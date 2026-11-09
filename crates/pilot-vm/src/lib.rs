@@ -356,7 +356,7 @@ impl BytecodeCompiler {
                             return dst;
                         }
                     } else if callee_n.node_kind() == NodeKind::MemberExpr {
-                        let hook = match arena.interner.resolve(SymbolId(callee_n.rhs)) { "len" => Some("str_len"), "push" => Some("list_push"), "byte_at" => Some("str_byte_at"), "slice" | "substring" => Some("str_slice"), "find" => Some("str_find"), "contains" => Some("str_contains"), "starts_with" => Some("str_starts_with"), "ends_with" => Some("str_ends_with"), "is_null" => Some("is_null"), "has" => Some("map_has"), "remove" => Some("map_remove"), _ => None };
+                        let hook = match arena.interner.resolve(SymbolId(callee_n.rhs)) { "len" => Some("str_len"), "push" => Some("list_push"), "byte_at" => Some("str_byte_at"), "slice" | "substring" => Some("str_slice"), "find" | "index_of" => Some("str_find"), "contains" => Some("str_contains"), "starts_with" => Some("str_starts_with"), "ends_with" => Some("str_ends_with"), "is_null" => Some("is_null"), "has" => Some("map_has"), "remove" => Some("map_remove"), _ => None };
                         if let Some(h) = hook {
                             let mut args = vec![self.compile_node(arena, NodeId(callee_n.lhs))];
                             for i in 1..arg_len { args.push(self.compile_node(arena, NodeId(arena.extra_children[arg_start + i]))); }

@@ -343,12 +343,12 @@ fn test_m12_3_cross_platform_sysroot_and_pkg_config_discovery() {
                 + "Libs: -L${libdir} -lz\n"
                 + "Cflags: -I${includedir}\n";
 
-            let (includes, libs) = parse_pkg_config_file(pc_text);
-            if includes.len() != 1 { return 5; }
-            if includes[0] != "/usr/include" { return 6; }
-            if libs.len() != 2 { return 7; }
-            if libs[0] != "-L/usr/lib" { return 8; }
-            if libs[1] != "-lz" { return 9; }
+            let pcr = parse_pkg_config_file(pc_text);
+            if pcr.includes.len() != 1 { return 5; }
+            if pcr.includes[0] != "/usr/include" { return 6; }
+            if pcr.libs.len() != 2 { return 7; }
+            if pcr.libs[0] != "-L/usr/lib" { return 8; }
+            if pcr.libs[1] != "-lz" { return 9; }
 
             return 42;
         }

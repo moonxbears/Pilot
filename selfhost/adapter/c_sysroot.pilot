@@ -69,7 +69,12 @@ pub fn sysroot_add_standard_paths(var ref sys: SysrootDiscovery) {
 // 3. Pure-Pilot .pc (pkg-config) Specification Parser
 // ------------------------------------------------------------------------------
 
-pub fn parse_pkg_config_file(pc_content: str) -> (List<str>, List<str>) {
+pub struct PkgConfigResult : IObject {
+    pub includes: List<str>;
+    pub libs:     List<str>;
+}
+
+pub fn parse_pkg_config_file(pc_content: str) -> PkgConfigResult {
     var includes: List<str> = [];
     var libs: List<str> = [];
     var vars = Map<str, str> {};
@@ -92,13 +97,13 @@ pub fn parse_pkg_config_file(pc_content: str) -> (List<str>, List<str>) {
 
         // Variable assignment: name=value
         if line.contains("=") && !line.contains(":") {
-            let eq_idx = line.index_of("=") as usize;
+            let eq_idx = line.find("=") as usize;
             let v_name = line.slice(0, eq_idx);
             var v_val = line.slice(eq_idx + 1, line.len());
             // Resolve nested ${var}
             while v_val.contains("${") {
-                let s_idx = v_val.index_of("${") as usize;
-                let e_idx = v_val.index_of("}") as usize;
+                let s_idx = v_val.find("${") as usize;
+                let e_idx = v_val.find("}") as usize;
                 if e_idx > s_idx {
                     let sub_name = v_val.slice(s_idx + 2, e_idx);
                     let repl = if vars.has(sub_name) { vars[sub_name] } else { "" };
@@ -116,8 +121,8 @@ pub fn parse_pkg_config_file(pc_content: str) -> (List<str>, List<str>) {
             var cflags = line.slice(7, line.len());
             // Resolve ${var}
             while cflags.contains("${") {
-                let s_idx = cflags.index_of("${") as usize;
-                let e_idx = cflags.index_of("}") as usize;
+                let s_idx = cflags.find("${") as usize;
+                let e_idx = cflags.find("}") as usize;
                 if e_idx > s_idx {
                     let sub_name = cflags.slice(s_idx + 2, e_idx);
                     let repl = if vars.has(sub_name) { vars[sub_name] } else { "" };
@@ -149,8 +154,8 @@ pub fn parse_pkg_config_file(pc_content: str) -> (List<str>, List<str>) {
         if line.starts_with("Libs:") {
             var lib_str = line.slice(5, line.len());
             while lib_str.contains("${") {
-                let s_idx = lib_str.index_of("${") as usize;
-                let e_idx = lib_str.index_of("}") as usize;
+                let s_idx = lib_str.find("${") as usize;
+                let e_idx = lib_str.find("}") as usize;
                 if e_idx > s_idx {
                     let sub_name = lib_str.slice(s_idx + 2, e_idx);
                     let repl = if vars.has(sub_name) { vars[sub_name] } else { "" };
@@ -178,7 +183,10 @@ pub fn parse_pkg_config_file(pc_content: str) -> (List<str>, List<str>) {
         }
     }
 
-    return (includes, libs);
+    return PkgConfigResult {
+        includes: includes,
+        libs:     libs,
+    };
 }
 
 // ------------------------------------------------------------------------------

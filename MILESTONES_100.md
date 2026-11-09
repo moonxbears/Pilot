@@ -1,10 +1,10 @@
 # MILESTONES_100.md — Pilot 100-Milestone Master Journey (`1.0` at M50 $\rightarrow$ `2.0` at M100)
 
-> **Companion Reference:** Read alongside [`VISION.md`](file:///home/moony/Documents/dev/projects/Pilot/VISION.md) (philosophical goals, syntax pairings, Universal Foreign-Language Adapter spec, `.pchor` choreography, and AI recontextualization checklist) and [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) (core syntax & 2-bit lattice physics).
+> **Companion References:** Read alongside [`VISION.md`](file:///home/moony/Documents/dev/projects/Pilot/VISION.md) (philosophical goals, syntax pairings, Universal Foreign-Language Adapter spec, `.pchor` choreography, and AI recontextualization checklist), [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) (core syntax & 2-bit lattice physics), and [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md) (foundational typing philosophy, 6 Core Laws, 12 Invariant Rules, 2-bit hardware lattice taxonomy, single source of truth / import discipline, and intrinsic encapsulation).
 >
-> **Baseline (`M0` / Current State):** Pilot `v1.1.51` — Stage-3 fixed-point self-hosting (`selfhost/pilotc.pilot`), 14-token Name-Blind Rust seed (`5,357` LOC across 12 crates), 2-Bit Hardware Lattice (`0b00`–`0b11`), 4-tier `MethodTable`, and initial multi-target emitters.
+> **Baseline (`M0` / Current State):** Pilot `v1.1.51` — Stage-3 fixed-point self-hosting (`selfhost/pilotc.pilot`), 14-token Name-Blind Rust seed (`5,357` LOC across 12 crates), 2-Bit Hardware Lattice (`0b00`–`0b11`), 4-tier `MethodTable`, initial multi-target emitters, and comprehensive typing physics defined in [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md).
 >
-> **Governing Rule:** Every milestone (`M1`–`M100`) delivers a **meaningful, non-trivial architectural, ergonomic, interoperability, performance, or tooling leap**, deletes any legacy code it supersedes, and passes the **3 Continuous Gates** (Adaptability/Rename Gate, Fixed-Point & Compile-Speed Gate, Peak Runtime Performance Gate).
+> **Governing Rule:** Every milestone (`M1`–`M100`) delivers a **meaningful, non-trivial architectural, ergonomic, interoperability, performance, or tooling leap**, deletes any legacy code it supersedes, strictly implements [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md), and passes the **3 Continuous Gates** (Adaptability/Rename Gate, Fixed-Point & Compile-Speed Gate, Peak Runtime Performance Gate).
 
 ---
 
@@ -22,6 +22,34 @@
 | **Phase 8** | `M71` – `M80` | Road to `2.0` | **AI Co-Design (`pilot mcp` v2, Hole Synthesis, Live Snippets), Reactive UI & Studio** |
 | **Phase 9** | `M81` – `M90` | Road to `2.0` | **Extreme Hardware Physics (PGO, Loop Fusion, Custom ISAs, `[Wcet]`/SMT Proofs & 100% Pure-Pilot Repo)** |
 | **Phase 10** | `M91` – `M100` | **PILOT 2.0** | **Global Registry, Multi-Editor Suite, Flagship Proof Engines & Pilot 2.0 Release** |
+
+---
+
+## Universal `imp_type.md` Architecture & Typing Physics Contract Across All 100 Milestones
+
+Every milestone from `M1` through `M100` is bound by the typing physics, structural taxonomy, and modular laws codified in [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md). No milestone may introduce unconstrained types, duplicate type definitions, blanket wildcard import pollution, or unmanaged intrinsic bypasses. The six foundational typing laws apply universally across standard library, selfhost compiler, foreign adapters, and tooling implementations:
+
+### The 6 Foundational Typing Laws of `imp_type.md`
+1. **Unambiguous Determinism (Law 1):** If values and lifecycle are known at design time, the definition and type must be immediately obvious. Never leave semantics up to interpretation or stringly-typed guesswork.
+2. **Appropriate Constraining (Law 2):** Constrain as tightly as the domain requires, but no tighter. Broad, open-ended types (`any`, bare `str`, bare `i64`) should only represent genuinely open-ended varieties of values.
+3. **Generic Precision (Law 3):** Never write unconstrained generics (`<T>`) when capabilities are required. Always constrain with interfaces (`<T : IComparable<T>>`, `<T : IAnyValue>`).
+4. **Hardware Lattice Alignment (Law 4):** Every type must classify into the 2-bit hardware lattice in 1 CPU cycle (`0b00` Value Type `: IValue`, `0b01` Borrowed Reference View `: IReference`, `0b10` Owned Dynamic Object `: IObject`, `0b11` Scoped Guard `: IGuard`).
+5. **Single Source of Truth & Targeted Importing (Law 5 / Rule 11 — Import-First Law):** Every type must have exactly one canonical definition in its owning module or package. Types must **never be duplicated, copied, re-declared, or shadowed** across different files or subsystems. When importing, code must **import only what is needed** (`use Pkg.Module.Type;`) rather than blanket wildcard importing an entire library (`use Pkg.Module.*;`), unless genuinely consuming the entire module or 3+ cohesive items.
+6. **Intrinsic Encapsulation (Law 6 / Rule 12):** Raw `__engine(...)` calls are strictly forbidden in application, domain, standard library, and self-host code. Code must always use strongly-typed standard and core types that encapsulate engine intrinsics (such as `Map<K, V>`, `List<T>`, `SliceBuffer<T>`, `fs.*`, `time.*`).
+
+### The 12 Invariant Rules Applied Across All Milestones
+- **Rule 1 (Discrete States $\le 19$):** Strongly typed `enum : u8/u16` with target-typed `::Variant`. Zero magic numbers or stringly constants.
+- **Rule 2 (Large Predefined Sets $20+$):** Open-registry pattern with table-driven `array<T, N>` or `comptime Map<K, V>` and integer ID handles.
+- **Rule 3 (Fixed Composite Records):** `[Layout(c_abi)] struct : IValue` (`0b00`) with trivial `memcpy` and zero allocation overhead.
+- **Rule 4 (Varying Implementations):** `interface` contracts with concrete `struct`s, composing shared state via `*Bundle` and shared methods via `*Facet` (no OOP base classes).
+- **Rule 5 (Combinable Flags):** `bitflags : u32/u64` (`0b00 : IValue`). Zero multiple boolean fields or boolean blindness.
+- **Rule 6 (Absence & Errors):** `opt<T>` (`T?`) for optionality and `res<T, E>` (`T ! E`) for fallible operations. Zero custom sentinels (`-1`, `null`, `""`).
+- **Rule 7 (Memory Boundaries):** Distinguish read-only borrowed views (`0b01` `slice<T>` / `...View`), owned buffers (`0b10` `List<T>` / `...Buffer`), and scoped resources (`0b11` `...Guard`).
+- **Rule 8 (Constrained Generics):** Always constrain generic type parameters (`<T : IConstraint>`).
+- **Rule 9 (Bounded Typestates):** Model lifecycle state progressions as distinct types consumed via `iso self`.
+- **Rule 10 (Quantitative Invariants):** Single-field `[Layout(c_abi)] struct : IValue` with construction validation returning `Self ! ValidationError`.
+- **Rule 11 (Import-First & Targeted Import):** Single canonical definition, targeted imports, zero duplicates.
+- **Rule 12 (Intrinsic Encapsulation):** All collections and OS operations encapsulated in safe, lattice-aware types (`Map<K, V>`, `List<T>`, `fs.*`).
 
 ---
 
@@ -88,6 +116,7 @@ Multiplatform compatibility is a non-negotiable, first-class architectural invar
 | :--- | :--- | :--- | ---: | :--- |
 | **CREATE** | `selfhost/gate/manifest.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Gate.Manifest;` | `~220L` | Declarative open registries of seed tokens, retired crates/files, LOC ceilings, and benchmark budgets (derived via `.len()`, zero magic numbers). |
 | **CREATE** | `selfhost/gate/seed_audit.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Gate.SeedAudit;` | `~340L` | Pure-Pilot scanner verifying surviving Rust files contain strictly the 14 seed tokens, zero user-space type/symbol names, zero `#[allow(dead_code)]`, zero `todo!()`/`unimplemented!()`, and monotonically decreasing Rust LOC. |
+| **CREATE** | `selfhost/gate/type_audit.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Gate.TypeAudit;` | `~280L` | Exhaustive `imp_type.md` compliance scanner: verifies zero duplicate type definitions across files (Single Source of Truth), targeted import discipline (no blanket wildcards), zero raw `__engine` invocations outside seed tokens, `bitflags` for orthogonal flags, explicit `res`/`opt` instead of sentinels, and proper `[Layout(c_abi)]` attributes. |
 | **CREATE** | `selfhost/gate/rename_litmus.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Gate.RenameLitmus;` | `~310L` | Ephemeral in-memory/sandboxed Universal Rename Litmus runner (`char` $\rightarrow$ `c32`, `slice` $\rightarrow$ `window`, `option` $\rightarrow$ `maybe`, `result` $\rightarrow$ `outcome`, `range` $\rightarrow$ `interval`, `map` $\rightarrow$ `dict_view`) across VM, C11, LLVM, WASM, ASM, and GPU emitters. |
 | **CREATE** | `selfhost/gate/bootstrap_parity.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Gate.BootstrapParity;` | `~260L` | Stage-2 == Stage-3 deterministic SHA-256 parity verifier (both `.pilc` bytecode and native C11 binary) + compile-time wall-clock & allocation ceiling monitor. |
 | **CREATE** | `selfhost/gate/runner.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Gate.Runner;` | `~240L` | Unified orchestrator executing registered `IGateCheck` implementations, aggregating timings, and emitting human ANSI or `--json` machine reports. |
@@ -96,7 +125,7 @@ Multiplatform compatibility is a non-negotiable, first-class architectural invar
 | **DELETE** | `scripts/gate1_check.py` .. `scripts/gate4_selfhost_contraction.py` & `scripts/convert_dunders.py` | Legacy Python scripts | `-100%` | Permanently delete `scripts/` Python files once `pilot gate` achieves 100% check parity and stricter coverage. |
 
 #### 1.3 Complete Data Structures, Registries & 2-Bit Lattice Physics
-- **`GateCategory` (`enum : u8`, `0b00 : IValue`)**: `::Adaptability` (`0`), `::BootstrapParity` (`1`), `::Performance` (`2`), `::Hygiene` (`3`).
+- **`GateCategory` (`enum : u8`, `0b00 : IValue`)**: `::Adaptability` (`0`), `::BootstrapParity` (`1`), `::Performance` (`2`), `::Hygiene` (`3`), `::TypeHygiene` (`4`).
 - **`GateSeverity` (`enum : u8`, `0b00 : IValue`)**: `::Blocker` (`0`), `::Warning` (`1`), `::Advisory` (`2`).
 - **`[Layout(c_abi)] pub struct SeedTokenRegistry : IValue`**:
   - Holds `tokens: slice<str>` populated from the single canonical 14-token declaration (`__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`).
@@ -133,14 +162,16 @@ Multiplatform compatibility is a non-negotiable, first-class architectural invar
    - Clones `stdlib/core/` into an isolated temp workspace arena (cleaned up via `0b11` `TempDirGuard` `~self()` even on panic/early return!), applies simultaneous whole-token alpha-renaming across 6 core primitives/algebraics (`char` $\rightarrow$ `c32`, `slice` $\rightarrow$ `window`, `option` $\rightarrow$ `maybe`, `result` $\rightarrow$ `outcome`, `range` $\rightarrow$ `interval`, `str` $\rightarrow$ `utf8view`), runs full bootstrap + typecheck + codegen across PilVM, C11, LLVM IR, WASM, x86_64 ASM, and WGSL/PTX, and verifies valid output (`GATE008`).
 5. **Bootstrap Parity & Speed Check:**
    - Verifies `SHA256(stage2.pilc) == SHA256(stage3.pilc)` and `SHA256(stage2.c) == SHA256(stage3.c)` using pure-Pilot `stdlib/crypto/hash.pilot`, asserting compile wall time stays within budget (`GATE009`).
+6. **Type Hygiene & `imp_type.md` Audit ($O(P)$):**
+   - Scans all `.pilot` files via `selfhost/gate/type_audit.pilot` ensuring: (a) zero duplicate struct/enum/interface definitions across files (Single Source of Truth), (b) targeted import discipline (zero blanket wildcard `use Pkg.*` imports), (c) zero raw `__engine(...)` invocations outside seed tokens (Intrinsic Encapsulation), (d) zero boolean blindness ($\ge 3$ bools $\rightarrow$ `bitflags`), (e) zero sentinel error returns (`-1`, `null` $\rightarrow$ `opt<T>`/`res<T, E>`), and (f) proper `[Layout(c_abi)]` on `0b00` value structs (`GATE010`).
 
 #### 1.6 CLI, JSON & Diagnostic Surface Contracts
 - **Invocation:**
-  - `pilot gate` — runs fast mandatory gates (`Adaptability`, `Hygiene`, `LOC Ratchet`) in `< 500 ms`.
+  - `pilot gate` — runs fast mandatory gates (`Adaptability`, `Hygiene`, `TypeHygiene`, `LOC Ratchet`) in `< 500 ms`.
   - `pilot gate --full` — includes full Dual-Pass Universal Rename Litmus + Stage-3 Fixed-Point Parity + Benchmark Sanity.
   - `pilot gate --only <id>` / `pilot gate --json` / `pilot gate --ratchet-update` (lowers Rust LOC caps in `manifest.pilot` after shrinking Rust code).
-- **Exit Codes:** `0` = all blocker gates passed; `1` = one or more `GATE001`–`GATE009` blocker violations; `2` = invalid CLI flags.
-- **Diagnostic Codes:** `GATE001` (Name-Blind Breach), `GATE002` (Pilot File `>1,500` LOC), `GATE003` (Rust LOC Ceiling Exceeded), `GATE004` (`allow(dead_code)` Forbidden), `GATE005` (Stub/TODO Marker Forbidden), `GATE006` (Retired File/Crate Resurrected), `GATE007` (Lattice Naming Taxonomy Violation), `GATE008` (Universal Rename Litmus Failure), `GATE009` (Stage-3 Fixed-Point Parity or Speed Regression).
+- **Exit Codes:** `0` = all blocker gates passed; `1` = one or more `GATE001`–`GATE010` blocker violations; `2` = invalid CLI flags.
+- **Diagnostic Codes:** `GATE001` (Name-Blind Breach), `GATE002` (Pilot File `>1,500` LOC), `GATE003` (Rust LOC Ceiling Exceeded), `GATE004` (`allow(dead_code)` Forbidden), `GATE005` (Stub/TODO Marker Forbidden), `GATE006` (Retired File/Crate Resurrected), `GATE007` (Lattice Naming Taxonomy Violation), `GATE008` (Universal Rename Litmus Failure), `GATE009` (Stage-3 Fixed-Point Parity or Speed Regression), `GATE010` (Type Hygiene / `imp_type.md` Violation).
 
 #### 1.7 Edge Cases & Safeguards
 - **Rust Identifier Overlap:** Rust shares keywords `fn`, `let`, `struct`, `if`, `loop`, `return`, `ref` and primitive identifiers `u8`, `i32`, `i64`, `f64`, `usize`, `bool`, `char`, `str` in *Rust type annotations*! `seed_audit.pilot` distinguishes *Rust host types* (`x: usize`, `as u8`) from *quoted string literals & parser/codegen lookup tables* (`"usize"`, `"i64"`, `"slice"`), ensuring zero false positives on valid Rust slice indexing while catching 100% of hardcoded Pilot symbol strings!
@@ -149,7 +180,8 @@ Multiplatform compatibility is a non-negotiable, first-class architectural invar
 #### 1.8 Verification & 3-Gate Acceptance Criteria
 1. Deliberately inject `"slice"` into a test copy of `infer.rs` $\rightarrow$ `pilot gate` catches `GATE001` at exact line/col in `< 200 ms`.
 2. Deliberately modify a comment in `crates/pilot-cli/src/main.rs` $\rightarrow$ Cargo tests + `pilot gate` **succeed** (proving frozen hash lock is retired while semantic name-blind enforcement holds!).
-3. Confirm `scripts/gate1..4_*.py` are deleted from git tree and `pilot gate --full` passes 100% green (`0` violations, Stage-2 == Stage-3 SHA-256 identical).
+3. Deliberately inject a duplicate struct declaration, wildcard import, or raw `__engine("map_new")` call into a test module $\rightarrow$ `pilot gate` catches `GATE010` in `< 150 ms`.
+4. Confirm `scripts/gate1..4_*.py` are deleted from git tree and `pilot gate --full` passes 100% green (`0` violations, Stage-2 == Stage-3 SHA-256 identical).
 
 ---
 
@@ -188,6 +220,7 @@ Multiplatform compatibility is a non-negotiable, first-class architectural invar
 - **`pub struct ModuleGraph : IObject`** (`0b10`):
   - `pub units: List<ModuleNode>;`
   - `pub pkg_to_unit: Map<str, FileUnitId>;`
+  - `pub canonical_type_owners: Map<str, FileUnitId>;` // imp_type.md Rule 11: Single source of truth tracking owning file per type name (rejects duplicate definitions across modules)
   - `pub edges: Map<u32, List<FileUnitId>>;`
   - `pub topo_order: List<FileUnitId>;`
   - `~self()` deterministic Perceus drop of graph buffers.
@@ -246,6 +279,7 @@ Multiplatform compatibility is a non-negotiable, first-class architectural invar
 
 #### 3.3 Complete Data Structures & 2-Bit Lattice Physics
 - **`FlagValueKind` (`enum : u8`, `0b00 : IValue`)**: `::Bool`, `::Int`, `::Float`, `::Str`, `::Path`, `::EnumChoice`, `::StringList`.
+- **`FlagOptions` (`bitflags : u16`, `0b00 : IValue`)**: `::None = 0`, `::Repeatable = 1 << 0`, `::Required = 1 << 1`, `::Hidden = 1 << 2`. // imp_type.md Rule 5: Zero boolean blindness
 - **`[Layout(c_abi)] pub struct FlagSpec : IValue`** (`0b00`):
   - `pub long_name: str;` (e.g. `"output"`)
   - `pub short_char: char;` (e.g. `'o'`, or `'\0'` if none)
@@ -253,8 +287,7 @@ Multiplatform compatibility is a non-negotiable, first-class architectural invar
   - `pub default_val: str;`
   - `pub env_fallback: str;` (e.g. `"PILOT_COLOR"`)
   - `pub choices: slice<str>;`
-  - `pub repeatable: bool;`
-  - `pub required: bool;`
+  - `pub options: FlagOptions;`
   - `pub summary: str;`
 - **`[Layout(c_abi)] pub struct PositionalSpec : IValue`** (`0b00`):
   - `pub name: str; pub kind: FlagValueKind; pub required: bool; pub variadic: bool; pub summary: str;`
@@ -544,10 +577,10 @@ Every row below is guaranteed **100% AST-, Type-, Lattice-, and Codegen-Identica
 #### 8.2 Module & File Manifest (`<= 1,500` LOC Law)
 | Action | Path | Package & Ring | Budget | Purpose |
 | :--- | :--- | :--- | ---: | :--- |
-| **CREATE** | `selfhost/diagnostics/model.pilot` | `pub lvl(0) pkg Pilot.Diagnostics.Model;` | `~240L` | Rich `Diagnostic`, `LabeledSpan` (`Primary`/`Secondary`), `Note`, `FixSuggestion`, `CstTextEdit`, `FixApplicability`, and open `DiagnosticCatalog` registry. |
+| **CREATE** | `selfhost/diagnostics/model.pilot` | `pub lvl(0) pkg Pilot.Diagnostics.Model;` | `~240L` | Single canonical home for `Diagnostic`, `LabeledSpan` (`Primary`/`Secondary`), `Note`, `FixSuggestion`, `CstTextEdit`, `FixApplicability`, and open `DiagnosticCatalog` registry (imported across compiler and public `pilot.diag` with zero type duplication per `imp_type.md` Rule 11). |
 | **CREATE** | `selfhost/diagnostics/renderer.pilot` | `pub lvl(0) pkg Pilot.Diagnostics.Renderer;` | `~350L` | Unicode/ASCII gutter snippet renderer (multi-span underlines, UTF-8 display-column width calculation, terminal color auto-detection/`NO_COLOR`, `--explain <CODE>` tutorial printer, and `--json` / SARIF 2.1.0 emitter). |
-| **CREATE** | `selfhost/cst/autofix.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Cst.Autofix;` | `~330L` | Transactional lossless CST edit applier: overlap conflict detector, trivia/comment preservation verifier, `--fix` atomic file writer, and `--fix-dry-run` unified diff previewer. |
-| **MODIFY** | `selfhost/diagnostics/{errors,warnings,infos}.pilot` | `Pilot.Diagnostics.*` | `+190L` | Enrich catalog entries with `why_summary`, `tier1_hint`, `example_bad`, `example_good`, and structured `FixBuilder` templates; add `MOD*`, `CLI*`, `DB*`, `IR*`, `INSP*`, `FIX*`, `RING*`, `VM*` codes. |
+| **CREATE** | `selfhost/cst/autofix.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Cst.Autofix;` | `~330L` | Transactional lossless CST edit applier: overlap conflict detector, trivia/comment preservation verifier, `--fix` atomic file writer, `--fix-dry-run` unified diff previewer, and automated `imp_type.md` transforms (expanding wildcard imports to targeted imports, rewriting raw `__engine("map_*")` to `Map<K, V>`). |
+| **MODIFY** | `selfhost/diagnostics/{errors,warnings,infos}.pilot` | `Pilot.Diagnostics.*` | `+190L` | Enrich catalog entries with `why_summary`, `tier1_hint`, `example_bad`, `example_good`, and structured `FixBuilder` templates; add `TYP*` (`TYP001`–`TYP006` for `imp_type.md` violations), `MOD*`, `CLI*`, `DB*`, `IR*`, `INSP*`, `FIX*`, `RING*`, `VM*` codes. |
 | **DELETE** | `crates/pilot-analysis/src/diagnostics.rs` formatting helpers & `main.rs` raw `ByteSpan` `Debug` printing | Legacy Rust diagnostic formatting | `-35L` | All human & JSON diagnostic rendering now runs 100% through `Pilot.Diagnostics.Renderer`. |
 
 #### 8.3 Complete Data Structures, CLI Flags & Transactional CST Auto-Fix Algorithm
@@ -638,7 +671,7 @@ Enforced automatically in `PilotDb` (`M5`) and `pilot gate` (`M1`):
 | **CREATE** | `stdlib/pilot/fmt.pilot` | `pub pkg pilot.fmt;` | `~140L` | Public `format_str(src: str, style: FmtStyle) -> res<str, List<Diagnostic>>` and `format_cst(tree: ref<CstTree>, style: FmtStyle) -> str`. |
 | **CREATE** | `stdlib/pilot/db.pilot` | `pub pkg pilot.db;` | `~210L` | Public `CompilerSession : IObject` (`0b10`) wrapping `PilotDb` (`M5`) supporting both virtual in-memory file overlays and real workspace directories. |
 | **CREATE** | `stdlib/pilot/vm.pilot` | `pub pkg pilot.vm;` | `~240L` | Capability-gated `VmSandbox : IObject` (`0b10`) + `VmLeaseGuard : IGuard` (`0b11`) executing compiled `PilIR`/`.pilc` with instruction `fuel`, `max_heap_bytes`, and capability bitmasks. |
-| **CREATE** | `stdlib/pilot/diag.pilot` | `pub pkg pilot.diag;` | `~140L` | Public `Diagnostic`, `FixSuggestion`, `render_ansi`, `render_json`, and `render_sarif` APIs (`M8`) for custom user linters and sublanguage compilers. |
+| **CREATE** | `stdlib/pilot/diag.pilot` | `pub pkg pilot.diag;` | `~140L` | Public facade re-exporting canonical `Diagnostic`, `FixSuggestion`, `render_ansi`, `render_json`, and `render_sarif` APIs from `Pilot.Diagnostics.Model` (`M8`) with zero duplicate type declarations (`imp_type.md` Rule 11). |
 
 #### 10.3 Complete Public API Signatures & 2-Bit Lattice Safety Contracts
 - **`pilot.lex`:**
@@ -731,7 +764,7 @@ Every adapted method compiles to a **force-inlined `PilIR` sequence** with **0 h
 
 ---
 
-### M12 — Headerless C11/C23 Semantic Absorber (`use c "header.h"`)
+### M12 — Headerless C11/C23 Semantic Absorber (`use c "header.h"`) [COMPLETE]
 
 #### 12.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (`ffi_bindgen.pilot` Is Outbound-Only & Single-Param):** [`selfhost/ffi_bindgen.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ffi_bindgen.pilot) only generates outbound C prototypes *from* Pilot ASTs (and `generate_ffi_binding` on line `54` only accepts a single parameter!). Pilot has **zero** ability to absorb standard C `.h` headers (`<sqlite3.h>`, `<zlib.h>`, `<sys/socket.h>`, `<pthread.h>`) directly via `use c`.
@@ -768,7 +801,7 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
   1. **Traditional `#ifndef H_ / #define H_ ... #endif` Include Guards:** Detected automatically alongside `#pragma once` so cyclic/diamond system headers never re-open files from disk!
   2. **C99 Flexible Array Members (`struct Packet { uint32_t len; uint8_t payload[]; };`):** `has_flexible_array_tail = true` synthesizes a safe Pilot trailing-slice accessor `.payload(total_bytes)` (`0b01` `slice<u8>`) bounds-checked against `len`!
   3. **Calling Convention Attributes (`__stdcall`, `__fastcall`, `__cdecl` on Win32):** Propagated directly into `CFnDecl.calling_conv` (`M13`).
-- **Memoized `PilotDb` Integration (`M5`):** `AbsorbCHeader(header_spec, defines_hash, target_triple)` is cached at `Durability::ExternalPkg` in `.pilc-cache/pilotdb.v1` (`< 30 ms` cold, `< 1 ms` warm).
+- **`PilotDb` Integration (`M5`) & `imp_type.md` Compliance:** `AbsorbCHeader(header_spec, defines_hash, target_triple)` is cached at `Durability::ExternalPkg` in `.pilc-cache/pilotdb.v1` (`< 30 ms` cold, `< 1 ms` warm). All C adapter modules (`c_pp.pilot`, `c_parser.pilot`, `c_sysroot.pilot`) strictly implement `imp_type.md`: zero raw `__engine` calls (Core Law 6 & Rule 12, using strongly-typed `Map<K, V>`, `List<T>`, and `fs.*`), zero duplicate types (Rule 11), `[Layout(c_abi)] struct : IValue` (`0b00`) records (Rule 3), and `bitflags : u32` for C flag enums (Rule 5).
 - **Diagnostics:** `CAB001` (Header Not Found in Sysroot/PkgConfig Paths), `CAB002` (Unsupported GNU Statement-Expression in Macro — suggests explicit signature override), `CAB003` (Preprocessor `#error` Directive Triggered), `CAB004` (Invalid Bitfield Width Exceeding Storage Type).
 - **Acceptance Proof:** Write a 15-line Pilot file starting with `use c "sqlite3.h" as raw;` + an `M11` `adapter` block $\rightarrow$ open an in-memory SQLite database, `CREATE TABLE`, `INSERT`, `SELECT` rows, and close cleanly with **zero `.c` glue files and zero `bindgen` CLI step**!
 
@@ -1451,69 +1484,69 @@ Before advancing to **Phase 4 (`M31` — Peak Performance, Hardware Backends & Z
 ## Phase 4 (`M31` – `M40`): Peak Performance, Hardware Backends & Zero-Rust Decoupling
 
 - [ ] **M31 — Interprocedural Perceus Borrow Inference & `drop_reuse` Recycling (`selfhost/perceus/`)**
-  - Upgrade Perceus on `PilIR` with automatic parameter borrow elision (eliminating unnecessary `dup`/`drop` pairs) and token-matched constructor memory reuse so functional updates mutate memory in place at C speed.
+  - Implement `imp_type.md` Rule 7 (2-Bit Boundary): upgrade Perceus on `PilIR` to automatically infer borrowed views (`0b01` `slice<T>` / `...View`) vs owned objects (`0b10` `List<T>` / `...Buffer`), eliding redundant `dup`/`drop` pairs and recycling constructor memory (`drop_reuse`) for functional updates in place at C speed without raw unmanaged allocations.
 
 - [ ] **M32 — First-Class Scoped Arenas (`with arena`) & Static `noalloc` Verifier**
-  - Ship composable `0b11` `ArenaScope`, pool, and ring allocators injectable via `context` / `.pchor`, backed by whole-call-graph `[ZeroAlloc]` / `noalloc` compile-time verification.
+  - Ship composable `0b11` `ArenaScope`, pool, and ring allocators (`IGuard` with LIFO cleanup) per `imp_type.md` Rule 7, injectable via `context` / `.pchor`, backed by whole-call-graph `[ZeroAlloc]` / `noalloc` verification statically enforcing zero heap allocation.
 
 - [ ] **M33 — Optimizing Native LLVM Backend (`selfhost/codegen/llvm.pilot`)**
-  - Emit production LLVM 18+ IR with strict alias metadata (`noalias` derived from `0b01`/`iso` lattice guarantees!), tail calls, vectorization hints, DWARF v5 debug info, and ThinLTO cross-module inlining.
+  - Emit production LLVM 18+ IR with strict alias metadata (`noalias` derived directly from `0b01` borrowed view and `iso` `0b10` lattice guarantees per `imp_type.md`), tail calls, vectorization hints, DWARF v5 debug info, and ThinLTO cross-module inlining.
   - Support cross-compilation from any host OS to Linux (`x86_64`, `aarch64`, `riscv64`), macOS (`aarch64` Darwin, `x86_64`), Windows (`x86_64`, `aarch64`), WASM (`wasm32-wasip2`), and bare-metal (`thumbv7em`, `riscv32`) targets.
 
 - [ ] **M34 — Portable Hardware SIMD Vectorization (`simd<T, N>` / `T@N`)**
-  - Lower `simd<T, N>` operations and vectorizable `PilIR` loops to x86_64 AVX2/AVX-512, ARM64 NEON, and WASM SIMD128 strictly through name-blind `[Bits]` and `[Layout]` register descriptors.
+  - Lower `simd<T, N>` operations and vectorizable `PilIR` loops to x86_64 AVX2/AVX-512, ARM64 NEON, and WASM SIMD128 strictly through name-blind `[Bits]` and `[Layout]` register descriptors per `imp_type.md` Rule 3.
 
 - [ ] **M35 — Sub-Millisecond Direct x86_64 & ARM64 Native Backend (`selfhost/codegen/asm_*`)**
-  - Emit direct native machine code + ELF (Linux), Mach-O (macOS), and PE/COFF (Windows) executables in pure Pilot without invoking LLVM or Clang—achieving $>500\text{K LOC/s}$ compile speeds for instant `pilot run` and debug cycles.
+  - Emit direct native machine code + ELF (Linux), Mach-O (macOS), and PE/COFF (Windows) executables in pure Pilot without invoking LLVM or Clang, mapping `0b00` value records into registers and achieving $>500\text{K LOC/s}$ compile speeds for instant `pilot run` and debug cycles.
 
 - [ ] **M36 — First-Class GPU Compute Pipeline (`[Kernel]` $\rightarrow$ PTX, AMDGPU, SPIR-V, WGSL, MSL, HLSL)**
-  - Compile typed Pilot `[Kernel]` functions directly to GPU targets across platforms: Vulkan/SPIR-V (Linux/Windows/Android), Metal/MSL (macOS/iOS), DirectX 12/HLSL (Windows), WebGPU/WGSL (Web/Browsers), and CUDA/PTX (NVIDIA) with automatic host-device buffer transfers, workgroup shared memory, and Perceus VRAM buffer pooling.
+  - Compile typed Pilot `[Kernel]` functions directly to GPU targets across platforms: Vulkan/SPIR-V (Linux/Windows/Android), Metal/MSL (macOS/iOS), DirectX 12/HLSL (Windows), WebGPU/WGSL (Web/Browsers), and CUDA/PTX (NVIDIA) with automatic mapping of `0b00` value structs to uniform buffers, `0b01` views to storage buffers, and Perceus VRAM buffer pooling.
 
 - [ ] **M37 — `PilIR` Symbolic Autodiff (`grad` / `!@`) & Glitch-Free Signals (`sig` / `!^`)**
-  - Lower forward- and reverse-mode `grad` (`!@`) through `PilIR` CSE/dead-code passes and compile `sig` (`!^`) reactive graphs into flat, zero-allocation topological arenas.
+  - Lower forward- and reverse-mode `grad` (`!@`) into `Dual<T, G>` (`0b00 : IValue`) records via `PilIR` CSE/dead-code passes and compile `Signal<T>` (`0b10 : IObject`) reactive graphs into flat, zero-allocation topological arenas.
 
 - [ ] **M38 — Native `pilot` Self-Hosting Cutover (Retiring Rust Lexer, Parser & Analysis Crates)**
-  - Promote the compiled native `pilot` binary to primary workspace compiler; delete `pilot-lexer`, `pilot-parser`, and `pilot-analysis` Rust crates in favor of their `selfhost/*.pilot` counterparts.
+  - Promote the compiled native `pilot` binary to primary workspace compiler; verify 100% compliance across `selfhost/` with `imp_type.md` (zero type duplication, strict targeted imports, zero raw `__engine` calls, 100% strongly-typed `Map<K, V>` and `List<T>`); delete `pilot-lexer`, `pilot-parser`, and `pilot-analysis` Rust crates in favor of their pure Pilot counterparts.
 
 - [ ] **M39 — Portable C11 Bootstrap Seed Snapshot (Zero Rust Toolchain Required)**
-  - Generate and verify a clean, self-contained C11 bootstrap snapshot (`bootstrap/pilot_seed.c`) + multiplatform bootstrap scripts (`./bootstrap.sh` on POSIX, `bootstrap.bat` on Windows) that build native `pilot` from scratch using **only a standard C compiler (Clang/GCC/MSVC/Zig CC) and zero Rust/Cargo installation**.
+  - Generate and verify a clean, self-contained C11 bootstrap snapshot (`bootstrap/pilot_seed.c`) generated from pure Pilot sources adhering to `imp_type.md` (exact struct layouts, 2-bit lattice dispatch, zero unmanaged runtime leaks) + multiplatform bootstrap scripts (`./bootstrap.sh` on POSIX, `bootstrap.bat` on Windows) that build native `pilot` using **only a standard C compiler (Clang/GCC/MSVC/Zig CC) and zero Rust/Cargo installation**.
 
 - [ ] **M40 — Integrated Hardware-Counter Benchmark Suite (`pilot bench` vs. C & Rust)**
-  - Build `pilot bench` reading hardware PMU counters (cycles, instructions, branches, cache misses, allocations) across Linux (`perf_event_open`), macOS (`proc_pidinfo`), and Windows (`QueryPerformanceCounter` / ETW) across canonical systems, string, JSON, crypto, matrix, and concurrency benchmarks—enforcing C/Rust parity gates.
+  - Build `pilot bench` reading hardware PMU counters (cycles, instructions, branches, cache misses, allocations) across Linux (`perf_event_open`), macOS (`proc_pidinfo`), and Windows (`QueryPerformanceCounter` / ETW) across canonical benchmarks, enforcing C/Rust parity gates and certifying `imp_type.md` zero-overhead layout guarantees.
 
 ---
 
 ## Phase 5 (`M41` – `M50`): Unified All-in-One `pilot` Toolchain & **PILOT 1.0 RELEASE**
 
 - [ ] **M41 — `pkg.pilot` Declarative Manifest & Content-Addressed Package Manager**
-  - Replace `pilot.json` with sandboxed `comptime` `pkg.pilot` manifests, cryptographic lockfiles (`pkg.lock`), workspace multi-package graphs, and instant single-file script imports.
+  - Replace `pilot.json` with sandboxed `comptime` `pkg.pilot` manifests; enforce `imp_type.md` Rule 11 (Single Source of Truth) across multi-package workspace graphs to prevent cross-package type duplication and verify cryptographic lockfiles (`pkg.lock`).
 
 - [ ] **M42 — Polyglot Package & Build Orchestrator (`pilot pkg` Foreign Dependencies)**
-  - Resolve, build, cache, and link foreign C/C++ sources, Rust crates, Python wheels/venvs, NPM packages, and WASM components declared right inside `pkg.pilot` without external Makefiles.
+  - Resolve, build, cache, and link foreign C/C++ sources, Rust crates, Python wheels/venvs, NPM packages, and WASM components declared inside `pkg.pilot`, absorbing foreign types directly into canonical Pilot `0b00`/`0b01`/`0b10`/`0b11` types without duplicate glue facades.
 
 - [ ] **M43 — Resident LSP v2 (`pilot lsp` — Sub-10ms Intelligence & Adaptable Snippets)**
-  - Full `PilotDb`-backed LSP with semantic tokens, inlay lattice/weave/Perceus hints, workspace rename, interface implementations, `.pchor` graph jumps, and type-aware adaptable snippets.
+  - Full `PilotDb`-backed LSP with semantic tokens, inlay lattice hints (`0b00`–`0b11`), `imp_type.md` real-time diagnostics (wildcard import expansion, duplicate type warnings, boolean blindness lints, raw `__engine` refactorings), workspace rename, and type-aware snippets.
 
 - [ ] **M44 — Unified DAP Debugger v2 (`pilot debug` — Native DWARF + VM + Foreign Frames)**
-  - Step seamlessly across native DWARF binaries, `PilVM` `comptime` weavers, and C/C++/Rust/Python adapter boundaries with live expression evaluation and Perceus memory/arena visualizers.
+  - Step seamlessly across native DWARF binaries, `PilVM` `comptime` weavers, and C/C++/Rust/Python adapter boundaries with live inspection of 2-bit lattice classifications, buffer capacities, and `0b11` scoped guard lifecycles.
 
 - [ ] **M45 — Native Pilot MCP Server v1 (`pilot mcp` — Compiler-in-the-Loop AI Engine)**
-  - Ship built-in Model Context Protocol server providing AI assistants and IDEs with semantic AST/type/lattice queries, 4-tier `MethodTable` lookup, `.pchor` rule inspection, object scaffolding, and millisecond in-memory dry-run verification.
+  - Built-in Model Context Protocol server providing AI assistants and IDEs with semantic AST/type/lattice queries, 4-tier `MethodTable` lookup, `imp_type.md` compliance verification, targeted import generation, and millisecond in-memory dry-run verification.
 
 - [ ] **M46 — Unified Test, Doc-Test, Differential & Coverage-Guided Fuzz Runner (`pilot test`)**
-  - Integrate unit tests, verified `///` doc-comment examples, foreign-language differential oracle tests, and layout-aware coverage-guided fuzzing (`pilot test --fuzz`) into `pilot test`.
+  - Integrate unit tests, verified `///` doc-comment examples, foreign-language differential oracle tests, and layout-aware coverage-guided fuzzing (`pilot test --fuzz`) verifying `[Layout(c_abi)]` memory safety, `res<T, E>` error paths, and typestate transitions.
 
 - [ ] **M47 — Living Documentation & Blueprint Visualizer (`pilot doc`)**
-  - Generate fast, searchable documentation showcasing readable + compact signatures, `*Bundle`/`*Facet` origins, `noalloc`/`pure`/lattice badges, and interactive `.pchor` Mermaid architecture diagrams.
+  - Generate fast, searchable documentation showcasing readable + compact signatures, 2-bit hardware lattice badges (`0b00` Value, `0b01` View, `0b10` Object, `0b11` Guard), canonical targeted import paths, and interactive `.pchor` Mermaid architecture diagrams.
 
 - [ ] **M48 — Single-Command Cross-Compilation & Asset Bundling (`pilot ship`)**
-  - Cross-compile standalone static binaries (`linux-x64/arm64`, `macos-x64/arm64`, `windows-x64/arm64`, `wasm32-wasi`) with `comptime` `embed()` assets from any host OS in a single command.
+  - Cross-compile standalone static binaries (`linux-x64/arm64`, `macos-x64/arm64`, `windows-x64/arm64`, `wasm32-wasi`) with whole-program dead-code and duplicate-type elimination, embedding assets via typed zero-allocation accessors.
 
 - [ ] **M49 — `Edition 1.0` Specification Freeze, `pilot doctor` & Onboarding Polish**
-  - Stamp `Edition 1.0` syntax & C/Pilot ABI stability rules, add `pilot doctor` environment/security diagnostics, and publish interactive progressive tutorials (Tier 1 $\rightarrow$ Tier 4).
+  - Stamp `Edition 1.0` syntax & C/Pilot ABI stability rules; add `pilot doctor` environment, security, and workspace-wide `imp_type.md` compliance audits (flagging duplicate types, raw `__engine` calls, and wildcard imports); publish interactive progressive tutorials (Tier 1 $\rightarrow$ Tier 4).
 
 - [ ] **M50 — PILOT 1.0 FULL RELEASE**
-  - End-to-end zero-Rust bootstrap certification on Linux/macOS/Windows, 1.0 benchmark report against C/Rust/Go/Zig, VS Code extension 1.0 bundle, and 4 production showcase apps (web/DB service, polyglot data app, GPU kernel suite, CLI tool).
+  - End-to-end zero-Rust bootstrap certification on Linux/macOS/Windows, full language & standard library certification under `imp_type.md` architecture, 1.0 benchmark report against C/Rust/Go/Zig, VS Code extension 1.0 bundle, and 4 production showcase apps (web/DB service, polyglot data app, GPU kernel suite, CLI tool).
 
 ---
 
@@ -1522,167 +1555,167 @@ Before advancing to **Phase 4 (`M31` — Peak Performance, Hardware Backends & Z
 ## Phase 6 (`M51` – `M60`): Live Codebase Adaptation, `pilot migrate` & Distributed `.pchor`
 
 - [ ] **M51 — Semantic Codebase Refactoring Engine (`pilot migrate` & `[Migrate]` Rules)**
-  - Attach declarative `[Migrate]` transformations to evolving APIs/structs; rewrite call sites, field splits, and argument reorderings losslessly across entire workspaces via Red/Green CST in milliseconds.
+  - Attach declarative `[Migrate]` transformations to evolving APIs/structs; rewrite call sites, field splits, and argument reorderings losslessly across entire workspaces via Red/Green CST in milliseconds; automate migration of legacy codebases to `imp_type.md` (collapsing boolean blindness to `bitflags`, sentinel errors to `opt<T>`/`res<T, E>`, and duplicate types to canonical targeted imports).
 
 - [ ] **M52 — Multi-Edition Seamless Compilation (`Edition 1.0` + `Edition 2.0` Interop)**
-  - Compile packages targeting different Pilot Editions into shared `PilIR` within one binary so Pilot can continually refine syntax without ever breaking existing dependencies.
+  - Compile packages targeting different Pilot Editions into shared `PilIR` within one binary, guaranteeing 2-bit hardware lattice classifications and `imp_type.md` typing contracts hold across editions.
 
 - [ ] **M53 — `.pchor` Execution Topology Choreography (Monolith $\leftrightarrow$ Actors $\leftrightarrow$ Services)**
-  - Re-bind `.pchor` `cue` routes between direct calls, M:N thread-pool queues, shared-memory IPC rings, and networked RPC/HTTP endpoints purely by editing `.pchor`—zero changes to `role` domain code.
+  - Re-bind `.pchor` `cue` routes between direct calls, M:N thread-pool queues, shared-memory IPC rings, and networked RPC/HTTP endpoints purely by editing `.pchor`—transferring `0b00` value records and `0b10` `iso` buffers with zero code duplication.
 
 - [ ] **M54 — Zero-Copy `.pchor` Shared-Memory & Wire Transport (`0b00` Direct Framing)**
-  - Transfer `0b00` `IValue` packets and `iso` `0b10` slab arenas across process/network cues with zero serialization copies and compile-time layout hash/endianness verification.
+  - Transfer `0b00` `IValue` packets (`[Layout(c_abi)]`) and `iso` `0b10` slab arenas across process/network cues with zero serialization copies and compile-time layout hash/endianness verification per `imp_type.md` Rule 3 & 7.
 
 - [ ] **M55 — Structured Deterministic Concurrency (`scope`, `task`, `chan`)**
-  - Pure-Pilot M:N work-stealing scheduler where `0b11` `IGuard` task scopes statically guarantee child tasks never outlive parent scopes or leak background fibers, paired with `select` channel multiplexing.
+  - Pure-Pilot M:N work-stealing scheduler where `0b11` `IGuard` task scopes statically guarantee child tasks never outlive parent scopes or leak background fibers, paired with typed `select` channel multiplexing.
 
 - [ ] **M56 — Deterministic Simulation Testing & Time-Travel Debugging (`pilot debug --replay`)**
-  - Record and deterministically replay multi-task `.pchor` schedules, timers, and I/O seeds; step **backwards** (`reverse-step`, `reverse-continue`) in `pilot debug` to pinpoint concurrency bugs instantly.
+  - Record and deterministically replay multi-task `.pchor` schedules, timers, `res<T, E>` error branches, and `0b10` Perceus lifecycle events; step **backwards** in `pilot debug` to pinpoint concurrency bugs instantly.
 
 - [ ] **M57 — Sub-20ms State-Preserving Binary Hot-Reload (`pilot run --watch`)**
-  - Patch modified functions in running native/VM processes via `PilotDb` incremental codegen and automatically migrate live in-memory structs when fields are added or reordered.
+  - Patch modified functions in running native/VM processes via `PilotDb` incremental codegen and automatically migrate live in-memory structs when fields are added or reordered based on `[Layout]` diffs.
 
 - [ ] **M58 — Parallel `.pchor` ECS & Data-Oriented Scheduler**
-  - Full archetype table storage + compile-time disjoint read/write `role` scheduling (`reads`/`writes` proven race-free at `comptime`), saturating all CPU cores and SIMD lanes automatically.
+  - Full archetype table storage combining `0b00` component value structs and `0b01` iteration views + compile-time disjoint read/write `role` scheduling, saturating all CPU cores and SIMD lanes automatically with zero heap allocations.
 
 - [ ] **M59 — Production Transactional Sandboxes (`plan` / `!?` Copy-on-Write Runtime)**
-  - Scale `EffectPlan<T>` (`plan` / `!?`) to snapshot memory arenas, virtualize filesystem/DB mutations, inspect diff logs, and commit or roll back atomically in nanoseconds.
+  - Scale `EffectPlan<T>` (`plan` / `!?`) to snapshot `0b10` memory arenas, virtualize filesystem/DB mutations, inspect diff logs, and commit or roll back atomically in nanoseconds without resource leaks.
 
 - [ ] **M60 — Architectural Law & Drift Verifier (`pilot chor verify`)**
-  - Enforce custom codebase laws in `.pchor` (layering boundaries, purity zones, `lvl` security rings, allocation ceilings, latency budgets) on every keystroke in LSP and CI.
+  - Enforce custom codebase laws in `.pchor` (including `imp_type.md` rules: zero duplicate types, targeted import discipline, zero raw `__engine` calls, allocation ceilings) continuously on every keystroke in LSP and CI.
 
 ---
 
 ## Phase 7 (`M61` – `M70`): Deep Polyglot Mastery v2 — Bidirectional Ecosystem Fabric
 
 - [ ] **M61 — Bidirectional C++20/23 Template Instantiation & Coroutine Adapter**
-  - Instantiate C++ class/function templates on demand from Pilot generic arguments at `comptime` and bridge C++20 `co_await` coroutines directly with Pilot `task` frames.
+  - Instantiate C++ class/function templates on demand from Pilot generic arguments constrained via `interface` bounds (`<T : IConstraint>`) per `imp_type.md` Rule 8 and bridge C++20 `co_await` coroutines directly with Pilot `task` frames.
 
 - [ ] **M62 — Bidirectional Rust Crate Export (`pilot ship --as rust-crate`)**
-  - Export any Pilot package as an idiomatic, safe Rust crate (`Cargo.toml` + lifetime-checked wrapper types over Pilot `0b01`/`0b10` ABI) so Rust projects can adopt Pilot modules effortlessly.
+  - Export any Pilot package as an idiomatic, safe Rust crate (`Cargo.toml` + lifetime-checked wrapper types mapping Pilot `0b00` values to `Copy` structs, `0b01` `slice<T>` to `&[T]`, `0b10` to `Drop` objects, `opt<T>` to `Option<T>`, and `res<T, E>` to `Result<T, E>`) so Rust projects adopt Pilot modules effortlessly.
 
 - [ ] **M63 — Universal Zero-Copy Data & Tensor Fabric (Apache Arrow, DLPack & Safetensors)**
-  - Implement Arrow C Data Interface and DLPack natively on Pilot `stride<T>`/`Table<T>`, enabling zero-copy CPU & GPU memory exchange with PyTorch, JAX, Polars, DuckDB, and cuDF.
+  - Implement Arrow C Data Interface and DLPack natively on Pilot `0b01` `stride<T>` and `Table<T>`, enabling zero-copy CPU & GPU memory exchange with PyTorch, JAX, Polars, DuckDB, and cuDF.
 
 - [ ] **M64 — Native JVM / Java / Kotlin Adapter (`use jvm` via Panama / JNI)**
-  - Absorb `.jar`/class signatures at `comptime` with `0b11` JNI local-frame guards, Java Virtual Thread bridging, and `MemorySegment` zero-copy `slice<T>` sharing.
+  - Absorb `.jar`/class signatures at `comptime` with `0b11` JNI local-frame guards, Java Virtual Thread bridging, and `MemorySegment` zero-copy `slice<T>` sharing (`0b01`).
 
 - [ ] **M65 — Native .NET / C# CLR Adapter (`use dotnet` via NativeAOT / HostFXR)**
-  - Bidirectional C# `Span<T>`, `Task<T>`, property, delegate, and interface bridging—giving C#/.NET codebases a natural zero-GC systems acceleration path in Pilot.
+  - Bidirectional C# `Span<T>` $\leftrightarrow$ `0b01` `slice<T>`, `Task<T>` $\leftrightarrow$ `task`, and value struct $\leftrightarrow$ `0b00 : IValue` bridging—giving C#/.NET codebases a natural zero-GC acceleration path.
 
 - [ ] **M66 — Native Swift / Objective-C & Apple Metal Adapter (`use swift` / `use objc`)**
-  - Unify Perceus ARC retain/release lifecycle with Swift/ObjC ARC, absorb Apple framework headers/modules, and pair seamlessly with Pilot's Metal (`MSL`) GPU backend.
+  - Unify Perceus ARC retain/release lifecycle with Swift/ObjC ARC, absorb Apple framework modules without duplicate facades, and pair seamlessly with Pilot's Metal (`MSL`) GPU backend.
 
 - [ ] **M67 — Systems Interop Adapter for Zig & Go (`use zig`, `use go`)**
-  - Bridge Zig C-ABI/build artifacts directly and handle Go cgo stack-switching / pinned-memory boundaries safely via `.pchor` async offload queues.
+  - Bridge Zig C-ABI/build artifacts directly and handle Go cgo stack-switching / pinned-memory boundaries safely via `.pchor` async offload queues with zero memory leaks.
 
 - [ ] **M68 — Incremental Legacy Codebase Absorber (`pilot absorb <dir>`)**
-  - Upgrade Pilot's multi-language ingesters (`selfhost/transpile/`) to convert C, Python, TypeScript, or C# modules into clean, idiomatic Pilot + `.pchor` blueprints one module at a time while linking unconverted siblings live via `adapter`!
+  - Upgrade Pilot's multi-language ingesters (`selfhost/transpile/`) to convert C, Python, TypeScript, or C# modules into clean Pilot + `.pchor` blueprints adhering strictly to `imp_type.md` (enums $\le 19$, open registries $20+$, `[Layout(c_abi)]` structs, `bitflags`, and targeted imports).
 
 - [ ] **M69 — Universal Polyglot SDK Exporter (`pilot ship --sdk py,ts,rust,csharp,go,c,wasm`)**
-  - Write core domain/engine logic **once** in Pilot and emit idiomatic, fully typed native packages (`.whl`, NPM N-API/WASM, Cargo crate, NuGet, Go module, `.h`/`.so`) in one command.
+  - Write core domain/engine logic **once** in Pilot and emit idiomatic, fully typed native packages (`.whl`, NPM N-API/WASM, Cargo crate, NuGet, Go module, `.h`/`.so`) adhering to target language equivalents of `imp_type.md`.
 
 - [ ] **M70 — Unified Cross-Language Profiler (`pilot perf --polyglot`)**
-  - Correlate stack samples, allocations, lock waits, and GPU kernel timelines across Pilot, C/C++, Rust, Python, and JS frames in a single interactive flamegraph.
+  - Correlate stack samples, allocations, 2-bit lattice lifecycles, lock waits, and GPU kernel timelines across Pilot, C/C++, Rust, Python, and JS frames in a single interactive flamegraph.
 
 ---
 
 ## Phase 8 (`M71` – `M80`): Next-Gen AI Co-Design (`pilot mcp` v2), Self-Generation & UI
 
 - [ ] **M71 — `pilot mcp` v2: Token-Minimal Semantic Graph Streaming**
-  - Stream surgical, dependency-pruned semantic context slices (types, active facets, contracts, `.pchor` role topology, callers) to AI agents in $<5\%$ of raw file token cost.
+  - Stream surgical, dependency-pruned semantic context slices (canonical types, active facets, contracts, `.pchor` role topology, targeted import paths) to AI agents in $<5\%$ of raw file token cost, ensuring generated code adheres to `imp_type.md` single-source definitions.
 
 - [ ] **M72 — `pilot mcp` Speculative Multi-Patch Verifier & Counterexample Engine**
-  - Evaluate candidate AI or refactoring patches inside isolated `PilotDb` memory forks: typecheck, run Perceus/escape checks, fuzz contracts, and return minimal failing inputs in $<50\text{ ms}$ with zero disk writes.
+  - Evaluate candidate AI or refactoring patches inside isolated `PilotDb` memory forks: typecheck, verify `imp_type.md` compliance (rejecting duplicate types and raw `__engine` calls before disk commit), run Perceus checks, fuzz contracts, and return minimal failing inputs in $<50\text{ ms}$.
 
 - [ ] **M73 — Typed Hole Sketching & Deductive Object Synthesis (`_?`)**
-  - Support `_?` typed expression/implementation holes guided by surrounding types and `requires`/`ensures` contracts—synthesizing boilerplate adapters, mappers, and mock objects automatically.
+  - Support `_?` typed expression/implementation holes guided by surrounding types and `requires`/`ensures` contracts—synthesizing boilerplate adapters, mappers, and mock objects strictly adhering to `imp_type.md` target types and lattice classifications.
 
 - [ ] **M74 — Programmable `comptime` Snippets & Live Refactoring Code Lenses**
-  - Replace static text snippets with `comptime` Pilot snippet functions that inspect local scope types, `.pchor` roles, and interfaces to generate context-exact code blocks in any IDE.
+  - Replace static text snippets with `comptime` Pilot snippet functions that inspect local scope types, `.pchor` roles, and interfaces to generate context-exact code blocks with targeted imports and zero boolean blindness.
 
 - [ ] **M75 — Zero-VDOM Reactive Cross-Platform UI Engine (`std.ui`)**
-  - Combine glitch-free `sig` (`!^`) signals, fluid `..` cascades, and WGSL/native rendering into a declarative, `0.0 ms`-GC UI toolkit running identically on desktop, web (WASM+WebGPU), and mobile.
+  - Combine glitch-free `sig` (`!^`) signals, fluid `..` cascades, `0b00` layout nodes, and WGSL/native rendering into a declarative, `0.0 ms`-GC UI toolkit running identically on desktop, web (WASM+WebGPU), and mobile.
 
 - [ ] **M76 — Compile-Time Verified Relational & Columnar Query Engine (`std.db` v2)**
-  - Compile native Pilot query expressions against live schemas into vectorized SIMD in-memory scans or parameterized zero-allocation Postgres/MySQL/SQLite wire statements.
+  - Compile native Pilot query expressions against live schemas into vectorized SIMD in-memory scans or parameterized zero-allocation Postgres/MySQL/SQLite wire statements using strongly-typed column tokens and `[Layout(c_abi)]` row mappers.
 
 - [ ] **M77 — SIMD-Accelerated Wire Codecs & Schema Evolution (`std.json` / `std.bin`)**
-  - Synthesize branchless SIMD JSON and compact binary serializers at `comptime` (`>3 GB/s` throughput) with forward/backward field-version evolution rules.
+  - Synthesize branchless SIMD JSON and compact binary serializers at `comptime` (`>3 GB/s` throughput) generating `[Layout(c_abi)]` value packets with forward/backward field-version evolution rules.
 
 - [ ] **M78 — Live Reactive Exploratory Workspace (`pilot studio`)**
-  - Local reactive canvas/notebook driven by `PilotDb` and `sig` (`!^`): edit code, `.pchor` blueprints, or data inputs and watch plots, tables, and GPU views update deterministically with zero out-of-order cell bugs.
+  - Local reactive canvas/notebook driven by `PilotDb` and `sig` (`!^`): edit code, `.pchor` blueprints, or data inputs and watch plots, tables, and GPU views update deterministically with live type and lattice inspection.
 
 - [ ] **M79 — Automated Layout & Performance Advisor (`pilot perf --advise`)**
-  - Combine static struct padding analysis with hardware PMU profiles to recommend 1-click `.pchor` `SoA`, arena, SIMD, or borrow-elision optimizations with projected speedup estimates.
+  - Combine static struct padding analysis with hardware PMU profiles to recommend 1-click `imp_type.md` optimizations (`[Layout(optimal)]`, `.pchor` `SoA`, arena pooling, SIMD vectorization, or `bitflags` conversion) with projected speedup estimates.
 
 - [ ] **M80 — Cryptographic Capability & Supply-Chain Proofs (`pilot audit`)**
-  - Statically prove and lock the exact OS capabilities (`fs`, `net`, `env`, `ffi`, `asm`, `lvl` ring) reachable by every dependency in `pkg.pilot`, eliminating hidden supply-chain privilege escalation.
+  - Statically prove and lock the exact OS capabilities (`fs`, `net`, `env`, `ffi`, `asm`, `lvl` ring) reachable by every dependency in `pkg.pilot`, proving zero unauthorized unmanaged engine calls or memory leaks across the dependency graph.
 
 ---
 
 ## Phase 9 (`M81` – `M90`): Extreme Hardware Physics, Formal Proofs & 100% Pure-Pilot Repo
 
 - [ ] **M81 — Profile-Guided `comptime` Specialization (`pilot build --pgo`)**
-  - Feed runtime trace profiles back into `PilIR` `comptime` passes to devirtualize hot interface dispatches, specialize dynamic tensor/slice shapes, and inline across polyglot LTO boundaries.
+  - Feed runtime trace profiles back into `PilIR` `comptime` passes to devirtualize hot interface dispatches, specialize constrained generics (`<T : IConstraint>` per `imp_type.md` Rule 8), and inline across polyglot LTO boundaries.
 
 - [ ] **M82 — Polyhedral Loop & GPU/SIMD Kernel Auto-Fusion**
-  - Automatically tile, vectorize, and fuse multi-stage math/array loops and `grad` (`!@`) backward passes into single cache-resident CPU or GPU kernels eliminating intermediate memory traffic.
+  - Automatically tile, vectorize, and fuse multi-stage math loops over `0b01` slices and `grad` (`!@`) backward passes into single cache-resident CPU or GPU kernels, eliminating intermediate buffer allocations.
 
 - [ ] **M83 — Declarative Hardware ISA & Accelerator Descriptor DSL**
-  - Define CPU/DSP/NPU register classes, instruction encodings, and scheduling latencies in pure Pilot (`stdlib/arch/`)—enabling RISC-V Vector (`RVV`), AVX10, or custom ASIC backends without compiler core edits.
+  - Define CPU/DSP/NPU register classes, instruction encodings, and scheduling latencies in pure Pilot (`stdlib/arch/`) using name-blind `[Bits]` and `[Layout]` descriptors without compiler core edits.
 
 - [ ] **M84 — Bare-Metal Kernel, Embedded Firmware & SVD MMIO Target (`core`)**
-  - Generate type-safe volatile MMIO register structs directly from hardware `.svd` files at `comptime`, support interrupt handlers and `.pchor` linker layouts, and boot bare-metal ARM Cortex-M, RISC-V, and x86 UEFI images.
+  - Generate type-safe volatile MMIO register structs directly from hardware `.svd` files at `comptime` as `[Layout(c_abi)] struct : IValue` with volatile bitfields, compiling strictly in freestanding `core.*` (`RING001`).
 
 - [ ] **M85 — Static Cycle-Bounded `[Wcet]` & Stack-Depth Prover**
-  - Prove static worst-case execution cycles and maximum stack bytes across `[HardRealtime]` call graphs (rejecting unbounded loops, recursion, or allocations at compile time).
+  - Prove static worst-case execution cycles and maximum stack bytes across `[HardRealtime]` call graphs (rejecting unbounded loops, recursion, or dynamic allocations on `[Layout(c_abi)]` structs).
 
 - [ ] **M86 — SMT-Backed Static Contract & Bounds-Elision Prover (`pilot check --prove`)**
-  - Discharge `requires`/`ensures` contracts, integer overflow checks, and slice bounds checks statically at compile time—unlocking `unsafe`-C speed inside 100% safe Pilot code!
+  - Discharge `requires`/`ensures` contracts, integer overflow checks, and slice bounds checks statically at compile time, formally verifying custom invariant value structs (`imp_type.md` Rule 10).
 
 - [ ] **M87 — Multi-GPU & Cluster `.pchor` Sharding Choreography**
-  - Extend `.pchor` storage/route blueprints to shard large tables and tensors across multiple GPUs or cluster nodes with overlapped compute and collective communication.
+  - Extend `.pchor` storage/route blueprints to shard large `0b00` tables and `0b10` tensor buffers across multiple GPUs or cluster nodes with overlapped compute and collective communication.
 
 - [ ] **M88 — Ultra-Tiny Binary & WASM Size Mode (`pilot build --tiny`)**
-  - Layout-erased polymorphic codegen deduplication + aggressive dead-field/symbol stripping producing `<50 KB` native CLI tools and `<15 KB` reactive WASM bundles.
+  - Layout-erased polymorphic codegen deduplication + aggressive dead-field and redundant type metadata stripping, producing `<50 KB` native CLI tools and `<15 KB` reactive WASM bundles.
 
 - [ ] **M89 — Complete Retirement of Legacy `crates/` Workspace (100% Pure-Pilot Repo)**
-  - Delete the remaining transitional Rust bootstrap directory (`crates/pilot-*`, `Cargo.toml`) completely. Every line of the compiler, runtime, Perceus verifier, backends, adapters, LSP, DAP, MCP, and gates is now **100% pure Pilot** bootstrapped from its portable C11/native seed.
+  - Delete the remaining transitional Rust bootstrap directory (`crates/pilot-*`, `Cargo.toml`) completely. Every line of the compiler, runtime, Perceus verifier, backends, adapters, LSP, DAP, MCP, and gates is now **100% pure Pilot** adhering to `imp_type.md` (zero type duplication, strict targeted imports, zero raw `__engine` calls, 100% encapsulated standard types) bootstrapped from its portable C11/native seed.
 
 - [ ] **M90 — Stage-4 Quad-Backend Fixed-Point Certification**
-  - Prove deterministic Stage-2 == Stage-3 bit-for-bit self-compilation of `pilot` across all 4 primary native emitters simultaneously (LLVM, C11, direct x86_64/ARM64 machine code, and WASM).
+  - Prove deterministic Stage-2 == Stage-3 bit-for-bit self-compilation of `pilot` across all 4 primary native emitters simultaneously (LLVM, C11, direct machine code, and WASM), certifying type layout and lattice invariance across platforms.
 
 ---
 
 ## Phase 10 (`M91` – `M100`): Ecosystem Polish, Flagship Proof Systems & **PILOT 2.0 RELEASE**
 
 - [ ] **M91 — Content-Addressed Package Registry & Semantic API Diffing (`pilot pkg publish/diff`)**
-  - Launch the native `pilot pkg` registry protocol with reproducible build attestations, capability badges (`noalloc`, `pure`, `net`), and automatic semver breaking-change detection + `[Migrate]` rule bundling.
+  - Launch the native `pilot pkg` registry protocol with reproducible build attestations, capability badges (`noalloc`, `pure`, `net`), and automatic semver breaking-change detection enforcing single source of truth across ecosystem types.
 
 - [ ] **M92 — Universal Editor Suite (`pilot ide-sync` for VS Code, Zed, Neovim & JetBrains)**
-  - Generate first-class editor extensions (Tree-sitter/TextMate grammars, LSP inlay lenses, DAP launch configs, MCP agent hooks) automatically from Pilot's single declarative registry.
+  - Generate first-class editor extensions (Tree-sitter/TextMate grammars, LSP inlay lenses showing 2-bit lattice badges, DAP launch configs, MCP agent hooks) automatically from Pilot's single declarative registry.
 
 - [ ] **M93 — Flagship Proof 1: Zero-GC High-Throughput HTTP/3 & Embedded DB Server**
-  - Pure-Pilot service handling >1M req/s with flat sub-millisecond p99.99 latency, compile-time SQL verification, and live `.pchor` single-binary $\leftrightarrow$ sharded-cluster switching.
+  - Pure-Pilot service handling >1M req/s with flat sub-millisecond p99.99 latency, compile-time SQL verification, `0b00` framing, `0b11` leases, `res<T, E>` error flows, and live `.pchor` cluster switching.
 
 - [ ] **M94 — Flagship Proof 2: Native + Polyglot AI Training & Inference Engine**
-  - End-to-end neural training & inference engine in Pilot (`grad`/`!@` + fused `[Kernel]` GPU + zero-copy PyTorch/Arrow `use py` adapter) matching CUDA/C++ throughput in a fraction of the code.
+  - End-to-end neural training & inference engine in Pilot (`grad`/`!@` autodiff on `0b01` `stride<T>` and `Dual<T, G>` value records + fused `[Kernel]` GPU + zero-copy PyTorch/Arrow `use py` adapter) matching CUDA/C++ throughput in a fraction of the code.
 
 - [ ] **M95 — Flagship Proof 3: Live-Reloading Multi-Target `.pchor` Simulation & UI**
-  - 120fps `SoA` ECS physics + `std.ui` application running from a single Pilot codebase on desktop native, mobile, and browser WebAssembly+WebGPU with sub-20ms state-preserving hot-reload.
+  - 120fps `SoA` ECS physics + `std.ui` application running from a single Pilot codebase with `0b00` value components and `sig` reactive UI across desktop native, mobile, and WebGPU with sub-20ms state-preserving hot-reload.
 
 - [ ] **M96 — Flagship Proof 4: Enterprise Polyglot Absorption & Universal SDK Showcase**
-  - Demonstrate absorbing C (`sqlite3`), Rust, Python, and TypeScript modules into one cohesive Pilot application, then exporting back native Python, TS, Rust, C#, and C SDKs via `pilot ship --sdk`.
+  - Demonstrate absorbing C (`sqlite3`), Rust, Python, and TypeScript modules into one cohesive Pilot application with zero duplicate type facades, then exporting back native Python, TS, Rust, C#, and C SDKs via `pilot ship --sdk`.
 
 - [ ] **M97 — Global Benchmark & Readability Certification Suite**
-  - Publish reproducible head-to-head benchmarks against C, C++, Rust, Zig, Go, C#, and Python across runtime speed, memory footprint, tail latency, compile speed (`>500K LOC/s`), and source LOC clarity.
+  - Publish reproducible head-to-head benchmarks against C, C++, Rust, Zig, Go, C#, and Python across runtime speed, memory footprint, tail latency, compile speed (`>500K LOC/s`), and source LOC clarity, certifying `imp_type.md` zero-overhead abstractions.
 
 - [ ] **M98 — Zero-Friction `Edition 1.0 -> 2.0` Auto-Migration & Stability Charter**
-  - Verify `pilot migrate --edition 2.0` upgrades every 1.0 package and test cleanly with zero manual edits; publish the Pilot 2.0 Language Reference & Sublanguage Architect's Guide.
+  - Verify `pilot migrate --edition 2.0` upgrades every 1.0 package and test cleanly with zero manual edits; publish the Pilot 2.0 Language Reference & Sublanguage Architect's Guide upholding `imp_type.md` invariants.
 
 - [ ] **M99 — 72-Hour Continuous Fuzz, Polyglot Stress & Multi-OS Bootstrap Burn-In**
-  - Run continuous differential fuzzing across compiler passes, Perceus ARC, `.pchor` cues, and all foreign-language adapters on Linux, macOS, Windows, x86_64, ARM64, and RISC-V with zero P0/P1 defects.
+  - Run continuous differential fuzzing across compiler passes, Perceus ARC, 2-bit lattice classifications, `.pchor` cues, and all foreign-language adapters on Linux, macOS, Windows, x86_64, ARM64, and RISC-V with zero P0/P1 defects and zero engine resource leaks.
 
 - [ ] **M100 — PILOT 2.0 RELEASE — The Universal Adaptable Programming Platform**
-  - Tag Pilot `v2.0.0`, ship single-file hermetic installers for all major platforms, certify MCP v2 AI co-design workflows, and open the 2.0 ecosystem!
+  - Tag Pilot `v2.0.0`, ship single-file hermetic installers for all major platforms, certify MCP v2 AI co-design workflows, and open the 2.0 ecosystem—fully powered by the 6 Core Laws and 12 Invariant Rules of `imp_type.md`!

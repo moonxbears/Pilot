@@ -514,9 +514,18 @@ pub fn test_61_2_stage3_bootstrap_fixed_point_clang_native_and_pilc_sha256_parit
          }}\n\
          {fn_entry}({input_n});\n"
     );
-    let unit_b = unit_a
-        .replace(&bias_a.to_string(), &bias_b.to_string())
-        .replace(&k_a.to_string(), &k_b.to_string());
+    let unit_b = format!(
+        "pub fn {fn_entry}(n: i64) -> i64 {{\n\
+             var acc = {bias_b};\n\
+             var i = 1;\n\
+             while i <= n {{\n\
+                 acc = acc + (i * {k_b});\n\
+                 i = i + 1;\n\
+             }}\n\
+             return acc;\n\
+         }}\n\
+         {fn_entry}({input_n});\n"
+    );
 
     let sum_1_to_n = input_n * (input_n + 1) / 2;
     let expected_a = bias_a + sum_1_to_n * k_a;
