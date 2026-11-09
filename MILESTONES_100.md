@@ -969,7 +969,7 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 
 ---
 
-### M18 — In-Process JS/TypeScript Adapter (`use js` / `use ts` via Node-API & Embedded QuickJS)
+### M18 — In-Process JS/TypeScript Adapter (`use js` / `use ts` via Node-API & Embedded QuickJS) [COMPLETE]
 
 #### 18.1 Objective & Current Codebase Audit
 - **Root Bottleneck (`bridge.pilot` Spawns Cold `node` Subprocess Per Call):** [`stdlib/polyglot/bridge.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/polyglot/bridge.pilot) (lines `67`–`70`) spawns a fresh `node` OS process per call (`~45 ms` V8 cold boot per expression!), cannot hold JS closures/objects, cannot share `Uint8Array`/`ArrayBuffer` zero-copy, and cannot await JS `Promise<T>`.

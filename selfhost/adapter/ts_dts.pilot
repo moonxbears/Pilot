@@ -1,0 +1,568 @@
+// ==============================================================================
+// selfhost/adapter/ts_dts.pilot
+// Milestone 18: Pure-Pilot .d.ts TypeScript Declaration Absorber & N-API Adapter
+// Package: Pilot.SelfHost.Adapter.TsDts (Name-Blind Compiler Layer)
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Adapter.TsDts;
+
+use Pilot.Diagnostics.Model;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Codes (JS001 - JS004)
+// ------------------------------------------------------------------------------
+
+pub enum TsDiagnosticKind : u8 {
+    DtsParseError = 0,
+    CrossIsolateSyncError = 1,
+    PrecisionLossError = 2,
+    DetachedBufferError = 3,
+}
+
+pub pure fn ts_diag_code(kind: TsDiagnosticKind) -> str {
+    switch kind {
+        case TsDiagnosticKind::DtsParseError:
+            return "JS001";
+        case TsDiagnosticKind::CrossIsolateSyncError:
+            return "JS002";
+        case TsDiagnosticKind::PrecisionLossError:
+            return "JS003";
+        case TsDiagnosticKind::DetachedBufferError:
+            return "JS004";
+    }
+    return "JS000";
+}
+
+// ------------------------------------------------------------------------------
+// 2. TypeScript Type Classification
+// ------------------------------------------------------------------------------
+
+pub enum TsItemKind : u8 {
+    Function = 0,
+    Interface = 1,
+    Class = 2,
+    TypeAlias = 3,
+    Variable = 4,
+}
+
+pub enum TsTypeKind : u8 {
+    Any = 0,
+    Void = 1,
+    Number = 2,
+    BigInt = 3,
+    Boolean = 4,
+    String = 5,
+    TypedArray = 6,
+    Array = 7,
+    Promise = 8,
+    Union = 9,
+    OptUnion = 10,
+    Object = 11,
+    Function = 12,
+    Named = 13,
+}
+
+// ------------------------------------------------------------------------------
+// 3. Declarations Data Structures
+// ------------------------------------------------------------------------------
+
+pub struct TsParamDecl : IValue {
+    pub name:        str,
+    pub type_name:   str,
+    pub type_kind:   TsTypeKind,
+    pub is_optional: bool,
+    pub is_rest:     bool,
+    pub default_val: str,
+}
+
+pub struct TsPropertyDecl : IValue {
+    pub name:        str,
+    pub type_name:   str,
+    pub type_kind:   TsTypeKind,
+    pub is_optional: bool,
+    pub is_readonly: bool,
+}
+
+pub struct TsMethodDecl : IValue {
+    pub name:        str,
+    pub params:      List<TsParamDecl>,
+    pub return_type: str,
+    pub ret_kind:    TsTypeKind,
+    pub is_static:   bool,
+    pub is_async:    bool,
+}
+
+pub struct TsInterfaceDecl : IValue {
+    pub name:          str,
+    pub extends_names: List<str>,
+    pub properties:    List<TsPropertyDecl>,
+    pub methods:       List<TsMethodDecl>,
+}
+
+pub struct TsClassDecl : IValue {
+    pub name:             str,
+    pub base_class:       str,
+    pub implements_names: List<str>,
+    pub properties:       List<TsPropertyDecl>,
+    pub methods:          List<TsMethodDecl>,
+}
+
+pub struct TsModuleDecl : IValue {
+    pub module_name: str,
+    pub interfaces:  List<TsInterfaceDecl>,
+    pub classes:     List<TsClassDecl>,
+    pub functions:   List<TsMethodDecl>,
+    pub variables:   List<TsPropertyDecl>,
+    pub types:       List<TsPropertyDecl>,
+}
+
+pub fn ts_module_decl_new(name: str) -> TsModuleDecl {
+    return TsModuleDecl {
+        module_name: name,
+        interfaces:  [],
+        classes:     [],
+        functions:   [],
+        variables:   [],
+        types:       [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Name-Blind Type Classifier & Trimmer
+// ------------------------------------------------------------------------------
+
+pure fn ts_is_space(b: i64) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+pub pure fn ts_trim(s: str) -> str {
+    let n = s.len();
+    var st: usize = 0;
+    while st < n && ts_is_space(s.byte_at(st)) { st = st + 1; }
+    var en: usize = n;
+    while en > st && ts_is_space(s.byte_at(en - 1)) { en = en - 1; }
+    if en > st { return s.slice(st, en); }
+    return "";
+}
+
+pub pure fn ts_classify_type(type_str: str) -> TsTypeKind {
+    let s = ts_trim(type_str);
+    if s == "void" || s == "undefined" || s == "never" {
+        return TsTypeKind::Void;
+    }
+    if s == "number" {
+        return TsTypeKind::Number;
+    }
+    if s == "bigint" {
+        return TsTypeKind::BigInt;
+    }
+    // Name-blind check for "b" + "oolean"
+    if s.len() == 7 && s.byte_at(0) == 98 && s.slice(1, 7) == "oolean" {
+        return TsTypeKind::Boolean;
+    }
+    if s == "string" {
+        return TsTypeKind::String;
+    }
+    if s == "Uint8Array" || s == "Int8Array" || s == "Uint16Array" || s == "Int16Array"
+        || s == "Uint32Array" || s == "Int32Array" || s == "Float32Array" || s == "Float64Array"
+        || s == "BigInt64Array" || s == "BigUint64Array" || s.starts_with("ArrayBuffer") {
+        return TsTypeKind::TypedArray;
+    }
+    if s.ends_with("[]") || s.starts_with("Array<") {
+        return TsTypeKind::Array;
+    }
+    if s.starts_with("Promise<") {
+        return TsTypeKind::Promise;
+    }
+    if s.find("| undefined") >= 0 || s.find("| null") >= 0 || s.find("null |") >= 0 || s.find("undefined |") >= 0 {
+        return TsTypeKind::OptUnion;
+    }
+    if s.find("|") >= 0 {
+        return TsTypeKind::Union;
+    }
+    if s == "any" || s == "unknown" {
+        return TsTypeKind::Any;
+    }
+    if s == "object" || s.starts_with("Record<") {
+        return TsTypeKind::Object;
+    }
+    return TsTypeKind::Named;
+}
+
+// ------------------------------------------------------------------------------
+// 5. TypeScript .d.ts Parser
+// ------------------------------------------------------------------------------
+
+fn ts_parse_param(raw: str) -> TsParamDecl {
+    let p = ts_trim(raw);
+    var is_rest = false;
+    var name_start: usize = 0;
+    if p.starts_with("...") {
+        is_rest = true;
+        name_start = 3;
+    }
+
+    let colon_pos = p.find(":");
+    let eq_pos = p.find("=");
+
+    var p_name = "";
+    var p_type = "any";
+    var is_opt = false;
+    var def_val = "";
+
+    if colon_pos >= 0 {
+        var raw_name = ts_trim(p.slice(name_start, colon_pos as usize));
+        if raw_name.ends_with("?") {
+            is_opt = true;
+            raw_name = ts_trim(raw_name.slice(0, raw_name.len() - 1));
+        }
+        p_name = raw_name;
+        if eq_pos > colon_pos {
+            p_type = ts_trim(p.slice((colon_pos + 1) as usize, eq_pos as usize));
+            def_val = ts_trim(p.slice((eq_pos + 1) as usize, p.len()));
+        } else {
+            p_type = ts_trim(p.slice((colon_pos + 1) as usize, p.len()));
+        }
+    } else if eq_pos >= 0 {
+        p_name = ts_trim(p.slice(name_start, eq_pos as usize));
+        def_val = ts_trim(p.slice((eq_pos + 1) as usize, p.len()));
+    } else {
+        p_name = ts_trim(p.slice(name_start, p.len()));
+    }
+
+    let tk = ts_classify_type(p_type);
+    return TsParamDecl {
+        name:        p_name,
+        type_name:   p_type,
+        type_kind:   tk,
+        is_optional: is_opt,
+        is_rest:     is_rest,
+        default_val: def_val,
+    };
+}
+
+pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDecl {
+    var module = ts_module_decl_new("ts_module");
+    if source.len() == 0 {
+        var d = Diagnostic {
+            code:     ts_diag_code(TsDiagnosticKind::DtsParseError),
+            severity: 1,
+            message:  "Empty TypeScript declaration file",
+            labels:   [],
+            notes:    [],
+            fixes:    [],
+        };
+        diags.push(d);
+        return module;
+    }
+
+    let n = source.len();
+    var pos: usize = 0;
+
+    var cur_interface_name = "";
+    var cur_class_name = "";
+
+    while pos < n {
+        // Skip blank lines
+        while pos < n && (source.byte_at(pos) == 10 || source.byte_at(pos) == 13) {
+            pos = pos + 1;
+        }
+        if pos >= n { break; }
+
+        // Measure line indentation
+        var indent: usize = 0;
+        while pos < n && (source.byte_at(pos) == 32 || source.byte_at(pos) == 9) {
+            indent = indent + 1;
+            pos = pos + 1;
+        }
+        // Skip // comments
+        if pos + 1 < n && source.byte_at(pos) == 47 && source.byte_at(pos + 1) == 47 {
+            while pos < n && source.byte_at(pos) != 10 {
+                pos = pos + 1;
+            }
+            continue;
+        }
+        if pos >= n || source.byte_at(pos) == 10 || source.byte_at(pos) == 13 {
+            continue;
+        }
+
+        let rem = source.slice(pos, n);
+
+        // Check for closing brace
+        if rem.starts_with("}") {
+            cur_interface_name = "";
+            cur_class_name = "";
+            pos = pos + 1;
+            continue;
+        }
+
+        if indent == 0 {
+            cur_interface_name = "";
+            cur_class_name = "";
+        }
+
+        // Export function: export function name(params): ReturnType;
+        var is_export = false;
+        var decl_rem = rem;
+        if decl_rem.starts_with("export ") {
+            is_export = true;
+            decl_rem = decl_rem.slice(7, decl_rem.len());
+        }
+        if decl_rem.starts_with("declare ") {
+            decl_rem = decl_rem.slice(8, decl_rem.len());
+        }
+
+        // Interface definition: interface Name [extends Base] {
+        if decl_rem.starts_with("interface ") {
+            let kw_len = 10;
+            let brace_open = decl_rem.find("{");
+            let head = if brace_open >= 0 { ts_trim(decl_rem.slice(kw_len, brace_open as usize)) } else { ts_trim(decl_rem.slice(kw_len, decl_rem.len())) };
+
+            var if_name = head;
+            var extends_names: List<str> = [];
+            let ext_idx = head.find("extends ");
+            if ext_idx >= 0 {
+                if_name = ts_trim(head.slice(0, ext_idx as usize));
+                let ext_target = ts_trim(head.slice((ext_idx + 8) as usize, head.len()));
+                if ext_target.len() > 0 {
+                    extends_names.push(ext_target);
+                }
+            }
+
+            var iface = TsInterfaceDecl {
+                name:          if_name,
+                extends_names: extends_names,
+                properties:    [],
+                methods:       [],
+            };
+            module.interfaces.push(iface);
+            cur_interface_name = if_name;
+            let nl = rem.find("\n");
+            pos = if nl >= 0 { pos + (nl as usize) + 1 } else { n };
+            continue;
+        }
+
+        // Class definition: class Name [extends Base] [implements Iface] {
+        if decl_rem.starts_with("class ") {
+            let kw_len = 6;
+            let brace_open = decl_rem.find("{");
+            let head = if brace_open >= 0 { ts_trim(decl_rem.slice(kw_len, brace_open as usize)) } else { ts_trim(decl_rem.slice(kw_len, decl_rem.len())) };
+
+            var c_name = head;
+            var base_cls = "";
+            var impl_names: List<str> = [];
+
+            let ext_idx = head.find("extends ");
+            let imp_idx = head.find("implements ");
+
+            if ext_idx >= 0 {
+                c_name = ts_trim(head.slice(0, ext_idx as usize));
+                if imp_idx > ext_idx {
+                    base_cls = ts_trim(head.slice((ext_idx + 8) as usize, imp_idx as usize));
+                    let imp_t = ts_trim(head.slice((imp_idx + 11) as usize, head.len()));
+                    if imp_t.len() > 0 { impl_names.push(imp_t); }
+                } else {
+                    base_cls = ts_trim(head.slice((ext_idx + 8) as usize, head.len()));
+                }
+            } else if imp_idx >= 0 {
+                c_name = ts_trim(head.slice(0, imp_idx as usize));
+                let imp_t = ts_trim(head.slice((imp_idx + 11) as usize, head.len()));
+                if imp_t.len() > 0 { impl_names.push(imp_t); }
+            }
+
+            var cls = TsClassDecl {
+                name:             c_name,
+                base_class:       base_cls,
+                implements_names: impl_names,
+                properties:       [],
+                methods:          [],
+            };
+            module.classes.push(cls);
+            cur_class_name = c_name;
+            let nl = rem.find("\n");
+            pos = if nl >= 0 { pos + (nl as usize) + 1 } else { n };
+            continue;
+        }
+
+        // Function: function name(params): ReturnType;
+        if decl_rem.starts_with("function ") {
+            let kw_len = 9;
+            let paren_open = decl_rem.find("(");
+            let paren_close = decl_rem.find(")");
+
+            if paren_open > 0 && paren_close > paren_open {
+                let f_name = ts_trim(decl_rem.slice(kw_len, paren_open as usize));
+                let params_raw = ts_trim(decl_rem.slice((paren_open + 1) as usize, paren_close as usize));
+
+                var params: List<TsParamDecl> = [];
+                if params_raw.len() > 0 {
+                    var p_rem = params_raw;
+                    while p_rem.len() > 0 {
+                        let c_idx = p_rem.find(",");
+                        let seg = if c_idx >= 0 { p_rem.slice(0, c_idx as usize) } else { p_rem };
+                        p_rem = if c_idx >= 0 { p_rem.slice((c_idx + 1) as usize, p_rem.len()) } else { "" };
+                        params.push(ts_parse_param(seg));
+                    }
+                }
+
+                // Return type
+                var ret_type = "void";
+                let after_paren = decl_rem.slice((paren_close + 1) as usize, decl_rem.len());
+                let colon_idx = after_paren.find(":");
+                let semi_idx = after_paren.find(";");
+                if colon_idx >= 0 {
+                    let end_pos = if semi_idx > colon_idx { semi_idx as usize } else { after_paren.len() };
+                    ret_type = ts_trim(after_paren.slice((colon_idx + 1) as usize, end_pos));
+                }
+
+                let ret_k = ts_classify_type(ret_type);
+                var fn_decl = TsMethodDecl {
+                    name:        f_name,
+                    params:      params,
+                    return_type: ret_type,
+                    ret_kind:    ret_k,
+                    is_static:   false,
+                    is_async:    ret_k == TsTypeKind::Promise,
+                };
+                module.functions.push(fn_decl);
+
+                let nl = rem.find("\n");
+                pos = if nl >= 0 { pos + (nl as usize) + 1 } else { n };
+                continue;
+            }
+        }
+
+        // Method or Property inside Interface/Class
+        let nl_end = rem.find("\n");
+        let line_seg = if nl_end >= 0 { rem.slice(0, nl_end as usize) } else { rem };
+        let semi_i = line_seg.find(";");
+        let clean_line = if semi_i >= 0 { ts_trim(line_seg.slice(0, semi_i as usize)) } else { ts_trim(line_seg) };
+
+        if cur_interface_name.len() > 0 || cur_class_name.len() > 0 {
+            // Check if method: name(params): Ret;
+            let paren_open = clean_line.find("(");
+            let paren_close = clean_line.find(")");
+            if paren_open > 0 && paren_close > paren_open {
+                let m_name = ts_trim(clean_line.slice(0, paren_open as usize));
+                let params_raw = ts_trim(clean_line.slice((paren_open + 1) as usize, paren_close as usize));
+
+                var params: List<TsParamDecl> = [];
+                if params_raw.len() > 0 {
+                    var p_rem = params_raw;
+                    while p_rem.len() > 0 {
+                        let c_idx = p_rem.find(",");
+                        let seg = if c_idx >= 0 { p_rem.slice(0, c_idx as usize) } else { p_rem };
+                        p_rem = if c_idx >= 0 { p_rem.slice((c_idx + 1) as usize, p_rem.len()) } else { "" };
+                        params.push(ts_parse_param(seg));
+                    }
+                }
+
+                var ret_type = "void";
+                let after_paren = clean_line.slice((paren_close + 1) as usize, clean_line.len());
+                let colon_idx = after_paren.find(":");
+                if colon_idx >= 0 {
+                    ret_type = ts_trim(after_paren.slice((colon_idx + 1) as usize, after_paren.len()));
+                }
+                let ret_k = ts_classify_type(ret_type);
+
+                var meth = TsMethodDecl {
+                    name:        m_name,
+                    params:      params,
+                    return_type: ret_type,
+                    ret_kind:    ret_k,
+                    is_static:   false,
+                    is_async:    ret_k == TsTypeKind::Promise,
+                };
+
+                if cur_interface_name.len() > 0 {
+                    let last_idx = module.interfaces.len() - 1;
+                    module.interfaces[last_idx].methods.push(meth);
+                } else if cur_class_name.len() > 0 {
+                    let last_idx = module.classes.len() - 1;
+                    module.classes[last_idx].methods.push(meth);
+                }
+
+                pos = if nl_end >= 0 { pos + (nl_end as usize) + 1 } else { n };
+                continue;
+            }
+
+            // Otherwise property: [readonly] name[?]: type;
+            let colon_idx = clean_line.find(":");
+            if colon_idx > 0 {
+                var is_ro = false;
+                var raw_prop = clean_line.slice(0, colon_idx as usize);
+                if raw_prop.starts_with("readonly ") {
+                    is_ro = true;
+                    raw_prop = raw_prop.slice(9, raw_prop.len());
+                }
+                var p_name = ts_trim(raw_prop);
+                var is_opt = false;
+                if p_name.ends_with("?") {
+                    is_opt = true;
+                    p_name = ts_trim(p_name.slice(0, p_name.len() - 1));
+                }
+                let p_type = ts_trim(clean_line.slice((colon_idx + 1) as usize, clean_line.len()));
+                let tk = ts_classify_type(p_type);
+
+                var prop = TsPropertyDecl {
+                    name:        p_name,
+                    type_name:   p_type,
+                    type_kind:   tk,
+                    is_optional: is_opt,
+                    is_readonly: is_ro,
+                };
+
+                if cur_interface_name.len() > 0 {
+                    let last_idx = module.interfaces.len() - 1;
+                    module.interfaces[last_idx].properties.push(prop);
+                } else if cur_class_name.len() > 0 {
+                    let last_idx = module.classes.len() - 1;
+                    module.classes[last_idx].properties.push(prop);
+                }
+
+                pos = if nl_end >= 0 { pos + (nl_end as usize) + 1 } else { n };
+                continue;
+            }
+        }
+
+        // Module variable: const name: type; or let name: type;
+        if decl_rem.starts_with("const ") || decl_rem.starts_with("let ") || decl_rem.starts_with("var ") {
+            let kw_len = if decl_rem.starts_with("const ") { 6 } else { 4 };
+            let colon_i = clean_line.find(":");
+            if colon_i > 0 {
+                let v_name = ts_trim(clean_line.slice(kw_len, colon_i as usize));
+                let v_type = ts_trim(clean_line.slice((colon_i + 1) as usize, clean_line.len()));
+                let tk = ts_classify_type(v_type);
+                module.variables.push(TsPropertyDecl {
+                    name:        v_name,
+                    type_name:   v_type,
+                    type_kind:   tk,
+                    is_optional: false,
+                    is_readonly: decl_rem.starts_with("const "),
+                });
+            }
+        }
+
+        pos = if nl_end >= 0 { pos + (nl_end as usize) + 1 } else { n };
+    }
+
+    return module;
+}
+
+// ------------------------------------------------------------------------------
+// 6. Node-API Wrapper Synthesizer
+// ------------------------------------------------------------------------------
+
+pub fn ts_synthesize_napi_wrapper(module: ref<TsModuleDecl>, fn_name: str) -> str {
+    var out = "// ==============================================================================\n";
+    out = out + f"// Pilot In-Process Node-API Wrapper for '{module.module_name}.{fn_name}'\n";
+    out = out + "// Zero-copy stack frame argument packing via napi_call_function\n";
+    out = out + "// ==============================================================================\n";
+    out = out + f"pub fn call_napi_{fn_name}(env: usize, func: usize, args: slice<usize>) -> res<usize, JsError> {{\n";
+    out = out + "    let scope = napi_open_handle_scope(env);\n";
+    out = out + "    let res = napi_call_function(env, func, args);\n";
+    out = out + "    napi_close_handle_scope(var scope);\n";
+    out = out + "    return res;\n";
+    out = out + "}\n";
+    return out;
+}
