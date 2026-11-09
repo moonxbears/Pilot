@@ -42,6 +42,9 @@ mod m05;
 #[path = "milestone06_first_class_typed_ssa_mid_level_ir.rs"]
 mod m06;
 
+#[path = "milestone07_zero_black_box_transparency_tool.rs"]
+mod m07;
+
 #[path = "milestone50_lossless_bridge_and_reflection.rs"]
 mod m50;
 
@@ -155,6 +158,10 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m06::test_m6_2_ir_printer_and_parser_round_trip();
             m06::test_m6_3_constant_folding_and_dead_code_elimination();
             m06::test_m6_4_name_blind_physics_and_multiplatform_target_invariance();
+            m07::test_m7_1_selector_resolution_and_target_query_parsing();
+            m07::test_m7_2_layout_lens_byte_offsets_cache_line_and_optimal_packing();
+            m07::test_m7_3_method_lens_4_tier_resolution_and_collision_modifiers();
+            m07::test_m7_4_perceus_lens_inline_markers_and_weave_lens_expand();
         });
         s.spawn(|| {
             m50::test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts();

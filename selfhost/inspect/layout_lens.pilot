@@ -1,0 +1,78 @@
+// ==============================================================================
+// FILE: selfhost/inspect/layout_lens.pilot
+// Milestone 7.1: Zero-Black-Box Inspection Layout Lens
+// Visual ASCII/Box Byte-Offset Diagrams, 64B Cache Line Crossings, Padding Holes,
+// Niche Bit Patterns, 2-Bit Lattice Derivation Tree
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Inspect.LayoutLens;
+
+use Pilot.SelfHost.Ir.Model::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Field Probe Entry (C-ABI Value Type)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct FieldProbeEntry : IValue {
+    pub field_name:     str;
+    pub byte_offset:    usize;
+    pub byte_size:      usize;
+    pub padding_before: usize;
+    pub lattice_bits:   u8;
+    pub origin_bundle:  str;
+}
+
+pub pure fn field_probe_new(name: str, offset: usize, size: usize, pad: usize, lat: u8, bundle: str) -> FieldProbeEntry {
+    return FieldProbeEntry {
+        field_name:     name,
+        byte_offset:    offset,
+        byte_size:      size,
+        padding_before: pad,
+        lattice_bits:   lat,
+        origin_bundle:  bundle,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// Cache Line (64B) & Layout Calculations
+// ------------------------------------------------------------------------------
+
+pub pure fn cache_line_bytes() -> usize => 64;
+
+// Checks whether a field crosses a 64-byte cache line boundary
+pub pure fn field_crosses_cache_line(offset: usize, size: usize) -> bool {
+    if size == 0 { return false; }
+    let line_start = offset / cache_line_bytes();
+    let line_end = (offset + size - 1) / cache_line_bytes();
+    return line_start != line_end;
+}
+
+// Computes memory alignment padding needed
+pub pure fn align_padding(offset: usize, align: usize) -> usize {
+    if align <= 1 { return 0; }
+    let rem = offset % align;
+    if rem == 0 { return 0; }
+    return align - rem;
+}
+
+// Renders an ASCII box diagram segment for a struct field
+pub fn render_field_box(f: FieldProbeEntry) -> str {
+    var out = "";
+    if f.padding_before > 0 {
+        out = out + "[pad: " + f.padding_before + "B] ";
+    }
+    let crosses = field_crosses_cache_line(f.byte_offset, f.byte_size);
+    let cross_mark = if crosses { " (!CacheLineCross)" } else { "" };
+    let bundle_mark = if f.origin_bundle.len() > 0 { " (from *" + f.origin_bundle + ")" } else { "" };
+    out = out + "+--- " + f.field_name + " @" + f.byte_offset + ".." + (f.byte_offset + f.byte_size) + " (" + f.byte_size + "B, " + lattice_name(f.lattice_bits) + ")" + bundle_mark + cross_mark + " ---+\n";
+    return out;
+}
+
+// Calculates optimal field ordering savings by packing large alignments first
+pub fn calculate_optimal_packing_savings(total_unpacked_padding: usize, packed_padding: usize) -> usize {
+    if total_unpacked_padding > packed_padding {
+        return total_unpacked_padding - packed_padding;
+    }
+    return 0;
+}

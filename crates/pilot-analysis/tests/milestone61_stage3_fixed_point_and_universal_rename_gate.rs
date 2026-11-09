@@ -819,9 +819,10 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
         );
 
         // Execute LLVM IR via `clang -x ir`
-        let tmp_ll = std::env::temp_dir().join(format!("pilot_m61_ll_{}_{}.ll", std::process::id(), pass_idx));
-        let tmp_drv = std::env::temp_dir().join(format!("pilot_m61_ll_{}_{}.c", std::process::id(), pass_idx));
-        let tmp_bin = std::env::temp_dir().join(format!("pilot_m61_ll_{}_{}.bin", std::process::id(), pass_idx));
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let tmp_ll = std::env::temp_dir().join(format!("pilot_m61_ll_{}_{}_{}.ll", std::process::id(), nonce, pass_idx));
+        let tmp_drv = std::env::temp_dir().join(format!("pilot_m61_ll_{}_{}_{}.c", std::process::id(), nonce, pass_idx));
+        let tmp_bin = std::env::temp_dir().join(format!("pilot_m61_ll_{}_{}_{}.bin", std::process::id(), nonce, pass_idx));
         std::fs::write(&tmp_ll, cg_cols[1]).unwrap();
         std::fs::write(
             &tmp_drv,

@@ -1,0 +1,61 @@
+// ==============================================================================
+// FILE: selfhost/inspect/method_lens.pilot
+// Milestone 7.1: Zero-Black-Box 4-Tier Method Resolution Lens
+// Tier 1 (Explicit), Tier 2 (*Bundle), Tier 3 (Sub-Interface), Tier 4 (Base-Interface),
+// Tier 5 (Scoped ext), and Collision Modifiers (coalesce, with, without)
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Inspect.MethodLens;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Method Candidate Trace Entry
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct MethodCandidateTrace : IValue {
+    pub member_name:       str;
+    pub signature:         str;
+    pub tier:              u8; // 1..4 canonical, 5 for scoped ext
+    pub provider_name:     str;
+    pub won_dispatch:      bool;
+    pub conflict_modifier: str; // "", "coalesce", "with", "without"
+}
+
+pub pure fn method_trace_new(name: str, sig: str, tier: u8, provider: str, won: bool, modifier: str) -> MethodCandidateTrace {
+    return MethodCandidateTrace {
+        member_name:       name,
+        signature:         sig,
+        tier:              tier,
+        provider_name:     provider,
+        won_dispatch:      won,
+        conflict_modifier: modifier,
+    };
+}
+
+pub fn tier_name(tier: u8) -> str {
+    if tier == 1 { return "Tier 1: Explicit Struct Member (Priority Win)"; }
+    if tier == 2 { return "Tier 2: Spliced *Bundle/*Facet Member"; }
+    if tier == 3 { return "Tier 3: Sub-Interface Default Method"; }
+    if tier == 4 { return "Tier 4: Base Interface Default Method"; }
+    if tier == 5 { return "Tier 5: Scoped Extension (ext)"; }
+    return "Unknown Tier";
+}
+
+// ------------------------------------------------------------------------------
+// 4-Tier Precedence Resolver
+// ------------------------------------------------------------------------------
+
+// Resolves winning tier between candidate tiers: lower numerical tier wins (1 > 2 > 3 > 4 > 5).
+// Horizontal collisions on the same tier are checked against modifiers (coalesce, without).
+pub pure fn resolve_winning_tier(t1: u8, t2: u8) -> u8 {
+    if t1 == 0 { return t2; }
+    if t2 == 0 { return t1; }
+    if t1 <= t2 { return t1; }
+    return t2;
+}
+
+pub fn render_method_trace(t: MethodCandidateTrace) -> str {
+    let status = if t.won_dispatch { " [WINNER]" } else { " [SHADOWED]" };
+    let mod_str = if t.conflict_modifier.len() > 0 { " (" + t.conflict_modifier + ")" } else { "" };
+    return "  " + t.member_name + t.signature + " via " + t.provider_name + " [" + tier_name(t.tier) + "]" + mod_str + status;
+}

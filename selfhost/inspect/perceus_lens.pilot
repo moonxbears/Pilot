@@ -1,0 +1,56 @@
+// ==============================================================================
+// FILE: selfhost/inspect/perceus_lens.pilot
+// Milestone 7.1: Zero-Black-Box Inspection Perceus ARC Lens
+// Inline Perceus Markers: [borrow], [move], [dup +1], [drop -1], [reuse-in-place], [guard-exit LIFO]
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Inspect.PerceusLens;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Perceus Event Note (C-ABI Value Type)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct PerceusEventNote : IValue {
+    pub binding_name:      str;
+    pub action:            str; // "borrow", "move", "dup", "drop", "drop_reuse", "guard_exit"
+    pub span_start:        u32;
+    pub span_len:          u32;
+    pub paired_reuse_site: str;
+}
+
+pub pure fn perceus_event_new(name: str, action: str, st: u32, len: u32, reuse: str) -> PerceusEventNote {
+    return PerceusEventNote {
+        binding_name:      name,
+        action:            action,
+        span_start:        st,
+        span_len:          len,
+        paired_reuse_site: reuse,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// Inline Marker Formatter
+// ------------------------------------------------------------------------------
+
+pub fn format_perceus_marker(ev: PerceusEventNote) -> str {
+    if ev.action == "borrow" {
+        return "/* [borrow: " + ev.binding_name + " (0 RC ops)] */";
+    }
+    if ev.action == "move" {
+        return "/* [move: " + ev.binding_name + " (ownership transfer)] */";
+    }
+    if ev.action == "dup" {
+        return "/* [dup: " + ev.binding_name + " (+1 RC)] */";
+    }
+    if ev.action == "drop" {
+        return "/* [drop: " + ev.binding_name + " (-1 RC / Perceus drop)] */";
+    }
+    if ev.action == "drop_reuse" {
+        return "/* [drop_reuse: " + ev.binding_name + " (recycle token for " + ev.paired_reuse_site + ")] */";
+    }
+    if ev.action == "guard_exit" {
+        return "/* [guard-exit LIFO: " + ev.binding_name + " (0b11 release)] */";
+    }
+    return "/* [perceus: " + ev.action + " on " + ev.binding_name + "] */";
+}

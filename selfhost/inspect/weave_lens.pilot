@@ -1,0 +1,29 @@
+// ==============================================================================
+// FILE: selfhost/inspect/weave_lens.pilot
+// Milestone 7.1: Zero-Black-Box Inspection Weave Lens
+// Expanded Source Formatter with Attribute Weight Stage & Bundle Origin Annotations
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Inspect.WeaveLens;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// Formats an expanded statement annotated with its synthesis origin
+pub fn format_woven_statement(stmt: str, origin_kind: str, origin_name: str, stage_weight: i32) -> str {
+    var annot = "  // [Synthesized via " + origin_kind + " '" + origin_name + "'";
+    if stage_weight != 0 {
+        annot = annot + ", weight: " + stage_weight;
+    }
+    annot = annot + "]\n";
+    return annot + "  " + stmt + "\n";
+}
+
+// Expands an implicit property getter/setter into standard backing store and method calls
+pub fn expand_property_accessor(prop_name: str, type_name: str, backing_field: str, has_setter: bool) -> str {
+    var out = "";
+    out = out + format_woven_statement("priv var " + backing_field + ": " + type_name + ";", "PropertyBackingStorage", prop_name, 0);
+    out = out + format_woven_statement("pub fn get_" + prop_name + "(ref self) -> " + type_name + " => self." + backing_field + ";", "SynthesizedGetter", prop_name, 100);
+    if has_setter {
+        out = out + format_woven_statement("pub fn set_" + prop_name + "(var ref self, value: " + type_name + ") { self." + backing_field + " = value; }", "SynthesizedSetter", prop_name, 100);
+    }
+    return out;
+}

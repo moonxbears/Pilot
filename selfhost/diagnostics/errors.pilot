@@ -601,4 +601,32 @@ pub let ERRORS = [
         category: "PilIR",
         reference: "Perceus Drop-Reuse Token Safety / Milestone 6",
     },
+    ErrorDef {
+        code: "INSP001",
+        title: "Inspection Target Not Found",
+        description: "The specified file, cursor position, or symbol path could not be resolved in the workspace",
+        category: "Inspection",
+        reference: "Pilot Transparency Tool / Milestone 7",
+    },
+    ErrorDef {
+        code: "INSP002",
+        title: "Uninstantiated Generic Inspection",
+        description: "Byte layout inspection requires concrete type arguments for generic types",
+        category: "Inspection",
+        reference: "Pilot Layout Lens / Milestone 7",
+    },
+    ErrorDef {
+        code: "INSP003",
+        title: "Unknown IR Pass Name",
+        description: "Requested IR pass is not registered in the active pass manager registry",
+        category: "Inspection",
+        reference: "Pilot IR Lens / Milestone 7",
+    },
+    ErrorDef {
+        code: "INSP004",
+        title: "Unknown Target Triple",
+        description: "Target architecture or OS triple is unrecognized or unsupported",
+        category: "Inspection",
+        reference: "Pilot Multiplatform Architecture / Milestone 7",
+    },
 ];

@@ -1,0 +1,133 @@
+// ==============================================================================
+// FILE: selfhost/inspect/selector.pilot
+// Milestone 7.1: Zero-Black-Box Inspection Selector Engine
+// Target Query Resolution: WholeFile, LineColCursor, LineRange, SymbolPath
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Inspect.Selector;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Inspection Target Kinds
+// ------------------------------------------------------------------------------
+pub pure fn target_kind_whole_file()          -> u8 => 0;
+pub pure fn target_kind_line_col_cursor()     -> u8 => 1;
+pub pure fn target_kind_line_range()          -> u8 => 2;
+pub pure fn target_kind_symbol_path()         -> u8 => 3;
+pub pure fn target_kind_monomorphized_type()  -> u8 => 4;
+
+pub fn target_kind_name(k: u8) -> str {
+    if k == target_kind_whole_file()         { return "WholeFile"; }
+    if k == target_kind_line_col_cursor()    { return "LineColCursor"; }
+    if k == target_kind_line_range()         { return "LineRange"; }
+    if k == target_kind_symbol_path()        { return "SymbolPath"; }
+    if k == target_kind_monomorphized_type() { return "MonomorphizedType"; }
+    return "UnknownTarget";
+}
+
+// ------------------------------------------------------------------------------
+// Target Query Descriptor (16 Bytes C-ABI)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct TargetQuery : IValue {
+    pub kind:       u8;
+    pub start_line: u32;
+    pub end_line:   u32;
+    pub col:        u32;
+}
+
+pub pure fn target_query_new(k: u8, st: u32, ed: u32, col: u32) -> TargetQuery {
+    return TargetQuery {
+        kind:       k,
+        start_line: st,
+        end_line:   ed,
+        col:        col,
+    };
+}
+
+// Parses string into integer helper
+pub fn parse_int(s: str) -> u32 {
+    let n = s.len();
+    var v: u32 = 0;
+    var i = 0;
+    while i < n {
+        let b = s.byte_at(i);
+        if b >= 48 && b <= 57 {
+            v = (v * 10) + (b - 48);
+        }
+        i = i + 1;
+    }
+    return v;
+}
+
+// Resolves a selector query string:
+// e.g. "app.pilot", "app.pilot:42:10", "app.pilot:40-55", "App.Billing.Account", "List<i64>"
+pub fn parse_inspect_selector(raw: str) -> TargetQuery {
+    // Check for monomorphized generic: e.g. "List<i64>" or "Map<str, i64>"
+    let p_gen = raw.find("<");
+    if p_gen >= 0 {
+        return TargetQuery {
+            kind:       target_kind_monomorphized_type(),
+            start_line: 0,
+            end_line:   0,
+            col:        0,
+        };
+    }
+
+    // Check for colon (cursor or line range): "file.pilot:42:10" or "file.pilot:40-55"
+    let p_colon = raw.find(":");
+    if p_colon >= 0 {
+        let rem = raw.slice(p_colon + 1, raw.len());
+        let p_colon2 = rem.find(":");
+        if p_colon2 >= 0 {
+            // "file:line:col" -> LineColCursor
+            let s_line = rem.slice(0, p_colon2);
+            let s_col = rem.slice(p_colon2 + 1, rem.len());
+            return TargetQuery {
+                kind:       target_kind_line_col_cursor(),
+                start_line: parse_int(s_line),
+                end_line:   parse_int(s_line),
+                col:        parse_int(s_col),
+            };
+        }
+
+        let p_dash = rem.find("-");
+        if p_dash >= 0 {
+            // "file:start-end" -> LineRange
+            let s_st = rem.slice(0, p_dash);
+            let s_ed = rem.slice(p_dash + 1, rem.len());
+            return TargetQuery {
+                kind:       target_kind_line_range(),
+                start_line: parse_int(s_st),
+                end_line:   parse_int(s_ed),
+                col:        0,
+            };
+        }
+
+        // "file:line" -> single line cursor
+        return TargetQuery {
+            kind:       target_kind_line_col_cursor(),
+            start_line: parse_int(rem),
+            end_line:   parse_int(rem),
+            col:        1,
+        };
+    }
+
+    // Check if it's a file ending in .pilot
+    if raw.len() >= 6 && raw.slice(raw.len() - 6, raw.len()) == ".pilot" {
+        return TargetQuery {
+            kind:       target_kind_whole_file(),
+            start_line: 0,
+            end_line:   0,
+            col:        0,
+        };
+    }
+
+    // Otherwise SymbolPath: "App.Billing.Account.balance"
+    return TargetQuery {
+        kind:       target_kind_symbol_path(),
+        start_line: 0,
+        end_line:   0,
+        col:        0,
+    };
+}
