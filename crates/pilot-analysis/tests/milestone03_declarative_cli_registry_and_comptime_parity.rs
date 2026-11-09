@@ -1,0 +1,331 @@
+//! ============================================================================
+//! Milestone 3 Verification Suite:
+//! First-Class Declarative CLI Command Registry & Minimal Pure-Pilot Launcher
+//! ============================================================================
+
+use std::fs;
+use pilot_analysis::PhysicsRegistry;
+use pilot_parser::parse;
+use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 3,
+    test_file_rel: "crates/pilot-analysis/tests/milestone03_declarative_cli_registry_and_comptime_parity.rs",
+    expected_test_count: 4,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/cli/spec.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "spec_new_flag",
+                "spec_new_positional",
+                "spec_new_command",
+                "spec_command_add_flag",
+                "spec_command_add_positional",
+                "spec_registry_new",
+                "spec_registry_register",
+                "spec_registry_count",
+                "spec_registry_get",
+                "spec_registry_find_by_name",
+            ],
+            required_code_markers: &[
+                "FlagSpec",
+                "PositionalSpec",
+                "CommandSpec",
+                "CommandRegistry",
+                "ParsedArgs",
+                "ICliHandler",
+            ],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cli/parser.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "cli_tokenize",
+                "cli_suggest_typo",
+                "cli_parse_args",
+            ],
+            required_code_markers: &[
+                "CLI001",
+                "CLI002",
+                "CLI003",
+                "CLI004",
+            ],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cli/help_and_comp.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "render_global_help",
+                "render_command_help",
+                "emit_shell_completions",
+                "export_cli_json_schema",
+            ],
+            required_code_markers: &[
+                "_pilot_completions",
+                "bash",
+                "zsh",
+                "fish",
+            ],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cli/main.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "default_command_registry",
+                "cli_help_banner",
+                "resolve_cli_subcommand",
+                "run_cli_entry",
+            ],
+            required_code_markers: &[
+                "default_command_registry",
+            ],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+    ],
+    required_group_pub_fns: &[],
+};
+
+fn eval_cli(raw_args: &str) -> String {
+    let root = anticheat::workspace_root();
+    let deps = [
+        "selfhost/cli/spec.pilot",
+        "selfhost/cli/parser.pilot",
+        "selfhost/cli/help_and_comp.pilot",
+        "selfhost/cli/main.pilot",
+    ];
+    let mut b = String::new();
+    for d in deps {
+        b.push_str(&fs::read_to_string(root.join(d)).unwrap_or_else(|e| panic!("Failed to read {d}: {e}")));
+        b.push('\n');
+    }
+    let src = format!("{b}\nrun_cli_entry(\"{raw_args}\");");
+    let arena = parse(&src);
+    let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
+    let (mut vm, mut phy) = (PilVirtualMachine::new(), PhysicsRegistry::new(flat, syms));
+    let reg_ptr = &mut phy as *mut PhysicsRegistry;
+    vm.engine_handler = Some(Box::new(move |op, a| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)));
+    vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
+    vm.run().to_string_repr()
+}
+
+#[test]
+pub fn test_m3_1_command_registry_and_typo_suggestions() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m3_1_command_registry_and_typo_suggestions",
+        &ANTICHEAT_SPEC,
+    );
+
+    // 1. Verify unknown command emits CLI001 with Levenshtein typo suggestion
+    let out_bld = eval_cli("bld");
+    assert!(
+        out_bld.contains("CLI001: Unknown command 'bld'. Did you mean 'build'?"),
+        "Expected typo suggestion for 'bld' -> 'build', got: {out_bld}"
+    );
+
+    let out_chekc = eval_cli("chekc");
+    assert!(
+        out_chekc.contains("CLI001: Unknown command 'chekc'. Did you mean 'check'?"),
+        "Expected typo suggestion for 'chekc' -> 'check', got: {out_chekc}"
+    );
+
+    // 2. Verify unknown flag emits CLI002 with typo suggestion
+    let out_trget = eval_cli("build --trget native");
+    assert!(
+        out_trget.contains("CLI002: Unknown flag '--trget'. Did you mean '--target'?"),
+        "Expected flag typo suggestion for '--trget' -> '--target', got: {out_trget}"
+    );
+
+    // 3. Verify missing required flag value emits CLI003
+    let out_missing = eval_cli("build --target");
+    assert!(
+        out_missing.contains("CLI003: Flag '--target' requires a value"),
+        "Expected CLI003 missing value, got: {out_missing}"
+    );
+
+    // 4. Verify invalid enum choice emits CLI004
+    let out_choice = eval_cli("build --target invalid_backend");
+    assert!(
+        out_choice.contains("CLI004: Invalid value 'invalid_backend' for flag '--target'. Allowed: native,c,llvm,wasm,gpu,asm"),
+        "Expected CLI004 invalid choice, got: {out_choice}"
+    );
+
+    guard.finish();
+}
+
+#[test]
+pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m3_2_posix_gnu_argument_parser_and_passthrough",
+        &ANTICHEAT_SPEC,
+    );
+
+    // 1. Verify --flag=val syntax correctly binds value
+    let out_eq = eval_cli("build --target=wasm -o output.wasm");
+    assert_eq!(out_eq, "0", "Valid build invocation with --target=wasm must succeed, got: {out_eq}");
+
+    // 2. Verify short flag syntax -t wasm and -r
+    let out_short = eval_cli("build -t wasm -r");
+    assert_eq!(out_short, "0", "Valid build with short flags -t wasm -r must succeed, got: {out_short}");
+
+    // 3. Verify -- passthrough forwards tokens verbatim to passthrough_args
+    let out_run = eval_cli("run app.pilot -- --target=native --release");
+    assert_eq!(out_run, "RUN:app.pilot", "Run command should route to target script, got: {out_run}");
+
+    // 4. Verify gate command parses --full and --json
+    let out_gate = eval_cli("gate --full --json");
+    assert!(
+        out_gate.starts_with("GATE:"),
+        "Gate command must route to GATE: protocol, got: {out_gate}"
+    );
+    assert!(out_gate.contains("--full"), "Gate args must contain --full, got: {out_gate}");
+    assert!(out_gate.contains("--json"), "Gate args must contain --json, got: {out_gate}");
+
+    // 5. Verify backward-compatible resolve_cli_subcommand API
+    let root = anticheat::workspace_root();
+    let deps = [
+        "selfhost/cli/spec.pilot",
+        "selfhost/cli/parser.pilot",
+        "selfhost/cli/help_and_comp.pilot",
+        "selfhost/cli/main.pilot",
+    ];
+    let mut b = String::new();
+    for d in deps {
+        b.push_str(&fs::read_to_string(root.join(d)).unwrap());
+        b.push('\n');
+    }
+    let src_resolve = format!("{b}\nlet id = resolve_cli_subcommand(\"build\"); return id;");
+    let arena = parse(&src_resolve);
+    let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
+    let (mut vm, mut phy) = (PilVirtualMachine::new(), PhysicsRegistry::new(flat, syms));
+    let reg_ptr = &mut phy as *mut PhysicsRegistry;
+    vm.engine_handler = Some(Box::new(move |op, a| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)));
+    vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
+    let id_val = vm.run().as_int().unwrap_or(0);
+    assert!(id_val > 0, "resolve_cli_subcommand(\"build\") must return positive index, got: {id_val}");
+
+    guard.finish();
+}
+
+#[test]
+pub fn test_m3_3_dynamic_shell_completions_and_schema_json() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m3_3_dynamic_shell_completions_and_schema_json",
+        &ANTICHEAT_SPEC,
+    );
+
+    // 1. Verify dynamic command registration produces updated shell completions without compiler edits
+    let root = anticheat::workspace_root();
+    let deps = [
+        "selfhost/cli/spec.pilot",
+        "selfhost/cli/parser.pilot",
+        "selfhost/cli/help_and_comp.pilot",
+        "selfhost/cli/main.pilot",
+    ];
+    let mut b = String::new();
+    for d in deps {
+        b.push_str(&fs::read_to_string(root.join(d)).unwrap());
+        b.push('\n');
+    }
+
+    let dyn_src = format!(
+        "{b}\n\
+        let reg = default_command_registry();\n\
+        let custom_cmd = spec_new_command(\"deploy\", \"\", \"Cloud & Ops\", \"Deploy artifact to cloud provider\", \"pilot deploy --env prod\");\n\
+        spec_command_add_flag(custom_cmd, spec_new_flag(\"env\", \"e\", 5, \"dev\", \"\", \"dev,staging,prod\", false, false, \"Target cloud environment\"));\n\
+        let _ = spec_registry_register(reg, custom_cmd);\n\
+        let bash_comp = emit_shell_completions(reg, \"bash\");\n\
+        return bash_comp;\n"
+    );
+
+    let arena = parse(&dyn_src);
+    let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
+    let (mut vm, mut phy) = (PilVirtualMachine::new(), PhysicsRegistry::new(flat, syms));
+    let reg_ptr = &mut phy as *mut PhysicsRegistry;
+    vm.engine_handler = Some(Box::new(move |op, a| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)));
+    vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
+    let bash_output = vm.run().to_string_repr();
+
+    assert!(
+        bash_output.contains("deploy"),
+        "Dynamic command 'deploy' must appear in generated bash completions, got: {bash_output}"
+    );
+    assert!(
+        bash_output.contains("--env"),
+        "Dynamic flag '--env' must appear in generated bash completions, got: {bash_output}"
+    );
+
+    // 2. Verify export_cli_json_schema outputs valid JSON schema structure
+    let out_schema = eval_cli("--schema-json");
+    assert!(
+        out_schema.contains("\"$schema\": \"http://json-schema.org/draft-07/schema#\""),
+        "Schema must have draft-07 URI, got: {out_schema}"
+    );
+    assert!(out_schema.contains("\"title\": \"PilotCLI\""), "Schema must have title PilotCLI");
+    assert!(out_schema.contains("\"name\": \"build\""), "Schema must declare 'build' command");
+    assert!(out_schema.contains("\"name\": \"target\""), "Schema must declare 'target' flag");
+
+    guard.finish();
+}
+
+#[test]
+pub fn test_m3_4_zero_stdout_scraping_and_cli_shrink_ceiling() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m3_4_zero_stdout_scraping_and_cli_shrink_ceiling",
+        &ANTICHEAT_SPEC,
+    );
+
+    let root = anticheat::workspace_root();
+
+    // 1. Verify crates/pilot-cli/src/main.rs <= 35 LOC
+    let main_rs_path = root.join("crates/pilot-cli/src/main.rs");
+    let main_rs = fs::read_to_string(&main_rs_path).expect("read crates/pilot-cli/src/main.rs");
+    let line_cnt = main_rs.lines().count();
+    assert!(
+        line_cnt <= 35,
+        "crates/pilot-cli/src/main.rs must be <= 35 LOC (found {} lines)!",
+        line_cnt
+    );
+
+    // 2. Verify zero subcommand string names in crates/pilot-cli/src/main.rs
+    let banned_subcommands = [
+        "\"run\"", "\"build\"", "\"compile\"", "\"check\"", "\"fmt\"",
+        "\"test\"", "\"gate\"", "\"pkg\"", "\"deps\"", "\"tree\"",
+        "\"venv\"", "\"repl\"", "\"debug\"", "\"lsp\"", "\"perf\"",
+        "\"emit\"", "\"from\"", "\"map\"", "\"ide-sync\"", "\"completions\"",
+    ];
+    for subcmd in banned_subcommands {
+        assert!(
+            !main_rs.contains(subcmd),
+            "crates/pilot-cli/src/main.rs must not hardcode subcommand string {subcmd}!"
+        );
+    }
+
+    // 3. Verify pkg_cmd.pilot writes files directly via __engine("fs_write_text") without @@WRITE: scraping
+    let pkg_cmd_path = root.join("selfhost/cli/pkg_cmd.pilot");
+    let pkg_cmd_src = fs::read_to_string(&pkg_cmd_path).expect("read pkg_cmd.pilot");
+    assert!(
+        !pkg_cmd_src.contains("@@WRITE:"),
+        "selfhost/cli/pkg_cmd.pilot must contain zero '@@WRITE:' stdout scraping markers!"
+    );
+    assert!(
+        pkg_cmd_src.contains("fs_write_text"),
+        "selfhost/cli/pkg_cmd.pilot must use direct __engine(\"fs_write_text\") file writes!"
+    );
+
+    guard.finish();
+}

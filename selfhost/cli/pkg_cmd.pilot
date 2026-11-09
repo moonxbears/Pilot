@@ -143,11 +143,11 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         if pkg_name.len() == 0 { pkg_name = "pilot_app"; }
         let mf_content = generate_default_manifest_json(pkg_name, "0.1.0");
         let main_content = scaffold_canonical_main_pilot(pkg_name);
+        let _ = __engine("fs_write_text", "pilot.json", mf_content);
+        let _ = __engine("fs_write_text", "src/main.pilot", main_content);
         return "Initialized new Pilot package '" + pkg_name + "' (v0.1.0)\n" +
                "  Created: pilot.json\n" +
-               "  Created: src/main.pilot\n" +
-               "@@WRITE:pilot.json@@\n" + mf_content + "\n" +
-               "@@WRITE:src/main.pilot@@\n" + main_content + "\n";
+               "  Created: src/main.pilot\n";
     }
 
     // 3. TREE
@@ -199,11 +199,11 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let res = resolve_package_dependencies(manifest_json);
         let summary = format_resolution_summary(res);
         let new_lock = generate_resolved_lockfile_json(name, ver, res);
+        let _ = __engine("fs_write_text", "pilot.lock", new_lock);
 
         return "Resolving dependencies for " + name + " (v" + ver + "):\n\n" +
                summary + "\n" +
-               "Lockfile written to pilot.lock.\n" +
-               "@@WRITE:pilot.lock@@\n" + new_lock;
+               "Lockfile written to pilot.lock.\n";
     }
 
     // 5. UPDATE
@@ -218,11 +218,11 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let res = resolve_package_dependencies(manifest_json);
         let summary = format_resolution_summary(res);
         let new_lock = generate_resolved_lockfile_json(name, ver, res);
+        let _ = __engine("fs_write_text", "pilot.lock", new_lock);
 
         return "Updating package dependencies to latest SemVer constraints:\n\n" +
                summary + "\n" +
-               "Updated pilot.lock successfully.\n" +
-               "@@WRITE:pilot.lock@@\n" + new_lock;
+               "Updated pilot.lock successfully.\n";
     }
 
     // 6. ADD
@@ -268,11 +268,11 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let root_ver = manifest_get_version(mf);
         let res = resolve_package_dependencies(updated_json);
         let new_lock = generate_resolved_lockfile_json(root_name, root_ver, res);
+        let _ = __engine("fs_write_text", "pilot.json", updated_json);
+        let _ = __engine("fs_write_text", "pilot.lock", new_lock);
 
         return "Added '" + pkg_name + "' (" + version_req + ") to " + kind_str + " in pilot.json\n" +
-               "Updated pilot.lock with resolved dependency graph.\n" +
-               "@@WRITE:pilot.json@@\n" + updated_json + "\n" +
-               "@@WRITE:pilot.lock@@\n" + new_lock;
+               "Updated pilot.lock with resolved dependency graph.\n";
     }
 
     // 7. REMOVE
@@ -291,11 +291,11 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let root_ver = manifest_get_version(mf);
         let res = resolve_package_dependencies(updated_json);
         let new_lock = generate_resolved_lockfile_json(root_name, root_ver, res);
+        let _ = __engine("fs_write_text", "pilot.json", updated_json);
+        let _ = __engine("fs_write_text", "pilot.lock", new_lock);
 
         return "Removed '" + pkg_name + "' from pilot.json\n" +
-               "Updated pilot.lock.\n" +
-               "@@WRITE:pilot.json@@\n" + updated_json + "\n" +
-               "@@WRITE:pilot.lock@@\n" + new_lock;
+               "Updated pilot.lock.\n";
     }
 
     // 8. WHY / EXPLAIN
@@ -346,8 +346,8 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         }
         let pattern = p_trim(args);
         let updated_json = add_exclusion_to_manifest_json(manifest_json, pattern);
-        return "Added exclusion rule for '" + pattern + "' in pilot.json\n" +
-               "@@WRITE:pilot.json@@\n" + updated_json + "\n";
+        let _ = __engine("fs_write_text", "pilot.json", updated_json);
+        return "Added exclusion rule for '" + pattern + "' in pilot.json\n";
     }
 
     // 11. INCLUDE
@@ -360,8 +360,8 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         }
         let pattern = p_trim(args);
         let updated_json = remove_exclusion_from_manifest_json(manifest_json, pattern);
-        return "Removed exclusion rule for '" + pattern + "' from pilot.json\n" +
-               "@@WRITE:pilot.json@@\n" + updated_json + "\n";
+        let _ = __engine("fs_write_text", "pilot.json", updated_json);
+        return "Removed exclusion rule for '" + pattern + "' from pilot.json\n";
     }
 
     // 12. EXCLUSIONS / LIST-EXCLUSIONS

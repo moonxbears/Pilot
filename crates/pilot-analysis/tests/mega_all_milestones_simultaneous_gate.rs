@@ -30,6 +30,9 @@ mod m01;
 #[path = "milestone02_module_graph_and_comptime_parity.rs"]
 mod m02;
 
+#[path = "milestone03_declarative_cli_registry_and_comptime_parity.rs"]
+mod m03;
+
 #[path = "milestone50_lossless_bridge_and_reflection.rs"]
 mod m50;
 
@@ -127,6 +130,10 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m02::test_m2_2_comptime_and_runtime_env_reflection_parity();
             m02::test_m2_3_pure_pilot_module_graph_and_pragma_suppression();
             m02::test_m2_4_zero_fake_transpile_stubs_and_crate_ceilings();
+            m03::test_m3_1_command_registry_and_typo_suggestions();
+            m03::test_m3_2_posix_gnu_argument_parser_and_passthrough();
+            m03::test_m3_3_dynamic_shell_completions_and_schema_json();
+            m03::test_m3_4_zero_stdout_scraping_and_cli_shrink_ceiling();
         });
         s.spawn(|| {
             m50::test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts();

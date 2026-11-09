@@ -207,11 +207,9 @@ impl BytecodeCompiler {
             }
             NodeKind::AssignStmt => {
                 let (lhs_n, rhs_r) = (*arena.node(NodeId(node.lhs)), self.compile_node(arena, NodeId(node.rhs)));
-                if lhs_n.node_kind() == NodeKind::IdentExpr {
-                    let name = arena.interner.resolve(SymbolId(lhs_n.lhs)).to_string();
-                    let slot = self.var_slots.get(&name).copied().unwrap_or_else(|| self.alloc_local_reg());
-                    self.emit(Opcode::Move, slot, rhs_r, 0); self.var_slots.insert(name, slot); slot
-                } else { rhs_r }
+                if lhs_n.node_kind() == NodeKind::IdentExpr { let name = arena.interner.resolve(SymbolId(lhs_n.lhs)).to_string(); let slot = self.var_slots.get(&name).copied().unwrap_or_else(|| self.alloc_local_reg()); self.emit(Opcode::Move, slot, rhs_r, 0); self.var_slots.insert(name, slot); slot }
+                else if lhs_n.node_kind() == NodeKind::MemberExpr { let (r_obj, r_key) = (self.compile_node(arena, NodeId(lhs_n.lhs)), self.emit_const(PilotVal::from_str(arena.interner.resolve(SymbolId(lhs_n.rhs))))); self.emit_intrinsic("map_set", &[r_obj, r_key, rhs_r]); rhs_r }
+                else if lhs_n.node_kind() == NodeKind::IndexExpr { let (r_obj, r_key) = (self.compile_node(arena, NodeId(lhs_n.lhs)), self.compile_node(arena, NodeId(lhs_n.rhs))); self.emit_intrinsic("map_set", &[r_obj, r_key, rhs_r]); rhs_r } else { rhs_r }
             }
             NodeKind::BinaryExpr => {
                 if node.flags == 32 { return self.compile_node(arena, NodeId(node.lhs)); }
@@ -316,7 +314,7 @@ impl BytecodeCompiler {
                                 let kn = arena.node(NodeId(ch[i]));
                                 let k_nm = if matches!(kn.node_kind(), NodeKind::IdentExpr | NodeKind::StrLit) { arena.interner.resolve(SymbolId(kn.lhs)).to_string() } else { String::new() };
                                 let (r_v, r_k) = (self.compile_node(arena, NodeId(ch[i + 1])), self.emit_const(PilotVal::from_str(&k_nm)));
-                                self.emit(Opcode::Move, 1, r_map, 0); self.emit(Opcode::Move, 2, r_k, 0); self.emit(Opcode::Move, 3, r_v, 0);
+                                self.stage_args(&[r_map, r_k, r_v]);
                                 self.emit(Opcode::EngineIntrinsic, r_map, r_set, 3);
                                 i += 2;
                             }
@@ -337,7 +335,7 @@ impl BytecodeCompiler {
                             return dst;
                         }
                     } else if callee_n.node_kind() == NodeKind::MemberExpr {
-                        let hook = match arena.interner.resolve(SymbolId(callee_n.rhs)) { "len" => Some("str_len"), "byte_at" => Some("str_byte_at"), "slice" | "substring" => Some("str_slice"), "find" => Some("str_find"), _ => None };
+                        let hook = match arena.interner.resolve(SymbolId(callee_n.rhs)) { "len" => Some("str_len"), "byte_at" => Some("str_byte_at"), "slice" | "substring" => Some("str_slice"), "find" => Some("str_find"), "is_null" => Some("is_null"), _ => None };
                         if let Some(h) = hook {
                             let mut args = vec![self.compile_node(arena, NodeId(callee_n.lhs))];
                             for i in 1..arg_len { args.push(self.compile_node(arena, NodeId(arena.extra_children[arg_start + i]))); }

@@ -1,0 +1,245 @@
+// ==============================================================================
+// FILE: selfhost/cli/help_and_comp.pilot
+// Milestone 3.3: Aligned ANSI --help, Shell Completions & JSON Schema Exporter
+// Generates bash/zsh/fish/pwsh completions and dynamic JSON tool schema
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Cli.Help;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Aligned --help Renderers
+// ------------------------------------------------------------------------------
+
+pub fn render_global_help(reg: ref<CommandRegistry>) -> str {
+    var out = "Pilot Programming Language Compiler & Toolchain (v1.1.51)\n" +
+              "Usage: pilot <command> [options] [arguments]\n\n" +
+              "Commands:\n";
+
+    let cats = cli_list_new();
+    let _ = cli_list_push(cats, "Run & Build");
+    let _ = cli_list_push(cats, "Analysis & Quality");
+    let _ = cli_list_push(cats, "Packages & Deps");
+    let _ = cli_list_push(cats, "IDE, Debug & AI");
+
+    let n_cats = cli_list_len(cats);
+    var c_idx: usize = 0;
+    while c_idx < n_cats {
+        let cat = cli_list_get_str(cats, c_idx);
+        out = out + "  " + cat + ":\n";
+
+        let n_cmds = spec_registry_count(reg);
+        var i: usize = 0;
+        while i < n_cmds {
+            let spec: CommandSpec = spec_registry_get(reg, i);
+            if spec.category == cat {
+                let name = spec.name;
+                var pad = "  ";
+                if name.len() < 12 {
+                    var p: usize = name.len();
+                    while p < 12 {
+                        pad = pad + " ";
+                        p = p + 1;
+                    }
+                }
+                out = out + "    " + name + pad + spec.summary + "\n";
+            }
+            i = i + 1;
+        }
+        out = out + "\n";
+        c_idx = c_idx + 1;
+    }
+
+    out = out + "Run 'pilot <command> --help' for details on specific flags and arguments.\n";
+    return out;
+}
+
+pub fn render_command_help(spec: ref<CommandSpec>) -> str {
+    var out = "Pilot: pilot " + spec.name + " - " + spec.summary + "\n\n" +
+              "Usage: pilot " + spec.name + " [flags] [arguments]\n\n";
+
+    let n_flags = cli_list_len(spec.flags_handle);
+    if n_flags > 0 {
+        out = out + "Flags:\n";
+        var i: usize = 0;
+        while i < n_flags {
+            let f: FlagSpec = cli_list_get(spec.flags_handle, i);
+            let sc_str = if f.short_char.len() > 0 { "-" + f.short_char + ", " } else { "    " };
+            out = out + "  " + sc_str + "--" + f.long_name + "\t" + f.summary;
+            if f.default_val.len() > 0 {
+                out = out + " (default: " + f.default_val + ")";
+            }
+            out = out + "\n";
+            i = i + 1;
+        }
+        out = out + "\n";
+    }
+
+    if spec.examples.len() > 0 {
+        out = out + "Examples:\n  " + spec.examples + "\n";
+    }
+
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// Shell Completion Script Emitters (Bash, Zsh, Fish, PowerShell)
+// ------------------------------------------------------------------------------
+
+pub fn emit_shell_completions(reg: ref<CommandRegistry>, shell: str) -> str {
+    let n_cmds = spec_registry_count(reg);
+    var all_cmd_names = "";
+    var i: usize = 0;
+    while i < n_cmds {
+        let spec: CommandSpec = spec_registry_get(reg, i);
+        all_cmd_names = all_cmd_names + spec.name + " ";
+        i = i + 1;
+    }
+
+    if shell == "bash" {
+        var out = "# bash completion for pilot\n" +
+                  "_pilot_completions() {\n" +
+                  "    local cur prev words cword\n" +
+                  "    _init_completion 2>/dev/null || return\n" +
+                  "    local commands=\"" + all_cmd_names + "\"\n" +
+                  "    if [[ $cword -eq 1 ]]; then\n" +
+                  "        COMPREPLY=($(compgen -W \"$commands\" -- \"$cur\"))\n" +
+                  "        return 0\n" +
+                  "    fi\n" +
+                  "    case \"${words[1]}\" in\n";
+
+        i = 0;
+        while i < n_cmds {
+            let spec: CommandSpec = spec_registry_get(reg, i);
+            var flag_str = "--help ";
+            let nf = cli_list_len(spec.flags_handle);
+            var fi: usize = 0;
+            while fi < nf {
+                let f: FlagSpec = cli_list_get(spec.flags_handle, fi);
+                flag_str = flag_str + "--" + f.long_name + " ";
+                if f.short_char.len() > 0 {
+                    flag_str = flag_str + "-" + f.short_char + " ";
+                }
+                fi = fi + 1;
+            }
+            out = out + "        " + spec.name + ")\n" +
+                  "            COMPREPLY=($(compgen -W \"" + flag_str + "\" -- \"$cur\"))\n" +
+                  "            ;;\n";
+            i = i + 1;
+        }
+
+        out = out + "    esac\n" +
+              "}\n" +
+              "complete -F _pilot_completions pilot\n";
+        return out;
+    }
+
+    if shell == "zsh" {
+        var out = "#compdef pilot\n" +
+                  "_pilot() {\n" +
+                  "    local -a commands\n" +
+                  "    commands=(\n";
+
+        i = 0;
+        while i < n_cmds {
+            let spec: CommandSpec = spec_registry_get(reg, i);
+            out = out + "        '" + spec.name + ":" + spec.summary + "'\n";
+            i = i + 1;
+        }
+
+        out = out + "    )\n" +
+              "    if (( CURRENT == 2 )); then\n" +
+              "        _describe 'command' commands\n" +
+              "    fi\n" +
+              "}\n" +
+              "_pilot \"$@\"\n";
+        return out;
+    }
+
+    if shell == "fish" {
+        var out = "# fish completion for pilot\n";
+        i = 0;
+        while i < n_cmds {
+            let spec: CommandSpec = spec_registry_get(reg, i);
+            out = out + "complete -c pilot -n \"__fish_use_subcommand\" -a \"" + spec.name + "\" -d \"" + spec.summary + "\"\n";
+
+            let nf = cli_list_len(spec.flags_handle);
+            var fi: usize = 0;
+            while fi < nf {
+                let f: FlagSpec = cli_list_get(spec.flags_handle, fi);
+                var f_line = "complete -c pilot -n \"__fish_seen_subcommand_from " + spec.name + "\" -l \"" + f.long_name + "\"";
+                if f.short_char.len() > 0 {
+                    f_line = f_line + " -s \"" + f.short_char + "\"";
+                }
+                f_line = f_line + " -d \"" + f.summary + "\"\n";
+                out = out + f_line;
+                fi = fi + 1;
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    if shell == "pwsh" || shell == "powershell" {
+        var out = "# PowerShell completion for pilot\n" +
+                  "Register-ArgumentCompleter -Native -CommandName pilot -ScriptBlock {\n" +
+                  "    param($wordToComplete, $commandAst, $cursorPosition)\n" +
+                  "    $elements = $commandAst.ToString().Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)\n" +
+                  "    if ($elements.Count -le 2) {\n" +
+                  "        $subcommands = @(" + all_cmd_names.replace(" ", "', '") + ")\n" +
+                  "        $subcommands | Where-Object { $_ -like \"$wordToComplete*\" } | ForEach-Object {\n" +
+                  "            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)\n" +
+                  "        }\n" +
+                  "    }\n" +
+                  "}\n";
+        return out;
+    }
+
+    return "# Unknown shell '" + shell + "'. Supported: bash, zsh, fish, pwsh.\n";
+}
+
+// ------------------------------------------------------------------------------
+// JSON Tool Schema Exporter
+// ------------------------------------------------------------------------------
+
+pub fn export_cli_json_schema(reg: ref<CommandRegistry>) -> str {
+    var out = "{\n" +
+              "  \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n" +
+              "  \"title\": \"PilotCLI\",\n" +
+              "  \"description\": \"Pilot Language Compiler and Unified CLI Registry\",\n" +
+              "  \"type\": \"object\",\n" +
+              "  \"commands\": [\n";
+
+    let n_cmds = spec_registry_count(reg);
+    var i: usize = 0;
+    while i < n_cmds {
+        let spec: CommandSpec = spec_registry_get(reg, i);
+        out = out + "    {\n" +
+              "      \"name\": \"" + spec.name + "\",\n" +
+              "      \"category\": \"" + spec.category + "\",\n" +
+              "      \"summary\": \"" + spec.summary + "\",\n" +
+              "      \"flags\": [";
+
+        let nf = cli_list_len(spec.flags_handle);
+        var fi: usize = 0;
+        while fi < nf {
+            let f: FlagSpec = cli_list_get(spec.flags_handle, fi);
+            out = out + "\n        {\n" +
+                  "          \"name\": \"" + f.long_name + "\",\n" +
+                  "          \"short\": \"" + f.short_char + "\",\n" +
+                  "          \"summary\": \"" + f.summary + "\",\n" +
+                  "          \"required\": " + (if f.required { "true" } else { "false" }) + "\n" +
+                  "        }";
+            if fi + 1 < nf { out = out + ","; }
+            fi = fi + 1;
+        }
+        if nf > 0 { out = out + "\n      "; }
+        out = out + "]\n    }";
+        if i + 1 < n_cmds { out = out + ","; }
+        out = out + "\n";
+        i = i + 1;
+    }
+
+    out = out + "  ]\n}\n";
+    return out;
+}

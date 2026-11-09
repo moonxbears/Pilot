@@ -1,11 +1,189 @@
-// =========================================================================
+// ==============================================================================
 // FILE: selfhost/cli/main.pilot
-// Milestone 60.3: Self-Hosted Unified CLI Subcommand Router
-// Replaces crates/pilot-cli/src/main.rs & commands.rs in Pure Pilot.
-// =========================================================================
-pub pkg Pilot.SelfHost.Cli.Main;
+// Milestone 3.4: Declarative CommandRegistry Router & Single-Source CLI Entry
+// Replaces hardcoded numeric dispatch in Pure Pilot (CLI001 - CLI006)
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Cli.Main;
 
 pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Default Built-in Command Registry Construction
+// ------------------------------------------------------------------------------
+
+pub fn default_command_registry() -> CommandRegistry {
+    let reg = spec_registry_new();
+
+    // 1. Run & Build
+    let cmd_run = spec_new_command(
+        "run", "", "Run & Build",
+        "Execute Pilot program via PilVM v3 / Native AOT",
+        "pilot run app.pilot [args...]"
+    );
+    let _ = spec_registry_register(reg, cmd_run);
+
+    let cmd_build = spec_new_command(
+        "build", "", "Run & Build",
+        "Compile Pilot program to Native/LLVM/C/WASM/GPU",
+        "pilot build app.pilot --target wasm --release -o app.wasm"
+    );
+    spec_command_add_flag(cmd_build, spec_new_flag("target", "t", 5, "native", "", "native,c,llvm,wasm,gpu,asm", false, false, "Compilation target backend"));
+    spec_command_add_flag(cmd_build, spec_new_flag("release", "r", 0, "false", "", "", false, false, "Optimize binary for release mode"));
+    spec_command_add_flag(cmd_build, spec_new_flag("output", "o", 4, "", "", "", false, false, "Output destination path"));
+    let _ = spec_registry_register(reg, cmd_build);
+
+    let cmd_compile = spec_new_command(
+        "compile", "", "Run & Build",
+        "Compile source into .pilc v3 bytecode binary",
+        "pilot compile app.pilot -o app.pilc"
+    );
+    spec_command_add_flag(cmd_compile, spec_new_flag("output", "o", 4, "", "", "", false, false, "Output destination path"));
+    let _ = spec_registry_register(reg, cmd_compile);
+
+    // 2. Analysis & Quality
+    let cmd_check = spec_new_command(
+        "check", "", "Analysis & Quality",
+        "Verify syntax, type safety, and comptime contracts",
+        "pilot check src/main.pilot"
+    );
+    spec_command_add_flag(cmd_check, spec_new_flag("fix", "", 0, "false", "", "", false, false, "Automatically apply lossless CST fixes"));
+    let _ = spec_registry_register(reg, cmd_check);
+
+    let cmd_fmt = spec_new_command(
+        "fmt", "", "Analysis & Quality",
+        "Format source code according to Pilot style",
+        "pilot fmt src/ --write"
+    );
+    spec_command_add_flag(cmd_fmt, spec_new_flag("write", "w", 0, "false", "", "", false, false, "Write formatting changes directly to disk"));
+    spec_command_add_flag(cmd_fmt, spec_new_flag("check", "", 0, "false", "", "", false, false, "Check if files are formatted without editing"));
+    spec_command_add_flag(cmd_fmt, spec_new_flag("style", "", 5, "preserve", "", "preserve,readable,compact", false, false, "Formatting syntax style"));
+    let _ = spec_registry_register(reg, cmd_fmt);
+
+    let cmd_test = spec_new_command(
+        "test", "", "Analysis & Quality",
+        "Run integrated test suite or differential tests",
+        "pilot test [filter]"
+    );
+    spec_command_add_flag(cmd_test, spec_new_flag("filter", "", 3, "", "", "", false, false, "Filter test cases by name substring"));
+    let _ = spec_registry_register(reg, cmd_test);
+
+    let cmd_gate = spec_new_command(
+        "gate", "", "Analysis & Quality",
+        "Run pure-Pilot architectural & bootstrap gates",
+        "pilot gate --full --json"
+    );
+    spec_command_add_flag(cmd_gate, spec_new_flag("full", "", 0, "false", "", "", false, false, "Run full suite including rename litmus"));
+    spec_command_add_flag(cmd_gate, spec_new_flag("json", "", 0, "false", "", "", false, false, "Emit structured machine-readable JSON report"));
+    spec_command_add_flag(cmd_gate, spec_new_flag("litmus", "", 0, "false", "", "", false, false, "Include Dual-Pass Universal Rename Litmus gate"));
+    spec_command_add_flag(cmd_gate, spec_new_flag("seed", "", 1, "0", "", "", false, false, "Deterministic seed for Pass-1 Rename Litmus"));
+    spec_command_add_flag(cmd_gate, spec_new_flag("only", "", 3, "", "", "", false, false, "Run only the specified gate id"));
+    spec_command_add_flag(cmd_gate, spec_new_flag("ratchet-update", "", 0, "false", "", "", false, false, "Update Rust LOC ratchet ceilings in manifest"));
+    let _ = spec_registry_register(reg, cmd_gate);
+
+    // 3. Packages & Deps
+    let cmd_pkg = spec_new_command(
+        "pkg", "package", "Packages & Deps",
+        "Manage packages, dependencies, and lockfiles",
+        "pilot pkg init my_app\npilot pkg add std.col"
+    );
+    let _ = spec_registry_register(reg, cmd_pkg);
+
+    let cmd_deps = spec_new_command(
+        "deps", "", "Packages & Deps",
+        "Inspect, list, and verify dependencies",
+        "pilot deps list\npilot deps check"
+    );
+    spec_command_add_flag(cmd_deps, spec_new_flag("depth", "d", 1, "99", "", "", false, false, "Maximum traversal depth"));
+    spec_command_add_flag(cmd_deps, spec_new_flag("flat", "l", 0, "false", "", "", false, false, "List dependencies in flat alphabetical format"));
+    let _ = spec_registry_register(reg, cmd_deps);
+
+    let cmd_tree = spec_new_command(
+        "tree", "", "Packages & Deps",
+        "Display visual dependency tree of imports or packages",
+        "pilot tree src/main.pilot"
+    );
+    let _ = spec_registry_register(reg, cmd_tree);
+
+    let cmd_venv = spec_new_command(
+        "venv", "", "Packages & Deps",
+        "Manage isolated virtual environments",
+        "pilot venv init .pilot_env"
+    );
+    let _ = spec_registry_register(reg, cmd_venv);
+
+    // 4. IDE, Debug & AI
+    let cmd_repl = spec_new_command(
+        "repl", "", "IDE, Debug & AI",
+        "Start interactive Name-Blind Pilot REPL",
+        "pilot repl"
+    );
+    let _ = spec_registry_register(reg, cmd_repl);
+
+    let cmd_debug = spec_new_command(
+        "debug", "", "IDE, Debug & AI",
+        "Launch VmHook-stepped debugger or DAP server",
+        "pilot debug app.pilot --dap"
+    );
+    spec_command_add_flag(cmd_debug, spec_new_flag("dap", "", 0, "false", "", "", false, false, "Launch resident Debug Adapter Protocol server"));
+    let _ = spec_registry_register(reg, cmd_debug);
+
+    let cmd_lsp = spec_new_command(
+        "lsp", "", "IDE, Debug & AI",
+        "Start resident PilVM Language Server",
+        "pilot lsp"
+    );
+    let _ = spec_registry_register(reg, cmd_lsp);
+
+    let cmd_perf = spec_new_command(
+        "perf", "", "IDE, Debug & AI",
+        "Profile and optimize code performance",
+        "pilot perf profile app.pilot"
+    );
+    let _ = spec_registry_register(reg, cmd_perf);
+
+    let cmd_emit = spec_new_command(
+        "emit", "--emit", "IDE, Debug & AI",
+        "Transpile Pilot code to target foreign language",
+        "pilot emit python app.pilot -o app.py"
+    );
+    spec_command_add_flag(cmd_emit, spec_new_flag("output", "o", 4, "", "", "", false, false, "Output file path"));
+    let _ = spec_registry_register(reg, cmd_emit);
+
+    let cmd_from = spec_new_command(
+        "from", "--from", "IDE, Debug & AI",
+        "Ingest foreign code into Pilot AST",
+        "pilot from python app.py -o app.pilot"
+    );
+    spec_command_add_flag(cmd_from, spec_new_flag("output", "o", 4, "", "", "", false, false, "Output file path"));
+    let _ = spec_registry_register(reg, cmd_from);
+
+    let cmd_map = spec_new_command(
+        "map", "outline", "IDE, Debug & AI",
+        "Display visual symbol map of namespaces, classes, fns",
+        "pilot map src/main.pilot"
+    );
+    let _ = spec_registry_register(reg, cmd_map);
+
+    let cmd_ide_sync = spec_new_command(
+        "ide-sync", "", "IDE, Debug & AI",
+        "Synchronize VS Code extension grammar and schemas",
+        "pilot ide-sync"
+    );
+    let _ = spec_registry_register(reg, cmd_ide_sync);
+
+    let cmd_completions = spec_new_command(
+        "completions", "", "IDE, Debug & AI",
+        "Generate shell completion script (bash, zsh, fish, pwsh)",
+        "pilot completions zsh > _pilot"
+    );
+    let _ = spec_registry_register(reg, cmd_completions);
+
+    return reg;
+}
+
+// ------------------------------------------------------------------------------
+// Backward-Compatible Facade APIs
+// ------------------------------------------------------------------------------
 
 pub pure fn cli_help_banner() -> str {
     return "Pilot Programming Language Compiler & Toolchain (v1.1.51)\n" +
@@ -13,7 +191,7 @@ pub pure fn cli_help_banner() -> str {
            "Commands:\n" +
            "  run <file.pilot> [args...]      Execute Pilot program via PilVM v3 / Native AOT\n" +
            "  build <file.pilot> [flags]      Compile Pilot program to Native/LLVM/C/WASM/GPU\n" +
-           "  check <file.pilot>              Verify syntax, type safety, and " + nameof(comptime) + "\n" +
+           "  check <file.pilot>              Verify syntax, type safety, and comptime\n" +
            "  fmt <file.pilot> [--write]      Format source code according to Pilot style\n" +
            "  test [filter]                   Run integrated test suite or differential tests\n" +
            "  repl                            Start interactive Name-Blind Pilot REPL\n" +
@@ -27,28 +205,90 @@ pub pure fn cli_help_banner() -> str {
            "  deps <tree|list|check> [file]   Inspect, list, and verify dependencies\n" +
            "  map [file.pilot] [flags]        Display visual symbol map of namespaces, classes, fns\n" +
            "  gate [--full|--only|--json]     Run pure-Pilot architectural & bootstrap gates\n" +
-           "  ide-sync                        Synchronize VS Code extension grammar and schemas";
+           "  ide-sync                        Synchronize VS Code extension grammar and schemas\n" +
+           "  completions <shell>             Generate shell completion script (bash, zsh, fish, pwsh)";
 }
 
-// Subcommand dispatch codes:
-// 1=run, 2=build, 3=check, 4=fmt, 5=test, 6=repl, 7=pkg, 8=venv, 9=debug, 10=lsp, 11=perf, 12=compile, 13=ide-sync, 14=tree, 15=deps, 16=map, 17=gate, 0=help
 pub pure fn resolve_cli_subcommand(cmd: str) -> i64 {
-    if cmd == "run" { return 1; }
-    if cmd == "build" { return 2; }
-    if cmd == "check" { return 3; }
-    if cmd == "fmt" { return 4; }
-    if cmd == "test" { return 5; }
-    if cmd == "repl" { return 6; }
-    if cmd == "pkg" { return 7; }
-    if cmd == "venv" { return 8; }
-    if cmd == "debug" { return 9; }
-    if cmd == "lsp" { return 10; }
-    if cmd == "perf" { return 11; }
-    if cmd == "compile" { return 12; }
-    if cmd == "ide-sync" { return 13; }
-    if cmd == "tree" { return 14; }
-    if cmd == "deps" { return 15; }
-    if cmd == "map" || cmd == "outline" { return 16; }
-    if cmd == "gate" { return 17; }
-    return 0;
+    let reg = default_command_registry();
+    let idx = spec_registry_find_by_name(reg, cmd);
+    return if idx >= 0 { idx + 1 } else { 0 };
+}
+
+// ------------------------------------------------------------------------------
+// Single-Source CLI Entry Point
+// ------------------------------------------------------------------------------
+
+pub fn run_cli_entry(raw_args_line: str) -> str {
+    let reg = default_command_registry();
+    let p_res = cli_parse_args(reg, raw_args_line);
+
+    let ok = __engine("map_get", p_res, "ok") as bool;
+    if !ok {
+        let msg = __engine("map_get", p_res, "message");
+        let ec = __engine("map_get", p_res, "exit_code");
+        return "PRINT:" + msg + "\nEXIT:" + ec;
+    }
+
+    let p: ParsedArgs = __engine("map_get", p_res, "parsed");
+
+    if p.command == "help" {
+        return "PRINT:" + render_global_help(reg);
+    }
+
+    if p.command == "version" {
+        return "PRINT:Pilot v1.1.51 (Self-Hosted PilVM v3)";
+    }
+
+    if p.command == "schema-json" {
+        return "PRINT:" + export_cli_json_schema(reg);
+    }
+
+    if p.command == "completions" {
+        let shell = if cli_list_len(p.positionals) > 0 {
+            cli_list_get_str(p.positionals, 0)
+        } else {
+            "bash"
+        };
+        return "PRINT:" + emit_shell_completions(reg, shell);
+    }
+
+    // Direct help flag on command
+    if parsed_has_flag(p, "help") {
+        let c_idx = spec_registry_find_by_name(reg, p.command);
+        if c_idx >= 0 {
+            let spec = spec_registry_get(reg, c_idx as usize);
+            return "PRINT:" + render_command_help(spec);
+        }
+    }
+
+    if p.command == "gate" {
+        var gate_args = "";
+        let np = cli_list_len(p.positionals);
+        var i: usize = 0;
+        while i < np {
+            gate_args = gate_args + cli_list_get_str(p.positionals, i) + " ";
+            i = i + 1;
+        }
+        if parsed_has_flag(p, "full") { gate_args = gate_args + "--full "; }
+        if parsed_has_flag(p, "json") { gate_args = gate_args + "--json "; }
+        if parsed_has_flag(p, "litmus") { gate_args = gate_args + "--litmus "; }
+        if parsed_has_flag(p, "seed") { gate_args = gate_args + "--seed " + parsed_get_str(p, "seed", "0") + " "; }
+        if parsed_has_flag(p, "only") { gate_args = gate_args + "--only " + parsed_get_str(p, "only", "") + " "; }
+        if parsed_has_flag(p, "ratchet-update") { gate_args = gate_args + "--ratchet-update "; }
+        return "GATE:" + cp_trim(gate_args);
+    }
+
+    if p.command == "emit" {
+        let lang = if cli_list_len(p.positionals) > 0 { cli_list_get_str(p.positionals, 0) } else { "" };
+        let file = if cli_list_len(p.positionals) > 1 { cli_list_get_str(p.positionals, 1) } else { "" };
+        return "EMIT:" + lang + "|" + file;
+    }
+
+    if p.command == "run" {
+        let target = if cli_list_len(p.positionals) > 0 { cli_list_get_str(p.positionals, 0) } else { "" };
+        return "RUN:" + target;
+    }
+
+    return "0";
 }

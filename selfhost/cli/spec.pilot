@@ -1,0 +1,335 @@
+// ==============================================================================
+// FILE: selfhost/cli/spec.pilot
+// Milestone 3.1: Declarative CLI Command Registry & Specification Protocol
+// Replaces static numeric dispatch and hardcoded CLI strings (CLI001 - CLI006)
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Cli.Spec;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Internal dynamic list and map helpers built on VM map primitives
+// ------------------------------------------------------------------------------
+
+pub fn cli_list_new() -> i64 {
+    let m = __engine("map_new");
+    __engine("map_set", m, "count", 0);
+    return m;
+}
+
+pub fn cli_list_len(list: i64) -> usize {
+    return __engine("map_get", list, "count") + 0;
+}
+
+pub fn cli_list_push(list: i64, item: any) -> usize {
+    let idx = cli_list_len(list);
+    __engine("map_set", list, idx, item);
+    __engine("map_set", list, "count", idx + 1);
+    return idx + 1;
+}
+
+pub fn cli_list_get(list: i64, idx: usize) -> any {
+    return __engine("map_get", list, idx);
+}
+
+pub fn cli_list_get_str(list: i64, idx: usize) -> str {
+    return __engine("map_get", list, idx);
+}
+
+pub fn cli_map_new() -> i64 {
+    return __engine("map_new");
+}
+
+pub fn cli_map_set(m: i64, key: str, val: any) -> i64 {
+    __engine("map_set", m, key, val);
+    return m;
+}
+
+pub fn cli_map_get(m: i64, key: str) -> any {
+    return __engine("map_get", m, key);
+}
+
+pub fn cli_map_get_int(m: i64, key: str) -> i64 {
+    return __engine("map_get", m, key) as i64;
+}
+
+pub fn cli_map_contains(m: i64, key: str) -> bool {
+    return __engine("map_has", m, key) as bool;
+}
+
+// ------------------------------------------------------------------------------
+// 2-Bit Lattice Specifications (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+pub enum FlagValueKind : u8 {
+    Bool = 0,
+    Int = 1,
+    Float = 2,
+    Str = 3,
+    Path = 4,
+    EnumChoice = 5,
+    StringList = 6,
+}
+
+[Layout(c_abi)]
+pub struct FlagSpec : IValue {
+    pub long_name:    str;
+    pub short_char:   str;
+    pub kind_tag:     u8;
+    pub default_val:  str;
+    pub env_fallback: str;
+    pub choices_csv:  str;
+    pub repeatable:   bool;
+    pub required:     bool;
+    pub summary:      str;
+}
+
+[Layout(c_abi)]
+pub struct PositionalSpec : IValue {
+    pub name:     str;
+    pub kind_tag: u8;
+    pub required: bool;
+    pub variadic: bool;
+    pub summary:  str;
+}
+
+[Layout(c_abi)]
+pub struct CommandSpec : IValue {
+    pub name:               str;
+    pub aliases_csv:        str;
+    pub category:           str;
+    pub summary:            str;
+    pub examples:           str;
+    pub flags_handle:       i64;
+    pub positionals_handle: i64;
+}
+
+// ------------------------------------------------------------------------------
+// Parsed Arguments Container (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct ParsedArgs : IObject {
+    pub command:          str;
+    pub flag_values:      i64;
+    pub positionals:      i64;
+    pub passthrough_args: i64;
+
+    ~self() {
+    }
+
+    pub pure fn has(flag: str) -> bool {
+        return cli_map_contains(.flag_values, flag);
+    }
+
+    pub pure fn str_or(flag: str, fallback: str) -> str {
+        if cli_map_contains(.flag_values, flag) {
+            let list = cli_map_get(.flag_values, flag) as i64;
+            if cli_list_len(list) > 0 {
+                return cli_list_get_str(list, 0);
+            }
+        }
+        return fallback;
+    }
+
+    pub pure fn int_or(flag: str, fallback: i64) -> i64 {
+        if cli_map_contains(.flag_values, flag) {
+            let list = cli_map_get(.flag_values, flag) as i64;
+            if cli_list_len(list) > 0 {
+                let s = cli_list_get_str(list, 0);
+                let v = s as i64;
+                return v;
+            }
+        }
+        return fallback;
+    }
+
+    pub pure fn bool_val(flag: str) -> bool {
+        if cli_map_contains(.flag_values, flag) {
+            let list = cli_map_get(.flag_values, flag) as i64;
+            if cli_list_len(list) > 0 {
+                let s = cli_list_get_str(list, 0);
+                return s == "true" || s == "1";
+            }
+            return true;
+        }
+        return false;
+    }
+}
+
+pub pure fn parsed_has_flag(args: ref<ParsedArgs>, flag: str) -> bool {
+    return cli_map_contains(args.flag_values, flag);
+}
+
+pub pure fn parsed_get_str(args: ref<ParsedArgs>, flag: str, fallback: str) -> str {
+    if cli_map_contains(args.flag_values, flag) {
+        let list = cli_map_get(args.flag_values, flag) as i64;
+        if cli_list_len(list) > 0 {
+            return cli_list_get_str(list, 0);
+        }
+    }
+    return fallback;
+}
+
+pub pure fn parsed_get_int(args: ref<ParsedArgs>, flag: str, fallback: i64) -> i64 {
+    if cli_map_contains(args.flag_values, flag) {
+        let list = cli_map_get(args.flag_values, flag) as i64;
+        if cli_list_len(list) > 0 {
+            let s = cli_list_get_str(list, 0);
+            return s as i64;
+        }
+    }
+    return fallback;
+}
+
+pub pure fn parsed_get_bool(args: ref<ParsedArgs>, flag: str) -> bool {
+    if cli_map_contains(args.flag_values, flag) {
+        let list = cli_map_get(args.flag_values, flag) as i64;
+        if cli_list_len(list) > 0 {
+            let s = cli_list_get_str(list, 0);
+            return s == "true" || s == "1";
+        }
+        return true;
+    }
+    return false;
+}
+
+// ------------------------------------------------------------------------------
+// Command Registry (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct CommandRegistry : IObject {
+    pub commands:          i64;
+    pub name_to_index:     i64;
+    pub alias_to_primary:  i64;
+
+    ~self() {
+    }
+
+    pub pure fn count() -> usize {
+        return cli_list_len(.commands);
+    }
+
+    pub pure fn get(idx: usize) -> CommandSpec {
+        return cli_list_get(.commands, idx);
+    }
+
+    pub pure fn find_by_name(name: str) -> i64 {
+        if cli_map_contains(.name_to_index, name) {
+            return cli_map_get_int(.name_to_index, name);
+        }
+        if cli_map_contains(.alias_to_primary, name) {
+            let primary = cli_map_get(.alias_to_primary, name);
+            if cli_map_contains(.name_to_index, primary) {
+                return cli_map_get_int(.name_to_index, primary);
+            }
+        }
+        return -1;
+    }
+}
+
+pub pure fn spec_registry_count(reg: ref<CommandRegistry>) -> usize {
+    return cli_list_len(reg.commands);
+}
+
+pub pure fn spec_registry_get(reg: ref<CommandRegistry>, idx: usize) -> CommandSpec {
+    return cli_list_get(reg.commands, idx);
+}
+
+pub pure fn spec_registry_find_by_name(reg: ref<CommandRegistry>, name: str) -> i64 {
+    if cli_map_contains(reg.name_to_index, name) {
+        return cli_map_get_int(reg.name_to_index, name);
+    }
+    if cli_map_contains(reg.alias_to_primary, name) {
+        let primary = cli_map_get(reg.alias_to_primary, name);
+        if cli_map_contains(reg.name_to_index, primary) {
+            return cli_map_get_int(reg.name_to_index, primary);
+        }
+    }
+    return -1;
+}
+
+pub interface ICliHandler : IAnyValue {
+    pub fn handle(args: ref<ParsedArgs>) -> i32;
+}
+
+// ------------------------------------------------------------------------------
+// Spec Factory Constructors
+// ------------------------------------------------------------------------------
+
+pub fn spec_new_flag(long_name: str, short_char: str, kind_tag: u8, default_val: str, env_fallback: str, choices_csv: str, repeatable: bool, required: bool, summary: str) -> FlagSpec {
+    return FlagSpec {
+        long_name: long_name,
+        short_char: short_char,
+        kind_tag: kind_tag,
+        default_val: default_val,
+        env_fallback: env_fallback,
+        choices_csv: choices_csv,
+        repeatable: repeatable,
+        required: required,
+        summary: summary,
+    };
+}
+
+pub fn spec_new_positional(name: str, kind_tag: u8, required: bool, variadic: bool, summary: str) -> PositionalSpec {
+    return PositionalSpec {
+        name: name,
+        kind_tag: kind_tag,
+        required: required,
+        variadic: variadic,
+        summary: summary,
+    };
+}
+
+pub fn spec_new_command(name: str, aliases_csv: str, category: str, summary: str, examples: str) -> CommandSpec {
+    return CommandSpec {
+        name: name,
+        aliases_csv: aliases_csv,
+        category: category,
+        summary: summary,
+        examples: examples,
+        flags_handle: cli_list_new(),
+        positionals_handle: cli_list_new(),
+    };
+}
+
+pub fn spec_command_add_flag(cmd: ref<CommandSpec>, flag: FlagSpec) {
+    let _ = cli_list_push(cmd.flags_handle, flag);
+}
+
+pub fn spec_command_add_positional(cmd: ref<CommandSpec>, pos: PositionalSpec) {
+    let _ = cli_list_push(cmd.positionals_handle, pos);
+}
+
+pub fn spec_registry_new() -> CommandRegistry {
+    return CommandRegistry {
+        commands: cli_list_new(),
+        name_to_index: cli_map_new(),
+        alias_to_primary: cli_map_new(),
+    };
+}
+
+pub fn spec_registry_register(reg: ref<CommandRegistry>, spec: CommandSpec) -> usize {
+    let idx = cli_list_len(reg.commands);
+    let _ = cli_list_push(reg.commands, spec);
+    let _ = cli_map_set(reg.name_to_index, spec.name, idx as i64);
+
+    // Register aliases if any
+    let al = spec.aliases_csv;
+    if al.len() > 0 {
+        var start: usize = 0;
+        let l = al.len();
+        while start < l {
+            var end = start;
+            while end < l && al.byte_at(end) != 44 { // ','
+                end = end + 1;
+            }
+            let alias = al.slice(start, end);
+            if alias.len() > 0 {
+                let _ = cli_map_set(reg.alias_to_primary, alias, spec.name);
+            }
+            start = end + 1;
+        }
+    }
+
+    return idx;
+}

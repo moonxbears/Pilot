@@ -124,6 +124,8 @@ impl PilVirtualMachine {
                                 let idx = args[0].as_int().unwrap_or(-1);
                                 if idx >= 0 && (idx as usize) < self.heap_maps.len() { let m = &self.heap_maps[idx as usize]; args[1].with_str(|k| m.get(k).copied()).unwrap_or_else(|| m.get(&args[1].to_string_repr()).copied()).unwrap_or(PilotVal::NULL) } else { PilotVal::NULL }
                             }
+                            "map_has" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(-1); if idx >= 0 && (idx as usize) < self.heap_maps.len() { let m = &self.heap_maps[idx as usize]; PilotVal::from_bool(args[1].with_str(|k| m.contains_key(k)).unwrap_or_else(|| m.contains_key(&args[1].to_string_repr()))) } else { PilotVal::FALSE } }
+                            "is_null" if !args.is_empty() => PilotVal::from_bool(args[0].is_null()),
                             "sym_str" if !args.is_empty() => { let sid = args[0].as_int().unwrap_or(0) as u32; self.shared_symbols.as_ref().and_then(|s| s.get(&sid)).map_or_else(|| self.engine_handler.as_mut().and_then(|h| h(hook_name, args).ok()).unwrap_or(PilotVal::NULL), |s| PilotVal::from_str(s)) }
                             "get_env" => PilotVal::from_int(0),
                             _ => match self.engine_handler.as_mut().map(|h| h(hook_name, args)) { Some(Ok(v)) if !v.is_null() => v, Some(Err(_)) => PilotVal::NULL, _ => pilot_rt::PilotOsSyscall::vm_intrinsic(hook_name, args) },
