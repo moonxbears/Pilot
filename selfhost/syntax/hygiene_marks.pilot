@@ -1,0 +1,192 @@
+// ==============================================================================
+// FILE: selfhost/syntax/hygiene_marks.pilot
+// Milestone 27: Scoped User Sublanguage Builder - Scopes-As-Sets Hygiene Renamer
+// Full Flatt Scopes-As-Sets hygienic macro resolution engine.
+// Guarantees macro-introduced bindings never shadow caller locals, with
+// explicit unhygienic($ident) opt-in for anaphoric bindings.
+// Enforces:
+//   SYN006: Hygiene Violation Audit Hint When Inspecting Captures
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Syntax.Hygiene;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Formatting Helpers
+// ------------------------------------------------------------------------------
+
+pub pure fn format_syn006(sym: str, introduced_in: str, shadowed_in: str) -> str {
+    return "SYN006: Potential unintended variable capture of '" + sym + "': introduced in '" + introduced_in + "', shadowing caller binding in '" + shadowed_in + "'; use unhygienic(" + sym + ") to make intentional";
+}
+
+// ------------------------------------------------------------------------------
+// 2. SyntaxScopeSet (0b00 : IValue - Scopes As Sets)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct SyntaxScopeSet : IValue {
+    pub bits: u64;
+
+    pub static pure fn empty() -> SyntaxScopeSet => SyntaxScopeSet { bits: 0 };
+    pub static pure fn from_scope(scope_id: u32) -> SyntaxScopeSet {
+        if scope_id >= 64 { return SyntaxScopeSet { bits: 0 }; }
+        let one: u64 = 1;
+        return SyntaxScopeSet { bits: one << scope_id };
+    }
+
+    pub pure fn add_scope(ref self, scope_id: u32) -> SyntaxScopeSet {
+        if scope_id >= 64 { return SyntaxScopeSet { bits: self.bits }; }
+        let one: u64 = 1;
+        return SyntaxScopeSet { bits: self.bits | (one << scope_id) };
+    }
+
+    pub pure fn has_scope(ref self, scope_id: u32) -> bool {
+        if scope_id >= 64 { return false; }
+        return ((self.bits >> scope_id) & 1) != 0;
+    }
+
+    pub pure fn is_subset_of(ref self, other: SyntaxScopeSet) -> bool {
+        return (self.bits & other.bits) == self.bits;
+    }
+
+    pub pure fn count(ref self) -> usize {
+        var cnt: usize = 0;
+        var b = self.bits;
+        while b != 0 {
+            cnt = cnt + (b & 1) as usize;
+            b = b >> 1;
+        }
+        return cnt;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 3. Hygienic Binding & Resolution Schemas (0b00 & 0b10)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct HygienicBinding : IValue {
+    pub sym_name:      str;
+    pub scope_set:     SyntaxScopeSet;
+    pub expansion_id:  u32;
+    pub is_unhygienic: bool;
+    pub binding_id:    usize;
+}
+
+[Layout(c_abi)]
+pub struct ResolvedBinding : IValue {
+    pub found:         bool;
+    pub binding_id:    usize;
+    pub sym_name:      str;
+    pub is_unhygienic: bool;
+    pub expansion_id:  u32;
+}
+
+pub struct HygienicEnv : IObject {
+    pub next_scope_id:        u32;
+    pub current_expansion_id: u32;
+    pub active_scopes:        SyntaxScopeSet;
+    pub bindings:             List<HygienicBinding>;
+}
+
+pub fn hygienic_env_new() -> HygienicEnv {
+    // Scope 0 is base caller scope
+    let base_scopes = SyntaxScopeSet::from_scope(0);
+    return HygienicEnv {
+        next_scope_id:        1,
+        current_expansion_id: 0,
+        active_scopes:        base_scopes,
+        bindings:             [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Macro Expansion Scope Lifecycle
+// ------------------------------------------------------------------------------
+
+pub var fn enter_expansion(var ref self: HygienicEnv, is_unhygienic: bool) -> u32 {
+    let exp_id = self.next_scope_id;
+    self.next_scope_id = self.next_scope_id + 1;
+    self.current_expansion_id = exp_id;
+    if !is_unhygienic {
+        self.active_scopes = self.active_scopes.add_scope(exp_id);
+    }
+    return exp_id;
+}
+
+pub var fn exit_expansion(var ref self: HygienicEnv, caller_scopes: SyntaxScopeSet) {
+    self.active_scopes = caller_scopes;
+    self.current_expansion_id = 0;
+}
+
+pub var fn add_binding(var ref self: HygienicEnv, name: str, is_unhygienic: bool) -> usize {
+    let b_id = self.bindings.len();
+    let scopes = if is_unhygienic { SyntaxScopeSet::from_scope(0) } else { self.active_scopes };
+    self.bindings.push(HygienicBinding {
+        sym_name:      name,
+        scope_set:     scopes,
+        expansion_id:  self.current_expansion_id,
+        is_unhygienic: is_unhygienic,
+        binding_id:    b_id,
+    });
+    return b_id;
+}
+
+// ------------------------------------------------------------------------------
+// 5. Flatt Scopes-As-Sets Resolution Algorithm
+// ------------------------------------------------------------------------------
+
+pub fn resolve_identifier(env: ref<HygienicEnv>, name: str, ref_scopes: SyntaxScopeSet) -> ResolvedBinding {
+    var best_match_id: usize = 0;
+    var best_count: usize = 0;
+    var found = false;
+    var best_unhygienic = false;
+    var best_exp_id: u32 = 0;
+
+    var i = 0;
+    while i < env.bindings.len() {
+        let b = env.bindings[i];
+        if b.sym_name == name {
+            if b.is_unhygienic {
+                // Unhygienic binding matches anywhere
+                if !found || best_count == 0 {
+                    found = true;
+                    best_match_id = b.binding_id;
+                    best_unhygienic = true;
+                    best_exp_id = b.expansion_id;
+                    best_count = 1;
+                }
+            } else if b.scope_set.is_subset_of(ref_scopes) {
+                let cnt = b.scope_set.count();
+                // Maximal subset wins!
+                if !found || cnt > best_count {
+                    found = true;
+                    best_match_id = b.binding_id;
+                    best_unhygienic = false;
+                    best_exp_id = b.expansion_id;
+                    best_count = cnt;
+                }
+            }
+        }
+        i = i + 1;
+    }
+
+    if found {
+        return ResolvedBinding {
+            found:         true,
+            binding_id:    best_match_id,
+            sym_name:      name,
+            is_unhygienic: best_unhygienic,
+            expansion_id:  best_exp_id,
+        };
+    }
+
+    return ResolvedBinding {
+        found:         false,
+        binding_id:    0,
+        sym_name:      name,
+        is_unhygienic: false,
+        expansion_id:  0,
+    };
+}

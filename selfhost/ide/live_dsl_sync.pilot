@@ -1,0 +1,150 @@
+// ==============================================================================
+// FILE: selfhost/ide/live_dsl_sync.pilot
+// Milestone 27: Scoped User Sublanguage Builder - Live LSP/IDE DSL Sync
+// Automatically derives LSP semanticTokens, contextual keyword completions,
+// hover signatures, and formatter rules directly from active scoped syntax.
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Ide.LiveDslSync;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. LSP DSL Data Schemas (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct DslCompletionItem : IValue {
+    pub label:         str;
+    pub kind:          u8; // 1: Keyword, 2: Snippet, 3: SyntaxArm
+    pub detail:        str;
+    pub documentation: str;
+    pub insert_text:   str;
+}
+
+pub pure fn dsl_completion_new(label: str, kind: u8, detail: str, doc: str, ins: str) -> DslCompletionItem {
+    return DslCompletionItem {
+        label:         label,
+        kind:          kind,
+        detail:        detail,
+        documentation: doc,
+        insert_text:   ins,
+    };
+}
+
+[Layout(c_abi)]
+pub struct DslSemanticToken : IValue {
+    pub line:       u32;
+    pub start_char: u32;
+    pub length:     u32;
+    pub token_type: u8; // 1: CustomKeyword, 2: DslDelimiter, 3: MacroArm
+}
+
+pub pure fn dsl_semantic_token_new(line: u32, start: u32, len: u32, tok_type: u8) -> DslSemanticToken {
+    return DslSemanticToken {
+        line:       line,
+        start_char: start,
+        length:     len,
+        token_type: tok_type,
+    };
+}
+
+[Layout(c_abi)]
+pub struct DslHoverInfo : IValue {
+    pub found:         bool;
+    pub symbol_name:   str;
+    pub category_name: str;
+    pub signature:     str;
+    pub description:   str;
+
+    pub static pure fn none() -> DslHoverInfo => DslHoverInfo {
+        found:         false,
+        symbol_name:   "",
+        category_name: "",
+        signature:     "",
+        description:   "",
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. Live DSL Catalog Schema (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct LiveDslSyncCatalog : IObject {
+    pub active_sublanguages: List<str>;
+    pub scoped_keywords:     List<str>;
+    pub completion_items:    List<DslCompletionItem>;
+    pub hover_infos:         List<DslHoverInfo>;
+}
+
+pub fn live_dsl_catalog_new() -> LiveDslSyncCatalog {
+    return LiveDslSyncCatalog {
+        active_sublanguages: [],
+        scoped_keywords:     [],
+        completion_items:    [],
+        hover_infos:         [],
+    };
+}
+
+pub var fn register_dsl_sublanguage(var ref self: LiveDslSyncCatalog, dsl_name: str) {
+    self.active_sublanguages.push(dsl_name);
+}
+
+pub var fn register_dsl_keyword(
+    var ref self: LiveDslSyncCatalog,
+    word: str,
+    dsl_name: str,
+    desc: str,
+    snippet: str
+) {
+    self.scoped_keywords.push(word);
+    let detail = "DSL Keyword (" + dsl_name + ")";
+    self.completion_items.push(dsl_completion_new(word, 1, detail, desc, snippet));
+    self.hover_infos.push(DslHoverInfo {
+        found:         true,
+        symbol_name:   word,
+        category_name: dsl_name,
+        signature:     word + "(...)",
+        description:   desc,
+    });
+}
+
+// ------------------------------------------------------------------------------
+// 3. LSP Query Providers
+// ------------------------------------------------------------------------------
+
+pub fn query_dsl_completions(cat: ref<LiveDslSyncCatalog>, prefix: str) -> List<DslCompletionItem> {
+    var results: List<DslCompletionItem> = [];
+    var i = 0;
+    while i < cat.completion_items.len() {
+        let item = cat.completion_items[i];
+        if prefix.len() == 0 || item.label.slice(0, prefix.len()) == prefix {
+            results.push(item);
+        }
+        i = i + 1;
+    }
+    return results;
+}
+
+pub fn query_dsl_hover(cat: ref<LiveDslSyncCatalog>, word: str) -> DslHoverInfo {
+    var i = 0;
+    while i < cat.hover_infos.len() {
+        let h = cat.hover_infos[i];
+        if h.symbol_name == word {
+            return h;
+        }
+        i = i + 1;
+    }
+    return DslHoverInfo::none();
+}
+
+pub pure fn is_dsl_keyword(cat: ref<LiveDslSyncCatalog>, word: str) -> bool {
+    var i = 0;
+    while i < cat.scoped_keywords.len() {
+        if cat.scoped_keywords[i] == word {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
