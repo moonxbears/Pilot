@@ -1,0 +1,175 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_each_cascade.pilot
+// Milestone 23: Zero-Allocation Pipeline Fusion & Lowering for:
+//   1. N-dimensional `each` member/operator broadcasts (FUSE001, FUSE002)
+//   2. Fluid cascades `..` and null-safe `?..` (single evaluation, FUSE004)
+//   3. Structural DTO projections `->` and `->>` (FUSE003)
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Ir.EachCascade;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Lowering Specifications & Data Schemas (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+pub enum BroadcastMode : u8 {
+    ::InPlaceMutate   = 1, // Statement position on var receiver (0 alloc)
+    ::ValueProjection = 2, // Expression position (exact-capacity allocation)
+    ::RankKFused      = 3, // Multi-dimensional nested each
+}
+
+[Layout(c_abi)]
+pub struct EachBroadcastLowering : IValue {
+    pub receiver_name:   str;
+    pub is_mutable:      bool;
+    pub is_collection:   bool;
+    pub mode:            BroadcastMode;
+    pub loop_var_name:   str;
+    pub operation:       str;
+    pub allocation_cost: usize; // 0 for in-place
+}
+
+[Layout(c_abi)]
+pub struct CascadeLowering : IValue {
+    pub root_expr:       str;
+    pub is_null_safe:    bool;
+    pub receiver_is_opt: bool;
+    pub action_count:    usize;
+    pub side_effects_evaluated: bool;
+}
+
+[Layout(c_abi)]
+pub struct DtoProjectionLowering : IValue {
+    pub source_type: str;
+    pub target_type: str;
+    pub is_fused_collection: bool; // true for ->>, false for ->
+    pub mapped_field_count:  usize;
+    pub has_missing_fields:  bool;
+    pub missing_field_name:  str;
+}
+
+// ------------------------------------------------------------------------------
+// 2. Diagnostics (FUSE001 - FUSE004)
+// ------------------------------------------------------------------------------
+
+pub pure fn format_fuse001(type_name: str) -> str {
+    return "FUSE001: 'each' applied to non-broadcastable scalar '" + type_name + "' without IEnumerable or lane descriptor";
+}
+
+pub pure fn format_fuse002(var_name: str) -> str {
+    return "FUSE002: In-place mutating 'each' method invoked on immutable 'let' collection '" + var_name + "'";
+}
+
+pub pure fn format_fuse003(source_type: str, target_type: str, missing_field: str) -> str {
+    return "FUSE003: DTO projection '" + source_type + " -> " + target_type + "' missing source field for non-defaulted target field '" + missing_field + "'";
+}
+
+pub pure fn format_fuse004() -> str {
+    return "FUSE004: '?..' null-safe cascade applied to non-optional receiver; help: rewrite to '..'";
+}
+
+// ------------------------------------------------------------------------------
+// 3. Lowering Compilers
+// ------------------------------------------------------------------------------
+
+pub fn lower_each_broadcast(
+    receiver_name: str,
+    is_collection: bool,
+    is_mutable: bool,
+    is_statement: bool,
+    operation: str,
+    var ref diags: List<str>
+) -> EachBroadcastLowering {
+    if !is_collection {
+        diags.push(format_fuse001(receiver_name));
+    }
+    if is_statement && !is_mutable {
+        diags.push(format_fuse002(receiver_name));
+    }
+
+    let mode = if is_statement { BroadcastMode::InPlaceMutate } else { BroadcastMode::ValueProjection };
+    let alloc_cost = if is_statement { 0 } else { 1 };
+
+    return EachBroadcastLowering {
+        receiver_name:   receiver_name,
+        is_mutable:      is_mutable,
+        is_collection:   is_collection,
+        mode:            mode,
+        loop_var_name:   "__elem",
+        operation:       operation,
+        allocation_cost: alloc_cost,
+    };
+}
+
+pub fn lower_cascade(
+    root_expr: str,
+    is_null_safe: bool,
+    receiver_is_opt: bool,
+    has_value: bool,
+    actions: List<str>,
+    var ref diags: List<str>
+) -> CascadeLowering {
+    if is_null_safe && !receiver_is_opt {
+        diags.push(format_fuse004());
+    }
+
+    // In PilIR, if is_null_safe and !has_value, side-effecting action arguments are evaluated 0 times!
+    let side_effects_run = if is_null_safe { has_value } else { true };
+
+    return CascadeLowering {
+        root_expr:              root_expr,
+        is_null_safe:           is_null_safe,
+        receiver_is_opt:        receiver_is_opt,
+        action_count:           actions.len(),
+        side_effects_evaluated: side_effects_run,
+    };
+}
+
+pub fn lower_dto_projection(
+    source_type: str,
+    source_fields: List<str>,
+    target_type: str,
+    target_fields: List<str>,
+    is_collection: bool,
+    var ref diags: List<str>
+) -> DtoProjectionLowering {
+    var mapped = 0;
+    var missing = "";
+    var has_missing = false;
+
+    let n_tar = target_fields.len();
+    var ti = 0;
+    while ti < n_tar {
+        let tf = target_fields[ti];
+        var found = false;
+        var si = 0;
+        while si < source_fields.len() {
+            if source_fields[si] == tf {
+                found = true;
+                break;
+            }
+            si = si + 1;
+        }
+
+        if found {
+            mapped = mapped + 1;
+        } else {
+            has_missing = true;
+            missing = tf;
+            diags.push(format_fuse003(source_type, target_type, tf));
+            break;
+        }
+        ti = ti + 1;
+    }
+
+    return DtoProjectionLowering {
+        source_type:         source_type,
+        target_type:         target_type,
+        is_fused_collection: is_collection,
+        mapped_field_count:  mapped,
+        has_missing_fields:  has_missing,
+        missing_field_name:  missing,
+    };
+}

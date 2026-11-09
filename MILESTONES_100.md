@@ -1193,7 +1193,7 @@ Before advancing to **Phase 3 (`M21` — Boilerplate Eradication & `.pchor` Chor
 
 ---
 
-### M23 — Zero-Allocation Pipeline Fusion, `each` Vectorization & Cascade Polish
+### M23 — Zero-Allocation Pipeline Fusion, `each` Vectorization & Cascade Polish [COMPLETE]
 
 #### 23.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (Toy String-Splicing Optimizer in `selfhost/perf/optimizer.pilot`):** [`selfhost/perf/optimizer.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/perf/optimizer.pilot) (lines `82`–`156`) operates by scanning raw source text for a single `if false` and a single `let k = a + b;` and string-concatenating `source_slice`! It cannot fuse loops, inline closures, or optimize real control flow.

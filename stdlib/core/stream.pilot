@@ -1,0 +1,155 @@
+// ==============================================================================
+// FILE: stdlib/core/stream.pilot
+// Milestone 23: Zero-Allocation Pipeline Fusion & Pull-Cursor Stream Combinators
+// Freestanding Ring-1 zero-allocation pull-cursor stream primitives (0b01 : IReference)
+// ==============================================================================
+
+pub lvl(0) pkg core.stream;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Stream Size Hint & Cursor Contract
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct SizeHint : IValue {
+    pub lower:     usize;
+    pub has_upper: bool;
+    pub upper:     usize;
+
+    pub static pure fn exact(n: usize) -> SizeHint => SizeHint { lower: n, has_upper: true, upper: n };
+    pub static pure fn bounded(low: usize, up: usize) -> SizeHint => SizeHint { lower: low, has_upper: true, upper: up };
+    pub static pure fn lower_only(low: usize) -> SizeHint => SizeHint { lower: low, has_upper: false, upper: 0 };
+}
+
+[Layout(c_abi)]
+pub struct StreamOpt : IValue {
+    pub val:       i64;
+    pub has_value: bool;
+
+    pub static pure fn some(v: i64) -> StreamOpt => StreamOpt { val: v, has_value: true };
+    pub static pure fn none() -> StreamOpt => StreamOpt { val: 0, has_value: false };
+}
+
+// ------------------------------------------------------------------------------
+// 2. Concrete Pull-Cursor Combinators (0b01 : IReference)
+// ------------------------------------------------------------------------------
+
+pub struct SliceStream : IReference {
+    pub items: slice<i64>;
+    pub cur:   usize;
+    pub len:   usize;
+
+    pub static pure fn create(s: slice<i64>) -> SliceStream => SliceStream {
+        items: s,
+        cur:   0,
+        len:   s.len(),
+    };
+
+    pub var fn next(var ref self) -> StreamOpt {
+        if self.cur < self.len {
+            let v = self.items[self.cur];
+            self.cur = self.cur + 1;
+            return StreamOpt::some(v);
+        }
+        return StreamOpt::none();
+    }
+
+    pub pure fn size_hint(ref self) -> SizeHint {
+        let remaining = if self.cur < self.len { self.len - self.cur } else { 0 };
+        return SizeHint::exact(remaining);
+    }
+}
+
+pub struct TakeStream : IReference {
+    pub source: SliceStream;
+    pub remaining: usize;
+
+    pub static pure fn create(src: SliceStream, count: usize) -> TakeStream => TakeStream {
+        source:    src,
+        remaining: count,
+    };
+
+    pub var fn next(var ref self) -> StreamOpt {
+        if self.remaining == 0 {
+            return StreamOpt::none();
+        }
+        let item = self.source.next();
+        if item.has_value {
+            self.remaining = self.remaining - 1;
+            return item;
+        }
+        return StreamOpt::none();
+    }
+
+    pub pure fn size_hint(ref self) -> SizeHint {
+        let src_hint = self.source.size_hint();
+        let up = if src_hint.has_upper && src_hint.upper < self.remaining { src_hint.upper } else { self.remaining };
+        return SizeHint::exact(up);
+    }
+}
+
+pub struct StepStream : IReference {
+    pub source: SliceStream;
+    pub step:   usize;
+
+    pub static pure fn create(src: SliceStream, step: usize) -> StepStream => StepStream {
+        source: src,
+        step:   if step > 0 { step } else { 1 },
+    };
+
+    pub var fn next(var ref self) -> StreamOpt {
+        let item = self.source.next();
+        if !item.has_value {
+            return StreamOpt::none();
+        }
+        // Skip (step - 1) items
+        var skip = self.step - 1;
+        while skip > 0 {
+            let _ = self.source.next();
+            skip = skip - 1;
+        }
+        return item;
+    }
+
+    pub pure fn size_hint(ref self) -> SizeHint {
+        let sh = self.source.size_hint();
+        let low = (sh.lower + self.step - 1) / self.step;
+        return if sh.has_upper { SizeHint::exact((sh.upper + self.step - 1) / self.step) } else { SizeHint::lower_only(low) };
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 3. Terminal Accumulator Operations (Zero-Allocation)
+// ------------------------------------------------------------------------------
+
+pub fn stream_sum(var ref stream: SliceStream) -> i64 {
+    var total: i64 = 0;
+    while true {
+        let opt_v = stream.next();
+        if !opt_v.has_value { break; }
+        total = total + opt_v.val;
+    }
+    return total;
+}
+
+pub fn stream_count(var ref stream: SliceStream) -> usize {
+    var cnt: usize = 0;
+    while true {
+        let opt_v = stream.next();
+        if !opt_v.has_value { break; }
+        cnt = cnt + 1;
+    }
+    return cnt;
+}
+
+pub fn stream_collect(var ref stream: SliceStream) -> List<i64> {
+    var out: List<i64> = [];
+    while true {
+        let opt_v = stream.next();
+        if !opt_v.has_value { break; }
+        out.push(opt_v.val);
+    }
+    return out;
+}
