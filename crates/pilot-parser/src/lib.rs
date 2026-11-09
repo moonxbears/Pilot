@@ -1,6 +1,6 @@
 //! Homoiconic 14-Token Seed Parser & `$param` AST-Splicing Macro Engine (`pilot-parser`).
 //! Hardcodes strictly the 14 seed `TokenKind`s; zero Pilot scalar/composite type names exist here.
-use std::collections::{HashMap, HashSet}; use std::sync::OnceLock; use pilot_ast::*; use pilot_intern::SymbolId;
+use std::borrow::Cow; use std::collections::{HashMap, HashSet}; use std::sync::OnceLock; use pilot_ast::*; use pilot_intern::SymbolId;
 use pilot_lexer::{tokenize, TokenKind, TokenTape}; use pilot_span::ByteSpan;
 #[derive(Clone, Debug)]
 pub enum TemplateNode { Splice(String), TypeNamed(String, Vec<TemplateNode>), TypeTuple(Vec<TemplateNode>),
@@ -194,10 +194,8 @@ pub fn bootstrap_tables() -> &'static ParserTables { BOOTSTRAP_TABLES.get_or_ini
         t
     }) }
 pub fn parse(src: &str) -> AstArena { parse_with_tables(src, bootstrap_tables()) }
-pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut local = tables.clone(); parse_and_ingest(src, &mut local) }
-pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser {
-        src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)),
-        tables, active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, }; p.parse_program(); p.arena }
+pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, }; p.parse_program(); p.arena }
+pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } arena }
 #[inline]
 fn is_seed_kw(k: TokenKind) -> bool { matches!(k, TokenKind::KwEngine | TokenKind::KwStruct | TokenKind::KwInterface | TokenKind::KwFn
         | TokenKind::KwLet | TokenKind::KwRef | TokenKind::KwIf | TokenKind::KwLoop
@@ -219,7 +217,7 @@ impl DeclMods {
         self.vis.is_some() || self.flags != 0 || self.is_const || self.is_ext || !self.attrs.is_empty() || self.ret_ty.is_some() } }
 #[derive(Clone, Debug)]
 struct ScopeHeader { mods: DeclMods, target: u8 }
-struct Parser<'a> { src: &'a str, tape: TokenTape, pos: usize, arena: AstArena, tables: &'a mut ParserTables,
+struct Parser<'a> { src: &'a str, tape: TokenTape, pos: usize, arena: AstArena, tables: Cow<'a, ParserTables>,
     active_hdr: Option<ScopeHeader>, hdr_stack: Vec<Option<ScopeHeader>>, in_quote_type: bool, no_struct_lit: bool, }
 impl<'a> Parser<'a> {
     #[inline] fn cur(&self) -> usize { self.next_non_nl(self.pos) }
@@ -255,7 +253,7 @@ impl<'a> Parser<'a> {
         } }
     fn parse_program(&mut self) { let mut items = Vec::new(); while !self.at_end() { self.skip_seps(); if self.at_end() { break; }
             let mark = self.pos; self.parse_item(&mut items, false); if self.pos == mark { self.advance(); }
-            if let Some(&last) = items.last() { self.tables.ingest_node(&self.arena, last); } }
+            if let Some(&last) = items.last() { if self.src.contains("__engine") { self.tables.to_mut().ingest_node(&self.arena, last); } } }
         self.arena.root = self.arena.alloc_list_node(NodeKind::Program, 0, ByteSpan::new(0, self.src.len() as u32), &items); }
     fn is_attr_prefix(&self, _in_type_body: bool) -> bool { if self.peek() != TokenKind::LBracket { return false; }
         let mut p = self.cur(); while p < self.tape.len() && self.tape.kind(p) == TokenKind::LBracket {
@@ -598,13 +596,13 @@ impl<'a> Parser<'a> {
                     self.in_quote_type = false; self.expect(TokenKind::RBrace); t
                 } else { self.parse_expr() }; let _ = self.eat(TokenKind::Semicolon); if is_tc && body.is_some() {
                     if let Some(rule) = compile_type_rule(&pat_toks, TemplateNode::from_arena(&self.arena, body)) {
-                        self.tables.type_rules.retain(|e| !same_type_trigger(e, &rule)); self.tables.type_rules.push(rule); } }
+                        let t = self.tables.to_mut(); t.type_rules.retain(|e| !same_type_trigger(e, &rule)); t.type_rules.push(rule); } }
                 rules.push(body); } else { let kw = self.text().to_string(); self.advance(); let params = self.parse_param_list();
                 let pnames: Vec<String> = params.iter().map(|&pid| self.arena.interner.resolve(SymbolId(self.arena.node(pid).lhs)).to_string()).collect();
                 self.expect(TokenKind::FatArrow); let has_quote = self.at(TokenKind::KwQuote);
                 let body = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); if has_quote && body.is_some() {
                     let tpl = TemplateNode::from_arena(&self.arena, body);
-                    self.tables.syntax_macros.insert(kw.clone(), SyntaxMacroRule { params: pnames, template: tpl }); }
+                    self.tables.to_mut().syntax_macros.insert(kw.clone(), SyntaxMacroRule { params: pnames, template: tpl }); }
                 let sym = self.arena.interner.intern(&kw); let mut ch = vec![body]; ch.extend(params);
                 let (st, ln) = self.arena.alloc_child_slice(&ch);
                 let f = self.arena.alloc_node(NodeKind::FnDecl, ln as u16, ByteSpan::new(rsp.start, self.prev_span().end), sym.0, st);

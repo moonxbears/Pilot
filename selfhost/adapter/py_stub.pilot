@@ -1,0 +1,456 @@
+// ==============================================================================
+// FILE: selfhost/adapter/py_stub.pilot
+// Milestone 17.1: Python .pyi Stub & Inspect Signature Parser
+// Name-Blind Type Physics, Optional Unions (X | None), Vectorcall Wrappers
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Adapter.PyStub;
+
+use Pilot.Diagnostics.Model;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Python Stub Entity & Type Kinds (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+pub enum PyStubItemKind : u8 {
+    ::Function  = 0,
+    ::Class     = 1,
+    ::Constant  = 2,
+    ::TypeAlias = 3,
+    ::Import    = 4,
+}
+
+pub enum PyStubTypeKind : u8 {
+    ::NoneType     = 0,
+    ::Int          = 1,
+    ::Float        = 2,
+    ::Bool         = 3,
+    ::Str          = 4,
+    ::Bytes        = 5,
+    ::OptUnion     = 6, // X | None or Optional[X]
+    ::List         = 7,
+    ::Dict         = 8,
+    ::Tuple        = 9,
+    ::StrideTensor = 10, // numpy.typing.NDArray[np.float64] -> stride<f64>
+    ::Any          = 11,
+    ::Named        = 12,
+}
+
+// ------------------------------------------------------------------------------
+// 2. Python Diagnostic Codes (PY001..PY004)
+// ------------------------------------------------------------------------------
+
+pub enum PyDiagnosticKind : u8 {
+    ::LibPythonNotFound = 1,
+    ::BufferFormatMismatch = 2,
+    ::ReadOnlyMutBorrow   = 3,
+    ::SubByteStrided      = 4,
+}
+
+pub pure fn py_diag_code(kind: PyDiagnosticKind) -> str {
+    if kind == PyDiagnosticKind::LibPythonNotFound { return "PY001"; }
+    if kind == PyDiagnosticKind::BufferFormatMismatch { return "PY002"; }
+    if kind == PyDiagnosticKind::ReadOnlyMutBorrow { return "PY003"; }
+    if kind == PyDiagnosticKind::SubByteStrided { return "PY004"; }
+    return "PY000";
+}
+
+// ------------------------------------------------------------------------------
+// 3. Declarations Schema (0b00 & 0b10)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct PyParamDecl : IValue {
+    pub name:        str;
+    pub type_name:   str;
+    pub type_kind:   PyStubTypeKind;
+    pub is_vararg:   bool; // *args
+    pub is_kwarg:    bool; // **kwargs
+    pub has_default: bool;
+    pub default_val: str;
+}
+
+pub struct PyMethodDecl : IObject {
+    pub name:           str;
+    pub params:         List<PyParamDecl>;
+    pub return_type:    str;
+    pub ret_kind:       PyStubTypeKind;
+    pub is_static:      bool;
+    pub is_classmethod: bool;
+    pub is_property:    bool;
+
+    ~self() {}
+}
+
+pub struct PyClassDecl : IObject {
+    pub name:    str;
+    pub bases:   List<str>;
+    pub methods: List<PyMethodDecl>;
+    pub fields:  List<PyParamDecl>;
+
+    ~self() {}
+}
+
+pub struct PyModuleStub : IObject {
+    pub name:      str;
+    pub classes:   List<PyClassDecl>;
+    pub functions: List<PyMethodDecl>;
+    pub constants: List<PyParamDecl>;
+
+    ~self() {}
+}
+
+pub fn py_module_stub_new(name: str) -> PyModuleStub {
+    return PyModuleStub {
+        name:      name,
+        classes:   [],
+        functions: [],
+        constants: [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Type Classification & Normalization
+// ------------------------------------------------------------------------------
+
+pure fn py_is_space(b: i64) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+pub pure fn py_trim(s: str) -> str {
+    let n = s.len();
+    var st: usize = 0;
+    while st < n && py_is_space(s.byte_at(st)) { st = st + 1; }
+    var en: usize = n;
+    while en > st && py_is_space(s.byte_at(en - 1)) { en = en - 1; }
+    if en > st { return s.slice(st, en); }
+    return "";
+}
+
+pub pure fn py_classify_type(type_str: str) -> PyStubTypeKind {
+    let s = py_trim(type_str);
+    if s == "None" || s == "NoneType" {
+        return PyStubTypeKind::NoneType;
+    }
+    if s == "int" {
+        return PyStubTypeKind::Int;
+    }
+    if s == "float" {
+        return PyStubTypeKind::Float;
+    }
+    if s == "bool" {
+        return PyStubTypeKind::Bool;
+    }
+    if s == "str" {
+        return PyStubTypeKind::Str;
+    }
+    if s == "bytes" || s == "bytearray" {
+        return PyStubTypeKind::Bytes;
+    }
+    if s.find("| None") >= 0 || s.find("None |") >= 0 || s.starts_with("Optional[") {
+        return PyStubTypeKind::OptUnion;
+    }
+    if s.starts_with("NDArray") || s.find("NDArray[") >= 0 || s.find("ndarray[") >= 0 {
+        return PyStubTypeKind::StrideTensor;
+    }
+    if s.starts_with("list[") || s.starts_with("List[") {
+        return PyStubTypeKind::List;
+    }
+    if s.starts_with("dict[") || s.starts_with("Dict[") {
+        return PyStubTypeKind::Dict;
+    }
+    if s.starts_with("tuple[") || s.starts_with("Tuple[") {
+        return PyStubTypeKind::Tuple;
+    }
+    if s == "Any" {
+        return PyStubTypeKind::Any;
+    }
+    return PyStubTypeKind::Named;
+}
+
+// ------------------------------------------------------------------------------
+// 5. Python .pyi Stub Parser
+// ------------------------------------------------------------------------------
+
+pure fn py_skip_ws(src: str, pos: usize) -> usize {
+    var p = pos;
+    let n = src.len();
+    while p < n {
+        let b = src.byte_at(p);
+        if b == 32 || b == 9 || b == 10 || b == 13 {
+            p = p + 1;
+        } else if b == 35 { // # comment
+            while p < n && src.byte_at(p) != 10 {
+                p = p + 1;
+            }
+        } else {
+            break;
+        }
+    }
+    return p;
+}
+
+fn py_parse_param(raw: str) -> PyParamDecl {
+    let p = py_trim(raw);
+    var is_var = false;
+    var is_kw = false;
+    var name_start: usize = 0;
+    if p.starts_with("**") {
+        is_kw = true;
+        name_start = 2;
+    } else if p.starts_with("*") {
+        is_var = true;
+        name_start = 1;
+    }
+
+    let colon_pos = p.find(":");
+    let eq_pos = p.find("=");
+
+    var p_name = "";
+    var p_type = "Any";
+    var has_def = false;
+    var def_val = "";
+
+    if colon_pos >= 0 {
+        p_name = py_trim(p.slice(name_start, colon_pos as usize));
+        if eq_pos > colon_pos {
+            p_type = py_trim(p.slice((colon_pos + 1) as usize, eq_pos as usize));
+            has_def = true;
+            def_val = py_trim(p.slice((eq_pos + 1) as usize, p.len()));
+        } else {
+            p_type = py_trim(p.slice((colon_pos + 1) as usize, p.len()));
+        }
+    } else if eq_pos >= 0 {
+        p_name = py_trim(p.slice(name_start, eq_pos as usize));
+        has_def = true;
+        def_val = py_trim(p.slice((eq_pos + 1) as usize, p.len()));
+    } else {
+        p_name = py_trim(p.slice(name_start, p.len()));
+    }
+
+    let tk = py_classify_type(p_type);
+    return PyParamDecl {
+        name:        p_name,
+        type_name:   p_type,
+        type_kind:   tk,
+        is_vararg:   is_var,
+        is_kwarg:    is_kw,
+        has_default: has_def,
+        default_val: def_val,
+    };
+}
+
+pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleStub {
+    var stub = py_module_stub_new("python_module");
+    if source.len() == 0 {
+        var d = Diagnostic {
+            code:     py_diag_code(PyDiagnosticKind::InvalidSyntax),
+            severity: 1,
+            message:  "Empty Python stub provided to parser",
+            labels:   [],
+            notes:    [],
+            fixes:    [],
+        };
+        diags.push(d);
+        return stub;
+    }
+    let n = source.len();
+    var pos: usize = 0;
+
+    var cur_class_name = "";
+    var is_static = false;
+    var is_classmethod = false;
+    var is_property = false;
+
+    while pos < n {
+        // Skip blank lines
+        while pos < n && (source.byte_at(pos) == 10 || source.byte_at(pos) == 13) {
+            pos = pos + 1;
+        }
+        if pos >= n { break; }
+
+        // Measure line indentation
+        var indent: usize = 0;
+        while pos < n && (source.byte_at(pos) == 32 || source.byte_at(pos) == 9) {
+            indent = indent + 1;
+            pos = pos + 1;
+        }
+        if pos < n && source.byte_at(pos) == 35 { // '#' comment
+            while pos < n && source.byte_at(pos) != 10 {
+                pos = pos + 1;
+            }
+            continue;
+        }
+        if pos >= n || source.byte_at(pos) == 10 || source.byte_at(pos) == 13 {
+            continue;
+        }
+
+        let rem = source.slice(pos, n);
+
+        if indent == 0 {
+            if !rem.starts_with("@") && !rem.starts_with("class ") {
+                cur_class_name = "";
+            }
+        }
+
+        // Decorators
+        if rem.starts_with("@staticmethod") {
+            is_static = true;
+            pos = pos + 13;
+            continue;
+        }
+        if rem.starts_with("@classmethod") {
+            is_classmethod = true;
+            pos = pos + 12;
+            continue;
+        }
+        if rem.starts_with("@property") {
+            is_property = true;
+            pos = pos + 9;
+            continue;
+        }
+
+        // Class definition: class ClassName(Base1, Base2):
+        if rem.starts_with("class ") {
+            let class_kw_len = 6;
+            let nl_pos = rem.find("\n");
+            let line = if nl_pos >= 0 { rem.slice(0, nl_pos as usize) } else { rem };
+            let colon_idx = line.find(":");
+            let head = if colon_idx >= 0 { py_trim(line.slice(class_kw_len, colon_idx as usize)) } else { py_trim(line.slice(class_kw_len, line.len())) };
+
+            var c_name = head;
+            var bases: List<str> = [];
+            let paren_open = head.find("(");
+            let paren_close = head.find(")");
+            if paren_open >= 0 && paren_close > paren_open {
+                c_name = py_trim(head.slice(0, paren_open as usize));
+                let b_str = py_trim(head.slice((paren_open + 1) as usize, paren_close as usize));
+                if b_str.len() > 0 {
+                    bases.push(b_str);
+                }
+            }
+
+            var cls = PyClassDecl {
+                name:    c_name,
+                bases:   bases,
+                methods: [],
+                fields:  [],
+            };
+            stub.classes.push(cls);
+            cur_class_name = c_name;
+            pos = if nl_pos >= 0 { pos + (nl_pos as usize) + 1 } else { n };
+            continue;
+        }
+
+        // Function or Method: def func_name(params) -> ReturnType: ...
+        if rem.starts_with("def ") {
+            let def_kw_len = 4;
+            let paren_open = rem.find("(");
+            let paren_close = rem.find(")");
+
+            if paren_open > 0 && paren_close > paren_open {
+                let f_name = py_trim(rem.slice(def_kw_len, paren_open as usize));
+                let params_raw = py_trim(rem.slice((paren_open + 1) as usize, paren_close as usize));
+
+                var params: List<PyParamDecl> = [];
+                if params_raw.len() > 0 {
+                    var p_rem = params_raw;
+                    while p_rem.len() > 0 {
+                        let c_idx = p_rem.find(",");
+                        let seg = if c_idx >= 0 { p_rem.slice(0, c_idx as usize) } else { p_rem };
+                        p_rem = if c_idx >= 0 { p_rem.slice((c_idx + 1) as usize, p_rem.len()) } else { "" };
+                        let param = py_parse_param(seg);
+                        if param.name != "self" && param.name != "cls" {
+                            params.push(param);
+                        }
+                    }
+                }
+
+                // Return type
+                var ret_type = "None";
+                let after_paren = rem.slice((paren_close + 1) as usize, rem.len());
+                let arrow_idx = after_paren.find("->");
+                let colon_idx = after_paren.find(":");
+                if arrow_idx >= 0 && colon_idx > arrow_idx {
+                    ret_type = py_trim(after_paren.slice((arrow_idx + 2) as usize, colon_idx as usize));
+                }
+
+                let ret_k = py_classify_type(ret_type);
+                var meth = PyMethodDecl {
+                    name:           f_name,
+                    params:         params,
+                    return_type:    ret_type,
+                    ret_kind:       ret_k,
+                    is_static:      is_static,
+                    is_classmethod: is_classmethod,
+                    is_property:    is_property,
+                };
+
+                if cur_class_name.len() > 0 {
+                    let last_idx = stub.classes.len() - 1;
+                    stub.classes[last_idx].methods.push(meth);
+                } else {
+                    stub.functions.push(meth);
+                }
+
+                // Reset modifiers
+                is_static = false;
+                is_classmethod = false;
+                is_property = false;
+
+                let nl = rem.find("\n");
+                pos = if nl >= 0 { pos + (nl as usize) + 1 } else { n };
+                continue;
+            }
+        }
+
+        // Constant or module attribute: NAME: type = val or NAME = val
+        let nl_end = rem.find("\n");
+        let line_seg = if nl_end >= 0 { rem.slice(0, nl_end as usize) } else { rem };
+        if line_seg.find("=") >= 0 && !line_seg.starts_with(" ") && !line_seg.starts_with("\t") {
+            let eq_i = line_seg.find("=");
+            let lhs = py_trim(line_seg.slice(0, eq_i as usize));
+            let rhs = py_trim(line_seg.slice((eq_i + 1) as usize, line_seg.len()));
+            let colon_i = lhs.find(":");
+            var c_name = lhs;
+            var c_ty = "Any";
+            if colon_i >= 0 {
+                c_name = py_trim(lhs.slice(0, colon_i as usize));
+                c_ty = py_trim(lhs.slice((colon_i + 1) as usize, lhs.len()));
+            }
+            let tk = py_classify_type(c_ty);
+            stub.constants.push(PyParamDecl {
+                name:        c_name,
+                type_name:   c_ty,
+                type_kind:   tk,
+                is_vararg:   false,
+                is_kwarg:    false,
+                has_default: true,
+                default_val: rhs,
+            });
+        }
+
+        pos = if nl_end >= 0 { pos + (nl_end as usize) + 1 } else { n };
+    }
+
+    return stub;
+}
+
+// ------------------------------------------------------------------------------
+// 6. Vectorcall Fast-Path Wrapper Synthesizer
+// ------------------------------------------------------------------------------
+
+pub fn py_synthesize_vectorcall_wrapper(module: ref<PyModuleStub>, fn_name: str) -> str {
+    var out = "// ==============================================================================\n";
+    out = out + f"// Pilot In-Process Python Vectorcall Wrapper for '{module.module_name}.{fn_name}'\n";
+    out = out + "// Zero-copy stack frame argument packing via PyObject_Vectorcall\n";
+    out = out + "// ==============================================================================\n";
+    out = out + f"pub fn call_py_{fn_name}(callable: usize, args: slice<usize>, kwnames: slice<str>) -> res<usize, PyError> {{\n";
+    out = out + "    let gil = py_gil_acquire();\n";
+    out = out + "    let res = py_vectorcall_fast(callable, args, kwnames);\n";
+    out = out + "    py_gil_release(var gil);\n";
+    out = out + "    return res;\n";
+    out = out + "}\n";
+    return out;
+}

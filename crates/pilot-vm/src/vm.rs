@@ -17,21 +17,23 @@ pub struct PilVirtualMachine {
     pub reg_symbols: Vec<(u8, u32, u32)>,
     pub pc: usize,
     pub call_stack: Vec<(usize, [PilotVal; 256], u8)>,
-    pub heap_maps: Vec<HashMap<String, PilotVal>>,
-    pub hook: Option<VmHook>,
-    pub engine_handler: Option<EngineIntrinsicHandler>,
+    pub heap_maps: Vec<HashMap<String, PilotVal>>, pub heap_lists: Vec<Vec<PilotVal>>,
+    pub hook: Option<VmHook>, pub engine_handler: Option<EngineIntrinsicHandler>,
     pub shared_symbols: Option<std::sync::Arc<HashMap<u32, String>>>,
 }
 
 impl Default for PilVirtualMachine { fn default() -> Self { Self::new() } }
 #[inline] fn is_str(v: PilotVal) -> bool { v.is_sso_str() || v.tag() == 9 }
+#[inline] fn cmp_str_val(a: PilotVal, b: PilotVal) -> Option<std::cmp::Ordering> {
+    if is_str(a) && is_str(b) { a.with_str(|sa| b.with_str(|sb| sa.cmp(sb))).flatten() } else if is_str(a) || is_str(b) { Some(a.to_string_repr().cmp(&b.to_string_repr())) } else { None }
+}
 
 impl PilVirtualMachine {
     pub fn new() -> Self {
         Self {
             registers: [PilotVal::NULL; 256], constants: Vec::new(), instructions: Vec::new(),
             pc_spans: Vec::new(), reg_symbols: Vec::new(), pc: 0,
-            call_stack: Vec::with_capacity(64), heap_maps: Vec::new(), hook: None, engine_handler: None,
+            call_stack: Vec::with_capacity(64), heap_maps: Vec::new(), heap_lists: Vec::new(), hook: None, engine_handler: None,
             shared_symbols: None,
         }
     }
@@ -39,7 +41,7 @@ impl PilVirtualMachine {
     pub fn load_binary(&mut self, b: PilcBinary) {
         self.constants = b.constants; self.instructions = b.instructions;
         self.pc_spans = b.pc_spans; self.reg_symbols = b.reg_symbols;
-        self.pc = 0; self.call_stack.clear(); self.registers = [PilotVal::NULL; 256];
+        self.pc = 0; self.call_stack.clear(); self.heap_lists.clear(); self.registers = [PilotVal::NULL; 256];
     }
 
     pub fn set_hook(&mut self, hook: Option<VmHook>) { self.hook = hook; }
@@ -56,7 +58,7 @@ impl PilVirtualMachine {
             match ins.opcode() {
                 Opcode::Nop => {}
                 Opcode::AddI64 => {
-                    let v = if is_str(r1) || is_str(r2) { PilotVal::from_str(&format!("{}{}", r1.to_string_repr(), r2.to_string_repr())) }
+                    let v = if is_str(r1) || is_str(r2) { let mut s = String::new(); r1.with_str(|a| s.push_str(a)).unwrap_or_else(|| s.push_str(&r1.to_string_repr())); r2.with_str(|b| s.push_str(b)).unwrap_or_else(|| s.push_str(&r2.to_string_repr())); PilotVal::from_str(&s) }
                     else { PilotVal::from_int(r1.as_int().unwrap_or(0).wrapping_add(r2.as_int().unwrap_or(0))) };
                     unsafe { *self.registers.get_unchecked_mut(dst) = v };
                 }
@@ -70,12 +72,12 @@ impl PilVirtualMachine {
                 Opcode::DivF64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_float(r1.as_float().unwrap_or(0.0) / r2.as_float().unwrap_or(1.0)) },
                 Opcode::LoadConst => if let Some(&v) = self.constants.get((src1 << 8) | src2) { unsafe { *self.registers.get_unchecked_mut(dst) = v }; },
                 Opcode::Move => unsafe { *self.registers.get_unchecked_mut(dst) = r1 },
-                Opcode::CmpEq => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(if is_str(r1) && is_str(r2) { r1.with_str(|a| r2.with_str(|b| a == b).unwrap_or(false)).unwrap_or(false) } else if is_str(r1) || is_str(r2) { r1.to_string_repr() == r2.to_string_repr() } else { r1 == r2 }) },
-                Opcode::CmpNe => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(if is_str(r1) && is_str(r2) { r1.with_str(|a| r2.with_str(|b| a != b).unwrap_or(true)).unwrap_or(true) } else if is_str(r1) || is_str(r2) { r1.to_string_repr() != r2.to_string_repr() } else { r1 != r2 }) },
-                Opcode::CmpLt => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(if is_str(r1) || is_str(r2) { r1.to_string_repr() < r2.to_string_repr() } else { r1.as_int().unwrap_or(0) < r2.as_int().unwrap_or(0) }) },
-                Opcode::CmpGt => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(if is_str(r1) || is_str(r2) { r1.to_string_repr() > r2.to_string_repr() } else { r1.as_int().unwrap_or(0) > r2.as_int().unwrap_or(0) }) },
-                Opcode::CmpLe => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(if is_str(r1) || is_str(r2) { r1.to_string_repr() <= r2.to_string_repr() } else { r1.as_int().unwrap_or(0) <= r2.as_int().unwrap_or(0) }) },
-                Opcode::CmpGe => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(if is_str(r1) || is_str(r2) { r1.to_string_repr() >= r2.to_string_repr() } else { r1.as_int().unwrap_or(0) >= r2.as_int().unwrap_or(0) }) },
+                Opcode::CmpEq => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or(r1 == r2, |o| o.is_eq())) },
+                Opcode::CmpNe => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or(r1 != r2, |o| o.is_ne())) },
+                Opcode::CmpLt => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or_else(|| r1.as_int().unwrap_or(0) < r2.as_int().unwrap_or(0), |o| o.is_lt())) },
+                Opcode::CmpGt => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or_else(|| r1.as_int().unwrap_or(0) > r2.as_int().unwrap_or(0), |o| o.is_gt())) },
+                Opcode::CmpLe => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or_else(|| r1.as_int().unwrap_or(0) <= r2.as_int().unwrap_or(0), |o| o.is_le())) },
+                Opcode::CmpGe => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or_else(|| r1.as_int().unwrap_or(0) >= r2.as_int().unwrap_or(0), |o| o.is_ge())) },
                 Opcode::NegI64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(-r1.as_int().unwrap_or(0)) },
                 Opcode::NegF64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_float(-r1.as_float().unwrap_or(0.0)) },
                 Opcode::Not => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(!r1.as_bool().unwrap_or(false)) },
@@ -103,8 +105,9 @@ impl PilVirtualMachine {
                                 PilotVal::NULL
                             }
                             "rt_assert" => { if !args.first().map_or(false, |v| v.as_bool().unwrap_or(false) || v.as_int().unwrap_or(0) != 0) { panic!("Assertion failed in PilVM execution"); } PilotVal::NULL }
-                            "str_len" if !args.is_empty() => { if let Some(idx) = args[0].as_int().filter(|&i| i >= 0 && (i as usize) < self.heap_maps.len()) { if let Some(lv) = self.heap_maps[idx as usize].get("len") { return *lv; } } PilotVal::from_int(if args[0].is_null() { 0 } else { args[0].with_str(|s| s.len() as i64).unwrap_or_else(|| args[0].to_string_repr().len() as i64) }) }
-                            "list_push" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(-1); if idx >= 0 && (idx as usize) < self.heap_maps.len() { let cur_len = self.heap_maps[idx as usize].get("len").and_then(|v| v.as_int()).unwrap_or(0); let m = &mut self.heap_maps[idx as usize]; m.insert(cur_len.to_string(), args[1]); m.insert("len".to_string(), PilotVal::from_int(cur_len + 1)); PilotVal::from_int(cur_len + 1) } else { PilotVal::NULL } }
+                            "str_len" if !args.is_empty() => { if let Some(i) = args[0].as_int() { if i < 0 { let li = (-i - 1) as usize; if li < self.heap_lists.len() { return PilotVal::from_int(self.heap_lists[li].len() as i64); } } else if (i as usize) < self.heap_maps.len() { if let Some(lv) = self.heap_maps[i as usize].get("len") { return *lv; } } } PilotVal::from_int(if args[0].is_null() { 0 } else { args[0].with_str(|s| s.len() as i64).unwrap_or_else(|| args[0].to_string_repr().len() as i64) }) }
+                            "list_new" => { let idx = self.heap_lists.len(); self.heap_lists.push(Vec::new()); PilotVal::from_int(-(idx as i64 + 1)) }
+                            "list_push" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(0); if idx < 0 { let li = (-idx - 1) as usize; if li < self.heap_lists.len() { self.heap_lists[li].push(args[1]); args[0] } else { PilotVal::NULL } } else if (idx as usize) < self.heap_maps.len() { let cur_len = self.heap_maps[idx as usize].get("len").and_then(|v| v.as_int()).unwrap_or(0); let m = &mut self.heap_maps[idx as usize]; m.insert(cur_len.to_string(), args[1]); m.insert("len".to_string(), PilotVal::from_int(cur_len + 1)); args[0] } else { PilotVal::NULL } }
                             "str_byte_at" if args.len() >= 2 => { let idx = args[1].as_int().unwrap_or(0).max(0) as usize; PilotVal::from_int(if args[0].is_null() { 0 } else { args[0].with_str(|s| s.as_bytes().get(idx).copied().unwrap_or(0) as i64).unwrap_or_else(|| args[0].to_string_repr().as_bytes().get(idx).copied().unwrap_or(0) as i64) }) }
                             "str_slice" if args.len() >= 3 => { let slice_fn = |s: &str| { let (mut a, mut b) = ((args[1].as_int().unwrap_or(0).max(0) as usize).min(s.len()), (args[2].as_int().unwrap_or(0).max(0) as usize).min(s.len())); while !s.is_char_boundary(a) && a < s.len() { a += 1; } while !s.is_char_boundary(b) && b < s.len() { b += 1; } PilotVal::from_str(&s[a..b.max(a)]) }; if args[0].is_null() { PilotVal::from_str("") } else { args[0].with_str(slice_fn).unwrap_or_else(|| slice_fn(&args[0].to_string_repr())) } }
                             "str_find" if args.len() >= 2 => { let st = if args.len() >= 3 { args[2].as_int().unwrap_or(0) } else { 0 }; if st < 0 || args[0].is_null() || args[1].is_null() { PilotVal::from_int(-1) } else { let find_fn = |h: &str, nd: &str| { let mut u = (st as usize).min(h.len()); while !h.is_char_boundary(u) && u < h.len() { u += 1; } h[u..].find(nd).map_or(-1, |o| (u + o) as i64) }; PilotVal::from_int(args[0].with_str(|h| args[1].with_str(|nd| find_fn(h, nd)).unwrap_or_else(|| find_fn(h, &args[1].to_string_repr()))).unwrap_or(-1)) } }
@@ -112,8 +115,8 @@ impl PilVirtualMachine {
                             "str_starts_with" if args.len() >= 2 => PilotVal::from_bool(if args[0].is_null() || args[1].is_null() { false } else { args[0].with_str(|h| args[1].with_str(|nd| h.starts_with(nd)).unwrap_or_else(|| h.starts_with(&args[1].to_string_repr()))).unwrap_or(false) }),
                             "str_ends_with" if args.len() >= 2 => PilotVal::from_bool(if args[0].is_null() || args[1].is_null() { false } else { args[0].with_str(|h| args[1].with_str(|nd| h.ends_with(nd)).unwrap_or_else(|| h.ends_with(&args[1].to_string_repr()))).unwrap_or(false) }),
                             "map_new" => { let idx = self.heap_maps.len(); self.heap_maps.push(HashMap::new()); PilotVal::from_int(idx as i64) }
-                            "map_set" if args.len() >= 3 => { let idx = args[0].as_int().unwrap_or(-1); if idx >= 0 { while self.heap_maps.len() <= idx as usize { self.heap_maps.push(HashMap::new()); } self.heap_maps[idx as usize].insert(args[1].to_string_repr(), args[2]); } args[0] }
-                            "map_get" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(-1); if idx >= 0 && (idx as usize) < self.heap_maps.len() { let m = &self.heap_maps[idx as usize]; args[1].with_str(|k| m.get(k).copied()).unwrap_or_else(|| m.get(&args[1].to_string_repr()).copied()).unwrap_or(PilotVal::NULL) } else { PilotVal::NULL } }
+                            "map_set" if args.len() >= 3 => { let idx = args[0].as_int().unwrap_or(0); if idx < 0 { let li = (-idx - 1) as usize; if li < self.heap_lists.len() { if let Some(k) = args[1].as_int() { if k >= 0 && (k as usize) < self.heap_lists[li].len() { self.heap_lists[li][k as usize] = args[2]; } } } args[0] } else if idx >= 0 { while self.heap_maps.len() <= idx as usize { self.heap_maps.push(HashMap::new()); } self.heap_maps[idx as usize].insert(args[1].to_string_repr(), args[2]); args[0] } else { args[0] } }
+                            "map_get" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(0); if idx < 0 { let li = (-idx - 1) as usize; if li < self.heap_lists.len() { let k_opt = args[1].as_int().or_else(|| args[1].with_str(|s| s.parse::<i64>().ok()).flatten()); if let Some(k) = k_opt { if k >= 0 && (k as usize) < self.heap_lists[li].len() { return self.heap_lists[li][k as usize]; } } else if args[1].with_str(|s| s == "len").unwrap_or_else(|| args[1].to_string_repr() == "len") { return PilotVal::from_int(self.heap_lists[li].len() as i64); } } PilotVal::NULL } else if (idx as usize) < self.heap_maps.len() { let m = &self.heap_maps[idx as usize]; args[1].with_str(|k| m.get(k).copied()).unwrap_or_else(|| m.get(&args[1].to_string_repr()).copied()).unwrap_or(PilotVal::NULL) } else { PilotVal::NULL } }
                             "map_has" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(-1); if idx >= 0 && (idx as usize) < self.heap_maps.len() { let m = &self.heap_maps[idx as usize]; PilotVal::from_bool(args[1].with_str(|k| m.contains_key(k)).unwrap_or_else(|| m.contains_key(&args[1].to_string_repr()))) } else { PilotVal::FALSE } }
                             "map_remove" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(-1); if idx >= 0 && (idx as usize) < self.heap_maps.len() { let removed = args[1].with_str(|k| self.heap_maps[idx as usize].remove(k)).unwrap_or_else(|| self.heap_maps[idx as usize].remove(&args[1].to_string_repr())); PilotVal::from_bool(removed.is_some()) } else { PilotVal::FALSE } }
                             "is_null" if !args.is_empty() => PilotVal::from_bool(args[0].is_null()),

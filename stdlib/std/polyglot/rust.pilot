@@ -1,0 +1,187 @@
+// ==============================================================================
+// FILE: stdlib/std/polyglot/rust.pilot
+// Milestone 16.3: Native Rust Crate Adapter - Zero-Copy Runtime & Cross-Allocator RAII
+// RustPanicErr, DynTraitFatPtr, RustVec<T> (0b10), RustString (0b10), RST001
+// ==============================================================================
+pub lvl(0) pkg std.polyglot.rust;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Rust Diagnostic Codes & Panic Value Type (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+pub const RST001_CROSS_ALLOCATOR_ERR: str = "RST001";
+
+[Layout(c_abi)]
+pub struct RustPanicErr : IValue {
+    pub message:    str;
+    pub panic_code: u32;
+
+    pub static pure fn create(msg: str) -> RustPanicErr => RustPanicErr {
+        message:    msg,
+        panic_code: 101, // Rust standard panic exit code
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. Dynamic Trait Fat Pointer { data, vtable } (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct DynTraitFatPtr : IValue {
+    pub data_ptr:   i64;
+    pub vtable_ptr: i64;
+
+    pub static pure fn create(data: i64, vtable: i64) -> DynTraitFatPtr => DynTraitFatPtr {
+        data_ptr:   data,
+        vtable_ptr: vtable,
+    };
+
+    pub pure fn is_valid(ref self) -> bool => .data_ptr != 0 && .vtable_ptr != 0;
+}
+
+// ------------------------------------------------------------------------------
+// 3. Rust Vec<T> Owned Object (0b10 : IObject)
+// Drops via Rust's allocator deallocator hook so memory heaps never cross-free!
+// ------------------------------------------------------------------------------
+
+pub struct RustVec<T: IAnyValue> : IObject {
+    pub raw_ptr:   i64;
+    pub capacity:  usize;
+    pub len:       usize;
+    pub dtor_fn:   i64;
+    pub is_armed:  bool;
+
+    pub static fn from_raw_parts(p: i64, cap: usize, len: usize, dtor: i64) -> RustVec<T> {
+        let armed = p != 0 && dtor != 0;
+        return RustVec {
+            raw_ptr:  p,
+            capacity: cap,
+            len:      len,
+            dtor_fn:  dtor,
+            is_armed: armed,
+        };
+    }
+
+    pub pure fn len(ref self) -> usize => .len;
+    pub pure fn cap(ref self) -> usize => .capacity;
+    pub pure fn is_empty(ref self) -> bool => .len == 0;
+
+    pub pure fn as_slice(ref self) -> slice<T> {
+        return slice<T> {
+            data: .raw_ptr as ptr<T>,
+            len:  .len,
+        };
+    }
+
+    pub var fn take_raw(ref self) -> i64 {
+        let p = .raw_ptr;
+        .is_armed = false;
+        .raw_ptr = 0;
+        return p;
+    }
+
+    ~self() {
+        if .is_armed && .raw_ptr != 0 && .dtor_fn != 0 {
+            // Invokes Rust's Vec::from_raw_parts deallocator
+            let dtor = .dtor_fn as fn(i64, usize, usize) -> void;
+            dtor(.raw_ptr, .capacity, .len);
+            .is_armed = false;
+        }
+    }
+}
+
+pub fn rust_vec_from_raw_parts(p: i64, cap: usize, len: usize, dtor: i64) -> RustVec<i64> {
+    let armed = p != 0 && dtor != 0;
+    return RustVec {
+        raw_ptr:  p,
+        capacity: cap,
+        len:      len,
+        dtor_fn:  dtor,
+        is_armed: armed,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Rust String Owned Object (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct RustString : IObject {
+    pub raw_ptr:   i64;
+    pub capacity:  usize;
+    pub len:       usize;
+    pub dtor_fn:   i64;
+    pub is_armed:  bool;
+
+    pub static fn from_raw_parts(p: i64, cap: usize, len: usize, dtor: i64) -> RustString {
+        let armed = p != 0 && dtor != 0;
+        return RustString {
+            raw_ptr:  p,
+            capacity: cap,
+            len:      len,
+            dtor_fn:  dtor,
+            is_armed: armed,
+        };
+    }
+
+    pub pure fn len(ref self) -> usize => .len;
+    pub pure fn cap(ref self) -> usize => .capacity;
+    pub pure fn is_empty(ref self) -> bool => .len == 0;
+
+    pub pure fn as_str(ref self) -> str {
+        if .raw_ptr == 0 || .length == 0 {
+            return "";
+        }
+        return str::from_raw_parts(.raw_ptr as ptr<u8>, .length);
+    }
+
+    pub var fn take_raw(ref self) -> i64 {
+        let p = .raw_ptr;
+        .is_armed = false;
+        .raw_ptr = 0;
+        return p;
+    }
+
+    ~self() {
+        if .is_armed && .raw_ptr != 0 && .dtor_fn != 0 {
+            let dtor = .dtor_fn as fn(i64, usize, usize) -> void;
+            dtor(.raw_ptr, .capacity, .length);
+            .is_armed = false;
+        }
+    }
+}
+
+pub fn rust_string_from_raw_parts(p: i64, cap: usize, len: usize, dtor: i64) -> RustString {
+    return RustString::from_raw_parts(p, cap, len, dtor);
+}
+
+// ------------------------------------------------------------------------------
+// 5. Zero-Crash Panic Catch Landing-Pad (res<i64, RustPanicErr>)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct RustCatchResult : IValue {
+    pub is_ok:   bool;
+    pub ok_val:  i64;
+    pub err_val: RustPanicErr;
+}
+
+pub fn rust_landing_pad_catch(
+    is_ok_flag: i64,
+    val: i64,
+    err_msg: str
+) -> RustCatchResult {
+    if is_ok_flag != 0 {
+        return RustCatchResult {
+            is_ok:   true,
+            ok_val:  val,
+            err_val: RustPanicErr::create(""),
+        };
+    }
+    return RustCatchResult {
+        is_ok:   false,
+        ok_val:  0,
+        err_val: RustPanicErr::create(if err_msg.len() > 0 { err_msg } else { "Rust panic unwound" }),
+    };
+}

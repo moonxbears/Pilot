@@ -332,13 +332,12 @@ impl BytecodeCompiler {
                 r_map
             }
             NodeKind::ListExpr => {
-                let (ch, (r_new, r_map, r_set)) = (arena.children_slice(node.lhs, node.rhs), (self.emit_const(PilotVal::from_str("map_new")), self.alloc_reg(), self.alloc_reg()));
-                self.emit(Opcode::EngineIntrinsic, r_map, r_new, 0);
-                let c_set = self.add_constant(PilotVal::from_str("map_set"));
-                self.emit(Opcode::LoadConst, r_set, (c_set >> 8) as u8, (c_set & 0xFF) as u8);
-                for (idx, &cid) in ch.iter().enumerate() { let (r_v, r_k) = (self.compile_node(arena, NodeId(cid)), self.emit_const(PilotVal::from_str(&idx.to_string()))); self.stage_args(&[r_map, r_k, r_v]); self.emit(Opcode::EngineIntrinsic, r_map, r_set, 3); }
-                let (r_lk, r_lv) = (self.emit_const(PilotVal::from_str("len")), self.emit_const(PilotVal::from_int(ch.len() as i64)));
-                self.stage_args(&[r_map, r_lk, r_lv]); self.emit(Opcode::EngineIntrinsic, r_map, r_set, 3); r_map
+                let (ch, (r_new, r_list, r_push)) = (arena.children_slice(node.lhs, node.rhs), (self.emit_const(PilotVal::from_str("list_new")), self.alloc_reg(), self.alloc_reg()));
+                self.emit(Opcode::EngineIntrinsic, r_list, r_new, 0);
+                let c_push = self.add_constant(PilotVal::from_str("list_push"));
+                self.emit(Opcode::LoadConst, r_push, (c_push >> 8) as u8, (c_push & 0xFF) as u8);
+                for &cid in ch.iter() { let r_v = self.compile_node(arena, NodeId(cid)); self.stage_args(&[r_list, r_v]); self.emit(Opcode::EngineIntrinsic, r_list, r_push, 2); }
+                r_list
             }
             NodeKind::CallExpr => {
                 let (arg_start, arg_len) = (node.lhs as usize, node.rhs as usize);

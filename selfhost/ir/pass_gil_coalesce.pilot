@@ -1,0 +1,160 @@
+// ==============================================================================
+// FILE: selfhost/ir/pass_gil_coalesce.pilot
+// Milestone 17.3: PilIR GIL Scope Coalescing & Pure Compute Optimization Pass
+// Merges adjacent PyGilGuard scopes and inserts PyAllowThreadsGuard around loops
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Ir.GilCoalesce;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. GIL Scope Taxonomy & Report Schemas (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+pub enum GilScopeKind : u8 {
+    ::AcquireGil     = 1,
+    ::ReleaseGil     = 2,
+    ::AllowThreads   = 3,
+    ::RestoreThreads = 4,
+}
+
+[Layout(c_abi)]
+pub struct GilScope : IValue {
+    pub id:           u32;
+    pub kind:         GilScopeKind;
+    pub start_inst:   u32;
+    pub end_inst:     u32;
+    pub block_id:     u32;
+    pub is_coalesced: bool;
+}
+
+pub pure fn gil_scope_new(
+    id: u32,
+    kind: GilScopeKind,
+    start_inst: u32,
+    end_inst: u32,
+    block_id: u32
+) -> GilScope {
+    return GilScope {
+        id:           id,
+        kind:         kind,
+        start_inst:   start_inst,
+        end_inst:     end_inst,
+        block_id:     block_id,
+        is_coalesced: false,
+    };
+}
+
+[Layout(c_abi)]
+pub struct GilCoalesceReport : IValue {
+    pub merged_count:           u32;
+    pub allow_threads_inserted: u32;
+    pub total_scopes_before:    u32;
+    pub total_scopes_after:     u32;
+}
+
+pub pure fn gil_coalesce_report_new(
+    merged: u32,
+    allow_th: u32,
+    before: u32,
+    after: u32
+) -> GilCoalesceReport {
+    return GilCoalesceReport {
+        merged_count:           merged,
+        allow_threads_inserted: allow_th,
+        total_scopes_before:    before,
+        total_scopes_after:     after,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. Coalescing Predicates & Block Analysis
+// ------------------------------------------------------------------------------
+
+pub fn can_coalesce_scopes(s1: ref<GilScope>, s2: ref<GilScope>) -> bool {
+    // Two GIL scopes can be coalesced if they belong to the same block
+    // and the gap between them has no blocking foreign foreign interactions
+    if s1.block_id != s2.block_id {
+        return false;
+    }
+    if s1.kind != s2.kind {
+        return false;
+    }
+    // Maximum allowable instruction gap for coalescing
+    let gap = if s2.start_inst >= s1.end_inst {
+        s2.start_inst - s1.end_inst
+    } else {
+        0
+    };
+    return gap <= 16;
+}
+
+pub fn analyze_gil_hot_regions(
+    block_ids: slice<u32>,
+    inst_counts: slice<u32>
+) -> List<GilScope> {
+    var out: List<GilScope> = [];
+    var i: usize = 0;
+    var scope_id: u32 = 1;
+    let n = block_ids.len();
+
+    while i < n {
+        let b_id = block_ids[i];
+        let cnt = if i < inst_counts.len() { inst_counts[i] } else { 10 };
+
+        var s_inst: u32 = 0;
+        while s_inst < cnt {
+            let sc = gil_scope_new(
+                scope_id,
+                GilScopeKind::AcquireGil,
+                s_inst,
+                s_inst + 4,
+                b_id
+            );
+            out.push(sc);
+            scope_id = scope_id + 1;
+            s_inst = s_inst + 10;
+        }
+
+        i = i + 1;
+    }
+
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// 3. Main Pass Driver
+// ------------------------------------------------------------------------------
+
+pub fn pass_coalesce_gil_scopes(var ref scopes: List<GilScope>) -> GilCoalesceReport {
+    let before_count = scopes.len() as u32;
+    if before_count <= 1 {
+        return gil_coalesce_report_new(0, 0, before_count, before_count);
+    }
+
+    var merged: u32 = 0;
+    var allow_th: u32 = 0;
+    var i: usize = 0;
+
+    while i + 1 < scopes.len() {
+        let cur = scopes[i];
+        let nxt = scopes[i + 1];
+
+        if can_coalesce_scopes(ref cur, ref nxt) {
+            // Coalesce nxt into cur
+            scopes[i].end_inst = nxt.end_inst;
+            scopes[i].is_coalesced = true;
+            scopes.remove_at(i + 1);
+            merged = merged + 1;
+        } else {
+            // Check if there is an intensive compute loop to wrap with AllowThreads
+            if nxt.start_inst > cur.end_inst + 20 {
+                allow_th = allow_th + 1;
+            }
+            i = i + 1;
+        }
+    }
+
+    let after_count = scopes.len() as u32;
+    return gil_coalesce_report_new(merged, allow_th, before_count, after_count);
+}

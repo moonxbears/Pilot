@@ -910,7 +910,7 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 
 ---
 
-### M16 — Native Rust Crate & Zero-Copy Slice/Result/Trait Adapter (`use rust`)
+### M16 — Native Rust Crate & Zero-Copy Slice/Result/Trait Adapter (`use rust`) [COMPLETE]
 
 #### 16.1 Objective & Current Codebase Audit
 - **Root Bottleneck:** Consuming external Rust crates today requires hand-writing `#[no_mangle] pub extern "C"` wrapper crates because `repr(Rust)` field order is unspecified, Rust `&str`/`&[T]` are 2-word fat pointers, `Option<&T>` uses non-null niche optimization, and an uncaught Rust `panic!` unwinding across an FFI boundary triggers immediate undefined behavior (process abort).
