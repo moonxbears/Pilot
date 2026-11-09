@@ -10,16 +10,13 @@ pub type VmHook = Box<dyn FnMut(usize, Instruction, &[PilotVal; 256])>;
 pub type EngineIntrinsicHandler = Box<dyn FnMut(&str, &[PilotVal]) -> Result<PilotVal, String>>;
 
 pub struct PilVirtualMachine {
-    pub registers: [PilotVal; 256],
-    pub constants: Vec<PilotVal>,
-    pub instructions: Vec<Instruction>,
-    pub pc_spans: Vec<ByteSpan>,
-    pub reg_symbols: Vec<(u8, u32, u32)>,
-    pub pc: usize,
+    pub registers: [PilotVal; 256], pub constants: Vec<PilotVal>, pub instructions: Vec<Instruction>,
+    pub pc_spans: Vec<ByteSpan>, pub reg_symbols: Vec<(u8, u32, u32)>, pub pc: usize,
     pub call_stack: Vec<(usize, usize, u16, u8)>, pub reg_stack: Vec<PilotVal>,
     pub heap_maps: Vec<HashMap<String, PilotVal>>, pub heap_lists: Vec<Vec<PilotVal>>,
     pub hook: Option<VmHook>, pub engine_handler: Option<EngineIntrinsicHandler>,
     pub shared_symbols: Option<std::sync::Arc<HashMap<u32, String>>>,
+    pub fuel_limit: Option<u64>, pub fuel_used: u64, pub fuel_exhausted: bool,
 }
 
 impl Default for PilVirtualMachine { fn default() -> Self { Self::new() } }
@@ -34,7 +31,7 @@ impl PilVirtualMachine {
             registers: [PilotVal::NULL; 256], constants: Vec::new(), instructions: Vec::new(),
             pc_spans: Vec::new(), reg_symbols: Vec::new(), pc: 0,
             call_stack: Vec::with_capacity(64), reg_stack: Vec::with_capacity(512), heap_maps: Vec::new(), heap_lists: Vec::new(), hook: None, engine_handler: None,
-            shared_symbols: None,
+            shared_symbols: None, fuel_limit: None, fuel_used: 0, fuel_exhausted: false,
         }
     }
 
@@ -42,6 +39,7 @@ impl PilVirtualMachine {
         self.constants = b.constants; self.instructions = b.instructions;
         self.pc_spans = b.pc_spans; self.reg_symbols = b.reg_symbols;
         self.pc = 0; self.call_stack.clear(); self.reg_stack.clear(); self.heap_lists.clear(); self.registers = [PilotVal::NULL; 256];
+        self.fuel_used = 0; self.fuel_exhausted = false;
     }
 
     pub fn set_hook(&mut self, hook: Option<VmHook>) { self.hook = hook; }
@@ -50,6 +48,7 @@ impl PilVirtualMachine {
     pub fn run(&mut self) -> PilotVal {
         let code_len = self.instructions.len();
         while self.pc < code_len {
+            if let Some(limit) = self.fuel_limit { self.fuel_used += 1; if self.fuel_used > limit { self.fuel_exhausted = true; return PilotVal::NULL; } }
             let ins = unsafe { *self.instructions.get_unchecked(self.pc) };
             if let Some(ref mut hook) = self.hook { hook(self.pc, ins, &self.registers); }
             self.pc += 1;

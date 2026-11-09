@@ -1,0 +1,212 @@
+// ==============================================================================
+// FILE: selfhost/comptime/guardian.pilot
+// Milestone 29: Capability-Sandboxed & Deterministic comptime Execution
+// Enforces:
+//   CTIME001: Unauthorized comptime Filesystem Access or .. Path Traversal Blocked
+//   CTIME002: Unauthorized comptime Network/Subprocess/FFI Call Blocked
+//   CTIME003: Non-Deterministic Host Clock/Entropy Blocked — Use Deterministic Seed
+//   CTIME004: comptime Instruction Fuel Exhausted — Possible Infinite Loop
+//   CTIME005: comptime Sandbox Heap Quota Exceeded
+//   CTIME006: Untrusted Dependency Requested Unapproved comptime Capability
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Comptime.Guardian;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Formatting Helpers
+// ------------------------------------------------------------------------------
+
+pub pure fn format_ctime001(path: str, reason: str) -> str {
+    return "CTIME001: Unauthorized comptime filesystem access to '" + path + "': " + reason;
+}
+
+pub pure fn format_ctime002(op_kind: str, target: str) -> str {
+    return "CTIME002: Unauthorized comptime " + op_kind + " call to '" + target + "' blocked; capability not granted in root pkg.pilot";
+}
+
+pub pure fn format_ctime003(source: str) -> str {
+    return "CTIME003: Non-deterministic host " + source + " blocked in comptime; use deterministic comptime PRNG / clock seed";
+}
+
+pub pure fn format_ctime004(limit: u64) -> str {
+    return "CTIME004: comptime instruction fuel exhausted (limit: " + (limit as str) + " instructions); possible infinite loop";
+}
+
+pub pure fn format_ctime005(allocated: usize, limit: usize) -> str {
+    return "CTIME005: comptime sandbox heap quota exceeded (" + (allocated as str) + " bytes allocated, limit: " + (limit as str) + " bytes)";
+}
+
+pub pure fn format_ctime006(dep_name: str, unapproved_cap: str) -> str {
+    return "CTIME006: Untrusted dependency '" + dep_name + "' requested unapproved comptime capability '" + unapproved_cap + "'; must be explicitly granted in root [comptime.grants]";
+}
+
+// ------------------------------------------------------------------------------
+// 2. Capability Bitmasks & Policy Schema
+// ------------------------------------------------------------------------------
+
+pub pure fn cap_none()       -> u32 => 0;
+pub pure fn cap_fs_read()    -> u32 => 1;
+pub pure fn cap_fs_write()   -> u32 => 2;
+pub pure fn cap_net()        -> u32 => 4;
+pub pure fn cap_env()        -> u32 => 8;
+pub pure fn cap_subprocess() -> u32 => 16;
+pub pure fn cap_ffi()        -> u32 => 32;
+pub pure fn cap_all()        -> u32 => 63;
+
+[Layout(c_abi)]
+pub struct ComptimePolicy : IValue {
+    pub caps_mask:      u32;
+    pub fuel_limit:     u64;
+    pub max_heap_bytes: usize;
+}
+
+pub pure fn comptime_policy_new(caps: u32, fuel: u64, max_heap: usize) -> ComptimePolicy {
+    return ComptimePolicy {
+        caps_mask:      caps,
+        fuel_limit:     fuel,
+        max_heap_bytes: max_heap,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Comptime Guardian Schema (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct ComptimeGuardian : IObject {
+    pub policy:         ComptimePolicy;
+    pub fuel_consumed:  u64;
+    pub heap_allocated: usize;
+    pub allowed_globs:  List<str>;
+    pub allowed_envs:   List<str>;
+    pub accessed_files: List<str>;
+    pub accessed_envs:  List<str>;
+    pub diagnostics:    List<str>;
+}
+
+pub fn comptime_guardian_new(caps: u32, fuel: u64, max_heap: usize) -> ComptimeGuardian {
+    return ComptimeGuardian {
+        policy:         comptime_policy_new(caps, fuel, max_heap),
+        fuel_consumed:  0,
+        heap_allocated: 0,
+        allowed_globs:  [],
+        allowed_envs:   [],
+        accessed_files: [],
+        accessed_envs:  [],
+        diagnostics:    [],
+    };
+}
+
+pub var fn guardian_add_allowed_glob(var ref self: ComptimeGuardian, glob: str) {
+    self.allowed_globs.push(glob);
+}
+
+pub var fn guardian_add_allowed_env(var ref self: ComptimeGuardian, env_var: str) {
+    self.allowed_envs.push(env_var);
+}
+
+// ------------------------------------------------------------------------------
+// 4. Security & Sandbox Invariant Checkers
+// ------------------------------------------------------------------------------
+
+fn str_contains_sub(haystack: str, needle: str) -> bool {
+    let hl = haystack.len();
+    let nl = needle.len();
+    if nl == 0 { return true; }
+    if nl > hl { return false; }
+    var i = 0;
+    while i + nl <= hl {
+        if haystack.slice(i, i + nl) == needle { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub var fn guardian_check_fs_read(var ref self: ComptimeGuardian, path: str) -> str {
+    // 1. Path traversal guard: block ".."
+    if str_contains_sub(path, "..") {
+        let diag = format_ctime001(path, "path traversal '..' forbidden");
+        self.diagnostics.push(diag);
+        return diag;
+    }
+
+    // 2. Absolute system path guard: block "/etc" or root access
+    if path.len() > 0 && path.byte_at(0) == 47 { // '/'
+        if str_contains_sub(path, "/etc/") || str_contains_sub(path, "/proc/") || str_contains_sub(path, "/sys/") {
+            let diag = format_ctime001(path, "access to host system directory forbidden");
+            self.diagnostics.push(diag);
+            return diag;
+        }
+    }
+
+    // 3. Capability check: FsRead
+    if (self.policy.caps_mask & cap_fs_read()) == 0 {
+        let diag = format_ctime001(path, "filesystem read capability not granted");
+        self.diagnostics.push(diag);
+        return diag;
+    }
+
+    self.accessed_files.push(path);
+    return "";
+}
+
+pub var fn guardian_check_net(var ref self: ComptimeGuardian, host: str, port: u16) -> str {
+    if (self.policy.caps_mask & cap_net()) == 0 {
+        let target = host + ":" + (port as str);
+        let diag = format_ctime002("network", target);
+        self.diagnostics.push(diag);
+        return diag;
+    }
+    return "";
+}
+
+pub var fn guardian_check_subprocess(var ref self: ComptimeGuardian, cmd: str) -> str {
+    if (self.policy.caps_mask & cap_subprocess()) == 0 {
+        let diag = format_ctime002("subprocess", cmd);
+        self.diagnostics.push(diag);
+        return diag;
+    }
+    return "";
+}
+
+pub var fn guardian_check_clock(var ref self: ComptimeGuardian) -> str {
+    let diag = format_ctime003("clock / entropy");
+    self.diagnostics.push(diag);
+    return diag;
+}
+
+pub var fn guardian_consume_fuel(var ref self: ComptimeGuardian, steps: u64) -> str {
+    self.fuel_consumed = self.fuel_consumed + steps;
+    if self.fuel_consumed > self.policy.fuel_limit {
+        let diag = format_ctime004(self.policy.fuel_limit);
+        self.diagnostics.push(diag);
+        return diag;
+    }
+    return "";
+}
+
+pub var fn guardian_allocate_heap(var ref self: ComptimeGuardian, bytes: usize) -> str {
+    self.heap_allocated = self.heap_allocated + bytes;
+    if self.heap_allocated > self.policy.max_heap_bytes {
+        let diag = format_ctime005(self.heap_allocated, self.policy.max_heap_bytes);
+        self.diagnostics.push(diag);
+        return diag;
+    }
+    return "";
+}
+
+pub pure fn guardian_check_dependency_grant(root_mask: u32, dep_mask: u32, dep_name: str) -> str {
+    if (dep_mask & root_mask) != dep_mask {
+        var unapproved = "privileged capabilities";
+        if (dep_mask & cap_fs_read()) != 0 && (root_mask & cap_fs_read()) == 0 {
+            unapproved = "fs.read";
+        } else if (dep_mask & cap_net()) != 0 && (root_mask & cap_net()) == 0 {
+            unapproved = "net";
+        } else if (dep_mask & cap_subprocess()) != 0 && (root_mask & cap_subprocess()) == 0 {
+            unapproved = "subprocess";
+        }
+        return format_ctime006(dep_name, unapproved);
+    }
+    return "";
+}

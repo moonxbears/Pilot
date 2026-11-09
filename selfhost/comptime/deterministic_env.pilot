@@ -1,0 +1,137 @@
+// ==============================================================================
+// FILE: selfhost/comptime/deterministic_env.pilot
+// Milestone 29: Capability-Sandboxed & Deterministic comptime Execution
+// Provides insertion-ordered deterministic map backing, virtualized monotonic
+// 0-epoch clock, content-seeded deterministic PRNG, and path normalization.
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Comptime.DetEnv;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Virtualized Monotonic 0-Epoch Clock
+// ------------------------------------------------------------------------------
+
+pub pure fn clock_now_virtual(instruction_steps: u64) -> u64 {
+    // 1 instruction step = 10 virtual nanoseconds
+    return instruction_steps * 10;
+}
+
+// ------------------------------------------------------------------------------
+// 2. Content-Seeded Deterministic PRNG (XorShift64)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct DetPrng : IValue {
+    pub state: u64;
+
+    pub static pure fn from_seed(seed: u64) -> DetPrng {
+        let s = if seed == 0 { 0x5151515151515151 } else { seed };
+        return DetPrng { state: s };
+    }
+
+    pub var fn next_u64(var ref self) -> u64 {
+        var x = self.state;
+        x = x ^ (x << 13);
+        x = x ^ (x >> 7);
+        x = x ^ (x << 17);
+        self.state = x;
+        return x;
+    }
+
+    pub var fn next_range(var ref self, min_val: u64, max_val: u64) -> u64 {
+        if max_val <= min_val { return min_val; }
+        let span = (max_val - min_val) + 1;
+        let r = self.next_u64();
+        return min_val + (r % span);
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 3. Insertion-Ordered Deterministic Map Backing
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct DetMapEntry : IValue {
+    pub key: str;
+    pub val: i64;
+}
+
+pub struct DetMap : IObject {
+    pub entries: List<DetMapEntry>;
+}
+
+pub fn det_map_new() -> DetMap {
+    return DetMap {
+        entries: [],
+    };
+}
+
+pub var fn det_map_set(var ref self: DetMap, key: str, val: i64) {
+    var i = 0;
+    while i < self.entries.len() {
+        if self.entries[i].key == key {
+            self.entries[i] = DetMapEntry { key: key, val: val };
+            return;
+        }
+        i = i + 1;
+    }
+    self.entries.push(DetMapEntry { key: key, val: val });
+}
+
+pub pure fn det_map_get(self: ref<DetMap>, key: str) -> i64 {
+    var i = 0;
+    while i < self.entries.len() {
+        if self.entries[i].key == key {
+            return self.entries[i].val;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+pub pure fn det_map_has(self: ref<DetMap>, key: str) -> bool {
+    var i = 0;
+    while i < self.entries.len() {
+        if self.entries[i].key == key {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn det_map_keys_ordered(self: ref<DetMap>) -> List<str> {
+    var keys: List<str> = [];
+    var i = 0;
+    while i < self.entries.len() {
+        keys.push(self.entries[i].key);
+        i = i + 1;
+    }
+    return keys;
+}
+
+// ------------------------------------------------------------------------------
+// 4. Virtual Path Normalizer (Cross-Platform Slashes)
+// ------------------------------------------------------------------------------
+
+pub fn normalize_virtual_path(path: str) -> str {
+    var out = "";
+    var i = 0;
+    let pl = path.len();
+    while i < pl {
+        let b = path.byte_at(i);
+        if b == 92 { // '\' -> '/'
+            out = out + "/";
+        } else {
+            out = out + path.slice(i, i + 1);
+        }
+        i = i + 1;
+    }
+    // Strip leading "./" if present
+    if out.len() >= 2 && out.slice(0, 2) == "./" {
+        out = out.slice(2, out.len());
+    }
+    return out;
+}

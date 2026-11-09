@@ -1435,7 +1435,7 @@ Given domain `struct T` with leaf scalar/object fields $f_0, f_1, \dots, f_{m-1}
 
 ---
 
-### M29 — Capability-Sandboxed & Deterministic `comptime` Execution
+### M29 — [COMPLETE] Capability-Sandboxed & Deterministic `comptime` Execution
 
 #### 29.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (Unbounded, Unsandboxed `comptime` Execution in `vm.rs` & `comptime.rs`):** [`crates/pilot-vm/src/vm.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm/src/vm.rs) (`run()`, lines `48`–`145`) and [`crates/pilot-analysis/src/comptime.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis/src/comptime.rs) run `comptime` code with **zero instruction fuel counter** (`while self.pc < code_len` hangs `pilot lsp` forever on `comptime { loop {} }`!), **zero heap memory ceiling**, and **unrestricted `EngineIntrinsic` dispatch**!

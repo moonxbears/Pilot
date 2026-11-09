@@ -390,3 +390,75 @@ pub fn mount_all_ast_imports() -> i64 {
     }
     return mounted;
 }
+
+// ==============================================================================
+// 6. Comptime Sandbox Policy & Capability Grant Parsing (Milestone 29)
+// ==============================================================================
+
+[Layout(c_abi)]
+pub struct ComptimeAllowPolicy : IValue {
+    pub max_fuel:         u64;
+    pub allow_fs_read:    bool;
+    pub allow_net:        bool;
+    pub allow_env:        bool;
+    pub allow_subprocess: bool;
+    pub allow_ffi:        bool;
+}
+
+pub pure fn comptime_allow_policy_default() -> ComptimeAllowPolicy {
+    return ComptimeAllowPolicy {
+        max_fuel:         2000000,
+        allow_fs_read:    false,
+        allow_net:        false,
+        allow_env:        false,
+        allow_subprocess: false,
+        allow_ffi:        false,
+    };
+}
+
+pub fn parse_comptime_allow_policy(manifest_text: str) -> ComptimeAllowPolicy {
+    var policy = comptime_allow_policy_default();
+
+    if mf_find(manifest_text, "\"fs.read\"", 0) >= 0 || mf_find(manifest_text, "read_globs", 0) >= 0 {
+        policy.allow_fs_read = true;
+    }
+    if mf_find(manifest_text, "\"net\"", 0) >= 0 {
+        policy.allow_net = true;
+    }
+    if mf_find(manifest_text, "\"env\"", 0) >= 0 || mf_find(manifest_text, "env_vars", 0) >= 0 {
+        policy.allow_env = true;
+    }
+    if mf_find(manifest_text, "\"subprocess\"", 0) >= 0 {
+        policy.allow_subprocess = true;
+    }
+    if mf_find(manifest_text, "\"ffi\"", 0) >= 0 || mf_find(manifest_text, "ffi_targets", 0) >= 0 {
+        policy.allow_ffi = true;
+    }
+
+    return policy;
+}
+
+pub fn validate_dependency_comptime_needs(
+    root_policy: ComptimeAllowPolicy,
+    dep_name: str,
+    needs: List<str>
+) -> str {
+    var i = 0;
+    while i < needs.len() {
+        let n = needs[i];
+        if (n == "fs.read" || n == "fs") && !root_policy.allow_fs_read {
+            return "CTIME006: Untrusted dependency '" + dep_name + "' requested unapproved comptime capability 'fs.read'; must be granted in root [comptime.grants]";
+        }
+        if n == "net" && !root_policy.allow_net {
+            return "CTIME006: Untrusted dependency '" + dep_name + "' requested unapproved comptime capability 'net'; must be granted in root [comptime.grants]";
+        }
+        if n == "subprocess" && !root_policy.allow_subprocess {
+            return "CTIME006: Untrusted dependency '" + dep_name + "' requested unapproved comptime capability 'subprocess'; must be granted in root [comptime.grants]";
+        }
+        if n == "ffi" && !root_policy.allow_ffi {
+            return "CTIME006: Untrusted dependency '" + dep_name + "' requested unapproved comptime capability 'ffi'; must be granted in root [comptime.grants]";
+        }
+        i = i + 1;
+    }
+    return "";
+}
