@@ -45,6 +45,9 @@ mod m06;
 #[path = "milestone07_zero_black_box_transparency_tool.rs"]
 mod m07;
 
+#[path = "milestone08_progressive_diagnostics_and_cst_autofix.rs"]
+mod m08;
+
 #[path = "milestone50_lossless_bridge_and_reflection.rs"]
 mod m50;
 
@@ -162,6 +165,10 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m07::test_m7_2_layout_lens_byte_offsets_cache_line_and_optimal_packing();
             m07::test_m7_3_method_lens_4_tier_resolution_and_collision_modifiers();
             m07::test_m7_4_perceus_lens_inline_markers_and_weave_lens_expand();
+            m08::test_m8_1_transactional_cst_autofix_six_defects_and_comment_conservation();
+            m08::test_m8_2_progressive_explain_tutorial_and_tier1_guidance();
+            m08::test_m8_3_unicode_east_asian_display_width_and_caret_alignment();
+            m08::test_m8_4_sarif_json_emitter_and_unified_diff_preview();
         });
         s.spawn(|| {
             m50::test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts();

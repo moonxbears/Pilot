@@ -1,0 +1,469 @@
+// ==============================================================================
+// FILE: selfhost/diagnostics/renderer.pilot
+// Milestone 8.2: Rich Visual Diagnostic Snippet Renderer & SARIF 2.1.0 Emitter
+// Unicode/East-Asian display-width alignment, gutter snippets, and --explain
+// ==============================================================================
+pub lvl(0) pkg Pilot.Diagnostics.Renderer;
+
+use Pilot.Diagnostics.Model::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn int_to_str(v: usize) -> str => "" + v;
+
+// ------------------------------------------------------------------------------
+// ANSI Terminal Color Codes (Disabled when use_color == false)
+// ------------------------------------------------------------------------------
+pub pure fn ansi_reset()        -> str => "\x1b[0m";
+pub pure fn ansi_bold()         -> str => "\x1b[1m";
+pub pure fn ansi_bold_red()     -> str => "\x1b[1;31m";
+pub pure fn ansi_bold_yellow()  -> str => "\x1b[1;33m";
+pub pure fn ansi_bold_cyan()    -> str => "\x1b[1;36m";
+pub pure fn ansi_bold_green()   -> str => "\x1b[1;32m";
+pub pure fn ansi_bold_blue()    -> str => "\x1b[1;34m";
+
+// ------------------------------------------------------------------------------
+// UTF-8 Display Column Width Calculation
+// Accurately handles 1-byte ASCII, 2-byte Greek/Cyrillic (1 col),
+// 3-byte CJK (2 cols), and 4-byte Emojis (2 cols).
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct CharWidthInfo : IValue {
+    pub byte_len:      usize;
+    pub display_width: usize;
+}
+
+pub fn utf8_char_info(src: str, byte_idx: usize) -> CharWidthInfo {
+    let n = src.len();
+    if byte_idx >= n {
+        return CharWidthInfo { byte_len: 0, display_width: 0 };
+    }
+    let b0 = src.byte_at(byte_idx);
+
+    // 1-byte ASCII (0x00 .. 0x7F)
+    if b0 < 128 {
+        if b0 == 9 { // tab
+            return CharWidthInfo { byte_len: 1, display_width: 4 };
+        }
+        return CharWidthInfo { byte_len: 1, display_width: 1 };
+    }
+
+    // 2-byte UTF-8 sequence (0xC0 .. 0xDF) -> Greek, Latin extended, Cyrillic (display width 1)
+    if (b0 & 0xE0) == 0xC0 {
+        return CharWidthInfo { byte_len: 2, display_width: 1 };
+    }
+
+    // 3-byte UTF-8 sequence (0xE0 .. 0xEF)
+    if (b0 & 0xF0) == 0xE0 {
+        if byte_idx + 2 < n {
+            let b1 = src.byte_at(byte_idx + 1);
+            let b2 = src.byte_at(byte_idx + 2);
+            let cp: u32 = (((b0 as u32) & 0x0F) << 12) | (((b1 as u32) & 0x3F) << 6) | ((b2 as u32) & 0x3F);
+            // East Asian Wide characters (CJK Unified Ideographs, Fullwidth forms, Hiragana, Katakana)
+            if (cp >= 0x1100 && cp <= 0x115F) ||
+               (cp >= 0x2E80 && cp <= 0xA4CF) ||
+               (cp >= 0xAC00 && cp <= 0xD7A3) ||
+               (cp >= 0xF900 && cp <= 0xFAFF) ||
+               (cp >= 0xFE10 && cp <= 0xFE19) ||
+               (cp >= 0xFE30 && cp <= 0xFE6F) ||
+               (cp >= 0xFF00 && cp <= 0xFF60) ||
+               (cp >= 0xFFE0 && cp <= 0xFFE6) {
+                return CharWidthInfo { byte_len: 3, display_width: 2 };
+            }
+        }
+        return CharWidthInfo { byte_len: 3, display_width: 1 };
+    }
+
+    // 4-byte UTF-8 sequence (0xF0 .. 0xF7) -> Emojis and Historic scripts (display width 2)
+    if (b0 & 0xF8) == 0xF0 {
+        return CharWidthInfo { byte_len: 4, display_width: 2 };
+    }
+
+    return CharWidthInfo { byte_len: 1, display_width: 1 };
+}
+
+pub fn measure_display_column(line_str: str, byte_offset_in_line: usize) -> usize {
+    var col: usize = 0;
+    var idx: usize = 0;
+    let limit = byte_offset_in_line;
+    let n = line_str.len();
+    while idx < limit && idx < n {
+        let info = utf8_char_info(line_str, idx);
+        if info.byte_len == 0 { break; }
+        col = col + info.display_width;
+        idx = idx + info.byte_len;
+    }
+    return col;
+}
+
+pub fn measure_span_display_width(line_str: str, start_byte: usize, end_byte: usize) -> usize {
+    var width: usize = 0;
+    var idx = start_byte;
+    let limit = end_byte;
+    let n = line_str.len();
+    while idx < limit && idx < n {
+        let info = utf8_char_info(line_str, idx);
+        if info.byte_len == 0 { break; }
+        width = width + info.display_width;
+        idx = idx + info.byte_len;
+    }
+    if width == 0 {
+        return 1;
+    }
+    return width;
+}
+
+// ------------------------------------------------------------------------------
+// Line and Column Locator
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct LineColInfo : IValue {
+    pub line:             usize;
+    pub col:              usize;
+    pub line_start_byte:  usize;
+    pub line_end_byte:    usize;
+}
+
+pub fn find_line_col_at(src: str, byte_offset: usize) -> LineColInfo {
+    let n = src.len();
+    var cur_line: usize = 1;
+    var line_start: usize = 0;
+    var i: usize = 0;
+    let target = if byte_offset < n { byte_offset; } else { n; };
+
+    while i < target {
+        if src.byte_at(i) == 10 { // newline \n
+            cur_line = cur_line + 1;
+            line_start = i + 1;
+        }
+        i = i + 1;
+    }
+
+    var line_end = line_start;
+    while line_end < n && src.byte_at(line_end) != 10 && src.byte_at(line_end) != 13 {
+        line_end = line_end + 1;
+    }
+
+    let line_str = src.slice(line_start, line_end);
+    let offset_in_line = if target >= line_start { target - line_start; } else { 0; };
+    let display_col = measure_display_column(line_str, offset_in_line) + 1;
+
+    return LineColInfo {
+        line:            cur_line,
+        col:             display_col,
+        line_start_byte: line_start,
+        line_end_byte:   line_end,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// Multi-Line Gutter Snippet Human Renderer
+// ------------------------------------------------------------------------------
+pub fn render_diagnostic_human(diag: Diagnostic, src: str, file_path: str, use_color: bool) -> str {
+    var out = "";
+    let sev_str = diag_severity_name(diag.severity);
+
+    // Header styling
+    if use_color {
+        if diag.severity == diag_severity_error() {
+            out = out + ansi_bold_red() + sev_str + "[" + diag.code + "]: " + ansi_reset() + ansi_bold() + diag.message + ansi_reset() + "\n";
+        } else if diag.severity == diag_severity_warning() {
+            out = out + ansi_bold_yellow() + sev_str + "[" + diag.code + "]: " + ansi_reset() + ansi_bold() + diag.message + ansi_reset() + "\n";
+        } else if diag.severity == diag_severity_info() {
+            out = out + ansi_bold_cyan() + sev_str + "[" + diag.code + "]: " + ansi_reset() + ansi_bold() + diag.message + ansi_reset() + "\n";
+        } else {
+            out = out + ansi_bold_green() + sev_str + "[" + diag.code + "]: " + ansi_reset() + ansi_bold() + diag.message + ansi_reset() + "\n";
+        }
+    } else {
+        out = out + sev_str + "[" + diag.code + "]: " + diag.message + "\n";
+    }
+
+    if diag.labels.len == 0 {
+        return out;
+    }
+
+    let prim_label = diag.labels[0];
+    let loc = find_line_col_at(src, prim_label.span.start as usize);
+
+    let pipe = if use_color { ansi_bold_blue() + " |" + ansi_reset(); } else { " |"; };
+    let arrow = if use_color { ansi_bold_blue() + "  --> " + ansi_reset(); } else { "  --> "; };
+
+    out = out + arrow + file_path + ":" + int_to_str(loc.line) + ":" + int_to_str(loc.col) + "\n";
+    out = out + "     " + pipe + "\n";
+
+    let line_str = src.slice(loc.line_start_byte, loc.line_end_byte);
+    let line_num_str = int_to_str(loc.line);
+    var gutter_pad = "    ";
+    if line_num_str.len() == 1 { gutter_pad = "   "; }
+    else if line_num_str.len() == 2 { gutter_pad = "  "; }
+    else if line_num_str.len() == 3 { gutter_pad = " "; }
+
+    let gutter_num = if use_color { ansi_bold_blue() + gutter_pad + line_num_str + " | " + ansi_reset(); } else { gutter_pad + line_num_str + " | "; };
+    out = out + gutter_num + line_str + "\n";
+
+    // Underline and caret positioning
+    let span_st_in_line = if (prim_label.span.start as usize) >= loc.line_start_byte {
+        (prim_label.span.start as usize) - loc.line_start_byte;
+    } else {
+        0;
+    };
+    let span_ed_in_line = if (prim_label.span.end as usize) >= loc.line_start_byte {
+        let ed = (prim_label.span.end as usize) - loc.line_start_byte;
+        if ed > line_str.len() { line_str.len(); } else { ed; };
+    } else {
+        span_st_in_line + 1;
+    };
+
+    let col_offset = measure_display_column(line_str, span_st_in_line);
+    let caret_width = measure_span_display_width(line_str, span_st_in_line, span_ed_in_line);
+
+    var underline_pad = "";
+    var p = 0;
+    while p < col_offset {
+        underline_pad = underline_pad + " ";
+        p = p + 1;
+    }
+
+    var carets = "";
+    var c = 0;
+    while c < caret_width {
+        carets = carets + "^";
+        c = c + 1;
+    }
+
+    let caret_colored = if use_color {
+        if diag.severity == diag_severity_error() { ansi_bold_red() + carets + ansi_reset(); }
+        else if diag.severity == diag_severity_warning() { ansi_bold_yellow() + carets + ansi_reset(); }
+        else { ansi_bold_cyan() + carets + ansi_reset(); };
+    } else {
+        carets;
+    };
+
+    var label_text = "";
+    if prim_label.label.len() > 0 {
+        label_text = " " + prim_label.label;
+    }
+
+    out = out + "     " + pipe + " " + underline_pad + caret_colored + label_text + "\n";
+    out = out + "     " + pipe + "\n";
+
+    // Notes
+    var ni = 0;
+    while ni < diag.notes.len {
+        let note_prefix = if use_color { ansi_bold() + "   = note: " + ansi_reset(); } else { "   = note: "; };
+        out = out + note_prefix + diag.notes[ni] + "\n";
+        ni = ni + 1;
+    }
+
+    // Fixes / Hints
+    var fi = 0;
+    while fi < diag.fixes.len {
+        let fix = diag.fixes[fi];
+        let help_prefix = if use_color { ansi_bold_green() + "   = help: " + ansi_reset(); } else { "   = help: "; };
+        out = out + help_prefix + fix.title + "\n";
+        fi = fi + 1;
+    }
+
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// Comprehensive `--explain <CODE>` Catalog Knowledge Base
+// ------------------------------------------------------------------------------
+pub fn get_diagnostic_explanation(code: str) -> DiagnosticCatalogEntry {
+    if code == "ESCAPE001" {
+        return catalog_entry_new(
+            "ESCAPE001",
+            "Cue Boundary Escape",
+            "Passing 0b01 reference view or 0b11 scoped guard across asynchronous [Cue] function boundary",
+            "PerceusOwnership",
+            "Pilot AGENTS.md §8 Cue Boundary Law (CHOR001) / Perceus Escape",
+            "Reference views (0b01) borrow memory and scoped guards (0b11) are bound to the caller's stack frame. When crossing an asynchronous or distributed .pchor cue boundary, the calling frame may unwind or complete concurrently, causing use-after-free or dangling pointers.",
+            "Only pass 0b00 value types (trivial memcpy) or 'iso'-moved 0b10 owned buffers across cue boundaries.",
+            "// BAD: Borrowed slice<i32> (0b01) crossing cue boundary\ncue fn process_samples(samples: slice<i32>) {\n    ...\n}",
+            "// GOOD: Pass owned SliceBuffer<T> or pass by value with 'iso'\ncue fn process_samples(iso samples: SliceBuffer<i32>) {\n    ...\n}"
+        );
+    }
+    if code == "DECL004" {
+        return catalog_entry_new(
+            "DECL004",
+            "Immutable Variable Reassigned",
+            "Cannot assign to immutable binding 'let'; use 'var' for mutable bindings",
+            "DeclarationSyntax",
+            "Pilot AGENTS.md §2 Mutability Law / Rust E0384",
+            "Bindings introduced with 'let' are deeply immutable by default in Pilot. Reassigning or mutating a 'let' binding is prohibited.",
+            "Declare the binding with 'var' instead of 'let' if it requires reassignment.",
+            "// BAD: Reassigning immutable 'let' binding\nlet count = 0;\ncount = count + 1;",
+            "// GOOD: Use 'var' for mutable variables\nvar count = 0;\ncount = count + 1;"
+        );
+    }
+    if code == "SYN001" {
+        return catalog_entry_new(
+            "SYN001",
+            "Missing Statement Terminator",
+            "Statements must terminate with a semicolon ';'",
+            "Syntax",
+            "Pilot AGENTS.md §2 Blocks & Terminators Law",
+            "Pilot requires explicit statement terminators ';' to eliminate ambiguity between chained expressions, prefix dots, and call quotes.",
+            "Add a terminating semicolon ';' at the end of the statement.",
+            "// BAD: Missing semicolon\nlet x = 42\nlet y = 100;",
+            "// GOOD: Terminated statement\nlet x = 42;\nlet y = 100;"
+        );
+    }
+    if code == "FIX001" {
+        return catalog_entry_new(
+            "FIX001",
+            "Comment Loss Prevented",
+            "Autofix operation would delete or mutate comments or trivia; file modification aborted",
+            "Autofix",
+            "Pilot AGENTS.md §8 Lossless CST Preservation Law / Milestone 8",
+            "The compiler's lossless CST engine detected that applying the requested automated fix would discard, overwrite, or mutate one or more user comments (// or /*...*/).",
+            "Apply the edit manually or ensure surrounding comments are outside the replacement span.",
+            "// Example: Replacement span covers comment block\n/* 重要: config */ let x = .5;",
+            "// Fixed: Comment preserved outside transformed token\n/* 重要: config */ var x = 0.5;"
+        );
+    }
+    return catalog_entry_new(
+        code,
+        "Compiler Diagnostic " + code,
+        "No extended explanation currently recorded for code " + code,
+        "General",
+        "Pilot Diagnostic Catalog",
+        "Refer to the Pilot language specification or standard error catalog.",
+        "Check syntax and type declarations.",
+        "",
+        ""
+    );
+}
+
+pub fn render_explain(code: str, use_color: bool) -> str {
+    let entry = get_diagnostic_explanation(code);
+    var out = "";
+
+    let header_color = if use_color { ansi_bold_cyan(); } else { ""; };
+    let sub_color = if use_color { ansi_bold(); } else { ""; };
+    let code_color = if use_color { ansi_bold_yellow(); } else { ""; };
+    let reset = if use_color { ansi_reset(); } else { ""; };
+
+    out = out + header_color + "================================================================================" + reset + "\n";
+    out = out + header_color + "Diagnostic Explanation: " + code_color + entry.code + reset + " (" + entry.title + ")\n";
+    out = out + header_color + "Category: " + reset + entry.category + "  |  " + header_color + "Reference: " + reset + entry.reference + "\n";
+    out = out + header_color + "================================================================================" + reset + "\n\n";
+
+    out = out + sub_color + "Description:" + reset + "\n";
+    out = out + "  " + entry.description + "\n\n";
+
+    out = out + sub_color + "Why This Happens:" + reset + "\n";
+    out = out + "  " + entry.why_summary + "\n\n";
+
+    out = out + sub_color + "How to Fix (Tier 1 Guidance):" + reset + "\n";
+    out = out + "  " + entry.tier1_hint + "\n\n";
+
+    if entry.example_bad.len() > 0 {
+        let red_prefix = if use_color { ansi_bold_red() + "Incorrect Code Example:" + reset; } else { "Incorrect Code Example:"; };
+        out = out + red_prefix + "\n" + entry.example_bad + "\n\n";
+    }
+
+    if entry.example_good.len() > 0 {
+        let green_prefix = if use_color { ansi_bold_green() + "Corrected Code Example:" + reset; } else { "Corrected Code Example:"; };
+        out = out + green_prefix + "\n" + entry.example_good + "\n\n";
+    }
+
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// JSON and SARIF 2.1.0 Emitter
+// ------------------------------------------------------------------------------
+pub fn escape_json_str(s: str) -> str {
+    var out = "";
+    var i = 0;
+    let n = s.len();
+    while i < n {
+        let b = s.byte_at(i);
+        if b == 34 { out = out + "\\\""; }
+        else if b == 92 { out = out + "\\\\"; }
+        else if b == 10 { out = out + "\\n"; }
+        else if b == 13 { out = out + "\\r"; }
+        else if b == 9  { out = out + "\\t"; }
+        else { out = out + s.slice(i, i + 1); }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn render_diagnostic_json(diag: Diagnostic, file_path: str, src: str) -> str {
+    var out = "{";
+    out = out + "\"code\":\"" + diag.code + "\",";
+    out = out + "\"severity\":\"" + diag_severity_name(diag.severity) + "\",";
+    out = out + "\"message\":\"" + escape_json_str(diag.message) + "\",";
+    out = out + "\"file\":\"" + escape_json_str(file_path) + "\"";
+
+    if diag.labels.len > 0 {
+        let prim = diag.labels[0];
+        let loc = find_line_col_at(src, prim.span.start as usize);
+        out = out + ",\"line\":" + int_to_str(loc.line) + ",\"column\":" + int_to_str(loc.col);
+    }
+    out = out + "}";
+    return out;
+}
+
+pub fn render_sarif_report(diags: List<Diagnostic>, file_path: str, src: str) -> str {
+    var out = "{\n";
+    out = out + "  \"$schema\": \"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\n";
+    out = out + "  \"version\": \"2.1.0\",\n";
+    out = out + "  \"runs\": [\n";
+    out = out + "    {\n";
+    out = out + "      \"tool\": {\n";
+    out = out + "        \"driver\": {\n";
+    out = out + "          \"name\": \"pilot\",\n";
+    out = out + "          \"version\": \"0.1.0\",\n";
+    out = out + "          \"informationUri\": \"https://pilot-lang.org\"\n";
+    out = out + "        }\n";
+    out = out + "      },\n";
+    out = out + "      \"results\": [\n";
+
+    var i = 0;
+    while i < diags.len {
+        let d = diags[i];
+        let sev_rule = if d.severity == diag_severity_error() { "error"; }
+                       else if d.severity == diag_severity_warning() { "warning"; }
+                       else { "note"; };
+
+        out = out + "        {\n";
+        out = out + "          \"ruleId\": \"" + d.code + "\",\n";
+        out = out + "          \"level\": \"" + sev_rule + "\",\n";
+        out = out + "          \"message\": { \"text\": \"" + escape_json_str(d.message) + "\" }";
+
+        if d.labels.len > 0 {
+            let prim = d.labels[0];
+            let loc = find_line_col_at(src, prim.span.start as usize);
+            out = out + ",\n          \"locations\": [\n";
+            out = out + "            {\n";
+            out = out + "              \"physicalLocation\": {\n";
+            out = out + "                \"artifactLocation\": { \"uri\": \"" + escape_json_str(file_path) + "\" },\n";
+            out = out + "                \"region\": {\n";
+            out = out + "                  \"startLine\": " + int_to_str(loc.line) + ",\n";
+            out = out + "                  \"startColumn\": " + int_to_str(loc.col) + "\n";
+            out = out + "                }\n";
+            out = out + "              }\n";
+            out = out + "            }\n";
+            out = out + "          ]\n";
+        } else {
+            out = out + "\n";
+        }
+
+        out = out + "        }";
+        if i + 1 < diags.len {
+            out = out + ",";
+        }
+        out = out + "\n";
+        i = i + 1;
+    }
+
+    out = out + "      ]\n";
+    out = out + "    }\n";
+    out = out + "  ]\n";
+    out = out + "}\n";
+    return out;
+}

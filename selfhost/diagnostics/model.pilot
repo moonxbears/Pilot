@@ -1,0 +1,263 @@
+// ==============================================================================
+// FILE: selfhost/diagnostics/model.pilot
+// Milestone 8.1: Rich Diagnostic Model, Spans, Text Edits, and Fix Suggestions
+// Core schemas for compiler diagnostics, multi-span labels, and CST autofix
+// ==============================================================================
+pub lvl(0) pkg Pilot.Diagnostics.Model;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn str_contains(haystack: str, needle: str) -> bool {
+    return haystack.find(needle) >= 0;
+}
+
+pub pure fn str_starts_with(src: str, prefix: str) -> bool {
+    let m = prefix.len();
+    if src.len() < m { return false; }
+    return src.slice(0, m) == prefix;
+}
+
+pub fn str_replace(src: str, target: str, replacement: str) -> str {
+    var out = "";
+    var p: usize = 0;
+    let n = src.len();
+    let m = target.len();
+    if m == 0 { return src; }
+    while p < n {
+        let idx = src.find(target, p);
+        if idx < 0 {
+            out = out + src.slice(p, n);
+            break;
+        }
+        out = out + src.slice(p, idx as usize) + replacement;
+        p = (idx as usize) + m;
+    }
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// Diagnostic Severity Levels (0b00 : IValue)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct DiagSeverity : IValue {
+    pub raw: u8;
+}
+
+pub pure fn diag_severity_error()   -> u8 => 1;
+pub pure fn diag_severity_warning() -> u8 => 2;
+pub pure fn diag_severity_info()    -> u8 => 3;
+pub pure fn diag_severity_hint()    -> u8 => 4;
+
+pub fn diag_severity_name(s: u8) -> str {
+    if s == diag_severity_error()   { return "error"; }
+    if s == diag_severity_warning() { return "warning"; }
+    if s == diag_severity_info()    { return "info"; }
+    if s == diag_severity_hint()    { return "hint"; }
+    return "unknown";
+}
+
+// ------------------------------------------------------------------------------
+// Fix Applicability (0b00 : IValue)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct FixApplicability : IValue {
+    pub raw: u8;
+}
+
+// 0: MachineApplicable (deterministic syntax/type/mutability correction; auto-applied by --fix)
+// 1: HasPlaceholders (contains template holes; offered in LSP Code Actions)
+// 2: MaybeIncorrect (heuristic suggestion; requires user/IDE confirmation)
+pub pure fn fix_machine_applicable() -> u8 => 0;
+pub pure fn fix_has_placeholders()   -> u8 => 1;
+pub pure fn fix_maybe_incorrect()    -> u8 => 2;
+
+pub fn fix_applicability_name(a: u8) -> str {
+    if a == fix_machine_applicable() { return "MachineApplicable"; }
+    if a == fix_has_placeholders()   { return "HasPlaceholders"; }
+    if a == fix_maybe_incorrect()    { return "MaybeIncorrect"; }
+    return "UnknownApplicability";
+}
+
+// ------------------------------------------------------------------------------
+// Source Spans and File Identifiers (0b00 : IValue)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct FileUnitId : IValue {
+    pub raw: u32;
+}
+
+pub pure fn file_unit_id_new(raw: u32) -> FileUnitId {
+    return FileUnitId { raw: raw };
+}
+
+[Layout(c_abi)]
+pub struct SourceSpan : IValue {
+    pub file_id: FileUnitId;
+    pub start:   u32;
+    pub end:     u32;
+}
+
+pub pure fn source_span_new(file_id: u32, start: u32, end: u32) -> SourceSpan {
+    return SourceSpan {
+        file_id: file_unit_id_new(file_id),
+        start:   start,
+        end:     end,
+    };
+}
+
+pub pure fn source_span_len(span: SourceSpan) -> usize {
+    if span.end >= span.start {
+        return (span.end - span.start) as usize;
+    }
+    return 0;
+}
+
+// ------------------------------------------------------------------------------
+// Labeled Span (Primary or Secondary underline in diagnostic output)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct LabeledSpan : IValue {
+    pub span:       SourceSpan;
+    pub label:      str;
+    pub is_primary: bool;
+}
+
+pub pure fn labeled_span_new(span: SourceSpan, label: str, is_primary: bool) -> LabeledSpan {
+    return LabeledSpan {
+        span:       span,
+        label:      label,
+        is_primary: is_primary,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// CST Text Edit (Precise replacement at span)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct CstTextEdit : IValue {
+    pub span:        SourceSpan;
+    pub replacement: str;
+}
+
+pub pure fn cst_text_edit_new(span: SourceSpan, replacement: str) -> CstTextEdit {
+    return CstTextEdit {
+        span:        span,
+        replacement: replacement,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// Fix Suggestion (Group of edits with applicability)
+// ------------------------------------------------------------------------------
+pub struct FixSuggestion : IObject {
+    pub title:         str;
+    pub applicability: u8;
+    pub edits:         List<CstTextEdit>;
+
+    ~self() {}
+}
+
+pub fn fix_suggestion_new(title: str, applicability: u8) -> FixSuggestion {
+    return FixSuggestion {
+        title:         title,
+        applicability: applicability,
+        edits:         [],
+    };
+}
+
+pub fn fix_suggestion_with_edit(title: str, applicability: u8, edit: CstTextEdit) -> FixSuggestion {
+    var fix = fix_suggestion_new(title, applicability);
+    fix.edits.push(edit);
+    return fix;
+}
+
+// ------------------------------------------------------------------------------
+// Full Diagnostic Object
+// ------------------------------------------------------------------------------
+pub struct Diagnostic : IObject {
+    pub code:     str;
+    pub severity: u8;
+    pub message:  str;
+    pub labels:   List<LabeledSpan>;
+    pub notes:    List<str>;
+    pub fixes:    List<FixSuggestion>;
+
+    ~self() {}
+}
+
+pub fn diagnostic_new(code: str, severity: u8, message: str, span: SourceSpan) -> Diagnostic {
+    var diag = Diagnostic {
+        code:     code,
+        severity: severity,
+        message:  message,
+        labels:   [],
+        notes:    [],
+        fixes:    [],
+    };
+    diag.labels.push(labeled_span_new(span, "", true));
+    return diag;
+}
+
+pub fn diagnostic_with_primary_label(code: str, severity: u8, message: str, span: SourceSpan, label: str) -> Diagnostic {
+    var diag = Diagnostic {
+        code:     code,
+        severity: severity,
+        message:  message,
+        labels:   [],
+        notes:    [],
+        fixes:    [],
+    };
+    diag.labels.push(labeled_span_new(span, label, true));
+    return diag;
+}
+
+pub fn diagnostic_add_secondary_label(var ref diag: Diagnostic, span: SourceSpan, label: str) {
+    diag.labels.push(labeled_span_new(span, label, false));
+}
+
+pub fn diagnostic_add_note(var ref diag: Diagnostic, note: str) {
+    diag.notes.push(note);
+}
+
+pub fn diagnostic_add_fix(var ref diag: Diagnostic, fix: FixSuggestion) {
+    diag.fixes.push(fix);
+}
+
+// ------------------------------------------------------------------------------
+// Rich Diagnostic Catalog Entry (for --explain and IDE hover/action)
+// ------------------------------------------------------------------------------
+pub struct DiagnosticCatalogEntry : IValue {
+    pub code:         str;
+    pub title:        str;
+    pub description:  str;
+    pub category:     str;
+    pub reference:    str;
+    pub why_summary:  str;
+    pub tier1_hint:   str;
+    pub example_bad:  str;
+    pub example_good: str;
+}
+
+pub pure fn catalog_entry_new(
+    code: str,
+    title: str,
+    desc: str,
+    cat: str,
+    refr: str,
+    why: str,
+    hint: str,
+    bad: str,
+    good: str
+) -> DiagnosticCatalogEntry {
+    return DiagnosticCatalogEntry {
+        code:         code,
+        title:        title,
+        description:  desc,
+        category:     cat,
+        reference:    refr,
+        why_summary:  why,
+        tier1_hint:   hint,
+        example_bad:  bad,
+        example_good: good,
+    };
+}

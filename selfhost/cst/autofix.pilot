@@ -1,0 +1,437 @@
+// ==============================================================================
+// FILE: selfhost/cst/autofix.pilot
+// Milestone 8.3: Transactional Lossless CST Auto-Fix & Comment-Preserving Rewriter
+// Reverse byte-order disjointness solver, comment conservation proof, and diffs
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Cst.Autofix;
+
+use Pilot.Diagnostics.Model::*;
+use Pilot.Diagnostics.Renderer::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Result of Applying CST Fixes
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct FixApplicationResult : IValue {
+    pub success:       bool;
+    pub fixes_applied: usize;
+    pub new_src:       str;
+    pub error_code:    str;
+    pub error_message: str;
+}
+
+pub fn fix_result_ok(new_src: str, applied: usize) -> FixApplicationResult {
+    return FixApplicationResult {
+        success:       true,
+        fixes_applied: applied,
+        new_src:       new_src,
+        error_code:    "",
+        error_message: "",
+    };
+}
+
+pub fn fix_result_err(err_code: str, err_msg: str, old_src: str) -> FixApplicationResult {
+    return FixApplicationResult {
+        success:       false,
+        fixes_applied: 0,
+        new_src:       old_src,
+        error_code:    err_code,
+        error_message: err_msg,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// Comment Extraction & Strict Verbatim Conservation Proof
+// ------------------------------------------------------------------------------
+pub fn extract_all_comments(src: str) -> List<str> {
+    var comments: List<str> = [];
+    let n = src.len();
+    var p: usize = 0;
+
+    while p < n {
+        let b = src.byte_at(p);
+        // Line comment: //
+        if b == 47 && p + 1 < n && src.byte_at(p + 1) == 47 {
+            let start = p;
+            p = p + 2;
+            while p < n && src.byte_at(p) != 10 && src.byte_at(p) != 13 {
+                p = p + 1;
+            }
+            let ctext = src.slice(start, p);
+            comments.push(ctext);
+        }
+        // Block comment: /* ... */
+        else if b == 47 && p + 1 < n && src.byte_at(p + 1) == 42 {
+            let start = p;
+            p = p + 2;
+            while p + 1 < n && !(src.byte_at(p) == 42 && src.byte_at(p + 1) == 47) {
+                p = p + 1;
+            }
+            if p + 1 < n {
+                p = p + 2;
+            } else {
+                p = n;
+            }
+            let ctext = src.slice(start, p);
+            comments.push(ctext);
+        }
+        // String literal: skip contents so comments inside strings are ignored
+        else if b == 34 { // "
+            p = p + 1;
+            while p < n && src.byte_at(p) != 34 {
+                if src.byte_at(p) == 92 && p + 1 < n { // \ escape
+                    p = p + 2;
+                } else {
+                    p = p + 1;
+                }
+            }
+            if p < n { p = p + 1; }
+        }
+        else {
+            p = p + 1;
+        }
+    }
+
+    return comments;
+}
+
+// Asserts every single comment token in old_src is preserved verbatim in new_src
+pub fn verify_comment_conservation(old_src: str, new_src: str) -> bool {
+    let old_comments = extract_all_comments(old_src);
+    var i: usize = 0;
+    while i < old_comments.len {
+        let c = old_comments[i];
+        if !str_contains(new_src, c) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// ------------------------------------------------------------------------------
+// Multi-Edit Disjointness Solver & Reverse Byte-Order Applicator
+// ------------------------------------------------------------------------------
+pub fn apply_file_fixes_lossless(old_src: str, fixes: List<FixSuggestion>, max_passes: usize) -> FixApplicationResult {
+    let limit_passes = if max_passes > 0 { max_passes; } else { 3; };
+    var cur_src = old_src;
+    var total_applied: usize = 0;
+    var pass: usize = 0;
+
+    // Detect CRLF in old source to preserve verbatim
+    let has_crlf = str_contains(old_src, "\r\n");
+
+    // Gather all edits across machine-applicable fixes
+    var pending_edits: List<CstTextEdit> = [];
+    var fi: usize = 0;
+    while fi < fixes.len {
+        let fix = fixes[fi];
+        if fix.applicability == fix_machine_applicable() {
+            var ei: usize = 0;
+            while ei < fix.edits.len {
+                pending_edits.push(fix.edits[ei]);
+                ei = ei + 1;
+            }
+        }
+        fi = fi + 1;
+    }
+
+    if pending_edits.len == 0 {
+        return fix_result_ok(cur_src, 0);
+    }
+
+    while pass < limit_passes && pending_edits.len > 0 {
+        pass = pass + 1;
+
+        // 1. Sort edits ascending by start offset
+        var i: usize = 0;
+        while i < pending_edits.len {
+            var j = i + 1;
+            while j < pending_edits.len {
+                if pending_edits[j].span.start < pending_edits[i].span.start {
+                    let tmp = pending_edits[i];
+                    pending_edits[i] = pending_edits[j];
+                    pending_edits[j] = tmp;
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+
+        // 2. Partition into non-overlapping batch for current pass and deferred for next pass
+        var batch: List<CstTextEdit> = [];
+        var deferred: List<CstTextEdit> = [];
+        var last_end: u32 = 0;
+
+        var k: usize = 0;
+        while k < pending_edits.len {
+            let ed = pending_edits[k];
+            if k == 0 || ed.span.start >= last_end {
+                batch.push(ed);
+                last_end = ed.span.end;
+            } else {
+                deferred.push(ed);
+            }
+            k = k + 1;
+        }
+
+        // 3. Apply non-overlapping batch in REVERSE byte order (end -> start)
+        // This ensures byte offsets of earlier edits remain identical!
+        var b_idx = batch.len;
+        while b_idx > 0 {
+            b_idx = b_idx - 1;
+            let edit = batch[b_idx];
+            let st = edit.span.start as usize;
+            let ed = edit.span.end as usize;
+
+            if st <= cur_src.len() && ed <= cur_src.len() && st <= ed {
+                let prefix = cur_src.slice(0, st);
+                let suffix = cur_src.slice(ed, cur_src.len());
+                cur_src = prefix + edit.replacement + suffix;
+                total_applied = total_applied + 1;
+            }
+        }
+
+        pending_edits = deferred;
+    }
+
+    if pending_edits.len > 0 {
+        return fix_result_err("FIX003", "Fix Convergence Passes Exceeded without stable fixed point", old_src);
+    }
+
+    // 4. Strict Comment Conservation Proof
+    if !verify_comment_conservation(old_src, cur_src) {
+        return fix_result_err("FIX001", "CommentLossPrevented: Autofix would mutate or delete comments; file modification aborted", old_src);
+    }
+
+    // 5. Line endings preservation: If old_src used CRLF, ensure cur_src preserves CRLF
+    if has_crlf && !str_contains(cur_src, "\r\n") && str_contains(cur_src, "\n") {
+        cur_src = str_replace(cur_src, "\n", "\r\n");
+    }
+
+    return fix_result_ok(cur_src, total_applied);
+}
+
+// ------------------------------------------------------------------------------
+// Unified Diff Previewer (`--fix-dry-run`)
+// ------------------------------------------------------------------------------
+pub fn generate_unified_diff(file_path: str, old_src: str, new_src: str) -> str {
+    if old_src == new_src {
+        return "";
+    }
+
+    var out = "--- a/" + file_path + "\n";
+    out = out + "+++ b/" + file_path + "\n";
+    out = out + "@@ -1 +1 @@\n";
+
+    // Scan line by line for differences
+    var p_old: usize = 0;
+    var p_new: usize = 0;
+    let n_old = old_src.len();
+    let n_new = new_src.len();
+
+    while p_old < n_old || p_new < n_new {
+        var next_old = p_old;
+        while next_old < n_old && old_src.byte_at(next_old) != 10 {
+            next_old = next_old + 1;
+        }
+        let line_old = if p_old < n_old { old_src.slice(p_old, next_old); } else { ""; };
+        if next_old < n_old { next_old = next_old + 1; }
+
+        var next_new = p_new;
+        while next_new < n_new && new_src.byte_at(next_new) != 10 {
+            next_new = next_new + 1;
+        }
+        let line_new = if p_new < n_new { new_src.slice(p_new, next_new); } else { ""; };
+        if next_new < n_new { next_new = next_new + 1; }
+
+        if line_old != line_new {
+            if line_old.len() > 0 {
+                out = out + "-" + line_old + "\n";
+            }
+            if line_new.len() > 0 {
+                out = out + "+" + line_new + "\n";
+            }
+        }
+
+        p_old = next_old;
+        p_new = next_new;
+    }
+
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// Automated Defect Scanner & Fix Proposer (6 Canonical Auto-Fixable Defects)
+// 1. `let` mutated -> `var` (DECL004)
+// 2. missing `;` statement terminator (SYN001)
+// 3. leading-zero float `.5` -> `0.5` (SYN002)
+// 4. legacy keyword `mut` -> `var` (DECL005)
+// 5. legacy keyword `match` -> `switch` (SYN003)
+// 6. missing `var ref` at call site (BORROW001)
+// ------------------------------------------------------------------------------
+pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
+    var diags: List<Diagnostic> = [];
+    let n = src.len();
+    var p: usize = 0;
+
+    while p < n {
+        let b = src.byte_at(p);
+
+        // Skip line comments
+        if b == 47 && p + 1 < n && src.byte_at(p + 1) == 47 {
+            p = p + 2;
+            while p < n && src.byte_at(p) != 10 { p = p + 1; }
+            continue;
+        }
+
+        // Skip block comments
+        if b == 47 && p + 1 < n && src.byte_at(p + 1) == 42 {
+            p = p + 2;
+            while p + 1 < n && !(src.byte_at(p) == 42 && src.byte_at(p + 1) == 47) { p = p + 1; }
+            if p + 1 < n { p = p + 2; } else { p = n; }
+            continue;
+        }
+
+        // Skip strings
+        if b == 34 {
+            p = p + 1;
+            while p < n && src.byte_at(p) != 34 {
+                if src.byte_at(p) == 92 && p + 1 < n { p = p + 2; } else { p = p + 1; }
+            }
+            if p < n { p = p + 1; }
+            continue;
+        }
+
+        // Defect 3: Leading-zero float `.5` -> `0.5`
+        // Dot preceded by space/punct and followed by digit
+        if b == 46 && p + 1 < n && src.byte_at(p + 1) >= 48 && src.byte_at(p + 1) <= 57 {
+            let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
+            if prev == 32 || prev == 61 || prev == 40 || prev == 91 || prev == 44 || prev == 58 {
+                let sp = source_span_new(file_id, p as u32, (p + 1) as u32);
+                var d = diagnostic_with_primary_label("SYN002", diag_severity_warning(), "Float literal must have leading zero", sp, "use '0.' instead of '.'");
+                let ed = cst_text_edit_new(sp, "0.");
+                let fx = fix_suggestion_with_edit("Add leading zero to float", fix_machine_applicable(), ed);
+                diagnostic_add_fix(var ref d, fx);
+                diags.push(d);
+                p = p + 1;
+                continue;
+            }
+        }
+
+        // Defect 4: Legacy keyword `mut` -> `var`
+        if b == 109 && p + 3 <= n && src.slice(p, p + 3) == "mut" {
+            let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
+            let next = if p + 3 < n { src.byte_at(p + 3); } else { 32; };
+            if (prev == 32 || prev == 10 || prev == 59 || prev == 123) && (next == 32 || next == 10) {
+                let sp = source_span_new(file_id, p as u32, (p + 3) as u32);
+                var d = diagnostic_with_primary_label("DECL005", diag_severity_error(), "Legacy keyword 'mut' is deprecated; use 'var'", sp, "replace 'mut' with 'var'");
+                let ed = cst_text_edit_new(sp, "var");
+                let fx = fix_suggestion_with_edit("Replace 'mut' with 'var'", fix_machine_applicable(), ed);
+                diagnostic_add_fix(var ref d, fx);
+                diags.push(d);
+                p = p + 3;
+                continue;
+            }
+        }
+
+        // Defect 5: Legacy keyword `match` -> `switch`
+        if b == 109 && p + 5 <= n && src.slice(p, p + 5) == "match" {
+            let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
+            let next = if p + 5 < n { src.byte_at(p + 5); } else { 32; };
+            if (prev == 32 || prev == 10 || prev == 59 || prev == 123) && (next == 32 || next == 10) {
+                let sp = source_span_new(file_id, p as u32, (p + 5) as u32);
+                var d = diagnostic_with_primary_label("SYN003", diag_severity_error(), "Pattern branching uses 'switch' in Pilot (not 'match')", sp, "replace 'match' with 'switch'");
+                let ed = cst_text_edit_new(sp, "switch");
+                let fx = fix_suggestion_with_edit("Replace 'match' with 'switch'", fix_machine_applicable(), ed);
+                diagnostic_add_fix(var ref d, fx);
+                diags.push(d);
+                p = p + 5;
+                continue;
+            }
+        }
+
+        // Defect 6: Missing `var ref` at call site: `(ref x)` -> `(var ref x)`
+        if b == 114 && p + 3 <= n && src.slice(p, p + 3) == "ref" {
+            let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
+            let next = if p + 3 < n { src.byte_at(p + 3); } else { 32; };
+            // Ensure not preceded by 'var '
+            let is_var_ref = (p >= 4 && src.slice(p - 4, p) == "var ");
+            if !is_var_ref && (prev == 32 || prev == 40 || prev == 44) && next == 32 {
+                let sp = source_span_new(file_id, p as u32, (p + 3) as u32);
+                var d = diagnostic_with_primary_label("BORROW001", diag_severity_error(), "Mutable reference argument requires 'var ref'", sp, "add 'var ref'");
+                let ed = cst_text_edit_new(sp, "var ref");
+                let fx = fix_suggestion_with_edit("Add 'var ref' to mutable reference argument", fix_machine_applicable(), ed);
+                diagnostic_add_fix(var ref d, fx);
+                diags.push(d);
+                p = p + 3;
+                continue;
+            }
+        }
+
+        // Defect 1: `let` binding mutated later -> suggest `var`
+        if b == 108 && p + 3 <= n && src.slice(p, p + 3) == "let" {
+            let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
+            let next = if p + 3 < n { src.byte_at(p + 3); } else { 32; };
+            if (prev == 32 || prev == 10 || prev == 59 || prev == 123) && next == 32 {
+                // Find ident name
+                var q = p + 4;
+                while q < n && src.byte_at(q) == 32 { q = q + 1; }
+                let id_start = q;
+                while q < n && ((src.byte_at(q) >= 65 && src.byte_at(q) <= 90) || (src.byte_at(q) >= 97 && src.byte_at(q) <= 122) || src.byte_at(q) == 95 || (src.byte_at(q) >= 48 && src.byte_at(q) <= 57)) {
+                    q = q + 1;
+                }
+                let id_name = src.slice(id_start, q);
+                if id_name.len() > 0 {
+                    // Check if reassigned downstream: `id_name = `
+                    let reassign_pat = id_name + " =";
+                    let rest = src.slice(q, n);
+                    if str_contains(rest, reassign_pat) {
+                        let sp = source_span_new(file_id, p as u32, (p + 3) as u32);
+                        var d = diagnostic_with_primary_label("DECL004", diag_severity_error(), "Cannot assign to immutable binding 'let " + id_name + "'", sp, "use 'var' for mutable binding");
+                        let ed = cst_text_edit_new(sp, "var");
+                        let fx = fix_suggestion_with_edit("Change 'let' to 'var'", fix_machine_applicable(), ed);
+                        diagnostic_add_fix(var ref d, fx);
+                        diags.push(d);
+                        p = p + 3;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Defect 2: Missing `;` statement terminator
+        // Pattern: statement ending at newline without ';' (e.g. `let a = 1\n` or `var b = 2\n`)
+        if b == 10 { // newline
+            var prev_p = p;
+            if prev_p > 0 && src.byte_at(prev_p - 1) == 13 { prev_p = prev_p - 1; } // CRLF
+            if prev_p > 0 {
+                let last_b = src.byte_at(prev_p - 1);
+                // Check if last byte was digit or ident or paren/bracket and line started with let/var/return
+                if (last_b >= 48 && last_b <= 57) || (last_b >= 65 && last_b <= 90) || (last_b >= 97 && last_b <= 122) || last_b == 41 || last_b == 93 || last_b == 34 {
+                    // Look back to line start
+                    var ls = prev_p - 1;
+                    while ls > 0 && src.byte_at(ls - 1) != 10 { ls = ls - 1; }
+                    var ls_trim = ls;
+                    while ls_trim < prev_p && src.byte_at(ls_trim) == 32 { ls_trim = ls_trim + 1; }
+                    let line_prefix = src.slice(ls_trim, if ls_trim + 7 < prev_p { ls_trim + 7; } else { prev_p; });
+
+                    if str_starts_with(line_prefix, "let ") || str_starts_with(line_prefix, "var ") || str_starts_with(line_prefix, "return ") {
+                        let sp = source_span_new(file_id, prev_p as u32, prev_p as u32);
+                        var d = diagnostic_with_primary_label("SYN001", diag_severity_error(), "Missing statement terminator ';'", sp, "insert ';'");
+                        let ed = cst_text_edit_new(sp, ";");
+                        let fx = fix_suggestion_with_edit("Insert missing ';'", fix_machine_applicable(), ed);
+                        diagnostic_add_fix(var ref d, fx);
+                        diags.push(d);
+                    }
+                }
+            }
+        }
+
+        p = p + 1;
+    }
+
+    return diags;
+}

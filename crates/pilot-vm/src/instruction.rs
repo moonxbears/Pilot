@@ -11,12 +11,7 @@ pub enum Opcode {
 
 impl Opcode {
     #[inline] pub const fn from_u8(v: u8) -> Self {
-        match v {
-            1 => Self::AddI64, 2 => Self::SubI64, 3 => Self::MulI64, 4 => Self::DivI64, 5 => Self::AddF64, 6 => Self::SubF64, 7 => Self::MulF64, 8 => Self::DivF64,
-            9 => Self::LoadConst, 10 => Self::Move, 11 => Self::CmpEq, 12 => Self::CmpLt, 13 => Self::Jump, 14 => Self::JumpIfTrue, 15 => Self::JumpIfFalse, 16 => Self::Call,
-            17 => Self::Ret, 18 => Self::Halt, 19 => Self::CmpGt, 20 => Self::CmpLe, 21 => Self::CmpGe, 22 => Self::CmpNe, 23 => Self::RemI64, 24 => Self::NegI64,
-            25 => Self::NegF64, 26 => Self::Not, 27 => Self::And, 28 => Self::Or, 31 => Self::Xor, 32 => Self::Shl, 33 => Self::Shr, 34 => Self::EngineIntrinsic, _ => Self::Nop,
-        }
+        match v { 1 => Self::AddI64, 2 => Self::SubI64, 3 => Self::MulI64, 4 => Self::DivI64, 5 => Self::AddF64, 6 => Self::SubF64, 7 => Self::MulF64, 8 => Self::DivF64, 9 => Self::LoadConst, 10 => Self::Move, 11 => Self::CmpEq, 12 => Self::CmpLt, 13 => Self::Jump, 14 => Self::JumpIfTrue, 15 => Self::JumpIfFalse, 16 => Self::Call, 17 => Self::Ret, 18 => Self::Halt, 19 => Self::CmpGt, 20 => Self::CmpLe, 21 => Self::CmpGe, 22 => Self::CmpNe, 23 => Self::RemI64, 24 => Self::NegI64, 25 => Self::NegF64, 26 => Self::Not, 27 => Self::And, 28 => Self::Or, 31 => Self::Xor, 32 => Self::Shl, 33 => Self::Shr, 34 => Self::EngineIntrinsic, _ => Self::Nop }
     }
 }
 
