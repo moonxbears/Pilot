@@ -1,0 +1,430 @@
+// ==============================================================================
+// FILE: selfhost/adapter/cpp_abi.pilot
+// Milestone 15.2: Native C++ Class, RAII, Vtable & Exception Boundary Adapter
+// C++ Class Layout Engine, Tail-Padding Reuse, Vtable Slots & Invisible-Ref ABI
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Adapter.CppAbi;
+
+use Pilot.Core.Reflect.TargetDescriptor;
+use Pilot.SelfHost.Adapter.CppMangle.CppType;
+use Pilot.SelfHost.Adapter.CppMangle.CppTypeKind;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. ABI Pass Mode & C++ Access Modifiers
+// ------------------------------------------------------------------------------
+
+pub enum AbiPassMode : u8 {
+    ::TrivialRegisters = 0,
+    ::HiddenRef        = 1,
+}
+
+pub enum CppAccess : u8 {
+    ::Public    = 0,
+    ::Protected = 1,
+    ::Private   = 2,
+}
+
+[Layout(c_abi)]
+pub struct CppOverloadResult : IValue {
+    pub is_ok:      bool;
+    pub winner_idx: usize;
+    pub err_code:   str;
+
+    pub static pure fn ok(idx: usize) -> CppOverloadResult => CppOverloadResult {
+        is_ok:      true,
+        winner_idx: idx,
+        err_code:   "",
+    };
+
+    pub static pure fn fail(code: str) -> CppOverloadResult => CppOverloadResult {
+        is_ok:      false,
+        winner_idx: 0,
+        err_code:   code,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. C++ AST & Class Declaration Schemas (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct CppBaseSpec : IObject {
+    pub name:       str;
+    pub is_virtual: bool;
+    pub access:     CppAccess;
+    pub offset:     usize;
+    pub size:       usize;
+    pub align:      usize;
+    pub nvsize:     usize;
+}
+
+pub pure fn cpp_base_spec_new(
+    name: str,
+    is_virt: bool,
+    access: CppAccess,
+    size: usize,
+    align: usize,
+    nvsize: usize
+) -> CppBaseSpec {
+    return CppBaseSpec {
+        name:       name,
+        is_virtual: is_virt,
+        access:     access,
+        offset:     0,
+        size:       size,
+        align:      align,
+        nvsize:     nvsize,
+    };
+}
+
+pub struct CppFieldDecl : IObject {
+    pub name:        str;
+    pub type_name:   str;
+    pub byte_size:   usize;
+    pub alignment:   usize;
+    pub byte_offset: usize;
+    pub access:      CppAccess;
+}
+
+pub pure fn cpp_field_decl_new(
+    name: str,
+    type_name: str,
+    size: usize,
+    align: usize,
+    access: CppAccess
+) -> CppFieldDecl {
+    return CppFieldDecl {
+        name:        name,
+        type_name:   type_name,
+        byte_size:   size,
+        alignment:   align,
+        byte_offset: 0,
+        access:      access,
+    };
+}
+
+pub struct CppMethodDecl : IObject {
+    pub name:             str;
+    pub mangled_name:     str;
+    pub is_virtual:       bool;
+    pub is_pure_virtual:  bool;
+    pub is_const:         bool;
+    pub is_ctor:          bool;
+    pub is_dtor:          bool;
+    pub is_deleted:       bool;
+    pub is_noexcept:      bool;
+    pub access:           CppAccess;
+    pub vtable_slot:      usize;
+    pub param_type_names: List<str>;
+    pub return_type_name: str;
+}
+
+pub fn cpp_method_decl_new(
+    name: str,
+    is_virt: bool,
+    is_pure: bool,
+    is_c: bool,
+    is_ct: bool,
+    is_dt: bool,
+    access: CppAccess,
+    ret_ty: str
+) -> CppMethodDecl {
+    return CppMethodDecl {
+        name:             name,
+        mangled_name:     "",
+        is_virtual:       is_virt,
+        is_pure_virtual:  is_pure,
+        is_const:         is_c,
+        is_ctor:          is_ct,
+        is_dtor:          is_dt,
+        is_deleted:       false,
+        is_noexcept:      false,
+        access:           access,
+        vtable_slot:      0,
+        param_type_names: [],
+        return_type_name: ret_ty,
+    };
+}
+
+pub struct CppClassDecl : IObject {
+    pub name:               str;
+    pub is_struct:          bool;
+    pub bases:              List<CppBaseSpec>;
+    pub fields:             List<CppFieldDecl>;
+    pub methods:            List<CppMethodDecl>;
+    pub has_user_dtor:      bool;
+    pub has_user_copy_ctor: bool;
+    pub has_user_move_ctor: bool;
+    pub is_abstract:        bool;
+}
+
+pub fn cpp_class_decl_new(name: str, is_struct: bool) -> CppClassDecl {
+    return CppClassDecl {
+        name:               name,
+        is_struct:          is_struct,
+        bases:              [],
+        fields:             [],
+        methods:            [],
+        has_user_dtor:      false,
+        has_user_copy_ctor: false,
+        has_user_move_ctor: false,
+        is_abstract:        false,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Vtable Slot & Class Layout Schemas
+// ------------------------------------------------------------------------------
+
+pub struct CppVtableSlot : IObject {
+    pub method_name:   str;
+    pub slot_index:    usize;
+    pub is_dtor:       bool;
+    pub dtor_variant:  u8; // 0=normal, 1=complete, 2=deleting
+    pub offset_to_top: isize;
+}
+
+pub struct CppClassLayout : IObject {
+    pub class_name:    str;
+    pub total_size:    usize;
+    pub alignment:     usize;
+    pub nvsize:        usize;
+    pub dsize:         usize;
+    pub has_vptr:      bool;
+    pub vptr_offset:   usize;
+    pub pass_mode:     AbiPassMode;
+    pub vtable_slots:  List<CppVtableSlot>;
+    pub field_offsets: List<usize>;
+}
+
+// ------------------------------------------------------------------------------
+// 4. Alignment & Non-Trivial ABI Detectors
+// ------------------------------------------------------------------------------
+
+pub pure fn align_up_to(val: usize, align: usize) -> usize {
+    if align <= 1 { return val; }
+    let rem = val % align;
+    if rem == 0 { return val; }
+    return val + (align - rem);
+}
+
+pub pure fn is_non_trivial_cpp_type(cls: ref<CppClassDecl>) -> bool {
+    return cls.has_user_dtor || cls.has_user_copy_ctor || cls.has_user_move_ctor;
+}
+
+pub pure fn class_has_virtual_methods(cls: ref<CppClassDecl>) -> bool {
+    var i: usize = 0;
+    while i < cls.methods.len() {
+        if cls.methods[i].is_virtual { return true; }
+        i = i + 1;
+    }
+    var b: usize = 0;
+    while b < cls.bases.len() {
+        if cls.bases[b].is_virtual { return true; }
+        b = b + 1;
+    }
+    return false;
+}
+
+// ------------------------------------------------------------------------------
+// 5. Vtable Slot Computation (Itanium 2-Slot Destructor Rule)
+// ------------------------------------------------------------------------------
+
+pub pure fn compute_vtable_slots(cls: ref<CppClassDecl>) -> List<CppVtableSlot> {
+    var slots: List<CppVtableSlot> = [];
+    var next_slot: usize = 0;
+
+    // Check if class has virtual destructor
+    var has_virt_dtor = false;
+    var i: usize = 0;
+    while i < cls.methods.len() {
+        let m = cls.methods[i];
+        if m.is_virtual && m.is_dtor {
+            has_virt_dtor = true;
+        }
+        i = i + 1;
+    }
+
+    // Itanium ABI rule: virtual dtor occupies 2 vtable slots:
+    // Slot 0: complete-object destructor (D1)
+    // Slot 1: deleting destructor (D0)
+    if has_virt_dtor {
+        slots.push(CppVtableSlot {
+            method_name:   "~" + cls.name,
+            slot_index:    0,
+            is_dtor:       true,
+            dtor_variant:  1, // Complete object dtor
+            offset_to_top: 0,
+        });
+        slots.push(CppVtableSlot {
+            method_name:   "~" + cls.name,
+            slot_index:    1,
+            is_dtor:       true,
+            dtor_variant:  2, // Deleting dtor
+            offset_to_top: 0,
+        });
+        next_slot = 2;
+    }
+
+    // Assign remaining virtual methods in order of declaration
+    i = 0;
+    while i < cls.methods.len() {
+        let m = cls.methods[i];
+        if m.is_virtual && !m.is_dtor {
+            slots.push(CppVtableSlot {
+                method_name:   m.name,
+                slot_index:    next_slot,
+                is_dtor:       false,
+                dtor_variant:  0,
+                offset_to_top: 0,
+            });
+            next_slot = next_slot + 1;
+        }
+        i = i + 1;
+    }
+
+    return slots;
+}
+
+// ------------------------------------------------------------------------------
+// 6. Complete Class Layout Calculation (Tail-Padding & Pass-Mode)
+// ------------------------------------------------------------------------------
+
+pub pure fn compute_cpp_class_layout(
+    cls: ref<CppClassDecl>,
+    target: ref<TargetDescriptor>
+) -> CppClassLayout {
+    let ptr_size = if target.pointer_bytes > 0 { target.pointer_bytes } else { 8 };
+    let has_vptr = class_has_virtual_methods(cls);
+    var vtable_slots: List<CppVtableSlot> = [];
+
+    var current_offset: usize = 0;
+    var max_align: usize = 1;
+
+    if has_vptr {
+        vtable_slots = compute_vtable_slots(cls);
+        current_offset = ptr_size;
+        max_align = ptr_size;
+    }
+
+    // Process base classes with Itanium tail-padding reuse
+    var b_idx: usize = 0;
+    while b_idx < cls.bases.len() {
+        let base = cls.bases[b_idx];
+        if base.align > max_align { max_align = base.align; }
+
+        if !base.is_virtual {
+            let base_offset = align_up_to(current_offset, base.align);
+            // Itanium ABI: reuse base tail padding if base nvsize < base size
+            if base.nvsize > 0 && base.nvsize < base.size {
+                current_offset = base_offset + base.nvsize;
+            } else if base.size > 0 {
+                current_offset = base_offset + base.size;
+            }
+        }
+        b_idx = b_idx + 1;
+    }
+
+    // Layout member fields
+    var field_offsets: List<usize> = [];
+    var f_idx: usize = 0;
+    while f_idx < cls.fields.len() {
+        let f = cls.fields[f_idx];
+        let f_align = if f.alignment > 0 { f.alignment } else { 1 };
+        if f_align > max_align { max_align = f_align; }
+
+        let f_off = align_up_to(current_offset, f_align);
+        field_offsets.push(f_off);
+        current_offset = f_off + f.byte_size;
+        f_idx = f_idx + 1;
+    }
+
+    let dsize = current_offset;
+    let nvsize = current_offset;
+    var total_size = align_up_to(current_offset, max_align);
+
+    // C++ empty class law: sizeof(Empty) >= 1
+    if total_size == 0 {
+        total_size = 1;
+    }
+
+    // Four Critical C++ Correctness Laws: The Invisible Non-Trivial Struct ABI Rule!
+    // Even an 8-byte C++ struct with a user-defined ~T() or copy constructor
+    // is forbidden by Itanium & MSVC ABIs from passing in registers!
+    var pass_mode = AbiPassMode::TrivialRegisters;
+    if is_non_trivial_cpp_type(cls) {
+        pass_mode = AbiPassMode::HiddenRef;
+    } else if total_size > 16 {
+        pass_mode = AbiPassMode::HiddenRef;
+    }
+
+    return CppClassLayout {
+        class_name:    cls.name,
+        total_size:    total_size,
+        alignment:     max_align,
+        nvsize:        nvsize,
+        dsize:         dsize,
+        has_vptr:      has_vptr,
+        vptr_offset:   0,
+        pass_mode:     pass_mode,
+        vtable_slots:  vtable_slots,
+        field_offsets: field_offsets,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 7. C++ Overload Resolution & Access Control
+// ------------------------------------------------------------------------------
+
+pub pure fn resolve_cpp_method_overload(
+    methods: slice<CppMethodDecl>,
+    name: str,
+    arg_types: slice<str>
+) -> CppOverloadResult {
+    var candidate_indices: List<usize> = [];
+
+    var i: usize = 0;
+    while i < methods.len() {
+        let m = methods[i];
+        if m.name == name && m.param_type_names.len() == arg_types.len() {
+            // Check type match
+            var all_match = true;
+            var a: usize = 0;
+            while a < arg_types.len() {
+                if m.param_type_names[a] != arg_types[a] && m.param_type_names[a] != "auto" {
+                    all_match = false;
+                }
+                a = a + 1;
+            }
+            if all_match {
+                candidate_indices.push(i);
+            }
+        }
+        i = i + 1;
+    }
+
+    if candidate_indices.len() == 0 {
+        return CppOverloadResult.fail("NO_MATCH");
+    }
+
+    if candidate_indices.len() > 1 {
+        // Tie between multiple viable overloads -> CPP004
+        return CppOverloadResult.fail("CPP004");
+    }
+
+    let winner_idx = candidate_indices[0];
+    let win = methods[winner_idx];
+
+    // Check if deleted -> CPP001
+    if win.is_deleted {
+        return CppOverloadResult.fail("CPP001");
+    }
+
+    // Check access control -> CPP002
+    if win.access != CppAccess::Public {
+        return CppOverloadResult.fail("CPP002");
+    }
+
+    return CppOverloadResult.ok(winner_idx);
+}

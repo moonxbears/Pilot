@@ -324,4 +324,122 @@ All three mandatory gates from `AGENTS.md` and `MILESTONES_100.md` were evaluate
 
 Phase 1 (`M1`–`M10`) established the core compiler foundation. Phase 2 (`M11`–`M20`) begins the **Universal Foreign-Language Adapter**:
 - **Milestone 11 (Completed):** First-Class `adapter` Blueprint Engine & Zero-Cost Idiom Lifter is fully implemented, verified with 4/4 anti-cheat tests, and tested across all 85 simultaneous mega gate tests.
-- **Next Milestone:** Ready to proceed to **Milestone 12 (`M12 — Headerless C11/C23 Semantic Absorber (use c "header.h")`)**.
+- **Milestones 12–14** are marked `[COMPLETE]` in `MILESTONES_100.md`. Policy violations in that code are recorded in [§6](#6-policy-audit-milestones-12-14-phase-2-adapter).
+- **Next Milestone:** **Milestone 15 (`M15 — Native C++ Class, RAII, Vtable & Exception Boundary Adapter`)**.
+
+---
+
+## 6. Policy Audit: Milestones 12–14 (Phase 2 Adapter)
+
+> **Audit Date:** 2026-11-09
+> **Scope:** Code landed for M12 (`use c`), M13 (`frame` / `!&`), and M14 (Perceus foreign handles and scope guards), checked against [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) and [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md). Spec gaps are included only where they are also a stated policy (no stubs, same-milestone purge, open registry, lattice, single definition).
+> **Method:** Static read of the milestone manifests, the new `.pilot` modules, `crates/pilot-rt/src/c_abi.rs`, and the M12–M14 anti-cheat suites. Line counts are `wc -l` on 2026-11-09. This pass did not re-run `pilot gate`.
+
+### 6.1 Scorecard
+
+| Policy | Where checked | Result |
+| :--- | :--- | :--- |
+| `MOD001` file cap (`<= 1,500` LOC) | M12–M14 `.pilot` and `c_abi.rs` | **Pass.** Largest new file is `selfhost/adapter/c_pp.pilot` at 916 lines. |
+| Zero `TODO` / `unimplemented!` markers | `selfhost/adapter/`, `stdlib/pilot/abi/`, `stdlib/std/polyglot/` | **Pass.** No marker comments. Behavior stubs are unmarked (see POL-01). |
+| Rule 12 on the new C absorber | `c_pp.pilot`, `c_parser.pilot`, `c_sysroot.pilot` | **Pass** for those three files: no raw `__engine(...)`. |
+| Open registry, no closed `if` dispatch (`AGENTS.md` §1) | `stdlib/pilot/abi/descriptor.pilot` | **Fail.** POL-02. |
+| Same-milestone legacy purge (`AGENTS.md` §1) | both `shm.pilot` copies | **Fail.** POL-03. |
+| Rule 11 single definition | `ShmBuffer` / `ShmView` | **Fail.** POL-03. |
+| Rule 6 absence, no null sentinels | `ForeignHandle`, `invoke_dynamic_frame` | **Fail.** POL-01, POL-04. |
+| Rule 3 / lattice on fixed records | C preprocessor and C parser schemas | **Fail.** POL-05. |
+| Rule 1 closed sets as `enum` | calling-convention ids, C `calling_conv` | **Fail.** POL-02, POL-06. |
+| Name-blind gate on new modules | M14 anti-cheat `name_blind` flag | **Waived** on the two stdlib files. POL-07. |
+| Spec public signatures that the milestone claims are implemented | `absorb_c_header`, dynamic frame invoke | **Missing or stubbed.** POL-01, POL-08. |
+
+### 6.2 Findings
+
+#### POL-01 — `invoke_dynamic_frame` does not invoke the frame (HIGH)
+
+`AGENTS.md` forbids stubbed branches that return a stand-in so a check can pass. M13’s public signature is `invoke_dynamic_frame(fn_addr, plan, packet)`, and `crates/pilot-rt/src/c_abi.rs` does export `pilot_rt_invoke_abi_frame`. The Pilot entry point never calls it. After a null check it counts SIMD locations and returns GPR 0:
+
+```290:310:stdlib/pilot/abi/descriptor.pilot
+pub fn invoke_dynamic_frame(
+    fn_addr: ptr<void>,
+    plan: ref<AbiFramePlan>,
+    packet: var ref<RawDispatchPacket>
+) -> res<u64, AbiDiagnostic> {
+    if fn_addr == null {
+        return res<u64, AbiDiagnostic>.err(AbiDiagnostic::symbol_not_found("dynamic_symbol", plan.conv_id));
+    }
+    // ... counts DirectSimd / HfaSimd* ...
+    packet.vec_reg_count = v_count;
+    let g0 = packet.get_gpr(0);
+    return res<u64, AbiDiagnostic>.ok(g0);
+}
+```
+
+The native dispatcher is also only real on `x86_64` + Unix (`#[cfg(all(target_arch = "x86_64", unix))]` naked SysV asm). Every other target, including Windows x64 where `LoadLibraryW` was added, falls through to a 6-GPR `extern "C" fn` that ignores XMM registers and the stack buffer (`c_abi.rs` lines 114–129).
+
+#### POL-02 — Calling conventions are a closed string `if` chain (HIGH)
+
+`AGENTS.md` §1 requires table-driven registries: adding item N+1 must not rewrite a core dispatcher. `imp_type.md` Rule 1 forbids stringly ids for a closed set, and Rule 2 requires a table once the set is an open catalog. `descriptor.pilot` declares `ICallingConvClassifier` and `CallingConvRegistryEntry`, then ignores both:
+
+- `calling_conv_get` (lines 245–252) is six hardcoded index arms (`"sysv_x64"`, `"win64"`, `"aapcs64"`, `"darwin_arm64"`, `"riscv64"`, `"wasm32"`).
+- `calling_conv_count` (lines 254–264) stops when `conv_id == "wasm32"`. That string is a sentinel terminator (Rule 6).
+- `classify_call_frame` (lines 266–288) is a closed `if conv == "..."` ladder and silently falls through to SysV for every unknown id, so `ABI003` (unsupported convention) cannot fire from this function.
+
+#### POL-03 — M14 left the lattice-bit shim in place and duplicated the types (HIGH)
+
+M14’s stated bottleneck was `ShmOwnedBuffer` / `ShmBorrowedView` storing lattice class as a dummy `i64` (`2` and `1`) so the compiler never runs `~self()` or `ESCAPE001`. `AGENTS.md` requires superseded code to be deleted in the same milestone. `imp_type.md` Rule 11 requires one canonical definition.
+
+Both copies still ship the shim, and both also define `ShmBuffer<T>` / `ShmView<T>`:
+
+| File | Legacy shim | Parallel canonical types |
+| :--- | :--- | :--- |
+| `stdlib/polyglot/shm.pilot` | lines 110–122, `lattice_bits: i64` set to `2` / `1` | lines 8–63 |
+| `stdlib/std/polyglot/shm.pilot` | lines 114–126, same integers | lines 15–108 |
+
+`create_shm_owned_buffer` and `project_shm_borrowed_view` still construct the integer-lattice records. The two `ShmBuffer` / `ShmView` definitions are not imports of one owner. `ShmBuffer::create` in `stdlib/polyglot/shm.pilot` also plants a fake mapping address (`base_addr: 1000000`) instead of an OS mapping.
+
+#### POL-04 — `ForeignHandle` uses integer nulls and always returns a handle (MEDIUM)
+
+M14 spec and Rule 6: `wrap` returns `opt<ForeignHandle<T>>` and `none` when the pointer is null. Fields are `ptr<T>` and `ptr<void>`. `stdlib/std/polyglot/lifetime.pilot` lines 141–166 store `raw_ptr: i64` and `dtor_fn: i64`, treat `0` as null, and `wrap` always returns `ForeignHandle<T>` with `is_armed: p != 0`. `take_raw` writes `raw_ptr = 0` to disarm. Absence is a sentinel, not `opt` / `ptr`.
+
+#### POL-05 — Preprocessor and parser records are on the wrong lattice (MEDIUM)
+
+Rule 3: a fixed value record is `[Layout(c_abi)] struct : IValue`. Rule 7: a type that owns a `List` is `0b10 : IObject`.
+
+| Type | File | Declared as | Problem |
+| :--- | :--- | :--- | :--- |
+| `CppMacro` | `c_pp.pilot:59` | `: IValue`, no `[Layout]` | Owns `params: List<str>`. |
+| `CppCondFrame` | `c_pp.pilot:67` | `: IValue`, no `[Layout]` | Three independent bools (`active`, `parent_active`, `had_true`) — Rule 5. |
+| `CFieldDecl` | `c_parser.pilot:53` | `: IObject`, no `[Layout]` | No owned heap and no `~self()`. It is a value record. |
+| `CRecordDecl` | `c_parser.pilot:78` | `: IObject` | Owns `fields`, which fits `0b10`, but `is_union`, `is_opaque`, and `has_flexible_array_tail` are three booleans that should be `bitflags` (Rule 5). |
+
+`CTranslationUnit.inline_fn_bodies` is `List<str>` (`c_parser.pilot:152`). The milestone schema requires `List<IrFunction>` so `static inline` helpers lower into PilIR. The field stores source text.
+
+#### POL-06 — C layout is a closed name match, and `long` is always 8 bytes (MEDIUM)
+
+`c_type_size` (`c_parser.pilot:170–187`) classifies C types by spelling (`"int"`, `"long"`, `"double"`, `"size_t"`, …) and returns `8` for every `long`. M12 requires `long` to be 4 bytes on Win64 LLP64 and 8 bytes on Unix LP64, selected from target bit width, not from a host-sized default. Unknown spellings also return `8`, which hides an unsupported type instead of a diagnostic.
+
+`CFnDecl.calling_conv` (`c_parser.pilot:96`) is a `str`. `__stdcall` / `__cdecl` / `__fastcall` are a closed set and belong in an `enum : u8` (Rule 1), the same way `ArgPassKind` already is.
+
+#### POL-07 — M14 turned the name-blind check off for the new stdlib files (MEDIUM)
+
+`AGENTS.md` Gate 1 requires the rename litmus and zero hardcoded user-space type names. `milestone14_perceus_foreign_resource_and_scope_guards.rs` sets `name_blind: false` on `stdlib/std/polyglot/lifetime.pilot` and `stdlib/std/polyglot/shm.pilot` (lines 22 and 41). `escape.pilot` and `arc.pilot` stay `name_blind: true`. The waiver means Pass 10 of the anti-cheat harness does not scan the two modules M14 added.
+
+Those same Perceus files still call raw `__engine("map_new")`, `__engine("map_get")`, `__engine("map_set")`, and `__engine("ast_*")` (Rule 12). That pattern is pre-existing across `selfhost/perceus/` (already counted in `Audit_imp_type.md`). M14 extended `escape.pilot` and `arc.pilot` inside that style instead of going through a typed AST cursor. New M14 lines in `lifetime.pilot` do not call `__engine`.
+
+#### POL-08 — `absorb_c_header` and the PilotDb cache are not in the absorber (MEDIUM)
+
+M12’s public signature is `absorb_c_header(db, spec, target) -> res<ref<CTranslationUnit>, List<Diagnostic>>`, cached as `AbsorbCHeader` at `Durability::ExternalPkg`. The tree has `preprocess_c_header` (`c_pp.pilot:909`) and `c_parse_translation_unit` (`c_parser.pilot:248`). There is no `absorb_c_header`, no `PilotDb` query, and no durability tier on the C include result.
+
+`c_sysroot.pilot` `sysroot_add_standard_paths` (lines 39–65) is a closed `target_os` string ladder with baked paths: macOS SDK directories instead of `xcrun --show-sdk-path`, and Windows Kits `10.0.22000.0` instead of a discovered version. That is the same closed-dispatch rule as POL-02, at lower severity because the set of host OS families is small and the milestone text asked for those paths explicitly. The version pin still fails the “discover the sysroot” requirement.
+
+### 6.3 What holds
+
+- New adapter, ABI, and lifetime files are under the 1,500-line cap.
+- `c_pp.pilot`, `c_parser.pilot`, and `c_sysroot.pilot` do not call `__engine`. They use `Map`, `List`, and `File`.
+- `ArgPassKind` is an `enum : u8`. `ArgLocation`, `CallingConvSpec`, `RawDispatchPacket`, and `ForeignHandle` / `ForeignGuard` / `PinnedSlice` carry `[Layout(c_abi)]` where they are value- or C-shaped records.
+- `LoadLibraryW` / `GetProcAddress` / `FreeLibrary` exist beside `dlopen` in `c_abi.rs`.
+- Diagnostic codes `CAB001`–`CAB004`, `ABI001`–`ABI003`, `ESCAPE004`, and `FFI001` are present in the modules or in `selfhost/diagnostics/errors.pilot`.
+- M12–M14 each have a 4-test anti-cheat file registered in `crates/pilot-analysis/tests/common/anticheat.rs`.
+
+### 6.4 Disposition
+
+M12–M14 are marked complete, and the file manifest matches the milestone paths. The policies that are still broken are the ones that make the foreign adapter actually call code and actually own memory: the frame trampoline returns a register already in the packet (POL-01), convention dispatch is a string ladder (POL-02), and the old integer `lattice_bits` shared-memory types were copied forward instead of deleted (POL-03). Those three should be fixed before M15 builds C++ RAII and exception edges on top of this layer.

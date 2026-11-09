@@ -706,4 +706,49 @@ pub let ERRORS = [
         category: "Autofix",
         reference: "Fixed-Point Convergence / Milestone 8",
     },
+    // -------------------------------------------------------------------------
+    // 37. C++ Class, RAII, Vtable & Exception Boundary (CPP001 - CPP006)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "CPP001",
+        title: "Deleted C++ Special Member Invoked",
+        description: "Attempted to call or copy an object whose corresponding C++ member is marked '= delete'",
+        category: "CppAdapter",
+        reference: "C++11 deleted function invocation / Milestone 15",
+    },
+    ErrorDef {
+        code: "CPP002",
+        title: "Inaccessible C++ Member",
+        description: "Attempted to access private or protected C++ member across adapter boundary",
+        category: "CppAdapter",
+        reference: "C++ access control boundary / Milestone 15",
+    },
+    ErrorDef {
+        code: "CPP003",
+        title: "Uninstantiated C++ Template",
+        description: "C++ template cannot be consumed without explicit concrete type arguments",
+        category: "CppAdapter",
+        reference: "C++ template instantiation / Milestone 15",
+    },
+    ErrorDef {
+        code: "CPP004",
+        title: "Ambiguous C++ Overload",
+        description: "Multiple C++ method overloads matched argument types with identical conversion rank",
+        category: "CppAdapter",
+        reference: "C++ overload resolution tie / Milestone 15",
+    },
+    ErrorDef {
+        code: "CPP005",
+        title: "Abstract C++ Class Instantiation",
+        description: "Cannot instantiate C++ class containing unfulfilled pure-virtual '= 0' functions",
+        category: "CppAdapter",
+        reference: "C++ pure virtual interface instantiation / Milestone 15",
+    },
+    ErrorDef {
+        code: "CPP006",
+        title: "Multiple Virtual Diamond Inheritance Thunk",
+        description: "Virtual base class in diamond inheritance hierarchy requires offset adjustment thunk",
+        category: "CppAdapter",
+        reference: "C++ Itanium diamond inheritance / Milestone 15",
+    },
 ];

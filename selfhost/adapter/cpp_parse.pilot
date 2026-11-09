@@ -1,0 +1,583 @@
+// ==============================================================================
+// FILE: selfhost/adapter/cpp_parse.pilot
+// Milestone 15.3: Native C++ Class, RAII, Vtable & Exception Boundary Adapter
+// Pure-Pilot C++ Header Parser: namespaces, classes, virtuals, std::string_view
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Adapter.CppParse;
+
+use Pilot.Diagnostics.Model.Diagnostic;
+use Pilot.Diagnostics.Model.SourceSpan;
+use Pilot.Diagnostics.Model.diagnostic_new;
+use Pilot.SelfHost.Adapter.CppAbi.*;
+use Pilot.SelfHost.Adapter.CppMangle.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Codes & Lattice Classifications
+// ------------------------------------------------------------------------------
+
+pub enum CppDiagnosticKind : u16 {
+    ::DeletedMethodInvoked   = 1, // CPP001
+    ::MemberInaccessible     = 2, // CPP002
+    ::UninstantiatedTemplate = 3, // CPP003
+    ::AmbiguousOverload      = 4, // CPP004
+    ::AbstractInstantiation  = 5, // CPP005
+    ::DiamondThunkAdjusted   = 6, // CPP006
+}
+
+pub pure fn cpp_diag_code(kind: CppDiagnosticKind) -> str {
+    return switch kind {
+        case ::DeletedMethodInvoked   => "CPP001",
+        case ::MemberInaccessible     => "CPP002",
+        case ::UninstantiatedTemplate => "CPP003",
+        case ::AmbiguousOverload      => "CPP004",
+        case ::AbstractInstantiation  => "CPP005",
+        case ::DiamondThunkAdjusted   => "CPP006",
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. C++ Enum & Translation Unit Schemas
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct CppEnumVariant : IValue {
+    pub name:  str;
+    pub value: i64;
+}
+
+pub struct CppEnumDecl : IObject {
+    pub name:            str;
+    pub underlying_type: str;
+    pub is_scoped:       bool;
+    pub variants:        List<CppEnumVariant>;
+}
+
+pub struct CppTranslationUnit : IObject {
+    pub file_path:  str;
+    pub namespaces: List<str>;
+    pub classes:    List<CppClassDecl>;
+    pub enums:      List<CppEnumDecl>;
+    pub functions:  List<CppMethodDecl>;
+    pub diags:      List<Diagnostic>;
+}
+
+pub fn cpp_translation_unit_new(path: str) -> CppTranslationUnit {
+    return CppTranslationUnit {
+        file_path:  path,
+        namespaces: [],
+        classes:    [],
+        enums:      [],
+        functions:  [],
+        diags:      [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Type Physics & Standard C++ View Mappings
+// ------------------------------------------------------------------------------
+
+pub pure fn cpp_type_size(ty: str) -> usize {
+    if ty == "std::string_view" || ty.starts_with("std::span<") {
+        return 16;
+    }
+    if (ty.len() == 4 && ty.byte_at(0) == 98 && ty.byte_at(1) == 111) || (ty.len() == 4 && ty.byte_at(0) == 99 && ty.byte_at(1) == 104) || ty == "uint8_t" || ty == "int8_t" {
+        return 1;
+    }
+    if ty == "short" || ty == "uint16_t" || ty == "int16_t" {
+        return 2;
+    }
+    if ty == "int" || ty == "uint32_t" || ty == "int32_t" || ty == "float" {
+        return 4;
+    }
+    if ty == "long" || ty == "long long" || ty == "uint64_t" || ty == "int64_t" || ty == "double" || ty.find("*") >= 0 || ty.find("&") >= 0 {
+        return 8;
+    }
+    return 8;
+}
+
+pub pure fn cpp_type_align(ty: str) -> usize {
+    if ty == "std::string_view" || ty.starts_with("std::span<") {
+        return 8;
+    }
+    return cpp_type_size(ty);
+}
+
+// ------------------------------------------------------------------------------
+// 4. Tokenizer & Character Predicates
+// ------------------------------------------------------------------------------
+
+pub pure fn cpp_is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
+pub pure fn cpp_is_alpha(b: i64) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+pub pure fn cpp_is_digit(b: i64) -> bool => b >= 48 && b <= 57;
+
+pub pure fn cpp_skip_whitespace_and_comments(src: str, start: usize) -> usize {
+    var p = start;
+    let n = src.len();
+    while p < n {
+        let b = src.byte_at(p as i64);
+        if cpp_is_space(b) {
+            p = p + 1;
+            continue;
+        }
+        // Single-line comment //
+        if b == 47 && p + 1 < n && src.byte_at((p + 1) as i64) == 47 {
+            p = p + 2;
+            while p < n && src.byte_at(p as i64) != 10 {
+                p = p + 1;
+            }
+            continue;
+        }
+        // Multi-line comment /* */
+        if b == 47 && p + 1 < n && src.byte_at((p + 1) as i64) == 42 {
+            p = p + 2;
+            while p + 1 < n && !(src.byte_at(p as i64) == 42 && src.byte_at((p + 1) as i64) == 47) {
+                p = p + 1;
+            }
+            p = p + 2;
+            continue;
+        }
+        // Preprocessor directive #
+        if b == 35 {
+            while p < n && src.byte_at(p as i64) != 10 {
+                p = p + 1;
+            }
+            continue;
+        }
+        break;
+    }
+    return p;
+}
+
+pub pure fn cpp_read_ident(src: str, start: usize) -> str {
+    var p = start;
+    let n = src.len();
+    while p < n {
+        let b = src.byte_at(p as i64);
+        if cpp_is_alpha(b) || cpp_is_digit(b) {
+            p = p + 1;
+        } else if b == 58 && p + 1 < n && src.byte_at((p + 1) as i64) == 58 {
+            p = p + 2;
+        } else {
+            break;
+        }
+    }
+    return src.slice(start, p);
+}
+
+// ------------------------------------------------------------------------------
+// 5. Pure-Pilot C++ Header Translation Unit Parser
+// ------------------------------------------------------------------------------
+
+pub fn cpp_parse_translation_unit(
+    source: str,
+    file_path: str,
+    var ref diags: List<Diagnostic>
+) -> CppTranslationUnit {
+    var tu = cpp_translation_unit_new(file_path);
+    var cursor: usize = 0;
+    let total_len = source.len();
+
+    var ns_stack: List<str> = [];
+
+    while cursor < total_len {
+        cursor = cpp_skip_whitespace_and_comments(source, cursor);
+        if cursor >= total_len { break; }
+
+        let token = cpp_read_ident(source, cursor);
+        if token.len() == 0 {
+            cursor = cursor + 1;
+            continue;
+        }
+
+        // 1. namespace <name> { ... }
+        if token == "namespace" {
+            cursor = cpp_skip_whitespace_and_comments(source, cursor + token.len());
+            let ns_name = cpp_read_ident(source, cursor);
+            cursor = cpp_skip_whitespace_and_comments(source, cursor + ns_name.len());
+            if cursor < total_len && source.byte_at(cursor as i64) == 123 { // '{'
+                ns_stack.push(ns_name);
+                tu.namespaces.push(ns_name);
+                cursor = cursor + 1;
+            }
+            continue;
+        }
+
+        // Closing brace for namespace or class
+        if token == "}" || source.byte_at(cursor as i64) == 125 {
+            if ns_stack.len() > 0 {
+                let _ = ns_stack.pop();
+            }
+            cursor = cursor + 1;
+            continue;
+        }
+
+        // 2. enum class <Name> [: <UnderlyingType>] { ... };
+        if token == "enum" {
+            let next_pos = cpp_skip_whitespace_and_comments(source, cursor + 4);
+            let next_tok = cpp_read_ident(source, next_pos);
+            var is_scoped = false;
+            var enum_name = "";
+            var enum_cursor = next_pos;
+
+            if next_tok == "class" || next_tok == "struct" {
+                is_scoped = true;
+                enum_cursor = cpp_skip_whitespace_and_comments(source, next_pos + next_tok.len());
+                enum_name = cpp_read_ident(source, enum_cursor);
+                enum_cursor = enum_cursor + enum_name.len();
+            } else {
+                enum_name = next_tok;
+                enum_cursor = next_pos + enum_name.len();
+            }
+
+            var underlying_type = "int";
+            enum_cursor = cpp_skip_whitespace_and_comments(source, enum_cursor);
+            if enum_cursor < total_len && source.byte_at(enum_cursor as i64) == 58 { // ':'
+                enum_cursor = cpp_skip_whitespace_and_comments(source, enum_cursor + 1);
+                underlying_type = cpp_read_ident(source, enum_cursor);
+                enum_cursor = enum_cursor + underlying_type.len();
+            }
+
+            enum_cursor = cpp_skip_whitespace_and_comments(source, enum_cursor);
+            var variants: List<CppEnumVariant> = [];
+            if enum_cursor < total_len && source.byte_at(enum_cursor as i64) == 123 { // '{'
+                enum_cursor = enum_cursor + 1;
+                var current_val: i64 = 0;
+                while enum_cursor < total_len && source.byte_at(enum_cursor as i64) != 125 { // '}'
+                    enum_cursor = cpp_skip_whitespace_and_comments(source, enum_cursor);
+                    let var_name = cpp_read_ident(source, enum_cursor);
+                    if var_name.len() == 0 {
+                        enum_cursor = enum_cursor + 1;
+                        continue;
+                    }
+                    enum_cursor = cpp_skip_whitespace_and_comments(source, enum_cursor + var_name.len());
+                    if enum_cursor < total_len && source.byte_at(enum_cursor as i64) == 61 { // '='
+                        enum_cursor = cpp_skip_whitespace_and_comments(source, enum_cursor + 1);
+                        var num_val: i64 = 0;
+                        while enum_cursor < total_len && cpp_is_digit(source.byte_at(enum_cursor as i64)) {
+                            num_val = num_val * 10 + (source.byte_at(enum_cursor as i64) - 48);
+                            enum_cursor = enum_cursor + 1;
+                        }
+                        current_val = num_val;
+                    }
+                    variants.push(CppEnumVariant { name: var_name, value: current_val });
+                    current_val = current_val + 1;
+
+                    enum_cursor = cpp_skip_whitespace_and_comments(source, enum_cursor);
+                    if enum_cursor < total_len && source.byte_at(enum_cursor as i64) == 44 { // ','
+                        enum_cursor = enum_cursor + 1;
+                    }
+                }
+                if enum_cursor < total_len && source.byte_at(enum_cursor as i64) == 125 { // '}'
+                    enum_cursor = enum_cursor + 1;
+                }
+                enum_cursor = cpp_skip_whitespace_and_comments(source, enum_cursor);
+                if enum_cursor < total_len && source.byte_at(enum_cursor as i64) == 59 { // ';'
+                    enum_cursor = enum_cursor + 1;
+                }
+            }
+
+            tu.enums.push(CppEnumDecl {
+                name:            enum_name,
+                underlying_type: underlying_type,
+                is_scoped:       is_scoped,
+                variants:        variants,
+            });
+            cursor = enum_cursor;
+            continue;
+        }
+
+        // 3. class or struct <Name> [: [public|protected|private] <Base>] { ... };
+        if token == "class" || token == "struct" {
+            let is_struct = token == "struct";
+            var class_access = if is_struct { CppAccess::Public } else { CppAccess::Private };
+
+            cursor = cpp_skip_whitespace_and_comments(source, cursor + token.len());
+            let class_name = cpp_read_ident(source, cursor);
+            cursor = cpp_skip_whitespace_and_comments(source, cursor + class_name.len());
+
+            var cls = cpp_class_decl_new(class_name, is_struct);
+
+            // Inheritance clause
+            if cursor < total_len && source.byte_at(cursor as i64) == 58 { // ':'
+                cursor = cpp_skip_whitespace_and_comments(source, cursor + 1);
+                var base_acc = CppAccess::Public;
+                let acc_cand = cpp_read_ident(source, cursor);
+                if acc_cand == "public" {
+                    base_acc = CppAccess::Public;
+                    cursor = cpp_skip_whitespace_and_comments(source, cursor + 6);
+                } else if acc_cand == "protected" {
+                    base_acc = CppAccess::Protected;
+                    cursor = cpp_skip_whitespace_and_comments(source, cursor + 9);
+                } else if acc_cand == "private" {
+                    base_acc = CppAccess::Private;
+                    cursor = cpp_skip_whitespace_and_comments(source, cursor + 7);
+                }
+                let base_name = cpp_read_ident(source, cursor);
+                cursor = cpp_skip_whitespace_and_comments(source, cursor + base_name.len());
+
+                cls.bases.push(cpp_base_spec_new(base_name, false, base_acc, 8, 8, 8));
+            }
+
+            // Class body
+            if cursor < total_len && source.byte_at(cursor as i64) == 123 { // '{'
+                cursor = cursor + 1;
+
+                while cursor < total_len && source.byte_at(cursor as i64) != 125 { // '}'
+                    cursor = cpp_skip_whitespace_and_comments(source, cursor);
+                    if cursor >= total_len || source.byte_at(cursor as i64) == 125 { break; }
+
+                    let member_tok = cpp_read_ident(source, cursor);
+
+                    // Access specifiers
+                    if member_tok == "public" || member_tok == "protected" || member_tok == "private" {
+                        var spec_cursor = cpp_skip_whitespace_and_comments(source, cursor + member_tok.len());
+                        if spec_cursor < total_len && source.byte_at(spec_cursor as i64) == 58 { // ':'
+                            if member_tok == "public" { class_access = CppAccess::Public; }
+                            else if member_tok == "protected" { class_access = CppAccess::Protected; }
+                            else { class_access = CppAccess::Private; }
+                            cursor = spec_cursor + 1;
+                            continue;
+                        }
+                    }
+
+                    // Check destructor: [virtual] ~ClassName()
+                    var is_virtual_member = false;
+                    var scan_cursor = cursor;
+                    if member_tok == "virtual" {
+                        is_virtual_member = true;
+                        scan_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor + 7);
+                    }
+
+                    let next_ident = cpp_read_ident(source, scan_cursor);
+
+                    // Destructor ~T()
+                    if source.byte_at(scan_cursor as i64) == 126 || next_ident.starts_with("~") {
+                        cls.has_user_dtor = true;
+                        var dtor_cursor = scan_cursor;
+                        if source.byte_at(dtor_cursor as i64) == 126 { dtor_cursor = dtor_cursor + 1; }
+                        let dtor_name = cpp_read_ident(source, dtor_cursor);
+                        dtor_cursor = cpp_skip_whitespace_and_comments(source, dtor_cursor + dtor_name.len());
+
+                        // Skip params ()
+                        if dtor_cursor < total_len && source.byte_at(dtor_cursor as i64) == 40 {
+                            while dtor_cursor < total_len && source.byte_at(dtor_cursor as i64) != 41 {
+                                dtor_cursor = dtor_cursor + 1;
+                            }
+                            if dtor_cursor < total_len { dtor_cursor = dtor_cursor + 1; }
+                        }
+
+                        // Check qualifiers (= 0, noexcept)
+                        var is_pure = false;
+                        while dtor_cursor < total_len && source.byte_at(dtor_cursor as i64) != 59 {
+                            dtor_cursor = cpp_skip_whitespace_and_comments(source, dtor_cursor);
+                            if source.byte_at(dtor_cursor as i64) == 61 { // '='
+                                dtor_cursor = cpp_skip_whitespace_and_comments(source, dtor_cursor + 1);
+                                if source.byte_at(dtor_cursor as i64) == 48 { // '0'
+                                    is_pure = true;
+                                    cls.is_abstract = true;
+                                    dtor_cursor = dtor_cursor + 1;
+                                }
+                            } else {
+                                dtor_cursor = dtor_cursor + 1;
+                            }
+                        }
+                        if dtor_cursor < total_len && source.byte_at(dtor_cursor as i64) == 59 {
+                            dtor_cursor = dtor_cursor + 1;
+                        }
+
+                        var dtor_m = cpp_method_decl_new("~" + class_name, is_virtual_member, is_pure, false, false, true, class_access, "void");
+                        cls.methods.push(dtor_m);
+                        cursor = dtor_cursor;
+                        continue;
+                    }
+
+                    // Constructor: ClassName(...)
+                    if next_ident == class_name && !is_virtual_member {
+                        var ctor_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor + next_ident.len());
+                        var param_types: List<str> = [];
+                        if ctor_cursor < total_len && source.byte_at(ctor_cursor as i64) == 40 {
+                            ctor_cursor = ctor_cursor + 1;
+                            while ctor_cursor < total_len && source.byte_at(ctor_cursor as i64) != 41 {
+                                ctor_cursor = cpp_skip_whitespace_and_comments(source, ctor_cursor);
+                                let p_ty = cpp_read_ident(source, ctor_cursor);
+                                if p_ty.len() > 0 {
+                                    param_types.push(p_ty);
+                                    ctor_cursor = cpp_skip_whitespace_and_comments(source, ctor_cursor + p_ty.len());
+                                    // Check param name
+                                    let p_nm = cpp_read_ident(source, ctor_cursor);
+                                    if p_nm.len() > 0 {
+                                        ctor_cursor = cpp_skip_whitespace_and_comments(source, ctor_cursor + p_nm.len());
+                                    }
+                                }
+                                if ctor_cursor < total_len && source.byte_at(ctor_cursor as i64) == 44 {
+                                    ctor_cursor = ctor_cursor + 1;
+                                }
+                            }
+                            if ctor_cursor < total_len { ctor_cursor = ctor_cursor + 1; }
+                        }
+
+                        // Skip to semicolon
+                        while ctor_cursor < total_len && source.byte_at(ctor_cursor as i64) != 59 {
+                            ctor_cursor = ctor_cursor + 1;
+                        }
+                        if ctor_cursor < total_len && source.byte_at(ctor_cursor as i64) == 59 {
+                            ctor_cursor = ctor_cursor + 1;
+                        }
+
+                        var ctor_m = cpp_method_decl_new(class_name, false, false, false, true, false, class_access, "void");
+                        ctor_m.param_type_names = param_types;
+                        cls.methods.push(ctor_m);
+                        cursor = ctor_cursor;
+                        continue;
+                    }
+
+                    // Member method or field: <Type> <Name> ...
+                    let type_candidate = next_ident;
+                    scan_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor + type_candidate.len());
+                    // Check for pointers or references attached to type
+                    var full_type = type_candidate;
+                    while scan_cursor < total_len && (source.byte_at(scan_cursor as i64) == 42 || source.byte_at(scan_cursor as i64) == 38) {
+                        full_type = full_type + source.slice(scan_cursor, scan_cursor + 1);
+                        scan_cursor = scan_cursor + 1;
+                    }
+                    scan_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor);
+
+                    let name_candidate = cpp_read_ident(source, scan_cursor);
+                    scan_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor + name_candidate.len());
+
+                    if scan_cursor < total_len && source.byte_at(scan_cursor as i64) == 40 { // '(' -> Method!
+                        scan_cursor = scan_cursor + 1;
+                        var method_params: List<str> = [];
+                        while scan_cursor < total_len && source.byte_at(scan_cursor as i64) != 41 { // ')'
+                            scan_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor);
+                            let mp_ty = cpp_read_ident(source, scan_cursor);
+                            if mp_ty.len() > 0 {
+                                method_params.push(mp_ty);
+                                scan_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor + mp_ty.len());
+                                let mp_nm = cpp_read_ident(source, scan_cursor);
+                                if mp_nm.len() > 0 {
+                                    scan_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor + mp_nm.len());
+                                }
+                            }
+                            if scan_cursor < total_len && source.byte_at(scan_cursor as i64) == 44 {
+                                scan_cursor = scan_cursor + 1;
+                            }
+                        }
+                        if scan_cursor < total_len && source.byte_at(scan_cursor as i64) == 41 {
+                            scan_cursor = scan_cursor + 1;
+                        }
+
+                        // Check qualifiers: const, noexcept, = 0
+                        var is_const_m = false;
+                        var is_noexcept_m = false;
+                        var is_pure_m = false;
+                        var is_deleted_m = false;
+
+                        while scan_cursor < total_len && source.byte_at(scan_cursor as i64) != 59 {
+                            scan_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor);
+                            let q_tok = cpp_read_ident(source, scan_cursor);
+                            if q_tok == "const" {
+                                is_const_m = true;
+                                scan_cursor = scan_cursor + 5;
+                            } else if q_tok == "noexcept" {
+                                is_noexcept_m = true;
+                                scan_cursor = scan_cursor + 8;
+                            } else if q_tok == "delete" {
+                                is_deleted_m = true;
+                                scan_cursor = scan_cursor + 6;
+                            } else if source.byte_at(scan_cursor as i64) == 61 { // '='
+                                scan_cursor = cpp_skip_whitespace_and_comments(source, scan_cursor + 1);
+                                if source.byte_at(scan_cursor as i64) == 48 { // '0'
+                                    is_pure_m = true;
+                                    cls.is_abstract = true;
+                                    scan_cursor = scan_cursor + 1;
+                                }
+                            } else {
+                                scan_cursor = scan_cursor + 1;
+                            }
+                        }
+                        if scan_cursor < total_len && source.byte_at(scan_cursor as i64) == 59 {
+                            scan_cursor = scan_cursor + 1;
+                        }
+
+                        var meth = cpp_method_decl_new(name_candidate, is_virtual_member, is_pure_m, is_const_m, false, false, class_access, full_type);
+                        meth.is_noexcept = is_noexcept_m;
+                        meth.is_deleted = is_deleted_m;
+                        meth.param_type_names = method_params;
+                        cls.methods.push(meth);
+                        cursor = scan_cursor;
+                        continue;
+                    } else {
+                        // Field declaration: <Type> <Name>;
+                        let f_size = cpp_type_size(full_type);
+                        let f_align = cpp_type_align(full_type);
+                        cls.fields.push(cpp_field_decl_new(name_candidate, full_type, f_size, f_align, class_access));
+
+                        while scan_cursor < total_len && source.byte_at(scan_cursor as i64) != 59 {
+                            scan_cursor = scan_cursor + 1;
+                        }
+                        if scan_cursor < total_len && source.byte_at(scan_cursor as i64) == 59 {
+                            scan_cursor = scan_cursor + 1;
+                        }
+                        cursor = scan_cursor;
+                        continue;
+                    }
+                }
+
+                if cursor < total_len && source.byte_at(cursor as i64) == 125 { // '}'
+                    cursor = cursor + 1;
+                }
+                cursor = cpp_skip_whitespace_and_comments(source, cursor);
+                if cursor < total_len && source.byte_at(cursor as i64) == 59 { // ';'
+                    cursor = cursor + 1;
+                }
+            }
+
+            tu.classes.push(cls);
+            continue;
+        }
+
+        cursor = cursor + 1;
+    }
+
+    var d_i: usize = 0;
+    while d_i < tu.diags.len() {
+        diags.push(tu.diags[d_i]);
+        d_i = d_i + 1;
+    }
+
+    return tu;
+}
+
+// ------------------------------------------------------------------------------
+// 6. Diagnostic Checkers
+// ------------------------------------------------------------------------------
+
+pub fn check_abstract_instantiation(cls: ref<CppClassDecl>, var ref diags: List<Diagnostic>) -> bool {
+    if cls.is_abstract {
+        let msg = "Cannot instantiate abstract C++ class '" + cls.name + "' with pure virtual functions";
+        diags.push(diagnostic_new("CPP005", 1, msg, SourceSpan { start: 0, length: 0 }));
+        return false;
+    }
+    return true;
+}
+
+pub fn check_deleted_method_call(m: ref<CppMethodDecl>, var ref diags: List<Diagnostic>) -> bool {
+    if m.is_deleted {
+        let msg = "Cannot invoke deleted C++ member '" + m.name + "'";
+        diags.push(diagnostic_new("CPP001", 1, msg, SourceSpan { start: 0, length: 0 }));
+        return false;
+    }
+    return true;
+}
+
+pub fn check_member_access(m_access: CppAccess, caller_is_member: bool, var ref diags: List<Diagnostic>) -> bool {
+    if !caller_is_member && m_access != CppAccess::Public {
+        let msg = "Inaccessible C++ member across adapter boundary";
+        diags.push(diagnostic_new("CPP002", 1, msg, SourceSpan { start: 0, length: 0 }));
+        return false;
+    }
+    return true;
+}

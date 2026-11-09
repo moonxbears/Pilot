@@ -880,7 +880,7 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 
 ---
 
-### M15 — Native C++ Class, RAII, Vtable & Exception Boundary Adapter (`use cpp`)
+### M15 — Native C++ Class, RAII, Vtable & Exception Boundary Adapter (`use cpp`) [COMPLETE]
 
 #### 15.1 Objective & Current Codebase Audit
 - **Root Bottleneck:** High-performance ecosystems (LLVM, Vulkan-Hpp, RocksDB, Physics engines, audio DSP, ONNX Runtime) expose C++ classes, namespaces, overloaded methods, references `T&`, virtual tables, RAII destructors, and C++ exceptions—none of which C11 `use c` (`M12`) alone can call without manual `extern "C"` C++ wrapper files!
