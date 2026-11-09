@@ -1,0 +1,99 @@
+// ==============================================================================
+// FILE: selfhost/ir/pass_manager.pilot
+// Milestone 6.1: First-Class Typed SSA Mid-Level IR Pass Manager
+// Open IPilIrPass Registry, Fixed-Point Iteration, Convergence Safety (IR007)
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Ir.PassManager;
+
+use Pilot.SelfHost.Ir.Model::*;
+use Pilot.SelfHost.Ir.Verifier::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Pass Execution Telemetry & Result
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct PassResult : IValue {
+    pub changed:        bool;
+    pub iterations:     u32;
+    pub err_code:       str;
+    pub pass_name:      str;
+    pub insts_before:   u32;
+    pub insts_after:    u32;
+}
+
+pub pure fn pass_result_ok(name: str, changed: bool, iters: u32, before: u32, after: u32) -> PassResult {
+    return PassResult {
+        changed:      changed,
+        iterations:   iters,
+        err_code:     "OK",
+        pass_name:    name,
+        insts_before: before,
+        insts_after:  after,
+    };
+}
+
+pub pure fn pass_result_err(name: str, err: str) -> PassResult {
+    return PassResult {
+        changed:      false,
+        iterations:   0,
+        err_code:     err,
+        pass_name:    name,
+        insts_before: 0,
+        insts_after:  0,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// Pass Registry & Driver
+// ------------------------------------------------------------------------------
+pub fn pass_registry_new() -> str {
+    // Pipe-delimited list of registered pass names
+    return "";
+}
+
+pub fn pass_registry_add(registry: str, pass_name: str) -> str {
+    return registry + pass_name + "|";
+}
+
+pub fn pass_registry_count(registry: str) -> u32 {
+    var count: u32 = 0;
+    var rem = registry;
+    while rem.len() > 0 {
+        let p = rem.find("|");
+        let seg = if p >= 0 { rem.slice(0, p) } else { rem };
+        rem = if p >= 0 { rem.slice(p + 1, rem.len()) } else { "" };
+        if seg.len() > 0 {
+            count = count + 1;
+        }
+    }
+    return count;
+}
+
+pub fn pass_registry_get(registry: str, index: u32) -> str {
+    var cur_idx: u32 = 0;
+    var rem = registry;
+    while rem.len() > 0 {
+        let p = rem.find("|");
+        let seg = if p >= 0 { rem.slice(0, p) } else { rem };
+        rem = if p >= 0 { rem.slice(p + 1, rem.len()) } else { "" };
+        if seg.len() > 0 {
+            if cur_idx == index {
+                return seg;
+            }
+            cur_idx = cur_idx + 1;
+        }
+    }
+    return "";
+}
+
+// Fixed-point convergence cap invariant (IR007)
+pub pure fn max_fixed_point_iterations() -> u32 => 64;
+
+pub fn check_iteration_cap(iterations: u32) -> str {
+    if iterations > max_fixed_point_iterations() {
+        return "IR007: Optimization pass exceeded maximum 64 fixed-point iterations without convergence";
+    }
+    return "OK";
+}

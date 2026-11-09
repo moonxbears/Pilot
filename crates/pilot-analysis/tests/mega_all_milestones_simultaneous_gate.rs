@@ -39,6 +39,9 @@ mod m04;
 #[path = "milestone05_shared_incremental_compiler_query_database.rs"]
 mod m05;
 
+#[path = "milestone06_first_class_typed_ssa_mid_level_ir.rs"]
+mod m06;
+
 #[path = "milestone50_lossless_bridge_and_reflection.rs"]
 mod m50;
 
@@ -148,6 +151,10 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m05::test_m5_2_signature_change_propagation_proof();
             m05::test_m5_3_identical_cold_vs_incremental_oracle();
             m05::test_m5_4_multiplatform_uri_normalization_and_persistent_cache_io();
+            m06::test_m6_1_ssa_dominance_and_block_parameter_lowering();
+            m06::test_m6_2_ir_printer_and_parser_round_trip();
+            m06::test_m6_3_constant_folding_and_dead_code_elimination();
+            m06::test_m6_4_name_blind_physics_and_multiplatform_target_invariance();
         });
         s.spawn(|| {
             m50::test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts();

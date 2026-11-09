@@ -1,0 +1,214 @@
+// ==============================================================================
+// FILE: selfhost/ir/verifier.pilot
+// Milestone 6.1: First-Class Typed SSA Mid-Level IR Verifier
+// Dominance Verification (IR001), Block Arity (IR002), Terminators (IR003),
+// 2-Bit Lattice Borrow Escape (IR004), Perceus Safety (IR005), Noalloc (IR006)
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Ir.Verifier;
+
+use Pilot.SelfHost.Ir.Model::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Verification Diagnostic Record
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct IrDiagnostic : IValue {
+    pub code:        str;
+    pub message:     str;
+    pub block_id:    u32;
+    pub inst_idx:    u32;
+    pub is_critical: bool;
+}
+
+pub fn ir_diag_new(code: str, message: str, block_id: u32, inst_idx: u32) -> IrDiagnostic {
+    return IrDiagnostic {
+        code:        code,
+        message:     message,
+        block_id:    block_id,
+        inst_idx:    inst_idx,
+        is_critical: true,
+    };
+}
+
+pub fn ir_diag_to_string(d: IrDiagnostic) -> str {
+    return d.code + " [Block " + d.block_id + ", Inst " + d.inst_idx + "]: " + d.message;
+}
+
+// ------------------------------------------------------------------------------
+// SSA Dominance & CFG Structural Verification
+// ------------------------------------------------------------------------------
+
+// Checks whether block `dom` dominates block `b` in the dominator tree.
+// Uses precomputed immediate dominator array `idoms` where entry block is its own idom.
+pub fn block_dominates(dom: u32, b: u32, idoms: str, block_count: u32) -> bool {
+    if dom == b { return true; }
+    var cur = b;
+    var visited = 0;
+    while visited < block_count {
+        let parent = get_idom(idoms, cur);
+        if parent == dom { return true; }
+        if parent == cur { return false; } // Reached root / entry
+        cur = parent;
+        visited = visited + 1;
+    }
+    return false;
+}
+
+// Encodes/decodes idom table into a pipe-delimited string for VM portability
+pub fn encode_idom_table(count: u32) -> str {
+    var s = "";
+    var i: u32 = 0;
+    while i < count {
+        s = s + i + "|";
+        i = i + 1;
+    }
+    return s;
+}
+
+pub fn set_idom(table: str, b: u32, idom_val: u32) -> str {
+    var out = "";
+    var cur_idx: u32 = 0;
+    var rem = table;
+    while rem.len() > 0 {
+        let p = rem.find("|");
+        let seg = if p >= 0 { rem.slice(0, p) } else { rem };
+        rem = if p >= 0 { rem.slice(p + 1, rem.len()) } else { "" };
+
+        if cur_idx == b {
+            out = out + idom_val + "|";
+        } else {
+            out = out + seg + "|";
+        }
+        cur_idx = cur_idx + 1;
+    }
+    return out;
+}
+
+pub fn get_idom(table: str, b: u32) -> u32 {
+    var cur_idx: u32 = 0;
+    var rem = table;
+    while rem.len() > 0 {
+        let p = rem.find("|");
+        let seg = if p >= 0 { rem.slice(0, p) } else { rem };
+        rem = if p >= 0 { rem.slice(p + 1, rem.len()) } else { "" };
+
+        if cur_idx == b {
+            var v: u32 = 0;
+            var i = 0;
+            let n = seg.len();
+            while i < n {
+                let byte_val = seg.byte_at(i);
+                if byte_val >= 48 && byte_val <= 57 {
+                    v = (v * 10) + (byte_val - 48);
+                }
+                i = i + 1;
+            }
+            return v;
+        }
+        cur_idx = cur_idx + 1;
+    }
+    return 0;
+}
+
+// ------------------------------------------------------------------------------
+// Verification Engine Functions
+// ------------------------------------------------------------------------------
+
+// Verifies that every instruction in block appears before the terminator (IR003)
+pub fn verify_block_terminator(opcodes: str) -> str {
+    let n = opcodes.len();
+    var last_op: u16 = 0;
+    var has_term = false;
+    var inst_after_term = false;
+
+    var rem = opcodes;
+    while rem.len() > 0 {
+        let p = rem.find("|");
+        let seg = if p >= 0 { rem.slice(0, p) } else { rem };
+        rem = if p >= 0 { rem.slice(p + 1, rem.len()) } else { "" };
+
+        if seg.len() > 0 {
+            var op_val: u16 = 0;
+            var i = 0;
+            while i < seg.len() {
+                let byte_val = seg.byte_at(i);
+                if byte_val >= 48 && byte_val <= 57 {
+                    op_val = (op_val * 10) + (byte_val - 48);
+                }
+                i = i + 1;
+            }
+
+            if has_term {
+                inst_after_term = true;
+            }
+            if opcode_is_terminator(op_val) {
+                has_term = true;
+            }
+            last_op = op_val;
+        }
+    }
+
+    if !has_term {
+        return "IR003: Basic block is missing a required terminator instruction";
+    }
+    if inst_after_term {
+        return "IR003: Dead instructions found following terminator";
+    }
+    return "OK";
+}
+
+// Verifies that SSA value definition dominates its use (IR001)
+pub fn verify_ssa_dominance(def_block: u32, use_block: u32, def_inst_idx: u32, use_inst_idx: u32, idoms: str, block_count: u32) -> str {
+    if def_block == use_block {
+        if def_inst_idx < use_inst_idx {
+            return "OK";
+        }
+        return "IR001: Value used before its definition within the same basic block";
+    }
+
+    if block_dominates(def_block, use_block, idoms, block_count) {
+        return "OK";
+    }
+
+    return "IR001: Value definition block " + def_block + " does not dominate use block " + use_block;
+}
+
+// Verifies branch argument count matches target block parameter count (IR002)
+pub fn verify_branch_arity(branch_arg_count: u32, target_param_count: u32, target_block_id: u32) -> str {
+    if branch_arg_count != target_param_count {
+        return "IR002: Branch passes " + branch_arg_count + " arguments to Block " + target_block_id + " which expects " + target_param_count;
+    }
+    return "OK";
+}
+
+// Verifies 2-bit lattice borrow escape across return (IR004)
+pub fn verify_return_lattice(ret_physics: IrTypePhysics) -> str {
+    let lb = ret_physics.lattice_bits;
+    if lb == lattice_reference() {
+        return "IR004: Reference view (0b01) cannot escape function return boundary";
+    }
+    if lb == lattice_guard() {
+        return "IR004: Scoped guard (0b11) cannot escape function return boundary";
+    }
+    return "OK";
+}
+
+// Verifies noalloc function does not contain dynamic heap allocation (IR006)
+pub fn verify_noalloc_op(is_noalloc_fn: bool, opcode: u16) -> str {
+    if is_noalloc_fn {
+        if opcode == op_arena_alloc() {
+            return "IR006: Function marked noalloc cannot allocate dynamic heap memory";
+        }
+    }
+    return "OK";
+}
+
+// Verifies Perceus drop-reuse token capacity (IR008)
+pub fn verify_reuse_token(token_bytes: u32, alloc_bytes: u32) -> str {
+    if alloc_bytes > token_bytes {
+        return "IR008: ConstructReuse size " + alloc_bytes + "B exceeds recyclable token capacity " + token_bytes + "B";
+    }
+    return "OK";
+}

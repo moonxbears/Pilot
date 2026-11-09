@@ -1,0 +1,376 @@
+// ==============================================================================
+// FILE: selfhost/ir/model.pilot
+// Milestone 6.1: First-Class Typed SSA Mid-Level IR (PilIR) Data Model
+// Name-Blind Type Physics, Block Parameters, 34 Orthogonal Opcodes, Target Descriptors
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Ir.Model;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Name-Blind IR Register Classes (Derived strictly from [Bits] & [Layout])
+// ------------------------------------------------------------------------------
+pub pure fn reg_class_gpr_signed()   -> u8 => 0;
+pub pure fn reg_class_gpr_unsigned() -> u8 => 1;
+pub pure fn reg_class_simd_float()   -> u8 => 2;
+pub pure fn reg_class_simd_vector()  -> u8 => 3;
+pub pure fn reg_class_raw_ptr()      -> u8 => 4;
+pub pure fn reg_class_aggregate()    -> u8 => 5;
+pub pure fn reg_class_unit()         -> u8 => 6;
+pub pure fn reg_class_noreturn()     -> u8 => 7;
+
+pub fn reg_class_name(rc: u8) -> str {
+    if rc == reg_class_gpr_signed()   { return "gpr_signed"; }
+    if rc == reg_class_gpr_unsigned() { return "gpr_unsigned"; }
+    if rc == reg_class_simd_float()   { return "simd_float"; }
+    if rc == reg_class_simd_vector()  { return "simd_vector"; }
+    if rc == reg_class_raw_ptr()      { return "raw_ptr"; }
+    if rc == reg_class_aggregate()    { return "aggregate"; }
+    if rc == reg_class_unit()         { return "unit"; }
+    if rc == reg_class_noreturn()     { return "noreturn"; }
+    return "unknown";
+}
+
+// ------------------------------------------------------------------------------
+// 2-Bit Lattice Bits (Hardware Semantic Taxonomy)
+// ------------------------------------------------------------------------------
+pub pure fn lattice_value()     -> u8 => 0; // 0b00: IValue (Trivial memcpy)
+pub pure fn lattice_reference() -> u8 => 1; // 0b01: IReference (Borrowed view)
+pub pure fn lattice_object()    -> u8 => 2; // 0b10: IObject (Owned ~self())
+pub pure fn lattice_guard()     -> u8 => 3; // 0b11: IGuard (Scoped lease)
+
+pub fn lattice_name(lb: u8) -> str {
+    if lb == lattice_value()     { return "IValue"; }
+    if lb == lattice_reference() { return "IReference"; }
+    if lb == lattice_object()    { return "IObject"; }
+    if lb == lattice_guard()     { return "IGuard"; }
+    return "UnknownLattice";
+}
+
+// ------------------------------------------------------------------------------
+// Name-Blind IrTypePhysics Value Type (12 Bytes C-ABI)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct IrTypePhysics : IValue {
+    pub layout_id:    u32;
+    pub reg_class:    u8;
+    pub bit_width:    u16;
+    pub align_pow2:   u8;
+    pub lattice_bits: u8;
+}
+
+pub pure fn ir_physics_new(layout_id: u32, reg_class: u8, bit_width: u16, align_pow2: u8, lattice_bits: u8) -> IrTypePhysics {
+    return IrTypePhysics {
+        layout_id:    layout_id,
+        reg_class:    reg_class,
+        bit_width:    bit_width,
+        align_pow2:   align_pow2,
+        lattice_bits: lattice_bits,
+    };
+}
+
+pub pure fn ir_physics_unit() -> IrTypePhysics {
+    return IrTypePhysics {
+        layout_id:    0,
+        reg_class:    reg_class_unit(),
+        bit_width:    0,
+        align_pow2:   0,
+        lattice_bits: lattice_value(),
+    };
+}
+
+pub pure fn ir_physics_i64() -> IrTypePhysics {
+    return IrTypePhysics {
+        layout_id:    1,
+        reg_class:    reg_class_gpr_signed(),
+        bit_width:    64,
+        align_pow2:   3,
+        lattice_bits: lattice_value(),
+    };
+}
+
+pub pure fn ir_physics_bool() -> IrTypePhysics {
+    return IrTypePhysics {
+        layout_id:    2,
+        reg_class:    reg_class_gpr_unsigned(),
+        bit_width:    1,
+        align_pow2:   0,
+        lattice_bits: lattice_value(),
+    };
+}
+
+pub pure fn ir_physics_ptr() -> IrTypePhysics {
+    return IrTypePhysics {
+        layout_id:    3,
+        reg_class:    reg_class_raw_ptr(),
+        bit_width:    64,
+        align_pow2:   3,
+        lattice_bits: lattice_value(),
+    };
+}
+
+pub pure fn ir_physics_equals(a: IrTypePhysics, b: IrTypePhysics) -> bool {
+    return a.layout_id == b.layout_id
+        && a.reg_class == b.reg_class
+        && a.bit_width == b.bit_width
+        && a.align_pow2 == b.align_pow2
+        && a.lattice_bits == b.lattice_bits;
+}
+
+// ------------------------------------------------------------------------------
+// Comparison Predicates & Cast Kinds
+// ------------------------------------------------------------------------------
+pub enum CmpPred : u8 {
+    Eq = 0,
+    Ne = 1,
+    Lt = 2,
+    Le = 3,
+    Gt = 4,
+    Ge = 5,
+}
+
+pub fn cmp_pred_name(p: u16) -> str {
+    if p == 0 { return "eq"; }
+    if p == 1 { return "ne"; }
+    if p == 2 { return "lt"; }
+    if p == 3 { return "le"; }
+    if p == 4 { return "gt"; }
+    if p == 5 { return "ge"; }
+    return "cmp_unknown";
+}
+
+pub enum CastKind : u8 {
+    ZeroExtend      = 0,
+    SignExtend      = 1,
+    Truncate        = 2,
+    FloatPromote    = 3,
+    FloatDemote     = 4,
+    IntToFloat      = 5,
+    FloatToInt      = 6,
+    Bitcast         = 7,
+    ViewReinterpret = 8,
+}
+
+pub fn cast_kind_name(k: u16) -> str {
+    if k == 0 { return "zext"; }
+    if k == 1 { return "sext"; }
+    if k == 2 { return "trunc"; }
+    if k == 3 { return "fpromote"; }
+    if k == 4 { return "fdemote"; }
+    if k == 5 { return "itof"; }
+    if k == 6 { return "ftoi"; }
+    if k == 7 { return "bitcast"; }
+    if k == 8 { return "view_reinterpret"; }
+    return "cast_unknown";
+}
+
+// ------------------------------------------------------------------------------
+// The 34 Orthogonal PilIR Opcodes across 6 Families
+// ------------------------------------------------------------------------------
+
+// Family 1: Constants & Aggregates (1..7)
+pub pure fn op_const_bits()          -> u16 => 1;
+pub pure fn op_const_float()         -> u16 => 2;
+pub pure fn op_const_bytes()         -> u16 => 3;
+pub pure fn op_undef()               -> u16 => 4;
+pub pure fn op_construct_aggregate() -> u16 => 5;
+pub pure fn op_extract_field()       -> u16 => 6;
+pub pure fn op_insert_field()        -> u16 => 7;
+
+// Family 2: Register Arithmetic & Bitwise (8..20)
+pub pure fn op_add()          -> u16 => 8;
+pub pure fn op_sub()          -> u16 => 9;
+pub pure fn op_mul()          -> u16 => 10;
+pub pure fn op_div()          -> u16 => 11;
+pub pure fn op_rem()          -> u16 => 12;
+pub pure fn op_bit_and()      -> u16 => 13;
+pub pure fn op_bit_or()       -> u16 => 14;
+pub pure fn op_bit_xor()      -> u16 => 15;
+pub pure fn op_shl()          -> u16 => 16;
+pub pure fn op_shr()          -> u16 => 17;
+pub pure fn op_cmp()          -> u16 => 18;
+pub pure fn op_cast()         -> u16 => 19;
+pub pure fn op_simd_lane_op() -> u16 => 20;
+
+// Family 3: Memory, Views & Arenas (21..26)
+pub pure fn op_stack_slot()   -> u16 => 21;
+pub pure fn op_arena_alloc()  -> u16 => 22;
+pub pure fn op_load()         -> u16 => 23;
+pub pure fn op_store()        -> u16 => 24;
+pub pure fn op_ptr_offset()   -> u16 => 25;
+pub pure fn op_make_view()    -> u16 => 26;
+
+// Family 4: Explicit 2-Bit Lattice & Perceus Lifecycle (27..33)
+pub pure fn op_perceus_dup()        -> u16 => 27;
+pub pure fn op_perceus_drop()       -> u16 => 28;
+pub pure fn op_perceus_drop_reuse() -> u16 => 29;
+pub pure fn op_construct_reuse()    -> u16 => 30;
+pub pure fn op_iso_freeze()         -> u16 => 31;
+pub pure fn op_guard_enter()        -> u16 => 32;
+pub pure fn op_guard_exit_lifo()    -> u16 => 33;
+
+// Family 5: Calls & Homoiconic Projections (34..40)
+pub pure fn op_call_direct()       -> u16 => 34;
+pub pure fn op_call_indirect()     -> u16 => 35;
+pub pure fn op_call_intrinsic()    -> u16 => 36;
+pub pure fn op_pack_abi_frame()    -> u16 => 37;
+pub pure fn op_init_signal()       -> u16 => 38;
+pub pure fn op_diff_adjoint()      -> u16 => 39;
+pub pure fn op_begin_effect_plan() -> u16 => 40;
+
+// Family 6: Block Terminators (41..45)
+pub pure fn op_jump()         -> u16 => 41;
+pub pure fn op_cond_br()      -> u16 => 42;
+pub pure fn op_switch_table() -> u16 => 43;
+pub pure fn op_return()       -> u16 => 44;
+pub pure fn op_unreachable()  -> u16 => 45;
+
+pub fn opcode_name(op: u16) -> str {
+    if op == op_const_bits()          { return "const_bits"; }
+    if op == op_const_float()         { return "const_float"; }
+    if op == op_const_bytes()         { return "const_bytes"; }
+    if op == op_undef()               { return "undef"; }
+    if op == op_construct_aggregate() { return "construct_aggregate"; }
+    if op == op_extract_field()       { return "extract_field"; }
+    if op == op_insert_field()        { return "insert_field"; }
+
+    if op == op_add()          { return "add"; }
+    if op == op_sub()          { return "sub"; }
+    if op == op_mul()          { return "mul"; }
+    if op == op_div()          { return "div"; }
+    if op == op_rem()          { return "rem"; }
+    if op == op_bit_and()      { return "bit_and"; }
+    if op == op_bit_or()       { return "bit_or"; }
+    if op == op_bit_xor()      { return "bit_xor"; }
+    if op == op_shl()          { return "shl"; }
+    if op == op_shr()          { return "shr"; }
+    if op == op_cmp()          { return "cmp"; }
+    if op == op_cast()         { return "cast"; }
+    if op == op_simd_lane_op() { return "simd_lane_op"; }
+
+    if op == op_stack_slot()   { return "stack_slot"; }
+    if op == op_arena_alloc()  { return "arena_alloc"; }
+    if op == op_load()         { return "load"; }
+    if op == op_store()        { return "store"; }
+    if op == op_ptr_offset()   { return "ptr_offset"; }
+    if op == op_make_view()    { return "make_view"; }
+
+    if op == op_perceus_dup()        { return "perceus_dup"; }
+    if op == op_perceus_drop()       { return "perceus_drop"; }
+    if op == op_perceus_drop_reuse() { return "perceus_drop_reuse"; }
+    if op == op_construct_reuse()    { return "construct_reuse"; }
+    if op == op_iso_freeze()         { return "iso_freeze"; }
+    if op == op_guard_enter()        { return "guard_enter"; }
+    if op == op_guard_exit_lifo()    { return "guard_exit_lifo"; }
+
+    if op == op_call_direct()       { return "call_direct"; }
+    if op == op_call_indirect()     { return "call_indirect"; }
+    if op == op_call_intrinsic()    { return "call_intrinsic"; }
+    if op == op_pack_abi_frame()    { return "pack_abi_frame"; }
+    if op == op_init_signal()       { return "init_signal"; }
+    if op == op_diff_adjoint()      { return "diff_adjoint"; }
+    if op == op_begin_effect_plan() { return "begin_effect_plan"; }
+
+    if op == op_jump()         { return "jump"; }
+    if op == op_cond_br()      { return "cond_br"; }
+    if op == op_switch_table() { return "switch_table"; }
+    if op == op_return()       { return "return"; }
+    if op == op_unreachable()  { return "unreachable"; }
+    return "op_custom_" + op;
+}
+
+pub pure fn opcode_is_terminator(op: u16) -> bool {
+    return op >= op_jump() && op <= op_unreachable();
+}
+
+// ------------------------------------------------------------------------------
+// IrInst Structure (32 Bytes C-ABI)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct IrInst : IValue {
+    pub result:      u32;
+    pub opcode:      u16;
+    pub subop:       u16;
+    pub physics:     IrTypePhysics;
+    pub args_offset: u32;
+    pub args_len:    u16;
+    pub span_start:  u32;
+    pub span_len:    u32;
+}
+
+pub pure fn ir_inst_new(res: u32, op: u16, sub: u16, phy: IrTypePhysics, a_off: u32, a_len: u16, sp_st: u32, sp_ln: u32) -> IrInst {
+    return IrInst {
+        result:      res,
+        opcode:      op,
+        subop:       sub,
+        physics:     phy,
+        args_offset: a_off,
+        args_len:    a_len,
+        span_start:  sp_st,
+        span_len:    sp_ln,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// Target Descriptor & Multiplatform ABI Physics
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct TargetDescriptor : IValue {
+    pub arch:             str;
+    pub os:               str;
+    pub pointer_bytes:    usize;
+    pub endian:           str;
+    pub backend:          str;
+    pub simd_width_bits:  usize;
+    pub cache_line_bytes: usize;
+    pub opt_level:        u8;
+}
+
+pub fn target_descriptor_new(os: str, arch: str) -> TargetDescriptor {
+    var p_bytes: usize = 8;
+    var simd_bits: usize = 128;
+    if arch == "x86_64" {
+        simd_bits = 256;
+    } else if arch == "aarch64" {
+        simd_bits = 128;
+    } else if arch == "wasm32" {
+        p_bytes = 4;
+        simd_bits = 128;
+    } else if arch == "riscv32" {
+        p_bytes = 4;
+        simd_bits = 64;
+    }
+
+    return TargetDescriptor {
+        arch:             arch,
+        os:               os,
+        pointer_bytes:    p_bytes,
+        endian:           "little",
+        backend:          "llvm",
+        simd_width_bits:  simd_bits,
+        cache_line_bytes: 64,
+        opt_level:        2,
+    };
+}
+
+// Max register arguments before spilling to stack
+pub fn target_max_gpr_args(target: TargetDescriptor) -> u32 {
+    if target.os == "windows" && target.arch == "x86_64" {
+        return 4; // Win64 calling convention (RCX, RDX, R8, R9)
+    }
+    if target.arch == "aarch64" {
+        return 8; // AAPCS64 (X0..X7)
+    }
+    if target.arch == "wasm32" {
+        return 16; // WebAssembly virtual local arguments
+    }
+    return 6; // System V AMD64 (RDI, RSI, RDX, RCX, R8, R9)
+}
+
+// Caller shadow stack space requirement
+pub fn target_caller_shadow_bytes(target: TargetDescriptor) -> u32 {
+    if target.os == "windows" && target.arch == "x86_64" {
+        return 32; // Win64 mandatory 32-byte shadow space
+    }
+    return 0;
+}

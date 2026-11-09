@@ -1,0 +1,113 @@
+// ==============================================================================
+// FILE: selfhost/ir/printer.pilot
+// Milestone 6.1: First-Class Typed SSA Mid-Level IR Textual Printer & Parser
+// Canonical Deterministic Serialization & Round-Trip Parsing
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Ir.Printer;
+
+use Pilot.SelfHost.Ir.Model::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Textual IR Serialization
+// ------------------------------------------------------------------------------
+
+pub fn print_physics(phy: IrTypePhysics) -> str {
+    let rc = reg_class_name(phy.reg_class);
+    let lat = lattice_name(phy.lattice_bits);
+    return rc + "[" + phy.bit_width + ":" + lat + "]";
+}
+
+pub fn print_instruction(inst: IrInst, args_str: str) -> str {
+    let op_str = opcode_name(inst.opcode);
+    let phy_str = print_physics(inst.physics);
+
+    if opcode_is_terminator(inst.opcode) {
+        if inst.opcode == op_return() {
+            return "  return " + args_str + ";";
+        }
+        if inst.opcode == op_jump() {
+            return "  jump " + args_str + ";";
+        }
+        if inst.opcode == op_cond_br() {
+            return "  cond_br " + args_str + ";";
+        }
+        if inst.opcode == op_unreachable() {
+            return "  unreachable;";
+        }
+        return "  " + op_str + " " + args_str + ";";
+    }
+
+    if inst.opcode == op_cmp() {
+        let pred = cmp_pred_name(inst.subop);
+        return "  v" + inst.result + ": " + phy_str + " = cmp." + pred + " " + args_str + ";";
+    }
+
+    if inst.opcode == op_cast() {
+        let ck = cast_kind_name(inst.subop);
+        return "  v" + inst.result + ": " + phy_str + " = cast." + ck + " " + args_str + ";";
+    }
+
+    return "  v" + inst.result + ": " + phy_str + " = " + op_str + " " + args_str + ";";
+}
+
+pub fn print_block_header(block_id: u32, params_str: str) -> str {
+    return "block" + block_id + "(" + params_str + "):";
+}
+
+pub fn print_function_header(fn_name: str, params_str: str, ret_phy: IrTypePhysics, is_pure: bool, is_noalloc: bool) -> str {
+    var pfx = "fn ";
+    if is_pure { pfx = "pure fn "; }
+    if is_noalloc { pfx = "[noalloc] " + pfx; }
+    return pfx + fn_name + "(" + params_str + ") -> " + print_physics(ret_phy) + " {";
+}
+
+// ------------------------------------------------------------------------------
+// Textual IR Round-Trip Parser Helpers
+// ------------------------------------------------------------------------------
+
+pub fn parse_ir_find_next_line(text: str, start: usize) -> str {
+    let n = text.len();
+    if start >= n { return ""; }
+    let rem = text.slice(start, n);
+    let p = rem.find("\n");
+    if p >= 0 {
+        return rem.slice(0, p);
+    }
+    return rem;
+}
+
+pub fn parse_ir_count_blocks(text: str) -> u32 {
+    var count: u32 = 0;
+    var i = 0;
+    let n = text.len();
+    while i < n {
+        let rem = text.slice(i, n);
+        let p = rem.find("block");
+        if p >= 0 {
+            count = count + 1;
+            i = i + p + 5;
+        } else {
+            break;
+        }
+    }
+    return count;
+}
+
+pub fn parse_ir_count_instructions(text: str) -> u32 {
+    var count: u32 = 0;
+    var i = 0;
+    let n = text.len();
+    while i < n {
+        let rem = text.slice(i, n);
+        let p = rem.find(";");
+        if p >= 0 {
+            count = count + 1;
+            i = i + p + 1;
+        } else {
+            break;
+        }
+    }
+    return count;
+}
