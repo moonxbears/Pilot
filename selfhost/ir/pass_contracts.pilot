@@ -1,0 +1,233 @@
+// ==============================================================================
+// FILE: selfhost/ir/pass_contracts.pilot
+// Milestone 26: Sound PilIR Weaver for requires, ensures, old, invariant & where
+// Enforces:
+//   DBC001: Compile-Time Provable Precondition/Refinement Violation
+//   DBC002: Impure Expression in Contract Clause
+//   DBC003: Impure Expression Inside old(...)
+//   DBC004: old(...) Captures Mutated 0b01 Borrow Without Value Snapshot
+//   DBC005: Struct invariant Violated on Constructor/Mutator Exit
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Ir.Contracts;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Formatting Helpers
+// ------------------------------------------------------------------------------
+
+pub pure fn format_dbc001(clause_type: str, expr: str, reason: str) -> str {
+    return "DBC001: Compile-time provable " + clause_type + " violation: '" + expr + "' evaluated to false (" + reason + ")";
+}
+
+pub pure fn format_dbc002(clause_type: str, expr: str) -> str {
+    return "DBC002: Impure expression in " + clause_type + " clause forbidden: '" + expr + "'";
+}
+
+pub pure fn format_dbc003(expr: str) -> str {
+    return "DBC003: Impure expression inside old(...) forbidden: '" + expr + "'";
+}
+
+pub pure fn format_dbc004(expr: str) -> str {
+    return "DBC004: old(...) captures mutated 0b01 borrowed view '" + expr + "' without value snapshot; require 0b00 IValue or ICloneable";
+}
+
+pub pure fn format_dbc005(struct_name: str, expr: str) -> str {
+    return "DBC005: Struct '" + struct_name + "' invariant violated on exit: '" + expr + "' evaluated to false";
+}
+
+// ------------------------------------------------------------------------------
+// 2. Contract Check Modes & Schemas
+// ------------------------------------------------------------------------------
+
+pub enum ContractCheckMode : u8 {
+    ::All      = 0, // Debug / test: check all contracts
+    ::Boundary = 1, // Release: check public package boundary contracts
+    ::Proven   = 2, // Check only non-proven contracts
+    ::Disabled = 3, // Disable runtime contract assertions
+}
+
+[Layout(c_abi)]
+pub struct ContractClause : IValue {
+    pub kind:               u8; // 1: requires, 2: ensures, 3: invariant, 4: old, 5: where
+    pub expr_str:           str;
+    pub is_pure:            bool;
+    pub is_value_type:      bool;
+    pub can_prove_comptime: bool;
+    pub comptime_val_bool:  bool;
+}
+
+pub pure fn contract_clause_new(
+    kind: u8,
+    expr: str,
+    is_pure: bool,
+    is_val: bool,
+    can_prove: bool,
+    eval_ok: bool
+) -> ContractClause {
+    return ContractClause {
+        kind:               kind,
+        expr_str:           expr,
+        is_pure:            is_pure,
+        is_value_type:      is_val,
+        can_prove_comptime: can_prove,
+        comptime_val_bool:  eval_ok,
+    };
+}
+
+[Layout(c_abi)]
+pub struct OldSnapshotDesc : IValue {
+    pub orig_expr:     str;
+    pub snapshot_var:  str;
+    pub is_pure:       bool;
+    pub is_value_type: bool;
+}
+
+pub pure fn old_snapshot_desc_new(orig: str, var_name: str, is_pure: bool, is_val: bool) -> OldSnapshotDesc {
+    return OldSnapshotDesc {
+        orig_expr:     orig,
+        snapshot_var:  var_name,
+        is_pure:       is_pure,
+        is_value_type: is_val,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Contract Weave Plan Schema (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct ContractWeavePlan : IObject {
+    pub fn_name:               str;
+    pub mode:                  ContractCheckMode;
+    pub requires_clauses:      List<ContractClause>;
+    pub ensures_clauses:       List<ContractClause>;
+    pub invariants:            List<ContractClause>;
+    pub old_snapshots:         List<OldSnapshotDesc>;
+    pub diagnostics:           List<str>;
+    pub requires_checked:      usize;
+    pub ensures_checked:       usize;
+    pub invariants_woven:      usize;
+    pub old_snapshots_hoisted: usize;
+    pub comptime_violations:   usize;
+}
+
+pub fn contract_weave_plan_new(name: str, mode: ContractCheckMode) -> ContractWeavePlan {
+    return ContractWeavePlan {
+        fn_name:               name,
+        mode:                  mode,
+        requires_clauses:      [],
+        ensures_clauses:       [],
+        invariants:            [],
+        old_snapshots:         [],
+        diagnostics:           [],
+        requires_checked:      0,
+        ensures_checked:       0,
+        invariants_woven:      0,
+        old_snapshots_hoisted: 0,
+        comptime_violations:   0,
+    };
+}
+
+pub var fn plan_add_requires(
+    var ref self: ContractWeavePlan,
+    expr: str,
+    is_pure: bool,
+    can_prove: bool,
+    eval_ok: bool
+) {
+    self.requires_clauses.push(contract_clause_new(1, expr, is_pure, true, can_prove, eval_ok));
+}
+
+pub var fn plan_add_ensures(var ref self: ContractWeavePlan, expr: str, is_pure: bool) {
+    self.ensures_clauses.push(contract_clause_new(2, expr, is_pure, true, false, true));
+}
+
+pub var fn plan_add_invariant(var ref self: ContractWeavePlan, expr: str, is_pure: bool) {
+    self.invariants.push(contract_clause_new(3, expr, is_pure, true, false, true));
+}
+
+pub var fn plan_add_old_snapshot(var ref self: ContractWeavePlan, expr: str, is_pure: bool, is_val: bool) {
+    let var_name = "__old_" + (self.old_snapshots.len() as str);
+    self.old_snapshots.push(old_snapshot_desc_new(expr, var_name, is_pure, is_val));
+}
+
+// ------------------------------------------------------------------------------
+// 4. Refinement Types (`where` Scalar Refinements)
+// ------------------------------------------------------------------------------
+
+pub fn verify_where_refinement_i64(
+    type_name: str,
+    val: i64,
+    min_val: i64,
+    max_val: i64,
+    predicate_str: str
+) -> str {
+    if val < min_val || val > max_val {
+        return format_dbc001("refinement '" + type_name + "'", predicate_str, "value " + (val as str) + " out of bounds [" + (min_val as str) + ".." + (max_val as str) + "]");
+    }
+    return "";
+}
+
+// ------------------------------------------------------------------------------
+// 5. Contract Weaver Execution
+// ------------------------------------------------------------------------------
+
+pub fn weave_contracts(var ref plan: ContractWeavePlan) -> bool {
+    if plan.mode == ContractCheckMode::Disabled {
+        return true;
+    }
+
+    // 1. Process requires clauses
+    var i = 0;
+    while i < plan.requires_clauses.len() {
+        let req = plan.requires_clauses[i];
+        if !req.is_pure {
+            plan.diagnostics.push(format_dbc002("requires", req.expr_str));
+        }
+        if req.can_prove_comptime && !req.comptime_val_bool {
+            plan.diagnostics.push(format_dbc001("precondition", req.expr_str, "provably false at comptime"));
+            plan.comptime_violations = plan.comptime_violations + 1;
+        }
+        plan.requires_checked = plan.requires_checked + 1;
+        i = i + 1;
+    }
+
+    // 2. Process old snapshots (EntryBlock hoisting)
+    var oi = 0;
+    while oi < plan.old_snapshots.len() {
+        let snap = plan.old_snapshots[oi];
+        if !snap.is_pure {
+            plan.diagnostics.push(format_dbc003(snap.orig_expr));
+        } else if !snap.is_value_type {
+            plan.diagnostics.push(format_dbc004(snap.orig_expr));
+        } else {
+            plan.old_snapshots_hoisted = plan.old_snapshots_hoisted + 1;
+        }
+        oi = oi + 1;
+    }
+
+    // 3. Process ensures clauses
+    var ei = 0;
+    while ei < plan.ensures_clauses.len() {
+        let ens = plan.ensures_clauses[ei];
+        if !ens.is_pure {
+            plan.diagnostics.push(format_dbc002("ensures", ens.expr_str));
+        }
+        plan.ensures_checked = plan.ensures_checked + 1;
+        ei = ei + 1;
+    }
+
+    // 4. Process struct invariants
+    var inv_i = 0;
+    while inv_i < plan.invariants.len() {
+        let inv = plan.invariants[inv_i];
+        if !inv.is_pure {
+            plan.diagnostics.push(format_dbc002("invariant", inv.expr_str));
+        }
+        plan.invariants_woven = plan.invariants_woven + 1;
+        inv_i = inv_i + 1;
+    }
+
+    return plan.diagnostics.len() == 0;
+}

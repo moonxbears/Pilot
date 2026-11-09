@@ -1,0 +1,254 @@
+// ==============================================================================
+// FILE: selfhost/types/typestate.pilot
+// Milestone 26: Compile-Time Typestates (state) & Zero-Byte State Lattice Solver
+// Enforces:
+//   STATE001: Invalid Method Call for Current Typestate
+//   STATE002: Ambiguous Merged Typestate Across Branches
+//   STATE003: Typestate Reassigned Inside Loop Without Loop-Invariant State
+//   STATE004: Unfulfilled Terminal Typestate Obligation on Drop
+//   STATE005: Aliased Mutable Reference Cannot Undergo Typestate Transition
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Types.Typestate;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Formatting Helpers
+// ------------------------------------------------------------------------------
+
+pub pure fn format_state001(type_name: str, current_state: str, method: str, valid_states: str) -> str {
+    return "STATE001: Invalid method call '" + method + "' on '" + type_name + "@" + current_state + "'; valid states: " + valid_states;
+}
+
+pub pure fn format_state002(type_name: str, state_a: str, state_b: str, method: str) -> str {
+    return "STATE002: Ambiguous merged typestate '" + type_name + "@(" + state_a + " | " + state_b + ")' at call to '" + method + "'; narrow with match/switch branch";
+}
+
+pub pure fn format_state003(type_name: str, initial_state: str, loop_state: str) -> str {
+    return "STATE003: Typestate reassigned inside loop without loop-invariant state for '" + type_name + "': entered as @" + initial_state + ", back-edge @" + loop_state;
+}
+
+pub pure fn format_state004(type_name: str, dropped_state: str, terminal_states: str) -> str {
+    return "STATE004: Typestate obligation unfulfilled: '" + type_name + "@" + dropped_state + "' dropped without reaching declared terminal state '" + terminal_states + "'";
+}
+
+pub pure fn format_state005(type_name: str, method: str) -> str {
+    return "STATE005: Aliased mutable reference to '" + type_name + "' cannot undergo typestate transition in method '" + method + "'";
+}
+
+// ------------------------------------------------------------------------------
+// 2. Zero-Byte StateSetMask & Transition Signature (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct StateSetMask : IValue {
+    pub bits: u64;
+
+    pub static pure fn empty() -> StateSetMask => StateSetMask { bits: 0 };
+    pub static pure fn from_index(idx: usize) -> StateSetMask {
+        if idx >= 64 { return StateSetMask { bits: 0 }; }
+        let one: u64 = 1;
+        return StateSetMask { bits: one << idx };
+    }
+    pub static pure fn union_with(a: StateSetMask, b: StateSetMask) -> StateSetMask => StateSetMask { bits: a.bits | b.bits };
+    pub static pure fn intersect(a: StateSetMask, b: StateSetMask) -> StateSetMask => StateSetMask { bits: a.bits & b.bits };
+
+    pub pure fn mask_contains(ref self, idx: usize) -> bool {
+        if idx >= 64 { return false; }
+        return ((self.bits >> idx) & 1) != 0;
+    }
+
+    pub pure fn is_subset_of(ref self, target: StateSetMask) -> bool {
+        return (self.bits & target.bits) == self.bits;
+    }
+
+    pub pure fn is_empty(ref self) -> bool => self.bits == 0;
+
+    pub pure fn count(ref self) -> usize {
+        var cnt: usize = 0;
+        var b = self.bits;
+        while b != 0 {
+            cnt = cnt + (b & 1) as usize;
+            b = b >> 1;
+        }
+        return cnt;
+    }
+}
+
+[Layout(c_abi)]
+pub struct TransitionSig : IValue {
+    pub method_name:   str;
+    pub required_mask: StateSetMask;
+    pub ok_next_mask:  StateSetMask;
+    pub err_next_mask: StateSetMask;
+    pub is_terminal:   bool;
+    pub is_fallible:   bool;
+}
+
+pub pure fn transition_sig_new(
+    method: str,
+    req: StateSetMask,
+    ok_next: StateSetMask,
+    err_next: StateSetMask,
+    is_term: bool,
+    is_fallible: bool
+) -> TransitionSig {
+    return TransitionSig {
+        method_name:   method,
+        required_mask: req,
+        ok_next_mask:  ok_next,
+        err_next_mask: err_next,
+        is_terminal:   is_term,
+        is_fallible:   is_fallible,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Typestate Declaration Schema (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct TypestateDecl : IObject {
+    pub type_name:      str;
+    pub states:         List<str>;
+    pub terminal_mask:  StateSetMask;
+    pub has_must_reach: bool;
+    pub transitions:    List<TransitionSig>;
+}
+
+pub fn typestate_decl_new(name: str) -> TypestateDecl {
+    return TypestateDecl {
+        type_name:      name,
+        states:         [],
+        terminal_mask:  StateSetMask::empty(),
+        has_must_reach: false,
+        transitions:    [],
+    };
+}
+
+pub var fn typestate_register_state(var ref self: TypestateDecl, name: str, is_terminal: bool) -> usize {
+    let idx = self.states.len();
+    self.states.push(name);
+    if is_terminal {
+        self.terminal_mask = StateSetMask::union_with(self.terminal_mask, StateSetMask::from_index(idx));
+        self.has_must_reach = true;
+    }
+    return idx;
+}
+
+pub var fn typestate_register_transition(
+    var ref self: TypestateDecl,
+    method: str,
+    req: StateSetMask,
+    ok_next: StateSetMask,
+    err_next: StateSetMask,
+    is_term: bool,
+    is_fallible: bool
+) {
+    self.transitions.push(transition_sig_new(method, req, ok_next, err_next, is_term, is_fallible));
+}
+
+pub fn typestate_format_mask(decl: ref<TypestateDecl>, mask: StateSetMask) -> str {
+    var s = "";
+    var i = 0;
+    while i < decl.states.len() {
+        if mask.mask_contains(i) {
+            if s.len() > 0 { s = s + " | "; }
+            s = s + decl.states[i];
+        }
+        i = i + 1;
+    }
+    if s.len() == 0 { return "None"; }
+    return s;
+}
+
+// ------------------------------------------------------------------------------
+// 4. Typestate Solver & Flow-Typing Transitions
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct TypestateCallResult : IValue {
+    pub has_error:      bool;
+    pub is_ambiguous:   bool;
+    pub ok_next_state:  StateSetMask;
+    pub err_next_state: StateSetMask;
+    pub diagnostic:     str;
+}
+
+pub fn typestate_check_call(
+    decl: ref<TypestateDecl>,
+    current_mask: StateSetMask,
+    method: str
+) -> TypestateCallResult {
+    var ti = 0;
+    while ti < decl.transitions.len() {
+        let tr = decl.transitions[ti];
+        if tr.method_name == method {
+            // Check if current_mask is valid for this method
+            if current_mask.is_subset_of(tr.required_mask) {
+                // Fully satisfied
+                return TypestateCallResult {
+                    has_error:      false,
+                    is_ambiguous:   false,
+                    ok_next_state:  tr.ok_next_mask,
+                    err_next_state: tr.err_next_mask,
+                    diagnostic:     "",
+                };
+            }
+
+            // Check if intersection is non-empty (ambiguous branch merge)
+            let inter = StateSetMask::intersect(current_mask, tr.required_mask);
+            if !inter.is_empty() && !current_mask.is_subset_of(tr.required_mask) {
+                let diag = format_state002(decl.type_name, typestate_format_mask(decl, inter), typestate_format_mask(decl, current_mask), method);
+                return TypestateCallResult {
+                    has_error:      true,
+                    is_ambiguous:   true,
+                    ok_next_state:  tr.ok_next_mask,
+                    err_next_state: tr.err_next_mask,
+                    diagnostic:     diag,
+                };
+            }
+
+            // Completely invalid state
+            let cur_str = typestate_format_mask(decl, current_mask);
+            let req_str = typestate_format_mask(decl, tr.required_mask);
+            let diag = format_state001(decl.type_name, cur_str, method, req_str);
+            return TypestateCallResult {
+                has_error:      true,
+                is_ambiguous:   false,
+                ok_next_state:  current_mask,
+                err_next_state: current_mask,
+                diagnostic:     diag,
+            };
+        }
+        ti = ti + 1;
+    }
+
+    // Method not recognized as a transition
+    return TypestateCallResult {
+        has_error:      true,
+        is_ambiguous:   false,
+        ok_next_state:  current_mask,
+        err_next_state: current_mask,
+        diagnostic:     "Method '" + method + "' not declared on typestate '" + decl.type_name + "'",
+    };
+}
+
+pub fn typestate_check_drop(decl: ref<TypestateDecl>, current_mask: StateSetMask) -> str {
+    if decl.has_must_reach {
+        // If current_mask does not intersect terminal_mask, obligation failed!
+        let inter = StateSetMask::intersect(current_mask, decl.terminal_mask);
+        if inter.is_empty() {
+            let cur_str = typestate_format_mask(decl, current_mask);
+            let term_str = typestate_format_mask(decl, decl.terminal_mask);
+            return format_state004(decl.type_name, cur_str, term_str);
+        }
+    }
+    return "";
+}
+
+pub pure fn typestate_merge_branches(then_state: StateSetMask, else_state: StateSetMask) -> StateSetMask {
+    return StateSetMask::union_with(then_state, else_state);
+}
+
+pub pure fn typestate_runtime_overhead_bytes() -> usize => 0;

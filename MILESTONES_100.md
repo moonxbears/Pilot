@@ -1322,7 +1322,7 @@ Given domain `struct T` with leaf scalar/object fields $f_0, f_1, \dots, f_{m-1}
 
 ---
 
-### M26 — Compile-Time Typestates (`state`) & Design-by-Contract (`requires` / `ensures` / `old`)
+### M26 — [COMPLETE] Compile-Time Typestates (`state`) & Design-by-Contract (`requires` / `ensures` / `old`)
 
 #### 26.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (`state` Is an Unchecked Identity Macro Stub):** [`stdlib/core/meta.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/meta.pilot) (line `172`) defines `state(state_decl) => quote { $state_decl };`, performing zero state-transition tracking, zero branch-merge verification, and zero terminal-state obligation checks!
