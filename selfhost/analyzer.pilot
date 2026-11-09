@@ -560,10 +560,9 @@ pub fn is_in_pipe_delimited(kw_buf: str, target: str) -> bool {
 }
 pub fn build_dynamic_keyword_set(node_count: i64) -> str {
     var kw_buf = "|__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm|";
-    kw_buf = kw_buf + "else|while|until|for|in|then|break|continue|guard|switch|case|default|try|catch|var|const|enum|actor|state|type|pub|priv|prot|pkg|int|file|open|export|lvl|pure|static|iso|partial|ext|scope|enter|exit|requires|ensures|old|context|adapter|each|coalesce|with|without|as|async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter|database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete|extern|assembly|module|lib|sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use|op|";
     var cat = 0;
     while cat <= 255 {
-        if cat <= 16 || cat >= 100 {
+        if cat <= 37 || cat >= 100 {
             let live = __engine(Cfg.ast.query_registered_symbols, cat);
             if live.len() > 0 { kw_buf = kw_buf + live + "|"; }
         }

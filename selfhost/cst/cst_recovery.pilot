@@ -138,7 +138,7 @@ pub fn suggest_keyword_typo(ident: str) -> str {
         return "";
     }
 
-    let canonical_keywords = "__engine,struct,interface,fn,let,ref,if,loop,return,yield,defer,comptime,quote,asm,else,while,until,for,in,then,break,continue,guard,switch,case,default,try,catch,var,const,enum,actor,state,type,pub,priv,prot,pkg,int,file,open,export,lvl,pure,static,iso,partial,ext,get,set,self,field,value,scope,enter,exit,requires,ensures,old,context,adapter,each,coalesce,with,without,as,async,await,spawn,atomic,sync,isolate,select,timeout,bounded,noalloc,region,deadline,within,periodic,priority,jitter,database,transaction,commit,rollback,savepoint,connect,from,where,order,ascending,descending,insert,into,values,update,delete,extern,assembly,module,lib,sizeof,alignof,offsetof,fields_of,nameof,assert,blueprint,cue,role,route,unit,syntax,use,op";
+    let canonical_keywords = "__engine,struct,interface,fn,let,ref,if,loop,return,yield,defer,comptime,quote,asm";
 
     if csv_contains_word(canonical_keywords, ident) {
         return "";

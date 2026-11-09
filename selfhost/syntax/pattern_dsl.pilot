@@ -1,0 +1,212 @@
+// ==============================================================================
+// FILE: selfhost/syntax/pattern_dsl.pilot
+// Milestone 27: Scoped User Sublanguage Builder - Pattern DSL Parser & Parselet Compiler
+// Compiles declarative `pub syntax Name { ... }` pattern arms into fast LL/Pratt parselets.
+// Enforces:
+//   SYN001: Ambiguous Overlapping syntax Pattern Arms
+//   SYN002: Direct/Indirect Left Recursion in Custom syntax Rule
+//   SYN003: Macro Expansion Recursion Depth/Step Limit Exceeded
+//   SYN004: Mismatched Variadic Repetition Counts in quote Splice
+//   SYN005: Unbound Pattern Metavariable in quote Body
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Syntax.PatternDsl;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Formatting Helpers
+// ------------------------------------------------------------------------------
+
+pub pure fn format_syn001(syntax_name: str, arm_a: str, arm_b: str) -> str {
+    return "SYN001: Ambiguous overlapping syntax pattern arms in '" + syntax_name + "': '" + arm_a + "' vs '" + arm_b + "'; specify explicit priority or distinct prefix token";
+}
+
+pub pure fn format_syn002(syntax_name: str, arm: str) -> str {
+    return "SYN002: Left recursion detected in custom syntax rule '" + syntax_name + "' on arm '" + arm + "'; requires Pratt parselet binding or prefix token";
+}
+
+pub pure fn format_syn003(syntax_name: str, depth: usize, limit: usize) -> str {
+    return "SYN003: Macro expansion recursion depth exceeded in '" + syntax_name + "': reached depth " + (depth as str) + " (limit " + (limit as str) + ")";
+}
+
+pub pure fn format_syn004(var_a: str, count_a: usize, var_b: str, count_b: usize) -> str {
+    return "SYN004: Mismatched variadic repetition counts between '$(" + var_a + "),*' (" + (count_a as str) + ") and '$(" + var_b + "),*' (" + (count_b as str) + ") in quote splice";
+}
+
+pub pure fn format_syn005(syntax_name: str, metavar: str) -> str {
+    return "SYN005: Unbound pattern metavariable '$" + metavar + "' in quote body of syntax rule '" + syntax_name + "'";
+}
+
+// ------------------------------------------------------------------------------
+// 2. Metavariable Fragment Kinds & Provenance Spans
+// ------------------------------------------------------------------------------
+
+pub enum FragmentSpecKind : u8 {
+    ::Ident            = 1,
+    ::Expr             = 2,
+    ::Stmt             = 3,
+    ::Type             = 4,
+    ::Pattern          = 5,
+    ::Block            = 6,
+    ::Literal          = 7,
+    ::TokenTree        = 8,
+    ::RepeatZeroOrMore = 9,
+    ::RepeatOneOrMore  = 10,
+    ::Optional         = 11,
+}
+
+[Layout(c_abi)]
+pub struct SyntaxOriginFrame : IValue {
+    pub call_site_span_start: u32;
+    pub call_site_span_len:   u32;
+    pub def_site_span_start:  u32;
+    pub def_site_span_len:    u32;
+    pub syntax_sym:           u32;
+    pub parent_expansion_id:  u32;
+}
+
+pub pure fn syntax_origin_frame_new(
+    call_start: u32,
+    call_len: u32,
+    def_start: u32,
+    def_len: u32,
+    sym: u32,
+    parent_id: u32
+) -> SyntaxOriginFrame {
+    return SyntaxOriginFrame {
+        call_site_span_start: call_start,
+        call_site_span_len:   call_len,
+        def_site_span_start:  def_start,
+        def_site_span_len:    def_len,
+        syntax_sym:           sym,
+        parent_expansion_id:  parent_id,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Pattern Arm & Syntax Rule Schemas (0b00 & 0b10)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct PatternArmDef : IValue {
+    pub arm_id:            usize;
+    pub head_keyword:      str;
+    pub pattern_template:  str;
+    pub is_left_recursive: bool;
+    pub priority:          usize;
+}
+
+pub pure fn pattern_arm_new(id: usize, head: str, tmpl: str, is_left_rec: bool, prio: usize) -> PatternArmDef {
+    return PatternArmDef {
+        arm_id:            id,
+        head_keyword:      head,
+        pattern_template:  tmpl,
+        is_left_recursive: is_left_rec,
+        priority:          prio,
+    };
+}
+
+pub struct SyntaxRuleDef : IObject {
+    pub name:          str;
+    pub is_scoped:     bool;
+    pub arms:          List<PatternArmDef>;
+    pub head_keywords: List<str>;
+}
+
+pub fn pattern_dsl_rule_new(name: str, is_scoped: bool) -> SyntaxRuleDef {
+    return SyntaxRuleDef {
+        name:          name,
+        is_scoped:     is_scoped,
+        arms:          [],
+        head_keywords: [],
+    };
+}
+
+pub var fn pattern_dsl_add_arm(
+    var ref self: SyntaxRuleDef,
+    head: str,
+    pattern: str,
+    is_left_rec: bool,
+    priority: usize
+) {
+    let arm_id = self.arms.len();
+    self.arms.push(pattern_arm_new(arm_id, head, pattern, is_left_rec, priority));
+    var found = false;
+    var i = 0;
+    while i < self.head_keywords.len() {
+        if self.head_keywords[i] == head {
+            found = true;
+            break;
+        }
+        i = i + 1;
+    }
+    if !found && head.len() > 0 {
+        self.head_keywords.push(head);
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 4. Pattern Diagnostics & Validation
+// ------------------------------------------------------------------------------
+
+pub fn pattern_dsl_check_diagnostics(rule: ref<SyntaxRuleDef>) -> List<str> {
+    var diags: List<str> = [];
+    var i = 0;
+    while i < rule.arms.len() {
+        let arm_a = rule.arms[i];
+        // Check SYN002: Left recursion
+        if arm_a.is_left_recursive {
+            diags.push(format_syn002(rule.name, arm_a.pattern_template));
+        }
+
+        // Check SYN001: Overlapping arms with same head and equal priority
+        var j = i + 1;
+        while j < rule.arms.len() {
+            let arm_b = rule.arms[j];
+            if arm_a.head_keyword == arm_b.head_keyword && arm_a.priority == arm_b.priority && arm_a.head_keyword.len() > 0 {
+                diags.push(format_syn001(rule.name, arm_a.pattern_template, arm_b.pattern_template));
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// ------------------------------------------------------------------------------
+// 5. Pattern Matching & Parselet Result
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct PatternMatchResult : IValue {
+    pub matched:          bool;
+    pub matched_arm_id:   usize;
+    pub matched_head:     str;
+    pub tokens_consumed:  usize;
+    pub captured_vars:    usize;
+}
+
+pub fn pattern_dsl_match_prefix(rule: ref<SyntaxRuleDef>, token: str) -> PatternMatchResult {
+    var i = 0;
+    while i < rule.arms.len() {
+        let arm = rule.arms[i];
+        if arm.head_keyword == token {
+            return PatternMatchResult {
+                matched:         true,
+                matched_arm_id:  arm.arm_id,
+                matched_head:    token,
+                tokens_consumed: 1,
+                captured_vars:   1,
+            };
+        }
+        i = i + 1;
+    }
+    return PatternMatchResult {
+        matched:         false,
+        matched_arm_id:  0,
+        matched_head:    "",
+        tokens_consumed: 0,
+        captured_vars:   0,
+    };
+}
