@@ -22,30 +22,46 @@ extern "C" {
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     fn dlclose(handle: *mut c_void) -> c_int;
 }
+#[cfg(windows)]
+extern "system" {
+    fn LoadLibraryW(lpLibFileName: *const u16) -> *mut c_void;
+    fn GetProcAddress(hModule: *mut c_void, lpProcName: *const c_char) -> *const ();
+    fn FreeLibrary(hLibModule: *mut c_void) -> c_int;
+}
 
 impl DynamicLibraryHandle {
     pub fn open(lib_name: &str) -> Result<Self, String> {
-        let c_name = CString::new(lib_name).map_err(|e| e.to_string())?;
-        #[cfg(unix)]
-        {
+        #[cfg(unix)] {
+            let c_name = CString::new(lib_name).map_err(|e| e.to_string())?;
             let h = unsafe { dlopen(c_name.as_ptr(), 2 | 0x100) };
             if h.is_null() { return Err(format!("dlopen failed for '{}'", lib_name)); }
             Ok(Self { name: lib_name.to_string(), raw_handle: h, is_loaded: true })
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)] {
+            use std::os::windows::ffi::OsStrExt;
+            let wide: Vec<u16> = std::ffi::OsStr::new(lib_name).encode_wide().chain(Some(0)).collect();
+            let h = unsafe { LoadLibraryW(wide.as_ptr()) };
+            if h.is_null() { return Err(format!("LoadLibraryW failed for '{}'", lib_name)); }
+            Ok(Self { name: lib_name.to_string(), raw_handle: h, is_loaded: true })
+        }
+        #[cfg(not(any(unix, windows)))]
         Ok(Self { name: lib_name.to_string(), raw_handle: std::ptr::null_mut(), is_loaded: false })
     }
 
     pub fn resolve_symbol(&self, sym_name: &str) -> Result<*const (), String> {
         if !self.is_loaded || self.raw_handle.is_null() { return Err("Library not loaded".into()); }
         let c_sym = CString::new(sym_name).map_err(|e| e.to_string())?;
-        #[cfg(unix)]
-        {
+        #[cfg(unix)] {
             let p = unsafe { dlsym(self.raw_handle, c_sym.as_ptr()) };
             if p.is_null() { return Err(format!("dlsym failed for '{}'", sym_name)); }
             Ok(p as *const ())
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)] {
+            let p = unsafe { GetProcAddress(self.raw_handle, c_sym.as_ptr()) };
+            if p.is_null() { return Err(format!("GetProcAddress failed for '{}'", sym_name)); }
+            Ok(p)
+        }
+        #[cfg(not(any(unix, windows)))]
         Err("Unsupported platform".into())
     }
 }
@@ -54,10 +70,63 @@ impl Drop for DynamicLibraryHandle {
     fn drop(&mut self) {
         if self.is_loaded && !self.raw_handle.is_null() {
             #[cfg(unix)] unsafe { dlclose(self.raw_handle); }
+            #[cfg(windows)] unsafe { FreeLibrary(self.raw_handle); }
             self.raw_handle = std::ptr::null_mut();
             self.is_loaded = false;
         }
     }
+}
+
+/// Dynamic name-blind register-pack dispatcher executing any `AbiFramePlan` constructed by Pilot.
+#[cfg(all(target_arch = "x86_64", unix))]
+#[unsafe(naked)]
+#[no_mangle]
+pub unsafe extern "C" fn pilot_rt_invoke_abi_frame(
+    fn_ptr: *const (),
+    gpr_buf: *const u64,
+    xmm_buf: *const f64,
+    stack_buf: *const u8,
+    stack_len: usize,
+    ret_buf: *mut u64,
+) {
+    std::arch::naked_asm!(
+        "push rbp", "mov rbp, rsp", "push rbx", "push r12", "push r13", "push r14", "push r15", "sub rsp, 8",
+        "mov r12, rdi", "mov r13, rsi", "mov r14, rdx", "mov r15, r9",
+        "test r8, r8", "jz 1f",
+        "mov rax, r8", "add rax, 15", "and rax, -16", "sub rsp, rax",
+        "mov rdi, rsp", "mov rsi, rcx", "mov rcx, r8", "rep movsb",
+        "1:", "test r14, r14", "jz 2f",
+        "movsd xmm0, qword ptr [r14]", "movsd xmm1, qword ptr [r14 + 8]", "movsd xmm2, qword ptr [r14 + 16]",
+        "movsd xmm3, qword ptr [r14 + 24]", "movsd xmm4, qword ptr [r14 + 32]", "movsd xmm5, qword ptr [r14 + 40]",
+        "movsd xmm6, qword ptr [r14 + 48]", "movsd xmm7, qword ptr [r14 + 56]",
+        "2:", "test r13, r13", "jz 3f",
+        "mov rdi, qword ptr [r13]", "mov rsi, qword ptr [r13 + 8]", "mov rdx, qword ptr [r13 + 16]",
+        "mov rcx, qword ptr [r13 + 24]", "mov r8,  qword ptr [r13 + 32]", "mov r9,  qword ptr [r13 + 40]",
+        "mov rax, qword ptr [r13 + 48]",
+        "3:", "call r12",
+        "test r15, r15", "jz 4f",
+        "mov qword ptr [r15], rax", "mov qword ptr [r15 + 8], rdx",
+        "movsd qword ptr [r15 + 16], xmm0", "movsd qword ptr [r15 + 24], xmm1",
+        "4:", "lea rsp, [rbp - 40]", "pop r15", "pop r14", "pop r13", "pop r12", "pop rbx", "pop rbp", "ret"
+    );
+}
+
+#[cfg(not(all(target_arch = "x86_64", unix)))]
+#[no_mangle]
+pub unsafe extern "C" fn pilot_rt_invoke_abi_frame(
+    fn_ptr: *const (), gpr_buf: *const u64, _xmm_buf: *const f64, _stack_buf: *const u8, _stack_len: usize, ret_buf: *mut u64,
+) {
+    if fn_ptr.is_null() { return; }
+    let f: extern "C" fn(u64, u64, u64, u64, u64, u64) -> u64 = std::mem::transmute(fn_ptr);
+    let r = f(
+        if !gpr_buf.is_null() { *gpr_buf } else { 0 },
+        if !gpr_buf.is_null() { *gpr_buf.add(1) } else { 0 },
+        if !gpr_buf.is_null() { *gpr_buf.add(2) } else { 0 },
+        if !gpr_buf.is_null() { *gpr_buf.add(3) } else { 0 },
+        if !gpr_buf.is_null() { *gpr_buf.add(4) } else { 0 },
+        if !gpr_buf.is_null() { *gpr_buf.add(5) } else { 0 },
+    );
+    if !ret_buf.is_null() { *ret_buf = r; }
 }
 
 #[no_mangle] pub extern "C" fn pilot_rt_region_enter() -> *mut c_void { Box::into_raw(Box::new(BumpRegion::new())) as *mut c_void }
@@ -82,31 +151,30 @@ pub extern "C" fn pilot_rt_alloc_arc(payload_size: usize) -> *mut c_void {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn pilot_rt_dup(payload_ptr: *mut c_void) -> *mut c_void {
-    if payload_ptr.is_null() { return std::ptr::null_mut(); }
-    (*(payload_ptr as *mut PilotArcBox).sub(1)).ref_count.fetch_add(1, Ordering::Relaxed);
-    payload_ptr
+pub unsafe extern "C" fn pilot_rt_dup(p: *mut c_void) -> *mut c_void {
+    if !p.is_null() { (*(p as *mut PilotArcBox).sub(1)).ref_count.fetch_add(1, Ordering::Relaxed); }
+    p
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn pilot_rt_drop(payload_ptr: *mut c_void, dtor: Option<unsafe extern "C" fn(*mut c_void)>) {
-    if payload_ptr.is_null() { return; }
-    let header = (payload_ptr as *mut PilotArcBox).sub(1);
-    if (*header).ref_count.fetch_sub(1, Ordering::Release) == 1 {
+pub unsafe extern "C" fn pilot_rt_drop(p: *mut c_void, dtor: Option<unsafe extern "C" fn(*mut c_void)>) {
+    if p.is_null() { return; }
+    let h = (p as *mut PilotArcBox).sub(1);
+    if (*h).ref_count.fetch_sub(1, Ordering::Release) == 1 {
         std::sync::atomic::fence(Ordering::Acquire);
-        if let Some(drop_fn) = dtor { drop_fn(payload_ptr); }
-        let layout = std::alloc::Layout::from_size_align(std::mem::size_of::<PilotArcBox>() + (*header).size, 8).unwrap();
-        std::alloc::dealloc(header as *mut u8, layout);
+        if let Some(drop_fn) = dtor { drop_fn(p); }
+        let l = std::alloc::Layout::from_size_align(std::mem::size_of::<PilotArcBox>() + (*h).size, 8).unwrap();
+        std::alloc::dealloc(h as *mut u8, l);
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn pilot_rt_drop_reuse(payload_ptr: *mut c_void, required_size: usize) -> *mut c_void {
-    if payload_ptr.is_null() { return pilot_rt_alloc_arc(required_size); }
-    let header = (payload_ptr as *mut PilotArcBox).sub(1);
-    if (*header).ref_count.load(Ordering::Acquire) == 1 && (*header).size >= required_size { return payload_ptr; }
-    pilot_rt_drop(payload_ptr, None);
-    pilot_rt_alloc_arc(required_size)
+pub unsafe extern "C" fn pilot_rt_drop_reuse(p: *mut c_void, req_sz: usize) -> *mut c_void {
+    if p.is_null() { return pilot_rt_alloc_arc(req_sz); }
+    let h = (p as *mut PilotArcBox).sub(1);
+    if (*h).ref_count.load(Ordering::Acquire) == 1 && (*h).size >= req_sz { return p; }
+    pilot_rt_drop(p, None);
+    pilot_rt_alloc_arc(req_sz)
 }
 
 #[no_mangle] pub extern "C" fn pilot_rt_print_i64(val: i64) { println!("{}", val); }

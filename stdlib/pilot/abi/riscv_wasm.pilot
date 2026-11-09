@@ -1,0 +1,188 @@
+// ==============================================================================
+// FILE: stdlib/pilot/abi/riscv_wasm.pilot
+// Milestone 13: RISC-V LP64D & WASM32 C-ABI Classifiers
+// Package: pub pkg pilot.abi.riscv_wasm;
+// ==============================================================================
+pub pkg Pilot.Abi.Riscv_wasm;
+
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Option::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Reflect.TypeLayout;
+use Pilot.Abi.Descriptor.*;
+
+pub struct Riscv64ConvClassifier : IValue, ICallingConvClassifier {
+    pub static pure fn name() -> str => "riscv64";
+
+    pub static pure fn spec() -> CallingConvSpec => CallingConvSpec::create(
+        "riscv64",
+        8,    // a0..a7
+        8,    // fa0..fa7
+        0,    // No shadow space
+        16,   // 16-byte stack alignment
+        false,// Sret shares a0
+        0     // a0
+    );
+
+    pub static pure fn classify(
+        params: slice<TypeLayout>,
+        ret: ref<TypeLayout>,
+        variadic_fixed_count: opt<usize>
+    ) -> AbiFramePlan {
+        var param_locs: List<ArgLocation> = [];
+        var next_gpr: u8 = 0;
+        var next_vec: u8 = 0;
+        var stack_offset: u32 = 0;
+        var sret_used = false;
+        var ret_location = ArgLocation::void_loc();
+
+        // 1. Return classification
+        let ret_sz = ret.size_in_bytes;
+        let ret_is_agg = ret.reg_class == 5;
+        let ret_is_flt = ret.reg_class == 2;
+        if ret_sz == 0 {
+            ret_location = ArgLocation::void_loc();
+        } else if ret_is_agg && ret_sz > 16 {
+            sret_used = true;
+            next_gpr = 1; // Hidden pointer in a0, explicit arg 0 shifts to a1
+            ret_location = ArgLocation::indirect(0, ret_sz as u32);
+        } else if ret_is_agg && ret_sz > 8 && ret_sz <= 16 {
+            ret_location = ArgLocation::pair_gpr_gpr(0, 1, ret_sz as u32);
+        } else if ret_is_flt {
+            ret_location = ArgLocation::direct_simd(0, ret_sz as u32);
+        } else {
+            ret_location = ArgLocation::direct_gpr(0, ret_sz as u32);
+        }
+
+        // 2. Parameter classification
+        var p_idx: usize = 0;
+        loop {
+            if !(p_idx < params.len()) { break; }
+            let p = params[p_idx];
+            let sz = p.size_in_bytes as u32;
+
+            if p.reg_class == 2 {
+                if next_vec < 8 {
+                    param_locs.push(ArgLocation::direct_simd(next_vec, sz));
+                    next_vec = next_vec + 1;
+                } else {
+                    param_locs.push(ArgLocation::stack(stack_offset, sz));
+                    stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                }
+            } else if p.reg_class == 5 {
+                if sz <= 8 {
+                    if next_gpr < 8 {
+                        param_locs.push(ArgLocation::direct_gpr(next_gpr, sz));
+                        next_gpr = next_gpr + 1;
+                    } else {
+                        param_locs.push(ArgLocation::stack(stack_offset, sz));
+                        stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                    }
+                } else if sz <= 16 {
+                    if next_gpr + 1 < 8 {
+                        param_locs.push(ArgLocation::pair_gpr_gpr(next_gpr, next_gpr + 1, sz));
+                        next_gpr = next_gpr + 2;
+                    } else {
+                        param_locs.push(ArgLocation::stack(stack_offset, sz));
+                        stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                    }
+                } else {
+                    // Struct > 16B passed by reference via pointer in GPR
+                    if next_gpr < 8 {
+                        param_locs.push(ArgLocation::indirect(next_gpr, sz));
+                        next_gpr = next_gpr + 1;
+                    } else {
+                        param_locs.push(ArgLocation::stack(stack_offset, 8));
+                        stack_offset = stack_offset + 8;
+                    }
+                }
+            } else {
+                if next_gpr < 8 {
+                    param_locs.push(ArgLocation::direct_gpr(next_gpr, sz));
+                    next_gpr = next_gpr + 1;
+                } else {
+                    param_locs.push(ArgLocation::stack(stack_offset, sz));
+                    stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                }
+            }
+
+            p_idx = p_idx + 1;
+        }
+
+        let aligned_stack = if stack_offset > 0 { (stack_offset + 15) & 0xFFFFFFF0 } else { 0 };
+
+        return AbiFramePlan {
+            conv_id:             "riscv64",
+            sret_uses_gpr0:      sret_used,
+            ret_loc:             ret_location,
+            param_locs:          param_locs,
+            aligned_stack_bytes: aligned_stack,
+        };
+    }
+}
+
+pub struct Wasm32ConvClassifier : IValue, ICallingConvClassifier {
+    pub static pure fn name() -> str => "wasm32";
+
+    pub static pure fn spec() -> CallingConvSpec => CallingConvSpec::create(
+        "wasm32",
+        16,   // WebAssembly locals
+        0,    // No distinct vector bank
+        0,    // No shadow space
+        16,   // Linear memory shadow stack alignment
+        false,// Sret pointer is first param
+        0
+    );
+
+    pub static pure fn classify(
+        params: slice<TypeLayout>,
+        ret: ref<TypeLayout>,
+        variadic_fixed_count: opt<usize>
+    ) -> AbiFramePlan {
+        var param_locs: List<ArgLocation> = [];
+        var next_local: u8 = 0;
+        var stack_offset: u32 = 0;
+        var sret_used = false;
+        var ret_location = ArgLocation::void_loc();
+
+        let ret_sz = ret.size_in_bytes;
+        let ret_is_agg = ret.reg_class == 5;
+        if ret_sz == 0 {
+            ret_location = ArgLocation::void_loc();
+        } else if ret_is_agg {
+            // Aggregates returned via shadow stack sret pointer
+            sret_used = true;
+            next_local = 1;
+            ret_location = ArgLocation::indirect(0, ret_sz as u32);
+        } else {
+            ret_location = ArgLocation::direct_gpr(0, ret_sz as u32);
+        }
+
+        var p_idx: usize = 0;
+        loop {
+            if !(p_idx < params.len()) { break; }
+            let p = params[p_idx];
+            let sz = p.size_in_bytes as u32;
+
+            if p.reg_class == 5 {
+                // Aggregates in wasm32 C-ABI passed indirectly via shadow stack
+                param_locs.push(ArgLocation::indirect(next_local, sz));
+                next_local = next_local + 1;
+                stack_offset = stack_offset + ((sz + 15) & 0xFFFFFFF0);
+            } else {
+                param_locs.push(ArgLocation::direct_gpr(next_local, sz));
+                next_local = next_local + 1;
+            }
+
+            p_idx = p_idx + 1;
+        }
+
+        return AbiFramePlan {
+            conv_id:             "wasm32",
+            sret_uses_gpr0:      sret_used,
+            ret_loc:             ret_location,
+            param_locs:          param_locs,
+            aligned_stack_bytes: stack_offset,
+        };
+    }
+}

@@ -957,6 +957,18 @@ pub struct TypeLayout : IValue {
     pub size_in_bytes: usize;
     pub alignment:     usize;
     pub lattice_bits:  u8;
+    pub reg_class:     u8;
+
+    pub static pure fn create(size: usize, align: usize, lattice: u8, reg_cls: u8) -> TypeLayout => TypeLayout {
+        size_in_bytes: size,
+        alignment: align,
+        lattice_bits: lattice,
+        reg_class: reg_cls,
+    };
+
+    pub pure fn is_simd_float() -> bool => .reg_class == 2;
+    pub pure fn is_aggregate() -> bool => .reg_class == 5;
+    pub pure fn is_gpr() -> bool => .reg_class == 0 || .reg_class == 1 || .reg_class == 4;
 
     pub static pure fn for_type_id(type_sym: i64) -> TypeLayout {
         let sz = __engine("layout_metrics", type_sym) as usize;
@@ -964,6 +976,7 @@ pub struct TypeLayout : IValue {
             size_in_bytes: sz,
             alignment: 8,
             lattice_bits: 0,
+            reg_class: 0,
         };
     }
 
@@ -1038,6 +1051,7 @@ pub struct CompileEnvView : IReference {
                     size_in_bytes: sz,
                     alignment: 8,
                     lattice_bits: 0,
+                    reg_class: 0,
                 });
             }
         }

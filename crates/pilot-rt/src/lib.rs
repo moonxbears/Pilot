@@ -19,4 +19,5 @@ pub use c_abi::{
     pilot_rt_dup, pilot_rt_os_getrandom, pilot_rt_print_f64, pilot_rt_print_i64,
     pilot_rt_region_alloc, pilot_rt_region_enter, pilot_rt_region_exit,
     pilot_rt_sleep_ms, pilot_rt_time_now_ns, DynamicLibraryHandle,
+    pilot_rt_invoke_abi_frame,
 };

@@ -1,0 +1,332 @@
+// ==============================================================================
+// FILE: stdlib/pilot/abi/descriptor.pilot
+// Milestone 13: Adaptive Hardware Calling-Convention Descriptors & Frame Plan
+// Package: pub pkg pilot.abi;
+// ==============================================================================
+pub pkg Pilot.Abi.Descriptor;
+
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Option::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Reflect.TypeLayout;
+
+// ------------------------------------------------------------------------------
+// 1. Argument Passing Category & Register Locations
+// ------------------------------------------------------------------------------
+
+pub enum ArgPassKind : u8 {
+    ::Void          = 0,
+    ::DirectGpr     = 1,
+    ::DirectSimd    = 2,
+    ::PairGprGpr    = 3,
+    ::PairGprSimd   = 4,
+    ::PairSimdGpr   = 5,
+    ::PairSimdSimd  = 6,
+    ::HfaSimd3      = 7,
+    ::HfaSimd4      = 8,
+    ::IndirectByRef = 9,
+    ::StackBytes    = 10,
+}
+
+[Layout(c_abi)]
+pub struct ArgLocation : IValue {
+    pub kind:         ArgPassKind;
+    pub reg0:         u8;
+    pub reg1:         u8;
+    pub stack_offset: u32;
+    pub byte_size:    u32;
+
+    pub static pure fn void_loc() -> ArgLocation => ArgLocation {
+        kind:         ArgPassKind::Void,
+        reg0:         0,
+        reg1:         0,
+        stack_offset: 0,
+        byte_size:    0,
+    };
+
+    pub static pure fn direct_gpr(reg: u8, size: u32) -> ArgLocation => ArgLocation {
+        kind:         ArgPassKind::DirectGpr,
+        reg0:         reg,
+        reg1:         0,
+        stack_offset: 0,
+        byte_size:    size,
+    };
+
+    pub static pure fn direct_simd(reg: u8, size: u32) -> ArgLocation => ArgLocation {
+        kind:         ArgPassKind::DirectSimd,
+        reg0:         reg,
+        reg1:         0,
+        stack_offset: 0,
+        byte_size:    size,
+    };
+
+    pub static pure fn pair_gpr_gpr(r0: u8, r1: u8, size: u32) -> ArgLocation => ArgLocation {
+        kind:         ArgPassKind::PairGprGpr,
+        reg0:         r0,
+        reg1:         r1,
+        stack_offset: 0,
+        byte_size:    size,
+    };
+
+    pub static pure fn pair_gpr_simd(r0: u8, r1: u8, size: u32) -> ArgLocation => ArgLocation {
+        kind:         ArgPassKind::PairGprSimd,
+        reg0:         r0,
+        reg1:         r1,
+        stack_offset: 0,
+        byte_size:    size,
+    };
+
+    pub static pure fn pair_simd_gpr(r0: u8, r1: u8, size: u32) -> ArgLocation => ArgLocation {
+        kind:         ArgPassKind::PairSimdGpr,
+        reg0:         r0,
+        reg1:         r1,
+        stack_offset: 0,
+        byte_size:    size,
+    };
+
+    pub static pure fn pair_simd_simd(r0: u8, r1: u8, size: u32) -> ArgLocation => ArgLocation {
+        kind:         ArgPassKind::PairSimdSimd,
+        reg0:         r0,
+        reg1:         r1,
+        stack_offset: 0,
+        byte_size:    size,
+    };
+
+    pub static pure fn hfa(r0: u8, count: u8, size: u32) -> ArgLocation => ArgLocation {
+        kind:         if count == 3 { ArgPassKind::HfaSimd3 } else { ArgPassKind::HfaSimd4 },
+        reg0:         r0,
+        reg1:         count,
+        stack_offset: 0,
+        byte_size:    size,
+    };
+
+    pub static pure fn indirect(reg: u8, size: u32) -> ArgLocation => ArgLocation {
+        kind:         ArgPassKind::IndirectByRef,
+        reg0:         reg,
+        reg1:         0,
+        stack_offset: 0,
+        byte_size:    size,
+    };
+
+    pub static pure fn stack(offset: u32, size: u32) -> ArgLocation => ArgLocation {
+        kind:         ArgPassKind::StackBytes,
+        reg0:         0,
+        reg1:         0,
+        stack_offset: offset,
+        byte_size:    size,
+    };
+
+    pub pure fn is_reg() -> bool =>
+        .kind == ArgPassKind::DirectGpr || .kind == ArgPassKind::DirectSimd ||
+        .kind == ArgPassKind::PairGprGpr || .kind == ArgPassKind::PairGprSimd ||
+        .kind == ArgPassKind::PairSimdGpr || .kind == ArgPassKind::PairSimdSimd ||
+        .kind == ArgPassKind::HfaSimd3 || .kind == ArgPassKind::HfaSimd4;
+
+    pub pure fn is_stack() -> bool => .kind == ArgPassKind::StackBytes;
+    pub pure fn is_indirect() -> bool => .kind == ArgPassKind::IndirectByRef;
+}
+
+// ------------------------------------------------------------------------------
+// 2. Hardware Calling Convention Specification & ABI Frame Plan
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct CallingConvSpec : IValue {
+    pub name:                str;
+    pub max_gpr_args:        u8;
+    pub max_vec_args:        u8;
+    pub shadow_space_bytes:  u32;
+    pub stack_align:         u32;
+    pub sret_dedicated_reg:  bool;
+    pub sret_reg:            u8;
+
+    pub static pure fn create(
+        name: str,
+        max_gpr: u8,
+        max_vec: u8,
+        shadow: u32,
+        align: u32,
+        sret_dedicated: bool,
+        sret_reg: u8,
+    ) -> CallingConvSpec => CallingConvSpec {
+        name:                name,
+        max_gpr_args:        max_gpr,
+        max_vec_args:        max_vec,
+        shadow_space_bytes:  shadow,
+        stack_align:         align,
+        sret_dedicated_reg:  sret_dedicated,
+        sret_reg:            sret_reg,
+    };
+}
+
+pub struct AbiFramePlan : IObject {
+    pub conv_id:             str;
+    pub sret_uses_gpr0:      bool;
+    pub ret_loc:             ArgLocation;
+    pub param_locs:          List<ArgLocation>;
+    pub aligned_stack_bytes: u32;
+
+    pub pure fn param_count() -> usize => .param_locs.len();
+
+    pub pure fn get_param(idx: usize) -> ArgLocation {
+        if idx < .param_locs.len() {
+            return .param_locs.get(idx);
+        }
+        return ArgLocation::void_loc();
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 3. Low-Level Dispatch Packet (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct RawDispatchPacket : IValue {
+    pub gprs:          array<u64, 8>;
+    pub x8_sret:       u64;
+    pub vecs:          array<f64, 16>;
+    pub stack_bytes:   slice<u8>;
+    pub vec_reg_count: u8;
+    pub ret_kind:      u8;
+
+    pub static pure fn create_empty() -> RawDispatchPacket => RawDispatchPacket {
+        gprs:          [0, 0, 0, 0, 0, 0, 0, 0],
+        x8_sret:       0,
+        vecs:          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        stack_bytes:   slice<u8> { data: null, len: 0 },
+        vec_reg_count: 0,
+        ret_kind:      0,
+    };
+
+    pub fn set_gpr(idx: usize, val: u64) {
+        if idx < 8 {
+            .gprs[idx] = val;
+        }
+    }
+
+    pub pure fn get_gpr(idx: usize) -> u64 {
+        if idx < 8 {
+            return .gprs[idx];
+        }
+        return 0;
+    }
+
+    pub fn set_vec(idx: usize, val: f64) {
+        if idx < 16 {
+            .vecs[idx] = val;
+        }
+    }
+
+    pub pure fn get_vec(idx: usize) -> f64 {
+        if idx < 16 {
+            return .vecs[idx];
+        }
+        return 0.0;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 4. Classifier Interface & Open Registry
+// ------------------------------------------------------------------------------
+
+pub interface ICallingConvClassifier {
+    pure fn name() -> str;
+    pure fn spec() -> CallingConvSpec;
+    pure fn classify(params: slice<TypeLayout>, ret: ref<TypeLayout>, variadic_fixed_count: opt<usize>) -> AbiFramePlan;
+}
+
+[Layout(c_abi)]
+pub struct CallingConvRegistryEntry : IValue {
+    pub conv_id:     str;
+    pub arch:        str;
+    pub description: str;
+}
+
+pub pure fn calling_conv_get(index: usize) -> CallingConvRegistryEntry {
+    if index == 0 { return CallingConvRegistryEntry { conv_id: "sysv_x64",     arch: "x86_64",  description: "AMD64 System V ABI (Linux, BSD, macOS x64)" }; }
+    if index == 1 { return CallingConvRegistryEntry { conv_id: "win64",        arch: "x86_64",  description: "Microsoft x64 ABI (Windows 64-bit)" }; }
+    if index == 2 { return CallingConvRegistryEntry { conv_id: "aapcs64",      arch: "aarch64", description: "ARM64 AAPCS64 (Linux ARM64, Android)" }; }
+    if index == 3 { return CallingConvRegistryEntry { conv_id: "darwin_arm64", arch: "aarch64", description: "Apple Darwin ARM64 (macOS, iOS Apple Silicon)" }; }
+    if index == 4 { return CallingConvRegistryEntry { conv_id: "riscv64",      arch: "riscv64", description: "RISC-V LP64D ABI (64-bit RISC-V)" }; }
+    return CallingConvRegistryEntry { conv_id: "wasm32", arch: "wasm32", description: "WebAssembly 32-bit C-ABI with shadow stack" };
+}
+
+pub pure fn calling_conv_count() -> usize {
+    var c: usize = 0;
+    loop {
+        let e = calling_conv_get(c);
+        c = c + 1;
+        if e.conv_id == "wasm32" {
+            break;
+        }
+    }
+    return c;
+}
+
+pub pure fn classify_call_frame(
+    conv: str,
+    params: slice<TypeLayout>,
+    ret: ref<TypeLayout>,
+    variadic_fixed_count: opt<usize>
+) -> AbiFramePlan {
+    if conv == "win64" || conv == "msvc" {
+        return pilot.abi.win64.Win64ConvClassifier::classify(params, ret, variadic_fixed_count);
+    }
+    if conv == "aapcs64" || conv == "arm64" || conv == "aarch64" {
+        return pilot.abi.aapcs64.Aapcs64ConvClassifier::classify(params, ret, variadic_fixed_count);
+    }
+    if conv == "darwin_arm64" || conv == "apple_arm64" {
+        return pilot.abi.aapcs64.Aapcs64ConvClassifier::darwin().classify(params, ret, variadic_fixed_count);
+    }
+    if conv == "riscv64" {
+        return pilot.abi.riscv_wasm.Riscv64ConvClassifier::classify(params, ret, variadic_fixed_count);
+    }
+    if conv == "wasm32" {
+        return pilot.abi.riscv_wasm.Wasm32ConvClassifier::classify(params, ret, variadic_fixed_count);
+    }
+    return pilot.abi.sysv_x64.SysVConvClassifier::classify(params, ret, variadic_fixed_count);
+}
+
+pub fn invoke_dynamic_frame(
+    fn_addr: ptr<void>,
+    plan: ref<AbiFramePlan>,
+    packet: var ref<RawDispatchPacket>
+) -> res<u64, AbiDiagnostic> {
+    if fn_addr == null {
+        return res<u64, AbiDiagnostic>.err(AbiDiagnostic::symbol_not_found("dynamic_symbol", plan.conv_id));
+    }
+    var v_count: u8 = 0;
+    var i: usize = 0;
+    loop {
+        if !(i < plan.param_locs.len()) { break; }
+        let loc = plan.param_locs.get(i);
+        if loc.kind == ArgPassKind::DirectSimd || loc.kind == ArgPassKind::HfaSimd3 || loc.kind == ArgPassKind::HfaSimd4 {
+            v_count = v_count + 1;
+        }
+        i = i + 1;
+    }
+    packet.vec_reg_count = v_count;
+    let g0 = packet.get_gpr(0);
+    return res<u64, AbiDiagnostic>.ok(g0);
+}
+
+[Layout(c_abi)]
+pub struct AbiDiagnostic : IValue {
+    pub code: str;
+    pub message: str;
+
+    pub static pure fn symbol_not_found(sym: str, lib: str) -> AbiDiagnostic => AbiDiagnostic {
+        code: "ABI001",
+        message: f"Symbol '{sym}' not found in shared library '{lib}'",
+    };
+
+    pub static pure fn library_load_failed(lib: str, reason: str) -> AbiDiagnostic => AbiDiagnostic {
+        code: "ABI002",
+        message: f"Failed to load shared library '{lib}': {reason}",
+    };
+
+    pub static pure fn unsupported_conv(conv: str, arch: str) -> AbiDiagnostic => AbiDiagnostic {
+        code: "ABI003",
+        message: f"Unsupported calling convention '{conv}' for architecture '{arch}'",
+    };
+}

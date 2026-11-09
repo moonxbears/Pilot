@@ -1,0 +1,146 @@
+// ==============================================================================
+// FILE: stdlib/pilot/abi/aapcs64.pilot
+// Milestone 13: ARM64 AAPCS64 & Apple Darwin ARM64 Calling Convention Classifier
+// Package: pub pkg pilot.abi.aapcs64;
+// ==============================================================================
+pub pkg Pilot.Abi.Aapcs64;
+
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Option::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Reflect.TypeLayout;
+use Pilot.Abi.Descriptor::*;
+
+pub struct Aapcs64ConvClassifier : IValue, ICallingConvClassifier {
+    pub is_darwin: bool;
+
+    pub static pure fn standard() -> Aapcs64ConvClassifier => Aapcs64ConvClassifier { is_darwin: false };
+    pub static pure fn darwin() -> Aapcs64ConvClassifier => Aapcs64ConvClassifier { is_darwin: true };
+
+    pub static pure fn name() -> str => "aapcs64";
+
+    pub static pure fn spec() -> CallingConvSpec => CallingConvSpec::create(
+        "aapcs64",
+        8,    // X0..X7
+        8,    // V0..V7
+        0,    // No shadow space
+        16,   // 16-byte stack alignment
+        true, // Dedicated X8 sret register (does NOT consume X0!)
+        8     // X8
+    );
+
+    pub static pure fn darwin_spec() -> CallingConvSpec => CallingConvSpec::create(
+        "darwin_arm64",
+        8, 8, 0, 16, true, 8
+    );
+
+    pub static pure fn classify(
+        params: slice<TypeLayout>,
+        ret: ref<TypeLayout>,
+        variadic_fixed_count: opt<usize>
+    ) -> AbiFramePlan {
+        var param_locs: List<ArgLocation> = [];
+        var next_gpr: u8 = 0;
+        var next_vec: u8 = 0;
+        var stack_offset: u32 = 0;
+        var sret_used = false;
+        var ret_location = ArgLocation::void_loc();
+
+        // 1. Classify return value
+        let ret_sz = ret.size_in_bytes;
+        let ret_is_agg = ret.reg_class == 5;
+        let ret_is_flt = ret.reg_class == 2;
+        if ret_sz == 0 {
+            ret_location = ArgLocation::void_loc();
+        } else if ret_is_agg && ret_sz > 16 {
+            // Sret required: dedicated register X8 holds the destination buffer.
+            // Notice: next_gpr stays at 0! Explicit argument 0 remains in X0!
+            sret_used = true;
+            ret_location = ArgLocation::indirect(8, ret_sz as u32);
+        } else if ret_is_agg && ret_sz > 8 && ret_sz <= 16 {
+            // 16-byte struct returned in X0:X1
+            ret_location = ArgLocation::pair_gpr_gpr(0, 1, ret_sz as u32);
+        } else if ret_is_flt {
+            ret_location = ArgLocation::direct_simd(0, ret_sz as u32);
+        } else {
+            ret_location = ArgLocation::direct_gpr(0, ret_sz as u32);
+        }
+
+        // 2. Classify parameters
+        var p_idx: usize = 0;
+        loop {
+            if !(p_idx < params.len()) { break; }
+            let p = params[p_idx];
+            let sz = p.size_in_bytes as u32;
+
+            if p.reg_class == 2 {
+                if next_vec < 8 {
+                    param_locs.push(ArgLocation::direct_simd(next_vec, sz));
+                    next_vec = next_vec + 1;
+                } else {
+                    param_locs.push(ArgLocation::stack(stack_offset, sz));
+                    stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                }
+            } else if p.reg_class == 5 {
+                // Check for Homogeneous Floating-Point Aggregate (HFA)
+                // e.g. 12B = 3x f32, 24B = 3x f64, 16B = 4x f32, 32B = 4x f64
+                if sz == 12 && next_vec + 3 <= 8 {
+                    // 3x float HFA in 3 consecutive vector registers
+                    param_locs.push(ArgLocation::hfa(next_vec, 3, sz));
+                    next_vec = next_vec + 3;
+                } else if sz == 16 && next_vec + 4 <= 8 && (p.lattice_bits & 0b10) == 0 {
+                    // Could be 4x float HFA or 2x GPR pair. If SIMD-aligned, prefer HFA
+                    param_locs.push(ArgLocation::hfa(next_vec, 4, sz));
+                    next_vec = next_vec + 4;
+                } else if sz <= 8 {
+                    if next_gpr < 8 {
+                        param_locs.push(ArgLocation::direct_gpr(next_gpr, sz));
+                        next_gpr = next_gpr + 1;
+                    } else {
+                        param_locs.push(ArgLocation::stack(stack_offset, sz));
+                        stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                    }
+                } else if sz <= 16 {
+                    if next_gpr + 1 < 8 {
+                        param_locs.push(ArgLocation::pair_gpr_gpr(next_gpr, next_gpr + 1, sz));
+                        next_gpr = next_gpr + 2;
+                    } else {
+                        param_locs.push(ArgLocation::stack(stack_offset, sz));
+                        stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                    }
+                } else {
+                    // Struct > 16B passed by reference via pointer in GPR or stack
+                    if next_gpr < 8 {
+                        param_locs.push(ArgLocation::indirect(next_gpr, sz));
+                        next_gpr = next_gpr + 1;
+                    } else {
+                        param_locs.push(ArgLocation::stack(stack_offset, 8));
+                        stack_offset = stack_offset + 8;
+                    }
+                }
+            } else {
+                // Scalar integer or pointer
+                if next_gpr < 8 {
+                    param_locs.push(ArgLocation::direct_gpr(next_gpr, sz));
+                    next_gpr = next_gpr + 1;
+                } else {
+                    param_locs.push(ArgLocation::stack(stack_offset, sz));
+                    stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                }
+            }
+
+            p_idx = p_idx + 1;
+        }
+
+        // Align stack to 16 bytes
+        let aligned_stack = if stack_offset > 0 { (stack_offset + 15) & 0xFFFFFFF0 } else { 0 };
+
+        return AbiFramePlan {
+            conv_id:             if .is_darwin { "darwin_arm64" } else { "aapcs64" },
+            sret_uses_gpr0:      false, // Dedicated X8 sret register!
+            ret_loc:             ret_location,
+            param_locs:          param_locs,
+            aligned_stack_bytes: aligned_stack,
+        };
+    }
+}

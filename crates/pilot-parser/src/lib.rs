@@ -856,11 +856,11 @@ impl<'a> Parser<'a> {
                 if let Some(after) = self.try_skip_generic_expr_args() { self.pos = after; let cp = self.cur();
                     if cp < self.tape.len() && self.tape.kind(cp) == TokenKind::PrefixDot { self.tape.kinds[cp] = TokenKind::InfixDot; }
                 } }
-            if !self.no_struct_lit && self.at(TokenKind::LBrace) && matches!(self.arena.node(lhs).node_kind(), NodeKind::IdentExpr | NodeKind::MemberExpr) && self.looks_like_struct_lit() {
+            if !self.no_struct_lit && self.at(TokenKind::LBrace) && matches!(self.arena.node(lhs).node_kind(), NodeKind::IdentExpr | NodeKind::MemberExpr | NodeKind::TypeNamed) && self.looks_like_struct_lit() {
                 let m = self.parse_brace_map();
                 lhs = self.arena.alloc_list_node(NodeKind::CallExpr, 0, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), &[lhs, m]);
                 continue; }
-            if matches!(k, TokenKind::InfixDot | TokenKind::SafeNav) {
+            if matches!(k, TokenKind::InfixDot | TokenKind::SafeNav | TokenKind::ColonColon) {
                 let safe = (k == TokenKind::SafeNav) as u16; self.advance(); let sym = self.intern_cur();
                 lhs = self.arena.alloc_node(NodeKind::MemberExpr, safe, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, sym.0);
                 continue; }

@@ -807,7 +807,7 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 
 ---
 
-### M13 — Adaptive Hardware Calling-Convention Descriptors & Dynamic Frame Trampoline (`frame` / `!&`)
+### M13 — Adaptive Hardware Calling-Convention Descriptors & Dynamic Frame Trampoline (`frame` / `!&`) [COMPLETE]
 
 #### 13.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (Hardcoded Unix-Only `dlopen` Without Call Trampoline):** [`crates/pilot-rt/src/c_abi.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt/src/c_abi.rs) (lines `19`–`50`) only wraps `dlopen`/`dlsym` under `#[cfg(unix)]` (returning `"Unsupported platform"` on Windows!) and only returns a raw `*const ()` pointer—`PilVM` (`comptime` and `pilot run`) has **no generic dynamic trampoline** to invoke arbitrary multi-argument/struct-by-value C functions resolved via `dlsym`!
