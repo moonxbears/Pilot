@@ -56,7 +56,7 @@ pub pure fn cpp_read_ident(s: str, pos: usize) -> str {
 // 2. Preprocessor State Schemas (0b10 : IObject, Encapsulated Types)
 // ------------------------------------------------------------------------------
 
-pub struct CppMacro : IValue {
+pub struct CppMacro : IObject {
     pub name:        str;
     pub val:         str;
     pub is_fn:       bool;
@@ -64,10 +64,24 @@ pub struct CppMacro : IValue {
     pub params:      List<str>;
 }
 
+[Layout(c_abi)]
 pub struct CppCondFrame : IValue {
-    pub active:        bool;
-    pub parent_active: bool;
-    pub had_true:      bool;
+    pub flags: u8;
+
+    pub static pure fn create(act: bool, parent_act: bool, had_tr: bool) -> CppCondFrame {
+        var f: u8 = 0;
+        if act { f = f | 1; }
+        if parent_act { f = f | 2; }
+        if had_tr { f = f | 4; }
+        return CppCondFrame { flags: f };
+    }
+
+    pub pure fn is_active(ref self) -> bool => (self.flags & 1) != 0;
+    pub pure fn is_parent_active(ref self) -> bool => (self.flags & 2) != 0;
+    pub pure fn had_true(ref self) -> bool => (self.flags & 4) != 0;
+
+    pub static pure fn make_active(parent_act: bool) -> CppCondFrame => CppCondFrame::create(true, parent_act, true);
+    pub static pure fn make_inactive(parent_act: bool, had_tr: bool) -> CppCondFrame => CppCondFrame::create(false, parent_act, had_tr);
 }
 
 pub struct CppEnv : IObject {
@@ -716,50 +730,37 @@ pub fn cpp_process_source(
             let is_parent_active = if cond_stack.len() == 0 {
                 true
             } else {
-                cond_stack[cond_stack.len() - 1].active
+                cond_stack[cond_stack.len() - 1].is_active()
             };
 
             // Branching directives
             if dir_name == "ifdef" {
                 let cond_met = is_parent_active && cpp_is_defined(env, dir_arg);
-                cond_stack.push(CppCondFrame {
-                    parent_active: is_parent_active,
-                    active:        cond_met,
-                    had_true:      cond_met,
-                });
+                cond_stack.push(CppCondFrame::create(cond_met, is_parent_active, cond_met));
                 continue;
             }
 
             if dir_name == "ifndef" {
                 let cond_met = is_parent_active && !cpp_is_defined(env, dir_arg);
-                cond_stack.push(CppCondFrame {
-                    parent_active: is_parent_active,
-                    active:        cond_met,
-                    had_true:      cond_met,
-                });
+                cond_stack.push(CppCondFrame::create(cond_met, is_parent_active, cond_met));
                 continue;
             }
 
             if dir_name == "if" {
                 let cond_met = is_parent_active && cpp_evaluate_condition(dir_arg, env);
-                cond_stack.push(CppCondFrame {
-                    parent_active: is_parent_active,
-                    active:        cond_met,
-                    had_true:      cond_met,
-                });
+                cond_stack.push(CppCondFrame::create(cond_met, is_parent_active, cond_met));
                 continue;
             }
 
             if dir_name == "elif" {
                 if cond_stack.len() > 0 {
                     let last_idx = cond_stack.len() - 1;
-                    let p_act = cond_stack[last_idx].parent_active;
-                    let had_true = cond_stack[last_idx].had_true;
-                    if p_act && !had_true && cpp_evaluate_condition(dir_arg, env) {
-                        cond_stack[last_idx].active = true;
-                        cond_stack[last_idx].had_true = true;
+                    let p_act = cond_stack[last_idx].is_parent_active();
+                    let had_tr = cond_stack[last_idx].had_true();
+                    if p_act && !had_tr && cpp_evaluate_condition(dir_arg, env) {
+                        cond_stack[last_idx] = CppCondFrame::make_active(p_act);
                     } else {
-                        cond_stack[last_idx].active = false;
+                        cond_stack[last_idx] = CppCondFrame::make_inactive(p_act, had_tr);
                     }
                 }
                 continue;
@@ -768,13 +769,12 @@ pub fn cpp_process_source(
             if dir_name == "else" {
                 if cond_stack.len() > 0 {
                     let last_idx = cond_stack.len() - 1;
-                    let p_act = cond_stack[last_idx].parent_active;
-                    let had_true = cond_stack[last_idx].had_true;
-                    if p_act && !had_true {
-                        cond_stack[last_idx].active = true;
-                        cond_stack[last_idx].had_true = true;
+                    let p_act = cond_stack[last_idx].is_parent_active();
+                    let had_tr = cond_stack[last_idx].had_true();
+                    if p_act && !had_tr {
+                        cond_stack[last_idx] = CppCondFrame::make_active(p_act);
                     } else {
-                        cond_stack[last_idx].active = false;
+                        cond_stack[last_idx] = CppCondFrame::make_inactive(p_act, had_tr);
                     }
                 }
                 continue;
@@ -790,7 +790,7 @@ pub fn cpp_process_source(
             // Check if current block is active before processing non-branching directives
             var is_cur_active = true;
             if cond_stack.len() > 0 {
-                is_cur_active = cond_stack[cond_stack.len() - 1].active;
+                is_cur_active = cond_stack[cond_stack.len() - 1].is_active();
             }
             if !is_cur_active {
                 continue;
@@ -890,7 +890,7 @@ pub fn cpp_process_source(
         // Check if current block is active for normal source line
         var is_active = true;
         if cond_stack.len() > 0 {
-            is_active = cond_stack[cond_stack.len() - 1].active;
+            is_active = cond_stack[cond_stack.len() - 1].is_active();
         }
 
         if is_active {

@@ -155,6 +155,13 @@ pub struct ForeignHandle<T: IAnyValue> : IObject {
         };
     }
 
+    pub static fn try_wrap(p: i64, dtor: i64) -> opt<ForeignHandle<T>> {
+        if p == 0 {
+            return opt<ForeignHandle<T>>::none();
+        }
+        return opt<ForeignHandle<T>>::some(ForeignHandle<T>::wrap(p, dtor));
+    }
+
     pub static fn wrap_thread_affine(p: i64, dtor: i64, owner_tid: u64) -> ForeignHandle<T> {
         let armed = p != 0;
         return ForeignHandle {
@@ -172,6 +179,14 @@ pub struct ForeignHandle<T: IAnyValue> : IObject {
         .is_armed = false;
         .raw_ptr = 0;
         return p;
+    }
+
+    pub var fn try_take_raw() -> opt<i64> {
+        if .raw_ptr == 0 || !.is_armed {
+            return opt<i64>::none();
+        }
+        let p = .take_raw();
+        return opt<i64>::some(p);
     }
 
     pub pure fn is_valid() -> bool => .is_armed && .raw_ptr != 0;

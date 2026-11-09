@@ -242,25 +242,26 @@ pub struct CallingConvRegistryEntry : IValue {
     pub description: str;
 }
 
+pub pure fn calling_conv_table() -> slice<CallingConvRegistryEntry> => [
+    CallingConvRegistryEntry { conv_id: "sysv_x64",     arch: "x86_64",  description: "AMD64 System V ABI (Linux, BSD, macOS x64)" },
+    CallingConvRegistryEntry { conv_id: "win64",        arch: "x86_64",  description: "Microsoft x64 ABI (Windows 64-bit)" },
+    CallingConvRegistryEntry { conv_id: "aapcs64",      arch: "aarch64", description: "ARM64 AAPCS64 (Linux ARM64, Android)" },
+    CallingConvRegistryEntry { conv_id: "darwin_arm64", arch: "aarch64", description: "Apple Darwin ARM64 (macOS, iOS Apple Silicon)" },
+    CallingConvRegistryEntry { conv_id: "riscv64",      arch: "riscv64", description: "RISC-V LP64D ABI (64-bit RISC-V)" },
+    CallingConvRegistryEntry { conv_id: "wasm32",       arch: "wasm32",  description: "WebAssembly 32-bit C-ABI with shadow stack" },
+];
+
 pub pure fn calling_conv_get(index: usize) -> CallingConvRegistryEntry {
-    if index == 0 { return CallingConvRegistryEntry { conv_id: "sysv_x64",     arch: "x86_64",  description: "AMD64 System V ABI (Linux, BSD, macOS x64)" }; }
-    if index == 1 { return CallingConvRegistryEntry { conv_id: "win64",        arch: "x86_64",  description: "Microsoft x64 ABI (Windows 64-bit)" }; }
-    if index == 2 { return CallingConvRegistryEntry { conv_id: "aapcs64",      arch: "aarch64", description: "ARM64 AAPCS64 (Linux ARM64, Android)" }; }
-    if index == 3 { return CallingConvRegistryEntry { conv_id: "darwin_arm64", arch: "aarch64", description: "Apple Darwin ARM64 (macOS, iOS Apple Silicon)" }; }
-    if index == 4 { return CallingConvRegistryEntry { conv_id: "riscv64",      arch: "riscv64", description: "RISC-V LP64D ABI (64-bit RISC-V)" }; }
-    return CallingConvRegistryEntry { conv_id: "wasm32", arch: "wasm32", description: "WebAssembly 32-bit C-ABI with shadow stack" };
+    let tbl = calling_conv_table();
+    if index < tbl.len() {
+        return tbl[index];
+    }
+    return CallingConvRegistryEntry { conv_id: "", arch: "", description: "" };
 }
 
 pub pure fn calling_conv_count() -> usize {
-    var c: usize = 0;
-    loop {
-        let e = calling_conv_get(c);
-        c = c + 1;
-        if e.conv_id == "wasm32" {
-            break;
-        }
-    }
-    return c;
+    let tbl = calling_conv_table();
+    return tbl.len();
 }
 
 pub pure fn classify_call_frame(
@@ -284,7 +285,29 @@ pub pure fn classify_call_frame(
     if conv == "wasm32" {
         return pilot.abi.riscv_wasm.Wasm32ConvClassifier::classify(params, ret, variadic_fixed_count);
     }
-    return pilot.abi.sysv_x64.SysVConvClassifier::classify(params, ret, variadic_fixed_count);
+    if conv == "sysv_x64" || conv == "sysv" || conv == "cdecl" || conv == "default" {
+        return pilot.abi.sysv_x64.SysVConvClassifier::classify(params, ret, variadic_fixed_count);
+    }
+    return AbiFramePlan {
+        conv_id: "unsupported",
+        sret_uses_gpr0: false,
+        ret_loc: ArgLocation::void_loc(),
+        param_locs: [],
+        aligned_stack_bytes: 0,
+    };
+}
+
+pub pure fn classify_call_frame_checked(
+    conv: str,
+    params: slice<TypeLayout>,
+    ret: ref<TypeLayout>,
+    variadic_fixed_count: opt<usize>
+) -> res<AbiFramePlan, AbiDiagnostic> {
+    let plan = classify_call_frame(conv, params, ret, variadic_fixed_count);
+    if plan.conv_id == "unsupported" {
+        return res<AbiFramePlan, AbiDiagnostic>.err(AbiDiagnostic::unsupported_conv(conv, "unknown"));
+    }
+    return res<AbiFramePlan, AbiDiagnostic>.ok(plan);
 }
 
 pub fn invoke_dynamic_frame(
@@ -294,6 +317,9 @@ pub fn invoke_dynamic_frame(
 ) -> res<u64, AbiDiagnostic> {
     if fn_addr == null {
         return res<u64, AbiDiagnostic>.err(AbiDiagnostic::symbol_not_found("dynamic_symbol", plan.conv_id));
+    }
+    if plan.conv_id == "unsupported" || plan.conv_id == "" {
+        return res<u64, AbiDiagnostic>.err(AbiDiagnostic::unsupported_conv(plan.conv_id, "unknown"));
     }
     var v_count: u8 = 0;
     var i: usize = 0;
@@ -306,8 +332,12 @@ pub fn invoke_dynamic_frame(
         i = i + 1;
     }
     packet.vec_reg_count = v_count;
-    let g0 = packet.get_gpr(0);
-    return res<u64, AbiDiagnostic>.ok(g0);
+    let inv_res = __engine("invoke_abi_frame", fn_addr, packet.get_gpr(0), packet.get_gpr(1), packet.get_gpr(2), packet.get_gpr(3), packet.get_gpr(4), packet.get_gpr(5), packet.vec_reg_count);
+    var ret_val: u64 = packet.get_gpr(0);
+    if inv_res != 0 {
+        ret_val = inv_res as u64;
+    }
+    return res<u64, AbiDiagnostic>.ok(ret_val);
 }
 
 [Layout(c_abi)]

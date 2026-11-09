@@ -50,7 +50,8 @@ pub pure fn c_bitfield_spec_none() -> CBitfieldSpec {
     };
 }
 
-pub struct CFieldDecl : IObject {
+[Layout(c_abi)]
+pub struct CFieldDecl : IValue {
     pub name:         str;
     pub type_name:    str;
     pub byte_offset:  usize;
@@ -77,11 +78,55 @@ pub pure fn c_field_decl_new(
 
 pub struct CRecordDecl : IObject {
     pub name:                    str;
+    pub flags:                   u8; // Bitflags (Rule 5): bit 0 = is_union, bit 1 = is_opaque, bit 2 = has_flexible_array_tail
     pub is_union:                bool;
     pub is_opaque:               bool;
     pub pack_align:              u8;
     pub has_flexible_array_tail: bool;
     pub fields:                  List<CFieldDecl>;
+
+    pub static pure fn create(
+        name: str,
+        is_u: bool,
+        is_op: bool,
+        align: u8,
+        has_flex: bool,
+        fields: List<CFieldDecl>
+    ) -> CRecordDecl {
+        var f: u8 = 0;
+        if is_u { f = f | 1; }
+        if is_op { f = f | 2; }
+        if has_flex { f = f | 4; }
+        return CRecordDecl {
+            name:                    name,
+            flags:                   f,
+            is_union:                is_u,
+            is_opaque:               is_op,
+            pack_align:              align,
+            has_flexible_array_tail: has_flex,
+            fields:                  fields,
+        };
+    }
+
+    pub pure fn is_union_flag(ref self) -> bool => (.flags & 1) != 0;
+    pub pure fn is_opaque_flag(ref self) -> bool => (.flags & 2) != 0;
+    pub pure fn has_flexible_tail_flag(ref self) -> bool => (.flags & 4) != 0;
+}
+
+pub enum CCallingConv : u8 {
+    ::Cdecl    = 0,
+    ::Stdcall  = 1,
+    ::Fastcall = 2,
+    ::SysV     = 3,
+    ::Win64    = 4,
+}
+
+pub pure fn c_parse_calling_conv(s: str) -> CCallingConv {
+    if s == "__stdcall" || s == "stdcall" { return CCallingConv::Stdcall; }
+    if s == "__fastcall" || s == "fastcall" { return CCallingConv::Fastcall; }
+    if s == "sysv" || s == "sysv_x64" { return CCallingConv::SysV; }
+    if s == "win64" || s == "msvc" { return CCallingConv::Win64; }
+    return CCallingConv::Cdecl;
 }
 
 [Layout(c_abi)]
@@ -91,12 +136,13 @@ pub struct CParamDecl : IValue {
 }
 
 pub struct CFnDecl : IObject {
-    pub name:         str;
-    pub return_type:  str;
-    pub calling_conv: str;
-    pub is_variadic:  bool;
-    pub is_inline:    bool;
-    pub params:       List<CParamDecl>;
+    pub name:              str;
+    pub return_type:       str;
+    pub calling_conv:      str;
+    pub calling_conv_kind: CCallingConv;
+    pub is_variadic:       bool;
+    pub is_inline:         bool;
+    pub params:            List<CParamDecl>;
 }
 
 pub fn c_fn_decl_new(
@@ -107,13 +153,15 @@ pub fn c_fn_decl_new(
     is_inl: bool,
     params: List<CParamDecl>
 ) -> CFnDecl {
+    let conv_kind = c_parse_calling_conv(calling_conv);
     return CFnDecl {
-        name:         name,
-        return_type:  ret_ty,
-        calling_conv: calling_conv,
-        is_variadic:  is_var,
-        is_inline:    is_inl,
-        params:       params,
+        name:              name,
+        return_type:       ret_ty,
+        calling_conv:      calling_conv,
+        calling_conv_kind: conv_kind,
+        is_variadic:       is_var,
+        is_inline:         is_inl,
+        params:            params,
     };
 }
 
@@ -167,7 +215,7 @@ pub fn c_translation_unit_new(header: str) -> CTranslationUnit {
 // 3. Name-Blind Type Physics & Layout Calculator
 // ------------------------------------------------------------------------------
 
-pub pure fn c_type_size(ty: str) -> usize {
+pub pure fn c_type_size_target(ty: str, is_win64: bool) -> usize {
     if ty == "signed char" || ty == "unsigned char" || ty == "int8_t" || ty == "uint8_t" || ty == "_Bool" || (ty.len() == 4 && ty.byte_at(0) == 99 && ty.byte_at(1) == 104) || (ty.len() == 4 && ty.byte_at(0) == 98 && ty.byte_at(1) == 111) {
         return 1;
     }
@@ -177,7 +225,11 @@ pub pure fn c_type_size(ty: str) -> usize {
     if ty == "int" || ty == "int32_t" || ty == "uint32_t" || ty == "float" {
         return 4;
     }
-    if ty == "long" || ty == "long long" || ty == "int64_t" || ty == "uint64_t" || ty == "double" || ty == "size_t" || ty == "ssize_t" || ty == "intptr_t" || ty == "uintptr_t" {
+    if ty == "long" {
+        if is_win64 { return 4; }
+        return 8;
+    }
+    if ty == "long long" || ty == "int64_t" || ty == "uint64_t" || ty == "double" || ty == "size_t" || ty == "ssize_t" || ty == "intptr_t" || ty == "uintptr_t" {
         return 8;
     }
     // Pointer types
@@ -186,6 +238,8 @@ pub pure fn c_type_size(ty: str) -> usize {
     }
     return 8;
 }
+
+pub pure fn c_type_size(ty: str) -> usize => c_type_size_target(ty, false);
 
 pub pure fn c_type_align(ty: str) -> usize => c_type_size(ty);
 
@@ -300,14 +354,7 @@ pub fn c_parse_translation_unit(
 
             // Opaque struct: e.g. "struct sqlite3;" or "typedef struct sqlite3 sqlite3;"
             if pos < n && src.byte_at(pos) == 59 { // ';'
-                var rec = CRecordDecl {
-                    name:                    tag_name,
-                    is_union:                is_union,
-                    is_opaque:               true,
-                    pack_align:              current_pack_align,
-                    has_flexible_array_tail: false,
-                    fields:                  [],
-                };
+                var rec = CRecordDecl::create(tag_name, is_union, true, current_pack_align, false, []);
                 tu.records.push(rec);
                 pos = pos + 1;
                 continue;
@@ -318,14 +365,7 @@ pub fn c_parse_translation_unit(
                 let alias = c_read_word(src, pos);
                 pos = c_skip_whitespace_and_comments(src, pos + alias.len());
                 if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
-                var rec = CRecordDecl {
-                    name:                    if alias.len() > 0 { alias } else { tag_name },
-                    is_union:                is_union,
-                    is_opaque:               true,
-                    pack_align:              current_pack_align,
-                    has_flexible_array_tail: false,
-                    fields:                  [],
-                };
+                var rec = CRecordDecl::create(if alias.len() > 0 { alias } else { tag_name }, is_union, true, current_pack_align, false, []);
                 tu.records.push(rec);
                 continue;
             }
@@ -507,14 +547,7 @@ pub fn c_parse_translation_unit(
 
                 var final_name = tag_name;
                 if alias_name.len() > 0 { final_name = alias_name; }
-                var rec = CRecordDecl {
-                    name:                    final_name,
-                    is_union:                is_union,
-                    is_opaque:               false,
-                    pack_align:              current_pack_align,
-                    has_flexible_array_tail: has_flex,
-                    fields:                  rec_fields,
-                };
+                var rec = CRecordDecl::create(final_name, is_union, false, current_pack_align, has_flex, rec_fields);
                 tu.records.push(rec);
                 continue;
             }
@@ -708,4 +741,28 @@ pub fn c_parse_translation_unit(
     }
 
     return tu;
+}
+
+// ------------------------------------------------------------------------------
+// 6. Top-Level Header Semantic Absorber Entry Point
+// ------------------------------------------------------------------------------
+
+pub fn absorb_c_header(
+    source: str,
+    header_path: str,
+    search_dirs: slice<str>,
+    diags: var ref<List<Diagnostic>>
+) -> CTranslationUnit {
+    var env = Pilot.SelfHost.Adapter.CPp.cpp_env_new();
+    let preprocessed = Pilot.SelfHost.Adapter.CPp.preprocess_c_header(source, header_path, search_dirs, var env);
+    return c_parse_translation_unit(preprocessed, header_path, var diags);
+}
+
+pub fn absorb_c_header_file(
+    header_path: str,
+    search_dirs: slice<str>,
+    diags: var ref<List<Diagnostic>>
+) -> CTranslationUnit {
+    let src = Pilot.Core.File.File::read_all_text(header_path);
+    return absorb_c_header(src, header_path, search_dirs, var diags);
 }

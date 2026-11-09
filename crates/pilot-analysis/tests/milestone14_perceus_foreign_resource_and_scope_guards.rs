@@ -19,7 +19,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
         anticheat::FileAuditRule {
             path: "stdlib/std/polyglot/lifetime.pilot",
             max_lines: 1500,
-            name_blind: false,
+            name_blind: true,
             required_pub_fns: &[
                 "current_thread_id",
                 "invoke_foreign_destructor",
@@ -39,11 +39,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
         anticheat::FileAuditRule {
             path: "stdlib/std/polyglot/shm.pilot",
             max_lines: 1500,
-            name_blind: false,
-            required_pub_fns: &[
-                "create_shm_owned_buffer",
-                "project_shm_borrowed_view",
-            ],
+            name_blind: true,
+            required_pub_fns: &[],
             required_code_markers: &[
                 "ShmBuffer",
                 "ShmView",

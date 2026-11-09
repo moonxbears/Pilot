@@ -81,51 +81,47 @@ impl Drop for DynamicLibraryHandle {
 #[cfg(all(target_arch = "x86_64", unix))]
 #[unsafe(naked)]
 #[no_mangle]
-pub unsafe extern "C" fn pilot_rt_invoke_abi_frame(
-    fn_ptr: *const (),
-    gpr_buf: *const u64,
-    xmm_buf: *const f64,
-    stack_buf: *const u8,
-    stack_len: usize,
-    ret_buf: *mut u64,
-) {
+pub unsafe extern "C" fn pilot_rt_invoke_abi_frame(fn_ptr: *const (), gpr_buf: *const u64, xmm_buf: *const f64, stack_buf: *const u8, stack_len: usize, ret_buf: *mut u64) {
     std::arch::naked_asm!(
         "push rbp", "mov rbp, rsp", "push rbx", "push r12", "push r13", "push r14", "push r15", "sub rsp, 8",
-        "mov r12, rdi", "mov r13, rsi", "mov r14, rdx", "mov r15, r9",
-        "test r8, r8", "jz 1f",
-        "mov rax, r8", "add rax, 15", "and rax, -16", "sub rsp, rax",
-        "mov rdi, rsp", "mov rsi, rcx", "mov rcx, r8", "rep movsb",
+        "mov r12, rdi", "mov r13, rsi", "mov r14, rdx", "mov r15, r9", "test r8, r8", "jz 1f",
+        "mov rax, r8", "add rax, 15", "and rax, -16", "sub rsp, rax", "mov rdi, rsp", "mov rsi, rcx", "mov rcx, r8", "rep movsb",
         "1:", "test r14, r14", "jz 2f",
-        "movsd xmm0, qword ptr [r14]", "movsd xmm1, qword ptr [r14 + 8]", "movsd xmm2, qword ptr [r14 + 16]",
-        "movsd xmm3, qword ptr [r14 + 24]", "movsd xmm4, qword ptr [r14 + 32]", "movsd xmm5, qword ptr [r14 + 40]",
-        "movsd xmm6, qword ptr [r14 + 48]", "movsd xmm7, qword ptr [r14 + 56]",
+        "movsd xmm0, qword ptr [r14]", "movsd xmm1, qword ptr [r14 + 8]", "movsd xmm2, qword ptr [r14 + 16]", "movsd xmm3, qword ptr [r14 + 24]",
+        "movsd xmm4, qword ptr [r14 + 32]", "movsd xmm5, qword ptr [r14 + 40]", "movsd xmm6, qword ptr [r14 + 48]", "movsd xmm7, qword ptr [r14 + 56]",
         "2:", "test r13, r13", "jz 3f",
-        "mov rdi, qword ptr [r13]", "mov rsi, qword ptr [r13 + 8]", "mov rdx, qword ptr [r13 + 16]",
-        "mov rcx, qword ptr [r13 + 24]", "mov r8,  qword ptr [r13 + 32]", "mov r9,  qword ptr [r13 + 40]",
-        "mov rax, qword ptr [r13 + 48]",
-        "3:", "call r12",
-        "test r15, r15", "jz 4f",
-        "mov qword ptr [r15], rax", "mov qword ptr [r15 + 8], rdx",
-        "movsd qword ptr [r15 + 16], xmm0", "movsd qword ptr [r15 + 24], xmm1",
+        "mov rdi, qword ptr [r13]", "mov rsi, qword ptr [r13 + 8]", "mov rdx, qword ptr [r13 + 16]", "mov rcx, qword ptr [r13 + 24]", "mov r8,  qword ptr [r13 + 32]", "mov r9,  qword ptr [r13 + 40]", "mov rax, qword ptr [r13 + 48]",
+        "3:", "call r12", "test r15, r15", "jz 4f",
+        "mov qword ptr [r15], rax", "mov qword ptr [r15 + 8], rdx", "movsd qword ptr [r15 + 16], xmm0", "movsd qword ptr [r15 + 24], xmm1",
         "4:", "lea rsp, [rbp - 40]", "pop r15", "pop r14", "pop r13", "pop r12", "pop rbx", "pop rbp", "ret"
     );
 }
 
-#[cfg(not(all(target_arch = "x86_64", unix)))]
+#[cfg(all(target_arch = "x86_64", windows))]
+#[unsafe(naked)]
 #[no_mangle]
-pub unsafe extern "C" fn pilot_rt_invoke_abi_frame(
-    fn_ptr: *const (), gpr_buf: *const u64, _xmm_buf: *const f64, _stack_buf: *const u8, _stack_len: usize, ret_buf: *mut u64,
-) {
+pub unsafe extern "C" fn pilot_rt_invoke_abi_frame(fn_ptr: *const (), gpr_buf: *const u64, xmm_buf: *const f64, stack_buf: *const u8, stack_len: usize, ret_buf: *mut u64) {
+    std::arch::naked_asm!(
+        "push rbp", "mov rbp, rsp", "push rbx", "push rsi", "push rdi", "push r12", "push r13", "push r14", "push r15",
+        "mov r12, rcx", "mov r13, rdx", "mov r14, r8", "mov rbx, r9", "mov rsi, qword ptr [rbp + 48]", "mov r15, qword ptr [rbp + 56]",
+        "mov rax, rsi", "add rax, 47", "and rax, -16", "sub rsp, rax", "test rsi, rsi", "jz 1f",
+        "lea rdi, [rsp + 32]", "mov rcx, rsi", "mov rsi, rbx", "rep movsb",
+        "1:", "test r14, r14", "jz 2f",
+        "movsd xmm0, qword ptr [r14]", "movsd xmm1, qword ptr [r14 + 8]", "movsd xmm2, qword ptr [r14 + 16]", "movsd xmm3, qword ptr [r14 + 24]",
+        "2:", "test r13, r13", "jz 3f",
+        "mov rcx, qword ptr [r13]", "mov rdx, qword ptr [r13 + 8]", "mov r8,  qword ptr [r13 + 16]", "mov r9,  qword ptr [r13 + 24]",
+        "3:", "call r12", "test r15, r15", "jz 4f",
+        "mov qword ptr [r15], rax", "movsd qword ptr [r15 + 8], xmm0",
+        "4:", "lea rsp, [rbp - 56]", "pop r15", "pop r14", "pop r13", "pop r12", "pop rdi", "pop rsi", "pop rbx", "pop rbp", "ret"
+    );
+}
+
+#[cfg(not(any(all(target_arch = "x86_64", unix), all(target_arch = "x86_64", windows))))]
+#[no_mangle]
+pub unsafe extern "C" fn pilot_rt_invoke_abi_frame(fn_ptr: *const (), gpr_buf: *const u64, _xmm_buf: *const f64, _stack_buf: *const u8, _stack_len: usize, ret_buf: *mut u64) {
     if fn_ptr.is_null() { return; }
     let f: extern "C" fn(u64, u64, u64, u64, u64, u64) -> u64 = std::mem::transmute(fn_ptr);
-    let r = f(
-        if !gpr_buf.is_null() { *gpr_buf } else { 0 },
-        if !gpr_buf.is_null() { *gpr_buf.add(1) } else { 0 },
-        if !gpr_buf.is_null() { *gpr_buf.add(2) } else { 0 },
-        if !gpr_buf.is_null() { *gpr_buf.add(3) } else { 0 },
-        if !gpr_buf.is_null() { *gpr_buf.add(4) } else { 0 },
-        if !gpr_buf.is_null() { *gpr_buf.add(5) } else { 0 },
-    );
+    let r = f(if !gpr_buf.is_null() { *gpr_buf } else { 0 }, if !gpr_buf.is_null() { *gpr_buf.add(1) } else { 0 }, if !gpr_buf.is_null() { *gpr_buf.add(2) } else { 0 }, if !gpr_buf.is_null() { *gpr_buf.add(3) } else { 0 }, if !gpr_buf.is_null() { *gpr_buf.add(4) } else { 0 }, if !gpr_buf.is_null() { *gpr_buf.add(5) } else { 0 });
     if !ret_buf.is_null() { *ret_buf = r; }
 }
 
