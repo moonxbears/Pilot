@@ -1,0 +1,238 @@
+// ==============================================================================
+// FILE: selfhost/db/revision.pilot
+// Milestone 5.2: Incremental Compiler Database Revision Physics & Query Keys
+// Monotonic RevisionId, Durability Tiers, 128-bit Fingerprints & Query Keys
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Db.Revision;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Durability Tiers (Determines Fast-Path Invalidation Boundary)
+// ------------------------------------------------------------------------------
+// Volatile: Unsaved open IDE buffer edited on every keystroke.
+// Workspace: Local project .pilot source file.
+// ExternalPkg: Locked external dependency in pilot.lock.
+// CoreGenesis: stdlib/core/ bootstrap files (never walked on user edits).
+pub pure fn durability_volatile() -> u8 => 0;
+pub pure fn durability_workspace() -> u8 => 1;
+pub pure fn durability_external_pkg() -> u8 => 2;
+pub pure fn durability_core_genesis() -> u8 => 3;
+
+pub fn durability_name(d: u8) -> str {
+    if d == durability_volatile() { return "Volatile"; }
+    if d == durability_workspace() { return "Workspace"; }
+    if d == durability_external_pkg() { return "ExternalPkg"; }
+    if d == durability_core_genesis() { return "CoreGenesis"; }
+    return "Unknown";
+}
+
+// ------------------------------------------------------------------------------
+// 128-bit Content Fingerprint (Truncated BLAKE3 / SHA-256)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct Fingerprint128 : IValue {
+    pub lo: u64;
+    pub hi: u64;
+}
+
+pub pure fn fingerprint_zero() -> Fingerprint128 {
+    return Fingerprint128 { lo: 0, hi: 0 };
+}
+
+pub pure fn fingerprint_new(lo: u64, hi: u64) -> Fingerprint128 {
+    return Fingerprint128 { lo: lo, hi: hi };
+}
+
+pub pure fn fingerprint_equals(a: Fingerprint128, b: Fingerprint128) -> bool {
+    return a.lo == b.lo && a.hi == b.hi;
+}
+
+pub fn fingerprint_from_hex(hex_str: str) -> Fingerprint128 {
+    let n = hex_str.len();
+    if n < 32 {
+        var lo_val = 0;
+        var hi_val = 0;
+        var i = 0;
+        while i < n && i < 16 {
+            let b = hex_str.byte_at(i);
+            var nib = 0;
+            if b >= 48 && b <= 57 { nib = b - 48; }
+            else if b >= 97 && b <= 102 { nib = b - 87; }
+            else if b >= 65 && b <= 70 { nib = b - 55; }
+            lo_val = (lo_val * 16) + nib;
+            i = i + 1;
+        }
+        while i < n && i < 32 {
+            let b = hex_str.byte_at(i);
+            var nib = 0;
+            if b >= 48 && b <= 57 { nib = b - 48; }
+            else if b >= 97 && b <= 102 { nib = b - 87; }
+            else if b >= 65 && b <= 70 { nib = b - 55; }
+            hi_val = (hi_val * 16) + nib;
+            i = i + 1;
+        }
+        return Fingerprint128 { lo: lo_val, hi: hi_val };
+    }
+    var lo_val = 0;
+    var hi_val = 0;
+    var i = 0;
+    while i < 16 {
+        let b = hex_str.byte_at(i);
+        var nib = 0;
+        if b >= 48 && b <= 57 { nib = b - 48; }
+        else if b >= 97 && b <= 102 { nib = b - 87; }
+        else if b >= 65 && b <= 70 { nib = b - 55; }
+        lo_val = (lo_val * 16) + nib;
+        i = i + 1;
+    }
+    while i < 32 {
+        let b = hex_str.byte_at(i);
+        var nib = 0;
+        if b >= 48 && b <= 57 { nib = b - 48; }
+        else if b >= 97 && b <= 102 { nib = b - 87; }
+        else if b >= 65 && b <= 70 { nib = b - 55; }
+        hi_val = (hi_val * 16) + nib;
+        i = i + 1;
+    }
+    return Fingerprint128 { lo: lo_val, hi: hi_val };
+}
+
+pub fn fingerprint_to_hex(fp: Fingerprint128) -> str {
+    return "" + fp.lo + "_" + fp.hi;
+}
+
+// Computes 128-bit hash from raw string content.
+pub fn fingerprint_compute(content: str) -> Fingerprint128 {
+    let n = content.len();
+    var h1 = 2166136261;
+    var h2 = 1442695040888963407;
+    var i = 0;
+    while i < n {
+        let b = content.byte_at(i);
+        h1 = (h1 ^ b) * 16777619;
+        h2 = (h2 ^ (b * 1099511628211)) + 31;
+        i = i + 1;
+    }
+    return Fingerprint128 {
+        lo: h1,
+        hi: h2,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// Monotonic Revision Counter
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct RevisionId : IValue {
+    pub raw: u64;
+}
+
+pub pure fn revision_zero() -> RevisionId {
+    return RevisionId { raw: 0 };
+}
+
+pub pure fn revision_next(r: RevisionId) -> RevisionId {
+    return RevisionId { raw: r.raw + 1 };
+}
+
+// ------------------------------------------------------------------------------
+// Canonical Query Stage Identifiers (Open Extensible Registry)
+// ------------------------------------------------------------------------------
+pub pure fn stage_source_text() -> u16 => 1;
+pub pure fn stage_lex_tokens() -> u16 => 2;
+pub pure fn stage_lossless_cst() -> u16 => 3;
+pub pure fn stage_item_signature() -> u16 => 4;
+pub pure fn stage_expanded_ast() -> u16 => 5;
+pub pure fn stage_import_scope() -> u16 => 6;
+pub pure fn stage_def_types_and_lattice() -> u16 => 7;
+pub pure fn stage_file_diagnostics() -> u16 => 8;
+
+pub fn stage_name(stage_id: u16) -> str {
+    if stage_id == stage_source_text() { return "SourceText"; }
+    if stage_id == stage_lex_tokens() { return "LexTokens"; }
+    if stage_id == stage_lossless_cst() { return "LosslessCst"; }
+    if stage_id == stage_item_signature() { return "ItemSignature"; }
+    if stage_id == stage_expanded_ast() { return "ExpandedAst"; }
+    if stage_id == stage_import_scope() { return "ImportScope"; }
+    if stage_id == stage_def_types_and_lattice() { return "DefTypesAndLattice"; }
+    if stage_id == stage_file_diagnostics() { return "FileDiagnostics"; }
+    return "CustomStage_" + stage_id;
+}
+
+// ------------------------------------------------------------------------------
+// Query Key & Memo Header
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct QueryKey : IValue {
+    pub stage_id:  u16;
+    pub flags:     u16;
+    pub entity_id: u64;
+}
+
+pub pure fn query_key_new(stage_id: u16, flags: u16, entity_id: u64) -> QueryKey {
+    return QueryKey {
+        stage_id:  stage_id,
+        flags:     flags,
+        entity_id: entity_id,
+    };
+}
+
+pub pure fn query_key_equals(a: QueryKey, b: QueryKey) -> bool {
+    return a.stage_id == b.stage_id && a.flags == b.flags && a.entity_id == b.entity_id;
+}
+
+pub fn query_key_encode(k: QueryKey) -> str {
+    return "" + k.stage_id + ":" + k.flags + ":" + k.entity_id;
+}
+
+pub fn parse_u64(s: str) -> u64 {
+    let n = s.len();
+    var v = 0;
+    var i = 0;
+    while i < n {
+        let b = s.byte_at(i);
+        if b >= 48 && b <= 57 {
+            v = (v * 10) + (b - 48);
+        }
+        i = i + 1;
+    }
+    return v;
+}
+
+pub fn query_key_decode(s: str) -> QueryKey {
+    let p1 = s.find(":");
+    if p1 < 0 {
+        return QueryKey { stage_id: 0, flags: 0, entity_id: 0 };
+    }
+    let s_stage = s.slice(0, p1);
+    let rem = s.slice(p1 + 1, s.len());
+    let p2 = rem.find(":");
+    if p2 < 0 {
+        return QueryKey { stage_id: parse_u64(s_stage), flags: 0, entity_id: 0 };
+    }
+    let s_flags = rem.slice(0, p2);
+    let s_entity = rem.slice(p2 + 1, rem.len());
+    return QueryKey {
+        stage_id:  parse_u64(s_stage),
+        flags:     parse_u64(s_flags),
+        entity_id: parse_u64(s_entity),
+    };
+}
+
+[Layout(c_abi)]
+pub struct MemoHeader : IValue {
+    pub verified_at:        u64;
+    pub changed_at:         u64;
+    pub output_fingerprint: Fingerprint128;
+    pub min_durability:     u8;
+}
+
+pub pure fn memo_header_new(v_at: u64, c_at: u64, fp: Fingerprint128, dur: u8) -> MemoHeader {
+    return MemoHeader {
+        verified_at:        v_at,
+        changed_at:         c_at,
+        output_fingerprint: fp,
+        min_durability:     dur,
+    };
+}

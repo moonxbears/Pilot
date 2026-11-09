@@ -36,6 +36,9 @@ mod m03;
 #[path = "milestone04_dual_syntax_pairings_and_bidirectional_formatter.rs"]
 mod m04;
 
+#[path = "milestone05_shared_incremental_compiler_query_database.rs"]
+mod m05;
+
 #[path = "milestone50_lossless_bridge_and_reflection.rs"]
 mod m50;
 
@@ -141,6 +144,10 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m04::test_m4_2_dual_syntax_equivalence_and_identical_codegen();
             m04::test_m4_3_bidirectional_formatter_styles();
             m04::test_m4_4_universal_rename_litmus_and_ide_reflection();
+            m05::test_m5_1_early_cutoff_counter_proof();
+            m05::test_m5_2_signature_change_propagation_proof();
+            m05::test_m5_3_identical_cold_vs_incremental_oracle();
+            m05::test_m5_4_multiplatform_uri_normalization_and_persistent_cache_io();
         });
         s.spawn(|| {
             m50::test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts();

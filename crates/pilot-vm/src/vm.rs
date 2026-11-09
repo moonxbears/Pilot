@@ -114,8 +114,8 @@ impl PilVirtualMachine {
                                 let slice_fn = |s: &str| { let (mut a, mut b) = ((args[1].as_int().unwrap_or(0).max(0) as usize).min(s.len()), (args[2].as_int().unwrap_or(0).max(0) as usize).min(s.len())); while !s.is_char_boundary(a) && a < s.len() { a += 1; } while !s.is_char_boundary(b) && b < s.len() { b += 1; } PilotVal::from_str(&s[a..b.max(a)]) };
                                 if args[0].is_null() { PilotVal::from_str("") } else { args[0].with_str(slice_fn).unwrap_or_else(|| slice_fn(&args[0].to_string_repr())) }
                             }
-                            "str_find" if args.len() >= 3 => {
-                                let st = args[2].as_int().unwrap_or(0);
+                            "str_find" if args.len() >= 2 => {
+                                let st = if args.len() >= 3 { args[2].as_int().unwrap_or(0) } else { 0 };
                                 if st < 0 || args[0].is_null() || args[1].is_null() { PilotVal::from_int(-1) } else { let find_fn = |h: &str, nd: &str| { let mut u = (st as usize).min(h.len()); while !h.is_char_boundary(u) && u < h.len() { u += 1; } h[u..].find(nd).map_or(-1, |o| (u + o) as i64) }; PilotVal::from_int(args[0].with_str(|h| args[1].with_str(|nd| find_fn(h, nd)).unwrap_or_else(|| find_fn(h, &args[1].to_string_repr()))).unwrap_or(-1)) }
                             }
                             "map_new" => { let idx = self.heap_maps.len(); self.heap_maps.push(HashMap::new()); PilotVal::from_int(idx as i64) }

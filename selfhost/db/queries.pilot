@@ -1,0 +1,105 @@
+// ==============================================================================
+// FILE: selfhost/db/queries.pilot
+// Milestone 5.2: The 8 Canonical Incremental Compiler Queries
+// SourceText -> LexTokens -> LosslessCst -> ItemSignature -> ExpandedAst
+//   -> ImportScope -> DefTypesAndLattice -> FileDiagnostics
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Db.Queries;
+
+use Pilot.SelfHost.Db.Revision::*;
+use Pilot.SelfHost.Db.Engine::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// The 8 Canonical Queries
+// ------------------------------------------------------------------------------
+
+pub fn query_source_text(db: i64, file_id: u64) -> str {
+    let k = query_key_new(stage_source_text(), 0, file_id);
+    return pilotdb_query_with_fn(db, k, "SourceText");
+}
+
+pub fn query_lex_tokens(db: i64, file_id: u64) -> str {
+    let k = query_key_new(stage_lex_tokens(), 0, file_id);
+    return pilotdb_query_with_fn(db, k, "LexTokens");
+}
+
+pub fn query_lossless_cst(db: i64, file_id: u64) -> str {
+    let k = query_key_new(stage_lossless_cst(), 0, file_id);
+    return pilotdb_query_with_fn(db, k, "LosslessCst");
+}
+
+pub fn query_item_signature(db: i64, file_id: u64) -> str {
+    let k = query_key_new(stage_item_signature(), 0, file_id);
+    return pilotdb_query_with_fn(db, k, "ItemSignature");
+}
+
+pub fn query_expanded_ast(db: i64, file_id: u64) -> str {
+    let k = query_key_new(stage_expanded_ast(), 0, file_id);
+    return pilotdb_query_with_fn(db, k, "ExpandedAst");
+}
+
+pub fn query_import_scope(db: i64, file_id: u64) -> str {
+    let k = query_key_new(stage_import_scope(), 0, file_id);
+    return pilotdb_query_with_fn(db, k, "ImportScope");
+}
+
+pub fn query_def_types_and_lattice(db: i64, file_id: u64) -> str {
+    let k = query_key_new(stage_def_types_and_lattice(), 0, file_id);
+    return pilotdb_query_with_fn(db, k, "DefTypesAndLattice");
+}
+
+pub fn query_file_diagnostics(db: i64, file_id: u64) -> str {
+    let k = query_key_new(stage_file_diagnostics(), 0, file_id);
+    return pilotdb_query_with_fn(db, k, "FileDiagnostics");
+}
+
+// ------------------------------------------------------------------------------
+// Telemetry Accessors
+// ------------------------------------------------------------------------------
+
+pub fn db_query_exec_count(db: i64, stage_id: u16) -> i64 {
+    return pilotdb_get_exec_count(db, stage_id);
+}
+
+pub fn db_query_hit_count(db: i64, stage_id: u16) -> i64 {
+    return pilotdb_get_hit_count(db, stage_id);
+}
+
+pub fn db_reset_telemetry(db: i64) {
+    pilotdb_reset_telemetry(db);
+}
+
+// ------------------------------------------------------------------------------
+// Synthesis of Multi-Module Dependency Graph for Incremental Testing
+// ------------------------------------------------------------------------------
+
+pub fn setup_module_chain(db: i64, count: i64) {
+    var i = 0;
+    while i < count {
+        let src = "pub fn compute_" + i + "(x: i64) -> i64 { let v = x + 1; return v; }";
+        pilotdb_set_file_source(db, i + 0, src, durability_workspace());
+        if i > 0 {
+            // Module i imports Module i - 1
+            pilotdb_register_module_import(db, i + 0, (i - 1) + 0);
+        }
+        i = i + 1;
+    }
+}
+
+pub fn mutate_fn_body(db: i64, file_id: u64, new_local_var: str) {
+    let old_src = pilotdb_get_file_source(db, file_id);
+    // Preserves signature `pub fn compute_...(...) -> i64`, modifies only body
+    let sig_end = old_src.find("{");
+    if sig_end >= 0 {
+        let sig_part = old_src.slice(0, sig_end + 1);
+        let new_src = sig_part + " let " + new_local_var + " = 42; return " + new_local_var + "; }";
+        pilotdb_set_file_source(db, file_id, new_src, durability_workspace());
+    }
+}
+
+pub fn mutate_fn_signature(db: i64, file_id: u64, new_ret_type: str) {
+    let new_src = "pub fn compute_" + file_id + "(x: i64) -> " + new_ret_type + " { return none; }";
+    pilotdb_set_file_source(db, file_id, new_src, durability_workspace());
+}

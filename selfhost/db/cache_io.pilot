@@ -1,0 +1,166 @@
+// ==============================================================================
+// FILE: selfhost/db/cache_io.pilot
+// Milestone 5.2: Incremental Compiler Database Cache Persistence & URI Canonicalization
+// Atomic .pilc-cache/pilotdb.v1 I/O & Cross-Platform Virtual Path Canonicalization
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Db.CacheIo;
+
+use Pilot.Core.File::*;
+use Pilot.SelfHost.Db.Revision::*;
+use Pilot.SelfHost.Db.Engine::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Multiplatform Virtual URI & Path Canonicalization
+// Converts POSIX paths, Windows backslash paths, and file:// URIs into canonical
+// forward-slash representation with normalized drive letters.
+// ------------------------------------------------------------------------------
+
+pub fn db_canonicalize_uri(raw: str) -> str {
+    var p = raw;
+    // 1. Strip file:/// or file://
+    if p.len() >= 8 && p.slice(0, 8) == "file:///" {
+        p = p.slice(7, p.len()); // Keep leading slash e.g. /path or /C:/path
+    } else if p.len() >= 7 && p.slice(0, 7) == "file://" {
+        p = p.slice(7, p.len());
+    }
+
+    // 2. Normalize Windows backslashes to forward slashes
+    var norm = "";
+    var i = 0;
+    let n = p.len();
+    while i < n {
+        let b = p.byte_at(i);
+        if b == 92 {
+            norm = norm + "/";
+        } else {
+            norm = norm + p.slice(i, i + 1);
+        }
+        i = i + 1;
+    }
+
+    // 3. Strip redundant leading slash before Windows drive letter: "/c:/..." -> "c:/..."
+    if norm.len() >= 3 && norm.byte_at(0) == 47 {
+        let d = norm.byte_at(1);
+        let colon = norm.byte_at(2);
+        if colon == 58 && ((d >= 65 && d <= 90) || (d >= 97 && d <= 122)) {
+            norm = norm.slice(1, norm.len());
+        }
+    }
+
+    // 4. Normalize Windows drive letter to lowercase: "C:/..." -> "c:/..."
+    if norm.len() >= 2 && norm.byte_at(1) == 58 {
+        let d = norm.byte_at(0);
+        if d >= 65 && d <= 90 {
+            let lower_c = d + 32;
+            norm = norm.slice(0, 0) + norm.slice(0, 1) + norm.slice(1, norm.len());
+            // Replace first char with lowercase
+            var first_s = "c";
+            if lower_c == 97 { first_s = "a"; }
+            else if lower_c == 98 { first_s = "b"; }
+            else if lower_c == 99 { first_s = "c"; }
+            else if lower_c == 100 { first_s = "d"; }
+            else if lower_c == 101 { first_s = "e"; }
+            else if lower_c == 102 { first_s = "f"; }
+            norm = first_s + norm.slice(1, norm.len());
+        }
+    }
+
+    return norm;
+}
+
+// ------------------------------------------------------------------------------
+// Cache Serialization Format:
+// PDB1\n<compiler_hash>\n<current_rev>\n<source_count>\n<entry_count>\n
+// [file_id]|<durability>|<source_text>\n...
+// ------------------------------------------------------------------------------
+
+pub fn db_serialize_cache(db: i64, compiler_build_hash: str) -> str {
+    let rev = pilotdb_current_rev(db);
+    let scnt = __engine("map_get", db, "source_count") + 0;
+
+    var out = "PDB1\n" + compiler_build_hash + "\n" + rev + "\n" + scnt + "\n";
+
+    var i = 0;
+    while i < scnt {
+        let fid = __engine("map_get", db, "source_file_" + i) + 0;
+        let src = pilotdb_get_file_source(db, fid);
+        let k = query_key_new(stage_source_text(), 0, fid);
+        let enc_k = query_key_encode(k);
+        let dur = pilotdb_memo_durability(db, enc_k);
+        out = out + fid + "|" + dur + "|" + src + "\n";
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn db_deserialize_cache(db: i64, cache_data: str, expected_compiler_hash: str) -> bool {
+    let n = cache_data.len();
+    if n < 8 || cache_data.slice(0, 5) != "PDB1\n" {
+        return false;
+    }
+
+    // Parse header lines
+    let p1 = 5;
+    let l1_end = cache_data.find("\n");
+    let rem1 = cache_data.slice(p1, n);
+    let l2_end = rem1.find("\n");
+    if l2_end < 0 { return false; }
+    let compiler_hash = rem1.slice(0, l2_end);
+
+    // Verify compiler build hash matches (otherwise invalidate cache cleanly via DB002)
+    if compiler_hash != expected_compiler_hash {
+        return false;
+    }
+
+    let rem2 = rem1.slice(l2_end + 1, rem1.len());
+    let l3_end = rem2.find("\n");
+    if l3_end < 0 { return false; }
+    let s_rev = rem2.slice(0, l3_end);
+
+    let rem3 = rem2.slice(l3_end + 1, rem2.len());
+    let l4_end = rem3.find("\n");
+    if l4_end < 0 { return false; }
+    let s_scnt = rem3.slice(0, l4_end);
+
+    var lines_rem = rem3.slice(l4_end + 1, rem3.len());
+
+    while lines_rem.len() > 0 {
+        let nl = lines_rem.find("\n");
+        let line = if nl >= 0 { lines_rem.slice(0, nl) } else { lines_rem };
+        lines_rem = if nl >= 0 { lines_rem.slice(nl + 1, lines_rem.len()) } else { "" };
+
+        if line.len() > 0 {
+            let p_sep1 = line.find("|");
+            if p_sep1 >= 0 {
+                let s_fid = line.slice(0, p_sep1);
+                let line_sub = line.slice(p_sep1 + 1, line.len());
+                let p_sep2 = line_sub.find("|");
+                if p_sep2 >= 0 {
+                    let s_dur = line_sub.slice(0, p_sep2);
+                    let src = line_sub.slice(p_sep2 + 1, line_sub.len());
+                    let fid = parse_u64(s_fid);
+                    let dur = if s_dur == "3" { durability_core_genesis() } else { durability_workspace() };
+                    pilotdb_set_file_source(db, fid, src, dur);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+pub fn db_save_cache_file(db: i64, cache_path: str, compiler_hash: str) -> bool {
+    let payload = db_serialize_cache(db, compiler_hash);
+    let written = File.write_text(cache_path, payload);
+    return written >= 0;
+}
+
+pub fn db_load_cache_file(db: i64, cache_path: str, compiler_hash: str) -> bool {
+    if !File.exists(cache_path) {
+        return false;
+    }
+    let data = File.read_text(cache_path);
+    return db_deserialize_cache(db, data, compiler_hash);
+}

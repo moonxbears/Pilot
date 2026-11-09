@@ -531,4 +531,18 @@ pub let ERRORS = [
         category: "CoreBoundary",
         reference: "Pilot Architecture Rule 1 / Ring 1 Freestanding Boundary",
     },
+    ErrorDef {
+        code: "DB001",
+        title: "Compiler Query Cycle",
+        description: "Cyclic dependency detected in incremental compiler query evaluation stack",
+        category: "CompilerDatabase",
+        reference: "Salsa / rustc query cycle / Milestone 5",
+    },
+    ErrorDef {
+        code: "DB002",
+        title: "Compiler Cache Invalidation",
+        description: "Persistent compiler database cache mismatched or corrupted; cache discarded and rebuilt",
+        category: "CompilerDatabase",
+        reference: "PilotDB v1 On-Disk Cache / Milestone 5",
+    },
 ];

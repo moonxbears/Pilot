@@ -1,0 +1,499 @@
+// ==============================================================================
+// FILE: selfhost/db/engine.pilot
+// Milestone 5.2: Shared Incremental Compiler Query Database Engine (PilotDb)
+// Salsa-Style Red-Green Memoization, Durability Watermarks & Early Cutoff
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Db.Engine;
+
+use Pilot.SelfHost.Db.Revision::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Query Node & Database Internal Storage
+// ------------------------------------------------------------------------------
+
+pub struct QueryNode : IObject {
+    pub header:       MemoHeader;
+    pub deps:         List<QueryKey>;
+    pub payload:      str;
+    pub payload_slot: usize;
+
+    ~self() {
+    }
+}
+
+pub struct PilotDb : IObject {
+    pub current_rev:          u64;
+    pub durability_watermarks: array<u64, 4>;
+    pub memos:                Map<str, QueryNode>;
+    pub active_query_stack:   List<QueryKey>;
+
+    ~self() {
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Constructor & Low-Level Revision Watermarks
+// ------------------------------------------------------------------------------
+
+pub fn pilotdb_new() -> i64 {
+    let db = __engine("map_new");
+    __engine("map_set", db, "current_rev", 1);
+    __engine("map_set", db, "wm_0", 1); // Volatile
+    __engine("map_set", db, "wm_1", 1); // Workspace
+    __engine("map_set", db, "wm_2", 1); // ExternalPkg
+    __engine("map_set", db, "wm_3", 1); // CoreGenesis
+    __engine("map_set", db, "memo_count", 0);
+    __engine("map_set", db, "stack_len", 0);
+    __engine("map_set", db, "source_count", 0);
+    __engine("map_set", db, "telemetry_total_runs", 0);
+    __engine("map_set", db, "telemetry_total_hits", 0);
+    return db;
+}
+
+pub fn pilotdb_current_rev(db: i64) -> u64 {
+    return __engine("map_get", db, "current_rev") + 0;
+}
+
+pub fn pilotdb_get_durability_watermark(db: i64, dur: u8) -> u64 {
+    return __engine("map_get", db, "wm_" + dur) + 0;
+}
+
+pub fn pilotdb_bump_rev(db: i64, durability: u8) -> u64 {
+    let next_r = pilotdb_current_rev(db) + 1;
+    __engine("map_set", db, "current_rev", next_r);
+    __engine("map_set", db, "wm_" + durability, next_r);
+    return next_r;
+}
+
+// ------------------------------------------------------------------------------
+// Telemetry Counters
+// ------------------------------------------------------------------------------
+
+pub fn pilotdb_record_exec(db: i64, stage_id: u16) {
+    let cur = __engine("map_get", db, "exec_stage_" + stage_id) + 0;
+    __engine("map_set", db, "exec_stage_" + stage_id, cur + 1);
+    let tot = __engine("map_get", db, "telemetry_total_runs") + 0;
+    __engine("map_set", db, "telemetry_total_runs", tot + 1);
+}
+
+pub fn pilotdb_record_hit(db: i64, stage_id: u16) {
+    let cur = __engine("map_get", db, "hit_stage_" + stage_id) + 0;
+    __engine("map_set", db, "hit_stage_" + stage_id, cur + 1);
+    let tot = __engine("map_get", db, "telemetry_total_hits") + 0;
+    __engine("map_set", db, "telemetry_total_hits", tot + 1);
+}
+
+pub fn pilotdb_get_exec_count(db: i64, stage_id: u16) -> i64 {
+    return __engine("map_get", db, "exec_stage_" + stage_id) + 0;
+}
+
+pub fn pilotdb_get_hit_count(db: i64, stage_id: u16) -> i64 {
+    return __engine("map_get", db, "hit_stage_" + stage_id) + 0;
+}
+
+pub fn pilotdb_reset_telemetry(db: i64) {
+    var sid = 1;
+    while sid <= 16 {
+        __engine("map_set", db, "exec_stage_" + sid, 0);
+        __engine("map_set", db, "hit_stage_" + sid, 0);
+        sid = sid + 1;
+    }
+    __engine("map_set", db, "telemetry_total_runs", 0);
+    __engine("map_set", db, "telemetry_total_hits", 0);
+}
+
+// ------------------------------------------------------------------------------
+// Active Query Stack (Cycle Detection & Dependency Recording)
+// ------------------------------------------------------------------------------
+
+pub fn pilotdb_stack_contains(db: i64, enc_key: str) -> bool {
+    let slen = __engine("map_get", db, "stack_len") + 0;
+    var i = 0;
+    while i < slen {
+        let entry = __engine("map_get", db, "stack_" + i);
+        if entry == enc_key {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn pilotdb_stack_push(db: i64, enc_key: str) {
+    let slen = __engine("map_get", db, "stack_len") + 0;
+    __engine("map_set", db, "stack_" + slen, enc_key);
+    __engine("map_set", db, "stack_len", slen + 1);
+}
+
+pub fn pilotdb_stack_pop(db: i64) {
+    let slen = __engine("map_get", db, "stack_len") + 0;
+    if slen > 0 {
+        __engine("map_set", db, "stack_len", slen - 1);
+    }
+}
+
+pub fn pilotdb_record_caller_dependency(db: i64, dep_enc_key: str) {
+    let slen = __engine("map_get", db, "stack_len") + 0;
+    if slen > 0 {
+        // Parent caller is at the top of the stack
+        let parent_key = __engine("map_get", db, "stack_" + (slen - 1));
+        if parent_key != dep_enc_key {
+            let dcnt = __engine("map_get", db, "depcnt_" + parent_key) + 0;
+            var already = false;
+            var i = 0;
+            while i < dcnt {
+                if __engine("map_get", db, "dep_" + parent_key + "_" + i) == dep_enc_key {
+                    already = true;
+                    break;
+                }
+                i = i + 1;
+            }
+            if !already {
+                __engine("map_set", db, "dep_" + parent_key + "_" + dcnt, dep_enc_key);
+                __engine("map_set", db, "depcnt_" + parent_key, dcnt + 1);
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Source File Storage (Stage 1 SourceText)
+// ------------------------------------------------------------------------------
+
+pub fn pilotdb_set_file_source(db: i64, file_id: u64, source: str, durability: u8) {
+    let old_src = __engine("map_get", db, "src_" + file_id);
+    let rev = pilotdb_bump_rev(db, durability);
+
+    let k = query_key_new(stage_source_text(), 0, file_id);
+    let enc_k = query_key_encode(k);
+    let new_fp = fingerprint_compute(source);
+
+    __engine("map_set", db, "src_" + file_id, source);
+    __engine("map_set", db, "memo_exists_" + enc_k, 1);
+    __engine("map_set", db, "memo_payload_" + enc_k, source);
+    __engine("map_set", db, "memo_fp_lo_" + enc_k, new_fp.lo);
+    __engine("map_set", db, "memo_fp_hi_" + enc_k, new_fp.hi);
+    __engine("map_set", db, "memo_dur_" + enc_k, durability);
+    __engine("map_set", db, "memo_vat_" + enc_k, rev);
+    __engine("map_set", db, "memo_cat_" + enc_k, rev);
+    __engine("map_set", db, "depcnt_" + enc_k, 0);
+
+    let scnt = __engine("map_get", db, "source_count") + 0;
+    var found = false;
+    var i = 0;
+    while i < scnt {
+        if __engine("map_get", db, "source_file_" + i) == file_id {
+            found = true;
+            break;
+        }
+        i = i + 1;
+    }
+    if !found {
+        __engine("map_set", db, "source_file_" + scnt, file_id);
+        __engine("map_set", db, "source_count", scnt + 1);
+    }
+}
+
+pub fn pilotdb_register_module_import(db: i64, fid: u64, dep_fid: u64) {
+    let cnt = __engine("map_get", db, "file_import_count_" + fid) + 0;
+    __engine("map_set", db, "file_import_" + fid + "_" + cnt, dep_fid);
+    __engine("map_set", db, "file_import_count_" + fid, cnt + 1);
+}
+
+pub fn pilotdb_get_file_source(db: i64, file_id: u64) -> str {
+    let src = __engine("map_get", db, "src_" + file_id);
+    if src == nil {
+        return "";
+    }
+    return src;
+}
+
+// ------------------------------------------------------------------------------
+// Core Salsa Red-Green Validation & Early Cutoff Engine
+// ------------------------------------------------------------------------------
+
+pub fn pilotdb_memo_has(db: i64, enc_k: str) -> bool {
+    return __engine("map_get", db, "memo_exists_" + enc_k) == 1;
+}
+
+pub fn pilotdb_memo_verified_at(db: i64, enc_k: str) -> u64 {
+    return __engine("map_get", db, "memo_vat_" + enc_k) + 0;
+}
+
+pub fn pilotdb_memo_changed_at(db: i64, enc_k: str) -> u64 {
+    return __engine("map_get", db, "memo_cat_" + enc_k) + 0;
+}
+
+pub fn pilotdb_memo_durability(db: i64, enc_k: str) -> u8 {
+    return __engine("map_get", db, "memo_dur_" + enc_k) + 0;
+}
+
+pub fn pilotdb_memo_payload(db: i64, enc_k: str) -> str {
+    let p = __engine("map_get", db, "memo_payload_" + enc_k);
+    if p == nil { return ""; }
+    return p;
+}
+
+pub fn pilotdb_memo_fp(db: i64, enc_k: str) -> Fingerprint128 {
+    let lo = __engine("map_get", db, "memo_fp_lo_" + enc_k) + 0;
+    let hi = __engine("map_get", db, "memo_fp_hi_" + enc_k) + 0;
+    return Fingerprint128 { lo: lo, hi: hi };
+}
+
+// Demand-driven query entry:
+// Validates dependencies, executes compute on demand, enforces early cutoff.
+pub fn pilotdb_query_with_fn(db: i64, key: QueryKey, fn_tag: str) -> str {
+    let enc_k = query_key_encode(key);
+    let cur_rev = pilotdb_current_rev(db);
+
+    // 1. O(1) Fast-Path: Already verified in current revision!
+    if pilotdb_memo_has(db, enc_k) {
+        let vat = pilotdb_memo_verified_at(db, enc_k);
+        if vat == cur_rev {
+            pilotdb_record_hit(db, key.stage_id);
+            pilotdb_record_caller_dependency(db, enc_k);
+            return pilotdb_memo_payload(db, enc_k);
+        }
+
+        // 2. O(1) Durability Watermark Fast-Path:
+        // If the durability tier has not seen any modification since this memo was verified,
+        // it cannot possibly be stale. Re-verify instantly without walking any dependencies!
+        let dur = pilotdb_memo_durability(db, enc_k);
+        let watermark = pilotdb_get_durability_watermark(db, dur);
+        if watermark <= vat {
+            __engine("map_set", db, "memo_vat_" + enc_k, cur_rev);
+            pilotdb_record_hit(db, key.stage_id);
+            pilotdb_record_caller_dependency(db, enc_k);
+            return pilotdb_memo_payload(db, enc_k);
+        }
+    }
+
+    // 3. Cycle Detection (DB001)
+    if pilotdb_stack_contains(db, enc_k) {
+        return "DB001: Compiler query cycle detected for " + enc_k;
+    }
+
+    // 4. Push active query stack
+    pilotdb_stack_push(db, enc_k);
+
+    // 5. Check dependencies recursively if memo exists
+    var needs_recompute = true;
+    if pilotdb_memo_has(db, enc_k) {
+        let memo_vat = pilotdb_memo_verified_at(db, enc_k);
+        let dcnt = __engine("map_get", db, "depcnt_" + enc_k) + 0;
+        var all_deps_clean = true;
+        var di = 0;
+        while di < dcnt {
+            let dep_k_enc = __engine("map_get", db, "dep_" + enc_k + "_" + di);
+            let dep_key = query_key_decode(dep_k_enc);
+            let _ = pilotdb_query_with_fn(db, dep_key, "");
+            let dep_cat = pilotdb_memo_changed_at(db, dep_k_enc);
+            if dep_cat > memo_vat {
+                all_deps_clean = false;
+                break;
+            }
+            di = di + 1;
+        }
+
+        if all_deps_clean {
+            // GREEN: No dependency changed after memo_vat!
+            __engine("map_set", db, "memo_vat_" + enc_k, cur_rev);
+            pilotdb_record_hit(db, key.stage_id);
+            pilotdb_stack_pop(db);
+            pilotdb_record_caller_dependency(db, enc_k);
+            return pilotdb_memo_payload(db, enc_k);
+        }
+    }
+
+    // 6. RED: Recompute query payload!
+    // Clear dependencies recorded during the previous run
+    __engine("map_set", db, "depcnt_" + enc_k, 0);
+
+    let new_payload = pilotdb_dispatch_compute(db, key, fn_tag);
+    let new_fp = fingerprint_compute(new_payload);
+    pilotdb_record_exec(db, key.stage_id);
+
+    // 7. Early-Cutoff Barrier:
+    // If output fingerprint bitwise matches previous memo, downstream consumers
+    // are insulated! Keep changed_at at the OLD revision!
+    var cat = cur_rev;
+    if pilotdb_memo_has(db, enc_k) {
+        let old_fp = pilotdb_memo_fp(db, enc_k);
+        if fingerprint_equals(old_fp, new_fp) {
+            cat = pilotdb_memo_changed_at(db, enc_k);
+        }
+    }
+
+    let min_dur = if pilotdb_memo_has(db, enc_k) { pilotdb_memo_durability(db, enc_k) } else { durability_workspace() };
+    __engine("map_set", db, "memo_exists_" + enc_k, 1);
+    __engine("map_set", db, "memo_payload_" + enc_k, new_payload);
+    __engine("map_set", db, "memo_fp_lo_" + enc_k, new_fp.lo);
+    __engine("map_set", db, "memo_fp_hi_" + enc_k, new_fp.hi);
+    __engine("map_set", db, "memo_dur_" + enc_k, min_dur);
+    __engine("map_set", db, "memo_vat_" + enc_k, cur_rev);
+    __engine("map_set", db, "memo_cat_" + enc_k, cat);
+
+    pilotdb_stack_pop(db);
+    pilotdb_record_caller_dependency(db, enc_k);
+
+    return new_payload;
+}
+
+// Open compute dispatcher: dispatches standard canonical stages
+pub fn pilotdb_dispatch_compute(db: i64, key: QueryKey, fn_tag: str) -> str {
+    let stage = key.stage_id;
+    let fid = key.entity_id;
+
+    if stage == stage_source_text() {
+        return pilotdb_get_file_source(db, fid);
+    }
+    if stage == stage_item_signature() {
+        // Depends on source text
+        let k_src = query_key_new(stage_source_text(), 0, fid);
+        let src = pilotdb_query_with_fn(db, k_src, "");
+        return pilotdb_extract_item_sig(src);
+    }
+    if stage == stage_lex_tokens() {
+        let k_src = query_key_new(stage_source_text(), 0, fid);
+        let src = pilotdb_query_with_fn(db, k_src, "");
+        return "tokens_len=" + src.len();
+    }
+    if stage == stage_lossless_cst() {
+        let k_lex = query_key_new(stage_lex_tokens(), 0, fid);
+        let _ = pilotdb_query_with_fn(db, k_lex, "");
+        let k_src = query_key_new(stage_source_text(), 0, fid);
+        let src = pilotdb_query_with_fn(db, k_src, "");
+        return "cst_nodes=" + (src.len() / 4);
+    }
+    if stage == stage_expanded_ast() {
+        let k_cst = query_key_new(stage_lossless_cst(), 0, fid);
+        let _ = pilotdb_query_with_fn(db, k_cst, "");
+        return "ast_for_" + fid;
+    }
+    if stage == stage_import_scope() {
+        // Query signature of imported modules if any are registered
+        let imp_count = __engine("map_get", db, "file_import_count_" + fid) + 0;
+        var sigs = "";
+        var ii = 0;
+        while ii < imp_count {
+            let dep_fid = __engine("map_get", db, "file_import_" + fid + "_" + ii) + 0;
+            let k_sig = query_key_new(stage_item_signature(), 0, dep_fid);
+            let s = pilotdb_query_with_fn(db, k_sig, "");
+            sigs = sigs + s + "\n";
+            ii = ii + 1;
+        }
+        return "imports_for_" + fid + "\n" + sigs;
+    }
+    if stage == stage_def_types_and_lattice() {
+        // Types depend on imported modules' def_types_and_lattice
+        let imp_count = __engine("map_get", db, "file_import_count_" + fid) + 0;
+        var ii = 0;
+        while ii < imp_count {
+            let dep_fid = __engine("map_get", db, "file_import_" + fid + "_" + ii) + 0;
+            let k_dep_types = query_key_new(stage_def_types_and_lattice(), 0, dep_fid);
+            let _ = pilotdb_query_with_fn(db, k_dep_types, "");
+            ii = ii + 1;
+        }
+
+        // Types depend on local AST, source text, item signature, and import scope
+        let k_src = query_key_new(stage_source_text(), 0, fid);
+        let _ = pilotdb_query_with_fn(db, k_src, "");
+        let k_ast = query_key_new(stage_expanded_ast(), 0, fid);
+        let _ = pilotdb_query_with_fn(db, k_ast, "");
+        let k_sig = query_key_new(stage_item_signature(), 0, fid);
+        let sig = pilotdb_query_with_fn(db, k_sig, "");
+        let k_scope = query_key_new(stage_import_scope(), 0, fid);
+        let sc = pilotdb_query_with_fn(db, k_scope, "");
+        return "types_and_lattice_for_" + fid + ": sig=" + sig + "; imports=" + sc;
+    }
+    if stage == stage_file_diagnostics() {
+        let k_types = query_key_new(stage_def_types_and_lattice(), 0, fid);
+        let _ = pilotdb_query_with_fn(db, k_types, "");
+        return "diagnostics_for_" + fid + ": 0 errors";
+    }
+
+    if fn_tag.len() > 0 {
+        return "custom_computed_" + fn_tag + "_" + fid;
+    }
+    return "computed_stage_" + stage + "_entity_" + fid;
+}
+
+// ------------------------------------------------------------------------------
+// Signature Extractor (ItemSignature Early-Cutoff Barrier)
+// Strips executable function body contents `{ ... }`, preserving `pub fn foo(x: T) -> R`
+// ------------------------------------------------------------------------------
+
+pub fn pilotdb_extract_item_sig(source: str) -> str {
+    let n = source.len();
+    var sig = "";
+    var body_depth = 0;
+    var in_fn = false;
+    var i = 0;
+
+    while i < n {
+        let b = source.byte_at(i);
+        // Comments
+        if b == 47 && i + 1 < n && source.byte_at(i + 1) == 47 {
+            i = i + 2;
+            while i < n && source.byte_at(i) != 10 {
+                i = i + 1;
+            }
+        } else if b == 47 && i + 1 < n && source.byte_at(i + 1) == 42 {
+            i = i + 2;
+            while i + 1 < n && !(source.byte_at(i) == 42 && source.byte_at(i + 1) == 47) {
+                i = i + 1;
+            }
+            if i + 1 < n { i = i + 2; }
+        } else if b == 34 || b == 39 {
+            // Strings
+            let q = b;
+            let s_start = i;
+            i = i + 1;
+            while i < n && source.byte_at(i) != q {
+                if source.byte_at(i) == 92 { i = i + 2; }
+                else { i = i + 1; }
+            }
+            if i < n { i = i + 1; }
+            if body_depth == 0 {
+                sig = sig + source.slice(s_start, i);
+            }
+        } else if body_depth > 0 {
+            if b == 123 {
+                body_depth = body_depth + 1;
+            } else if b == 125 {
+                body_depth = body_depth - 1;
+                if body_depth == 0 {
+                    sig = sig + "{}";
+                    in_fn = false;
+                }
+            }
+            i = i + 1;
+        } else {
+            if b == 123 && in_fn {
+                body_depth = 1;
+                i = i + 1;
+            } else {
+                if b == 102 && i + 2 < n && source.byte_at(i + 1) == 110 && (source.byte_at(i + 2) == 32 || source.byte_at(i + 2) == 9) {
+                    in_fn = true;
+                } else if b == 59 {
+                    in_fn = false;
+                }
+                sig = sig + source.slice(i, i + 1);
+                i = i + 1;
+            }
+        }
+    }
+    return sig;
+}
+
+// ------------------------------------------------------------------------------
+// Multi-Module Import Registry Helper
+// ------------------------------------------------------------------------------
+
+pub fn pilotdb_register_module_import(db: i64, importer_fid: u64, imported_fid: u64) {
+    let cur = __engine("map_get", db, "file_import_count_" + importer_fid) + 0;
+    __engine("map_set", db, "file_import_" + importer_fid + "_" + cur, imported_fid);
+    __engine("map_set", db, "file_import_count_" + importer_fid, cur + 1);
+}

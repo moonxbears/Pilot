@@ -5,6 +5,11 @@
 // =========================================================================
 pub pkg Pilot.SelfHost.Lsp.IdeDb;
 
+use Pilot.SelfHost.Db.Revision::*;
+use Pilot.SelfHost.Db.Engine::*;
+use Pilot.SelfHost.Db.Queries::*;
+use Pilot.SelfHost.Db.CacheIo::*;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 pub enum IdeParseState {
@@ -136,4 +141,33 @@ pub fn should_early_cutoff(old_source: str, new_source: str) -> i64 {
         return 1;
     }
     return 0;
+}
+
+// ------------------------------------------------------------------------------
+// PilotDb-backed LSP Document & Query Bridge
+// ------------------------------------------------------------------------------
+
+pub fn lsp_db_new() -> i64 {
+    return pilotdb_new();
+}
+
+pub fn lsp_db_update_document(db: i64, uri: str, new_source: str) {
+    let canon_uri = db_canonicalize_uri(uri);
+    let fid = canon_uri.len() + 0;
+    __engine("map_set", db, "uri_to_fid_" + canon_uri, fid);
+    pilotdb_set_file_source(db, fid, new_source, durability_volatile());
+}
+
+pub fn lsp_db_get_document(db: i64, uri: str) -> str {
+    let canon_uri = db_canonicalize_uri(uri);
+    let fid = __engine("map_get", db, "uri_to_fid_" + canon_uri);
+    if fid == nil { return ""; }
+    return pilotdb_get_file_source(db, fid + 0);
+}
+
+pub fn lsp_db_query_diagnostics(db: i64, uri: str) -> str {
+    let canon_uri = db_canonicalize_uri(uri);
+    let fid = __engine("map_get", db, "uri_to_fid_" + canon_uri);
+    if fid == nil { return ""; }
+    return query_file_diagnostics(db, fid + 0);
 }
