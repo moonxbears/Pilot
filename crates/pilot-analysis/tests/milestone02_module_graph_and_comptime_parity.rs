@@ -27,6 +27,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "mg_resolve_import_path",
                 "mg_extract_package_info",
                 "mg_build_graph",
+                "mg_normalize_path",
             ],
             required_code_markers: &[
                 "FileUnitId",
@@ -95,6 +96,13 @@ pub fn test_m2_1_exact_line_col_preservation_without_span_drift() {
     assert_eq!(loc1.line, 1);
     assert_eq!(loc1.col, 8);
 
+    // 1b. Verify CRLF (\r\n) line endings compute exact coordinates without skew
+    let f_crlf = sm.add_file("crlf.pilot", "let a = 1;\r\nlet b = 2;\r\nreturn a + b;\r\n");
+    let (p_crlf, loc_crlf) = sm.lookup_loc(f_crlf, 12).expect("lookup in f_crlf");
+    assert_eq!(p_crlf, "crlf.pilot");
+    assert_eq!(loc_crlf.line, 2);
+    assert_eq!(loc_crlf.col, 1);
+
     // 2. Verify AnalysisPipeline loads dependencies without shifting entry file spans
     let root = anticheat::workspace_root();
     let (arena, phy) = AnalysisPipeline::load_program(root.join("stdlib/core/bootstrap.pilot").to_str().unwrap());
@@ -136,10 +144,24 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
     let cache_res = engine.eval_ast_node(&cache_arena, cache_arena.root).expect("eval cache_line_bytes");
     assert_eq!(cache_res.as_int(), Some(64));
 
+    // 3b. Verify multiplatform target physics map aliases ("arch", "pointer_bytes", "endian")
+    let arch_arena = parse("let a = __engine(\"map_get\", 1, \"arch\"); return a;\n");
+    let arch_res = engine.eval_ast_node(&arch_arena, arch_arena.root).expect("eval arch");
+    let interner = pilot_intern::Interner::new();
+    assert_eq!(arch_res.as_str(&interner), Some(std::env::consts::ARCH));
+
+    let ptr_arena = parse("let p = __engine(\"map_get\", 1, \"pointer_bytes\"); return p;\n");
+    let ptr_res = engine.eval_ast_node(&ptr_arena, ptr_arena.root).expect("eval pointer_bytes");
+    assert_eq!(ptr_res.as_int(), Some(std::mem::size_of::<usize>() as i64));
+
+    let endian_arena = parse("let e = __engine(\"map_get\", 1, \"endian\"); return e;\n");
+    let endian_res = engine.eval_ast_node(&endian_arena, endian_arena.root).expect("eval endian");
+    let expected_endian = if cfg!(target_endian = "little") { "little" } else { "big" };
+    assert_eq!(endian_res.as_str(&interner), Some(expected_endian));
+
     // 4. Verify string return values are preserved in ComptimeValue
     let str_arena = parse("return \"pilot_env_ok\";\n");
     let str_res = engine.eval_ast_node(&str_arena, str_arena.root).expect("eval str");
-    let interner = pilot_intern::Interner::new();
     assert_eq!(str_res.as_str(&interner), Some("pilot_env_ok"));
 
     guard.finish();
@@ -189,6 +211,40 @@ pub fn test_m2_3_pure_pilot_module_graph_and_pragma_suppression() {
     let mut mg_vm = PilVirtualMachine::new();
     mg_vm.load_binary(BytecodeCompiler::compile(&mg_arena, mg_arena.root));
     assert_eq!(mg_vm.run().as_int(), Some(200), "Module graph must accurately extract package name, lvl, and imports");
+
+    // 3. Test Pure-Pilot Module Graph Path Normalization (Windows backslashes & relative prefixes)
+    let mg_norm_tail = r#"
+        let p1 = mg_normalize_path(".\\src\\sub\\mod.pilot");
+        let p2 = mg_normalize_path("stdlib\\core\\reflect.pilot");
+        let p3 = mg_normalize_path("c:\\projects\\pilot\\main.pilot");
+        if p1 == "src/sub/mod.pilot" && p2 == "stdlib/core/reflect.pilot" && p3 == "C:/projects/pilot/main.pilot" {
+            return 300;
+        }
+        return 0;
+    "#;
+    let mg_norm_full = format!("{mg_src}\n{mg_norm_tail}\n");
+    let mg_norm_arena = parse(&mg_norm_full);
+    let mut mg_norm_vm = PilVirtualMachine::new();
+    mg_norm_vm.load_binary(BytecodeCompiler::compile(&mg_norm_arena, mg_norm_arena.root));
+    assert_eq!(mg_norm_vm.run().as_int(), Some(300), "Module graph path normalization must convert Windows paths and normalize drive letters");
+
+    // 4. Test Pure-Pilot Module Graph resolving Windows-style import path
+    let root_norm = root.to_str().unwrap().replace('\\', "/");
+    let win_path = format!("{root_norm}/stdlib/core/bootstrap.pilot").replace('/', "\\").replace('\\', "\\\\");
+    let expected_norm = format!("{root_norm}/stdlib/core/bootstrap.pilot");
+    let mg_res_tail = format!(r#"
+        let roots = mg_default_search_roots();
+        let resolved = mg_resolve_import_path("{win_path}", roots);
+        if resolved == "{expected_norm}" {{
+            return 400;
+        }}
+        return 0;
+    "#);
+    let mg_res_full = format!("{mg_src}\n{mg_res_tail}\n");
+    let mg_res_arena = parse(&mg_res_full);
+    let mut mg_res_vm = PilVirtualMachine::new();
+    mg_res_vm.load_binary(BytecodeCompiler::compile(&mg_res_arena, mg_res_arena.root));
+    assert_eq!(mg_res_vm.run().as_int(), Some(400), "Module graph must resolve Windows-style backslash paths seamlessly");
 
     guard.finish();
 }

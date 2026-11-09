@@ -225,4 +225,13 @@ mod tests {
         assert_eq!((st.line, st.col), (1, 8));
         assert_eq!((en.line, en.col), (1, 11));
     }
+
+    #[test]
+    fn line_index_crlf_windows_compatibility() {
+        let src = "let a = 1;\r\nlet b = 2;\r\nreturn a + b;\r\n";
+        let idx = LineIndex::new(src.as_bytes());
+        assert_eq!(idx.line_count(), 4);
+        assert_eq!((idx.lookup(0).line, idx.lookup(0).col), (1, 1));
+        assert_eq!((idx.lookup(12).line, idx.lookup(12).col), (2, 1));
+    }
 }

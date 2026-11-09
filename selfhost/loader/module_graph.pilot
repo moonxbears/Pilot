@@ -107,17 +107,21 @@ pub fn gmap_contains(m: i64, key: str) -> bool {
 }
 
 // ------------------------------------------------------------------------------
-// String Utilities
+// String Utilities & Multiplatform Path Normalization
 // ------------------------------------------------------------------------------
 
 pub pure fn mg_trim(s: str) -> str {
     let l = s.len();
     var start: usize = 0;
-    while start < l && (s.byte_at(start) == 32 || s.byte_at(start) == 9 || s.byte_at(start) == 13 || s.byte_at(start) == 10) {
+    while start < l {
+        let b = s.byte_at(start);
+        if b != 32 && b != 9 && b != 13 && b != 10 { break; }
         start = start + 1;
     }
     var end: usize = l;
-    while end > start && (s.byte_at(end - 1) == 32 || s.byte_at(end - 1) == 9 || s.byte_at(end - 1) == 13 || s.byte_at(end - 1) == 10) {
+    while end > start {
+        let b = s.byte_at(end - 1);
+        if b != 32 && b != 9 && b != 13 && b != 10 { break; }
         end = end - 1;
     }
     return s.slice(start, end);
@@ -148,25 +152,37 @@ pub pure fn mg_ends_with(s: str, sfx: str) -> bool {
 }
 
 pub pure fn mg_find(haystack: str, needle: str, start: usize) -> i64 {
-    let hl = haystack.len();
-    let nl = needle.len();
-    if nl == 0 { return start as i64; }
-    if start + nl > hl { return -1; }
-    var i: usize = start;
-    while i + nl <= hl {
-        var j: usize = 0;
-        var m: bool = true;
-        while j < nl {
-            if haystack.byte_at(i + j) != needle.byte_at(j) {
-                m = false;
-                break;
-            }
-            j = j + 1;
-        }
-        if m { return i as i64; }
-        i = i + 1;
-    }
-    return -1;
+    return __engine("str_find", haystack, needle, start) as i64;
+}
+
+pub pure fn mg_to_upper_drive(b: i64) -> str {
+    if b == 97 { return "A"; }
+    if b == 98 { return "B"; }
+    if b == 99 { return "C"; }
+    if b == 100 { return "D"; }
+    if b == 101 { return "E"; }
+    if b == 102 { return "F"; }
+    if b == 103 { return "G"; }
+    if b == 104 { return "H"; }
+    if b == 105 { return "I"; }
+    if b == 106 { return "J"; }
+    if b == 107 { return "K"; }
+    if b == 108 { return "L"; }
+    if b == 109 { return "M"; }
+    if b == 110 { return "N"; }
+    if b == 111 { return "O"; }
+    if b == 112 { return "P"; }
+    if b == 113 { return "Q"; }
+    if b == 114 { return "R"; }
+    if b == 115 { return "S"; }
+    if b == 116 { return "T"; }
+    if b == 117 { return "U"; }
+    if b == 118 { return "V"; }
+    if b == 119 { return "W"; }
+    if b == 120 { return "X"; }
+    if b == 121 { return "Y"; }
+    if b == 122 { return "Z"; }
+    return "";
 }
 
 pub pure fn mg_to_lower(s: str) -> str {
@@ -175,12 +191,34 @@ pub pure fn mg_to_lower(s: str) -> str {
     var i: usize = 0;
     while i < l {
         let b = s.byte_at(i);
-        if b >= 65 && b <= 90 {
-            let lower_char = (b + 32) as char;
-            out = out + f"{lower_char}";
-        } else {
-            let ch = b as char;
-            out = out + f"{ch}";
+        if b == 65 { out = out + "a"; }
+        else if b == 66 { out = out + "b"; }
+        else if b == 67 { out = out + "c"; }
+        else if b == 68 { out = out + "d"; }
+        else if b == 69 { out = out + "e"; }
+        else if b == 70 { out = out + "f"; }
+        else if b == 71 { out = out + "g"; }
+        else if b == 72 { out = out + "h"; }
+        else if b == 73 { out = out + "i"; }
+        else if b == 74 { out = out + "j"; }
+        else if b == 75 { out = out + "k"; }
+        else if b == 76 { out = out + "l"; }
+        else if b == 77 { out = out + "m"; }
+        else if b == 78 { out = out + "n"; }
+        else if b == 79 { out = out + "o"; }
+        else if b == 80 { out = out + "p"; }
+        else if b == 81 { out = out + "q"; }
+        else if b == 82 { out = out + "r"; }
+        else if b == 83 { out = out + "s"; }
+        else if b == 84 { out = out + "t"; }
+        else if b == 85 { out = out + "u"; }
+        else if b == 86 { out = out + "v"; }
+        else if b == 87 { out = out + "w"; }
+        else if b == 88 { out = out + "x"; }
+        else if b == 89 { out = out + "y"; }
+        else if b == 90 { out = out + "z"; }
+        else {
+            out = out + s.slice(i, i + 1);
         }
         i = i + 1;
     }
@@ -194,15 +232,43 @@ pub pure fn mg_replace_char(s: str, from_b: u8, to_b: u8) -> str {
     while i < l {
         let b = s.byte_at(i);
         if b == from_b {
-            let ch = to_b as char;
-            out = out + f"{ch}";
+            if to_b == 47 {
+                out = out + "/";
+            } else if to_b == 92 {
+                out = out + "\\";
+            } else {
+                out = out + "_";
+            }
         } else {
-            let ch = b as char;
-            out = out + f"{ch}";
+            out = out + s.slice(i, i + 1);
         }
         i = i + 1;
     }
     return out;
+}
+
+pub pure fn mg_normalize_path(p: str) -> str {
+    let l = p.len();
+    if l == 0 { return ""; }
+
+    // 1. Replace all backslashes '\' (ASCII 92) with '/' (ASCII 47)
+    var s = mg_replace_char(p, 92, 47);
+
+    // 2. Normalize Windows drive letters to uppercase (e.g. c:/ -> C:/)
+    if s.len() >= 2 && s.byte_at(1) == 58 {
+        let b0 = s.byte_at(0);
+        let up = mg_to_upper_drive(b0);
+        if up.len() > 0 {
+            s = up + s.slice(1, s.len());
+        }
+    }
+
+    // 3. Strip redundant leading "./"
+    while mg_starts_with(s, "./") && s.len() > 2 {
+        s = s.slice(2, s.len());
+    }
+
+    return s;
 }
 
 // ------------------------------------------------------------------------------
@@ -220,10 +286,15 @@ pub fn mg_default_search_roots() -> i64 {
 }
 
 pub fn mg_resolve_import_path(import_spec: str, roots: i64) -> str {
-    var raw = mg_trim(import_spec);
+    var raw = mg_normalize_path(mg_trim(import_spec));
     while raw.len() > 0 && (raw.byte_at(raw.len() - 1) == 59 || raw.byte_at(raw.len() - 1) == 42 || raw.byte_at(raw.len() - 1) == 46 || raw.byte_at(raw.len() - 1) == 32) {
         raw = raw.slice(0, raw.len() - 1);
     }
+    raw = mg_normalize_path(raw);
+    if __engine("fs_exists", raw) == true { return raw; }
+    let direct = f"{raw}.pilot";
+    if __engine("fs_exists", direct) == true { return direct; }
+
     let rel_slash = mg_replace_char(raw, 46, 47); // '.' -> '/'
     var sub = rel_slash;
     if mg_starts_with(sub, "Pilot/") {
@@ -237,20 +308,16 @@ pub fn mg_resolve_import_path(import_spec: str, roots: i64) -> str {
     var i: usize = 0;
     while i < count {
         let r = glist_get_str(roots, i);
-        let c1 = f"{r}/{rel_slash}.pilot";
+        let c1 = mg_normalize_path(f"{r}/{rel_slash}.pilot");
         if __engine("fs_exists", c1) == true { return c1; }
-        let c2 = f"{r}/{sub}.pilot";
+        let c2 = mg_normalize_path(f"{r}/{sub}.pilot");
         if __engine("fs_exists", c2) == true { return c2; }
-        let c3 = f"{r}/{lower_sub}.pilot";
+        let c3 = mg_normalize_path(f"{r}/{lower_sub}.pilot");
         if __engine("fs_exists", c3) == true { return c3; }
-        let c4 = f"{r}/{lower_sub}/{lower_sub}.pilot";
+        let c4 = mg_normalize_path(f"{r}/{lower_sub}/{lower_sub}.pilot");
         if __engine("fs_exists", c4) == true { return c4; }
         i = i + 1;
     }
-
-    let direct = f"{raw}.pilot";
-    if __engine("fs_exists", direct) == true { return direct; }
-    if __engine("fs_exists", raw) == true { return raw; }
 
     return "";
 }
@@ -325,7 +392,8 @@ pub fn mg_build_graph(entry_file: str) -> ModuleGraph {
     let diags = glist_new();
     let queue = glist_new();
 
-    let _ = glist_push(queue, entry_file);
+    let norm_entry = mg_normalize_path(entry_file);
+    let _ = glist_push(queue, norm_entry);
 
     while glist_len(queue) > 0 {
         let cur_path = glist_pop(queue);
@@ -377,7 +445,7 @@ pub fn mg_build_graph(entry_file: str) -> ModuleGraph {
         var j: usize = 0;
         while j < imp_count {
             let imp_str = glist_get_str(file_imports, j);
-            let dep_path = mg_resolve_import_path(imp_str, roots);
+            let dep_path = mg_normalize_path(mg_resolve_import_path(imp_str, roots));
             if dep_path.len() > 0 {
                 let _ = glist_push(dep_list, dep_path);
                 if !gmap_contains(path_map, dep_path) {

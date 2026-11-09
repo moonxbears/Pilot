@@ -1005,6 +1005,14 @@ pub struct TargetDescriptor : IValue {
 
     pub pure fn is_64bit() -> bool => .pointer_bytes == 8;
     pub pure fn is_little_endian() -> bool => .endian == "little";
+    pub pure fn is_windows() -> bool => .os == "windows";
+    pub pure fn is_darwin() -> bool => .os == "darwin" || .os == "macos";
+    pub pure fn is_linux() -> bool => .os == "linux";
+    pub pure fn is_unix() -> bool => .os == "linux" || .os == "darwin" || .os == "macos" || .os == "freebsd" || .os == "openbsd" || .os == "netbsd";
+    pub pure fn is_wasm() -> bool => .os == "wasi" || .os == "wasm32" || .arch == "wasm32" || .arch == "wasm64";
+    pub pure fn is_arm64() -> bool => .arch == "aarch64" || .arch == "arm64";
+    pub pure fn is_x86_64() -> bool => .arch == "x86_64" || .arch == "amd64";
+    pub pure fn is_riscv() -> bool => .arch == "riscv64" || .arch == "riscv32";
 }
 
 pub struct CompileEnvView : IReference {
@@ -1038,20 +1046,31 @@ pub struct CompileEnvView : IReference {
 }
 
 pub fn env() -> CompileEnvView {
-    let arch = __engine("map_get", 1, "architecture");
+    var arch = __engine("map_get", 1, "arch");
+    if arch.len() == 0 { arch = __engine("map_get", 1, "architecture"); }
     let arch_str = if arch.len() > 0 { arch } else { "x86_64" };
+
     let os = __engine("map_get", 1, "os");
     let os_str = if os.len() > 0 { os } else { "linux" };
-    let ptr_b = __engine("map_get", 1, "pointer_byte") as usize;
+
+    var ptr_b = __engine("map_get", 1, "pointer_bytes") as usize;
+    if ptr_b == 0 { ptr_b = __engine("map_get", 1, "pointer_byte") as usize; }
     let ptr_bytes = if ptr_b > 0 { ptr_b } else { 8 };
-    let end = __engine("map_get", 1, "endianess");
+
+    var end = __engine("map_get", 1, "endian");
+    if end.len() == 0 { end = __engine("map_get", 1, "endianess"); }
     let endian_str = if end.len() > 0 { end } else { "little" };
+
     let be = __engine("map_get", 1, "backend");
     let be_str = if be.len() > 0 { be } else { "vm" };
+
     let simd = __engine("map_get", 1, "simd_width_bits") as usize;
     let simd_bits = if simd > 0 { simd } else { 128 };
-    let cl = __engine("map_get", 1, "cache_line_bytes") as usize;
+
+    var cl = __engine("map_get", 1, "cache_line_bytes") as usize;
+    if cl == 0 { cl = __engine("map_get", 1, "cache_line") as usize; }
     let cache_bytes = if cl > 0 { cl } else { 64 };
+
     let opt = __engine("map_get", 1, "opt_level") as u8;
     let opt_lvl = if opt > 0 { opt } else { 2 };
 
