@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+static STRING_INTERNER: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> = std::sync::OnceLock::new();
+
 pub const TAG_NULL: u8 = 0;
 pub const TAG_UNDEFINED: u8 = 1;
 pub const TAG_BOOL: u8 = 2;
@@ -61,8 +63,16 @@ impl PilotVal {
     pub fn from_str(s: &str) -> Self {
         if let Some(sso) = Self::from_str_sso(s) { sso } else {
             let len = s.len() as u32;
-            let raw_ptr = Box::into_raw(s.to_string().into_boxed_str()) as *const u8;
-            Self { tag_meta: (TAG_HEAP_STR as u64) | ((len as u64) << 8), payload: raw_ptr as usize as u64 }
+            let pool = STRING_INTERNER.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+            let mut guard = pool.lock().unwrap();
+            let ptr = if let Some(&existing) = guard.get(s) {
+                existing.as_ptr()
+            } else {
+                let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
+                guard.insert(leaked);
+                leaked.as_ptr()
+            };
+            Self { tag_meta: (TAG_HEAP_STR as u64) | ((len as u64) << 8), payload: ptr as usize as u64 }
         }
     }
 

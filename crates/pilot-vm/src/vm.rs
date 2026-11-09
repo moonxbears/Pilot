@@ -16,7 +16,7 @@ pub struct PilVirtualMachine {
     pub pc_spans: Vec<ByteSpan>,
     pub reg_symbols: Vec<(u8, u32, u32)>,
     pub pc: usize,
-    pub call_stack: Vec<(usize, [PilotVal; 256], u8)>,
+    pub call_stack: Vec<(usize, usize, u16, u8)>, pub reg_stack: Vec<PilotVal>,
     pub heap_maps: Vec<HashMap<String, PilotVal>>, pub heap_lists: Vec<Vec<PilotVal>>,
     pub hook: Option<VmHook>, pub engine_handler: Option<EngineIntrinsicHandler>,
     pub shared_symbols: Option<std::sync::Arc<HashMap<u32, String>>>,
@@ -33,7 +33,7 @@ impl PilVirtualMachine {
         Self {
             registers: [PilotVal::NULL; 256], constants: Vec::new(), instructions: Vec::new(),
             pc_spans: Vec::new(), reg_symbols: Vec::new(), pc: 0,
-            call_stack: Vec::with_capacity(64), heap_maps: Vec::new(), heap_lists: Vec::new(), hook: None, engine_handler: None,
+            call_stack: Vec::with_capacity(64), reg_stack: Vec::with_capacity(512), heap_maps: Vec::new(), heap_lists: Vec::new(), hook: None, engine_handler: None,
             shared_symbols: None,
         }
     }
@@ -41,7 +41,7 @@ impl PilVirtualMachine {
     pub fn load_binary(&mut self, b: PilcBinary) {
         self.constants = b.constants; self.instructions = b.instructions;
         self.pc_spans = b.pc_spans; self.reg_symbols = b.reg_symbols;
-        self.pc = 0; self.call_stack.clear(); self.heap_lists.clear(); self.registers = [PilotVal::NULL; 256];
+        self.pc = 0; self.call_stack.clear(); self.reg_stack.clear(); self.heap_lists.clear(); self.registers = [PilotVal::NULL; 256];
     }
 
     pub fn set_hook(&mut self, hook: Option<VmHook>) { self.hook = hook; }
@@ -89,10 +89,10 @@ impl PilVirtualMachine {
                 Opcode::Jump => self.pc = (src1 << 8) | src2,
                 Opcode::JumpIfTrue => if r1.as_bool().unwrap_or_else(|| r1.as_int().map_or(false, |i| i != 0)) { self.pc = (dst << 8) | src2; },
                 Opcode::JumpIfFalse => if !r1.as_bool().unwrap_or_else(|| r1.as_int().map_or(false, |i| i != 0)) { self.pc = (dst << 8) | src2; },
-                Opcode::Call => { self.call_stack.push((self.pc, self.registers, ins.dst())); self.pc = (src1 << 8) | src2; }
+                Opcode::Call => { let act = self.registers.iter().rposition(|r| !r.is_null()).map_or(0, |i| i + 1); let st = self.reg_stack.len(); self.reg_stack.extend_from_slice(&self.registers[..act]); self.call_stack.push((self.pc, st, act as u16, ins.dst())); self.pc = (src1 << 8) | src2; }
                 Opcode::Ret => {
                     let ret = if src1 != 0 { r1 } else { unsafe { *self.registers.get_unchecked(0) } };
-                    if let Some((ret_pc, saved, d)) = self.call_stack.pop() { self.registers = saved; unsafe { *self.registers.get_unchecked_mut(d as usize) = ret }; self.pc = ret_pc; } else { return ret; }
+                    if let Some((ret_pc, st, act, d)) = self.call_stack.pop() { let n = act as usize; self.registers[..n].copy_from_slice(&self.reg_stack[st..st + n]); self.registers[n..].fill(PilotVal::NULL); self.reg_stack.truncate(st); unsafe { *self.registers.get_unchecked_mut(d as usize) = ret }; self.pc = ret_pc; } else { return ret; }
                 }
                 Opcode::EngineIntrinsic => {
                     let mut sbuf = [PilotVal::NULL; 16];
