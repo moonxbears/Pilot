@@ -49,7 +49,10 @@ impl BytecodeCompiler {
     /// `__engine("intrinsic", args..)`.
     fn compile_engine_call(&mut self, arena: &AstArena, args: &[NodeId]) -> u8 {
         let Some((&hook, rest)) = args.split_first() else {
-            return self.error(format!("{} expects an intrinsic name", crate::ENGINE_TOKEN));
+            return self.error(
+                crate::codes::SYNTAX,
+                format!("{} expects an intrinsic name", crate::ENGINE_TOKEN),
+            );
         };
         let r_hook = self.compile_node(arena, hook);
         let regs = self.compile_args(arena, rest);
@@ -62,14 +65,14 @@ impl BytecodeCompiler {
     /// `nameof(x)`: the name `x` as a string.
     fn compile_symbol_quote(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> u8 {
         let Some(&arg) = args.first() else {
-            return self.error(format!("`{name}` expects one argument"));
+            return self.error(crate::codes::ARG_COUNT, format!("`{name}` expects one argument"));
         };
         let an = arena.node(arg);
         match an.node_kind() {
             NodeKind::IdentExpr | NodeKind::TypeNamed | NodeKind::StrLit => {
                 self.emit_const(PilotVal::from_str(Self::name(arena, an.lhs)))
             }
-            _ => self.error(format!("`{name}` expects a name")),
+            _ => self.error(crate::codes::SYNTAX, format!("`{name}` expects a name")),
         }
     }
 
@@ -79,16 +82,22 @@ impl BytecodeCompiler {
             matches!(n.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed)
         });
         let Some(ty) = ty.map(|n| Self::name(arena, n.lhs).to_string()) else {
-            return self.error(format!("`{name}` expects a type name"));
+            return self.error(crate::codes::SYNTAX, format!("`{name}` expects a type name"));
         };
         if query != QUERY_BYTE_SIZE {
-            return self.error(format!("`{name}` asks `{query}`, which the seed cannot answer"));
+            return self.error(
+                crate::codes::SEED,
+                format!("`{name}` asks `{query}`, which the seed cannot answer"),
+            );
         }
         match pilot_parser::bootstrap_tables().reg_layout(&ty) {
             Some(layout) => self.emit_const(PilotVal::from_int((layout.width + 7) / 8)),
-            None => self.error(format!(
-                "`{name}({ty})`: the seed knows only the register layouts of primitive types; struct layouts come with the type checker (F4)"
-            )),
+            None => self.error(
+                crate::codes::SEED,
+                format!(
+                    "`{name}({ty})`: the seed knows only the register layouts of primitive types; struct layouts come with the type checker (F4)"
+                ),
+            ),
         }
     }
 

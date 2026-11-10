@@ -1,0 +1,2 @@
+error[CALL001]: `Shape.Circle` carries 1 value(s), but 2 were given
+err_variant_arity.pilot:8:13

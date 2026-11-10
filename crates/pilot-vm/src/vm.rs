@@ -14,6 +14,11 @@ use std::collections::HashMap;
 pub type VmHook = Box<dyn FnMut(usize, Instruction, &[PilotVal; 256])>;
 pub type EngineIntrinsicHandler = Box<dyn FnMut(&str, &[PilotVal]) -> Result<PilotVal, String>>;
 
+/// Host operations the embedding program provides (`crate::host::HostValue`).
+/// Returns `None` for an operation the host does not provide.
+pub type HostOpHandler =
+    Box<dyn FnMut(&str, &[crate::host::HostValue]) -> Option<Result<crate::host::HostValue, String>>>;
+
 /// A runtime failure: what went wrong and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VmFault {
@@ -57,6 +62,8 @@ pub struct PilVirtualMachine {
     pub globals: HashMap<String, PilotVal>,
     pub hook: Option<VmHook>,
     pub engine_handler: Option<EngineIntrinsicHandler>,
+    /// Host operations, tried before the engine handler.
+    pub host_ops: Option<HostOpHandler>,
     pub shared_symbols: Option<std::sync::Arc<HashMap<u32, String>>>,
     pub fuel_limit: Option<u64>,
     pub fuel_used: u64,
@@ -92,6 +99,7 @@ impl PilVirtualMachine {
             globals: HashMap::new(),
             hook: None,
             engine_handler: None,
+            host_ops: None,
             script_args: Vec::new(),
             shared_symbols: None,
             fuel_limit: None,

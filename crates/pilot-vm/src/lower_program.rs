@@ -236,7 +236,10 @@ impl BytecodeCompiler {
             return;
         };
         if home != self.cur_unit {
-            self.error(format!("`{name}` is not exported by the module that declares it (`without`)"));
+            self.error(
+                crate::codes::NOT_EXPORTED,
+                format!("`{name}` is not exported by the module that declares it (`without`)"),
+            );
         }
     }
 }

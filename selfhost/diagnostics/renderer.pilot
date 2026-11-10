@@ -189,7 +189,7 @@ pub fn render_diagnostic_human(diag: Diagnostic, src: str, file_path: str, use_c
     let arrow = if use_color { ansi_bold_blue() + "  --> " + ansi_reset(); } else { "  --> "; };
 
     out = out + arrow + file_path + ":" + int_to_str(loc.line) + ":" + int_to_str(loc.col) + "\n";
-    out = out + "     " + pipe + "\n";
+    out = out + "    " + pipe + "\n";
 
     let line_str = src.slice(loc.line_start_byte, loc.line_end_byte);
     let line_num_str = int_to_str(loc.line);
@@ -244,8 +244,8 @@ pub fn render_diagnostic_human(diag: Diagnostic, src: str, file_path: str, use_c
         label_text = " " + prim_label.label;
     }
 
-    out = out + "     " + pipe + " " + underline_pad + caret_colored + label_text + "\n";
-    out = out + "     " + pipe + "\n";
+    out = out + "    " + pipe + " " + underline_pad + caret_colored + label_text + "\n";
+    out = out + "    " + pipe + "\n";
 
     // Notes
     var ni = 0;

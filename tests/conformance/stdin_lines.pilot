@@ -1,0 +1,15 @@
+// Standard input, read line by line until it ends (F3).
+use std.io;
+
+fn main() {
+    var count = 0;
+    var total = 0;
+    var line = io.read_line();
+    while !line.is_null() {
+        count = count + 1;
+        total = total + line.len();
+        print(f"{count}: [{line}]");
+        line = io.read_line();
+    }
+    print(f"{count} lines, {total} bytes");
+}

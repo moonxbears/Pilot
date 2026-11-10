@@ -36,11 +36,11 @@ impl BytecodeCompiler {
             .checked_sub(1)
             .and_then(|i| arena.for_clauses.get(i).copied());
         let Some((iter_id, then_id)) = clause else {
-            return self.error("malformed `for` expression".to_string());
+            return self.error(crate::codes::SYNTAX, "malformed `for` expression".to_string());
         };
         if then_id.is_some() {
             let msg = "`for ... then` expressions are not lowered by the seed yet";
-            return self.error(msg.to_string());
+            return self.error(crate::codes::SEED, msg.to_string());
         }
         let iter_n = *arena.node(iter_id);
         let is_range = iter_n.node_kind() == NodeKind::BinaryExpr

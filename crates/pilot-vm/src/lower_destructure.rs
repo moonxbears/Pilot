@@ -32,7 +32,10 @@ impl BytecodeCompiler {
     pub(crate) fn compile_destructuring_let(&mut self, arena: &AstArena, decl: NodeId) -> u8 {
         let dn = *arena.node(decl);
         if NodeId(dn.rhs).is_none() {
-            return self.error("a destructuring `let` needs a value".to_string());
+            return self.error(
+                crate::codes::SYNTAX,
+                "a destructuring `let` needs a value".to_string(),
+            );
         }
         let r = self.compile_node(arena, NodeId(dn.rhs));
         let subject = self.alloc_local_reg();
@@ -152,7 +155,10 @@ impl BytecodeCompiler {
             .map(|(i, _)| i)
             .collect();
         if rests.len() > 1 {
-            self.error("a slice pattern can have only one rest element".to_string());
+            self.error(
+                crate::codes::PATTERN,
+                "a slice pattern can have only one rest element".to_string(),
+            );
             return;
         }
         let fixed = elems.len() - rests.len();

@@ -1,0 +1,2 @@
+error[PAT001]: `Shape.Rect` carries 2 value(s); the pattern matches 1
+err_pattern_arity.pilot:9:14

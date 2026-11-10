@@ -271,14 +271,18 @@ impl BytecodeCompiler {
                         self.emit(Opcode::Move, slot, rhs_r, 0);
                         slot
                     }
-                    None if self.is_captured_name(&name) => self.error(format!(
-                        "cannot assign to `{name}` inside a lambda: closures capture variables by value"
-                    )),
+                    None if self.is_captured_name(&name) => self.error(
+                        crate::codes::CAPTURED_ASSIGN,
+                        format!("cannot assign to `{name}` inside a lambda: closures capture variables by value"),
+                    ),
                     None if self.globals.contains(&name) => {
                         self.emit_global_set(&name, rhs_r);
                         rhs_r
                     }
-                    None => self.error(format!("assignment to undeclared variable `{name}`")),
+                    None => self.error(
+                        crate::codes::UNDECLARED,
+                        format!("assignment to undeclared variable `{name}`"),
+                    ),
                 }
             }
             NodeKind::MemberExpr => {
@@ -293,7 +297,7 @@ impl BytecodeCompiler {
                 self.emit_intrinsic("map_set", &[r_obj, r_key, rhs_r]);
                 rhs_r
             }
-            other => self.error(format!("cannot assign to {other:?}")),
+            other => self.error(crate::codes::SYNTAX, format!("cannot assign to {other:?}")),
         }
     }
 
@@ -365,10 +369,16 @@ impl BytecodeCompiler {
 
     pub(crate) fn compile_break(&mut self, arena: &AstArena, has_value: bool) -> u8 {
         if has_value {
-            return self.error("`break` with a value is not lowered by the seed yet".to_string());
+            return self.error(
+                crate::codes::SEED,
+                "`break` with a value is not lowered by the seed yet".to_string(),
+            );
         }
         let Some(depth) = self.loops.last().map(|l| l.defer_depth) else {
-            return self.error("`break` outside of a loop or switch".to_string());
+            return self.error(
+                crate::codes::BREAK_OUTSIDE_LOOP,
+                "`break` outside of a loop or switch".to_string(),
+            );
         };
         self.emit_defers_above(arena, depth);
         let j = self.emit_jump(0);
@@ -380,10 +390,16 @@ impl BytecodeCompiler {
 
     pub(crate) fn compile_continue(&mut self, arena: &AstArena, has_value: bool) -> u8 {
         if has_value {
-            return self.error("`continue` with new bounds is not lowered by the seed yet".to_string());
+            return self.error(
+                crate::codes::SEED,
+                "`continue` with new bounds is not lowered by the seed yet".to_string(),
+            );
         }
         let Some(depth) = self.loops.iter().rev().find(|l| !l.is_switch).map(|l| l.defer_depth) else {
-            return self.error("`continue` outside of a loop".to_string());
+            return self.error(
+                crate::codes::CONTINUE_OUTSIDE_LOOP,
+                "`continue` outside of a loop".to_string(),
+            );
         };
         self.emit_defers_above(arena, depth);
         let j = self.emit_jump(0);

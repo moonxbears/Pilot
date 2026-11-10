@@ -1,1 +1,2 @@
-lib/cycle_b.pilot:4:1: error: MOD002: import cycle: Conformance.CycleA -> lib.cycle_b -> Conformance.CycleA
+error[MOD002]: import cycle: Conformance.CycleA -> lib.cycle_b -> Conformance.CycleA
+lib/cycle_b.pilot:4:1

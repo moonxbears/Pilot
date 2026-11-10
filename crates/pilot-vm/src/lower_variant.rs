@@ -56,11 +56,14 @@ impl BytecodeCompiler {
     pub(crate) fn compile_variant_ctor(&mut self, arena: &AstArena, full: &str, args: &[NodeId]) -> u8 {
         let fields = self.variant_payloads.get(full).cloned().unwrap_or_default();
         if fields.len() != args.len() {
-            return self.error(format!(
-                "`{full}` carries {} value(s), but {} were given",
-                fields.len(),
-                args.len()
-            ));
+            return self.error(
+                crate::codes::ARG_COUNT,
+                format!(
+                    "`{full}` carries {} value(s), but {} were given",
+                    fields.len(),
+                    args.len()
+                ),
+            );
         }
         let dst = self.alloc_reg();
         let mark = self.next_reg;
@@ -90,11 +93,14 @@ impl BytecodeCompiler {
         let subs = arena.children_slice(pn.rhs, pn.flags as u32).to_vec();
         let fields = self.variant_payloads.get(full).cloned().unwrap_or_default();
         if !subs.is_empty() && subs.len() != fields.len() {
-            self.error(format!(
-                "`{full}` carries {} value(s); the pattern matches {}",
-                fields.len(),
-                subs.len()
-            ));
+            self.error(
+                crate::codes::PATTERN,
+                format!(
+                    "`{full}` carries {} value(s); the pattern matches {}",
+                    fields.len(),
+                    subs.len()
+                ),
+            );
             return;
         }
         let r_type = self.emit_intrinsic("record_type", &[r_subject]);

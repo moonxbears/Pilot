@@ -11,7 +11,7 @@ use crate::link::LinkedSource;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_rt::PilotVal;
-use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use pilot_vm::{BytecodeCompiler, HostOpHandler, PilVirtualMachine};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -53,7 +53,7 @@ fn link_tool(paths: &[&str], tail: &str) -> LinkedSource {
 
 /// Compiles and runs a tool, returning the VM and the entry call's value.
 /// `phy` is the physics registry the script's `__engine` calls operate on.
-fn run_tool(src: &LinkedSource, mut phy: PhysicsRegistry) -> (PilVirtualMachine, PilotVal) {
+fn run_tool(src: &LinkedSource, mut phy: PhysicsRegistry, host_ops: Option<HostOpHandler>) -> (PilVirtualMachine, PilotVal) {
     let mut failed = false;
     for (span, msg) in &src.arena.diagnostics {
         eprintln!("{}: internal error: {msg}", src.locate(*span));
@@ -71,6 +71,7 @@ fn run_tool(src: &LinkedSource, mut phy: PhysicsRegistry) -> (PilVirtualMachine,
     vm.engine_handler = Some(Box::new(move |op, a| {
         pilot_analysis::handle_engine_intrinsic(&mut phy, op, a)
     }));
+    vm.host_ops = host_ops;
     vm.load_binary(bin);
     let out = vm.run();
     if let Some(fault) = vm.fault.take() {
@@ -83,7 +84,7 @@ fn run_tool(src: &LinkedSource, mut phy: PhysicsRegistry) -> (PilVirtualMachine,
 
 /// Compiles and runs a tool script, returning its result rendered as text.
 fn run_script(src: &LinkedSource, phy: PhysicsRegistry) -> String {
-    let (vm, out) = run_tool(src, phy);
+    let (vm, out) = run_tool(src, phy, None);
     vm.display(out)
 }
 
@@ -100,7 +101,16 @@ pub fn toolchain_root() -> String {
 pub fn eval_value(paths: &[&str], tail: &str) -> (PilVirtualMachine, PilotVal) {
     let src = link_tool(paths, tail);
     let (flat, syms) = pilot_analysis::flatten_ast(&src.arena, src.arena.root);
-    run_tool(&src, PhysicsRegistry::new(flat, syms))
+    run_tool(&src, PhysicsRegistry::new(flat, syms), None)
+}
+
+/// Runs the CLI tool with the host operations `ops`; its result is the
+/// process exit code.
+pub fn eval_cli(paths: &[&str], tail: &str, ops: HostOpHandler) -> i32 {
+    let src = link_tool(paths, tail);
+    let (flat, syms) = pilot_analysis::flatten_ast(&src.arena, src.arena.root);
+    let (_, out) = run_tool(&src, PhysicsRegistry::new(flat, syms), Some(ops));
+    out.as_int().map_or(EXIT_INTERNAL, |c| c.clamp(0, 255) as i32)
 }
 
 /// Runs a tool whose engine calls see the tool's own AST.

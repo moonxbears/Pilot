@@ -58,10 +58,13 @@ impl BytecodeCompiler {
         let (mut records, others): (Vec<String>, Vec<String>) =
             instance_owners.into_iter().partition(|o| self.structs.contains_key(o));
         if others.len() > 1 {
-            return self.error(format!(
-                "`{method}` is declared by {}; give the receiver a type so the call can choose",
-                others.join(", ")
-            ));
+            return self.error(
+                crate::codes::SEED,
+                format!(
+                    "`{method}` is declared by {}; give the receiver a type so the call can choose",
+                    others.join(", ")
+                ),
+            );
         }
         records.sort();
         self.emit_dynamic_dispatch(method, &records, others.first(), &regs)

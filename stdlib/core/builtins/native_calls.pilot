@@ -18,6 +18,7 @@ comptime {
     // Functions: `name(args)`.
     __engine("bind_native_fn", nameof(print),   "rt_print");
     __engine("bind_native_fn", nameof(println), "rt_print");
+    __engine("bind_native_fn", nameof(eprint),  "rt_eprint");
     __engine("bind_native_fn", nameof(assert),  "rt_assert");
     __engine("bind_native_fn", nameof(List),    "list_new");
     __engine("bind_native_fn", nameof(Map),     "map_new");

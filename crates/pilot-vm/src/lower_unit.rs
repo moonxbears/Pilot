@@ -28,7 +28,7 @@ impl BytecodeCompiler {
     pub(crate) fn compile_unit_text(&mut self, raw: &str) -> u8 {
         match unit_value(raw) {
             Ok(v) => self.emit_const(PilotVal::from_int(v)),
-            Err(message) => self.error(message),
+            Err(message) => self.error(crate::codes::UNKNOWN_UNIT, message),
         }
     }
 

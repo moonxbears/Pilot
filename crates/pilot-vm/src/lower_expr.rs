@@ -42,13 +42,25 @@ fn direct_opcode(op: BinaryOp) -> Option<Opcode> {
 }
 
 impl BytecodeCompiler {
+    /// Lowers `node_id`. Code and diagnostics emitted for the node itself
+    /// carry its span; once it is lowered, the span of the node that contains
+    /// it is current again, so the parent's own instructions (a call after its
+    /// arguments, an operator after its operands) point at the parent.
     pub fn compile_node(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
         if node_id.is_none() {
             return self.emit_null();
         }
-        let node = *arena.node(node_id);
+        let (parent_span, parent_unit) = (self.cur_span, self.cur_unit);
         self.cur_span = arena.span(node_id);
         self.cur_unit = arena.unit_of(node_id).map(|u| u.file);
+        let r = self.compile_node_kind(arena, node_id);
+        self.cur_span = parent_span;
+        self.cur_unit = parent_unit;
+        r
+    }
+
+    fn compile_node_kind(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
+        let node = *arena.node(node_id);
         match node.node_kind() {
             NodeKind::Program => self.compile_program(arena, node.lhs, node.rhs),
             NodeKind::BlockExpr => self.compile_block(arena, node.lhs, node.rhs),
@@ -102,10 +114,16 @@ impl BytecodeCompiler {
             // resolved by the module loader, interfaces only constrain types.
             NodeKind::ImportDecl | NodeKind::ExcludeDecl | NodeKind::InterfaceDecl => self.emit_null(),
             NodeKind::PolyglotBlock => {
-                self.error("inline foreign-language blocks cannot run on the seed VM".to_string())
+                self.error(
+                    crate::codes::SEED,
+                    "inline foreign-language blocks cannot run on the seed VM".to_string(),
+                )
             }
-            NodeKind::ErrorNode => self.error("syntax error".to_string()),
-            other => self.error(format!("`{}` is not lowered by the seed yet", other.name())),
+            NodeKind::ErrorNode => self.error(crate::codes::SYNTAX, "syntax error".to_string()),
+            other => self.error(
+                crate::codes::SEED,
+                format!("`{}` is not lowered by the seed yet", other.name()),
+            ),
         }
     }
 
@@ -141,7 +159,7 @@ impl BytecodeCompiler {
         if let Some(r) = self.function_value(name) {
             return r;
         }
-        self.error(format!("undefined name `{name}`"))
+        self.error(crate::codes::UNDECLARED, format!("undefined name `{name}`"))
     }
 
     fn compile_member(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
@@ -177,7 +195,10 @@ impl BytecodeCompiler {
 
     fn compile_index(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
         if NodeId(rhs).is_none() {
-            return self.error("empty index `[]` is not lowered by the seed yet".to_string());
+            return self.error(
+                crate::codes::SEED,
+                "empty index `[]` is not lowered by the seed yet".to_string(),
+            );
         }
         if let Some(raw) = self.bracket_unit_text(arena, NodeId(lhs), NodeId(rhs)) {
             return self.compile_unit_text(&raw);
@@ -211,11 +232,14 @@ impl BytecodeCompiler {
 
     fn compile_binary(&mut self, arena: &AstArena, flags: u16, lhs: u32, rhs: u32) -> u8 {
         let Some(op) = BinaryOp::from_u16(flags) else {
-            return self.error("unknown binary operator".to_string());
+            return self.error(crate::codes::SYNTAX, "unknown binary operator".to_string());
         };
         // `As` keeps its target type outside the operand slots.
         if NodeId(lhs).is_none() || (NodeId(rhs).is_none() && !matches!(op, BinaryOp::As | BinaryOp::AsView)) {
-            return self.error(format!("operator `{}` is missing an operand", op.symbol()));
+            return self.error(
+                crate::codes::SYNTAX,
+                format!("operator `{}` is missing an operand", op.symbol()),
+            );
         }
         match op {
             BinaryOp::And | BinaryOp::Or => return self.compile_short_circuit(arena, op, lhs, rhs),
@@ -238,14 +262,17 @@ impl BytecodeCompiler {
         }
         let Some(opcode) = direct_opcode(op) else {
             if matches!(op, BinaryOp::RangeInclusive | BinaryOp::RangeHalfOpen) {
-                return self.error(
+                return self.error(crate::codes::SEED, 
                     "range values are only lowered as `for` iterables and slice indices by the seed".to_string(),
                 );
             }
             if let Some(r) = self.compile_operator_fn(op.symbol(), arena, NodeId(lhs), NodeId(rhs)) {
                 return r;
             }
-            return self.error(format!("operator `{}` is not lowered by the seed yet", op.symbol()));
+            return self.error(
+                crate::codes::SEED,
+                format!("operator `{}` is not lowered by the seed yet", op.symbol()),
+            );
         };
         // `x == ::Variant`: each side's declared type types the other side.
         let (hint_l, hint_r) = if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
@@ -328,11 +355,14 @@ impl BytecodeCompiler {
             UNARY_NOT => Opcode::Not,
             pilot_ast::UNARY_OP_SOME => return self.compile_some_test(arena, NodeId(operand)),
             pilot_ast::UNARY_OP_SPLAT | pilot_ast::UNARY_OP_DOUBLE_SPLAT | pilot_ast::UNARY_OP_DEEP_FLATTEN => {
-                return self.error(
+                return self.error(crate::codes::SEED, 
                     "the seed lowers `*x` and `*..x` only as elements of a list literal".to_string(),
                 );
             }
-            _ => return self.error("unary operator is not lowered by the seed yet".to_string()),
+            _ => return self.error(
+                crate::codes::SEED,
+                "unary operator is not lowered by the seed yet".to_string(),
+            ),
         };
         let dst = self.alloc_reg();
         let mark = self.next_reg;
@@ -348,7 +378,10 @@ impl BytecodeCompiler {
         let mark = self.next_reg;
         for pair in children.chunks(2) {
             if pair.len() != 2 {
-                return self.error("map literal entry without a value".to_string());
+                return self.error(
+                    crate::codes::SYNTAX,
+                    "map literal entry without a value".to_string(),
+                );
             }
             let r_k = match Self::map_key(arena, NodeId(pair[0])) {
                 Some(k) => self.emit_const(PilotVal::from_str(&k)),
@@ -376,7 +409,10 @@ impl BytecodeCompiler {
                     self.emit_intrinsic("list_extend", &[r_list, r_v, r_deep]);
                 }
                 Some(pilot_ast::UNARY_OP_DOUBLE_SPLAT) => {
-                    self.error("`**x` unpacks key-value pairs, which a list literal cannot hold".to_string());
+                    self.error(
+                        crate::codes::SYNTAX,
+                        "`**x` unpacks key-value pairs, which a list literal cannot hold".to_string(),
+                    );
                 }
                 _ => {
                     let r_v = self.compile_node(arena, NodeId(c));

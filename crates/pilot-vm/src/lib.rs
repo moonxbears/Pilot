@@ -5,9 +5,10 @@
 //! diagnostic in `PilcBinary::diagnostics` and compiles to a `Trap`, so a
 //! construct the seed cannot run is reported instead of silently dropped.
 
+pub mod codes;
 mod heap;
 pub mod instruction;
-mod host;
+pub mod host;
 mod lower_args;
 mod lower_call;
 mod lower_cascade;
@@ -33,7 +34,8 @@ pub mod vm;
 
 pub use instruction::{Instruction, Opcode};
 pub use pilc::{CompileDiagnostic, PilcBinary, PILC_V3_MAGIC, PILC_V3_VERSION};
-pub use vm::{EngineIntrinsicHandler, PilVirtualMachine, VmFault, VmHook};
+pub use host::HostValue;
+pub use vm::{EngineIntrinsicHandler, HostOpHandler, PilVirtualMachine, VmFault, VmHook};
 
 pub mod compiler {
     pub use super::BytecodeCompiler;
@@ -216,6 +218,7 @@ impl BytecodeCompiler {
             let span = arena.span(root);
             c.diagnostics.push(CompileDiagnostic {
                 span,
+                code: codes::SEED,
                 message: format!(
                     "program needs {} instructions; PilVM jump targets address at most {}",
                     c.instructions.len(),
@@ -267,7 +270,11 @@ impl BytecodeCompiler {
                     let message = format!("no function named `{name}`");
                     let c = self.add_constant(PilotVal::from_str(&message));
                     self.instructions[idx] = Instruction::encode_wide(Opcode::Trap, 0, c);
-                    self.diagnostics.push(CompileDiagnostic { span, message });
+                    self.diagnostics.push(CompileDiagnostic {
+                        span,
+                        code: codes::UNDECLARED,
+                        message,
+                    });
                 }
             }
         }
@@ -285,7 +292,11 @@ impl BytecodeCompiler {
                     let message = format!("no function named `{full}`");
                     let c = self.add_constant(PilotVal::from_str(&message));
                     self.instructions[idx] = Instruction::encode_wide(Opcode::Trap, 0, c);
-                    self.diagnostics.push(CompileDiagnostic { span, message });
+                    self.diagnostics.push(CompileDiagnostic {
+                        span,
+                        code: codes::UNDECLARED,
+                        message,
+                    });
                 }
             }
         }
@@ -298,7 +309,7 @@ impl BytecodeCompiler {
     fn alloc_local_reg(&mut self) -> u8 {
         let r = self.next_local_reg;
         if r > LAST_LOCAL_REG {
-            self.error(format!(
+            self.error(codes::SEED, format!(
                 "function needs more than {} local variables",
                 LAST_LOCAL_REG - FIRST_LOCAL_REG + 1
             ));
@@ -317,6 +328,7 @@ impl BytecodeCompiler {
         if r == u8::MAX {
             self.diagnostics.push(CompileDiagnostic {
                 span: self.cur_span,
+                code: codes::SEED,
                 message: format!(
                     "expression needs more than {} scratch registers",
                     u8::MAX - FIRST_TEMP_REG
@@ -390,7 +402,7 @@ impl BytecodeCompiler {
     /// Copies argument registers into `r1..rN` without clobbering sources.
     fn stage_args(&mut self, args: &[u8]) {
         if args.len() > MAX_CALL_ARGS {
-            self.error(format!(
+            self.error(codes::SEED, format!(
                 "calls take at most {MAX_CALL_ARGS} arguments, found {}",
                 args.len()
             ));
@@ -439,11 +451,12 @@ impl BytecodeCompiler {
     }
 
     /// Records a diagnostic at the current span and emits a trap carrying it.
-    fn error(&mut self, message: String) -> u8 {
+    fn error(&mut self, code: &'static str, message: String) -> u8 {
         let c = self.add_constant(PilotVal::from_str(&message));
         self.push_ins(Instruction::encode_wide(Opcode::Trap, 0, c));
         self.diagnostics.push(CompileDiagnostic {
             span: self.cur_span,
+            code,
             message,
         });
         self.emit_null()

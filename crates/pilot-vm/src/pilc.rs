@@ -11,6 +11,8 @@ pub const PILC_V3_VERSION: u32 = 4;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompileDiagnostic {
     pub span: ByteSpan,
+    /// The catalog code (`crate::codes`).
+    pub code: &'static str,
     pub message: String,
 }
 

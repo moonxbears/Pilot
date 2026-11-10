@@ -15,6 +15,10 @@ use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_rt::PilotVal;
 
+
+/// A call whose arguments do not fit its callee: the diagnostic code and message.
+type ArgError = (&'static str, String);
+
 impl BytecodeCompiler {
     /// Records the declaration whose parameters `key` (`f`, `Owner.m` or
     /// `Owner.self`) takes.
@@ -52,7 +56,7 @@ impl BytecodeCompiler {
         callee: &str,
         params: &[String],
         args: &[NodeId],
-    ) -> Result<Vec<Option<NodeId>>, String> {
+    ) -> Result<Vec<Option<NodeId>>, ArgError> {
         let mut slots: Vec<Option<NodeId>> = vec![None; params.len()];
         let mut next = 0;
         let mut named = false;
@@ -62,19 +66,31 @@ impl BytecodeCompiler {
                 named = true;
                 let name = Self::name(arena, an.lhs);
                 let Some(i) = params.iter().position(|p| p == name) else {
-                    return Err(format!("`{callee}` has no parameter `{name}`"));
+                    return Err((
+                        crate::codes::NAMED_ARG,
+                        format!("`{callee}` has no parameter `{name}`"),
+                    ));
                 };
                 if slots[i].is_some() {
-                    return Err(format!("`{callee}` is given `{name}` twice"));
+                    return Err((
+                        crate::codes::NAMED_ARG,
+                        format!("`{callee}` is given `{name}` twice"),
+                    ));
                 }
                 slots[i] = Some(NodeId(an.rhs));
                 continue;
             }
             if named {
-                return Err(format!("in a call to `{callee}`, a positional argument follows a named one"));
+                return Err((
+                    crate::codes::NAMED_ARG,
+                    format!("in a call to `{callee}`, a positional argument follows a named one"),
+                ));
             }
             if next >= params.len() {
-                return Err(format!("`{callee}` takes {} argument(s), but more were given", params.len()));
+                return Err((
+                    crate::codes::ARG_COUNT,
+                    format!("`{callee}` takes {} argument(s), but more were given", params.len()),
+                ));
             }
             slots[next] = Some(a);
             next += 1;
@@ -110,7 +126,7 @@ impl BytecodeCompiler {
     /// Puts the named arguments of the call `ids` (callee, then arguments)
     /// in parameter order. A struct without a constructor keeps its
     /// arguments, which memberwise construction binds to fields.
-    pub(crate) fn order_named_args(&self, arena: &AstArena, ids: &[NodeId]) -> Result<Vec<NodeId>, String> {
+    pub(crate) fn order_named_args(&self, arena: &AstArena, ids: &[NodeId]) -> Result<Vec<NodeId>, ArgError> {
         let callee = ids[0];
         let cn = arena.node(callee);
         if matches!(cn.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) {
@@ -121,9 +137,12 @@ impl BytecodeCompiler {
         }
         let key = self.named_call_key(arena, callee);
         let Some(decl) = key.as_ref().and_then(|k| self.param_decls.get(k)) else {
-            return Err(format!(
-                "named arguments need a callee whose parameters are known; `{}` is not one",
-                key.unwrap_or_else(|| "this call".to_string())
+            return Err((
+                crate::codes::SEED,
+                format!(
+                    "named arguments need a callee whose parameters are known; `{}` is not one",
+                    key.unwrap_or_else(|| "this call".to_string())
+                ),
             ));
         };
         let callee_name = key.clone().unwrap_or_default();
@@ -133,7 +152,12 @@ impl BytecodeCompiler {
         for (p, slot) in params.iter().zip(slots) {
             match slot {
                 Some(a) => out.push(a),
-                None => return Err(format!("`{callee_name}` is missing argument `{p}`")),
+                None => {
+                    return Err((
+                        crate::codes::ARG_COUNT,
+                        format!("`{callee_name}` is missing argument `{p}`"),
+                    ))
+                }
             }
         }
         Ok(out)
@@ -146,10 +170,13 @@ impl BytecodeCompiler {
         let names: Vec<String> = fields.iter().map(|(f, _)| f.clone()).collect();
         let slots = match Self::bind_args(arena, name, &names, args) {
             Ok(s) => s,
-            Err(message) => return self.error(message),
+            Err((code, message)) => return self.error(code, message),
         };
         if let Some((f, _)) = fields.iter().zip(&slots).find(|((_, d), s)| s.is_none() && d.is_none()).map(|(f, _)| f) {
-            return self.error(format!("`{name}(..)` is missing field `{f}`, which has no default"));
+            return self.error(
+                crate::codes::MISSING_FIELD,
+                format!("`{name}(..)` is missing field `{f}`, which has no default"),
+            );
         }
         let dst = self.alloc_reg();
         let mark = self.next_reg;
@@ -177,8 +204,11 @@ impl BytecodeCompiler {
     /// A named argument outside a call that can bind it.
     pub(crate) fn compile_stray_named_arg(&mut self, arena: &AstArena, sym: u32) -> u8 {
         let name = Self::name(arena, sym).to_string();
-        self.error(format!(
-            "named argument `{name}` can only be passed to a function, method or struct whose parameters are known"
-        ))
+        self.error(
+            crate::codes::SEED,
+            format!(
+                "named argument `{name}` can only be passed to a function, method or struct whose parameters are known"
+            ),
+        )
     }
 }

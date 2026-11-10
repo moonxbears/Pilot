@@ -1,0 +1,9 @@
+// Constructing a variant takes exactly the values it carries.
+enum Shape {
+    Circle(r: i64),
+}
+
+fn main() {
+    print("never printed");
+    let s = Shape.Circle(1, 2);
+}

@@ -80,9 +80,21 @@ pub fn wiring_ledger() -> List<Capability> {
             "cargo test -p pilot-cli --test conformance", ""),
         cap("F2", "module linking, prelude, MOD001/MOD002", ::Complete,
             "tests/conformance/modules.pilot, err_import_cycle.pilot, err_import_missing.pilot", ""),
+        cap("F3", "pilot run and pilot check render coded diagnostics and exit non-zero", ::Wired,
+            "pilot check tests/conformance/err_undefined_name.pilot; crates/pilot-cli/tests/cli_f3.rs check_*; tests/conformance/err_*.stderr", ""),
+        cap("F3", "seed compile errors carry catalog codes (SYN001 SEED001 DECL001 DECL004 FLOW003 FLOW004 METH001 PAT001 INIT001 VIS001 CALL001 CALL003 DIM002)", ::Wired,
+            "crates/pilot-vm/src/codes.rs; one negative program per code in tests/conformance/err_*.pilot, run by pilot test", ""),
+        cap("F3", "pilot test: conformance corpus, [Test] functions, known bugs", ::Wired,
+            "pilot test; crates/pilot-cli/tests/cli_f3.rs test_runner_* over tests/pilot_test_fixtures/", ""),
+        cap("F3", "commands dispatched through cli_handlers(); unhandled ones fail at a seam", ::Wired,
+            "crates/pilot-cli/tests/cli_f3.rs every_listed_command_works_or_says_it_is_not_implemented", ""),
+        cap("F3", "standard input (std.io read_line, read_all) and process spawn (std.proc run, current_exe)", ::Wired,
+            "tests/conformance/stdin_lines.pilot; tests/pilot_test_fixtures/passing/echo_input.pilot", ""),
+        cap("F3", "analyzer warnings (UNUSED001, UNUSED004, SHADOW001) on pilot check", ::Spec,
+            "selfhost/analyzer.pilot runs only from Rust tests; pilot check reports seed diagnostics only", "F4"),
 
         cap("F1", "seed takes core syntax, native bindings and primitives from the stdlib it runs with", ::Spec,
-            "crates/pilot-parser/src/lib.rs bootstrap_tables() bakes them in with include_str!; primitive_sources() reads CARGO_MANIFEST_DIR at run time; blocks the real rename litmus and installed binaries", "F3"),
+            "crates/pilot-parser/src/lib.rs bootstrap_tables() bakes them in with include_str!; primitive_sources() reads CARGO_MANIFEST_DIR at run time; blocks the real rename litmus and installed binaries", "F4"),
 
         // M1 gate
         cap("M1", "source scans GATE001-GATE007", ::Wired, "pilot gate; milestone01 test_m1_1_dynamic_vocabulary_harvester_and_fast_gate001_slice_injection", ""),
@@ -106,6 +118,18 @@ pub fn wiring_ledger() -> List<Capability> {
             "milestone02 test_m2_1_exact_line_col_preservation_without_span_drift", ""),
         cap("M2", "transitive module graph on the run path, MOD001/MOD002", ::Wired,
             "tests/conformance/modules.pilot, err_import_cycle.pilot, err_import_missing.pilot", ""),
+        cap("F3", "pilot run and pilot check render coded diagnostics and exit non-zero", ::Wired,
+            "pilot check tests/conformance/err_undefined_name.pilot; crates/pilot-cli/tests/cli_f3.rs check_*; tests/conformance/err_*.stderr", ""),
+        cap("F3", "seed compile errors carry catalog codes (SYN001 SEED001 DECL001 DECL004 FLOW003 FLOW004 METH001 PAT001 INIT001 VIS001 CALL001 CALL003 DIM002)", ::Wired,
+            "crates/pilot-vm/src/codes.rs; one negative program per code in tests/conformance/err_*.pilot, run by pilot test", ""),
+        cap("F3", "pilot test: conformance corpus, [Test] functions, known bugs", ::Wired,
+            "pilot test; crates/pilot-cli/tests/cli_f3.rs test_runner_* over tests/pilot_test_fixtures/", ""),
+        cap("F3", "commands dispatched through cli_handlers(); unhandled ones fail at a seam", ::Wired,
+            "crates/pilot-cli/tests/cli_f3.rs every_listed_command_works_or_says_it_is_not_implemented", ""),
+        cap("F3", "standard input (std.io read_line, read_all) and process spawn (std.proc run, current_exe)", ::Wired,
+            "tests/conformance/stdin_lines.pilot; tests/pilot_test_fixtures/passing/echo_input.pilot", ""),
+        cap("F3", "analyzer warnings (UNUSED001, UNUSED004, SHADOW001) on pilot check", ::Spec,
+            "selfhost/analyzer.pilot runs only from Rust tests; pilot check reports seed diagnostics only", "F4"),
         cap("M2", "path normalization (Windows/UNC/drive letters)", ::Core,
             "milestone02 test_m2_3_pure_pilot_module_graph_and_pragma_suppression", ""),
         cap("M2", "pragma interval suppression", ::Core,
@@ -122,8 +146,8 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M2", "pilot emit <lang>: fns, structs, let/var, while, if/else, arithmetic", ::Core,
             "milestone57 test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host_toolchains (rustc/clang/clang++/python3/node/lua run the output)", ""),
         cap("M2", "pilot emit <lang>: lists, for, f-strings, print, entry call", ::Draft,
-            "selfhost/transpile/emit_*.pilot walk the real AST but emit `0` for list literals, `while xs` (binding lost) for `for x in xs`, `\"t=\" + n` for f\"t={n}\", call print() unmapped, never call main; C emits int64_t main", "F5"),
-        cap("M2", "pilot from <lang>", ::Spec, "selfhost/cli/main.pilot:278 stops at seam", "cli.command_handler F3"),
+            "selfhost/transpile/emit_*.pilot walk the real AST; constructs they cannot lower stop at the emit.unlowered_* seams instead of emitting `0` (list literals, closures); `while xs` (binding lost) for `for x in xs`, `\"t=\" + n` for f\"t={n}\", call print() unmapped, never call main; C emits int64_t main", "emit.unlowered_expr emit.unlowered_literal emit.unlowered_operator F5"),
+        cap("M2", "pilot from <lang>", ::Spec, "pilot from stops at seam cli.command_handler", "cli.command_handler F6"),
 
         // M3 CLI
         cap("M3", "registry-driven parsing, help, completions, schema, CLI001-CLI004", ::Wired,
@@ -131,8 +155,8 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M3", "GNU flag binding (--k=v, -k v, bool shorts) and -- passthrough", ::Wired,
             "milestone03 test_m3_2_posix_gnu_argument_parser_and_passthrough; tests/conformance/script_args.pilot", ""),
         cap("M3", "direct script invocation (pilot file.pilot)", ::Wired, "pilot tests/conformance/arith_int.pilot", ""),
-        cap("M3", "command handlers beyond run, gate, emit, help, version, schema-json, completions", ::Spec,
-            "selfhost/cli/main.pilot:278 stops at seam; dispatch is still an if-chain", "cli.command_handler F3"),
+        cap("M3", "command handlers for build, compile, fmt, repl, pkg, deps, tree, venv, lsp, debug, perf, from, map, ide-sync", ::Spec,
+            "dispatch goes through cli_handlers() (selfhost/cli/commands.pilot); these stop at seam cli.command_handler", "cli.command_handler F6"),
 
         // M4 dual syntax
         cap("M4", "readable and symbolic forms parse to one AST", ::Core,
@@ -178,13 +202,13 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M7", "pilot inspect", ::Spec, "selfhost/cli/inspect_cmd.pilot:49 stops at its seam after parsing; command not registered", "inspect.resolve_target F3 F4"),
 
         // M8 diagnostics
-        cap("M8", "human renderer with UTF-8 display width", ::Core, "milestone08 test_m8_3", "F3"),
+        cap("M8", "human renderer with UTF-8 display width", ::Wired, "milestone08 test_m8_3; renders every pilot run / pilot check diagnostic (crates/pilot-cli/tests/cli_f3.rs)", ""),
         cap("M8", "JSON and SARIF 2.1.0 output", ::Core, "milestone08 test_m8_4", "F3"),
         cap("M8", "--explain catalog", ::Draft, "selfhost/diagnostics/renderer.pilot:273 if-chain of 6 codes; ignores errors/warnings/infos catalogs", "F3"),
         cap("M8", "lexical autofix (SYN001 SYN002 DECL005 SYN003) and lossless apply", ::Core, "milestone08 test_m8_1 compares the hand-applied fixed source exactly", "F3"),
         cap("M8", "semantic autofix (DECL004 BORROW001)", ::Spec, "selfhost/cst/autofix.pilot:430", "autofix.semantic_defects F4"),
         cap("M8", "atomic write of fixed files", ::Draft, "selfhost/cst/autofix.pilot:229 writes .tmp then stops (milestone08 test_m8_1)", "autofix.atomic_rename F6"),
-        cap("M8", "pilot check --fix", ::Spec, "pilot check does nothing", "F3"),
+        cap("M8", "pilot check --fix", ::Spec, "pilot check --fix stops at its seam (cli_f3 check_fix_stops_at_its_seam)", "cli.check_fix F4"),
 
         // M9 three rings
         cap("M9", "std.env args", ::Wired, "tests/conformance/script_args.pilot", ""),

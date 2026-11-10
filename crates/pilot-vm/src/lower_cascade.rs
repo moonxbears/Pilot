@@ -30,7 +30,7 @@ impl BytecodeCompiler {
 
     fn compile_cascade_step(&mut self, arena: &AstArena, step: NodeId, r_recv: u8, owner: &str) {
         if step.is_none() {
-            self.error("a cascade `..` needs a step".to_string());
+            self.error(crate::codes::SYNTAX, "a cascade `..` needs a step".to_string());
             return;
         }
         self.cur_span = arena.span(step);
@@ -42,12 +42,15 @@ impl BytecodeCompiler {
             NodeKind::CallExpr => {
                 let children = arena.children_slice(sn.lhs, sn.rhs).to_vec();
                 let Some((&callee, args)) = children.split_first() else {
-                    self.error("malformed call".to_string());
+                    self.error(crate::codes::SYNTAX, "malformed call".to_string());
                     return;
                 };
                 let cn = *arena.node(NodeId(callee));
                 if cn.node_kind() != NodeKind::IdentExpr {
-                    self.error("a cascade step calls a method by name: `..name(args)`".to_string());
+                    self.error(
+                        crate::codes::SYNTAX,
+                        "a cascade step calls a method by name: `..name(args)`".to_string(),
+                    );
                     return;
                 }
                 let args: Vec<NodeId> = args.iter().map(|&a| NodeId(a)).collect();
@@ -57,7 +60,10 @@ impl BytecodeCompiler {
             NodeKind::AssignStmt => {
                 let tn = *arena.node(NodeId(sn.lhs));
                 if tn.node_kind() != NodeKind::IdentExpr {
-                    self.error("a cascade step assigns a field by name: `..name = value`".to_string());
+                    self.error(
+                        crate::codes::SYNTAX,
+                        "a cascade step assigns a field by name: `..name = value`".to_string(),
+                    );
                     return;
                 }
                 let r_v = self.compile_node(arena, NodeId(sn.rhs));
@@ -65,7 +71,10 @@ impl BytecodeCompiler {
                 self.emit_intrinsic("map_set", &[r_recv, r_k, r_v]);
             }
             _ => {
-                self.error("a cascade step must be a method call or a field assignment".to_string());
+                self.error(
+                    crate::codes::SYNTAX,
+                    "a cascade step must be a method call or a field assignment".to_string(),
+                );
             }
         }
     }

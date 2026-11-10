@@ -31,6 +31,17 @@ impl LinkedSource {
         Self { arena, files: table }
     }
 
+    /// The file a span lies in and the span's byte offsets within it.
+    pub fn resolve(&self, span: ByteSpan) -> (String, u32, u32) {
+        let Some((path, src, base)) = self.files.iter().rev().find(|(_, _, b)| *b <= span.start) else {
+            return ("<unknown>".to_string(), 0, 0);
+        };
+        let len = src.len() as u32;
+        let start = (span.start - base).min(len);
+        let end = span.end.saturating_sub(*base).clamp(start, len);
+        (path.clone(), start, end)
+    }
+
     /// `file:line:col` for a program-wide offset.
     pub fn locate(&self, span: ByteSpan) -> String {
         let at = span.start;

@@ -222,6 +222,20 @@ impl PilVirtualMachine {
                 println!("{}", parts.join(" "));
                 Ok(PilotVal::NULL)
             }
+            "rt_eprint" => {
+                let parts: Vec<String> = args.iter().map(|a| self.display(*a)).collect();
+                eprintln!("{}", parts.join(" "));
+                Ok(PilotVal::NULL)
+            }
+            "stdin_read_line" => Ok(crate::host::stdin_read_line()),
+            "stdin_read_all" => Ok(crate::host::stdin_read_all()),
+            "proc_exe" => Ok(crate::host::proc_exe()),
+            "proc_run" => {
+                let program = str_arg(args, 0, op)?;
+                let argv = self.str_list(arg(args, 1, op)?, op)?;
+                let input = args.get(2).and_then(|v| v.with_str(str::to_string));
+                self.proc_run(&program, &argv, input.as_deref())
+            }
             // `field_or_native(obj, key, intrinsic)`: the record's field
             // `key` if it has one, else `intrinsic(obj)` (a native property).
             "field_or_native" => {
@@ -409,6 +423,9 @@ impl PilVirtualMachine {
 
     /// Forwards an intrinsic to the host engine handler, then to the OS table.
     fn forward(&mut self, op: &str, args: &[PilotVal]) -> IntrinsicResult {
+        if let Some(r) = self.host_op(op, args) {
+            return r.map_err(|e| format!("intrinsic `{op}` failed: {e}"));
+        }
         if let Some(h) = self.engine_handler.as_mut() {
             match h(op, args) {
                 Ok(v) if !v.is_null() => return Ok(v),

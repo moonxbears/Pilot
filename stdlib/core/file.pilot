@@ -12,7 +12,7 @@ use Pilot.Core.Interfaces::*;
 [KeywordDefAttr(30, "Freestanding core filesystem interface for file I/O operations.")]
 pub struct File : IValue {
     pub static fn exists(path: str) -> bool {
-        return __engine("fs_exists", path) != 0;
+        return __engine("fs_exists", path);
     }
 
     pub static fn read_text(path: str) -> str {

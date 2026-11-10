@@ -1,0 +1,235 @@
+// ==============================================================================
+// FILE: selfhost/cli/test_cmd.pilot
+// `pilot test`: the conformance corpus and `[Test]` functions.
+// ==============================================================================
+// A path is a directory of programs or one program. Each program `<name>.pilot`
+// is one of:
+//
+// * a conformance case, when `<name>.stdout` exists. It is run as
+//   `pilot run <name>.pilot -- <args>` in its own process and must
+//   - write exactly `<name>.stdout` to stdout,
+//   - exit with the code in `<name>.exit` (0 when there is none),
+//   - write every non-empty line of `<name>.stderr`, when there is one,
+//     somewhere in its stderr.
+//   `<name>.args` holds the script arguments, one per line, and `<name>.stdin`
+//   is written to its standard input.
+// * a unit-test file, when it declares `[Test]` functions. Each runs on its own
+//   and passes when it returns without a runtime error.
+//
+// A directory's `known_bugs/` holds programs that reproduce registered seed
+// bugs (`bug_registry()` in `selfhost/gate/ledger/seams.pilot`). Their
+// expectation files hold the correct output, so each must still fail; one
+// that passes means its bug is fixed and its entry must be retired.
+//
+// Only the top-level `.pilot` files of a directory are programs: packages they
+// import live in subdirectories.
+pub lvl(0) pkg Pilot.SelfHost.Cli.TestCmd;
+
+use Pilot.Core.File;
+use std.proc;
+use std.text;
+use Pilot.SelfHost.Cli.Host;
+use Pilot.SelfHost.Cli.Report;
+
+/// The directory `pilot test` runs when it is given no path.
+pub pure fn test_default_dir() -> str => "tests/conformance";
+/// The subdirectory of known-bug reproductions.
+pub pure fn test_known_bugs_dir() -> str => "known_bugs";
+/// The attribute that marks a unit test.
+pub pure fn test_attr() -> str => "Test";
+
+/// How one program or test function fared.
+pub struct TestResult : IValue {
+    pub name:     str;
+    pub problems: List<str>;
+}
+
+/// The totals of a `pilot test` run.
+pub struct TestTally : IObject {
+    pub passed:         i64;
+    pub failed:         i64;
+    /// Known-bug programs that still fail, as they must.
+    pub bugs_reproduced: i64;
+    /// Known-bug programs that now pass: their bug is fixed.
+    pub bugs_fixed:      i64;
+}
+
+/// The lines of `text`, without line endings.
+pub fn test_lines(text: str) -> List<str> {
+    var out: List<str> = [];
+    var at = 0;
+    while at < text.len() {
+        var nl = text.find("\n", at);
+        if nl < 0 { nl = text.len(); }
+        var line = text.slice(at, nl);
+        if line.ends_with("\r") { line = line.slice(0, line.len() - 1); }
+        out.push(line);
+        at = nl + 1;
+    }
+    return out;
+}
+
+/// `path` without its final `.pilot`.
+pub fn test_stem(path: str) -> str => path.slice(0, path.len() - 6);
+
+/// The last component of `path`.
+pub fn test_base_name(path: str) -> str {
+    var at = path.len();
+    while at > 0 && path.slice(at - 1, at) != "/" { at = at - 1; }
+    return path.slice(at, path.len());
+}
+
+/// The top-level `.pilot` files directly inside `dir`, sorted.
+pub fn test_programs_in(dir: str) -> List<str> {
+    var out: List<str> = [];
+    let prefix = if dir.ends_with("/") { dir } else { dir + "/" };
+    for f in test_lines(File.walk_files(dir)) {
+        if !f.ends_with(".pilot") { continue; }
+        let at = f.find(prefix, 0);
+        if at < 0 { continue; }
+        let rest = f.slice(at + prefix.len(), f.len());
+        if rest.find("/", 0) < 0 { out.push(f); }
+    }
+    return out;
+}
+
+fn read_optional(path: str) -> str? {
+    if File.exists(path) { return File.read_text(path); }
+    return none;
+}
+
+/// Runs the conformance case `program` in its own process and lists every
+/// way its result differs from its expectation files.
+pub fn test_run_case(program: str) -> TestResult {
+    let stem = test_stem(program);
+    var problems: List<str> = [];
+    let expected_stdout = File.read_text(stem + ".stdout");
+    let exit_text = (read_optional(stem + ".exit") ?? "0").trim();
+    let expected_exit = text.parse_i64(exit_text) ?? -1;
+    if expected_exit == -1 && exit_text != "-1" {
+        problems.push(f"`{stem}.exit` must hold an integer, found `{exit_text}`");
+    }
+    var argv: List<str> = ["run", program, "--"];
+    let arg_text = read_optional(stem + ".args");
+    if arg_text != none {
+        for a in test_lines(arg_text) { argv.push(a); }
+    }
+    let input = read_optional(stem + ".stdin") ?? "";
+    let exe = proc.current_exe() ?? "pilot";
+    let out = proc.run(exe, argv, input);
+    if out.stdout != expected_stdout {
+        problems.push(f"stdout differs\n--- expected ---\n{expected_stdout}--- actual ---\n{out.stdout}--- stderr ---\n{out.stderr}");
+    }
+    if out.exit_code != expected_exit {
+        problems.push(f"exit code {out.exit_code}, expected {expected_exit}\n--- stderr ---\n{out.stderr}");
+    }
+    let stderr_text = read_optional(stem + ".stderr");
+    if stderr_text != none {
+        for line in test_lines(stderr_text) {
+            let want = line.trim();
+            if want.len() > 0 && out.stderr.find(want, 0) < 0 {
+                problems.push(f"stderr lacks `{want}`\n--- stderr ---\n{out.stderr}");
+            }
+        }
+    }
+    return TestResult { name: program, problems: problems };
+}
+
+/// The `[Test]` functions of `program`, each run on its own.
+pub fn test_run_functions(program: str, filter: str) -> List<TestResult> {
+    var out: List<TestResult> = [];
+    let fns = host_functions(program) ?? [];
+    for f in fns {
+        var marked = false;
+        for a in f.attrs {
+            if a == test_attr() { marked = true; }
+        }
+        let name = program + "::" + f.name;
+        if !marked || name.find(filter, 0) < 0 { continue; }
+        var problems: List<str> = [];
+        let run = host_run(program, [], f.name + "();");
+        if report_diagnostics(run.diags) > 0 {
+            problems.push("does not compile");
+        } else if run.exit_code != 0 {
+            problems.push(f"failed with exit code {run.exit_code}");
+        }
+        out.push(TestResult { name: name, problems: problems });
+    }
+    return out;
+}
+
+/// Whether `program` declares any `[Test]` function.
+pub fn test_has_functions(program: str) -> bool {
+    for f in host_functions(program) ?? [] {
+        for a in f.attrs {
+            if a == test_attr() { return true; }
+        }
+    }
+    return false;
+}
+
+fn print_failure(r: TestResult) {
+    print(f"FAIL {r.name}");
+    for p in r.problems { print("  " + p); }
+}
+
+/// Runs one program (a conformance case or a unit-test file) into `tally`.
+pub fn test_program(program: str, filter: str, var ref tally: TestTally) {
+    var results: List<TestResult> = [];
+    if File.exists(test_stem(program) + ".stdout") {
+        if program.find(filter, 0) >= 0 { results.push(test_run_case(program)); }
+    } else if test_has_functions(program) {
+        results = test_run_functions(program, filter);
+    } else if program.find(filter, 0) >= 0 {
+        results.push(TestResult { name: program, problems: ["has no `.stdout` expectation file and no `[Test]` functions"] });
+    }
+    for r in results {
+        if r.problems.len == 0 {
+            tally.passed = tally.passed + 1;
+        } else {
+            tally.failed = tally.failed + 1;
+            print_failure(r);
+        }
+    }
+}
+
+/// Runs the known-bug programs of `dir`; each must still fail.
+pub fn test_known_bugs(dir: str, filter: str, var ref tally: TestTally) {
+    for program in test_programs_in(dir) {
+        if program.find(filter, 0) < 0 { continue; }
+        let r = test_run_case(program);
+        if r.problems.len == 0 {
+            tally.bugs_fixed = tally.bugs_fixed + 1;
+            print(f"FIXED {program}: the bug it reproduces is gone; move it up into the corpus, delete its `bug_registry()` entry and undo every [Workaround] naming it");
+        } else {
+            tally.bugs_reproduced = tally.bugs_reproduced + 1;
+        }
+    }
+}
+
+/// `pilot test [paths...] [--filter text]`: exit 0 when every case passes and
+/// every known bug still reproduces, 1 otherwise.
+pub fn test_command(paths: List<str>, filter: str) -> i64 {
+    var tally = TestTally { passed: 0, failed: 0, bugs_reproduced: 0, bugs_fixed: 0 };
+    let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
+    for root in roots {
+        if root.ends_with(".pilot") {
+            if !File.exists(root) {
+                eprint(f"error: no such file `{root}`");
+                return 2;
+            }
+            test_program(root, filter, tally);
+            continue;
+        }
+        let programs = test_programs_in(root);
+        if programs.len == 0 {
+            eprint(f"error: no `.pilot` programs in `{root}`");
+            return 2;
+        }
+        for program in programs { test_program(program, filter, tally); }
+        let bugs = (if root.ends_with("/") { root } else { root + "/" }) + test_known_bugs_dir();
+        if test_programs_in(bugs).len > 0 { test_known_bugs(bugs, filter, tally); }
+    }
+    print(f"RESULT: {tally.passed} passed, {tally.failed} failed, {tally.bugs_reproduced} known bugs reproduced, {tally.bugs_fixed} known bugs fixed");
+    return if tally.failed == 0 && tally.bugs_fixed == 0 { 0 } else { 1 };
+}

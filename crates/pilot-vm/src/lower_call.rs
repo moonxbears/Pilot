@@ -37,7 +37,7 @@ impl BytecodeCompiler {
     fn compile_call_value(&mut self, arena: &AstArena, arg_start: u32, arg_len: u32) -> u8 {
         let (arg_start, arg_len) = (arg_start as usize, arg_len as usize);
         if arg_len == 0 || arg_start >= arena.extra_children.len() {
-            return self.error("malformed call".to_string());
+            return self.error(crate::codes::SYNTAX, "malformed call".to_string());
         }
         let ids: Vec<NodeId> = arena.extra_children[arg_start..arg_start + arg_len]
             .iter()
@@ -52,7 +52,7 @@ impl BytecodeCompiler {
             return match self.order_named_args(arena, ids) {
                 Ok(ordered) if Self::has_named_args(arena, &ordered[1..]) => self.compile_call_positional(arena, &ordered),
                 Ok(ordered) => self.compile_call_ids(arena, &ordered),
-                Err(message) => self.error(message),
+                Err((code, message)) => self.error(code, message),
             };
         }
         self.compile_call_positional(arena, ids)

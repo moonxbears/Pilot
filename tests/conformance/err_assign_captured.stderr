@@ -1,1 +1,2 @@
 cannot assign to `total` inside a lambda
+error[DECL004]:

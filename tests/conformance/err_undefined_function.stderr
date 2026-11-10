@@ -1,1 +1,2 @@
-error: no function named `nowhere`
+error[DECL001]: no function named `nowhere`
+err_undefined_function.pilot:4:5

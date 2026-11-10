@@ -1,0 +1,2 @@
+error[FLOW004]: `continue` outside of a loop
+err_continue_outside.pilot:4:5

@@ -287,7 +287,7 @@ pub fn tir_is_struct_literal_call(nid: i64) -> bool {
     return __engine("ast_orig_kind", __engine("ast_child_at", nid, 1)) == 219;
 }
 
-pub pure fn tir_binop_sym(op: i64) -> str {
+pub fn tir_binop_sym(op: i64) -> str {
     if op == 1 { return "+"; }
     if op == 2 { return "-"; }
     if op == 3 { return "*"; }
@@ -306,7 +306,7 @@ pub pure fn tir_binop_sym(op: i64) -> str {
     if op == 18 { return "^"; }
     if op == 19 { return "<<"; }
     if op == 20 { return ">>"; }
-    return "+";
+    return seam("emit.unlowered_operator", f"no emitter spelling for binary operator {op}");
 }
 
 pub fn tir_escape_str_lit(raw_s: str) -> str {

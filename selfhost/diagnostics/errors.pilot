@@ -758,4 +758,50 @@ pub let ERRORS = [
         category: "CppAdapter",
         reference: "C++ Itanium diamond inheritance / Milestone 15",
     },
+    // -------------------------------------------------------------------------
+    // Seed compiler diagnostics (SYN001, SEED001, PAT001, INIT001, CALL003, DIM002)
+    // Codes the bootstrap compiler attaches (`crates/pilot-vm/src/codes.rs`).
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "SYN001",
+        title: "Malformed Syntax",
+        description: "Source text that does not form a construct of the language: a missing value, operand, pattern or clause",
+        category: "Syntax",
+        reference: "Rust E0000-series parse errors / C# CS1002",
+    },
+    ErrorDef {
+        code: "SEED001",
+        title: "Construct Not Supported by the Seed",
+        description: "The bootstrap seed cannot run this construct yet; it is a limit of the seed, not an error in the program",
+        category: "Seed",
+        reference: "Phase F (MILESTONES_100.md F1-F8)",
+    },
+    ErrorDef {
+        code: "PAT001",
+        title: "Invalid Pattern",
+        description: "A switch, guard or destructuring pattern that cannot match the value it is given",
+        category: "Patterns",
+        reference: "Rust E0164 / C# CS8120",
+    },
+    ErrorDef {
+        code: "INIT001",
+        title: "Missing Field Initializer",
+        description: "A struct construction leaves a field without a value and the field has no default",
+        category: "Initialization",
+        reference: "Rust E0063 / C# CS0843",
+    },
+    ErrorDef {
+        code: "CALL003",
+        title: "Invalid Named Argument",
+        description: "A named argument names no parameter of the callee, names one twice, or precedes a positional argument",
+        category: "CallSafety",
+        reference: "C# CS1739 / CS1740 / CS8323",
+    },
+    ErrorDef {
+        code: "DIM002",
+        title: "Unknown Unit",
+        description: "A dimensional literal uses a unit suffix that no unit family declares",
+        category: "Dimensions",
+        reference: "F# FS0039 units of measure",
+    },
 ];

@@ -1,1 +1,2 @@
-err_import_missing.pilot:2:1: error: MOD001: no package `std.no_such_module`
+error[MOD001]: no package `std.no_such_module`
+err_import_missing.pilot:2:1

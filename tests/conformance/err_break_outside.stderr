@@ -1,0 +1,2 @@
+error[FLOW003]: `break` outside of a loop or switch
+err_break_outside.pilot:4:5

@@ -15,3 +15,22 @@ pub struct ProcessExit : IValue {
 pub pure fn process_exit_new(code: i32) -> ProcessExit {
     return ProcessExit { exit_code: code, success: code == 0 };
 }
+
+/// What a finished child process left: its exit code and everything it
+/// wrote. A process killed by a signal has exit code `-1`.
+pub struct ProcessOutput : IValue {
+    pub exit_code: i64;
+    pub stdout:    str;
+    pub stderr:    str;
+}
+
+/// Runs `program` with `args`, writes `input` to its standard input, and
+/// waits for it. A program that cannot be started stops the caller with an
+/// intrinsic failure.
+pub fn run(program: str, args: List<str>, input: str) -> ProcessOutput {
+    let out = __engine("proc_run", program, args, input);
+    return ProcessOutput { exit_code: out[0], stdout: out[1], stderr: out[2] };
+}
+
+/// The path of the running executable, or `none` when the OS does not say.
+pub fn current_exe() -> str? => __engine("proc_exe");

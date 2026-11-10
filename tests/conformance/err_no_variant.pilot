@@ -1,0 +1,13 @@
+// A `case` naming no variant of the enum is a compile error.
+enum Light {
+    Red,
+    Green,
+}
+
+fn main() {
+    print("never printed");
+    switch Light.Red {
+        case Blue(x): print(x);
+        default: print("other");
+    }
+}
