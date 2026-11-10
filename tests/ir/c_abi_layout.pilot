@@ -1,0 +1,22 @@
+// C-ABI struct layout, read through `sizeof` on the PilIR path.
+// Expected sizes come from gcc 15 and clang (x86_64 SysV), compiling the
+// same structs written in C (see c_abi_layout.c beside this file):
+//   Trio 12, ByteThenTrio 16, ByteThenWide 32, Flags 8, Mixed 24,
+//   MixedSorted 16, Nested 20.
+struct Trio { a: i32; b: i32; c: i32; }
+struct ByteThenTrio { x: u8; t: Trio; }
+struct ByteThenWide { a: u8; b: i128; }
+struct Flags { a: bool; b: bool; c: i32; }
+struct Mixed { a: u8; b: f64; c: u16; }
+struct MixedSorted { b: f64; c: u16; a: u8; }
+struct Nested { n: ByteThenTrio; z: u8; }
+
+fn main() {
+    print(sizeof(Trio));
+    print(sizeof(ByteThenTrio));
+    print(sizeof(ByteThenWide));
+    print(sizeof(Flags));
+    print(sizeof(Mixed));
+    print(sizeof(MixedSorted));
+    print(sizeof(Nested));
+}

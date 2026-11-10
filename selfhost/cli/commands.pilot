@@ -272,7 +272,9 @@ pub fn cmd_ir(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     if args[1].ends_with(ir_text_ext()) {
         return host_text_tool(args[1], cli_ir_files(), f"ir_text_main(\"{args[0]}\");");
     }
-    let compiled = host_check(args[1]);
+    // The lowered program runs on the PilIR interpreter, not the seed, so a
+    // construct only the seed cannot run does not stop it.
+    let compiled = without_seed_limits(host_check(args[1]));
     if report_diagnostics(compiled) > 0 { return 1; }
     return host_program_tool(args[1], cli_ir_files(), cli_ir_decls(), f"ir_main(\"{args[0]}\");");
 }

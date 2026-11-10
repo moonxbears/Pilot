@@ -196,13 +196,21 @@ fn sg_form_code(form: SiteForm) -> i64 {
     return 0;
 }
 
-/// Whether `token` names a milestone (`F6`, `M17`) rather than a seam.
+/// Whether `token` names a milestone rather than a seam: `F`, `M` or `P`,
+/// digits, and at most one trailing lowercase letter for a milestone added
+/// between two numbered ones (`F6`, `M17`, `P20`, `F5b`).
 fn sg_is_milestone_id(token: str) -> bool {
     if token.len() < 2 { return false; }
     let head = token.byte_at(0);
-    if head != 70 && head != 77 { return false; }
+    // ASCII `F`, `M`, `P`.
+    if head != 70 && head != 77 && head != 80 { return false; }
+    var end = token.len();
+    let last = token.byte_at(end - 1);
+    // ASCII `a`..`z`.
+    if last >= 97 && last <= 122 { end = end - 1; }
+    if end < 2 { return false; }
     var i = 1;
-    while i < token.len() {
+    while i < end {
         let b = token.byte_at(i);
         if b < 48 || b > 57 { return false; }
         i = i + 1;

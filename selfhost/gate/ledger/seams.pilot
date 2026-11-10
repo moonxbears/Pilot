@@ -267,6 +267,10 @@ pub fn bug_registry() -> List<KnownBug> {
             "a 0b00 `IValue` struct is shared, not copied: after `var b = a; b.x = 2;` the field of `a` is 2",
             "`a.x` stays 1; prints 1", "prints 2",
             "tests/conformance/known_bugs/value_struct_shared.pilot", "F6"),
+        known_bug("seed.view_reinterpret_identity", "crates/pilot-vm `as view` casts",
+            "`xs as view T` returns `xs` unchanged instead of reading the same memory as elements of `T`: an i32 slice viewed as u32 keeps its negative values",
+            "the i32 bits read as u32; prints 4294967295, 7, 4294967294, 3", "prints -1, 7, -2, 3",
+            "tests/conformance/known_bugs/view_reinterpret_identity.pilot", "F6"),
     ];
     return entries;
 }

@@ -149,6 +149,10 @@ pub pure fn native_member_hook() -> str => "bind_native_member";
 pub pure fn list_literal_hook() -> str => "bind_list_literal";
 pub pure fn operator_intrinsic_hook() -> str => "bind_operator_intrinsic";
 pub pure fn map_literal_hook() -> str => "bind_map_literal";
+/// A compile-time question about a type argument (`sizeof(T)`), and the
+/// question that asks for its size in bytes.
+pub pure fn type_query_hook() -> str => "bind_type_query";
+pub pure fn byte_size_query() -> str => "byte_size";
 
 /// Lowers the program the checker analysed, starting at its `main`.
 pub fn lower_program(inf: Infer) -> IrModule {
@@ -579,11 +583,24 @@ pub fn lower_cast(lw: Lowerer, n: i64, value: i64) -> u32 {
     return emit(lw, op_cast(), 0, to, [v], n);
 }
 
+/// `sizeof(T)`: the size the checker's layout of `T` gives, as a constant.
+/// A type whose layout the checker does not know stops at the lowering seam.
+fn lower_type_query(lw: Lowerer, n: i64, query: str, arg: i64) -> u32 {
+    let t = type_receiver(lw.inf, arg);
+    if query != byte_size_query() || !ty_is_named(lw.inf.p.tt, t) { return unsupported(lw, n); }
+    guard some e = type_extent(lw.inf.p, t, 0) else { return unsupported(lw, n); }
+    return emit(lw, op_const_bits(), 0, physics_of(lw, n), [pool_int(lw, e.size as i64)], n);
+}
+
 pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let ch = children(s, n);
     var i = 1;
     let callee = ch[0];
+    if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 && ch.len() == 2 {
+        let query = bound(lw, type_query_hook(), [node_name(s, callee)]);
+        if query != "" { return lower_type_query(lw, n, query, ch[1]); }
+    }
     if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 {
         let as_type = type_receiver(lw.inf, callee);
         if ty_is_named(lw.inf.p.tt, as_type) && ch.len() == 2 && kind(s, ch[1]) == nk_map() {

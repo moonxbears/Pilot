@@ -107,3 +107,13 @@ fn an_unlowered_construct_stops_at_its_seam() {
     assert!(stderr.contains("SEAM001") && stderr.contains("ir.lower_construct"), "{stderr}");
     assert_eq!(text(&out.stdout), "");
 }
+
+#[test]
+fn struct_sizes_follow_the_c_abi() {
+    // Expected sizes from gcc and clang (x86_64 SysV) on the same structs
+    // written in C: tests/ir/c_abi_layout.c.
+    let out = pilot(&["ir", "run", "tests/ir/c_abi_layout.pilot"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let expected = std::fs::read_to_string(root().join("tests/ir/c_abi_layout.stdout")).expect("expected sizes");
+    assert_eq!(text(&out.stdout), expected);
+}

@@ -121,6 +121,7 @@ fn test_m22_1_arbitrary_n_field_flattener_and_cycle_detection() {
                     type_name: "i64",
                     layout_id: 1,
                     byte_size: 8,
+                    byte_align: 8,
                     lattice_bits: 0,
                     is_mutable: true,
                 });
@@ -181,15 +182,15 @@ fn test_m22_2_horizontal_collision_algebra() {
 
             // BundleSpatial: has id: i64, x: f32, y: f32
             var b_spatial = bundle_def_new("SpatialBundle", false);
-            b_spatial.fields.push(BundleFieldDef { name: "id", type_name: "i64", layout_id: 1, byte_size: 8, lattice_bits: 0, is_mutable: false });
-            b_spatial.fields.push(BundleFieldDef { name: "x", type_name: "f32", layout_id: 2, byte_size: 4, lattice_bits: 0, is_mutable: true });
-            b_spatial.fields.push(BundleFieldDef { name: "y", type_name: "f32", layout_id: 2, byte_size: 4, lattice_bits: 0, is_mutable: true });
+            b_spatial.fields.push(BundleFieldDef { name: "id", type_name: "i64", layout_id: 1, byte_size: 8, byte_align: 8, lattice_bits: 0, is_mutable: false });
+            b_spatial.fields.push(BundleFieldDef { name: "x", type_name: "f32", layout_id: 2, byte_size: 4, byte_align: 4, lattice_bits: 0, is_mutable: true });
+            b_spatial.fields.push(BundleFieldDef { name: "y", type_name: "f32", layout_id: 2, byte_size: 4, byte_align: 4, lattice_bits: 0, is_mutable: true });
 
             // BundleNetwork: has id: i64, flags: u32, scratch: i64
             var b_net = bundle_def_new("NetworkBundle", false);
-            b_net.fields.push(BundleFieldDef { name: "id", type_name: "i64", layout_id: 1, byte_size: 8, lattice_bits: 0, is_mutable: false });
-            b_net.fields.push(BundleFieldDef { name: "flags", type_name: "u32", layout_id: 3, byte_size: 4, lattice_bits: 0, is_mutable: true });
-            b_net.fields.push(BundleFieldDef { name: "scratch", type_name: "i64", layout_id: 1, byte_size: 8, lattice_bits: 0, is_mutable: true });
+            b_net.fields.push(BundleFieldDef { name: "id", type_name: "i64", layout_id: 1, byte_size: 8, byte_align: 8, lattice_bits: 0, is_mutable: false });
+            b_net.fields.push(BundleFieldDef { name: "flags", type_name: "u32", layout_id: 3, byte_size: 4, byte_align: 4, lattice_bits: 0, is_mutable: true });
+            b_net.fields.push(BundleFieldDef { name: "scratch", type_name: "i64", layout_id: 1, byte_size: 8, byte_align: 8, lattice_bits: 0, is_mutable: true });
 
             // Method ping accesses flags and scratch
             b_net.methods.push(BundleMethodDef {
@@ -292,6 +293,7 @@ fn test_m22_3_sealed_partial_struct_and_lattice_law() {
                 type_name: "slice<u8>",
                 layout_id: 10,
                 byte_size: 16,
+                byte_align: 8,
                 lattice_bits: 1, // 0b01 = Reference View
                 is_mutable: false,
             });

@@ -181,22 +181,53 @@ fn listed(items: List<str>, name: str) -> bool {
     return false;
 }
 
-/// Bytes a value of type `t` takes: its `[Bits]` width, or its layout plan's
-/// size; 0 when not known (a generic parameter, an interface, an enum).
-[StandIn("check.field_size", "the byte size of every field type", "fields of a generic parameter, interface or enum type count 0 bytes", "F5")]
-fn byte_size(p: Program, t: i64, depth: i64) -> usize {
-    if !ty_is_named(p.tt, t) { return 0; }
+/// The bytes a value of a type takes and the byte boundary it is placed on.
+pub struct TypeExtent : IValue {
+    pub size: usize;
+    pub align: usize;
+}
+
+/// The extent of type `t`, or `none` when the checker does not know it (a
+/// generic parameter, an interface, an enum, or a struct with such a field).
+/// A `[Bits(width, ..)]` type takes `ceil(width / 8)` bytes and is aligned to
+/// that size rounded up to a power of two (the natural alignment C gives a
+/// scalar on the 64-bit targets: a 1-bit `bool` takes 1 byte, a 128-bit
+/// integer 16). A struct takes its layout plan's size and alignment.
+pub fn type_extent(p: Program, t: i64, depth: i64) -> TypeExtent? {
+    if !ty_is_named(p.tt, t) { return none; }
     let d = ty_decl(p.tt, t);
     let name = node_name(p.s, d);
     for decl in nl_get(p.type_decls, name) {
         if some args = prog_attr_nodes(p, decl, "Bits") {
             if args.len() > 0 {
-                if some bits = prog_const(p, args[0]) { return (bits / 8) as usize; }
+                if some bits = prog_const(p, args[0]) {
+                    let size = ((bits + 7) / 8) as usize;
+                    var align: usize = 1;
+                    while align < size { align = align * 2; }
+                    return TypeExtent { size: size, align: align };
+                }
             }
         }
     }
-    if kind(p.s, d) != nk_struct() || depth > 8 { return 0; }
-    return build_type(p, name, depth + 1).plan.total_size;
+    if kind(p.s, d) != nk_struct() || depth > 8 { return none; }
+    let bt = build_type(p, name, depth + 1);
+    for f in bt.own_fields {
+        if f.byte_align == 0 { return none; }
+    }
+    return TypeExtent { size: bt.plan.total_size, align: bt.plan.alignment };
+}
+
+/// Bytes a value of type `t` takes as a field; 0 when not known.
+[StandIn("check.field_size", "the byte size of every field type", "fields of a generic parameter, interface or enum type count 0 bytes", "F5")]
+fn byte_size(p: Program, t: i64, depth: i64) -> usize {
+    guard some e = type_extent(p, t, depth) else { return 0; }
+    return e.size;
+}
+
+/// The byte boundary a field of type `t` is placed on; 0 when not known.
+fn byte_align(p: Program, t: i64, depth: i64) -> usize {
+    guard some e = type_extent(p, t, depth) else { return 0; }
+    return e.align;
 }
 
 /// The lattice bits of type `t` (0 when it is not derived).
@@ -314,6 +345,7 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
                     type_name: node_text(s, field_type_node(s, m)),
                     layout_id: 0,
                     byte_size: byte_size(p, ft, depth),
+                    byte_align: byte_align(p, ft, depth),
                     lattice_bits: field_lattice(p, m, ft) as u8,
                     is_mutable: kind(s, m) == nk_var(),
                 };

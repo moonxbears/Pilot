@@ -1,0 +1,14 @@
+// KNOWN BUG seed.view_reinterpret_identity: `xs as view T` reinterprets the
+// same memory as elements of `T` without copying (stdlib/core/primitives/
+// slice.pilot as_structural_view). The seed returns `xs` unchanged instead.
+// Expected values are two's complement arithmetic: the 32 bits of the i32 -1
+// read as a u32 are 2^32 - 1 = 4294967295, and those of -2 are
+// 2^32 - 2 = 4294967294; 7 is the same in both. The view keeps 3 elements.
+fn main() {
+    let xs: i32[] = [-1, 7, -2];
+    let us = xs as view u32;
+    print(us[0]);
+    print(us[1]);
+    print(us[2]);
+    print(us.len);
+}

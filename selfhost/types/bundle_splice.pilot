@@ -40,6 +40,9 @@ pub struct BundleFieldDef : IValue {
     pub type_name:    str;
     pub layout_id:    usize;
     pub byte_size:    usize;
+    /// The byte boundary the field is placed on; 0 when not known (it is
+    /// then placed on any byte).
+    pub byte_align:   usize;
     pub lattice_bits: u8;
     pub is_mutable:   bool;
 }
@@ -219,7 +222,7 @@ pub fn compute_struct_layout(
     var pfi = 0;
     while pfi < n_prim {
         let pf = primary_fields[pfi];
-        let f_align = if pf.byte_size >= 8 { 8 } else if pf.byte_size >= 4 { 4 } else if pf.byte_size >= 2 { 2 } else { 1 };
+        let f_align = if pf.byte_align > 0 { pf.byte_align } else { 1 };
         if f_align > max_align { max_align = f_align; }
 
         cur_offset = align_up(cur_offset, f_align);
@@ -340,7 +343,7 @@ pub fn compute_struct_layout(
                 }
             } else {
                 // Brand new physical field
-                let f_align = if bf.byte_size >= 8 { 8 } else if bf.byte_size >= 4 { 4 } else if bf.byte_size >= 2 { 2 } else { 1 };
+                let f_align = if bf.byte_align > 0 { bf.byte_align } else { 1 };
                 if f_align > max_align { max_align = f_align; }
 
                 cur_offset = align_up(cur_offset, f_align);
