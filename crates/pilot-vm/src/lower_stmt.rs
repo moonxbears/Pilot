@@ -14,13 +14,16 @@ impl BytecodeCompiler {
         for &c_id in &children {
             let cn = arena.node(NodeId(c_id));
             match cn.node_kind() {
-                NodeKind::LetStmt | NodeKind::ConstDecl => {
-                    if let Some(m) = self.eval_cmap(arena, NodeId(cn.rhs)) {
-                        self.const_maps.insert(Self::name(arena, cn.lhs).to_string(), m);
+                NodeKind::LetStmt | NodeKind::ConstDecl | NodeKind::VarStmt => {
+                    if cn.node_kind() != NodeKind::VarStmt {
+                        if let Some(m) = self.eval_cmap(arena, NodeId(cn.rhs)) {
+                            self.const_maps.insert(Self::name(arena, cn.lhs).to_string(), m);
+                        }
                     }
+                    self.register_global(arena, NodeId(c_id));
                 }
                 NodeKind::TypeAdtDecl => self.register_enum(arena, NodeId(c_id)),
-                NodeKind::StructDecl => self.register_struct(arena, NodeId(c_id)),
+                NodeKind::StructDecl | NodeKind::ExtendDecl => self.register_struct(arena, NodeId(c_id)),
                 NodeKind::FnDecl => {
                     let arity = (cn.flags as usize).saturating_sub(1);
                     self.known_fns.insert(Self::name(arena, cn.lhs).to_string(), arity);
@@ -38,26 +41,46 @@ impl BytecodeCompiler {
                 _ => {}
             }
         }
+        for &c_id in &children {
+            if arena.node(NodeId(c_id)).node_kind() == NodeKind::ComptimeExpr {
+                self.compile_comptime(arena, NodeId(c_id));
+            }
+        }
         self.patch_to_here(skip);
         self.reset_fn_state();
+        // The comptime runs go after the program, once every one is compiled,
+        // and run first: the program starts by jumping to them.
+        let to_runs = self.emit_jump(0);
+        let body = self.here();
         let mut last = 0;
         for &c_id in &children {
             let kind = arena.node(NodeId(c_id)).node_kind();
-            if matches!(kind, NodeKind::FnDecl | NodeKind::StructDecl | NodeKind::ExtendDecl) {
+            if matches!(
+                kind,
+                NodeKind::FnDecl | NodeKind::StructDecl | NodeKind::ExtendDecl | NodeKind::ComptimeExpr
+            ) {
                 continue;
             }
             let mark = self.next_reg;
-            last = self.compile_node(arena, NodeId(c_id));
+            last = if self.is_global_decl(arena, NodeId(c_id)) {
+                self.compile_global_let(arena, NodeId(c_id))
+            } else {
+                self.compile_node(arena, NodeId(c_id))
+            };
             if last >= crate::FIRST_TEMP_REG {
                 self.next_reg = mark;
             }
         }
-        if let Some(ep) = entry {
-            self.push_ins(crate::Instruction::encode_wide(Opcode::Call, 0, ep));
-            self.emit(Opcode::Halt, 0, 0, 0);
-            return 0;
-        }
-        last
+        let result = match entry {
+            Some(ep) => {
+                self.push_ins(crate::Instruction::encode_wide(Opcode::Call, 0, ep));
+                self.emit(Opcode::Halt, 0, 0, 0);
+                0
+            }
+            None => last,
+        };
+        self.place_comptime_runs(to_runs, body, entry.is_none());
+        result
     }
 
     /// Lowers a `{ ... }` block. Scratch registers used by one statement are
@@ -115,10 +138,16 @@ impl BytecodeCompiler {
         if params.is_empty() && fn_name == "main" && owner.is_none() {
             *entry = Some(pc);
         }
-        if let Some(p) = owner {
-            self.fn_entries.insert(format!("{p}.{fn_name}"), (pc, params.clone()));
+        // A method is reached through its type (`Owner.name`), never by its
+        // bare name, which belongs to free functions.
+        match owner {
+            Some(p) => {
+                self.fn_entries.insert(format!("{p}.{fn_name}"), (pc, params.clone()));
+            }
+            None => {
+                self.fn_entries.entry(fn_name.clone()).or_insert((pc, params.clone()));
+            }
         }
-        self.fn_entries.entry(fn_name.clone()).or_insert((pc, params.clone()));
         let ret_name = arena
             .type_annot(fn_id)
             .and_then(|tid| {
@@ -128,12 +157,14 @@ impl BytecodeCompiler {
             })
             .unwrap_or_default();
         if !ret_name.is_empty() {
-            if let Some(p) = owner {
-                self.fn_ret_types.insert(format!("{p}.{fn_name}"), ret_name.clone());
-            }
-            self.fn_ret_types.entry(fn_name).or_insert(ret_name.clone());
+            let key = match owner {
+                Some(p) => format!("{p}.{fn_name}"),
+                None => fn_name,
+            };
+            self.fn_ret_types.entry(key).or_insert(ret_name.clone());
         }
         self.reset_fn_state();
+        self.cur_owner = owner.map(str::to_string);
         self.cur_ret_type = (!ret_name.is_empty()).then(|| ret_name.clone());
         if fn_len > 1 {
             for &p in &arena.extra_children[fn_start + 1..fn_start + fn_len] {
@@ -141,6 +172,10 @@ impl BytecodeCompiler {
                     self.var_types.insert(Self::name(arena, arena.node(NodeId(p)).lhs).to_string(), t);
                 }
             }
+        }
+        if let Some(o) = owner.filter(|_| !is_static) {
+            self.var_types.insert(receiver.to_string(), o.to_string());
+            self.var_types.insert(receiver_short.to_string(), o.to_string());
         }
         for (i, p) in params.iter().enumerate() {
             let s = self.alloc_local_reg();
@@ -290,6 +325,10 @@ impl BytecodeCompiler {
                     None if self.is_captured_name(&name) => self.error(format!(
                         "cannot assign to `{name}` inside a lambda: closures capture variables by value"
                     )),
+                    None if self.globals.contains(&name) => {
+                        self.emit_global_set(&name, rhs_r);
+                        rhs_r
+                    }
                     None => self.error(format!("assignment to undeclared variable `{name}`")),
                 }
             }

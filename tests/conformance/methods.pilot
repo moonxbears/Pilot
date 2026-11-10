@@ -1,0 +1,60 @@
+// Method calls dispatch on the struct a record was built as, a method is
+// never reachable by its bare name from outside its type, and a bare call
+// inside a method calls a sibling method on `self`.
+struct Circle {
+    r: i64 = 1;
+
+    fn area() -> i64 {
+        return 3 * .r * .r;
+    }
+
+    fn describe() -> str {
+        return f"circle {area()}";
+    }
+
+    fn scaled(k: i64) -> i64 {
+        let f = (x) => x * area();
+        return f(k);
+    }
+}
+
+struct Square {
+    side: i64 = 2;
+
+    fn area() -> i64 {
+        return .side * .side;
+    }
+
+    pub static fn one() -> Square => Square { side: 1 };
+
+    fn grow() -> Square {
+        let u = one();
+        return Square { side: .side + u.side };
+    }
+}
+
+fn area(x: i64) -> i64 => x * 100;
+
+fn pick(n: i64) {
+    if n == 0 {
+        return Circle { r: 2 };
+    }
+    return Square();
+}
+
+fn main() {
+    print(pick(0).area());
+    print(pick(1).area());
+    print(area(5));
+    print(Circle().describe());
+    print(Circle { r: 2 }.scaled(10));
+    print(Square().grow().area());
+
+    let shapes = [Circle(), Square { side: 3 }];
+    var total = 0;
+    for i in 0..shapes.len() {
+        total = total + shapes[i].area();
+    }
+    print(total);
+    print(shapes.len());
+}

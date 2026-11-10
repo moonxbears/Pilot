@@ -69,7 +69,7 @@ impl BytecodeCompiler {
     /// Emits the test for `pat` against `r_subject`. Each emitted branch that
     /// fires on a mismatch is pushed to `fails`; names the pattern binds are
     /// added to `var_slots`.
-    fn compile_pattern(
+    pub(crate) fn compile_pattern(
         &mut self,
         arena: &AstArena,
         pat: NodeId,
@@ -100,10 +100,13 @@ impl BytecodeCompiler {
             }
             NodeKind::PatVariant => {
                 let name = Self::name(arena, pn.lhs).to_string();
+                if let Some(full) = self.payload_variant(&name, subject_type.as_deref()) {
+                    self.compile_payload_pattern(arena, pat, &full, r_subject, fails);
+                    self.release_to(mark);
+                    return;
+                }
                 if pn.flags != 0 {
-                    self.error(format!(
-                        "variant patterns with payloads (`{name}(..)`) are not lowered by the seed yet"
-                    ));
+                    self.error(format!("`{name}` is not an enum variant that carries values"));
                     return;
                 }
                 let Some(v) = self.resolve_variant(&name, subject_type) else {

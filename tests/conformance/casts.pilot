@@ -1,0 +1,21 @@
+// `T(x)` and `x as T` convert to a primitive's register layout, read from its
+// `[Bits(width, class)]` descriptor: floats truncate toward zero, integers
+// wrap to the width, and a 1-bit type is a boolean.
+fn main() {
+    let x = 7;
+    print(f64(x) / 2.0);
+    print(x as f64 / 2.0);
+    print(i64(3.9));
+    print(i64(-3.9));
+    print(u8(300));
+    print(i8(200));
+    print(u16(-1));
+    print(f32(0.1) == 0.1);
+    print(bool(2));
+    print(i32(true) + 1);
+    print((10 as f64) * 0.5);
+    // `as` binds tighter than `*` and comparisons, looser than prefix `-`.
+    print(1 + 2 > 300 as u8);
+    print(-3 as u8);
+    print(7 as f64 / 2.0);
+}

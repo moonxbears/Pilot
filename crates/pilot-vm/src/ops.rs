@@ -224,3 +224,56 @@ pub fn truth(v: PilotVal) -> Result<bool, String> {
     v.as_bool()
         .ok_or_else(|| format!("condition must be a boolean, found {}", v.kind_label()))
 }
+
+/// Converts a number (or boolean) to the register layout of a primitive
+/// type: `class` is the descriptor's register class and `width` its bit
+/// width. Floats go to integers by truncation toward zero; integers wrap to
+/// `width` bits; a 1-bit layout is a boolean.
+pub fn convert(v: PilotVal, class: &str, width: i64) -> Result<PilotVal, String> {
+    let is_int_class = matches!(class, "gpr_signed" | "gpr_unsigned");
+    // A heap handle (record, list, function) in a pointer-width integer
+    // register is still that handle: Pilot code types handles as integers.
+    let is_handle = v.as_map_handle().is_some()
+        || v.as_list_handle().is_some()
+        || v.as_fn_handle().is_some();
+    if is_handle && is_int_class && width >= 64 {
+        return Ok(v);
+    }
+    let n = match (num(v), v.as_bool()) {
+        (Some(n), _) => n,
+        (None, Some(b)) => Num::Int(b as i64),
+        _ => return Err(format!("cannot convert {} to a number", v.kind_label())),
+    };
+    if width == 1 {
+        return Ok(PilotVal::from_bool(as_f64(&n) != 0.0));
+    }
+    if width <= 0 {
+        return Err("cannot convert a value to a type with no bits".to_string());
+    }
+    match class {
+        "simd_float" => {
+            let f = as_f64(&n);
+            Ok(PilotVal::from_float(if width == 32 { f as f32 as f64 } else { f }))
+        }
+        _ if is_int_class => {
+            let i = match n {
+                Num::Int(i) => i,
+                Num::Float(f) if f.is_finite() && f.trunc() >= i64::MIN as f64 && f.trunc() < i64::MAX as f64 => {
+                    f.trunc() as i64
+                }
+                Num::Float(f) => return Err(format!("{f} does not fit an integer")),
+            };
+            if width >= 64 {
+                return Ok(PilotVal::from_int(i));
+            }
+            let shift = 64 - width as u32;
+            let wrapped = if class == "gpr_signed" {
+                (i << shift) >> shift
+            } else {
+                ((i as u64) << shift >> shift) as i64
+            };
+            Ok(PilotVal::from_int(wrapped))
+        }
+        other => Err(format!("no numeric conversion to a `{other}` register")),
+    }
+}

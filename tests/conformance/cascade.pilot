@@ -1,0 +1,38 @@
+// Fluid cascades: `..` applies method calls and field assignments to one
+// receiver and yields it; `?..` skips the steps when the receiver is none.
+// A literal before `..` is a range, as is `0..xs.len()`.
+struct Node {
+    title: str = "";
+    status: str = "";
+    count: i64 = 0;
+
+    fn set_title(t: str) {
+        .title = t;
+    }
+
+    fn bump(by: i64) {
+        .count = .count + by;
+    }
+}
+
+fn maybe(flag: bool) -> Node? {
+    if flag {
+        return Node();
+    }
+    return none;
+}
+
+fn main() {
+    let n = Node()..set_title("Master")..status = "OK"..bump(2)..bump(3);
+    print(f"{n.title} {n.status} {n.count}");
+    let xs = [3, 1]..push(7);
+    print(xs.len());
+    let m = maybe(true)?..set_title("yes");
+    print(m.title);
+    let z = maybe(false)?..set_title("no");
+    print(z == none);
+    let ys = [5, 6, 7, 8];
+    print(ys[1..ys.len()].len());
+    let m2 = Node()..count = 2..title = "t";
+    print(f"{m2.count} {m2.title}");
+}

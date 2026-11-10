@@ -1,0 +1,38 @@
+// Top-level bindings are globals every function reads and writes. `comptime`
+// blocks and expressions run once, in source order, before any other code.
+var counter = 0;
+let greeting = "hi " + "there";
+
+fn bump(by: i64) -> i64 {
+    counter = counter + by;
+    return counter;
+}
+
+fn square(x: i64) -> i64 => x * x;
+
+comptime {
+    print("comptime: top level");
+}
+
+const AREA = comptime square(4);
+
+print("top-level statement");
+
+fn main() {
+    comptime {
+        print("comptime: inside main");
+    }
+    print(greeting);
+    bump(2);
+    bump(5);
+    print(counter);
+    counter += 1;
+    print(counter);
+    for i in 0..3 {
+        let k = comptime { square(3) + 1 };
+        print(k + i);
+    }
+    print(AREA);
+    let f = () => counter * 10;
+    print(f());
+}

@@ -41,7 +41,7 @@ impl BytecodeCompiler {
         }
     }
 
-    fn compile_args(&mut self, arena: &AstArena, args: &[NodeId]) -> Vec<u8> {
+    pub(crate) fn compile_args(&mut self, arena: &AstArena, args: &[NodeId]) -> Vec<u8> {
         args.iter().map(|&a| self.compile_node(arena, a)).collect()
     }
 
@@ -125,6 +125,21 @@ impl BytecodeCompiler {
             let regs = self.compile_args(arena, args);
             return self.emit_closure_call(r_callee, &regs);
         }
+        if let Some(r) = self.compile_implicit_self_call(arena, name, args) {
+            return r;
+        }
+        if !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
+            let hint = self.type_hint.clone();
+            if let Some(full) = self.payload_variant(name, hint.as_deref()) {
+                return self.compile_variant_ctor(arena, &full, args);
+            }
+        }
+        if args.len() == 1 && !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
+            if let Some(layout) = pilot_parser::bootstrap_tables().reg_layout(name).cloned() {
+                let r = self.compile_node(arena, args[0]);
+                return self.emit_conversion(r, &layout);
+            }
+        }
         if !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
             if let Some(r) = self.compile_ctor_call(arena, name, args) {
                 return r;
@@ -149,19 +164,28 @@ impl BytecodeCompiler {
         let full = format!("{l_nm}.{r_nm}");
         let known = self.fn_entries.contains_key(&full);
         let receiver_is_value = is_var || (!lhs_is_name && !known);
-        if !known {
-            if let Some(hook) = SeedBuiltin::method(&r_nm) {
-                let mut regs = vec![self.compile_node(arena, NodeId(callee.lhs))];
-                regs.extend(self.compile_args(arena, args));
-                return self.emit_intrinsic(hook, &regs);
-            }
+        if receiver_is_value || (!known && SeedBuiltin::method(&r_nm).is_some()) {
+            let r_recv = self.compile_node(arena, NodeId(callee.lhs));
+            return self.emit_method_call(arena, r_recv, &l_nm, &r_nm, args);
         }
-        let mut regs = if receiver_is_value {
-            vec![self.compile_node(arena, NodeId(callee.lhs))]
-        } else {
-            Vec::new()
-        };
-        regs.extend(self.compile_args(arena, args));
+        if !known && self.variant_payloads.contains_key(&full) {
+            return self.compile_variant_ctor(arena, &full, args);
+        }
+        let regs = self.compile_args(arena, args);
         self.emit_user_call(full, r_nm, &regs)
+    }
+
+    /// Converts the value in `r` to a primitive's register layout: `T(x)` and
+    /// `x as T` for a type `T` declared with `[Bits(..)]`.
+    pub(crate) fn emit_conversion(&mut self, r: u8, layout: &pilot_parser::RegLayout) -> u8 {
+        let mark = self.next_reg;
+        let r_class = self.emit_const(PilotVal::from_str(&layout.class));
+        let r_width = self.emit_const(PilotVal::from_int(layout.width));
+        let dst = self.emit_intrinsic("num_convert", &[r, r_class, r_width]);
+        if dst >= mark {
+            self.emit(Opcode::Move, mark, dst, 0);
+        }
+        self.release_to(mark + 1);
+        mark
     }
 }

@@ -6,6 +6,9 @@
 //! the struct's constructor `self(params) { .. }` on it, with `self` bound to
 //! the record; the call's value is the record.
 //!
+//! Every record built this way remembers its struct, so a method call on a
+//! value whose type the compiler cannot see is dispatched at run time.
+//!
 //! A constructor is compiled the first time a `Name(args)` call is lowered,
 //! like a generic body checked at instantiation: a struct whose constructor
 //! needs types from modules that are not linked yet can still be used for its
@@ -48,12 +51,33 @@ impl BytecodeCompiler {
         out
     }
 
+    /// Records the methods a struct or `ext` block declares, and a struct's
+    /// fields and constructor.
     pub(crate) fn register_struct(&mut self, arena: &AstArena, decl: NodeId) {
         let dn = *arena.node(decl);
-        if dn.node_kind() != NodeKind::StructDecl || dn.rhs == u32::MAX {
+        if dn.rhs == u32::MAX || dn.rhs == 0 {
             return;
         }
-        let mut info = StructInfo::default();
+        let owner = Self::name(arena, dn.lhs).to_string();
+        for m in Self::type_members(arena, NodeId(dn.rhs)) {
+            if arena.node(m).node_kind() != NodeKind::FnDecl {
+                continue;
+            }
+            let is_static =
+                arena.decl_flags.get(m.0 as usize).copied().unwrap_or(0) & pilot_ast::DECL_FLAG_STATIC != 0;
+            let owners = self
+                .method_owners
+                .entry(Self::name(arena, arena.node(m).lhs).to_string())
+                .or_default();
+            if !owners.iter().any(|(o, _)| *o == owner) {
+                owners.push((owner.clone(), is_static));
+            }
+        }
+        if dn.node_kind() != NodeKind::StructDecl {
+            return;
+        }
+        // A `partial struct` adds to the parts declared before it.
+        let mut info = self.structs.remove(Self::name(arena, dn.lhs)).unwrap_or_default();
         for m in Self::type_members(arena, NodeId(dn.rhs)) {
             let mn = arena.node(m);
             match mn.node_kind() {
@@ -64,7 +88,23 @@ impl BytecodeCompiler {
                 _ => {}
             }
         }
-        self.structs.insert(Self::name(arena, dn.lhs).to_string(), info);
+        self.structs.insert(owner, info);
+    }
+
+    /// A new empty record of struct `name`.
+    fn emit_new_record(&mut self, name: &str) -> u8 {
+        let r_obj = self.emit_intrinsic("map_new", &[]);
+        self.emit_record_type(r_obj, name);
+        r_obj
+    }
+
+    /// Marks the record in `r_obj` as built from struct `name`, which is what
+    /// method calls dispatch on.
+    fn emit_record_type(&mut self, r_obj: u8, name: &str) {
+        let mark = self.next_reg;
+        let r_name = self.emit_const(PilotVal::from_str(name));
+        self.emit_intrinsic("record_set_type", &[r_obj, r_name]);
+        self.release_to(mark);
     }
 
     /// Sets each defaulted field of `name` that is not in `given` on `r_obj`.
@@ -88,6 +128,7 @@ impl BytecodeCompiler {
     pub(crate) fn compile_struct_literal(&mut self, arena: &AstArena, name: &str, literal: NodeId) -> u8 {
         let ln = *arena.node(literal);
         let r_obj = self.compile_map_literal(arena, ln.lhs, ln.rhs);
+        self.emit_record_type(r_obj, name);
         let given: Vec<String> = arena
             .children_slice(ln.lhs, ln.rhs)
             .chunks(2)
@@ -104,7 +145,7 @@ impl BytecodeCompiler {
             if !args.is_empty() {
                 return Some(self.error(format!("`{name}` has no constructor `self(..)`")));
             }
-            let r_obj = self.emit_intrinsic("map_new", &[]);
+            let r_obj = self.emit_new_record(name);
             self.emit_field_defaults(arena, name, &[], r_obj);
             return Some(r_obj);
         };
@@ -116,7 +157,7 @@ impl BytecodeCompiler {
             self.patch_to_here(skip);
             self.restore_fn_state(saved);
         }
-        let r_obj = self.emit_intrinsic("map_new", &[]);
+        let r_obj = self.emit_new_record(name);
         self.emit_field_defaults(arena, name, &[], r_obj);
         let mut regs = vec![r_obj];
         regs.extend(args.iter().map(|&a| self.compile_node(arena, a)));

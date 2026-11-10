@@ -8,12 +8,16 @@
 mod heap;
 pub mod instruction;
 mod lower_call;
+mod lower_cascade;
 mod lower_closure;
 mod lower_defer;
+mod lower_dispatch;
 mod lower_expr;
+mod lower_global;
 mod lower_stmt;
 mod lower_struct;
 mod lower_try;
+mod lower_variant;
 mod lower_switch;
 mod ops;
 pub mod pilc;
@@ -91,6 +95,7 @@ struct FnState {
     var_slots: HashMap<String, u8>,
     var_types: HashMap<String, String>,
     cur_ret_type: Option<String>,
+    cur_owner: Option<String>,
     next_local_reg: u8,
     next_reg: u8,
     loops: Vec<LoopCtx>,
@@ -115,6 +120,18 @@ pub struct BytecodeCompiler {
     cur_span: ByteSpan,
     /// Declared return type of the function being compiled.
     cur_ret_type: Option<String>,
+    /// The struct or `ext` type whose method is being compiled.
+    cur_owner: Option<String>,
+    /// Names of the module-level bindings that live in the VM's globals.
+    globals: std::collections::HashSet<String>,
+    /// `comptime` code compiled so far, run before everything else.
+    comptime_runs: Vec<lower_global::ComptimeRun>,
+    /// Payload field names of each enum variant that carries values, by
+    /// `Enum.Variant`.
+    variant_payloads: HashMap<String, Vec<String>>,
+    /// Every declared method by name: the types declaring it, and whether
+    /// that declaration is static.
+    method_owners: HashMap<String, Vec<(String, bool)>>,
     /// Expected type of the expression being compiled, used to resolve
     /// target-typed enum variants (`::Variant`).
     type_hint: Option<String>,
@@ -344,6 +361,13 @@ impl BytecodeCompiler {
         self.next_reg = mark;
     }
 
+    /// Emits a trap that stops the program with `message` when reached.
+    fn emit_trap(&mut self, message: String) -> u8 {
+        let c = self.add_constant(PilotVal::from_str(&message));
+        self.push_ins(Instruction::encode_wide(Opcode::Trap, 0, c));
+        self.emit_null()
+    }
+
     /// Records a diagnostic at the current span and emits a trap carrying it.
     fn error(&mut self, message: String) -> u8 {
         let c = self.add_constant(PilotVal::from_str(&message));
@@ -362,6 +386,7 @@ impl BytecodeCompiler {
             var_slots: std::mem::take(&mut self.var_slots),
             var_types: std::mem::take(&mut self.var_types),
             cur_ret_type: self.cur_ret_type.take(),
+            cur_owner: self.cur_owner.take(),
             next_local_reg: self.next_local_reg,
             next_reg: self.next_reg,
             loops: std::mem::take(&mut self.loops),
@@ -375,6 +400,7 @@ impl BytecodeCompiler {
         self.var_slots = s.var_slots;
         self.var_types = s.var_types;
         self.cur_ret_type = s.cur_ret_type;
+        self.cur_owner = s.cur_owner;
         self.next_local_reg = s.next_local_reg;
         self.next_reg = s.next_reg;
         self.loops = s.loops;
@@ -401,6 +427,7 @@ impl BytecodeCompiler {
         self.var_slots.clear();
         self.var_types.clear();
         self.cur_ret_type = None;
+        self.cur_owner = None;
         self.loops.clear();
         self.tries.clear();
         self.defers.clear();
@@ -547,6 +574,7 @@ impl BytecodeCompiler {
         let mut map = HashMap::new();
         let mut next = 0i64;
         for &vid in arena.children_slice(cn.rhs, cn.flags as u32) {
+            self.register_variant_payload(arena, &e_nm, NodeId(vid));
             let vn = arena.node(NodeId(vid));
             let v_nm = Self::name(arena, vn.lhs).to_string();
             let mut val = next;

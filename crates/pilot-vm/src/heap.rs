@@ -278,6 +278,19 @@ impl PilVirtualMachine {
                 Ok(PilotVal::from_bool(h.ends_with(&n)))
             }
             "map_new" => Ok(self.new_map(HashMap::new())),
+            // `record_set_type(obj, name)` marks a record as built from struct `name`.
+            "record_set_type" => {
+                let obj = arg(args, 0, op)?;
+                let slot = self.map_slot(obj, op)?;
+                self.record_types.insert(slot, arg(args, 1, op)?);
+                Ok(obj)
+            }
+            // The struct a record was built as, or `none`.
+            "record_type" => {
+                let v = arg(args, 0, op)?;
+                let ty = v.as_map_handle().and_then(|slot| self.record_types.get(&slot));
+                Ok(ty.copied().unwrap_or(PilotVal::NULL))
+            }
             "map_set" => self.put(arg(args, 0, op)?, arg(args, 1, op)?, arg(args, 2, op)?, op),
             "map_get" => self.get(arg(args, 0, op)?, arg(args, 1, op)?, op),
             "map_has" => {
@@ -319,6 +332,23 @@ impl PilVirtualMachine {
                     ));
                 }
                 Ok(v)
+            }
+            "global_get" => {
+                let name = str_arg(args, 0, op)?;
+                self.globals
+                    .get(&name)
+                    .copied()
+                    .ok_or_else(|| format!("`{name}` is read before its declaration has run"))
+            }
+            "global_set" => {
+                let v = arg(args, 1, op)?;
+                self.globals.insert(str_arg(args, 0, op)?, v);
+                Ok(v)
+            }
+            // `num_convert(v, register_class, width)`: see `ops::convert`.
+            "num_convert" => {
+                let class = str_arg(args, 1, op)?;
+                crate::ops::convert(arg(args, 0, op)?, &class, int_arg(args, 2, op)?)
             }
             "list_pop" => {
                 let list = arg(args, 0, op)?;
