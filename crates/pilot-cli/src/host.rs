@@ -13,6 +13,7 @@
 //! | `cli_analyze` | path | the self-hosted analyzer's diagnostics for the file |
 //! | `cli_typecheck` | path, checker files, declaration files | the type checker's diagnostics in the program's own files (`check.rs`) |
 //! | `cli_program_tool` | path, tool files, declaration files, entry call | the tool's exit code; the tool reads the program's snapshot (`check::run_on_program`) |
+//! | `cli_text_tool` | path, tool files, entry call | the tool's exit code; the tool reads the file's text through `tool_input_text` (`tool::run_on_text`) |
 //! | `cli_functions` | path | `[name, [attributes]]` per top-level function, or `none` |
 //! | `cli_tool` | files, entry call | the tool's result as text |
 //! | `cli_tool_on` | files, entry call, input path | the same, its AST queries seeing the input file |
@@ -57,6 +58,7 @@ pub fn cli_host_ops() -> HostOpHandler {
             "cli_program_tool" => {
                 HostValue::Int(i64::from(check::run_on_program(&text(0), &texts(1), &texts(2), &text(3))))
             }
+            "cli_text_tool" => HostValue::Int(i64::from(tool::run_on_text(&text(0), &texts(1), &text(2)))),
             "cli_functions" => run::declared_functions(&text(0)).unwrap_or(HostValue::Null),
             "cli_tool" | "cli_tool_on" => {
                 let files = texts(0);

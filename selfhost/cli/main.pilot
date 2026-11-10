@@ -65,6 +65,7 @@ pub fn default_command_registry() -> CommandRegistry {
         "pilot test [filter]"
     );
     spec_command_add_flag(cmd_test, spec_new_flag("filter", "", 3, "", "", "", false, false, "Filter test cases by name substring"));
+    spec_command_add_flag(cmd_test, spec_new_flag("ir", "", 0, "false", "", "", false, false, "Run the conformance cases on the PilIR interpreter (`pilot ir run`) and check their text round trip"));
     let _ = spec_registry_register(reg, cmd_test);
 
     let cmd_bench = spec_new_command(
@@ -156,6 +157,13 @@ pub fn default_command_registry() -> CommandRegistry {
     );
     spec_command_add_flag(cmd_emit, spec_new_flag("output", "o", 4, "", "", "", false, false, "Output file path"));
     let _ = spec_registry_register(reg, cmd_emit);
+
+    let cmd_ir = spec_new_command(
+        "ir", "", "IDE, Debug & AI",
+        "Lower a program (or read a .pir file) to PilIR: verify it, print it, run it on the IR interpreter, or check its text round trip",
+        "pilot ir run app.pilot"
+    );
+    let _ = spec_registry_register(reg, cmd_ir);
 
     let cmd_from = spec_new_command(
         "from", "--from", "IDE, Debug & AI",

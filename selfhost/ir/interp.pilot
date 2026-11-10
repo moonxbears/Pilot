@@ -1,0 +1,254 @@
+// ==============================================================================
+// FILE: selfhost/ir/interp.pilot
+// F5: the PilIR interpreter.
+// ==============================================================================
+// Runs an `IrModule` so the IR is executable before a native backend exists.
+// Values are the interpreter's own values; how an instruction treats them
+// follows its physics: a 1-bit register constant is a boolean, a 64-bit
+// unsigned register constant is unsigned. Each opcode is run by the handler
+// registered for it in `interp_handlers()`; an opcode with none stops at the
+// seam `ir.interp_opcode`. Engine operations (`call_intrinsic`) are run by
+// the hook registered for them in `interp_hooks()`; a hook with none stops at
+// the seam `ir.interp_hook`.
+pub lvl(0) pkg Pilot.SelfHost.Ir.Interp;
+
+use selfhost.ir.model.*;
+
+/// One activation of a function.
+pub struct IrFrame : IObject {
+    pub m: IrModule;
+    pub f: IrFunction;
+    /// Value id -> its value.
+    pub vals: List<any>;
+    /// Stack slot cells; a `stack_slot` value is an index into this list.
+    pub cells: List<any>;
+    /// Where control goes after a terminator: the block, or -1 to return.
+    pub next: i64;
+    /// Arguments for the next block's parameters.
+    pub next_args: List<any>;
+    pub ret: any;
+    pub handlers: List<any>;
+    pub hooks: Map<str, any>;
+}
+
+/// Runs `main` (function 0) and returns the exit code `pilot run` would.
+pub fn ir_run(m: IrModule) -> i64 {
+    let handlers = interp_handlers();
+    let hooks = interp_hooks();
+    let out = interp_call(m, 0, [], handlers, hooks);
+    // `main` without a value exits 0, as on the seed.
+    return if out == none { 0 } else { out };
+}
+
+fn interp_call(m: IrModule, fi: i64, args: List<any>, handlers: List<any>, hooks: Map<str, any>) -> any {
+    let f = m.functions[fi];
+    var vals: List<any> = [];
+    var i = 0;
+    while i < f.value_physics.len {
+        vals.push(none);
+        i = i + 1;
+    }
+    let fr = IrFrame { m: m, f: f, vals: vals, cells: [], next: 0, next_args: args, ret: none, handlers: handlers, hooks: hooks };
+    while fr.next >= 0 {
+        let b = f.blocks[fr.next];
+        var p = 0;
+        while p < b.params.len {
+            fr.vals[b.params[p]] = fr.next_args[p];
+            p = p + 1;
+        }
+        fr.next = -1;
+        for inst in b.insts {
+            let h = if inst.opcode < handlers.len { handlers[inst.opcode] } else { none };
+            if h == none {
+                return seam("ir.interp_opcode", f"the IR interpreter has no handler for `{opcode_name(inst.opcode)}`");
+            }
+            h(fr, inst);
+        }
+    }
+    return fr.ret;
+}
+
+fn arg_values(fr: IrFrame, inst: IrInst) -> List<any> {
+    var out: List<any> = [];
+    for a in ir_args(fr.f, inst) { out.push(fr.vals[a]); }
+    return out;
+}
+
+fn put(fr: IrFrame, inst: IrInst, v: any) { fr.vals[inst.result] = v; }
+
+/// A constant integer as a value of physics `phy`.
+fn bits_value(phy: IrTypePhysics, v: i64) -> any {
+    if phy.bit_width == 1 { return v != 0; }
+    if phy.reg_class == reg_class_gpr_unsigned() && phy.bit_width >= 64 { return v as u64; }
+    return v;
+}
+
+fn run_const_bits(fr: IrFrame, inst: IrInst) {
+    put(fr, inst, bits_value(inst.physics, fr.m.ints[ir_args(fr.f, inst)[0]]));
+}
+
+fn run_const_bytes(fr: IrFrame, inst: IrInst) { put(fr, inst, fr.m.strings[ir_args(fr.f, inst)[0]]); }
+
+fn run_undef(fr: IrFrame, inst: IrInst) { put(fr, inst, none); }
+
+fn binary(fr: IrFrame, inst: IrInst) -> List<any> => arg_values(fr, inst);
+
+fn run_add(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] + a[1]); }
+fn run_sub(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] - a[1]); }
+fn run_mul(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] * a[1]); }
+fn run_div(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] / a[1]); }
+fn run_rem(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] % a[1]); }
+fn run_bit_and(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] & a[1]); }
+fn run_bit_or(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] | a[1]); }
+fn run_shl(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] << a[1]); }
+fn run_shr(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] >> a[1]); }
+
+fn run_bit_xor(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] ^ a[1]); }
+
+fn run_cmp(fr: IrFrame, inst: IrInst) {
+    let a = binary(fr, inst);
+    let p = inst.subop;
+    var r = false;
+    if p == 0 { r = a[0] == a[1]; }
+    else if p == 1 { r = a[0] != a[1]; }
+    else if p == 2 { r = a[0] < a[1]; }
+    else if p == 3 { r = a[0] <= a[1]; }
+    else if p == 4 { r = a[0] > a[1]; }
+    else { r = a[0] >= a[1]; }
+    put(fr, inst, r);
+}
+
+fn run_stack_slot(fr: IrFrame, inst: IrInst) {
+    fr.cells.push(none);
+    put(fr, inst, fr.cells.len - 1);
+}
+
+fn run_load(fr: IrFrame, inst: IrInst) { put(fr, inst, fr.cells[fr.vals[ir_args(fr.f, inst)[0]]]); }
+
+fn run_store(fr: IrFrame, inst: IrInst) {
+    let a = ir_args(fr.f, inst);
+    fr.cells[fr.vals[a[0]]] = fr.vals[a[1]];
+}
+
+fn run_call_direct(fr: IrFrame, inst: IrInst) {
+    put(fr, inst, interp_call(fr.m, inst.subop, arg_values(fr, inst), fr.handlers, fr.hooks));
+}
+
+fn run_call_intrinsic(fr: IrFrame, inst: IrInst) {
+    let name = fr.m.intrinsics[inst.subop];
+    if !fr.hooks.has(name) {
+        put(fr, inst, seam("ir.interp_hook", f"the IR interpreter does not run the engine operation `{name}`"));
+        return;
+    }
+    let hook = fr.hooks.get(name);
+    put(fr, inst, hook(arg_values(fr, inst)));
+}
+
+/// An aggregate is a record of its field values. Records are shared, not
+/// copied, when a value is passed on.
+[StandIn("ir.aggregate_by_reference", "a 0b00 value is copied when it is bound or passed (memcpy)", "the IR interpreter shares one record between every copy, as the seed does", "F5")]
+fn run_construct_aggregate(fr: IrFrame, inst: IrInst) { put(fr, inst, arg_values(fr, inst)); }
+
+fn run_extract_field(fr: IrFrame, inst: IrInst) {
+    let rec: List<any> = fr.vals[ir_args(fr.f, inst)[0]];
+    put(fr, inst, rec[inst.subop]);
+}
+
+fn run_insert_field(fr: IrFrame, inst: IrInst) {
+    let a = ir_args(fr.f, inst);
+    let rec: List<any> = fr.vals[a[0]];
+    rec[inst.subop] = fr.vals[a[1]];
+}
+
+/// A register value converted to the physics of the instruction: a 1-bit
+/// register holds a boolean, a 64-bit unsigned register an unsigned value.
+fn run_cast(fr: IrFrame, inst: IrInst) {
+    let v = fr.vals[ir_args(fr.f, inst)[0]];
+    let phy = inst.physics;
+    if phy.bit_width == 1 {
+        put(fr, inst, if v == true || v == false { v } else { v != 0 });
+    } else if phy.reg_class == reg_class_gpr_unsigned() && phy.bit_width >= 64 {
+        put(fr, inst, v as u64);
+    } else if phy.reg_class == reg_class_gpr_signed() {
+        put(fr, inst, v as i64);
+    } else {
+        put(fr, inst, v);
+    }
+}
+
+fn run_jump(fr: IrFrame, inst: IrInst) {
+    let a = ir_args(fr.f, inst);
+    var args: List<any> = [];
+    var i = 1;
+    while i < a.len() {
+        args.push(fr.vals[a[i]]);
+        i = i + 1;
+    }
+    fr.next = a[0];
+    fr.next_args = args;
+}
+
+fn run_cond_br(fr: IrFrame, inst: IrInst) {
+    let a = ir_args(fr.f, inst);
+    let taken = fr.vals[a[0]] == true;
+    let at = if taken { 1 } else { 3 + a[2] };
+    var args: List<any> = [];
+    var i = 0;
+    while i < a[at + 1] {
+        args.push(fr.vals[a[at + 2 + i]]);
+        i = i + 1;
+    }
+    fr.next = a[at];
+    fr.next_args = args;
+}
+
+fn run_return(fr: IrFrame, inst: IrInst) {
+    let a = ir_args(fr.f, inst);
+    fr.ret = if a.len() > 0 { fr.vals[a[0]] } else { none };
+    fr.next = -1;
+}
+
+/// Opcode -> its handler.
+pub fn interp_handlers() -> List<any> {
+    var hs: List<any> = [];
+    var i = 0;
+    while i < opcode_names().len() {
+        hs.push(none);
+        i = i + 1;
+    }
+    hs[op_const_bits()] = run_const_bits;
+    hs[op_const_bytes()] = run_const_bytes;
+    hs[op_undef()] = run_undef;
+    hs[op_add()] = run_add;
+    hs[op_sub()] = run_sub;
+    hs[op_mul()] = run_mul;
+    hs[op_div()] = run_div;
+    hs[op_rem()] = run_rem;
+    hs[op_bit_and()] = run_bit_and;
+    hs[op_bit_or()] = run_bit_or;
+    hs[op_bit_xor()] = run_bit_xor;
+    hs[op_shl()] = run_shl;
+    hs[op_shr()] = run_shr;
+    hs[op_cmp()] = run_cmp;
+    hs[op_cast()] = run_cast;
+    hs[op_construct_aggregate()] = run_construct_aggregate;
+    hs[op_extract_field()] = run_extract_field;
+    hs[op_insert_field()] = run_insert_field;
+    hs[op_stack_slot()] = run_stack_slot;
+    hs[op_load()] = run_load;
+    hs[op_store()] = run_store;
+    hs[op_call_direct()] = run_call_direct;
+    hs[op_call_intrinsic()] = run_call_intrinsic;
+    hs[op_jump()] = run_jump;
+    hs[op_cond_br()] = run_cond_br;
+    hs[op_return()] = run_return;
+    return hs;
+}
+
+/// Engine operation -> the function that runs it.
+pub fn interp_hooks() -> Map<str, any> {
+    let hooks = Map<str, any>();
+    hooks.set("rt_print", (args) => print(args[0]));
+    hooks.set("rt_eprint", (args) => eprint(args[0]));
+    return hooks;
+}

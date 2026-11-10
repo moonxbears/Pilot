@@ -24,6 +24,7 @@
 //! | 11 | properties, `[field node, number of accessor bodies]` each |
 //! | 12 | the receiver words: `[receiver, accessor backing storage, setter value]` (`bind_receiver_ident`), empty strings when unbound |
 //! | 13 | declarations, `[node, is partial, is static, visibility tier or -1 when none is written, is package declaration]` each |
+//! | 14 | field defaults and explicit enum values, `[field node, value node]` each |
 //!
 //! Absent node references are `-1`. The checker returns its diagnostics as
 //! `[code, message, start, end, severity]` with program-wide offsets; only
@@ -221,6 +222,11 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
             ])
         })
         .collect();
+    let field_defaults = arena
+        .field_defaults
+        .iter()
+        .map(|(field, value)| pair(i64::from(field.0), reference(value.0)))
+        .collect();
     let tables = pilot_parser::bootstrap_tables();
     let receiver_words = [&tables.receiver_ident, &tables.backing_ident, &tables.setter_value_ident]
         .into_iter()
@@ -241,6 +247,7 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
         HostValue::List(accessors),
         HostValue::List(receiver_words),
         HostValue::List(modifiers),
+        HostValue::List(field_defaults),
     ])
 }
 

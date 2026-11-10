@@ -90,6 +90,9 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("fusion.rewrite_ir", ::Exit, "PilIR rewrite of a combinator chain into one fused loop", "F5"),
         seam_entry("http.invoke_handler", ::Exit, "calling the [Service] handler a matched route names, with bound params, decoded body and requires->422", "F4"),
         seam_entry("http.weave_service", ::Entry, "[Service]/[Get]/[Post]/.. weaving of a struct and its methods into an HttpServiceDef", "F4"),
+        seam_entry("ir.interp_hook", ::Entry, "IR interpreter hooks for every engine operation a program calls (only rt_print and rt_eprint run)", "F5"),
+        seam_entry("ir.interp_opcode", ::Entry, "IR interpreter handlers for the remaining opcodes (floats, views, Perceus, guards, indirect calls, switch tables)", "F5"),
+        seam_entry("ir.lower_construct", ::Entry, "PilIR lowering for every AST node kind (floats, lists, maps, enums, for, closures, ??, catch, named arguments, accessors, pipes, cascades, defer) and programs without `main`", "F5"),
         seam_entry("inspect.resolve_target", ::Exit, "type-checked PilotDb unit that supplies woven statements, layouts, MethodTable winners and Perceus events", "F4"),
         seam_entry("json.code_point_str", ::Exit, "a str holding one Unicode scalar (code-point-to-str intrinsic) for JSON \\b, \\f and non-ASCII \\u escapes", "F6"),
         seam_entry("js.bigint_create", ::Entry, "napi_create_bigint_int64 through a loaded Node-API host", "F6"),
@@ -206,6 +209,7 @@ pub fn stand_in_registry() -> List<StandInEntry> {
         stand_in_entry("ffi.int_address", "ptr<T> data pointer and native destructor fn pointer", "addresses held as i64 with no type or provenance", "F6"),
         stand_in_entry("json.decimal_to_f64", "correctly rounded decimal to binary64 conversion (IEEE 754 roundTiesToEven)", "exact up to 15 significant digits and |exponent| <= 22; beyond that repeated scaling can be off by an ulp or more", "F6"),
         stand_in_entry("inspect.cache_line", "cache line size of the inspected target", "64 bytes on every target", "F3"),
+        stand_in_entry("ir.aggregate_by_reference", "a 0b00 value is copied when it is bound or passed (memcpy)", "the IR interpreter shares one record between every copy, as the seed does", "F5"),
         stand_in_entry("ir.fixed_layout_ids", "layout ids handed out by the type registry from [Bits] and [Layout]", "each helper returns a fixed id (0-3) and fixed register facts", "F4"),
         stand_in_entry("ir.target_defaults", "target descriptor from --target and the compile driver", "backend llvm and little-endian on every target", "F3"),
         stand_in_entry("proto.packet_bytes", "borrowed slice<u8> wire view (0b01)", "generated views hold an owned List<i64>, one byte per element", "F7"),
@@ -257,6 +261,10 @@ pub fn bug_registry() -> List<KnownBug> {
             "`::Variant` is undefined when two enums share the variant name and the seed has no type at that spot: a struct literal field (`Cell { slot: ::Value }`) or a comparison with a field of a `for` element",
             "the field's enum picks the variant; prints true", "error[DECL001]: undefined name `Value`",
             "tests/conformance/known_bugs/variant_compare_untyped.pilot", "F5"),
+        known_bug("seed.value_struct_shared", "crates/pilot-vm struct values",
+            "a 0b00 `IValue` struct is shared, not copied: after `var b = a; b.x = 2;` the field of `a` is 2",
+            "`a.x` stays 1; prints 1", "prints 2",
+            "tests/conformance/known_bugs/value_struct_shared.pilot", "F6"),
     ];
     return entries;
 }

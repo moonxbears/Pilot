@@ -440,15 +440,6 @@ pub fn prog_const_name(p: Program, e: i64) -> str {
     return if n >= 0 && kind(p.s, n) == nk_ident() { node_name(p.s, n) } else { "" };
 }
 
-/// The argument nodes of the attribute named `name` on node `n`, or none.
-pub fn prog_attr_nodes(p: Program, n: i64, name: str) -> List<i64>? {
-    for row_index in nl_get(p.attrs, key(n)) {
-        let row: List<any> = p.s.attrs[row_index];
-        if sym_text(p.s, row[1]) == name { return row[2]; }
-    }
-    return none;
-}
-
 /// The integer a constant expression evaluates to, or none.
 pub fn prog_const(p: Program, e: i64) -> i64? {
     let n = const_node(p, e, 0);

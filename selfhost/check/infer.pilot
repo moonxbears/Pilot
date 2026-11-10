@@ -170,7 +170,7 @@ fn list_type(inf: Infer, n: i64) -> i64 {
     return ty_named(p.tt, ty_decl(p.tt, lt), p.tt.name[lt], [elem]);
 }
 
-fn binding_type(inf: Infer, b: i64) -> i64 {
+pub fn binding_type(inf: Infer, b: i64) -> i64 {
     let r = inf.r;
     if r.annot[b] >= 0 { return prog_annot_type(inf.p, r.annot[b]); }
     if r.bind_kind[b] == BindKind::Local && r.source[b] >= 0 { return type_of(inf, r.source[b]); }
@@ -224,6 +224,8 @@ fn call_type(inf: Infer, n: i64) -> i64 {
             return as_type;
         }
         let f = called_fn(inf, n);
+        // `Type(args)` with no function of that name constructs the type.
+        if f < 0 && ty_is_named(p.tt, as_type) && nl_get(p.fns, node_name(s, callee)).len() == 0 { return as_type; }
         if f < 0 { return ty_unknown(); }
         let ret = prog_annot_type(p, annot(s, f));
         return ty_subst(p.tt, ret, prog_tparam_names(p, f), call_generic_args(inf, f, n));

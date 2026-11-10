@@ -1,0 +1,89 @@
+// ==============================================================================
+// FILE: selfhost/ir/main.pilot
+// F5: entry point of `pilot ir` (crates/pilot-cli/src/check.rs run_on_program).
+// ==============================================================================
+// `ir_main` reads the linked program, lets the type checker resolve and type
+// it, and lowers it to PilIR; `ir_text_main` parses PilIR text (a `.pir`
+// file). Either way the module is verified, then, by `mode`:
+//   verify     stops there;
+//   print      prints the module's text;
+//   run        runs it on the IR interpreter; the exit code is the program's;
+//   roundtrip  prints it, parses that text, prints the parsed module, and
+//              fails unless the two texts are the same byte for byte (for a
+//              `.pir` file, the file's own text is the first).
+// A module the verifier rejects is not printed or run: its issues are
+// reported and the exit code is 1. Text that does not parse is reported
+// (IR009) with exit code 1.
+pub lvl(0) pkg Pilot.SelfHost.Ir.Main;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.ir.model.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.verify.*;
+use selfhost.ir.text.*;
+use selfhost.ir.interp.*;
+
+fn lowered() -> IrModule {
+    let s = snap_load();
+    let p = prog_new(s);
+    let r = resolve_program(p, sink_new(s));
+    return lower_program(infer_new(p, r));
+}
+
+/// The text of the file the host runs this tool on (`tool::run_on_text`).
+fn input_text() -> str => __engine("tool_input_text");
+
+/// `pilot ir <mode> <program>.pilot`.
+pub fn ir_main(mode: str) -> i64 {
+    let m = lowered();
+    return finish(m, mode, print_ir_module(m));
+}
+
+/// `pilot ir <mode> <file>.pir`.
+pub fn ir_text_main(mode: str) -> i64 {
+    let text = input_text();
+    try {
+        let m = parse_ir_module(text)?;
+        return finish(m, mode, text);
+    } catch e {
+        eprint(f"error: {e.message}");
+        return 1;
+    }
+    return 1;
+}
+
+/// Verifies `m` (whose text is `first`) and does what `mode` asks.
+fn finish(m: IrModule, mode: str, first: str) -> i64 {
+    let issues = verify_ir_module(m);
+    if issues.len() > 0 {
+        for i in issues { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
+        return 1;
+    }
+    if mode == "verify" { return 0; }
+    if mode == "print" {
+        // The text ends in a newline; `print` writes that one.
+        let text = print_ir_module(m);
+        print(text.slice(0, text.len() - 1));
+        return 0;
+    }
+    if mode == "roundtrip" {
+        try {
+            let second = print_ir_module(parse_ir_module(first)?);
+            if second != first {
+                eprint("error: printing the parsed module gives different text");
+                return 1;
+            }
+        } catch e {
+            eprint(f"error: {e.message}");
+            return 1;
+        }
+        return 0;
+    }
+    if mode == "run" { return ir_run(m); }
+    eprint(f"error: unknown `pilot ir` mode `{mode}` (verify, print, run, roundtrip)");
+    return 2;
+}

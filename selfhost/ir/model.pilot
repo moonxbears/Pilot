@@ -390,16 +390,23 @@ pub fn ir_emit(f: IrFunction, b: u32, op: u16, sub: u16, phy: IrTypePhysics, arg
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
     f.spans.push(span);
-    f.blocks[b].insts.push(IrInst {
+    f.blocks[b].insts.push(ir_inst_new(result, op, sub, phy, offset, args.len, f.spans.len - 1));
+    return result;
+}
+
+/// An instruction: its result (or `ir_no_value()`), opcode and sub-opcode,
+/// physics, its operands' place in the function's operand pool, and the id
+/// of its source span in the function's span table.
+pub pure fn ir_inst_new(result: u32, op: u16, sub: u16, phy: IrTypePhysics, args_offset: u32, args_len: u32, span_id: u32) -> IrInst {
+    return IrInst {
         result:      result,
         opcode:      op,
         subop:       sub,
         physics:     phy,
-        args_offset: offset,
-        args_len:    args.len,
-        span_id:     f.spans.len - 1,
-    });
-    return result;
+        args_offset: args_offset,
+        args_len:    args_len,
+        span_id:     span_id,
+    };
 }
 
 /// The operands of `inst`.

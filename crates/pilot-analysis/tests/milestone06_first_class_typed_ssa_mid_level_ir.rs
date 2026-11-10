@@ -233,9 +233,9 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
         let phy_i64 = ir_physics_i64();
         let phy_bool = ir_physics_bool();
 
-        let inst1 = ir_inst_new(0, op_const_bits(), 0, phy_i64, 0, 0, 10, 2);
-        let inst2 = ir_inst_new(1, op_add(), 0, phy_i64, 0, 2, 14, 5);
-        let inst3 = ir_inst_new(2, op_return(), 0, phy_i64, 0, 1, 20, 8);
+        let inst1 = ir_inst_new(0, op_const_bits(), 0, phy_i64, 0, 0, 0);
+        let inst2 = ir_inst_new(1, op_add(), 0, phy_i64, 0, 2, 1);
+        let inst3 = ir_inst_new(2, op_return(), 0, phy_i64, 0, 1, 2);
 
         let s_fn = print_function_header("compute", "v0: gpr_signed[64:IValue]", phy_i64, true, false);
         let s_b0 = print_block_header(0, "v0: gpr_signed[64:IValue]");
@@ -246,7 +246,7 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
         let textual_ir = s_fn + "\n" + s_b0 + "\n" + s_i1 + "\n" + s_i2 + "\n" + s_i3 + "\n}";
 
         // Two blocks; the jump names `block1` without being a block header.
-        let inst_j = ir_inst_new(3, op_jump(), 0, phy_i64, 0, 1, 24, 4);
+        let inst_j = ir_inst_new(3, op_jump(), 0, phy_i64, 0, 1, 3);
         let two_block_ir = s_fn + "\n" + s_b0 + "\n" + s_i1 + "\n" + print_instruction(inst_j, "block1(v0)") + "\n" +
             print_block_header(1, "v3: gpr_signed[64:IValue]") + "\n" + s_i3 + "\n}";
         let two_blocks = parse_ir_count_blocks(two_block_ir);

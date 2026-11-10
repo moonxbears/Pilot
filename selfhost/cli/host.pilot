@@ -52,6 +52,17 @@ pub fn host_analyze(path: str) -> List<HostDiag> => host_diags(__engine("cli_ana
 pub fn host_typecheck(path: str, checker: List<str>, decls: List<str>) -> List<HostDiag> =>
     host_diags(__engine("cli_typecheck", path, checker, decls));
 
+/// Runs the tool made of `files`, calling `entry`, over the program at
+/// `path` linked with `decls`; the tool reads the program the way the type
+/// checker does. Its result is the tool's exit code.
+pub fn host_program_tool(path: str, files: List<str>, decls: List<str>, entry: str) -> i64 =>
+    __engine("cli_program_tool", path, files, decls, entry);
+
+/// Runs the tool made of `files`, calling `entry`, on the text of the file
+/// at `path`. Its result is the tool's exit code.
+pub fn host_text_tool(path: str, files: List<str>, entry: str) -> i64 =>
+    __engine("cli_text_tool", path, files, entry);
+
 /// Compiles and runs `path` with the script arguments `args`. A non-empty
 /// `tail` is linked after the program as its entry and runs instead of `main`.
 pub fn host_run(path: str, args: List<str>, tail: str) -> RunOutcome {

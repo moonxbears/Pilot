@@ -6,6 +6,7 @@ mod accessors;
 pub use accessors::{INDEX_GET_OP, INDEX_SET_OP};
 mod attr_hooks;
 mod generic_receiver;
+mod op_decl;
 mod modules;
 mod pilot_impls;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
@@ -434,7 +435,7 @@ impl<'a> Parser<'a> {
                 let rt = self.parse_type(); hdr_mods.ret_ty = Some(TemplateNode::from_arena(&self.arena, rt));             }
             if self.eat(TokenKind::Colon) { let merged = hdr_mods.merge_under(self.hdr_stack.last().and_then(|x| x.as_ref()));
                 self.active_hdr = Some(ScopeHeader { mods: merged, target }); return; }
-            if self.at(TokenKind::LBrace) && (target != 0 || hdr_mods.ret_ty.is_some() || !in_type_body) {
+            if self.at(TokenKind::LBrace) {
                 let (merged, blk_sp) = (hdr_mods.merge_under(self.active_hdr.as_ref()), self.span()); self.advance();
                 self.hdr_stack.push(self.active_hdr.take()); self.active_hdr = Some(ScopeHeader { mods: merged, target });
                 let mut inner = Vec::new(); while !self.at_end() && !self.at(TokenKind::RBrace) {
@@ -470,9 +471,7 @@ impl<'a> Parser<'a> {
                 if self.is_rec(7) { out.push(self.parse_extern_decl(&mods)); return; }
                 if self.is_rec(26) { out.push(self.parse_type_adt(&mods, def_vis)); return; }
                 if self.is_rec(27) { out.push(self.parse_enum_decl(&mods, def_vis, false)); return; }
-                // `op <symbol>(..)` declares an operator; `op` followed by an
-                // assignment, `.`, `;`, `,` or `)` is a name (`op = op + 2;`).
-                if self.is_rec(25) && !is_name_use(self.tape.kind(nx)) { out.push(self.parse_op_decl(&mods, def_vis)); return; }
+                if self.is_rec(25) && self.op_decl_follows(in_type_body) { out.push(self.parse_op_decl(&mods, def_vis)); return; }
                 if self.is_rec(20) && in_type_body { out.push(self.parse_scope_decl()); return; }
                 if self.is_receiver() && in_type_body { let nx = self.next_non_nl(self.cur() + 1);
                     if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen { out.push(self.parse_ctor(&mods)); return; }
@@ -1375,11 +1374,6 @@ impl<'a> Parser<'a> {
         (k == TokenKind::LParen && !chained) || assign_op_of(k).is_some() } }
 /// The `BinaryOp` an assignment token stores: 0 for `=`, the combined
 /// operator for `+=` and the other compound forms.
-/// Whether a word followed by `next` is used as a name, not starting a declaration.
-fn is_name_use(next: TokenKind) -> bool {
-    assign_op_of(next).is_some()
-        || matches!(next, TokenKind::InfixDot | TokenKind::Semicolon | TokenKind::Comma | TokenKind::RParen)
-}
 fn assign_op_of(k: TokenKind) -> Option<u16> { match k { TokenKind::Equal => Some(0u16), TokenKind::PlusEqual => Some(1), TokenKind::MinusEqual => Some(2),
         TokenKind::StarEqual => Some(3), TokenKind::SlashEqual => Some(4), TokenKind::PercentEqual => Some(6),
         TokenKind::AmperEqual => Some(16), TokenKind::VbarEqual => Some(17), TokenKind::CaretEqual => Some(18),

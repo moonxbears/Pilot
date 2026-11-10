@@ -1,0 +1,373 @@
+// ==============================================================================
+// FILE: selfhost/ir/text.pilot
+// F5: the textual form of PilIR, printed and parsed.
+// ==============================================================================
+// `print_ir_module` writes a module; `parse_ir_module` reads one back, and
+// printing what it read gives the same text byte for byte.
+//
+//   pilir 1
+//   layout <id> "<type>" <register class> <bit width> <align log2> <lattice>
+//   int <index> <value>
+//   str <index> "<escaped text>"
+//   intrinsic <index> <engine operation>
+//   fn <index> "<name>" -> <return layout> {
+//     b<id>(v<n>:<layout>, ..):
+//       [v<n> =] <opcode>[.<subop>] <operands> :<layout> !<source offset>
+//   }
+//
+// Operands: `#k` names constant pool entry k, `v<n>` a value, and a branch
+// target is `b<id>(<args>)`. A `cond_br` is `v<cond>, b<then>(..), b<else>(..)`.
+// Malformed text is reported as `IR009` with the line it is on.
+pub lvl(0) pkg Pilot.SelfHost.Ir.Text;
+
+use selfhost.ir.model.*;
+use std.text.*;
+
+// ------------------------------------------------------------------------------
+// Printing
+// ------------------------------------------------------------------------------
+
+/// `s` quoted, with `\`, `"`, newline, tab and carriage return escaped.
+fn quote_text(s: str) -> str {
+    var out = "\"";
+    var i = 0;
+    while i < s.len() {
+        let b = s.byte_at(i);
+        if b == 92 { out = out + "\\\\"; }
+        else if b == 34 { out = out + "\\\""; }
+        else if b == 10 { out = out + "\\n"; }
+        else if b == 9 { out = out + "\\t"; }
+        else if b == 13 { out = out + "\\r"; }
+        else { out = out + s.slice(i, i + 1); }
+        i = i + 1;
+    }
+    return out + "\"";
+}
+
+fn value_ref(v: u32) -> str => f"v{v}";
+
+fn value_list(f: IrFunction, vs: List<u32>, from: i64, count: i64) -> str {
+    var out = "";
+    var i = 0;
+    while i < count {
+        if i > 0 { out = out + ", "; }
+        out = out + value_ref(vs[from + i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The operands of `inst`, as the module documentation spells them.
+fn operands_text(f: IrFunction, inst: IrInst) -> str {
+    let a = ir_args(f, inst);
+    let op = inst.opcode;
+    if op == op_const_bits() || op == op_const_float() || op == op_const_bytes() { return f"#{a[0]}"; }
+    if op == op_jump() { return f"b{a[0]}(" + value_list(f, a, 1, a.len() - 1) + ")"; }
+    if op == op_cond_br() {
+        let e = 3 + a[2];
+        return value_ref(a[0]) + f", b{a[1]}(" + value_list(f, a, 3, a[2]) + f"), b{a[e]}(" + value_list(f, a, e + 2, a[e + 1]) + ")";
+    }
+    return value_list(f, a, 0, a.len());
+}
+
+fn inst_text(f: IrFunction, inst: IrInst) -> str {
+    var out = "    ";
+    if inst.result != ir_no_value() { out = out + value_ref(inst.result) + " = "; }
+    out = out + opcode_name(inst.opcode);
+    if inst.subop != 0 { out = out + f".{inst.subop}"; }
+    let ops = operands_text(f, inst);
+    if ops.len() > 0 { out = out + " " + ops; }
+    return out + f" :{inst.physics.layout_id} !{f.spans[inst.span_id]}";
+}
+
+/// The text of module `m`.
+pub fn print_ir_module(m: IrModule) -> str {
+    var out = "pilir 1\n";
+    var i = 0;
+    while i < m.layouts.len {
+        let l = m.layouts[i];
+        let p = l.physics;
+        out = out + f"layout {i} " + quote_text(l.name)
+            + f" {reg_class_name(p.reg_class)} {p.bit_width} {p.align_pow2} {p.lattice_bits}\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < m.ints.len { out = out + f"int {i} {m.ints[i]}\n"; i = i + 1; }
+    i = 0;
+    while i < m.strings.len { out = out + f"str {i} " + quote_text(m.strings[i]) + "\n"; i = i + 1; }
+    i = 0;
+    while i < m.intrinsics.len { out = out + f"intrinsic {i} {m.intrinsics[i]}\n"; i = i + 1; }
+    i = 0;
+    while i < m.functions.len {
+        let f = m.functions[i];
+        out = out + f"fn {i} " + quote_text(f.name) + f" -> {f.ret_physics.layout_id}" + " {\n";
+        for b in f.blocks {
+            out = out + f"  b{b.id}(";
+            var j = 0;
+            while j < b.params.len {
+                if j > 0 { out = out + ", "; }
+                let v = b.params[j];
+                out = out + value_ref(v) + f":{f.value_physics[v].layout_id}";
+                j = j + 1;
+            }
+            out = out + "):\n";
+            for inst in b.insts { out = out + inst_text(f, inst) + "\n"; }
+        }
+        out = out + "}\n";
+        i = i + 1;
+    }
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// Parsing
+// ------------------------------------------------------------------------------
+
+/// A parse failure: the line it is on and what is wrong.
+pub struct IrTextError : IValue {
+    pub line: i64;
+    pub message: str;
+}
+
+/// The state of one parse: the lines, where it is, and the module so far.
+struct Reader : IObject {
+    lines: List<str>;
+    at: i64;
+    m: IrModule;
+    error: str;
+}
+
+fn split_lines(text: str) -> List<str> {
+    var out: List<str> = [];
+    var start = 0;
+    var i = 0;
+    while i < text.len() {
+        if text.byte_at(i) == 10 {
+            out.push(text.slice(start, i));
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    if start < text.len() { out.push(text.slice(start, text.len())); }
+    return out;
+}
+
+/// The words of `line`: runs of bytes between spaces, with a quoted string
+/// kept as one word (still quoted) and `,` `(` `)` `:` `=` as their own words.
+fn words(line: str) -> List<str> {
+    var out: List<str> = [];
+    var i = 0;
+    let n = line.len();
+    while i < n {
+        let b = line.byte_at(i);
+        if b == 32 { i = i + 1; }
+        else if b == 34 {
+            var j = i + 1;
+            while j < n && line.byte_at(j) != 34 {
+                if line.byte_at(j) == 92 { j = j + 1; }
+                j = j + 1;
+            }
+            out.push(line.slice(i, j + 1));
+            i = j + 1;
+        } else if b == 44 || b == 40 || b == 41 || b == 58 || b == 61 {
+            out.push(line.slice(i, i + 1));
+            i = i + 1;
+        } else {
+            var j = i;
+            while j < n {
+                let c = line.byte_at(j);
+                if c == 32 || c == 44 || c == 40 || c == 41 || c == 58 || c == 61 { break; }
+                j = j + 1;
+            }
+            out.push(line.slice(i, j));
+            i = j;
+        }
+    }
+    return out;
+}
+
+/// The text a quoted word spells, escapes undone.
+fn unquote(w: str) -> str {
+    var out = "";
+    var i = 1;
+    while i < w.len() - 1 {
+        let b = w.byte_at(i);
+        if b == 92 && i + 1 < w.len() - 1 {
+            let e = w.byte_at(i + 1);
+            if e == 110 { out = out + "\n"; }
+            else if e == 116 { out = out + "\t"; }
+            else if e == 114 { out = out + "\r"; }
+            else { out = out + w.slice(i + 1, i + 2); }
+            i = i + 2;
+        } else {
+            out = out + w.slice(i, i + 1);
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+fn fail(r: Reader, message: str) -> i64 {
+    if r.error == "" { r.error = f"IR009: line {r.at + 1}: {message}"; }
+    return 0;
+}
+
+/// The integer word `w` spells after its one-byte prefix `prefix` ("" for none).
+fn number(r: Reader, w: str, prefix: str) -> i64 {
+    if !w.starts_with(prefix) { return fail(r, f"expected `{prefix}<number>`, found `{w}`"); }
+    if some v = parse_i64(w.slice(prefix.len(), w.len())) { return v; }
+    return fail(r, f"`{w}` is not a number");
+}
+
+fn layout_physics(r: Reader, id: i64) -> IrTypePhysics {
+    if id < 0 || id >= r.m.layouts.len {
+        let _ = fail(r, f"layout {id} is not declared");
+        return ir_physics_new(0, 0, 0, 0, 0);
+    }
+    return r.m.layouts[id].physics;
+}
+
+fn reg_class_from(r: Reader, name: str) -> u8 {
+    var c: u8 = 0;
+    while c <= reg_class_noreturn() {
+        if reg_class_name(c) == name { return c; }
+        c = c + 1;
+    }
+    return fail(r, f"unknown register class `{name}`");
+}
+
+fn parse_header(r: Reader, w: List<str>) {
+    let tag = w[0];
+    if tag == "layout" && w.len() == 7 {
+        let id = number(r, w[1], "");
+        r.m.layouts.push(IrLayout {
+            name: unquote(w[2]),
+            physics: ir_physics_new(id, reg_class_from(r, w[3]), number(r, w[4], ""), number(r, w[5], ""), number(r, w[6], "")),
+        });
+    } else if tag == "int" && w.len() == 3 {
+        r.m.ints.push(number(r, w[2], ""));
+    } else if tag == "str" && w.len() == 3 {
+        r.m.strings.push(unquote(w[2]));
+    } else if tag == "intrinsic" && w.len() == 3 {
+        r.m.intrinsics.push(w[2]);
+    } else {
+        let _ = fail(r, f"unexpected `{tag}` line");
+    }
+}
+
+/// Parses `b<id>(v.., ..)` starting at word `at`; returns the operands
+/// `[id, args..]` and the index of the word after `)`.
+fn parse_target(r: Reader, w: List<str>, at: i64, out: List<u32>, with_count: bool) -> i64 {
+    out.push(number(r, w[at], "b"));
+    var i = at + 2;
+    var args: List<u32> = [];
+    while i < w.len() && w[i] != ")" {
+        if w[i] != "," { args.push(number(r, w[i], "v")); }
+        i = i + 1;
+    }
+    if with_count { out.push(args.len()); }
+    for a in args { out.push(a); }
+    return i + 1;
+}
+
+/// Parses one instruction line into block `b` of `f`.
+fn parse_inst(r: Reader, f: IrFunction, b: u32, w: List<str>) {
+    var i = 0;
+    var result = ir_no_value();
+    if w.len() > 1 && w[1] == "=" {
+        result = number(r, w[0], "v");
+        i = 2;
+    }
+    let head = w[i];
+    let dot = head.find(".", 0);
+    let name = if dot > 0 { head.slice(0, dot) } else { head };
+    let sub = if dot > 0 { number(r, head.slice(dot + 1, head.len()), "") } else { 0 };
+    let op = opcode_of(name);
+    if op == 0 { let _ = fail(r, f"unknown opcode `{name}`"); return; }
+    i = i + 1;
+    var args: List<u32> = [];
+    if op == op_jump() {
+        i = parse_target(r, w, i, args, false);
+    } else if op == op_cond_br() {
+        args.push(number(r, w[i], "v"));
+        i = parse_target(r, w, i + 2, args, true);
+        i = parse_target(r, w, i + 1, args, true);
+    } else {
+        while i < w.len() && w[i] != ":" {
+            if w[i] != "," {
+                let prefix = if w[i].starts_with("#") { "#" } else { "v" };
+                args.push(number(r, w[i], prefix));
+            }
+            i = i + 1;
+        }
+    }
+    if i + 2 >= w.len() || w[i] != ":" { let _ = fail(r, "expected `:<layout> !<offset>`"); return; }
+    let phy = layout_physics(r, number(r, w[i + 1], ""));
+    let span = number(r, w[i + 2], "!");
+    let offset = f.operand_pool.len;
+    for a in args { f.operand_pool.push(a); }
+    f.spans.push(span);
+    if result != ir_no_value() { set_value_physics(f, result, phy); }
+    f.blocks[b].insts.push(IrInst {
+        result: result, opcode: op, subop: sub, physics: phy,
+        args_offset: offset, args_len: args.len(), span_id: f.spans.len - 1,
+    });
+}
+
+fn set_value_physics(f: IrFunction, v: u32, phy: IrTypePhysics) {
+    while f.value_physics.len <= v { f.value_physics.push(ir_physics_new(0, 0, 0, 0, 0)); }
+    f.value_physics[v] = phy;
+}
+
+fn parse_function(r: Reader, w: List<str>) {
+    if w.len() != 6 || w[3] != "->" || w[5] != "{" { let _ = fail(r, "expected `fn <index> \"<name>\" -> <layout> {`"); return; }
+    let f = ir_function_new(unquote(w[2]), layout_physics(r, number(r, w[4], "")));
+    r.m.functions.push(f);
+    var b: u32 = 0;
+    var has_block = false;
+    r.at = r.at + 1;
+    while r.at < r.lines.len() && r.error == "" {
+        let line = r.lines[r.at];
+        let lw = words(line);
+        if lw.len() == 1 && lw[0] == "}" { return; }
+        if lw.len() > 0 && lw[0].starts_with("b") && line.starts_with("  b") {
+            b = ir_add_block(f);
+            has_block = true;
+            if number(r, lw[0], "b") != b { let _ = fail(r, f"blocks must be numbered in order; expected b{b}"); return; }
+            var i = 2;
+            while i < lw.len() && lw[i] != ")" {
+                if lw[i] != "," {
+                    let v = number(r, lw[i], "v");
+                    set_value_physics(f, v, layout_physics(r, number(r, lw[i + 2], "")));
+                    f.blocks[b].params.push(v);
+                    i = i + 2;
+                }
+                i = i + 1;
+            }
+        } else if lw.len() > 0 && has_block {
+            parse_inst(r, f, b, lw);
+        } else if lw.len() > 0 {
+            let _ = fail(r, "an instruction outside a block");
+        }
+        r.at = r.at + 1;
+    }
+    let _ = fail(r, "missing `}`");
+}
+
+/// Parses the text of a module, or says on which line and why it cannot.
+pub fn parse_ir_module(text: str) -> IrModule ! IrTextError {
+    let r = Reader { lines: split_lines(text), at: 0, m: ir_module_new(), error: "" };
+    if r.lines.len() == 0 || r.lines[0] != "pilir 1" {
+        return result<IrModule, IrTextError>.err(IrTextError { line: 1, message: "IR009: line 1: expected `pilir 1`" });
+    }
+    r.at = 1;
+    while r.at < r.lines.len() && r.error == "" {
+        let w = words(r.lines[r.at]);
+        if w.len() > 0 {
+            if w[0] == "fn" { parse_function(r, w); } else { parse_header(r, w); }
+        }
+        r.at = r.at + 1;
+    }
+    if r.error != "" { return result<IrModule, IrTextError>.err(IrTextError { line: r.at, message: r.error }); }
+    return result<IrModule, IrTextError>.ok(r.m);
+}

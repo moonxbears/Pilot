@@ -1,0 +1,18 @@
+// Fields declared in a distributive group (`pub { a: i64 = 3; }`) are fields
+// of the struct, with their defaults: a literal that omits them gets 3 and 1.
+struct Counter {
+    pub {
+        count: i64 = 3;
+        step: i64 = 1;
+    }
+
+    fn next() -> i64 => .count + .step;
+}
+
+fn main() {
+    let c = Counter { step: 2 };
+    print(c.count);
+    print(c.next());
+    let d = Counter {};
+    print(d.next());
+}

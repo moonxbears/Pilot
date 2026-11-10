@@ -75,12 +75,15 @@ pub fn layout_of(ls: IrLayouts, t: i64) -> IrTypePhysics {
     }
     let lattice: u8 = lattice_of(p, t);
     if ty_is_named(p.tt, t) {
-        if some bits = prog_attr_nodes(p, ty_decl(p.tt, t), "Bits") {
-            if bits.len() >= 2 {
-                if some width = prog_const(p, bits[0]) {
-                    let class = reg_class_code(prog_const_name(p, bits[1]));
-                    let rc = if width == 0 { reg_class_unit() } else { class };
-                    return layout_add(ls, name, ir_physics_new(0, rc, width, align_pow2_of(width), lattice));
+        // `[Bits]` may sit on any partial declaration of the type.
+        for d in nl_get(p.type_decls, p.tt.name[t]) {
+            if some bits = prog_attr_nodes(p, d, "Bits") {
+                if bits.len() >= 2 {
+                    if some width = prog_const(p, bits[0]) {
+                        let class = reg_class_code(prog_const_name(p, bits[1]));
+                        let rc = if width == 0 { reg_class_unit() } else { class };
+                        return layout_add(ls, name, ir_physics_new(0, rc, width, align_pow2_of(width), lattice));
+                    }
                 }
             }
         }

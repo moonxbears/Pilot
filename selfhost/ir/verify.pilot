@@ -1,0 +1,245 @@
+// ==============================================================================
+// FILE: selfhost/ir/verify.pilot
+// F5: the PilIR verifier.
+// ==============================================================================
+// Computes each function's predecessors and dominator tree (Cooper, Harvey
+// and Kennedy, "A Simple, Fast Dominance Algorithm", over reverse postorder)
+// and checks:
+//   IR003  every block ends in exactly one terminator, and nothing follows it;
+//   IR002  a branch passes one argument per parameter of its target, and
+//          names a block that exists;
+//   IR001  every operand that is a value is defined, and its definition
+//          dominates the use (a block parameter is defined at the top of its
+//          block; an instruction's result after the instruction).
+// Blocks no path from the entry reaches are not checked for dominance.
+pub lvl(0) pkg Pilot.SelfHost.Ir.Verify;
+
+use selfhost.ir.model.*;
+
+/// A verifier finding: the code, the function, and what is wrong.
+pub struct IrIssue : IValue {
+    pub code: str;
+    pub function: str;
+    pub message: str;
+}
+
+/// Blocks in reverse postorder from the entry; unreachable blocks are left out.
+fn reverse_postorder(f: IrFunction) -> List<u32> {
+    var seen: List<bool> = [];
+    for b in f.blocks { seen.push(false); }
+    var post: List<u32> = [];
+    // Iterative depth-first search: a stack of (block, next successor index).
+    var stack: List<u32> = [0];
+    var next: List<i64> = [0];
+    seen[0] = true;
+    while stack.len > 0 {
+        let top = stack.len - 1;
+        let b = stack[top];
+        let succ = block_successors(f, b);
+        if next[top] < succ.len() {
+            let s = succ[next[top]];
+            next[top] = next[top] + 1;
+            if s < f.blocks.len && !seen[s] {
+                seen[s] = true;
+                stack.push(s);
+                next.push(0);
+            }
+        } else {
+            post.push(b);
+            let _ = stack.pop();
+            let _ = next.pop();
+        }
+    }
+    var out: List<u32> = [];
+    var i = post.len - 1;
+    while i >= 0 {
+        out.push(post[i]);
+        i = i - 1;
+    }
+    return out;
+}
+
+/// The successors of block `b`: those of its last instruction.
+pub fn block_successors(f: IrFunction, b: u32) -> List<u32> {
+    let insts = f.blocks[b].insts;
+    if insts.len == 0 { return []; }
+    return ir_successors(f, insts[insts.len - 1]);
+}
+
+/// Fills `preds` of every block of `f`.
+pub fn ir_compute_preds(f: IrFunction) {
+    for b in f.blocks { b.preds = []; }
+    for b in f.blocks {
+        for s in block_successors(f, b.id) {
+            if s < f.blocks.len { f.blocks[s].preds.push(b.id); }
+        }
+    }
+}
+
+/// Fills `idom` of every block of `f` reachable from the entry; returns the
+/// reverse postorder it used.
+pub fn ir_compute_dominators(f: IrFunction) -> List<u32> {
+    ir_compute_preds(f);
+    let order = reverse_postorder(f);
+    var rank: List<i64> = [];
+    for b in f.blocks {
+        rank.push(-1);
+        b.idom = ir_no_value();
+    }
+    var i = 0;
+    while i < order.len() {
+        rank[order[i]] = i;
+        i = i + 1;
+    }
+    f.blocks[0].idom = 0;
+    var changed = true;
+    while changed {
+        changed = false;
+        i = 1;
+        while i < order.len() {
+            let b = order[i];
+            var new_idom = ir_no_value();
+            for p in f.blocks[b].preds {
+                if rank[p] < 0 || f.blocks[p].idom == ir_no_value() { continue; }
+                new_idom = if new_idom == ir_no_value() { p } else { intersect(f, rank, p, new_idom) };
+            }
+            if new_idom != f.blocks[b].idom {
+                f.blocks[b].idom = new_idom;
+                changed = true;
+            }
+            i = i + 1;
+        }
+    }
+    return order;
+}
+
+fn intersect(f: IrFunction, rank: List<i64>, a: u32, b: u32) -> u32 {
+    var x = a;
+    var y = b;
+    while x != y {
+        while rank[x] > rank[y] { x = f.blocks[x].idom; }
+        while rank[y] > rank[x] { y = f.blocks[y].idom; }
+    }
+    return x;
+}
+
+/// Whether block `a` dominates block `b` (both reachable).
+pub fn ir_dominates(f: IrFunction, a: u32, b: u32) -> bool {
+    var x = b;
+    while true {
+        if x == a { return true; }
+        if x == 0 { return false; }
+        x = f.blocks[x].idom;
+    }
+    return false;
+}
+
+/// The operand positions of `inst` that hold values (the others name blocks,
+/// counts or pool entries).
+fn value_positions(f: IrFunction, inst: IrInst) -> List<i64> {
+    let a = ir_args(f, inst);
+    var out: List<i64> = [];
+    let op = inst.opcode;
+    if op == op_const_bits() || op == op_const_float() || op == op_const_bytes() { return out; }
+    if op == op_jump() {
+        var i = 1;
+        while i < a.len() { out.push(i); i = i + 1; }
+        return out;
+    }
+    if op == op_cond_br() {
+        out.push(0);
+        var i = 0;
+        while i < a[2] { out.push(3 + i); i = i + 1; }
+        let e = 3 + a[2];
+        i = 0;
+        while i < a[e + 1] { out.push(e + 2 + i); i = i + 1; }
+        return out;
+    }
+    var i = 0;
+    while i < a.len() { out.push(i); i = i + 1; }
+    return out;
+}
+
+fn issue(out: List<IrIssue>, code: str, f: IrFunction, message: str) {
+    out.push(IrIssue { code: code, function: f.name, message: message });
+}
+
+/// Checks a branch to `target` with `count` arguments.
+fn check_target(out: List<IrIssue>, f: IrFunction, from: u32, target: u32, count: i64) {
+    if target >= f.blocks.len {
+        issue(out, "IR002", f, f"b{from} branches to b{target}, which does not exist");
+    } else if f.blocks[target].params.len != count {
+        issue(out, "IR002", f, f"b{from} passes {count} argument(s) to b{target}, which has {f.blocks[target].params.len} parameter(s)");
+    }
+}
+
+/// The issues in function `f`.
+pub fn verify_ir_function(f: IrFunction) -> List<IrIssue> {
+    var out: List<IrIssue> = [];
+    let order = ir_compute_dominators(f);
+    // Where each value is defined: its block and position (-1 for a parameter).
+    var def_block: List<i64> = [];
+    var def_pos: List<i64> = [];
+    for v in f.value_physics {
+        def_block.push(-1);
+        def_pos.push(-1);
+    }
+    for b in f.blocks {
+        for v in b.params { def_block[v] = b.id; }
+        var i = 0;
+        while i < b.insts.len {
+            let inst = b.insts[i];
+            if inst.result != ir_no_value() {
+                def_block[inst.result] = b.id;
+                def_pos[inst.result] = i;
+            }
+            let last = i == b.insts.len - 1;
+            if opcode_is_terminator(inst.opcode) != last {
+                let what = if last { "does not end in a terminator" } else { f"has `{opcode_name(inst.opcode)}` before its end" };
+                issue(out, "IR003", f, f"b{b.id} " + what);
+            }
+            if inst.opcode == op_jump() {
+                let a = ir_args(f, inst);
+                check_target(out, f, b.id, a[0], a.len() - 1);
+            } else if inst.opcode == op_cond_br() {
+                let a = ir_args(f, inst);
+                check_target(out, f, b.id, a[1], a[2]);
+                check_target(out, f, b.id, a[3 + a[2]], a[4 + a[2]]);
+            }
+            i = i + 1;
+        }
+        if b.insts.len == 0 { issue(out, "IR003", f, f"b{b.id} is empty"); }
+    }
+    var reachable: List<bool> = [];
+    for b in f.blocks { reachable.push(false); }
+    for b in order { reachable[b] = true; }
+    for b in f.blocks {
+        if !reachable[b.id] { continue; }
+        var i = 0;
+        while i < b.insts.len {
+            let inst = b.insts[i];
+            let a = ir_args(f, inst);
+            for pos in value_positions(f, inst) {
+                let v = a[pos];
+                if v >= def_block.len() || def_block[v] < 0 {
+                    issue(out, "IR001", f, f"b{b.id} uses v{v}, which is never defined");
+                } else if def_block[v] == b.id {
+                    if def_pos[v] >= i { issue(out, "IR001", f, f"b{b.id} uses v{v} before it is defined"); }
+                } else if !reachable[def_block[v]] || !ir_dominates(f, def_block[v], b.id) {
+                    issue(out, "IR001", f, f"v{v} is defined in b{def_block[v]}, which does not dominate its use in b{b.id}");
+                }
+            }
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+/// The issues in every function of `m`.
+pub fn verify_ir_module(m: IrModule) -> List<IrIssue> {
+    var out: List<IrIssue> = [];
+    for f in m.functions {
+        for i in verify_ir_function(f) { out.push(i); }
+    }
+    return out;
+}

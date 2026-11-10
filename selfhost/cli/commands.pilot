@@ -17,6 +17,7 @@ use Pilot.SelfHost.Cli.Help;
 use Pilot.SelfHost.Cli.Host;
 use Pilot.SelfHost.Cli.Report;
 use Pilot.SelfHost.Cli.TestCmd;
+use Pilot.SelfHost.Cli.TestIr;
 use Pilot.SelfHost.Cli.BenchCmd;
 
 /// Exit code for a command used wrongly.
@@ -184,6 +185,7 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
 
 /// `pilot test [paths...] [--filter text]`
 pub fn cmd_test(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    if parsed_has_flag(p, "ir") { return test_ir_command(cli_positionals(p), parsed_get_str(p, "filter", "")); }
     return test_command(cli_positionals(p), parsed_get_str(p, "filter", ""));
 }
 
@@ -228,6 +230,51 @@ pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     return 0;
 }
 
+/// The sources of `pilot ir`: the type checker's analysis, then PilIR.
+pub fn cli_ir_files() -> List<str> {
+    var out: List<str> = [];
+    for f in cli_checker_files() {
+        if f != "selfhost/check/main.pilot" { out.push(f); }
+    }
+    for f in [
+        "stdlib/std/text.pilot",
+        "stdlib/core/result.pilot",
+        "selfhost/ir/model.pilot",
+        "selfhost/ir/layouts.pilot",
+        "selfhost/ir/lower.pilot",
+        "selfhost/ir/verify.pilot",
+        "selfhost/ir/text.pilot",
+        "selfhost/ir/interp.pilot",
+        "selfhost/ir/main.pilot",
+    ] { out.push(f); }
+    return out;
+}
+
+/// The declarations `pilot ir` links with the program: the checker's, and the
+/// native function bindings the lowering reads.
+pub fn cli_ir_decls() -> List<str> {
+    var out = cli_checker_decls();
+    out.push("stdlib/core/builtins/native_calls.pilot");
+    return out;
+}
+
+/// The extension of a PilIR text file.
+pub pure fn ir_text_ext() -> str => ".pir";
+
+/// `pilot ir <verify|print|run|roundtrip> <file>`: lowers a program to PilIR,
+/// or reads PilIR text from a `.pir` file (F5).
+pub fn cmd_ir(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    let args = cli_positionals(p);
+    if args.len < 2 { return usage_error("`pilot ir` needs a mode (verify, print, run, roundtrip) and a file"); }
+    if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
+    if args[1].ends_with(ir_text_ext()) {
+        return host_text_tool(args[1], cli_ir_files(), f"ir_text_main(\"{args[0]}\");");
+    }
+    let compiled = host_check(args[1]);
+    if report_diagnostics(compiled) > 0 { return 1; }
+    return host_program_tool(args[1], cli_ir_files(), cli_ir_decls(), f"ir_main(\"{args[0]}\");");
+}
+
 /// The handler of every command that has one, by command name (a CLI map,
 /// `cli_map_*` in `spec.pilot`).
 pub fn cli_handlers() -> i64 {
@@ -242,5 +289,6 @@ pub fn cli_handlers() -> i64 {
     let _ = cli_map_set(h, "bench", cmd_bench);
     let _ = cli_map_set(h, "gate", cmd_gate);
     let _ = cli_map_set(h, "emit", cmd_emit);
+    let _ = cli_map_set(h, "ir", cmd_ir);
     return h;
 }

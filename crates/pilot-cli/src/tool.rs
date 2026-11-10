@@ -113,6 +113,25 @@ pub fn eval_cli(paths: &[&str], tail: &str, ops: HostOpHandler) -> i32 {
     out.as_int().map_or(EXIT_INTERNAL, |c| c.clamp(0, 255) as i32)
 }
 
+/// Runs the tool made of `tool_files`, calling `entry`, with the text of the
+/// file at `path` served through the host operation `tool_input_text`; its
+/// result is the tool's exit code.
+pub fn run_on_text(path: &str, tool_files: &[String], entry: &str) -> i32 {
+    let input = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{path}: error: cannot read file: {e}");
+            return crate::run::EXIT_FAILURE;
+        }
+    };
+    let ops: HostOpHandler = Box::new(move |op, _| match op {
+        "tool_input_text" => Some(Ok(pilot_vm::HostValue::Str(input.clone()))),
+        _ => None,
+    });
+    let paths: Vec<&str> = tool_files.iter().map(String::as_str).collect();
+    eval_cli(&paths, entry, ops)
+}
+
 /// Runs a tool with the host operations `ops` and returns its result as a
 /// host value.
 pub fn eval_to_host(paths: &[&str], tail: &str, ops: HostOpHandler) -> pilot_vm::HostValue {
