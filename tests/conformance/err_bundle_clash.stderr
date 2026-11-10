@@ -1,0 +1,2 @@
+error[COMP004]: Ambiguous Tier 2 bundle method collision on 'speak': multiple spliced bundles ('LoudFacet' and 'QuietFacet') define 'speak' without a Tier 1 struct override. Help: resolve using 'without { speak }' or provide an explicit struct method.
+err_bundle_clash.pilot:10:1

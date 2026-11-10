@@ -1,0 +1,39 @@
+// Facets spliced into a struct: a clash settled by `without`, a method
+// taken under another name with `with .. as`, and a struct method that
+// overrides a facet's (Tier 1 wins over Tier 2). The type checker accepts
+// these tables (crates/pilot-cli/tests/cli_f4.rs); the seed does not give
+// the struct its spliced methods, so it rejects `loud_volume` (DECL001) and
+// stops at the first spliced call.
+// Expected: Speaker keeps QuietFacet's `speak` ("quiet") and LoudFacet's
+// `volume` as `loud_volume` (9); Announcer's own methods win ("announce", 5).
+struct LoudFacet {
+    pub fn speak() -> str => "LOUD";
+    pub fn volume() -> i64 => 9;
+}
+
+struct QuietFacet {
+    pub fn speak() -> str => "quiet";
+    pub fn volume() -> i64 => 1;
+}
+
+struct Speaker {
+    *LoudFacet without { speak } with { volume as loud_volume };
+    *QuietFacet without { volume };
+    pub name: str;
+}
+
+struct Announcer {
+    *LoudFacet;
+    *QuietFacet;
+    pub fn speak() -> str => "announce";
+    pub fn volume() -> i64 => 5;
+}
+
+fn main() {
+    let s = Speaker { name: "s" };
+    print(s.speak());
+    print(s.loud_volume());
+    let a = Announcer {};
+    print(a.speak());
+    print(a.volume());
+}

@@ -1,0 +1,48 @@
+// Owned values that are borrowed, given a new value, moved on a branch that
+// returns, or created fresh on every iteration are not moved-from uses.
+// `Ticket` is owned because it declares `IObject`.
+struct Ticket : IObject {
+    pub id: i64;
+}
+
+fn consume(t: Ticket) -> i64 => t.id;
+fn peek(ref t: Ticket) -> i64 => t.id;
+
+fn borrowed() -> i64 {
+    let t = Ticket { id: 1 };
+    let a = peek(t);
+    return a + peek(t);
+}
+
+fn renewed() -> i64 {
+    var t = Ticket { id: 2 };
+    let a = consume(t);
+    t = Ticket { id: 3 };
+    return a + t.id;
+}
+
+fn early(flag: bool) -> i64 {
+    let t = Ticket { id: 4 };
+    if flag {
+        return consume(t);
+    }
+    return t.id;
+}
+
+fn fresh() -> i64 {
+    var sum = 0;
+    var i = 0;
+    while i < 2 {
+        let t = Ticket { id: 10 + i };
+        sum = sum + consume(t);
+        i = i + 1;
+    }
+    return sum;
+}
+
+fn main() {
+    print(borrowed());
+    print(renewed());
+    print(early(false));
+    print(fresh());
+}

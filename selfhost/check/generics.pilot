@@ -1,0 +1,168 @@
+// ==============================================================================
+// FILE: selfhost/check/generics.pilot
+// Generic argument counts and constraints.
+// ==============================================================================
+//   TYPE004  a type written with a different number of type arguments than
+//            its declaration has generic parameters
+//   TYPE005  a type argument, written or inferred from a call, that does not
+//            satisfy its parameter's bounds (`<T : IEquatable<T>>`)
+//
+// A type satisfies an interface bound when it is that interface, or names it
+// among its bases (`: IFoo`, on any of its declarations or `ext` blocks),
+// directly or through other bases. A bound that is not an interface is met
+// only by the same type. Like every rule, nothing is reported while a type
+// involved is not derived or its bases are not all resolved.
+pub lvl(0) pkg Pilot.SelfHost.Check.Generics;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.methods.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.rules.*;
+
+/// Generic parameter bounds of every declaration.
+pub struct Bounds {
+    /// Owner node -> rows of `s.bounds`.
+    pub rows: NodeLists;
+}
+
+pub fn bounds_new(s: Snap) -> Bounds {
+    let b = Bounds { rows: nl_new() };
+    var i = 0;
+    while i < s.bounds.len() {
+        let row: List<i64> = s.bounds[i];
+        nl_add(b.rows, f"{row[0]}", i);
+        i = i + 1;
+    }
+    return b;
+}
+
+/// The largest number of generic parameters any declaration of `name` has.
+fn tparam_count(p: Program, name: str) -> i64 {
+    var most = 0;
+    for d in nl_get(p.type_decls, name) {
+        let c = prog_tparam_names(p, d).len();
+        if c > most { most = c; }
+    }
+    return most;
+}
+
+/// The declaration of `name` that introduces its generic parameters, or -1.
+fn generic_decl(p: Program, name: str) -> i64 {
+    for d in nl_get(p.type_decls, name) {
+        if prog_tparam_names(p, d).len() > 0 { return d; }
+    }
+    return prog_type_decl(p, name);
+}
+
+/// Whether `t` reaches the type named `target` through its bases.
+fn reaches(p: Program, t: i64, target: str, depth: i64) -> bool {
+    if depth > 16 || !ty_is_named(p.tt, t) { return false; }
+    let name = node_name(p.s, ty_decl(p.tt, t));
+    if name == target { return true; }
+    for b in nl_get(p.bases, name) {
+        let bt = prog_annot_type(p, b);
+        if reaches(p, bt, target, depth + 1) { return true; }
+    }
+    return false;
+}
+
+/// Whether every base of `t` and of the bases it reaches resolved.
+fn bases_resolved(p: Program, t: i64, depth: i64) -> bool {
+    if depth > 16 || !ty_is_named(p.tt, t) { return depth > 0; }
+    for b in nl_get(p.bases, node_name(p.s, ty_decl(p.tt, t))) {
+        let bt = prog_annot_type(p, b);
+        if !ty_is_named(p.tt, bt) || !bases_resolved(p, bt, depth + 1) { return false; }
+    }
+    return true;
+}
+
+/// Whether `arg` satisfies `bound`, or it cannot be told yet.
+pub fn satisfies(p: Program, arg: i64, bound: i64) -> bool {
+    let tt = p.tt;
+    if ty_is_open(tt, arg) || ty_is_open(tt, bound) || !ty_is_named(tt, arg) || !ty_is_named(tt, bound) { return true; }
+    let target = node_name(p.s, ty_decl(tt, bound));
+    if kind(p.s, ty_decl(tt, bound)) != nk_interface() {
+        return node_name(p.s, ty_decl(tt, arg)) == target;
+    }
+    if reaches(p, arg, target, 0) { return true; }
+    return !bases_resolved(p, arg, 0);
+}
+
+/// The first bound of generic parameter `index` of `owner` that `values`
+/// do not satisfy, as a type, or the unknown type.
+fn unmet_bound(p: Program, b: Bounds, owner: i64, names: List<str>, values: List<i64>, index: i64) -> i64 {
+    for r in nl_get(b.rows, f"{owner}") {
+        let row: List<i64> = p.s.bounds[r];
+        if sym_text(p.s, row[1]) == names[index] {
+            let bound = ty_subst(p.tt, prog_annot_type(p, row[2]), names, values);
+            if !satisfies(p, values[index], bound) { return bound; }
+        }
+    }
+    return ty_unknown();
+}
+
+/// Checks the type arguments `values` of generic declaration `owner`;
+/// `at` is the node reported, `what` names the generic in the message.
+fn check_args(p: Program, b: Bounds, sink: DiagSink, owner: i64, values: List<i64>, at: i64, what: str) {
+    let names = prog_tparam_names(p, owner);
+    var i = 0;
+    while i < names.len() && i < values.len() {
+        let bound = unmet_bound(p, b, owner, names, values, i);
+        if !ty_is_unknown(p.tt, bound) {
+            sink_error(sink, at, "TYPE005",
+                f"`{ty_display(p.tt, values[i])}` does not satisfy `{names[i]} : {ty_display(p.tt, bound)}` of `{what}`");
+        }
+        i = i + 1;
+    }
+}
+
+/// TYPE004 and TYPE005 on one written type node.
+fn check_type_node(inf: Infer, b: Bounds, sink: DiagSink, t: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let name = node_name(s, t);
+    if !name_is_written(s, t) || name.find(".", 0) >= 0 { return; }
+    let ty = prog_annot_type(p, t);
+    if !ty_is_named(p.tt, ty) { return; }
+    let wanted = tparam_count(p, name);
+    let given = children(s, t).len();
+    if given != wanted {
+        sink_error(sink, t, "TYPE004",
+            f"`{name}` takes {wanted} type argument(s), found {given}");
+        return;
+    }
+    if wanted > 0 { check_args(p, b, sink, generic_decl(p, name), ty_args(p.tt, ty), t, name); }
+}
+
+/// Runs TYPE004 and TYPE005 over the user's files.
+pub fn check_generics(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    let b = bounds_new(s);
+    var roots: List<i64> = [];
+    var i = 0;
+    while i < s.count {
+        if in_user_file(s, i) {
+            let k = kind(s, i);
+            if annot(s, i) >= 0 { roots.push(annot(s, i)); }
+            if k == nk_param() && rhs(s, i) >= 0 { roots.push(rhs(s, i)); }
+            if k == nk_binary() && (flags(s, i) == op_as() || flags(s, i) == op_as_view()) { roots.push(rhs(s, i)); }
+            if k == nk_call() {
+                let f = called_fn(inf, i);
+                if f >= 0 && prog_tparam_names(p, f).len() > 0 {
+                    check_args(p, b, sink, f, call_generic_args(inf, f, i), i, node_name(s, f));
+                }
+            }
+        }
+        i = i + 1;
+    }
+    for row in s.bases { if row[1] >= 0 && in_user_file(s, row[1]) { roots.push(row[1]); } }
+    for row in s.bounds { if row[2] >= 0 && in_user_file(s, row[2]) { roots.push(row[2]); } }
+    var nodes: List<i64> = [];
+    for r in roots { type_nodes(s, r, nodes); }
+    for t in nodes { check_type_node(inf, b, sink, t); }
+}

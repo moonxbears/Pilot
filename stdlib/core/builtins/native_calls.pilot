@@ -6,9 +6,11 @@
 // the engine intrinsic each one is bound to here. A user-declared function or
 // method of the same name takes precedence over a native method.
 //
-// `List<T>` and `Map<K, V>` are declared in `std.col` over raw memory, which
-// the seed cannot run until F6. Until then their constructors build the
-// engine's own list and map, and the methods below act on those.
+// `List<T>` (stdlib/core/primitives/list.pilot) and `Map<K, V>`
+// (stdlib/core/primitives/map.pilot) state their surface in Pilot; their
+// layout over raw memory runs once the seed runs native code (F6). Until
+// then their constructors build the engine's own list and map, and the
+// methods below act on those.
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Builtins.NativeCalls;
 

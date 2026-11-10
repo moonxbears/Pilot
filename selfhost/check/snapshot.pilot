@@ -5,7 +5,8 @@
 // The host operation `chk_snapshot` (crates/pilot-cli/src/check.rs) hands
 // over the parser's arena: one row of integers per node, the shared list of
 // extra children, every symbol string, and the side tables (generic
-// parameters, base types, attributes, files, `for` clauses).
+// parameters, base types, attributes, files, `for` clauses, generic bounds,
+// splice collision modifiers).
 //
 // The numbers below are the parser's AST layout (`NodeKind` and `BinaryOp`
 // in crates/pilot-ast/src/lib.rs). They name node shapes, not Pilot types.
@@ -79,17 +80,29 @@ pub pure fn nk_pat_slice() -> i64 => 506;
 pub pure fn nk_pat_or() -> i64 => 507;
 pub pure fn nk_pat_range() -> i64 => 508;
 
+// --- `*Bundle` collision modifiers ------------------------------------------
+// The receptor sub-slots the modifier keywords are bound to (category 30 in
+// stdlib/core/syntax/module_ext.pilot); the parser records the sub-slot.
+pub pure fn splice_coalesce() -> i64 => 0;
+pub pure fn splice_with() -> i64 => 1;
+pub pure fn splice_without() -> i64 => 2;
+
 // --- Binary and unary operators --------------------------------------------
 pub pure fn op_eq() -> i64 => 8;
 pub pure fn op_or() -> i64 => 15;
 pub pure fn op_ge() -> i64 => 13;
 pub pure fn op_and() -> i64 => 14;
 pub pure fn op_coalesce() -> i64 => 22;
+pub pure fn op_range_inclusive() -> i64 => 23;
+pub pure fn op_range() -> i64 => 24;
 pub pure fn op_is() -> i64 => 25;
 pub pure fn op_as() -> i64 => 32;
 pub pure fn op_as_view() -> i64 => 33;
 pub pure fn unary_some() -> i64 => 9;
 pub pure fn unary_splat() -> i64 => 6;
+/// `MemberExpr` flags of `.name`, whose receiver is implied
+/// (`MEMBER_IMPLIED_RECEIVER` in crates/pilot-parser/src/lib.rs).
+pub pure fn member_implied() -> i64 => 2;
 
 /// Integers per node row (crates/pilot-cli/src/check.rs `NODE_COLUMNS`).
 pub pure fn snap_columns() -> i64 => 9;
@@ -104,6 +117,14 @@ pub struct Snap {
     pub attrs: List<any>;
     pub files: List<any>;
     pub for_clauses: List<List<i64>>;
+    /// `[owner, parameter symbol, bound type node]` per generic bound.
+    pub bounds: List<List<i64>>;
+    /// `[splice node, modifier sub-slot, member symbol, alias symbol]` per
+    /// member a `*Bundle` collision modifier lists.
+    pub splice_mods: List<List<i64>>;
+    /// The member names of the enumeration protocol `for` uses: the call
+    /// that gives the enumerator, the step, and the current element.
+    pub enumeration: List<str>;
     pub count: i64;
 }
 
@@ -120,6 +141,9 @@ pub fn snap_load() -> Snap {
         attrs: raw[5],
         files: raw[6],
         for_clauses: raw[7],
+        bounds: raw[8],
+        splice_mods: raw[9],
+        enumeration: raw[10],
         count: nodes.len() / snap_columns(),
     };
 }
@@ -159,6 +183,13 @@ pub fn node_text(s: Snap, n: i64) -> str {
     let base: i64 = row[2];
     let text: str = row[3];
     return text.slice(span_start(s, n) - base, span_end(s, n) - base);
+}
+
+/// The text of a string literal without its quotes (escapes are kept as
+/// written; the tables the checker reads hold plain names).
+pub fn str_value(s: Snap, n: i64) -> str {
+    let t = node_text(s, n);
+    return if t.len() >= 2 { t.slice(1, t.len() - 1) } else { "" };
 }
 
 /// Whether the name node `n` carries is written in the source where the

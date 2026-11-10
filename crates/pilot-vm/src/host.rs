@@ -143,13 +143,24 @@ impl PilVirtualMachine {
         Ok(items.iter().map(|&i| self.display(i)).collect())
     }
 
-    /// Runs `program` with `argv`, feeding it `input` on standard input, and
-    /// returns `[exit_code, stdout, stderr]`. A program that cannot be started
-    /// is an intrinsic failure; one killed by a signal exits with `-1`.
-    pub(crate) fn proc_run(&mut self, program: &str, argv: &[String], input: Option<&str>) -> Result<PilotVal, String> {
+    /// Runs `program` with `argv` in working directory `dir` (the caller's
+    /// when absent), feeding it `input` on standard input, and returns
+    /// `[exit_code, stdout, stderr]`. A program that cannot be started is an
+    /// intrinsic failure; one killed by a signal exits with `-1`.
+    pub(crate) fn proc_run(
+        &mut self,
+        program: &str,
+        argv: &[String],
+        input: Option<&str>,
+        dir: Option<&str>,
+    ) -> Result<PilotVal, String> {
         use std::io::Write;
         use std::process::{Command, Stdio};
-        let mut child = Command::new(program)
+        let mut cmd = Command::new(program);
+        if let Some(d) = dir {
+            cmd.current_dir(d);
+        }
+        let mut child = cmd
             .args(argv)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

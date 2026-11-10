@@ -1,9 +1,10 @@
 //! Running the self-hosted type checker (`selfhost/check/`) over a program.
 //!
 //! The checker is Pilot. It needs the whole linked program as the parser
-//! produced it: the program's files in link order, then the core primitive
-//! declarations (`stdlib/core/primitives/`), which give the types of literals
-//! and the members of `i64`, `str` and the rest. This module links those
+//! produced it: the program's files in link order, then the core
+//! declarations the CLI names (`cli_checker_decls()` in
+//! selfhost/cli/commands.pilot), which give the types of literals, the
+//! members of the primitives and the root interfaces. This module links those
 //! files into one arena and serves the checker a faithful snapshot of it
 //! through the host operation `chk_snapshot`:
 //!
@@ -17,6 +18,9 @@
 //! | 5 | attributes, `[target node, name symbol, [argument nodes]]` each |
 //! | 6 | files, `[path, is_user, base offset, source text]` each, in unit order |
 //! | 7 | `for` clauses, `[iterable node, then node]` each |
+//! | 8 | generic bounds, `[owner node, parameter symbol, bound type node]` each |
+//! | 9 | splice modifiers, `[splice node, modifier sub-slot, member symbol, alias symbol]` each |
+//! | 10 | the enumeration protocol `for` uses: `[get, move next, current]` member names, or empty |
 //!
 //! Absent node references are `-1`. The checker returns its diagnostics as
 //! `[code, message, start, end, severity]` with program-wide offsets; only
@@ -34,9 +38,6 @@ use std::path::{Path, PathBuf};
 /// Integers per node in the snapshot: kind, lhs, rhs, flags, span start,
 /// span end, type annotation, literal value, unit index.
 const NODE_COLUMNS: usize = 9;
-
-/// Where the core primitive declarations live, under the toolchain root.
-const PRIMITIVES: &str = "stdlib/core/primitives";
 
 fn reference(raw: u32) -> i64 {
     if raw == u32::MAX {
@@ -158,6 +159,27 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
         .iter()
         .map(|(it, then)| pair(reference(it.0), reference(then.0)))
         .collect();
+    let bounds = arena
+        .type_param_bounds
+        .iter()
+        .map(|(owner, sym, ty)| ints([i64::from(owner.0), i64::from(sym.0), reference(ty.0)]))
+        .collect();
+    let splice_mods = arena
+        .splice_mods
+        .iter()
+        .map(|(splice, sub, member, alias)| {
+            ints([i64::from(splice.0), i64::from(*sub), i64::from(member.0), i64::from(alias.0)])
+        })
+        .collect();
+    let protocol = pilot_parser::bootstrap_tables()
+        .enumerator()
+        .map(|e| {
+            [&e.get_enumerator, &e.move_next, &e.current]
+                .into_iter()
+                .map(|n| HostValue::Str(n.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
     HostValue::List(vec![
         ints(nodes),
         ints(extra),
@@ -167,21 +189,33 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
         HostValue::List(attrs),
         HostValue::List(file_rows),
         HostValue::List(for_clauses),
+        HostValue::List(bounds),
+        HostValue::List(splice_mods),
+        HostValue::List(protocol),
     ])
 }
 
-/// The core primitive files, sorted, as paths under the toolchain root.
-fn primitive_files() -> Vec<String> {
-    let dir = Path::new(&tool::toolchain_root()).join(PRIMITIVES);
-    let mut files: Vec<PathBuf> = fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "pilot"))
-        .collect();
-    files.sort();
-    files
-        .into_iter()
+/// The files `decls` names, under the toolchain root: each file itself, and
+/// each directory's `.pilot` files in name order.
+fn decl_files(decls: &[String]) -> Vec<String> {
+    let root = PathBuf::from(tool::toolchain_root());
+    let mut out = Vec::new();
+    for d in decls {
+        let path = root.join(d);
+        if path.is_dir() {
+            let mut files: Vec<PathBuf> = fs::read_dir(&path)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "pilot"))
+                .collect();
+            files.sort();
+            out.extend(files);
+        } else {
+            out.push(path);
+        }
+    }
+    out.into_iter()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .collect()
 }
@@ -195,14 +229,15 @@ fn in_stdlib(path: &str) -> bool {
     }
 }
 
-/// Runs the checker made of `checker_files` over the program at `path` and
-/// returns its diagnostics in the user's files. A program that does not link
-/// gives none here: `cli_check` reports why it does not.
-pub fn check(path: &str, checker_files: &[String]) -> Vec<Diag> {
+/// Runs the checker made of `checker_files` over the program at `path`,
+/// linked with the declarations `decls` names, and returns its diagnostics
+/// in the user's files. A program that does not link gives none here:
+/// `cli_check` reports why it does not.
+pub fn check(path: &str, checker_files: &[String], decls: &[String]) -> Vec<Diag> {
     let Ok(mut paths) = run::link_plan(path) else {
         return Vec::new();
     };
-    for p in primitive_files() {
+    for p in decl_files(decls) {
         if !paths.contains(&p) {
             paths.push(p);
         }

@@ -87,9 +87,16 @@ pub fn register_method(
 
     let existing = mt.methods[m_name];
 
-    // Tier 1 wins unconditionally over Tiers 2, 3, 4, 5
+    // Tier 1 wins unconditionally over Tiers 2, 3, 4, 5, and settles any
+    // collision reported among them for this name.
     if entry.tier == MemberTier::Tier1ExplicitStruct {
         mt.methods[m_name] = entry;
+        var kept: List<str> = [];
+        let settled = "on '" + m_name + "'";
+        for d in mt.diagnostics {
+            if d.find(settled, 0) < 0 { kept.push(d); }
+        }
+        mt.diagnostics = kept;
         return;
     }
 
@@ -130,7 +137,7 @@ pub fn register_method(
     // Diamond collision between two sub-interfaces at Tier 3 or two base interfaces at Tier 4
     if entry.tier == existing.tier && (entry.tier == MemberTier::Tier3SubInterfaceDefault || entry.tier == MemberTier::Tier4BaseInterfaceDefault) {
         if entry.origin_type_name != existing.origin_type_name {
-            let msg = "AmbiguousInterfaceDefault: Diamond interface default method collision on '" + m_name + "' between '" + existing.origin_type_name + "' and '" + entry.origin_type_name + "': provide an explicit Tier 1 or Tier 2 implementation to disambiguate";
+            let msg = "COMP007: AmbiguousInterfaceDefault: Diamond interface default method collision on '" + m_name + "' between '" + existing.origin_type_name + "' and '" + entry.origin_type_name + "': provide an explicit Tier 1 or Tier 2 implementation to disambiguate";
             mt.diagnostics.push(msg);
         }
         return;

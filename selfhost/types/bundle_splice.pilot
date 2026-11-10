@@ -94,6 +94,7 @@ pub struct StructLayoutPlan : IObject {
     pub struct_name:       str;
     pub is_partial:        bool;
     pub declared_lattice:  u8; // 0b00, 0b01, 0b10, 0b11
+    pub declares_lattice:  bool; // false: the struct names no lattice interface
     pub explicit_dtor:     bool;
     pub physical_fields:   List<PhysicalFieldSlot>;
     pub remap_offsets:     Map<str, usize>; // "Bundle.field" -> physical byte offset
@@ -109,6 +110,7 @@ pub fn struct_layout_plan_new(name: str, is_partial: bool, decl_lattice: u8) -> 
         struct_name:      name,
         is_partial:       is_partial,
         declared_lattice: decl_lattice,
+        declares_lattice: true,
         explicit_dtor:    false,
         physical_fields:  [],
         remap_offsets:    [:],
@@ -118,6 +120,14 @@ pub fn struct_layout_plan_new(name: str, is_partial: bool, decl_lattice: u8) -> 
         computed_lattice: 0,
         diagnostics:      [],
     };
+}
+
+/// A plan for a struct that declares no lattice: its fields and destructor
+/// decide its bits, and no lattice contract can be violated.
+pub fn struct_layout_plan_undeclared(name: str, is_partial: bool) -> StructLayoutPlan {
+    var plan = struct_layout_plan_new(name, is_partial, 0);
+    plan.declares_lattice = false;
+    return plan;
 }
 
 // ------------------------------------------------------------------------------
@@ -366,7 +376,7 @@ pub fn compute_struct_layout(
 
     // COMP005: 2-Bit Lattice Law Enforcement
     // Splicing a field that borrows (0b01) or owns (0b10) into a struct declared IValue (0b00) is illegal
-    if plan.declared_lattice == 0 && max_lattice != 0 {
+    if plan.declares_lattice && plan.declared_lattice == 0 && max_lattice != 0 {
         let msg = "COMP005: Declared Lattice Contract Violated: Struct '" + plan.struct_name + "' is declared ': IValue' (0b00), but spliced fields introduce lattice bits 0b" + if max_lattice == 1 { "01" } else if max_lattice == 2 { "10" } else { "11" };
         plan.diagnostics.push(msg);
     }

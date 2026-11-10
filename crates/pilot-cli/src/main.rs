@@ -26,6 +26,9 @@ const CLI: &[&str] = &[
 ];
 
 fn main() {
+    // The seed's syntax, native bindings and primitives come from the stdlib
+    // it runs with, never from copies compiled into the binary.
+    pilot_parser::set_source_root(std::path::Path::new(&tool::toolchain_root()));
     let args: Vec<String> = std::env::args().skip(1).collect();
     let line = run::pilot_str(&args.join("\x1f"));
     let code = tool::eval_cli(CLI, &format!("run_cli_entry(\"{line}\");"), host::cli_host_ops());

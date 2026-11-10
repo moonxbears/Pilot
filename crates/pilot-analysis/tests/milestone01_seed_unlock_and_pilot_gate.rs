@@ -61,7 +61,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "execute_universal_rename_litmus",
                 "execute_dual_pass_rename_gate",
             ],
-            required_code_markers: &["GATE008", "temp_guard_new", "temp_guard_cleanup", "gate_seam_open", "rl_run_program"],
+            required_code_markers: &["GATE008", "temp_guard_new", "temp_guard_cleanup", "rl_run_corpus", "run_in"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -100,6 +100,7 @@ fn workspace_root() -> PathBuf {
 fn load_gate_bundle(root: &Path) -> String {
     let deps = [
         "stdlib/crypto/hash.pilot",
+        "stdlib/std/proc.pilot",
         "selfhost/lexer.pilot",
         "selfhost/ast.pilot",
         "selfhost/parser.pilot",
@@ -383,23 +384,27 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
         "seeded rename output: {first}"
     );
 
-    // 3. The gate builds the renamed sandbox, then stops at the seam that
-    //    runs programs (no process spawn until F6). It must not pass.
-    let res = eval_gate_script(
-        &bundle,
-        &format!(
-            "let opts = parse_gate_cli_args(\"--only rename_litmus --seed {seed} --json\");\n\
-             let reps = run_all_gates(\"{root_esc}\", opts);\n\
-             format_gate_reports_json(reps);"
-        ),
-    );
+    // 3. The gate builds the renamed sandbox (stdlib, selfhost and the
+    //    corpus) and runs `pilot test` in it with the real binary. Every
+    //    program keeps its result, in both passes.
+    let bin = ensure_pilot_cli_bin(&root);
+    let child = Command::new(&bin)
+        .args(["gate", "--only", "rename_litmus", "--seed", &seed.to_string(), "--json"])
+        .current_dir(&root)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("run pilot gate --only rename_litmus");
+    // The sandbox is named after the gate process: /tmp/pilot_litmus_<pid>_<us>.
+    let sandbox_prefix = format!("pilot_litmus_{}_", child.id());
+    let out = child.wait_with_output().expect("wait for pilot gate");
+    let res = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(
-        res.contains("\"id\":\"rename_litmus\"")
-            && res.contains("\"passed\":false")
-            && res.contains("\"at_seam\":\"gate.litmus_run_program\"")
-            && res.contains("\"at_seams\":1")
+        out.status.success()
+            && res.contains("\"id\":\"rename_litmus\"")
+            && res.contains("\"passed\":true")
+            && res.contains("\"at_seams\":0")
             && res.contains("\"total_violations\":0"),
-        "Rename litmus must stop at its seam for seed {}: {}",
+        "Rename litmus must pass for seed {}: {}",
         seed,
         res
     );
@@ -418,20 +423,42 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
         scanned >= 2 * conformance_programs,
         "the sandbox must hold every conformance program in both passes ({scanned} < 2 x {conformance_programs})"
     );
-    let leftover = std::fs::read_dir("/tmp")
+    let leaked = std::fs::read_dir("/tmp")
         .unwrap()
         .filter_map(|e| e.ok())
-        .any(|e| e.file_name().to_string_lossy().starts_with(&format!("pilot_litmus_{}_", std::process::id())));
-    assert!(!leftover, "rename litmus leaked its sandbox under /tmp");
+        .any(|e| e.file_name().to_string_lossy().starts_with(&sandbox_prefix));
+    assert!(!leaked, "rename litmus leaked its sandbox /tmp/{sandbox_prefix}*");
 
-    // 4. Running a program stops at the registered seam.
-    let run = eval_gate_script(&bundle, "rl_run_program(\"/tmp\", \"progs/x.pilot\", glist_new());");
-    assert!(
-        run.starts_with("FAULT: SEAM001: unconnected seam `gate.litmus_run_program`"),
-        "rl_run_program must stop at its seam: {run}"
+    // 4. Expectation files follow the rename. Words are renamed; a location
+    //    keeps its line and its column moves by what the rename changed in
+    //    the source line before it. Line 2 of the source below is
+    //    `fn f(a: str, b: res) {`; `b` is at column 14. With `str` -> `utf8`
+    //    and `res` -> `outcome` the prefix `fn f(a: str, ` (13 bytes) becomes
+    //    `fn f(a: utf8, ` (14 bytes), so `b` moves to column 15.
+    let moved = eval_gate_script(
+        &bundle,
+        "let rmap = __engine(\"map_new\");\n\
+         __engine(\"map_set\", rmap, \"str\", \"utf8\");\n\
+         __engine(\"map_set\", rmap, \"res\", \"outcome\");\n\
+         rl_rename_stderr(\"error[X]: `res<str>` here\\np.pilot:2:14\\n\", \"// head\\nfn f(a: str, b: res) {\\n}\\n\", rmap);",
     );
+    assert_eq!(moved, "error[X]: `outcome<utf8>` here\np.pilot:2:15\n");
 
-    // 5. TempDirGuard deterministic cleanup on a dedicated probe arena
+    // 5. A corpus run is judged by what `pilot test` printed: each failing
+    //    or fixed program is a violation, and so is a run with no result.
+    let judged = eval_gate_script(
+        &bundle,
+        "let v = glist_new();\n\
+         rl_corpus_violations(LitmusRun { stdout: \"FAIL tests/conformance/a.pilot\\n  stdout differs\\nRESULT: 1 passed, 1 failed\\n\", stderr: \"\", exit_code: 1 }, v);\n\
+         let w = glist_new();\n\
+         rl_corpus_violations(LitmusRun { stdout: \"\", stderr: \"boom\", exit_code: 101 }, w);\n\
+         let x = glist_new();\n\
+         rl_corpus_violations(LitmusRun { stdout: \"RESULT: 9 passed, 0 failed\\n\", stderr: \"\", exit_code: 0 }, x);\n\
+         \"\" + glist_len(v) + \" \" + glist_get(v, 0).file_path + \" \" + glist_len(w) + \" \" + glist_len(x);",
+    );
+    assert_eq!(judged, "1 tests/conformance/a.pilot 1 0");
+
+    // 6. TempDirGuard deterministic cleanup on a dedicated probe arena
     let probe_dir = format!("/tmp/pilot_litmus_guard_probe_{}_{}", std::process::id(), seed);
     let probe_esc = escape_pilot_str(&probe_dir);
     let guard_probe = eval_gate_script(
@@ -480,9 +507,9 @@ pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status() {
         fast_json
     );
 
-    // 2. `pilot gate --full`: the three source gates pass; the rename litmus
-    //    and the bootstrap parity gate cannot run their checks yet and report
-    //    the seams they stop at. Exit 0: no gate failed.
+    // 2. `pilot gate --full`: the three source gates and the rename litmus
+    //    pass; the bootstrap parity gate cannot run its check yet and reports
+    //    the seam it stops at. Exit 0: no gate failed.
     let full_out = Command::new(&bin)
         .args(["gate", "--full", "--seed", "77777"])
         .current_dir(&root)
@@ -491,9 +518,9 @@ pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status() {
     let full_txt = String::from_utf8(full_out.stdout).unwrap();
     assert!(full_out.status.success(), "pilot gate --full failed:\n{}", full_txt);
     for line in [
-        "[SEAM] rename_litmus (Adaptability) stops at seam `gate.litmus_run_program`",
+        "[PASS] rename_litmus (Adaptability",
         "[SEAM] bootstrap_parity (BootstrapParity) stops at seam `bootstrap.stage_compile`",
-        "RESULT: 3 GATE(S) PASSED, 2 AT SEAMS (0 violations)",
+        "RESULT: 4 GATE(S) PASSED, 1 AT SEAMS (0 violations)",
     ] {
         assert!(full_txt.contains(line), "Expected `{}` in --full output:\n{}", line, full_txt);
     }

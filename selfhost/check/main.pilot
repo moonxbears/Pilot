@@ -13,12 +13,19 @@ use selfhost.check.resolve.*;
 use selfhost.check.infer.*;
 use selfhost.check.rules.*;
 use selfhost.check.diag.*;
+use selfhost.check.generics.*;
+use selfhost.check.methods.*;
+use selfhost.check.own.*;
 
 pub fn check_program() -> List<List<any>> {
     let s = snap_load();
     let sink = sink_new(s);
     let p = prog_new(s);
     let r = resolve_program(p, sink);
-    check_rules(infer_new(p, r), sink);
+    let inf = infer_new(p, r);
+    check_rules(inf, sink);
+    check_generics(inf, sink);
+    check_ownership(inf, sink);
+    check_type_tables(p, sink);
     return sink.rows;
 }

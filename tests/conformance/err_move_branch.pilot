@@ -1,0 +1,17 @@
+// A value moved on one branch may be gone after the `if` (OWN001).
+struct Ticket {
+    pub id: i64;
+    ~self() {
+        print("closed");
+    }
+}
+
+fn consume(t: Ticket) -> i64 => t.id;
+
+fn main() {
+    let t = Ticket { id: 7 };
+    if t.id > 5 {
+        print(consume(t));
+    }
+    print(t.id);
+}

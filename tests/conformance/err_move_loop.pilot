@@ -1,0 +1,18 @@
+// A value moved inside a loop is gone on the next iteration (OWN001).
+struct Ticket {
+    pub id: i64;
+    ~self() {
+        print("closed");
+    }
+}
+
+fn consume(t: Ticket) -> i64 => t.id;
+
+fn main() {
+    let t = Ticket { id: 7 };
+    var i = 0;
+    while i < 2 {
+        print(consume(t));
+        i = i + 1;
+    }
+}

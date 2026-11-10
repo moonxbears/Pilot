@@ -20,8 +20,8 @@
 //   GATE018  a stand-in that no wiring ledger row names, or that a row above
 //            DRAFT names
 //   GATE019  a `[Workaround]` naming a bug that is not in the bug registry
-//   GATE020  a known bug whose repro program is missing, or a program under
-//            `tests/conformance/known_bugs/` that no bug names as its repro
+//   GATE020  a known bug whose repro program is missing, or a program directly
+//            in `tests/conformance/known_bugs/` that no bug names as its repro
 pub lvl(0) pkg Pilot.SelfHost.Gate.SeamGate;
 
 use selfhost.gate.manifest.*;
@@ -310,6 +310,9 @@ pub fn execute_seam_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> Gat
     for full in sg_lines(gate_fs_walk_files(bugs_base)) {
         if !full.ends_with(".pilot") { continue; }
         let rel = sg_known_bugs_dir() + full.slice(bugs_base.len(), full.len());
+        // Like `pilot test`, only top-level files are programs; packages a
+        // repro imports live in subdirectories.
+        if rel.slice(sg_known_bugs_dir().len() + 1, rel.len()).find("/", 0) >= 0 { continue; }
         if !repros.has(rel) {
             glist_push(violations, sg_violation("GATE020", rel, 1, 1, rel,
                 "known-bug program is not the repro of any registered bug",

@@ -27,6 +27,7 @@ pub pure fn cli_version_text() -> str => "Pilot v1.1.51 (Self-Hosted PilVM v3)";
 /// The sources of the `pilot gate` runner.
 pub fn cli_gate_files() -> List<str> => [
     "stdlib/crypto/hash.pilot",
+    "stdlib/std/proc.pilot",
     "selfhost/lexer.pilot",
     "selfhost/ast.pilot",
     "selfhost/parser.pilot",
@@ -41,15 +42,30 @@ pub fn cli_gate_files() -> List<str> => [
     "selfhost/gate/runner.pilot",
 ];
 
+/// The declarations every program is checked against, linked after the
+/// program: files, or directories whose `.pilot` files are taken in name
+/// order. `core.pilot` holds the `Cfg` tables (lattice masks, register
+/// classes), `operator.pilot` the root and operator interfaces.
+pub fn cli_checker_decls() -> List<str> => [
+    "stdlib/core/core.pilot",
+    "stdlib/core/operator.pilot",
+    "stdlib/core/primitives",
+];
+
 /// The type checker's sources (`selfhost/check/`), in link order.
 pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/snapshot.pilot",
     "selfhost/check/types.pilot",
     "selfhost/check/diag.pilot",
     "selfhost/check/program.pilot",
+    "selfhost/types/method_table.pilot",
+    "selfhost/types/bundle_splice.pilot",
+    "selfhost/check/methods.pilot",
     "selfhost/check/resolve.pilot",
     "selfhost/check/infer.pilot",
     "selfhost/check/rules.pilot",
+    "selfhost/check/generics.pilot",
+    "selfhost/check/own.pilot",
     "selfhost/check/main.pilot",
 ];
 
@@ -61,7 +77,7 @@ fn diag_before(a: HostDiag, b: HostDiag) -> bool =>
 fn semantic_diags(path: str) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in host_analyze(path) { out.push(d); }
-    for d in host_typecheck(path, cli_checker_files()) {
+    for d in host_typecheck(path, cli_checker_files(), cli_checker_decls()) {
         out.push(d);
         var at = out.len - 1;
         while at > 0 && diag_before(d, out[at - 1]) {

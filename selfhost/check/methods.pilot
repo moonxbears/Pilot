@@ -1,0 +1,463 @@
+// ==============================================================================
+// FILE: selfhost/check/methods.pilot
+// Method tables, layout plans and lattice bits of the program's types.
+// ==============================================================================
+// For each type the checker meets it builds, once:
+//   - its method table (selfhost/types/method_table.pilot), from its own
+//     `struct`/`interface` members (tier 1), the members of the `*Bundle`
+//     and `*Facet` types it splices, after `with`/`without` (tier 2), the
+//     default members of the interfaces it names directly (tier 3) and of
+//     the interfaces those reach (tier 4), and its `ext` members (tier 5);
+//   - its layout plan (selfhost/types/bundle_splice.pilot), from its own
+//     fields and the fields of its splices after `coalesce`/`with`/`without`;
+//     the plan gives the fields the type exposes and their lattice bits;
+//   - its lattice bits: the bits of the `[Lattice(..)]` interfaces it
+//     reaches when it names any (its fields and `~self()` are checked
+//     against them, COMP005), otherwise the bits its fields and `~self()`
+//     give it (the plan's `computed_lattice`).
+// The libraries' collision and lattice findings (COMP001-COMP007) are
+// reported on the type's declaration when it is in a user file.
+//
+// A built member keeps its declaration and the generic arguments that apply
+// to its signature, written in terms of the type's own generic parameters;
+// a lookup on `T<args>` substitutes `args` for them.
+pub lvl(0) pkg Pilot.SelfHost.Check.Methods;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.diag.*;
+use selfhost.types.method_table.*;
+use selfhost.types.bundle_splice.*;
+
+/// Everything built for one type name.
+pub struct BuiltType {
+    pub name: str;
+    /// The declaration that introduces the type's generic parameters.
+    pub decl: i64;
+    pub tparams: List<str>;
+    pub table: MethodTable;
+    pub plan: StructLayoutPlan;
+    /// Member names registered in `table`, in registration order.
+    pub names: List<str>;
+    /// `name@origin` -> index into `found`.
+    pub sides: Map<str, i64>;
+    pub found: List<Member>;
+    /// Exposed field name -> index into `found`.
+    pub fields: Map<str, i64>;
+    /// Members interfaces declare without a body, by name -> `found` index;
+    /// they type a call when no table entry does.
+    pub requires: Map<str, i64>;
+    pub require_names: List<str>;
+    /// Whether every splice and base resolved to a declaration.
+    pub complete: bool;
+    /// Lattice bits: the declared ones, or those of its fields and `~self()`.
+    pub lattice: i64;
+    pub declared: i64;
+    pub declares_lattice: bool;
+    /// Fields of the type itself and of its splices, for bundle catalogs.
+    pub own_fields: List<BundleFieldDef>;
+    pub own_methods: List<BundleMethodDef>;
+    /// The type's own field members, by name -> `found` index.
+    pub field_decls: Map<str, i64>;
+}
+
+fn is_method_kind(k: i64) -> bool => k == nk_fn() || k == nk_operator() || k == nk_indexer();
+
+fn is_field(s: Snap, m: i64) -> bool {
+    let k = kind(s, m);
+    return k == nk_param() || ((k == nk_let() || k == nk_var()) && annot(s, m) >= 0);
+}
+
+fn field_type_node(s: Snap, m: i64) -> i64 => if kind(s, m) == nk_param() { rhs(s, m) } else { annot(s, m) };
+
+/// The generic arguments that stand for a type's own parameters.
+fn own_args(p: Program, decl: i64, names: List<str>) -> List<i64> {
+    var out: List<i64> = [];
+    for n in names { out.push(ty_param(p.tt, decl, n)); }
+    return out;
+}
+
+fn generic_decl(p: Program, name: str) -> i64 {
+    for d in nl_get(p.type_decls, name) {
+        if prog_tparam_names(p, d).len() > 0 { return d; }
+    }
+    return prog_type_decl(p, name);
+}
+
+fn entry_for(p: Program, name: str, tier: MemberTier, origin: str, m: i64) -> MethodTableEntry {
+    let s = p.s;
+    var params = "";
+    for prm in fn_params(s, m) {
+        if params.len() > 0 { params = params + ", "; }
+        params = params + node_text(s, prm);
+    }
+    let ret = if annot(s, m) >= 0 { node_text(s, annot(s, m)) } else { "" };
+    return MethodTableEntry {
+        method_name: name,
+        tier: tier,
+        origin_type_name: origin,
+        return_type: ret,
+        params: params,
+        is_mut: false,
+        is_static: false,
+        field_remap_bundle: "",
+        clearance_lvl: 0,
+        visibility: 0,
+    };
+}
+
+fn add_found(bt: BuiltType, m: Member) -> i64 {
+    bt.found.push(m);
+    return bt.found.len() - 1;
+}
+
+/// Registers member `m` under `name` at `tier`, with origin `origin`.
+fn register(p: Program, bt: BuiltType, name: str, tier: MemberTier, origin: str, m: Member, excluded: bool) {
+    var mt = bt.table;
+    register_method(var mt, entry_for(p, name, tier, origin, m.decl), excluded);
+    if excluded { return; }
+    let key = name + "@" + origin;
+    if !bt.sides.has(key) { bt.sides.set(key, add_found(bt, m)); }
+    var seen = false;
+    for n in bt.names { if n == name { seen = true; } }
+    if !seen { bt.names.push(name); }
+}
+
+/// The member a type `sub` built for `name`, with its generic arguments
+/// rewritten from `sub`'s parameters to the arguments `st` gives them.
+fn compose(p: Program, sub: BuiltType, m: Member, st: i64) -> Member {
+    var values: List<i64> = [];
+    for v in m.values { values.push(ty_subst(p.tt, v, sub.tparams, ty_args(p.tt, st))); }
+    return Member { decl: m.decl, names: m.names, values: values };
+}
+
+/// The winning member of `sub` for `name`, or none.
+fn winner(sub: BuiltType, name: str) -> Member? {
+    if !sub.table.methods.has(name) { return none; }
+    let e: MethodTableEntry = sub.table.methods[name];
+    let key = name + "@" + e.origin_type_name;
+    if !sub.sides.has(key) { return none; }
+    return sub.found[sub.sides.get(key)];
+}
+
+/// The splice modifiers listed for splice node `u`: `[sub-slot, member,
+/// alias]` rows.
+fn splice_rows(s: Snap, u: i64) -> List<List<any>> {
+    var out: List<List<any>> = [];
+    for row in s.splice_mods {
+        if row[0] == u {
+            let alias = if row[3] > 0 { sym_text(s, row[3]) } else { "" };
+            out.push([row[1], sym_text(s, row[2]), alias]);
+        }
+    }
+    return out;
+}
+
+fn directive_for(s: Snap, u: i64, bundle: str) -> BundleSpliceDirective {
+    var d = bundle_splice_directive_new(bundle);
+    for r in splice_rows(s, u) {
+        let sub: i64 = r[0];
+        let member: str = r[1];
+        let alias: str = r[2];
+        if sub == splice_coalesce() { d.coalesce_fields.push(member); }
+        if sub == splice_without() { d.without_items.push(member); }
+        if sub == splice_with() && alias.len() > 0 { d.with_aliases[member] = alias; }
+    }
+    return d;
+}
+
+fn listed(items: List<str>, name: str) -> bool {
+    for i in items { if i == name { return true; } }
+    return false;
+}
+
+/// Bytes a value of type `t` takes: its `[Bits]` width, or its layout plan's
+/// size; 0 when not known (a generic parameter, an interface, an enum).
+[StandIn("check.field_size", "the byte size of every field type", "fields of a generic parameter, interface or enum type count 0 bytes", "F5")]
+fn byte_size(p: Program, t: i64, depth: i64) -> usize {
+    if !ty_is_named(p.tt, t) { return 0; }
+    let d = ty_decl(p.tt, t);
+    let name = node_name(p.s, d);
+    for decl in nl_get(p.type_decls, name) {
+        if some args = prog_attr_nodes(p, decl, "Bits") {
+            if args.len() > 0 {
+                if some bits = prog_const(p, args[0]) { return (bits / 8) as usize; }
+            }
+        }
+    }
+    if kind(p.s, d) != nk_struct() || depth > 8 { return 0; }
+    return build_type(p, name, depth + 1).plan.total_size;
+}
+
+/// The lattice bits of type `t` (0 when it is not derived).
+pub fn lattice_of(p: Program, t: i64) -> i64 {
+    if !ty_is_named(p.tt, t) { return 0; }
+    return build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).lattice;
+}
+
+/// The bits the `[Lattice(..)]` attribute of interface `name` declares, or -1.
+fn lattice_attr(p: Program, name: str) -> i64 {
+    for d in nl_get(p.type_decls, name) {
+        if some args = prog_attr_nodes(p, d, "Lattice") {
+            if args.len() > 0 {
+                if some bits = prog_const(p, args[0]) { return bits; }
+            }
+        }
+    }
+    return -1;
+}
+
+/// Accessed fields of a bundle method: members read through the receiver
+/// (`.x`, or a name no local binds, such as the receiver itself).
+fn accessed_fields(s: Snap, n: i64, out: List<str>, depth: i64) {
+    if n < 0 || depth > 64 { return; }
+    if kind(s, n) == nk_member() {
+        let recv = lhs(s, n);
+        if flags(s, n) == member_implied() || (recv >= 0 && kind(s, recv) == nk_ident()) {
+            out.push(sym_text(s, rhs(s, n)));
+        }
+    }
+    for c in children(s, n) { accessed_fields(s, c, out, depth + 1); }
+}
+
+fn empty_built(p: Program, name: str) -> BuiltType {
+    let decl = generic_decl(p, name);
+    let tparams = if decl >= 0 { prog_tparam_names(p, decl) } else { [] };
+    return BuiltType {
+        name: name,
+        decl: decl,
+        tparams: tparams,
+        table: method_table_new(name),
+        plan: struct_layout_plan_new(name, false, 0),
+        names: [],
+        sides: Map<str, i64>(),
+        found: [],
+        fields: Map<str, i64>(),
+        requires: Map<str, i64>(),
+        require_names: [],
+        complete: true,
+        lattice: 0,
+        declared: 0,
+        declares_lattice: false,
+        own_fields: [],
+        own_methods: [],
+        field_decls: Map<str, i64>(),
+    };
+}
+
+/// The built type of `name`, building it on first use.
+pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
+    if p.built_index.has(name) { return p.built[p.built_index.get(name)]; }
+    let bt = empty_built(p, name);
+    // Registered before its parts are built, so a cycle ends here.
+    p.built_index.set(name, p.built.len());
+    p.built.push(bt);
+    if bt.decl < 0 || depth > 12 { return bt; }
+    let s = p.s;
+    let args = own_args(p, bt.decl, bt.tparams);
+    var primary: List<BundleFieldDef> = [];
+    var directives: List<BundleSpliceDirective> = [];
+    var catalog: Map<str, BundleDef> = [:];
+    var has_dtor = false;
+    var splices: List<i64> = [];
+
+    // Tier 1: the type's own members.
+    for d in nl_get(p.type_decls, name) {
+        for m in type_members(s, d) {
+            let k = kind(s, m);
+            let member = Member { decl: m, names: bt.tparams, values: args };
+            if k == nk_dtor() { has_dtor = true; }
+            if is_method_kind(k) {
+                let mname = node_name(s, m);
+                if kind(s, d) == nk_interface() && fn_body(s, m) < 0 {
+                    if !bt.requires.has(mname) {
+                        bt.requires.set(mname, add_found(bt, member));
+                        bt.require_names.push(mname);
+                    }
+                } else {
+                    register(p, bt, mname, MemberTier::Tier1ExplicitStruct, name, member, false);
+                    var used: List<str> = [];
+                    accessed_fields(s, fn_body(s, m), used, 0);
+                    bt.own_methods.push(BundleMethodDef { name: mname, return_type: "", params: "", is_mut: false, accessed_fields: used });
+                }
+            } else if is_field(s, m) {
+                let fname = node_name(s, m);
+                let ft = prog_annot_type(p, field_type_node(s, m));
+                let fdef = BundleFieldDef {
+                    name: fname,
+                    type_name: node_text(s, field_type_node(s, m)),
+                    layout_id: 0,
+                    byte_size: byte_size(p, ft, depth),
+                    lattice_bits: lattice_of(p, ft) as u8,
+                    is_mutable: kind(s, m) == nk_var(),
+                };
+                primary.push(fdef);
+                bt.own_fields.push(fdef);
+                bt.field_decls.set(fname, add_found(bt, member));
+            } else if k == nk_expr_stmt() {
+                let u = lhs(s, m);
+                if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 { splices.push(u); }
+            }
+        }
+    }
+
+    // Tier 2: members of the spliced bundles and facets.
+    for u in splices {
+        let st = prog_annot_type(p, lhs(s, u));
+        if !ty_is_named(p.tt, st) { bt.complete = false; continue; }
+        let bname = node_name(s, ty_decl(p.tt, st));
+        let sub = build_type(p, bname, depth + 1);
+        if !sub.complete { bt.complete = false; }
+        let dir = directive_for(s, u, bname);
+        for mname in sub.names {
+            if some m = winner(sub, mname) {
+                let exposed = if dir.with_aliases.has(mname) { dir.with_aliases[mname] } else { mname };
+                register(p, bt, exposed, MemberTier::Tier2SplicedBundleFacet, bname, compose(p, sub, m, st),
+                    listed(dir.without_items, mname));
+            }
+        }
+        var bdef = bundle_def_new(bname, sub.own_fields.len() == 0);
+        for f in sub.own_fields { bdef.fields.push(f); }
+        for bm in sub.own_methods { bdef.methods.push(bm); }
+        catalog[bname] = bdef;
+        directives.push(dir);
+        // The fields the splice exposes, under their exposed names.
+        for f in sub.own_fields {
+            if !listed(dir.without_items, f.name) {
+                let exposed = if dir.with_aliases.has(f.name) { dir.with_aliases[f.name] } else { f.name };
+                if !bt.fields.has(exposed) && sub.field_decls.has(f.name) {
+                    bt.fields.set(exposed, add_found(bt, compose(p, sub, sub.found[sub.field_decls.get(f.name)], st)));
+                }
+            }
+        }
+    }
+    for f in bt.own_fields {
+        if bt.field_decls.has(f.name) { bt.fields.set(f.name, bt.field_decls.get(f.name)); }
+    }
+
+    // Tiers 3 and 4: default members of the interfaces it implements.
+    for b in nl_get(p.bases, name) {
+        let it = prog_annot_type(p, b);
+        if !ty_is_named(p.tt, it) { bt.complete = false; continue; }
+        let iname = node_name(s, ty_decl(p.tt, it));
+        let sub = build_type(p, iname, depth + 1);
+        if !sub.complete { bt.complete = false; }
+        for mname in sub.names {
+            if some m = winner(sub, mname) {
+                let e: MethodTableEntry = sub.table.methods[mname];
+                let tier = if e.tier == MemberTier::Tier1ExplicitStruct { MemberTier::Tier3SubInterfaceDefault } else { MemberTier::Tier4BaseInterfaceDefault };
+                register(p, bt, mname, tier, e.origin_type_name, compose(p, sub, m, it), false);
+            }
+        }
+        for rname in sub.require_names {
+            if !bt.requires.has(rname) {
+                bt.requires.set(rname, add_found(bt, compose(p, sub, sub.found[sub.requires.get(rname)], it)));
+                bt.require_names.push(rname);
+            }
+        }
+        let bits = lattice_attr(p, iname);
+        if bits >= 0 { bt.declared = bt.declared | bits; bt.declares_lattice = true; }
+        if sub.declares_lattice { bt.declared = bt.declared | sub.declared; bt.declares_lattice = true; }
+    }
+    let own_bits = lattice_attr(p, name);
+    if own_bits >= 0 { bt.declared = bt.declared | own_bits; bt.declares_lattice = true; }
+
+    // Tier 5: `ext` members.
+    let ext_prefix = name + ".";
+    for d in nl_get(p.ext_decls, name) {
+        for m in type_members(s, d) {
+            if is_method_kind(kind(s, m)) {
+                register(p, bt, node_name(s, m), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
+                    Member { decl: m, names: bt.tparams, values: args }, false);
+            }
+        }
+    }
+    for f in nl_get(p.dotted_fns, name) {
+        let full = node_name(s, f);
+        register(p, bt, full.slice(ext_prefix.len(), full.len()), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
+            Member { decl: f, names: bt.tparams, values: args }, false);
+    }
+
+    // Layout plan and lattice bits.
+    var plan = if bt.declares_lattice {
+        struct_layout_plan_new(name, false, bt.declared as u8)
+    } else {
+        struct_layout_plan_undeclared(name, false)
+    };
+    plan.explicit_dtor = has_dtor;
+    compute_struct_layout(var plan, primary, directives, catalog);
+    bt.plan = plan;
+    // A type that declares a lattice is classified by its declaration; the
+    // plan checks its fields and destructor against it (COMP005). One that
+    // declares none takes the bits its fields and destructor give it.
+    bt.lattice = if bt.declares_lattice { bt.declared } else { plan.computed_lattice as i64 };
+    return bt;
+}
+
+// ------------------------------------------------------------------------------
+// Lookups used by inference and the rules
+// ------------------------------------------------------------------------------
+
+fn instantiate(p: Program, bt: BuiltType, m: Member, t: i64) -> Member {
+    var values: List<i64> = [];
+    for v in m.values { values.push(ty_subst(p.tt, v, bt.tparams, ty_args(p.tt, t))); }
+    return Member { decl: m.decl, names: m.names, values: values };
+}
+
+/// The member `member` of type `t`: a field it exposes, the winner of its
+/// method table, or a member an interface it implements requires. None when
+/// `t` is not a named type or has no such member.
+pub fn prog_member(p: Program, t: i64, member: str) -> Member? {
+    if !ty_is_named(p.tt, t) { return none; }
+    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
+    if bt.fields.has(member) { return instantiate(p, bt, bt.found[bt.fields.get(member)], t); }
+    if some m = winner(bt, member) { return instantiate(p, bt, m, t); }
+    if bt.requires.has(member) { return instantiate(p, bt, bt.found[bt.requires.get(member)], t); }
+    return none;
+}
+
+/// Whether the member lookup on `t` is complete: every splice and base of
+/// the type and its parts resolved to a declaration. When it is not, a
+/// missing member may still exist and must not be reported.
+pub fn prog_members_complete(p: Program, t: i64) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    return build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).complete;
+}
+
+/// Whether values of `t` are owned (lattice bit 1): moving one ends the
+/// source binding's use.
+pub fn prog_is_owned(p: Program, t: i64) -> bool => (lattice_of(p, t) & 2) != 0;
+
+/// The code of a library finding (`COMP004: ...` -> `COMP004`).
+fn finding_code(msg: str) -> str {
+    let colon = msg.find(":", 0);
+    return if colon > 0 { msg.slice(0, colon) } else { msg };
+}
+
+/// The text of a library finding after its code (`COMP004: text` -> `text`).
+fn finding_text(msg: str) -> str {
+    let colon = msg.find(": ", 0);
+    return if colon > 0 { msg.slice(colon + 2, msg.len()) } else { msg };
+}
+
+/// Reports the method-table and layout findings of every type declared in
+/// a user file, on its first declaration there.
+pub fn check_type_tables(p: Program, sink: DiagSink) {
+    let s = p.s;
+    var done = Map<str, i64>();
+    var i = 0;
+    while i < s.count {
+        let k = kind(s, i);
+        if (k == nk_struct() || k == nk_interface()) && in_user_file(s, i) {
+            let name = node_name(s, i);
+            if !done.has(name) {
+                done.set(name, i);
+                let bt = build_type(p, name, 0);
+                for msg in bt.table.diagnostics { sink_error(sink, i, finding_code(msg), finding_text(msg)); }
+                for msg in bt.plan.diagnostics { sink_error(sink, i, finding_code(msg), finding_text(msg)); }
+            }
+        }
+        i = i + 1;
+    }
+}

@@ -234,7 +234,8 @@ impl PilVirtualMachine {
                 let program = str_arg(args, 0, op)?;
                 let argv = self.str_list(arg(args, 1, op)?, op)?;
                 let input = args.get(2).and_then(|v| v.with_str(str::to_string));
-                self.proc_run(&program, &argv, input.as_deref())
+                let dir = args.get(3).and_then(|v| v.with_str(str::to_string));
+                self.proc_run(&program, &argv, input.as_deref(), dir.as_deref())
             }
             // `field_or_native(obj, key, intrinsic)`: the record's field
             // `key` if it has one, else `intrinsic(obj)` (a native property).

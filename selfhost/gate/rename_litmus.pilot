@@ -2,15 +2,15 @@
 // FILE: selfhost/gate/rename_litmus.pilot
 // Milestone 1 / F4: Dual-Pass Universal Rename Litmus Gate (`GATE008`)
 // ==============================================================================
-// The check: copy `stdlib/` and the conformance programs into a sandbox,
-// rename the core type names there (pass 0: the AGENTS.md pairs; pass 1: the
-// same names with a seeded suffix), consistently in every copied file, then
-// run each conformance program with `pilot run` against the sandbox stdlib and
-// compare its stdout and exit code with the program's expectation files.
-// Running a program needs process spawn (F6), so `rl_run_program` stops at
-// the seam `gate.litmus_run_program`. The sandbox is built for real; while the
-// seam is registered the gate reports that it stops there (`at_seam`), never a
-// pass.
+// The check: copy `stdlib/`, `selfhost/` and the conformance corpus into a
+// sandbox, rename the core type names there (pass 0: the AGENTS.md pairs;
+// pass 1: the same names plus `str` with a seeded suffix), consistently in
+// every copied file, then run `pilot test` in the sandbox. The seed reads its
+// syntax, native bindings and primitives from the stdlib of the directory it
+// runs in (`pilot_parser::set_source_root`), and its own Pilot sources from
+// there too, so the renamed toolchain checks and runs the renamed programs
+// with no change to the seed. Every program whose result changes is a
+// `GATE008` violation.
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Gate.RenameLitmus;
 
@@ -151,25 +151,27 @@ pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
     return out;
 }
 
-/// The seam a program run stops at; the id of the `seam(..)` call in
-/// `rl_run_program`.
-fn rl_run_seam() -> str => "gate.litmus_run_program";
-
-/// Where the conformance programs live, relative to the workspace root.
+/// Where the conformance corpus lives, relative to the workspace root.
 fn rl_conformance_dir() -> str => "tests/conformance";
 
-/// What one program run printed and returned.
-[Layout(c_abi)]
+/// The trees copied into the sandbox, renamed: the stdlib the programs and
+/// the seed's tables come from, the toolchain's own Pilot sources, and the
+/// conformance corpus.
+fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir()];
+
+/// What `pilot test` printed and returned in the sandbox.
 pub struct LitmusRun : IValue {
     pub stdout: str;
+    pub stderr: str;
     pub exit_code: i64;
 }
 
-/// Runs `pilot run <program_rel> <args..>` with `sandbox_dir` as the working
-/// directory, so the toolchain resolves `stdlib/` to the renamed copy.
-pub fn rl_run_program(sandbox_dir: str, program_rel: str, args: i64) -> LitmusRun {
-    return seam("gate.litmus_run_program",
-        "running a program needs a process-spawn intrinsic (F6) to start `pilot run` in the sandbox");
+/// Runs `pilot test <corpus>` with `sandbox_dir` as the working directory,
+/// so the toolchain takes `stdlib/` and `selfhost/` from the renamed copies.
+pub fn rl_run_corpus(sandbox_dir: str) -> LitmusRun {
+    let exe = current_exe() ?? "pilot";
+    let out = run_in(sandbox_dir, exe, ["test", rl_conformance_dir()], "");
+    return LitmusRun { stdout: out.stdout, stderr: out.stderr, exit_code: out.exit_code };
 }
 
 fn rl_violation(file_path: str, snippet: str, message: str, remediation: str) -> GateViolation {
@@ -184,6 +186,98 @@ fn rl_violation(file_path: str, snippet: str, message: str, remediation: str) ->
     };
 }
 
+/// Renames whole words in plain text, such as the diagnostics a `.stderr`
+/// expectation file quotes (`option<Pair>` -> `maybe<Pair>`).
+pub pure fn rl_rename_words(text: str, rmap: i64) -> str {
+    let n = text.len();
+    var out = "";
+    var chunk_start = 0;
+    var pos = 0;
+    while pos < n {
+        let b = text.byte_at(pos);
+        if sa_is_upper(b) || sa_is_lower(b) || b == 95 {
+            let st = pos;
+            pos = pos + 1;
+            while pos < n && sa_is_id_char(text.byte_at(pos)) { pos = pos + 1; }
+            let repl = __engine("map_get", rmap, text.slice(st, pos)) ?? "";
+            if repl.len() > 0 {
+                out = out + text.slice(chunk_start, st) + repl;
+                chunk_start = pos;
+            }
+        } else if b >= 48 && b <= 57 {
+            pos = pos + 1;
+            while pos < n && sa_is_id_char(text.byte_at(pos)) { pos = pos + 1; }
+        } else {
+            pos = pos + 1;
+        }
+    }
+    return out + text.slice(chunk_start, n);
+}
+
+/// The decimal number `s` holds, or -1 when it holds anything else.
+fn rl_parse_count(s: str) -> i64 {
+    if s.len() == 0 { return -1; }
+    var v = 0;
+    var i = 0;
+    while i < s.len() {
+        let d = s.byte_at(i) - 48;
+        if d < 0 || d > 9 { return -1; }
+        v = v * 10 + d;
+        i = i + 1;
+    }
+    return v;
+}
+
+/// One `.stderr` expectation line in the renamed sandbox. A location
+/// `<file>.pilot:<line>:<col>` keeps its file and line; its column moves by
+/// what renaming the source line before it changed. Any other line has its
+/// words renamed.
+fn rl_rename_expectation(line: str, src_lines: i64, rmap: i64) -> str {
+    let ext = ".pilot:";
+    let at = gm_find(line, ext, 0);
+    if at < 0 { return rl_rename_words(line, rmap); }
+    let rest = line.slice(at + ext.len(), line.len());
+    let colon = gm_find(rest, ":", 0);
+    if colon < 0 { return rl_rename_words(line, rmap); }
+    let row = rl_parse_count(rest.slice(0, colon));
+    let col = rl_parse_count(gm_trim(rest.slice(colon + 1, rest.len())));
+    if row < 1 || col < 1 || row > glist_len(src_lines) { return line; }
+    let src_line = glist_get(src_lines, row - 1);
+    let before = src_line.slice(0, if col - 1 < src_line.len() { col - 1 } else { src_line.len() });
+    let moved = rl_rename_pilot_identifiers(before, rmap).len() + 1;
+    return line.slice(0, at + ext.len()) + row + ":" + moved;
+}
+
+/// The lines of `s` in order, empty ones included, so index `k` is line
+/// `k + 1`.
+fn rl_source_lines(s: str) -> i64 {
+    let out = glist_new();
+    var p = 0;
+    while p <= s.len() {
+        var nx = gm_find(s, "\n", p);
+        if nx < 0 { nx = s.len(); }
+        var end_pos = nx;
+        if end_pos > p && s.byte_at(end_pos - 1) == 13 { end_pos = end_pos - 1; }
+        let _ = glist_push(out, s.slice(p, end_pos));
+        p = nx + 1;
+    }
+    return out;
+}
+
+/// A `.stderr` expectation file renamed to match its renamed program, whose
+/// original source is `program_src`.
+fn rl_rename_stderr(text: str, program_src: str, rmap: i64) -> str {
+    let src_lines = rl_source_lines(program_src);
+    let lines = gm_split_lines(text);
+    var out = "";
+    var i = 0;
+    while i < glist_len(lines) {
+        out = out + rl_rename_expectation(glist_get(lines, i), src_lines, rmap) + "\n";
+        i = i + 1;
+    }
+    return out;
+}
+
 /// Copies every file under `<root>/<src_rel>` to `<sandbox>/<dst_rel>`,
 /// renaming identifiers in `.pilot` files. Returns the number of files copied.
 fn rl_copy_renamed_tree(root: str, src_rel: str, sandbox_dir: str, dst_rel: str, rmap: i64, violations: i64) -> usize {
@@ -196,7 +290,13 @@ fn rl_copy_renamed_tree(root: str, src_rel: str, sandbox_dir: str, dst_rel: str,
         let path = glist_get(files, i);
         let rel = path.slice(base.len() + 1, path.len());
         let text = gate_fs_read_text(path);
-        let out_text = if gm_ends_with(rel, ".pilot") { rl_rename_pilot_identifiers(text, rmap) } else { text };
+        var out_text = text;
+        if gm_ends_with(rel, ".pilot") {
+            out_text = rl_rename_pilot_identifiers(text, rmap);
+        } else if gm_ends_with(rel, ".stderr") {
+            let program = path.slice(0, path.len() - 7) + ".pilot";
+            out_text = rl_rename_stderr(text, gate_fs_read_text(program), rmap);
+        }
         let out_path = gm_join_path(sandbox_dir, dst_rel + "/" + rel);
         if gate_fs_write_text(out_path, out_text) {
             copied = copied + 1;
@@ -215,85 +315,42 @@ fn rl_copy_renamed_tree(root: str, src_rel: str, sandbox_dir: str, dst_rel: str,
     return copied;
 }
 
-/// The conformance programs the litmus runs: the top-level `*.pilot` files of
-/// `tests/conformance` that have a `.stdout` expectation.
-fn rl_conformance_programs(root: str) -> i64 {
-    let dir = gm_join_path(root, rl_conformance_dir());
-    let files = gm_split_lines(gate_fs_walk_files(dir));
-    let programs = glist_new();
+/// The GATE008 violations of one corpus run: every program `pilot test`
+/// reports as failing, or the run itself when it reports no result.
+fn rl_corpus_violations(run: LitmusRun, violations: i64) {
+    let lines = gm_split_lines(run.stdout);
+    var saw_result = false;
     var i = 0;
-    while i < glist_len(files) {
-        let path = glist_get(files, i);
-        let rel = path.slice(dir.len() + 1, path.len());
-        if gm_ends_with(rel, ".pilot") && gm_find(rel, "/", 0) < 0 {
-            let stem = rel.slice(0, rel.len() - 6);
-            if gate_fs_exists(gm_join_path(dir, stem + ".stdout")) {
-                let _ = glist_push(programs, stem);
-            }
+    while i < glist_len(lines) {
+        let line = glist_get(lines, i);
+        if gm_starts_with(line, "RESULT: ") { saw_result = true; }
+        if gm_starts_with(line, "FAIL ") || gm_starts_with(line, "FIXED ") {
+            let detail = if i + 1 < glist_len(lines) { gm_trim(glist_get(lines, i + 1)) } else { "" };
+            let _ = glist_push(violations, rl_violation(line.slice(5, line.len()), detail,
+                "Program result changed after renaming core types: the toolchain depends on a core type name",
+                "Derive the behaviour from layouts, field anatomy, syntax rules or method tables, not names"));
         }
         i = i + 1;
     }
-    return programs;
+    if !saw_result {
+        let _ = glist_push(violations, rl_violation(rl_conformance_dir(), "exit " + run.exit_code,
+            "`pilot test` in the renamed sandbox reported no result: " + gm_trim(run.stderr),
+            "Run `pilot test` in the sandbox by hand to see where the toolchain stops"));
+    }
 }
 
-/// Runs one renamed program and compares it with its expectation files.
-fn rl_check_program(root: str, sandbox_dir: str, stem: str, violations: i64) -> bool {
-    let dir = gm_join_path(root, rl_conformance_dir());
-    let expected_out = gate_fs_read_text(gm_join_path(dir, stem + ".stdout"));
-    let exit_text = gm_trim(gate_fs_read_text(gm_join_path(dir, stem + ".exit")));
-    var expected_exit = 0;
-    var k = 0;
-    while k < exit_text.len() {
-        expected_exit = expected_exit * 10 + (exit_text.byte_at(k) - 48);
-        k = k + 1;
-    }
-    let args = gm_split_lines(gate_fs_read_text(gm_join_path(dir, stem + ".args")));
-    let run = rl_run_program(sandbox_dir, "progs/" + stem + ".pilot", args);
-    if run.stdout != expected_out || run.exit_code != expected_exit {
-        let _ = glist_push(violations, rl_violation(rl_conformance_dir() + "/" + stem + ".pilot",
-            "exit " + run.exit_code + " (expected " + expected_exit + ")",
-            "Program output changed after renaming core types: the toolchain depends on a core type name",
-            "Derive the behaviour from layouts, field anatomy, syntax rules or method tables, not names"));
-        return false;
-    }
-    return true;
-}
-
-/// One litmus pass: build the renamed sandbox, then run every program in it.
-/// Returns the number of items handled; sets `stopped` when the program runs
-/// stop at `gate.litmus_run_program`.
-fn rl_run_pass(root: str, rename_pairs: i64, violations: i64, stopped: i64) -> usize {
+/// One litmus pass: build the renamed sandbox, then run the corpus in it.
+/// Returns the number of files copied plus programs run.
+fn rl_run_pass(root: str, rename_pairs: i64, violations: i64) -> usize {
     let rmap = rl_pairs_to_map(rename_pairs);
     let sandbox_dir = "/tmp/pilot_litmus_" + gate_proc_pid() + "_" + gate_time_now_us();
     let guard = temp_guard_new(sandbox_dir);
-    var scanned = rl_copy_renamed_tree(root, "stdlib", sandbox_dir, "stdlib", rmap, violations);
-    scanned = scanned + rl_copy_renamed_tree(root, rl_conformance_dir() + "/lib", sandbox_dir, "progs/lib", rmap, violations);
-
-    let programs = rl_conformance_programs(root);
-    let dir = gm_join_path(root, rl_conformance_dir());
-    var i = 0;
-    while i < glist_len(programs) {
-        let stem = glist_get(programs, i);
-        let src = rl_rename_pilot_identifiers(gate_fs_read_text(gm_join_path(dir, stem + ".pilot")), rmap);
-        if gate_fs_write_text(gm_join_path(sandbox_dir, "progs/" + stem + ".pilot"), src) {
-            scanned = scanned + 1;
-        }
-        i = i + 1;
+    var scanned = 0;
+    for tree in rl_sandbox_trees() {
+        scanned = scanned + rl_copy_renamed_tree(root, tree, sandbox_dir, tree, rmap, violations);
     }
-    if glist_len(programs) == 0 {
-        let _ = glist_push(violations, rl_violation(rl_conformance_dir(), dir,
-            "No conformance programs with .stdout expectations found",
-            "Run the gate from the workspace root"));
-    }
-
-    if glist_len(violations) == 0 && gate_seam_open(rl_run_seam()) {
-        __engine("map_set", stopped, "seam", rl_run_seam());
-    } else if glist_len(violations) == 0 {
-        var p = 0;
-        while p < glist_len(programs) {
-            let _ = rl_check_program(root, sandbox_dir, glist_get(programs, p), violations);
-            p = p + 1;
-        }
+    if glist_len(violations) == 0 {
+        rl_corpus_violations(rl_run_corpus(sandbox_dir), violations);
     }
 
     let _ = temp_guard_cleanup(guard);
@@ -309,12 +366,7 @@ pub fn execute_universal_rename_litmus(workspace_root: str, rename_pairs: i64) -
     let t0 = gate_time_now_us();
     let root = resolve_workspace_root(workspace_root);
     let violations = glist_new();
-    let stopped = __engine("map_new");
-    let scanned = rl_run_pass(root, rename_pairs, violations, stopped);
-    let seam_id = __engine("map_get", stopped, "seam") ?? "";
-    if seam_id.len() > 0 {
-        return gate_at_seam_report("rename_litmus", GateCategoryId.Adaptability, seam_id, t0, scanned);
-    }
+    let scanned = rl_run_pass(root, rename_pairs, violations);
     let dt = gate_time_now_us() - t0;
     return GateReport {
         gate_id: "rename_litmus",
@@ -335,9 +387,6 @@ pub fn execute_dual_pass_rename_gate(workspace_root: str, opts: ref<GateRunOptio
     let _ = glist_extend(combined, pass0.violations);
     let _ = glist_extend(combined, pass1.violations);
     let scanned = pass0.items_scanned + pass1.items_scanned;
-    if glist_len(combined) == 0 && pass0.at_seam.len() > 0 {
-        return gate_at_seam_report("rename_litmus", GateCategoryId.Adaptability, pass0.at_seam, t0, scanned);
-    }
     let dt = gate_time_now_us() - t0;
     return GateReport {
         gate_id: "rename_litmus",

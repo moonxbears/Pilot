@@ -1,0 +1,6 @@
+// Half of known_bugs/private_fn_clash.pilot: another private `helper`.
+pkg lib.private_two;
+
+fn helper() -> i64 => 2;
+
+pub fn from_two() -> i64 => helper();

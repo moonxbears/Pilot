@@ -1,0 +1,2 @@
+error[TYPE005]: `Label` does not satisfy `T : IShape` of `measure`
+err_type_bound.pilot:19:11

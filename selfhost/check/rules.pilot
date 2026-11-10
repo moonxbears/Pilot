@@ -30,6 +30,7 @@ pub lvl(0) pkg Pilot.SelfHost.Check.Rules;
 use selfhost.check.snapshot.*;
 use selfhost.check.types.*;
 use selfhost.check.program.*;
+use selfhost.check.methods.*;
 use selfhost.check.resolve.*;
 use selfhost.check.infer.*;
 use selfhost.check.diag.*;
@@ -51,11 +52,31 @@ fn literal_fits(s: Snap, e: i64, class: str) -> bool {
     return false;
 }
 
+/// Whether `t` is the list a collection literal builds (the `list_t` slot).
+fn is_literal_list(p: Program, t: i64) -> bool {
+    let lt = prog_slot_type(p, list_slot());
+    return ty_is_named(p.tt, t) && ty_is_named(p.tt, lt) && ty_decl(p.tt, t) == ty_decl(p.tt, lt);
+}
+
 /// Whether a value of type `src` (the expression `e`, or -1) fits where a
 /// `dst` is expected.
 pub fn assignable(inf: Infer, src: i64, dst: i64, e: i64) -> bool {
     let p = inf.p;
     let tt = p.tt;
+    // Collection literals are target-typed: the items of `[a, b]` must fit
+    // the element type of the collection it goes into.
+    if e >= 0 && kind(p.s, e) == nk_list() && ty_is_named(tt, dst) {
+        let elem = element_type(p, dst);
+        for item in children(p.s, e) {
+            if !assignable(inf, type_of(inf, item), elem, item) { return false; }
+        }
+        return true;
+    }
+    if is_literal_list(p, src) && !is_literal_list(p, dst) && ty_is_named(tt, dst) {
+        let elem = element_type(p, dst);
+        let args = ty_args(tt, src);
+        return ty_is_unknown(tt, elem) || args.len() == 0 || assignable(inf, args[0], elem, -1);
+    }
     if ty_is_unknown(tt, src) || ty_is_unknown(tt, dst) || src == dst { return true; }
     if ty_is_param(tt, src) || ty_is_param(tt, dst) { return true; }
     if prog_is_never(p, src) { return true; }
@@ -178,7 +199,7 @@ fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
 }
 
 /// Every type node reachable from `t`, the node included.
-fn type_nodes(s: Snap, t: i64, out: List<i64>) {
+pub fn type_nodes(s: Snap, t: i64, out: List<i64>) {
     if t < 0 || kind(s, t) != nk_type_named() { return; }
     out.push(t);
     for a in children(s, t) { type_nodes(s, a, out); }
@@ -199,6 +220,7 @@ fn check_type_names(inf: Infer, sink: DiagSink) {
         i = i + 1;
     }
     for b in s.bases { if b[1] >= 0 && in_user_file(s, b[1]) { roots.push(b[1]); } }
+    for b in s.bounds { if b[2] >= 0 && in_user_file(s, b[2]) { roots.push(b[2]); } }
     var nodes: List<i64> = [];
     for r in roots { type_nodes(s, r, nodes); }
     for t in nodes {
@@ -387,47 +409,6 @@ fn check_optional_access(inf: Infer, sink: DiagSink, n: i64, member: str, is_ind
     }
 }
 
-/// The statement of block `block` that contains node `n`, or -1.
-fn statement_in(p: Program, block: i64, n: i64) -> i64 {
-    var cur = n;
-    while cur >= 0 {
-        let up = p.parents[cur];
-        if up == block { return cur; }
-        cur = up;
-    }
-    return -1;
-}
-
-fn check_moves(inf: Infer, sink: DiagSink) {
-    let p = inf.p;
-    let s = p.s;
-    let r = inf.r;
-    var i = 0;
-    while i < s.count {
-        let k = kind(s, i);
-        let v = rhs(s, i);
-        if (k == nk_let() || k == nk_var()) && v >= 0 && kind(s, v) == nk_ident() && r.ref_of[v] >= 0
-            && in_user_file(s, i) {
-            let b = r.ref_of[v];
-            let block = p.parents[i];
-            if block >= 0 && kind(s, block) == nk_block() && r.bind_kind[b] == BindKind::Local
-                && prog_is_owned(p, type_of(inf, v)) {
-                var u = 0;
-                while u < s.count {
-                    if u != v && r.ref_of[u] == b && span_start(s, u) > span_start(s, i) {
-                        let st = statement_in(p, block, u);
-                        if st >= 0 && st != i {
-                            sink_error(sink, u, "OWN001", f"`{r.name[b]}` is used after it was moved");
-                        }
-                    }
-                    u = u + 1;
-                }
-            }
-        }
-        i = i + 1;
-    }
-}
-
 fn check_assign(inf: Infer, sink: DiagSink, n: i64) {
     let s = inf.p.s;
     let target = lhs(s, n);
@@ -470,5 +451,4 @@ pub fn check_rules(inf: Infer, sink: DiagSink) {
         }
         i = i + 1;
     }
-    check_moves(inf, sink);
 }

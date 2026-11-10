@@ -1,0 +1,2 @@
+error[OWN001]: `t` is used after it was moved
+err_move_branch.pilot:16:11

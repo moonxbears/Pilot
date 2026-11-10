@@ -1,6 +1,5 @@
 //! Comptime execution engine & Pilot-driven bootstrap snapshot (`pilot-vm`).
 
-use std::path::Path;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
 use pilot_parser::ParserTables;
@@ -128,7 +127,10 @@ impl BootstrapSnapshot {
     pub fn global() -> &'static Self {
         GLOBAL_BOOTSTRAP_SNAPSHOT.get_or_init(|| {
             let (mut tables, mut vm, mut arenas, mut m_vm) = (ParserTables::new(), ComptimeEngine::new(), Vec::new(), PilVirtualMachine::new());
-            let manifest_src = include_str!("../../../stdlib/core/bootstrap.pilot");
+            let ws_root = pilot_parser::source_root();
+            let manifest_path = ws_root.join("stdlib/core/bootstrap.pilot");
+            let manifest_src = std::fs::read_to_string(&manifest_path)
+                .unwrap_or_else(|e| panic!("bootstrap manifest {} unreadable: {e}", manifest_path.display()));
             let harness = format!(
                 "{}\n\
                  let sc = bootstrap_stage_count();\n\
@@ -150,7 +152,6 @@ impl BootstrapSnapshot {
             let mut parts = result_str.split('|');
             let _stage_count: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let stage_paths: Vec<&str> = parts.collect();
-            let ws_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
             for (idx, rel_path) in stage_paths.iter().enumerate() {
                 let src = std::fs::read_to_string(ws_root.join(rel_path)).or_else(|_| std::fs::read_to_string(rel_path))
                     .unwrap_or_else(|e| panic!("Bootstrap stage {} ('{}') unreadable: {}", idx, rel_path, e));

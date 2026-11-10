@@ -19,6 +19,9 @@ pub enum TypeForm : u8 {
     Named,
     /// A generic parameter, by owner and name.
     Param,
+    /// A function value: its arguments are the parameter types written in
+    /// the type (or of the closure), then the return type.
+    Func,
 }
 
 pub struct TypeTable {
@@ -70,6 +73,20 @@ pub fn ty_param(tt: TypeTable, owner: i64, name: str) -> i64 {
     return tt_intern(tt, TypeForm::Param, "P", owner, name, none_args);
 }
 
+/// The function type `name<args..>`: the type the closure-type rule writes
+/// (`(A) => R`), or a closure's own type.
+pub fn ty_func(tt: TypeTable, name: str, args: List<i64>) -> i64 =>
+    tt_intern(tt, TypeForm::Func, "F", -1, name, args);
+
+pub fn ty_is_func(tt: TypeTable, t: i64) -> bool => t > 0 && tt.form[t] == TypeForm::Func;
+
+/// The return type of a function type, or the unknown type.
+pub fn ty_func_return(tt: TypeTable, t: i64) -> i64 {
+    if !ty_is_func(tt, t) { return 0; }
+    let args = tt.args[t];
+    return if args.len() > 0 { args[args.len() - 1] } else { 0 };
+}
+
 pub fn ty_is_unknown(tt: TypeTable, t: i64) -> bool => t <= 0;
 pub fn ty_is_named(tt: TypeTable, t: i64) -> bool => t > 0 && tt.form[t] == TypeForm::Named;
 pub fn ty_is_param(tt: TypeTable, t: i64) -> bool => t > 0 && tt.form[t] == TypeForm::Param;
@@ -119,5 +136,6 @@ pub fn ty_subst(tt: TypeTable, t: i64, names: List<str>, values: List<i64>) -> i
     if args.len() == 0 { return t; }
     var out: List<i64> = [];
     for a in args { out.push(ty_subst(tt, a, names, values)); }
+    if ty_is_func(tt, t) { return ty_func(tt, tt.name[t], out); }
     return ty_named(tt, tt.decl[t], tt.name[t], out);
 }

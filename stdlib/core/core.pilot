@@ -96,6 +96,7 @@ comptime {
             pairs_t:  "pairs",
             expand_t: "expand",
             map_t:    "map",
+            list_t:    "List",
             frame_t:  "frame",
             type_t:   "type",
             ast_t:    "ast",

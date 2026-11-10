@@ -211,33 +211,92 @@ fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
         "-|" => SatSub, "*|" => SatMul, "+%" => WrapAdd, "-%" => WrapSub, "*%" => WrapMul,
         "+?" => CheckedAdd, "-?" => CheckedSub, "*?" => CheckedMul, "%%" => EucMod, "~>" => Lens,
         ">..<" => OpenRange, ">.." => AfterRange, ":=:" => Swap, _ => return 0, }) as u16 }
-/// Every `stdlib/core/primitives/*.pilot` source, in file-name order, so the
-/// register layouts they declare reach the tables. Adding a primitive file
-/// needs no change here.
-fn primitive_sources() -> Vec<String> {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/core/primitives");
-    let mut files: Vec<_> = std::fs::read_dir(dir).into_iter().flatten().filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "pilot")).collect();
-    files.sort();
-    files.iter().filter_map(|p| std::fs::read_to_string(p).ok()).collect()
+/// The stdlib files whose `syntax`, keyword, native-binding and protocol
+/// declarations fill the bootstrap tables, relative to the source root, in
+/// ingest order. Every `stdlib/core/primitives/*.pilot` file follows them.
+const BOOTSTRAP_SOURCES: &[&str] = &[
+    "stdlib/core/core.pilot",
+    "stdlib/core/syntax/type_construct.pilot",
+    "stdlib/core/syntax/visibility.pilot",
+    "stdlib/core/syntax/lifecycle.pilot",
+    "stdlib/core/syntax/properties.pilot",
+    "stdlib/core/syntax/module_ext.pilot",
+    "stdlib/core/syntax/attribute.pilot",
+    "stdlib/core/syntax/for.pilot",
+    "stdlib/core/syntax/while.pilot",
+    "stdlib/core/syntax/until.pilot",
+    "stdlib/core/syntax/switch.pilot",
+    "stdlib/core/syntax/guard.pilot",
+    "stdlib/core/syntax/try_catch.pilot",
+    "stdlib/core/syntax/expr_sugar.pilot",
+    "stdlib/core/syntax/fstring.pilot",
+    "stdlib/core/syntax/call_quote.pilot",
+    "stdlib/core/syntax/unit_decl.pilot",
+    "stdlib/core/builtins/native_calls.pilot",
+    "stdlib/db/sql_syntax.pilot",
+    "stdlib/db/set_ops.pilot",
+    "stdlib/polyglot/polyglot_syntax.pilot",
+    "stdlib/realtime/rt_syntax.pilot",
+    "stdlib/asyncio/select_syntax.pilot",
+    "stdlib/contracts/contracts_syntax.pilot",
+];
+
+/// Where the primitive declarations live, relative to the source root.
+const PRIMITIVES_DIR: &str = "stdlib/core/primitives";
+
+static SOURCE_ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+/// Sets the directory holding the `stdlib/` the bootstrap tables are read
+/// from. The toolchain calls it once, before anything is parsed, with the
+/// root it runs with; later calls have no effect. Without it the tables come
+/// from the workspace this crate was built in.
+pub fn set_source_root(root: &std::path::Path) {
+    let _ = SOURCE_ROOT.set(root.to_path_buf());
 }
+
+/// The directory holding the `stdlib/` the toolchain runs with.
+pub fn source_root() -> std::path::PathBuf {
+    SOURCE_ROOT
+        .get()
+        .cloned()
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+}
+
+/// The sources of the bootstrap tables: `BOOTSTRAP_SOURCES`, then every
+/// primitive file in file-name order, so adding a primitive file needs no
+/// change here. A missing file is reported and skipped.
+fn bootstrap_sources() -> Vec<String> {
+    let root = source_root();
+    let mut out = Vec::new();
+    for rel in BOOTSTRAP_SOURCES {
+        match std::fs::read_to_string(root.join(rel)) {
+            Ok(src) => out.push(src),
+            Err(e) => eprintln!("internal error: bootstrap source `{rel}` unreadable: {e}"),
+        }
+    }
+    let mut files: Vec<_> = std::fs::read_dir(root.join(PRIMITIVES_DIR))
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "pilot"))
+        .collect();
+    files.sort();
+    out.extend(files.iter().filter_map(|p| std::fs::read_to_string(p).ok()));
+    out
+}
+
 static BOOTSTRAP_TABLES: OnceLock<ParserTables> = OnceLock::new();
-pub fn bootstrap_tables() -> &'static ParserTables { BOOTSTRAP_TABLES.get_or_init(|| { let mut t = ParserTables::new(); for src in [
-            include_str!("../../../stdlib/core/core.pilot"), include_str!("../../../stdlib/core/syntax/type_construct.pilot"),
-            include_str!("../../../stdlib/core/syntax/visibility.pilot"), include_str!("../../../stdlib/core/syntax/lifecycle.pilot"),
-            include_str!("../../../stdlib/core/syntax/properties.pilot"), include_str!("../../../stdlib/core/syntax/module_ext.pilot"),
-            include_str!("../../../stdlib/core/syntax/attribute.pilot"), include_str!("../../../stdlib/core/syntax/for.pilot"),
-            include_str!("../../../stdlib/core/syntax/while.pilot"), include_str!("../../../stdlib/core/syntax/until.pilot"),
-            include_str!("../../../stdlib/core/syntax/switch.pilot"), include_str!("../../../stdlib/core/syntax/guard.pilot"),
-            include_str!("../../../stdlib/core/syntax/try_catch.pilot"), include_str!("../../../stdlib/core/syntax/expr_sugar.pilot"),
-            include_str!("../../../stdlib/core/syntax/fstring.pilot"), include_str!("../../../stdlib/core/syntax/call_quote.pilot"),
-            include_str!("../../../stdlib/core/syntax/unit_decl.pilot"), include_str!("../../../stdlib/core/builtins/native_calls.pilot"), include_str!("../../../stdlib/db/sql_syntax.pilot"), include_str!("../../../stdlib/db/set_ops.pilot"),
-            include_str!("../../../stdlib/polyglot/polyglot_syntax.pilot"), include_str!("../../../stdlib/realtime/rt_syntax.pilot"),
-            include_str!("../../../stdlib/asyncio/select_syntax.pilot"),
-            include_str!("../../../stdlib/contracts/contracts_syntax.pilot"), ] { let _ = parse_and_ingest(src, &mut t); }
-        for src in primitive_sources() { let _ = parse_and_ingest(&src, &mut t); }
+
+/// The tables built from the stdlib at the source root (`set_source_root`).
+pub fn bootstrap_tables() -> &'static ParserTables {
+    BOOTSTRAP_TABLES.get_or_init(|| {
+        let mut t = ParserTables::new();
+        for src in bootstrap_sources() {
+            let _ = parse_and_ingest(&src, &mut t);
+        }
         t
-    }) }
+    })
+}
 pub fn parse(src: &str) -> AstArena { parse_with_tables(src, bootstrap_tables()) }
 pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: false, }; p.parse_program(); p.arena }
 pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } tables.finish_ingest(src); arena }
@@ -427,17 +486,30 @@ impl<'a> Parser<'a> {
             4 => out.push(self.parse_enum_decl(&mods, 15, true)), _ => { let saved = self.active_hdr.clone();
                 self.active_hdr = Some(ScopeHeader { mods, target: 0 }); self.parse_item(out, in_type_body); self.active_hdr = saved; }
         } }
-    fn parse_generic_params(&mut self) -> Vec<SymbolId> { let mut out = Vec::new(); if !self.eat(TokenKind::Less) { return out; }
+    /// `<T : IA + IB, U, const N = 4>`: each parameter's name and the bound
+    /// types after its `:`.
+    fn parse_generic_params(&mut self) -> Vec<(SymbolId, Vec<NodeId>)> { let mut out = Vec::new(); if !self.eat(TokenKind::Less) { return out; }
         while !self.at_end() && !self.at(TokenKind::Greater) && !self.at(TokenKind::ShiftRight) {
                         if self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Const) { self.advance(); }
-            if self.is_word() || is_seed_kw(self.peek()) { out.push(self.intern_cur()); } else { self.advance(); }
-            if self.eat(TokenKind::Colon) { let _ = self.parse_type(); while self.eat(TokenKind::Plus) { let _ = self.parse_type(); } }
+            if self.is_word() || is_seed_kw(self.peek()) { out.push((self.intern_cur(), Vec::new())); } else { self.advance(); }
+            if self.eat(TokenKind::Colon) {
+                let mut bounds = vec![self.parse_type()];
+                while self.eat(TokenKind::Plus) { bounds.push(self.parse_type()); }
+                if let Some(last) = out.last_mut() { last.1.extend(bounds.into_iter().filter(|b| b.is_some())); }
+            }
             if self.eat(TokenKind::Equal) { let _ = self.parse_expr_bp(20); }
             if self.eat(TokenKind::Comma) {
                                 if self.at(TokenKind::Greater) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in generic parameters".into())); break; }
             } else { break; } }
         if !self.eat(TokenKind::Greater) && self.at(TokenKind::ShiftRight) { let p = self.cur(); self.tape.kinds[p] = TokenKind::Greater; }
         out }
+    /// Records the generic parameters and their bounds on `owner`.
+    fn add_type_params(&mut self, owner: NodeId, tps: Vec<(SymbolId, Vec<NodeId>)>) {
+        for (tp, bounds) in tps {
+            self.arena.type_params.push((owner, tp));
+            for b in bounds { self.arena.type_param_bounds.push((owner, tp, b)); }
+        }
+    }
     fn parse_type_decl(&mut self, kind: NodeKind, mods: &DeclMods, def_vis: u8, headless: bool) -> NodeId {
         let sp = self.span(); if !headless { self.advance(); }
         let (name_sym, tparams, mut bases) = (self.intern_cur(), self.parse_generic_params(), Vec::new());
@@ -457,7 +529,7 @@ impl<'a> Parser<'a> {
         } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
         let id = self.arena.alloc_node(kind, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), name_sym.0, body.0);
         let mut fm = mods.clone(); if has_dtor { fm.flags |= DECL_FLAG_DTOR; }
-        self.apply_mods(id, &fm, def_vis); for tp in tparams { self.arena.type_params.push((id, tp)); }
+        self.apply_mods(id, &fm, def_vis); self.add_type_params(id, tparams);
         for b in bases { self.arena.base_types.push((id, b)); }
         id }
     fn parse_extend_decl(&mut self, mods: &DeclMods) -> NodeId { let (sp, name_sym) = (self.span(), self.intern_cur());
@@ -503,7 +575,7 @@ impl<'a> Parser<'a> {
         let mut ch = vec![body]; ch.extend(params); let (st, ln) = self.arena.alloc_child_slice(&ch);
         let id = self.arena.alloc_node(NodeKind::FnDecl, ln as u16, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), name_sym.0, st);
         if ret_ty.is_some() { self.arena.set_type_annot(id, ret_ty); }
-        self.apply_mods(id, mods, def_vis); for tp in tparams { self.arena.type_params.push((id, tp)); }
+        self.apply_mods(id, mods, def_vis); self.add_type_params(id, tparams);
         id }
     fn parse_ctor(&mut self, mods: &DeclMods) -> NodeId { let sp = self.span(); self.advance(); let params = self.parse_param_list();
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
@@ -567,12 +639,29 @@ impl<'a> Parser<'a> {
         if default.is_some() { self.arena.field_defaults.push((id, default)); }
         if ty.is_some() { self.arena.set_type_annot(id, ty); }
         self.apply_mods(id, mods, def_vis); id }
+    /// `*Bundle<T> coalesce { id } with { flags as net_flags } without { x };`
+    /// Each listed member is kept in `splice_mods` under the receptor
+    /// sub-slot of the modifier that lists it.
     fn parse_bundle_splice(&mut self) -> NodeId { let sp = self.span(); self.advance(); let ty = self.parse_type();
-        while self.is_rec(30) { self.advance(); if self.eat(TokenKind::LBrace) {
-                let mut d = 1; while !self.at_end() && d > 0 { if self.at(TokenKind::LBrace) { d += 1; } else if self.at(TokenKind::RBrace) { d -= 1; } self.advance(); }
-            } }
+        let mut mods: Vec<(u8, SymbolId, SymbolId)> = Vec::new();
+        while self.is_rec(30) {
+            let sub = self.receptor().map_or(0, |(_, s)| s);
+            self.advance();
+            if !self.eat(TokenKind::LBrace) { continue; }
+            while !self.at_end() && !self.at(TokenKind::RBrace) {
+                if self.is_word() {
+                    let member = self.intern_cur();
+                    let mut alias = SymbolId(0);
+                    if self.is_rec(29) { self.advance(); if self.is_word() { alias = self.intern_cur(); } }
+                    mods.push((sub, member, alias));
+                } else { self.advance(); }
+                let _ = self.eat(TokenKind::Comma) || self.eat(TokenKind::Semicolon);
+            }
+            self.expect(TokenKind::RBrace);
+        }
         let _ = self.eat(TokenKind::Semicolon);
         let u = self.arena.alloc_node(NodeKind::UnaryExpr, UNARY_OP_SPLAT, ByteSpan::new(sp.start, self.prev_span().end), ty.0, 0);
+        for (sub, member, alias) in mods { self.arena.splice_mods.push((u, sub, member, alias)); }
         self.arena.alloc_node(NodeKind::ExprStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), u.0, 0) }
     fn parse_type_adt(&mut self, mods: &DeclMods, def_vis: u8) -> NodeId { let sp = self.span(); self.advance();
         let (sym, tps) = (self.intern_cur(), self.parse_generic_params());
@@ -585,7 +674,7 @@ impl<'a> Parser<'a> {
                 if !self.eat(TokenKind::Vbar) { break; } }
             let _ = self.eat(TokenKind::Semicolon); let (st, ln) = self.arena.alloc_child_slice(&variants);
             let id = self.arena.alloc_node(NodeKind::TypeAdtDecl, ln as u16, ByteSpan::new(sp.start, self.prev_span().end), sym.0, st);
-            self.apply_mods(id, mods, def_vis); for tp in tps { self.arena.type_params.push((id, tp)); }
+            self.apply_mods(id, mods, def_vis); self.add_type_params(id, tps);
             id
         } else { let rhs = self.parse_type(); let _ = self.eat(TokenKind::Semicolon);
             let id = self.arena.alloc_node(NodeKind::TypeAdtDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, rhs.0);

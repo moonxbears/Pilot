@@ -1,0 +1,10 @@
+// A generic type written with the wrong number of type arguments (TYPE004).
+struct Pair<A, B> {
+    pub first: A;
+    pub second: B;
+}
+
+fn main() {
+    let p: Pair<i64> = Pair { first: 1, second: 2 };
+    print(p.first);
+}

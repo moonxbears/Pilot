@@ -1,0 +1,19 @@
+// Two facets spliced into one struct give it the same method (COMP004).
+struct LoudFacet {
+    pub fn speak() -> str => "LOUD";
+}
+
+struct QuietFacet {
+    pub fn speak() -> str => "quiet";
+}
+
+struct Speaker {
+    *LoudFacet;
+    *QuietFacet;
+    pub name: str;
+}
+
+fn main() {
+    let s = Speaker { name: "a" };
+    print(s.name);
+}

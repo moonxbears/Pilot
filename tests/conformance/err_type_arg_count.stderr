@@ -1,0 +1,2 @@
+error[TYPE004]: `Pair` takes 2 type argument(s), found 1
+err_type_arg_count.pilot:8:12

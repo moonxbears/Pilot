@@ -233,6 +233,14 @@ pub struct AstArena {
     pub attrs: Vec<AstAttribute>,
     pub base_types: Vec<(NodeId, NodeId)>,
     pub type_params: Vec<(NodeId, SymbolId)>,
+    /// Constraints on generic parameters: `(owner, parameter, bound type)`,
+    /// one row per bound (`<T : IA + IB>` gives two).
+    pub type_param_bounds: Vec<(NodeId, SymbolId, NodeId)>,
+    /// Collision modifiers of `*Bundle` splices, one row per listed member:
+    /// `(splice UnaryExpr, modifier receptor sub-slot, member, alias)`. The
+    /// sub-slot is the one the modifier keyword is bound to (category 30);
+    /// `alias` is the name after `as`, or `SymbolId(0)`.
+    pub splice_mods: Vec<(NodeId, u8, SymbolId, SymbolId)>,
     pub for_clauses: Vec<(NodeId, NodeId)>,
     /// `case p if cond:` guards; `MatchArm.flags` holds the index + 1.
     pub arm_guards: Vec<NodeId>,
@@ -270,7 +278,7 @@ impl AstArena {
             nodes: Vec::with_capacity(expected), spans: Vec::with_capacity(expected),
             decl_flags: Vec::with_capacity(expected), type_annots: Vec::with_capacity(expected),
             extra_children: Vec::with_capacity(expected),
-            attrs: Vec::new(), base_types: Vec::new(), type_params: Vec::new(),
+            attrs: Vec::new(), base_types: Vec::new(), type_params: Vec::new(), type_param_bounds: Vec::new(), splice_mods: Vec::new(),
             for_clauses: Vec::new(), arm_guards: Vec::new(), field_defaults: Vec::new(), diagnostics: Vec::new(),
             i64_pool: Vec::with_capacity(expected / 4), f64_pool: Vec::with_capacity(expected / 8),
             interner: Interner::with_capacity(expected / 2, expected * 8), root: NodeId::NONE,

@@ -1,0 +1,33 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/list.pilot
+// GROWABLE OWNED LIST (`List<T>`, 0b10 IObject)
+// =========================================================================
+// The seed runs `List<T>` as its own engine list (see the `list_*` bindings
+// in stdlib/core/builtins/native_calls.pilot): `List()` and `[a, b]` build
+// one, and the methods below act on it. This declaration states that
+// surface, so the type checker knows the type and its members. The layout
+// over raw memory comes with `std.col` once the seed runs native code (F6).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.List;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+[Lang(Cfg.Lang.list_t)]
+pub partial struct List<T: IAnyValue> : IObject {
+    /// The number of items.
+    pub fn len() -> usize;
+    pub fn probe_empty() -> bool => .len() == 0;
+    pub count: usize { get => .len(); }
+    /// Appends `item` and returns the list.
+    pub fn push(item: T) -> List<T>;
+    /// Removes and returns the last item; an empty list stops the program.
+    pub fn pop() -> T;
+    /// Removes and returns the item at `index`; an index out of range stops
+    /// the program.
+    pub fn remove_at(index: usize) -> T;
+    /// The item at `index`; an index out of range stops the program.
+    pub op [] (index: usize) -> T;
+    /// Replaces the item at `index`.
+    pub op []= (index: usize, item: T);
+}

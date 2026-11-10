@@ -1,0 +1,20 @@
+// A type argument that does not meet its parameter's bound (TYPE005).
+interface IShape {
+    fn area() -> i64;
+}
+
+struct Square : IShape {
+    pub side: i64;
+    pub fn area() -> i64 => .side * .side;
+}
+
+struct Label {
+    pub text: str;
+}
+
+fn measure<T : IShape>(shape: T) -> i64 => shape.area();
+
+fn main() {
+    print(measure(Square { side: 3 }));
+    print(measure(Label { text: "x" }));
+}

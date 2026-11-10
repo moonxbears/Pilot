@@ -181,3 +181,77 @@ fn scale(x: i64) -> i64 {
     );
     assert!(!stderr.contains("UNUSED"), "{stderr}");
 }
+
+/// Method tables built from spliced facets (selfhost/check/methods.pilot):
+/// a clash settled by `without` or `with .. as`, and struct methods that
+/// override facet methods, are accepted, and a spliced method has its
+/// facet's type. The seed does not run spliced methods and rejects a call
+/// to an aliased name before the checker runs (known bug
+/// `seed.bundle_splice_methods`), so no aliased name is called here.
+#[test]
+fn spliced_facets_settled_by_modifiers_type_check() {
+    let src = "\
+struct LoudFacet {
+    pub fn speak() -> str => \"LOUD\";
+    pub fn volume() -> i64 => 9;
+}
+struct QuietFacet {
+    pub fn speak() -> str => \"quiet\";
+    pub fn volume() -> i64 => 1;
+}
+struct Speaker {
+    *LoudFacet without { speak } with { volume as loud_volume };
+    *QuietFacet without { volume };
+    pub name: str;
+}
+struct Announcer {
+    *LoudFacet;
+    *QuietFacet;
+    pub fn speak() -> str => \"announce\";
+    pub fn volume() -> i64 => 5;
+}
+fn read(s: Speaker, a: Announcer) -> str {
+    let v: i64 = a.volume();
+    let w: i64 = s.speak();
+    return s.speak() + a.speak() + f\"{v}{w}\";
+}
+";
+    let got = reported("spliced_facets", src);
+    // Only line 22 is wrong: the `speak` Speaker keeps gives a `str`.
+    // Nothing is reported for the clashes the modifiers and overrides settle.
+    assert_eq!(got, vec![at("TYPE001", "22:18")]);
+}
+
+/// OWN001 follows moves through branches, loops and calls: a value moved
+/// on a branch that returns is still usable after it, a `ref` parameter
+/// borrows, and a new value makes a moved binding usable again.
+#[test]
+fn moves_are_followed_through_control_flow() {
+    assert_clean("tests/conformance/moves_clean.pilot");
+    let src = "\
+struct Ticket : IObject { pub id: i64; }
+fn consume(t: Ticket) -> i64 => t.id;
+fn peek(ref t: Ticket) -> i64 => t.id;
+fn named(t: Ticket) -> i64 { let a = consume(t: t); return a + t.id; }
+fn both(flag: bool) -> i64 {
+    let t = Ticket { id: 1 };
+    if flag { consume(t); } else { peek(t); }
+    return t.id;
+}
+fn listed() -> i64 {
+    let t = Ticket { id: 2 };
+    let all: List<Ticket> = [t];
+    return t.id + all.len();
+}
+";
+    let got = reported("moves_flow", src);
+    let want = vec![
+        // line 4: a named argument for a plain parameter moves too.
+        at("OWN001", "4:64"),
+        // line 7: moved on the `then` branch only; maybe moved after.
+        at("OWN001", "8:12"),
+        // line 12: putting it in a list moves it.
+        at("OWN001", "13:12"),
+    ];
+    assert_eq!(got, want);
+}

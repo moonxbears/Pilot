@@ -5,15 +5,21 @@
 // Literals take the type of their receptor slot. A local takes its
 // annotation, or the type of the value it was bound to. A call takes the
 // declared return type of the function or method it resolves to, with the
-// generic arguments the receiver or the arguments fix. Postfix `?`, `??` and
+// generic arguments the receiver or the arguments fix; a call through a
+// local closure takes the closure's return type. Postfix `?`, `??` and
 // `catch` unwrap through the operand type's `op ?`; indexing goes through its
-// `op []`. Whatever is not derived yet is the unknown type, which every rule
-// accepts.
+// `op []`. A `for` variable takes the element type of what it iterates: the
+// `current` of the enumerator the enumeration protocol's `get` member gives,
+// else the type's `op []`, else a range's bounds. A block, `if` or `switch`
+// used as a value takes the type its branches agree on; a list literal is a
+// list (the `list_t` slot) of the type its items agree on. Whatever is not
+// derived yet is the unknown type, which every rule accepts.
 pub lvl(0) pkg Pilot.SelfHost.Check.Infer;
 
 use selfhost.check.snapshot.*;
 use selfhost.check.types.*;
 use selfhost.check.program.*;
+use selfhost.check.methods.*;
 use selfhost.check.resolve.*;
 
 pub struct Infer {
@@ -68,10 +74,85 @@ fn type_receiver(inf: Infer, n: i64) -> i64 {
     return ty_named(inf.p.tt, d, name, args);
 }
 
+/// The type two branches agree on: the other when one is unknown or never
+/// returns, the type when both are the same, else the unknown type.
+pub fn agree(p: Program, a: i64, b: i64) -> i64 {
+    if ty_is_unknown(p.tt, a) || prog_is_never(p, a) { return b; }
+    if ty_is_unknown(p.tt, b) || prog_is_never(p, b) || a == b { return a; }
+    return ty_unknown();
+}
+
+/// The element type values of type `t` yield when iterated.
+pub fn element_type(p: Program, t: i64) -> i64 {
+    let proto = p.s.enumeration;
+    if proto.len() == 3 {
+        if some g = prog_member(p, t, proto[0]) {
+            if some c = prog_member(p, prog_member_type(p, g), proto[2]) { return prog_member_type(p, c); }
+        }
+    }
+    if some m = prog_member(p, t, op_index()) { return prog_member_type(p, m); }
+    return ty_unknown();
+}
+
+/// The element type of the iterable expression `e`.
+fn iterated_type(inf: Infer, e: i64) -> i64 {
+    let s = inf.p.s;
+    if e < 0 { return ty_unknown(); }
+    let k = kind(s, e);
+    if (k == nk_binary() && (flags(s, e) == op_range() || flags(s, e) == op_range_inclusive())) || k == nk_range() {
+        return agree(inf.p, type_of(inf, lhs(s, e)), type_of(inf, rhs(s, e)));
+    }
+    return element_type(inf.p, type_of(inf, e));
+}
+
+/// The value a block ends with: its last item when written without a `;`.
+pub fn block_value(inf: Infer, b: i64) -> i64 {
+    let s = inf.p.s;
+    if b < 0 { return ty_unknown(); }
+    if kind(s, b) != nk_block() { return type_of(inf, b); }
+    let ch = children(s, b);
+    if ch.len() == 0 { return ty_unknown(); }
+    let last = ch[ch.len() - 1];
+    if kind(s, last) == nk_expr_stmt() && lhs(s, last) >= 0 && span_end(s, last) == span_end(s, lhs(s, last)) {
+        return type_of(inf, lhs(s, last));
+    }
+    return ty_unknown();
+}
+
+fn lambda_type(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    let ch = children(s, n);
+    var args: List<i64> = [];
+    var i = 0;
+    while i + 1 < ch.len() {
+        let prm = ch[i];
+        args.push(if kind(s, prm) == nk_param() { prog_annot_type(p, rhs(s, prm)) } else { ty_unknown() });
+        i = i + 1;
+    }
+    args.push(block_value(inf, rhs(s, n)));
+    return ty_func(p.tt, prog_slot_name(p, fn_slot()), args);
+}
+
+fn list_type(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    var elem = ty_unknown();
+    var first = true;
+    for c in children(p.s, n) {
+        let t = type_of(inf, c);
+        elem = if first { t } else { agree(p, elem, t) };
+        first = false;
+    }
+    let lt = prog_slot_type(p, list_slot());
+    if !ty_is_named(p.tt, lt) { return ty_unknown(); }
+    return ty_named(p.tt, ty_decl(p.tt, lt), p.tt.name[lt], [elem]);
+}
+
 fn binding_type(inf: Infer, b: i64) -> i64 {
     let r = inf.r;
     if r.annot[b] >= 0 { return prog_annot_type(inf.p, r.annot[b]); }
     if r.bind_kind[b] == BindKind::Local && r.source[b] >= 0 { return type_of(inf, r.source[b]); }
+    if r.bind_kind[b] == BindKind::Loop && r.source[b] >= 0 { return iterated_type(inf, r.source[b]); }
     if r.bind_kind[b] == BindKind::Unwrapped && r.source[b] >= 0 {
         return unwrap_type(inf.p, type_of(inf, r.source[b]));
     }
@@ -81,7 +162,7 @@ fn binding_type(inf: Infer, b: i64) -> i64 {
 /// Binds the generic parameters of function `f` from the argument types of
 /// call `call`: a parameter declared as a bare generic parameter takes the
 /// argument's type.
-fn call_generics(inf: Infer, f: i64, call: i64) -> List<i64> {
+pub fn call_generic_args(inf: Infer, f: i64, call: i64) -> List<i64> {
     let s = inf.p.s;
     let names = prog_tparam_names(inf.p, f);
     var values: List<i64> = [];
@@ -112,6 +193,9 @@ fn call_type(inf: Infer, n: i64) -> i64 {
     if ch.len() == 0 { return ty_unknown(); }
     let callee = ch[0];
     let ck = kind(s, callee);
+    if ck == nk_ident() && inf.r.ref_of[callee] >= 0 {
+        return ty_func_return(p.tt, type_of(inf, callee));
+    }
     if ck == nk_ident() {
         let as_type = type_receiver(inf, callee);
         if ty_is_named(p.tt, as_type) && ch.len() == 2 && kind(s, ch[1]) == nk_map() {
@@ -120,7 +204,7 @@ fn call_type(inf: Infer, n: i64) -> i64 {
         let f = called_fn(inf, n);
         if f < 0 { return ty_unknown(); }
         let ret = prog_annot_type(p, annot(s, f));
-        return ty_subst(p.tt, ret, prog_tparam_names(p, f), call_generics(inf, f, n));
+        return ty_subst(p.tt, ret, prog_tparam_names(p, f), call_generic_args(inf, f, n));
     }
     if ck == nk_member() {
         let recv = lhs(s, callee);
@@ -195,6 +279,25 @@ fn compute(inf: Infer, n: i64) -> i64 {
         return unwrap_type(p, type_of(inf, lhs(s, n)));
     }
     if k == nk_expr_stmt() { return type_of(inf, lhs(s, n)); }
+    if k == nk_lambda() { return lambda_type(inf, n); }
+    if k == nk_list() { return list_type(inf, n); }
+    if k == nk_block() { return block_value(inf, n); }
+    if k == nk_if() {
+        let ch = children(s, n);
+        if ch.len() < 3 { return ty_unknown(); }
+        return agree(p, block_value(inf, ch[1]), block_value(inf, ch[2]));
+    }
+    if k == nk_match() {
+        let ch = children(s, n);
+        var t = ty_unknown();
+        var i = 1;
+        while i < ch.len() {
+            let body = block_value(inf, rhs(s, ch[i]));
+            t = if i == 1 { body } else { agree(p, t, body) };
+            i = i + 1;
+        }
+        return t;
+    }
     return ty_unknown();
 }
 

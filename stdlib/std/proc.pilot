@@ -32,5 +32,11 @@ pub fn run(program: str, args: List<str>, input: str) -> ProcessOutput {
     return ProcessOutput { exit_code: out[0], stdout: out[1], stderr: out[2] };
 }
 
+/// Runs `program` like `run`, with `dir` as its working directory.
+pub fn run_in(dir: str, program: str, args: List<str>, input: str) -> ProcessOutput {
+    let out = __engine("proc_run", program, args, input, dir);
+    return ProcessOutput { exit_code: out[0], stdout: out[1], stderr: out[2] };
+}
+
 /// The path of the running executable, or `none` when the OS does not say.
 pub fn current_exe() -> str? => __engine("proc_exe");
