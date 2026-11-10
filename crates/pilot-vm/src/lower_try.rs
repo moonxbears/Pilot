@@ -2,7 +2,10 @@
 //! and `expr catch err => fallback`.
 //!
 //! A failure is a value, never an unwinding exception. Postfix `expr?` tests
-//! its operand: a success value is unwrapped, a failure leaves. Outside any
+//! its operand: `none` is a failure, and so is a struct record whose success
+//! predicate (the try protocol `stdlib/core/syntax/try_catch.pilot` binds)
+//! answers `false`. A successful record is unwrapped by its `op ?`; any other
+//! value passes through unchanged. A failure leaves. Outside any
 //! `try`, it returns the failure from the current function. Inside a `try`
 //! block, it jumps to the `catch` clause with the failure bound to the
 //! clause's name, running the deferred statements of every block it leaves.
@@ -24,10 +27,15 @@ impl BytecodeCompiler {
         let r = self.compile_node(arena, NodeId(inner));
         self.emit(Opcode::Move, dst, r, 0);
         self.release_to(mark);
-        let present = self.emit_branch(Opcode::JumpIfNotNull, dst, 0);
+        let absent = self.emit_branch(Opcode::JumpIfNull, dst, 0);
+        let failed = self.emit_unwrap(arena, dst);
+        let done = self.emit_jump(0);
+        self.patch_to_here(absent);
+        if let Some(j) = failed {
+            self.patch_to_here(j);
+        }
         self.emit_failure_exit(arena, dst);
-        self.patch_to_here(present);
-        self.emit_unwrap(dst);
+        self.patch_to_here(done);
         self.release_to(mark);
         dst
     }
@@ -50,10 +58,25 @@ impl BytecodeCompiler {
         }
     }
 
-    /// Replaces the success value in `r` with what it carries.
-    fn emit_unwrap(&mut self, r: u8) {
-        let r_v = self.emit_intrinsic("try_unwrap", &[r]);
+    /// When `r` holds a successful struct record, replaces it with its
+    /// success value. Returns the branch taken, with `r` unchanged, when it
+    /// holds a failed one. Nothing is emitted while no struct implements the
+    /// try protocol.
+    fn emit_unwrap(&mut self, arena: &AstArena, r: u8) -> Option<usize> {
+        let p = pilot_parser::bootstrap_tables().try_protocol()?.clone();
+        if !self.method_owners.contains_key(&p.is_success) {
+            return None;
+        }
+        let mark = self.next_reg;
+        let r_type = self.emit_intrinsic("record_type", &[r]);
+        let plain = self.emit_branch(Opcode::JumpIfNull, r_type, 0);
+        let r_ok = self.emit_method_call(arena, r, "", &p.is_success, &[]);
+        let failed = self.emit_branch(Opcode::JumpIfFalse, r_ok, 0);
+        let r_v = self.emit_method_call(arena, r, "", &p.unwrap, &[]);
         self.emit(Opcode::Move, r, r_v, 0);
+        self.patch_to_here(plain);
+        self.release_to(mark);
+        Some(failed)
     }
 
     /// Opens a `try` region; failures inside it go to the returned register.
@@ -129,17 +152,19 @@ impl BytecodeCompiler {
         self.emit(Opcode::Move, dst, r, 0);
         self.release_to(mark);
         let fails = self.close_try();
-        let present = self.emit_branch(Opcode::JumpIfNotNull, dst, 0);
+        let absent = self.emit_branch(Opcode::JumpIfNull, dst, 0);
+        let failed = self.emit_unwrap(arena, dst);
+        let end = self.emit_jump(0);
+        self.patch_to_here(absent);
+        if let Some(j) = failed {
+            self.patch_to_here(j);
+        }
         self.emit(Opcode::Move, fail_reg, dst, 0);
         for j in fails {
             self.patch_to_here(j);
         }
         let r_fb = self.compile_catch_clause(arena, clause, fail_reg);
         self.emit(Opcode::Move, dst, r_fb, 0);
-        self.release_to(mark);
-        let end = self.emit_jump(0);
-        self.patch_to_here(present);
-        self.emit_unwrap(dst);
         self.release_to(mark);
         self.patch_to_here(end);
         dst

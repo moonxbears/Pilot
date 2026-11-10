@@ -1,0 +1,6 @@
+// F2: a name its module hides with `without` cannot be used by importers.
+use lib.shapes;
+
+fn main() {
+    print(legacy_square(2).area());
+}

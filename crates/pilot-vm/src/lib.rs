@@ -7,6 +7,7 @@
 
 mod heap;
 pub mod instruction;
+mod host;
 mod lower_args;
 mod lower_call;
 mod lower_cascade;
@@ -15,10 +16,11 @@ mod lower_defer;
 mod lower_destructure;
 mod lower_dispatch;
 mod lower_expr;
+mod lower_for;
 mod lower_global;
-mod lower_linked;
 mod lower_native;
 mod lower_pipe;
+mod lower_program;
 mod lower_stmt;
 mod lower_struct;
 mod lower_switch;
@@ -134,8 +136,6 @@ pub struct BytecodeCompiler {
     /// The declaration whose parameters each callee takes (`f`, `Owner.m`,
     /// `Owner.self`), for binding named arguments.
     param_decls: HashMap<String, NodeId>,
-    /// Sources of the Pilot modules already compiled into the program.
-    linked_modules: std::collections::HashSet<String>,
     call_patches: Vec<(usize, String, String, ByteSpan)>,
     const_maps: HashMap<String, CMap>,
     loops: Vec<LoopCtx>,
@@ -172,6 +172,12 @@ pub struct BytecodeCompiler {
     /// `LoadConst` instructions that must load a function's entry point once
     /// it is known.
     entry_patches: Vec<(usize, String, ByteSpan)>,
+    /// Functions and methods of imported units, compiled on first use.
+    lazy_decls: HashMap<String, lower_program::LazyDecl>,
+    /// Names a unit hides with `without`, and that unit.
+    excluded: HashMap<String, Option<pilot_span::FileId>>,
+    /// The unit of the node being compiled, in a linked program.
+    cur_unit: Option<pilot_span::FileId>,
 }
 
 impl BytecodeCompiler {
@@ -186,9 +192,25 @@ impl BytecodeCompiler {
     pub fn compile(arena: &AstArena, root: NodeId) -> PilcBinary {
         let mut c = Self::new();
         let last = if root.is_some() { c.compile_node(arena, root) } else { 0 };
+        c.finish(arena, root, last)
+    }
+
+    /// Compiles a program linked from the units of `arena` (see
+    /// `pilot_parser::parse_unit`), in link order with the entry unit last.
+    pub fn compile_linked(arena: &AstArena) -> PilcBinary {
+        let mut c = Self::new();
+        let units = Self::unit_items(arena);
+        let last = c.compile_units(arena, &units);
+        let root = arena.units.last().map_or(NodeId::NONE, |u| u.root);
+        c.finish(arena, root, last)
+    }
+
+    fn finish(mut self, arena: &AstArena, root: NodeId, last: u8) -> PilcBinary {
+        let c = &mut self;
         c.emit(Opcode::Move, 0, last, 0);
         c.emit(Opcode::Ret, 0, 0, 0);
         c.emit(Opcode::Halt, 0, 0, 0);
+        c.link_lazy(arena);
         c.resolve_calls();
         if c.instructions.len() > u16::MAX as usize {
             let span = arena.span(root);
@@ -201,9 +223,34 @@ impl BytecodeCompiler {
                 ),
             });
         }
-        let mut bin = PilcBinary::with_debug_tables(c.constants, c.instructions, c.pc_spans, c.reg_symbols);
-        bin.diagnostics = c.diagnostics;
+        let mut bin = PilcBinary::with_debug_tables(
+            std::mem::take(&mut c.constants),
+            std::mem::take(&mut c.instructions),
+            std::mem::take(&mut c.pc_spans),
+            std::mem::take(&mut c.reg_symbols),
+        );
+        bin.diagnostics = std::mem::take(&mut c.diagnostics);
         bin
+    }
+
+    /// Compiles every imported function or method the program calls, and
+    /// the ones those call, until no call is left to an uncompiled one.
+    fn link_lazy(&mut self, arena: &AstArena) {
+        loop {
+            let wanted: Vec<String> = self
+                .call_patches
+                .iter()
+                .flat_map(|(_, full, bare, _)| [full.clone(), bare.clone()])
+                .chain(self.entry_patches.iter().map(|(_, name, _)| name.clone()))
+                .collect();
+            let mut progress = false;
+            for name in wanted {
+                progress |= self.compile_lazy(arena, &name);
+            }
+            if !progress {
+                break;
+            }
+        }
     }
 
     /// Patches forward calls and function-value entry points once every

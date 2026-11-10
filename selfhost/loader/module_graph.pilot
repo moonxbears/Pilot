@@ -1,36 +1,95 @@
 // ==============================================================================
 // FILE: selfhost/loader/module_graph.pilot
-// Milestone 2.1: Pure-Pilot Topological DAG Resolver & Module Graph
-// Replaces Rust load_program & hardcoded path heuristics (MOD001 - MOD004)
+// The module graph: which source files make up a program, and in what order
+// they are linked.
+//
+// `pilot run` calls `mg_link_plan` before it compiles a program. Starting from
+// the entry file, the loader reads each file's `pkg` and `use` declarations
+// (parsed by the seed parser, never scanned as text), resolves every `use` to
+// the files that declare that package, and orders the files so each comes
+// after the files it imports. The implicit prelude (`Pilot.Core.Prelude`) is
+// linked before everything else, so every program has it without a `use`.
+//
+// Resolving `use A.B.C`:
+//   - the path names a package, or an item of a package (`use A.B.Item`);
+//   - `.*`, `::*` and a `.{X, Y}` selection name the package before them;
+//   - a package is looked up first where its name says (`std.col` ->
+//     `stdlib/std/col.pilot`, `Pilot.Core.Option` -> `stdlib/core/option.pilot`),
+//     then in an index of the `pkg` declarations of every file under the
+//     search roots, built the first time the convention misses.
+//
+// Diagnostics: MOD001 for a `use` that names no package, MOD002 for an import
+// cycle. Each points at the `use` declaration that closes it.
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Loader.ModuleGraph;
 
+use Pilot.Core.File;
 use Pilot.Diagnostics.Model;
 
-pub pure fn mg_unit_span(fid: FileUnitId, start: u32, end: u32) -> SourceSpan => source_span_new(fid.raw, start, end);
-
+/// One `pkg` or `use` declaration at the head of a file.
 [Layout(c_abi)]
-pub struct ModuleNode : IValue {
+pub struct HeaderDecl : IValue {
+    pub is_package: bool;
+    pub path: str;
+    pub alias: str;
+    pub offset: u32;
+}
+
+/// The `pkg` and `use` declarations at the head of a source file, as the
+/// seed parser reads them.
+pub struct UnitHeader : IValue {
+    pub decls: List<HeaderDecl>;
+
+    /// The header of the file at `path`, or `none` when it cannot be read.
+    pub static fn read(path: str) -> UnitHeader? {
+        let raw = __engine("unit_header", path);
+        if raw == none { return none; }
+        var decls: List<HeaderDecl> = [];
+        for d in raw {
+            decls.push(HeaderDecl { is_package: d[0], path: d[1], alias: d[2], offset: d[3] });
+        }
+        return UnitHeader { decls: decls };
+    }
+
+    /// The package the file declares, or `""`.
+    pub fn package_name() -> str {
+        for d in .decls {
+            if d.is_package { return d.path; }
+        }
+        return "";
+    }
+}
+
+/// One file of the program.
+pub struct ModuleNode : IObject {
     pub id: FileUnitId;
     pub pkg_name: str;
     pub file_path: str;
-    pub content_hash: u64;
-    pub clearance_lvl: i32;
+    /// Units this one imports, and the offset of the `use` naming each.
+    pub deps: List<i64>;
+    pub dep_offsets: List<u32>;
+
+    ~self() {
+    }
 }
 
+/// A loader error, at a byte offset of a file.
 [Layout(c_abi)]
 pub struct ModuleDiagnostic : IValue {
     pub code: str;
     pub message: str;
     pub file_path: str;
-    pub line: usize;
-    pub column: usize;
+    pub offset: u32;
 }
 
 pub struct ModuleGraph : IObject {
     pub units: List<ModuleNode>;
-    pub pkg_to_unit: Map<str, FileUnitId>;
-    pub edges: Map<u32, List<FileUnitId>>;
+    /// Unit index by normalized file path.
+    pub by_path: Map<str, i64>;
+    /// Files declaring each package, once the index is built.
+    pub pkg_files: Map<str, List<str>>;
+    pub indexed: bool;
+    pub roots: List<str>;
     pub topo_order: List<FileUnitId>;
     pub diagnostics: List<ModuleDiagnostic>;
 
@@ -38,439 +97,278 @@ pub struct ModuleGraph : IObject {
     }
 }
 
-// ------------------------------------------------------------------------------
-// Internal dynamic list and map helpers built on VM map primitives
-// ------------------------------------------------------------------------------
+/// The package every program links without importing it.
+pub pure fn mg_prelude_package() -> str => "Pilot.Core.Prelude";
 
-pub fn glist_new() -> i64 {
-    let m = __engine("map_new");
-    __engine("map_set", m, "count", 0);
-    return m;
-}
+/// The genesis package (`stdlib/core/core.pilot`). The toolchain reads it
+/// before any program, so importing it links nothing.
+pub pure fn mg_genesis_package() -> str => "Pilot.Core.Genesis";
 
-pub fn glist_len(list: i64) -> usize {
-    return (__engine("map_get", list, "count") ?? 0);
-}
-
-pub fn glist_push(list: i64, item: any) -> usize {
-    let idx = glist_len(list);
-    __engine("map_set", list, idx, item);
-    __engine("map_set", list, "count", idx + 1);
-    return idx + 1;
-}
-
-pub fn glist_get(list: i64, idx: usize) -> any {
-    return __engine("map_get", list, idx);
-}
-
-pub fn glist_get_str(list: i64, idx: usize) -> str {
-    return __engine("map_get", list, idx);
-}
-
-pub fn glist_pop(list: i64) -> str {
-    let n = glist_len(list);
-    if n == 0 { return ""; }
-    let last = glist_get_str(list, n - 1);
-    __engine("map_set", list, "count", n - 1);
-    return last;
-}
-
-pub fn gmap_new() -> i64 {
-    return __engine("map_new");
-}
-
-pub fn gmap_set(m: i64, key: str, val: any) -> i64 {
-    __engine("map_set", m, key, val);
-    return m;
-}
-
-pub fn gmap_set_int(m: i64, key: str, val: i64) -> i64 {
-    __engine("map_set", m, key, val);
-    return m;
-}
-
-pub fn gmap_get_int(m: i64, key: str) -> i64 {
-    return __engine("map_get", m, key) as i64;
-}
-
-pub fn gmap_contains(m: i64, key: str) -> bool {
-    let v = __engine("map_get", m, key);
-    return !v.is_null();
-}
+pub pure fn mg_unit_span(fid: FileUnitId, start: u32, end: u32) -> SourceSpan => source_span_new(fid.raw, start, end);
 
 // ------------------------------------------------------------------------------
-// String Utilities & Multiplatform Path Normalization
+// Paths
 // ------------------------------------------------------------------------------
 
-pub pure fn mg_trim(s: str) -> str {
-    let l = s.len();
-    var start: usize = 0;
-    while start < l {
-        let b = s.byte_at(start);
-        if b != 32 && b != 9 && b != 13 && b != 10 { break; }
-        start = start + 1;
-    }
-    var end: usize = l;
-    while end > start {
-        let b = s.byte_at(end - 1);
-        if b != 32 && b != 9 && b != 13 && b != 10 { break; }
-        end = end - 1;
-    }
-    return s.slice(start, end);
-}
-
-pub pure fn mg_starts_with(s: str, pfx: str) -> bool {
-    let sl = s.len();
-    let pl = pfx.len();
-    if pl > sl { return false; }
-    var i: usize = 0;
-    while i < pl {
-        if s.byte_at(i) != pfx.byte_at(i) { return false; }
-        i = i + 1;
-    }
-    return true;
-}
-
-pub pure fn mg_ends_with(s: str, sfx: str) -> bool {
-    let sl = s.len();
-    let xl = sfx.len();
-    if xl > sl { return false; }
-    var i: usize = 0;
-    while i < xl {
-        if s.byte_at(sl - xl + i) != sfx.byte_at(i) { return false; }
-        i = i + 1;
-    }
-    return true;
-}
-
-pub pure fn mg_find(haystack: str, needle: str, start: usize) -> i64 {
-    return __engine("str_find", haystack, needle, start) as i64;
-}
-
-pub pure fn mg_to_upper_drive(b: i64) -> str {
-    if b == 97 { return "A"; }
-    if b == 98 { return "B"; }
-    if b == 99 { return "C"; }
-    if b == 100 { return "D"; }
-    if b == 101 { return "E"; }
-    if b == 102 { return "F"; }
-    if b == 103 { return "G"; }
-    if b == 104 { return "H"; }
-    if b == 105 { return "I"; }
-    if b == 106 { return "J"; }
-    if b == 107 { return "K"; }
-    if b == 108 { return "L"; }
-    if b == 109 { return "M"; }
-    if b == 110 { return "N"; }
-    if b == 111 { return "O"; }
-    if b == 112 { return "P"; }
-    if b == 113 { return "Q"; }
-    if b == 114 { return "R"; }
-    if b == 115 { return "S"; }
-    if b == 116 { return "T"; }
-    if b == 117 { return "U"; }
-    if b == 118 { return "V"; }
-    if b == 119 { return "W"; }
-    if b == 120 { return "X"; }
-    if b == 121 { return "Y"; }
-    if b == 122 { return "Z"; }
-    return "";
-}
-
-pub pure fn mg_to_lower(s: str) -> str {
-    let l = s.len();
-    var out = "";
-    var i: usize = 0;
-    while i < l {
-        let b = s.byte_at(i);
-        if b == 65 { out = out + "a"; }
-        else if b == 66 { out = out + "b"; }
-        else if b == 67 { out = out + "c"; }
-        else if b == 68 { out = out + "d"; }
-        else if b == 69 { out = out + "e"; }
-        else if b == 70 { out = out + "f"; }
-        else if b == 71 { out = out + "g"; }
-        else if b == 72 { out = out + "h"; }
-        else if b == 73 { out = out + "i"; }
-        else if b == 74 { out = out + "j"; }
-        else if b == 75 { out = out + "k"; }
-        else if b == 76 { out = out + "l"; }
-        else if b == 77 { out = out + "m"; }
-        else if b == 78 { out = out + "n"; }
-        else if b == 79 { out = out + "o"; }
-        else if b == 80 { out = out + "p"; }
-        else if b == 81 { out = out + "q"; }
-        else if b == 82 { out = out + "r"; }
-        else if b == 83 { out = out + "s"; }
-        else if b == 84 { out = out + "t"; }
-        else if b == 85 { out = out + "u"; }
-        else if b == 86 { out = out + "v"; }
-        else if b == 87 { out = out + "w"; }
-        else if b == 88 { out = out + "x"; }
-        else if b == 89 { out = out + "y"; }
-        else if b == 90 { out = out + "z"; }
-        else {
-            out = out + s.slice(i, i + 1);
-        }
-        i = i + 1;
-    }
-    return out;
-}
-
-pub pure fn mg_replace_char(s: str, from_b: u8, to_b: u8) -> str {
-    let l = s.len();
-    var out = "";
-    var i: usize = 0;
-    while i < l {
-        let b = s.byte_at(i);
-        if b == from_b {
-            if to_b == 47 {
-                out = out + "/";
-            } else if to_b == 92 {
-                out = out + "\\";
-            } else {
-                out = out + "_";
-            }
-        } else {
-            out = out + s.slice(i, i + 1);
-        }
-        i = i + 1;
-    }
-    return out;
-}
-
+/// Uses `/` separators, an upper-case drive letter, and no leading `./`.
 pub pure fn mg_normalize_path(p: str) -> str {
-    let l = p.len();
-    if l == 0 { return ""; }
-
-    // 1. Replace all backslashes '\' (ASCII 92) with '/' (ASCII 47)
-    var s = mg_replace_char(p, 92, 47);
-
-    // 2. Normalize Windows drive letters to uppercase (e.g. c:/ -> C:/)
+    var s = p.replace("\\", "/");
     if s.len() >= 2 && s.byte_at(1) == 58 {
-        let b0 = s.byte_at(0);
-        let up = mg_to_upper_drive(b0);
-        if up.len() > 0 {
-            s = up + s.slice(1, s.len());
+        let b = s.byte_at(0);
+        if b >= 97 && b <= 122 {
+            let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            s = upper.slice(b - 97, b - 96) + s.slice(1, s.len());
         }
     }
-
-    // 3. Strip redundant leading "./"
-    while mg_starts_with(s, "./") && s.len() > 2 {
+    while s.starts_with("./") && s.len() > 2 {
         s = s.slice(2, s.len());
     }
-
     return s;
 }
 
-// ------------------------------------------------------------------------------
-// Declarative Package Search Table (Zero Rust Hardcoding)
-// ------------------------------------------------------------------------------
-
-pub fn mg_default_search_roots() -> i64 {
-    let roots = glist_new();
-    let _ = glist_push(roots, ".");
-    let _ = glist_push(roots, "src");
-    let _ = glist_push(roots, "stdlib");
-    let _ = glist_push(roots, "stdlib/core");
-    let _ = glist_push(roots, "selfhost");
-    return roots;
-}
-
-pub fn mg_resolve_import_path(import_spec: str, roots: i64) -> str {
-    var raw = mg_normalize_path(mg_trim(import_spec));
-    while raw.len() > 0 && (raw.byte_at(raw.len() - 1) == 59 || raw.byte_at(raw.len() - 1) == 42 || raw.byte_at(raw.len() - 1) == 46 || raw.byte_at(raw.len() - 1) == 32) {
-        raw = raw.slice(0, raw.len() - 1);
-    }
-    raw = mg_normalize_path(raw);
-    if __engine("fs_exists", raw) == true { return raw; }
-    let direct = f"{raw}.pilot";
-    if __engine("fs_exists", direct) == true { return direct; }
-
-    let rel_slash = mg_replace_char(raw, 46, 47); // '.' -> '/'
-    var sub = rel_slash;
-    if mg_starts_with(sub, "Pilot/") {
-        sub = sub.slice(6, sub.len());
-    } else if mg_starts_with(sub, "pilot/") {
-        sub = sub.slice(6, sub.len());
-    }
-    let lower_sub = mg_to_lower(sub);
-
-    let count = glist_len(roots);
-    var i: usize = 0;
-    while i < count {
-        let r = glist_get_str(roots, i);
-        let c1 = mg_normalize_path(f"{r}/{rel_slash}.pilot");
-        if __engine("fs_exists", c1) == true { return c1; }
-        let c2 = mg_normalize_path(f"{r}/{sub}.pilot");
-        if __engine("fs_exists", c2) == true { return c2; }
-        let c3 = mg_normalize_path(f"{r}/{lower_sub}.pilot");
-        if __engine("fs_exists", c3) == true { return c3; }
-        let c4 = mg_normalize_path(f"{r}/{lower_sub}/{lower_sub}.pilot");
-        if __engine("fs_exists", c4) == true { return c4; }
+pub pure fn mg_to_lower(s: str) -> str {
+    let lower = "abcdefghijklmnopqrstuvwxyz";
+    var out = "";
+    var i = 0;
+    while i < s.len() {
+        let b = s.byte_at(i);
+        if b >= 65 && b <= 90 {
+            out = out + lower.slice(b - 65, b - 64);
+        } else {
+            out = out + s.slice(i, i + 1);
+        }
         i = i + 1;
     }
+    return out;
+}
 
-    return "";
+/// The directory part of `path`, or `"."`.
+pub pure fn mg_dir_of(path: str) -> str {
+    var i = path.len();
+    while i > 0 {
+        if path.byte_at(i - 1) == 47 { return path.slice(0, i - 1); }
+        i = i - 1;
+    }
+    return ".";
+}
+
+pub pure fn mg_lines(text: str) -> List<str> {
+    var out: List<str> = [];
+    var start = 0;
+    loop {
+        let nl = text.find("\n", start);
+        if nl < 0 {
+            if start < text.len() { out.push(text.slice(start, text.len())); }
+            break;
+        }
+        if nl > start { out.push(text.slice(start, nl)); }
+        start = nl + 1;
+    }
+    return out;
+}
+
+/// Where packages are looked for: the entry file's directory, then the
+/// standard library of the toolchain at `toolchain_root`.
+pub fn mg_default_search_roots(entry_dir: str, toolchain_root: str) -> List<str> {
+    return [mg_normalize_path(entry_dir), mg_normalize_path(toolchain_root + "/stdlib")];
 }
 
 // ------------------------------------------------------------------------------
-// Package & Import Header Extraction
+// Package resolution
 // ------------------------------------------------------------------------------
 
-pub fn mg_extract_package_info(src: str, out_imports: i64) -> ModuleNode {
-    var pkg_name = "Main";
-    var lvl: i32 = 0;
-    let sl = src.len();
-    var cur: usize = 0;
-
-    while cur < sl {
-        let nl = mg_find(src, "\n", cur);
-        let line_end = if nl >= 0 { nl as usize } else { sl };
-        let line = mg_trim(src.slice(cur, line_end));
-
-        if mg_starts_with(line, "pub lvl(") {
-            let end_lvl = mg_find(line, ")", 8);
-            if end_lvl > 8 {
-                let lvl_str = mg_trim(line.slice(8, end_lvl as usize));
-                if lvl_str == "0" { lvl = 0; }
-                else if lvl_str == "1" { lvl = 1; }
-                else if lvl_str == "2" { lvl = 2; }
-                else if lvl_str == "3" { lvl = 3; }
-                else if lvl_str == "Cfg.Tokens.ring_genesis" { lvl = 0; }
-            }
-        }
-
-        if mg_starts_with(line, "pkg ") || mg_find(line, " pkg ", 0) >= 0 {
-            let p_idx = mg_find(line, "pkg ", 0);
-            if p_idx >= 0 {
-                let rest = mg_trim(line.slice((p_idx + 4) as usize, line.len()));
-                var sc_idx = mg_find(rest, ";", 0);
-                if sc_idx < 0 { sc_idx = rest.len() as i64; }
-                pkg_name = mg_trim(rest.slice(0, sc_idx as usize));
-            }
-        } else if mg_starts_with(line, "use ") {
-            let rest = mg_trim(line.slice(4, line.len()));
-            var sc_idx = mg_find(rest, ";", 0);
-            if sc_idx < 0 { sc_idx = rest.len() as i64; }
-            let imp = mg_trim(rest.slice(0, sc_idx as usize));
-            if imp.len() > 0 {
-                let _ = glist_push(out_imports, imp);
-            }
-        }
-
-        cur = if nl >= 0 { (nl + 1) as usize } else { sl };
+/// The package a `use` path names, before any `.*`, `::*` or selection.
+pub pure fn mg_import_package(spec: str) -> str {
+    var p = spec.replace("::", ".");
+    let brace = p.find("{", 0);
+    if brace >= 0 { p = p.slice(0, brace); }
+    while p.ends_with(".") || p.ends_with("*") {
+        p = p.slice(0, p.len() - 1);
     }
+    return p;
+}
 
+/// Where the name of `pkg` says it lives under `root`.
+pub fn mg_conventional_paths(root: str, pkg: str) -> List<str> {
+    let rel = pkg.replace(".", "/");
+    var sub = rel;
+    if mg_to_lower(sub).starts_with("pilot/") { sub = sub.slice(6, sub.len()); }
+    let lower = mg_to_lower(sub);
+    return [
+        f"{root}/{rel}.pilot",
+        f"{root}/{lower}.pilot",
+        f"{root}/{lower}/{lower}.pilot",
+    ];
+}
+
+/// Indexes the `pkg` declaration of every source file under the roots.
+pub fn mg_build_index(g: ModuleGraph) {
+    g.indexed = true;
+    for root in g.roots {
+        for file in mg_lines(File.walk_files(root)) {
+            if !file.ends_with(".pilot") { continue; }
+            let path = mg_normalize_path(file);
+            guard some h = UnitHeader.read(path) else { continue; };
+            let pkg = h.package_name();
+            if pkg == "" { continue; }
+            if !g.pkg_files.has(pkg) { g.pkg_files.set(pkg, []); }
+            g.pkg_files.get(pkg).push(path);
+        }
+    }
+}
+
+/// The files declaring package `pkg`; empty when none does.
+pub fn mg_package_files(g: ModuleGraph, pkg: str) -> List<str> {
+    if !g.indexed {
+        for root in g.roots {
+            for path in mg_conventional_paths(root, pkg) {
+                if !File.exists(path) { continue; }
+                guard some h = UnitHeader.read(path) else { continue; };
+                if h.package_name() == pkg { return [mg_normalize_path(path)]; }
+            }
+        }
+        mg_build_index(g);
+    }
+    if g.pkg_files.has(pkg) { return g.pkg_files.get(pkg); }
+    return [];
+}
+
+/// The files a `use` path imports: the package it names, or the package
+/// whose item it names. Empty when it names neither.
+pub fn mg_resolve_import_path(g: ModuleGraph, spec: str) -> List<str> {
+    let pkg = mg_import_package(spec);
+    let files = mg_package_files(g, pkg);
+    if files.len() > 0 { return files; }
+    var i = pkg.len();
+    while i > 0 {
+        if pkg.byte_at(i - 1) == 46 {
+            return mg_package_files(g, pkg.slice(0, i - 1));
+        }
+        i = i - 1;
+    }
+    return [];
+}
+
+// ------------------------------------------------------------------------------
+// Graph construction
+// ------------------------------------------------------------------------------
+
+/// A new unit for the file at `path` whose header is `h`.
+pub fn mg_extract_package_info(path: str, id: u32, h: UnitHeader) -> ModuleNode {
     return ModuleNode {
-        id: FileUnitId { raw: 0 },
-        pkg_name: pkg_name,
-        file_path: "",
-        content_hash: sl as u64,
-        clearance_lvl: lvl,
+        id: file_unit_id_new(id),
+        pkg_name: h.package_name(),
+        file_path: path,
+        deps: [],
+        dep_offsets: [],
     };
 }
 
-// ------------------------------------------------------------------------------
-// Module Graph Construction & Transitive DAG Resolution
-// ------------------------------------------------------------------------------
+fn mg_report(g: ModuleGraph, code: str, message: str, path: str, offset: u32) {
+    g.diagnostics.push(ModuleDiagnostic { code: code, message: message, file_path: path, offset: offset });
+}
 
-pub fn mg_build_graph(entry_file: str) -> ModuleGraph {
-    let roots = mg_default_search_roots();
-    let units = glist_new();
-    let pkg_map = gmap_new();
-    let path_map = gmap_new();
-    let edges = gmap_new();
-    let diags = glist_new();
-    let queue = glist_new();
-
-    let norm_entry = mg_normalize_path(entry_file);
-    let _ = glist_push(queue, norm_entry);
-
-    while glist_len(queue) > 0 {
-        let cur_path = glist_pop(queue);
-        if gmap_contains(path_map, cur_path) {
+/// The unit for `path`, adding it (and the units it imports) when new.
+/// `-1` when the file cannot be read.
+fn mg_unit_for(g: ModuleGraph, path: str) -> i64 {
+    if g.by_path.has(path) { return g.by_path.get(path); }
+    guard some h = UnitHeader.read(path) else { return -1; };
+    let id = g.units.len();
+    let node = mg_extract_package_info(path, id, h);
+    g.units.push(node);
+    g.by_path.set(path, id);
+    for d in h.decls {
+        if d.is_package || mg_import_package(d.path) == mg_genesis_package() { continue; }
+        let files = mg_resolve_import_path(g, d.path);
+        if files.len() == 0 {
+            mg_report(g, "MOD001", f"no package `{mg_import_package(d.path)}` for `use {d.path}`", path, d.offset);
             continue;
         }
-
-        let src = __engine("fs_read_text", cur_path);
-        if src.len() == 0 && !__engine("fs_exists", cur_path) {
-            let diag = ModuleDiagnostic {
-                code: "MOD001",
-                message: f"Unresolved module path: '{cur_path}'",
-                file_path: cur_path,
-                line: 1,
-                column: 1,
-            };
-            let _ = glist_push(diags, diag);
-            continue;
-        }
-
-        let unit_id = glist_len(units) as u32;
-        let file_imports = glist_new();
-        var node = mg_extract_package_info(src, file_imports);
-        node.id = FileUnitId { raw: unit_id };
-        node.file_path = cur_path;
-
-        if gmap_contains(pkg_map, node.pkg_name) {
-            let prev_id = gmap_get_int(pkg_map, node.pkg_name) as usize;
-            let prev_node = glist_get(units, prev_id);
-            if prev_node.clearance_lvl != node.clearance_lvl {
-                let diag = ModuleDiagnostic {
-                    code: "MOD004",
-                    message: f"Conflicting clearance ring for package '{node.pkg_name}': lvl({node.clearance_lvl}) vs lvl({prev_node.clearance_lvl})",
-                    file_path: cur_path,
-                    line: 1,
-                    column: 1,
-                };
-                let _ = glist_push(diags, diag);
+        for f in files {
+            if f == path { continue; }
+            let dep = mg_unit_for(g, f);
+            if dep >= 0 {
+                node.deps.push(dep);
+                node.dep_offsets.push(d.offset);
             }
-        } else {
-            let _ = gmap_set_int(pkg_map, node.pkg_name, unit_id as i64);
         }
+    }
+    return id;
+}
 
-        let _ = glist_push(units, node);
-        let _ = gmap_set_int(path_map, cur_path, unit_id as i64);
-
-        let dep_list = glist_new();
-        let imp_count = glist_len(file_imports);
-        var j: usize = 0;
-        while j < imp_count {
-            let imp_str = glist_get_str(file_imports, j);
-            let dep_path = mg_normalize_path(mg_resolve_import_path(imp_str, roots));
-            if dep_path.len() > 0 {
-                let _ = glist_push(dep_list, dep_path);
-                if !gmap_contains(path_map, dep_path) {
-                    let _ = glist_push(queue, dep_path);
-                }
-            } else {
-                let diag = ModuleDiagnostic {
-                    code: "MOD001",
-                    message: f"Unresolved import '{imp_str}' in {cur_path}",
-                    file_path: cur_path,
-                    line: 1,
-                    column: 1,
-                };
-                let _ = glist_push(diags, diag);
+/// Depth-first visit: appends `u` after everything it imports. `state` is
+/// 0 for unvisited, 1 while `u`'s imports are being visited, 2 when done.
+fn mg_visit(g: ModuleGraph, u: i64, state: List<i64>, stack: List<i64>) {
+    state[u] = 1;
+    stack.push(u);
+    let node = g.units[u];
+    var i = 0;
+    while i < node.deps.len() {
+        let d = node.deps[i];
+        if state[d] == 1 {
+            var cycle = "";
+            var k = 0;
+            var on = false;
+            while k < stack.len() {
+                if stack[k] == d { on = true; }
+                if on { cycle = cycle + g.units[stack[k]].pkg_name + " -> "; }
+                k = k + 1;
             }
-            j = j + 1;
+            cycle = cycle + g.units[d].pkg_name;
+            mg_report(g, "MOD002", f"import cycle: {cycle}", node.file_path, node.dep_offsets[i]);
+        } else if state[d] == 0 {
+            mg_visit(g, d, state, stack);
         }
-        let _ = gmap_set(edges, f"{unit_id}", dep_list);
+        i = i + 1;
     }
+    let _ = stack.pop();
+    state[u] = 2;
+    g.topo_order.push(file_unit_id_new(u));
+}
 
-    let topo = glist_new();
-    let num_units = glist_len(units);
-    var u: usize = 0;
-    while u < num_units {
-        let _ = glist_push(topo, FileUnitId { raw: u as u32 });
-        u = u + 1;
-    }
-
-    return ModuleGraph {
-        units: units,
-        pkg_to_unit: pkg_map,
-        edges: edges,
-        topo_order: topo,
-        diagnostics: diags,
+/// The module graph of the program whose entry file is `entry_file`.
+pub fn mg_build_graph(entry_file: str, toolchain_root: str) -> ModuleGraph {
+    let entry = mg_normalize_path(entry_file);
+    let g = ModuleGraph {
+        units: [],
+        by_path: [:],
+        pkg_files: [:],
+        indexed: false,
+        roots: mg_default_search_roots(mg_dir_of(entry), toolchain_root),
+        topo_order: [],
+        diagnostics: [],
     };
+    var starts: List<i64> = [];
+    for f in mg_package_files(g, mg_prelude_package()) {
+        let u = mg_unit_for(g, f);
+        if u >= 0 { starts.push(u); }
+    }
+    let main_unit = mg_unit_for(g, entry);
+    if main_unit < 0 {
+        mg_report(g, "MOD001", f"cannot read `{entry}`", entry, 0);
+        return g;
+    }
+    starts.push(main_unit);
+    var state: List<i64> = [];
+    for _ in g.units { state.push(0); }
+    for u in starts {
+        if state[u] == 0 { mg_visit(g, u, state, []); }
+    }
+    return g;
+}
+
+/// What the host needs to link the program: `[paths, diagnostics]`, the
+/// unit files in link order (entry last) and each diagnostic as
+/// `[code, message, path, offset]`.
+pub fn mg_link_plan(entry_file: str, toolchain_root: str) -> List<any> {
+    let g = mg_build_graph(entry_file, toolchain_root);
+    var paths: List<str> = [];
+    for id in g.topo_order {
+        paths.push(g.units[id.raw].file_path);
+    }
+    var diags: List<any> = [];
+    for d in g.diagnostics {
+        diags.push([d.code, d.message, d.file_path, d.offset]);
+    }
+    return [paths, diags];
 }

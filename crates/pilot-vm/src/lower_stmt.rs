@@ -6,85 +6,6 @@ use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_rt::PilotVal;
 
 impl BytecodeCompiler {
-    /// Lowers a whole program: constants and enums first, then functions and
-    /// methods, then top-level statements, then a call to a zero-argument
-    /// `main` when one exists.
-    pub(crate) fn compile_program(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
-        let children: Vec<u32> = arena.children_slice(lhs, rhs).to_vec();
-        for &c_id in &children {
-            let cn = arena.node(NodeId(c_id));
-            match cn.node_kind() {
-                NodeKind::LetStmt | NodeKind::ConstDecl | NodeKind::VarStmt => {
-                    let pattern = Self::is_destructuring_let(arena, NodeId(c_id));
-                    if cn.node_kind() != NodeKind::VarStmt && !pattern {
-                        if let Some(m) = self.eval_cmap(arena, NodeId(cn.rhs)) {
-                            self.const_maps.insert(Self::name(arena, cn.lhs).to_string(), m);
-                        }
-                    }
-                    self.register_global(arena, NodeId(c_id));
-                }
-                NodeKind::TypeAdtDecl => self.register_enum(arena, NodeId(c_id)),
-                NodeKind::StructDecl | NodeKind::ExtendDecl => self.register_struct(arena, NodeId(c_id)),
-                NodeKind::FnDecl => {
-                    let arity = (cn.flags as usize).saturating_sub(1);
-                    self.known_fns.insert(Self::name(arena, cn.lhs).to_string(), arity);
-                    self.register_params(Self::name(arena, cn.lhs).to_string(), NodeId(c_id));
-                }
-                _ => {}
-            }
-        }
-        let skip = self.emit_jump(0);
-        let mut entry = None;
-        for &c_id in &children {
-            let id = NodeId(c_id);
-            match arena.node(id).node_kind() {
-                NodeKind::FnDecl => self.compile_fn_decl(arena, id, None, &mut entry),
-                NodeKind::StructDecl | NodeKind::ExtendDecl => self.compile_type_members(arena, id, &mut entry),
-                _ => {}
-            }
-        }
-        for &c_id in &children {
-            if arena.node(NodeId(c_id)).node_kind() == NodeKind::ComptimeExpr {
-                self.compile_comptime(arena, NodeId(c_id));
-            }
-        }
-        self.patch_to_here(skip);
-        self.reset_fn_state();
-        // The comptime runs go after the program, once every one is compiled,
-        // and run first: the program starts by jumping to them.
-        let to_runs = self.emit_jump(0);
-        let body = self.here();
-        let mut last = 0;
-        for &c_id in &children {
-            let kind = arena.node(NodeId(c_id)).node_kind();
-            if matches!(
-                kind,
-                NodeKind::FnDecl | NodeKind::StructDecl | NodeKind::ExtendDecl | NodeKind::ComptimeExpr
-            ) {
-                continue;
-            }
-            let mark = self.next_reg;
-            last = if self.is_global_decl(arena, NodeId(c_id)) {
-                self.compile_global_let(arena, NodeId(c_id))
-            } else {
-                self.compile_node(arena, NodeId(c_id))
-            };
-            if last >= crate::FIRST_TEMP_REG {
-                self.next_reg = mark;
-            }
-        }
-        let result = match entry {
-            Some(ep) => {
-                self.push_ins(crate::Instruction::encode_wide(Opcode::Call, 0, ep));
-                self.emit(Opcode::Halt, 0, 0, 0);
-                0
-            }
-            None => last,
-        };
-        self.place_comptime_runs(to_runs, body, entry.is_none());
-        result
-    }
-
     /// Lowers a `{ ... }` block. Scratch registers used by one statement are
     /// released before the next; the block's value is its last statement's.
     pub(crate) fn compile_block(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
@@ -228,7 +149,9 @@ impl BytecodeCompiler {
         for m in Self::type_members(arena, NodeId(cn.rhs)) {
             let mn = *arena.node(m);
             match mn.node_kind() {
-                NodeKind::FnDecl => self.compile_fn_decl(arena, m, Some(&owner), entry),
+                NodeKind::FnDecl | NodeKind::OperatorDecl => {
+                    self.compile_fn_decl(arena, m, Some(&owner), entry)
+                }
                 NodeKind::DestructorDecl if mn.lhs != 0 => {
                     let receiver = crate::RECEIVER;
                     let dtor = format!("~{}", &receiver[1..]);
@@ -404,7 +327,7 @@ impl BytecodeCompiler {
     }
 
     /// Runs `body` inside a loop context; returns the context's jump lists.
-    fn loop_body(&mut self, arena: &AstArena, body: NodeId) -> LoopCtx {
+    pub(crate) fn loop_body(&mut self, arena: &AstArena, body: NodeId) -> LoopCtx {
         self.loops.push(LoopCtx {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
@@ -432,73 +355,6 @@ impl BytecodeCompiler {
         for j in ctx.continue_jumps {
             self.patch_jump(j, start);
         }
-        self.emit_jump(start);
-        self.patch_to_here(jf);
-        for j in ctx.break_jumps {
-            self.patch_to_here(j);
-        }
-        self.emit_null()
-    }
-
-    pub(crate) fn compile_for(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
-        let node = *arena.node(node_id);
-        let clause = (node.flags as usize).checked_sub(1).and_then(|i| arena.for_clauses.get(i).copied());
-        let Some((iter_id, then_id)) = clause else {
-            return self.error("malformed `for` expression".to_string());
-        };
-        if then_id.is_some() {
-            return self.error("`for ... then` expressions are not lowered by the seed yet".to_string());
-        }
-        let loop_var = Self::name(arena, node.lhs).to_string();
-        let iter_n = *arena.node(iter_id);
-        let is_range = iter_n.node_kind() == NodeKind::BinaryExpr
-            && matches!(iter_n.flags, crate::lower_expr::OP_RANGE_INCLUSIVE | crate::lower_expr::OP_RANGE_HALF_OPEN);
-
-        // Counter, bound and loop variable live in locals so the body cannot clobber them.
-        let slot = self.alloc_local_reg();
-        self.var_slots.insert(loop_var.clone(), slot);
-        self.reg_symbols.push((slot, node.lhs, 0));
-        let r_idx = self.alloc_local_reg();
-        let r_end = self.alloc_local_reg();
-        let r_seq = self.alloc_local_reg();
-
-        let mark = self.next_reg;
-        if is_range {
-            let r_s = self.compile_node(arena, NodeId(iter_n.lhs));
-            self.emit(Opcode::Move, r_idx, r_s, 0);
-            let r_e = self.compile_node(arena, NodeId(iter_n.rhs));
-            self.emit(Opcode::Move, r_end, r_e, 0);
-        } else {
-            let r_it = self.compile_node(arena, iter_id);
-            self.emit(Opcode::Move, r_seq, r_it, 0);
-            let r_len = self.emit_intrinsic("list_len", &[r_seq]);
-            self.emit(Opcode::Move, r_end, r_len, 0);
-            let r_zero = self.emit_const(PilotVal::from_int(0));
-            self.emit(Opcode::Move, r_idx, r_zero, 0);
-        }
-        self.next_reg = mark;
-
-        let start = self.here();
-        let r_cond = self.alloc_reg();
-        let cmp = if is_range && iter_n.flags == crate::lower_expr::OP_RANGE_INCLUSIVE {
-            Opcode::CmpLe
-        } else {
-            Opcode::CmpLt
-        };
-        self.emit(cmp, r_cond, r_idx, r_end);
-        let jf = self.emit_branch(Opcode::JumpIfFalse, r_cond, 0);
-        if is_range {
-            self.emit(Opcode::Move, slot, r_idx, 0);
-        } else {
-            let r_item = self.emit_intrinsic("map_get", &[r_seq, r_idx]);
-            self.emit(Opcode::Move, slot, r_item, 0);
-        }
-        let ctx = self.loop_body(arena, NodeId(node.rhs));
-        for j in ctx.continue_jumps {
-            self.patch_to_here(j);
-        }
-        let r_one = self.emit_const(PilotVal::from_int(1));
-        self.emit(Opcode::Add, r_idx, r_idx, r_one);
         self.emit_jump(start);
         self.patch_to_here(jf);
         for j in ctx.break_jumps {

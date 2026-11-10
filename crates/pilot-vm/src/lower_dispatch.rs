@@ -20,7 +20,7 @@ use pilot_rt::PilotVal;
 
 impl BytecodeCompiler {
     /// Whether `owner` declares `method`; `Some(is_static)` when it does.
-    fn declares(&self, owner: &str, method: &str) -> Option<bool> {
+    pub(crate) fn declares(&self, owner: &str, method: &str) -> Option<bool> {
         self.method_owners
             .get(method)?
             .iter()

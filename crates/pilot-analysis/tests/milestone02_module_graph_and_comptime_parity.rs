@@ -5,8 +5,10 @@
 
 use std::process::Command;
 
-use pilot_analysis::{AnalysisPipeline, ComptimeEngine};
-use pilot_parser::parse;
+use pilot_analysis::{ComptimeEngine, PhysicsRegistry};
+use pilot_ast::AstArena;
+use pilot_parser::{parse, parse_unit};
+use pilot_rt::PilotVal;
 use pilot_span::{FileId, SourceMap};
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
@@ -69,6 +71,55 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     required_group_pub_fns: &[],
 };
 
+/// The Pilot loader's units, as `pilot run` links them.
+const LOADER: [&str; 3] = [
+    "stdlib/core/file.pilot",
+    "selfhost/diagnostics/model.pilot",
+    "selfhost/loader/module_graph.pilot",
+];
+
+/// Links the loader with `tail` as the entry unit and runs it with the
+/// engine's file intrinsics, returning the VM and the entry's value.
+fn run_loader_val(tail: &str) -> (PilVirtualMachine, PilotVal) {
+    let root = anticheat::workspace_root();
+    let mut arena = AstArena::new();
+    let mut base = 0u32;
+    let mut sources: Vec<String> = LOADER
+        .iter()
+        .map(|p| std::fs::read_to_string(root.join(p)).expect("read loader unit"))
+        .collect();
+    sources.push(tail.to_string());
+    for (i, src) in sources.iter().enumerate() {
+        arena = parse_unit(arena, src, FileId(i as u32), base);
+        base += src.len() as u32 + 1;
+    }
+    assert!(arena.diagnostics.is_empty(), "loader must parse: {:?}", arena.diagnostics);
+    let bin = BytecodeCompiler::compile_linked(&arena);
+    let errs: Vec<_> = bin.diagnostics.iter().map(|d| d.message.clone()).collect();
+    assert!(errs.is_empty(), "loader must compile: {errs:?}");
+    let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
+    let mut phy = PhysicsRegistry::new(flat, syms);
+    let mut vm = PilVirtualMachine::new();
+    vm.engine_handler = Some(Box::new(move |op, a| {
+        pilot_analysis::handle_engine_intrinsic(&mut phy, op, a)
+    }));
+    vm.load_binary(bin);
+    let out = vm.run();
+    if let Some(fault) = vm.fault.take() {
+        panic!("loader faulted: {}", fault.message);
+    }
+    (vm, out)
+}
+
+fn run_loader(tail: &str) -> Option<i64> {
+    run_loader_val(tail).1.as_int()
+}
+
+fn run_loader_str(tail: &str) -> Option<String> {
+    let (vm, v) = run_loader_val(tail);
+    Some(vm.display(v))
+}
+
 #[test]
 pub fn test_m2_1_exact_line_col_preservation_without_span_drift() {
     let guard = anticheat::AntiCheatGuard::arm(
@@ -103,15 +154,31 @@ pub fn test_m2_1_exact_line_col_preservation_without_span_drift() {
     assert_eq!(loc_crlf.line, 2);
     assert_eq!(loc_crlf.col, 1);
 
-    // 2. Verify AnalysisPipeline loads dependencies without shifting entry file spans
-    let root = anticheat::workspace_root();
-    let (arena, phy) = AnalysisPipeline::load_program(root.join("stdlib/core/bootstrap.pilot").to_str().unwrap());
-    assert!(!arena.nodes.is_empty(), "Bootstrap AST nodes must be loaded");
-    assert!(!phy.symbol_strings.is_empty(), "Symbols must be mounted");
+    // 2. Verify linked units keep their own file identity: every unit is
+    //    parsed into one arena at its own base offset, the entry unit starts
+    //    at 0, and any node maps back to the file it came from
+    let entry_src = "use util;\nfn main() => twice(4);\n";
+    let util_src = "pkg util;\npub fn twice(x: i64) -> i64 => x * 2;\n";
+    let util_base = entry_src.len() as u32 + 1;
+    let arena = parse_unit(AstArena::new(), entry_src, FileId(0), 0);
+    let arena = parse_unit(arena, util_src, FileId(1), util_base);
+    assert_eq!(arena.units.len(), 2, "Each linked file must be its own unit");
+    assert!(arena.diagnostics.is_empty(), "Both units must parse: {:?}", arena.diagnostics);
+    let entry = &arena.units[0];
+    let util = &arena.units[1];
+    assert_eq!(arena.span(entry.root).start, 0, "Entry unit span MUST start at 0");
+    assert_eq!(arena.span(util.root).start, util_base, "Second unit MUST start at its own base");
+    let last = pilot_ast::NodeId(arena.nodes.len() as u32 - 1);
+    assert_eq!(arena.unit_of(last).map(|u| u.file), Some(FileId(1)));
+    assert_eq!(arena.unit_of(entry.root).map(|u| u.file), Some(FileId(0)));
 
-    // The root node span of bootstrap.pilot MUST start at 0
-    let root_span = arena.span(arena.root);
-    assert_eq!(root_span.start, 0, "Entry file span MUST start at 0 (no pre-concatenation offset drift)");
+    // 3. Verify a span in the second unit maps back to its own line/col
+    let twice_at = util_base + util_src.find("twice").unwrap() as u32;
+    let mut sm2 = SourceMap::new();
+    sm2.add_file("app.pilot", entry_src);
+    let fu = sm2.add_file("util.pilot", util_src);
+    let (pu, lu) = sm2.lookup_loc(fu, twice_at - util_base).expect("lookup in util");
+    assert_eq!((pu, lu.line, lu.col), ("util.pilot", 2, 8));
 
     guard.finish();
 }
@@ -195,57 +262,82 @@ pub fn test_m2_3_pure_pilot_module_graph_and_pragma_suppression() {
     let res = vm.run().as_int();
     assert_eq!(res, Some(100), "Pragma interval solver must correctly suppress disabled ranges");
 
-    // 2. Test Pure-Pilot Module Graph Package Extraction
-    let mg_src = std::fs::read_to_string(root.join("selfhost/loader/module_graph.pilot")).expect("read module_graph.pilot");
-    let mg_test_tail = r#"
-        let code = "pub lvl(2) pkg Pilot.App.Main;\nuse core.mem;\nuse core.reflect;\n";
-        let imports = glist_new();
-        let node = mg_extract_package_info(code, imports);
-        let imp_count = glist_len(imports);
-        if node.pkg_name == "Pilot.App.Main" && node.clearance_lvl == 2 && imp_count == 2 {
+    // 2. Test the Pure-Pilot module graph on a real project: imports resolve
+    //    by convention and through the package index, and the link order puts
+    //    the prelude first, dependencies before dependents, the entry last
+    let proj = std::env::temp_dir().join(format!("pilot_m2_loader_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&proj);
+    std::fs::create_dir_all(proj.join("lib")).expect("create project");
+    let write = |rel: &str, text: &str| std::fs::write(proj.join(rel), text).expect("write unit");
+    write("app.pilot", "pub lvl(2) pkg Pilot.App.Main;\nuse util;\nuse Pilot.App.Shapes;\n");
+    write("util.pilot", "pkg util;\npub fn twice(x: i64) -> i64 => x * 2;\n");
+    write("lib/geometry.pilot", "pkg Pilot.App.Shapes;\nuse util;\n");
+    let proj_dir = proj.to_str().unwrap().replace('\\', "/");
+    let root_dir = root.to_str().unwrap().replace('\\', "/");
+    let order = |entry: &str| format!(
+        r#"
+        fn check() -> i64 {{
+            let plan = mg_link_plan("{entry}", "{root_dir}");
+            let paths = plan[0];
+            let diags = plan[1];
+            if diags.len() != 0 {{ return 0; }}
+            // The prelude's own imports link before it, then the program.
+            var prelude = -1;
+            var util = -1;
+            var geometry = -1;
+            var i = 0;
+            for p in paths {{
+                if p.ends_with("stdlib/core/prelude.pilot") {{ prelude = i; }}
+                if p == "{proj_dir}/util.pilot" {{ util = i; }}
+                if p == "{proj_dir}/lib/geometry.pilot" {{ geometry = i; }}
+                i = i + 1;
+            }}
+            let last = paths.len() - 1;
+            if prelude < 0 || util < 0 || geometry < 0 {{ return 1; }}
+            if !(prelude < util && util < geometry && geometry == last - 1) {{ return 2; }}
+            if paths[last] != "{proj_dir}/app.pilot" {{ return 3; }}
             return 200;
-        }
-        return 0;
-    "#;
-    let mg_full = format!("{mg_src}\n{mg_test_tail}\n");
-    let mg_arena = parse(&mg_full);
-    let mut mg_vm = PilVirtualMachine::new();
-    mg_vm.load_binary(BytecodeCompiler::compile(&mg_arena, mg_arena.root));
-    assert_eq!(mg_vm.run().as_int(), Some(200), "Module graph must accurately extract package name, lvl, and imports");
+        }}
+        check();
+        "#
+    );
+    let plan_src = order(&format!("{proj_dir}/app.pilot"));
+    assert_eq!(run_loader(&plan_src), Some(200), "Module graph must link the prelude, dependencies, then the entry");
 
     // 3. Test Pure-Pilot Module Graph Path Normalization (Windows backslashes & relative prefixes)
     let mg_norm_tail = r#"
-        let p1 = mg_normalize_path(".\\src\\sub\\mod.pilot");
-        let p2 = mg_normalize_path("stdlib\\core\\reflect.pilot");
-        let p3 = mg_normalize_path("c:\\projects\\pilot\\main.pilot");
-        if p1 == "src/sub/mod.pilot" && p2 == "stdlib/core/reflect.pilot" && p3 == "C:/projects/pilot/main.pilot" {
-            return 300;
+        fn check() -> i64 {
+            let p1 = mg_normalize_path(".\\src\\sub\\mod.pilot");
+            let p2 = mg_normalize_path("stdlib\\core\\reflect.pilot");
+            let p3 = mg_normalize_path("c:\\projects\\pilot\\main.pilot");
+            if p1 == "src/sub/mod.pilot" && p2 == "stdlib/core/reflect.pilot" && p3 == "C:/projects/pilot/main.pilot" {
+                return 300;
+            }
+            return 0;
         }
-        return 0;
+        check();
     "#;
-    let mg_norm_full = format!("{mg_src}\n{mg_norm_tail}\n");
-    let mg_norm_arena = parse(&mg_norm_full);
-    let mut mg_norm_vm = PilVirtualMachine::new();
-    mg_norm_vm.load_binary(BytecodeCompiler::compile(&mg_norm_arena, mg_norm_arena.root));
-    assert_eq!(mg_norm_vm.run().as_int(), Some(300), "Module graph path normalization must convert Windows paths and normalize drive letters");
+    assert_eq!(run_loader(mg_norm_tail), Some(300), "Module graph path normalization must convert Windows paths and normalize drive letters");
 
-    // 4. Test Pure-Pilot Module Graph resolving Windows-style import path
-    let root_norm = root.to_str().unwrap().replace('\\', "/");
-    let win_path = format!("{root_norm}/stdlib/core/bootstrap.pilot").replace('/', "\\").replace('\\', "\\\\");
-    let expected_norm = format!("{root_norm}/stdlib/core/bootstrap.pilot");
-    let mg_res_tail = format!(r#"
-        let roots = mg_default_search_roots();
-        let resolved = mg_resolve_import_path("{win_path}", roots);
-        if resolved == "{expected_norm}" {{
-            return 400;
+    // 4. Test a Windows-style entry path links the same files, and an import
+    //    cycle and a missing module each fail with their code
+    let win_entry = format!("{proj_dir}/app.pilot").replace('/', "\\\\");
+    assert_eq!(run_loader(&order(&win_entry)), Some(200), "Module graph must resolve Windows-style backslash paths seamlessly");
+    write("util.pilot", "pkg util;\nuse Pilot.App.Main;\n");
+    write("missing.pilot", "pkg Pilot.App.Missing;\nuse no.such.module;\n");
+    let codes = |entry: &str| format!(
+        r#"
+        fn check() -> str {{
+            let diags = mg_link_plan("{proj_dir}/{entry}", "{root_dir}")[1];
+            if diags.len() != 1 {{ return "count"; }}
+            return diags[0][0];
         }}
-        return 0;
-    "#);
-    let mg_res_full = format!("{mg_src}\n{mg_res_tail}\n");
-    let mg_res_arena = parse(&mg_res_full);
-    let mut mg_res_vm = PilVirtualMachine::new();
-    mg_res_vm.load_binary(BytecodeCompiler::compile(&mg_res_arena, mg_res_arena.root));
-    assert_eq!(mg_res_vm.run().as_int(), Some(400), "Module graph must resolve Windows-style backslash paths seamlessly");
+        check();
+        "#
+    );
+    assert_eq!(run_loader_str(&codes("app.pilot")).as_deref(), Some("MOD002"), "An import cycle must report MOD002");
+    assert_eq!(run_loader_str(&codes("missing.pilot")).as_deref(), Some("MOD001"), "A missing module must report MOD001");
+    let _ = std::fs::remove_dir_all(&proj);
 
     guard.finish();
 }

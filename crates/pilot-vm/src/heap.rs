@@ -354,19 +354,6 @@ impl PilVirtualMachine {
                     .copied()
                     .ok_or_else(|| format!("{} has no captured value #{i}", f.kind_label()))
             }
-            // Postfix `?` on a non-null value. Records (`res`, `opt` structs)
-            // unwrap through their `op ?` method, which the seed cannot
-            // dispatch yet, so they fault instead of passing through unchanged.
-            "try_unwrap" => {
-                let v = arg(args, 0, op)?;
-                if v.is_map() {
-                    return Err(format!(
-                        "postfix `?` on a {} needs its `op ?` method, which the seed cannot dispatch yet",
-                        v.kind_label()
-                    ));
-                }
-                Ok(v)
-            }
             "global_get" => {
                 let name = str_arg(args, 0, op)?;
                 self.globals
@@ -404,6 +391,11 @@ impl PilVirtualMachine {
                     return Ok(PilotVal::from_str(s));
                 }
                 self.forward(op, args)
+            }
+            "proc_args" => Ok(self.proc_args()),
+            "unit_header" => {
+                let path = str_arg(args, 0, op)?;
+                Ok(self.unit_header(&path))
             }
             _ => self.forward(op, args),
         }

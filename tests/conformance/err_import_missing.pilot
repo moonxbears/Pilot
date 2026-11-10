@@ -1,0 +1,6 @@
+// F2: an import that names no package is MOD001.
+use std.no_such_module;
+
+fn main() {
+    print(1);
+}

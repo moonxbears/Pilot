@@ -54,6 +54,8 @@ pub struct PilVirtualMachine {
     pub fuel_used: u64,
     pub fuel_exhausted: bool,
     pub fault: Option<VmFault>,
+    /// The arguments after `--` on the command line (`proc_args()`).
+    pub script_args: Vec<String>,
 }
 
 impl Default for PilVirtualMachine {
@@ -82,6 +84,7 @@ impl PilVirtualMachine {
             globals: HashMap::new(),
             hook: None,
             engine_handler: None,
+            script_args: Vec::new(),
             shared_symbols: None,
             fuel_limit: None,
             fuel_used: 0,

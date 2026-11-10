@@ -20,6 +20,11 @@
 //!     __engine("bind_native_value", nameof(ENV), "get_env");
 //!     // `sizeof(T)` is answered from `T`'s register layout.
 //!     __engine("bind_type_query", nameof(sizeof), "byte_size");
+//!     // `for x in e` over a value that is not a list or range calls
+//!     // `e.get_enumerator()`, then `move_next()` and `current` on the result.
+//!     __engine("bind_enumerator", nameof(get_enumerator), nameof(move_next), nameof(current));
+//!     // `x?` on a record unwraps it through its `op ?` when `x.is_success()`.
+//!     __engine("bind_try_protocol", nameof(is_success), "?");
 //! }
 //! ```
 
@@ -55,6 +60,32 @@ pub const HOOK_TYPE_QUERY: &str = "bind_type_query";
 /// The receptor kind and payload `expr_sugar.pilot` binds `nameof` to.
 const RECEPTOR_SYMBOL_QUOTE: (u8, u8) = (33, 25);
 
+/// The hook that names the enumerator protocol `for` loops use.
+pub const HOOK_ENUMERATOR: &str = "bind_enumerator";
+/// The hook that names the success predicate of the `op ?` protocol.
+pub const HOOK_TRY_PROTOCOL: &str = "bind_try_protocol";
+
+/// The methods postfix `x?` calls on a struct record `x`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TryProtocol {
+    /// Whether `x` holds a success value; when it does not, `x` itself is
+    /// the failure that leaves.
+    pub is_success: String,
+    /// The operator method that yields the success value.
+    pub unwrap: String,
+}
+
+/// The methods a `for` loop calls on a value that is not a list or range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnumeratorProtocol {
+    /// Called once on the iterated value; returns the enumerator.
+    pub get_enumerator: String,
+    /// Called before each element; `false` ends the loop.
+    pub move_next: String,
+    /// Read after a successful `move_next`: the element.
+    pub current: String,
+}
+
 /// Which table a native binding goes into.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NativeKind {
@@ -71,11 +102,11 @@ pub enum NativeKind {
 }
 
 /// The Pilot function an infix operator calls: `a op b` is `function(a, b)`.
+/// The program links the function like any other: the package that binds it
+/// is imported, by the prelude or by the program.
 #[derive(Clone, Debug)]
 pub struct OperatorFn {
     pub function: String,
-    /// Source of the module that defines it.
-    pub module: Arc<str>,
 }
 
 impl ParserTables {
@@ -101,6 +132,28 @@ impl ParserTables {
         self.receptors.get(name) == Some(&RECEPTOR_SYMBOL_QUOTE)
     }
 
+    /// The enumerator protocol of `for` loops, if bound.
+    pub fn enumerator(&self) -> Option<&EnumeratorProtocol> {
+        self.enumerator.as_ref()
+    }
+
+    /// The methods postfix `x?` calls on a record, if bound.
+    pub fn try_protocol(&self) -> Option<&TryProtocol> {
+        self.try_protocol.as_ref()
+    }
+
+    pub(crate) fn bind_enumerator(&mut self, get_enumerator: String, move_next: String, current: String) {
+        if !get_enumerator.is_empty() && !move_next.is_empty() && !current.is_empty() {
+            self.enumerator = Some(EnumeratorProtocol { get_enumerator, move_next, current });
+        }
+    }
+
+    pub(crate) fn bind_try_protocol(&mut self, is_success: String, unwrap: String) {
+        if !is_success.is_empty() && !unwrap.is_empty() {
+            self.try_protocol = Some(TryProtocol { is_success, unwrap });
+        }
+    }
+
     pub(crate) fn bind_native(&mut self, kind: NativeKind, name: String, target: String) {
         if !name.is_empty() && !target.is_empty() {
             self.natives.insert((kind, name), target);
@@ -119,20 +172,15 @@ impl ParserTables {
 
     pub(crate) fn bind_operator_fn(&mut self, symbol: String, function: String) {
         if !symbol.is_empty() && !function.is_empty() {
-            let module = Arc::from("");
-            self.operator_fns.insert(symbol, OperatorFn { function, module });
+            self.operator_fns.insert(symbol, OperatorFn { function });
         }
     }
 
     /// Records `src` as the defining module of every hook bound while
     /// ingesting it.
     pub(crate) fn finish_ingest(&mut self, src: &str) {
-        let module: Arc<str> = Arc::from(src);
         if let Some(h) = self.unit_literal.as_mut().filter(|h| h.module.is_empty()) {
-            h.module = module.clone();
-        }
-        for f in self.operator_fns.values_mut().filter(|f| f.module.is_empty()) {
-            f.module = module.clone();
+            h.module = Arc::from(src);
         }
     }
 }

@@ -3,8 +3,11 @@
 use std::borrow::Cow; use std::collections::{HashMap, HashSet}; use std::sync::OnceLock; use pilot_ast::*; use pilot_intern::SymbolId;
 use pilot_lexer::{tokenize, TokenKind, TokenTape}; use pilot_span::ByteSpan;
 mod attr_hooks;
+mod modules;
 mod pilot_impls;
-pub use pilot_impls::{NativeKind, OperatorFn, UnitLiteralHook};
+pub use modules::{parse_header, parse_unit, ModuleDecl};
+use modules::EXCLUDE_RECEPTOR;
+pub use pilot_impls::{EnumeratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
 use pilot_impls::*;
 pub use attr_hooks::RegLayout;
 #[derive(Clone, Debug)]
@@ -138,7 +141,9 @@ pub struct ParserTables { modifiers: HashMap<String, ModAct>, param_modifiers: H
     /// The Pilot function each infix operator calls, by symbol (see `pilot_impls`).
     operator_fns: HashMap<String, OperatorFn>,
     /// Names bound to engine intrinsics, by kind (see `pilot_impls`).
-    natives: HashMap<(NativeKind, String), String>, }
+    natives: HashMap<(NativeKind, String), String>,
+    enumerator: Option<EnumeratorProtocol>,
+    try_protocol: Option<TryProtocol>, }
 impl ParserTables {
     pub fn new() -> Self { Self::default() }
     fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
@@ -182,6 +187,8 @@ impl ParserTables {
                     HOOK_NATIVE_PROPERTY => self.bind_native(NativeKind::Property, s_arg(2), s_arg(3)),
                     HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(2), s_arg(3)),
                     HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(2), s_arg(3)),
+                    HOOK_ENUMERATOR => self.bind_enumerator(s_arg(2), s_arg(3), s_arg(4)),
+                    HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3)),
                     "bind_receiver_ident" => { let w = s_arg(2); if !w.is_empty() { self.receiver_ident = w; } }
                     "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
                     "register_pratt_op" => { let (sym, fix, bp, assoc) = (s_arg(2), s_arg(3), i_arg(4).unwrap_or(20) as u8, s_arg(5));
@@ -420,31 +427,6 @@ impl<'a> Parser<'a> {
             4 => out.push(self.parse_enum_decl(&mods, 15, true)), _ => { let saved = self.active_hdr.clone();
                 self.active_hdr = Some(ScopeHeader { mods, target: 0 }); self.parse_item(out, in_type_body); self.active_hdr = saved; }
         } }
-    fn parse_module_decl(&mut self, is_pkg: bool, mods: &DeclMods, out: &mut Vec<NodeId>) {
-        let sp = self.span(); self.advance();
-        if !is_pkg && self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Ext) { self.advance(); self.advance(); if self.at(TokenKind::LBrace) { out.push(self.parse_block()); return; } }
-        let in_block = is_pkg && self.eat(TokenKind::LBrace);
-        loop {
-            if in_block && (self.at_end() || self.at(TokenKind::RBrace)) { break; }
-            let mut path = String::new();
-            while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::Comma) && (!in_block || !self.at(TokenKind::RBrace)) {
-                if self.is_rec(29) || (!path.is_empty() && self.src[self.prev_span().end as usize..self.span().start as usize].contains('\n') && !in_block) { break; }
-                path.push_str(self.text()); self.advance();
-            }
-            let alias = if self.is_rec(29) { self.advance(); if self.is_word() { self.intern_cur() } else { SymbolId(0) } } else { SymbolId(0) };
-            let p = path.trim();
-            if !p.is_empty() {
-                let sym = self.arena.interner.intern(p);
-                let id = self.arena.alloc_node(NodeKind::ImportDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, alias.0);
-                let mut m = mods.clone(); if is_pkg { m.flags |= DECL_FLAG_PKG; }
-                self.apply_mods(id, &m, 7); out.push(id);
-            }
-            if in_block { let _ = self.eat(TokenKind::Comma); let _ = self.eat(TokenKind::Semicolon); }
-            else if self.eat(TokenKind::Comma) { continue; } else { break; }
-        }
-        if in_block { self.expect(TokenKind::RBrace); }
-        let _ = self.eat(TokenKind::Semicolon);
-    }
     fn parse_generic_params(&mut self) -> Vec<SymbolId> { let mut out = Vec::new(); if !self.eat(TokenKind::Less) { return out; }
         while !self.at_end() && !self.at(TokenKind::Greater) && !self.at(TokenKind::ShiftRight) {
                         if self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Const) { self.advance(); }
@@ -568,8 +550,11 @@ impl<'a> Parser<'a> {
         let (params, ret) = (self.parse_param_list(), if self.eat(TokenKind::Arrow) { self.parse_type() } else { NodeId::NONE });
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
         else if self.at(TokenKind::LBrace) { self.parse_block() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
-        let mut ch = vec![body]; ch.extend(params);
-        let id = self.arena.alloc_list_node(NodeKind::OperatorDecl, map_binop_sym(&op_txt), ByteSpan::new(sp.start, self.prev_span().end), &ch);
+        // Laid out like a function, named by the operator's text: `op ?` is
+        // the method `?` of its type.
+        let mut ch = vec![body]; ch.extend(params); let (st, ln) = self.arena.alloc_child_slice(&ch);
+        let name = self.arena.interner.intern(&op_txt);
+        let id = self.arena.alloc_node(NodeKind::OperatorDecl, ln as u16, ByteSpan::new(sp.start, self.prev_span().end), name.0, st);
         if ret.is_some() { self.arena.set_type_annot(id, ret); }
         self.apply_mods(id, mods, def_vis); id }
     fn parse_field_or_prop(&mut self, mods: &DeclMods, def_vis: u8) -> NodeId { let (sp, sym) = (self.span(), self.intern_cur());
@@ -689,7 +674,8 @@ impl<'a> Parser<'a> {
             let id = self.arena.alloc_node(kind, 1, ByteSpan::new(sp.start, self.prev_span().end), pat.0, init.0);
             if ty.is_some() { self.arena.set_type_annot(id, ty); }
             self.apply_mods(id, mods, def_vis); out.push(id); return; }
-        if !self.is_word() {
+        // `let $name = ..` inside `quote { .. }` splices the name.
+        if !self.is_word() && !self.at(TokenKind::Dollar) {
             let found = self.text().to_string();
             self.arena.diagnostics.push((self.span(), format!("expected a name to bind, found `{found}`")));
         }
@@ -811,6 +797,9 @@ impl<'a> Parser<'a> {
                             let _ = self.eat(TokenKind::Semicolon); return self.arena.alloc_list_node(NodeKind::TryStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch); }
                         32 if matches!(self.tape.kind(self.next_non_nl(self.cur() + 1)), TokenKind::LBrace | TokenKind::LParen) => return self.parse_polyglot_inline(),
                         _ => {} } }
+                if self.receptor() == Some(EXCLUDE_RECEPTOR) && self.word_follows() {
+                    return self.parse_exclude_decl();
+                }
                 let w = self.text().to_string(); let nx = self.next_non_nl(self.cur() + 1);
                 if let Some(mac) = self.tables.syntax_macros.get(&w).cloned() {
                     if nx < self.tape.len() && !matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::InfixDot | TokenKind::RBrace | TokenKind::Semicolon | TokenKind::Comma | TokenKind::RParen | TokenKind::RBracket) {

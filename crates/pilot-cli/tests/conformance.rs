@@ -8,6 +8,10 @@
 //! - stderr against `<name>.stderr` (optional, every non-empty line must
 //!   appear somewhere in stderr).
 //!
+//! `<name>.args` (optional) holds the script arguments, one per line, passed
+//! after `--`. Only the top-level `.pilot` files are programs; packages they
+//! import live in subdirectories (`tests/conformance/lib/`).
+//!
 //! All mismatches are collected and reported together so one run shows the
 //! full state of the corpus.
 
@@ -52,9 +56,14 @@ fn run_case(root: &Path, program: &Path) -> CaseResult {
         .unwrap_or(0);
     let expected_stderr = read_optional(&program.with_extension("stderr"));
 
+    let args: Vec<String> = read_optional(&program.with_extension("args"))
+        .map(|s| s.lines().map(str::to_string).collect())
+        .unwrap_or_default();
     let output = Command::new(env!("CARGO_BIN_EXE_pilot"))
         .arg("run")
         .arg(program)
+        .arg("--")
+        .args(&args)
         .current_dir(root)
         .output()
         .expect("spawn pilot binary");

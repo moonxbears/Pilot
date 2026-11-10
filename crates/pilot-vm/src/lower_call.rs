@@ -67,6 +67,10 @@ impl BytecodeCompiler {
 
     /// Emits a call to `full`, falling back to `bare` when `full` is unknown.
     pub(crate) fn emit_user_call(&mut self, full: String, bare: String, args: &[u8]) -> u8 {
+        self.check_exported(&full);
+        if let Some((owner, _)) = full.rsplit_once('.') {
+            self.check_exported(owner);
+        }
         self.stage_args(args);
         let dst = self.alloc_reg();
         let entry = self
@@ -86,9 +90,39 @@ impl BytecodeCompiler {
         dst
     }
 
+    /// `a op b` for an infix operator a Pilot function implements
+    /// (`pilot_parser::OperatorFn`), or `None`.
+    pub(crate) fn compile_operator_fn(
+        &mut self,
+        symbol: &str,
+        arena: &AstArena,
+        lhs: NodeId,
+        rhs: NodeId,
+    ) -> Option<u8> {
+        let function = pilot_parser::bootstrap_tables().operator_fn(symbol)?.function.clone();
+        let mark = self.next_reg;
+        let r_l = self.compile_node(arena, lhs);
+        let r_r = self.compile_node(arena, rhs);
+        let r = self.emit_user_call(function.clone(), function, &[r_l, r_r]);
+        self.emit(Opcode::Move, mark, r, 0);
+        self.release_to(mark + 1);
+        Some(mark)
+    }
+
     fn compile_named_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> u8 {
-        if let Some(r) = self.compile_native_call(arena, name, args) {
-            return r;
+        // A name the program declares wins over a native function. The seed
+        // token and receptors such as `nameof` are syntax and always win.
+        let syntax =
+            name == crate::ENGINE_TOKEN || pilot_parser::bootstrap_tables().quotes_symbol(name);
+        let declared = self.fn_entries.contains_key(name)
+            || self.known_fns.contains_key(name)
+            || self.lazy_decls.contains_key(name)
+            || self.structs.contains_key(name)
+            || self.var_slots.contains_key(name);
+        if syntax || !declared {
+            if let Some(r) = self.compile_native_call(arena, name, args) {
+                return r;
+            }
         }
         // `Name { field: value, ... }` struct literal.
         if args.len() == 1
@@ -146,7 +180,9 @@ impl BytecodeCompiler {
             raw_l.clone()
         };
         let full = format!("{l_nm}.{r_nm}");
-        let known = self.fn_entries.contains_key(&full);
+        // `Type.method` names a method the type declares, compiled or not yet
+        // (a method of an imported unit is compiled when first called).
+        let known = self.fn_entries.contains_key(&full) || (!is_var && self.declares(&l_nm, &r_nm).is_some());
         let receiver_is_value = is_var || (!lhs_is_name && !known);
         if receiver_is_value || (!known && native(NativeKind::Method, &r_nm).is_some()) {
             let r_recv = self.compile_node(arena, NodeId(callee.lhs));

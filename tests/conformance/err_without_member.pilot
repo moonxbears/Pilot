@@ -1,0 +1,6 @@
+// F2: `without Type { member }` hides one member from importers.
+use lib.shapes;
+
+fn main() {
+    print(square(1).debug_dump());
+}

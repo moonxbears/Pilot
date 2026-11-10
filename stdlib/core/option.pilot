@@ -23,13 +23,15 @@ pub partial struct option<T: IAnyValue> : IEquatable<option<T>>, ITryOperator<T,
             has_value: true,
         };
 
+        // An empty option leaves its value out, which zero-fills it.
         fn none() -> option<T> => option<T> {
-            val:       __ssa_cast(Cfg.Ssa.zext, 0, T),
             has_value: false,
         };
 
     pub pure:
-        // Universal postfix `expr?` unwraps `T` or propagates `none` early from enclosing `U?` fn
+        // Universal postfix `expr?` unwraps `T`, or propagates the empty
+        // option early when `is_success()` is `false`.
+        fn is_success() -> bool => .has_value;
         op ?  ()            -> T => .val;
         op ?? (fallback: T) -> T => if .has_value { .val } else { fallback };
 

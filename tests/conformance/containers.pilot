@@ -1,0 +1,20 @@
+// F2: `List<T>` and `Map<K, V>` with no imports.
+fn main() {
+    var xs = List<i64>();
+    xs.push(3);
+    xs.push(1);
+    xs.push(2);
+    print(xs.len());
+    print(xs[0] + xs[2]);
+    print(xs.pop());
+    for x in xs { print(x); }
+
+    var ages = Map<str, i64>();
+    ages.set("ada", 36);
+    ages["alan"] = 41;
+    print(ages.get("ada") + ages["alan"]);
+    print(ages.has("ada"));
+    print(ages.has("grace"));
+    ages.remove("ada");
+    print(ages.has("ada"));
+}

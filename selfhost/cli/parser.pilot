@@ -151,25 +151,18 @@ pub fn cli_tokenize(raw: str) -> i64 {
         i = i + 1;
     }
 
+    // Separated argv entries are exact: each is kept verbatim, empty or not.
     if has_unit_sep {
         var start: usize = 0;
         i = 0;
         while i < l {
             if raw.byte_at(i) == 31 {
-                let tok = cp_trim(raw.slice(start, i));
-                if tok.len() > 0 {
-                    let _ = cli_list_push(tokens, tok);
-                }
+                let _ = cli_list_push(tokens, raw.slice(start, i));
                 start = i + 1;
             }
             i = i + 1;
         }
-        if start < l {
-            let tok = cp_trim(raw.slice(start, l));
-            if tok.len() > 0 {
-                let _ = cli_list_push(tokens, tok);
-            }
-        }
+        let _ = cli_list_push(tokens, raw.slice(start, l));
         return tokens;
     }
 

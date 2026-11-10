@@ -56,29 +56,29 @@ All Pilot code in `selfhost/` and `stdlib/` is executed by that Rust VM. The sel
 
 ### 3.2 `pilot run` on real programs
 
-| Construct | Result | After F1 (2026-11-09) |
-| :--- | :--- | :--- |
-| Integer arithmetic, recursion (`fib(25)`) | Works | Works |
-| `while`, `if` / `else if` / `else`, `loop` + `return` | Works | Works |
-| Structs, methods, interface dispatch | Works | Works |
-| Maps with `m["a"]` | Works | Works |
-| `for x in xs` and `for i in 0..5` | Body never runs (prints `0`) | Works on lists and ranges; user enumerators wait for F2 |
-| `switch` | Body never runs | Works, with literal, variant, range, tuple, record and slice patterns |
-| f-strings `f"n={n}"` | Printed literally as `n={n}` | Works |
-| Closures `(a, b) => a + b` | Call returns `null` | Works |
-| Floats `1.5 * 2.0` | Prints `0` | Prints `3` |
-| `2 ** 3` | Prints `5` (unknown operators compile to addition) | Prints `8`; an unknown operator is a compile error |
-| `false && side()` | `side()` still runs (no short-circuit) | Short-circuits |
-| `defer` | Never runs | Runs at every block exit |
-| Constructors `self(...)`, field defaults, `~self()` | Yield `null` / never run | Constructors and defaults work; `~self()` moved to F7 |
-| `expr?` on a result | Returns `null` | Propagates `none`; on a `res` record it is an error until F2 |
-| `find(3) ?? 9` | Prints `12` | Prints `9` |
-| Cascades `obj..set_a(1)..set_b(2)` | Corrupts the receiver | Works |
-| `use std.crypto;` then calling an imported function | Returns `null` (imports are not linked) | Compile error `no function named ..`; linking is F2 |
-| Type error `let x: i64 = "hello";` | No error, prints `hello`, exit 0 | Unchanged; the type checker is F4 |
-| Undefined name or function | No error, evaluates to `null`, exit 0 | Compile error, exit 1 |
-| Syntax error | No output, exit 0 | Error with `file:line:col`, exit 1 |
-| `return 7` from `main` | Prints `RESULT: 7`, process exit code 0 | Exit code 7 |
+| Construct | Result | After F1 (2026-11-09) | After F2 (2026-11-09) |
+| :--- | :--- | :--- | :--- |
+| Integer arithmetic, recursion (`fib(25)`) | Works | Works | Unchanged |
+| `while`, `if` / `else if` / `else`, `loop` + `return` | Works | Works | Unchanged |
+| Structs, methods, interface dispatch | Works | Works | Unchanged |
+| Maps with `m["a"]` | Works | Works | Unchanged |
+| `for x in xs` and `for i in 0..5` | Body never runs (prints `0`) | Works on lists and ranges; user enumerators wait for F2 | Works, including any type with `get_enumerator`/`move_next`/`current` |
+| `switch` | Body never runs | Works, with literal, variant, range, tuple, record and slice patterns | Unchanged |
+| f-strings `f"n={n}"` | Printed literally as `n={n}` | Works | Unchanged |
+| Closures `(a, b) => a + b` | Call returns `null` | Works | Unchanged |
+| Floats `1.5 * 2.0` | Prints `0` | Prints `3` | Unchanged |
+| `2 ** 3` | Prints `5` (unknown operators compile to addition) | Prints `8`; an unknown operator is a compile error | Unchanged |
+| `false && side()` | `side()` still runs (no short-circuit) | Short-circuits | Unchanged |
+| `defer` | Never runs | Runs at every block exit | Unchanged |
+| Constructors `self(...)`, field defaults, `~self()` | Yield `null` / never run | Constructors and defaults work; `~self()` moved to F7 | After F2 (2026-11-09) |
+| `expr?` on a result | Returns `null` | Propagates `none`; on a `res` record it is an error until F2 | Works on `res`/`opt` records: `is_success()`, then `op ?`; a failure returns unchanged |
+| `find(3) ?? 9` | Prints `12` | Prints `9` | Unchanged |
+| Cascades `obj..set_a(1)..set_b(2)` | Corrupts the receiver | Works | Unchanged |
+| `use std.crypto;` then calling an imported function | Returns `null` (imports are not linked) | Compile error `no function named ..`; linking is F2 | Works; imports are linked, `MOD001`/`MOD002` on a missing module or a cycle |
+| Type error `let x: i64 = "hello";` | No error, prints `hello`, exit 0 | Unchanged; the type checker is F4 | Unchanged |
+| Undefined name or function | No error, evaluates to `null`, exit 0 | Compile error, exit 1 | Unchanged |
+| Syntax error | No output, exit 0 | Error with `file:line:col`, exit 1 | Unchanged |
+| `return 7` from `main` | Prints `RESULT: 7`, process exit code 0 | Exit code 7 | Unchanged |
 
 `examples/overview.pilot`, the project's own feature tour, prints nothing and exits 0. After F1 it stops with compile errors on constructs of later milestones (inline `sql`, channels `<-`, `unit meter;`), each named.
 

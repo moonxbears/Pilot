@@ -1,0 +1,6 @@
+// Imports the program that imports it.
+pkg lib.cycle_b;
+
+use Conformance.CycleA;
+
+pub fn b() -> i64 => 2;

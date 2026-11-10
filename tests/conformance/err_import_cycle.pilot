@@ -1,0 +1,8 @@
+// F2: an import cycle is MOD002.
+pkg Conformance.CycleA;
+
+use lib.cycle_b;
+
+fn main() {
+    print(b());
+}

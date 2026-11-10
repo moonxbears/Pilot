@@ -48,6 +48,7 @@ impl BytecodeCompiler {
         }
         let node = *arena.node(node_id);
         self.cur_span = arena.span(node_id);
+        self.cur_unit = arena.unit_of(node_id).map(|u| u.file);
         match node.node_kind() {
             NodeKind::Program => self.compile_program(arena, node.lhs, node.rhs),
             NodeKind::BlockExpr => self.compile_block(arena, node.lhs, node.rhs),
@@ -98,7 +99,7 @@ impl BytecodeCompiler {
             }
             // Declarations with no runtime effect of their own: imports are
             // resolved by the module loader, interfaces only constrain types.
-            NodeKind::ImportDecl | NodeKind::InterfaceDecl => self.emit_null(),
+            NodeKind::ImportDecl | NodeKind::ExcludeDecl | NodeKind::InterfaceDecl => self.emit_null(),
             NodeKind::PolyglotBlock => {
                 self.error("inline foreign-language blocks cannot run on the seed VM".to_string())
             }

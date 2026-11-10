@@ -11,7 +11,6 @@ pub pkg Pilot.Core.Reflect;
 
 use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
-use Pilot.Core.Keywords::*;
 use Pilot.Core.Memory::*;
 use Pilot.Core.Option::*;
 

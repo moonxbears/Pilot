@@ -185,9 +185,13 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
     let out_short = eval_cli("build -t wasm -r");
     assert_eq!(out_short, "0", "Valid build with short flags -t wasm -r must succeed, got: {out_short}");
 
-    // 3. Verify -- passthrough forwards tokens verbatim to passthrough_args
+    // 3. Verify -- passthrough forwards tokens verbatim to the script, one
+    //    per line after the target, without parsing them as flags
     let out_run = eval_cli("run app.pilot -- --target=native --release");
-    assert_eq!(out_run, "RUN:app.pilot", "Run command should route to target script, got: {out_run}");
+    assert_eq!(
+        out_run, "RUN:app.pilot\n--target=native\n--release",
+        "Run command should route to target script with its args, got: {out_run}"
+    );
 
     // 4. Verify gate command parses --full and --json
     let out_gate = eval_cli("gate --full --json");

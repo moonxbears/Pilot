@@ -1,14 +1,16 @@
 //! Evaluation of the self-hosted Pilot tool scripts (`selfhost/**`) that
 //! implement the CLI, the gate and the emitters.
 //!
-//! A tool script is several source files concatenated with an entry call.
-//! Compile errors and runtime faults inside a tool are internal toolchain
+//! A tool script is several source files linked as units of one program,
+//! with its entry call as the last unit. Compile errors and runtime faults
+//! inside a tool are internal toolchain
 //! failures: they are reported with the originating file and line, and the
 //! process exits with `EXIT_INTERNAL`.
 
+use crate::link::LinkedSource;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
-use pilot_span::ByteSpan;
+use pilot_rt::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,61 +34,32 @@ pub fn read_src(rel: &str) -> Option<String> {
         .find_map(|r| fs::read_to_string(r.join(rel)).ok())
 }
 
-/// Concatenated tool source with the byte range each file occupies.
-struct ToolSource {
-    text: String,
-    files: Vec<(String, usize)>,
-}
-
-impl ToolSource {
-    fn assemble(paths: &[&str], tail: &str) -> Self {
-        let (mut text, mut files) = (String::new(), Vec::new());
-        for &p in paths {
-            match read_src(p) {
-                Some(s) => {
-                    files.push((p.to_string(), text.len()));
-                    text.push_str(&s);
-                    text.push('\n');
-                }
-                None => {
-                    eprintln!("internal error: toolchain source `{p}` not found");
-                    std::process::exit(EXIT_INTERNAL);
-                }
+/// The tool's files and its entry call, each parsed as one unit of a linked
+/// program; the entry call is the last unit.
+fn link_tool(paths: &[&str], tail: &str) -> LinkedSource {
+    let mut files = Vec::with_capacity(paths.len() + 1);
+    for &p in paths {
+        match read_src(p) {
+            Some(s) => files.push((p.to_string(), s)),
+            None => {
+                eprintln!("internal error: toolchain source `{p}` not found");
+                std::process::exit(EXIT_INTERNAL);
             }
         }
-        files.push(("<entry>".to_string(), text.len()));
-        text.push('\n');
-        text.push_str(tail);
-        Self { text, files }
     }
-
-    /// `file:line:col` for a byte offset in the concatenated text.
-    fn locate(&self, span: ByteSpan) -> String {
-        let off = (span.start as usize).min(self.text.len());
-        let (name, start) = self
-            .files
-            .iter()
-            .rev()
-            .find(|(_, s)| *s <= off)
-            .cloned()
-            .unwrap_or_else(|| ("<tool>".to_string(), 0));
-        let upto = &self.text[start..off];
-        let line = upto.matches('\n').count() + 1;
-        let col = upto.rfind('\n').map_or(upto.len(), |nl| upto.len() - nl - 1) + 1;
-        format!("{name}:{line}:{col}")
-    }
+    files.push(("<entry>".to_string(), tail.to_string()));
+    LinkedSource::parse(files)
 }
 
-/// Compiles and runs a tool script, returning its result rendered as text.
+/// Compiles and runs a tool, returning the VM and the entry call's value.
 /// `phy` is the physics registry the script's `__engine` calls operate on.
-fn run_script(src: &ToolSource, mut phy: PhysicsRegistry) -> String {
-    let arena = parse(&src.text);
+fn run_tool(src: &LinkedSource, mut phy: PhysicsRegistry) -> (PilVirtualMachine, PilotVal) {
     let mut failed = false;
-    for (span, msg) in &arena.diagnostics {
+    for (span, msg) in &src.arena.diagnostics {
         eprintln!("{}: internal error: {msg}", src.locate(*span));
         failed = true;
     }
-    let bin = BytecodeCompiler::compile(&arena, arena.root);
+    let bin = BytecodeCompiler::compile_linked(&src.arena);
     for d in &bin.diagnostics {
         eprintln!("{}: internal error: {}", src.locate(d.span), d.message);
         failed = true;
@@ -95,9 +68,8 @@ fn run_script(src: &ToolSource, mut phy: PhysicsRegistry) -> String {
         std::process::exit(EXIT_INTERNAL);
     }
     let mut vm = PilVirtualMachine::new();
-    let reg_ptr = &mut phy as *mut PhysicsRegistry;
     vm.engine_handler = Some(Box::new(move |op, a| {
-        pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
+        pilot_analysis::handle_engine_intrinsic(&mut phy, op, a)
     }));
     vm.load_binary(bin);
     let out = vm.run();
@@ -106,14 +78,35 @@ fn run_script(src: &ToolSource, mut phy: PhysicsRegistry) -> String {
         eprintln!("{at}: internal error: {}", fault.message);
         std::process::exit(EXIT_INTERNAL);
     }
+    (vm, out)
+}
+
+/// Compiles and runs a tool script, returning its result rendered as text.
+fn run_script(src: &LinkedSource, phy: PhysicsRegistry) -> String {
+    let (vm, out) = run_tool(src, phy);
     vm.display(out)
+}
+
+/// The directory holding the toolchain's `stdlib/`, as the search roots
+/// find it.
+pub fn toolchain_root() -> String {
+    search_roots()
+        .into_iter()
+        .find(|r| r.join("stdlib").is_dir())
+        .map_or_else(|| ".".to_string(), |r| r.to_string_lossy().replace('\\', "/"))
+}
+
+/// Runs a tool and returns the VM holding its result, and the result.
+pub fn eval_value(paths: &[&str], tail: &str) -> (PilVirtualMachine, PilotVal) {
+    let src = link_tool(paths, tail);
+    let (flat, syms) = pilot_analysis::flatten_ast(&src.arena, src.arena.root);
+    run_tool(&src, PhysicsRegistry::new(flat, syms))
 }
 
 /// Runs a tool whose engine calls see the tool's own AST.
 pub fn eval(paths: &[&str], tail: &str) -> String {
-    let src = ToolSource::assemble(paths, tail);
-    let arena = parse(&src.text);
-    let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
+    let src = link_tool(paths, tail);
+    let (flat, syms) = pilot_analysis::flatten_ast(&src.arena, src.arena.root);
     run_script(&src, PhysicsRegistry::new(flat, syms))
 }
 
@@ -130,5 +123,5 @@ pub fn eval_on_input(paths: &[&str], tail: &str, input_path: &str) -> String {
     let (flat, syms) = pilot_analysis::flatten_ast(&input_arena, input_arena.root);
     let mut phy = PhysicsRegistry::new(flat, syms);
     phy.source_text = input;
-    run_script(&ToolSource::assemble(paths, tail), phy)
+    run_script(&link_tool(paths, tail), phy)
 }

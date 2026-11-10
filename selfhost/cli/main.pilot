@@ -285,9 +285,16 @@ pub fn run_cli_entry(raw_args_line: str) -> str {
         return "EMIT:" + lang + "|" + file;
     }
 
+    // `RUN:` + the file, then each argument after `--`, one per line.
     if p.command == "run" {
         let target = if cli_list_len(p.positionals) > 0 { cli_list_get_str(p.positionals, 0) } else { "" };
-        return "RUN:" + target;
+        var out = "RUN:" + target;
+        var i: usize = 0;
+        while i < cli_list_len(p.passthrough_args) {
+            out = out + "\n" + cli_list_get_str(p.passthrough_args, i);
+            i = i + 1;
+        }
+        return out;
     }
 
     return "0";

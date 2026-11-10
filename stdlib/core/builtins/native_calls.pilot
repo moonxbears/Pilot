@@ -2,10 +2,13 @@
 // FILE: stdlib/core/builtins/native_calls.pilot
 // NAMES THE SEED ANSWERS WITH ENGINE INTRINSICS
 // =========================================================================
-// Until the standard library is linked (F2), the seed runs these calls,
-// methods, properties and values directly with the engine intrinsic each one
-// is bound to here. A user-declared function or method of the same name
-// takes precedence over a native method.
+// The seed runs these calls, methods, properties and values directly with
+// the engine intrinsic each one is bound to here. A user-declared function or
+// method of the same name takes precedence over a native method.
+//
+// `List<T>` and `Map<K, V>` are declared in `std.col` over raw memory, which
+// the seed cannot run until F6. Until then their constructors build the
+// engine's own list and map, and the methods below act on those.
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Builtins.NativeCalls;
 
@@ -16,6 +19,8 @@ comptime {
     __engine("bind_native_fn", nameof(print),   "rt_print");
     __engine("bind_native_fn", nameof(println), "rt_print");
     __engine("bind_native_fn", nameof(assert),  "rt_assert");
+    __engine("bind_native_fn", nameof(List),    "list_new");
+    __engine("bind_native_fn", nameof(Map),     "map_new");
 
     // Methods on strings, lists and records: `value.name(args)`.
     __engine("bind_native_method", nameof(len),         "str_len");

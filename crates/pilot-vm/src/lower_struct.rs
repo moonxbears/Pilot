@@ -51,6 +51,12 @@ impl BytecodeCompiler {
         out
     }
 
+    /// Whether type member `m` is a method: a `fn`, or an `op` named by its
+    /// operator.
+    pub(crate) fn is_method_decl(arena: &AstArena, m: NodeId) -> bool {
+        matches!(arena.node(m).node_kind(), NodeKind::FnDecl | NodeKind::OperatorDecl)
+    }
+
     /// Records the methods a struct or `ext` block declares, and a struct's
     /// fields and constructor.
     pub(crate) fn register_struct(&mut self, arena: &AstArena, decl: NodeId) {
@@ -60,7 +66,7 @@ impl BytecodeCompiler {
         }
         let owner = Self::name(arena, dn.lhs).to_string();
         for m in Self::type_members(arena, NodeId(dn.rhs)) {
-            if arena.node(m).node_kind() != NodeKind::FnDecl {
+            if !Self::is_method_decl(arena, m) {
                 continue;
             }
             let is_static =
@@ -140,6 +146,7 @@ impl BytecodeCompiler {
 
     /// `Name { field: value, .. }`.
     pub(crate) fn compile_struct_literal(&mut self, arena: &AstArena, name: &str, literal: NodeId) -> u8 {
+        self.check_exported(name);
         let ln = *arena.node(literal);
         let r_obj = self.compile_map_literal(arena, ln.lhs, ln.rhs);
         self.emit_record_type(r_obj, name);
@@ -155,6 +162,7 @@ impl BytecodeCompiler {
     /// `Name(args)` for a declared struct; `None` when `name` is not one.
     pub(crate) fn compile_ctor_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> Option<u8> {
         let ctor = self.structs.get(name)?.ctor;
+        self.check_exported(name);
         let Some(ctor) = ctor else {
             if !args.is_empty() {
                 return Some(self.compile_memberwise(arena, name, args));
