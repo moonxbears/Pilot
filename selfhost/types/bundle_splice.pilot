@@ -65,6 +65,9 @@ pub struct BundleSpliceDirective : IObject {
     pub coalesce_fields: List<str>;
     pub with_aliases:    Map<str, str>; // old_name -> new_name
     pub without_items:   List<str>;    // excluded fields or methods
+    /// Written in a `partial struct` extension rather than the primary
+    /// declaration, which seals the layout (COMP001 for a stateful bundle).
+    pub from_partial:    bool;
 }
 
 pub fn bundle_def_new(name: str, is_facet: bool) -> BundleDef {
@@ -83,6 +86,7 @@ pub fn bundle_splice_directive_new(bname: str) -> BundleSpliceDirective {
         coalesce_fields: [],
         with_aliases:    [:],
         without_items:   [],
+        from_partial:    false,
     };
 }
 
@@ -253,7 +257,7 @@ pub fn compute_struct_layout(
         let bdef = bundle_catalog[bname];
 
         // COMP001: Cannot splice stateful bundle into layout-sealed partial struct
-        if plan.is_partial && (!bdef.is_facet && bdef.fields.len() > 0) {
+        if (plan.is_partial || dir.from_partial) && (!bdef.is_facet && bdef.fields.len() > 0) {
             let msg = "COMP001: Stateful *Bundle '" + bdef.name + "' spliced into layout-sealed 'partial struct'; only 0-field *Facet may be spliced in partial extensions";
             plan.diagnostics.push(msg);
             di = di + 1;

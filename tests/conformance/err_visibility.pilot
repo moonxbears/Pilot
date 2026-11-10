@@ -1,0 +1,11 @@
+// Items used beyond their reach: a `priv`, `file` or `pkg` function of
+// another package (MOD003) and a `priv` field outside its struct (VIS001).
+use lib.vault;
+
+fn main() {
+    print(secret());
+    print(hidden());
+    print(shared());
+    let s = safe(3);
+    print(s.code);
+}

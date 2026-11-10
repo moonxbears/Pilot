@@ -8,7 +8,7 @@ pub mod c_abi;
 pub mod time;
 pub mod net;
 
-pub use value::{PilotVal, TAG_INT, TAG_FLOAT, TAG_BOOL, TAG_SSO_STR, TAG_HEAP_STR, TAG_NULL, TAG_LIST, TAG_MAP, TAG_FN};
+pub use value::{PilotVal, TAG_INT, TAG_UINT, TAG_FLOAT, TAG_BOOL, TAG_SSO_STR, TAG_HEAP_STR, TAG_NULL, TAG_LIST, TAG_MAP, TAG_FN};
 pub use memory::{ArcHeader, BumpRegion, FLAG_ATOMIC};
 pub use concurrency::Channel;
 pub use stdlib::{PilotOsSyscall, PilotStdlibResolver};

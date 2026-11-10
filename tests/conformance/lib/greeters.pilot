@@ -1,0 +1,10 @@
+// An interface declared in its own package, for the analyzer's
+// whole-program check in analyzer_linked.pilot.
+pkg lib.greeters;
+
+pub interface IGreeter {
+    fn greet() -> str;
+    fn farewell() -> str;
+}
+
+pub fn shout(s: str) -> str => s + "!";

@@ -1,0 +1,11 @@
+// F4: `priv`, `file` and `pkg` items of an imported package are used only
+// through its public functions; a `priv` field is read by its own methods.
+use lib.vault;
+
+fn main() {
+    print(total());
+    let s = safe(21);
+    print(s.peek());
+    print(s.rank());
+    print(s.label);
+}

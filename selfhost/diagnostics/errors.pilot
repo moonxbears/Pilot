@@ -423,6 +423,13 @@ pub let ERRORS = [
         reference: "Pilot *Bundle / *Facet composition (AGENTS.md section 4)",
     },
     ErrorDef {
+        code: "COMP008",
+        title: "Delegation To Unspliced Bundle",
+        description: "Static delegation Bundle.method(var ref self, ..) names a bundle the receiver's type does not splice",
+        category: "HardwareLattice",
+        reference: "Pilot *Bundle / *Facet composition (AGENTS.md section 4)",
+    },
+    ErrorDef {
         code: "NAMING001",
         title: "Interface Naming Violation",
         description: "Interface must begin with 'I' followed by PascalCase",

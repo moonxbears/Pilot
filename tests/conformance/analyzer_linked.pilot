@@ -1,0 +1,15 @@
+// F3: the analyzer (selfhost/analyzer.pilot) reads the whole linked program.
+// `IGreeter` is declared in lib/greeters.pilot; a struct here that leaves out
+// one of its methods is reported by the analyzer (UNIMP003), which needs the
+// interface from the other file, as well as by the type checker (TYPE006).
+use lib.greeters;
+
+struct Polite : IGreeter {
+    pub name: str;
+    pub fn greet() -> str => shout("hello " + .name);
+}
+
+fn main() {
+    let p = Polite { name: "ada" };
+    print(p.greet());
+}

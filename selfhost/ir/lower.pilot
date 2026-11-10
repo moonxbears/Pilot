@@ -1,0 +1,457 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower.pilot
+// F5: lowering the type-checked program to PilIR.
+// ==============================================================================
+// Reads the linked program the type checker analysed (its snapshot, name
+// resolution and inferred types) and builds an `IrModule`. Lowering starts at
+// `main` and takes in every function a lowered function calls.
+//
+// Values are SSA. A `let` binding or a parameter is the value it was given; a
+// `var` binding lives in a `stack_slot`, read with `load` and written with
+// `store`, so no block parameters are needed to carry it across loops.
+// Control flow joins pass values through block parameters (`if` with an
+// `else` and the short-circuit `&&` / `||` produce one).
+//
+// A construct this lowering does not handle yet stops at the seam
+// `ir.lower_construct`, naming the node kind.
+pub lvl(0) pkg Pilot.SelfHost.Ir.Lower;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+
+/// The state of one lowering run.
+pub struct Lowerer : IObject {
+    pub inf: Infer;
+    pub ls: IrLayouts;
+    pub m: IrModule;
+    /// Declaration node -> function index.
+    pub fn_index: Map<str, i64>;
+    /// Declaration nodes still to lower, in function-index order.
+    pub queue: List<i64>;
+    /// Function name -> engine hook it is bound to (`bind_native_fn`).
+    pub natives: Map<str, str>;
+    /// Declaration node -> binding index.
+    pub binding_of: Map<str, i64>;
+    // The function being lowered.
+    pub f: IrFunction;
+    pub cur: u32;
+    /// Binding index -> its SSA value (`let`, parameters).
+    pub values: Map<str, i64>;
+    /// Binding index -> its stack slot (`var`).
+    pub slots: Map<str, i64>;
+    /// Innermost loop last: the block `continue` goes to and the block `break` goes to.
+    pub loop_heads: List<u32>;
+    pub loop_exits: List<u32>;
+}
+
+fn key(n: i64) -> str => f"{n}";
+
+/// The engine hook word that binds a native function (the seed reads the
+/// same declarations: stdlib/core/builtins/native_calls.pilot).
+pub pure fn native_fn_hook() -> str => "bind_native_fn";
+
+/// The seed token for engine calls.
+pub pure fn engine_token() -> str => "__engine";
+
+/// The function name -> hook bindings the program's `comptime` blocks make.
+fn read_natives(s: Snap) -> Map<str, str> {
+    let out = Map<str, str>();
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_call() {
+            let ch = children(s, n);
+            if ch.len() == 4 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == engine_token()
+                && kind(s, ch[1]) == nk_str() && node_name(s, ch[1]) == native_fn_hook()
+                && kind(s, ch[3]) == nk_str() {
+                let target = ch[2];
+                // `nameof(f)` is the name `f`.
+                let name_node = if kind(s, target) == nk_call() { children(s, target)[1] } else { target };
+                out.set(node_name(s, name_node), node_name(s, ch[3]));
+            }
+        }
+        n = n + 1;
+    }
+    return out;
+}
+
+/// Lowers the program the checker analysed, starting at its `main`.
+pub fn lower_program(inf: Infer) -> IrModule {
+    let p = inf.p;
+    let m = ir_module_new();
+    let binding_of = Map<str, i64>();
+    var b = 0;
+    while b < inf.r.site.len() {
+        binding_of.set(key(inf.r.site[b]), b);
+        b = b + 1;
+    }
+    let lw = Lowerer {
+        inf: inf, ls: layouts_new(p, m), m: m, fn_index: Map<str, i64>(), queue: [],
+        natives: read_natives(p.s), binding_of: binding_of,
+        f: ir_function_new("", ir_physics_new(0, 0, 0, 0, 0)), cur: 0,
+        values: Map<str, i64>(), slots: Map<str, i64>(), loop_heads: [], loop_exits: [],
+    };
+    let mains = nl_get(p.fns, "main");
+    if mains.len() == 0 {
+        return seam("ir.lower_construct", "a program without a top-level `main` has no entry to lower");
+    }
+    let _ = function_index(lw, mains[mains.len() - 1]);
+    var i = 0;
+    while i < lw.queue.len() {
+        lower_function(lw, lw.queue[i]);
+        i = i + 1;
+    }
+    return m;
+}
+
+/// The index of the function declared by `decl`, queuing it for lowering.
+fn function_index(lw: Lowerer, decl: i64) -> i64 {
+    let k = key(decl);
+    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
+    let idx = lw.queue.len();
+    lw.fn_index.set(k, idx);
+    lw.queue.push(decl);
+    lw.m.functions.push(ir_function_new(node_name(lw.inf.p.s, decl), layout_unknown(lw.ls)));
+    return idx;
+}
+
+fn physics_of_type_node(lw: Lowerer, t: i64) -> IrTypePhysics {
+    if t < 0 { return layout_unknown(lw.ls); }
+    return layout_of(lw.ls, prog_annot_type(lw.inf.p, t));
+}
+
+fn physics_of(lw: Lowerer, n: i64) -> IrTypePhysics => layout_of(lw.ls, type_of(lw.inf, n));
+
+fn lower_function(lw: Lowerer, decl: i64) {
+    let s = lw.inf.p.s;
+    let idx = lw.fn_index.get(key(decl));
+    let f = lw.m.functions[idx];
+    f.ret_physics = physics_of_type_node(lw, annot(s, decl));
+    lw.f = f;
+    lw.values = Map<str, i64>();
+    lw.slots = Map<str, i64>();
+    lw.loop_heads = [];
+    lw.loop_exits = [];
+    lw.cur = ir_add_block(f);
+    for param in fn_params(s, decl) {
+        let v = ir_add_param(f, lw.cur, physics_of_type_node(lw, rhs(s, param)));
+        if lw.binding_of.has(key(param)) { lw.values.set(key(lw.binding_of.get(key(param))), v); }
+    }
+    let body = fn_body(s, decl);
+    if body < 0 {
+        let _ = seam("ir.lower_construct", f"`{node_name(s, decl)}` has no body to lower");
+        return;
+    }
+    let v = lower_expr(lw, body);
+    if !ir_is_terminated(f, lw.cur) {
+        // `=> expr` and a function with a declared return type return the
+        // body's value; a block body without one returns nothing.
+        let returns_value = annot(s, decl) >= 0 || kind(s, body) != nk_block();
+        let args: List<u32> = if returns_value { [v] } else { [] };
+        let _ = ir_emit(f, lw.cur, op_return(), 0, f.ret_physics, args, false, span_start(s, body));
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Emission helpers
+// ------------------------------------------------------------------------------
+
+fn emit(lw: Lowerer, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, n: i64) -> u32 =>
+    ir_emit(lw.f, lw.cur, op, sub, phy, args, true, span_start(lw.inf.p.s, n));
+
+fn emit_void(lw: Lowerer, op: u16, sub: u16, args: List<u32>, n: i64) {
+    let _ = ir_emit(lw.f, lw.cur, op, sub, layout_unknown(lw.ls), args, false, span_start(lw.inf.p.s, n));
+}
+
+/// The value of a construct that has none.
+fn unit_value(lw: Lowerer, n: i64) -> u32 => emit(lw, op_undef(), 0, physics_of(lw, n), [], n);
+
+/// Continues in `b`.
+fn switch_to(lw: Lowerer, b: u32) { lw.cur = b; }
+
+/// Jumps from the current block to `target` with `args`, unless the current
+/// block already ended.
+fn jump_to(lw: Lowerer, target: u32, args: List<u32>, n: i64) {
+    if ir_is_terminated(lw.f, lw.cur) { return; }
+    var ops: List<u32> = [target];
+    for a in args { ops.push(a); }
+    emit_void(lw, op_jump(), 0, ops, n);
+}
+
+/// After a terminator, code that follows has no predecessor; it is lowered
+/// into a fresh block so every block still ends in one terminator.
+fn ensure_open(lw: Lowerer) {
+    if ir_is_terminated(lw.f, lw.cur) { lw.cur = ir_add_block(lw.f); }
+}
+
+fn pool_int(lw: Lowerer, v: i64) -> u32 {
+    lw.m.ints.push(v);
+    return lw.m.ints.len - 1;
+}
+
+fn pool_str(lw: Lowerer, v: str) -> u32 {
+    lw.m.strings.push(v);
+    return lw.m.strings.len - 1;
+}
+
+fn intrinsic_index(lw: Lowerer, hook: str) -> u32 {
+    var i = 0;
+    while i < lw.m.intrinsics.len {
+        if lw.m.intrinsics[i] == hook { return i; }
+        i = i + 1;
+    }
+    lw.m.intrinsics.push(hook);
+    return lw.m.intrinsics.len - 1;
+}
+
+fn unsupported(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    return seam("ir.lower_construct", f"node kind {kind(s, n)} (`{node_text(s, n)}`) is not lowered to PilIR yet");
+}
+
+// ------------------------------------------------------------------------------
+// Expressions and statements
+// ------------------------------------------------------------------------------
+
+/// Lowers `n` and returns its value (an `undef` of its type when it has none).
+fn lower_expr(lw: Lowerer, n: i64) -> u32 {
+    ensure_open(lw);
+    let s = lw.inf.p.s;
+    let k = kind(s, n);
+    if k == nk_int() { return emit(lw, op_const_bits(), 0, physics_of(lw, n), [pool_int(lw, lit_value(s, n))], n); }
+    if k == nk_bool() { return emit(lw, op_const_bits(), 0, physics_of(lw, n), [pool_int(lw, lit_value(s, n))], n); }
+    if k == nk_str() { return emit(lw, op_const_bytes(), 0, physics_of(lw, n), [pool_str(lw, node_name(s, n))], n); }
+    if k == nk_ident() { return lower_ident(lw, n); }
+    if k == nk_binary() { return lower_binary(lw, n); }
+    if k == nk_unary() { return lower_unary(lw, n); }
+    if k == nk_call() { return lower_call(lw, n); }
+    if k == nk_block() { return lower_block(lw, n); }
+    if k == nk_expr_stmt() { return lower_expr(lw, lhs(s, n)); }
+    if k == nk_if() { return lower_if(lw, n); }
+    if k == nk_while() { return lower_while(lw, n); }
+    if k == nk_let() || k == nk_var() || k == nk_const() { return lower_binding(lw, n); }
+    if k == nk_assign() { return lower_assign(lw, n); }
+    if k == nk_return() { return lower_return(lw, n); }
+    if k == nk_break() || k == nk_continue() { return lower_loop_exit(lw, n); }
+    return unsupported(lw, n);
+}
+
+fn lower_block(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let items = children(s, n);
+    var last = ir_no_value();
+    var i = 0;
+    while i < items.len() {
+        let item = items[i];
+        let v = lower_expr(lw, item);
+        let k = kind(s, item);
+        let yields = k == nk_expr_stmt() || k == nk_if() || k == nk_match() || k == nk_block();
+        last = if yields { v } else { ir_no_value() };
+        i = i + 1;
+    }
+    ensure_open(lw);
+    return if last == ir_no_value() { unit_value(lw, n) } else { last };
+}
+
+fn binding_index(lw: Lowerer, ident: i64) -> i64 => lw.inf.r.ref_of[ident];
+
+fn lower_ident(lw: Lowerer, n: i64) -> u32 {
+    let b = binding_index(lw, n);
+    if b < 0 { return unsupported(lw, n); }
+    let k = key(b);
+    if lw.values.has(k) { return lw.values.get(k); }
+    if lw.slots.has(k) { return emit(lw, op_load(), 0, physics_of(lw, n), [lw.slots.get(k)], n); }
+    return unsupported(lw, n);
+}
+
+fn lower_binding(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let value_node = rhs(s, n);
+    let phy = physics_of(lw, n);
+    let v = if value_node >= 0 { lower_expr(lw, value_node) } else { emit(lw, op_undef(), 0, phy, [], n) };
+    if !lw.binding_of.has(key(n)) { return unsupported(lw, n); }
+    let b = key(lw.binding_of.get(key(n)));
+    if kind(s, n) == nk_var() {
+        let slot = emit(lw, op_stack_slot(), 0, phy, [], n);
+        emit_void(lw, op_store(), 0, [slot, v], n);
+        lw.slots.set(b, slot);
+    } else {
+        lw.values.set(b, v);
+    }
+    return v;
+}
+
+fn lower_assign(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let target = lhs(s, n);
+    if kind(s, target) != nk_ident() { return unsupported(lw, n); }
+    let b = binding_index(lw, target);
+    if b < 0 || !lw.slots.has(key(b)) { return unsupported(lw, n); }
+    let slot = lw.slots.get(key(b));
+    var v = lower_expr(lw, rhs(s, n));
+    let op = flags(s, n);
+    if op != 0 {
+        let ir_op = arith_opcode(op);
+        if ir_op == 0 { return unsupported(lw, n); }
+        let old = emit(lw, op_load(), 0, physics_of(lw, target), [slot], n);
+        v = emit(lw, ir_op, 0, physics_of(lw, target), [old, v], n);
+    }
+    emit_void(lw, op_store(), 0, [slot, v], n);
+    return unit_value(lw, n);
+}
+
+/// The IR opcode of an arithmetic or bitwise `BinaryOp` code, or 0.
+fn arith_opcode(op: i64) -> u16 {
+    // BinaryOp codes (crates/pilot-ast): Add 1, Sub 2, Mul 3, Div 4, Rem 6,
+    // BitAnd 16, BitOr 17, BitXor 18, Shl 19, Shr 20.
+    let codes: List<i64> = [1, 2, 3, 4, 6, 16, 17, 18, 19, 20];
+    let ops: List<u16> = [op_add(), op_sub(), op_mul(), op_div(), op_rem(), op_bit_and(), op_bit_or(), op_bit_xor(), op_shl(), op_shr()];
+    var i = 0;
+    while i < codes.len() {
+        if codes[i] == op { return ops[i]; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+/// The `CmpPred` of a comparison `BinaryOp` code (Eq 8 .. Ge 13), or -1.
+fn cmp_pred_of(op: i64) -> i64 => if op >= op_eq() && op <= op_ge() { op - op_eq() } else { -1 };
+
+fn lower_binary(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let op = flags(s, n);
+    if op == op_and() || op == op_or() { return lower_short_circuit(lw, n, op == op_and()); }
+    let ir_op = arith_opcode(op);
+    let pred = cmp_pred_of(op);
+    if ir_op == 0 && pred < 0 { return unsupported(lw, n); }
+    let a = lower_expr(lw, lhs(s, n));
+    let b = lower_expr(lw, rhs(s, n));
+    if ir_op != 0 { return emit(lw, ir_op, 0, physics_of(lw, n), [a, b], n); }
+    return emit(lw, op_cmp(), pred, physics_of(lw, n), [a, b], n);
+}
+
+/// `a && b` / `a || b`: `b` runs only when `a` does not decide the result.
+fn lower_short_circuit(lw: Lowerer, n: i64, is_and: bool) -> u32 {
+    let s = lw.inf.p.s;
+    let a = lower_expr(lw, lhs(s, n));
+    let rhs_block = ir_add_block(lw.f);
+    let join = ir_add_block(lw.f);
+    let result = ir_add_param(lw.f, join, physics_of(lw, n));
+    let args: List<u32> = if is_and { [a, rhs_block, 0, join, 1, a] } else { [a, join, 1, a, rhs_block, 0] };
+    emit_void(lw, op_cond_br(), 0, args, n);
+    switch_to(lw, rhs_block);
+    let b = lower_expr(lw, rhs(s, n));
+    jump_to(lw, join, [b], n);
+    switch_to(lw, join);
+    return result;
+}
+
+fn lower_unary(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let op = flags(s, n);
+    // UnaryExpr flags (crates/pilot-vm lower_expr.rs): 0 neg, 1 identity,
+    // 4 bitwise not, 5 logical not.
+    if op == 1 { return lower_expr(lw, lhs(s, n)); }
+    if op != 0 && op != 4 && op != 5 { return unsupported(lw, n); }
+    let x = lower_expr(lw, lhs(s, n));
+    let phy = physics_of(lw, n);
+    if op == 0 {
+        let zero = emit(lw, op_const_bits(), 0, phy, [pool_int(lw, 0)], n);
+        return emit(lw, op_sub(), 0, phy, [zero, x], n);
+    }
+    let mask = emit(lw, op_const_bits(), 0, phy, [pool_int(lw, if op == 5 { 1 } else { -1 })], n);
+    return emit(lw, op_bit_xor(), 0, phy, [x, mask], n);
+}
+
+fn lower_call(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let ch = children(s, n);
+    var args: List<u32> = [];
+    var i = 1;
+    while i < ch.len() {
+        if kind(s, ch[i]) == nk_call_arg() { return unsupported(lw, n); }
+        i = i + 1;
+    }
+    let decl = called_fn(lw.inf, n);
+    let callee = ch[0];
+    if decl < 0 && !(kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 && lw.natives.has(node_name(s, callee))) {
+        return unsupported(lw, n);
+    }
+    i = 1;
+    while i < ch.len() {
+        args.push(lower_expr(lw, ch[i]));
+        i = i + 1;
+    }
+    if decl >= 0 {
+        let idx = function_index(lw, decl);
+        return emit(lw, op_call_direct(), idx, physics_of(lw, n), args, n);
+    }
+    let hook = intrinsic_index(lw, lw.natives.get(node_name(s, callee)));
+    return emit(lw, op_call_intrinsic(), hook, physics_of(lw, n), args, n);
+}
+
+fn lower_if(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let ch = children(s, n);
+    if ch.len() > 3 { return unsupported(lw, n); }
+    let cond = lower_expr(lw, ch[0]);
+    let then_block = ir_add_block(lw.f);
+    let else_block = ir_add_block(lw.f);
+    let has_else = ch.len() == 3;
+    let join = if has_else { ir_add_block(lw.f) } else { else_block };
+    emit_void(lw, op_cond_br(), 0, [cond, then_block, 0, else_block, 0], n);
+    switch_to(lw, then_block);
+    let tv = lower_expr(lw, ch[1]);
+    if !has_else {
+        jump_to(lw, join, [], n);
+        switch_to(lw, join);
+        return unit_value(lw, n);
+    }
+    let result = ir_add_param(lw.f, join, physics_of(lw, n));
+    jump_to(lw, join, [tv], n);
+    switch_to(lw, else_block);
+    let ev = lower_expr(lw, ch[2]);
+    jump_to(lw, join, [ev], n);
+    switch_to(lw, join);
+    return result;
+}
+
+fn lower_while(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let head = ir_add_block(lw.f);
+    let body = ir_add_block(lw.f);
+    let exit = ir_add_block(lw.f);
+    jump_to(lw, head, [], n);
+    switch_to(lw, head);
+    let cond = lower_expr(lw, lhs(s, n));
+    emit_void(lw, op_cond_br(), 0, [cond, body, 0, exit, 0], n);
+    switch_to(lw, body);
+    lw.loop_heads.push(head);
+    lw.loop_exits.push(exit);
+    let _ = lower_expr(lw, rhs(s, n));
+    let _ = lw.loop_heads.pop();
+    let _ = lw.loop_exits.pop();
+    jump_to(lw, head, [], n);
+    switch_to(lw, exit);
+    return unit_value(lw, n);
+}
+
+fn lower_loop_exit(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    if lhs(s, n) >= 0 || lw.loop_heads.len == 0 { return unsupported(lw, n); }
+    let depth = lw.loop_heads.len - 1;
+    let target = if kind(s, n) == nk_break() { lw.loop_exits[depth] } else { lw.loop_heads[depth] };
+    jump_to(lw, target, [], n);
+    return ir_no_value();
+}
+
+fn lower_return(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let args: List<u32> = if lhs(s, n) >= 0 { [lower_expr(lw, lhs(s, n))] } else { [] };
+    emit_void(lw, op_return(), 0, args, n);
+    return ir_no_value();
+}

@@ -419,8 +419,9 @@ fn test_m22_4_four_tier_method_table_and_static_delegation() {
             if mt.methods["render"].origin_type_name != "MyStruct" { return 8; }
 
             // Test static delegation lookup: RenderBundle.render
-            let static_entry = resolve_static_delegation(mt, "RenderBundle", "render");
+            guard some static_entry = resolve_static_delegation(mt, "RenderBundle", "render") else { return 9; };
             if static_entry.method_name != "render" { return 9; }
+            if resolve_static_delegation(mt, "RenderBundle", "missing") != none { return 11; }
             if static_entry.origin_type_name != "RenderBundle" { return 10; }
 
             return 42;

@@ -1,0 +1,92 @@
+// ==============================================================================
+// FILE: selfhost/ir/layouts.pilot
+// F5: the layouts of an IR module, taken from the type checker's types.
+// ==============================================================================
+// Every IR value carries `IrTypePhysics`. Its layout id indexes the module's
+// layout table, which holds one entry per distinct checked type the program
+// uses. The physics come from the type's declaration, never its name:
+//   - a type with `[Bits(width, class)]` sits in a register of that class and
+//     width (the class and width are the entries of the table the attribute
+//     arguments index, e.g. `Cfg.Reg`);
+//   - a function type is a code pointer;
+//   - any other type is an aggregate of the lattice class the checker
+//     computes for it;
+//   - a value the checker could not type gets the layout of the unknown type.
+pub lvl(0) pkg Pilot.SelfHost.Ir.Layouts;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.methods.*;
+use selfhost.ir.model.*;
+
+/// The layouts of one module, with the index that keeps them unique.
+pub struct IrLayouts : IObject {
+    pub p: Program;
+    pub m: IrModule;
+    /// Printed type -> layout id.
+    pub index: Map<str, i64>;
+}
+
+pub fn layouts_new(p: Program, m: IrModule) -> IrLayouts {
+    let ls = IrLayouts { p: p, m: m, index: Map<str, i64>() };
+    // Layout 0 is the type the checker could not determine.
+    let _ = layout_add(ls, "?", ir_physics_new(0, reg_class_aggregate(), 0, 0, lattice_value()));
+    return ls;
+}
+
+fn layout_add(ls: IrLayouts, name: str, phy: IrTypePhysics) -> IrTypePhysics {
+    let id = ls.m.layouts.len;
+    let placed = ir_physics_new(id, phy.reg_class, phy.bit_width, phy.align_pow2, phy.lattice_bits);
+    ls.m.layouts.push(IrLayout { name: name, physics: placed });
+    ls.index.set(name, id);
+    return placed;
+}
+
+/// The register class code for the class name a `[Bits]` descriptor gives.
+fn reg_class_code(name: str) -> u8 {
+    var c: u8 = 0;
+    while c <= reg_class_noreturn() {
+        if reg_class_name(c) == name { return c; }
+        c = c + 1;
+    }
+    return reg_class_aggregate();
+}
+
+/// log2 of the byte alignment of a `width`-bit register value.
+fn align_pow2_of(width: i64) -> u8 {
+    var bytes = (width + 7) / 8;
+    var p: u8 = 0;
+    while bytes > 1 {
+        bytes = bytes / 2;
+        p = p + 1;
+    }
+    return p;
+}
+
+/// The physics of checked type `t`.
+pub fn layout_of(ls: IrLayouts, t: i64) -> IrTypePhysics {
+    let p = ls.p;
+    if ty_is_unknown(p.tt, t) || ty_is_param(p.tt, t) { return ls.m.layouts[0].physics; }
+    let name = ty_display(p.tt, t);
+    if ls.index.has(name) { return ls.m.layouts[ls.index.get(name)].physics; }
+    if ty_is_func(p.tt, t) {
+        return layout_add(ls, name, ir_physics_new(0, reg_class_raw_ptr(), 64, 3, lattice_value()));
+    }
+    let lattice: u8 = lattice_of(p, t);
+    if ty_is_named(p.tt, t) {
+        if some bits = prog_attr_nodes(p, ty_decl(p.tt, t), "Bits") {
+            if bits.len() >= 2 {
+                if some width = prog_const(p, bits[0]) {
+                    let class = reg_class_code(prog_const_name(p, bits[1]));
+                    let rc = if width == 0 { reg_class_unit() } else { class };
+                    return layout_add(ls, name, ir_physics_new(0, rc, width, align_pow2_of(width), lattice));
+                }
+            }
+        }
+    }
+    return layout_add(ls, name, ir_physics_new(0, reg_class_aggregate(), 0, 0, lattice));
+}
+
+/// The physics of the unknown type.
+pub fn layout_unknown(ls: IrLayouts) -> IrTypePhysics => ls.m.layouts[0].physics;

@@ -169,6 +169,13 @@ impl BytecodeCompiler {
             if let Some(full) = self.payload_variant(name, hint.as_deref()) {
                 return self.compile_variant_ctor(arena, &full, args);
             }
+            // A bare call names a static method of the type expected here:
+            // `return ok(x);` in a function returning `result<..>` is
+            // `result<..>.ok(x)`.
+            if let Some(owner) = hint.filter(|h| self.declares(h, name) == Some(true)) {
+                let regs = self.compile_args(arena, args);
+                return self.emit_user_call(format!("{owner}.{name}"), name.to_string(), &regs);
+            }
         }
         if args.len() == 1 && !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
             if let Some(layout) = pilot_parser::bootstrap_tables().reg_layout(name).cloned() {
@@ -181,8 +188,9 @@ impl BytecodeCompiler {
                 return r;
             }
         }
-        let regs = self.compile_args(arena, args);
-        self.emit_user_call(name.to_string(), name.to_string(), &regs)
+        let regs = self.compile_args_for(arena, name, args);
+        let key = self.unit_fn_key(name);
+        self.emit_user_call(key.clone(), key, &regs)
     }
 
     fn compile_method_call(&mut self, arena: &AstArena, callee_id: NodeId, args: &[NodeId]) -> u8 {
@@ -210,7 +218,7 @@ impl BytecodeCompiler {
         if !known && self.variant_payloads.contains_key(&full) {
             return self.compile_variant_ctor(arena, &full, args);
         }
-        let regs = self.compile_args(arena, args);
+        let regs = self.compile_args_for(arena, &full, args);
         self.emit_user_call(full, r_nm, &regs)
     }
 

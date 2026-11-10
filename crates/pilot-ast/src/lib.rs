@@ -193,6 +193,8 @@ pub const DECL_FLAG_MUT: u16 = 128;
 pub const DECL_FLAG_COMPTIME: u16 = 256;
 pub const DECL_FLAG_PKG: u16 = 512;
 pub const DECL_FLAG_DTOR: u16 = 1024;
+/// The declaration's visibility was written (`priv`, `pub:`, ..), not defaulted.
+pub const DECL_FLAG_VIS_WRITTEN: u16 = 2048;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct AstAttribute {

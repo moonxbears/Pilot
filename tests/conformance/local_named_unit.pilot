@@ -1,0 +1,11 @@
+// F4: a local named `unit` (also a declaration word) followed by a block,
+// as in `if a == unit { .. }`, stays a name: the `{` opens the `if` body.
+fn same(a: i64) -> bool {
+    let unit = a;
+    if a == unit { return true; }
+    return false;
+}
+
+fn main() {
+    print(same(4));
+}

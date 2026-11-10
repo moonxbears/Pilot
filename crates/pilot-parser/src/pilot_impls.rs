@@ -23,8 +23,9 @@
 //!     // `for x in e` over a value that is not a list or range calls
 //!     // `e.get_enumerator()`, then `move_next()` and `current` on the result.
 //!     __engine("bind_enumerator", nameof(get_enumerator), nameof(move_next), nameof(current));
-//!     // `x?` on a record unwraps it through its `op ?` when `x.is_success()`.
-//!     __engine("bind_try_protocol", nameof(is_success), "?");
+//!     // `x?` on a record unwraps it through its `op ?` when `x.is_success()`;
+//!     // `catch e` binds a failed record's `failure()`.
+//!     __engine("bind_try_protocol", nameof(is_success), "?", nameof(failure));
 //! }
 //! ```
 
@@ -73,6 +74,10 @@ pub struct TryProtocol {
     pub is_success: String,
     /// The operator method that yields the success value.
     pub unwrap: String,
+    /// The method that yields a failed record's error, which a `catch`
+    /// clause binds; empty when none is bound, and the clause then binds the
+    /// record itself.
+    pub failure: String,
 }
 
 /// The methods a `for` loop calls on a value that is not a list or range.
@@ -148,9 +153,9 @@ impl ParserTables {
         }
     }
 
-    pub(crate) fn bind_try_protocol(&mut self, is_success: String, unwrap: String) {
+    pub(crate) fn bind_try_protocol(&mut self, is_success: String, unwrap: String, failure: String) {
         if !is_success.is_empty() && !unwrap.is_empty() {
-            self.try_protocol = Some(TryProtocol { is_success, unwrap });
+            self.try_protocol = Some(TryProtocol { is_success, unwrap, failure });
         }
     }
 

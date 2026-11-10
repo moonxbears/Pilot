@@ -9,7 +9,8 @@
 //! goes to the one non-struct type (`ext` block) declaring `method`, else the
 //! seed's builtin method of that name, else a free function
 //! `method(recv, args)`; with none of these the call stops the program with
-//! an error naming the method.
+//! an error naming the method. A field of the receiver's struct that is not
+//! also a method is called as the function it holds.
 
 use crate::instruction::Opcode;
 use crate::lower_native::native;
@@ -39,6 +40,14 @@ impl BytecodeCompiler {
         args: &[NodeId],
     ) -> u8 {
         let full = format!("{owner}.{method}");
+        // `recv.f(x)` / `(recv.f)(x)` where `f` is a field of the receiver's
+        // struct and not one of its methods calls the function the field holds.
+        let is_field = self.structs.get(owner).is_some_and(|s| s.fields.iter().any(|(f, _)| f == method));
+        if is_field && self.declares(owner, method).is_none() && !self.fn_entries.contains_key(&full) {
+            let r_fn = self.emit_member_read(r_recv, Some(owner), method);
+            let regs = self.compile_args(arena, args);
+            return self.emit_closure_call(r_fn, &regs);
+        }
         let mut regs = vec![r_recv];
         regs.extend(self.compile_args(arena, args));
         if self.declares(owner, method) == Some(false) || self.fn_entries.contains_key(&full) {

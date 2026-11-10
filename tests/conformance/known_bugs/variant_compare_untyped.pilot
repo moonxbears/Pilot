@@ -1,0 +1,25 @@
+// KNOWN BUG seed.variant_compare_untyped: when two enums have a variant with
+// the same name, `::Variant` in a struct literal field, or compared with a
+// field of a `for` element, is an undefined name: the seed does not know the
+// field's type, so it cannot pick the enum. Lowering from the typed AST (F5)
+// fixes it.
+enum Shape : u8 {
+    Dot,
+    Value,
+}
+
+enum Slot : u8 {
+    Empty,
+    Value,
+}
+
+struct Cell : IValue {
+    pub slot: Slot;
+}
+
+fn main() {
+    let cells: List<Cell> = [Cell { slot: ::Value }];
+    for c in cells {
+        print(c.slot == ::Value);
+    }
+}

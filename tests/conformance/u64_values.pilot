@@ -1,0 +1,17 @@
+// u64 values keep unsigned semantics through parameters, returns, struct
+// fields, comparisons and division. Expected by hand: 2^64-1 >> 1 = 2^63-1;
+// 2^64-1 >> 60 = 15; 2^63 / 2 = 2^62; an i64 holding 0xFF..FF is -1.
+struct Box { v: u64; }
+fn half(x: u64) -> u64 => x >> 1;
+fn top() -> u64 => 0xFFFFFFFFFFFFFFFF;
+fn main() {
+    print(half(0xFFFFFFFFFFFFFFFF));
+    let b = Box { v: 0xFFFFFFFFFFFFFFFF };
+    print(b.v >> 60);
+    print(top());
+    let y: u64 = 0x8000000000000000;
+    print(y > 1);
+    print(y / 2);
+    let s: i64 = 0xFFFFFFFFFFFFFFFF;
+    print(s);
+}

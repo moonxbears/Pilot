@@ -1,0 +1,17 @@
+// Delegating to a facet the struct does not splice (COMP008).
+struct LoudFacet {
+    pub fn speak() -> str => "LOUD";
+}
+
+struct OtherFacet {
+    pub fn speak() -> str => "other";
+}
+
+struct Speaker {
+    *LoudFacet;
+    pub fn other() -> str => OtherFacet.speak(var ref self);
+}
+
+fn main() {
+    print(Speaker {}.speak());
+}

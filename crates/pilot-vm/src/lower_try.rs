@@ -95,9 +95,24 @@ impl BytecodeCompiler {
         self.tries.pop().map(|t| t.fail_jumps).unwrap_or_default()
     }
 
-    /// Compiles a `catch` clause's body with its name bound to `fail_reg`.
+    /// Compiles a `catch` clause's body with its name bound to the failure in
+    /// `fail_reg`: a failed record's error (the try protocol's `failure`), or
+    /// the failure itself when it is not a record.
     fn compile_catch_clause(&mut self, arena: &AstArena, clause: NodeId, fail_reg: u8) -> u8 {
         let cn = *arena.node(clause);
+        let failure = pilot_parser::bootstrap_tables()
+            .try_protocol()
+            .map(|p| p.failure.clone())
+            .filter(|f| !f.is_empty() && self.method_owners.contains_key(f));
+        if let (true, Some(f)) = (cn.lhs != 0, failure) {
+            let mark = self.next_reg;
+            let r_type = self.emit_intrinsic("record_type", &[fail_reg]);
+            let plain = self.emit_branch(Opcode::JumpIfNull, r_type, 0);
+            let r_e = self.emit_method_call(arena, fail_reg, "", &f, &[]);
+            self.emit(Opcode::Move, fail_reg, r_e, 0);
+            self.patch_to_here(plain);
+            self.release_to(mark);
+        }
         let outer_slots = self.var_slots.clone();
         if cn.lhs != 0 {
             self.var_slots.insert(Self::name(arena, cn.lhs).to_string(), fail_reg);

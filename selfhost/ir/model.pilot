@@ -250,58 +250,31 @@ pub pure fn op_switch_table() -> u16 => 43;
 pub pure fn op_return()       -> u16 => 44;
 pub pure fn op_unreachable()  -> u16 => 45;
 
+/// Opcode -> its printed name; index 0 is unused.
+pub fn opcode_names() -> List<str> => [
+    "",
+    "const_bits", "const_float", "const_bytes", "undef", "construct_aggregate", "extract_field", "insert_field",
+    "add", "sub", "mul", "div", "rem", "bit_and", "bit_or", "bit_xor", "shl", "shr", "cmp", "cast", "simd_lane_op",
+    "stack_slot", "arena_alloc", "load", "store", "ptr_offset", "make_view",
+    "perceus_dup", "perceus_drop", "perceus_drop_reuse", "construct_reuse", "iso_freeze", "guard_enter", "guard_exit_lifo",
+    "call_direct", "call_indirect", "call_intrinsic", "pack_abi_frame", "init_signal", "diff_adjoint", "begin_effect_plan",
+    "jump", "cond_br", "switch_table", "return", "unreachable",
+];
+
 pub fn opcode_name(op: u16) -> str {
-    if op == op_const_bits()          { return "const_bits"; }
-    if op == op_const_float()         { return "const_float"; }
-    if op == op_const_bytes()         { return "const_bytes"; }
-    if op == op_undef()               { return "undef"; }
-    if op == op_construct_aggregate() { return "construct_aggregate"; }
-    if op == op_extract_field()       { return "extract_field"; }
-    if op == op_insert_field()        { return "insert_field"; }
+    let names = opcode_names();
+    return if op > 0 && op < names.len { names[op] } else { "op_custom_" + op };
+}
 
-    if op == op_add()          { return "add"; }
-    if op == op_sub()          { return "sub"; }
-    if op == op_mul()          { return "mul"; }
-    if op == op_div()          { return "div"; }
-    if op == op_rem()          { return "rem"; }
-    if op == op_bit_and()      { return "bit_and"; }
-    if op == op_bit_or()       { return "bit_or"; }
-    if op == op_bit_xor()      { return "bit_xor"; }
-    if op == op_shl()          { return "shl"; }
-    if op == op_shr()          { return "shr"; }
-    if op == op_cmp()          { return "cmp"; }
-    if op == op_cast()         { return "cast"; }
-    if op == op_simd_lane_op() { return "simd_lane_op"; }
-
-    if op == op_stack_slot()   { return "stack_slot"; }
-    if op == op_arena_alloc()  { return "arena_alloc"; }
-    if op == op_load()         { return "load"; }
-    if op == op_store()        { return "store"; }
-    if op == op_ptr_offset()   { return "ptr_offset"; }
-    if op == op_make_view()    { return "make_view"; }
-
-    if op == op_perceus_dup()        { return "perceus_dup"; }
-    if op == op_perceus_drop()       { return "perceus_drop"; }
-    if op == op_perceus_drop_reuse() { return "perceus_drop_reuse"; }
-    if op == op_construct_reuse()    { return "construct_reuse"; }
-    if op == op_iso_freeze()         { return "iso_freeze"; }
-    if op == op_guard_enter()        { return "guard_enter"; }
-    if op == op_guard_exit_lifo()    { return "guard_exit_lifo"; }
-
-    if op == op_call_direct()       { return "call_direct"; }
-    if op == op_call_indirect()     { return "call_indirect"; }
-    if op == op_call_intrinsic()    { return "call_intrinsic"; }
-    if op == op_pack_abi_frame()    { return "pack_abi_frame"; }
-    if op == op_init_signal()       { return "init_signal"; }
-    if op == op_diff_adjoint()      { return "diff_adjoint"; }
-    if op == op_begin_effect_plan() { return "begin_effect_plan"; }
-
-    if op == op_jump()         { return "jump"; }
-    if op == op_cond_br()      { return "cond_br"; }
-    if op == op_switch_table() { return "switch_table"; }
-    if op == op_return()       { return "return"; }
-    if op == op_unreachable()  { return "unreachable"; }
-    return "op_custom_" + op;
+/// The opcode printed as `name`, or 0.
+pub fn opcode_of(name: str) -> u16 {
+    let names = opcode_names();
+    var i = 1;
+    while i < names.len {
+        if names[i] == name { return i; }
+        i = i + 1;
+    }
+    return 0;
 }
 
 pub pure fn opcode_is_terminator(op: u16) -> bool {
@@ -309,8 +282,20 @@ pub pure fn opcode_is_terminator(op: u16) -> bool {
 }
 
 // ------------------------------------------------------------------------------
-// IrInst Structure (32 Bytes C-ABI)
+// Instructions, Blocks, Functions & Modules
 // ------------------------------------------------------------------------------
+// An instruction is 32 bytes under the C layout rules:
+//   result u32 @0, opcode u16 @4, subop u16 @6, physics @8 (12 bytes:
+//   layout_id u32, reg_class u8, 1 pad, bit_width u16, align_pow2 u8,
+//   lattice_bits u8, 2 pad), args_offset u32 @20, args_len u32 @24,
+//   span_id u32 @28.
+// Operands live in the function's operand pool; the source span lives in the
+// function's span table, so the instruction holds only its index (M6 put two
+// span words in the instruction, which made it 38 bytes, not 32).
+
+/// The result id of an instruction that produces no value.
+pub pure fn ir_no_value() -> u32 => 4294967295;
+
 [Layout(c_abi)]
 pub struct IrInst : IValue {
     pub result:      u32;
@@ -318,22 +303,134 @@ pub struct IrInst : IValue {
     pub subop:       u16;
     pub physics:     IrTypePhysics;
     pub args_offset: u32;
-    pub args_len:    u16;
-    pub span_start:  u32;
-    pub span_len:    u32;
+    pub args_len:    u32;
+    pub span_id:     u32;
 }
 
-pub pure fn ir_inst_new(res: u32, op: u16, sub: u16, phy: IrTypePhysics, a_off: u32, a_len: u16, sp_st: u32, sp_ln: u32) -> IrInst {
-    return IrInst {
-        result:      res,
+/// A basic block. Values flow in through block parameters, never phi nodes;
+/// a jump passes one argument per parameter.
+pub struct IrBlock : IObject {
+    pub id:     u32;
+    /// Value ids of the block parameters.
+    pub params: List<u32>;
+    pub insts:  List<IrInst>;
+    /// Ids of the blocks that jump here; filled by `ir_compute_preds`.
+    pub preds:  List<u32>;
+    /// Immediate dominator, or `ir_no_value()` for the entry block.
+    pub idom:   u32;
+}
+
+/// A function: its blocks (the first is the entry, whose parameters are the
+/// function's), its operands, and the physics of every value it defines.
+pub struct IrFunction : IObject {
+    pub name:          str;
+    pub ret_physics:   IrTypePhysics;
+    pub blocks:        List<IrBlock>;
+    pub operand_pool:  List<u32>;
+    /// Value id -> its physics.
+    pub value_physics: List<IrTypePhysics>;
+    /// Span id -> byte offset of the source the instruction came from.
+    pub spans:         List<i64>;
+}
+
+/// A layout the module's values use, named for printing.
+pub struct IrLayout : IValue {
+    pub name:    str;
+    pub physics: IrTypePhysics;
+}
+
+/// A lowered program. Constants are pooled: an instruction names a pool
+/// entry by index.
+pub struct IrModule : IObject {
+    /// Layout id -> layout.
+    pub layouts:    List<IrLayout>;
+    pub functions:  List<IrFunction>;
+    /// `const_bits` operands.
+    pub ints:       List<i64>;
+    /// `const_float` operands.
+    pub floats:     List<f64>;
+    /// `const_bytes` operands.
+    pub strings:    List<str>;
+    /// `call_intrinsic` subops: the engine operations the program calls.
+    pub intrinsics: List<str>;
+}
+
+pub fn ir_module_new() -> IrModule {
+    return IrModule { layouts: [], functions: [], ints: [], floats: [], strings: [], intrinsics: [] };
+}
+
+pub fn ir_function_new(name: str, ret: IrTypePhysics) -> IrFunction {
+    return IrFunction { name: name, ret_physics: ret, blocks: [], operand_pool: [], value_physics: [], spans: [] };
+}
+
+/// Adds an empty block to `f` and returns its id.
+pub fn ir_add_block(f: IrFunction) -> u32 {
+    let id = f.blocks.len;
+    f.blocks.push(IrBlock { id: id, params: [], insts: [], preds: [], idom: ir_no_value() });
+    return id;
+}
+
+/// A new value of physics `phy` in `f`.
+pub fn ir_new_value(f: IrFunction, phy: IrTypePhysics) -> u32 {
+    f.value_physics.push(phy);
+    return f.value_physics.len - 1;
+}
+
+/// Adds a parameter of physics `phy` to block `b` of `f`.
+pub fn ir_add_param(f: IrFunction, b: u32, phy: IrTypePhysics) -> u32 {
+    let v = ir_new_value(f, phy);
+    f.blocks[b].params.push(v);
+    return v;
+}
+
+/// Appends an instruction to block `b`; returns its result (a new value of
+/// physics `phy`, or `ir_no_value()` when `produces` is false).
+pub fn ir_emit(f: IrFunction, b: u32, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, produces: bool, span: i64) -> u32 {
+    let result = if produces { ir_new_value(f, phy) } else { ir_no_value() };
+    let offset = f.operand_pool.len;
+    for a in args { f.operand_pool.push(a); }
+    f.spans.push(span);
+    f.blocks[b].insts.push(IrInst {
+        result:      result,
         opcode:      op,
         subop:       sub,
         physics:     phy,
-        args_offset: a_off,
-        args_len:    a_len,
-        span_start:  sp_st,
-        span_len:    sp_ln,
-    };
+        args_offset: offset,
+        args_len:    args.len,
+        span_id:     f.spans.len - 1,
+    });
+    return result;
+}
+
+/// The operands of `inst`.
+pub fn ir_args(f: IrFunction, inst: IrInst) -> List<u32> {
+    var out: List<u32> = [];
+    var i: u32 = 0;
+    while i < inst.args_len {
+        out.push(f.operand_pool[inst.args_offset + i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// Whether block `b` ends in a terminator.
+pub fn ir_is_terminated(f: IrFunction, b: u32) -> bool {
+    let insts = f.blocks[b].insts;
+    return insts.len > 0 && opcode_is_terminator(insts[insts.len - 1].opcode);
+}
+
+/// The blocks a terminator can go to. `jump` is `[target, args..]`;
+/// `cond_br` is `[cond, then, n_then, then args.., else, n_else, else args..]`.
+pub fn ir_successors(f: IrFunction, inst: IrInst) -> List<u32> {
+    var out: List<u32> = [];
+    let a = ir_args(f, inst);
+    if inst.opcode == op_jump() {
+        out.push(a[0]);
+    } else if inst.opcode == op_cond_br() {
+        out.push(a[1]);
+        out.push(a[3 + a[2]]);
+    }
+    return out;
 }
 
 // ------------------------------------------------------------------------------

@@ -1,0 +1,14 @@
+// F1: `>>` on a u64 shifts in zeros, so xorshift64 matches the reference.
+// Expected values: xorshift64 (13, 7, 17) from seed 12345678, computed with
+// 64-bit unsigned arithmetic.
+fn main() {
+    var x: u64 = 12345678;
+    x = x ^ (x << 13);
+    x = x ^ (x >> 7);
+    x = x ^ (x << 17);
+    print(x);
+    x = x ^ (x << 13);
+    x = x ^ (x >> 7);
+    x = x ^ (x << 17);
+    print(x);
+}

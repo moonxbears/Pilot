@@ -60,6 +60,15 @@ pub struct BuiltType {
     pub own_methods: List<BundleMethodDef>;
     /// The type's own field members, by name -> `found` index.
     pub field_decls: Map<str, i64>;
+    /// The types it splices, in order.
+    pub spliced: List<str>;
+    /// `Bundle.method` -> `found` index: every method of every splice, the
+    /// ones `without` hides and `with .. as` renames included, for static
+    /// delegation `Bundle.method(var ref self, ..)`.
+    pub delegates: Map<str, i64>;
+    /// `[bundle name, splice node]` per splice written in a `partial`
+    /// declaration, where a finding about that splice is reported.
+    pub partial_splices: List<List<any>>;
 }
 
 fn is_method_kind(k: i64) -> bool => k == nk_fn() || k == nk_operator() || k == nk_indexer();
@@ -254,6 +263,9 @@ fn empty_built(p: Program, name: str) -> BuiltType {
         own_fields: [],
         own_methods: [],
         field_decls: Map<str, i64>(),
+        spliced: [],
+        delegates: Map<str, i64>(),
+        partial_splices: [],
     };
 }
 
@@ -272,6 +284,8 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
     var catalog: Map<str, BundleDef> = [:];
     var has_dtor = false;
     var splices: List<i64> = [];
+    // Whether each splice is written in a `partial` declaration.
+    var splice_in_partial: List<bool> = [];
 
     // Tier 1: the type's own members.
     for d in nl_get(p.type_decls, name) {
@@ -308,22 +322,39 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
                 bt.field_decls.set(fname, add_found(bt, member));
             } else if k == nk_expr_stmt() {
                 let u = lhs(s, m);
-                if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 { splices.push(u); }
+                if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 {
+                    splices.push(u);
+                    splice_in_partial.push(is_partial_decl(s, d));
+                }
             }
         }
     }
 
     // Tier 2: members of the spliced bundles and facets.
-    for u in splices {
+    var si = 0;
+    while si < splices.len() {
+        let u = splices[si];
+        let in_partial = splice_in_partial[si];
+        si = si + 1;
         let st = prog_annot_type(p, lhs(s, u));
         if !ty_is_named(p.tt, st) { bt.complete = false; continue; }
         let bname = node_name(s, ty_decl(p.tt, st));
         let sub = build_type(p, bname, depth + 1);
         if !sub.complete { bt.complete = false; }
-        let dir = directive_for(s, u, bname);
+        var dir = directive_for(s, u, bname);
+        dir.from_partial = in_partial;
+        if in_partial { bt.partial_splices.push([bname, u]); }
+        bt.spliced.push(bname);
         for mname in sub.names {
             if some m = winner(sub, mname) {
+                let key = bname + "." + mname;
+                if !bt.delegates.has(key) { bt.delegates.set(key, add_found(bt, compose(p, sub, m, st))); }
                 let exposed = if dir.with_aliases.has(mname) { dir.with_aliases[mname] } else { mname };
+                if exposed != mname {
+                    // Delegation names the member by its own name, not its alias.
+                    var mt = bt.table;
+                    register_method(var mt, entry_for(p, mname, MemberTier::Tier2SplicedBundleFacet, bname, m.decl), true);
+                }
                 register(p, bt, exposed, MemberTier::Tier2SplicedBundleFacet, bname, compose(p, sub, m, st),
                     listed(dir.without_items, mname));
             }
@@ -428,6 +459,25 @@ pub fn prog_member(p: Program, t: i64, member: str) -> Member? {
     return none;
 }
 
+/// Whether type `t` splices the type named `bundle`.
+pub fn prog_splices(p: Program, t: i64, bundle: str) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    return listed(build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).spliced, bundle);
+}
+
+/// The method `Bundle.method(receiver, ..)` delegates to when the receiver's
+/// type `t` splices `bundle`: that splice's own `method`, even when `t` hides
+/// it with `without` or renames it with `with .. as`. None when `t` does not
+/// splice `bundle` or the splice has no such method.
+pub fn prog_delegate(p: Program, t: i64, bundle: str, method: str) -> Member? {
+    if !ty_is_named(p.tt, t) { return none; }
+    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
+    guard some _e = resolve_static_delegation(bt.table, bundle, method) else { return none; };
+    let key = bundle + "." + method;
+    if !bt.delegates.has(key) { return none; }
+    return instantiate(p, bt, bt.found[bt.delegates.get(key)], t);
+}
+
 /// Whether type `name` has `member` itself: a field or property it exposes,
 /// or a method its table resolves (its own, a splice's, an interface
 /// default or an extension). None while its table is incomplete.
@@ -463,6 +513,16 @@ fn finding_text(msg: str) -> str {
     return if colon > 0 { msg.slice(colon + 2, msg.len()) } else { msg };
 }
 
+/// Where a layout finding is reported: the `partial` splice it quotes
+/// (`'Bundle'`), else the type's declaration `decl`.
+fn finding_site(bt: BuiltType, msg: str, decl: i64) -> i64 {
+    for row in bt.partial_splices {
+        let bname: str = row[0];
+        if msg.find("'" + bname + "'", 0) >= 0 { return row[1]; }
+    }
+    return decl;
+}
+
 /// Reports the method-table and layout findings of every type declared in
 /// a user file, on its first declaration there.
 pub fn check_type_tables(p: Program, sink: DiagSink) {
@@ -477,7 +537,7 @@ pub fn check_type_tables(p: Program, sink: DiagSink) {
                 done.set(name, i);
                 let bt = build_type(p, name, 0);
                 for msg in bt.table.diagnostics { sink_error(sink, i, finding_code(msg), finding_text(msg)); }
-                for msg in bt.plan.diagnostics { sink_error(sink, i, finding_code(msg), finding_text(msg)); }
+                for msg in bt.plan.diagnostics { sink_error(sink, finding_site(bt, msg, i), finding_code(msg), finding_text(msg)); }
             }
         }
         i = i + 1;

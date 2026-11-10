@@ -1,0 +1,12 @@
+// F4: a binding named `set` (also the property-setter word) as the sequence
+// of a `for` loop stays a name: the `{` after it opens the loop body.
+fn total(set: List<i64>) -> i64 {
+    var n = 0;
+    for x in set { n = n + x; }
+    return n;
+}
+
+fn main() {
+    let xs: List<i64> = [1, 2, 3];
+    print(total(xs));
+}

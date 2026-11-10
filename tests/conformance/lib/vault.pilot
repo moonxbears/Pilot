@@ -1,0 +1,20 @@
+// A package with items of each reach, for visibility.pilot and
+// err_visibility.pilot.
+pkg lib.vault;
+
+priv fn secret() -> i64 => 1;
+file fn hidden() -> i64 => 10;
+pkg fn shared() -> i64 => 100;
+fn plain() -> i64 => 1000;
+
+pub fn total() -> i64 => secret() + hidden() + shared() + plain();
+
+pub struct Safe {
+    priv code: i64;
+    pub label: str;
+    level: i64;
+    pub fn peek() -> i64 => .code * 2;
+    pub fn rank() -> i64 => .level;
+}
+
+pub fn safe(code: i64) -> Safe => Safe { code: code, label: "safe", level: code + 1 };

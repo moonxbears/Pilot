@@ -128,6 +128,12 @@ pub struct Snap {
     /// `[field node, number of accessor bodies]` per field written with an
     /// accessor block; `{ get; }` has none.
     pub properties: List<List<i64>>;
+    /// The word that names a method's receiver (`bind_receiver_ident`), or
+    /// "" when the syntax binds none.
+    pub receiver: str;
+    /// Node -> its declaration modifiers packed by `decl_bits`, or -1 for a
+    /// node that is no declaration.
+    pub modifiers: List<i64>;
     pub count: i64;
 }
 
@@ -148,9 +154,52 @@ pub fn snap_load() -> Snap {
         splice_mods: raw[9],
         enumeration: raw[10],
         properties: raw[11],
+        receiver: snap_word(raw[12], 0),
+        modifiers: decl_bits(raw[13], nodes.len() / snap_columns()),
         count: nodes.len() / snap_columns(),
     };
 }
+
+/// The declaration rows the host serves (`[node, is partial, is static,
+/// visibility tier or -1, is package declaration]`) as one entry per node:
+/// bit 0 partial, bit 1 static, bit 2 package declaration, the tier plus one
+/// from bit 4 (0 when no visibility is written).
+fn decl_bits(rows: List<List<i64>>, count: i64) -> List<i64> {
+    var out: List<i64> = [];
+    var i = 0;
+    while i < count { out.push(-1); i = i + 1; }
+    for row in rows {
+        out[row[0]] = row[1] + row[2] * 2 + row[4] * 4 + (row[3] + 1) * 16;
+    }
+    return out;
+}
+
+fn decl_bit(s: Snap, n: i64, bit: i64) -> bool {
+    let m = s.modifiers[n];
+    return m >= 0 && (m / bit) % 2 == 1;
+}
+
+/// Whether declaration `n` is written `partial`.
+pub fn is_partial_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 1);
+
+/// Whether declaration `n` is written `static`.
+pub fn is_static_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 2);
+
+/// Whether node `n` is a `pkg Name;` package declaration.
+pub fn is_package_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 4);
+
+/// Whether node `n` is a declaration (or a `let` / `var` binding).
+pub fn is_declaration(s: Snap, n: i64) -> bool => s.modifiers[n] >= 0;
+
+/// The visibility tier declaration `n` was written with, or -1 when none
+/// is written or `n` is no declaration.
+pub fn decl_tier(s: Snap, n: i64) -> i64 {
+    let m = s.modifiers[n];
+    return if m < 0 { -1 } else { m / 16 - 1 };
+}
+
+/// Word `i` of a list of words the host serves, or "".
+fn snap_word(words: List<str>, i: i64) -> str => if i < words.len() { words[i] } else { "" };
 
 pub fn kind(s: Snap, n: i64) -> i64 => s.nodes[n * 9];
 pub fn lhs(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 1];

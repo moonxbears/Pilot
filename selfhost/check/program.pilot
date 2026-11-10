@@ -248,6 +248,20 @@ pub fn prog_class(p: Program, t: i64) -> str {
     return if p.bits_class.has(d) { p.bits_class.get(d) } else { "" };
 }
 
+/// The register class values of type `t` travel in: its `[Bits]` class, or
+/// for an enum declared over a primitive (`enum E : u8`) that primitive's.
+pub fn prog_value_class(p: Program, t: i64) -> str {
+    let c = prog_class(p, t);
+    if c != "" || !ty_is_named(p.tt, t) { return c; }
+    let d = ty_decl(p.tt, t);
+    if d < 0 || kind(p.s, d) != nk_adt() { return ""; }
+    for b in nl_get(p.bases, node_name(p.s, d)) {
+        let bc = prog_class(p, prog_annot_type(p, b));
+        if bc != "" { return bc; }
+    }
+    return "";
+}
+
 /// Whether a type holds no value (`void`, `never`).
 pub fn prog_is_zero_width(p: Program, t: i64) -> bool {
     if !ty_is_named(p.tt, t) { return false; }
@@ -280,7 +294,8 @@ fn visible_tparam(p: Program, at: i64, name: str) -> i64 {
 /// parameter in scope.
 pub fn prog_type_name_known(p: Program, n: i64) -> bool {
     let name = node_name(p.s, n);
-    return prog_type_decl(p, name) >= 0 || visible_tparam(p, n, name) > 0;
+    return prog_type_decl(p, name) >= 0 || visible_tparam(p, n, name) > 0
+        || name == prog_slot_name(p, fn_slot());
 }
 
 /// The name the `Cfg.Lang`-style table of receptor slots gives `slot`
@@ -329,8 +344,22 @@ pub fn prog_annot_type(p: Program, n: i64) -> i64 {
         } else {
             let d = prog_type_decl(p, name);
             var args: List<i64> = [];
-            if d >= 0 || name == prog_slot_name(p, fn_slot()) {
+            let is_fn = d < 0 && name == prog_slot_name(p, fn_slot());
+            if d >= 0 {
                 for a in children(p.s, n) { args.push(prog_annot_type(p, a)); }
+            } else if is_fn {
+                // `(A, B) => R` gives the parameters as one tuple type
+                // (`()` for none); each of its items is a parameter.
+                let ch = children(p.s, n);
+                var i = 0;
+                while i < ch.len() {
+                    if i + 1 < ch.len() && kind(p.s, ch[i]) == nk_type_tuple() {
+                        for item in children(p.s, ch[i]) { args.push(prog_annot_type(p, item)); }
+                    } else {
+                        args.push(prog_annot_type(p, ch[i]));
+                    }
+                    i = i + 1;
+                }
             }
             if d >= 0 {
                 t = ty_named(p.tt, d, name, args);
@@ -402,6 +431,22 @@ fn const_node(p: Program, e: i64, depth: i64) -> i64 {
         return map_entry(s, base, sym_text(s, rhs(s, e)));
     }
     return e;
+}
+
+/// The name a constant expression stands for (`Cfg.Reg.gpr_s` ->
+/// `gpr_signed`), or "".
+pub fn prog_const_name(p: Program, e: i64) -> str {
+    let n = const_node(p, e, 0);
+    return if n >= 0 && kind(p.s, n) == nk_ident() { node_name(p.s, n) } else { "" };
+}
+
+/// The argument nodes of the attribute named `name` on node `n`, or none.
+pub fn prog_attr_nodes(p: Program, n: i64, name: str) -> List<i64>? {
+    for row_index in nl_get(p.attrs, key(n)) {
+        let row: List<any> = p.s.attrs[row_index];
+        if sym_text(p.s, row[1]) == name { return row[2]; }
+    }
+    return none;
 }
 
 /// The integer a constant expression evaluates to, or none.

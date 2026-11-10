@@ -63,7 +63,7 @@ pub fn called_fn(inf: Infer, call: i64) -> i64 {
 
 /// The type a type-name identifier denotes when used as a value receiver
 /// (`Shade::Dim`, `result<..>.err(..)`), with its generic arguments unknown.
-fn type_receiver(inf: Infer, n: i64) -> i64 {
+pub fn type_receiver(inf: Infer, n: i64) -> i64 {
     let s = inf.p.s;
     if kind(s, n) != nk_ident() || inf.r.ref_of[n] >= 0 { return ty_unknown(); }
     let name = node_name(s, n);
@@ -72,6 +72,28 @@ fn type_receiver(inf: Infer, n: i64) -> i64 {
     var args: List<i64> = [];
     for _p in prog_tparam_names(inf.p, d) { args.push(ty_unknown()); }
     return ty_named(inf.p.tt, d, name, args);
+}
+
+/// The type of the receiver word at node `n`: the struct, interface or
+/// extended type whose body holds `n`, over its own generic parameters. The
+/// unknown type outside any such body.
+fn receiver_type(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    var cur = p.parents[n];
+    while cur >= 0 {
+        let k = kind(s, cur);
+        if k == nk_struct() || k == nk_interface() || k == nk_extend() {
+            let name = node_name(s, cur);
+            let d = prog_type_decl(p, name);
+            if d < 0 { return ty_unknown(); }
+            var args: List<i64> = [];
+            for tp in prog_tparam_names(p, d) { args.push(ty_param(p.tt, d, tp)); }
+            return ty_named(p.tt, d, name, args);
+        }
+        cur = p.parents[cur];
+    }
+    return ty_unknown();
 }
 
 /// The type two branches agree on: the other when one is unknown or never
@@ -262,7 +284,9 @@ fn compute(inf: Infer, n: i64) -> i64 {
     }
     if k == nk_ident() {
         let b = inf.r.ref_of[n];
-        return if b >= 0 { binding_type(inf, b) } else { ty_unknown() };
+        if b >= 0 { return binding_type(inf, b); }
+        if s.receiver.len() > 0 && node_name(s, n) == s.receiver { return receiver_type(inf, n); }
+        return ty_unknown();
     }
     if k == nk_call() { return call_type(inf, n); }
     if k == nk_member() { return member_type(inf, n); }

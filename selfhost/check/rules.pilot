@@ -18,6 +18,11 @@
 //   NULL003  `none` returned from a function whose return type cannot hold it
 //   NULL004  `none` passed for a parameter whose type cannot hold it
 //   ERR001   a fallible result dropped without `?`, `catch` or a binding
+//   COMP008  static delegation `Bundle.method(receiver, ..)` whose receiver's
+//            type does not splice `Bundle`
+//   CALL001  static delegation, or a call through a local closure, with a
+//            wrong number of arguments (TYPE001 for an argument of the wrong
+//            type)
 //
 // A type can hold `none` when it declares `op ??`; a value is fallible when
 // its type unwraps (`op ?`) but cannot hold `none`. No type is known by name.
@@ -80,6 +85,7 @@ pub fn assignable(inf: Infer, src: i64, dst: i64, e: i64) -> bool {
     if ty_is_unknown(tt, src) || ty_is_unknown(tt, dst) || src == dst { return true; }
     if ty_is_param(tt, src) || ty_is_param(tt, dst) { return true; }
     if prog_is_never(p, src) { return true; }
+    if ty_is_func(tt, src) && ty_is_func(tt, dst) { return func_assignable(inf, src, dst); }
     if !ty_is_named(tt, src) || !ty_is_named(tt, dst) { return true; }
     let sd = ty_decl(tt, src);
     let dd = ty_decl(tt, dst);
@@ -100,6 +106,23 @@ pub fn assignable(inf: Infer, src: i64, dst: i64, e: i64) -> bool {
     let inner = unwrap_type(p, dst);
     if !ty_is_unknown(tt, inner) && inner != dst && assignable(inf, src, inner, e) { return true; }
     return false;
+}
+
+/// Whether a function of type `src` fits where a `dst` is expected: the same
+/// number of parameters, each of `dst`'s parameters fits the matching one of
+/// `src` (what the caller passes must suit what the closure was written to
+/// take), and `src`'s result fits `dst`'s.
+fn func_assignable(inf: Infer, src: i64, dst: i64) -> bool {
+    let tt = inf.p.tt;
+    let sa = ty_args(tt, src);
+    let da = ty_args(tt, dst);
+    if sa.len() != da.len() { return false; }
+    var i = 0;
+    while i + 1 < sa.len() {
+        if !assignable(inf, da[i], sa[i], -1) { return false; }
+        i = i + 1;
+    }
+    return sa.len() == 0 || assignable(inf, sa[sa.len() - 1], da[da.len() - 1], -1);
 }
 
 /// The operator a type declares when it can hold `none`.
@@ -125,6 +148,46 @@ fn enclosing_function(p: Program, n: i64) -> i64 {
     return -1;
 }
 
+/// A bare call `v` (`ok(x)`) whose callee names no binding, function or
+/// type, where a `dst` is expected and `dst` has a static method of that
+/// name: the call is that method's (`result<i64, str>.ok(x)`), so it must
+/// pass as many arguments as the method takes (CALL001), each fitting its
+/// parameter over `dst`'s generic arguments (TYPE001). Returns whether `v`
+/// is such a call.
+fn check_target_call(inf: Infer, sink: DiagSink, v: i64, dst: i64) -> bool {
+    let p = inf.p;
+    let s = p.s;
+    if v < 0 || kind(s, v) != nk_call() || !ty_is_named(p.tt, dst) { return false; }
+    let ch = children(s, v);
+    if ch.len() == 0 || kind(s, ch[0]) != nk_ident() || inf.r.ref_of[ch[0]] >= 0 { return false; }
+    let name = node_name(s, ch[0]);
+    if nl_get(p.fns, name).len() > 0 || prog_type_decl(p, name) >= 0 { return false; }
+    guard some m = prog_member(p, dst, name) else { return false; };
+    if kind(s, m.decl) != nk_fn() || !is_static_decl(s, m.decl) { return false; }
+    for a in ch { if kind(s, a) == nk_call_arg() { return true; } }
+    let label = f"{ty_display(p.tt, dst)}.{name}";
+    let params = fn_params(s, m.decl);
+    if params.len() + 1 != ch.len() {
+        sink_error(sink, v, "CALL001", f"`{label}` takes {params.len()} argument(s), found {ch.len() - 1}");
+        return true;
+    }
+    var i = 0;
+    while i < params.len() {
+        let arg = ch[i + 1];
+        let want = ty_subst(p.tt, prog_annot_type(p, rhs(s, params[i])), m.names, m.values);
+        if !ty_is_open(p.tt, want) && !is_none_literal(s, arg) {
+            if !check_target_call(inf, sink, arg, want) {
+                let src = type_of(inf, arg);
+                if !assignable(inf, src, want, arg) {
+                    sink_error(sink, arg, "TYPE001", f"argument {i + 1} of `{label}`: " + mismatch(inf, src, want));
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
 fn check_binding_value(inf: Infer, sink: DiagSink, n: i64) {
     let s = inf.p.s;
     let a = annot(s, n);
@@ -138,6 +201,7 @@ fn check_binding_value(inf: Infer, sink: DiagSink, n: i64) {
         }
         return;
     }
+    if check_target_call(inf, sink, v, dst) { return; }
     let src = type_of(inf, v);
     if !assignable(inf, src, dst, v) { sink_error(sink, v, "TYPE001", mismatch(inf, src, dst)); }
 }
@@ -157,6 +221,7 @@ fn check_return(inf: Infer, sink: DiagSink, n: i64) {
         }
         return;
     }
+    if check_target_call(inf, sink, v, dst) { return; }
     let src = type_of(inf, v);
     if !assignable(inf, src, dst, v) {
         sink_error(sink, v, "TYPE001",
@@ -187,11 +252,94 @@ fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
                 sink_error(sink, arg, "NULL004",
                     f"Cannot pass 'none' to non-nullable parameter '{ty_display(p.tt, dst)}'");
             }
-        } else if !ty_is_open(p.tt, dst) {
+        } else if !ty_is_open(p.tt, dst) && !check_target_call(inf, sink, arg, dst) {
             let src = type_of(inf, arg);
             if !assignable(inf, src, dst, arg) {
                 sink_error(sink, arg, "TYPE001",
                     f"argument {i + 1} of `{node_name(s, f)}`: " + mismatch(inf, src, dst));
+            }
+        }
+        i = i + 1;
+    }
+}
+
+/// A call through a local closure: as many arguments as the closure's type
+/// has parameters (CALL001), each fitting its parameter (TYPE001).
+fn check_closure_call(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let ch = children(s, n);
+    if ch.len() == 0 || kind(s, ch[0]) != nk_ident() || inf.r.ref_of[ch[0]] < 0 { return; }
+    let t = type_of(inf, ch[0]);
+    if !ty_is_func(p.tt, t) { return; }
+    for a in ch { if kind(s, a) == nk_call_arg() { return; } }
+    let params = ty_args(p.tt, t);
+    let name = node_name(s, ch[0]);
+    if params.len() != ch.len() {
+        sink_error(sink, n, "CALL001", f"`{name}` takes {params.len() - 1} argument(s), found {ch.len() - 1}");
+        return;
+    }
+    var i = 0;
+    while i + 1 < params.len() {
+        let arg = ch[i + 1];
+        let dst = params[i];
+        if !ty_is_open(p.tt, dst) && !is_none_literal(s, arg) {
+            let src = type_of(inf, arg);
+            if !assignable(inf, src, dst, arg) {
+                sink_error(sink, arg, "TYPE001", f"argument {i + 1} of `{name}`: " + mismatch(inf, src, dst));
+            }
+        }
+        i = i + 1;
+    }
+}
+
+/// Static delegation `Bundle.method(receiver, args..)`: a call through a
+/// splice's type name whose first argument is a struct value. When the
+/// receiver's type splices `Bundle`, the call reaches that splice's `method`
+/// (even one hidden by `without` or renamed by `with .. as`) and the other
+/// arguments must fit its parameters. When it does not, and the call passes
+/// one argument more than `method` takes, it is COMP008. A `static` method,
+/// or a call with as many arguments as `method` takes, is a static call, not
+/// a delegation.
+fn check_delegation(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let ch = children(s, n);
+    if ch.len() < 2 || kind(s, ch[0]) != nk_member() { return; }
+    let bundle_t = type_receiver(inf, lhs(s, ch[0]));
+    if !ty_is_named(p.tt, bundle_t) || kind(s, ty_decl(p.tt, bundle_t)) != nk_struct() { return; }
+    let bundle = node_name(s, ty_decl(p.tt, bundle_t));
+    let method = sym_text(s, rhs(s, ch[0]));
+    let host = type_of(inf, ch[1]);
+    if !ty_is_named(p.tt, host) || kind(s, ty_decl(p.tt, host)) != nk_struct() { return; }
+    if node_name(s, ty_decl(p.tt, host)) == bundle { return; }
+    for a in ch { if kind(s, a) == nk_call_arg() { return; } }
+    let host_name = ty_display(p.tt, host);
+    guard some m = prog_delegate(p, host, bundle, method) else {
+        if prog_splices(p, host, bundle) { return; }
+        if some own = prog_member(p, bundle_t, method) {
+            if kind(s, own.decl) == nk_fn() && !is_static_decl(s, own.decl) && fn_params(s, own.decl).len() + 2 == ch.len() {
+                sink_error(sink, n, "COMP008",
+                    f"`{bundle}.{method}(..)` delegates to a splice, but `{host_name}` does not splice `{bundle}`");
+            }
+        }
+        return;
+    };
+    if kind(s, m.decl) != nk_fn() || is_static_decl(s, m.decl) { return; }
+    let params = fn_params(s, m.decl);
+    if params.len() + 2 != ch.len() {
+        sink_error(sink, n, "CALL001",
+            f"`{bundle}.{method}` takes the receiver and {params.len()} argument(s), found {ch.len() - 2}");
+        return;
+    }
+    var i = 0;
+    while i < params.len() {
+        let arg = ch[i + 2];
+        let dst = ty_subst(p.tt, prog_annot_type(p, rhs(s, params[i])), m.names, m.values);
+        if !ty_is_open(p.tt, dst) && !is_none_literal(s, arg) {
+            let src = type_of(inf, arg);
+            if !assignable(inf, src, dst, arg) {
+                sink_error(sink, arg, "TYPE001", f"argument {i + 1} of `{bundle}.{method}`: " + mismatch(inf, src, dst));
             }
         }
         i = i + 1;
@@ -238,7 +386,7 @@ fn check_cast(inf: Infer, sink: DiagSink, n: i64) {
     let dst = prog_annot_type(p, rhs(s, n));
     if !ty_is_named(p.tt, src) || !ty_is_named(p.tt, dst) || ty_is_open(p.tt, src) || ty_is_open(p.tt, dst) { return; }
     if assignable(inf, src, dst, lhs(s, n)) { return; }
-    if prog_class(p, src) != "" && prog_class(p, dst) != "" { return; }
+    if prog_value_class(p, src) != "" && prog_value_class(p, dst) != "" { return; }
     if some _m = prog_member(p, src, "as") { return; }
     sink_error(sink, n, "TYPE003",
         f"cannot cast `{ty_display(p.tt, src)}` to `{ty_display(p.tt, dst)}`");
@@ -442,7 +590,7 @@ pub fn check_rules(inf: Infer, sink: DiagSink) {
             else if k == nk_return() { check_return(inf, sink, i); }
             else if k == nk_assign() { check_assign(inf, sink, i); }
             else if k == nk_expr_stmt() { check_dropped_result(inf, sink, i); }
-            else if k == nk_call() { check_call_args(inf, sink, i); }
+            else if k == nk_call() { check_call_args(inf, sink, i); check_closure_call(inf, sink, i); check_delegation(inf, sink, i); }
             else if k == nk_fn() || k == nk_operator() { check_missing_return(inf, sink, i); }
             else if k == nk_match() { check_switch(inf, sink, i); }
             else if k == nk_member() { check_optional_access(inf, sink, i, sym_text(s, rhs(s, i)), false); }

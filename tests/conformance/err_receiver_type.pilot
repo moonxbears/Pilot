@@ -1,0 +1,15 @@
+// Inside a method the receiver has its struct's type, written as `self` or
+// left implied (`.name`): a `str` field is not an `i64` (TYPE001, twice).
+struct Gauge {
+    pub name: str;
+    pub reading: i64;
+    pub fn total() -> i64 {
+        let implied: i64 = .name;
+        let named: i64 = self.name;
+        return implied + named + .reading;
+    }
+}
+
+fn main() {
+    print(Gauge { name: "g", reading: 2 }.reading);
+}

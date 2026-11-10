@@ -1,0 +1,20 @@
+// A closure's written parameter types are checked: calls through a local
+// closure (TYPE001, CALL001), and a closure stored or passed where a
+// function type is expected (TYPE001); unannotated parameters take anything.
+fn apply(f: (i64) => i64, x: i64) -> i64 => f(x);
+
+fn main() {
+    let twice = (x: i64) => x * 2;
+    print(twice(3));
+    print(twice("a"));
+    print(twice(1, 2));
+    let stored: (i64) => i64 = (_s: str) => 1;
+    print(apply((_v: str) => 2, 1));
+    print(apply((v: i64) => v + stored(1), 1));
+    let none_taken: () => i64 = () => 1;
+    let pair: (i64, str) => i64 = (x: i64, _y: str) => x + none_taken();
+    let short: (i64, str) => i64 = (x: i64) => x;
+    print(pair(1, "s") + short(1, "t"));
+    let any_arg = (v) => v;
+    print(any_arg("x"));
+}

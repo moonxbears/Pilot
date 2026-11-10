@@ -1,0 +1,17 @@
+// F1: a variant written with a value (`Low = 5`) has that value, and an
+// enum declared over a primitive casts to an integer. A variant without a
+// value counts on from the one before it (Low = 5, so Mid is 6).
+enum Level : u8 {
+    Low = 5,
+    Mid,
+    High = 9,
+}
+
+fn main() {
+    let a: Level = ::Low;
+    let b: Level = ::High;
+    let m: Level = ::Mid;
+    print(a as i64);
+    print(m as i64);
+    print(b as i64);
+}

@@ -53,7 +53,7 @@ fn sg_workaround_marker() -> str => nameof(Workaround) + "(\"";
 fn sg_known_bugs_dir() -> str => "tests/conformance/known_bugs";
 
 /// How a gap appears in the source.
-[Workaround("seed.shared_variant_name", "the pending-value form is `Pending`, not `Value`, which SeamKind also has")]
+[Workaround("seed.variant_compare_untyped", "the pending-value form is `Pending`, not `Value`, which SeamKind also has")]
 enum SiteForm : u8 {
     /// `seam("id", ..)`, or a SEAM001 message raised by the seed.
     Call,

@@ -548,6 +548,7 @@ pub fn build_allowed_infer_strings() -> i64 {
     let _ = gset_insert(s, "ast_parent");
     let _ = gset_insert(s, "ast_node_sym");
     let _ = gset_insert(s, "ast_node_lit_kind");
+    let _ = gset_insert(s, "ast_node_unit");
     let _ = gset_insert(s, "ast_node_raw_bits");
     let _ = gset_insert(s, "ast_child_count");
     let _ = gset_insert(s, "ast_child_at");

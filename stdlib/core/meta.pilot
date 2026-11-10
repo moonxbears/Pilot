@@ -113,10 +113,8 @@ pub struct {
         pub weight:   i32;
 
         pub pure fn on_validating(old_val: TVal, new_val: TVal) -> TVal => new_val;
-        [Workaround("seed.field_closure_call", "the closure is read into a local before the call")]
         pub fn on_changed(old_val: TVal, new_val: TVal) {
-            let callback = self.callback;
-            callback(old_val, new_val);
+            (.callback)(old_val, new_val);
         }
     }
 
@@ -126,11 +124,7 @@ pub struct {
         pub expr_fn: fn<ref<TOwner>, TOut>;
         pub weight:  i32;
 
-        [Workaround("seed.field_closure_call", "the closure is read into a local before the call")]
-        pub pure fn evaluate(owner: ref<TOwner>) -> TOut {
-            let expr_fn = self.expr_fn;
-            return expr_fn(owner);
-        }
+        pub pure fn evaluate(owner: ref<TOwner>) -> TOut => (.expr_fn)(owner);
     }
 
     // Pillar 2 AOP Trace Span Interceptor: `[TraceSpan(name: "step_physics", weight: 50)]`
@@ -157,15 +151,9 @@ pub struct {
         pub then_fn: fn<var ref<TEntity>, void>;
         pub weight:  i32;
 
-        [Workaround("seed.field_closure_call", "the closure is read into a local before the call")]
-        pub pure fn matches(entity: ref<TEntity>) -> bool {
-            let when_fn = self.when_fn;
-            return when_fn(entity);
-        }
-        [Workaround("seed.field_closure_call", "the closure is read into a local before the call")]
+        pub pure fn matches(entity: ref<TEntity>) -> bool => (.when_fn)(entity);
         pub var  fn apply(entity: var ref<TEntity>) {
-            let then_fn = self.then_fn;
-            then_fn(var ref entity);
+            (.then_fn)(var ref entity);
         }
     }
 

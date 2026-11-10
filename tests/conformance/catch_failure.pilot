@@ -1,0 +1,32 @@
+// F4: `catch e` binds the failed value's error (the try protocol's
+// `failure()`), in the expression form and in `try { .. } catch e { .. }`,
+// including a failure that `?` carries out of a called function. A failed
+// option's failure is the empty option.
+fn parse_digit(c: str) -> result<i64, str> {
+    if c == "7" { return result<i64, str>.ok(7); }
+    return result<i64, str>.err(f"not a digit: {c}");
+}
+
+fn doubled(c: str) -> result<i64, str> {
+    let d = parse_digit(c)?;
+    return result<i64, str>.ok(d * 2);
+}
+
+fn first(xs: List<i64>) -> option<i64> {
+    if xs.len == 0 { return option<i64>.none(); }
+    return option<i64>.some(xs[0]);
+}
+
+fn main() {
+    print(parse_digit("7") catch e => -1);
+    print(parse_digit("x") catch e => e);
+    print(doubled("q") catch e => e);
+    try {
+        let v = doubled("z")?;
+        print(v);
+    } catch e {
+        print(f"caught {e}");
+    }
+    let empty: List<i64> = [];
+    print(first(empty) catch e => e.is_none);
+}

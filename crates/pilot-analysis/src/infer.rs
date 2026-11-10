@@ -15,6 +15,8 @@ pub struct RawAstNode {
     pub first_child: u32, pub child_count: u16, pub first_attr_arg: u32, pub attr_arg_count: u16,
     pub first_attr: u32, pub attr_count: u16, pub first_base: u32, pub base_count: u16,
     pub raw_bits: u64, pub literal_kind: u8, pub span_start: u32, pub span_end: u32,
+    /// The compilation unit (file) the node was parsed from; 0 for a single file.
+    pub unit: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -237,6 +239,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
             node_id: idx_u32, parent_id: u32::MAX, kind_tag, orig_kind: node.kind, node_flags: node.flags, decl_flags,
             sym_id, first_child, child_count, first_attr_arg, attr_arg_count, first_attr, attr_count,
             first_base, base_count, raw_bits, literal_kind: lit_kind, span_start: span.start, span_end: span.end,
+            unit: arena.unit_of(NodeId(idx_u32)).map_or(0, |u| u.file.0),
         });
     }
 
@@ -253,6 +256,7 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
     let nid = arg_i(0) as usize;
     match op_code {
         "ast_node_count" => Ok(PilotVal::from_int(registry.arena.nodes.len() as i64)),
+        "ast_node_unit" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.unit) as i64)),
         "ast_node_kind" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(255, |n| n.kind_tag) as i64)),
         "ast_orig_kind" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(65535, |n| n.orig_kind) as i64)),
         "ast_node_flags" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.node_flags) as i64)),

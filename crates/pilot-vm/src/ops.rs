@@ -13,21 +13,44 @@ pub type OpResult = Result<PilotVal, String>;
 
 enum Num {
     Int(i64),
+    /// An integer in an unsigned 64-bit register.
+    UInt(u64),
     Float(f64),
 }
 
 fn num(v: PilotVal) -> Option<Num> {
-    if let Some(i) = v.as_int() {
-        Some(Num::Int(i))
-    } else {
-        v.as_float().map(Num::Float)
+    match v.as_int() {
+        Some(i) if v.is_uint() => Some(Num::UInt(i as u64)),
+        Some(i) => Some(Num::Int(i)),
+        None => v.as_float().map(Num::Float),
     }
 }
 
 fn as_f64(n: &Num) -> f64 {
     match n {
         Num::Int(i) => *i as f64,
+        Num::UInt(u) => *u as f64,
         Num::Float(f) => *f,
+    }
+}
+
+/// The exact value of an integer operand, whatever its signedness.
+fn wide(n: &Num) -> Option<i128> {
+    match n {
+        Num::Int(i) => Some(*i as i128),
+        Num::UInt(u) => Some(*u as i128),
+        Num::Float(_) => None,
+    }
+}
+
+/// Both operands as unsigned 64-bit integers when both are integers and at
+/// least one is unsigned: the signed one is read as its two's-complement bits.
+fn unsigned_pair(x: &Num, y: &Num) -> Option<(u64, u64)> {
+    match (x, y) {
+        (Num::UInt(a), Num::UInt(b)) => Some((*a, *b)),
+        (Num::UInt(a), Num::Int(b)) => Some((*a, *b as u64)),
+        (Num::Int(a), Num::UInt(b)) => Some((*a as u64, *b)),
+        _ => None,
     }
 }
 
@@ -74,6 +97,9 @@ pub fn arith(op: Opcode, a: PilotVal, b: PilotVal) -> OpResult {
     };
     if let (Num::Int(x), Num::Int(y)) = (&x, &y) {
         return int_arith(op, *x, *y);
+    }
+    if let Some((x, y)) = unsigned_pair(&x, &y) {
+        return uint_arith(op, x, y);
     }
     let (x, y) = (as_f64(&x), as_f64(&y));
     let r = match op {
@@ -124,9 +150,38 @@ fn int_arith(op: Opcode, x: i64, y: i64) -> OpResult {
     Ok(PilotVal::from_int(r))
 }
 
+/// Arithmetic on unsigned 64-bit integers, wrapping at 2^64.
+fn uint_arith(op: Opcode, x: u64, y: u64) -> OpResult {
+    if y == 0 && matches!(op, Opcode::Div | Opcode::Rem | Opcode::FloorDiv) {
+        return Err("integer division by zero".to_string());
+    }
+    let r = match op {
+        Opcode::Add => x.wrapping_add(y),
+        Opcode::Sub => x.wrapping_sub(y),
+        Opcode::Mul => x.wrapping_mul(y),
+        Opcode::Div | Opcode::FloorDiv => x / y,
+        Opcode::Rem => x % y,
+        Opcode::Pow => x.wrapping_pow(y.min(u32::MAX as u64) as u32),
+        _ => return Err(format!("cannot apply `{}` to integers", symbol(op))),
+    };
+    Ok(PilotVal::from_uint(r))
+}
+
 /// Bitwise operators. Integers combine bitwise; booleans combine logically
-/// (without short-circuiting) for `& | ^`.
+/// (without short-circuiting) for `& | ^`. When either operand is unsigned
+/// the result is unsigned and `>>` shifts in zeros.
 pub fn bitwise(op: Opcode, a: PilotVal, b: PilotVal) -> OpResult {
+    if let Some((x, y)) = num(a).zip(num(b)).and_then(|(x, y)| unsigned_pair(&x, &y)) {
+        let r = match op {
+            Opcode::BitAnd => x & y,
+            Opcode::BitOr => x | y,
+            Opcode::Xor => x ^ y,
+            Opcode::Shl => x.wrapping_shl(y as u32),
+            Opcode::Shr => x.wrapping_shr(y as u32),
+            _ => return Err(type_error(op, a, b)),
+        };
+        return Ok(PilotVal::from_uint(r));
+    }
     if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
         let r = match op {
             Opcode::BitAnd => x & y,
@@ -154,9 +209,9 @@ pub fn bitwise(op: Opcode, a: PilotVal, b: PilotVal) -> OpResult {
 /// content, everything else by tag and payload (handles by identity).
 pub fn equals(a: PilotVal, b: PilotVal) -> bool {
     if let (Some(x), Some(y)) = (num(a), num(b)) {
-        return match (x, y) {
-            (Num::Int(x), Num::Int(y)) => x == y,
-            (x, y) => as_f64(&x) == as_f64(&y),
+        return match (wide(&x), wide(&y)) {
+            (Some(x), Some(y)) => x == y,
+            _ => as_f64(&x) == as_f64(&y),
         };
     }
     if a.is_str() && b.is_str() {
@@ -169,9 +224,9 @@ pub fn equals(a: PilotVal, b: PilotVal) -> bool {
 
 fn ordering(op: Opcode, a: PilotVal, b: PilotVal) -> Result<Ordering, String> {
     if let (Some(x), Some(y)) = (num(a), num(b)) {
-        let ord = match (x, y) {
-            (Num::Int(x), Num::Int(y)) => Some(x.cmp(&y)),
-            (x, y) => as_f64(&x).partial_cmp(&as_f64(&y)),
+        let ord = match (wide(&x), wide(&y)) {
+            (Some(x), Some(y)) => Some(x.cmp(&y)),
+            _ => as_f64(&x).partial_cmp(&as_f64(&y)),
         };
         return ord.ok_or_else(|| "comparison with NaN".to_string());
     }
@@ -203,6 +258,7 @@ pub fn unary(op: Opcode, a: PilotVal) -> OpResult {
     let r = match op {
         Opcode::Neg => match num(a) {
             Some(Num::Int(i)) => PilotVal::from_int(i.wrapping_neg()),
+            Some(Num::UInt(u)) => PilotVal::from_uint(u.wrapping_neg()),
             Some(Num::Float(f)) => PilotVal::from_float(-f),
             None => return Err(format!("cannot negate {}", a.kind_label())),
         },
@@ -211,6 +267,7 @@ pub fn unary(op: Opcode, a: PilotVal) -> OpResult {
             None => return Err(format!("cannot apply `!` to {}", a.kind_label())),
         },
         Opcode::BitNot => match a.as_int() {
+            Some(i) if a.is_uint() => PilotVal::from_uint(!(i as u64)),
             Some(i) => PilotVal::from_int(!i),
             None => return Err(format!("cannot apply `~` to {}", a.kind_label())),
         },
@@ -270,15 +327,20 @@ pub fn convert(v: PilotVal, class: &str, width: i64) -> Result<PilotVal, String>
             Ok(PilotVal::from_float(if width == 32 { f as f32 as f64 } else { f }))
         }
         _ if is_int_class => {
+            let unsigned = class == "gpr_unsigned";
             let i = match n {
                 Num::Int(i) => i,
+                Num::UInt(u) => u as i64,
+                Num::Float(f) if unsigned && f.is_finite() && f.trunc() >= 0.0 && f.trunc() < u64::MAX as f64 => {
+                    f.trunc() as u64 as i64
+                }
                 Num::Float(f) if f.is_finite() && f.trunc() >= i64::MIN as f64 && f.trunc() < i64::MAX as f64 => {
                     f.trunc() as i64
                 }
                 Num::Float(f) => return Err(format!("{f} does not fit an integer")),
             };
             if width >= 64 {
-                return Ok(PilotVal::from_int(i));
+                return Ok(if unsigned { PilotVal::from_uint(i as u64) } else { PilotVal::from_int(i) });
             }
             let shift = 64 - width as u32;
             let wrapped = if class == "gpr_signed" {

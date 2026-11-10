@@ -1,0 +1,8 @@
+error[MOD003]: `secret` is private and cannot be used here
+err_visibility.pilot:6:11
+error[MOD003]: `hidden` is private to its file and cannot be used here
+err_visibility.pilot:7:11
+error[MOD003]: `shared` is private to its package and cannot be used here
+err_visibility.pilot:8:11
+error[VIS001]: Member 'code' is private and cannot be used from external scope
+err_visibility.pilot:10:11

@@ -1,0 +1,15 @@
+// Static delegation passes the receiver and then the method's arguments:
+// one too many (CALL001) and one of the wrong type (TYPE001).
+struct VolumeFacet {
+    pub fn volume(boost: i64) -> i64 => 9 + boost;
+}
+
+struct Amp {
+    *VolumeFacet;
+    pub fn extra() -> i64 => VolumeFacet.volume(var ref self, 1, 2);
+    pub fn wrong() -> i64 => VolumeFacet.volume(var ref self, "loud");
+}
+
+fn main() {
+    print(Amp {}.volume(1));
+}

@@ -1,0 +1,30 @@
+// A `partial struct` extension may splice a facet (no fields) but not a
+// bundle with fields: the primary declaration seals the layout (COMP001).
+struct CountBundle {
+    pub count: i64;
+}
+
+struct GreetFacet {
+    pub fn greet() -> str => "hi";
+}
+
+struct Widget {
+    pub id: i64;
+    *CountBundle;
+}
+
+partial struct Widget {
+    *GreetFacet;
+}
+
+struct Gadget {
+    pub id: i64;
+}
+
+partial struct Gadget {
+    *CountBundle;
+}
+
+fn main() {
+    print(Widget { id: 1, count: 2 }.greet());
+}

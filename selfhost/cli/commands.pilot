@@ -55,6 +55,7 @@ pub fn cli_checker_decls() -> List<str> => [
 
 /// The type checker's sources (`selfhost/check/`), in link order.
 pub fn cli_checker_files() -> List<str> => [
+    "stdlib/core/syntax/visibility.pilot",
     "selfhost/check/snapshot.pilot",
     "selfhost/check/types.pilot",
     "selfhost/check/diag.pilot",
@@ -68,6 +69,7 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/generics.pilot",
     "selfhost/check/own.pilot",
     "selfhost/check/contracts.pilot",
+    "selfhost/check/access.pilot",
     "selfhost/check/main.pilot",
 ];
 

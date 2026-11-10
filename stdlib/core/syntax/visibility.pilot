@@ -51,3 +51,29 @@ pub pure fn visibility_tier_of(word: str) -> i32 {
 pub pure fn can_access_ring(caller_lvl: i32, required_lvl: i32) -> bool {
     return caller_lvl >= required_lvl;
 }
+
+/// The tier of a declaration written without a visibility word: it is
+/// private to its package.
+pub pure fn default_visibility_tier() -> i64 => visibility_tier_of(nameof(pkg));
+
+/// How far a declaration reaches from where it is declared.
+pub enum VisReach : u8 {
+    /// The declaring scope: a member's own type body, a top-level item's file.
+    Scope,
+    /// The file it is declared in.
+    File,
+    /// Every file of its package.
+    Package,
+    /// The whole program.
+    Program,
+}
+
+/// How far a declaration of visibility `tier` reaches. `prot` reaches the
+/// package: derived types and extensions in other packages are not told
+/// apart yet.
+pub pure fn visibility_reach(tier: i64) -> VisReach {
+    if tier < visibility_tier_of(nameof(file)) { return ::Scope; }
+    if tier < visibility_tier_of(nameof(prot)) { return ::File; }
+    if tier < visibility_tier_of(nameof(int)) { return ::Package; }
+    return ::Program;
+}

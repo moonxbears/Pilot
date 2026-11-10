@@ -1,6 +1,0 @@
-// Half of known_bugs/private_fn_clash.pilot: a private `helper`.
-pkg lib.private_one;
-
-fn helper() -> i64 => 1;
-
-pub fn from_one() -> i64 => helper();

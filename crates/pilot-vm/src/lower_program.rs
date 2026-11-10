@@ -15,6 +15,11 @@
 //!
 //! `without Item;` and `without Item { member, .. };` in a unit hide those
 //! names from every other unit; a reference from another unit is an error.
+//!
+//! Top-level functions of the same name in two units are two functions. A
+//! bare name reaches the first one registered (the entry unit's, else the
+//! first imported unit's); a call from inside another unit that declares
+//! the name reaches that unit's own (`unit_fn_key`).
 
 use crate::instruction::Opcode;
 use crate::BytecodeCompiler;
@@ -170,6 +175,8 @@ impl BytecodeCompiler {
                 NodeKind::StructDecl | NodeKind::ExtendDecl => self.register_struct(arena, id),
                 NodeKind::FnDecl => {
                     let name = Self::name(arena, cn.lhs).to_string();
+                    let unit = arena.unit_of(id).map(|u| u.file);
+                    self.fn_homes.entry(name.clone()).or_insert(unit);
                     if !self.known_fns.contains_key(&name) {
                         let arity = (cn.flags as usize).saturating_sub(1);
                         self.known_fns.insert(name.clone(), arity);
@@ -191,7 +198,13 @@ impl BytecodeCompiler {
                 NodeKind::FnDecl => {
                     let name = Self::name(arena, cn.lhs).to_string();
                     let decl = LazyDecl { node: id, owner: None, kind: LazyKind::Method { alias: None }, inherited: false };
-                    self.lazy_decls.entry(name).or_insert(decl);
+                    self.lazy_decls.entry(name.clone()).or_insert(decl);
+                    // The unit's own copy, for calls from inside the unit.
+                    if let Some(u) = arena.unit_of(id).map(|u| u.file) {
+                        let key = Self::unit_fn_name(&name, u);
+                        let kind = LazyKind::Method { alias: Some(key.clone()) };
+                        self.lazy_decls.entry(key).or_insert(LazyDecl { node: id, owner: None, kind, inherited: false });
+                    }
                 }
                 NodeKind::StructDecl | NodeKind::ExtendDecl if cn.rhs != 0 && cn.rhs != u32::MAX => {
                     let owner = Self::name(arena, cn.lhs).to_string();
@@ -211,6 +224,27 @@ impl BytecodeCompiler {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// The key of unit `u`'s own top-level function `name`.
+    fn unit_fn_name(name: &str, u: pilot_span::FileId) -> String {
+        format!("{name}@{}", u.0)
+    }
+
+    /// The function a bare call to `name` from the unit being compiled
+    /// reaches: that unit's own `name` when the bare name belongs to another
+    /// unit and this one declares it too, else `name`.
+    pub(crate) fn unit_fn_key(&self, name: &str) -> String {
+        let Some(u) = self.cur_unit else {
+            return name.to_string();
+        };
+        match self.fn_homes.get(name) {
+            Some(&home) if home != Some(u) => {
+                let key = Self::unit_fn_name(name, u);
+                if self.lazy_decls.contains_key(&key) { key } else { name.to_string() }
+            }
+            _ => name.to_string(),
         }
     }
 

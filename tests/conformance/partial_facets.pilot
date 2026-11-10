@@ -1,0 +1,27 @@
+// A `partial struct` extension adds a facet's methods to a struct whose
+// primary declaration holds the fields and a stateful bundle.
+struct CountBundle {
+    pub count: i64;
+    pub fn bump() -> i64 => .count + 1;
+}
+
+struct GreetFacet {
+    pub fn greet() -> str => "hi";
+}
+
+struct Widget {
+    pub id: i64;
+    *CountBundle;
+}
+
+partial struct Widget {
+    *GreetFacet;
+    pub fn label() -> str => f"{.greet()} #{.id}";
+}
+
+fn main() {
+    let w = Widget { id: 7, count: 2 };
+    print(w.greet());
+    print(w.bump());
+    print(w.label());
+}

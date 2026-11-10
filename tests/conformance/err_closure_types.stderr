@@ -1,0 +1,10 @@
+error[TYPE001]: argument 1 of `twice`: expected `i64`, found `str`
+err_closure_types.pilot:9:17
+error[CALL001]: `twice` takes 1 argument(s), found 2
+err_closure_types.pilot:10:11
+error[TYPE001]: expected `fn<i64, i64>`, found `fn<str, i64>`
+err_closure_types.pilot:11:32
+error[TYPE001]: argument 1 of `apply`: expected `fn<i64, i64>`, found `fn<str, i64>`
+err_closure_types.pilot:12:17
+error[TYPE001]: expected `fn<i64, str, i64>`, found `fn<i64, i64>`
+err_closure_types.pilot:16:36

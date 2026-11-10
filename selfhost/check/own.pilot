@@ -16,8 +16,11 @@
 //   - a loop body is walked twice, the second time from what the first left,
 //     so a move in one iteration reaches the uses of the next; bindings
 //     declared inside the loop are fresh on every iteration;
-//   - after `return`, the rest of the block is not reached.
-// Closures are not entered: a use inside one is not followed.
+//   - after `return`, the rest of the block is not reached;
+//   - creating a closure reads what it captures (a binding moved before is
+//     reported at its use inside the closure) and moves each captured owned
+//     binding the closure's body moves, whether or not it is ever called.
+// Each closure body is also walked on its own, for its own bindings.
 pub lvl(0) pkg Pilot.SelfHost.Check.Own;
 
 use selfhost.check.snapshot.*;
@@ -28,7 +31,6 @@ use selfhost.check.resolve.*;
 use selfhost.check.infer.*;
 use selfhost.check.diag.*;
 
-[Workaround("seed.private_fn_clash", "every private function here starts with `mv_` so none takes the name of another checker file's")]
 pub struct Flow {
     pub inf: Infer;
     pub sink: DiagSink;
@@ -36,28 +38,28 @@ pub struct Flow {
     pub owned: List<i64>;
 }
 
-fn mv_has(xs: List<i64>, b: i64) -> bool {
+fn has(xs: List<i64>, b: i64) -> bool {
     for x in xs { if x == b { return true; } }
     return false;
 }
 
-fn mv_copy(xs: List<i64>) -> List<i64> {
+fn copy(xs: List<i64>) -> List<i64> {
     var out: List<i64> = [];
     for x in xs { out.push(x); }
     return out;
 }
 
-fn mv_add(xs: List<i64>, b: i64) { if !mv_has(xs, b) { xs.push(b); } }
+fn add(xs: List<i64>, b: i64) { if !has(xs, b) { xs.push(b); } }
 
-fn mv_union_into(into: List<i64>, other: List<i64>) { for x in other { mv_add(into, x); } }
+fn union_into(into: List<i64>, other: List<i64>) { for x in other { add(into, x); } }
 
-fn mv_drop_binding(xs: List<i64>, b: i64) -> List<i64> {
+fn drop_binding(xs: List<i64>, b: i64) -> List<i64> {
     var out: List<i64> = [];
     for x in xs { if x != b { out.push(x); } }
     return out;
 }
 
-fn mv_is_owned_binding(f: Flow, b: i64) -> bool {
+fn is_owned_binding(f: Flow, b: i64) -> bool {
     if f.owned[b] < 0 {
         let r = f.inf.r;
         var t = ty_unknown();
@@ -70,7 +72,7 @@ fn mv_is_owned_binding(f: Flow, b: i64) -> bool {
 
 /// The declaration a call resolves to (a function, or a method of the
 /// receiver's type), or -1.
-fn mv_call_target(f: Flow, call: i64) -> i64 {
+fn call_target(f: Flow, call: i64) -> i64 {
     let inf = f.inf;
     let s = inf.p.s;
     let fnode = called_fn(inf, call);
@@ -86,7 +88,7 @@ fn mv_call_target(f: Flow, call: i64) -> i64 {
 }
 
 /// Whether the identifier `n` is used by value where it stands.
-fn mv_is_move_position(f: Flow, n: i64) -> bool {
+fn is_move_position(f: Flow, n: i64) -> bool {
     let p = f.inf.p;
     let s = p.s;
     let up = p.parents[n];
@@ -96,7 +98,7 @@ fn mv_is_move_position(f: Flow, n: i64) -> bool {
         // Storing into a `ref` field borrows the value.
         let target = lhs(s, up);
         if target >= 0 && kind(s, target) == nk_member() {
-            return !mv_is_ref_field(f, type_of(f.inf, lhs(s, target)), sym_text(s, rhs(s, target)));
+            return !is_ref_field(f, type_of(f.inf, lhs(s, target)), sym_text(s, rhs(s, target)));
         }
         return true;
     }
@@ -109,7 +111,7 @@ fn mv_is_move_position(f: Flow, n: i64) -> bool {
         let ch = children(s, up);
         var i = 1;
         while i < ch.len() {
-            if ch[i] == n { return !mv_is_ref_field(f, built, node_name(s, ch[i - 1])); }
+            if ch[i] == n { return !is_ref_field(f, built, node_name(s, ch[i - 1])); }
             i = i + 2;
         }
         return false;
@@ -118,21 +120,21 @@ fn mv_is_move_position(f: Flow, n: i64) -> bool {
         // `name: value`: the parameter of that name.
         let call = p.parents[up];
         if call < 0 || kind(s, call) != nk_call() { return false; }
-        let target = mv_call_target(f, call);
+        let target = call_target(f, call);
         if target < 0 { return false; }
         for prm in fn_params(s, target) {
-            if kind(s, prm) == nk_param() && node_name(s, prm) == node_name(s, up) { return mv_plain_param(s, prm); }
+            if kind(s, prm) == nk_param() && node_name(s, prm) == node_name(s, up) { return plain_param(s, prm); }
         }
         return false;
     }
     if k == nk_call() {
         let ch = children(s, up);
-        let target = mv_call_target(f, up);
+        let target = call_target(f, up);
         if target < 0 { return false; }
         let params = fn_params(s, target);
         var i = 1;
         while i < ch.len() {
-            if ch[i] == n { return i - 1 < params.len() && mv_plain_param(s, params[i - 1]); }
+            if ch[i] == n { return i - 1 < params.len() && plain_param(s, params[i - 1]); }
             i = i + 1;
         }
     }
@@ -140,7 +142,7 @@ fn mv_is_move_position(f: Flow, n: i64) -> bool {
 }
 
 /// Whether `field` of type `t` is declared `ref` (it borrows what it holds).
-fn mv_is_ref_field(f: Flow, t: i64, field: str) -> bool {
+fn is_ref_field(f: Flow, t: i64, field: str) -> bool {
     if some m = prog_member(f.inf.p, t, field) {
         let s = f.inf.p.s;
         return kind(s, m.decl) == nk_param() && flags(s, m.decl) != 0;
@@ -149,10 +151,10 @@ fn mv_is_ref_field(f: Flow, t: i64, field: str) -> bool {
 }
 
 /// A parameter written without `ref`, `var`, `iso` or `comptime`.
-fn mv_plain_param(s: Snap, prm: i64) -> bool => kind(s, prm) == nk_param() && flags(s, prm) == 0;
+fn plain_param(s: Snap, prm: i64) -> bool => kind(s, prm) == nk_param() && flags(s, prm) == 0;
 
 /// Bindings declared inside node `n`, which are fresh each time it runs.
-fn mv_outside_of(f: Flow, xs: List<i64>, n: i64) -> List<i64> {
+fn outside_of(f: Flow, xs: List<i64>, n: i64) -> List<i64> {
     let s = f.inf.p.s;
     var out: List<i64> = [];
     for b in xs {
@@ -169,102 +171,108 @@ pub struct FlowState {
     pub falls_through: bool;
 }
 
-fn mv_state(moved: List<i64>, falls: bool) -> FlowState => FlowState { moved: moved, falls_through: falls };
+fn flow_state(moved: List<i64>, falls: bool) -> FlowState => FlowState { moved: moved, falls_through: falls };
 
-fn mv_walk_seq(f: Flow, nodes: List<i64>, moved: List<i64>) -> FlowState {
+fn walk_seq(f: Flow, nodes: List<i64>, moved: List<i64>) -> FlowState {
     var cur = moved;
     for c in nodes {
-        let st = mv_walk(f, c, cur);
+        let st = walk(f, c, cur);
         cur = st.moved;
-        if !st.falls_through { return mv_state(cur, false); }
+        if !st.falls_through { return flow_state(cur, false); }
     }
-    return mv_state(cur, true);
+    return flow_state(cur, true);
 }
 
 /// Joins branch results: the moves of every branch that falls through.
-fn mv_join(branches: List<FlowState>) -> FlowState {
+fn join(branches: List<FlowState>) -> FlowState {
     var moved: List<i64> = [];
     var falls = false;
     for b in branches {
         if b.falls_through {
-            mv_union_into(moved, b.moved);
+            union_into(moved, b.moved);
             falls = true;
         }
     }
-    return mv_state(moved, falls);
+    return flow_state(moved, falls);
 }
 
-fn mv_walk_loop(f: Flow, n: i64, head: List<i64>, body: List<i64>, moved: List<i64>) -> FlowState {
-    let entry = mv_walk_seq(f, head, moved).moved;
-    let first = mv_walk_seq(f, body, mv_copy(entry));
-    var again = mv_copy(entry);
-    mv_union_into(again, mv_outside_of(f, first.moved, n));
-    let second = mv_walk_seq(f, body, again);
-    var out = mv_copy(entry);
-    mv_union_into(out, mv_outside_of(f, second.moved, n));
-    return mv_state(out, true);
+fn walk_loop(f: Flow, n: i64, head: List<i64>, body: List<i64>, moved: List<i64>) -> FlowState {
+    let entry = walk_seq(f, head, moved).moved;
+    let first = walk_seq(f, body, copy(entry));
+    var again = copy(entry);
+    union_into(again, outside_of(f, first.moved, n));
+    let second = walk_seq(f, body, again);
+    var out = copy(entry);
+    union_into(out, outside_of(f, second.moved, n));
+    return flow_state(out, true);
 }
 
-fn mv_walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
+fn walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
     let inf = f.inf;
     let s = inf.p.s;
-    if n < 0 { return mv_state(moved, true); }
+    if n < 0 { return flow_state(moved, true); }
     let k = kind(s, n);
-    if k == nk_lambda() || k == nk_fn() || k == nk_operator() { return mv_state(moved, true); }
+    if k == nk_fn() || k == nk_operator() { return flow_state(moved, true); }
+    if k == nk_lambda() {
+        let inside = walk(f, rhs(s, n), copy(moved));
+        var out = copy(moved);
+        union_into(out, outside_of(f, inside.moved, n));
+        return flow_state(out, true);
+    }
     if k == nk_ident() {
         let b = inf.r.ref_of[n];
-        if b < 0 { return mv_state(moved, true); }
-        if mv_has(moved, b) {
+        if b < 0 { return flow_state(moved, true); }
+        if has(moved, b) {
             sink_error(f.sink, n, "OWN001", f"`{inf.r.name[b]}` is used after it was moved");
-            return mv_state(moved, true);
+            return flow_state(moved, true);
         }
-        if mv_is_owned_binding(f, b) && mv_is_move_position(f, n) {
-            var out = mv_copy(moved);
-            mv_add(out, b);
-            return mv_state(out, true);
+        if is_owned_binding(f, b) && is_move_position(f, n) {
+            var out = copy(moved);
+            add(out, b);
+            return flow_state(out, true);
         }
-        return mv_state(moved, true);
+        return flow_state(moved, true);
     }
     if k == nk_assign() {
-        let st = mv_walk(f, rhs(s, n), moved);
+        let st = walk(f, rhs(s, n), moved);
         let target = lhs(s, n);
         if target >= 0 && kind(s, target) == nk_ident() && inf.r.ref_of[target] >= 0 {
-            return mv_state(mv_drop_binding(st.moved, inf.r.ref_of[target]), st.falls_through);
+            return flow_state(drop_binding(st.moved, inf.r.ref_of[target]), st.falls_through);
         }
-        return mv_walk(f, target, st.moved);
+        return walk(f, target, st.moved);
     }
     if k == nk_return() {
-        let st = mv_walk(f, lhs(s, n), moved);
-        return mv_state(st.moved, false);
+        let st = walk(f, lhs(s, n), moved);
+        return flow_state(st.moved, false);
     }
-    if k == nk_break() || k == nk_continue() { return mv_state(moved, false); }
+    if k == nk_break() || k == nk_continue() { return flow_state(moved, false); }
     if k == nk_if() {
         let ch = children(s, n);
-        if ch.len() == 0 { return mv_state(moved, true); }
-        let cond = mv_walk(f, ch[0], moved);
+        if ch.len() == 0 { return flow_state(moved, true); }
+        let cond = walk(f, ch[0], moved);
         var branches: List<FlowState> = [];
         var i = 1;
         while i < ch.len() {
-            branches.push(mv_walk(f, ch[i], mv_copy(cond.moved)));
+            branches.push(walk(f, ch[i], copy(cond.moved)));
             i = i + 1;
         }
-        if ch.len() < 3 { branches.push(mv_state(cond.moved, true)); }
-        return mv_join(branches);
+        if ch.len() < 3 { branches.push(flow_state(cond.moved, true)); }
+        return join(branches);
     }
     if k == nk_match() {
         let ch = children(s, n);
-        if ch.len() == 0 { return mv_state(moved, true); }
-        let scrut = mv_walk(f, ch[0], moved);
+        if ch.len() == 0 { return flow_state(moved, true); }
+        let scrut = walk(f, ch[0], moved);
         var branches: List<FlowState> = [];
         var i = 1;
         while i < ch.len() {
-            branches.push(mv_walk(f, rhs(s, ch[i]), mv_copy(scrut.moved)));
+            branches.push(walk(f, rhs(s, ch[i]), copy(scrut.moved)));
             i = i + 1;
         }
         if branches.len() == 0 { return scrut; }
-        return mv_join(branches);
+        return join(branches);
     }
-    if k == nk_while() { return mv_walk_loop(f, n, [lhs(s, n)], [rhs(s, n)], moved); }
+    if k == nk_while() { return walk_loop(f, n, [lhs(s, n)], [rhs(s, n)], moved); }
     if k == nk_for() {
         let clause = flags(s, n) - 1;
         var head: List<i64> = [];
@@ -272,9 +280,9 @@ fn mv_walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
             let c: List<i64> = s.for_clauses[clause];
             head.push(c[0]);
         }
-        return mv_walk_loop(f, n, head, [rhs(s, n)], moved);
+        return walk_loop(f, n, head, [rhs(s, n)], moved);
     }
-    return mv_walk_seq(f, children(s, n), moved);
+    return walk_seq(f, children(s, n), moved);
 }
 
 /// Runs OWN001 over every function body in the user's files.
@@ -291,7 +299,7 @@ pub fn check_ownership(inf: Infer, sink: DiagSink) {
             let body = if k == nk_lambda() { rhs(s, i) } else { fn_body(s, i) };
             if body >= 0 {
                 let empty: List<i64> = [];
-                let _ = mv_walk(f, body, empty);
+                let _ = walk(f, body, empty);
             }
         }
         i = i + 1;

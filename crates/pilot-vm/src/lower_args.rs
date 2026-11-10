@@ -26,9 +26,9 @@ impl BytecodeCompiler {
         self.param_decls.entry(key).or_insert(decl);
     }
 
-    /// Parameter names of a function or constructor declaration, without the
-    /// receiver.
-    fn decl_param_names(arena: &AstArena, decl: NodeId) -> Vec<String> {
+    /// Parameter declarations of a function or constructor declaration,
+    /// without the receiver.
+    fn decl_params(arena: &AstArena, decl: NodeId) -> Vec<NodeId> {
         let dn = arena.node(decl);
         let children = match dn.node_kind() {
             NodeKind::FnDecl => arena.children_slice(dn.rhs, dn.flags as u32),
@@ -39,8 +39,40 @@ impl BytecodeCompiler {
         children
             .iter()
             .skip(1)
-            .map(|&p| Self::name(arena, arena.node(NodeId(p)).lhs).to_string())
-            .filter(|p| p != receiver && p != &receiver[1..])
+            .map(|&p| NodeId(p))
+            .filter(|&p| {
+                let name = Self::name(arena, arena.node(p).lhs);
+                name != receiver && name != &receiver[1..]
+            })
+            .collect()
+    }
+
+    /// Parameter names of a function or constructor declaration, without the
+    /// receiver.
+    fn decl_param_names(arena: &AstArena, decl: NodeId) -> Vec<String> {
+        Self::decl_params(arena, decl)
+            .into_iter()
+            .map(|p| Self::name(arena, arena.node(p).lhs).to_string())
+            .collect()
+    }
+
+    /// Compiles positional `args` of a call to `key` (`f` or `Owner.m`), each
+    /// with its parameter's declared type as the expected type, so a bare
+    /// `ok(x)` or `::Variant` argument resolves against it.
+    pub(crate) fn compile_args_for(&mut self, arena: &AstArena, key: &str, args: &[NodeId]) -> Vec<u8> {
+        let hints: Vec<Option<String>> = match self.param_decls.get(key) {
+            Some(&decl) => Self::decl_params(arena, decl)
+                .into_iter()
+                .map(|p| Self::annot_name(arena, p))
+                .collect(),
+            None => Vec::new(),
+        };
+        args.iter()
+            .enumerate()
+            .map(|(i, &a)| {
+                let hint = hints.get(i).cloned().flatten();
+                self.compile_with_hint(arena, a, hint)
+            })
             .collect()
     }
 
@@ -192,6 +224,8 @@ impl BytecodeCompiler {
             let Some(a) = *slot else { continue };
             let m = self.next_reg;
             let r_v = self.compile_node(arena, a);
+            let ty = self.field_type(name, field);
+            let r_v = self.convert_for_binding(r_v, ty.as_deref());
             let r_k = self.emit_const(PilotVal::from_str(field));
             self.emit_intrinsic("map_set", &[r_obj, r_k, r_v]);
             self.release_to(m);

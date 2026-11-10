@@ -7,7 +7,7 @@ pub pkg Pilot.SelfHost.Analyzer;
 extern fn __engine(operation: string, ...args: i64) -> i64;
 let Cfg = {
     ast = {
-        ast_attr_arg: "ast_attr_arg", ast_attr_count: "ast_attr_count", ast_attr_decl_arg: "ast_attr_decl_arg", ast_attr_decl_arg_count: "ast_attr_decl_arg_count", ast_attr_decl_count: "ast_attr_decl_count", ast_attr_name: "ast_attr_name", ast_base_at: "ast_base_at", ast_base_count: "ast_base_count", ast_bind_layout: "ast_bind_layout", ast_bind_target: "ast_bind_target", ast_child_at: "ast_child_at", ast_child_count: "ast_child_count", ast_decl_flags: "ast_decl_flags", ast_emit_diag: "ast_emit_diag", ast_get_bound_layout: "ast_get_bound_layout", ast_get_bound_target: "ast_get_bound_target", ast_node_count: "ast_node_count", ast_node_flags: "ast_node_flags", ast_node_kind: "ast_node_kind", ast_node_lit_kind: "ast_node_lit_kind", ast_node_raw_bits: "ast_node_raw_bits", ast_node_sym: "ast_node_sym", ast_orig_kind: "ast_orig_kind", ast_parent: "ast_parent", ast_span_end: "ast_span_end", ast_span_start: "ast_span_start", layout_aggregate: "layout_aggregate", layout_field_offset: "layout_field_offset", layout_hw_header: "layout_hw_header", layout_metrics: "layout_metrics", layout_ptr: "layout_ptr", layout_scalar: "layout_scalar", layout_union: "layout_union", lsp_query_method: "lsp_query_method", lsp_query_offset: "lsp_query_offset", lsp_set_result: "lsp_set_result", mount_unit: "mount_unit", query_registered_symbols: "query_registered_symbols", source_slice: "source_slice", str_byte_at: "str_byte_at", str_len: "str_len", sym_str: "sym_str",
+        ast_attr_arg: "ast_attr_arg", ast_attr_count: "ast_attr_count", ast_attr_decl_arg: "ast_attr_decl_arg", ast_attr_decl_arg_count: "ast_attr_decl_arg_count", ast_attr_decl_count: "ast_attr_decl_count", ast_attr_name: "ast_attr_name", ast_base_at: "ast_base_at", ast_base_count: "ast_base_count", ast_bind_layout: "ast_bind_layout", ast_bind_target: "ast_bind_target", ast_child_at: "ast_child_at", ast_child_count: "ast_child_count", ast_decl_flags: "ast_decl_flags", ast_emit_diag: "ast_emit_diag", ast_get_bound_layout: "ast_get_bound_layout", ast_get_bound_target: "ast_get_bound_target", ast_node_count: "ast_node_count", ast_node_unit: "ast_node_unit", ast_node_flags: "ast_node_flags", ast_node_kind: "ast_node_kind", ast_node_lit_kind: "ast_node_lit_kind", ast_node_raw_bits: "ast_node_raw_bits", ast_node_sym: "ast_node_sym", ast_orig_kind: "ast_orig_kind", ast_parent: "ast_parent", ast_span_end: "ast_span_end", ast_span_start: "ast_span_start", layout_aggregate: "layout_aggregate", layout_field_offset: "layout_field_offset", layout_hw_header: "layout_hw_header", layout_metrics: "layout_metrics", layout_ptr: "layout_ptr", layout_scalar: "layout_scalar", layout_union: "layout_union", lsp_query_method: "lsp_query_method", lsp_query_offset: "lsp_query_offset", lsp_set_result: "lsp_set_result", mount_unit: "mount_unit", query_registered_symbols: "query_registered_symbols", source_slice: "source_slice", str_byte_at: "str_byte_at", str_len: "str_len", sym_str: "sym_str",
     }
 };
 pub fn str_contains(haystack: str, needle: str) -> bool {
@@ -22,10 +22,12 @@ pub fn str_contains(haystack: str, needle: str) -> bool {
     }
     return false;
 }
+/// Whether `n` names a node of the program (a parent link of a root names none).
+pub fn is_node(n: i64) -> bool => n >= 0 && n < __engine(Cfg.ast.ast_node_count);
 pub fn is_suppressed(nid: i64, code: str, msg: str) -> bool {
     var cur = nid;
     var depth = 0;
-    while cur >= 0 && cur < 100000 && depth < 50 {
+    while is_node(cur) && depth < 50 {
         let ac = __engine(Cfg.ast.ast_attr_decl_count, cur);
         var idx = 0;
         while idx < ac {
@@ -43,7 +45,7 @@ pub fn is_suppressed(nid: i64, code: str, msg: str) -> bool {
             idx = idx + 1;
         }
         let p = __engine(Cfg.ast.ast_parent, cur);
-        if p < 0 || p >= 100000 || p == cur { break; }
+        if !is_node(p) || p == cur { break; }
         cur = p; depth = depth + 1;
     }
     var k = 0;
@@ -617,14 +619,6 @@ pub fn get_decl_error(target: i64, node_count: i64) -> str {
     }
     return "";
 }
-pub fn is_same_lexical_scope(caller: i64, target: i64) -> bool {
-    var cur = caller; var depth = 0;
-    while cur != 4294967295 && cur >= 0 && depth < 30 {
-        if cur == target || cur == __engine(Cfg.ast.ast_parent, target) { return true; }
-        cur = __engine(Cfg.ast.ast_parent, cur); depth = depth + 1;
-    }
-    return false;
-}
 pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
     if ok == 104 {
@@ -656,16 +650,8 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
     // NULL001 (`none` stored into a type that cannot hold it), NULL003 and
     // NULL004 come from the type checker (selfhost/check/rules.pilot), which
     // knows a type can hold `none` from its `op ??`, not from its name.
-    if ok == 207 {
-        let target_fn = __engine(Cfg.ast.ast_get_bound_target, i);
-        if target_fn != 4294967295 && target_fn >= 0 {
-            let df = __engine(Cfg.ast.ast_decl_flags, target_fn);
-            if (df & 15) == 0 && df != 0 && !is_same_lexical_scope(i, target_fn) {
-                emit_diag(i, 1, "VIS001: Cannot access private member '" + __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, target_fn)) + "' from external scope");
-                return 1;
-            }
-        }
-    }
+    // VIS001 and MOD003 (visibility across the linked program) come from
+    // the type checker (selfhost/check/access.pilot).
     // Member and index access through an optional value (NULL006, NULL005)
     // come from the type checker.
     return 0;
@@ -1016,7 +1002,7 @@ pub fn verify_type_and_decl(i: i64, node_count: i64) -> i64 {
     // FLOW002: Constructor return disallowed
     if ok == 103 && __engine(Cfg.ast.ast_child_count, i) > 0 {
         var cur = __engine(Cfg.ast.ast_parent, i); var depth = 0;
-        while cur >= 0 && cur < 100000 && depth < 20 {
+        while is_node(cur) && depth < 20 {
             let cok = __engine(Cfg.ast.ast_orig_kind, cur);
             if cok == 13 { emit_diag(i, 1, "FLOW002: Constructor 'self()' cannot return a value; constructors initialize state in-place"); break; }
             if cok == 3 { break; }
@@ -1066,7 +1052,7 @@ pub fn verify_ownership_and_perceus(i: i64, node_count: i64) -> i64 {
     // PILOT104: Heap allocation in [HardRealtime] or noalloc context
     if (ok == 306 || ok == 219) {
         var cur = __engine(Cfg.ast.ast_parent, i); var depth = 0;
-        while cur >= 0 && cur < 100000 && depth < 20 {
+        while is_node(cur) && depth < 20 {
             if has_attr_named(cur, "HardRealtime") || has_attr_named(cur, "noalloc") {
                 emit_diag(i, 1, "PILOT104: Dynamic heap allocation is prohibited inside 'noalloc' or '[HardRealtime]' block"); break;
             }
@@ -1090,19 +1076,19 @@ pub fn verify_engine_usage(i: i64, is_core: bool) -> i64 {
 }
 pub fn is_inside_const_decl(nid: i64) -> bool {
     var cur = nid; var depth = 0;
-    while cur >= 0 && cur < 100000 && depth < 20 {
+    while is_node(cur) && depth < 20 {
         if __engine(Cfg.ast.ast_orig_kind, cur) == 12 { return true; }
-        let p = __engine(Cfg.ast.ast_parent, cur); if p < 0 || p >= 100000 || p == cur { break; }
+        let p = __engine(Cfg.ast.ast_parent, cur); if !is_node(p) || p == cur { break; }
         cur = p; depth = depth + 1;
     }
     return false;
 }
 pub fn is_inside_executable_scope(nid: i64) -> bool {
     var cur = nid; var depth = 0;
-    while cur >= 0 && cur < 100000 && depth < 20 {
+    while is_node(cur) && depth < 20 {
         let ok = __engine(Cfg.ast.ast_orig_kind, cur);
         if ok == 3 || ok == 13 || ok == 14 || ok == 18 || ok == 216 || (ok >= 100 && ok <= 112) { return true; }
-        let p = __engine(Cfg.ast.ast_parent, cur); if p < 0 || p >= 100000 || p == cur { break; }
+        let p = __engine(Cfg.ast.ast_parent, cur); if !is_node(p) || p == cur { break; }
         cur = p; depth = depth + 1;
     }
     return false;
@@ -1116,9 +1102,9 @@ pub fn verify_hardcoding_contracts(i: i64, has_pkg_no_hardcode: bool, unit_pkg_n
     }
     if !in_scope {
         var cur = i; var depth = 0;
-        while cur >= 0 && cur < 100000 && depth < 20 {
+        while is_node(cur) && depth < 20 {
             if has_attr_named(cur, "NoHardcoding") || has_attr_named(cur, "NoHardcodingAttr") || has_attr_named(cur, "NoHardcode") || has_attr_named(cur, "NoHardcodeAttr") { in_scope = true; depth = 20; }
-            let p = __engine(Cfg.ast.ast_parent, cur); if p < 0 || p >= 100000 || p == cur { break; }
+            let p = __engine(Cfg.ast.ast_parent, cur); if !is_node(p) || p == cur { break; }
             cur = p; depth = depth + 1;
         }
     }
@@ -1135,16 +1121,18 @@ pub fn verify_hardcoding_contracts(i: i64, has_pkg_no_hardcode: bool, unit_pkg_n
         emit_diag(i, 1, "HARD001: Hardcoded numeric literal '" + __engine(Cfg.ast.ast_node_raw_bits, i) + "' is prohibited in '[NoHardcoding]' scope; extract to a 'const' declaration or configuration");
     }
 }
-pub fn analyze_unit(unit_id: i64) -> i64 {
-    let node_count = __engine(Cfg.ast.ast_node_count);
-    if node_count == 0 { return 0; }
+/// The checks of one file: the nodes `lo` up to `hi` (one unit of the linked
+/// program). Package-level attributes (`[EnforceCoreNaming]`,
+/// `[NoHardcoding]`) and the package name apply to this file alone; names
+/// still resolve against the whole program (`node_count` nodes).
+pub fn analyze_unit(lo: i64, hi: i64, node_count: i64, kw_set: str) -> i64 {
     var enforce_naming = false;
     var has_pkg_no_hardcode = false;
     var has_any_no_hardcode = false;
     var unit_pkg_name = "|";
     var targeted_no_hardcode_ns = "|";
-    var ni = 0;
-    while ni < node_count {
+    var ni = lo;
+    while ni < hi {
         if has_attr_named(ni, "EnforceCoreNaming") || has_attr_named(ni, "EnforceCoreNamingAttr") { enforce_naming = true; }
         let df = __engine(Cfg.ast.ast_decl_flags, ni);
         let f = __engine(Cfg.ast.ast_node_flags, ni);
@@ -1176,6 +1164,42 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         }
         ni = ni + 1;
     }
+    var i = lo; while i < hi { verify_decl_contracts(i, enforce_naming); i = i + 1; }
+    i = lo; while i < hi { verify_ident_not_keyword(i, kw_set); i = i + 1; }
+    // Pass 6: Null-safety, Error flow, Loop ergonomics, Warnings, Type/Decl, Perceus, Core Engine Boundary
+    let is_core = enforce_naming || str_contains(unit_pkg_name, "|Pilot.Core.") || str_contains(unit_pkg_name, "|core.") || str_contains(unit_pkg_name, "|Pilot.Core|") || str_contains(unit_pkg_name, "|core|");
+    i = lo; while i < hi {
+        verify_null_safety(i, node_count); verify_error_flow(i, node_count); verify_loop_ergonomics(i, node_count);
+        verify_pattern_matching(i, node_count); verify_warnings_and_unimplemented(i, node_count);
+        verify_type_and_decl(i, node_count); verify_ownership_and_perceus(i, node_count);
+        verify_engine_usage(i, is_core);
+        i = i + 1;
+    }
+    // UNUSED001, UNUSED004 and SHADOW001 come from the type checker's scoped
+    // name resolution (selfhost/check/resolve.pilot).
+    // Pass 7: Propagate declaration errors to corresponding uses later
+    i = lo; while i < hi {
+        if __engine(Cfg.ast.ast_node_kind, i) == 14 {
+            let target = __engine(Cfg.ast.ast_get_bound_target, i);
+            if target != 4294967295 && target >= 0 && target != i {
+                let err = get_decl_error(target, node_count); if err.len() > 0 { emit_diag(i, 1, err); }
+            }
+        }
+        i = i + 1;
+    }
+    // Pass 8: Anti-hardcoding contract verification ([NoHardcoding])
+    if has_any_no_hardcode {
+        i = lo; while i < hi { verify_hardcoding_contracts(i, has_pkg_no_hardcode, unit_pkg_name, targeted_no_hardcode_ns); i = i + 1; }
+    }
+    return 1;
+}
+
+/// Analyzes the whole linked program: layouts and inference over every node
+/// first, so a declaration in any file is known where it is used, then the
+/// checks of each file (`analyze_unit`). A unit's nodes are contiguous.
+pub fn analyze_program() -> i64 {
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    if node_count == 0 { return 0; }
     // Pass 1 & 2: Resolve StructDecl & param layouts
     var i = 0;
     while i < node_count {
@@ -1187,36 +1211,17 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         }
         i = i + 1;
     }
-    // Pass 3, 4, 5: Inference, Decl Contracts, Keyword Validation
+    // Pass 3: Inference
     i = 0; while i < node_count { infer_node(i, node_count); i = i + 1; }
-    i = 0; while i < node_count { verify_decl_contracts(i, enforce_naming); i = i + 1; }
     let kw_set = build_dynamic_keyword_set(node_count);
-    i = 0; while i < node_count { verify_ident_not_keyword(i, kw_set); i = i + 1; }
-    // Pass 6: Null-safety, Error flow, Loop ergonomics, Warnings, Type/Decl, Perceus, Core Engine Boundary
-    let is_core = enforce_naming || str_contains(unit_pkg_name, "|Pilot.Core.") || str_contains(unit_pkg_name, "|core.") || str_contains(unit_pkg_name, "|Pilot.Core|") || str_contains(unit_pkg_name, "|core|");
-    i = 0; while i < node_count {
-        verify_null_safety(i, node_count); verify_error_flow(i, node_count); verify_loop_ergonomics(i, node_count);
-        verify_pattern_matching(i, node_count); verify_warnings_and_unimplemented(i, node_count);
-        verify_type_and_decl(i, node_count); verify_ownership_and_perceus(i, node_count);
-        verify_engine_usage(i, is_core);
-        i = i + 1;
-    }
-    // UNUSED001, UNUSED004 and SHADOW001 come from the type checker's scoped
-    // name resolution (selfhost/check/resolve.pilot).
-    // Pass 7: Propagate declaration errors to corresponding uses later
-    i = 0; while i < node_count {
-        if __engine(Cfg.ast.ast_node_kind, i) == 14 {
-            let target = __engine(Cfg.ast.ast_get_bound_target, i);
-            if target != 4294967295 && target >= 0 && target != i {
-                let err = get_decl_error(target, node_count); if err.len() > 0 { emit_diag(i, 1, err); }
-            }
-        }
-        i = i + 1;
-    }
-    // Pass 8: Anti-hardcoding contract verification ([NoHardcoding])
-    if has_any_no_hardcode {
-        i = 0; while i < node_count { verify_hardcoding_contracts(i, has_pkg_no_hardcode, unit_pkg_name, targeted_no_hardcode_ns); i = i + 1; }
+    var lo = 0;
+    while lo < node_count {
+        let unit = __engine(Cfg.ast.ast_node_unit, lo);
+        var hi = lo + 1;
+        while hi < node_count && __engine(Cfg.ast.ast_node_unit, hi) == unit { hi = hi + 1; }
+        analyze_unit(lo, hi, node_count, kw_set);
+        lo = hi;
     }
     return 1;
 }
-analyze_unit(0);
+analyze_program();

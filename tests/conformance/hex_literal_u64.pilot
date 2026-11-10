@@ -1,0 +1,6 @@
+// F1: a hex literal above i64::MAX keeps its 64 bits; held in a u64 it
+// prints as unsigned (2^64 - 1).
+fn main() {
+    let x: u64 = 0xFFFFFFFFFFFFFFFF;
+    print(x);
+}

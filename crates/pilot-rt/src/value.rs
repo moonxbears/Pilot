@@ -42,7 +42,11 @@ impl PilotVal {
     #[inline] pub const fn tag(self) -> u8 { (self.tag_meta & 0xFF) as u8 }
     #[inline] pub const fn is_null(self) -> bool { self.tag() == TAG_NULL }
     #[inline] pub const fn is_bool(self) -> bool { self.tag() == TAG_BOOL }
-    #[inline] pub const fn is_int(self) -> bool { self.tag() == TAG_INT }
+    /// An integer of either signedness; `as_int` reads its 64 bits.
+    #[inline] pub const fn is_int(self) -> bool { let t = self.tag(); t == TAG_INT || t == TAG_UINT }
+    /// An integer held in an unsigned 64-bit register: arithmetic, shifts,
+    /// comparisons and printing treat its bits as unsigned.
+    #[inline] pub const fn is_uint(self) -> bool { self.tag() == TAG_UINT }
     #[inline] pub const fn is_float(self) -> bool { self.tag() == TAG_FLOAT }
     #[inline] pub const fn is_sso_str(self) -> bool { self.tag() == TAG_SSO_STR }
     #[inline] pub const fn is_str(self) -> bool { let t = self.tag(); t == TAG_SSO_STR || t == TAG_HEAP_STR }

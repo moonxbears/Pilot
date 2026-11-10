@@ -17,6 +17,7 @@ use selfhost.check.generics.*;
 use selfhost.check.methods.*;
 use selfhost.check.own.*;
 use selfhost.check.contracts.*;
+use selfhost.check.access.*;
 
 pub fn check_program() -> List<List<any>> {
     let s = snap_load();
@@ -29,5 +30,6 @@ pub fn check_program() -> List<List<any>> {
     check_ownership(inf, sink);
     check_type_tables(p, sink);
     check_contracts(p, sink);
+    check_access(inf, sink);
     return sink.rows;
 }

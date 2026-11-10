@@ -166,22 +166,21 @@ pub fn route_path_params(template: str) -> List<str> {
     return names;
 }
 
-[Workaround("seed.local_named_op", "the operation text is accumulated in `text`, not `op`")]
 fn openapi_operation(r: HttpRouteDef) -> str {
-    var text = "\"" + ascii_lower(r.method) + "\": { \"operationId\": \"" + json_escape(r.handler_fn) + "\"";
+    var op = "\"" + ascii_lower(r.method) + "\": { \"operationId\": \"" + json_escape(r.handler_fn) + "\"";
     let params = route_path_params(r.path_template);
     if params.len() > 0 {
-        text = text + ", \"parameters\": [";
+        op = op + ", \"parameters\": [";
         var k = 0;
         while k < params.len() {
-            if k > 0 { text = text + ", "; }
-            text = text + "{ \"name\": \"" + json_escape(params[k]) + "\", \"in\": \"path\", \"required\": true, \"schema\": { \"type\": \"string\" } }";
+            if k > 0 { op = op + ", "; }
+            op = op + "{ \"name\": \"" + json_escape(params[k]) + "\", \"in\": \"path\", \"required\": true, \"schema\": { \"type\": \"string\" } }";
             k = k + 1;
         }
-        text = text + "]";
+        op = op + "]";
     }
-    text = text + ", \"responses\": { \"default\": { \"description\": \"Response of " + json_escape(r.handler_fn) + "\" } } }";
-    return text;
+    op = op + ", \"responses\": { \"default\": { \"description\": \"Response of " + json_escape(r.handler_fn) + "\" } } }";
+    return op;
 }
 
 /// An OpenAPI 3.1 document with one path item per distinct path template;

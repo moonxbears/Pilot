@@ -1,0 +1,6 @@
+error[OWN001]: `t` is used after it was moved
+err_move_closure.pilot:9:19
+error[OWN001]: `t` is used after it was moved
+err_move_closure.pilot:15:18
+error[OWN001]: `u` is used after it was moved
+err_move_closure.pilot:23:84

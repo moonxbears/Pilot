@@ -1,0 +1,26 @@
+// Closures and moves (OWN001): a closure that uses a value moved before it
+// was made, a value used after a closure that moves it was made, and a move
+// inside a closure's own body. A closure that only reads a capture is fine.
+struct Ticket : IObject { pub id: i64; }
+fn consume(t: Ticket) -> i64 => t.id;
+fn after_move() -> i64 {
+    let t = Ticket { id: 1 };
+    let a = consume(t);
+    let f = () => t.id;
+    return a + f();
+}
+fn captured_move() -> i64 {
+    let t = Ticket { id: 2 };
+    let g = () => consume(t);
+    return g() + t.id;
+}
+fn reads_only() -> i64 {
+    let t = Ticket { id: 3 };
+    let h = () => t.id;
+    return h() + t.id;
+}
+fn inner_own() -> i64 {
+    let k = (n: i64) => { let u = Ticket { id: n }; let v = consume(u); return v + u.id; };
+    return k(1);
+}
+fn main() { print(reads_only()); }

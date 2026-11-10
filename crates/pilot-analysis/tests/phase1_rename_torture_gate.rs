@@ -100,7 +100,7 @@ fn test_type_rename_torture_gate_wholenum_truthbit_utf8run() {
 
     // Verify Pilot-hosted capability transitions, field projections & target-width SOA projections
     let eval_pilot_expr = |reg: &mut pilot_analysis::PhysicsRegistry, call_expr: &str| -> pilot_rt::PilotVal {
-        let base_src = ANALYZER_PILOT_SRC.trim_end().strip_suffix("analyze_unit(0);").unwrap_or(ANALYZER_PILOT_SRC);
+        let base_src = ANALYZER_PILOT_SRC.trim_end().strip_suffix("analyze_program();").unwrap_or(ANALYZER_PILOT_SRC);
         let script = format!("{}\n{};\n", base_src, call_expr);
         let p = pilot_parser::parse(&script);
         let bin = BytecodeCompiler::compile(&p, p.root);

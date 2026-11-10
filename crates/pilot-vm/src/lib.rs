@@ -182,6 +182,8 @@ pub struct BytecodeCompiler {
     excluded: HashMap<String, Option<pilot_span::FileId>>,
     /// The unit of the node being compiled, in a linked program.
     cur_unit: Option<pilot_span::FileId>,
+    /// The unit whose top-level function a bare name reaches, by name.
+    fn_homes: HashMap<String, Option<pilot_span::FileId>>,
     /// Struct and interface declarations of every unit, by name.
     type_decls: HashMap<String, Vec<NodeId>>,
     /// Accessor block of each property, by its field node.
@@ -528,7 +530,7 @@ impl BytecodeCompiler {
     }
 
     /// Named type of an annotation node, if it is a plain name.
-    fn annot_name(arena: &AstArena, id: NodeId) -> Option<String> {
+    pub(crate) fn annot_name(arena: &AstArena, id: NodeId) -> Option<String> {
         let tid = arena.type_annot(id)?;
         let tn = arena.node(tid);
         matches!(tn.node_kind(), NodeKind::TypeNamed | NodeKind::IdentExpr)
@@ -679,6 +681,16 @@ impl BytecodeCompiler {
     }
 
     /// Records an enum declaration's variants as compile-time integers.
+    /// The integer an integer literal, or a negated one, denotes.
+    fn const_int(arena: &AstArena, id: NodeId) -> Option<i64> {
+        let n = arena.node(id);
+        match n.node_kind() {
+            NodeKind::IntLit => arena.i64_pool.get(n.lhs as usize).copied(),
+            NodeKind::UnaryExpr if n.flags == 0 => Self::const_int(arena, NodeId(n.lhs)).map(i64::wrapping_neg),
+            _ => None,
+        }
+    }
+
     fn register_enum(&mut self, arena: &AstArena, id: NodeId) {
         let cn = arena.node(id);
         if cn.flags == 0 {
@@ -691,15 +703,21 @@ impl BytecodeCompiler {
             self.register_variant_payload(arena, &e_nm, NodeId(vid));
             let vn = arena.node(NodeId(vid));
             let v_nm = Self::name(arena, vn.lhs).to_string();
-            let mut val = next;
-            if vn.flags > 0 {
-                let last = arena.extra_children[(vn.rhs as usize) + (vn.flags as usize) - 1];
-                let lcn = arena.node(NodeId(last));
-                if lcn.node_kind() == NodeKind::IntLit {
-                    val = arena.i64_pool.get(lcn.lhs as usize).copied().unwrap_or(next);
+            // `Low = 5` gives the variant its value; the next variant
+            // without one counts on from it.
+            let value = arena.field_default(NodeId(vid));
+            let val = if value.is_none() {
+                next
+            } else {
+                match Self::const_int(arena, value) {
+                    Some(v) => v,
+                    None => {
+                        self.error(codes::SEED, format!("the value of `{e_nm}.{v_nm}` must be an integer literal"));
+                        next
+                    }
                 }
-            }
-            next = val + 1;
+            };
+            next = val.wrapping_add(1);
             map.insert(v_nm, CMap::Val(PilotVal::from_int(val)));
         }
         self.const_maps.insert(e_nm, CMap::Map(map));

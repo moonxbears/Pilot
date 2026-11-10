@@ -5,6 +5,9 @@ use crate::instruction::Opcode;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_rt::PilotVal;
 
+
+/// The register class `[Bits]` descriptors give unsigned integers.
+const UNSIGNED_REGISTER: &str = "gpr_unsigned";
 impl BytecodeCompiler {
     /// Lowers a `{ ... }` block. Scratch registers used by one statement are
     /// released before the next; the block's value is its last statement's.
@@ -139,12 +142,24 @@ impl BytecodeCompiler {
                 self.var_slots.insert(receiver.to_string(), s);
             }
         }
+        // Arguments are converted once all are in their slots: a conversion
+        // stages its own arguments in the argument registers.
+        for p in &params {
+            let (Some(&slot), ty) = (self.var_slots.get(p), self.var_types.get(p).cloned()) else { continue };
+            let mark = self.next_reg;
+            let r = self.convert_for_binding(slot, ty.as_deref());
+            if r != slot {
+                self.emit(Opcode::Move, slot, r, 0);
+            }
+            self.release_to(mark);
+        }
         let b = self.compile_node(arena, body_node);
         // A block-bodied function without a declared return type returns
         // nothing when it falls off the end; `=> expr` bodies return `expr`.
         let returns_value = arena.type_annot(fn_id).is_some()
             || arena.node(body_node).node_kind() != NodeKind::BlockExpr;
-        let r = if returns_value { b } else { self.emit_const(PilotVal::NULL) };
+        let ret = self.cur_ret_type.clone();
+        let r = if returns_value { self.convert_for_binding(b, ret.as_deref()) } else { self.emit_const(PilotVal::NULL) };
         self.emit(Opcode::Move, 0, r, 0);
         self.emit(Opcode::Ret, 0, 0, 0);
     }
@@ -232,6 +247,7 @@ impl BytecodeCompiler {
             .or_else(|| rhs.is_some().then(|| self.infer_call_type(arena, rhs)).flatten());
         let mark = self.next_reg;
         let r_val = if rhs.is_some() { self.compile_with_hint(arena, rhs, ty.clone()) } else { self.emit_null() };
+        let r_val = self.convert_for_binding(r_val, ty.as_deref());
         match ty {
             Some(t) => {
                 self.var_types.insert(name.clone(), t);
@@ -252,6 +268,18 @@ impl BytecodeCompiler {
         self.release_to(mark);
         self.var_slots.insert(name, slot);
         slot
+    }
+
+    /// The value in `r` as a binding of type `ty` holds it. A primitive laid
+    /// out in an unsigned integer register of 64 bits or more holds values the
+    /// signed integer tag cannot, so the value is converted to that layout;
+    /// every other binding keeps the value as it is.
+    pub(crate) fn convert_for_binding(&mut self, r: u8, ty: Option<&str>) -> u8 {
+        let layout = ty.and_then(|t| pilot_parser::bootstrap_tables().reg_layout(t).cloned());
+        match layout {
+            Some(l) if l.class == UNSIGNED_REGISTER && l.width >= 64 => self.emit_conversion(r, &l),
+            _ => r,
+        }
     }
 
     /// Static receiver type of `let x = Type.make(...)` / `let x = make(...)`,
@@ -288,6 +316,8 @@ impl BytecodeCompiler {
                 if let Some(r) = self.compile_backing_write(&name, rhs_r) {
                     return r;
                 }
+                let ty = self.var_types.get(&name).cloned();
+                let rhs_r = self.convert_for_binding(rhs_r, ty.as_deref());
                 match self.var_slots.get(&name) {
                     Some(&slot) => {
                         self.emit(Opcode::Move, slot, rhs_r, 0);
@@ -311,6 +341,8 @@ impl BytecodeCompiler {
                 let ty = self.static_type(arena, NodeId(lhs_n.lhs));
                 let r_obj = self.compile_node(arena, NodeId(lhs_n.lhs));
                 let field = Self::name(arena, lhs_n.rhs).to_string();
+                let field_ty = ty.as_deref().and_then(|t| self.field_type(t, &field));
+                let rhs_r = self.convert_for_binding(rhs_r, field_ty.as_deref());
                 self.emit_member_write(r_obj, ty.as_deref(), &field, rhs_r)
             }
             NodeKind::IndexExpr => {
@@ -434,7 +466,8 @@ impl BytecodeCompiler {
     pub(crate) fn compile_return(&mut self, arena: &AstArena, value: u32) -> u8 {
         let r_ret = if NodeId(value).is_some() {
             let hint = self.cur_ret_type.clone();
-            self.compile_with_hint(arena, NodeId(value), hint)
+            let r = self.compile_with_hint(arena, NodeId(value), hint.clone());
+            self.convert_for_binding(r, hint.as_deref())
         } else {
             self.emit_null()
         };

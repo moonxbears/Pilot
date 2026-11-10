@@ -26,6 +26,8 @@ pub(crate) struct StructInfo {
     pub(crate) fields: Vec<(String, NodeId)>,
     /// The `self(..)` declaration, if the struct has one.
     pub(crate) ctor: Option<NodeId>,
+    /// The declared type of each field written with a plain type name.
+    pub(crate) field_types: std::collections::HashMap<String, String>,
 }
 
 impl BytecodeCompiler {
@@ -106,6 +108,10 @@ impl BytecodeCompiler {
         let mut info = self.structs.remove(Self::name(arena, dn.lhs)).unwrap_or_default();
         for m in Self::type_members(arena, NodeId(dn.rhs)) {
             let mn = arena.node(m);
+            let is_field = matches!(mn.node_kind(), NodeKind::ParamDecl | NodeKind::VarStmt | NodeKind::LetStmt);
+            if let Some(t) = Self::annot_name(arena, m).filter(|_| is_field) {
+                info.field_types.insert(Self::name(arena, mn.lhs).to_string(), t);
+            }
             match mn.node_kind() {
                 // A property whose accessors have bodies is computed, not stored.
                 NodeKind::ParamDecl if self.is_computed_property(arena, m) => {}
@@ -127,6 +133,11 @@ impl BytecodeCompiler {
     }
 
     /// Fields of struct `name` in declaration order, with their defaults.
+    /// The declared type of field `field` of struct `owner`.
+    pub(crate) fn field_type(&self, owner: &str, field: &str) -> Option<String> {
+        self.structs.get(owner)?.field_types.get(field).cloned()
+    }
+
     pub(crate) fn struct_fields(&self, name: &str) -> Vec<(String, NodeId)> {
         self.structs.get(name).map(|s| s.fields.clone()).unwrap_or_default()
     }
@@ -176,6 +187,18 @@ impl BytecodeCompiler {
             .chunks(2)
             .filter_map(|pair| Self::map_key(arena, NodeId(pair[0])))
             .collect();
+        // A field whose type converts the values it holds stores the converted value.
+        for field in &given {
+            let ty = self.field_type(name, field);
+            let mark = self.next_reg;
+            let r_k = self.emit_const(PilotVal::from_str(field));
+            let r_v = self.emit_intrinsic("map_get", &[r_obj, r_k]);
+            let r_c = self.convert_for_binding(r_v, ty.as_deref());
+            if r_c != r_v {
+                self.emit_intrinsic("map_set", &[r_obj, r_k, r_c]);
+            }
+            self.release_to(mark);
+        }
         self.emit_field_defaults(arena, name, &given, r_obj);
         r_obj
     }

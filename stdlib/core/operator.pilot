@@ -178,10 +178,12 @@ pub interface {
 
     // Postfix `x?`: when `x.is_success()`, the value is `x?`'s `op ?` result;
     // otherwise the enclosing function returns `x` itself, so a failure flows
-    // out unchanged (`stdlib/core/syntax/try_catch.pilot` binds this protocol).
+    // out unchanged, and a `catch e` clause gets `x.failure()` as `e`
+    // (`stdlib/core/syntax/try_catch.pilot` binds this protocol).
     ITryOperator<TOk: IAnyValue, TErr: IAnyValue = void> : IAnyValue {
         pub pure fn is_success() -> bool;
         pub pure op ? () -> TOk;
+        pub pure fn failure() -> TErr;
     }
 
     ICoalesceOperator<TOut: IAnyValue> : IAnyValue {

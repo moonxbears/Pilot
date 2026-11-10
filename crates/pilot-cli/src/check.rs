@@ -22,6 +22,8 @@
 //! | 9 | splice modifiers, `[splice node, modifier sub-slot, member symbol, alias symbol]` each |
 //! | 10 | the enumeration protocol `for` uses: `[get, move next, current]` member names, or empty |
 //! | 11 | properties, `[field node, number of accessor bodies]` each |
+//! | 12 | the receiver words: `[receiver, accessor backing storage, setter value]` (`bind_receiver_ident`), empty strings when unbound |
+//! | 13 | declarations, `[node, is partial, is static, visibility tier or -1 when none is written, is package declaration]` each |
 //!
 //! Absent node references are `-1`. The checker returns its diagnostics as
 //! `[code, message, start, end, severity]` with program-wide offsets; only
@@ -30,7 +32,10 @@
 use crate::link::LinkedSource;
 use crate::run::{self, Diag};
 use crate::tool;
-use pilot_ast::{AstArena, NodeId, NodeKind};
+use pilot_ast::{
+    AstArena, NodeId, NodeKind, DECL_FLAG_PARTIAL, DECL_FLAG_PKG, DECL_FLAG_STATIC,
+    DECL_FLAG_VIS_WRITTEN, DECL_VIS_MASK,
+};
 use pilot_span::ByteSpan;
 use pilot_vm::HostValue;
 use std::fs;
@@ -83,6 +88,13 @@ fn node_units(arena: &AstArena) -> Vec<i64> {
 
 fn ints(values: impl IntoIterator<Item = i64>) -> HostValue {
     HostValue::List(values.into_iter().map(HostValue::Int).collect())
+}
+
+/// Whether nodes of `kind` declare something that carries modifiers: the
+/// declaration kinds, and `let` / `var` bindings.
+fn is_declaration(kind: NodeKind) -> bool {
+    (kind as u16) < (NodeKind::LetStmt as u16)
+        || matches!(kind, NodeKind::LetStmt | NodeKind::VarStmt)
 }
 
 /// The snapshot of the linked program described in the module documentation.
@@ -190,6 +202,30 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
                 .collect()
         })
         .unwrap_or_default();
+    let modifiers = arena
+        .decl_flags
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| is_declaration(arena.nodes[*i].node_kind()))
+        .map(|(i, &f)| {
+            ints([
+                i as i64,
+                i64::from(f & DECL_FLAG_PARTIAL != 0),
+                i64::from(f & DECL_FLAG_STATIC != 0),
+                if f & DECL_FLAG_VIS_WRITTEN != 0 {
+                    i64::from(f & DECL_VIS_MASK)
+                } else {
+                    -1
+                },
+                i64::from(f & DECL_FLAG_PKG != 0),
+            ])
+        })
+        .collect();
+    let tables = pilot_parser::bootstrap_tables();
+    let receiver_words = [&tables.receiver_ident, &tables.backing_ident, &tables.setter_value_ident]
+        .into_iter()
+        .map(|w| HostValue::Str(w.clone()))
+        .collect();
     HostValue::List(vec![
         ints(nodes),
         ints(extra),
@@ -203,6 +239,8 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
         HostValue::List(splice_mods),
         HostValue::List(protocol),
         HostValue::List(accessors),
+        HostValue::List(receiver_words),
+        HostValue::List(modifiers),
     ])
 }
 
@@ -232,7 +270,7 @@ fn decl_files(decls: &[String]) -> Vec<String> {
 }
 
 /// Whether `path` lies inside the toolchain's own `stdlib/`.
-fn in_stdlib(path: &str) -> bool {
+pub(crate) fn in_stdlib(path: &str) -> bool {
     let stdlib = Path::new(&tool::toolchain_root()).join("stdlib");
     match (fs::canonicalize(path), fs::canonicalize(stdlib)) {
         (Ok(p), Ok(s)) => p.starts_with(s),
@@ -245,25 +283,9 @@ fn in_stdlib(path: &str) -> bool {
 /// in the user's files. A program that does not link gives none here:
 /// `cli_check` reports why it does not.
 pub fn check(path: &str, checker_files: &[String], decls: &[String]) -> Vec<Diag> {
-    let Ok(mut paths) = run::link_plan(path) else {
+    let Some((linked, files, snap)) = program_snapshot(path, decls) else {
         return Vec::new();
     };
-    for p in decl_files(decls) {
-        if !paths.contains(&p) {
-            paths.push(p);
-        }
-    }
-    let mut sources = Vec::with_capacity(paths.len());
-    let mut files = Vec::with_capacity(paths.len());
-    for p in paths {
-        let Ok(src) = fs::read_to_string(&p) else {
-            return Vec::new();
-        };
-        files.push((p.clone(), !in_stdlib(&p)));
-        sources.push((p, src));
-    }
-    let linked = LinkedSource::parse(sources);
-    let snap = snapshot(&linked, &files);
     let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
         "chk_snapshot" => Some(Ok(snap.clone())),
         _ => None,
@@ -296,4 +318,45 @@ pub fn check(path: &str, checker_files: &[String], decls: &[String]) -> Vec<Diag
             })
         })
         .collect()
+}
+
+/// Runs the tool made of `tool_files`, calling `entry`, with the snapshot of
+/// the program at `path` (linked with `decls`) served as `chk_snapshot`.
+/// The tool's result is its exit code; a program that does not link gives
+/// `EXIT_FAILURE`.
+pub fn run_on_program(path: &str, tool_files: &[String], decls: &[String], entry: &str) -> i32 {
+    let Some((_, _, snap)) = program_snapshot(path, decls) else {
+        return run::EXIT_FAILURE;
+    };
+    let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
+        "chk_snapshot" => Some(Ok(snap.clone())),
+        _ => None,
+    });
+    let tool_paths: Vec<&str> = tool_files.iter().map(String::as_str).collect();
+    tool::eval_cli(&tool_paths, entry, ops)
+}
+
+/// The program at `path` linked with the declaration files `decls`: its
+/// linked source, its files (`[path, is the user's]`) and its snapshot.
+fn program_snapshot(path: &str, decls: &[String]) -> Option<(LinkedSource, Vec<(String, bool)>, HostValue)> {
+    let Ok(mut paths) = run::link_plan(path) else {
+        return None;
+    };
+    for p in decl_files(decls) {
+        if !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let mut sources = Vec::with_capacity(paths.len());
+    let mut files = Vec::with_capacity(paths.len());
+    for p in paths {
+        let Ok(src) = fs::read_to_string(&p) else {
+            return None;
+        };
+        files.push((p.clone(), !in_stdlib(&p)));
+        sources.push((p, src));
+    }
+    let linked = LinkedSource::parse(sources);
+    let snap = snapshot(&linked, &files);
+    Some((linked, files, snap))
 }

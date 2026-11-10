@@ -910,7 +910,7 @@ pub fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2
         .expect("read selfhost/analyzer.pilot");
     let analyzer_defs = analyzer_raw
         .trim_end()
-        .strip_suffix("analyze_unit(0);")
+        .strip_suffix("analyze_program();")
         .unwrap_or(&analyzer_raw);
 
     let empty_arena = parse("");

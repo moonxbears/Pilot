@@ -5,6 +5,7 @@ use pilot_lexer::{tokenize, TokenKind, TokenTape}; use pilot_span::ByteSpan;
 mod accessors;
 pub use accessors::{INDEX_GET_OP, INDEX_SET_OP};
 mod attr_hooks;
+mod generic_receiver;
 mod modules;
 mod pilot_impls;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
@@ -192,7 +193,7 @@ impl ParserTables {
                     HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(2), s_arg(3)),
                     HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(2), s_arg(3)),
                     HOOK_ENUMERATOR => self.bind_enumerator(s_arg(2), s_arg(3), s_arg(4)),
-                    HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3)),
+                    HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3), s_arg(4)),
                     "bind_receiver_ident" => { let (w, b, v) = (s_arg(2), s_arg(3), s_arg(4)); if !w.is_empty() { self.receiver_ident = w; }
                         self.backing_ident = b; self.setter_value_ident = v; }
                     "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
@@ -356,7 +357,8 @@ impl<'a> Parser<'a> {
     #[inline] fn is_receiver(&self) -> bool { self.is_word() && !self.tables.receiver_ident.is_empty() && self.text() == self.tables.receiver_ident }
     fn apply_mods(&mut self, id: NodeId, mods: &DeclMods, def_vis: u8) { if id.is_none() || (id.0 as usize) >= self.arena.nodes.len() { return; }
         let vis = mods.vis.unwrap_or(def_vis) as u16;
-        self.arena.decl_flags[id.0 as usize] = (self.arena.decl_flags[id.0 as usize] & !DECL_VIS_MASK) | (vis & DECL_VIS_MASK) | mods.flags;
+        let written = if mods.vis.is_some() { DECL_FLAG_VIS_WRITTEN } else { 0 };
+        self.arena.decl_flags[id.0 as usize] = (self.arena.decl_flags[id.0 as usize] & !DECL_VIS_MASK) | (vis & DECL_VIS_MASK) | mods.flags | written;
         for a in &mods.attrs { let args: Vec<NodeId> = a.args.iter().map(|&x| clone_ast(&mut self.arena, x)).collect();
             let (st, ln) = self.arena.alloc_child_slice(&args);
             self.arena.attrs.push(AstAttribute { target: id, name: a.name, args_start: st, args_len: ln as u16, is_mut_binding: a.is_mut, binding_sym: a.bind_sym });
@@ -468,7 +470,9 @@ impl<'a> Parser<'a> {
                 if self.is_rec(7) { out.push(self.parse_extern_decl(&mods)); return; }
                 if self.is_rec(26) { out.push(self.parse_type_adt(&mods, def_vis)); return; }
                 if self.is_rec(27) { out.push(self.parse_enum_decl(&mods, def_vis, false)); return; }
-                if self.is_rec(25) { out.push(self.parse_op_decl(&mods, def_vis)); return; }
+                // `op <symbol>(..)` declares an operator; `op` followed by an
+                // assignment, `.`, `;`, `,` or `)` is a name (`op = op + 2;`).
+                if self.is_rec(25) && !is_name_use(self.tape.kind(nx)) { out.push(self.parse_op_decl(&mods, def_vis)); return; }
                 if self.is_rec(20) && in_type_body { out.push(self.parse_scope_decl()); return; }
                 if self.is_receiver() && in_type_body { let nx = self.next_non_nl(self.cur() + 1);
                     if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen { out.push(self.parse_ctor(&mods)); return; }
@@ -679,17 +683,22 @@ impl<'a> Parser<'a> {
             let id = self.arena.alloc_node(NodeKind::TypeAdtDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, rhs.0);
             self.apply_mods(id, mods, def_vis); id } }
     fn parse_enum_decl(&mut self, mods: &DeclMods, def_vis: u8, headless: bool) -> NodeId { let sp = self.span(); if !headless { self.advance(); }
-        let sym = self.intern_cur(); let _ = self.parse_generic_params(); if self.eat(TokenKind::Colon) { let _ = self.parse_type(); }
+        let sym = self.intern_cur(); let _ = self.parse_generic_params(); let base = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
         let mut variants = Vec::new(); if self.eat(TokenKind::LBrace) { while !self.at_end() && !self.at(TokenKind::RBrace) {
                 self.skip_seps(); if self.at(TokenKind::RBrace) || self.at_end() { break; }
                 let _ = self.parse_mods(true); let (vsp, vsym) = (self.span(), self.intern_cur());
                 let params = if self.at(TokenKind::LParen) { self.parse_param_list() } else { Vec::new() };
-                if self.eat(TokenKind::Equal) { let _ = self.parse_expr(); }
+                // `Low = 5`: the variant's value is kept as its initializer.
+                let value = if self.eat(TokenKind::Equal) { self.parse_expr() } else { NodeId::NONE };
                 let (st, ln) = self.arena.alloc_child_slice(&params);
-                variants.push(self.arena.alloc_node(NodeKind::AdtVariant, ln as u16, vsp, vsym.0, st)); let _ = self.eat(TokenKind::Comma); }
+                let v = self.arena.alloc_node(NodeKind::AdtVariant, ln as u16, vsp, vsym.0, st);
+                if value.is_some() { self.arena.field_defaults.push((v, value)); }
+                variants.push(v); let _ = self.eat(TokenKind::Comma); }
             self.expect(TokenKind::RBrace); }
         let (st, ln) = self.arena.alloc_child_slice(&variants);
         let id = self.arena.alloc_node(NodeKind::TypeAdtDecl, ln as u16, ByteSpan::new(sp.start, self.prev_span().end), sym.0, st);
+        // `enum E : u8`: the type that holds the variants' values.
+        if base.is_some() { self.arena.base_types.push((id, base)); }
         self.apply_mods(id, mods, def_vis); id }
     fn parse_extern_decl(&mut self, mods: &DeclMods) -> NodeId { let sp = self.span(); self.advance();
         if self.at(TokenKind::StrLit) || self.is_word() { self.advance(); }
@@ -1042,7 +1051,7 @@ impl<'a> Parser<'a> {
                 if nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::InfixDot | TokenKind::PrefixDot | TokenKind::SafeNav | TokenKind::PipeForward | TokenKind::SafeCascade | TokenKind::DotDot) {
                     self.pos = nx; } }
             if self.peek() == TokenKind::Less && matches!(self.arena.node(lhs).node_kind(), NodeKind::IdentExpr | NodeKind::MemberExpr) {
-                if let Some(after) = self.try_skip_generic_expr_args() { self.pos = after; let cp = self.cur();
+                if let Some(after) = self.try_skip_generic_expr_args() { self.rewrite_generic_receiver(lhs); self.pos = after; let cp = self.cur();
                     if cp < self.tape.len() && self.tape.kind(cp) == TokenKind::PrefixDot { self.tape.kinds[cp] = TokenKind::InfixDot; }
                 } }
             // Read after any generic arguments: `Name<T>(..)` continues with the call.
@@ -1105,10 +1114,10 @@ impl<'a> Parser<'a> {
     fn parse_prefix(&mut self) -> NodeId { let sp = self.span(); match self.peek() {
             TokenKind::IntLit | TokenKind::FloatLit if self.tape.flag(self.cur()).contains(pilot_lexer::TokenFlags::IS_DIMENSIONAL) => {
                 let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::UnitLit, 1, sp, sym.0, 0) }
-            TokenKind::IntLit => { let v = self.text().replace('_', "").parse().unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
-            TokenKind::HexIntLit => { let v = i64::from_str_radix(&self.text()[2..].replace('_', ""), 16).unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
-            TokenKind::BinIntLit => { let v = i64::from_str_radix(&self.text()[2..].replace('_', ""), 2).unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
-            TokenKind::OctIntLit => { let v = i64::from_str_radix(&self.text()[2..].replace('_', ""), 8).unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
+            TokenKind::IntLit => { let t = self.text().replace('_', ""); let v = t.parse::<i64>().or_else(|_| t.parse::<u64>().map(|u| u as i64)).unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
+            TokenKind::HexIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 16).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }
+            TokenKind::BinIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 2).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }
+            TokenKind::OctIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 8).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }
             TokenKind::FloatLit => { let v = self.text().replace('_', "").parse().unwrap_or(0.0); self.advance(); self.arena.alloc_float(v, sp) }
             TokenKind::StrLit | TokenKind::TripleStrLit => { let raw = self.text(); let is_f = raw.starts_with('f') || raw.starts_with('F');
                 let s = if is_f { &raw[1..] } else { raw };
@@ -1170,7 +1179,9 @@ impl<'a> Parser<'a> {
                                         return self.parse_call_args(callee, pl as u16); } } } }
                         _ => {} } }
                 let w = self.text().to_string(); if let Some(mac) = self.tables.syntax_macros.get(&w).cloned() {
-                    if nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::LParen | TokenKind::LBrace) { return self.expand_syntax_macro(&mac); }
+                    // In the head of `for`, `if` or `switch` a `{` opens the body, so
+                    // a binding named like a macro (`for x in set { .. }`) stays a name.
+                    if nx < self.tape.len() && (self.tape.kind(nx) == TokenKind::LParen || (!self.no_struct_lit && self.tape.kind(nx) == TokenKind::LBrace)) { return self.expand_syntax_macro(&mac); }
                 }
                 self.advance(); self.arena.alloc_ident(&w, sp) }
             _ if is_seed_kw(self.peek()) => { let w = self.text(); self.advance(); self.arena.alloc_ident(w, sp) }
@@ -1364,6 +1375,11 @@ impl<'a> Parser<'a> {
         (k == TokenKind::LParen && !chained) || assign_op_of(k).is_some() } }
 /// The `BinaryOp` an assignment token stores: 0 for `=`, the combined
 /// operator for `+=` and the other compound forms.
+/// Whether a word followed by `next` is used as a name, not starting a declaration.
+fn is_name_use(next: TokenKind) -> bool {
+    assign_op_of(next).is_some()
+        || matches!(next, TokenKind::InfixDot | TokenKind::Semicolon | TokenKind::Comma | TokenKind::RParen)
+}
 fn assign_op_of(k: TokenKind) -> Option<u16> { match k { TokenKind::Equal => Some(0u16), TokenKind::PlusEqual => Some(1), TokenKind::MinusEqual => Some(2),
         TokenKind::StarEqual => Some(3), TokenKind::SlashEqual => Some(4), TokenKind::PercentEqual => Some(6),
         TokenKind::AmperEqual => Some(16), TokenKind::VbarEqual => Some(17), TokenKind::CaretEqual => Some(18),

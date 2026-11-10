@@ -37,6 +37,7 @@ pub partial struct result<TOk: IAnyValue, TErr: IAnyValue> : IEquatable<result<T
         // Universal postfix `expr?` unwraps `TOk`, or early-returns the
         // failed result itself when `is_success()` is `false`.
         fn is_success() -> bool => .is_ok;
+        fn failure() -> TErr => .err_val;
         op ? () -> TOk => .ok_val;
 
         op == (rhs: result<TOk, TErr>) -> bool =>
