@@ -15,6 +15,8 @@ use std::sync::{Mutex, OnceLock};
 
 #[path = "seed_policy.rs"]
 mod seed_policy;
+#[path = "test_metrics.rs"]
+mod test_metrics;
 #[allow(unused_imports)]
 pub use seed_policy::{seed_rust_crate_loc_cap, seed_rust_file_loc_cap};
 
@@ -41,6 +43,8 @@ pub struct AntiCheatGuard<'a> {
     spec: &'a MilestoneAuditSpec,
     root: PathBuf,
     finished: bool,
+    /// Times the test; a test that does not pass erases its history.
+    timer: Option<test_metrics::TestTimer>,
 }
 
 impl<'a> AntiCheatGuard<'a> {
@@ -48,17 +52,30 @@ impl<'a> AntiCheatGuard<'a> {
         let root = workspace_root();
         // Pre-flight architectural gate & crate-tree integrity check before running test code.
         verify_live_pilot_gate_and_crate_tree(&root, test_name, spec.milestone_id);
+        let timer = test_metrics::TestTimer::start(&test_metrics::metrics_dir(&root), spec.milestone_id, test_name);
         Self {
             test_name,
             spec,
             root,
             finished: false,
+            timer: Some(timer),
         }
     }
 
+    /// Runs the anti-cheat passes, then records the test's time: only a test
+    /// that passed them gets a history entry (`target/test-metrics/`, read by
+    /// `pilot bench`). A latest time far over the fastest is reported.
     pub fn finish(mut self) {
         self.finished = true;
+        let took = self.timer.as_ref().map(|t| t.elapsed()).unwrap_or_default();
         run_all_ten_anticheat_passes(&self.root, self.test_name, self.spec);
+        if let Some(timer) = self.timer.take() {
+            let history = timer.record(took);
+            let percent = test_metrics::regression_percent(&self.root);
+            if let Some(warning) = test_metrics::regression_warning(self.test_name, &history, percent) {
+                eprintln!("warning: {warning}");
+            }
+        }
     }
 }
 

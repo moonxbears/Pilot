@@ -86,6 +86,8 @@ pub fn wiring_ledger() -> List<Capability> {
             "crates/pilot-vm/src/codes.rs; one negative program per code in tests/conformance/err_*.pilot, run by pilot test", ""),
         cap("F3", "pilot test: conformance corpus, [Test] functions, known bugs", ::Wired,
             "pilot test; crates/pilot-cli/tests/cli_f3.rs test_runner_* over tests/pilot_test_fixtures/", ""),
+        cap("F3", "pilot bench: milestone test times (average, fastest, slowest, latest; latest more than 50% over fastest flagged), recorded only for passing runs, erased when a test fails", ::Wired,
+            "pilot bench; crates/pilot-cli/tests/cli_bench.rs over hand-written histories and the recorder in crates/pilot-analysis/tests/common/test_metrics.rs; every AntiCheatGuard test records into target/test-metrics/", ""),
         cap("F3", "commands dispatched through cli_handlers(); unhandled ones fail at a seam", ::Wired,
             "crates/pilot-cli/tests/cli_f3.rs every_listed_command_works_or_says_it_is_not_implemented", ""),
         cap("F3", "standard input (std.io read_line, read_all) and process spawn (std.proc run, current_exe)", ::Wired,
@@ -147,7 +149,7 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M1", "rename litmus sandbox: copy stdlib/, selfhost/ and the corpus, rename core names consistently, expectation files included", ::Wired,
             "selfhost/gate/rename_litmus.pilot rl_rename_pilot_identifiers and rl_rename_stderr checked against hand-worked renames (milestone01 test_m1_3); the gate builds and removes the sandbox on every --full run", ""),
         cap("M1", "dual-pass rename litmus GATE008 runs renamed programs", ::Wired,
-            "rl_run_corpus runs `pilot test tests/conformance` in the sandbox through std.proc run_in; each FAIL/FIXED line is a GATE008 violation (milestone01 test_m1_3, test_m1_4: [PASS] rename_litmus)", ""),
+            "rl_run_corpus runs `pilot test tests/conformance` in the sandbox through std.proc run_in; each FAIL/FIXED line is a GATE008 violation (milestone01 test_m1_3: the rename_litmus entry of `pilot gate --full --json` passes)", ""),
         cap("M1", "type audit GATE010", ::Spec, "type_audit.pilot not written", ""),
         cap("M1", "Gate 3 performance and leak checks", ::Spec, "no implementation", "F7"),
 

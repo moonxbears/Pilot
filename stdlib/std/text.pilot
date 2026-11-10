@@ -47,3 +47,17 @@ pub fn parse_i64(text: str) -> i64? {
     if value == -9223372036854775807 - 1 { return none; }
     return -value;
 }
+
+/// `s` followed by spaces up to `width` bytes; `s` itself when it is as wide.
+pub fn pad_right(s: str, width: i64) -> str {
+    var out = s;
+    while out.len() < width { out = out + " "; }
+    return out;
+}
+
+/// Spaces up to `width` bytes followed by `s`; `s` itself when it is as wide.
+pub fn pad_left(s: str, width: i64) -> str {
+    var out = s;
+    while out.len() < width { out = " " + out; }
+    return out;
+}

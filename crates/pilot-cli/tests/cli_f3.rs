@@ -105,6 +105,7 @@ fn every_listed_command_works_or_says_it_is_not_implemented() {
         ("check", &["check", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot"]),
         ("test", &["test", "tests/pilot_test_fixtures/passing"]),
         ("gate", &["gate", "--only", "hygiene"]),
+        ("bench", &["bench", "--filter", "no_such_test"]),
         ("emit", &["emit", "python", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot"]),
         ("completions", &["completions", "bash"]),
     ];
