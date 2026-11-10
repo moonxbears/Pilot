@@ -1,0 +1,5 @@
+// A failed assertion reports its message.
+fn main() {
+    let xs = [1, 2, 3];
+    assert(xs.len == 4, "four items");
+}

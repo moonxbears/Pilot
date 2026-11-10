@@ -137,7 +137,7 @@ impl PilVirtualMachine {
         }
         if v.is_map() {
             let m = &self.heap_maps[self.map_slot(v, op)?];
-            return Ok(m.get("len").copied().unwrap_or(PilotVal::from_int(m.len() as i64)));
+            return Ok(PilotVal::from_int(m.len() as i64));
         }
         Err(format!("`{op}` expects a string, list or record, found {}", v.kind_label()))
     }
@@ -145,9 +145,6 @@ impl PilVirtualMachine {
     fn get(&self, obj: PilotVal, k: PilotVal, op: &str) -> IntrinsicResult {
         if obj.is_list() {
             let slot = self.list_slot(obj, op)?;
-            if k.with_str(|s| s == "len").unwrap_or(false) {
-                return Ok(PilotVal::from_int(self.heap_lists[slot].len() as i64));
-            }
             let i = self.list_index(slot, k, op)?;
             return Ok(self.heap_lists[slot][i]);
         }
@@ -225,11 +222,24 @@ impl PilVirtualMachine {
                 println!("{}", parts.join(" "));
                 Ok(PilotVal::NULL)
             }
+            // `field_or_native(obj, key, intrinsic)`: the record's field
+            // `key` if it has one, else `intrinsic(obj)` (a native property).
+            "field_or_native" => {
+                let (obj, key) = (arg(args, 0, op)?, arg(args, 1, op)?);
+                if let Some(slot) = obj.as_map_handle().filter(|s| *s < self.heap_maps.len()) {
+                    if let Some(v) = self.heap_maps[slot].get(&key_of(key)) {
+                        return Ok(*v);
+                    }
+                }
+                let hook = str_arg(args, 2, op)?;
+                self.intrinsic(&hook, &[obj])
+            }
             "rt_assert" => {
                 let v = arg(args, 0, op)?;
+                let note = args.get(1).map(|m| format!(": {}", key_of(*m))).unwrap_or_default();
                 match v.as_bool() {
                     Some(true) => Ok(PilotVal::NULL),
-                    Some(false) => Err("assertion failed".to_string()),
+                    Some(false) => Err(format!("assertion failed{note}")),
                     None => Err(format!("assert expects a boolean, found {}", v.kind_label())),
                 }
             }

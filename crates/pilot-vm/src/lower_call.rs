@@ -1,7 +1,9 @@
 //! Call lowering: free functions, methods, struct literals and seed builtins.
 
 use crate::instruction::{Instruction, Opcode};
-use crate::{BytecodeCompiler, SeedBuiltin};
+use crate::lower_native::native;
+use crate::BytecodeCompiler;
+use pilot_parser::NativeKind;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_rt::PilotVal;
 
@@ -85,51 +87,8 @@ impl BytecodeCompiler {
     }
 
     fn compile_named_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> u8 {
-        match SeedBuiltin::function(name) {
-            Some(SeedBuiltin::SizeOf) => {
-                return self.emit_const(PilotVal::from_int(std::mem::size_of::<usize>() as i64));
-            }
-            Some(SeedBuiltin::Assert) => {
-                let Some(&cond) = args.first() else {
-                    return self.error("assert expects a condition".to_string());
-                };
-                let cn = *arena.node(cond);
-                let r_c = if cn.node_kind() == NodeKind::TupleExpr {
-                    match arena.children_slice(cn.lhs, cn.rhs).first() {
-                        Some(&first) => self.compile_node(arena, NodeId(first)),
-                        None => return self.error("assert expects a condition".to_string()),
-                    }
-                } else {
-                    self.compile_node(arena, cond)
-                };
-                return self.emit_intrinsic("rt_assert", &[r_c]);
-            }
-            Some(SeedBuiltin::Print) => {
-                let regs = self.compile_args(arena, args);
-                return self.emit_intrinsic("rt_print", &regs);
-            }
-            Some(SeedBuiltin::NameOf) => {
-                let Some(&arg) = args.first() else {
-                    return self.error("nameof expects one argument".to_string());
-                };
-                let an = arena.node(arg);
-                if an.node_kind() == NodeKind::IdentExpr {
-                    return self.emit_const(PilotVal::from_str(Self::name(arena, an.lhs)));
-                }
-                return self.compile_node(arena, arg);
-            }
-            Some(SeedBuiltin::Engine) => {
-                let Some((&hook, rest)) = args.split_first() else {
-                    return self.error("__engine expects an intrinsic name".to_string());
-                };
-                let r_hook = self.compile_node(arena, hook);
-                let regs = self.compile_args(arena, rest);
-                self.stage_args(&regs);
-                let dst = self.alloc_reg();
-                self.emit(Opcode::EngineIntrinsic, dst, r_hook, regs.len() as u8);
-                return dst;
-            }
-            Some(SeedBuiltin::Method(_)) | None => {}
+        if let Some(r) = self.compile_native_call(arena, name, args) {
+            return r;
         }
         // `Name { field: value, ... }` struct literal.
         if args.len() == 1
@@ -145,6 +104,12 @@ impl BytecodeCompiler {
         }
         if let Some(r) = self.compile_implicit_self_call(arena, name, args) {
             return r;
+        }
+        // So does calling a module-level binding (`let f = (x) => ..;`).
+        if self.globals.contains(name) && !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
+            let r_callee = self.emit_global_get(name);
+            let regs = self.compile_args(arena, args);
+            return self.emit_closure_call(r_callee, &regs);
         }
         if !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
             let hint = self.type_hint.clone();
@@ -173,7 +138,8 @@ impl BytecodeCompiler {
         let r_nm = Self::name(arena, callee.rhs).to_string();
         let lhs_is_name = matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed);
         let raw_l = if lhs_is_name { Self::name(arena, ln.lhs).to_string() } else { String::new() };
-        let is_var = lhs_is_name && self.var_slots.contains_key(&raw_l);
+        // A local or module-level binding is a value, not a type name.
+        let is_var = lhs_is_name && (self.var_slots.contains_key(&raw_l) || self.globals.contains(&raw_l));
         let l_nm = if is_var {
             self.var_types.get(&raw_l).cloned().unwrap_or_else(|| raw_l.clone())
         } else {
@@ -182,7 +148,7 @@ impl BytecodeCompiler {
         let full = format!("{l_nm}.{r_nm}");
         let known = self.fn_entries.contains_key(&full);
         let receiver_is_value = is_var || (!lhs_is_name && !known);
-        if receiver_is_value || (!known && SeedBuiltin::method(&r_nm).is_some()) {
+        if receiver_is_value || (!known && native(NativeKind::Method, &r_nm).is_some()) {
             let r_recv = self.compile_node(arena, NodeId(callee.lhs));
             return self.emit_method_call(arena, r_recv, &l_nm, &r_nm, args);
         }

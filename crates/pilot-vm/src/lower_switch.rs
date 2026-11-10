@@ -87,7 +87,7 @@ impl BytecodeCompiler {
             NodeKind::PatWildcard => {}
             NodeKind::PatBind => {
                 if pn.flags != 0 {
-                    self.error("rest patterns are not lowered by the seed yet".to_string());
+                    self.error("a rest element `..name` belongs inside a slice pattern `[..]`".to_string());
                     return;
                 }
                 let slot = self.alloc_local_reg();
@@ -144,6 +144,8 @@ impl BytecodeCompiler {
                     self.compile_pattern(arena, NodeId(e), r_e, &None, fails);
                 }
             }
+            NodeKind::PatRecord => self.compile_record_pattern(arena, pat, r_subject, fails),
+            NodeKind::PatSlice => self.compile_slice_pattern(arena, pat, r_subject, fails),
             other => {
                 self.error(format!("`{}` patterns are not lowered by the seed yet", other.name()));
             }
@@ -183,6 +185,31 @@ impl BytecodeCompiler {
         let v = self.unique_variant(name);
         self.type_hint = saved;
         v
+    }
+
+    /// `some x = v` (binding `x`) or `some v` as a condition: whether the
+    /// value is present. The binding lasts to the end of the enclosing `if`.
+    pub(crate) fn compile_some_test(&mut self, arena: &AstArena, operand: NodeId) -> u8 {
+        let on = *arena.node(operand);
+        let r_v = if on.node_kind() == NodeKind::AssignStmt {
+            let target = arena.node(NodeId(on.lhs));
+            if target.node_kind() != NodeKind::IdentExpr {
+                return self.error("`some` must bind a plain name".to_string());
+            }
+            let name = Self::name(arena, target.lhs).to_string();
+            let r = self.compile_node(arena, NodeId(on.rhs));
+            let slot = self.alloc_local_reg();
+            self.emit(Opcode::Move, slot, r, 0);
+            self.var_slots.insert(name.clone(), slot);
+            self.var_types.remove(&name);
+            slot
+        } else {
+            self.compile_node(arena, operand)
+        };
+        let dst = self.alloc_reg();
+        let r_null = self.emit_intrinsic("is_null", &[r_v]);
+        self.emit(Opcode::Not, dst, r_null, 0);
+        dst
     }
 
     /// `guard cond else { .. }`, `guard some x else { .. }` and

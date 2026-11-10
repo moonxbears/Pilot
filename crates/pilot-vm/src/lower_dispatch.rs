@@ -12,7 +12,9 @@
 //! an error naming the method.
 
 use crate::instruction::Opcode;
-use crate::{BytecodeCompiler, SeedBuiltin};
+use crate::lower_native::native;
+use crate::BytecodeCompiler;
+use pilot_parser::NativeKind;
 use pilot_ast::{AstArena, NodeId};
 use pilot_rt::PilotVal;
 
@@ -48,7 +50,7 @@ impl BytecodeCompiler {
             .map(|v| v.iter().filter(|(_, st)| !st).map(|(o, _)| o.clone()).collect())
             .unwrap_or_default();
         if instance_owners.is_empty() {
-            if let Some(hook) = SeedBuiltin::method(method) {
+            if let Some(hook) = native(NativeKind::Method, method) {
                 return self.emit_intrinsic(hook, &regs);
             }
             return self.emit_user_call(full, method.to_string(), &regs);
@@ -86,7 +88,7 @@ impl BytecodeCompiler {
         }
         let r = if let Some(o) = other {
             self.emit_user_call(format!("{o}.{method}"), method.to_string(), regs)
-        } else if let Some(hook) = SeedBuiltin::method(method) {
+        } else if let Some(hook) = native(NativeKind::Method, method) {
             self.emit_intrinsic(hook, regs)
         } else if self.known_fns.contains_key(method) {
             self.emit_user_call(method.to_string(), method.to_string(), regs)

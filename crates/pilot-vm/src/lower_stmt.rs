@@ -15,7 +15,8 @@ impl BytecodeCompiler {
             let cn = arena.node(NodeId(c_id));
             match cn.node_kind() {
                 NodeKind::LetStmt | NodeKind::ConstDecl | NodeKind::VarStmt => {
-                    if cn.node_kind() != NodeKind::VarStmt {
+                    let pattern = Self::is_destructuring_let(arena, NodeId(c_id));
+                    if cn.node_kind() != NodeKind::VarStmt && !pattern {
                         if let Some(m) = self.eval_cmap(arena, NodeId(cn.rhs)) {
                             self.const_maps.insert(Self::name(arena, cn.lhs).to_string(), m);
                         }
@@ -266,6 +267,9 @@ impl BytecodeCompiler {
     }
 
     pub(crate) fn compile_let(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
+        if Self::is_destructuring_let(arena, node_id) {
+            return self.compile_destructuring_let(arena, node_id);
+        }
         let node = *arena.node(node_id);
         let (name, rhs) = (Self::name(arena, node.lhs).to_string(), NodeId(node.rhs));
         // A name bound outside the enclosing block is shadowed, not reused:
@@ -372,6 +376,8 @@ impl BytecodeCompiler {
 
     pub(crate) fn compile_if(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
         let node = *arena.node(node_id);
+        // A binding the condition makes (`if some x = v`) ends with the `if`.
+        let (outer_slots, outer_types) = (self.var_slots.clone(), self.var_types.clone());
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_cond = self.compile_node(arena, NodeId(node.lhs));
@@ -392,6 +398,8 @@ impl BytecodeCompiler {
         self.emit(Opcode::Move, dst, e_reg, 0);
         self.release_to(mark);
         self.patch_to_here(j_end);
+        self.var_slots = outer_slots;
+        self.var_types = outer_types;
         dst
     }
 

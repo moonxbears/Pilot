@@ -1,7 +1,9 @@
 //! Node dispatch and expression lowering.
 
 use crate::instruction::Opcode;
-use crate::{BytecodeCompiler, CMap, SeedBuiltin};
+use crate::lower_native::native;
+use crate::{BytecodeCompiler, CMap};
+use pilot_parser::NativeKind;
 use pilot_ast::{AstArena, BinaryOp, NodeId, NodeKind};
 use pilot_rt::PilotVal;
 
@@ -121,8 +123,8 @@ impl BytecodeCompiler {
         if let Some(r) = self.capture_read(name) {
             return r;
         }
-        if name == "ENV" {
-            return self.emit_const(PilotVal::from_map_handle(0));
+        if let Some(r) = self.compile_native_value(name) {
+            return r;
         }
         if let Some(cm) = self.const_maps.get(name).cloned() {
             return self.materialize_cmap(&cm);
@@ -151,7 +153,7 @@ impl BytecodeCompiler {
         // A property of a compile-time collection that is not one of its keys.
         if let (Some(container), Some(hook)) = (
             self.resolve_cmap(arena, NodeId(node.lhs)),
-            SeedBuiltin::property(&field),
+            native(NativeKind::Property, &field),
         ) {
             let dst = self.alloc_reg();
             let mark = self.next_reg;
@@ -163,18 +165,9 @@ impl BytecodeCompiler {
         }
         let dst = self.alloc_reg();
         let mark = self.next_reg;
-        let ln = arena.node(NodeId(node.lhs));
-        let r_obj = if ln.node_kind() == NodeKind::IdentExpr && Self::name(arena, ln.lhs) == "ENV" {
-            self.emit_const(PilotVal::from_map_handle(0))
-        } else {
-            self.compile_node(arena, NodeId(node.lhs))
-        };
+        let r_obj = self.compile_node(arena, NodeId(node.lhs));
         // Positional fields (`tuple.0`) index the underlying sequence.
-        let r_key = match field.parse::<i64>() {
-            Ok(i) => self.emit_const(PilotVal::from_int(i)),
-            Err(_) => self.emit_const(PilotVal::from_str(&field)),
-        };
-        let r = self.emit_intrinsic("map_get", &[r_obj, r_key]);
+        let r = self.emit_field_read(r_obj, &field);
         self.emit(Opcode::Move, dst, r, 0);
         self.release_to(mark);
         dst
@@ -331,6 +324,7 @@ impl BytecodeCompiler {
             UNARY_NEG => Opcode::Neg,
             UNARY_BIT_NOT => Opcode::BitNot,
             UNARY_NOT => Opcode::Not,
+            pilot_ast::UNARY_OP_SOME => return self.compile_some_test(arena, NodeId(operand)),
             pilot_ast::UNARY_OP_SPLAT | pilot_ast::UNARY_OP_DOUBLE_SPLAT | pilot_ast::UNARY_OP_DEEP_FLATTEN => {
                 return self.error(
                     "the seed lowers `*x` and `*..x` only as elements of a list literal".to_string(),

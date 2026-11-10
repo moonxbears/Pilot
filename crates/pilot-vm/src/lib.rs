@@ -12,10 +12,12 @@ mod lower_call;
 mod lower_cascade;
 mod lower_closure;
 mod lower_defer;
+mod lower_destructure;
 mod lower_dispatch;
 mod lower_expr;
 mod lower_global;
 mod lower_linked;
+mod lower_native;
 mod lower_pipe;
 mod lower_stmt;
 mod lower_struct;
@@ -58,6 +60,8 @@ const FIRST_TEMP_REG: u8 = 128;
 /// Name of the hidden receiver parameter of methods and constructors; the
 /// body sees it as `self` (the name without the leading underscore).
 const RECEIVER: &str = "_self";
+/// The seed token that calls an engine intrinsic by name.
+const ENGINE_TOKEN: &str = "__engine";
 /// Arguments travel in `r1..=r16`.
 const MAX_CALL_ARGS: usize = 16;
 
@@ -614,72 +618,3 @@ impl BytecodeCompiler {
     }
 }
 
-/// Names the seed compiler treats specially. This is the only table of
-/// callable names in the VM crate; the gate's name-blind audit exempts lines
-/// that reference `SeedBuiltin::` and nothing else. Method entries forward to
-/// heap intrinsics until collection protocols dispatch through Pilot method
-/// tables (Phase F).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SeedBuiltin {
-    SizeOf,
-    Assert,
-    Print,
-    NameOf,
-    Engine,
-    Method(&'static str),
-}
-
-impl SeedBuiltin {
-    /// Free-function builtins, looked up by callee name.
-    pub(crate) fn function(name: &str) -> Option<Self> {
-        Some(match name {
-            "sizeof" => SeedBuiltin::SizeOf,
-            "assert" => SeedBuiltin::Assert,
-            "print" | "println" => SeedBuiltin::Print,
-            "nameof" => SeedBuiltin::NameOf,
-            "__engine" => SeedBuiltin::Engine,
-            _ => return None,
-        })
-    }
-
-    /// Methods on VM-native values (strings, lists, records), looked up by
-    /// method name; the payload is the heap intrinsic that implements it.
-    pub(crate) fn method(name: &str) -> Option<&'static str> {
-        let SeedBuiltin::Method(hook) = (match name {
-            "len" => SeedBuiltin::Method("str_len"),
-            "get" => SeedBuiltin::Method("map_get"),
-            "set" => SeedBuiltin::Method("map_set"),
-            "push" => SeedBuiltin::Method("list_push"),
-            "pop" => SeedBuiltin::Method("list_pop"),
-            "trim" => SeedBuiltin::Method("str_trim"),
-            "to_str" => SeedBuiltin::Method("to_str"),
-            "remove_at" => SeedBuiltin::Method("list_remove_at"),
-            "byte_at" => SeedBuiltin::Method("str_byte_at"),
-            "slice" | "substring" => SeedBuiltin::Method("str_slice"),
-            "find" | "index_of" => SeedBuiltin::Method("str_find"),
-            "replace" => SeedBuiltin::Method("str_replace"),
-            "contains" => SeedBuiltin::Method("str_contains"),
-            "starts_with" => SeedBuiltin::Method("str_starts_with"),
-            "ends_with" => SeedBuiltin::Method("str_ends_with"),
-            "is_null" => SeedBuiltin::Method("is_null"),
-            "has" => SeedBuiltin::Method("map_has"),
-            "remove" => SeedBuiltin::Method("map_remove"),
-            _ => return None,
-        }) else {
-            return None;
-        };
-        Some(hook)
-    }
-
-    /// Paren-less properties on VM-native values (`xs.len`), with the heap
-    /// intrinsic that computes them from the receiver alone.
-    pub(crate) fn property(name: &str) -> Option<&'static str> {
-        let SeedBuiltin::Method(hook) = (match name {
-            "len" => SeedBuiltin::Method("str_len"),
-            _ => return None,
-        }) else {
-            return None;
-        };
-        Some(hook)
-    }
-}

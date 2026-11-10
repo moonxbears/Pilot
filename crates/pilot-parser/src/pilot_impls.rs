@@ -13,6 +13,13 @@
 //!     __engine("bind_unit_literal", nameof(convert), nameof(classify));
 //!     // `a union b` calls `seq_union(a, b)`.
 //!     __engine("bind_operator_fn", nameof(union), nameof(seq_union));
+//!     // `print(..)`, `xs.push(x)`, `s.len`, `ENV` run engine intrinsics.
+//!     __engine("bind_native_fn", nameof(print), "rt_print");
+//!     __engine("bind_native_method", nameof(push), "list_push");
+//!     __engine("bind_native_property", nameof(len), "str_len");
+//!     __engine("bind_native_value", nameof(ENV), "get_env");
+//!     // `sizeof(T)` is answered from `T`'s register layout.
+//!     __engine("bind_type_query", nameof(sizeof), "byte_size");
 //! }
 //! ```
 
@@ -35,6 +42,34 @@ pub struct UnitLiteralHook {
     pub module: Arc<str>,
 }
 
+/// Hooks that bind a Pilot name to an engine intrinsic. The seed answers a
+/// call, method, property or value with that name by running the intrinsic.
+pub const HOOK_NATIVE_FN: &str = "bind_native_fn";
+pub const HOOK_NATIVE_METHOD: &str = "bind_native_method";
+pub const HOOK_NATIVE_PROPERTY: &str = "bind_native_property";
+pub const HOOK_NATIVE_VALUE: &str = "bind_native_value";
+/// Binds a function name to a compile-time question about its type
+/// argument, such as `"byte_size"`.
+pub const HOOK_TYPE_QUERY: &str = "bind_type_query";
+
+/// The receptor kind and payload `expr_sugar.pilot` binds `nameof` to.
+const RECEPTOR_SYMBOL_QUOTE: (u8, u8) = (33, 25);
+
+/// Which table a native binding goes into.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeKind {
+    /// `name(args)`.
+    Function,
+    /// `value.name(args)`, with the receiver first.
+    Method,
+    /// `value.name` without parentheses, when the value has no such field.
+    Property,
+    /// `name` on its own.
+    Value,
+    /// `name(Type)`, answered while compiling.
+    TypeQuery,
+}
+
 /// The Pilot function an infix operator calls: `a op b` is `function(a, b)`.
 #[derive(Clone, Debug)]
 pub struct OperatorFn {
@@ -52,6 +87,24 @@ impl ParserTables {
     /// The Pilot function that implements infix operator `symbol`, if any.
     pub fn operator_fn(&self, symbol: &str) -> Option<&OperatorFn> {
         self.operator_fns.get(symbol)
+    }
+
+    /// The engine intrinsic (or, for `TypeQuery`, the question) bound to
+    /// `name` in table `kind`.
+    pub fn native(&self, kind: NativeKind, name: &str) -> Option<&str> {
+        self.natives.get(&(kind, name.to_string())).map(String::as_str)
+    }
+
+    /// Whether `name` is bound as the symbol-quoting receptor (`nameof`),
+    /// whose argument is a name, not an expression.
+    pub fn quotes_symbol(&self, name: &str) -> bool {
+        self.receptors.get(name) == Some(&RECEPTOR_SYMBOL_QUOTE)
+    }
+
+    pub(crate) fn bind_native(&mut self, kind: NativeKind, name: String, target: String) {
+        if !name.is_empty() && !target.is_empty() {
+            self.natives.insert((kind, name), target);
+        }
     }
 
     pub(crate) fn bind_unit_literal(&mut self, convert: String, classify: String) {

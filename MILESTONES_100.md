@@ -1575,7 +1575,7 @@ These rules apply to every `F` milestone and replace the "four function-level te
   5. `tests/conformance/` with a runner. Until `pilot test` works (`F3`), the runner may be one Rust integration test that invokes the built `pilot` binary and diffs stdout and exit code.
 - **Done when:** every row of the table in `Audit.md` §3.2 behaves as the language reference says; `examples/overview.pilot` and `examples/*.pilot` produce checked output; the legacy-syntax files in `tests/*.pilot` (`def`, `match`, `record`) are either migrated to canonical syntax and passing, or deleted.
 - **Deletes:** the `_ => 0` fall-through and the `_ => Opcode::AddI64` default.
-- **Progress (2026-11-09, part 1) — `[STATUS: IN PROGRESS]`:**
+- **Progress (2026-11-09, part 1):**
   - Done: deliverables 3, 4 and 5; deliverable 1 for lists and records (`TAG_LIST`, `TAG_MAP`); f-string interpolation, ranges and `??` from deliverable 2. Both deletions are done: unlowered node kinds and unknown operators are now compile errors (`is not lowered by the seed yet`), and erroneous nodes compile to a `Trap` opcode.
   - The VM records a `VmFault` with a source span. `pilot run` prints `file:line:col: error:` and exits 1. `run_pilot_analyzer`, the bootstrap manifest and the self-hosted tool scripts surface faults instead of returning `null`.
   - `.pilc` format is now version 4 (opcodes renumbered to tag-polymorphic `Add`/`Sub`/…; `selfhost/vm/compiler.pilot` and `selfhost/pilotc.pilot` updated to match).
@@ -1632,6 +1632,18 @@ These rules apply to every `F` milestone and replace the "four function-level te
   - `tests/conformance/` now holds 50 programs (16 error cases).
   - The legacy `tests/*.pilot` corpus is deleted: its 40 files used pre-canonical syntax (`def`, `class`, `record`, `import`), nothing ran or referenced them, and most exercised features of later milestones (actors, Postgres, polyglot). `tests/conformance/` replaces them as the seed's checked corpus.
   - Remaining: `op ?` on `res`/`opt` and the enumerator protocol (after F2), and moving the `SeedBuiltin` method table into Pilot (the `bind_operator_fn` path is the mechanism for it).
+- **Progress (2026-11-09, part 8) — `[STATUS: COMPLETE]`:**
+  - The `SeedBuiltin` method table is gone. `stdlib/core/builtins/native_calls.pilot` binds every name the seed used to hardcode (`print`, `assert`, `len`, `push`, `ENV`, `sizeof`, ...) to a VM intrinsic through the `bind_native_fn`, `bind_native_method`, `bind_native_property`, `bind_native_value` and `bind_type_query` engine hooks (`crates/pilot-parser/src/pilot_impls.rs`, `crates/pilot-vm/src/lower_native.rs`). `assert(cond, msg)` reports its message. `sizeof(T)` answers from the type's `[Bits]` layout, and is a compile error for a struct until F4 computes struct layouts.
+  - Destructuring: `let (a, b) = t;`, `let [head, ..rest, last] = xs;` and `let { "k": v, "nested": { "x": x }, name } = m;` bind through a pattern, locally or as globals at the top level; a value the pattern does not fit is a runtime error. `switch` matches record patterns (`case Point { x: 0, y }:`), typed or not, and slice patterns with one rest element (`case [first, ..rest]:`, `*rest`) (`crates/pilot-vm/src/lower_destructure.rs`). `examples/showcase/08_exhaustive_pattern_matching.pilot` now runs end to end.
+  - `if some x = v { .. } else { .. }` binds `x` when `v` is present; it used to parse as a comparison. `f"{m[\"k\"]}"` (escaped quotes in an f-string hole) parses. A global holding a closure is callable, and globals take method calls.
+  - Syntax errors: `let = 3;` and `let x = ;` are errors; they used to run with the binding set to `none`. Every row of `Audit.md` §3.2 that F1 owns now behaves as the reference says.
+  - `tests/conformance/` now holds 57 programs (20 error cases).
+  - **Moved out of F1**, each to the milestone that owns the mechanism:
+    - `op ?` on `res`/`opt` records and the `for` enumerator protocol over user types → **F2**: `result.pilot`/`option.pilot` must be linked first. `ITryOperator` also needs a success predicate (it declares only `op ? () -> TOk`), which F2 adds when it links the prelude.
+    - `use std.crypto;` and other imported functions, and `without` exports (`examples/test_exclusions.pilot`, `examples/mytest.pilot`) → **F2**.
+    - Type errors such as `let x: i64 = "hello";` → **F4** (the seed has no type checker; F4 adds it).
+    - Value-type copies for `: IValue` structs (`examples/crucible_200.pilot` pillar 1) → **F4** classifies, **F7** inserts the copies. `~self()` destructors → **F7**.
+    - Constructs of later milestones that `examples/overview.pilot` and `examples/all_syntax.pilot` use: inline `sql { .. }` blocks, channels (`<-`), `yield` generators, and `unit meter;` (which collides with the keyword catalog's compilation-unit `unit`). Each stops the program with a compile error naming the construct; none is silently dropped.
 
 ### F2 — Real Module Linking
 
@@ -1643,6 +1655,8 @@ These rules apply to every `F` milestone and replace the "four function-level te
   3. Topological load order with cycle detection (`MOD002`), driven by `selfhost/loader/module_graph.pilot` once that file has a real SCC pass, or by the seed until then.
   4. An implicit prelude so `for`, collections, `opt`/`res` and `print` work with no imports.
   5. Script arguments after `--` reach the program.
+  6. Postfix `?` on `res`/`opt` records dispatches to the type's `op ?`. `ITryOperator` gains the success predicate it lacks (it declares only `op ? () -> TOk`), and its duplicate declaration (`stdlib/core/operator.pilot` and `stdlib/core/operators/try_op.pilot`) collapses to one (carried from F1).
+  7. `use M without { .. }` exclusions (`examples/test_exclusions.pilot`). The F1 stopgap `link_pilot_module` (`crates/pilot-vm/src/lower_linked.rs`), which compiles an operator's module on first use, is replaced by real linking.
 - **Done when:** `for x in xs`, `for i in 0..n`, `List<T>`/`Map<K, V>` methods and a function imported from `std.*` all work in conformance programs; an import cycle and a missing module each fail with their code.
 - **Deletes:** the textual `use ` scanner in `pipeline.rs` and the string-concatenating `eval_sh` loader in `crates/pilot-cli/src/main.rs`.
 
@@ -1709,6 +1723,7 @@ These rules apply to every `F` milestone and replace the "four function-level te
   3. `~self()` invoked at last use for `0b10` objects and at scope exit, in reverse declaration order, for `0b11` guards.
   4. Escape checks `ESCAPE001`–`003` for `0b01` views, computed from the lattice classes of `F4`.
   5. A live-allocation counter reported at exit under a flag.
+  6. Copy semantics for `0b00` value types: a `: IValue` struct passed, returned or stored is copied, not shared by handle (`examples/crucible_200.pilot` pillar 1, carried from F1).
 - **Done when:** the whole conformance corpus exits with zero live allocations on the native backend; guard-ordering and use-after-move programs behave or fail as specified.
 - **Deletes:** the string-emitting drop schedulers in `selfhost/perceus/arc.pilot`.
 

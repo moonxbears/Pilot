@@ -1,0 +1,9 @@
+// A global holding a closure is callable, and globals take method calls.
+let double = (x) => x * 2;
+let names = ["ada", "lin"];
+
+fn main() {
+    println(double(21));
+    println(names.len());
+    println(names.get(1));
+}

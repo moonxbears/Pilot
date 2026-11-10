@@ -1,0 +1,5 @@
+// Escaped quotes inside f-string holes.
+fn main() {
+    let m = ["k": 42, "name": "pilot"];
+    println(f"k = {m[\"k\"]}, name = {m[\"name\"]}");
+}

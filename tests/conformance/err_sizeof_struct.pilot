@@ -1,0 +1,8 @@
+// The seed knows only primitive register layouts.
+struct Point {
+    x: i64;
+}
+
+fn main() {
+    print(sizeof(Point));
+}

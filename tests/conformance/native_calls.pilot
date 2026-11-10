@@ -1,0 +1,17 @@
+// Names the seed runs natively are declared in
+// `stdlib/core/builtins/native_calls.pilot`.
+struct Window {
+    len: i64;
+}
+
+fn main() {
+    // `sizeof` reads a primitive's register layout.
+    print(sizeof(i64), sizeof(u8), sizeof(bool));
+    let xs = [1, 2, 3];
+    // `len` as a method and as a property.
+    print(xs.len, xs.len(), "abc".len);
+    // A record's own field wins over the native property.
+    print(Window { len: 42 }.len);
+    print(nameof(main));
+    assert(xs.len == 3, "three items");
+}
