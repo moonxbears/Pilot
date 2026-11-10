@@ -1,0 +1,4 @@
+// Converting a string to a number stops the program.
+fn main() {
+    print(i64("12"));
+}

@@ -42,6 +42,11 @@ pub struct PilVirtualMachine {
     pub reg_stack: Vec<PilotVal>,
     pub heap_maps: Vec<HashMap<String, PilotVal>>,
     pub heap_lists: Vec<Vec<PilotVal>>,
+    /// The struct each record was built as, by record slot. Kept beside the
+    /// record so it never shows up as a field.
+    pub record_types: HashMap<usize, PilotVal>,
+    /// Module-level bindings, by name.
+    pub globals: HashMap<String, PilotVal>,
     pub hook: Option<VmHook>,
     pub engine_handler: Option<EngineIntrinsicHandler>,
     pub shared_symbols: Option<std::sync::Arc<HashMap<u32, String>>>,
@@ -73,6 +78,8 @@ impl PilVirtualMachine {
             reg_stack: Vec::with_capacity(512),
             heap_maps: Vec::new(),
             heap_lists: Vec::new(),
+            record_types: HashMap::new(),
+            globals: HashMap::new(),
             hook: None,
             engine_handler: None,
             shared_symbols: None,
@@ -92,6 +99,7 @@ impl PilVirtualMachine {
         self.call_stack.clear();
         self.reg_stack.clear();
         self.heap_lists.clear();
+        self.globals.clear();
         self.registers = [PilotVal::NULL; 256];
         self.fuel_used = 0;
         self.fuel_exhausted = false;
@@ -166,6 +174,18 @@ impl PilVirtualMachine {
         Ok(())
     }
 
+    /// `==`: lists (and tuples) compare element by element; everything else
+    /// as `ops::equals`.
+    fn values_equal(&self, a: PilotVal, b: PilotVal) -> bool {
+        let list = |v: PilotVal| v.as_list_handle().and_then(|slot| self.heap_lists.get(slot));
+        match (list(a), list(b)) {
+            (Some(x), Some(y)) => {
+                a == b || (x.len() == y.len() && x.iter().zip(y).all(|(&p, &q)| self.values_equal(p, q)))
+            }
+            _ => ops::equals(a, b),
+        }
+    }
+
     /// Entry point and arity of a function value.
     fn closure_target(&self, f: PilotVal) -> Result<(usize, usize), String> {
         let env = f
@@ -227,7 +247,11 @@ impl PilVirtualMachine {
                 | Opcode::CmpLe
                 | Opcode::CmpGt
                 | Opcode::CmpGe) => {
-                    let v = ops::compare(op, r1, r2)?;
+                    let v = match op {
+                        Opcode::CmpEq => PilotVal::from_bool(self.values_equal(r1, r2)),
+                        Opcode::CmpNe => PilotVal::from_bool(!self.values_equal(r1, r2)),
+                        _ => ops::compare(op, r1, r2)?,
+                    };
                     self.set(dst, v);
                 }
                 op @ (Opcode::Neg | Opcode::Not | Opcode::BitNot) => {

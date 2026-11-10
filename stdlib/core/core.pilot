@@ -279,6 +279,7 @@ comptime {
             prec_shift:  55,
             prec_add:    60,
             prec_mul:    70,
+            prec_cast:   75,
             prec_unary:  80,
             prec_lens:   85,
             prec_splat:  90,
@@ -424,6 +425,8 @@ comptime {
     // 4. Register Global Pratt Operator Precedences ONCE for the Entire Language
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_coal,   Cfg.Ops.fix_infix,   Cfg.Ops.prec_coal,   Cfg.Ops.assoc_right);
     __engine(Cfg.Hooks.pratt_op, "||",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_or,     Cfg.Ops.assoc_left);
+    // `x as T` binds tighter than `*` and looser than prefix operators.
+    __engine(Cfg.Hooks.pratt_op, nameof(as),         Cfg.Ops.fix_infix,   Cfg.Ops.prec_cast,   Cfg.Ops.assoc_left);
     __engine(Cfg.Hooks.pratt_op, "&&",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_and,    Cfg.Ops.assoc_left);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitor,  Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitor,  Cfg.Ops.assoc_left);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_xor,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_xor,    Cfg.Ops.assoc_left);

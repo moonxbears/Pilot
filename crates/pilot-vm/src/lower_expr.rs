@@ -77,6 +77,8 @@ impl BytecodeCompiler {
             NodeKind::ContinueStmt => self.compile_continue(arena, NodeId(node.lhs).is_some()),
             NodeKind::DeferStmt => self.compile_defer(node.lhs),
             NodeKind::TryStmt => self.compile_try_stmt(arena, node_id),
+            NodeKind::CascadeExpr => self.compile_cascade(arena, node_id),
+            NodeKind::ComptimeExpr => self.compile_comptime(arena, node_id),
             NodeKind::CatchRecoveryExpr => self.compile_catch_recovery(arena, node.lhs, node.rhs),
             NodeKind::ReturnStmt => self.compile_return(arena, node.lhs),
             NodeKind::ExprStmt => self.compile_node(arena, NodeId(node.lhs)),
@@ -122,6 +124,10 @@ impl BytecodeCompiler {
         }
         if let Some(cm) = self.const_maps.get(name).cloned() {
             return self.materialize_cmap(&cm);
+        }
+        if self.globals.contains(name) {
+            let name = name.to_string();
+            return self.emit_global_get(&name);
         }
         if let Some(v) = self.unique_variant(name) {
             return self.emit_const(v);
@@ -214,7 +220,18 @@ impl BytecodeCompiler {
         match op {
             BinaryOp::And | BinaryOp::Or => return self.compile_short_circuit(arena, op, lhs, rhs),
             BinaryOp::Coalesce => return self.compile_coalesce(arena, lhs, rhs),
-            BinaryOp::As | BinaryOp::AsView => return self.compile_node(arena, NodeId(lhs)),
+            BinaryOp::As | BinaryOp::AsView => {
+                let r = self.compile_node(arena, NodeId(lhs));
+                let ty = NodeId(rhs);
+                let layout = (op == BinaryOp::As && ty.is_some())
+                    .then(|| pilot_parser::bootstrap_tables().reg_layout(Self::name(arena, arena.node(ty).lhs)))
+                    .flatten()
+                    .cloned();
+                return match layout {
+                    Some(layout) => self.emit_conversion(r, &layout),
+                    None => r,
+                };
+            }
             _ => {}
         }
         let Some(opcode) = direct_opcode(op) else {
@@ -250,10 +267,16 @@ impl BytecodeCompiler {
             NodeKind::IdentExpr => self.var_types.get(Self::name(arena, n.lhs)).cloned(),
             NodeKind::CallExpr if n.rhs > 0 => {
                 let callee = arena.node(NodeId(*arena.extra_children.get(n.lhs as usize)?));
-                matches!(callee.node_kind(), NodeKind::IdentExpr)
-                    .then(|| self.fn_ret_types.get(Self::name(arena, callee.lhs)).cloned())
-                    .flatten()
+                if !matches!(callee.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) {
+                    return None;
+                }
+                let name = Self::name(arena, callee.lhs);
+                match self.fn_ret_types.get(name) {
+                    Some(t) => Some(t.clone()),
+                    None => self.structs.contains_key(name).then(|| name.to_string()),
+                }
             }
+            NodeKind::CascadeExpr => self.static_type(arena, NodeId(n.lhs)),
             _ => None,
         }
     }

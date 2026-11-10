@@ -37,6 +37,8 @@ impl BytecodeCompiler {
         let saved = self.save_fn_state();
         self.reset_fn_state();
         self.captures = saved.captures.clone();
+        // A lambda inside a method still sees the method's type for bare calls.
+        self.cur_owner = saved.cur_owner.clone();
         for (i, p) in params.iter().enumerate() {
             let slot = self.alloc_local_reg();
             self.emit(Opcode::Move, slot, (i + 1) as u8, 0);

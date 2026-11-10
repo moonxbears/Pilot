@@ -1,0 +1,7 @@
+// Reading a global before its declaration has run stops the program.
+fn show() {
+    print(late);
+}
+
+show();
+var late = 1;
