@@ -1,5 +1,9 @@
 // A construct the seed cannot run yet is a compile error, never a silent no-op.
+fn numbers() -> i64 {
+    yield 1;
+    return 0;
+}
+
 fn main() {
-    defer print("cleanup");
-    print("body");
+    print(numbers());
 }

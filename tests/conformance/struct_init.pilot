@@ -1,0 +1,57 @@
+// Field defaults, struct literals that omit defaulted fields, and
+// constructors `self(..)` run by `Name(args)`.
+struct Config {
+    name: str;
+    retries: i64 = 3;
+    verbose: bool = false;
+}
+
+struct Counter {
+    pub {
+        count: i64 = 0;
+        step: i64 = 1;
+    }
+
+    self(start: i64, step: i64) {
+        .count = start;
+        self.step = step;
+    }
+
+    fn advance() -> i64 {
+        .count = .count + .step;
+        return .count;
+    }
+}
+
+struct Plain {
+    a: i64 = 7;
+}
+
+struct Pair<TKey, TVal> {
+    key: TKey;
+    hits: i64 = 0;
+
+    self(key: TKey) {
+        .key = key;
+    }
+}
+
+fn main() {
+    let c = Config { name: "svc" };
+    print(c.name);
+    print(c.retries);
+    print(c.verbose);
+
+    let loud = Config { name: "dbg", verbose: true, retries: 9 };
+    print(f"{loud.name} {loud.retries} {loud.verbose}");
+
+    var k = Counter(10, 5);
+    print(k.advance());
+    print(k.advance());
+
+    let p = Plain();
+    print(p.a);
+
+    let pair = Pair<str, i64>("id");
+    print(f"{pair.key} {pair.hits}");
+}

@@ -233,6 +233,8 @@ pub struct AstArena {
     pub for_clauses: Vec<(NodeId, NodeId)>,
     /// `case p if cond:` guards; `MatchArm.flags` holds the index + 1.
     pub arm_guards: Vec<NodeId>,
+    /// `field: T = default` initializers, keyed by the field's `ParamDecl`.
+    pub field_defaults: Vec<(NodeId, NodeId)>,
     pub diagnostics: Vec<(ByteSpan, String)>,
     pub i64_pool: Vec<i64>,
     pub f64_pool: Vec<f64>,
@@ -249,7 +251,7 @@ impl AstArena {
             decl_flags: Vec::with_capacity(expected), type_annots: Vec::with_capacity(expected),
             extra_children: Vec::with_capacity(expected),
             attrs: Vec::new(), base_types: Vec::new(), type_params: Vec::new(),
-            for_clauses: Vec::new(), arm_guards: Vec::new(), diagnostics: Vec::new(),
+            for_clauses: Vec::new(), arm_guards: Vec::new(), field_defaults: Vec::new(), diagnostics: Vec::new(),
             i64_pool: Vec::with_capacity(expected / 4), f64_pool: Vec::with_capacity(expected / 8),
             interner: Interner::with_capacity(expected / 2, expected * 8), root: NodeId::NONE,
         }
@@ -300,6 +302,11 @@ impl AstArena {
             self.arm_guards.len() as u16
         };
         self.alloc_node(NodeKind::MatchArm, flags, span, pat.0, body.0)
+    }
+
+    /// The default initializer of a struct field, or `NodeId::NONE`.
+    pub fn field_default(&self, field: NodeId) -> NodeId {
+        self.field_defaults.iter().find(|(f, _)| *f == field).map_or(NodeId::NONE, |&(_, d)| d)
     }
 
     /// The guard of a `MatchArm`, or `NodeId::NONE`.

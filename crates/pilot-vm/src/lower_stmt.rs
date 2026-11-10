@@ -20,6 +20,7 @@ impl BytecodeCompiler {
                     }
                 }
                 NodeKind::TypeAdtDecl => self.register_enum(arena, NodeId(c_id)),
+                NodeKind::StructDecl => self.register_struct(arena, NodeId(c_id)),
                 NodeKind::FnDecl => {
                     let arity = (cn.flags as usize).saturating_sub(1);
                     self.known_fns.insert(Self::name(arena, cn.lhs).to_string(), arity);
@@ -63,6 +64,7 @@ impl BytecodeCompiler {
     /// released before the next; the block's value is its last statement's.
     pub(crate) fn compile_block(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
         let children: Vec<u32> = arena.children_slice(lhs, rhs).to_vec();
+        self.defers.push(Vec::new());
         let mut last = 0;
         for (i, &c) in children.iter().enumerate() {
             let mark = self.next_reg;
@@ -71,10 +73,11 @@ impl BytecodeCompiler {
                 self.next_reg = mark;
             }
         }
-        match children.last() {
+        let value = match children.last() {
             Some(&c) if Self::item_yields_value(arena, NodeId(c)) => last,
             _ => self.emit_const(PilotVal::NULL),
-        }
+        };
+        self.close_defer_scope(arena, value)
     }
 
     /// Lowers a function. `owner` is the struct/extend name for methods.
@@ -92,7 +95,7 @@ impl BytecodeCompiler {
             return;
         }
         let body_node = NodeId(arena.extra_children[fn_start]);
-        let receiver = "_self";
+        let receiver = crate::RECEIVER;
         let receiver_short = &receiver[1..];
         let mut params: Vec<String> = if fn_len > 1 {
             arena.extra_children[fn_start + 1..fn_start + fn_len]
@@ -176,16 +179,12 @@ impl BytecodeCompiler {
             return;
         }
         let owner = Self::name(arena, cn.lhs).to_string();
-        let bn = *arena.node(NodeId(cn.rhs));
-        if bn.node_kind() != NodeKind::BlockExpr {
-            return;
-        }
-        for &m in arena.children_slice(bn.lhs, bn.rhs) {
-            let mn = *arena.node(NodeId(m));
+        for m in Self::type_members(arena, NodeId(cn.rhs)) {
+            let mn = *arena.node(m);
             match mn.node_kind() {
-                NodeKind::FnDecl => self.compile_fn_decl(arena, NodeId(m), Some(&owner), entry),
+                NodeKind::FnDecl => self.compile_fn_decl(arena, m, Some(&owner), entry),
                 NodeKind::DestructorDecl if mn.lhs != 0 => {
-                    let receiver = "_self";
+                    let receiver = crate::RECEIVER;
                     let dtor = format!("~{}", &receiver[1..]);
                     let pc = self.here();
                     self.fn_entries
@@ -213,6 +212,7 @@ impl BytecodeCompiler {
         if arena.node(id).node_kind() == NodeKind::FnDecl {
             self.compile_fn_decl(arena, id, None, &mut unused_entry);
         } else {
+            self.register_struct(arena, id);
             self.compile_type_members(arena, id, &mut unused_entry);
         }
         self.patch_to_here(skip);
@@ -340,6 +340,7 @@ impl BytecodeCompiler {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
             is_switch: false,
+            defer_depth: self.defers.len(),
         });
         let mark = self.next_reg;
         self.compile_node(arena, body);
@@ -348,6 +349,7 @@ impl BytecodeCompiler {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
             is_switch: false,
+            defer_depth: self.defers.len(),
         })
     }
 
@@ -436,13 +438,14 @@ impl BytecodeCompiler {
         self.emit_null()
     }
 
-    pub(crate) fn compile_break(&mut self, has_value: bool) -> u8 {
+    pub(crate) fn compile_break(&mut self, arena: &AstArena, has_value: bool) -> u8 {
         if has_value {
             return self.error("`break` with a value is not lowered by the seed yet".to_string());
         }
-        if self.loops.is_empty() {
+        let Some(depth) = self.loops.last().map(|l| l.defer_depth) else {
             return self.error("`break` outside of a loop or switch".to_string());
-        }
+        };
+        self.emit_defers_above(arena, depth);
         let j = self.emit_jump(0);
         if let Some(l) = self.loops.last_mut() {
             l.break_jumps.push(j);
@@ -450,13 +453,14 @@ impl BytecodeCompiler {
         0
     }
 
-    pub(crate) fn compile_continue(&mut self, has_value: bool) -> u8 {
+    pub(crate) fn compile_continue(&mut self, arena: &AstArena, has_value: bool) -> u8 {
         if has_value {
             return self.error("`continue` with new bounds is not lowered by the seed yet".to_string());
         }
-        if !self.loops.iter().any(|l| !l.is_switch) {
+        let Some(depth) = self.loops.iter().rev().find(|l| !l.is_switch).map(|l| l.defer_depth) else {
             return self.error("`continue` outside of a loop".to_string());
-        }
+        };
+        self.emit_defers_above(arena, depth);
         let j = self.emit_jump(0);
         if let Some(l) = self.loops.iter_mut().rev().find(|l| !l.is_switch) {
             l.continue_jumps.push(j);
@@ -471,7 +475,11 @@ impl BytecodeCompiler {
         } else {
             self.emit_null()
         };
-        self.emit(Opcode::Move, 0, r_ret, 0);
+        // The value is computed before deferred statements run.
+        let keep = self.alloc_reg();
+        self.emit(Opcode::Move, keep, r_ret, 0);
+        self.emit_defers_above(arena, 0);
+        self.emit(Opcode::Move, 0, keep, 0);
         self.emit(Opcode::Ret, 0, 0, 0);
         0
     }

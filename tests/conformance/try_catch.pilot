@@ -1,0 +1,54 @@
+// Values-first failures: a failing `?` inside `try` jumps to `catch`,
+// `expr catch err => fallback` recovers, and deferred statements run on
+// every way out.
+fn find(xs: i64[], want: i64) -> i64? {
+    var i = 0;
+    while i < xs.len() {
+        if xs[i] == want {
+            return i;
+        }
+        i = i + 1;
+    }
+    return none;
+}
+
+fn lookup(want: i64) -> str {
+    try {
+        defer print("leaving try");
+        let i = find([4, 5, 6], want)?;
+        return f"index {i}";
+    } catch err {
+        print(f"caught none={err == none}");
+    }
+    return "fallback";
+}
+
+fn first_twice(xs: i64[]) -> i64? {
+    defer print("first_twice done");
+    let a = find(xs, 1)?;
+    let b = find(xs, 2)?;
+    return a + b;
+}
+
+fn main() {
+    print(lookup(6));
+    print(lookup(9));
+
+    print(find([1, 2, 3], 3) catch e => -1);
+    print(find([1, 2, 3], 7) catch e => -1);
+    print(find([1, 2], 2)? + 10 catch => 0);
+
+    print(first_twice([2, 1]) ?? -1);
+    print(first_twice([1]) ?? -1);
+
+    var hits = 0;
+    for x in [1, 2, 3] {
+        try {
+            let i = find([2, 3], x)?;
+            hits = hits + i + 1;
+        } catch {
+            hits = hits + 100;
+        }
+    }
+    print(hits);
+}

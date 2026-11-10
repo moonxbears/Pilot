@@ -1,5 +1,4 @@
-//! Lowering of `switch` (patterns and arm guards), `guard` statements and
-//! postfix `?`.
+//! Lowering of `switch` (patterns and arm guards) and `guard` statements.
 //!
 //! A `switch` evaluates its subject once, then tests each arm's pattern in
 //! order. A pattern either matches (binding its names for the arm) or jumps
@@ -32,6 +31,7 @@ impl BytecodeCompiler {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
             is_switch: true,
+            defer_depth: self.defers.len(),
         });
         let mut end_jumps = Vec::new();
         for &arm in arms {
@@ -211,23 +211,5 @@ impl BytecodeCompiler {
         self.release_to(mark);
         self.patch_to_here(pass);
         self.emit_null()
-    }
-
-    /// Postfix `expr?`: `none` returns `none` from the current function;
-    /// any other value is the expression's result.
-    pub(crate) fn compile_try_propagate(&mut self, arena: &AstArena, inner: u32) -> u8 {
-        let dst = self.alloc_reg();
-        let mark = self.next_reg;
-        let r = self.compile_node(arena, NodeId(inner));
-        self.emit(Opcode::Move, dst, r, 0);
-        self.release_to(mark);
-        let present = self.emit_branch(Opcode::JumpIfNotNull, dst, 0);
-        self.emit(Opcode::Move, 0, dst, 0);
-        self.emit(Opcode::Ret, 0, 0, 0);
-        self.patch_to_here(present);
-        let r_v = self.emit_intrinsic("try_unwrap", &[dst]);
-        self.emit(Opcode::Move, dst, r_v, 0);
-        self.release_to(mark);
-        dst
     }
 }

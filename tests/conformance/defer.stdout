@@ -1,0 +1,15 @@
+inner block body
+inner block exit
+work: end of body
+work: second deferred, runs first
+work: first deferred, runs last
+3
+work: second deferred, runs first
+work: first deferred, runs last
+40
+deferred sees x = 6
+6
+iteration 1
+leave iteration 1
+leave iteration 2
+leave iteration 3

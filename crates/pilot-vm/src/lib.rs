@@ -9,8 +9,11 @@ mod heap;
 pub mod instruction;
 mod lower_call;
 mod lower_closure;
+mod lower_defer;
 mod lower_expr;
 mod lower_stmt;
+mod lower_struct;
+mod lower_try;
 mod lower_switch;
 mod ops;
 pub mod pilc;
@@ -44,6 +47,9 @@ const FIRST_LOCAL_REG: u8 = 17;
 const LAST_LOCAL_REG: u8 = 127;
 /// First scratch register; scratch registers cycle through `128..=255`.
 const FIRST_TEMP_REG: u8 = 128;
+/// Name of the hidden receiver parameter of methods and constructors; the
+/// body sees it as `self` (the name without the leading underscore).
+const RECEIVER: &str = "_self";
 /// Arguments travel in `r1..=r16`.
 const MAX_CALL_ARGS: usize = 16;
 
@@ -53,6 +59,9 @@ struct LoopCtx {
     break_jumps: Vec<usize>,
     /// A `switch` takes `break` but passes `continue` to the enclosing loop.
     is_switch: bool,
+    /// Number of `defer` scopes open when the loop or switch began; leaving
+    /// it runs the deferred statements of the scopes above.
+    defer_depth: usize,
 }
 
 /// A lambda being compiled: what its enclosing scope can see, which of those
@@ -65,15 +74,27 @@ struct CaptureCtx {
     env_slot: u8,
 }
 
+/// An enclosing `try` (or `expr catch`): where a failing `?` goes.
+struct TryCtx {
+    /// Local register that receives the failure value.
+    fail_reg: u8,
+    /// Defer scopes open when the `try` began; scopes above it are left.
+    defer_depth: usize,
+    /// Jumps to the catch clause, patched once its address is known.
+    fail_jumps: Vec<usize>,
+}
+
 /// Per-function compiler state, saved and restored around nested functions.
 struct FnState {
     captures: Vec<CaptureCtx>,
+    defers: Vec<Vec<NodeId>>,
     var_slots: HashMap<String, u8>,
     var_types: HashMap<String, String>,
     cur_ret_type: Option<String>,
     next_local_reg: u8,
     next_reg: u8,
     loops: Vec<LoopCtx>,
+    tries: Vec<TryCtx>,
 }
 
 #[derive(Default)]
@@ -90,6 +111,7 @@ pub struct BytecodeCompiler {
     call_patches: Vec<(usize, String, String, ByteSpan)>,
     const_maps: HashMap<String, CMap>,
     loops: Vec<LoopCtx>,
+    tries: Vec<TryCtx>,
     cur_span: ByteSpan,
     /// Declared return type of the function being compiled.
     cur_ret_type: Option<String>,
@@ -100,6 +122,10 @@ pub struct BytecodeCompiler {
     next_reg: u8,
     /// Enclosing lambdas, innermost last. Empty inside named functions.
     captures: Vec<CaptureCtx>,
+    /// Deferred statements of each open block, innermost last.
+    defers: Vec<Vec<NodeId>>,
+    /// Declared structs: fields with defaults, and whether `self(..)` exists.
+    structs: HashMap<String, lower_struct::StructInfo>,
     /// Arity of every top-level function, so a function can be used as a
     /// value before its body is compiled.
     known_fns: HashMap<String, usize>,
@@ -332,23 +358,27 @@ impl BytecodeCompiler {
     fn save_fn_state(&mut self) -> FnState {
         FnState {
             captures: std::mem::take(&mut self.captures),
+            defers: std::mem::take(&mut self.defers),
             var_slots: std::mem::take(&mut self.var_slots),
             var_types: std::mem::take(&mut self.var_types),
             cur_ret_type: self.cur_ret_type.take(),
             next_local_reg: self.next_local_reg,
             next_reg: self.next_reg,
             loops: std::mem::take(&mut self.loops),
+            tries: std::mem::take(&mut self.tries),
         }
     }
 
     fn restore_fn_state(&mut self, s: FnState) {
         self.captures = s.captures;
+        self.defers = s.defers;
         self.var_slots = s.var_slots;
         self.var_types = s.var_types;
         self.cur_ret_type = s.cur_ret_type;
         self.next_local_reg = s.next_local_reg;
         self.next_reg = s.next_reg;
         self.loops = s.loops;
+        self.tries = s.tries;
     }
 
     /// Compiles `id` with `hint` as the expected type.
@@ -372,6 +402,8 @@ impl BytecodeCompiler {
         self.var_types.clear();
         self.cur_ret_type = None;
         self.loops.clear();
+        self.tries.clear();
+        self.defers.clear();
         self.next_local_reg = FIRST_LOCAL_REG;
         self.next_reg = FIRST_TEMP_REG;
     }

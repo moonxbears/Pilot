@@ -1,0 +1,41 @@
+// defer: LIFO at block exit, on early return (after the value is computed),
+// and on break / continue out of a loop.
+fn work(n: i64) -> i64 {
+    defer print("work: first deferred, runs last");
+    defer print("work: second deferred, runs first");
+    if n > 10 {
+        return n * 2;
+    }
+    {
+        defer print("inner block exit");
+        print("inner block body");
+    }
+    print("work: end of body");
+    return n;
+}
+
+fn traced(n: i64) -> i64 {
+    var x = n;
+    defer print(f"deferred sees x = {x}");
+    x = x + 1;
+    return x;
+}
+
+fn main() {
+    print(work(3));
+    print(work(20));
+    print(traced(5));
+
+    var i = 0;
+    while i < 4 {
+        i = i + 1;
+        defer print(f"leave iteration {i}");
+        if i == 2 {
+            continue;
+        }
+        if i == 3 {
+            break;
+        }
+        print(f"iteration {i}");
+    }
+}

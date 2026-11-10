@@ -46,7 +46,7 @@ impl BytecodeCompiler {
     }
 
     /// Emits a call to `full`, falling back to `bare` when `full` is unknown.
-    fn emit_user_call(&mut self, full: String, bare: String, args: &[u8]) -> u8 {
+    pub(crate) fn emit_user_call(&mut self, full: String, bare: String, args: &[u8]) -> u8 {
         self.stage_args(args);
         let dst = self.alloc_reg();
         let entry = self
@@ -118,13 +118,17 @@ impl BytecodeCompiler {
             && arena.node(args[0]).node_kind() == NodeKind::MapExpr
             && !self.fn_entries.contains_key(name)
         {
-            let mn = *arena.node(args[0]);
-            return self.compile_map_literal(arena, mn.lhs, mn.rhs);
+            return self.compile_struct_literal(arena, name, args[0]);
         }
         // Calling a variable or captured variable calls the function value it holds.
         if let Some(r_callee) = self.var_slots.get(name).copied().or_else(|| self.capture_read(name)) {
             let regs = self.compile_args(arena, args);
             return self.emit_closure_call(r_callee, &regs);
+        }
+        if !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
+            if let Some(r) = self.compile_ctor_call(arena, name, args) {
+                return r;
+            }
         }
         let regs = self.compile_args(arena, args);
         self.emit_user_call(name.to_string(), name.to_string(), &regs)
