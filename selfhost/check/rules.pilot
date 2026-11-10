@@ -1,0 +1,474 @@
+// ==============================================================================
+// FILE: selfhost/check/rules.pilot
+// Diagnostics derived from resolved names and inferred types.
+// ==============================================================================
+//   TYPE001  a value whose type does not fit where it goes (a `let`/`var`
+//            annotation, a parameter of the called function, the declared
+//            return type)
+//   TYPE002  a type annotation naming no type
+//   TYPE003  a cast between unrelated types
+//   FLOW001  a function with a return type that can end without a value
+//   FLOW005  a switch over an enum that misses a variant and has no
+//            catch-all arm
+//   NULL006  reading a member through a value that may be none
+//   NULL005  indexing a value that may be none
+//   OWN001   using an owned local after it was moved
+//   NULL001  `none` stored where the type cannot hold it (a `let`/`var`
+//            annotation or an assignment)
+//   NULL003  `none` returned from a function whose return type cannot hold it
+//   NULL004  `none` passed for a parameter whose type cannot hold it
+//   ERR001   a fallible result dropped without `?`, `catch` or a binding
+//
+// A type can hold `none` when it declares `op ??`; a value is fallible when
+// its type unwraps (`op ?`) but cannot hold `none`. No type is known by name.
+//
+// Each rule reports only when every type it compares is derived. The unknown
+// type, generic parameters and interfaces are accepted everywhere, so what
+// the checker cannot see yet is never reported as an error.
+pub lvl(0) pkg Pilot.SelfHost.Check.Rules;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+
+/// The expression with any unary minus taken off.
+fn strip_negation(s: Snap, e: i64) -> i64 {
+    var cur = e;
+    while cur >= 0 && kind(s, cur) == nk_unary() && flags(s, cur) == 0 { cur = lhs(s, cur); }
+    return cur;
+}
+
+/// Whether a literal expression fits a type of the given register class.
+fn literal_fits(s: Snap, e: i64, class: str) -> bool {
+    let core = strip_negation(s, e);
+    if core < 0 { return false; }
+    let k = kind(s, core);
+    if k == nk_int() { return is_integer_class(class) || is_float_class(class); }
+    if k == nk_float() { return is_float_class(class); }
+    return false;
+}
+
+/// Whether a value of type `src` (the expression `e`, or -1) fits where a
+/// `dst` is expected.
+pub fn assignable(inf: Infer, src: i64, dst: i64, e: i64) -> bool {
+    let p = inf.p;
+    let tt = p.tt;
+    if ty_is_unknown(tt, src) || ty_is_unknown(tt, dst) || src == dst { return true; }
+    if ty_is_param(tt, src) || ty_is_param(tt, dst) { return true; }
+    if prog_is_never(p, src) { return true; }
+    if !ty_is_named(tt, src) || !ty_is_named(tt, dst) { return true; }
+    let sd = ty_decl(tt, src);
+    let dd = ty_decl(tt, dst);
+    if kind(p.s, dd) == nk_interface() || kind(p.s, sd) == nk_interface() { return true; }
+    if node_name(p.s, sd) == node_name(p.s, dd) {
+        let sa = ty_args(tt, src);
+        let da = ty_args(tt, dst);
+        if sa.len() != da.len() { return true; }
+        var i = 0;
+        while i < sa.len() {
+            if !assignable(inf, sa[i], da[i], -1) { return false; }
+            i = i + 1;
+        }
+        return true;
+    }
+    if e >= 0 && literal_fits(p.s, e, prog_class(p, dst)) { return true; }
+    // Implicit lifting: a value fits a type that unwraps (`op ?`) to it.
+    let inner = unwrap_type(p, dst);
+    if !ty_is_unknown(tt, inner) && inner != dst && assignable(inf, src, inner, e) { return true; }
+    return false;
+}
+
+/// The operator a type declares when it can hold `none`.
+pub pure fn op_coalesce_sym() -> str => "??";
+
+/// Whether `t` is derived and cannot hold `none`.
+fn rejects_none(p: Program, t: i64) -> bool =>
+    ty_is_named(p.tt, t) && !ty_is_open(p.tt, t) && prog_member(p, t, op_coalesce_sym()) == none;
+
+fn is_none_literal(s: Snap, e: i64) -> bool => e >= 0 && kind(s, e) == nk_none();
+
+fn mismatch(inf: Infer, src: i64, dst: i64) -> str =>
+    f"expected `{ty_display(inf.p.tt, dst)}`, found `{ty_display(inf.p.tt, src)}`";
+
+/// The function-like node enclosing `n` (`fn`, `op` or closure), or -1.
+fn enclosing_function(p: Program, n: i64) -> i64 {
+    var cur = p.parents[n];
+    while cur >= 0 {
+        let k = kind(p.s, cur);
+        if k == nk_fn() || k == nk_operator() || k == nk_lambda() { return cur; }
+        cur = p.parents[cur];
+    }
+    return -1;
+}
+
+fn check_binding_value(inf: Infer, sink: DiagSink, n: i64) {
+    let s = inf.p.s;
+    let a = annot(s, n);
+    let v = rhs(s, n);
+    if a < 0 || v < 0 { return; }
+    let dst = prog_annot_type(inf.p, a);
+    if is_none_literal(s, v) {
+        if rejects_none(inf.p, dst) {
+            sink_error(sink, n, "NULL001",
+                f"Cannot assign 'none' to non-nullable type '{ty_display(inf.p.tt, dst)}'");
+        }
+        return;
+    }
+    let src = type_of(inf, v);
+    if !assignable(inf, src, dst, v) { sink_error(sink, v, "TYPE001", mismatch(inf, src, dst)); }
+}
+
+fn check_return(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let v = lhs(s, n);
+    if v < 0 { return; }
+    let f = enclosing_function(p, n);
+    if f < 0 || kind(s, f) == nk_lambda() || annot(s, f) < 0 { return; }
+    let dst = prog_annot_type(p, annot(s, f));
+    if is_none_literal(s, v) {
+        if rejects_none(p, dst) {
+            sink_error(sink, n, "NULL003",
+                f"Cannot return 'none' from function with non-nullable return type '{ty_display(p.tt, dst)}'");
+        }
+        return;
+    }
+    let src = type_of(inf, v);
+    if !assignable(inf, src, dst, v) {
+        sink_error(sink, v, "TYPE001",
+            f"`{node_name(s, f)}` returns `{ty_display(p.tt, dst)}`, found `{ty_display(p.tt, src)}`");
+    }
+}
+
+fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let f = called_fn(inf, n);
+    if f < 0 { return; }
+    let params = fn_params(s, f);
+    let ch = children(s, n);
+    if ch.len() - 1 != params.len() { return; }
+    var i = 0;
+    while i < params.len() {
+        let arg = ch[i + 1];
+        if kind(s, arg) == nk_call_arg() { return; }
+        i = i + 1;
+    }
+    i = 0;
+    while i < params.len() {
+        let arg = ch[i + 1];
+        let dst = prog_annot_type(p, rhs(s, params[i]));
+        if is_none_literal(s, arg) {
+            if rejects_none(p, dst) {
+                sink_error(sink, arg, "NULL004",
+                    f"Cannot pass 'none' to non-nullable parameter '{ty_display(p.tt, dst)}'");
+            }
+        } else if !ty_is_open(p.tt, dst) {
+            let src = type_of(inf, arg);
+            if !assignable(inf, src, dst, arg) {
+                sink_error(sink, arg, "TYPE001",
+                    f"argument {i + 1} of `{node_name(s, f)}`: " + mismatch(inf, src, dst));
+            }
+        }
+        i = i + 1;
+    }
+}
+
+/// Every type node reachable from `t`, the node included.
+fn type_nodes(s: Snap, t: i64, out: List<i64>) {
+    if t < 0 || kind(s, t) != nk_type_named() { return; }
+    out.push(t);
+    for a in children(s, t) { type_nodes(s, a, out); }
+}
+
+fn check_type_names(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    var roots: List<i64> = [];
+    var i = 0;
+    while i < s.count {
+        if in_user_file(s, i) {
+            let k = kind(s, i);
+            if annot(s, i) >= 0 { roots.push(annot(s, i)); }
+            if k == nk_param() && rhs(s, i) >= 0 { roots.push(rhs(s, i)); }
+            if k == nk_binary() && (flags(s, i) == op_as() || flags(s, i) == op_as_view()) { roots.push(rhs(s, i)); }
+        }
+        i = i + 1;
+    }
+    for b in s.bases { if b[1] >= 0 && in_user_file(s, b[1]) { roots.push(b[1]); } }
+    var nodes: List<i64> = [];
+    for r in roots { type_nodes(s, r, nodes); }
+    for t in nodes {
+        let name = node_name(s, t);
+        if name.find(".", 0) < 0 && name_is_written(s, t) && !prog_type_name_known(p, t) {
+            sink_error(sink, t, "TYPE002", f"no type named `{name}`");
+        }
+    }
+}
+
+fn check_cast(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let src = type_of(inf, lhs(s, n));
+    let dst = prog_annot_type(p, rhs(s, n));
+    if !ty_is_named(p.tt, src) || !ty_is_named(p.tt, dst) || ty_is_open(p.tt, src) || ty_is_open(p.tt, dst) { return; }
+    if assignable(inf, src, dst, lhs(s, n)) { return; }
+    if prog_class(p, src) != "" && prog_class(p, dst) != "" { return; }
+    if some _m = prog_member(p, src, "as") { return; }
+    sink_error(sink, n, "TYPE003",
+        f"cannot cast `{ty_display(p.tt, src)}` to `{ty_display(p.tt, dst)}`");
+}
+
+/// Whether a `while` loop's condition is the literal `true`.
+fn loops_forever(s: Snap, n: i64) -> bool {
+    let c = lhs(s, n);
+    return c >= 0 && kind(s, c) == nk_bool() && lit_value(s, c) != 0;
+}
+
+/// Whether a `break` inside `n` leaves the loop `n` (not a nested loop,
+/// switch or function).
+fn has_own_break(s: Snap, n: i64, top: bool) -> bool {
+    let k = kind(s, n);
+    if k == nk_break() { return true; }
+    if !top && (k == nk_while() || k == nk_for() || k == nk_match() || k == nk_fn() || k == nk_lambda()) {
+        return false;
+    }
+    for c in children(s, n) {
+        if has_own_break(s, c, false) { return true; }
+    }
+    return false;
+}
+
+/// Whether node `n`, the last item of a block, gives the block a value: an
+/// expression written without a `;` after it. An `if` gives one only when
+/// it has an `else` and both branches end in a value or leave.
+fn is_tail_value(inf: Infer, n: i64) -> bool {
+    let s = inf.p.s;
+    let k = kind(s, n);
+    if k == nk_expr_stmt() {
+        let e = lhs(s, n);
+        return e >= 0 && span_end(s, n) == span_end(s, e) && is_tail_value(inf, e);
+    }
+    if k == nk_if() {
+        let ch = children(s, n);
+        return ch.len() >= 3 && terminates(inf, ch[1]) && terminates(inf, ch[2]);
+    }
+    if k == nk_match() { return missing_variants(inf, n).len() == 0; }
+    if k == nk_for() { return false; }
+    return k >= nk_block() && k < nk_type_named();
+}
+
+/// Whether control cannot leave `n` normally: every path returns, or ends
+/// in a call that never returns, or loops forever.
+fn terminates(inf: Infer, n: i64) -> bool {
+    let p = inf.p;
+    let s = p.s;
+    if n < 0 { return false; }
+    let k = kind(s, n);
+    if k == nk_return() { return true; }
+    if k == nk_block() {
+        let ch = children(s, n);
+        for c in ch {
+            if terminates(inf, c) { return true; }
+        }
+        return ch.len() > 0 && is_tail_value(inf, ch[ch.len() - 1]);
+    }
+    if k == nk_expr_stmt() { return terminates(inf, lhs(s, n)); }
+    if k == nk_if() {
+        let ch = children(s, n);
+        return ch.len() >= 3 && terminates(inf, ch[1]) && terminates(inf, ch[2]);
+    }
+    if k == nk_match() {
+        let ch = children(s, n);
+        if ch.len() < 2 || missing_variants(inf, n).len() > 0 { return false; }
+        var i = 1;
+        while i < ch.len() {
+            if !terminates(inf, rhs(s, ch[i])) { return false; }
+            i = i + 1;
+        }
+        return true;
+    }
+    if k == nk_while() { return loops_forever(s, n) && !has_own_break(s, n, true); }
+    if k == nk_call() { return prog_is_never(p, type_of(inf, n)); }
+    return false;
+}
+
+fn check_missing_return(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let body = fn_body(s, n);
+    if annot(s, n) < 0 || body < 0 || kind(s, body) != nk_block() { return; }
+    let ret = prog_annot_type(p, annot(s, n));
+    if ty_is_unknown(p.tt, ret) || prog_is_zero_width(p, ret) { return; }
+    if !terminates(inf, body) {
+        sink_error(sink, n, "FLOW001",
+            f"`{node_name(s, n)}` must return `{ty_display(p.tt, ret)}`, but not every path returns a value");
+    }
+}
+
+/// Whether a switch arm's pattern matches anything.
+fn is_catch_all(s: Snap, pat: i64) -> bool {
+    if pat < 0 { return false; }
+    let k = kind(s, pat);
+    return k == nk_pat_wildcard() || k == nk_pat_bind();
+}
+
+fn covered_variants(s: Snap, pat: i64, out: List<str>) {
+    if pat < 0 { return; }
+    let k = kind(s, pat);
+    if k == nk_pat_variant() { out.push(sym_text(s, lhs(s, pat))); }
+    if k == nk_pat_or() {
+        covered_variants(s, lhs(s, pat), out);
+        covered_variants(s, rhs(s, pat), out);
+    }
+}
+
+/// The variants of the enum a switch inspects that no arm handles; empty
+/// when the scrutinee is not an enum or an arm matches anything.
+fn missing_variants(inf: Infer, n: i64) -> List<str> {
+    let p = inf.p;
+    let s = p.s;
+    var out: List<str> = [];
+    let ch = children(s, n);
+    if ch.len() == 0 { return out; }
+    let t = type_of(inf, ch[0]);
+    if !ty_is_named(p.tt, t) || kind(s, ty_decl(p.tt, t)) != nk_adt() { return out; }
+    var covered: List<str> = [];
+    var i = 1;
+    while i < ch.len() {
+        let pat = lhs(s, ch[i]);
+        if is_catch_all(s, pat) { return out; }
+        covered_variants(s, pat, covered);
+        i = i + 1;
+    }
+    for v in children(s, ty_decl(p.tt, t)) {
+        if kind(s, v) == nk_variant() {
+            let name = node_name(s, v);
+            var found = false;
+            for c in covered { if c == name { found = true; } }
+            if !found { out.push(name); }
+        }
+    }
+    return out;
+}
+
+fn check_switch(inf: Infer, sink: DiagSink, n: i64) {
+    let missing = missing_variants(inf, n);
+    if missing.len() == 0 { return; }
+    let p = inf.p;
+    let t = type_of(inf, children(p.s, n)[0]);
+    var names = "";
+    var i = 0;
+    while i < missing.len() {
+        if i > 0 { names = names + ", "; }
+        names = names + "`" + missing[i] + "`";
+        i = i + 1;
+    }
+    sink_error(sink, n, "FLOW005", f"switch on `{ty_display(p.tt, t)}` does not handle {names}");
+}
+
+fn check_optional_access(inf: Infer, sink: DiagSink, n: i64, member: str, is_index: bool) {
+    let p = inf.p;
+    let t = type_of(inf, lhs(p.s, n));
+    if !ty_is_named(p.tt, t) || !prog_members_complete(p, t) || !is_unwrappable(p, t) { return; }
+    if some _own = prog_member(p, t, member) { return; }
+    let inner = unwrap_type(p, t);
+    if some _m = prog_member(p, inner, member) {
+        let shown = ty_display(p.tt, t);
+        if is_index {
+            sink_error(sink, n, "NULL005", f"cannot index `{shown}`: the value may be none; unwrap it first");
+        } else {
+            sink_error(sink, n, "NULL006",
+                f"cannot read `{member}` from `{shown}`: the value may be none; unwrap it first");
+        }
+    }
+}
+
+/// The statement of block `block` that contains node `n`, or -1.
+fn statement_in(p: Program, block: i64, n: i64) -> i64 {
+    var cur = n;
+    while cur >= 0 {
+        let up = p.parents[cur];
+        if up == block { return cur; }
+        cur = up;
+    }
+    return -1;
+}
+
+fn check_moves(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    let r = inf.r;
+    var i = 0;
+    while i < s.count {
+        let k = kind(s, i);
+        let v = rhs(s, i);
+        if (k == nk_let() || k == nk_var()) && v >= 0 && kind(s, v) == nk_ident() && r.ref_of[v] >= 0
+            && in_user_file(s, i) {
+            let b = r.ref_of[v];
+            let block = p.parents[i];
+            if block >= 0 && kind(s, block) == nk_block() && r.bind_kind[b] == BindKind::Local
+                && prog_is_owned(p, type_of(inf, v)) {
+                var u = 0;
+                while u < s.count {
+                    if u != v && r.ref_of[u] == b && span_start(s, u) > span_start(s, i) {
+                        let st = statement_in(p, block, u);
+                        if st >= 0 && st != i {
+                            sink_error(sink, u, "OWN001", f"`{r.name[b]}` is used after it was moved");
+                        }
+                    }
+                    u = u + 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+}
+
+fn check_assign(inf: Infer, sink: DiagSink, n: i64) {
+    let s = inf.p.s;
+    let target = lhs(s, n);
+    if !is_none_literal(s, rhs(s, n)) || target < 0 || kind(s, target) != nk_ident() { return; }
+    if rejects_none(inf.p, type_of(inf, target)) {
+        sink_error(sink, n, "NULL001", "Cannot assign 'none' to non-nullable variable");
+    }
+}
+
+/// A call whose fallible result is dropped as a statement.
+fn check_dropped_result(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let e = lhs(p.s, n);
+    if e < 0 || kind(p.s, e) != nk_call() { return; }
+    let t = type_of(inf, e);
+    if is_unwrappable(p, t) && rejects_none(p, t) {
+        sink_error(sink, e, "ERR001", "Unhandled fallible return value; must use '?', 'catch', or assign to a binding");
+    }
+}
+
+/// Runs every rule over the user's files.
+pub fn check_rules(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    check_type_names(inf, sink);
+    var i = 0;
+    while i < s.count {
+        if in_user_file(s, i) {
+            let k = kind(s, i);
+            if k == nk_let() || k == nk_var() || k == nk_const() { check_binding_value(inf, sink, i); }
+            else if k == nk_return() { check_return(inf, sink, i); }
+            else if k == nk_assign() { check_assign(inf, sink, i); }
+            else if k == nk_expr_stmt() { check_dropped_result(inf, sink, i); }
+            else if k == nk_call() { check_call_args(inf, sink, i); }
+            else if k == nk_fn() || k == nk_operator() { check_missing_return(inf, sink, i); }
+            else if k == nk_match() { check_switch(inf, sink, i); }
+            else if k == nk_member() { check_optional_access(inf, sink, i, sym_text(s, rhs(s, i)), false); }
+            else if k == nk_index() { check_optional_access(inf, sink, i, op_index(), true); }
+            else if k == nk_binary() && flags(s, i) == op_as() { check_cast(inf, sink, i); }
+        }
+        i = i + 1;
+    }
+    check_moves(inf, sink);
+}

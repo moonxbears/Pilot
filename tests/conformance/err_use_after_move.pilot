@@ -1,0 +1,14 @@
+// An owned value (its type has `~self()`) cannot be used after it is moved (OWN001).
+struct Holder {
+    pub n: i64;
+    ~self() {
+        print("released");
+    }
+}
+
+fn main() {
+    let first = Holder { n: 5 };
+    let second = first;
+    print(second.n);
+    print(first.n);
+}

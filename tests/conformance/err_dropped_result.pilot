@@ -1,0 +1,12 @@
+// A fallible result dropped without `?`, `catch` or a binding is an error (ERR001).
+fn halve(n: i64) -> i64 ! str {
+    if n % 2 != 0 {
+        return result<i64, str>.err("odd");
+    }
+    return n / 2;
+}
+
+fn main() {
+    halve(3);
+    print("done");
+}

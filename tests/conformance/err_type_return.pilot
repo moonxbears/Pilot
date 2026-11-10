@@ -1,0 +1,8 @@
+// Returning a value of the wrong type is an error (TYPE001).
+fn label() -> i64 {
+    return "ten";
+}
+
+fn main() {
+    print(label());
+}

@@ -1,0 +1,2 @@
+error[TYPE003]: cannot cast `Pair` to `i64`
+err_type_cast.pilot:9:13

@@ -113,6 +113,15 @@ pub fn eval_cli(paths: &[&str], tail: &str, ops: HostOpHandler) -> i32 {
     out.as_int().map_or(EXIT_INTERNAL, |c| c.clamp(0, 255) as i32)
 }
 
+/// Runs a tool with the host operations `ops` and returns its result as a
+/// host value.
+pub fn eval_to_host(paths: &[&str], tail: &str, ops: HostOpHandler) -> pilot_vm::HostValue {
+    let src = link_tool(paths, tail);
+    let (flat, syms) = pilot_analysis::flatten_ast(&src.arena, src.arena.root);
+    let (vm, out) = run_tool(&src, PhysicsRegistry::new(flat, syms), Some(ops));
+    vm.to_host(out)
+}
+
 /// Runs a tool whose engine calls see the tool's own AST.
 pub fn eval(paths: &[&str], tail: &str) -> String {
     let src = link_tool(paths, tail);

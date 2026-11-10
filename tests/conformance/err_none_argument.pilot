@@ -1,0 +1,8 @@
+// `none` cannot be passed for a parameter whose type cannot hold it (NULL004).
+fn twice(n: i64) -> i64 {
+    return n * 2;
+}
+
+fn main() {
+    print(twice(none));
+}

@@ -1,0 +1,2 @@
+error[OWN001]: `first` is used after it was moved
+err_use_after_move.pilot:13:11

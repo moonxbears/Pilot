@@ -1,0 +1,328 @@
+// ==============================================================================
+// FILE: selfhost/check/resolve.pilot
+// Scoped name resolution: every identifier to the local binding it means.
+// ==============================================================================
+// The resolver walks each function body with a stack of bindings. A block
+// opens a scope; `let` and `var` bind after their initializer; parameters,
+// `for` variables, `if some x = ..` (the then branch), `guard some x = ..`
+// (the rest of the block), `catch e` and switch-arm patterns bind where the
+// language says they do. An identifier that no local binding covers is a
+// top-level name, left to the declarations index.
+//
+// From the bindings and their uses it reports:
+//   UNUSED001  a local binding that is never used
+//   UNUSED004  a parameter of a function with a body that is never used
+//   SHADOW001  a local binding that hides a binding of an enclosing scope
+pub lvl(0) pkg Pilot.SelfHost.Check.Resolve;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.diag.*;
+
+/// How a binding was introduced.
+pub enum BindKind : u8 {
+    /// `let`, `var` or `const` in a body.
+    Local,
+    /// A function or closure parameter.
+    Param,
+    /// A `for` loop variable.
+    Loop,
+    /// `if some x = ..` or `guard some x = ..`: the unwrapped value.
+    Unwrapped,
+    /// `catch e`: the error value.
+    Caught,
+    /// A name bound by a switch-arm pattern.
+    Pattern,
+}
+
+pub struct Resolution {
+    pub site: List<i64>;
+    pub name: List<str>;
+    pub bind_kind: List<BindKind>;
+    /// The expression the binding takes its value from, or -1.
+    pub source: List<i64>;
+    /// The binding's type annotation node, or -1.
+    pub annot: List<i64>;
+    /// The function-like node the binding belongs to.
+    pub owner: List<i64>;
+    pub uses: List<i64>;
+    /// Identifier node -> binding index, -1 for names no local binding covers.
+    pub ref_of: List<i64>;
+}
+
+struct Walk {
+    p: Program;
+    r: Resolution;
+    stack: List<i64>;
+    frames: List<i64>;
+    owners: List<i64>;
+    sink: DiagSink;
+}
+
+fn push_frame(w: Walk) { w.frames.push(w.stack.len()); }
+
+fn pop_frame(w: Walk) {
+    let mark = w.frames.pop();
+    while w.stack.len() > mark { w.stack.pop(); }
+}
+
+fn current_owner(w: Walk) -> i64 => if w.owners.len() > 0 { w.owners[w.owners.len() - 1] } else { -1 };
+
+/// The innermost binding named `name`, as a stack position, or -1.
+fn lookup_position(w: Walk, name: str) -> i64 {
+    var i = w.stack.len() - 1;
+    while i >= 0 {
+        if w.r.name[w.stack[i]] == name { return i; }
+        i = i - 1;
+    }
+    return -1;
+}
+
+fn is_plain_name(name: str) -> bool {
+    if name.len() == 0 { return false; }
+    let c = name.byte_at(0);
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
+}
+
+fn declare(w: Walk, site: i64, name: str, bk: BindKind, source: i64, annot_node: i64) {
+    if !is_plain_name(name) { return; }
+    let s = w.p.s;
+    if bk != BindKind::Param && in_user_file(s, site) && name.byte_at(0) != 95 {
+        let pos = lookup_position(w, name);
+        let frame_start = if w.frames.len() > 0 { w.frames[w.frames.len() - 1] } else { 0 };
+        if pos >= 0 && (pos < frame_start || w.r.bind_kind[w.stack[pos]] == BindKind::Param) {
+            sink_warning(w.sink, site, "SHADOW001",
+                f"Local binding '{name}' shadows a binding of the same name in an enclosing scope");
+        }
+    }
+    let index = w.r.site.len();
+    w.r.site.push(site);
+    w.r.name.push(name);
+    w.r.bind_kind.push(bk);
+    w.r.source.push(source);
+    w.r.annot.push(annot_node);
+    w.r.owner.push(current_owner(w));
+    w.r.uses.push(0);
+    w.stack.push(index);
+}
+
+fn walk_all(w: Walk, nodes: List<i64>) {
+    for c in nodes { walk(w, c); }
+}
+
+/// Binds every name a pattern introduces.
+fn bind_pattern(w: Walk, pat: i64, scrutinee: i64) {
+    let s = w.p.s;
+    if pat < 0 { return; }
+    if kind(s, pat) == nk_pat_bind() {
+        declare(w, pat, node_name(s, pat), BindKind::Pattern, -1, -1);
+        return;
+    }
+    for c in children(s, pat) { bind_pattern(w, c, scrutinee); }
+}
+
+fn walk_function(w: Walk, n: i64, params: List<i64>, body: i64) {
+    push_frame(w);
+    w.owners.push(n);
+    for prm in params {
+        if kind(w.p.s, prm) == nk_param() {
+            declare(w, prm, node_name(w.p.s, prm), BindKind::Param, -1, rhs(w.p.s, prm));
+        }
+    }
+    walk(w, body);
+    w.owners.pop();
+    pop_frame(w);
+}
+
+/// `some x = expr` as a condition: the assignment node, or -1.
+fn unwrap_binding(s: Snap, cond: i64) -> i64 {
+    if cond < 0 || kind(s, cond) != nk_unary() || flags(s, cond) != unary_some() { return -1; }
+    let a = lhs(s, cond);
+    if a >= 0 && kind(s, a) == nk_assign() && kind(s, lhs(s, a)) == nk_ident() { return a; }
+    return -1;
+}
+
+/// Whether call `n` builds a struct value: its callee names a type and its
+/// one argument is the field list.
+fn is_struct_literal(w: Walk, n: i64) -> bool {
+    let s = w.p.s;
+    let ch = children(s, n);
+    if ch.len() != 2 || kind(s, ch[1]) != nk_map() || kind(s, ch[0]) != nk_ident() { return false; }
+    return prog_type_decl(w.p, node_name(s, ch[0])) >= 0;
+}
+
+fn walk(w: Walk, n: i64) {
+    if n < 0 { return; }
+    let s = w.p.s;
+    let k = kind(s, n);
+    if k == nk_fn() || k == nk_operator() {
+        walk_function(w, n, fn_params(s, n), fn_body(s, n));
+        return;
+    }
+    if k == nk_ctor() || k == nk_indexer() {
+        let ch = children(s, n);
+        var params: List<i64> = [];
+        var i = 1;
+        while i < ch.len() { params.push(ch[i]); i = i + 1; }
+        walk_function(w, n, params, if ch.len() > 0 { ch[0] } else { -1 });
+        return;
+    }
+    if k == nk_lambda() {
+        let ch = children(s, n);
+        var params: List<i64> = [];
+        var i = 0;
+        while i + 1 < ch.len() { params.push(ch[i]); i = i + 1; }
+        walk_function(w, n, params, rhs(s, n));
+        return;
+    }
+    if k == nk_block() {
+        push_frame(w);
+        walk_all(w, children(s, n));
+        pop_frame(w);
+        return;
+    }
+    if k == nk_let() || k == nk_var() || k == nk_const() {
+        walk(w, rhs(s, n));
+        if w.owners.len() > 0 {
+            declare(w, n, node_name(s, n), BindKind::Local, rhs(s, n), annot(s, n));
+        }
+        return;
+    }
+    if k == nk_for() {
+        let ch = children(s, n);
+        let clause = flags(s, n) - 1;
+        var iterable = -1;
+        var then_branch = -1;
+        if clause >= 0 && clause < s.for_clauses.len() {
+            let c: List<i64> = s.for_clauses[clause];
+            iterable = c[0];
+            then_branch = c[1];
+        }
+        walk(w, iterable);
+        push_frame(w);
+        declare(w, n, sym_text(s, lhs(s, n)), BindKind::Loop, iterable, -1);
+        walk(w, rhs(s, n));
+        pop_frame(w);
+        walk(w, then_branch);
+        return;
+    }
+    if k == nk_if() {
+        let ch = children(s, n);
+        let a = unwrap_binding(s, lhs(s, n));
+        if a < 0 {
+            walk_all(w, ch);
+            return;
+        }
+        walk(w, rhs(s, a));
+        push_frame(w);
+        let target = lhs(s, a);
+        declare(w, target, node_name(s, target), BindKind::Unwrapped, rhs(s, a), -1);
+        if ch.len() > 1 { walk(w, ch[1]); }
+        pop_frame(w);
+        var i = 2;
+        while i < ch.len() { walk(w, ch[i]); i = i + 1; }
+        return;
+    }
+    if k == nk_guard() {
+        let a = lhs(s, n);
+        if a >= 0 && kind(s, a) == nk_assign() && kind(s, lhs(s, a)) == nk_ident() {
+            walk(w, rhs(s, a));
+            walk(w, rhs(s, n));
+            let target = lhs(s, a);
+            declare(w, target, node_name(s, target), BindKind::Unwrapped, rhs(s, a), -1);
+            return;
+        }
+        walk_all(w, children(s, n));
+        return;
+    }
+    if k == nk_catch() {
+        push_frame(w);
+        declare(w, n, sym_text(s, lhs(s, n)), BindKind::Caught, -1, -1);
+        walk(w, rhs(s, n));
+        pop_frame(w);
+        return;
+    }
+    if k == nk_match() {
+        let ch = children(s, n);
+        if ch.len() == 0 { return; }
+        walk(w, ch[0]);
+        var i = 1;
+        while i < ch.len() {
+            let arm = ch[i];
+            push_frame(w);
+            bind_pattern(w, lhs(s, arm), ch[0]);
+            walk(w, rhs(s, arm));
+            pop_frame(w);
+            i = i + 1;
+        }
+        return;
+    }
+    if k == nk_ident() {
+        let pos = lookup_position(w, node_name(s, n));
+        if pos >= 0 {
+            let b = w.stack[pos];
+            w.r.uses[b] = w.r.uses[b] + 1;
+            w.r.ref_of[n] = b;
+        }
+        return;
+    }
+    if k == nk_member() {
+        walk(w, lhs(s, n));
+        return;
+    }
+    if k == nk_call() && is_struct_literal(w, n) {
+        let fields = children(s, children(s, n)[1]);
+        var i = 1;
+        while i < fields.len() { walk(w, fields[i]); i = i + 1; }
+        return;
+    }
+    if k == nk_param() || k == nk_type_named() || k == nk_pat_wildcard() || k == nk_pat_bind() {
+        return;
+    }
+    walk_all(w, children(s, n));
+}
+
+/// Resolves every function body of the program and reports unused and
+/// shadowing bindings in the user's files.
+pub fn resolve_program(p: Program, sink: DiagSink) -> Resolution {
+    var refs: List<i64> = [];
+    var i = 0;
+    while i < p.s.count { refs.push(-1); i = i + 1; }
+    let r = Resolution {
+        site: [], name: [], bind_kind: [], source: [], annot: [], owner: [], uses: [],
+        ref_of: refs,
+    };
+    let w = Walk { p: p, r: r, stack: [], frames: [], owners: [], sink: sink };
+    i = 0;
+    while i < p.s.count {
+        if kind(p.s, i) == nk_program() { walk_all(w, children(p.s, i)); }
+        i = i + 1;
+    }
+    var b = 0;
+    while b < r.site.len() {
+        let site = r.site[b];
+        let name = r.name[b];
+        if r.uses[b] == 0 && in_user_file(p.s, site) && name.byte_at(0) != 95 {
+            if r.bind_kind[b] == BindKind::Param {
+                if fn_has_body(p.s, r.owner[b]) {
+                    sink_warning(sink, site, "UNUSED004",
+                        f"Function parameter '{name}' is never read in the body; prefix with '_' or omit");
+                }
+            } else if r.bind_kind[b] == BindKind::Local {
+                sink_warning(sink, site, "UNUSED001", f"Local binding '{name}' is never used");
+            }
+        }
+        b = b + 1;
+    }
+    return r;
+}
+
+/// Whether a function-like node has a body (interface and `extern`
+/// declarations list only their parameters).
+fn fn_has_body(s: Snap, owner: i64) -> bool {
+    if owner < 0 { return false; }
+    let k = kind(s, owner);
+    if k == nk_fn() || k == nk_operator() { return fn_body(s, owner) >= 0; }
+    return true;
+}

@@ -1,5 +1,6 @@
 //! The `pilot` executable: runs the self-hosted CLI (`selfhost/cli/`) and
 //! exits with the code it returns.
+mod check;
 mod host;
 mod link;
 mod run;

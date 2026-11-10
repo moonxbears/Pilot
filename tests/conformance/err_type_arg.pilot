@@ -1,0 +1,8 @@
+// An argument of the wrong type is an error (TYPE001).
+fn twice(n: i64) -> i64 {
+    return n * 2;
+}
+
+fn main() {
+    print(twice("four"));
+}

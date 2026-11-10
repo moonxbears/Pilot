@@ -11,10 +11,12 @@
 //! | `cli_check` | path | diagnostics (`run::Diag::to_host`) |
 //! | `cli_run` | path, args, tail | `[exit_code, diagnostics]`; not run when there are diagnostics |
 //! | `cli_analyze` | path | the self-hosted analyzer's diagnostics for the file |
+//! | `cli_typecheck` | path, checker files | the type checker's diagnostics in the program's own files (`check.rs`) |
 //! | `cli_functions` | path | `[name, [attributes]]` per top-level function, or `none` |
 //! | `cli_tool` | files, entry call | the tool's result as text |
 //! | `cli_tool_on` | files, entry call, input path | the same, its AST queries seeing the input file |
 
+use crate::check;
 use crate::run::{self, Diag, EXIT_FAILURE};
 use crate::tool;
 use pilot_vm::{HostOpHandler, HostValue};
@@ -50,6 +52,7 @@ pub fn cli_host_ops() -> HostOpHandler {
                 }
             }
             "cli_analyze" => diags(&run::analyze(&text(0))),
+            "cli_typecheck" => diags(&check::check(&text(0), &texts(1))),
             "cli_functions" => run::declared_functions(&text(0)).unwrap_or(HostValue::Null),
             "cli_tool" | "cli_tool_on" => {
                 let files = texts(0);

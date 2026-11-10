@@ -1,0 +1,2 @@
+error[FLOW005]: switch on `Shade` does not handle `Dim`
+err_switch_missing.pilot:9:12

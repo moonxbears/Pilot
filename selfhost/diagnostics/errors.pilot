@@ -239,6 +239,13 @@ pub let ERRORS = [
         reference: "C# CS8602 / Rust Option-index",
     },
     ErrorDef {
+        code: "NULL006",
+        title: "Unchecked Optional Member Access",
+        description: "Cannot read a member through a value that may be none without an explicit unwrap ('?', '??', 'if some', 'guard') or safe navigation '?.'",
+        category: "NullSafety",
+        reference: "C# CS8602 / Kotlin only-safe-calls",
+    },
+    ErrorDef {
         code: "ERR001",
         title: "Unhandled Fallible Result",
         description: "Fallible function returning 'result<T, E>' / 'T ! E' must be handled using '?', 'catch', or 'guard'",

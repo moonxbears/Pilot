@@ -1,0 +1,2 @@
+error[NULL005]: cannot index `option<slice<i64>>`: the value may be none; unwrap it first
+err_optional_index.pilot:11:11

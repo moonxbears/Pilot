@@ -606,16 +606,6 @@ pub fn get_decl_error(target: i64, node_count: i64) -> str {
     }
     return "";
 }
-pub fn is_type_name_or_sym_optional(sym: i64, name: str, node_count: i64) -> bool {
-    let nlen = name.len();
-    if nlen > 0 && name.byte_at(nlen - 1) == 63 { return true; }
-    return nlen == 6 && name.byte_at(0) == 111 && name.byte_at(1) == 112 && name.byte_at(2) == 116 && name.byte_at(3) == 105 && name.byte_at(4) == 111 && name.byte_at(5) == 110;
-}
-pub fn is_type_fallible(sym: i64, name: str, node_count: i64) -> bool {
-    let nlen = name.len(); var idx = 0;
-    while idx < nlen { if name.byte_at(idx) == 33 { return true; } idx = idx + 1; }
-    return nlen == 6 && name.byte_at(0) == 114 && name.byte_at(1) == 101 && name.byte_at(2) == 115 && name.byte_at(3) == 117 && name.byte_at(4) == 108 && name.byte_at(5) == 116;
-}
 pub fn is_same_lexical_scope(caller: i64, target: i64) -> bool {
     var cur = caller; var depth = 0;
     while cur != 4294967295 && cur >= 0 && depth < 30 {
@@ -652,78 +642,9 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-    if ok == 100 || ok == 101 {
-        let ann_sym = __engine(Cfg.ast.ast_node_raw_bits, i);
-        if ann_sym > 0 {
-            let ann_name = __engine(Cfg.ast.sym_str, ann_sym);
-            if !is_type_name_or_sym_optional(ann_sym, ann_name, node_count) {
-                let cc = __engine(Cfg.ast.ast_child_count, i);
-                if cc > 0 {
-                    let init_node = __engine(Cfg.ast.ast_child_at, i, 0);
-                    let init_ok = __engine(Cfg.ast.ast_orig_kind, init_node);
-                    if init_ok == 305 {
-                        emit_diag(i, 1, "NULL001: Cannot assign 'none' to non-nullable type '" + ann_name + "'");
-                        return 1;
-                    }
-                }
-            }
-        }
-    }
-    if ok == 102 {
-        let cc = __engine(Cfg.ast.ast_child_count, i);
-        if cc >= 2 {
-            let rhs = __engine(Cfg.ast.ast_child_at, i, 1);
-            let rhs_ok = __engine(Cfg.ast.ast_orig_kind, rhs);
-            if rhs_ok == 305 {
-                let lhs = __engine(Cfg.ast.ast_child_at, i, 0);
-                let lhs_tid = __engine(Cfg.ast.ast_get_bound_target, lhs);
-                var is_opt = false;
-                if lhs_tid != 4294967295 && lhs_tid >= 0 {
-                    let t_sym = __engine(Cfg.ast.ast_node_raw_bits, lhs_tid);
-                    if t_sym > 0 {
-                        let t_name = __engine(Cfg.ast.sym_str, t_sym);
-                        is_opt = is_type_name_or_sym_optional(t_sym, t_name, node_count);
-                    }
-                }
-                if !is_opt {
-                    emit_diag(i, 1, "NULL001: Cannot assign 'none' to non-nullable variable");
-                    return 1;
-                }
-            }
-        }
-    }
-    if ok == 103 {
-        let cc = __engine(Cfg.ast.ast_child_count, i);
-        if cc > 0 {
-            let ret_val = __engine(Cfg.ast.ast_child_at, i, 0);
-            let val_ok = __engine(Cfg.ast.ast_orig_kind, ret_val);
-            if val_ok == 305 {
-                var cur = i;
-                var enc_fn = -1;
-                var depth = 0;
-                while cur != 4294967295 && cur >= 0 && depth < 30 {
-                    depth = depth + 1;
-                    let pk = __engine(Cfg.ast.ast_node_kind, cur);
-                    if pk == 3 {
-                        enc_fn = cur;
-                        cur = -1;
-                    } else {
-                        cur = __engine(Cfg.ast.ast_parent, cur);
-                    }
-                }
-                if enc_fn >= 0 {
-                    let ret_ty_sym = __engine(Cfg.ast.ast_node_raw_bits, enc_fn);
-                    if ret_ty_sym > 0 {
-                        let rname = __engine(Cfg.ast.sym_str, ret_ty_sym);
-                        if !is_type_name_or_sym_optional(ret_ty_sym, rname, node_count) {
-                            emit_diag(i, 1, "NULL003: Cannot return 'none' from function with non-nullable return type '" + rname + "'");
-                            return 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // NULL001 (`none` stored into a type that cannot hold it), NULL003 and
+    // NULL004 come from the type checker (selfhost/check/rules.pilot), which
+    // knows a type can hold `none` from its `op ??`, not from its name.
     if ok == 207 {
         let target_fn = __engine(Cfg.ast.ast_get_bound_target, i);
         if target_fn != 4294967295 && target_fn >= 0 {
@@ -733,53 +654,14 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
                 return 1;
             }
         }
-        let cc = __engine(Cfg.ast.ast_child_count, i);
-        if cc > 1 {
-            if target_fn != 4294967295 && target_fn >= 0 {
-                let p_cnt = __engine(Cfg.ast.ast_child_count, target_fn);
-                var ai = 1;
-                while ai < cc {
-                    let arg = __engine(Cfg.ast.ast_child_at, i, ai);
-                    let a_ok = __engine(Cfg.ast.ast_orig_kind, arg);
-                    if a_ok == 305 {
-                        if ai < p_cnt {
-                            let param_node = __engine(Cfg.ast.ast_child_at, target_fn, ai);
-                            let psym = __engine(Cfg.ast.ast_node_raw_bits, param_node);
-                            if psym > 0 {
-                                let pname = __engine(Cfg.ast.sym_str, psym);
-                                if !is_type_name_or_sym_optional(psym, pname, node_count) {
-                                    emit_diag(arg, 1, "NULL004: Cannot pass 'none' to non-nullable parameter '" + pname + "'");
-                                    return 1;
-                                }
-                            }
-                        }
-                    }
-                    ai = ai + 1;
-                }
-            }
-        }
     }
-    // Member and index access on an optional value (NULL002 / NULL005 on
-    // `?.`-less access) need the receiver's type: F4 derives them. Guessing
-    // the type from the binding's name reported valid accesses to the
-    // optional record's own members.
+    // Member and index access through an optional value (NULL006, NULL005)
+    // come from the type checker.
     return 0;
 }
 pub fn verify_error_flow(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
-    if ok == 110 && __engine(Cfg.ast.ast_child_count, i) > 0 {
-        let expr = __engine(Cfg.ast.ast_child_at, i, 0);
-        if __engine(Cfg.ast.ast_orig_kind, expr) == 207 {
-            let target_fn = __engine(Cfg.ast.ast_get_bound_target, expr);
-            if target_fn != 4294967295 && target_fn >= 0 {
-                let ret_sym = __engine(Cfg.ast.ast_node_raw_bits, target_fn);
-                if ret_sym > 0 && is_type_fallible(ret_sym, __engine(Cfg.ast.sym_str, ret_sym), node_count) {
-                    emit_diag(expr, 1, "ERR001: Unhandled fallible return value; must use '?', 'catch', or assign to a binding");
-                    return 1;
-                }
-            }
-        }
-    }
+    // ERR001 (a dropped fallible result) comes from the type checker.
     if ok == 111 {
         var p = __engine(Cfg.ast.ast_parent, i);
         var in_polyglot = false;
@@ -1082,112 +964,6 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
 pub fn is_fn_like_kind(ok: i64) -> bool {
     return ok == 3 || ok == 13 || ok == 16 || ok == 18 || ok == 216;
 }
-pub fn is_plain_binding_name(name: str) -> bool {
-    if name.len() == 0 { return false; }
-    let c0 = name.byte_at(0);
-    return (c0 >= 65 && c0 <= 90) || (c0 >= 97 && c0 <= 122) || c0 == 95;
-}
-// The node whose span is the scope of binding `nid`, or -1 if `nid` is not a local binding.
-pub fn binding_scope_owner(nid: i64) -> i64 {
-    let p = __engine(Cfg.ast.ast_parent, nid);
-    if p < 0 || p == 4294967295 { return -1; }
-    let ok = __engine(Cfg.ast.ast_orig_kind, nid);
-    let pok = __engine(Cfg.ast.ast_orig_kind, p);
-    if (ok == 100 || ok == 101) && __engine(Cfg.ast.ast_node_kind, nid) == 4 && pok == 200 { return p; }
-    if ok == 4 && is_fn_like_kind(pok) { return p; }
-    return -1;
-}
-pub fn collect_local_bindings(node_count: i64) -> List<i64> {
-    var out: List<i64> = [];
-    var i = 0;
-    while i < node_count {
-        let ok = __engine(Cfg.ast.ast_orig_kind, i);
-        if ok == 100 || ok == 101 || ok == 4 {
-            let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-            if binding_scope_owner(i) >= 0 && is_plain_binding_name(name) { out.push(i); }
-        }
-        i = i + 1;
-    }
-    return out;
-}
-// Index in `bindings` of the binding a use of `sym` over [start, end) refers to,
-// ignoring index `skip`; -1 when no local binding is visible there.
-pub fn resolve_local(sym: i64, start: i64, end: i64, skip: i64, bindings: List<i64>) -> i64 {
-    var best = -1;
-    var best_start = -1;
-    var bi = 0;
-    let n = bindings.len();
-    while bi < n {
-        let b = bindings[bi];
-        if bi != skip && __engine(Cfg.ast.ast_node_sym, b) == sym && __engine(Cfg.ast.ast_span_end, b) <= start {
-            let owner = binding_scope_owner(b);
-            let b_start = __engine(Cfg.ast.ast_span_start, b);
-            if end <= __engine(Cfg.ast.ast_span_end, owner) && b_start > best_start {
-                best = bi;
-                best_start = b_start;
-            }
-        }
-        bi = bi + 1;
-    }
-    return best;
-}
-// Whether the function-like node `owner` has a body (interface and extern
-// declarations list parameters only).
-pub fn fn_like_has_body(owner: i64) -> bool {
-    let cc = __engine(Cfg.ast.ast_child_count, owner);
-    var ci = 0;
-    while ci < cc {
-        if __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, owner, ci)) != 4 { return true; }
-        ci = ci + 1;
-    }
-    return false;
-}
-// UNUSED001 (local never used), UNUSED004 (parameter never used) and
-// SHADOW001 (local hides a binding of an enclosing scope).
-pub fn verify_local_bindings(node_count: i64, bindings: List<i64>) -> i64 {
-    let n = bindings.len();
-    if n == 0 { return 0; }
-    var uses: List<i64> = [];
-    var bi = 0;
-    while bi < n { uses.push(0); bi = bi + 1; }
-    var i = 0;
-    while i < node_count {
-        if __engine(Cfg.ast.ast_orig_kind, i) == 300 {
-            let r = resolve_local(__engine(Cfg.ast.ast_node_sym, i), __engine(Cfg.ast.ast_span_start, i), __engine(Cfg.ast.ast_span_end, i), -1, bindings);
-            if r >= 0 { uses[r] = uses[r] + 1; }
-        }
-        i = i + 1;
-    }
-    var emitted = 0;
-    bi = 0;
-    while bi < n {
-        let b = bindings[bi];
-        let sym = __engine(Cfg.ast.ast_node_sym, b);
-        let name = __engine(Cfg.ast.sym_str, sym);
-        let is_param = __engine(Cfg.ast.ast_orig_kind, b) == 4;
-        if uses[bi] == 0 && name.byte_at(0) != 95 && !is_kw_contextual_ident(name) {
-            if !is_param {
-                emit_diag(b, 2, "UNUSED001: Local binding '" + name + "' is never used");
-                emitted = emitted + 1;
-            } else if fn_like_has_body(binding_scope_owner(b)) {
-                emit_diag(b, 2, "UNUSED004: Function parameter '" + name + "' is never read in the body; prefix with '_' or omit");
-                emitted = emitted + 1;
-            }
-        }
-        if !is_param {
-            let outer = resolve_local(sym, __engine(Cfg.ast.ast_span_start, b), __engine(Cfg.ast.ast_span_end, b), bi, bindings);
-            if outer >= 0 {
-                let ob = bindings[outer];
-                if __engine(Cfg.ast.ast_orig_kind, ob) == 4 || binding_scope_owner(ob) != binding_scope_owner(b) {
-                    emit_diag(b, 2, "SHADOW001: Local binding '" + name + "' shadows a binding of the same name in an enclosing scope");
-                    emitted = emitted + 1;
-                }
-            }
-        }
-        bi = bi + 1;
-    }
-    return emitted;
-}
 // Start of the innermost function-like node containing node `i`, or -1.
 pub fn innermost_fn_like_start(i: i64, node_count: i64) -> i64 {
     let s = __engine(Cfg.ast.ast_span_start, i);
@@ -1411,8 +1187,8 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         verify_engine_usage(i, is_core);
         i = i + 1;
     }
-    // Pass 6b: Local bindings (UNUSED001, UNUSED004, SHADOW001)
-    verify_local_bindings(node_count, collect_local_bindings(node_count));
+    // UNUSED001, UNUSED004 and SHADOW001 come from the type checker's scoped
+    // name resolution (selfhost/check/resolve.pilot).
     // Pass 7: Propagate declaration errors to corresponding uses later
     i = 0; while i < node_count {
         if __engine(Cfg.ast.ast_node_kind, i) == 14 {

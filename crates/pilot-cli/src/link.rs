@@ -31,6 +31,11 @@ impl LinkedSource {
         Self { arena, files: table }
     }
 
+    /// Path, source text and base offset of each unit, in link order.
+    pub fn units(&self) -> impl Iterator<Item = (&str, &str, u32)> {
+        self.files.iter().map(|(p, s, b)| (p.as_str(), s.as_str(), *b))
+    }
+
     /// The file a span lies in and the span's byte offsets within it.
     pub fn resolve(&self, span: ByteSpan) -> (String, u32, u32) {
         let Some((path, src, base)) = self.files.iter().rev().find(|(_, _, b)| *b <= span.start) else {

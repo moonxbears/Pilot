@@ -47,6 +47,11 @@ pub fn host_check(path: str) -> List<HostDiag> => host_diags(__engine("cli_check
 /// The self-hosted analyzer's diagnostics for the file `path`.
 pub fn host_analyze(path: str) -> List<HostDiag> => host_diags(__engine("cli_analyze", path));
 
+/// The type checker's diagnostics for the program at `path`, in the
+/// program's own files. `checker` lists the checker's sources in link order.
+pub fn host_typecheck(path: str, checker: List<str>) -> List<HostDiag> =>
+    host_diags(__engine("cli_typecheck", path, checker));
+
 /// Compiles and runs `path` with the script arguments `args`. A non-empty
 /// `tail` is linked after the program as its entry and runs instead of `main`.
 pub fn host_run(path: str, args: List<str>, tail: str) -> RunOutcome {

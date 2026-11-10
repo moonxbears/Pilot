@@ -94,7 +94,7 @@ fn val_str(vm: &PilVirtualMachine, v: PilotVal) -> String {
 
 /// The files of the program whose entry is `path`, in link order, as the
 /// loader resolves its `use` declarations.
-fn link_plan(path: &str) -> Result<Vec<String>, Vec<Diag>> {
+pub(crate) fn link_plan(path: &str) -> Result<Vec<String>, Vec<Diag>> {
     let root = tool::toolchain_root();
     let call = format!("mg_link_plan(\"{}\", \"{}\");", pilot_str(path), pilot_str(&root));
     let (vm, plan) = tool::eval_value(LOADER, &call);

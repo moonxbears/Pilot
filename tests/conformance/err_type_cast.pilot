@@ -1,0 +1,11 @@
+// A cast between unrelated types is an error (TYPE003).
+struct Pair {
+    pub left: i64;
+    pub right: i64;
+}
+
+fn main() {
+    let p = Pair { left: 1, right: 2 };
+    let n = p as i64;
+    print(n);
+}

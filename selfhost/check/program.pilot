@@ -1,0 +1,374 @@
+// ==============================================================================
+// FILE: selfhost/check/program.pilot
+// Declarations of the linked program: types, functions, members, slots.
+// ==============================================================================
+// Nothing here knows a Pilot type by name. A type is recognised by what its
+// declaration says about itself:
+//   - `[Lang(Cfg.Lang.<slot>)]` binds it to a receptor slot. The checker asks
+//     for slots, never for names (`prog_slot_type`).
+//   - `[Bits(<width>, <register class>)]` gives its register class; integer
+//     and float literals fit any type of a matching class.
+//   - Its members, in the 4-tier order of AGENTS.md section 4: its own
+//     members, then spliced `*Bundle`/`*Facet` members, then default members
+//     of the interfaces it implements.
+//   - `~self()` makes it an owned type (lattice bit 1).
+pub lvl(0) pkg Pilot.SelfHost.Check.Program;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+
+/// Receptor slot each literal kind takes when nothing else fixes its type.
+/// The slot keys are the `Cfg.Lang` keys of stdlib/core/core.pilot.
+pub fn literal_slot(lit_kind: i64) -> str {
+    if lit_kind == nk_int() { return "i64_t"; }
+    if lit_kind == nk_float() { return "f64_t"; }
+    if lit_kind == nk_str() { return "str_t"; }
+    if lit_kind == nk_bool() { return "bool_t"; }
+    return "";
+}
+
+/// The slot of the bottom type, which a call that never returns has.
+pub pure fn never_slot() -> str => "never_t";
+
+/// Register classes (`Cfg.Reg` keys) whose types hold integers and floats.
+pub fn is_integer_class(class: str) -> bool => class == "gpr_s" || class == "gpr_u";
+pub fn is_float_class(class: str) -> bool => class == "simd_f";
+/// The `Cfg.Reg` width key of a type that holds no value.
+pub pure fn zero_width() -> str => "b0";
+
+/// A node-keyed list of node lists.
+pub struct NodeLists {
+    pub index: Map<str, i64>;
+    pub lists: List<List<i64>>;
+}
+
+pub fn nl_new() -> NodeLists => NodeLists { index: Map<str, i64>(), lists: [] };
+
+pub fn nl_add(m: NodeLists, key: str, v: i64) {
+    if !m.index.has(key) {
+        let fresh: List<i64> = [];
+        m.index.set(key, m.lists.len());
+        m.lists.push(fresh);
+    }
+    let l: List<i64> = m.lists[m.index.get(key)];
+    l.push(v);
+}
+
+pub fn nl_get(m: NodeLists, key: str) -> List<i64> {
+    if !m.index.has(key) { return []; }
+    return m.lists[m.index.get(key)];
+}
+
+pub struct Program {
+    pub s: Snap;
+    pub tt: TypeTable;
+    pub parents: List<i64>;
+    /// Type name -> declarations (`struct`, `enum`, `interface`; partial
+    /// declarations share a name).
+    pub type_decls: NodeLists;
+    /// Function name -> top-level `fn` declarations.
+    pub fns: NodeLists;
+    /// `Type.member` -> member declarations.
+    pub members: NodeLists;
+    /// Type name -> type nodes of its `*Bundle` splices.
+    pub splices: NodeLists;
+    /// Type name -> base type nodes (`: IFoo, IBar`).
+    pub bases: NodeLists;
+    /// Node -> attribute rows.
+    pub attrs: NodeLists;
+    /// Owner node -> generic parameter symbols.
+    pub tparams: NodeLists;
+    /// Slot key -> declaration.
+    pub slots: Map<str, i64>;
+    /// Type name -> `[Bits]` register class and width keys. A type's
+    /// attributes may sit on any of its declarations, so facts are kept by
+    /// name.
+    pub bits_class: Map<str, str>;
+    pub bits_width: Map<str, str>;
+    /// Type node -> its type, once computed (-1 before).
+    pub annot_memo: List<i64>;
+}
+
+fn key(n: i64) -> str => f"{n}";
+
+/// The last name in an attribute argument (`Cfg.Lang.i64_t` -> `i64_t`).
+fn attr_arg_key(s: Snap, a: i64) -> str {
+    let k = kind(s, a);
+    if k == nk_member() { return sym_text(s, rhs(s, a)); }
+    if k == nk_ident() || k == nk_str() || k == nk_type_named() { return node_name(s, a); }
+    return "";
+}
+
+/// The argument keys of the attribute named `name` on node `n`, or none.
+pub fn prog_attr_args(p: Program, n: i64, name: str) -> List<str>? {
+    for row_index in nl_get(p.attrs, key(n)) {
+        let row: List<any> = p.s.attrs[row_index];
+        if sym_text(p.s, row[1]) == name {
+            var out: List<str> = [];
+            let args: List<i64> = row[2];
+            for a in args { out.push(attr_arg_key(p.s, a)); }
+            return out;
+        }
+    }
+    return none;
+}
+
+fn is_type_decl_kind(k: i64) -> bool => k == nk_struct() || k == nk_interface() || k == nk_adt();
+
+fn index_members(p: Program, owner_name: str, decl: i64) {
+    let s = p.s;
+    for m in type_members(s, decl) {
+        let k = kind(s, m);
+        if k == nk_param() || k == nk_fn() || k == nk_operator() || k == nk_indexer()
+            || ((k == nk_let() || k == nk_var()) && annot(s, m) >= 0) {
+            nl_add(p.members, owner_name + "." + node_name(s, m), m);
+        } else if k == nk_expr_stmt() {
+            let u = lhs(s, m);
+            if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 {
+                nl_add(p.splices, owner_name, lhs(s, u));
+            }
+        }
+    }
+}
+
+/// Indexes the declarations of the snapshot.
+pub fn prog_new(s: Snap) -> Program {
+    var memo: List<i64> = [];
+    var i = 0;
+    while i < s.count { memo.push(-1); i = i + 1; }
+    let p = Program {
+        s: s,
+        tt: tt_new(),
+        parents: parents_of(s),
+        type_decls: nl_new(),
+        fns: nl_new(),
+        members: nl_new(),
+        splices: nl_new(),
+        bases: nl_new(),
+        attrs: nl_new(),
+        tparams: nl_new(),
+        slots: Map<str, i64>(),
+        bits_class: Map<str, str>(),
+        bits_width: Map<str, str>(),
+        annot_memo: memo,
+    };
+    var r = 0;
+    while r < s.attrs.len() {
+        let row: List<any> = s.attrs[r];
+        nl_add(p.attrs, key(row[0]), r);
+        r = r + 1;
+    }
+    for tp in s.type_params { nl_add(p.tparams, key(tp[0]), tp[1]); }
+    i = 0;
+    while i < s.count {
+        let k = kind(s, i);
+        if is_type_decl_kind(k) {
+            let name = node_name(s, i);
+            nl_add(p.type_decls, name, i);
+            if k != nk_adt() { index_members(p, name, i); }
+            if some slot = prog_attr_args(p, i, "Lang") {
+                if slot.len() > 0 && !p.slots.has(slot[0]) { p.slots.set(slot[0], i); }
+            }
+            if some bits = prog_attr_args(p, i, "Bits") {
+                if bits.len() >= 2 {
+                    p.bits_width.set(name, bits[0]);
+                    p.bits_class.set(name, bits[1]);
+                }
+            }
+        } else if k == nk_extend() {
+            index_members(p, node_name(s, i), i);
+        } else if k == nk_program() {
+            for c in children(s, i) {
+                if kind(s, c) == nk_fn() {
+                    let name = node_name(s, c);
+                    let dot = name.find(".", 0);
+                    if dot > 0 {
+                        nl_add(p.members, name, c);
+                    } else {
+                        nl_add(p.fns, name, c);
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    for b in s.bases {
+        let owner = b[0];
+        if owner >= 0 && b[1] >= 0 { nl_add(p.bases, node_name(s, owner), b[1]); }
+    }
+    return p;
+}
+
+/// The canonical declaration of type name `name`, or -1.
+pub fn prog_type_decl(p: Program, name: str) -> i64 {
+    let decls = nl_get(p.type_decls, name);
+    if decls.len() == 0 { return -1; }
+    return decls[0];
+}
+
+/// The generic parameter names of declaration `owner`.
+pub fn prog_tparam_names(p: Program, owner: i64) -> List<str> {
+    var out: List<str> = [];
+    for sym in nl_get(p.tparams, key(owner)) { out.push(sym_text(p.s, sym)); }
+    return out;
+}
+
+/// The type of the declaration bound to `slot`, with no type arguments,
+/// or the unknown type when no declaration takes that slot.
+pub fn prog_slot_type(p: Program, slot: str) -> i64 {
+    if !p.slots.has(slot) { return ty_unknown(); }
+    let name = node_name(p.s, p.slots.get(slot));
+    let no_args: List<i64> = [];
+    return ty_named(p.tt, prog_type_decl(p, name), name, no_args);
+}
+
+/// The `[Bits]` register class of a type, or "".
+pub fn prog_class(p: Program, t: i64) -> str {
+    if !ty_is_named(p.tt, t) { return ""; }
+    let d = node_name(p.s, ty_decl(p.tt, t));
+    return if p.bits_class.has(d) { p.bits_class.get(d) } else { "" };
+}
+
+/// Whether a type holds no value (`void`, `never`).
+pub fn prog_is_zero_width(p: Program, t: i64) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    let d = node_name(p.s, ty_decl(p.tt, t));
+    return p.bits_width.has(d) && p.bits_width.get(d) == zero_width();
+}
+
+/// Whether `t` is the bottom type.
+pub fn prog_is_never(p: Program, t: i64) -> bool {
+    return t > 0 && ty_is_named(p.tt, t) && p.slots.has(never_slot())
+        && node_name(p.s, ty_decl(p.tt, t)) == node_name(p.s, p.slots.get(never_slot()));
+}
+
+/// The generic parameter `name` visible at node `at`, as a type, or the
+/// unknown type when no enclosing declaration introduces it.
+fn visible_tparam(p: Program, at: i64, name: str) -> i64 {
+    var cur = at;
+    var depth = 0;
+    while cur >= 0 && depth < 200 {
+        for sym in nl_get(p.tparams, key(cur)) {
+            if sym_text(p.s, sym) == name { return ty_param(p.tt, cur, name); }
+        }
+        cur = p.parents[cur];
+        depth = depth + 1;
+    }
+    return ty_unknown();
+}
+
+/// Whether type node `n` names something: a type declaration or a generic
+/// parameter in scope.
+pub fn prog_type_name_known(p: Program, n: i64) -> bool {
+    let name = node_name(p.s, n);
+    return prog_type_decl(p, name) >= 0 || visible_tparam(p, n, name) > 0;
+}
+
+/// The type a type node denotes.
+pub fn prog_annot_type(p: Program, n: i64) -> i64 {
+    if n < 0 { return ty_unknown(); }
+    if p.annot_memo[n] >= 0 { return p.annot_memo[n]; }
+    var t = ty_unknown();
+    if kind(p.s, n) == nk_type_named() {
+        let name = node_name(p.s, n);
+        let tp = visible_tparam(p, n, name);
+        if tp > 0 {
+            t = tp;
+        } else {
+            let d = prog_type_decl(p, name);
+            if d >= 0 {
+                var args: List<i64> = [];
+                for a in children(p.s, n) { args.push(prog_annot_type(p, a)); }
+                t = ty_named(p.tt, d, name, args);
+            }
+        }
+    }
+    p.annot_memo[n] = t;
+    return t;
+}
+
+/// A member found on a type: its declaration and the generic parameter
+/// names and arguments that apply to its signature.
+pub struct Member {
+    pub decl: i64;
+    pub names: List<str>;
+    pub values: List<i64>;
+}
+
+fn lookup_in(p: Program, type_name: str, decl: i64, args: List<i64>, member: str, depth: i64) -> Member? {
+    if depth > 8 { return none; }
+    let names = prog_tparam_names(p, decl);
+    // Tier 1: the type's own members.
+    let own = nl_get(p.members, type_name + "." + member);
+    if own.len() > 0 {
+        return Member { decl: own[0], names: names, values: args };
+    }
+    // Tier 2: members of spliced bundles and facets.
+    for sp in nl_get(p.splices, type_name) {
+        let st = ty_subst(p.tt, prog_annot_type(p, sp), names, args);
+        if ty_is_named(p.tt, st) {
+            let sd = ty_decl(p.tt, st);
+            if some m = lookup_in(p, node_name(p.s, sd), sd, ty_args(p.tt, st), member, depth + 1) {
+                return m;
+            }
+        }
+    }
+    // Tiers 3 and 4: default members of the interfaces it implements.
+    for b in nl_get(p.bases, type_name) {
+        let bt = ty_subst(p.tt, prog_annot_type(p, b), names, args);
+        if ty_is_named(p.tt, bt) {
+            let bd = ty_decl(p.tt, bt);
+            if some m = lookup_in(p, node_name(p.s, bd), bd, ty_args(p.tt, bt), member, depth + 1) {
+                return m;
+            }
+        }
+    }
+    return none;
+}
+
+/// The member `member` of type `t`, or none when `t` is not a named type or
+/// declares no such member.
+pub fn prog_member(p: Program, t: i64, member: str) -> Member? {
+    if !ty_is_named(p.tt, t) { return none; }
+    let d = ty_decl(p.tt, t);
+    return lookup_in(p, node_name(p.s, d), d, ty_args(p.tt, t), member, 0);
+}
+
+/// Whether the member lookup on `t` is complete: every splice and base of
+/// the type and its parts resolved to a declaration. When it is not, a
+/// missing member may still exist and must not be reported.
+pub fn prog_members_complete(p: Program, t: i64) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    let name = node_name(p.s, ty_decl(p.tt, t));
+    for sp in nl_get(p.splices, name) {
+        if !ty_is_named(p.tt, prog_annot_type(p, sp)) { return false; }
+    }
+    for b in nl_get(p.bases, name) {
+        if !ty_is_named(p.tt, prog_annot_type(p, b)) { return false; }
+    }
+    return true;
+}
+
+/// The declared type of a member: a field's annotation, or the return type
+/// of a method or operator; with the type's arguments substituted.
+pub fn prog_member_type(p: Program, m: Member) -> i64 {
+    let n = m.decl;
+    let k = kind(p.s, n);
+    var t = ty_unknown();
+    if k == nk_param() { t = prog_annot_type(p, rhs(p.s, n)); }
+    else { t = prog_annot_type(p, annot(p.s, n)); }
+    return ty_subst(p.tt, t, m.names, m.values);
+}
+
+/// Whether a type declaration runs code when its value is dropped: it
+/// declares `~self()` (lattice bit 1, an owned `0b10` or `0b11` type).
+pub fn prog_is_owned(p: Program, t: i64) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    let name = node_name(p.s, ty_decl(p.tt, t));
+    for d in nl_get(p.type_decls, name) {
+        for m in type_members(p.s, d) {
+            if kind(p.s, m) == nk_dtor() { return true; }
+        }
+    }
+    return false;
+}

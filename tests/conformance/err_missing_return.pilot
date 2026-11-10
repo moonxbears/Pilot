@@ -1,0 +1,10 @@
+// A function that can fall off its end without a value is an error (FLOW001).
+fn sign(n: i64) -> i64 {
+    if n > 0 {
+        return 1;
+    }
+}
+
+fn main() {
+    print(sign(-3));
+}

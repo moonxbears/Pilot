@@ -1,0 +1,2 @@
+error[ERR001]: Unhandled fallible return value; must use '?', 'catch', or assign to a binding
+err_dropped_result.pilot:10:5

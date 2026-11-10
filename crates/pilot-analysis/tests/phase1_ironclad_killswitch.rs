@@ -214,17 +214,9 @@ fn check_src(src: &str) -> pilot_analysis::AnalysisResult {
 
 #[test]
 fn test_semantic_null_safety_diagnostics() {
-    // 1. NULL001: Assigning 'none' to non-nullable type
-    let res = check_src("fn test_bad() { let x: i64 = none; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL001")), "Expected NULL001 on bad assign: {:?}", res.diagnostics);
-
     // NULL001: Postfix '!' non-null assertion forbidden
     let res = check_src("fn test_bang(x: i64?) -> i64 { return x!; }");
     assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL001")), "Expected NULL001 on postfix '!': {:?}", res.diagnostics);
-
-    // Valid: Assigning 'none' to optional type
-    let res = check_src("fn test_good() { let x: i64? = none; }");
-    assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL001")), "Unexpected NULL001 on optional assign: {:?}", res.diagnostics);
 
     // 2. NULL002: Guard statement without else block
     let res = check_src("fn test_g(x: i64) { guard x > 0; }");
@@ -242,41 +234,15 @@ fn test_semantic_null_safety_diagnostics() {
     let res = check_src("fn test_g4(x: i64) -> i64 { guard x > 0 else { panic(0); } return x; }");
     assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL002")), "Unexpected NULL002 on valid guard panic: {:?}", res.diagnostics);
 
-    // 3. NULL003: Returning 'none' from function with non-nullable return type
-    let res = check_src("fn test_ret() -> i64 { return none; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL003")), "Expected NULL003 on return none: {:?}", res.diagnostics);
-
-    // Valid: Returning 'none' from function with optional return type
-    let res = check_src("fn test_ret_opt() -> i64? { return none; }");
-    assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL003")), "Unexpected NULL003 on optional return: {:?}", res.diagnostics);
-
-    // 4. NULL004: Passing 'none' to non-nullable parameter
-    let res = check_src("fn helper(x: i64) -> i64 { return x; } fn caller() { helper(none); }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL004")), "Expected NULL004 on arg none: {:?}", res.diagnostics);
-
-    // Valid: Passing 'none' to optional parameter
-    let res = check_src("fn helper_opt(x: i64?) -> i64 { return 0; } fn caller_opt() { helper_opt(none); }");
-    assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL004")), "Unexpected NULL004 on optional arg: {:?}", res.diagnostics);
-
-    // NULL002 on member access and NULL005 on index access through an
-    // optional need the receiver's type; they come with the F4 type checker.
+    // NULL001 for `none` stored into a non-optional type, NULL003, NULL004,
+    // NULL005 and NULL006 come from the F4 type checker (selfhost/check/) and
+    // are tested through `pilot check` in crates/pilot-cli/tests/cli_f4.rs.
 }
 
 #[test]
 fn test_semantic_values_first_error_and_loop_diagnostics() {
-    // 1. ERR001: Statement-level call to fallible function discarded
-    let res = check_src("fn try_op() -> i64 ! i64 { return 1; } fn caller() { try_op(); }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("ERR001")), "Expected ERR001 on discarded fallible call: {:?}", res.diagnostics);
-
-    // Valid: Fallible call assigned to a let binding
-    let res = check_src("fn try_op() -> i64 ! i64 { return 1; } fn caller() { let x = try_op(); }");
-    assert!(!res.diagnostics.iter().any(|d| d.message.contains("ERR001")), "Unexpected ERR001 on bound call: {:?}", res.diagnostics);
-
-    // Valid: Fallible call handled with catch recovery
-    let res = check_src("fn try_op() -> i64 ! i64 { return 1; } fn caller() { try_op() catch err => 0; }");
-    assert!(!res.diagnostics.iter().any(|d| d.message.contains("ERR001")), "Unexpected ERR001 on catch call: {:?}", res.diagnostics);
-
-    // 2. ERR005: Legacy try/catch in native Pilot code emits warning
+    // ERR001 comes from the F4 type checker; see crates/pilot-cli/tests/cli_f4.rs.
+    // ERR005: Legacy try/catch in native Pilot code emits warning
     let res = check_src("fn test_try() { try { let a = 1; } catch e { let b = 2; } }");
     assert!(res.diagnostics.iter().any(|d| d.message.contains("ERR005")), "Expected ERR005 on native try/catch: {:?}", res.diagnostics);
 
@@ -410,17 +376,6 @@ fn count_code(res: &pilot_analysis::AnalysisResult, code: &str) -> usize {
     codes_of(res).iter().filter(|c| c.as_str() == code).count()
 }
 
-/// Source text of every `code` diagnostic in `src`, in report order.
-fn flagged_text(src: &str, code: &str) -> Vec<String> {
-    let res = check_src(src);
-    let _ = codes_of(&res);
-    res.diagnostics
-        .iter()
-        .filter(|d| d.code == code)
-        .map(|d| src[d.span.start as usize..d.span.end as usize].to_string())
-        .collect()
-}
-
 #[test]
 fn test_tier_1_1_flow_and_declaration_diagnostics() {
     // FLOW002: Constructor return disallowed
@@ -456,55 +411,6 @@ fn test_tier_1_1_flow_and_declaration_diagnostics() {
     // DECL004: Reassignment to immutable let binding
     let res = check_src("fn test_immut() { let immut = 10; immut = 20; }");
     assert!(res.diagnostics.iter().any(|d| d.message.contains("DECL004")), "Expected DECL004 on immutable let reassignment: {:?}", res.diagnostics);
-}
-
-#[test]
-fn test_tier_1_2_unused_bindings_and_shadowing() {
-    // `scratch` is never read and `spare` is never read; every other binding is.
-    // A name that merely starts with "unused" but is read is not reported.
-    let src = "fn tally(limit: i64, spare: i64) -> i64 {\n    let total = limit * 2;\n    let scratch = 7;\n    var count = 0;\n    count = count + total;\n    let unused_name = 1;\n    return count + unused_name;\n}\n";
-    let unused_locals = flagged_text(src, "UNUSED001");
-    assert_eq!(unused_locals.len(), 1, "{:?}", unused_locals);
-    assert!(unused_locals[0].starts_with("let scratch"), "{:?}", unused_locals);
-    let unused_params = flagged_text(src, "UNUSED004");
-    assert_eq!(unused_params.len(), 1, "{:?}", unused_params);
-    assert!(unused_params[0].starts_with("spare"), "{:?}", unused_params);
-    assert!(flagged_text(src, "SHADOW001").is_empty());
-
-    // A parameter read only inside a closure is used; a closure parameter
-    // that is never read is reported.
-    let src = "fn lift(base: i64) -> i64 {\n    let add = (v, w) => v + base;\n    return add(1, 2);\n}\n";
-    assert!(flagged_text(src, "UNUSED001").is_empty());
-    let params = flagged_text(src, "UNUSED004");
-    assert_eq!(params.len(), 1, "{:?}", params);
-    assert!(params[0].starts_with('w'), "{:?}", params);
-
-    // Bodiless interface methods and `_` names are not reported.
-    let src = "interface IShape { fn area(scale: i64) -> i64; }\nfn keep(_ignored: i64) -> i64 { let _tmp = 1; return 1; }\n";
-    assert!(flagged_text(src, "UNUSED004").is_empty());
-    assert!(flagged_text(src, "UNUSED001").is_empty());
-
-    // A `let` in a nested block hides a parameter of the function.
-    let src = "fn scale(x: i64) -> i64 {\n    if x > 0 {\n        let x = 2;\n        return x;\n    }\n    return x;\n}\n";
-    let shadows = flagged_text(src, "SHADOW001");
-    assert_eq!(shadows.len(), 1, "{:?}", shadows);
-    assert!(shadows[0].starts_with("let x = 2"), "{:?}", shadows);
-}
-
-#[test]
-fn test_tier_1_3_shadowing_conformance_program() {
-    // tests/conformance/shadowing.pilot: the three inner `let x` hide the
-    // outer `x`; `let y = y + 1;` re-declares in the same block, which is not
-    // shadowing an enclosing scope. Every binding is read.
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-    let src = std::fs::read_to_string(root.join("tests/conformance/shadowing.pilot")).expect("read shadowing.pilot");
-    let shadows = flagged_text(&src, "SHADOW001");
-    assert_eq!(shadows.len(), 3, "{:?}", shadows);
-    assert!(shadows[0].starts_with("let x = i * 10"), "{:?}", shadows);
-    assert!(shadows[1].starts_with("let x = \"inner\""), "{:?}", shadows);
-    assert!(shadows[2].starts_with("let x = x + 1"), "{:?}", shadows);
-    assert!(flagged_text(&src, "UNUSED001").is_empty());
-    assert!(flagged_text(&src, "UNUSED004").is_empty());
 }
 
 #[test]

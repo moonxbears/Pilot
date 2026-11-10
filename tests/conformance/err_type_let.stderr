@@ -1,0 +1,2 @@
+error[TYPE001]: expected `i64`, found `str`
+err_type_let.pilot:3:22

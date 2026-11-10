@@ -1,0 +1,2 @@
+error[NULL006]: cannot read `left` from `option<Pair>`: the value may be none; unwrap it first
+err_optional_member.pilot:16:11

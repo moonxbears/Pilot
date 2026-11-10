@@ -41,6 +41,38 @@ pub fn cli_gate_files() -> List<str> => [
     "selfhost/gate/runner.pilot",
 ];
 
+/// The type checker's sources (`selfhost/check/`), in link order.
+pub fn cli_checker_files() -> List<str> => [
+    "selfhost/check/snapshot.pilot",
+    "selfhost/check/types.pilot",
+    "selfhost/check/diag.pilot",
+    "selfhost/check/program.pilot",
+    "selfhost/check/resolve.pilot",
+    "selfhost/check/infer.pilot",
+    "selfhost/check/rules.pilot",
+    "selfhost/check/main.pilot",
+];
+
+fn diag_before(a: HostDiag, b: HostDiag) -> bool =>
+    a.file < b.file || (a.file == b.file && a.start < b.start);
+
+/// The analyzer's and the type checker's diagnostics for a program the seed
+/// accepted, in source order.
+fn semantic_diags(path: str) -> List<HostDiag> {
+    var out: List<HostDiag> = [];
+    for d in host_analyze(path) { out.push(d); }
+    for d in host_typecheck(path, cli_checker_files()) {
+        out.push(d);
+        var at = out.len - 1;
+        while at > 0 && diag_before(d, out[at - 1]) {
+            out[at] = out[at - 1];
+            at = at - 1;
+        }
+        out[at] = d;
+    }
+    return out;
+}
+
 /// The positional arguments as a list.
 pub fn cli_positionals(p: ParsedArgs) -> List<str> {
     var out: List<str> = [];
@@ -99,7 +131,7 @@ pub fn cmd_run(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     if !program.ends_with(".pilc") {
         let compiled = host_check(program);
         if report_diagnostics(compiled) > 0 { return 1; }
-        let analyzed = report_at_least(host_analyze(program), diag_severity_warning());
+        let analyzed = report_at_least(semantic_diags(program), diag_severity_warning());
         if report_diagnostics(analyzed) > 0 { return 1; }
     }
     let outcome = host_run(program, script_args, "");
@@ -120,7 +152,7 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
         let compiled = host_check(f);
         errors = errors + report_diagnostics(compiled);
         // The analyzer reads a program the seed accepted.
-        if compiled.len == 0 { errors = errors + report_diagnostics(host_analyze(f)); }
+        if compiled.len == 0 { errors = errors + report_diagnostics(semantic_diags(f)); }
     }
     if errors > 0 {
         eprint(f"check failed: {errors} error(s)");
