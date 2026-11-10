@@ -1,0 +1,5 @@
+// A value whose type differs from the annotation is an error (TYPE001).
+fn main() {
+    let count: i64 = "seven";
+    print(count);
+}

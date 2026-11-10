@@ -23,3 +23,27 @@ pub struct StringBuilder : IObject {
 pub fn string_builder_new() -> StringBuilder {
     return StringBuilder { content: "" };
 }
+
+/// The decimal integer `text` spells (an optional sign, then digits, with no
+/// surrounding space), or `none` when it spells something else or does not
+/// fit in an `i64`.
+pub fn parse_i64(text: str) -> i64? {
+    let n = text.len();
+    if n == 0 { return none; }
+    let negative = text.byte_at(0) == 45;
+    var at = if negative || text.byte_at(0) == 43 { 1 } else { 0 };
+    if at == n { return none; }
+    // Accumulated as a negative number, whose range includes i64's minimum.
+    var value = 0;
+    while at < n {
+        let b = text.byte_at(at);
+        if b < 48 || b > 57 { return none; }
+        let digit = b - 48;
+        if value < (-9223372036854775807 - 1 + digit) / 10 { return none; }
+        value = value * 10 - digit;
+        at = at + 1;
+    }
+    if negative { return value; }
+    if value == -9223372036854775807 - 1 { return none; }
+    return -value;
+}

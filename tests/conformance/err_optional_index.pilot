@@ -1,0 +1,12 @@
+// Indexing a value that may be none is an error (NULL005).
+fn items(n: i64) -> i64[]? {
+    if n > 0 {
+        return [n, n + 1];
+    }
+    return none;
+}
+
+fn main() {
+    let xs = items(4);
+    print(xs[0]);
+}

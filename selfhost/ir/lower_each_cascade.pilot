@@ -37,7 +37,10 @@ pub struct CascadeLowering : IValue {
     pub is_null_safe:    bool;
     pub receiver_is_opt: bool;
     pub action_count:    usize;
-    pub side_effects_evaluated: bool;
+    /// `?..` on an optional receiver: the lowering tests the receiver for
+    /// `none` once and branches past every action, so no action argument is
+    /// evaluated when it is absent.
+    pub guards_receiver: bool;
 }
 
 [Layout(c_abi)]
@@ -107,7 +110,6 @@ pub fn lower_cascade(
     root_expr: str,
     is_null_safe: bool,
     receiver_is_opt: bool,
-    has_value: bool,
     actions: List<str>,
     var ref diags: List<str>
 ) -> CascadeLowering {
@@ -115,15 +117,14 @@ pub fn lower_cascade(
         diags.push(format_fuse004());
     }
 
-    // In PilIR, if is_null_safe and !has_value, side-effecting action arguments are evaluated 0 times!
-    let side_effects_run = if is_null_safe { has_value } else { true };
+    let guards = is_null_safe && receiver_is_opt;
 
     return CascadeLowering {
         root_expr:              root_expr,
         is_null_safe:           is_null_safe,
         receiver_is_opt:        receiver_is_opt,
         action_count:           actions.len(),
-        side_effects_evaluated: side_effects_run,
+        guards_receiver: guards,
     };
 }
 
@@ -172,4 +173,16 @@ pub fn lower_dto_projection(
         has_missing_fields:  has_missing,
         missing_field_name:  missing,
     };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Hand-off to PilIR
+// ------------------------------------------------------------------------------
+
+/// Emits a cascade lowering into the current PilIR function: the receiver is
+/// evaluated once into a block parameter, a `none` test branches past the
+/// actions when `guards_receiver` is set, and each action is a call on that
+/// parameter. The typed SSA function builder does not exist yet.
+pub fn emit_cascade_ir(lowering: CascadeLowering) -> i64 {
+    return seam("each_cascade.emit_ir", "typed PilIR function builder arrives in F5");
 }

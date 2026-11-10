@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -44,15 +46,21 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_ring(script: &str) -> String {
+    eval_files(
+        &[
+            "selfhost/diagnostics/model.pilot",
+            "selfhost/diagnostics/renderer.pilot",
+            "selfhost/cst/autofix.pilot",
+            "selfhost/loader/ring_verifier.pilot",
+        ],
+        script,
+    )
+}
+
+fn eval_files(deps: &[&str], script: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-    let deps = [
-        "selfhost/diagnostics/model.pilot",
-        "selfhost/diagnostics/renderer.pilot",
-        "selfhost/cst/autofix.pilot",
-        "selfhost/loader/ring_verifier.pilot",
-    ];
     let mut combined = String::new();
-    for rel in &deps {
+    for rel in deps {
         let p = root.join(rel);
         let src = fs::read_to_string(&p)
             .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
@@ -69,7 +77,7 @@ fn eval_ring(script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -248,6 +256,37 @@ pub fn test_m9_4_canonical_std_packages_and_stale_cache_rejection() {
     assert_eq!(parts.len(), 2, "Expected 2 parts, got: {}", res);
     assert_eq!(parts[0], "RING004_OK", "Committed .pilc in stdlib/ must be rejected with RING004");
     assert_eq!(parts[1], "MATCHERS_OK", "Canonical Python-clone matchers must resolve accurately");
+
+    // std.* entry points that need the host stop at their seams.
+    let seams = [
+        ("stdlib/std/fs.pilot", r#"file_handle_open("data.bin", "r");"#, "fs.open"),
+        ("stdlib/std/sync.pilot", "var m = mutex_new<i64>(); mutex_guard_new(var ref m);", "sync.mutex_lock"),
+        ("stdlib/std/task.pilot", "task_handle_new<i64>();", "task.spawn"),
+        ("stdlib/std/os.pilot", "host_system_info();", "os.host_info"),
+    ];
+    for (file, call, id) in seams {
+        let out = eval_files(&[file], call);
+        assert!(
+            out.starts_with(&format!("FAULT: SEAM001: unconnected seam `{}`", id)),
+            "{} must stop at seam {}, got: {}",
+            file,
+            id,
+            out
+        );
+    }
+
+    // A bounded channel refuses a send once it holds `capacity` values.
+    let chan = eval_files(
+        &["stdlib/std/chan.pilot"],
+        r#"var c = chan_new<i64>(2);
+        let a = c.send(1);
+        let b = c.send(2);
+        let full = c.send(3);
+        c.close();
+        let closed = c.send(4);
+        "" + a + "|" + b + "|" + full + "|" + closed + "|" + c.len();"#,
+    );
+    assert_eq!(chan, "true|true|false|false|2", "bounded channel send");
 
     guard.finish();
 }

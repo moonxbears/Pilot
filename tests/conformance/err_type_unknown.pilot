@@ -1,0 +1,5 @@
+// An annotation naming no type is an error (TYPE002).
+fn main() {
+    let spot: Nowhere = 1;
+    print(spot);
+}

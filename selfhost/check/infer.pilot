@@ -1,0 +1,211 @@
+// ==============================================================================
+// FILE: selfhost/check/infer.pilot
+// The type of every expression, derived from declarations and protocols.
+// ==============================================================================
+// Literals take the type of their receptor slot. A local takes its
+// annotation, or the type of the value it was bound to. A call takes the
+// declared return type of the function or method it resolves to, with the
+// generic arguments the receiver or the arguments fix. Postfix `?`, `??` and
+// `catch` unwrap through the operand type's `op ?`; indexing goes through its
+// `op []`. Whatever is not derived yet is the unknown type, which every rule
+// accepts.
+pub lvl(0) pkg Pilot.SelfHost.Check.Infer;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+
+pub struct Infer {
+    pub p: Program;
+    pub r: Resolution;
+    /// Node -> its type; -1 not computed yet, -2 being computed.
+    pub memo: List<i64>;
+}
+
+pub fn infer_new(p: Program, r: Resolution) -> Infer {
+    var memo: List<i64> = [];
+    var i = 0;
+    while i < p.s.count { memo.push(-1); i = i + 1; }
+    return Infer { p: p, r: r, memo: memo };
+}
+
+/// The operator symbols whose declarations the checker reads.
+pub pure fn op_unwrap() -> str => "?";
+pub pure fn op_index() -> str => "[]";
+
+/// The value `t` holds once unwrapped by its `op ?`, or unknown.
+pub fn unwrap_type(p: Program, t: i64) -> i64 {
+    if some m = prog_member(p, t, op_unwrap()) { return prog_member_type(p, m); }
+    return ty_unknown();
+}
+
+/// Whether `t` can be unwrapped (it declares `op ?`).
+pub fn is_unwrappable(p: Program, t: i64) -> bool => prog_member(p, t, op_unwrap()) != none;
+
+/// The function a call's callee names, when it names exactly one top-level
+/// function and no local binding; -1 otherwise.
+pub fn called_fn(inf: Infer, call: i64) -> i64 {
+    let s = inf.p.s;
+    let ch = children(s, call);
+    if ch.len() == 0 { return -1; }
+    let callee = ch[0];
+    if kind(s, callee) != nk_ident() || inf.r.ref_of[callee] >= 0 { return -1; }
+    let fns = nl_get(inf.p.fns, node_name(s, callee));
+    return if fns.len() == 1 { fns[0] } else { -1 };
+}
+
+/// The type a type-name identifier denotes when used as a value receiver
+/// (`Shade::Dim`, `result<..>.err(..)`), with its generic arguments unknown.
+fn type_receiver(inf: Infer, n: i64) -> i64 {
+    let s = inf.p.s;
+    if kind(s, n) != nk_ident() || inf.r.ref_of[n] >= 0 { return ty_unknown(); }
+    let name = node_name(s, n);
+    let d = prog_type_decl(inf.p, name);
+    if d < 0 { return ty_unknown(); }
+    var args: List<i64> = [];
+    for _p in prog_tparam_names(inf.p, d) { args.push(ty_unknown()); }
+    return ty_named(inf.p.tt, d, name, args);
+}
+
+fn binding_type(inf: Infer, b: i64) -> i64 {
+    let r = inf.r;
+    if r.annot[b] >= 0 { return prog_annot_type(inf.p, r.annot[b]); }
+    if r.bind_kind[b] == BindKind::Local && r.source[b] >= 0 { return type_of(inf, r.source[b]); }
+    if r.bind_kind[b] == BindKind::Unwrapped && r.source[b] >= 0 {
+        return unwrap_type(inf.p, type_of(inf, r.source[b]));
+    }
+    return ty_unknown();
+}
+
+/// Binds the generic parameters of function `f` from the argument types of
+/// call `call`: a parameter declared as a bare generic parameter takes the
+/// argument's type.
+fn call_generics(inf: Infer, f: i64, call: i64) -> List<i64> {
+    let s = inf.p.s;
+    let names = prog_tparam_names(inf.p, f);
+    var values: List<i64> = [];
+    for _n in names { values.push(ty_unknown()); }
+    let params = fn_params(s, f);
+    let args = children(s, call);
+    var i = 0;
+    while i < params.len() && i + 1 < args.len() {
+        let pt = prog_annot_type(inf.p, rhs(s, params[i]));
+        if ty_is_param(inf.p.tt, pt) {
+            var j = 0;
+            while j < names.len() {
+                if names[j] == inf.p.tt.name[pt] && values[j] == ty_unknown() {
+                    values[j] = type_of(inf, args[i + 1]);
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return values;
+}
+
+fn call_type(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    let ch = children(s, n);
+    if ch.len() == 0 { return ty_unknown(); }
+    let callee = ch[0];
+    let ck = kind(s, callee);
+    if ck == nk_ident() {
+        let as_type = type_receiver(inf, callee);
+        if ty_is_named(p.tt, as_type) && ch.len() == 2 && kind(s, ch[1]) == nk_map() {
+            return as_type;
+        }
+        let f = called_fn(inf, n);
+        if f < 0 { return ty_unknown(); }
+        let ret = prog_annot_type(p, annot(s, f));
+        return ty_subst(p.tt, ret, prog_tparam_names(p, f), call_generics(inf, f, n));
+    }
+    if ck == nk_member() {
+        let recv = lhs(s, callee);
+        var rt = type_of(inf, recv);
+        if ty_is_unknown(p.tt, rt) { rt = type_receiver(inf, recv); }
+        if some m = prog_member(p, rt, sym_text(s, rhs(s, callee))) {
+            let mk = kind(s, m.decl);
+            if mk == nk_fn() || mk == nk_operator() { return prog_member_type(p, m); }
+        }
+    }
+    return ty_unknown();
+}
+
+fn member_type(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    let recv = lhs(s, n);
+    let name = sym_text(s, rhs(s, n));
+    let rt = type_of(inf, recv);
+    if !ty_is_unknown(p.tt, rt) {
+        if some m = prog_member(p, rt, name) {
+            if kind(s, m.decl) == nk_fn() { return ty_unknown(); }
+            return prog_member_type(p, m);
+        }
+        return ty_unknown();
+    }
+    let as_type = type_receiver(inf, recv);
+    if ty_is_named(p.tt, as_type) && kind(s, ty_decl(p.tt, as_type)) == nk_adt() { return as_type; }
+    return ty_unknown();
+}
+
+fn binary_type(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    let op = flags(s, n);
+    if (op >= op_eq() && op <= op_or()) || op == op_is() { return prog_slot_type(p, literal_slot(nk_bool())); }
+    if op == op_as() || op == op_as_view() { return prog_annot_type(p, rhs(s, n)); }
+    if op == op_coalesce() {
+        let inner = unwrap_type(p, type_of(inf, lhs(s, n)));
+        return if ty_is_unknown(p.tt, inner) { type_of(inf, rhs(s, n)) } else { inner };
+    }
+    if op >= 1 && op <= 7 {
+        let l = type_of(inf, lhs(s, n));
+        return if ty_is_unknown(p.tt, l) { type_of(inf, rhs(s, n)) } else { l };
+    }
+    return ty_unknown();
+}
+
+fn compute(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    let k = kind(s, n);
+    if k == nk_int() || k == nk_float() || k == nk_str() || k == nk_bool() {
+        return prog_slot_type(p, literal_slot(k));
+    }
+    if k == nk_ident() {
+        let b = inf.r.ref_of[n];
+        return if b >= 0 { binding_type(inf, b) } else { ty_unknown() };
+    }
+    if k == nk_call() { return call_type(inf, n); }
+    if k == nk_member() { return member_type(inf, n); }
+    if k == nk_index() {
+        if some m = prog_member(p, type_of(inf, lhs(s, n)), op_index()) { return prog_member_type(p, m); }
+        return ty_unknown();
+    }
+    if k == nk_binary() { return binary_type(inf, n); }
+    if k == nk_unary() {
+        if flags(s, n) == unary_some() { return prog_slot_type(p, literal_slot(nk_bool())); }
+        return type_of(inf, lhs(s, n));
+    }
+    if k == nk_try_propagate() || k == nk_catch_recovery() {
+        return unwrap_type(p, type_of(inf, lhs(s, n)));
+    }
+    if k == nk_expr_stmt() { return type_of(inf, lhs(s, n)); }
+    return ty_unknown();
+}
+
+/// The type of expression `n` (the unknown type when not derived).
+pub fn type_of(inf: Infer, n: i64) -> i64 {
+    if n < 0 { return ty_unknown(); }
+    let m = inf.memo[n];
+    if m >= 0 { return m; }
+    if m == -2 { return ty_unknown(); }
+    inf.memo[n] = -2;
+    let t = compute(inf, n);
+    inf.memo[n] = t;
+    return t;
+}

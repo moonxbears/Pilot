@@ -1,0 +1,9 @@
+// Memberwise construction must set every field that has no default.
+struct Point {
+    x: i64;
+    y: i64;
+}
+
+fn main() {
+    print(Point(1).x);
+}

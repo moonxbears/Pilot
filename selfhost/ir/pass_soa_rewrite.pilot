@@ -129,7 +129,6 @@ pub struct LoweredFieldAccess : IValue {
     pub bit_word_idx:       usize;
     pub bit_shift:          usize;
     pub bit_mask:           u64;
-    pub cacheline_speedup:  usize;
 }
 
 pub fn lower_choreographed_field_access(
@@ -137,16 +136,9 @@ pub fn lower_choreographed_field_access(
     base_ptr: usize,
     row_idx: usize,
     col_idx: usize
-) -> LoweredFieldAccess {
+) -> LoweredFieldAccess? {
     if col_idx >= plan.columns.len() {
-        return LoweredFieldAccess {
-            target_addr:       0,
-            is_bitpacked:      false,
-            bit_word_idx:      0,
-            bit_shift:         0,
-            bit_mask:          0,
-            cacheline_speedup: 1,
-        };
+        return none;
     }
 
     let col = plan.columns[col_idx];
@@ -154,14 +146,12 @@ pub fn lower_choreographed_field_access(
     if plan.strategy == StorageStrategy::SoA {
         let col_base = base_ptr + col.plane_offset;
         let addr = compute_addr_soa(col_base, row_idx, col.byte_size);
-        let speedup = estimate_speedup_factor(plan.columns.len() * col.byte_size, col.byte_size);
         return LoweredFieldAccess {
             target_addr:       addr,
             is_bitpacked:      false,
             bit_word_idx:      0,
             bit_shift:         0,
             bit_mask:          0,
-            cacheline_speedup: speedup,
         };
     } else if plan.strategy == StorageStrategy::AoSoA {
         let w = plan.tile_width;
@@ -179,7 +169,6 @@ pub fn lower_choreographed_field_access(
             bit_word_idx:      0,
             bit_shift:         0,
             bit_mask:          0,
-            cacheline_speedup: 4,
         };
     } else if plan.strategy == StorageStrategy::HotCold {
         let stride = if col.plane_offset >= plan.hot_bytes { plan.cold_bytes } else { plan.hot_bytes };
@@ -191,7 +180,6 @@ pub fn lower_choreographed_field_access(
             bit_word_idx:      0,
             bit_shift:         0,
             bit_mask:          0,
-            cacheline_speedup: 2,
         };
     } else if plan.strategy == StorageStrategy::BitPacked {
         let coord = compute_bitpacked_coord(row_idx, col.element_stride);
@@ -202,7 +190,6 @@ pub fn lower_choreographed_field_access(
             bit_word_idx:      coord.word_index,
             bit_shift:         coord.bit_shift,
             bit_mask:          coord.bit_mask,
-            cacheline_speedup: 8,
         };
     } else {
         // AoS
@@ -219,7 +206,17 @@ pub fn lower_choreographed_field_access(
             bit_word_idx:      0,
             bit_shift:         0,
             bit_mask:          0,
-            cacheline_speedup: 1,
         };
     }
+}
+
+// ------------------------------------------------------------------------------
+// 4. Hand-off to PilIR
+// ------------------------------------------------------------------------------
+
+/// Replaces a `FieldAddr` / `Load` / `Store` on choreographed storage in the
+/// caller's PilIR with the column address arithmetic `access` describes. The
+/// typed SSA IR it rewrites does not exist yet.
+pub fn rewrite_field_access_ir(access: LoweredFieldAccess) -> i64 {
+    return seam("soa.rewrite_ir", "typed PilIR function builder arrives in F5");
 }

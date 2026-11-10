@@ -1,0 +1,11 @@
+// F2: functions, structs, methods and globals linked from other files.
+use lib.shapes;
+
+fn main() {
+    let r = Rect { w: 30, h: 40 };
+    print(r.area());
+    print(r.label());
+    let s = square(50);
+    print(s.area());
+    print(unit_name);
+}

@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -120,7 +122,7 @@ fn eval_m12(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -135,10 +137,25 @@ fn test_m12_1_c_preprocessor_includes_macros_and_integer_eval() {
 
     let script = r##"
         pub fn main() -> i64 {
-            var env = cpp_env_new();
+            var env = cpp_env_new("linux", "x86_64");
             if !cpp_is_defined(env, "__STDC__") { return 1; }
             if !cpp_is_defined(env, "__x86_64__") { return 2; }
             if cpp_get_macro(env, "__STDC_VERSION__") != "201710L" { return 3; }
+            if !cpp_is_defined(env, "__LP64__") || !cpp_is_defined(env, "__linux__") { return 30; }
+
+            // Target macros follow the target: Apple ARM64 is LP64 without
+            // x86 macros; Windows x64 is LLP64 (no __LP64__) and defines _WIN64.
+            let mac = cpp_env_new("macos", "aarch64");
+            if !cpp_is_defined(mac, "__aarch64__") || !cpp_is_defined(mac, "__APPLE__") { return 31; }
+            if cpp_is_defined(mac, "__x86_64__") || cpp_is_defined(mac, "__linux__") { return 32; }
+            let win = cpp_env_new("windows", "x86_64");
+            if !cpp_is_defined(win, "_WIN64") || !cpp_is_defined(win, "_WIN32") { return 33; }
+            if cpp_is_defined(win, "__LP64__") || cpp_is_defined(win, "__unix__") { return 34; }
+
+            // CAB001: an #include no include path resolves.
+            var miss = cpp_env_new("linux", "x86_64");
+            let _ = preprocess_c_header("#include \"no_such_header_m12.h\"\n", "m.h", [], var miss);
+            if cpp_error_code(miss) != "CAB001" { return 35; }
 
             cpp_define_macro(var env, "BUFFER_SIZE", "1024");
             if !cpp_is_defined(env, "BUFFER_SIZE") { return 4; }
@@ -299,6 +316,44 @@ fn test_m12_2_c11_declarative_parser_structs_unions_bitfields_and_enums() {
     ];
     let res = eval_m12(deps, script);
     assert_eq!(res, "42", "C11/C23 parser must accurately extract structs, unions, bitfields, enums, flexible tails, and emit CAB004");
+
+    // A header on disk that includes a second header: the absorber reads
+    // both from disk, the target's data model picks the `#if` branch, and the
+    // layout follows C (int[4] = 16 bytes; LP64 long = 8 bytes).
+    let dir = std::env::temp_dir().join(format!("pilot_m12_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("inner.h"), "#define N 4\ntypedef struct In { int a[N]; int b; } In;\n").unwrap();
+    fs::write(
+        dir.join("outer.h"),
+        "#include \"inner.h\"\n#if defined(__LP64__)\ntypedef struct W { long v; } W;\n#else\ntypedef struct W { char v; } W;\n#endif\n",
+    )
+    .unwrap();
+    let dir_s = dir.to_string_lossy().replace('\\', "/");
+    let file_script = format!(
+        r#"
+        pub fn main() -> i64 {{
+            var diags: List<Diagnostic> = [];
+            let tu = absorb_c_header_file("{dir_s}/outer.h", ["{dir_s}"], "linux", "x86_64", var diags);
+            if tu.records.len() != 2 {{ return 1; }}
+            let inner = tu.records[0];
+            if inner.name != "In" {{ return 2; }}
+            if inner.fields[0].byte_size != 16 {{ return 3; }}
+            if inner.fields[1].byte_offset != 16 {{ return 4; }}
+            let w = tu.records[1];
+            if w.name != "W" || w.fields[0].byte_size != 8 {{ return 5; }}
+            return 42;
+        }}
+    "#
+    );
+    let deps = &[
+        "selfhost/diagnostics/model.pilot",
+        "stdlib/core/file.pilot",
+        "selfhost/adapter/c_pp.pilot",
+        "selfhost/adapter/c_parser.pilot",
+    ];
+    let res = eval_m12(deps, &file_script);
+    let _ = fs::remove_dir_all(&dir);
+    assert_eq!(res, "42", "absorbing a header from disk must follow its #include and the target's #if branches");
 
     guard.finish();
 }

@@ -11,6 +11,112 @@ use Pilot.Core.Memory::*;
 use Pilot.Core.Reflect.TypeLayout;
 use Pilot.Abi.Descriptor.*;
 
+/// The class of one eightbyte of an aggregate (System V AMD64 psABI 3.2.3).
+pub enum EightbyteClass : u8 {
+    NoClass,
+    Integer,
+    Sse,
+    Memory,
+}
+
+/// Merges the class of a member into the class of its eightbyte
+/// (psABI 3.2.3, rule 4).
+pub pure fn sysv_merge_class(a: EightbyteClass, b: EightbyteClass) -> EightbyteClass {
+    if a == b { return a; }
+    if a == EightbyteClass::NoClass { return b; }
+    if b == EightbyteClass::NoClass { return a; }
+    if a == EightbyteClass::Memory || b == EightbyteClass::Memory { return EightbyteClass::Memory; }
+    if a == EightbyteClass::Integer || b == EightbyteClass::Integer { return EightbyteClass::Integer; }
+    return EightbyteClass::Sse;
+}
+
+/// Classifies each eightbyte of an aggregate of `size` bytes from its
+/// flattened members. Aggregates over 16 bytes, and members that are not
+/// naturally aligned, make the whole aggregate `Memory`.
+pub fn sysv_classify_eightbytes(fields: List<AbiFieldClass>, size: u32) -> List<EightbyteClass> {
+    var classes: List<EightbyteClass> = [];
+    if size > 16 || size == 0 {
+        classes.push(EightbyteClass::Memory);
+        return classes;
+    }
+    let words = (size + 7) / 8;
+    var w: u32 = 0;
+    while w < words {
+        classes.push(EightbyteClass::NoClass);
+        w = w + 1;
+    }
+    var i: usize = 0;
+    while i < fields.len() {
+        let f = fields[i];
+        if f.size > 0 && f.offset % f.size != 0 {
+            var mem: List<EightbyteClass> = [EightbyteClass::Memory];
+            return mem;
+        }
+        let cls = if f.is_float() { EightbyteClass::Sse } else { EightbyteClass::Integer };
+        var word = f.offset / 8;
+        let last = (f.offset + f.size - 1) / 8;
+        while word <= last && word < words {
+            classes[word as usize] = sysv_merge_class(classes[word as usize], cls);
+            word = word + 1;
+        }
+        i = i + 1;
+    }
+    // Padding-only eightbytes carry no data; pass them as INTEGER.
+    var k: usize = 0;
+    while k < classes.len() {
+        if classes[k] == EightbyteClass::NoClass { classes[k] = EightbyteClass::Integer; }
+        if classes[k] == EightbyteClass::Memory {
+            var mem: List<EightbyteClass> = [EightbyteClass::Memory];
+            return mem;
+        }
+        k = k + 1;
+    }
+    return classes;
+}
+
+/// The location of a value whose eightbytes are `classes`, given the next
+/// free integer and vector registers; `none`-like `Void` when the
+/// registers run out (the value then goes on the stack).
+pub pure fn sysv_eightbyte_location(
+    classes: List<EightbyteClass>,
+    next_gpr: u8,
+    next_vec: u8,
+    max_gpr: u8,
+    max_vec: u8,
+    size: u32
+) -> ArgLocation {
+    var need_gpr: u8 = 0;
+    var need_vec: u8 = 0;
+    var k: usize = 0;
+    while k < classes.len() {
+        if classes[k] == EightbyteClass::Sse { need_vec = need_vec + 1; } else { need_gpr = need_gpr + 1; }
+        k = k + 1;
+    }
+    if next_gpr + need_gpr > max_gpr || next_vec + need_vec > max_vec {
+        return ArgLocation::void_loc();
+    }
+    if classes.len() == 1 {
+        if classes[0] == EightbyteClass::Sse { return ArgLocation::direct_simd(next_vec, size); }
+        return ArgLocation::direct_gpr(next_gpr, size);
+    }
+    let first_sse = classes[0] == EightbyteClass::Sse;
+    let second_sse = classes[1] == EightbyteClass::Sse;
+    if first_sse && second_sse { return ArgLocation::pair_simd_simd(next_vec, next_vec + 1, size); }
+    if first_sse { return ArgLocation::pair_simd_gpr(next_vec, next_gpr, size); }
+    if second_sse { return ArgLocation::pair_gpr_simd(next_gpr, next_vec, size); }
+    return ArgLocation::pair_gpr_gpr(next_gpr, next_gpr + 1, size);
+}
+
+pub pure fn sysv_count_class(classes: List<EightbyteClass>, cls: EightbyteClass) -> u8 {
+    var n: u8 = 0;
+    var k: usize = 0;
+    while k < classes.len() {
+        if classes[k] == cls { n = n + 1; }
+        k = k + 1;
+    }
+    return n;
+}
+
 pub struct SysVConvClassifier : IValue, ICallingConvClassifier {
     pub static pure fn name() -> str => "sysv_x64";
 
@@ -36,25 +142,36 @@ pub struct SysVConvClassifier : IValue, ICallingConvClassifier {
         var sret_used = false;
         var ret_location = ArgLocation::void_loc();
 
-        // 1. Classify return value
+        // 1. Classify return value (RAX/RDX = return GPRs 0/2, XMM0/XMM1).
         let ret_sz = ret.size_in_bytes;
         let ret_is_agg = ret.reg_class == 5;
         let ret_is_flt = ret.reg_class == 2;
         if ret_sz == 0 {
             ret_location = ArgLocation::void_loc();
         } else if ret_is_agg && ret_sz > 16 {
-            // Sret required: memory class (> 16B). RDI is hidden sret pointer!
+            // MEMORY class: RDI carries the hidden sret pointer, so
+            // explicit argument 0 shifts to RSI.
             sret_used = true;
-            next_gpr = 1; // Explicit arg 0 shifts to RSI (register 1)
+            next_gpr = 1;
             ret_location = ArgLocation::indirect(0, ret_sz as u32);
-        } else if ret_is_agg && ret_sz > 8 && ret_sz <= 16 {
-            // 16-byte struct return: Pair in RAX:RDX
-            ret_location = ArgLocation::pair_gpr_gpr(0, 2, ret_sz as u32);
+        } else if ret_is_agg {
+            let classes = sysv_classify_eightbytes(abi_aggregate_fields(ret), ret_sz as u32);
+            if classes[0] == EightbyteClass::Memory {
+                sret_used = true;
+                next_gpr = 1;
+                ret_location = ArgLocation::indirect(0, ret_sz as u32);
+            } else {
+                // Return registers: integer RAX then RDX (2), vector XMM0 then XMM1.
+                let loc = sysv_eightbyte_location(classes, 0, 0, 2, 2, ret_sz as u32);
+                if loc.kind == ArgPassKind::PairGprGpr {
+                    ret_location = ArgLocation::pair_gpr_gpr(0, 2, ret_sz as u32);
+                } else {
+                    ret_location = loc;
+                }
+            }
         } else if ret_is_flt {
-            // Float/double returned in XMM0
             ret_location = ArgLocation::direct_simd(0, ret_sz as u32);
         } else {
-            // Integer / pointer / small struct returned in RAX
             ret_location = ArgLocation::direct_gpr(0, ret_sz as u32);
         }
 
@@ -74,28 +191,25 @@ pub struct SysVConvClassifier : IValue, ICallingConvClassifier {
                     stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
                 }
             } else if p.reg_class == 5 {
-                if sz <= 8 {
-                    if next_gpr < 6 {
-                        param_locs.push(ArgLocation::direct_gpr(next_gpr, sz));
-                        next_gpr = next_gpr + 1;
-                    } else {
-                        param_locs.push(ArgLocation::stack(stack_offset, sz));
-                        stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                // Aggregates over 16 bytes are MEMORY; smaller ones go by
+                // the classes of their eightbytes, all in registers or all
+                // on the stack.
+                var loc = ArgLocation::void_loc();
+                if sz <= 16 {
+                    let classes = sysv_classify_eightbytes(abi_aggregate_fields(ref p), sz);
+                    if classes[0] != EightbyteClass::Memory {
+                        loc = sysv_eightbyte_location(classes, next_gpr, next_vec, 6, 8, sz);
+                        if loc.kind != ArgPassKind::Void {
+                            next_gpr = next_gpr + sysv_count_class(classes, EightbyteClass::Integer);
+                            next_vec = next_vec + sysv_count_class(classes, EightbyteClass::Sse);
+                        }
                     }
-                } else if sz <= 16 {
-                    if next_gpr + 1 < 6 {
-                        param_locs.push(ArgLocation::pair_gpr_gpr(next_gpr, next_gpr + 1, sz));
-                        next_gpr = next_gpr + 2;
-                    } else {
-                        // Spills completely to memory
-                        param_locs.push(ArgLocation::stack(stack_offset, sz));
-                        stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
-                    }
-                } else {
-                    // Struct > 16 bytes: passed on stack in SysV AMD64
-                    param_locs.push(ArgLocation::stack(stack_offset, sz));
+                }
+                if loc.kind == ArgPassKind::Void {
+                    loc = ArgLocation::stack(stack_offset, sz);
                     stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
                 }
+                param_locs.push(loc);
             } else {
                 // Scalar integer or pointer
                 if next_gpr < 6 {

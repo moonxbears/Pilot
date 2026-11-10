@@ -1,0 +1,220 @@
+// ==============================================================================
+// FILE: selfhost/cli/commands.pilot
+// The handlers of the CLI commands that work today.
+// ==============================================================================
+// Each handler takes the parsed arguments and the command registry and returns
+// the process exit code. `cli_handlers()` maps command names to them; a
+// registered command with no handler stops at the `cli.command_handler` seam
+// (`selfhost/cli/main.pilot`).
+//
+// Exit codes: 0 success, 1 the program or check failed, 2 bad usage.
+pub lvl(0) pkg Pilot.SelfHost.Cli.Commands;
+
+use std.text;
+use Pilot.Diagnostics.Model;
+use Pilot.SelfHost.Cli.Spec;
+use Pilot.SelfHost.Cli.Help;
+use Pilot.SelfHost.Cli.Host;
+use Pilot.SelfHost.Cli.Report;
+use Pilot.SelfHost.Cli.TestCmd;
+
+/// Exit code for a command used wrongly.
+pub pure fn cli_exit_usage() -> i64 => 2;
+
+/// The version line `pilot version` prints.
+pub pure fn cli_version_text() -> str => "Pilot v1.1.51 (Self-Hosted PilVM v3)";
+
+/// The sources of the `pilot gate` runner.
+pub fn cli_gate_files() -> List<str> => [
+    "stdlib/crypto/hash.pilot",
+    "selfhost/lexer.pilot",
+    "selfhost/ast.pilot",
+    "selfhost/parser.pilot",
+    "selfhost/pilotc.pilot",
+    "selfhost/gate/manifest.pilot",
+    "selfhost/gate/seed_audit.pilot",
+    "selfhost/gate/rename_litmus.pilot",
+    "selfhost/gate/bootstrap_parity.pilot",
+    "selfhost/gate/ledger/seams.pilot",
+    "selfhost/gate/ledger/wiring.pilot",
+    "selfhost/gate/seam_gate.pilot",
+    "selfhost/gate/runner.pilot",
+];
+
+/// The type checker's sources (`selfhost/check/`), in link order.
+pub fn cli_checker_files() -> List<str> => [
+    "selfhost/check/snapshot.pilot",
+    "selfhost/check/types.pilot",
+    "selfhost/check/diag.pilot",
+    "selfhost/check/program.pilot",
+    "selfhost/check/resolve.pilot",
+    "selfhost/check/infer.pilot",
+    "selfhost/check/rules.pilot",
+    "selfhost/check/main.pilot",
+];
+
+fn diag_before(a: HostDiag, b: HostDiag) -> bool =>
+    a.file < b.file || (a.file == b.file && a.start < b.start);
+
+/// The analyzer's and the type checker's diagnostics for a program the seed
+/// accepted, in source order.
+fn semantic_diags(path: str) -> List<HostDiag> {
+    var out: List<HostDiag> = [];
+    for d in host_analyze(path) { out.push(d); }
+    for d in host_typecheck(path, cli_checker_files()) {
+        out.push(d);
+        var at = out.len - 1;
+        while at > 0 && diag_before(d, out[at - 1]) {
+            out[at] = out[at - 1];
+            at = at - 1;
+        }
+        out[at] = d;
+    }
+    return out;
+}
+
+/// The positional arguments as a list.
+pub fn cli_positionals(p: ParsedArgs) -> List<str> {
+    var out: List<str> = [];
+    var i: usize = 0;
+    while i < cli_list_len(p.positionals) {
+        out.push(cli_list_get_str(p.positionals, i));
+        i = i + 1;
+    }
+    return out;
+}
+
+fn usage_error(message: str) -> i64 {
+    eprint("error: " + message);
+    return cli_exit_usage();
+}
+
+/// `pilot help`
+pub fn cmd_help(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    print(render_global_help(reg));
+    return 0;
+}
+
+/// `pilot version`
+pub fn cmd_version(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    print(cli_version_text());
+    return 0;
+}
+
+/// `pilot --schema-json`
+pub fn cmd_schema_json(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    print(export_cli_json_schema(reg));
+    return 0;
+}
+
+/// `pilot completions [shell]`
+pub fn cmd_completions(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    let args = cli_positionals(p);
+    let shell = if args.len > 0 { args[0] } else { "bash" };
+    print(emit_shell_completions(reg, shell));
+    return 0;
+}
+
+/// `pilot run <file> [-- args...]`: compiles the program and runs the
+/// analyzer over it, reports their errors and warnings, and refuses to run
+/// it if any is an error; else runs it and exits with its exit code.
+pub fn cmd_run(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    let args = cli_positionals(p);
+    if args.len == 0 { return usage_error("`pilot run` needs a program file"); }
+    var script_args: List<str> = [];
+    var i: usize = 0;
+    while i < cli_list_len(p.passthrough_args) {
+        script_args.push(cli_list_get_str(p.passthrough_args, i));
+        i = i + 1;
+    }
+    let program = args[0];
+    if !program.ends_with(".pilc") {
+        let compiled = host_check(program);
+        if report_diagnostics(compiled) > 0 { return 1; }
+        let analyzed = report_at_least(semantic_diags(program), diag_severity_warning());
+        if report_diagnostics(analyzed) > 0 { return 1; }
+    }
+    let outcome = host_run(program, script_args, "");
+    let _ = report_diagnostics(outcome.diags);
+    return outcome.exit_code;
+}
+
+/// `pilot check <files...>`: reports every diagnostic without running
+/// anything; exits 1 when there is one.
+pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    if parsed_has_flag(p, "fix") {
+        return seam("cli.check_fix", "`pilot check --fix` needs analyzer diagnostics with CST fixes (F4)");
+    }
+    let files = cli_positionals(p);
+    if files.len == 0 { return usage_error("`pilot check` needs at least one file"); }
+    var errors = 0;
+    for f in files {
+        let compiled = host_check(f);
+        errors = errors + report_diagnostics(compiled);
+        // The analyzer reads a program the seed accepted.
+        if compiled.len == 0 { errors = errors + report_diagnostics(semantic_diags(f)); }
+    }
+    if errors > 0 {
+        eprint(f"check failed: {errors} error(s)");
+        return 1;
+    }
+    print(f"check passed: {files.len} file(s), no errors");
+    return 0;
+}
+
+/// `pilot test [paths...] [--filter text]`
+pub fn cmd_test(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    return test_command(cli_positionals(p), parsed_get_str(p, "filter", ""));
+}
+
+/// `pilot gate [...]`: runs the architectural gates.
+pub fn cmd_gate(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    var gate_args = "";
+    for a in cli_positionals(p) { gate_args = gate_args + a + " "; }
+    if parsed_has_flag(p, "full") { gate_args = gate_args + "--full "; }
+    if parsed_has_flag(p, "json") { gate_args = gate_args + "--json "; }
+    if parsed_has_flag(p, "litmus") { gate_args = gate_args + "--litmus "; }
+    if parsed_has_flag(p, "seed") { gate_args = gate_args + "--seed " + parsed_get_str(p, "seed", "0") + " "; }
+    if parsed_has_flag(p, "only") { gate_args = gate_args + "--only " + parsed_get_str(p, "only", "") + " "; }
+    if parsed_has_flag(p, "ratchet-update") { gate_args = gate_args + "--ratchet-update "; }
+    let report = host_tool(cli_gate_files(), f"run_pilot_gate_cli(\".\", \"{gate_args.trim()}\");");
+    // The runner's result is its exit code, a newline, then the report.
+    let nl = report.find("\n", 0);
+    if nl < 0 {
+        print(report);
+        return 1;
+    }
+    print(report.slice(nl + 1, report.len()));
+    return text.parse_i64(report.slice(0, nl)) ?? 1;
+}
+
+/// `pilot emit <lang> <file>`: transpiles a program with the emitter of `lang`.
+pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    let args = cli_positionals(p);
+    if args.len < 2 { return usage_error("`pilot emit` needs a target language and a file"); }
+    let lang = args[0];
+    // The emitter is a toolchain source, found from the toolchain's own
+    // search roots (a language without one stops as an internal error).
+    let emitter = f"selfhost/transpile/emit_{lang}.pilot";
+    if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
+    var out = host_tool_on(["selfhost/transpile/ir.pilot", emitter], f"transpile_arena_to_{lang}();", args[1]);
+    if out.ends_with("\n") { out = out.slice(0, out.len() - 1); }
+    print(out);
+    return 0;
+}
+
+/// The handler of every command that has one, by command name (a CLI map,
+/// `cli_map_*` in `spec.pilot`).
+pub fn cli_handlers() -> i64 {
+    let h = cli_map_new();
+    let _ = cli_map_set(h, "help", cmd_help);
+    let _ = cli_map_set(h, "version", cmd_version);
+    let _ = cli_map_set(h, "schema-json", cmd_schema_json);
+    let _ = cli_map_set(h, "completions", cmd_completions);
+    let _ = cli_map_set(h, "run", cmd_run);
+    let _ = cli_map_set(h, "check", cmd_check);
+    let _ = cli_map_set(h, "test", cmd_test);
+    let _ = cli_map_set(h, "gate", cmd_gate);
+    let _ = cli_map_set(h, "emit", cmd_emit);
+    return h;
+}

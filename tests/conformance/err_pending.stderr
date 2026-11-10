@@ -1,0 +1,3 @@
+runtime error: SEAM001: unconnected seam `demo.frame_code`: native code pointers arrive in F6
+err_pending.pilot:18:12
+err_pending.pilot:25:14

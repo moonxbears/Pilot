@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -135,6 +137,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 fn eval_ir(script: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let deps = [
+        "stdlib/core/pending.pilot",
         "selfhost/ir/model.pilot",
         "selfhost/ir/verifier.pilot",
         "selfhost/ir/pass_manager.pilot",
@@ -160,7 +163,7 @@ fn eval_ir(script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -242,6 +245,15 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
 
         let textual_ir = s_fn + "\n" + s_b0 + "\n" + s_i1 + "\n" + s_i2 + "\n" + s_i3 + "\n}";
 
+        // Two blocks; the jump names `block1` without being a block header.
+        let inst_j = ir_inst_new(3, op_jump(), 0, phy_i64, 0, 1, 24, 4);
+        let two_block_ir = s_fn + "\n" + s_b0 + "\n" + s_i1 + "\n" + print_instruction(inst_j, "block1(v0)") + "\n" +
+            print_block_header(1, "v3: gpr_signed[64:IValue]") + "\n" + s_i3 + "\n}";
+        let two_blocks = parse_ir_count_blocks(two_block_ir);
+        let two_insts = parse_ir_count_instructions(two_block_ir);
+
+        let header = lower_loop_header(loop_tier_fixed_scalar(), "i", phy_i64, phy_bool, "v0", "v1", 3);
+
         let block_cnt = parse_ir_count_blocks(textual_ir);
         let inst_cnt = parse_ir_count_instructions(textual_ir);
 
@@ -251,15 +263,24 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
         clean_stack = scope_cleanup_push(clean_stack, "lease_b");
         let unwound = scope_cleanup_unwind_to_depth(clean_stack, 0);
 
-        block_cnt + "|" + inst_cnt + "|" + unwound;
+        block_cnt + "|" + inst_cnt + "|" + unwound + "|" + two_blocks + "|" + two_insts + "|" + header;
     "#;
 
     let res = eval_ir(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts.len(), 3, "Expected 3 parts, got: {}", res);
+    assert_eq!(parts.len(), 6, "Expected 6 parts, got: {}", res);
     assert_eq!(parts[0], "1", "Expected 1 block");
     assert_eq!(parts[1], "3", "Expected 3 instructions");
-    assert_eq!(parts[2], "unwind_guard_1;unwind_guard_0;", "LIFO scope unwinding failed");
+    // Entries pushed a then b unwind b then a.
+    assert_eq!(parts[2], "lease_b;lease_a;", "LIFO scope unwinding failed");
+    assert_eq!(parts[3], "2", "A jump naming block1 is not a block header");
+    assert_eq!(parts[4], "3", "Expected 3 instructions in the two-block function");
+    // The loop header carries physics, never a source type name.
+    assert_eq!(
+        parts[5],
+        "block3(i: gpr_signed[64:IValue] = v0, i_end: gpr_signed[64:IValue] = v1):",
+        "Fixed-scalar loop header"
+    );
 
     guard.finish();
 }

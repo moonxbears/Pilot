@@ -1,0 +1,5 @@
+// `none` cannot initialise a binding whose type is not optional (NULL001).
+fn main() {
+    let x: i64 = none;
+    print(x);
+}

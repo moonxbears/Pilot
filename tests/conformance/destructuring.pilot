@@ -1,0 +1,40 @@
+// Destructuring `let` and record/slice patterns in `switch`.
+struct Point { var x: i64; var y: i64; }
+
+let (top_a, top_b) = (5, 6);
+
+fn classify(xs: i64[]) -> str {
+    switch xs {
+        case []: return "empty";
+        case [only]: return f"one: {only}";
+        case [first, ..rest]: return f"first {first}, {rest.len()} more";
+    }
+}
+
+fn main() {
+    let (a, b) = (1, 2);
+    println(f"tuple: {a} {b}");
+    println(f"top-level: {top_a} {top_b}");
+
+    let [head, ..mid, last] = [10, 20, 30, 40];
+    println(f"slice: {head} {mid} {last}");
+    let [x0, *tail] = [7];
+    println(f"star rest: {x0} {tail.len()}");
+
+    let payload = ["id": 7, "loc": ["region": "eu", "rack": 3]];
+    let { "id": id, "loc": { "region": region } } = payload;
+    println(f"record: {id} {region}");
+
+    let p = Point(x: 3, y: 4);
+    let { x, y } = p;
+    println(f"shorthand: {x} {y}");
+    switch p {
+        case Point { x: 0, y }: println(f"on the y axis at {y}");
+        case Point { x, y: 4 }: println(f"y is 4, x is {x}");
+        case _: println("elsewhere");
+    }
+
+    println(classify([]));
+    println(classify([9]));
+    println(classify([1, 2, 3]));
+}

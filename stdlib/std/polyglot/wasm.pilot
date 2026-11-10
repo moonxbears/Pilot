@@ -66,9 +66,10 @@ pub struct WasmResourceHandle<R: IAnyValue> : IObject {
         };
     }
 
+    /// Runs the component's `[resource-drop]R` for this handle.
     pub fn drop_handle(var ref self) -> void {
         if self.is_valid {
-            self.is_valid = false;
+            seam("wasm.resource_drop", "calling the component's [resource-drop] export through the WASM interpreter");
         }
     }
 }

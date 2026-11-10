@@ -1,1 +1,2 @@
-error: undefined name `missing_value`
+error[DECL001]: undefined name `missing_value`
+err_undefined_name.pilot:4:11

@@ -6,10 +6,6 @@
 pub lvl(0) pkg Pilot.SelfHost.Cli.InspectCmd;
 
 use Pilot.SelfHost.Inspect.Selector::*;
-use Pilot.SelfHost.Inspect.LayoutLens::*;
-use Pilot.SelfHost.Inspect.MethodLens::*;
-use Pilot.SelfHost.Inspect.PerceusLens::*;
-use Pilot.SelfHost.Inspect.WeaveLens::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -25,44 +21,30 @@ pub fn inspect_cmd_help() -> str {
     return h;
 }
 
+// Which lenses a flag string asks for, as a bit set.
+pub pure fn inspect_lens_weave()   -> u32 => 1;
+pub pure fn inspect_lens_layout()  -> u32 => 2;
+pub pure fn inspect_lens_methods() -> u32 => 4;
+pub pure fn inspect_lens_perceus() -> u32 => 8;
+
+pub fn inspect_parse_lenses(lens_flags: str) -> u32 {
+    var bits: u32 = 0;
+    if lens_flags.find("--all") >= 0 {
+        return inspect_lens_weave() | inspect_lens_layout() | inspect_lens_methods() | inspect_lens_perceus();
+    }
+    if lens_flags.find("--weave") >= 0 { bits = bits | inspect_lens_weave(); }
+    if lens_flags.find("--layout") >= 0 { bits = bits | inspect_lens_layout(); }
+    if lens_flags.find("--methods") >= 0 { bits = bits | inspect_lens_methods(); }
+    if lens_flags.find("--perceus") >= 0 { bits = bits | inspect_lens_perceus(); }
+    return bits;
+}
+
+// Parses the selector and the lens flags, then hands the query to the
+// type-checked program, which does not exist yet: the lenses render facts
+// (woven statements, field offsets, MethodTable winners, Perceus events)
+// that only a checked unit can supply.
 pub fn inspect_run(selector_str: str, lens_flags: str) -> str {
     let q = parse_inspect_selector(selector_str);
-    var out = "=== Pilot Inspect: " + selector_str + " (" + target_kind_name(q.kind) + ") ===\n";
-
-    let show_all = lens_flags.find("--all") >= 0;
-    let show_weave = show_all || lens_flags.find("--weave") >= 0;
-    let show_layout = show_all || lens_flags.find("--layout") >= 0;
-    let show_methods = show_all || lens_flags.find("--methods") >= 0;
-    let show_perceus = show_all || lens_flags.find("--perceus") >= 0;
-
-    if show_weave {
-        out = out + "\n--- Weave Lens (Synthesized Pipelines) ---\n";
-        out = out + format_woven_statement("let x: i64 = 42;", "AttributePipeline", "Clamp", 100);
-    }
-
-    if show_layout {
-        out = out + "\n--- Layout Lens (Physical Anatomy & Cache Lines) ---\n";
-        let f1 = field_probe_new("header", 0, 16, 0, lattice_value(), "HeaderBundle");
-        let f2 = field_probe_new("payload", 16, 32, 0, lattice_value(), "");
-        out = out + render_field_box(f1);
-        out = out + render_field_box(f2);
-    }
-
-    if show_methods {
-        out = out + "\n--- Method Lens (4-Tier Dispatch Resolution) ---\n";
-        let t1 = method_trace_new("get_balance", "() -> f64", 1, "Account", true, "");
-        let t2 = method_trace_new("validate", "() -> bool", 2, "IValidatable", true, "coalesce");
-        out = out + render_method_trace(t1) + "\n";
-        out = out + render_method_trace(t2) + "\n";
-    }
-
-    if show_perceus {
-        out = out + "\n--- Perceus Lens (Exact Reference Counting & Reuse) ---\n";
-        let ev1 = perceus_event_new("buf", "borrow", 10, 5, "");
-        let ev2 = perceus_event_new("buf", "drop_reuse", 25, 5, "NewBuffer");
-        out = out + "  " + format_perceus_marker(ev1) + "\n";
-        out = out + "  " + format_perceus_marker(ev2) + "\n";
-    }
-
-    return out;
+    let lenses = inspect_parse_lenses(lens_flags);
+    return seam("inspect.resolve_target", "resolving a selector against a type-checked PilotDb unit arrives in F4");
 }

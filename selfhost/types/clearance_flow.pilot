@@ -86,6 +86,8 @@ pub var fn enter_elevated_scope(var ref self: ClearanceSolver, new_level: u32, r
 pub var fn exit_elevated_scope(var ref self: ClearanceSolver) {
     if self.depth > 1 {
         let prev_reason = self.frame_reasons[self.depth - 1];
+        self.frame_levels.pop();
+        self.frame_reasons.pop();
         self.depth = self.depth - 1;
         let now_lvl = self.frame_levels[self.depth - 1];
         let audit_msg = "Restored clearance to lvl" + (now_lvl as str) + " on exit from '" + prev_reason + "'";

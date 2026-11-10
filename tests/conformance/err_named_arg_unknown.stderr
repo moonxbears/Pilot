@@ -1,0 +1,3 @@
+`area` has no parameter `depth`
+error[CALL003]:
+err_named_arg_unknown.pilot:5:11

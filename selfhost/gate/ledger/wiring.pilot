@@ -1,0 +1,600 @@
+// ==============================================================================
+// FILE: selfhost/gate/ledger/wiring.pilot
+// THE WIRING LEDGER: how far each capability really works, with proof.
+// ==============================================================================
+// Milestone prose says what a capability should do. This ledger says what it
+// does today. Read it before assuming any feature works, and update it in the
+// same change that moves a capability.
+//
+// Levels, lowest to highest:
+//   SPEC      designed only; no code.
+//   DRAFT     code exists but is not verified on real input.
+//   CORE      the part works on its own on real input, checked against an
+//             answer it did not choose (a reference tool, a published test
+//             vector, a conformance program's expected output). It may stop
+//             at a seam.
+//   WIRED     reachable through the language or the `pilot` CLI, with a
+//             conformance program or CLI run as proof.
+//   COMPLETE  the milestone's acceptance criteria pass through the CLI. Only
+//             the project owner sets this level.
+//   SIMULATED legacy code that returns fixed or caller-supplied values in
+//             place of real behaviour. `evidence` names where. These are
+//             defects to remove: replace the fake with real code or a seam.
+//
+// `blocked_by` lists what must exist first: milestone ids (`F6`), and seam and
+// stand-in ids from `seams.pilot`, separated by spaces. `pilot gate` (the
+// `seams` gate) checks that every CORE level or higher has evidence, that
+// every SIMULATED row says where the fake is, that every id named here is
+// registered, that every stand-in is named by at least one row, and that no
+// row above DRAFT rests on a stand-in.
+pub pkg Pilot.SelfHost.Gate.Ledger.Wiring;
+
+pub enum WiringLevel : u8 {
+    Spec,
+    Draft,
+    Core,
+    Wired,
+    Complete,
+    Simulated,
+}
+
+/// One capability of a milestone and how far it works.
+pub struct Capability : IValue {
+    pub milestone: str;
+    pub name: str;
+    pub level: WiringLevel;
+    /// For CORE and above, how to see it work. For SIMULATED, where the fake
+    /// is. Otherwise a note.
+    pub evidence: str;
+    pub blocked_by: str;
+}
+
+fn cap(milestone: str, name: str, level: WiringLevel, evidence: str, blocked_by: str) -> Capability {
+    return Capability {
+        milestone: milestone,
+        name: name,
+        level: level,
+        evidence: evidence,
+        blocked_by: blocked_by,
+    };
+}
+
+/// `"SPEC"`, `"DRAFT"`, .. for a level.
+pub fn wiring_level_label(level: WiringLevel) -> str {
+    switch level {
+        case ::Spec: return "SPEC";
+        case ::Draft: return "DRAFT";
+        case ::Core: return "CORE";
+        case ::Wired: return "WIRED";
+        case ::Complete: return "COMPLETE";
+        case ::Simulated: return "SIMULATED";
+    }
+    return "";
+}
+
+/// Every tracked capability. Audited 2026-11-09 (see `Audit.md`).
+pub fn wiring_ledger() -> List<Capability> {
+    let rows: List<Capability> = [
+        // Phase F
+        cap("F1", "seed executes every lowered construct", ::Complete,
+            "cargo test -p pilot-cli --test conformance", ""),
+        cap("F2", "module linking, prelude, MOD001/MOD002", ::Complete,
+            "tests/conformance/modules.pilot, err_import_cycle.pilot, err_import_missing.pilot", ""),
+        cap("F3", "pilot run and pilot check render coded diagnostics and exit non-zero", ::Wired,
+            "pilot check tests/conformance/err_undefined_name.pilot; crates/pilot-cli/tests/cli_f3.rs check_*; tests/conformance/err_*.stderr", ""),
+        cap("F3", "seed compile errors carry catalog codes (SYN001 SEED001 DECL001 DECL004 FLOW003 FLOW004 METH001 PAT001 INIT001 VIS001 CALL001 CALL003 DIM002)", ::Wired,
+            "crates/pilot-vm/src/codes.rs; one negative program per code in tests/conformance/err_*.pilot, run by pilot test", ""),
+        cap("F3", "pilot test: conformance corpus, [Test] functions, known bugs", ::Wired,
+            "pilot test; crates/pilot-cli/tests/cli_f3.rs test_runner_* over tests/pilot_test_fixtures/", ""),
+        cap("F3", "commands dispatched through cli_handlers(); unhandled ones fail at a seam", ::Wired,
+            "crates/pilot-cli/tests/cli_f3.rs every_listed_command_works_or_says_it_is_not_implemented", ""),
+        cap("F3", "standard input (std.io read_line, read_all) and process spawn (std.proc run, current_exe)", ::Wired,
+            "tests/conformance/stdin_lines.pilot; tests/pilot_test_fixtures/passing/echo_input.pilot", ""),
+        cap("F3", "self-hosted analyzer diagnostics on pilot check and pilot run (errors stop the run, warnings print)", ::Wired,
+            "selfhost/cli/commands.pilot cmd_check/cmd_run via host_analyze; tests/conformance/err_div_zero, err_none_to_value, err_none_return, err_duplicate_field, err_case_after_wildcard, warn_unused_local, warn_unreachable", ""),
+        cap("F3", "remaining analyzer.pilot rules read the whole linked program", ::Spec,
+            "the type checker reads the linked program; the rules left in selfhost/analyzer.pilot (DIV001, MATCH002, DECL002, FLOW002-004, LOOP*, UNIMP*, HARD001, ENGINE001, VIS001, guard NULL002) still see the entry file alone (crates/pilot-cli/src/run.rs analyze)", "F4"),
+
+        // F4 type checker (selfhost/check/), run by pilot check and pilot run
+        cap("F4", "type checker over the linked program plus the core primitive declarations", ::Wired,
+            "crates/pilot-cli/src/check.rs serves the parser arena (chk_snapshot); selfhost/check/main.pilot; crates/pilot-cli/tests/cli_f4.rs (modules.pilot: nothing reported in stdlib)", ""),
+        cap("F4", "scoped name resolution: locals, parameters, for, if some, guard, catch, switch patterns; UNUSED001 UNUSED004 SHADOW001", ::Wired,
+            "selfhost/check/resolve.pilot; tests/conformance/warn_unused_local.pilot; cli_f4 closures.pilot (calls through a local closure count as uses)", ""),
+        cap("F4", "type inference: literals by receptor slot, locals, calls with generic arguments bound from arguments, fields, methods, op ? / ?? / [] protocols, casts", ::Wired,
+            "selfhost/check/infer.pilot; tests/conformance/types_clean.pilot (cli_f4: no diagnostic); err_type_*.pilot", ""),
+        cap("F4", "type inference for closures, for-loop elements, if/switch/block values and list literals", ::Spec,
+            "infer.pilot gives them the unknown type, which every rule accepts", "F4"),
+        cap("F4", "TYPE001 TYPE002 TYPE003 FLOW001 FLOW005 NULL001 NULL003 NULL004 NULL005 NULL006 ERR001 OWN001 derived from resolved types", ::Wired,
+            "selfhost/check/rules.pilot; one program each in tests/conformance/err_type_let, err_type_arg, err_type_return, err_type_unknown, err_type_cast, err_missing_return, err_switch_missing, err_none_to_value, err_none_return, err_none_argument, err_optional_index, err_optional_member, err_dropped_result, err_use_after_move", ""),
+        cap("F4", "method tables: own members, then spliced *Bundle/*Facet members, then interface defaults", ::Draft,
+            "selfhost/check/program.pilot lookup_in; coalesce/with/without modifiers and static delegation are not applied; selfhost/types/method_table.pilot and bundle_splice.pilot are still called only by tests", "F4"),
+        cap("F4", "2-bit lattice classification stored on each type", ::Draft,
+            "selfhost/check/program.pilot prog_is_owned derives bit 1 from ~self() for OWN001; bit 0 (borrows memory) and field-wise propagation are not computed", "F4"),
+        cap("F4", "OWN001 beyond `let b = a;` in straight-line code (moves into calls, returns, loops, branches)", ::Spec,
+            "rules.pilot check_moves reports only a use in a later statement of the same block", "F4 F7"),
+        cap("F4", "generic constraints checked (TYPE004, TYPE005)", ::Spec,
+            "crates/pilot-parser parse_generic_params drops the constraint types; only the parameter names reach type_params", "F4"),
+        cap("F4", "renamed core types (M1 rename pairs) still type-check and run", ::Spec,
+            "the checker knows types by receptor slot, register class and protocol, not by name; running a renamed stdlib needs the rename litmus run", "F4 gate.litmus_run_program"),
+
+        cap("F1", "seed takes core syntax, native bindings and primitives from the stdlib it runs with", ::Spec,
+            "crates/pilot-parser/src/lib.rs bootstrap_tables() bakes them in with include_str!; primitive_sources() reads CARGO_MANIFEST_DIR at run time; blocks the real rename litmus and installed binaries", "F4"),
+
+        // M1 gate
+        cap("M1", "source scans GATE001-GATE007", ::Wired, "pilot gate; milestone01 test_m1_1_dynamic_vocabulary_harvester_and_fast_gate001_slice_injection", ""),
+        cap("M1", "gate CLI surface: --json, --full, --seed, exit 2 on bad flag", ::Wired,
+            "milestone01 test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status", ""),
+        cap("M1", "gate seam status: [SEAM] lines, at_seam/at_seams JSON, exit 0 only for registered seams", ::Wired,
+            "pilot gate --full; milestone01 test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status", ""),
+        cap("M1", "stage-2 == stage-3 parity GATE009", ::Draft,
+            "selfhost/gate/bootstrap_parity.pilot compares sha256 of stage 2 and stage 3 built from selfhost/pilotc.pilot; the stage build stops at its seam, so `pilot gate --full` reports [SEAM] bootstrap_parity (milestone01 test_m1_4)", "F8 bootstrap.stage_compile"),
+        cap("M1", "pilotc compiles a Pilot program to C11", ::Spec,
+            "selfhost/pilotc.pilot pilotc_compile_source_to_c11 stops at its seam (milestone61 test_61_2)", "F8 pilotc.compile_c11"),
+        cap("M1", "rename litmus sandbox: copy stdlib/ and conformance programs, rename core names consistently", ::Core,
+            "selfhost/gate/rename_litmus.pilot rl_rename_pilot_identifiers checked against hand-written renames (milestone01 test_m1_3); the gate builds and removes the sandbox on every --full run", ""),
+        cap("M1", "dual-pass rename litmus GATE008 runs renamed programs", ::Draft,
+            "program runs stop at their seam, so `pilot gate --full` reports [SEAM] rename_litmus. Once spawn exists the seed still reads core syntax and native bindings compiled in (crates/pilot-parser/src/lib.rs bootstrap_tables include_str!), so a renamed sandbox stdlib cannot change them: by hand, renamed tests/conformance/collections.pilot fails with `no function named s.window`", "F6 F4 gate.litmus_run_program"),
+        cap("M1", "type audit GATE010", ::Spec, "type_audit.pilot not written", ""),
+        cap("M1", "Gate 3 performance and leak checks", ::Spec, "no implementation", "F7"),
+
+        // M2 module graph and reflection
+        cap("M2", "per-unit spans, no concatenation drift", ::Core,
+            "milestone02 test_m2_1_exact_line_col_preservation_without_span_drift", ""),
+        cap("M2", "transitive module graph on the run path, MOD001/MOD002", ::Wired,
+            "tests/conformance/modules.pilot, err_import_cycle.pilot, err_import_missing.pilot", ""),
+        cap("M2", "path normalization (Windows/UNC/drive letters)", ::Core,
+            "milestone02 test_m2_3_pure_pilot_module_graph_and_pragma_suppression", ""),
+        cap("M2", "pragma interval suppression", ::Core,
+            "milestone02 test_m2_3_pure_pilot_module_graph_and_pragma_suppression; selfhost/loader/pragma_filter.pilot has no caller", "M2"),
+        cap("M2", "env() target arch/os/pointer_bytes/endian at comptime", ::Core,
+            "milestone02 test_m2_2_comptime_and_runtime_env_reflection_parity (checked against std::env::consts)", ""),
+        cap("M2", "ENV.target backend at comptime (the seed VM that runs comptime code)", ::Core,
+            "milestone02 test_m2_2_comptime_and_runtime_env_reflection_parity (env().target.backend is \"vm\")", ""),
+        cap("M2", "ENV.target simd_width_bits/cache_line_bytes/opt_level", ::Spec,
+            "stdlib/core/reflect.pilot env() returns pending values; the engine publishes none of them", "reflect.target_simd_width reflect.target_cache_line reflect.target_opt_level"),
+        cap("M2", "env() at run time", ::Spec, "stdlib/core/reflect.pilot:1064 stops at seam", "reflect.target_descriptor"),
+        cap("M2", "CompileEnvView lookup_type/symbols_in_pkg/ast_root", ::Spec,
+            "stdlib/core/reflect.pilot:1045-1053 stop at seams", "reflect.lookup_type reflect.symbols_in_pkg reflect.ast_root F4"),
+        cap("M2", "pilot emit <lang>: fns, structs, let/var, while, if/else, arithmetic", ::Core,
+            "milestone57 test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host_toolchains (rustc/clang/clang++/python3/node/lua run the output)", ""),
+        cap("M2", "pilot emit <lang>: lists, for, f-strings, print, entry call", ::Draft,
+            "selfhost/transpile/emit_*.pilot walk the real AST; constructs they cannot lower stop at the emit.unlowered_* seams instead of emitting `0` (list literals, closures); `while xs` (binding lost) for `for x in xs`, `\"t=\" + n` for f\"t={n}\", call print() unmapped, never call main; C emits int64_t main", "emit.unlowered_expr emit.unlowered_literal emit.unlowered_operator F5"),
+        cap("M2", "pilot from <lang>", ::Spec, "pilot from stops at seam cli.command_handler", "cli.command_handler F6"),
+
+        // M3 CLI
+        cap("M3", "registry-driven parsing, help, completions, schema, CLI001-CLI004", ::Wired,
+            "pilot --help; pilot biuld; milestone03 test_m3_1_command_registry_and_typo_suggestions, test_m3_3_dynamic_shell_completions_and_schema_json", ""),
+        cap("M3", "GNU flag binding (--k=v, -k v, bool shorts) and -- passthrough", ::Wired,
+            "milestone03 test_m3_2_posix_gnu_argument_parser_and_passthrough; tests/conformance/script_args.pilot", ""),
+        cap("M3", "direct script invocation (pilot file.pilot)", ::Wired, "pilot tests/conformance/arith_int.pilot", ""),
+        cap("M3", "command handlers for build, compile, fmt, repl, pkg, deps, tree, venv, lsp, debug, perf, from, map, ide-sync", ::Spec,
+            "dispatch goes through cli_handlers() (selfhost/cli/commands.pilot); these stop at seam cli.command_handler", "cli.command_handler F6"),
+
+        // M4 dual syntax
+        cap("M4", "readable and symbolic forms parse to one AST", ::Core,
+            "milestone04 test_m4_1_identifier_non_collision_and_prefix_projection, test_m4_2_dual_syntax_equivalence_and_identical_codegen", ""),
+        cap("M4", "keyword pairing reflection and hover", ::Core,
+            "milestone04 test_m4_4_universal_rename_litmus_and_ide_reflection", ""),
+        cap("M4", "call-quote modes (! !! !& !^ !@ !?) execute", ::Spec,
+            "tests/conformance/err_call_quote.pilot stops at vm.call_quote (crates/pilot-vm/src/lower_call.rs)", "vm.call_quote F4"),
+        cap("M4", "readable/compact formatter styles", ::Draft,
+            "selfhost/fmt/fmt.pilot rewrites tokens, not the CST; pilot fmt stops at cli.command_handler", "cli.command_handler"),
+
+        // M5 PilotDb
+        cap("M5", "red-green memo engine, durability watermarks, early cutoff", ::Core,
+            "milestone05 test_m5_1_early_cutoff_counter_proof, test_m5_2_signature_change_propagation_proof (exact exec/hit counts)", ""),
+        cap("M5", "DB001 query cycle detection", ::Draft, "selfhost/db/engine.pilot:274; untested", ""),
+        cap("M5", "Fingerprint128", ::Draft, "selfhost/db/revision.pilot:113 is an FNV-style hash, not truncated BLAKE3", "db.fingerprint"),
+        cap("M5", "queries SourceText, ItemSignature, ImportScope, LexTokens", ::Core,
+            "milestone05 test_m5_2 (hand-worked signatures), test_m5_3_identical_cold_vs_incremental_oracle (token texts spell the source)", ""),
+        cap("M5", "queries LosslessCst, ExpandedAst, DefTypesAndLattice, FileDiagnostics", ::Spec,
+            "selfhost/db/engine.pilot:366-388 stop at seams; milestone05 test_m5_3", "db.lossless_cst db.expanded_ast db.def_types db.file_diagnostics"),
+        cap("M5", "URI canonicalization and .pilc-cache round trip with version reject", ::Core,
+            "milestone05 test_m5_4_multiplatform_uri_normalization_and_persistent_cache_io", ""),
+        cap("M5", "tools (check/build/fmt/lsp) share one PilotDb", ::Spec, "no tool queries PilotDb", "cli.command_handler F4"),
+
+        // M6 PilIR
+        cap("M6", "IrModule/IrFunction/IrBlock data model", ::Spec, "not written; selfhost/ir/model.pilot has only IrTypePhysics, IrInst, opcodes", "F5 ir.fixed_layout_ids"),
+        cap("M6", "AST lowering to PilIR (lower_unit_to_ir)", ::Draft, "selfhost/ir/lower_ast.pilot emits text fragments; loop headers now carry physics, not type names (milestone06 test_m6_2)", "F4 F5"),
+        cap("M6", "verifier IR001-IR008", ::Draft, "selfhost/ir/verifier.pilot:120,163 run on pipe-encoded opcodes/idoms, not IR; milestone06 test_m6_1, test_m6_4", "F5"),
+        cap("M6", "pass manager, IPilIrPass, fixed-point cap IR007", ::Draft, "selfhost/ir/pass_manager.pilot is a name list; no pass runs on IR", "F5"),
+        cap("M6", "core passes (fold, identities, DCE, CFG)", ::Draft, "selfhost/ir/passes_core.pilot decision helpers only; milestone06 test_m6_3", "F5"),
+        cap("M6", "textual printer and round-trip parser", ::Draft, "selfhost/ir/printer.pilot:118 counts header/instruction lines; no parse_ir_module", "F5"),
+        cap("M6", "target descriptor ABI facts", ::Core, "milestone06 test_m6_4 (SysV 6, Win64 4 + 32B shadow, AAPCS64 8)", ""),
+        cap("M6", "target descriptor build settings (backend, endianness)", ::Draft,
+            "selfhost/ir/model.pilot target_descriptor_new fixes them for every target", "ir.target_defaults F5"),
+        cap("M6", "backends consume IR; delete selfhost/transpile/ir.pilot", ::Spec, "transpile/ir.pilot still the pilot emit path", "F5"),
+
+        // M7 inspect
+        cap("M7", "selector parsing", ::Core, "milestone07 test_m7_1", ""),
+        cap("M7", "layout lens math (padding, reorder savings)", ::Core, "milestone07 test_m7_2 checks C struct layout {u8,u64,u8,u64}=32B vs reordered 24B", ""),
+        cap("M7", "layout lens cache-line crossing count", ::Draft,
+            "selfhost/inspect/layout_lens.pilot:46 counts lines of a fixed size", "inspect.cache_line"),
+        cap("M7", "method/perceus/weave lens renderers", ::Draft, "selfhost/inspect/*.pilot format caller-built records", "inspect.resolve_target"),
+        cap("M7", "pilot inspect", ::Spec, "selfhost/cli/inspect_cmd.pilot:49 stops at its seam after parsing; command not registered", "inspect.resolve_target cli.command_handler F4"),
+
+        // M8 diagnostics
+        cap("M8", "human renderer with UTF-8 display width", ::Wired, "milestone08 test_m8_3; renders every pilot run / pilot check diagnostic (crates/pilot-cli/tests/cli_f3.rs)", ""),
+        cap("M8", "JSON and SARIF 2.1.0 output", ::Core, "milestone08 test_m8_4", "M8"),
+        cap("M8", "--explain catalog", ::Draft, "selfhost/diagnostics/renderer.pilot:273 if-chain of 6 codes; ignores errors/warnings/infos catalogs", "M8"),
+        cap("M8", "lexical autofix (SYN001 SYN002 DECL005 SYN003) and lossless apply", ::Core, "milestone08 test_m8_1 compares the hand-applied fixed source exactly", "cli.check_fix"),
+        cap("M8", "semantic autofix (DECL004 BORROW001)", ::Spec, "selfhost/cst/autofix.pilot:430", "autofix.semantic_defects F4"),
+        cap("M8", "atomic write of fixed files", ::Draft, "selfhost/cst/autofix.pilot:229 writes .tmp then stops (milestone08 test_m8_1)", "autofix.atomic_rename F6"),
+        cap("M8", "pilot check --fix", ::Spec, "pilot check --fix stops at its seam (cli_f3 check_fix_stops_at_its_seam)", "cli.check_fix F4"),
+
+        // M9 three rings
+        cap("M9", "std.env args", ::Wired, "tests/conformance/script_args.pilot", ""),
+        cap("M9", "std.fs/sync/task/os host surfaces", ::Spec, "stdlib/std/fs.pilot:29, sync.pilot:28, task.pilot:24, os.pilot:17 (milestone09 test_m9_4)", "fs.open sync.mutex_lock task.spawn os.host_info F6"),
+        cap("M9", "std.chan bounded in-process channel", ::Core, "milestone09 test_m9_4 (capacity 2: true,true,false; closed false)", ""),
+        cap("M9", "pure std helpers (path, enc, crypto.ct_eq, text, io.BufReader, toml doc)", ::Draft, "stdlib/std/*.pilot; no tests", ""),
+        cap("M9", "ring rules RING001-RING004", ::Draft, "selfhost/loader/ring_verifier.pilot matches substrings; nothing calls it", "M9"),
+        cap("M9", "legacy stdlib directories removed", ::Spec, "stdlib/asyncio, contracts, crypto, db, http, pkg, polyglot, realtime remain", ""),
+
+        // M10 compiler as a library
+        cap("M10", "pilot.lex tokenizer", ::Draft, "stdlib/pilot/lex.pilot:67 has no numbers, strings, block comments or keywords", ""),
+        cap("M10", "pilot.cst parse_lossless", ::Spec, "stdlib/pilot/cst.pilot:41 (milestone10 test_m10_1)", "pilot_cst.parse_lossless"),
+        cap("M10", "pilot.cst editor", ::Draft, "stdlib/pilot/cst.pilot:61 splices text with no trivia check", "pilot_cst.parse_lossless"),
+        cap("M10", "pilot.ast gensym and AST001 splice guard", ::Draft, "stdlib/pilot/ast.pilot; no arena behind AstModule", "F4"),
+        cap("M10", "pilot.types reflection", ::Spec, "stdlib/pilot/types.pilot has constructors only", "F4"),
+        cap("M10", "pilot.ir pipeline", ::Spec, "stdlib/pilot/ir.pilot:45 (milestone10 test_m10_3)", "pilot_ir.pipeline_run F5"),
+        cap("M10", "pilot.fmt", ::Spec, "stdlib/pilot/fmt.pilot:39 (milestone10 test_m10_3)", "pilot_fmt.format_str"),
+        cap("M10", "pilot.db in-memory session", ::Draft, "milestone10 test_m10_4 (set/get/revision)", ""),
+        cap("M10", "pilot.db workspace and check", ::Spec, "stdlib/pilot/db.pilot:30,77 (milestone10 test_m10_4)", "pilot_db.open_workspace pilot_db.check_all F4"),
+        cap("M10", "pilot.vm sandbox", ::Draft, "stdlib/pilot/vm.pilot bookkeeping only; vm_sandbox_run:122 is a seam", "pilot_vm.sandbox_run F7"),
+        cap("M10", "pilot.diag facade", ::Draft, "stdlib/pilot/diag.pilot render_json does not escape; duplicates selfhost Diagnostic types", "M10"),
+
+        // M11 adapter
+        cap("M11", "adapter A -> B syntax", ::Spec, "parsed and discarded; nothing lowers it", "F4"),
+        cap("M11", "[Adapt] attributes", ::Draft, "stdlib/std/polyglot/adapter.pilot: value types only, no weaver reads them", "F4"),
+        cap("M11", "prefix strip and case rules", ::Core, "milestone11 test_m11_1 (hand-worked names)", ""),
+        cap("M11", "blueprint compiler: receiver, slice pair, out-param, error lift, properties", ::Core,
+            "selfhost/adapter/compiler.pilot:194; test_m11_2 checks the op sequence worked by hand from spec 11.4 over 12 real signatures", "adapter.install_thunks"),
+        cap("M11", "ADP001-ADP004 diagnostics", ::Core, "selfhost/adapter/compiler.pilot:321; test_m11_4", ""),
+        cap("M11", "thunks installed as PilIR + MethodTable", ::Spec, "selfhost/adapter/compiler.pilot:366 stops at seam", "adapter.install_thunks F5"),
+        cap("M11", "CError/Errno/NullPtrErr and Posix/Win32 facets", ::Draft, "stdlib/std/polyglot/adapter.pilot:31 errno_is_eagain hardcodes Linux EAGAIN=11", "adapter.errno_values"),
+        cap("M11", "pilot-ffi mock deletion", ::Core, "test_m11_4 checks crates/pilot-ffi/src/lib.rs", ""),
+
+        // M12 C absorber
+        cap("M12", "C preprocessor: macros, #if, #include from disk, target macros, CAB001/CAB003", ::Draft,
+            "test_m12_1, test_m12_2 (header + include read from disk); audit: exhausts call depth on zlib.h (not rechecked)", ""),
+        cap("M12", "C declaration parser", ::Draft, "selfhost/adapter/c_parser.pilot misreads unsigned long long, nested structs, function pointers", ""),
+        cap("M12", "C type layout per target", ::Draft, "selfhost/adapter/c_parser.pilot:218 unknown types default to 8 bytes, align == size", "F4 c.type_layout"),
+        cap("M12", "pkg-config .pc parser", ::Core, "test_m12_3", ""),
+        cap("M12", "sysroot include discovery", ::Draft, "selfhost/adapter/c_sysroot.pilot:40 fixed SDK/Windows Kits 10.0.22000.0 paths, no xcrun", "F6"),
+        cap("M12", "outbound ffi_bindgen multi-param", ::Draft, "selfhost/ffi_bindgen.pilot:14 reg-class codes differ from selfhost/ir/model.pilot RegClass", ""),
+        cap("M12", "static inline bodies to PilIR", ::Spec, "c_parser stores body text", "F5"),
+        cap("M12", "PilotDb caching of absorbed headers", ::Spec, "no query", "M5 F4"),
+        cap("M12", "use c \"header.h\"", ::Spec, "fails with MOD001", "F4 F6"),
+
+        // M13 calling conventions
+        cap("M13", "native trampoline (SysV, Win64)", ::Core, "crates/pilot-rt/src/c_abi.rs; test_m13_3 calls real native functions", ""),
+        cap("M13", "calling-convention descriptors and registry", ::Core, "test_m13_1, test_m13_2", ""),
+        cap("M13", "SysV eightbyte classification", ::Core,
+            "stdlib/pilot/abi/sysv_x64.pilot:36; test_m13_1 checks psABI 3.2.3 answers", "abi.aggregate_fields"),
+        cap("M13", "Win64 classification", ::Core, "stdlib/pilot/abi/win64.pilot; test_m13_2", ""),
+        cap("M13", "AAPCS64 X8 sret and HFA", ::Core, "stdlib/pilot/abi/aapcs64.pilot:17; test_m13_2 (AAPCS64 5.9.5.1)", "abi.aggregate_fields"),
+        cap("M13", "RISC-V LP64D float-struct rule, wasm32", ::Draft,
+            "stdlib/pilot/abi/riscv_wasm.pilot:18 tested in test_m13_2; wasm32 single-scalar struct rule missing", "abi.aggregate_fields"),
+        cap("M13", "variadic promotions and SysV %al", ::Draft, "stdlib/pilot/abi/descriptor.pilot:356 counts %al; variadic_fixed_count ignored", ""),
+        cap("M13", "classify_call_frame dispatch by name", ::Draft, "stdlib/pilot/abi/descriptor.pilot:294 qualified pilot.abi.* calls unverified in PilVM", ""),
+        cap("M13", "ABI001-ABI003 diagnostics", ::Draft, "constructors only (test_m13_4); no loader emits them", "F6"),
+        cap("M13", "Pilot to native calls (frame f(..))", ::Spec, "stdlib/pilot/abi/descriptor.pilot:370 stops at seam", "abi.invoke_frame F6"),
+
+        // M14 foreign lifetimes
+        cap("M14", "ForeignHandle ownership (wrap, take_raw, disarm)", ::Core, "test_m14_1", "ffi.call_destructor"),
+        cap("M14", "foreign destructor call", ::Spec, "stdlib/std/polyglot/lifetime.pilot:103", "ffi.call_destructor F6 ffi.int_address"),
+        cap("M14", "ThreadAffineDropQueue", ::Core, "stdlib/std/polyglot/lifetime.pilot:36; test_m14_2", "lifetime.global_drop_queue thread.current_id"),
+        cap("M14", "ForeignGuard release", ::Core, "test_m14_4 (closure release, disarm); automatic LIFO at scope exit unverified", "F7"),
+        cap("M14", "PinnedSlice", ::Spec, "stdlib/std/polyglot/lifetime.pilot:244", "mem.pinned_alloc F7"),
+        cap("M14", "ShmView bounds", ::Core, "stdlib/std/polyglot/shm.pilot; test_m14_4", ""),
+        cap("M14", "ShmBuffer map/unmap", ::Spec, "stdlib/std/polyglot/shm.pilot:23,45", "shm.map shm.unmap F6"),
+        cap("M14", "BorrowCallbackScope", ::Draft, "flag only; no borrow bounding", "F4"),
+        cap("M14", "ESCAPE004 on [Retained] arguments", ::Core,
+            "selfhost/perceus/escape.pilot esc_verify_call_node (lattice and iso read from the parsed program); test_m14_3; not on the pilot check path", "F7"),
+        cap("M14", "FFI001 null foreign destructor check", ::Spec,
+            "no check; needs absorbed foreign destructor symbols from the type checker", "F4"),
+        cap("M14", "ForeignDrop ops in PilIR", ::Spec,
+            "selfhost/perceus/arc.pilot emit_foreign_drop_op stops at seam; test_m14_3", "perceus.foreign_drop_ir F5"),
+        cap("M14", "100k-handle stress and cross-thread drop", ::Spec, "needs real threads and native destructors", "F6 F7"),
+        cap("M14", "legacy stdlib/polyglot/shm.pilot deleted", ::Spec, "file still present, no references", ""),
+
+        // M15 C++
+        cap("M15", "Itanium mangling", ::Draft, "selfhost/adapter/cpp_mangle.pilot has no substitutions; test_m15_1", ""),
+        cap("M15", "MSVC x64 mangling", ::Draft, "test_m15_1 covers two symbols", ""),
+        cap("M15", "C++ class layout and vtable slots", ::Core, "selfhost/adapter/cpp_abi.pilot; test_m15_2", ""),
+        cap("M15", "C++ header parser", ::Draft, "selfhost/adapter/cpp_parse.pilot; test_m15_3", ""),
+        cap("M15", "CPP001-CPP006 diagnostics", ::Draft, "selfhost/adapter/cpp_parse.pilot:576 rule functions over caller flags; CPP003/CPP006 not emitted", "F4"),
+        cap("M15", "C++ exception boundary", ::Spec, "stdlib/std/polyglot/cpp.pilot:104", "cpp.catch_boundary F6"),
+        cap("M15", "std::string_view / std::span views", ::Spec, "stdlib/std/polyglot/cpp.pilot:67", "cpp.string_view_from_str F6"),
+        cap("M15", "use cpp \"x.hpp\"", ::Spec, "no absorber hook", "F4 F6"),
+
+        // M16 Rust
+        cap("M16", "Rust signature parser", ::Draft, "selfhost/adapter/rust_sig.pilot; test_m16_1", ""),
+        cap("M16", "Rust type classification", ::Core, "test_m16_2", ""),
+        cap("M16", "Rust bridge generator", ::Core,
+            "selfhost/adapter/rust_bridge.pilot:192; test_m16_4 compiles the generated bridge with rustc and checks the program output", "rust.bridge_marshal"),
+        cap("M16", "RST003 lifetime check", ::Core, "test_m16_4", ""),
+        cap("M16", "dyn trait vtable synthesis", ::Draft, "selfhost/adapter/rust_bridge.pilot rust_synthesize_dyn_vtable emits an unclosed fn( signature", ""),
+        cap("M16", "cargo crate resolution", ::Spec, "selfhost/adapter/rust_bridge.pilot:352", "rust.cargo_resolve F6"),
+        cap("M16", "calls into bridge, panic to RustPanicErr", ::Spec, "stdlib/std/polyglot/rust.pilot:180", "rust.call_bridge F6"),
+        cap("M16", "RustVec / RustString", ::Draft, "ownership logic test_m16_3; drop and views stop at seams", "rust.call_dealloc rust.vec_view rust.string_view ffi.int_address"),
+        cap("M16", "use rust", ::Spec, "no absorber hook", "F4 F6"),
+
+        // M17 Python
+        cap("M17", ".pyi stub parser", ::Core,
+            "selfhost/adapter/py_stub.pilot:246; test_m17_1_py_stub_parser_and_inspect_signatures", "M2"),
+        cap("M17", "in-process libpython3 runtime (init, GIL, refcounts, vectorcall, conversions)", ::Spec,
+            "stdlib/std/polyglot/py_capi.pilot:134 seams; test_m17_3_vectorcall_fast_path_and_gil_guards",
+            "F6 py.init py.gil_acquire py.gil_release py.allow_threads py.restore_threads py.inc_ref py.dec_ref py.import_module py.vectorcall py.err_fetch py.str_from_obj py.int_from_obj py.float_from_obj py.obj_from_int py.obj_from_float py.obj_from_str"),
+        cap("M17", "PEP 3118 zero-copy buffer leases", ::Spec,
+            "stdlib/std/polyglot/py_capi.pilot:175 seam; test_m17_2_zero_copy_pep3118_buffer_and_strided_tensor_views",
+            "F6 py.buffer_acquire py.buffer_release py.buffer_layout"),
+        cap("M17", "vectorcall wrapper synthesizer", ::Draft,
+            "selfhost/adapter/py_stub.pilot:455 emits a template that does not type-check against py_capi", "M17"),
+        cap("M17", "GIL scope coalescing over GilScope records", ::Draft,
+            "selfhost/ir/pass_gil_coalesce.pilot:105; test_m17_4_gil_coalesce_ir_pass_and_diagnostics (thresholds are local choices, no oracle)", ""),
+        cap("M17", "GIL scope discovery in PilIR", ::Spec,
+            "selfhost/ir/pass_gil_coalesce.pilot:98 seam", "F5 pilir.gil_scopes"),
+        cap("M17", "PY001-PY005 diagnostics", ::Draft, "selfhost/adapter/py_stub.pilot:52 code catalog; only PY005 is emitted", "F6"),
+        cap("M17", "python3 subprocess bridge deleted", ::Spec,
+            "stdlib/polyglot/bridge.pilot:57-70 still spawns python3/node", ""),
+
+        // M18 JS/TS
+        cap("M18", ".d.ts declaration parser", ::Core,
+            "selfhost/adapter/ts_dts.pilot:244; test_m18_1_typescript_dts_parser_and_inspect_signatures", "M2"),
+        cap("M18", "Node-API host (handle scopes, refs, calls, errors)", ::Spec,
+            "stdlib/std/polyglot/js_napi.pilot:48 seams; test_m18_4_handle_scopes_promises_and_napi_synthesizer",
+            "F6 js.open_handle_scope js.close_handle_scope js.ref_new js.ref_inc js.ref_dec js.call_function js.err_fetch"),
+        cap("M18", "zero-copy TypedArray leases", ::Spec,
+            "stdlib/std/polyglot/js_napi.pilot:124 seam; test_m18_2_zero_copy_typedarray_and_subarray_buffers",
+            "F6 js.typedarray_info js.typedarray_release"),
+        cap("M18", "lossless 64-bit BigInt", ::Spec,
+            "stdlib/std/polyglot/js_napi.pilot:142 seam; test_m18_3_lossless_bigint_fidelity_and_precision_protection",
+            "F6 js.bigint_create js.bigint_read"),
+        cap("M18", "Promise to Task bridging", ::Spec, "stdlib/std/polyglot/js_napi.pilot:188 seams",
+            "F6 js.promise_new js.promise_resolve js.promise_reject"),
+        cap("M18", "thread-affine JsRef release (JS002)", ::Spec, "no code", "F7 js.ref_dec"),
+        cap("M18", "embedded QuickJS fallback", ::Spec, "no code", "F6"),
+        cap("M18", "N-API wrapper synthesizer", ::Draft,
+            "selfhost/adapter/ts_dts.pilot:556 emits a template; output never compiled", "M18"),
+
+        // M19 WASM
+        cap("M19", "WIT text parser", ::Core,
+            "selfhost/adapter/wit_parser.pilot:461 (list<T> field hang fixed); test_m19_1_wit_parser_and_2bit_lattice_mapping", ""),
+        cap("M19", "binary component-type section decoder", ::Spec,
+            "selfhost/adapter/wit_parser.pilot:775 seam; test_m19_1_wit_parser_and_2bit_lattice_mapping", "wit.decode_custom_section"),
+        cap("M19", "canonical ABI flattening and spill rules", ::Draft,
+            "selfhost/adapter/wit_abi.pilot:207; test_m19_2_canonical_abi_flattening_and_spill_rules; legacy float32/float64 names only, simplified result join", ""),
+        cap("M19", "component resource handle table", ::Core,
+            "selfhost/adapter/wit_abi.pilot:352; test_m19_4_component_resource_table_and_lease_lifecycle", ""),
+        cap("M19", "bounds-checked linear memory and UTF-8 validation", ::Core,
+            "selfhost/adapter/wasm_runtime.pilot:162; test_m19_3_sandboxed_wasm_runtime_bounds_and_fuel_traps (RFC 3629 vectors)", "wasm.load_str"),
+        cap("M19", "instance lease fuel and borrow accounting", ::Core,
+            "selfhost/adapter/wasm_runtime.pilot:228; test_m19_3_sandboxed_wasm_runtime_bounds_and_fuel_traps", ""),
+        cap("M19", "WASM interpreter", ::Spec,
+            "selfhost/adapter/wasm_runtime.pilot:344 seam after export and arity checks", "wasm.interpret"),
+        cap("M19", "PilIR AOT lifter", ::Spec, "selfhost/adapter/wasm_runtime.pilot:352 seam", "F5 wasm.lift_pilir"),
+        cap("M19", "owned resource drop", ::Spec, "stdlib/std/polyglot/wasm.pilot:72 seam", "wasm.resource_drop wasm.interpret"),
+        cap("M19", "wasm32-wasip2 component output and .wit generation", ::Spec, "selfhost/codegen/wasm_emitter.pilot not extended", "F5"),
+
+        // M20 schemas
+        cap("M20", "SQL DDL migration replay", ::Core,
+            "selfhost/adapter/absorb_sql.pilot:316; test_m20_1_sql_ddl_replay_and_annotated_query_synthesis", ""),
+        cap("M20", "SQL annotated queries and dialect placeholders", ::Core,
+            "selfhost/adapter/absorb_sql.pilot:425 and :506; test_m20_1_sql_ddl_replay_and_annotated_query_synthesis", ""),
+        cap("M20", "SQL SCH002 catalog checks", ::Draft,
+            "selfhost/adapter/absorb_sql.pilot:523 checks table and compared columns, not types or counts", ""),
+        cap("M20", "SQL typed query wrapper execution", ::Spec,
+            "selfhost/adapter/absorb_sql.pilot:563 seam; test_m20_1_sql_ddl_replay_and_annotated_query_synthesis", "F6 sql.query_body"),
+        cap("M20", "Postgres/MySQL binary row decoders", ::Spec, "no code", "F6 sql.query_body"),
+        cap("M20", "OpenAPI 3.x JSON absorber", ::Core,
+            "selfhost/adapter/absorb_openapi.pilot:458; test_m20_2_openapi_schema_dag_allof_and_client_interfaces", ""),
+        cap("M20", "OpenAPI $ref cycle detection", ::Core,
+            "selfhost/adapter/absorb_openapi.pilot:153; test_m20_2_openapi_schema_dag_allof_and_client_interfaces", ""),
+        cap("M20", "OpenAPI YAML input", ::Spec, "no code", ""),
+        cap("M20", "OpenAPI client/server interface synthesis", ::Draft,
+            "selfhost/adapter/absorb_openapi.pilot:488 client only; output never compiled", ""),
+        cap("M20", "proto varints, ZigZag and wire records", ::Core,
+            "selfhost/adapter/absorb_proto.pilot:53 and :142; test_m20_3_protobuf_zigzag_varint_and_wire_packet_codecs (protobuf encoding-guide vectors)", ""),
+        cap("M20", "proto source parser", ::Draft,
+            "selfhost/adapter/absorb_proto.pilot:247 messages and fields only; no enum/oneof/map/service/import", ""),
+        cap("M20", "proto dual owned/view synthesis", ::Draft,
+            "selfhost/adapter/absorb_proto.pilot:405; packet is List<i64>, not a 0b01 slice; output never compiled", "proto.packet_bytes"),
+        cap("M20", "use sql / use openapi / use proto wiring", ::Spec, "no absorber registration", "M20"),
+
+        // M21 weavers
+        cap("M21", "[Eq]/[Ord]/[Hash]/[Clone]/[Default]/[Display] source synthesis", ::Draft,
+            "stdlib/core/derive.pilot:285 builds text over hand-built DeriveField lists; output is never compiled", "F4"),
+        cap("M21", "JSON case styles and WEAVE003/WEAVE004 checks", ::Core,
+            "test_m21_2_streaming_utf8_json_weaver_case_styles_and_collision_diagnostics", ""),
+        cap("M21", "[Json] serializer/deserializer synthesis", ::Draft,
+            "stdlib/std/serde/derive_json.pilot:284; generated code calls to_json_val/from_json_val, which do not exist", "F4"),
+        cap("M21", "LEB128 varint codec", ::Core,
+            "test_m21_3_deterministic_wire_safe_binary_weaver_and_varint (protobuf vectors 300 and -1)", ""),
+        cap("M21", "[Binary] codec synthesis", ::Draft,
+            "stdlib/std/serde/derive_bin.pilot:94; generated read_le/read_be/read_varint/write_raw_pod helpers do not exist", "F4"),
+        cap("M21", "delegate thunks, WEAVE005/WEAVE006", ::Draft,
+            "selfhost/types/delegation.pilot:80 over hand-built MethodContract lists; delegate syntax not connected", "F4"),
+        cap("M21", "attribute weight scheduler, ATTR001/ATTR002", ::Core,
+            "test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_sorted_weaver", ""),
+        cap("M21", "attribute protocol classification from ...Attr declaration bases", ::Core,
+            "milestone50 test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_sorted_weaver (meta.pilot declarations and a randomly named IEcsRule attribute; undeclared attributes get no pillar). Needs the declaration in the same arena: no cross-module resolution yet", "F4"),
+        cap("M21", "weavers generate code at real attribute sites", ::Spec,
+            "selfhost/attr_weaver.pilot:337 only validates; [Eq, Json] on a struct adds nothing", "F4"),
+        cap("M21", "built-in attribute bodies: Clamp, OnChange, Formula, Rule", ::Draft,
+            "stdlib/core/meta.pilot; OnChange, Formula and Rule bodies run in milestone21 test_m21_4; nothing weaves them into setters/getters yet", "F4"),
+        cap("M21", "built-in attribute bodies: TraceSpan", ::Spec,
+            "stdlib/core/meta.pilot TraceSpanAttr.on_enter/on_exit stop at seams (milestone21 test_m21_4)", "trace.span_enter trace.span_exit F7"),
+        cap("M21", "vscode_gen artifact serializers (tmLanguage, language-configuration, snippets, package.json)", ::Core,
+            "milestone59 test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matrix (python3 json.loads accepts all four); hand-written per artifact, the unused [JsonObject] models and the fake dumps/loads were removed", ""),
+        cap("M21", "std.polyglot.transport.json json_parse (RFC 8259 grammar, res<JsonValue, JsonError>)", ::Draft,
+            "tests/conformance/json_rfc8259.pilot (RFC 8259 section 13 examples; expected output from Python's json module); err_json_code_point.pilot stops at its seam", "json.code_point_str json.decimal_to_f64 F6"),
+
+        // M22 bundles and facets
+        cap("M22", "N-field layout flattener and bundle cycle detection", ::Core,
+            "test_m22_1_arbitrary_n_field_flattener_and_cycle_detection", ""),
+        cap("M22", "coalesce/with/without collision algebra, COMP004/COMP006", ::Core,
+            "test_m22_2_horizontal_collision_algebra", ""),
+        cap("M22", "partial struct facet seal and lattice law, COMP001/COMP005", ::Core,
+            "test_m22_3_sealed_partial_struct_and_lattice_law", ""),
+        cap("M22", "4-tier MethodTable and static delegation", ::Draft,
+            "selfhost/types/method_table.pilot:62 keeps COMP004 after a later Tier 1 override; resolve_static_delegation returns an empty entry, not none", ""),
+        cap("M22", "analyzer uses bundle_splice and method_table", ::Spec,
+            "no caller outside tests", "F4"),
+        cap("M22", "spliced methods at run time", ::Draft,
+            "Audit.md Phase 3 M22: spliced methods that touch fields return null in crates/pilot-vm", "F4"),
+
+        // M23 fusion, each, cascades
+        cap("M23", "pull-cursor streams (Slice/Take/Step; sum/count/collect)", ::Core,
+            "test_m23_1_zero_allocation_pull_stream_combinators; Filter/Map/Flat/Zip/Chunk not written; i64 only", ""),
+        cap("M23", "stream fusion plan", ::Draft,
+            "selfhost/ir/pass_stream_fusion.pilot:69 counts stages of a hand-built spec", ""),
+        cap("M23", "fused loop rewrite in PilIR", ::Spec,
+            "selfhost/ir/pass_stream_fusion.pilot:100 stops at its seam", "F5 fusion.rewrite_ir"),
+        cap("M23", "each broadcast lowering, FUSE001/FUSE002", ::Draft,
+            "selfhost/ir/lower_each_cascade.pilot:80 decides from caller-given facts; emits no IR", "F4 F5"),
+        cap("M23", "cascade lowering, guarded ?.., FUSE004", ::Draft,
+            "selfhost/ir/lower_each_cascade.pilot:109; IR emission stops at :187", "F5 each_cascade.emit_ir"),
+        cap("M23", "DTO projection -> / ->>, FUSE003", ::Draft,
+            "selfhost/ir/lower_each_cascade.pilot:131 matches field names only", "F4"),
+        cap("M23", "cascades at run time", ::Draft,
+            "Audit.md Phase 3 M23: crates/pilot-vm/src/lower_cascade.rs corrupts the receiver; re-check", ""),
+
+        // M24 .pchor
+        cap("M24", ".pchor blueprint parser", ::Core,
+            "test_m24_1_pchor_parsing_and_ast (keyword scanning by substring)", ""),
+        cap("M24", "CHOR001 cue boundary law", ::Core,
+            "test_m24_2_two_bit_cue_boundary_law with test-supplied lattices; parsed cues stop at selfhost/chor/verifier.pilot:102", "F4 chor.cue_lattice"),
+        cap("M24", "CHOR003/CHOR004/CHOR005", ::Core,
+            "test_m24_3_route_cycles_and_realtime_checks (CHOR004 any cycle length)", ""),
+        cap("M24", "CHOR006 dependency laws", ::Core,
+            "test_m24_4_laws_lowering_and_mermaid_export over test-supplied role imports", "F4"),
+        cap("M24", "CHOR002 storage ACL", ::Spec, "format only; never emitted", "F4"),
+        cap("M24", "CHOR007 write races", ::Draft,
+            "selfhost/chor/verifier.pilot:213 flags any two writers, ignores async/epoch barrier; untested", ""),
+        cap("M24", "topology lowering plan", ::Draft, "selfhost/chor/lower.pilot:50", ""),
+        cap("M24", "dispatcher emission into PilIR", ::Spec,
+            "selfhost/chor/lower.pilot:98 stops at its seam", "F5 chor.emit_dispatchers"),
+        cap("M24", "Mermaid export", ::Core, "test_m24_4_laws_lowering_and_mermaid_export", ""),
+        cap("M24", "pilot chor / inspect --chor", ::Spec, "unknown command", "cli.command_handler"),
+
+        // M25 storage layout
+        cap("M25", "column layout planner (64B planes, nested flattening, drop masks)", ::Core,
+            "test_m25_1_multicolumn_layout_and_simd_alignment; test_m25_4_column_selective_perceus_drop_masks; leaves hand-supplied", "F4"),
+        cap("M25", "address lowering AoS/SoA/AoSoA/HotCold/BitPacked", ::Core,
+            "test_m25_2_physical_address_lowering_across_all_strategies", ""),
+        cap("M25", "CHOR008 raw pointer escape", ::Core,
+            "test_m25_3_raw_pointer_escape_guard_chor008 over caller-given facts", "F4"),
+        cap("M25", "FieldAddr/Load/Store rewrite in PilIR", ::Spec,
+            "selfhost/ir/pass_soa_rewrite.pilot:221 stops at its seam", "F5 soa.rewrite_ir"),
+        cap("M25", "SoaTable/AoSoaTable/HotColdTable layout", ::Draft, "stdlib/core/soa.pilot:90", ""),
+        cap("M25", "SoaTable row storage (push, row, swap_remove)", ::Spec,
+            "stdlib/core/soa.pilot:138 stops at its seam", "F4 F7 soa.column_memory soa.row_base"),
+        cap("M25", "bandwidth estimate", ::Draft,
+            "selfhost/chor/storage_plan.pilot:381 is a size ratio, not a measurement", ""),
+        cap("M25", "measured SoA speedup (Gate 3 >= 3.5x)", ::Spec, "not measured", "F5"),
+
+        // M26 typestates and contracts
+        cap("M26", "typestate lattice: transitions, branch merge, drop obligations (STATE001, STATE002, STATE004)", ::Core,
+            "selfhost/types/typestate.pilot:178,237,250; test_m26_1, test_m26_2 (full messages checked)", ""),
+        cap("M26", "STATE003 loop-invariant and STATE005 aliasing checks", ::Spec,
+            "formatters only, selfhost/types/typestate.pilot:28,36; nothing emits them", "F4 F5"),
+        cap("M26", "`state` declarations checked in the language", ::Spec,
+            "stdlib/core/meta.pilot `state` macro is an identity quote; typestate.pilot has no caller outside its test", "F4 F5"),
+        cap("M26", "contract plan rules DBC002-DBC004", ::Draft,
+            "selfhost/ir/pass_contracts.pilot:178 check_contract_plan; purity and value-type facts are passed in by the caller, no effect analysis", "F4"),
+        cap("M26", "where refinement range check (DBC001)", ::Draft,
+            "selfhost/ir/pass_contracts.pilot:140; bounds passed separately, predicate text not parsed", "F4"),
+        cap("M26", "comptime proof of requires at call sites (DBC001)", ::Spec,
+            "selfhost/ir/pass_contracts.pilot:159 stops at seam; test_m26_4", "F4 contracts.prove_requires"),
+        cap("M26", "requires/ensures/old/invariant woven into PilIR and enforced at run time (incl. DBC005)", ::Spec,
+            "selfhost/ir/pass_contracts.pilot:173 stops at seam (test_m26_3); `requires n > 0` on f(0) still runs", "F5 contracts.weave_ir"),
+
+        // M27 user syntax and hygiene
+        cap("M27", "pattern arm diagnostics SYN001 overlap and SYN002 direct left recursion (from pattern text)", ::Core,
+            "selfhost/syntax/pattern_dsl.pilot:150,193; test_m27_1", ""),
+        cap("M27", "SYN002 indirect left recursion across rules", ::Spec, "only direct recursion is detected", ""),
+        cap("M27", "SYN003-SYN005 expansion depth, variadic counts, unbound metavariables", ::Spec,
+            "formatters only, selfhost/syntax/pattern_dsl.pilot:29-39", "F4"),
+        cap("M27", "pattern parselet matching", ::Draft,
+            "selfhost/syntax/pattern_dsl.pilot:229 matches only the head token; no fragment capture", "F4"),
+        cap("M27", "scopes-as-sets hygiene resolver", ::Core,
+            "selfhost/syntax/hygiene_marks.pilot:140; test_m27_2 (Flatt maximal-subset resolution)", ""),
+        cap("M27", "hygienic quote expansion in the language", ::Spec,
+            "resolver has no caller; a macro's `let tmp` overwrites the caller's `tmp` (Audit.md section 6)", "F4"),
+        cap("M27", "`pub syntax Name { .. }` and `use syntax` scoping", ::Spec,
+            "named form silently stops all output (Audit.md section 6)", "F4"),
+        cap("M27", "live DSL catalog: completions, hover, keyword lookup", ::Draft,
+            "selfhost/ide/live_dsl_sync.pilot:93-141; filled by hand, not from syntax declarations; not served by pilot lsp", "F4"),
+        cap("M27", "DSL semantic tokens", ::Spec, "struct only, selfhost/ide/live_dsl_sync.pilot:36", "F4"),
+        cap("M27", "no hardcoded non-seed keyword lists in analyzer.pilot / cst_recovery.pilot", ::Draft,
+            "test_m27_4 checks the strings are gone; no ActiveKeywordTable from scoped syntax heads", "F4"),
+
+        // M28 tiers and coach
+        cap("M28", "LearningTier profiles", ::Draft,
+            "stdlib/pilot/profile.pilot:87; no --tier flag or #pragma tier reads it", "M28"),
+        cap("M28", "tier-adapted ESCAPE001 phrasing", ::Draft,
+            "selfhost/diag/progressive_coach.pilot:80 fixed per-tier templates; no escape analysis feeds it", "F7"),
+        cap("M28", "PERF002 struct padding analyzer", ::Core,
+            "selfhost/diag/progressive_coach.pilot:143; test_m28_2 (x86_64 SysV sizes incl. 16-byte alignment)", "F4"),
+        cap("M28", "PERF001 clone-in-loop detection", ::Spec,
+            "selfhost/diag/progressive_coach.pilot:190 stops at seam; test_m28_3", "F5 coach.loop_clones"),
+        cap("M28", "COACH001, COACH002, PERF003 detectors", ::Spec,
+            "formatters only, selfhost/diag/progressive_coach.pilot:24-42", "F4 F5"),
+        cap("M28", "flow-sensitive clearance solver (LVL001, elevation stack, audit trail)", ::Core,
+            "selfhost/types/clearance_flow.pilot:76-102; test_m28_4", ""),
+        cap("M28", "clearance checks in the analyzer", ::Spec,
+            "string-parsed lvl check deleted from selfhost/analyzer.pilot; the analyzer is compiled alone and cannot call selfhost/types/clearance_flow.pilot", "F4"),
+        cap("M28", "analyzer UNUSED001, UNUSED004, SHADOW001 (span-scoped local bindings)", ::Core,
+            "selfhost/analyzer.pilot verify_local_bindings; phase1_ironclad_killswitch test_tier_1_2, test_tier_1_3 (tests/conformance/shadowing.pilot); for-loop and pattern bindings not tracked", "F4"),
+        cap("M28", "analyzer FLOW003/FLOW004 (break/continue outside loop)", ::Core,
+            "selfhost/analyzer.pilot has_enclosing_jump_target; phase1_ironclad_killswitch test_tier_1_1", ""),
+        cap("M28", "analyzer FLOW001 missing return", ::Spec,
+            "no check; diverging calls need resolved callee return types", "F4"),
+        cap("M28", "analyzer DECL001, UNUSED002, UNUSED003 (name resolution across modules)", ::Spec,
+            "no check; needs prelude, imports and package symbol tables", "F4"),
+        cap("M28", "analyzer TYPE001-TYPE003, DIM001", ::Spec, "no check; needs the type checker", "F4"),
+        cap("M28", "analyzer MUT001, DEAD001", ::Spec, "no check; which method calls mutate needs resolved receivers", "F4"),
+        cap("M28", "analyzer OWN001-OWN003 move and borrow checks", ::Spec,
+            "no check; needs type lattices and moves on the checked path", "F4 F5"),
+        cap("M28", "ESCAPE001-ESCAPE003 on parsed programs", ::Core,
+            "selfhost/perceus/escape.pilot verify_perceus_unit; milestone54 test_54_2_and_54_3; not on the pilot check path", "F7"),
+        cap("M28", "HINT001-HINT005, OPT003 hints", ::Spec, "no detectors", "F4 F5"),
+
+        // M29 sandboxed comptime
+        cap("M29", "guardian checks CTIME001-CTIME005 (traversal, absolute paths, glob allowlist, net, subprocess, clock, fuel, heap)", ::Core,
+            "selfhost/comptime/guardian.pilot:115-268; test_m29_1, test_m29_2, test_m29_3", "comptime.run_sandboxed"),
+        cap("M29", "comptime runs under a policy", ::Spec,
+            "selfhost/comptime/guardian.pilot:300 stops at seam (test_m29_4); `comptime { while true {} }` hangs under pilot run; mount_unit reads any path", "comptime.run_sandboxed"),
+        cap("M29", "seed VM fuel counter", ::Draft,
+            "crates/pilot-vm fuel_limit; only test_m29_3 sets it", "M29"),
+        cap("M29", "root manifest comptime policy and CTIME006", ::Core,
+            "selfhost/pkg/manifest.pilot:493-560, selfhost/comptime/guardian.pilot:282; test_m29_4", "M29"),
+        cap("M29", "deterministic env: xorshift64 PRNG, virtual clock, ordered map, path normalizer", ::Draft,
+            "selfhost/comptime/deterministic_env.pilot; first xorshift64 output matches a u64 reference, later outputs diverge (seed VM u64 shifts)", "seed.u64_right_shift"),
+        cap("M29", "deterministic VM maps (HashMap replaced)", ::Spec, "crates/pilot-vm still uses HashMap", "M29"),
+
+        // M30 [Cli] / [Service] / [Entity]
+        cap("M30", "[Cli] argv parser, help, defaults, required/unknown checks, GEN005", ::Core,
+            "stdlib/std/cli/weaver.pilot:78-233; test_m30_1", ""),
+        cap("M30", "[Cli] env-var fallback and shell completions", ::Spec, "CliArgDef.env_var is never read", "M30"),
+        cap("M30", "[Cli]/[Arg] attribute weaving", ::Spec,
+            "stdlib/std/cli/weaver.pilot:250 stops at seam; test_m30_1", "M21 F4 cli.weave_struct"),
+        cap("M30", "[Service] route validation GEN001/GEN002, route matching, 404/405 problem responses", ::Core,
+            "stdlib/std/http/service_weaver.pilot:78,256-318; test_m30_2, test_m30_4", ""),
+        cap("M30", "OpenAPI 3.1 document and RFC 9457 problem JSON", ::Draft,
+            "stdlib/std/http/service_weaver.pilot:188,232; not run through an OpenAPI validator; no requestBody/components", ""),
+        cap("M30", "[Service] handler invocation and requires -> 422", ::Spec,
+            "stdlib/std/http/service_weaver.pilot:325 stops at seam; test_m30_4", "M21 F4 http.invoke_handler"),
+        cap("M30", "[Service] weaving, typed client SDK, radix router", ::Spec,
+            "stdlib/std/http/service_weaver.pilot:335 stops at seam; test_m30_4", "M21 F4 http.weave_service"),
+        cap("M30", "HTTP server transport", ::Spec, "no socket listener", "F6"),
+        cap("M30", "[Entity] SQL generation (CREATE, SELECT, INSERT, optimistic UPDATE), GEN003/GEN004/GEN006 diff", ::Draft,
+            "stdlib/std/db/entity_weaver.pilot:90-290; test_m30_3 checks exact SQL; never run on a database", "F6"),
+        cap("M30", "[Entity] attribute weaving", ::Spec,
+            "stdlib/std/db/entity_weaver.pilot:303 stops at seam; test_m30_3", "M21 F4 db.weave_entity"),
+        cap("M30", "database execution and row decoding", ::Spec, "no database driver", "F6"),
+        cap("M30", "pilot inspect --weave", ::Spec, "inspect is not a registered command", "M7 cli.command_handler"),
+    ];
+    return rows;
+}

@@ -46,6 +46,7 @@ pub struct DynTraitFatPtr : IValue {
 // Drops via Rust's allocator deallocator hook so memory heaps never cross-free!
 // ------------------------------------------------------------------------------
 
+[StandIn("ffi.int_address", "ptr<T> data pointer and native destructor fn pointer", "addresses held as i64 with no type or provenance", "F6")]
 pub struct RustVec<T: IAnyValue> : IObject {
     pub raw_ptr:   i64;
     pub capacity:  usize;
@@ -68,11 +69,10 @@ pub struct RustVec<T: IAnyValue> : IObject {
     pub pure fn cap(ref self) -> usize => .capacity;
     pub pure fn is_empty(ref self) -> bool => .len == 0;
 
-    pub pure fn as_slice(ref self) -> slice<T> {
-        return slice<T> {
-            data: .raw_ptr as ptr<T>,
-            len:  .len,
-        };
+    /// The elements as a borrowed `0b01` view, without copying.
+    pub fn as_slice(ref self) -> slice<T> {
+        return seam("rust.vec_view",
+            "viewing foreign memory as a Pilot slice needs raw memory views in PilVM (F6)");
     }
 
     pub var fn take_raw(ref self) -> i64 {
@@ -84,10 +84,9 @@ pub struct RustVec<T: IAnyValue> : IObject {
 
     ~self() {
         if .is_armed && .raw_ptr != 0 && .dtor_fn != 0 {
-            // Invokes Rust's Vec::from_raw_parts deallocator
-            let dtor = .dtor_fn as fn(i64, usize, usize) -> void;
-            dtor(.raw_ptr, .capacity, .len);
+            // Rust's allocator frees it (pilot_rust_free_vec_<crate>).
             .is_armed = false;
+            rust_call_dealloc(.dtor_fn, .raw_ptr, .capacity, .len);
         }
     }
 }
@@ -107,6 +106,7 @@ pub fn rust_vec_from_raw_parts(p: i64, cap: usize, len: usize, dtor: i64) -> Rus
 // 4. Rust String Owned Object (0b10 : IObject)
 // ------------------------------------------------------------------------------
 
+[StandIn("ffi.int_address", "ptr<T> data pointer and native destructor fn pointer", "addresses held as i64 with no type or provenance", "F6")]
 pub struct RustString : IObject {
     pub raw_ptr:   i64;
     pub capacity:  usize;
@@ -129,11 +129,13 @@ pub struct RustString : IObject {
     pub pure fn cap(ref self) -> usize => .capacity;
     pub pure fn is_empty(ref self) -> bool => .len == 0;
 
-    pub pure fn as_str(ref self) -> str {
-        if .raw_ptr == 0 || .length == 0 {
+    /// The text as a borrowed `str`, without copying.
+    pub fn as_str(ref self) -> str {
+        if .raw_ptr == 0 || .len == 0 {
             return "";
         }
-        return str::from_raw_parts(.raw_ptr as ptr<u8>, .length);
+        return seam("rust.string_view",
+            "viewing foreign UTF-8 bytes as a Pilot str needs raw memory views in PilVM (F6)");
     }
 
     pub var fn take_raw(ref self) -> i64 {
@@ -145,9 +147,9 @@ pub struct RustString : IObject {
 
     ~self() {
         if .is_armed && .raw_ptr != 0 && .dtor_fn != 0 {
-            let dtor = .dtor_fn as fn(i64, usize, usize) -> void;
-            dtor(.raw_ptr, .capacity, .length);
+            // Rust's allocator frees it (pilot_rust_free_string_<crate>).
             .is_armed = false;
+            rust_call_dealloc(.dtor_fn, .raw_ptr, .capacity, .len);
         }
     }
 }
@@ -156,8 +158,15 @@ pub fn rust_string_from_raw_parts(p: i64, cap: usize, len: usize, dtor: i64) -> 
     return RustString::from_raw_parts(p, cap, len, dtor);
 }
 
+/// Calls the bridge's `pilot_rust_free_*` function `dtor_fn` with the
+/// parts of a Vec or String so Rust's own allocator frees them.
+pub fn rust_call_dealloc(dtor_fn: i64, raw_ptr: i64, cap: usize, len: usize) {
+    seam("rust.call_dealloc",
+        "calling the bridge's free function needs PilVM native calls (F6)");
+}
+
 // ------------------------------------------------------------------------------
-// 5. Zero-Crash Panic Catch Landing-Pad (res<i64, RustPanicErr>)
+// 5. Zero-Crash Panic Catch Boundary (res<i64, RustPanicErr>)
 // ------------------------------------------------------------------------------
 
 [Layout(c_abi)]
@@ -167,21 +176,9 @@ pub struct RustCatchResult : IValue {
     pub err_val: RustPanicErr;
 }
 
-pub fn rust_landing_pad_catch(
-    is_ok_flag: i64,
-    val: i64,
-    err_msg: str
-) -> RustCatchResult {
-    if is_ok_flag != 0 {
-        return RustCatchResult {
-            is_ok:   true,
-            ok_val:  val,
-            err_val: RustPanicErr::create(""),
-        };
-    }
-    return RustCatchResult {
-        is_ok:   false,
-        ok_val:  0,
-        err_val: RustPanicErr::create(if err_msg.len() > 0 { err_msg } else { "Rust panic unwound" }),
-    };
+/// Calls the generated `bridge_<crate>_<fn>` trampoline at `fn_addr` and
+/// turns its `BridgeResult` into a value or a `RustPanicErr`.
+pub fn rust_call_bridge(fn_addr: i64, args: List<i64>) -> RustCatchResult {
+    return seam("rust.call_bridge",
+        "loading the bridge cdylib and calling its trampolines needs PilVM native calls (F6)");
 }

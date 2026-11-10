@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -100,7 +102,7 @@ fn eval_m27(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -121,9 +123,11 @@ fn test_m27_1_pattern_dsl_compilation_and_diagnostics() {
         pub fn main() -> i64 {
             // Case 1: Valid UI DSL rule
             var ui_rule = pattern_dsl_rule_new("UiDsl", true);
-            ui_rule.pattern_dsl_add_arm("vstack", "vstack ( gap : $gap:expr ) { $body:block }", false, 10);
-            ui_rule.pattern_dsl_add_arm("hstack", "hstack ( gap : $gap:expr ) { $body:block }", false, 10);
-            ui_rule.pattern_dsl_add_arm("button", "button ( $label:str ) => $action:expr", false, 5);
+            ui_rule.pattern_dsl_add_arm("vstack", "vstack ( gap : $gap:expr ) { $body:block }", 10);
+            ui_rule.pattern_dsl_add_arm("hstack", "hstack ( gap : $gap:expr ) { $body:block }", 10);
+            ui_rule.pattern_dsl_add_arm("button", "button ( $label:str ) => $action:expr", 5);
+            // Starts with a fragment of another kind: an infix form, not recursion.
+            ui_rule.pattern_dsl_add_arm("pipe", "$lhs:expr |> $rhs:expr", 1);
 
             let diags_valid = pattern_dsl_check_diagnostics(ui_rule);
             if diags_valid.len() != 0 { return 1; }
@@ -136,21 +140,23 @@ fn test_m27_1_pattern_dsl_compilation_and_diagnostics() {
             if m2.matched { return 3; }
 
             // Case 2: Left-recursive arm must trigger SYN002
-            var bad_rec_rule = pattern_dsl_rule_new("LeftRecDsl", true);
-            bad_rec_rule.pattern_dsl_add_arm("expr", "expr + expr", true, 0);
+            // Detected from the pattern text: the first element refers back to the rule.
+            var bad_rec_rule = pattern_dsl_rule_new("Sum", true);
+            bad_rec_rule.pattern_dsl_add_arm("add", "$lhs:Sum + $rhs:Term", 0);
+            bad_rec_rule.pattern_dsl_add_arm("list", "$($x:Sum),* ;", 1);
+            bad_rec_rule.pattern_dsl_add_arm("neg", "- $x:Sum", 2);
             let diags_rec = pattern_dsl_check_diagnostics(bad_rec_rule);
-            if diags_rec.len() != 1 { return 4; }
-            let expected_syn002 = "SYN002";
-            if diags_rec[0].len() < expected_syn002.len() { return 5; }
+            if diags_rec.len() != 2 { return 4; }
+            if diags_rec[0] != "SYN002: Left recursion detected in custom syntax rule 'Sum' on arm '$lhs:Sum + $rhs:Term'; requires Pratt parselet binding or prefix token" { return 5; }
+            if !diags_rec[1].starts_with("SYN002: Left recursion detected in custom syntax rule 'Sum' on arm '$($x:Sum),* ;'") { return 8; }
 
             // Case 3: Overlapping arms with same head and equal priority must trigger SYN001
             var bad_overlap_rule = pattern_dsl_rule_new("OverlapDsl", true);
-            bad_overlap_rule.pattern_dsl_add_arm("parse", "parse ( a )", false, 5);
-            bad_overlap_rule.pattern_dsl_add_arm("parse", "parse ( b )", false, 5);
+            bad_overlap_rule.pattern_dsl_add_arm("parse", "parse ( a )", 5);
+            bad_overlap_rule.pattern_dsl_add_arm("parse", "parse ( b )", 5);
             let diags_overlap = pattern_dsl_check_diagnostics(bad_overlap_rule);
             if diags_overlap.len() != 1 { return 6; }
-            let expected_syn001 = "SYN001";
-            if diags_overlap[0].len() < expected_syn001.len() { return 7; }
+            if !diags_overlap[0].starts_with("SYN001: Ambiguous overlapping syntax pattern arms in 'OverlapDsl': 'parse ( a )' vs 'parse ( b )'") { return 7; }
 
             return 42;
         }
@@ -267,6 +273,7 @@ fn test_m27_3_scoped_dsl_lexical_isolation_and_live_lsp_sync() {
             if !hover_info.found { return 8; }
             if hover_info.symbol_name != "button" { return 9; }
             if hover_info.category_name != "UiDsl" { return 10; }
+            if hover_info.signature != "button(\"Click\") => { ... }" { return 11; }
 
             return 42;
         }

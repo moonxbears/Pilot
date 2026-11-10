@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -86,7 +88,6 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             name_blind: true,
             required_pub_fns: &[
                 "default_command_registry",
-                "cli_help_banner",
                 "resolve_cli_subcommand",
                 "run_cli_entry",
             ],
@@ -100,7 +101,30 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     required_group_pub_fns: &[],
 };
 
+/// Runs the real `pilot` binary with the whitespace-separated `raw_args`
+/// from the workspace root; returns stdout, stderr and the exit code.
+fn pilot_cli(raw_args: &str) -> (String, String, i32) {
+    let out = std::process::Command::new("cargo")
+        .args(["run", "-q", "-p", "pilot-cli", "--"])
+        .args(raw_args.split_whitespace())
+        .current_dir(anticheat::workspace_root())
+        .output()
+        .expect("run pilot");
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
+/// Everything `pilot <raw_args>` wrote, stdout then stderr.
 fn eval_cli(raw_args: &str) -> String {
+    let (stdout, stderr, _) = pilot_cli(raw_args);
+    stdout + &stderr
+}
+
+/// Links the CLI units with `tail` as the last statement and runs it.
+fn eval_cli_script(tail: &str) -> String {
     let root = anticheat::workspace_root();
     let deps = [
         "stdlib/core/file.pilot",
@@ -116,14 +140,25 @@ fn eval_cli(raw_args: &str) -> String {
         b.push_str(&fs::read_to_string(root.join(d)).unwrap_or_else(|e| panic!("Failed to read {d}: {e}")));
         b.push('\n');
     }
-    let src = format!("{b}\nrun_cli_entry(\"{raw_args}\");");
+    let src = format!("{b}\n{tail}");
     let arena = parse(&src);
     let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
     let (mut vm, mut phy) = (PilVirtualMachine::new(), PhysicsRegistry::new(flat, syms));
     let reg_ptr = &mut phy as *mut PhysicsRegistry;
     vm.engine_handler = Some(Box::new(move |op, a| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
+}
+
+/// Parses `raw_args` with the default registry and returns
+/// `command|target|output|release` from the parsed flags.
+fn eval_parsed(raw_args: &str) -> String {
+    let script = format!(
+        "let p_res = cli_parse_args(default_command_registry(), \"{raw_args}\");\n\
+         let p: ParsedArgs = cli_map_get(p_res, \"parsed\");\n\
+         p.command + \"|\" + parsed_get_str(p, \"target\", \"\") + \"|\" + parsed_get_str(p, \"output\", \"\") + \"|\" + parsed_get_bool(p, \"release\");"
+    );
+    eval_cli_script(&script)
 }
 
 #[test]
@@ -178,25 +213,37 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
     );
 
     // 1. Verify --flag=val syntax correctly binds value
-    let out_eq = eval_cli("build --target=wasm -o output.wasm");
-    assert_eq!(out_eq, "0", "Valid build invocation with --target=wasm must succeed, got: {out_eq}");
+    let out_eq = eval_parsed("build --target=wasm -o output.wasm");
+    assert_eq!(out_eq, "build|wasm|output.wasm|false", "--target=wasm and -o must bind, got: {out_eq}");
 
     // 2. Verify short flag syntax -t wasm and -r
-    let out_short = eval_cli("build -t wasm -r");
-    assert_eq!(out_short, "0", "Valid build with short flags -t wasm -r must succeed, got: {out_short}");
+    let out_short = eval_parsed("build -t wasm -r");
+    assert_eq!(out_short, "build|wasm||true", "short flags -t wasm -r must bind, got: {out_short}");
 
-    // 3. Verify -- passthrough forwards tokens verbatim to passthrough_args
-    let out_run = eval_cli("run app.pilot -- --target=native --release");
-    assert_eq!(out_run, "RUN:app.pilot", "Run command should route to target script, got: {out_run}");
-
-    // 4. Verify gate command parses --full and --json
-    let out_gate = eval_cli("gate --full --json");
+    // A command that parses but has no handler stops at its seam instead of
+    // exiting 0 having done nothing.
+    let (_, err_build, code_build) = pilot_cli("build --target=wasm -o output.wasm");
     assert!(
-        out_gate.starts_with("GATE:"),
-        "Gate command must route to GATE: protocol, got: {out_gate}"
+        err_build.contains("SEAM001: unconnected seam `cli.command_handler`") && code_build == 70,
+        "build has no handler and must stop at the cli.command_handler seam, got {code_build}: {err_build}"
     );
-    assert!(out_gate.contains("--full"), "Gate args must contain --full, got: {out_gate}");
-    assert!(out_gate.contains("--json"), "Gate args must contain --json, got: {out_gate}");
+
+    // 3. Verify -- passthrough forwards tokens verbatim to the script without
+    //    parsing them as flags. `script_args.pilot` prints the argument count,
+    //    then each argument in brackets.
+    let (out_run, err_run, code_run) = pilot_cli("run tests/conformance/script_args.pilot -- --target=native --release");
+    assert_eq!(
+        (out_run.as_str(), code_run),
+        ("2\n[--target=native]\n[--release]\n", 0),
+        "run must pass the tokens after -- to the script, stderr: {err_run}"
+    );
+
+    // 4. Verify gate command parses --full and --json: a JSON report that
+    //    includes the gates only --full runs.
+    let (out_gate, err_gate, code_gate) = pilot_cli("gate --full --json");
+    assert_eq!(code_gate, 0, "gate --full --json failed: {err_gate}");
+    assert!(out_gate.trim_start().starts_with('{'), "--json must print JSON, got: {out_gate}");
+    assert!(out_gate.contains("\"id\":\"rename_litmus\""), "--full must run the rename litmus, got: {out_gate}");
 
     // 5. Verify backward-compatible resolve_cli_subcommand API
     let root = anticheat::workspace_root();
@@ -267,7 +314,7 @@ pub fn test_m3_3_dynamic_shell_completions_and_schema_json() {
     let reg_ptr = &mut phy as *mut PhysicsRegistry;
     vm.engine_handler = Some(Box::new(move |op, a| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    let bash_output = vm.run().to_string_repr();
+    let bash_output = vm_outcome::outcome(&mut vm);
 
     assert!(
         bash_output.contains("deploy"),

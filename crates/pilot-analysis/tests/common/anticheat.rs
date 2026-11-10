@@ -1240,6 +1240,16 @@ fn extract_single_param_name(seg: &[PilotTok]) -> Option<String> {
         .map(|t| t.text.clone())
 }
 
+/// Whether a function body calls the `seam` built-in.
+fn opens_seam(body: &[PilotTok]) -> bool {
+    body.windows(2).any(|w| {
+        w[0].kind == TokKind::Ident
+            && w[0].text == "seam"
+            && w[1].kind == TokKind::Punct
+            && w[1].text == "("
+    })
+}
+
 fn is_trivial_constant_stub(body: &[PilotTok]) -> bool {
     if body.is_empty() {
         return true;
@@ -1421,6 +1431,12 @@ fn verify_fn_body_and_params(
     req_fn: &str,
     real_def: &ExtractedFn,
 ) {
+    // A body that stops at a seam is an honest, registered gap (see
+    // `selfhost/gate/ledger/seams.pilot`), not a stub. It fails at run time
+    // with SEAM001, and the `seams` gate checks it is registered.
+    if opens_seam(&real_def.body_tokens) {
+        return;
+    }
     assert!(
         real_def.body_tokens.len() >= 3 && !is_trivial_constant_stub(&real_def.body_tokens),
         "ANTI-CHEAT [PASS 6: TRIVIAL_CONSTANT_RETURN_STUB] [M{}::{}]: `pub fn {}` in '{}' returns a trivial constant/stub instead of computing!",

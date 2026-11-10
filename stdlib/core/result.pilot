@@ -19,15 +19,14 @@ pub partial struct result<TOk: IAnyValue, TErr: IAnyValue> : IEquatable<result<T
 
     pub is_err: bool { get => !.is_ok; }
 
+    // The payload a result does not hold is left out, which zero-fills it.
     pub static pure:
         fn ok(v: TOk) -> result<TOk, TErr> => result<TOk, TErr> {
             ok_val:  v,
-            err_val: __ssa_cast(Cfg.Ssa.zext, 0, TErr),
             is_ok:   true,
         };
 
         fn err(e: TErr) -> result<TOk, TErr> => result<TOk, TErr> {
-            ok_val:  __ssa_cast(Cfg.Ssa.zext, 0, TOk),
             err_val: e,
             is_ok:   false,
         };
@@ -35,7 +34,9 @@ pub partial struct result<TOk: IAnyValue, TErr: IAnyValue> : IEquatable<result<T
         fn fail(e: TErr) -> result<TOk, TErr> => result<TOk, TErr>.err(e);
 
     pub pure:
-        // Universal postfix `expr?` unwraps `TOk` or early-returns `fail(err_val)`
+        // Universal postfix `expr?` unwraps `TOk`, or early-returns the
+        // failed result itself when `is_success()` is `false`.
+        fn is_success() -> bool => .is_ok;
         op ? () -> TOk => .ok_val;
 
         op == (rhs: result<TOk, TErr>) -> bool =>

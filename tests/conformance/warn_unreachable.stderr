@@ -1,0 +1,2 @@
+warning[UNREACH001]: Unreachable code detected after diverging statement
+warn_unreachable.pilot:4:5

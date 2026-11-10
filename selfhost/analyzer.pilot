@@ -606,52 +606,6 @@ pub fn get_decl_error(target: i64, node_count: i64) -> str {
     }
     return "";
 }
-pub fn is_type_name_or_sym_optional(sym: i64, name: str, node_count: i64) -> bool {
-    let nlen = name.len();
-    if nlen > 0 && name.byte_at(nlen - 1) == 63 { return true; }
-    return nlen == 6 && name.byte_at(0) == 111 && name.byte_at(1) == 112 && name.byte_at(2) == 116 && name.byte_at(3) == 105 && name.byte_at(4) == 111 && name.byte_at(5) == 110;
-}
-pub fn is_type_fallible(sym: i64, name: str, node_count: i64) -> bool {
-    let nlen = name.len(); var idx = 0;
-    while idx < nlen { if name.byte_at(idx) == 33 { return true; } idx = idx + 1; }
-    return nlen == 6 && name.byte_at(0) == 114 && name.byte_at(1) == 101 && name.byte_at(2) == 115 && name.byte_at(3) == 117 && name.byte_at(4) == 108 && name.byte_at(5) == 116;
-}
-pub fn parse_num(s: str) -> i64 {
-    var acc = 0; var idx = 0; let slen = s.len();
-    while idx < slen { let b = s.byte_at(idx); if b >= 48 && b <= 57 { acc = acc * 10 + (b - 48); } idx = idx + 1; }
-    return acc;
-}
-pub fn get_node_clearance(nid: i64) -> i64 {
-    let ac = __engine(Cfg.ast.ast_attr_decl_count, nid); var idx = 0;
-    while idx < ac {
-        let anm = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_attr_name, nid, idx));
-        if anm.len() >= 3 && anm.slice(0, 3) == "lvl" {
-            if anm.len() == 3 && __engine(Cfg.ast.ast_attr_decl_arg_count, nid, idx) > 0 {
-                return parse_num(__engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_attr_decl_arg, nid, idx, 0)));
-            } else if anm.len() > 3 { return parse_num(anm.slice(3, anm.len())); }
-        }
-        idx = idx + 1;
-    }
-    return 0;
-}
-pub fn get_caller_clearance(i: i64) -> i64 {
-    var cur = i; var depth = 0;
-    while cur != 4294967295 && cur >= 0 && depth < 30 {
-        let cl = get_node_clearance(cur); if cl > 0 { return cl; }
-        let ok = __engine(Cfg.ast.ast_orig_kind, cur);
-        if (ok == 201 || ok == 104) && __engine(Cfg.ast.ast_child_count, cur) > 0 {
-            let cond = __engine(Cfg.ast.ast_child_at, cur, 0);
-            if __engine(Cfg.ast.ast_orig_kind, cond) == 205 && __engine(Cfg.ast.ast_child_count, cond) >= 2 {
-                let lhs = __engine(Cfg.ast.ast_child_at, cond, 0);
-                if __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, lhs)) == "lvl" {
-                    return parse_num(__engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, cond, 1))));
-                }
-            }
-        }
-        cur = __engine(Cfg.ast.ast_parent, cur); depth = depth + 1;
-    }
-    return 0;
-}
 pub fn is_same_lexical_scope(caller: i64, target: i64) -> bool {
     var cur = caller; var depth = 0;
     while cur != 4294967295 && cur >= 0 && depth < 30 {
@@ -688,152 +642,26 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-    if ok == 100 || ok == 101 {
-        let ann_sym = __engine(Cfg.ast.ast_node_raw_bits, i);
-        if ann_sym > 0 {
-            let ann_name = __engine(Cfg.ast.sym_str, ann_sym);
-            if !is_type_name_or_sym_optional(ann_sym, ann_name, node_count) {
-                let cc = __engine(Cfg.ast.ast_child_count, i);
-                if cc > 0 {
-                    let init_node = __engine(Cfg.ast.ast_child_at, i, 0);
-                    let init_ok = __engine(Cfg.ast.ast_orig_kind, init_node);
-                    if init_ok == 305 {
-                        emit_diag(i, 1, "NULL001: Cannot assign 'none' to non-nullable type '" + ann_name + "'");
-                        return 1;
-                    }
-                }
-            }
-        }
-    }
-    if ok == 102 {
-        let cc = __engine(Cfg.ast.ast_child_count, i);
-        if cc >= 2 {
-            let rhs = __engine(Cfg.ast.ast_child_at, i, 1);
-            let rhs_ok = __engine(Cfg.ast.ast_orig_kind, rhs);
-            if rhs_ok == 305 {
-                let lhs = __engine(Cfg.ast.ast_child_at, i, 0);
-                let lhs_tid = __engine(Cfg.ast.ast_get_bound_target, lhs);
-                var is_opt = false;
-                if lhs_tid != 4294967295 && lhs_tid >= 0 {
-                    let t_sym = __engine(Cfg.ast.ast_node_raw_bits, lhs_tid);
-                    if t_sym > 0 {
-                        let t_name = __engine(Cfg.ast.sym_str, t_sym);
-                        is_opt = is_type_name_or_sym_optional(t_sym, t_name, node_count);
-                    }
-                }
-                if !is_opt {
-                    emit_diag(i, 1, "NULL001: Cannot assign 'none' to non-nullable variable");
-                    return 1;
-                }
-            }
-        }
-    }
-    if ok == 103 {
-        let cc = __engine(Cfg.ast.ast_child_count, i);
-        if cc > 0 {
-            let ret_val = __engine(Cfg.ast.ast_child_at, i, 0);
-            let val_ok = __engine(Cfg.ast.ast_orig_kind, ret_val);
-            if val_ok == 305 {
-                var cur = i;
-                var enc_fn = -1;
-                var depth = 0;
-                while cur != 4294967295 && cur >= 0 && depth < 30 {
-                    depth = depth + 1;
-                    let pk = __engine(Cfg.ast.ast_node_kind, cur);
-                    if pk == 3 {
-                        enc_fn = cur;
-                        cur = -1;
-                    } else {
-                        cur = __engine(Cfg.ast.ast_parent, cur);
-                    }
-                }
-                if enc_fn >= 0 {
-                    let ret_ty_sym = __engine(Cfg.ast.ast_node_raw_bits, enc_fn);
-                    if ret_ty_sym > 0 {
-                        let rname = __engine(Cfg.ast.sym_str, ret_ty_sym);
-                        if !is_type_name_or_sym_optional(ret_ty_sym, rname, node_count) {
-                            emit_diag(i, 1, "NULL003: Cannot return 'none' from function with non-nullable return type '" + rname + "'");
-                            return 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // NULL001 (`none` stored into a type that cannot hold it), NULL003 and
+    // NULL004 come from the type checker (selfhost/check/rules.pilot), which
+    // knows a type can hold `none` from its `op ??`, not from its name.
     if ok == 207 {
         let target_fn = __engine(Cfg.ast.ast_get_bound_target, i);
         if target_fn != 4294967295 && target_fn >= 0 {
-            let req_lvl = get_node_clearance(target_fn);
-            if req_lvl > 0 && get_caller_clearance(i) < req_lvl {
-                emit_diag(i, 1, "LVL001: Insufficient clearance to access target '" + __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, target_fn)) + "' (requires lvl(" + req_lvl + "), caller is lvl(" + get_caller_clearance(i) + "))");
-                return 1;
-            }
             let df = __engine(Cfg.ast.ast_decl_flags, target_fn);
             if (df & 15) == 0 && df != 0 && !is_same_lexical_scope(i, target_fn) {
                 emit_diag(i, 1, "VIS001: Cannot access private member '" + __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, target_fn)) + "' from external scope");
                 return 1;
             }
         }
-        let cc = __engine(Cfg.ast.ast_child_count, i);
-        if cc > 1 {
-            if target_fn != 4294967295 && target_fn >= 0 {
-                let p_cnt = __engine(Cfg.ast.ast_child_count, target_fn);
-                var ai = 1;
-                while ai < cc {
-                    let arg = __engine(Cfg.ast.ast_child_at, i, ai);
-                    let a_ok = __engine(Cfg.ast.ast_orig_kind, arg);
-                    if a_ok == 305 {
-                        if ai < p_cnt {
-                            let param_node = __engine(Cfg.ast.ast_child_at, target_fn, ai);
-                            let psym = __engine(Cfg.ast.ast_node_raw_bits, param_node);
-                            if psym > 0 {
-                                let pname = __engine(Cfg.ast.sym_str, psym);
-                                if !is_type_name_or_sym_optional(psym, pname, node_count) {
-                                    emit_diag(arg, 1, "NULL004: Cannot pass 'none' to non-nullable parameter '" + pname + "'");
-                                    return 1;
-                                }
-                            }
-                        }
-                    }
-                    ai = ai + 1;
-                }
-            }
-        }
     }
-    if (ok == 209 || ok == 210) && __engine(Cfg.ast.ast_child_count, i) > 0 {
-        let recv = __engine(Cfg.ast.ast_child_at, i, 0);
-        if __engine(Cfg.ast.ast_orig_kind, recv) != 213 {
-            let recv_tid = __engine(Cfg.ast.ast_get_bound_target, recv);
-            if recv_tid != 4294967295 && recv_tid >= 0 {
-                let t_sym = __engine(Cfg.ast.ast_node_raw_bits, recv_tid);
-                if t_sym > 0 && is_type_name_or_sym_optional(t_sym, __engine(Cfg.ast.sym_str, t_sym), node_count) {
-                    if ok == 209 {
-                        emit_diag(i, 1, "NULL002: Member access on optional type requires '?.' safe navigation or unwrapping");
-                    } else {
-                        emit_diag(i, 1, "NULL005: Index access on optional type requires safe navigation or unwrapping");
-                    }
-                    return 1;
-                }
-            }
-        }
-    }
+    // Member and index access through an optional value (NULL006, NULL005)
+    // come from the type checker.
     return 0;
 }
 pub fn verify_error_flow(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
-    if ok == 110 && __engine(Cfg.ast.ast_child_count, i) > 0 {
-        let expr = __engine(Cfg.ast.ast_child_at, i, 0);
-        if __engine(Cfg.ast.ast_orig_kind, expr) == 207 {
-            let target_fn = __engine(Cfg.ast.ast_get_bound_target, expr);
-            if target_fn != 4294967295 && target_fn >= 0 {
-                let ret_sym = __engine(Cfg.ast.ast_node_raw_bits, target_fn);
-                if ret_sym > 0 && is_type_fallible(ret_sym, __engine(Cfg.ast.sym_str, ret_sym), node_count) {
-                    emit_diag(expr, 1, "ERR001: Unhandled fallible return value; must use '?', 'catch', or assign to a binding");
-                    return 1;
-                }
-            }
-        }
-    }
+    // ERR001 (a dropped fallible result) comes from the type checker.
     if ok == 111 {
         var p = __engine(Cfg.ast.ast_parent, i);
         var in_polyglot = false;
@@ -949,7 +777,10 @@ pub fn verify_pattern_matching(i: i64, node_count: i64) -> i64 {
             }
             ai = ai + 1;
         }
-        if !wildcard_seen { emit_diag(i, 1, "FLOW005: Non-exhaustive pattern match in switch expression; add wildcard '_' arm"); }
+        // FLOW005 (exhaustiveness) needs the subject's type: which variants an
+        // enum has, which slice lengths a pattern set covers. F4 derives it; a
+        // switch without a `_` arm is not evidence of a gap (`case Rect(w, h)`
+        // over every variant, or `(x, _)`, already covers everything).
     }
     return 0;
 }
@@ -1112,20 +943,7 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
             emit_diag(i, 1, "VAR001: Variable '" + vname + "' requires an explicit type annotation or initial value");
         }
     }
-    // 11. UNUSED001: Unused declaration (Warning)
-    if ok == 100 || ok == 101 || ok == 3 {
-        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-        if name.len() >= 6 && name.slice(0, 6) == "unused" { emit_diag(i, 2, "UNUSED001: Declaration '" + name + "' is unused"); }
-    }
-    // 12. OPT003: Small leaf function inlining candidate (Info)
-    if ok == 3 && __engine(Cfg.ast.ast_child_count, i) > 0 {
-        let body = __engine(Cfg.ast.ast_child_at, i, __engine(Cfg.ast.ast_child_count, i) - 1);
-        if __engine(Cfg.ast.ast_orig_kind, body) == 200 && __engine(Cfg.ast.ast_child_count, body) <= 1 {
-            let fn_name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-            if fn_name.len() >= 6 && fn_name.slice(0, 6) == "unused" { emit_diag(i, 3, "OPT003: Leaf function '" + fn_name + "' is an eligible candidate for inlining"); }
-        }
-    }
-    // 13. FLOAT001: Direct float equality comparison (Warning)
+    // 11. FLOAT001: Direct float equality comparison (Warning)
     if ok == 205 && __engine(Cfg.ast.ast_child_count, i) >= 2 {
         let op = __engine(Cfg.ast.ast_node_raw_bits, i);
         if op == 8 || op == 9 {
@@ -1134,47 +952,53 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
             if lok == 302 || rok == 302 { emit_diag(i, 2, "FLOAT001: Direct floating-point equality comparison ('==' or '!=') may fail due to precision; use epsilon comparison"); }
         }
     }
-    // 14. MUT001, UNUSED, Hints
-    let sname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-    if ok == 101 {
-        if sname.len() >= 6 && sname.slice(0, 6) == "unmuta" { emit_diag(i, 2, "MUT001: Variable '" + sname + "' is declared as 'var' but never mutated; prefer immutable 'let'"); }
-        if sname.len() >= 4 && (sname.slice(0, 4) == "dead" || sname.slice(0, 4) == "unas") { emit_diag(i, 2, "DEAD001: Mutable variable '" + sname + "' is declared but never assigned or written"); }
-        if sname.len() >= 6 && sname.slice(0, 6) == "shadow" { emit_diag(i, 2, "SHADOW001: Variable '" + sname + "' shadows an existing binding in outer scope"); }
-    } else if ok == 3 {
-        if sname.len() >= 6 && (sname.slice(0, 6) == "unused" || sname.slice(0, 6) == "dead_f") { emit_diag(i, 2, "UNUSED002: Function '" + sname + "' is defined but never called"); }
-        if sname.len() >= 5 && sname.slice(0, 5) == "memo_" { emit_diag(i, 3, "HINT001: Pure function '" + sname + "' is eligible for memoization"); }
-        if sname.len() >= 7 && sname.slice(0, 7) == "static_" { emit_diag(i, 3, "HINT002: Method '" + sname + "' does not access self; declare as static or pure"); }
-    } else if ok == 21 {
-        if sname.len() >= 6 && sname.slice(0, 6) == "unused" { emit_diag(i, 2, "UNUSED004: Parameter '" + sname + "' is declared but never read; prefix with '_'"); }
-        if sname.len() >= 5 && sname.slice(0, 5) == "view_" { emit_diag(i, 3, "HINT004: Pass slice view rather than owned buffer for parameter '" + sname + "'"); }
-    } else if ok == 12 {
-        if sname.len() >= 6 && sname.slice(0, 6) == "unused" { emit_diag(i, 2, "UNUSED003: Import directive '" + sname + "' is unused"); }
-    }
-    if sname.len() >= 6 && sname.slice(0, 6) == "clone_" { emit_diag(i, 3, "PERF001: Redundant buffer clone on '" + sname + "'; borrow as view"); }
-    if sname.len() >= 5 && sname.slice(0, 5) == "cold_" { emit_diag(i, 3, "PERF003: Cold branch '" + sname + "' identified for out-of-line alignment"); }
-    if sname.len() >= 5 && sname.slice(0, 5) == "each_" { emit_diag(i, 3, "HINT005: Loop '" + sname + "' can be vectorized using each adapter"); }
     return 0;
+}
+// ------------------------------------------------------------------------------
+// Local bindings and lexical scopes, from node spans.
+// A local binding is a `let`/`var` statement directly inside a block, visible
+// from the end of its statement to the end of that block, or a parameter of a
+// function, constructor, indexer, operator or closure, visible in its body.
+// A use of a name refers to the visible binding of that name declared last.
+// ------------------------------------------------------------------------------
+pub fn is_fn_like_kind(ok: i64) -> bool {
+    return ok == 3 || ok == 13 || ok == 16 || ok == 18 || ok == 216;
+}
+// Start of the innermost function-like node containing node `i`, or -1.
+pub fn innermost_fn_like_start(i: i64, node_count: i64) -> i64 {
+    let s = __engine(Cfg.ast.ast_span_start, i);
+    let e = __engine(Cfg.ast.ast_span_end, i);
+    var best = -1;
+    var j = 0;
+    while j < node_count {
+        if j != i && is_fn_like_kind(__engine(Cfg.ast.ast_orig_kind, j)) {
+            let js = __engine(Cfg.ast.ast_span_start, j);
+            if js <= s && e <= __engine(Cfg.ast.ast_span_end, j) && js > best { best = js; }
+        }
+        j = j + 1;
+    }
+    return best;
+}
+// Whether a loop (or, when `allow_switch`, a switch) inside the innermost
+// function or closure of node `i` contains it.
+pub fn has_enclosing_jump_target(i: i64, node_count: i64, allow_switch: bool) -> bool {
+    let s = __engine(Cfg.ast.ast_span_start, i);
+    let e = __engine(Cfg.ast.ast_span_end, i);
+    let floor = innermost_fn_like_start(i, node_count);
+    var j = 0;
+    while j < node_count {
+        let ok = __engine(Cfg.ast.ast_orig_kind, j);
+        if ok == 106 || ok == 204 || (allow_switch && ok == 202) {
+            let js = __engine(Cfg.ast.ast_span_start, j);
+            if js > floor && js <= s && e <= __engine(Cfg.ast.ast_span_end, j) { return true; }
+        }
+        j = j + 1;
+    }
+    return false;
 }
 pub fn verify_type_and_decl(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
     let kind = __engine(Cfg.ast.ast_node_kind, i);
-    // FLOW001: Missing return value in non-void function
-    if ok == 3 && __engine(Cfg.ast.ast_child_count, i) > 0 {
-        let ret_sym = __engine(Cfg.ast.ast_node_raw_bits, i);
-        if ret_sym > 0 {
-            let rname = __engine(Cfg.ast.sym_str, ret_sym);
-            if rname != "void" && rname != "never" && rname.len() > 0 {
-                let body = __engine(Cfg.ast.ast_child_at, i, __engine(Cfg.ast.ast_child_count, i) - 1);
-                if __engine(Cfg.ast.ast_orig_kind, body) == 200 {
-                    let bcc = __engine(Cfg.ast.ast_child_count, body);
-                    var has_ret = false; var bi = 0;
-                    while bi < bcc && !has_ret { let sok = __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, body, bi)); if sok == 103 || sok == 109 { has_ret = true; } bi = bi + 1; }
-                    let fname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-                    if bcc > 0 && !has_ret && fname.len() >= 4 && fname.slice(0, 4) == "bad_" { emit_diag(i, 1, "FLOW001: Missing return value in non-void function '" + fname + "'"); }
-                }
-            }
-        }
-    }
     // FLOW002: Constructor return disallowed
     if ok == 103 && __engine(Cfg.ast.ast_child_count, i) > 0 {
         var cur = __engine(Cfg.ast.ast_parent, i); var depth = 0;
@@ -1185,27 +1009,12 @@ pub fn verify_type_and_decl(i: i64, node_count: i64) -> i64 {
             cur = __engine(Cfg.ast.ast_parent, cur); depth = depth + 1;
         }
     }
-    // FLOW003 & FLOW004: Break & Continue outside loop
+    // FLOW003 & FLOW004: 'break' / 'continue' with no enclosing loop (or
+    // switch, for 'break') inside the innermost function or closure.
     if ok == 107 || ok == 108 {
-        var cur = __engine(Cfg.ast.ast_parent, i); var is_bad = false; var depth = 0;
-        while cur >= 0 && cur < 100000 && depth < 30 {
-            let cok = __engine(Cfg.ast.ast_orig_kind, cur);
-            if cok == 106 || cok == 204 || (ok == 107 && cok == 202) { break; }
-            if cok == 3 {
-                let fn_name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, cur));
-                if fn_name.len() >= 4 && fn_name.slice(0, 4) == "bad_" { is_bad = true; }
-                break;
-            }
-            cur = __engine(Cfg.ast.ast_parent, cur); depth = depth + 1;
-        }
-        if is_bad {
+        if !has_enclosing_jump_target(i, node_count, ok == 107) {
             emit_diag(i, 1, if ok == 107 { "FLOW003: 'break' statement outside loop or switch construct" } else { "FLOW004: 'continue' statement outside loop iteration construct" });
         }
-    }
-    // DECL001: Undeclared identifier
-    if kind == 14 {
-        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-        if name.len() >= 6 && name.slice(0, 6) == "undecl" { emit_diag(i, 1, "DECL001: Undeclared identifier '" + name + "'; name does not exist in current scope"); }
     }
     // DECL002: Duplicate member declaration in struct scope
     if kind == 1 {
@@ -1229,11 +1038,6 @@ pub fn verify_type_and_decl(i: i64, node_count: i64) -> i64 {
             fi1 = fi1 + 1;
         }
     }
-    // DECL003: Local variable shadowing
-    if ok == 100 || ok == 101 {
-        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-        if name.len() >= 6 && name.slice(0, 6) == "shadow" { emit_diag(i, 1, "DECL003: Local variable '" + name + "' shadows outer binding of the same name"); }
-    }
     // DECL004: Reassignment to immutable 'let' binding
     if ok == 102 && __engine(Cfg.ast.ast_child_count, i) > 0 {
         let target = __engine(Cfg.ast.ast_get_bound_target, __engine(Cfg.ast.ast_child_at, i, 0));
@@ -1241,44 +1045,10 @@ pub fn verify_type_and_decl(i: i64, node_count: i64) -> i64 {
             emit_diag(i, 1, "DECL004: Cannot reassign to immutable 'let' binding '" + __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, target)) + "'; declare with 'var' to permit mutation");
         }
     }
-    // TYPE001: Type mismatch between incompatible layouts
-    if (ok == 100 || ok == 101) && __engine(Cfg.ast.ast_child_count, i) > 0 && __engine(Cfg.ast.ast_node_raw_bits, i) > 0 {
-        let vname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-        let par = __engine(Cfg.ast.ast_parent, i);
-        let par_fn = if par >= 0 { __engine(Cfg.ast.ast_parent, par) } else { -1 };
-        let fn_name = if par_fn >= 0 { __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, par_fn)) } else { "" };
-        if (vname.len() >= 8 && vname.slice(0, 8) == "mismatch") || (fn_name.len() >= 13 && fn_name.slice(0, 13) == "test_mismatch") {
-            emit_diag(i, 1, "TYPE001: Type mismatch; expression layout does not match target type annotation");
-        }
-    }
-    // TYPE002 & TYPE003
-    if ok == 400 {
-        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-        if name.len() >= 9 && name.slice(0, 9) == "undefined" { emit_diag(i, 1, "TYPE002: Undefined type name '" + name + "'; type could not be resolved"); }
-    } else if ok == 205 && (__engine(Cfg.ast.ast_node_raw_bits, i) == 32 || __engine(Cfg.ast.ast_node_raw_bits, i) == 33) {
-        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, i, 0)));
-        if name.len() >= 7 && name.slice(0, 7) == "badcast" { emit_diag(i, 1, "TYPE003: Invalid type cast between incompatible types"); }
-    }
-    // DIM001: Incompatible dimensional units in addition/subtraction
-    if ok == 205 && __engine(Cfg.ast.ast_child_count, i) >= 2 {
-        let op = __engine(Cfg.ast.ast_node_raw_bits, i);
-        if op == 1 || op == 2 {
-            let l_id = __engine(Cfg.ast.ast_child_at, i, 0);
-            let r_id = __engine(Cfg.ast.ast_child_at, i, 1);
-            let l_tgt = __engine(Cfg.ast.ast_get_bound_target, l_id);
-            let r_tgt = __engine(Cfg.ast.ast_get_bound_target, r_id);
-            let l_name = if l_tgt != 4294967295 && l_tgt >= 0 { __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, l_tgt)) } else { __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, l_id)) };
-            let r_name = if r_tgt != 4294967295 && r_tgt >= 0 { __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, r_tgt)) } else { __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, r_id)) };
-            if (l_name.len() >= 6 && l_name.slice(0, 6) == "Meters" && r_name.len() >= 7 && r_name.slice(0, 7) == "Seconds") || (l_name.len() >= 7 && l_name.slice(0, 7) == "Seconds" && r_name.len() >= 6 && r_name.slice(0, 6) == "Meters") || (l_name.len() >= 3 && l_name.slice(0, 3) == "bad" && r_name.len() >= 3 && r_name.slice(0, 3) == "bad") {
-                emit_diag(i, 1, "DIM001: Incompatible dimensional units in arithmetic: '" + l_name + "' vs '" + r_name + "'");
-            }
-        }
-    }
     return 0;
 }
 pub fn verify_ownership_and_perceus(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
-    let kind = __engine(Cfg.ast.ast_node_kind, i);
     // PILOT104: Heap allocation in [HardRealtime] or noalloc context
     if (ok == 306 || ok == 219) {
         var cur = __engine(Cfg.ast.ast_parent, i); var depth = 0;
@@ -1287,50 +1057,6 @@ pub fn verify_ownership_and_perceus(i: i64, node_count: i64) -> i64 {
                 emit_diag(i, 1, "PILOT104: Dynamic heap allocation is prohibited inside 'noalloc' or '[HardRealtime]' block"); break;
             }
             cur = __engine(Cfg.ast.ast_parent, cur); depth = depth + 1;
-        }
-    }
-    // OWN001: Use of moved value
-    if kind == 14 {
-        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-        if name.len() >= 5 && name.slice(0, 5) == "moved" { emit_diag(i, 1, "OWN001: Use of moved value '" + name + "'; uniquely owned buffer variable used after ownership transfer"); }
-    }
-    // OWN002: Multiple mutable borrows in same call
-    if ok == 207 {
-        let cc = __engine(Cfg.ast.ast_child_count, i);
-        var a1 = 1;
-        while a1 < cc {
-            let aname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, i, a1)));
-            if aname.len() >= 15 && aname.slice(0, 15) == "borrow_conflict" { emit_diag(i, 1, "OWN002: Multiple mutable borrows; cannot borrow variable as mutable more than once simultaneously in the same scope"); }
-            a1 = a1 + 1;
-        }
-    }
-    // OWN003: Cannot mutate value while active reference view exists
-    if ok == 102 && __engine(Cfg.ast.ast_child_count, i) > 0 {
-        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, i, 0)));
-        if name.len() >= 15 && name.slice(0, 15) == "immature_borrow" { emit_diag(i, 1, "OWN003: Cannot mutate value while an active reference view exists"); }
-    }
-    // ESCAPE001: Passing reference view or scoped guard across [Cue] boundary
-    if ok == 207 && __engine(Cfg.ast.ast_child_count, i) > 1 {
-        let target = __engine(Cfg.ast.ast_get_bound_target, __engine(Cfg.ast.ast_child_at, i, 0));
-        if target != 4294967295 && has_attr_named(target, "Cue") {
-            let cc = __engine(Cfg.ast.ast_child_count, i); var ai = 1;
-            while ai < cc {
-                let aname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, i, ai)));
-                if aname.len() >= 4 && (aname.slice(0, 4) == "view" || aname.slice(0, 4) == "esc1") { emit_diag(i, 1, "ESCAPE001: Passing reference view or scoped guard across asynchronous [Cue] function boundary"); }
-                ai = ai + 1;
-            }
-        }
-    }
-    // ESCAPE002: Storing reference view into heap container
-    if (ok == 207 || ok == 102) && __engine(Cfg.ast.ast_child_count, i) > 0 {
-        let cname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, i, 0)));
-        if cname.len() >= 4 && cname.slice(0, 4) == "esc2" { emit_diag(i, 1, "ESCAPE002: Reference view escapes into heap container"); }
-    }
-    // ESCAPE003: Scoped guard or local reference view escapes stack frame
-    if ok == 103 && __engine(Cfg.ast.ast_child_count, i) > 0 {
-        let rname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, i, 0)));
-        if rname.len() >= 4 && (rname.slice(0, 4) == "esc3" || (rname.len() >= 9 && rname.slice(0, 9) == "local_win")) {
-            emit_diag(i, 1, "ESCAPE003: Scoped guard or local reference view escapes stack frame; must be lexically bound");
         }
     }
     return 0;
@@ -1461,6 +1187,8 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         verify_engine_usage(i, is_core);
         i = i + 1;
     }
+    // UNUSED001, UNUSED004 and SHADOW001 come from the type checker's scoped
+    // name resolution (selfhost/check/resolve.pilot).
     // Pass 7: Propagate declaration errors to corresponding uses later
     i = 0; while i < node_count {
         if __engine(Cfg.ast.ast_node_kind, i) == 14 {

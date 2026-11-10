@@ -1,0 +1,8 @@
+// F2: script arguments after `--` reach the program through `std.env`.
+use std.env;
+
+fn main() {
+    let args = env.args();
+    print(args.len());
+    for a in args { print(f"[{a}]"); }
+}

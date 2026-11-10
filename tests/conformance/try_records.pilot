@@ -1,0 +1,35 @@
+// F2: postfix `?` and `catch` on the prelude's `res` and `opt` records:
+// `is_success()` decides, `op ?` unwraps, a failure leaves unchanged.
+fn half(x: i64) -> res<i64, str> {
+    if x % 2 == 0 { return result<i64, str>.ok(x / 2); }
+    return result<i64, str>.err(f"{x} is odd");
+}
+
+fn quarter(x: i64) -> res<i64, str> {
+    let h = half(x)?;
+    return half(h);
+}
+
+fn first_even(xs) -> opt<i64> {
+    for x in xs {
+        if x % 2 == 0 { return option<i64>.some(x); }
+    }
+    return option<i64>.none();
+}
+
+fn next_even(xs) -> opt<i64> => option<i64>.some(first_even(xs)? + 2);
+
+fn main() {
+    let a = quarter(12);
+    print(a.is_ok);
+    print(a.ok_val);
+    let b = quarter(6);
+    print(b.is_ok);
+    print(b.err_val);
+    print(next_even([1, 4]).val);
+    print(next_even([1, 3]).has_value);
+    print(half(7) catch e => -1);
+    print(half(8) catch e => -1);
+    print(half(9).unwrap_or(0));
+    print(5?);
+}

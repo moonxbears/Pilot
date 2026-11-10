@@ -43,6 +43,7 @@ pub pure fn align_up_bytes(offset: usize, align: usize) -> usize {
 // ------------------------------------------------------------------------------
 
 pub struct RowProxyRef<T> : IReference {
+    [StandIn("soa.row_base", "ptr<u8> base of the table's column planes", "integer address with no allocation behind it", "F7")]
     pub table_base: usize;
     pub row_index:  usize;
     pub is_active:  bool;
@@ -58,6 +59,7 @@ pub struct RowProxyRef<T> : IReference {
 }
 
 pub struct RowProxyMut<T> : IReference {
+    [StandIn("soa.row_base", "ptr<u8> base of the table's column planes", "integer address with no allocation behind it", "F7")]
     pub table_base: usize;
     pub row_index:  usize;
     pub is_active:  bool;
@@ -131,25 +133,23 @@ pub struct SoaTable<T> : IObject {
         return self.col_offsets[col_idx];
     }
 
+    // Row access and mutation need the column planes themselves: memory from
+    // the allocator and T split into its field columns. Neither exists yet,
+    // so every operation that touches rows stops at the same seam.
     pub pure fn row(ref self, idx: usize) -> RowProxyRef<T> {
-        return RowProxyRef<T>::create(0, idx);
+        return seam("soa.column_memory", "column planes need the F7 allocator and the F4 field split of T");
     }
 
     pub var fn row_mut(var ref self, idx: usize) -> RowProxyMut<T> {
-        return RowProxyMut<T>::create(0, idx);
+        return seam("soa.column_memory", "column planes need the F7 allocator and the F4 field split of T");
     }
 
     pub var fn push(var ref self) -> usize {
-        if self.count >= self.capacity { return self.capacity; }
-        let new_idx = self.count;
-        self.count = self.count + 1;
-        return new_idx;
+        return seam("soa.column_memory", "column planes need the F7 allocator and the F4 field split of T");
     }
 
     pub var fn swap_remove(var ref self, idx: usize) -> bool {
-        if idx >= self.count { return false; }
-        self.count = self.count - 1;
-        return true;
+        return seam("soa.column_memory", "column planes need the F7 allocator and the F4 field split of T");
     }
 
     pub var fn clear(var ref self) {

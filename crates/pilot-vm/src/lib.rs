@@ -5,27 +5,37 @@
 //! diagnostic in `PilcBinary::diagnostics` and compiles to a `Trap`, so a
 //! construct the seed cannot run is reported instead of silently dropped.
 
+pub mod codes;
 mod heap;
 pub mod instruction;
+pub mod host;
+mod lower_args;
 mod lower_call;
 mod lower_cascade;
 mod lower_closure;
 mod lower_defer;
+mod lower_destructure;
 mod lower_dispatch;
 mod lower_expr;
+mod lower_for;
 mod lower_global;
+mod lower_native;
+mod lower_pipe;
+mod lower_program;
 mod lower_stmt;
 mod lower_struct;
-mod lower_try;
-mod lower_variant;
 mod lower_switch;
+mod lower_try;
+mod lower_unit;
+mod lower_variant;
 mod ops;
 pub mod pilc;
 pub mod vm;
 
 pub use instruction::{Instruction, Opcode};
 pub use pilc::{CompileDiagnostic, PilcBinary, PILC_V3_MAGIC, PILC_V3_VERSION};
-pub use vm::{EngineIntrinsicHandler, PilVirtualMachine, VmFault, VmHook};
+pub use host::HostValue;
+pub use vm::{EngineIntrinsicHandler, HostOpHandler, PilVirtualMachine, VmFault, VmHook};
 
 pub mod compiler {
     pub use super::BytecodeCompiler;
@@ -54,6 +64,8 @@ const FIRST_TEMP_REG: u8 = 128;
 /// Name of the hidden receiver parameter of methods and constructors; the
 /// body sees it as `self` (the name without the leading underscore).
 const RECEIVER: &str = "_self";
+/// The seed token that calls an engine intrinsic by name.
+const ENGINE_TOKEN: &str = "__engine";
 /// Arguments travel in `r1..=r16`.
 const MAX_CALL_ARGS: usize = 16;
 
@@ -100,6 +112,15 @@ struct FnState {
     next_reg: u8,
     loops: Vec<LoopCtx>,
     tries: Vec<TryCtx>,
+    block_scopes: Vec<BlockScope>,
+}
+
+/// The bindings visible where a block starts. A `let` in the block that
+/// reuses one of these names gets its own slot, and the block's end brings
+/// these bindings back.
+struct BlockScope {
+    slots: HashMap<String, u8>,
+    types: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -111,8 +132,12 @@ pub struct BytecodeCompiler {
     pub diagnostics: Vec<CompileDiagnostic>,
     var_slots: HashMap<String, u8>,
     var_types: HashMap<String, String>,
+    block_scopes: Vec<BlockScope>,
     fn_ret_types: HashMap<String, String>,
     fn_entries: HashMap<String, (u16, Vec<String>)>,
+    /// The declaration whose parameters each callee takes (`f`, `Owner.m`,
+    /// `Owner.self`), for binding named arguments.
+    param_decls: HashMap<String, NodeId>,
     call_patches: Vec<(usize, String, String, ByteSpan)>,
     const_maps: HashMap<String, CMap>,
     loops: Vec<LoopCtx>,
@@ -149,6 +174,12 @@ pub struct BytecodeCompiler {
     /// `LoadConst` instructions that must load a function's entry point once
     /// it is known.
     entry_patches: Vec<(usize, String, ByteSpan)>,
+    /// Functions and methods of imported units, compiled on first use.
+    lazy_decls: HashMap<String, lower_program::LazyDecl>,
+    /// Names a unit hides with `without`, and that unit.
+    excluded: HashMap<String, Option<pilot_span::FileId>>,
+    /// The unit of the node being compiled, in a linked program.
+    cur_unit: Option<pilot_span::FileId>,
 }
 
 impl BytecodeCompiler {
@@ -163,14 +194,31 @@ impl BytecodeCompiler {
     pub fn compile(arena: &AstArena, root: NodeId) -> PilcBinary {
         let mut c = Self::new();
         let last = if root.is_some() { c.compile_node(arena, root) } else { 0 };
+        c.finish(arena, root, last)
+    }
+
+    /// Compiles a program linked from the units of `arena` (see
+    /// `pilot_parser::parse_unit`), in link order with the entry unit last.
+    pub fn compile_linked(arena: &AstArena) -> PilcBinary {
+        let mut c = Self::new();
+        let units = Self::unit_items(arena);
+        let last = c.compile_units(arena, &units);
+        let root = arena.units.last().map_or(NodeId::NONE, |u| u.root);
+        c.finish(arena, root, last)
+    }
+
+    fn finish(mut self, arena: &AstArena, root: NodeId, last: u8) -> PilcBinary {
+        let c = &mut self;
         c.emit(Opcode::Move, 0, last, 0);
         c.emit(Opcode::Ret, 0, 0, 0);
         c.emit(Opcode::Halt, 0, 0, 0);
+        c.link_lazy(arena);
         c.resolve_calls();
         if c.instructions.len() > u16::MAX as usize {
             let span = arena.span(root);
             c.diagnostics.push(CompileDiagnostic {
                 span,
+                code: codes::SEED,
                 message: format!(
                     "program needs {} instructions; PilVM jump targets address at most {}",
                     c.instructions.len(),
@@ -178,9 +226,34 @@ impl BytecodeCompiler {
                 ),
             });
         }
-        let mut bin = PilcBinary::with_debug_tables(c.constants, c.instructions, c.pc_spans, c.reg_symbols);
-        bin.diagnostics = c.diagnostics;
+        let mut bin = PilcBinary::with_debug_tables(
+            std::mem::take(&mut c.constants),
+            std::mem::take(&mut c.instructions),
+            std::mem::take(&mut c.pc_spans),
+            std::mem::take(&mut c.reg_symbols),
+        );
+        bin.diagnostics = std::mem::take(&mut c.diagnostics);
         bin
+    }
+
+    /// Compiles every imported function or method the program calls, and
+    /// the ones those call, until no call is left to an uncompiled one.
+    fn link_lazy(&mut self, arena: &AstArena) {
+        loop {
+            let wanted: Vec<String> = self
+                .call_patches
+                .iter()
+                .flat_map(|(_, full, bare, _)| [full.clone(), bare.clone()])
+                .chain(self.entry_patches.iter().map(|(_, name, _)| name.clone()))
+                .collect();
+            let mut progress = false;
+            for name in wanted {
+                progress |= self.compile_lazy(arena, &name);
+            }
+            if !progress {
+                break;
+            }
+        }
     }
 
     /// Patches forward calls and function-value entry points once every
@@ -197,7 +270,11 @@ impl BytecodeCompiler {
                     let message = format!("no function named `{name}`");
                     let c = self.add_constant(PilotVal::from_str(&message));
                     self.instructions[idx] = Instruction::encode_wide(Opcode::Trap, 0, c);
-                    self.diagnostics.push(CompileDiagnostic { span, message });
+                    self.diagnostics.push(CompileDiagnostic {
+                        span,
+                        code: codes::UNDECLARED,
+                        message,
+                    });
                 }
             }
         }
@@ -215,7 +292,11 @@ impl BytecodeCompiler {
                     let message = format!("no function named `{full}`");
                     let c = self.add_constant(PilotVal::from_str(&message));
                     self.instructions[idx] = Instruction::encode_wide(Opcode::Trap, 0, c);
-                    self.diagnostics.push(CompileDiagnostic { span, message });
+                    self.diagnostics.push(CompileDiagnostic {
+                        span,
+                        code: codes::UNDECLARED,
+                        message,
+                    });
                 }
             }
         }
@@ -228,7 +309,7 @@ impl BytecodeCompiler {
     fn alloc_local_reg(&mut self) -> u8 {
         let r = self.next_local_reg;
         if r > LAST_LOCAL_REG {
-            self.error(format!(
+            self.error(codes::SEED, format!(
                 "function needs more than {} local variables",
                 LAST_LOCAL_REG - FIRST_LOCAL_REG + 1
             ));
@@ -247,6 +328,7 @@ impl BytecodeCompiler {
         if r == u8::MAX {
             self.diagnostics.push(CompileDiagnostic {
                 span: self.cur_span,
+                code: codes::SEED,
                 message: format!(
                     "expression needs more than {} scratch registers",
                     u8::MAX - FIRST_TEMP_REG
@@ -320,7 +402,7 @@ impl BytecodeCompiler {
     /// Copies argument registers into `r1..rN` without clobbering sources.
     fn stage_args(&mut self, args: &[u8]) {
         if args.len() > MAX_CALL_ARGS {
-            self.error(format!(
+            self.error(codes::SEED, format!(
                 "calls take at most {MAX_CALL_ARGS} arguments, found {}",
                 args.len()
             ));
@@ -369,11 +451,12 @@ impl BytecodeCompiler {
     }
 
     /// Records a diagnostic at the current span and emits a trap carrying it.
-    fn error(&mut self, message: String) -> u8 {
+    fn error(&mut self, code: &'static str, message: String) -> u8 {
         let c = self.add_constant(PilotVal::from_str(&message));
         self.push_ins(Instruction::encode_wide(Opcode::Trap, 0, c));
         self.diagnostics.push(CompileDiagnostic {
             span: self.cur_span,
+            code,
             message,
         });
         self.emit_null()
@@ -391,6 +474,7 @@ impl BytecodeCompiler {
             next_reg: self.next_reg,
             loops: std::mem::take(&mut self.loops),
             tries: std::mem::take(&mut self.tries),
+            block_scopes: std::mem::take(&mut self.block_scopes),
         }
     }
 
@@ -405,6 +489,7 @@ impl BytecodeCompiler {
         self.next_reg = s.next_reg;
         self.loops = s.loops;
         self.tries = s.tries;
+        self.block_scopes = s.block_scopes;
     }
 
     /// Compiles `id` with `hint` as the expected type.
@@ -430,6 +515,7 @@ impl BytecodeCompiler {
         self.cur_owner = None;
         self.loops.clear();
         self.tries.clear();
+        self.block_scopes.clear();
         self.defers.clear();
         self.next_local_reg = FIRST_LOCAL_REG;
         self.next_reg = FIRST_TEMP_REG;
@@ -592,72 +678,3 @@ impl BytecodeCompiler {
     }
 }
 
-/// Names the seed compiler treats specially. This is the only table of
-/// callable names in the VM crate; the gate's name-blind audit exempts lines
-/// that reference `SeedBuiltin::` and nothing else. Method entries forward to
-/// heap intrinsics until collection protocols dispatch through Pilot method
-/// tables (Phase F).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SeedBuiltin {
-    SizeOf,
-    Assert,
-    Print,
-    NameOf,
-    Engine,
-    Method(&'static str),
-}
-
-impl SeedBuiltin {
-    /// Free-function builtins, looked up by callee name.
-    pub(crate) fn function(name: &str) -> Option<Self> {
-        Some(match name {
-            "sizeof" => SeedBuiltin::SizeOf,
-            "assert" => SeedBuiltin::Assert,
-            "print" | "println" => SeedBuiltin::Print,
-            "nameof" => SeedBuiltin::NameOf,
-            "__engine" => SeedBuiltin::Engine,
-            _ => return None,
-        })
-    }
-
-    /// Methods on VM-native values (strings, lists, records), looked up by
-    /// method name; the payload is the heap intrinsic that implements it.
-    pub(crate) fn method(name: &str) -> Option<&'static str> {
-        let SeedBuiltin::Method(hook) = (match name {
-            "len" => SeedBuiltin::Method("str_len"),
-            "get" => SeedBuiltin::Method("map_get"),
-            "set" => SeedBuiltin::Method("map_set"),
-            "push" => SeedBuiltin::Method("list_push"),
-            "pop" => SeedBuiltin::Method("list_pop"),
-            "trim" => SeedBuiltin::Method("str_trim"),
-            "to_str" => SeedBuiltin::Method("to_str"),
-            "remove_at" => SeedBuiltin::Method("list_remove_at"),
-            "byte_at" => SeedBuiltin::Method("str_byte_at"),
-            "slice" | "substring" => SeedBuiltin::Method("str_slice"),
-            "find" | "index_of" => SeedBuiltin::Method("str_find"),
-            "replace" => SeedBuiltin::Method("str_replace"),
-            "contains" => SeedBuiltin::Method("str_contains"),
-            "starts_with" => SeedBuiltin::Method("str_starts_with"),
-            "ends_with" => SeedBuiltin::Method("str_ends_with"),
-            "is_null" => SeedBuiltin::Method("is_null"),
-            "has" => SeedBuiltin::Method("map_has"),
-            "remove" => SeedBuiltin::Method("map_remove"),
-            _ => return None,
-        }) else {
-            return None;
-        };
-        Some(hook)
-    }
-
-    /// Paren-less properties on VM-native values (`xs.len`), with the heap
-    /// intrinsic that computes them from the receiver alone.
-    pub(crate) fn property(name: &str) -> Option<&'static str> {
-        let SeedBuiltin::Method(hook) = (match name {
-            "len" => SeedBuiltin::Method("str_len"),
-            _ => return None,
-        }) else {
-            return None;
-        };
-        Some(hook)
-    }
-}

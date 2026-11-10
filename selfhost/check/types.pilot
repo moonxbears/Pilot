@@ -1,0 +1,123 @@
+// ==============================================================================
+// FILE: selfhost/check/types.pilot
+// Type terms of the checker, interned in one table.
+// ==============================================================================
+// A type is an index into `TypeTable`. Index 0 is the unknown type: what the
+// checker cannot derive yet. Every rule treats it as compatible with
+// anything, so an incomplete inference never produces a false error.
+//
+// A named type is a declaration node (a `struct`, `enum` or `interface`, the
+// first one declared under its name) applied to type arguments. A type
+// parameter is a name owned by the generic declaration that introduces it.
+pub lvl(0) pkg Pilot.SelfHost.Check.Types;
+
+/// What a type term is.
+pub enum TypeForm : u8 {
+    /// Not derived; compatible with anything.
+    Unknown,
+    /// A declaration applied to type arguments.
+    Named,
+    /// A generic parameter, by owner and name.
+    Param,
+}
+
+pub struct TypeTable {
+    pub form: List<TypeForm>;
+    pub decl: List<i64>;
+    pub args: List<List<i64>>;
+    pub name: List<str>;
+    pub keys: Map<str, i64>;
+}
+
+pub fn tt_new() -> TypeTable {
+    let empty: List<i64> = [];
+    return TypeTable {
+        form: [TypeForm::Unknown],
+        decl: [-1],
+        args: [empty],
+        name: ["_"],
+        keys: Map<str, i64>(),
+    };
+}
+
+pub pure fn ty_unknown() -> i64 => 0;
+
+fn tt_key(tag: str, decl: i64, name: str, args: List<i64>) -> str {
+    var key = tag + ":" + f"{decl}" + ":" + name;
+    for a in args { key = key + "," + f"{a}"; }
+    return key;
+}
+
+fn tt_intern(tt: TypeTable, form: TypeForm, tag: str, decl: i64, name: str, args: List<i64>) -> i64 {
+    let key = tt_key(tag, decl, name, args);
+    if tt.keys.has(key) { return tt.keys.get(key); }
+    let id = tt.form.len();
+    tt.form.push(form);
+    tt.decl.push(decl);
+    tt.args.push(args);
+    tt.name.push(name);
+    tt.keys.set(key, id);
+    return id;
+}
+
+/// The declaration `decl` (named `name`) applied to `args`.
+pub fn ty_named(tt: TypeTable, decl: i64, name: str, args: List<i64>) -> i64 =>
+    tt_intern(tt, TypeForm::Named, "N", decl, name, args);
+
+/// The generic parameter `name` of declaration `owner`.
+pub fn ty_param(tt: TypeTable, owner: i64, name: str) -> i64 {
+    let none_args: List<i64> = [];
+    return tt_intern(tt, TypeForm::Param, "P", owner, name, none_args);
+}
+
+pub fn ty_is_unknown(tt: TypeTable, t: i64) -> bool => t <= 0;
+pub fn ty_is_named(tt: TypeTable, t: i64) -> bool => t > 0 && tt.form[t] == TypeForm::Named;
+pub fn ty_is_param(tt: TypeTable, t: i64) -> bool => t > 0 && tt.form[t] == TypeForm::Param;
+
+pub fn ty_decl(tt: TypeTable, t: i64) -> i64 => tt.decl[t];
+pub fn ty_args(tt: TypeTable, t: i64) -> List<i64> => tt.args[t];
+
+/// Whether `t` mentions a generic parameter or the unknown type anywhere.
+pub fn ty_is_open(tt: TypeTable, t: i64) -> bool {
+    if t <= 0 || ty_is_param(tt, t) { return true; }
+    for a in tt.args[t] {
+        if ty_is_open(tt, a) { return true; }
+    }
+    return false;
+}
+
+/// The type as source text: `option<slice<i64>>`.
+pub fn ty_display(tt: TypeTable, t: i64) -> str {
+    if t <= 0 { return "_"; }
+    let args = tt.args[t];
+    if args.len() == 0 { return tt.name[t]; }
+    var out = tt.name[t] + "<";
+    var i = 0;
+    while i < args.len() {
+        if i > 0 { out = out + ", "; }
+        out = out + ty_display(tt, args[i]);
+        i = i + 1;
+    }
+    return out + ">";
+}
+
+/// `t` with each generic parameter named in `names` (owned by any
+/// declaration) replaced by the matching entry of `values`.
+pub fn ty_subst(tt: TypeTable, t: i64, names: List<str>, values: List<i64>) -> i64 {
+    if t <= 0 || names.len() == 0 { return t; }
+    if ty_is_param(tt, t) {
+        var i = 0;
+        while i < names.len() {
+            if names[i] == tt.name[t] {
+                return if i < values.len() { values[i] } else { 0 };
+            }
+            i = i + 1;
+        }
+        return t;
+    }
+    let args = tt.args[t];
+    if args.len() == 0 { return t; }
+    var out: List<i64> = [];
+    for a in args { out.push(ty_subst(tt, a, names, values)); }
+    return ty_named(tt, tt.decl[t], tt.name[t], out);
+}

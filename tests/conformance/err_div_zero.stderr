@@ -1,0 +1,2 @@
+error[DIV001]: Compile-time division by zero detected
+err_div_zero.pilot:4:11

@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -113,7 +115,7 @@ fn eval_m24(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -148,6 +150,9 @@ fn test_m24_1_pchor_parsing_and_ast() {
             if bp.name != "GameTopology" { return 1; }
             if bp.storages.len() != 1 { return 2; }
             if bp.storages[0].strategy != "SoA" { return 3; }
+            if bp.storages[0].capacity != 100000 { return 15; }
+            let bp_tiled = parse_pchor_source("blueprint T {\n    storage P: Particle(strategy: \"AoSoA\", capacity: 64);\n}\n");
+            if bp_tiled.storages[0].strategy != "AoSoA" { return 18; }
 
             if bp.roles.len() != 2 { return 4; }
             if !bp.roles[0].is_hard_realtime { return 5; }
@@ -156,10 +161,13 @@ fn test_m24_1_pchor_parsing_and_ast() {
 
             if bp.cues.len() != 1 { return 8; }
             if !bp.cues[0].requires_iso_move { return 9; }
-            if bp.cues[0].payload_lattice != 2 { return 10; } // 0b10 Object with iso
+            if bp.cues[0].payload_type != "List<Pair>" { return 10; }
+            // The lattice is left for the type checker; the parser never guesses it from a name.
+            if bp.cues[0].payload_lattice != none { return 16; }
 
             if bp.routes.len() != 1 { return 11; }
             if bp.routes[0].transport.kind != TransportKind::RingBuffer { return 12; }
+            if bp.routes[0].transport.capacity != 1024 { return 17; }
 
             if bp.laws.len() != 1 { return 13; }
             if bp.laws[0].target_role_or_pkg != "Broadphase" { return 14; }
@@ -194,7 +202,9 @@ fn test_m24_2_two_bit_cue_boundary_law() {
             let pchor_bad1 = "blueprint Bad1 {\n"
                 + "    cue BorrowedData(slice<u8>);\n"
                 + "}\n";
-            let bp1 = parse_pchor_source(pchor_bad1);
+            // The type checker would resolve each payload lattice; supply it here.
+            var bp1 = parse_pchor_source(pchor_bad1);
+            bp1.cues[0].payload_lattice = 1;
             let d1 = verify_blueprint_topology(bp1);
             if d1.len() == 0 { return 1; }
             if !d1[0].contains("CHOR001") { return 2; }
@@ -203,7 +213,8 @@ fn test_m24_2_two_bit_cue_boundary_law() {
             let pchor_bad2 = "blueprint Bad2 {\n"
                 + "    cue NonIsoObject(SliceBuffer<u8>);\n"
                 + "}\n";
-            let bp2 = parse_pchor_source(pchor_bad2);
+            var bp2 = parse_pchor_source(pchor_bad2);
+            bp2.cues[0].payload_lattice = 2;
             let d2 = verify_blueprint_topology(bp2);
             if d2.len() == 0 { return 3; }
             if !d2[0].contains("CHOR001") { return 4; }
@@ -212,7 +223,8 @@ fn test_m24_2_two_bit_cue_boundary_law() {
             let pchor_bad3 = "blueprint Bad3 {\n"
                 + "    cue GuardData(MutexGuard<u8>);\n"
                 + "}\n";
-            let bp3 = parse_pchor_source(pchor_bad3);
+            var bp3 = parse_pchor_source(pchor_bad3);
+            bp3.cues[0].payload_lattice = 3;
             let d3 = verify_blueprint_topology(bp3);
             if d3.len() == 0 { return 5; }
             if !d3[0].contains("CHOR001") { return 6; }
@@ -221,9 +233,15 @@ fn test_m24_2_two_bit_cue_boundary_law() {
             let pchor_ok = "blueprint Ok1 {\n"
                 + "    cue ValueData(Vec3);\n"
                 + "}\n";
-            let bp4 = parse_pchor_source(pchor_ok);
+            var bp4 = parse_pchor_source(pchor_ok);
+            bp4.cues[0].payload_lattice = 0;
             let d4 = verify_blueprint_topology(bp4);
             if d4.len() != 0 { return 7; }
+
+            // Scenario 5: iso-moved owned object (0b10) -> ALLOWED
+            var bp5 = parse_pchor_source("blueprint Ok2 {\n    cue Moved(iso SliceBuffer<u8>);\n}\n");
+            bp5.cues[0].payload_lattice = 2;
+            if verify_blueprint_topology(bp5).len() != 0 { return 8; }
 
             return 42;
         }
@@ -236,6 +254,19 @@ fn test_m24_2_two_bit_cue_boundary_law() {
     ];
     let res = eval_m24(deps, script);
     assert_eq!(res, "42", "2-Bit Cue Boundary Law must catch 0b01 borrowed views, 0b11 guards, and non-iso 0b10 objects");
+
+    // Without a resolved payload lattice the verifier stops at its seam.
+    let unresolved = eval_m24(
+        deps,
+        r#"
+        verify_blueprint_topology(parse_pchor_source("blueprint U {\n    cue C(Vec3);\n}\n"));
+    "#,
+    );
+    assert!(
+        unresolved.starts_with("FAULT: SEAM001: unconnected seam `chor.cue_lattice`"),
+        "unresolved cue lattice must stop at its seam, got: {}",
+        unresolved
+    );
 
     guard.finish();
 }
@@ -261,7 +292,9 @@ fn test_m24_3_route_cycles_and_realtime_checks() {
                 + "    route RoleA.CueAB -> RoleB.h;\n"
                 + "    route RoleB.CueBA -> RoleA.h;\n"
                 + "}\n";
-            let bp1 = parse_pchor_source(pchor_cycle);
+            var bp1 = parse_pchor_source(pchor_cycle);
+            bp1.cues[0].payload_lattice = 0;
+            bp1.cues[1].payload_lattice = 0;
             let d1 = verify_blueprint_topology(bp1);
             var has_chor004 = false;
             var i = 0;
@@ -271,6 +304,35 @@ fn test_m24_3_route_cycles_and_realtime_checks() {
             }
             if !has_chor004 { return 1; }
 
+            // 1b. Three-role DirectCall cycle A -> B -> C -> A is reported once
+            var bp_tri = parse_pchor_source("blueprint Tri {\n"
+                + "    route RA.X -> RB.h;\n"
+                + "    route RB.Y -> RC.h;\n"
+                + "    route RC.Z -> RA.h;\n"
+                + "}\n");
+            let d_tri = verify_blueprint_topology(bp_tri);
+            var tri_count = 0;
+            i = 0;
+            while i < d_tri.len() {
+                if d_tri[i].contains("CHOR004") { tri_count = tri_count + 1; }
+                i = i + 1;
+            }
+            if tri_count != 1 { return 4; }
+
+            // 1c. Acyclic chain and a cycle broken by a RingBuffer -> no CHOR004
+            var bp_dag = parse_pchor_source("blueprint Dag {\n"
+                + "    route RA.X -> RB.h;\n"
+                + "    route RB.Y -> RC.h;\n"
+                + "    route RA.W -> RC.h;\n"
+                + "    route RC.Z -> RA.h (transport: ::RingBuffer(64, ::TryFail));\n"
+                + "}\n");
+            let d_dag = verify_blueprint_topology(bp_dag);
+            i = 0;
+            while i < d_dag.len() {
+                if d_dag[i].contains("CHOR004") { return 5; }
+                i = i + 1;
+            }
+
             // 2. [HardRealtime] role over blocking transport -> CHOR005
             let pchor_hrt = "blueprint HrtBp {\n"
                 + "    cue SampleCue(i64);\n"
@@ -278,7 +340,8 @@ fn test_m24_3_route_cycles_and_realtime_checks() {
                 + "    role Logger { receives: SampleCue; }\n"
                 + "    route Sensor.SampleCue -> Logger.log (transport: ::Block);\n"
                 + "}\n";
-            let bp2 = parse_pchor_source(pchor_hrt);
+            var bp2 = parse_pchor_source(pchor_hrt);
+            bp2.cues[0].payload_lattice = 0;
             let d2 = verify_blueprint_topology(bp2);
             var has_chor005 = false;
             i = 0;
@@ -293,7 +356,8 @@ fn test_m24_3_route_cycles_and_realtime_checks() {
                 + "    cue OrphanCue(i64);\n"
                 + "    role Sender { emits: OrphanCue; }\n"
                 + "}\n";
-            let bp3 = parse_pchor_source(pchor_unhandled);
+            var bp3 = parse_pchor_source(pchor_unhandled);
+            bp3.cues[0].payload_lattice = 0;
             let d3 = verify_blueprint_topology(bp3);
             var has_chor003 = false;
             i = 0;
@@ -344,6 +408,7 @@ fn test_m24_4_laws_lowering_and_mermaid_export() {
                 + "}\n";
 
             var bp = parse_pchor_source(pchor_text);
+            bp.cues[0].payload_lattice = 0; // i64 is 0b00
 
             // 1. Test Law Enforcement CHOR006
             bp.roles[1].prohibited_imports.push("std.fs.File"); // Consumer illegally imports std.fs
@@ -356,6 +421,15 @@ fn test_m24_4_laws_lowering_and_mermaid_export() {
             }
             if !has_chor006 { return 1; }
 
+            // A package that merely shares a prefix is not under std.fs.*
+            bp.roles[1].prohibited_imports = ["std.fsx.Thing"];
+            let diags_prefix = verify_blueprint_topology(bp);
+            i = 0;
+            while i < diags_prefix.len() {
+                if diags_prefix[i].contains("CHOR006") { return 11; }
+                i = i + 1;
+            }
+
             // Clear illegal import
             bp.roles[1].prohibited_imports = [];
 
@@ -363,7 +437,7 @@ fn test_m24_4_laws_lowering_and_mermaid_export() {
             let lowered = lower_topology(bp);
             if lowered.routes.len() != 1 { return 2; }
             if lowered.routes[0].transport_kind != TransportKind::RingBuffer { return 3; }
-            if lowered.routes[0].ring_buffer_cap != 1024 { return 4; }
+            if lowered.routes[0].ring_buffer_cap != 512 { return 4; } // declared RingBuffer(512, ..)
             if !lowered.routes[0].is_zero_copy { return 5; }
 
             // 3. Test Mermaid Diagram Generation
@@ -387,6 +461,19 @@ fn test_m24_4_laws_lowering_and_mermaid_export() {
     ];
     let res = eval_m24(deps, script);
     assert_eq!(res, "42", "Must enforce laws (CHOR006), compile lowered route plans, and export Mermaid diagrams");
+
+    // Emitting the dispatchers into PilIR stops at its seam until the typed PilIR exists.
+    let emit = eval_m24(
+        deps,
+        r#"
+        emit_topology_ir(lower_topology(parse_pchor_source("blueprint E {\n    route A.X -> B.h;\n}\n")));
+    "#,
+    );
+    assert!(
+        emit.starts_with("FAULT: SEAM001: unconnected seam `chor.emit_dispatchers`"),
+        "dispatcher emission must stop at its seam, got: {}",
+        emit
+    );
 
     guard.finish();
 }

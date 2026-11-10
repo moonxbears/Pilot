@@ -1,0 +1,19 @@
+// =========================================================================
+// FILE: stdlib/core/prelude.pilot
+// THE IMPLICIT PRELUDE
+// Every program links this package and the packages it imports without a
+// `use` of its own (see `selfhost/loader/module_graph.pilot`). Import here
+// only what everyday code needs with no ceremony.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Prelude;
+
+// `T?` / `opt<T>` and `T ! E` / `res<T, E>`, with postfix `?` and `catch`.
+use Pilot.Core.Option;
+use Pilot.Core.Result;
+
+// `Pending<T>` / `pending(..)` and `[StandIn(..)]`: gaps kept in data.
+use Pilot.Core.Pending;
+
+// `a union b`, `a intersect b` and `a except b` on sequences.
+use Pilot.Db.SetOps;

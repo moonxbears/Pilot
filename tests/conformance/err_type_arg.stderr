@@ -1,0 +1,2 @@
+error[TYPE001]: argument 1 of `twice`: expected `i64`, found `str`
+err_type_arg.pilot:7:17

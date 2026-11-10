@@ -19,7 +19,7 @@ impl From<NodeId> for u32 { #[inline] fn from(id: NodeId) -> Self { id.0 } }
 #[repr(u16)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum NodeKind {
-    Program = 0, ImportDecl = 1, FnDecl = 3, ParamDecl = 4, TypeAdtDecl = 5, AdtVariant = 6,
+    Program = 0, ImportDecl = 1, ExcludeDecl = 2, FnDecl = 3, ParamDecl = 4, TypeAdtDecl = 5, AdtVariant = 6,
     StructDecl = 8, InterfaceDecl = 10, ExtendDecl = 11, ConstDecl = 12, ConstructorDecl = 13,
     DestructorDecl = 14, ScopeDecl = 15, IndexerDecl = 16, DynamicMemberDecl = 17, OperatorDecl = 18,
     LetStmt = 100, VarStmt = 101, AssignStmt = 102, ReturnStmt = 103, GuardStmt = 104,
@@ -42,7 +42,7 @@ impl NodeKind {
     #[inline]
     pub const fn from_u16(raw: u16) -> Self {
         match raw {
-            0 => Self::Program, 1 => Self::ImportDecl, 3 => Self::FnDecl, 4 => Self::ParamDecl,
+            0 => Self::Program, 1 => Self::ImportDecl, 2 => Self::ExcludeDecl, 3 => Self::FnDecl, 4 => Self::ParamDecl,
             5 => Self::TypeAdtDecl, 6 => Self::AdtVariant, 8 => Self::StructDecl,
             10 => Self::InterfaceDecl, 11 => Self::ExtendDecl, 12 => Self::ConstDecl,
             13 => Self::ConstructorDecl, 14 => Self::DestructorDecl, 15 => Self::ScopeDecl,
@@ -67,7 +67,7 @@ impl NodeKind {
 
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Program => "Program", Self::ImportDecl => "ImportDecl", Self::FnDecl => "FnDecl",
+            Self::Program => "Program", Self::ImportDecl => "ImportDecl", Self::ExcludeDecl => "ExcludeDecl", Self::FnDecl => "FnDecl",
             Self::ParamDecl => "ParamDecl", Self::TypeAdtDecl => "TypeAdtDecl", Self::AdtVariant => "AdtVariant",
             Self::StructDecl => "StructDecl", Self::InterfaceDecl => "InterfaceDecl", Self::ExtendDecl => "ExtendDecl",
             Self::ConstDecl => "ConstDecl", Self::ConstructorDecl => "ConstructorDecl",
@@ -181,6 +181,9 @@ impl BinaryOp {
 pub const UNARY_OP_SPLAT: u16 = 6;
 pub const UNARY_OP_DOUBLE_SPLAT: u16 = 7;
 pub const UNARY_OP_DEEP_FLATTEN: u16 = 8;
+/// `some x = v` / `some v` as a condition: true when the value is present,
+/// binding it to `x`. The operand is `AssignStmt(x, v)` or the value itself.
+pub const UNARY_OP_SOME: u16 = 9;
 
 pub const DECL_VIS_MASK: u16 = 0x000F;
 pub const DECL_FLAG_PARTIAL: u16 = 16;
@@ -240,6 +243,23 @@ pub struct AstArena {
     pub f64_pool: Vec<f64>,
     pub interner: Interner,
     pub root: NodeId,
+    /// The compilation units parsed into this arena, in parse order. A
+    /// single-file parse has none; `pilot_parser::parse_unit` adds one per
+    /// linked file.
+    pub units: Vec<UnitInfo>,
+}
+
+/// One source file parsed into a shared arena. Its nodes are
+/// `first_node..` up to the next unit's `first_node`; its spans (and parse
+/// diagnostics from `first_diag` on) are offsets in one program-wide space
+/// where the file starts at `base`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnitInfo {
+    pub file: pilot_span::FileId,
+    pub root: NodeId,
+    pub base: u32,
+    pub first_node: u32,
+    pub first_diag: u32,
 }
 
 impl AstArena {
@@ -254,6 +274,7 @@ impl AstArena {
             for_clauses: Vec::new(), arm_guards: Vec::new(), field_defaults: Vec::new(), diagnostics: Vec::new(),
             i64_pool: Vec::with_capacity(expected / 4), f64_pool: Vec::with_capacity(expected / 8),
             interner: Interner::with_capacity(expected / 2, expected * 8), root: NodeId::NONE,
+            units: Vec::new(),
         }
     }
 
@@ -336,6 +357,28 @@ impl AstArena {
     }
 
     #[inline] pub fn node(&self, id: NodeId) -> &AstNode { &self.nodes[id.0 as usize] }
+    /// The unit whose nodes include `id`, when the arena holds units.
+    pub fn unit_of(&self, id: NodeId) -> Option<&UnitInfo> {
+        let i = self.units.partition_point(|u| u.first_node <= id.0);
+        i.checked_sub(1).map(|i| &self.units[i])
+    }
+
+    /// Moves every span and diagnostic recorded since `first_node` /
+    /// `first_diag` by `base`, into the program-wide offset space.
+    pub fn shift_spans_from(&mut self, first_node: u32, first_diag: u32, base: u32) {
+        for n in &mut self.nodes[first_node as usize..] {
+            n.span_start += base;
+        }
+        for s in &mut self.spans[first_node as usize..] {
+            s.start += base;
+            s.end += base;
+        }
+        for (s, _) in &mut self.diagnostics[first_diag as usize..] {
+            s.start += base;
+            s.end += base;
+        }
+    }
+
     #[inline] pub fn span(&self, id: NodeId) -> ByteSpan { self.spans.get(id.0 as usize).copied().unwrap_or_default() }
     #[inline] pub fn type_annot(&self, id: NodeId) -> Option<NodeId> { self.type_annots.get(id.0 as usize).copied().filter(|t| t.is_some()) }
     #[inline] pub fn set_type_annot(&mut self, id: NodeId, ty: NodeId) { if let Some(s) = self.type_annots.get_mut(id.0 as usize) { *s = ty; } }

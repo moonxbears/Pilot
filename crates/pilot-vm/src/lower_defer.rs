@@ -18,7 +18,7 @@ impl BytecodeCompiler {
                 scope.push(NodeId(body));
                 self.emit_null()
             }
-            None => self.error("`defer` must be inside a block".to_string()),
+            None => self.error(crate::codes::SYNTAX, "`defer` must be inside a block".to_string()),
         }
     }
 

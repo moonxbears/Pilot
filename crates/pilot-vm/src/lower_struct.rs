@@ -23,9 +23,9 @@ use pilot_rt::PilotVal;
 #[derive(Clone, Default)]
 pub(crate) struct StructInfo {
     /// Fields in declaration order, with their default initializer or `NONE`.
-    fields: Vec<(String, NodeId)>,
+    pub(crate) fields: Vec<(String, NodeId)>,
     /// The `self(..)` declaration, if the struct has one.
-    ctor: Option<NodeId>,
+    pub(crate) ctor: Option<NodeId>,
 }
 
 impl BytecodeCompiler {
@@ -51,6 +51,12 @@ impl BytecodeCompiler {
         out
     }
 
+    /// Whether type member `m` is a method: a `fn`, or an `op` named by its
+    /// operator.
+    pub(crate) fn is_method_decl(arena: &AstArena, m: NodeId) -> bool {
+        matches!(arena.node(m).node_kind(), NodeKind::FnDecl | NodeKind::OperatorDecl)
+    }
+
     /// Records the methods a struct or `ext` block declares, and a struct's
     /// fields and constructor.
     pub(crate) fn register_struct(&mut self, arena: &AstArena, decl: NodeId) {
@@ -60,7 +66,7 @@ impl BytecodeCompiler {
         }
         let owner = Self::name(arena, dn.lhs).to_string();
         for m in Self::type_members(arena, NodeId(dn.rhs)) {
-            if arena.node(m).node_kind() != NodeKind::FnDecl {
+            if !Self::is_method_decl(arena, m) {
                 continue;
             }
             let is_static =
@@ -72,6 +78,8 @@ impl BytecodeCompiler {
             if !owners.iter().any(|(o, _)| *o == owner) {
                 owners.push((owner.clone(), is_static));
             }
+            let key = format!("{owner}.{}", Self::name(arena, arena.node(m).lhs));
+            self.register_params(key, m);
         }
         if dn.node_kind() != NodeKind::StructDecl {
             return;
@@ -84,15 +92,27 @@ impl BytecodeCompiler {
                 NodeKind::ParamDecl => info
                     .fields
                     .push((Self::name(arena, mn.lhs).to_string(), arena.field_default(m))),
-                NodeKind::ConstructorDecl => info.ctor = Some(m),
+                // `var x: T = v;` and `let x: T;` in a struct body are fields too.
+                NodeKind::VarStmt | NodeKind::LetStmt => {
+                    info.fields.push((Self::name(arena, mn.lhs).to_string(), NodeId(mn.rhs)))
+                }
+                NodeKind::ConstructorDecl => {
+                    info.ctor = Some(m);
+                    self.register_params(format!("{owner}.{}", &crate::RECEIVER[1..]), m);
+                }
                 _ => {}
             }
         }
         self.structs.insert(owner, info);
     }
 
+    /// Fields of struct `name` in declaration order, with their defaults.
+    pub(crate) fn struct_fields(&self, name: &str) -> Vec<(String, NodeId)> {
+        self.structs.get(name).map(|s| s.fields.clone()).unwrap_or_default()
+    }
+
     /// A new empty record of struct `name`.
-    fn emit_new_record(&mut self, name: &str) -> u8 {
+    pub(crate) fn emit_new_record(&mut self, name: &str) -> u8 {
         let r_obj = self.emit_intrinsic("map_new", &[]);
         self.emit_record_type(r_obj, name);
         r_obj
@@ -108,7 +128,7 @@ impl BytecodeCompiler {
     }
 
     /// Sets each defaulted field of `name` that is not in `given` on `r_obj`.
-    fn emit_field_defaults(&mut self, arena: &AstArena, name: &str, given: &[String], r_obj: u8) {
+    pub(crate) fn emit_field_defaults(&mut self, arena: &AstArena, name: &str, given: &[String], r_obj: u8) {
         let Some(info) = self.structs.get(name).cloned() else {
             return;
         };
@@ -126,6 +146,7 @@ impl BytecodeCompiler {
 
     /// `Name { field: value, .. }`.
     pub(crate) fn compile_struct_literal(&mut self, arena: &AstArena, name: &str, literal: NodeId) -> u8 {
+        self.check_exported(name);
         let ln = *arena.node(literal);
         let r_obj = self.compile_map_literal(arena, ln.lhs, ln.rhs);
         self.emit_record_type(r_obj, name);
@@ -141,9 +162,10 @@ impl BytecodeCompiler {
     /// `Name(args)` for a declared struct; `None` when `name` is not one.
     pub(crate) fn compile_ctor_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> Option<u8> {
         let ctor = self.structs.get(name)?.ctor;
+        self.check_exported(name);
         let Some(ctor) = ctor else {
             if !args.is_empty() {
-                return Some(self.error(format!("`{name}` has no constructor `self(..)`")));
+                return Some(self.compile_memberwise(arena, name, args));
             }
             let r_obj = self.emit_new_record(name);
             self.emit_field_defaults(arena, name, &[], r_obj);

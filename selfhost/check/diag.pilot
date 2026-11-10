@@ -1,0 +1,38 @@
+// ==============================================================================
+// FILE: selfhost/check/diag.pilot
+// Diagnostics the checker collects, in the shape the host reads back.
+// ==============================================================================
+// Each entry is `[code, message, span start, span end, severity]`, spans in
+// the linked program's offset space (crates/pilot-cli/src/check.rs maps them
+// to files). Severities follow selfhost/diagnostics/model.pilot: 1 error,
+// 2 warning.
+pub lvl(0) pkg Pilot.SelfHost.Check.Diag;
+
+use selfhost.check.snapshot.*;
+
+pub struct DiagSink {
+    pub s: Snap;
+    pub rows: List<List<any>>;
+    /// `code@start` of every reported diagnostic, so a node is reported once.
+    pub seen: Map<str, i64>;
+}
+
+pub fn sink_new(s: Snap) -> DiagSink => DiagSink { s: s, rows: [], seen: Map<str, i64>() };
+
+fn sink_add(sink: DiagSink, n: i64, code: str, message: str, severity: i64) {
+    if !in_user_file(sink.s, n) { return; }
+    let start = span_start(sink.s, n);
+    let key = code + "@" + f"{start}";
+    if sink.seen.has(key) { return; }
+    sink.seen.set(key, 1);
+    let row: List<any> = [code, message, start, span_end(sink.s, n), severity];
+    sink.rows.push(row);
+}
+
+pub fn sink_error(sink: DiagSink, n: i64, code: str, message: str) {
+    sink_add(sink, n, code, message, 1);
+}
+
+pub fn sink_warning(sink: DiagSink, n: i64, code: str, message: str) {
+    sink_add(sink, n, code, message, 2);
+}

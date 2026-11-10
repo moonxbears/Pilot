@@ -23,8 +23,9 @@ pub struct MutexGuard<T: IAnyValue> : IGuard {
     ~self() {}
 }
 
-pub pure fn mutex_guard_new<T>(lock_id: usize) -> MutexGuard<T> {
-    return MutexGuard<T> { lock_id: lock_id };
+/// Locks `m` and returns the guard that unlocks it at scope exit.
+pub fn mutex_guard_new<T>(var ref m: Mutex<T>) -> MutexGuard<T> {
+    return seam("sync.mutex_lock", "locking needs an OS mutex or atomic intrinsic");
 }
 
 [Layout(c_abi)]

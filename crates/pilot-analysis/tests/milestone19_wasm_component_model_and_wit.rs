@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -144,7 +146,7 @@ fn eval_m19(deps: &[&str], script: &str) -> String {
     }));
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     vm.load_binary(bin);
-    vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -164,6 +166,8 @@ fn test_m19_1_wit_parser_and_2bit_lattice_mapping() {
                 + "    record Config {\n"
                 + "        timeout: u32,\n"
                 + "        retries: u32,\n"
+                + "        payload: list<u8>,\n"
+                + "        limits: result<u32, string>\n"
                 + "    }\n"
                 + "    resource Session {\n"
                 + "        constructor(name: string);\n"
@@ -207,11 +211,44 @@ fn test_m19_1_wit_parser_and_2bit_lattice_mapping() {
             let diag5 = wit_diag_code(5);
             if !diag5.starts_with("WASM005") { return 12; }
 
-            // Binary custom section decoder
-            let cs_pkg = wit_decode_custom_section("component-type", wit_src);
-            if cs_pkg.name != "test" { return 13; }
+            // Record fields keep their full type expressions
+            let rec = iface.records.get(0);
+            if rec.fields.len() != 4 { return 13; }
+            if rec.fields.get(2).type_ref.kind != WitTypeKind::List { return 14; }
+            if rec.fields.get(2).type_ref.inner1 != "u8" { return 15; }
+            if rec.fields.get(3).type_ref.kind != WitTypeKind::Result { return 16; }
+            if rec.fields.get(3).type_ref.inner2 != "string" { return 17; }
 
-            return 42;
+            // Function signatures: declared types resolve to Named, handles keep their resource
+            let open_fn = iface.functions.get(0);
+            if open_fn.name != "open-session" { return 18; }
+            if open_fn.params.len() != 1 { return 19; }
+            if open_fn.params.get(0).name != "cfg" { return 20; }
+            if open_fn.params.get(0).type_ref.kind != WitTypeKind::Named { return 21; }
+            if open_fn.results.get(0).type_ref.kind != WitTypeKind::Own { return 22; }
+            if open_fn.results.get(0).type_ref.inner1 != "Session" { return 23; }
+            let query_fn = iface.functions.get(1);
+            if query_fn.params.get(0).type_ref.kind != WitTypeKind::Borrow { return 24; }
+            if query_fn.params.get(0).type_ref.inner1 != "Session" { return 25; }
+
+            // Resource constructor and method signatures
+            let sess = iface.resources.get(0);
+            if sess.methods.len() != 2 { return 26; }
+            if sess.methods.get(0).params.get(0).name != "name" { return 27; }
+            if sess.methods.get(0).results.get(0).type_ref.inner1 != "Session" { return 28; }
+            if sess.methods.get(1).name != "ping" { return 29; }
+            if sess.methods.get(1).results.len() != 1 { return 30; }
+
+            // World imports and exports
+            let world = pkg.worlds.get(0);
+            if world.imports.get(0) != "engine" { return 31; }
+            if world.exports.get(0).name != "open-session" { return 32; }
+            if world.exports.get(0).results.get(0).type_ref.inner1 != "Session" { return 33; }
+
+            // The binary component-type section has no decoder yet.
+            var section: List<i64> = [0, 97, 115, 109];
+            let cs_pkg = wit_decode_custom_section("component-type", section);
+            return 43;
         }
     "##;
 
@@ -222,7 +259,10 @@ fn test_m19_1_wit_parser_and_2bit_lattice_mapping() {
         "stdlib/std/polyglot/wasm.pilot",
     ];
     let res = eval_m19(deps, script);
-    assert_eq!(res, "42", "WIT parser & 2-bit lattice mapping must succeed");
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `wit.decode_custom_section`"),
+        "WIT parser & 2-bit lattice mapping must succeed, then binary decoding must stop at its seam, got {res}"
+    );
 
     guard.finish();
 }
@@ -302,6 +342,20 @@ fn test_m19_2_canonical_abi_flattening_and_spill_rules() {
     let res = eval_m19(deps, script);
     assert_eq!(res, "42", "Canonical ABI flattening, spills & out-pointers must pass");
 
+    // Lifting WASM bytecode into PilIR needs a decoded function body.
+    let lift_script = r##"
+        pub fn main() -> i64 {
+            var params: List<str> = ["p0"];
+            let ir = wasm_lift_to_pilir_bridge("add", params, "r");
+            return 43;
+        }
+    "##;
+    let res = eval_m19(deps, lift_script);
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `wasm.lift_pilir`"),
+        "PilIR lifting must stop at its seam, got {res}"
+    );
+
     guard.finish();
 }
 
@@ -329,12 +383,33 @@ fn test_m19_3_sandboxed_wasm_runtime_bounds_and_fuel_traps() {
             var mem = wasm_memory_new(1, 4); // 1 page init, 4 pages max
             if wasm_memory_byte_len(mem) != 65536 { return 4; }
 
-            // Store and load string in linear memory
+            // Strings in linear memory: well-formed UTF-8 passes the check
             let st_res = wasm_memory_store_str(var mem, 100, "hello wasm component");
             if st_res.is_err() { return 5; }
-            let ld_res = wasm_memory_load_str(mem, 100, 20);
-            if ld_res.is_err() { return 6; }
-            if ld_res.unwrap() != "hello wasm component" { return 7; }
+            if st_res.unwrap() != 20 { return 6; }
+            let utf_ok = wasm_memory_validate_utf8(mem, 100, 20);
+            if utf_ok.is_err() { return 7; }
+            // Bytes read back as stored
+            if wasm_memory_load_byte(mem, 100).unwrap() != 104 { return 30; } // 'h'
+            if wasm_memory_load_i32(mem, 100).unwrap() != 1819043176 { return 31; } // "hell" little-endian
+
+            // Invalid UTF-8 (RFC 3629): C3 28 is a broken 2-byte sequence,
+            // ED A0 80 encodes the surrogate U+D800 -> WASM004
+            wasm_memory_store_byte(var mem, 200, 195);
+            wasm_memory_store_byte(var mem, 201, 40);
+            let bad_utf = wasm_memory_validate_utf8(mem, 200, 2);
+            if !bad_utf.is_err() { return 32; }
+            if !bad_utf.unwrap_err().contains("WASM004") { return 33; }
+            wasm_memory_store_byte(var mem, 210, 237);
+            wasm_memory_store_byte(var mem, 211, 160);
+            wasm_memory_store_byte(var mem, 212, 128);
+            let surrogate = wasm_memory_validate_utf8(mem, 210, 3);
+            if !surrogate.is_err() { return 34; }
+            // E2 82 AC is U+20AC (euro sign), valid
+            wasm_memory_store_byte(var mem, 220, 226);
+            wasm_memory_store_byte(var mem, 221, 130);
+            wasm_memory_store_byte(var mem, 222, 172);
+            if wasm_memory_validate_utf8(mem, 220, 3).is_err() { return 35; }
 
             // Bounds check trap: load outside allocated memory -> WASM003
             let oob_res = wasm_memory_load_byte(mem, 70000);
@@ -351,25 +426,28 @@ fn test_m19_3_sandboxed_wasm_runtime_bounds_and_fuel_traps() {
             if !over_grow.is_err() { return 12; }
             if !over_grow.unwrap_err().contains("WASM003") { return 13; }
 
-            // 3. Sandboxed Instance Execution & Fuel Limit Trap
-            var inst = wasm_instance_new("plugin", 1, 4, 1000); // 1000 fuel limit
+            // 3. Fuel accounting: exceeding the lease's limit traps
+            var fuel = wasm_lease_new(7, 1000);
+            if wasm_lease_consume_fuel(var fuel, 600).is_err() { return 14; }
+            let exhausted = wasm_lease_consume_fuel(var fuel, 600);
+            if !exhausted.is_err() { return 16; }
+            if !exhausted.unwrap_err().contains("Fuel limit exhausted") { return 17; }
+            if !exhausted.unwrap_err().contains("WASM003") { return 18; }
+
+            // 4. Export lookup and arity are checked before anything runs
+            var inst = wasm_instance_new("plugin", 1, 4, 1000);
             wasm_instance_add_export(var inst, "add", 2, 1);
-            wasm_instance_add_export(var inst, "infinite_loop_test", 0, 1);
-
-            // Valid invocation: add(15, 27) = 42
+            var one_arg: List<i64> = [15];
+            let arity = wasm_invoke(var inst, "add", one_arg);
+            if !arity.is_err() { return 19; }
+            if !arity.unwrap_err().contains("WASM002") { return 20; }
             var args: List<i64> = [15, 27];
+            let missing = wasm_invoke(var inst, "sub", args);
+            if !missing.unwrap_err().contains("not found") { return 21; }
+
+            // Running the export needs the bytecode interpreter.
             let call_res = wasm_invoke(var inst, "add", args);
-            if call_res.is_err() { return 14; }
-            if call_res.unwrap() != 42 { return 15; }
-
-            // Infinite loop trap: fuel exhausted cleanly without crashing the host!
-            var no_args: List<i64> = [];
-            let loop_res = wasm_invoke(var inst, "infinite_loop_test", no_args);
-            if !loop_res.is_err() { return 16; }
-            if !loop_res.unwrap_err().contains("Fuel limit exhausted") { return 17; }
-            if !loop_res.unwrap_err().contains("WASM003") { return 18; }
-
-            return 42;
+            return 43;
         }
     "##;
 
@@ -380,7 +458,25 @@ fn test_m19_3_sandboxed_wasm_runtime_bounds_and_fuel_traps() {
         "stdlib/std/polyglot/wasm.pilot",
     ];
     let res = eval_m19(deps, script);
-    assert_eq!(res, "42", "Sandboxed WASM runtime, bounds traps & fuel exhaustion must pass");
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `wasm.interpret`"),
+        "Memory, UTF-8, fuel and export checks must pass, then execution must stop at its seam, got {res}"
+    );
+
+    // Turning validated linear-memory bytes into a str needs a bytes-to-str intrinsic.
+    let load_script = r##"
+        pub fn main() -> i64 {
+            var mem = wasm_memory_new(1, 1);
+            wasm_memory_store_str(var mem, 0, "hello");
+            let s = wasm_memory_load_str(mem, 0, 5);
+            return 43;
+        }
+    "##;
+    let res = eval_m19(deps, load_script);
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `wasm.load_str`"),
+        "Loading a string must stop at its seam after validation, got {res}"
+    );
 
     guard.finish();
 }
@@ -459,6 +555,20 @@ fn test_m19_4_component_resource_table_and_lease_lifecycle() {
     ];
     let res = eval_m19(deps, script);
     assert_eq!(res, "42", "Component resource table and lease lifecycle must pass");
+
+    // Dropping an owned handle runs the component's [resource-drop] export.
+    let drop_script = r##"
+        pub fn main() -> i64 {
+            var h = WasmResourceHandle::create(1, 2);
+            h.drop_handle();
+            return 43;
+        }
+    "##;
+    let res = eval_m19(deps, drop_script);
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `wasm.resource_drop`"),
+        "Dropping a resource handle must stop at its seam, got {res}"
+    );
 
     guard.finish();
 }

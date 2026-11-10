@@ -1,0 +1,5 @@
+// A binding whose `=` has no value is a syntax error.
+fn main() {
+    let x = ;
+    println(x);
+}

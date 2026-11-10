@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -160,7 +162,7 @@ fn eval_m21(deps: &[&str], script: &str) -> String {
     }));
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     vm.load_binary(bin);
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -328,6 +330,16 @@ fn run_json_tests() -> i64 {
         return 8; // was skipped!
     }
 
+    // 5. The deserializer reads back the wire key the serializer writes and
+    //    leaves skipped fields to their defaults.
+    let de = derive_json_deserializer("UserProfile", fields, cfg, 2);
+    if !de.contains("root.get(\"userName\")") {
+        return 9;
+    }
+    if de.contains("secretToken") || de.contains(".default()") {
+        return 10;
+    }
+
     return 200;
 }
 run_json_tests();
@@ -398,6 +410,20 @@ fn run_bin_tests() -> i64 {
     let obj_code = derive_binary_codecs("ObjMsg", fields, 2); // 0b10 Object
     if !obj_code.contains("write_varint") {
         return 8;
+    }
+    // The decoder mirrors the encoder field by field.
+    if !obj_code.contains("read_varint<i64>(offset)") || obj_code.contains(".default()") {
+        return 9;
+    }
+
+    // 4. Protobuf int64 wire form of -1: nine 0xFF bytes then 0x01.
+    let enc_neg = bin_encode_varint64(-1);
+    if enc_neg.len() != 10 || enc_neg.get(0) != 255 || enc_neg.get(9) != 1 {
+        return 10;
+    }
+    let dec_neg = bin_decode_varint64(enc_neg, 0);
+    if dec_neg.value != -1 || dec_neg.next_offset != 10 {
+        return 11;
     }
 
     return 300;
@@ -482,18 +508,17 @@ fn run_delegation_and_registry_tests() -> i64 {
         return 5;
     }
 
-    // 4. WeaverProtocolRegistry table classification
+    // 4. WeaverProtocolRegistry holds the pillar interfaces (numbered as in
+    //    stdlib/core/meta.pilot), never attribute names: attribute pillars are
+    //    derived from declarations (milestone50 test_50_3).
     var reg = WeaverProtocolRegistry.create();
-    let p_clamp = reg.lookup("Clamp");
-    if p_clamp != 5 {
+    if reg.lookup("IReactiveAttribute") != 5 {
         return 6;
     }
-    let p_rule = reg.lookup("Rule");
-    if p_rule != 7 {
+    if reg.lookup("IEcsRule") != 7 {
         return 7;
     }
-    let p_eq = reg.lookup("Eq");
-    if p_eq != 1 {
+    if reg.lookup("Clamp") != 0 || reg.lookup("Rule") != 0 || reg.lookup("Eq") != 0 {
         return 8;
     }
 
@@ -504,5 +529,48 @@ run_delegation_and_registry_tests();
 
     let res = eval_m21(&["selfhost/types/delegation.pilot", "selfhost/attr_weaver.pilot"], script);
     assert_eq!(res, "400", "test_m21_4 failed with exit code: {}", res);
+
+    // 5. Built-in attribute bodies in stdlib/core/meta.pilot: [OnChange]
+    //    calls its callback with the old and new value; [TraceSpan] has no
+    //    clock or sink in the freestanding core and stops at its seams.
+    let on_change = eval_m21(
+        &["stdlib/core/meta.pilot"],
+        "var seen: List<i64> = [];\n\
+         let a = OnChangeAttr { callback: (o, n) => { seen.push(o * 100 + n); }, weight: 50 };\n\
+         a.on_changed(3, 7);\n\
+         a.on_changed(7, 9);\n\
+         return seen.get(0) + \",\" + seen.get(1);\n",
+    );
+    assert_eq!(on_change, "307,709", "[OnChange] must call its callback with (old, new)");
+    let formula_rule = eval_m21(
+        &["stdlib/core/meta.pilot"],
+        "struct Unit { atk: i64, mult: i64, hp: i64 }\n\
+         let f = FormulaAttr { expr_fn: (u) => u.atk * u.mult, weight: 10 };\n\
+         var hits: List<i64> = [];\n\
+         let r = RuleAttr { when_fn: (u) => u.hp < 10, then_fn: (u) => { hits.push(u.hp); }, weight: 10 };\n\
+         let weak = Unit { atk: 6, mult: 7, hp: 4 };\n\
+         let strong = Unit { atk: 3, mult: 5, hp: 40 };\n\
+         var applied = 0;\n\
+         if r.matches(weak) { r.apply(weak); applied = applied + 1; }\n\
+         if r.matches(strong) { r.apply(strong); applied = applied + 1; }\n\
+         return f.evaluate(weak) + \",\" + f.evaluate(strong) + \",\" + applied + \",\" + hits.get(0);\n",
+    );
+    assert_eq!(formula_rule, "42,15,1,4", "[Formula] evaluates its expression; [Rule] applies only where it matches");
+    let enter = eval_m21(
+        &["stdlib/core/meta.pilot"],
+        "let t = TraceSpanAttr { name: \"step\", weight: 50 };\nreturn t.on_enter(\"step\");\n",
+    );
+    assert!(
+        enter.starts_with("FAULT: SEAM001: unconnected seam `trace.span_enter`"),
+        "TraceSpan.on_enter must stop at its seam, got: {enter}"
+    );
+    let exit = eval_m21(
+        &["stdlib/core/meta.pilot"],
+        "let t = TraceSpanAttr { name: \"step\", weight: 50 };\nt.on_exit(0);\nreturn 1;\n",
+    );
+    assert!(
+        exit.starts_with("FAULT: SEAM001: unconnected seam `trace.span_exit`"),
+        "TraceSpan.on_exit must stop at its seam, got: {exit}"
+    );
     guard.finish();
 }

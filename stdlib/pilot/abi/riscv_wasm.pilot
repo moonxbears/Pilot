@@ -11,6 +11,32 @@ use Pilot.Core.Memory::*;
 use Pilot.Core.Reflect.TypeLayout;
 use Pilot.Abi.Descriptor.*;
 
+/// RISC-V LP64D hardware floating-point convention for a small aggregate:
+/// one float member, two float members, or one float and one integer
+/// member travel in FPRs (and a GPR). `Void` when the rule does not apply
+/// or the registers run out; the integer convention then applies.
+pub fn riscv_fp_struct_location(fields: List<AbiFieldClass>, next_gpr: u8, next_vec: u8, size: u32) -> ArgLocation {
+    let n = fields.len();
+    if n == 0 || n > 2 || size > 16 { return ArgLocation::void_loc(); }
+    if n == 1 {
+        if fields[0].is_float() && fields[0].size <= 8 && next_vec < 8 {
+            return ArgLocation::direct_simd(next_vec, size);
+        }
+        return ArgLocation::void_loc();
+    }
+    let f0 = fields[0].is_float();
+    let f1 = fields[1].is_float();
+    if fields[0].size > 8 || fields[1].size > 8 { return ArgLocation::void_loc(); }
+    if f0 && f1 {
+        if next_vec + 2 <= 8 { return ArgLocation::pair_simd_simd(next_vec, next_vec + 1, size); }
+    } else if f0 {
+        if next_vec < 8 && next_gpr < 8 { return ArgLocation::pair_simd_gpr(next_vec, next_gpr, size); }
+    } else if f1 {
+        if next_vec < 8 && next_gpr < 8 { return ArgLocation::pair_gpr_simd(next_gpr, next_vec, size); }
+    }
+    return ArgLocation::void_loc();
+}
+
 pub struct Riscv64ConvClassifier : IValue, ICallingConvClassifier {
     pub static pure fn name() -> str => "riscv64";
 
@@ -46,8 +72,15 @@ pub struct Riscv64ConvClassifier : IValue, ICallingConvClassifier {
             sret_used = true;
             next_gpr = 1; // Hidden pointer in a0, explicit arg 0 shifts to a1
             ret_location = ArgLocation::indirect(0, ret_sz as u32);
-        } else if ret_is_agg && ret_sz > 8 && ret_sz <= 16 {
-            ret_location = ArgLocation::pair_gpr_gpr(0, 1, ret_sz as u32);
+        } else if ret_is_agg {
+            let fp_ret = riscv_fp_struct_location(abi_aggregate_fields(ret), 0, 0, ret_sz as u32);
+            if fp_ret.kind != ArgPassKind::Void {
+                ret_location = fp_ret;
+            } else if ret_sz > 8 {
+                ret_location = ArgLocation::pair_gpr_gpr(0, 1, ret_sz as u32);
+            } else {
+                ret_location = ArgLocation::direct_gpr(0, ret_sz as u32);
+            }
         } else if ret_is_flt {
             ret_location = ArgLocation::direct_simd(0, ret_sz as u32);
         } else {
@@ -70,7 +103,16 @@ pub struct Riscv64ConvClassifier : IValue, ICallingConvClassifier {
                     stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
                 }
             } else if p.reg_class == 5 {
-                if sz <= 8 {
+                var fp_loc = ArgLocation::void_loc();
+                if sz <= 16 {
+                    fp_loc = riscv_fp_struct_location(abi_aggregate_fields(ref p), next_gpr, next_vec, sz);
+                }
+                if fp_loc.kind != ArgPassKind::Void {
+                    param_locs.push(fp_loc);
+                    if fp_loc.kind == ArgPassKind::DirectSimd { next_vec = next_vec + 1; }
+                    else if fp_loc.kind == ArgPassKind::PairSimdSimd { next_vec = next_vec + 2; }
+                    else { next_vec = next_vec + 1; next_gpr = next_gpr + 1; }
+                } else if sz <= 8 {
                     if next_gpr < 8 {
                         param_locs.push(ArgLocation::direct_gpr(next_gpr, sz));
                         next_gpr = next_gpr + 1;

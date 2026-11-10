@@ -1,0 +1,13 @@
+// `res<T, E>` is the readable pair of `result<T, E>` (AGENTS.md, Dual
+// Readable/Symbolic Pairing Law), so both name the same type everywhere,
+// including a static call on the type in expression position.
+fn halve(n: i64) -> i64 ! str {
+    if n % 2 != 0 {
+        return res<i64, str>.err("odd");
+    }
+    return n / 2;
+}
+
+fn main() {
+    print(halve(3) catch e => e);
+}

@@ -1,0 +1,20 @@
+// A package found by its conventional path (`use lib.shapes;`).
+pkg lib.shapes;
+
+use Conformance.Units;
+
+pub let unit_name = "cm";
+
+pub struct Rect {
+    pub w: i64;
+    pub h: i64;
+    pub fn area() -> i64 => .w * .h;
+    pub fn label() -> str => f"{to_cm(.w)}x{to_cm(.h)} {unit_name}";
+    pub fn debug_dump() -> str => "internal";
+}
+
+pub fn square(side: i64) -> Rect => Rect { w: side, h: side };
+pub fn legacy_square(side: i64) -> Rect => square(side);
+
+without legacy_square;
+without Rect { debug_dump };

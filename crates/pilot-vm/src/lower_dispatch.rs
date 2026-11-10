@@ -12,13 +12,15 @@
 //! an error naming the method.
 
 use crate::instruction::Opcode;
-use crate::{BytecodeCompiler, SeedBuiltin};
+use crate::lower_native::native;
+use crate::BytecodeCompiler;
+use pilot_parser::NativeKind;
 use pilot_ast::{AstArena, NodeId};
 use pilot_rt::PilotVal;
 
 impl BytecodeCompiler {
     /// Whether `owner` declares `method`; `Some(is_static)` when it does.
-    fn declares(&self, owner: &str, method: &str) -> Option<bool> {
+    pub(crate) fn declares(&self, owner: &str, method: &str) -> Option<bool> {
         self.method_owners
             .get(method)?
             .iter()
@@ -48,7 +50,7 @@ impl BytecodeCompiler {
             .map(|v| v.iter().filter(|(_, st)| !st).map(|(o, _)| o.clone()).collect())
             .unwrap_or_default();
         if instance_owners.is_empty() {
-            if let Some(hook) = SeedBuiltin::method(method) {
+            if let Some(hook) = native(NativeKind::Method, method) {
                 return self.emit_intrinsic(hook, &regs);
             }
             return self.emit_user_call(full, method.to_string(), &regs);
@@ -56,10 +58,13 @@ impl BytecodeCompiler {
         let (mut records, others): (Vec<String>, Vec<String>) =
             instance_owners.into_iter().partition(|o| self.structs.contains_key(o));
         if others.len() > 1 {
-            return self.error(format!(
-                "`{method}` is declared by {}; give the receiver a type so the call can choose",
-                others.join(", ")
-            ));
+            return self.error(
+                crate::codes::SEED,
+                format!(
+                    "`{method}` is declared by {}; give the receiver a type so the call can choose",
+                    others.join(", ")
+                ),
+            );
         }
         records.sort();
         self.emit_dynamic_dispatch(method, &records, others.first(), &regs)
@@ -86,7 +91,7 @@ impl BytecodeCompiler {
         }
         let r = if let Some(o) = other {
             self.emit_user_call(format!("{o}.{method}"), method.to_string(), regs)
-        } else if let Some(hook) = SeedBuiltin::method(method) {
+        } else if let Some(hook) = native(NativeKind::Method, method) {
             self.emit_intrinsic(hook, regs)
         } else if self.known_fns.contains_key(method) {
             self.emit_user_call(method.to_string(), method.to_string(), regs)

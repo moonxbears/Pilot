@@ -6,6 +6,13 @@ pub pkg std.io;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
+/// The next line of standard input without its line ending, or `none` once
+/// the input has ended.
+pub fn read_line() -> str? => __engine("stdin_read_line");
+
+/// The rest of standard input (empty once it has ended).
+pub fn read_all() -> str => __engine("stdin_read_all");
+
 pub interface IReader {
     fn read(var ref self, buf: var slice<u8>) -> usize;
 }

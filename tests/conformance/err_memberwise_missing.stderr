@@ -1,0 +1,2 @@
+`Point(..)` is missing field `y`, which has no default
+error[INIT001]:

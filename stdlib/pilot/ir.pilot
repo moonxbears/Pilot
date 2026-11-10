@@ -40,7 +40,7 @@ pub fn ir_pass_pipeline_add_pass(var ref p: IrPassPipeline, pass: str) {
     p.pass_names.push(pass);
 }
 
+/// Runs each registered pass over `m` in order; returns how many ran.
 pub fn ir_pass_pipeline_run(p: IrPassPipeline, var ref m: IrModule) -> usize {
-    m.inst_count = m.inst_count + p.pass_names.len;
-    return p.pass_names.len;
+    return seam("pilot_ir.pipeline_run", "no lowered IrModule or pass driver exists to run passes on");
 }

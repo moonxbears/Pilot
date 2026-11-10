@@ -1,0 +1,4 @@
+// A literal with a unit no unit family declares is a compile error.
+fn main() {
+    print(5parsecs);
+}

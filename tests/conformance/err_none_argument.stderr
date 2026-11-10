@@ -1,0 +1,2 @@
+error[NULL004]: Cannot pass 'none' to non-nullable parameter 'i64'
+err_none_argument.pilot:7:17

@@ -1,0 +1,3 @@
+`legacy_square` is not exported by the module that declares it
+error[VIS001]:
+err_without.pilot:5:11

@@ -185,30 +185,6 @@ pub fn default_command_registry() -> CommandRegistry {
 // Backward-Compatible Facade APIs
 // ------------------------------------------------------------------------------
 
-pub pure fn cli_help_banner() -> str {
-    return "Pilot Programming Language Compiler & Toolchain (v1.1.51)\n" +
-           "Usage: pilot <command> [options] [arguments]\n\n" +
-           "Commands:\n" +
-           "  run <file.pilot> [args...]      Execute Pilot program via PilVM v3 / Native AOT\n" +
-           "  build <file.pilot> [flags]      Compile Pilot program to Native/LLVM/C/WASM/GPU\n" +
-           "  check <file.pilot>              Verify syntax, type safety, and comptime\n" +
-           "  fmt <file.pilot> [--write]      Format source code according to Pilot style\n" +
-           "  test [filter]                   Run integrated test suite or differential tests\n" +
-           "  repl                            Start interactive Name-Blind Pilot REPL\n" +
-           "  pkg <init|add|rm|resolve|audit> Manage packages and dependencies\n" +
-           "  venv <init|activate|list>       Manage isolated virtual environments\n" +
-           "  debug [--dap] <file.pilot>      Launch VmHook-stepped debugger or DAP server\n" +
-           "  lsp                             Start resident PilVM Language Server\n" +
-           "  perf <profile|analyze|opt>      Profile and optimize code performance\n" +
-           "  compile <file.pilot> [-o out]   Compile source into .pilc v3 bytecode binary\n" +
-           "  tree [file.pilot] [flags]       Display visual dependency tree of imports or packages\n" +
-           "  deps <tree|list|check> [file]   Inspect, list, and verify dependencies\n" +
-           "  map [file.pilot] [flags]        Display visual symbol map of namespaces, classes, fns\n" +
-           "  gate [--full|--only|--json]     Run pure-Pilot architectural & bootstrap gates\n" +
-           "  ide-sync                        Synchronize VS Code extension grammar and schemas\n" +
-           "  completions <shell>             Generate shell completion script (bash, zsh, fish, pwsh)";
-}
-
 pub pure fn resolve_cli_subcommand(cmd: str) -> i64 {
     let reg = default_command_registry();
     let idx = spec_registry_find_by_name(reg, cmd);
@@ -219,76 +195,31 @@ pub pure fn resolve_cli_subcommand(cmd: str) -> i64 {
 // Single-Source CLI Entry Point
 // ------------------------------------------------------------------------------
 
-pub fn run_cli_entry(raw_args_line: str) -> str {
+/// Parses the `\x1f`-separated command line, dispatches the command to its
+/// handler (`cli_handlers()` in `commands.pilot`) and returns the process exit
+/// code.
+pub fn run_cli_entry(raw_args_line: str) -> i64 {
     let reg = default_command_registry();
     let p_res = cli_parse_args(reg, raw_args_line);
 
-    let ok = cli_map_get(p_res, "ok") as bool;
-    if !ok {
-        let msg = cli_map_get(p_res, "message");
-        let ec = cli_map_get(p_res, "exit_code");
-        return "PRINT:" + msg + "\nEXIT:" + ec;
+    if !(cli_map_get(p_res, "ok") as bool) {
+        eprint(cli_map_get(p_res, "message"));
+        return cli_map_get_int(p_res, "exit_code");
     }
-
     let p: ParsedArgs = cli_map_get(p_res, "parsed");
 
-    if p.command == "help" {
-        return "PRINT:" + render_global_help(reg);
-    }
-
-    if p.command == "version" {
-        return "PRINT:Pilot v1.1.51 (Self-Hosted PilVM v3)";
-    }
-
-    if p.command == "schema-json" {
-        return "PRINT:" + export_cli_json_schema(reg);
-    }
-
-    if p.command == "completions" {
-        let shell = if cli_list_len(p.positionals) > 0 {
-            cli_list_get_str(p.positionals, 0)
-        } else {
-            "bash"
-        };
-        return "PRINT:" + emit_shell_completions(reg, shell);
-    }
-
-    // Direct help flag on command
     if parsed_has_flag(p, "help") {
         let c_idx = spec_registry_find_by_name(reg, p.command);
         if c_idx >= 0 {
-            let spec = spec_registry_get(reg, c_idx as usize);
-            return "PRINT:" + render_command_help(spec);
+            print(render_command_help(spec_registry_get(reg, c_idx as usize)));
+            return 0;
         }
     }
 
-    if p.command == "gate" {
-        var gate_args = "";
-        let np = cli_list_len(p.positionals);
-        var i: usize = 0;
-        while i < np {
-            gate_args = gate_args + cli_list_get_str(p.positionals, i) + " ";
-            i = i + 1;
-        }
-        if parsed_has_flag(p, "full") { gate_args = gate_args + "--full "; }
-        if parsed_has_flag(p, "json") { gate_args = gate_args + "--json "; }
-        if parsed_has_flag(p, "litmus") { gate_args = gate_args + "--litmus "; }
-        if parsed_has_flag(p, "seed") { gate_args = gate_args + "--seed " + parsed_get_str(p, "seed", "0") + " "; }
-        if parsed_has_flag(p, "only") { gate_args = gate_args + "--only " + parsed_get_str(p, "only", "") + " "; }
-        if parsed_has_flag(p, "ratchet-update") { gate_args = gate_args + "--ratchet-update "; }
-        return "GATE:" + cp_trim(gate_args);
+    let handlers = cli_handlers();
+    if !cli_map_contains(handlers, p.command) {
+        return seam("cli.command_handler", f"`pilot {p.command}` is not implemented yet: no handler is registered for it");
     }
-
-    if p.command == "emit" {
-        let lang = if cli_list_len(p.positionals) > 0 { cli_list_get_str(p.positionals, 0) } else { "" };
-        let file = if cli_list_len(p.positionals) > 1 { cli_list_get_str(p.positionals, 1) } else { "" };
-        return "EMIT:" + lang + "|" + file;
-    }
-
-    if p.command == "run" {
-        let target = if cli_list_len(p.positionals) > 0 { cli_list_get_str(p.positionals, 0) } else { "" };
-        return "RUN:" + target;
-    }
-
-    return "0";
+    let handler = cli_map_get(handlers, p.command);
+    return handler(p, reg);
 }

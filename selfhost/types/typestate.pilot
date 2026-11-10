@@ -21,8 +21,8 @@ pub pure fn format_state001(type_name: str, current_state: str, method: str, val
     return "STATE001: Invalid method call '" + method + "' on '" + type_name + "@" + current_state + "'; valid states: " + valid_states;
 }
 
-pub pure fn format_state002(type_name: str, state_a: str, state_b: str, method: str) -> str {
-    return "STATE002: Ambiguous merged typestate '" + type_name + "@(" + state_a + " | " + state_b + ")' at call to '" + method + "'; narrow with match/switch branch";
+pub pure fn format_state002(type_name: str, merged_states: str, method: str) -> str {
+    return "STATE002: Ambiguous merged typestate '" + type_name + "@(" + merged_states + ")' at call to '" + method + "'; narrow with a switch branch";
 }
 
 pub pure fn format_state003(type_name: str, initial_state: str, loop_state: str) -> str {
@@ -199,7 +199,7 @@ pub fn typestate_check_call(
             // Check if intersection is non-empty (ambiguous branch merge)
             let inter = StateSetMask::intersect(current_mask, tr.required_mask);
             if !inter.is_empty() && !current_mask.is_subset_of(tr.required_mask) {
-                let diag = format_state002(decl.type_name, typestate_format_mask(decl, inter), typestate_format_mask(decl, current_mask), method);
+                let diag = format_state002(decl.type_name, typestate_format_mask(decl, current_mask), method);
                 return TypestateCallResult {
                     has_error:      true,
                     is_ambiguous:   true,
@@ -250,5 +250,3 @@ pub fn typestate_check_drop(decl: ref<TypestateDecl>, current_mask: StateSetMask
 pub pure fn typestate_merge_branches(then_state: StateSetMask, else_state: StateSetMask) -> StateSetMask {
     return StateSetMask::union_with(then_state, else_state);
 }
-
-pub pure fn typestate_runtime_overhead_bytes() -> usize => 0;

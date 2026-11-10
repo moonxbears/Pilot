@@ -19,10 +19,7 @@ pub struct TaskHandle<T: IAnyValue> : IObject {
     ~self() {}
 }
 
-pub fn task_handle_new<T>(id: u64) -> TaskHandle<T> {
-    return TaskHandle<T> {
-        id:        TaskId { raw: id },
-        is_done:   false,
-        has_value: false,
-    };
+/// Starts a task and returns its handle.
+pub fn task_handle_new<T>() -> TaskHandle<T> {
+    return seam("task.spawn", "spawning a task needs a scheduler or OS thread intrinsic");
 }

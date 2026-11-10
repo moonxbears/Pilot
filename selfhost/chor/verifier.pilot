@@ -50,7 +50,60 @@ pub pure fn format_chor007(role1: str, role2: str, storage: str) -> str {
 }
 
 // ------------------------------------------------------------------------------
-// 2. Blueprint Topology Verifier
+// 2. Graph & Package Helpers
+// ------------------------------------------------------------------------------
+
+pure fn chor_list_has(items: List<str>, item: str) -> bool {
+    var i = 0;
+    while i < items.len() {
+        if items[i] == item { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+/// Walks `::DirectCall` routes from `role`. A route back to a role still on
+/// the walk's stack closes a synchronous cycle and is reported as CHOR004.
+fn direct_call_dfs(
+    bp: ref<BlueprintDef>,
+    role: str,
+    var ref on_stack: List<str>,
+    var ref done: List<str>,
+    var ref diags: List<str>
+) {
+    on_stack.push(role);
+    var i = 0;
+    while i < bp.routes.len() {
+        let edge = bp.routes[i];
+        if edge.transport.kind == TransportKind::DirectCall && edge.from_role == role {
+            if chor_list_has(on_stack, edge.to_role) {
+                diags.push(format_chor004(edge.from_role, edge.to_role));
+            } else if !chor_list_has(done, edge.to_role) {
+                direct_call_dfs(bp, edge.to_role, var on_stack, var done, var diags);
+            }
+        }
+        i = i + 1;
+    }
+    on_stack.pop();
+    done.push(role);
+}
+
+/// `std.fs.` (from `std.fs.*`) matches every package under `std.fs`; a bare
+/// `std.fs` matches itself and its sub-packages.
+pub pure fn package_matches(imported: str, pattern: str) -> bool {
+    if pattern.len() == 0 { return false; }
+    if pattern.ends_with(".") { return imported.starts_with(pattern); }
+    return imported == pattern || imported.starts_with(pattern + ".");
+}
+
+/// The lattice class of a cue payload comes from its resolved `TypeDef`
+/// (fields and `~self()`), which only the type checker can supply.
+pub fn resolve_cue_payload_lattice(cue: CueContract) -> u8 {
+    return seam("chor.cue_lattice", "payload TypeDef lattice from the type checker arrives in F4");
+}
+
+// ------------------------------------------------------------------------------
+// 3. Blueprint Topology Verifier
 // ------------------------------------------------------------------------------
 
 pub fn verify_blueprint_topology(bp: ref<BlueprintDef>) -> List<str> {
@@ -60,11 +113,17 @@ pub fn verify_blueprint_topology(bp: ref<BlueprintDef>) -> List<str> {
     var ci = 0;
     while ci < bp.cues.len() {
         let cue = bp.cues[ci];
-        if cue.payload_lattice == 1 { // 0b01 Reference View
+        var lat: u8 = 0;
+        if cue.payload_lattice == none {
+            lat = resolve_cue_payload_lattice(cue);
+        } else {
+            lat = cue.payload_lattice ?? lat;
+        }
+        if lat == 1 { // 0b01 Reference View
             diags.push(format_chor001(cue.name, cue.payload_type, "borrowed 0b01 IReference views cannot cross process or thread cue boundaries"));
-        } else if cue.payload_lattice == 3 { // 0b11 Guard
+        } else if lat == 3 { // 0b11 Guard
             diags.push(format_chor001(cue.name, cue.payload_type, "scoped 0b11 IGuard resources cannot cross cue boundaries"));
-        } else if cue.payload_lattice == 2 && !cue.requires_iso_move { // 0b10 Object without iso
+        } else if lat == 2 && !cue.requires_iso_move { // 0b10 Object without iso
             diags.push(format_chor001(cue.name, cue.payload_type, "owned 0b10 IObject crossing cue boundary must be qualified 'iso' to guarantee zero shared mutable state"));
         }
         ci = ci + 1;
@@ -93,24 +152,16 @@ pub fn verify_blueprint_topology(bp: ref<BlueprintDef>) -> List<str> {
         ri = ri + 1;
     }
 
-    // 3. CHOR004: DirectCall Cycle Detection
-    var r1 = 0;
-    while r1 < bp.routes.len() {
-        let route1 = bp.routes[r1];
-        if route1.transport.kind == TransportKind::DirectCall {
-            var r2 = 0;
-            while r2 < bp.routes.len() {
-                let route2 = bp.routes[r2];
-                if route2.transport.kind == TransportKind::DirectCall {
-                    if route1.from_role == route2.to_role && route1.to_role == route2.from_role {
-                        diags.push(format_chor004(route1.from_role, route1.to_role));
-                        break;
-                    }
-                }
-                r2 = r2 + 1;
-            }
+    // 3. CHOR004: DirectCall Cycle Detection (depth-first, one report per back edge)
+    var on_stack: List<str> = [];
+    var done: List<str> = [];
+    var start_i = 0;
+    while start_i < bp.routes.len() {
+        let start_edge = bp.routes[start_i];
+        if start_edge.transport.kind == TransportKind::DirectCall && !chor_list_has(done, start_edge.from_role) {
+            direct_call_dfs(bp, start_edge.from_role, var on_stack, var done, var diags);
         }
-        r1 = r1 + 1;
+        start_i = start_i + 1;
     }
 
     // 4. CHOR003: Emitted cue with zero active routes
@@ -148,7 +199,7 @@ pub fn verify_blueprint_topology(bp: ref<BlueprintDef>) -> List<str> {
                 var imp_k = 0;
                 while imp_k < role.prohibited_imports.len() {
                     let imp = role.prohibited_imports[imp_k];
-                    if imp.contains(law.prohibited_pkg) || law.prohibited_pkg.contains(imp) {
+                    if package_matches(imp, law.prohibited_pkg) {
                         diags.push(format_chor006(law.rule_name, role.name, imp));
                     }
                     imp_k = imp_k + 1;

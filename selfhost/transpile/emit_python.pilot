@@ -36,7 +36,7 @@ pub fn tpy_emit_expr(nid: i64) -> str {
             if __engine("ast_node_raw_bits", nid) != 0 { return "True"; }
             return "False";
         }
-        return "0";
+        return seam("emit.unlowered_literal", f"the python emitter has no lowering for literal kind {lk}");
     }
     if ok == 206 {
         let inner = tpy_emit_expr(__engine("ast_child_at", nid, 0));
@@ -62,7 +62,7 @@ pub fn tpy_emit_expr(nid: i64) -> str {
     }
     if k == 16 {
         let cc = __engine("ast_child_count", nid);
-        if cc <= 0 { return "0"; }
+        if cc <= 0 { return seam("emit.unlowered_expr", "a call node without a callee reached the python emitter"); }
         let callee_nid = __engine("ast_child_at", nid, 0);
         let cname = __engine("sym_str", __engine("ast_node_sym", callee_nid));
         if tir_is_struct_literal_call(nid) {
@@ -101,7 +101,7 @@ pub fn tpy_emit_expr(nid: i64) -> str {
         let idx_e = tpy_emit_expr(__engine("ast_child_at", nid, 1));
         return base_e + "[" + idx_e + "]";
     }
-    return "0";
+    return seam("emit.unlowered_expr", f"the python emitter has no lowering for AST node kind {k} (original kind {ok})");
 }
 
 pub fn tpy_emit_block_body(blk_nid: i64, depth: i64) -> str {

@@ -87,6 +87,19 @@ impl PilVirtualMachine {
             .ok_or_else(|| format!("`{op}` expects a list, found {}", v.kind_label()))
     }
 
+    /// The elements of the list `v`, or with `deep` its leaves at any depth.
+    fn collect_elements(&self, v: PilotVal, deep: bool, op: &str, out: &mut Vec<PilotVal>) -> Result<(), String> {
+        let slot = self.list_slot(v, op)?;
+        for &e in &self.heap_lists[slot] {
+            if deep && e.as_list_handle().is_some() {
+                self.collect_elements(e, true, op, out)?;
+            } else {
+                out.push(e);
+            }
+        }
+        Ok(())
+    }
+
     fn map_slot(&self, v: PilotVal, op: &str) -> Result<usize, String> {
         v.as_map_handle()
             .filter(|s| *s < self.heap_maps.len())
@@ -124,7 +137,7 @@ impl PilVirtualMachine {
         }
         if v.is_map() {
             let m = &self.heap_maps[self.map_slot(v, op)?];
-            return Ok(m.get("len").copied().unwrap_or(PilotVal::from_int(m.len() as i64)));
+            return Ok(PilotVal::from_int(m.len() as i64));
         }
         Err(format!("`{op}` expects a string, list or record, found {}", v.kind_label()))
     }
@@ -132,9 +145,6 @@ impl PilVirtualMachine {
     fn get(&self, obj: PilotVal, k: PilotVal, op: &str) -> IntrinsicResult {
         if obj.is_list() {
             let slot = self.list_slot(obj, op)?;
-            if k.with_str(|s| s == "len").unwrap_or(false) {
-                return Ok(PilotVal::from_int(self.heap_lists[slot].len() as i64));
-            }
             let i = self.list_index(slot, k, op)?;
             return Ok(self.heap_lists[slot][i]);
         }
@@ -212,11 +222,38 @@ impl PilVirtualMachine {
                 println!("{}", parts.join(" "));
                 Ok(PilotVal::NULL)
             }
+            "rt_eprint" => {
+                let parts: Vec<String> = args.iter().map(|a| self.display(*a)).collect();
+                eprintln!("{}", parts.join(" "));
+                Ok(PilotVal::NULL)
+            }
+            "stdin_read_line" => Ok(crate::host::stdin_read_line()),
+            "stdin_read_all" => Ok(crate::host::stdin_read_all()),
+            "proc_exe" => Ok(crate::host::proc_exe()),
+            "proc_run" => {
+                let program = str_arg(args, 0, op)?;
+                let argv = self.str_list(arg(args, 1, op)?, op)?;
+                let input = args.get(2).and_then(|v| v.with_str(str::to_string));
+                self.proc_run(&program, &argv, input.as_deref())
+            }
+            // `field_or_native(obj, key, intrinsic)`: the record's field
+            // `key` if it has one, else `intrinsic(obj)` (a native property).
+            "field_or_native" => {
+                let (obj, key) = (arg(args, 0, op)?, arg(args, 1, op)?);
+                if let Some(slot) = obj.as_map_handle().filter(|s| *s < self.heap_maps.len()) {
+                    if let Some(v) = self.heap_maps[slot].get(&key_of(key)) {
+                        return Ok(*v);
+                    }
+                }
+                let hook = str_arg(args, 2, op)?;
+                self.intrinsic(&hook, &[obj])
+            }
             "rt_assert" => {
                 let v = arg(args, 0, op)?;
+                let note = args.get(1).map(|m| format!(": {}", key_of(*m))).unwrap_or_default();
                 match v.as_bool() {
                     Some(true) => Ok(PilotVal::NULL),
-                    Some(false) => Err("assertion failed".to_string()),
+                    Some(false) => Err(format!("assertion failed{note}")),
                     None => Err(format!("assert expects a boolean, found {}", v.kind_label())),
                 }
             }
@@ -234,6 +271,17 @@ impl PilVirtualMachine {
                 let list = arg(args, 0, op)?;
                 let slot = self.list_slot(list, op)?;
                 self.heap_lists[slot].push(arg(args, 1, op)?);
+                Ok(list)
+            }
+            // `list_extend(list, other, deep)`: appends `other`'s elements;
+            // with `deep` set, nested lists are flattened down to their leaves.
+            "list_extend" => {
+                let list = arg(args, 0, op)?;
+                let slot = self.list_slot(list, op)?;
+                let deep = arg(args, 2, op)?.as_bool().unwrap_or(false);
+                let mut leaves = Vec::new();
+                self.collect_elements(arg(args, 1, op)?, deep, op, &mut leaves)?;
+                self.heap_lists[slot].extend(leaves);
                 Ok(list)
             }
             "list_remove_at" => {
@@ -320,19 +368,6 @@ impl PilVirtualMachine {
                     .copied()
                     .ok_or_else(|| format!("{} has no captured value #{i}", f.kind_label()))
             }
-            // Postfix `?` on a non-null value. Records (`res`, `opt` structs)
-            // unwrap through their `op ?` method, which the seed cannot
-            // dispatch yet, so they fault instead of passing through unchanged.
-            "try_unwrap" => {
-                let v = arg(args, 0, op)?;
-                if v.is_map() {
-                    return Err(format!(
-                        "postfix `?` on a {} needs its `op ?` method, which the seed cannot dispatch yet",
-                        v.kind_label()
-                    ));
-                }
-                Ok(v)
-            }
             "global_get" => {
                 let name = str_arg(args, 0, op)?;
                 self.globals
@@ -371,12 +406,26 @@ impl PilVirtualMachine {
                 }
                 self.forward(op, args)
             }
+            "proc_args" => Ok(self.proc_args()),
+            // An intentionally unconnected entry or exit point was reached.
+            "seam_open" => {
+                let id = str_arg(args, 0, op)?;
+                let note = args.get(1).map(|&v| self.display(v)).unwrap_or_default();
+                Err(format!("SEAM001: unconnected seam `{id}`: {note}"))
+            }
+            "unit_header" => {
+                let path = str_arg(args, 0, op)?;
+                Ok(self.unit_header(&path))
+            }
             _ => self.forward(op, args),
         }
     }
 
     /// Forwards an intrinsic to the host engine handler, then to the OS table.
     fn forward(&mut self, op: &str, args: &[PilotVal]) -> IntrinsicResult {
+        if let Some(r) = self.host_op(op, args) {
+            return r.map_err(|e| format!("intrinsic `{op}` failed: {e}"));
+        }
         if let Some(h) = self.engine_handler.as_mut() {
             match h(op, args) {
                 Ok(v) if !v.is_null() => return Ok(v),

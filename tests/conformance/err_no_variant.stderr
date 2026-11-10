@@ -1,0 +1,2 @@
+error[METH001]: no enum variant named `Blue`
+err_no_variant.pilot:10:14

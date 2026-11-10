@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -85,7 +87,7 @@ fn eval_m26(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -142,11 +144,7 @@ fn test_m26_1_zero_byte_typestate_algebra_and_transitions() {
             // 5. Calling read() while in Closed must fail with STATE001!
             let bad_read = typestate_check_call(decl, cur_state, "read");
             if !bad_read.has_error { return 6; }
-            let expected_code = "STATE001";
-            if bad_read.diagnostic.len() < expected_code.len() { return 7; }
-
-            // 6. Zero-byte erasure verification
-            if typestate_runtime_overhead_bytes() != 0 { return 8; }
+            if !bad_read.diagnostic.starts_with("STATE001: Invalid method call 'read' on 'File@Closed'; valid states: Open") { return 7; }
 
             return 42;
         }
@@ -193,13 +191,12 @@ fn test_m26_2_branch_merge_ambiguity_and_terminal_drop_obligations() {
             // 2. Calling exec_sql on merged (Open | Committed) must trigger STATE002 ambiguous merge!
             let call_res = typestate_check_call(decl, merged, "exec_sql");
             if !call_res.has_error || !call_res.is_ambiguous { return 2; }
-            if call_res.diagnostic.len() < 8 { return 3; }
+            if !call_res.diagnostic.starts_with("STATE002: Ambiguous merged typestate 'Tx@(Open | Committed)' at call to 'exec_sql'; narrow with a switch branch") { return 3; }
 
             // 3. Drop obligation: Tx@Open dropped without reaching Committed or Aborted -> STATE004!
             let drop_open_diag = typestate_check_drop(decl, mask_open);
             if drop_open_diag.len() == 0 { return 4; }
-            let expected_code = "STATE004";
-            if drop_open_diag.len() < expected_code.len() { return 5; }
+            if drop_open_diag != "STATE004: Typestate obligation unfulfilled: 'Tx@Open' dropped without reaching declared terminal state 'Committed | Aborted'" { return 5; }
 
             // 4. Drop obligation satisfied: Tx@Committed dropped -> no diagnostic
             let drop_term_diag = typestate_check_drop(decl, mask_committed);
@@ -232,11 +229,11 @@ fn test_m26_3_design_by_contract_hoisted_old_snapshots_and_purity() {
         pub fn main() -> i64 {
             // Case 1: Valid Account.deposit contract plan
             var plan = contract_weave_plan_new("deposit", ContractCheckMode::All);
-            plan.plan_add_requires("amt > 0", true, false, true);
+            plan.plan_add_requires("amt > 0", true);
             plan.plan_add_old_snapshot(".balance", true, true); // pure, 0b00 IValue
             plan.plan_add_ensures(".balance == __old_0 + amt", true);
 
-            let ok = weave_contracts(plan);
+            let ok = check_contract_plan(plan);
             if !ok { return 1; }
             if plan.requires_checked != 1 { return 2; }
             if plan.old_snapshots_hoisted != 1 { return 3; }
@@ -249,8 +246,7 @@ fn test_m26_3_design_by_contract_hoisted_old_snapshots_and_purity() {
             let ok2 = weave_contracts(plan_impure);
             if ok2 { return 6; }
             if plan_impure.diagnostics.len() != 1 { return 7; }
-            let expected_dbc003 = "DBC003";
-            if plan_impure.diagnostics[0].len() < expected_dbc003.len() { return 8; }
+            if plan_impure.diagnostics[0] != "DBC003: Impure expression inside old(...) forbidden: 'fetch_api()'" { return 8; }
 
             // Case 3: Borrowed 0b01 view captured in old() must trigger DBC004
             var plan_borrow = contract_weave_plan_new("bad_borrow", ContractCheckMode::All);
@@ -258,8 +254,7 @@ fn test_m26_3_design_by_contract_hoisted_old_snapshots_and_purity() {
             let ok3 = weave_contracts(plan_borrow);
             if ok3 { return 9; }
             if plan_borrow.diagnostics.len() != 1 { return 10; }
-            let expected_dbc004 = "DBC004";
-            if plan_borrow.diagnostics[0].len() < expected_dbc004.len() { return 11; }
+            if !plan_borrow.diagnostics[0].starts_with("DBC004: old(...) captures mutated 0b01 borrowed view 'borrowed_slice'") { return 11; }
 
             return 42;
         }
@@ -267,6 +262,23 @@ fn test_m26_3_design_by_contract_hoisted_old_snapshots_and_purity() {
 
     let res = eval_m26(&deps, script);
     assert_eq!(res, "42", "Failed DBC old() snapshot & purity test: {}", res);
+
+    // A plan that passes its checks is handed to PilIR, which does not exist yet.
+    let weave_script = r#"
+        pub fn main() -> i64 {
+            var plan = contract_weave_plan_new("deposit", ContractCheckMode::All);
+            plan.plan_add_requires("amt > 0", true);
+            plan.plan_add_ensures(".balance == __old_0 + amt", true);
+            if weave_contracts(plan) { return 1; }
+            return 2;
+        }
+    "#;
+    let weave = eval_m26(&deps, weave_script);
+    assert!(
+        weave.starts_with("FAULT: SEAM001: unconnected seam `contracts.weave_ir`"),
+        "weave_contracts must stop at its seam: {}",
+        weave
+    );
     guard.finish();
 }
 
@@ -286,27 +298,21 @@ fn test_m26_4_comptime_precondition_refinement_and_invariant() {
 
     let script = r#"
         pub fn main() -> i64 {
-            // Case 1: Comptime provably false requires(-5 > 0) must trigger DBC001!
-            var plan = contract_weave_plan_new("deposit", ContractCheckMode::All);
-            plan.plan_add_requires("amt > 0", true, true, false); // can_prove = true, eval_ok = false
-            let ok = weave_contracts(plan);
-            if ok { return 1; }
-            if plan.comptime_violations != 1 { return 2; }
-            let expected_dbc001 = "DBC001";
-            if plan.diagnostics[0].len() < expected_dbc001.len() { return 3; }
-
-            // Case 2: Refinement type Percentage = f64 where self >= 0 && self <= 100
+            // Case 1: Refinement type Percentage = f64 where self >= 0 && self <= 100
             let ref_valid = verify_where_refinement_i64("Percentage", 75, 0, 100, "self >= 0 && self <= 100");
             if ref_valid.len() != 0 { return 4; }
+            let ref_low = verify_where_refinement_i64("Percentage", 0, 0, 100, "self >= 0 && self <= 100");
+            if ref_low.len() != 0 { return 9; }
 
             let ref_invalid = verify_where_refinement_i64("Percentage", 150, 0, 100, "self >= 0 && self <= 100");
-            if ref_invalid.len() == 0 { return 5; }
-            if ref_invalid.len() < expected_dbc001.len() { return 6; }
+            if ref_invalid != "DBC001: Compile-time provable refinement 'Percentage' violation: 'self >= 0 && self <= 100' evaluated to false (value 150 out of bounds [0..100])" { return 6; }
+            let ref_neg = verify_where_refinement_i64("Percentage", -1, 0, 100, "self >= 0 && self <= 100");
+            if ref_neg.len() == 0 { return 10; }
 
-            // Case 3: Struct invariant weaving
+            // Case 2: Struct invariant checking
             var plan_inv = contract_weave_plan_new("Account", ContractCheckMode::All);
             plan_inv.plan_add_invariant(".balance >= 0", true);
-            let ok_inv = weave_contracts(plan_inv);
+            let ok_inv = check_contract_plan(plan_inv);
             if !ok_inv { return 7; }
             if plan_inv.invariants_woven != 1 { return 8; }
 
@@ -316,5 +322,22 @@ fn test_m26_4_comptime_precondition_refinement_and_invariant() {
 
     let res = eval_m26(&deps, script);
     assert_eq!(res, "42", "Failed comptime precondition & refinement test: {}", res);
+
+    // Proving `requires(amt > 0)` false for `deposit(-5)` needs a comptime evaluator.
+    let prove_script = r#"
+        pub fn main() -> i64 {
+            var plan = contract_weave_plan_new("deposit", ContractCheckMode::All);
+            plan.plan_add_requires("amt > 0", true);
+            let args: List<str> = ["-5"];
+            if prove_requires_at_call(plan, 0, args) { return 1; }
+            return 2;
+        }
+    "#;
+    let prove = eval_m26(&deps, prove_script);
+    assert!(
+        prove.starts_with("FAULT: SEAM001: unconnected seam `contracts.prove_requires`"),
+        "requires proving must stop at its seam: {}",
+        prove
+    );
     guard.finish();
 }

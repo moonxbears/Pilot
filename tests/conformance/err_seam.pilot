@@ -1,0 +1,13 @@
+// An unconnected seam stops the program with SEAM001 and the calls that
+// reached it. Nothing after it runs.
+fn load_library(path: str) -> i64 => seam("demo.load_library", "native calls arrive in F6");
+
+fn open_codec(name: str) -> i64 {
+    return load_library(f"lib{name}.so");
+}
+
+fn main() {
+    print("start");
+    let codec = open_codec("z");
+    print("unreachable");
+}

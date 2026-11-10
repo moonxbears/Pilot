@@ -10,7 +10,6 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 use Pilot.Core.Memory.*;
 use Pilot.Core.Meta.*;
-use Pilot.Json.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -28,30 +27,8 @@ let Cfg = {
 };
 
 // =========================================================================
-// 1. JSON ATTRIBUTES & STANDARD SERIALIZATION HELPERS
+// 1. JSON LAYOUT HELPERS
 // =========================================================================
-
-[Layout(c_abi)]
-pub struct JsonObjectAttr : IAttribute, IValue {
-    pub naming_policy: str;
-    pub weight:        i32;
-
-    pub static pure fn create() -> JsonObjectAttr => JsonObjectAttr {
-        naming_policy: "camelCase",
-        weight:        10,
-    };
-}
-
-[Layout(c_abi)]
-pub struct JsonPropertyAttr : IAttribute, IValue {
-    pub name:   str;
-    pub weight: i32;
-
-    pub static pure fn named(name: str) -> JsonPropertyAttr => JsonPropertyAttr {
-        name:   name,
-        weight: 10,
-    };
-}
 
 pure fn json_indent(depth: i64, spaces: i64) -> str {
     let total = depth * spaces;
@@ -64,119 +41,9 @@ pure fn json_indent(depth: i64, spaces: i64) -> str {
     return res;
 }
 
-pub pure fn dumps(obj: any, indent: i64 = 2) -> str {
-    if indent < 0 { return ""; }
-    let s = str(obj);
-    if s.starts_with("{") || s.starts_with("[") {
-        return s;
-    }
-    return "\"" + s + "\"";
-}
-
-pub fn loads(s: str) -> any {
-    // Strips surrounding quotes if present
-    if s.starts_with("\"") && s.ends_with("\"") && s.len() >= 2 {
-        return s.slice(1, s.len() - 1);
-    }
-    return s;
-}
-
 // =========================================================================
-// 2. LANGUAGE CONFIGURATION HIERARCHICAL MODEL & SERIALIZER
+// 2. LANGUAGE CONFIGURATION SERIALIZER
 // =========================================================================
-
-[JsonObject]
-pub struct CommentRule : IValue {
-    [JsonProperty("lineComment")]
-    pub line_comment: str;
-
-    [JsonProperty("blockComment")]
-    pub block_comment: str[];
-}
-
-[JsonObject]
-pub struct BracketPair : IValue {
-    [JsonProperty("open")]
-    pub open: str;
-
-    [JsonProperty("close")]
-    pub close: str;
-}
-
-[JsonObject]
-pub struct AutoClosingPair : IValue {
-    [JsonProperty("open")]
-    pub open: str;
-
-    [JsonProperty("close")]
-    pub close: str;
-
-    [JsonProperty("notIn")]
-    pub not_in: str[];
-}
-
-[JsonObject]
-pub struct IndentationRules : IValue {
-    [JsonProperty("increaseIndentPattern")]
-    pub increase_indent_pattern: str;
-
-    [JsonProperty("decreaseIndentPattern")]
-    pub decrease_indent_pattern: str;
-}
-
-[JsonObject]
-pub struct LanguageConfiguration : IValue {
-    [JsonProperty("comments")]
-    pub comments: CommentRule;
-
-    [JsonProperty("brackets")]
-    pub brackets: BracketPair[];
-
-    [JsonProperty("autoClosingPairs")]
-    pub auto_closing_pairs: AutoClosingPair[];
-
-    [JsonProperty("surroundingPairs")]
-    pub surrounding_pairs: BracketPair[];
-
-    [JsonProperty("indentationRules")]
-    pub indentation_rules: IndentationRules;
-}
-
-pub pure fn build_language_configuration_model() -> LanguageConfiguration {
-    return LanguageConfiguration {
-        comments: CommentRule {
-            line_comment:  "//",
-            block_comment: ["/*", "*/"],
-        },
-        brackets: [
-            BracketPair { open: "{", close: "}" },
-            BracketPair { open: "[", close: "]" },
-            BracketPair { open: "(", close: ")" },
-            BracketPair { open: "<", close: ">" },
-        ],
-        auto_closing_pairs: [
-            AutoClosingPair { open: "{", close: "}", not_in: [] },
-            AutoClosingPair { open: "[", close: "]", not_in: [] },
-            AutoClosingPair { open: "(", close: ")", not_in: [] },
-            AutoClosingPair { open: "\"", close: "\"", not_in: ["string"] },
-            AutoClosingPair { open: "'", close: "'", not_in: ["string", "comment"] },
-            AutoClosingPair { open: "`", close: "`", not_in: ["string", "comment"] },
-        ],
-        surrounding_pairs: [
-            BracketPair { open: "{", close: "}" },
-            BracketPair { open: "[", close: "]" },
-            BracketPair { open: "(", close: ")" },
-            BracketPair { open: "<", close: ">" },
-            BracketPair { open: "\\\"", close: "\\\"" },
-            BracketPair { open: "'", close: "'" },
-            BracketPair { open: "`", close: "`" },
-        ],
-        indentation_rules: IndentationRules {
-            increase_indent_pattern: "^((?!.*?\\\\/\\\\/).)*(\\\\{[^}\\\"'`]*|\\\\([^)\\\"'`]*|\\\\[[^\\\\]\\\"'`]*)$",
-            decrease_indent_pattern: "^\\\\s*[}\\\\])]\\\\s*$",
-        },
-    };
-}
 
 pure fn lc_comments_section(indent: i64) -> str {
     let p1 = json_indent(1, indent);
@@ -245,87 +112,8 @@ pub pure fn dumps_language_configuration(indent: i64 = 2) -> str {
 }
 
 // =========================================================================
-// 3. SNIPPETS CATALOG HIERARCHICAL MODEL & SERIALIZER
+// 3. SNIPPETS CATALOG SERIALIZER
 // =========================================================================
-
-[JsonObject]
-pub struct SnippetDefinition : IValue {
-    [JsonProperty("prefix")]
-    pub prefix: str;
-
-    [JsonProperty("body")]
-    pub body: str[];
-
-    [JsonProperty("description")]
-    pub description: str;
-}
-
-[JsonObject]
-pub struct SnippetEntry : IValue {
-    [JsonProperty("name")]
-    pub name: str;
-
-    [JsonProperty("definition")]
-    pub definition: SnippetDefinition;
-}
-
-[JsonObject]
-pub struct SnippetsCatalog : IValue {
-    [JsonProperty("entries")]
-    pub entries: SnippetEntry[];
-}
-
-pub pure fn build_snippets_model() -> SnippetsCatalog {
-    return SnippetsCatalog {
-        entries: [
-            SnippetEntry {
-                name: "Distributive Struct Block",
-                definition: SnippetDefinition {
-                    prefix:      "pstruct",
-                    body:        ["pub " + nameof(struct) + " {", "\\t$0", "}"],
-                    description: "Distributive Pilot struct block",
-                },
-            },
-            SnippetEntry {
-                name: "Syntax Macro Rule",
-                definition: SnippetDefinition {
-                    prefix:      "psyntax",
-                    body:        ["pub syntax ${1:name}(${2:expr}) => " + nameof(quote) + " {", "\\t$0", "};"],
-                    description: "Self-hosted Pilot syntax macro",
-                },
-            },
-            SnippetEntry {
-                name: "Patch Function Clone",
-                definition: SnippetDefinition {
-                    prefix: "ppatch",
-                    body: [
-                        "[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]",
-                        "pub " + nameof(fn) + " ${5:new_fn}() {",
-                        "\\t$0",
-                        "\\t${1:contents}.patch().call();",
-                        "}",
-                    ],
-                    description: "Non-destructive CST/AST function patch and clone",
-                },
-            },
-            SnippetEntry {
-                name: "Choreography Blueprint",
-                definition: SnippetDefinition {
-                    prefix: "pblueprint",
-                    body: [
-                        "pub blueprint ${1:Pipeline} {",
-                        "\\trole ${2:Worker};",
-                        "\\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {",
-                        "\\t\\troute pkt -> ${2:Worker}.${5:handle};",
-                        "\\t}",
-                        "}",
-                    ],
-                    description: "Zero-copy .pchor choreography blueprint",
-                },
-            },
-        ],
-    };
-}
 
 pure fn serialize_snippet(name: str, prefix: str, body_str: str, desc: str, indent: i64 = 2) -> str {
     let pad = json_indent(1, indent);
@@ -489,42 +277,6 @@ pub fn reflect_primitives_pattern() -> str {
     return pat;
 }
 
-[JsonObject]
-pub struct TmPatternInclude : IValue {
-    [JsonProperty("include")]
-    pub include: str;
-}
-
-[JsonObject]
-pub struct TmLanguageGrammar : IValue {
-    [JsonProperty("$schema")]
-    pub schema: str;
-
-    [JsonProperty("name")]
-    pub name: str;
-
-    [JsonProperty("scopeName")]
-    pub scope_name: str;
-
-    [JsonProperty("patterns")]
-    pub patterns: TmPatternInclude[];
-}
-
-pub fn build_tm_language_model() -> TmLanguageGrammar {
-    return TmLanguageGrammar {
-        schema:     "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-        name:       "Pilot",
-        scope_name: "source.pilot",
-        patterns: [
-            TmPatternInclude { include: "#comments" },
-            TmPatternInclude { include: "#strings" },
-            TmPatternInclude { include: "#keywords" },
-            TmPatternInclude { include: "#primitives" },
-            TmPatternInclude { include: "#operators" },
-        ],
-    };
-}
-
 // Real JSON serializer for TextMate grammar
 pub fn dumps_tm_language(
     seed_keywords_regex:   str = "",
@@ -603,44 +355,8 @@ pub fn dumps_tm_language(
 }
 
 // =========================================================================
-// 5. VS CODE PACKAGE.JSON MANIFEST MODEL & REAL SERIALIZER
+// 5. VS CODE PACKAGE.JSON SERIALIZER
 // =========================================================================
-
-[JsonObject]
-pub struct PackageJsonModel : IValue {
-    [JsonProperty("name")]
-    pub name: str;
-
-    [JsonProperty("displayName")]
-    pub display_name: str;
-
-    [JsonProperty("description")]
-    pub description: str;
-
-    [JsonProperty("version")]
-    pub version: str;
-
-    [JsonProperty("publisher")]
-    pub publisher: str;
-
-    [JsonProperty("license")]
-    pub license: str;
-
-    [JsonProperty("main")]
-    pub main_path: str;
-}
-
-pub pure fn build_package_json_model(version: str = "1.1.51") -> PackageJsonModel {
-    return PackageJsonModel {
-        name:         "pilot-lang",
-        display_name: "Pilot Language Support",
-        description:  "Syntax highlighting, semantic analysis, type checking, and Language Server (LSP) integration for the Pilot programming language.",
-        version:      if version != "" { version } else { "1.1.51" },
-        publisher:    "pilot-lang",
-        license:      "MIT",
-        main_path:    "./out/extension.js",
-    };
-}
 
 // Real JSON serializer for package.json
 pub pure fn dumps_package_json(version: str = "1.1.51", indent: i64 = 2) -> str {
@@ -684,31 +400,16 @@ pub pure fn dumps_package_json(version: str = "1.1.51", indent: i64 = 2) -> str 
            "}";
 }
 
-pub fn dump(obj: any, file_path: str, indent: i64 = 2) -> bool {
-    let content = if file_path == "vscode-pilot/syntaxes/pilot.tmLanguage.json" {
-        dumps_tm_language("", "", "", "", "", indent)
-    } else if file_path == "vscode-pilot/language-configuration.json" {
-        dumps_language_configuration(indent)
-    } else if file_path == "vscode-pilot/snippets/pilot.json" {
-        dumps_snippets(indent)
-    } else if file_path == "vscode-pilot/package.json" {
-        dumps_package_json("1.1.51", indent)
-    } else {
-        dumps(obj, indent)
-    };
-    let res = __engine("fs_write_text", file_path, content);
-    return res == 0 || true;
+/// Writes one generated artifact; true when the file was written.
+pub fn write_artifact(file_path: str, content: str) -> bool {
+    return __engine("fs_write_text", file_path, content) == true;
 }
 
 let _ide_method = __engine(Cfg.ast.lsp_query_method);
 if _ide_method == "ide-sync" {
     __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
-    let tm_model = build_tm_language_model();
-    let lc_model = build_language_configuration_model();
-    let sn_model = build_snippets_model();
-    let pkg_model = build_package_json_model("1.1.51");
-    dump(tm_model, "vscode-pilot/syntaxes/pilot.tmLanguage.json");
-    dump(lc_model, "vscode-pilot/language-configuration.json");
-    dump(sn_model, "vscode-pilot/snippets/pilot.json");
-    dump(pkg_model, "vscode-pilot/package.json");
+    write_artifact("vscode-pilot/syntaxes/pilot.tmLanguage.json", dumps_tm_language("", "", "", "", "", 2));
+    write_artifact("vscode-pilot/language-configuration.json", dumps_language_configuration(2));
+    write_artifact("vscode-pilot/snippets/pilot.json", dumps_snippets(2));
+    write_artifact("vscode-pilot/package.json", dumps_package_json("1.1.51", 2));
 }

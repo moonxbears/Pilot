@@ -11,9 +11,9 @@ pub pkg Pilot.Core.Reflect;
 
 use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
-use Pilot.Core.Keywords::*;
 use Pilot.Core.Memory::*;
 use Pilot.Core.Option::*;
+use Pilot.Core.Pending::*;
 
 // =========================================================================
 // 1. REFLECTION DATA STRUCTURES (0b00 IValue, Zero Runtime Overhead)
@@ -1020,9 +1020,12 @@ pub struct TargetDescriptor : IValue {
     pub pointer_bytes:    usize;
     pub endian:           str;
     pub backend:          str;
-    pub simd_width_bits:  usize;
-    pub cache_line_bytes: usize;
-    pub opt_level:        u8;
+    /// Pending until the compile driver publishes a `--target` descriptor.
+    pub simd_width_bits:  Pending<usize>;
+    /// Pending until the compile driver publishes a `--target` descriptor.
+    pub cache_line_bytes: Pending<usize>;
+    /// Pending until the compile driver publishes the build's opt level.
+    pub opt_level:        Pending<u8>;
 
     pub pure fn is_64bit() -> bool => .pointer_bytes == 8;
     pub pure fn is_little_endian() -> bool => .endian == "little";
@@ -1043,79 +1046,44 @@ pub struct CompileEnvView : IReference {
     pub symbol_count: usize;
 
     pub pure fn lookup_type(name: str) -> opt<TypeLayout> {
-        let sym_id = __engine("sym_lookup", name) as i64;
-        if sym_id >= 0 {
-            let sz = __engine("layout_metrics", sym_id) as usize;
-            if sz > 0 {
-                return opt<TypeLayout>.some(TypeLayout {
-                    size_in_bytes: sz,
-                    alignment: 8,
-                    lattice_bits: 0,
-                    reg_class: 0,
-                });
-            }
-        }
-        return opt<TypeLayout>.none();
+        return seam("reflect.lookup_type", "resolving a type name to its layout (size, alignment, lattice bits, register class) needs the type checker");
     }
 
     pub pure fn symbols_in_pkg(pkg_name: str) -> slice<str> {
-        return slice<str> { data: none, len: 0 };
+        return seam("reflect.symbols_in_pkg", "package symbol tables come with the type checker");
     }
 
     pub pure fn ast_root(unit: u32) -> usize {
-        return 0;
+        return seam("reflect.ast_root", "per-unit AST roots are not published to ENV yet");
     }
 }
 
+/// The compile environment the engine publishes as `ENV`: its `target`
+/// record describes the target being compiled for. Nothing is assumed when
+/// the engine publishes no target record.
 pub fn env() -> CompileEnvView {
-    var arch = __engine("map_get", 1, "arch");
-    if arch.len() == 0 { arch = __engine("map_get", 1, "architecture"); }
-    let arch_str = if arch.len() > 0 { arch } else { "x86_64" };
-
-    let os = __engine("map_get", 1, "os");
-    let os_str = if os.len() > 0 { os } else { "linux" };
-
-    var ptr_b = __engine("map_get", 1, "pointer_bytes") as usize;
-    if ptr_b == 0 { ptr_b = __engine("map_get", 1, "pointer_byte") as usize; }
-    let ptr_bytes = if ptr_b > 0 { ptr_b } else { 8 };
-
-    var end = __engine("map_get", 1, "endian");
-    if end.len() == 0 { end = __engine("map_get", 1, "endianess"); }
-    let endian_str = if end.len() > 0 { end } else { "little" };
-
-    let be = __engine("map_get", 1, "backend");
-    let be_str = if be.len() > 0 { be } else { "vm" };
-
-    let simd = __engine("map_get", 1, "simd_width_bits") as usize;
-    let simd_bits = if simd > 0 { simd } else { 128 };
-
-    var cl = __engine("map_get", 1, "cache_line_bytes") as usize;
-    if cl == 0 { cl = __engine("map_get", 1, "cache_line") as usize; }
-    let cache_bytes = if cl > 0 { cl } else { 64 };
-
-    let opt = __engine("map_get", 1, "opt_level") as u8;
-    let opt_lvl = if opt > 0 { opt } else { 2 };
-
-    let is_comp = __engine("map_get", __engine("get_env"), "is_comptime") as i64 == 1;
-    let u_cnt = __engine("map_get", __engine("get_env"), "unit_count") as usize;
-    let s_cnt = __engine("map_get", __engine("get_env"), "symbol_count") as usize;
+    let env_rec = __engine("get_env");
+    let tgt_rec = __engine("map_get", env_rec, "target");
+    if tgt_rec == none {
+        return seam("reflect.target_descriptor", "the engine publishes ENV.target only at comptime; the run-time target record arrives with the compile driver");
+    }
 
     let tgt = TargetDescriptor {
-        arch: arch_str,
-        os: os_str,
-        pointer_bytes: ptr_bytes,
-        endian: endian_str,
-        backend: be_str,
-        simd_width_bits: simd_bits,
-        cache_line_bytes: cache_bytes,
-        opt_level: opt_lvl,
+        arch: __engine("map_get", tgt_rec, "arch"),
+        os: __engine("map_get", tgt_rec, "os"),
+        pointer_bytes: __engine("map_get", tgt_rec, "pointer_bytes") as usize,
+        endian: __engine("map_get", tgt_rec, "endian"),
+        backend: __engine("map_get", tgt_rec, "backend"),
+        simd_width_bits: pending("reflect.target_simd_width", "the target's SIMD register width comes from a --target descriptor published by the compile driver"),
+        cache_line_bytes: pending("reflect.target_cache_line", "the target's cache line size comes from a --target descriptor published by the compile driver"),
+        opt_level: pending("reflect.target_opt_level", "the optimisation level is set by the compile driver; the seed VM does not optimise"),
     };
 
     return CompileEnvView {
         target: tgt,
-        is_comptime: is_comp,
-        unit_count: if u_cnt > 0 { u_cnt } else { 1 },
-        symbol_count: s_cnt,
+        is_comptime: __engine("map_get", env_rec, "is_comptime") as i64 == 1,
+        unit_count: __engine("map_get", env_rec, "unit_count") as usize,
+        symbol_count: __engine("map_get", env_rec, "symbol_count") as usize,
     };
 }
 

@@ -1,7 +1,8 @@
 // ==============================================================================
 // FILE: selfhost/adapter/compiler.pilot
 // Milestone 11.2: Adapter Declaration Compiler & Zero-Cost PilIR Idiom Lifter
-// Synthesizes Tier-1/Tier-2 MethodTable entries and 0-allocation PilIR thunks
+// Applies an `AdapterBlueprint` to real foreign signatures and plans the
+// 0-allocation thunk of every adapted method as a sequence of PilIR opcodes.
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Adapter.Compiler;
 
@@ -12,7 +13,40 @@ use Pilot.Diagnostics.Model;
 pub pure fn nameof(sym: str) -> str => sym;
 
 // ------------------------------------------------------------------------------
-// 1. Adapter Method Model & Synthesis
+// 1. Foreign Signature Input
+// ------------------------------------------------------------------------------
+
+/// One foreign function as an absorber read it: its symbol, the spelling of
+/// each parameter type and the return type.
+pub struct AdapterFnSig : IObject {
+    pub symbol:      str;
+    pub param_types: List<str>;
+    pub ret_type:    str;
+
+    ~self() {}
+}
+
+pub fn adapter_fn_sig_new(symbol: str, param_types: List<str>, ret_type: str) -> AdapterFnSig {
+    return AdapterFnSig { symbol: symbol, param_types: param_types, ret_type: ret_type };
+}
+
+/// `const uint8_t *` -> true. A foreign pointer spelling ends in `*`.
+pub fn adapter_type_is_pointer(ty: str) -> bool {
+    let t = ty.trim();
+    return t.len() > 0 && t.slice(t.len() - 1, t.len()) == "*";
+}
+
+/// Integer spellings that can carry a length: `size_t`, `int`, `long`,
+/// `unsigned short`, `uint32_t`, `ptrdiff_t`, ...
+pub fn adapter_type_is_length(ty: str) -> bool {
+    if adapter_type_is_pointer(ty) { return false; }
+    let t = ty.trim();
+    return t.contains("int") || t.contains("long") || t.contains("short")
+        || t.ends_with("size_t") || t.ends_with("ptrdiff_t");
+}
+
+// ------------------------------------------------------------------------------
+// 2. Adapter Method Model & Synthesis
 // ------------------------------------------------------------------------------
 
 [Layout(c_abi)]
@@ -45,6 +79,9 @@ pub struct AdaptedMethod : IObject {
     pub params:           List<AdaptedParam>;
     pub return_type:      str;
     pub has_error_lift:   bool;
+    /// The thunk as PilIR opcodes (`op_*` in `selfhost/ir/model.pilot`).
+    pub ir_ops:           List<u16>;
+    /// The same thunk as a readable listing, one op per line.
     pub ir_thunk:         str;
 
     ~self() {}
@@ -60,12 +97,18 @@ pub fn adapted_method_new(raw_sym: str, clean_name: str) -> AdaptedMethod {
         params:          [],
         return_type:     "void",
         has_error_lift:  false,
+        ir_ops:          [],
         ir_thunk:        "",
     };
 }
 
+fn emit_op(method: var ref<AdaptedMethod>, op: u16, text: str) {
+    method.ir_ops.push(op);
+    method.ir_thunk = method.ir_thunk + "  " + text + "\n";
+}
+
 // ------------------------------------------------------------------------------
-// 2. Adapter Compiler State & Output
+// 3. Adapter Compiler State & Output
 // ------------------------------------------------------------------------------
 
 pub struct AdapterCompilationReport : IObject {
@@ -88,145 +131,238 @@ pub fn adapter_compilation_report_new(target: str) -> AdapterCompilationReport {
     };
 }
 
+fn report_error(report: var ref<AdapterCompilationReport>, code: str, message: str) {
+    let span = source_span_new(0, 0, 0);
+    report.diagnostics.push(diagnostic_new(code, diag_severity_error(), message, span));
+}
+
 // ------------------------------------------------------------------------------
-// 3. Foreign Method Transformation & PilIR Thunk Synthesis
+// 4. Rule Matching Against a Signature
+// ------------------------------------------------------------------------------
+
+/// The slice rule whose pointer slot is `idx` and whose pointer/length pair
+/// fits this signature, or -1.
+fn slice_rule_at(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, idx: usize) -> i64 {
+    let n = sig.param_types.len();
+    var r: usize = 0;
+    while r < blueprint.slice_rules.len() {
+        let rule = blueprint.slice_rules[r];
+        let p = rule.ptr_param_idx as usize;
+        let l = rule.len_param_idx as usize;
+        if p == idx && p < n && l < n && p != l
+            && adapter_type_is_pointer(sig.param_types[p])
+            && adapter_type_is_length(sig.param_types[l]) {
+            return r as i64;
+        }
+        r = r + 1;
+    }
+    return -1;
+}
+
+/// True when `idx` is the length slot of a slice rule that applies here.
+fn is_consumed_len(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, idx: usize) -> bool {
+    var r: usize = 0;
+    while r < blueprint.slice_rules.len() {
+        let rule = blueprint.slice_rules[r];
+        if rule.len_param_idx as usize == idx
+            && slice_rule_at(blueprint, sig, rule.ptr_param_idx as usize) >= 0 {
+            return true;
+        }
+        r = r + 1;
+    }
+    return false;
+}
+
+/// The out-param rule for slot `idx` when that slot is a pointer, or -1.
+fn out_rule_at(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, idx: usize) -> i64 {
+    var r: usize = 0;
+    while r < blueprint.out_rules.len() {
+        let rule = blueprint.out_rules[r];
+        if rule.param_idx as usize == idx && idx < sig.param_types.len()
+            && adapter_type_is_pointer(sig.param_types[idx]) {
+            return r as i64;
+        }
+        r = r + 1;
+    }
+    return -1;
+}
+
+// ------------------------------------------------------------------------------
+// 5. Foreign Method Transformation & PilIR Thunk Planning
 // ------------------------------------------------------------------------------
 
 pub fn compile_adapter_method_thunk(
     blueprint: ref<AdapterBlueprint>,
-    raw_symbol: str,
-    raw_param_types: List<str>,
-    raw_ret_type: str
+    sig: ref<AdapterFnSig>
 ) -> AdaptedMethod {
+    let raw_symbol = sig.symbol;
     let clean = adapter_strip_prefix(raw_symbol, blueprint.strip_prefixes);
-    let normed_name = adapter_case_norm(clean, blueprint.method_case);
+    let normed_name = adapter_case_norm(clean, naming_style_code(blueprint.method_case));
 
     var method = adapted_method_new(raw_symbol, normed_name);
+    let n_params = sig.param_types.len();
 
-    // Check for property getter: get_foo(handle) -> T
-    if clean.len() > 4 && clean.slice(0, 4) == "get_" {
+    // Property getter `get_foo(handle) -> T`, setter `set_foo(handle, value)`.
+    if clean.len() > 4 && clean.slice(0, 4) == "get_" && n_params == 1 {
         method.is_property_get = true;
-        method.property_name = adapter_case_norm(clean.slice(4, clean.len()), blueprint.method_case);
+        method.property_name = adapter_case_norm(clean.slice(4, clean.len()), naming_style_code(blueprint.method_case));
     }
-    // Check for property setter: set_foo(handle, val) -> void/rc
-    if clean.len() > 4 && clean.slice(0, 4) == "set_" {
+    if clean.len() > 4 && clean.slice(0, 4) == "set_" && n_params == 2 {
         method.is_property_set = true;
-        method.property_name = adapter_case_norm(clean.slice(4, clean.len()), blueprint.method_case);
+        method.property_name = adapter_case_norm(clean.slice(4, clean.len()), naming_style_code(blueprint.method_case));
     }
 
-    var ir_builder = "";
+    var out_slots: List<usize> = [];
     var p_idx: usize = 0;
-    let n_params = raw_param_types.len();
-
-    // 1. Receiver promote: First parameter matching handle becomes self
-    var receiver_found = false;
     while p_idx < n_params {
-        let ty = raw_param_types[p_idx];
-        if !receiver_found && p_idx == 0 {
+        let ty = sig.param_types[p_idx];
+        let p_name = f"arg_{p_idx}";
+        let s_rule = slice_rule_at(blueprint, sig, p_idx);
+        let o_rule = out_rule_at(blueprint, sig, p_idx);
+        if p_idx == 0 && adapter_type_is_pointer(ty) && s_rule < 0 && o_rule < 0 {
+            // Receiver promote: a leading handle pointer becomes `self`.
             var param = adapted_param_new("self", blueprint.target_type, reg_class_raw_ptr(), 0);
             param.is_receiver = true;
             method.params.push(param);
-            receiver_found = true;
-            ir_builder = ir_builder + f"  %r0 = ExtractHandle(self)\n";
-        } else {
-            // Check slice pair rules
-            var is_slice_ptr = false;
-            var r_idx: usize = 0;
-            while r_idx < blueprint.slice_rules.len() {
-                let rule = blueprint.slice_rules[r_idx];
-                if rule.ptr_param_idx as usize == p_idx {
-                    is_slice_ptr = true;
-                    let p_name = f"arg_{p_idx}";
-                    let p_type = if rule.as_utf8_str { "str" } else { "slice<u8>" };
-                    var sp_param = adapted_param_new(p_name, p_type, reg_class_raw_ptr(), p_idx as u16);
-                    method.params.push(sp_param);
-
-                    ir_builder = ir_builder + f"  %ptr_{p_idx} = ExtractField({p_name}, 0)\n";
-                    ir_builder = ir_builder + f"  %len_{p_idx} = ExtractField({p_name}, 1)\n";
-                    break;
-                }
-                r_idx = r_idx + 1;
+            emit_op(ref method, op_extract_field(), "%r0 = extract_field(self, 0)");
+        } else if s_rule >= 0 {
+            let rule = blueprint.slice_rules[s_rule as usize];
+            let p_type = if rule.as_utf8_str { "str" } else { "slice<u8>" };
+            method.params.push(adapted_param_new(p_name, p_type, reg_class_raw_ptr(), p_idx as u16));
+            emit_op(ref method, op_extract_field(), f"%r{p_idx} = extract_field({p_name}, 0)");
+            emit_op(ref method, op_extract_field(), f"%r{rule.len_param_idx} = extract_field({p_name}, 1)");
+        } else if o_rule >= 0 {
+            let rule = blueprint.out_rules[o_rule as usize];
+            out_slots.push(p_idx);
+            emit_op(ref method, op_stack_slot(), f"%slot_{p_idx} = stack_slot(layout {rule.pointee_layout})");
+            if rule.zero_init_stack {
+                emit_op(ref method, op_store(), f"store(%slot_{p_idx}, 0)");
             }
-
-            if !is_slice_ptr {
-                let p_name = f"arg_{p_idx}";
-                var reg_cl = reg_class_gpr_signed();
-                if ty == "void*" || ty == "ptr" { reg_cl = reg_class_raw_ptr(); }
-                var normal_param = adapted_param_new(p_name, ty, reg_cl, p_idx as u16);
-                method.params.push(normal_param);
-                ir_builder = ir_builder + f"  %r{p_idx} = PassArg({p_name})\n";
-            }
+        } else if !is_consumed_len(blueprint, sig, p_idx) {
+            var reg_cl = reg_class_gpr_signed();
+            if adapter_type_is_pointer(ty) { reg_cl = reg_class_raw_ptr(); }
+            method.params.push(adapted_param_new(p_name, ty, reg_cl, p_idx as u16));
         }
         p_idx = p_idx + 1;
     }
 
-    // 2. Out-param stack slot allocation
-    var out_rule_idx: usize = 0;
-    while out_rule_idx < blueprint.out_rules.len() {
-        let out_rule = blueprint.out_rules[out_rule_idx];
-        let out_slot = out_rule.param_idx;
-        ir_builder = ir_builder + f"  %slot_{out_slot} = StackSlot({out_rule.pointee_layout})\n";
-        if out_rule.zero_init_stack {
-            ir_builder = ir_builder + f"  ZeroMem(%slot_{out_slot})\n";
-        }
-        out_rule_idx = out_rule_idx + 1;
-    }
+    emit_op(ref method, op_call_direct(), f"%ret = call_direct {raw_symbol}");
 
-    // 3. Call foreign function directly
-    ir_builder = ir_builder + f"  %ret = CallDirect({raw_symbol})\n";
-
-    // 4. Status code error lifting
+    // Status code -> result branch.
     if blueprint.err_policy == ErrorLiftPolicy::ZeroIsOk {
-        ir_builder = ir_builder + f"  %cond = CmpEq(%ret, 0)\n";
-        ir_builder = ir_builder + f"  Branch(%cond, .ok_path, .err_path)\n";
+        emit_op(ref method, op_cmp(), "%ok = cmp eq %ret, 0");
+        emit_op(ref method, op_cond_br(), "cond_br %ok, ok_path, err_path");
         method.has_error_lift = true;
-        method.return_type = if raw_ret_type == "int" || raw_ret_type == "i32" { "void ! i32" } else { f"{raw_ret_type} ! i32" };
+        method.return_type = f"void ! {sig.ret_type}";
+    } else if blueprint.err_policy == ErrorLiftPolicy::NonNegativeIsOk {
+        emit_op(ref method, op_cmp(), "%ok = cmp ge %ret, 0");
+        emit_op(ref method, op_cond_br(), "cond_br %ok, ok_path, err_path");
+        method.has_error_lift = true;
+        method.return_type = f"usize ! {sig.ret_type}";
     } else if blueprint.err_policy == ErrorLiftPolicy::NonNullIsOk {
-        ir_builder = ir_builder + f"  %cond = CmpNe(%ret, 0)\n";
-        ir_builder = ir_builder + f"  Branch(%cond, .ok_path, .err_path)\n";
+        emit_op(ref method, op_cmp(), "%ok = cmp ne %ret, 0");
+        emit_op(ref method, op_cond_br(), "cond_br %ok, ok_path, err_path");
         method.has_error_lift = true;
-        method.return_type = f"{blueprint.target_type}? ";
+        method.return_type = f"{sig.ret_type}?";
     } else {
-        method.return_type = raw_ret_type;
+        method.return_type = sig.ret_type;
     }
 
-    method.ir_thunk = ir_builder;
+    // Out-parameters are loaded on the ok path.
+    var o_idx: usize = 0;
+    while o_idx < out_slots.len() {
+        let slot = out_slots[o_idx];
+        emit_op(ref method, op_load(), f"%out_{slot} = load %slot_{slot}");
+        o_idx = o_idx + 1;
+    }
+    emit_op(ref method, op_return(), "return");
     return method;
 }
 
 // ------------------------------------------------------------------------------
-// 4. Blueprint Verification & Diagnostics Catalog
+// 6. Blueprint Verification & Diagnostics Catalog
 // ------------------------------------------------------------------------------
+
+fn check_slice_rules(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, report: var ref<AdapterCompilationReport>) {
+    let n = sig.param_types.len();
+    var r: usize = 0;
+    while r < blueprint.slice_rules.len() {
+        let rule = blueprint.slice_rules[r];
+        let p = rule.ptr_param_idx as usize;
+        let l = rule.len_param_idx as usize;
+        if p == l {
+            report_error(report, "ADP004", f"slice_pair uses slot {p} as both pointer and length");
+        } else if p < n && l < n && adapter_type_is_pointer(sig.param_types[p])
+            && !adapter_type_is_length(sig.param_types[l]) {
+            report_error(report, "ADP004",
+                f"{sig.symbol}: slice_pair length slot {l} has type `{sig.param_types[l]}`, not an integer");
+        }
+        r = r + 1;
+    }
+}
+
+fn check_callbacks(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, report: var ref<AdapterCompilationReport>) {
+    let n = sig.param_types.len();
+    var r: usize = 0;
+    while r < blueprint.callbacks.len() {
+        let rule = blueprint.callbacks[r];
+        let f = rule.fn_ptr_param_idx as usize;
+        let u = rule.userdata_void_ptr_idx as usize;
+        if f < n && sig.param_types[f].contains("(*") {
+            if u >= n || u == f || sig.param_types[u].replace(" ", "") != "void*" {
+                report_error(report, "ADP003",
+                    f"{sig.symbol}: callback in slot {f} has no void* userdata slot for a stateful closure");
+            }
+        }
+        r = r + 1;
+    }
+}
 
 pub fn verify_and_compile_blueprint(
     blueprint: ref<AdapterBlueprint>,
-    raw_symbols: List<str>
+    sigs: List<AdapterFnSig>
 ) -> AdapterCompilationReport {
     var report = adapter_compilation_report_new(blueprint.target_type);
 
     // ADP001: Handle Type Not Found
     if blueprint.target_type.len() == 0 {
-        let span = source_span_new(0, 0, 0);
-        let diag = diagnostic_new("ADP001", diag_severity_error(), "Adapter target type cannot be empty", span);
-        report.diagnostics.push(diag);
+        report_error(ref report, "ADP001", "Adapter target type cannot be empty");
         return report;
     }
 
     var i: usize = 0;
-    let n = raw_symbols.len();
+    let n = sigs.len();
     while i < n {
-        let sym = raw_symbols[i];
-        let dummy_params: List<str> = ["ptr", "ptr", "size_t"];
-        let m = compile_adapter_method_thunk(blueprint, sym, dummy_params, "i32");
+        let sig = sigs[i];
+        check_slice_rules(blueprint, sig, ref report);
+        check_callbacks(blueprint, sig, ref report);
+        let m = compile_adapter_method_thunk(blueprint, sig);
         if m.clean_name.len() > 0 {
+            // ADP002: two foreign symbols collapse onto one Pilot name.
+            var j: usize = 0;
+            while j < report.methods.len() {
+                if report.methods[j].clean_name == m.clean_name {
+                    report_error(ref report, "ADP002",
+                        f"`{report.methods[j].raw_symbol}` and `{m.raw_symbol}` both adapt to `{m.clean_name}`");
+                }
+                j = j + 1;
+            }
             if m.is_property_get || m.is_property_set {
                 report.properties_count = report.properties_count + 1;
             }
-            report.total_ir_ops = report.total_ir_ops + 6;
+            report.total_ir_ops = report.total_ir_ops + m.ir_ops.len();
             report.methods.push(m);
         }
         i = i + 1;
     }
 
     return report;
+}
+
+/// Hands the planned thunks to the PilIR module and the target type's
+/// `MethodTable`. Neither an `IrFunction` model nor a `MethodTable` install
+/// point exists yet, so the adapted methods cannot be called.
+pub fn install_adapter_thunks(report: ref<AdapterCompilationReport>) -> usize {
+    return seam("adapter.install_thunks",
+        "PilIR IrFunction emission and MethodTable install arrive in F5");
 }

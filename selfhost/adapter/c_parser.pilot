@@ -6,6 +6,8 @@
 pub lvl(0) pkg Pilot.SelfHost.Adapter.CParser;
 
 use Pilot.Diagnostics.Model;
+use Pilot.Core.File.File;
+use Pilot.SelfHost.Adapter.CPp;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -215,6 +217,7 @@ pub fn c_translation_unit_new(header: str) -> CTranslationUnit {
 // 3. Name-Blind Type Physics & Layout Calculator
 // ------------------------------------------------------------------------------
 
+[StandIn("c.type_layout", "size and alignment of the resolved C type per target", "unknown types and aggregates count as 8 bytes", "F4")]
 pub pure fn c_type_size_target(ty: str, is_win64: bool) -> usize {
     if ty == "signed char" || ty == "unsigned char" || ty == "int8_t" || ty == "uint8_t" || ty == "_Bool" || (ty.len() == 4 && ty.byte_at(0) == 99 && ty.byte_at(1) == 104) || (ty.len() == 4 && ty.byte_at(0) == 98 && ty.byte_at(1) == 111) {
         return 1;
@@ -478,7 +481,7 @@ pub fn c_parse_translation_unit(
                             }
                             let count_str = src.slice(pos, arr_n_end);
                             pos = if arr_n_end < n { arr_n_end + 1 } else { arr_n_end };
-                            var count_val: usize = 1;
+                            var count_val: usize = 0;
                             var ci = 0;
                             while ci < count_str.len() {
                                 if c_is_digit(count_str.byte_at(ci)) {
@@ -751,18 +754,22 @@ pub fn absorb_c_header(
     source: str,
     header_path: str,
     search_dirs: slice<str>,
+    target_os: str,
+    target_arch: str,
     diags: var ref<List<Diagnostic>>
 ) -> CTranslationUnit {
-    var env = Pilot.SelfHost.Adapter.CPp.cpp_env_new();
-    let preprocessed = Pilot.SelfHost.Adapter.CPp.preprocess_c_header(source, header_path, search_dirs, var env);
+    var env = cpp_env_new(target_os, target_arch);
+    let preprocessed = preprocess_c_header(source, header_path, search_dirs, var env);
     return c_parse_translation_unit(preprocessed, header_path, var diags);
 }
 
 pub fn absorb_c_header_file(
     header_path: str,
     search_dirs: slice<str>,
+    target_os: str,
+    target_arch: str,
     diags: var ref<List<Diagnostic>>
 ) -> CTranslationUnit {
-    let src = Pilot.Core.File.File::read_all_text(header_path);
-    return absorb_c_header(src, header_path, search_dirs, var diags);
+    let src = File.read_text(header_path);
+    return absorb_c_header(src, header_path, search_dirs, target_os, target_arch, var diags);
 }

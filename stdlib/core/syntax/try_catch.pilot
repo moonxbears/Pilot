@@ -12,6 +12,9 @@ comptime {
     __engine("bind_receptor", nameof(try),   18, 0);
     __engine("bind_receptor", nameof(catch), 19, 0);
     __engine("bind_receptor", "!",     34, 1);
+    // Postfix `x?` on a record asks `ITryOperator.is_success`; on success the
+    // value is its `op ?`, otherwise `x` itself leaves as the failure.
+    __engine("bind_try_protocol", nameof(is_success), "?");
 }
 
 pub syntax {

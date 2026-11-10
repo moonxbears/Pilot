@@ -1,0 +1,8 @@
+// Echoes its script arguments and its standard input.
+use std.env;
+use std.io;
+
+fn main() {
+    for a in env.args() { print(f"arg {a}"); }
+    print(f"input {io.read_all()}");
+}

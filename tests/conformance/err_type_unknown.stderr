@@ -1,0 +1,2 @@
+error[TYPE002]: no type named `Nowhere`
+err_type_unknown.pilot:3:15

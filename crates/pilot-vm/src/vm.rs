@@ -14,13 +14,26 @@ use std::collections::HashMap;
 pub type VmHook = Box<dyn FnMut(usize, Instruction, &[PilotVal; 256])>;
 pub type EngineIntrinsicHandler = Box<dyn FnMut(&str, &[PilotVal]) -> Result<PilotVal, String>>;
 
+/// Host operations the embedding program provides (`crate::host::HostValue`).
+/// Returns `None` for an operation the host does not provide.
+pub type HostOpHandler =
+    Box<dyn FnMut(&str, &[crate::host::HostValue]) -> Option<Result<crate::host::HostValue, String>>>;
+
 /// A runtime failure: what went wrong and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VmFault {
     pub message: String,
     pub pc: usize,
     pub span: Option<ByteSpan>,
+    /// The calls that led here, innermost first, at most `MAX_TRACE` of them.
+    pub trace: Vec<ByteSpan>,
+    /// How many calls with a source position were active; it can exceed
+    /// `trace.len()`.
+    pub depth: usize,
 }
+
+/// The most calls a fault's trace keeps.
+pub const MAX_TRACE: usize = 32;
 
 impl std::fmt::Display for VmFault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -49,11 +62,15 @@ pub struct PilVirtualMachine {
     pub globals: HashMap<String, PilotVal>,
     pub hook: Option<VmHook>,
     pub engine_handler: Option<EngineIntrinsicHandler>,
+    /// Host operations, tried before the engine handler.
+    pub host_ops: Option<HostOpHandler>,
     pub shared_symbols: Option<std::sync::Arc<HashMap<u32, String>>>,
     pub fuel_limit: Option<u64>,
     pub fuel_used: u64,
     pub fuel_exhausted: bool,
     pub fault: Option<VmFault>,
+    /// The arguments after `--` on the command line (`proc_args()`).
+    pub script_args: Vec<String>,
 }
 
 impl Default for PilVirtualMachine {
@@ -82,6 +99,8 @@ impl PilVirtualMachine {
             globals: HashMap::new(),
             hook: None,
             engine_handler: None,
+            host_ops: None,
+            script_args: Vec::new(),
             shared_symbols: None,
             fuel_limit: None,
             fuel_used: 0,
@@ -122,14 +141,26 @@ impl PilVirtualMachine {
             .filter(|s| s.start > 0 || s.end > 0)
     }
 
-    /// Records a fault for the instruction at `pc`.
+    /// Records a fault for the instruction at `pc`, with the calls that led
+    /// to it.
     fn raise(&mut self, pc: usize, message: String) {
-        let span = self
-            .pc_spans
+        let span = self.span_at(pc);
+        // A frame saves the address after its call instruction.
+        let calls = self
+            .call_stack
+            .iter()
+            .rev()
+            .filter_map(|&(ret, ..)| self.span_at(ret.saturating_sub(1)));
+        let depth = calls.clone().count();
+        let trace = calls.take(MAX_TRACE).collect();
+        self.fault = Some(VmFault { message, pc, span, trace, depth });
+    }
+
+    fn span_at(&self, pc: usize) -> Option<ByteSpan> {
+        self.pc_spans
             .get(pc)
             .copied()
-            .filter(|s| s.start > 0 || s.end > 0);
-        self.fault = Some(VmFault { message, pc, span });
+            .filter(|s| s.start > 0 || s.end > 0)
     }
 
     #[inline]

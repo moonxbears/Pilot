@@ -38,6 +38,7 @@ pub pure fn field_probe_new(name: str, offset: usize, size: usize, pad: usize, l
 // Cache Line (64B) & Layout Calculations
 // ------------------------------------------------------------------------------
 
+[StandIn("inspect.cache_line", "cache line size of the inspected target", "64 bytes on every target", "F3")]
 pub pure fn cache_line_bytes() -> usize => 64;
 
 // Checks whether a field crosses a 64-byte cache line boundary
@@ -69,10 +70,56 @@ pub fn render_field_box(f: FieldProbeEntry) -> str {
     return out;
 }
 
-// Calculates optimal field ordering savings by packing large alignments first
-pub fn calculate_optimal_packing_savings(total_unpacked_padding: usize, packed_padding: usize) -> usize {
-    if total_unpacked_padding > packed_padding {
-        return total_unpacked_padding - packed_padding;
+// Total padding bytes (inner holes plus tail) when fields with the given
+// sizes and alignments are laid out in list order under C ABI rules.
+pub fn layout_padding_bytes(sizes: List<usize>, aligns: List<usize>) -> usize {
+    var offset: usize = 0;
+    var padding: usize = 0;
+    var max_align: usize = 1;
+    var i = 0;
+    while i < sizes.len() {
+        let a = aligns[i];
+        let pad = align_padding(offset, a);
+        padding = padding + pad;
+        offset = offset + pad + sizes[i];
+        if a > max_align { max_align = a; }
+        i = i + 1;
+    }
+    return padding + align_padding(offset, max_align);
+}
+
+// Bytes saved by reordering fields by descending alignment (stable), the
+// packing a C compiler would give the reordered struct.
+pub fn calculate_optimal_packing_savings(sizes: List<usize>, aligns: List<usize>) -> usize {
+    let declared = layout_padding_bytes(sizes, aligns);
+    var sorted_sizes: List<usize> = [];
+    var sorted_aligns: List<usize> = [];
+    var used: List<bool> = [];
+    var k = 0;
+    while k < sizes.len() {
+        used.push(false);
+        k = k + 1;
+    }
+    var placed = 0;
+    while placed < sizes.len() {
+        var best = 0 - 1;
+        var j = 0;
+        while j < sizes.len() {
+            if !used[j] {
+                if best < 0 || aligns[j] > aligns[best] {
+                    best = j;
+                }
+            }
+            j = j + 1;
+        }
+        used[best] = true;
+        sorted_sizes.push(sizes[best]);
+        sorted_aligns.push(aligns[best]);
+        placed = placed + 1;
+    }
+    let packed = layout_padding_bytes(sorted_sizes, sorted_aligns);
+    if declared > packed {
+        return declared - packed;
     }
     return 0;
 }

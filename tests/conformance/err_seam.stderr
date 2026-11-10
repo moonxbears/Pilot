@@ -1,0 +1,4 @@
+runtime error: SEAM001: unconnected seam `demo.load_library`: native calls arrive in F6
+err_seam.pilot:3:38
+err_seam.pilot:6:12
+err_seam.pilot:11:17

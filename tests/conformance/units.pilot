@@ -1,0 +1,15 @@
+// Dimensional literals hold their value in the family's base unit:
+// nanoseconds, hertz or bytes. `stdlib/core/syntax/unit_decl.pilot` defines
+// the units; the seed runs its functions while compiling.
+fn main() {
+    print(250ms);
+    print(1_500us);
+    print(64KB);
+    print(2.4GHz);
+    // The bracketed spelling means the same literal.
+    print(3[ms]);
+    // Values in one family add and divide like integers.
+    print(2s + 250ms);
+    let timeout = 10ms;
+    print(timeout / 1us);
+}

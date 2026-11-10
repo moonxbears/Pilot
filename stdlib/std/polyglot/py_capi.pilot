@@ -12,7 +12,7 @@ pub pure fn nameof(sym: str) -> str => sym;
 // ------------------------------------------------------------------------------
 
 /// Exact CPython PEP 3118 Py_buffer memory layout (0b00 : IValue)
-[Layout(c_abi)]
+[Layout(c_abi), StandIn("py.buffer_layout", "CPython Py_buffer C layout with typed pointers", "pointers are usize and format is a str, so the layout does not match", "F6")]
 pub struct PyBufferRaw : IValue {
     pub buf:        usize;
     pub obj:        usize;
@@ -71,37 +71,36 @@ pub pure fn py_error_new(exc_type: str, message: str, tb: str) -> PyError {
 
 /// Reentrant Python GIL Acquisition Guard (0b11 : IGuard)
 pub struct PyGilGuard : IGuard {
-    pub state:     i32; // PyGILState_STATE (0 = UNLOCKED, 1 = LOCKED)
+    pub state:     i32; // PyGILState_STATE returned by PyGILState_Ensure
     pub is_active: bool;
 
     ~self() {
         if self.is_active {
-            self.state = 0;
-            self.is_active = false;
+            py_gil_release(var self);
         }
     }
 }
 
 /// Multi-threaded Compute Guard releasing the Python GIL (0b11 : IGuard)
 pub struct PyAllowThreadsGuard : IGuard {
-    pub saved_thread: usize; // PyThreadState*
+    pub saved_thread: usize; // PyThreadState* returned by PyEval_SaveThread
     pub is_released:  bool;
 
     ~self() {
         if self.is_released {
-            self.is_released = false;
+            py_restore_threads(var self);
         }
     }
 }
 
-/// Managed Python Object handle (0b10 : IObject) with Perceus reference counting
+/// Managed Python Object handle (0b10 : IObject). The reference count lives in
+/// the `PyObject` itself; dropping the handle gives up this handle's reference.
 pub struct PyObj : IObject {
-    pub ptr:      usize;
-    pub refcount: i32;
+    pub ptr: usize; // PyObject*
 
     ~self() {
-        if self.ptr != 0 && self.refcount > 0 {
-            self.refcount = self.refcount - 1;
+        if self.ptr != 0 {
+            py_obj_dec_ref(var self);
         }
     }
 }
@@ -113,7 +112,7 @@ pub struct PyBufferLease : IGuard {
 
     ~self() {
         if self.is_active {
-            self.is_active = false;
+            py_buffer_release(var self);
         }
     }
 }
@@ -128,60 +127,44 @@ pub struct PyVectorcallResult : IValue {
 // ------------------------------------------------------------------------------
 // 2. In-Process Python Runtime Initialization & GIL Management
 // ------------------------------------------------------------------------------
+// Every call below goes through a libpython3 loaded into this process. The
+// seed has no native-call path yet (F6), so each one stops at a seam.
 
 pub fn py_init_in_process() -> bool {
-    // Dynamic loader for libpython3 via host runtime
-    return true;
+    return seam("py.init", "libpython3 located and loaded in-process (Py_InitializeEx, PEP 384)");
 }
 
 pub fn py_gil_acquire() -> PyGilGuard {
-    return PyGilGuard {
-        state:     1,
-        is_active: true,
-    };
+    return seam("py.gil_acquire", "PyGILState_Ensure through the loaded libpython3");
 }
 
 pub fn py_gil_release(var ref g: PyGilGuard) {
-    if g.is_active {
-        g.state = 0;
-        g.is_active = false;
-    }
+    seam("py.gil_release", "PyGILState_Release through the loaded libpython3");
 }
 
 pub fn py_allow_threads() -> PyAllowThreadsGuard {
-    return PyAllowThreadsGuard {
-        saved_thread: 0x1000,
-        is_released:  true,
-    };
+    return seam("py.allow_threads", "PyEval_SaveThread through the loaded libpython3");
 }
 
 pub fn py_restore_threads(var ref g: PyAllowThreadsGuard) {
-    if g.is_released {
-        g.is_released = false;
-    }
+    seam("py.restore_threads", "PyEval_RestoreThread through the loaded libpython3");
 }
 
 // ------------------------------------------------------------------------------
 // 3. Object Lifetime & Reference Counting
 // ------------------------------------------------------------------------------
 
+/// Wraps a `PyObject*` this handle already owns one reference to.
 pub fn py_obj_new(ptr: usize) -> PyObj {
-    return PyObj {
-        ptr:      ptr,
-        refcount: 1,
-    };
+    return PyObj { ptr: ptr };
 }
 
 pub fn py_obj_inc_ref(obj: ref<PyObj>) {
-    if obj.ptr != 0 {
-        let _rc = obj.refcount;
-    }
+    seam("py.inc_ref", "Py_IncRef through the loaded libpython3");
 }
 
 pub fn py_obj_dec_ref(var ref obj: PyObj) {
-    if obj.refcount > 0 {
-        obj.refcount = obj.refcount - 1;
-    }
+    seam("py.dec_ref", "Py_DecRef through the loaded libpython3");
 }
 
 // ------------------------------------------------------------------------------
@@ -189,31 +172,11 @@ pub fn py_obj_dec_ref(var ref obj: PyObj) {
 // ------------------------------------------------------------------------------
 
 pub fn py_buffer_acquire(obj: ref<PyObj>, flags: i32) -> PyBufferLease {
-    let dummy_ptr: usize = obj.ptr;
-    let is_ro: i32 = if (flags & 1) != 0 { 1 } else { 0 };
-    let raw = PyBufferRaw {
-        buf:        dummy_ptr,
-        obj:        dummy_ptr,
-        len:        1024,
-        itemsize:   8,
-        readonly:   is_ro,
-        ndim:       1,
-        format:     "d", // float64
-        shape:      128,
-        strides:    8,
-        suboffsets: 0,
-        internal:   0,
-    };
-    return PyBufferLease {
-        raw:       raw,
-        is_active: true,
-    };
+    return seam("py.buffer_acquire", "PyObject_GetBuffer filling a PyBufferRaw from the exporter");
 }
 
 pub fn py_buffer_release(var ref lease: PyBufferLease) {
-    if lease.is_active {
-        lease.is_active = false;
-    }
+    seam("py.buffer_release", "PyBuffer_Release through the loaded libpython3");
 }
 
 // ------------------------------------------------------------------------------
@@ -221,13 +184,11 @@ pub fn py_buffer_release(var ref lease: PyBufferLease) {
 // ------------------------------------------------------------------------------
 
 pub fn py_import_module(mod_name: str) -> PyObj {
-    if mod_name.len() == 0 {
-        return py_obj_new(0);
-    }
-    // Returns handle to imported module
-    return py_obj_new(0x2000);
+    return seam("py.import_module", "PyImport_ImportModule through the loaded libpython3");
 }
 
+/// Calls `callable` with positional `args` followed by keyword values named by
+/// `kwnames`. A null callable is refused here, before anything reaches Python.
 pub fn py_vectorcall_fast(
     callable: ref<PyObj>,
     args: slice<usize>,
@@ -241,22 +202,11 @@ pub fn py_vectorcall_fast(
             err:   err,
         };
     }
-
-    // Process args and keyword names
-    var _arg_cnt: usize = args.len();
-    var _kw_cnt: usize = kwnames.len();
-
-    let res_obj = py_obj_new(0x3000);
-    let empty_err = py_error_new("", "", "");
-    return PyVectorcallResult {
-        is_ok: true,
-        val:   res_obj,
-        err:   empty_err,
-    };
+    return seam("py.vectorcall", "PyObject_Vectorcall with a kwnames tuple through the loaded libpython3");
 }
 
 pub fn py_err_fetch() -> PyError {
-    return py_error_new("RuntimeError", "Python error occurred", "");
+    return seam("py.err_fetch", "PyErr_Fetch and the exception's type, message and traceback");
 }
 
 // ------------------------------------------------------------------------------
@@ -264,31 +214,25 @@ pub fn py_err_fetch() -> PyError {
 // ------------------------------------------------------------------------------
 
 pub fn py_str_from_obj(obj: ref<PyObj>) -> str {
-    if obj.ptr == 0 { return "None"; }
-    return "python_str";
+    return seam("py.str_from_obj", "PyUnicode_AsUTF8AndSize through the loaded libpython3");
 }
 
 pub fn py_int_from_obj(obj: ref<PyObj>) -> i64 {
-    if obj.ptr == 0 { return 0; }
-    return 42;
+    return seam("py.int_from_obj", "PyLong_AsLongLong through the loaded libpython3");
 }
 
 pub fn py_float_from_obj(obj: ref<PyObj>) -> f64 {
-    if obj.ptr == 0 { return 0.0; }
-    return 3.14159;
+    return seam("py.float_from_obj", "PyFloat_AsDouble through the loaded libpython3");
 }
 
 pub fn py_obj_from_int(val: i64) -> PyObj {
-    if val == 0 { return py_obj_new(0); }
-    return py_obj_new(0x4000);
+    return seam("py.obj_from_int", "PyLong_FromLongLong through the loaded libpython3");
 }
 
 pub fn py_obj_from_float(val: f64) -> PyObj {
-    if val == 0.0 { return py_obj_new(0); }
-    return py_obj_new(0x5000);
+    return seam("py.obj_from_float", "PyFloat_FromDouble through the loaded libpython3");
 }
 
 pub fn py_obj_from_str(val: str) -> PyObj {
-    if val.len() == 0 { return py_obj_new(0); }
-    return py_obj_new(0x6000);
+    return seam("py.obj_from_str", "PyUnicode_FromStringAndSize through the loaded libpython3");
 }

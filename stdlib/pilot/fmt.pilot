@@ -33,15 +33,8 @@ pub fn str_replace(src: str, target: str, replacement: str) -> str {
     return out;
 }
 
+/// Rewrites `src` into `style`, swapping every compact/readable pairing
+/// (`f!^(x)` <-> `sig f(x)`, `T?` <-> `opt<T>`, ..) while keeping trivia.
 pub fn format_str(src: str, style: u8) -> str {
-    if style == fmt_style_readable() {
-        if src.find("!^(") >= 0 {
-            return str_replace(src, "!^(", " sig (");
-        }
-    } else {
-        if src.find(" sig (") >= 0 {
-            return str_replace(src, " sig (", "!^(");
-        }
-    }
-    return src;
+    return seam("pilot_fmt.format_str", "style rewriting needs the lossless CST and the M4 pairing table");
 }

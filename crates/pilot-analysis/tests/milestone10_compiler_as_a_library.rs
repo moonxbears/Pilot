@@ -9,6 +9,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -122,7 +124,7 @@ fn eval_m10(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -158,27 +160,27 @@ pub fn test_m10_1_streaming_tokenizer_and_cst_lossless_roundtrip() {
 
         let tok_ok = tok_count >= 5 && saw_ident && saw_comment;
 
-        // 2. Lossless CST Tree test
-        let src_code = "fn compute() => 123;";
-        let tree = parse_lossless(src_code);
-        let root_view = cst_tree_root(tree);
-        let cst_lossless_ok = root_view.raw_text == src_code && cst_tree_full_text(tree) == src_code;
-
         // 3. CST Editor with Trivia Preservation
         var editor = cst_editor_new("let count = 10; // counter");
         cst_editor_replace_span(var ref editor, 12, 14, "99");
         let edited = cst_editor_finish(editor);
         let edit_ok = edited == "let count = 99; // counter";
 
-        ("" + (if tok_ok { "TOKENS_OK" } else { "TOKENS_FAIL" }) + "|" + (if cst_lossless_ok { "CST_LOSSLESS_OK" } else { "CST_FAIL" }) + "|" + (if edit_ok { "CST_EDIT_OK" } else { "EDIT_FAIL" }));
+        ("" + (if tok_ok { "TOKENS_OK" } else { "TOKENS_FAIL" }) + "|" + (if edit_ok { "CST_EDIT_OK" } else { "EDIT_FAIL" }));
     "#;
 
     let res = eval_m10(&["stdlib/pilot/lex.pilot", "stdlib/pilot/cst.pilot"], script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts.len(), 3, "Expected 3 parts, got: {}", res);
+    assert_eq!(parts.len(), 2, "Expected 2 parts, got: {}", res);
     assert_eq!(parts[0], "TOKENS_OK");
-    assert_eq!(parts[1], "CST_LOSSLESS_OK");
-    assert_eq!(parts[2], "CST_EDIT_OK");
+    assert_eq!(parts[1], "CST_EDIT_OK");
+
+    let parsed = eval_m10(&["stdlib/pilot/cst.pilot"], r#"parse_lossless("fn compute() => 123;");"#);
+    assert!(
+        parsed.starts_with("FAULT: SEAM001: unconnected seam `pilot_cst.parse_lossless`"),
+        "parse_lossless must stop at its seam, got: {}",
+        parsed
+    );
 
     guard.finish();
 }
@@ -248,20 +250,16 @@ pub fn test_m10_3_type_reflection_lattice_classes_and_ir_pipeline() {
         let t_obj = type_info_new("Buffer", 24, 8, obj_cls, 3);
         let lattice_ok = t_val.lattice_class == 0 && t_obj.lattice_class == 2 && ref_cls == 1 && grd_cls == 3;
 
-        // 2. IR Module & Pass Pipeline
-        var ir_mod = ir_module_new("kernel");
+        // 2. IR Pass Pipeline registration
         var pipe = ir_pass_pipeline_new();
         ir_pass_pipeline_add_pass(var ref pipe, "dce");
         ir_pass_pipeline_add_pass(var ref pipe, "const_fold");
         ir_pass_pipeline_add_pass(var ref pipe, "perceus");
-        let passes_run = ir_pass_pipeline_run(pipe, var ref ir_mod);
-        let ir_ok = passes_run == 3 && ir_pass_pipeline_count(pipe) == 3;
+        let ir_ok = ir_pass_pipeline_count(pipe) == 3;
 
-        // 3. Formatter Dual Syntax Pairing
-        let compact_sig = "let task = fn!^(arg);";
-        let readable_sig = format_str(compact_sig, fmt_style_readable());
-        let back_compact = format_str(readable_sig, fmt_style_compact());
-        let fmt_ok = readable_sig.find("sig (arg);") >= 0 && back_compact.find("!^(arg);") >= 0;
+        // 3. Formatter substring helper
+        let replaced = str_replace("a!^(x) + b!^(y)", "!^(", "!(");
+        let fmt_ok = replaced == "a!(x) + b!(y)";
 
         ("" + (if lattice_ok { "LATTICE_OK" } else { "LATTICE_FAIL" }) + "|" + (if ir_ok { "IR_OK" } else { "IR_FAIL" }) + "|" + (if fmt_ok { "FMT_OK" } else { "FMT_FAIL" }));
     "#;
@@ -272,6 +270,22 @@ pub fn test_m10_3_type_reflection_lattice_classes_and_ir_pipeline() {
     assert_eq!(parts[0], "LATTICE_OK");
     assert_eq!(parts[1], "IR_OK");
     assert_eq!(parts[2], "FMT_OK");
+
+    let ran = eval_m10(
+        &["stdlib/pilot/ir.pilot"],
+        r#"var m = ir_module_new("kernel"); var p = ir_pass_pipeline_new(); ir_pass_pipeline_add_pass(var ref p, "dce"); ir_pass_pipeline_run(p, var ref m);"#,
+    );
+    assert!(
+        ran.starts_with("FAULT: SEAM001: unconnected seam `pilot_ir.pipeline_run`"),
+        "ir_pass_pipeline_run must stop at its seam, got: {}",
+        ran
+    );
+    let formatted = eval_m10(&["stdlib/pilot/fmt.pilot"], r#"format_str("let t = f!^(a);", fmt_style_readable());"#);
+    assert!(
+        formatted.starts_with("FAULT: SEAM001: unconnected seam `pilot_fmt.format_str`"),
+        "format_str must stop at its seam, got: {}",
+        formatted
+    );
 
     guard.finish();
 }
@@ -293,7 +307,10 @@ pub fn test_m10_4_in_memory_compiler_session_and_vm_sandbox_capabilities() {
         compiler_session_set_file(var ref sess, "util.pilot", "pub fn helper() => 1;");
         let f_count = compiler_session_total_files(sess);
         let main_content = compiler_session_get_file(sess, "main.pilot");
-        let sess_ok = sess.is_virtual && f_count == 2 && main_content == "pub fn main() => 42;" && compiler_session_check_all(sess) == 0;
+        compiler_session_set_file(var ref sess, "main.pilot", "pub fn main() => 7;");
+        let replaced = compiler_session_get_file(sess, "main.pilot");
+        let sess_ok = sess.is_virtual && f_count == 2 && main_content == "pub fn main() => 42;" &&
+            replaced == "pub fn main() => 7;" && compiler_session_total_files(sess) == 2 && sess.revision_number == 4;
 
         // 2. VM Sandbox & Capability Denial (VM004)
         let cfg = vm_config_default();
@@ -325,6 +342,29 @@ pub fn test_m10_4_in_memory_compiler_session_and_vm_sandbox_capabilities() {
     assert_eq!(parts[1], "VM_CAP_DENIED_OK");
     assert_eq!(parts[2], "VM_FUEL_TRAP_OK");
     assert_eq!(parts[3], "DIAG_OK");
+
+    let session_seams = [
+        (r#"var s = compiler_session_new_in_memory(); compiler_session_set_file(var ref s, "a.pilot", "fn a() => 1;"); compiler_session_check_all(s);"#, "pilot_db.check_all"),
+        (r#"compiler_session_open_workspace(".");"#, "pilot_db.open_workspace"),
+    ];
+    for (call, id) in session_seams {
+        let out = eval_m10(&["stdlib/pilot/db.pilot"], call);
+        assert!(
+            out.starts_with(&format!("FAULT: SEAM001: unconnected seam `{}`", id)),
+            "must stop at seam {}, got: {}",
+            id,
+            out
+        );
+    }
+    let sandboxed = eval_m10(
+        &["stdlib/pilot/vm.pilot"],
+        r#"var sb = vm_sandbox_new(vm_config_default()); vm_sandbox_run(var ref sb, "print(1);");"#,
+    );
+    assert!(
+        sandboxed.starts_with("FAULT: SEAM001: unconnected seam `pilot_vm.sandbox_run`"),
+        "vm_sandbox_run must stop at its seam, got: {}",
+        sandboxed
+    );
 
     guard.finish();
 }

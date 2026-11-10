@@ -1,0 +1,5 @@
+// A value that does not fit a destructuring `let` stops the program.
+fn main() {
+    let [a, b] = [1, 2, 3];
+    println(f"{a} {b}");
+}

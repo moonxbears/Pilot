@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -67,7 +69,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             max_lines: 1500,
             name_blind: false,
             required_pub_fns: &[
-                "rust_landing_pad_catch",
+                "rust_call_bridge",
                 "rust_vec_from_raw_parts",
                 "rust_string_from_raw_parts",
             ],
@@ -106,7 +108,7 @@ fn eval_m16(deps: &[&str], script: &str) -> String {
     }));
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     vm.load_binary(bin);
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -314,6 +316,25 @@ fn test_m16_3_rust_vec_string_cross_allocator_raii_and_dyn_trait() {
     let res = eval_m16(deps, script);
     assert_eq!(res, "42", "RustVec, RustString and DynTraitFatPtr must maintain exact cross-allocator safety");
 
+    // Freeing, viewing and calling need PilVM native calls and memory views.
+    let cases = [
+        ("var v = rust_vec_from_raw_parts(4096, 64, 32, 8192); v.~self();", "rust.call_dealloc"),
+        ("var v = rust_vec_from_raw_parts(4096, 64, 32, 8192); let s = v.as_slice();", "rust.vec_view"),
+        ("var t = rust_string_from_raw_parts(8192, 128, 48, 16384); let s = t.as_str();", "rust.string_view"),
+        ("let r = rust_call_bridge(4096, [3, 4]);", "rust.call_bridge"),
+    ];
+    for (body, seam_id) in cases {
+        let script = format!("pub fn main() -> i64 {{ {body} return 42; }}");
+        let res = eval_m16(deps, &script);
+        assert!(
+            res.starts_with(&format!("FAULT: SEAM001: unconnected seam `{seam_id}`")),
+            "`{body}` must stop at seam {seam_id}, got {res}"
+        );
+    }
+    // A disarmed (taken) value drops without calling the deallocator.
+    let taken = "pub fn main() -> i64 { var v = rust_vec_from_raw_parts(4096, 64, 32, 8192); let p = v.take_raw(); v.~self(); return p; }";
+    assert_eq!(eval_m16(deps, taken), "4096");
+
     guard.finish();
 }
 
@@ -329,17 +350,6 @@ fn test_m16_4_panic_boundary_catch_unwind_and_diagnostics() {
 
     let script = r##"
         pub fn main() -> i64 {
-            // 1. Landing-pad catch: success case
-            let ok_res = rust_landing_pad_catch(1, 100, "");
-            if !ok_res.is_ok { return 1; }
-            if ok_res.ok_val != 100 { return 2; }
-
-            // 2. Landing-pad catch: panic unwound case
-            let panic_res = rust_landing_pad_catch(0, 0, "index out of bounds: 99");
-            if panic_res.is_ok { return 3; }
-            if panic_res.err_val.message != "index out of bounds: 99" { return 4; }
-            if panic_res.err_val.panic_code != 101 { return 5; }
-
             // 3. Diagnostic codes
             if rust_diag_code(RustDiagnosticKind::CrossAllocatorFree) != "RST001" { return 6; }
             if rust_diag_code(RustDiagnosticKind::CargoResolveError) != "RST002" { return 7; }
@@ -362,13 +372,6 @@ fn test_m16_4_panic_boundary_catch_unwind_and_diagnostics() {
             if diags.len() == 0 { return 11; }
             if diags[0].code != "RST003" { return 12; }
 
-            // 5. C-ABI bridge crate generator
-            var mod_decl = rust_module_decl_new("sample_crate");
-            let bridge_code = rust_generate_bridge_crate(ref mod_decl, "sample_crate");
-            if !bridge_code.contains("catch_unwind") { return 13; }
-            if !bridge_code.contains("free_vec") { return 14; }
-            if !bridge_code.contains("free_string") { return 15; }
-
             // 6. Content cache key
             let key1 = rust_bridge_cache_key("sample_crate", "pub fn a() {}");
             let key2 = rust_bridge_cache_key("sample_crate", "pub fn a() {}");
@@ -387,7 +390,116 @@ fn test_m16_4_panic_boundary_catch_unwind_and_diagnostics() {
         "stdlib/std/polyglot/rust.pilot",
     ];
     let res = eval_m16(deps, script);
-    assert_eq!(res, "42", "Panic boundary, RST003 lifetime tying and bridge generator must pass");
+    assert_eq!(res, "42", "RST diagnostics, RST003 lifetime tying and cache keys must pass");
+
+    bridge_crate_compiles_and_catches_panics(deps);
+
+    // Resolving a crate through cargo, and bridging a Result return, stop at seams.
+    let cases = [
+        ("var d: List<Diagnostic> = []; let m = absorb_rust_crate(\"serde\", [], var d);", "rust.cargo_resolve"),
+        (
+            "var d: List<Diagnostic> = []; let m = absorb_rust_source(\"pub fn parse(s: &str) -> Result<u32, String> { Ok(1) }\", var d); let b = rust_generate_bridge_crate(ref m, \"c\");",
+            "rust.bridge_marshal",
+        ),
+    ];
+    for (body, seam_id) in cases {
+        let script = format!("pub fn main() -> i64 {{ {body} return 42; }}");
+        let res = eval_m16(deps, &script);
+        assert!(
+            res.starts_with(&format!("FAULT: SEAM001: unconnected seam `{seam_id}`")),
+            "`{body}` must stop at seam {seam_id}, got {res}"
+        );
+    }
 
     guard.finish();
+}
+
+/// Generates the bridge for a small crate with Pilot, compiles crate +
+/// bridge + a C-ABI caller with rustc, and checks what the program prints:
+/// the answers come from rustc and Rust's std, not from the generator.
+fn bridge_crate_compiles_and_catches_panics(deps: &[&str]) {
+    let lib = "pub fn add(a: u64, b: u64) -> u64 { a + b }\n\
+        pub fn tokens(text: &str) -> Vec<u32> { text.split(' ').map(|w| w.len() as u32).collect() }\n\
+        pub fn sort_in_place(xs: &mut [f64]) { xs.sort_by(|a, b| a.partial_cmp(b).unwrap()); }\n\
+        pub fn greet(name: &str) -> String { let mut s = String::from(\"hi \"); s.push_str(name); s }\n\
+        pub fn first_word(text: &str) -> &str { text.split(' ').next().unwrap() }\n\
+        pub fn boom(i: u64) -> u64 { let v: Vec<u64> = Vec::new(); v[i as usize] }\n";
+    let dir = std::env::temp_dir().join(format!("pilot_m16_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let lib_path = dir.join("lib.rs");
+    fs::write(&lib_path, lib).unwrap();
+    let lib_s = lib_path.to_string_lossy().replace('\\', "/");
+
+    let mut gen_deps = vec!["stdlib/core/file.pilot"];
+    gen_deps.extend_from_slice(deps);
+    let script = format!(
+        r#"
+        pub fn main() -> str {{
+            var diags: List<Diagnostic> = [];
+            let m = absorb_rust_source(File.read_text("{lib_s}"), var diags);
+            if diags.len() != 0 {{ return "diagnostics"; }}
+            return rust_generate_bridge_crate(ref m, "sample_crate");
+        }}
+    "#
+    );
+    let bridge = eval_m16(&gen_deps, &script);
+    assert!(bridge.contains("bridge_sample_crate_add"), "bridge generation failed: {bridge}");
+
+    let caller = r#"
+mod sample_crate {
+    include!("lib.rs");
+}
+
+fn main() {
+    unsafe {
+        let r = bridge_sample_crate_add(3, 4);
+        println!("add {} {}", r.is_ok, r.val);
+        let text = "aa bbb c";
+        let view = PilotSliceView { ptr: text.as_ptr(), len: text.len() };
+        let r = bridge_sample_crate_tokens(view);
+        println!("tokens {:?}", std::slice::from_raw_parts(r.val.ptr, r.val.len));
+        bridge_free_sample_crate_tokens(r.val.ptr, r.val.cap, r.val.len);
+        let mut xs = [3.0f64, 1.0, 2.0];
+        let r = bridge_sample_crate_sort_in_place(PilotSliceMut { ptr: xs.as_mut_ptr(), len: 3 });
+        println!("sort {} {:?}", r.is_ok, xs);
+        let who = "pilot";
+        let r = bridge_sample_crate_greet(PilotSliceView { ptr: who.as_ptr(), len: who.len() });
+        let bytes = std::slice::from_raw_parts(r.val.ptr, r.val.len);
+        println!("greet {}", std::str::from_utf8(bytes).unwrap());
+        pilot_rust_free_string_sample_crate(r.val.ptr, r.val.cap, r.val.len);
+        let r = bridge_sample_crate_first_word(view);
+        println!("first {}", std::str::from_utf8(std::slice::from_raw_parts(r.val.ptr, r.val.len)).unwrap());
+        std::panic::set_hook(Box::new(|_| {}));
+        let r = bridge_sample_crate_boom(99);
+        let msg = std::str::from_utf8(std::slice::from_raw_parts(r.panic_msg, r.panic_len)).unwrap();
+        println!("boom {} {}", r.is_ok, msg);
+    }
+}
+"#;
+    let main_path = dir.join("main.rs");
+    fs::write(&main_path, format!("{bridge}\n{caller}")).unwrap();
+    let exe = dir.join("bridge_check");
+    let rustc = std::process::Command::new("rustc")
+        .args(["--edition", "2021", "-o"])
+        .arg(&exe)
+        .arg(&main_path)
+        .output()
+        .expect("run rustc");
+    assert!(
+        rustc.status.success(),
+        "generated bridge must compile with rustc:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let run = std::process::Command::new(&exe).output().expect("run bridge_check");
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let _ = fs::remove_dir_all(&dir);
+    assert_eq!(
+        stdout,
+        "add true 7\n\
+         tokens [2, 3, 1]\n\
+         sort true [1.0, 2.0, 3.0]\n\
+         greet hi pilot\n\
+         first aa\n\
+         boom false index out of bounds: the len is 0 but the index is 99\n"
+    );
 }

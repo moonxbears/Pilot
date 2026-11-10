@@ -69,6 +69,8 @@ impl BytecodeCompiler {
     /// Emits the test for `pat` against `r_subject`. Each emitted branch that
     /// fires on a mismatch is pushed to `fails`; names the pattern binds are
     /// added to `var_slots`.
+    /// Lowers the test of pattern `pat` against `r_subject`; code and
+    /// diagnostics for the pattern point at the pattern.
     pub(crate) fn compile_pattern(
         &mut self,
         arena: &AstArena,
@@ -77,8 +79,24 @@ impl BytecodeCompiler {
         subject_type: &Option<String>,
         fails: &mut Vec<usize>,
     ) {
+        let parent_span = self.cur_span;
+        if pat.is_some() {
+            self.cur_span = arena.span(pat);
+        }
+        self.compile_pattern_kind(arena, pat, r_subject, subject_type, fails);
+        self.cur_span = parent_span;
+    }
+
+    fn compile_pattern_kind(
+        &mut self,
+        arena: &AstArena,
+        pat: NodeId,
+        r_subject: u8,
+        subject_type: &Option<String>,
+        fails: &mut Vec<usize>,
+    ) {
         if pat.is_none() {
-            self.error("`case` without a pattern".to_string());
+            self.error(crate::codes::PATTERN, "`case` without a pattern".to_string());
             return;
         }
         let pn = *arena.node(pat);
@@ -87,7 +105,10 @@ impl BytecodeCompiler {
             NodeKind::PatWildcard => {}
             NodeKind::PatBind => {
                 if pn.flags != 0 {
-                    self.error("rest patterns are not lowered by the seed yet".to_string());
+                    self.error(
+                        crate::codes::PATTERN,
+                        "a rest element `..name` belongs inside a slice pattern `[..]`".to_string(),
+                    );
                     return;
                 }
                 let slot = self.alloc_local_reg();
@@ -106,11 +127,21 @@ impl BytecodeCompiler {
                     return;
                 }
                 if pn.flags != 0 {
-                    self.error(format!("`{name}` is not an enum variant that carries values"));
+                    if self.resolve_variant(&name, subject_type).is_none() {
+                        self.error(
+                            crate::codes::NO_MEMBER,
+                            format!("no enum variant named `{name}`"),
+                        );
+                    } else {
+                        self.error(
+                            crate::codes::PATTERN,
+                            format!("`{name}` is not an enum variant that carries values"),
+                        );
+                    }
                     return;
                 }
                 let Some(v) = self.resolve_variant(&name, subject_type) else {
-                    self.error(format!("no enum variant named `{name}`"));
+                    self.error(crate::codes::NO_MEMBER, format!("no enum variant named `{name}`"));
                     return;
                 };
                 let r_v = self.emit_const(v);
@@ -144,8 +175,13 @@ impl BytecodeCompiler {
                     self.compile_pattern(arena, NodeId(e), r_e, &None, fails);
                 }
             }
+            NodeKind::PatRecord => self.compile_record_pattern(arena, pat, r_subject, fails),
+            NodeKind::PatSlice => self.compile_slice_pattern(arena, pat, r_subject, fails),
             other => {
-                self.error(format!("`{}` patterns are not lowered by the seed yet", other.name()));
+                self.error(
+                    crate::codes::SEED,
+                    format!("`{}` patterns are not lowered by the seed yet", other.name()),
+                );
             }
         }
         self.release_to(mark);
@@ -156,7 +192,7 @@ impl BytecodeCompiler {
         if id.is_some() && arena.node(id).node_kind() == NodeKind::PatLiteral {
             return self.compile_with_hint(arena, NodeId(arena.node(id).lhs), hint.clone());
         }
-        self.error("range pattern bounds must be literals".to_string())
+        self.error(crate::codes::PATTERN, "range pattern bounds must be literals".to_string())
     }
 
     /// Emits `r_tmp = r_a <op> r_b` and a branch to the next arm when false.
@@ -185,6 +221,34 @@ impl BytecodeCompiler {
         v
     }
 
+    /// `some x = v` (binding `x`) or `some v` as a condition: whether the
+    /// value is present. The binding lasts to the end of the enclosing `if`.
+    pub(crate) fn compile_some_test(&mut self, arena: &AstArena, operand: NodeId) -> u8 {
+        let on = *arena.node(operand);
+        let r_v = if on.node_kind() == NodeKind::AssignStmt {
+            let target = arena.node(NodeId(on.lhs));
+            if target.node_kind() != NodeKind::IdentExpr {
+                return self.error(
+                    crate::codes::PATTERN,
+                    "`some` must bind a plain name".to_string(),
+                );
+            }
+            let name = Self::name(arena, target.lhs).to_string();
+            let r = self.compile_node(arena, NodeId(on.rhs));
+            let slot = self.alloc_local_reg();
+            self.emit(Opcode::Move, slot, r, 0);
+            self.var_slots.insert(name.clone(), slot);
+            self.var_types.remove(&name);
+            slot
+        } else {
+            self.compile_node(arena, operand)
+        };
+        let dst = self.alloc_reg();
+        let r_null = self.emit_intrinsic("is_null", &[r_v]);
+        self.emit(Opcode::Not, dst, r_null, 0);
+        dst
+    }
+
     /// `guard cond else { .. }`, `guard some x else { .. }` and
     /// `guard some x = value else { .. }`. The else block runs when the
     /// condition is false or the value is `none`; a binding stays in scope.
@@ -197,7 +261,10 @@ impl BytecodeCompiler {
             let cn = *arena.node(cond);
             let target = arena.node(NodeId(cn.lhs));
             if target.node_kind() != NodeKind::IdentExpr {
-                return self.error("`guard some` must bind a plain name".to_string());
+                return self.error(
+                    crate::codes::PATTERN,
+                    "`guard some` must bind a plain name".to_string(),
+                );
             }
             let r_v = self.compile_node(arena, NodeId(cn.rhs));
             let slot = self.alloc_local_reg();

@@ -1,0 +1,2 @@
+warning[UNUSED001]: Local binding 'unused' is never used
+warn_unused_local.pilot:3:5

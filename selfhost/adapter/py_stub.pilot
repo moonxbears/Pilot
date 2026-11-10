@@ -46,6 +46,7 @@ pub enum PyDiagnosticKind : u8 {
     ::BufferFormatMismatch = 2,
     ::ReadOnlyMutBorrow   = 3,
     ::SubByteStrided      = 4,
+    ::StubParseError      = 5,
 }
 
 pub pure fn py_diag_code(kind: PyDiagnosticKind) -> str {
@@ -53,6 +54,7 @@ pub pure fn py_diag_code(kind: PyDiagnosticKind) -> str {
     if kind == PyDiagnosticKind::BufferFormatMismatch { return "PY002"; }
     if kind == PyDiagnosticKind::ReadOnlyMutBorrow { return "PY003"; }
     if kind == PyDiagnosticKind::SubByteStrided { return "PY004"; }
+    if kind == PyDiagnosticKind::StubParseError { return "PY005"; }
     return "PY000";
 }
 
@@ -243,18 +245,6 @@ fn py_parse_param(raw: str) -> PyParamDecl {
 
 pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleStub {
     var stub = py_module_stub_new("python_module");
-    if source.len() == 0 {
-        var d = Diagnostic {
-            code:     py_diag_code(PyDiagnosticKind::InvalidSyntax),
-            severity: 1,
-            message:  "Empty Python stub provided to parser",
-            labels:   [],
-            notes:    [],
-            fixes:    [],
-        };
-        diags.push(d);
-        return stub;
-    }
     let n = source.len();
     var pos: usize = 0;
 
@@ -325,9 +315,14 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
             let paren_close = head.find(")");
             if paren_open >= 0 && paren_close > paren_open {
                 c_name = py_trim(head.slice(0, paren_open as usize));
-                let b_str = py_trim(head.slice((paren_open + 1) as usize, paren_close as usize));
-                if b_str.len() > 0 {
-                    bases.push(b_str);
+                var b_rem = py_trim(head.slice((paren_open + 1) as usize, paren_close as usize));
+                while b_rem.len() > 0 {
+                    let comma = b_rem.find(",");
+                    let b_str = if comma >= 0 { py_trim(b_rem.slice(0, comma as usize)) } else { py_trim(b_rem) };
+                    b_rem = if comma >= 0 { py_trim(b_rem.slice((comma + 1) as usize, b_rem.len())) } else { "" };
+                    if b_str.len() > 0 {
+                        bases.push(b_str);
+                    }
                 }
             }
 
@@ -348,8 +343,10 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
             let def_kw_len = 4;
             let paren_open = rem.find("(");
             let paren_close = rem.find(")");
+            let def_nl = rem.find("\n");
+            let on_line = def_nl < 0 || paren_close < def_nl;
 
-            if paren_open > 0 && paren_close > paren_open {
+            if paren_open > 0 && paren_close > paren_open && on_line {
                 let f_name = py_trim(rem.slice(def_kw_len, paren_open as usize));
                 let params_raw = py_trim(rem.slice((paren_open + 1) as usize, paren_close as usize));
 
@@ -403,6 +400,20 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
                 pos = if nl >= 0 { pos + (nl as usize) + 1 } else { n };
                 continue;
             }
+
+            // A `def` without a parameter list is not a valid declaration.
+            let bad_nl = rem.find("\n");
+            let bad_line = if bad_nl >= 0 { rem.slice(0, bad_nl as usize) } else { rem };
+            diags.push(Diagnostic {
+                code:     py_diag_code(PyDiagnosticKind::StubParseError),
+                severity: 1,
+                message:  "Malformed function declaration in Python stub: " + bad_line,
+                labels:   [],
+                notes:    [],
+                fixes:    [],
+            });
+            pos = if bad_nl >= 0 { pos + (bad_nl as usize) + 1 } else { n };
+            continue;
         }
 
         // Constant or module attribute: NAME: type = val or NAME = val
@@ -443,7 +454,7 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
 
 pub fn py_synthesize_vectorcall_wrapper(module: ref<PyModuleStub>, fn_name: str) -> str {
     var out = "// ==============================================================================\n";
-    out = out + f"// Pilot In-Process Python Vectorcall Wrapper for '{module.module_name}.{fn_name}'\n";
+    out = out + f"// Pilot In-Process Python Vectorcall Wrapper for '{module.name}.{fn_name}'\n";
     out = out + "// Zero-copy stack frame argument packing via PyObject_Vectorcall\n";
     out = out + "// ==============================================================================\n";
     out = out + f"pub fn call_py_{fn_name}(callable: usize, args: slice<usize>, kwnames: slice<str>) -> res<usize, PyError> {{\n";

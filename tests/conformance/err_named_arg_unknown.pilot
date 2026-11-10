@@ -1,0 +1,6 @@
+// A named argument must name one of the callee's parameters.
+fn area(w: i64, h: i64) -> i64 => w * h;
+
+fn main() {
+    print(area(w: 2, depth: 3));
+}

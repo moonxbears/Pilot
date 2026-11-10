@@ -70,19 +70,15 @@ pub fn verify_borrow_escape_by_lattice(
     return "";
 }
 
-// Milestone 14: Checks ephemeral 0b01 borrow passed to [Retained] async foreign parameter.
+// Milestone 14: the ESCAPE004 rule for an argument passed to a [Retained]
+// foreign parameter. Its facts come from `esc_verify_call_node`: the lattice
+// deduced from the argument's AST and whether the argument is `iso`.
+// FFI001 (null destructor on a non-trivial foreign handle) has no check: it
+// needs absorbed foreign destructor symbols from the type checker (F4).
 pub pure fn verify_retained_escape(lattice_bits: i64, is_pinned_or_iso: bool) -> str {
     let bits = lattice_bits & 3;
     if (bits & 1) != 0 && !is_pinned_or_iso {
         return "ESCAPE004";
-    }
-    return "";
-}
-
-// Milestone 14: Enforces non-trivial foreign handles have non-null destructors (FFI001).
-pub pure fn verify_foreign_handle_dtor(has_null_dtor: bool, is_trivial: bool) -> str {
-    if has_null_dtor && !is_trivial {
-        return "FFI001";
     }
     return "";
 }

@@ -1,0 +1,2 @@
+error[NULL003]: Cannot return 'none' from function with non-nullable return type 'i64'
+err_none_return.pilot:3:5

@@ -1,0 +1,24 @@
+// ==============================================================================
+// FILE: selfhost/check/main.pilot
+// Entry point of the type checker (`pilot check`, `pilot run`).
+// ==============================================================================
+// Reads the linked program, indexes its declarations, resolves names, infers
+// types and applies the rules. Returns the diagnostics as rows for
+// crates/pilot-cli/src/check.rs.
+pub lvl(0) pkg Pilot.SelfHost.Check.Main;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.rules.*;
+use selfhost.check.diag.*;
+
+pub fn check_program() -> List<List<any>> {
+    let s = snap_load();
+    let sink = sink_new(s);
+    let p = prog_new(s);
+    let r = resolve_program(p, sink);
+    check_rules(infer_new(p, r), sink);
+    return sink.rows;
+}

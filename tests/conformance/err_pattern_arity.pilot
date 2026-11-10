@@ -1,0 +1,11 @@
+// A pattern must match as many values as its variant carries.
+enum Shape {
+    Rect(w: i64, h: i64),
+}
+
+fn main() {
+    print("never printed");
+    switch Shape.Rect(1, 2) {
+        case Rect(w): print(w);
+    }
+}

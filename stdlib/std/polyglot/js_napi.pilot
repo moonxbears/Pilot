@@ -40,8 +40,12 @@ pub fn js_error_new(name: str, message: str, stack: str) -> JsError {
     };
 }
 
+// Every call below goes through a Node-API host (libnode, or embedded
+// QuickJS) loaded into this process. The seed has no native-call path yet
+// (F6), so each one stops at a seam.
+
 pub fn js_err_fetch() -> JsError {
-    return js_error_new("TypeError", "JavaScript exception occurred", "");
+    return seam("js.err_fetch", "napi_get_and_clear_last_exception and the error's name, message and stack");
 }
 
 // ------------------------------------------------------------------------------
@@ -50,70 +54,50 @@ pub fn js_err_fetch() -> JsError {
 
 [Layout(c_abi)]
 pub struct NapiScopeGuard : IGuard {
-    pub scope_id: usize,
+    pub scope_id: usize, // napi_handle_scope
     pub is_open:  bool,
 
     ~self() {
         if self.is_open {
-            self.is_open = false;
+            napi_close_handle_scope(var self);
         }
     }
 }
 
 pub fn napi_open_handle_scope(env: usize) -> NapiScopeGuard {
-    if env == 0 {
-        return NapiScopeGuard {
-            scope_id: 0,
-            is_open:  false,
-        };
-    }
-    return NapiScopeGuard {
-        scope_id: 0x1000,
-        is_open:  true,
-    };
+    return seam("js.open_handle_scope", "napi_open_handle_scope through a loaded Node-API host");
 }
 
 pub fn napi_close_handle_scope(var ref g: NapiScopeGuard) {
-    if g.is_open {
-        g.is_open = false;
-    }
+    seam("js.close_handle_scope", "napi_close_handle_scope through a loaded Node-API host");
 }
 
 // ------------------------------------------------------------------------------
 // 4. JS Object Reference (0b10: IObject)
 // ------------------------------------------------------------------------------
 
+/// A `napi_ref`. Its reference count lives in the JS engine.
 pub struct JsRef : IObject {
-    pub ref_id:   usize,
-    pub env_ptr:  usize,
-    pub refcount: usize,
+    pub ref_id:  usize, // napi_ref
+    pub env_ptr: usize, // napi_env
 
     ~self() {
-        if self.refcount > 0 {
-            self.refcount = self.refcount - 1;
+        if self.ref_id != 0 {
+            js_ref_dec(var self);
         }
     }
 }
 
 pub fn js_ref_new(env: usize, val: usize) -> JsRef {
-    let r_id = if env != 0 && val != 0 { 0x2000 } else { 0 };
-    return JsRef {
-        ref_id:   r_id,
-        env_ptr:  env,
-        refcount: 1,
-    };
+    return seam("js.ref_new", "napi_create_reference through a loaded Node-API host");
 }
 
 pub fn js_ref_inc(ref r: JsRef) {
-    if r.ref_id != 0 {
-        let _rc = r.refcount;
-    }
+    seam("js.ref_inc", "napi_reference_ref through a loaded Node-API host");
 }
 
 pub fn js_ref_dec(var ref r: JsRef) {
-    if r.refcount > 0 {
-        r.refcount = r.refcount - 1;
-    }
+    seam("js.ref_dec", "napi_reference_unref, routed to the owning isolate's thread");
 }
 
 // ------------------------------------------------------------------------------
@@ -129,33 +113,19 @@ pub struct JsBufferLease : IGuard {
 
     ~self() {
         if self.is_active {
-            self.is_active = false;
+            napi_release_typedarray(var self);
         }
     }
 }
 
-pub fn napi_acquire_typedarray(
-    env: usize,
-    val: usize,
-    elem_type: str,
-    byte_offset: usize,
-    byte_length: usize
-) -> JsBufferLease {
-    let p = if env != 0 && val != 0 { val + byte_offset } else { 0 };
-    let act = p != 0 && byte_length > 0;
-    return JsBufferLease {
-        raw_ptr:      p,
-        byte_length:  byte_length,
-        byte_offset:  byte_offset,
-        is_active:    act,
-        element_type: elem_type,
-    };
+/// Borrows the memory behind a JS TypedArray. Its data pointer, length and
+/// byte offset come from `napi_get_typedarray_info`, never from the caller.
+pub fn napi_acquire_typedarray(env: usize, val: usize) -> JsBufferLease {
+    return seam("js.typedarray_info", "napi_get_typedarray_info through a loaded Node-API host");
 }
 
 pub fn napi_release_typedarray(var ref lease: JsBufferLease) {
-    if lease.is_active {
-        lease.is_active = false;
-    }
+    seam("js.typedarray_release", "releasing the reference that pins the TypedArray's ArrayBuffer");
 }
 
 // ------------------------------------------------------------------------------
@@ -164,35 +134,20 @@ pub fn napi_release_typedarray(var ref lease: JsBufferLease) {
 
 [Layout(c_abi)]
 pub struct JsValue : IValue {
-    pub val_id:   usize,
-    pub type_tag: u8, // 1: number, 2: bigint, 3: string, 4: object, 5: function
+    pub val_id:   usize, // napi_value
+    pub type_tag: u8, // napi_valuetype
 }
 
 pub fn napi_create_bigint_int64(env: usize, val: i64) -> JsValue {
-    if env == 0 {
-        return JsValue { val_id: 0, type_tag: 0 };
-    }
-    // High-fidelity 64-bit integer preservation
-    let dummy_id = if val < 0 { 0x8000 } else { 0x4000 };
-    return JsValue {
-        val_id:   dummy_id,
-        type_tag: 2, // BigInt
-    };
+    return seam("js.bigint_create", "napi_create_bigint_int64 through a loaded Node-API host");
 }
 
 pub fn napi_get_value_bigint_int64(env: usize, val: ref<JsValue>) -> i64 {
-    if env == 0 || val.val_id == 0 {
-        return 0;
-    }
-    if val.type_tag != 2 {
-        // Precision loss protection JS003
-        return 0;
-    }
-    return 9223372036854775807; // i64.max
+    return seam("js.bigint_read", "napi_get_value_bigint_int64 (with its lossless flag) through a loaded Node-API host");
 }
 
 // ------------------------------------------------------------------------------
-// 7. Function Invocation & Vectorcall Fast-Path
+// 7. Function Invocation
 // ------------------------------------------------------------------------------
 
 [Layout(c_abi)]
@@ -202,6 +157,8 @@ pub struct NapiResult : IValue {
     pub err:    JsError,
 }
 
+/// Calls `func` with `args`. A null environment or function is refused here
+/// with `napi_invalid_arg`, before anything reaches the JS engine.
 pub fn napi_call_function(
     env: usize,
     func: usize,
@@ -210,19 +167,12 @@ pub fn napi_call_function(
     if env == 0 || func == 0 {
         let err = js_error_new("TypeError", "Invalid function handle or environment", "");
         return NapiResult {
-            status: 1, // NAPI_INVALID_ARG
+            status: NAPI_INVALID_ARG,
             val:    0,
             err:    err,
         };
     }
-
-    var _arg_cnt: usize = args.len();
-    let empty_err = js_error_new("", "", "");
-    return NapiResult {
-        status: 0, // NAPI_OK
-        val:    0x3000,
-        err:    empty_err,
-    };
+    return seam("js.call_function", "napi_call_function through a loaded Node-API host");
 }
 
 // ------------------------------------------------------------------------------
@@ -230,29 +180,18 @@ pub fn napi_call_function(
 // ------------------------------------------------------------------------------
 
 pub struct JsPromise : IObject {
-    pub promise_id: usize,
-    pub state:      u8, // 0: pending, 1: resolved, 2: rejected
-
-    ~self() {
-        // Drop unhandled promise
-    }
+    pub promise_id: usize, // napi_value of the promise
+    pub deferred:   usize, // napi_deferred that settles it
 }
 
-pub fn js_promise_new(promise_id: usize) -> JsPromise {
-    return JsPromise {
-        promise_id: promise_id,
-        state:      0,
-    };
+pub fn js_promise_new(env: usize) -> JsPromise {
+    return seam("js.promise_new", "napi_create_promise through a loaded Node-API host");
 }
 
-pub fn js_promise_resolve(var ref prom: JsPromise) {
-    if prom.state == 0 {
-        prom.state = 1;
-    }
+pub fn js_promise_resolve(var ref prom: JsPromise, val: usize) {
+    seam("js.promise_resolve", "napi_resolve_deferred through a loaded Node-API host");
 }
 
-pub fn js_promise_reject(var ref prom: JsPromise) {
-    if prom.state == 0 {
-        prom.state = 2;
-    }
+pub fn js_promise_reject(var ref prom: JsPromise, err: usize) {
+    seam("js.promise_reject", "napi_reject_deferred through a loaded Node-API host");
 }

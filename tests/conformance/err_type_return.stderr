@@ -1,0 +1,2 @@
+error[TYPE001]: `label` returns `i64`, found `str`
+err_type_return.pilot:3:12

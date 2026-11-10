@@ -1,0 +1,20 @@
+// `if some x = value` binds `x` when the value is present.
+fn find(m: map<str, i64>, k: str) -> i64? {
+    if m.has(k) { return m[k]; }
+    return none;
+}
+
+fn main() {
+    let m = ["a": 1];
+    if some v = find(m, "a") {
+        println(f"found {v}");
+    } else {
+        println("missing a");
+    }
+    if some v = find(m, "b") {
+        println(f"found {v}");
+    } else {
+        println("missing b");
+    }
+    if some find(m, "a") { println("a is present"); }
+}

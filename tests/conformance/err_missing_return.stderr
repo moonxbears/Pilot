@@ -1,0 +1,2 @@
+error[FLOW001]: `sign` must return `i64`, but not every path returns a value
+err_missing_return.pilot:2:1

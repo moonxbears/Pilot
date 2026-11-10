@@ -116,7 +116,7 @@ When `steal DonorClass` or `steal from DonorClass [m1, m2]` executes inside `Vis
 
 ## 6. Complete Runnable Examples
 
-See [`examples/showcase/09_contracts_and_method_stealing.pilot`](../../examples/showcase/09_contracts_and_method_stealing.pilot) and [`tests/18_contracts_and_method_stealing.pilot`](../../tests/18_contracts_and_method_stealing.pilot) for the full executable showcases.
+See [`examples/showcase/09_contracts_and_method_stealing.pilot`](../../examples/showcase/09_contracts_and_method_stealing.pilot) for the full executable showcase.
 
 ```pilot
 // 1. Preconditions (requires), Postconditions (ensures), old(), and result

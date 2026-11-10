@@ -23,7 +23,7 @@
 | **Package Management & Virtual Envs** | `crates/pilot-pkg/src/lib.rs`, `crates/pilot-venv/src/lib.rs` | `.pilpkg` package resolution, lockfiles, virtual environments. |
 | **CLI Driver & Interactive REPL** | `crates/pilot-cli/src/main.rs`, `crates/pilot-repl/src/lib.rs` | 14 CLI commands (`run`, `build`, `check`, `fmt`, `test`, `repl`, `lsp`, etc.). |
 | **VS Code Extension** | `vscode-pilot/src/extension.ts`, `vscode-pilot/syntaxes/pilot.tmLanguage.json` | Native LSP client launcher, TextMate grammar, debugger integration. |
-| **Integration & Differential Test Suites** | `tests/*.pilot`, `tests/differential/*.pilot`, `crates/pilot-cli/src/main.rs` | `cargo test --all`, `pilot test`, `pilot test --differential` (PilVM, Native, LLVM, WASM). |
+| **Integration & Differential Test Suites** | `tests/conformance/*.pilot`, `tests/differential/*.pilot`, `crates/pilot-cli/src/main.rs` | `cargo test --all`, `pilot test`, `pilot test --differential` (PilVM, Native, LLVM, WASM). |
 
 ### Cross-Layer Checklist When Adding/Modifying a Language Feature
 1. **Lexer / Syntax**: `crates/pilot-syntax/src/lib.rs` (`SyntaxKind`), `crates/pilot-lexer/src/lib.rs` (`TokenKind`).
@@ -11139,44 +11139,6 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `target/release/pilot.d` (1 L)
 
 ### tests
-- `tests/01_type_safety.pilot` (108 L)
-- `tests/02_database_set_operations.pilot` (84 L)
-- `tests/03_concurrency.pilot` (89 L)
-- `tests/04_realtime.pilot` (68 L)
-- `tests/05_udsa_metaprogramming.pilot` (60 L)
-- `tests/06_syntax_edge_cases.pilot` (66 L)
-- `tests/07_syntax_errors.pilot` (10 L)
-- `tests/08_guard_defer.pilot` (100 L)
-- `tests/09_postgres_database.pilot` (119 L)
-- `tests/10_csharp_robustness.pilot` (128 L)
-- `tests/11_modern_language_features.pilot` (253 L)
-- `tests/12_pattern_matching_collections.pilot` (162 L)
-- `tests/13_builtin_types_matrix.pilot` (86 L)
-- `tests/14_preprocessing_directives.pilot` (67 L)
-- `tests/15_polyglot_interop.pilot` (91 L)
-- `tests/16_root_object_and_lisp_metaprogramming.pilot` (144 L)
-- `tests/17_advanced_runtime_features.pilot` (108 L)
-- `tests/18_contracts_and_method_stealing.pilot` (126 L)
-- `tests/19_exception_protections.pilot` (80 L)
-- `tests/20_compilation_and_scripting.pilot` (38 L)
-- `tests/21_debugging_capabilities.pilot` (34 L)
-- `tests/22_method_groups_and_dispatch.pilot` (151 L)
-- `tests/23_algebraic_typestates_generative.pilot` (119 L)
-- `tests/24_contextual_contracts_pattern_matching.pilot` (102 L)
-- `tests/25_polyglot_extended_interop.pilot` (102 L)
-- `tests/26_type_adapters_and_repetition.pilot` (80 L)
-- `tests/27_virtual_environment.pilot` (30 L)
-- `tests/28_adt_and_exhaustive_matching.pilot` (146 L)
-- `tests/29_null_safety_and_optionals.pilot` (114 L)
-- `tests/30_values_first_errors.pilot` (109 L)
-- `tests/31_expression_ergonomics_and_extensions.pilot` (189 L)
-- `tests/32_dynamic_for_expressions_and_c_abi.pilot` (69 L)
-- `tests/33_advanced_type_inference.pilot` (55 L)
-- `tests/34_keywords_and_call_quoting.pilot` (76 L)
-- `tests/35_semantic_call_projections.pilot` (85 L)
-- `tests/36_comptime_and_static_demotion.pilot` (114 L)
-- `tests/37_generator_metaprogramming.pilot` (63 L)
-- `tests/38_sql_dataset_compile_time_inference.pilot` (87 L)
 - `tests/differential/01_arithmetic_precedence.pilot` (14 L)
 - `tests/differential/02_recursion_fibonacci.pilot` (12 L)
 - `tests/differential/03_loops_and_accumulators.pilot` (15 L)
@@ -11184,7 +11146,6 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `tests/differential/05_functions_multi_params.pilot` (12 L)
 - `tests/differential/06_contract_assertions.pilot` (12 L)
 - `tests/test_convert_dunders.py` (187 L)
-- `tests/zero_copy_rearrangement.pilot` (85 L)
 
 ### tools
 - `tools/pilot-kernel/pilot_kernel.egg-info/dependency_links.txt` (1 L)

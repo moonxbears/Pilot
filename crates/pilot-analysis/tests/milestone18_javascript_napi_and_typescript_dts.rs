@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -95,7 +97,7 @@ fn eval_m18(deps: &[&str], script: &str) -> String {
     }));
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     vm.load_binary(bin);
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -200,34 +202,15 @@ fn test_m18_2_zero_copy_typedarray_and_subarray_buffers() {
 
     let script = r##"
         pub fn main() -> i64 {
-            let env: usize = 0x1000;
-            let val_ptr: usize = 0x50000;
+            // 1. TypedArray kinds absorbed from .d.ts map to borrowed views
+            if ts_classify_type("Uint8Array") != TsTypeKind::TypedArray { return 1; }
+            if ts_classify_type("Int32Array") != TsTypeKind::TypedArray { return 2; }
+            if ts_classify_type("Float64Array") != TsTypeKind::TypedArray { return 3; }
+            if ts_diag_code(TsDiagnosticKind::DetachedBufferError) != "JS004" { return 4; }
 
-            // 1. Full buffer acquisition
-            var lease = napi_acquire_typedarray(env, val_ptr, "Float64Array", 0, 1024);
-            if !lease.is_active { return 1; }
-            if lease.raw_ptr != 0x50000 { return 2; }
-            if lease.byte_length != 1024 { return 3; }
-            if lease.byte_offset != 0 { return 4; }
-            if lease.element_type != "Float64Array" { return 5; }
-
-            // 2. Subarray acquisition with byte_offset > 0
-            var sub_lease = napi_acquire_typedarray(env, val_ptr, "Float64Array", 128, 512);
-            if !sub_lease.is_active { return 6; }
-            if sub_lease.raw_ptr != (0x50000 + 128) { return 7; }
-            if sub_lease.byte_offset != 128 { return 8; }
-            if sub_lease.byte_length != 512 { return 9; }
-
-            // 3. Buffer release
-            napi_release_typedarray(var lease);
-            if lease.is_active { return 10; }
-
-            // 4. Null safety
-            var null_lease = napi_acquire_typedarray(0, 0, "Uint8Array", 0, 0);
-            if null_lease.is_active { return 11; }
-            if null_lease.raw_ptr != 0 { return 12; }
-
-            return 42;
+            // 2. Borrowing the memory needs napi_get_typedarray_info from a loaded host.
+            var lease = napi_acquire_typedarray(0x1000, 0x50000);
+            return 43;
         }
     "##;
 
@@ -237,7 +220,10 @@ fn test_m18_2_zero_copy_typedarray_and_subarray_buffers() {
         "stdlib/std/polyglot/js_napi.pilot",
     ];
     let res = eval_m18(deps, script);
-    assert_eq!(res, "42", "Zero-copy TypedArray and subarray buffer operations must pass");
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `js.typedarray_info`"),
+        "TypedArray classification must pass, then borrowing must stop at its seam, got {res}"
+    );
 
     guard.finish();
 }
@@ -254,28 +240,15 @@ fn test_m18_3_lossless_bigint_fidelity_and_precision_protection() {
 
     let script = r##"
         pub fn main() -> i64 {
-            let env: usize = 0x1000;
-            let i64_val: i64 = 9223372036854775807; // i64.max
+            // 1. bigint declarations map to 64-bit integers; JS003 guards precision loss
+            if ts_classify_type("bigint") != TsTypeKind::BigInt { return 1; }
+            if ts_classify_type("number") != TsTypeKind::Number { return 2; }
+            if ts_diag_code(TsDiagnosticKind::PrecisionLossError) != "JS003" { return 3; }
 
-            // 1. BigInt creation
-            let big_js = napi_create_bigint_int64(env, i64_val);
-            if big_js.val_id == 0 { return 1; }
-            if big_js.type_tag != 2 { return 2; } // BigInt tag == 2
-
-            // 2. Round-trip recovery
-            let recovered = napi_get_value_bigint_int64(env, ref big_js);
-            if recovered != i64_val { return 3; }
-
-            // 3. Precision protection: regular JS number (tag == 1) rejected for 64-bit int
-            let num_js = JsValue { val_id: 0x4000, type_tag: 1 };
-            let rej = napi_get_value_bigint_int64(env, ref num_js);
-            if rej != 0 { return 4; }
-
-            // 4. Null env check
-            let null_js = napi_create_bigint_int64(0, i64_val);
-            if null_js.val_id != 0 { return 5; }
-
-            return 42;
+            // 2. Creating a BigInt needs napi_create_bigint_int64 from a loaded host.
+            let i64_val: i64 = 9223372036854775807;
+            let big_js = napi_create_bigint_int64(0x1000, i64_val);
+            return 43;
         }
     "##;
 
@@ -285,7 +258,10 @@ fn test_m18_3_lossless_bigint_fidelity_and_precision_protection() {
         "stdlib/std/polyglot/js_napi.pilot",
     ];
     let res = eval_m18(deps, script);
-    assert_eq!(res, "42", "Lossless BigInt fidelity and precision protection must pass");
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `js.bigint_create`"),
+        "bigint classification must pass, then BigInt creation must stop at its seam, got {res}"
+    );
 
     guard.finish();
 }
@@ -304,46 +280,22 @@ fn test_m18_4_handle_scopes_promises_and_napi_synthesizer() {
         pub fn main() -> i64 {
             let env: usize = 0x1000;
 
-            // 1. Handle Scope Guard (0b11: IGuard)
-            var scope = napi_open_handle_scope(env);
-            if !scope.is_open { return 1; }
-            if scope.scope_id != 0x1000 { return 2; }
-            napi_close_handle_scope(var scope);
-            if scope.is_open { return 3; }
-
-            // 2. JsRef (0b10: IObject) Refcounting
-            var r = js_ref_new(env, 0x3000);
-            if r.ref_id != 0x2000 { return 4; }
-            if r.refcount != 1 { return 5; }
-            js_ref_inc(ref r);
-            js_ref_dec(var r);
-            if r.refcount != 0 { return 6; }
-
-            // 3. Function Invocation
+            // 1. A null function is refused with napi_invalid_arg before reaching JS
             var args: List<usize> = [10, 20];
-            let call_res = napi_call_function(env, 0x4000, args.slice(0, 2));
-            if call_res.status != 0 { return 7; }
-            if call_res.val != 0x3000 { return 8; }
-
-            // Null func call
             let err_call = napi_call_function(env, 0, args.slice(0, 0));
-            if err_call.status == 0 { return 9; }
+            if err_call.status != NAPI_INVALID_ARG { return 9; }
             if err_call.err.name != "TypeError" { return 10; }
 
-            // 4. Promise Lifecycle
-            var prom = js_promise_new(101);
-            if prom.promise_id != 101 { return 11; }
-            if prom.state != 0 { return 12; }
-            js_promise_resolve(var prom);
-            if prom.state != 1 { return 13; }
-
-            // 5. N-API Wrapper Synthesizer
+            // 2. N-API Wrapper Synthesizer
             var mod_decl = ts_module_decl_new("my_engine");
             let wrapper = ts_synthesize_napi_wrapper(ref mod_decl, "execute");
+            if !wrapper.contains("my_engine.execute") { return 13; }
             if !wrapper.contains("napi_call_function") { return 14; }
             if !wrapper.contains("napi_open_handle_scope") { return 15; }
 
-            return 42;
+            // 3. Opening a handle scope needs napi_open_handle_scope from a loaded host.
+            var scope = napi_open_handle_scope(env);
+            return 43;
         }
     "##;
 
@@ -353,7 +305,46 @@ fn test_m18_4_handle_scopes_promises_and_napi_synthesizer() {
         "stdlib/std/polyglot/js_napi.pilot",
     ];
     let res = eval_m18(deps, script);
-    assert_eq!(res, "42", "Node-API handle scopes, promises, and wrapper synthesizer must pass");
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `js.open_handle_scope`"),
+        "Argument check and wrapper synthesizer must pass, then handle scopes must stop at their seam, got {res}"
+    );
+
+    // Every other Node-API entry point stops at its own seam.
+    let calls: &[(&str, &str)] = &[
+        ("js_err_fetch()", "js.err_fetch"),
+        ("napi_close_handle_scope(var scope)", "js.close_handle_scope"),
+        ("js_ref_new(0x1000, 0x2000)", "js.ref_new"),
+        ("js_ref_inc(ref r)", "js.ref_inc"),
+        ("js_ref_dec(var r)", "js.ref_dec"),
+        ("napi_release_typedarray(var lease)", "js.typedarray_release"),
+        ("napi_get_value_bigint_int64(0x1000, ref v)", "js.bigint_read"),
+        ("napi_call_function(0x1000, 0x3000, args.slice(0, 1))", "js.call_function"),
+        ("js_promise_new(0x1000)", "js.promise_new"),
+        ("js_promise_resolve(var prom, 0x4000)", "js.promise_resolve"),
+        ("js_promise_reject(var prom, 0x4000)", "js.promise_reject"),
+    ];
+    for (call, id) in calls {
+        let script = format!(
+            r##"
+            pub fn main() -> i64 {{
+                var scope = NapiScopeGuard {{ scope_id: 0x10, is_open: true }};
+                var r = JsRef {{ ref_id: 0x20, env_ptr: 0x1000 }};
+                var lease = JsBufferLease {{ raw_ptr: 0x30, byte_length: 8, byte_offset: 0, is_active: true, element_type: "Uint8Array" }};
+                let v = JsValue {{ val_id: 0x40, type_tag: 9 }};
+                var prom = JsPromise {{ promise_id: 0x50, deferred: 0x60 }};
+                var args: List<usize> = [1];
+                {call};
+                return 43;
+            }}
+        "##
+        );
+        let res = eval_m18(deps, &script);
+        assert!(
+            res.starts_with(&format!("FAULT: SEAM001: unconnected seam `{id}`")),
+            "{call} must stop at seam {id}, got {res}"
+        );
+    }
 
     guard.finish();
 }

@@ -124,7 +124,7 @@ Compiled Pilot code and external C/C++ applications link against native artifact
 
 ## 5. Complete Runnable Examples
 
-See [`examples/showcase/15_virtual_environments_and_packaging.pilot`](../../examples/showcase/15_virtual_environments_and_packaging.pilot) and [`tests/14_preprocessing_directives.pilot`](../../tests/14_preprocessing_directives.pilot) for the full executable showcases.
+See [`examples/showcase/15_virtual_environments_and_packaging.pilot`](../../examples/showcase/15_virtual_environments_and_packaging.pilot) for the full executable showcase.
 
 ```pilot
 #define FEATURE_TELEMETRY

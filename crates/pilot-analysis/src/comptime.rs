@@ -59,7 +59,26 @@ impl ComptimeEngine {
         let mut registry = crate::infer::PhysicsRegistry::new(flat_arena, symbol_strings);
         registry.layouts = self.layout_table.clone();
         let (mut env_m, mut tgt_m, mut ast_m, mut sym_m) = (std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new());
-        for (k, v) in [("architecture", PilotVal::from_str(std::env::consts::ARCH)), ("arch", PilotVal::from_str(std::env::consts::ARCH)), ("os", PilotVal::from_str(std::env::consts::OS)), ("pointer_byte", PilotVal::from_int(std::mem::size_of::<usize>() as i64)), ("pointer_bytes", PilotVal::from_int(std::mem::size_of::<usize>() as i64)), ("endianess", PilotVal::from_str(if cfg!(target_endian = "little") { "little" } else { "big" })), ("endian", PilotVal::from_str(if cfg!(target_endian = "little") { "little" } else { "big" })), ("backend", PilotVal::from_str("vm")), ("simd_width_bits", PilotVal::from_int(128)), ("cache_line", PilotVal::from_int(64)), ("cache_line_bytes", PilotVal::from_int(64)), ("opt_level", PilotVal::from_int(2))] { tgt_m.insert(k.into(), v); }
+        // ENV.target: the host the seed VM runs on, which is the target of a
+        // comptime evaluation. SIMD width, cache line size and optimisation
+        // level are not published: they belong to a `--target` descriptor from
+        // the compile driver (F3), and reflect.pilot reads them as pending.
+        let endian = if cfg!(target_endian = "little") { "little" } else { "big" };
+        let pointer_bytes = std::mem::size_of::<usize>() as i64;
+        let target_fields = [
+            ("architecture", PilotVal::from_str(std::env::consts::ARCH)),
+            ("arch", PilotVal::from_str(std::env::consts::ARCH)),
+            ("os", PilotVal::from_str(std::env::consts::OS)),
+            ("pointer_byte", PilotVal::from_int(pointer_bytes)),
+            ("pointer_bytes", PilotVal::from_int(pointer_bytes)),
+            ("endianess", PilotVal::from_str(endian)),
+            ("endian", PilotVal::from_str(endian)),
+            // Comptime code is executed by this PilVM instance.
+            ("backend", PilotVal::from_str("vm")),
+        ];
+        for (k, v) in target_fields {
+            tgt_m.insert(k.into(), v);
+        }
         ast_m.insert("node_count".into(), PilotVal::from_int(registry.arena.nodes.len() as i64)); ast_m.insert("root_node".into(), PilotVal::from_int(0)); sym_m.insert("count".into(), PilotVal::from_int(registry.symbol_strings.len() as i64));
         for (k, v) in [("is_comptime", 1), ("unit_count", 1), ("symbol_count", registry.symbol_strings.len() as i64)] { env_m.insert(k.into(), PilotVal::from_int(v)); }
         // Nested environment records live in heap slots 1..=3, pushed below in this order.

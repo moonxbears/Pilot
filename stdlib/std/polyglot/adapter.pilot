@@ -30,7 +30,9 @@ pub pure fn errno_new(val: i32) -> Errno {
     return Errno { raw: val };
 }
 
+[StandIn("adapter.errno_values", "per-target errno table", "Linux numbers on every target", "F6")]
 pub pure fn errno_is_eagain(e: Errno) -> bool => e.raw == 11;
+[StandIn("adapter.errno_values", "per-target errno table", "Linux numbers on every target", "F6")]
 pub pure fn errno_is_eintr(e: Errno)  -> bool => e.raw == 4;
 
 [Layout(c_abi)]

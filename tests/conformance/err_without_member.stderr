@@ -1,0 +1,2 @@
+`Rect.debug_dump` is not exported by the module that declares it
+error[VIS001]:

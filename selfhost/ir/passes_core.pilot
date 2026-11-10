@@ -46,10 +46,6 @@ pub fn fold_binary_const(op: u16, c1: i64, c2: i64) -> str {
     if op == op_shr() {
         return "" + (c1 >> c2);
     }
-    if op == op_cmp() {
-        // subop cmp
-        return "CMP";
-    }
     return "NOT_FOLDABLE";
 }
 

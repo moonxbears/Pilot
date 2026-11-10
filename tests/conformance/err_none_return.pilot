@@ -1,0 +1,8 @@
+// A function whose return type is not optional cannot return `none` (NULL003).
+fn pick() -> i64 {
+    return none;
+}
+
+fn main() {
+    print(pick());
+}

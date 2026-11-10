@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -115,6 +117,7 @@ fn eval_db(script: &str) -> String {
     let root = anticheat::workspace_root();
     let deps = [
         "stdlib/core/file.pilot",
+        "selfhost/lexer.pilot",
         "selfhost/db/revision.pilot",
         "selfhost/db/engine.pilot",
         "selfhost/db/queries.pilot",
@@ -138,14 +141,16 @@ fn eval_db(script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
 // Test 1: Early-Cutoff Counter Proof
-// Build 25-module chain M0 <- M1 <- ... <- M24.
-// Mutate statement inside M0 fn body: assert DefTypesAndLattice runs 1 time
-// (M0) and 0 times for M1..M24!
+// Build a 25-module chain M0 <- M1 <- ... <- M24, where each module's
+// ImportScope reads the ItemSignature of the module it imports. Mutate a
+// statement inside M0's fn body: M0's ItemSignature re-executes once, its
+// output is unchanged, so no ImportScope re-executes and all 24 are re-verified
+// as hits. (DefTypesAndLattice, the stage the spec names, is a seam until F4.)
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m5_1_early_cutoff_counter_proof() {
@@ -153,42 +158,46 @@ pub fn test_m5_1_early_cutoff_counter_proof() {
 
     let script = r#"
         let db = pilotdb_new();
-        // 1. Setup 25-module dependency chain
         setup_module_chain(db, 25);
 
-        // 2. Initial warm-up: evaluate target module M24 (walks all 25 upstream modules)
-        let _ = query_def_types_and_lattice(db, 24);
+        var m = 1;
+        while m < 25 {
+            let _ = query_import_scope(db, m + 0);
+            m = m + 1;
+        }
 
-        // 3. Reset telemetry counters
         db_reset_telemetry(db);
 
-        // 4. Mutate only a function body in root module M0 (preserves signature)
+        // Mutate only a function body in root module M0 (preserves signature)
         mutate_fn_body(db, 0, "fresh_local");
 
-        // 5. Query M24 again
-        let _ = query_def_types_and_lattice(db, 24);
+        m = 1;
+        while m < 25 {
+            let _ = query_import_scope(db, m + 0);
+            m = m + 1;
+        }
 
-        let exec_stage7 = db_query_exec_count(db, stage_def_types_and_lattice());
-        let hits_stage7 = db_query_hit_count(db, stage_def_types_and_lattice());
-        exec_stage7 + "|" + hits_stage7;
+        let exec_scope = db_query_exec_count(db, stage_import_scope());
+        let hits_scope = db_query_hit_count(db, stage_import_scope());
+        let exec_sig = db_query_exec_count(db, stage_item_signature());
+        exec_scope + "|" + hits_scope + "|" + exec_sig;
     "#;
 
     let res = eval_db(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts.len(), 2, "Expected exec|hits, got: {}", res);
-    let exec_count: i64 = parts[0].parse().unwrap_or(-1);
-    let hit_count: i64 = parts[1].parse().unwrap_or(-1);
-
-    assert_eq!(exec_count, 1, "Early-cutoff failed! DefTypesAndLattice should only recompute M0 (1 time), got: {}", exec_count);
-    assert!(hit_count >= 24, "Expected >= 24 fast-path hits across M1..M24, got: {}", hit_count);
+    assert_eq!(parts.len(), 3, "Expected exec|hits|sig_exec, got: {}", res);
+    assert_eq!(parts[0], "0", "Early cutoff failed: no ImportScope may re-execute after a body-only edit, got: {}", res);
+    assert_eq!(parts[1], "24", "Expected 24 re-verified ImportScope memos (M1..M24), got: {}", res);
+    assert_eq!(parts[2], "1", "Only M0's ItemSignature may re-execute, got: {}", res);
 
     guard.finish();
 }
 
 // -----------------------------------------------------------------------------
 // Test 2: Signature-Change Propagation Proof
-// Modifying a public function return type invalidates direct callers and
-// re-executes type checking across dependent modules.
+// Changing M0's public return type changes its ItemSignature, so the direct
+// importer M1 re-executes its ImportScope; M2 imports the unchanged M1 and is
+// cut off.
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m5_2_signature_change_propagation_proof() {
@@ -197,51 +206,53 @@ pub fn test_m5_2_signature_change_propagation_proof() {
     let script = r#"
         let db = pilotdb_new();
         setup_module_chain(db, 3);
-
-        // Initial warm-up
-        let _ = query_def_types_and_lattice(db, 2);
+        let before = query_import_scope(db, 1);
+        let _ = query_import_scope(db, 2);
 
         db_reset_telemetry(db);
 
-        // Mutate M0 return type signature (breaks early-cutoff barrier)
         mutate_fn_signature(db, 0, "opt<str>");
 
-        // Query M2 again
-        let _ = query_def_types_and_lattice(db, 2);
+        let after = query_import_scope(db, 1);
+        let _ = query_import_scope(db, 2);
 
-        let exec_stage7 = db_query_exec_count(db, stage_def_types_and_lattice());
+        let exec_scope = db_query_exec_count(db, stage_import_scope());
         let exec_sig = db_query_exec_count(db, stage_item_signature());
-        exec_stage7 + "|" + exec_sig;
+        exec_scope + "|" + exec_sig + "|" + before + "|" + after;
     "#;
 
     let res = eval_db(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts.len(), 2, "Expected exec7|exec_sig, got: {}", res);
-    let exec_stage7: i64 = parts[0].parse().unwrap_or(-1);
-    assert!(exec_stage7 >= 2, "Signature change must propagate! Expected >= 2 recomputations, got: {}", exec_stage7);
+    assert_eq!(parts.len(), 4, "Expected exec_scope|exec_sig|before|after, got: {}", res);
+    assert_eq!(parts[0], "1", "Only M1's ImportScope may re-execute, got: {}", res);
+    assert_eq!(parts[1], "1", "Only M0's ItemSignature may re-execute, got: {}", res);
+    // The scope of M1 is M0's body-free signature, before and after the edit.
+    assert_eq!(parts[2], "pub fn compute_0(x: i64) -> i64 {}\n", "M1 scope before the edit");
+    assert_eq!(parts[3], "pub fn compute_0(x: i64) -> opt<str> {}\n", "M1 scope after the edit");
 
     guard.finish();
 }
 
 // -----------------------------------------------------------------------------
 // Test 3: Identical Cold vs Incremental Oracle
-// Compares query outputs between an incrementally updated database and a
-// fresh cold database built from scratch.
+// Compares ImportScope and LexTokens outputs between an incrementally updated
+// database and a fresh cold database built from the same end-state files.
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m5_3_identical_cold_vs_incremental_oracle() {
     let guard = anticheat::AntiCheatGuard::arm("test_m5_3_identical_cold_vs_incremental_oracle", &ANTICHEAT_SPEC);
 
     let script = r#"
-        // 1. Build incremental database with edits
         let inc_db = pilotdb_new();
         setup_module_chain(inc_db, 5);
-        let _ = query_file_diagnostics(inc_db, 4);
+        let inc_before = query_import_scope(inc_db, 2) + query_import_scope(inc_db, 3);
+        let _ = query_lex_tokens(inc_db, 2);
 
         mutate_fn_body(inc_db, 2, "v_added");
-        let inc_out = query_file_diagnostics(inc_db, 4);
+        mutate_fn_signature(inc_db, 1, "u8");
+        let inc_scope = query_import_scope(inc_db, 2) + query_import_scope(inc_db, 3);
+        let inc_lex = query_lex_tokens(inc_db, 2);
 
-        // 2. Build cold database with exact same end-state files
         let cold_db = pilotdb_new();
         var i = 0;
         while i < 5 {
@@ -252,13 +263,18 @@ pub fn test_m5_3_identical_cold_vs_incremental_oracle() {
             }
             i = i + 1;
         }
-        let cold_out = query_file_diagnostics(cold_db, 4);
+        let cold_scope = query_import_scope(cold_db, 2) + query_import_scope(cold_db, 3);
+        let cold_lex = query_lex_tokens(cold_db, 2);
 
-        if inc_out == cold_out { "BIT_IDENTICAL" } else { "MISMATCH" };
+        (if inc_scope == cold_scope { "SCOPE_IDENTICAL" } else { "SCOPE_MISMATCH" })
+            + "|" + (if inc_lex == cold_lex { "LEX_IDENTICAL" } else { "LEX_MISMATCH" })
+            + "|" + (if inc_before != inc_scope { "EDIT_SEEN" } else { "EDIT_LOST" });
     "#;
 
     let res = eval_db(script);
-    assert_eq!(res, "BIT_IDENTICAL", "Incremental query output did not match cold database oracle!");
+    assert_eq!(res, "SCOPE_IDENTICAL|LEX_IDENTICAL|EDIT_SEEN", "Incremental query output did not match cold database oracle: {}", res);
+
+    check_lex_tokens_and_unconnected_stage_seams();
 
     guard.finish();
 }
@@ -307,4 +323,45 @@ pub fn test_m5_4_multiplatform_uri_normalization_and_persistent_cache_io() {
     assert_eq!(parts[6], "SRC_OK", "Loaded source text empty");
 
     guard.finish();
+}
+
+/// LexTokens is the real scanner; the stages that need engines that do not
+/// exist yet stop at their seams. Run from test 3.
+fn check_lex_tokens_and_unconnected_stage_seams() {
+    // The token texts, in order, spell the source without its whitespace.
+    let src = "pub fn area(w: i64, h: i64) -> i64 { return w * h; }";
+    let script = format!(
+        r#"
+        let db = pilotdb_new();
+        pilotdb_set_file_source(db, 7, "{src}", durability_workspace());
+        query_lex_tokens(db, 7);
+        "#
+    );
+    let lexed = eval_db(&script);
+    assert!(!lexed.starts_with("FAULT"), "LexTokens must run, got: {lexed}");
+    let mut texts = Vec::new();
+    for line in lexed.lines() {
+        let (_, text) = line.split_once(' ').unwrap_or_else(|| panic!("token line `{line}` has no text"));
+        texts.push(text);
+    }
+    let expected: String = src.chars().filter(|c| !c.is_whitespace()).collect();
+    assert_eq!(texts.concat(), expected, "token texts must spell the source: {lexed}");
+
+    for (query, seam_id) in [
+        ("query_lossless_cst", "db.lossless_cst"),
+        ("query_expanded_ast", "db.expanded_ast"),
+        ("query_def_types_and_lattice", "db.def_types"),
+        ("query_file_diagnostics", "db.file_diagnostics"),
+    ] {
+        let script = format!(
+            r#"
+            let db = pilotdb_new();
+            pilotdb_set_file_source(db, 7, "{src}", durability_workspace());
+            {query}(db, 7);
+            "#
+        );
+        let out = eval_db(&script);
+        let want = format!("FAULT: SEAM001: unconnected seam `{seam_id}`");
+        assert!(out.starts_with(&want), "{query} must stop at {seam_id}, got: {out}");
+    }
 }

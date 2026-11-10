@@ -1,0 +1,303 @@
+// ==============================================================================
+// FILE: selfhost/check/snapshot.pilot
+// The linked program exactly as the seed parser built it, read by the checker.
+// ==============================================================================
+// The host operation `chk_snapshot` (crates/pilot-cli/src/check.rs) hands
+// over the parser's arena: one row of integers per node, the shared list of
+// extra children, every symbol string, and the side tables (generic
+// parameters, base types, attributes, files, `for` clauses).
+//
+// The numbers below are the parser's AST layout (`NodeKind` and `BinaryOp`
+// in crates/pilot-ast/src/lib.rs). They name node shapes, not Pilot types.
+pub lvl(0) pkg Pilot.SelfHost.Check.Snapshot;
+
+// --- Node kinds ------------------------------------------------------------
+pub pure fn nk_program() -> i64 => 0;
+pub pure fn nk_fn() -> i64 => 3;
+pub pure fn nk_param() -> i64 => 4;
+pub pure fn nk_adt() -> i64 => 5;
+pub pure fn nk_variant() -> i64 => 6;
+pub pure fn nk_struct() -> i64 => 8;
+pub pure fn nk_interface() -> i64 => 10;
+pub pure fn nk_extend() -> i64 => 11;
+pub pure fn nk_const() -> i64 => 12;
+pub pure fn nk_ctor() -> i64 => 13;
+pub pure fn nk_dtor() -> i64 => 14;
+pub pure fn nk_scope() -> i64 => 15;
+pub pure fn nk_indexer() -> i64 => 16;
+pub pure fn nk_operator() -> i64 => 18;
+pub pure fn nk_let() -> i64 => 100;
+pub pure fn nk_var() -> i64 => 101;
+pub pure fn nk_assign() -> i64 => 102;
+pub pure fn nk_return() -> i64 => 103;
+pub pure fn nk_guard() -> i64 => 104;
+pub pure fn nk_defer() -> i64 => 105;
+pub pure fn nk_while() -> i64 => 106;
+pub pure fn nk_break() -> i64 => 107;
+pub pure fn nk_continue() -> i64 => 108;
+pub pure fn nk_yield() -> i64 => 109;
+pub pure fn nk_expr_stmt() -> i64 => 110;
+pub pure fn nk_try() -> i64 => 111;
+pub pure fn nk_catch() -> i64 => 112;
+pub pure fn nk_block() -> i64 => 200;
+pub pure fn nk_if() -> i64 => 201;
+pub pure fn nk_match() -> i64 => 202;
+pub pure fn nk_arm() -> i64 => 203;
+pub pure fn nk_for() -> i64 => 204;
+pub pure fn nk_binary() -> i64 => 205;
+pub pure fn nk_unary() -> i64 => 206;
+pub pure fn nk_call() -> i64 => 207;
+pub pure fn nk_call_arg() -> i64 => 208;
+pub pure fn nk_member() -> i64 => 209;
+pub pure fn nk_index() -> i64 => 210;
+pub pure fn nk_cascade() -> i64 => 211;
+pub pure fn nk_pipe() -> i64 => 212;
+pub pure fn nk_try_propagate() -> i64 => 213;
+pub pure fn nk_catch_recovery() -> i64 => 214;
+pub pure fn nk_coalesce() -> i64 => 215;
+pub pure fn nk_lambda() -> i64 => 216;
+pub pure fn nk_tuple() -> i64 => 217;
+pub pure fn nk_list() -> i64 => 218;
+pub pure fn nk_map() -> i64 => 219;
+pub pure fn nk_range() -> i64 => 220;
+pub pure fn nk_comptime() -> i64 => 221;
+pub pure fn nk_ident() -> i64 => 300;
+pub pure fn nk_int() -> i64 => 301;
+pub pure fn nk_float() -> i64 => 302;
+pub pure fn nk_bool() -> i64 => 303;
+pub pure fn nk_str() -> i64 => 304;
+pub pure fn nk_none() -> i64 => 305;
+pub pure fn nk_type_named() -> i64 => 400;
+pub pure fn nk_type_tuple() -> i64 => 409;
+pub pure fn nk_pat_wildcard() -> i64 => 500;
+pub pure fn nk_pat_bind() -> i64 => 501;
+pub pure fn nk_pat_literal() -> i64 => 502;
+pub pure fn nk_pat_variant() -> i64 => 503;
+pub pure fn nk_pat_record() -> i64 => 504;
+pub pure fn nk_pat_tuple() -> i64 => 505;
+pub pure fn nk_pat_slice() -> i64 => 506;
+pub pure fn nk_pat_or() -> i64 => 507;
+pub pure fn nk_pat_range() -> i64 => 508;
+
+// --- Binary and unary operators --------------------------------------------
+pub pure fn op_eq() -> i64 => 8;
+pub pure fn op_or() -> i64 => 15;
+pub pure fn op_ge() -> i64 => 13;
+pub pure fn op_and() -> i64 => 14;
+pub pure fn op_coalesce() -> i64 => 22;
+pub pure fn op_is() -> i64 => 25;
+pub pure fn op_as() -> i64 => 32;
+pub pure fn op_as_view() -> i64 => 33;
+pub pure fn unary_some() -> i64 => 9;
+pub pure fn unary_splat() -> i64 => 6;
+
+/// Integers per node row (crates/pilot-cli/src/check.rs `NODE_COLUMNS`).
+pub pure fn snap_columns() -> i64 => 9;
+
+/// The arena of the linked program.
+pub struct Snap {
+    pub nodes: List<i64>;
+    pub extra: List<i64>;
+    pub syms: List<str>;
+    pub type_params: List<List<i64>>;
+    pub bases: List<List<i64>>;
+    pub attrs: List<any>;
+    pub files: List<any>;
+    pub for_clauses: List<List<i64>>;
+    pub count: i64;
+}
+
+/// Reads the snapshot the host serves.
+pub fn snap_load() -> Snap {
+    let raw = __engine("chk_snapshot");
+    let nodes: List<i64> = raw[0];
+    return Snap {
+        nodes: nodes,
+        extra: raw[1],
+        syms: raw[2],
+        type_params: raw[3],
+        bases: raw[4],
+        attrs: raw[5],
+        files: raw[6],
+        for_clauses: raw[7],
+        count: nodes.len() / snap_columns(),
+    };
+}
+
+pub fn kind(s: Snap, n: i64) -> i64 => s.nodes[n * 9];
+pub fn lhs(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 1];
+pub fn rhs(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 2];
+pub fn flags(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 3];
+pub fn span_start(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 4];
+pub fn span_end(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 5];
+pub fn annot(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 6];
+pub fn lit_value(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 7];
+pub fn unit_of(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 8];
+
+/// The text of symbol `sym`, or "" for an absent symbol.
+pub fn sym_text(s: Snap, sym: i64) -> str {
+    if sym < 0 || sym >= s.syms.len() { return ""; }
+    return s.syms[sym];
+}
+
+/// The name a declaration, binding or identifier node carries.
+pub fn node_name(s: Snap, n: i64) -> str => sym_text(s, lhs(s, n));
+
+/// Whether node `n` lies in one of the user's own files.
+pub fn in_user_file(s: Snap, n: i64) -> bool {
+    let u = unit_of(s, n);
+    if u < 0 || u >= s.files.len() { return false; }
+    let row: List<any> = s.files[u];
+    return row[1];
+}
+
+/// The source text node `n` spans.
+pub fn node_text(s: Snap, n: i64) -> str {
+    let u = unit_of(s, n);
+    if u < 0 || u >= s.files.len() { return ""; }
+    let row: List<any> = s.files[u];
+    let base: i64 = row[2];
+    let text: str = row[3];
+    return text.slice(span_start(s, n) - base, span_end(s, n) - base);
+}
+
+/// Whether the name node `n` carries is written in the source where the
+/// node starts. A name a `syntax` rule produced (`(A) => R` becomes
+/// `fn<A, R>`) is not.
+pub fn name_is_written(s: Snap, n: i64) -> bool => node_text(s, n).starts_with(node_name(s, n));
+
+fn extra_slice(s: Snap, start: i64, len: i64) -> List<i64> {
+    var out: List<i64> = [];
+    var i = 0;
+    while i < len {
+        let c = s.extra[start + i];
+        if c >= 0 { out.push(c); }
+        i = i + 1;
+    }
+    return out;
+}
+
+fn push_present(out: List<i64>, n: i64) {
+    if n >= 0 { out.push(n); }
+}
+
+/// The children of node `n`, in source order.
+pub fn children(s: Snap, n: i64) -> List<i64> {
+    let k = kind(s, n);
+    var out: List<i64> = [];
+    if k == nk_program() || k == nk_block() || k == nk_call() || k == nk_tuple()
+        || k == nk_list() || k == nk_map() || k == nk_match() || k == nk_try()
+        || k == nk_ctor() || k == nk_indexer() || k == nk_type_tuple()
+        || k == nk_pat_tuple() || k == nk_pat_slice() {
+        return extra_slice(s, lhs(s, n), rhs(s, n));
+    }
+    if k == nk_fn() || k == nk_operator() || k == nk_variant() || k == nk_pat_variant()
+        || k == nk_type_named() {
+        return extra_slice(s, rhs(s, n), flags(s, n));
+    }
+    if k == nk_adt() {
+        if flags(s, n) > 0 { return extra_slice(s, rhs(s, n), flags(s, n)); }
+        push_present(out, rhs(s, n));
+        return out;
+    }
+    if k == nk_struct() || k == nk_interface() || k == nk_extend() {
+        push_present(out, rhs(s, n));
+        return out;
+    }
+    if k == nk_lambda() {
+        out = extra_slice(s, lhs(s, n), flags(s, n));
+        push_present(out, rhs(s, n));
+        return out;
+    }
+    if k == nk_for() {
+        let clause = flags(s, n) - 1;
+        if clause >= 0 && clause < s.for_clauses.len() {
+            let c: List<i64> = s.for_clauses[clause];
+            push_present(out, c[0]);
+            push_present(out, rhs(s, n));
+            push_present(out, c[1]);
+        } else {
+            push_present(out, rhs(s, n));
+        }
+        return out;
+    }
+    if k == nk_if() {
+        push_present(out, lhs(s, n));
+        if flags(s, n) >= 2 {
+            for c in extra_slice(s, rhs(s, n), flags(s, n)) { out.push(c); }
+        } else {
+            push_present(out, rhs(s, n));
+        }
+        return out;
+    }
+    if k == nk_binary() || k == nk_assign() || k == nk_while() || k == nk_index()
+        || k == nk_cascade() || k == nk_pipe() || k == nk_catch_recovery()
+        || k == nk_coalesce() || k == nk_range() || k == nk_guard() || k == nk_arm()
+        || k == nk_scope() || k == nk_pat_or() || k == nk_pat_range() {
+        push_present(out, lhs(s, n));
+        push_present(out, rhs(s, n));
+        return out;
+    }
+    if k == nk_call_arg() || k == nk_let() || k == nk_var() || k == nk_const()
+        || k == nk_catch() {
+        push_present(out, rhs(s, n));
+        return out;
+    }
+    if k == nk_member() || k == nk_unary() || k == nk_return() || k == nk_yield()
+        || k == nk_defer() || k == nk_break() || k == nk_continue() || k == nk_expr_stmt()
+        || k == nk_try_propagate() || k == nk_dtor() || k == nk_comptime()
+        || k == nk_pat_literal() {
+        push_present(out, lhs(s, n));
+        return out;
+    }
+    if k == nk_param() {
+        push_present(out, rhs(s, n));
+        return out;
+    }
+    return out;
+}
+
+/// The parent of every node (-1 for roots and unreachable nodes).
+pub fn parents_of(s: Snap) -> List<i64> {
+    var out: List<i64> = [];
+    var i = 0;
+    while i < s.count { out.push(-1); i = i + 1; }
+    i = 0;
+    while i < s.count {
+        for c in children(s, i) {
+            if c < s.count && out[c] < 0 { out[c] = i; }
+        }
+        // A type annotation sits in a side table; its parent is the node it
+        // annotates, so generic parameters resolve from it.
+        let a = annot(s, i);
+        if a >= 0 && a < s.count && out[a] < 0 { out[a] = i; }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The body of a function-like node (`fn`, `op`), or -1.
+pub fn fn_body(s: Snap, n: i64) -> i64 {
+    if flags(s, n) == 0 { return -1; }
+    return s.extra[rhs(s, n)];
+}
+
+/// The parameters of a function-like node.
+pub fn fn_params(s: Snap, n: i64) -> List<i64> {
+    var out: List<i64> = [];
+    let len = flags(s, n);
+    var i = 1;
+    while i < len {
+        let c = s.extra[rhs(s, n) + i];
+        if c >= 0 { out.push(c); }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The members of a `struct`, `interface` or `ext` declaration.
+pub fn type_members(s: Snap, n: i64) -> List<i64> {
+    let body = rhs(s, n);
+    if body < 0 || kind(s, body) != nk_block() { return []; }
+    return children(s, body);
+}

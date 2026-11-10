@@ -6,7 +6,6 @@
 
 pub lvl(0) pkg Pilot.SelfHost.Adapter.AbsorbOpenApi;
 
-use Pilot.SelfHost.Adapter.AbsorbSql;
 
 // ------------------------------------------------------------------------------
 // 1. OpenAPI Property & Schema AST
@@ -61,6 +60,8 @@ pub struct OpenApiOperation : IValue {
     pub http_method:     str, // "GET", "POST", "PUT", "DELETE"
     pub operation_id:    str,
     pub path_params:     List<str>,
+    /// The `format` (or, without one, the `type`) of each path parameter.
+    pub path_param_types: List<str>,
     pub request_schema:  str,
     pub response_schema: str,
 }
@@ -111,184 +112,368 @@ pub fn openapi_resolve_ref(ref_str: str) -> str {
     return ref_str;
 }
 
+/// Index of `name` in `doc.schemas`' names, or -1.
+fn oa_schema_index(doc: OpenApiDoc, name: str) -> i64 {
+    return openapi_doc_find_schema(doc, name);
+}
+
+/// The schemas `s` refers to by value: property `$ref`s, `allOf` splices and
+/// `oneOf` variants.
+fn oa_schema_edges(s: OpenApiSchema) -> List<str> {
+    var out: List<str> = [];
+    for p in s.properties {
+        if p.ref_target.len() > 0 { out.push(p.ref_target); }
+    }
+    for a in s.all_of { out.push(a); }
+    for o in s.one_of { out.push(o); }
+    return out;
+}
+
+/// Whether schema `start` can reach itself through `$ref` edges.
+fn oa_reaches_self(doc: OpenApiDoc, start: i64) -> bool {
+    var seen: List<i64> = [];
+    var stack: List<str> = oa_schema_edges(doc.schemas.get(start as usize));
+    while stack.len() > 0 {
+        let name = stack.pop();
+        let idx = oa_schema_index(doc, name);
+        if idx < 0 { continue; }
+        if idx == start { return true; }
+        var visited = false;
+        for v in seen { if v == idx { visited = true; } }
+        if visited { continue; }
+        seen.push(idx);
+        for e in oa_schema_edges(doc.schemas.get(idx as usize)) { stack.push(e); }
+    }
+    return false;
+}
+
+/// Marks every schema that lies on a `$ref` cycle (directly or through other
+/// schemas) as recursive, so its layout gets indirected (SCH004). Returns how
+/// many there are.
 pub fn openapi_detect_recursion(var ref doc: OpenApiDoc) -> i64 {
     var recursive_count: i64 = 0;
-    var i = 0;
-    while i < doc.schemas.len() {
-        var s = doc.schemas.get(i);
-        var j = 0;
-        while j < s.properties.len() {
-            let p = s.properties.get(j);
-            if p.ref_target == s.name {
-                s.is_recursive = true;
-                recursive_count = recursive_count + 1;
-            }
-            j = j + 1;
+    var i: i64 = 0;
+    while i < doc.schemas.len() as i64 {
+        if oa_reaches_self(doc, i) {
+            var s = doc.schemas.get(i as usize);
+            s.is_recursive = true;
+            doc.schemas.set(i as usize, s);
+            recursive_count = recursive_count + 1;
         }
-        doc.schemas.set(i, s);
         i = i + 1;
     }
     return recursive_count;
 }
 
 // ------------------------------------------------------------------------------
-// 4. OpenAPI JSON/YAML Parser
+// 4. JSON Span Reader
+// ------------------------------------------------------------------------------
+// Walks the spec text in place: a value is named by the offset where it
+// starts, and nothing is copied until a string is read.
+
+pure fn oa_is_ws(b: i64) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+fn oa_ws(src: str, p: i64) -> i64 {
+    var i = p;
+    while i < src.len() as i64 && oa_is_ws(src.byte_at(i)) { i = i + 1; }
+    return i;
+}
+
+/// `p` is at an opening '"'; returns the offset just past the closing one.
+fn oa_skip_string(src: str, p: i64) -> i64 {
+    let n = src.len() as i64;
+    var i = p + 1;
+    while i < n {
+        let b = src.byte_at(i);
+        if b == 92 { i = i + 2; continue; } // backslash escape
+        if b == 34 { return i + 1; }
+        i = i + 1;
+    }
+    return n;
+}
+
+/// Offset just past the JSON value that starts at `p`.
+fn oa_skip_value(src: str, p: i64) -> i64 {
+    let n = src.len() as i64;
+    let i = oa_ws(src, p);
+    if i >= n { return n; }
+    let b = src.byte_at(i);
+    if b == 34 { return oa_skip_string(src, i); }
+    if b == 123 || b == 91 { // '{' or '['
+        var depth: i64 = 0;
+        var k = i;
+        while k < n {
+            let c = src.byte_at(k);
+            if c == 34 { k = oa_skip_string(src, k); continue; }
+            if c == 123 || c == 91 { depth = depth + 1; }
+            if c == 125 || c == 93 {
+                depth = depth - 1;
+                if depth == 0 { return k + 1; }
+            }
+            k = k + 1;
+        }
+        return n;
+    }
+    // number, true, false, null
+    var k = i;
+    while k < n {
+        let c = src.byte_at(k);
+        if c == 44 || c == 125 || c == 93 || oa_is_ws(c) { break; }
+        k = k + 1;
+    }
+    return k;
+}
+
+/// The text of the JSON string at `p`, with `\"`, `\\`, `\/`, `\n` and `\t`
+/// unescaped; "" if `p` is not at a string.
+fn oa_string_at(src: str, p: i64) -> str {
+    if p < 0 { return ""; }
+    let i = oa_ws(src, p);
+    if i >= src.len() as i64 || src.byte_at(i) != 34 { return ""; }
+    let end = oa_skip_string(src, i) - 1;
+    var out = "";
+    var at = i + 1;
+    var k = i + 1;
+    while k < end {
+        if src.byte_at(k) == 92 && k + 1 < end {
+            let e = src.byte_at(k + 1);
+            out = out + src.slice(at, k);
+            if e == 110 { out = out + "\n"; }
+            else if e == 116 { out = out + "\t"; }
+            else { out = out + src.slice(k + 1, k + 2); }
+            k = k + 2;
+            at = k;
+            continue;
+        }
+        k = k + 1;
+    }
+    return out + src.slice(at, end);
+}
+
+/// Offsets of the keys of the object at `p` (each at its '"'); empty if `p`
+/// is not at an object.
+fn oa_member_keys(src: str, p: i64) -> List<i64> {
+    var keys: List<i64> = [];
+    if p < 0 { return keys; }
+    let n = src.len() as i64;
+    var i = oa_ws(src, p);
+    if i >= n || src.byte_at(i) != 123 { return keys; }
+    i = oa_ws(src, i + 1);
+    while i < n && src.byte_at(i) == 34 {
+        keys.push(i);
+        i = oa_ws(src, oa_skip_string(src, i));
+        if i < n && src.byte_at(i) == 58 { i = i + 1; } // ':'
+        i = oa_ws(src, oa_skip_value(src, i));
+        if i < n && src.byte_at(i) == 44 { i = oa_ws(src, i + 1); } // ','
+    }
+    return keys;
+}
+
+/// Offset of the value that follows the key at `key_at`.
+fn oa_member_value(src: str, key_at: i64) -> i64 {
+    var i = oa_ws(src, oa_skip_string(src, key_at));
+    if i < src.len() as i64 && src.byte_at(i) == 58 { i = i + 1; }
+    return oa_ws(src, i);
+}
+
+/// Offset of member `key`'s value in the object at `p`, or -1.
+fn oa_get(src: str, p: i64, key: str) -> i64 {
+    if p < 0 { return -1; }
+    for k in oa_member_keys(src, p) {
+        if oa_string_at(src, k) == key { return oa_member_value(src, k); }
+    }
+    return -1;
+}
+
+/// Offsets of the elements of the array at `p`.
+fn oa_elements(src: str, p: i64) -> List<i64> {
+    var out: List<i64> = [];
+    if p < 0 { return out; }
+    let n = src.len() as i64;
+    var i = oa_ws(src, p);
+    if i >= n || src.byte_at(i) != 91 { return out; }
+    i = oa_ws(src, i + 1);
+    while i < n && src.byte_at(i) != 93 {
+        out.push(i);
+        i = oa_ws(src, oa_skip_value(src, i));
+        if i < n && src.byte_at(i) == 44 { i = oa_ws(src, i + 1); }
+    }
+    return out;
+}
+
+fn oa_get_string(src: str, p: i64, key: str) -> str {
+    let v = oa_get(src, p, key);
+    if v < 0 { return ""; }
+    return oa_string_at(src, v);
+}
+
+// ------------------------------------------------------------------------------
+// 5. OpenAPI 3.x Absorber (JSON)
 // ------------------------------------------------------------------------------
 
+/// The schema a schema object names: its `$ref` target, or `List<T>` for an
+/// array whose `items` is a `$ref`; "" for an inline schema.
+fn oa_schema_ref_name(src: str, schema_at: i64) -> str {
+    let r = oa_get_string(src, schema_at, "$ref");
+    if r.len() > 0 { return openapi_resolve_ref(r); }
+    let items = oa_get(src, schema_at, "items");
+    let ir = oa_get_string(src, items, "$ref");
+    if ir.len() > 0 { return "List<" + openapi_resolve_ref(ir) + ">"; }
+    return "";
+}
+
+/// `format` when the schema has one, else its `type`.
+fn oa_type_name(src: str, schema_at: i64) -> str {
+    let f = oa_get_string(src, schema_at, "format");
+    if f.len() > 0 { return f; }
+    return oa_get_string(src, schema_at, "type");
+}
+
+/// Adds the members of `properties` in the schema object at `at` to `schema`.
+fn oa_read_properties(src: str, at: i64, var ref schema: OpenApiSchema) {
+    var required: List<str> = [];
+    for r in oa_elements(src, oa_get(src, at, "required")) { required.push(oa_string_at(src, r)); }
+    let props = oa_get(src, at, "properties");
+    for k in oa_member_keys(src, props) {
+        let pname = oa_string_at(src, k);
+        let pv = oa_member_value(src, k);
+        var is_req = false;
+        for r in required { if r == pname { is_req = true; } }
+        let target = oa_schema_ref_name(src, pv);
+        let direct = oa_get_string(src, pv, "$ref");
+        schema.properties.push(OpenApiProperty {
+            name:        pname,
+            prop_type:   if target.len() > 0 { target } else { oa_type_name(src, pv) },
+            is_required: is_req,
+            // Only a direct `$ref` is stored by value; a list of T is not.
+            ref_target:  if direct.len() > 0 { openapi_resolve_ref(direct) } else { "" },
+        });
+    }
+}
+
+fn oa_read_schema(src: str, name: str, at: i64) -> OpenApiSchema {
+    let stype = oa_get_string(src, at, "type");
+    var schema = openapi_schema_new(name, if stype.len() > 0 { stype } else { "object" });
+    oa_read_properties(src, at, var schema);
+    for part in oa_elements(src, oa_get(src, at, "allOf")) {
+        let r = oa_get_string(src, part, "$ref");
+        if r.len() > 0 {
+            schema.all_of.push(openapi_resolve_ref(r));
+        } else {
+            oa_read_properties(src, part, var schema);
+        }
+    }
+    let variants = oa_elements(src, oa_get(src, at, "oneOf"));
+    if variants.len() > 0 {
+        schema.schema_type = "union";
+        for v in variants {
+            let r = oa_get_string(src, v, "$ref");
+            if r.len() > 0 { schema.one_of.push(openapi_resolve_ref(r)); }
+        }
+    }
+    return schema;
+}
+
+/// The HTTP method an OpenAPI path-item key names, or "" for other keys
+/// (`parameters`, `summary`, ..).
+fn oa_http_method(key: str) -> str {
+    if key == "get" { return "GET"; }
+    if key == "put" { return "PUT"; }
+    if key == "post" { return "POST"; }
+    if key == "delete" { return "DELETE"; }
+    if key == "options" { return "OPTIONS"; }
+    if key == "head" { return "HEAD"; }
+    if key == "patch" { return "PATCH"; }
+    if key == "trace" { return "TRACE"; }
+    return "";
+}
+
+/// The `$ref` name of the first media type's schema under `content`.
+fn oa_content_schema(src: str, holder_at: i64) -> str {
+    let content = oa_get(src, holder_at, "content");
+    for mk in oa_member_keys(src, content) {
+        return oa_schema_ref_name(src, oa_get(src, oa_member_value(src, mk), "schema"));
+    }
+    return "";
+}
+
+fn oa_path_template_params(path_str: str) -> List<str> {
+    var out: List<str> = [];
+    var scan_p = 0;
+    let pn = path_str.len();
+    while scan_p < pn {
+        if path_str.byte_at(scan_p) == 123 { // '{'
+            let cl = path_str.find("}", scan_p + 1);
+            if cl > scan_p {
+                out.push(path_str.slice(scan_p + 1, cl));
+                scan_p = cl;
+            }
+        }
+        scan_p = scan_p + 1;
+    }
+    return out;
+}
+
+/// The type of path parameter `pname` from a `parameters` array, or "".
+fn oa_param_type(src: str, params_at: i64, pname: str) -> str {
+    for e in oa_elements(src, params_at) {
+        if oa_get_string(src, e, "name") == pname && oa_get_string(src, e, "in") == "path" {
+            return oa_type_name(src, oa_get(src, e, "schema"));
+        }
+    }
+    return "";
+}
+
+fn oa_read_operation(src: str, path_str: str, item_at: i64, method: str, op_at: i64) -> OpenApiOperation {
+    let names = oa_path_template_params(path_str);
+    var types: List<str> = [];
+    for pname in names {
+        var t = oa_param_type(src, oa_get(src, op_at, "parameters"), pname);
+        if t.len() == 0 { t = oa_param_type(src, oa_get(src, item_at, "parameters"), pname); }
+        types.push(t);
+    }
+    var response = "";
+    let responses = oa_get(src, op_at, "responses");
+    for rk in oa_member_keys(src, responses) {
+        let code = oa_string_at(src, rk);
+        if response.len() == 0 && code.starts_with("2") {
+            response = oa_content_schema(src, oa_member_value(src, rk));
+        }
+    }
+    return OpenApiOperation {
+        path:             path_str,
+        http_method:      method,
+        operation_id:     oa_get_string(src, op_at, "operationId"),
+        path_params:      names,
+        path_param_types: types,
+        request_schema:   oa_content_schema(src, oa_get(src, op_at, "requestBody")),
+        response_schema:  response,
+    };
+}
+
+/// Absorbs an OpenAPI 3.x document written as JSON: `info`, every schema
+/// under `components/schemas`, and every operation under `paths`.
 pub fn openapi_parse_spec(src: str) -> OpenApiDoc {
-    var doc = openapi_doc_new("API", "1.0.0");
+    let root = oa_ws(src, 0);
+    let info = oa_get(src, root, "info");
+    var doc = openapi_doc_new(oa_get_string(src, info, "title"), oa_get_string(src, info, "version"));
 
-    // Extract title
-    let t_idx = src.find("\"title\":");
-    if t_idx >= 0 {
-        let q1 = src.find("\"", t_idx + 8);
-        if q1 > 0 {
-            let q2 = src.find("\"", q1 + 1);
-            if q2 > q1 {
-                doc.title = src.slice(q1 + 1, q2);
-            }
-        }
+    let schemas = oa_get(src, oa_get(src, root, "components"), "schemas");
+    for k in oa_member_keys(src, schemas) {
+        doc.schemas.push(oa_read_schema(src, oa_string_at(src, k), oa_member_value(src, k)));
     }
 
-    // Parse schemas under components/schemas
-    let comp_idx = src.find("components");
-    if comp_idx >= 0 {
-        var pos = comp_idx;
-        let n = src.len();
-        while pos < n {
-            let s_tag = src.find("\"schemas\":", pos);
-            if s_tag < 0 { break; }
-            pos = s_tag + 10;
-
-            // Scan schema names
-            while pos < n {
-                let name_st = src.find("\"", pos);
-                if name_st < 0 { break; }
-                let name_en = src.find("\"", name_st + 1);
-                if name_en < 0 { break; }
-                let s_name = src.slice(name_st + 1, name_en);
-                pos = name_en + 1;
-
-                if s_name == "properties" || s_name == "type" || s_name == "required" {
-                    continue;
-                }
-
-                var schema = openapi_schema_new(s_name, "object");
-
-                // Check for allOf / oneOf
-                let end_peek = if (pos + 2000) < n { pos + 2000 } else { n };
-                let rem_peek = src.slice(pos, end_peek);
-                if rem_peek.contains("\"allOf\"") {
-                    // Extract allOf reference
-                    let ref_idx = rem_peek.find("\"$ref\":");
-                    if ref_idx >= 0 {
-                        let r_q1 = rem_peek.find("\"", ref_idx + 7);
-                        let r_q2 = rem_peek.find("\"", r_q1 + 1);
-                        if r_q2 > r_q1 {
-                            let target = openapi_resolve_ref(rem_peek.slice(r_q1 + 1, r_q2));
-                            schema.all_of.push(target);
-                        }
-                    }
-                }
-
-                if rem_peek.contains("\"oneOf\"") {
-                    schema.schema_type = "union";
-                    schema.one_of.push("VariantA");
-                    schema.one_of.push("VariantB");
-                }
-
-                // Check for properties
-                let prop_idx = rem_peek.find("\"properties\":");
-                if prop_idx >= 0 {
-                    let prop_scope = rem_peek.slice(prop_idx, rem_peek.len());
-                    if prop_scope.contains("\"id\":") {
-                        let prop_id = OpenApiProperty {
-                            name:        "id",
-                            prop_type:   "int64",
-                            is_required: true,
-                            ref_target:  "",
-                        };
-                        schema.properties.push(prop_id);
-                    }
-                    if prop_scope.contains("\"name\":") {
-                        let prop_name = OpenApiProperty {
-                            name:        "name",
-                            prop_type:   "openapi_str",
-                            is_required: true,
-                            ref_target:  "",
-                        };
-                        schema.properties.push(prop_name);
-                    }
-                    if prop_scope.contains("\"parent\":") {
-                        // Self-referential
-                        let prop_parent = OpenApiProperty {
-                            name:        "parent",
-                            prop_type:   "object",
-                            is_required: false,
-                            ref_target:  s_name,
-                        };
-                        schema.properties.push(prop_parent);
-                    }
-                }
-
-                doc.schemas.push(schema);
-                break;
+    let paths = oa_get(src, root, "paths");
+    for pk in oa_member_keys(src, paths) {
+        let path_str = oa_string_at(src, pk);
+        let item_at = oa_member_value(src, pk);
+        for mk in oa_member_keys(src, item_at) {
+            let method = oa_http_method(oa_string_at(src, mk));
+            if method.len() > 0 {
+                doc.operations.push(oa_read_operation(src, path_str, item_at, method, oa_member_value(src, mk)));
             }
-            break;
-        }
-    }
-
-    // Extract paths and operations
-    let paths_idx = src.find("\"paths\":");
-    if paths_idx >= 0 {
-        var pos = paths_idx + 8;
-        let n = src.len();
-        while pos < n {
-            let p_q1 = src.find("\"", pos);
-            if p_q1 < 0 { break; }
-            let p_q2 = src.find("\"", p_q1 + 1);
-            if p_q2 < 0 { break; }
-            let path_str = src.slice(p_q1 + 1, p_q2);
-            pos = p_q2 + 1;
-
-            if !path_str.starts_with("/") { continue; }
-
-            // Extract path parameters: e.g. /users/{id}/orders
-            var path_params: List<str> = [];
-            var scan_p = 0;
-            let pn = path_str.len();
-            while scan_p < pn {
-                if path_str.byte_at(scan_p) == 123 { // '{'
-                    let cl = path_str.find("}", scan_p + 1);
-                    if cl > scan_p {
-                        let param_name = path_str.slice(scan_p + 1, cl);
-                        path_params.push(param_name);
-                        scan_p = cl;
-                    }
-                }
-                scan_p = scan_p + 1;
-            }
-
-            var op_id = "request";
-            let op_marker = src.find("\"operationId\":", pos);
-            if op_marker > 0 && op_marker < (pos + 2000) {
-                let op_q1 = src.find("\"", op_marker + 14);
-                let op_q2 = src.find("\"", op_q1 + 1);
-                if op_q2 > op_q1 {
-                    op_id = src.slice(op_q1 + 1, op_q2);
-                }
-            }
-
-            let op = OpenApiOperation {
-                path:            path_str,
-                http_method:     "GET",
-                operation_id:    op_id,
-                path_params:     path_params,
-                request_schema:  "",
-                response_schema: "User",
-            };
-            doc.operations.push(op);
-            break;
         }
     }
 
@@ -297,7 +482,7 @@ pub fn openapi_parse_spec(src: str) -> OpenApiDoc {
 }
 
 // ------------------------------------------------------------------------------
-// 5. Synthesis of Pilot Client & Server Interfaces
+// 6. Synthesis of Pilot Client & Server Interfaces
 // ------------------------------------------------------------------------------
 
 pub fn openapi_synthesize_client_interface(doc: OpenApiDoc) -> str {
@@ -311,8 +496,12 @@ pub fn openapi_synthesize_client_interface(doc: OpenApiDoc) -> str {
         var p = 0;
         while p < op.path_params.len() {
             if p > 0 { param_sig = param_sig + ", "; }
-            param_sig = param_sig + op.path_params.get(p) + ": int64";
+            param_sig = param_sig + op.path_params.get(p) + ": " + op.path_param_types.get(p);
             p = p + 1;
+        }
+        if op.request_schema.len() > 0 {
+            if param_sig.len() > 0 { param_sig = param_sig + ", "; }
+            param_sig = param_sig + "body: " + op.request_schema;
         }
         var ret_ty = "void";
         if op.response_schema.len() > 0 {

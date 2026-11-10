@@ -1,0 +1,17 @@
+// Reading a member through a value that may be none is an error (NULL006).
+struct Pair {
+    pub left: i64;
+    pub right: i64;
+}
+
+fn find(key: i64) -> Pair? {
+    if key > 0 {
+        return Pair { left: key, right: key };
+    }
+    return none;
+}
+
+fn main() {
+    let p = find(2);
+    print(p.left);
+}

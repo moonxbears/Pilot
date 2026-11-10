@@ -3,6 +3,12 @@
 use std::borrow::Cow; use std::collections::{HashMap, HashSet}; use std::sync::OnceLock; use pilot_ast::*; use pilot_intern::SymbolId;
 use pilot_lexer::{tokenize, TokenKind, TokenTape}; use pilot_span::ByteSpan;
 mod attr_hooks;
+mod modules;
+mod pilot_impls;
+pub use modules::{parse_header, parse_unit, ModuleDecl};
+use modules::EXCLUDE_RECEPTOR;
+pub use pilot_impls::{EnumeratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
+use pilot_impls::*;
 pub use attr_hooks::RegLayout;
 #[derive(Clone, Debug)]
 pub enum TemplateNode { Splice(String), TypeNamed(String, Vec<TemplateNode>), TypeTuple(Vec<TemplateNode>),
@@ -129,7 +135,15 @@ pub struct ParserTables { modifiers: HashMap<String, ModAct>, param_modifiers: H
     /// Attribute functions by name (see `attr_hooks`).
     attr_hooks: HashMap<String, attr_hooks::AttrHook>,
     /// Register layouts declared with `[Bits(..)]`, by type name.
-    reg_layouts: HashMap<String, RegLayout>, }
+    reg_layouts: HashMap<String, RegLayout>,
+    /// The Pilot functions that value dimensional literals (see `pilot_impls`).
+    unit_literal: Option<UnitLiteralHook>,
+    /// The Pilot function each infix operator calls, by symbol (see `pilot_impls`).
+    operator_fns: HashMap<String, OperatorFn>,
+    /// Names bound to engine intrinsics, by kind (see `pilot_impls`).
+    natives: HashMap<(NativeKind, String), String>,
+    enumerator: Option<EnumeratorProtocol>,
+    try_protocol: Option<TryProtocol>, }
 impl ParserTables {
     pub fn new() -> Self { Self::default() }
     fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
@@ -166,6 +180,15 @@ impl ParserTables {
                         }); if !w.is_empty() { self.modifiers.insert(w, act); } }
                     "register_parametric_modifier" => { let w = s_arg(2); if !w.is_empty() { self.param_modifiers.insert(w); } }
                     "register_module_kw" => { let w = s_arg(2); if !w.is_empty() { self.module_kws.insert(w, s_arg(3) == "declare_package_scope"); } }
+                    HOOK_UNIT_LITERAL => self.bind_unit_literal(s_arg(2), s_arg(3)),
+                    HOOK_OPERATOR_FN => self.bind_operator_fn(s_arg(2), s_arg(3)),
+                    HOOK_NATIVE_FN => self.bind_native(NativeKind::Function, s_arg(2), s_arg(3)),
+                    HOOK_NATIVE_METHOD => self.bind_native(NativeKind::Method, s_arg(2), s_arg(3)),
+                    HOOK_NATIVE_PROPERTY => self.bind_native(NativeKind::Property, s_arg(2), s_arg(3)),
+                    HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(2), s_arg(3)),
+                    HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(2), s_arg(3)),
+                    HOOK_ENUMERATOR => self.bind_enumerator(s_arg(2), s_arg(3), s_arg(4)),
+                    HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3)),
                     "bind_receiver_ident" => { let w = s_arg(2); if !w.is_empty() { self.receiver_ident = w; } }
                     "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
                     "register_pratt_op" => { let (sym, fix, bp, assoc) = (s_arg(2), s_arg(3), i_arg(4).unwrap_or(20) as u8, s_arg(5));
@@ -175,6 +198,9 @@ impl ParserTables {
                             } } }
                     _ => {} } }
             _ => {} } } }
+/// `MemberExpr.flags` of a prefix-dot member (`.name`), whose receiver the
+/// parser filled in. `0` is `a.b` and `1` is `a?.b`.
+pub const MEMBER_IMPLIED_RECEIVER: u16 = 2;
 fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
         "+" => Add, "-" => Sub, "*" => Mul, "/" => Div, "//" => FloorDiv, "%" => Rem, "**" => Pow,
         "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" | "and" => And,
@@ -205,7 +231,7 @@ pub fn bootstrap_tables() -> &'static ParserTables { BOOTSTRAP_TABLES.get_or_ini
             include_str!("../../../stdlib/core/syntax/switch.pilot"), include_str!("../../../stdlib/core/syntax/guard.pilot"),
             include_str!("../../../stdlib/core/syntax/try_catch.pilot"), include_str!("../../../stdlib/core/syntax/expr_sugar.pilot"),
             include_str!("../../../stdlib/core/syntax/fstring.pilot"), include_str!("../../../stdlib/core/syntax/call_quote.pilot"),
-            include_str!("../../../stdlib/core/syntax/unit_decl.pilot"), include_str!("../../../stdlib/db/sql_syntax.pilot"),
+            include_str!("../../../stdlib/core/syntax/unit_decl.pilot"), include_str!("../../../stdlib/core/builtins/native_calls.pilot"), include_str!("../../../stdlib/db/sql_syntax.pilot"), include_str!("../../../stdlib/db/set_ops.pilot"),
             include_str!("../../../stdlib/polyglot/polyglot_syntax.pilot"), include_str!("../../../stdlib/realtime/rt_syntax.pilot"),
             include_str!("../../../stdlib/asyncio/select_syntax.pilot"),
             include_str!("../../../stdlib/contracts/contracts_syntax.pilot"), ] { let _ = parse_and_ingest(src, &mut t); }
@@ -214,7 +240,7 @@ pub fn bootstrap_tables() -> &'static ParserTables { BOOTSTRAP_TABLES.get_or_ini
     }) }
 pub fn parse(src: &str) -> AstArena { parse_with_tables(src, bootstrap_tables()) }
 pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: false, }; p.parse_program(); p.arena }
-pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } arena }
+pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } tables.finish_ingest(src); arena }
 #[inline]
 fn is_seed_kw(k: TokenKind) -> bool { matches!(k, TokenKind::KwEngine | TokenKind::KwStruct | TokenKind::KwInterface | TokenKind::KwFn
         | TokenKind::KwLet | TokenKind::KwRef | TokenKind::KwIf | TokenKind::KwLoop
@@ -401,31 +427,6 @@ impl<'a> Parser<'a> {
             4 => out.push(self.parse_enum_decl(&mods, 15, true)), _ => { let saved = self.active_hdr.clone();
                 self.active_hdr = Some(ScopeHeader { mods, target: 0 }); self.parse_item(out, in_type_body); self.active_hdr = saved; }
         } }
-    fn parse_module_decl(&mut self, is_pkg: bool, mods: &DeclMods, out: &mut Vec<NodeId>) {
-        let sp = self.span(); self.advance();
-        if !is_pkg && self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Ext) { self.advance(); self.advance(); if self.at(TokenKind::LBrace) { out.push(self.parse_block()); return; } }
-        let in_block = is_pkg && self.eat(TokenKind::LBrace);
-        loop {
-            if in_block && (self.at_end() || self.at(TokenKind::RBrace)) { break; }
-            let mut path = String::new();
-            while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::Comma) && (!in_block || !self.at(TokenKind::RBrace)) {
-                if self.is_rec(29) || (!path.is_empty() && self.src[self.prev_span().end as usize..self.span().start as usize].contains('\n') && !in_block) { break; }
-                path.push_str(self.text()); self.advance();
-            }
-            let alias = if self.is_rec(29) { self.advance(); if self.is_word() { self.intern_cur() } else { SymbolId(0) } } else { SymbolId(0) };
-            let p = path.trim();
-            if !p.is_empty() {
-                let sym = self.arena.interner.intern(p);
-                let id = self.arena.alloc_node(NodeKind::ImportDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, alias.0);
-                let mut m = mods.clone(); if is_pkg { m.flags |= DECL_FLAG_PKG; }
-                self.apply_mods(id, &m, 7); out.push(id);
-            }
-            if in_block { let _ = self.eat(TokenKind::Comma); let _ = self.eat(TokenKind::Semicolon); }
-            else if self.eat(TokenKind::Comma) { continue; } else { break; }
-        }
-        if in_block { self.expect(TokenKind::RBrace); }
-        let _ = self.eat(TokenKind::Semicolon);
-    }
     fn parse_generic_params(&mut self) -> Vec<SymbolId> { let mut out = Vec::new(); if !self.eat(TokenKind::Less) { return out; }
         while !self.at_end() && !self.at(TokenKind::Greater) && !self.at(TokenKind::ShiftRight) {
                         if self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Const) { self.advance(); }
@@ -549,8 +550,11 @@ impl<'a> Parser<'a> {
         let (params, ret) = (self.parse_param_list(), if self.eat(TokenKind::Arrow) { self.parse_type() } else { NodeId::NONE });
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
         else if self.at(TokenKind::LBrace) { self.parse_block() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
-        let mut ch = vec![body]; ch.extend(params);
-        let id = self.arena.alloc_list_node(NodeKind::OperatorDecl, map_binop_sym(&op_txt), ByteSpan::new(sp.start, self.prev_span().end), &ch);
+        // Laid out like a function, named by the operator's text: `op ?` is
+        // the method `?` of its type.
+        let mut ch = vec![body]; ch.extend(params); let (st, ln) = self.arena.alloc_child_slice(&ch);
+        let name = self.arena.interner.intern(&op_txt);
+        let id = self.arena.alloc_node(NodeKind::OperatorDecl, ln as u16, ByteSpan::new(sp.start, self.prev_span().end), name.0, st);
         if ret.is_some() { self.arena.set_type_annot(id, ret); }
         self.apply_mods(id, mods, def_vis); id }
     fn parse_field_or_prop(&mut self, mods: &DeclMods, def_vis: u8) -> NodeId { let (sp, sym) = (self.span(), self.intern_cur());
@@ -663,18 +667,38 @@ impl<'a> Parser<'a> {
             self.pos = saved; if self.is_word() && nx < self.tape.len() && is_word_tok(self.tape.kind(nx)) {
                 let (esp, bad) = (self.span(), self.text().to_string());
                 self.arena.diagnostics.push((esp, format!("Prohibited or unregistered binding modifier '{}'", bad))); self.advance(); } }
-        if matches!(self.peek(), TokenKind::LParen | TokenKind::LBracket) { let pat = self.parse_pattern();
+        if matches!(self.peek(), TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace) { let pat = self.parse_pattern();
             let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
-            let init = if self.eat(TokenKind::Equal) { self.parse_expr() } else { NodeId::NONE }; let _ = self.eat(TokenKind::Semicolon);
+            let init = self.parse_binding_init();
+            let _ = self.eat(TokenKind::Semicolon);
             let id = self.arena.alloc_node(kind, 1, ByteSpan::new(sp.start, self.prev_span().end), pat.0, init.0);
             if ty.is_some() { self.arena.set_type_annot(id, ty); }
             self.apply_mods(id, mods, def_vis); out.push(id); return; }
+        // `let $name = ..` inside `quote { .. }` splices the name.
+        if !self.is_word() && !self.at(TokenKind::Dollar) {
+            let found = self.text().to_string();
+            self.arena.diagnostics.push((self.span(), format!("expected a name to bind, found `{found}`")));
+        }
         let sym = self.intern_cur(); let _ = self.parse_generic_params();
         let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
-        let init = if self.eat(TokenKind::Equal) { self.parse_expr() } else { NodeId::NONE }; let _ = self.eat(TokenKind::Semicolon);
+        let init = self.parse_binding_init();
+        let _ = self.eat(TokenKind::Semicolon);
         let id = self.arena.alloc_node(kind, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), sym.0, init.0);
         if ty.is_some() { self.arena.set_type_annot(id, ty); }
         self.apply_mods(id, mods, def_vis); out.push(id); }
+    /// The `= value` of a binding, or `NONE` without one. An `=` followed
+    /// by no value is an error.
+    fn parse_binding_init(&mut self) -> NodeId {
+        if !self.eat(TokenKind::Equal) {
+            return NodeId::NONE;
+        }
+        if matches!(self.peek(), TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Comma) {
+            let sp = self.prev_span();
+            self.arena.diagnostics.push((sp, "`=` in a binding needs a value".to_string()));
+            return NodeId::NONE;
+        }
+        self.parse_expr()
+    }
     pub fn parse_type(&mut self) -> NodeId { self.parse_type_bp(0) }
     fn parse_type_bp(&mut self, min_bp: u8) -> NodeId { let sp = self.span(); let mut lhs = if self.in_quote_type && self.eat(TokenKind::Dollar) {
             let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::TypeNamed, 0, sp, sym.0, u32::MAX)
@@ -773,6 +797,9 @@ impl<'a> Parser<'a> {
                             let _ = self.eat(TokenKind::Semicolon); return self.arena.alloc_list_node(NodeKind::TryStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch); }
                         32 if matches!(self.tape.kind(self.next_non_nl(self.cur() + 1)), TokenKind::LBrace | TokenKind::LParen) => return self.parse_polyglot_inline(),
                         _ => {} } }
+                if self.receptor() == Some(EXCLUDE_RECEPTOR) && self.word_follows() {
+                    return self.parse_exclude_decl();
+                }
                 let w = self.text().to_string(); let nx = self.next_non_nl(self.cur() + 1);
                 if let Some(mac) = self.tables.syntax_macros.get(&w).cloned() {
                     if nx < self.tape.len() && !matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::InfixDot | TokenKind::RBrace | TokenKind::Semicolon | TokenKind::Comma | TokenKind::RParen | TokenKind::RBracket) {
@@ -812,12 +839,21 @@ impl<'a> Parser<'a> {
         let _ = self.eat(TokenKind::Semicolon); let end = self.prev_span().end.max(sp.end);
         mac.template.instantiate(&mut self.arena, &bindings, ByteSpan::new(sp.start, end)) }
     fn parse_if(&mut self) -> NodeId { let sp = self.span(); self.advance();
-        self.no_struct_lit = true; let cond = self.parse_expr(); self.no_struct_lit = false;
+        self.no_struct_lit = true; let cond = self.parse_some_condition().unwrap_or_else(|| self.parse_expr()); self.no_struct_lit = false;
         let then_b = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() }; if self.is_rec(3) { self.advance();
             let else_b = if self.at(TokenKind::KwIf) { self.parse_if() } else if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() };
             let (st, _) = self.arena.alloc_child_slice(&[then_b, else_b]);
             self.arena.alloc_node(NodeKind::IfExpr, 2, ByteSpan::new(sp.start, self.prev_span().end), cond.0, st)
         } else { self.arena.alloc_node(NodeKind::IfExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), cond.0, then_b.0) } }
+    /// `some x = v` or `some v` as a condition (`if some mail = acct.email`).
+    /// `some(..)` is a call, not a condition.
+    fn parse_some_condition(&mut self) -> Option<NodeId> {
+        let nx = self.next_non_nl(self.cur() + 1);
+        if self.receptor() != Some((31, 2)) || nx >= self.tape.len() || self.tape.kind(nx) == TokenKind::LParen { return None; }
+        let sp = self.span(); self.advance(); let mut c = self.parse_expr();
+        if self.eat(TokenKind::Equal) { let v = self.parse_expr();
+            c = self.arena.alloc_node(NodeKind::AssignStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), c.0, v.0); }
+        Some(self.arena.alloc_node(NodeKind::UnaryExpr, pilot_ast::UNARY_OP_SOME, ByteSpan::new(sp.start, self.prev_span().end), c.0, 0)) }
     fn parse_for(&mut self) -> NodeId { let sp = self.span(); self.advance();
         let vsym = if matches!(self.peek(), TokenKind::LParen | TokenKind::LBracket) { let _ = self.parse_pattern(); self.arena.interner.intern("_item") }
         else { let s = self.intern_cur(); if self.eat(TokenKind::Comma) { self.advance(); } s }; if self.is_rec(10) { self.advance(); }
@@ -866,6 +902,9 @@ impl<'a> Parser<'a> {
             while !self.at_end() && !self.at(TokenKind::RParen) { ps.push(self.parse_pattern()); if !self.eat(TokenKind::Comma) { break; } }
             self.expect(TokenKind::RParen);
             return self.arena.alloc_list_node(NodeKind::PatTuple, 0, ByteSpan::new(sp.start, self.prev_span().end), &ps); }
+        // `{ "key": p, field: p, name }`: a record or map of any type.
+        if self.eat(TokenKind::LBrace) { let fields = self.parse_record_pattern_fields();
+            return self.arena.alloc_list_node(NodeKind::PatRecord, 0, ByteSpan::new(sp.start, self.prev_span().end), &fields); }
         if self.eat(TokenKind::LBracket) { let mut ps = Vec::new(); while !self.at_end() && !self.at(TokenKind::RBracket) {
                 let is_splat = self.eat(TokenKind::Star) || self.eat(TokenKind::DotDot); let p = self.parse_pattern();
                 if is_splat && self.arena.node(p).node_kind() == NodeKind::PatBind { self.arena.nodes[p.0 as usize].flags = 2; }
@@ -878,17 +917,28 @@ impl<'a> Parser<'a> {
             let (sym, mut sub) = (self.arena.interner.intern(&nm), Vec::new()); if self.eat(TokenKind::LParen) {
                 while !self.at_end() && !self.at(TokenKind::RParen) { sub.push(self.parse_pattern()); if !self.eat(TokenKind::Comma) { break; } }
                 self.expect(TokenKind::RParen); } else if self.eat(TokenKind::LBrace) {
-                while !self.at_end() && !self.at(TokenKind::RBrace) { let fsym = self.intern_cur();
-                    sub.push(if self.eat(TokenKind::Colon) { self.parse_pattern() } else { self.arena.alloc_node(NodeKind::PatBind, 0, sp, fsym.0, 0) });
-                    let _ = self.eat(TokenKind::Comma); }
-                self.expect(TokenKind::RBrace);
-                return self.arena.alloc_list_node(NodeKind::PatRecord, 0, ByteSpan::new(sp.start, self.prev_span().end), &sub); }
+                // `Name { .. }`: flags = 1 and the first child names the type.
+                let mut fields = vec![self.arena.alloc_node(NodeKind::IdentExpr, 0, sp, sym.0, 0)];
+                fields.extend(self.parse_record_pattern_fields());
+                return self.arena.alloc_list_node(NodeKind::PatRecord, 1, ByteSpan::new(sp.start, self.prev_span().end), &fields); }
             let (st, ln) = self.arena.alloc_child_slice(&sub);
             return self.arena.alloc_node(NodeKind::PatVariant, ln as u16, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), sym.0, st); }
         if matches!(self.peek(), TokenKind::IntLit | TokenKind::HexIntLit | TokenKind::FloatLit | TokenKind::StrLit | TokenKind::Minus) || self.is_rec(1) || self.is_rec(2) {
             let lit = self.parse_expr_bp(self.pattern_literal_bp()); return self.arena.alloc_node(NodeKind::PatLiteral, 0, sp, lit.0, 0); }
         if self.is_word() { let sym = self.intern_cur(); return self.arena.alloc_node(NodeKind::PatBind, 0, sp, sym.0, 0); }
         NodeId::NONE }
+    /// The fields of a record pattern after its `{`, through the `}`. A field
+    /// with a sub-pattern (`key: p`, `"key": p`) is `CallArg(key, p)`; a bare
+    /// `name` binds the field of that name.
+    fn parse_record_pattern_fields(&mut self) -> Vec<NodeId> { let mut fields = Vec::new();
+        while !self.at_end() && !self.at(TokenKind::RBrace) { self.skip_seps(); if self.at(TokenKind::RBrace) { break; }
+            let fsp = self.span(); let quoted = self.at(TokenKind::StrLit);
+            let key = if quoted { let raw = self.text(); let k = raw[1..raw.len().saturating_sub(1)].to_string(); self.advance(); self.arena.interner.intern(&k) } else { self.intern_cur() };
+            if self.eat(TokenKind::Colon) { let p = self.parse_pattern();
+                fields.push(self.arena.alloc_node(NodeKind::CallArg, 0, ByteSpan::new(fsp.start, self.prev_span().end), key.0, p.0));
+            } else { fields.push(self.arena.alloc_node(NodeKind::PatBind, 0, fsp, key.0, 0)); }
+            if !self.eat(TokenKind::Comma) { self.skip_seps(); if !self.at(TokenKind::RBrace) { break; } } }
+        self.expect(TokenKind::RBrace); fields }
     fn parse_polyglot_inline(&mut self) -> NodeId { let (sp, lang) = (self.span(), self.text().to_string()); self.advance();
         if self.at(TokenKind::LBrace) { let bsp = self.span();
             let close = self.tape.matching_bracket(self.cur()).unwrap_or(self.cur() as u32) as usize;
@@ -990,7 +1040,7 @@ impl<'a> Parser<'a> {
             TokenKind::PrefixDot => { self.advance();
                 let rcv_nm = if self.tables.receiver_ident.is_empty() { "_self".to_string() } else { self.tables.receiver_ident.clone() };
                 let (rcv, fld) = (self.arena.alloc_ident(&rcv_nm, sp), self.intern_cur());
-                self.arena.alloc_node(NodeKind::MemberExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), rcv.0, fld.0) }
+                self.arena.alloc_node(NodeKind::MemberExpr, MEMBER_IMPLIED_RECEIVER, ByteSpan::new(sp.start, self.prev_span().end), rcv.0, fld.0) }
             TokenKind::ColonColon => { self.advance(); let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::IdentExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, 0) }
             TokenKind::Minus | TokenKind::Plus | TokenKind::Exclamation | TokenKind::CallQuoteShallow | TokenKind::Tilde | TokenKind::Amper | TokenKind::KwRef | TokenKind::ArrowLeft
             | TokenKind::Star | TokenKind::DoubleStar | TokenKind::StarDotDot | TokenKind::GreaterDotDot => { let (fl, bp) = match self.peek() {
@@ -1044,14 +1094,17 @@ impl<'a> Parser<'a> {
             _ => CallQuoteKind::None, }; if qk != CallQuoteKind::None { self.advance(); }
         self.parse_call_args(callee, qk as u16) }
     fn parse_call_args(&mut self, callee: NodeId, qk: u16) -> NodeId {
-        let is_sym_quote = self.arena.node(callee).node_kind() == NodeKind::IdentExpr && self.tables.receptors.get(self.arena.interner.resolve(SymbolId(self.arena.node(callee).lhs))) == Some(&(33, 25));
+        let is_sym_quote = self.arena.node(callee).node_kind() == NodeKind::IdentExpr && self.tables.quotes_symbol(self.arena.interner.resolve(SymbolId(self.arena.node(callee).lhs)));
         self.expect(TokenKind::LParen); let mut ch = vec![callee]; while !self.at_end() && !self.at(TokenKind::RParen) {
             if is_sym_quote { let (tsp, mut txt) = (self.span(), String::new());
                 while !self.at_end() && !self.at(TokenKind::RParen) && !self.at(TokenKind::Comma) { txt.push_str(self.text()); self.advance(); }
                 let sym = self.arena.interner.intern(&txt); ch.push(self.arena.alloc_node(NodeKind::StrLit, 0, tsp, sym.0, 0));
             } else { let nx = self.next_non_nl(self.cur() + 1);
-                if self.is_word() && nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::Colon) { self.advance(); self.advance(); }
-                let a = self.parse_expr(); if a.is_some() { ch.push(a); } }
+                // `name: value` keeps its name in a `CallArg` (lhs = name, rhs = value).
+                if self.is_word() && nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::Colon) {
+                    let nsp = self.span(); let name = self.intern_cur(); self.advance(); let a = self.parse_expr();
+                    if a.is_some() { ch.push(self.arena.alloc_node(NodeKind::CallArg, 0, ByteSpan::new(nsp.start, self.prev_span().end), name.0, a.0)); }
+                } else { let a = self.parse_expr(); if a.is_some() { ch.push(a); } } }
             if self.eat(TokenKind::Comma) { if self.at(TokenKind::RParen) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in argument list".into())); break; } } else { break; } }
         self.expect(TokenKind::RParen); self.arena.alloc_list_node(NodeKind::CallExpr, qk, ByteSpan::new(self.arena.span(callee).start, self.prev_span().end), &ch) }
     /// Lowers the body of `f"..."` into string concatenation: literal
@@ -1090,7 +1143,9 @@ impl<'a> Parser<'a> {
                 parts.push(self.arena.alloc_node(NodeKind::StrLit, 0, sp, sym.0, 0));
                 lit.clear();
             }
-            parts.push(self.parse_fstring_hole(&body[i + 1..end], sp));
+            let hole = &body[i + 1..end];
+            let offset = (hole.as_ptr() as usize).saturating_sub(self.src.as_ptr() as usize) as u32;
+            parts.push(self.parse_fstring_hole(unescape_hole_quotes(hole), offset, sp));
             i = end + 1;
         }
         if !lit.is_empty() || parts.is_empty() {
@@ -1111,8 +1166,8 @@ impl<'a> Parser<'a> {
 
     /// Parses one `{expr}` hole of an f-string with a temporary token tape.
     /// Spans of the hole's nodes are shifted back into the enclosing source.
-    fn parse_fstring_hole(&mut self, hole: &'a str, sp: ByteSpan) -> NodeId {
-        let offset = (hole.as_ptr() as usize).saturating_sub(self.src.as_ptr() as usize) as u32;
+    /// `offset` is where the hole starts in the enclosing source.
+    fn parse_fstring_hole(&mut self, hole: &'a str, offset: u32, sp: ByteSpan) -> NodeId {
         let first_node = self.arena.nodes.len();
         let first_diag = self.arena.diagnostics.len();
         let saved_tape = std::mem::replace(&mut self.tape, tokenize(hole));
@@ -1261,16 +1316,52 @@ fn compile_type_rule(pat: &[(TokenKind, String)], template: TemplateNode) -> Opt
     None }
 /// Index of the `}` closing an f-string hole that starts at `start`, skipping
 /// nested braces and quoted strings inside the hole.
+/// Marks a string inside a hole delimited by escaped quotes (`\"`), the only
+/// way to write a double-quoted string inside `f"..."`.
+const ESCAPED_QUOTE: u8 = 0;
+
+/// A hole with its escaped quotes made plain: `m[\"k\"]` becomes `m[ "k" ]`.
+/// Each `\"` becomes two characters, so every offset in the hole is kept.
+/// The rewritten text must live as long as the source it stands in for; only
+/// holes that contain `\"` are copied, and each copy is kept for the life of
+/// the process.
+fn unescape_hole_quotes(hole: &str) -> &str {
+    if !hole.contains("\\\"") {
+        return hole;
+    }
+    let b = hole.as_bytes();
+    let (mut out, mut j, mut open) = (String::with_capacity(hole.len()), 0, false);
+    while j < b.len() {
+        if b[j] == b'\\' && b.get(j + 1) == Some(&b'"') {
+            out.push_str(if open { "\" " } else { " \"" });
+            open = !open;
+            j += 2;
+        } else {
+            let ch = hole[j..].chars().next().unwrap_or(' ');
+            out.push(ch);
+            j += ch.len_utf8();
+        }
+    }
+    Box::leak(out.into_boxed_str())
+}
+
 fn fstring_hole_end(b: &[u8], start: usize) -> Option<usize> {
     let (mut depth, mut j, mut quote) = (1usize, start, None::<u8>);
     while j < b.len() {
         let c = b[j];
+        let escaped_quote = c == b'\\' && b.get(j + 1) == Some(&b'"');
         if let Some(q) = quote {
-            if c == b'\\' {
+            if q == ESCAPED_QUOTE && escaped_quote {
+                quote = None;
+                j += 1;
+            } else if c == b'\\' {
                 j += 1;
             } else if c == q {
                 quote = None;
             }
+        } else if escaped_quote {
+            quote = Some(ESCAPED_QUOTE);
+            j += 1;
         } else if c == b'"' || c == b'\'' {
             quote = Some(c);
         } else if c == b'{' {

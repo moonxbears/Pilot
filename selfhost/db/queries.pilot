@@ -17,42 +17,42 @@ pub pure fn nameof(sym: str) -> str => sym;
 
 pub fn query_source_text(db: i64, file_id: u64) -> str {
     let k = query_key_new(stage_source_text(), 0, file_id);
-    return pilotdb_query_with_fn(db, k, "SourceText");
+    return pilotdb_query_with_fn(db, k);
 }
 
 pub fn query_lex_tokens(db: i64, file_id: u64) -> str {
     let k = query_key_new(stage_lex_tokens(), 0, file_id);
-    return pilotdb_query_with_fn(db, k, "LexTokens");
+    return pilotdb_query_with_fn(db, k);
 }
 
 pub fn query_lossless_cst(db: i64, file_id: u64) -> str {
     let k = query_key_new(stage_lossless_cst(), 0, file_id);
-    return pilotdb_query_with_fn(db, k, "LosslessCst");
+    return pilotdb_query_with_fn(db, k);
 }
 
 pub fn query_item_signature(db: i64, file_id: u64) -> str {
     let k = query_key_new(stage_item_signature(), 0, file_id);
-    return pilotdb_query_with_fn(db, k, "ItemSignature");
+    return pilotdb_query_with_fn(db, k);
 }
 
 pub fn query_expanded_ast(db: i64, file_id: u64) -> str {
     let k = query_key_new(stage_expanded_ast(), 0, file_id);
-    return pilotdb_query_with_fn(db, k, "ExpandedAst");
+    return pilotdb_query_with_fn(db, k);
 }
 
 pub fn query_import_scope(db: i64, file_id: u64) -> str {
     let k = query_key_new(stage_import_scope(), 0, file_id);
-    return pilotdb_query_with_fn(db, k, "ImportScope");
+    return pilotdb_query_with_fn(db, k);
 }
 
 pub fn query_def_types_and_lattice(db: i64, file_id: u64) -> str {
     let k = query_key_new(stage_def_types_and_lattice(), 0, file_id);
-    return pilotdb_query_with_fn(db, k, "DefTypesAndLattice");
+    return pilotdb_query_with_fn(db, k);
 }
 
 pub fn query_file_diagnostics(db: i64, file_id: u64) -> str {
     let k = query_key_new(stage_file_diagnostics(), 0, file_id);
-    return pilotdb_query_with_fn(db, k, "FileDiagnostics");
+    return pilotdb_query_with_fn(db, k);
 }
 
 // ------------------------------------------------------------------------------

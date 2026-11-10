@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -88,7 +90,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             required_pub_fns: &[
                 "cpp_exception_what",
                 "cpp_exception_type",
-                "cpp_landing_pad_catch",
+                "cpp_call_catching",
             ],
             required_code_markers: &[
                 "CppException",
@@ -122,7 +124,7 @@ fn eval_m15(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -404,19 +406,8 @@ fn test_m15_4_cpp_diagnostics_and_safe_exception_boundary() {
             if cpp_exception_what(exc) != "connection refused" { return 7; }
             if cpp_exception_type(exc) != "std::runtime_error" { return 8; }
 
-            // Catch landing pad returning failure result
-            let failed_res = cpp_landing_pad_catch(false, 0, exc);
-            if failed_res.is_ok { return 9; }
-            if failed_res.err_val.what != "connection refused" { return 10; }
-
-            // Catch landing pad returning success result
-            let ok_res = cpp_landing_pad_catch(true, 42, exc);
-            if !ok_res.is_ok || ok_res.ok_val != 42 { return 11; }
-
-            // 5. CppStringView zero-copy reference
-            let sv = CppStringView::from_str("hello cpp");
-            if sv.is_empty() { return 12; }
-            if sv.length() != 9 { return 13; }
+            let failed = CppCatchResult.fail(exc);
+            if failed.is_ok || failed.err_val.to_string() != "std::runtime_error: connection refused" { return 9; }
 
             return 42;
         }
@@ -430,7 +421,22 @@ fn test_m15_4_cpp_diagnostics_and_safe_exception_boundary() {
         "stdlib/std/polyglot/cpp.pilot",
     ];
     let res = eval_m15(deps, script);
-    assert_eq!(res, "42", "C++ diagnostic checks and safe exception landing-pad boundary must function correctly");
+    assert_eq!(res, "42", "C++ diagnostic checks and exception values must function correctly");
+
+    // Calling into C++ and viewing Pilot strings as std::string_view need
+    // native calls and raw memory views.
+    let cases = [
+        ("let r = cpp_call_catching(4096, [1, 2]);", "cpp.catch_boundary"),
+        ("let sv = CppStringView::from_str(\"hello cpp\");", "cpp.string_view_from_str"),
+    ];
+    for (body, seam_id) in cases {
+        let script = format!("pub fn main() -> i64 {{ {body} return 42; }}");
+        let res = eval_m15(&["stdlib/std/polyglot/cpp.pilot"], &script);
+        assert!(
+            res.starts_with(&format!("FAULT: SEAM001: unconnected seam `{seam_id}`")),
+            "`{body}` must stop at seam {seam_id}, got {res}"
+        );
+    }
 
     guard.finish();
 }

@@ -34,7 +34,6 @@ pub struct WasmMemory : IObject {
     pub pages:     i64,
     pub max_pages: i64,
     pub bytes:     List<i64>,
-    pub str_cache: Map<i64, str>,
 }
 
 pub fn wasm_memory_new(initial_pages: i64, max_pages: i64) -> WasmMemory {
@@ -46,7 +45,6 @@ pub fn wasm_memory_new(initial_pages: i64, max_pages: i64) -> WasmMemory {
         pages:     p,
         max_pages: mp,
         bytes:     [],
-        str_cache: Map<i64, str>{},
     };
 }
 
@@ -146,20 +144,63 @@ pub fn wasm_memory_store_str(var ref mem: WasmMemory, offset: i64, s: str) -> Wa
         }
         i = i + 1;
     }
-    mem.str_cache.set(offset, s);
     return wasm_ok_int(slen);
 }
 
-pub fn wasm_memory_load_str(mem: WasmMemory, offset: i64, len: i64) -> WasmResult {
+/// Length of the UTF-8 sequence that starts with lead byte `b`, or 0 when
+/// `b` cannot start one (RFC 3629).
+pure fn wasm_utf8_seq_len(b: i64) -> i64 {
+    if b < 128 { return 1; }
+    if b >= 194 && b <= 223 { return 2; }
+    if b >= 224 && b <= 239 { return 3; }
+    if b >= 240 && b <= 244 { return 4; }
+    return 0;
+}
+
+/// Checks that `len` bytes at `offset` are well-formed UTF-8 (RFC 3629:
+/// no overlong forms, no surrogates, nothing above U+10FFFF). WASM004 if not.
+pub fn wasm_memory_validate_utf8(mem: WasmMemory, offset: i64, len: i64) -> WasmResult {
     let chk = wasm_memory_check_bounds(mem, offset, len);
     if chk.is_err() {
         return chk;
     }
-    if mem.str_cache.has(offset) {
-        let cached = mem.str_cache.get(offset);
-        return wasm_ok_str(cached.slice(0, len as usize));
+    var i: i64 = 0;
+    while i < len {
+        let b0 = wasm_memory_load_byte(mem, offset + i).unwrap();
+        let n = wasm_utf8_seq_len(b0);
+        if n == 0 || i + n > len {
+            return wasm_err("WASM004: Invalid UTF-8 lead byte " + b0.to_str() + " at offset " + (offset + i).to_str());
+        }
+        var k: i64 = 1;
+        while k < n {
+            let bk = wasm_memory_load_byte(mem, offset + i + k).unwrap();
+            var lo: i64 = 128;
+            var hi: i64 = 191;
+            if k == 1 {
+                if b0 == 224 { lo = 160; }
+                if b0 == 237 { hi = 159; }
+                if b0 == 240 { lo = 144; }
+                if b0 == 244 { hi = 143; }
+            }
+            if bk < lo || bk > hi {
+                return wasm_err("WASM004: Invalid UTF-8 continuation byte " + bk.to_str() + " at offset " + (offset + i + k).to_str());
+            }
+            k = k + 1;
+        }
+        i = i + n;
     }
-    return wasm_ok_str("");
+    return wasm_ok_int(len);
+}
+
+/// Reads a string of `len` bytes at `offset`. The bytes are checked as UTF-8
+/// here; turning them into a `str` needs a bytes-to-string intrinsic the seed
+/// does not have yet.
+pub fn wasm_memory_load_str(mem: WasmMemory, offset: i64, len: i64) -> WasmResult {
+    let valid = wasm_memory_validate_utf8(mem, offset, len);
+    if valid.is_err() {
+        return valid;
+    }
+    return seam("wasm.load_str", "a str built from validated linear-memory bytes");
 }
 
 // ------------------------------------------------------------------------------
@@ -298,106 +339,9 @@ pub fn wasm_invoke(var ref inst: WasmInstance, export_name: str, args: List<i64>
         return wasm_err("WASM002: Parameter count mismatch for '" + export_name + "': expected " + exp.param_count.to_str() + ", got " + (args.len() as i64).to_str());
     }
 
-    var lease = wasm_lease_new(1, inst.fuel_limit);
-
-    // Fuel cost per invocation entry
-    let fuel_step = wasm_lease_consume_fuel(var lease, 10);
-    if fuel_step.is_err() {
-        return fuel_step;
-    }
-
-    // Standard execution engine for common component operations
-    if export_name == "cabi_realloc" {
-        // cabi_realloc(orig_ptr, orig_size, align, new_size) -> new_ptr
-        if args.len() < 4 {
-            return wasm_err("WASM002: cabi_realloc requires 4 arguments");
-        }
-        let orig_ptr = args.get(0);
-        let orig_size = args.get(1);
-        let align = args.get(2);
-        let new_size = args.get(3);
-
-        let plan = cabi_plan_alloc(new_size as i32, align as i32, 1024);
-        let alloc_ptr = plan.ptr as i64;
-        let mem_grow_chk = wasm_memory_check_bounds(inst.memory, alloc_ptr, new_size);
-        if mem_grow_chk.is_err() {
-            // Need to grow memory
-            let grow_res = wasm_memory_grow(var inst.memory, 1);
-            if grow_res.is_err() {
-                return grow_res;
-            }
-        }
-        inst.fuel_used = inst.fuel_used + lease.fuel_consumed;
-        return wasm_ok_int(alloc_ptr);
-    }
-
-    if export_name == "echo" || export_name == "identity" {
-        let f_chk = wasm_lease_consume_fuel(var lease, 5);
-        if f_chk.is_err() { return f_chk; }
-        inst.fuel_used = inst.fuel_used + lease.fuel_consumed;
-        if args.len() > 0 { return wasm_ok_int(args.get(0)); }
-        return wasm_ok_int(0);
-    }
-
-    if export_name == "add" {
-        let f_chk = wasm_lease_consume_fuel(var lease, 5);
-        if f_chk.is_err() { return f_chk; }
-        inst.fuel_used = inst.fuel_used + lease.fuel_consumed;
-        let sum = args.get(0) + args.get(1);
-        return wasm_ok_int(sum);
-    }
-
-    if export_name == "spilled_sum" {
-        // Reads indirect buffer from spilled params (> 16 params)
-        let ptr = args.get(0);
-        let f_chk = wasm_lease_consume_fuel(var lease, 20);
-        if f_chk.is_err() { return f_chk; }
-
-        var sum: i64 = 0;
-        var p = 0;
-        while p < 17 {
-            let offset = ptr + (p * 4);
-            let val_res = wasm_memory_load_i32(inst.memory, offset);
-            if val_res.is_err() {
-                return val_res;
-            }
-            sum = sum + val_res.unwrap();
-            p = p + 1;
-        }
-        inst.fuel_used = inst.fuel_used + lease.fuel_consumed;
-        return wasm_ok_int(sum);
-    }
-
-    if export_name == "infinite_loop_test" {
-        // Simulates an infinite loop consuming fuel until exhaustion
-        var loop_step = 0;
-        while loop_step < 10000000 {
-            let chk = wasm_lease_consume_fuel(var lease, 100);
-            if chk.is_err() {
-                return chk;
-            }
-            loop_step = loop_step + 1;
-        }
-        return wasm_ok_int(0);
-    }
-
-    if export_name == "oob_read_test" {
-        // Attempts to read beyond linear memory boundary
-        let huge_offset = wasm_memory_byte_len(inst.memory) + 1048576;
-        let load_res = wasm_memory_load_i32(inst.memory, huge_offset);
-        if load_res.is_err() {
-            return load_res;
-        }
-        return load_res;
-    }
-
-    // Default return
-    inst.fuel_used = inst.fuel_used + lease.fuel_consumed;
-    let exit_res = wasm_lease_exit(var lease);
-    if exit_res.is_err() {
-        return exit_res;
-    }
-    return wasm_ok_int(0);
+    // Running the export means decoding its code section and interpreting
+    // the instructions under the instance's fuel and memory limits.
+    return seam("wasm.interpret", "a WASM code-section decoder and instruction interpreter");
 }
 
 // ------------------------------------------------------------------------------
@@ -405,23 +349,5 @@ pub fn wasm_invoke(var ref inst: WasmInstance, export_name: str, args: List<i64>
 // ------------------------------------------------------------------------------
 
 pub fn wasm_lift_to_pilir_bridge(func_name: str, params: List<str>, return_ty: str) -> str {
-    var s = "pil_ir.func @" + func_name + "(";
-    var i = 0;
-    while i < params.len() {
-        if i > 0 { s = s + ", "; }
-        s = s + "%p" + i.to_str() + ": " + params.get(i);
-        i = i + 1;
-    }
-    s = s + ") -> " + return_ty + " {\n";
-    s = s + "  %entry:\n";
-    s = s + "    %linear_mem = wasm.get_linear_memory\n";
-    s = s + "    wasm.bounds_check %linear_mem\n";
-    s = s + "    wasm.fuel_tick 1\n";
-    if return_ty != "void" {
-        s = s + "    pil_ir.return %p0\n";
-    } else {
-        s = s + "    pil_ir.return\n";
-    }
-    s = s + "}\n";
-    return s;
+    return seam("wasm.lift_pilir", "lifting a decoded WASM function body into PilIR");
 }

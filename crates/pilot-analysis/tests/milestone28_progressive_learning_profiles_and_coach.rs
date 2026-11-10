@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -91,7 +93,7 @@ fn eval_m28(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -130,8 +132,7 @@ fn test_m28_1_progressive_diagnostic_adaptation_across_tiers() {
             if d3.error_code != "ESCAPE001" { return 6; }
             let exp_t3 = "ESCAPE001: 0b01 borrowed view escapes lexical owner span";
             if d3.title != exp_t3 { return 7; }
-            let exp_drop = "Perceus drop occurs at line 42";
-            if d3.explanation.len() < exp_drop.len() { return 8; }
+            if d3.explanation != "Cannot outlive scope of 0b10 local buffer 'names'; Perceus drop occurs at line 42" { return 8; }
 
             // Case 4: Non-bifurcation verification (same code across all tiers)
             if d1.error_code != d3.error_code { return 9; }
@@ -177,8 +178,16 @@ fn test_m28_2_perf_coach_struct_padding_waste_perf002() {
             let diag = analyze_struct_padding("BadPad", fields);
             if diag.len() == 0 { return 1; }
 
-            let exp_perf002 = "PERF002";
-            if diag.slice(0, exp_perf002.len()) != exp_perf002 { return 2; }
+            if diag != "PERF002: Struct 'BadPad' wastes 8 bytes in padding (32B -> 24B); reorder fields by descending alignment" { return 2; }
+
+            // 16-byte alignment (u128 on x86_64 SysV): { u8, u128, u8 } is 48B in
+            // declared order and 32B reordered (rustc/clang give the same sizes).
+            var wide: List<FieldLayoutInfo> = [];
+            wide.push(field_layout_info_new("x", 1, 1));
+            wide.push(field_layout_info_new("y", 16, 16));
+            wide.push(field_layout_info_new("z", 1, 1));
+            let wide_diag = analyze_struct_padding("Wide", wide);
+            if wide_diag != "PERF002: Struct 'Wide' wastes 16 bytes in padding (48B -> 32B); reorder fields by descending alignment" { return 4; }
 
             // Well-ordered struct (no waste): struct GoodPad { b: i64; d: i64; a: u8; c: u8; }
             var good_fields: List<FieldLayoutInfo> = [];
@@ -216,15 +225,9 @@ fn test_m28_3_perf_coach_loop_clone_perf001_and_arch_coaching() {
 
     let script = r#"
         pub fn main() -> i64 {
-            // Case 1: PERF001 on avoidable 0b10 .clone() inside loop
-            let loop_diag = analyze_loop_clone(true, "items", "List<f64>");
-            if loop_diag.len() == 0 { return 1; }
-            let exp_perf001 = "PERF001";
-            if loop_diag.slice(0, exp_perf001.len()) != exp_perf001 { return 2; }
-
-            // Outside loop: no warning
-            let no_loop_diag = analyze_loop_clone(false, "items", "List<f64>");
-            if no_loop_diag.len() != 0 { return 3; }
+            // Case 1: PERF001 message
+            let p1 = format_perf001("items", "List<f64>");
+            if p1 != "PERF001: Avoidable 0b10 .clone() of 'items: List<f64>' inside loop; borrow via ref<List<f64>> for zero allocations" { return 1; }
 
             // Case 2: COACH001 on manual equality boilerplate
             let c1 = format_coach001("UserRecord");
@@ -247,6 +250,20 @@ fn test_m28_3_perf_coach_loop_clone_perf001_and_arch_coaching() {
 
     let res = eval_m28(&deps, script);
     assert_eq!(res, "42", "Failed coaching & perf hints test: {}", res);
+
+    // Finding clones inside loops needs PilIR function bodies.
+    let loop_script = r#"
+        pub fn main() -> i64 {
+            let diags = analyze_loop_clones("sum_all");
+            return diags.len() as i64;
+        }
+    "#;
+    let loop_res = eval_m28(&deps, loop_script);
+    assert!(
+        loop_res.starts_with("FAULT: SEAM001: unconnected seam `coach.loop_clones`"),
+        "loop clone analysis must stop at its seam: {}",
+        loop_res
+    );
     guard.finish();
 }
 
@@ -294,6 +311,16 @@ fn test_m28_4_flow_sensitive_clearance_ring_solver() {
 
             // 7. Verify audit trail records transitions
             if solver.audit_trail.len() != 2 { return 8; }
+            if solver.audit_trail[0] != "Elevated clearance from lvl1 to lvl2 (if lvl >= 2 branch)" { return 9; }
+            if solver.audit_trail[1] != "Restored clearance to lvl1 on exit from 'if lvl >= 2 branch'" { return 10; }
+
+            // 8. A later scope sees its own level, not a stale one from an exited scope
+            solver.enter_elevated_scope(3, "first");
+            solver.exit_elevated_scope();
+            solver.enter_elevated_scope(2, "second");
+            if solver.current_clearance() != 2 { return 11; }
+            solver.exit_elevated_scope();
+            if solver.current_clearance() != 1 { return 12; }
 
             return 42;
         }

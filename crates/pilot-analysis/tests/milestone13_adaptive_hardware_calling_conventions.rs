@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -115,7 +117,7 @@ fn eval_m13(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // Target test functions for native dynamic frame invocation
@@ -185,12 +187,6 @@ fn test_m13_1_calling_convention_descriptors_and_sysv_x64_eightbyte_classificati
             if p0.reg0 != 0 { return 9; } // RDI
             if p1.reg0 != 1 { return 10; } // RSI
 
-            // Case B: 16B struct pair return in RAX:RDX
-            let ret_struct16 = TypeLayout::create(16, 8, 0, 5);
-            let plan_b = SysVConvClassifier::classify(params_a, ref ret_struct16, 0);
-            if plan_b.ret_loc.reg0 != 0 { return 11; } // RAX
-            if plan_b.ret_loc.reg1 != 2 { return 12; } // RDX
-
             // Case C: Sret struct > 16B (RDI hidden pointer, arg 0 shifts to RSI)
             let ret_struct32 = TypeLayout::create(32, 8, 0, 5);
             let plan_c = SysVConvClassifier::classify(params_a, ref ret_struct32, 0);
@@ -202,15 +198,63 @@ fn test_m13_1_calling_convention_descriptors_and_sysv_x64_eightbyte_classificati
         }
     "#;
 
-    let res = eval_m13(
-        &[
-            "stdlib/core/reflect.pilot",
-            "stdlib/pilot/abi/descriptor.pilot",
-            "stdlib/pilot/abi/sysv_x64.pilot",
-        ],
-        script,
-    );
+    let deps = &[
+        "stdlib/core/reflect.pilot",
+        "stdlib/pilot/abi/descriptor.pilot",
+        "stdlib/pilot/abi/sysv_x64.pilot",
+    ];
+    let res = eval_m13(deps, script);
     assert_eq!(res, "100", "SysV classification verification passed");
+
+    // Eightbyte classification from members, with the answers the System V
+    // AMD64 psABI 3.2.3 merge rules give.
+    let eightbytes = r#"
+        fn f(off: u32, size: u32) -> AbiFieldClass => AbiFieldClass::create(off, size, 2);
+        fn i(off: u32, size: u32) -> AbiFieldClass => AbiFieldClass::create(off, size, 0);
+
+        pub fn main() -> i64 {
+            // struct { double x, y; } -> SSE, SSE
+            let dd = sysv_classify_eightbytes([f(0, 8), f(8, 8)], 16);
+            if dd.len() != 2 || dd[0] != EightbyteClass::Sse || dd[1] != EightbyteClass::Sse { return 1; }
+            // struct { long a; double b; } -> INTEGER, SSE
+            let ld = sysv_classify_eightbytes([i(0, 8), f(8, 8)], 16);
+            if ld[0] != EightbyteClass::Integer || ld[1] != EightbyteClass::Sse { return 2; }
+            // struct { float a, b; int c; } -> SSE, INTEGER
+            let ffi = sysv_classify_eightbytes([f(0, 4), f(4, 4), i(8, 4)], 12);
+            if ffi[0] != EightbyteClass::Sse || ffi[1] != EightbyteClass::Integer { return 3; }
+            // struct { int a; float b; } -> one INTEGER eightbyte
+            let if8 = sysv_classify_eightbytes([i(0, 4), f(4, 4)], 8);
+            if if8.len() != 1 || if8[0] != EightbyteClass::Integer { return 4; }
+            // 24 bytes -> MEMORY
+            let big = sysv_classify_eightbytes([i(0, 8), i(8, 8), i(16, 8)], 24);
+            if big[0] != EightbyteClass::Memory { return 5; }
+            // { long, double } as the first argument: RDI + XMM0
+            let loc = sysv_eightbyte_location(ld, 0, 0, 6, 8, 16);
+            if loc.kind != ArgPassKind::PairGprSimd || loc.reg0 != 0 || loc.reg1 != 0 { return 6; }
+            // { double, double } when only one XMM is left: does not fit
+            let full = sysv_eightbyte_location(dd, 0, 7, 6, 8, 16);
+            if full.kind != ArgPassKind::Void { return 7; }
+            return 100;
+        }
+    "#;
+    let res = eval_m13(deps, eightbytes);
+    assert_eq!(res, "100", "SysV eightbyte classes must follow the psABI merge rules");
+
+    // A 16-byte aggregate return needs its members; TypeLayout has none yet.
+    let small_agg = r#"
+        pub fn main() -> i64 {
+            let p_i64 = TypeLayout::create(8, 8, 0, 0);
+            let params: slice<TypeLayout> = [p_i64];
+            let ret16 = TypeLayout::create(16, 8, 0, 5);
+            let plan = SysVConvClassifier::classify(params, ref ret16, 0);
+            return 100;
+        }
+    "#;
+    let res = eval_m13(deps, small_agg);
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `abi.aggregate_fields`"),
+        "classifying a small aggregate must stop at the member-layout seam, got {res}"
+    );
 
     guard.finish();
 }
@@ -241,20 +285,39 @@ fn test_m13_2_win64_shadow_space_and_aapcs64_x8_sret_hfa() {
             if !arm_spec.sret_dedicated_reg { return 4; }
             if arm_spec.sret_reg != 8 { return 5; }
 
-            let ret_struct32 = TypeLayout::create(32, 8, 0, 5);
+            // 48 bytes can never be an HFA (at most 4 x 8 bytes), so it is
+            // returned through X8 whatever its members are.
+            let ret_struct48 = TypeLayout::create(48, 8, 0, 5);
             let p_i64 = TypeLayout::create(8, 8, 0, 0);
             let params_arm: slice<TypeLayout> = [p_i64];
-            let plan_arm = Aapcs64ConvClassifier::classify(params_arm, ref ret_struct32, 0);
+            let plan_arm = Aapcs64ConvClassifier::classify(params_arm, ref ret_struct48, 0);
             if plan_arm.sret_uses_gpr0 { return 6; } // Does NOT use GPR0!
+            if plan_arm.ret_loc.reg0 != 8 { return 61; } // X8
             let arm_p0 = plan_arm.get_param(0);
             if arm_p0.reg0 != 0 { return 7; } // Explicit arg 0 remains in X0!
 
-            // 3. AAPCS64: Homogeneous Floating-Point Aggregate (HFA 3-float 12B)
-            let hfa3 = TypeLayout::create(12, 4, 0, 5);
-            let params_hfa: slice<TypeLayout> = [hfa3];
-            let plan_hfa = Aapcs64ConvClassifier::classify(params_hfa, ref ret_void, 0);
-            let hfa_p0 = plan_hfa.get_param(0);
-            if hfa_p0.reg1 != 3 { return 8; } // 3 SIMD registers used for HFA3!
+            // 3. AAPCS64 HFAs (5.9.5.1): 1-4 float members of one size.
+            let s4 = AbiFieldClass::create(0, 4, 2);
+            let s4b = AbiFieldClass::create(4, 4, 2);
+            let s4c = AbiFieldClass::create(8, 4, 2);
+            if aapcs64_hfa_count([s4, s4b, s4c], 12) != 3 { return 8; }
+            let d0 = AbiFieldClass::create(0, 8, 2);
+            let d1 = AbiFieldClass::create(8, 8, 2);
+            let d2 = AbiFieldClass::create(16, 8, 2);
+            let d3 = AbiFieldClass::create(24, 8, 2);
+            if aapcs64_hfa_count([d0, d1, d2, d3], 32) != 4 { return 81; }
+            let mid_int = AbiFieldClass::create(4, 4, 0);
+            if aapcs64_hfa_count([s4, mid_int, s4c], 12) != 0 { return 82; }
+            let f_after_d = AbiFieldClass::create(8, 4, 2);
+            if aapcs64_hfa_count([d0, f_after_d], 16) != 0 { return 83; }
+            let hfa_loc = aapcs64_hfa_location(0, 3, 12);
+            if hfa_loc.kind != ArgPassKind::HfaSimd3 || hfa_loc.reg1 != 3 { return 84; }
+
+            // RISC-V LP64D: { double, long } -> fa0 + a0; { int, int } -> integer rule.
+            let rv_mixed = riscv_fp_struct_location([d0, AbiFieldClass::create(8, 8, 0)], 0, 0, 16);
+            if rv_mixed.kind != ArgPassKind::PairSimdGpr { return 85; }
+            let rv_ints = riscv_fp_struct_location([AbiFieldClass::create(0, 4, 0), mid_int], 0, 0, 8);
+            if rv_ints.kind != ArgPassKind::Void { return 86; }
 
             // 4. RISC-V and WASM specs
             let rv_spec = Riscv64ConvClassifier::spec();
@@ -415,6 +478,29 @@ fn test_m13_4_pilvm_frame_homoiconic_call_and_diagnostics() {
 
     let res = eval_m13(&["stdlib/pilot/abi/descriptor.pilot"], script);
     assert_eq!(res, "300", "PilVM frame & diagnostics passed");
+
+    // Invoking a planned frame from PilVM stops at the native-call seam.
+    let invoke = r#"
+        pub fn main() -> i64 {
+            var pkt = RawDispatchPacket::create_empty();
+            let plan = AbiFramePlan {
+                conv_id: "sysv_x64",
+                sret_uses_gpr0: false,
+                ret_loc: ArgLocation::direct_gpr(0, 8),
+                param_locs: [ArgLocation::direct_simd(0, 8)],
+                aligned_stack_bytes: 0,
+            };
+            // Never dereferenced: the call stops at the seam first.
+            let addr = 4096;
+            let r = invoke_dynamic_frame(addr, ref plan, var pkt);
+            return 300;
+        }
+    "#;
+    let res = eval_m13(&["stdlib/pilot/abi/descriptor.pilot"], invoke);
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `abi.invoke_frame`"),
+        "PilVM frame invocation must stop at its seam, got {res}"
+    );
 
     guard.finish();
 }

@@ -1,0 +1,59 @@
+// =========================================================================
+// FILE: stdlib/core/builtins/native_calls.pilot
+// NAMES THE SEED ANSWERS WITH ENGINE INTRINSICS
+// =========================================================================
+// The seed runs these calls, methods, properties and values directly with
+// the engine intrinsic each one is bound to here. A user-declared function or
+// method of the same name takes precedence over a native method.
+//
+// `List<T>` and `Map<K, V>` are declared in `std.col` over raw memory, which
+// the seed cannot run until F6. Until then their constructors build the
+// engine's own list and map, and the methods below act on those.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Builtins.NativeCalls;
+
+use Pilot.Core.Genesis.*;
+
+comptime {
+    // Functions: `name(args)`.
+    __engine("bind_native_fn", nameof(print),   "rt_print");
+    __engine("bind_native_fn", nameof(println), "rt_print");
+    __engine("bind_native_fn", nameof(eprint),  "rt_eprint");
+    __engine("bind_native_fn", nameof(assert),  "rt_assert");
+    __engine("bind_native_fn", nameof(List),    "list_new");
+    __engine("bind_native_fn", nameof(Map),     "map_new");
+    // `seam("id", "note")`: an intentionally unconnected entry or exit point.
+    // It always fails; every call is listed in `selfhost/gate/ledger/seams.pilot`.
+    __engine("bind_native_fn", nameof(seam),    "seam_open");
+
+    // Methods on strings, lists and records: `value.name(args)`.
+    __engine("bind_native_method", nameof(len),         "str_len");
+    __engine("bind_native_method", nameof(get),         "map_get");
+    __engine("bind_native_method", nameof(set),         "map_set");
+    __engine("bind_native_method", nameof(has),         "map_has");
+    __engine("bind_native_method", nameof(remove),      "map_remove");
+    __engine("bind_native_method", nameof(push),        "list_push");
+    __engine("bind_native_method", nameof(pop),         "list_pop");
+    __engine("bind_native_method", nameof(remove_at),   "list_remove_at");
+    __engine("bind_native_method", nameof(trim),        "str_trim");
+    __engine("bind_native_method", nameof(to_str),      "to_str");
+    __engine("bind_native_method", nameof(byte_at),     "str_byte_at");
+    __engine("bind_native_method", nameof(slice),       "str_slice");
+    __engine("bind_native_method", nameof(substring),   "str_slice");
+    __engine("bind_native_method", nameof(find),        "str_find");
+    __engine("bind_native_method", nameof(index_of),    "str_find");
+    __engine("bind_native_method", nameof(replace),     "str_replace");
+    __engine("bind_native_method", nameof(contains),    "str_contains");
+    __engine("bind_native_method", nameof(starts_with), "str_starts_with");
+    __engine("bind_native_method", nameof(ends_with),   "str_ends_with");
+    __engine("bind_native_method", nameof(is_null),     "is_null");
+
+    // Properties: `value.name`, when the value has no field of that name.
+    __engine("bind_native_property", nameof(len), "str_len");
+
+    // Values: the program environment record.
+    __engine("bind_native_value", nameof(ENV), "get_env");
+
+    // Compile-time questions about a type argument.
+    __engine("bind_type_query", nameof(sizeof), "byte_size");
+}

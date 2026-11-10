@@ -50,7 +50,6 @@ pub struct StreamPipelineSpec : IObject {
 pub struct FusedLoopPlan : IValue {
     pub stages_fused:           usize;
     pub allocations_saved:      usize;
-    pub estimated_instructions: usize;
     pub is_zero_alloc:          bool;
 }
 
@@ -69,22 +68,15 @@ pub fn stream_pipeline_spec_new(src_name: str, src_len: usize, term: StreamTermi
 
 pub fn fuse_stream_pipeline(spec: StreamPipelineSpec) -> FusedLoopPlan {
     let n_stages = spec.stages.len();
+    // Each element-producing stage would otherwise materialize an
+    // intermediate buffer; fusing the chain into one loop removes it.
     var alloc_saved = 0;
-    var instr_count = 5; // Base while loop instructions (load, cmp, branch, add, jmp)
 
     var i = 0;
     while i < n_stages {
         let st = spec.stages[i];
-        if st.kind == StreamStageKind::Filter {
-            alloc_saved = alloc_saved + 1; // Saved intermediate Filter buffer
-            instr_count = instr_count + 2; // Inlined test + conditional jump
-        } else if st.kind == StreamStageKind::Map {
-            alloc_saved = alloc_saved + 1; // Saved intermediate Map buffer
-            instr_count = instr_count + 1; // Inlined arithmetic transform
-        } else if st.kind == StreamStageKind::Take {
-            instr_count = instr_count + 2; // Bound comparison
-        } else if st.kind == StreamStageKind::Step {
-            instr_count = instr_count + 1; // Stride addition
+        if st.kind != StreamStageKind::SourceSlice {
+            alloc_saved = alloc_saved + 1;
         }
         i = i + 1;
     }
@@ -94,31 +86,16 @@ pub fn fuse_stream_pipeline(spec: StreamPipelineSpec) -> FusedLoopPlan {
     return FusedLoopPlan {
         stages_fused:           n_stages,
         allocations_saved:      alloc_saved,
-        estimated_instructions: instr_count,
         is_zero_alloc:          is_zero_alloc,
     };
 }
 
 // ------------------------------------------------------------------------------
-// 3. Direct Loop Execution Simulation (Verified Against Hand-Written Loop)
+// 3. Hand-off to PilIR
 // ------------------------------------------------------------------------------
 
-pub fn execute_fused_pipeline_mock(
-    data: slice<i64>,
-    filter_even_only: bool,
-    map_mul: i64,
-    map_add: i64
-) -> i64 {
-    var total: i64 = 0;
-    let n = data.len();
-    var idx: usize = 0;
-    while idx < n {
-        let x = data[idx];
-        if !filter_even_only || (x & 1) == 0 {
-            let transformed = x * map_mul + map_add;
-            total = total + transformed;
-        }
-        idx = idx + 1;
-    }
-    return total;
+/// Replaces the combinator chain in the caller's PilIR with the single fused
+/// loop the plan describes. The typed SSA IR it rewrites does not exist yet.
+pub fn rewrite_fused_pipeline(spec: StreamPipelineSpec, plan: FusedLoopPlan) -> i64 {
+    return seam("fusion.rewrite_ir", "typed PilIR function builder arrives in F5");
 }

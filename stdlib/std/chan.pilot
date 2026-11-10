@@ -14,8 +14,11 @@ pub struct Chan<T: IAnyValue> : IObject {
     pub pure fn len(ref self) -> usize => self.queue.len;
     pub pure fn is_closed(ref self) -> bool => !self.is_open;
 
+    /// Queues `val`. Fails when the channel is closed or, for a bounded
+    /// channel (`capacity > 0`), full.
     pub fn send(var ref self, val: T) -> bool {
         if !self.is_open { return false; }
+        if self.capacity > 0 && self.queue.len >= self.capacity { return false; }
         self.queue.push(val);
         return true;
     }

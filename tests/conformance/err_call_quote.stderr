@@ -1,0 +1,1 @@
+err_call_quote.pilot:8:17: runtime error: SEAM001: unconnected seam `vm.call_quote`

@@ -1,0 +1,17 @@
+// A switch over an enum must handle every variant or have a wildcard arm (FLOW005).
+enum Shade {
+    Light,
+    Dark,
+    Dim,
+}
+
+fn name(s: Shade) -> str {
+    return switch s {
+        case ::Light: "light";
+        case ::Dark: "dark";
+    };
+}
+
+fn main() {
+    print(name(Shade::Dim));
+}

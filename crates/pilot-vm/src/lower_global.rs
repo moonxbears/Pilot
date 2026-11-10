@@ -29,6 +29,12 @@ impl BytecodeCompiler {
     /// Records the top-level bindings that are globals.
     pub(crate) fn register_global(&mut self, arena: &AstArena, decl: NodeId) {
         let n = arena.node(decl);
+        if Self::is_destructuring_let(arena, decl) {
+            let mut names = Vec::new();
+            Self::pattern_names(arena, NodeId(n.lhs), &mut names);
+            self.globals.extend(names);
+            return;
+        }
         let name = Self::name(arena, n.lhs);
         if !self.const_maps.contains_key(name) {
             self.globals.insert(name.to_string());
@@ -38,12 +44,17 @@ impl BytecodeCompiler {
     /// Whether `decl`, a top-level item, declares a global.
     pub(crate) fn is_global_decl(&self, arena: &AstArena, decl: NodeId) -> bool {
         let n = arena.node(decl);
-        matches!(n.node_kind(), NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl)
-            && self.globals.contains(Self::name(arena, n.lhs))
+        if !matches!(n.node_kind(), NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl) {
+            return false;
+        }
+        Self::is_destructuring_let(arena, decl) || self.globals.contains(Self::name(arena, n.lhs))
     }
 
     /// Runs a top-level binding of a global.
     pub(crate) fn compile_global_let(&mut self, arena: &AstArena, decl: NodeId) -> u8 {
+        if Self::is_destructuring_let(arena, decl) {
+            return self.compile_global_destructuring_let(arena, decl);
+        }
         let n = *arena.node(decl);
         let name = Self::name(arena, n.lhs).to_string();
         let mark = self.next_reg;

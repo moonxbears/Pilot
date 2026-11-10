@@ -1,0 +1,12 @@
+// `union`, `intersect` and `except` on lists, implemented in Pilot by
+// `stdlib/db/set_ops.pilot`. Results keep first-appearance order and hold no
+// duplicates.
+fn main() {
+    let a = [1, 2, 3, 2];
+    let b = [3, 4, 1];
+    print(a union b);
+    print(a intersect b);
+    print(a except b);
+    print(["x", "y"] union ["y", "z"]);
+    print([[1], [2]] except [[2]]);
+}

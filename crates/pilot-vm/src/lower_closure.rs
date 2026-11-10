@@ -27,7 +27,10 @@ impl BytecodeCompiler {
             .map(|&p| Self::name(arena, arena.node(NodeId(p)).lhs).to_string())
             .collect();
         if params.len() > MAX_CLOSURE_ARGS {
-            return self.error(format!("a lambda takes at most {MAX_CLOSURE_ARGS} parameters"));
+            return self.error(
+                crate::codes::SEED,
+                format!("a lambda takes at most {MAX_CLOSURE_ARGS} parameters"),
+            );
         }
         let dst = self.alloc_reg();
         let skip = self.emit_jump(0);
@@ -59,7 +62,10 @@ impl BytecodeCompiler {
         self.patch_to_here(skip);
 
         if captured.len() > MAX_CAPTURES {
-            return self.error(format!("a lambda captures at most {MAX_CAPTURES} variables"));
+            return self.error(
+                crate::codes::SEED,
+                format!("a lambda captures at most {MAX_CAPTURES} variables"),
+            );
         }
         let mark = self.next_reg;
         let mut regs = vec![
@@ -71,7 +77,10 @@ impl BytecodeCompiler {
                 Some(r) => r,
                 None => self
                     .capture_read(name)
-                    .unwrap_or_else(|| self.error(format!("undefined name `{name}`"))),
+                    .unwrap_or_else(|| self.error(
+                        crate::codes::UNDECLARED,
+                        format!("undefined name `{name}`"),
+                    )),
             };
             regs.push(r);
         }
@@ -123,9 +132,12 @@ impl BytecodeCompiler {
             .copied()
             .or_else(|| self.fn_entries.get(name).map(|(_, params)| params.len()))?;
         if arity > MAX_CLOSURE_ARGS {
-            return Some(self.error(format!(
-                "`{name}` takes {arity} parameters; a function value takes at most {MAX_CLOSURE_ARGS}"
-            )));
+            return Some(self.error(
+                crate::codes::SEED,
+                format!(
+                    "`{name}` takes {arity} parameters; a function value takes at most {MAX_CLOSURE_ARGS}"
+                ),
+            ));
         }
         let r_entry = self.alloc_reg();
         let idx = self.push_ins(Instruction::encode_wide(Opcode::LoadConst, r_entry, 0));
@@ -137,9 +149,12 @@ impl BytecodeCompiler {
     /// Calls the function value in `r_callee` with `args`.
     pub(crate) fn emit_closure_call(&mut self, r_callee: u8, args: &[u8]) -> u8 {
         if args.len() > MAX_CLOSURE_ARGS {
-            return self.error(format!(
-                "a call through a function value takes at most {MAX_CLOSURE_ARGS} arguments"
-            ));
+            return self.error(
+                crate::codes::SEED,
+                format!(
+                    "a call through a function value takes at most {MAX_CLOSURE_ARGS} arguments"
+                ),
+            );
         }
         self.stage_args(args);
         let dst = self.alloc_reg();

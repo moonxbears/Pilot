@@ -204,7 +204,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                         if bn.node_kind() == NodeKind::BlockExpr { for &c in arena.children_slice(bn.lhs, bn.rhs) { push_ch(c); } } else { push_ch(node.rhs); }
                     }
                 }
-                NodeKind::FnDecl | NodeKind::AdtVariant | NodeKind::PatVariant | NodeKind::TypeNamed => {
+                NodeKind::FnDecl | NodeKind::OperatorDecl | NodeKind::AdtVariant | NodeKind::PatVariant | NodeKind::TypeNamed => {
                     for &c in arena.children_slice(node.rhs, node.flags as u32) { push_ch(c); }
                 }
                 NodeKind::TypeAdtDecl => if node.flags > 0 { for &c in arena.children_slice(node.rhs, node.flags as u32) { push_ch(c); } } else { push_ch(node.rhs); },
@@ -216,7 +216,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                 }
                 NodeKind::Program | NodeKind::BlockExpr | NodeKind::CallExpr | NodeKind::TupleExpr | NodeKind::ListExpr
                 | NodeKind::MapExpr | NodeKind::MatchExpr | NodeKind::TryStmt | NodeKind::ConstructorDecl
-                | NodeKind::IndexerDecl | NodeKind::OperatorDecl | NodeKind::TypeTuple | NodeKind::PatTuple | NodeKind::PatSlice => {
+                | NodeKind::IndexerDecl | NodeKind::TypeTuple | NodeKind::PatTuple | NodeKind::PatSlice => {
                     for &c in arena.children_slice(node.lhs, node.rhs) { push_ch(c); }
                 }
                 NodeKind::BinaryExpr | NodeKind::AssignStmt | NodeKind::WhileStmt | NodeKind::IndexExpr | NodeKind::CascadeExpr
@@ -224,6 +224,8 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                 | NodeKind::GuardStmt | NodeKind::MatchArm | NodeKind::ScopeDecl | NodeKind::PatOr | NodeKind::PatRange => {
                     push_ch(node.lhs); push_ch(node.rhs);
                 }
+                // `name: value`: the name is a symbol, the value a node.
+                NodeKind::CallArg => push_ch(node.rhs),
                 NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl | NodeKind::CatchClause => push_ch(node.rhs),
                 NodeKind::MemberExpr | NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::YieldStmt | NodeKind::DeferStmt | NodeKind::BreakStmt | NodeKind::ContinueStmt
                 | NodeKind::ExprStmt | NodeKind::TryPropagateExpr | NodeKind::DestructorDecl | NodeKind::DynamicMemberDecl

@@ -89,7 +89,9 @@ pub struct WeaverProtocolRegistry : IObject {
     pub static fn create() -> WeaverProtocolRegistry {
         var reg = WeaverProtocolRegistry { entries: [] };
 
-        // Base IAttribute Sub-Interfaces
+        // The pillar interfaces. An attribute's pillar is never registered by
+        // its name: it is derived from the interfaces its `...Attr`
+        // declaration implements (see `classify_attribute`).
         reg.register("ITypeWeaverAttribute", 1);
         reg.register("IInterceptor", 2);
         reg.register("IFieldWeaverAttribute", 3);
@@ -98,52 +100,6 @@ pub struct WeaverProtocolRegistry : IObject {
         reg.register("IInheritedAttribute", 6);
         reg.register("IEcsRule", 7);
         reg.register("IPatchAttribute", 8);
-
-        // Core Builtin Mappings (Table-Driven Registry)
-        reg.register("Rule", 7);
-        reg.register("RuleAttr", 7);
-        reg.register("Clamp", 5);
-        reg.register("ClampAttr", 5);
-        reg.register("OnChange", 5);
-        reg.register("OnChangeAttr", 5);
-        reg.register("Formula", 4);
-        reg.register("FormulaAttr", 4);
-        reg.register("TraceSpan", 2);
-        reg.register("TraceSpanAttr", 2);
-        reg.register("HardRealtime", 6);
-        reg.register("HardRealtimeAttr", 6);
-        reg.register("Wcet", 6);
-        reg.register("WcetAttr", 6);
-        reg.register("ZeroRuntime", 6);
-        reg.register("ZeroRuntimeAttr", 6);
-        reg.register("Eq", 1);
-        reg.register("EqAttr", 1);
-        reg.register("Ord", 1);
-        reg.register("OrdAttr", 1);
-        reg.register("Hash", 1);
-        reg.register("HashAttr", 1);
-        reg.register("Clone", 1);
-        reg.register("CloneAttr", 1);
-        reg.register("Default", 1);
-        reg.register("DefaultAttr", 1);
-        reg.register("Display", 1);
-        reg.register("DisplayAttr", 1);
-        reg.register("Json", 1);
-        reg.register("JsonAttr", 1);
-        reg.register("Binary", 1);
-        reg.register("BinaryAttr", 1);
-        reg.register("SkipEq", 3);
-        reg.register("SkipEqAttr", 3);
-        reg.register("SkipHash", 3);
-        reg.register("SkipHashAttr", 3);
-        reg.register("Redact", 3);
-        reg.register("RedactAttr", 3);
-        reg.register("JsonRename", 3);
-        reg.register("JsonRenameAttr", 3);
-        reg.register("JsonSkip", 3);
-        reg.register("JsonSkipAttr", 3);
-        reg.register("JsonFlatten", 3);
-        reg.register("JsonFlattenAttr", 3);
 
         return reg;
     }
@@ -166,31 +122,59 @@ pub struct WeaverProtocolRegistry : IObject {
         return 0;
     }
 
+    /// The pillar of `[attr_name]`, derived from the interfaces its
+    /// `<attr_name>` / `<attr_name>Attr` struct declaration implements,
+    /// following interface bases transitively. -1 when the declaration is not
+    /// in the arena: an undeclared attribute has no pillar to check.
     pub fn classify_attribute(ref self, attr_name: str, node_count: i64) -> i64 {
         let decl_nid = find_attr_struct_node(attr_name, node_count);
-        if decl_nid >= 0 {
-            let bc = __engine(WeaverHooks.ast_base_count, decl_nid);
-            var bi = 0;
-            while bi < bc {
-                let bsym = __engine(WeaverHooks.ast_base_at, decl_nid, bi);
-                let bname = __engine(WeaverHooks.sym_str, bsym);
-                let pid = self.lookup(bname);
-                if pid > 0 {
-                    return pid;
-                }
-                bi = bi + 1;
+        if decl_nid < 0 {
+            return -1;
+        }
+        return self.pillar_of_bases(decl_nid, node_count, 0);
+    }
+
+    /// The first pillar reached through the bases of `decl_nid`, or 0 (plain
+    /// metadata) when none of them leads to a pillar interface.
+    pub fn pillar_of_bases(ref self, decl_nid: i64, node_count: i64, depth: i64) -> i64 {
+        if depth > node_count {
+            return 0;
+        }
+        let bc = __engine(WeaverHooks.ast_base_count, decl_nid);
+        var bi = 0;
+        while bi < bc {
+            let bsym = __engine(WeaverHooks.ast_base_at, decl_nid, bi);
+            let bname = __engine(WeaverHooks.sym_str, bsym);
+            let pid = self.lookup(bname);
+            if pid > 0 {
+                return pid;
             }
-        }
-        let direct_pid = self.lookup(attr_name);
-        if direct_pid > 0 {
-            return direct_pid;
-        }
-        let suffixed_pid = self.lookup(attr_name + "Attr");
-        if suffixed_pid > 0 {
-            return suffixed_pid;
+            let iface_nid = find_interface_node(bname, node_count);
+            if iface_nid >= 0 && iface_nid != decl_nid {
+                let inherited = self.pillar_of_bases(iface_nid, node_count, depth + 1);
+                if inherited > 0 {
+                    return inherited;
+                }
+            }
+            bi = bi + 1;
         }
         return 0;
     }
+}
+
+/// The interface declaration named `name`, or -1.
+pub fn find_interface_node(name: str, node_count: i64) -> i64 {
+    var i = 0;
+    while i < node_count {
+        if __engine(WeaverHooks.ast_node_kind, i) == 2 {
+            let nm = __engine(WeaverHooks.sym_str, __engine(WeaverHooks.ast_node_sym, i));
+            if nm == name {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    return -1;
 }
 
 pub fn find_attr_struct_node(attr_name: str, node_count: i64) -> i64 {
