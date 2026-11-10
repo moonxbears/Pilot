@@ -231,6 +231,8 @@ pub struct AstArena {
     pub base_types: Vec<(NodeId, NodeId)>,
     pub type_params: Vec<(NodeId, SymbolId)>,
     pub for_clauses: Vec<(NodeId, NodeId)>,
+    /// `case p if cond:` guards; `MatchArm.flags` holds the index + 1.
+    pub arm_guards: Vec<NodeId>,
     pub diagnostics: Vec<(ByteSpan, String)>,
     pub i64_pool: Vec<i64>,
     pub f64_pool: Vec<f64>,
@@ -247,7 +249,7 @@ impl AstArena {
             decl_flags: Vec::with_capacity(expected), type_annots: Vec::with_capacity(expected),
             extra_children: Vec::with_capacity(expected),
             attrs: Vec::new(), base_types: Vec::new(), type_params: Vec::new(),
-            for_clauses: Vec::new(), diagnostics: Vec::new(),
+            for_clauses: Vec::new(), arm_guards: Vec::new(), diagnostics: Vec::new(),
             i64_pool: Vec::with_capacity(expected / 4), f64_pool: Vec::with_capacity(expected / 8),
             interner: Interner::with_capacity(expected / 2, expected * 8), root: NodeId::NONE,
         }
@@ -287,6 +289,23 @@ impl AstArena {
         let clause_idx = self.for_clauses.len();
         self.for_clauses.push((iter, then_node));
         self.alloc_node(NodeKind::ForExpr, (clause_idx + 1) as u16, span, var_sym.0, body.0)
+    }
+
+    /// Allocates a `switch` arm; `guard` may be `NodeId::NONE`.
+    pub fn alloc_match_arm(&mut self, pat: NodeId, guard: NodeId, body: NodeId, span: ByteSpan) -> NodeId {
+        let flags = if guard.is_none() {
+            0
+        } else {
+            self.arm_guards.push(guard);
+            self.arm_guards.len() as u16
+        };
+        self.alloc_node(NodeKind::MatchArm, flags, span, pat.0, body.0)
+    }
+
+    /// The guard of a `MatchArm`, or `NodeId::NONE`.
+    pub fn arm_guard(&self, id: NodeId) -> NodeId {
+        let f = self.node(id).flags as usize;
+        if f > 0 { self.arm_guards.get(f - 1).copied().unwrap_or(NodeId::NONE) } else { NodeId::NONE }
     }
 
     #[inline] pub fn alloc_int(&mut self, val: i64, span: ByteSpan) -> NodeId {

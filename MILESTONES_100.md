@@ -1579,10 +1579,17 @@ These rules apply to every `F` milestone and replace the "four function-level te
   - Done: deliverables 3, 4 and 5; deliverable 1 for lists and records (`TAG_LIST`, `TAG_MAP`); f-string interpolation, ranges and `??` from deliverable 2. Both deletions are done: unlowered node kinds and unknown operators are now compile errors (`is not lowered by the seed yet`), and erroneous nodes compile to a `Trap` opcode.
   - The VM records a `VmFault` with a source span. `pilot run` prints `file:line:col: error:` and exits 1. `run_pilot_analyzer`, the bootstrap manifest and the self-hosted tool scripts surface faults instead of returning `null`.
   - `.pilc` format is now version 4 (opcodes renumbered to tag-polymorphic `Add`/`Sub`/…; `selfhost/vm/compiler.pilot` and `selfhost/pilotc.pilot` updated to match).
-  - `tests/conformance/` holds 24 programs (10 error cases) run by `crates/pilot-cli/tests/conformance.rs`.
+  - `tests/conformance/` holds 24 programs after part 1 (10 error cases) run by `crates/pilot-cli/tests/conformance.rs`.
   - Turning faults on exposed latent bugs in Pilot sources that the old VM hid by reading null as `0`; these were fixed at the source (`?? 0` defaults, undeclared `ccount` in `analyzer.pilot`, `static` method reading `self` in `abi/aapcs64.pilot`, integer `0` used as the environment record, `< 0` checks on record handles).
-  - Remaining: `switch`, closures and lambdas, `defer`, `guard`, `try`/`catch`, postfix `?`, cascades, `comptime` blocks, constructors, field defaults and `~self()`, dimensional units and `f64(x)` casts (`examples/overview.pilot` stops on these), runtime method dispatch and the enumerator protocol, structural equality for lists, a closure value kind, the legacy `tests/*.pilot` corpus, and moving the `SeedBuiltin` method table into Pilot.
-  - Parser defect found: contextual keywords are taken over in identifier position (`var pkg = …`, a binding named `default` or `fallback` is rejected or silently dropped). Fix in the parser, not by renaming user code.
+- **Progress (2026-11-09, part 2):**
+  - `switch` lowers literal, enum-variant (`Enum.V`, `::V`), range (`..`, `..=`), or (`|`), tuple, binding and wildcard patterns, plus arm guards (`case x if cond:`), which the parser used to discard. `break` leaves the `switch`; `continue` reaches the enclosing loop. With no matching arm the `switch` yields `none`.
+  - `guard cond else`, `guard some x else` and `guard some x = v else` lower; the parser now keeps the binding name and the `some` form.
+  - Postfix `?` propagates `none`. On a record (a `res`/`opt` struct) it faults, because unwrapping must go through the type's `op ?` method and the seed cannot dispatch methods yet.
+  - Lambdas, captured variables, named functions used as values, and calls through function values are in. There is a function value kind (`TAG_FN`) and a `CallClosure` opcode. Captures are by value, so assigning to a captured variable is a compile error.
+  - Parser fixes: `var <modifier-word> = …` and a statement starting with `pkg`/`mod` now parse as bindings and expressions. A variable named after a foreign language (`c`, `rust`, …) is no longer read as an inline foreign block in `switch`/`if`/`while` subjects. Range patterns use the range precedence from the Pilot operator table. A binary operator missing an operand is a compile error instead of a compiler crash.
+  - Using a declared keyword as a name (`var pkg`, `fn default()`) parses but stays the analyzer's KW001 error, as `stdlib/core/keywords.pilot` declares; `pilot run` does not run the analyzer yet (F3).
+  - `tests/conformance/` now holds 28 programs (11 error cases).
+  - Remaining: `try`/`catch`, `defer`, cascades, `comptime` blocks, constructors, field defaults and `~self()`, dimensional units and `f64(x)` casts (`examples/overview.pilot` stops on these), runtime method dispatch (which also unlocks `op ?` on `res`/`opt`) and the enumerator protocol, variant patterns with payloads, structural equality for lists, the legacy `tests/*.pilot` corpus, and moving the `SeedBuiltin` method table into Pilot.
 
 ### F2 — Real Module Linking
 

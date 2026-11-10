@@ -8,8 +8,10 @@
 mod heap;
 pub mod instruction;
 mod lower_call;
+mod lower_closure;
 mod lower_expr;
 mod lower_stmt;
+mod lower_switch;
 mod ops;
 pub mod pilc;
 pub mod vm;
@@ -49,10 +51,23 @@ const MAX_CALL_ARGS: usize = 16;
 struct LoopCtx {
     continue_jumps: Vec<usize>,
     break_jumps: Vec<usize>,
+    /// A `switch` takes `break` but passes `continue` to the enclosing loop.
+    is_switch: bool,
+}
+
+/// A lambda being compiled: what its enclosing scope can see, which of those
+/// names the body captured (in environment order), and where the body keeps
+/// its environment.
+#[derive(Clone)]
+struct CaptureCtx {
+    outer_slots: HashMap<String, u8>,
+    names: Vec<String>,
+    env_slot: u8,
 }
 
 /// Per-function compiler state, saved and restored around nested functions.
 struct FnState {
+    captures: Vec<CaptureCtx>,
     var_slots: HashMap<String, u8>,
     var_types: HashMap<String, String>,
     cur_ret_type: Option<String>,
@@ -83,6 +98,14 @@ pub struct BytecodeCompiler {
     type_hint: Option<String>,
     next_local_reg: u8,
     next_reg: u8,
+    /// Enclosing lambdas, innermost last. Empty inside named functions.
+    captures: Vec<CaptureCtx>,
+    /// Arity of every top-level function, so a function can be used as a
+    /// value before its body is compiled.
+    known_fns: HashMap<String, usize>,
+    /// `LoadConst` instructions that must load a function's entry point once
+    /// it is known.
+    entry_patches: Vec<(usize, String, ByteSpan)>,
 }
 
 impl BytecodeCompiler {
@@ -117,8 +140,24 @@ impl BytecodeCompiler {
         bin
     }
 
-    /// Patches forward calls once every function entry is known.
+    /// Patches forward calls and function-value entry points once every
+    /// function entry is known.
     fn resolve_calls(&mut self) {
+        for (idx, name, span) in std::mem::take(&mut self.entry_patches) {
+            let dst = self.instructions[idx].dst();
+            match self.fn_entries.get(&name).map(|&(e, _)| e) {
+                Some(e) => {
+                    let c = self.add_constant(PilotVal::from_int(e as i64));
+                    self.instructions[idx] = Instruction::encode_wide(Opcode::LoadConst, dst, c);
+                }
+                None => {
+                    let message = format!("no function named `{name}`");
+                    let c = self.add_constant(PilotVal::from_str(&message));
+                    self.instructions[idx] = Instruction::encode_wide(Opcode::Trap, 0, c);
+                    self.diagnostics.push(CompileDiagnostic { span, message });
+                }
+            }
+        }
         let patches = std::mem::take(&mut self.call_patches);
         for (idx, full, bare, span) in patches {
             let dst = self.instructions[idx].dst();
@@ -292,6 +331,7 @@ impl BytecodeCompiler {
 
     fn save_fn_state(&mut self) -> FnState {
         FnState {
+            captures: std::mem::take(&mut self.captures),
             var_slots: std::mem::take(&mut self.var_slots),
             var_types: std::mem::take(&mut self.var_types),
             cur_ret_type: self.cur_ret_type.take(),
@@ -302,6 +342,7 @@ impl BytecodeCompiler {
     }
 
     fn restore_fn_state(&mut self, s: FnState) {
+        self.captures = s.captures;
         self.var_slots = s.var_slots;
         self.var_types = s.var_types;
         self.cur_ret_type = s.cur_ret_type;

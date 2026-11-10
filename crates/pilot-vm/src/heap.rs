@@ -291,6 +291,35 @@ impl PilVirtualMachine {
                 Ok(PilotVal::from_bool(self.heap_maps[slot].remove(&k).is_some()))
             }
             "is_null" => Ok(PilotVal::from_bool(arg(args, 0, op)?.is_null())),
+            // `closure_new(entry, arity, captured...)` builds a function value.
+            "closure_new" => {
+                let slot = self.heap_lists.len();
+                self.heap_lists.push(args.to_vec());
+                Ok(PilotVal::from_fn_handle(slot))
+            }
+            // `closure_env(fn, i)` reads the i-th captured value of a closure.
+            "closure_env" => {
+                let f = arg(args, 0, op)?;
+                let i = arg(args, 1, op)?.as_int().unwrap_or(-1);
+                f.as_fn_handle()
+                    .and_then(|slot| self.heap_lists.get(slot))
+                    .and_then(|env| usize::try_from(i).ok().and_then(|i| env.get(i + 2)))
+                    .copied()
+                    .ok_or_else(|| format!("{} has no captured value #{i}", f.kind_label()))
+            }
+            // Postfix `?` on a non-null value. Records (`res`, `opt` structs)
+            // unwrap through their `op ?` method, which the seed cannot
+            // dispatch yet, so they fault instead of passing through unchanged.
+            "try_unwrap" => {
+                let v = arg(args, 0, op)?;
+                if v.is_map() {
+                    return Err(format!(
+                        "postfix `?` on a {} needs its `op ?` method, which the seed cannot dispatch yet",
+                        v.kind_label()
+                    ));
+                }
+                Ok(v)
+            }
             "list_pop" => {
                 let list = arg(args, 0, op)?;
                 let slot = self.list_slot(list, op)?;

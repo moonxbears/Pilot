@@ -20,6 +20,10 @@ impl BytecodeCompiler {
                     }
                 }
                 NodeKind::TypeAdtDecl => self.register_enum(arena, NodeId(c_id)),
+                NodeKind::FnDecl => {
+                    let arity = (cn.flags as usize).saturating_sub(1);
+                    self.known_fns.insert(Self::name(arena, cn.lhs).to_string(), arity);
+                }
                 _ => {}
             }
         }
@@ -283,6 +287,9 @@ impl BytecodeCompiler {
                         self.emit(Opcode::Move, slot, rhs_r, 0);
                         slot
                     }
+                    None if self.is_captured_name(&name) => self.error(format!(
+                        "cannot assign to `{name}` inside a lambda: closures capture variables by value"
+                    )),
                     None => self.error(format!("assignment to undeclared variable `{name}`")),
                 }
             }
@@ -332,6 +339,7 @@ impl BytecodeCompiler {
         self.loops.push(LoopCtx {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
+            is_switch: false,
         });
         let mark = self.next_reg;
         self.compile_node(arena, body);
@@ -339,6 +347,7 @@ impl BytecodeCompiler {
         self.loops.pop().unwrap_or(LoopCtx {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
+            is_switch: false,
         })
     }
 
@@ -432,7 +441,7 @@ impl BytecodeCompiler {
             return self.error("`break` with a value is not lowered by the seed yet".to_string());
         }
         if self.loops.is_empty() {
-            return self.error("`break` outside of a loop".to_string());
+            return self.error("`break` outside of a loop or switch".to_string());
         }
         let j = self.emit_jump(0);
         if let Some(l) = self.loops.last_mut() {
@@ -445,11 +454,11 @@ impl BytecodeCompiler {
         if has_value {
             return self.error("`continue` with new bounds is not lowered by the seed yet".to_string());
         }
-        if self.loops.is_empty() {
+        if !self.loops.iter().any(|l| !l.is_switch) {
             return self.error("`continue` outside of a loop".to_string());
         }
         let j = self.emit_jump(0);
-        if let Some(l) = self.loops.last_mut() {
+        if let Some(l) = self.loops.iter_mut().rev().find(|l| !l.is_switch) {
             l.continue_jumps.push(j);
         }
         0

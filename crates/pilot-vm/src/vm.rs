@@ -149,6 +149,36 @@ impl PilVirtualMachine {
         }
     }
 
+    /// Saves the live registers and jumps to `entry`; `Ret` writes the result to `dst`.
+    fn enter_call(&mut self, entry: usize, dst: u8) -> Result<(), String> {
+        if self.call_stack.len() >= MAX_CALL_DEPTH {
+            return Err(format!("call depth exceeded {MAX_CALL_DEPTH} frames"));
+        }
+        let act = self
+            .registers
+            .iter()
+            .rposition(|r| !r.is_null())
+            .map_or(0, |i| i + 1);
+        let st = self.reg_stack.len();
+        self.reg_stack.extend_from_slice(&self.registers[..act]);
+        self.call_stack.push((self.pc, st, act as u16, dst));
+        self.pc = entry;
+        Ok(())
+    }
+
+    /// Entry point and arity of a function value.
+    fn closure_target(&self, f: PilotVal) -> Result<(usize, usize), String> {
+        let env = f
+            .as_fn_handle()
+            .and_then(|slot| self.heap_lists.get(slot))
+            .ok_or_else(|| format!("{} is not callable", f.kind_label()))?;
+        let field = |i: usize| env.get(i).and_then(|v| v.as_int()).and_then(|n| usize::try_from(n).ok());
+        match (field(0), field(1)) {
+            (Some(entry), Some(arity)) => Ok((entry, arity)),
+            _ => Err("malformed function value".to_string()),
+        }
+    }
+
     fn execute(&mut self) -> Result<PilotVal, String> {
         let code_len = self.instructions.len();
         while self.pc < code_len {
@@ -234,19 +264,15 @@ impl PilVirtualMachine {
                         self.pc = ins.branch_target() as usize;
                     }
                 }
-                Opcode::Call => {
-                    if self.call_stack.len() >= MAX_CALL_DEPTH {
-                        return Err(format!("call depth exceeded {MAX_CALL_DEPTH} frames"));
+                Opcode::Call => self.enter_call(ins.wide() as usize, ins.dst())?,
+                Opcode::CallClosure => {
+                    let (entry, arity) = self.closure_target(r1)?;
+                    if src2 != arity {
+                        return Err(format!("function expects {arity} argument(s), got {src2}"));
                     }
-                    let act = self
-                        .registers
-                        .iter()
-                        .rposition(|r| !r.is_null())
-                        .map_or(0, |i| i + 1);
-                    let st = self.reg_stack.len();
-                    self.reg_stack.extend_from_slice(&self.registers[..act]);
-                    self.call_stack.push((self.pc, st, act as u16, ins.dst()));
-                    self.pc = ins.wide() as usize;
+                    // The callee finds its environment right after its arguments.
+                    self.registers[src2 + 1] = r1;
+                    self.enter_call(entry, ins.dst())?;
                 }
                 Opcode::Ret => {
                     let ret = if src1 != 0 { r1 } else { self.registers[0] };

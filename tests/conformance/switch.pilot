@@ -1,0 +1,65 @@
+// switch: literal, enum variant, range, or-pattern, tuple, binding,
+// wildcard and arm guards; `break` leaves the switch, not the loop.
+enum Color { Red, Green, Blue }
+
+fn describe(n: i64) -> str {
+    return switch n {
+        case 0: "zero",
+        case 1 | 2 | 3: "small",
+        case 4 ..= 9: "medium",
+        case x if x < 0: "negative",
+        default: "large",
+    };
+}
+
+fn hue(c: Color) -> str {
+    switch c {
+        case ::Red => "warm",
+        case Color.Blue => "cool",
+        _ => "neutral",
+    }
+}
+
+fn pair(p: (i64, i64)) -> str {
+    switch p {
+        case (0, 0): "origin",
+        case (0, y): f"on y at {y}",
+        case (x, _): f"x is {x}",
+    }
+}
+
+fn main() {
+    print(describe(0));
+    print(describe(2));
+    print(describe(9));
+    print(describe(-4));
+    print(describe(42));
+    print(hue(Color.Red));
+    print(hue(Color.Green));
+    print(hue(Color.Blue));
+    print(pair((0, 0)));
+    print(pair((0, 5)));
+    print(pair((7, 1)));
+
+    var total = 0;
+    var i = 0;
+    while i < 5 {
+        i = i + 1;
+        switch i {
+            case 2: {
+                continue;
+            }
+            case 4: {
+                break;
+            }
+            default: {
+                total = total + i;
+            }
+        }
+        total = total + 100;
+    }
+    print(total);
+
+    let unmatched = switch 5 { case 1: "one" };
+    print(unmatched ?? "no arm matched");
+}
