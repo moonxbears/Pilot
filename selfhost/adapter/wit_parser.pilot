@@ -326,7 +326,7 @@ pub fn wit_parse(src: str) -> WitPackage {
     let n = src.len();
     var pos: usize = 0;
 
-    var pkg = wit_package_new("default", "module", "0.1.0");
+    var out_pkg = wit_package_new("default", "module", "0.1.0");
 
     while pos < n {
         // Skip whitespace and comments
@@ -356,13 +356,13 @@ pub fn wit_parse(src: str) -> WitPackage {
             let colon_idx = full_spec.find(":");
             let at_idx = full_spec.find("@");
             if colon_idx > 0 {
-                pkg.ns = full_spec.slice(0, colon_idx as usize);
-                pkg.namespace = pkg.ns;
+                out_pkg.ns = full_spec.slice(0, colon_idx as usize);
+                out_pkg.namespace = out_pkg.ns;
                 if at_idx > colon_idx {
-                    pkg.name = full_spec.slice((colon_idx + 1) as usize, at_idx as usize);
-                    pkg.version = full_spec.slice((at_idx + 1) as usize, full_spec.len());
+                    out_pkg.name = full_spec.slice((colon_idx + 1) as usize, at_idx as usize);
+                    out_pkg.version = full_spec.slice((at_idx + 1) as usize, full_spec.len());
                 } else {
-                    pkg.name = full_spec.slice((colon_idx + 1) as usize, full_spec.len());
+                    out_pkg.name = full_spec.slice((colon_idx + 1) as usize, full_spec.len());
                 }
             }
             continue;
@@ -536,7 +536,7 @@ pub fn wit_parse(src: str) -> WitPackage {
                 continue;
             }
             if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
-            pkg.interfaces.push(iface);
+            out_pkg.interfaces.push(iface);
             continue;
         }
 
@@ -604,7 +604,7 @@ pub fn wit_parse(src: str) -> WitPackage {
                 if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
             }
             if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
-            pkg.worlds.push(world);
+            out_pkg.worlds.push(world);
             continue;
         }
 
@@ -613,7 +613,7 @@ pub fn wit_parse(src: str) -> WitPackage {
         if pos < n { pos = pos + 1; }
     }
 
-    return pkg;
+    return out_pkg;
 }
 
 // ------------------------------------------------------------------------------

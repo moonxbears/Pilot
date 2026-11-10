@@ -1,0 +1,12 @@
+// `&&` / `||` evaluate the right operand only when needed.
+fn side(tag: str) -> bool {
+    print(tag);
+    return true;
+}
+
+fn main() {
+    print(false && side("and-rhs"));
+    print(true || side("or-rhs"));
+    print(true && side("and-rhs-2"));
+    print(false || side("or-rhs-2"));
+}

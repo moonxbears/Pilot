@@ -14,6 +14,9 @@
 //! When contraction resumes the caller's pre-pause ceiling applies again.
 //! ==============================================================================
 
+// Each test binary uses only part of this module.
+#![allow(dead_code)]
+
 use std::path::Path;
 
 const MANIFEST_REL: &str = "selfhost/gate/manifest.pilot";

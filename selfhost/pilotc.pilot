@@ -164,8 +164,8 @@ pub fn pilotc_bootstrap_stage_pilc_hex(stage: i64, compiler_unit_src: str) -> st
 
     // Magic: PIL3 (4 bytes)
     let magic_hex = "50494c33";
-    // Version: 3 (u32 le)
-    let ver_hex = "03000000";
+    // Version: 4 (u32 le)
+    let ver_hex = "04000000";
     // Const count: 4 (u32 le)
     let const_cnt_hex = "04000000";
 

@@ -1,0 +1,13 @@
+// Paren-less `.len` on top-level collection literals.
+let stages = [
+    0: "a",
+    1: "b",
+    2: "c",
+];
+let primes = [2, 3, 5, 7];
+
+fn main() {
+    print(stages.len);
+    print(primes.len);
+    print(stages[1]);
+}

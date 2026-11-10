@@ -1,0 +1,8 @@
+// Reading a field of a non-record value is a runtime error, not a lookup in some other value.
+fn main() {
+    var m = {a: 1};
+    var z = 0;
+    print(m.a);
+    print(z.a);
+    print("never printed");
+}

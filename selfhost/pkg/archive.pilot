@@ -61,7 +61,7 @@ pub fn pilpkg_new() -> i64 {
 
 pub fn pilpkg_add_file(ar: i64, rel_path: str, content: str) -> i64 {
     let raw_cnt = __engine("map_get", ar, "count");
-    let cnt = if raw_cnt != null { raw_cnt } else { 0 };
+    let cnt = if raw_cnt != none { raw_cnt } else { 0 };
     let _p = __engine("map_set", ar, "path:" + cnt, rel_path);
     let _c = __engine("map_set", ar, "content:" + cnt, content);
     let _cnt = __engine("map_set", ar, "count", cnt + 1);
@@ -70,7 +70,7 @@ pub fn pilpkg_add_file(ar: i64, rel_path: str, content: str) -> i64 {
 
 pub fn pilpkg_serialize(ar: i64) -> str {
     let raw_cnt = __engine("map_get", ar, "count");
-    let cnt = if raw_cnt != null { raw_cnt } else { 0 };
+    let cnt = if raw_cnt != none { raw_cnt } else { 0 };
     let hdr = archive_format_header(::PilPkgV1);
     var out = hdr + cnt + "\n";
     var i = 0;

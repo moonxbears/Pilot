@@ -317,7 +317,8 @@ fn sa_is_bridge_exemption(rs_path: str, cur_line: str) -> bool {
     if gm_ends_with(rs_path, "pilot-parser/src/lib.rs") && gm_contains(cur_line, "=> Union") {
         return true;
     }
-    if gm_ends_with(rs_path, "pilot-vm/src/lib.rs") && (gm_contains(cur_line, "str_slice") || gm_contains(cur_line, "if name ==")) {
+    // The seed compiler's single builtin-name table (`SeedBuiltin` in pilot-vm/src/lib.rs).
+    if gm_ends_with(rs_path, "pilot-vm/src/lib.rs") && gm_contains(cur_line, "SeedBuiltin::") {
         return true;
     }
     if gm_ends_with(rs_path, "pilot-cli/src/main.rs") && (gm_contains(cur_line, "cmd_from(") || gm_contains(cur_line, "cmd_map(")) {
@@ -745,7 +746,7 @@ fn sa_audit_pilot_tree(root: str, subdir: str, file_caps: i64, violations: i64) 
                     "Split cohesive responsibilities into clean sub-packages <= 1,500 lines"
                 ));
             }
-            let specific_cap = __engine("map_get", file_caps, rel) + 0;
+            let specific_cap = (__engine("map_get", file_caps, rel) ?? 0);
             if specific_cap > 0 && loc > specific_cap {
                 let _ = glist_push(violations, sa_make_violation(
                     "GATE002", rel, loc, 1, "" + loc + " > " + specific_cap,
@@ -854,10 +855,10 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunO
             let src_idx = gm_find(rel, "/src/", 0);
             if src_idx > 0 {
                 let ckey = rel.slice(0, src_idx);
-                let prev = __engine("map_get", crate_loc_sums, ckey) + 0;
+                let prev = (__engine("map_get", crate_loc_sums, ckey) ?? 0);
                 __engine("map_set", crate_loc_sums, ckey, prev + loc);
             }
-            let fcap = __engine("map_get", file_caps, rel) + 0;
+            let fcap = (__engine("map_get", file_caps, rel) ?? 0);
             if paused == true {
                 if loc > paused_max_rust_file_loc() {
                     let _ = glist_push(violations, sa_make_violation(
@@ -883,7 +884,7 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunO
         let cpath = glist_get(crate_keys, ci);
         let rule = __engine("map_get", crate_reg, cpath);
         if rule.must_be_absent == false && paused == false {
-            let cloc = __engine("map_get", crate_loc_sums, cpath) + 0;
+            let cloc = (__engine("map_get", crate_loc_sums, cpath) ?? 0);
             if cloc > rule.max_loc {
                 let _ = glist_push(violations, sa_make_violation(
                     "GATE003", cpath, cloc, 1, "" + cloc + " > " + rule.max_loc,

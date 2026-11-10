@@ -16,7 +16,7 @@
 //!        `PIL3` v3 binary bytes encoded as lowercase hexadecimal!
 //!      - Exact `PIL3` v3 Wire Format consumed by `PilcBinary::load_from_bytes`:
 //!        * Bytes `0..4`: `"PIL3"` (`50494c33`)
-//!        * Bytes `4..8`: `3u32` little-endian (`03000000`)
+//!        * Bytes `4..8`: `4u32` little-endian (`04000000`)
 //!        * Bytes `8..12`: `const_count: u32` LE
 //!        * `const_count * 16` bytes: `(tag_meta: u64 LE, payload: u64 LE)`:
 //!          - `TAG_NULL = 0`, `TAG_BOOL = 2` (`payload = 0|1`), `TAG_INT = 3` (`payload = i64 as u64`),

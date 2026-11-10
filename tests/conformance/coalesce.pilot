@@ -1,0 +1,18 @@
+// `??` falls back only when the left side is none, and evaluates lazily.
+fn find(x: i64) -> i64? {
+    if x > 5 {
+        return x;
+    }
+    return none;
+}
+
+fn default_value() -> i64 {
+    print("default_value ran");
+    return 9;
+}
+
+fn main() {
+    print(find(3) ?? 9);
+    print(find(7) ?? default_value());
+    print(find(1) ?? default_value());
+}

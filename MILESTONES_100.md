@@ -1555,7 +1555,7 @@ These rules apply to every `F` milestone and replace the "four function-level te
 7. **Deletions are part of done.** The stand-in code each milestone replaces (listed per milestone below) is deleted in the same milestone, as [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §1 already requires.
 
 > **Decided 2026-11-09 — Rust seed contraction is paused until `F8`.** `F1`–`F3` need changes to the Rust seed (`crates/pilot-vm`, `crates/pilot-analysis`, `crates/pilot-cli`), and every crate sat 2–6 lines under its line ceiling. While paused:
-> - The gate no longer enforces the per-crate and per-file ratchet ceilings. It enforces the `<= 1,500` LOC law per Rust file and a total budget of `15,000` Rust `src` lines, which leaves room to reformat the dense seed to normal line lengths and land `F1`–`F3`.
+> - The gate no longer enforces the per-crate and per-file ratchet ceilings. It enforces the `<= 1,500` LOC law per Rust file and a total budget of `30,000` Rust `src` lines (raised from `15,000` on 2026-11-09), which leaves room to reformat the dense seed to normal line lengths and land `F1`–`F3`.
 > - The pre-pause ceilings stay recorded in `selfhost/gate/manifest.pilot` for when contraction resumes. `pilot gate --ratchet-update` is refused.
 > - Milestone tests that assert Rust LOC ceilings read the same policy through `crates/pilot-analysis/tests/common/seed_policy.rs`.
 > - `AGENTS.md` §1 ("Pilot First & Active Rust Engine Contraction") records the pause and what Rust growth is allowed: execution-engine correctness only.
@@ -1575,6 +1575,14 @@ These rules apply to every `F` milestone and replace the "four function-level te
   5. `tests/conformance/` with a runner. Until `pilot test` works (`F3`), the runner may be one Rust integration test that invokes the built `pilot` binary and diffs stdout and exit code.
 - **Done when:** every row of the table in `Audit.md` §3.2 behaves as the language reference says; `examples/overview.pilot` and `examples/*.pilot` produce checked output; the legacy-syntax files in `tests/*.pilot` (`def`, `match`, `record`) are either migrated to canonical syntax and passing, or deleted.
 - **Deletes:** the `_ => 0` fall-through and the `_ => Opcode::AddI64` default.
+- **Progress (2026-11-09, part 1) — `[STATUS: IN PROGRESS]`:**
+  - Done: deliverables 3, 4 and 5; deliverable 1 for lists and records (`TAG_LIST`, `TAG_MAP`); f-string interpolation, ranges and `??` from deliverable 2. Both deletions are done: unlowered node kinds and unknown operators are now compile errors (`is not lowered by the seed yet`), and erroneous nodes compile to a `Trap` opcode.
+  - The VM records a `VmFault` with a source span. `pilot run` prints `file:line:col: error:` and exits 1. `run_pilot_analyzer`, the bootstrap manifest and the self-hosted tool scripts surface faults instead of returning `null`.
+  - `.pilc` format is now version 4 (opcodes renumbered to tag-polymorphic `Add`/`Sub`/…; `selfhost/vm/compiler.pilot` and `selfhost/pilotc.pilot` updated to match).
+  - `tests/conformance/` holds 24 programs (10 error cases) run by `crates/pilot-cli/tests/conformance.rs`.
+  - Turning faults on exposed latent bugs in Pilot sources that the old VM hid by reading null as `0`; these were fixed at the source (`?? 0` defaults, undeclared `ccount` in `analyzer.pilot`, `static` method reading `self` in `abi/aapcs64.pilot`, integer `0` used as the environment record, `< 0` checks on record handles).
+  - Remaining: `switch`, closures and lambdas, `defer`, `guard`, `try`/`catch`, postfix `?`, cascades, `comptime` blocks, constructors, field defaults and `~self()`, dimensional units and `f64(x)` casts (`examples/overview.pilot` stops on these), runtime method dispatch and the enumerator protocol, structural equality for lists, a closure value kind, the legacy `tests/*.pilot` corpus, and moving the `SeedBuiltin` method table into Pilot.
+  - Parser defect found: contextual keywords are taken over in identifier position (`var pkg = …`, a binding named `default` or `fallback` is rejected or silently dropped). Fix in the parser, not by renaming user code.
 
 ### F2 — Real Module Linking
 

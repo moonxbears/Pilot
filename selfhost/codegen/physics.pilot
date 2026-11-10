@@ -294,9 +294,9 @@ pub fn cg_collect_fn_locals(nid: i64, st: i64) -> i64 {
     let k = __engine("ast_node_kind", nid);
     if k == 4 {
         let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        if (__engine("map_get", st, "lseen_" + vname) + 0) == 0 {
+        if ((__engine("map_get", st, "lseen_" + vname) ?? 0)) == 0 {
             __engine("map_set", st, "lseen_" + vname, 1);
-            let idx = __engine("map_get", st, "lcnt") + 0;
+            let idx = (__engine("map_get", st, "lcnt") ?? 0);
             __engine("map_set", st, "lname_" + idx, vname);
             __engine("map_set", st, "ltsym_" + idx, __engine("ast_node_raw_bits", nid));
             __engine("map_set", st, "lcnt", idx + 1);
@@ -308,5 +308,5 @@ pub fn cg_collect_fn_locals(nid: i64, st: i64) -> i64 {
         cg_collect_fn_locals(__engine("ast_child_at", nid, ci), st);
         ci = ci + 1;
     }
-    return __engine("map_get", st, "lcnt") + 0;
+    return (__engine("map_get", st, "lcnt") ?? 0);
 }

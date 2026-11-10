@@ -340,9 +340,8 @@ pub fn sh_token_tag_kind(tape: i64, idx: i64) -> TokenTagKind {
 }
 
 pub fn sh_token_matching_bracket(tape: i64, idx: i64) -> i64 {
-    let nil;
     let m = __engine("map_get", tape, idx + "_match");
-    if m != nil {
+    if m != none {
         return m;
     }
     return -1;

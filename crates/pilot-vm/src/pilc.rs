@@ -5,17 +5,28 @@ use pilot_span::ByteSpan;
 use crate::instruction::Instruction;
 
 pub const PILC_V3_MAGIC: &[u8; 4] = b"PIL3";
-pub const PILC_V3_VERSION: u32 = 3;
+pub const PILC_V3_VERSION: u32 = 4;
+
+/// A construct the compiler could not lower, with the span it came from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompileDiagnostic {
+    pub span: ByteSpan,
+    pub message: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct PilcBinary {
     pub constants: Vec<PilotVal>, pub instructions: Vec<Instruction>,
     pub pc_spans: Vec<ByteSpan>, pub reg_symbols: Vec<(u8, u32, u32)>,
+    /// Compile errors. Each one also compiled to a `Trap`; callers that run
+    /// user programs must refuse to run a binary that has any. Not serialized:
+    /// only error-free binaries are written to `.pilc`.
+    pub diagnostics: Vec<CompileDiagnostic>,
 }
 
 impl PilcBinary {
-    pub fn new(constants: Vec<PilotVal>, instructions: Vec<Instruction>) -> Self { Self { constants, instructions, pc_spans: Vec::new(), reg_symbols: Vec::new() } }
-    pub fn with_debug_tables(constants: Vec<PilotVal>, instructions: Vec<Instruction>, pc_spans: Vec<ByteSpan>, reg_symbols: Vec<(u8, u32, u32)>) -> Self { Self { constants, instructions, pc_spans, reg_symbols } }
+    pub fn new(constants: Vec<PilotVal>, instructions: Vec<Instruction>) -> Self { Self { constants, instructions, pc_spans: Vec::new(), reg_symbols: Vec::new(), diagnostics: Vec::new() } }
+    pub fn with_debug_tables(constants: Vec<PilotVal>, instructions: Vec<Instruction>, pc_spans: Vec<ByteSpan>, reg_symbols: Vec<(u8, u32, u32)>) -> Self { Self { constants, instructions, pc_spans, reg_symbols, diagnostics: Vec::new() } }
     #[inline] pub fn span_for_pc(&self, pc: usize) -> Option<ByteSpan> { self.pc_spans.get(pc).copied().filter(|s| s.start > 0 || s.end > 0) }
     #[inline] pub fn symbol_for_reg(&self, reg: u8) -> Option<(u32, u32)> { self.reg_symbols.iter().find(|&&(r, _, _)| r == reg).map(|&(_, sym, lay)| (sym, lay)) }
 

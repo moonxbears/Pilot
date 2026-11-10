@@ -236,7 +236,7 @@ pub fn apply_ratchet_update(workspace_root: str) -> str {
             let sidx = gm_find(fp, "/src/", cidx);
             if cidx >= 0 && sidx > cidx {
                 let ckey = fp.slice(cidx, sidx);
-                let prev = __engine("map_get", crate_sums, ckey) + 0;
+                let prev = (__engine("map_get", crate_sums, ckey) ?? 0);
                 __engine("map_set", crate_sums, ckey, prev + gm_count_lines(gate_fs_read_text(fp)));
             }
         }
@@ -251,7 +251,7 @@ pub fn apply_ratchet_update(workspace_root: str) -> str {
         let cpath = glist_get(keys, ki);
         let rule = __engine("map_get", reg, cpath);
         if rule.must_be_absent == false {
-            let live_loc = __engine("map_get", crate_sums, cpath) + 0;
+            let live_loc = (__engine("map_get", crate_sums, cpath) ?? 0);
             if live_loc > 0 && live_loc < rule.max_loc {
                 let old_pat = "\"" + cpath + "\", " + rule.max_loc + ", false";
                 let new_pat = "\"" + cpath + "\", " + live_loc + ", false";

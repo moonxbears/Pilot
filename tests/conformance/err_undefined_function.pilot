@@ -1,0 +1,5 @@
+// Calling a function that does not exist is a compile error.
+fn main() {
+    print("never printed");
+    nowhere(1, 2);
+}

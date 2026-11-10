@@ -139,7 +139,25 @@ pub enum BinaryOp {
     CheckedMul = 43, EucMod = 44, Lens = 45, OpenRange = 46, AfterRange = 47, Swap = 48,
 }
 
+const BINARY_OPS: [BinaryOp; 48] = [
+    BinaryOp::Add, BinaryOp::Sub, BinaryOp::Mul, BinaryOp::Div, BinaryOp::FloorDiv, BinaryOp::Rem,
+    BinaryOp::Pow, BinaryOp::Eq, BinaryOp::Ne, BinaryOp::Lt, BinaryOp::Le, BinaryOp::Gt, BinaryOp::Ge,
+    BinaryOp::And, BinaryOp::Or, BinaryOp::BitAnd, BinaryOp::BitOr, BinaryOp::BitXor, BinaryOp::Shl,
+    BinaryOp::Shr, BinaryOp::Pipe, BinaryOp::Coalesce, BinaryOp::RangeInclusive,
+    BinaryOp::RangeHalfOpen, BinaryOp::Is, BinaryOp::Walrus, BinaryOp::Send, BinaryOp::Union,
+    BinaryOp::Intersect, BinaryOp::Except, BinaryOp::PipeBackward, BinaryOp::As, BinaryOp::AsView,
+    BinaryOp::Spaceship, BinaryOp::SatAdd, BinaryOp::SatSub, BinaryOp::SatMul, BinaryOp::WrapAdd,
+    BinaryOp::WrapSub, BinaryOp::WrapMul, BinaryOp::CheckedAdd, BinaryOp::CheckedSub,
+    BinaryOp::CheckedMul, BinaryOp::EucMod, BinaryOp::Lens, BinaryOp::OpenRange,
+    BinaryOp::AfterRange, BinaryOp::Swap,
+];
+
 impl BinaryOp {
+    /// Decodes a `BinaryExpr` flag; `None` for operators the parser did not recognise.
+    pub fn from_u16(raw: u16) -> Option<Self> {
+        BINARY_OPS.iter().copied().find(|op| *op as u16 == raw)
+    }
+
     pub const fn symbol(self) -> &'static str {
         match self {
             Self::Add => "+", Self::Sub => "-", Self::Mul => "*", Self::Div => "/",
@@ -147,8 +165,8 @@ impl BinaryOp {
             Self::Ne => "!=", Self::Lt => "<", Self::Le => "<=", Self::Gt => ">",
             Self::Ge => ">=", Self::And => "and", Self::Or => "or", Self::BitAnd => "&",
             Self::BitOr => "|", Self::BitXor => "^", Self::Shl => "<<", Self::Shr => ">>",
-            Self::Pipe => "|>", Self::Coalesce => "??", Self::RangeInclusive => "..",
-            Self::RangeHalfOpen => "..<", Self::Is => "is", Self::Walrus => ":=",
+            Self::Pipe => "|>", Self::Coalesce => "??", Self::RangeInclusive => "..=",
+            Self::RangeHalfOpen => "..", Self::Is => "is", Self::Walrus => ":=",
             Self::Send => "<-", Self::Union => "union", Self::Intersect => "intersect",
             Self::Except => "except", Self::PipeBackward => "<|", Self::As => "as",
             Self::AsView => "as view", Self::Spaceship => "<=>", Self::SatAdd => "+|",

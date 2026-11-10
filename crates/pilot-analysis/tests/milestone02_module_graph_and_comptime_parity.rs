@@ -130,31 +130,32 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
     let res = engine.eval_ast_node(&arena, arena.root).expect("eval basic int");
     assert_eq!(res.as_int(), Some(42));
 
-    // 2. Verify ENV map at index 0 is queryable via map_get at comptime
-    let env_arena = parse("let c = __engine(\"map_get\", 0, \"is_comptime\"); return c;\n");
+    // 2. Verify the comptime ENV record (obtained through `get_env`; integers are
+    //    never record handles) is queryable via map_get at comptime
+    let env_arena = parse("let c = __engine(\"map_get\", __engine(\"get_env\"), \"is_comptime\"); return c;\n");
     let env_res = engine.eval_ast_node(&env_arena, env_arena.root).expect("eval is_comptime");
     assert_eq!(env_res.as_int(), Some(1), "is_comptime must be 1 at comptime");
 
-    // 3. Verify target physics map at index 1 is queryable at comptime
-    let simd_arena = parse("let s = __engine(\"map_get\", 1, \"simd_width_bits\"); return s;\n");
+    // 3. Verify the nested target physics record (ENV.target) is queryable at comptime
+    let simd_arena = parse("let s = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"simd_width_bits\"); return s;\n");
     let simd_res = engine.eval_ast_node(&simd_arena, simd_arena.root).expect("eval simd_width_bits");
     assert_eq!(simd_res.as_int(), Some(128));
 
-    let cache_arena = parse("let cl = __engine(\"map_get\", 1, \"cache_line_bytes\"); return cl;\n");
+    let cache_arena = parse("let cl = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"cache_line_bytes\"); return cl;\n");
     let cache_res = engine.eval_ast_node(&cache_arena, cache_arena.root).expect("eval cache_line_bytes");
     assert_eq!(cache_res.as_int(), Some(64));
 
     // 3b. Verify multiplatform target physics map aliases ("arch", "pointer_bytes", "endian")
-    let arch_arena = parse("let a = __engine(\"map_get\", 1, \"arch\"); return a;\n");
+    let arch_arena = parse("let a = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"arch\"); return a;\n");
     let arch_res = engine.eval_ast_node(&arch_arena, arch_arena.root).expect("eval arch");
     let interner = pilot_intern::Interner::new();
     assert_eq!(arch_res.as_str(&interner), Some(std::env::consts::ARCH));
 
-    let ptr_arena = parse("let p = __engine(\"map_get\", 1, \"pointer_bytes\"); return p;\n");
+    let ptr_arena = parse("let p = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"pointer_bytes\"); return p;\n");
     let ptr_res = engine.eval_ast_node(&ptr_arena, ptr_arena.root).expect("eval pointer_bytes");
     assert_eq!(ptr_res.as_int(), Some(std::mem::size_of::<usize>() as i64));
 
-    let endian_arena = parse("let e = __engine(\"map_get\", 1, \"endian\"); return e;\n");
+    let endian_arena = parse("let e = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"endian\"); return e;\n");
     let endian_res = engine.eval_ast_node(&endian_arena, endian_arena.root).expect("eval endian");
     let expected_endian = if cfg!(target_endian = "little") { "little" } else { "big" };
     assert_eq!(endian_res.as_str(&interner), Some(expected_endian));

@@ -142,7 +142,7 @@ pub pure fn sha256_k_const(i: i64) -> i64 {
 
 pub pure fn sha256_padded_byte(bmap: i64, blen: i64, padded_len: i64, idx: i64) -> i64 {
     if idx < blen {
-        return (__engine("map_get", bmap, idx) + 0) & 255;
+        return ((__engine("map_get", bmap, idx) ?? 0)) & 255;
     }
     if idx == blen {
         return 128;
@@ -182,10 +182,10 @@ pub fn sha256_hash_byte_map(bmap: i64, blen: i64) -> i64 {
             t = t + 1;
         }
         while t < 64 {
-            let w15 = __engine("map_get", wmap, t - 15) + 0;
-            let w2 = __engine("map_get", wmap, t - 2) + 0;
-            let w16 = __engine("map_get", wmap, t - 16) + 0;
-            let w7 = __engine("map_get", wmap, t - 7) + 0;
+            let w15 = (__engine("map_get", wmap, t - 15) ?? 0);
+            let w2 = (__engine("map_get", wmap, t - 2) ?? 0);
+            let w16 = (__engine("map_get", wmap, t - 16) ?? 0);
+            let w7 = (__engine("map_get", wmap, t - 7) ?? 0);
             let wt = (w16 + sha256_lsigma0(w15) + w7 + sha256_lsigma1(w2)) & 4294967295;
             __engine("map_set", wmap, t, wt);
             t = t + 1;
@@ -202,7 +202,7 @@ pub fn sha256_hash_byte_map(bmap: i64, blen: i64) -> i64 {
 
         t = 0;
         while t < 64 {
-            let wt = __engine("map_get", wmap, t) + 0;
+            let wt = (__engine("map_get", wmap, t) ?? 0);
             let kt = sha256_k_const(t);
             let t1 = (h + sha256_sigma1(e) + sha256_ch(e, f, g) + kt + wt) & 4294967295;
             let t2 = (sha256_sigma0(a) + sha256_maj(a, b, c_v)) & 4294967295;
@@ -240,7 +240,7 @@ pub fn sha256_hash_byte_map(bmap: i64, blen: i64) -> i64 {
 
     var wi = 0;
     while wi < 8 {
-        let hv = __engine("map_get", out, "h" + wi) + 0;
+        let hv = (__engine("map_get", out, "h" + wi) ?? 0);
         let base_b = wi * 4;
         __engine("map_set", out, base_b, (hv >> 24) & 255);
         __engine("map_set", out, base_b + 1, (hv >> 16) & 255);
@@ -277,10 +277,10 @@ pub fn sha256_digest(msg: str) -> Digest256 {
     }
     let res = sha256_hash_byte_map(bmap, n);
     return Digest256 {
-        h0: __engine("map_get", res, "h0") + 0,
-        h1: __engine("map_get", res, "h1") + 0,
-        h2: __engine("map_get", res, "h2") + 0,
-        h3: __engine("map_get", res, "h3") + 0,
+        h0: (__engine("map_get", res, "h0") ?? 0),
+        h1: (__engine("map_get", res, "h1") ?? 0),
+        h2: (__engine("map_get", res, "h2") ?? 0),
+        h3: (__engine("map_get", res, "h3") ?? 0),
         hex_prefix: __engine("map_get", res, "hex"),
     };
 }
@@ -302,7 +302,7 @@ pub fn hmac_sha256_hex(key: str, msg: str) -> str {
         let kh = sha256_hash_byte_map(raw_k, klen);
         var j = 0;
         while j < 32 {
-            __engine("map_set", kblock, j, __engine("map_get", kh, j) + 0);
+            __engine("map_set", kblock, j, (__engine("map_get", kh, j) ?? 0));
             j = j + 1;
         }
         while j < 64 {
@@ -325,7 +325,7 @@ pub fn hmac_sha256_hex(key: str, msg: str) -> str {
     let inner_in = __engine("map_new");
     var i = 0;
     while i < 64 {
-        let kb = __engine("map_get", kblock, i) + 0;
+        let kb = (__engine("map_get", kblock, i) ?? 0);
         __engine("map_set", inner_in, i, (kb ^ 54) & 255);
         i = i + 1;
     }
@@ -339,13 +339,13 @@ pub fn hmac_sha256_hex(key: str, msg: str) -> str {
     let outer_in = __engine("map_new");
     i = 0;
     while i < 64 {
-        let kb = __engine("map_get", kblock, i) + 0;
+        let kb = (__engine("map_get", kblock, i) ?? 0);
         __engine("map_set", outer_in, i, (kb ^ 92) & 255);
         i = i + 1;
     }
     var di = 0;
     while di < 32 {
-        __engine("map_set", outer_in, 64 + di, __engine("map_get", inner_hash, di) + 0);
+        __engine("map_set", outer_in, 64 + di, (__engine("map_get", inner_hash, di) ?? 0));
         di = di + 1;
     }
     let outer_hash = sha256_hash_byte_map(outer_in, 96);
@@ -617,7 +617,7 @@ pub fn sha512_init_k_table(kmap: i64) -> i64 {
 
 pub pure fn sha512_padded_byte(bmap: i64, blen: i64, padded_len: i64, idx: i64) -> i64 {
     if idx < blen {
-        return (__engine("map_get", bmap, idx) + 0) & 255;
+        return ((__engine("map_get", bmap, idx) ?? 0)) & 255;
     }
     if idx == blen {
         return 128;
@@ -674,14 +674,14 @@ pub fn sha512_hash_byte_map(bmap: i64, blen: i64) -> i64 {
             t = t + 1;
         }
         while t < 80 {
-            let w15_h = __engine("map_get", st, 200 + t - 15) + 0;
-            let w15_l = __engine("map_get", st, 300 + t - 15) + 0;
-            let w2_h = __engine("map_get", st, 200 + t - 2) + 0;
-            let w2_l = __engine("map_get", st, 300 + t - 2) + 0;
-            let w16_h = __engine("map_get", st, 200 + t - 16) + 0;
-            let w16_l = __engine("map_get", st, 300 + t - 16) + 0;
-            let w7_h = __engine("map_get", st, 200 + t - 7) + 0;
-            let w7_l = __engine("map_get", st, 300 + t - 7) + 0;
+            let w15_h = (__engine("map_get", st, 200 + t - 15) ?? 0);
+            let w15_l = (__engine("map_get", st, 300 + t - 15) ?? 0);
+            let w2_h = (__engine("map_get", st, 200 + t - 2) ?? 0);
+            let w2_l = (__engine("map_get", st, 300 + t - 2) ?? 0);
+            let w16_h = (__engine("map_get", st, 200 + t - 16) ?? 0);
+            let w16_l = (__engine("map_get", st, 300 + t - 16) ?? 0);
+            let w7_h = (__engine("map_get", st, 200 + t - 7) ?? 0);
+            let w7_l = (__engine("map_get", st, 300 + t - 7) ?? 0);
 
             let s0_h = sha512_lsigma0_hi(w15_h, w15_l);
             let s0_l = sha512_lsigma0_lo(w15_h, w15_l);
@@ -707,10 +707,10 @@ pub fn sha512_hash_byte_map(bmap: i64, blen: i64) -> i64 {
 
         t = 0;
         while t < 80 {
-            let wt_h = __engine("map_get", st, 200 + t) + 0;
-            let wt_l = __engine("map_get", st, 300 + t) + 0;
-            let kt_h = __engine("map_get", st, t) + 0;
-            let kt_l = __engine("map_get", st, 100 + t) + 0;
+            let wt_h = (__engine("map_get", st, 200 + t) ?? 0);
+            let wt_l = (__engine("map_get", st, 300 + t) ?? 0);
+            let kt_h = (__engine("map_get", st, t) ?? 0);
+            let kt_l = (__engine("map_get", st, 100 + t) ?? 0);
 
             let t1_l_sum = h_l + sha512_sigma1_lo(e_h, e_l) + sha256_ch(e_l, f_l, g_l) + kt_l + wt_l;
             let t1_l = t1_l_sum & 4294967295;
@@ -827,10 +827,10 @@ pub pure fn blake3_msg_perm(i: i64) -> i64 {
 }
 
 pub fn blake3_qround(st: i64, ai: i64, bi: i64, ci: i64, di: i64, mx: i64, my: i64) -> i64 {
-    let a0 = __engine("map_get", st, ai) + 0;
-    let b0 = __engine("map_get", st, bi) + 0;
-    let c0 = __engine("map_get", st, ci) + 0;
-    let d0 = __engine("map_get", st, di) + 0;
+    let a0 = (__engine("map_get", st, ai) ?? 0);
+    let b0 = (__engine("map_get", st, bi) ?? 0);
+    let c0 = (__engine("map_get", st, ci) ?? 0);
+    let d0 = (__engine("map_get", st, di) ?? 0);
 
     let a1 = (a0 + b0 + mx) & 4294967295;
     let d1 = rotr32(d0 ^ a1, 16);
@@ -852,7 +852,7 @@ pub fn blake3_qround(st: i64, ai: i64, bi: i64, ci: i64, di: i64, mx: i64, my: i
 pub fn blake3_compress_in_place(st: i64, counter: i64, block_len: i64, flags: i64) -> i64 {
     var i = 0;
     while i < 8 {
-        __engine("map_set", st, i, __engine("map_get", st, 48 + i) + 0);
+        __engine("map_set", st, i, (__engine("map_get", st, 48 + i) ?? 0));
         i = i + 1;
     }
     __engine("map_set", st, 8, blake3_iv(0));
@@ -866,24 +866,24 @@ pub fn blake3_compress_in_place(st: i64, counter: i64, block_len: i64, flags: i6
 
     var r = 0;
     while r < 7 {
-        blake3_qround(st, 0, 4, 8, 12, __engine("map_get", st, 16) + 0, __engine("map_get", st, 17) + 0);
-        blake3_qround(st, 1, 5, 9, 13, __engine("map_get", st, 18) + 0, __engine("map_get", st, 19) + 0);
-        blake3_qround(st, 2, 6, 10, 14, __engine("map_get", st, 20) + 0, __engine("map_get", st, 21) + 0);
-        blake3_qround(st, 3, 7, 11, 15, __engine("map_get", st, 22) + 0, __engine("map_get", st, 23) + 0);
-        blake3_qround(st, 0, 5, 10, 15, __engine("map_get", st, 24) + 0, __engine("map_get", st, 25) + 0);
-        blake3_qround(st, 1, 6, 11, 12, __engine("map_get", st, 26) + 0, __engine("map_get", st, 27) + 0);
-        blake3_qround(st, 2, 7, 8, 13, __engine("map_get", st, 28) + 0, __engine("map_get", st, 29) + 0);
-        blake3_qround(st, 3, 4, 9, 14, __engine("map_get", st, 30) + 0, __engine("map_get", st, 31) + 0);
+        blake3_qround(st, 0, 4, 8, 12, (__engine("map_get", st, 16) ?? 0), (__engine("map_get", st, 17) ?? 0));
+        blake3_qround(st, 1, 5, 9, 13, (__engine("map_get", st, 18) ?? 0), (__engine("map_get", st, 19) ?? 0));
+        blake3_qround(st, 2, 6, 10, 14, (__engine("map_get", st, 20) ?? 0), (__engine("map_get", st, 21) ?? 0));
+        blake3_qround(st, 3, 7, 11, 15, (__engine("map_get", st, 22) ?? 0), (__engine("map_get", st, 23) ?? 0));
+        blake3_qround(st, 0, 5, 10, 15, (__engine("map_get", st, 24) ?? 0), (__engine("map_get", st, 25) ?? 0));
+        blake3_qround(st, 1, 6, 11, 12, (__engine("map_get", st, 26) ?? 0), (__engine("map_get", st, 27) ?? 0));
+        blake3_qround(st, 2, 7, 8, 13, (__engine("map_get", st, 28) ?? 0), (__engine("map_get", st, 29) ?? 0));
+        blake3_qround(st, 3, 4, 9, 14, (__engine("map_get", st, 30) ?? 0), (__engine("map_get", st, 31) ?? 0));
         if r < 6 {
             var pi = 0;
             while pi < 16 {
                 let src_idx = blake3_msg_perm(pi);
-                __engine("map_set", st, 32 + pi, __engine("map_get", st, 16 + src_idx) + 0);
+                __engine("map_set", st, 32 + pi, (__engine("map_get", st, 16 + src_idx) ?? 0));
                 pi = pi + 1;
             }
             pi = 0;
             while pi < 16 {
-                __engine("map_set", st, 16 + pi, __engine("map_get", st, 32 + pi) + 0);
+                __engine("map_set", st, 16 + pi, (__engine("map_get", st, 32 + pi) ?? 0));
                 pi = pi + 1;
             }
         }
@@ -892,9 +892,9 @@ pub fn blake3_compress_in_place(st: i64, counter: i64, block_len: i64, flags: i6
 
     i = 0;
     while i < 8 {
-        let s_lo = __engine("map_get", st, i) + 0;
-        let s_hi = __engine("map_get", st, i + 8) + 0;
-        let cv_i = __engine("map_get", st, 48 + i) + 0;
+        let s_lo = (__engine("map_get", st, i) ?? 0);
+        let s_hi = (__engine("map_get", st, i + 8) ?? 0);
+        let cv_i = (__engine("map_get", st, 48 + i) ?? 0);
         __engine("map_set", st, i, (s_lo ^ s_hi) & 4294967295);
         __engine("map_set", st, i + 8, (s_hi ^ cv_i) & 4294967295);
         i = i + 1;
@@ -949,7 +949,7 @@ pub fn blake3_hex(msg: str) -> str {
             if b_idx + 1 < num_blocks {
                 var ci = 0;
                 while ci < 8 {
-                    __engine("map_set", st, 48 + ci, __engine("map_get", st, ci) + 0);
+                    __engine("map_set", st, 48 + ci, (__engine("map_get", st, ci) ?? 0));
                     ci = ci + 1;
                 }
             }
@@ -958,7 +958,7 @@ pub fn blake3_hex(msg: str) -> str {
         var hex_s = "";
         var hi = 0;
         while hi < 8 {
-            hex_s = hex_s + hash_hex_u32_le(__engine("map_get", st, hi) + 0);
+            hex_s = hex_s + hash_hex_u32_le((__engine("map_get", st, hi) ?? 0));
             hi = hi + 1;
         }
         return hex_s;
@@ -990,7 +990,7 @@ pub fn blake3_hex(msg: str) -> str {
             blake3_compress_in_place(st, chunk_idx, b_len, flags);
             var ci = 0;
             while ci < 8 {
-                __engine("map_set", st, 48 + ci, __engine("map_get", st, ci) + 0);
+                __engine("map_set", st, 48 + ci, (__engine("map_get", st, ci) ?? 0));
                 ci = ci + 1;
             }
             b_idx = b_idx + 1;
@@ -1001,21 +1001,21 @@ pub fn blake3_hex(msg: str) -> str {
             var fold = 1;
             while fold == 1 {
                 if stack_len > 0 {
-                    let top_h = __engine("map_get", st, 300 + stack_len - 1) + 0;
+                    let top_h = (__engine("map_get", st, 300 + stack_len - 1) ?? 0);
                     if top_h == cur_h {
                         stack_len = stack_len - 1;
                         let l_base = 100 + (stack_len * 8);
                         var wi = 0;
                         while wi < 8 {
-                            __engine("map_set", st, 16 + wi, __engine("map_get", st, l_base + wi) + 0);
-                            __engine("map_set", st, 24 + wi, __engine("map_get", st, 48 + wi) + 0);
+                            __engine("map_set", st, 16 + wi, (__engine("map_get", st, l_base + wi) ?? 0));
+                            __engine("map_set", st, 24 + wi, (__engine("map_get", st, 48 + wi) ?? 0));
                             __engine("map_set", st, 48 + wi, blake3_iv(wi));
                             wi = wi + 1;
                         }
                         blake3_compress_in_place(st, 0, 64, 4);
                         wi = 0;
                         while wi < 8 {
-                            __engine("map_set", st, 48 + wi, __engine("map_get", st, wi) + 0);
+                            __engine("map_set", st, 48 + wi, (__engine("map_get", st, wi) ?? 0));
                             wi = wi + 1;
                         }
                         cur_h = top_h + 1;
@@ -1028,7 +1028,7 @@ pub fn blake3_hex(msg: str) -> str {
             }
             var si = 0;
             while si < 8 {
-                __engine("map_set", st, 100 + (stack_len * 8) + si, __engine("map_get", st, 48 + si) + 0);
+                __engine("map_set", st, 100 + (stack_len * 8) + si, (__engine("map_get", st, 48 + si) ?? 0));
                 si = si + 1;
             }
             __engine("map_set", st, 300 + stack_len, cur_h);
@@ -1039,15 +1039,15 @@ pub fn blake3_hex(msg: str) -> str {
                 let l_base = 100 + (stack_len * 8);
                 var wi = 0;
                 while wi < 8 {
-                    __engine("map_set", st, 16 + wi, __engine("map_get", st, l_base + wi) + 0);
-                    __engine("map_set", st, 24 + wi, __engine("map_get", st, 48 + wi) + 0);
+                    __engine("map_set", st, 16 + wi, (__engine("map_get", st, l_base + wi) ?? 0));
+                    __engine("map_set", st, 24 + wi, (__engine("map_get", st, 48 + wi) ?? 0));
                     __engine("map_set", st, 48 + wi, blake3_iv(wi));
                     wi = wi + 1;
                 }
                 blake3_compress_in_place(st, 0, 64, 4);
                 wi = 0;
                 while wi < 8 {
-                    __engine("map_set", st, 48 + wi, __engine("map_get", st, wi) + 0);
+                    __engine("map_set", st, 48 + wi, (__engine("map_get", st, wi) ?? 0));
                     wi = wi + 1;
                 }
             }
@@ -1055,8 +1055,8 @@ pub fn blake3_hex(msg: str) -> str {
             let root_l = 100 + (stack_len * 8);
             var rwi = 0;
             while rwi < 8 {
-                __engine("map_set", st, 16 + rwi, __engine("map_get", st, root_l + rwi) + 0);
-                __engine("map_set", st, 24 + rwi, __engine("map_get", st, 48 + rwi) + 0);
+                __engine("map_set", st, 16 + rwi, (__engine("map_get", st, root_l + rwi) ?? 0));
+                __engine("map_set", st, 24 + rwi, (__engine("map_get", st, 48 + rwi) ?? 0));
                 __engine("map_set", st, 48 + rwi, blake3_iv(rwi));
                 rwi = rwi + 1;
             }
@@ -1064,7 +1064,7 @@ pub fn blake3_hex(msg: str) -> str {
             var hex_s = "";
             var hi = 0;
             while hi < 8 {
-                hex_s = hex_s + hash_hex_u32_le(__engine("map_get", st, hi) + 0);
+                hex_s = hex_s + hash_hex_u32_le((__engine("map_get", st, hi) ?? 0));
                 hi = hi + 1;
             }
             return hex_s;

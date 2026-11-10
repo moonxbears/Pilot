@@ -68,7 +68,7 @@ pub fn emit_amdgpu_llvm_ir_module(
 }
 
 pub fn gl_next_ssa(st: i64, prefix: str) -> str {
-    let n = (__engine("map_get", st, "gl_n") + 0) + 1;
+    let n = ((__engine("map_get", st, "gl_n") ?? 0)) + 1;
     __engine("map_set", st, "gl_n", n);
     return "%" + prefix + n;
 }
@@ -90,7 +90,7 @@ pub fn gl_emit_expr(nid: i64, st: i64, backend: str, want_float: bool) -> str {
     }
     if k == 14 {
         let nm = __engine("sym_str", __engine("ast_node_sym", nid));
-        if (__engine("map_get", st, "has_ssa_" + nm) + 0) == 1 {
+        if ((__engine("map_get", st, "has_ssa_" + nm) ?? 0)) == 1 {
             return "" + __engine("map_get", st, "ssa_" + nm);
         }
         return "%" + nm;
@@ -216,7 +216,7 @@ pub fn gl_emit_stmt(nid: i64, st: i64, backend: str) -> i64 {
     }
     if k == 6 {
         let cond_v = gl_emit_expr(__engine("ast_child_at", nid, 0), st, backend, false);
-        let lid = (__engine("map_get", st, "gl_lbl") + 0) + 1;
+        let lid = ((__engine("map_get", st, "gl_lbl") ?? 0)) + 1;
         __engine("map_set", st, "gl_lbl", lid);
         let l_then = "if.then" + lid;
         let l_end = "if.end" + lid;

@@ -115,7 +115,7 @@ fn eval_m13(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr()
 }
 
 // Target test functions for native dynamic frame invocation

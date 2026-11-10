@@ -258,7 +258,9 @@ M51–M100 are one-paragraph summaries and are reasonable as long-range directio
 
 > **Applied on 2026-11-09:** 8.1 items 1–2 (baseline paragraph rewritten; `[COMPLETE]` markers replaced with audited `[STATUS: …]` tags and a legend) and 8.2 (Phase F, `F1`–`F8`, inserted before Phase 4 with a verification contract and a prerequisite table). 8.4 rules 10–13 are folded into the Phase F verification contract.
 >
-> **Also applied on 2026-11-09:** 8.3 item 6 (Rust seed contraction paused until `F8`). The gate now enforces the `<= 1,500` LOC law per Rust file plus a 15,000-line total budget instead of the per-crate ratchet. The policy lives in `selfhost/gate/manifest.pilot`, the Rust milestone tests read it through `crates/pilot-analysis/tests/common/seed_policy.rs`, and `AGENTS.md` §1 records the pause.
+> **Also applied on 2026-11-09:** 8.3 item 6 (Rust seed contraction paused until `F8`). The gate now enforces the `<= 1,500` LOC law per Rust file plus a total budget (now 30,000 lines) instead of the per-crate ratchet. The policy lives in `selfhost/gate/manifest.pilot`, the Rust milestone tests read it through `crates/pilot-analysis/tests/common/seed_policy.rs`, and `AGENTS.md` §1 records the pause.
+>
+> **F1 started on 2026-11-09:** tagged lists and records, tag-dispatched operators, short-circuit `&&`/`||`, `??`, f-strings, compile errors for unlowered constructs, runtime faults with source spans, exit codes, and a 24-program conformance corpus. Progress and the remaining F1 work are listed under `F1` in `MILESTONES_100.md`.
 >
 > **Still open:** 8.1 items 3–4 (version reset; README and `VISION.md` claims), 8.3 (reordering and scope of `M31`–`M50` and Phase 2), 8.4 items 14–18 (anticheat, ratchet, gates), 8.5 (spec defects), 8.6 (process and outstanding deletions).
 

@@ -61,8 +61,10 @@ impl ComptimeEngine {
         let (mut env_m, mut tgt_m, mut ast_m, mut sym_m) = (std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new());
         for (k, v) in [("architecture", PilotVal::from_str(std::env::consts::ARCH)), ("arch", PilotVal::from_str(std::env::consts::ARCH)), ("os", PilotVal::from_str(std::env::consts::OS)), ("pointer_byte", PilotVal::from_int(std::mem::size_of::<usize>() as i64)), ("pointer_bytes", PilotVal::from_int(std::mem::size_of::<usize>() as i64)), ("endianess", PilotVal::from_str(if cfg!(target_endian = "little") { "little" } else { "big" })), ("endian", PilotVal::from_str(if cfg!(target_endian = "little") { "little" } else { "big" })), ("backend", PilotVal::from_str("vm")), ("simd_width_bits", PilotVal::from_int(128)), ("cache_line", PilotVal::from_int(64)), ("cache_line_bytes", PilotVal::from_int(64)), ("opt_level", PilotVal::from_int(2))] { tgt_m.insert(k.into(), v); }
         ast_m.insert("node_count".into(), PilotVal::from_int(registry.arena.nodes.len() as i64)); ast_m.insert("root_node".into(), PilotVal::from_int(0)); sym_m.insert("count".into(), PilotVal::from_int(registry.symbol_strings.len() as i64));
-        for (k, v) in [("is_comptime", 1), ("unit_count", 1), ("symbol_count", registry.symbol_strings.len() as i64), ("target", 1), ("ast_nodes", 2), ("symbols", 3)] { env_m.insert(k.into(), PilotVal::from_int(v)); }
-        vm.heap_maps.extend([env_m, tgt_m, ast_m, sym_m]);
+        for (k, v) in [("is_comptime", 1), ("unit_count", 1), ("symbol_count", registry.symbol_strings.len() as i64)] { env_m.insert(k.into(), PilotVal::from_int(v)); }
+        // Nested environment records live in heap slots 1..=3, pushed below in this order.
+        for (k, slot) in [("target", 1), ("ast_nodes", 2), ("symbols", 3)] { env_m.insert(k.into(), PilotVal::from_map_handle(slot)); }
+        vm.heap_maps = vec![env_m, tgt_m, ast_m, sym_m];
         vm.shared_symbols = Some(std::sync::Arc::new(registry.symbol_strings.clone()));
         let reg_ptr = &mut registry as *mut crate::infer::PhysicsRegistry;
         vm.engine_handler = Some(Box::new(move |op: &str, args: &[PilotVal]| crate::infer::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)));
@@ -122,7 +124,10 @@ impl BootstrapSnapshot {
             );
             let c_arena = pilot_parser::parse(&harness);
             m_vm.load_binary(BytecodeCompiler::compile(&c_arena, c_arena.root));
-            let result_str = m_vm.run().to_string_repr();
+            let result_str = m_vm
+                .run_checked()
+                .unwrap_or_else(|f| panic!("Bootstrap manifest faulted: {f}"))
+                .to_string_repr();
             let mut parts = result_str.split('|');
             let _stage_count: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let stage_paths: Vec<&str> = parts.collect();

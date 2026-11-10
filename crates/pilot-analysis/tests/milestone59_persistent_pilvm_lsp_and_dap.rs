@@ -413,7 +413,7 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
         handle_engine_intrinsic(r, name, args)
     }));
     vm.load_binary(BytecodeCompiler::compile(&gen_arena, gen_arena.root));
-    let gen_out = vm.run().to_string_repr();
+    let gen_out = vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr();
     assert!(
         !fs_read_trapped.load(Ordering::SeqCst),
         "vscode_gen.pilot attempted forbidden fs_read_text pass-through!"
@@ -648,7 +648,7 @@ pub fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_
     assert!(arena.diagnostics.is_empty(), "ide_db/server parse diagnostics: {:?}", arena.diagnostics);
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    let out = vm.run().to_string_repr();
+    let out = vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr();
     let segs: Vec<&str> = out.split("@@LSP@@").collect();
     assert_eq!(segs.len(), 3, "Unexpected ide_db/lsp output: {}", out);
 
@@ -902,7 +902,7 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
         handle_engine_intrinsic(r, name, args)
     }));
     dap_vm.load_binary(BytecodeCompiler::compile(&dap_arena, dap_arena.root));
-    let dap_out = dap_vm.run().to_string_repr();
+    let dap_out = dap_vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr();
     let cols: Vec<&str> = dap_out.split("@@DAP@@").collect();
     assert_eq!(cols.len(), 6, "Unexpected DAP output: {}", dap_out);
 

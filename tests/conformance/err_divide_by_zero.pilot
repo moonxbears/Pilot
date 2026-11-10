@@ -1,0 +1,9 @@
+// Integer division by zero faults.
+fn div(a: i64, b: i64) -> i64 {
+    return a / b;
+}
+
+fn main() {
+    print(div(6, 3));
+    print(div(1, 0));
+}

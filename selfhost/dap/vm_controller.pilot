@@ -27,12 +27,12 @@ pub fn should_pause_at_pc(
         return 0;
     }
 
-    let raw_val = __engine("map_get", 0, "call_line");
-    let call_line = if raw_val != null { raw_val } else { -1 };
+    let raw_val = __engine("map_get", __engine("get_env"), "call_line");
+    let call_line = if raw_val != none { raw_val } else { -1 };
 
     if cur_line == breakpoint_line && cur_line != last_stopped_line {
         let _new = __engine("map_new");
-        let _s = __engine("map_set", 0, "call_line", cur_line);
+        let _s = __engine("map_set", __engine("get_env"), "call_line", cur_line);
         return 1;
     }
     if step_mode == 1 {
@@ -44,14 +44,14 @@ pub fn should_pause_at_pc(
     if step_mode == 2 {
         // StepOver: pause when back at target_call_depth or lower, on a new statement
         if cur_call_depth <= target_call_depth && cur_line != last_stopped_line && cur_line != call_line {
-            let _s = __engine("map_set", 0, "call_line", cur_line);
+            let _s = __engine("map_set", __engine("get_env"), "call_line", cur_line);
             return 1;
         }
     }
     if step_mode == 3 {
         // StepOut: pause when popped to a shallower call depth, on the statement following the call
         if cur_call_depth < target_call_depth && cur_line != last_stopped_line && cur_line != call_line {
-            let _s = __engine("map_set", 0, "call_line", cur_line);
+            let _s = __engine("map_set", __engine("get_env"), "call_line", cur_line);
             return 1;
         }
     }

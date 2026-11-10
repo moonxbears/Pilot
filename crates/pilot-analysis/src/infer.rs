@@ -35,6 +35,8 @@ pub struct PhysicsRegistry {
     pub node_targets: Vec<Option<u32>>, pub symbol_strings: HashMap<u32, String>,
     pub diagnostics: Vec<PhysicsDiagnostic>, pub source_text: String,
     pub lsp_method: String, pub lsp_offset: u32, pub lsp_result: String,
+    /// Set when the self-hosted analyzer faulted; its results are then incomplete.
+    pub analyzer_error: Option<String>,
     pub categories: Vec<CategoryRecord>, pub registered_symbols: Vec<(i64, String, String)>,
 }
 
@@ -44,7 +46,7 @@ impl PhysicsRegistry {
         let mut reg = Self {
             arena, layouts: LayoutTable::new(), node_layouts: vec![None; count], node_targets: vec![None; count],
             symbol_strings, diagnostics: Vec::new(), source_text: String::new(),
-            lsp_method: String::new(), lsp_offset: 0, lsp_result: String::new(),
+            lsp_method: String::new(), lsp_offset: 0, lsp_result: String::new(), analyzer_error: None,
             categories: Vec::new(), registered_symbols: Vec::new(),
         };
         reg.index_arena_symbols(0);
@@ -408,14 +410,19 @@ pub fn run_pilot_analyzer(registry: &mut PhysicsRegistry, analyzer_src: Option<&
     let reg_ptr = registry as *mut PhysicsRegistry;
     vm.engine_handler = Some(Box::new(move |op_code, args| handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op_code, args)));
     vm.run();
-    Ok(())
+    match vm.fault.take() {
+        Some(fault) => Err(fault.to_string()),
+        None => Ok(()),
+    }
 }
 
 pub fn analyze_physics_with_source(arena: &AstArena, root: NodeId, source: Option<&str>, analyzer_override: Option<&str>) -> PhysicsRegistry {
     let (flat_arena, symbol_strings) = flatten_ast(arena, root);
     let mut registry = PhysicsRegistry::new(flat_arena, symbol_strings);
     if let Some(src) = source { registry.source_text = src.to_string(); }
-    let _ = run_pilot_analyzer(&mut registry, analyzer_override);
+    if let Err(e) = run_pilot_analyzer(&mut registry, analyzer_override) {
+        registry.analyzer_error = Some(e);
+    }
     registry
 }
 

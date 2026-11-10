@@ -53,11 +53,11 @@ pub fn pilotdb_new() -> i64 {
 }
 
 pub fn pilotdb_current_rev(db: i64) -> u64 {
-    return __engine("map_get", db, "current_rev") + 0;
+    return (__engine("map_get", db, "current_rev") ?? 0);
 }
 
 pub fn pilotdb_get_durability_watermark(db: i64, dur: u8) -> u64 {
-    return __engine("map_get", db, "wm_" + dur) + 0;
+    return (__engine("map_get", db, "wm_" + dur) ?? 0);
 }
 
 pub fn pilotdb_bump_rev(db: i64, durability: u8) -> u64 {
@@ -72,25 +72,25 @@ pub fn pilotdb_bump_rev(db: i64, durability: u8) -> u64 {
 // ------------------------------------------------------------------------------
 
 pub fn pilotdb_record_exec(db: i64, stage_id: u16) {
-    let cur = __engine("map_get", db, "exec_stage_" + stage_id) + 0;
+    let cur = (__engine("map_get", db, "exec_stage_" + stage_id) ?? 0);
     __engine("map_set", db, "exec_stage_" + stage_id, cur + 1);
-    let tot = __engine("map_get", db, "telemetry_total_runs") + 0;
+    let tot = (__engine("map_get", db, "telemetry_total_runs") ?? 0);
     __engine("map_set", db, "telemetry_total_runs", tot + 1);
 }
 
 pub fn pilotdb_record_hit(db: i64, stage_id: u16) {
-    let cur = __engine("map_get", db, "hit_stage_" + stage_id) + 0;
+    let cur = (__engine("map_get", db, "hit_stage_" + stage_id) ?? 0);
     __engine("map_set", db, "hit_stage_" + stage_id, cur + 1);
-    let tot = __engine("map_get", db, "telemetry_total_hits") + 0;
+    let tot = (__engine("map_get", db, "telemetry_total_hits") ?? 0);
     __engine("map_set", db, "telemetry_total_hits", tot + 1);
 }
 
 pub fn pilotdb_get_exec_count(db: i64, stage_id: u16) -> i64 {
-    return __engine("map_get", db, "exec_stage_" + stage_id) + 0;
+    return (__engine("map_get", db, "exec_stage_" + stage_id) ?? 0);
 }
 
 pub fn pilotdb_get_hit_count(db: i64, stage_id: u16) -> i64 {
-    return __engine("map_get", db, "hit_stage_" + stage_id) + 0;
+    return (__engine("map_get", db, "hit_stage_" + stage_id) ?? 0);
 }
 
 pub fn pilotdb_reset_telemetry(db: i64) {
@@ -109,7 +109,7 @@ pub fn pilotdb_reset_telemetry(db: i64) {
 // ------------------------------------------------------------------------------
 
 pub fn pilotdb_stack_contains(db: i64, enc_key: str) -> bool {
-    let slen = __engine("map_get", db, "stack_len") + 0;
+    let slen = (__engine("map_get", db, "stack_len") ?? 0);
     var i = 0;
     while i < slen {
         let entry = __engine("map_get", db, "stack_" + i);
@@ -122,25 +122,25 @@ pub fn pilotdb_stack_contains(db: i64, enc_key: str) -> bool {
 }
 
 pub fn pilotdb_stack_push(db: i64, enc_key: str) {
-    let slen = __engine("map_get", db, "stack_len") + 0;
+    let slen = (__engine("map_get", db, "stack_len") ?? 0);
     __engine("map_set", db, "stack_" + slen, enc_key);
     __engine("map_set", db, "stack_len", slen + 1);
 }
 
 pub fn pilotdb_stack_pop(db: i64) {
-    let slen = __engine("map_get", db, "stack_len") + 0;
+    let slen = (__engine("map_get", db, "stack_len") ?? 0);
     if slen > 0 {
         __engine("map_set", db, "stack_len", slen - 1);
     }
 }
 
 pub fn pilotdb_record_caller_dependency(db: i64, dep_enc_key: str) {
-    let slen = __engine("map_get", db, "stack_len") + 0;
+    let slen = (__engine("map_get", db, "stack_len") ?? 0);
     if slen > 0 {
         // Parent caller is at the top of the stack
         let parent_key = __engine("map_get", db, "stack_" + (slen - 1));
         if parent_key != dep_enc_key {
-            let dcnt = __engine("map_get", db, "depcnt_" + parent_key) + 0;
+            let dcnt = (__engine("map_get", db, "depcnt_" + parent_key) ?? 0);
             var already = false;
             var i = 0;
             while i < dcnt {
@@ -180,7 +180,7 @@ pub fn pilotdb_set_file_source(db: i64, file_id: u64, source: str, durability: u
     __engine("map_set", db, "memo_cat_" + enc_k, rev);
     __engine("map_set", db, "depcnt_" + enc_k, 0);
 
-    let scnt = __engine("map_get", db, "source_count") + 0;
+    let scnt = (__engine("map_get", db, "source_count") ?? 0);
     var found = false;
     var i = 0;
     while i < scnt {
@@ -197,14 +197,14 @@ pub fn pilotdb_set_file_source(db: i64, file_id: u64, source: str, durability: u
 }
 
 pub fn pilotdb_register_module_import(db: i64, fid: u64, dep_fid: u64) {
-    let cnt = __engine("map_get", db, "file_import_count_" + fid) + 0;
+    let cnt = (__engine("map_get", db, "file_import_count_" + fid) ?? 0);
     __engine("map_set", db, "file_import_" + fid + "_" + cnt, dep_fid);
     __engine("map_set", db, "file_import_count_" + fid, cnt + 1);
 }
 
 pub fn pilotdb_get_file_source(db: i64, file_id: u64) -> str {
     let src = __engine("map_get", db, "src_" + file_id);
-    if src == nil {
+    if src == none {
         return "";
     }
     return src;
@@ -219,26 +219,26 @@ pub fn pilotdb_memo_has(db: i64, enc_k: str) -> bool {
 }
 
 pub fn pilotdb_memo_verified_at(db: i64, enc_k: str) -> u64 {
-    return __engine("map_get", db, "memo_vat_" + enc_k) + 0;
+    return (__engine("map_get", db, "memo_vat_" + enc_k) ?? 0);
 }
 
 pub fn pilotdb_memo_changed_at(db: i64, enc_k: str) -> u64 {
-    return __engine("map_get", db, "memo_cat_" + enc_k) + 0;
+    return (__engine("map_get", db, "memo_cat_" + enc_k) ?? 0);
 }
 
 pub fn pilotdb_memo_durability(db: i64, enc_k: str) -> u8 {
-    return __engine("map_get", db, "memo_dur_" + enc_k) + 0;
+    return (__engine("map_get", db, "memo_dur_" + enc_k) ?? 0);
 }
 
 pub fn pilotdb_memo_payload(db: i64, enc_k: str) -> str {
     let p = __engine("map_get", db, "memo_payload_" + enc_k);
-    if p == nil { return ""; }
+    if p == none { return ""; }
     return p;
 }
 
 pub fn pilotdb_memo_fp(db: i64, enc_k: str) -> Fingerprint128 {
-    let lo = __engine("map_get", db, "memo_fp_lo_" + enc_k) + 0;
-    let hi = __engine("map_get", db, "memo_fp_hi_" + enc_k) + 0;
+    let lo = (__engine("map_get", db, "memo_fp_lo_" + enc_k) ?? 0);
+    let hi = (__engine("map_get", db, "memo_fp_hi_" + enc_k) ?? 0);
     return Fingerprint128 { lo: lo, hi: hi };
 }
 
@@ -282,7 +282,7 @@ pub fn pilotdb_query_with_fn(db: i64, key: QueryKey, fn_tag: str) -> str {
     var needs_recompute = true;
     if pilotdb_memo_has(db, enc_k) {
         let memo_vat = pilotdb_memo_verified_at(db, enc_k);
-        let dcnt = __engine("map_get", db, "depcnt_" + enc_k) + 0;
+        let dcnt = (__engine("map_get", db, "depcnt_" + enc_k) ?? 0);
         var all_deps_clean = true;
         var di = 0;
         while di < dcnt {
@@ -374,11 +374,11 @@ pub fn pilotdb_dispatch_compute(db: i64, key: QueryKey, fn_tag: str) -> str {
     }
     if stage == stage_import_scope() {
         // Query signature of imported modules if any are registered
-        let imp_count = __engine("map_get", db, "file_import_count_" + fid) + 0;
+        let imp_count = (__engine("map_get", db, "file_import_count_" + fid) ?? 0);
         var sigs = "";
         var ii = 0;
         while ii < imp_count {
-            let dep_fid = __engine("map_get", db, "file_import_" + fid + "_" + ii) + 0;
+            let dep_fid = (__engine("map_get", db, "file_import_" + fid + "_" + ii) ?? 0);
             let k_sig = query_key_new(stage_item_signature(), 0, dep_fid);
             let s = pilotdb_query_with_fn(db, k_sig, "");
             sigs = sigs + s + "\n";
@@ -388,10 +388,10 @@ pub fn pilotdb_dispatch_compute(db: i64, key: QueryKey, fn_tag: str) -> str {
     }
     if stage == stage_def_types_and_lattice() {
         // Types depend on imported modules' def_types_and_lattice
-        let imp_count = __engine("map_get", db, "file_import_count_" + fid) + 0;
+        let imp_count = (__engine("map_get", db, "file_import_count_" + fid) ?? 0);
         var ii = 0;
         while ii < imp_count {
-            let dep_fid = __engine("map_get", db, "file_import_" + fid + "_" + ii) + 0;
+            let dep_fid = (__engine("map_get", db, "file_import_" + fid + "_" + ii) ?? 0);
             let k_dep_types = query_key_new(stage_def_types_and_lattice(), 0, dep_fid);
             let _ = pilotdb_query_with_fn(db, k_dep_types, "");
             ii = ii + 1;
@@ -493,7 +493,7 @@ pub fn pilotdb_extract_item_sig(source: str) -> str {
 // ------------------------------------------------------------------------------
 
 pub fn pilotdb_register_module_import(db: i64, importer_fid: u64, imported_fid: u64) {
-    let cur = __engine("map_get", db, "file_import_count_" + importer_fid) + 0;
+    let cur = (__engine("map_get", db, "file_import_count_" + importer_fid) ?? 0);
     __engine("map_set", db, "file_import_" + importer_fid + "_" + cur, imported_fid);
     __engine("map_set", db, "file_import_count_" + importer_fid, cur + 1);
 }

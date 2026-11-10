@@ -98,7 +98,7 @@ pub fn incremental_reparse_cst(
     replacement: str
 ) -> i64 {
     let new_src = apply_text_edit(old_src, edit_start, edit_end, replacement);
-    if old_root < 0 || edit_start < 0 || edit_end < edit_start || edit_end > old_src.len() {
+    if old_root == -1 || edit_start < 0 || edit_end < edit_start || edit_end > old_src.len() {
         return parse_lossless_cst(new_src);
     }
 

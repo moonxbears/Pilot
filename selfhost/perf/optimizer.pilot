@@ -114,7 +114,7 @@ pub fn optimize_mounted_pilot_source() -> str {
         let k = __engine("ast_node_kind", j);
         if k == 4 { // LetStmt
             let rhs = __engine("ast_child_at", j, 0);
-            if rhs != null && __engine("ast_node_kind", rhs) == 19 {
+            if rhs != none && __engine("ast_node_kind", rhs) == 19 {
                 let let_span_start = __engine("ast_span_start", j);
                 let eq_pos = opt_find(full_src, "=", let_span_start);
                 let semi_pos = opt_find(full_src, ";", eq_pos);

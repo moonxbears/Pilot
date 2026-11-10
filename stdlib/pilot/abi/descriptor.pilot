@@ -193,7 +193,7 @@ pub struct RawDispatchPacket : IValue {
         gprs:          [0, 0, 0, 0, 0, 0, 0, 0],
         x8_sret:       0,
         vecs:          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        stack_bytes:   slice<u8> { data: null, len: 0 },
+        stack_bytes:   slice<u8> { data: none, len: 0 },
         vec_reg_count: 0,
         ret_kind:      0,
     };
@@ -277,7 +277,7 @@ pub pure fn classify_call_frame(
         return pilot.abi.aapcs64.Aapcs64ConvClassifier::classify(params, ret, variadic_fixed_count);
     }
     if conv == "darwin_arm64" || conv == "apple_arm64" {
-        return pilot.abi.aapcs64.Aapcs64ConvClassifier::darwin().classify(params, ret, variadic_fixed_count);
+        return pilot.abi.aapcs64.Aapcs64ConvClassifier::darwin().plan(params, ret, variadic_fixed_count);
     }
     if conv == "riscv64" {
         return pilot.abi.riscv_wasm.Riscv64ConvClassifier::classify(params, ret, variadic_fixed_count);
@@ -315,7 +315,7 @@ pub fn invoke_dynamic_frame(
     plan: ref<AbiFramePlan>,
     packet: var ref<RawDispatchPacket>
 ) -> res<u64, AbiDiagnostic> {
-    if fn_addr == null {
+    if fn_addr == none {
         return res<u64, AbiDiagnostic>.err(AbiDiagnostic::symbol_not_found("dynamic_symbol", plan.conv_id));
     }
     if plan.conv_id == "unsupported" || plan.conv_id == "" {

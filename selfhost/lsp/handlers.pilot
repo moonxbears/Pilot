@@ -882,9 +882,9 @@ pub fn handle_lsp_references(offset: i64) {
 
 fn mount_unit_safe(path: str) -> i64 {
     let r1 = __engine(Cfg.ast.mount_unit, path);
-    if r1 != null && r1 >= 0 { return r1; }
+    if r1 != none && r1 >= 0 { return r1; }
     let r2 = __engine(Cfg.ast.mount_unit, "../../" + path);
-    return if r2 != null { r2 } else { -1 };
+    return if r2 != none { r2 } else { -1 };
 }
 
 fn mount_keywords_if_needed() {

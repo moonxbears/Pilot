@@ -144,7 +144,7 @@ fn eval_m19(deps: &[&str], script: &str) -> String {
     }));
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     vm.load_binary(bin);
-    vm.run().to_string_repr()
+    vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr()
 }
 
 // -----------------------------------------------------------------------------

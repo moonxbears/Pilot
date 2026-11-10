@@ -1,0 +1,16 @@
+// Struct literals, methods with an implicit receiver, field updates.
+struct Counter {
+    pub count: i64;
+
+    pub fn bump(by: i64) -> i64 {
+        self.count = self.count + by;
+        return self.count;
+    }
+}
+
+fn main() {
+    let c = Counter { count: 1 };
+    c.bump(2);
+    print(c.bump(3));
+    print(c.count);
+}

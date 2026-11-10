@@ -1,0 +1,10 @@
+// Float arithmetic and int/float mixing pick the operation from operand kinds.
+fn main() {
+    print(1.5 + 2.25);
+    print(1.5 * 2.0);
+    print(7.0 / 2);
+    print(1 + 0.5);
+    print(2.0 ** 3);
+    print(0.1 + 0.2 > 0.3);
+    print(3 == 3.0);
+}
