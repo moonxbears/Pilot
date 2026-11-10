@@ -47,11 +47,14 @@ pub enum Opcode {
     EngineIntrinsic = 34,
     /// Raises a runtime fault whose message is the string constant at `src1:src2`.
     Trap = 35,
+    /// Calls the function value in `src1` with `src2` arguments staged in
+    /// `r1..`; the result lands in `dst`.
+    CallClosure = 36,
     /// Any byte that does not decode to a known opcode. Executing it faults.
     Invalid = 255,
 }
 
-const OPCODE_TABLE: [Opcode; 33] = [
+const OPCODE_TABLE: [Opcode; 35] = [
     Opcode::Nop,
     Opcode::Add,
     Opcode::Sub,
@@ -85,14 +88,13 @@ const OPCODE_TABLE: [Opcode; 33] = [
     Opcode::Shl,
     Opcode::Shr,
     Opcode::EngineIntrinsic,
+    Opcode::Trap,
+    Opcode::CallClosure,
 ];
 
 impl Opcode {
     #[inline]
     pub fn from_u8(v: u8) -> Self {
-        if v == Opcode::Trap as u8 {
-            return Opcode::Trap;
-        }
         OPCODE_TABLE
             .iter()
             .copied()

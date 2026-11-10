@@ -1,0 +1,9 @@
+// Closures capture by value, so writing to a captured variable is rejected.
+fn main() {
+    var total = 0;
+    let bump = (x) => {
+        total = total + x;
+        return total;
+    };
+    print(bump(1));
+}

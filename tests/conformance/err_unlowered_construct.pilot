@@ -1,5 +1,5 @@
-// Constructs the seed cannot run yet are reported, not silently skipped.
+// A construct the seed cannot run yet is a compile error, never a silent no-op.
 fn main() {
-    let add = (a, b) => a + b;
-    print(add(1, 2));
+    defer print("cleanup");
+    print("body");
 }

@@ -33,7 +33,11 @@ impl BytecodeCompiler {
                 self.compile_named_call(arena, &name, &ids[1..])
             }
             NodeKind::MemberExpr => self.compile_method_call(arena, ids[0], &ids[1..]),
-            _ => self.error("calling a computed value is not lowered by the seed yet".to_string()),
+            _ => {
+                let r_callee = self.compile_node(arena, ids[0]);
+                let regs = self.compile_args(arena, &ids[1..]);
+                self.emit_closure_call(r_callee, &regs)
+            }
         }
     }
 
@@ -117,10 +121,10 @@ impl BytecodeCompiler {
             let mn = *arena.node(args[0]);
             return self.compile_map_literal(arena, mn.lhs, mn.rhs);
         }
-        if self.var_slots.contains_key(name) {
-            return self.error(format!(
-                "`{name}` is a variable; calling values (closures) is not lowered by the seed yet"
-            ));
+        // Calling a variable or captured variable calls the function value it holds.
+        if let Some(r_callee) = self.var_slots.get(name).copied().or_else(|| self.capture_read(name)) {
+            let regs = self.compile_args(arena, args);
+            return self.emit_closure_call(r_callee, &regs);
         }
         let regs = self.compile_args(arena, args);
         self.emit_user_call(name.to_string(), name.to_string(), &regs)

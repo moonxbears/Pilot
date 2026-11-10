@@ -67,6 +67,10 @@ impl BytecodeCompiler {
             NodeKind::BinaryExpr => self.compile_binary(arena, node.flags, node.lhs, node.rhs),
             NodeKind::UnaryExpr => self.compile_unary(arena, node.flags, node.lhs),
             NodeKind::IfExpr => self.compile_if(arena, node_id),
+            NodeKind::MatchExpr => self.compile_match(arena, node_id),
+            NodeKind::LambdaExpr => self.compile_lambda(arena, node_id),
+            NodeKind::GuardStmt => self.compile_guard(arena, node_id),
+            NodeKind::TryPropagateExpr => self.compile_try_propagate(arena, node.lhs),
             NodeKind::WhileStmt => self.compile_while(arena, node.lhs, node.rhs),
             NodeKind::ForExpr => self.compile_for(arena, node_id),
             NodeKind::BreakStmt => self.compile_break(NodeId(node.lhs).is_some()),
@@ -107,6 +111,9 @@ impl BytecodeCompiler {
         if let Some(&r) = self.var_slots.get(name) {
             return r;
         }
+        if let Some(r) = self.capture_read(name) {
+            return r;
+        }
         if name == "ENV" {
             return self.emit_const(PilotVal::from_map_handle(0));
         }
@@ -116,10 +123,8 @@ impl BytecodeCompiler {
         if let Some(v) = self.unique_variant(name) {
             return self.emit_const(v);
         }
-        if self.fn_entries.contains_key(name) {
-            return self.error(format!(
-                "function `{name}` used as a value; closures are not lowered by the seed yet"
-            ));
+        if let Some(r) = self.function_value(name) {
+            return r;
         }
         self.error(format!("undefined name `{name}`"))
     }
@@ -199,6 +204,10 @@ impl BytecodeCompiler {
         let Some(op) = BinaryOp::from_u16(flags) else {
             return self.error("unknown binary operator".to_string());
         };
+        // `As` keeps its target type outside the operand slots.
+        if NodeId(lhs).is_none() || (NodeId(rhs).is_none() && !matches!(op, BinaryOp::As | BinaryOp::AsView)) {
+            return self.error(format!("operator `{}` is missing an operand", op.symbol()));
+        }
         match op {
             BinaryOp::And | BinaryOp::Or => return self.compile_short_circuit(arena, op, lhs, rhs),
             BinaryOp::Coalesce => return self.compile_coalesce(arena, lhs, rhs),
@@ -229,7 +238,10 @@ impl BytecodeCompiler {
     }
 
     /// Declared type of a variable or call result, when statically known.
-    fn static_type(&self, arena: &AstArena, id: NodeId) -> Option<String> {
+    pub(crate) fn static_type(&self, arena: &AstArena, id: NodeId) -> Option<String> {
+        if id.is_none() {
+            return None;
+        }
         let n = arena.node(id);
         match n.node_kind() {
             NodeKind::IdentExpr => self.var_types.get(Self::name(arena, n.lhs)).cloned(),

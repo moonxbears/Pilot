@@ -19,6 +19,9 @@ pub const TAG_LIST: u8 = 10;
 /// Handle to a VM-owned keyed record (maps and struct instances). The payload
 /// is the heap slot index.
 pub const TAG_MAP: u8 = 11;
+/// Handle to a VM-owned function value (closure). The payload is the heap
+/// slot of its environment: entry point, arity, then captured values.
+pub const TAG_FN: u8 = 12;
 
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -45,6 +48,17 @@ impl PilotVal {
     #[inline] pub const fn is_str(self) -> bool { let t = self.tag(); t == TAG_SSO_STR || t == TAG_HEAP_STR }
     #[inline] pub const fn is_list(self) -> bool { self.tag() == TAG_LIST }
     #[inline] pub const fn is_map(self) -> bool { self.tag() == TAG_MAP }
+    #[inline] pub const fn is_fn(self) -> bool { self.tag() == TAG_FN }
+
+    #[inline]
+    pub const fn from_fn_handle(slot: usize) -> Self {
+        Self { tag_meta: TAG_FN as u64, payload: slot as u64 }
+    }
+
+    #[inline]
+    pub const fn as_fn_handle(self) -> Option<usize> {
+        if self.is_fn() { Some(self.payload as usize) } else { None }
+    }
 
     #[inline]
     pub const fn from_list_handle(slot: usize) -> Self {
@@ -79,6 +93,7 @@ impl PilotVal {
             TAG_SSO_STR | TAG_HEAP_STR => "string",
             TAG_LIST => "list",
             TAG_MAP => "record",
+            TAG_FN => "function",
             _ => "unknown value",
         }
     }
@@ -159,6 +174,7 @@ impl PilotVal {
             TAG_SSO_STR | TAG_HEAP_STR => self.with_str(|s| s.to_string()).unwrap_or_default(),
             TAG_LIST => format!("<list #{}>", self.payload),
             TAG_MAP => format!("<record #{}>", self.payload),
+            TAG_FN => format!("<function #{}>", self.payload),
             _ => format!("PilotVal(tag={})", self.tag()),
         }
     }

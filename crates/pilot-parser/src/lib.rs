@@ -295,7 +295,14 @@ impl<'a> Parser<'a> {
                 continue; }
             if self.tables.module_kws.get(w) == Some(&true) && nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || self.tape.kind(nx) == TokenKind::LBrace) && !self.tables.modifiers.contains_key(self.tape.text(nx, self.src)) {
                 break; }
-            let Some(&act) = self.tables.modifiers.get(w) else { break; }; self.advance(); match act {
+            let Some(&act) = self.tables.modifiers.get(w) else { break; };
+            // After `var`/`const`, a modifier word followed by `=`, `:`, `;` or `,`
+            // is the binding's name (`var pkg = 1;`), not another modifier.
+            let binding_started = (m.flags & DECL_FLAG_MUT) != 0 || m.is_const;
+            if binding_started && nx < self.tape.len()
+                && matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::Colon | TokenKind::Semicolon | TokenKind::Comma)
+            { break; }
+            self.advance(); match act {
                 ModAct::Vis(v) => m.vis = Some(v), ModAct::Partial => m.flags |= DECL_FLAG_PARTIAL,
                 ModAct::Static => m.flags |= DECL_FLAG_STATIC, ModAct::Pure => m.flags |= DECL_FLAG_PURE,
                 ModAct::Mut => m.flags |= DECL_FLAG_MUT, ModAct::Const => m.is_const = true,
@@ -333,7 +340,10 @@ impl<'a> Parser<'a> {
                 out.push(self.arena.alloc_node(NodeKind::ComptimeExpr, 0, self.arena.span(b), b.0, 0)); }
             TokenKind::Tilde if in_type_body => out.push(self.parse_dtor(&mods)),
             TokenKind::Star if in_type_body => out.push(self.parse_bundle_splice()), _ if self.is_word() => {
-                if let Some(&is_pkg) = self.tables.module_kws.get(self.text()) { self.parse_module_decl(is_pkg, &mods, out); return; }
+                let nx = self.next_non_nl(self.cur() + 1);
+                let decl_follows = nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || self.tape.kind(nx) == TokenKind::LBrace);
+                if let Some(&is_pkg) = self.tables.module_kws.get(self.text()).filter(|_| decl_follows) {
+                    self.parse_module_decl(is_pkg, &mods, out); return; }
                 if mods.is_ext && !self.at(TokenKind::KwFn) { out.push(self.parse_extend_decl(&mods)); return; }
                 if raw_mods.flags & DECL_FLAG_MUT != 0 || raw_mods.is_const { self.parse_bindings(out, &mods, def_vis, true); return; }
                 if self.is_rec(4) { out.push(self.parse_syntax_decl(&mods)); return; }
@@ -721,9 +731,14 @@ impl<'a> Parser<'a> {
                             else { let first = self.parse_expr(); if self.at(TokenKind::Comma) { let mut items = vec![first]; while self.eat(TokenKind::Comma) { items.push(self.parse_expr()); } self.arena.alloc_list_node(NodeKind::TupleExpr, 0, sp, &items) } else { first } }; let _ = self.eat(TokenKind::Semicolon);
                             return self.arena.alloc_node(if pl == 0 { NodeKind::BreakStmt } else { NodeKind::ContinueStmt }, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), v.0, 0); }
                         14 => return self.parse_switch(), 17 => { self.advance();
-                            if self.receptor() == Some((31, 2)) || self.at(TokenKind::KwLet) { self.advance(); }
-                            self.no_struct_lit = true; let mut c = self.parse_expr(); if self.eat(TokenKind::Equal) { c = self.parse_expr(); } self.no_struct_lit = false; if self.is_rec(3) { self.advance(); } else { self.arena.diagnostics.push((sp, "NULL002: 'guard' statement requires an 'else' block with early exit".into())); }
-                            let eb = self.parse_block(); return self.arena.alloc_node(NodeKind::GuardStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), c.0, eb.0); }
+                            // `guard some x [= v] else`: flags = 1, and a binding keeps its name as `AssignStmt(x, v)`.
+                            let is_some = self.receptor() == Some((31, 2)) || self.at(TokenKind::KwLet);
+                            if is_some { self.advance(); }
+                            self.no_struct_lit = true; let mut c = self.parse_expr();
+                            if self.eat(TokenKind::Equal) { let v = self.parse_expr();
+                                c = self.arena.alloc_node(NodeKind::AssignStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), c.0, v.0); }
+                            self.no_struct_lit = false; if self.is_rec(3) { self.advance(); } else { self.arena.diagnostics.push((sp, "NULL002: 'guard' statement requires an 'else' block with early exit".into())); }
+                            let eb = self.parse_block(); return self.arena.alloc_node(NodeKind::GuardStmt, u16::from(is_some), ByteSpan::new(sp.start, self.prev_span().end), c.0, eb.0); }
                         18 => { self.advance(); let tb = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() };
                             let mut ch = vec![tb]; while self.is_rec(19) { let csp = self.span(); self.advance();
                                 let psym = if self.is_word() && !self.at(TokenKind::LBrace) { let s = self.intern_cur(); if self.eat(TokenKind::Colon) { let _ = self.parse_type(); } s } else { SymbolId(0) };
@@ -791,7 +806,10 @@ impl<'a> Parser<'a> {
             let asp = self.span(); let pat = if self.is_rec(16) || (self.is_word() && self.text() == "_") { self.advance();
                 self.arena.alloc_node(NodeKind::PatWildcard, 0, asp, 0, 0)
             } else { if self.is_rec(15) { self.advance(); } self.parse_pattern() };
-            if self.eat(TokenKind::KwIf) || self.is_rec(28) { self.no_struct_lit = true; let _ = self.parse_expr(); self.no_struct_lit = false; }
+            let mut guard = NodeId::NONE;
+            if self.eat(TokenKind::KwIf) || self.is_rec(28) {
+                if self.is_rec(28) { self.advance(); }
+                self.no_struct_lit = true; guard = self.parse_expr(); self.no_struct_lit = false; }
             let is_colon = self.eat(TokenKind::Colon); if !is_colon { let _ = self.eat(TokenKind::FatArrow); }
             let body = if self.at(TokenKind::LBrace) { self.parse_block() }
             else { let mut stmts = Vec::new(); while !self.at_end() && !self.at(TokenKind::RBrace) && !self.is_rec(15) && !self.is_rec(16) {
@@ -799,12 +817,21 @@ impl<'a> Parser<'a> {
                 if stmts.len() == 1 { let s = stmts[0]; if self.arena.node(s).node_kind() == NodeKind::ExprStmt { NodeId(self.arena.node(s).lhs) } else { s } }
                 else { self.arena.alloc_list_node(NodeKind::BlockExpr, 0, asp, &stmts) } };
             let _ = self.eat(TokenKind::Comma) || self.eat(TokenKind::Semicolon);
-            ch.push(self.arena.alloc_node(NodeKind::MatchArm, 0, ByteSpan::new(asp.start, self.prev_span().end), pat.0, body.0)); }
+            ch.push(self.arena.alloc_match_arm(pat, guard, body, ByteSpan::new(asp.start, self.prev_span().end))); }
         self.expect(TokenKind::RBrace); self.arena.alloc_list_node(NodeKind::MatchExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch) }
+    /// Binding power for a literal inside a pattern: tighter than the range
+    /// operators (from the Pilot operator table), so `case 4 ..= 9:` keeps the
+    /// range as a pattern instead of folding it into the literal.
+    fn pattern_literal_bp(&self) -> u8 {
+        let is_range = |op: u16| matches!(pilot_ast::BinaryOp::from_u16(op), Some(pilot_ast::BinaryOp::RangeInclusive | pilot_ast::BinaryOp::RangeHalfOpen));
+        self.tables.infix_ops.values().filter(|e| is_range(e.bin_op)).map(|e| e.bp.saturating_add(1)).max().unwrap_or(36).max(36)
+    }
     fn parse_pattern(&mut self) -> NodeId { let mut lhs = self.parse_pat_atom();
         if matches!(self.peek(), TokenKind::DotDot | TokenKind::DotDotEqual | TokenKind::DotDotLess) {
+            // PatRange flags: 1 = inclusive `..=`, 0 = half-open `..` / `..<`.
+            let inclusive = u16::from(self.at(TokenKind::DotDotEqual));
             let sp = self.arena.span(lhs); self.advance(); let rhs = self.parse_pat_atom();
-            lhs = self.arena.alloc_node(NodeKind::PatRange, 0, sp, lhs.0, rhs.0); }
+            lhs = self.arena.alloc_node(NodeKind::PatRange, inclusive, sp, lhs.0, rhs.0); }
         while self.eat(TokenKind::Vbar) { let (sp, rhs) = (self.arena.span(lhs), self.parse_pat_atom()); lhs = self.arena.alloc_node(NodeKind::PatOr, 0, sp, lhs.0, rhs.0); }
         lhs }
     fn parse_pat_atom(&mut self) -> NodeId { let sp = self.span();
@@ -833,7 +860,7 @@ impl<'a> Parser<'a> {
             let (st, ln) = self.arena.alloc_child_slice(&sub);
             return self.arena.alloc_node(NodeKind::PatVariant, ln as u16, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), sym.0, st); }
         if matches!(self.peek(), TokenKind::IntLit | TokenKind::HexIntLit | TokenKind::FloatLit | TokenKind::StrLit | TokenKind::Minus) || self.is_rec(1) || self.is_rec(2) {
-            let lit = self.parse_expr_bp(36); return self.arena.alloc_node(NodeKind::PatLiteral, 0, sp, lit.0, 0); }
+            let lit = self.parse_expr_bp(self.pattern_literal_bp()); return self.arena.alloc_node(NodeKind::PatLiteral, 0, sp, lit.0, 0); }
         if self.is_word() { let sym = self.intern_cur(); return self.arena.alloc_node(NodeKind::PatBind, 0, sp, sym.0, 0); }
         NodeId::NONE }
     fn parse_polyglot_inline(&mut self) -> NodeId { let (sp, lang) = (self.span(), self.text().to_string()); self.advance();
@@ -943,7 +970,7 @@ impl<'a> Parser<'a> {
                         9 => return self.parse_for(), 14 => return self.parse_switch(), 18 => { self.advance(); return self.parse_expr_bp(6); }
                         31 if pl == 1 => { self.advance(); let v = self.parse_expr_bp(16); return self.arena.alloc_node(NodeKind::UnaryExpr, 5, sp, v.0, 0); }
                         31 if pl == 2 => { self.advance(); return self.parse_expr_bp(80); }
-                        32 if nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::LBrace | TokenKind::LParen) => return self.parse_polyglot_inline(),
+                        32 if nx < self.tape.len() && (matches!(self.tape.kind(nx), TokenKind::LParen) || (!self.no_struct_lit && matches!(self.tape.kind(nx), TokenKind::LBrace))) => return self.parse_polyglot_inline(),
                         33 if pl == 6 => { let p2 = self.next_non_nl(nx + 1);
                             if p2 < self.tape.len() && is_word_tok(self.tape.kind(nx)) && self.tables.receptors.get(self.tape.text(p2, self.src)) == Some(&(10, 0)) {
                                 return self.parse_linq_query(); } }
