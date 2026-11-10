@@ -78,13 +78,13 @@ pub fn db_canonicalize_uri(raw: str) -> str {
 
 pub fn db_serialize_cache(db: i64, compiler_build_hash: str) -> str {
     let rev = pilotdb_current_rev(db);
-    let scnt = __engine("map_get", db, "source_count") + 0;
+    let scnt = (__engine("map_get", db, "source_count") ?? 0);
 
     var out = "PDB1\n" + compiler_build_hash + "\n" + rev + "\n" + scnt + "\n";
 
     var i = 0;
     while i < scnt {
-        let fid = __engine("map_get", db, "source_file_" + i) + 0;
+        let fid = (__engine("map_get", db, "source_file_" + i) ?? 0);
         let src = pilotdb_get_file_source(db, fid);
         let k = query_key_new(stage_source_text(), 0, fid);
         let enc_k = query_key_encode(k);

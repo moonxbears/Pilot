@@ -1,0 +1,9 @@
+// f-string interpolation of expressions, with `{{` / `}}` escapes.
+fn main() {
+    let name = "pilot";
+    let n = 3;
+    print(f"hello {name}!");
+    print(f"{n} + {n} = {n + n}");
+    print(f"{{literal}} {n * 2.5}");
+    print(f"{[1, 2]}");
+}

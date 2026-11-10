@@ -1,0 +1,17 @@
+// Integer arithmetic, precedence and recursion.
+fn fib(n: i64) -> i64 {
+    if n < 2 {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main() {
+    print(1 + 2 * 3);
+    print((1 + 2) * 3);
+    print(17 / 5);
+    print(17 % 5);
+    print(-17 / 5);
+    print(2 ** 10);
+    print(fib(20));
+}

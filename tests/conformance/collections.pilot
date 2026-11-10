@@ -1,0 +1,19 @@
+// Lists and records keep their own identity; values print structurally.
+fn main() {
+    var xs = [1, 2, 3,];
+    xs.push(4);
+    print(xs);
+    print(xs.len());
+    print(xs[2]);
+    xs[0] = 10;
+    print(xs[0]);
+    var m = {a: 1, b: "two",};
+    m["c"] = 3;
+    print(m["b"]);
+    print(m.a);
+    print(m.has("c"));
+    print(m);
+    let s = "hello";
+    print(s.len());
+    print(s.slice(1, 3));
+}

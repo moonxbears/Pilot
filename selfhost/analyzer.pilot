@@ -588,6 +588,7 @@ pub fn verify_ident_not_keyword(nid: i64, kw_set: str) -> i64 {
     if sym == 0 { return 0; }
     let name = __engine(Cfg.ast.sym_str, sym);
     if name.len() == 0 || name.byte_at(0) == 36 || is_kw_contextual_ident(name) { return 0; }
+    let ccount = __engine(Cfg.ast.ast_child_count, nid);
     let ch0 = if ccount > 0 { __engine(Cfg.ast.ast_child_at, nid, 0) } else { -1 };
     let ch0_ok = if ch0 >= 0 { __engine(Cfg.ast.ast_orig_kind, ch0) } else { -1 };
     if kind == 1 && name.len() == 2 && name.byte_at(0) == 102 && name.byte_at(1) == 110 && (ch0_ok == 103 || ch0_ok == 200 || ch0_ok == 110) {

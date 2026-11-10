@@ -525,7 +525,7 @@ let CATEGORY_WORDS = [
 pub fn reflect_category_scope(cat_id: i64) -> str {
     // 1. Try dynamic compiler PhysicsRegistry query first:
     let live = __engine(ReflectEngine.query_sym, cat_id, 1);
-    if live != null && live != "" {
+    if live != none && live != "" {
         return live;
     }
     
@@ -535,7 +535,7 @@ pub fn reflect_category_scope(cat_id: i64) -> str {
 pub fn reflect_category_badge(cat_id: i64) -> str {
     // 1. Try dynamic compiler PhysicsRegistry query first:
     let live = __engine(ReflectEngine.query_sym, cat_id, 2);
-    if live != null && live != "" {
+    if live != none && live != "" {
         return live;
     }
     
@@ -545,11 +545,11 @@ pub fn reflect_category_badge(cat_id: i64) -> str {
 pub fn reflect_keyword_doc(cat_id: i64, word: str) -> str {
     // 1. Query compiler dynamic registry for exact doc:
     let live = __engine(ReflectEngine.query_sym, cat_id, 3, word);
-    if live != null && live != "" {
+    if live != none && live != "" {
         return live;
     }
     let any_cat = __engine(ReflectEngine.query_sym, -1, 3, word);
-    if any_cat != null && any_cat != "" {
+    if any_cat != none && any_cat != "" {
         return any_cat;
     }
     return "Pilot language symbol: " + word;
@@ -558,7 +558,7 @@ pub fn reflect_keyword_doc(cat_id: i64, word: str) -> str {
 pub fn reflect_category_words(cat_id: i64) -> str {
     // 1. Try dynamic compiler PhysicsRegistry query first:
     let live = __engine(ReflectEngine.query_sym, cat_id, 0);
-    if live != null && live != "" {
+    if live != none && live != "" {
         return live;
     }
     
@@ -1059,7 +1059,7 @@ pub struct CompileEnvView : IReference {
     }
 
     pub pure fn symbols_in_pkg(pkg_name: str) -> slice<str> {
-        return slice<str> { data: null, len: 0 };
+        return slice<str> { data: none, len: 0 };
     }
 
     pub pure fn ast_root(unit: u32) -> usize {
@@ -1096,9 +1096,9 @@ pub fn env() -> CompileEnvView {
     let opt = __engine("map_get", 1, "opt_level") as u8;
     let opt_lvl = if opt > 0 { opt } else { 2 };
 
-    let is_comp = __engine("map_get", 0, "is_comptime") as i64 == 1;
-    let u_cnt = __engine("map_get", 0, "unit_count") as usize;
-    let s_cnt = __engine("map_get", 0, "symbol_count") as usize;
+    let is_comp = __engine("map_get", __engine("get_env"), "is_comptime") as i64 == 1;
+    let u_cnt = __engine("map_get", __engine("get_env"), "unit_count") as usize;
+    let s_cnt = __engine("map_get", __engine("get_env"), "symbol_count") as usize;
 
     let tgt = TargetDescriptor {
         arch: arch_str,

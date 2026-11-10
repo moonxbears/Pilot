@@ -503,7 +503,7 @@ pub fn fmt_transform_stream_style(stream: i64, style: str) -> i64 {
     if style == "preserve" || style == "" {
         return stream;
     }
-    let total = __engine("map_get", stream, "cnt") + 0;
+    let total = (__engine("map_get", stream, "cnt") ?? 0);
     let out = __engine("map_new");
     __engine("map_set", out, "cnt", 0);
     var i = 0;

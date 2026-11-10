@@ -1,135 +1,287 @@
-//! Zero-Allocation Register-Based Virtual Machine Engine (`PilVirtualMachine`).
+//! Register-based virtual machine (`PilVirtualMachine`).
+//!
+//! Execution stops at the first fault. A fault records the message and the
+//! source span of the faulting instruction in `PilVirtualMachine::fault`;
+//! `run` then returns `PilotVal::NULL` and callers decide how to surface it.
 
-use std::collections::HashMap;
+use crate::instruction::{Instruction, Opcode};
+use crate::ops;
+use crate::pilc::PilcBinary;
 use pilot_rt::PilotVal;
 use pilot_span::ByteSpan;
-use crate::instruction::{Instruction, Opcode};
-use crate::pilc::PilcBinary;
+use std::collections::HashMap;
 
 pub type VmHook = Box<dyn FnMut(usize, Instruction, &[PilotVal; 256])>;
 pub type EngineIntrinsicHandler = Box<dyn FnMut(&str, &[PilotVal]) -> Result<PilotVal, String>>;
 
-pub struct PilVirtualMachine {
-    pub registers: [PilotVal; 256], pub constants: Vec<PilotVal>, pub instructions: Vec<Instruction>,
-    pub pc_spans: Vec<ByteSpan>, pub reg_symbols: Vec<(u8, u32, u32)>, pub pc: usize,
-    pub call_stack: Vec<(usize, usize, u16, u8)>, pub reg_stack: Vec<PilotVal>,
-    pub heap_maps: Vec<HashMap<String, PilotVal>>, pub heap_lists: Vec<Vec<PilotVal>>,
-    pub hook: Option<VmHook>, pub engine_handler: Option<EngineIntrinsicHandler>,
-    pub shared_symbols: Option<std::sync::Arc<HashMap<u32, String>>>,
-    pub fuel_limit: Option<u64>, pub fuel_used: u64, pub fuel_exhausted: bool,
+/// A runtime failure: what went wrong and where.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VmFault {
+    pub message: String,
+    pub pc: usize,
+    pub span: Option<ByteSpan>,
 }
 
-impl Default for PilVirtualMachine { fn default() -> Self { Self::new() } }
-#[inline] fn is_str(v: PilotVal) -> bool { v.is_sso_str() || v.tag() == 9 }
-#[inline] fn cmp_str_val(a: PilotVal, b: PilotVal) -> Option<std::cmp::Ordering> {
-    if is_str(a) && is_str(b) { a.with_str(|sa| b.with_str(|sb| sa.cmp(sb))).flatten() } else if is_str(a) || is_str(b) { Some(a.to_string_repr().cmp(&b.to_string_repr())) } else { None }
+impl std::fmt::Display for VmFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.span {
+            Some(span) => write!(f, "{} (bytes {}..{})", self.message, span.start, span.end),
+            None => write!(f, "{} (pc {})", self.message, self.pc),
+        }
+    }
 }
+
+pub struct PilVirtualMachine {
+    pub registers: [PilotVal; 256],
+    pub constants: Vec<PilotVal>,
+    pub instructions: Vec<Instruction>,
+    pub pc_spans: Vec<ByteSpan>,
+    pub reg_symbols: Vec<(u8, u32, u32)>,
+    pub pc: usize,
+    pub call_stack: Vec<(usize, usize, u16, u8)>,
+    pub reg_stack: Vec<PilotVal>,
+    pub heap_maps: Vec<HashMap<String, PilotVal>>,
+    pub heap_lists: Vec<Vec<PilotVal>>,
+    pub hook: Option<VmHook>,
+    pub engine_handler: Option<EngineIntrinsicHandler>,
+    pub shared_symbols: Option<std::sync::Arc<HashMap<u32, String>>>,
+    pub fuel_limit: Option<u64>,
+    pub fuel_used: u64,
+    pub fuel_exhausted: bool,
+    pub fault: Option<VmFault>,
+}
+
+impl Default for PilVirtualMachine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Upper bound on nested calls before the VM faults instead of exhausting memory.
+const MAX_CALL_DEPTH: usize = 10_000;
 
 impl PilVirtualMachine {
     pub fn new() -> Self {
         Self {
-            registers: [PilotVal::NULL; 256], constants: Vec::new(), instructions: Vec::new(),
-            pc_spans: Vec::new(), reg_symbols: Vec::new(), pc: 0,
-            call_stack: Vec::with_capacity(64), reg_stack: Vec::with_capacity(512), heap_maps: Vec::new(), heap_lists: Vec::new(), hook: None, engine_handler: None,
-            shared_symbols: None, fuel_limit: None, fuel_used: 0, fuel_exhausted: false,
+            registers: [PilotVal::NULL; 256],
+            constants: Vec::new(),
+            instructions: Vec::new(),
+            pc_spans: Vec::new(),
+            reg_symbols: Vec::new(),
+            pc: 0,
+            call_stack: Vec::with_capacity(64),
+            reg_stack: Vec::with_capacity(512),
+            heap_maps: Vec::new(),
+            heap_lists: Vec::new(),
+            hook: None,
+            engine_handler: None,
+            shared_symbols: None,
+            fuel_limit: None,
+            fuel_used: 0,
+            fuel_exhausted: false,
+            fault: None,
         }
     }
 
     pub fn load_binary(&mut self, b: PilcBinary) {
-        self.constants = b.constants; self.instructions = b.instructions;
-        self.pc_spans = b.pc_spans; self.reg_symbols = b.reg_symbols;
-        self.pc = 0; self.call_stack.clear(); self.reg_stack.clear(); self.heap_lists.clear(); self.registers = [PilotVal::NULL; 256];
-        self.fuel_used = 0; self.fuel_exhausted = false;
+        self.constants = b.constants;
+        self.instructions = b.instructions;
+        self.pc_spans = b.pc_spans;
+        self.reg_symbols = b.reg_symbols;
+        self.pc = 0;
+        self.call_stack.clear();
+        self.reg_stack.clear();
+        self.heap_lists.clear();
+        self.registers = [PilotVal::NULL; 256];
+        self.fuel_used = 0;
+        self.fuel_exhausted = false;
+        self.fault = None;
+        // Heap record slot 0 is the program environment record (`ENV`).
+        if self.heap_maps.is_empty() {
+            self.heap_maps.push(HashMap::new());
+        }
     }
 
-    pub fn set_hook(&mut self, hook: Option<VmHook>) { self.hook = hook; }
-    #[inline] pub fn current_span(&self) -> Option<ByteSpan> { self.pc_spans.get(self.pc).copied().filter(|s| s.start > 0 || s.end > 0) }
+    pub fn set_hook(&mut self, hook: Option<VmHook>) {
+        self.hook = hook;
+    }
+
+    #[inline]
+    pub fn current_span(&self) -> Option<ByteSpan> {
+        self.pc_spans
+            .get(self.pc)
+            .copied()
+            .filter(|s| s.start > 0 || s.end > 0)
+    }
+
+    /// Records a fault for the instruction at `pc`.
+    fn raise(&mut self, pc: usize, message: String) {
+        let span = self
+            .pc_spans
+            .get(pc)
+            .copied()
+            .filter(|s| s.start > 0 || s.end > 0);
+        self.fault = Some(VmFault { message, pc, span });
+    }
+
+    #[inline]
+    fn set(&mut self, reg: usize, v: PilotVal) {
+        self.registers[reg] = v;
+    }
 
     pub fn run(&mut self) -> PilotVal {
+        match self.execute() {
+            Ok(v) => v,
+            Err(message) => {
+                let pc = self.pc.saturating_sub(1);
+                self.raise(pc, message);
+                PilotVal::NULL
+            }
+        }
+    }
+
+    /// Like `run`, but returns the fault instead of leaving it in `self.fault`.
+    pub fn run_checked(&mut self) -> Result<PilotVal, VmFault> {
+        let v = self.run();
+        match self.fault.take() {
+            Some(fault) => Err(fault),
+            None => Ok(v),
+        }
+    }
+
+    fn execute(&mut self) -> Result<PilotVal, String> {
         let code_len = self.instructions.len();
         while self.pc < code_len {
-            if let Some(limit) = self.fuel_limit { self.fuel_used += 1; if self.fuel_used > limit { self.fuel_exhausted = true; return PilotVal::NULL; } }
-            let ins = unsafe { *self.instructions.get_unchecked(self.pc) };
-            if let Some(ref mut hook) = self.hook { hook(self.pc, ins, &self.registers); }
+            if let Some(limit) = self.fuel_limit {
+                self.fuel_used += 1;
+                if self.fuel_used > limit {
+                    self.fuel_exhausted = true;
+                    return Ok(PilotVal::NULL);
+                }
+            }
+            let ins = self.instructions[self.pc];
+            if let Some(ref mut hook) = self.hook {
+                hook(self.pc, ins, &self.registers);
+            }
             self.pc += 1;
             let (dst, src1, src2) = (ins.dst() as usize, ins.src1() as usize, ins.src2() as usize);
-            let (r1, r2) = unsafe { (*self.registers.get_unchecked(src1), *self.registers.get_unchecked(src2)) };
+            let (r1, r2) = (self.registers[src1], self.registers[src2]);
             match ins.opcode() {
                 Opcode::Nop => {}
-                Opcode::AddI64 => {
-                    let v = if is_str(r1) || is_str(r2) { let mut s = String::new(); r1.with_str(|a| s.push_str(a)).unwrap_or_else(|| s.push_str(&r1.to_string_repr())); r2.with_str(|b| s.push_str(b)).unwrap_or_else(|| s.push_str(&r2.to_string_repr())); PilotVal::from_str(&s) }
-                    else { PilotVal::from_int(r1.as_int().unwrap_or(0).wrapping_add(r2.as_int().unwrap_or(0))) };
-                    unsafe { *self.registers.get_unchecked_mut(dst) = v };
+                Opcode::Add => {
+                    let v = if r1.is_str() || r2.is_str() {
+                        let mut s = self.display(r1);
+                        s.push_str(&self.display(r2));
+                        PilotVal::from_str(&s)
+                    } else {
+                        ops::arith(Opcode::Add, r1, r2)?
+                    };
+                    self.set(dst, v);
                 }
-                Opcode::SubI64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(r1.as_int().unwrap_or(0).wrapping_sub(r2.as_int().unwrap_or(0))) },
-                Opcode::MulI64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(r1.as_int().unwrap_or(0).wrapping_mul(r2.as_int().unwrap_or(0))) },
-                Opcode::DivI64 => { let b = r2.as_int().unwrap_or(1); unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(if b != 0 { r1.as_int().unwrap_or(0) / b } else { 0 }) }; }
-                Opcode::RemI64 => { let b = r2.as_int().unwrap_or(1); unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(if b != 0 { r1.as_int().unwrap_or(0) % b } else { 0 }) }; }
-                Opcode::AddF64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_float(r1.as_float().unwrap_or(0.0) + r2.as_float().unwrap_or(0.0)) },
-                Opcode::SubF64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_float(r1.as_float().unwrap_or(0.0) - r2.as_float().unwrap_or(0.0)) },
-                Opcode::MulF64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_float(r1.as_float().unwrap_or(0.0) * r2.as_float().unwrap_or(0.0)) },
-                Opcode::DivF64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_float(r1.as_float().unwrap_or(0.0) / r2.as_float().unwrap_or(1.0)) },
-                Opcode::LoadConst => if let Some(&v) = self.constants.get((src1 << 8) | src2) { unsafe { *self.registers.get_unchecked_mut(dst) = v }; },
-                Opcode::Move => unsafe { *self.registers.get_unchecked_mut(dst) = r1 },
-                Opcode::CmpEq => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or(r1 == r2, |o| o.is_eq())) },
-                Opcode::CmpNe => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or(r1 != r2, |o| o.is_ne())) },
-                Opcode::CmpLt => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or_else(|| r1.as_int().unwrap_or(0) < r2.as_int().unwrap_or(0), |o| o.is_lt())) },
-                Opcode::CmpGt => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or_else(|| r1.as_int().unwrap_or(0) > r2.as_int().unwrap_or(0), |o| o.is_gt())) },
-                Opcode::CmpLe => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or_else(|| r1.as_int().unwrap_or(0) <= r2.as_int().unwrap_or(0), |o| o.is_le())) },
-                Opcode::CmpGe => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(cmp_str_val(r1, r2).map_or_else(|| r1.as_int().unwrap_or(0) >= r2.as_int().unwrap_or(0), |o| o.is_ge())) },
-                Opcode::NegI64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(-r1.as_int().unwrap_or(0)) },
-                Opcode::NegF64 => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_float(-r1.as_float().unwrap_or(0.0)) },
-                Opcode::Not => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(!r1.as_bool().unwrap_or(false)) },
-                Opcode::And => unsafe { *self.registers.get_unchecked_mut(dst) = if let (Some(a), Some(b)) = (r1.as_int(), r2.as_int()) { PilotVal::from_int(a & b) } else { PilotVal::from_bool(r1.as_bool().unwrap_or(false) && r2.as_bool().unwrap_or(false)) } },
-                Opcode::Or => unsafe { *self.registers.get_unchecked_mut(dst) = if let (Some(a), Some(b)) = (r1.as_int(), r2.as_int()) { PilotVal::from_int(a | b) } else { PilotVal::from_bool(r1.as_bool().unwrap_or(false) || r2.as_bool().unwrap_or(false)) } },
-                Opcode::Xor => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(r1.as_int().unwrap_or(0) ^ r2.as_int().unwrap_or(0)) },
-                Opcode::Shl => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(r1.as_int().unwrap_or(0) << r2.as_int().unwrap_or(0)) },
-                Opcode::Shr => unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(r1.as_int().unwrap_or(0) >> r2.as_int().unwrap_or(0)) },
-                Opcode::Jump => self.pc = (src1 << 8) | src2,
-                Opcode::JumpIfTrue => if r1.as_bool().unwrap_or_else(|| r1.as_int().map_or(false, |i| i != 0)) { self.pc = (dst << 8) | src2; },
-                Opcode::JumpIfFalse => if !r1.as_bool().unwrap_or_else(|| r1.as_int().map_or(false, |i| i != 0)) { self.pc = (dst << 8) | src2; },
-                Opcode::Call => { let act = self.registers.iter().rposition(|r| !r.is_null()).map_or(0, |i| i + 1); let st = self.reg_stack.len(); self.reg_stack.extend_from_slice(&self.registers[..act]); self.call_stack.push((self.pc, st, act as u16, ins.dst())); self.pc = (src1 << 8) | src2; }
+                op @ (Opcode::Sub
+                | Opcode::Mul
+                | Opcode::Div
+                | Opcode::Rem
+                | Opcode::Pow
+                | Opcode::FloorDiv) => {
+                    let v = ops::arith(op, r1, r2)?;
+                    self.set(dst, v);
+                }
+                op @ (Opcode::BitAnd | Opcode::BitOr | Opcode::Xor | Opcode::Shl | Opcode::Shr) => {
+                    let v = ops::bitwise(op, r1, r2)?;
+                    self.set(dst, v);
+                }
+                op @ (Opcode::CmpEq
+                | Opcode::CmpNe
+                | Opcode::CmpLt
+                | Opcode::CmpLe
+                | Opcode::CmpGt
+                | Opcode::CmpGe) => {
+                    let v = ops::compare(op, r1, r2)?;
+                    self.set(dst, v);
+                }
+                op @ (Opcode::Neg | Opcode::Not | Opcode::BitNot) => {
+                    let v = ops::unary(op, r1)?;
+                    self.set(dst, v);
+                }
+                Opcode::LoadConst => {
+                    let v = self
+                        .constants
+                        .get(ins.wide() as usize)
+                        .copied()
+                        .ok_or_else(|| format!("constant #{} out of range", ins.wide()))?;
+                    self.set(dst, v);
+                }
+                Opcode::Move => self.set(dst, r1),
+                Opcode::Jump => self.pc = ins.wide() as usize,
+                Opcode::JumpIfTrue => {
+                    if ops::truth(r1)? {
+                        self.pc = ins.branch_target() as usize;
+                    }
+                }
+                Opcode::JumpIfFalse => {
+                    if !ops::truth(r1)? {
+                        self.pc = ins.branch_target() as usize;
+                    }
+                }
+                Opcode::JumpIfNull => {
+                    if r1.is_null() {
+                        self.pc = ins.branch_target() as usize;
+                    }
+                }
+                Opcode::JumpIfNotNull => {
+                    if !r1.is_null() {
+                        self.pc = ins.branch_target() as usize;
+                    }
+                }
+                Opcode::Call => {
+                    if self.call_stack.len() >= MAX_CALL_DEPTH {
+                        return Err(format!("call depth exceeded {MAX_CALL_DEPTH} frames"));
+                    }
+                    let act = self
+                        .registers
+                        .iter()
+                        .rposition(|r| !r.is_null())
+                        .map_or(0, |i| i + 1);
+                    let st = self.reg_stack.len();
+                    self.reg_stack.extend_from_slice(&self.registers[..act]);
+                    self.call_stack.push((self.pc, st, act as u16, ins.dst()));
+                    self.pc = ins.wide() as usize;
+                }
                 Opcode::Ret => {
-                    let ret = if src1 != 0 { r1 } else { unsafe { *self.registers.get_unchecked(0) } };
-                    if let Some((ret_pc, st, act, d)) = self.call_stack.pop() { let n = act as usize; self.registers[..n].copy_from_slice(&self.reg_stack[st..st + n]); self.registers[n..].fill(PilotVal::NULL); self.reg_stack.truncate(st); unsafe { *self.registers.get_unchecked_mut(d as usize) = ret }; self.pc = ret_pc; } else { return ret; }
+                    let ret = if src1 != 0 { r1 } else { self.registers[0] };
+                    let Some((ret_pc, st, act, d)) = self.call_stack.pop() else {
+                        return Ok(ret);
+                    };
+                    let n = act as usize;
+                    self.registers[..n].copy_from_slice(&self.reg_stack[st..st + n]);
+                    self.registers[n..].fill(PilotVal::NULL);
+                    self.reg_stack.truncate(st);
+                    self.set(d as usize, ret);
+                    self.pc = ret_pc;
                 }
                 Opcode::EngineIntrinsic => {
-                    let mut sbuf = [PilotVal::NULL; 16];
-                    let overflow: Vec<PilotVal>;
-                    let args: &[PilotVal] = if src2 <= 16 { sbuf[..src2].copy_from_slice(&self.registers[1..=src2]); &sbuf[..src2] } else { overflow = self.registers[1..=src2.min(255)].to_vec(); &overflow };
-                    let mut run_op = |hook_name: &str| -> PilotVal {
-                        match hook_name {
-                            "rt_print" => {
-                                if let Some(a) = args.first() { if let Some(m) = a.as_int().and_then(|i| self.heap_maps.get(i.max(0) as usize)) { let mut items: Vec<String> = m.iter().map(|(k, v)| v.as_int().and_then(|i| self.heap_maps.get(i.max(0) as usize)).map_or_else(|| format!("{k}: {v:?}"), |s| { let mut p: Vec<String> = s.iter().map(|(sk, sv)| format!("{sk}: {sv:?}")).collect(); p.sort(); format!("{k}: {{ {} }}", p.join(", ")) })).collect(); items.sort(); println!("{{ {} }}", items.join(", ")); } else { println!("{}", a.to_string_repr()); } }
-                                PilotVal::NULL
-                            }
-                            "rt_assert" => { if !args.first().map_or(false, |v| v.as_bool().unwrap_or(false) || v.as_int().unwrap_or(0) != 0) { panic!("Assertion failed in PilVM execution"); } PilotVal::NULL }
-                            "str_len" if !args.is_empty() => { if let Some(i) = args[0].as_int() { if i < 0 { let li = (-i - 1) as usize; if li < self.heap_lists.len() { return PilotVal::from_int(self.heap_lists[li].len() as i64); } } else if (i as usize) < self.heap_maps.len() { if let Some(lv) = self.heap_maps[i as usize].get("len") { return *lv; } } } PilotVal::from_int(if args[0].is_null() { 0 } else { args[0].with_str(|s| s.len() as i64).unwrap_or_else(|| args[0].to_string_repr().len() as i64) }) }
-                            "list_new" => { let idx = self.heap_lists.len(); self.heap_lists.push(Vec::new()); PilotVal::from_int(-(idx as i64 + 1)) }
-                            "list_push" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(0); if idx < 0 { let li = (-idx - 1) as usize; if li < self.heap_lists.len() { self.heap_lists[li].push(args[1]); args[0] } else { PilotVal::NULL } } else if (idx as usize) < self.heap_maps.len() { let cur_len = self.heap_maps[idx as usize].get("len").and_then(|v| v.as_int()).unwrap_or(0); let m = &mut self.heap_maps[idx as usize]; m.insert(cur_len.to_string(), args[1]); m.insert("len".to_string(), PilotVal::from_int(cur_len + 1)); args[0] } else { PilotVal::NULL } }
-                            "str_byte_at" if args.len() >= 2 => { let idx = args[1].as_int().unwrap_or(0).max(0) as usize; PilotVal::from_int(if args[0].is_null() { 0 } else { args[0].with_str(|s| s.as_bytes().get(idx).copied().unwrap_or(0) as i64).unwrap_or_else(|| args[0].to_string_repr().as_bytes().get(idx).copied().unwrap_or(0) as i64) }) }
-                            "str_slice" if args.len() >= 3 => { if let Some(i) = args[0].as_int() { if i < 0 { let li = (-i - 1) as usize; if li < self.heap_lists.len() { let (st, en) = ((args[1].as_int().unwrap_or(0).max(0) as usize).min(self.heap_lists[li].len()), (args[2].as_int().unwrap_or(0).max(0) as usize).min(self.heap_lists[li].len())); let sub = self.heap_lists[li][st..en.max(st)].to_vec(); let idx = self.heap_lists.len(); self.heap_lists.push(sub); return PilotVal::from_int(-(idx as i64 + 1)); } } } let slice_fn = |s: &str| { let (mut a, mut b) = ((args[1].as_int().unwrap_or(0).max(0) as usize).min(s.len()), (args[2].as_int().unwrap_or(0).max(0) as usize).min(s.len())); while !s.is_char_boundary(a) && a < s.len() { a += 1; } while !s.is_char_boundary(b) && b < s.len() { b += 1; } PilotVal::from_str(&s[a..b.max(a)]) }; if args[0].is_null() { PilotVal::from_str("") } else { args[0].with_str(slice_fn).unwrap_or_else(|| slice_fn(&args[0].to_string_repr())) } }
-                            "str_find" if args.len() >= 2 => { let st = if args.len() >= 3 { args[2].as_int().unwrap_or(0) } else { 0 }; if st < 0 || args[0].is_null() || args[1].is_null() { PilotVal::from_int(-1) } else { let find_fn = |h: &str, nd: &str| { let mut u = (st as usize).min(h.len()); while !h.is_char_boundary(u) && u < h.len() { u += 1; } h[u..].find(nd).map_or(-1, |o| (u + o) as i64) }; PilotVal::from_int(args[0].with_str(|h| args[1].with_str(|nd| find_fn(h, nd)).unwrap_or_else(|| find_fn(h, &args[1].to_string_repr()))).unwrap_or(-1)) } }
-                            "str_contains" if args.len() >= 2 => PilotVal::from_bool(if args[0].is_null() || args[1].is_null() { false } else { args[0].with_str(|h| args[1].with_str(|nd| h.contains(nd)).unwrap_or_else(|| h.contains(&args[1].to_string_repr()))).unwrap_or(false) }),
-                            "str_starts_with" if args.len() >= 2 => PilotVal::from_bool(if args[0].is_null() || args[1].is_null() { false } else { args[0].with_str(|h| args[1].with_str(|nd| h.starts_with(nd)).unwrap_or_else(|| h.starts_with(&args[1].to_string_repr()))).unwrap_or(false) }),
-                            "str_ends_with" if args.len() >= 2 => PilotVal::from_bool(if args[0].is_null() || args[1].is_null() { false } else { args[0].with_str(|h| args[1].with_str(|nd| h.ends_with(nd)).unwrap_or_else(|| h.ends_with(&args[1].to_string_repr()))).unwrap_or(false) }),
-                            "map_new" => { let idx = self.heap_maps.len(); self.heap_maps.push(HashMap::new()); PilotVal::from_int(idx as i64) }
-                            "map_set" if args.len() >= 3 => { let idx = args[0].as_int().unwrap_or(0); if idx < 0 { let li = (-idx - 1) as usize; if li < self.heap_lists.len() { if let Some(k) = args[1].as_int() { if k >= 0 && (k as usize) < self.heap_lists[li].len() { self.heap_lists[li][k as usize] = args[2]; } } } args[0] } else if idx >= 0 { while self.heap_maps.len() <= idx as usize { self.heap_maps.push(HashMap::new()); } self.heap_maps[idx as usize].insert(args[1].to_string_repr(), args[2]); args[0] } else { args[0] } }
-                            "map_get" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(0); if idx < 0 { let li = (-idx - 1) as usize; if li < self.heap_lists.len() { let k_opt = args[1].as_int().or_else(|| args[1].with_str(|s| s.parse::<i64>().ok()).flatten()); if let Some(k) = k_opt { if k >= 0 && (k as usize) < self.heap_lists[li].len() { return self.heap_lists[li][k as usize]; } } else if args[1].with_str(|s| s == "len").unwrap_or_else(|| args[1].to_string_repr() == "len") { return PilotVal::from_int(self.heap_lists[li].len() as i64); } } PilotVal::NULL } else if (idx as usize) < self.heap_maps.len() { let m = &self.heap_maps[idx as usize]; args[1].with_str(|k| m.get(k).copied()).unwrap_or_else(|| m.get(&args[1].to_string_repr()).copied()).unwrap_or(PilotVal::NULL) } else { PilotVal::NULL } }
-                            "map_has" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(-1); if idx >= 0 && (idx as usize) < self.heap_maps.len() { let m = &self.heap_maps[idx as usize]; PilotVal::from_bool(args[1].with_str(|k| m.contains_key(k)).unwrap_or_else(|| m.contains_key(&args[1].to_string_repr()))) } else { PilotVal::FALSE } }
-                            "map_remove" if args.len() >= 2 => { let idx = args[0].as_int().unwrap_or(-1); if idx >= 0 && (idx as usize) < self.heap_maps.len() { let removed = args[1].with_str(|k| self.heap_maps[idx as usize].remove(k)).unwrap_or_else(|| self.heap_maps[idx as usize].remove(&args[1].to_string_repr())); PilotVal::from_bool(removed.is_some()) } else { PilotVal::FALSE } }
-                            "is_null" if !args.is_empty() => PilotVal::from_bool(args[0].is_null()),
-                            "sym_str" if !args.is_empty() => { let sid = args[0].as_int().unwrap_or(0) as u32; self.shared_symbols.as_ref().and_then(|s| s.get(&sid)).map_or_else(|| self.engine_handler.as_mut().and_then(|h| h(hook_name, args).ok()).unwrap_or(PilotVal::NULL), |s| PilotVal::from_str(s)) }
-                            "get_env" => PilotVal::from_int(0),
-                            _ => match self.engine_handler.as_mut().map(|h| h(hook_name, args)) { Some(Ok(v)) if !v.is_null() => v, Some(Err(_)) => PilotVal::NULL, _ => pilot_rt::PilotOsSyscall::vm_intrinsic(hook_name, args) },
-                        }
-                    };
-                    let res = r1.with_str(&mut run_op).unwrap_or_else(|| run_op(&r1.to_string_repr()));
-                    unsafe { *self.registers.get_unchecked_mut(dst) = res };
+                    let args: Vec<PilotVal> = self.registers[1..=src2.min(255)].to_vec();
+                    let hook = r1
+                        .with_str(|s| s.to_string())
+                        .ok_or_else(|| format!("intrinsic name must be a string, found {}", r1.kind_label()))?;
+                    let v = self.intrinsic(&hook, &args[..src2])?;
+                    self.set(dst, v);
+                }
+                Opcode::Trap => {
+                    let msg = self
+                        .constants
+                        .get(ins.wide() as usize)
+                        .map(|c| c.to_string_repr())
+                        .unwrap_or_else(|| "trap".to_string());
+                    return Err(msg);
+                }
+                Opcode::Invalid => {
+                    return Err(format!("invalid opcode byte {:#04x}", ins.0 >> 24));
                 }
                 Opcode::Halt => break,
             }
         }
-        unsafe { *self.registers.get_unchecked(0) }
+        Ok(self.registers[0])
     }
 }

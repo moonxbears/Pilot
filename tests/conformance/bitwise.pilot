@@ -1,0 +1,11 @@
+// Bitwise operators on integers, non-short-circuit logic on booleans.
+fn main() {
+    print(12 & 10);
+    print(12 | 10);
+    print(12 ^ 10);
+    print(1 << 4);
+    print(256 >> 2);
+    print(~0);
+    print(true & false);
+    print(true | false);
+}

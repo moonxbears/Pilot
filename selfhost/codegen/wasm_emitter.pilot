@@ -158,7 +158,7 @@ pub fn wm_emit_expr_hex(st: i64, nid: i64) -> str {
 
     if k == 14 {
         let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        let idx = __engine("map_get", st, "loc_" + vname) + 0;
+        let idx = (__engine("map_get", st, "loc_" + vname) ?? 0);
         return "20" + wm_uleb_hex(idx);
     }
 
@@ -211,8 +211,8 @@ pub fn wm_emit_expr_hex(st: i64, nid: i64) -> str {
             args = args + wm_emit_expr_hex(st, __engine("ast_child_at", nid, ai));
             ai = ai + 1;
         }
-        let fidx = __engine("map_get", st, "fidx_" + cname) + 0;
-        let is_void = (__engine("map_get", st, "fvoid_" + cname) + 0) == 1;
+        let fidx = (__engine("map_get", st, "fidx_" + cname) ?? 0);
+        let is_void = ((__engine("map_get", st, "fvoid_" + cname) ?? 0)) == 1;
         let call_hex = args + "10" + wm_uleb_hex(fidx);
         if is_void {
             return call_hex + "4200";
@@ -241,7 +241,7 @@ pub fn wm_emit_stmt_hex(st: i64, nid: i64) -> str {
 
     if k == 4 {
         let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        let idx = __engine("map_get", st, "loc_" + vname) + 0;
+        let idx = (__engine("map_get", st, "loc_" + vname) ?? 0);
         if __engine("ast_child_count", nid) > 0 {
             return wm_emit_expr_hex(st, __engine("ast_child_at", nid, 0)) + "21" + wm_uleb_hex(idx);
         }
@@ -251,13 +251,13 @@ pub fn wm_emit_stmt_hex(st: i64, nid: i64) -> str {
     if k == 20 {
         let lhs_nid = __engine("ast_child_at", nid, 0);
         let vname = __engine("sym_str", __engine("ast_node_sym", lhs_nid));
-        let idx = __engine("map_get", st, "loc_" + vname) + 0;
+        let idx = (__engine("map_get", st, "loc_" + vname) ?? 0);
         return wm_emit_expr_hex(st, __engine("ast_child_at", nid, 1)) + "21" + wm_uleb_hex(idx);
     }
 
     if k == 6 {
         let cond_hex = wm_emit_expr_hex(st, __engine("ast_child_at", nid, 0)) + "420052";
-        let old_d = __engine("map_get", st, "cdepth") + 0;
+        let old_d = (__engine("map_get", st, "cdepth") ?? 0);
         __engine("map_set", st, "cdepth", old_d + 1);
         let then_hex = wm_emit_stmt_hex(st, __engine("ast_child_at", nid, 1));
         var else_hex = "";
@@ -269,10 +269,10 @@ pub fn wm_emit_stmt_hex(st: i64, nid: i64) -> str {
     }
 
     if k == 7 && orig == 106 {
-        let old_d = __engine("map_get", st, "cdepth") + 0;
+        let old_d = (__engine("map_get", st, "cdepth") ?? 0);
         let brk_lvl = old_d + 1;
         let cnt_lvl = old_d + 2;
-        let ld = (__engine("map_get", st, "ldepth") + 0) + 1;
+        let ld = ((__engine("map_get", st, "ldepth") ?? 0)) + 1;
         __engine("map_set", st, "ldepth", ld);
         __engine("map_set", st, "lbrk_" + ld, brk_lvl);
         __engine("map_set", st, "lcnt_" + ld, cnt_lvl);
@@ -287,27 +287,27 @@ pub fn wm_emit_stmt_hex(st: i64, nid: i64) -> str {
     }
 
     if orig == 107 {
-        let ld = __engine("map_get", st, "ldepth") + 0;
+        let ld = (__engine("map_get", st, "ldepth") ?? 0);
         if ld > 0 {
-            let cur_d = __engine("map_get", st, "cdepth") + 0;
-            let brk_lvl = __engine("map_get", st, "lbrk_" + ld) + 0;
+            let cur_d = (__engine("map_get", st, "cdepth") ?? 0);
+            let brk_lvl = (__engine("map_get", st, "lbrk_" + ld) ?? 0);
             return "0c" + wm_uleb_hex(cur_d - brk_lvl);
         }
         return "";
     }
 
     if orig == 108 {
-        let ld = __engine("map_get", st, "ldepth") + 0;
+        let ld = (__engine("map_get", st, "ldepth") ?? 0);
         if ld > 0 {
-            let cur_d = __engine("map_get", st, "cdepth") + 0;
-            let cnt_lvl = __engine("map_get", st, "lcnt_" + ld) + 0;
+            let cur_d = (__engine("map_get", st, "cdepth") ?? 0);
+            let cnt_lvl = (__engine("map_get", st, "lcnt_" + ld) ?? 0);
             return "0c" + wm_uleb_hex(cur_d - cnt_lvl);
         }
         return "";
     }
 
     if k == 8 {
-        let is_void = (__engine("map_get", st, "cur_void") + 0) == 1;
+        let is_void = ((__engine("map_get", st, "cur_void") ?? 0)) == 1;
         if is_void || __engine("ast_child_count", nid) == 0 {
             return "0f";
         }
@@ -333,7 +333,7 @@ pub fn wm_collect_arena_fns() -> i64 {
             if __engine("ast_node_kind", item) == 3 && (__engine("ast_decl_flags", item) & 256) == 0 {
                 let nm = __engine("sym_str", __engine("ast_node_sym", item));
                 let rdesc = cg_resolve_type_physics(cg_fn_return_type_name(item));
-                let idx = __engine("map_get", meta, "fcnt") + 0;
+                let idx = (__engine("map_get", meta, "fcnt") ?? 0);
                 __engine("map_set", meta, "fname_" + idx, nm);
                 __engine("map_set", meta, "fnid_" + idx, item);
                 __engine("map_set", meta, "fvoid_" + idx, if rdesc.reg_class == 0 || rdesc.reg_class == 1 { 1 } else { 0 });
@@ -350,7 +350,7 @@ pub fn wm_collect_arena_fns() -> i64 {
 // Emits a valid WebAssembly v1 binary module as lowercase hex exporting all functions in `RawAstArena`.
 pub fn emit_arena_wasm_hex() -> str {
     let meta = wm_collect_arena_fns();
-    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    let fcnt = (__engine("map_get", meta, "fcnt") ?? 0);
     let header = "0061736d01000000";
     if fcnt == 0 {
         return header + wm_section_hex(5, "010001");
@@ -363,9 +363,9 @@ pub fn emit_arena_wasm_hex() -> str {
 
     var fi = 0;
     while fi < fcnt {
-        let fn_nid = __engine("map_get", meta, "fnid_" + fi) + 0;
+        let fn_nid = (__engine("map_get", meta, "fnid_" + fi) ?? 0);
         let fname = __engine("map_get", meta, "fname_" + fi);
-        let is_void = (__engine("map_get", meta, "fvoid_" + fi) + 0) == 1;
+        let is_void = ((__engine("map_get", meta, "fvoid_" + fi) ?? 0)) == 1;
 
         let st = __engine("map_new");
         __engine("map_set", st, "cdepth", 0);
@@ -376,7 +376,7 @@ pub fn emit_arena_wasm_hex() -> str {
         while m_i < fcnt {
             let m_nm = __engine("map_get", meta, "fname_" + m_i);
             __engine("map_set", st, "fidx_" + m_nm, m_i);
-            __engine("map_set", st, "fvoid_" + m_nm, __engine("map_get", meta, "fvoid_" + m_i) + 0);
+            __engine("map_set", st, "fvoid_" + m_nm, (__engine("map_get", meta, "fvoid_" + m_i) ?? 0));
             m_i = m_i + 1;
         }
 
@@ -434,13 +434,13 @@ pub fn emit_arena_wasm_hex() -> str {
 // Emits WebAssembly Text Format (WAT) for all functions in `RawAstArena`.
 pub fn emit_arena_wat() -> str {
     let meta = wm_collect_arena_fns();
-    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    let fcnt = (__engine("map_get", meta, "fcnt") ?? 0);
     var funcs = "";
     var fi = 0;
     while fi < fcnt {
-        let fn_nid = __engine("map_get", meta, "fnid_" + fi) + 0;
+        let fn_nid = (__engine("map_get", meta, "fnid_" + fi) ?? 0);
         let fname = __engine("map_get", meta, "fname_" + fi);
-        let is_void = (__engine("map_get", meta, "fvoid_" + fi) + 0) == 1;
+        let is_void = ((__engine("map_get", meta, "fvoid_" + fi) ?? 0)) == 1;
         let cc = __engine("ast_child_count", fn_nid);
         var params_wat = "";
         var pi = 1;
@@ -463,7 +463,7 @@ pub fn emit_arena_wat() -> str {
 // Emits ES2023 `.mjs` WebAssembly loader bindings for `RawAstArena`.
 pub fn emit_arena_wasm_mjs() -> str {
     let meta = wm_collect_arena_fns();
-    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    let fcnt = (__engine("map_get", meta, "fcnt") ?? 0);
     var names = "";
     var fi = 0;
     while fi < fcnt {
@@ -478,13 +478,13 @@ pub fn emit_arena_wasm_mjs() -> str {
 // Emits TypeScript `.d.ts` interface declarations for `RawAstArena` exports.
 pub fn emit_arena_wasm_dts() -> str {
     let meta = wm_collect_arena_fns();
-    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    let fcnt = (__engine("map_get", meta, "fcnt") ?? 0);
     var members = "  readonly memory: WebAssembly.Memory;\n";
     var fi = 0;
     while fi < fcnt {
-        let fn_nid = __engine("map_get", meta, "fnid_" + fi) + 0;
+        let fn_nid = (__engine("map_get", meta, "fnid_" + fi) ?? 0);
         let fname = __engine("map_get", meta, "fname_" + fi);
-        let is_void = (__engine("map_get", meta, "fvoid_" + fi) + 0) == 1;
+        let is_void = ((__engine("map_get", meta, "fvoid_" + fi) ?? 0)) == 1;
         let cc = __engine("ast_child_count", fn_nid);
         var psig = "";
         var pi = 1;

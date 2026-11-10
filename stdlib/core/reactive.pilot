@@ -50,8 +50,8 @@ pub fn rx_graph_new() -> i64 {
 }
 
 pub fn rx_source(g: i64, init_val: i64) -> i64 {
-    let id = (__engine("map_get", g, "cnt") + 0) + 1;
-    let ep = __engine("map_get", g, "epoch") + 0;
+    let id = ((__engine("map_get", g, "cnt") ?? 0)) + 1;
+    let ep = (__engine("map_get", g, "epoch") ?? 0);
     __engine("map_set", g, "cnt", id);
     __engine("map_set", g, "kind_" + id, 0);
     __engine("map_set", g, "val_" + id, init_val);
@@ -62,45 +62,45 @@ pub fn rx_source(g: i64, init_val: i64) -> i64 {
 }
 
 pub fn rx_read(g: i64, node_id: i64) -> i64 {
-    let kind = __engine("map_get", g, "kind_" + node_id) + 0;
+    let kind = (__engine("map_get", g, "kind_" + node_id) ?? 0);
     if kind == 0 {
-        return __engine("map_get", g, "val_" + node_id) + 0;
+        return (__engine("map_get", g, "val_" + node_id) ?? 0);
     }
-    let ep = __engine("map_get", g, "epoch") + 0;
-    let seen = __engine("map_get", g, "seen_" + node_id) + 0;
+    let ep = (__engine("map_get", g, "epoch") ?? 0);
+    let seen = (__engine("map_get", g, "seen_" + node_id) ?? 0);
     if seen == ep {
-        return __engine("map_get", g, "val_" + node_id) + 0;
+        return (__engine("map_get", g, "val_" + node_id) ?? 0);
     }
-    let da = __engine("map_get", g, "da_" + node_id) + 0;
-    let db = __engine("map_get", g, "db_" + node_id) + 0;
-    let ca = __engine("map_get", g, "ca_" + node_id) + 0;
+    let da = (__engine("map_get", g, "da_" + node_id) ?? 0);
+    let db = (__engine("map_get", g, "db_" + node_id) ?? 0);
+    let ca = (__engine("map_get", g, "ca_" + node_id) ?? 0);
 
     let va = if da > 0 { rx_read(g, da) } else { 0 };
     let vb = if db > 0 { rx_read(g, db) } else { 0 };
 
-    let vera = if da > 0 { __engine("map_get", g, "ver_" + da) + 0 } else { 0 };
-    let verb = if db > 0 { __engine("map_get", g, "ver_" + db) + 0 } else { 0 };
+    let vera = if da > 0 { (__engine("map_get", g, "ver_" + da) ?? 0) } else { 0 };
+    let verb = if db > 0 { (__engine("map_get", g, "ver_" + db) ?? 0) } else { 0 };
     let dep_ver = (vera * 1000003) + verb;
-    let prev_dep_ver = __engine("map_get", g, "dver_" + node_id) + 0;
+    let prev_dep_ver = (__engine("map_get", g, "dver_" + node_id) ?? 0);
 
     __engine("map_set", g, "seen_" + node_id, ep);
     if dep_ver != prev_dep_ver {
         let next_v = rx_eval_op(kind, va, vb, ca);
-        let rc = (__engine("map_get", g, "recomp_" + node_id) + 0) + 1;
+        let rc = ((__engine("map_get", g, "recomp_" + node_id) ?? 0)) + 1;
         __engine("map_set", g, "recomp_" + node_id, rc);
         __engine("map_set", g, "dver_" + node_id, dep_ver);
-        let old_v = __engine("map_get", g, "val_" + node_id) + 0;
+        let old_v = (__engine("map_get", g, "val_" + node_id) ?? 0);
         if next_v != old_v {
             __engine("map_set", g, "val_" + node_id, next_v);
             __engine("map_set", g, "ver_" + node_id, ep);
         }
     }
-    return __engine("map_get", g, "val_" + node_id) + 0;
+    return (__engine("map_get", g, "val_" + node_id) ?? 0);
 }
 
 pub fn rx_derived(g: i64, dep_a: i64, dep_b: i64, op_kind: i64, const_arg: i64) -> i64 {
-    let id = (__engine("map_get", g, "cnt") + 0) + 1;
-    let ep = __engine("map_get", g, "epoch") + 0;
+    let id = ((__engine("map_get", g, "cnt") ?? 0)) + 1;
+    let ep = (__engine("map_get", g, "epoch") ?? 0);
     __engine("map_set", g, "cnt", id);
     __engine("map_set", g, "kind_" + id, op_kind);
     __engine("map_set", g, "da_" + id, dep_a);
@@ -109,8 +109,8 @@ pub fn rx_derived(g: i64, dep_a: i64, dep_b: i64, op_kind: i64, const_arg: i64) 
 
     let va = if dep_a > 0 { rx_read(g, dep_a) } else { 0 };
     let vb = if dep_b > 0 { rx_read(g, dep_b) } else { 0 };
-    let vera = if dep_a > 0 { __engine("map_get", g, "ver_" + dep_a) + 0 } else { 0 };
-    let verb = if dep_b > 0 { __engine("map_get", g, "ver_" + dep_b) + 0 } else { 0 };
+    let vera = if dep_a > 0 { (__engine("map_get", g, "ver_" + dep_a) ?? 0) } else { 0 };
+    let verb = if dep_b > 0 { (__engine("map_get", g, "ver_" + dep_b) ?? 0) } else { 0 };
     let init_v = rx_eval_op(op_kind, va, vb, const_arg);
 
     __engine("map_set", g, "val_" + id, init_v);
@@ -122,11 +122,11 @@ pub fn rx_derived(g: i64, dep_a: i64, dep_b: i64, op_kind: i64, const_arg: i64) 
 }
 
 pub fn rx_set(g: i64, node_id: i64, new_val: i64) -> i64 {
-    let cur = __engine("map_get", g, "val_" + node_id) + 0;
+    let cur = (__engine("map_get", g, "val_" + node_id) ?? 0);
     if cur == new_val {
         return cur;
     }
-    let ep = (__engine("map_get", g, "epoch") + 0) + 1;
+    let ep = ((__engine("map_get", g, "epoch") ?? 0)) + 1;
     __engine("map_set", g, "epoch", ep);
     __engine("map_set", g, "val_" + node_id, new_val);
     __engine("map_set", g, "ver_" + node_id, ep);
@@ -135,5 +135,5 @@ pub fn rx_set(g: i64, node_id: i64, new_val: i64) -> i64 {
 }
 
 pub fn rx_recompute_count(g: i64, node_id: i64) -> i64 {
-    return __engine("map_get", g, "recomp_" + node_id) + 0;
+    return (__engine("map_get", g, "recomp_" + node_id) ?? 0);
 }

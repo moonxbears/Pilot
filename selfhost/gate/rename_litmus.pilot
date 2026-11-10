@@ -129,7 +129,7 @@ pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
                 pos = pos + 1;
             }
             let word = src.slice(st, pos);
-            let repl = __engine("map_get", rmap, word);
+            let repl = __engine("map_get", rmap, word) ?? "";
             if repl.len() > 0 {
                 out = out + src.slice(chunk_start, st) + repl;
                 chunk_start = pos;

@@ -1,0 +1,20 @@
+// A block's value is its last expression; a trailing declaration gives null.
+// A block-bodied function without a return type returns null, so `main` exits 0.
+fn seven() -> i64 => 7;
+
+fn pick(flag: bool) -> i64 {
+    if flag { 1 } else { 2 }
+}
+
+fn side_effect() {
+    seven();
+}
+
+fn main() {
+    print(pick(true));
+    print(pick(false));
+    print(side_effect() ?? "none");
+    let v = { let t = 20; t + 1 };
+    print(v);
+    var last = seven();
+}

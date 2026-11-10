@@ -176,7 +176,7 @@ pub fn sql_exec_create_table(db: i64, q_str: str) -> str {
     let tname = sql_trim(q_str.slice(12, p_open));
     let cols_csv = q_str.slice(p_open + 1, p_close);
     let parts = sql_split_csv(cols_csv);
-    let n = __engine("map_get", parts, "cnt") + 0;
+    let n = (__engine("map_get", parts, "cnt") ?? 0);
     __engine("map_set", db, "t_" + tname + "_ncols", n);
     __engine("map_set", db, "t_" + tname + "_nrows", 0);
     var i = 0;
@@ -196,8 +196,8 @@ pub fn sql_exec_insert(db: i64, q_str: str) -> str {
     let p_close = sql_find_sub(q_str, ")", p_open + 1);
     let vals_csv = q_str.slice(p_open + 1, p_close);
     let vals = sql_split_csv(vals_csv);
-    let ncols = __engine("map_get", db, "t_" + tname + "_ncols") + 0;
-    let r_idx = __engine("map_get", db, "t_" + tname + "_nrows") + 0;
+    let ncols = (__engine("map_get", db, "t_" + tname + "_ncols") ?? 0);
+    let r_idx = (__engine("map_get", db, "t_" + tname + "_nrows") ?? 0);
     __engine("map_set", db, "t_" + tname + "_nrows", r_idx + 1);
     __engine("map_set", db, "t_" + tname + "_r_" + r_idx + "_alive", 1);
 
@@ -212,7 +212,7 @@ pub fn sql_exec_insert(db: i64, q_str: str) -> str {
 }
 
 pub fn sql_build_row_map(db: i64, tname: str, r_idx: i64, target_map: i64) -> i64 {
-    let ncols = __engine("map_get", db, "t_" + tname + "_ncols") + 0;
+    let ncols = (__engine("map_get", db, "t_" + tname + "_ncols") ?? 0);
     var ci = 0;
     while ci < ncols {
         let cname = "" + __engine("map_get", db, "t_" + tname + "_col_" + ci);
@@ -319,10 +319,10 @@ pub fn sql_exec_update(db: i64, q_str: str) -> str {
     let set_val = sql_unquote(assign_s.slice(eq_idx + 1, assign_s.len()));
     let where_s = if w_idx >= 0 { sql_trim(q_str.slice(w_idx + 7, q_str.len())) } else { "" };
 
-    let nrows = __engine("map_get", db, "t_" + tname + "_nrows") + 0;
+    let nrows = (__engine("map_get", db, "t_" + tname + "_nrows") ?? 0);
     var r = 0;
     while r < nrows {
-        if (__engine("map_get", db, "t_" + tname + "_r_" + r + "_alive") + 0) == 1 {
+        if ((__engine("map_get", db, "t_" + tname + "_r_" + r + "_alive") ?? 0)) == 1 {
             let rm = __engine("map_new");
             sql_build_row_map(db, tname, r, rm);
             if sql_eval_where(rm, where_s) {
@@ -340,10 +340,10 @@ pub fn sql_exec_delete(db: i64, q_str: str) -> str {
     let tname = sql_trim(q_str.slice(11, t_end));
     let where_s = if w_idx >= 0 { sql_trim(q_str.slice(w_idx + 7, q_str.len())) } else { "" };
 
-    let nrows = __engine("map_get", db, "t_" + tname + "_nrows") + 0;
+    let nrows = (__engine("map_get", db, "t_" + tname + "_nrows") ?? 0);
     var r = 0;
     while r < nrows {
-        if (__engine("map_get", db, "t_" + tname + "_r_" + r + "_alive") + 0) == 1 {
+        if ((__engine("map_get", db, "t_" + tname + "_r_" + r + "_alive") ?? 0)) == 1 {
             let rm = __engine("map_new");
             sql_build_row_map(db, tname, r, rm);
             if sql_eval_where(rm, where_s) {
@@ -359,7 +359,7 @@ pub fn sql_exec_select(db: i64, q_str: str) -> str {
     let from_idx = sql_find_sub(q_str, " FROM ", 0);
     let proj_s = sql_trim(q_str.slice(6, from_idx));
     let proj_cols = sql_split_csv(proj_s);
-    let nproj = __engine("map_get", proj_cols, "cnt") + 0;
+    let nproj = (__engine("map_get", proj_cols, "cnt") ?? 0);
 
     let join_idx = sql_find_sub(q_str, " JOIN ", from_idx);
     let where_idx = sql_find_sub(q_str, " WHERE ", from_idx);
@@ -416,15 +416,15 @@ pub fn sql_exec_select(db: i64, q_str: str) -> str {
     // Collect candidate rows into `cand_list`
     let cand_list = __engine("map_new");
     var cand_cnt = 0;
-    let nrows1 = __engine("map_get", db, "t_" + t1 + "_nrows") + 0;
+    let nrows1 = (__engine("map_get", db, "t_" + t1 + "_nrows") ?? 0);
     var r1 = 0;
     while r1 < nrows1 {
-        if (__engine("map_get", db, "t_" + t1 + "_r_" + r1 + "_alive") + 0) == 1 {
+        if ((__engine("map_get", db, "t_" + t1 + "_r_" + r1 + "_alive") ?? 0)) == 1 {
             if t2.len() > 0 {
-                let nrows2 = __engine("map_get", db, "t_" + t2 + "_nrows") + 0;
+                let nrows2 = (__engine("map_get", db, "t_" + t2 + "_nrows") ?? 0);
                 var r2 = 0;
                 while r2 < nrows2 {
-                    if (__engine("map_get", db, "t_" + t2 + "_r_" + r2 + "_alive") + 0) == 1 {
+                    if ((__engine("map_get", db, "t_" + t2 + "_r_" + r2 + "_alive") ?? 0)) == 1 {
                         let rm = __engine("map_new");
                         sql_build_row_map(db, t1, r1, rm);
                         sql_build_row_map(db, t2, r2, rm);
@@ -457,8 +457,8 @@ pub fn sql_exec_select(db: i64, q_str: str) -> str {
         while i < cand_cnt {
             var j = i + 1;
             while j < cand_cnt {
-                let ri_m = __engine("map_get", cand_list, i) + 0;
-                let rj_m = __engine("map_get", cand_list, j) + 0;
+                let ri_m = (__engine("map_get", cand_list, i) ?? 0);
+                let rj_m = (__engine("map_get", cand_list, j) ?? 0);
                 let vi = "" + __engine("map_get", ri_m, order_col);
                 let vj = "" + __engine("map_get", rj_m, order_col);
                 var swap = false;
@@ -483,7 +483,7 @@ pub fn sql_exec_select(db: i64, q_str: str) -> str {
     var out = "";
     var ri = 0;
     while ri < cand_cnt {
-        let rm = __engine("map_get", cand_list, ri) + 0;
+        let rm = (__engine("map_get", cand_list, ri) ?? 0);
         if ri > 0 {
             out = out + "\n";
         }

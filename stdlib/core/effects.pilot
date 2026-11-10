@@ -69,7 +69,7 @@ pub fn effect_store_put(store: i64, key: str, val: str) -> i64 {
 }
 
 pub fn effect_store_get(store: i64, key: str) -> str {
-    let h = __engine("map_get", store, "has_" + key) + 0;
+    let h = (__engine("map_get", store, "has_" + key) ?? 0);
     if h == 1 {
         return "" + __engine("map_get", store, "val_" + key);
     }
@@ -84,8 +84,8 @@ pub fn effect_sandbox_begin(base_store: i64) -> i64 {
 }
 
 pub fn effect_sandbox_put(sb: i64, key: str, val: str) -> i64 {
-    if (__engine("map_get", sb, "seen_" + key) + 0) == 0 {
-        let idx = __engine("map_get", sb, "log_cnt") + 0;
+    if ((__engine("map_get", sb, "seen_" + key) ?? 0)) == 0 {
+        let idx = (__engine("map_get", sb, "log_cnt") ?? 0);
         __engine("map_set", sb, "log_" + idx, key);
         __engine("map_set", sb, "log_cnt", idx + 1);
         __engine("map_set", sb, "seen_" + key, 1);
@@ -96,8 +96,8 @@ pub fn effect_sandbox_put(sb: i64, key: str, val: str) -> i64 {
 }
 
 pub fn effect_sandbox_delete(sb: i64, key: str) -> i64 {
-    if (__engine("map_get", sb, "seen_" + key) + 0) == 0 {
-        let idx = __engine("map_get", sb, "log_cnt") + 0;
+    if ((__engine("map_get", sb, "seen_" + key) ?? 0)) == 0 {
+        let idx = (__engine("map_get", sb, "log_cnt") ?? 0);
         __engine("map_set", sb, "log_" + idx, key);
         __engine("map_set", sb, "log_cnt", idx + 1);
         __engine("map_set", sb, "seen_" + key, 1);
@@ -108,19 +108,19 @@ pub fn effect_sandbox_delete(sb: i64, key: str) -> i64 {
 }
 
 pub fn effect_sandbox_get(sb: i64, key: str) -> str {
-    let st = __engine("map_get", sb, "state_" + key) + 0;
+    let st = (__engine("map_get", sb, "state_" + key) ?? 0);
     if st == 1 {
         return "" + __engine("map_get", sb, "val_" + key);
     }
     if st == 2 {
         return "";
     }
-    let base = __engine("map_get", sb, "base") + 0;
+    let base = (__engine("map_get", sb, "base") ?? 0);
     return effect_store_get(base, key);
 }
 
 pub fn effect_sandbox_rollback(sb: i64) -> i64 {
-    let cnt = __engine("map_get", sb, "log_cnt") + 0;
+    let cnt = (__engine("map_get", sb, "log_cnt") ?? 0);
     var i = 0;
     while i < cnt {
         let k = "" + __engine("map_get", sb, "log_" + i);
@@ -134,12 +134,12 @@ pub fn effect_sandbox_rollback(sb: i64) -> i64 {
 }
 
 pub fn effect_sandbox_commit(sb: i64, store: i64) -> i64 {
-    let base = if store >= 0 { store } else { __engine("map_get", sb, "base") + 0 };
-    let cnt = __engine("map_get", sb, "log_cnt") + 0;
+    let base = store ?? (__engine("map_get", sb, "base") ?? 0);
+    let cnt = (__engine("map_get", sb, "log_cnt") ?? 0);
     var i = 0;
     while i < cnt {
         let k = "" + __engine("map_get", sb, "log_" + i);
-        let st = __engine("map_get", sb, "state_" + k) + 0;
+        let st = (__engine("map_get", sb, "state_" + k) ?? 0);
         if st == 1 {
             let v = "" + __engine("map_get", sb, "val_" + k);
             effect_store_put(base, k, v);

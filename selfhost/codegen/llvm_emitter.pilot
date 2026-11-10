@@ -67,13 +67,13 @@ pub fn build_llvm_module(
 }
 
 pub fn ll_next_tmp(st: i64) -> str {
-    let id = (__engine("map_get", st, "tid") + 0) + 1;
+    let id = ((__engine("map_get", st, "tid") ?? 0)) + 1;
     __engine("map_set", st, "tid", id);
     return "%t" + id;
 }
 
 pub fn ll_next_lbl(st: i64) -> i64 {
-    let id = (__engine("map_get", st, "lid") + 0) + 1;
+    let id = ((__engine("map_get", st, "lid") ?? 0)) + 1;
     __engine("map_set", st, "lid", id);
     return id;
 }
@@ -193,7 +193,7 @@ pub fn ll_emit_expr(st: i64, nid: i64) -> str {
             args = args + "i64 " + av;
             ai = ai + 1;
         }
-        let is_void = (__engine("map_get", st, "fn_void_" + cname) + 0) == 1;
+        let is_void = ((__engine("map_get", st, "fn_void_" + cname) ?? 0)) == 1;
         if is_void {
             ll_emit_line(st, "call void @" + cname + "(" + args + ")");
             return "0";
@@ -207,7 +207,7 @@ pub fn ll_emit_expr(st: i64, nid: i64) -> str {
 }
 
 pub fn ll_emit_stmt(st: i64, nid: i64) -> i64 {
-    if nid < 0 || (__engine("map_get", st, "term") + 0) == 1 {
+    if nid < 0 || ((__engine("map_get", st, "term") ?? 0)) == 1 {
         return 0;
     }
     let k = __engine("ast_node_kind", nid);
@@ -217,7 +217,7 @@ pub fn ll_emit_stmt(st: i64, nid: i64) -> i64 {
         let cc = __engine("ast_child_count", nid);
         var ci = 0;
         while ci < cc {
-            if (__engine("map_get", st, "term") + 0) == 1 {
+            if ((__engine("map_get", st, "term") ?? 0)) == 1 {
                 return 0;
             }
             ll_emit_stmt(st, __engine("ast_child_at", nid, ci));
@@ -258,13 +258,13 @@ pub fn ll_emit_stmt(st: i64, nid: i64) -> i64 {
             ll_emit_label(st, t_lbl);
             ll_emit_stmt(st, __engine("ast_child_at", nid, 1));
             var need_merge = 0;
-            if (__engine("map_get", st, "term") + 0) == 0 {
+            if ((__engine("map_get", st, "term") ?? 0)) == 0 {
                 ll_emit_line(st, "br label %" + m_lbl);
                 need_merge = 1;
             }
             ll_emit_label(st, e_lbl);
             ll_emit_stmt(st, __engine("ast_child_at", nid, 2));
-            if (__engine("map_get", st, "term") + 0) == 0 {
+            if ((__engine("map_get", st, "term") ?? 0)) == 0 {
                 ll_emit_line(st, "br label %" + m_lbl);
                 need_merge = 1;
             }
@@ -277,7 +277,7 @@ pub fn ll_emit_stmt(st: i64, nid: i64) -> i64 {
             ll_emit_line(st, "br i1 " + ci1 + ", label %" + t_lbl + ", label %" + m_lbl);
             ll_emit_label(st, t_lbl);
             ll_emit_stmt(st, __engine("ast_child_at", nid, 1));
-            if (__engine("map_get", st, "term") + 0) == 0 {
+            if ((__engine("map_get", st, "term") ?? 0)) == 0 {
                 ll_emit_line(st, "br label %" + m_lbl);
             }
             ll_emit_label(st, m_lbl);
@@ -297,14 +297,14 @@ pub fn ll_emit_stmt(st: i64, nid: i64) -> i64 {
         ll_emit_line(st, ci1 + " = icmp ne i64 " + cv + ", 0");
         ll_emit_line(st, "br i1 " + ci1 + ", label %" + b_lbl + ", label %" + x_lbl);
 
-        let ld = (__engine("map_get", st, "ldepth") + 0) + 1;
+        let ld = ((__engine("map_get", st, "ldepth") ?? 0)) + 1;
         __engine("map_set", st, "ldepth", ld);
         __engine("map_set", st, "lcond_" + ld, c_lbl);
         __engine("map_set", st, "lend_" + ld, x_lbl);
 
         ll_emit_label(st, b_lbl);
         ll_emit_stmt(st, __engine("ast_child_at", nid, 1));
-        if (__engine("map_get", st, "term") + 0) == 0 {
+        if ((__engine("map_get", st, "term") ?? 0)) == 0 {
             ll_emit_line(st, "br label %" + c_lbl);
         }
         __engine("map_set", st, "ldepth", ld - 1);
@@ -313,7 +313,7 @@ pub fn ll_emit_stmt(st: i64, nid: i64) -> i64 {
     }
 
     if orig == 107 {
-        let ld = __engine("map_get", st, "ldepth") + 0;
+        let ld = (__engine("map_get", st, "ldepth") ?? 0);
         if ld > 0 {
             ll_emit_line(st, "br label %" + __engine("map_get", st, "lend_" + ld));
             __engine("map_set", st, "term", 1);
@@ -322,7 +322,7 @@ pub fn ll_emit_stmt(st: i64, nid: i64) -> i64 {
     }
 
     if orig == 108 {
-        let ld = __engine("map_get", st, "ldepth") + 0;
+        let ld = (__engine("map_get", st, "ldepth") ?? 0);
         if ld > 0 {
             ll_emit_line(st, "br label %" + __engine("map_get", st, "lcond_" + ld));
             __engine("map_set", st, "term", 1);
@@ -331,7 +331,7 @@ pub fn ll_emit_stmt(st: i64, nid: i64) -> i64 {
     }
 
     if k == 8 {
-        let is_void = (__engine("map_get", st, "cur_void") + 0) == 1;
+        let is_void = ((__engine("map_get", st, "cur_void") ?? 0)) == 1;
         if is_void || __engine("ast_child_count", nid) == 0 {
             ll_emit_line(st, "ret void");
         } else {
@@ -365,11 +365,11 @@ pub fn ll_emit_fn_decl(fn_nid: i64, fn_meta: i64) -> str {
     __engine("map_set", st, "ldepth", 0);
     __engine("map_set", st, "cur_void", if is_void { 1 } else { 0 });
 
-    let fcnt = __engine("map_get", fn_meta, "fcnt") + 0;
+    let fcnt = (__engine("map_get", fn_meta, "fcnt") ?? 0);
     var fi = 0;
     while fi < fcnt {
         let nm = __engine("map_get", fn_meta, "fname_" + fi);
-        let vd = __engine("map_get", fn_meta, "fvoid_" + fi) + 0;
+        let vd = (__engine("map_get", fn_meta, "fvoid_" + fi) ?? 0);
         __engine("map_set", st, "fn_void_" + nm, vd);
         fi = fi + 1;
     }
@@ -401,7 +401,7 @@ pub fn ll_emit_fn_decl(fn_nid: i64, fn_meta: i64) -> str {
     }
 
     ll_emit_stmt(st, body_nid);
-    if (__engine("map_get", st, "term") + 0) == 0 {
+    if ((__engine("map_get", st, "term") ?? 0)) == 0 {
         if is_void {
             ll_emit_line(st, "ret void");
         } else {
@@ -427,7 +427,7 @@ pub fn emit_arena_llvm_ir() -> str {
             if __engine("ast_node_kind", item) == 3 && (__engine("ast_decl_flags", item) & 256) == 0 {
                 let nm = __engine("sym_str", __engine("ast_node_sym", item));
                 let rdesc = cg_resolve_type_physics(cg_fn_return_type_name(item));
-                let idx = __engine("map_get", meta, "fcnt") + 0;
+                let idx = (__engine("map_get", meta, "fcnt") ?? 0);
                 __engine("map_set", meta, "fname_" + idx, nm);
                 __engine("map_set", meta, "fvoid_" + idx, if rdesc.reg_class == 0 || rdesc.reg_class == 1 { 1 } else { 0 });
                 __engine("map_set", meta, "fnid_" + idx, item);
@@ -438,10 +438,10 @@ pub fn emit_arena_llvm_ir() -> str {
     }
 
     var defs = "";
-    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    let fcnt = (__engine("map_get", meta, "fcnt") ?? 0);
     var fi = 0;
     while fi < fcnt {
-        defs = defs + ll_emit_fn_decl(__engine("map_get", meta, "fnid_" + fi) + 0, meta);
+        defs = defs + ll_emit_fn_decl((__engine("map_get", meta, "fnid_" + fi) ?? 0), meta);
         fi = fi + 1;
     }
 

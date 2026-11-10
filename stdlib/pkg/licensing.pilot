@@ -39,11 +39,11 @@ pub pure fn spdx_is_approved_exception(exc_id: str) -> bool {
 }
 
 pub fn spdx_parse_atom(st: i64) -> bool {
-    if (__engine("map_get", st, "ok") + 0) == 0 {
+    if ((__engine("map_get", st, "ok") ?? 0)) == 0 {
         return false;
     }
-    let pos = __engine("map_get", st, "pos") + 0;
-    let cnt = __engine("map_get", st, "cnt") + 0;
+    let pos = (__engine("map_get", st, "pos") ?? 0);
+    let cnt = (__engine("map_get", st, "cnt") ?? 0);
     if pos >= cnt {
         __engine("map_set", st, "ok", 0);
         return false;
@@ -52,10 +52,10 @@ pub fn spdx_parse_atom(st: i64) -> bool {
     if tk == "(" {
         __engine("map_set", st, "pos", pos + 1);
         let inner = spdx_parse_or(st);
-        if (__engine("map_get", st, "ok") + 0) == 0 {
+        if ((__engine("map_get", st, "ok") ?? 0)) == 0 {
             return false;
         }
-        let p2 = __engine("map_get", st, "pos") + 0;
+        let p2 = (__engine("map_get", st, "pos") ?? 0);
         if p2 >= cnt {
             __engine("map_set", st, "ok", 0);
             return false;
@@ -96,9 +96,9 @@ pub fn spdx_parse_atom(st: i64) -> bool {
 
 pub fn spdx_parse_and(st: i64) -> bool {
     var acc = spdx_parse_atom(st);
-    while 1 == (__engine("map_get", st, "ok") + 0) {
-        let pos = __engine("map_get", st, "pos") + 0;
-        let cnt = __engine("map_get", st, "cnt") + 0;
+    while 1 == ((__engine("map_get", st, "ok") ?? 0)) {
+        let pos = (__engine("map_get", st, "pos") ?? 0);
+        let cnt = (__engine("map_get", st, "cnt") ?? 0);
         if pos >= cnt {
             break;
         }
@@ -115,9 +115,9 @@ pub fn spdx_parse_and(st: i64) -> bool {
 
 pub fn spdx_parse_or(st: i64) -> bool {
     var acc = spdx_parse_and(st);
-    while 1 == (__engine("map_get", st, "ok") + 0) {
-        let pos = __engine("map_get", st, "pos") + 0;
-        let cnt = __engine("map_get", st, "cnt") + 0;
+    while 1 == ((__engine("map_get", st, "ok") ?? 0)) {
+        let pos = (__engine("map_get", st, "pos") ?? 0);
+        let cnt = (__engine("map_get", st, "cnt") ?? 0);
         if pos >= cnt {
             break;
         }
@@ -171,10 +171,10 @@ pub fn is_viable_spdx_license(spdx_expr: str) -> bool {
     __engine("map_set", st, "ok", 1);
 
     let res = spdx_parse_or(st);
-    if (__engine("map_get", st, "ok") + 0) != 1 {
+    if ((__engine("map_get", st, "ok") ?? 0)) != 1 {
         return false;
     }
-    if (__engine("map_get", st, "pos") + 0) != cnt {
+    if ((__engine("map_get", st, "pos") ?? 0)) != cnt {
         return false;
     }
     return res;

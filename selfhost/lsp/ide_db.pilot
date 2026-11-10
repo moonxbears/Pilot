@@ -161,13 +161,13 @@ pub fn lsp_db_update_document(db: i64, uri: str, new_source: str) {
 pub fn lsp_db_get_document(db: i64, uri: str) -> str {
     let canon_uri = db_canonicalize_uri(uri);
     let fid = __engine("map_get", db, "uri_to_fid_" + canon_uri);
-    if fid == nil { return ""; }
+    if fid == none { return ""; }
     return pilotdb_get_file_source(db, fid + 0);
 }
 
 pub fn lsp_db_query_diagnostics(db: i64, uri: str) -> str {
     let canon_uri = db_canonicalize_uri(uri);
     let fid = __engine("map_get", db, "uri_to_fid_" + canon_uri);
-    if fid == nil { return ""; }
+    if fid == none { return ""; }
     return query_file_diagnostics(db, fid + 0);
 }

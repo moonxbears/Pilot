@@ -14,6 +14,11 @@ pub const TAG_CHAR: u8 = 6;
 pub const TAG_KEYWORD: u8 = 7;
 pub const TAG_SSO_STR: u8 = 8;
 pub const TAG_HEAP_STR: u8 = 9;
+/// Handle to a VM-owned ordered sequence. The payload is the heap slot index.
+pub const TAG_LIST: u8 = 10;
+/// Handle to a VM-owned keyed record (maps and struct instances). The payload
+/// is the heap slot index.
+pub const TAG_MAP: u8 = 11;
 
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -38,6 +43,45 @@ impl PilotVal {
     #[inline] pub const fn is_float(self) -> bool { self.tag() == TAG_FLOAT }
     #[inline] pub const fn is_sso_str(self) -> bool { self.tag() == TAG_SSO_STR }
     #[inline] pub const fn is_str(self) -> bool { let t = self.tag(); t == TAG_SSO_STR || t == TAG_HEAP_STR }
+    #[inline] pub const fn is_list(self) -> bool { self.tag() == TAG_LIST }
+    #[inline] pub const fn is_map(self) -> bool { self.tag() == TAG_MAP }
+
+    #[inline]
+    pub const fn from_list_handle(slot: usize) -> Self {
+        Self { tag_meta: TAG_LIST as u64, payload: slot as u64 }
+    }
+
+    #[inline]
+    pub const fn from_map_handle(slot: usize) -> Self {
+        Self { tag_meta: TAG_MAP as u64, payload: slot as u64 }
+    }
+
+    #[inline]
+    pub const fn as_list_handle(self) -> Option<usize> {
+        if self.is_list() { Some(self.payload as usize) } else { None }
+    }
+
+    #[inline]
+    pub const fn as_map_handle(self) -> Option<usize> {
+        if self.is_map() { Some(self.payload as usize) } else { None }
+    }
+
+    /// Human-readable value kind used in runtime diagnostics.
+    pub const fn kind_label(self) -> &'static str {
+        match self.tag() {
+            TAG_NULL => "null",
+            TAG_UNDEFINED => "undefined",
+            TAG_BOOL => "boolean",
+            TAG_INT | TAG_UINT => "integer",
+            TAG_FLOAT => "float",
+            TAG_CHAR => "character",
+            TAG_KEYWORD => "keyword",
+            TAG_SSO_STR | TAG_HEAP_STR => "string",
+            TAG_LIST => "list",
+            TAG_MAP => "record",
+            _ => "unknown value",
+        }
+    }
 
     #[inline] pub const fn from_bool(val: bool) -> Self { if val { Self::TRUE } else { Self::FALSE } }
     #[inline] pub const fn from_int(val: i64) -> Self { Self { tag_meta: TAG_INT as u64, payload: val as u64 } }
@@ -113,6 +157,8 @@ impl PilotVal {
             TAG_CHAR => (self.payload as u8 as char).to_string(),
             TAG_KEYWORD => format!(":kw#{}", self.payload),
             TAG_SSO_STR | TAG_HEAP_STR => self.with_str(|s| s.to_string()).unwrap_or_default(),
+            TAG_LIST => format!("<list #{}>", self.payload),
+            TAG_MAP => format!("<record #{}>", self.payload),
             _ => format!("PilotVal(tag={})", self.tag()),
         }
     }

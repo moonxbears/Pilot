@@ -333,7 +333,7 @@ pub fn ing_py_params_to_pilot(raw_params: str, seen_vars: i64) -> str {
 
 pub fn ing_ingest_python(foreign_src: str) -> str {
     let lm = ing_split_lines(foreign_src);
-    let cnt = __engine("map_get", lm, "cnt") + 0;
+    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
     let st = __engine("map_new");
     __engine("map_set", st, "ind_0", 0);
     var top = 0;
@@ -356,16 +356,16 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
                 }
             }
 
-            if expect_indent == 1 && cur_ind > (__engine("map_get", st, "ind_" + top) + 0) {
+            if expect_indent == 1 && cur_ind > ((__engine("map_get", st, "ind_" + top) ?? 0)) {
                 top = top + 1;
                 __engine("map_set", st, "ind_" + top, cur_ind);
                 expect_indent = 0;
             } else {
                 expect_indent = 0;
                 let is_else_hdr = tline == "else:" || ing_starts_with(tline, "elif ");
-                while top > 0 && cur_ind < (__engine("map_get", st, "ind_" + top) + 0) {
+                while top > 0 && cur_ind < ((__engine("map_get", st, "ind_" + top) ?? 0)) {
                     top = top - 1;
-                    let at_target = cur_ind == (__engine("map_get", st, "ind_" + top) + 0);
+                    let at_target = cur_ind == ((__engine("map_get", st, "ind_" + top) ?? 0));
                     if !(is_else_hdr && at_target) {
                         out = out + ing_indent(top) + "}\n";
                     }
@@ -430,7 +430,7 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
                     let rhs_e = ing_norm_py_expr(tline.slice(eq_pos + 1, tline.len()));
                     let dot_p = ing_find_byte(vname, 46, 0);
                     let brk_p = ing_find_byte(vname, 91, 0);
-                    if dot_p < 0 && brk_p < 0 && (__engine("map_get", seen_vars, "v_" + vname) + 0) == 0 {
+                    if dot_p < 0 && brk_p < 0 && ((__engine("map_get", seen_vars, "v_" + vname) ?? 0)) == 0 {
                         __engine("map_set", seen_vars, "v_" + vname, 1);
                         out = out + pad + "var " + vname + " = " + rhs_e + ";\n";
                     } else {
@@ -457,7 +457,7 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
 
 pub fn ing_ingest_rust(foreign_src: str) -> str {
     let lm = ing_split_lines(foreign_src);
-    let cnt = __engine("map_get", lm, "cnt") + 0;
+    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
     let rust_let_mut = "let " + "mut ";
     var out = "";
     var li = 0;
@@ -483,7 +483,7 @@ pub fn ing_ingest_rust(foreign_src: str) -> str {
 
 pub fn ing_ingest_js(foreign_src: str) -> str {
     let lm = ing_split_lines(foreign_src);
-    let cnt = __engine("map_get", lm, "cnt") + 0;
+    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
     var depth = 0;
     var out = "";
     var li = 0;
@@ -584,7 +584,7 @@ pub fn ing_c_params_to_pilot(raw_params: str) -> str {
 
 pub fn ing_ingest_c_family(foreign_src: str) -> str {
     let lm = ing_split_lines(foreign_src);
-    let cnt = __engine("map_get", lm, "cnt") + 0;
+    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
     let st = __engine("map_new");
     var wrap_cnt = 0;
     var brace_depth = 0;
@@ -599,7 +599,7 @@ pub fn ing_ingest_c_family(foreign_src: str) -> str {
             let eff_indent = if brace_depth > wrap_cnt { brace_depth - wrap_cnt } else { 0 };
             if tline == "}" || tline == "};" {
                 if brace_depth > 0 { brace_depth = brace_depth - 1; }
-                if wrap_cnt > 0 && (__engine("map_get", st, "wrap_" + (wrap_cnt - 1)) + 0) == brace_depth {
+                if wrap_cnt > 0 && ((__engine("map_get", st, "wrap_" + (wrap_cnt - 1)) ?? 0)) == brace_depth {
                     wrap_cnt = wrap_cnt - 1;
                 } else {
                     let close_ind = if brace_depth > wrap_cnt { brace_depth - wrap_cnt } else { 0 };
@@ -672,7 +672,7 @@ pub fn ing_norm_lua_expr(expr_s: str) -> str {
 
 pub fn ing_ingest_lua(foreign_src: str) -> str {
     let lm = ing_split_lines(foreign_src);
-    let cnt = __engine("map_get", lm, "cnt") + 0;
+    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
     var depth = 0;
     var out = "";
     let lua_local_fn = "local " + "function ";

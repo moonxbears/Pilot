@@ -100,7 +100,7 @@ pub fn esc_expr_lattice(expr_nid: i64, env: i64, memo: i64, node_count: i64) -> 
     let orig = __engine("ast_orig_kind", expr_nid);
     if k == 14 {
         let vname = __engine("sym_str", __engine("ast_node_sym", expr_nid));
-        let lplus = __engine("map_get", env, "elat_" + vname) + 0;
+        let lplus = (__engine("map_get", env, "elat_" + vname) ?? 0);
         if lplus > 0 {
             return (lplus - 1) & 3;
         }
@@ -133,7 +133,7 @@ pub fn esc_expr_from_ref(expr_nid: i64, env: i64) -> bool {
     let orig = __engine("ast_orig_kind", expr_nid);
     if k == 14 {
         let vname = __engine("sym_str", __engine("ast_node_sym", expr_nid));
-        return (__engine("map_get", env, "eref_" + vname) + 0) == 1;
+        return ((__engine("map_get", env, "eref_" + vname) ?? 0)) == 1;
     }
     if k == 17 && __engine("ast_child_count", expr_nid) > 0 {
         return esc_expr_from_ref(__engine("ast_child_at", expr_nid, 0), env);
@@ -153,7 +153,7 @@ pub fn esc_expr_is_iso(expr_nid: i64, env: i64) -> bool {
     let orig = __engine("ast_orig_kind", expr_nid);
     if k == 14 {
         let vname = __engine("sym_str", __engine("ast_node_sym", expr_nid));
-        return (__engine("map_get", env, "eiso_" + vname) + 0) == 1;
+        return ((__engine("map_get", env, "eiso_" + vname) ?? 0)) == 1;
     }
     if orig == 217 && __engine("ast_child_count", expr_nid) == 1 {
         return esc_expr_is_iso(__engine("ast_child_at", expr_nid, 0), env);

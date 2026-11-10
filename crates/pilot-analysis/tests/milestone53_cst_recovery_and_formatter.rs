@@ -233,7 +233,7 @@ fn run_with_registry(modules: &[&str], tail_src: &str, reg_setup: impl FnOnce(&m
         handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run()
+    vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}"))
 }
 
 #[test]

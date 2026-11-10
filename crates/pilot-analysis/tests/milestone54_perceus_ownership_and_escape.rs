@@ -227,8 +227,17 @@ fn run_perceus_on_program(target_program: &str, tail_expr: &str) -> (PilotVal, V
     vm.engine_handler = Some(Box::new(move |op, args| {
         handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)
     }));
-    vm.load_binary(BytecodeCompiler::compile(&pass_arena, pass_arena.root));
+    let binary = BytecodeCompiler::compile(&pass_arena, pass_arena.root);
+    assert!(
+        binary.diagnostics.is_empty(),
+        "perceus pass failed to compile: {:?}",
+        binary.diagnostics
+    );
+    vm.load_binary(binary);
     let val = vm.run();
+    if let Some(fault) = &vm.fault {
+        panic!("perceus pass faulted: {fault}");
+    }
     let diags = registry.diagnostics.into_iter().map(|d| d.message).collect();
     (val, diags)
 }

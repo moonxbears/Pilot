@@ -53,8 +53,8 @@ pub pure fn json_escape_str(s: str) -> str {
 }
 
 pub fn json_skip_ws(src: str, st: i64) -> i64 {
-    let n = __engine("map_get", st, "len") + 0;
-    var p = __engine("map_get", st, "pos") + 0;
+    let n = (__engine("map_get", st, "len") ?? 0);
+    var p = (__engine("map_get", st, "pos") ?? 0);
     while p < n {
         let b = src.byte_at(p);
         if b == 32 || b == 9 || b == 10 || b == 13 {
@@ -68,7 +68,7 @@ pub fn json_skip_ws(src: str, st: i64) -> i64 {
 }
 
 pub fn json_parse_str_token(src: str, st: i64) -> str {
-    let n = __engine("map_get", st, "len") + 0;
+    let n = (__engine("map_get", st, "len") ?? 0);
     var p = json_skip_ws(src, st);
     if p < n && src.byte_at(p) == 34 {
         p = p + 1;
@@ -106,7 +106,7 @@ pub fn json_parse_str_token(src: str, st: i64) -> str {
 }
 
 pub fn json_parse_node(src: str, st: i64, doc: i64, path: str) -> str {
-    let n = __engine("map_get", st, "len") + 0;
+    let n = (__engine("map_get", st, "len") ?? 0);
     var p = json_skip_ws(src, st);
     if p >= n {
         return "null";
@@ -261,15 +261,15 @@ pub fn json_get_str(doc: i64, path: str) -> str {
 }
 
 pub fn json_get_int(doc: i64, path: str) -> i64 {
-    return __engine("map_get", doc, "int_" + path) + 0;
+    return (__engine("map_get", doc, "int_" + path) ?? 0);
 }
 
 pub fn json_get_bool(doc: i64, path: str) -> bool {
-    return (__engine("map_get", doc, "bool_" + path) + 0) != 0;
+    return ((__engine("map_get", doc, "bool_" + path) ?? 0)) != 0;
 }
 
 pub fn json_array_len(doc: i64, path: str) -> i64 {
-    return __engine("map_get", doc, "alen_" + path) + 0;
+    return (__engine("map_get", doc, "alen_" + path) ?? 0);
 }
 
 pub fn json_stringify(doc: i64) -> str {

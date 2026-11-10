@@ -171,12 +171,12 @@ fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
         "+" => Add, "-" => Sub, "*" => Mul, "/" => Div, "//" => FloorDiv, "%" => Rem, "**" => Pow,
         "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" | "and" => And,
         "||" | "or" => Or, "&" => BitAnd, "|" => BitOr, "^" => BitXor, "<<" => Shl, ">>" => Shr,
-        "|>" => Pipe, "<|" => PipeBackward, "??" => Coalesce, ".." | "..=" => RangeInclusive,
-        "..<" => RangeHalfOpen, "is" => Is, ":=" => Walrus, "<-" => Send, "union" => Union,
+        "|>" => Pipe, "<|" => PipeBackward, "??" => Coalesce, "..=" => RangeInclusive,
+        ".." | "..<" => RangeHalfOpen, "is" => Is, ":=" => Walrus, "<-" => Send, "union" => Union,
         "intersect" => Intersect, "except" => Except, "<=>" => Spaceship, "+|" => SatAdd,
         "-|" => SatSub, "*|" => SatMul, "+%" => WrapAdd, "-%" => WrapSub, "*%" => WrapMul,
         "+?" => CheckedAdd, "-?" => CheckedSub, "*?" => CheckedMul, "%%" => EucMod, "~>" => Lens,
-        ">..<" => OpenRange, ">.." => AfterRange, ":=:" => Swap, _ => Add, }) as u16 }
+        ">..<" => OpenRange, ">.." => AfterRange, ":=:" => Swap, _ => return 0, }) as u16 }
 static BOOTSTRAP_TABLES: OnceLock<ParserTables> = OnceLock::new();
 pub fn bootstrap_tables() -> &'static ParserTables { BOOTSTRAP_TABLES.get_or_init(|| { let mut t = ParserTables::new(); for src in [
             include_str!("../../../stdlib/core/core.pilot"), include_str!("../../../stdlib/core/syntax/type_construct.pilot"),
@@ -912,8 +912,10 @@ impl<'a> Parser<'a> {
             TokenKind::StrLit | TokenKind::TripleStrLit => { let raw = self.text(); let is_f = raw.starts_with('f') || raw.starts_with('F');
                 let s = if is_f { &raw[1..] } else { raw };
                 let inner = if (s.starts_with("\"\"\"") || s.starts_with("'''")) && s.len() >= 6 { &s[3..s.len() - 3] }
-                else if s.len() >= 2 { &s[1..s.len() - 1] } else { s }; let unesc = unescape_str(inner); self.advance();
-                let sym = self.arena.interner.intern(&unesc); self.arena.alloc_node(NodeKind::StrLit, is_f as u16, sp, sym.0, 0) }
+                else if s.len() >= 2 { &s[1..s.len() - 1] } else { s }; self.advance();
+                if is_f { return self.lower_fstring(inner, sp); }
+                let unesc = unescape_str(inner);
+                let sym = self.arena.interner.intern(&unesc); self.arena.alloc_node(NodeKind::StrLit, 0, sp, sym.0, 0) }
             TokenKind::KeywordLit => { let t = self.text(); self.advance(); self.arena.alloc_keyword(t, sp) }
             TokenKind::KwIf => self.parse_if(),
             TokenKind::KwQuote | TokenKind::KwComptime => { self.advance(); if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() } }
@@ -986,6 +988,89 @@ impl<'a> Parser<'a> {
                 let a = self.parse_expr(); if a.is_some() { ch.push(a); } }
             if self.eat(TokenKind::Comma) { if self.at(TokenKind::RParen) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in argument list".into())); break; } } else { break; } }
         self.expect(TokenKind::RParen); self.arena.alloc_list_node(NodeKind::CallExpr, qk, ByteSpan::new(self.arena.span(callee).start, self.prev_span().end), &ch) }
+    /// Lowers the body of `f"..."` into string concatenation: literal
+    /// segments become string literals and every `{expr}` hole is parsed as an
+    /// expression. `{{` and `}}` stand for literal braces. The chain starts
+    /// with a string so `+` concatenates instead of adding numbers.
+    fn lower_fstring(&mut self, body: &'a str, sp: ByteSpan) -> NodeId {
+        let bytes = body.as_bytes();
+        let mut parts: Vec<NodeId> = Vec::new();
+        let mut lit = String::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if (c == b'{' || c == b'}') && bytes.get(i + 1) == Some(&c) {
+                lit.push(c as char);
+                i += 2;
+                continue;
+            }
+            if c == b'}' {
+                self.arena.diagnostics.push((sp, "SyntaxError: unmatched `}` in f-string; write `}}` for a literal brace".into()));
+                i += 1;
+                continue;
+            }
+            if c != b'{' {
+                let ch = body[i..].chars().next().unwrap_or('?');
+                lit.push(ch);
+                i += ch.len_utf8();
+                continue;
+            }
+            let Some(end) = fstring_hole_end(bytes, i + 1) else {
+                self.arena.diagnostics.push((sp, "SyntaxError: unterminated `{` in f-string".into()));
+                break;
+            };
+            if !lit.is_empty() {
+                let sym = self.arena.interner.intern(&unescape_str(&lit));
+                parts.push(self.arena.alloc_node(NodeKind::StrLit, 0, sp, sym.0, 0));
+                lit.clear();
+            }
+            parts.push(self.parse_fstring_hole(&body[i + 1..end], sp));
+            i = end + 1;
+        }
+        if !lit.is_empty() || parts.is_empty() {
+            let sym = self.arena.interner.intern(&unescape_str(&lit));
+            parts.push(self.arena.alloc_node(NodeKind::StrLit, 0, sp, sym.0, 0));
+        }
+        let first_is_str = self.arena.node(parts[0]).node_kind() == NodeKind::StrLit;
+        let mut acc = if first_is_str { parts[0] } else {
+            let empty = self.arena.interner.intern("");
+            let e = self.arena.alloc_node(NodeKind::StrLit, 0, sp, empty.0, 0);
+            self.arena.alloc_node(NodeKind::BinaryExpr, BinaryOp::Add as u16, sp, e.0, parts[0].0)
+        };
+        for &p in &parts[1..] {
+            acc = self.arena.alloc_node(NodeKind::BinaryExpr, BinaryOp::Add as u16, sp, acc.0, p.0);
+        }
+        acc
+    }
+
+    /// Parses one `{expr}` hole of an f-string with a temporary token tape.
+    /// Spans of the hole's nodes are shifted back into the enclosing source.
+    fn parse_fstring_hole(&mut self, hole: &'a str, sp: ByteSpan) -> NodeId {
+        let offset = (hole.as_ptr() as usize).saturating_sub(self.src.as_ptr() as usize) as u32;
+        let first_node = self.arena.nodes.len();
+        let first_diag = self.arena.diagnostics.len();
+        let saved_tape = std::mem::replace(&mut self.tape, tokenize(hole));
+        let saved_src = std::mem::replace(&mut self.src, hole);
+        let saved_pos = std::mem::replace(&mut self.pos, 0);
+        let e = if self.at_end() { NodeId::NONE } else { self.parse_expr() };
+        let trailing = !self.at_end();
+        self.tape = saved_tape;
+        self.src = saved_src;
+        self.pos = saved_pos;
+        for span in &mut self.arena.spans[first_node..] {
+            *span = ByteSpan::new(span.start + offset, span.end + offset);
+        }
+        for d in &mut self.arena.diagnostics[first_diag..] {
+            d.0 = ByteSpan::new(d.0.start + offset, d.0.end + offset);
+        }
+        if e.is_none() {
+            self.arena.diagnostics.push((sp, "SyntaxError: empty `{}` in f-string".into()));
+        } else if trailing {
+            self.arena.diagnostics.push((sp, "SyntaxError: f-string hole must be a single expression (format specifiers are not supported yet)".into()));
+        }
+        e
+    }
+
     fn parse_paren_or_lambda(&mut self) -> NodeId { let sp = self.span(); if let Some(close) = self.tape.matching_bracket(self.cur()) {
             let nx = self.next_non_nl(close as usize + 1); if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::FatArrow {
                 let params = self.parse_param_list(); self.expect(TokenKind::FatArrow);
@@ -1086,6 +1171,33 @@ fn compile_type_rule(pat: &[(TokenKind, String)], template: TemplateNode) -> Opt
         return Some(TypeConstructRule::Infix { op: clean[1].1.clone(), bp, right_assoc: ra, lhs_param: clean[0].1.clone(), rhs_param: clean[2].1.clone(), template });
     }
     None }
+/// Index of the `}` closing an f-string hole that starts at `start`, skipping
+/// nested braces and quoted strings inside the hole.
+fn fstring_hole_end(b: &[u8], start: usize) -> Option<usize> {
+    let (mut depth, mut j, mut quote) = (1usize, start, None::<u8>);
+    while j < b.len() {
+        let c = b[j];
+        if let Some(q) = quote {
+            if c == b'\\' {
+                j += 1;
+            } else if c == q {
+                quote = None;
+            }
+        } else if c == b'"' || c == b'\'' {
+            quote = Some(c);
+        } else if c == b'{' {
+            depth += 1;
+        } else if c == b'}' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(j);
+            }
+        }
+        j += 1;
+    }
+    None
+}
+
 fn unescape_str(s: &str) -> String { if !s.contains('\\') { return s.to_string(); }
     let (mut out, mut ch) = (String::with_capacity(s.len()), s.chars()); while let Some(c) = ch.next() { if c == '\\' {
             match ch.next() { Some('n') => out.push('\n'), Some('t') => out.push('\t'), Some('r') => out.push('\r'),

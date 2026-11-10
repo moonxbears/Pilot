@@ -65,11 +65,11 @@ pub fn gs_expr_is_float(nid: i64, st: i64) -> bool {
     if orig == 210 {
         let base_nid = __engine("ast_child_at", nid, 0);
         let bname = __engine("sym_str", __engine("ast_node_sym", base_nid));
-        return (__engine("map_get", st, "is_ptr_" + bname) + 0) == 1;
+        return ((__engine("map_get", st, "is_ptr_" + bname) ?? 0)) == 1;
     }
     if k == 14 {
         let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        return (__engine("map_get", st, "is_flt_" + vname) + 0) == 1;
+        return ((__engine("map_get", st, "is_flt_" + vname) ?? 0)) == 1;
     }
     if k == 19 {
         let op = __engine("ast_node_raw_bits", nid);
@@ -106,7 +106,7 @@ pub fn gs_wgsl_expr(nid: i64, st: i64, want_float: bool) -> str {
     }
     if k == 14 {
         let nm = __engine("sym_str", __engine("ast_node_sym", nid));
-        if want_float && (__engine("map_get", st, "is_flt_" + nm) + 0) == 0 {
+        if want_float && ((__engine("map_get", st, "is_flt_" + nm) ?? 0)) == 0 {
             return "f32(" + nm + ")";
         }
         return nm;
@@ -237,7 +237,7 @@ pub fn gs_emit_wgsl_from_arena(kernel_name: str) -> str {
 }
 
 pub fn gs_next_spv_id(st: i64, prefix: str) -> str {
-    let n = (__engine("map_get", st, "spv_n") + 0) + 1;
+    let n = ((__engine("map_get", st, "spv_n") ?? 0)) + 1;
     __engine("map_set", st, "spv_n", n);
     return "%" + prefix + "_" + n;
 }
@@ -264,7 +264,7 @@ pub fn gs_spirv_expr(nid: i64, st: i64, want_float: bool) -> str {
     }
     if k == 14 {
         let nm = __engine("sym_str", __engine("ast_node_sym", nid));
-        if (__engine("map_get", st, "has_ssa_" + nm) + 0) == 1 {
+        if ((__engine("map_get", st, "has_ssa_" + nm) ?? 0)) == 1 {
             return "" + __engine("map_get", st, "ssa_" + nm);
         }
         return "%param_" + nm;

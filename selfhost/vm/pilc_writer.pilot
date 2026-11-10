@@ -22,7 +22,7 @@ pub pure fn pilc_v3_magic() -> str {
 }
 
 pub pure fn pilc_v3_version() -> i64 {
-    return 3;
+    return 4;
 }
 
 // Computes the exact serialized byte size of a `.pilc` v3 binary image.
@@ -146,24 +146,24 @@ pub pure fn pilc_heap_str_entry_hex(slen: i64, heap_byte_off: i64) -> str {
 pub fn pilc_serialize_state_hex(st: i64) -> str {
     let magic_hex = pilc_raw_str_hex(pilc_v3_magic());
     let ver_hex = pilc_u32_le_hex(pilc_v3_version());
-    let ccount = __engine("map_get", st, "ccount") + 0;
+    let ccount = (__engine("map_get", st, "ccount") ?? 0);
     var consts_hex = "";
     var heap_hex = "";
     var heap_byte_len = 0;
 
     var ci = 0;
     while ci < ccount {
-        let ctag = __engine("map_get", st, "ctag_" + ci) + 0;
+        let ctag = (__engine("map_get", st, "ctag_" + ci) ?? 0);
         if ctag == 0 {
             consts_hex = consts_hex + pilc_u64_le_hex(0) + pilc_u64_le_hex(0);
         } else if ctag == 2 {
-            let bval = __engine("map_get", st, "cpay_" + ci) + 0;
+            let bval = (__engine("map_get", st, "cpay_" + ci) ?? 0);
             consts_hex = consts_hex + pilc_u64_le_hex(2) + pilc_u64_le_hex(bval);
         } else if ctag == 3 {
-            let ival = __engine("map_get", st, "cpay_" + ci) + 0;
+            let ival = (__engine("map_get", st, "cpay_" + ci) ?? 0);
             consts_hex = consts_hex + pilc_u64_le_hex(3) + pilc_u64_le_hex(ival);
         } else if ctag == 5 {
-            let fbits = __engine("map_get", st, "cpay_" + ci) + 0;
+            let fbits = (__engine("map_get", st, "cpay_" + ci) ?? 0);
             consts_hex = consts_hex + pilc_u64_le_hex(5) + pilc_u64_le_hex(fbits);
         } else if ctag == 8 {
             let sval = __engine("map_get", st, "cstr_" + ci);
@@ -179,11 +179,11 @@ pub fn pilc_serialize_state_hex(st: i64) -> str {
         ci = ci + 1;
     }
 
-    let icount = __engine("map_get", st, "icount") + 0;
+    let icount = (__engine("map_get", st, "icount") ?? 0);
     var code_hex = "";
     var pc = 0;
     while pc < icount {
-        let word = __engine("map_get", st, "ins_" + pc) + 0;
+        let word = (__engine("map_get", st, "ins_" + pc) ?? 0);
         code_hex = code_hex + pilc_u32_le_hex(word);
         pc = pc + 1;
     }
@@ -200,12 +200,12 @@ pub fn pilc_serialize_state_hex(st: i64) -> str {
 
 // Formats `"SPANS:<pc>:<start>:<end>,...|REGS:<reg>:<sym_id>:<name>,..."` from compiled state `st`.
 pub fn pilc_format_debug_manifest(st: i64) -> str {
-    let icount = __engine("map_get", st, "icount") + 0;
+    let icount = (__engine("map_get", st, "icount") ?? 0);
     var spans_out = "SPANS:";
     var pc = 0;
     while pc < icount {
-        let s0 = __engine("map_get", st, "isp0_" + pc) + 0;
-        let s1 = __engine("map_get", st, "isp1_" + pc) + 0;
+        let s0 = (__engine("map_get", st, "isp0_" + pc) ?? 0);
+        let s1 = (__engine("map_get", st, "isp1_" + pc) ?? 0);
         if pc > 0 {
             spans_out = spans_out + ",";
         }
@@ -213,12 +213,12 @@ pub fn pilc_format_debug_manifest(st: i64) -> str {
         pc = pc + 1;
     }
 
-    let rcount = __engine("map_get", st, "dbg_rcount") + 0;
+    let rcount = (__engine("map_get", st, "dbg_rcount") ?? 0);
     var regs_out = "REGS:";
     var ri = 0;
     while ri < rcount {
-        let rslot = __engine("map_get", st, "dbg_rslot_" + ri) + 0;
-        let rsym = __engine("map_get", st, "dbg_rsym_" + ri) + 0;
+        let rslot = (__engine("map_get", st, "dbg_rslot_" + ri) ?? 0);
+        let rsym = (__engine("map_get", st, "dbg_rsym_" + ri) ?? 0);
         let rname = __engine("map_get", st, "dbg_rname_" + ri);
         if ri > 0 {
             regs_out = regs_out + ",";

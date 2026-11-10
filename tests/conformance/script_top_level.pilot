@@ -1,0 +1,3 @@
+// A file without `main` runs its top-level statements and exits 0.
+let base = 40;
+print(base + 2);

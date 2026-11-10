@@ -50,7 +50,7 @@ pub pure fn as_sysv_arg_reg(idx: i64) -> str {
 }
 
 pub fn as_next_lbl(st: i64) -> i64 {
-    let id = (__engine("map_get", st, "lid") + 0) + 1;
+    let id = ((__engine("map_get", st, "lid") ?? 0)) + 1;
     __engine("map_set", st, "lid", id);
     return id;
 }
@@ -68,7 +68,7 @@ pub fn as_emit_lbl(st: i64, lbl: str) -> i64 {
 }
 
 pub fn as_temp_off(st: i64, depth: i64) -> i64 {
-    let base = __engine("map_get", st, "tbase") + 0;
+    let base = (__engine("map_get", st, "tbase") ?? 0);
     return (base + depth + 1) * 8;
 }
 
@@ -101,7 +101,7 @@ pub fn as_emit_expr(st: i64, nid: i64, depth: i64) -> i64 {
 
     if k == 14 {
         let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        let off = __engine("map_get", st, "off_" + vname) + 0;
+        let off = (__engine("map_get", st, "off_" + vname) ?? 0);
         as_emit_insn(st, "movq -" + off + "(%rbp), %rax");
         return 0;
     }
@@ -232,7 +232,7 @@ pub fn as_emit_stmt(st: i64, nid: i64) -> i64 {
 
     if k == 4 {
         let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        let off = __engine("map_get", st, "off_" + vname) + 0;
+        let off = (__engine("map_get", st, "off_" + vname) ?? 0);
         if __engine("ast_child_count", nid) > 0 {
             as_emit_expr(st, __engine("ast_child_at", nid, 0), 0);
         } else {
@@ -260,7 +260,7 @@ pub fn as_emit_stmt(st: i64, nid: i64) -> i64 {
             return 0;
         }
         let vname = __engine("sym_str", __engine("ast_node_sym", lhs_nid));
-        let off = __engine("map_get", st, "off_" + vname) + 0;
+        let off = (__engine("map_get", st, "off_" + vname) ?? 0);
         as_emit_expr(st, __engine("ast_child_at", nid, 1), 0);
         as_emit_insn(st, "movq %rax, -" + off + "(%rbp)");
         return 0;
@@ -291,7 +291,7 @@ pub fn as_emit_stmt(st: i64, nid: i64) -> i64 {
         let id = as_next_lbl(st);
         let c_lbl = ".Lwh_cond_" + id;
         let x_lbl = ".Lwh_end_" + id;
-        let ld = (__engine("map_get", st, "ldepth") + 0) + 1;
+        let ld = ((__engine("map_get", st, "ldepth") ?? 0)) + 1;
         __engine("map_set", st, "ldepth", ld);
         __engine("map_set", st, "lcond_" + ld, c_lbl);
         __engine("map_set", st, "lend_" + ld, x_lbl);
@@ -309,7 +309,7 @@ pub fn as_emit_stmt(st: i64, nid: i64) -> i64 {
     }
 
     if orig == 107 {
-        let ld = __engine("map_get", st, "ldepth") + 0;
+        let ld = (__engine("map_get", st, "ldepth") ?? 0);
         if ld > 0 {
             as_emit_insn(st, "jmp " + __engine("map_get", st, "lend_" + ld));
         }
@@ -317,7 +317,7 @@ pub fn as_emit_stmt(st: i64, nid: i64) -> i64 {
     }
 
     if orig == 108 {
-        let ld = __engine("map_get", st, "ldepth") + 0;
+        let ld = (__engine("map_get", st, "ldepth") ?? 0);
         if ld > 0 {
             as_emit_insn(st, "jmp " + __engine("map_get", st, "lcond_" + ld));
         }
@@ -397,7 +397,7 @@ pub fn emit_arena_x86_64_asm() -> str {
                     fn_seq = fn_seq + 1;
                     let fst = __engine("map_new");
                     __engine("map_set", fst, "code", "");
-                    __engine("map_set", fst, "lid", (__engine("map_get", st, "lid") + 0));
+                    __engine("map_set", fst, "lid", ((__engine("map_get", st, "lid") ?? 0)));
                     __engine("map_set", fst, "ldepth", 0);
                     let ret_lbl = ".Lret_fn_" + fn_seq;
                     __engine("map_set", fst, "ret_lbl", ret_lbl);
@@ -440,7 +440,7 @@ pub fn emit_arena_x86_64_asm() -> str {
                         let p_nid = __engine("ast_child_at", item, pi);
                         if __engine("ast_node_kind", p_nid) == 21 && pidx < 6 {
                             let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
-                            let off = __engine("map_get", fst, "off_" + pname) + 0;
+                            let off = (__engine("map_get", fst, "off_" + pname) ?? 0);
                             as_emit_insn(fst, "movq " + as_sysv_arg_reg(pidx) + ", -" + off + "(%rbp)");
                             pidx = pidx + 1;
                         }
@@ -454,7 +454,7 @@ pub fn emit_arena_x86_64_asm() -> str {
                     as_emit_insn(fst, "popq %rbp");
                     as_emit_insn(fst, "retq");
 
-                    __engine("map_set", st, "lid", __engine("map_get", fst, "lid") + 0);
+                    __engine("map_set", st, "lid", (__engine("map_get", fst, "lid") ?? 0));
                     out = out + "\t.globl\t" + fname + "\n" + fname + ":\n" + __engine("map_get", fst, "code") + "\n";
                 }
             }

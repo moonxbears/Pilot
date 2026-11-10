@@ -248,7 +248,7 @@ pub fn is_member_excluded(map: i64, target_name: str, member_name: str) -> bool 
 
 pub fn format_exclusions_report(map: i64) -> str {
     let ex_count = __engine("map_get", map, "ex_count");
-    if ex_count == null || ex_count == 0 {
+    if ex_count == none || ex_count == 0 {
         return "No post-definition symbol exclusions ('without') detected.\n";
     }
 

@@ -36,28 +36,28 @@ pub syntax {
     };
     sync(body) => quote {
         {
-            let __sync_prev = __engine("map_get", 0, "__sync_active");
-            __engine("map_set", 0, "__sync_active", 1);
+            let __sync_prev = __engine("map_get", __engine("get_env"), "__sync_active");
+            __engine("map_set", __engine("get_env"), "__sync_active", 1);
             let __sync_res = $body;
-            __engine("map_set", 0, "__sync_active", __sync_prev);
+            __engine("map_set", __engine("get_env"), "__sync_active", __sync_prev);
             __sync_res
         }
     };
     atomic(body) => quote {
         {
-            let __atomic_prev = __engine("map_get", 0, "__atomic_active");
-            __engine("map_set", 0, "__atomic_active", 1);
+            let __atomic_prev = __engine("map_get", __engine("get_env"), "__atomic_active");
+            __engine("map_set", __engine("get_env"), "__atomic_active", 1);
             let __atomic_res = $body;
-            __engine("map_set", 0, "__atomic_active", __atomic_prev);
+            __engine("map_set", __engine("get_env"), "__atomic_active", __atomic_prev);
             __atomic_res
         }
     };
     isolate(body) => quote {
         {
-            let __iso_prev = __engine("map_get", 0, "__isolated_active");
-            __engine("map_set", 0, "__isolated_active", 1);
+            let __iso_prev = __engine("map_get", __engine("get_env"), "__isolated_active");
+            __engine("map_set", __engine("get_env"), "__isolated_active", 1);
             let __iso_res = $body;
-            __engine("map_set", 0, "__isolated_active", __iso_prev);
+            __engine("map_set", __engine("get_env"), "__isolated_active", __iso_prev);
             __iso_res
         }
     };

@@ -1,0 +1,4 @@
+// A syntax error stops the program before anything runs.
+fn main() {
+    print("never printed";
+}

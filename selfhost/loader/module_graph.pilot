@@ -49,7 +49,7 @@ pub fn glist_new() -> i64 {
 }
 
 pub fn glist_len(list: i64) -> usize {
-    return __engine("map_get", list, "count") + 0;
+    return (__engine("map_get", list, "count") ?? 0);
 }
 
 pub fn glist_push(list: i64, item: any) -> usize {

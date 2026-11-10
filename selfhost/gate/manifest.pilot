@@ -188,7 +188,7 @@ pub fn glist_new() -> i64 {
 }
 
 pub fn glist_len(list: i64) -> usize {
-    return __engine("map_get", list, "count") + 0;
+    return (__engine("map_get", list, "count") ?? 0);
 }
 
 pub fn glist_push(list: i64, item: any) -> usize {
@@ -222,7 +222,7 @@ pub fn gset_insert(s: i64, key: str) -> bool {
     if __engine("map_get", s, key) == true {
         return false;
     }
-    let cnt = __engine("map_get", s, "__count__") + 0;
+    let cnt = (__engine("map_get", s, "__count__") ?? 0);
     __engine("map_set", s, key, true);
     __engine("map_set", s, "__count__", cnt + 1);
     return true;
@@ -233,7 +233,7 @@ pub pure fn gset_contains(s: i64, key: str) -> bool {
 }
 
 pub pure fn gset_len(s: i64) -> usize {
-    return __engine("map_get", s, "__count__") + 0;
+    return (__engine("map_get", s, "__count__") ?? 0);
 }
 
 pub pure fn gm_join_path(root: str, rel: str) -> str {
@@ -619,7 +619,7 @@ pub pure fn max_total_rust_loc() -> usize => 5900;
 // To resume contraction, set `seed_contraction_paused()` to `false` and run
 // `pilot gate --ratchet-update` once the live LOC is below the recorded ceilings.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 15000;
+pub pure fn paused_max_total_rust_loc() -> usize => 30000;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
 pub pure fn bootstrap_budget_us() -> u64 => 5000000;

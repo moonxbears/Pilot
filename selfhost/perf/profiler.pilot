@@ -78,14 +78,14 @@ pub fn parse_and_aggregate_folded_stacks(folded_stacks: str) -> i64 {
             let fn_name = if last_semi >= 0 { stack.slice(last_semi + 1, slen) } else { stack };
             
             let cur_val = __engine("map_get", m, "dur:" + fn_name);
-            let prev = if cur_val != null { cur_val } else { 0 };
+            let prev = if cur_val != none { cur_val } else { 0 };
             let _s = __engine("map_set", m, "dur:" + fn_name, prev + cnt);
             if prev == 0 {
                 let _fn = __engine("map_set", m, "frame:" + frame_count, fn_name);
                 frame_count = frame_count + 1;
             }
             let tot_val = __engine("map_get", m, "total_samples");
-            let prev_tot = if tot_val != null { tot_val } else { 0 };
+            let prev_tot = if tot_val != none { tot_val } else { 0 };
             let _st = __engine("map_set", m, "total_samples", prev_tot + cnt);
         }
         if nl < 0 { break; }
@@ -98,9 +98,9 @@ pub fn parse_and_aggregate_folded_stacks(folded_stacks: str) -> i64 {
 pub fn profile_folded_stacks_to_svg(folded_stacks: str, total_width_px: i64) -> str {
     let m = parse_and_aggregate_folded_stacks(folded_stacks);
     let total_samples = __engine("map_get", m, "total_samples");
-    let tot = if total_samples != null && total_samples > 0 { total_samples } else { 1 };
+    let tot = if total_samples != none && total_samples > 0 { total_samples } else { 1 };
     let frame_count = __engine("map_get", m, "frame_count");
-    let fc = if frame_count != null { frame_count } else { 0 };
+    let fc = if frame_count != none { frame_count } else { 0 };
 
     var svg = "<?xml version=\"1.0\" standalone=\"no\"?>\n" +
               "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n" +
@@ -125,7 +125,7 @@ pub fn profile_folded_stacks_to_svg(folded_stacks: str, total_width_px: i64) -> 
 pub fn profile_folded_stacks_to_chrome_trace(folded_stacks: str) -> str {
     let m = parse_and_aggregate_folded_stacks(folded_stacks);
     let frame_count = __engine("map_get", m, "frame_count");
-    let fc = if frame_count != null { frame_count } else { 0 };
+    let fc = if frame_count != none { frame_count } else { 0 };
 
     var json = "{\"traceEvents\":[";
     var cur_ts = 1000;

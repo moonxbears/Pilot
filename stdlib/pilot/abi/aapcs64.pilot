@@ -34,7 +34,15 @@ pub struct Aapcs64ConvClassifier : IValue, ICallingConvClassifier {
         8, 8, 0, 16, true, 8
     );
 
+    // Standard (non-Darwin) AAPCS64 classification.
     pub static pure fn classify(
+        params: slice<TypeLayout>,
+        ret: ref<TypeLayout>,
+        variadic_fixed_count: opt<usize>
+    ) -> AbiFramePlan => Aapcs64ConvClassifier::standard().plan(params, ret, variadic_fixed_count);
+
+    // Classification for this variant; `is_darwin` selects the Darwin ABI id.
+    pub pure fn plan(
         params: slice<TypeLayout>,
         ret: ref<TypeLayout>,
         variadic_fixed_count: opt<usize>

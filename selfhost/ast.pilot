@@ -172,30 +172,26 @@ pub fn sh_ast_free_node(arena: i64, node_id: i64) -> bool {
 }
 
 pub fn sh_ast_node_count(arena: i64) -> i64 {
-    let nil;
     let cnt = __engine("map_get", arena, "node_count");
-    if cnt != nil { return cnt; }
+    if cnt != none { return cnt; }
     return 0;
 }
 
 pub fn sh_ast_live_count(arena: i64) -> i64 {
-    let nil;
     let cnt = __engine("map_get", arena, "live_count");
-    if cnt != nil { return cnt; }
+    if cnt != none { return cnt; }
     return 0;
 }
 
 pub fn sh_ast_free_count(arena: i64) -> i64 {
-    let nil;
     let cnt = __engine("map_get", arena, "free_top");
-    if cnt != nil { return cnt; }
+    if cnt != none { return cnt; }
     return 0;
 }
 
 pub fn sh_ast_generation(arena: i64) -> i64 {
-    let nil;
     let g = __engine("map_get", arena, "generation");
-    if g != nil { return g; }
+    if g != none { return g; }
     return 0;
 }
 
@@ -205,9 +201,8 @@ pub fn sh_ast_set_root(arena: i64, root_nid: i64) -> void {
 }
 
 pub fn sh_ast_root(arena: i64) -> i64 {
-    let nil;
     let r = __engine("map_get", arena, "root");
-    if r != nil { return r; }
+    if r != none { return r; }
     return -1;
 }
 
@@ -216,9 +211,8 @@ pub fn sh_ast_root(arena: i64) -> i64 {
 // ==============================================================================
 
 pub fn sh_ast_kind_name(arena: i64, node_id: i64) -> str {
-    let nil;
     let k = __engine("map_get", arena, node_id + "_kind");
-    if k != nil { return k; }
+    if k != none { return k; }
     return "Unknown";
 }
 
@@ -228,16 +222,14 @@ pub fn sh_ast_kind(arena: i64, node_id: i64) -> i64 {
 }
 
 pub fn sh_ast_op_text(arena: i64, node_id: i64) -> str {
-    let nil;
     let op_v = __engine("map_get", arena, node_id + "_op");
-    if op_v != nil { return op_v; }
+    if op_v != none { return op_v; }
     return "";
 }
 
 pub fn sh_ast_flags(arena: i64, node_id: i64) -> i64 {
-    let nil;
     let fl = __engine("map_get", arena, node_id + "_flags");
-    if fl != nil { return fl; }
+    if fl != none { return fl; }
     return 0;
 }
 
@@ -246,23 +238,20 @@ pub fn sh_ast_is_tombstone(arena: i64, node_id: i64) -> bool {
 }
 
 pub fn sh_ast_parent(arena: i64, node_id: i64) -> i64 {
-    let nil;
     let p = __engine("map_get", arena, node_id + "_parent");
-    if p != nil { return p; }
+    if p != none { return p; }
     return -1;
 }
 
 pub fn sh_ast_span_start(arena: i64, node_id: i64) -> i64 {
-    let nil;
     let s = __engine("map_get", arena, node_id + "_span_s");
-    if s != nil { return s; }
+    if s != none { return s; }
     return 0;
 }
 
 pub fn sh_ast_span_end(arena: i64, node_id: i64) -> i64 {
-    let nil;
     let e = __engine("map_get", arena, node_id + "_span_e");
-    if e != nil { return e; }
+    if e != none { return e; }
     return 0;
 }
 
@@ -287,18 +276,16 @@ pub fn sh_ast_set_span(arena: i64, node_id: i64, start_byte: i64, end_byte: i64)
 }
 
 pub fn sh_ast_child_count(arena: i64, node_id: i64) -> i64 {
-    let nil;
     let cnt = __engine("map_get", arena, node_id + "_child_count");
-    if cnt != nil { return cnt; }
+    if cnt != none { return cnt; }
     return 0;
 }
 
 pub fn sh_ast_child_at(arena: i64, node_id: i64, idx: i64) -> i64 {
-    let nil;
     let cnt = sh_ast_child_count(arena, node_id);
     if idx < 0 || idx >= cnt { return -1; }
     let ch = __engine("map_get", arena, node_id + "_child_" + idx);
-    if ch != nil { return ch; }
+    if ch != none { return ch; }
     return -1;
 }
 
@@ -450,13 +437,12 @@ pub fn sh_ast_clone_subtree(arena: i64, sub_root: i64) -> i64 {
         sh_ast_span_start(arena, sub_root),
         sh_ast_span_end(arena, sub_root)
     );
-    let nil;
     let sig = __engine("map_get", arena, sub_root + "_sig");
-    if sig != nil {
+    if sig != none {
         __engine("map_set", arena, copy_nid + "_sig", sig);
     }
     let arity = __engine("map_get", arena, sub_root + "_arity");
-    if arity != nil {
+    if arity != none {
         __engine("map_set", arena, copy_nid + "_arity", arity);
     }
     let ccnt = sh_ast_child_count(arena, sub_root);
@@ -554,9 +540,8 @@ pub fn sh_ast_alloc_syntax_arm(arena: i64, arity: i64, pattern_tag: str, body: i
 }
 
 pub fn sh_ast_syntax_arm_arity(arena: i64, arm_id: i64) -> i64 {
-    let nil;
     let a = __engine("map_get", arena, arm_id + "_arity");
-    if a != nil { return a; }
+    if a != none { return a; }
     return 0;
 }
 
@@ -622,17 +607,17 @@ pub fn sh_ast_eval_const_expr(arena: i64, nid: i64, bindings: i64) -> i64 {
         return 0;
     }
     if k == "IdentExpr" {
-        if bindings >= 0 && __engine("map_get", bindings, "has_const_" + op) == 1 {
+        if bindings != -1 && __engine("map_get", bindings, "has_const_" + op) == 1 {
             return __engine("map_get", bindings, "const_" + op);
         }
-        if bindings >= 0 && __engine("map_get", bindings, "has_" + op) == 1 {
+        if bindings != -1 && __engine("map_get", bindings, "has_" + op) == 1 {
             let bn = __engine("map_get", bindings, "node_" + op);
             return sh_ast_eval_const_expr(arena, bn, bindings);
         }
         return 0;
     }
     if k == "SpliceHole" {
-        if bindings >= 0 && __engine("map_get", bindings, "has_" + op) == 1 {
+        if bindings != -1 && __engine("map_get", bindings, "has_" + op) == 1 {
             let sn = __engine("map_get", bindings, "node_" + op);
             return sh_ast_eval_const_expr(arena, sn, bindings);
         }
@@ -700,9 +685,8 @@ fn sh_instantiate_node_rec(arena: i64, tpl_nid: i64, bindings: i64, hyg_map: i64
         }
         return -1;
     }
-    let nil;
     if k == "SpliceHole" {
-        if bindings >= 0 && __engine("map_get", bindings, "has_" + op) != nil {
+        if bindings != -1 && __engine("map_get", bindings, "has_" + op) != none {
             let bound = __engine("map_get", bindings, "node_" + op);
             return sh_ast_clone_subtree(arena, bound);
         }
@@ -712,7 +696,7 @@ fn sh_instantiate_node_rec(arena: i64, tpl_nid: i64, bindings: i64, hyg_map: i64
         return sh_ast_alloc_node(arena, "IdentExpr", op);
     }
     if k == "SplatHole" {
-        if bindings >= 0 && __engine("map_get", bindings, "has_" + op) != nil {
+        if bindings != -1 && __engine("map_get", bindings, "has_" + op) != none {
             let bound_seq = __engine("map_get", bindings, "node_" + op);
             return sh_ast_clone_subtree(arena, bound_seq);
         }
@@ -929,9 +913,8 @@ pub fn sh_ast_emit_pilot(arena: i64, node_id: i64) -> str {
         return b_out + "}";
     }
     if k == "FnDecl" {
-        let nil;
         let sig = __engine("map_get", arena, node_id + "_sig");
-        let sig_s = if sig != nil { sig } else { "()" };
+        let sig_s = if sig != none { sig } else { "()" };
         let body_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
         let is_async = (sh_ast_flags(arena, node_id) & 64) != 0;
         let prefix_s = if is_async { "pub async fn " } else { "pub fn " };
