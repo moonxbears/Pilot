@@ -1,0 +1,27 @@
+// Setters are tried in declaration order: the first whose guard holds runs.
+// With several setters, a setter that names a typed parameter also needs the
+// value to be of that type.
+struct Meter {
+    pub reading: i64 {
+        get => field;
+        set if value >= 0 => { field = value; }
+        set(v: i64) if v < 0 => { field = 0 - v; }
+    }
+    pub size: i64 {
+        get => field;
+        set(n: i64) => { field = n; }
+        set(flag: bool) => { field = if flag { 100 } else { 0 }; }
+    }
+}
+
+fn main() {
+    var m = Meter { reading: 0, size: 0 };
+    m.reading = 5;
+    print(m.reading);
+    m.reading = -8;
+    print(m.reading);
+    m.size = 7;
+    print(m.size);
+    m.size = true;
+    print(m.size);
+}

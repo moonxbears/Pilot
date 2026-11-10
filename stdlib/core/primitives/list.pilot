@@ -5,10 +5,8 @@
 // The seed runs `List<T>` as its own engine list (see the `list_*` bindings
 // in stdlib/core/builtins/native_calls.pilot): `List()` and `[a, b]` build
 // one, and the bodiless methods below are answered by the engine. The
-// members with bodies are written over those. The seed links this file only
-// into a program that imports `Pilot.Core.Primitives.List` (known bug
-// `seed.primitive_bodies`), and does not run property getters yet, so
-// `count` and `ListEnumerator.current` read null (`seed.property_getters`).
+// members with bodies are written over those. The prelude links this file
+// into every program.
 // The layout over raw memory comes with `std.col` once the seed runs native
 // code (F6).
 [EnforceCoreNaming]
@@ -61,10 +59,9 @@ pub partial struct List<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerato
     };
 }
 
-/// Walks a `List<T>` front to back.
-[StandIn("list.enumerator_borrow", "a borrowed reference to the list it walks", "holds the list value itself until fields can be declared as borrowed references", "F5")]
+/// Walks a `List<T>` front to back, borrowing it.
 pub struct ListEnumerator<T: IAnyValue> : ICursor<T> {
-    pub items:       List<T>;
+    pub ref items:   List<T>;
     pub index:       usize;
     pub has_started: bool;
 

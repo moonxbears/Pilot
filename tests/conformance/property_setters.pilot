@@ -1,0 +1,31 @@
+// Assigning a property with a setter runs the setter. Inside the accessors
+// `field` is the property's own storage on the value, and the assigned value
+// is `value`, or the setter's parameter when it names one. A receiver whose
+// type the compiler does not know (a list item here) reaches the same
+// accessors at run time.
+struct Gauge {
+    pub level: i64 {
+        get => field;
+        set => { field = if value > 10 { 10 } else { value }; }
+    }
+    pub scale: i64 {
+        get => field;
+        set(v: i64) => { field = v * 2; }
+    }
+}
+
+fn main() {
+    var g = Gauge { level: 0, scale: 1 };
+    g.level = 3;
+    print(g.level);
+    g.level = 50;
+    print(g.level);
+    g.scale = 4;
+    print(g.scale);
+    let gauges: List<Gauge> = [g];
+    for x in gauges {
+        x.level = 12;
+        x.scale = 5;
+        print(x.level + x.scale);
+    }
+}

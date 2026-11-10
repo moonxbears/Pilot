@@ -222,7 +222,6 @@ bash examples/showcase/run_all.sh
 python3 scripts/gate1_check.py && python3 scripts/gate2_check.py
 python3 scripts/gate3_check.py && python3 scripts/gate4_selfhost_contraction.py
 
-# Run all workspace unit tests & the simultaneous 44-test Milestone 50–61 Mega Gate
+# Run all workspace tests
 cargo test --workspace
-cargo test -p pilot-analysis --test mega_all_milestones_simultaneous_gate
 ```

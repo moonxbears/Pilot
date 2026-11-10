@@ -196,6 +196,17 @@ pub fn lattice_of(p: Program, t: i64) -> i64 {
     return build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).lattice;
 }
 
+/// The lattice bits a field adds to its struct: a `ref` field borrows what it
+/// holds (the bits of the reference root, `Cfg.Lang.ref_t`), any other field
+/// adds the bits of its type.
+fn field_lattice(p: Program, m: i64, t: i64) -> i64 {
+    if kind(p.s, m) == nk_param() && flags(p.s, m) != 0 {
+        let bits = lattice_attr(p, prog_slot_name(p, "ref_t"));
+        if bits >= 0 { return bits; }
+    }
+    return lattice_of(p, t);
+}
+
 /// The bits the `[Lattice(..)]` attribute of interface `name` declares, or -1.
 fn lattice_attr(p: Program, name: str) -> i64 {
     for d in nl_get(p.type_decls, name) {
@@ -289,7 +300,7 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
                     type_name: node_text(s, field_type_node(s, m)),
                     layout_id: 0,
                     byte_size: byte_size(p, ft, depth),
-                    lattice_bits: lattice_of(p, ft) as u8,
+                    lattice_bits: field_lattice(p, m, ft) as u8,
                     is_mutable: kind(s, m) == nk_var(),
                 };
                 primary.push(fdef);

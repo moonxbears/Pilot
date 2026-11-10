@@ -506,7 +506,9 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
-    // 1. Run ALL 4 workspace verification gates via pure-Pilot `pilot gate --full`
+    // 1. Run the source gates via pure-Pilot `pilot gate`. The `--full` run
+    //    (adding the rename litmus and bootstrap parity) is test_m1_4's; this
+    //    test runs its own dual-pass litmus below.
     let pilot_bin = root.join("target/debug/pilot");
     if !pilot_bin.exists() {
         let build_st = Command::new("cargo")
@@ -517,13 +519,13 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
         assert!(build_st.success(), "Failed building pilot-cli");
     }
     let out = Command::new(&pilot_bin)
-        .args(["gate", "--full"])
+        .args(["gate"])
         .current_dir(&root)
         .output()
-        .expect("Failed to spawn pilot gate --full");
+        .expect("Failed to spawn pilot gate");
     assert!(
         out.status.success(),
-        "pilot gate --full failed:\n{}{}",
+        "pilot gate failed:\n{}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );

@@ -98,9 +98,23 @@ fn read_optional(path: str) -> str? {
     return none;
 }
 
-/// Runs the conformance case `program` in its own process and lists every
-/// way its result differs from its expectation files.
-pub fn test_run_case(program: str) -> TestResult {
+/// Starts the conformance case `program` in its own process, as
+/// `pilot run <program> -- <args>` with its `.stdin` as input.
+pub fn test_start_case(program: str) -> proc.ProcessHandle {
+    let stem = test_stem(program);
+    var argv: List<str> = ["run", program, "--"];
+    let arg_text = read_optional(stem + ".args");
+    if arg_text != none {
+        for a in test_lines(arg_text) { argv.push(a); }
+    }
+    let input = read_optional(stem + ".stdin") ?? "";
+    let exe = proc.current_exe() ?? "pilot";
+    return proc.spawn(exe, argv, input);
+}
+
+/// Every way the result `out` of conformance case `program` differs from
+/// its expectation files.
+pub fn test_check_case(program: str, out: proc.ProcessOutput) -> TestResult {
     let stem = test_stem(program);
     var problems: List<str> = [];
     let expected_stdout = File.read_text(stem + ".stdout");
@@ -109,14 +123,6 @@ pub fn test_run_case(program: str) -> TestResult {
     if expected_exit == -1 && exit_text != "-1" {
         problems.push(f"`{stem}.exit` must hold an integer, found `{exit_text}`");
     }
-    var argv: List<str> = ["run", program, "--"];
-    let arg_text = read_optional(stem + ".args");
-    if arg_text != none {
-        for a in test_lines(arg_text) { argv.push(a); }
-    }
-    let input = read_optional(stem + ".stdin") ?? "";
-    let exe = proc.current_exe() ?? "pilot";
-    let out = proc.run(exe, argv, input);
     if out.stdout != expected_stdout {
         problems.push(f"stdout differs\n--- expected ---\n{expected_stdout}--- actual ---\n{out.stdout}--- stderr ---\n{out.stderr}");
     }
@@ -133,6 +139,33 @@ pub fn test_run_case(program: str) -> TestResult {
         }
     }
     return TestResult { name: program, problems: problems };
+}
+
+/// Runs the conformance case `program` in its own process and lists every
+/// way its result differs from its expectation files.
+pub fn test_run_case(program: str) -> TestResult => test_check_case(program, test_start_case(program).wait());
+
+/// Runs the conformance cases `programs`, as many at once as the machine has
+/// CPUs, and returns their results in the order of `programs`.
+pub fn test_run_cases(programs: List<str>) -> List<TestResult> {
+    let window = if proc.cpu_count() > 1 { proc.cpu_count() } else { 1 };
+    var running: List<proc.ProcessHandle> = [];
+    var started = 0;
+    while started < programs.len() && started < window {
+        running.push(test_start_case(programs[started]));
+        started = started + 1;
+    }
+    var results: List<TestResult> = [];
+    var i = 0;
+    while i < programs.len() {
+        results.push(test_check_case(programs[i], running[i].wait()));
+        if started < programs.len() {
+            running.push(test_start_case(programs[started]));
+            started = started + 1;
+        }
+        i = i + 1;
+    }
+    return results;
 }
 
 /// The `[Test]` functions of `program`, each run on its own.
@@ -173,34 +206,55 @@ fn print_failure(r: TestResult) {
     for p in r.problems { print("  " + p); }
 }
 
-/// Runs one program (a conformance case or a unit-test file) into `tally`.
-pub fn test_program(program: str, filter: str, var ref tally: TestTally) {
-    var results: List<TestResult> = [];
-    if File.exists(test_stem(program) + ".stdout") {
-        if program.find(filter, 0) >= 0 { results.push(test_run_case(program)); }
-    } else if test_has_functions(program) {
-        results = test_run_functions(program, filter);
-    } else if program.find(filter, 0) >= 0 {
-        results.push(TestResult { name: program, problems: ["has no `.stdout` expectation file and no `[Test]` functions"] });
+/// Whether `program` is a conformance case (it has a `.stdout` file).
+fn is_case(program: str) -> bool => File.exists(test_stem(program) + ".stdout");
+
+fn test_tally_result(r: TestResult, var ref tally: TestTally) {
+    if r.problems.len == 0 {
+        tally.passed = tally.passed + 1;
+    } else {
+        tally.failed = tally.failed + 1;
+        print_failure(r);
     }
-    for r in results {
-        if r.problems.len == 0 {
-            tally.passed = tally.passed + 1;
-        } else {
-            tally.failed = tally.failed + 1;
-            print_failure(r);
+}
+
+/// Runs `programs` (conformance cases and unit-test files) into `tally`, in
+/// order. The cases run in parallel first; their results are reported in
+/// place.
+pub fn test_programs(programs: List<str>, filter: str, var ref tally: TestTally) {
+    var cases: List<str> = [];
+    for program in programs {
+        if is_case(program) && program.find(filter, 0) >= 0 { cases.push(program); }
+    }
+    let case_results = test_run_cases(cases);
+    var next_case = 0;
+    for program in programs {
+        if is_case(program) {
+            if program.find(filter, 0) >= 0 {
+                test_tally_result(case_results[next_case], tally);
+                next_case = next_case + 1;
+            }
+        } else if test_has_functions(program) {
+            for r in test_run_functions(program, filter) { test_tally_result(r, tally); }
+        } else if program.find(filter, 0) >= 0 {
+            test_tally_result(TestResult { name: program, problems: ["has no `.stdout` expectation file and no `[Test]` functions"] }, tally);
         }
     }
 }
 
+/// Runs one program (a conformance case or a unit-test file) into `tally`.
+pub fn test_program(program: str, filter: str, var ref tally: TestTally) => test_programs([program], filter, tally);
+
 /// Runs the known-bug programs of `dir`; each must still fail.
 pub fn test_known_bugs(dir: str, filter: str, var ref tally: TestTally) {
+    var programs: List<str> = [];
     for program in test_programs_in(dir) {
-        if program.find(filter, 0) < 0 { continue; }
-        let r = test_run_case(program);
+        if program.find(filter, 0) >= 0 { programs.push(program); }
+    }
+    for r in test_run_cases(programs) {
         if r.problems.len == 0 {
             tally.bugs_fixed = tally.bugs_fixed + 1;
-            print(f"FIXED {program}: the bug it reproduces is gone; move it up into the corpus, delete its `bug_registry()` entry and undo every [Workaround] naming it");
+            print(f"FIXED {r.name}: the bug it reproduces is gone; move it up into the corpus, delete its `bug_registry()` entry and undo every [Workaround] naming it");
         } else {
             tally.bugs_reproduced = tally.bugs_reproduced + 1;
         }
@@ -226,7 +280,7 @@ pub fn test_command(paths: List<str>, filter: str) -> i64 {
             eprint(f"error: no `.pilot` programs in `{root}`");
             return 2;
         }
-        for program in programs { test_program(program, filter, tally); }
+        test_programs(programs, filter, tally);
         let bugs = (if root.ends_with("/") { root } else { root + "/" }) + test_known_bugs_dir();
         if test_programs_in(bugs).len > 0 { test_known_bugs(bugs, filter, tally); }
     }

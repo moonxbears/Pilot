@@ -1,0 +1,7 @@
+// Every type starts from the root interface, so a struct that declares no
+// base still satisfies an `IAnyValue` bound (`List<T: IAnyValue>`).
+struct Plain { pub n: i64; }
+fn main() {
+    let xs: List<Plain> = [Plain { n: 4 }];
+    print(xs[0].n);
+}

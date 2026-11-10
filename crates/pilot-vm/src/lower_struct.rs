@@ -91,16 +91,24 @@ impl BytecodeCompiler {
                 owners.push((owner.clone(), is_static));
             }
             let key = format!("{owner}.{}", Self::name(arena, arena.node(m).lhs));
+            // A method the type declares replaces one a splice or an
+            // interface gave it (a part of a `partial struct` may come later).
+            if self.lazy_decls.get(&key).is_some_and(|d| d.inherited) {
+                self.lazy_decls.remove(&key);
+            }
             self.register_params(key, m);
         }
         if dn.node_kind() != NodeKind::StructDecl {
             return;
         }
+        self.register_inherited(arena, decl, &owner);
         // A `partial struct` adds to the parts declared before it.
         let mut info = self.structs.remove(Self::name(arena, dn.lhs)).unwrap_or_default();
         for m in Self::type_members(arena, NodeId(dn.rhs)) {
             let mn = arena.node(m);
             match mn.node_kind() {
+                // A property whose accessors have bodies is computed, not stored.
+                NodeKind::ParamDecl if self.is_computed_property(arena, m) => {}
                 NodeKind::ParamDecl => info
                     .fields
                     .push((Self::name(arena, mn.lhs).to_string(), arena.field_default(m))),
@@ -133,6 +141,7 @@ impl BytecodeCompiler {
     /// Marks the record in `r_obj` as built from struct `name`, which is what
     /// method calls dispatch on.
     fn emit_record_type(&mut self, r_obj: u8, name: &str) {
+        self.constructed.insert(name.to_string());
         let mark = self.next_reg;
         let r_name = self.emit_const(PilotVal::from_str(name));
         self.emit_intrinsic("record_set_type", &[r_obj, r_name]);

@@ -2,6 +2,8 @@
 //! Hardcodes strictly the 14 seed `TokenKind`s; zero Pilot scalar/composite type names exist here.
 use std::borrow::Cow; use std::collections::{HashMap, HashSet}; use std::sync::OnceLock; use pilot_ast::*; use pilot_intern::SymbolId;
 use pilot_lexer::{tokenize, TokenKind, TokenTape}; use pilot_span::ByteSpan;
+mod accessors;
+pub use accessors::{INDEX_GET_OP, INDEX_SET_OP};
 mod attr_hooks;
 mod modules;
 mod pilot_impls;
@@ -130,6 +132,8 @@ enum CVal { Str(String), Int(i64), Map(HashMap<String, CVal>) }
 #[derive(Clone, Debug, Default)]
 pub struct ParserTables { modifiers: HashMap<String, ModAct>, param_modifiers: HashSet<String>, module_kws: HashMap<String, bool>,
     pub receptors: HashMap<String, (u8, u8)>, pub receiver_ident: String,
+    /// `field` and `value` inside accessor bodies (`bind_receiver_ident`).
+    pub backing_ident: String, pub setter_value_ident: String,
     pub prefix_ops: HashMap<String, u8>, pub infix_ops: HashMap<String, PrattEntry>, pub postfix_ops: HashMap<String, u8>,
     pub type_rules: Vec<TypeConstructRule>, pub syntax_macros: HashMap<String, SyntaxMacroRule>, const_maps: HashMap<String, CVal>,
     /// Attribute functions by name (see `attr_hooks`).
@@ -189,7 +193,8 @@ impl ParserTables {
                     HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(2), s_arg(3)),
                     HOOK_ENUMERATOR => self.bind_enumerator(s_arg(2), s_arg(3), s_arg(4)),
                     HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3)),
-                    "bind_receiver_ident" => { let w = s_arg(2); if !w.is_empty() { self.receiver_ident = w; } }
+                    "bind_receiver_ident" => { let (w, b, v) = (s_arg(2), s_arg(3), s_arg(4)); if !w.is_empty() { self.receiver_ident = w; }
+                        self.backing_ident = b; self.setter_value_ident = v; }
                     "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
                     "register_pratt_op" => { let (sym, fix, bp, assoc) = (s_arg(2), s_arg(3), i_arg(4).unwrap_or(20) as u8, s_arg(5));
                         if !sym.is_empty() { match fix.as_str() { "prefix" => { self.prefix_ops.insert(sym, bp); }
@@ -448,7 +453,10 @@ impl<'a> Parser<'a> {
                 let b = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() };
                 out.push(self.arena.alloc_node(NodeKind::ComptimeExpr, 0, self.arena.span(b), b.0, 0)); }
             TokenKind::Tilde if in_type_body => out.push(self.parse_dtor(&mods)),
-            TokenKind::Star if in_type_body => out.push(self.parse_bundle_splice()), _ if self.is_word() => {
+            TokenKind::Star if in_type_body => out.push(self.parse_bundle_splice()),
+            // `ref name: T;` is a field that borrows what it holds (flags 1, as a `ref` parameter).
+            TokenKind::KwRef if in_type_body => { self.advance(); let f = self.parse_field_or_prop(&mods, def_vis); self.arena.nodes[f.0 as usize].flags = 1; out.push(f); }
+            _ if self.is_word() => {
                 let nx = self.next_non_nl(self.cur() + 1);
                 let decl_follows = nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || self.tape.kind(nx) == TokenKind::LBrace);
                 if let Some(&is_pkg) = self.tables.module_kws.get(self.text()).filter(|_| decl_follows) {
@@ -595,16 +603,6 @@ impl<'a> Parser<'a> {
                 else { self.advance(); } }
             self.expect(TokenKind::RBrace); }
         self.arena.alloc_node(NodeKind::ScopeDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), en.0, ex.0) }
-    fn skip_accessor_block(&mut self) -> NodeId { let bsp = self.span(); self.advance(); let mut items = Vec::new();
-        while !self.at_end() && !self.at(TokenKind::RBrace) { self.skip_seps(); if self.at(TokenKind::RBrace) || self.at_end() { break; }
-            let _ = self.parse_mods(true); if self.is_rec(23) || self.is_rec(24) { self.advance();
-                if self.at(TokenKind::LParen) { let _ = self.parse_param_list(); }
-                if self.eat(TokenKind::KwIf) { self.no_struct_lit = true; let _ = self.parse_expr(); self.no_struct_lit = false; }
-                let b = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
-                else if self.at(TokenKind::LBrace) { self.parse_block() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
-                if b.is_some() { items.push(b); }
-            } else { self.advance(); } }
-        self.expect(TokenKind::RBrace); self.arena.alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(bsp.start, self.prev_span().end), &items) }
     fn parse_indexer(&mut self, mods: &DeclMods, def_vis: u8) -> NodeId {
         let sp = self.span(); self.advance(); self.expect(TokenKind::LBracket); let mut params = Vec::new();
         while !self.at_end() && !self.at(TokenKind::RBracket) { let (psp, psym) = (self.span(), self.intern_cur());
@@ -617,7 +615,7 @@ impl<'a> Parser<'a> {
         if ret.is_some() { self.arena.set_type_annot(id, ret); }
         self.apply_mods(id, mods, def_vis); id }
     fn parse_op_decl(&mut self, mods: &DeclMods, def_vis: u8) -> NodeId { let sp = self.span(); self.advance(); let mut op_txt = String::new();
-        if self.eat(TokenKind::LBracket) { op_txt.push_str("[]"); let _ = self.eat(TokenKind::RBracket); if self.eat(TokenKind::Equal) { op_txt.push('='); } }
+        if self.eat(TokenKind::LBracket) { let _ = self.eat(TokenKind::RBracket); op_txt.push_str(if self.eat(TokenKind::Equal) { INDEX_SET_OP } else { INDEX_GET_OP }); }
         else { while !self.at_end() && !self.at(TokenKind::LParen) { op_txt.push_str(self.text()); self.advance(); } }
         let (params, ret) = (self.parse_param_list(), if self.eat(TokenKind::Arrow) { self.parse_type() } else { NodeId::NONE });
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }

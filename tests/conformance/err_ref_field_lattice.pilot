@@ -1,0 +1,7 @@
+// A `ref` field adds the borrow bit (0b01) to its struct, so a value type
+// (`: IValue`, 0b00) cannot hold one.
+struct Window : IValue {
+    pub ref items: List<i64>;
+}
+
+fn main() { print(1); }

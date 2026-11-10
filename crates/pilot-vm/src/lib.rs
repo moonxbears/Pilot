@@ -19,6 +19,7 @@ mod lower_dispatch;
 mod lower_expr;
 mod lower_for;
 mod lower_global;
+mod lower_members;
 mod lower_native;
 mod lower_pipe;
 mod lower_program;
@@ -108,6 +109,7 @@ struct FnState {
     var_types: HashMap<String, String>,
     cur_ret_type: Option<String>,
     cur_owner: Option<String>,
+    backing: Option<String>,
     next_local_reg: u8,
     next_reg: u8,
     loops: Vec<LoopCtx>,
@@ -180,6 +182,24 @@ pub struct BytecodeCompiler {
     excluded: HashMap<String, Option<pilot_span::FileId>>,
     /// The unit of the node being compiled, in a linked program.
     cur_unit: Option<pilot_span::FileId>,
+    /// Struct and interface declarations of every unit, by name.
+    type_decls: HashMap<String, Vec<NodeId>>,
+    /// Accessor block of each property, by its field node.
+    accessor_blocks: HashMap<u32, NodeId>,
+    /// Parameter and guard of each setter body, by the body node.
+    setter_rows: HashMap<u32, (NodeId, NodeId)>,
+    /// The structs whose records the compiled code builds.
+    constructed: std::collections::HashSet<String>,
+    /// Member dispatchers the code calls, by function name, with the owners
+    /// each was last built for (`None` before it is built).
+    dispatchers: std::collections::BTreeMap<String, (lower_members::Switch, Option<Vec<String>>)>,
+    /// The structs with a getter for each property name.
+    getters: HashMap<String, Vec<String>>,
+    /// The structs with a setter for each property name.
+    setters: HashMap<String, Vec<String>>,
+    /// The property whose accessor is being compiled: the backing name
+    /// reads and writes its storage on the record.
+    backing: Option<String>,
 }
 
 impl BytecodeCompiler {
@@ -212,7 +232,12 @@ impl BytecodeCompiler {
         c.emit(Opcode::Move, 0, last, 0);
         c.emit(Opcode::Ret, 0, 0, 0);
         c.emit(Opcode::Halt, 0, 0, 0);
-        c.link_lazy(arena);
+        loop {
+            c.link_lazy(arena);
+            if !c.emit_dispatchers() {
+                break;
+            }
+        }
         c.resolve_calls();
         if c.instructions.len() > u16::MAX as usize {
             let span = arena.span(root);
@@ -470,6 +495,7 @@ impl BytecodeCompiler {
             var_types: std::mem::take(&mut self.var_types),
             cur_ret_type: self.cur_ret_type.take(),
             cur_owner: self.cur_owner.take(),
+            backing: self.backing.take(),
             next_local_reg: self.next_local_reg,
             next_reg: self.next_reg,
             loops: std::mem::take(&mut self.loops),
@@ -485,6 +511,7 @@ impl BytecodeCompiler {
         self.var_types = s.var_types;
         self.cur_ret_type = s.cur_ret_type;
         self.cur_owner = s.cur_owner;
+        self.backing = s.backing;
         self.next_local_reg = s.next_local_reg;
         self.next_reg = s.next_reg;
         self.loops = s.loops;
@@ -513,6 +540,7 @@ impl BytecodeCompiler {
         self.var_types.clear();
         self.cur_ret_type = None;
         self.cur_owner = None;
+        self.backing = None;
         self.loops.clear();
         self.tries.clear();
         self.block_scopes.clear();

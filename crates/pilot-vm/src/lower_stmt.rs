@@ -43,8 +43,21 @@ impl BytecodeCompiler {
         owner: Option<&str>,
         entry: &mut Option<u16>,
     ) {
+        self.compile_fn_decl_as(arena, fn_id, owner, None, entry);
+    }
+
+    /// Lowers a function or method; `alias` names a method a splice exposes
+    /// under another name (`with { m as n }`).
+    pub(crate) fn compile_fn_decl_as(
+        &mut self,
+        arena: &AstArena,
+        fn_id: NodeId,
+        owner: Option<&str>,
+        alias: Option<&str>,
+        entry: &mut Option<u16>,
+    ) {
         let cn = *arena.node(fn_id);
-        let fn_name = Self::name(arena, cn.lhs).to_string();
+        let fn_name = alias.unwrap_or(Self::name(arena, cn.lhs)).to_string();
         let (fn_start, fn_len) = (cn.rhs as usize, cn.flags as usize);
         if fn_start >= arena.extra_children.len() {
             return;
@@ -272,6 +285,9 @@ impl BytecodeCompiler {
         match lhs_n.node_kind() {
             NodeKind::IdentExpr => {
                 let name = Self::name(arena, lhs_n.lhs).to_string();
+                if let Some(r) = self.compile_backing_write(&name, rhs_r) {
+                    return r;
+                }
                 match self.var_slots.get(&name) {
                     Some(&slot) => {
                         self.emit(Opcode::Move, slot, rhs_r, 0);
@@ -292,16 +308,16 @@ impl BytecodeCompiler {
                 }
             }
             NodeKind::MemberExpr => {
+                let ty = self.static_type(arena, NodeId(lhs_n.lhs));
                 let r_obj = self.compile_node(arena, NodeId(lhs_n.lhs));
-                let r_key = self.emit_const(PilotVal::from_str(Self::name(arena, lhs_n.rhs)));
-                self.emit_intrinsic("map_set", &[r_obj, r_key, rhs_r]);
-                rhs_r
+                let field = Self::name(arena, lhs_n.rhs).to_string();
+                self.emit_member_write(r_obj, ty.as_deref(), &field, rhs_r)
             }
             NodeKind::IndexExpr => {
+                let ty = self.static_type(arena, NodeId(lhs_n.lhs));
                 let r_obj = self.compile_node(arena, NodeId(lhs_n.lhs));
                 let r_key = self.compile_node(arena, NodeId(lhs_n.rhs));
-                self.emit_intrinsic("map_set", &[r_obj, r_key, rhs_r]);
-                rhs_r
+                self.emit_index_write(r_obj, ty.as_deref(), r_key, rhs_r)
             }
             other => self.error(crate::codes::SYNTAX, format!("cannot assign to {other:?}")),
         }

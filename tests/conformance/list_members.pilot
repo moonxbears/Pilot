@@ -1,0 +1,9 @@
+// `List<T>` members written in Pilot over the engine-backed ones
+// (stdlib/core/primitives/list.pilot: `contains`, `add`) need no import:
+// the prelude links them.
+fn main() {
+    var xs: List<i64> = [1, 2];
+    print(xs.contains(2));
+    xs.add(3);
+    print(xs.len());
+}

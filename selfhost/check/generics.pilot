@@ -85,6 +85,9 @@ pub fn satisfies(p: Program, arg: i64, bound: i64) -> bool {
     let tt = p.tt;
     if ty_is_open(tt, arg) || ty_is_open(tt, bound) || !ty_is_named(tt, arg) || !ty_is_named(tt, bound) { return true; }
     let target = node_name(p.s, ty_decl(tt, bound));
+    // Every type starts from the root interface (`Cfg.Lang.any_t`), declared
+    // base or not.
+    if target == prog_slot_name(p, "any_t") { return true; }
     if kind(p.s, ty_decl(tt, bound)) != nk_interface() {
         return node_name(p.s, ty_decl(tt, arg)) == target;
     }

@@ -1,5 +1,5 @@
 // A property with a getter (`count: usize { get => .. }`) is read like a
-// field. The seed does not run the getter: the read gives null.
+// field and runs its getter on every read.
 struct Bag {
     pub items: List<i64>;
     pub count: usize { get => .items.len(); }
