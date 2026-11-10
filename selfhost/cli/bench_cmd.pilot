@@ -1,0 +1,179 @@
+// ==============================================================================
+// FILE: selfhost/cli/bench_cmd.pilot
+// `pilot bench`: the run times of the milestone tests, across runs.
+// ==============================================================================
+// Every milestone test that passes appends a line to
+// `target/test-metrics/M<milestone>/<test>.tsv`: the Unix time it finished, a
+// tab, and how long it ran in microseconds. A test that fails deletes its
+// file, so only passing runs are ever counted
+// (crates/pilot-analysis/tests/common/test_metrics.rs writes them).
+//
+// `pilot bench [dir] [--filter text]` prints one row per test, by milestone:
+// its number of runs and its average, fastest, slowest and latest time. A
+// latest time more than `bench_regression_percent()` over the fastest is
+// flagged on its row and counted in the closing line. The flag only points
+// at a part of a milestone that may have become a problem: the fastest run
+// is not the best one by itself (flexibility, scaling and memory weigh too),
+// so a flag never fails anything.
+//
+// Exit codes: 0 the table was printed (flags are warnings), 2 bad usage.
+pub lvl(0) pkg Pilot.SelfHost.Cli.BenchCmd;
+
+use Pilot.Core.File;
+use std.text;
+use Pilot.SelfHost.Cli.TestCmd;
+
+/// How much slower than its fastest time, in percent, a test's latest time
+/// may be before it is flagged. The milestone tests read this value too.
+pub pure fn bench_regression_percent() -> i64 => 50;
+
+/// Where the milestone tests keep their run times.
+pub pure fn bench_default_dir() -> str => "target/test-metrics";
+
+/// The run times of one test, in microseconds.
+pub struct TestTimes : IValue {
+    pub milestone: i64;
+    pub test: str;
+    pub runs: i64;
+    pub average_us: i64;
+    pub fastest_us: i64;
+    pub slowest_us: i64;
+    pub latest_us: i64;
+}
+
+/// How far the latest time is over the fastest, in percent.
+pub fn bench_over_fastest(t: TestTimes) -> i64 =>
+    if t.fastest_us > 0 { (t.latest_us - t.fastest_us) * 100 / t.fastest_us } else { 0 };
+
+/// Whether the latest time is more than the allowed percent over the fastest.
+pub fn bench_regressed(t: TestTimes) -> bool =>
+    t.latest_us * 100 > t.fastest_us * (100 + bench_regression_percent());
+
+/// The run times in a history file's text, oldest first; lines that do not
+/// hold a time are skipped.
+pub fn bench_parse_history(history: str) -> List<i64> {
+    var out: List<i64> = [];
+    for line in test_lines(history) {
+        let tab = line.find("\t", 0);
+        if tab < 0 { continue; }
+        if some us = text.parse_i64(line.slice(tab + 1, line.len()).trim()) {
+            if us >= 0 { out.push(us); }
+        }
+    }
+    return out;
+}
+
+/// The summary of a test's runs, or `none` when it has none.
+pub fn bench_summarize(milestone: i64, test: str, runs: List<i64>) -> TestTimes? {
+    if runs.len == 0 { return none; }
+    var total = 0;
+    var fastest = runs[0];
+    var slowest = runs[0];
+    for us in runs {
+        total = total + us;
+        if us < fastest { fastest = us; }
+        if us > slowest { slowest = us; }
+    }
+    return TestTimes {
+        milestone: milestone,
+        test: test,
+        runs: runs.len,
+        average_us: total / runs.len,
+        fastest_us: fastest,
+        slowest_us: slowest,
+        latest_us: runs[runs.len - 1],
+    };
+}
+
+/// Which test a history file belongs to.
+pub struct HistoryFile : IValue {
+    pub milestone: i64;
+    pub test: str;
+}
+
+/// `M<n>/<test>.tsv` under `dir` as milestone `n` and `test`, or `none` for
+/// any other file.
+fn bench_split_path(dir: str, path: str) -> HistoryFile? {
+    let prefix = if dir.ends_with("/") { dir } else { dir + "/" };
+    let at = path.find(prefix, 0);
+    if at < 0 || !path.ends_with(".tsv") { return none; }
+    let rest = path.slice(at + prefix.len(), path.len() - 4);
+    let slash = rest.find("/", 0);
+    if slash < 2 || rest.byte_at(0) != 77 { return none; }
+    let n = text.parse_i64(rest.slice(1, slash)) ?? -1;
+    let test = rest.slice(slash + 1, rest.len());
+    if n < 0 || test.len() == 0 || test.find("/", 0) >= 0 { return none; }
+    return HistoryFile { milestone: n, test: test };
+}
+
+fn bench_before(a: TestTimes, b: TestTimes) -> bool =>
+    a.milestone < b.milestone || (a.milestone == b.milestone && a.test < b.test);
+
+/// The run times of every test under `dir` whose name contains `filter`, by
+/// milestone, then by name.
+pub fn bench_collect(dir: str, filter: str) -> List<TestTimes> {
+    var out: List<TestTimes> = [];
+    for path in test_lines(File.walk_files(dir)) {
+        guard some h = bench_split_path(dir, path) else { continue; }
+        if filter.len() > 0 && h.test.find(filter, 0) < 0 { continue; }
+        guard some t = bench_summarize(h.milestone, h.test, bench_parse_history(File.read_text(path))) else { continue; }
+        out.push(t);
+        var at = out.len - 1;
+        while at > 0 && bench_before(t, out[at - 1]) {
+            out[at] = out[at - 1];
+            at = at - 1;
+        }
+        out[at] = t;
+    }
+    return out;
+}
+
+/// Microseconds as seconds with three decimals: `1234567` is `1.234s`.
+pub fn bench_seconds(us: i64) -> str {
+    let ms = us / 1000;
+    let frac = f"{ms % 1000}";
+    return f"{ms / 1000}." + text.pad_left(frac, 3).replace(" ", "0") + "s";
+}
+
+/// The status column of a row.
+pub fn bench_status(t: TestTimes) -> str {
+    if bench_regressed(t) {
+        return f"look: +{bench_over_fastest(t)}% over fastest";
+    }
+    return "ok";
+}
+
+/// The table `pilot bench` prints for `rows`.
+pub fn bench_table(rows: List<TestTimes>) -> str {
+    var name_w = 4;
+    for t in rows { if t.test.len() > name_w { name_w = t.test.len(); } }
+    let head = text.pad_right("MILESTONE", 10) + text.pad_right("TEST", name_w + 2)
+        + text.pad_left("RUNS", 5) + text.pad_left("AVERAGE", 11) + text.pad_left("FASTEST", 11)
+        + text.pad_left("SLOWEST", 11) + text.pad_left("LATEST", 11) + "  STATUS";
+    var out = head + "\n";
+    var flagged = 0;
+    for t in rows {
+        if bench_regressed(t) { flagged = flagged + 1; }
+        out = out + text.pad_right(f"M{t.milestone}", 10) + text.pad_right(t.test, name_w + 2)
+            + text.pad_left(f"{t.runs}", 5) + text.pad_left(bench_seconds(t.average_us), 11)
+            + text.pad_left(bench_seconds(t.fastest_us), 11) + text.pad_left(bench_seconds(t.slowest_us), 11)
+            + text.pad_left(bench_seconds(t.latest_us), 11) + "  " + bench_status(t) + "\n";
+    }
+    return out + f"RESULT: {rows.len} tests, {flagged} more than {bench_regression_percent()}% over their fastest time (worth a look, not a failure)";
+}
+
+/// `pilot bench [dir] [--filter text]`
+pub fn bench_command(paths: List<str>, filter: str) -> i64 {
+    if paths.len > 1 {
+        eprint("error: `pilot bench` takes at most one directory");
+        return 2;
+    }
+    let dir = if paths.len == 1 { paths[0] } else { bench_default_dir() };
+    let rows = bench_collect(dir, filter);
+    if rows.len == 0 {
+        print(f"no recorded test times in `{dir}`: run the milestone tests (`cargo test --workspace`) first");
+        return 0;
+    }
+    print(bench_table(rows));
+    return 0;
+}

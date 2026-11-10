@@ -143,37 +143,13 @@ impl PilVirtualMachine {
         Ok(items.iter().map(|&i| self.display(i)).collect())
     }
 
-    /// Runs `program` with `argv` in working directory `dir` (the caller's
-    /// when absent), feeding it `input` on standard input, and returns
-    /// `[exit_code, stdout, stderr]`. A program that cannot be started is an
-    /// intrinsic failure; one killed by a signal exits with `-1`.
-    pub(crate) fn proc_run(
-        &mut self,
-        program: &str,
-        argv: &[String],
-        input: Option<&str>,
-        dir: Option<&str>,
-    ) -> Result<PilotVal, String> {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-        let mut cmd = Command::new(program);
-        if let Some(d) = dir {
-            cmd.current_dir(d);
-        }
-        let mut child = cmd
-            .args(argv)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("cannot start `{program}`: {e}"))?;
-        if let Some(mut stdin) = child.stdin.take() {
-            // A program that exits without reading its input closes the pipe;
-            // that is not a failure of the run.
-            let _ = stdin.write_all(input.unwrap_or("").as_bytes());
-        }
-        let out = child
-            .wait_with_output()
+    /// Waits for `child` and returns `[exit_code, stdout, stderr]`. One
+    /// killed by a signal exits with `-1`.
+    pub(crate) fn finish_child(&mut self, child: Child) -> Result<PilotVal, String> {
+        let (program, done) = child;
+        let out = done
+            .join()
+            .map_err(|_| format!("the thread waiting for `{program}` failed"))?
             .map_err(|e| format!("cannot wait for `{program}`: {e}"))?;
         let fields = vec![
             PilotVal::from_int(out.status.code().map_or(-1, i64::from)),
@@ -182,6 +158,44 @@ impl PilVirtualMachine {
         ];
         Ok(self.new_list(fields))
     }
+}
+
+/// A started child process: its program, and the thread that feeds its
+/// standard input and collects its output.
+pub type Child = (String, std::thread::JoinHandle<std::io::Result<std::process::Output>>);
+
+/// Starts `program` with `argv` in working directory `dir` (the caller's when
+/// absent), feeding it `input` on standard input. A program that cannot be
+/// started is an intrinsic failure.
+pub(crate) fn spawn(program: &str, argv: &[String], input: String, dir: Option<&str>) -> Result<Child, String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(program);
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    let mut child = cmd
+        .args(argv)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cannot start `{program}`: {e}"))?;
+    let stdin = child.stdin.take();
+    let done = std::thread::spawn(move || {
+        if let Some(mut stdin) = stdin {
+            // A program that exits without reading its input closes the
+            // pipe; that is not a failure of the run.
+            let _ = stdin.write_all(input.as_bytes());
+        }
+        child.wait_with_output()
+    });
+    Ok((program.to_string(), done))
+}
+
+/// How many processes the machine runs at once.
+pub(crate) fn cpu_count() -> i64 {
+    std::thread::available_parallelism().map_or(1, |n| n.get() as i64)
 }
 
 /// The next line of standard input without its line ending, or `none` at

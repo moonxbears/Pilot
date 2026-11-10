@@ -1,6 +1,6 @@
-// A method an interface gives a body to (Tier 3/4 of the method table) is
-// a method of every struct that implements the interface and does not
-// declare it. The seed does not give the struct those methods.
+// A method an interface gives a body to (tiers 3 and 4 of the method table)
+// is a method of every struct that implements the interface and does not
+// declare it; inside it, `self` is the struct's value.
 interface ISized {
     fn size() -> i64;
     fn empty() -> bool => .size() == 0;

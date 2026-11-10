@@ -229,6 +229,20 @@ pub fn truth(v: PilotVal) -> Result<bool, String> {
 /// type: `class` is the descriptor's register class and `width` its bit
 /// width. Floats go to integers by truncation toward zero; integers wrap to
 /// `width` bits; a 1-bit layout is a boolean.
+/// Whether `v` already is a value of a type laid out in `class` registers of
+/// `width` bits: a bool for one bit, a float for a float class, an integer
+/// for an integer class.
+pub fn fits(v: PilotVal, class: &str, width: i64) -> bool {
+    if width == 1 {
+        return v.as_bool().is_some();
+    }
+    match class {
+        "simd_float" => v.as_float().is_some(),
+        "gpr_signed" | "gpr_unsigned" => v.as_int().is_some(),
+        _ => false,
+    }
+}
+
 pub fn convert(v: PilotVal, class: &str, width: i64) -> Result<PilotVal, String> {
     let is_int_class = matches!(class, "gpr_signed" | "gpr_unsigned");
     // A heap handle (record, list, function) in a pointer-width integer

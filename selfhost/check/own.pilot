@@ -92,14 +92,24 @@ fn mv_is_move_position(f: Flow, n: i64) -> bool {
     let up = p.parents[n];
     if up < 0 { return false; }
     let k = kind(s, up);
+    if k == nk_assign() && rhs(s, up) == n {
+        // Storing into a `ref` field borrows the value.
+        let target = lhs(s, up);
+        if target >= 0 && kind(s, target) == nk_member() {
+            return !mv_is_ref_field(f, type_of(f.inf, lhs(s, target)), sym_text(s, rhs(s, target)));
+        }
+        return true;
+    }
     if (k == nk_let() || k == nk_var() || k == nk_const() || k == nk_assign()) { return rhs(s, up) == n; }
     if k == nk_return() { return lhs(s, up) == n; }
     if k == nk_list() { return true; }
     if k == nk_map() {
+        // A struct literal's value for a `ref` field is borrowed, not moved.
+        let built = if p.parents[up] >= 0 { type_of(f.inf, p.parents[up]) } else { ty_unknown() };
         let ch = children(s, up);
         var i = 1;
         while i < ch.len() {
-            if ch[i] == n { return true; }
+            if ch[i] == n { return !mv_is_ref_field(f, built, node_name(s, ch[i - 1])); }
             i = i + 2;
         }
         return false;
@@ -125,6 +135,15 @@ fn mv_is_move_position(f: Flow, n: i64) -> bool {
             if ch[i] == n { return i - 1 < params.len() && mv_plain_param(s, params[i - 1]); }
             i = i + 1;
         }
+    }
+    return false;
+}
+
+/// Whether `field` of type `t` is declared `ref` (it borrows what it holds).
+fn mv_is_ref_field(f: Flow, t: i64, field: str) -> bool {
+    if some m = prog_member(f.inf.p, t, field) {
+        let s = f.inf.p.s;
+        return kind(s, m.decl) == nk_param() && flags(s, m.decl) != 0;
     }
     return false;
 }

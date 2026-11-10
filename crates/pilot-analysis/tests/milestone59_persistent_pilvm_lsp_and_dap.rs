@@ -313,7 +313,15 @@ fn parse_content_length_frames(stream: &str) -> Vec<String> {
     out
 }
 
-fn run_lsp_handler_query(target_doc: &str, handlers_src: &str, method: &str, offset: usize) -> String {
+/// A document linked with the LSP handlers and analyzed once; each query
+/// runs the handlers against its own copy of the analysis.
+struct LspSession {
+    arena: pilot_ast::AstArena,
+    analysis: PhysicsRegistry,
+    combined: String,
+}
+
+fn open_lsp_session(target_doc: &str, handlers_src: &str) -> LspSession {
     let combined = format!("{}\n{}", target_doc, handlers_src);
     let arena = parse(&combined);
     assert!(
@@ -321,9 +329,13 @@ fn run_lsp_handler_query(target_doc: &str, handlers_src: &str, method: &str, off
         "LSP combined parse diagnostics: {:?}",
         arena.diagnostics
     );
-    let analysis = AnalysisPipeline::analyze(&arena, arena.root);
-    let mut registry = analysis.physics;
-    registry.source_text = combined.clone();
+    let analysis = AnalysisPipeline::analyze(&arena, arena.root).physics;
+    LspSession { arena, analysis, combined }
+}
+
+fn run_lsp_handler_query(session: &LspSession, method: &str, offset: usize) -> String {
+    let mut registry = session.analysis.clone();
+    registry.source_text = session.combined.clone();
     registry.lsp_method = method.to_string();
     registry.lsp_offset = offset as u32;
 
@@ -333,7 +345,7 @@ fn run_lsp_handler_query(target_doc: &str, handlers_src: &str, method: &str, off
         let reg = unsafe { &mut *reg_ptr };
         handle_engine_intrinsic(reg, name, args)
     }));
-    let bin = BytecodeCompiler::compile(&arena, arena.root);
+    let bin = BytecodeCompiler::compile(&session.arena, session.arena.root);
     vm.load_binary(bin);
     let _ = vm.run();
     registry.lsp_result
@@ -464,9 +476,11 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
          }}\n"
     );
 
+    let lsp = open_lsp_session(&target_doc, &handlers_src);
+
     // 2a. Hover on `main_fn`
     let hover_off = target_doc.find(&format!("pub fn {}", main_fn)).unwrap() + 8;
-    let hover_res = run_lsp_handler_query(&target_doc, &handlers_src, "textDocument/hover", hover_off);
+    let hover_res = run_lsp_handler_query(&lsp, "textDocument/hover", hover_off);
     assert!(
         hover_res.contains(&main_fn) && hover_res.contains(&doc_line),
         "Hover must include function signature and doc comment, got:\n{}",
@@ -475,7 +489,7 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
 
     // 2b. Dot-completion on `sensor.` inside `main_fn`
     let dot_off = target_doc.find(&format!("let c = sensor.{}", pub_field)).unwrap() + "let c = sensor.".len();
-    let comp_res = run_lsp_handler_query(&target_doc, &handlers_src, "textDocument/completion", dot_off);
+    let comp_res = run_lsp_handler_query(&lsp, "textDocument/completion", dot_off);
     assert!(
         comp_res.contains(&pub_field) && comp_res.contains(&pub_method),
         "Dot-completion on struct receiver must include pub field '{}' and pub method '{}', got:\n{}",
@@ -494,7 +508,7 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
     let decl_pos = target_doc.find(&format!("pub fn {}", helper_fn)).unwrap();
     let decl_ident_start = decl_pos + "pub fn ".len();
     let call_pos = target_doc.find(&format!("{}(b + c)", helper_fn)).unwrap() + 2;
-    let def_res = run_lsp_handler_query(&target_doc, &handlers_src, "textDocument/definition", call_pos);
+    let def_res = run_lsp_handler_query(&lsp, "textDocument/definition", call_pos);
     assert!(
         def_res.contains(&decl_ident_start.to_string()) || def_res.contains(&decl_pos.to_string()),
         "Definition result must reference declaration span ({} / {}), got:\n{}",
@@ -504,7 +518,7 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
     );
 
     // 2d. References on `helper_fn` must find exact 4 occurrences (1 decl + 3 calls) and exclude `decoy_fn`
-    let refs_res = run_lsp_handler_query(&target_doc, &handlers_src, "textDocument/references", call_pos);
+    let refs_res = run_lsp_handler_query(&lsp, "textDocument/references", call_pos);
     assert_valid_json_via_python(&refs_res, "textDocument/references");
     let decoy_pos = target_doc.find(&decoy_fn).unwrap();
     assert_eq!(
@@ -523,11 +537,11 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
 
     // 2e. prepareRename & rename guard on seed keywords vs user symbol
     let seed_fn_off = target_doc.find("fn ").unwrap() + 1;
-    let prep_seed = run_lsp_handler_query(&target_doc, &handlers_src, "textDocument/prepareRename", seed_fn_off);
+    let prep_seed = run_lsp_handler_query(&lsp, "textDocument/prepareRename", seed_fn_off);
     assert_eq!(prep_seed, "null", "prepareRename must reject seed keyword 'fn'");
-    let ren_seed = run_lsp_handler_query(&target_doc, &handlers_src, "textDocument/rename:struct", call_pos);
+    let ren_seed = run_lsp_handler_query(&lsp, "textDocument/rename:struct", call_pos);
     assert_eq!(ren_seed, "null", "rename must reject renaming to seed keyword 'struct'");
-    let prep_user = run_lsp_handler_query(&target_doc, &handlers_src, "textDocument/prepareRename", call_pos);
+    let prep_user = run_lsp_handler_query(&lsp, "textDocument/prepareRename", call_pos);
     assert!(
         prep_user.contains(&helper_fn) && prep_user != "null",
         "prepareRename must accept valid user identifier '{}', got: {}",

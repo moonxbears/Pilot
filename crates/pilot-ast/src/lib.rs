@@ -243,8 +243,13 @@ pub struct AstArena {
     pub splice_mods: Vec<(NodeId, u8, SymbolId, SymbolId)>,
     /// Fields written with an accessor block (`count: usize { get; }`):
     /// `(field ParamDecl, BlockExpr of the accessor bodies)`. The block has
-    /// no items when no accessor has a body.
+    /// no items when no accessor has a body. The getter bodies come first;
+    /// the block's `flags` holds how many there are.
     pub property_accessors: Vec<(NodeId, NodeId)>,
+    /// Setter bodies of accessor blocks: `(body, parameter ParamDecl or
+    /// NONE, guard expression or NONE)`. A setter written without a
+    /// parameter list takes the bound setter-value name.
+    pub property_setters: Vec<(NodeId, NodeId, NodeId)>,
     pub for_clauses: Vec<(NodeId, NodeId)>,
     /// `case p if cond:` guards; `MatchArm.flags` holds the index + 1.
     pub arm_guards: Vec<NodeId>,
@@ -283,6 +288,7 @@ impl AstArena {
             decl_flags: Vec::with_capacity(expected), type_annots: Vec::with_capacity(expected),
             extra_children: Vec::with_capacity(expected),
             attrs: Vec::new(), base_types: Vec::new(), type_params: Vec::new(), type_param_bounds: Vec::new(), splice_mods: Vec::new(), property_accessors: Vec::new(),
+            property_setters: Vec::new(),
             for_clauses: Vec::new(), arm_guards: Vec::new(), field_defaults: Vec::new(), diagnostics: Vec::new(),
             i64_pool: Vec::with_capacity(expected / 4), f64_pool: Vec::with_capacity(expected / 8),
             interner: Interner::with_capacity(expected / 2, expected * 8), root: NodeId::NONE,

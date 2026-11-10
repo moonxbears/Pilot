@@ -1,0 +1,16 @@
+// When no setter's guard holds, the assignment stops the program with an
+// error naming the property; the value is never stored silently or dropped.
+struct Meter {
+    pub reading: i64 {
+        get => field;
+        set if value >= 0 => { field = value; }
+    }
+}
+
+fn main() {
+    var m = Meter { reading: 0 };
+    m.reading = 3;
+    print(m.reading);
+    m.reading = -1;
+    print(m.reading);
+}

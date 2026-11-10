@@ -238,12 +238,14 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
         "run must pass the tokens after -- to the script, stderr: {err_run}"
     );
 
-    // 4. Verify gate command parses --full and --json: a JSON report that
-    //    includes the gates only --full runs.
-    let (out_gate, err_gate, code_gate) = pilot_cli("gate --full --json");
-    assert_eq!(code_gate, 0, "gate --full --json failed: {err_gate}");
+    // 4. Verify gate command parses --full, --json and --only together: a
+    //    JSON report of the one gate named, here one that only --full runs.
+    //    (What --full runs as a whole is checked by test_m1_4.)
+    let (out_gate, err_gate, code_gate) = pilot_cli("gate --full --json --only bootstrap_parity");
+    assert_eq!(code_gate, 0, "gate --full --json --only failed: {err_gate}");
     assert!(out_gate.trim_start().starts_with('{'), "--json must print JSON, got: {out_gate}");
-    assert!(out_gate.contains("\"id\":\"rename_litmus\""), "--full must run the rename litmus, got: {out_gate}");
+    assert!(out_gate.contains("\"gate_count\":1"), "--only must run one gate, got: {out_gate}");
+    assert!(out_gate.contains("\"id\":\"bootstrap_parity\""), "--only must name the gate, got: {out_gate}");
 
     // 5. Verify backward-compatible resolve_cli_subcommand API
     let root = anticheat::workspace_root();

@@ -185,9 +185,8 @@ fn scale(x: i64) -> i64 {
 /// Method tables built from spliced facets (selfhost/check/methods.pilot):
 /// a clash settled by `without` or `with .. as`, and struct methods that
 /// override facet methods, are accepted, and a spliced method has its
-/// facet's type. The seed does not run spliced methods and rejects a call
-/// to an aliased name before the checker runs (known bug
-/// `seed.bundle_splice_methods`), so no aliased name is called here.
+/// facet's type. tests/conformance/spliced_methods.pilot runs the same
+/// tables.
 #[test]
 fn spliced_facets_settled_by_modifiers_type_check() {
     let src = "\
@@ -213,13 +212,15 @@ struct Announcer {
 fn read(s: Speaker, a: Announcer) -> str {
     let v: i64 = a.volume();
     let w: i64 = s.speak();
-    return s.speak() + a.speak() + f\"{v}{w}\";
+    let u: str = s.loud_volume();
+    return s.speak() + a.speak() + f\"{v}{w}{u}\";
 }
 ";
     let got = reported("spliced_facets", src);
-    // Only line 22 is wrong: the `speak` Speaker keeps gives a `str`.
-    // Nothing is reported for the clashes the modifiers and overrides settle.
-    assert_eq!(got, vec![at("TYPE001", "22:18")]);
+    // Line 22: the `speak` Speaker keeps gives a `str`. Line 23:
+    // `loud_volume` is LoudFacet's `volume`, an `i64`. Nothing is reported
+    // for the clashes the modifiers and overrides settle.
+    assert_eq!(got, vec![at("TYPE001", "22:18"), at("TYPE001", "23:18")]);
 }
 
 /// OWN001 follows moves through branches, loops and calls: a value moved

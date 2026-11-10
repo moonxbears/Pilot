@@ -129,10 +129,14 @@ impl BytecodeCompiler {
         // token and receptors such as `nameof` are syntax and always win.
         let syntax =
             name == crate::ENGINE_TOKEN || pilot_parser::bootstrap_tables().quotes_symbol(name);
+        // A struct with no stored fields and no constructor (a `[Lang]` type
+        // the engine lays out, like the list) is built by the engine's
+        // function of that name when there is one.
+        let builds_records = self.structs.get(name).is_some_and(|s| !s.fields.is_empty() || s.ctor.is_some());
         let declared = self.fn_entries.contains_key(name)
             || self.known_fns.contains_key(name)
             || self.lazy_decls.contains_key(name)
-            || self.structs.contains_key(name)
+            || builds_records
             || self.var_slots.contains_key(name);
         if syntax || !declared {
             if let Some(r) = self.compile_native_call(arena, name, args) {

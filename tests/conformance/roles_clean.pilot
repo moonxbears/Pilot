@@ -2,9 +2,8 @@
 // provide everything it requires: an owned stack (IBuffer, so 0b10), a
 // cursor over it (ICursor, 0b01) that `for` walks, and a fixed-size inline
 // pair (IInlineList, 0b00). `count` and `current` are stored fields, which
-// meet the `{ get; }` requirements. The index operators are declared to
-// meet the contracts but not called: the seed does not dispatch them yet
-// (known bug `seed.index_operators`).
+// meet the `{ get; }` requirements. `s[i]` and `q[i]` run the index
+// operators each type declares.
 struct Stack : IBuffer<i64>, IEnumerable<i64, StackCursor> {
     pub items: List<i64>;
     pub count: usize;
@@ -88,4 +87,14 @@ fn main() {
     let p = Pair { a: 1, b: 7, count: 2 };
     print(p.contains(7));
     print(p.contains(3));
+
+    // [6, 8], then [2, 8]: 2 + 8.
+    s.add(6);
+    s.add(8);
+    s[0] = 2;
+    print(s[0] + s[1]);
+    // (4, 7): 4 * 7.
+    var q = Pair { a: 1, b: 7, count: 2 };
+    q[0] = 4;
+    print(q[0] * q[1]);
 }

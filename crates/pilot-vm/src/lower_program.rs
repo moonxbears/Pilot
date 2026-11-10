@@ -23,9 +23,26 @@ use pilot_ast::{AstArena, NodeId, NodeKind};
 /// A declaration of an imported unit, compiled when first called.
 #[derive(Clone)]
 pub(crate) struct LazyDecl {
+    /// The function or method declaration, or an accessor's body.
     pub(crate) node: NodeId,
     /// The struct or `ext` type of a method.
     pub(crate) owner: Option<String>,
+    pub(crate) kind: LazyKind,
+    /// Given to the owner by a splice or an interface rather than declared
+    /// by it; a method the owner declares replaces it.
+    pub(crate) inherited: bool,
+}
+
+/// What a lazily compiled declaration lowers to.
+#[derive(Clone)]
+pub(crate) enum LazyKind {
+    /// A function or method; `alias` is the name a splice exposes it under.
+    Method { alias: Option<String> },
+    /// The getter of property `field`.
+    Getter { field: String },
+    /// The setters of property `field`: its setter bodies in declaration
+    /// order, tried in that order.
+    Setter { field: String, bodies: Vec<NodeId> },
 }
 
 impl BytecodeCompiler {
@@ -56,6 +73,7 @@ impl BytecodeCompiler {
         let Some((entry_items, imported)) = units.split_last() else {
             return self.emit_null();
         };
+        self.index_declarations(arena, units);
         // The entry unit registers first, so its names win over imported ones.
         self.register_items(arena, entry_items);
         for items in imported {
@@ -172,7 +190,8 @@ impl BytecodeCompiler {
             match cn.node_kind() {
                 NodeKind::FnDecl => {
                     let name = Self::name(arena, cn.lhs).to_string();
-                    self.lazy_decls.entry(name).or_insert(LazyDecl { node: id, owner: None });
+                    let decl = LazyDecl { node: id, owner: None, kind: LazyKind::Method { alias: None }, inherited: false };
+                    self.lazy_decls.entry(name).or_insert(decl);
                 }
                 NodeKind::StructDecl | NodeKind::ExtendDecl if cn.rhs != 0 && cn.rhs != u32::MAX => {
                     let owner = Self::name(arena, cn.lhs).to_string();
@@ -181,7 +200,13 @@ impl BytecodeCompiler {
                             continue;
                         }
                         let key = format!("{owner}.{}", Self::name(arena, arena.node(m).lhs));
-                        self.lazy_decls.entry(key).or_insert(LazyDecl { node: m, owner: Some(owner.clone()) });
+                        let decl = LazyDecl {
+                            node: m,
+                            owner: Some(owner.clone()),
+                            kind: LazyKind::Method { alias: None },
+                            inherited: false,
+                        };
+                        self.lazy_decls.entry(key).or_insert(decl);
                     }
                 }
                 _ => {}
@@ -202,7 +227,13 @@ impl BytecodeCompiler {
         let saved_span = self.cur_span;
         let skip = self.emit_jump(0);
         let mut no_entry = None;
-        self.compile_fn_decl(arena, decl.node, decl.owner.as_deref(), &mut no_entry);
+        match (&decl.kind, decl.owner.as_deref()) {
+            (LazyKind::Method { alias }, owner) => {
+                self.compile_fn_decl_as(arena, decl.node, owner, alias.as_deref(), &mut no_entry)
+            }
+            (kind, Some(owner)) => self.compile_accessor(arena, name, decl.node, owner, kind),
+            (_, None) => {}
+        }
         self.patch_to_here(skip);
         self.restore_fn_state(saved);
         self.cur_span = saved_span;

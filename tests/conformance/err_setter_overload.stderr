@@ -1,0 +1,2 @@
+error[SEED001]: the setters of `Label.text` overload on `str`, which the seed cannot tell apart at run time yet
+err_setter_overload.pilot:7:13

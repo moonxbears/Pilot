@@ -1,0 +1,16 @@
+// A `ref` field borrows what it holds: building the struct from a local
+// does not move the local, so both stay usable.
+struct Owned : IObject { pub id: i64; }
+struct Walker : IReference {
+    pub ref items: List<i64>;
+    pub ref target: Owned;
+    pub index: usize;
+}
+fn main() {
+    let o = Owned { id: 3 };
+    let xs: List<i64> = [1, 2];
+    let w = Walker { items: xs, target: o, index: 0 };
+    print(w.items.len());
+    print(o.id + w.target.id);
+    print(xs.len());
+}

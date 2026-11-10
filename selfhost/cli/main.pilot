@@ -67,6 +67,14 @@ pub fn default_command_registry() -> CommandRegistry {
     spec_command_add_flag(cmd_test, spec_new_flag("filter", "", 3, "", "", "", false, false, "Filter test cases by name substring"));
     let _ = spec_registry_register(reg, cmd_test);
 
+    let cmd_bench = spec_new_command(
+        "bench", "", "Analysis & Quality",
+        "Show the milestone tests' average, fastest, slowest and latest times",
+        "pilot bench --filter test_59"
+    );
+    spec_command_add_flag(cmd_bench, spec_new_flag("filter", "", 3, "", "", "", false, false, "Show only tests whose name contains this text"));
+    let _ = spec_registry_register(reg, cmd_bench);
+
     let cmd_gate = spec_new_command(
         "gate", "", "Analysis & Quality",
         "Run pure-Pilot architectural & bootstrap gates",

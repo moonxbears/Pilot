@@ -1,0 +1,2 @@
+error[COMP005]: Declared Lattice Contract Violated: Struct 'Window' is declared ': IValue' (0b00), but spliced fields introduce lattice bits 0b01
+err_ref_field_lattice.pilot:3:1

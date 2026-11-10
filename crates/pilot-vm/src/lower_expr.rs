@@ -137,6 +137,9 @@ impl BytecodeCompiler {
 
     fn compile_ident(&mut self, arena: &AstArena, sym: u32) -> u8 {
         let name = Self::name(arena, sym);
+        if let Some(r) = self.compile_backing_read(name) {
+            return r;
+        }
         if let Some(&r) = self.var_slots.get(name) {
             return r;
         }
@@ -183,11 +186,12 @@ impl BytecodeCompiler {
             self.release_to(mark);
             return dst;
         }
+        let ty = self.static_type(arena, NodeId(node.lhs));
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_obj = self.compile_node(arena, NodeId(node.lhs));
         // Positional fields (`tuple.0`) index the underlying sequence.
-        let r = self.emit_field_read(r_obj, &field);
+        let r = self.emit_member_read(r_obj, ty.as_deref(), &field);
         self.emit(Opcode::Move, dst, r, 0);
         self.release_to(mark);
         dst
@@ -225,9 +229,10 @@ impl BytecodeCompiler {
             }
             return self.emit_intrinsic("str_slice", &[r_obj, r_a, r_b]);
         }
+        let ty = self.static_type(arena, NodeId(lhs));
         let r_obj = self.compile_node(arena, NodeId(lhs));
         let r_key = self.compile_node(arena, NodeId(rhs));
-        self.emit_intrinsic("map_get", &[r_obj, r_key])
+        self.emit_index_read(r_obj, ty.as_deref(), r_key)
     }
 
     fn compile_binary(&mut self, arena: &AstArena, flags: u16, lhs: u32, rhs: u32) -> u8 {

@@ -38,5 +38,27 @@ pub fn run_in(dir: str, program: str, args: List<str>, input: str) -> ProcessOut
     return ProcessOutput { exit_code: out[0], stdout: out[1], stderr: out[2] };
 }
 
+/// A child process started with `spawn`, running until `wait` collects it.
+pub struct ProcessHandle : IObject {
+    pub id: i64;
+
+    /// Waits for the process to finish and returns what it left. Each
+    /// handle is waited for once.
+    pub fn wait() -> ProcessOutput {
+        let out = __engine("proc_wait", .id);
+        return ProcessOutput { exit_code: out[0], stdout: out[1], stderr: out[2] };
+    }
+}
+
+/// Starts `program` with `args`, writing `input` to its standard input, and
+/// returns at once; several can run at the same time. A program that cannot
+/// be started stops the caller with an intrinsic failure.
+pub fn spawn(program: str, args: List<str>, input: str) -> ProcessHandle {
+    return ProcessHandle { id: __engine("proc_spawn", program, args, input) };
+}
+
+/// How many processes the machine runs at once (its logical CPUs).
+pub fn cpu_count() -> i64 => __engine("proc_cpus");
+
 /// The path of the running executable, or `none` when the OS does not say.
 pub fn current_exe() -> str? => __engine("proc_exe");

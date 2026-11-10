@@ -167,7 +167,7 @@ impl BytecodeCompiler {
         let mark = self.next_reg;
         let r_more = self.emit_method_call(arena, r_enum, "", &p.move_next, &[]);
         exits.push(self.emit_branch(Opcode::JumpIfFalse, r_more, 0));
-        let r_cur = self.emit_field_read(r_enum, &p.current);
+        let r_cur = self.emit_member_read(r_enum, None, &p.current);
         self.emit(Opcode::Move, slot, r_cur, 0);
         self.release_to(mark);
     }

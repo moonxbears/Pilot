@@ -230,13 +230,28 @@ impl PilVirtualMachine {
             "stdin_read_line" => Ok(crate::host::stdin_read_line()),
             "stdin_read_all" => Ok(crate::host::stdin_read_all()),
             "proc_exe" => Ok(crate::host::proc_exe()),
-            "proc_run" => {
+            "proc_run" | "proc_spawn" => {
                 let program = str_arg(args, 0, op)?;
                 let argv = self.str_list(arg(args, 1, op)?, op)?;
-                let input = args.get(2).and_then(|v| v.with_str(str::to_string));
+                let input = args.get(2).and_then(|v| v.with_str(str::to_string)).unwrap_or_default();
                 let dir = args.get(3).and_then(|v| v.with_str(str::to_string));
-                self.proc_run(&program, &argv, input.as_deref(), dir.as_deref())
+                let child = crate::host::spawn(&program, &argv, input, dir.as_deref())?;
+                if op == "proc_run" {
+                    return self.finish_child(child);
+                }
+                self.children.push(Some(child));
+                Ok(PilotVal::from_int(self.children.len() as i64 - 1))
             }
+            "proc_wait" => {
+                let handle = int_arg(args, 0, op)?;
+                let child = usize::try_from(handle)
+                    .ok()
+                    .and_then(|h| self.children.get_mut(h))
+                    .and_then(Option::take)
+                    .ok_or_else(|| format!("`proc_wait`: no running child process {handle}"))?;
+                self.finish_child(child)
+            }
+            "proc_cpus" => Ok(PilotVal::from_int(crate::host::cpu_count())),
             // `field_or_native(obj, key, intrinsic)`: the record's field
             // `key` if it has one, else `intrinsic(obj)` (a native property).
             "field_or_native" => {
@@ -380,6 +395,12 @@ impl PilVirtualMachine {
                 let v = arg(args, 1, op)?;
                 self.globals.insert(str_arg(args, 0, op)?, v);
                 Ok(v)
+            }
+            // `num_fits(v, register_class, width)`: see `ops::fits`.
+            "num_fits" => {
+                let class = str_arg(args, 1, op)?;
+                let fits = crate::ops::fits(arg(args, 0, op)?, &class, int_arg(args, 2, op)?);
+                Ok(PilotVal::from_bool(fits))
             }
             // `num_convert(v, register_class, width)`: see `ops::convert`.
             "num_convert" => {

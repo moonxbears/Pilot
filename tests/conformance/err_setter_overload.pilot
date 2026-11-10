@@ -1,0 +1,16 @@
+// Setters that overload on a type the seed cannot tell apart at run time (a
+// struct the engine lays out, with no register layout and no stored fields)
+// stop the build with SEED001 at the parameter, never pick one at random.
+struct Label {
+    pub text: str {
+        get => field;
+        set(s: str) => { field = s; }
+        set(n: i64) => { field = f"{n}"; }
+    }
+}
+
+fn main() {
+    var l = Label { text: "" };
+    l.text = "hi";
+    print(l.text);
+}

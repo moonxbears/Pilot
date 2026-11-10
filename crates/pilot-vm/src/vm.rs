@@ -71,6 +71,9 @@ pub struct PilVirtualMachine {
     pub fault: Option<VmFault>,
     /// The arguments after `--` on the command line (`proc_args()`).
     pub script_args: Vec<String>,
+    /// Child processes started with `proc_spawn`, by handle; `None` once
+    /// waited for.
+    pub children: Vec<Option<crate::host::Child>>,
 }
 
 impl Default for PilVirtualMachine {
@@ -101,6 +104,7 @@ impl PilVirtualMachine {
             engine_handler: None,
             host_ops: None,
             script_args: Vec::new(),
+            children: Vec::new(),
             shared_symbols: None,
             fuel_limit: None,
             fuel_used: 0,

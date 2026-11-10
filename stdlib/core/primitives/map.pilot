@@ -49,10 +49,8 @@ pub partial struct map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryVie
 
     pub pure op [] (key: TKey) -> TVal {
         let idx = .find_index(key);
-        if idx >= 0 {
-            return .vals[idx as usize];
-        }
-        panic("Key not found in map projection");
+        assert(idx >= 0, "map: key not found");
+        return .vals[idx as usize];
     }
 }
 
@@ -115,8 +113,8 @@ pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDiction
 
     pub pure op [] (key: TKey) -> TVal {
         let idx = .find_index(key);
-        if idx >= 0 { return .vals[idx as usize]; }
-        panic("Key not found in map buffer");
+        assert(idx >= 0, "MapBuffer: key not found");
+        return .vals[idx as usize];
     }
 
     pub op []= (key: TKey, val: TVal) {

@@ -330,7 +330,6 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     );
     let root = workspace_root();
     let bundle = load_gate_bundle(&root);
-    let root_esc = escape_pilot_str(root.to_str().unwrap());
 
     // 1. The renamer: whole identifiers only, never inside comments, string
     //    or char literals, never a longer identifier. Expected text is
@@ -384,31 +383,47 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
         "seeded rename output: {first}"
     );
 
-    // 3. The gate builds the renamed sandbox (stdlib, selfhost and the
-    //    corpus) and runs `pilot test` in it with the real binary. Every
-    //    program keeps its result, in both passes.
+    // 3. `pilot gate --full`: the source gates and the rename litmus pass;
+    //    the bootstrap parity gate cannot run its check yet and reports the
+    //    seam it stops at. The litmus builds the renamed sandbox (stdlib,
+    //    selfhost and the corpus) and runs `pilot test` in it with the real
+    //    binary. Every program keeps its result, in both passes. (This is the
+    //    suite's one full gate run; test_m1_4 checks the text report.)
     let bin = ensure_pilot_cli_bin(&root);
     let child = Command::new(&bin)
-        .args(["gate", "--only", "rename_litmus", "--seed", &seed.to_string(), "--json"])
+        .args(["gate", "--full", "--seed", &seed.to_string(), "--json"])
         .current_dir(&root)
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .expect("run pilot gate --only rename_litmus");
+        .expect("run pilot gate --full");
     // The sandbox is named after the gate process: /tmp/pilot_litmus_<pid>_<us>.
     let sandbox_prefix = format!("pilot_litmus_{}_", child.id());
     let out = child.wait_with_output().expect("wait for pilot gate");
     let res = String::from_utf8_lossy(&out.stdout).to_string();
+    let gate_entry = |id: &str| -> String {
+        let at = res.find(&format!("{{\"id\":\"{id}\"")).unwrap_or_else(|| panic!("no `{id}` gate in: {res}"));
+        res[at..].split('}').next().unwrap_or("").to_string()
+    };
+    let litmus = gate_entry("rename_litmus");
+    let parity = gate_entry("bootstrap_parity");
     assert!(
         out.status.success()
-            && res.contains("\"id\":\"rename_litmus\"")
-            && res.contains("\"passed\":true")
-            && res.contains("\"at_seams\":0")
-            && res.contains("\"total_violations\":0"),
+            && res.contains("\"gate_count\":5")
+            && res.contains("\"at_seams\":1")
+            && res.contains("\"total_violations\":0")
+            && litmus.contains("\"passed\":true,\"at_seam\":\"\""),
         "Rename litmus must pass for seed {}: {}",
         seed,
         res
     );
-    let scanned: usize = res
+    assert!(
+        parity.contains("\"at_seam\":\"bootstrap.stage_compile\""),
+        "bootstrap parity must stop at its seam: {parity}"
+    );
+    for id in ["adaptability", "hygiene", "seams"] {
+        assert!(gate_entry(id).contains("\"passed\":true"), "gate `{id}` must pass: {res}");
+    }
+    let scanned: usize = litmus
         .split("\"items_scanned\":")
         .nth(1)
         .and_then(|t| t.split(|c: char| !c.is_ascii_digit()).next())
@@ -507,20 +522,19 @@ pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status() {
         fast_json
     );
 
-    // 2. `pilot gate --full`: the three source gates and the rename litmus
-    //    pass; the bootstrap parity gate cannot run its check yet and reports
-    //    the seam it stops at. Exit 0: no gate failed.
+    // 2. The text report of a gate stopped at a seam, on the gate only
+    //    `--full` runs. Exit 0: no gate failed. (The whole `--full` run, with
+    //    the rename litmus, is test_m1_3's.)
     let full_out = Command::new(&bin)
-        .args(["gate", "--full", "--seed", "77777"])
+        .args(["gate", "--full", "--only", "bootstrap_parity"])
         .current_dir(&root)
         .output()
-        .expect("run pilot gate --full");
+        .expect("run pilot gate --full --only bootstrap_parity");
     let full_txt = String::from_utf8(full_out.stdout).unwrap();
     assert!(full_out.status.success(), "pilot gate --full failed:\n{}", full_txt);
     for line in [
-        "[PASS] rename_litmus (Adaptability",
         "[SEAM] bootstrap_parity (BootstrapParity) stops at seam `bootstrap.stage_compile`",
-        "RESULT: 4 GATE(S) PASSED, 1 AT SEAMS (0 violations)",
+        "RESULT: 0 GATE(S) PASSED, 1 AT SEAMS (0 violations)",
     ] {
         assert!(full_txt.contains(line), "Expected `{}` in --full output:\n{}", line, full_txt);
     }

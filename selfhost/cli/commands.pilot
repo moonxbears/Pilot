@@ -17,6 +17,7 @@ use Pilot.SelfHost.Cli.Help;
 use Pilot.SelfHost.Cli.Host;
 use Pilot.SelfHost.Cli.Report;
 use Pilot.SelfHost.Cli.TestCmd;
+use Pilot.SelfHost.Cli.BenchCmd;
 
 /// Exit code for a command used wrongly.
 pub pure fn cli_exit_usage() -> i64 => 2;
@@ -184,6 +185,11 @@ pub fn cmd_test(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     return test_command(cli_positionals(p), parsed_get_str(p, "filter", ""));
 }
 
+/// `pilot bench [dir] [--filter text]`: the milestone tests' run times.
+pub fn cmd_bench(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    return bench_command(cli_positionals(p), parsed_get_str(p, "filter", ""));
+}
+
 /// `pilot gate [...]`: runs the architectural gates.
 pub fn cmd_gate(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     var gate_args = "";
@@ -231,6 +237,7 @@ pub fn cli_handlers() -> i64 {
     let _ = cli_map_set(h, "run", cmd_run);
     let _ = cli_map_set(h, "check", cmd_check);
     let _ = cli_map_set(h, "test", cmd_test);
+    let _ = cli_map_set(h, "bench", cmd_bench);
     let _ = cli_map_set(h, "gate", cmd_gate);
     let _ = cli_map_set(h, "emit", cmd_emit);
     return h;

@@ -200,7 +200,18 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
     __engine(Cfg.ast.ast_bind_layout, s_id, agg_lid);
     return agg_lid;
 }
+// The layout each literal kind resolved to, by kind (-1: not resolved yet).
+// Every literal of a kind gets the layout the first one got (step 3 below),
+// so the scans run once per kind instead of once per literal.
+var lit_layout_memo = [-1, -1, -1, -1, -1, -1, -1, -1];
 pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
+    let memo = lit_kind >= 0 && lit_kind < lit_layout_memo.len();
+    if memo && lit_layout_memo[lit_kind] != -1 { return lit_layout_memo[lit_kind]; }
+    let lid = scan_lit_layout(lit_kind, node_count);
+    if memo { lit_layout_memo[lit_kind] = lid; }
+    return lid;
+}
+pub fn scan_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
     // 1. Check for StructDecl with matching 1-arg attribute (e.g. [DefaultLit(1)])
     var j = 0;
     while j < node_count {
@@ -825,7 +836,10 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
                 let icc = __engine(Cfg.ast.ast_child_count, iface_nid); var mi = 0;
                 while mi < icc {
                     let mn = __engine(Cfg.ast.ast_child_at, iface_nid, mi);
-                    if __engine(Cfg.ast.ast_node_kind, mn) == 3 {
+                    // A method the interface gives a body to needs none from the struct.
+                    let ibody = if __engine(Cfg.ast.ast_child_count, mn) > 0 { __engine(Cfg.ast.ast_child_at, mn, 0) } else { -1 };
+                    let has_default = ibody >= 0 && ibody < node_count;
+                    if __engine(Cfg.ast.ast_node_kind, mn) == 3 && !has_default {
                         let msym = __engine(Cfg.ast.ast_node_sym, mn);
                         let scc = __engine(Cfg.ast.ast_child_count, i);
                         var s_has = false; var si = 0;

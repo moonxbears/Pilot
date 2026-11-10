@@ -1,6 +1,5 @@
 // A struct that declares `op []` and `op []=` is indexed through them
-// (IIndexGet / IIndexSet). The seed indexes the record as if it were a map
-// and never calls the operators.
+// (IIndexGet / IIndexSet).
 struct Pair {
     pub a: i64;
     pub b: i64;
