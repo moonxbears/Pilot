@@ -657,4 +657,3 @@ pub pure fn seed_contraction_paused() -> bool => true;
 pub pure fn paused_max_total_rust_loc() -> usize => 30000;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
-pub pure fn bootstrap_budget_us() -> u64 => 5000000;

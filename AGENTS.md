@@ -1,6 +1,6 @@
 # AGENTS.md — Pilot Language AI Coding & Architecture Guidelines
 
-> **Master Companion References:** Always consult [`VISION.md`](file:///home/moony/Documents/dev/projects/Pilot/VISION.md) (North Star philosophy, syntax pairings, Universal Foreign Adapter, `.pchor`, and toolchain design), [`MILESTONES_100.md`](file:///home/moony/Documents/dev/projects/Pilot/MILESTONES_100.md) (`M1` $\rightarrow$ `M50` Pilot 1.0 $\rightarrow$ `M100` Pilot 2.0 roadmap), and [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md) (type selection decision matrix based on projected values, cardinality, domain constraints, and 2-bit hardware lattice rules) when designing or constructing any implementation.
+> **Master Companion References:** Always consult [`VISION.md`](file:///home/moony/Documents/dev/projects/Pilot/VISION.md) (North Star philosophy, syntax pairings, Universal Foreign Adapter, `.pchor`, and toolchain design), [`MILESTONES_100.md`](file:///home/moony/Documents/dev/projects/Pilot/MILESTONES_100.md) (Phase F, then `M30`–`M50` Pilot 1.0 and `M51`–`M100` Pilot 2.0, reframed 2026-11-10 around adaptability, self-generation and run-time performance; see its Reframed Roadmap), and [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md) (type selection decision matrix based on projected values, cardinality, domain constraints, and 2-bit hardware lattice rules) when designing or constructing any implementation.
 
 ---
 
@@ -15,7 +15,7 @@
   - Keep every `.pilot` and `.rs` file focused on a single cohesive responsibility and strictly `<= 1,500` lines (`MOD001`). Split growing subsystems into clean sub-packages rather than monoliths.
 - **Pilot First & Active Rust Engine Contraction:**
   - Implement every feature in Pilot first (`stdlib/core/`, `stdlib/std/`, `stdlib/pilot/`, `selfhost/`). Only touch an underlying bootstrap language when strictly irreducible at the OS/hardware boundary—and even then, drive behavior declaratively from Pilot descriptors (e.g., `pilot.abi.*` `AbiFramePlan`).
-  - Treat `crates/pilot-*` as a **shrinking bootstrap seed** (unlocked in `M1` strictly for contraction toward a minimal C11 seed in `M38`–`M39` and a 100% pure-Pilot repository in `M89`). Never add user-facing CLI tools, linters, formatters, or domain semantics in Rust.
+  - Treat `crates/pilot-*` as a **shrinking bootstrap seed** (unlocked in `M1` strictly for contraction toward a minimal C11 seed in `M46` and a 100% pure-Pilot repository in `M95`). Never add user-facing CLI tools, linters, formatters, or domain semantics in Rust.
   - **Contraction is PAUSED until `F8` (decided 2026-11-09, see `MILESTONES_100.md` Phase F and `Audit.md`).** The seed must execute the whole language correctly before it can be replaced, so Phase F milestones `F1`–`F3` (and later the process/file intrinsics of `F6`) may **grow** `crates/pilot-*`. While paused:
     - Rust growth is limited to execution-engine correctness: the tagged value model, lowering of every AST node kind, operators, module linking, error surfacing and exit codes, and the small set of OS intrinsics Pilot cannot provide itself (stdin, process spawn, file write). The 14-seed-token rule, the zero-hardcoded-type-name rule, and the ban on user-facing tools or domain semantics in Rust still apply.
     - Write new Rust in normal `rustfmt` style. Do not pack code onto long lines to satisfy a line count.
@@ -200,7 +200,7 @@ Enables natural embedding and execution of Pilot generative code inside foreign 
 ## 9. Mandatory 3-Gate Milestone Verification Discipline
 No milestone (`M1`–`M100` in [`MILESTONES_100.md`](file:///home/moony/Documents/dev/projects/Pilot/MILESTONES_100.md)) is complete until all three automated gates pass (`pilot gate`):
 1. **Gate 1 — Adaptability & Hygiene:** `14` seed tokens respected, `0` hardcoded user-space names, all files `<= 1,500` LOC, `0` dead legacy shims/mocks, freestanding `core.*` (`RING001`), and Dual-Pass Universal Rename Litmus green.
-2. **Gate 2 — Bootstrap Parity & Compile Speed:** Deterministic Stage-2 == Stage-3 self-compilation fixed point (`pilotc`) + warm incremental `PilotDb` latency within budget.
+2. **Gate 2 — Bootstrap Parity:** Deterministic Stage-2 == Stage-3 self-compilation fixed point (`pilotc`). Compile speed is not gated: run-time performance matters, compile speed does not (decided 2026-11-10).
 3. **Gate 3 — Top-of-Chart Performance & Zero Leaks:** `0` unintended hot-path heap allocations, `0` Perceus/foreign handle leaks, and C/Rust-competitive runtime execution verified.
 
 ### 9.1 Definition of Done (what "start milestone X" asks for)
