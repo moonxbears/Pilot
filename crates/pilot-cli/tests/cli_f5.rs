@@ -100,8 +100,8 @@ fn malformed_ir_is_rejected_with_its_code() {
 
 #[test]
 fn an_unlowered_construct_stops_at_its_seam() {
-    // Float constants are not lowered yet.
-    let out = pilot(&["ir", "run", "tests/conformance/arith_float.pilot"]);
+    // Closures are not lowered yet.
+    let out = pilot(&["ir", "run", "tests/conformance/closures.pilot"]);
     let stderr = text(&out.stderr);
     assert_ne!(out.status.code(), Some(0), "{stderr}");
     assert!(stderr.contains("SEAM001") && stderr.contains("ir.lower_construct"), "{stderr}");

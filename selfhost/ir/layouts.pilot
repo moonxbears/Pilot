@@ -88,7 +88,43 @@ pub fn layout_of(ls: IrLayouts, t: i64) -> IrTypePhysics {
             }
         }
     }
+    if ty_is_named(p.tt, t) && is_tag_enum(p.s, ty_decl(p.tt, t)) {
+        // A payload-free enum is its tag: a value of the primitive it is
+        // declared over (`enum E : u8`), else of the integer literals' type.
+        let d = ty_decl(p.tt, t);
+        var tag = prog_slot_type(p, literal_slot(nk_int()));
+        for b in nl_get(p.bases, node_name(p.s, d)) { tag = prog_annot_type(p, b); }
+        let tp = layout_of(ls, tag);
+        return layout_add(ls, name, ir_physics_new(0, tp.reg_class, tp.bit_width, tp.align_pow2, lattice));
+    }
     return layout_add(ls, name, ir_physics_new(0, reg_class_aggregate(), 0, 0, lattice));
+}
+
+/// Whether declaration `d` is an enum whose variants carry no values.
+pub fn is_tag_enum(s: Snap, d: i64) -> bool {
+    if d < 0 || kind(s, d) != nk_adt() || flags(s, d) == 0 { return false; }
+    for v in children(s, d) {
+        if kind(s, v) != nk_variant() || flags(s, v) != 0 { return false; }
+    }
+    return true;
+}
+
+/// The tag of variant `name` of payload-free enum type `t`: its written
+/// value (`Low = 5`), else one more than the variant before it, from 0.
+pub fn variant_tag(p: Program, t: i64, name: str) -> i64? {
+    if !ty_is_named(p.tt, t) || !is_tag_enum(p.s, ty_decl(p.tt, t)) { return none; }
+    var next = 0;
+    for v in children(p.s, ty_decl(p.tt, t)) {
+        let written = field_default(p.s, v);
+        var value = next;
+        if written >= 0 {
+            guard some w = prog_const(p, written) else { return none; }
+            value = w;
+        }
+        if node_name(p.s, v) == name { return value; }
+        next = value + 1;
+    }
+    return none;
 }
 
 /// The physics of the unknown type.

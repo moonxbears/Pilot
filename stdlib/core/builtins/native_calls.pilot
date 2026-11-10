@@ -58,4 +58,25 @@ comptime {
 
     // Compile-time questions about a type argument.
     __engine("bind_type_query", nameof(sizeof), "byte_size");
+
+    // Members of a type the engine holds by itself, named per type: the
+    // seed indexes its own lists directly; the PilIR lowering
+    // (selfhost/ir/lower.pilot) reads these to name the engine operation.
+    __engine("bind_native_member", nameof(List), "[]",  "list_get");
+    __engine("bind_native_member", nameof(List), "[]=", "list_set");
+    __engine("bind_native_member", nameof(Map),  "[]",  "map_get");
+    __engine("bind_native_member", nameof(Map),  "[]=", "map_set");
+    // The seed holds a slice as its own list; the PilIR lowering indexes it
+    // the same way (stand-in `ir.engine_sequence_for`).
+    __engine("bind_native_member", nameof(slice), "[]",  "list_get");
+    // An operator with no PilIR instruction of its own runs as an engine
+    // operation: `a ** b` (an integer power wraps; a float power is `powf`).
+    __engine("bind_operator_intrinsic", "**", "num_pow");
+    // The test for an absent value (`a ?? b`): the seed holds none as its
+    // null (stand-in `ir.absent_as_null`).
+    __engine("bind_absent_test", "is_null");
+    // A list literal `[a, b]` is `List()` followed by `push(a)`, `push(b)`.
+    __engine("bind_list_literal", nameof(List), nameof(push));
+    // A map literal `["k": v]` (or `{k: v}`) is `Map()` followed by `set(k, v)`.
+    __engine("bind_map_literal", nameof(Map), nameof(set));
 }

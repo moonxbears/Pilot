@@ -125,18 +125,24 @@ pub struct Snap {
     /// The member names of the enumeration protocol `for` uses: the call
     /// that gives the enumerator, the step, and the current element.
     pub enumeration: List<str>;
-    /// `[field node, number of accessor bodies]` per field written with an
-    /// accessor block; `{ get; }` has none.
+    /// `[field node, number of accessor bodies, accessor block]` per field
+    /// written with an accessor block; `{ get; }` has none. The block lists
+    /// the getter bodies first, their count in its `flags`.
     pub properties: List<List<i64>>;
     /// The word that names a method's receiver (`bind_receiver_ident`), or
     /// "" when the syntax binds none.
     pub receiver: str;
+    /// The word that names a property's backing storage inside its accessors
+    /// (`field`), or "".
+    pub backing: str;
     /// Node -> its declaration modifiers packed by `decl_bits`, or -1 for a
     /// node that is no declaration.
     pub modifiers: List<i64>;
     /// Field node -> the node of its default value (`retries: i64 = 3`, an
     /// enum variant's `= 5`), or -1.
     pub field_defaults: List<i64>;
+    /// Switch arm node -> its guard (`case x if x < 0`), or -1.
+    pub arm_guards: List<i64>;
     pub count: i64;
 }
 
@@ -154,6 +160,9 @@ fn node_map(rows: List<List<i64>>, count: i64) -> List<i64> {
 
 /// The default value of field `n`, or -1.
 pub fn field_default(s: Snap, n: i64) -> i64 => s.field_defaults[n];
+
+/// The guard of switch arm `arm`, or -1.
+pub fn arm_guard(s: Snap, arm: i64) -> i64 => s.arm_guards[arm];
 
 /// Reads the snapshot the host serves.
 pub fn snap_load() -> Snap {
@@ -173,8 +182,10 @@ pub fn snap_load() -> Snap {
         enumeration: raw[10],
         properties: raw[11],
         receiver: snap_word(raw[12], 0),
+        backing: snap_word(raw[12], 1),
         modifiers: decl_bits(raw[13], nodes.len() / snap_columns()),
         field_defaults: node_map(raw[14], nodes.len() / snap_columns()),
+        arm_guards: node_map(raw[15], nodes.len() / snap_columns()),
         count: nodes.len() / snap_columns(),
     };
 }
@@ -245,6 +256,15 @@ pub fn in_user_file(s: Snap, n: i64) -> bool {
     if u < 0 || u >= s.files.len() { return false; }
     let row: List<any> = s.files[u];
     return row[1];
+}
+
+/// Whether node `n` is in a file the program links (not a declaration file
+/// the checker reads beside it).
+pub fn in_linked_file(s: Snap, n: i64) -> bool {
+    let u = unit_of(s, n);
+    if u < 0 || u >= s.files.len() { return false; }
+    let row: List<any> = s.files[u];
+    return row[4];
 }
 
 /// The source text node `n` spans.

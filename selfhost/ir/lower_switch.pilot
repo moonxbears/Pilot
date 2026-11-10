@@ -1,0 +1,183 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_switch.pilot
+// F5: lowering of `switch`, tuples and absent values to PilIR.
+// ==============================================================================
+// A switch tests its arms in order. Each arm's pattern becomes a chain of
+// compares and conditional branches that leave for the next arm on the
+// first mismatch; names the pattern binds take the inspected value. The
+// guard (`case x if x < 0`) runs after the pattern, and the first arm that
+// passes both runs its body, whose value goes to the join block. When no arm
+// matches, the switch has no value (`undef`), as on the seed, where it is
+// none. `break` in an arm leaves the switch; `continue` goes to the loop
+// around it.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerSwitch;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_members.*;
+
+pub fn lower_switch(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let ch = children(s, n);
+    if ch.len() == 0 { return unsupported(lw, n); }
+    let subject_t = type_of(lw.inf, ch[0]);
+    let subject = lower_expr(lw, ch[0]);
+    let phy = physics_of(lw, n);
+    let join = ir_add_block(lw.f);
+    let result = ir_add_param(lw.f, join, phy);
+    // `break` in an arm leaves the switch with no value.
+    let leave = ir_add_block(lw.f);
+    lw.loop_exits.push(leave);
+    var i = 1;
+    while i < ch.len() {
+        let arm = ch[i];
+        let next = ir_add_block(lw.f);
+        if !match_pattern(lw, lhs(s, arm), subject, subject_t, next) {
+            let _ = lw.loop_exits.pop();
+            return unsupported(lw, arm);
+        }
+        let guard = arm_guard(s, arm);
+        if guard >= 0 {
+            let body = ir_add_block(lw.f);
+            emit_void(lw, op_cond_br(), 0, [lower_expr(lw, guard), body, 0, next, 0], arm);
+            switch_to(lw, body);
+        }
+        let v = lower_hinted(lw, rhs(s, arm), type_of(lw.inf, n));
+        jump_to(lw, join, [arm_value(lw, v, phy, arm)], arm);
+        switch_to(lw, next);
+        i = i + 1;
+    }
+    let _ = lw.loop_exits.pop();
+    jump_to(lw, join, [emit(lw, op_undef(), 0, phy, [], n)], n);
+    switch_to(lw, leave);
+    jump_to(lw, join, [emit(lw, op_undef(), 0, phy, [], n)], n);
+    switch_to(lw, join);
+    return result;
+}
+
+/// The value an arm passes to the join block: its body's value, or `undef`
+/// for a body that has none.
+fn arm_value(lw: Lowerer, v: u32, phy: IrTypePhysics, n: i64) -> u32 {
+    if ir_is_terminated(lw.f, lw.cur) { return v; }
+    if v == ir_no_value() { return emit(lw, op_undef(), 0, phy, [], n); }
+    return coerce(lw, v, phy, n);
+}
+
+/// Emits the test of `pat` against `v` (of type `t`): on a mismatch control
+/// goes to `fail`; on a match it continues in the current block with the
+/// pattern's names bound. False when the pattern is not lowered yet.
+fn match_pattern(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
+    let s = lw.inf.p.s;
+    if pat < 0 { return false; }
+    let k = kind(s, pat);
+    if k == nk_pat_wildcard() { return true; }
+    if k == nk_pat_bind() {
+        if !lw.binding_of.has(key(pat)) { return false; }
+        lw.values.set(key(lw.binding_of.get(key(pat))), v);
+        return true;
+    }
+    if k == nk_pat_literal() {
+        let lit = lower_hinted(lw, lhs(s, pat), t);
+        test(lw, emit(lw, op_cmp(), 0, bool_physics(lw), [v, coerce(lw, lit, lw.f.value_physics[v], pat)], pat), fail, pat);
+        return true;
+    }
+    if k == nk_pat_range() {
+        if kind(s, lhs(s, pat)) != nk_pat_literal() || kind(s, rhs(s, pat)) != nk_pat_literal() { return false; }
+        let lo = coerce(lw, lower_hinted(lw, lhs(s, lhs(s, pat)), t), lw.f.value_physics[v], pat);
+        let hi = coerce(lw, lower_hinted(lw, lhs(s, rhs(s, pat)), t), lw.f.value_physics[v], pat);
+        // CmpPred 5 is `>=`; 3 is `<=` (inclusive `..=`), 2 is `<`.
+        test(lw, emit(lw, op_cmp(), 5, bool_physics(lw), [v, lo], pat), fail, pat);
+        let upper = if flags(s, pat) == 1 { 3 } else { 2 };
+        test(lw, emit(lw, op_cmp(), upper, bool_physics(lw), [v, hi], pat), fail, pat);
+        return true;
+    }
+    if k == nk_pat_variant() {
+        if flags(s, pat) != 0 { return false; }
+        guard some tag = variant_tag(lw.inf.p, t, last_segment(node_name(s, pat))) else { return false; }
+        let c = emit(lw, op_const_bits(), 0, lw.f.value_physics[v], [pool_int(lw, tag)], pat);
+        test(lw, emit(lw, op_cmp(), 0, bool_physics(lw), [v, c], pat), fail, pat);
+        return true;
+    }
+    if k == nk_pat_or() {
+        let matched = ir_add_block(lw.f);
+        let other = ir_add_block(lw.f);
+        if !match_pattern(lw, lhs(s, pat), v, t, other) { return false; }
+        jump_to(lw, matched, [], pat);
+        switch_to(lw, other);
+        if !match_pattern(lw, rhs(s, pat), v, t, fail) { return false; }
+        jump_to(lw, matched, [], pat);
+        switch_to(lw, matched);
+        return true;
+    }
+    if k == nk_pat_tuple() {
+        let parts = children(s, pat);
+        var i = 0;
+        while i < parts.len() {
+            let part = emit(lw, op_extract_field(), i, layout_unknown(lw.ls), [v], pat);
+            if !match_pattern(lw, parts[i], part, ty_unknown(), fail) { return false; }
+            i = i + 1;
+        }
+        return true;
+    }
+    return false;
+}
+
+/// Continues in a fresh block when `cond` holds, else goes to `fail`.
+fn test(lw: Lowerer, cond: u32, fail: u32, n: i64) {
+    let pass = ir_add_block(lw.f);
+    emit_void(lw, op_cond_br(), 0, [cond, pass, 0, fail, 0], n);
+    switch_to(lw, pass);
+}
+
+fn bool_physics(lw: Lowerer) -> IrTypePhysics => layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
+
+/// `Color.Blue` -> `Blue`.
+fn last_segment(name: str) -> str {
+    var start = 0;
+    var i = 0;
+    while i < name.len() {
+        if name.byte_at(i) == 46 { start = i + 1; }
+        i = i + 1;
+    }
+    return name.slice(start, name.len());
+}
+
+/// `(a, b)`: a record of the elements. The checker gives tuples no type yet,
+/// so its physics is the unknown layout.
+pub fn lower_tuple(lw: Lowerer, n: i64) -> u32 {
+    var vals: List<u32> = [];
+    for c in children(lw.inf.p.s, n) { vals.push(lower_expr(lw, c)); }
+    return emit(lw, op_construct_aggregate(), 0, physics_of(lw, n), vals, n);
+}
+
+/// The engine operation that tells whether a value is absent.
+pub pure fn absent_test_hook() -> str => "bind_absent_test";
+
+/// `none`: the absent value.
+[StandIn("ir.absent_as_null", "opt<T> is a tagged or niche-packed value whose tag says none or some", "none is the engine's null (`undef` in the IR) and some(x) is x itself, as on the seed", "F6")]
+pub fn lower_none(lw: Lowerer, n: i64) -> u32 => emit(lw, op_undef(), 0, physics_of(lw, n), [], n);
+
+/// `a ?? b`: `a` unless it is none; `b` runs only when it is.
+pub fn lower_coalesce(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let hook = bound(lw, absent_test_hook(), []);
+    if hook == "" { return unsupported(lw, n); }
+    let phy = physics_of(lw, n);
+    let a = lower_expr(lw, lhs(s, n));
+    let absent = emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), bool_physics(lw), [a], n);
+    let fallback = ir_add_block(lw.f);
+    let join = ir_add_block(lw.f);
+    let result = ir_add_param(lw.f, join, phy);
+    emit_void(lw, op_cond_br(), 0, [absent, fallback, 0, join, 1, coerce(lw, a, phy, n)], n);
+    switch_to(lw, fallback);
+    let b = lower_hinted(lw, rhs(s, n), type_of(lw.inf, n));
+    jump_to(lw, join, [coerce(lw, b, phy, n)], n);
+    switch_to(lw, join);
+    return result;
+}

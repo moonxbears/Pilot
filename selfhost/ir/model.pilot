@@ -347,8 +347,8 @@ pub struct IrModule : IObject {
     pub functions:  List<IrFunction>;
     /// `const_bits` operands.
     pub ints:       List<i64>;
-    /// `const_float` operands.
-    pub floats:     List<f64>;
+    /// `const_float` operands, as their IEEE 754 binary64 bits.
+    pub floats:     List<i64>;
     /// `const_bytes` operands.
     pub strings:    List<str>;
     /// `call_intrinsic` subops: the engine operations the program calls.

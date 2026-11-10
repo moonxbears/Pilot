@@ -16,15 +16,16 @@
 //! | 3 | type parameters, `[owner node, name symbol]` each |
 //! | 4 | base types, `[owner node, type node]` each |
 //! | 5 | attributes, `[target node, name symbol, [argument nodes]]` each |
-//! | 6 | files, `[path, is_user, base offset, source text]` each, in unit order |
+//! | 6 | files, `[path, is_user, base offset, source text, linked by the program]` each, in unit order; a file that is not linked is a declaration file the checker reads beside the program |
 //! | 7 | `for` clauses, `[iterable node, then node]` each |
 //! | 8 | generic bounds, `[owner node, parameter symbol, bound type node]` each |
 //! | 9 | splice modifiers, `[splice node, modifier sub-slot, member symbol, alias symbol]` each |
 //! | 10 | the enumeration protocol `for` uses: `[get, move next, current]` member names, or empty |
-//! | 11 | properties, `[field node, number of accessor bodies]` each |
+//! | 11 | properties, `[field node, number of accessor bodies, accessor block node]` each; the block lists the getters first, their count in its `flags` |
 //! | 12 | the receiver words: `[receiver, accessor backing storage, setter value]` (`bind_receiver_ident`), empty strings when unbound |
 //! | 13 | declarations, `[node, is partial, is static, visibility tier or -1 when none is written, is package declaration]` each |
 //! | 14 | field defaults and explicit enum values, `[field node, value node]` each |
+//! | 15 | switch arm guards (`case x if x < 0`), `[arm node, guard node]` each |
 //!
 //! Absent node references are `-1`. The checker returns its diagnostics as
 //! `[code, message, start, end, severity]` with program-wide offsets; only
@@ -99,7 +100,7 @@ fn is_declaration(kind: NodeKind) -> bool {
 }
 
 /// The snapshot of the linked program described in the module documentation.
-fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
+fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usize) -> HostValue {
     let arena = &linked.arena;
     let units = node_units(arena);
     let mut nodes = Vec::with_capacity(arena.nodes.len() * NODE_COLUMNS);
@@ -159,12 +160,14 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
     let file_rows = files
         .iter()
         .zip(linked.units())
-        .map(|((path, user), (_, text, base))| {
+        .enumerate()
+        .map(|(i, ((path, user), (_, text, base)))| {
             HostValue::List(vec![
                 HostValue::Str(path.clone()),
                 HostValue::Bool(*user),
                 HostValue::Int(i64::from(base)),
                 HostValue::Str(text.to_string()),
+                HostValue::Bool(i < program_files),
             ])
         })
         .collect();
@@ -191,7 +194,7 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
         .map(|(field, block)| {
             // A list node keeps its child count in `rhs`.
             let bodies = i64::from(arena.node(*block).rhs);
-            ints([i64::from(field.0), bodies])
+            ints([i64::from(field.0), bodies, i64::from(block.0)])
         })
         .collect();
     let protocol = pilot_parser::bootstrap_tables()
@@ -227,6 +230,17 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
         .iter()
         .map(|(field, value)| pair(i64::from(field.0), reference(value.0)))
         .collect();
+    // An arm's `flags` count its guard in `arm_guards` from 1.
+    let arm_guards = arena
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.node_kind() == NodeKind::MatchArm && n.flags > 0)
+        .filter_map(|(i, n)| {
+            let guard = arena.arm_guards.get(usize::from(n.flags) - 1)?;
+            Some(pair(i as i64, reference(guard.0)))
+        })
+        .collect();
     let tables = pilot_parser::bootstrap_tables();
     let receiver_words = [&tables.receiver_ident, &tables.backing_ident, &tables.setter_value_ident]
         .into_iter()
@@ -248,6 +262,7 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
         HostValue::List(receiver_words),
         HostValue::List(modifiers),
         HostValue::List(field_defaults),
+        HostValue::List(arm_guards),
     ])
 }
 
@@ -349,8 +364,13 @@ fn program_snapshot(path: &str, decls: &[String]) -> Option<(LinkedSource, Vec<(
     let Ok(mut paths) = run::link_plan(path) else {
         return None;
     };
+    let program_files = paths.len();
+    // The same file can be spelled two ways (`stdlib/..`, `./stdlib/..`);
+    // a declaration file the program already links is not linked again.
+    let canonical = |p: &str| fs::canonicalize(p).map_or_else(|_| p.to_string(), |c| c.to_string_lossy().into_owned());
+    let mut seen: std::collections::HashSet<String> = paths.iter().map(|p| canonical(p)).collect();
     for p in decl_files(decls) {
-        if !paths.contains(&p) {
+        if seen.insert(canonical(&p)) {
             paths.push(p);
         }
     }
@@ -364,6 +384,6 @@ fn program_snapshot(path: &str, decls: &[String]) -> Option<(LinkedSource, Vec<(
         sources.push((p, src));
     }
     let linked = LinkedSource::parse(sources);
-    let snap = snapshot(&linked, &files);
+    let snap = snapshot(&linked, &files, program_files);
     Some((linked, files, snap))
 }

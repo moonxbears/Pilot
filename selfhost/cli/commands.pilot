@@ -242,6 +242,8 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/model.pilot",
         "selfhost/ir/layouts.pilot",
         "selfhost/ir/lower.pilot",
+        "selfhost/ir/lower_members.pilot",
+        "selfhost/ir/lower_switch.pilot",
         "selfhost/ir/verify.pilot",
         "selfhost/ir/text.pilot",
         "selfhost/ir/interp.pilot",

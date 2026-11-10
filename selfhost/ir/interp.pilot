@@ -87,6 +87,33 @@ fn run_const_bits(fr: IrFrame, inst: IrInst) {
     put(fr, inst, bits_value(inst.physics, fr.m.ints[ir_args(fr.f, inst)[0]]));
 }
 
+/// The binary64 value whose bits are `bits`: sign, 11-bit exponent and
+/// 52-bit fraction (IEEE 754-2019 section 3.4). Scaling by powers of two is
+/// exact, so the result is the value itself.
+pub fn f64_from_bits(bits: i64) -> f64 {
+    let neg = bits < 0;
+    let exp = (bits >> 52) & 2047;
+    let frac = bits & 4503599627370495;
+    if exp == 2047 {
+        if frac != 0 { return 0.0 / 0.0; }
+        return if neg { -1.0 / 0.0 } else { 1.0 / 0.0 };
+    }
+    // Normal: (2^52 + frac) * 2^(exp - 1075); subnormal: frac * 2^-1074.
+    var mant = (if exp == 0 { frac } else { frac + 4503599627370496 }) as f64;
+    var e = if exp == 0 { -1074 } else { exp - 1075 };
+    while e > 0 {
+        mant = mant * 2.0;
+        e = e - 1;
+    }
+    while e < 0 {
+        mant = mant * 0.5;
+        e = e + 1;
+    }
+    return if neg { -mant } else { mant };
+}
+
+fn run_const_float(fr: IrFrame, inst: IrInst) { put(fr, inst, f64_from_bits(fr.m.floats[ir_args(fr.f, inst)[0]])); }
+
 fn run_const_bytes(fr: IrFrame, inst: IrInst) { put(fr, inst, fr.m.strings[ir_args(fr.f, inst)[0]]); }
 
 fn run_undef(fr: IrFrame, inst: IrInst) { put(fr, inst, none); }
@@ -162,19 +189,17 @@ fn run_insert_field(fr: IrFrame, inst: IrInst) {
 
 /// A register value converted to the physics of the instruction: a 1-bit
 /// register holds a boolean, a 64-bit unsigned register an unsigned value.
+/// `cast`: the value converted to the result's register physics, as the
+/// seed converts `T(x)`: floats truncate toward zero, integers wrap to the
+/// width, a 1-bit value is a boolean, a 32-bit float rounds to binary32.
 fn run_cast(fr: IrFrame, inst: IrInst) {
     let v = fr.vals[ir_args(fr.f, inst)[0]];
     let phy = inst.physics;
-    if phy.bit_width == 1 {
-        put(fr, inst, if v == true || v == false { v } else { v != 0 });
-    } else if phy.reg_class == reg_class_gpr_unsigned() && phy.bit_width >= 64 {
-        put(fr, inst, v as u64);
-    } else if phy.reg_class == reg_class_gpr_signed() {
-        put(fr, inst, v as i64);
-    } else {
-        put(fr, inst, v);
-    }
+    put(fr, inst, num_convert(v, reg_class_name(phy.reg_class), phy.bit_width));
 }
+
+/// The seed's numeric conversion to register class `class` of `width` bits.
+fn num_convert(v: any, class: str, width: i64) -> any => __engine("num_convert", v, class, width);
 
 fn run_jump(fr: IrFrame, inst: IrInst) {
     let a = ir_args(fr.f, inst);
@@ -218,6 +243,7 @@ pub fn interp_handlers() -> List<any> {
     }
     hs[op_const_bits()] = run_const_bits;
     hs[op_const_bytes()] = run_const_bytes;
+    hs[op_const_float()] = run_const_float;
     hs[op_undef()] = run_undef;
     hs[op_add()] = run_add;
     hs[op_sub()] = run_sub;
@@ -245,10 +271,88 @@ pub fn interp_handlers() -> List<any> {
     return hs;
 }
 
-/// Engine operation -> the function that runs it.
+/// Engine operation -> the function that runs it. The IR interpreter runs
+/// on the seed, so each one is the same operation on the seed's own values.
 pub fn interp_hooks() -> Map<str, any> {
     let hooks = Map<str, any>();
-    hooks.set("rt_print", (args) => print(args[0]));
-    hooks.set("rt_eprint", (args) => eprint(args[0]));
+    hooks.set("rt_print", (a) => print(a[0]));
+    hooks.set("rt_eprint", (a) => eprint(a[0]));
+    hooks.set("list_new", (a) => new_list());
+    hooks.set("list_push", (a) => list_push(a[0], a[1]));
+    hooks.set("list_pop", (a) => list_pop(a[0]));
+    hooks.set("list_remove_at", (a) => list_remove_at(a[0], a[1]));
+    hooks.set("list_get", (a) => list_get(a[0], a[1]));
+    hooks.set("list_set", (a) => list_set(a[0], a[1], a[2]));
+    hooks.set("is_null", (a) => a[0] == none);
+    hooks.set("num_pow", (a) => a[0] ** a[1]);
+    hooks.set("str_len", (a) => a[0].len());
+    hooks.set("str_slice", (a) => a[0].slice(a[1], a[2]));
+    hooks.set("str_find", (a) => if a.len() > 2 { a[0].find(a[1], a[2]) } else { a[0].find(a[1], 0) });
+    hooks.set("str_contains", (a) => a[0].contains(a[1]));
+    hooks.set("str_starts_with", (a) => a[0].starts_with(a[1]));
+    hooks.set("str_ends_with", (a) => a[0].ends_with(a[1]));
+    hooks.set("str_trim", (a) => a[0].trim());
+    hooks.set("str_replace", (a) => a[0].replace(a[1], a[2]));
+    hooks.set("str_byte_at", (a) => a[0].byte_at(a[1]));
+    hooks.set("to_str", (a) => a[0].to_str());
+    hooks.set("map_new", (a) => new_map());
+    hooks.set("map_get", (a) => map_get(a[0], a[1]));
+    hooks.set("map_set", (a) => map_set(a[0], a[1], a[2]));
+    hooks.set("map_has", (a) => map_has(a[0], a[1]));
+    hooks.set("map_remove", (a) => map_remove(a[0], a[1]));
     return hooks;
+}
+
+fn new_list() -> List<any> {
+    var xs: List<any> = [];
+    return xs;
+}
+
+fn list_push(list: any, item: any) -> any {
+    let xs: List<any> = list;
+    xs.push(item);
+    return xs;
+}
+
+fn list_pop(list: any) -> any {
+    let xs: List<any> = list;
+    return xs.pop();
+}
+
+fn list_remove_at(list: any, i: any) -> any {
+    let xs: List<any> = list;
+    return xs.remove_at(i);
+}
+
+fn list_get(list: any, i: any) -> any {
+    let xs: List<any> = list;
+    return xs[i];
+}
+
+fn list_set(list: any, i: any, v: any) {
+    let xs: List<any> = list;
+    xs[i] = v;
+}
+
+fn new_map() -> Map<any, any> => Map<any, any>();
+
+fn map_get(map: any, k: any) -> any {
+    let m: Map<any, any> = map;
+    return m.get(k);
+}
+
+fn map_set(map: any, k: any, v: any) -> any {
+    let m: Map<any, any> = map;
+    m.set(k, v);
+    return m;
+}
+
+fn map_has(map: any, k: any) -> bool {
+    let m: Map<any, any> = map;
+    return m.has(k);
+}
+
+fn map_remove(map: any, k: any) -> any {
+    let m: Map<any, any> = map;
+    return m.remove(k);
 }

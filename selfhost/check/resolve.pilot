@@ -252,6 +252,7 @@ fn walk(w: Walk, n: i64) {
             let arm = ch[i];
             push_frame(w);
             bind_pattern(w, lhs(s, arm), ch[0]);
+            if arm_guard(s, arm) >= 0 { walk(w, arm_guard(s, arm)); }
             walk(w, rhs(s, arm));
             pop_frame(w);
             i = i + 1;

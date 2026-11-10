@@ -94,6 +94,8 @@ pub fn print_ir_module(m: IrModule) -> str {
     i = 0;
     while i < m.ints.len { out = out + f"int {i} {m.ints[i]}\n"; i = i + 1; }
     i = 0;
+    while i < m.floats.len { out = out + f"float {i} {m.floats[i]}\n"; i = i + 1; }
+    i = 0;
     while i < m.strings.len { out = out + f"str {i} " + quote_text(m.strings[i]) + "\n"; i = i + 1; }
     i = 0;
     while i < m.intrinsics.len { out = out + f"intrinsic {i} {m.intrinsics[i]}\n"; i = i + 1; }
@@ -246,6 +248,8 @@ fn parse_header(r: Reader, w: List<str>) {
         });
     } else if tag == "int" && w.len() == 3 {
         r.m.ints.push(number(r, w[2], ""));
+    } else if tag == "float" && w.len() == 3 {
+        r.m.floats.push(number(r, w[2], ""));
     } else if tag == "str" && w.len() == 3 {
         r.m.strings.push(unquote(w[2]));
     } else if tag == "intrinsic" && w.len() == 3 {
