@@ -87,6 +87,19 @@ impl PilVirtualMachine {
             .ok_or_else(|| format!("`{op}` expects a list, found {}", v.kind_label()))
     }
 
+    /// The elements of the list `v`, or with `deep` its leaves at any depth.
+    fn collect_elements(&self, v: PilotVal, deep: bool, op: &str, out: &mut Vec<PilotVal>) -> Result<(), String> {
+        let slot = self.list_slot(v, op)?;
+        for &e in &self.heap_lists[slot] {
+            if deep && e.as_list_handle().is_some() {
+                self.collect_elements(e, true, op, out)?;
+            } else {
+                out.push(e);
+            }
+        }
+        Ok(())
+    }
+
     fn map_slot(&self, v: PilotVal, op: &str) -> Result<usize, String> {
         v.as_map_handle()
             .filter(|s| *s < self.heap_maps.len())
@@ -234,6 +247,17 @@ impl PilVirtualMachine {
                 let list = arg(args, 0, op)?;
                 let slot = self.list_slot(list, op)?;
                 self.heap_lists[slot].push(arg(args, 1, op)?);
+                Ok(list)
+            }
+            // `list_extend(list, other, deep)`: appends `other`'s elements;
+            // with `deep` set, nested lists are flattened down to their leaves.
+            "list_extend" => {
+                let list = arg(args, 0, op)?;
+                let slot = self.list_slot(list, op)?;
+                let deep = arg(args, 2, op)?.as_bool().unwrap_or(false);
+                let mut leaves = Vec::new();
+                self.collect_elements(arg(args, 1, op)?, deep, op, &mut leaves)?;
+                self.heap_lists[slot].extend(leaves);
                 Ok(list)
             }
             "list_remove_at" => {

@@ -1,0 +1,27 @@
+// A `let` in an inner block shadows an outer binding of the same name
+// until the block ends; the outer binding is untouched.
+fn main() {
+    let x = 100;
+    var sum = 0;
+    for i in 0..3 {
+        let x = i * 10;
+        sum = sum + x;
+    }
+    print(x);
+    print(sum);
+    if true {
+        let x = "inner";
+        print(x);
+    }
+    print(x);
+    // The new binding's value can read the binding it shadows.
+    {
+        let x = x + 1;
+        print(x);
+    }
+    print(x);
+    // Re-declaring in the same block replaces the binding.
+    let y = 1;
+    let y = y + 1;
+    print(y);
+}

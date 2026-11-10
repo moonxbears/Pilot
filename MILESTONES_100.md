@@ -1615,6 +1615,23 @@ These rules apply to every `F` milestone and replace the "four function-level te
   - Known gaps: `quote { .. }` in an expression still evaluates its body instead of producing an AST value. A variant record prints as `{ r: 2 }`, without its variant name.
   - `tests/conformance/` now holds 39 programs (13 error cases).
   - Remaining: dimensional units (`UnitLit`), `|>` pipes, `op ?` on `res`/`opt` and the enumerator protocol (after F2), the legacy `tests/*.pilot` corpus, and moving the `SeedBuiltin` method table into Pilot.
+- **Progress (2026-11-09, part 6):**
+  - Pipes: `x |> f` calls `f(x)`, `x |> f(a)` calls `f(x, a)`, `x |> .m(a)` calls `x.m(a)`, and `f <| x` calls `f(x)`. Each step lowers as the call it stands for, so it dispatches like a written call (`crates/pilot-vm/src/lower_pipe.rs`). The parser now marks a prefix-dot member (`MEMBER_IMPLIED_RECEIVER`) so a pipe can tell `.m()` from `self.m()`.
+  - Dimensional literals (`250ms`, `64KB`, `2.4GHz`, and the bracketed `3[ms]`) evaluate to their value in the family's base unit (nanoseconds, hertz, bytes). The values come from Pilot: `stdlib/core/syntax/unit_decl.pilot` registers `convert_unit_literal_to_base` and `unit_family_of_literal` through the `bind_unit_literal` engine hook, and the seed runs them on each literal while compiling (`crates/pilot-vm/src/lower_unit.rs`). No unit name appears in Rust. A literal with an unknown unit is a compile error. `convert_unit_literal_to_base` used to ignore the decimal point, so `2.4GHz` was 24 GHz.
+  - Known gaps: units are not type-checked, so `2s + 64KB` adds two integers; compound units (`100[m/s]`) are not lowered.
+  - `tests/conformance/` now holds 42 programs (14 error cases).
+  - Remaining: `op ?` on `res`/`opt` and the enumerator protocol (after F2), the legacy `tests/*.pilot` corpus, and moving the `SeedBuiltin` method table into Pilot.
+- **Progress (2026-11-09, part 7):**
+  - Named arguments: `f(b: 1, a: 10)` binds each value to the parameter it names; positional arguments come first. The parser used to drop the names and pass the values in written order. It now keeps them in a `CallArg` node, and the seed binds them for functions, methods and constructors (`crates/pilot-vm/src/lower_args.rs`). An unknown or repeated name, a positional argument after a named one, a missing argument, or a named argument to a callee whose parameters are unknown (a closure) is a compile error.
+  - Memberwise construction: a struct without `self(..)` is built by `T(a, b)` or `T(b: 2, a: 1)`; a field left out takes its default, and one with no default is a compile error. `var x: T;` members of a struct body are fields (they used to be skipped, so their defaults never applied).
+  - Block scope: a `let` in an inner block that reuses an outer name now shadows it until the block ends. It used to overwrite the outer variable (`examples/crucible_200.pilot` pillar 4).
+  - `[0, *xs, 99]` and `[*..nested]` (and `splat(xs)`, `flat(xs)`) unpack inside list literals; anywhere else `*x` is a compile error.
+  - `union`, `intersect` and `except` on lists are Pilot functions in `stdlib/db/set_ops.pilot`, bound to their operators with the new `bind_operator_fn` engine hook (`crates/pilot-parser/src/pilot_impls.rs`). The first use of such an operator compiles that module's functions into the program (`crates/pilot-vm/src/lower_linked.rs`); F2's `use` linking replaces this.
+  - `examples/crucible_2.pilot` now prints its expected output. `examples/crucible_200.pilot` matches except pillar 1, which needs value-type structs (`: IValue`) to be copied when passed and stored; the seed passes every record by handle. That needs the lattice classification of F4 and the copy insertion of F7.
+  - `examples/overview.pilot` still stops on constructs outside F1: an inline `sql { .. }` block (reported as foreign code the seed cannot run), channel send/receive (`<-`), and `unit meter;`, which the keyword catalog defines as a compilation-unit wrapper rather than a unit of measure.
+  - `tests/conformance/` now holds 50 programs (16 error cases).
+  - The legacy `tests/*.pilot` corpus is deleted: its 40 files used pre-canonical syntax (`def`, `class`, `record`, `import`), nothing ran or referenced them, and most exercised features of later milestones (actors, Postgres, polyglot). `tests/conformance/` replaces them as the seed's checked corpus.
+  - Remaining: `op ?` on `res`/`opt` and the enumerator protocol (after F2), and moving the `SeedBuiltin` method table into Pilot (the `bind_operator_fn` path is the mechanism for it).
 
 ### F2 — Real Module Linking
 

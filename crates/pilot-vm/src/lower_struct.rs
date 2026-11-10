@@ -23,9 +23,9 @@ use pilot_rt::PilotVal;
 #[derive(Clone, Default)]
 pub(crate) struct StructInfo {
     /// Fields in declaration order, with their default initializer or `NONE`.
-    fields: Vec<(String, NodeId)>,
+    pub(crate) fields: Vec<(String, NodeId)>,
     /// The `self(..)` declaration, if the struct has one.
-    ctor: Option<NodeId>,
+    pub(crate) ctor: Option<NodeId>,
 }
 
 impl BytecodeCompiler {
@@ -72,6 +72,8 @@ impl BytecodeCompiler {
             if !owners.iter().any(|(o, _)| *o == owner) {
                 owners.push((owner.clone(), is_static));
             }
+            let key = format!("{owner}.{}", Self::name(arena, arena.node(m).lhs));
+            self.register_params(key, m);
         }
         if dn.node_kind() != NodeKind::StructDecl {
             return;
@@ -84,15 +86,27 @@ impl BytecodeCompiler {
                 NodeKind::ParamDecl => info
                     .fields
                     .push((Self::name(arena, mn.lhs).to_string(), arena.field_default(m))),
-                NodeKind::ConstructorDecl => info.ctor = Some(m),
+                // `var x: T = v;` and `let x: T;` in a struct body are fields too.
+                NodeKind::VarStmt | NodeKind::LetStmt => {
+                    info.fields.push((Self::name(arena, mn.lhs).to_string(), NodeId(mn.rhs)))
+                }
+                NodeKind::ConstructorDecl => {
+                    info.ctor = Some(m);
+                    self.register_params(format!("{owner}.{}", &crate::RECEIVER[1..]), m);
+                }
                 _ => {}
             }
         }
         self.structs.insert(owner, info);
     }
 
+    /// Fields of struct `name` in declaration order, with their defaults.
+    pub(crate) fn struct_fields(&self, name: &str) -> Vec<(String, NodeId)> {
+        self.structs.get(name).map(|s| s.fields.clone()).unwrap_or_default()
+    }
+
     /// A new empty record of struct `name`.
-    fn emit_new_record(&mut self, name: &str) -> u8 {
+    pub(crate) fn emit_new_record(&mut self, name: &str) -> u8 {
         let r_obj = self.emit_intrinsic("map_new", &[]);
         self.emit_record_type(r_obj, name);
         r_obj
@@ -108,7 +122,7 @@ impl BytecodeCompiler {
     }
 
     /// Sets each defaulted field of `name` that is not in `given` on `r_obj`.
-    fn emit_field_defaults(&mut self, arena: &AstArena, name: &str, given: &[String], r_obj: u8) {
+    pub(crate) fn emit_field_defaults(&mut self, arena: &AstArena, name: &str, given: &[String], r_obj: u8) {
         let Some(info) = self.structs.get(name).cloned() else {
             return;
         };
@@ -143,7 +157,7 @@ impl BytecodeCompiler {
         let ctor = self.structs.get(name)?.ctor;
         let Some(ctor) = ctor else {
             if !args.is_empty() {
-                return Some(self.error(format!("`{name}` has no constructor `self(..)`")));
+                return Some(self.compile_memberwise(arena, name, args));
             }
             let r_obj = self.emit_new_record(name);
             self.emit_field_defaults(arena, name, &[], r_obj);

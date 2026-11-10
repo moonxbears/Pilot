@@ -3,6 +3,8 @@
 use std::borrow::Cow; use std::collections::{HashMap, HashSet}; use std::sync::OnceLock; use pilot_ast::*; use pilot_intern::SymbolId;
 use pilot_lexer::{tokenize, TokenKind, TokenTape}; use pilot_span::ByteSpan;
 mod attr_hooks;
+mod pilot_impls;
+pub use pilot_impls::{OperatorFn, UnitLiteralHook, HOOK_OPERATOR_FN, HOOK_UNIT_LITERAL};
 pub use attr_hooks::RegLayout;
 #[derive(Clone, Debug)]
 pub enum TemplateNode { Splice(String), TypeNamed(String, Vec<TemplateNode>), TypeTuple(Vec<TemplateNode>),
@@ -129,7 +131,11 @@ pub struct ParserTables { modifiers: HashMap<String, ModAct>, param_modifiers: H
     /// Attribute functions by name (see `attr_hooks`).
     attr_hooks: HashMap<String, attr_hooks::AttrHook>,
     /// Register layouts declared with `[Bits(..)]`, by type name.
-    reg_layouts: HashMap<String, RegLayout>, }
+    reg_layouts: HashMap<String, RegLayout>,
+    /// The Pilot functions that value dimensional literals (see `pilot_impls`).
+    unit_literal: Option<UnitLiteralHook>,
+    /// The Pilot function each infix operator calls, by symbol (see `pilot_impls`).
+    operator_fns: HashMap<String, OperatorFn>, }
 impl ParserTables {
     pub fn new() -> Self { Self::default() }
     fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
@@ -166,6 +172,8 @@ impl ParserTables {
                         }); if !w.is_empty() { self.modifiers.insert(w, act); } }
                     "register_parametric_modifier" => { let w = s_arg(2); if !w.is_empty() { self.param_modifiers.insert(w); } }
                     "register_module_kw" => { let w = s_arg(2); if !w.is_empty() { self.module_kws.insert(w, s_arg(3) == "declare_package_scope"); } }
+                    HOOK_UNIT_LITERAL => self.bind_unit_literal(s_arg(2), s_arg(3)),
+                    HOOK_OPERATOR_FN => self.bind_operator_fn(s_arg(2), s_arg(3)),
                     "bind_receiver_ident" => { let w = s_arg(2); if !w.is_empty() { self.receiver_ident = w; } }
                     "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
                     "register_pratt_op" => { let (sym, fix, bp, assoc) = (s_arg(2), s_arg(3), i_arg(4).unwrap_or(20) as u8, s_arg(5));
@@ -175,6 +183,9 @@ impl ParserTables {
                             } } }
                     _ => {} } }
             _ => {} } } }
+/// `MemberExpr.flags` of a prefix-dot member (`.name`), whose receiver the
+/// parser filled in. `0` is `a.b` and `1` is `a?.b`.
+pub const MEMBER_IMPLIED_RECEIVER: u16 = 2;
 fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
         "+" => Add, "-" => Sub, "*" => Mul, "/" => Div, "//" => FloorDiv, "%" => Rem, "**" => Pow,
         "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" | "and" => And,
@@ -205,7 +216,7 @@ pub fn bootstrap_tables() -> &'static ParserTables { BOOTSTRAP_TABLES.get_or_ini
             include_str!("../../../stdlib/core/syntax/switch.pilot"), include_str!("../../../stdlib/core/syntax/guard.pilot"),
             include_str!("../../../stdlib/core/syntax/try_catch.pilot"), include_str!("../../../stdlib/core/syntax/expr_sugar.pilot"),
             include_str!("../../../stdlib/core/syntax/fstring.pilot"), include_str!("../../../stdlib/core/syntax/call_quote.pilot"),
-            include_str!("../../../stdlib/core/syntax/unit_decl.pilot"), include_str!("../../../stdlib/db/sql_syntax.pilot"),
+            include_str!("../../../stdlib/core/syntax/unit_decl.pilot"), include_str!("../../../stdlib/db/sql_syntax.pilot"), include_str!("../../../stdlib/db/set_ops.pilot"),
             include_str!("../../../stdlib/polyglot/polyglot_syntax.pilot"), include_str!("../../../stdlib/realtime/rt_syntax.pilot"),
             include_str!("../../../stdlib/asyncio/select_syntax.pilot"),
             include_str!("../../../stdlib/contracts/contracts_syntax.pilot"), ] { let _ = parse_and_ingest(src, &mut t); }
@@ -214,7 +225,7 @@ pub fn bootstrap_tables() -> &'static ParserTables { BOOTSTRAP_TABLES.get_or_ini
     }) }
 pub fn parse(src: &str) -> AstArena { parse_with_tables(src, bootstrap_tables()) }
 pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: false, }; p.parse_program(); p.arena }
-pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } arena }
+pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } tables.finish_ingest(src); arena }
 #[inline]
 fn is_seed_kw(k: TokenKind) -> bool { matches!(k, TokenKind::KwEngine | TokenKind::KwStruct | TokenKind::KwInterface | TokenKind::KwFn
         | TokenKind::KwLet | TokenKind::KwRef | TokenKind::KwIf | TokenKind::KwLoop
@@ -990,7 +1001,7 @@ impl<'a> Parser<'a> {
             TokenKind::PrefixDot => { self.advance();
                 let rcv_nm = if self.tables.receiver_ident.is_empty() { "_self".to_string() } else { self.tables.receiver_ident.clone() };
                 let (rcv, fld) = (self.arena.alloc_ident(&rcv_nm, sp), self.intern_cur());
-                self.arena.alloc_node(NodeKind::MemberExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), rcv.0, fld.0) }
+                self.arena.alloc_node(NodeKind::MemberExpr, MEMBER_IMPLIED_RECEIVER, ByteSpan::new(sp.start, self.prev_span().end), rcv.0, fld.0) }
             TokenKind::ColonColon => { self.advance(); let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::IdentExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, 0) }
             TokenKind::Minus | TokenKind::Plus | TokenKind::Exclamation | TokenKind::CallQuoteShallow | TokenKind::Tilde | TokenKind::Amper | TokenKind::KwRef | TokenKind::ArrowLeft
             | TokenKind::Star | TokenKind::DoubleStar | TokenKind::StarDotDot | TokenKind::GreaterDotDot => { let (fl, bp) = match self.peek() {
@@ -1050,8 +1061,11 @@ impl<'a> Parser<'a> {
                 while !self.at_end() && !self.at(TokenKind::RParen) && !self.at(TokenKind::Comma) { txt.push_str(self.text()); self.advance(); }
                 let sym = self.arena.interner.intern(&txt); ch.push(self.arena.alloc_node(NodeKind::StrLit, 0, tsp, sym.0, 0));
             } else { let nx = self.next_non_nl(self.cur() + 1);
-                if self.is_word() && nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::Colon) { self.advance(); self.advance(); }
-                let a = self.parse_expr(); if a.is_some() { ch.push(a); } }
+                // `name: value` keeps its name in a `CallArg` (lhs = name, rhs = value).
+                if self.is_word() && nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::Colon) {
+                    let nsp = self.span(); let name = self.intern_cur(); self.advance(); let a = self.parse_expr();
+                    if a.is_some() { ch.push(self.arena.alloc_node(NodeKind::CallArg, 0, ByteSpan::new(nsp.start, self.prev_span().end), name.0, a.0)); }
+                } else { let a = self.parse_expr(); if a.is_some() { ch.push(a); } } }
             if self.eat(TokenKind::Comma) { if self.at(TokenKind::RParen) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in argument list".into())); break; } } else { break; } }
         self.expect(TokenKind::RParen); self.arena.alloc_list_node(NodeKind::CallExpr, qk, ByteSpan::new(self.arena.span(callee).start, self.prev_span().end), &ch) }
     /// Lowers the body of `f"..."` into string concatenation: literal

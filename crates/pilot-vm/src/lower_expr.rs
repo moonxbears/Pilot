@@ -85,6 +85,8 @@ impl BytecodeCompiler {
             NodeKind::MapExpr => self.compile_map_literal(arena, node.lhs, node.rhs),
             NodeKind::ListExpr => self.compile_list_literal(arena, node.lhs, node.rhs),
             NodeKind::CallExpr => self.compile_call(arena, node.lhs, node.rhs),
+            NodeKind::UnitLit => self.compile_unit_lit(arena, node.lhs),
+            NodeKind::CallArg => self.compile_stray_named_arg(arena, node.lhs),
             NodeKind::FnDecl | NodeKind::StructDecl | NodeKind::ExtendDecl => {
                 self.compile_local_decl(arena, node_id)
             }
@@ -182,6 +184,9 @@ impl BytecodeCompiler {
         if NodeId(rhs).is_none() {
             return self.error("empty index `[]` is not lowered by the seed yet".to_string());
         }
+        if let Some(raw) = self.bracket_unit_text(arena, NodeId(lhs), NodeId(rhs)) {
+            return self.compile_unit_text(&raw);
+        }
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r = self.compile_index_value(arena, lhs, rhs);
@@ -220,6 +225,8 @@ impl BytecodeCompiler {
         match op {
             BinaryOp::And | BinaryOp::Or => return self.compile_short_circuit(arena, op, lhs, rhs),
             BinaryOp::Coalesce => return self.compile_coalesce(arena, lhs, rhs),
+            BinaryOp::Pipe => return self.compile_pipe(arena, NodeId(lhs), NodeId(rhs)),
+            BinaryOp::PipeBackward => return self.compile_pipe(arena, NodeId(rhs), NodeId(lhs)),
             BinaryOp::As | BinaryOp::AsView => {
                 let r = self.compile_node(arena, NodeId(lhs));
                 let ty = NodeId(rhs);
@@ -239,6 +246,9 @@ impl BytecodeCompiler {
                 return self.error(
                     "range values are only lowered as `for` iterables and slice indices by the seed".to_string(),
                 );
+            }
+            if let Some(r) = self.compile_operator_fn(op.symbol(), arena, NodeId(lhs), NodeId(rhs)) {
+                return r;
             }
             return self.error(format!("operator `{}` is not lowered by the seed yet", op.symbol()));
         };
@@ -322,7 +332,9 @@ impl BytecodeCompiler {
             UNARY_BIT_NOT => Opcode::BitNot,
             UNARY_NOT => Opcode::Not,
             pilot_ast::UNARY_OP_SPLAT | pilot_ast::UNARY_OP_DOUBLE_SPLAT | pilot_ast::UNARY_OP_DEEP_FLATTEN => {
-                return self.error("splat operators are not lowered by the seed yet".to_string());
+                return self.error(
+                    "the seed lowers `*x` and `*..x` only as elements of a list literal".to_string(),
+                );
             }
             _ => return self.error("unary operator is not lowered by the seed yet".to_string()),
         };
@@ -358,8 +370,23 @@ impl BytecodeCompiler {
         let r_list = self.emit_intrinsic("list_new", &[]);
         let mark = self.next_reg;
         for c in children {
-            let r_v = self.compile_node(arena, NodeId(c));
-            self.emit_intrinsic("list_push", &[r_list, r_v]);
+            let cn = *arena.node(NodeId(c));
+            let unpack = (cn.node_kind() == NodeKind::UnaryExpr).then_some(cn.flags);
+            match unpack {
+                // `*xs` adds xs's elements; `*..xs` adds its leaves at any depth.
+                Some(f @ (pilot_ast::UNARY_OP_SPLAT | pilot_ast::UNARY_OP_DEEP_FLATTEN)) => {
+                    let r_v = self.compile_node(arena, NodeId(cn.lhs));
+                    let r_deep = self.emit_const(PilotVal::from_bool(f == pilot_ast::UNARY_OP_DEEP_FLATTEN));
+                    self.emit_intrinsic("list_extend", &[r_list, r_v, r_deep]);
+                }
+                Some(pilot_ast::UNARY_OP_DOUBLE_SPLAT) => {
+                    self.error("`**x` unpacks key-value pairs, which a list literal cannot hold".to_string());
+                }
+                _ => {
+                    let r_v = self.compile_node(arena, NodeId(c));
+                    self.emit_intrinsic("list_push", &[r_list, r_v]);
+                }
+            }
             self.release_to(mark);
         }
         r_list

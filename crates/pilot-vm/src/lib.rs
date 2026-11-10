@@ -7,6 +7,7 @@
 
 mod heap;
 pub mod instruction;
+mod lower_args;
 mod lower_call;
 mod lower_cascade;
 mod lower_closure;
@@ -14,11 +15,14 @@ mod lower_defer;
 mod lower_dispatch;
 mod lower_expr;
 mod lower_global;
+mod lower_linked;
+mod lower_pipe;
 mod lower_stmt;
 mod lower_struct;
-mod lower_try;
-mod lower_variant;
 mod lower_switch;
+mod lower_try;
+mod lower_unit;
+mod lower_variant;
 mod ops;
 pub mod pilc;
 pub mod vm;
@@ -100,6 +104,15 @@ struct FnState {
     next_reg: u8,
     loops: Vec<LoopCtx>,
     tries: Vec<TryCtx>,
+    block_scopes: Vec<BlockScope>,
+}
+
+/// The bindings visible where a block starts. A `let` in the block that
+/// reuses one of these names gets its own slot, and the block's end brings
+/// these bindings back.
+struct BlockScope {
+    slots: HashMap<String, u8>,
+    types: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -111,8 +124,14 @@ pub struct BytecodeCompiler {
     pub diagnostics: Vec<CompileDiagnostic>,
     var_slots: HashMap<String, u8>,
     var_types: HashMap<String, String>,
+    block_scopes: Vec<BlockScope>,
     fn_ret_types: HashMap<String, String>,
     fn_entries: HashMap<String, (u16, Vec<String>)>,
+    /// The declaration whose parameters each callee takes (`f`, `Owner.m`,
+    /// `Owner.self`), for binding named arguments.
+    param_decls: HashMap<String, NodeId>,
+    /// Sources of the Pilot modules already compiled into the program.
+    linked_modules: std::collections::HashSet<String>,
     call_patches: Vec<(usize, String, String, ByteSpan)>,
     const_maps: HashMap<String, CMap>,
     loops: Vec<LoopCtx>,
@@ -391,6 +410,7 @@ impl BytecodeCompiler {
             next_reg: self.next_reg,
             loops: std::mem::take(&mut self.loops),
             tries: std::mem::take(&mut self.tries),
+            block_scopes: std::mem::take(&mut self.block_scopes),
         }
     }
 
@@ -405,6 +425,7 @@ impl BytecodeCompiler {
         self.next_reg = s.next_reg;
         self.loops = s.loops;
         self.tries = s.tries;
+        self.block_scopes = s.block_scopes;
     }
 
     /// Compiles `id` with `hint` as the expected type.
@@ -430,6 +451,7 @@ impl BytecodeCompiler {
         self.cur_owner = None;
         self.loops.clear();
         self.tries.clear();
+        self.block_scopes.clear();
         self.defers.clear();
         self.next_local_reg = FIRST_LOCAL_REG;
         self.next_reg = FIRST_TEMP_REG;

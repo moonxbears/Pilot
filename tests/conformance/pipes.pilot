@@ -1,0 +1,27 @@
+// `x |> f` passes `x` to `f` as its first argument; `f <| x` does the same.
+struct Counter { n: i64 }
+
+ext Counter {
+    fn bump(self, by: i64) -> Counter => Counter { n: self.n + by };
+}
+
+fn double(x: i64) -> i64 => x * 2;
+fn add(a: i64, b: i64) -> i64 => a + b;
+
+fn main() {
+    // A function, then a call with more arguments.
+    print(5 |> double);
+    print(5 |> add(3));
+    // Steps chain left to right.
+    print(3 |> double |> double |> add(1));
+    // A closure value.
+    let inc = (x) => x + 1;
+    print(9 |> inc);
+    // The backward pipe.
+    print(double <| 21);
+    // A prefix-dot method is called on the piped value.
+    let c = Counter { n: 1 };
+    print((c |> .bump(4) |> .bump(10)).n);
+    print("hello" |> .len());
+    print([1, 2, 3] |> .len());
+}

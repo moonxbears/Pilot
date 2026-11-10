@@ -26,6 +26,24 @@ impl BytecodeCompiler {
             .iter()
             .map(|&c| NodeId(c))
             .collect();
+        self.compile_call_ids(arena, &ids)
+    }
+
+    /// Calls `ids[0]` with the arguments `ids[1..]`.
+    pub(crate) fn compile_call_ids(&mut self, arena: &AstArena, ids: &[NodeId]) -> u8 {
+        if Self::has_named_args(arena, &ids[1..]) {
+            return match self.order_named_args(arena, ids) {
+                Ok(ordered) if Self::has_named_args(arena, &ordered[1..]) => self.compile_call_positional(arena, &ordered),
+                Ok(ordered) => self.compile_call_ids(arena, &ordered),
+                Err(message) => self.error(message),
+            };
+        }
+        self.compile_call_positional(arena, ids)
+    }
+
+    /// Calls `ids[0]` with `ids[1..]`, which are positional except for a
+    /// memberwise struct construction.
+    fn compile_call_positional(&mut self, arena: &AstArena, ids: &[NodeId]) -> u8 {
         let callee = *arena.node(ids[0]);
         match callee.node_kind() {
             NodeKind::IdentExpr | NodeKind::TypeNamed => {

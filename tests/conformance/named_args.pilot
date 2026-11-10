@@ -1,0 +1,50 @@
+// Named arguments bind by parameter name; positional ones come first.
+// A struct without `self(..)` is built memberwise, in field order or by name.
+struct Rgba {
+    r: u8;
+    g: u8;
+    b: u8;
+    a: u8 = 255;
+}
+
+struct Frame {
+    var x: i64;
+    var hop: i64 = 1;
+}
+
+struct Box {
+    w: i64;
+    self(w: i64, scale: i64) {
+        .w = w * scale;
+    }
+}
+
+struct P {
+    x: i64;
+    y: i64;
+}
+
+ext P {
+    fn moved(self, dx: i64, dy: i64) -> P => P(.x + dx, .y + dy);
+}
+
+fn sub(a: i64, b: i64) -> i64 => a - b;
+
+fn main() {
+    print(sub(b: 1, a: 10));
+    print(sub(10, b: 3));
+    // Memberwise: a field left out takes its default.
+    let c = Rgba(r: 1, g: 2, b: 3);
+    print(c.a);
+    let d = Rgba(9, 8, 7, 6);
+    print(d.r + d.a);
+    // `var` fields are fields too.
+    let f = Frame(5);
+    print(f.x + f.hop);
+    // A constructor's parameters take names like a function's.
+    print(Box(scale: 3, w: 2).w);
+    // So do a method's.
+    let p = P(1, 2).moved(dy: 10, dx: 5);
+    print(p.x);
+    print(p.y);
+}

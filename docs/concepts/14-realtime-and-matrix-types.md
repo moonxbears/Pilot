@@ -121,7 +121,7 @@ In the lexer and parser frontend ([`pilot-lexer`](file:///home/moony/Documents/d
 
 ## 6. Complete Runnable Examples
 
-See [`examples/showcase/14_realtime_and_matrix_types.pilot`](../../examples/showcase/14_realtime_and_matrix_types.pilot) and [`tests/13_builtin_types_matrix.pilot`](../../tests/13_builtin_types_matrix.pilot) for the full executable showcases.
+See [`examples/showcase/14_realtime_and_matrix_types.pilot`](../../examples/showcase/14_realtime_and_matrix_types.pilot) for the full executable showcase.
 
 ```pilot
 // 1. Native Dimensional Literals (Duration, Frequency, Memory)

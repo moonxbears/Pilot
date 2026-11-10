@@ -116,17 +116,35 @@ pub fn split_numeric_and_unit_suffix(raw_lit: str) -> UnitDescriptor {
     };
 }
 
+// A literal's value in its family's base unit. Digits after a `.` scale the
+// result down (`2.4GHz` is 2_400_000_000 Hz); a value finer than the base
+// unit truncates toward zero.
 pub fn convert_unit_literal_to_base(raw_lit: str) -> i64 {
     let desc = split_numeric_and_unit_suffix(raw_lit);
     let num_len = raw_lit.len() - desc.suffix.len();
     var acc = 0;
+    var frac_div = 1;
+    var in_frac = false;
     var i = 0;
     while i < num_len {
         let b = raw_lit.byte_at(i);
         if b >= 48 && b <= 57 {
             acc = acc * 10 + (b - 48);
+            if in_frac {
+                frac_div = frac_div * 10;
+            }
+        } else if b == 46 {
+            in_frac = true;
         }
         i = i + 1;
     }
-    return acc * desc.base_multiplier;
+    return acc * desc.base_multiplier / frac_div;
+}
+
+// A literal's unit family (see `unit_family_for_suffix`); `0` for an unknown unit.
+pub fn unit_family_of_literal(raw_lit: str) -> i64 => split_numeric_and_unit_suffix(raw_lit).family;
+
+// Dimensional literals (`250ms`, `64KB`) take their value from these two functions.
+comptime {
+    __engine("bind_unit_literal", nameof(convert_unit_literal_to_base), nameof(unit_family_of_literal));
 }

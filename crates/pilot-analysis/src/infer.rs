@@ -224,6 +224,8 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                 | NodeKind::GuardStmt | NodeKind::MatchArm | NodeKind::ScopeDecl | NodeKind::PatOr | NodeKind::PatRange => {
                     push_ch(node.lhs); push_ch(node.rhs);
                 }
+                // `name: value`: the name is a symbol, the value a node.
+                NodeKind::CallArg => push_ch(node.rhs),
                 NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl | NodeKind::CatchClause => push_ch(node.rhs),
                 NodeKind::MemberExpr | NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::YieldStmt | NodeKind::DeferStmt | NodeKind::BreakStmt | NodeKind::ContinueStmt
                 | NodeKind::ExprStmt | NodeKind::TryPropagateExpr | NodeKind::DestructorDecl | NodeKind::DynamicMemberDecl

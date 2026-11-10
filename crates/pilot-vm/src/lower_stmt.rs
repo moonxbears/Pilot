@@ -27,6 +27,7 @@ impl BytecodeCompiler {
                 NodeKind::FnDecl => {
                     let arity = (cn.flags as usize).saturating_sub(1);
                     self.known_fns.insert(Self::name(arena, cn.lhs).to_string(), arity);
+                    self.register_params(Self::name(arena, cn.lhs).to_string(), NodeId(c_id));
                 }
                 _ => {}
             }
@@ -87,6 +88,10 @@ impl BytecodeCompiler {
     /// released before the next; the block's value is its last statement's.
     pub(crate) fn compile_block(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
         let children: Vec<u32> = arena.children_slice(lhs, rhs).to_vec();
+        self.block_scopes.push(crate::BlockScope {
+            slots: self.var_slots.clone(),
+            types: self.var_types.clone(),
+        });
         self.defers.push(Vec::new());
         let mut last = 0;
         for (i, &c) in children.iter().enumerate() {
@@ -100,7 +105,12 @@ impl BytecodeCompiler {
             Some(&c) if Self::item_yields_value(arena, NodeId(c)) => last,
             _ => self.emit_const(PilotVal::NULL),
         };
-        self.close_defer_scope(arena, value)
+        let r = self.close_defer_scope(arena, value);
+        if let Some(scope) = self.block_scopes.pop() {
+            self.var_slots = scope.slots;
+            self.var_types = scope.types;
+        }
+        r
     }
 
     /// Lowers a function. `owner` is the struct/extend name for methods.
@@ -258,23 +268,35 @@ impl BytecodeCompiler {
     pub(crate) fn compile_let(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
         let node = *arena.node(node_id);
         let (name, rhs) = (Self::name(arena, node.lhs).to_string(), NodeId(node.rhs));
-        if let Some(ann_id) = arena.type_annot(node_id) {
+        // A name bound outside the enclosing block is shadowed, not reused:
+        // the new binding gets its own slot and its own type.
+        let shadows = self.block_scopes.last().is_some_and(|outer| {
+            outer.slots.get(&name).is_some() && outer.slots.get(&name) == self.var_slots.get(&name)
+        });
+        // The value is compiled before the binding exists, so it still sees
+        // any outer binding of the same name.
+        let annotated = arena.type_annot(node_id).and_then(|ann_id| {
             let an = arena.node(ann_id);
-            if matches!(an.node_kind(), NodeKind::TypeNamed | NodeKind::IdentExpr) {
-                self.var_types.insert(name.clone(), Self::name(arena, an.lhs).to_string());
-            }
-        }
-        if !self.var_types.contains_key(&name) && rhs.is_some() {
-            if let Some(ty) = self.infer_call_type(arena, rhs) {
-                self.var_types.insert(name.clone(), ty);
-            }
-        }
+            matches!(an.node_kind(), NodeKind::TypeNamed | NodeKind::IdentExpr)
+                .then(|| Self::name(arena, an.lhs).to_string())
+        });
+        let kept = if shadows { None } else { self.var_types.get(&name).cloned() };
+        let ty = annotated
+            .or(kept)
+            .or_else(|| rhs.is_some().then(|| self.infer_call_type(arena, rhs)).flatten());
         let mark = self.next_reg;
-        let hint = self.var_types.get(&name).cloned();
-        let r_val = if rhs.is_some() { self.compile_with_hint(arena, rhs, hint) } else { self.emit_null() };
-        let slot = match self.var_slots.get(&name) {
-            Some(&s) => s,
+        let r_val = if rhs.is_some() { self.compile_with_hint(arena, rhs, ty.clone()) } else { self.emit_null() };
+        match ty {
+            Some(t) => {
+                self.var_types.insert(name.clone(), t);
+            }
             None => {
+                self.var_types.remove(&name);
+            }
+        }
+        let slot = match self.var_slots.get(&name) {
+            Some(&s) if !shadows => s,
+            _ => {
                 let s = self.alloc_local_reg();
                 self.reg_symbols.push((s, node.lhs, 0));
                 s

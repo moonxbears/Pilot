@@ -1,0 +1,65 @@
+// =========================================================================
+// FILE: stdlib/db/set_ops.pilot
+// SEQUENCE SET OPERATORS (`a union b`, `a intersect b`, `a except b`)
+// =========================================================================
+// The operators are registered by `stdlib/db/sql_syntax.pilot`. Each result
+// keeps the order its elements first appear in and holds no duplicates;
+// elements compare with `==`.
+pub pkg Pilot.Db.SetOps;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+
+// Whether `xs` holds an element equal to `x`.
+pub pure fn seq_has<T: IEquatable<T>>(xs: T[], x: T) -> bool {
+    for y in xs {
+        if y == x {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Every element of `a`, then every element of `b`, each once.
+pub fn seq_union<T: IEquatable<T>>(a: T[], b: T[]) -> T[] {
+    var out: T[] = [];
+    for x in a {
+        if !seq_has(out, x) {
+            out.push(x);
+        }
+    }
+    for x in b {
+        if !seq_has(out, x) {
+            out.push(x);
+        }
+    }
+    return out;
+}
+
+// The elements of `a` that `b` also holds, each once.
+pub fn seq_intersect<T: IEquatable<T>>(a: T[], b: T[]) -> T[] {
+    var out: T[] = [];
+    for x in a {
+        if seq_has(b, x) && !seq_has(out, x) {
+            out.push(x);
+        }
+    }
+    return out;
+}
+
+// The elements of `a` that `b` does not hold, each once.
+pub fn seq_except<T: IEquatable<T>>(a: T[], b: T[]) -> T[] {
+    var out: T[] = [];
+    for x in a {
+        if !seq_has(b, x) && !seq_has(out, x) {
+            out.push(x);
+        }
+    }
+    return out;
+}
+
+comptime {
+    __engine("bind_operator_fn", nameof(union),     nameof(seq_union));
+    __engine("bind_operator_fn", nameof(intersect), nameof(seq_intersect));
+    __engine("bind_operator_fn", nameof(except),    nameof(seq_except));
+}
