@@ -17,7 +17,7 @@ pub struct ErrorDef : IValue {
 
 pub let ERRORS = [
     // -------------------------------------------------------------------------
-    // 1. Type Safety & Type Mismatches (TYPE001 - TYPE005)
+    // 1. Type Safety & Type Mismatches (TYPE001 - TYPE006)
     // -------------------------------------------------------------------------
     ErrorDef {
         code: "TYPE001",
@@ -53,6 +53,13 @@ pub let ERRORS = [
         description: "Type argument does not satisfy interface contract bounds required by generic parameter",
         category: "TypeSafety",
         reference: "C# CS0311 / Rust E0277",
+    },
+    ErrorDef {
+        code: "TYPE006",
+        title: "Interface Member Not Provided",
+        description: "A struct implements an interface but does not provide a member the interface requires",
+        category: "TypeSafety",
+        reference: "C# CS0535 / Rust E0046",
     },
 
     // -------------------------------------------------------------------------

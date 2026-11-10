@@ -329,7 +329,7 @@ pub struct {
             get => .source_buf[line_idx];
             set {
                 comptime {
-                    if !.window.contains(line_idx) {
+                    if !self.window.contains(line_idx) {
                         compile_error("PatchLineOutOfWindow: Attempted to mutate a line outside the declared Patch window");
                     }
                 }

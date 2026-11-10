@@ -12,7 +12,7 @@ use Pilot.Core.Keywords::*;
 
 [KeywordDefAttr(26, "Borrowed contiguous memory slice view backed by pointer and length (16 bytes).")]
 [Lang(Cfg.Lang.slice_t), Layout(c_abi)]
-pub partial struct slice<T: IAnyValue> : IReadOnlyList<T>, IReference {
+pub partial struct slice<T: IAnyValue> : IView<T>, IEnumerable<T, SliceEnumerator<T>> {
     *RawStorageBundle<T>;
     *ContiguousViewFacet<T>;
 
@@ -28,6 +28,16 @@ pub partial struct slice<T: IAnyValue> : IReadOnlyList<T>, IReference {
             data: .data + s.start,
             len:  (s.end - s.start) + 1,
         };
+
+        fn contains(item: T) -> bool {
+            var idx: usize = 0;
+            loop {
+                if !(idx < .len) { break; }
+                if .data[idx] == item { return true; }
+                idx = idx + 1;
+            }
+            return false;
+        }
 
         fn subslice(start: usize, sub_len: usize) -> slice<T> => slice<T> {
             data: .data + start,

@@ -33,18 +33,28 @@ pub struct StreamOpt : IValue {
 }
 
 // ------------------------------------------------------------------------------
-// 2. Concrete Pull-Cursor Combinators (0b01 : IReference)
+// 2. Concrete Pull-Cursor Combinators (0b01 through ICursor)
 // ------------------------------------------------------------------------------
 
-pub struct SliceStream : IReference {
+pub struct SliceStream : ICursor<i64> {
     pub items: slice<i64>;
     pub cur:   usize;
     pub len:   usize;
+
+    /// The item the last successful `move_next` reached.
+    pub current: i64;
+
+    pub var fn move_next(var ref self) -> bool {
+        let item = self.next();
+        if item.has_value { self.current = item.val; }
+        return item.has_value;
+    }
 
     pub static pure fn create(s: slice<i64>) -> SliceStream => SliceStream {
         items: s,
         cur:   0,
         len:   s.len(),
+        current: 0,
     };
 
     pub var fn next(var ref self) -> StreamOpt {
@@ -62,13 +72,23 @@ pub struct SliceStream : IReference {
     }
 }
 
-pub struct TakeStream : IReference {
+pub struct TakeStream : ICursor<i64> {
     pub source: SliceStream;
     pub remaining: usize;
+
+    /// The item the last successful `move_next` reached.
+    pub current: i64;
+
+    pub var fn move_next(var ref self) -> bool {
+        let item = self.next();
+        if item.has_value { self.current = item.val; }
+        return item.has_value;
+    }
 
     pub static pure fn create(src: SliceStream, count: usize) -> TakeStream => TakeStream {
         source:    src,
         remaining: count,
+        current:   0,
     };
 
     pub var fn next(var ref self) -> StreamOpt {
@@ -90,13 +110,23 @@ pub struct TakeStream : IReference {
     }
 }
 
-pub struct StepStream : IReference {
+pub struct StepStream : ICursor<i64> {
     pub source: SliceStream;
     pub step:   usize;
+
+    /// The item the last successful `move_next` reached.
+    pub current: i64;
+
+    pub var fn move_next(var ref self) -> bool {
+        let item = self.next();
+        if item.has_value { self.current = item.val; }
+        return item.has_value;
+    }
 
     pub static pure fn create(src: SliceStream, step: usize) -> StepStream => StepStream {
         source: src,
         step:   if step > 0 { step } else { 1 },
+        current: 0,
     };
 
     pub var fn next(var ref self) -> StreamOpt {

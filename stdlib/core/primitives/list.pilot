@@ -1,12 +1,16 @@
 // =========================================================================
 // FILE: stdlib/core/primitives/list.pilot
-// GROWABLE OWNED LIST (`List<T>`, 0b10 IObject)
+// GROWABLE OWNED LIST (`List<T>`, 0b10 through IBuffer)
 // =========================================================================
 // The seed runs `List<T>` as its own engine list (see the `list_*` bindings
 // in stdlib/core/builtins/native_calls.pilot): `List()` and `[a, b]` build
-// one, and the methods below act on it. This declaration states that
-// surface, so the type checker knows the type and its members. The layout
-// over raw memory comes with `std.col` once the seed runs native code (F6).
+// one, and the bodiless methods below are answered by the engine. The
+// members with bodies are written over those. The seed links this file only
+// into a program that imports `Pilot.Core.Primitives.List` (known bug
+// `seed.primitive_bodies`), and does not run property getters yet, so
+// `count` and `ListEnumerator.current` read null (`seed.property_getters`).
+// The layout over raw memory comes with `std.col` once the seed runs native
+// code (F6).
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.List;
 
@@ -14,11 +18,9 @@ use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
 
 [Lang(Cfg.Lang.list_t)]
-pub partial struct List<T: IAnyValue> : IObject {
+pub partial struct List<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerator<T>> {
     /// The number of items.
     pub fn len() -> usize;
-    pub fn probe_empty() -> bool => .len() == 0;
-    pub count: usize { get => .len(); }
     /// Appends `item` and returns the list.
     pub fn push(item: T) -> List<T>;
     /// Removes and returns the last item; an empty list stops the program.
@@ -30,4 +32,53 @@ pub partial struct List<T: IAnyValue> : IObject {
     pub op [] (index: usize) -> T;
     /// Replaces the item at `index`.
     pub op []= (index: usize, item: T);
+
+    /// The number of items.
+    pub count: usize { get => .len(); }
+
+    /// Whether some item equals `item`.
+    pub fn contains(item: T) -> bool {
+        var i: usize = 0;
+        while i < .len() {
+            if self[i] == item { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    /// Appends `item`.
+    pub fn add(item: T) { .push(item); }
+
+    /// Removes every item.
+    pub fn clear() {
+        while .len() > 0 { .pop(); }
+    }
+
+    pub fn get_enumerator() -> ListEnumerator<T> => ListEnumerator<T> {
+        items:       self,
+        index:       0,
+        has_started: false,
+    };
+}
+
+/// Walks a `List<T>` front to back.
+[StandIn("list.enumerator_borrow", "a borrowed reference to the list it walks", "holds the list value itself until fields can be declared as borrowed references", "F5")]
+pub struct ListEnumerator<T: IAnyValue> : ICursor<T> {
+    pub items:       List<T>;
+    pub index:       usize;
+    pub has_started: bool;
+
+    pub var fn move_next() -> bool {
+        if !self.has_started {
+            .has_started = true;
+            return .items.len() > 0;
+        }
+        if .index + 1 < .items.len() {
+            .index = .index + 1;
+            return true;
+        }
+        return false;
+    }
+
+    pub current: T { get => .items[.index]; }
 }

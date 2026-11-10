@@ -17,7 +17,7 @@ pub partial struct result<TOk: IAnyValue, TErr: IAnyValue> : IEquatable<result<T
     pub err_val: TErr;
     pub is_ok:   bool;
 
-    pub is_err: bool { get => !.is_ok; }
+    pub is_err: bool { get => !self.is_ok; }
 
     // The payload a result does not hold is left out, which zero-fills it.
     pub static pure:
@@ -52,7 +52,7 @@ pub partial struct result<TOk: IAnyValue, TErr: IAnyValue> : IEquatable<result<T
             if .is_ok { option<TOk>.some(.ok_val) } else { option<TOk>.none() };
 
         fn err_option() -> option<TErr> =>
-            if !.is_ok { option<TErr>.some(.err_val) } else { option<TErr>.none() };
+            if !self.is_ok { option<TErr>.some(.err_val) } else { option<TErr>.none() };
 
         fn map<U: IAnyValue>(f: (TOk) => U) -> result<U, TErr> =>
             if .is_ok {

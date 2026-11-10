@@ -200,7 +200,11 @@ pub interface {
         pub pure fn flat() -> slice<TLeaf>;
     }
 
-    // 6. Zero-Allocation Value-Type Iteration Hierarchy (`for x in coll`)
+    // 6. Zero-Allocation Value-Type Iteration & Collection Capabilities
+    // These contracts say what a type can do, not how it holds memory, so
+    // they are lattice-neutral (`: IAnyValue`): an inline `array` (0b00), a
+    // borrowed `slice` (0b01) and an owned `List` (0b10) are all lists.
+    // Section 7 binds them to one lattice root each.
     IEnumerator<TItem: IAnyValue> : IAnyValue {
         pub var fn move_next() -> bool;
         pub current: TItem { get; }
@@ -210,25 +214,79 @@ pub interface {
         pub pure fn get_enumerator() -> TEnum;
     }
 
-    ICollection<TItem: IAnyValue> : IAnyValue {
+    /// A finite group of items that can be counted and searched.
+    IReadOnlyCollection<TItem: IAnyValue> : IAnyValue {
         pub count:    usize { get; }
         pub is_empty: bool  { get => .count == 0; }
         pub pure fn contains(item: TItem) -> bool;
+    }
+
+    /// A collection items can be added to and cleared from.
+    ICollection<TItem: IAnyValue> : IReadOnlyCollection<TItem> {
         pub var:
             fn add(item: TItem);
             fn clear();
     }
 
-    IReadOnlyList<TItem: IAnyValue> : IIndexGet<usize, TItem> {
-        pub count:    usize { get; }
-        pub is_empty: bool  { get => .count == 0; }
+    /// Items in order, read by position.
+    IReadOnlyList<TItem: IAnyValue> : IReadOnlyCollection<TItem>, IIndexGet<usize, TItem> {}
+
+    /// A fixed number of items in order, each of which can be replaced.
+    IWritableList<TItem: IAnyValue> : IReadOnlyList<TItem>, IIndexSet<usize, TItem> {}
+
+    /// Items in order that can grow and shrink.
+    IList<TItem: IAnyValue> : ICollection<TItem>, IWritableList<TItem> {
+        /// Removes and returns the item at `index`.
+        pub var fn remove_at(index: usize) -> TItem;
     }
 
-    IList<TItem: IAnyValue> :
-        ICollection<TItem>,
-        IReadOnlyList<TItem>,
-        IIndexSet<usize, TItem>
-    {
-        pub var fn remove_at(index: usize);
+    /// Items taken out in the order they were put in.
+    IQueue<TItem: IAnyValue> : IReadOnlyCollection<TItem> {
+        pub var:
+            /// Puts `item` at the back; false when the queue is full.
+            fn enqueue(item: TItem) -> bool;
+            /// Takes the front item; none when the queue is empty.
+            fn dequeue() -> option<TItem>;
     }
+
+    /// Values looked up by key.
+    IReadOnlyDictionary<TKey: IEquatable<TKey>, TVal: IAnyValue> : IIndexGet<TKey, TVal> {
+        pub count:    usize { get; }
+        pub is_empty: bool  { get => .count == 0; }
+        pub pure fn has(key: TKey) -> bool;
+        pub pure fn get(key: TKey) -> option<TVal>;
+    }
+
+    /// Values looked up by key that can be set and removed.
+    IDictionary<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReadOnlyDictionary<TKey, TVal>, IIndexSet<TKey, TVal> {
+        pub var:
+            fn set(key: TKey, val: TVal);
+            /// Removes `key`; false when it was not there.
+            fn remove(key: TKey) -> bool;
+            fn clear();
+    }
+
+    // 7. Lattice Roles: one capability contract bound to one lattice root.
+    // A concrete collection names its role and gets its lattice through it;
+    // it names `IValue`, `IReference` or `IObject` itself only when no role
+    // fits (a bounds pair such as `range` is just a value).
+    /// A fixed-length list stored inline (0b00): `array`.
+    IInlineList<TItem: IAnyValue> : IWritableList<TItem>, IValue {}
+
+    /// A borrowed window over items someone else owns (0b01): `slice`,
+    /// `stride`, `str`.
+    IView<TItem: IAnyValue> : IReadOnlyList<TItem>, IReference {}
+
+    /// A borrowed position moving over a sequence (0b01): the enumerators
+    /// and streams.
+    ICursor<TItem: IAnyValue> : IEnumerator<TItem>, IReference {}
+
+    /// An owned list that can grow (0b10): `List`, `SliceBuffer`, `ListBuffer`.
+    IBuffer<TItem: IAnyValue> : IList<TItem>, IObject {}
+
+    /// A borrowed key-value projection (0b01): `map`.
+    IDictionaryView<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReadOnlyDictionary<TKey, TVal>, IReference {}
+
+    /// An owned dictionary (0b10): `Map`, `MapBuffer`.
+    IDictionaryBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionary<TKey, TVal>, IObject {}
 }

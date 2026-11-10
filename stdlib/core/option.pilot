@@ -15,7 +15,7 @@ pub partial struct option<T: IAnyValue> : IEquatable<option<T>>, ITryOperator<T,
     pub has_value: bool;
 
     pub is_some: bool { get => .has_value; }
-    pub is_none: bool { get => !.has_value; }
+    pub is_none: bool { get => !self.has_value; }
 
     pub static pure:
         fn some(v: T) -> option<T> => option<T> {
@@ -39,7 +39,7 @@ pub partial struct option<T: IAnyValue> : IEquatable<option<T>>, ITryOperator<T,
             if .has_value != rhs.has_value {
                 false
             } else {
-                if !.has_value { true } else { .val == rhs.val }
+                if !self.has_value { true } else { .val == rhs.val }
             };
 
         fn unwrap_or(default_val: T) -> T => if .has_value { .val } else { default_val };

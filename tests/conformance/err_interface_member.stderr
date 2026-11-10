@@ -1,0 +1,2 @@
+error[TYPE006]: `HalfList` does not provide what its interfaces require: `remove_at` (IList), `clear` (ICollection), `contains` (IReadOnlyCollection), `[]` (IIndexGet), `[]=` (IIndexSet)
+err_interface_member.pilot:3:1

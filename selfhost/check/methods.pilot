@@ -417,6 +417,17 @@ pub fn prog_member(p: Program, t: i64, member: str) -> Member? {
     return none;
 }
 
+/// Whether type `name` has `member` itself: a field or property it exposes,
+/// or a method its table resolves (its own, a splice's, an interface
+/// default or an extension). None while its table is incomplete.
+pub fn type_provides(p: Program, name: str, member: str) -> bool? {
+    let bt = build_type(p, name, 0);
+    if !bt.complete { return none; }
+    if bt.fields.has(member) { return true; }
+    if some _m = winner(bt, member) { return true; }
+    return false;
+}
+
 /// Whether the member lookup on `t` is complete: every splice and base of
 /// the type and its parts resolved to a declaration. When it is not, a
 /// missing member may still exist and must not be reported.

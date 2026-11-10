@@ -57,6 +57,18 @@ impl BytecodeCompiler {
         matches!(arena.node(m).node_kind(), NodeKind::FnDecl | NodeKind::OperatorDecl)
     }
 
+    /// Whether a function-like declaration has a body. One without states a
+    /// signature the engine answers (a native-bound method), so the type is
+    /// not recorded as declaring it.
+    pub(crate) fn has_body(arena: &AstArena, m: NodeId) -> bool {
+        let n = arena.node(m);
+        n.flags > 0
+            && arena
+                .extra_children
+                .get(n.rhs as usize)
+                .is_some_and(|&b| !NodeId(b).is_none())
+    }
+
     /// Records the methods a struct or `ext` block declares, and a struct's
     /// fields and constructor.
     pub(crate) fn register_struct(&mut self, arena: &AstArena, decl: NodeId) {
@@ -66,7 +78,7 @@ impl BytecodeCompiler {
         }
         let owner = Self::name(arena, dn.lhs).to_string();
         for m in Self::type_members(arena, NodeId(dn.rhs)) {
-            if !Self::is_method_decl(arena, m) {
+            if !Self::is_method_decl(arena, m) || !Self::has_body(arena, m) {
                 continue;
             }
             let is_static =

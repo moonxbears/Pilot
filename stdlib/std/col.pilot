@@ -7,17 +7,30 @@ pub pkg std.col;
 pub pure fn nameof(sym: str) -> str => sym;
 
 // ------------------------------------------------------------------------------
-// Dynamic List Buffer (0b10 : IObject)
+// Dynamic List Buffer (0b10 through IBuffer)
 // ------------------------------------------------------------------------------
-pub struct ListBuffer<T: IAnyValue> : IObject {
+pub struct ListBuffer<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerator<T>> {
     pub items: List<T>;
 
-    pub pure fn len(ref self) -> usize => self.items.len;
-    pub pure fn is_empty(ref self) -> bool => self.items.len == 0;
+    pub count: usize { get => self.items.len(); }
+
+    pub pure fn len(ref self) -> usize => self.items.len();
+
+    pub pure fn contains(ref self, item: T) -> bool => self.items.contains(item);
+
+    pub fn add(var ref self, item: T) {
+        self.items.push(item);
+    }
 
     pub fn push(var ref self, item: T) {
         self.items.push(item);
     }
+
+    pub fn clear(var ref self) {
+        while self.items.len() > 0 { self.items.pop(); }
+    }
+
+    pub fn remove_at(var ref self, index: usize) -> T => self.items.remove_at(index);
 
     pub fn get(ref self, index: usize) -> T {
         return self.items[index];
@@ -27,17 +40,25 @@ pub struct ListBuffer<T: IAnyValue> : IObject {
         self.items[index] = item;
     }
 
+    pub op [] (index: usize) -> T => self.items[index];
+
+    pub op []= (index: usize, item: T) {
+        self.items[index] = item;
+    }
+
+    pub pure fn get_enumerator(ref self) -> ListEnumerator<T> => self.items.get_enumerator();
+
     ~self() {}
 }
 
-pub fn list_buffer_new<T>() -> ListBuffer<T> {
+pub fn list_buffer_new<T: IAnyValue>() -> ListBuffer<T> {
     return ListBuffer<T> { items: [] };
 }
 
 // ------------------------------------------------------------------------------
-// Ring Buffer Queue (0b10 : IObject)
+// Ring Buffer Queue (0b10 : IObject): a queue of at most `capacity` items.
 // ------------------------------------------------------------------------------
-pub struct RingBuffer<T: IAnyValue> : IObject {
+pub struct RingBuffer<T: IAnyValue> : IQueue<T>, IObject {
     pub capacity: usize;
     pub head:     usize;
     pub tail:     usize;
@@ -46,12 +67,40 @@ pub struct RingBuffer<T: IAnyValue> : IObject {
 
     pub pure fn len(ref self) -> usize => self.count;
     pub pure fn is_full(ref self) -> bool => self.count >= self.capacity;
-    pub pure fn is_empty(ref self) -> bool => self.count == 0;
+
+    pub pure fn contains(ref self, item: T) -> bool {
+        var i: usize = 0;
+        while i < self.count {
+            if self.items[(self.head + i) % self.capacity] == item { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    pub fn enqueue(var ref self, item: T) -> bool {
+        if self.count >= self.capacity { return false; }
+        if self.items.len() < self.capacity {
+            self.items.push(item);
+        } else {
+            self.items[self.tail] = item;
+        }
+        self.tail = (self.tail + 1) % self.capacity;
+        self.count = self.count + 1;
+        return true;
+    }
+
+    pub fn dequeue(var ref self) -> T? {
+        if self.count == 0 { return none; }
+        let item = self.items[self.head];
+        self.head = (self.head + 1) % self.capacity;
+        self.count = self.count - 1;
+        return item;
+    }
 
     ~self() {}
 }
 
-pub fn ring_buffer_new<T>(capacity: usize) -> RingBuffer<T> {
+pub fn ring_buffer_new<T: IAnyValue>(capacity: usize) -> RingBuffer<T> {
     return RingBuffer<T> {
         capacity: capacity,
         head:     0,

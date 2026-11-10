@@ -11,9 +11,13 @@ use Pilot.Core.Keywords::*;
 
 [KeywordDefAttr(28, "Half-open interval `start .. end` iterating from start up to (excluding) end.")]
 [Lang(Cfg.Lang.range_t), Layout(c_abi)]
-pub partial struct range<T: INumber<T>> : IValue {
+// A bounds pair is a plain value (0b00): it names `IValue` itself, since no
+// collection role is stored inline as a pair of bounds.
+pub partial struct range<T: INumber<T>> : IReadOnlyCollection<T>, IEnumerable<T, RangeEnumerator<T>>, IValue {
     pub start: T;
     pub end:   T;
+    /// The number of values from `start` up to, not including, `end`.
+    pub count: usize { get => if .end > .start { (.end - .start) as usize } else { 0 }; }
 
     pub pure:
         fn contains(v: T) -> bool => (v >= .start) && (v < .end);

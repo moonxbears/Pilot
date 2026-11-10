@@ -154,7 +154,7 @@ pub struct ForeignHandle<T: IAnyValue> : IObject {
     }
 
     pub var fn try_take_raw() -> opt<i64> {
-        if .raw_ptr == 0 || !.is_armed {
+        if .raw_ptr == 0 || !self.is_armed {
             return opt<i64>::none();
         }
         let p = .take_raw();

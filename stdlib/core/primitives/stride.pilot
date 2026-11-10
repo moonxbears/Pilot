@@ -12,7 +12,7 @@ use Pilot.Core.Keywords::*;
 
 [KeywordDefAttr(26, "Strided offset memory lens view backed by pointer, length, and byte stride (24 bytes).")]
 [Lang(Cfg.Lang.stride_t), Layout(c_abi)]
-pub partial struct stride<T: IAnyValue> : IReadOnlyList<T>, IReference {
+pub partial struct stride<T: IAnyValue> : IView<T>, IEnumerable<T, StrideEnumerator<T>> {
     *RawStorageBundle<T>;
     *ContiguousViewFacet<T>;
     pub byte_step: isize;
@@ -24,6 +24,16 @@ pub partial struct stride<T: IAnyValue> : IReadOnlyList<T>, IReference {
             let elem_addr = (base_addr as isize + step_off) as usize;
             let elem_ptr  = __ssa_cast(Cfg.Ssa.bitcast, elem_addr, ptr<T>);
             return __ssa_load(elem_ptr);
+        }
+
+        fn contains(item: T) -> bool {
+            var idx: usize = 0;
+            loop {
+                if !(idx < .len) { break; }
+                if self[idx] == item { return true; }
+                idx = idx + 1;
+            }
+            return false;
         }
 
         fn get_enumerator() -> StrideEnumerator<T> => StrideEnumerator<T> {

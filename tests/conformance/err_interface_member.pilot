@@ -1,0 +1,17 @@
+// A struct that names a collection role but does not provide everything
+// the role's interfaces require (TYPE006).
+struct HalfList : IBuffer<i64> {
+    pub items: List<i64>;
+    pub count: usize;
+
+    pub fn add(item: i64) {
+        .items.push(item);
+        .count = .count + 1;
+    }
+}
+
+fn main() {
+    var h = HalfList { items: [], count: 0 };
+    h.add(1);
+    print(h.count);
+}

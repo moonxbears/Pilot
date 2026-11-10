@@ -1,0 +1,13 @@
+// A property with a getter (`count: usize { get => .. }`) is read like a
+// field. The seed does not run the getter: the read gives null.
+struct Bag {
+    pub items: List<i64>;
+    pub count: usize { get => .items.len(); }
+}
+
+fn main() {
+    var b = Bag { items: [] };
+    print(b.count);
+    b.items.push(4);
+    print(b.count);
+}

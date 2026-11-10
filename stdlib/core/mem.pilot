@@ -24,14 +24,14 @@ let ContiguousViewFacet<TItem: IAnyValue> = {
 // Zero-allocation value enumerators for `slice<T>` and `stride<T>`
 pub struct {
     [Layout(c_abi)]
-    SliceEnumerator<TItem: IAnyValue> : IEnumerator<TItem>, IReference {
+    SliceEnumerator<TItem: IAnyValue> : ICursor<TItem> {
         pub data:  ptr<TItem>;
         pub len:   usize;
         pub index: usize;
         pub has_started: bool;
 
         pub var fn move_next() -> bool {
-            if !.has_started {
+            if !self.has_started {
                 .has_started = true;
                 return .len > 0;
             }
@@ -49,13 +49,13 @@ pub struct {
     }
 
     [Layout(c_abi)]
-    StrideEnumerator<TItem: IAnyValue> : IEnumerator<TItem>, IReference {
+    StrideEnumerator<TItem: IAnyValue> : ICursor<TItem> {
         pub source: stride<TItem>;
         pub index:  usize;
         pub has_started: bool;
 
         pub var fn move_next() -> bool {
-            if !.has_started {
+            if !self.has_started {
                 .has_started = true;
                 return .source.len > 0;
             }
@@ -73,247 +73,15 @@ pub struct {
     }
 }
 
+// `ptr`, `slice`, `stride`, `array`, `simd`, `grid`, `ring`, `map`, `splat`,
+// `pairs` and `expand` are declared once each in stdlib/core/primitives/.
 pub partial struct {
-    // 1. Raw 64-Bit Address Register (`ptr<T>` / `T*`) — `0b01` `IReference`
-    [Lang(Cfg.Lang.ptr_t), Bits(Cfg.Reg.b64, Cfg.Reg.raw_ptr)]
-    ptr<T: IAnyValue> : IIndexGet<usize, T>, IIndexSet<usize, T>, IEquatable<ptr<T>>, IReference {
-        pub pure:
-            op []  (idx: usize)    -> T      => __ssa_load(__ssa_gep(self, idx));
-            op +   (offset: usize) -> ptr<T> => __ssa_gep(self, offset);
-            op -   (offset: usize) -> ptr<T> => __ssa_gep(self, 0 - offset);
-            op ==  (rhs: ptr<T>)   -> bool   => __ssa(Cfg.Ssa.eq, self, rhs);
-            fn is_null()           -> bool   => (__ssa_cast(Cfg.Ssa.bitcast, self, usize)) == 0;
-        pub var:
-            op []= (idx: usize, v: T)        => __ssa_store(__ssa_gep(self, idx), v);
-    }
-
-    // 2. Borrowed Contiguous Slice (`slice<T>` / `T[]`) — 16-Byte `{ ptr<T>, usize }`, `0b01` `IReference`
-    [Lang(Cfg.Lang.slice_t), Layout(c_abi)]
-    slice<T: IAnyValue> : IReadOnlyList<T>, IReference {
-        *RawStorageBundle<T>;
-        *ContiguousViewFacet<T>;
-
-        pub pure:
-            op [] (idx: usize) -> T => .data[idx];
-
-            op [] (r: range<usize>) -> slice<T> => slice<T> {
-                data: .data + r.start,
-                len:  r.end - r.start,
-            };
-
-            op [] (s: span<usize>) -> slice<T> => slice<T> {
-                data: .data + s.start,
-                len:  (s.end - s.start) + 1,
-            };
-
-            fn subslice(start: usize, sub_len: usize) -> slice<T> => slice<T> {
-                data: .data + start,
-                len:  sub_len,
-            };
-
-            fn get_enumerator() -> SliceEnumerator<T> => SliceEnumerator<T> {
-                data:        .data,
-                len:         .len,
-                index:       0,
-                has_started: false,
-            };
-
-            fn lens_column<TField: IAnyValue>(comptime field_sym: str) -> stride<TField> {
-                comptime {
-                    if lattice_bits_of(T) != Cfg.Lattice.value {
-                        compile_error("OffsetLens '~>' requires a 0b00 IValue element struct");
-                    }
-                }
-                let base_addr = (__ssa_cast(Cfg.Ssa.bitcast, .data, usize)) + offsetof(T, field_sym);
-                return stride<TField> {
-                    data:      __ssa_cast(Cfg.Ssa.bitcast, base_addr, ptr<TField>),
-                    len:       .len,
-                    byte_step: sizeof(T) as isize,
-                };
-            }
-
-            fn lens_map<TKey: IEquatable<TKey>, TVal: IAnyValue>(
-                comptime key_sym: str,
-                comptime val_sym: str
-            ) -> map<TKey, TVal> => map<TKey, TVal> {
-                keys: .lens_column<TKey>(key_sym),
-                vals: .lens_column<TVal>(val_sym),
-            };
-
-            fn as_structural_view<TDst: IValue>() -> stride<TDst> {
-                comptime {
-                    if (lattice_bits_of(T) != Cfg.Lattice.value) || (lattice_bits_of(TDst) != Cfg.Lattice.value) {
-                        compile_error("'as view' requires both source and target structs to be 0b00 IValue");
-                    }
-                    if sizeof(TDst) > sizeof(T) {
-                        compile_error("'as view' target struct cannot be larger than source struct");
-                    }
-                }
-                return stride<TDst> {
-                    data:      __ssa_cast(Cfg.Ssa.bitcast, .data, ptr<TDst>),
-                    len:       .len,
-                    byte_step: sizeof(T) as isize,
-                };
-            }
-    }
-
-    // 3. Strided OffsetLens View (`stride<T>` / `T[..]`) — 24-Byte `{ ptr<T>, usize, isize }`, `0b01` `IReference`
-    [Lang(Cfg.Lang.stride_t), Layout(c_abi)]
-    stride<T: IAnyValue> : IReadOnlyList<T>, IReference {
-        *RawStorageBundle<T>;
-        *ContiguousViewFacet<T>;
-        pub byte_step: isize;
-
-        pub pure:
-            op [] (idx: usize) -> T {
-                let base_addr = __ssa_cast(Cfg.Ssa.bitcast, .data, usize);
-                let step_off  = (idx as isize) * .byte_step;
-                let elem_addr = (base_addr as isize + step_off) as usize;
-                let elem_ptr  = __ssa_cast(Cfg.Ssa.bitcast, elem_addr, ptr<T>);
-                return __ssa_load(elem_ptr);
-            }
-
-            fn get_enumerator() -> StrideEnumerator<T> => StrideEnumerator<T> {
-                source:      self,
-                index:       0,
-                has_started: false,
-            };
-
-            fn lens_column<TField: IAnyValue>(comptime field_sym: str) -> stride<TField> {
-                comptime {
-                    if lattice_bits_of(T) != Cfg.Lattice.value {
-                        compile_error("OffsetLens '~>' requires a 0b00 IValue element struct");
-                    }
-                }
-                let base_addr = (__ssa_cast(Cfg.Ssa.bitcast, .data, usize)) + offsetof(T, field_sym);
-                return stride<TField> {
-                    data:      __ssa_cast(Cfg.Ssa.bitcast, base_addr, ptr<TField>),
-                    len:       .len,
-                    byte_step: .byte_step,
-                };
-            }
-
-            fn lens_map<TKey: IEquatable<TKey>, TVal: IAnyValue>(
-                comptime key_sym: str,
-                comptime val_sym: str
-            ) -> map<TKey, TVal> => map<TKey, TVal> {
-                keys: .lens_column<TKey>(key_sym),
-                vals: .lens_column<TVal>(val_sym),
-            };
-
-            fn as_structural_view<TDst: IValue>() -> stride<TDst> {
-                comptime {
-                    if (lattice_bits_of(T) != Cfg.Lattice.value) || (lattice_bits_of(TDst) != Cfg.Lattice.value) {
-                        compile_error("'as view' requires both source and target structs to be 0b00 IValue");
-                    }
-                    if sizeof(TDst) > sizeof(T) {
-                        compile_error("'as view' target struct cannot be larger than source struct");
-                    }
-                }
-                return stride<TDst> {
-                    data:      __ssa_cast(Cfg.Ssa.bitcast, .data, ptr<TDst>),
-                    len:       .len,
-                    byte_step: .byte_step,
-                };
-            }
-    }
-
-    // 4. Inline Fixed-Size C-ABI Array (`array<T, N>` / `T[N]`) — `N * sizeof(T)` Bytes, `0b00` `IValue`
-    [Lang(Cfg.Lang.array_t), Layout("inline_array")]
-    array<T: IAnyValue, N: const usize> : IList<T>, IValue {
-        pub count:    usize { get => N; }
-        pub is_empty: bool  { get => N == 0; }
-
-        pub pure:
-            fn as_ptr() -> ptr<T> => __ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>);
-
-            fn as_slice() -> slice<T> => slice<T> {
-                data: .as_ptr(),
-                len:  N,
-            };
-
-            op [] (idx: usize) -> T => .as_ptr()[idx];
-
-            fn contains(item: T) -> bool {
-                var idx: usize = 0;
-                loop {
-                    if !(idx < N) { break; }
-                    if .as_ptr()[idx] == item { return true; }
-                    idx = idx + 1;
-                }
-                return false;
-            }
-
-            fn get_enumerator() -> SliceEnumerator<T> => .as_slice().get_enumerator();
-
-        pub var:
-            op []= (idx: usize, val: T) => { .as_ptr()[idx] = val; }
-            fn add(item: T) {}
-            fn clear() {}
-            fn remove_at(index: usize) {}
-    }
-
-    // 5. Hardware SIMD Vector (`simd<T, N>` / `T@N`) — `N * sizeof(T)` Bytes, `0b00` `IValue`
-    [Lang(Cfg.Lang.simd_t), Bits(Cfg.Reg.b0, Cfg.Reg.simd_v), Layout("inline_array")]
-    simd<T: IValue, N: const usize> : IValue {
-        pub lanes: usize { get => N; }
-        pub pure:
-            op [] (idx: usize) -> T => (__ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>))[idx];
-            op +  (rhs: simd<T, N>) -> simd<T, N> => __ssa(Cfg.Ssa.add, self, rhs);
-            op -  (rhs: simd<T, N>) -> simd<T, N> => __ssa(Cfg.Ssa.sub, self, rhs);
-            op *  (rhs: simd<T, N>) -> simd<T, N> => __ssa(Cfg.Ssa.mul, self, rhs);
-    }
-
-    // 6. 2D Inline Matrix / Grid (`grid<T, N, M>` / `T[N, M]`) — `N * M * sizeof(T)` Bytes, `0b00` `IValue`
-    [Lang(Cfg.Lang.grid_t), Layout("inline_array")]
-    grid<T: IAnyValue, N: const usize, M: const usize> : IValue {
-        pub rows: usize { get => N; }
-        pub cols: usize { get => M; }
-        pub pure:
-            fn as_ptr() -> ptr<T> => __ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>);
-            op [] (row: usize) -> ptr<T> => .as_ptr() + (row * M);
-    }
-
-    // 7. Power-of-Two Circular Ring Buffer View (`ring<T>` / `T[:]`) — 24-Byte `{ ptr<T>, usize, usize }`, `0b01` `IReference`
-    [Lang(Cfg.Lang.ring_t), Layout(c_abi)]
-    ring<T: IAnyValue> : IIndexGet<usize, T>, IReference {
-        pub data: ptr<T>;
-        pub mask: usize;
-        pub head: usize;
-
-        pub pure:
-            op [] (idx: usize) -> T => .data[(.head + idx) & .mask];
-    }
-
-    // 8. Scoped Memory Pin Guard (`pin<T>` / `@T`) — `0b11` `IGuard`
+    // Scoped Memory Pin Guard (`pin<T>` / `@T`) — `0b11` `IGuard`
     [Lang(Cfg.Lang.pin_t), Layout(c_abi)]
     pin<T: IAnyValue> : IGuard {
         pub target: ptr<T>;
         ~self() {}
     }
-
-    // 9. Zero-Copy Key-Value Strided Projection (`map<K, V>`) — `0b01` `IReference`
-    [Lang(Cfg.Lang.map_t), Layout(c_abi)]
-    map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReference {
-        pub keys: stride<TKey>;
-        pub vals: stride<TVal>;
-        pub count: usize { get => .keys.len; }
-
-        pub pure fn contains_key(key: TKey) -> bool {
-            var idx: usize = 0;
-            loop {
-                if !(idx < .keys.len) { break; }
-                if .keys[idx] == key { return true; }
-                idx = idx + 1;
-            }
-            return false;
-        }
-    }
-
-    // 10. Splat & Flatten Carrier Primitives (`splat<T>`, `pairs<K, V>`, `expand<T>`)
-    [Lang(Cfg.Lang.splat_t),  Layout(c_abi)] splat<T: IAnyValue>                     : IReference { pub items: slice<T>; }
-    [Lang(Cfg.Lang.pairs_t),  Layout(c_abi)] pairs<K: IEquatable<K>, V: IAnyValue>   : IReference { pub entries: map<K, V>; }
-    [Lang(Cfg.Lang.expand_t), Layout(c_abi)] expand<T: IAnyValue>                    : IReference { pub items: slice<T>; }
 }
 
 pub struct {
@@ -326,7 +94,7 @@ pub struct {
 
     // 12. Milestone 15.3.3 24-Byte Universal C-ABI Owned Buffer (`SliceBuffer<T>`) — `0b10` `IObject`
     [Layout(c_abi)]
-    SliceBuffer<TItem: IAnyValue> : IList<TItem>, IObject {
+    SliceBuffer<TItem: IAnyValue> : IBuffer<TItem>, IEnumerable<TItem, SliceEnumerator<TItem>> {
         *RawStorageBundle<TItem>;
         *ContiguousViewFacet<TItem>;
         pub cap: usize;
@@ -356,23 +124,25 @@ pub struct {
         pub var:
             op []= (idx: usize, val: TItem) => { .data[idx] = val; }
             fn add(item: TItem) {
-                if .len < .cap {
-                    .data[.len] = item;
-                    .len = .len + 1;
+                if .len >= .cap {
+                    seam("mem.slice_buffer_grow", "growing past the capacity needs the heap allocator behind libpilot_rt (F6)");
                 }
+                .data[.len] = item;
+                .len = .len + 1;
             }
             fn clear() => { .len = 0; }
-            fn remove_at(index: usize) {
-                if index < .len {
-                    var i = index;
-                    let last = .len - 1;
-                    loop {
-                        if !(i < last) { break; }
-                        .data[i] = .data[i + 1];
-                        i = i + 1;
-                    }
-                    .len = last;
+            fn remove_at(index: usize) -> TItem {
+                assert(index < .len, "SliceBuffer.remove_at: index out of range");
+                let item = .data[index];
+                var i = index;
+                let last = .len - 1;
+                loop {
+                    if !(i < last) { break; }
+                    .data[i] = .data[i + 1];
+                    i = i + 1;
                 }
+                .len = last;
+                return item;
             }
     }
 

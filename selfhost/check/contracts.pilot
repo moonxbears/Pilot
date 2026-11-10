@@ -1,0 +1,116 @@
+// ==============================================================================
+// FILE: selfhost/check/contracts.pilot
+// TYPE006: a struct that does not provide what its interfaces require.
+// ==============================================================================
+// An interface requires each method it declares without a body and each
+// property or field it declares without an accessor body (`count: usize
+// { get; }`). A struct implementing it, directly or through other
+// interfaces, provides a member when it declares it (a body-less method of
+// a primitive is answered by the engine), splices it from a bundle or
+// facet, gets it from an `ext` block, or when some interface it reaches
+// gives it a body (`is_empty: bool { get => .count == 0; }`). Nothing is
+// reported while a base of the struct is not resolved.
+pub lvl(0) pkg Pilot.SelfHost.Check.Contracts;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.methods.*;
+use selfhost.check.diag.*;
+
+/// What the interfaces of one struct ask for and give.
+pub struct Contract {
+    /// Required member names, with the interface each comes from.
+    pub required: List<str>;
+    pub required_by: List<str>;
+    /// Members some interface gives a body to.
+    pub provided: Map<str, i64>;
+    /// Interfaces already visited.
+    pub seen: Map<str, i64>;
+    /// Whether every base was resolved.
+    pub resolved: bool;
+}
+
+/// Field node -> number of accessor bodies, for fields with an accessor block.
+fn ct_accessor_bodies(s: Snap) -> Map<str, i64> {
+    var out = Map<str, i64>();
+    for row in s.properties { out.set(f"{row[0]}", row[1]); }
+    return out;
+}
+
+fn ct_require(c: Contract, name: str, iname: str) {
+    for r in c.required { if r == name { return; } }
+    c.required.push(name);
+    c.required_by.push(iname);
+}
+
+/// Collects what interface `iname` and the interfaces it reaches ask for.
+fn ct_collect(p: Program, bodies: Map<str, i64>, c: Contract, iname: str, depth: i64) {
+    if depth > 16 || c.seen.has(iname) { return; }
+    c.seen.set(iname, 1);
+    let s = p.s;
+    for d in nl_get(p.type_decls, iname) {
+        if kind(s, d) != nk_interface() { continue; }
+        for m in type_members(s, d) {
+            let k = kind(s, m);
+            let name = node_name(s, m);
+            if k == nk_fn() || k == nk_operator() || k == nk_indexer() {
+                if fn_body(s, m) >= 0 { c.provided.set(name, 1); } else { ct_require(c, name, iname); }
+            } else if k == nk_param() {
+                let key = f"{m}";
+                if bodies.has(key) && bodies.get(key) > 0 { c.provided.set(name, 1); } else { ct_require(c, name, iname); }
+            }
+        }
+    }
+    ct_bases(p, bodies, c, iname, depth + 1);
+}
+
+fn ct_bases(p: Program, bodies: Map<str, i64>, c: Contract, name: str, depth: i64) {
+    for b in nl_get(p.bases, name) {
+        let bt = prog_annot_type(p, b);
+        if !ty_is_named(p.tt, bt) { c.resolved = false; continue; }
+        let decl = ty_decl(p.tt, bt);
+        if kind(p.s, decl) == nk_interface() { ct_collect(p, bodies, c, node_name(p.s, decl), depth); }
+    }
+}
+
+//// Reports TYPE006 on each struct declared in a user file that does not
+/// provide every member its interfaces require, naming each missing member
+/// and the interface that asks for it.
+pub fn check_contracts(p: Program, sink: DiagSink) {
+    let s = p.s;
+    let bodies = ct_accessor_bodies(s);
+    var done = Map<str, i64>();
+    var i = 0;
+    while i < s.count {
+        if kind(s, i) == nk_struct() && in_user_file(s, i) && !done.has(node_name(s, i)) {
+            let name = node_name(s, i);
+            done.set(name, i);
+            let c = Contract { required: [], required_by: [], provided: Map<str, i64>(), seen: Map<str, i64>(), resolved: true };
+            ct_bases(p, bodies, c, name, 0);
+            if c.resolved {
+                var missing: List<str> = [];
+                var r = 0;
+                while r < c.required.len() {
+                    let member = c.required[r];
+                    if !c.provided.has(member) {
+                        if some present = type_provides(p, name, member) {
+                            if !present { missing.push(f"`{member}` ({c.required_by[r]})"); }
+                        }
+                    }
+                    r = r + 1;
+                }
+                if missing.len() > 0 {
+                    var listed = missing[0];
+                    var m = 1;
+                    while m < missing.len() {
+                        listed = listed + ", " + missing[m];
+                        m = m + 1;
+                    }
+                    sink_error(sink, i, "TYPE006", f"`{name}` does not provide what its interfaces require: {listed}");
+                }
+            }
+        }
+        i = i + 1;
+    }
+}

@@ -1,0 +1,19 @@
+// A struct that declares `op []` and `op []=` is indexed through them
+// (IIndexGet / IIndexSet). The seed indexes the record as if it were a map
+// and never calls the operators.
+struct Pair {
+    pub a: i64;
+    pub b: i64;
+    pub op [] (index: usize) -> i64 => if index == 0 { .a } else { .b };
+    pub op []= (index: usize, item: i64) {
+        if index == 0 { .a = item; } else { .b = item; }
+    }
+}
+
+fn main() {
+    var p = Pair { a: 1, b: 2 };
+    print(p[0]);
+    print(p[1]);
+    p[1] = 7;
+    print(p.b);
+}

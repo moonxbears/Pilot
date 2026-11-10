@@ -12,7 +12,10 @@ use Pilot.Core.Keywords::*;
 
 [KeywordDefAttr(25, "Borrowed UTF-8 string view backed by contiguous byte pointer and length (16 bytes).")]
 [Lang(Cfg.Lang.str_t), Layout(c_abi)]
-pub partial struct str : IEquatable<str>, IIndexGet<usize, u8>, IReference {
+// Text is not a collection of bytes: `contains` searches for text, not for
+// one byte, so `str` takes no collection role. It is a borrowed (0b01) view
+// whose bytes can be read by position and enumerated.
+pub partial struct str : IEquatable<str>, IIndexGet<usize, u8>, IEnumerable<u8, SliceEnumerator<u8>>, IReference {
     *RawStorageBundle<u8>;
     *ContiguousViewFacet<u8>;
 

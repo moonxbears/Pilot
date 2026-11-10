@@ -125,6 +125,9 @@ pub struct Snap {
     /// The member names of the enumeration protocol `for` uses: the call
     /// that gives the enumerator, the step, and the current element.
     pub enumeration: List<str>;
+    /// `[field node, number of accessor bodies]` per field written with an
+    /// accessor block; `{ get; }` has none.
+    pub properties: List<List<i64>>;
     pub count: i64;
 }
 
@@ -144,6 +147,7 @@ pub fn snap_load() -> Snap {
         bounds: raw[8],
         splice_mods: raw[9],
         enumeration: raw[10],
+        properties: raw[11],
         count: nodes.len() / snap_columns(),
     };
 }
@@ -303,6 +307,14 @@ pub fn parents_of(s: Snap) -> List<i64> {
         let a = annot(s, i);
         if a >= 0 && a < s.count && out[a] < 0 { out[a] = i; }
         i = i + 1;
+    }
+    // Base types and generic bounds sit in side tables too; their parent is
+    // the declaration, so its generic parameters resolve from them.
+    for row in s.bases {
+        if row[1] >= 0 && row[1] < s.count && out[row[1]] < 0 { out[row[1]] = row[0]; }
+    }
+    for row in s.bounds {
+        if row[2] >= 0 && row[2] < s.count && out[row[2]] < 0 { out[row[2]] = row[0]; }
     }
     return out;
 }

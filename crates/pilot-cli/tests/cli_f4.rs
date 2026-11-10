@@ -255,3 +255,52 @@ fn listed() -> i64 {
     ];
     assert_eq!(got, want);
 }
+
+/// The stdlib collections take the collection roles of
+/// stdlib/core/operator.pilot and provide what they require (TYPE006).
+/// Checked as the entry program, a file's own types are held to their
+/// interfaces. `slice`, `stride`, `array`, `map` and `SliceBuffer` sit over
+/// raw memory the seed cannot compile yet, so they are not checked here.
+#[test]
+fn stdlib_collections_provide_their_roles() {
+    assert_clean("stdlib/core/primitives/list.pilot");
+    assert_clean("stdlib/std/col.pilot");
+    assert_clean("stdlib/core/stream.pilot");
+    assert_clean("tests/conformance/roles_clean.pilot");
+}
+
+/// A role gives a type its lattice: a struct that names `IBuffer` is owned
+/// (0b10) without naming `IObject`, so using it after a move is OWN001; one
+/// that names `ICursor` is a borrowed view (0b01) and is not moved.
+#[test]
+fn a_role_gives_its_lattice() {
+    let src = "\
+struct Bag : IBuffer<i64> {
+    pub items: List<i64>;
+    pub count: usize;
+    pub fn contains(item: i64) -> bool => item == 0;
+    pub fn add(_item: i64) { .count = .count + 1; }
+    pub fn clear() { .count = 0; }
+    pub fn remove_at(_index: usize) -> i64 => 0;
+    pub op [] (_index: usize) -> i64 => 0;
+    pub op []= (_index: usize, _item: i64) { .count = .count; }
+}
+struct Walk : ICursor<i64> {
+    pub current: i64;
+    pub fn move_next() -> bool => false;
+}
+fn keep(b: Bag) -> usize => b.count;
+fn look(w: Walk) -> i64 => w.current;
+fn main() {
+    let b = Bag { items: [], count: 0 };
+    let n = keep(b);
+    print(b.count + n);
+    let w = Walk { current: 1 };
+    let m = look(w);
+    print(w.current + m);
+}
+";
+    let got = reported("role_lattice", src);
+    // line 20: `b` was moved into `keep`; `w` is a view and is not moved.
+    assert_eq!(got, vec![at("OWN001", "20:11")]);
+}

@@ -50,6 +50,12 @@ impl BytecodeCompiler {
             return;
         }
         let body_node = NodeId(arena.extra_children[fn_start]);
+        // A declaration without a body states a signature: the engine
+        // answers it (a native-bound method) or an implementing type gives
+        // the body. Compiling it would shadow the native method with a stub.
+        if body_node.is_none() {
+            return;
+        }
         let receiver = crate::RECEIVER;
         let receiver_short = &receiver[1..];
         let mut params: Vec<String> = if fn_len > 1 {

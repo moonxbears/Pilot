@@ -1,0 +1,91 @@
+// User collections that take a role from stdlib/core/operator.pilot and
+// provide everything it requires: an owned stack (IBuffer, so 0b10), a
+// cursor over it (ICursor, 0b01) that `for` walks, and a fixed-size inline
+// pair (IInlineList, 0b00). `count` and `current` are stored fields, which
+// meet the `{ get; }` requirements. The index operators are declared to
+// meet the contracts but not called: the seed does not dispatch them yet
+// (known bug `seed.index_operators`).
+struct Stack : IBuffer<i64>, IEnumerable<i64, StackCursor> {
+    pub items: List<i64>;
+    pub count: usize;
+
+    pub fn contains(item: i64) -> bool {
+        var i: usize = 0;
+        while i < .count {
+            if .items[i] == item { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    pub fn add(item: i64) {
+        .items.push(item);
+        .count = .count + 1;
+    }
+
+    pub fn clear() {
+        while .count > 0 {
+            .items.pop();
+            .count = .count - 1;
+        }
+    }
+
+    pub fn remove_at(index: usize) -> i64 {
+        .count = .count - 1;
+        return .items.remove_at(index);
+    }
+
+    pub op [] (index: usize) -> i64 => .items[index];
+
+    pub op []= (index: usize, item: i64) {
+        .items[index] = item;
+    }
+
+    pub fn get_enumerator() -> StackCursor => StackCursor { items: .items, next: 0, current: 0 };
+}
+
+struct StackCursor : ICursor<i64> {
+    pub items: List<i64>;
+    pub next: usize;
+    pub current: i64;
+
+    pub fn move_next() -> bool {
+        if .next >= .items.len() { return false; }
+        .current = .items[.next];
+        .next = .next + 1;
+        return true;
+    }
+}
+
+struct Pair : IInlineList<i64> {
+    pub a: i64;
+    pub b: i64;
+    pub count: usize;
+
+    pub fn contains(item: i64) -> bool => .a == item || .b == item;
+
+    pub op [] (index: usize) -> i64 => if index == 0 { .a } else { .b };
+
+    pub op []= (index: usize, item: i64) {
+        if index == 0 { .a = item; } else { .b = item; }
+    }
+}
+
+fn main() {
+    var s = Stack { items: [], count: 0 };
+    s.add(3);
+    s.add(4);
+    s.add(5);
+    print(s.count);
+    print(s.contains(4));
+    print(s.remove_at(0));
+    var sum = 0;
+    for x in s { sum = sum + x; }
+    print(sum);
+    s.clear();
+    print(s.count);
+
+    let p = Pair { a: 1, b: 7, count: 2 };
+    print(p.contains(7));
+    print(p.contains(3));
+}

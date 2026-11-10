@@ -631,12 +631,13 @@ impl<'a> Parser<'a> {
         self.apply_mods(id, mods, def_vis); id }
     fn parse_field_or_prop(&mut self, mods: &DeclMods, def_vis: u8) -> NodeId { let (sp, sym) = (self.span(), self.intern_cur());
         let _ = self.eat(TokenKind::Question); let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
-        let mut default = NodeId::NONE;
-        if self.at(TokenKind::LBrace) { let _ = self.skip_accessor_block(); }
+        let (mut default, mut accessors) = (NodeId::NONE, NodeId::NONE);
+        if self.at(TokenKind::LBrace) { accessors = self.skip_accessor_block(); }
         else if self.eat(TokenKind::Equal) { default = self.parse_expr(); }
         let _ = self.eat(TokenKind::Semicolon) || self.eat(TokenKind::Comma);
         let id = self.arena.alloc_node(NodeKind::ParamDecl, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), sym.0, ty.0);
         if default.is_some() { self.arena.field_defaults.push((id, default)); }
+        if accessors.is_some() { self.arena.property_accessors.push((id, accessors)); }
         if ty.is_some() { self.arena.set_type_annot(id, ty); }
         self.apply_mods(id, mods, def_vis); id }
     /// `*Bundle<T> coalesce { id } with { flags as net_flags } without { x };`

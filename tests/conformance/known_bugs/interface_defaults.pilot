@@ -1,0 +1,18 @@
+// A method an interface gives a body to (Tier 3/4 of the method table) is
+// a method of every struct that implements the interface and does not
+// declare it. The seed does not give the struct those methods.
+interface ISized {
+    fn size() -> i64;
+    fn empty() -> bool => .size() == 0;
+}
+
+struct Bag : ISized {
+    pub n: i64;
+    pub fn size() -> i64 => .n;
+}
+
+fn main() {
+    let b = Bag { n: 0 };
+    print(b.size());
+    print(b.empty());
+}

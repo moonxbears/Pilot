@@ -21,6 +21,7 @@
 //! | 8 | generic bounds, `[owner node, parameter symbol, bound type node]` each |
 //! | 9 | splice modifiers, `[splice node, modifier sub-slot, member symbol, alias symbol]` each |
 //! | 10 | the enumeration protocol `for` uses: `[get, move next, current]` member names, or empty |
+//! | 11 | properties, `[field node, number of accessor bodies]` each |
 //!
 //! Absent node references are `-1`. The checker returns its diagnostics as
 //! `[code, message, start, end, severity]` with program-wide offsets; only
@@ -171,6 +172,15 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
             ints([i64::from(splice.0), i64::from(*sub), i64::from(member.0), i64::from(alias.0)])
         })
         .collect();
+    let accessors = arena
+        .property_accessors
+        .iter()
+        .map(|(field, block)| {
+            // A list node keeps its child count in `rhs`.
+            let bodies = i64::from(arena.node(*block).rhs);
+            ints([i64::from(field.0), bodies])
+        })
+        .collect();
     let protocol = pilot_parser::bootstrap_tables()
         .enumerator()
         .map(|e| {
@@ -192,6 +202,7 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)]) -> HostValue {
         HostValue::List(bounds),
         HostValue::List(splice_mods),
         HostValue::List(protocol),
+        HostValue::List(accessors),
     ])
 }
 

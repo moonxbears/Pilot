@@ -11,7 +11,7 @@ use Pilot.Core.Keywords::*;
 
 [KeywordDefAttr(28, "Stepped interval progression advancing by a fixed non-zero step.")]
 [Lang(Cfg.Lang.step_t), Layout(c_abi)]
-pub partial struct step<T: INumber<T>> : IValue {
+pub partial struct step<T: INumber<T>> : IEnumerable<T, RangeEnumerator<T>>, IValue {
     pub bounds:  range<T>;
     pub step_by: T;
 

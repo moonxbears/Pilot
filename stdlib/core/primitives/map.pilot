@@ -12,7 +12,7 @@ use Pilot.Core.Keywords::*;
 
 [KeywordDefAttr(29, "Zero-copy key-value strided column projection map.")]
 [Lang(Cfg.Lang.map_t), Layout(c_abi)]
-pub partial struct map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReference {
+pub partial struct map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryView<TKey, TVal> {
     pub keys: stride<TKey>;
     pub vals: stride<TVal>;
     pub count: usize { get => .keys.len; }
@@ -26,6 +26,8 @@ pub partial struct map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReference {
         }
         return false;
     }
+
+    pub pure fn has(key: TKey) -> bool => .contains_key(key);
 
     pub pure fn find_index(key: TKey) -> isize {
         var idx: usize = 0;
@@ -56,7 +58,7 @@ pub partial struct map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReference {
 
 // Pure Pilot dynamic key-value dictionary (replaces __engine("map_new"), __engine("map_set"), __engine("map_get"))
 [KeywordDefAttr(29, "Owned dynamic heap map buffer backed by linear key/value vectors.")]
-pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IObject {
+pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuffer<TKey, TVal> {
     pub keys: SliceBuffer<TKey>;
     pub vals: SliceBuffer<TVal>;
 
@@ -65,8 +67,7 @@ pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IObject 
         .vals = SliceBuffer<TVal>();
     }
 
-    pub pure fn count() -> usize => .keys.len;
-    pub pure fn is_empty() -> bool => .keys.len == 0;
+    pub count: usize { get => .keys.len; }
 
     pub pure fn find_index(key: TKey) -> isize {
         var i: usize = 0;
@@ -92,8 +93,8 @@ pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IObject 
         if idx >= 0 {
             .vals[idx as usize] = val;
         } else {
-            .keys.push(key);
-            .vals.push(val);
+            .keys.add(key);
+            .vals.add(val);
         }
     }
 
@@ -124,15 +125,14 @@ pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IObject 
 }
 
 // Canonical type alias & high-level dynamic dictionary
-pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IObject {
+pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuffer<TKey, TVal> {
     pub inner: MapBuffer<TKey, TVal>;
 
     pub self() {
         .inner = MapBuffer<TKey, TVal>();
     }
 
-    pub pure fn count() -> usize => .inner.count();
-    pub pure fn is_empty() -> bool => .inner.is_empty();
+    pub count: usize { get => .inner.count; }
     pub pure fn has(key: TKey) -> bool => .inner.has(key);
     pub pure fn get(key: TKey) -> option<TVal> => .inner.get(key);
     pub fn set(key: TKey, val: TVal) { .inner.set(key, val); }

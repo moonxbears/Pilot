@@ -123,7 +123,7 @@ pub struct {
         pub has_started: bool;
 
         pub var fn move_next() -> bool {
-            if !.has_started {
+            if !self.has_started {
                 .has_started = true;
                 return .current_val < .end_val;
             }
@@ -146,7 +146,7 @@ pub struct {
         pub has_started: bool;
 
         pub var fn move_next() -> bool {
-            if !.has_started {
+            if !self.has_started {
                 .has_started = true;
                 return .current_val <= .end_val;
             }
@@ -221,81 +221,8 @@ pub partial struct {
                 ((.to_u32() >= 0x61) && (.to_u32() <= 0x7A));
     }
 
-    // 5.7 Borrowed UTF-8 String View (`str`) — 16-Byte `{ ptr<u8>, usize }`, `0b01` `IReference`
-    [Lang(Cfg.Lang.str_t), Layout(c_abi)]
-    str : IEquatable<str>, IIndexGet<usize, u8>, IReference {
-        *RawStorageBundle<u8>;
-        *ContiguousViewFacet<u8>;
-
-        pub pure:
-            fn as_bytes() -> slice<u8> => slice<u8> { data: .data, len: .len };
-
-            op [] (idx: usize) -> u8 => .data[idx];
-
-            op [] (r: range<usize>) -> str => str {
-                data: .data + r.start,
-                len:  r.end - r.start,
-            };
-
-            op == (rhs: str) -> bool {
-                if .len != rhs.len { return false; }
-                var idx: usize = 0;
-                loop {
-                    if !(idx < .len) { break; }
-                    if .data[idx] != rhs.data[idx] { return false; }
-                    idx = idx + 1;
-                }
-                return true;
-            }
-
-            fn get_enumerator() -> SliceEnumerator<u8> => .as_bytes().get_enumerator();
-    }
-
-    // 5.8 Range, Span, Step, Open & Unbounded Slicing Descriptors (`range<T>`, `span<T>`, `step<T>`, `open<T>`, `after<T>`, `from<T>`, `until<T>`, `full`)
-    [Lang(Cfg.Lang.range_t), Layout(c_abi)]
-    range<T: INumber<T>> : IValue {
-        pub start: T;
-        pub end:   T;
-
-        pub pure:
-            fn contains(v: T) -> bool => (v >= .start) && (v < .end);
-            fn step_by(step: T) -> step<T> => step<T> { bounds: self, step_by: step };
-            fn get_enumerator() -> RangeEnumerator<T> => RangeEnumerator<T> {
-                current_val: .start,
-                end_val:     .end,
-                step_val:    1 as T,
-                has_started: false,
-            };
-    }
-
-    [Lang(Cfg.Lang.span_t), Layout(c_abi)]
-    span<T: INumber<T>> : IValue {
-        pub start: T;
-        pub end:   T;
-
-        pub pure:
-            fn contains(v: T) -> bool => (v >= .start) && (v <= .end);
-            fn get_enumerator() -> SpanEnumerator<T> => SpanEnumerator<T> {
-                current_val: .start,
-                end_val:     .end,
-                step_val:    1 as T,
-                has_started: false,
-            };
-    }
-
-    [Lang(Cfg.Lang.step_t), Layout(c_abi)]
-    step<T: INumber<T>> : IValue {
-        pub bounds:  range<T>;
-        pub step_by: T;
-
-        pub pure fn get_enumerator() -> RangeEnumerator<T> => RangeEnumerator<T> {
-            current_val: .bounds.start,
-            end_val:     .bounds.end,
-            step_val:    .step_by,
-            has_started: false,
-        };
-    }
-
+    // 5.7-5.8 `str`, `range`, `span` and `step` are declared once each in
+    // stdlib/core/primitives/.
     [Lang(Cfg.Lang.open_t),  Layout(c_abi)] open<T: IValue>  : IValue { pub start: T; pub end: T; }
     [Lang(Cfg.Lang.after_t), Layout(c_abi)] after<T: IValue> : IValue { pub start: T; }
     [Lang(Cfg.Lang.from_t),  Layout(c_abi)] from<T: IValue>  : IValue { pub start: T; }
