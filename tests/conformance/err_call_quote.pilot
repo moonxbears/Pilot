@@ -1,0 +1,10 @@
+// A call-quote mode (`f!(..)`, `sig f(..)`, ..) builds a carrier value, not
+// the call's result. Until the carriers exist it stops at the
+// `vm.call_quote` seam instead of running as a plain call.
+fn add(a: i64, b: i64) -> i64 => a + b;
+
+fn main() {
+    print(add(1, 2));
+    let s = sig add(1, 2);
+    print("unreachable");
+}

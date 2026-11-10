@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -93,7 +95,7 @@ fn eval_m29(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -117,7 +119,7 @@ fn test_m29_1_unauthorized_fs_and_path_traversal_blocked_ctime001() {
 
             // Attempting read without FsRead cap fails with CTIME001
             let d1 = g_zero.guardian_check_fs_read("src/config.json");
-            if d1.len() == 0 { return 1; }
+            if d1 != "CTIME001: Unauthorized comptime filesystem access to 'src/config.json': filesystem read capability not granted" { return 1; }
             let exp_ctime001 = "CTIME001";
             if d1.slice(0, exp_ctime001.len()) != exp_ctime001 { return 2; }
 
@@ -134,10 +136,30 @@ fn test_m29_1_unauthorized_fs_and_path_traversal_blocked_ctime001() {
             if d3.len() == 0 { return 5; }
             if d3.slice(0, exp_ctime001.len()) != exp_ctime001 { return 6; }
 
-            // Valid relative read succeeds
+            // Any absolute host path is outside the package, not only system dirs
+            let d5 = g_read.guardian_check_fs_read("/home/user/.ssh/id_rsa");
+            if !d5.starts_with("CTIME001") { return 9; }
+            let d6 = g_read.guardian_check_fs_read("C:\\Windows\\win.ini");
+            if !d6.starts_with("CTIME001") { return 10; }
+            let d7 = g_read.guardian_check_fs_read("queries\\..\\..\\secret");
+            if !d7.starts_with("CTIME001") { return 11; }
+
+            // Valid relative read succeeds; '..' inside a file name is not traversal
             let d4 = g_read.guardian_check_fs_read("queries/users.sql");
             if d4.len() != 0 { return 7; }
-            if g_read.accessed_files.len() != 1 { return 8; }
+            let d8 = g_read.guardian_check_fs_read("notes/v1..v2.txt");
+            if d8.len() != 0 { return 12; }
+            if g_read.accessed_files.len() != 2 { return 8; }
+
+            // A declared glob allowlist limits reads to matching paths
+            var g_glob = comptime_guardian_new(cap_fs_read(), 100000, 1048576);
+            g_glob.guardian_add_allowed_glob("queries/**/*.sql");
+            if g_glob.guardian_check_fs_read("queries/users.sql").len() != 0 { return 13; }
+            if g_glob.guardian_check_fs_read("queries/v2/orders.sql").len() != 0 { return 14; }
+            if !g_glob.guardian_check_fs_read("queries/users.json").starts_with("CTIME001") { return 15; }
+            if !g_glob.guardian_check_fs_read("secrets/users.sql").starts_with("CTIME001") { return 16; }
+            if !glob_matches("src/*.pilot", "src/main.pilot") { return 17; }
+            if glob_matches("src/*.pilot", "src/sub/main.pilot") { return 18; }
 
             return 42;
         }
@@ -263,12 +285,14 @@ fn test_m29_4_deterministic_env_and_transitive_privilege_escalation_ctime006() {
             let v_time = clock_now_virtual(100);
             if v_time != 1000 { return 1; }
 
-            // 2. Content-seeded PRNG is 100% deterministic
+            // 2. Content-seeded PRNG: Marsaglia xorshift64 (13, 7, 17); the
+            //    expected values come from a u64 reference implementation.
             var prng1 = DetPrng::from_seed(12345678);
             var prng2 = DetPrng::from_seed(12345678);
             let r1 = prng1.next_u64();
             let r2 = prng2.next_u64();
             if r1 != r2 { return 2; }
+            if r1 != 13307452440480268 { return 20; }
 
             // 3. Insertion-ordered deterministic map
             var m = det_map_new();
@@ -291,9 +315,20 @@ fn test_m29_4_deterministic_env_and_transitive_privilege_escalation_ctime006() {
             var dep_needs: List<str> = [];
             dep_needs.push("net");
             let err_dep = validate_dependency_comptime_needs(root_policy, "evil_macro", dep_needs);
-            if err_dep.len() == 0 { return 7; }
-            let exp_ctime006 = "CTIME006";
-            if err_dep.slice(0, exp_ctime006.len()) != exp_ctime006 { return 8; }
+            if err_dep != "CTIME006: Untrusted dependency 'evil_macro' requested unapproved comptime capability 'net'; must be granted in root [comptime.grants]" { return 8; }
+
+            // "net" outside the comptime object (a dependency name) grants nothing
+            let tricky = parse_comptime_allow_policy("{ \"deps\": { \"net\": \"1.0\" }, \"comptime\": { \"allow\": [\"env\"], \"max_fuel\": 5000 } }");
+            if tricky.allow_net || !tricky.allow_env || tricky.max_fuel != 5000 { return 9; }
+            var env_needs: List<str> = [];
+            env_needs.push("env");
+            if validate_dependency_comptime_needs(root_policy, "env_reader", env_needs).len() == 0 { return 10; }
+            if validate_dependency_comptime_needs(tricky, "env_reader", env_needs).len() != 0 { return 11; }
+
+            // Bitmask form names the first ungranted capability
+            let g6 = guardian_check_dependency_grant(cap_fs_read(), cap_fs_read() | cap_env(), "dep");
+            if g6 != "CTIME006: Untrusted dependency 'dep' requested unapproved comptime capability 'env'; must be explicitly granted in root [comptime.grants]" { return 12; }
+            if guardian_check_dependency_grant(cap_all(), cap_net(), "dep").len() != 0 { return 13; }
 
             return 42;
         }
@@ -301,5 +336,19 @@ fn test_m29_4_deterministic_env_and_transitive_privilege_escalation_ctime006() {
 
     let res = eval_m29(&deps, script);
     assert_eq!(res, "42", "Failed deterministic env and CTIME006 test: {}", res);
+
+    // Running comptime under a policy needs the seed VM to honour it.
+    let run_script = r#"
+        pub fn main() -> i64 {
+            let out = comptime_run_sandboxed(comptime_policy_new(cap_none(), 1000, 4096), "src/gen.pilot");
+            return out.len() as i64;
+        }
+    "#;
+    let run = eval_m29(&deps, run_script);
+    assert!(
+        run.starts_with("FAULT: SEAM001: unconnected seam `comptime.run_sandboxed`"),
+        "sandboxed comptime run must stop at its seam: {}",
+        run
+    );
     guard.finish();
 }

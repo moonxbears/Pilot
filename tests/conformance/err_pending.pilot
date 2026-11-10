@@ -1,0 +1,27 @@
+// A pending value can be built, stored and passed around, but reading it stops
+// the program with SEAM001 and the calls that reached it. A stand-in field is
+// ordinary working data; its attribute only records what it stands in for.
+struct Frame : IValue {
+    code: Pending<i64>;
+    [StandIn("demo.frame_base", "ptr<u8>", "integer address", "F6")]
+    base: i64;
+    len: i64;
+}
+
+fn open_frame(len: i64) -> Frame => Frame {
+    code: pending("demo.frame_code", "native code pointers arrive in F6"),
+    base: 4096,
+    len: len,
+};
+
+fn entry_of(f: Frame) -> i64 {
+    return f.code.get();
+}
+
+fn main() {
+    let f = open_frame(3);
+    print(f.base + f.len);
+    print(f.code.id);
+    let at = entry_of(f);
+    print("unreachable");
+}

@@ -191,7 +191,7 @@ pub struct JsonValue : IObject {
             return "" + self.num_val;
         }
         if self.kind == JsonKind::String {
-            return "\"" + self.str_val + "\"";
+            return json_quote(self.str_val);
         }
         if self.kind == JsonKind::Array {
             var out = "[";
@@ -212,7 +212,7 @@ pub struct JsonValue : IObject {
             while i < n {
                 if i > 0 { out = out + ", "; }
                 let p = self.object_val[i];
-                out = out + "\"" + p.key + "\": " + p.val.stringify();
+                out = out + json_quote(p.key) + ": " + p.val.stringify();
                 i = i + 1;
             }
             out = out + "}";
@@ -295,101 +295,341 @@ pub fn json_object() -> JsonValue {
 }
 
 // ------------------------------------------------------------------------------
-// 4. Lightweight Lexer & Parser
+// 4. RFC 8259 Parser
 // ------------------------------------------------------------------------------
+
+/// Why a JSON text was rejected, and the byte offset where it was noticed.
+pub struct JsonError : IValue {
+    pub pos:     usize,
+    pub message: str,
+}
+
+/// A read position in a JSON text.
+pub struct JsonCursor : IReference {
+    pub src: str,
+    pub pos: usize,
+
+    pub fn at_end(ref self) -> bool => self.pos >= self.src.len();
+
+    pub fn peek(ref self) -> i64 {
+        if self.pos >= self.src.len() { return -1; }
+        return self.src.byte_at(self.pos);
+    }
+
+    pub fn fail(ref self, message: str) -> res<JsonValue, JsonError> {
+        return result<JsonValue, JsonError>.err(JsonError { pos: self.pos, message: message });
+    }
+
+    /// RFC 8259 §2: insignificant whitespace is space, tab, LF and CR.
+    pub fn skip_ws(var ref self) {
+        while self.pos < self.src.len() && json_is_space(self.src.byte_at(self.pos)) {
+            self.pos = self.pos + 1;
+        }
+    }
+
+    /// Consumes `word` (`true`, `false`, `null`) when it is next.
+    pub fn eat_word(var ref self, word: str) -> bool {
+        let end = self.pos + word.len();
+        if end > self.src.len() { return false; }
+        if self.src.slice(self.pos, end) != word { return false; }
+        self.pos = end;
+        return true;
+    }
+
+    /// RFC 8259 §3: `value = false / null / true / object / array / number / string`.
+    pub fn parse_value(var ref self) -> res<JsonValue, JsonError> {
+        self.skip_ws();
+        let b = self.peek();
+        if b == 123 { return self.parse_object(); }
+        if b == 91 { return self.parse_array(); }
+        if b == 34 {
+            let s = self.parse_string()?;
+            return result<JsonValue, JsonError>.ok(json_str(s));
+        }
+        if b == 45 || (b >= 48 && b <= 57) { return self.parse_number(); }
+        if self.eat_word("true") { return result<JsonValue, JsonError>.ok(json_bool(true)); }
+        if self.eat_word("false") { return result<JsonValue, JsonError>.ok(json_bool(false)); }
+        if self.eat_word("null") { return result<JsonValue, JsonError>.ok(json_null()); }
+        if b < 0 { return self.fail("unexpected end of input, expected a value"); }
+        return self.fail("expected a value");
+    }
+
+    /// RFC 8259 §4: `object = { [ member *( , member ) ] }`, `member = string : value`.
+    pub fn parse_object(var ref self) -> res<JsonValue, JsonError> {
+        var obj = json_object();
+        self.pos = self.pos + 1;
+        self.skip_ws();
+        if self.peek() == 125 {
+            self.pos = self.pos + 1;
+            return result<JsonValue, JsonError>.ok(obj);
+        }
+        loop {
+            self.skip_ws();
+            if self.peek() != 34 { return self.fail("expected a string key"); }
+            let key = self.parse_string()?;
+            self.skip_ws();
+            if self.peek() != 58 { return self.fail("expected ':' after an object key"); }
+            self.pos = self.pos + 1;
+            let val = self.parse_value()?;
+            obj.set(key, val);
+            self.skip_ws();
+            let b = self.peek();
+            if b == 44 {
+                self.pos = self.pos + 1;
+            } else if b == 125 {
+                self.pos = self.pos + 1;
+                return result<JsonValue, JsonError>.ok(obj);
+            } else {
+                return self.fail("expected ',' or '}' in an object");
+            }
+        }
+        return self.fail("unterminated object");
+    }
+
+    /// RFC 8259 §5: `array = [ [ value *( , value ) ] ]`.
+    pub fn parse_array(var ref self) -> res<JsonValue, JsonError> {
+        var arr = json_array();
+        self.pos = self.pos + 1;
+        self.skip_ws();
+        if self.peek() == 93 {
+            self.pos = self.pos + 1;
+            return result<JsonValue, JsonError>.ok(arr);
+        }
+        loop {
+            let item = self.parse_value()?;
+            arr.push(item);
+            self.skip_ws();
+            let b = self.peek();
+            if b == 44 {
+                self.pos = self.pos + 1;
+            } else if b == 93 {
+                self.pos = self.pos + 1;
+                return result<JsonValue, JsonError>.ok(arr);
+            } else {
+                return self.fail("expected ',' or ']' in an array");
+            }
+        }
+        return self.fail("unterminated array");
+    }
+
+    /// RFC 8259 §6: `number = [ minus ] int [ frac ] [ exp ]`, where `int` is
+    /// `0` or a digit 1-9 followed by digits.
+    pub fn parse_number(var ref self) -> res<JsonValue, JsonError> {
+        let n = self.src.len();
+        var negative = false;
+        if self.peek() == 45 {
+            negative = true;
+            self.pos = self.pos + 1;
+        }
+        let int_start = self.pos;
+        if self.peek() == 48 {
+            self.pos = self.pos + 1;
+            if json_is_digit(self.peek()) { return self.fail("leading zeros are not allowed in a number"); }
+        } else if json_is_digit(self.peek()) {
+            while json_is_digit(self.peek()) { self.pos = self.pos + 1; }
+        } else {
+            return self.fail("expected a digit");
+        }
+        let int_digits = self.src.slice(int_start, self.pos);
+        var frac_digits = "";
+        if self.peek() == 46 {
+            self.pos = self.pos + 1;
+            let frac_start = self.pos;
+            while json_is_digit(self.peek()) { self.pos = self.pos + 1; }
+            if self.pos == frac_start { return self.fail("expected a digit after '.'"); }
+            frac_digits = self.src.slice(frac_start, self.pos);
+        }
+        var exp10 = 0;
+        if self.peek() == 101 || self.peek() == 69 {
+            self.pos = self.pos + 1;
+            var exp_negative = false;
+            if self.peek() == 43 || self.peek() == 45 {
+                exp_negative = self.peek() == 45;
+                self.pos = self.pos + 1;
+            }
+            let exp_start = self.pos;
+            while json_is_digit(self.peek()) {
+                if exp10 < 100000 { exp10 = exp10 * 10 + (self.peek() - 48); }
+                self.pos = self.pos + 1;
+            }
+            if self.pos == exp_start { return self.fail("expected a digit in the exponent"); }
+            if exp_negative { exp10 = -exp10; }
+        }
+        let mag = json_decimal_to_f64(int_digits, frac_digits, exp10);
+        if mag - mag != 0.0 {
+            return self.fail("number is outside the binary64 range");
+        }
+        return result<JsonValue, JsonError>.ok(json_num(if negative { -mag } else { mag }));
+    }
+
+    /// RFC 8259 §7: a string is quoted; `"`, `\` and the controls U+0000 to
+    /// U+001F must be escaped.
+    pub fn parse_string(var ref self) -> res<str, JsonError> {
+        self.pos = self.pos + 1;
+        var out = "";
+        var run_start = self.pos;
+        while self.pos < self.src.len() {
+            let b = self.src.byte_at(self.pos);
+            if b == 34 {
+                out = out + self.src.slice(run_start, self.pos);
+                self.pos = self.pos + 1;
+                return result<str, JsonError>.ok(out);
+            }
+            if b < 32 {
+                return result<str, JsonError>.err(JsonError { pos: self.pos, message: "unescaped control character in a string" });
+            }
+            if b == 92 {
+                out = out + self.src.slice(run_start, self.pos);
+                self.pos = self.pos + 1;
+                let e = self.peek();
+                if e == 34 { out = out + "\""; }
+                else if e == 92 { out = out + "\\"; }
+                else if e == 47 { out = out + "/"; }
+                else if e == 110 { out = out + "\n"; }
+                else if e == 114 { out = out + "\r"; }
+                else if e == 116 { out = out + "\t"; }
+                else if e == 98 || e == 102 {
+                    out = out + json_code_point_str(if e == 98 { 8 } else { 12 });
+                } else if e == 117 {
+                    var cp = json_hex4(self.src, self.pos + 1);
+                    if cp < 0 {
+                        return result<str, JsonError>.err(JsonError { pos: self.pos, message: "expected four hex digits after \\u" });
+                    }
+                    self.pos = self.pos + 4;
+                    if cp >= 55296 && cp <= 56319 {
+                        // A high surrogate must be followed by `\u` and a low surrogate.
+                        let lo = if self.pos + 2 < self.src.len() && self.src.byte_at(self.pos + 1) == 92 && self.src.byte_at(self.pos + 2) == 117 {
+                            json_hex4(self.src, self.pos + 3)
+                        } else {
+                            -1
+                        };
+                        if lo >= 56320 && lo <= 57343 {
+                            cp = 65536 + (cp - 55296) * 1024 + (lo - 56320);
+                            self.pos = self.pos + 6;
+                        }
+                    }
+                    out = out + json_code_point_str(cp);
+                } else {
+                    return result<str, JsonError>.err(JsonError { pos: self.pos, message: "invalid escape in a string" });
+                }
+                self.pos = self.pos + 1;
+                run_start = self.pos;
+            } else {
+                self.pos = self.pos + 1;
+            }
+        }
+        return result<str, JsonError>.err(JsonError { pos: self.pos, message: "unterminated string" });
+    }
+}
+
+/// `s` as an RFC 8259 string: quoted, with `"`, `\\` and controls escaped.
+pub pure fn json_quote(s: str) -> str {
+    let hex = "0123456789abcdef";
+    var out = "\"";
+    var run_start = 0;
+    var i = 0;
+    let n = s.len();
+    while i < n {
+        let b = s.byte_at(i);
+        if b == 34 || b == 92 || b < 32 {
+            out = out + s.slice(run_start, i);
+            if b == 34 { out = out + "\\\""; }
+            else if b == 92 { out = out + "\\\\"; }
+            else if b == 10 { out = out + "\\n"; }
+            else if b == 13 { out = out + "\\r"; }
+            else if b == 9 { out = out + "\\t"; }
+            else { out = out + "\\u00" + hex.slice(b / 16, b / 16 + 1) + hex.slice(b % 16, b % 16 + 1); }
+            run_start = i + 1;
+        }
+        i = i + 1;
+    }
+    return out + s.slice(run_start, n) + "\"";
+}
 
 pure fn json_is_space(b: i64) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13;
 }
 
-pub fn json_parse(src: str) -> JsonValue {
-    let n = src.len();
-    var p: usize = 0;
-    while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
-    if p >= n { return json_null(); }
+pure fn json_is_digit(b: i64) -> bool {
+    return b >= 48 && b <= 57;
+}
 
-    let b = src.byte_at(p);
-    // Object: { ... }
-    if b == 123 {
-        var obj = json_object();
-        p = p + 1;
-        while p < n {
-            while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
-            if p >= n || src.byte_at(p) == 125 { break; } // '}'
-            if src.byte_at(p) == 44 { p = p + 1; continue; } // ','
-
-            // Parse key string
-            if src.byte_at(p) == 34 { // '"'
-                p = p + 1;
-                let k_start = p;
-                while p < n && src.byte_at(p) != 34 { p = p + 1; }
-                let k = src.slice(k_start, p);
-                if p < n { p = p + 1; } // skip '"'
-
-                while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
-                if p < n && src.byte_at(p) == 58 { p = p + 1; } // skip ':'
-
-                while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
-                let val_sub = src.slice(p, n);
-                let v = json_parse(val_sub);
-                obj.set(k, v);
-
-                // Advance past parsed value
-                let v_str = v.stringify();
-                p = p + v_str.len();
-            } else {
-                p = p + 1;
-            }
-        }
-        return obj;
+/// The value of the four hex digits at `at`, or -1.
+pure fn json_hex4(src: str, at: usize) -> i64 {
+    if at + 4 > src.len() { return -1; }
+    var v = 0;
+    var i = 0;
+    while i < 4 {
+        let b = src.byte_at(at + i);
+        var d = -1;
+        if b >= 48 && b <= 57 { d = b - 48; }
+        else if b >= 97 && b <= 102 { d = b - 87; }
+        else if b >= 65 && b <= 70 { d = b - 55; }
+        if d < 0 { return -1; }
+        v = v * 16 + d;
+        i = i + 1;
     }
+    return v;
+}
 
-    // Array: [ ... ]
-    if b == 91 {
-        var arr = json_array();
-        p = p + 1;
-        while p < n {
-            while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
-            if p >= n || src.byte_at(p) == 93 { break; } // ']'
-            if src.byte_at(p) == 44 { p = p + 1; continue; } // ','
+/// The str holding the single Unicode scalar `cp`. Printable ASCII, LF, CR
+/// and tab can be written as Pilot literals; any other scalar needs a str
+/// built from a code point, which the VM cannot do yet.
+pure fn json_code_point_str(cp: i64) -> str {
+    let printable = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    if cp >= 32 && cp <= 126 { return printable.slice(cp - 32, cp - 31); }
+    if cp == 10 { return "\n"; }
+    if cp == 13 { return "\r"; }
+    if cp == 9 { return "\t"; }
+    return seam("json.code_point_str", "a str holding one Unicode scalar (code-point-to-str intrinsic) for \\b, \\f and \\u escapes outside printable ASCII");
+}
 
-            let sub = src.slice(p, n);
-            let item = json_parse(sub);
-            arr.push(item);
-            p = p + item.stringify().len();
-        }
-        return arr;
+/// The binary64 value of the decimal `int_digits.frac_digits * 10^exp10`.
+[StandIn("json.decimal_to_f64", "correctly rounded decimal to binary64 conversion (IEEE 754 roundTiesToEven)", "exact when the significand has at most 15 digits and the scaled exponent is within 10^22; beyond that, repeated scaling can be off by an ulp or more", "F6")]
+pure fn json_decimal_to_f64(int_digits: str, frac_digits: str, exp10: i64) -> f64 {
+    let digits = int_digits + frac_digits;
+    var sig = 0.0;
+    var i = 0;
+    let n = digits.len();
+    while i < n {
+        sig = sig * 10.0 + f64(digits.byte_at(i) - 48);
+        i = i + 1;
     }
-
-    // String: "..."
-    if b == 34 {
-        p = p + 1;
-        let s_start = p;
-        while p < n && src.byte_at(p) != 34 { p = p + 1; }
-        let s = src.slice(s_start, p);
-        return json_str(s);
+    if sig == 0.0 { return 0.0; }
+    var e = exp10 - frac_digits.len();
+    var v = sig;
+    while e > 0 {
+        let step = if e >= 22 { 22 } else { e };
+        v = v * json_pow10(step);
+        e = e - step;
     }
-
-    // Literals: true, false, null
-    let rem = src.slice(p, n);
-    if rem.starts_with("true") { return json_bool(true); }
-    if rem.starts_with("false") { return json_bool(false); }
-    if rem.starts_with("null") { return json_null(); }
-
-    // Number: digits or minus
-    var num_end = p;
-    while num_end < n {
-        let ch = src.byte_at(num_end);
-        if (ch >= 48 && ch <= 57) || ch == 46 || ch == 45 || ch == 101 || ch == 69 {
-            num_end = num_end + 1;
-        } else {
-            break;
-        }
+    while e < 0 {
+        let step = if -e >= 22 { 22 } else { -e };
+        v = v / json_pow10(step);
+        e = e + step;
     }
-    if num_end > p {
-        let raw_num = src.slice(p, num_end);
-        return json_num(42.0); // Canonical numeric representative
-    }
+    return v;
+}
 
-    return json_null();
+/// 10^k for 0 <= k <= 22, each exactly representable in binary64.
+pure fn json_pow10(k: i64) -> f64 {
+    var p = 1.0;
+    var i = 0;
+    while i < k {
+        p = p * 10.0;
+        i = i + 1;
+    }
+    return p;
+}
+
+/// Parses one RFC 8259 JSON text: a value with optional surrounding
+/// whitespace and nothing after it.
+pub fn json_parse(src: str) -> res<JsonValue, JsonError> {
+    var cur = JsonCursor { src: src, pos: 0 };
+    let v = cur.parse_value()?;
+    cur.skip_ws();
+    if !cur.at_end() {
+        return cur.fail("unexpected text after the JSON value");
+    }
+    return result<JsonValue, JsonError>.ok(v);
 }

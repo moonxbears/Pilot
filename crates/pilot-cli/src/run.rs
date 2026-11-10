@@ -34,6 +34,19 @@ fn execute(vm: &mut PilVirtualMachine, locate: impl Fn(ByteSpan) -> String) -> i
     if let Some(fault) = vm.fault.take() {
         let at = fault.span.map_or_else(|| "<program>".to_string(), &locate);
         eprintln!("{at}: runtime error: {}", fault.message);
+        // Consecutive calls from one place (recursion) print once.
+        let mut i = 0;
+        while i < fault.trace.len() {
+            let run = fault.trace[i..].iter().take_while(|&&s| s == fault.trace[i]).count();
+            match run {
+                1 => eprintln!("  called from {}", locate(fault.trace[i])),
+                n => eprintln!("  called from {} ({n} times)", locate(fault.trace[i])),
+            }
+            i += run;
+        }
+        if fault.depth > fault.trace.len() {
+            eprintln!("  ... and {} more calls", fault.depth - fault.trace.len());
+        }
         return EXIT_FAILURE;
     }
     exit_code_of(result)

@@ -4,10 +4,25 @@ use crate::instruction::{Instruction, Opcode};
 use crate::lower_native::native;
 use crate::BytecodeCompiler;
 use pilot_parser::NativeKind;
-use pilot_ast::{AstArena, NodeId, NodeKind};
+use pilot_ast::{AstArena, AstNode, CallQuoteKind, NodeId, NodeKind};
 use pilot_rt::PilotVal;
 
+/// Where a call-quote mode stops until its carrier values exist.
+const QUOTED_CALL_SEAM: &str = "SEAM001: unconnected seam `vm.call_quote`: \
+    call-quote modes build their carrier values once the type checker exists (F4)";
+
 impl BytecodeCompiler {
+    /// True for `f!(..)`, `sig f(..)` and the other call-quote modes: the
+    /// parser records the mode in the call node's flags.
+    pub(crate) fn is_quoted_call(node: &AstNode) -> bool {
+        node.flags != CallQuoteKind::None as u16
+    }
+
+    /// Lowers a call-quote mode to a seam fault instead of a plain call.
+    pub(crate) fn compile_quoted_call(&mut self) -> u8 {
+        self.emit_trap(QUOTED_CALL_SEAM.to_string())
+    }
+
     /// Every call nets one scratch register: argument temporaries are
     /// released once the call has been emitted.
     pub(crate) fn compile_call(&mut self, arena: &AstArena, arg_start: u32, arg_len: u32) -> u8 {

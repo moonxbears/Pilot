@@ -1,0 +1,80 @@
+// =========================================================================
+// FILE: stdlib/core/pending.pilot
+// PENDING VALUES AND STAND-INS: data-side seams.
+// =========================================================================
+// A seam (`seam("id", "note")`) marks a function boundary that cannot work
+// yet. Two more kinds of gap live in data rather than in calls:
+//
+// * `Pending<T>`: a value whose real type cannot be represented yet, for
+//   example a typed pointer before `ptr<T>` reaches the VM. It can be built,
+//   stored and passed around, but reading it always fails with `SEAM001`.
+//   Build one with `pending("<area>.<what>", "<what is missing>")`.
+//
+// * `[StandIn(..)]`: a real but temporary representation that works and is
+//   known to differ from the spec, for example an integer address in place of
+//   `ptr<T>`, or FNV in place of BLAKE3. It names what it stands in for and
+//   how it differs. It must never stand behind a value chosen to satisfy a
+//   test: a stand-in computes, it only computes the wrong kind of thing.
+//
+// * `[Workaround(..)]`: code bent around a known bug (a registered
+//   `KnownBug` with a repro program) instead of being written the natural
+//   way. When the bug is fixed, the gate lists every workaround to undo.
+//
+// All three are registered in `selfhost/gate/ledger/seams.pilot` and checked by
+// `pilot gate` (the `seams` gate), like seams. None of them carries an expected
+// value: expected answers belong in tests, from a source outside the code.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Pending;
+
+use Pilot.Core.Interfaces.*;
+
+/// A value of type `T` that cannot exist yet. `T` records what it will be.
+pub struct Pending<T: IAnyValue> : IValue {
+    /// The registry id, `<area>.<what>`.
+    pub id: str;
+    /// What is missing before a real `T` can be held here.
+    pub note: str;
+
+    /// There is no `T` to give: always stops with SEAM001 and this id.
+    pub fn get(self) -> T => seam(self.id, self.note);
+}
+
+/// A pending value with the registry id `id`.
+pub fn pending<T: IAnyValue>(id: str, note: str) -> Pending<T> => Pending<T> {
+    id:   id,
+    note: note,
+};
+
+/// `[StandIn("id", "what it stands in for", "how it differs", "owner")]` on a
+/// field, type or function that uses a temporary representation.
+[Layout(c_abi)]
+pub struct StandInAttr : IAttribute, IValue {
+    pub id:      str;
+    pub real:    str;
+    pub differs: str;
+    pub owner:   str;
+    pub weight:  i32;
+
+    pub static pure fn create(id: str, real: str, differs: str, owner: str) -> StandInAttr => StandInAttr {
+        id:      id,
+        real:    real,
+        differs: differs,
+        owner:   owner,
+        weight:  0,
+    };
+}
+
+/// `[Workaround("bug.id", "what was done instead")]` on code shaped around a
+/// known bug. The id must be in `bug_registry()`.
+[Layout(c_abi)]
+pub struct WorkaroundAttr : IAttribute, IValue {
+    pub bug:    str;
+    pub change: str;
+    pub weight: i32;
+
+    pub static pure fn create(bug: str, change: str) -> WorkaroundAttr => WorkaroundAttr {
+        bug:    bug,
+        change: change,
+        weight: 0,
+    };
+}

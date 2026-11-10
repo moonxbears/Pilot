@@ -36,6 +36,9 @@ impl BytecodeCompiler {
         self.cur_span = arena.span(step);
         let sn = *arena.node(step);
         match sn.node_kind() {
+            NodeKind::CallExpr if Self::is_quoted_call(&sn) => {
+                self.compile_quoted_call();
+            }
             NodeKind::CallExpr => {
                 let children = arena.children_slice(sn.lhs, sn.rhs).to_vec();
                 let Some((&callee, args)) = children.split_first() else {

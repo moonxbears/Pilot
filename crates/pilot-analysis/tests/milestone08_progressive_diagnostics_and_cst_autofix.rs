@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -84,6 +86,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 fn eval_diag(script: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let deps = [
+        "stdlib/core/file.pilot",
         "selfhost/diagnostics/model.pilot",
         "selfhost/diagnostics/renderer.pilot",
         "selfhost/cst/autofix.pilot",
@@ -106,11 +109,11 @@ fn eval_diag(script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
-// Test 1: Transactional Lossless CST Auto-Fix (6 Defects + 12 Comments + CRLF)
+// Test 1: Transactional Lossless CST Auto-Fix (4 Lexical Defects + 12 Comments + CRLF)
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m8_1_transactional_cst_autofix_six_defects_and_comment_conservation() {
@@ -152,20 +155,52 @@ pub fn test_m8_1_transactional_cst_autofix_six_defects_and_comment_conservation(
         adv_list.push(adv_fix);
         let adv_res = apply_file_fixes_lossless(src, adv_list, 3);
 
-        ("" + diag_count + "|" + fix_res.fixes_applied + "|" + (if fix_res.success { "OK" } else { "FAIL" }) + "|" + (if comments_ok { "CONSERVED" } else { "LOST" }) + "|" + (if crlf_ok { "CRLF" } else { "LF" }) + "|" + adv_res.error_code);
+        ("" + diag_count + "|" + fix_res.fixes_applied + "|" + (if fix_res.success { "OK" } else { "FAIL" }) + "|" + (if comments_ok { "CONSERVED" } else { "LOST" }) + "|" + (if crlf_ok { "CRLF" } else { "LF" }) + "|" + adv_res.error_code + "|" + fix_res.new_src);
     "#;
 
     let res = eval_diag(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts.len(), 6, "Expected 6 parts, got: {}", res);
-    let diag_count: usize = parts[0].parse().unwrap();
-    let applied_count: usize = parts[1].parse().unwrap();
-    assert!(diag_count >= 6, "Expected at least 6 diagnostics detected, got {}", diag_count);
-    assert!(applied_count >= 6, "Expected at least 6 fixes applied, got {}", applied_count);
+    assert_eq!(parts.len(), 7, "Expected 7 parts, got: {}", res);
+    // The source holds four lexical defects: `.5`, the unterminated
+    // `let missing_semi = 42`, `mut` and `match`. `let counter = 10; // comment 2`
+    // ends in a comment, not a missing `;`.
+    assert_eq!(parts[0], "4", "Expected 4 lexical diagnostics");
+    assert_eq!(parts[1], "4", "Expected 4 fixes applied");
     assert_eq!(parts[2], "OK", "Autofix should report OK");
     assert_eq!(parts[3], "CONSERVED", "All 12 comments must be preserved verbatim");
     assert_eq!(parts[4], "CRLF", "CRLF line endings must be preserved verbatim");
     assert_eq!(parts[5], "FIX001", "Adversarial comment loss must abort with FIX001");
+    // Hand-applied edits: `.5` -> `0.5`, `42` -> `42;`, `mut` -> `var`, `match` -> `switch`.
+    assert_eq!(
+        parts[6],
+        "/* comment 1 */\r\nlet counter = 10; // comment 2\r\n/* comment 3 */ counter = 20;\r\n// comment 4\r\nlet factor = 0.5; /* comment 5 */\r\n// comment 6\r\nlet missing_semi = 42;\r\n/* comment 7 */\r\nvar mutable_var = 100;\r\n// comment 8\r\nswitch state_val {\r\n    /* comment 9 */\r\n    case 1: break;\r\n}\r\n// comment 10\r\nupdate_data(ref target_buffer); /* comment 11 */\r\n// comment 12\r\n",
+        "Fixed source must differ from the input only at the four edits"
+    );
+
+    // DECL004 / BORROW001 need the type checker; that path stops at its seam.
+    let semantic = eval_diag(r#"suggest_semantic_fixes("let a = 1;\na = 2;\n", 1);"#);
+    assert!(
+        semantic.starts_with("FAULT: SEAM001: unconnected seam `autofix.semantic_defects`"),
+        "semantic fixes must stop at their seam, got: {}",
+        semantic
+    );
+
+    // The atomic replace writes the .tmp file, then stops before the rename.
+    let dir = std::env::temp_dir().join(format!("pilot_m8_atomic_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("app.pilot");
+    let target_s = target.to_string_lossy().replace('\\', "/");
+    let atomic = eval_diag(&format!(r#"write_file_atomic("{}", "let x = 1;\n");"#, target_s));
+    let tmp_written = std::fs::read_to_string(dir.join("app.pilot.tmp")).ok();
+    let target_exists = target.exists();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        atomic.starts_with("FAULT: SEAM001: unconnected seam `autofix.atomic_rename`"),
+        "atomic write must stop at its rename seam, got: {}",
+        atomic
+    );
+    assert_eq!(tmp_written.as_deref(), Some("let x = 1;\n"), "the .tmp file holds the new source");
+    assert!(!target_exists, "the target is not written before the rename exists");
 
     guard.finish();
 }

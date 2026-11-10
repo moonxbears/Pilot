@@ -114,3 +114,10 @@ pub fn vm_sandbox_write_stdout(var ref s: VmSandbox, piece: str) {
         s.stdout_buf = s.stdout_buf + piece;
     }
 }
+
+/// Runs `source` inside the sandbox, charging fuel per instruction and
+/// checking each host call against the capability mask; returns captured
+/// stdout.
+pub fn vm_sandbox_run(var ref s: VmSandbox, source: str) -> str {
+    return seam("pilot_vm.sandbox_run", "the VM does not meter fuel, heap or capabilities through a sandbox");
+}

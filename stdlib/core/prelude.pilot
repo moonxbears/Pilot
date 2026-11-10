@@ -12,5 +12,8 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Prelude;
 use Pilot.Core.Option;
 use Pilot.Core.Result;
 
+// `Pending<T>` / `pending(..)` and `[StandIn(..)]`: gaps kept in data.
+use Pilot.Core.Pending;
+
 // `a union b`, `a intersect b` and `a except b` on sequences.
 use Pilot.Db.SetOps;

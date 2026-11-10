@@ -21,6 +21,9 @@ comptime {
     __engine("bind_native_fn", nameof(assert),  "rt_assert");
     __engine("bind_native_fn", nameof(List),    "list_new");
     __engine("bind_native_fn", nameof(Map),     "map_new");
+    // `seam("id", "note")`: an intentionally unconnected entry or exit point.
+    // It always fails; every call is listed in `selfhost/gate/ledger/seams.pilot`.
+    __engine("bind_native_fn", nameof(seam),    "seam_open");
 
     // Methods on strings, lists and records: `value.name(args)`.
     __engine("bind_native_method", nameof(len),         "str_len");

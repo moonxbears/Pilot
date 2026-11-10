@@ -48,6 +48,21 @@ pure fn chor_read_ident(src: str, start: usize) -> str {
     return "";
 }
 
+/// Reads the decimal digits starting at `start`; `none` when there are none.
+pure fn chor_read_usize(src: str, start: usize) -> usize? {
+    let n = src.len();
+    var pos = start;
+    var val: usize = 0;
+    while pos < n && src.byte_at(pos) >= 48 && src.byte_at(pos) <= 57 {
+        val = val * 10 + ((src.byte_at(pos) - 48) as usize);
+        pos = pos + 1;
+    }
+    if pos == start {
+        return none;
+    }
+    return val;
+}
+
 pure fn chor_trim(s: str) -> str {
     let n = s.len();
     var st: usize = 0;
@@ -100,9 +115,14 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
 
             // Read until ';'
             while pos < n && src.byte_at(pos) != 59 {
-                if src.slice(pos, pos + 3) == "SoA" { strat = "SoA"; }
-                else if src.slice(pos, pos + 5) == "AoSoA" { strat = "AoSoA"; }
-                else if src.slice(pos, pos + 7) == "HotCold" { strat = "HotCold"; }
+                if src.slice(pos, pos + 9) == "capacity:" {
+                    cap = chor_read_usize(src, chor_skip_ws(src, pos + 9)) ?? cap;
+                }
+                // Longest name first, and skip past it, so `AoSoA` is not
+                // also read as the `SoA` inside it.
+                if src.slice(pos, pos + 5) == "AoSoA" { strat = "AoSoA"; pos = pos + 5; continue; }
+                if src.slice(pos, pos + 7) == "HotCold" { strat = "HotCold"; pos = pos + 7; continue; }
+                if src.slice(pos, pos + 3) == "SoA" { strat = "SoA"; pos = pos + 3; continue; }
                 pos = pos + 1;
             }
             if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
@@ -171,7 +191,6 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
             pos = chor_skip_ws(src, pos + c_name.len());
             var p_ty = "";
             var is_iso = false;
-            var lat: u8 = 0; // 0b00=Val default
 
             if pos < n && src.byte_at(pos) == 40 { // '('
                 pos = pos + 1;
@@ -181,18 +200,7 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
                 if full_payload.starts_with("iso ") {
                     is_iso = true;
                     p_ty = chor_trim(full_payload.slice(4, full_payload.len()));
-                    lat = 2; // 0b10 Object with iso
-                } else if full_payload.starts_with("slice<") || full_payload.contains("View") {
-                    lat = 1; // 0b01 Reference (Forbidden by 2-bit cue law!)
-                    p_ty = full_payload;
-                } else if full_payload.contains("Guard") {
-                    lat = 3; // 0b11 Guard (Forbidden!)
-                    p_ty = full_payload;
-                } else if full_payload.contains("Buffer") || full_payload.contains("List") {
-                    lat = 2; // 0b10 Object without iso
-                    p_ty = full_payload;
                 } else {
-                    lat = 0; // 0b00 Value
                     p_ty = full_payload;
                 }
                 pos = if p_end < n { p_end + 1 } else { n };
@@ -204,8 +212,7 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
             bp.cues.push(CueContract {
                 name:              c_name,
                 payload_type:      p_ty,
-                payload_layout_id: 1,
-                payload_lattice:   lat,
+                payload_lattice:   none,
                 requires_iso_move: is_iso,
                 backpressure:      BackpressurePolicy::Block,
                 priority:          1,
@@ -246,9 +253,11 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
             var trans = TransportSpec::direct_call();
             var is_block = false;
             while pos < n && src.byte_at(pos) != 59 {
-                if src.slice(pos, pos + 10) == "RingBuffer" {
+                if src.slice(pos, pos + 11) == "RingBuffer(" {
                     trans.kind = TransportKind::RingBuffer;
-                    trans.capacity = 1024;
+                    trans.capacity = chor_read_usize(src, chor_skip_ws(src, pos + 11)) ?? trans.capacity;
+                } else if src.slice(pos, pos + 10) == "RingBuffer" {
+                    trans.kind = TransportKind::RingBuffer;
                 } else if src.slice(pos, pos + 14) == "CoalesceLatest" {
                     trans.backpressure = BackpressurePolicy::CoalesceLatest;
                 } else if src.slice(pos, pos + 7) == "TryFail" {

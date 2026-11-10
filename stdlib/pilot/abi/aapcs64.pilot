@@ -11,6 +11,30 @@ use Pilot.Core.Memory::*;
 use Pilot.Core.Reflect.TypeLayout;
 use Pilot.Abi.Descriptor::*;
 
+/// Members of a Homogeneous Floating-point Aggregate (AAPCS64 5.9.5.1):
+/// 1 to 4 floating-point members of one size that fill the aggregate.
+/// `0` when the aggregate is not an HFA.
+pub fn aapcs64_hfa_count(fields: List<AbiFieldClass>, size: u32) -> u8 {
+    let n = fields.len();
+    if n == 0 || n > 4 { return 0; }
+    let member = fields[0].size;
+    var i: usize = 0;
+    while i < n {
+        let f = fields[i];
+        if !f.is_float() || f.size != member || f.offset != member * (i as u32) { return 0; }
+        i = i + 1;
+    }
+    if member * (n as u32) != size { return 0; }
+    return n as u8;
+}
+
+/// An HFA of `count` members starting at vector register `v0`.
+pub pure fn aapcs64_hfa_location(v0: u8, count: u8, size: u32) -> ArgLocation {
+    if count == 1 { return ArgLocation::direct_simd(v0, size); }
+    if count == 2 { return ArgLocation::pair_simd_simd(v0, v0 + 1, size); }
+    return ArgLocation::hfa(v0, count, size);
+}
+
 pub struct Aapcs64ConvClassifier : IValue, ICallingConvClassifier {
     pub is_darwin: bool;
 
@@ -60,14 +84,25 @@ pub struct Aapcs64ConvClassifier : IValue, ICallingConvClassifier {
         let ret_is_flt = ret.reg_class == 2;
         if ret_sz == 0 {
             ret_location = ArgLocation::void_loc();
-        } else if ret_is_agg && ret_sz > 16 {
-            // Sret required: dedicated register X8 holds the destination buffer.
-            // Notice: next_gpr stays at 0! Explicit argument 0 remains in X0!
-            sret_used = true;
-            ret_location = ArgLocation::indirect(8, ret_sz as u32);
-        } else if ret_is_agg && ret_sz > 8 && ret_sz <= 16 {
-            // 16-byte struct returned in X0:X1
-            ret_location = ArgLocation::pair_gpr_gpr(0, 1, ret_sz as u32);
+        } else if ret_is_agg {
+            // Aggregates up to 32 bytes may be HFAs (returned in V0..V3);
+            // that depends on their members, not their size.
+            var hfa: u8 = 0;
+            if ret_sz <= 32 {
+                hfa = aapcs64_hfa_count(abi_aggregate_fields(ret), ret_sz as u32);
+            }
+            if hfa > 0 {
+                ret_location = aapcs64_hfa_location(0, hfa, ret_sz as u32);
+            } else if ret_sz > 16 {
+                // Dedicated X8 holds the destination; explicit argument 0
+                // stays in X0.
+                sret_used = true;
+                ret_location = ArgLocation::indirect(8, ret_sz as u32);
+            } else if ret_sz > 8 {
+                ret_location = ArgLocation::pair_gpr_gpr(0, 1, ret_sz as u32);
+            } else {
+                ret_location = ArgLocation::direct_gpr(0, ret_sz as u32);
+            }
         } else if ret_is_flt {
             ret_location = ArgLocation::direct_simd(0, ret_sz as u32);
         } else {
@@ -90,16 +125,20 @@ pub struct Aapcs64ConvClassifier : IValue, ICallingConvClassifier {
                     stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
                 }
             } else if p.reg_class == 5 {
-                // Check for Homogeneous Floating-Point Aggregate (HFA)
-                // e.g. 12B = 3x f32, 24B = 3x f64, 16B = 4x f32, 32B = 4x f64
-                if sz == 12 && next_vec + 3 <= 8 {
-                    // 3x float HFA in 3 consecutive vector registers
-                    param_locs.push(ArgLocation::hfa(next_vec, 3, sz));
-                    next_vec = next_vec + 3;
-                } else if sz == 16 && next_vec + 4 <= 8 && (p.lattice_bits & 0b10) == 0 {
-                    // Could be 4x float HFA or 2x GPR pair. If SIMD-aligned, prefer HFA
-                    param_locs.push(ArgLocation::hfa(next_vec, 4, sz));
-                    next_vec = next_vec + 4;
+                var hfa: u8 = 0;
+                if sz <= 32 {
+                    hfa = aapcs64_hfa_count(abi_aggregate_fields(ref p), sz);
+                }
+                if hfa > 0 {
+                    if next_vec + hfa <= 8 {
+                        param_locs.push(aapcs64_hfa_location(next_vec, hfa, sz));
+                        next_vec = next_vec + hfa;
+                    } else {
+                        // No partial HFAs: the rest of V0..V7 is closed.
+                        next_vec = 8;
+                        param_locs.push(ArgLocation::stack(stack_offset, sz));
+                        stack_offset = stack_offset + ((sz + 7) & 0xFFFFFFF8);
+                    }
                 } else if sz <= 8 {
                     if next_gpr < 8 {
                         param_locs.push(ArgLocation::direct_gpr(next_gpr, sz));

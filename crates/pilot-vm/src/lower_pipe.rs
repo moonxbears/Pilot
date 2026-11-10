@@ -16,6 +16,9 @@ impl BytecodeCompiler {
     /// Lowers `value |> target` (and `target <| value`).
     pub(crate) fn compile_pipe(&mut self, arena: &AstArena, value: NodeId, target: NodeId) -> u8 {
         let tn = *arena.node(target);
+        if tn.node_kind() == NodeKind::CallExpr && Self::is_quoted_call(&tn) {
+            return self.compile_quoted_call();
+        }
         let (callee, args): (NodeId, Vec<NodeId>) = match tn.node_kind() {
             NodeKind::CallExpr if tn.rhs > 0 => {
                 let ids = arena.children_slice(tn.lhs, tn.rhs);

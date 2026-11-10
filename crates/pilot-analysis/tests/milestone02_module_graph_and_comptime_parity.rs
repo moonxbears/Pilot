@@ -12,6 +12,8 @@ use pilot_rt::PilotVal;
 use pilot_span::{FileId, SourceMap};
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -203,16 +205,7 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
     let env_res = engine.eval_ast_node(&env_arena, env_arena.root).expect("eval is_comptime");
     assert_eq!(env_res.as_int(), Some(1), "is_comptime must be 1 at comptime");
 
-    // 3. Verify the nested target physics record (ENV.target) is queryable at comptime
-    let simd_arena = parse("let s = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"simd_width_bits\"); return s;\n");
-    let simd_res = engine.eval_ast_node(&simd_arena, simd_arena.root).expect("eval simd_width_bits");
-    assert_eq!(simd_res.as_int(), Some(128));
-
-    let cache_arena = parse("let cl = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"cache_line_bytes\"); return cl;\n");
-    let cache_res = engine.eval_ast_node(&cache_arena, cache_arena.root).expect("eval cache_line_bytes");
-    assert_eq!(cache_res.as_int(), Some(64));
-
-    // 3b. Verify multiplatform target physics map aliases ("arch", "pointer_bytes", "endian")
+    // 3. Verify multiplatform target physics map aliases ("arch", "pointer_bytes", "endian")
     let arch_arena = parse("let a = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"arch\"); return a;\n");
     let arch_res = engine.eval_ast_node(&arch_arena, arch_arena.root).expect("eval arch");
     let interner = pilot_intern::Interner::new();
@@ -226,6 +219,81 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
     let endian_res = engine.eval_ast_node(&endian_arena, endian_arena.root).expect("eval endian");
     let expected_endian = if cfg!(target_endian = "little") { "little" } else { "big" };
     assert_eq!(endian_res.as_str(&interner), Some(expected_endian));
+
+    // 3c. `env()` in stdlib/core/reflect.pilot reads the same ENV.target
+    //     record at comptime, and stops at a seam when no record exists.
+    let reflect_src = std::fs::read_to_string(anticheat::workspace_root().join("stdlib/core/reflect.pilot"))
+        .expect("read reflect.pilot");
+    let pending_src = std::fs::read_to_string(anticheat::workspace_root().join("stdlib/core/pending.pilot"))
+        .expect("read pending.pilot");
+    let env_section = format!(
+        "{pending_src}\n{}",
+        &reflect_src[reflect_src
+            .find("pub struct TargetDescriptor")
+            .map(|i| reflect_src[..i].rfind("[Layout(c_abi)]").unwrap_or(i))
+            .expect("TargetDescriptor in reflect.pilot")..]
+    );
+    let env_arch_src = format!("{env_section}\nlet e = env();\nreturn e.target.arch + \"|\" + e.target.pointer_bytes + \"|\" + e.is_comptime;\n");
+    let env_arch_arena = parse(&env_arch_src);
+    assert!(env_arch_arena.diagnostics.is_empty(), "env() section must parse: {:?}", env_arch_arena.diagnostics);
+    let env_arch = engine.eval_ast_node(&env_arch_arena, env_arch_arena.root).expect("eval env()");
+    let expected_env = format!("{}|{}|true", std::env::consts::ARCH, std::mem::size_of::<usize>());
+    assert_eq!(env_arch.as_str(&interner), Some(expected_env.as_str()), "env() must report the host target at comptime");
+
+    // SIMD width, cache line size and opt level are not known without a
+    // `--target` descriptor from the compile driver: env() hands them out as
+    // pending values, never as invented numbers.
+    for (field, pending_id) in [
+        ("simd_width_bits", "reflect.target_simd_width"),
+        ("cache_line_bytes", "reflect.target_cache_line"),
+        ("opt_level", "reflect.target_opt_level"),
+    ] {
+        let src = format!("{env_section}\nlet e = env();\nreturn e.target.{field}.id;\n");
+        let arena = parse(&src);
+        let got = engine.eval_ast_node(&arena, arena.root).expect("eval pending target field");
+        assert_eq!(got.as_str(&interner), Some(pending_id), "ENV.target.{field} must be pending");
+        assert!(
+            !engine_target_has(&mut engine, field),
+            "the engine must not publish an invented ENV.target.{field}"
+        );
+    }
+    let backend_src = format!("{env_section}\nlet e = env();\nreturn e.target.backend;\n");
+    let backend_arena = parse(&backend_src);
+    let backend = engine.eval_ast_node(&backend_arena, backend_arena.root).expect("eval backend");
+    assert_eq!(backend.as_str(&interner), Some("vm"), "comptime code runs on the seed VM");
+    let read_src = format!("{env_section}\nlet t = TargetDescriptor {{ arch: \"\", os: \"\", pointer_bytes: 0, endian: \"\", backend: \"\", simd_width_bits: pending(\"reflect.target_simd_width\", \"x\"), cache_line_bytes: pending(\"reflect.target_cache_line\", \"x\"), opt_level: pending(\"reflect.target_opt_level\", \"x\") }};\nreturn t.simd_width_bits.get();\n");
+    let read_arena = parse(&read_src);
+    let mut read_vm = PilVirtualMachine::new();
+    read_vm.load_binary(BytecodeCompiler::compile(&read_arena, read_arena.root));
+    let read_out = vm_outcome::outcome(&mut read_vm);
+    assert!(
+        read_out.starts_with("FAULT: SEAM001: unconnected seam `reflect.target_simd_width`"),
+        "reading a pending target field must stop at SEAM001, got: {read_out}"
+    );
+
+    let mut vm = PilVirtualMachine::new();
+    vm.load_binary(BytecodeCompiler::compile(&env_arch_arena, env_arch_arena.root));
+    let run_out = vm_outcome::outcome(&mut vm);
+    assert!(
+        run_out.starts_with("FAULT: SEAM001: unconnected seam `reflect.target_descriptor`"),
+        "env() without an ENV.target record must stop at its seam, got: {run_out}"
+    );
+
+    for (call, seam_id) in [
+        ("e.lookup_type(\"i64\")", "reflect.lookup_type"),
+        ("e.symbols_in_pkg(\"core\")", "reflect.symbols_in_pkg"),
+        ("e.ast_root(0)", "reflect.ast_root"),
+    ] {
+        let src = format!(
+            "{env_section}\nlet t = TargetDescriptor {{ arch: \"\", os: \"\", pointer_bytes: 0, endian: \"\", backend: \"\", simd_width_bits: pending(\"reflect.target_simd_width\", \"x\"), cache_line_bytes: pending(\"reflect.target_cache_line\", \"x\"), opt_level: pending(\"reflect.target_opt_level\", \"x\") }};\n\
+             let e = CompileEnvView {{ target: t, is_comptime: false, unit_count: 0, symbol_count: 0 }};\nreturn {call};\n"
+        );
+        let arena = parse(&src);
+        let mut vm = PilVirtualMachine::new();
+        vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
+        let out = vm_outcome::outcome(&mut vm);
+        assert!(out.contains(&format!("SEAM001: unconnected seam `{seam_id}`")), "{call} must stop at {seam_id}, got: {out}");
+    }
 
     // 4. Verify string return values are preserved in ComptimeValue
     let str_arena = parse("return \"pilot_env_ok\";\n");
@@ -383,4 +451,13 @@ pub fn test_m2_4_zero_fake_transpile_stubs_and_crate_ceilings() {
     let _ = std::fs::remove_dir_all(tmp_dir);
 
     guard.finish();
+}
+
+/// Whether the comptime engine publishes `field` in its ENV.target record.
+fn engine_target_has(engine: &mut ComptimeEngine, field: &str) -> bool {
+    let src = format!(
+        "let v = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"{field}\");\nif v == none {{ return 0; }}\nreturn 1;\n"
+    );
+    let arena = parse(&src);
+    engine.eval_ast_node(&arena, arena.root).expect("eval target field probe").as_int() == Some(1)
 }

@@ -107,6 +107,51 @@ pub pure fn pattern_arm_new(id: usize, head: str, tmpl: str, is_left_rec: bool, 
     };
 }
 
+/// The first element of a pattern template: the text before the first space,
+/// with a variadic group opener `$(` removed.
+pub pure fn pattern_leading_element(tmpl: str) -> str {
+    let text = tmpl.trim();
+    let space = text.find(" ");
+    var first = text;
+    if space >= 0 {
+        first = text.slice(0, space);
+    }
+    if first.starts_with("$(") {
+        first = first.slice(2, first.len());
+    }
+    return first;
+}
+
+/// The nonterminal a pattern element refers to: the fragment kind of a
+/// metavariable (`$lhs:Expr` refers to `Expr`), or the element itself when it
+/// is a bare word. Delimiters after the kind (`)`, `,`) are dropped.
+pub pure fn pattern_element_nonterminal(elem: str) -> str {
+    if !elem.starts_with("$") {
+        return elem;
+    }
+    let colon = elem.find(":");
+    if colon < 0 {
+        return "";
+    }
+    var kind = elem.slice(colon + 1, elem.len());
+    var end = 0;
+    while end < kind.len() {
+        let b = kind.byte_at(end);
+        let is_word = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+        if !is_word { break; }
+        end = end + 1;
+    }
+    return kind.slice(0, end);
+}
+
+/// Direct left recursion: the arm's first element refers back to the rule
+/// itself, so an LL parselet for the rule would call itself before consuming
+/// a token.
+pub pure fn pattern_is_left_recursive(rule_name: str, tmpl: str) -> bool {
+    let nt = pattern_element_nonterminal(pattern_leading_element(tmpl));
+    return nt.len() > 0 && nt == rule_name;
+}
+
 pub struct SyntaxRuleDef : IObject {
     pub name:          str;
     pub is_scoped:     bool;
@@ -123,14 +168,9 @@ pub fn pattern_dsl_rule_new(name: str, is_scoped: bool) -> SyntaxRuleDef {
     };
 }
 
-pub var fn pattern_dsl_add_arm(
-    var ref self: SyntaxRuleDef,
-    head: str,
-    pattern: str,
-    is_left_rec: bool,
-    priority: usize
-) {
+pub var fn pattern_dsl_add_arm(var ref self: SyntaxRuleDef, head: str, pattern: str, priority: usize) {
     let arm_id = self.arms.len();
+    let is_left_rec = pattern_is_left_recursive(self.name, pattern);
     self.arms.push(pattern_arm_new(arm_id, head, pattern, is_left_rec, priority));
     var found = false;
     var i = 0;
@@ -184,7 +224,6 @@ pub struct PatternMatchResult : IValue {
     pub matched_arm_id:   usize;
     pub matched_head:     str;
     pub tokens_consumed:  usize;
-    pub captured_vars:    usize;
 }
 
 pub fn pattern_dsl_match_prefix(rule: ref<SyntaxRuleDef>, token: str) -> PatternMatchResult {
@@ -197,7 +236,6 @@ pub fn pattern_dsl_match_prefix(rule: ref<SyntaxRuleDef>, token: str) -> Pattern
                 matched_arm_id:  arm.arm_id,
                 matched_head:    token,
                 tokens_consumed: 1,
-                captured_vars:   1,
             };
         }
         i = i + 1;
@@ -207,6 +245,5 @@ pub fn pattern_dsl_match_prefix(rule: ref<SyntaxRuleDef>, token: str) -> Pattern
         matched_arm_id:  0,
         matched_head:    "",
         tokens_consumed: 0,
-        captured_vars:   0,
     };
 }

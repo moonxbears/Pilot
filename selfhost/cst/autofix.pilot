@@ -217,16 +217,15 @@ pub fn apply_file_fixes_lossless(old_src: str, fixes: List<FixSuggestion>, max_p
 
 // ------------------------------------------------------------------------------
 // Atomic File Replacement Strategy (Milestone 8.3)
-// Writes to `<file>.tmp` first, verifies write integrity, then commits to `<file>`
+// Writes `<file>.tmp` first; committing it over `<file>` needs an atomic rename,
+// which the host does not offer yet.
 // ------------------------------------------------------------------------------
 pub fn write_file_atomic(file_path: str, new_src: str) -> bool {
     let tmp_path = file_path + ".tmp";
-    let written_tmp = File.write_text(tmp_path, new_src);
-    if written_tmp < 0 {
+    if !File.write_text(tmp_path, new_src) {
         return false;
     }
-    let written = File.write_text(file_path, new_src);
-    return written >= 0;
+    return seam("autofix.atomic_rename", "renaming the written .tmp over the target needs an OS rename intrinsic");
 }
 
 // ------------------------------------------------------------------------------
@@ -279,18 +278,23 @@ pub fn generate_unified_diff(file_path: str, old_src: str, new_src: str) -> str 
 }
 
 // ------------------------------------------------------------------------------
-// Automated Defect Scanner & Fix Proposer (6 Canonical Auto-Fixable Defects)
-// 1. `let` mutated -> `var` (DECL004)
-// 2. missing `;` statement terminator (SYN001)
-// 3. leading-zero float `.5` -> `0.5` (SYN002)
-// 4. legacy keyword `mut` -> `var` (DECL005)
-// 5. legacy keyword `match` -> `switch` (SYN003)
-// 6. missing `var ref` at call site (BORROW001)
+// Lexical Defect Scanner & Fix Proposer
+// Defects visible in the token stream alone:
+// 1. missing `;` statement terminator (SYN001)
+// 2. leading-zero float `.5` -> `0.5` (SYN002)
+// 3. legacy keyword `mut` -> `var` (DECL005)
+// 4. legacy keyword `match` -> `switch` (SYN003)
+// Defects that need resolved bindings or callee signatures (`let` reassigned ->
+// `var`, DECL004; missing `var ref` at a call site, BORROW001) are found by
+// `suggest_semantic_fixes`.
 // ------------------------------------------------------------------------------
 pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
     var diags: List<Diagnostic> = [];
     let n = src.len();
     var p: usize = 0;
+    // First and last significant (non-trivia) byte of the current line, or -1.
+    var line_first: i64 = 0 - 1;
+    var line_last: i64 = 0 - 1;
 
     while p < n {
         let b = src.byte_at(p);
@@ -298,29 +302,71 @@ pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
         // Skip line comments
         if b == 47 && p + 1 < n && src.byte_at(p + 1) == 47 {
             p = p + 2;
-            while p < n && src.byte_at(p) != 10 { p = p + 1; }
+            while p < n && src.byte_at(p) != 10 && src.byte_at(p) != 13 { p = p + 1; }
             continue;
         }
 
-        // Skip block comments
+        // Skip block comments; one spanning lines ends the current line
         if b == 47 && p + 1 < n && src.byte_at(p + 1) == 42 {
+            let start = p;
             p = p + 2;
             while p + 1 < n && !(src.byte_at(p) == 42 && src.byte_at(p + 1) == 47) { p = p + 1; }
             if p + 1 < n { p = p + 2; } else { p = n; }
+            if src.slice(start, p).find("\n") >= 0 {
+                line_first = 0 - 1;
+                line_last = 0 - 1;
+            }
             continue;
         }
 
         // Skip strings
         if b == 34 {
+            if line_first < 0 { line_first = p as i64; }
             p = p + 1;
             while p < n && src.byte_at(p) != 34 {
                 if src.byte_at(p) == 92 && p + 1 < n { p = p + 2; } else { p = p + 1; }
             }
-            if p < n { p = p + 1; }
+            if p < n {
+                line_last = p as i64;
+                p = p + 1;
+            } else {
+                line_last = (n - 1) as i64;
+            }
             continue;
         }
 
-        // Defect 3: Leading-zero float `.5` -> `0.5`
+        // End of line: Defect 1, missing `;` after a `let`/`var`/`return` statement
+        if b == 10 {
+            if line_last >= 0 {
+                let last_b = src.byte_at(line_last as usize);
+                let ends_operand = (last_b >= 48 && last_b <= 57) || (last_b >= 65 && last_b <= 90) ||
+                    (last_b >= 97 && last_b <= 122) || last_b == 95 || last_b == 41 || last_b == 93 || last_b == 34;
+                let stmt = src.slice(line_first as usize, (line_last + 1) as usize);
+                if ends_operand && (stmt.starts_with("let ") || stmt.starts_with("var ") || stmt.starts_with("return ")) {
+                    let at = (line_last + 1) as u32;
+                    let sp = source_span_new(file_id, at, at);
+                    var d = diagnostic_with_primary_label("SYN001", diag_severity_error(), "Missing statement terminator ';'", sp, "insert ';'");
+                    let ed = cst_text_edit_new(sp, ";");
+                    let fx = fix_suggestion_with_edit("Insert missing ';'", fix_machine_applicable(), ed);
+                    diagnostic_add_fix(var ref d, fx);
+                    diags.push(d);
+                }
+            }
+            line_first = 0 - 1;
+            line_last = 0 - 1;
+            p = p + 1;
+            continue;
+        }
+
+        if b == 32 || b == 9 || b == 13 {
+            p = p + 1;
+            continue;
+        }
+
+        if line_first < 0 { line_first = p as i64; }
+        line_last = p as i64;
+
+        // Defect 2: Leading-zero float `.5` -> `0.5`
         // Dot preceded by space/punct and followed by digit
         if b == 46 && p + 1 < n && src.byte_at(p + 1) >= 48 && src.byte_at(p + 1) <= 57 {
             let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
@@ -336,7 +382,7 @@ pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
             }
         }
 
-        // Defect 4: Legacy keyword `mut` -> `var`
+        // Defect 3: Legacy keyword `mut` -> `var`
         if b == 109 && p + 3 <= n && src.slice(p, p + 3) == "mut" {
             let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
             let next = if p + 3 < n { src.byte_at(p + 3); } else { 32; };
@@ -347,12 +393,13 @@ pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
                 let fx = fix_suggestion_with_edit("Replace 'mut' with 'var'", fix_machine_applicable(), ed);
                 diagnostic_add_fix(var ref d, fx);
                 diags.push(d);
+                line_last = (p + 2) as i64;
                 p = p + 3;
                 continue;
             }
         }
 
-        // Defect 5: Legacy keyword `match` -> `switch`
+        // Defect 4: Legacy keyword `match` -> `switch`
         if b == 109 && p + 5 <= n && src.slice(p, p + 5) == "match" {
             let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
             let next = if p + 5 < n { src.byte_at(p + 5); } else { 32; };
@@ -363,85 +410,9 @@ pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
                 let fx = fix_suggestion_with_edit("Replace 'match' with 'switch'", fix_machine_applicable(), ed);
                 diagnostic_add_fix(var ref d, fx);
                 diags.push(d);
+                line_last = (p + 4) as i64;
                 p = p + 5;
                 continue;
-            }
-        }
-
-        // Defect 6: Missing `var ref` at call site: `(ref x)` -> `(var ref x)`
-        if b == 114 && p + 3 <= n && src.slice(p, p + 3) == "ref" {
-            let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
-            let next = if p + 3 < n { src.byte_at(p + 3); } else { 32; };
-            // Ensure not preceded by 'var '
-            let is_var_ref = (p >= 4 && src.slice(p - 4, p) == "var ");
-            if !is_var_ref && (prev == 32 || prev == 40 || prev == 44) && next == 32 {
-                let sp = source_span_new(file_id, p as u32, (p + 3) as u32);
-                var d = diagnostic_with_primary_label("BORROW001", diag_severity_error(), "Mutable reference argument requires 'var ref'", sp, "add 'var ref'");
-                let ed = cst_text_edit_new(sp, "var ref");
-                let fx = fix_suggestion_with_edit("Add 'var ref' to mutable reference argument", fix_machine_applicable(), ed);
-                diagnostic_add_fix(var ref d, fx);
-                diags.push(d);
-                p = p + 3;
-                continue;
-            }
-        }
-
-        // Defect 1: `let` binding mutated later -> suggest `var`
-        if b == 108 && p + 3 <= n && src.slice(p, p + 3) == "let" {
-            let prev = if p > 0 { src.byte_at(p - 1); } else { 32; };
-            let next = if p + 3 < n { src.byte_at(p + 3); } else { 32; };
-            if (prev == 32 || prev == 10 || prev == 59 || prev == 123) && next == 32 {
-                // Find ident name
-                var q = p + 4;
-                while q < n && src.byte_at(q) == 32 { q = q + 1; }
-                let id_start = q;
-                while q < n && ((src.byte_at(q) >= 65 && src.byte_at(q) <= 90) || (src.byte_at(q) >= 97 && src.byte_at(q) <= 122) || src.byte_at(q) == 95 || (src.byte_at(q) >= 48 && src.byte_at(q) <= 57)) {
-                    q = q + 1;
-                }
-                let id_name = src.slice(id_start, q);
-                if id_name.len() > 0 {
-                    // Check if reassigned downstream: `id_name = `
-                    let reassign_pat = id_name + " =";
-                    let rest = src.slice(q, n);
-                    if str_contains(rest, reassign_pat) {
-                        let sp = source_span_new(file_id, p as u32, (p + 3) as u32);
-                        var d = diagnostic_with_primary_label("DECL004", diag_severity_error(), "Cannot assign to immutable binding 'let " + id_name + "'", sp, "use 'var' for mutable binding");
-                        let ed = cst_text_edit_new(sp, "var");
-                        let fx = fix_suggestion_with_edit("Change 'let' to 'var'", fix_machine_applicable(), ed);
-                        diagnostic_add_fix(var ref d, fx);
-                        diags.push(d);
-                        p = p + 3;
-                        continue;
-                    }
-                }
-            }
-        }
-
-        // Defect 2: Missing `;` statement terminator
-        // Pattern: statement ending at newline without ';' (e.g. `let a = 1\n` or `var b = 2\n`)
-        if b == 10 { // newline
-            var prev_p = p;
-            if prev_p > 0 && src.byte_at(prev_p - 1) == 13 { prev_p = prev_p - 1; } // CRLF
-            if prev_p > 0 {
-                let last_b = src.byte_at(prev_p - 1);
-                // Check if last byte was digit or ident or paren/bracket and line started with let/var/return
-                if (last_b >= 48 && last_b <= 57) || (last_b >= 65 && last_b <= 90) || (last_b >= 97 && last_b <= 122) || last_b == 41 || last_b == 93 || last_b == 34 {
-                    // Look back to line start
-                    var ls = prev_p - 1;
-                    while ls > 0 && src.byte_at(ls - 1) != 10 { ls = ls - 1; }
-                    var ls_trim = ls;
-                    while ls_trim < prev_p && src.byte_at(ls_trim) == 32 { ls_trim = ls_trim + 1; }
-                    let line_prefix = src.slice(ls_trim, if ls_trim + 7 < prev_p { ls_trim + 7; } else { prev_p; });
-
-                    if str_starts_with(line_prefix, "let ") || str_starts_with(line_prefix, "var ") || str_starts_with(line_prefix, "return ") {
-                        let sp = source_span_new(file_id, prev_p as u32, prev_p as u32);
-                        var d = diagnostic_with_primary_label("SYN001", diag_severity_error(), "Missing statement terminator ';'", sp, "insert ';'");
-                        let ed = cst_text_edit_new(sp, ";");
-                        let fx = fix_suggestion_with_edit("Insert missing ';'", fix_machine_applicable(), ed);
-                        diagnostic_add_fix(var ref d, fx);
-                        diags.push(d);
-                    }
-                }
             }
         }
 
@@ -449,4 +420,11 @@ pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
     }
 
     return diags;
+}
+
+// Defects that need name resolution and callee signatures: a `let` binding
+// that is reassigned in its own scope (DECL004) and a `ref` argument passed
+// to a `var ref` parameter (BORROW001).
+pub fn suggest_semantic_fixes(src: str, file_id: u32) -> List<Diagnostic> {
+    return seam("autofix.semantic_defects", "DECL004 and BORROW001 need resolved bindings and callee parameter modes from the type checker");
 }

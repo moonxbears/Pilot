@@ -29,108 +29,80 @@ pub pure fn queued_drop_item_new(raw: i64, dtor: i64, tid: u64) -> QueuedDropIte
 
 // ------------------------------------------------------------------------------
 // 2. ThreadAffineDropQueue Engine
-// Collects drops that happen on foreign worker threads where owner_tid != current_tid
+// Collects drops that happen on a thread other than the owner's; the owner
+// thread drains them from its own drain hook.
 // ------------------------------------------------------------------------------
 
 pub struct ThreadAffineDropQueue : IObject {
     pub queue: List<QueuedDropItem>;
 
-    pub static fn instance() -> ThreadAffineDropQueue {
-        return ThreadAffineDropQueue {
-            queue: [],
-        };
+    pub static fn create() -> ThreadAffineDropQueue {
+        return ThreadAffineDropQueue { queue: [] };
     }
 
-    pub static fn enqueue(p: i64, dtor: i64, target_tid: u64) {
+    /// The process-wide queue every thread-affine `ForeignHandle` drops into.
+    pub static fn global() -> ThreadAffineDropQueue {
+        return seam("lifetime.global_drop_queue",
+            "a process-wide, lock-protected drop queue needs runtime globals and locks (F7)");
+    }
+
+    pub var fn enqueue(p: i64, dtor: i64, target_tid: u64) {
         if p != 0 && dtor != 0 {
-            let count = ENV.dq_len;
-            ENV["p_" + count] = p;
-            ENV["d_" + count] = dtor;
-            ENV["t_" + count] = target_tid;
-            ENV["v_" + count] = 1;
-            ENV.dq_len = count + 1;
+            .queue.push(queued_drop_item_new(p, dtor, target_tid));
         }
     }
 
-    pub static fn pending_drops_for(tid: u64) -> usize {
+    pub pure fn pending_drops_for(tid: u64) -> usize {
         var count: usize = 0;
         var i: usize = 0;
-        let total = ENV.dq_len;
-        while i < total {
-            if ENV["v_" + i] == 1 && ENV["t_" + i] == tid {
-                count = count + 1;
-            }
+        while i < .queue.len() {
+            if .queue[i].target_tid == tid { count = count + 1; }
             i = i + 1;
         }
         return count;
     }
 
-    pub static fn pending_count() -> usize {
-        var count: usize = 0;
-        var i: usize = 0;
-        let total = ENV.dq_len;
-        while i < total {
-            if ENV["v_" + i] == 1 {
-                count = count + 1;
-            }
-            i = i + 1;
-        }
-        return count;
-    }
+    pub pure fn pending_count() -> usize => .queue.len();
 
-    pub static fn drain_thread(tid: u64) -> usize {
+    /// Runs, on thread `tid`, every destructor queued for it, and removes
+    /// them from the queue.
+    pub var fn drain_thread(tid: u64) -> usize {
+        var kept: List<QueuedDropItem> = [];
         var drained: usize = 0;
         var i: usize = 0;
-        let total = ENV.dq_len;
-        while i < total {
-            if ENV["v_" + i] == 1 && ENV["t_" + i] == tid {
-                let dtor = ENV["d_" + i];
-                let p = ENV["p_" + i];
-                invoke_foreign_destructor(dtor, p);
-                ENV["v_" + i] = 0;
+        while i < .queue.len() {
+            let item = .queue[i];
+            if item.target_tid == tid {
+                invoke_foreign_destructor(item.dtor_fn, item.raw_ptr);
                 drained = drained + 1;
+            } else {
+                kept.push(item);
             }
             i = i + 1;
         }
+        .queue = kept;
         return drained;
     }
 
-    pub static fn drain_current_thread() -> usize {
-        return ThreadAffineDropQueue.drain_thread(current_thread_id());
+    pub var fn drain_current_thread() -> usize {
+        return .drain_thread(current_thread_id());
     }
 
     ~self() {}
 }
 
+/// The id of the OS thread running this code.
 pub fn current_thread_id() -> u64 {
-    let tid = ENV.active_tid;
-    if tid == 0 {
-        return 1;
-    }
-    return tid;
+    return seam("thread.current_id",
+        "OS thread ids need the thread intrinsics (gettid / GetCurrentThreadId) of F6");
 }
 
-pub fn set_current_thread_id(tid: u64) {
-    if tid > 0 {
-        ENV.active_tid = tid;
-    }
-}
-
+/// Calls the native destructor `dtor_fn` on `raw_ptr`.
 pub fn invoke_foreign_destructor(dtor_fn: i64, raw_ptr: i64) {
     if dtor_fn != 0 && raw_ptr != 0 {
-        let cur = ENV.live_destructions;
-        ENV.live_destructions = cur + 1;
+        seam("ffi.call_destructor",
+            "calling a native destructor needs PilVM native calls through pilot_rt_invoke_abi_frame (F6)");
     }
-}
-
-pub fn live_foreign_destructions_count() -> i64 {
-    return ENV.live_destructions;
-}
-
-pub fn reset_foreign_destructions_count() {
-    ENV.live_destructions = 0;
-    ENV.dq_len = 0;
-    ENV.active_tid = 1;
 }
 
 // ------------------------------------------------------------------------------
@@ -138,7 +110,7 @@ pub fn reset_foreign_destructions_count() {
 // Wraps foreign heap pointer with Perceus move semantics + exact-last-ref dtor
 // ------------------------------------------------------------------------------
 
-[Layout(c_abi)]
+[Layout(c_abi), StandIn("ffi.int_address", "ptr<T> data pointer and native destructor fn pointer", "addresses held as i64 with no type or provenance", "F6")]
 pub struct ForeignHandle<T: IAnyValue> : IObject {
     pub raw_ptr:   i64;
     pub dtor_fn:   i64;
@@ -202,9 +174,9 @@ pub struct ForeignHandle<T: IAnyValue> : IObject {
     ~self() {
         if .is_armed && .raw_ptr != 0 {
             if .dtor_fn != 0 {
-                let cur_tid = current_thread_id();
-                if .owner_tid != 0 && cur_tid != .owner_tid {
-                    ThreadAffineDropQueue.enqueue(.raw_ptr, .dtor_fn, .owner_tid);
+                if .owner_tid != 0 && current_thread_id() != .owner_tid {
+                    var dq = ThreadAffineDropQueue.global();
+                    dq.enqueue(.raw_ptr, .dtor_fn, .owner_tid);
                 } else {
                     invoke_foreign_destructor(.dtor_fn, .raw_ptr);
                 }
@@ -223,13 +195,15 @@ pub struct ForeignHandle<T: IAnyValue> : IObject {
 [Layout(c_abi)]
 pub struct ForeignGuard<T: IAnyValue> : IGuard {
     pub state_token: T;
-    pub release_fn:  i64;
+    pub release_fn:  fn<T, void>;
     pub is_active:   bool;
 
-    pub static fn acquire(token: T, release_code: i64) -> ForeignGuard<T> {
+    /// Holds `token` until scope exit, then passes it to `release`
+    /// (for example a closure calling `PyGILState_Release`).
+    pub static fn acquire(token: T, release: fn<T, void>) -> ForeignGuard<T> {
         return ForeignGuard {
             state_token: token,
-            release_fn:  release_code,
+            release_fn:  release,
             is_active:   true,
         };
     }
@@ -244,10 +218,9 @@ pub struct ForeignGuard<T: IAnyValue> : IGuard {
 
     ~self() {
         if .is_active {
-            if .release_fn != 0 {
-                invoke_foreign_destructor(.release_fn, 1);
-            }
             .is_active = false;
+            let release = .release_fn;
+            release(.state_token);
         }
     }
 }
@@ -265,13 +238,11 @@ pub struct PinnedSlice<T: IValue> : IObject {
     pub len:       usize;
     pub is_pinned: bool;
 
-    pub static fn from_slice_buffer(ptr_val: i64, count: usize, elem_size: usize) -> PinnedSlice<T> {
-        return PinnedSlice {
-            data_ptr:  ptr_val,
-            len_bytes: count * elem_size,
-            len:       count,
-            is_pinned: true,
-        };
+    /// A heap block of `count` elements that never moves and is freed when
+    /// the last reference drops.
+    pub static fn allocate(count: usize, elem_size: usize) -> PinnedSlice<T> {
+        return seam("mem.pinned_alloc",
+            "pinned, reference-counted heap blocks need the runtime allocator (F7)");
     }
 
     pub pure fn byte_len() -> usize => .len_bytes;

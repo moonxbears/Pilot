@@ -6,6 +6,7 @@
 pub lvl(0) pkg Pilot.SelfHost.Ir.Model;
 
 use Pilot.Core.Reflect;
+use Pilot.Core.Pending;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -89,6 +90,7 @@ pub pure fn ir_physics_new(layout_id: u32, reg_class: u8, bit_width: u16, align_
     };
 }
 
+[StandIn("ir.fixed_layout_ids", "layout ids handed out by the type registry from [Bits] and [Layout]", "each helper returns a fixed id (0-3) and fixed register facts", "F4")]
 pub pure fn ir_physics_unit() -> IrTypePhysics {
     return IrTypePhysics {
         layout_id:    0,
@@ -99,6 +101,7 @@ pub pure fn ir_physics_unit() -> IrTypePhysics {
     };
 }
 
+[StandIn("ir.fixed_layout_ids", "layout ids handed out by the type registry from [Bits] and [Layout]", "each helper returns a fixed id (0-3) and fixed register facts", "F4")]
 pub pure fn ir_physics_i64() -> IrTypePhysics {
     return IrTypePhysics {
         layout_id:    1,
@@ -109,6 +112,7 @@ pub pure fn ir_physics_i64() -> IrTypePhysics {
     };
 }
 
+[StandIn("ir.fixed_layout_ids", "layout ids handed out by the type registry from [Bits] and [Layout]", "each helper returns a fixed id (0-3) and fixed register facts", "F4")]
 pub pure fn ir_physics_bool() -> IrTypePhysics {
     return IrTypePhysics {
         layout_id:    2,
@@ -119,6 +123,7 @@ pub pure fn ir_physics_bool() -> IrTypePhysics {
     };
 }
 
+[StandIn("ir.fixed_layout_ids", "layout ids handed out by the type registry from [Bits] and [Layout]", "each helper returns a fixed id (0-3) and fixed register facts", "F4")]
 pub pure fn ir_physics_ptr() -> IrTypePhysics {
     return IrTypePhysics {
         layout_id:    3,
@@ -335,19 +340,11 @@ pub pure fn ir_inst_new(res: u32, op: u16, sub: u16, phy: IrTypePhysics, a_off: 
 // Target Descriptor & Multiplatform ABI Physics (from Pilot.Core.Reflect)
 // ------------------------------------------------------------------------------
 
+[StandIn("ir.target_defaults", "target descriptor from --target and the compile driver", "backend llvm and little-endian on every target", "F3")]
 pub fn target_descriptor_new(os: str, arch: str) -> TargetDescriptor {
     var p_bytes: usize = 8;
-    var simd_bits: usize = 128;
-    if arch == "x86_64" {
-        simd_bits = 256;
-    } else if arch == "aarch64" {
-        simd_bits = 128;
-    } else if arch == "wasm32" {
+    if arch == "wasm32" || arch == "riscv32" {
         p_bytes = 4;
-        simd_bits = 128;
-    } else if arch == "riscv32" {
-        p_bytes = 4;
-        simd_bits = 64;
     }
 
     return TargetDescriptor {
@@ -356,9 +353,9 @@ pub fn target_descriptor_new(os: str, arch: str) -> TargetDescriptor {
         pointer_bytes:    p_bytes,
         endian:           "little",
         backend:          "llvm",
-        simd_width_bits:  simd_bits,
-        cache_line_bytes: 64,
-        opt_level:        2,
+        simd_width_bits:  pending("reflect.target_simd_width", "SIMD width of the chosen target CPU, set by --target"),
+        cache_line_bytes: pending("reflect.target_cache_line", "cache line size of the chosen target, set by --target"),
+        opt_level:        pending("reflect.target_opt_level", "optimisation level set by the compile driver"),
     };
 }
 

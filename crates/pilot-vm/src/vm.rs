@@ -20,7 +20,15 @@ pub struct VmFault {
     pub message: String,
     pub pc: usize,
     pub span: Option<ByteSpan>,
+    /// The calls that led here, innermost first, at most `MAX_TRACE` of them.
+    pub trace: Vec<ByteSpan>,
+    /// How many calls with a source position were active; it can exceed
+    /// `trace.len()`.
+    pub depth: usize,
 }
+
+/// The most calls a fault's trace keeps.
+pub const MAX_TRACE: usize = 32;
 
 impl std::fmt::Display for VmFault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -125,14 +133,26 @@ impl PilVirtualMachine {
             .filter(|s| s.start > 0 || s.end > 0)
     }
 
-    /// Records a fault for the instruction at `pc`.
+    /// Records a fault for the instruction at `pc`, with the calls that led
+    /// to it.
     fn raise(&mut self, pc: usize, message: String) {
-        let span = self
-            .pc_spans
+        let span = self.span_at(pc);
+        // A frame saves the address after its call instruction.
+        let calls = self
+            .call_stack
+            .iter()
+            .rev()
+            .filter_map(|&(ret, ..)| self.span_at(ret.saturating_sub(1)));
+        let depth = calls.clone().count();
+        let trace = calls.take(MAX_TRACE).collect();
+        self.fault = Some(VmFault { message, pc, span, trace, depth });
+    }
+
+    fn span_at(&self, pc: usize) -> Option<ByteSpan> {
+        self.pc_spans
             .get(pc)
             .copied()
-            .filter(|s| s.start > 0 || s.end > 0);
-        self.fault = Some(VmFault { message, pc, span });
+            .filter(|s| s.start > 0 || s.end > 0)
     }
 
     #[inline]

@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -114,7 +116,7 @@ fn eval_m17(deps: &[&str], script: &str) -> String {
     }));
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     vm.load_binary(bin);
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -187,6 +189,24 @@ fn test_m17_1_py_stub_parser_and_inspect_signatures() {
             if py_classify_type("Optional[int]") != PyStubTypeKind::OptUnion { return 30; }
             if py_classify_type("list[str]") != PyStubTypeKind::List { return 31; }
 
+            // 5. Several base classes, and a `def` with no parameter list (PY005)
+            var diags2: List<Diagnostic> = [];
+            let module2 = py_parse_stub("class Pair(Left, Right):\n    def broken: ...\n    def ok(self) -> int: ...\n", var diags2);
+            if module2.classes.len() != 1 { return 32; }
+            if module2.classes[0].bases.len() != 2 { return 33; }
+            if module2.classes[0].bases[1] != "Right" { return 34; }
+            if module2.classes[0].methods.len() != 1 { return 35; }
+            if module2.classes[0].methods[0].name != "ok" { return 36; }
+            if diags2.len() != 1 { return 37; }
+            if diags2[0].code != "PY005" { return 38; }
+
+            // 6. Vectorcall wrapper synthesizer
+            var stub = py_module_stub_new("test_mod");
+            let wrapper = py_synthesize_vectorcall_wrapper(ref stub, "predict");
+            if !wrapper.contains("test_mod.predict") { return 39; }
+            if !wrapper.contains("py_vectorcall_fast") { return 40; }
+            if !wrapper.contains("py_gil_acquire") { return 41; }
+
             return 42;
         }
     "##;
@@ -233,22 +253,16 @@ fn test_m17_2_zero_copy_pep3118_buffer_and_strided_tensor_views() {
             if raw_buf.format != "d" { return 4; }
             if raw_buf.strides != 8 { return 5; }
 
-            // 2. Strided buffer lease (IGuard 0b11)
-            let obj = py_obj_new(0x7fff0000);
-            var lease = py_buffer_acquire(ref obj, 0);
-            if !lease.is_active { return 6; }
-            if lease.raw.itemsize != 8 { return 7; }
-
-            py_buffer_release(var lease);
-            if lease.is_active { return 8; }
-
-            // 3. Diagnostics
+            // 2. Diagnostics
             if py_diag_code(PyDiagnosticKind::LibPythonNotFound) != "PY001" { return 9; }
             if py_diag_code(PyDiagnosticKind::BufferFormatMismatch) != "PY002" { return 10; }
             if py_diag_code(PyDiagnosticKind::ReadOnlyMutBorrow) != "PY003" { return 11; }
             if py_diag_code(PyDiagnosticKind::SubByteStrided) != "PY004" { return 12; }
 
-            return 42;
+            // 3. Borrowing a buffer needs PyObject_GetBuffer from a loaded libpython3.
+            let obj = py_obj_new(0x7fff0000);
+            var lease = py_buffer_acquire(ref obj, 0);
+            return 43;
         }
     "##;
 
@@ -258,7 +272,10 @@ fn test_m17_2_zero_copy_pep3118_buffer_and_strided_tensor_views() {
         "stdlib/std/polyglot/py_capi.pilot",
     ];
     let res = eval_m17(deps, script);
-    assert_eq!(res, "42", "PEP 3118 buffer and zero-copy strided tensor views must pass");
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `py.buffer_acquire`"),
+        "PEP 3118 layout and diagnostics must pass, then buffer borrowing must stop at its seam, got {res}"
+    );
 
     guard.finish();
 }
@@ -275,51 +292,17 @@ fn test_m17_3_vectorcall_fast_path_and_gil_guards() {
 
     let script = r##"
         pub fn main() -> i64 {
-            // 1. GIL Guard (0b11) acquisition and release
-            var gil = py_gil_acquire();
-            if !gil.is_active { return 1; }
-            if gil.state != 1 { return 2; }
-
-            py_gil_release(var gil);
-            if gil.is_active { return 3; }
-            if gil.state != 0 { return 4; }
-
-            // 2. AllowThreads Guard (0b11) for pure compute loops
-            var allow_th = py_allow_threads();
-            if !allow_th.is_released { return 5; }
-
-            py_restore_threads(var allow_th);
-            if allow_th.is_released { return 6; }
-
-            // 3. PyObj (0b10) Perceus refcounting
-            var obj = py_obj_new(0x2000);
-            if obj.refcount != 1 { return 7; }
-            py_obj_inc_ref(ref obj);
-            py_obj_dec_ref(var obj);
-
-            // 4. Vectorcall fast-path with kwnames
-            let mod_obj = py_import_module("numpy");
-            if mod_obj.ptr == 0 { return 8; }
-
+            // 1. A null callable is refused before anything reaches Python
             var args: List<usize> = [100, 200];
             var kwnames: List<str> = ["batch_size", "verbose"];
-            let call_res = py_vectorcall_fast(ref mod_obj, args.slice(0, args.len()), kwnames.slice(0, kwnames.len()));
-            if !call_res.is_ok { return 9; }
-            if call_res.val.ptr == 0 { return 10; }
-
-            // 5. Error checking
             let null_obj = py_obj_new(0);
             let err_call = py_vectorcall_fast(ref null_obj, args.slice(0, 0), kwnames.slice(0, 0));
             if err_call.is_ok { return 11; }
             if err_call.err.exc_type != "TypeError" { return 12; }
 
-            // 6. Vectorcall wrapper synthesizer
-            var stub = py_module_stub_new("test_mod");
-            let wrapper = py_synthesize_vectorcall_wrapper(ref stub, "predict");
-            if !wrapper.contains("py_vectorcall_fast") { return 13; }
-            if !wrapper.contains("py_gil_acquire") { return 14; }
-
-            return 42;
+            // 2. Taking the GIL needs PyGILState_Ensure from a loaded libpython3.
+            var gil = py_gil_acquire();
+            return 43;
         }
     "##;
 
@@ -329,7 +312,51 @@ fn test_m17_3_vectorcall_fast_path_and_gil_guards() {
         "stdlib/std/polyglot/py_capi.pilot",
     ];
     let res = eval_m17(deps, script);
-    assert_eq!(res, "42", "Vectorcall fast-path and GIL guards must pass");
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `py.gil_acquire`"),
+        "Null-callable check must pass, then GIL acquisition must stop at its seam, got {res}"
+    );
+
+    // Every other libpython3 entry point stops at its own seam.
+    let calls: &[(&str, &str)] = &[
+        ("py_init_in_process()", "py.init"),
+        ("py_gil_release(var g)", "py.gil_release"),
+        ("py_allow_threads()", "py.allow_threads"),
+        ("py_restore_threads(var t)", "py.restore_threads"),
+        ("py_obj_inc_ref(ref obj)", "py.inc_ref"),
+        ("py_obj_dec_ref(var obj)", "py.dec_ref"),
+        ("py_buffer_release(var lease)", "py.buffer_release"),
+        ("py_import_module(\"math\")", "py.import_module"),
+        ("py_vectorcall_fast(ref obj, args.slice(0, 1), kw.slice(0, 0))", "py.vectorcall"),
+        ("py_err_fetch()", "py.err_fetch"),
+        ("py_str_from_obj(ref obj)", "py.str_from_obj"),
+        ("py_int_from_obj(ref obj)", "py.int_from_obj"),
+        ("py_float_from_obj(ref obj)", "py.float_from_obj"),
+        ("py_obj_from_int(7)", "py.obj_from_int"),
+        ("py_obj_from_float(2.5)", "py.obj_from_float"),
+        ("py_obj_from_str(\"x\")", "py.obj_from_str"),
+    ];
+    for (call, id) in calls {
+        let script = format!(
+            r##"
+            pub fn main() -> i64 {{
+                var obj = py_obj_new(0x10);
+                var g = PyGilGuard {{ state: 1, is_active: true }};
+                var t = PyAllowThreadsGuard {{ saved_thread: 0x20, is_released: true }};
+                var lease = PyBufferLease {{ raw: py_buffer_raw_new(0x30, 0x10, 8, 8, 0, 1, "d", 1, 8), is_active: true }};
+                var args: List<usize> = [1];
+                var kw: List<str> = [];
+                {call};
+                return 43;
+            }}
+        "##
+        );
+        let res = eval_m17(deps, &script);
+        assert!(
+            res.starts_with(&format!("FAULT: SEAM001: unconnected seam `{id}`")),
+            "{call} must stop at seam {id}, got {res}"
+        );
+    }
 
     guard.finish();
 }
@@ -365,13 +392,15 @@ fn test_m17_4_gil_coalesce_ir_pass_and_diagnostics() {
             if report.allow_threads_inserted != 1 { return 5; } // gap s2 -> s3 is 25 (> 20)
             if report.total_scopes_after != 3 { return 6; }
 
-            // 4. Hot regions analyzer
-            var blocks: List<u32> = [1, 2];
-            var inst_counts: List<u32> = [25, 15];
-            let hot_scopes = analyze_gil_hot_regions(blocks.slice(0, 2), inst_counts.slice(0, 2));
-            if hot_scopes.len() == 0 { return 7; }
+            // The pass leaves the merged scopes in place of the input.
+            if scopes.len() != 3 { return 7; }
+            if scopes[0].end_inst != 15 { return 8; }
+            if !scopes[0].is_coalesced { return 9; }
 
-            return 42;
+            // 4. Finding guard scopes needs them in lowered PilIR.
+            var insts: List<IrInst> = [];
+            let hot_scopes = analyze_gil_hot_regions(insts.slice(0, 0));
+            return 43;
         }
     "##;
 
@@ -382,7 +411,10 @@ fn test_m17_4_gil_coalesce_ir_pass_and_diagnostics() {
         "selfhost/ir/pass_gil_coalesce.pilot",
     ];
     let res = eval_m17(deps, script);
-    assert_eq!(res, "42", "PilIR GIL coalesce pass and diagnostics must pass");
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `pilir.gil_scopes`"),
+        "GIL coalesce pass must pass, then scope discovery must stop at its seam, got {res}"
+    );
 
     guard.finish();
 }

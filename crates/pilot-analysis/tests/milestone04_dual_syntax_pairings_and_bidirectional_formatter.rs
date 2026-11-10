@@ -9,6 +9,8 @@ use pilot_ast::{CallQuoteKind, NodeId, NodeKind, UNARY_OP_DEEP_FLATTEN, UNARY_OP
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -154,7 +156,16 @@ fn eval_fmt(script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
+}
+
+/// Runs `src` on the VM alone and returns its outcome.
+fn eval_program(src: &str) -> String {
+    let arena = parse(src);
+    assert!(arena.diagnostics.is_empty(), "parse diagnostics: {:?}", arena.diagnostics);
+    let mut vm = PilVirtualMachine::new();
+    vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -298,6 +309,23 @@ pub fn test_m4_2_dual_syntax_equivalence_and_identical_codegen() {
     let un_flat_r = arena_readable.nodes.iter().filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_DEEP_FLATTEN).count();
     assert_eq!(un_flat_c, un_flat_r, "Flat unary expr mismatch");
 
+    // A plain call runs; every call-quote mode, in either spelling, stops at
+    // the `vm.call_quote` seam instead of silently running as a plain call.
+    let plain = eval_program("fn compute(x: i64) -> i64 => x + 1;\nreturn compute(41);\n");
+    assert_eq!(plain, "42", "a plain call must run, got: {plain}");
+    let forms = [
+        "compute!(41)", "compute!!(41)", "compute!&(41)", "compute!^(41)", "compute!@(41)", "compute!?(41)",
+        "call compute(41)", "splice compute(41)", "frame compute(41)", "sig compute(41)", "grad compute(41)",
+        "plan compute(41)",
+    ];
+    for form in forms {
+        let out = eval_program(&format!("fn compute(x: i64) -> i64 => x + 1;\nreturn {form};\n"));
+        assert!(
+            out.starts_with("FAULT: SEAM001: unconnected seam `vm.call_quote`"),
+            "`{form}` must stop at the vm.call_quote seam, got: {out}"
+        );
+    }
+
     guard.finish();
 }
 
@@ -381,7 +409,7 @@ pub fn test_m4_4_universal_rename_litmus_and_ide_reflection() {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    let reflected = vm.run().to_string_repr();
+    let reflected = vm_outcome::outcome(&mut vm);
     assert!(reflected.contains("!^|!?|!|*|OK"), "Reflected symbols mismatch: {}", reflected);
 
     guard.finish();

@@ -5,6 +5,8 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Ir.GilCoalesce;
 
+use Pilot.SelfHost.Ir.Model::*;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 // ------------------------------------------------------------------------------
@@ -89,37 +91,11 @@ pub fn can_coalesce_scopes(s1: ref<GilScope>, s2: ref<GilScope>) -> bool {
     return gap <= 16;
 }
 
-pub fn analyze_gil_hot_regions(
-    block_ids: slice<u32>,
-    inst_counts: slice<u32>
-) -> List<GilScope> {
-    var out: List<GilScope> = [];
-    var i: usize = 0;
-    var scope_id: u32 = 1;
-    let n = block_ids.len();
-
-    while i < n {
-        let b_id = block_ids[i];
-        let cnt = if i < inst_counts.len() { inst_counts[i] } else { 10 };
-
-        var s_inst: u32 = 0;
-        while s_inst < cnt {
-            let sc = gil_scope_new(
-                scope_id,
-                GilScopeKind::AcquireGil,
-                s_inst,
-                s_inst + 4,
-                b_id
-            );
-            out.push(sc);
-            scope_id = scope_id + 1;
-            s_inst = s_inst + 10;
-        }
-
-        i = i + 1;
-    }
-
-    return out;
+/// Finds the `PyGilGuard` and `PyAllowThreadsGuard` scopes in a lowered
+/// function body. The PilIR the seed builds today has no guard scopes or
+/// foreign calls to find them from, so this stops at a seam.
+pub fn analyze_gil_hot_regions(insts: slice<IrInst>) -> List<GilScope> {
+    return seam("pilir.gil_scopes", "PyGilGuard scope enter/exit instructions in lowered PilIR");
 }
 
 // ------------------------------------------------------------------------------
@@ -155,6 +131,15 @@ pub fn pass_coalesce_gil_scopes(var ref scopes: List<GilScope>) -> GilCoalesceRe
         i = i + 1;
     }
     out_scopes.push(cur);
+    // Leave the merged scopes in place of the input.
+    while scopes.len() > 0 {
+        scopes.pop();
+    }
+    var k: usize = 0;
+    while k < out_scopes.len() {
+        scopes.push(out_scopes[k]);
+        k = k + 1;
+    }
 
     let after_count = out_scopes.len() as u32;
     return gil_coalesce_report_new(merged, allow_th, before_count, after_count);

@@ -35,7 +35,26 @@ pub fn scope_cleanup_count(stack: str) -> u32 {
     return count;
 }
 
-// Emits reverse-declaration exit cleanup tokens (LIFO)
+// Returns the cleanup entry at `index` (0 = first pushed), or "" when absent.
+pub fn scope_cleanup_at(stack: str, index: u32) -> str {
+    var cur: u32 = 0;
+    var rem = stack;
+    while rem.len() > 0 {
+        let p = rem.find("|");
+        let seg = if p >= 0 { rem.slice(0, p) } else { rem };
+        rem = if p >= 0 { rem.slice(p + 1, rem.len()) } else { "" };
+        if seg.len() > 0 {
+            if cur == index {
+                return seg;
+            }
+            cur = cur + 1;
+        }
+    }
+    return "";
+}
+
+// Emits the cleanup entries above `target_depth` in reverse-declaration
+// (LIFO) order, each followed by `;`.
 pub fn scope_cleanup_unwind_to_depth(stack: str, target_depth: u32) -> str {
     let total = scope_cleanup_count(stack);
     if total <= target_depth {
@@ -44,7 +63,7 @@ pub fn scope_cleanup_unwind_to_depth(stack: str, target_depth: u32) -> str {
     var out = "";
     var cur = total;
     while cur > target_depth {
-        out = out + "unwind_guard_" + (cur - 1) + ";";
+        out = out + scope_cleanup_at(stack, cur - 1) + ";";
         cur = cur - 1;
     }
     return out;
@@ -92,12 +111,21 @@ pub pure fn loop_tier_fixed_scalar()   -> u8 => 1;
 pub pure fn loop_tier_mutable_bounds() -> u8 => 2;
 pub pure fn loop_tier_worklist_stack() -> u8 => 3;
 
-pub fn lower_loop_header(tier: u8, loop_var: str, start_val: str, end_val: str, header_block_id: u32) -> str {
+// Renders a block parameter `name: <physics>` from the value's type physics,
+// so the loop header never names a source type.
+fn loop_param(name: str, phy: IrTypePhysics) -> str {
+    return name + ": " + reg_class_name(phy.reg_class) + "[" + phy.bit_width + ":" + lattice_name(phy.lattice_bits) + "]";
+}
+
+// `iter_phy` is the physics of the loop variable; `window_phy` the physics of
+// the worklist window carried by a WorklistStack loop.
+pub fn lower_loop_header(tier: u8, loop_var: str, iter_phy: IrTypePhysics, window_phy: IrTypePhysics, start_val: str, end_val: str, header_block_id: u32) -> str {
+    let head = "block" + header_block_id + "(";
     if tier == loop_tier_fixed_scalar() {
-        return "block" + header_block_id + "(" + loop_var + ": i64 = " + start_val + ", " + loop_var + "_end: i64 = " + end_val + "):";
+        return head + loop_param(loop_var, iter_phy) + " = " + start_val + ", " + loop_param(loop_var + "_end", iter_phy) + " = " + end_val + "):";
     }
     if tier == loop_tier_mutable_bounds() {
-        return "block" + header_block_id + "(" + loop_var + ": i64 = " + start_val + ", var " + loop_var + "_end: i64 = " + end_val + "):";
+        return head + loop_param(loop_var, iter_phy) + " = " + start_val + ", var " + loop_param(loop_var + "_end", iter_phy) + " = " + end_val + "):";
     }
-    return "block" + header_block_id + "(" + loop_var + "_worklist: RangeWindow = " + start_val + "):";
+    return head + loop_param(loop_var + "_worklist", window_phy) + " = " + start_val + "):";
 }

@@ -93,7 +93,10 @@ pub struct CppEnv : IObject {
     pub eval_pos:        usize;
 }
 
-pub fn cpp_env_new() -> CppEnv {
+/// A preprocessor environment predefining the standard macros and the
+/// macros a C compiler for `target_os` / `target_arch` predefines
+/// (`linux`, `macos`/`darwin`, `windows`; `x86_64`, `aarch64`, `riscv64`).
+pub fn cpp_env_new(target_os: str, target_arch: str) -> CppEnv {
     var env = CppEnv {
         macros:          [:],
         visited_headers: [:],
@@ -107,14 +110,39 @@ pub fn cpp_env_new() -> CppEnv {
     cpp_define_macro(var env, "__STDC__", "1");
     cpp_define_macro(var env, "__STDC_VERSION__", "201710L");
     cpp_define_macro(var env, "__STDC_HOSTED__", "1");
-    cpp_define_macro(var env, "__x86_64__", "1");
+    cpp_define_target_macros(var env, target_os, target_arch);
+    return env;
+}
+
+/// Architecture, data-model and OS macros. Unix targets are LP64
+/// (`long` is 8 bytes); Windows is LLP64 and defines no `__LP64__`.
+pub fn cpp_define_target_macros(var ref env: CppEnv, target_os: str, target_arch: str) {
+    if target_arch == "x86_64" {
+        cpp_define_macro(var env, "__x86_64__", "1");
+        cpp_define_macro(var env, "__x86_64", "1");
+        if target_os == "windows" { cpp_define_macro(var env, "_M_X64", "100"); }
+    } else if target_arch == "aarch64" {
+        cpp_define_macro(var env, "__aarch64__", "1");
+        if target_os == "windows" { cpp_define_macro(var env, "_M_ARM64", "1"); }
+    } else if target_arch == "riscv64" {
+        cpp_define_macro(var env, "__riscv", "1");
+        cpp_define_macro(var env, "__riscv_xlen", "64");
+    }
+
+    if target_os == "windows" {
+        cpp_define_macro(var env, "_WIN32", "1");
+        cpp_define_macro(var env, "_WIN64", "1");
+        return;
+    }
     cpp_define_macro(var env, "__LP64__", "1");
     cpp_define_macro(var env, "_LP64", "1");
-    cpp_define_macro(var env, "__linux__", "1");
-    cpp_define_macro(var env, "__GNUC__", "11");
-    cpp_define_macro(var env, "__GNUC_MINOR__", "2");
-
-    return env;
+    cpp_define_macro(var env, "__unix__", "1");
+    if target_os == "linux" {
+        cpp_define_macro(var env, "__linux__", "1");
+    } else if target_os == "macos" || target_os == "darwin" {
+        cpp_define_macro(var env, "__APPLE__", "1");
+        cpp_define_macro(var env, "__MACH__", "1");
+    }
 }
 
 pub fn cpp_define_macro(var ref env: CppEnv, name: str, val: str) {
@@ -977,6 +1005,9 @@ pub fn cpp_process_source(
                     let inc_src = File.read_text(resolved_path);
                     let inc_out = cpp_process_source(inc_src, resolved_path, include_dirs, var env);
                     out = out + inc_out + "\n";
+                } else {
+                    // CAB001: Header Not Found in the include paths
+                    cpp_set_error(var env, "CAB001", f"{file_path}: header not found: {dir_arg}");
                 }
                 continue;
             }

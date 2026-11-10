@@ -104,7 +104,7 @@ pub var fn register_dsl_keyword(
         found:         true,
         symbol_name:   word,
         category_name: dsl_name,
-        signature:     word + "(...)",
+        signature:     snippet,
         description:   desc,
     });
 }

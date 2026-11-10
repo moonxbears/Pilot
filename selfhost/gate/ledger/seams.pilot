@@ -1,0 +1,278 @@
+// ==============================================================================
+// FILE: selfhost/gate/ledger/seams.pilot
+// THE SEAM REGISTRY: every intentionally unconnected entry, exit or value, and
+// every stand-in representation.
+// ==============================================================================
+// A seam marks a place where code stops on purpose because what it connects to
+// does not exist yet. In source it is a call to the built-in `seam`, given the
+// seam's id and a short note, as the whole body of an empty entry point or at
+// the hand-off of an exit point. Reaching one at run time always fails with
+// `SEAM001` and the seam's id, so a seam can never pass for a working feature.
+//
+// Seams replace placeholder values: never return a constant, a fake pointer or
+// a value chosen to satisfy a test where real behaviour is missing. Leave the
+// code broken at a seam, test the parts on each side of it on their own, and
+// list the seam here.
+//
+// `pilot gate` (the `seams` gate) keeps this registry and the source in step:
+// every `seam` call in `stdlib/` and `selfhost/` must have exactly one entry
+// here, and every entry must still have a call. Connecting a seam means
+// replacing its call with the real code and deleting its entry in the same
+// change.
+//
+// Two data-side kinds sit beside the call seams (see `stdlib/core/pending.pilot`):
+//   * a pending value, `pending("<id>", "<note>")` typed `Pending<T>`, holds no
+//     `T` yet and fails with SEAM001 when read. Registered here with kind
+//     `::Value`.
+//   * a stand-in, `[StandIn("<id>", "<real>", "<how it differs>", "<owner>")]`,
+//     is working code with a temporary representation. Registered in
+//     `stand_in_registry()`, and named in the `blocked_by` of every wiring
+//     ledger row it affects; those rows stay at DRAFT or below until it goes.
+pub pkg Pilot.SelfHost.Gate.Ledger.Seams;
+
+/// Which side of the missing piece a seam stands on.
+pub enum SeamKind : u8 {
+    /// Something calls in here, and the body that should answer is missing.
+    Entry,
+    /// The code here is done and must hand its result to something missing.
+    Exit,
+    /// A `Pending<T>` value: data whose real type cannot be represented yet.
+    Value,
+}
+
+/// One registered seam.
+pub struct SeamEntry : IValue {
+    /// The id passed to `seam(..)`: `<area>.<what>`, for example
+    /// `ffi.load_library`.
+    pub id: str;
+    pub kind: SeamKind;
+    /// What the seam will connect to once it exists.
+    pub connects_to: str;
+    /// The milestone that connects it (`F6`, `M17`, ..).
+    pub owner: str;
+}
+
+fn seam_entry(id: str, kind: SeamKind, connects_to: str, owner: str) -> SeamEntry {
+    return SeamEntry { id: id, kind: kind, connects_to: connects_to, owner: owner };
+}
+
+/// Every seam in the toolchain and standard library, ordered by id.
+pub fn seam_registry() -> List<SeamEntry> {
+    let entries: List<SeamEntry> = [
+        seam_entry("abi.aggregate_fields", ::Entry, "per-member offsets and register classes of an aggregate TypeLayout (type checker)", "F4"),
+        seam_entry("abi.invoke_frame", ::Exit, "PilVM bridge to pilot_rt_invoke_abi_frame (crates/pilot-rt/src/c_abi.rs)", "F6"),
+        seam_entry("adapter.install_thunks", ::Exit, "PilIR IrFunction emission and MethodTable install of adapted methods", "F5"),
+        seam_entry("autofix.atomic_rename", ::Exit, "OS atomic rename of <file>.tmp over <file>", "F6"),
+        seam_entry("autofix.semantic_defects", ::Entry, "type checker: resolved bindings (DECL004) and callee var-ref parameter modes (BORROW001)", "F4"),
+        seam_entry("bootstrap.stage_compile", ::Entry, "self-hosted driver (lex, parse, analyze, PilIR, Perceus, C11) building compiler stage 2 and 3 from selfhost/ for the GATE009 parity gate", "F8"),
+        seam_entry("chor.cue_lattice", ::Entry, "cue payload lattice class from the resolved TypeDef (type checker)", "F4"),
+        seam_entry("chor.emit_dispatchers", ::Exit, "PilIR function builder: one dispatcher per lowered .pchor route", "F5"),
+        seam_entry("cli.command_handler", ::Entry, "per-command handlers (ICliHandler) for check, build, compile, fmt, test, repl, pkg, deps, tree, venv, lsp, debug, perf, from, map, ide-sync", "F3"),
+        seam_entry("cli.weave_struct", ::Entry, "[Cli]/[Arg] weaving of a struct into a CliAppDef (struct reflection + attribute weaver)", "F4"),
+        seam_entry("coach.loop_clones", ::Entry, "PilIR loop bodies and clone calls scanned for PERF001", "F5"),
+        seam_entry("comptime.run_sandboxed", ::Entry, "seed VM running comptime blocks under a ComptimePolicy (fuel, heap, gated fs/net/proc/clock/env intrinsics)", "F3"),
+        seam_entry("contracts.prove_requires", ::Entry, "comptime evaluator for requires clauses over constant call arguments (DBC001)", "F4"),
+        seam_entry("contracts.weave_ir", ::Exit, "PilIR function bodies to insert requires/ensures/old/invariant checks into", "F5"),
+        seam_entry("cpp.catch_boundary", ::Entry, "compiled C++ catch shim (__cxa_begin_catch) around native calls", "F6"),
+        seam_entry("cpp.string_view_from_str", ::Entry, "data address of a Pilot str (raw memory views in PilVM)", "F6"),
+        seam_entry("db.def_types", ::Entry, "type checker computing per-file definitions, layouts and lattice bits (DefTypesAndLattice query)", "F4"),
+        seam_entry("db.expanded_ast", ::Entry, "syntax-rule and macro expansion over the lossless CST (ExpandedAst query)", "F4"),
+        seam_entry("db.file_diagnostics", ::Entry, "type-checker diagnostics per file (FileDiagnostics query)", "F4"),
+        seam_entry("db.lossless_cst", ::Entry, "lossless red/green CST parser, pilot.cst (LosslessCst query)", "F3"),
+        seam_entry("db.weave_entity", ::Entry, "[Entity]/[Id]/[Unique]/[Index]/[ForeignKey]/[Version] weaving of a struct into an EntitySchemaDef", "F4"),
+        seam_entry("each_cascade.emit_ir", ::Exit, "PilIR function builder: cascade receiver block param + none-guard branch", "F5"),
+        seam_entry("ffi.call_destructor", ::Exit, "native destructor call through PilVM native calls", "F6"),
+        seam_entry("fs.open", ::Entry, "host file-descriptor open/close intrinsics", "F6"),
+        seam_entry("fusion.rewrite_ir", ::Exit, "PilIR rewrite of a combinator chain into one fused loop", "F5"),
+        seam_entry("gate.litmus_run_program", ::Exit, "process-spawn intrinsic running `pilot run` in the renamed litmus sandbox for the GATE008 rename litmus", "F6"),
+        seam_entry("http.invoke_handler", ::Exit, "calling the [Service] handler a matched route names, with bound params, decoded body and requires->422", "F4"),
+        seam_entry("http.weave_service", ::Entry, "[Service]/[Get]/[Post]/.. weaving of a struct and its methods into an HttpServiceDef", "F4"),
+        seam_entry("inspect.resolve_target", ::Exit, "type-checked PilotDb unit that supplies woven statements, layouts, MethodTable winners and Perceus events", "F4"),
+        seam_entry("json.code_point_str", ::Exit, "a str holding one Unicode scalar (code-point-to-str intrinsic) for JSON \\b, \\f and non-ASCII \\u escapes", "F6"),
+        seam_entry("js.bigint_create", ::Entry, "napi_create_bigint_int64 through a loaded Node-API host", "F6"),
+        seam_entry("js.bigint_read", ::Entry, "napi_get_value_bigint_int64 with its lossless flag", "F6"),
+        seam_entry("js.call_function", ::Entry, "napi_call_function through a loaded Node-API host", "F6"),
+        seam_entry("js.close_handle_scope", ::Entry, "napi_close_handle_scope through a loaded Node-API host", "F6"),
+        seam_entry("js.err_fetch", ::Entry, "napi_get_and_clear_last_exception and the JS error's name, message, stack", "F6"),
+        seam_entry("js.open_handle_scope", ::Entry, "napi_open_handle_scope through a loaded Node-API host", "F6"),
+        seam_entry("js.promise_new", ::Entry, "napi_create_promise through a loaded Node-API host", "F6"),
+        seam_entry("js.promise_reject", ::Entry, "napi_reject_deferred through a loaded Node-API host", "F6"),
+        seam_entry("js.promise_resolve", ::Entry, "napi_resolve_deferred through a loaded Node-API host", "F6"),
+        seam_entry("js.ref_dec", ::Entry, "napi_reference_unref routed to the owning isolate's thread", "F7"),
+        seam_entry("js.ref_inc", ::Entry, "napi_reference_ref through a loaded Node-API host", "F6"),
+        seam_entry("js.ref_new", ::Entry, "napi_create_reference through a loaded Node-API host", "F6"),
+        seam_entry("js.typedarray_info", ::Entry, "napi_get_typedarray_info (data pointer, length, byte offset)", "F6"),
+        seam_entry("js.typedarray_release", ::Entry, "releasing the reference pinning a TypedArray's ArrayBuffer", "F6"),
+        seam_entry("lifetime.global_drop_queue", ::Entry, "process-wide lock-protected drop queue (runtime globals and locks)", "F7"),
+        seam_entry("mem.pinned_alloc", ::Entry, "pinned reference-counted heap blocks from the runtime allocator", "F7"),
+        seam_entry("os.host_info", ::Entry, "host OS/arch query intrinsic", "F6"),
+        seam_entry("perceus.foreign_drop_ir", ::Exit, "PilIR ForeignDrop instruction calling a foreign destructor pointer (IR function builder)", "F5"),
+        seam_entry("pilir.gil_scopes", ::Entry, "PyGilGuard scope enter/exit instructions in lowered PilIR", "F5"),
+        seam_entry("pilot_cst.parse_lossless", ::Entry, "lossless CST parser linked behind the pilot.cst facade", "F3"),
+        seam_entry("pilot_db.check_all", ::Entry, "PilotDb queries backed by the type checker", "F4"),
+        seam_entry("pilot_db.open_workspace", ::Entry, "module graph plus host file walking to load a workspace", "F3"),
+        seam_entry("pilot_fmt.format_str", ::Entry, "lossless CST and the M4 compact/readable pairing table", "F3"),
+        seam_entry("pilot_ir.pipeline_run", ::Entry, "lowered IrModule and a pass driver over it", "F5"),
+        seam_entry("pilot_vm.sandbox_run", ::Entry, "VM that meters fuel, heap and capabilities through VmSandbox", "F7"),
+        seam_entry("pilotc.compile_c11", ::Entry, "self-hosted pipeline lowering a whole Pilot program to C11 (analyzer F4, PilIR F5, C11 backend F6)", "F8"),
+        seam_entry("py.allow_threads", ::Entry, "PyEval_SaveThread through an in-process libpython3", "F6"),
+        seam_entry("py.buffer_acquire", ::Entry, "PyObject_GetBuffer filling a PyBufferRaw (PEP 3118)", "F6"),
+        seam_entry("py.buffer_release", ::Entry, "PyBuffer_Release through an in-process libpython3", "F6"),
+        seam_entry("py.dec_ref", ::Entry, "Py_DecRef through an in-process libpython3", "F6"),
+        seam_entry("py.err_fetch", ::Entry, "PyErr_Fetch and the exception's type, message, traceback", "F6"),
+        seam_entry("py.float_from_obj", ::Entry, "PyFloat_AsDouble through an in-process libpython3", "F6"),
+        seam_entry("py.gil_acquire", ::Entry, "PyGILState_Ensure through an in-process libpython3", "F6"),
+        seam_entry("py.gil_release", ::Entry, "PyGILState_Release through an in-process libpython3", "F6"),
+        seam_entry("py.import_module", ::Entry, "PyImport_ImportModule through an in-process libpython3", "F6"),
+        seam_entry("py.inc_ref", ::Entry, "Py_IncRef through an in-process libpython3", "F6"),
+        seam_entry("py.init", ::Entry, "libpython3 located and loaded in-process (Py_InitializeEx, PEP 384)", "F6"),
+        seam_entry("py.int_from_obj", ::Entry, "PyLong_AsLongLong through an in-process libpython3", "F6"),
+        seam_entry("py.obj_from_float", ::Entry, "PyFloat_FromDouble through an in-process libpython3", "F6"),
+        seam_entry("py.obj_from_int", ::Entry, "PyLong_FromLongLong through an in-process libpython3", "F6"),
+        seam_entry("py.obj_from_str", ::Entry, "PyUnicode_FromStringAndSize through an in-process libpython3", "F6"),
+        seam_entry("py.restore_threads", ::Entry, "PyEval_RestoreThread through an in-process libpython3", "F6"),
+        seam_entry("py.str_from_obj", ::Entry, "PyUnicode_AsUTF8AndSize through an in-process libpython3", "F6"),
+        seam_entry("py.vectorcall", ::Entry, "PyObject_Vectorcall with a kwnames tuple", "F6"),
+        seam_entry("reflect.ast_root", ::Entry, "per-unit AST roots published in ENV", "F4"),
+        seam_entry("reflect.lookup_type", ::Entry, "type name to layout (size, align, lattice bits, register class) from the type checker", "F4"),
+        seam_entry("reflect.symbols_in_pkg", ::Entry, "package symbol tables from the type checker", "F4"),
+        seam_entry("reflect.target_cache_line", ::Value, "cache line size from the --target descriptor published by the compile driver", "F3"),
+        seam_entry("reflect.target_descriptor", ::Entry, "run-time ENV.target record published by the compile driver", "F3"),
+        seam_entry("reflect.target_opt_level", ::Value, "optimisation level set by the compile driver", "F3"),
+        seam_entry("reflect.target_simd_width", ::Value, "SIMD register width from the --target descriptor published by the compile driver", "F3"),
+        seam_entry("rust.bridge_marshal", ::Entry, "C-ABI marshalling of Result, Option, named repr(Rust) and dyn values", "M16"),
+        seam_entry("rust.call_bridge", ::Entry, "loading the bridge cdylib and calling its trampolines", "F6"),
+        seam_entry("rust.call_dealloc", ::Exit, "calling the bridge's pilot_rust_free_* function", "F6"),
+        seam_entry("rust.cargo_resolve", ::Entry, "cargo metadata / cargo build via process spawn", "F6"),
+        seam_entry("rust.string_view", ::Entry, "foreign UTF-8 bytes viewed as a Pilot str (raw memory views)", "F6"),
+        seam_entry("rust.vec_view", ::Entry, "foreign memory viewed as a Pilot slice (raw memory views)", "F6"),
+        seam_entry("shm.map", ::Entry, "OS shared-memory map (shm_open + mmap / CreateFileMapping)", "F6"),
+        seam_entry("shm.unmap", ::Exit, "OS shared-memory unmap (munmap / UnmapViewOfFile)", "F6"),
+        seam_entry("soa.column_memory", ::Entry, "SoaTable column planes: allocator memory and T split into field columns (F4)", "F7"),
+        seam_entry("soa.rewrite_ir", ::Exit, "PilIR rewrite of FieldAddr/Load/Store into column address arithmetic", "F5"),
+        seam_entry("sql.query_body", ::Exit, "database driver execution and typed row decoding for a synthesized query wrapper", "F6"),
+        seam_entry("sync.mutex_lock", ::Entry, "OS mutex / atomic intrinsic", "F6"),
+        seam_entry("task.spawn", ::Entry, "scheduler or OS thread intrinsic", "F6"),
+        seam_entry("thread.current_id", ::Entry, "OS thread id intrinsic (gettid / GetCurrentThreadId)", "F6"),
+        seam_entry("trace.span_enter", ::Entry, "monotonic clock provider reachable from the freestanding core ([TraceSpan] start tick)", "F7"),
+        seam_entry("trace.span_exit", ::Exit, "hosted clock and trace sink recording a finished [TraceSpan]", "F7"),
+        seam_entry("vm.call_quote",::Entry, "carrier values (CallExpr/Signal/Dual/frame/ast/EffectPlan) for the six call-quote modes", "F4"),
+        seam_entry("wasm.interpret", ::Entry, "a WASM code-section decoder and instruction interpreter (pure Pilot)", "M19"),
+        seam_entry("wasm.lift_pilir", ::Entry, "lifting a decoded WASM function body into PilIR", "F5"),
+        seam_entry("wasm.load_str", ::Exit, "a str built from validated linear-memory bytes (bytes-to-str intrinsic)", "F6"),
+        seam_entry("wasm.resource_drop", ::Exit, "calling the component's [resource-drop] export through the interpreter", "M19"),
+        seam_entry("wit.decode_custom_section", ::Entry, "a decoder for the binary component-type encoding (pure Pilot)", "M19"),
+    ];
+    return entries;
+}
+
+/// `"ENTRY"`, `"EXIT"` or `"VALUE"`.
+pub fn seam_kind_label(kind: SeamKind) -> str {
+    switch kind {
+        case ::Entry: return "ENTRY";
+        case ::Exit: return "EXIT";
+        case ::Value: return "VALUE";
+    }
+    return "";
+}
+
+/// One registered stand-in: working code with a temporary representation.
+pub struct StandInEntry : IValue {
+    /// The id given to `[StandIn(..)]`: `<area>.<what>`.
+    pub id: str;
+    /// What the spec calls for, for example `ptr<T>` or `truncated BLAKE3`.
+    pub real: str;
+    /// How the stand-in differs from it.
+    pub differs: str;
+    /// The milestone that replaces it.
+    pub owner: str;
+}
+
+fn stand_in_entry(id: str, real: str, differs: str, owner: str) -> StandInEntry {
+    return StandInEntry { id: id, real: real, differs: differs, owner: owner };
+}
+
+/// Every stand-in in the toolchain and standard library, ordered by id.
+pub fn stand_in_registry() -> List<StandInEntry> {
+    let entries: List<StandInEntry> = [
+        stand_in_entry("adapter.errno_values", "per-target errno table", "Linux numbers on every target", "F6"),
+        stand_in_entry("c.type_layout", "size and alignment of the resolved C type per target", "unknown types and aggregates count as 8 bytes", "F4"),
+        stand_in_entry("db.fingerprint", "128-bit truncated BLAKE3", "two FNV-style lanes; weaker and different collisions", "M5"),
+        stand_in_entry("ffi.int_address", "ptr<T> data pointer and native destructor fn pointer", "addresses held as i64 with no type or provenance", "F6"),
+        stand_in_entry("json.decimal_to_f64", "correctly rounded decimal to binary64 conversion (IEEE 754 roundTiesToEven)", "exact up to 15 significant digits and |exponent| <= 22; beyond that repeated scaling can be off by an ulp or more", "F6"),
+        stand_in_entry("inspect.cache_line", "cache line size of the inspected target", "64 bytes on every target", "F3"),
+        stand_in_entry("ir.fixed_layout_ids", "layout ids handed out by the type registry from [Bits] and [Layout]", "each helper returns a fixed id (0-3) and fixed register facts", "F4"),
+        stand_in_entry("ir.target_defaults", "target descriptor from --target and the compile driver", "backend llvm and little-endian on every target", "F3"),
+        stand_in_entry("proto.packet_bytes", "borrowed slice<u8> wire view (0b01)", "generated views hold an owned List<i64>, one byte per element", "F7"),
+        stand_in_entry("py.buffer_layout", "CPython Py_buffer C layout with typed pointers", "pointers are usize and format is a str, so the layout does not match", "F6"),
+        stand_in_entry("soa.row_base", "ptr<u8> base of the table's column planes", "integer address with no allocation behind it", "F7"),
+    ];
+    return entries;
+}
+
+/// One known bug in the seed, the standard library or the self-hosted tools:
+/// code that runs but gives a wrong answer. Each has a repro program under
+/// `tests/conformance/known_bugs/` whose expectation files hold the correct
+/// output; the conformance runner requires it to keep failing, and reports
+/// when it starts passing. Code bent around the bug is marked
+/// `[Workaround("<id>", "<what was done instead>")]`.
+pub struct KnownBug : IValue {
+    /// `<area>.<what>`, for example `seed.u64_right_shift`.
+    pub id: str;
+    /// The component that holds the bug: a crate, file or stdlib package.
+    pub component: str;
+    /// What goes wrong, in one sentence.
+    pub summary: str;
+    /// The correct behaviour, and where that answer comes from.
+    pub expected: str;
+    /// What happens instead.
+    pub actual: str;
+    /// The repro program, relative to the workspace root.
+    pub repro: str;
+    /// The milestone or Phase F step that fixes it.
+    pub owner: str;
+}
+
+fn known_bug(id: str, component: str, summary: str, expected: str, actual: str, repro: str, owner: str) -> KnownBug {
+    return KnownBug {
+        id: id,
+        component: component,
+        summary: summary,
+        expected: expected,
+        actual: actual,
+        repro: repro,
+        owner: owner,
+    };
+}
+
+/// Every known bug, ordered by id.
+pub fn bug_registry() -> List<KnownBug> {
+    let entries: List<KnownBug> = [
+        known_bug("seed.enum_explicit_values", "crates/pilot-vm enum lowering",
+            "explicit enum values are ignored; variants are numbered by position",
+            "`Low = 5` casts to 5", "casts to its position, 0",
+            "tests/conformance/known_bugs/enum_explicit_values.pilot", "F1"),
+        known_bug("seed.field_closure_call", "crates/pilot-vm call lowering",
+            "calling a closure stored in a field, `(self.f)(x)`, is lowered as a method call named `<Type>.f`",
+            "the field's closure is called; prints 10", "error: no function named `Doubler.f`",
+            "tests/conformance/known_bugs/field_closure_call.pilot", "F1"),
+        known_bug("seed.hex_literal_u64", "crates/pilot-lexer / pilot-vm literal parsing",
+            "a hex literal above i64::MAX evaluates to 0",
+            "0xFFFFFFFFFFFFFFFF as u64 prints 18446744073709551615", "prints 0",
+            "tests/conformance/known_bugs/hex_literal_u64.pilot", "F1"),
+        known_bug("seed.local_named_op", "crates/pilot-parser statement parsing",
+            "a local variable named `op` is parsed as an operator declaration",
+            "`var op = 1; op = op + 2;` prints 3", "error: `OperatorDecl` is not lowered by the seed yet",
+            "tests/conformance/known_bugs/local_named_op.pilot", "F1"),
+        known_bug("seed.shared_variant_name", "crates/pilot-vm target-typed enum resolution",
+            "`::Variant` as a call argument is undefined when two enums share the variant name",
+            "the parameter type picks the enum; prints true", "error: undefined name `Value`",
+            "tests/conformance/known_bugs/shared_variant_name.pilot", "F4"),
+        known_bug("seed.u64_right_shift", "crates/pilot-vm integer shifts",
+            "`>>` on a u64 with the top bit set does not shift in zeros",
+            "xorshift64 (13,7,17) from 12345678 gives 17339054203798593560 on step 2 (64-bit unsigned reference)",
+            "gives 1054037951226880024",
+            "tests/conformance/known_bugs/u64_right_shift.pilot", "F1"),
+    ];
+    return entries;
+}

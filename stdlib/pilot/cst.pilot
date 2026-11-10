@@ -36,12 +36,9 @@ pub struct CstTree : IObject {
     ~self() {}
 }
 
+/// Parses `source` into a lossless tree whose root covers every byte.
 pub fn parse_lossless(source: str) -> CstTree {
-    return CstTree {
-        source:      source,
-        root_kind:   500, // Program
-        child_count: 1,
-    };
+    return seam("pilot_cst.parse_lossless", "the facade is not linked to a lossless CST parser yet");
 }
 
 pub pure fn cst_tree_full_text(tree: CstTree) -> str => tree.source;

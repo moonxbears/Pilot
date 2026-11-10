@@ -69,6 +69,10 @@ pub struct GateReport : IObject {
     pub elapsed_us: u64;
     pub items_scanned: usize;
     pub violations: List<GateViolation>;
+    /// Empty when the gate ran its check. Otherwise the id of the registered
+    /// seam (`selfhost/gate/ledger/seams.pilot`) the check stops at: the gate
+    /// could not run, so `passed` is false and the runner reports `[SEAM]`.
+    pub at_seam: str = "";
 
     ~self() {
     }
@@ -159,6 +163,36 @@ pub fn temp_guard_cleanup(guard: TempDirGuard) -> bool {
         return true;
     }
     return false;
+}
+
+// ------------------------------------------------------------------------------
+// Gates That Stop at a Seam
+// ------------------------------------------------------------------------------
+
+/// Whether `seam_id` is still listed in `seam_registry()`. A gate whose real
+/// check needs code that stops at that seam cannot run while it is listed;
+/// connecting the seam deletes the entry, and the gate then runs its check.
+pub fn gate_seam_open(seam_id: str) -> bool {
+    for e in seam_registry() {
+        if e.id == seam_id {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The report of a gate that stops at `seam_id`: not passed, no violations.
+pub fn gate_at_seam_report(gate_id: str, cat: GateCategory, seam_id: str, t0: i64, scanned: usize) -> GateReport {
+    let dt = gate_time_now_us() - t0;
+    return GateReport {
+        gate_id: gate_id,
+        category: cat,
+        passed: false,
+        elapsed_us: if dt >= 0 { dt } else { 0 },
+        items_scanned: scanned,
+        violations: glist_new(),
+        at_seam: seam_id,
+    };
 }
 
 pub fn resolve_workspace_root(hint: str) -> str {

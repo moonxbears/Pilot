@@ -62,11 +62,10 @@ pub struct CppStringView : IReference {
     pub data_ptr: usize;
     pub len:      usize;
 
-    pub static pure fn from_str(s: str) -> CppStringView {
-        return CppStringView {
-            data_ptr: 0x1000,
-            len:      s.len(),
-        };
+    /// A `std::string_view` over the bytes of `s`, without copying.
+    pub static fn from_str(s: str) -> CppStringView {
+        return seam("cpp.string_view_from_str",
+            "the data address of a Pilot str needs raw memory views in PilVM (F6)");
     }
 
     pub pure fn is_empty() -> bool => .len == 0;
@@ -98,14 +97,10 @@ pub struct CppSpan<T: IValue> : IReference {
 // 4. Safe Exception Boundary Landing Pad
 // ------------------------------------------------------------------------------
 
-pub pure fn cpp_landing_pad_catch(
-    thunk_result_ok: bool,
-    val: i64,
-    exc: ref<CppException>
-) -> CppCatchResult {
-    if thunk_result_ok {
-        return CppCatchResult.ok(val);
-    } else {
-        return CppCatchResult.fail(exc);
-    }
+/// Calls the native C++ function at `fn_addr` inside a catch landing pad:
+/// a thrown `std::exception` becomes `CppCatchResult.fail` with its
+/// `what()` and dynamic type name instead of unwinding into Pilot frames.
+pub fn cpp_call_catching(fn_addr: i64, args: List<i64>) -> CppCatchResult {
+    return seam("cpp.catch_boundary",
+        "a compiled catch shim (__cxa_begin_catch / __cxa_current_exception_type) and native calls (F6)");
 }

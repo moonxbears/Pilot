@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -102,7 +104,7 @@ fn eval_m11(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -161,34 +163,66 @@ fn test_m11_2_zero_allocation_pilir_thunk_lowering() {
         &ANTICHEAT_SPEC,
     );
 
+    // A 12-function C API: handle receivers, a `(const uint8_t*, size_t)` pair
+    // in slots 1-2, an `int*` out-parameter in slot 3 and zero-is-ok status
+    // codes. Expected op counts are worked by hand from spec 11.4:
+    // receiver 1 op, slice pair 2, out-param stack_slot + store (zero-init)
+    // + load on the ok path 3, call_direct 1, cmp + cond_br 2, return 1.
+    // Nine plain methods give 5 ops, read/write_buffer 7, poll 10 -> 69.
     let script = r#"
+        fn mk(sym: str, params: List<str>) -> AdapterFnSig => adapter_fn_sig_new(sym, params, "int");
+
         pub fn main() -> i64 {
             var bp = adapter_blueprint_new("libfoo", "FooHandle");
             bp.strip_prefixes.push("foo_");
             bp.slice_rules.push(slice_pair_rule_new(1, 2, true, false));
             bp.out_rules.push(out_param_rule_new(3, 4, true));
 
-            var raw_syms: List<str> = [
-                "foo_get_timeout",
-                "foo_set_timeout",
-                "foo_read_buffer",
-                "foo_write_buffer",
-                "foo_connect",
-                "foo_disconnect",
-                "foo_flush",
-                "foo_poll",
-                "foo_reset",
-                "foo_status",
-                "foo_bind",
-                "foo_close",
+            var sigs: List<AdapterFnSig> = [
+                mk("foo_get_timeout", ["foo_t*"]),
+                mk("foo_set_timeout", ["foo_t*", "int"]),
+                mk("foo_read_buffer", ["foo_t*", "uint8_t*", "size_t"]),
+                mk("foo_write_buffer", ["foo_t*", "const uint8_t *", "size_t"]),
+                mk("foo_connect", ["foo_t*", "int"]),
+                mk("foo_disconnect", ["foo_t*"]),
+                mk("foo_flush", ["foo_t*"]),
+                mk("foo_poll", ["foo_t*", "const uint8_t*", "size_t", "int*"]),
+                mk("foo_reset", ["foo_t*"]),
+                mk("foo_status", ["foo_t*"]),
+                mk("foo_bind", ["foo_t*", "int"]),
+                mk("foo_close", ["foo_t*"]),
             ];
 
-            let report = verify_and_compile_blueprint(ref bp, raw_syms);
+            let report = verify_and_compile_blueprint(ref bp, sigs);
             if report.diagnostics.len() != 0 { return 1; }
             if report.methods.len() != 12 { return 2; }
-            if report.properties_count < 2 { return 3; }
-            if report.total_ir_ops < 70 { return 4; }
+            if report.properties_count != 2 { return 3; }
+            if report.total_ir_ops != 69 { return 4; }
 
+            let read = report.methods[2];
+            if read.clean_name != "read_buffer" { return 5; }
+            if read.params.len() != 2 { return 6; }
+            if !read.params[0].is_receiver { return 7; }
+            if read.params[1].pilot_type != "slice<u8>" { return 8; }
+            if read.return_type != "void ! int" { return 9; }
+
+            // poll: receiver, slice pair, out-param slot, call, branch, load, return.
+            let poll = report.methods[7];
+            let want: List<u16> = [
+                op_extract_field(), op_extract_field(), op_extract_field(),
+                op_stack_slot(), op_store(), op_call_direct(), op_cmp(),
+                op_cond_br(), op_load(), op_return(),
+            ];
+            if poll.ir_ops.len() != want.len() { return 10; }
+            var i: usize = 0;
+            while i < want.len() {
+                if poll.ir_ops[i] != want[i] { return 11; }
+                i = i + 1;
+            }
+            if poll.params.len() != 2 { return 12; }
+
+            let get = report.methods[0];
+            if !get.is_property_get || get.property_name != "timeout" { return 13; }
             return 42;
         }
     "#;
@@ -201,7 +235,23 @@ fn test_m11_2_zero_allocation_pilir_thunk_lowering() {
         "selfhost/adapter/compiler.pilot",
     ];
     let res = eval_m11(deps, script);
-    assert_eq!(res, "42", "12-function C mock API adaptation must synthesize clean PilIR thunks with 0 diagnostics");
+    assert_eq!(res, "42", "12-function C API adaptation must plan the PilIR thunks of spec 11.4 with 0 diagnostics");
+
+    // Installing the planned thunks needs the PilIR function model (F5).
+    let install = r#"
+        pub fn main() -> i64 {
+            var bp = adapter_blueprint_new("libfoo", "Foo");
+            var sigs: List<AdapterFnSig> = [adapter_fn_sig_new("foo_close", ["foo_t*"], "int")];
+            let report = verify_and_compile_blueprint(ref bp, sigs);
+            let n = install_adapter_thunks(ref report);
+            return 42;
+        }
+    "#;
+    let res = eval_m11(deps, install);
+    assert!(
+        res.starts_with("FAULT: SEAM001: unconnected seam `adapter.install_thunks`"),
+        "installing adapter thunks must stop at its seam, got {res}"
+    );
 
     guard.finish();
 }
@@ -259,15 +309,45 @@ fn test_m11_4_pilot_ffi_mock_deletion_and_adapter_diagnostics() {
     assert!(!ffi_src.contains("pilot_transpile_sample"), "pilot_transpile_sample mock must be permanently deleted!");
     assert!(!ffi_src.contains("pilot_polyglot_execute"), "pilot_polyglot_execute mock must be permanently deleted!");
 
-    // Verify ADP001 Diagnostic emission on empty target type
+    // ADP001..ADP004, each from the shape of a real signature.
     let script = r#"
+        fn first_code(bp: ref<AdapterBlueprint>, sigs: List<AdapterFnSig>) -> str {
+            let report = verify_and_compile_blueprint(bp, sigs);
+            if report.diagnostics.len() == 0 { return "none"; }
+            return report.diagnostics[0].code;
+        }
+
         pub fn main() -> i64 {
-            var bp = adapter_blueprint_new("libfoo", "");
-            var raw_syms: List<str> = ["foo_work"];
-            let report = verify_and_compile_blueprint(ref bp, raw_syms);
-            if report.diagnostics.len() == 0 { return 1; }
-            let diag = report.diagnostics[0];
-            if diag.code != "ADP001" { return 2; }
+            var empty = adapter_blueprint_new("libfoo", "");
+            var s1: List<AdapterFnSig> = [adapter_fn_sig_new("foo_work", ["foo_t*"], "int")];
+            if first_code(ref empty, s1) != "ADP001" { return 1; }
+
+            var bp = adapter_blueprint_new("libfoo", "Foo");
+            bp.strip_prefixes.push("foo_");
+            bp.strip_prefixes.push("bar_");
+            var s2: List<AdapterFnSig> = [
+                adapter_fn_sig_new("foo_close", ["foo_t*"], "int"),
+                adapter_fn_sig_new("bar_close", ["foo_t*"], "int"),
+            ];
+            if first_code(ref bp, s2) != "ADP002" { return 2; }
+
+            var cb = adapter_blueprint_new("libfoo", "Foo");
+            cb.callbacks.push(callback_pair_rule_new(1, 2));
+            var s3: List<AdapterFnSig> = [
+                adapter_fn_sig_new("foo_on_event", ["foo_t*", "void (*)(int, void*)", "int"], "int"),
+            ];
+            if first_code(ref cb, s3) != "ADP003" { return 3; }
+            var s3ok: List<AdapterFnSig> = [
+                adapter_fn_sig_new("foo_on_event", ["foo_t*", "void (*)(int, void*)", "void *"], "int"),
+            ];
+            if first_code(ref cb, s3ok) != "none" { return 4; }
+
+            var sp = adapter_blueprint_new("libfoo", "Foo");
+            sp.slice_rules.push(slice_pair_rule_new(1, 2, true, false));
+            var s4: List<AdapterFnSig> = [
+                adapter_fn_sig_new("foo_read", ["foo_t*", "uint8_t*", "double"], "int"),
+            ];
+            if first_code(ref sp, s4) != "ADP004" { return 5; }
             return 42;
         }
     "#;
@@ -280,7 +360,8 @@ fn test_m11_4_pilot_ffi_mock_deletion_and_adapter_diagnostics() {
         "selfhost/adapter/compiler.pilot",
     ];
     let res = eval_m11(deps, script);
-    assert_eq!(res, "42", "Adapter must emit ADP001 diagnostic when target type is empty");
+    assert_eq!(res, "42", "Adapter must emit ADP001..ADP004 from the signatures it is given");
 
     guard.finish();
 }
+

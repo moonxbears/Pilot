@@ -136,6 +136,8 @@ pub fn generate_create_table_sql(schema: ref<EntitySchemaDef>) -> str {
         sql = sql + col.name + " " + col.col_type;
         if col.is_id {
             sql = sql + " PRIMARY KEY";
+        } else if col.is_unique {
+            sql = sql + " UNIQUE";
         }
         if i + 1 < schema.columns.len() {
             sql = sql + ", ";
@@ -183,10 +185,14 @@ pub fn generate_insert_sql(schema: ref<EntitySchemaDef>) -> str {
     return sql;
 }
 
+/// `UPDATE` by primary key. `$1` is the id, then one parameter per other
+/// non-version column in order. With a `[Version]` column the update also
+/// bumps it and only matches the row version the caller read (last
+/// parameter): zero rows affected means a stale version.
 pub fn generate_update_with_optimistic_lock_sql(schema: ref<EntitySchemaDef>) -> str {
     var sql = "UPDATE " + schema.table_name + " SET ";
     var id_col = "id";
-    var ver_col = "ver";
+    var ver_col = "";
     var param_idx: usize = 1;
     var first_set = true;
 
@@ -195,10 +201,9 @@ pub fn generate_update_with_optimistic_lock_sql(schema: ref<EntitySchemaDef>) ->
         let col = schema.columns[i];
         if col.is_id {
             id_col = col.name;
+        } else if col.is_version {
+            ver_col = col.name;
         } else {
-            if col.is_version {
-                ver_col = col.name;
-            }
             if !first_set {
                 sql = sql + ", ";
             }
@@ -209,8 +214,14 @@ pub fn generate_update_with_optimistic_lock_sql(schema: ref<EntitySchemaDef>) ->
         i = i + 1;
     }
 
+    if ver_col.len() == 0 {
+        return sql + " WHERE " + id_col + " = $1;";
+    }
+    if !first_set {
+        sql = sql + ", ";
+    }
     param_idx = param_idx + 1;
-    sql = sql + " WHERE " + id_col + " = $1 AND " + ver_col + " = $" + (param_idx as str) + ";";
+    sql = sql + ver_col + " = " + ver_col + " + 1 WHERE " + id_col + " = $1 AND " + ver_col + " = $" + (param_idx as str) + ";";
     return sql;
 }
 
@@ -282,3 +293,14 @@ pub fn entity_diff_ddl(
 
     return res;
 }
+
+// ------------------------------------------------------------------------------
+// 6. [Entity] Attribute Weaving
+// ------------------------------------------------------------------------------
+
+/// The schema `[Entity]` and `[Id]`/`[Unique]`/`[Index]`/`[ForeignKey]`/
+/// `[Version]` derive from the struct `type_name` and its fields.
+pub fn entity_weave_struct(type_name: str) -> EntitySchemaDef {
+    return seam("db.weave_entity", "[Entity] needs struct field reflection from the type checker (F4) and a working attribute weaver (M21)");
+}
+

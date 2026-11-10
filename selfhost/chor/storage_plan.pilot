@@ -118,11 +118,28 @@ pub struct StoragePlan : IObject {
 // 4. Nested Struct Flattening
 // ------------------------------------------------------------------------------
 
-pub fn flatten_nested_vec3(prefix: str) -> List<FieldLeafDesc> {
+/// Flattens one nested struct field into scalar column leaves: every leaf of
+/// the field's own type gets the field's path as a prefix
+/// (`pos` + `x` -> `pos.x`). Applied recursively, this turns
+/// `Particle.pos.{x,y,z}` into three columns. The inner leaves come from the
+/// field type's resolved layout.
+pub fn flatten_nested_fields(prefix: str, inner: List<FieldLeafDesc>) -> List<FieldLeafDesc> {
     var leaves: List<FieldLeafDesc> = [];
-    leaves.push(field_leaf_desc_new(prefix + ".x", "x", 4, 4, 0, false, 32, false));
-    leaves.push(field_leaf_desc_new(prefix + ".y", "y", 4, 4, 0, false, 32, false));
-    leaves.push(field_leaf_desc_new(prefix + ".z", "z", 4, 4, 0, false, 32, false));
+    var i = 0;
+    while i < inner.len() {
+        let leaf = inner[i];
+        leaves.push(field_leaf_desc_new(
+            prefix + "." + leaf.path,
+            leaf.leaf_name,
+            leaf.byte_size,
+            leaf.align_bytes,
+            leaf.lattice_bits,
+            leaf.is_cold,
+            leaf.bit_width,
+            leaf.is_bit_packed
+        ));
+        i = i + 1;
+    }
     return leaves;
 }
 

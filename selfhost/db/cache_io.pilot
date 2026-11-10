@@ -153,8 +153,7 @@ pub fn db_deserialize_cache(db: i64, cache_data: str, expected_compiler_hash: st
 
 pub fn db_save_cache_file(db: i64, cache_path: str, compiler_hash: str) -> bool {
     let payload = db_serialize_cache(db, compiler_hash);
-    let written = File.write_text(cache_path, payload);
-    return written >= 0;
+    return File.write_text(cache_path, payload);
 }
 
 pub fn db_load_cache_file(db: i64, cache_path: str, compiler_hash: str) -> bool {

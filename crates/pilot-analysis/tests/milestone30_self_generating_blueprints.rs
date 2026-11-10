@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -111,7 +113,7 @@ fn eval_m30(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -157,7 +159,7 @@ fn test_m30_1_cli_argv_parsing_subcommands_and_collision_gen005() {
 
             // Test 1c: Help screen generation
             let help = cli_generate_help(ref app);
-            if help.len() < 50 { return 5; }
+            if help != "pilot-order 1.0.0\nPilot Order CLI Tool\n\nUSAGE:\n  pilot-order [OPTIONS] [SUBCOMMAND]\n\nOPTIONS:\n  -c, --customer-id    Target Customer ID\n  -t, --total-cents    Order Total in Cents\n  -v, --verbose    Enable Verbose Logging\n" { return 5; }
 
             // Test 1d: Argv parsing with subcommand and flags
             let argv: List<str> = ["create", "--customer-id", "42", "--total-cents", "2500", "--verbose"];
@@ -168,12 +170,33 @@ fn test_m30_1_cli_argv_parsing_subcommands_and_collision_gen005() {
             if cli_parsed_get(ref parsed, "total_cents") != "2500" { return 9; }
             if cli_parsed_get(ref parsed, "verbose") != "true" { return 10; }
 
+            // Test 1e: defaults, unknown options, unknown subcommands, required options
+            let argv2: List<str> = ["get", "-c", "7", "-t", "1"];
+            let parsed2 = cli_parse_argv(ref app, argv2);
+            if !parsed2.is_ok || cli_parsed_get(ref parsed2, "verbose") != "false" { return 11; }
+            let argv3: List<str> = ["create", "--customer-id", "1", "--total-cents", "2", "--colour"];
+            let parsed3 = cli_parse_argv(ref app, argv3);
+            if parsed3.is_ok || parsed3.error_message != "Unknown option '--colour'" { return 12; }
+            let argv4: List<str> = ["delete", "--customer-id", "1"];
+            let parsed4 = cli_parse_argv(ref app, argv4);
+            if parsed4.is_ok || parsed4.error_message != "Unknown subcommand 'delete'" { return 13; }
+            let argv5: List<str> = ["create", "--customer-id", "1"];
+            let parsed5 = cli_parse_argv(ref app, argv5);
+            if parsed5.is_ok || parsed5.error_message != "Missing required option '--total-cents'" { return 14; }
+
             return 42;
         }
     "#;
 
     let res = eval_m30(&deps, script);
     assert_eq!(res, "42", "Failed CLI weaver test: {}", res);
+
+    let weave = eval_m30(&deps, "pub fn main() -> i64 { let app = cli_weave_struct(\"OrderCli\"); return 1; }");
+    assert!(
+        weave.starts_with("FAULT: SEAM001: unconnected seam `cli.weave_struct`"),
+        "[Cli] weaving must stop at its seam: {}",
+        weave
+    );
     guard.finish();
 }
 
@@ -205,24 +228,26 @@ fn test_m30_2_service_openapi_generation_and_contract_validation_gen001_gen002()
             // Test 2b: GEN001 Unclosed route parameter brace
             let bad_route_1 = http_route_def_new("GET", "/v1/orders/{id", "bad_handler_1", "void", true);
             let err_gen001 = http_service_add_route(var ref svc, bad_route_1);
-            if err_gen001.len() == 0 { return 2; }
-            let exp_gen001 = "GEN001";
-            if err_gen001.slice(0, exp_gen001.len()) != exp_gen001 { return 3; }
+            if err_gen001 != "GEN001: Invalid route path parameter syntax in [Service] 'OrdersService' on path '/v1/orders/{id': unclosed path parameter brace" { return 2; }
+            // A later closing brace in another segment does not close it
+            let bad_route_3 = http_route_def_new("GET", "/v1/{a/b}", "bad_handler_3", "void", true);
+            if !http_service_add_route(var ref svc, bad_route_3).starts_with("GEN001") { return 3; }
 
             // Test 2c: GEN002 Payload missing [Json] serialization contract
             let bad_route_2 = http_route_def_new("POST", "/v1/orders/raw", "bad_handler_2", "RawPacket", false);
             let err_gen002 = http_service_add_route(var ref svc, bad_route_2);
             if err_gen002.len() == 0 { return 4; }
-            let exp_gen002 = "GEN002";
-            if err_gen002.slice(0, exp_gen002.len()) != exp_gen002 { return 5; }
+            if err_gen002 != "GEN002: Service 'OrdersService' method 'bad_handler_2' payload type 'RawPacket' missing [Json] serialization contract" { return 5; }
 
             // Test 2d: OpenAPI 3.1 JSON spec synthesis
+            let r3 = http_route_def_new("GET", "/v1/orders", "list_orders", "void", true);
+            if http_service_add_route(var ref svc, r3).len() != 0 { return 8; }
             let openapi = http_service_generate_openapi(ref svc);
-            if openapi.len() < 100 { return 6; }
+            if openapi != "{ \"openapi\": \"3.1.0\", \"info\": { \"title\": \"OrdersService\", \"version\": \"1.0.0\" }, \"paths\": { \"/v1/orders\": { \"post\": { \"operationId\": \"create_order\", \"responses\": { \"default\": { \"description\": \"Response of create_order\" } } }, \"get\": { \"operationId\": \"list_orders\", \"responses\": { \"default\": { \"description\": \"Response of list_orders\" } } } }, \"/v1/orders/{id}\": { \"get\": { \"operationId\": \"get_order_by_id\", \"parameters\": [{ \"name\": \"id\", \"in\": \"path\", \"required\": true, \"schema\": { \"type\": \"string\" } }], \"responses\": { \"default\": { \"description\": \"Response of get_order_by_id\" } } } } } }" { return 6; }
 
-            // Test 2e: RFC 9457 Problem JSON generation
-            let problem = format_rfc9457_problem_json(422, "Unprocessable Content", "total_cents must be > 0");
-            if problem.len() < 50 { return 7; }
+            // Test 2e: RFC 9457 Problem JSON generation, with JSON string escaping
+            let problem = format_rfc9457_problem_json(422, "Unprocessable Content", "total_cents must be > 0 (\"cents\")");
+            if problem != "{\"type\":\"about:blank\",\"title\":\"Unprocessable Content\",\"status\":422,\"detail\":\"total_cents must be > 0 (\\\"cents\\\")\"}" { return 7; }
 
             return 42;
         }
@@ -276,21 +301,21 @@ fn test_m30_3_entity_crud_optimistic_locking_and_ddl_diff_gen003_gen006() {
             // Test 3b: Column type mismatch in predicate (GEN004)
             let err_gen004 = entity_validate_predicate(ref full_schema, "customer_id", "VARCHAR");
             if err_gen004.len() == 0 { return 4; }
-            let exp_gen004 = "GEN004";
-            if err_gen004.slice(0, exp_gen004.len()) != exp_gen004 { return 5; }
+            if err_gen004 != "GEN004: SQL column type mismatch in entity 'orders': column 'customer_id' of type 'BIGINT' compared with 'VARCHAR'" { return 5; }
 
             // Test 3c: SQL generation
             let create_sql = generate_create_table_sql(ref full_schema);
-            if create_sql.len() < 30 { return 6; }
+            if create_sql != "CREATE TABLE orders (id BIGINT PRIMARY KEY, customer_id BIGINT, total_cents BIGINT, ver INTEGER);" { return 6; }
 
             let select_sql = generate_select_by_id_sql(ref full_schema);
-            if select_sql.len() < 25 { return 7; }
+            if select_sql != "SELECT id, customer_id, total_cents, ver FROM orders WHERE id = $1;" { return 7; }
 
             let insert_sql = generate_insert_sql(ref full_schema);
-            if insert_sql.len() < 30 { return 8; }
+            if insert_sql != "INSERT INTO orders (id, customer_id, total_cents, ver) VALUES ($1, $2, $3, $4);" { return 8; }
 
+            // Optimistic lock: bump the version, match the version read
             let update_sql = generate_update_with_optimistic_lock_sql(ref full_schema);
-            if update_sql.len() < 30 { return 9; }
+            if update_sql != "UPDATE orders SET customer_id = $2, total_cents = $3, ver = ver + 1 WHERE id = $1 AND ver = $4;" { return 9; }
 
             // Test 3d: Schema diff and destructive column drop check (GEN006)
             var prev_schema = entity_schema_def_new("orders");
@@ -300,8 +325,7 @@ fn test_m30_3_entity_crud_optimistic_locking_and_ddl_diff_gen003_gen006() {
 
             let diff_err = entity_diff_ddl(ref full_schema, ref prev_schema);
             if diff_err.is_ok { return 10; }
-            let exp_gen006 = "GEN006";
-            if diff_err.error_message.slice(0, exp_gen006.len()) != exp_gen006 { return 11; }
+            if diff_err.error_message != "GEN006: Destructive schema column drop detected in diff_ddl for entity 'orders' on column 'legacy_tag' without [AllowDropColumn]" { return 11; }
 
             // When allow_drop is true, migration SQL is generated
             var prev_schema2 = entity_schema_def_new("orders");
@@ -311,7 +335,7 @@ fn test_m30_3_entity_crud_optimistic_locking_and_ddl_diff_gen003_gen006() {
 
             let diff_ok = entity_diff_ddl(ref full_schema, ref prev_schema2);
             if !diff_ok.is_ok { return 12; }
-            if diff_ok.migration_sql.len() < 20 { return 13; }
+            if diff_ok.migration_sql != "ALTER TABLE orders DROP COLUMN legacy_tag;\nALTER TABLE orders ADD COLUMN customer_id BIGINT;\nALTER TABLE orders ADD COLUMN total_cents BIGINT;\nALTER TABLE orders ADD COLUMN ver INTEGER;\n" { return 13; }
 
             return 42;
         }
@@ -319,6 +343,13 @@ fn test_m30_3_entity_crud_optimistic_locking_and_ddl_diff_gen003_gen006() {
 
     let res = eval_m30(&deps, script);
     assert_eq!(res, "42", "Failed Entity weaver test: {}", res);
+
+    let weave = eval_m30(&deps, "pub fn main() -> i64 { let s = entity_weave_struct(\"Order\"); return 1; }");
+    assert!(
+        weave.starts_with("FAULT: SEAM001: unconnected seam `db.weave_entity`"),
+        "[Entity] weaving must stop at its seam: {}",
+        weave
+    );
     guard.finish();
 }
 
@@ -367,26 +398,24 @@ fn test_m30_4_full_stack_microservice_cli_and_persistence_integration() {
             let total = cli_parsed_get(ref parsed, "total_cents");
             if cid != "42" || total != "2500" { return 2; }
 
-            // 5. Construct payload & dispatch HTTP POST
-            let req_body = "{\"customer_id\":" + cid + ",\"total_cents\":" + total + "}";
-            let resp_post = http_service_dispatch(ref svc, "POST", "/v1/orders", req_body);
-            if resp_post.status_code != 201 { return 3; }
-            if resp_post.content_type != "application/json" { return 4; }
+            // 5. Route requests: path parameters bind, unknown paths and methods are problems
+            let m_get = http_service_match_route(ref svc, "GET", "/v1/orders/17");
+            if m_get.route_index != 1 { return 3; }
+            if m_get.param_names.len() != 1 || m_get.param_names[0] != "id" || m_get.param_values[0] != "17" { return 4; }
+            let m_post = http_service_match_route(ref svc, "POST", "/v1/orders");
+            if m_post.route_index != 0 { return 5; }
+            if http_service_match_route(ref svc, "GET", "/v1/orders/").route_index != -1 { return 6; }
+            if http_service_match_route(ref svc, "GET", "/v1/orders/1/items").route_index != -1 { return 7; }
+
+            let resp_404 = http_service_dispatch(ref svc, "GET", "/v2/nothing", "");
+            if resp_404.status_code != 404 || resp_404.content_type != "application/problem+json" { return 8; }
+            let resp_405 = http_service_dispatch(ref svc, "DELETE", "/v1/orders/1", "");
+            if resp_405.status_code != 405 { return 9; }
+            if resp_405.body != "{\"type\":\"about:blank\",\"title\":\"Method Not Allowed\",\"status\":405,\"detail\":\"no DELETE route for '/v1/orders/1'\"}" { return 10; }
 
             // 6. Persist order via Entity SQL
             let insert_sql = generate_insert_sql(ref schema);
-            if insert_sql.len() == 0 { return 5; }
-
-            // 7. Dispatch HTTP GET /v1/orders/1 to verify retrieval
-            let resp_get = http_service_dispatch(ref svc, "GET", "/v1/orders/1", "");
-            if resp_get.status_code != 200 { return 6; }
-            if resp_get.body.len() == 0 { return 7; }
-
-            // 8. Contract violation test: invalid negative total_cents produces RFC 9457 Problem JSON
-            let invalid_req_body = "{\"customer_id\":42,\"total_cents\":-500}";
-            let resp_invalid = http_service_dispatch(ref svc, "POST", "/v1/orders", invalid_req_body);
-            if resp_invalid.status_code != 422 { return 8; }
-            if resp_invalid.content_type != "application/problem+json" { return 9; }
+            if insert_sql != "INSERT INTO orders (id, customer_id, total_cents, ver) VALUES ($1, $2, $3, $4);" { return 11; }
 
             return 42;
         }
@@ -394,5 +423,28 @@ fn test_m30_4_full_stack_microservice_cli_and_persistence_integration() {
 
     let res = eval_m30(&deps, script);
     assert_eq!(res, "42", "Failed End-to-End integration test: {}", res);
+
+    // A request that selects a route is handed to its handler, which nothing can call yet.
+    let dispatch_script = r#"
+        pub fn main() -> i64 {
+            var svc = http_service_def_new("OrdersService", "/v1/orders", "1.0.0");
+            http_service_add_route(var ref svc, http_route_def_new("POST", "/v1/orders", "create_order", "OrderCreateReq", true));
+            let resp = http_service_dispatch(ref svc, "POST", "/v1/orders", "{\"customer_id\":42,\"total_cents\":2500}");
+            return resp.status_code as i64;
+        }
+    "#;
+    let dispatched = eval_m30(&deps, dispatch_script);
+    assert!(
+        dispatched.starts_with("FAULT: SEAM001: unconnected seam `http.invoke_handler`"),
+        "handler invocation must stop at its seam: {}",
+        dispatched
+    );
+
+    let weave = eval_m30(&deps, "pub fn main() -> i64 { let s = service_weave_struct(\"OrdersService\"); return 1; }");
+    assert!(
+        weave.starts_with("FAULT: SEAM001: unconnected seam `http.weave_service`"),
+        "[Service] weaving must stop at its seam: {}",
+        weave
+    );
     guard.finish();
 }

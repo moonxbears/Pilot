@@ -1,0 +1,14 @@
+// KNOWN BUG seed.field_closure_call: calling a closure stored in a field,
+// `(self.f)(x)`, is lowered as a call to a method named `<Type>.f`.
+struct Doubler {
+    f: fn<i64, i64>;
+
+    fn run(self, x: i64) -> i64 {
+        return (self.f)(x);
+    }
+}
+
+fn main() {
+    let d = Doubler { f: (x) => x * 2 };
+    print(d.run(5));
+}

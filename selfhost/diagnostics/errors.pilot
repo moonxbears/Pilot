@@ -560,6 +560,13 @@ pub let ERRORS = [
         reference: "PilotDB v1 On-Disk Cache / Milestone 5",
     },
     ErrorDef {
+        code: "DB003",
+        title: "Unknown Query Stage",
+        description: "A query names a stage that has no registered compute function",
+        category: "CompilerDatabase",
+        reference: "PilotDB query registry / Milestone 5",
+    },
+    ErrorDef {
         code: "IR001",
         title: "SSA Dominance Violation",
         description: "Value use is not strictly dominated by its definition along all control flow paths",

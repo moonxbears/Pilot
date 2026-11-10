@@ -10,6 +10,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -29,8 +31,10 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "build_crate_ceiling_registry",
                 "temp_guard_new",
                 "temp_guard_cleanup",
+                "gate_seam_open",
+                "gate_at_seam_report",
             ],
-            required_code_markers: &["SeedTokenRegistry", "CrateCeilingRule", "GateViolation", "GateReport", "IGateCheck", "TempDirGuard"],
+            required_code_markers: &["SeedTokenRegistry", "CrateCeilingRule", "GateViolation", "GateReport", "IGateCheck", "TempDirGuard", "at_seam"],
             forbidden_code_markers: &["return 14;"],
             forbidden_string_substrings: &[],
         },
@@ -57,7 +61,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "execute_universal_rename_litmus",
                 "execute_dual_pass_rename_gate",
             ],
-            required_code_markers: &["GATE008", "temp_guard_new", "temp_guard_cleanup"],
+            required_code_markers: &["GATE008", "temp_guard_new", "temp_guard_cleanup", "gate_seam_open", "rl_run_program"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -65,11 +69,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/gate/bootstrap_parity.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "verify_stage3_fixed_point_digests",
-                "execute_bootstrap_parity_gate",
-            ],
-            required_code_markers: &["GATE009", "sha256_hex", "pilotc_bootstrap_stage_c11", "pilotc_bootstrap_stage_pilc_hex"],
+            required_pub_fns: &["execute_bootstrap_parity_gate"],
+            required_code_markers: &["GATE009", "sha256_hex", "pilotc_bootstrap_stage_c11", "gate_seam_open"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -107,6 +108,9 @@ fn load_gate_bundle(root: &Path) -> String {
         "selfhost/gate/seed_audit.pilot",
         "selfhost/gate/rename_litmus.pilot",
         "selfhost/gate/bootstrap_parity.pilot",
+        "selfhost/gate/ledger/seams.pilot",
+        "selfhost/gate/ledger/wiring.pilot",
+        "selfhost/gate/seam_gate.pilot",
         "selfhost/gate/runner.pilot",
     ];
     let mut combined = String::with_capacity(96 * 1024);
@@ -144,7 +148,7 @@ fn eval_gate_script(bundle: &str, tail: &str) -> String {
     );
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 fn ensure_pilot_cli_bin(root: &Path) -> PathBuf {
@@ -290,6 +294,7 @@ pub fn test_m1_2_rust_tamper_unlock_comment_freedom_and_retired_scripts_purged()
     {
         std::os::unix::fs::symlink(root.join("stdlib"), tmp_ws.join("stdlib")).unwrap();
         std::os::unix::fs::symlink(root.join("selfhost"), tmp_ws.join("selfhost")).unwrap();
+        std::os::unix::fs::symlink(root.join("tests"), tmp_ws.join("tests")).unwrap();
         for ent in std::fs::read_dir(root.join("crates")).unwrap().flatten() {
             let cname = ent.file_name();
             if cname.to_string_lossy() != "pilot-cli" {
@@ -326,12 +331,60 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     let bundle = load_gate_bundle(&root);
     let root_esc = escape_pilot_str(root.to_str().unwrap());
 
+    // 1. The renamer: whole identifiers only, never inside comments, string
+    //    or char literals, never a longer identifier. Expected text is
+    //    written by hand.
+    let input = "// a slice comment\n\
+                 fn f(xs: slice<char>, o: opt<range<i64>>) -> result<str, res> {\n\
+                 \x20   let slices = xs.slice(0, 1);\n\
+                 \x20   let t = \"slice range\";\n\
+                 \x20   let c = 'r';\n\
+                 \x20   /* option */ return option.none;\n\
+                 }\n";
+    let expected = "// a slice comment\n\
+                    fn f(xs: window<c32>, o: maybe<interval<i64>>) -> outcome<str, outcome> {\n\
+                    \x20   let slices = xs.window(0, 1);\n\
+                    \x20   let t = \"slice range\";\n\
+                    \x20   let c = 'r';\n\
+                    \x20   /* option */ return maybe.none;\n\
+                    }\n";
+    let renamed = eval_gate_script(
+        &bundle,
+        &format!(
+            "let rmap = rl_pairs_to_map(build_canonical_litmus_pairs());\n\
+             rl_rename_pilot_identifiers(\"{}\", rmap);",
+            escape_pilot_str(input)
+        ),
+    );
+    assert_eq!(renamed, expected, "Pass-0 identifier renamer");
+
+    // 2. Pass 1 renames to seeded names: the same seed gives the same names,
+    //    and no seeded name is a canonical one.
     let seed = (SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .subsec_nanos() as i64)
         + 104_729;
+    let seeded = |s: i64| {
+        eval_gate_script(
+            &bundle,
+            &format!(
+                "let rmap = rl_pairs_to_map(build_seeded_litmus_pairs({s}));\n\
+                 rl_rename_pilot_identifiers(\"slice char\", rmap);"
+            ),
+        )
+    };
+    let first = seeded(seed);
+    assert_eq!(first, seeded(seed), "seeded renames must be deterministic");
+    let parts: Vec<&str> = first.split(' ').collect();
+    assert_eq!(parts.len(), 2, "seeded rename output: {first}");
+    assert!(
+        parts[0].starts_with("window_") && parts[1].starts_with("c32_") && parts[0].len() == "window_".len() + 6,
+        "seeded rename output: {first}"
+    );
 
+    // 3. The gate builds the renamed sandbox, then stops at the seam that
+    //    runs programs (no process spawn until F6). It must not pass.
     let res = eval_gate_script(
         &bundle,
         &format!(
@@ -342,14 +395,43 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     );
     assert!(
         res.contains("\"id\":\"rename_litmus\"")
-            && res.contains("\"passed\":true")
+            && res.contains("\"passed\":false")
+            && res.contains("\"at_seam\":\"gate.litmus_run_program\"")
+            && res.contains("\"at_seams\":1")
             && res.contains("\"total_violations\":0"),
-        "Dual-Pass Universal Rename Litmus failed for seed {}: {}",
+        "Rename litmus must stop at its seam for seed {}: {}",
         seed,
         res
     );
+    let scanned: usize = res
+        .split("\"items_scanned\":")
+        .nth(1)
+        .and_then(|t| t.split(|c: char| !c.is_ascii_digit()).next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0);
+    let conformance_programs = std::fs::read_dir(root.join("tests/conformance"))
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "pilot") && p.with_extension("stdout").exists())
+        .count();
+    assert!(
+        scanned >= 2 * conformance_programs,
+        "the sandbox must hold every conformance program in both passes ({scanned} < 2 x {conformance_programs})"
+    );
+    let leftover = std::fs::read_dir("/tmp")
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().starts_with(&format!("pilot_litmus_{}_", std::process::id())));
+    assert!(!leftover, "rename litmus leaked its sandbox under /tmp");
 
-    // Verify TempDirGuard deterministic cleanup on a dedicated probe arena
+    // 4. Running a program stops at the registered seam.
+    let run = eval_gate_script(&bundle, "rl_run_program(\"/tmp\", \"progs/x.pilot\", glist_new());");
+    assert!(
+        run.starts_with("FAULT: SEAM001: unconnected seam `gate.litmus_run_program`"),
+        "rl_run_program must stop at its seam: {run}"
+    );
+
+    // 5. TempDirGuard deterministic cleanup on a dedicated probe arena
     let probe_dir = format!("/tmp/pilot_litmus_guard_probe_{}_{}", std::process::id(), seed);
     let probe_esc = escape_pilot_str(&probe_dir);
     let guard_probe = eval_gate_script(
@@ -369,15 +451,15 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
 }
 
 #[test]
-pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_stage3_sha256_parity() {
+pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status() {
     let guard = anticheat::AntiCheatGuard::arm(
-        "test_m1_4_cli_pilot_gate_full_json_exit_codes_and_stage3_sha256_parity",
+        "test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status",
         &ANTICHEAT_SPEC,
     );
     let root = workspace_root();
     let bin = ensure_pilot_cli_bin(&root);
 
-    // 1. `pilot gate` fast default (< 500 ms inside pure-Pilot engine)
+    // 1. `pilot gate` fast default
     let fast_out = Command::new(&bin)
         .args(["gate", "--json"])
         .current_dir(&root)
@@ -391,29 +473,31 @@ pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_stage3_sha256_parity() 
     let fast_json = String::from_utf8(fast_out.stdout).unwrap();
     assert!(
         fast_json.contains("\"passed\":true")
-            && fast_json.contains("\"gate_count\":2")
+            && fast_json.contains("\"gate_count\":3")
+            && fast_json.contains("\"at_seams\":0")
             && fast_json.contains("\"total_violations\":0"),
         "Unexpected fast gate JSON: {}",
         fast_json
     );
 
-    // 2. `pilot gate --full` (runs all 4 gates: adaptability, hygiene, rename_litmus, bootstrap_parity)
+    // 2. `pilot gate --full`: the three source gates pass; the rename litmus
+    //    and the bootstrap parity gate cannot run their checks yet and report
+    //    the seams they stop at. Exit 0: no gate failed.
     let full_out = Command::new(&bin)
         .args(["gate", "--full", "--seed", "77777"])
         .current_dir(&root)
         .output()
         .expect("run pilot gate --full");
-    assert!(
-        full_out.status.success(),
-        "pilot gate --full failed:\n{}",
-        String::from_utf8_lossy(&full_out.stdout)
-    );
     let full_txt = String::from_utf8(full_out.stdout).unwrap();
-    assert!(
-        full_txt.contains("ALL 4 GATE(S) PASSED (0 violations)"),
-        "Expected all 4 gates to pass in --full mode, got:\n{}",
-        full_txt
-    );
+    assert!(full_out.status.success(), "pilot gate --full failed:\n{}", full_txt);
+    for line in [
+        "[SEAM] rename_litmus (Adaptability) stops at seam `gate.litmus_run_program`",
+        "[SEAM] bootstrap_parity (BootstrapParity) stops at seam `bootstrap.stage_compile`",
+        "RESULT: 3 GATE(S) PASSED, 2 AT SEAMS (0 violations)",
+    ] {
+        assert!(full_txt.contains(line), "Expected `{}` in --full output:\n{}", line, full_txt);
+    }
+    assert!(!full_txt.contains("[FAIL]"), "--full output:\n{}", full_txt);
 
     // 3. Invalid CLI flag must return exit code `2`
     let bad_out = Command::new(&bin)
@@ -427,15 +511,24 @@ pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_stage3_sha256_parity() 
         "Invalid CLI flags on `pilot gate` must return exit code 2"
     );
 
-    // 4. Direct Stage-2 == Stage-3 SHA-256 fixed-point digest equality check
+    // 4. The stage build stops at its seam, and a gate claiming a seam that
+    //    is not registered fails.
     let bundle = load_gate_bundle(&root);
-    let digests = eval_gate_script(&bundle, "verify_stage3_fixed_point_digests(4242);");
-    let dcols: Vec<&str> = digests.split('|').collect();
-    assert_eq!(dcols.len(), 4, "Expected 4 SHA-256 digests: {}", digests);
-    assert_eq!(dcols[0].len(), 64);
-    assert_eq!(dcols[0], dcols[1], "Stage-2 != Stage-3 C11 SHA-256 digest");
-    assert_eq!(dcols[2].len(), 64);
-    assert_eq!(dcols[2], dcols[3], "Stage-2 != Stage-3 .pilc SHA-256 digest");
+    let stage = eval_gate_script(&bundle, "pilotc_bootstrap_stage_c11(::Stage2, \"fn f() {}\");");
+    assert!(
+        stage.starts_with("FAULT: SEAM001: unconnected seam `bootstrap.stage_compile`"),
+        "stage build must stop at its seam: {stage}"
+    );
+    let fake_seam = eval_gate_script(
+        &bundle,
+        "let reps = glist_new();\n\
+         let _ = glist_push(reps, gate_at_seam_report(\"probe\", GateCategoryId.Hygiene, \"no_such.seam\", gate_time_now_us(), 0));\n\
+         format_gate_reports_human(reps);",
+    );
+    assert!(
+        fake_seam.contains("[FAIL] probe") && fake_seam.contains("RESULT: FAILED"),
+        "an unregistered seam must fail the gate:\n{fake_seam}"
+    );
 
     guard.finish();
 }

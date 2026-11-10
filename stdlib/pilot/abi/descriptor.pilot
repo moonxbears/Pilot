@@ -126,6 +126,33 @@ pub struct ArgLocation : IValue {
     pub pure fn is_indirect() -> bool => .kind == ArgPassKind::IndirectByRef;
 }
 
+/// One scalar member of an aggregate, flattened: its byte offset, its size
+/// and its register class (`2` = floating point, anything else integer).
+/// Aggregate classification (SysV eightbytes, AAPCS64 HFAs, RISC-V float
+/// flattening) is decided from these, never from the aggregate's size alone.
+[Layout(c_abi)]
+pub struct AbiFieldClass : IValue {
+    pub offset:    u32;
+    pub size:      u32;
+    pub reg_class: u8;
+
+    pub static pure fn create(offset: u32, size: u32, reg_class: u8) -> AbiFieldClass => AbiFieldClass {
+        offset:    offset,
+        size:      size,
+        reg_class: reg_class,
+    };
+
+    pub pure fn is_float() -> bool => .reg_class == 2;
+}
+
+/// The flattened scalar members of an aggregate `TypeLayout`.
+/// `TypeLayout` records only size, alignment and one register class, so the
+/// members are not known here yet.
+pub fn abi_aggregate_fields(layout: ref<TypeLayout>) -> List<AbiFieldClass> {
+    return seam("abi.aggregate_fields",
+        "TypeLayout has no member list; per-member offsets and register classes come with the type checker (F4)");
+}
+
 // ------------------------------------------------------------------------------
 // 2. Hardware Calling Convention Specification & ABI Frame Plan
 // ------------------------------------------------------------------------------
@@ -326,18 +353,22 @@ pub fn invoke_dynamic_frame(
     loop {
         if !(i < plan.param_locs.len()) { break; }
         let loc = plan.param_locs.get(i);
-        if loc.kind == ArgPassKind::DirectSimd || loc.kind == ArgPassKind::HfaSimd3 || loc.kind == ArgPassKind::HfaSimd4 {
+        // SysV `%al`: the number of vector registers the call uses.
+        if loc.kind == ArgPassKind::DirectSimd || loc.kind == ArgPassKind::PairGprSimd
+            || loc.kind == ArgPassKind::PairSimdGpr {
             v_count = v_count + 1;
+        } else if loc.kind == ArgPassKind::PairSimdSimd {
+            v_count = v_count + 2;
+        } else if loc.kind == ArgPassKind::HfaSimd3 || loc.kind == ArgPassKind::HfaSimd4 {
+            v_count = v_count + loc.reg1;
         }
         i = i + 1;
     }
     packet.vec_reg_count = v_count;
-    let inv_res = __engine("invoke_abi_frame", fn_addr, packet.get_gpr(0), packet.get_gpr(1), packet.get_gpr(2), packet.get_gpr(3), packet.get_gpr(4), packet.get_gpr(5), packet.vec_reg_count);
-    var ret_val: u64 = packet.get_gpr(0);
-    if inv_res != 0 {
-        ret_val = inv_res as u64;
-    }
-    return res<u64, AbiDiagnostic>.ok(ret_val);
+    // The packed frame goes to `pilot_rt_invoke_abi_frame`
+    // (crates/pilot-rt/src/c_abi.rs), which PilVM cannot reach yet.
+    return seam("abi.invoke_frame",
+        "PilVM has no bridge to pilot_rt_invoke_abi_frame; native calls from Pilot arrive in F6");
 }
 
 [Layout(c_abi)]

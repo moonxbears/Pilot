@@ -6,6 +6,7 @@
 pub lvl(0) pkg Pilot.SelfHost.Db.Engine;
 
 use Pilot.SelfHost.Db.Revision::*;
+use Pilot.SelfHost.Lexer::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -244,7 +245,7 @@ pub fn pilotdb_memo_fp(db: i64, enc_k: str) -> Fingerprint128 {
 
 // Demand-driven query entry:
 // Validates dependencies, executes compute on demand, enforces early cutoff.
-pub fn pilotdb_query_with_fn(db: i64, key: QueryKey, fn_tag: str) -> str {
+pub fn pilotdb_query_with_fn(db: i64, key: QueryKey) -> str {
     let enc_k = query_key_encode(key);
     let cur_rev = pilotdb_current_rev(db);
 
@@ -288,7 +289,7 @@ pub fn pilotdb_query_with_fn(db: i64, key: QueryKey, fn_tag: str) -> str {
         while di < dcnt {
             let dep_k_enc = __engine("map_get", db, "dep_" + enc_k + "_" + di);
             let dep_key = query_key_decode(dep_k_enc);
-            let _ = pilotdb_query_with_fn(db, dep_key, "");
+            let _ = pilotdb_query_with_fn(db, dep_key);
             let dep_cat = pilotdb_memo_changed_at(db, dep_k_enc);
             if dep_cat > memo_vat {
                 all_deps_clean = false;
@@ -311,7 +312,7 @@ pub fn pilotdb_query_with_fn(db: i64, key: QueryKey, fn_tag: str) -> str {
     // Clear dependencies recorded during the previous run
     __engine("map_set", db, "depcnt_" + enc_k, 0);
 
-    let new_payload = pilotdb_dispatch_compute(db, key, fn_tag);
+    let new_payload = pilotdb_dispatch_compute(db, key);
     let new_fp = fingerprint_compute(new_payload);
     pilotdb_record_exec(db, key.stage_id);
 
@@ -341,8 +342,10 @@ pub fn pilotdb_query_with_fn(db: i64, key: QueryKey, fn_tag: str) -> str {
     return new_payload;
 }
 
-// Open compute dispatcher: dispatches standard canonical stages
-pub fn pilotdb_dispatch_compute(db: i64, key: QueryKey, fn_tag: str) -> str {
+// Compute dispatcher for the canonical stages. Stages whose engine does not
+// exist yet (lossless CST, macro expansion, type checking) stop at a seam
+// instead of producing a placeholder payload.
+pub fn pilotdb_dispatch_compute(db: i64, key: QueryKey) -> str {
     let stage = key.stage_id;
     let fid = key.entity_id;
 
@@ -350,74 +353,54 @@ pub fn pilotdb_dispatch_compute(db: i64, key: QueryKey, fn_tag: str) -> str {
         return pilotdb_get_file_source(db, fid);
     }
     if stage == stage_item_signature() {
-        // Depends on source text
         let k_src = query_key_new(stage_source_text(), 0, fid);
-        let src = pilotdb_query_with_fn(db, k_src, "");
+        let src = pilotdb_query_with_fn(db, k_src);
         return pilotdb_extract_item_sig(src);
     }
     if stage == stage_lex_tokens() {
         let k_src = query_key_new(stage_source_text(), 0, fid);
-        let src = pilotdb_query_with_fn(db, k_src, "");
-        return "tokens_len=" + src.len();
+        let src = pilotdb_query_with_fn(db, k_src);
+        return pilotdb_render_tokens(src);
     }
     if stage == stage_lossless_cst() {
-        let k_lex = query_key_new(stage_lex_tokens(), 0, fid);
-        let _ = pilotdb_query_with_fn(db, k_lex, "");
-        let k_src = query_key_new(stage_source_text(), 0, fid);
-        let src = pilotdb_query_with_fn(db, k_src, "");
-        return "cst_nodes=" + (src.len() / 4);
+        return seam("db.lossless_cst", "the lossless red/green CST parser (pilot.cst) does not exist yet");
     }
     if stage == stage_expanded_ast() {
-        let k_cst = query_key_new(stage_lossless_cst(), 0, fid);
-        let _ = pilotdb_query_with_fn(db, k_cst, "");
-        return "ast_for_" + fid;
+        return seam("db.expanded_ast", "syntax-rule and macro expansion over the CST does not exist yet");
     }
     if stage == stage_import_scope() {
-        // Query signature of imported modules if any are registered
+        // The public signatures of every imported module, in import order.
         let imp_count = (__engine("map_get", db, "file_import_count_" + fid) ?? 0);
         var sigs = "";
         var ii = 0;
         while ii < imp_count {
             let dep_fid = (__engine("map_get", db, "file_import_" + fid + "_" + ii) ?? 0);
             let k_sig = query_key_new(stage_item_signature(), 0, dep_fid);
-            let s = pilotdb_query_with_fn(db, k_sig, "");
-            sigs = sigs + s + "\n";
+            sigs = sigs + pilotdb_query_with_fn(db, k_sig) + "\n";
             ii = ii + 1;
         }
-        return "imports_for_" + fid + "\n" + sigs;
+        return sigs;
     }
     if stage == stage_def_types_and_lattice() {
-        // Types depend on imported modules' def_types_and_lattice
-        let imp_count = (__engine("map_get", db, "file_import_count_" + fid) ?? 0);
-        var ii = 0;
-        while ii < imp_count {
-            let dep_fid = (__engine("map_get", db, "file_import_" + fid + "_" + ii) ?? 0);
-            let k_dep_types = query_key_new(stage_def_types_and_lattice(), 0, dep_fid);
-            let _ = pilotdb_query_with_fn(db, k_dep_types, "");
-            ii = ii + 1;
-        }
-
-        // Types depend on local AST, source text, item signature, and import scope
-        let k_src = query_key_new(stage_source_text(), 0, fid);
-        let _ = pilotdb_query_with_fn(db, k_src, "");
-        let k_ast = query_key_new(stage_expanded_ast(), 0, fid);
-        let _ = pilotdb_query_with_fn(db, k_ast, "");
-        let k_sig = query_key_new(stage_item_signature(), 0, fid);
-        let sig = pilotdb_query_with_fn(db, k_sig, "");
-        let k_scope = query_key_new(stage_import_scope(), 0, fid);
-        let sc = pilotdb_query_with_fn(db, k_scope, "");
-        return "types_and_lattice_for_" + fid + ": sig=" + sig + "; imports=" + sc;
+        return seam("db.def_types", "the type checker that computes definitions, layouts and lattice bits arrives in F4");
     }
     if stage == stage_file_diagnostics() {
-        let k_types = query_key_new(stage_def_types_and_lattice(), 0, fid);
-        let _ = pilotdb_query_with_fn(db, k_types, "");
-        return "diagnostics_for_" + fid + ": 0 errors";
+        return seam("db.file_diagnostics", "per-file diagnostics come from the type checker (F4)");
     }
+    return "DB003: no compute is registered for query stage " + stage;
+}
 
-    if fn_tag.len() > 0 {
-        return "custom_computed_" + fn_tag + "_" + fid;
+// One line per token: `<tag> <text>`, from the self-hosted scanner.
+pub fn pilotdb_render_tokens(src: str) -> str {
+    let tape = sh_tokenize(src);
+    let n = sh_token_count(tape);
+    var out = "";
+    var i = 0;
+    while i < n {
+        out = out + sh_token_tag(tape, i) + " " + sh_token_text(tape, i) + "\n";
+        i = i + 1;
     }
-    return "computed_stage_" + stage + "_entity_" + fid;
+    return out;
 }
 
 // ------------------------------------------------------------------------------
@@ -486,14 +469,4 @@ pub fn pilotdb_extract_item_sig(source: str) -> str {
         }
     }
     return sig;
-}
-
-// ------------------------------------------------------------------------------
-// Multi-Module Import Registry Helper
-// ------------------------------------------------------------------------------
-
-pub fn pilotdb_register_module_import(db: i64, importer_fid: u64, imported_fid: u64) {
-    let cur = (__engine("map_get", db, "file_import_count_" + importer_fid) ?? 0);
-    __engine("map_set", db, "file_import_" + importer_fid + "_" + cur, imported_fid);
-    __engine("map_set", db, "file_import_count_" + importer_fid, cur + 1);
 }

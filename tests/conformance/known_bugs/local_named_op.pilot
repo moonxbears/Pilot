@@ -1,0 +1,7 @@
+// KNOWN BUG seed.local_named_op: a local variable named `op` is parsed as an
+// operator declaration.
+fn main() {
+    var op = 1;
+    op = op + 2;
+    print(op);
+}

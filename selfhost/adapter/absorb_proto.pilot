@@ -48,13 +48,17 @@ pub pure fn proto_zigzag_decode64(n: i64) -> i64 {
     return (n >> 1) ^ sign_mask;
 }
 
+/// Base-128 varint of `val` read as an unsigned 64-bit value, so a negative
+/// `int64` takes the full ten bytes, as protobuf encodes it.
 pub fn proto_encode_varint(val: i64) -> List<i64> {
     var out: List<i64> = [];
     var v = val;
     var more = true;
     while more {
         var byte = v & 127;
-        v = v >> 7;
+        // Logical shift right by 7: clear the 7 sign bits an arithmetic shift
+        // copies in (0x01FFFFFFFFFFFFFF keeps the low 57 bits).
+        v = (v >> 7) & 144115188075855871;
         if v != 0 {
             byte = byte | 128;
             out.push(byte);
@@ -78,7 +82,7 @@ pub fn proto_decode_varint(bytes: List<i64>, offset: i64) -> ProtoVarintResult {
     var shift: i64 = 0;
     var count: i64 = 0;
     var idx = offset;
-    let end_idx = offset + bytes.len();
+    let end_idx = bytes.len() as i64;
 
     while idx < end_idx {
         if count >= 10 { break; }
@@ -103,6 +107,80 @@ pub fn proto_decode_varint(bytes: List<i64>, offset: i64) -> ProtoVarintResult {
         is_valid:    false,
         err_message: "SCH005: Truncated wire varint at offset " + ("" + offset),
     };
+}
+
+/// Where one field sits in an encoded message.
+pub struct ProtoFieldSpan : IValue {
+    pub found:       bool,
+    pub wire_type:   i64,
+    /// The decoded value of a varint, 64-bit or 32-bit field.
+    pub value:       i64,
+    /// For a length-delimited field, where its payload starts and how long it is.
+    pub offset:      i64,
+    pub len:         i64,
+    pub err_message: str,
+}
+
+fn proto_span_err(msg: str) -> ProtoFieldSpan {
+    return ProtoFieldSpan { found: false, wire_type: 0, value: 0, offset: 0, len: 0, err_message: msg };
+}
+
+/// Little-endian fixed-width integer of `width` bytes at `at`.
+fn proto_read_fixed(bytes: List<i64>, at: i64, width: i64) -> i64 {
+    var v: i64 = 0;
+    var k = width - 1;
+    while k >= 0 {
+        v = (v << 8) | (bytes.get(at + k) & 255);
+        k = k - 1;
+    }
+    return v;
+}
+
+/// Finds field `field_number` in the encoded message `bytes`. Every record is
+/// walked so a malformed packet is caught; for a field that appears more than
+/// once the last occurrence wins, as the protobuf spec says for scalars.
+pub fn proto_wire_find_field(bytes: List<i64>, field_number: i64) -> ProtoFieldSpan {
+    var hit = proto_span_err("");
+    let n = bytes.len() as i64;
+    var pos: i64 = 0;
+    while pos < n {
+        let tag = proto_decode_varint(bytes, pos);
+        if !tag.is_valid { return proto_span_err(tag.err_message); }
+        pos = pos + tag.bytes_read;
+        let wt = proto_tag_wire_type(tag.value);
+        let fnum = proto_tag_field_number(tag.value);
+        var value: i64 = 0;
+        var start: i64 = pos;
+        var len: i64 = 0;
+        if wt == 0 {
+            let v = proto_decode_varint(bytes, pos);
+            if !v.is_valid { return proto_span_err(v.err_message); }
+            value = v.value;
+            pos = pos + v.bytes_read;
+        } else if wt == 1 || wt == 5 {
+            let width: i64 = if wt == 1 { 8 } else { 4 };
+            if pos + width > n {
+                return proto_span_err("SCH005: Truncated fixed-width field at offset " + ("" + pos));
+            }
+            value = proto_read_fixed(bytes, pos, width);
+            pos = pos + width;
+        } else if wt == 2 {
+            let l = proto_decode_varint(bytes, pos);
+            if !l.is_valid { return proto_span_err(l.err_message); }
+            start = pos + l.bytes_read;
+            len = l.value;
+            if len < 0 || start + len > n {
+                return proto_span_err("SCH005: Length-delimited field runs past the packet at offset " + ("" + pos));
+            }
+            pos = start + len;
+        } else {
+            return proto_span_err("SCH005: Unsupported wire type " + ("" + wt) + " at offset " + ("" + pos));
+        }
+        if fnum == field_number {
+            hit = ProtoFieldSpan { found: true, wire_type: wt, value: value, offset: start, len: len, err_message: "" };
+        }
+    }
+    return hit;
 }
 
 // ------------------------------------------------------------------------------
@@ -240,16 +318,11 @@ pub fn proto_parse_source(src: str) -> ProtoDoc {
                 // rhs has NUMBER [OPT]
                 var num_end = 0;
                 let rn = rhs.len();
+                var f_num: i64 = 0;
                 while num_end < rn && rhs.byte_at(num_end) >= 48 && rhs.byte_at(num_end) <= 57 {
+                    f_num = f_num * 10 + (rhs.byte_at(num_end) - 48);
                     num_end = num_end + 1;
                 }
-                var f_num: i64 = 1;
-                let num_str = rhs.slice(0, num_end);
-                if num_str == "1" { f_num = 1; }
-                else if num_str == "2" { f_num = 2; }
-                else if num_str == "3" { f_num = 3; }
-                else if num_str == "19000" { f_num = 19000; }
-                else if num_str == "19001" { f_num = 19001; }
 
                 let is_packed = rhs.contains("packed=true");
 
@@ -299,7 +372,38 @@ pub fn proto_validate_reserved_tags(msg: ProtoMessageDef) -> ProtoValidationResu
 // 5. Synthesis of Dual Owned 0b10 Builder & Zero-Copy 0b01 Wire View
 // ------------------------------------------------------------------------------
 
-pub fn proto_synthesize_dual_views(msg: ProtoMessageDef) -> str {
+/// Whether `type_name` (possibly package-qualified) names a message in `doc`.
+fn proto_doc_has_message(doc: ProtoDoc, type_name: str) -> bool {
+    var short = type_name;
+    var i = type_name.len();
+    while i > 0 {
+        i = i - 1;
+        if type_name.byte_at(i) == 46 { // '.'
+            short = type_name.slice(i + 1, type_name.len());
+            break;
+        }
+    }
+    for m in doc.messages {
+        if m.name == short { return true; }
+    }
+    return false;
+}
+
+/// The wire type a declared field is encoded with (protobuf encoding guide):
+/// fixed64/sfixed64/double use 1, fixed32/sfixed32/float use 5, strings,
+/// bytes and messages are length-delimited (2), and every other scalar and
+/// every enum is a varint (0).
+pub fn proto_field_wire_type(doc: ProtoDoc, f: ProtoFieldDef) -> i64 {
+    let t = f.field_type;
+    if t == "fixed64" || t == "sfixed64" || t == "double" { return 1; }
+    if t == "fixed32" || t == "sfixed32" || t == "float" { return 5; }
+    if t == "string" || t == "bytes" { return 2; }
+    if proto_doc_has_message(doc, t) { return 2; }
+    return 0;
+}
+
+[StandIn("proto.packet_bytes", "borrowed slice<u8> wire view (0b01)", "generated views hold an owned List<i64>, one byte per element", "F7")]
+pub fn proto_synthesize_dual_views(doc: ProtoDoc, msg: ProtoMessageDef) -> str {
     var out = "// ------------------------------------------------------------------\n";
     out = out + "// 0b10 Owned Mutable Builder\n";
     out = out + "pub struct " + msg.name + " : IObject {\n";
@@ -314,12 +418,20 @@ pub fn proto_synthesize_dual_views(msg: ProtoMessageDef) -> str {
 
     out = out + "// 0b01 Zero-Copy Borrowed Wire View\n";
     out = out + "pub struct " + msg.name + "View : IReference {\n";
-    out = out + "    pub packet_ptr: int64;\n";
-    out = out + "    pub packet_len: int64;\n";
+    out = out + "    pub packet: List<i64>;\n";
     var j = 0;
     while j < msg.fields.len() {
         let f = msg.fields.get(j);
-        out = out + "    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => 0;\n";
+        let find = "proto_wire_find_field(self.packet, " + ("" + f.field_number) + ")";
+        let wire = proto_field_wire_type(doc, f);
+        if f.is_repeated || wire == 2 {
+            // Repeated, packed and length-delimited fields hand back the span.
+            out = out + "    pub fn " + f.name + "_span(ref self) -> ProtoFieldSpan => " + find + ";\n";
+        } else if f.field_type.starts_with("sint") {
+            out = out + "    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => proto_zigzag_decode64(" + find + ".value);\n";
+        } else {
+            out = out + "    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => " + find + ".value;\n";
+        }
         j = j + 1;
     }
     out = out + "}\n";

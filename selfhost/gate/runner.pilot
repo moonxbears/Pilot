@@ -15,6 +15,7 @@ use selfhost.gate.manifest.*;
 use selfhost.gate.seed_audit.*;
 use selfhost.gate.rename_litmus.*;
 use selfhost.gate.bootstrap_parity.*;
+use selfhost.gate.seam_gate.*;
 
 fn gr_reg_gate(reg: i64, ids: i64, gid: str, cat: GateCategory, fast_def: bool) -> usize {
     let entry = __engine("map_new");
@@ -30,6 +31,7 @@ pub fn build_gate_registry() -> i64 {
     let ids = glist_new();
     let _ = gr_reg_gate(reg, ids, "adaptability", GateCategoryId.Adaptability, true);
     let _ = gr_reg_gate(reg, ids, "hygiene", GateCategoryId.Hygiene, true);
+    let _ = gr_reg_gate(reg, ids, "seams", GateCategoryId.Hygiene, true);
     let _ = gr_reg_gate(reg, ids, "rename_litmus", GateCategoryId.Adaptability, false);
     let _ = gr_reg_gate(reg, ids, "bootstrap_parity", GateCategoryId.BootstrapParity, false);
     __engine("map_set", reg, "__ids__", ids);
@@ -41,7 +43,8 @@ pub fn gate_help_banner() -> str {
            "Usage: pilot gate [options]\n\n" +
            "Options:\n" +
            "  --full             Run all gates including Dual-Pass Rename Litmus & Stage-3 Parity\n" +
-           "  --only <id>        Run a single registered gate (adaptability|hygiene|rename_litmus|bootstrap_parity)\n" +
+           "                     (a gate whose check needs unconnected code reports [SEAM]; exit 0 unless a gate fails)\n" +
+           "  --only <id>        Run a single registered gate (adaptability|hygiene|seams|rename_litmus|bootstrap_parity)\n" +
            "  --litmus           Include Dual-Pass Universal Rename Litmus gate\n" +
            "  --seed <u64>       Deterministic seed for Pass-1 Rename Litmus & Bootstrap Parity\n" +
            "  --json             Emit machine-readable JSON gate report\n" +
@@ -181,6 +184,9 @@ pub fn run_gate_by_id(workspace_root: str, gate_id: str, opts: ref<GateRunOption
     if gate_id == "hygiene" {
         return execute_hygiene_and_ratchet_gate(workspace_root, opts);
     }
+    if gate_id == "seams" {
+        return execute_seam_gate(workspace_root, opts);
+    }
     if gate_id == "rename_litmus" {
         return execute_dual_pass_rename_gate(workspace_root, opts);
     }
@@ -270,10 +276,21 @@ pub fn apply_ratchet_update(workspace_root: str) -> str {
     return "Ratchet update complete: tightened " + tightened + " crate ceiling(s).";
 }
 
+/// Whether `rep` stops at a seam that is still registered.
+fn gr_at_registered_seam(rep: GateReport) -> bool {
+    return rep.at_seam.len() > 0 && gate_seam_open(rep.at_seam);
+}
+
+/// Whether `rep` blocks: it neither passed nor stops at a registered seam.
+fn gr_blocks(rep: GateReport) -> bool {
+    return rep.passed == false && !gr_at_registered_seam(rep);
+}
+
 pub fn format_gate_reports_json(reports: List<GateReport>) -> str {
     let n = glist_len(reports);
     var all_passed = true;
     var total_viols = 0;
+    var at_seams = 0;
     var gates_json = "";
     var i = 0;
     while i < n {
@@ -281,6 +298,7 @@ pub fn format_gate_reports_json(reports: List<GateReport>) -> str {
         let vcount = glist_len(rep.violations);
         total_viols = total_viols + vcount;
         if rep.passed == false { all_passed = false; }
+        if gr_at_registered_seam(rep) { at_seams = at_seams + 1; }
 
         var viols_json = "";
         var vi = 0;
@@ -303,6 +321,7 @@ pub fn format_gate_reports_json(reports: List<GateReport>) -> str {
             "{\"id\":\"" + gm_json_escape(rep.gate_id) +
             "\",\"category\":\"" + gate_category_name(rep.category) +
             "\",\"passed\":" + (if rep.passed == true { "true" } else { "false" }) +
+            ",\"at_seam\":\"" + gm_json_escape(rep.at_seam) + "\"" +
             ",\"elapsed_us\":" + rep.elapsed_us +
             ",\"items_scanned\":" + rep.items_scanned +
             ",\"violations\":[" + viols_json + "]}";
@@ -311,13 +330,16 @@ pub fn format_gate_reports_json(reports: List<GateReport>) -> str {
 
     return "{\"passed\":" + (if all_passed { "true" } else { "false" }) +
            ",\"gate_count\":" + n +
+           ",\"at_seams\":" + at_seams +
            ",\"total_violations\":" + total_viols +
            ",\"gates\":[" + gates_json + "]}";
 }
 
 pub fn format_gate_reports_human(reports: List<GateReport>) -> str {
     let n = glist_len(reports);
-    var all_passed = true;
+    var blocked = false;
+    var passed = 0;
+    var at_seams = 0;
     var total_viols = 0;
     var out = "=== Pilot Pure-Pilot Architectural Gate Runner ===\n";
     var i = 0;
@@ -325,11 +347,25 @@ pub fn format_gate_reports_human(reports: List<GateReport>) -> str {
         let rep = glist_get(reports, i);
         let vcount = glist_len(rep.violations);
         total_viols = total_viols + vcount;
-        if rep.passed == false { all_passed = false; }
-        let badge = if rep.passed == true { "[PASS]" } else { "[FAIL]" };
-        out = out + "  " + badge + " " + rep.gate_id +
-              " (" + gate_category_name(rep.category) + ", scanned=" + rep.items_scanned +
-              ", " + rep.elapsed_us + " us)\n";
+        if gr_blocks(rep) { blocked = true; }
+        if rep.passed == true {
+            passed = passed + 1;
+            out = out + "  [PASS] " + rep.gate_id +
+                  " (" + gate_category_name(rep.category) + ", scanned=" + rep.items_scanned +
+                  ", " + rep.elapsed_us + " us)\n";
+        } else if gr_at_registered_seam(rep) {
+            at_seams = at_seams + 1;
+            out = out + "  [SEAM] " + rep.gate_id + " (" + gate_category_name(rep.category) +
+                  ") stops at seam `" + rep.at_seam + "`\n";
+        } else {
+            out = out + "  [FAIL] " + rep.gate_id +
+                  " (" + gate_category_name(rep.category) + ", scanned=" + rep.items_scanned +
+                  ", " + rep.elapsed_us + " us)\n";
+            if rep.at_seam.len() > 0 {
+                out = out + "    -> stops at seam `" + rep.at_seam +
+                      "`, which is not registered in selfhost/gate/ledger/seams.pilot\n";
+            }
+        }
         var vi = 0;
         while vi < vcount {
             let v = glist_get(rep.violations, vi);
@@ -340,10 +376,12 @@ pub fn format_gate_reports_human(reports: List<GateReport>) -> str {
         }
         i = i + 1;
     }
-    if all_passed {
+    if blocked {
+        out = out + "RESULT: FAILED (" + total_viols + " blocker violation(s) across " + n + " gate(s))";
+    } else if at_seams == 0 {
         out = out + "RESULT: ALL " + n + " GATE(S) PASSED (0 violations)";
     } else {
-        out = out + "RESULT: FAILED (" + total_viols + " blocker violation(s) across " + n + " gate(s))";
+        out = out + "RESULT: " + passed + " GATE(S) PASSED, " + at_seams + " AT SEAMS (0 violations)";
     }
     return out;
 }
@@ -371,8 +409,7 @@ pub fn run_pilot_gate_cli(workspace_root: str, raw_args: str) -> str {
     var all_ok = true;
     var i = 0;
     while i < glist_len(reports) {
-        let r = glist_get(reports, i);
-        if r.passed == false { all_ok = false; }
+        if gr_blocks(glist_get(reports, i)) { all_ok = false; }
         i = i + 1;
     }
     let code = if all_ok { "0" } else { "1" };

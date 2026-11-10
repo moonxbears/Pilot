@@ -86,3 +86,14 @@ pub fn lower_topology(bp: ref<BlueprintDef>) -> LoweredTopologyPlan {
 
     return plan;
 }
+
+// ------------------------------------------------------------------------------
+// 3. Hand-off to PilIR
+// ------------------------------------------------------------------------------
+
+/// Emits one PilIR dispatcher function per lowered route (direct call, ring
+/// buffer push/pop, work-stealing submit or shared-memory channel) into the
+/// program being built. The typed SSA function builder does not exist yet.
+pub fn emit_topology_ir(plan: LoweredTopologyPlan) -> i64 {
+    return seam("chor.emit_dispatchers", "typed PilIR function builder arrives in F5");
+}

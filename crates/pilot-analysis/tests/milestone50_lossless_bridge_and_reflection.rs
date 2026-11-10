@@ -738,6 +738,19 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
     // 3. Full N-attribute weight-sorting & pillar verification in `selfhost/attr_weaver.pilot`
     let weaver_src = std::fs::read_to_string(root.join("selfhost/attr_weaver.pilot"))
         .expect("read selfhost/attr_weaver.pilot");
+    // The pillar interfaces and built-in `...Attr` declarations, as declared
+    // in stdlib/core/meta.pilot (sections 1 and 2). The weaver must derive
+    // [Rule]/[Clamp]/[TraceSpan] pillars from these declarations' bases.
+    let meta_src = std::fs::read_to_string(root.join("stdlib/core/meta.pilot"))
+        .expect("read stdlib/core/meta.pilot");
+    let meta_attr_decls = {
+        let start = meta_src.find("pub struct InheritPolicy").expect("InheritPolicy in meta.pilot");
+        let end = meta_src
+            .find("// 3. PILOT-HOSTED")
+            .and_then(|i| meta_src[..i].rfind("// ====="))
+            .expect("section 3 in meta.pilot");
+        meta_src[start..end].to_string()
+    };
 
     for trial in 0..8 {
         let attr_cnt = rng.range(5, 7) as usize;
@@ -770,11 +783,23 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
             ));
         }
 
+        // An ECS rule attribute with a random name: only its declaration's
+        // `IEcsRule` base can classify it.
+        let custom_rule = format!("Sched{}{}", trial, rng.alpha_tag(5).to_ascii_uppercase());
+        ecs_decls.push_str(&format!("[{custom_rule}(7)]\npub struct EcsCustom{trial} {{}}\n"));
+        // The same attribute name with no declaration has no pillar.
+        let undeclared = format!("Loose{}{}", trial, rng.alpha_tag(5).to_ascii_uppercase());
+        ecs_decls.push_str(&format!("[{undeclared}(3)]\npub struct EcsLoose{trial} {{}}\n"));
+
         let w_src = format!(
             r#"
             {ecs_decls}
             [{}]
             pub fn target_fn_{trial}(x: i64) -> i64 {{ return x; }}
+
+            pub struct {custom_rule}Attr : IEcsRule<i64>, IValue {{ pub weight: i32; }}
+
+            {meta_attr_decls}
 
             [Clamp(50)]
             pub interface IBadIface{trial} {{}}
@@ -831,7 +856,17 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
         )
         .as_int()
         .unwrap_or(-1);
-        assert_eq!(got_ecs, ecs_sys_cnt as i64);
+        assert_eq!(got_ecs, ecs_sys_cnt as i64 + 1, "[Rule] sites plus the declared custom IEcsRule attribute");
+        let got_loose = run_vm_with_registry(
+            &format!(
+                "{}\nclassify_attr_pillar(\"{undeclared}\", __engine(\"ast_node_count\"));\n",
+                weaver_src
+            ),
+            &mut w_reg,
+        )
+        .as_int()
+        .unwrap_or(-99);
+        assert_eq!(got_loose, -1, "an attribute with no declaration has no pillar");
         assert!(
             w_reg.diagnostics.iter().any(|d| d.message.contains("ATTR001")),
             "Must emit ATTR001 for reactive attribute on interface"

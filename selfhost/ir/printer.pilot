@@ -78,19 +78,53 @@ pub fn parse_ir_find_next_line(text: str, start: usize) -> str {
     return rem;
 }
 
+// Strips leading spaces from one line of textual IR.
+fn parse_ir_strip_indent(line: str) -> str {
+    var i = 0;
+    let n = line.len();
+    while i < n && line.byte_at(i) == 32 {
+        i = i + 1;
+    }
+    return line.slice(i, n);
+}
+
+// True when `line` is a block header as printed by `print_block_header`:
+// `block<digits>(...):`.
+pub fn parse_ir_is_block_header(line: str) -> bool {
+    let t = parse_ir_strip_indent(line);
+    if !t.starts_with("block") || !t.ends_with("):") {
+        return false;
+    }
+    var i = 5;
+    let n = t.len();
+    var digits = 0;
+    while i < n && t.byte_at(i) >= 48 && t.byte_at(i) <= 57 {
+        i = i + 1;
+        digits = digits + 1;
+    }
+    return digits > 0 && i < n && t.byte_at(i) == 40;
+}
+
+// True when `line` is an instruction as printed by `print_instruction`:
+// indented and terminated by `;`.
+pub fn parse_ir_is_instruction(line: str) -> bool {
+    if !line.starts_with("  ") {
+        return false;
+    }
+    let t = parse_ir_strip_indent(line);
+    return t.len() > 1 && t.ends_with(";");
+}
+
 pub fn parse_ir_count_blocks(text: str) -> u32 {
     var count: u32 = 0;
     var i = 0;
     let n = text.len();
     while i < n {
-        let rem = text.slice(i, n);
-        let p = rem.find("block");
-        if p >= 0 {
+        let line = parse_ir_find_next_line(text, i);
+        if parse_ir_is_block_header(line) {
             count = count + 1;
-            i = i + p + 5;
-        } else {
-            break;
         }
+        i = i + line.len() + 1;
     }
     return count;
 }
@@ -100,14 +134,11 @@ pub fn parse_ir_count_instructions(text: str) -> u32 {
     var i = 0;
     let n = text.len();
     while i < n {
-        let rem = text.slice(i, n);
-        let p = rem.find(";");
-        if p >= 0 {
+        let line = parse_ir_find_next_line(text, i);
+        if parse_ir_is_instruction(line) {
             count = count + 1;
-            i = i + p + 1;
-        } else {
-            break;
         }
+        i = i + line.len() + 1;
     }
     return count;
 }

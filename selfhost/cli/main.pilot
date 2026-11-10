@@ -185,30 +185,6 @@ pub fn default_command_registry() -> CommandRegistry {
 // Backward-Compatible Facade APIs
 // ------------------------------------------------------------------------------
 
-pub pure fn cli_help_banner() -> str {
-    return "Pilot Programming Language Compiler & Toolchain (v1.1.51)\n" +
-           "Usage: pilot <command> [options] [arguments]\n\n" +
-           "Commands:\n" +
-           "  run <file.pilot> [args...]      Execute Pilot program via PilVM v3 / Native AOT\n" +
-           "  build <file.pilot> [flags]      Compile Pilot program to Native/LLVM/C/WASM/GPU\n" +
-           "  check <file.pilot>              Verify syntax, type safety, and comptime\n" +
-           "  fmt <file.pilot> [--write]      Format source code according to Pilot style\n" +
-           "  test [filter]                   Run integrated test suite or differential tests\n" +
-           "  repl                            Start interactive Name-Blind Pilot REPL\n" +
-           "  pkg <init|add|rm|resolve|audit> Manage packages and dependencies\n" +
-           "  venv <init|activate|list>       Manage isolated virtual environments\n" +
-           "  debug [--dap] <file.pilot>      Launch VmHook-stepped debugger or DAP server\n" +
-           "  lsp                             Start resident PilVM Language Server\n" +
-           "  perf <profile|analyze|opt>      Profile and optimize code performance\n" +
-           "  compile <file.pilot> [-o out]   Compile source into .pilc v3 bytecode binary\n" +
-           "  tree [file.pilot] [flags]       Display visual dependency tree of imports or packages\n" +
-           "  deps <tree|list|check> [file]   Inspect, list, and verify dependencies\n" +
-           "  map [file.pilot] [flags]        Display visual symbol map of namespaces, classes, fns\n" +
-           "  gate [--full|--only|--json]     Run pure-Pilot architectural & bootstrap gates\n" +
-           "  ide-sync                        Synchronize VS Code extension grammar and schemas\n" +
-           "  completions <shell>             Generate shell completion script (bash, zsh, fish, pwsh)";
-}
-
 pub pure fn resolve_cli_subcommand(cmd: str) -> i64 {
     let reg = default_command_registry();
     let idx = spec_registry_find_by_name(reg, cmd);
@@ -297,5 +273,7 @@ pub fn run_cli_entry(raw_args_line: str) -> str {
         return out;
     }
 
-    return "0";
+    // Every other registered command parses and validates its flags above,
+    // but has no handler yet.
+    return seam("cli.command_handler", "registered commands other than run, gate, emit, help, version, schema-json and completions have no handler (ICliHandler) yet");
 }

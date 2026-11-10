@@ -110,34 +110,86 @@ pub var fn guardian_add_allowed_env(var ref self: ComptimeGuardian, env_var: str
 // 4. Security & Sandbox Invariant Checkers
 // ------------------------------------------------------------------------------
 
-fn str_contains_sub(haystack: str, needle: str) -> bool {
-    let hl = haystack.len();
-    let nl = needle.len();
-    if nl == 0 { return true; }
-    if nl > hl { return false; }
+/// Whether `path` names a location outside the package: an absolute POSIX
+/// path, a Windows drive (`C:`) or a UNC path (`\\host`).
+pub pure fn is_host_absolute_path(path: str) -> bool {
+    if path.len() == 0 { return false; }
+    let b0 = path.byte_at(0);
+    if b0 == 47 || b0 == 92 { return true; } // '/' or '\'
+    if path.len() >= 2 && path.byte_at(1) == 58 { // 'X:'
+        return (b0 >= 65 && b0 <= 90) || (b0 >= 97 && b0 <= 122);
+    }
+    return false;
+}
+
+/// Whether any `/`- or `\`-separated segment of `path` is `..`.
+pub pure fn has_parent_segment(path: str) -> bool {
+    var seg_start = 0;
     var i = 0;
-    while i + nl <= hl {
-        if haystack.slice(i, i + nl) == needle { return true; }
+    let n = path.len();
+    while i <= n {
+        let at_sep = i == n || path.byte_at(i) == 47 || path.byte_at(i) == 92;
+        if at_sep {
+            if i - seg_start == 2 && path.slice(seg_start, i) == ".." { return true; }
+            seg_start = i + 1;
+        }
         i = i + 1;
     }
     return false;
 }
 
+/// Glob match over `/`-separated paths: `*` matches within one segment,
+/// `**` matches any number of whole segments (including none).
+pub pure fn glob_matches(glob: str, path: str) -> bool {
+    return glob_match_at(glob, 0, path, 0);
+}
+
+fn glob_match_at(glob: str, gi: i64, path: str, pi: i64) -> bool {
+    let gn = glob.len();
+    let pn = path.len();
+    if gi == gn { return pi == pn; }
+    let g = glob.byte_at(gi);
+    if g == 42 { // '*'
+        let double = gi + 1 < gn && glob.byte_at(gi + 1) == 42;
+        if double {
+            // `**/` may match zero segments; `**` may cross separators.
+            var next = gi + 2;
+            if next < gn && glob.byte_at(next) == 47 {
+                if glob_match_at(glob, next + 1, path, pi) { return true; }
+            }
+            var k = pi;
+            while k <= pn {
+                if glob_match_at(glob, next, path, k) { return true; }
+                k = k + 1;
+            }
+            return false;
+        }
+        var k = pi;
+        while k <= pn {
+            if glob_match_at(glob, gi + 1, path, k) { return true; }
+            if k < pn && path.byte_at(k) == 47 { return false; }
+            k = k + 1;
+        }
+        return false;
+    }
+    if pi == pn { return false; }
+    if g != path.byte_at(pi) { return false; }
+    return glob_match_at(glob, gi + 1, path, pi + 1);
+}
+
 pub var fn guardian_check_fs_read(var ref self: ComptimeGuardian, path: str) -> str {
-    // 1. Path traversal guard: block ".."
-    if str_contains_sub(path, "..") {
+    // 1. Path traversal guard: block any ".." segment
+    if has_parent_segment(path) {
         let diag = format_ctime001(path, "path traversal '..' forbidden");
         self.diagnostics.push(diag);
         return diag;
     }
 
-    // 2. Absolute system path guard: block "/etc" or root access
-    if path.len() > 0 && path.byte_at(0) == 47 { // '/'
-        if str_contains_sub(path, "/etc/") || str_contains_sub(path, "/proc/") || str_contains_sub(path, "/sys/") {
-            let diag = format_ctime001(path, "access to host system directory forbidden");
-            self.diagnostics.push(diag);
-            return diag;
-        }
+    // 2. Reads stay inside the package: no absolute host paths
+    if is_host_absolute_path(path) {
+        let diag = format_ctime001(path, "absolute host path outside the package forbidden");
+        self.diagnostics.push(diag);
+        return diag;
     }
 
     // 3. Capability check: FsRead
@@ -145,6 +197,24 @@ pub var fn guardian_check_fs_read(var ref self: ComptimeGuardian, path: str) -> 
         let diag = format_ctime001(path, "filesystem read capability not granted");
         self.diagnostics.push(diag);
         return diag;
+    }
+
+    // 4. Path-glob allowlist, when one is declared
+    if self.allowed_globs.len() > 0 {
+        var allowed = false;
+        var gi = 0;
+        while gi < self.allowed_globs.len() {
+            if glob_matches(self.allowed_globs[gi], path) {
+                allowed = true;
+                break;
+            }
+            gi = gi + 1;
+        }
+        if !allowed {
+            let diag = format_ctime001(path, "path not matched by any allowed read glob");
+            self.diagnostics.push(diag);
+            return diag;
+        }
     }
 
     self.accessed_files.push(path);
@@ -196,17 +266,37 @@ pub var fn guardian_allocate_heap(var ref self: ComptimeGuardian, bytes: usize) 
     return "";
 }
 
+/// The manifest name of one capability bit (`fs.read`, `net`, ..).
+pub pure fn cap_bit_name(bit: u32) -> str {
+    if bit == cap_fs_read()    { return "fs.read"; }
+    if bit == cap_fs_write()   { return "fs.write"; }
+    if bit == cap_net()        { return "net"; }
+    if bit == cap_env()        { return "env"; }
+    if bit == cap_subprocess() { return "subprocess"; }
+    if bit == cap_ffi()        { return "ffi"; }
+    return "";
+}
+
+/// CTIME006 naming the lowest capability bit the dependency asks for that
+/// the root package does not grant; empty when every bit is granted.
 pub pure fn guardian_check_dependency_grant(root_mask: u32, dep_mask: u32, dep_name: str) -> str {
-    if (dep_mask & root_mask) != dep_mask {
-        var unapproved = "privileged capabilities";
-        if (dep_mask & cap_fs_read()) != 0 && (root_mask & cap_fs_read()) == 0 {
-            unapproved = "fs.read";
-        } else if (dep_mask & cap_net()) != 0 && (root_mask & cap_net()) == 0 {
-            unapproved = "net";
-        } else if (dep_mask & cap_subprocess()) != 0 && (root_mask & cap_subprocess()) == 0 {
-            unapproved = "subprocess";
+    let missing = dep_mask & (cap_all() ^ (root_mask & cap_all()));
+    var bit: u32 = 1;
+    while bit <= cap_all() {
+        if (missing & bit) != 0 {
+            return format_ctime006(dep_name, cap_bit_name(bit));
         }
-        return format_ctime006(dep_name, unapproved);
+        bit = bit << 1;
+    }
+    if (dep_mask & (cap_all() ^ 0xFFFFFFFF)) != 0 {
+        return format_ctime006(dep_name, "unknown capability bits");
     }
     return "";
+}
+
+/// Runs a unit's `comptime` blocks in the seed VM under `policy`: fuel and
+/// heap limits armed, and every file, network, process, clock and env
+/// intrinsic routed through the guardian checks above.
+pub fn comptime_run_sandboxed(policy: ComptimePolicy, unit_path: str) -> str {
+    return seam("comptime.run_sandboxed", "the seed VM runs comptime blocks with no policy, fuel limit or intrinsic gating; arrives with F3");
 }

@@ -8,29 +8,32 @@
 
 pub pkg std.serde.json;
 
+use core.derive.ITypeWeaverAttribute;
+use core.derive.IFieldWeaverAttribute;
+
 // JSON Attributes
 [Layout(c_abi)]
-pub struct JsonAttr : IValue {
+pub struct JsonAttr : ITypeWeaverAttribute, IValue {
     pub naming: str;
     pub weight: i32;
     pub static pure fn create() -> JsonAttr => JsonAttr { naming: "camelCase", weight: 100 };
 }
 
 [Layout(c_abi)]
-pub struct JsonRenameAttr : IValue {
+pub struct JsonRenameAttr : IFieldWeaverAttribute, IValue {
     pub wire_name: str;
     pub weight: i32;
     pub static pure fn named(name: str) -> JsonRenameAttr => JsonRenameAttr { wire_name: name, weight: 50 };
 }
 
 [Layout(c_abi)]
-pub struct JsonSkipAttr : IValue {
+pub struct JsonSkipAttr : IFieldWeaverAttribute, IValue {
     pub weight: i32;
     pub static pure fn create() -> JsonSkipAttr => JsonSkipAttr { weight: 50 };
 }
 
 [Layout(c_abi)]
-pub struct JsonFlattenAttr : IValue {
+pub struct JsonFlattenAttr : IFieldWeaverAttribute, IValue {
     pub weight: i32;
     pub static pure fn create() -> JsonFlattenAttr => JsonFlattenAttr { weight: 50 };
 }
@@ -252,7 +255,15 @@ pub fn derive_json_serializer(type_name: str, fields: List<JsonFieldMeta>, cfg: 
         let f = fields.get(i);
         if !f.is_skip {
             let w_name = if f.wire_name.len() > 0 { f.wire_name } else { apply_case_style(f.name, cfg.case_style) };
-            if f.is_optional && cfg.omit_none_fields {
+            if f.is_flatten {
+                // [JsonFlatten]: splice the inner object's members into this one.
+                out = out + "        let inner_" + f.name + " = self." + f.name + ".to_json();\n";
+                out = out + "        if inner_" + f.name + ".len() > 2 {\n";
+                out = out + "            if has_prop { res = res + \",\"; }\n";
+                out = out + "            res = res + inner_" + f.name + ".slice(1, inner_" + f.name + ".len() - 1);\n";
+                out = out + "            has_prop = true;\n";
+                out = out + "        }\n";
+            } else if f.is_optional && cfg.omit_none_fields {
                 out = out + "        if self." + f.name + " != null {\n";
                 out = out + "            if has_prop { res = res + \",\"; }\n";
                 out = out + "            res = res + \"\\\"" + w_name + "\\\":\" + to_json_val(self." + f.name + ");\n";
@@ -278,18 +289,53 @@ pub fn derive_json_deserializer(type_name: str, fields: List<JsonFieldMeta>, cfg
     if l_err.len() > 0 {
         return l_err;
     }
+    // The generated body mirrors `derive_json_serializer`: every non-skipped
+    // field is read back from the wire key the serializer writes. Skipped
+    // fields are left to their declared field defaults.
     var out = "impl IJsonDeserializable<" + type_name + "> for " + type_name + " {\n";
     out = out + "    pub static fn from_json(json_str: str) -> res<" + type_name + ", str> {\n";
-    out = out + "        // Zero-reflection parser synthesized for " + type_name + "\n";
+    out = out + "        let parsed = json_parse(json_str);\n";
+    out = out + "        if parsed.is_err {\n";
+    out = out + "            return err(parsed.err_val.message);\n";
+    out = out + "        }\n";
+    out = out + "        let root = parsed.ok_val;\n";
+    out = out + "        if root.kind != JsonKind::Object {\n";
+    out = out + "            return err(\"expected a JSON object for " + type_name + "\");\n";
+    out = out + "        }\n";
+    if cfg.tag_field.len() > 0 {
+        out = out + "        if root.get(\"" + cfg.tag_field + "\").stringify() != \"\\\"" + type_name + "\\\"\" {\n";
+        out = out + "            return err(\"tag '" + cfg.tag_field + "' does not name " + type_name + "\");\n";
+        out = out + "        }\n";
+    }
     let n = fields.len();
     var i = 0;
     while i < n {
         let f = fields.get(i);
-        let wire = if f.wire_name.len() > 0 { f.wire_name } else { apply_case_style(f.name, cfg.case_style) };
-        out = out + "        // populate field: " + f.name + " from wire key: " + wire + "\n";
+        if !f.is_skip && !f.is_flatten && !f.is_optional {
+            let wire = if f.wire_name.len() > 0 { f.wire_name } else { apply_case_style(f.name, cfg.case_style) };
+            out = out + "        if !root.has(\"" + wire + "\") {\n";
+            out = out + "            return err(\"missing field '" + wire + "' for " + type_name + "\");\n";
+            out = out + "        }\n";
+        }
         i = i + 1;
     }
-    out = out + "        return " + type_name + ".default();\n";
+    out = out + "        return ok(" + type_name + " {\n";
+    i = 0;
+    while i < n {
+        let f = fields.get(i);
+        if !f.is_skip {
+            let wire = if f.wire_name.len() > 0 { f.wire_name } else { apply_case_style(f.name, cfg.case_style) };
+            if f.is_flatten {
+                out = out + "            " + f.name + ": " + f.type_name + ".from_json_value(root),\n";
+            } else if f.is_optional {
+                out = out + "            " + f.name + ": if root.has(\"" + wire + "\") { from_json_val(root.get(\"" + wire + "\")) } else { none },\n";
+            } else {
+                out = out + "            " + f.name + ": from_json_val(root.get(\"" + wire + "\")),\n";
+            }
+        }
+        i = i + 1;
+    }
+    out = out + "        });\n";
     out = out + "    }\n";
     out = out + "}\n";
     return out;

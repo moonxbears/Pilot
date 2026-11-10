@@ -405,82 +405,110 @@ fn test_semantic_info_and_optimization_diagnostics() {
     );
 }
 
-#[test]
-fn test_tier_1_1_type_and_declaration_diagnostics() {
-    // 1. FLOW001: Missing return value in non-void function
-    let res = check_src("fn bad_noreturn() -> i64 { let x = 42; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("FLOW001")), "Expected FLOW001 on missing return: {:?}", res.diagnostics);
+/// Codes of the diagnostics `res` reports, failing if the analyzer faulted.
+fn codes_of(res: &pilot_analysis::AnalysisResult) -> Vec<String> {
+    assert!(res.physics.analyzer_error.is_none(), "analyzer faulted: {:?}", res.physics.analyzer_error);
+    res.diagnostics.iter().map(|d| d.code.clone()).collect()
+}
 
-    // 2. FLOW002: Constructor return disallowed
-    let res = check_src("struct S { self() { return 1; } }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("FLOW002")), "Expected FLOW002 on constructor return: {:?}", res.diagnostics);
+fn count_code(res: &pilot_analysis::AnalysisResult, code: &str) -> usize {
+    codes_of(res).iter().filter(|c| c.as_str() == code).count()
+}
 
-    // 3. FLOW003: Break statement outside loop
-    let res = check_src("fn bad_break() { break; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("FLOW003")), "Expected FLOW003 on break outside loop: {:?}", res.diagnostics);
-
-    // 4. FLOW004: Continue statement outside loop
-    let res = check_src("fn bad_continue() { continue; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("FLOW004")), "Expected FLOW004 on continue outside loop: {:?}", res.diagnostics);
-
-    // 5. FLOW005: Non-exhaustive pattern match in switch
-    let res = check_src("fn bad_sw(x: i64) -> i64 { return switch x { case 1: 10, case 2: 20 }; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("FLOW005")), "Expected FLOW005 on switch without wildcard: {:?}", res.diagnostics);
-
-    // 6. DECL001: Undeclared identifier
-    let res = check_src("fn test_decl() { let x = undeclared_sym; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("DECL001")), "Expected DECL001 on undeclared identifier: {:?}", res.diagnostics);
-
-    // 7. DECL002: Duplicate member declaration in struct scope
-    let res = check_src("struct DupS { pub x: i64; pub x: i64; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("DECL002")), "Expected DECL002 on duplicate struct field: {:?}", res.diagnostics);
-
-    // 8. DECL003: Local variable shadowing
-    let res = check_src("fn test_shadow(x: i64) { let shadow_x = 10; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("DECL003")), "Expected DECL003 on variable shadowing: {:?}", res.diagnostics);
-
-    // 9. DECL004: Reassignment to immutable let binding
-    let res = check_src("fn test_immut() { let immut = 10; immut = 20; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("DECL004")), "Expected DECL004 on immutable let reassignment: {:?}", res.diagnostics);
-
-    // 10. TYPE001: Type mismatch between incompatible layouts (1-byte bool vs 8-byte int)
-    let res = check_src("fn test_mismatch() { let b: bool = 123; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("TYPE001")), "Expected TYPE001 on incompatible layout assignment: {:?}", res.diagnostics);
-
-    // 11. TYPE002: Undefined type name
-    let res = check_src("fn test_undef(x: undefined_type) {}");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("TYPE002")), "Expected TYPE002 on undefined type annotation: {:?}", res.diagnostics);
-
-    // 12. TYPE003: Invalid type cast
-    let res = check_src("fn test_badcast() { let x = badcast as i64; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("TYPE003")), "Expected TYPE003 on invalid type cast: {:?}", res.diagnostics);
+/// Source text of every `code` diagnostic in `src`, in report order.
+fn flagged_text(src: &str, code: &str) -> Vec<String> {
+    let res = check_src(src);
+    let _ = codes_of(&res);
+    res.diagnostics
+        .iter()
+        .filter(|d| d.code == code)
+        .map(|d| src[d.span.start as usize..d.span.end as usize].to_string())
+        .collect()
 }
 
 #[test]
-fn test_tier_1_2_perceus_ownership_and_move_safety_diagnostics() {
-    // 1. OWN001: Use of moved value
-    let res = check_src("fn test_moved() { let x = moved_buf; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("OWN001")), "Expected OWN001 on use of moved value: {:?}", res.diagnostics);
+fn test_tier_1_1_flow_and_declaration_diagnostics() {
+    // FLOW002: Constructor return disallowed
+    let res = check_src("struct S { self() { return 1; } }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("FLOW002")), "Expected FLOW002 on constructor return: {:?}", res.diagnostics);
 
-    // 2. OWN002: Multiple mutable borrows in same call
-    let res = check_src("fn bad_call() { call(borrow_conflict, borrow_conflict); }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("OWN002")), "Expected OWN002 on multiple mutable borrows: {:?}", res.diagnostics);
+    // FLOW003: no loop or switch around `break` in its function.
+    let res = check_src("fn quit_early() { break; }");
+    assert_eq!(count_code(&res, "FLOW003"), 1, "{:?}", res.diagnostics);
+    let res = check_src("fn quit_early() { while true { break; } }");
+    assert_eq!(count_code(&res, "FLOW003"), 0, "{:?}", res.diagnostics);
+    let res = check_src("fn quit_early() { loop { break; } }");
+    assert_eq!(count_code(&res, "FLOW003"), 0, "{:?}", res.diagnostics);
+    // A loop outside a closure does not enclose a `break` inside the closure.
+    let res = check_src("fn outer() { while true { let stop = () => { break; }; stop(); break; } }");
+    assert_eq!(count_code(&res, "FLOW003"), 1, "{:?}", res.diagnostics);
 
-    // 3. OWN003: Cannot mutate value while active reference view exists
-    let res = check_src("fn test_immature() { immature_borrow = 10; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("OWN003")), "Expected OWN003 on mutating immature borrow: {:?}", res.diagnostics);
+    // FLOW004: no loop around `continue` in its function.
+    let res = check_src("fn skip_ahead() { continue; }");
+    assert_eq!(count_code(&res, "FLOW004"), 1, "{:?}", res.diagnostics);
+    let res = check_src("fn skip_ahead() { for i in 0 .. 3 { continue; } }");
+    assert_eq!(count_code(&res, "FLOW004"), 0, "{:?}", res.diagnostics);
 
-    // 4. ESCAPE001: Passing reference view or scoped guard across [Cue] boundary
-    let res = check_src("[Cue] fn cue_task(w: i64) {} fn caller() { cue_task(view_window); }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("ESCAPE001")), "Expected ESCAPE001 on cue view escape: {:?}", res.diagnostics);
+    // FLOW005: Non-exhaustive pattern match in switch
+    let res = check_src("fn bad_sw(x: i64) -> i64 { return switch x { case 1: 10, case 2: 20 }; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("FLOW005")), "Expected FLOW005 on switch without wildcard: {:?}", res.diagnostics);
 
-    // 5. ESCAPE002: Storing reference view into heap container
-    let res = check_src("fn test_esc2() { esc2_holder(view_window); }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("ESCAPE002")), "Expected ESCAPE002 on container escape: {:?}", res.diagnostics);
+    // DECL002: Duplicate member declaration in struct scope
+    let res = check_src("struct DupS { pub x: i64; pub x: i64; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("DECL002")), "Expected DECL002 on duplicate struct field: {:?}", res.diagnostics);
 
-    // 6. ESCAPE003: Scoped guard or local reference view escapes stack frame
-    let res = check_src("fn test_esc3() -> i64 { return esc3_local; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("ESCAPE003")), "Expected ESCAPE003 on returning local view: {:?}", res.diagnostics);
+    // DECL004: Reassignment to immutable let binding
+    let res = check_src("fn test_immut() { let immut = 10; immut = 20; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("DECL004")), "Expected DECL004 on immutable let reassignment: {:?}", res.diagnostics);
+}
+
+#[test]
+fn test_tier_1_2_unused_bindings_and_shadowing() {
+    // `scratch` is never read and `spare` is never read; every other binding is.
+    // A name that merely starts with "unused" but is read is not reported.
+    let src = "fn tally(limit: i64, spare: i64) -> i64 {\n    let total = limit * 2;\n    let scratch = 7;\n    var count = 0;\n    count = count + total;\n    let unused_name = 1;\n    return count + unused_name;\n}\n";
+    let unused_locals = flagged_text(src, "UNUSED001");
+    assert_eq!(unused_locals.len(), 1, "{:?}", unused_locals);
+    assert!(unused_locals[0].starts_with("let scratch"), "{:?}", unused_locals);
+    let unused_params = flagged_text(src, "UNUSED004");
+    assert_eq!(unused_params.len(), 1, "{:?}", unused_params);
+    assert!(unused_params[0].starts_with("spare"), "{:?}", unused_params);
+    assert!(flagged_text(src, "SHADOW001").is_empty());
+
+    // A parameter read only inside a closure is used; a closure parameter
+    // that is never read is reported.
+    let src = "fn lift(base: i64) -> i64 {\n    let add = (v, w) => v + base;\n    return add(1, 2);\n}\n";
+    assert!(flagged_text(src, "UNUSED001").is_empty());
+    let params = flagged_text(src, "UNUSED004");
+    assert_eq!(params.len(), 1, "{:?}", params);
+    assert!(params[0].starts_with('w'), "{:?}", params);
+
+    // Bodiless interface methods and `_` names are not reported.
+    let src = "interface IShape { fn area(scale: i64) -> i64; }\nfn keep(_ignored: i64) -> i64 { let _tmp = 1; return 1; }\n";
+    assert!(flagged_text(src, "UNUSED004").is_empty());
+    assert!(flagged_text(src, "UNUSED001").is_empty());
+
+    // A `let` in a nested block hides a parameter of the function.
+    let src = "fn scale(x: i64) -> i64 {\n    if x > 0 {\n        let x = 2;\n        return x;\n    }\n    return x;\n}\n";
+    let shadows = flagged_text(src, "SHADOW001");
+    assert_eq!(shadows.len(), 1, "{:?}", shadows);
+    assert!(shadows[0].starts_with("let x = 2"), "{:?}", shadows);
+}
+
+#[test]
+fn test_tier_1_3_shadowing_conformance_program() {
+    // tests/conformance/shadowing.pilot: the three inner `let x` hide the
+    // outer `x`; `let y = y + 1;` re-declares in the same block, which is not
+    // shadowing an enclosing scope. Every binding is read.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let src = std::fs::read_to_string(root.join("tests/conformance/shadowing.pilot")).expect("read shadowing.pilot");
+    let shadows = flagged_text(&src, "SHADOW001");
+    assert_eq!(shadows.len(), 3, "{:?}", shadows);
+    assert!(shadows[0].starts_with("let x = i * 10"), "{:?}", shadows);
+    assert!(shadows[1].starts_with("let x = \"inner\""), "{:?}", shadows);
+    assert!(shadows[2].starts_with("let x = x + 1"), "{:?}", shadows);
+    assert!(flagged_text(&src, "UNUSED001").is_empty());
+    assert!(flagged_text(&src, "UNUSED004").is_empty());
 }
 
 #[test]

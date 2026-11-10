@@ -87,6 +87,7 @@ impl BytecodeCompiler {
             NodeKind::ExprStmt => self.compile_node(arena, NodeId(node.lhs)),
             NodeKind::MapExpr => self.compile_map_literal(arena, node.lhs, node.rhs),
             NodeKind::ListExpr => self.compile_list_literal(arena, node.lhs, node.rhs),
+            NodeKind::CallExpr if Self::is_quoted_call(&node) => self.compile_quoted_call(),
             NodeKind::CallExpr => self.compile_call(arena, node.lhs, node.rhs),
             NodeKind::UnitLit => self.compile_unit_lit(arena, node.lhs),
             NodeKind::CallArg => self.compile_stray_named_arg(arena, node.lhs),

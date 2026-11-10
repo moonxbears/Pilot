@@ -73,32 +73,35 @@ pub fn http_service_def_new(name: str, base_path: str, ver: str) -> HttpServiceD
 // 3. Route Registration & Validation
 // ------------------------------------------------------------------------------
 
-fn contains_char_byte(s: str, target: u8) -> bool {
+/// GEN001 reason for a path template, or empty when it is well formed:
+/// every `{` closes before the next `{` or `/`, and names are non-empty.
+pub pure fn route_template_error(p: str) -> str {
+    var open_at = -1;
     var i = 0;
-    while i < s.len() {
-        if s.byte_at(i) == target { return true; }
+    while i < p.len() {
+        let b = p.byte_at(i);
+        if b == 123 {
+            if open_at >= 0 { return "nested path parameter brace"; }
+            open_at = i;
+        } else if b == 125 {
+            if open_at < 0 { return "unmatched closing path parameter brace"; }
+            if i == open_at + 1 { return "empty parameter name '{}'"; }
+            open_at = -1;
+        } else if b == 47 && open_at >= 0 {
+            return "unclosed path parameter brace";
+        }
         i = i + 1;
     }
-    return false;
+    if open_at >= 0 { return "unclosed path parameter brace"; }
+    return "";
 }
 
 pub fn http_service_add_route(var ref self: HttpServiceDef, route: HttpRouteDef) -> str {
     // 1. Validate route path parameter syntax
     let p = route.path_template;
-    let has_open = contains_char_byte(p, 123);  // '{'
-    let has_close = contains_char_byte(p, 125); // '}'
-
-    if (has_open && !has_close) || (!has_open && has_close) {
-        return format_gen001(self.name, p, "unclosed path parameter brace");
-    }
-
-    // Check for empty "{}"
-    var i = 0;
-    while i + 1 < p.len() {
-        if p.byte_at(i) == 123 && p.byte_at(i + 1) == 125 {
-            return format_gen001(self.name, p, "empty parameter name '{}'");
-        }
-        i = i + 1;
+    let reason = route_template_error(p);
+    if reason.len() > 0 {
+        return format_gen001(self.name, p, reason);
     }
 
     // 2. Validate payload JSON contract
@@ -114,42 +117,110 @@ pub fn http_service_add_route(var ref self: HttpServiceDef, route: HttpRouteDef)
 // 4. OpenAPI 3.1 Specification Generator
 // ------------------------------------------------------------------------------
 
-pub fn http_service_generate_openapi(svc: ref<HttpServiceDef>) -> str {
-    var json = "{\n";
-    json = json + "  \"openapi\": \"3.1.0\",\n";
-    json = json + "  \"info\": {\n";
-    json = json + "    \"title\": \"" + svc.name + "\",\n";
-    json = json + "    \"version\": \"" + svc.version + "\"\n";
-    json = json + "  },\n";
-    json = json + "  \"paths\": {\n";
-
+/// `text` as the body of a JSON string literal (RFC 8259 section 7).
+pub pure fn json_escape(text: str) -> str {
+    var out = "";
     var i = 0;
-    while i < svc.routes.len() {
-        let r = svc.routes[i];
-        let method_lower = if r.method == "POST" { "post" } else if r.method == "GET" { "get" } else if r.method == "PUT" { "put" } else { "delete" };
-        json = json + "    \"" + r.path_template + "\": {\n";
-        json = json + "      \"" + method_lower + "\": {\n";
-        json = json + "        \"operationId\": \"" + r.handler_fn + "\",\n";
-        json = json + "        \"responses\": {\n";
-        json = json + "          \"200\": { \"description\": \"Successful response\" },\n";
-        json = json + "          \"422\": { \"description\": \"RFC 9457 Validation Problem\" }\n";
-        json = json + "        }\n";
-        json = json + "      }\n";
-        json = json + "    }";
-        if i + 1 < svc.routes.len() {
-            json = json + ",";
-        }
-        json = json + "\n";
+    while i < text.len() {
+        let b = text.byte_at(i);
+        if b == 34 { out = out + "\\\""; }
+        else if b == 92 { out = out + "\\\\"; }
+        else if b == 10 { out = out + "\\n"; }
+        else if b == 13 { out = out + "\\r"; }
+        else if b == 9 { out = out + "\\t"; }
+        else { out = out + text.slice(i, i + 1); }
         i = i + 1;
     }
+    return out;
+}
 
-    json = json + "  }\n";
-    json = json + "}";
+/// ASCII lower case, for OpenAPI operation keys (`get`, `post`, ..).
+pub pure fn ascii_lower(text: str) -> str {
+    var out = "";
+    var i = 0;
+    while i < text.len() {
+        let b = text.byte_at(i);
+        if b >= 65 && b <= 90 {
+            out = out + "abcdefghijklmnopqrstuvwxyz".slice(b - 65, b - 64);
+        } else {
+            out = out + text.slice(i, i + 1);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The `{name}` parameter names of a path template, in order.
+pub fn route_path_params(template: str) -> List<str> {
+    var names: List<str> = [];
+    var i = 0;
+    while i < template.len() {
+        if template.byte_at(i) == 123 {
+            var j = i + 1;
+            while j < template.len() && template.byte_at(j) != 125 { j = j + 1; }
+            names.push(template.slice(i + 1, j));
+            i = j;
+        }
+        i = i + 1;
+    }
+    return names;
+}
+
+[Workaround("seed.local_named_op", "the operation text is accumulated in `text`, not `op`")]
+fn openapi_operation(r: HttpRouteDef) -> str {
+    var text = "\"" + ascii_lower(r.method) + "\": { \"operationId\": \"" + json_escape(r.handler_fn) + "\"";
+    let params = route_path_params(r.path_template);
+    if params.len() > 0 {
+        text = text + ", \"parameters\": [";
+        var k = 0;
+        while k < params.len() {
+            if k > 0 { text = text + ", "; }
+            text = text + "{ \"name\": \"" + json_escape(params[k]) + "\", \"in\": \"path\", \"required\": true, \"schema\": { \"type\": \"string\" } }";
+            k = k + 1;
+        }
+        text = text + "]";
+    }
+    text = text + ", \"responses\": { \"default\": { \"description\": \"Response of " + json_escape(r.handler_fn) + "\" } } }";
+    return text;
+}
+
+/// An OpenAPI 3.1 document with one path item per distinct path template;
+/// routes sharing a template become operations of the same path item.
+pub fn http_service_generate_openapi(svc: ref<HttpServiceDef>) -> str {
+    var json = "{ \"openapi\": \"3.1.0\", \"info\": { \"title\": \"" + json_escape(svc.name) + "\", \"version\": \"" + json_escape(svc.version) + "\" }, \"paths\": {";
+    var first_path = true;
+    var i = 0;
+    while i < svc.routes.len() {
+        let path = svc.routes[i].path_template;
+        var seen = false;
+        var e = 0;
+        while e < i {
+            if svc.routes[e].path_template == path { seen = true; break; }
+            e = e + 1;
+        }
+        if !seen {
+            json = json + (if first_path { " " } else { ", " }) + "\"" + json_escape(path) + "\": { ";
+            first_path = false;
+            var first_op = true;
+            var k = i;
+            while k < svc.routes.len() {
+                if svc.routes[k].path_template == path {
+                    if !first_op { json = json + ", "; }
+                    json = json + openapi_operation(svc.routes[k]);
+                    first_op = false;
+                }
+                k = k + 1;
+            }
+            json = json + " }";
+        }
+        i = i + 1;
+    }
+    json = json + " } }";
     return json;
 }
 
 // ------------------------------------------------------------------------------
-// 5. Request Dispatch & RFC 9457 Problem JSON Response
+// 5. Request Routing & RFC 9457 Problem JSON Response
 // ------------------------------------------------------------------------------
 
 [Layout(c_abi)]
@@ -159,48 +230,109 @@ pub struct HttpResponse : IValue {
     pub body:         str;
 }
 
+/// An RFC 9457 problem document with type `about:blank`: the problem has no
+/// meaning beyond its HTTP status, and `title` should be the status phrase.
 pub pure fn format_rfc9457_problem_json(status: u16, title: str, detail: str) -> str {
-    return "{\"type\":\"https://pilot-lang.org/rfc9457/unprocessable-content\",\"title\":\"" + title + "\",\"status\":" + (status as str) + ",\"detail\":\"" + detail + "\"}";
+    return "{\"type\":\"about:blank\",\"title\":\"" + json_escape(title) + "\",\"status\":" + (status as str) + ",\"detail\":\"" + json_escape(detail) + "\"}";
 }
 
+pub pure fn http_problem_response(status: u16, title: str, detail: str) -> HttpResponse {
+    return HttpResponse {
+        status_code:  status,
+        content_type: "application/problem+json",
+        body:         format_rfc9457_problem_json(status, title, detail),
+    };
+}
+
+/// The route a request selects, with its path parameters bound.
+pub struct HttpRouteMatch : IObject {
+    pub path_matched:  bool;
+    pub route_index:   i64;
+    pub param_names:   List<str>;
+    pub param_values:  List<str>;
+}
+
+/// Matches `path` against `template` segment by segment; `{name}` binds
+/// one non-empty segment.
+pub fn route_template_bind(template: str, path: str, var ref names: List<str>, var ref values: List<str>) -> bool {
+    var ti = 0;
+    var pi = 0;
+    let tn = template.len();
+    let pn = path.len();
+    while ti < tn && pi < pn {
+        let tb = template.byte_at(ti);
+        if tb == 123 {
+            var te = ti;
+            while te < tn && template.byte_at(te) != 125 { te = te + 1; }
+            var pe = pi;
+            while pe < pn && path.byte_at(pe) != 47 { pe = pe + 1; }
+            if pe == pi { return false; }
+            names.push(template.slice(ti + 1, te));
+            values.push(path.slice(pi, pe));
+            ti = te + 1;
+            pi = pe;
+        } else {
+            if tb != path.byte_at(pi) { return false; }
+            ti = ti + 1;
+            pi = pi + 1;
+        }
+    }
+    return ti == tn && pi == pn;
+}
+
+/// Finds the route for `method` and `path`. `path_matched` is true when
+/// some route has this path, whatever its method (405 rather than 404).
+pub fn http_service_match_route(svc: ref<HttpServiceDef>, http_method: str, path: str) -> HttpRouteMatch {
+    var m = HttpRouteMatch { path_matched: false, route_index: -1, param_names: [], param_values: [] };
+    var i = 0;
+    while i < svc.routes.len() {
+        let r = svc.routes[i];
+        var names: List<str> = [];
+        var values: List<str> = [];
+        if route_template_bind(r.path_template, path, names, values) {
+            m.path_matched = true;
+            if r.method == http_method {
+                m.route_index = i as i64;
+                m.param_names = names;
+                m.param_values = values;
+                return m;
+            }
+        }
+        i = i + 1;
+    }
+    return m;
+}
+
+/// Routes a request: 404 or 405 problem responses when no route takes it,
+/// otherwise the matched route's handler answers.
 pub fn http_service_dispatch(
     svc: ref<HttpServiceDef>,
     http_method: str,
     path: str,
     body: str
 ) -> HttpResponse {
-    // 1. Contract / Validation check: e.g. total_cents > 0 check in request body
-    if http_method == "POST" && path == svc.base_path {
-        // If body specifies a negative or 0 total_cents
-        if body.len() > 0 && contains_char_byte(body, 45) { // '-'
-            let problem = format_rfc9457_problem_json(422, "Unprocessable Content", "contract violation: total_cents must be > 0");
-            return HttpResponse {
-                status_code:  422,
-                content_type: "application/problem+json",
-                body:         problem,
-            };
+    let m = http_service_match_route(svc, http_method, path);
+    if m.route_index < 0 {
+        if m.path_matched {
+            return http_problem_response(405, "Method Not Allowed", "no " + http_method + " route for '" + path + "'");
         }
-        // Valid POST order creation response
-        let resp_json = "{\"id\":1,\"customer_id\":42,\"total_cents\":2500,\"status\":\"created\"}";
-        return HttpResponse {
-            status_code:  201,
-            content_type: "application/json",
-            body:         resp_json,
-        };
+        return http_problem_response(404, "Not Found", "no route for '" + path + "'");
     }
+    return http_invoke_handler(svc, m, body);
+}
 
-    if http_method == "GET" && path.len() > svc.base_path.len() {
-        let resp_json = "{\"id\":1,\"customer_id\":42,\"total_cents\":2500,\"status\":\"confirmed\"}";
-        return HttpResponse {
-            status_code:  200,
-            content_type: "application/json",
-            body:         resp_json,
-        };
-    }
+/// Calls the handler function a route names, with its bound path parameters
+/// and decoded body, checking the handler's `requires` (422 on violation).
+pub fn http_invoke_handler(svc: ref<HttpServiceDef>, m: HttpRouteMatch, body: str) -> HttpResponse {
+    return seam("http.invoke_handler", "calling a [Service] handler by route needs attribute weaving of handler functions (M21, F4)");
+}
 
-    return HttpResponse {
-        status_code:  404,
-        content_type: "application/json",
-        body:         "{\"error\":\"Not Found\"}",
-    };
+// ------------------------------------------------------------------------------
+// 6. [Service] Attribute Weaving
+// ------------------------------------------------------------------------------
+
+/// The service definition `[Service]` and `[Get]`/`[Post]`/.. derive from the
+/// struct `type_name` and its methods.
+pub fn service_weave_struct(type_name: str) -> HttpServiceDef {
+    return seam("http.weave_service", "[Service] needs struct and method reflection from the type checker (F4) and a working attribute weaver (M21)");
 }

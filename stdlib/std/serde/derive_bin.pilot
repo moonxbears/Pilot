@@ -8,8 +8,10 @@
 
 pub pkg std.serde.bin;
 
+use core.derive.ITypeWeaverAttribute;
+
 [Layout(c_abi)]
-pub struct BinaryAttr : IValue {
+pub struct BinaryAttr : ITypeWeaverAttribute, IValue {
     pub weight: i32;
     pub static pure fn create() -> BinaryAttr => BinaryAttr { weight: 100 };
 }
@@ -39,16 +41,17 @@ pub struct BinFieldMeta : IValue {
 
 // LEB128 Varint Encoders & Decoders
 pub fn bin_encode_varint64(mut_val: i64) -> List<u8> {
+    // Unsigned LEB128 over the 64-bit two's-complement pattern, so negative
+    // values take ten bytes (the protobuf `int64` wire form).
     var out: List<u8> = [];
     var v = mut_val;
-    if v == 0 {
-        out.push(0);
-        return out;
-    }
-    while v > 0 {
+    var more = true;
+    while more {
         var byte_val = (v & 127) as u8;
-        v = v >> 7;
-        if v > 0 {
+        // Logical shift: clear the 7 sign bits an arithmetic shift copies in.
+        v = (v >> 7) & 144115188075855871;
+        more = v != 0;
+        if more {
             byte_val = byte_val | 128;
         }
         out.push(byte_val);
@@ -123,8 +126,32 @@ pub fn derive_binary_codecs(type_name: str, fields: List<BinFieldMeta>, lattice_
 
     out = out + "impl IBinaryDeserializable<" + type_name + "> for " + type_name + " {\n";
     out = out + "    pub static fn read_binary(bytes: slice<u8>, offset: var ref<usize>) -> res<" + type_name + ", str> {\n";
-    out = out + "        // Zero-reflection binary decoder\n";
-    out = out + "        return " + type_name + ".default();\n";
+    // The decoder reads the fields back in the order the encoder wrote them.
+    if lattice_bits == 0 {
+        out = out + "        return bytes.read_raw_pod<" + type_name + ">(offset);\n";
+    } else {
+        let m = fields.len();
+        var j = 0;
+        while j < m {
+            let f = fields.get(j);
+            if f.is_varint {
+                out = out + "        let " + f.name + " = bytes.read_varint<" + f.type_name + ">(offset)?;\n";
+            } else if f.is_big_endian {
+                out = out + "        let " + f.name + " = bytes.read_be<" + f.type_name + ">(offset)?;\n";
+            } else {
+                out = out + "        let " + f.name + " = bytes.read_le<" + f.type_name + ">(offset)?;\n";
+            }
+            j = j + 1;
+        }
+        out = out + "        return ok(" + type_name + " {";
+        j = 0;
+        while j < m {
+            let f = fields.get(j);
+            out = out + " " + f.name + ": " + f.name + ",";
+            j = j + 1;
+        }
+        out = out + " });\n";
+    }
     out = out + "    }\n";
     out = out + "}\n";
 

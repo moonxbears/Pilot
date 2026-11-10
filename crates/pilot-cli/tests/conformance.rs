@@ -14,6 +14,13 @@
 //!
 //! All mismatches are collected and reported together so one run shows the
 //! full state of the corpus.
+//!
+//! `tests/conformance/known_bugs/<name>.pilot` programs reproduce registered
+//! engine bugs (`bug_registry()` in `selfhost/gate/ledger/seams.pilot`). Their
+//! expectation files hold the correct output, so each must still fail. One
+//! that passes means its bug is fixed: the runner fails until the program is
+//! moved up into `tests/conformance/`, its registry entry is deleted, and its
+//! `[Workaround]`s are removed.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -94,16 +101,49 @@ fn run_case(root: &Path, program: &Path) -> CaseResult {
     CaseResult { name, problems }
 }
 
+fn programs_in(dir: &Path) -> Vec<PathBuf> {
+    let mut programs: Vec<PathBuf> = fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("pilot"))
+                .collect()
+        })
+        .unwrap_or_default();
+    programs.sort();
+    programs
+}
+
+#[test]
+fn known_bugs_still_reproduce() {
+    let root = workspace_root();
+    let registry = fs::read_to_string(root.join("selfhost/gate/ledger/seams.pilot"))
+        .expect("seam registry");
+    let mut report = String::new();
+    for program in programs_in(&root.join("tests/conformance/known_bugs")) {
+        let rel = program
+            .strip_prefix(&root)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if !registry.contains(&format!("\"{rel}\"")) {
+            report.push_str(&format!("{rel}: no bug_registry() entry names it as its repro\n"));
+        }
+        let case = run_case(&root, &program);
+        if case.problems.is_empty() {
+            report.push_str(&format!(
+                "{rel}: now gives the correct output, so its bug looks fixed. Move it up \
+                 into tests/conformance/, delete its bug_registry() entry and remove \
+                 every [Workaround] naming it\n"
+            ));
+        }
+    }
+    assert!(report.is_empty(), "{report}");
+}
+
 #[test]
 fn conformance_corpus() {
     let root = workspace_root();
-    let dir = root.join("tests/conformance");
-    let mut programs: Vec<PathBuf> = fs::read_dir(&dir)
-        .expect("tests/conformance directory")
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("pilot"))
-        .collect();
-    programs.sort();
+    let programs = programs_in(&root.join("tests/conformance"));
     assert!(!programs.is_empty(), "conformance corpus is empty");
 
     let results: Vec<CaseResult> = programs.iter().map(|p| run_case(&root, p)).collect();

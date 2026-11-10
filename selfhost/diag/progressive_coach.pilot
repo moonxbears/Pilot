@@ -157,9 +157,10 @@ pub fn analyze_struct_padding(
     }
     let cur_total = align_up_sz(cur_off, max_align);
 
-    // 2. Calculate optimal size (e.g. descending alignment: 8, then 4, then 2, then 1)
+    // 2. Calculate optimal size: fields placed by descending power-of-two
+    // alignment, starting from the widest alignment present.
     var opt_off: usize = 0;
-    var a = 8;
+    var a = max_align;
     while a >= 1 {
         var j = 0;
         while j < fields.len() {
@@ -183,13 +184,9 @@ pub fn analyze_struct_padding(
     return "";
 }
 
-pub pure fn analyze_loop_clone(
-    in_loop: bool,
-    var_name: str,
-    type_name: str
-) -> str {
-    if in_loop {
-        return format_perf001(var_name, type_name);
-    }
-    return "";
+/// PERF001 for every `.clone()` of an owned (0b10) value inside a loop body of
+/// the named function where a `ref<T>` borrow would do. Needs the function's
+/// loops and calls in PilIR.
+pub fn analyze_loop_clones(fn_name: str) -> List<str> {
+    return seam("coach.loop_clones", "PilIR loop bodies and clone calls to scan arrive in F5");
 }

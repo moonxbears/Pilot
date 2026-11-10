@@ -114,13 +114,94 @@ pub fn rust_synthesize_dyn_vtable(trait_decl: ref<RustTraitDecl>) -> str {
 // 4. Automatic C-ABI Bridge Crate Synthesizer with Panic Protection
 // ------------------------------------------------------------------------------
 
+/// `T` in `&[T]`, `&'a mut [T]` and `Vec<T>`.
+pub fn rust_elem_type(ty: str, kind: RustTypeKind) -> str {
+    var open = "<";
+    var close = ">";
+    if kind == RustTypeKind::SliceRef || kind == RustTypeKind::SliceMut {
+        open = "[";
+        close = "]";
+    }
+    let a = ty.find(open);
+    let b = ty.find(close);
+    if a < 0 || b <= a { return ty; }
+    return ty.slice((a + 1) as usize, b as usize).trim();
+}
+
+/// Where a parameter or return kind the bridge cannot carry yet stops.
+fn bridge_unsupported_kind() -> str {
+    return seam("rust.bridge_marshal",
+        "C-ABI marshalling of Result, Option, named repr(Rust) and dyn values is not designed yet");
+}
+
+/// True for the parameter kinds the bridge passes across the C ABI.
+fn bridge_param_supported(kind: RustTypeKind) -> bool {
+    return kind == RustTypeKind::Scalar || kind == RustTypeKind::StrRef
+        || kind == RustTypeKind::SliceRef || kind == RustTypeKind::SliceMut;
+}
+
+/// True for the return kinds the bridge passes back across the C ABI.
+fn bridge_return_supported(f: ref<RustFnDecl>) -> bool {
+    let k = f.ret_kind;
+    return f.return_type == "()" || k == RustTypeKind::Scalar || k == RustTypeKind::Vec
+        || k == RustTypeKind::String || k == RustTypeKind::StrRef || k == RustTypeKind::SliceRef;
+}
+
+/// The C-ABI type carrying a return value of `f` back to Pilot.
+fn bridge_return_carrier(f: ref<RustFnDecl>) -> str {
+    let k = f.ret_kind;
+    if f.return_type == "()" { return "()"; }
+    if k == RustTypeKind::Scalar { return f.return_type; }
+    // Text travels as its UTF-8 bytes.
+    if k == RustTypeKind::String { return "PilotVecParts<u8>"; }
+    if k == RustTypeKind::StrRef { return "PilotSliceView<u8>"; }
+    let elem = rust_elem_type(f.return_type, k);
+    if k == RustTypeKind::Vec { return f"PilotVecParts<{elem}>"; }
+    return f"PilotSliceView<{elem}>";
+}
+
+/// Turns `call` (an expression of the Rust return type) into the carrier.
+fn bridge_return_lift(f: ref<RustFnDecl>, call: str) -> str {
+    let k = f.ret_kind;
+    if f.return_type == "()" { return f"{{ {call}; }}"; }
+    if k == RustTypeKind::Scalar { return call; }
+    if k == RustTypeKind::Vec {
+        return f"{{ let mut v = std::mem::ManuallyDrop::new({call}); PilotVecParts {{ ptr: v.as_mut_ptr(), cap: v.capacity(), len: v.len() }} }}";
+    }
+    if k == RustTypeKind::String {
+        return f"{{ let v = std::mem::ManuallyDrop::new({call}); PilotVecParts {{ ptr: v.as_ptr() as *mut u8, cap: v.capacity(), len: v.len() }} }}";
+    }
+    return f"{{ let s = {call}; PilotSliceView {{ ptr: s.as_ptr(), len: s.len() }} }}";
+}
+
+fn bridge_param_type(p: RustParamDecl) -> str {
+    if p.type_kind == RustTypeKind::StrRef { return "PilotSliceView<u8>"; }
+    let elem = rust_elem_type(p.type_name, p.type_kind);
+    if p.type_kind == RustTypeKind::SliceRef { return f"PilotSliceView<{elem}>"; }
+    if p.type_kind == RustTypeKind::SliceMut { return f"PilotSliceMut<{elem}>"; }
+    return p.type_name;
+}
+
+fn bridge_param_arg(p: RustParamDecl) -> str {
+    if p.type_kind == RustTypeKind::StrRef {
+        return f"std::str::from_utf8(std::slice::from_raw_parts({p.name}.ptr, {p.name}.len)).unwrap()";
+    }
+    if p.type_kind == RustTypeKind::SliceRef {
+        return f"std::slice::from_raw_parts({p.name}.ptr, {p.name}.len)";
+    }
+    if p.type_kind == RustTypeKind::SliceMut {
+        return f"std::slice::from_raw_parts_mut({p.name}.ptr, {p.name}.len)";
+    }
+    return p.name;
+}
+
 pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) -> str {
     var out = "// ==============================================================================\n";
     out = out + f"// Auto-generated Pilot C-ABI bridge crate for '{crate_name}'\n";
     out = out + "// Enforces std::panic::catch_unwind safety boundary and zero-copy slices\n";
     out = out + "// ==============================================================================\n";
-    out = out + "#![allow(non_snake_case, dead_code)]\n";
-    out = out + "use std::panic::catch_unwind;\n";
+    out = out + "#![allow(non_snake_case, dead_code, improper_ctypes_definitions)]\n";
+    out = out + "use std::panic::{catch_unwind, AssertUnwindSafe};\n";
     out = out + f"use {crate_name}::*;\n\n";
 
     out = out + "/// Bridge Result payload structure\n";
@@ -133,16 +214,24 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
     out = out + "}\n\n";
 
     out = out + "/// Zero-copy slice view passed between Pilot and Rust\n";
-    out = out + "#[repr(C)]\n";
+    out = out + "#[repr(C)]\n#[derive(Clone, Copy)]\n";
     out = out + "pub struct PilotSliceView<T> {\n";
     out = out + "    pub ptr: *const T,\n";
     out = out + "    pub len: usize,\n";
     out = out + "}\n\n";
 
     out = out + "/// Zero-copy mutable slice view\n";
-    out = out + "#[repr(C)]\n";
+    out = out + "#[repr(C)]\n#[derive(Clone, Copy)]\n";
     out = out + "pub struct PilotSliceMut<T> {\n";
     out = out + "    pub ptr: *mut T,\n";
+    out = out + "    pub len: usize,\n";
+    out = out + "}\n\n";
+
+    out = out + "/// An owned Rust Vec<T> / String handed to Pilot; freed by the free_* functions\n";
+    out = out + "#[repr(C)]\n";
+    out = out + "pub struct PilotVecParts<T> {\n";
+    out = out + "    pub ptr: *mut T,\n";
+    out = out + "    pub cap: usize,\n";
     out = out + "    pub len: usize,\n";
     out = out + "}\n\n";
 
@@ -151,6 +240,13 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
     out = out + "pub struct DynTraitFatPtr {\n";
     out = out + "    pub data: *mut (),\n";
     out = out + "    pub vtable: *const (),\n";
+    out = out + "}\n\n";
+
+    out = out + "/// Panic payload text. A String payload is leaked so the pointer stays valid.\n";
+    out = out + "fn bridge_panic_text(e: Box<dyn std::any::Any + Send>) -> &'static str {\n";
+    out = out + "    if let Some(s) = e.downcast_ref::<&'static str>() { return s; }\n";
+    out = out + "    if let Some(s) = e.downcast_ref::<String>() { return Box::leak(s.clone().into_boxed_str()); }\n";
+    out = out + "    \"[RST004] Rust panic unwound\"\n";
     out = out + "}\n\n";
 
     out = out + "/// Free function for Rust Vec<T>\n";
@@ -172,57 +268,57 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
     var f_idx: usize = 0;
     while f_idx < module.functions.len() {
         let f = module.functions[f_idx];
+        var p_idx: usize = 0;
+        while p_idx < f.params.len() {
+            if !bridge_param_supported(f.params[p_idx].type_kind) {
+                return bridge_unsupported_kind();
+            }
+            p_idx = p_idx + 1;
+        }
+        if !bridge_return_supported(ref f) {
+            return bridge_unsupported_kind();
+        }
+        let carrier = bridge_return_carrier(ref f);
+
         out = out + f"/// Trampoline for function '{f.name}'\n";
         out = out + "#[no_mangle]\n";
         out = out + f"pub unsafe extern \"C\" fn bridge_{crate_name}_{f.name}(";
-
-        var p_idx: usize = 0;
-        while p_idx < f.params.len() {
-            let p = f.params[p_idx];
-            if p_idx > 0 { out = out + ", "; }
-            out = out + f"{p.name}: ";
-            if p.type_kind == RustTypeKind::StrRef {
-                out = out + "PilotSliceView<u8>";
-            } else if p.type_kind == RustTypeKind::SliceRef {
-                out = out + "PilotSliceView<()>";
-            } else if p.type_kind == RustTypeKind::SliceMut {
-                out = out + "PilotSliceMut<()>";
-            } else {
-                out = out + p.type_name;
-            }
-            p_idx = p_idx + 1;
-        }
-        out = out + ") -> BridgeResult<u64> {\n";
-        out = out + "    let res = catch_unwind(|| {\n";
-        out = out + f"        {f.name}(";
-
+        var call_args = "";
         p_idx = 0;
         while p_idx < f.params.len() {
             let p = f.params[p_idx];
-            if p_idx > 0 { out = out + ", "; }
-            if p.type_kind == RustTypeKind::StrRef {
-                out = out + f"std::str::from_utf8(std::slice::from_raw_parts({p.name}.ptr, {p.name}.len)).unwrap()";
-            } else if p.type_kind == RustTypeKind::SliceRef {
-                out = out + f"std::slice::from_raw_parts({p.name}.ptr as *const u8, {p.name}.len)";
-            } else if p.type_kind == RustTypeKind::SliceMut {
-                out = out + f"std::slice::from_raw_parts_mut({p.name}.ptr as *mut u8, {p.name}.len)";
-            } else {
-                out = out + p.name;
+            if p_idx > 0 {
+                out = out + ", ";
+                call_args = call_args + ", ";
             }
+            out = out + f"{p.name}: " + bridge_param_type(p);
+            call_args = call_args + bridge_param_arg(p);
             p_idx = p_idx + 1;
         }
-        out = out + ");\n";
-        out = out + "        0u64\n";
-        out = out + "    });\n";
+        out = out + f") -> BridgeResult<{carrier}> {{\n";
+        let lifted = bridge_return_lift(ref f, f"{f.name}({call_args})");
+        out = out + f"    let res = catch_unwind(AssertUnwindSafe(|| {lifted}));\n";
         out = out + "    match res {\n";
         out = out + "        Ok(v) => BridgeResult { is_ok: true, val: v, panic_msg: std::ptr::null(), panic_len: 0 },\n";
         out = out + "        Err(e) => {\n";
         out = out + "            // RST004: Foreign panic unwind safely captured at boundary\n";
-        out = out + "            let msg = if let Some(s) = e.downcast_ref::<&str>() { *s } else { \"[RST004] Rust panic unwound\" };\n";
-        out = out + "            BridgeResult { is_ok: false, val: 0, panic_msg: msg.as_ptr(), panic_len: msg.len() }\n";
+        out = out + "            let msg = bridge_panic_text(e);\n";
+        out = out + "            BridgeResult { is_ok: false, val: std::mem::zeroed(), panic_msg: msg.as_ptr(), panic_len: msg.len() }\n";
         out = out + "        }\n";
         out = out + "    }\n";
         out = out + "}\n\n";
+
+        // A returned Vec<T> is freed with its own element layout.
+        if f.ret_kind == RustTypeKind::Vec {
+            let elem = rust_elem_type(f.return_type, f.ret_kind);
+            out = out + f"/// Frees the Vec<{elem}> returned by '{f.name}' on Rust's allocator\n";
+            out = out + "#[no_mangle]\n";
+            out = out + f"pub unsafe extern \"C\" fn bridge_free_{crate_name}_{f.name}(ptr: *mut {elem}, cap: usize, len: usize) {{\n";
+            out = out + "    if !ptr.is_null() && cap > 0 {\n";
+            out = out + "        let _ = Vec::from_raw_parts(ptr, len, cap);\n";
+            out = out + "    }\n";
+            out = out + "}\n\n";
+        }
 
         f_idx = f_idx + 1;
     }
@@ -231,29 +327,32 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
 }
 
 // ------------------------------------------------------------------------------
-// 5. High-Level Semantic Absorber Entry Point
+// 5. High-Level Semantic Absorber Entry Points
 // ------------------------------------------------------------------------------
 
-pub fn absorb_rust_crate(
-    crate_spec: str,
-    features: slice<str>,
+/// Reads the public items of Rust source text and checks that every
+/// returned borrow is tied to an input borrow (RST003).
+pub fn absorb_rust_source(
+    src: str,
     diags: var ref<List<Diagnostic>>
 ) -> RustModuleDecl {
-    let module = rust_parse_source(crate_spec, var diags);
-
-    // Verify lifetime bindings across all public functions
+    let module = rust_parse_source(src, var diags);
     var i: usize = 0;
     while i < module.functions.len() {
         let f = module.functions[i];
         let _ = rust_verify_lifetime_bindings(ref f, var diags);
         i = i + 1;
     }
-
-    var f_idx: usize = 0;
-    while f_idx < features.len() {
-        let feat = features[f_idx];
-        f_idx = f_idx + 1;
-    }
-
     return module;
+}
+
+/// Resolves `crate_spec` with the given cargo features (`cargo metadata`),
+/// reads its public items and builds its cached C-ABI bridge crate.
+pub fn absorb_rust_crate(
+    crate_spec: str,
+    features: slice<str>,
+    diags: var ref<List<Diagnostic>>
+) -> RustModuleDecl {
+    return seam("rust.cargo_resolve",
+        "running cargo metadata / cargo build for the crate and its features needs process spawn (F6)");
 }

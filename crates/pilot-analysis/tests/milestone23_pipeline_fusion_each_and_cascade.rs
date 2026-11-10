@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -42,7 +44,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             required_pub_fns: &[
                 "fuse_stream_pipeline",
                 "stream_pipeline_spec_new",
-                "execute_fused_pipeline_mock",
+                "rewrite_fused_pipeline",
             ],
             required_code_markers: &[
                 "StreamStageKind",
@@ -62,6 +64,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "lower_each_broadcast",
                 "lower_cascade",
                 "lower_dto_projection",
+                "emit_cascade_ir",
             ],
             required_code_markers: &[
                 "BroadcastMode",
@@ -100,7 +103,7 @@ fn eval_m23(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -199,13 +202,9 @@ fn test_m23_2_stream_fusion_pass_and_loop_equivalence() {
             if plan.allocations_saved != 2 { return 2; } // Filter and Map intermediate buffers eliminated!
             if !plan.is_zero_alloc { return 3; } // Terminal Sum produces a scalar in SSA register (0 bytes heap)
 
-            // Verify mathematical equivalence against hand-written loop
-            let data: slice<i64> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-            // Even numbers: 2, 4, 6, 8, 10
-            // Map (x * 3 + 1): 7, 13, 19, 25, 31
-            // Sum: 7 + 13 + 19 + 25 + 31 = 95
-            let total = execute_fused_pipeline_mock(data, true, 3, 1);
-            if total != 95 { return 4; }
+            // A collecting terminal still allocates its output.
+            var spec_c = stream_pipeline_spec_new("items", 1000, StreamTerminalKind::Collect);
+            if fuse_stream_pipeline(spec_c).is_zero_alloc { return 4; }
 
             return 42;
         }
@@ -213,7 +212,21 @@ fn test_m23_2_stream_fusion_pass_and_loop_equivalence() {
 
     let deps = &["selfhost/ir/pass_stream_fusion.pilot"];
     let res = eval_m23(deps, script);
-    assert_eq!(res, "42", "Stream fusion pass must eliminate intermediate allocations and match hand-written loop");
+    assert_eq!(res, "42", "Stream fusion pass must eliminate intermediate allocations");
+
+    // Rewriting the IR stops at its seam until the typed PilIR exists.
+    let rewrite = eval_m23(
+        deps,
+        r#"
+        var spec = stream_pipeline_spec_new("items", 4, StreamTerminalKind::Sum);
+        rewrite_fused_pipeline(spec, fuse_stream_pipeline(spec));
+    "#,
+    );
+    assert!(
+        rewrite.starts_with("FAULT: SEAM001: unconnected seam `fusion.rewrite_ir`"),
+        "fused loop rewrite must stop at its seam, got: {}",
+        rewrite
+    );
 
     guard.finish();
 }
@@ -282,19 +295,19 @@ fn test_m23_4_cascades_side_effects_and_dto_projections() {
             var diags: List<str> = [];
 
             // 1. Regular cascade .. executes side effects exactly once
-            let c1 = lower_cascade("make_box()", false, false, true, ["add(1)", "add(2)"], var diags);
+            let c1 = lower_cascade("make_box()", false, false, ["add(1)", "add(2)"], var diags);
             if diags.len() != 0 { return 1; }
-            if !c1.side_effects_evaluated { return 2; }
+            if c1.guards_receiver { return 2; }
             if c1.action_count != 2 { return 3; }
 
-            // 2. Null-safe cascade ?.. with none receiver -> side effects evaluated ZERO times
-            let c2 = lower_cascade("opt_box", true, true, false, ["add(side_effect())"], var diags);
+            // 2. Null-safe cascade ?.. on an optional receiver guards every action on one none-test
+            let c2 = lower_cascade("opt_box", true, true, ["add(side_effect())"], var diags);
             if diags.len() != 0 { return 4; }
-            if c2.side_effects_evaluated { return 5; } // ZERO side effects executed!
+            if !c2.guards_receiver { return 5; }
 
             // 3. FUSE004: ?.. applied to non-optional receiver
             var diags_f4: List<str> = [];
-            let _ = lower_cascade("regular_box", true, false, true, ["clear()"], var diags_f4);
+            let _ = lower_cascade("regular_box", true, false, ["clear()"], var diags_f4);
             if diags_f4.len() == 0 { return 6; }
             if !diags_f4[0].contains("FUSE004") { return 7; }
 
@@ -320,7 +333,21 @@ fn test_m23_4_cascades_side_effects_and_dto_projections() {
 
     let deps = &["selfhost/ir/lower_each_cascade.pilot"];
     let res = eval_m23(deps, script);
-    assert_eq!(res, "42", "Cascades must eliminate side-effects on none, and DTO projection must catch FUSE003/FUSE004");
+    assert_eq!(res, "42", "Cascades must guard optional receivers, and DTO projection must catch FUSE003/FUSE004");
+
+    // Emitting the cascade into PilIR stops at its seam until the typed PilIR exists.
+    let emit = eval_m23(
+        deps,
+        r#"
+        var diags: List<str> = [];
+        emit_cascade_ir(lower_cascade("make_box()", false, false, ["add(1)"], var diags));
+    "#,
+    );
+    assert!(
+        emit.starts_with("FAULT: SEAM001: unconnected seam `each_cascade.emit_ir`"),
+        "cascade emission must stop at its seam, got: {}",
+        emit
+    );
 
     guard.finish();
 }

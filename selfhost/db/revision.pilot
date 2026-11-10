@@ -110,6 +110,7 @@ pub fn fingerprint_to_hex(fp: Fingerprint128) -> str {
 }
 
 // Computes 128-bit hash from raw string content.
+[StandIn("db.fingerprint", "128-bit truncated BLAKE3", "two FNV-style lanes; weaker and different collisions", "M5")]
 pub fn fingerprint_compute(content: str) -> Fingerprint128 {
     let n = content.len();
     var h1 = 2166136261;

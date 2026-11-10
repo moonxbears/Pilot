@@ -12,6 +12,7 @@ pub struct HostSystemInfo : IValue {
     pub arch:    str;
 }
 
-pub pure fn host_system_info(os: str, arch: str) -> HostSystemInfo {
-    return HostSystemInfo { os_name: os, arch: arch };
+/// The operating system and CPU architecture this program runs on.
+pub fn host_system_info() -> HostSystemInfo {
+    return seam("os.host_info", "reading the host OS and architecture needs a host query intrinsic");
 }

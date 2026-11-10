@@ -76,8 +76,10 @@ pub struct TransportSpec : IValue {
 pub struct CueContract : IValue {
     pub name:               str;
     pub payload_type:       str;
-    pub payload_layout_id:  usize;
-    pub payload_lattice:    u8; // 0b00=Val, 0b01=Ref, 0b10=Obj, 0b11=Guard
+    /// 0b00=Val, 0b01=Ref, 0b10=Obj, 0b11=Guard. `none` until the payload
+    /// type is resolved; the lattice comes from the type's `TypeDef`, never
+    /// from its name.
+    pub payload_lattice:    u8?;
     pub requires_iso_move:  bool;
     pub backpressure:       BackpressurePolicy;
     pub priority:           u8;

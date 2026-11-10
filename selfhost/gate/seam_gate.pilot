@@ -1,0 +1,384 @@
+// ==============================================================================
+// FILE: selfhost/gate/seam_gate.pilot
+// The `seams` gate: the seam registry, the wiring ledger and the source agree.
+// ==============================================================================
+// Seams are `seam(..)` calls and `pending(..)` values in `stdlib/` and
+// `selfhost/`, and SEAM001 messages the seed raises itself in `crates/*/src`.
+// Stand-ins are `[StandIn(..)]` attributes and workarounds are
+// `[Workaround(..)]` attributes in `stdlib/` and `selfhost/`.
+//
+// Codes:
+//   GATE011  a seam call or pending value whose id is not in the registry
+//   GATE012  a registry entry with nothing left in the source (delete it)
+//   GATE013  an id registered twice (seams and stand-ins share one id space)
+//   GATE014  a ledger row without the evidence its level requires
+//   GATE015  a ledger row blocked by an id that is neither a milestone, a
+//            registered seam nor a registered stand-in
+//   GATE016  an id used as a call seam but registered as `::Value`, or the
+//            other way round
+//   GATE017  a `[StandIn]` whose id is not in the stand-in registry
+//   GATE018  a stand-in that no wiring ledger row names, or that a row above
+//            DRAFT names
+//   GATE019  a `[Workaround]` naming a bug that is not in the bug registry
+//   GATE020  a known bug whose repro program is missing, or a program under
+//            `tests/conformance/known_bugs/` that no bug names as its repro
+pub lvl(0) pkg Pilot.SelfHost.Gate.SeamGate;
+
+use selfhost.gate.manifest.*;
+use selfhost.gate.ledger.seams.*;
+use selfhost.gate.ledger.wiring.*;
+
+/// The trees whose `.pilot` sources may hold seams.
+fn sg_roots() -> List<str> => ["stdlib", "selfhost"];
+
+/// The call that opens a seam, up to its id's opening quote.
+fn sg_call_marker() -> str => nameof(seam) + "(\"";
+
+/// The seed's Rust sources, which may hold seams the VM raises itself.
+fn sg_seed_root() -> str => "crates";
+
+/// The start of a SEAM001 message written out in Rust, up to the id's quote.
+fn sg_seed_marker() -> str => "unconnected seam `";
+
+/// The constructor of a pending value, up to its id's opening quote.
+fn sg_value_marker() -> str => nameof(pending) + "(\"";
+
+/// The stand-in attribute, up to its id's opening quote.
+fn sg_stand_in_marker() -> str => nameof(StandIn) + "(\"";
+
+/// The workaround attribute, up to its bug id's opening quote.
+fn sg_workaround_marker() -> str => nameof(Workaround) + "(\"";
+
+/// Where known-bug repro programs live.
+fn sg_known_bugs_dir() -> str => "tests/conformance/known_bugs";
+
+/// How a gap appears in the source.
+[Workaround("seed.shared_variant_name", "the pending-value form is `Pending`, not `Value`, which SeamKind also has")]
+enum SiteForm : u8 {
+    /// `seam("id", ..)`, or a SEAM001 message raised by the seed.
+    Call,
+    /// `pending("id", ..)`.
+    Pending,
+    /// `[StandIn("id", ..)]`.
+    StandIn,
+    /// `[Workaround("bug.id", ..)]`.
+    Workaround,
+}
+
+/// One gap found in the source.
+struct SeamSite : IValue {
+    id: str;
+    form: SiteForm;
+    path: str;
+    line: i64;
+    col: i64;
+}
+
+fn sg_lines(text: str) -> List<str> {
+    var out: List<str> = [];
+    var start = 0;
+    var nl = text.find("\n", start);
+    while nl >= 0 {
+        if nl > start { out.push(text.slice(start, nl)); }
+        start = nl + 1;
+        nl = text.find("\n", start);
+    }
+    if start < text.len() { out.push(text.slice(start, text.len())); }
+    return out;
+}
+
+fn sg_is_ident_byte(b: i64) -> bool {
+    return (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 || b == 46;
+}
+
+/// Appends every gap in `src` (the file `rel`) to `sites`.
+fn sg_scan_source(src: str, rel: str, sites: List<SeamSite>) {
+    sg_scan_marker(src, rel, sg_call_marker(), ::Call, sites);
+    sg_scan_marker(src, rel, sg_value_marker(), ::Pending, sites);
+    sg_scan_marker(src, rel, sg_stand_in_marker(), ::StandIn, sites);
+    sg_scan_marker(src, rel, sg_workaround_marker(), ::Workaround, sites);
+}
+
+/// Appends every use of `marker` in `src` as a site of `form`. A use inside a
+/// `//` comment, or one that is part of a longer name, does not count.
+fn sg_scan_marker(src: str, rel: str, marker: str, form: SiteForm, sites: List<SeamSite>) {
+    // Lines are counted forward from the previous hit, newline to newline.
+    var line = 1;
+    var line_start = 0;
+    var at = src.find(marker, 0);
+    while at >= 0 {
+        var nl = src.find("\n", line_start);
+        while nl >= 0 && nl < at {
+            line = line + 1;
+            line_start = nl + 1;
+            nl = src.find("\n", line_start);
+        }
+        let prefix = src.slice(line_start, at);
+        let is_call = (at == 0 || !sg_is_ident_byte(src.byte_at(at - 1))) && prefix.find("//", 0) < 0;
+        if is_call {
+            let id_start = at + marker.len();
+            let id_end = src.find("\"", id_start);
+            let id = if id_end > id_start { src.slice(id_start, id_end) } else { "" };
+            sites.push(SeamSite { id: id, form: form, path: rel, line: line, col: at - line_start + 1 });
+        }
+        at = src.find(marker, at + marker.len());
+    }
+}
+
+/// Appends every seam a seed Rust file (`rel`) raises by writing out its
+/// SEAM001 message. A message whose id is a format placeholder is the generic
+/// handler for Pilot seams, not a seam of its own.
+fn sg_scan_seed_source(src: str, rel: str, sites: List<SeamSite>) {
+    let marker = sg_seed_marker();
+    var at = src.find(marker, 0);
+    while at >= 0 {
+        let id_start = at + marker.len();
+        let id_end = src.find("`", id_start);
+        if id_end > id_start {
+            let id = src.slice(id_start, id_end);
+            if id.find("{", 0) < 0 {
+                let line_start = sg_line_start(src, at);
+                sites.push(SeamSite {
+                    id: id,
+                    form: ::Call,
+                    path: rel,
+                    line: sg_line_of(src, at),
+                    col: at - line_start + 1,
+                });
+            }
+        }
+        at = src.find(marker, at + marker.len());
+    }
+}
+
+/// Byte offset where the line holding offset `at` of `src` starts.
+fn sg_line_start(src: str, at: i64) -> i64 {
+    var i = at;
+    while i > 0 {
+        if src.byte_at(i - 1) == 10 { return i; }
+        i = i - 1;
+    }
+    return 0;
+}
+
+/// The 1-based line of offset `at` in `src`.
+fn sg_line_of(src: str, at: i64) -> i64 {
+    var n = 1;
+    var i = 0;
+    while i < at {
+        if src.byte_at(i) == 10 { n = n + 1; }
+        i = i + 1;
+    }
+    return n;
+}
+
+fn sg_violation(code: str, path: str, line: i64, col: i64, snippet: str, message: str, fix: str) -> GateViolation {
+    return GateViolation {
+        code: code,
+        file_path: path,
+        line: line,
+        column: col,
+        offending_snippet: snippet,
+        message: message,
+        remediation: fix,
+    };
+}
+
+/// 1 for a call seam, 2 for a pending value, 3 for a stand-in, 4 for a
+/// workaround.
+fn sg_form_code(form: SiteForm) -> i64 {
+    switch form {
+        case ::Call: return 1;
+        case ::Pending: return 2;
+        case ::StandIn: return 3;
+        case ::Workaround: return 4;
+    }
+    return 0;
+}
+
+/// Whether `token` names a milestone (`F6`, `M17`) rather than a seam.
+fn sg_is_milestone_id(token: str) -> bool {
+    if token.len() < 2 { return false; }
+    let head = token.byte_at(0);
+    if head != 70 && head != 77 { return false; }
+    var i = 1;
+    while i < token.len() {
+        let b = token.byte_at(i);
+        if b < 48 || b > 57 { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn sg_words(text: str) -> List<str> {
+    var out: List<str> = [];
+    var start = 0;
+    var i = 0;
+    while i <= text.len() {
+        if i == text.len() || text.byte_at(i) == 32 {
+            if i > start { out.push(text.slice(start, i)); }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// Checks the registry against the source, and the ledger against both.
+pub fn execute_seam_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> GateReport {
+    let t0 = gate_time_now_us();
+    let root = resolve_workspace_root(workspace_root);
+    // The report's violation list uses the gate's list helpers.
+    let violations = glist_new();
+    var scanned = 0;
+    let registry_file = "selfhost/gate/ledger/seams.pilot";
+    let ledger_file = "selfhost/gate/ledger/wiring.pilot";
+
+    var sites: List<SeamSite> = [];
+    for tree in sg_roots() {
+        let base = gm_join_path(root, tree);
+        for full in sg_lines(gate_fs_walk_files(base)) {
+            if !full.ends_with(".pilot") { continue; }
+            let rel = tree + full.slice(base.len(), full.len());
+            sg_scan_source(gate_fs_read_text(full), rel, sites);
+            scanned = scanned + 1;
+        }
+    }
+
+    let seed_base = gm_join_path(root, sg_seed_root());
+    for full in sg_lines(gate_fs_walk_files(seed_base)) {
+        if !full.ends_with(".rs") || full.find("/src/", 0) < 0 { continue; }
+        let rel = sg_seed_root() + full.slice(seed_base.len(), full.len());
+        sg_scan_seed_source(gate_fs_read_text(full), rel, sites);
+        scanned = scanned + 1;
+    }
+
+    // Ids in use, by form: 1 call, 2 value, 3 stand-in. Workarounds name bugs,
+    // which are checked on their own below.
+    var used = Map<str, i64>();
+    for site in sites {
+        if site.form != ::Workaround { used.set(site.id, sg_form_code(site.form)); }
+    }
+
+    // Registered ids: 1 call seam, 2 value seam, 3 stand-in.
+    var registered = Map<str, i64>();
+    for e in seam_registry() {
+        if registered.has(e.id) {
+            glist_push(violations, sg_violation("GATE013", registry_file, 1, 1, e.id,
+                "id registered twice", "Keep one entry per id"));
+        }
+        let code = if e.kind == ::Value { 2 } else { 1 };
+        registered.set(e.id, code);
+        if !used.has(e.id) {
+            glist_push(violations, sg_violation("GATE012", registry_file, 1, 1, e.id,
+                "registered seam has nothing left in the source",
+                "The seam is connected or gone: delete its registry entry"));
+        } else if used.get(e.id) != code && used.get(e.id) != 3 {
+            glist_push(violations, sg_violation("GATE016", registry_file, 1, 1, e.id,
+                "seam is registered as " + seam_kind_label(e.kind) + " but used the other way",
+                "Register a pending(..) value as ::Value and a seam(..) call as ::Entry or ::Exit"));
+        }
+    }
+    for e in stand_in_registry() {
+        if registered.has(e.id) {
+            glist_push(violations, sg_violation("GATE013", registry_file, 1, 1, e.id,
+                "id registered twice", "Keep one entry per id"));
+        }
+        registered.set(e.id, 3);
+        if !used.has(e.id) {
+            glist_push(violations, sg_violation("GATE012", registry_file, 1, 1, e.id,
+                "registered stand-in has no [StandIn] left in the source",
+                "The stand-in is replaced: delete its registry entry and free its ledger rows"));
+        }
+    }
+    // Registered bugs: 5. Each repro must exist.
+    var repros = Map<str, i64>();
+    for b in bug_registry() {
+        if registered.has(b.id) {
+            glist_push(violations, sg_violation("GATE013", registry_file, 1, 1, b.id,
+                "id registered twice", "Keep one entry per id"));
+        }
+        registered.set(b.id, 5);
+        repros.set(b.repro, 1);
+        if !gate_fs_exists(gm_join_path(root, b.repro)) {
+            glist_push(violations, sg_violation("GATE020", registry_file, 1, 1, b.id + " -> " + b.repro,
+                "known bug has no repro program",
+                "Add the program, with expectation files holding the correct output"));
+        }
+    }
+    let bugs_base = gm_join_path(root, sg_known_bugs_dir());
+    for full in sg_lines(gate_fs_walk_files(bugs_base)) {
+        if !full.ends_with(".pilot") { continue; }
+        let rel = sg_known_bugs_dir() + full.slice(bugs_base.len(), full.len());
+        if !repros.has(rel) {
+            glist_push(violations, sg_violation("GATE020", rel, 1, 1, rel,
+                "known-bug program is not the repro of any registered bug",
+                "Register the bug in bug_registry() in " + registry_file));
+        }
+        scanned = scanned + 1;
+    }
+
+    for site in sites {
+        if site.form == ::Workaround {
+            if !registered.has(site.id) || registered.get(site.id) != 5 {
+                glist_push(violations, sg_violation("GATE019", site.path, site.line, site.col, site.id,
+                    "workaround names a bug that is not in the bug registry",
+                    "Register the bug, or remove the workaround if the bug is fixed"));
+            }
+            continue;
+        }
+        let is_stand_in = site.form == ::StandIn;
+        if !registered.has(site.id) || (is_stand_in != (registered.get(site.id) == 3)) {
+            let code = if is_stand_in { "GATE017" } else { "GATE011" };
+            let what = if is_stand_in { "stand-in is not in the stand-in registry" } else { "seam is not in the seam registry" };
+            let fix = if is_stand_in { "Add it to stand_in_registry() in " } else { "Add an entry for it to " };
+            glist_push(violations, sg_violation(code, site.path, site.line, site.col, site.id, what, fix + registry_file));
+        }
+    }
+
+    var named_stand_ins = Map<str, i64>();
+    for row in wiring_ledger() {
+        let label = row.milestone + " " + row.name;
+        let needs_evidence = row.level == ::Core || row.level == ::Wired
+            || row.level == ::Complete || row.level == ::Simulated;
+        if needs_evidence && row.evidence.len() == 0 {
+            glist_push(violations, sg_violation("GATE014", ledger_file, 1, 1, label,
+                wiring_level_label(row.level) + " capability has no evidence",
+                "Name the command, test or (for SIMULATED) the fake's location"));
+        }
+        let at_most_draft = row.level == ::Spec || row.level == ::Draft || row.level == ::Simulated;
+        for token in sg_words(row.blocked_by) {
+            if sg_is_milestone_id(token) { continue; }
+            if !registered.has(token) {
+                glist_push(violations, sg_violation("GATE015", ledger_file, 1, 1, label + " <- " + token,
+                    "capability is blocked by an unregistered seam or stand-in",
+                    "Register it or name the milestone that unblocks it"));
+            } else if registered.get(token) == 3 {
+                named_stand_ins.set(token, 1);
+                if !at_most_draft {
+                    glist_push(violations, sg_violation("GATE018", ledger_file, 1, 1, label + " <- " + token,
+                        wiring_level_label(row.level) + " capability rests on a stand-in",
+                        "Keep the row at DRAFT until the stand-in is replaced"));
+                }
+            }
+        }
+        scanned = scanned + 1;
+    }
+    for e in stand_in_registry() {
+        if !named_stand_ins.has(e.id) {
+            glist_push(violations, sg_violation("GATE018", ledger_file, 1, 1, e.id,
+                "stand-in is not named by any wiring ledger row",
+                "Name it in the blocked_by of each capability it affects"));
+        }
+    }
+
+    let dt = gate_time_now_us() - t0;
+    return GateReport {
+        gate_id: "seams",
+        category: GateCategoryId.Hygiene,
+        passed: glist_len(violations) == 0,
+        elapsed_us: if dt >= 0 { dt } else { 0 },
+        items_scanned: scanned,
+        violations: violations,
+    };
+}

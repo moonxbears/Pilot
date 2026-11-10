@@ -103,6 +103,8 @@ impl BytecodeCompiler {
         }
         let result = match entry {
             Some(ep) => {
+                // The program's own call into `main` has no source position.
+                self.cur_span = pilot_span::ByteSpan::default();
                 self.push_ins(crate::Instruction::encode_wide(Opcode::Call, 0, ep));
                 self.emit(Opcode::Halt, 0, 0, 0);
                 0

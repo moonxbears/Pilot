@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -145,7 +147,7 @@ fn eval_inspect(script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -202,24 +204,35 @@ pub fn test_m7_2_layout_lens_byte_offsets_cache_line_and_optimal_packing() {
         let s_box = render_field_box(f1);
 
         // 4. Optimal field packing savings
-        let savings = calculate_optimal_packing_savings(24, 8); // 24B unaligned - 8B optimal = 16B saved
+        // { u8, u64, u8, u64 }: C lays this out in 32 bytes (14 bytes of
+        // padding); reordered { u64, u64, u8, u8 } takes 24 bytes (6 bytes of
+        // tail padding), so reordering saves 8 bytes.
+        var sizes: List<usize> = [];
+        var aligns: List<usize> = [];
+        sizes.push(1); aligns.push(1);
+        sizes.push(8); aligns.push(8);
+        sizes.push(1); aligns.push(1);
+        sizes.push(8); aligns.push(8);
+        let declared_pad = layout_padding_bytes(sizes, aligns);
+        let savings = calculate_optimal_packing_savings(sizes, aligns);
 
         pad1 + "|" + pad2 + "|" +
         (if !cross_no { "SAFE" } else { "CROSS" }) + "|" +
         (if cross_yes { "CROSS" } else { "SAFE" }) + "|" +
         (if s_box.len() > 0 { "BOX_OK" } else { "FAIL" }) + "|" +
-        savings;
+        declared_pad + "|" + savings;
     "#;
 
     let res = eval_inspect(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts.len(), 6, "Expected 6 parts, got: {}", res);
+    assert_eq!(parts.len(), 7, "Expected 7 parts, got: {}", res);
     assert_eq!(parts[0], "7", "Padding to align 1 to 8 should be 7");
     assert_eq!(parts[1], "0", "Padding to align 8 to 8 should be 0");
     assert_eq!(parts[2], "SAFE", "Offset 16 size 32 should not cross cache line");
     assert_eq!(parts[3], "CROSS", "Offset 48 size 32 should cross cache line");
     assert_eq!(parts[4], "BOX_OK", "Field box rendering failed");
-    assert_eq!(parts[5], "16", "Expected 16 bytes optimal packing savings");
+    assert_eq!(parts[5], "14", "Declared order pads 7 + 7 bytes");
+    assert_eq!(parts[6], "8", "Reordering by alignment saves 32 - 24 = 8 bytes");
 
     guard.finish();
 }
@@ -293,9 +306,6 @@ pub fn test_m7_4_perceus_lens_inline_markers_and_weave_lens_expand() {
         // 2. Weave Lens property accessor expansion
         let s_prop = expand_property_accessor("balance", "f64", "backing_balance", true);
 
-        // 3. Full CLI driver inspection run
-        let full_out = inspect_run("Account", "--all");
-
         (if s_borrow.find("borrow") >= 0 { "BORROW_OK" } else { "FAIL" }) + "|" +
         (if s_move.find("move") >= 0 { "MOVE_OK" } else { "FAIL" }) + "|" +
         (if s_dup.find("dup") >= 0 { "DUP_OK" } else { "FAIL" }) + "|" +
@@ -303,7 +313,7 @@ pub fn test_m7_4_perceus_lens_inline_markers_and_weave_lens_expand() {
         (if s_reuse.find("drop_reuse") >= 0 { "REUSE_OK" } else { "FAIL" }) + "|" +
         (if s_guard.find("guard-exit") >= 0 { "GUARD_OK" } else { "FAIL" }) + "|" +
         (if s_prop.find("get_balance") >= 0 && s_prop.find("set_balance") >= 0 { "PROP_OK" } else { "FAIL" }) + "|" +
-        (if full_out.find("Weave Lens") >= 0 && full_out.find("Layout Lens") >= 0 { "INSPECT_OK" } else { "FAIL" });
+        inspect_parse_lenses("--layout --perceus");
     "#;
 
     let res = eval_inspect(script);
@@ -316,7 +326,15 @@ pub fn test_m7_4_perceus_lens_inline_markers_and_weave_lens_expand() {
     assert_eq!(parts[4], "REUSE_OK", "Perceus reuse marker mismatch");
     assert_eq!(parts[5], "GUARD_OK", "Perceus guard-exit marker mismatch");
     assert_eq!(parts[6], "PROP_OK", "Weave property expansion mismatch");
-    assert_eq!(parts[7], "INSPECT_OK", "Inspect CLI run output mismatch");
+    assert_eq!(parts[7], "10", "--layout (2) | --perceus (8)");
+
+    // Rendering lenses needs a type-checked unit; the run stops at its seam.
+    let run = eval_inspect(r#"inspect_run("src/app.pilot:42:10", "--all");"#);
+    assert!(
+        run.starts_with("FAULT: SEAM001: unconnected seam `inspect.resolve_target`"),
+        "inspect_run must stop at its seam, got: {}",
+        run
+    );
 
     guard.finish();
 }

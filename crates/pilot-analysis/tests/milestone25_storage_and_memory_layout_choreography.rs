@@ -8,6 +8,8 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
@@ -47,7 +49,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "FieldLeafDesc",
                 "ColumnPhysicalLayout",
                 "StoragePlan",
-                "flatten_nested_vec3",
+                "flatten_nested_fields",
                 "estimate_cacheline_efficiency",
             ],
             forbidden_code_markers: &[],
@@ -60,6 +62,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             required_pub_fns: &[
                 "check_raw_pointer_escape",
                 "lower_choreographed_field_access",
+                "rewrite_field_access_ir",
             ],
             required_code_markers: &[
                 "CHOR008",
@@ -97,7 +100,7 @@ fn eval_m25(deps: &[&str], script: &str) -> String {
         pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    vm.run().to_string_repr()
+    vm_outcome::outcome(&mut vm)
 }
 
 // -----------------------------------------------------------------------------
@@ -118,7 +121,13 @@ fn test_m25_1_multicolumn_layout_and_simd_alignment() {
     let script = r#"
         pub fn main() -> i64 {
             // Flatten Particle.pos (Vec3: x, y, z: f32) + vel.x: f32 + mass: f32
-            var fields = flatten_nested_vec3("pos");
+            // Vec3 { x, y, z: f32 } leaves, as the field type's resolved layout gives them
+            var vec3_leaves: List<FieldLeafDesc> = [];
+            vec3_leaves.push(field_leaf_desc_new("x", "x", 4, 4, 0, false, 32, false));
+            vec3_leaves.push(field_leaf_desc_new("y", "y", 4, 4, 0, false, 32, false));
+            vec3_leaves.push(field_leaf_desc_new("z", "z", 4, 4, 0, false, 32, false));
+            var fields = flatten_nested_fields("pos", vec3_leaves);
+            if fields.len() != 3 || fields[0].path != "pos.x" || fields[2].path != "pos.z" { return 40; }
             fields.push(field_leaf_desc_new("vel.x", "vel_x", 4, 4, 0, false, 32, false));
             fields.push(field_leaf_desc_new("mass", "mass", 4, 4, 0, false, 32, false));
 
@@ -154,6 +163,25 @@ fn test_m25_1_multicolumn_layout_and_simd_alignment() {
 
     let res = eval_m25(&deps, script);
     assert_eq!(res, "42", "Failed multi-column physical layout test: {}", res);
+
+    // A SoaTable lays out its planes, but has no column memory to push rows into yet.
+    let table = eval_m25(
+        &deps,
+        r#"
+        pub fn main() -> i64 {
+            var t = SoaTable::create(16, [4, 8], 64);
+            // Plane 0 holds 16 * 4 bytes = 64, so plane 1 starts at 64.
+            if t.column_base(1) != 64 { return 1; }
+            t.push();
+            return 2;
+        }
+    "#,
+    );
+    assert!(
+        table.starts_with("FAULT: SEAM001: unconnected seam `soa.column_memory`"),
+        "SoaTable row storage must stop at its seam, got: {}",
+        table
+    );
     guard.finish();
 }
 
@@ -175,7 +203,12 @@ fn test_m25_2_physical_address_lowering_across_all_strategies() {
 
     let script = r#"
         pub fn main() -> i64 {
-            var fields = flatten_nested_vec3("pos"); // 3 fields of 4 bytes each = 12 bytes
+            // Vec3 { x, y, z: f32 } leaves, as the field type's resolved layout gives them
+            var vec3_leaves: List<FieldLeafDesc> = [];
+            vec3_leaves.push(field_leaf_desc_new("x", "x", 4, 4, 0, false, 32, false));
+            vec3_leaves.push(field_leaf_desc_new("y", "y", 4, 4, 0, false, 32, false));
+            vec3_leaves.push(field_leaf_desc_new("z", "z", 4, 4, 0, false, 32, false));
+            var fields = flatten_nested_fields("pos", vec3_leaves); // 3 fields of 4 bytes each = 12 bytes
             fields.push(field_leaf_desc_new("mass", "mass", 4, 4, 0, false, 32, false)); // total 16 bytes
 
             let base = 10000;
@@ -217,12 +250,32 @@ fn test_m25_2_physical_address_lowering_across_all_strategies() {
             if eff_soa != 100 { return 8; } // 100%
             if speedup != 16 { return 9; }  // 16x speedup (>= 3.5x)
 
+            // 6. A column outside the plan has no address
+            if lower_choreographed_field_access(soa_plan, base, 0, 99) != none { return 10; }
+
             return 42;
         }
     "#;
 
     let res = eval_m25(&deps, script);
     assert_eq!(res, "42", "Failed physical address lowering test: {}", res);
+
+    // Rewriting the PilIR access stops at its seam until the typed PilIR exists.
+    let rewrite = eval_m25(
+        &deps,
+        r#"
+        var leaves: List<FieldLeafDesc> = [];
+        leaves.push(field_leaf_desc_new("mass", "mass", 4, 4, 0, false, 32, false));
+        let plan = compute_storage_plan("P", StorageStrategy::SoA, 8, leaves, 8, 64);
+        let access = lower_choreographed_field_access(plan, 0, 1, 0);
+        rewrite_field_access_ir(access);
+    "#,
+    );
+    assert!(
+        rewrite.starts_with("FAULT: SEAM001: unconnected seam `soa.rewrite_ir`"),
+        "PilIR access rewrite must stop at its seam, got: {}",
+        rewrite
+    );
     guard.finish();
 }
 

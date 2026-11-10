@@ -393,6 +393,12 @@ impl PilVirtualMachine {
                 self.forward(op, args)
             }
             "proc_args" => Ok(self.proc_args()),
+            // An intentionally unconnected entry or exit point was reached.
+            "seam_open" => {
+                let id = str_arg(args, 0, op)?;
+                let note = args.get(1).map(|&v| self.display(v)).unwrap_or_default();
+                Err(format!("SEAM001: unconnected seam `{id}`: {note}"))
+            }
             "unit_header" => {
                 let path = str_arg(args, 0, op)?;
                 Ok(self.unit_header(&path))

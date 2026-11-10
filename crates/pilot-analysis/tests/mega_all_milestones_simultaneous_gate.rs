@@ -146,7 +146,7 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m01::test_m1_1_dynamic_vocabulary_harvester_and_fast_gate001_slice_injection();
             m01::test_m1_2_rust_tamper_unlock_comment_freedom_and_retired_scripts_purged();
             m01::test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup();
-            m01::test_m1_4_cli_pilot_gate_full_json_exit_codes_and_stage3_sha256_parity();
+            m01::test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status();
             m02::test_m2_1_exact_line_col_preservation_without_span_drift();
             m02::test_m2_2_comptime_and_runtime_env_reflection_parity();
             m02::test_m2_3_pure_pilot_module_graph_and_pragma_suppression();
@@ -243,7 +243,7 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
         });
         s.spawn(|| {
             m61::test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_splicing();
-            m61::test_61_2_stage3_bootstrap_fixed_point_clang_native_and_pilc_sha256_parity();
+            m61::test_61_2_pilotc_c11_and_stage_build_stop_at_seams();
             m61::test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_across_7_backends();
         });
     });

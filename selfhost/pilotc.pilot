@@ -1,218 +1,39 @@
 // ==============================================================================
 // FILE: selfhost/pilotc.pilot
-// Milestone 61.2: Self-Hosted Stage-3 Bootstrap Compiler & Deterministic Fixed-Point
-// Standalone C11 emitter & .pilc v3 bytecode synthesizer.
+// Milestone 61.2 / F8: Self-Hosted Bootstrap Compiler Entry Points
+// ==============================================================================
+// `pilotc` is the compiler written in Pilot. Its pipeline (lex -> parse ->
+// expand -> analyze -> lower to PilIR -> Perceus -> C11) does not exist yet:
+// the analyzer arrives in F4, PilIR in F5, the C11 backend and process spawn
+// in F6, ownership in F7, and the driver that builds compiler stages in F8.
+// Until then both entry points stop at registered seams
+// (`selfhost/gate/ledger/seams.pilot`), and the bootstrap parity gate reports
+// that it stops at `bootstrap.stage_compile`.
 // ==============================================================================
 pub pkg Pilot.SelfHost.Pilotc;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
-pub enum CompilerBootstrapStage {
-    Stage0,
-    Stage1,
+/// Which compiler produced an artifact: the Rust seed (stage 1), the compiler
+/// stage 1 built from `selfhost/` (stage 2), or the one stage 2 built from the
+/// same sources (stage 3). Stage 2 and stage 3 must be byte-identical.
+pub enum CompilerBootstrapStage : u8 {
+    Seed,
     Stage2,
     Stage3,
 }
 
-let BootstrapStageId = [
-    Stage0: 0,
-    Stage1: 1,
-    Stage2: 2,
-    Stage3: 3,
-];
-
-pub enum CompilerTarget {
-    C11,
-    PilcHex,
-    LlvmIr,
-    Wasm,
-}
-
-pub enum KernelField {
-    FnName,
-    Bias,
-    K,
-    InputN,
-}
-
-let KernelFieldId = [
-    FnName: 0,
-    Bias: 1,
-    K: 2,
-    InputN: 3,
-];
-
-pub pure fn pilotc_stage_kind(stage: i64) -> CompilerBootstrapStage {
-    if stage == 1 { return BootstrapStageId.Stage1; }
-    if stage == 2 { return BootstrapStageId.Stage2; }
-    if stage == 3 { return BootstrapStageId.Stage3; }
-    return BootstrapStageId.Stage0;
-}
-
 pub pure fn pilotc_version_banner() -> str {
-    return "pilotc 1.1.51 (100% self-hosted layout-driven compiler)";
+    return "pilotc (self-hosted compiler; pipeline not yet connected, see F4-F8)";
 }
 
-fn hex_char(v: i64) -> str {
-    let hex_chars = "0123456789abcdef";
-    return hex_chars.slice(v, v + 1);
-}
-
-fn u8_to_hex(b: i64) -> str {
-    let hi = (b >> 4) & 15;
-    let lo = b & 15;
-    return hex_char(hi) + hex_char(lo);
-}
-
-fn u32_to_hex_le(v: i64) -> str {
-    return u8_to_hex(v & 255) +
-           u8_to_hex((v >> 8) & 255) +
-           u8_to_hex((v >> 16) & 255) +
-           u8_to_hex((v >> 24) & 255);
-}
-
-fn u64_to_hex_le(v: i64) -> str {
-    return u32_to_hex_le(v & 4294967295) +
-           u32_to_hex_le((v >> 32) & 4294967295);
-}
-
-fn pilotc_parse_int(s: str) -> i64 {
-    var acc = 0;
-    var i = 0;
-    let n = s.len();
-    while i < n {
-        let b = s.byte_at(i);
-        if b >= 48 && b <= 57 {
-            acc = acc * 10 + (b - 48);
-        }
-        i = i + 1;
-    }
-    return acc;
-}
-
-fn pilotc_extract_field(tape: i64, field: KernelField, fn_name: str) -> str {
-    let count = sh_token_count(tape);
-    var i = 0;
-    while i < count {
-        let txt = sh_token_text(tape, i);
-        if field == KernelFieldId.FnName {
-            if txt == nameof(fn) && i + 1 < count {
-                return sh_token_text(tape, i + 1);
-            }
-        }
-        if field == KernelFieldId.Bias {
-            if txt == "acc" && i + 2 < count {
-                if sh_token_text(tape, i + 1) == "=" {
-                    return sh_token_text(tape, i + 2);
-                }
-            }
-        }
-        if field == KernelFieldId.K {
-            if txt == "*" && i + 1 < count {
-                return sh_token_text(tape, i + 1);
-            }
-        }
-        if field == KernelFieldId.InputN {
-            let fn_len = fn_name.len();
-            if fn_len > 0 && txt == fn_name && i > 10 && i + 2 < count {
-                if sh_token_text(tape, i + 1) == "(" {
-                    return sh_token_text(tape, i + 2);
-                }
-            }
-        }
-        i = i + 1;
-    }
-    return "";
-}
-
+/// Compiles a whole Pilot program to standalone C11 source.
 pub fn pilotc_compile_source_to_c11(pilot_src: str) -> str {
-    let tape = sh_tokenize(pilot_src);
-    let fn_name = pilotc_extract_field(tape, KernelFieldId.FnName, "");
-    let bias_str = pilotc_extract_field(tape, KernelFieldId.Bias, fn_name);
-    let k_str = pilotc_extract_field(tape, KernelFieldId.K, fn_name);
-
-    return "#include <stdint.h>\n\n" +
-           "int64_t " + fn_name + "(int64_t n) {\n" +
-           "    int64_t acc = " + bias_str + ";\n" +
-           "    int64_t i = 1;\n" +
-           "    while (i <= n) {\n" +
-           "        acc = acc + (i * " + k_str + ");\n" +
-           "        i = i + 1;\n" +
-           "    }\n" +
-           "    return acc;\n" +
-           "}\n";
+    return seam("pilotc.compile_c11",
+        "no self-hosted pipeline lowers a Pilot program to C11 yet (analyzer F4, PilIR F5, C11 backend F6, driver F8)");
 }
 
-pub fn pilotc_bootstrap_stage_c11(stage: i64, compiler_unit_src: str) -> str {
-    let stage_kind = pilotc_stage_kind(stage);
-    if stage_kind < 0 {
-        return "";
-    }
-    return pilotc_compile_source_to_c11(compiler_unit_src);
-}
-
-pub fn pilotc_bootstrap_stage_pilc_hex(stage: i64, compiler_unit_src: str) -> str {
-    let stage_kind = pilotc_stage_kind(stage);
-    if stage_kind < 0 {
-        return "";
-    }
-    let tape = sh_tokenize(compiler_unit_src);
-    let fn_name = pilotc_extract_field(tape, KernelFieldId.FnName, "");
-    let bias_val = pilotc_parse_int(pilotc_extract_field(tape, KernelFieldId.Bias, fn_name));
-    let k_val = pilotc_parse_int(pilotc_extract_field(tape, KernelFieldId.K, fn_name));
-    let n_val = pilotc_parse_int(pilotc_extract_field(tape, KernelFieldId.InputN, fn_name));
-
-    // Magic: PIL3 (4 bytes)
-    let magic_hex = "50494c33";
-    // Version: 4 (u32 le)
-    let ver_hex = "04000000";
-    // Const count: 4 (u32 le)
-    let const_cnt_hex = "04000000";
-
-    // Const 0: bias
-    let c0_hex = "0300000000000000" + u64_to_hex_le(bias_val);
-    // Const 1: 1
-    let c1_hex = "0300000000000000" + u64_to_hex_le(1);
-    // Const 2: k
-    let c2_hex = "0300000000000000" + u64_to_hex_le(k_val);
-    // Const 3: input_n
-    let c3_hex = "0300000000000000" + u64_to_hex_le(n_val);
-
-    // Heap string table len: 0 (u32 le)
-    let heap_len_hex = "00000000";
-
-    // Instructions count: 13 (u32 le)
-    let ins_cnt_hex = "0d000000";
-
-    // 13 instructions:
-    // pc 0: LoadConst dst=5, src1=0, src2=0 (acc = bias)
-    let ins0 = "00000509";
-    // pc 1: LoadConst dst=6, src1=0, src2=1 (i = 1)
-    let ins1 = "01000609";
-    // pc 2: LoadConst dst=3, src1=0, src2=2 (r3 = k)
-    let ins2 = "02000309";
-    // pc 3: LoadConst dst=4, src1=0, src2=3 (r4 = n)
-    let ins3 = "03000409";
-    // pc 4: LoadConst dst=2, src1=0, src2=1 (r2 = 1)
-    let ins4 = "01000209";
-    // pc 5: CmpLe dst=7, src1=6, src2=4 (r7 = (i <= n))
-    let ins5 = "04060714";
-    // pc 6: JumpIfFalse dst=0, src1=7, src2=11 (if !r7 goto 11)
-    let ins6 = "0b07000f";
-    // pc 7: MulI64 dst=8, src1=6, src2=3 (r8 = i * k)
-    let ins7 = "03060803";
-    // pc 8: AddI64 dst=5, src1=5, src2=8 (acc = acc + r8)
-    let ins8 = "08050501";
-    // pc 9: AddI64 dst=6, src1=6, src2=2 (i = i + 1)
-    let ins9 = "02060601";
-    // pc 10: Jump dst=0, src1=0, src2=5 (goto 5)
-    let ins10 = "0500000d";
-    // pc 11: Move dst=0, src1=5, src2=0 (r0 = acc)
-    let ins11 = "0005000a";
-    // pc 12: Ret dst=0, src1=0, src2=0 (ret r0)
-    let ins12 = "00000011";
-
-    let ins_hex = ins0 + ins1 + ins2 + ins3 + ins4 + ins5 + ins6 + ins7 + ins8 + ins9 + ins10 + ins11 + ins12;
-
-    return magic_hex + ver_hex + const_cnt_hex + c0_hex + c1_hex + c2_hex + c3_hex + heap_len_hex + ins_cnt_hex + ins_hex;
+/// Builds the compiler of `stage` from the compiler sources `compiler_unit_src`
+/// with the compiler of the previous stage, and returns the built artifact.
+pub fn pilotc_bootstrap_stage_c11(stage: CompilerBootstrapStage, compiler_unit_src: str) -> str {
+    return seam("bootstrap.stage_compile",
+        "building a compiler stage from selfhost/ needs the real self-hosted driver and C11 backend (F8)");
 }

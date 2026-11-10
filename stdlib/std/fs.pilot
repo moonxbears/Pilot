@@ -24,6 +24,7 @@ pub struct FileHandle : IObject {
     ~self() {}
 }
 
-pub pure fn file_handle_open(path: str, mode: str) -> FileHandle {
-    return FileHandle { path: path, mode: mode };
+/// Opens `path` with `mode` and returns the owning handle.
+pub fn file_handle_open(path: str, mode: str) -> FileHandle {
+    return seam("fs.open", "opening an OS file descriptor needs host file intrinsics");
 }

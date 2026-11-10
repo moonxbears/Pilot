@@ -54,25 +54,14 @@ pub struct ContractClause : IValue {
     pub expr_str:           str;
     pub is_pure:            bool;
     pub is_value_type:      bool;
-    pub can_prove_comptime: bool;
-    pub comptime_val_bool:  bool;
 }
 
-pub pure fn contract_clause_new(
-    kind: u8,
-    expr: str,
-    is_pure: bool,
-    is_val: bool,
-    can_prove: bool,
-    eval_ok: bool
-) -> ContractClause {
+pub pure fn contract_clause_new(kind: u8, expr: str, is_pure: bool, is_val: bool) -> ContractClause {
     return ContractClause {
-        kind:               kind,
-        expr_str:           expr,
-        is_pure:            is_pure,
-        is_value_type:      is_val,
-        can_prove_comptime: can_prove,
-        comptime_val_bool:  eval_ok,
+        kind:          kind,
+        expr_str:      expr,
+        is_pure:       is_pure,
+        is_value_type: is_val,
     };
 }
 
@@ -109,7 +98,6 @@ pub struct ContractWeavePlan : IObject {
     pub ensures_checked:       usize;
     pub invariants_woven:      usize;
     pub old_snapshots_hoisted: usize;
-    pub comptime_violations:   usize;
 }
 
 pub fn contract_weave_plan_new(name: str, mode: ContractCheckMode) -> ContractWeavePlan {
@@ -125,26 +113,19 @@ pub fn contract_weave_plan_new(name: str, mode: ContractCheckMode) -> ContractWe
         ensures_checked:       0,
         invariants_woven:      0,
         old_snapshots_hoisted: 0,
-        comptime_violations:   0,
     };
 }
 
-pub var fn plan_add_requires(
-    var ref self: ContractWeavePlan,
-    expr: str,
-    is_pure: bool,
-    can_prove: bool,
-    eval_ok: bool
-) {
-    self.requires_clauses.push(contract_clause_new(1, expr, is_pure, true, can_prove, eval_ok));
+pub var fn plan_add_requires(var ref self: ContractWeavePlan, expr: str, is_pure: bool) {
+    self.requires_clauses.push(contract_clause_new(1, expr, is_pure, true));
 }
 
 pub var fn plan_add_ensures(var ref self: ContractWeavePlan, expr: str, is_pure: bool) {
-    self.ensures_clauses.push(contract_clause_new(2, expr, is_pure, true, false, true));
+    self.ensures_clauses.push(contract_clause_new(2, expr, is_pure, true));
 }
 
 pub var fn plan_add_invariant(var ref self: ContractWeavePlan, expr: str, is_pure: bool) {
-    self.invariants.push(contract_clause_new(3, expr, is_pure, true, false, true));
+    self.invariants.push(contract_clause_new(3, expr, is_pure, true));
 }
 
 pub var fn plan_add_old_snapshot(var ref self: ContractWeavePlan, expr: str, is_pure: bool, is_val: bool) {
@@ -173,21 +154,34 @@ pub fn verify_where_refinement_i64(
 // 5. Contract Weaver Execution
 // ------------------------------------------------------------------------------
 
+/// Whether a `requires` clause is provably false for the constant arguments
+/// of a call site. Needs a compile-time evaluator over the clause's AST.
+pub fn prove_requires_at_call(plan: ref<ContractWeavePlan>, clause_index: usize, call_args: List<str>) -> bool {
+    return seam("contracts.prove_requires", "comptime evaluation of requires clauses over constant call arguments arrives in F4");
+}
+
+/// Weaves the checked plan into the function's PilIR: entry checks for
+/// `requires`, entry-hoisted `old` snapshots, exit checks for `ensures` and
+/// invariants. Returns false when the plan has diagnostics.
 pub fn weave_contracts(var ref plan: ContractWeavePlan) -> bool {
     if plan.mode == ContractCheckMode::Disabled {
         return true;
     }
+    if !check_contract_plan(plan) {
+        return false;
+    }
+    return seam("contracts.weave_ir", "PilIR function bodies to insert contract checks into arrive in F5");
+}
 
+/// Checks a plan's clauses (DBC002-DBC004) and counts each kind checked.
+/// Purity and value-type facts are given per clause by the caller.
+pub fn check_contract_plan(var ref plan: ContractWeavePlan) -> bool {
     // 1. Process requires clauses
     var i = 0;
     while i < plan.requires_clauses.len() {
         let req = plan.requires_clauses[i];
         if !req.is_pure {
             plan.diagnostics.push(format_dbc002("requires", req.expr_str));
-        }
-        if req.can_prove_comptime && !req.comptime_val_bool {
-            plan.diagnostics.push(format_dbc001("precondition", req.expr_str, "provably false at comptime"));
-            plan.comptime_violations = plan.comptime_violations + 1;
         }
         plan.requires_checked = plan.requires_checked + 1;
         i = i + 1;

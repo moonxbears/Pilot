@@ -18,14 +18,10 @@ pub struct ShmBuffer<T: IValue> : IObject {
     pub alignment:     i64;
     pub is_mapped:     bool;
 
+    /// Maps `capacity` bytes of shared memory aligned to `align_bytes`.
     pub static fn create(capacity: i64, align_bytes: i64) -> ShmBuffer<T> {
-        let align_val = if align_bytes > 0 { align_bytes; } else { 4096; };
-        return ShmBuffer {
-            base_addr:     1000000,
-            byte_capacity: capacity,
-            alignment:     align_val,
-            is_mapped:     true,
-        };
+        return seam("shm.map",
+            "mapping shared memory needs the OS intrinsics (shm_open + mmap / CreateFileMapping) of F6");
     }
 
     pub pure fn as_view(elem_size: i64) -> ShmView<T> {
@@ -43,18 +39,16 @@ pub struct ShmBuffer<T: IValue> : IObject {
 
     pub pure fn is_active() -> bool => .is_mapped;
 
+    /// Unmaps the region; views projected from it become invalid.
     pub var fn release() {
         if .is_mapped {
-            .is_mapped = false;
-            .base_addr = 0;
+            seam("shm.unmap",
+                "unmapping shared memory needs the OS intrinsics (munmap / UnmapViewOfFile) of F6");
         }
     }
 
     ~self() {
-        if .is_mapped {
-            .is_mapped = false;
-            .base_addr = 0;
-        }
+        .release();
     }
 }
 
