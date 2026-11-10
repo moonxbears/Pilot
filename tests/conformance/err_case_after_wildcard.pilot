@@ -1,0 +1,8 @@
+// A case after the wildcard can never match (MATCH002).
+fn main() {
+    let x = 2;
+    switch x {
+        case _: print(0);
+        case 1: print(1);
+    }
+}

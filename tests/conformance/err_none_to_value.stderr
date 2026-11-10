@@ -1,0 +1,2 @@
+error[NULL001]: Cannot assign 'none' to non-nullable type 'i64'
+err_none_to_value.pilot:3:5

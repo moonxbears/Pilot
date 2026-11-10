@@ -1,0 +1,9 @@
+// Code after `return` is a warning (UNREACH001); the program still runs.
+fn one() -> i64 {
+    return 1;
+    print(2);
+}
+
+fn main() {
+    print(one());
+}

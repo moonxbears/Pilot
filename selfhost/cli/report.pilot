@@ -15,16 +15,27 @@ use Pilot.SelfHost.Cli.Host;
 /// (the loader points at where a declaration starts) is shown as one column.
 pub fn report_diagnostic(d: HostDiag) -> Diagnostic {
     let end = if d.end > d.start { d.end } else { d.start + 1 };
-    return diagnostic_new(d.code, diag_severity_error(), d.message, source_span_new(0, d.start, end));
+    return diagnostic_new(d.code, d.severity, d.message, source_span_new(0, d.start, end));
 }
 
-/// Renders `diags` to stderr and returns how many there were.
+/// Renders `diags` to stderr and returns how many are errors.
 pub fn report_diagnostics(diags: List<HostDiag>) -> i64 {
-    var n = 0;
+    var errors = 0;
     for d in diags {
         let src = if File.exists(d.file) { File.read_text(d.file) } else { "" };
         eprint(render_diagnostic_human(report_diagnostic(d), src, d.file, false));
-        n = n + 1;
+        if d.severity == diag_severity_error() { errors = errors + 1; }
     }
-    return n;
+    return errors;
+}
+
+/// The diagnostics of `diags` at least as severe as `severity` (errors are
+/// the most severe). `pilot run` shows errors and warnings, not the
+/// analyzer's info and hint notes.
+pub fn report_at_least(diags: List<HostDiag>, severity: u8) -> List<HostDiag> {
+    var out: List<HostDiag> = [];
+    for d in diags {
+        if d.severity <= severity { out.push(d); }
+    }
+    return out;
 }

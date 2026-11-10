@@ -1,0 +1,2 @@
+error[DECL002]: Duplicate member declaration 'x' in struct scope
+err_duplicate_field.pilot:4:9

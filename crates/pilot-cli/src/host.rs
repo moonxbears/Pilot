@@ -10,6 +10,7 @@
 //! | --- | --- | --- |
 //! | `cli_check` | path | diagnostics (`run::Diag::to_host`) |
 //! | `cli_run` | path, args, tail | `[exit_code, diagnostics]`; not run when there are diagnostics |
+//! | `cli_analyze` | path | the self-hosted analyzer's diagnostics for the file |
 //! | `cli_functions` | path | `[name, [attributes]]` per top-level function, or `none` |
 //! | `cli_tool` | files, entry call | the tool's result as text |
 //! | `cli_tool_on` | files, entry call, input path | the same, its AST queries seeing the input file |
@@ -48,6 +49,7 @@ pub fn cli_host_ops() -> HostOpHandler {
                     Err(d) => HostValue::List(vec![HostValue::Int(i64::from(EXIT_FAILURE)), diags(&d)]),
                 }
             }
+            "cli_analyze" => diags(&run::analyze(&text(0))),
             "cli_functions" => run::declared_functions(&text(0)).unwrap_or(HostValue::Null),
             "cli_tool" | "cli_tool_on" => {
                 let files = texts(0);

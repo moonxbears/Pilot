@@ -11,6 +11,7 @@
 pub lvl(0) pkg Pilot.SelfHost.Cli.Commands;
 
 use std.text;
+use Pilot.Diagnostics.Model;
 use Pilot.SelfHost.Cli.Spec;
 use Pilot.SelfHost.Cli.Help;
 use Pilot.SelfHost.Cli.Host;
@@ -82,9 +83,9 @@ pub fn cmd_completions(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     return 0;
 }
 
-/// `pilot run <file> [-- args...]`: compiles the program, reports its
-/// diagnostics and refuses to run it if there are any, else runs it and exits
-/// with its exit code.
+/// `pilot run <file> [-- args...]`: compiles the program and runs the
+/// analyzer over it, reports their errors and warnings, and refuses to run
+/// it if any is an error; else runs it and exits with its exit code.
 pub fn cmd_run(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     if args.len == 0 { return usage_error("`pilot run` needs a program file"); }
@@ -94,7 +95,14 @@ pub fn cmd_run(p: ParsedArgs, reg: CommandRegistry) -> i64 {
         script_args.push(cli_list_get_str(p.passthrough_args, i));
         i = i + 1;
     }
-    let outcome = host_run(args[0], script_args, "");
+    let program = args[0];
+    if !program.ends_with(".pilc") {
+        let compiled = host_check(program);
+        if report_diagnostics(compiled) > 0 { return 1; }
+        let analyzed = report_at_least(host_analyze(program), diag_severity_warning());
+        if report_diagnostics(analyzed) > 0 { return 1; }
+    }
+    let outcome = host_run(program, script_args, "");
     let _ = report_diagnostics(outcome.diags);
     return outcome.exit_code;
 }
@@ -109,7 +117,10 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     if files.len == 0 { return usage_error("`pilot check` needs at least one file"); }
     var errors = 0;
     for f in files {
-        errors = errors + report_diagnostics(host_check(f));
+        let compiled = host_check(f);
+        errors = errors + report_diagnostics(compiled);
+        // The analyzer reads a program the seed accepted.
+        if compiled.len == 0 { errors = errors + report_diagnostics(host_analyze(f)); }
     }
     if errors > 0 {
         eprint(f"check failed: {errors} error(s)");

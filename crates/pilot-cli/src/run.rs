@@ -21,6 +21,9 @@ pub const EXIT_FAILURE: i32 = 1;
 /// The loader's code for a file that cannot be read (`selfhost/loader/module_graph.pilot`).
 const UNREADABLE: &str = "MOD001";
 
+/// Code for a fault inside the self-hosted analyzer itself.
+const ANALYZER_FAULT: &str = "VM001";
+
 /// A diagnostic found while linking, parsing or compiling a program. Offsets
 /// are byte offsets into `file`.
 pub struct Diag {
@@ -29,7 +32,13 @@ pub struct Diag {
     pub file: String,
     pub start: u32,
     pub end: u32,
+    /// 1 error, 2 warning, 3 info, 4 hint (`diag_severity_*` in
+    /// `selfhost/diagnostics/model.pilot`).
+    pub severity: u8,
 }
+
+/// Severity of the seed's own diagnostics.
+const ERROR: u8 = 1;
 
 impl Diag {
     /// `[code, message, file, start, end]`, the shape the Pilot CLI reads.
@@ -40,6 +49,7 @@ impl Diag {
             HostValue::Str(self.file.clone()),
             HostValue::Int(i64::from(self.start)),
             HostValue::Int(i64::from(self.end)),
+            HostValue::Int(i64::from(self.severity)),
         ])
     }
 
@@ -50,6 +60,7 @@ impl Diag {
             file: file.to_string(),
             start: 0,
             end: 0,
+            severity: ERROR,
         }
     }
 }
@@ -105,6 +116,7 @@ fn link_plan(path: &str) -> Result<Vec<String>, Vec<Diag>> {
                 file: field(2),
                 start: offset,
                 end: offset,
+                severity: ERROR,
             }
         })
         .collect())
@@ -144,6 +156,7 @@ pub fn compile(path: &str, tail: Option<&str>) -> Result<Program, Vec<Diag>> {
             file,
             start,
             end,
+            severity: ERROR,
         }
     };
     let parse_diags: Vec<Diag> = source
@@ -232,4 +245,34 @@ pub fn declared_functions(path: &str) -> Option<HostValue> {
         out.push(HostValue::List(vec![HostValue::Str(name), HostValue::List(attrs)]));
     }
     Some(HostValue::List(out))
+}
+
+/// The self-hosted analyzer's diagnostics for the file at `path`, read on
+/// its own (`selfhost/analyzer.pilot`, run by `pilot_analysis`). A fault
+/// inside the analyzer is reported as an error, never dropped.
+pub fn analyze(path: &str) -> Vec<Diag> {
+    let Ok(src) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let result = pilot_analysis::AnalysisPipeline::analyze_source(&src);
+    let mut out: Vec<Diag> = result
+        .diagnostics
+        .iter()
+        .map(|d| Diag {
+            code: d.code.clone(),
+            message: d
+                .message
+                .strip_prefix(&format!("{}: ", d.code))
+                .unwrap_or(&d.message)
+                .to_string(),
+            file: path.to_string(),
+            start: d.span.start,
+            end: d.span.end,
+            severity: d.severity.as_lsp_code(),
+        })
+        .collect();
+    if let Some(e) = &result.physics.analyzer_error {
+        out.push(Diag::whole_file(path, ANALYZER_FAULT, format!("the analyzer stopped: {e}")));
+    }
+    out
 }

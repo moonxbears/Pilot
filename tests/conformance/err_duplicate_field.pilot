@@ -1,0 +1,9 @@
+// A struct cannot declare the same field twice (DECL002).
+struct Point {
+    pub x: i64;
+    pub x: i64;
+}
+
+fn main() {
+    print(1);
+}

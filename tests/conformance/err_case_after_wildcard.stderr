@@ -1,0 +1,2 @@
+error[MATCH002]: Unreachable pattern in switch arm; previous wildcard arm subsumes this case
+err_case_after_wildcard.pilot:6:9

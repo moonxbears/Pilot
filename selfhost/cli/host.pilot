@@ -16,6 +16,8 @@ pub struct HostDiag : IValue {
     pub file:    str;
     pub start:   u32;
     pub end:     u32;
+    /// `diag_severity_*` in `selfhost/diagnostics/model.pilot`.
+    pub severity: u8;
 }
 
 /// What running a program gave: its exit code, or the diagnostics that kept
@@ -34,13 +36,16 @@ pub struct DeclaredFn : IValue {
 fn host_diags(raw: List<any>) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in raw {
-        out.push(HostDiag { code: d[0], message: d[1], file: d[2], start: d[3], end: d[4] });
+        out.push(HostDiag { code: d[0], message: d[1], file: d[2], start: d[3], end: d[4], severity: d[5] });
     }
     return out;
 }
 
 /// Links, parses and compiles `path` without running it.
 pub fn host_check(path: str) -> List<HostDiag> => host_diags(__engine("cli_check", path));
+
+/// The self-hosted analyzer's diagnostics for the file `path`.
+pub fn host_analyze(path: str) -> List<HostDiag> => host_diags(__engine("cli_analyze", path));
 
 /// Compiles and runs `path` with the script arguments `args`. A non-empty
 /// `tail` is linked after the program as its entry and runs instead of `main`.

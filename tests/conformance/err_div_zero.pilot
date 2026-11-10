@@ -1,0 +1,5 @@
+// Dividing by a literal zero is an analyzer error (DIV001).
+fn main() {
+    let x = 7;
+    print(x / 0);
+}

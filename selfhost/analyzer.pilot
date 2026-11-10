@@ -759,23 +759,10 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-    if (ok == 209 || ok == 210) && __engine(Cfg.ast.ast_child_count, i) > 0 {
-        let recv = __engine(Cfg.ast.ast_child_at, i, 0);
-        if __engine(Cfg.ast.ast_orig_kind, recv) != 213 {
-            let recv_tid = __engine(Cfg.ast.ast_get_bound_target, recv);
-            if recv_tid != 4294967295 && recv_tid >= 0 {
-                let t_sym = __engine(Cfg.ast.ast_node_raw_bits, recv_tid);
-                if t_sym > 0 && is_type_name_or_sym_optional(t_sym, __engine(Cfg.ast.sym_str, t_sym), node_count) {
-                    if ok == 209 {
-                        emit_diag(i, 1, "NULL002: Member access on optional type requires '?.' safe navigation or unwrapping");
-                    } else {
-                        emit_diag(i, 1, "NULL005: Index access on optional type requires safe navigation or unwrapping");
-                    }
-                    return 1;
-                }
-            }
-        }
-    }
+    // Member and index access on an optional value (NULL002 / NULL005 on
+    // `?.`-less access) need the receiver's type: F4 derives them. Guessing
+    // the type from the binding's name reported valid accesses to the
+    // optional record's own members.
     return 0;
 }
 pub fn verify_error_flow(i: i64, node_count: i64) -> i64 {
@@ -908,7 +895,10 @@ pub fn verify_pattern_matching(i: i64, node_count: i64) -> i64 {
             }
             ai = ai + 1;
         }
-        if !wildcard_seen { emit_diag(i, 1, "FLOW005: Non-exhaustive pattern match in switch expression; add wildcard '_' arm"); }
+        // FLOW005 (exhaustiveness) needs the subject's type: which variants an
+        // enum has, which slice lengths a pattern set covers. F4 derives it; a
+        // switch without a `_` arm is not evidence of a gap (`case Rect(w, h)`
+        // over every variant, or `(x, _)`, already covers everything).
     }
     return 0;
 }
