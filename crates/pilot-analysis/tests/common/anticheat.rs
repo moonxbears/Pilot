@@ -13,6 +13,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+#[path = "seed_policy.rs"]
+mod seed_policy;
+#[allow(unused_imports)]
+pub use seed_policy::{seed_rust_crate_loc_cap, seed_rust_file_loc_cap};
+
 pub struct FileAuditRule {
     pub path: &'static str,
     pub max_lines: usize,

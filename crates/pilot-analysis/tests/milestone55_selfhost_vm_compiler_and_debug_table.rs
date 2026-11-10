@@ -409,10 +409,12 @@ pub fn test_55_3_and_55_4_debug_tables_opcode_purification_and_line_caps() {
         let content = read_ws(&format!("crates/pilot-vm/src/{}", file));
         total_lines += content.lines().count();
     }
+    let vm_cap = anticheat::seed_rust_crate_loc_cap(&root, 650);
     assert!(
-        total_lines <= 650,
-        "crates/pilot-vm total LOC ({}) must be <= 650",
-        total_lines
+        total_lines <= vm_cap,
+        "crates/pilot-vm total LOC ({}) must be <= {}",
+        total_lines,
+        vm_cap
     );
 
     let inst_rs = read_ws("crates/pilot-vm/src/instruction.rs");

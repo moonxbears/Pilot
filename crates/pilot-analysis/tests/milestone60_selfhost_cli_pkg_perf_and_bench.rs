@@ -706,7 +706,8 @@ pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_c
             cli_loc += std::fs::read_to_string(&p).unwrap().lines().count();
         }
     }
-    assert!(cli_loc <= 100, "crates/pilot-cli/src total LOC ({}) must be <= 100", cli_loc);
+    let cli_cap = anticheat::seed_rust_crate_loc_cap(&root, 100);
+    assert!(cli_loc <= cli_cap, "crates/pilot-cli/src total LOC ({}) must be <= {}", cli_loc, cli_cap);
 
     let pilotc_src = std::fs::read_to_string(root.join("selfhost/pilotc.pilot")).unwrap();
     assert!(!pilotc_src.contains("system(") && !pilotc_src.contains("pilot build"));

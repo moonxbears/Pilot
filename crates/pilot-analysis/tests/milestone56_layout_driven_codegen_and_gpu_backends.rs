@@ -775,7 +775,7 @@ pub fn test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_
     ] {
         assert!(!root.join(deleted).exists(), "Legacy file {} must remain deleted", deleted);
     }
-    assert!(read_ws("crates/pilot-codegen/src/lib.rs").lines().count() <= 120);
-    assert!(read_ws("crates/pilot-rt/src/c_abi.rs").lines().count() <= 220);
+    assert!(read_ws("crates/pilot-codegen/src/lib.rs").lines().count() <= anticheat::seed_rust_file_loc_cap(&root, 120));
+    assert!(read_ws("crates/pilot-rt/src/c_abi.rs").lines().count() <= anticheat::seed_rust_file_loc_cap(&root, 220));
     guard.finish();
 }

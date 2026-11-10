@@ -304,9 +304,11 @@ pub fn test_m3_4_zero_stdout_scraping_and_cli_shrink_ceiling() {
     let main_rs_path = root.join("crates/pilot-cli/src/main.rs");
     let main_rs = fs::read_to_string(&main_rs_path).expect("read crates/pilot-cli/src/main.rs");
     let line_cnt = main_rs.lines().count();
+    let main_cap = anticheat::seed_rust_file_loc_cap(&root, 35);
     assert!(
-        line_cnt <= 35,
-        "crates/pilot-cli/src/main.rs must be <= 35 LOC (found {} lines)!",
+        line_cnt <= main_cap,
+        "crates/pilot-cli/src/main.rs must be <= {} LOC (found {} lines)!",
+        main_cap,
         line_cnt
     );
 

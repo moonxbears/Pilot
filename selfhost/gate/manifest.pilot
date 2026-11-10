@@ -600,5 +600,26 @@ pub fn build_banned_cli_lsp_tokens() -> i64 {
 }
 
 pub pure fn max_total_rust_loc() -> usize => 5900;
+
+// ------------------------------------------------------------------------------
+// Seed Contraction Policy (MILESTONES_100.md Phase F, decided 2026-11-09)
+// ------------------------------------------------------------------------------
+// Rust seed contraction is PAUSED until milestone F8 (real self-hosting fixed
+// point). F1–F3 must make the seed execute the full language correctly, which
+// needs more Rust, not less. While paused:
+//   - the per-crate ceilings in `build_crate_ceiling_registry()`, the per-file
+//     ceilings in `build_file_ceiling_registry()` and `max_total_rust_loc()` are
+//     NOT enforced; they are kept as the pre-pause record for when contraction
+//     resumes after F8;
+//   - each Rust source file must still obey the `<= 1,500` LOC law (MOD001);
+//   - total Rust `src` LOC must stay under `paused_max_total_rust_loc()`, which
+//     leaves room to reformat the dense pre-pause seed (~353 KB in ~5,400 lines)
+//     to normal line lengths and to land F1–F3;
+//   - retired crates must stay absent, and `--ratchet-update` is refused.
+// To resume contraction, set `seed_contraction_paused()` to `false` and run
+// `pilot gate --ratchet-update` once the live LOC is below the recorded ceilings.
+pub pure fn seed_contraction_paused() -> bool => true;
+pub pure fn paused_max_total_rust_loc() -> usize => 15000;
+pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
 pub pure fn bootstrap_budget_us() -> u64 => 5000000;

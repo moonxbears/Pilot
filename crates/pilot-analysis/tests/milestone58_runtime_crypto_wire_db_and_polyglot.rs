@@ -1447,7 +1447,8 @@ pub fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
             }
         }
     }
-    assert!(rt_lines <= 700, "crates/pilot-rt/src total LOC ({}) must be <= 700", rt_lines);
+    let rt_cap = anticheat::seed_rust_crate_loc_cap(&root, 700);
+    assert!(rt_lines <= rt_cap, "crates/pilot-rt/src total LOC ({}) must be <= {}", rt_lines, rt_cap);
 
     let mut ffi_lines = 0usize;
     for entry in std::fs::read_dir(root.join("crates/pilot-ffi/src")).unwrap() {
@@ -1456,6 +1457,7 @@ pub fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
             ffi_lines += std::fs::read_to_string(&path).unwrap().lines().count();
         }
     }
-    assert!(ffi_lines <= 300, "crates/pilot-ffi/src total LOC ({}) must be <= 300", ffi_lines);
+    let ffi_cap = anticheat::seed_rust_crate_loc_cap(&root, 300);
+    assert!(ffi_lines <= ffi_cap, "crates/pilot-ffi/src total LOC ({}) must be <= {}", ffi_lines, ffi_cap);
     guard.finish();
 }

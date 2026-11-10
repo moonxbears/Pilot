@@ -656,7 +656,8 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
             }
         }
     }
-    assert!(total_src_loc <= 5900, "Total Rust src LOC ({}) exceeds 5,900", total_src_loc);
+    let total_cap = anticheat::seed_rust_crate_loc_cap(&root, 5900);
+    assert!(total_src_loc <= total_cap, "Total Rust src LOC ({}) exceeds {}", total_src_loc, total_cap);
 
     // 3. Dual-Pass Universal Rename Litmus Test:
     //    Pass 0: Canonical AGENTS.md litmus names (`c32`, `window`, `maybe`, `outcome`, `interval`)

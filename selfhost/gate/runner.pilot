@@ -45,7 +45,7 @@ pub fn gate_help_banner() -> str {
            "  --litmus           Include Dual-Pass Universal Rename Litmus gate\n" +
            "  --seed <u64>       Deterministic seed for Pass-1 Rename Litmus & Bootstrap Parity\n" +
            "  --json             Emit machine-readable JSON gate report\n" +
-           "  --ratchet-update   Tighten CrateCeilingRule LOC caps downward to live Rust LOC\n" +
+           "  --ratchet-update   Tighten CrateCeilingRule LOC caps downward to live Rust LOC (disabled while contraction is paused)\n" +
            "  -h, --help         Show this help message";
 }
 
@@ -360,6 +360,11 @@ pub fn run_pilot_gate_cli(workspace_root: str, raw_args: str) -> str {
         return "0\n" + gate_help_banner();
     }
     if opts.ratchet_update == true {
+        if seed_contraction_paused() == true {
+            return "2\nError: --ratchet-update is disabled while Rust seed contraction is paused " +
+                   "(MILESTONES_100.md Phase F, until F8). Set seed_contraction_paused() to false " +
+                   "in selfhost/gate/manifest.pilot to resume contraction.";
+        }
         return "0\n" + apply_ratchet_update(workspace_root);
     }
     let reports = run_all_gates(workspace_root, opts);

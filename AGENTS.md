@@ -16,6 +16,11 @@
 - **Pilot First & Active Rust Engine Contraction:**
   - Implement every feature in Pilot first (`stdlib/core/`, `stdlib/std/`, `stdlib/pilot/`, `selfhost/`). Only touch an underlying bootstrap language when strictly irreducible at the OS/hardware boundary—and even then, drive behavior declaratively from Pilot descriptors (e.g., `pilot.abi.*` `AbiFramePlan`).
   - Treat `crates/pilot-*` as a **shrinking bootstrap seed** (unlocked in `M1` strictly for contraction toward a minimal C11 seed in `M38`–`M39` and a 100% pure-Pilot repository in `M89`). Never add user-facing CLI tools, linters, formatters, or domain semantics in Rust.
+  - **Contraction is PAUSED until `F8` (decided 2026-11-09, see `MILESTONES_100.md` Phase F and `Audit.md`).** The seed must execute the whole language correctly before it can be replaced, so Phase F milestones `F1`–`F3` (and later the process/file intrinsics of `F6`) may **grow** `crates/pilot-*`. While paused:
+    - Rust growth is limited to execution-engine correctness: the tagged value model, lowering of every AST node kind, operators, module linking, error surfacing and exit codes, and the small set of OS intrinsics Pilot cannot provide itself (stdin, process spawn, file write). The 14-seed-token rule, the zero-hardcoded-type-name rule, and the ban on user-facing tools or domain semantics in Rust still apply.
+    - Write new Rust in normal `rustfmt` style. Do not pack code onto long lines to satisfy a line count.
+    - The gate enforces the `<= 1,500` LOC law per Rust file and a total budget instead of the per-crate ratchet. The single source of truth is `seed_contraction_paused()`, `paused_max_total_rust_loc()` and `paused_max_rust_file_loc()` in `selfhost/gate/manifest.pilot`; milestone tests read the same values through `crates/pilot-analysis/tests/common/seed_policy.rs`. `pilot gate --ratchet-update` is refused while paused.
+    - Resume contraction after `F8` by setting `seed_contraction_paused()` to `false`.
 - **Same-Milestone Legacy & Cache Purge:**
   - Anytime a replacement is introduced, delete all superseded legacy code, mock stubs, obsolete scripts, foreign-clone shims, and stale `.pilc` blobs within the **same milestone** so dead paths never accumulate.
 - **The Dual-Pass Universal Rename Litmus Test:**

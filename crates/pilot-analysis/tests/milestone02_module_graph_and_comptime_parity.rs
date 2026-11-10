@@ -265,11 +265,13 @@ pub fn test_m2_4_zero_fake_transpile_stubs_and_crate_ceilings() {
 
     // 2. Verify crate line counts
     let cli_lines = cli_src.lines().count();
-    assert!(cli_lines <= 100, "crates/pilot-cli/src/main.rs LOC ({cli_lines}) must be <= 100");
+    let cli_cap = anticheat::seed_rust_file_loc_cap(&root, 100);
+    assert!(cli_lines <= cli_cap, "crates/pilot-cli/src/main.rs LOC ({cli_lines}) must be <= {cli_cap}");
 
     let span_src = std::fs::read_to_string(root.join("crates/pilot-span/src/lib.rs")).expect("read lib.rs");
     let span_lines = span_src.lines().count();
-    assert!(span_lines <= 250, "crates/pilot-span/src/lib.rs LOC ({span_lines}) must be <= 250");
+    let span_cap = anticheat::seed_rust_file_loc_cap(&root, 250);
+    assert!(span_lines <= span_cap, "crates/pilot-span/src/lib.rs LOC ({span_lines}) must be <= {span_cap}");
 
     // 3. Verify real transpile routing works via `pilot emit python`
     let sample_pilot = "pub fn add_nums(a: i64, b: i64) -> i64 => a + b;\n";

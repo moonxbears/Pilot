@@ -835,7 +835,11 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunO
         ri = ri + 1;
     }
 
-    // 4. Measure per-crate & total Rust `src/**/*.rs` LOC against ratchet ceilings
+    // 4. Measure per-crate & total Rust `src/**/*.rs` LOC.
+    //    While seed contraction is paused (Phase F, until F8), the ratchet
+    //    ceilings are not enforced; only the per-file `<= 1,500` LOC law and the
+    //    paused total budget apply (see `seed_contraction_paused()` in manifest.pilot).
+    let paused = seed_contraction_paused();
     let crate_loc_sums = __engine("map_new");
     let file_caps = build_file_ceiling_registry();
     let rs_walk = gm_split_lines(gate_fs_walk_files(gm_join_path(root, "crates")));
@@ -854,7 +858,15 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunO
                 __engine("map_set", crate_loc_sums, ckey, prev + loc);
             }
             let fcap = __engine("map_get", file_caps, rel) + 0;
-            if fcap > 0 && loc > fcap {
+            if paused == true {
+                if loc > paused_max_rust_file_loc() {
+                    let _ = glist_push(violations, sa_make_violation(
+                        "GATE003", rel, loc, 1, "" + loc + " > " + paused_max_rust_file_loc(),
+                        "Rust source file exceeds the <= 1,500 LOC law (MOD001)",
+                        "Split the file into modules with one responsibility each"
+                    ));
+                }
+            } else if fcap > 0 && loc > fcap {
                 let _ = glist_push(violations, sa_make_violation(
                     "GATE003", rel, loc, 1, "" + loc + " > " + fcap,
                     "Rust source file exceeds per-file LOC ratchet ceiling",
@@ -870,7 +882,7 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunO
     while ci < n_crates {
         let cpath = glist_get(crate_keys, ci);
         let rule = __engine("map_get", crate_reg, cpath);
-        if rule.must_be_absent == false {
+        if rule.must_be_absent == false && paused == false {
             let cloc = __engine("map_get", crate_loc_sums, cpath) + 0;
             if cloc > rule.max_loc {
                 let _ = glist_push(violations, sa_make_violation(
@@ -883,7 +895,15 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunO
         ci = ci + 1;
     }
 
-    if total_rs_loc > max_total_rust_loc() {
+    if paused == true {
+        if total_rs_loc > paused_max_total_rust_loc() {
+            let _ = glist_push(violations, sa_make_violation(
+                "GATE003", "crates", total_rs_loc, 1, "" + total_rs_loc + " > " + paused_max_total_rust_loc(),
+                "Total workspace Rust src LOC exceeds the Phase F growth budget",
+                "Move logic into Pilot or revisit paused_max_total_rust_loc() in manifest.pilot"
+            ));
+        }
+    } else if total_rs_loc > max_total_rust_loc() {
         let _ = glist_push(violations, sa_make_violation(
             "GATE003", "crates", total_rs_loc, 1, "" + total_rs_loc + " > " + max_total_rust_loc(),
             "Total workspace Rust src LOC exceeds global contraction ceiling",

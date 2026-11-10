@@ -733,17 +733,21 @@ pub fn test_51_4_rust_parser_and_ast_contraction_and_name_blind_purity() {
     let parser_rs =
         std::fs::read_to_string(root.join("crates/pilot-parser/src/lib.rs")).unwrap();
     let parser_loc = parser_rs.lines().count();
+    let parser_cap = anticheat::seed_rust_file_loc_cap(&root, 1100);
     assert!(
-        parser_loc <= 1100,
-        "crates/pilot-parser/src/lib.rs must be <= 1,100 LOC, got {}",
+        parser_loc <= parser_cap,
+        "crates/pilot-parser/src/lib.rs must be <= {} LOC, got {}",
+        parser_cap,
         parser_loc
     );
 
     let ast_rs = std::fs::read_to_string(root.join("crates/pilot-ast/src/lib.rs")).unwrap();
     let ast_loc = ast_rs.lines().count();
+    let ast_cap = anticheat::seed_rust_file_loc_cap(&root, 450);
     assert!(
-        ast_loc <= 450,
-        "crates/pilot-ast/src/lib.rs must be <= 450 LOC, got {}",
+        ast_loc <= ast_cap,
+        "crates/pilot-ast/src/lib.rs must be <= {} LOC, got {}",
+        ast_cap,
         ast_loc
     );
     assert!(!ast_rs.contains("collections::HashMap"));

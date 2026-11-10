@@ -362,9 +362,11 @@ pub fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
         let content = std::fs::read_to_string(workspace_root.join(rel)).unwrap();
         total_lexer_loc += content.lines().count();
     }
+    let lexer_cap = anticheat::seed_rust_crate_loc_cap(&workspace_root, 900);
     assert!(
-        total_lexer_loc <= 900,
-        "crates/pilot-lexer total LOC must be <= 900, got {}",
+        total_lexer_loc <= lexer_cap,
+        "crates/pilot-lexer total LOC must be <= {}, got {}",
+        lexer_cap,
         total_lexer_loc
     );
 
@@ -404,9 +406,11 @@ pub fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
 
     let intern_rs = std::fs::read_to_string(workspace_root.join("crates/pilot-intern/src/lib.rs")).unwrap();
     let intern_loc = intern_rs.lines().count();
+    let intern_cap = anticheat::seed_rust_file_loc_cap(&workspace_root, 165);
     assert!(
-        intern_loc <= 165,
-        "crates/pilot-intern/src/lib.rs must be <= 165 LOC, got {}",
+        intern_loc <= intern_cap,
+        "crates/pilot-intern/src/lib.rs must be <= {} LOC, got {}",
+        intern_cap,
         intern_loc
     );
     assert!(!intern_rs.contains("KeywordId") && !intern_rs.contains("intern_keyword"));

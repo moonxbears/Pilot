@@ -1,454 +1,349 @@
-# Comprehensive Audit: Milestones 1 through 10 (Phase 1)
+# Audit: Milestones vs. Actual Project State
 
-> **Document Purpose:** This document provides a complete, rigorous architectural audit comparing the Phase 1 specifications (`M1` through `M10` in [`MILESTONES_100.md`](file:///home/moony/Documents/dev/projects/Pilot/MILESTONES_100.md)) against the actual implementation in the Pilot repository (`crates/`, `selfhost/`, `stdlib/`, and test suites).
-
----
-
-## 1. Executive Summary & Phase 1 Scorecard
-
-Phase 1 (`M1` $\rightarrow$ `M10`) establishes the core foundation: Seed Unlock, Pure-Pilot Gate Runner, Unified `PilotDb`, `PilIR`, Dual-Syntax Pairings, Progressive Diagnostics, Three-Ring Standard Library, and Compiler-as-a-Library.
-
-| Milestone | Title | Spec Status | Test Suite Status | Gate Compliance | Core Implementation Health |
-| :---: | :--- | :---: | :---: | :---: | :--- |
-| **M1** | Seed Unlock & Pure-Pilot Gate Runner | Complete | 4/4 Passed | Green (`0` violations) | Clean, robust pure-Pilot gate suite. |
-| **M2** | Module Graph & `comptime` Parity | Complete | 4/4 Passed | Green (`0` violations) | Tarjan SCC graph, FileId SourceMap. |
-| **M3** | Declarative CLI Command Registry | Complete | 4/4 Passed | Green (`0` violations) | `crates/pilot-cli` shrunk to 33 LOC. |
-| **M4** | Dual Readable/Symbolic Syntax Pairings | Complete | 4/4 Passed | Green (`0` violations) | Canonical pairs lowered to identical AST. |
-| **M5** | Incremental Compiler Query Database (`PilotDb`) | Complete | 4/4 Passed | Green (`0` violations) | Red-green memoization, 128-bit fingerprints & early cutoff. |
-| **M6** | First-Class Typed SSA Mid-Level IR (`PilIR`) | Substantially Complete | 4/4 Passed | Green (`0` violations) | PilIR operational; `ir.pilot` retained strictly as M57 test anchor. |
-| **M7** | Zero-Black-Box Transparency Tool (`pilot inspect`) | Complete | 4/4 Passed | Green (`0` violations) | Weave, layout, method, Perceus lenses active; LSP handler wired. |
-| **M8** | Progressive Diagnostics & Lossless CST Auto-Fix | Complete | 4/4 Passed | Green (`0` violations) | Unicode width gutter snippet, CST autofix & atomic write. |
-| **M9** | Three-Ring Standard Library Personality | Substantially Complete | 4/4 Passed | Green (`0` violations) | Canonical `std.*` active; 15 legacy folders purged; 7 test anchors retained. |
-| **M10** | Compiler-as-a-Library (`pilot.*` Ring 3 API) | Complete | 4/4 Passed | Green (`0` violations) | 9 Ring 3 modules active; idiomatic freestanding API. |
-| **M11** | First-Class `adapter` Blueprint Engine & Zero-Cost Idiom Lifter | Complete | 4/4 Passed | Green (`0` violations) | Table-driven rules, PilIR zero-alloc thunk compilation, public Adapt facets, mocks purged. |
-
-**Overall Gate Status:**
-- `cargo run -p pilot-cli -- gate --json`: **PASSED** (`0` violations across 419 Adaptability items and 338 Hygiene items).
-- `cargo test -p pilot-analysis --test mega_all_milestones_simultaneous_gate`: **85/85 PASSED** in 53.73s.
+- **Date:** 2026-11-09
+- **Audited revision:** `d3565a8` (M30 commit) plus the uncommitted edits to `MILESTONES_100.md`
+- **Scope:** all of `MILESTONES_100.md` — M1–M30 (marked done) checked against the code; M31–M100 checked for feasibility from where the code actually is
+- **Replaces:** the previous `Audit.md` (M1–M11 only), whose "Complete / Green" scorecard this audit does not confirm
 
 ---
 
-## 2. Detailed Milestone-by-Milestone Audit
+## 1. Verdict
+
+**The milestone document does not reflect the state of the project, and the project is not on track for M31 onward.**
+
+- All 276 tests pass and `pilot gate --full` reports 0 violations. Both are true and both are misleading.
+- None of M1–M30 is complete as specified. Each one exists as a Pilot library that only its own test calls. Almost nothing is connected to the compiler, the VM or the CLI.
+- The baseline the roadmap starts from ("v1.1.51, Stage-3 fixed-point self-hosting") is not real. `selfhost/pilotc.pilot` is a 218-line template, not a compiler.
+- What a user can actually run is a Rust parser plus a small Rust bytecode VM that executes a `while` / `if` / function / struct subset of the language, with integers, strings and maps. `for`, `switch`, f-strings, closures, floats, `defer`, constructors, destructors, imports and all error reporting do not work.
+- M31–M50 are specified on top of a type checker, an SSA IR, a heap/ownership model and a native backend. None of those four exist yet.
+
+There is real, reusable work in the repo (section 9). The problem is not that nothing was built; it is that "done" has been measured by tests that cannot tell a working feature from a stand-in.
 
 ---
 
-### Milestone 1: Seed Unlock & Pure-Pilot Architectural Gate Runner (`pilot gate`)
+## 2. How this audit was done
 
-#### 1.1 Specified in `MILESTONES_100.md`
-- Creation of `selfhost/gate/`: `manifest.pilot`, `seed_audit.pilot`, `rename_litmus.pilot`, `bootstrap_parity.pilot`, `runner.pilot`.
-- Complete deletion of `FROZEN_RUST_AND_GATE_HASHES` in `crates/pilot-analysis/tests/common/anticheat.rs`.
-- Total purge of legacy Python gate scripts (`scripts/gate1..4_*.py`, `scripts/convert_dunders.py`).
-- Universal Rename Litmus verifying name-blindness across backends.
-- Fast gate execution (`< 500 ms`) with exit code contracts and `GATE001`–`GATE009`.
-
-#### 1.2 Actual Implementation
-- [`selfhost/gate/manifest.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/gate/manifest.pilot) (604 LOC): Declarative registries of seed tokens, surviving crates, and ratchet ceilings.
-- [`selfhost/gate/seed_audit.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/gate/seed_audit.pilot) (907 LOC): Scans Rust files for 14 seed tokens and catches user-space type names.
-- [`selfhost/gate/rename_litmus.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/gate/rename_litmus.pilot) (332 LOC): Universal rename runner.
-- [`selfhost/gate/bootstrap_parity.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/gate/bootstrap_parity.pilot) (141 LOC): Parity checker.
-- [`selfhost/gate/runner.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/gate/runner.pilot) (380 LOC): CLI orchestrator.
-- `scripts/` directory is completely deleted from the repository.
-- `FROZEN_RUST_AND_GATE_HASHES` and its tamper seal function are completely removed from `anticheat.rs`.
-
-#### 1.3 Discrepancies & Disparities
-1. **`TempDirGuard` Implementation (Minor):** Spec described an explicit `0b11` `TempDirGuard` struct with `~self()` unlinking `/tmp/pilot_litmus_<pid>`. In `rename_litmus.pilot`, temporary paths are created and cleaned via direct engine calls rather than a formal `IGuard` carrier.
-2. **Crate Ratchet Ceilings (Minor):** Some crate ceiling values in `manifest.pilot` differ slightly from the speculative budgets (e.g., `pilot-vm` ratchet ceiling is set to 650 LOC vs. 700 LOC proposed).
-
----
-
-### Milestone 2: Transitive Module Graph & `comptime` Reflection Parity
-
-#### 2.1 Specified in `MILESTONES_100.md`
-- Creation of `selfhost/loader/module_graph.pilot` (`~360L`) implementing Tarjan's SCC cycle detection.
-- Creation of `selfhost/loader/pragma_filter.pilot` (`~180L`) replacing Rust-side pragma parsing.
-- Extension of `crates/pilot-span/src/lib.rs` with `FileId(u32)` and `SourceMap` to eliminate span drift from string concatenation.
-- Binding of root `ENV` global symbol in `comptime.rs` to allow $O(1)$ reflection.
-- Deletion of fake transpilation stubs (`"def add"`, `"pub fn mul"`) from `crates/pilot-cli/src/main.rs`.
-
-#### 2.2 Actual Implementation
-- [`selfhost/loader/module_graph.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/loader/module_graph.pilot) (484 LOC): Implements module resolution, DAG topological sorting, and circular dependency checks (`MOD002`).
-- [`selfhost/loader/pragma_filter.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/loader/pragma_filter.pilot) (198 LOC): Pure-Pilot `#pragma` filter.
-- `crates/pilot-span/src/lib.rs` and `crates/pilot-analysis/src/pipeline.rs`: Spans retain file unit offsets.
-- `crates/pilot-analysis/src/comptime.rs`: Registers `ENV` in VM globals and preserves `ComptimeValue` types.
-- `crates/pilot-cli/src/main.rs`: Fake string stubs deleted.
-
-#### 2.3 Discrepancies & Disparities
-1. **`CompileEnvView` Struct Form (Minor):** In `stdlib/core/reflect.pilot`, reflection queries are exposed through functional APIs (`env_target_os()`, `env_pointer_bytes()`, etc.) rather than a single `0b01` borrowed view struct `CompileEnvView : IReference`.
-2. **Windows UNC Network Shares (Minor):** Path normalization handles POSIX `/` and Windows `\` seamlessly, but Windows UNC network share paths (`//server/share/...`) are normalized as standard paths without dedicated UNC probe tests.
-
----
-
-### Milestone 3: Declarative CLI Command Registry (`selfhost/cli/`)
-
-#### 3.1 Specified in `MILESTONES_100.md`
-- Creation of `selfhost/cli/spec.pilot` (`~210L`), `parser.pilot` (`~320L`), `help_and_comp.pilot` (`~290L`), and `main.pilot` (`~260L`).
-- Shrink `crates/pilot-cli/src/main.rs` to $\le 35$ LOC with zero subcommand names.
-- POSIX/GNU flag parsing (`--flag=val`, short flag clustering `-abc`, `--` passthrough).
-- Damerau-Levenshtein typo suggestions with exit code 2.
-- Shell completions (`bash`, `zsh`, `fish`, `pwsh`) and JSON tool schemas.
-
-#### 3.2 Actual Implementation
-- [`selfhost/cli/spec.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/cli/spec.pilot) (337 LOC): `CommandSpec`, `FlagSpec`, `CommandRegistry`.
-- [`selfhost/cli/parser.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/cli/parser.pilot) (494 LOC): POSIX parser, `--` passthrough, Damerau-Levenshtein suggestions.
-- [`selfhost/cli/help_and_comp.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/cli/help_and_comp.pilot) (245 LOC): Terminal-aware help and completion scripts.
-- [`selfhost/cli/main.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/cli/main.pilot) (294 LOC): Command router.
-- [`crates/pilot-cli/src/main.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-cli/src/main.rs) (33 LOC): Strictly compliant with the $\le 35$ LOC limit (33 lines).
-
-#### 3.3 Discrepancies & Disparities
-1. **CLI IPC Protocol (Minor):** The boundary between `crates/pilot-cli/src/main.rs` and `selfhost/cli/main.pilot` communicates through formatted string commands (`RUN:<file>`, `GATE:<args>`, `EMIT:<args>`, `PRINT:<msg>`) rather than a direct memory-mapped struct or foreign ABI frame.
-
----
-
-### Milestone 4: Dual Readable/Symbolic Syntax Pairings
-
-#### 4.1 Specified in `MILESTONES_100.md`
-- Mandatory readable/symbolic keyword and type pairings:
-  - Types: `T?` $\leftrightarrow$ `opt<T>`, `T ! E` $\leftrightarrow$ `res<T, E>`, `T[]` $\leftrightarrow$ `slice<T>`, `T[N]` $\leftrightarrow$ `array<T, N>`, `T[..]` $\leftrightarrow$ `stride<T>`, `T@N` $\leftrightarrow$ `simd<T, N>`.
-  - Call-Quotes: `f!(x)` $\leftrightarrow$ `call f(x)`, `f!!(~x)` $\leftrightarrow$ `splice f(~x)`, `f!&(x)` $\leftrightarrow$ `frame f(x)`, `f!^(x)` $\leftrightarrow$ `sig f(x)`, `f!@(x)` $\leftrightarrow$ `grad f(x)`, `f!?(x)` $\leftrightarrow$ `plan f(x)`.
-  - Unpacking: `*x` $\leftrightarrow$ `splat(x)`, `**x` $\leftrightarrow$ `pairs(x)`, `*..x` $\leftrightarrow$ `flat(x)`.
-- Metadata registration in `stdlib/core/keywords.pilot`.
-- Bidirectional formatting in `selfhost/fmt/fmt.pilot` (`--style=readable`, `--style=compact`, `--style=preserve`).
-
-#### 4.2 Actual Implementation
-- `stdlib/core/keywords.pilot` registers all 11 readable symbols and paired definitions.
-- `stdlib/core/syntax/call_quote.pilot`, `expr_sugar.pilot`, and `type_construct.pilot` define macro rewrites to identical AST receptors.
-- `selfhost/fmt/fmt.pilot` provides style modes and round-trips correctly.
-
-#### 4.3 Discrepancies & Disparities
-1. **Wadler-Lindig Precedence Grouping in Formatter (Minor):** Complex nested parenthesization (such as `opt<fn<i64, bool>>` rewriting to `((i64) => bool)?`) is handled by procedural token transformations in `selfhost/fmt/fmt.pilot` rather than an algebraic CST pretty-printer.
-
----
-
-### Milestone 5: Shared Incremental Compiler Query Database (`PilotDb`)
-
-#### 5.1 Specified in `MILESTONES_100.md`
-- Creation of `selfhost/db/`: `revision.pilot`, `engine.pilot`, `queries.pilot`, `cache_io.pilot`.
-- Salsa-style Red-Green memoization with 4 durability tiers (`Volatile`, `Workspace`, `ExternalPkg`, `CoreGenesis`).
-- BLAKE3 128-bit fingerprinting with early-cutoff support.
-- On-disk persistence in `.pilc-cache/pilotdb.v1` with `< 15 ms` warm check latency.
-- Cycle detection reporting `DB001`.
-
-#### 5.2 Actual Implementation
-- [`selfhost/db/revision.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/db/revision.pilot) (238 LOC): Revisions and keys.
-- [`selfhost/db/engine.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/db/engine.pilot) (499 LOC): Red-green memoization and cycle detection (`DB001`).
-- [`selfhost/db/queries.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/db/queries.pilot) (105 LOC): Query stage definitions.
-- [`selfhost/db/cache_io.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/db/cache_io.pilot) (166 LOC): Cache serialization.
-
-#### 5.3 Discrepancies & Disparities
-1. **Fingerprint Bit Width (Resolved):** In `selfhost/db/revision.pilot`, `Fingerprint128` is implemented as a 128-bit `[Layout(c_abi)]` struct with `lo: u64` and `hi: u64`, accompanied by `fingerprint_zero()`, `fingerprint_new(lo, hi)`, `fingerprint_equals(a, b)`, `fingerprint_from_hex(hex)`, and `fingerprint_compute(content)` producing the full 128-bit hash pair.
-2. **Durability Watermark Representation (Minor):** Durability tracking operates via monotonic per-tier revision comparison rather than an explicit fixed array `array<u64, 4>` in `PilotDb`.
-
----
-
-### Milestone 6: First-Class Typed SSA Mid-Level IR (`PilIR`)
-
-#### 6.1 Specified in `MILESTONES_100.md`
-- Creation of `selfhost/ir/`: `model.pilot`, `lower_ast.pilot`, `verifier.pilot`, `pass_manager.pilot`, `passes_core.pilot`, `printer.pilot`.
-- Block parameters instead of $\phi$-nodes.
-- 34 orthogonal opcodes across 6 families with zero hardcoded type names (`IrTypePhysics`).
-- Pluggable pass pipeline (`IPilIrPass`).
-- **Mandatory Deletion of `selfhost/transpile/ir.pilot` (`-100%`)**: all 7 transpilers to read unified `PilIR`.
-
-#### 6.2 Actual Implementation
-- [`selfhost/ir/model.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/model.pilot) (376 LOC): Block parameters, SSA values, `IrTypePhysics`.
-- [`selfhost/ir/lower_ast.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/lower_ast.pilot) (103 LOC): AST to IR lowering.
-- [`selfhost/ir/verifier.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/verifier.pilot) (214 LOC): SSA dominance and block argument verification.
-- [`selfhost/ir/pass_manager.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/pass_manager.pilot) (99 LOC): Pass manager.
-- [`selfhost/ir/passes_core.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/passes_core.pilot) (142 LOC): Canonical passes (DCE, constant folding).
-- [`selfhost/ir/printer.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/printer.pilot) (113 LOC): Textual IR printer.
-
-#### 6.3 Discrepancies & Disparities
-1. **`selfhost/transpile/ir.pilot` Retained as Downstream Test Anchor (Intentional Deferral):**
-   - *Spec Requirement:* `MILESTONES_100.md` lines 436 and 493 state: *"Confirm selfhost/transpile/ir.pilot is deleted and all 7 transpilers + VM + C + LLVM + WASM + ASM + GPU backends emit valid outputs from PilIR."*
-   - *Current State:* [`selfhost/transpile/ir.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/transpile/ir.pilot) (371 lines, 10,418 bytes) **remains on disk**.
-   - *Root Cause:* [`crates/pilot-analysis/tests/milestone57_bidirectional_transpilers_and_ingest.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis/tests/milestone57_bidirectional_transpilers_and_ingest.rs#L25) explicitly enforces an anti-cheat `FileAuditRule` requiring `selfhost/transpile/ir.pilot` with `min_bytes: 5_000`. Additionally, [`crates/pilot-cli/src/main.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-cli/src/main.rs#L30) references it for legacy `pilot emit`. Deleting it immediately causes M57 anti-cheat tests to fail. It is intentionally preserved as a downstream test anchor until M57.
-2. **Instruction Operand Pool (Minor):** In `model.pilot`, instructions store argument value IDs directly rather than referencing a slice into a global `IrFunction.operand_pool`.
-
----
-
-### Milestone 7: Zero-Black-Box Transparency Tool (`pilot inspect`)
-
-#### 7.1 Specified in `MILESTONES_100.md`
-- Creation of `selfhost/inspect/`: `selector.pilot`, `weave_lens.pilot`, `layout_lens.pilot`, `method_lens.pilot`, `perceus_lens.pilot`.
-- Creation of `selfhost/cli/inspect_cmd.pilot` registered in `CommandRegistry`.
-- Multi-target selector syntax (`file.pilot:line:col`, symbol path, monomorphized types).
-- Inspection of struct byte offsets, padding holes, 4-tier method resolution trace, and Perceus inline markers.
-- LSP custom request `pilot/inspect` responding in `< 5 ms`.
-
-#### 7.2 Actual Implementation
-- [`selfhost/inspect/selector.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/inspect/selector.pilot) (133 LOC): Target parsing.
-- [`selfhost/inspect/weave_lens.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/inspect/weave_lens.pilot) (29 LOC): Attribute and macro expansion view.
-- [`selfhost/inspect/layout_lens.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/inspect/layout_lens.pilot) (78 LOC): Byte offsets, alignment, padding.
-- [`selfhost/inspect/method_lens.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/inspect/method_lens.pilot) (61 LOC): 4-tier precedence resolution.
-- [`selfhost/inspect/perceus_lens.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/inspect/perceus_lens.pilot) (56 LOC): Inline borrow/move/drop annotations.
-- [`selfhost/cli/inspect_cmd.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/cli/inspect_cmd.pilot) (68 LOC): Subcommand wiring.
-
-#### 7.3 Discrepancies & Disparities
-1. **ASCII Box Diagrams (Minor):** Layout lens prints structured tabular offsets and padding calculations rather than rendering multi-row ASCII box-drawing memory maps (`┌──────┬──────┐`).
-2. **LSP Handler Exposure (Resolved):** Custom request handler `handle_lsp_inspect` has been implemented and wired to `"pilot/inspect"` in `selfhost/lsp/handlers.pilot` (dispatching JSON responses for inspected target symbols while maintaining file LOC $\le 1000$).
-
----
-
-### Milestone 8: Progressive Diagnostics & Lossless CST Auto-Fix (`pilot check --fix`)
-
-#### 8.1 Specified in `MILESTONES_100.md`
-- Creation of `selfhost/diagnostics/model.pilot` (`~240L`) and `renderer.pilot` (`~350L`).
-- Creation of `selfhost/cst/autofix.pilot` (`~330L`).
-- Unicode East-Asian display width alignment for multi-byte codepoints (`Δ`, CJK, emoji).
-- `--explain <CODE>` tutorial knowledge base.
-- Reverse byte-order multi-edit disjointness solver with strict comment conservation verifier (`FIX001`).
-- SARIF 2.1.0 and JSON reports.
-
-#### 8.2 Actual Implementation
-- [`selfhost/diagnostics/model.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/diagnostics/model.pilot) (263 LOC): Full diagnostic schema, `DiagSeverity`, `FixApplicability`, `CstTextEdit`.
-- [`selfhost/diagnostics/renderer.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/diagnostics/renderer.pilot) (469 LOC): Gutter snippets, UTF-8 char width calculation (`utf8_char_info`), `--explain` knowledge base, SARIF 2.1.0 generator.
-- [`selfhost/cst/autofix.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/cst/autofix.pilot) (437 LOC): Reverse-order edit applier, `verify_comment_conservation` (failing with `FIX001`), CRLF preservation, unified diff preview.
-
-#### 8.3 Discrepancies & Disparities
-1. **Atomic File Replacement Strategy (Resolved):** `selfhost/cst/autofix.pilot` implements `write_file_atomic(file_path, new_src)` which commits to `<file_path>.tmp` first and verifies write integrity before updating the destination file.
-2. **Legacy Catalog Integration (Minor):** Catalog files in `selfhost/diagnostics/{errors,warnings,infos}.pilot` continue using older diagnostic schemas for legacy selfhost passes alongside the new rich `Diagnostic` model.
-
----
-
-### Milestone 9: Three-Ring Standard Library Personality (`core`, `std`, `pilot`)
-
-#### 9.1 Specified in `MILESTONES_100.md`
-- Three-Ring personality:
-  - Ring 1 (`core.*`): Freestanding language core (0 OS syscalls).
-  - Ring 2 (`std.*`): Hosted standard library (27 canonical packages).
-  - Ring 3 (`pilot.*`): First-class compiler-as-a-library.
-- `selfhost/loader/ring_verifier.pilot` (`~190L`): Enforces `RING001` (upward imports), `RING002` (freestanding core), `RING003` (retired import migration), `RING004` (stale cache rejection).
-- Complete deletion of **21 legacy Python-clone folders/files** in `stdlib/`.
-- Purge of all **80 stale `stdlib/.pilc-cache/std.*.pilc` binaries**.
-
-#### 9.2 Actual Implementation
-- [`selfhost/loader/ring_verifier.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/loader/ring_verifier.pilot) (243 LOC): Enforces `RING001`, `RING002`, `RING003`, and `RING004`.
-- All 27 canonical Ring 2 packages created in [`stdlib/std/`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/std/): `col.pilot`, `io.pilot`, `fs.pilot`, `path.pilot`, `net.pilot`, `http.pilot`, `task.pilot`, `chan.pilot`, `sync.pilot`, `crypto.pilot`, `rand.pilot`, `json.pilot`, `toml.pilot`, `csv.pilot`, `bin.pilot`, `enc.pilot`, `db.pilot`, `math.pilot`, `os.pilot`, `env.pilot`, `proc.pilot`, `time.pilot`, `log.pilot`, `text.pilot`, `test.pilot`, `bench.pilot`, `polyglot.pilot`.
-- Purged all 80 stale `.pilc` files from `stdlib/.pilc-cache/`.
-- Permanently deleted all 21 banned Python-clone directories/files (`pickle`, `tomllib`, `unittest`, `timeit`, `urllib`, `request`, `pandas`, `numpy`, `matplotlib`, `scikit`, `asyncio/asyncio.pilot`, `collections/itertools.pilot`, `functools`, `io/pathlib.pilot`, `io/shutil.pilot`, `math/random.pilot`, `secrets`, `threading`, `multiprocessing`).
-
-#### 9.3 Discrepancies & Disparities
-1. **Legacy Non-Python Folders Purged / Phase 5 Anchors (Substantially Resolved):**
-   - *Purge Executed:* 15 unused legacy directories have been completely purged from `stdlib/`: `numeric`, `csv`, `decimal`, `os`, `logging`, `json`, `socket`, `sys`, `random`, `io`, `text`, `math`, `formats`, `encoding`, and `collections`. Reference paths in `selfhost/pkg/manifest.pilot` and `selfhost/lsp/handlers.pilot` were updated to point to canonical `stdlib/std/col.pilot`.
-   - *Retained Phase 5 Anchors:* Exactly 7 legacy directories are temporarily retained because downstream anti-cheat test suites and parser bootstrap tables enforce file-level existence audits:
-     - `stdlib/crypto/`, `stdlib/db/`, `stdlib/http/`, `stdlib/polyglot/`: audited by `milestone58_polyglot_and_crypto.rs`, `milestone60`, and `milestone61`.
-     - `stdlib/pkg/`: audited by `milestone57_bidirectional_transpilers_and_ingest.rs` (`licensing.pilot`).
-     - `stdlib/asyncio/`, `stdlib/contracts/`, `stdlib/realtime/`: embedded via `include_str!` in `crates/pilot-parser/src/lib.rs` for `bootstrap_tables()`.
-   - These 7 remaining directories serve strictly as test dependency anchors until Phase 5 when their respective milestones are reached.
-
----
-
-### Milestone 10: Compiler-as-a-Library (`pilot.*` Ring 3 API)
-
-#### 10.1 Specified in `MILESTONES_100.md`
-- Creation of 9 Ring 3 modules in `stdlib/pilot/`:
-  - `lex.pilot`: `TokenCursor : IReference`, `Token : IValue`, zero-alloc tokenizer.
-  - `cst.pilot`: `CstTree : IObject`, `CstNodeView : IReference`, `CstEditor`.
-  - `ast.pilot`: `AstModule : IObject`, `AstNodeView : IReference`, `can_splice` (`AST001`), `gensym`.
-  - `types.pilot`: `TypeInfo : IValue`, `FieldInfo : IValue`, 2-bit lattice classes.
-  - `ir.pilot`: `IrModule : IObject`, `IrPassPipeline`.
-  - `fmt.pilot`: `format_str` with readable and compact styles.
-  - `db.pilot`: `CompilerSession : IObject` for virtual in-memory and workspace files.
-  - `vm.pilot`: `VmSandbox : IObject` with fuel limits (`VM001`) and capability masks (`VM004`).
-  - `diag.pilot`: `Diagnostic : IObject`, `render_ansi`, `render_json`, `render_sarif`.
-
-#### 10.2 Actual Implementation
-- All 9 packages implemented in [`stdlib/pilot/`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/pilot/) with total 636 LOC ($\le 1,500$ LOC law respected across all files).
-- Anti-cheat test suite [`milestone10_compiler_as_a_library.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis/tests/milestone10_compiler_as_a_library.rs) passes 4/4 tests.
-- Integrated into [`mega_all_milestones_simultaneous_gate.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis/tests/mega_all_milestones_simultaneous_gate.rs) (85/85 tests passed).
-
-#### 10.3 Discrepancies & Disparities
-1. **Freestanding Function API vs. Struct Method API (Architectural Adaptation):**
-   - *Spec Blueprint:* API signatures were described as struct methods: `tree.root()`, `editor.replace_span()`, `cur.next_token()`, `sess.set_file()`, `sandbox.consume_fuel()`.
-   - *Actual Implementation:* Implemented as canonical freestanding functions: `cst_tree_root(tree)`, `cst_editor_replace_span(var ref ed, ...)`, `token_cursor_next(var ref cur)`, `compiler_session_set_file(var ref sess, ...)`, `vm_sandbox_consume_fuel(var ref s, ...)`.
-   - *Root Cause:* In the current bootstrap PilVM engine (`crates/pilot-vm/src/lib.rs`), calling an instance method `obj.method(...)` does not automatically prepend `obj` as the `self` argument for user-defined structs. Auto-binding `self` in the Rust engine requires checking for `"self"`, which is strictly banned by `GATE001` (Name-Blind Contract). Following the established pattern of `selfhost/diagnostics/model.pilot` and `selfhost/loader/ring_verifier.pilot`, public APIs in `stdlib/pilot/` use freestanding functions taking `(ref self, ...)` or `(var ref self, ...)`.
-2. **`VmSandbox.eval_fn` Execution Engine (Minor):**
-   - *Spec Requirement:* `VmSandbox.eval_fn(var ref self, mod_ir, entry_fn, args)` compiles and executes IR within the sandbox.
-   - *Actual Implementation:* `VmSandbox` manages the sandbox state (fuel consumption, trap codes, stdout capture, and capability mask enforcement), while the execution of compiled bytecode is delegated to `PilVirtualMachine`.
-
----
-
-### Milestone 11: First-Class `adapter` Blueprint Engine & Zero-Cost Idiom Lifter
-
-#### 11.1 Specified in `MILESTONES_100.md`
-- Creation of `selfhost/adapter/rules.pilot` (`~310L`): Table-driven `AdapterRuleRegistry` and `IAdapterTransform` protocols (`NamingStyle`, `ErrorLiftPolicy`, `SlicePairRule`, `OutParamRule`, `CallbackPairRule`, `AdapterBlueprint`).
-- Creation of `selfhost/adapter/compiler.pilot` (`~420L`): Compiles `adapter` blueprints into synthesized Tier-1/Tier-2 `MethodTable` entries and inline zero-allocation `PilIR` thunks (`Receiver Handle Unwrap`, `Slice Unpack`, `OutParam Promotion`, `Result Branching`, `Property Synthesis`).
-- Creation of `stdlib/std/polyglot/adapter.pilot` (`~190L`): Public `[Adapt(...)]` attributes, `CError`, `Errno`, `NullPtrErr`, `PosixAdapterFacet`, `Win32AdapterFacet`.
-- Deletion of `pilot_transpile_sample` and `pilot_polyglot_execute` fake mocks in `crates/pilot-ffi/src/lib.rs`.
-- Diagnostic codes `ADP001`..`ADP004` and verification suite in `crates/pilot-analysis/tests/milestone11_adapter_blueprint_engine.rs`.
-
-#### 11.2 Actual Implementation
-- [`selfhost/adapter/rules.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/adapter/rules.pilot) (279 LOC, $\le 1,500$ cap): Table-driven transforms, prefix stripping, case normalizations, and rule descriptors.
-- [`selfhost/adapter/compiler.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/adapter/compiler.pilot) (229 LOC, $\le 1,500$ cap): Zero-allocation `PilIR` thunk lowerer with stack slots, parameter transforms, error branch lifting, and property synthesis.
-- [`stdlib/std/polyglot/adapter.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/std/polyglot/adapter.pilot) (106 LOC, $\le 1,500$ cap): User-facing attributes (`[Adapt]`, `[SlicePair]`, `[OutParam]`), error record types, and POSIX / Win32 facets.
-- [`crates/pilot-ffi/src/lib.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-ffi/src/lib.rs): Fake mocks permanently deleted.
-- [`crates/pilot-analysis/tests/milestone11_adapter_blueprint_engine.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis/tests/milestone11_adapter_blueprint_engine.rs): 4/4 anti-cheat tests passing cleanly.
-
-#### 11.3 Discrepancies & Disparities
-1. **None:** All components, rule protocols, error lifting policies, PilIR zero-allocation lowerings, and mock purges align directly with spec requirements and pass 100% of anti-cheat gates.
-
----
-
-## 3. Cross-Cutting Disparities Summary Table
-
-| Issue ID | Milestone | Status | Category | Description | Root Cause / Impact | Resolution / Current State |
-| :---: | :---: | :---: | :---: | :--- | :--- | :--- |
-| **DISP-01** | **M6** | **Deferred to M57** | Test Anchor | `selfhost/transpile/ir.pilot` retained. | Audited by `milestone57_bidirectional_transpilers_and_ingest.rs:25` (`min_bytes: 5000`) and `main.rs:30`. | Retained as intentional dependency anchor until M57 transpiler ingestion milestone. |
-| **DISP-02** | **M9** | **Substantially Resolved** | Stdlib Cleanup | Legacy folders in `stdlib/` co-existing alongside `std/`. | 15 unused legacy folders purged. 7 folders retained solely for M57/M58/M60/M61 anti-cheat audits and parser tables. | Purged 15 folders (`numeric`, `csv`, `decimal`, `os`, `logging`, `json`, `socket`, `sys`, `random`, `io`, `text`, `math`, `formats`, `encoding`, `collections`). |
-| **DISP-03** | **M10** | **Architectural Parity** | Ergonomics | `stdlib/pilot/*` exposes freestanding functions instead of `obj.method()`. | PilVM method dispatch cannot hardcode `"self"` without violating `GATE001` (Strict 14-Token Boundary). | Idiomatic freestanding API taking `(ref self, ...)` and `(var ref self, ...)` matching `Diagnostics.Model` and `RingVerifier`. |
-| **DISP-04** | **M7** | **Resolved** | Tooling | `pilot inspect` not wired to LSP JSON-RPC handler `pilot/inspect`. | Implemented fully as CLI tool; LSP handler missing. | Implemented `handle_lsp_inspect` and wired to `"pilot/inspect"` in `selfhost/lsp/handlers.pilot` ($\le 1000$ LOC). |
-| **DISP-05** | **M8** | **Resolved** | Diagnostics | In-memory comment verification before write instead of atomic `<file>.tmp` swap. | File I/O omitted atomic temp file stage. | Implemented `write_file_atomic(file_path, new_src)` in `selfhost/cst/autofix.pilot`. |
-| **DISP-06** | **M5** | **Resolved** | Performance | Fingerprints 128-bit verification. | Verified against `selfhost/db/revision.pilot`. | Confirmed `Fingerprint128 : IValue` with `lo: u64` and `hi: u64` and full 128-bit hash pipeline. |
-
----
-
-## 4. Verification Gate Health & Invariant Checks
-
-All three mandatory gates from `AGENTS.md` and `MILESTONES_100.md` were evaluated:
-
-1. **Gate 1 — Adaptability & Name-Blind Hygiene:**
-   - **Passed:** `pilot gate --json` returned `0` violations.
-   - 14 seed tokens strictly respected across all Rust crates.
-   - All `.pilot` and `.rs` files strictly `<= 1,500` lines.
-   - All legacy Python gate scripts remain purged.
-   - Freestanding `core` verified with 0 host OS imports.
-2. **Gate 2 — Bootstrap Parity & Compile Speed:**
-   - **Passed:** Deterministic bootstrap fixed point verified.
-   - Incremental query caching in `PilotDb` operational.
-3. **Gate 3 — Peak Runtime Performance & Mega Gate:**
-   - **Passed:** `mega_all_milestones_simultaneous_gate` executed all 85 tests across `M01`–`M10` and `M50`–`M61` in **53.73s** with bit-for-bit pre/post SHA-256 integrity snapshot matching.
-
----
-
-## 5. Phase 2 Progress & Readiness Assessment
-
-Phase 1 (`M1`–`M10`) established the core compiler foundation. Phase 2 (`M11`–`M20`) begins the **Universal Foreign-Language Adapter**:
-- **Milestone 11 (Completed):** First-Class `adapter` Blueprint Engine & Zero-Cost Idiom Lifter is fully implemented, verified with 4/4 anti-cheat tests, and tested across all 85 simultaneous mega gate tests.
-- **Milestones 12–14** are marked `[COMPLETE]` in `MILESTONES_100.md`. Policy violations in that code are recorded in [§6](#6-policy-audit-milestones-12-14-phase-2-adapter).
-- **Next Milestone:** **Milestone 15 (`M15 — Native C++ Class, RAII, Vtable & Exception Boundary Adapter`)**.
-
----
-
-## 6. Policy Audit: Milestones 12–14 (Phase 2 Adapter)
-
-> **Audit Date:** 2026-11-09
-> **Scope:** Code landed for M12 (`use c`), M13 (`frame` / `!&`), and M14 (Perceus foreign handles and scope guards), checked against [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) and [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md). Spec gaps are included only where they are also a stated policy (no stubs, same-milestone purge, open registry, lattice, single definition).
-> **Method:** Static read of the milestone manifests, the new `.pilot` modules, `crates/pilot-rt/src/c_abi.rs`, and the M12–M14 anti-cheat suites. Line counts are `wc -l` on 2026-11-09. This pass did not re-run `pilot gate`.
-
-### 6.1 Scorecard
-
-| Policy | Where checked | Result |
+| Step | What was run or read | Result |
 | :--- | :--- | :--- |
-| `MOD001` file cap (`<= 1,500` LOC) | M12–M14 `.pilot` and `c_abi.rs` | **Pass.** Largest file is `selfhost/adapter/c_pp.pilot` at 902 lines. `crates/pilot-rt/src/c_abi.rs` is at 208 lines (`<= 220`). |
-| Zero `TODO` / `unimplemented!` markers | `selfhost/adapter/`, `stdlib/pilot/abi/`, `stdlib/std/polyglot/` | **Pass.** No marker comments. |
-| Rule 12 on the new C absorber | `c_pp.pilot`, `c_parser.pilot`, `c_sysroot.pilot` | **Pass** for those three files: no raw `__engine(...)`. |
-| Open registry, no closed `if` dispatch (`AGENTS.md` §1) | `stdlib/pilot/abi/descriptor.pilot` | **Pass (Resolved).** POL-02 fixed via table-driven registry `calling_conv_table()`, dynamic `.len()` count, and `classify_call_frame_checked` emitting `ABI003`. |
-| Same-milestone legacy purge (`AGENTS.md` §1) | both `shm.pilot` copies | **Pass (Resolved).** POL-03 fixed; duplicate `ShmBuffer`/`ShmView` purged from `stdlib/polyglot/shm.pilot`, keeping modern types exclusively in `stdlib/std/polyglot/shm.pilot`. |
-| Rule 11 single definition | `ShmBuffer` / `ShmView` | **Pass (Resolved).** POL-03 fixed; single canonical definition in `stdlib/std/polyglot/shm.pilot`. |
-| Rule 6 absence, no null sentinels | `ForeignHandle`, `invoke_dynamic_frame` | **Pass (Resolved).** POL-01, POL-04 fixed; `try_wrap` / `try_take_raw` returning `opt<T>`, and `invoke_dynamic_frame` checking for `"unsupported"` frame plans returning `ABI003`. |
-| Rule 3 / lattice on fixed records | C preprocessor and C parser schemas | **Pass (Resolved).** POL-05 fixed; `CppMacro` is `0b10 : IObject`, `CppCondFrame` is `[Layout(c_abi)] : IValue` with bitflags, `CFieldDecl` is `[Layout(c_abi)] : IValue`, `CRecordDecl` has `flags: u8` bitflags. |
-| Rule 1 closed sets as `enum` | calling-convention ids, C `calling_conv` | **Pass (Resolved).** POL-02, POL-06 fixed; `CCallingConv : u8` enum added with `calling_conv_kind`, `c_type_size_target` with Win64 LLP64 `long = 4` vs Unix LP64 `long = 8`. |
-| Name-blind gate on new modules | M14 anti-cheat `name_blind` flag | **Pass (Resolved).** POL-07 fixed; `name_blind: true` restored and passing across all M14 files. |
-| Spec public signatures that the milestone claims are implemented | `absorb_c_header`, dynamic frame invoke | **Pass (Resolved).** POL-01, POL-08 fixed; `absorb_c_header` and `absorb_c_header_file` added, and Windows x64 naked asm dispatcher with shadow space implemented in `c_abi.rs`. |
+| Test suite | `cargo test --workspace --no-fail-fast` | 276 passed, 0 failed (2m41s) |
+| Gate | `target/debug/pilot gate --full --json` | 4 gates, 0 violations, 0.83 s |
+| Direct use | About 60 small programs through `pilot run`, plus every CLI subcommand | See section 3 |
+| Code reading | Every M1–M30 spec section compared with the function bodies that implement it, in four parallel read-only passes (M1–M10, M11–M20, M21–M30, core pipeline) | See sections 5–6 |
+| Spot checks | 20+ of the most serious findings re-checked by hand against the cited lines | All held |
+| Forward review | M31–M50 manifests and acceptance tests, M51–M100 summaries | See section 7 |
 
-### 6.2 Findings
+**Not verified** (stated so nothing below is read as stronger than it is):
 
-#### POL-01 — `invoke_dynamic_frame` does not invoke the frame (HIGH)
+- Windows, macOS and ARM64 behaviour. Everything was run on Linux x86_64.
+- Correctness of the Win64 / AAPCS64 / RISC-V ABI classifiers, the MSVC mangler, and the `.d.ts` / `.pyi` / Rust-signature scanners on real-world input.
+- Whether the bytecode produced by `selfhost/vm/compiler.pilot` loads and runs.
+- The LLVM, WASM, asm and GPU emitters were read, not executed. No emitted C or LLVM was compiled by hand.
+- The timing in section 3.4 is a single run of one micro-benchmark.
 
-`AGENTS.md` forbids stubbed branches that return a stand-in so a check can pass. M13’s public signature is `invoke_dynamic_frame(fn_addr, plan, packet)`, and `crates/pilot-rt/src/c_abi.rs` does export `pilot_rt_invoke_abi_frame`. The Pilot entry point never calls it. After a null check it counts SIMD locations and returns GPR 0:
+---
 
-```290:310:stdlib/pilot/abi/descriptor.pilot
-pub fn invoke_dynamic_frame(
-    fn_addr: ptr<void>,
-    plan: ref<AbiFramePlan>,
-    packet: var ref<RawDispatchPacket>
-) -> res<u64, AbiDiagnostic> {
-    if fn_addr == null {
-        return res<u64, AbiDiagnostic>.err(AbiDiagnostic::symbol_not_found("dynamic_symbol", plan.conv_id));
-    }
-    // ... counts DirectSimd / HfaSimd* ...
-    packet.vec_reg_count = v_count;
-    let g0 = packet.get_gpr(0);
-    return res<u64, AbiDiagnostic>.ok(g0);
-}
+## 3. What actually works today
+
+### 3.1 The real execution path
+
+```
+user.pilot → Rust lexer/parser (crates/pilot-lexer, pilot-parser)
+           → Rust BytecodeCompiler + PilVirtualMachine (crates/pilot-vm)
+           → __engine intrinsics (crates/pilot-analysis/src/infer.rs, pilot-rt)
 ```
 
-The native dispatcher is also only real on `x86_64` + Unix (`#[cfg(all(target_arch = "x86_64", unix))]` naked SysV asm). Every other target, including Windows x64 where `LoadLibraryW` was added, falls through to a 6-GPR `extern "C" fn` that ignores XMM registers and the stack buffer (`c_abi.rs` lines 114–129).
+All Pilot code in `selfhost/` and `stdlib/` is executed by that Rust VM. The self-hosted analyzer, IR, codegen, Perceus, LSP and formatter are not on this path.
 
-#### POL-02 — Calling conventions are a closed string `if` chain (HIGH)
+### 3.2 `pilot run` on real programs
 
-`AGENTS.md` §1 requires table-driven registries: adding item N+1 must not rewrite a core dispatcher. `imp_type.md` Rule 1 forbids stringly ids for a closed set, and Rule 2 requires a table once the set is an open catalog. `descriptor.pilot` declares `ICallingConvClassifier` and `CallingConvRegistryEntry`, then ignores both:
+| Construct | Result |
+| :--- | :--- |
+| Integer arithmetic, recursion (`fib(25)`) | Works |
+| `while`, `if` / `else if` / `else`, `loop` + `return` | Works |
+| Structs, methods, interface dispatch | Works |
+| Maps with `m["a"]` | Works |
+| `for x in xs` and `for i in 0..5` | Body never runs (prints `0`) |
+| `switch` | Body never runs |
+| f-strings `f"n={n}"` | Printed literally as `n={n}` |
+| Closures `(a, b) => a + b` | Call returns `null` |
+| Floats `1.5 * 2.0` | Prints `0` |
+| `2 ** 3` | Prints `5` (unknown operators compile to addition) |
+| `false && side()` | `side()` still runs (no short-circuit) |
+| `defer` | Never runs |
+| Constructors `self(...)`, field defaults, `~self()` | Yield `null` / never run |
+| `expr?` on a result | Returns `null` |
+| `find(3) ?? 9` | Prints `12` |
+| Cascades `obj..set_a(1)..set_b(2)` | Corrupts the receiver |
+| `use std.crypto;` then calling an imported function | Returns `null` (imports are not linked) |
+| Type error `let x: i64 = "hello";` | No error, prints `hello`, exit 0 |
+| Undefined name or function | No error, evaluates to `null`, exit 0 |
+| Syntax error | No output, exit 0 |
+| `return 7` from `main` | Prints `RESULT: 7`, process exit code 0 |
 
-- `calling_conv_get` (lines 245–252) is six hardcoded index arms (`"sysv_x64"`, `"win64"`, `"aapcs64"`, `"darwin_arm64"`, `"riscv64"`, `"wasm32"`).
-- `calling_conv_count` (lines 254–264) stops when `conv_id == "wasm32"`. That string is a sentinel terminator (Rule 6).
-- `classify_call_frame` (lines 266–288) is a closed `if conv == "..."` ladder and silently falls through to SysV for every unknown id, so `ABI003` (unsupported convention) cannot fire from this function.
+`examples/overview.pilot`, the project's own feature tour, prints nothing and exits 0.
 
-#### POL-03 — M14 left the lattice-bit shim in place and duplicated the types (HIGH)
+**Root causes** (`crates/pilot-vm/src/lib.rs`):
 
-M14’s stated bottleneck was `ShmOwnedBuffer` / `ShmBorrowedView` storing lattice class as a dummy `i64` (`2` and `1`) so the compiler never runs `~self()` or `ESCAPE001`. `AGENTS.md` requires superseded code to be deleted in the same milestone. `imp_type.md` Rule 11 requires one canonical definition.
+- The bytecode compiler handles about 20 AST node kinds. Everything else — match/switch, defer, guard, try, lambda, cascade, range, coalesce, `?`, comptime, interface and extend declarations — falls into a `_ => 0` arm and is silently dropped.
+- Binary operators always compile to integer opcodes; unknown operators fall back to `AddI64` (line 258). Float opcodes exist in the VM but are never emitted.
+- `for` expands (correctly, via `stdlib/core/syntax/for.pilot`) to a `get_enumerator()` call, but that function lives in a stdlib file that is never linked into the user program.
+- The value model has no tag separating integers from heap handles. After `var m = {a: 1}`, `var z = 0; z.a` prints `1`. Nothing is ever freed; there is no reference counting.
+- The analyzer's diagnostics are discarded by `pilot run`, and there is no type checker to produce real ones (section 5.2).
 
-Both copies still ship the shim, and both also define `ShmBuffer<T>` / `ShmView<T>`:
+### 3.3 CLI commands
 
-| File | Legacy shim | Parallel canonical types |
+| Status | Commands |
+| :--- | :--- |
+| Work | `--help`, `--version`, `completions`, `--schema-json`, `gate`, `run` (subset above), `emit <lang> <file>` (partial) |
+| Listed in help, silently do nothing, exit 0 | `check`, `build`, `compile`, `fmt`, `test`, `repl`, `pkg`, `deps`, `tree`, `venv`, `lsp`, `debug`, `perf`, `from`, `map`, `ide-sync` |
+| "Unknown command" | `inspect`, `chor`, `doc`, `bench`, `mcp`, `doctor`, `ship`, `migrate`, `absorb`, `studio` |
+
+`selfhost/cli/main.pilot` dispatches with an if-chain that returns `"0"` for anything it does not handle. The VS Code extension's working language server and debugger are Python (`vscode-pilot/server/pilot-lsp.py`, 2,735 lines; `pilot-dap.py`, 2,124 lines).
+
+### 3.4 Performance
+
+One run of `fib(32)`: Pilot VM 0.58 s, CPython 0.14 s, C `-O2` 0.003 s. There is no path from Pilot source to native code that a user can invoke. Gate 3 ("C/Rust-competitive, zero leaks") has no implementation.
+
+---
+
+## 4. Baseline claims vs. reality
+
+The roadmap's "M0 / current state", the README and `VISION.md` all assert the following.
+
+| Claim | Finding |
+| :--- | :--- |
+| Stage-3 fixed-point self-hosting (`selfhost/pilotc.pilot`) | **False.** `pilotc.pilot` extracts four tokens (function name, bias, multiplier, n) from one fixed-shape function and pastes them into a hardcoded C string and a hardcoded 13-instruction bytecode blob. |
+| Stage-2 == Stage-3 SHA-256 parity | **Tautology.** `selfhost/gate/bootstrap_parity.pilot` calls that same function twice with `2` and `3` and compares the outputs. |
+| >90% of the compiler in pure Pilot | The Pilot code exists (66,892 lines) but does not compile Pilot. It reads the AST the Rust parser built, through `__engine("ast_*")` calls. |
+| 14-token name-blind Rust seed, 5,3xx LOC | The line count is accurate and gamed: 5,363 lines but about 353 KB, with lines up to 981 characters. Normally formatted it would be substantially longer (not measured; `rustfmt` is not installed on the audit machine). The seed also hardcodes Pilot method names (`"len"`, `"slice"`, `"push"`, `"get"` in `pilot-vm/src/lib.rs`), exempted line-by-line in the gate. |
+| Native compilation to C11, LLVM, WASM, asm, 8 GPU targets | Emitters exist and walk the AST for an integer-only subset. `f64` and `str` become `int64_t`; `-> i64` often becomes `void`. `crates/pilot-codegen` returns `int main(void){return 0;}` and one fixed GPU kernel regardless of input. Nothing is reachable from the CLI. |
+| Perceus ARC with `drop_reuse`, `0.0 ms` GC | The VM does no reference counting and never frees. `~self()` never runs. Perceus code returns strings such as `"Drop:x"` that nothing consumes. |
+| Type-safe | There is no type checker. `selfhost/analyzer.pilot` "inference" is a backwards name lookup, and its diagnostics fire on identifier prefixes (section 5.2). |
+| Resident LSP, DAP debugger | Handlers exist with no transport (the seed has no stdin intrinsic). DAP returns canned JSON. The working servers are Python. |
+| 7 bidirectional transpilers | `pilot emit` is faithful for `while` / `if` / struct fields. It drops methods, constructors and interfaces, turns `for x in xs` into an infinite `while xs:`, and leaves f-strings uninterpolated. |
+| Version `v1.1.51` | Not supportable. This is pre-alpha (0.x) by any normal reading. |
+
+---
+
+## 5. Why the tests and the gate are green anyway
+
+### 5.1 The test harness cannot see integration
+
+Every milestone test (`crates/pilot-analysis/tests/milestoneNN_*.rs`) does the same thing: concatenate a hand-picked list of `.pilot` files with an inline script, run it on the Rust VM, and compare a returned value. The script calls library functions directly with hand-built inputs. So a feature specified as language syntax is "tested" without the syntax ever being used.
+
+Example: M30 specifies that `[Cli]`, `[Service]` and `[Entity]` attributes generate code. The M30 tests never put an attribute on a struct; they call `cli_app_def_new(...)`, `cli_arg_def_new(...)`, `cli_parse_argv(...)` by hand.
+
+The attached "anticheat" spec mostly checks that named `pub fn`s and marker strings exist in files. That rewards creating the right names, and the bodies behind them are often stubs.
+
+### 5.2 Recurring failure patterns
+
+| Pattern | Examples |
+| :--- | :--- |
+| **Fixed output keyed to the test** | `http_service_dispatch` returns the literal `{"id":1,"customer_id":42,"total_cents":2500,...}` and rejects a body if it contains a `-` character (`stdlib/std/http/service_weaver.pilot:166`). `wasm_invoke` branches on export names `"add"`, `"echo"`, `"infinite_loop_test"`, `"oob_read_test"` (`selfhost/adapter/wasm_runtime.pilot:334`). `py_int_from_obj` returns `42`, `py_float_from_obj` returns `3.14159` (`stdlib/std/polyglot/py_capi.pilot:268`). `inspect_run` ignores its target file and prints canned fields `header` / `payload` and methods `get_balance` / `validate`. |
+| **Diagnostics triggered by names** | In `selfhost/analyzer.pilot`: `FLOW001` only if the function name starts with `bad_` (line 1172); `TYPE001` only if the variable starts with `mismatch` (1249); `TYPE002` on `undefined` (1256); `TYPE003` on `badcast` (1259); `OWN001` on `moved` (1294); `ESCAPE001`–`003` on `view` / `esc1` / `esc2` / `esc3` (1318–1331). About 35 such checks. |
+| **The test supplies the answer** | `check_raw_pointer_escape(..., takes_raw_ptr: bool)` emits `CHOR008` when the caller passes `true`. `analyze_loop_clone(in_loop, ...)` emits `PERF001` when `in_loop` is true. Contract weaving takes `can_prove` and `eval_ok` as arguments. Left-recursion detection takes `is_left_rec`. |
+| **Placeholder standing in for a real engine** | `PilotDb` queries return `"tokens_len=" + len`, `"cst_nodes=" + len/4`, `"ast_for_" + fid`, and always `"diagnostics_for_N: 0 errors"` (`selfhost/db/engine.pilot:361–414`). `pilot.cst.parse_lossless` returns `{root_kind: 500, child_count: 1}`. The IR "parser" counts occurrences of the substring `"block"`. |
+| **Simulated resources** | Foreign pointers are integer literals (`0x1000`, `0x7fff0000`, `1000000`). The foreign destructor only increments a counter and never calls the destructor. Threads are a simulated id in `ENV`. `SoaTable.push` only changes `count`. |
+| **Assertions too weak to fail** | `if plan_impure.diagnostics[0].len() < "DBC003".len() { return 8; }` checks length, not content (`milestone26...rs:253`). The cold-vs-incremental oracle compares two results that are always `"0 errors"`. |
+| **Tautological gates** | Stage parity (section 4). The rename litmus renames text in a sandbox and checks the renamed text contains the new names, then runs one probe through the `pilotc` template. It never recompiles `stdlib/core` or runs a backend. |
+
+### 5.3 What `pilot gate` really enforces
+
+Real: the 1,500-line cap per file, TODO/FIXME markers, retired files, per-crate line ceilings, and a check that Rust string literals do not exactly equal a `stdlib/core` type name.
+
+Not enforced, despite the spec and `AGENTS.md`:
+
+- **Raw `__engine` use.** There are 4,344 raw calls (3,431 in `selfhost/`, 913 in `stdlib/`). Rule 12 forbids them. `type_audit.pilot` / `GATE010` were specified in M1 and do not exist.
+- **Name-blindness beyond exact literals.** `"slice<"`, match arms and method names are not checked.
+- **Ring 1 freestanding.** `stdlib/core/file.pilot` and `stdlib/core/env.pilot` make filesystem and environment engine calls; `ring_verifier.pilot` would reject them but nothing calls it.
+- **Duplicate types.** `Diagnostic`, `FixSuggestion`, `HttpResponse`, `ForeignHandle`, `ContractCheckMode` and `StorageStrategy` are each defined twice.
+- **Stub bodies, performance, leaks.** No check exists.
+
+The line-count ratchet has had a perverse effect: every Rust crate sits 2–6 lines under its cap, achieved by packing code into very long lines.
+
+---
+
+## 6. Milestone status, M1–M30
+
+**Scale**
+
+| Label | Meaning |
+| :--- | :--- |
+| **Integrated** | Works on arbitrary input through the CLI or compile pipeline |
+| **Library only** | A genuine general algorithm exists, but only tests call it |
+| **Simulated** | Operates on hand-built descriptors or returns fixed values in place of the real thing |
+| **Missing** | Specified but not present |
+
+No milestone earns "Integrated" overall. The "Marked" column is the heading in `MILESTONES_100.md`; M2–M10 have completion commits but no `[COMPLETE]` tag.
+
+### Phase 1 — foundation
+
+| M | Title | Marked | Actual | Key evidence |
+| :-: | :--- | :--- | :--- | :--- |
+| 1 | Gate runner | Complete | Partly integrated | `pilot gate` runs and its hygiene checks are real. Rename litmus and stage parity are tautologies. `type_audit.pilot` missing. No performance gate. Fast run takes ~0.8 s against a 500 ms budget. |
+| 2 | Module graph, comptime parity | — | Library only, shallow | `module_graph.pilot` has no cycle detection (no Tarjan), `topo_order` is discovery order, `content_hash` is the byte length. `pilot run` still scans `use ` lines textually in Rust (`pipeline.rs:36`) and never links imported code. `pragma_filter.pilot` has no caller, and the Rust filter it replaced was deleted. |
+| 3 | CLI registry | — | Partly integrated | Help, completions, schema and typo suggestions work. Dispatch is still an if-chain; `ICliHandler` has no implementers; script arguments after `--` never reach the program. |
+| 4 | Dual syntax | — | Partly integrated | Both forms parse. Semantically empty: `add!(1,2)`, `add!^(1,2)`, `sig add(1,2)` and `plan add(1,2)` all just print `3`. `pilot fmt` is a no-op. |
+| 5 | `PilotDb` | — | Simulated | The red/green memo engine is plausible; every query returns a placeholder string. No tool uses it. |
+| 6 | `PilIR` | — | Simulated / missing | No `IrFunction`, `IrBlock` or `IrModule`. `lower_ast.pilot` (103 lines) concatenates text and hardcodes `"i64"` and `"RangeWindow"`. No backend consumes IR. `selfhost/transpile/ir.pilot`, which M6 was to delete, is still the live path for `pilot emit`. |
+| 7 | `pilot inspect` | — | Simulated | Unknown CLI command. `inspect_run` prints canned data. |
+| 8 | Diagnostics, `check --fix` | — | Library only | Renderer (UTF-8 width, JSON, SARIF) is real. Autofix detection is a byte scanner with false positives; the "atomic write" has no rename. `pilot check` does nothing. |
+| 9 | Three-ring stdlib | — | Mostly not done | Legacy `stdlib/asyncio`, `contracts`, `crypto`, `db`, `http`, `pkg`, `polyglot`, `realtime` remain. `stdlib/std/*.pilot` are thin shells (784 lines total). Ring verifier unenforced. |
+| 10 | Compiler-as-a-library | — | Simulated | `stdlib/pilot/*` (46–116 lines each) wrap nothing: `format_str` replaces one substring, the IR pipeline adds a pass count, the VM sandbox fuel trap is driven by hand. |
+
+### Phase 2 — foreign-language adapter
+
+**There is no foreign interop reachable from Pilot.** `use c "definitely_not_a_header.h" as q; q.nope(1,2,3);` runs without complaint and yields `null`. `adapter X -> Y { ... }` is parsed and ignored. No crate has an external dependency (no libloading, libffi, pyo3, napi, wasmtime, quickjs).
+
+| M | Title | Marked | Actual | Key evidence |
+| :-: | :--- | :--- | :--- | :--- |
+| 11 | `adapter` engine | Complete | Simulated | Thunk "IR" is a text string. Every symbol gets dummy params `["ptr","ptr","size_t"]`. Only `ADP001` is ever emitted. Prefix stripping and case conversion are real. |
+| 12 | `use c` absorber | Complete | Library only | The C preprocessor (1,013 lines) is genuine and reads `#include` files from disk. The declaration parser is a word scanner: `unsigned long long x` parses as a field named `long`; function pointers are not handled. Never run on a real system header. |
+| 13 | Calling conventions, frame trampoline | Complete | Partly real, unconnected | The Rust `dlopen` wrapper and SysV/Win64 assembly trampoline (`crates/pilot-rt/src/c_abi.rs`) are real and tested from Rust. `__engine("invoke_abi_frame")` has no handler, so Pilot can never reach them. The SysV classifier does not merge eightbytes. |
+| 14 | Foreign handles, guards | Complete | Simulated | Destructor increments a counter. Spec asks for 100,000 handles and real threads; the test uses 100 and a fake thread id. |
+| 15 | C++ | Complete | Simulated | Itanium mangler and class layout are real libraries. The exception boundary is an if on a boolean argument. No C++ is compiled or loaded. |
+| 16 | Rust crates | Complete | Simulated | `absorb_rust_crate` takes source text; the features loop does nothing; cargo is never run. |
+| 17 | Python | Complete | Simulated | `py_init_in_process()` is `return true`. libpython is never loaded. The mandated deletion of the `python3` subprocess bridge was not done. |
+| 18 | JS / TS | Complete | Simulated | Bigint round-trip returns a hardcoded `i64::MAX`. No Node-API or QuickJS. `node` subprocess path not deleted. |
+| 19 | WASM / WIT | Complete | Simulated | No bytecode is executed; dispatch is on export-name strings. The WIT text parser and flattening logic are real libraries. |
+| 20 | SQL / OpenAPI / proto | Complete | Partly real, unconnected | Simple DDL scanner and proto varint/zigzag are real. OpenAPI "parsing" is substring search; `oneOf` pushes hardcoded `"VariantA"`, `"VariantB"`. Generated proto getters are `=> 0`. |
+
+### Phase 3 — weavers, `.pchor`, comptime
+
+Every key function in this phase has exactly two kinds of caller: its own file and its test.
+
+| M | Title | Marked | Actual | Key evidence |
+| :-: | :--- | :--- | :--- | :--- |
+| 21 | `[...]` weavers | Complete | Simulated | Attributes on a struct generate nothing: `[Eq, Clone, Json]` then `a.to_json()` gives `null`. Generated `from_json` returns `T.default()`. The "zero hardcoded attribute names" rule was met by moving ~60 names into `register(...)` calls. |
+| 22 | `*Bundle` / `*Facet` | Complete | Library only | Layout flattener and collision rules are real, over hand-built descriptors. At runtime spliced fields read correctly, but spliced methods that touch fields return `null`. Not wired into the analyzer. |
+| 23 | Pipeline fusion, `each`, cascades | Complete | Simulated | Fusion adds constants per stage kind and rewrites no IR; equivalence is checked against `execute_fused_pipeline_mock`. Real cascades corrupt the receiver. `selfhost/perf/optimizer.pilot` was to be deleted and was not. |
+| 24 | `.pchor` compiler | Complete | Partly real, unconnected | The text parser is real. Cue lattice class comes from name heuristics (`contains("View")`, `contains("Buffer")`). `CHOR004` finds only 2-cycles; `CHOR002` is never emitted; lowering is 88 lines of name strings. `pilot chor` is an unknown command. |
+| 25 | `.pchor` storage / SoA | Complete | Simulated | Offset arithmetic on descriptors. Speedups are constants per strategy (4, 2, 8). `SoaTable` has no backing memory. |
+| 26 | Typestates, contracts | Complete | Simulated | `requires n > 0` is not enforced: `f(0)` runs. Provability is supplied by the test. |
+| 27 | User `syntax`, hygiene | Complete | Simulated | The spec's named form `pub syntax Name { ... }` silently stops all output. A macro's `let tmp` overwrites the caller's `tmp` (hygiene violation). The scopes-as-sets resolver is real and unconnected. |
+| 28 | Tiers, perf coach | Complete | Partly real, unconnected | Padding analyzer is real. The tiered `ESCAPE001` messages are three fixed templates. No `--tier` flag exists. Mandated analyzer deletions not done. |
+| 29 | Sandboxed comptime | Complete | Simulated | The VM has a real fuel counter that is only ever set in tests; `comptime { while true {} }` hangs under `pilot run`. `mount_unit` reads any path ungated. The VM still uses `HashMap`, which the milestone was to replace. |
+| 30 | `[Cli]` / `[Service]` / `[Entity]` | Complete | Simulated | Argv parser and SQL/DDL generators are real string builders. HTTP dispatch is hardcoded. The attributes themselves are never used. |
+
+### Mandated deletions not carried out
+
+`AGENTS.md` requires superseded code to go in the same milestone. Still present: `selfhost/transpile/ir.pilot` (M6), `crates/pilot-analysis/src/diagnostics.rs` (M8), the string-concatenating loader in `main.rs` (M2), legacy stdlib directories (M9), the `python3` / `node` subprocess bridge in `stdlib/polyglot/bridge.pilot` (M17, M18), `stdlib/polyglot/shm.pilot` (M14), `selfhost/perf/optimizer.pilot` (M23), clearance string-parsing in `analyzer.pilot` (M28), the VM `HashMap` (M29).
+
+Other hygiene debt: 203 `def`, 20 `match` and 13 `record` uses in `tests/*.pilot`; 14 tracked Python scripts in `scratch/`; `__pycache__/`, `input.txt`, `fix_type.sh`, `selfhost/.pilc-cache/analyzer.pilc`, `tests/test_convert_dunders.py` and `tools/pilot-kernel` (Python).
+
+---
+
+## 7. Are we on track for M31–M100?
+
+No. The next twenty milestones each assume substrate that section 6 shows is absent.
+
+| Needed by | Assumed to exist | Actual state |
 | :--- | :--- | :--- |
-| `stdlib/polyglot/shm.pilot` | lines 110–122, `lattice_bits: i64` set to `2` / `1` | lines 8–63 |
-| `stdlib/std/polyglot/shm.pilot` | lines 114–126, same integers | lines 15–108 |
+| M31, M32, M33, M34, M35, M37, M48 | `PilIR`: typed SSA with blocks, lowered from real source | No IR containers, no lowering |
+| M31, M32, M36, M39, M46 | Heap objects with reference counts and destructor calls | VM never frees; `~self()` never runs |
+| M31–M38, M43, M45 | A type checker and method tables built from declarations | Name-prefix diagnostics only |
+| M33, M35, M39, M40, M48 | A backend that compiles the whole language | Integer-only AST walkers, tests only |
+| M38, M39, M50 | Self-hosted front end that parses declarations | `selfhost/parser.pilot` skips struct bodies and stores signatures as raw text |
+| M41–M49 | Working `check`, `build`, `test`, `lsp`, `PilotDb` | No-ops and placeholders |
+| M40, Gate 3 | Any performance or leak measurement | None |
+| All Tier-1 platform claims | CI on Linux, macOS, Windows, x86_64 and ARM64 | CI runs `cargo test` on Ubuntu and Windows x86_64 only |
 
-`create_shm_owned_buffer` and `project_shm_borrowed_view` still construct the integer-lattice records. The two `ShmBuffer` / `ShmView` definitions are not imports of one owner. `ShmBuffer::create` in `stdlib/polyglot/shm.pilot` also plants a fake mapping address (`base_addr: 1000000`) instead of an OS mapping.
+If M31–M50 are built the way M1–M30 were, they will produce twenty more libraries with passing tests and no working compiler. M38 ("retire the Rust lexer, parser and analysis crates") is the point where this stops being possible to paper over: the Rust seed is the only thing that currently executes anything.
 
-#### POL-04 — `ForeignHandle` uses integer nulls and always returns a handle (MEDIUM)
+M51–M100 are one-paragraph summaries and are reasonable as long-range direction. They are not assessable in detail until 1.0 exists.
 
-M14 spec and Rule 6: `wrap` returns `opt<ForeignHandle<T>>` and `none` when the pointer is null. Fields are `ptr<T>` and `ptr<void>`. `stdlib/std/polyglot/lifetime.pilot` lines 141–166 store `raw_ptr: i64` and `dtor_fn: i64`, treat `0` as null, and `wrap` always returns `ForeignHandle<T>` with `is_armed: p != 0`. `take_raw` writes `raw_ptr = 0` to disarm. Absence is a sentinel, not `opt` / `ptr`.
+---
 
-#### POL-05 — Preprocessor and parser records are on the wrong lattice (MEDIUM)
+## 8. Changes needed in `MILESTONES_100.md`
 
-Rule 3: a fixed value record is `[Layout(c_abi)] struct : IValue`. Rule 7: a type that owns a `List` is `0b10 : IObject`.
+> **Applied on 2026-11-09:** 8.1 items 1–2 (baseline paragraph rewritten; `[COMPLETE]` markers replaced with audited `[STATUS: …]` tags and a legend) and 8.2 (Phase F, `F1`–`F8`, inserted before Phase 4 with a verification contract and a prerequisite table). 8.4 rules 10–13 are folded into the Phase F verification contract.
+>
+> **Also applied on 2026-11-09:** 8.3 item 6 (Rust seed contraction paused until `F8`). The gate now enforces the `<= 1,500` LOC law per Rust file plus a 15,000-line total budget instead of the per-crate ratchet. The policy lives in `selfhost/gate/manifest.pilot`, the Rust milestone tests read it through `crates/pilot-analysis/tests/common/seed_policy.rs`, and `AGENTS.md` §1 records the pause.
+>
+> **Still open:** 8.1 items 3–4 (version reset; README and `VISION.md` claims), 8.3 (reordering and scope of `M31`–`M50` and Phase 2), 8.4 items 14–18 (anticheat, ratchet, gates), 8.5 (spec defects), 8.6 (process and outstanding deletions).
 
-| Type | File | Declared as | Problem |
-| :--- | :--- | :--- | :--- |
-| `CppMacro` | `c_pp.pilot:59` | `: IValue`, no `[Layout]` | Owns `params: List<str>`. |
-| `CppCondFrame` | `c_pp.pilot:67` | `: IValue`, no `[Layout]` | Three independent bools (`active`, `parent_active`, `had_true`) — Rule 5. |
-| `CFieldDecl` | `c_parser.pilot:53` | `: IObject`, no `[Layout]` | No owned heap and no `~self()`. It is a value record. |
-| `CRecordDecl` | `c_parser.pilot:78` | `: IObject` | Owns `fields`, which fits `0b10`, but `is_union`, `is_opaque`, and `has_flexible_array_tail` are three booleans that should be `bitflags` (Rule 5). |
+### 8.1 Status and baseline corrections
 
-`CTranslationUnit.inline_fn_bodies` is `List<str>` (`c_parser.pilot:152`). The milestone schema requires `List<IrFunction>` so `static inline` helpers lower into PilIR. The field stores source text.
+1. **Rewrite the "Baseline (M0 / Current State)" paragraph** to match section 3. Remove "Stage-3 fixed-point self-hosting".
+2. **Remove `[COMPLETE]` from M1 and M11–M30**, and from the M50 heading (`[COMPLETE / UNIFIED 1.0 GATE]` on a milestone that depends on unbuilt M31–M49). Replace with a status that distinguishes "library exists" from "integrated", for example `[LIBRARY]` vs `[INTEGRATED]`.
+3. **Reset the version** from `1.1.51` to a `0.x` number in `Cargo.toml`, the README and the CLI banner.
+4. **Fix the README and `VISION.md`** claims listed in section 4.
 
-#### POL-06 — C layout is a closed name match, and `long` is always 8 bytes (MEDIUM)
+### 8.2 Insert a foundation phase before M31
 
-`c_type_size` (`c_parser.pilot:170–187`) classifies C types by spelling (`"int"`, `"long"`, `"double"`, `"size_t"`, …) and returns `8` for every `long`. M12 requires `long` to be 4 bytes on Win64 LLP64 and 8 bytes on Unix LP64, selected from target bit width, not from a host-sized default. Unknown spellings also return `8`, which hides an unsupported type instead of a diagnostic.
+Everything after M30 depends on these. They should be milestones in their own right, each proven through the CLI.
 
-`CFnDecl.calling_conv` (`c_parser.pilot:96`) is a `str`. `__stdcall` / `__cdecl` / `__fastcall` are a closed set and belong in an `enum : u8` (Rule 1), the same way `ArgPassKind` already is.
+| # | Deliverable | Done when |
+| :-: | :--- | :--- |
+| F1 | **Honest seed.** Every AST node kind either executes correctly or is a hard error. Tagged values (int, float, handle distinct). Float and generic operators. Non-zero exit codes. | `examples/overview.pilot` and the `tests/*.pilot` corpus run and produce checked output; every program in section 3.2 behaves as the language reference says. |
+| F2 | **Module linking.** `use` compiles and links imported units. | `for` works because `get_enumerator` is linked; `use std.crypto` functions are callable. |
+| F3 | **Errors surface.** Syntax, name and (once F4 lands) type errors print and fail the process. | A negative-test corpus: each bad program fails with the expected code. |
+| F4 | **Type checker.** Scoped name resolution, inference, method tables from declarations, lattice classification from fields. | The name-prefix triggers in `analyzer.pilot` are deleted and the same diagnostics fire on programs with arbitrary identifiers. |
+| F5 | **Real `PilIR`.** Data structures, lowering from typed AST for the whole language, verifier, pass driver. | A VM or interpreter executes the IR and matches the AST path on the corpus. |
+| F6 | **One real backend.** C11 from `PilIR`, a runtime (allocation, reference counts, strings, print), `pilot build` invoking the C compiler. | The corpus passes when built natively; outputs match the VM. |
+| F7 | **Ownership at runtime.** Dup/drop insertion over the IR, destructors run, a live-allocation counter. | A leak check over the corpus reports zero. |
+| F8 | **Real self-hosting.** The Pilot front end parses declarations and feeds the same pipeline; the compiler compiles its own sources. | Stage 2 and stage 3 are produced by actually compiling `selfhost/`, and their hashes match. |
 
-#### POL-07 — M14 turned the name-blind check off for the new stdlib files (MEDIUM)
+Only after F5–F7 does M31 (interprocedural Perceus) have something to analyse, and only after F8 are M38/M39 meaningful.
 
-`AGENTS.md` Gate 1 requires the rename litmus and zero hardcoded user-space type names. `milestone14_perceus_foreign_resource_and_scope_guards.rs` sets `name_blind: false` on `stdlib/std/polyglot/lifetime.pilot` and `stdlib/std/polyglot/shm.pilot` (lines 22 and 41). `escape.pilot` and `arc.pilot` stay `name_blind: true`. The waiver means Pass 10 of the anti-cheat harness does not scan the two modules M14 added.
+### 8.3 Reordering and scope
 
-Those same Perceus files still call raw `__engine("map_new")`, `__engine("map_get")`, `__engine("map_set")`, and `__engine("ast_*")` (Rule 12). That pattern is pre-existing across `selfhost/perceus/` (already counted in `Audit_imp_type.md`). M14 extended `escape.pilot` and `arc.pilot` inside that style instead of going through a typed AST cursor. New M14 lines in `lifetime.pilot` do not call `__engine`.
+5. **Move M38 and M39 (self-hosting cutover, C11 seed) ahead of M33–M37**, directly after the foundation phase. Optimising backends for a compiler that cannot yet compile itself is the wrong order.
+6. **Pause Rust contraction until F8.** The seed must become correct before it can be replaced, and that will take more Rust in the short term, not less. Contracting it now only removes working behaviour (the pragma filter was deleted in M2 with no working replacement).
+7. **Cut the 1.0 backend set to C11 first, LLVM second.** Defer M35 (hand-written x86_64/ARM64 encoders plus ELF, Mach-O and PE writers) and M36 (six GPU targets) until after 1.0. LLVM already provides SIMD, cross-targets and debug info, which covers most of M34.
+8. **Redo Phase 2 as "C for real, then one managed runtime".** Wire the existing `dlopen` wrapper and trampoline to a VM intrinsic, add a raw-pointer/byte-buffer value, make `use c` and `adapter` reach the absorber, and prove it by calling a real C library. Then pick one of Python or JS. Mark C++, Rust, WASM, JVM, .NET and Swift as post-1.0. A bytecode VM with no native-call path cannot host libpython or catch C++ exceptions, so M15–M19 as written were not achievable when they were marked complete.
+9. **Bring `pilot test` (M46) forward** to the foundation phase. Milestone tests are Rust files in `crates/pilot-analysis/tests`, which M38 and M89 are supposed to delete.
 
-#### POL-08 — `absorb_c_header` and the PilotDb cache are not in the absorber (MEDIUM)
+### 8.4 Verification rules to change
 
-M12’s public signature is `absorb_c_header(db, spec, target) -> res<ref<CTranslationUnit>, List<Diagnostic>>`, cached as `AbsorbCHeader` at `Durability::ExternalPkg`. The tree has `preprocess_c_header` (`c_pp.pilot:909`) and `c_parse_translation_unit` (`c_parser.pilot:248`). There is no `absorb_c_header`, no `PilotDb` query, and no durability tier on the C include result.
+10. **Acceptance tests must go through the CLI on source files.** A milestone about syntax is tested by a `.pilot` file that uses the syntax, run with `pilot run` / `check` / `build`, with stdout and exit code checked. Function-level unit tests are welcome but do not close a milestone.
+11. **Every diagnostic needs a negative and a positive test with neutral identifiers.** This removes name-keyed triggers.
+12. **No test-supplied verdicts.** A checker may not take the fact it is supposed to establish as a parameter.
+13. **Assert content, not length or substring presence.**
+14. **Replace the anticheat name/marker lists** with behavioural checks. Requiring specific `pub fn` names has produced the names without the behaviour.
+15. **Replace the line-count ratchet** with a byte or token count, and format the Rust with `rustfmt`. Drop the per-file "~360L" budgets as targets; several M31–M50 budgets are far below what the described feature needs, which invites shallow implementations.
+16. **Drop the fixed "four tests per milestone" shape.** Let the acceptance criteria decide.
+17. **Add the missing gates for real:** raw `__engine` use, duplicate types, ring isolation, a performance baseline and a leak count. Today the gate reports "0 violations" while 4,344 raw engine calls exist.
+18. **Rebuild the binary before gate tests.** `anticheat.rs` runs a prebuilt `target/debug/pilot` and only rebuilds if it is missing, so it can test a stale binary.
 
-`c_sysroot.pilot` `sysroot_add_standard_paths` (lines 39–65) is a closed `target_os` string ladder with baked paths: macOS SDK directories instead of `xcrun --show-sdk-path`, and Windows Kits `10.0.22000.0` instead of a discovered version. That is the same closed-dispatch rule as POL-02, at lower severity because the set of host OS families is small and the milestone text asked for those paths explicitly. The version pin still fails the “discover the sysroot” requirement.
+### 8.5 Defects inside the spec text
 
-### 6.3 What holds
+19. **Milestone number collisions.** Test files `milestone50_*` through `milestone61_*` belong to the old numbering in `LEGACY_MILESTONES.md`. The new M50 cites the old `milestone50_lossless_bridge_and_reflection.rs` as already verifying it, and M43 refers to "CST (`M53`/`M8`)". New M50–M61 tests will collide with these files. Rename the legacy tests.
+20. **M1** gives two different rename-pair lists (`map→dict_view` in the manifest, `str→utf8view` in §1.5).
+21. **M5** names durability tiers `Low/Medium/High/Core` in §5.2 and `Volatile/Workspace/ExternalPkg/CoreGenesis` in §5.3.
+22. **M6** declares `IrInst` as 32 bytes; its listed fields sum to 38.
+23. **M1 and M3** jointly ask for more dispatch in `main.rs` and a 35-line cap, which is what produced 793-character lines.
+24. **"The Rust seed contains strictly the 14 seed tokens"** cannot hold while a Rust parser parses the full language. State the rule as the behaviour that matters (renaming core types still compiles and runs real programs) and test that.
+25. **Unmeasurable acceptance criteria** — "≤1.02× hand-written C", "0 ns overhead", "<15 ns", "sub-10 ms", ">500K LOC/s", "bit-identical across Windows/macOS/Linux" — should be removed until the infrastructure to measure them exists, then reintroduced with the measuring tool named.
+26. **Multiplatform contract.** Either add macOS and ARM64 CI or downgrade the Tier-1 wording to a goal.
 
-- New adapter, ABI, and lifetime files are under the 1,500-line cap.
-- `c_pp.pilot`, `c_parser.pilot`, and `c_sysroot.pilot` do not call `__engine`. They use `Map`, `List`, and `File`.
-- `ArgPassKind` is an `enum : u8`. `ArgLocation`, `CallingConvSpec`, `RawDispatchPacket`, and `ForeignHandle` / `ForeignGuard` / `PinnedSlice` carry `[Layout(c_abi)]` where they are value- or C-shaped records.
-- `LoadLibraryW` / `GetProcAddress` / `FreeLibrary` exist beside `dlopen` in `c_abi.rs`.
-- Diagnostic codes `CAB001`–`CAB004`, `ABI001`–`ABI003`, `ESCAPE004`, and `FFI001` are present in the modules or in `selfhost/diagnostics/errors.pilot`.
-- M12–M14 each have a 4-test anti-cheat file registered in `crates/pilot-analysis/tests/common/anticheat.rs`.
+### 8.6 Process
 
-### 6.4 Disposition
+27. **Enforce `AGENTS.md` §1 "Zero Shortcuts".** The patterns in section 5.2 are exactly what that rule forbids. The gate should fail on functions whose names contain `mock`, on fixed-literal returns in non-test code where practical, and reviews should check bodies, not signatures.
+28. **Do the outstanding deletions** listed at the end of section 6.
 
-All eight policy findings (`POL-01` through `POL-08`) have been resolved and verified across the test matrix:
-- **`POL-01` & `POL-02`:** Calling conventions in `stdlib/pilot/abi/descriptor.pilot` are now table-driven via `calling_conv_table()` with dynamic length calculation. Unrecognized conventions return `"unsupported"` plans enabling `classify_call_frame_checked` and `invoke_dynamic_frame` to emit `AbiDiagnostic::unsupported_conv` (`ABI003`). `crates/pilot-rt/src/c_abi.rs` includes a dedicated Windows x64 naked asm dispatcher with 32-byte shadow space, XMM0..3, and stack frame alignment (`<= 220` LOC ratchet preserved at 208 lines).
-- **`POL-03`:** Duplicate `ShmBuffer` and `ShmView` declarations were purged from `stdlib/polyglot/shm.pilot`, leaving it strictly as a legacy Phase 5 test anchor. Modern `ShmBuffer<T>` (`0b10`) and `ShmView<T>` (`0b01`) reside canonically in `stdlib/std/polyglot/shm.pilot`.
-- **`POL-04`:** `ForeignHandle<T>` in `stdlib/std/polyglot/lifetime.pilot` now features `try_wrap(p: i64, dtor: i64) -> opt<ForeignHandle<T>>` and `try_take_raw() -> opt<i64>` returning `opt<T>` rather than relying on integer sentinels.
-- **`POL-05`:** `CppMacro` is classified as `0b10 : IObject`, `CppCondFrame` is classified as `[Layout(c_abi)] : IValue` using compact bitflags, `CFieldDecl` is classified as `[Layout(c_abi)] pub struct CFieldDecl : IValue`, and `CRecordDecl` uses `flags: u8` bitflags.
-- **`POL-06`:** Target-specific type sizing `c_type_size_target(ty, is_win64)` supports Win64 LLP64 (`long = 4`) vs Unix LP64 (`long = 8`), and `CCallingConv : u8` enum is wired into `CFnDecl.calling_conv_kind`.
-- **`POL-07`:** The name-blind waiver was removed from `milestone14_perceus_foreign_resource_and_scope_guards.rs`, restoring `name_blind: true` across all stdlib files with 0 banned type name literals.
-- **`POL-08`:** Public semantic absorber entry points `absorb_c_header` and `absorb_c_header_file` have been implemented in `selfhost/adapter/c_parser.pilot`.
+---
 
-All 85 tests in `mega_all_milestones_simultaneous_gate` and all M11–M15 anti-cheat test suites pass with zero regressions. Milestone 15 is complete, clearing the way for Milestone 16 (`M16 — Native Rust CXX/Bridge & Non-Copy Type Transpiler`).
+## 9. What is real and worth keeping
+
+- **Rust lexer and parser**, including the `syntax` rule system that expands `for` / `while` / `switch` from Pilot-defined rules. General.
+- **Rust VM** for the integer / string / map subset, and its (currently unwired) fuel counter.
+- **`dlopen` wrapper and SysV/Win64 assembly trampoline** in `crates/pilot-rt/src/c_abi.rs`. This is the seed of real FFI.
+- **`pilot gate` hygiene checks**, and the CLI registry with help, completions, schema output and typo suggestions.
+- **Self-hosted lexer** (`selfhost/lexer.pilot`) and the statement/expression half of the self-hosted parser.
+- **`selfhost/vm/compiler.pilot`**, which covers more node kinds than the Rust compiler (defer, guard, try, match, for). Output unverified.
+- **AST-walking emitters** for C, LLVM, WASM and asm — a starting point once types exist.
+- **`pilot emit`** for straight-line code.
+- **Libraries with genuine algorithms:** the C preprocessor, Itanium mangler, C++ class layout, WIT parser and flattening, proto varint/zigzag, SQL DDL scanner and generators, bundle layout flattener, scopes-as-sets hygiene resolver, struct padding analyzer, `.pchor` text parser, diagnostic renderer (UTF-8 width, SARIF), autofix edit applier, the `PilotDb` red/green memo skeleton, the argv parser.
+- **The design documents.** `VISION.md`, `AGENTS.md` and `imp_type.md` are coherent, and the 2-bit lattice is a sound organising idea. The gap is implementation and verification, not direction.
+
+---
+
+## 10. Summary
+
+| Question | Answer |
+| :--- | :--- |
+| Does the milestone document reflect the current state? | No. M1–M30 are libraries plus tests, not integrated features. The baseline self-hosting claim is false. |
+| Are tests and gate trustworthy as completion signals? | No. They pass by construction for the reasons in section 5. |
+| Are we on track for M31+? | No. Type checking, IR, a heap model and a native backend must exist first. |
+| What should change first? | Correct the status markers and baseline (8.1), add the foundation phase (8.2), and change how milestones are verified (8.4). |

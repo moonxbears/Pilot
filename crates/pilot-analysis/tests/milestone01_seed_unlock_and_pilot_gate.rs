@@ -299,7 +299,8 @@ pub fn test_m1_2_rust_tamper_unlock_comment_freedom_and_retired_scripts_purged()
     }
     let orig_cli = std::fs::read_to_string(root.join("crates/pilot-cli/src/main.rs")).unwrap();
     let mutated_cli = format!("// M1 dynamic comment-freedom probe\n{}", orig_cli);
-    assert!(mutated_cli.lines().count() <= 100, "Mutated main.rs must stay <= 100 LOC");
+    let cli_cap = anticheat::seed_rust_file_loc_cap(&root, 100);
+    assert!(mutated_cli.lines().count() <= cli_cap, "Mutated main.rs must stay <= {cli_cap} LOC");
     std::fs::write(tmp_ws.join("crates/pilot-cli/src/main.rs"), &mutated_cli).unwrap();
 
     let bundle = load_gate_bundle(&root);
