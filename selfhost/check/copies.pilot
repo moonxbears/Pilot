@@ -1,0 +1,126 @@
+// ==============================================================================
+// FILE: selfhost/check/copies.pilot
+// F7: where value types are copied.
+// ==============================================================================
+// A value type (a struct that declares `IValue`, lattice 0b00) behaves as its
+// fields: binding it, passing it, returning it or storing it gives the
+// receiver its own copy, so changing one never changes the other.
+//
+// A value is copied where a place holding one (a local, a field or an
+// element: `a`, `o.p`, `xs[i]`) is used by value: a `let`/`var`
+// initializer, the right of an assignment, a `return`, an element of a list
+// literal, a field of a struct literal, and an argument (except to a `ref`,
+// `var`, `iso` or `comptime` parameter). Expressions that build a value (a
+// literal, a call) give a fresh one and are not copied. A place used to
+// reach into it (`a.x`, `a.m()`) or assigned to is not copied either.
+//
+// Rows, read by crates/pilot-cli/src/check.rs (`drop_plan`):
+//   [Copy, start, end, kind, type]
+//   [CopyGlue, type, "", [field, field type, ..]]  the value-type fields a
+//                                                  copy copies too
+pub lvl(0) pkg Pilot.SelfHost.Check.Copies;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.methods.*;
+use selfhost.check.infer.*;
+use selfhost.check.own.*;
+use selfhost.check.drops.*;
+
+/// Whether `t` is a struct that declares itself a value type and stores
+/// fields of its own (a scalar such as an integer stores none: it is one
+/// register, which every engine already copies).
+pub fn declares_value(p: Program, t: i64) -> bool {
+    if !ty_is_named(p.tt, t) || struct_decl(p, t) < 0 { return false; }
+    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
+    return bt.declares_lattice && (bt.declared & 3) == 0 && stored_fields(p, t).len() > 0;
+}
+
+/// Writes the copy glue of value type `t` and of the value-type fields it
+/// holds.
+fn copy_glue(pl: DropPlanner, t: i64) {
+    let p = pl.flow.inf.p;
+    let key = ty_display(p.tt, t);
+    let mark = "copy " + key;
+    if pl.glued.has(mark) { return; }
+    pl.glued.set(mark, true);
+    var fields: List<str> = [];
+    for fl in stored_fields(p, t) {
+        let ft: i64 = fl[1];
+        if declares_value(p, ft) {
+            fields.push(fl[0]);
+            fields.push(ty_display(p.tt, ft));
+            copy_glue(pl, ft);
+        }
+    }
+    pl.rows.push([DropAction::CopyGlue as i64, key, "", fields]);
+}
+
+fn is_place(k: i64) -> bool => k == nk_ident() || k == nk_member() || k == nk_index();
+
+/// Whether the place `n` is used by value where it stands.
+fn copy_position(f: Flow, n: i64) -> bool {
+    let p = f.inf.p;
+    let s = p.s;
+    let up = p.parents[n];
+    if up < 0 { return false; }
+    let k = kind(s, up);
+    if k == nk_let() || k == nk_var() || k == nk_const() || k == nk_assign() { return rhs(s, up) == n; }
+    if k == nk_return() { return lhs(s, up) == n; }
+    if k == nk_list() { return true; }
+    if k == nk_map() {
+        // A struct literal's field values sit after their names.
+        let ch = children(s, up);
+        var i = 1;
+        while i < ch.len() {
+            if ch[i] == n { return true; }
+            i = i + 2;
+        }
+        return false;
+    }
+    if k == nk_call_arg() {
+        let call = p.parents[up];
+        if call < 0 || kind(s, call) != nk_call() { return false; }
+        let target = call_target(f, call);
+        if target < 0 { return true; }
+        for prm in fn_params(s, target) {
+            if kind(s, prm) == nk_param() && node_name(s, prm) == node_name(s, up) { return plain_param(s, prm); }
+        }
+        return true;
+    }
+    if k == nk_call() {
+        let ch = children(s, up);
+        if ch.len() == 0 || ch[0] == n { return false; }
+        let target = call_target(f, up);
+        if target < 0 { return true; }
+        let params = fn_params(s, target);
+        var i = 1;
+        while i < ch.len() {
+            if ch[i] == n { return i - 1 >= params.len() || plain_param(s, params[i - 1]); }
+            i = i + 1;
+        }
+    }
+    return false;
+}
+
+/// Adds the copies of the user's files to the rows of `pl`.
+pub fn plan_copies(pl: DropPlanner) {
+    let inf = pl.flow.inf;
+    let p = inf.p;
+    let s = p.s;
+    let count = s.nodes.len() / 9;
+    var n = 0;
+    while n < count {
+        if is_place(kind(s, n)) && in_user_file(s, n) {
+            let t = type_of(inf, n);
+            if declares_value(p, t) && copy_position(pl.flow, n) {
+                copy_glue(pl, t);
+                pl.cur_binding = -1;
+                pl.cur_type = t;
+                row(pl, ::Copy, n, ty_display(p.tt, t), "");
+            }
+        }
+        n = n + 1;
+    }
+}

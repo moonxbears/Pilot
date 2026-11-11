@@ -31,11 +31,23 @@ pub enum DropAction {
     Else = 4,
     Guard = 5,
     Seam = 6,
+    Copy = 7,
+    CopyGlue = 8,
 }
 
 impl DropAction {
     pub fn from_code(code: i64) -> Option<Self> {
-        [Self::Glue, Self::Before, Self::After, Self::Exit, Self::Else, Self::Guard, Self::Seam]
+        [
+            Self::Glue,
+            Self::Before,
+            Self::After,
+            Self::Exit,
+            Self::Else,
+            Self::Guard,
+            Self::Seam,
+            Self::Copy,
+            Self::CopyGlue,
+        ]
             .into_iter()
             .find(|a| *a as i64 == code)
     }
@@ -70,6 +82,10 @@ pub struct DropPlan {
     /// Seam id and note.
     pub seams: HashMap<NodeKey, Vec<(String, String)>>,
     pub glue: HashMap<String, DropGlue>,
+    /// Nodes whose value is copied, with the value type it is copied as.
+    pub copies: HashMap<NodeKey, String>,
+    /// The value-type fields a copy of each value type copies too.
+    pub copy_glue: HashMap<String, Vec<(String, String)>>,
 }
 
 impl DropPlan {
@@ -80,6 +96,7 @@ impl DropPlan {
             && self.on_else.is_empty()
             && self.guard.is_empty()
             && self.seams.is_empty()
+            && self.copies.is_empty()
     }
 }
 
@@ -168,6 +185,37 @@ impl BytecodeCompiler {
                 scope.push(Deferred::Drop(g));
             }
         }
+    }
+
+    /// The value of node `id`, in register `r`, or its copy when the plan
+    /// copies it.
+    pub(crate) fn copy_if_planned(&mut self, arena: &AstArena, id: NodeId, r: u8) -> u8 {
+        let Some(ty) = self.drop_plan.as_ref().and_then(|p| p.copies.get(&key_of(arena, id)).cloned()) else {
+            return r;
+        };
+        self.emit_copy_value(r, &ty, 0)
+    }
+
+    /// A copy of the value in register `r`, of value type `ty`, in a new
+    /// register.
+    fn emit_copy_value(&mut self, r: u8, ty: &str, depth: usize) -> u8 {
+        let copy = self.emit_intrinsic("record_copy", &[r]);
+        if depth > MAX_GLUE_DEPTH {
+            self.emit_trap(format!(
+                "internal error: the copy glue of `{ty}` nests more than {MAX_GLUE_DEPTH} levels of fields"
+            ));
+            return copy;
+        }
+        let fields = self.drop_plan.as_ref().and_then(|p| p.copy_glue.get(ty).cloned()).unwrap_or_default();
+        for (field, field_ty) in fields {
+            let mark = self.next_reg;
+            let rf = self.emit_member_read(copy, Some(ty), &field);
+            let rc = self.emit_copy_value(rf, &field_ty, depth + 1);
+            let rk = self.emit_const(crate::PilotVal::from_str(&field));
+            self.emit_intrinsic("map_set", &[copy, rk, rc]);
+            self.release_to(mark);
+        }
+        copy
     }
 
     /// The `on_else` drops of `if` node `id`.

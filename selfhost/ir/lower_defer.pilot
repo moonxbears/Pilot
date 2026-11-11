@@ -17,6 +17,7 @@ pub lvl(0) pkg Pilot.SelfHost.Ir.LowerDefer;
 use selfhost.check.snapshot.*;
 use selfhost.ir.model.*;
 use selfhost.ir.lower.*;
+use selfhost.ir.lower_drop.*;
 
 /// The number of open scopes.
 pub fn scope_depth(lw: Lowerer) -> i64 => lw.defers.len();
@@ -35,7 +36,8 @@ fn run_scope(lw: Lowerer, i: i64) {
     let stmts = lw.defers[i];
     var k = stmts.len() - 1;
     while k >= 0 && !ir_is_terminated(lw.f, lw.cur) {
-        let _ = lower_expr(lw, stmts[k]);
+        // A guard's release, or a `defer` statement.
+        if !run_release(lw, stmts[k]) { let _ = lower_expr(lw, stmts[k]); }
         k = k - 1;
     }
 }

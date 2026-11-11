@@ -1,0 +1,42 @@
+// F7: copying a value type copies the value-type fields inside it, and a
+// value read out of a field or a list element is a copy too. Reading a
+// field through a value (`l.a.x`) or calling a method on it copies nothing.
+struct Point : IValue {
+    pub x: i64;
+    pub y: i64;
+
+    pub fn sum() -> i64 => .x + .y;
+}
+
+struct Line : IValue {
+    pub a: Point;
+    pub b: Point;
+}
+
+fn shift(l: Line) -> Line {
+    var m = l;
+    m.a.x = m.a.x + 5;
+    return m;
+}
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+    var l = Line { a: p, b: Point { x: 3, y: 4 } };
+    l.a.y = 20;
+    print(p.y);
+    var k = l;
+    k.b.x = 30;
+    print(l.b.x);
+    var q = l.a;
+    q.x = 7;
+    print(l.a.x);
+    let s = shift(l);
+    print(l.a.x);
+    print(s.a.x);
+    print(l.a.sum());
+    var ls: List<Line> = [l, k];
+    var first = ls[0];
+    first.a.x = 99;
+    print(ls[0].a.x);
+    print(first.a.x);
+}

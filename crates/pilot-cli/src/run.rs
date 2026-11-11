@@ -145,6 +145,9 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
             },
         );
     }
+    for (ty, fields) in &plan.copy_glue {
+        out.copy_glue.insert(ty.clone(), fields.clone());
+    }
     for r in &plan.rows {
         let Some(&base) = bases.get(r.file.as_str()) else { continue };
         let key = (base + r.start, base + r.end, r.kind);
@@ -156,7 +159,10 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
             DropAction::Else => out.on_else.entry(key).or_default().push(item()),
             DropAction::Guard => out.guard.entry(key).or_default().push(item()),
             DropAction::Seam => out.seams.entry(key).or_default().push((r.a.clone(), r.b.clone())),
-            DropAction::Glue => {}
+            DropAction::Copy => {
+                out.copies.insert(key, r.a.clone());
+            }
+            DropAction::Glue | DropAction::CopyGlue => {}
         }
     }
     out

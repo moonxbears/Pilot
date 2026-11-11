@@ -36,6 +36,8 @@ use selfhost.ir.lower_unit.*;
 use selfhost.ir.lower_setter.*;
 use selfhost.ir.lower_destructure.*;
 use selfhost.ir.lower_generator.*;
+use selfhost.check.drops.*;
+use selfhost.ir.lower_drop.*;
 
 /// The state of one lowering run.
 pub struct Lowerer : IObject {
@@ -149,6 +151,10 @@ pub struct Lowerer : IObject {
     /// is left.
     pub loop_enums: List<u32>;
     pub loop_enum_types: List<i64>;
+    /// The drop and copy plan (selfhost/ir/lower_drop.pilot), and the
+    /// guard bindings released at scope exit, by their `let` node.
+    pub plan: DropPlanner;
+    pub releases: Map<str, List<any>>;
 }
 
 /// Lowers `n` expecting type `t` (for target-typed variants).
@@ -269,7 +275,7 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
         setter_arg: ir_no_value(), setter_arg_type: ty_unknown(),
         gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
         resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, i64>(),
-        loop_enums: [], loop_enum_types: [],
+        loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, List<any>>(),
     };
     // Function 0 is `<start>` (selfhost/ir/lower_global.pilot).
     lw.queue.push(-1);
@@ -350,7 +356,9 @@ pub fn specialized_index(lw: Lowerer, decl: i64, self_t: i64, arg_types: List<i6
     lw.queue_self.push(recv);
     lw.queue_body.push(-1);
     lw.queue_args.push(arg_types);
-    let own = if kind(s, decl) == nk_ctor() { s.receiver } else { node_name(s, decl) };
+    // A constructor is named by the receiver word, a destructor `~` then it,
+    // as the seed names them.
+    let own = if kind(s, decl) == nk_ctor() { s.receiver } else if kind(s, decl) == nk_dtor() { "~" + s.receiver } else { node_name(s, decl) };
     let type_name = if ty_is_named(lw.inf.p.tt, recv) { ty_display(lw.inf.p.tt, recv) } else if owner >= 0 { node_name(s, owner) } else { "" };
     let base = if type_name.len() > 0 { type_name + "." + own } else { own };
     let name = if spec == "" { base } else { base + "(" + shown + ")" };
@@ -542,8 +550,16 @@ pub fn unsupported(lw: Lowerer, n: i64) -> u32 {
 // Expressions and statements
 // ------------------------------------------------------------------------------
 
-/// Lowers `n` and returns its value (an `undef` of its type when it has none).
+/// Lowers `n` and returns its value (an `undef` of its type when it has none),
+/// with the drops and copies the plan puts around it.
 pub fn lower_expr(lw: Lowerer, n: i64) -> u32 {
+    if !planned(lw, n) { return lower_node(lw, n); }
+    ensure_open(lw);
+    plan_before(lw, n);
+    return plan_after(lw, n, lower_node(lw, n));
+}
+
+fn lower_node(lw: Lowerer, n: i64) -> u32 {
     ensure_open(lw);
     let s = lw.inf.p.s;
     let k = kind(s, n);
@@ -1047,12 +1063,18 @@ pub fn lower_if(lw: Lowerer, n: i64) -> u32 {
     let then_block = ir_add_block(lw.f);
     let else_block = ir_add_block(lw.f);
     let has_else = ch.len() == 3;
-    let join = if has_else { ir_add_block(lw.f) } else { else_block };
+    // Without `else`, the false path drops what the plan says on it.
+    let join = if has_else || planned(lw, n) { ir_add_block(lw.f) } else { else_block };
     emit_void(lw, op_cond_br(), 0, [cond, then_block, 0, else_block, 0], n);
     switch_to(lw, then_block);
     let tv = lower_expr(lw, ch[1]);
     if !has_else {
         jump_to(lw, join, [], n);
+        if else_block != join {
+            switch_to(lw, else_block);
+            plan_else(lw, n);
+            jump_to(lw, join, [], n);
+        }
         switch_to(lw, join);
         return unit_value(lw, n);
     }
@@ -1236,6 +1258,7 @@ pub fn lower_loop_exit(lw: Lowerer, n: i64) -> u32 {
     if lhs(s, n) >= 0 || targets.len == 0 { return unsupported(lw, n); }
     let target = targets[targets.len - 1];
     let depths = if is_break { lw.exit_depths } else { lw.head_depths };
+    plan_exit(lw, n);
     run_defers_to(lw, depths[depths.len - 1]);
     jump_to(lw, target, [], n);
     return ir_no_value();
@@ -1248,8 +1271,9 @@ pub fn lower_return(lw: Lowerer, n: i64) -> u32 {
         let v = lower_hinted(lw, lhs(s, n), lw.ret_type);
         args.push(coerce(lw, as_member_of(lw, v, value_type(lw, lhs(s, n)), lw.ret_type, n), lw.f.ret_physics, n));
     }
-    // The loops left close their enumerators; deferred statements run after
-    // the value is computed.
+    // The loops left close their enumerators; drops and deferred statements
+    // run after the value is computed.
+    plan_exit(lw, n);
     close_loop_enumerators(lw, n);
     run_defers_to(lw, 0);
     if ir_is_terminated(lw.f, lw.cur) { return ir_no_value(); }

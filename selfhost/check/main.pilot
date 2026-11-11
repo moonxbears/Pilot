@@ -19,6 +19,7 @@ use selfhost.check.own.*;
 use selfhost.check.contracts.*;
 use selfhost.check.access.*;
 use selfhost.check.drops.*;
+use selfhost.check.copies.*;
 
 pub fn check_program() -> List<List<any>> {
     let s = snap_load();
@@ -42,5 +43,7 @@ pub fn drop_plan() -> List<List<any>> {
     let p = prog_new(s);
     let r = resolve_program(p, sink_new(s));
     let inf = infer_new(p, r);
-    return drop_plan_rows(inf);
+    let pl = drop_planner(inf);
+    plan_copies(pl);
+    return pl.rows;
 }

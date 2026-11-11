@@ -355,6 +355,20 @@ impl PilVirtualMachine {
                 let ty = v.as_map_handle().and_then(|slot| self.record_types.get(&slot));
                 Ok(ty.copied().unwrap_or(PilotVal::NULL))
             }
+            // `record_copy(obj)`: a new record with the same type and fields
+            // (a value type is copied where it is bound, passed or stored).
+            "record_copy" => {
+                let obj = arg(args, 0, op)?;
+                let Some(slot) = obj.as_map_handle().filter(|s| *s < self.heap_maps.len()) else {
+                    return Ok(obj);
+                };
+                let fields = self.heap_maps[slot].clone();
+                let copy = self.new_map(fields);
+                if let Some(ty) = self.record_types.get(&slot).copied() {
+                    self.record_types.insert(self.map_slot(copy, op)?, ty);
+                }
+                Ok(copy)
+            }
             "map_set" => self.put(arg(args, 0, op)?, arg(args, 1, op)?, arg(args, 2, op)?, op),
             "map_get" => self.get(arg(args, 0, op)?, arg(args, 1, op)?, op),
             "map_has" => {

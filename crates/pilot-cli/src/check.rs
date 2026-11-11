@@ -387,6 +387,8 @@ pub struct PlannedDrop {
 pub struct CheckedDropPlan {
     pub rows: Vec<PlannedDrop>,
     pub glue: Vec<(String, String, Vec<(String, String)>)>,
+    /// `[value type, fields]`: the value-type fields a copy copies too.
+    pub copy_glue: Vec<(String, Vec<(String, String)>)>,
 }
 
 /// Runs the checker's `drop_plan()` over the program at `path`. A program
@@ -407,14 +409,19 @@ pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> Chec
         let s = |i: usize| f.get(i).and_then(HostValue::as_str).unwrap_or("").to_string();
         let n = |i: usize| f.get(i).and_then(HostValue::as_int).unwrap_or(0);
         let Some(action) = pilot_vm::lower_drop::DropAction::from_code(n(0)) else { continue };
-        if action == pilot_vm::lower_drop::DropAction::Glue {
+        use pilot_vm::lower_drop::DropAction;
+        if matches!(action, DropAction::Glue | DropAction::CopyGlue) {
             let raw: Vec<String> = f
                 .get(3)
                 .and_then(HostValue::as_list)
                 .map(|l| l.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
                 .unwrap_or_default();
             let fields = raw.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].clone(), c[1].clone())).collect();
-            plan.glue.push((s(1), s(2), fields));
+            if action == DropAction::Glue {
+                plan.glue.push((s(1), s(2), fields));
+            } else {
+                plan.copy_glue.push((s(1), fields));
+            }
             continue;
         }
         let (file, start, end) = linked.resolve(ByteSpan::new(n(1) as u32, n(2) as u32));

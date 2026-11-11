@@ -1,0 +1,177 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_drop.pilot
+// F7: drops, guard releases and value copies in PilIR.
+// ==============================================================================
+// The type checker's drop plan (selfhost/check/drops.pilot) and copy plan
+// (selfhost/check/copies.pilot) say, per node, what happens around it; the
+// seed carries out the same plan (crates/pilot-vm/src/lower_drop.rs). Here
+// it becomes ordinary PilIR, so the interpreter and every emitter run it:
+//   - dropping a value calls its type's destructor, then drops the fields
+//     that need dropping, in declaration order;
+//   - a guard joins its block's deferred statements and is released when
+//     the block is left, last in first out (selfhost/ir/lower_defer.pilot);
+//   - copying a value type reads its fields and builds a new value of the
+//     same layout, copying the value-type fields inside it too;
+//   - a node the plan stops at a seam ends in `unreachable` carrying the
+//     seed's SEAM001 message.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerDrop;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.drops.*;
+use selfhost.check.copies.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_members.*;
+
+/// Glue nesting deeper than this is a planner error (a type that holds
+/// itself does so through an `opt` or a collection, a seam in the plan).
+fn max_glue_depth() -> i64 => 32;
+
+/// The drop and copy plan of the program `inf` describes.
+pub fn plan_program(inf: Infer) -> DropPlanner {
+    let pl = drop_planner(inf);
+    plan_copies(pl);
+    return pl;
+}
+
+/// Whether the plan names node `n`.
+pub fn planned(lw: Lowerer, n: i64) -> bool => lw.plan.at.has(key(n));
+
+fn rows_at(lw: Lowerer, n: i64) -> List<List<any>> =>
+    if lw.plan.at.has(key(n)) { lw.plan.at.get(key(n)) } else { [] };
+
+fn is(r: List<any>, a: DropAction) -> bool {
+    let code: i64 = r[0];
+    return code == a as i64;
+}
+
+/// Before node `n` is lowered: its seam, then its `Before` drops.
+pub fn plan_before(lw: Lowerer, n: i64) {
+    for r in rows_at(lw, n) {
+        if is(r, ::Seam) {
+            let id: str = r[3];
+            let note: str = r[4];
+            emit_trap(lw, f"SEAM001: unconnected seam `{id}`: {note}", n);
+            ensure_open(lw);
+            return;
+        }
+    }
+    drop_rows(lw, n, ::Before);
+}
+
+/// After node `n` is lowered to `v`: its `After` drops, and the guards it
+/// binds join the innermost scope's releases. Gives the value of `n`: a
+/// copy of `v` when the plan copies it.
+pub fn plan_after(lw: Lowerer, n: i64, v: u32) -> u32 {
+    var out = v;
+    for r in rows_at(lw, n) {
+        if is(r, ::Copy) && v != ir_no_value() && !ir_is_terminated(lw.f, lw.cur) {
+            let t: i64 = r[2];
+            out = copy_value(lw, v, t, n, 0);
+        }
+        if is(r, ::Guard) && lw.defers.len() > 0 {
+            lw.defers[lw.defers.len() - 1].push(n);
+            lw.releases.set(key(n), r);
+        }
+    }
+    drop_rows(lw, n, ::After);
+    return out;
+}
+
+/// The drops a `return`, `break` or `continue` (node `n`) makes as it
+/// leaves, after a returned value is computed.
+pub fn plan_exit(lw: Lowerer, n: i64) { drop_rows(lw, n, ::Exit); }
+
+/// The drops on the false path of `if` node `n` without `else`.
+pub fn plan_else(lw: Lowerer, n: i64) { drop_rows(lw, n, ::Else); }
+
+/// Whether deferred entry `n` is a guard's release, and if so emits it.
+pub fn run_release(lw: Lowerer, n: i64) -> bool {
+    if !lw.releases.has(key(n)) { return false; }
+    let r = lw.releases.get(key(n));
+    let b: i64 = r[1];
+    let t: i64 = r[2];
+    drop_binding(lw, b, t, n);
+    return true;
+}
+
+fn drop_rows(lw: Lowerer, n: i64, a: DropAction) {
+    for r in rows_at(lw, n) {
+        if is(r, a) {
+            let b: i64 = r[1];
+            let t: i64 = r[2];
+            drop_binding(lw, b, t, n);
+        }
+    }
+}
+
+/// Drops the value binding `b` holds, of type `t`.
+fn drop_binding(lw: Lowerer, b: i64, t: i64, n: i64) {
+    if ir_is_terminated(lw.f, lw.cur) { return; }
+    let k = key(b);
+    var v = ir_no_value();
+    if lw.values.has(k) { v = lw.values.get(k); }
+    else if lw.slots.has(k) { v = emit(lw, op_load(), 0, layout_of(lw.ls, t), [lw.slots.get(k)], n); }
+    if v == ir_no_value() { return; }
+    drop_value(lw, v, t, n, 0);
+}
+
+/// The destructor of struct type `t` with a body to run, or -1.
+fn destructor_of(lw: Lowerer, t: i64) -> i64 {
+    let p = lw.inf.p;
+    let d = struct_decl(p, t);
+    if d < 0 { return -1; }
+    for m in type_members(p.s, d) {
+        if kind(p.s, m) == nk_dtor() && lhs(p.s, m) >= 0 { return m; }
+    }
+    return -1;
+}
+
+/// Drops `v`, a value of type `t`: its destructor, then its fields that
+/// need dropping.
+fn drop_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) {
+    if depth > max_glue_depth() {
+        emit_trap(lw, f"internal error: the drop glue of `{ty_display(lw.inf.p.tt, t)}` nests more than {max_glue_depth()} levels of fields", n);
+        ensure_open(lw);
+        return;
+    }
+    let dtor = destructor_of(lw, t);
+    if dtor >= 0 { let _ = emit(lw, op_call_direct(), function_index(lw, dtor, t), layout_unknown(lw.ls), [v], n); }
+    for fl in stored_fields(lw.inf.p, t) {
+        let name: str = fl[0];
+        let ft: i64 = fl[1];
+        if needs_drop(lw.plan, ft, 0) == 1 {
+            drop_value(lw, property_read(lw, v, t, name, n), ft, n, depth + 1);
+        }
+    }
+}
+
+/// A copy of `v`, a value of value type `t`: a new value of its layout
+/// holding its fields, the value-type ones copied too.
+fn copy_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) -> u32 {
+    if depth > max_glue_depth() {
+        emit_trap(lw, f"internal error: the copy glue of `{ty_display(lw.inf.p.tt, t)}` nests more than {max_glue_depth()} levels of fields", n);
+        ensure_open(lw);
+        return v;
+    }
+    let p = lw.inf.p;
+    var args: List<u32> = [];
+    var slot = 0;
+    for f in fields_of(lw, t) {
+        let name = f.canonical_name;
+        var fv = emit(lw, op_extract_field(), slot, field_physics(lw, t, name), [v], n);
+        if some m = prog_member(p, t, name) {
+            let ft = prog_member_type(p, m);
+            if declares_value(p, ft) { fv = copy_value(lw, fv, ft, n, depth + 1); }
+        }
+        args.push(fv);
+        slot = slot + 1;
+    }
+    let phy = layout_of(lw.ls, t);
+    note_record(lw, t, phy);
+    return emit(lw, op_construct_aggregate(), 0, phy, args, n);
+}

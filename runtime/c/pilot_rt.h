@@ -19,7 +19,12 @@
  * physics and holds value types in place. A string's length is 64 bits (see
  * "Strings").
  *
- * Memory is allocated and never freed; reference counting is F7.
+ * Memory. Strings, lists, maps and struct values are reference counted
+ * (F7, see "Ownership"): the emitted code releases a value when the last
+ * reference to it goes, and the object is freed then. Compiled with
+ * PILOT_LIVE_COUNT, a program reports on standard error, when it ends
+ * normally, how many objects are still allocated (`live allocations: N`);
+ * PILOT_NO_FREE turns freeing off, so that count is every object made.
  *
  * ABI. The entry points named `pilot_*` and `pilot_v_*` below are the stable
  * surface emitted code calls. Behaviour (printing, equality, ordering,
@@ -174,6 +179,7 @@ typedef struct pilot_val {
 } pilot_val;
 
 typedef struct pilot_v_list {
+    int64_t rc;
     int64_t len;
     int64_t cap;
     pilot_val *items;
@@ -188,6 +194,7 @@ typedef struct pilot_v_map_entry {
 } pilot_v_map_entry;
 
 typedef struct pilot_v_map {
+    int64_t rc;
     int64_t count;
     int64_t used;
     int64_t cap;
@@ -199,60 +206,59 @@ typedef pilot_val (*pilot_v_fn)(int32_t argc, pilot_val *argv);
 
 #define PILOT_V_NULL ((pilot_val){0})
 /*
+ * Ownership. Every entry point below borrows its arguments and gives an
+ * owned result: one reference the caller must release (`pilot_v_drop`) or
+ * hand on. A runtime operation that returns a value it also keeps (a list
+ * element, the list `push` returns) takes a new reference for the caller
+ * (`pilot_v_dup`); storing a value into a list, map or struct takes a
+ * reference for the container and releases the value it replaces. A field
+ * or element read through `pilot_v_field` or a layout's `get` is borrowed.
+ * Objects are freed when their count reaches 0. A string literal is a
+ * static object whose count is 0: it is never counted or freed.
+ */
+#ifdef PILOT_LIVE_COUNT
+static int64_t pilot_live;
+#define PILOT_LIVE(d) (pilot_live += (d))
+#else
+#define PILOT_LIVE(d) ((void)0)
+#endif
+
+/* Reports the objects still allocated, when the program counts them. */
+static inline void pilot_rt_finish(void) {
+#ifdef PILOT_LIVE_COUNT
+    fflush(stdout);
+    fprintf(stderr, "live allocations: %" PRId64 "\n", pilot_live);
+#endif
+}
+
+/*
  * Strings. A string is its bytes (followed by a 0 byte that is not part of
- * it) and a 64-bit length. A length up to PILOT_V_SHORT_MAX is kept in the
- * value itself; a longer one in the 8 bytes before the string's bytes, with
- * `n` set to PILOT_V_LONG. Tests lower PILOT_V_SHORT_MAX to run the long
- * form on small strings.
+ * it) and a 64-bit length, in a buffer that starts with a header: the
+ * reference count, the room for appending (0 when the buffer is not
+ * appended to in place) and how many bytes are written. A length up to
+ * PILOT_V_SHORT_MAX is kept in the value itself; a longer one is the
+ * buffer's written length, the 8 bytes just before the string's bytes, with
+ * `n` set to PILOT_V_LONG. A string's bytes always start its buffer. Tests
+ * lower PILOT_V_SHORT_MAX to run the long form on small strings.
  */
 #define PILOT_V_LONG UINT32_MAX
 #ifndef PILOT_V_SHORT_MAX
 #define PILOT_V_SHORT_MAX (UINT32_MAX - 1)
 #endif
 
+typedef struct pilot_v_strhdr {
+    int64_t rc;
+    uint64_t cap;
+    uint64_t fill;
+} pilot_v_strhdr;
+
+static inline pilot_v_strhdr *pilot_v_strhead(const char *s) {
+    return (pilot_v_strhdr *)(void *)(s - sizeof(pilot_v_strhdr));
+}
+
 static inline size_t pilot_v_len(pilot_val v) {
-    return v.n != PILOT_V_LONG ? (size_t)v.n : (size_t)((const uint64_t *)(const void *)v.as.s)[-1];
+    return v.n != PILOT_V_LONG ? (size_t)v.n : (size_t)pilot_v_strhead(v.as.s)->fill;
 }
-
-static inline void *pilot_alloc(size_t size);
-
-/* A string of `len` bytes, uninitialised, for the caller to fill. */
-static inline pilot_val pilot_v_strbuf(size_t len, char **bytes) {
-    pilot_val v = PILOT_V_NULL;
-    v.tag = PILOT_V_STR;
-    char *s;
-    if (len <= PILOT_V_SHORT_MAX) {
-        s = (char *)pilot_alloc(len + 1);
-        v.n = (uint32_t)len;
-    } else {
-        uint64_t *base = (uint64_t *)pilot_alloc(sizeof(uint64_t) + len + 1);
-        base[0] = (uint64_t)len;
-        s = (char *)(base + 1);
-        v.n = PILOT_V_LONG;
-    }
-    s[len] = 0;
-    v.as.s = s;
-    *bytes = s;
-    return v;
-}
-
-/* Bytes `bytes[0..len)` as a string that shares them when its length fits
-   in the value; else a copy in the long form. */
-static inline pilot_val pilot_v_borrow(const char *bytes, size_t len) {
-    if (len <= PILOT_V_SHORT_MAX) {
-        pilot_val v = PILOT_V_NULL;
-        v.tag = PILOT_V_STR;
-        v.n = (uint32_t)len;
-        v.as.s = bytes;
-        return v;
-    }
-    char *s;
-    pilot_val v = pilot_v_strbuf(len, &s);
-    memcpy(s, bytes, len);
-    return v;
-}
-/* A string literal, without copying it. */
-#define PILOT_V_LIT(lit) pilot_v_borrow((lit), sizeof(lit) - 1)
 
 static inline void *pilot_alloc(size_t size) {
     void *p = malloc(size ? size : 1);
@@ -260,16 +266,57 @@ static inline void *pilot_alloc(size_t size) {
     return p;
 }
 
+/* A string of `len` bytes, uninitialised, for the caller to fill, in a
+   buffer with room for `room` bytes; `room` is 0 for a buffer that is not
+   appended to, else at least `len`. */
+static inline pilot_val pilot_v_strroom(size_t len, size_t room, char **bytes) {
+    pilot_v_strhdr *h = (pilot_v_strhdr *)pilot_alloc(sizeof(pilot_v_strhdr) + (room > len ? room : len) + 1);
+    h->rc = 1;
+    h->cap = room;
+    h->fill = len;
+    PILOT_LIVE(1);
+    char *s = (char *)(h + 1);
+    s[len] = 0;
+    pilot_val v = PILOT_V_NULL;
+    v.tag = PILOT_V_STR;
+    v.n = len <= PILOT_V_SHORT_MAX ? (uint32_t)len : PILOT_V_LONG;
+    v.as.s = s;
+    *bytes = s;
+    return v;
+}
+static inline pilot_val pilot_v_strbuf(size_t len, char **bytes) { return pilot_v_strroom(len, 0, bytes); }
+
+/* A string literal: a static buffer whose count is 0, declared once per
+   module (`PILOT_V_STATIC`) and used as a value (`PILOT_V_STATIC_VAL`). */
+#define PILOT_V_STATIC(name, lit) \
+    static struct { pilot_v_strhdr h; char s[sizeof(lit)]; } name = { { 0, 0, sizeof(lit) - 1 }, lit }
+static inline pilot_val pilot_v_static_str(const char *s, size_t len) {
+    pilot_val v = PILOT_V_NULL;
+    v.tag = PILOT_V_STR;
+    v.n = len <= PILOT_V_SHORT_MAX ? (uint32_t)len : PILOT_V_LONG;
+    v.as.s = s;
+    return v;
+}
+#define PILOT_V_STATIC_VAL(name) pilot_v_static_str((name).s, sizeof((name).s) - 1)
+
 /*
  * Small fixed-size objects (struct values): carved in 16-byte steps from
- * 64 KiB chunks rather than one malloc each. They are never handed back
- * one by one; F7's freeing gives this allocator per-size free lists.
+ * 64 KiB chunks rather than one malloc each, and kept on a free list per
+ * size when freed, for the next object of that size.
  */
 #define PILOT_OBJ_CHUNK ((size_t)64 * 1024)
+#define PILOT_OBJ_CLASSES (PILOT_OBJ_CHUNK / 4 / 16 + 1)
 static char *pilot_obj_at, *pilot_obj_end;
+static void *pilot_obj_free[PILOT_OBJ_CLASSES];
 static inline void *pilot_alloc_obj(size_t size) {
     size = (size + 15) & ~(size_t)15;
     if (size > PILOT_OBJ_CHUNK / 4) return pilot_alloc(size);
+    void **head = &pilot_obj_free[size / 16];
+    if (*head) {
+        void *p = *head;
+        *head = *(void **)p;
+        return p;
+    }
     if ((size_t)(pilot_obj_end - pilot_obj_at) < size) {
         pilot_obj_at = (char *)pilot_alloc(PILOT_OBJ_CHUNK);
         pilot_obj_end = pilot_obj_at + PILOT_OBJ_CHUNK;
@@ -278,6 +325,20 @@ static inline void *pilot_alloc_obj(size_t size) {
     pilot_obj_at += size;
     return p;
 }
+static inline void pilot_free_obj(void *p, size_t size) {
+    size = (size + 15) & ~(size_t)15;
+    if (size > PILOT_OBJ_CHUNK / 4) {
+        free(p);
+        return;
+    }
+    *(void **)p = pilot_obj_free[size / 16];
+    pilot_obj_free[size / 16] = p;
+}
+
+/* Takes one more reference to `v`. */
+static inline void pilot_v_dup(pilot_val v);
+/* Releases one reference to `v`, freeing it when it was the last. */
+static inline void pilot_v_drop(pilot_val v);
 
 static inline pilot_val pilot_v_bool(bool b) {
     pilot_val v = PILOT_V_NULL;
@@ -342,17 +403,30 @@ static inline const char *pilot_v_kind(pilot_val v) {
  */
 typedef struct pilot_v_rec {
     uint32_t layout;
+    uint32_t rc;
 } pilot_v_rec;
 
+/* A layout's field count, its dynamic field reader (borrowed) and writer,
+   what releasing a value of it releases (its fields), and its size. */
 typedef struct pilot_v_layout {
     int32_t n;
     pilot_val (*get)(pilot_val rec, int32_t i);
     void (*set)(pilot_val rec, int32_t i, pilot_val v);
+    void (*drop)(pilot_v_rec *rec);
+    size_t size;
 } pilot_v_layout;
 
 /* Defined by the emitted module when it has record layouts. */
 static const pilot_v_layout *pilot_rt_layouts;
 
+/* A new struct value of `size` bytes and layout `layout`, one reference. */
+static inline pilot_v_rec *pilot_v_rec_new(size_t size, uint32_t layout) {
+    pilot_v_rec *h = (pilot_v_rec *)pilot_alloc_obj(size);
+    h->layout = layout;
+    h->rc = 1;
+    PILOT_LIVE(1);
+    return h;
+}
 static inline pilot_val pilot_v_rec_val(pilot_v_rec *h) {
     pilot_val v = PILOT_V_NULL;
     v.tag = PILOT_V_REC;
@@ -402,7 +476,10 @@ static inline int pilot_v_cmp_text(const void *a, const void *b) {
 }
 
 static inline pilot_val pilot_v_show(pilot_val v) {
-    if (v.tag == PILOT_V_STR) return v;
+    if (v.tag == PILOT_V_STR) {
+        pilot_v_dup(v);
+        return v;
+    }
     pilot_v_buf b = {0};
     pilot_v_show_into(&b, v);
     pilot_val out = pilot_v_str(b.data ? b.data : "", b.len);
@@ -457,6 +534,7 @@ static void pilot_v_show_into(pilot_v_buf *b, pilot_val v) {
         for (int64_t i = 0; i < n; i++) {
             if (i) pilot_v_buf_cstr(b, ", ");
             pilot_v_buf_add(b, parts[i].as.s, pilot_v_len(parts[i]));
+            pilot_v_drop(parts[i]);
         }
         pilot_v_buf_cstr(b, " }");
         free(parts);
@@ -472,75 +550,53 @@ static inline void pilot_v_put(FILE *f, pilot_val v) {
     }
     pilot_val s = pilot_v_show(v);
     fwrite(s.as.s, 1, pilot_v_len(s), f);
+    pilot_v_drop(s);
 }
 
 /*
  * Appending in place. Strings are immutable, so `a + b` may write `b` just
  * past `a` when `a` ends where its buffer's written bytes end: every other
  * string in that buffer is a prefix of `a`, and its bytes do not change.
- * The runtime remembers the buffers concatenation made most recently (the
- * largest are kept), with how far each is written and its capacity, and a
- * buffer that runs out of room is replaced by one twice as large, so a loop
- * of `s = s + x` copies O(n) bytes in all rather than O(n^2). Only strings
- * whose length is kept in the value take part (a long string's length
- * lives in its buffer, which the strings sharing it read). F7, which frees
- * buffers, must forget a buffer here when it frees it.
+ * The result then shares `a`'s buffer. A buffer concatenation made has room
+ * for appending (`cap`); one that runs out of room is replaced by one twice
+ * as large, so a loop of `s = s + x` copies O(n) bytes in all rather than
+ * O(n^2). Only strings whose length is kept in the value take part (a long
+ * string's length lives in its buffer, which the strings sharing it read),
+ * and never a literal.
  */
-#ifndef PILOT_V_GROW_SLOTS
-#define PILOT_V_GROW_SLOTS 8
-#endif
-typedef struct pilot_v_grow {
-    const char *base;
-    size_t fill;
-    size_t cap;
-} pilot_v_grow;
-static pilot_v_grow pilot_v_grows[PILOT_V_GROW_SLOTS];
-
 static inline pilot_val pilot_v_concat(pilot_val a, pilot_val b) {
-    if (a.tag != PILOT_V_STR) a = pilot_v_show(a);
-    if (b.tag != PILOT_V_STR) b = pilot_v_show(b);
+    bool shown_a = a.tag != PILOT_V_STR, shown_b = b.tag != PILOT_V_STR;
+    if (shown_a) a = pilot_v_show(a);
+    if (shown_b) b = pilot_v_show(b);
     size_t an = pilot_v_len(a), bn = pilot_v_len(b), n = an + bn;
+    pilot_val v;
     char *s;
     if (a.n == PILOT_V_LONG || n > PILOT_V_SHORT_MAX) {
-        pilot_val v = pilot_v_strbuf(n, &s);
+        v = pilot_v_strbuf(n, &s);
         memcpy(s, a.as.s, an);
         memcpy(s + an, b.as.s, bn);
-        return v;
-    }
-    /* The buffer `a` ends at the written end of, if any; else the slot of
-       the smallest buffer, which the new one replaces. */
-    int slot = 0;
-    bool grows = false;
-    for (int i = 0; i < PILOT_V_GROW_SLOTS; i++) {
-        pilot_v_grow *g = &pilot_v_grows[i];
-        if (g->base == a.as.s && g->fill == an) {
-            if (n <= g->cap) {
-                char *at = (char *)g->base;
-                memcpy(at + an, b.as.s, bn);
-                at[n] = 0;
-                g->fill = n;
-                pilot_val v = a;
-                v.n = (uint32_t)n;
-                return v;
-            }
-            slot = i;
-            grows = true;
-            break;
+    } else {
+        pilot_v_strhdr *h = pilot_v_strhead(a.as.s);
+        bool at_end = h->rc != 0 && h->cap != 0 && h->fill == an;
+        if (at_end && n <= h->cap) {
+            char *at = (char *)a.as.s;
+            memcpy(at + an, b.as.s, bn);
+            at[n] = 0;
+            h->fill = n;
+            h->rc++;
+            v = a;
+            v.n = (uint32_t)n;
+        } else {
+            /* A string that keeps growing gets twice the room it needs. */
+            size_t room = at_end ? n * 2 : n;
+            if (room > PILOT_V_SHORT_MAX) room = PILOT_V_SHORT_MAX;
+            v = pilot_v_strroom(n, room, &s);
+            memcpy(s, a.as.s, an);
+            memcpy(s + an, b.as.s, bn);
         }
-        if (g->cap < pilot_v_grows[slot].cap) slot = i;
     }
-    /* A string that keeps growing gets twice the room it needs. */
-    size_t cap = grows ? n * 2 : n;
-    if (cap > PILOT_V_SHORT_MAX) cap = PILOT_V_SHORT_MAX;
-    s = (char *)pilot_alloc(cap + 1);
-    memcpy(s, a.as.s, an);
-    memcpy(s + an, b.as.s, bn);
-    s[n] = 0;
-    pilot_v_grows[slot] = (pilot_v_grow){s, n, cap};
-    pilot_val v = PILOT_V_NULL;
-    v.tag = PILOT_V_STR;
-    v.n = (uint32_t)n;
-    v.as.s = s;
+    if (shown_a) pilot_v_drop(a);
+    if (shown_b) pilot_v_drop(b);
     return v;
 }
 
@@ -730,9 +786,11 @@ static inline bool pilot_v_le(pilot_val a, pilot_val b) {
 
 static inline pilot_val pilot_v_list_new(int64_t cap) {
     pilot_v_list *l = (pilot_v_list *)pilot_alloc(sizeof(pilot_v_list));
+    l->rc = 1;
     l->len = 0;
     l->cap = cap > 0 ? cap : 4;
     l->items = (pilot_val *)pilot_alloc(sizeof(pilot_val) * (size_t)l->cap);
+    PILOT_LIVE(1);
     pilot_val v = PILOT_V_NULL;
     v.tag = PILOT_V_LIST;
     v.as.l = l;
@@ -751,7 +809,10 @@ static inline void pilot_v_list_reserve(pilot_v_list *l, int64_t n) {
 /* A record (or function value) of `n` fields. */
 static inline pilot_val pilot_v_record(int32_t n, const pilot_val *fields) {
     pilot_val r = pilot_v_list_new(n);
-    if (n) memcpy(r.as.l->items, fields, sizeof(pilot_val) * (size_t)n);
+    for (int32_t i = 0; i < n; i++) {
+        pilot_v_dup(fields[i]);
+        r.as.l->items[i] = fields[i];
+    }
     r.as.l->len = n;
     return r;
 }
@@ -763,11 +824,18 @@ static inline pilot_v_list *pilot_v_need_list(pilot_val v, const char *what) {
     }
     return v.as.l;
 }
+/* Field `i` of a record, borrowed. */
 static inline pilot_val pilot_v_field(pilot_val rec, int32_t i) {
     if (rec.tag == PILOT_V_REC) return pilot_v_rec_get(rec, i);
     pilot_v_list *l = pilot_v_need_list(rec, "read a field of");
     if (i < 0 || i >= l->len) pilot_trap("field index out of range");
     return l->items[i];
+}
+/* Replaces `*cell` with `v`: a reference to `v`, the old value released. */
+static inline void pilot_v_replace(pilot_val *cell, pilot_val v) {
+    pilot_v_dup(v);
+    pilot_v_drop(*cell);
+    *cell = v;
 }
 static inline void pilot_v_set_field(pilot_val rec, int32_t i, pilot_val v) {
     if (rec.tag == PILOT_V_REC) {
@@ -778,7 +846,7 @@ static inline void pilot_v_set_field(pilot_val rec, int32_t i, pilot_val v) {
     }
     pilot_v_list *l = pilot_v_need_list(rec, "write a field of");
     if (i < 0 || i >= l->len) pilot_trap("field index out of range");
-    l->items[i] = v;
+    pilot_v_replace(&l->items[i], v);
 }
 static inline int64_t pilot_v_index(pilot_v_list *l, pilot_val k) {
     char m[128];
@@ -797,18 +865,20 @@ static inline int64_t pilot_v_index(pilot_v_list *l, pilot_val k) {
 
 static inline pilot_val pilot_v_map_new(void) {
     pilot_v_map *m = (pilot_v_map *)pilot_alloc(sizeof(pilot_v_map));
+    m->rc = 1;
     m->count = 0;
     m->used = 0;
     m->cap = 8;
     m->slots = (pilot_v_map_entry *)calloc((size_t)m->cap, sizeof(pilot_v_map_entry));
     if (!m->slots) pilot_trap("out of memory");
+    PILOT_LIVE(1);
     pilot_val v = PILOT_V_NULL;
     v.tag = PILOT_V_MAP;
     v.as.m = m;
     return v;
 }
-/* A key as text: a string, or the text the seed shows for it. */
-static inline pilot_val pilot_v_key(pilot_val k) { return k.tag == PILOT_V_STR ? k : pilot_v_show(k); }
+/* A key as text: a string, or the text the seed shows for it; owned. */
+static inline pilot_val pilot_v_key(pilot_val k) { return pilot_v_show(k); }
 static inline uint64_t pilot_v_hash(pilot_val k) {
     uint64_t h = 1469598103934665603u;
     for (size_t i = 0, n = pilot_v_len(k); i < n; i++) {
@@ -853,9 +923,16 @@ static inline pilot_v_map *pilot_v_need_map(pilot_val v, const char *what, pilot
     }
     return v.as.m;
 }
-static inline pilot_val pilot_v_map_lookup(pilot_v_map *m, pilot_val k) {
+/* The entry of key `k`, or the empty slot where it would go. */
+static inline pilot_v_map_entry *pilot_v_map_find(pilot_v_map *m, pilot_val k) {
     pilot_val key = pilot_v_key(k);
     pilot_v_map_entry *e = pilot_v_map_slot(m, key, pilot_v_hash(key), false);
+    pilot_v_drop(key);
+    return e;
+}
+/* The value of key `k`, borrowed; null when there is none. */
+static inline pilot_val pilot_v_map_lookup(pilot_v_map *m, pilot_val k) {
+    pilot_v_map_entry *e = pilot_v_map_find(m, k);
     return e->state == 1 ? e->val : PILOT_V_NULL;
 }
 static inline void pilot_v_map_store(pilot_v_map *m, pilot_val k, pilot_val v) {
@@ -863,7 +940,8 @@ static inline void pilot_v_map_store(pilot_v_map *m, pilot_val k, pilot_val v) {
     uint64_t h = pilot_v_hash(key);
     pilot_v_map_entry *e = pilot_v_map_slot(m, key, h, false);
     if (e->state == 1) {
-        e->val = v;
+        pilot_v_drop(key);
+        pilot_v_replace(&e->val, v);
         return;
     }
     if ((m->used + 1) * 4 > m->cap * 3) {
@@ -872,10 +950,74 @@ static inline void pilot_v_map_store(pilot_v_map *m, pilot_val k, pilot_val v) {
     e = pilot_v_map_slot(m, key, h, true);
     if (e->state == 0) m->used++;
     e->key = key;
+    pilot_v_dup(v);
     e->val = v;
     e->hash = h;
     e->state = 1;
     m->count++;
+}
+
+/* ---- Releasing ---------------------------------------------------------- */
+
+static void pilot_v_free(pilot_val v) {
+    switch (v.tag) {
+    case PILOT_V_STR: free(pilot_v_strhead(v.as.s)); break;
+    case PILOT_V_LIST: {
+        pilot_v_list *l = v.as.l;
+        for (int64_t i = 0; i < l->len; i++) pilot_v_drop(l->items[i]);
+        free(l->items);
+        free(l);
+        break;
+    }
+    case PILOT_V_MAP: {
+        pilot_v_map *m = v.as.m;
+        for (int64_t i = 0; i < m->cap; i++) {
+            if (m->slots[i].state != 1) continue;
+            pilot_v_drop(m->slots[i].key);
+            pilot_v_drop(m->slots[i].val);
+        }
+        free(m->slots);
+        free(m);
+        break;
+    }
+    default: {
+        const pilot_v_layout *l = pilot_v_rec_layout(v);
+        l->drop(v.as.r);
+        pilot_free_obj(v.as.r, l->size);
+        break;
+    }
+    }
+    PILOT_LIVE(-1);
+}
+static inline void pilot_v_dup(pilot_val v) {
+    switch (v.tag) {
+    case PILOT_V_STR: {
+        pilot_v_strhdr *h = pilot_v_strhead(v.as.s);
+        if (h->rc) h->rc++;
+        return;
+    }
+    case PILOT_V_LIST: v.as.l->rc++; return;
+    case PILOT_V_MAP: v.as.m->rc++; return;
+    case PILOT_V_REC: v.as.r->rc++; return;
+    default: return;
+    }
+}
+static inline void pilot_v_drop(pilot_val v) {
+#ifdef PILOT_NO_FREE
+    (void)v;
+#else
+    switch (v.tag) {
+    case PILOT_V_STR: {
+        pilot_v_strhdr *h = pilot_v_strhead(v.as.s);
+        if (h->rc && --h->rc == 0) pilot_v_free(v);
+        return;
+    }
+    case PILOT_V_LIST: if (--v.as.l->rc == 0) pilot_v_free(v); return;
+    case PILOT_V_MAP: if (--v.as.m->rc == 0) pilot_v_free(v); return;
+    case PILOT_V_REC: if (--v.as.r->rc == 0) pilot_v_free(v); return;
+    default: return;
+    }
+#endif
 }
 
 /* ---- Engine operations (`__engine` names, with their seed behaviour) ----- */
@@ -886,45 +1028,58 @@ static inline pilot_val pilot_is_null(pilot_val v) { return pilot_v_bool(v.tag =
 static inline pilot_val pilot_to_str(pilot_val v) { return pilot_v_show(v); }
 
 static inline pilot_val pilot_map_get(pilot_val o, pilot_val k) {
-    if (o.tag == PILOT_V_LIST) return o.as.l->items[pilot_v_index(o.as.l, k)];
-    if (o.tag == PILOT_V_STR && pilot_v_is_intlike(k)) {
+    pilot_val out;
+    if (o.tag == PILOT_V_LIST) {
+        out = o.as.l->items[pilot_v_index(o.as.l, k)];
+    } else if (o.tag == PILOT_V_STR && pilot_v_is_intlike(k)) {
         if (k.as.i >= 0 && k.as.i < (int64_t)pilot_v_len(o)) return pilot_v_int((unsigned char)o.as.s[k.as.i]);
         char m[128];
         snprintf(m, sizeof m, "string index %" PRId64 " out of bounds for length %" PRIu64, k.as.i, (uint64_t)pilot_v_len(o));
         pilot_trap(m);
+        return PILOT_V_NULL;
+    } else {
+        out = pilot_v_map_lookup(pilot_v_need_map(o, "read", k), k);
     }
-    return pilot_v_map_lookup(pilot_v_need_map(o, "read", k), k);
+    pilot_v_dup(out);
+    return out;
 }
 static inline pilot_val pilot_map_set(pilot_val o, pilot_val k, pilot_val v) {
     if (o.tag == PILOT_V_LIST) {
-        o.as.l->items[pilot_v_index(o.as.l, k)] = v;
-        return o;
+        pilot_v_replace(&o.as.l->items[pilot_v_index(o.as.l, k)], v);
+    } else {
+        pilot_v_map_store(pilot_v_need_map(o, "write", k), k, v);
     }
-    pilot_v_map_store(pilot_v_need_map(o, "write", k), k, v);
+    pilot_v_dup(o);
     return o;
 }
 static inline pilot_val pilot_list_get(pilot_val o, pilot_val k) { return pilot_map_get(o, k); }
 static inline pilot_val pilot_list_set(pilot_val o, pilot_val k, pilot_val v) { return pilot_map_set(o, k, v); }
 static inline pilot_val pilot_map_has(pilot_val o, pilot_val k) {
     pilot_v_map *m = pilot_v_need_map(o, "read", k);
-    pilot_val key = pilot_v_key(k);
-    return pilot_v_bool(pilot_v_map_slot(m, key, pilot_v_hash(key), false)->state == 1);
+    return pilot_v_bool(pilot_v_map_find(m, k)->state == 1);
 }
+/* The removed value: the map's reference passes to the caller. */
 static inline pilot_val pilot_map_remove(pilot_val o, pilot_val k) {
     pilot_v_map *m = pilot_v_need_map(o, "write", k);
-    pilot_val key = pilot_v_key(k);
-    pilot_v_map_entry *e = pilot_v_map_slot(m, key, pilot_v_hash(key), false);
+    pilot_v_map_entry *e = pilot_v_map_find(m, k);
     if (e->state != 1) return PILOT_V_NULL;
     e->state = 2;
     m->count--;
-    return e->val;
+    pilot_v_drop(e->key);
+    pilot_val out = e->val;
+    e->key = PILOT_V_NULL;
+    e->val = PILOT_V_NULL;
+    return out;
 }
 static inline pilot_val pilot_list_push(pilot_val l, pilot_val x) {
     pilot_v_list *p = pilot_v_need_list(l, "push onto");
     pilot_v_list_reserve(p, p->len + 1);
+    pilot_v_dup(x);
     p->items[p->len++] = x;
+    pilot_v_dup(l);
     return l;
 }
+/* The popped element: the list's reference passes to the caller. */
 static inline pilot_val pilot_list_pop(pilot_val l) {
     pilot_v_list *p = pilot_v_need_list(l, "pop from");
     if (p->len == 0) pilot_trap("pop from an empty list");
@@ -936,26 +1091,36 @@ static inline pilot_val pilot_str_len(pilot_val x) {
     return pilot_v_int(pilot_v_need_list(x, "take the length of")->len);
 }
 static inline pilot_val pilot_num_pow(pilot_val a, pilot_val b) { return pilot_v_pow(a, b); }
-static inline void pilot_v_leaves(pilot_v_list *out, pilot_val v, bool deep) {
+/* Appends the elements of list `v` (its leaves, when `deep`) to `out`,
+   borrowed. */
+static inline void pilot_v_leaves(pilot_v_buf *out, pilot_val v, bool deep) {
     pilot_v_list *l = pilot_v_need_list(v, "flatten");
     for (int64_t i = 0; i < l->len; i++) {
         pilot_val e = l->items[i];
         if (deep && e.tag == PILOT_V_LIST) {
             pilot_v_leaves(out, e, true);
         } else {
-            pilot_v_list_reserve(out, out->len + 1);
-            out->items[out->len++] = e;
+            pilot_v_buf_add(out, (const char *)&e, sizeof e);
         }
     }
 }
 static inline pilot_val pilot_list_extend(pilot_val l, pilot_val other, pilot_val deep) {
-    pilot_val tmp = pilot_v_list_new(4);
-    pilot_v_leaves(tmp.as.l, other, deep.tag == PILOT_V_BOOL && deep.as.b);
+    pilot_v_buf tmp = {0};
+    pilot_v_leaves(&tmp, other, deep.tag == PILOT_V_BOOL && deep.as.b);
     pilot_v_list *p = pilot_v_need_list(l, "extend");
-    pilot_v_list_reserve(p, p->len + tmp.as.l->len);
-    for (int64_t i = 0; i < tmp.as.l->len; i++) p->items[p->len++] = tmp.as.l->items[i];
+    int64_t n = (int64_t)(tmp.len / sizeof(pilot_val));
+    pilot_v_list_reserve(p, p->len + n);
+    for (int64_t i = 0; i < n; i++) {
+        pilot_val e;
+        memcpy(&e, tmp.data + (size_t)i * sizeof e, sizeof e);
+        pilot_v_dup(e);
+        p->items[p->len++] = e;
+    }
+    free(tmp.data);
+    pilot_v_dup(l);
     return l;
 }
+/* The removed element: the list's reference passes to the caller. */
 static inline pilot_val pilot_list_remove_at(pilot_val l, pilot_val k) {
     pilot_v_list *p = pilot_v_need_list(l, "remove from");
     int64_t i = pilot_v_index(p, k);
@@ -983,7 +1148,8 @@ static inline pilot_val pilot_str_slice(pilot_val v, pilot_val a, pilot_val b) {
     if (v.tag != PILOT_V_STR) pilot_v_type_error("slice", v, b);
     int64_t x = pilot_v_boundary(v, from), y = pilot_v_boundary(v, to);
     if (y < x) y = x;
-    return pilot_v_borrow(v.as.s + x, (size_t)(y - x));
+    /* A copy: a string's bytes start its buffer. */
+    return pilot_v_str(v.as.s + x, (size_t)(y - x));
 }
 static inline pilot_val pilot_str_byte_at(pilot_val s, pilot_val k) {
     int64_t i = pilot_v_as_i64(k);
@@ -996,12 +1162,12 @@ static inline pilot_val pilot_str_byte_at(pilot_val s, pilot_val k) {
 static inline pilot_val pilot_rt_assert(pilot_val cond, bool has_note, pilot_val note) {
     if (cond.tag == PILOT_V_BOOL && cond.as.b) return PILOT_V_NULL;
     if (!has_note) pilot_trap("assertion failed");
-    pilot_val text = pilot_v_concat(PILOT_V_LIT("assertion failed: "), note);
+    pilot_val text = pilot_v_concat(pilot_v_cstr("assertion failed: "), note);
     pilot_trap(text.as.s);
     return PILOT_V_NULL;
 }
 static inline pilot_val pilot_seam_open(pilot_val id, bool has_note, pilot_val note) {
-    pilot_val text = pilot_v_concat(pilot_v_concat(PILOT_V_LIT("SEAM001: unconnected seam `"), id), PILOT_V_LIT("`: "));
+    pilot_val text = pilot_v_concat(pilot_v_concat(pilot_v_cstr("SEAM001: unconnected seam `"), id), pilot_v_cstr("`: "));
     if (has_note) text = pilot_v_concat(text, note);
     pilot_trap(text.as.s);
     return PILOT_V_NULL;
@@ -1018,7 +1184,7 @@ static inline void pilot_rt_init(int argc, char **argv) {
 }
 static inline pilot_val pilot_proc_args(void) {
     pilot_val l = pilot_v_list_new(pilot_argc);
-    for (int i = 1; i < pilot_argc; i++) pilot_list_push(l, pilot_v_cstr(pilot_argv[i]));
+    for (int i = 1; i < pilot_argc; i++) l.as.l->items[l.as.l->len++] = pilot_v_cstr(pilot_argv[i]);
     return l;
 }
 

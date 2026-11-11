@@ -27,6 +27,7 @@ pub lvl(0) pkg Pilot.SelfHost.Transpile.Source;
 
 use selfhost.check.snapshot.*;
 use selfhost.ir.model.*;
+use selfhost.ir.pass_perceus.*;
 use selfhost.ir.verify.*;
 use selfhost.ir.passes.*;
 use selfhost.ir.interp.*;
@@ -132,6 +133,22 @@ pub interface ISourceDialect {
     fn represent(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str => v;
     /// The value of a string constant, written `lit` by `str_lit`.
     fn text_value(lit: str) -> str => lit;
+    /// Lines declaring the module's string constants `strings` once, written
+    /// before the functions, for a language that refers to them by index
+    /// (`pooled_text`).
+    fn string_pool(strings: List<str>) -> List<str> => [];
+    /// The value of string constant `index` of the module's pool, when
+    /// `string_pool` declared it; else none, and `text_value` writes it.
+    fn pooled_text(index: i64) -> str? => none;
+    /// Whether the language's values are reference counted by the emitted
+    /// code: the module then runs the Perceus pass (selfhost/ir/pass_perceus.pilot)
+    /// and writes its `perceus_dup` and `perceus_drop` with `dup` and `drop`,
+    /// and a store releases the value it replaces.
+    fn counts_references() -> bool => false;
+    /// The statement taking one more reference to `v`.
+    fn dup(v: str) -> str => "";
+    /// The statement releasing one reference to `v`.
+    fn drop(v: str) -> str => "";
     /// Lines that let function `name` (parameters of physics `phys`, result
     /// of physics `ret`) be called through a function value, written before
     /// `function_table` when the language needs them.
@@ -225,6 +242,9 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
         u.declared.push(ls);
     }
     if d.widens_mixed_kinds() { widen_mixed_kinds(m); }
+    // Once every value's representation is final: which values the emitted
+    // code holds references to depends on it.
+    if d.counts_references() { insert_reference_counts(m, (p) => !is_scalar(p)); }
     for line in d.prelude() { u.out.push(line); }
     var protos: List<str> = [];
     var fi = 0;
@@ -244,6 +264,7 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
         }
     }
     for line in d.record_decls(laid, laid_fields) { u.out.push(line); }
+    for line in d.string_pool(m.strings) { u.out.push(line); }
     var g = 0;
     while g < m.globals.len() {
         let name = f"g{g}";
@@ -579,7 +600,7 @@ fn classify_values(sf: SourceFn) -> List<str> {
             } else if op == op_const_float() {
                 sf.inline[r] = float_text(sf, f64_from_bits(m.floats[a[0]]), inst.physics);
             } else if op == op_const_bytes() {
-                sf.inline[r] = d.text_value(d.str_lit(m.strings[a[0]]));
+                sf.inline[r] = d.pooled_text(a[0]) ?? d.text_value(d.str_lit(m.strings[a[0]]));
                 sf.literal[r] = true;
             } else if op == op_undef() {
                 sf.inline[r] = if carries(sf, inst.physics) { d.zero(inst.physics) } else { unit_text(sf) };
@@ -891,7 +912,13 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
     if op == op_store() {
         if !carries(sf, f.value_physics[a[1]]) { return; }
         let cell = cell_of(sf, a[0]);
-        let v = as_physics(sf, a[1], cell_physics(sf, a[0], cell));
+        let held = cell_physics(sf, a[0], cell);
+        let v = as_physics(sf, a[1], held);
+        if d.counts_references() && !is_scalar(held) {
+            // The cell takes a reference and releases the value it held.
+            line(sf, d.dup(v));
+            line(sf, d.drop(cell));
+        }
         line(sf, if global_of(sf, cell) < 0 { d.assign(cell, v) } else { d.global_write(cell, v) });
         return;
     }
@@ -1040,6 +1067,18 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
     if op == op_return() {
         let carried = a.len() > 0 && carries(sf, f.value_physics[a[0]]) && carries(sf, f.ret_physics);
         line(sf, d.ret(if carried { as_physics(sf, a[0], f.ret_physics) } else { "" }));
+        return;
+    }
+    if op == op_perceus_dup() || op == op_perceus_drop() {
+        // A constant is static: it is never counted.
+        let v = a[0];
+        let named = sf.cell[v];
+        if named != "" {
+            if op == op_perceus_drop() && !is_scalar(cell_physics(sf, v, named)) { line(sf, d.drop(named)); }
+            return;
+        }
+        if sf.inline[v] != "" || is_scalar(f.value_physics[v]) { return; }
+        line(sf, if op == op_perceus_dup() { d.dup(use_of(sf, v)) } else { d.drop(use_of(sf, v)) });
         return;
     }
     if op == op_unreachable() {

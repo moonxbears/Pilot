@@ -55,6 +55,7 @@ impl BytecodeCompiler {
         self.cur_unit = arena.unit_of(node_id).map(|u| u.file);
         self.drops_before(arena, node_id);
         let r = self.compile_node_kind(arena, node_id);
+        let r = self.copy_if_planned(arena, node_id, r);
         self.drops_after(arena, node_id);
         self.cur_span = parent_span;
         self.cur_unit = parent_unit;

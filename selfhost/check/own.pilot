@@ -72,7 +72,7 @@ pub fn is_owned_binding(f: Flow, b: i64) -> bool {
 
 /// The declaration a call resolves to (a function, or a method of the
 /// receiver's type), or -1.
-fn call_target(f: Flow, call: i64) -> i64 {
+pub fn call_target(f: Flow, call: i64) -> i64 {
     let inf = f.inf;
     let s = inf.p.s;
     let fnode = called_fn(inf, call);
@@ -151,7 +151,7 @@ fn is_ref_field(f: Flow, t: i64, field: str) -> bool {
 }
 
 /// A parameter written without `ref`, `var`, `iso` or `comptime`.
-fn plain_param(s: Snap, prm: i64) -> bool => kind(s, prm) == nk_param() && flags(s, prm) == 0;
+pub fn plain_param(s: Snap, prm: i64) -> bool => kind(s, prm) == nk_param() && flags(s, prm) == 0;
 
 /// Bindings declared inside node `n`, which are fresh each time it runs.
 fn outside_of(f: Flow, xs: List<i64>, n: i64) -> List<i64> {

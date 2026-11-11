@@ -58,6 +58,10 @@ pub enum DropAction : u8 {
     Guard,
     /// The node stops at a seam.
     Seam,
+    /// The value the node gives is copied (selfhost/check/copies.pilot).
+    Copy,
+    /// How to copy a value of one type: the value-type fields to copy too.
+    CopyGlue,
 }
 
 /// What planning the drops of one program keeps.
@@ -69,11 +73,22 @@ pub struct DropPlanner : IObject {
     pub needs: Map<str, i64>;
     /// Type display -> its glue row was written.
     pub glued: Map<str, bool>;
+    /// Node -> the rows naming it, for a reader in the same program (the
+    /// PilIR lowering): `[action, binding, type, a, b]`, with the binding
+    /// index and type id being planned (-1 and the unknown type for a copy's
+    /// binding).
+    pub at: Map<str, List<List<any>>>;
+    /// The binding and type being planned.
+    pub cur_binding: i64;
+    pub cur_type: i64;
 }
 
-fn row(pl: DropPlanner, action: DropAction, n: i64, a: str, b: str) {
+pub fn row(pl: DropPlanner, action: DropAction, n: i64, a: str, b: str) {
     let s = pl.flow.inf.p.s;
     pl.rows.push([action as i64, span_start(s, n), span_end(s, n), kind(s, n), a, b]);
+    let k = f"{n}";
+    if !pl.at.has(k) { pl.at.set(k, []); }
+    pl.at.get(k).push([action as i64, pl.cur_binding, pl.cur_type, a, b]);
 }
 
 /// The type of binding `b`: its annotation, else its initializer's type.
@@ -89,7 +104,7 @@ fn binding_type(f: Flow, b: i64) -> i64 {
 }
 
 /// The struct declaration of named type `t`, or -1.
-fn struct_decl(p: Program, t: i64) -> i64 {
+pub fn struct_decl(p: Program, t: i64) -> i64 {
     if !ty_is_named(p.tt, t) { return -1; }
     let d = ty_decl(p.tt, t);
     return if d >= 0 && kind(p.s, d) == nk_struct() { d } else { -1 };
@@ -103,7 +118,7 @@ fn has_dtor(p: Program, d: i64) -> bool {
 }
 
 /// Field name and type of each stored field of struct type `t`.
-fn stored_fields(p: Program, t: i64) -> List<List<any>> {
+pub fn stored_fields(p: Program, t: i64) -> List<List<any>> {
     var out: List<List<any>> = [];
     let d = struct_decl(p, t);
     if d < 0 { return out; }
@@ -117,7 +132,7 @@ fn stored_fields(p: Program, t: i64) -> List<List<any>> {
 
 /// 1 when a value of type `t` needs dropping, 2 when it is a collection of
 /// values that do, else 0.
-fn needs_drop(pl: DropPlanner, t: i64, depth: i64) -> i64 {
+pub fn needs_drop(pl: DropPlanner, t: i64, depth: i64) -> i64 {
     let p = pl.flow.inf.p;
     if !prog_is_owned(p, t) || depth > 16 { return 0; }
     let key = ty_display(p.tt, t);
@@ -358,6 +373,8 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
     if kindof != BindKind::Local && kindof != BindKind::Param { return; }
     if kindof == BindKind::Param && flags(s, r.site[b]) != 0 { return; }
     let t = binding_type(f, b);
+    pl.cur_binding = b;
+    pl.cur_type = t;
     let need = needs_drop(pl, t, 0);
     if need == 0 { return; }
     let key = ty_display(p.tt, t);
@@ -387,14 +404,18 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
     }
 }
 
-/// The drop plan of every function body in the user's files.
-pub fn drop_plan_rows(inf: Infer) -> List<List<any>> {
+/// A planner over `inf` that has planned the drops of every function body
+/// in the user's files.
+pub fn drop_planner(inf: Infer) -> DropPlanner {
     let s = inf.p.s;
     var owned: List<i64> = [];
     var i = 0;
     while i < inf.r.site.len() { owned.push(-1); i = i + 1; }
     let f = Flow { inf: inf, sink: sink_new(s), owned: owned };
-    let pl = DropPlanner { flow: f, rows: [], needs: Map<str, i64>(), glued: Map<str, bool>() };
+    let pl = DropPlanner {
+        flow: f, rows: [], needs: Map<str, i64>(), glued: Map<str, bool>(),
+        at: Map<str, List<List<any>>>(), cur_binding: -1, cur_type: ty_unknown(),
+    };
     var b = 0;
     while b < inf.r.site.len() {
         let owner = inf.r.owner[b];
@@ -405,5 +426,5 @@ pub fn drop_plan_rows(inf: Infer) -> List<List<any>> {
         }
         b = b + 1;
     }
-    return pl.rows;
+    return pl;
 }

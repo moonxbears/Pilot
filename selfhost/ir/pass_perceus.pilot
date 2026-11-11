@@ -1,0 +1,426 @@
+// ==============================================================================
+// FILE: selfhost/ir/pass_perceus.pilot
+// F7: reference counts in PilIR (`perceus_dup`, `perceus_drop`).
+// ==============================================================================
+// For a target whose emitted code counts references (C: runtime/c/pilot_rt.h),
+// this pass makes every reference explicit, so each heap object is freed
+// when its last reference goes. Which values are counted is the caller's
+// `counted` test on their physics (for C, every value that is not a number
+// or a boolean). The convention, shared with the C runtime:
+//   - an operation borrows its operands and gives an owned result, one
+//     reference its function must release or hand on; storing into a slot,
+//     a global, a field or a container takes a reference of its own (the
+//     emitter writes that, with the release of the value replaced);
+//   - `return` and a branch's block arguments consume theirs: a function's
+//     result is owned by its caller and a block parameter by its block;
+//   - a function's parameters are borrowed from the caller, and constants
+//     (strings, `undef`) are static, so they are never released;
+//   - a `load`, a field read or a `cast` gives a value it shares with its
+//     operand: it is made owned by a `perceus_dup` right after it.
+// Each owned value is then released (`perceus_drop`) right after its last
+// use, found by liveness over block parameters. At a branch, a value goes
+// on to each successor that needs it, taking one more reference per extra
+// block argument, and is released on an edge whose successor does not need
+// it; such code sits before a `jump`, at the start of a successor that has
+// no other predecessor, or in a new block on the edge. Before a `return`,
+// the function's counted slots are released, and in the start function
+// (function 0, after which the program ends) the counted globals too.
+//
+// The pass runs once, after the representation of every value is final; it
+// is not one of the fixpoint passes of selfhost/ir/passes.pilot.
+pub lvl(0) pkg Pilot.SelfHost.Ir.PassPerceus;
+
+use selfhost.ir.model.*;
+use selfhost.ir.verify.*;
+
+/// How the pass sees one function: which values it counts and whether each
+/// is owned, their liveness, and the code to add.
+struct RcFunction : IObject {
+    pub f: IrFunction;
+    /// Value id -> 0 not counted, 1 owned, 2 borrowed.
+    pub kind: List<i64>;
+    /// Value id -> its index among the counted values, or -1.
+    pub index: List<i64>;
+    /// The counted values, by index.
+    pub counted: List<u32>;
+    /// Block * counted.len + index -> whether the value is live into the block.
+    pub live_in: List<bool>;
+    /// The counted stack slots, released before each return.
+    pub slots: List<u32>;
+    /// The global cells released before each return (the start function).
+    pub globals: List<u32>;
+    /// Block id -> code to put at its start, from a branch into it.
+    pub entry_code: List<List<IrInst>>;
+}
+
+fn rc_owned() -> i64 => 1;
+fn rc_borrowed() -> i64 => 2;
+
+/// Adds the reference counts to every function of `m`.
+pub fn insert_reference_counts(m: IrModule, counted: (IrTypePhysics) => bool) {
+    var fi = 0;
+    while fi < m.functions.len() {
+        rc_function(m, m.functions[fi], fi == 0, counted);
+        fi = fi + 1;
+    }
+}
+
+/// An instruction appended to nothing yet: its operands go to `f`'s pool.
+fn rc_inst(f: IrFunction, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, result: u32, span: u32) -> IrInst {
+    let offset = f.operand_pool.len();
+    for a in args { f.operand_pool.push(a); }
+    return ir_inst_new(result, op, sub, phy, offset, args.len(), span);
+}
+
+fn rc_op(rc: RcFunction, op: u16, v: u32, span: u32) -> IrInst => rc_inst(rc.f, op, 0, ir_physics_unit(), [v], ir_no_value(), span);
+
+fn rc_function(m: IrModule, f: IrFunction, start: bool, counted: (IrTypePhysics) => bool) {
+    if f.blocks.len() == 0 { return; }
+    let rc = RcFunction { f: f, kind: [], index: [], counted: [], live_in: [], slots: [], globals: [], entry_code: [] };
+    for _v in f.value_physics {
+        rc.kind.push(0);
+        rc.index.push(-1);
+    }
+    for b in f.blocks {
+        rc.entry_code.push([]);
+        for p in b.params {
+            if counted(f.value_physics[p]) { rc_track(rc, p, if b.id == 0 { rc_borrowed() } else { rc_owned() }); }
+        }
+        for inst in b.insts {
+            let r = inst.result;
+            if r == ir_no_value() || !counted(f.value_physics[r]) { continue; }
+            let op = inst.opcode;
+            if op == op_stack_slot() {
+                rc.slots.push(r);
+            } else if op != op_global_addr() {
+                rc_track(rc, r, if op == op_const_bytes() || op == op_undef() { rc_borrowed() } else { rc_owned() });
+            }
+        }
+    }
+    if start {
+        var g = 0;
+        while g < m.globals.len() {
+            if counted(m.globals[g].physics) { rc.globals.push(g); }
+            g = g + 1;
+        }
+    }
+    if rc.counted.len() == 0 && rc.slots.len() == 0 && rc.globals.len() == 0 { return; }
+    rc_liveness(rc);
+    // Blocks added on edges are complete when added; only the original
+    // blocks are rewritten.
+    let original = f.blocks.len();
+    var rewritten: List<List<IrInst>> = [];
+    var b = 0;
+    while b < original {
+        rewritten.push(rc_block(rc, b));
+        b = b + 1;
+    }
+    b = 0;
+    while b < original {
+        var insts: List<IrInst> = [];
+        for i in rc.entry_code[b] { insts.push(i); }
+        for i in rewritten[b] { insts.push(i); }
+        f.blocks[b].insts = insts;
+        b = b + 1;
+    }
+    ir_compute_preds(f);
+}
+
+fn rc_track(rc: RcFunction, v: u32, k: i64) {
+    rc.kind[v] = k;
+    rc.index[v] = rc.counted.len();
+    rc.counted.push(v);
+}
+
+fn rc_live_in(rc: RcFunction, b: u32, v: u32) -> bool => rc.live_in[b * rc.counted.len() + rc.index[v]];
+
+/// The counted values an instruction uses, each as often as it is used.
+fn rc_uses(rc: RcFunction, inst: IrInst) -> List<u32> {
+    let a = ir_args(rc.f, inst);
+    var out: List<u32> = [];
+    for pos in value_positions(rc.f, inst) {
+        let v = a[pos];
+        if v < rc.kind.len() && rc.kind[v] != 0 { out.push(v); }
+    }
+    return out;
+}
+
+/// Fills `live_in`: the counted values each block needs from before it.
+fn rc_liveness(rc: RcFunction) {
+    let f = rc.f;
+    let n = rc.counted.len();
+    for _b in f.blocks {
+        for _i in rc.counted { rc.live_in.push(false); }
+    }
+    if n == 0 { return; }
+    var changed = true;
+    while changed {
+        changed = false;
+        var b = f.blocks.len() - 1;
+        while b >= 0 {
+            let live = rc_live_out(rc, b);
+            let insts = f.blocks[b].insts;
+            var k = insts.len() - 1;
+            while k >= 0 {
+                let inst = insts[k];
+                if inst.result != ir_no_value() && inst.result < rc.index.len() && rc.index[inst.result] >= 0 { live[rc.index[inst.result]] = false; }
+                for v in rc_uses(rc, inst) { live[rc.index[v]] = true; }
+                k = k - 1;
+            }
+            for p in f.blocks[b].params {
+                if rc.index[p] >= 0 { live[rc.index[p]] = false; }
+            }
+            var i = 0;
+            while i < n {
+                if live[i] && !rc.live_in[b * n + i] {
+                    rc.live_in[b * n + i] = true;
+                    changed = true;
+                }
+                i = i + 1;
+            }
+            b = b - 1;
+        }
+    }
+}
+
+/// The counted values live out of block `b`: those its successors need.
+fn rc_live_out(rc: RcFunction, b: u32) -> List<bool> {
+    let n = rc.counted.len();
+    var live: List<bool> = [];
+    for _i in rc.counted { live.push(false); }
+    for s in block_successors(rc.f, b) {
+        if s >= rc.f.blocks.len() { continue; }
+        var i = 0;
+        while i < n {
+            if rc.live_in[s * n + i] { live[i] = true; }
+            i = i + 1;
+        }
+    }
+    return live;
+}
+
+/// The number of branches into block `s` (a `cond_br` naming it twice
+/// counts twice).
+fn rc_edges_into(f: IrFunction, s: u32) -> i64 {
+    var count = 0;
+    for b in f.blocks {
+        for t in block_successors(f, b.id) {
+            if t == s { count = count + 1; }
+        }
+    }
+    return count;
+}
+
+/// Block `b`'s instructions with their reference counts.
+fn rc_block(rc: RcFunction, b: u32) -> List<IrInst> {
+    let f = rc.f;
+    let insts = f.blocks[b].insts;
+    let live = rc_live_out(rc, b);
+    // Built back to front: `tail` holds the instructions after the one
+    // being looked at, in reverse order.
+    var tail: List<IrInst> = [];
+    var k = insts.len() - 1;
+    if k >= 0 && opcode_is_terminator(insts[k].opcode) {
+        for i in rc_terminator(rc, b, insts[k], live) { tail.push(i); }
+        k = k - 1;
+    }
+    while k >= 0 {
+        let inst = insts[k];
+        let r = inst.result;
+        var after: List<IrInst> = [];
+        let mine = r != ir_no_value() && r < rc.index.len() && rc.index[r] >= 0;
+        if mine {
+            let used = live[rc.index[r]];
+            let op = inst.opcode;
+            let shares = op == op_load() || op == op_extract_field() || op == op_cast();
+            if used && shares {
+                after.push(rc_op(rc, op_perceus_dup(), r, inst.span_id));
+            } else if !used && !shares && rc.kind[r] == rc_owned() {
+                after.push(rc_op(rc, op_perceus_drop(), r, inst.span_id));
+            }
+            live[rc.index[r]] = false;
+        }
+        for v in rc_uses(rc, inst) {
+            if !live[rc.index[v]] {
+                live[rc.index[v]] = true;
+                if rc.kind[v] == rc_owned() { after.push(rc_op(rc, op_perceus_drop(), v, inst.span_id)); }
+            }
+        }
+        var j = after.len() - 1;
+        while j >= 0 {
+            tail.push(after[j]);
+            j = j - 1;
+        }
+        tail.push(inst);
+        k = k - 1;
+    }
+    if b != 0 {
+        for p in f.blocks[b].params {
+            if rc.index[p] >= 0 && !live[rc.index[p]] && rc.kind[p] == rc_owned() {
+                tail.push(rc_op(rc, op_perceus_drop(), p, 0));
+            }
+        }
+    }
+    var out: List<IrInst> = [];
+    var i = tail.len() - 1;
+    while i >= 0 {
+        out.push(tail[i]);
+        i = i - 1;
+    }
+    return out;
+}
+
+/// The terminator `t` of block `b` with the code before it, in reverse
+/// order; `live` (the values live out of `b`) becomes the values live
+/// before it. Code for an edge that cannot go before `t` goes to its
+/// successor's start or to a new block.
+fn rc_terminator(rc: RcFunction, b: u32, t: IrInst, live: List<bool>) -> List<IrInst> {
+    let f = rc.f;
+    let a = ir_args(f, t);
+    let op = t.opcode;
+    var before: List<IrInst> = [];
+    var term = t;
+    if op == op_return() {
+        if a.len() > 0 && a[0] < rc.kind.len() && rc.kind[a[0]] == rc_borrowed() {
+            before.push(rc_op(rc, op_perceus_dup(), a[0], t.span_id));
+        }
+        for s in rc.slots { before.push(rc_op(rc, op_perceus_drop(), s, t.span_id)); }
+        for g in rc.globals {
+            let cell = ir_new_value(f, ir_physics_ptr());
+            rc.kind.push(0);
+            rc.index.push(-1);
+            before.push(rc_inst(f, op_global_addr(), g, ir_physics_ptr(), [], cell, t.span_id));
+            before.push(rc_op(rc, op_perceus_drop(), cell, t.span_id));
+        }
+    } else if op == op_jump() || op == op_cond_br() || op == op_switch_table() {
+        // The values held at the branch: live after it or used by it.
+        var held: List<u32> = [];
+        for v in rc.counted {
+            if live[rc.index[v]] { held.push(v); }
+        }
+        for v in rc_uses(rc, t) {
+            if !live[rc.index[v]] {
+                live[rc.index[v]] = true;
+                held.push(v);
+            }
+        }
+        var targets: List<u32> = [];
+        var args: List<List<u32>> = [];
+        if op == op_jump() {
+            targets.push(a[0]);
+            args.push(rc_slice(a, 1, a.len() - 1));
+        } else if op == op_cond_br() {
+            let at = 3 + a[2];
+            targets.push(a[1]);
+            args.push(rc_slice(a, 3, a[2]));
+            targets.push(a[at]);
+            args.push(rc_slice(a, at + 2, a[at + 1]));
+        } else {
+            var i = 1;
+            while i < a.len() {
+                targets.push(a[i]);
+                args.push([]);
+                i = i + 1;
+            }
+        }
+        var moved: List<u32> = [];
+        var e = 0;
+        while e < targets.len() {
+            let code = rc_edge(rc, held, targets[e], args[e], t.span_id);
+            if code.len() > 0 {
+                let s = targets[e];
+                if op == op_jump() {
+                    for c in code { before.push(c); }
+                } else if s != b && s != 0 && rc_edges_into(f, s) == 1 {
+                    for c in code { rc.entry_code[s].push(c); }
+                } else {
+                    // A new block on the edge, passing the arguments on.
+                    let nb = ir_add_block(f);
+                    rc.entry_code.push([]);
+                    var body: List<IrInst> = [];
+                    for c in code { body.push(c); }
+                    var jargs: List<u32> = [s];
+                    for v in args[e] { jargs.push(v); }
+                    body.push(rc_inst(f, op_jump(), 0, t.physics, jargs, ir_no_value(), t.span_id));
+                    f.blocks[nb].insts = body;
+                    targets[e] = nb;
+                    args[e] = [];
+                    moved.push(e);
+                }
+            }
+            e = e + 1;
+        }
+        if moved.len() > 0 { term = rc_retarget(rc, t, targets, args); }
+    } else {
+        for v in rc_uses(rc, t) { live[rc.index[v]] = true; }
+        var rev: List<IrInst> = [term];
+        return rev;
+    }
+    // `return` uses its value.
+    for v in rc_uses(rc, t) { live[rc.index[v]] = true; }
+    var rev: List<IrInst> = [term];
+    var i = before.len() - 1;
+    while i >= 0 {
+        rev.push(before[i]);
+        i = i - 1;
+    }
+    return rev;
+}
+
+/// The code on the edge to block `s` passing `args`, for the values `held`
+/// at the branch.
+fn rc_edge(rc: RcFunction, held: List<u32>, s: u32, args: List<u32>, span: u32) -> List<IrInst> {
+    var code: List<IrInst> = [];
+    for v in held {
+        var uses = 0;
+        for x in args {
+            if x == v { uses = uses + 1; }
+        }
+        if rc.kind[v] == rc_owned() {
+            let need = uses + if rc_live_in(rc, s, v) { 1 } else { 0 };
+            if need == 0 { code.push(rc_op(rc, op_perceus_drop(), v, span)); }
+            var d = 1;
+            while d < need {
+                code.push(rc_op(rc, op_perceus_dup(), v, span));
+                d = d + 1;
+            }
+        } else {
+            var d = 0;
+            while d < uses {
+                code.push(rc_op(rc, op_perceus_dup(), v, span));
+                d = d + 1;
+            }
+        }
+    }
+    return code;
+}
+
+fn rc_slice(a: List<u32>, from: i64, count: i64) -> List<u32> {
+    var out: List<u32> = [];
+    var i = 0;
+    while i < count {
+        out.push(a[from + i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// Branch `t` going to `targets` with `args` instead.
+fn rc_retarget(rc: RcFunction, t: IrInst, targets: List<u32>, args: List<List<u32>>) -> IrInst {
+    let a = ir_args(rc.f, t);
+    var out: List<u32> = [];
+    if t.opcode == op_cond_br() {
+        out.push(a[0]);
+        var e = 0;
+        while e < 2 {
+            out.push(targets[e]);
+            out.push(args[e].len());
+            for v in args[e] { out.push(v); }
+            e = e + 1;
+        }
+    } else {
+        out.push(a[0]);
+        for s in targets { out.push(s); }
+    }
+    return rc_inst(rc.f, t.opcode, t.subop, t.physics, out, t.result, t.span_id);
+}

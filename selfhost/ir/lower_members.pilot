@@ -663,6 +663,8 @@ pub fn method_params(s: Snap, decl: i64) -> List<i64> {
 }
 
 pub fn decl_params(s: Snap, decl: i64) -> List<i64> {
+    // A destructor takes only its receiver.
+    if kind(s, decl) == nk_dtor() { return []; }
     if kind(s, decl) != nk_ctor() { return fn_params(s, decl); }
     let ch = children(s, decl);
     var out: List<i64> = [];
@@ -676,6 +678,7 @@ pub fn decl_params(s: Snap, decl: i64) -> List<i64> {
 
 /// The body of a function or constructor declaration, or -1.
 pub fn decl_body(s: Snap, decl: i64) -> i64 {
+    if kind(s, decl) == nk_dtor() { return lhs(s, decl); }
     if kind(s, decl) != nk_ctor() { return fn_body(s, decl); }
     let ch = children(s, decl);
     return if ch.len() > 0 { ch[0] } else { -1 };
