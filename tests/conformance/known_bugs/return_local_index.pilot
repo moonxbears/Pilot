@@ -1,0 +1,19 @@
+// Known bug seed.return_local_index: returning an element read by index from
+// a list bound in the same function panics in the seed (crates/pilot-ast
+// `node` is handed node id u32::MAX) instead of returning the element.
+// Expected: the first element of each list (by hand: [4, 5][0] is 4,
+// ["a", "b"][0] is "a").
+fn first_number() -> i64 {
+    let xs = [4, 5];
+    return xs[0];
+}
+
+fn first_word() -> str {
+    let parts = ["a", "b"];
+    return parts[0];
+}
+
+fn main() {
+    print(first_number());
+    print(first_word());
+}

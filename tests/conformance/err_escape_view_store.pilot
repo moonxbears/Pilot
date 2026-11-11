@@ -1,0 +1,30 @@
+// A view stored where it outlives the function cannot borrow one of the
+// function's locals (ESCAPE002): `Cursor` lives on in the caller, `b` does not.
+struct Buf : IObject {
+    pub data: List<i64>;
+    ~self() {
+        print("free buf");
+    }
+}
+
+struct Win : IReference {
+    pub start: i64;
+    pub len: i64;
+}
+
+struct Cursor {
+    pub at: Win;
+}
+
+fn window_of(ref b: Buf) -> Win => Win { start: 0, len: b.data.len() };
+
+fn reset(ref c: Cursor) {
+    let b = Buf { data: [4, 5] };
+    c.at = window_of(b);
+}
+
+fn main() {
+    let c = Cursor { at: Win { start: 0, len: 0 } };
+    reset(c);
+    print(c.at.len);
+}

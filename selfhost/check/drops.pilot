@@ -40,6 +40,7 @@ use selfhost.check.resolve.*;
 use selfhost.check.infer.*;
 use selfhost.check.diag.*;
 use selfhost.check.own.*;
+use selfhost.check.borrows.*;
 
 /// What a row of the drop plan says. The seed reads the numbers
 /// (crates/pilot-vm/src/lower_drop.rs `DropAction`), so they are fixed.
@@ -81,6 +82,11 @@ pub struct DropPlanner : IObject {
     /// The binding and type being planned.
     pub cur_binding: i64;
     pub cur_type: i64;
+    /// What views and guards borrow (selfhost/check/borrows.pilot).
+    pub borrows: Borrows;
+    /// The bindings that borrow from the binding being planned: it lives
+    /// until their last use too.
+    pub borrowers: List<i64>;
 }
 
 pub fn row(pl: DropPlanner, action: DropAction, n: i64, a: str, b: str) {
@@ -89,18 +95,6 @@ pub fn row(pl: DropPlanner, action: DropAction, n: i64, a: str, b: str) {
     let k = f"{n}";
     if !pl.at.has(k) { pl.at.set(k, []); }
     pl.at.get(k).push([action as i64, pl.cur_binding, pl.cur_type, a, b]);
-}
-
-/// The type of binding `b`: its annotation, else its initializer's type.
-fn binding_type(f: Flow, b: i64) -> i64 {
-    let r = f.inf.r;
-    if r.annot[b] >= 0 { return prog_annot_type(f.inf.p, r.annot[b]); }
-    if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Local { return type_of(f.inf, r.source[b]); }
-    if r.bind_kind[b] == BindKind::Param && kind(f.inf.p.s, r.site[b]) == nk_param() {
-        let a = rhs(f.inf.p.s, r.site[b]);
-        if a >= 0 { return prog_annot_type(f.inf.p, a); }
-    }
-    return ty_unknown();
 }
 
 /// The struct declaration of named type `t`, or -1.
@@ -183,7 +177,11 @@ fn glue(pl: DropPlanner, t: i64) {
 fn uses(pl: DropPlanner, n: i64, b: i64) -> bool {
     if n < 0 { return false; }
     let s = pl.flow.inf.p.s;
-    if kind(s, n) == nk_ident() && pl.flow.inf.r.ref_of[n] == b { return true; }
+    if kind(s, n) == nk_ident() {
+        let at = pl.flow.inf.r.ref_of[n];
+        if at == b { return true; }
+        for v in pl.borrowers { if at == v { return true; } }
+    }
     for c in children(s, n) { if uses(pl, c, b) { return true; } }
     return false;
 }
@@ -257,15 +255,6 @@ fn conditional_move(pl: DropPlanner, n: i64, b: i64) -> bool {
         }
     }
     return false;
-}
-
-/// Whether `t` declares itself a scoped guard (an `IGuard`, lattice 0b11).
-/// The bits a borrowed field adds to an owned type do not make it one: its
-/// release at scope end is what the guard contract promises.
-fn declares_guard(p: Program, t: i64) -> bool {
-    if !ty_is_named(p.tt, t) { return false; }
-    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
-    return bt.declares_lattice && (bt.declared & 3) == 3;
 }
 
 fn is_loop(k: i64) -> bool => k == nk_while() || k == nk_for();
@@ -372,9 +361,10 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
     let kindof = r.bind_kind[b];
     if kindof != BindKind::Local && kindof != BindKind::Param { return; }
     if kindof == BindKind::Param && flags(s, r.site[b]) != 0 { return; }
-    let t = binding_type(f, b);
+    let t = flow_binding_type(f, b);
     pl.cur_binding = b;
     pl.cur_type = t;
+    pl.borrowers = borrowers_of(pl.borrows, b);
     let need = needs_drop(pl, t, 0);
     if need == 0 { return; }
     let key = ty_display(p.tt, t);
@@ -415,6 +405,7 @@ pub fn drop_planner(inf: Infer) -> DropPlanner {
     let pl = DropPlanner {
         flow: f, rows: [], needs: Map<str, i64>(), glued: Map<str, bool>(),
         at: Map<str, List<List<any>>>(), cur_binding: -1, cur_type: ty_unknown(),
+        borrows: borrows_new(f), borrowers: [],
     };
     var b = 0;
     while b < inf.r.site.len() {

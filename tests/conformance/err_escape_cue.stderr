@@ -1,0 +1,2 @@
+error[ESCAPE001]: `w` borrows (`Win`, lattice 0b01) and cannot be passed to `send`, which runs across a cue
+err_escape_cue.pilot:18:16

@@ -16,6 +16,7 @@ use selfhost.check.diag.*;
 use selfhost.check.generics.*;
 use selfhost.check.methods.*;
 use selfhost.check.own.*;
+use selfhost.check.borrows.*;
 use selfhost.check.contracts.*;
 use selfhost.check.access.*;
 use selfhost.check.drops.*;
@@ -30,6 +31,7 @@ pub fn check_program() -> List<List<any>> {
     check_rules(inf, sink);
     check_generics(inf, sink);
     check_ownership(inf, sink);
+    check_escapes(inf, sink);
     check_type_tables(p, sink);
     check_contracts(p, sink);
     check_access(inf, sink);

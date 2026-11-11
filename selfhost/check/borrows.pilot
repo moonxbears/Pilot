@@ -1,0 +1,370 @@
+// ==============================================================================
+// FILE: selfhost/check/borrows.pilot
+// F7: what views and guards borrow, and where they would escape it
+// (ESCAPE001-ESCAPE003).
+// ==============================================================================
+// A value borrows when its type's lattice (F4, selfhost/check/methods.pilot
+// `lattice_of`) is a view's (0b01), or its type declares itself a scoped
+// guard (0b11); an owned type whose fields borrow owns them. What
+// it borrows from, its roots, are the bindings whose storage it may point
+// into:
+//   - a binding of a type that does not borrow is its own root; one that
+//     borrows has the roots of the values bound or assigned to it;
+//   - a field or element of a place has the roots of the place;
+//   - a call's result borrows from its receiver, from each argument passed
+//     to a `ref` or `var` parameter, and from what each argument that
+//     itself borrows borrows from; a block, conditional, collection or
+//     struct literal from what its borrowing parts borrow from; arithmetic,
+//     concatenation and formatting make new values that borrow nothing.
+// A root outlives the function when it is not one of the function's own
+// locals or by-value parameters: a `ref`/`var` parameter, a parameter that
+// itself borrows (the caller's view), `self`, a module global.
+//
+// The rules, on the user's files:
+//   ESCAPE001  a borrowing value passed to a function declared `[Cue]`,
+//              which runs apart from its caller;
+//   ESCAPE002  a view returned, or stored into a place that outlives the
+//              function, while it borrows from one of the function's locals;
+//   ESCAPE003  the same for a guard; and a guard bound to a local returned,
+//              or a guard stored into a field, an element, a global or a
+//              list: a guard stays bound to the block that made it.
+// A closure's body is checked for what it returns of its own locals only.
+//
+// The drop plan (selfhost/check/drops.pilot) asks `borrowers_of`: a value
+// is not dropped while a binding that borrows from it is still used.
+pub lvl(0) pkg Pilot.SelfHost.Check.Borrows;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.methods.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.own.*;
+
+pub struct Borrows : IObject {
+    pub flow: Flow;
+    /// Binding -> 0 not computed, 1 being computed, 2 done.
+    pub state: List<i64>;
+    /// Binding -> its roots, once computed.
+    pub roots: List<List<i64>>;
+    /// Binding -> the right-hand sides of assignments to it.
+    pub assigned: List<List<i64>>;
+}
+
+/// The type of binding `b`: its annotation, else its initializer's type,
+/// else its parameter annotation.
+pub fn flow_binding_type(f: Flow, b: i64) -> i64 {
+    let r = f.inf.r;
+    if r.annot[b] >= 0 { return prog_annot_type(f.inf.p, r.annot[b]); }
+    if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Local { return type_of(f.inf, r.source[b]); }
+    if r.bind_kind[b] == BindKind::Param && kind(f.inf.p.s, r.site[b]) == nk_param() {
+        let a = rhs(f.inf.p.s, r.site[b]);
+        if a >= 0 { return prog_annot_type(f.inf.p, a); }
+    }
+    return ty_unknown();
+}
+
+/// Whether `t` declares itself a scoped guard (an `IGuard`, lattice 0b11).
+/// The bits a borrowed field adds to an owned type do not make it one: its
+/// release at scope end is what the guard contract promises.
+pub fn declares_guard(p: Program, t: i64) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
+    return bt.declares_lattice && (bt.declared & 3) == 3;
+}
+
+/// Whether values of type `t` borrow: a view (lattice 0b01) or a declared
+/// guard. An owned type with a borrowed field (0b11 by its fields alone) owns
+/// what it holds and does not.
+pub fn borrows_type(p: Program, t: i64) -> bool => lattice_of(p, t) == 1 || declares_guard(p, t);
+
+fn guard_type(p: Program, t: i64) -> bool => declares_guard(p, t);
+
+/// The borrow analysis of the program `f` reads.
+pub fn borrows_new(f: Flow) -> Borrows {
+    let r = f.inf.r;
+    let s = f.inf.p.s;
+    var state: List<i64> = [];
+    var roots: List<List<i64>> = [];
+    var assigned: List<List<i64>> = [];
+    var b = 0;
+    while b < r.site.len() {
+        state.push(0);
+        roots.push([]);
+        assigned.push([]);
+        b = b + 1;
+    }
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_assign() {
+            let target = lhs(s, n);
+            if target >= 0 && kind(s, target) == nk_ident() && r.ref_of[target] >= 0 && rhs(s, n) >= 0 {
+                assigned[r.ref_of[target]].push(rhs(s, n));
+            }
+        }
+        n = n + 1;
+    }
+    return Borrows { flow: f, state: state, roots: roots, assigned: assigned };
+}
+
+fn add_all(into: List<i64>, xs: List<i64>) {
+    for x in xs {
+        var seen = false;
+        for y in into { if y == x { seen = true; } }
+        if !seen { into.push(x); }
+    }
+}
+
+/// The roots of binding `b`.
+pub fn binding_roots(bw: Borrows, b: i64) -> List<i64> {
+    if bw.state[b] == 2 { return bw.roots[b]; }
+    // A binding met again while its roots are being computed (`x = f(x)`)
+    // adds nothing new.
+    if bw.state[b] == 1 { return []; }
+    let f = bw.flow;
+    let r = f.inf.r;
+    if !borrows_type(f.inf.p, flow_binding_type(f, b)) || r.bind_kind[b] == BindKind::Param {
+        bw.roots[b] = [b];
+        bw.state[b] = 2;
+        return bw.roots[b];
+    }
+    bw.state[b] = 1;
+    var out: List<i64> = [];
+    if r.source[b] >= 0 { add_all(out, expr_roots(bw, r.source[b])); }
+    for e in bw.assigned[b] { add_all(out, expr_roots(bw, e)); }
+    bw.roots[b] = out;
+    bw.state[b] = 2;
+    return out;
+}
+
+/// What the value of place `n` (an identifier, field or element) borrows
+/// when it is lent: the place's own storage, or what it borrows.
+fn place_roots(bw: Borrows, n: i64) -> List<i64> {
+    let s = bw.flow.inf.p.s;
+    let k = kind(s, n);
+    if k == nk_ident() {
+        let b = bw.flow.inf.r.ref_of[n];
+        return if b >= 0 { binding_roots(bw, b) } else { [] };
+    }
+    if k == nk_member() || k == nk_index() { return place_roots(bw, lhs(s, n)); }
+    return expr_roots(bw, n);
+}
+
+/// What the value of expression `n` borrows from.
+pub fn expr_roots(bw: Borrows, n: i64) -> List<i64> {
+    if n < 0 { return []; }
+    let inf = bw.flow.inf;
+    let p = inf.p;
+    let s = p.s;
+    let k = kind(s, n);
+    if k == nk_ident() || k == nk_member() || k == nk_index() {
+        return if borrows_type(p, type_of(inf, n)) { place_roots(bw, n) } else { [] };
+    }
+    var out: List<i64> = [];
+    if k == nk_call() {
+        let ch = children(s, n);
+        if ch.len() == 0 { return out; }
+        if kind(s, ch[0]) == nk_member() { add_all(out, place_roots(bw, lhs(s, ch[0]))); }
+        let target = call_target(bw.flow, n);
+        let params = if target >= 0 { fn_params(s, target) } else { [] };
+        var i = 1;
+        while i < ch.len() {
+            var a = ch[i];
+            var lent = false;
+            if kind(s, a) == nk_call_arg() {
+                for prm in params {
+                    if kind(s, prm) == nk_param() && node_name(s, prm) == node_name(s, a) { lent = flags(s, prm) != 0; }
+                }
+                a = rhs(s, a);
+            } else if i - 1 < params.len() {
+                lent = kind(s, params[i - 1]) == nk_param() && flags(s, params[i - 1]) != 0;
+            }
+            if lent { add_all(out, place_roots(bw, a)); }
+            else if borrows_type(p, type_of(inf, a)) || kind(s, a) == nk_map() { add_all(out, expr_roots(bw, a)); }
+            i = i + 1;
+        }
+        return out;
+    }
+    // An expression that hands on one of its parts: a block, a conditional,
+    // a collection or struct literal (`nk_map` holds a literal's fields).
+    // Others (arithmetic, concatenation, formatting, comparison) make a new
+    // value that borrows nothing.
+    let passes = k == nk_block() || k == nk_if() || k == nk_match() || k == nk_arm() || k == nk_coalesce()
+        || k == nk_tuple() || k == nk_list() || k == nk_map() || k == nk_try_propagate()
+        || k == nk_catch_recovery() || k == nk_cascade();
+    if !passes { return out; }
+    for c in children(s, n) {
+        if borrows_type(p, type_of(inf, c)) || kind(s, c) == nk_map() { add_all(out, expr_roots(bw, c)); }
+    }
+    return out;
+}
+
+/// The function-like node `n` sits in, or -1.
+fn enclosing_fn(p: Program, n: i64) -> i64 {
+    let s = p.s;
+    var at = p.parents[n];
+    while at >= 0 {
+        let k = kind(s, at);
+        if k == nk_fn() || k == nk_operator() || k == nk_lambda() { return at; }
+        at = p.parents[at];
+    }
+    return -1;
+}
+
+/// The roots among `roots` that are locals or by-value parameters of the
+/// function-like node `owner`: storage that goes when it returns.
+fn dying(bw: Borrows, roots: List<i64>, owner: i64) -> List<i64> {
+    let f = bw.flow;
+    let r = f.inf.r;
+    let s = f.inf.p.s;
+    var out: List<i64> = [];
+    for b in roots {
+        if r.owner[b] != owner { continue; }
+        if r.bind_kind[b] == BindKind::Param {
+            if kind(s, r.site[b]) == nk_param() && flags(s, r.site[b]) != 0 { continue; }
+            if borrows_type(f.inf.p, flow_binding_type(f, b)) { continue; }
+        }
+        out.push(b);
+    }
+    return out;
+}
+
+/// The name of the function-like node `fnode`, for messages.
+fn fn_label(s: Snap, fnode: i64) -> str => if kind(s, fnode) == nk_lambda() { "the closure" } else { node_name(s, fnode) };
+
+/// Reports value `e` of type `t` leaving its function (`how`: "returned" or
+/// "stored") while it borrows from one of the function's locals.
+fn check_leaving(bw: Borrows, e: i64, t: i64, how: str) {
+    let f = bw.flow;
+    let p = f.inf.p;
+    let s = p.s;
+    let owner = enclosing_fn(p, e);
+    if owner < 0 { return; }
+    let gone = dying(bw, expr_roots(bw, e), owner);
+    if gone.len() == 0 { return; }
+    let code = if guard_type(p, t) { "ESCAPE003" } else { "ESCAPE002" };
+    sink_error(f.sink, e, code, f"`{ty_display(p.tt, t)}` {how} here borrows `{f.inf.r.name[gone[0]]}`, which is dropped when `{fn_label(s, owner)}` returns");
+}
+
+/// Whether the place `target` (assigned to) outlives the function `owner`.
+fn outlives(bw: Borrows, target: i64, owner: i64) -> bool {
+    let s = bw.flow.inf.p.s;
+    let k = kind(s, target);
+    if k == nk_ident() {
+        let b = bw.flow.inf.r.ref_of[target];
+        if b < 0 { return true; }
+        return dying(bw, [b], owner).len() == 0;
+    }
+    if k == nk_member() || k == nk_index() {
+        let base = lhs(s, target);
+        if kind(s, base) == nk_ident() || kind(s, base) == nk_member() || kind(s, base) == nk_index() { return outlives(bw, base, owner); }
+        return true;
+    }
+    return true;
+}
+
+fn guard_stored(bw: Borrows, n: i64, t: i64) {
+    let p = bw.flow.inf.p;
+    sink_error(bw.flow.sink, n, "ESCAPE003", f"a `{ty_display(p.tt, t)}` guard cannot be stored here: a guard stays bound to the block that made it");
+}
+
+/// Whether function `target` is declared `[Cue]`.
+fn has_cue(p: Program, target: i64) -> bool {
+    if some _args = prog_attr_nodes(p, target, "Cue") { return true; }
+    return false;
+}
+
+fn check_node(bw: Borrows, n: i64) {
+    let f = bw.flow;
+    let inf = f.inf;
+    let p = inf.p;
+    let s = p.s;
+    let k = kind(s, n);
+    if k == nk_return() {
+        let e = lhs(s, n);
+        if e < 0 { return; }
+        let t = type_of(inf, e);
+        if !borrows_type(p, t) { return; }
+        if guard_type(p, t) && kind(s, e) == nk_ident() {
+            let b = inf.r.ref_of[e];
+            let owner = enclosing_fn(p, n);
+            if b >= 0 && inf.r.bind_kind[b] == BindKind::Local && inf.r.owner[b] == owner {
+                sink_error(f.sink, e, "ESCAPE003", f"guard `{inf.r.name[b]}` is bound in `{fn_label(s, owner)}` and is released when it ends; return the expression that makes the guard instead");
+                return;
+            }
+        }
+        check_leaving(bw, e, t, "returned");
+        return;
+    }
+    if k == nk_assign() {
+        let target = lhs(s, n);
+        let e = rhs(s, n);
+        if target < 0 || e < 0 { return; }
+        let t = type_of(inf, e);
+        if !borrows_type(p, t) { return; }
+        let tk = kind(s, target);
+        if guard_type(p, t) && (tk == nk_member() || tk == nk_index() || (tk == nk_ident() && inf.r.ref_of[target] < 0)) {
+            guard_stored(bw, e, t);
+            return;
+        }
+        let owner = enclosing_fn(p, n);
+        if owner >= 0 && outlives(bw, target, owner) { check_leaving(bw, e, t, "stored"); }
+        return;
+    }
+    if k == nk_list() {
+        for c in children(s, n) {
+            let t = type_of(inf, c);
+            if guard_type(p, t) { guard_stored(bw, c, t); }
+        }
+        return;
+    }
+    if k == nk_call() {
+        let target = call_target(f, n);
+        if target < 0 || !has_cue(p, target) { return; }
+        let ch = children(s, n);
+        var i = 1;
+        while i < ch.len() {
+            let a = if kind(s, ch[i]) == nk_call_arg() { rhs(s, ch[i]) } else { ch[i] };
+            let t = type_of(inf, a);
+            if a >= 0 && borrows_type(p, t) {
+                let what = if kind(s, a) == nk_ident() { f"`{node_name(s, a)}`" } else { "this argument" };
+                let bits = if guard_type(p, t) { "0b11" } else { "0b01" };
+                sink_error(f.sink, a, "ESCAPE001", f"{what} borrows (`{ty_display(p.tt, t)}`, lattice {bits}) and cannot be passed to `{node_name(s, target)}`, which runs across a cue");
+            }
+            i = i + 1;
+        }
+    }
+}
+
+/// Runs ESCAPE001-ESCAPE003 over the user's files.
+pub fn check_escapes(inf: Infer, sink: DiagSink) {
+    let s = inf.p.s;
+    var owned: List<i64> = [];
+    var i = 0;
+    while i < inf.r.site.len() { owned.push(-1); i = i + 1; }
+    let bw = borrows_new(Flow { inf: inf, sink: sink, owned: owned });
+    var n = 0;
+    while n < s.count {
+        if in_user_file(s, n) { check_node(bw, n); }
+        n = n + 1;
+    }
+}
+
+/// The bindings that borrow from binding `b` (a local or parameter of the
+/// same function), directly or through other views.
+pub fn borrowers_of(bw: Borrows, b: i64) -> List<i64> {
+    let r = bw.flow.inf.r;
+    var out: List<i64> = [];
+    var v = 0;
+    while v < r.site.len() {
+        if v != b && r.owner[v] == r.owner[b] && borrows_type(bw.flow.inf.p, flow_binding_type(bw.flow, v)) {
+            for x in binding_roots(bw, v) {
+                if x == b { out.push(v); }
+            }
+        }
+        v = v + 1;
+    }
+    return out;
+}

@@ -1,0 +1,19 @@
+// What crosses a cue ([Cue]: the function runs apart from its caller) cannot
+// borrow (ESCAPE001): a view or guard is only valid in the caller's scope.
+// A plain value may cross (`send_len`).
+struct Win : IReference {
+    pub start: i64;
+    pub len: i64;
+}
+
+[Cue]
+fn send(w: Win) -> i64 => w.len;
+
+[Cue]
+fn send_len(n: i64) -> i64 => n;
+
+fn main() {
+    let w = Win { start: 0, len: 2 };
+    print(send_len(w.len));
+    print(send(w));
+}

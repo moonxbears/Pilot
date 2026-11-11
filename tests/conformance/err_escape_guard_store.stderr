@@ -1,0 +1,2 @@
+error[ESCAPE003]: a `Lock` guard cannot be stored here: a guard stays bound to the block that made it
+err_escape_guard_store.pilot:12:16
