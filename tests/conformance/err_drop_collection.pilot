@@ -1,0 +1,16 @@
+// F7: a list of values that need dropping must drop each element. Until the
+// PilIR drop pass does that, binding such a list stops at the
+// `own.collection_drop` seam.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn main() {
+    print("before");
+    let rs: List<Res> = [Res { name: "a" }, Res { name: "b" }];
+    print(rs.len());
+}

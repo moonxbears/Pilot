@@ -239,7 +239,7 @@ impl BytecodeCompiler {
         let (field, setters) = match kind {
             LazyKind::Getter { field } => (field.clone(), None),
             LazyKind::Setter { field, bodies } => (field.clone(), Some(bodies.clone())),
-            LazyKind::Method { .. } => return,
+            LazyKind::Method { .. } | LazyKind::Destructor => return,
         };
         let receiver = crate::RECEIVER;
         let mut params = vec![receiver.to_string()];

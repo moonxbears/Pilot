@@ -1,0 +1,17 @@
+// F7: a closure that captures an owned local owns it and must drop it with
+// itself. Until the PilIR drop pass does that, the closure stops at the
+// `own.capture` seam.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn main() {
+    let r = Res { name: "a" };
+    print("before");
+    let f = () => r.name;
+    print(f());
+}

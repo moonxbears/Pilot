@@ -1,0 +1,23 @@
+// F7: a value moved on only some paths through a statement must be dropped
+// on the others. Until the PilIR drop pass does that, such a statement stops
+// at the `own.conditional_move` seam.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn take(r: Res) -> bool {
+    print(f"took {r.name}");
+    return true;
+}
+
+fn main() {
+    let r = Res { name: "a" };
+    let keep = true;
+    print("before");
+    let taken = keep && take(r);
+    print(taken);
+}

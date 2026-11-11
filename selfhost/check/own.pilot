@@ -59,7 +59,7 @@ fn drop_binding(xs: List<i64>, b: i64) -> List<i64> {
     return out;
 }
 
-fn is_owned_binding(f: Flow, b: i64) -> bool {
+pub fn is_owned_binding(f: Flow, b: i64) -> bool {
     if f.owned[b] < 0 {
         let r = f.inf.r;
         var t = ty_unknown();
@@ -88,7 +88,7 @@ fn call_target(f: Flow, call: i64) -> i64 {
 }
 
 /// Whether the identifier `n` is used by value where it stands.
-fn is_move_position(f: Flow, n: i64) -> bool {
+pub fn is_move_position(f: Flow, n: i64) -> bool {
     let p = f.inf.p;
     let s = p.s;
     let up = p.parents[n];

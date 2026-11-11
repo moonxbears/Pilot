@@ -45,37 +45,6 @@ pub fn cli_gate_files() -> List<str> => [
     "selfhost/gate/runner.pilot",
 ];
 
-/// The declarations every program is checked against, linked after the
-/// program: files, or directories whose `.pilot` files are taken in name
-/// order. `core.pilot` holds the `Cfg` tables (lattice masks, register
-/// classes), `operator.pilot` the root and operator interfaces.
-pub fn cli_checker_decls() -> List<str> => [
-    "stdlib/core/core.pilot",
-    "stdlib/core/operator.pilot",
-    "stdlib/core/primitives",
-];
-
-/// The type checker's sources (`selfhost/check/`), in link order.
-pub fn cli_checker_files() -> List<str> => [
-    "stdlib/core/syntax/visibility.pilot",
-    "selfhost/check/snapshot.pilot",
-    "selfhost/check/types.pilot",
-    "selfhost/check/diag.pilot",
-    "selfhost/check/program.pilot",
-    "selfhost/types/method_table.pilot",
-    "selfhost/types/bundle_splice.pilot",
-    "selfhost/check/methods.pilot",
-    "selfhost/check/resolve.pilot",
-    "selfhost/check/generators.pilot",
-    "selfhost/check/infer.pilot",
-    "selfhost/check/rules.pilot",
-    "selfhost/check/generics.pilot",
-    "selfhost/check/own.pilot",
-    "selfhost/check/contracts.pilot",
-    "selfhost/check/access.pilot",
-    "selfhost/check/main.pilot",
-];
-
 fn diag_before(a: HostDiag, b: HostDiag) -> bool =>
     a.file < b.file || (a.file == b.file && a.start < b.start);
 

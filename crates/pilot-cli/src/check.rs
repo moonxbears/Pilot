@@ -368,6 +368,69 @@ pub fn check(path: &str, checker_files: &[String], decls: &[String]) -> Vec<Diag
         .collect()
 }
 
+/// One row of a drop plan (selfhost/check/drops.pilot), its node named by
+/// file and the node's offsets in it.
+#[derive(Clone, Debug)]
+pub struct PlannedDrop {
+    pub action: pilot_vm::lower_drop::DropAction,
+    pub file: String,
+    pub start: u32,
+    pub end: u32,
+    pub kind: u16,
+    pub a: String,
+    pub b: String,
+}
+
+/// The drop plan of the program at `path`: its rows, and how to drop a value
+/// of each type it names (`[type, destructor owner or "", fields]`).
+#[derive(Clone, Debug, Default)]
+pub struct CheckedDropPlan {
+    pub rows: Vec<PlannedDrop>,
+    pub glue: Vec<(String, String, Vec<(String, String)>)>,
+}
+
+/// Runs the checker's `drop_plan()` over the program at `path`. A program
+/// that does not link has no plan.
+pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> CheckedDropPlan {
+    let Some((linked, _, snap)) = program_snapshot(path, decls) else {
+        return CheckedDropPlan::default();
+    };
+    let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
+        "chk_snapshot" => Some(Ok(snap.clone())),
+        _ => None,
+    });
+    let tool_paths: Vec<&str> = checker_files.iter().map(String::as_str).collect();
+    let out = tool::eval_to_host(&tool_paths, "drop_plan();", ops);
+    let mut plan = CheckedDropPlan::default();
+    for r in out.as_list().unwrap_or_default() {
+        let Some(f) = r.as_list() else { continue };
+        let s = |i: usize| f.get(i).and_then(HostValue::as_str).unwrap_or("").to_string();
+        let n = |i: usize| f.get(i).and_then(HostValue::as_int).unwrap_or(0);
+        let Some(action) = pilot_vm::lower_drop::DropAction::from_code(n(0)) else { continue };
+        if action == pilot_vm::lower_drop::DropAction::Glue {
+            let raw: Vec<String> = f
+                .get(3)
+                .and_then(HostValue::as_list)
+                .map(|l| l.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            let fields = raw.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].clone(), c[1].clone())).collect();
+            plan.glue.push((s(1), s(2), fields));
+            continue;
+        }
+        let (file, start, end) = linked.resolve(ByteSpan::new(n(1) as u32, n(2) as u32));
+        plan.rows.push(PlannedDrop {
+            action,
+            file,
+            start,
+            end,
+            kind: n(3) as u16,
+            a: s(4),
+            b: s(5),
+        });
+    }
+    plan
+}
+
 /// Runs the tool made of `tool_files`, calling `entry`, with the snapshot of
 /// the program at `path` (linked with `decls`) served as `chk_snapshot`.
 /// The tool's result is its exit code; a program that does not link gives

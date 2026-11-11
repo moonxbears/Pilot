@@ -8,11 +8,13 @@
 //! Exit codes: the integer returned by `main` (0 when it returns nothing);
 //! `1` for runtime faults.
 
+use crate::check;
 use crate::link::LinkedSource;
 use crate::tool;
 use pilot_analysis::PhysicsRegistry;
 use pilot_rt::PilotVal;
 use pilot_span::ByteSpan;
+use pilot_vm::lower_drop::{DropAction, DropGlue, DropItem, DropPlan};
 use pilot_vm::{codes, BytecodeCompiler, HostValue, PilVirtualMachine, PilcBinary};
 use std::fs;
 
@@ -126,6 +128,42 @@ pub(crate) fn link_plan(path: &str) -> Result<Vec<String>, Vec<Diag>> {
 /// source text linked after the program as its entry unit: it runs instead of
 /// the program's `main` (the test runner calls one function this way).
 pub fn compile(path: &str, tail: Option<&str>) -> Result<Program, Vec<Diag>> {
+    compile_planned(path, tail, None)
+}
+
+/// The seed's drop plan from the checker's, its nodes moved into the
+/// offsets of `source`.
+fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropPlan {
+    let bases: std::collections::HashMap<&str, u32> = source.units().map(|(p, _, b)| (p, b)).collect();
+    let mut out = DropPlan::default();
+    for (ty, owner, fields) in &plan.glue {
+        out.glue.insert(
+            ty.clone(),
+            DropGlue {
+                destructor_owner: (!owner.is_empty()).then(|| owner.clone()),
+                fields: fields.clone(),
+            },
+        );
+    }
+    for r in &plan.rows {
+        let Some(&base) = bases.get(r.file.as_str()) else { continue };
+        let key = (base + r.start, base + r.end, r.kind);
+        let item = || DropItem { binding: r.a.clone(), ty: r.b.clone() };
+        match r.action {
+            DropAction::Before => out.before.entry(key).or_default().push(item()),
+            DropAction::After => out.after.entry(key).or_default().push(item()),
+            DropAction::Exit => out.exit.entry(key).or_default().push(item()),
+            DropAction::Else => out.on_else.entry(key).or_default().push(item()),
+            DropAction::Guard => out.guard.entry(key).or_default().push(item()),
+            DropAction::Seam => out.seams.entry(key).or_default().push((r.a.clone(), r.b.clone())),
+            DropAction::Glue => {}
+        }
+    }
+    out
+}
+
+/// `compile`, dropping owned values where the checker's `plan` says (F7).
+pub fn compile_planned(path: &str, tail: Option<&str>, plan: Option<&check::CheckedDropPlan>) -> Result<Program, Vec<Diag>> {
     if path.ends_with(".pilc") {
         return fs::read(path)
             .map_err(|e| e.to_string())
@@ -168,7 +206,8 @@ pub fn compile(path: &str, tail: Option<&str>) -> Result<Program, Vec<Diag>> {
     if !parse_diags.is_empty() {
         return Err(parse_diags);
     }
-    let bin = BytecodeCompiler::compile_linked(&source.arena);
+    let drops = plan.map(|p| seed_drop_plan(&source, p)).unwrap_or_default();
+    let bin = BytecodeCompiler::compile_linked_with_drops(&source.arena, drops);
     if !bin.diagnostics.is_empty() {
         return Err(bin
             .diagnostics

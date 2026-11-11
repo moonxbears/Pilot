@@ -63,10 +63,44 @@ pub fn host_program_tool(path: str, files: List<str>, decls: List<str>, entry: s
 pub fn host_text_tool(path: str, files: List<str>, entry: str) -> i64 =>
     __engine("cli_text_tool", path, files, entry);
 
+/// The declarations every program is checked against, linked after the
+/// program: files, or directories whose `.pilot` files are taken in name
+/// order. `core.pilot` holds the `Cfg` tables (lattice masks, register
+/// classes), `operator.pilot` the root and operator interfaces.
+pub fn cli_checker_decls() -> List<str> => [
+    "stdlib/core/core.pilot",
+    "stdlib/core/operator.pilot",
+    "stdlib/core/primitives",
+];
+
+/// The type checker's sources (`selfhost/check/`), in link order.
+pub fn cli_checker_files() -> List<str> => [
+    "stdlib/core/syntax/visibility.pilot",
+    "selfhost/check/snapshot.pilot",
+    "selfhost/check/types.pilot",
+    "selfhost/check/diag.pilot",
+    "selfhost/check/program.pilot",
+    "selfhost/types/method_table.pilot",
+    "selfhost/types/bundle_splice.pilot",
+    "selfhost/check/methods.pilot",
+    "selfhost/check/resolve.pilot",
+    "selfhost/check/generators.pilot",
+    "selfhost/check/infer.pilot",
+    "selfhost/check/rules.pilot",
+    "selfhost/check/generics.pilot",
+    "selfhost/check/own.pilot",
+    "selfhost/check/drops.pilot",
+    "selfhost/check/contracts.pilot",
+    "selfhost/check/access.pilot",
+    "selfhost/check/main.pilot",
+];
+
 /// Compiles and runs `path` with the script arguments `args`. A non-empty
 /// `tail` is linked after the program as its entry and runs instead of `main`.
+/// Owned values are dropped where the type checker's drop plan
+/// (`selfhost/check/drops.pilot`) says.
 pub fn host_run(path: str, args: List<str>, tail: str) -> RunOutcome {
-    let raw = __engine("cli_run", path, args, tail);
+    let raw = __engine("cli_run", path, args, tail, cli_checker_files(), cli_checker_decls());
     return RunOutcome { exit_code: raw[0], diags: host_diags(raw[1]) };
 }
 

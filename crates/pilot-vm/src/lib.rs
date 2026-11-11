@@ -16,6 +16,7 @@ mod lower_cascade;
 mod lower_closure;
 mod lower_defer;
 mod lower_destructure;
+pub mod lower_drop;
 mod lower_dispatch;
 mod lower_expr;
 mod lower_for;
@@ -118,7 +119,7 @@ struct TryCtx {
 /// Per-function compiler state, saved and restored around nested functions.
 struct FnState {
     captures: Vec<CaptureCtx>,
-    defers: Vec<Vec<NodeId>>,
+    defers: Vec<Vec<lower_drop::Deferred>>,
     var_slots: HashMap<String, u8>,
     var_types: HashMap<String, String>,
     cur_ret_type: Option<String>,
@@ -144,6 +145,10 @@ struct BlockScope {
 #[derive(Default)]
 pub struct BytecodeCompiler {
     pub instructions: Vec<Instruction>,
+    /// Where owned values are dropped (F7), when the CLI gave a plan.
+    drop_plan: Option<std::rc::Rc<lower_drop::DropPlan>>,
+    /// The `exit` drops of the `return` / `break` / `continue` being lowered.
+    pending_exit_drops: Vec<lower_drop::DropItem>,
     pub constants: Vec<PilotVal>,
     pub pc_spans: Vec<ByteSpan>,
     pub reg_symbols: Vec<(u8, u32, u32)>,
@@ -183,7 +188,7 @@ pub struct BytecodeCompiler {
     /// Enclosing lambdas, innermost last. Empty inside named functions.
     captures: Vec<CaptureCtx>,
     /// Deferred statements of each open block, innermost last.
-    defers: Vec<Vec<NodeId>>,
+    defers: Vec<Vec<lower_drop::Deferred>>,
     /// The collecting `for`s around the code being compiled, innermost last;
     /// a `yield` outside all of them makes the function a generator.
     yield_owners: Vec<YieldOwner>,
@@ -247,7 +252,13 @@ impl BytecodeCompiler {
     /// Compiles a program linked from the units of `arena` (see
     /// `pilot_parser::parse_unit`), in link order with the entry unit last.
     pub fn compile_linked(arena: &AstArena) -> PilcBinary {
+        Self::compile_linked_with_drops(arena, lower_drop::DropPlan::default())
+    }
+
+    /// `compile_linked`, dropping owned values where `plan` says (F7).
+    pub fn compile_linked_with_drops(arena: &AstArena, plan: lower_drop::DropPlan) -> PilcBinary {
         let mut c = Self::new();
+        c.set_drop_plan(plan);
         let units = Self::unit_items(arena);
         let last = c.compile_units(arena, &units);
         let root = arena.units.last().map_or(NodeId::NONE, |u| u.root);

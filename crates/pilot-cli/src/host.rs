@@ -45,7 +45,11 @@ pub fn cli_host_ops() -> HostOpHandler {
             "cli_run" => {
                 let tail = text(2);
                 let tail = (!tail.is_empty()).then_some(tail.as_str());
-                match run::compile(&text(0), tail) {
+                // With the checker's sources (3) and declarations (4), owned
+                // values are dropped where its drop plan says (F7).
+                let checker = texts(3);
+                let plan = (!checker.is_empty()).then(|| check::drop_plan(&text(0), &checker, &texts(4)));
+                match run::compile_planned(&text(0), tail, plan.as_ref()) {
                     Ok(program) => {
                         let code = run::execute(program, texts(1));
                         HostValue::List(vec![HostValue::Int(i64::from(code)), HostValue::List(Vec::new())])

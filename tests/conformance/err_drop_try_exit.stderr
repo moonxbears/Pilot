@@ -1,0 +1,1 @@
+err_drop_try_exit.pilot:19:13: runtime error: SEAM001: unconnected seam `own.try_exit`

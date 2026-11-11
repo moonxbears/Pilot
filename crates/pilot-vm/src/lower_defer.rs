@@ -8,6 +8,7 @@
 //! deferred code is emitted inline at each exit.
 
 use crate::instruction::Opcode;
+use crate::lower_drop::Deferred;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId};
 
@@ -15,7 +16,7 @@ impl BytecodeCompiler {
     pub(crate) fn compile_defer(&mut self, body: u32) -> u8 {
         match self.defers.last_mut() {
             Some(scope) => {
-                scope.push(NodeId(body));
+                scope.push(Deferred::Stmt(NodeId(body)));
                 self.emit_null()
             }
             None => self.error(crate::codes::SYNTAX, "`defer` must be inside a block".to_string()),
@@ -32,9 +33,14 @@ impl BytecodeCompiler {
         let open = self.defers.clone();
         while self.defers.len() > depth {
             let scope = self.defers.pop().unwrap_or_default();
-            for &stmt in scope.iter().rev() {
+            for item in scope.iter().rev() {
                 let mark = self.next_reg;
-                self.compile_node(arena, stmt);
+                match item {
+                    Deferred::Stmt(stmt) => {
+                        self.compile_node(arena, *stmt);
+                    }
+                    Deferred::Drop(d) => self.emit_drops(arena, std::slice::from_ref(d)),
+                }
                 self.next_reg = mark;
             }
         }

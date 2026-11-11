@@ -18,6 +18,7 @@ use selfhost.check.methods.*;
 use selfhost.check.own.*;
 use selfhost.check.contracts.*;
 use selfhost.check.access.*;
+use selfhost.check.drops.*;
 
 pub fn check_program() -> List<List<any>> {
     let s = snap_load();
@@ -32,4 +33,14 @@ pub fn check_program() -> List<List<any>> {
     check_contracts(p, sink);
     check_access(inf, sink);
     return sink.rows;
+}
+
+/// Where each owned value of the program is dropped (selfhost/check/drops.pilot),
+/// as rows for crates/pilot-cli/src/check.rs `drop_plan`.
+pub fn drop_plan() -> List<List<any>> {
+    let s = snap_load();
+    let p = prog_new(s);
+    let r = resolve_program(p, sink_new(s));
+    let inf = infer_new(p, r);
+    return drop_plan_rows(inf);
 }

@@ -48,6 +48,8 @@ pub(crate) enum LazyKind {
     /// The setters of property `field`: its setter bodies in declaration
     /// order, tried in that order.
     Setter { field: String, bodies: Vec<NodeId> },
+    /// The type's `~self()`, called when one of its values is dropped.
+    Destructor,
 }
 
 impl BytecodeCompiler {
@@ -211,6 +213,16 @@ impl BytecodeCompiler {
                 NodeKind::StructDecl | NodeKind::ExtendDecl if cn.rhs != 0 && cn.rhs != u32::MAX => {
                     let owner = Self::name(arena, cn.lhs).to_string();
                     for m in Self::type_members(arena, NodeId(cn.rhs)) {
+                        if arena.node(m).node_kind() == NodeKind::DestructorDecl {
+                            let decl = LazyDecl {
+                                node: m,
+                                owner: Some(owner.clone()),
+                                kind: LazyKind::Destructor,
+                                inherited: false,
+                            };
+                            self.lazy_decls.entry(Self::destructor_name(&owner)).or_insert(decl);
+                            continue;
+                        }
                         if !Self::is_method_decl(arena, m) {
                             continue;
                         }
@@ -267,6 +279,7 @@ impl BytecodeCompiler {
             (LazyKind::Method { alias }, owner) => {
                 self.compile_fn_decl_as(arena, decl.node, owner, alias.as_deref(), &mut no_entry)
             }
+            (LazyKind::Destructor, Some(owner)) => self.compile_destructor(arena, owner, decl.node),
             (kind, Some(owner)) => self.compile_accessor(arena, name, decl.node, owner, kind),
             (_, None) => {}
         }

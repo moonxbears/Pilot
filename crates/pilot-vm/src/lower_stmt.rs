@@ -180,6 +180,28 @@ impl BytecodeCompiler {
         )
     }
 
+    /// The function name of `owner`'s destructor, `Owner.~self`.
+    pub(crate) fn destructor_name(owner: &str) -> String {
+        format!("{owner}.~{}", &crate::RECEIVER[1..])
+    }
+
+    /// Lowers destructor `m` of `owner` as a function of its receiver. An
+    /// empty `~self() {}` still has a destructor to call.
+    pub(crate) fn compile_destructor(&mut self, arena: &AstArena, owner: &str, m: NodeId) {
+        let receiver = crate::RECEIVER;
+        let pc = self.here();
+        self.fn_entries.insert(Self::destructor_name(owner), (pc, vec![receiver.to_string()]));
+        self.reset_fn_state();
+        let s = self.alloc_local_reg();
+        self.emit(Opcode::Move, s, 1, 0);
+        self.var_slots.insert(receiver.to_string(), s);
+        self.var_slots.insert(receiver[1..].to_string(), s);
+        let body = arena.node(m).lhs;
+        let b = if body == 0 { self.emit_null() } else { self.compile_node(arena, NodeId(body)) };
+        self.emit(Opcode::Move, 0, b, 0);
+        self.emit(Opcode::Ret, 0, 0, 0);
+    }
+
     /// Lowers the methods of a `struct` or `extend` body.
     pub(crate) fn compile_type_members(&mut self, arena: &AstArena, id: NodeId, entry: &mut Option<u32>) {
         let cn = *arena.node(id);
@@ -193,21 +215,7 @@ impl BytecodeCompiler {
                 NodeKind::FnDecl | NodeKind::OperatorDecl => {
                     self.compile_fn_decl(arena, m, Some(&owner), entry)
                 }
-                NodeKind::DestructorDecl if mn.lhs != 0 => {
-                    let receiver = crate::RECEIVER;
-                    let dtor = format!("~{}", &receiver[1..]);
-                    let pc = self.here();
-                    self.fn_entries
-                        .insert(format!("{owner}.{dtor}"), (pc, vec![receiver.to_string()]));
-                    self.reset_fn_state();
-                    let s = self.alloc_local_reg();
-                    self.emit(Opcode::Move, s, 1, 0);
-                    self.var_slots.insert(receiver.to_string(), s);
-                    self.var_slots.insert(receiver[1..].to_string(), s);
-                    let b = self.compile_node(arena, NodeId(mn.lhs));
-                    self.emit(Opcode::Move, 0, b, 0);
-                    self.emit(Opcode::Ret, 0, 0, 0);
-                }
+                NodeKind::DestructorDecl => self.compile_destructor(arena, &owner, m),
                 _ => {}
             }
         }
@@ -384,6 +392,10 @@ impl BytecodeCompiler {
         self.release_to(mark);
         let j_end = self.emit_jump(0);
         self.patch_to_here(jf);
+        if else_n.is_none() {
+            let drops = self.else_drops(arena, node_id);
+            self.emit_drops(arena, &drops);
+        }
         let e_reg = self.compile_node(arena, else_n);
         self.emit(Opcode::Move, dst, e_reg, 0);
         self.release_to(mark);
@@ -451,6 +463,7 @@ impl BytecodeCompiler {
                 "`break` outside of a loop or switch".to_string(),
             );
         };
+        self.emit_exit_drops(arena);
         self.emit_defers_above(arena, depth);
         let j = self.emit_jump(0);
         if let Some(l) = self.loops.last_mut() {
@@ -472,6 +485,7 @@ impl BytecodeCompiler {
                 "`continue` outside of a loop".to_string(),
             );
         };
+        self.emit_exit_drops(arena);
         self.emit_defers_above(arena, depth);
         let j = self.emit_jump(0);
         if let Some(l) = self.loops.iter_mut().rev().find(|l| !l.is_switch) {
@@ -491,6 +505,7 @@ impl BytecodeCompiler {
         // The value is computed before deferred statements run.
         let keep = self.alloc_reg();
         self.emit(Opcode::Move, keep, r_ret, 0);
+        self.emit_exit_drops(arena);
         self.emit_loop_releases(0);
         self.emit_defers_above(arena, 0);
         self.emit(Opcode::Move, 0, keep, 0);
