@@ -25,7 +25,7 @@ pub struct JsDialect : ISourceDialect {
         "process", "console", "BigInt", "Math", "Number", "String", "Object",
     ];
     pub fn type_name(p: IrTypePhysics) -> str? {
-        if p.reg_class == reg_class_simd_vector() || p.reg_class == reg_class_raw_ptr() { return none; }
+        if p.reg_class == reg_class_simd_vector() { return none; }
         return "";
     }
     pub fn prelude() -> List<str> => [
@@ -65,7 +65,70 @@ pub struct JsDialect : ISourceDialect {
         "}",
         "function pilot_add(a, b) {",
         "    if (typeof a === \"string\" || typeof b === \"string\") return pilot_show(a) + pilot_show(b);",
-        "    return a + b;",
+        "    return pilot_arith(\"+\", a, b);",
+        "}",
+        "const pilot_unset = Symbol(\"unset\");",
+        "function pilot_unset_read(message) {",
+        "    pilot_trap(message);",
+        "}",
+        "function pilot_truth(v) {",
+        "    if (typeof v !== \"boolean\") pilot_trap(\"condition must be a boolean, found \" + pilot_kind(v));",
+        "    return v;",
+        "}",
+        "function pilot_convert(v, kind, bits, signed) {",
+        "    if (kind === \"int\" && bits >= 64 && (Array.isArray(v) || v instanceof Map || typeof v === \"function\")) return v;",
+        "    let n;",
+        "    if (typeof v === \"boolean\") n = v ? 1n : 0n;",
+        "    else if (pilot_is_num(v)) n = v;",
+        "    else pilot_trap(\"cannot convert \" + pilot_kind(v) + \" to a number\");",
+        "    if (kind === \"bool\") return Number(n) !== 0;",
+        "    if (kind === \"float\") return bits === 32 ? Math.fround(Number(n)) : Number(n);",
+        "    if (typeof n === \"number\") {",
+        "        const t = Math.trunc(n);",
+        "        if (!Number.isFinite(n) || t < -9223372036854775808 || t >= (signed ? 9223372036854775808 : 18446744073709551616)) {",
+        "            pilot_trap(pilot_show(n) + \" does not fit an integer\");",
+        "        }",
+        "        n = BigInt(t);",
+        "    }",
+        "    return signed ? BigInt.asIntN(bits, n) : BigInt.asUintN(bits, n);",
+        "}",
+        "function pilot_proc_args() {",
+        "    return process.argv.slice(2);",
+        "}",
+        "function pilot_is_num(x) {",
+        "    return typeof x === \"bigint\" || typeof x === \"number\";",
+        "}",
+        "function pilot_type_error(sym, a, b) {",
+        "    pilot_trap(\"cannot apply `\" + sym + \"` to \" + pilot_kind(a) + \" and \" + pilot_kind(b));",
+        "}",
+        "function pilot_arith(sym, a, b) {",
+        "    if (!(pilot_is_num(a) && pilot_is_num(b))) pilot_type_error(sym, a, b);",
+        "    if (typeof a === \"bigint\" && typeof b === \"bigint\") {",
+        "        if (sym === \"/\") return BigInt.asIntN(64, pilot_div(a, b));",
+        "        if (sym === \"%\") return pilot_rem(a, b);",
+        "        return BigInt.asIntN(64, sym === \"+\" ? a + b : sym === \"-\" ? a - b : a * b);",
+        "    }",
+        "    const x = Number(a);",
+        "    const y = Number(b);",
+        "    if (sym === \"+\") return x + y;",
+        "    if (sym === \"-\") return x - y;",
+        "    if (sym === \"*\") return x * y;",
+        "    if (sym === \"%\") return x % y;",
+        "    return x / y;",
+        "}",
+        "function pilot_bits(sym, a, b) {",
+        "    if (typeof a === \"boolean\" && typeof b === \"boolean\" && (sym === \"&\" || sym === \"|\" || sym === \"^\")) {",
+        "        return sym === \"&\" ? a && b : sym === \"|\" ? a || b : a !== b;",
+        "    }",
+        "    if (typeof a !== \"bigint\" || typeof b !== \"bigint\") pilot_type_error(sym, a, b);",
+        "    const n = b & 63n;",
+        "    const r = sym === \"&\" ? a & b : sym === \"|\" ? a | b : sym === \"^\" ? a ^ b : sym === \"<<\" ? a << n : a >> n;",
+        "    return BigInt.asIntN(64, r);",
+        "}",
+        "function pilot_str_byte_at(s, i) {",
+        "    const raw = Buffer.from(s, \"utf8\");",
+        "    if (i >= 0n && i < BigInt(raw.length)) return BigInt(raw[Number(i)]);",
+        "    pilot_trap(\"byte index \" + i + \" out of bounds for length \" + raw.length);",
         "}",
         "function pilot_eq(a, b) {",
         "    if (Array.isArray(a) && Array.isArray(b)) {",
@@ -76,6 +139,53 @@ pub struct JsDialect : ISourceDialect {
         "    if (na && nb) return typeof a === typeof b ? a === b : Number(a) === Number(b);",
         "    if ((a === null || a === undefined) && (b === null || b === undefined)) return true;",
         "    return a === b;",
+        "}",
+        "function pilot_boundary(b, at) {",
+        "    let u = Math.min(Math.max(Number(at), 0), b.length);",
+        "    while (u < b.length && (b[u] & 0xC0) === 0x80) u++;",
+        "    return u;",
+        "}",
+        "function pilot_str_slice(v, a, b) {",
+        "    if (Array.isArray(v)) {",
+        "        const n = v.length;",
+        "        const x = Math.min(Math.max(Number(a), 0), n);",
+        "        const y = Math.min(Math.max(Number(b), 0), n);",
+        "        return v.slice(x, Math.max(x, y));",
+        "    }",
+        "    const raw = Buffer.from(v, \"utf8\");",
+        "    const x = pilot_boundary(raw, a);",
+        "    const y = pilot_boundary(raw, b);",
+        "    return raw.subarray(x, Math.max(x, y)).toString(\"utf8\");",
+        "}",
+        "function pilot_leaves(v, deep, out) {",
+        "    for (const e of v) {",
+        "        if (deep && Array.isArray(e)) pilot_leaves(e, true, out);",
+        "        else out.push(e);",
+        "    }",
+        "}",
+        "function pilot_list_extend(l, other, deep) {",
+        "    const leaves = [];",
+        "    pilot_leaves(other, deep === true, leaves);",
+        "    l.push(...leaves);",
+        "    return l;",
+        "}",
+        "function pilot_list_remove_at(l, i) {",
+        "    return l.splice(pilot_index(l, i), 1)[0];",
+        "}",
+        "let pilot_stdin = null;",
+        "function pilot_stdin_read_line() {",
+        "    if (pilot_stdin === null) {",
+        "        let text = \"\";",
+        "        try { text = require(\"fs\").readFileSync(0, \"utf8\"); } catch (e) { text = \"\"; }",
+        "        pilot_stdin = { text: text, at: 0 };",
+        "    }",
+        "    const s = pilot_stdin;",
+        "    if (s.at >= s.text.length) return null;",
+        "    let end = s.text.indexOf(\"\\n\", s.at);",
+        "    let line;",
+        "    if (end < 0) { line = s.text.slice(s.at); s.at = s.text.length; }",
+        "    else { line = s.text.slice(s.at, end); s.at = end + 1; }",
+        "    return line.endsWith(\"\\r\") ? line.slice(0, -1) : line;",
         "}",
         "function pilot_kind(x) {",
         "    if (x === null || x === undefined) return \"null\";",
@@ -149,7 +259,10 @@ pub struct JsDialect : ISourceDialect {
         "}",
         "",
     ];
-    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => f"let {name};";
+    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => f"let {name} = pilot_unset;";
+    pub fn global_read(name: str, message: str) -> str => f"({name} !== pilot_unset ? {name} : pilot_unset_read({message}))";
+    pub fn global_write(name: str, v: str) -> str => f"{name} = {v};";
+    pub fn truth(v: str) -> str? => f"pilot_truth({v})";
     pub fn module_open(protos: List<str>) -> List<str> => [];
     pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str => "";
     pub fn module_close(entry: str, has_code: bool) -> List<str> {
@@ -204,7 +317,10 @@ pub struct JsDialect : ISourceDialect {
             return none;
         }
         if !is_int(p) {
-            return if op == "add" { f"pilot_add({a}, {b})" } else { none };
+            if op == "add" { return f"pilot_add({a}, {b})"; }
+            let sym = operator_symbols().get(op);
+            let helper = if op == "sub" || op == "mul" || op == "div" || op == "rem" { "pilot_arith" } else { "pilot_bits" };
+            return f"{helper}(\"{sym}\", {a}, {b})";
         }
         let mask = p.bit_width - 1;
         let e = if op == "add" { f"{a} + {b}" } else if op == "sub" { f"{a} - {b}" } else if op == "mul" { f"{a} * {b}" }
@@ -224,6 +340,12 @@ pub struct JsDialect : ISourceDialect {
         return f"({a} {js_cmp(pred)} {b})";
     }
     pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
+        if !(is_int(from) || is_bool(from)) && !(is_float(from) && is_float(to)) {
+            // The kind of `v` is checked at run time, as the seed does.
+            if !(is_bool(to) || is_float(to) || is_int(to)) { return none; }
+            let kind = if is_bool(to) { "bool" } else if is_float(to) { "float" } else { "int" };
+            return f"pilot_convert({v}, \"{kind}\", {to.bit_width}, {is_signed(to)})";
+        }
         if is_bool(to) {
             if is_bool(from) { return v; }
             return if is_int(from) { f"({v} !== 0n)" } else { f"({v} !== 0)" };
@@ -237,7 +359,7 @@ pub struct JsDialect : ISourceDialect {
         return f"{wrap_fn(to)}({to.bit_width}, {n})";
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
-    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
         let text = "[" + joined(args) + "].map(pilot_show).join(\" \")";
         if name == "rt_print" { return f"console.log({text})"; }
         if name == "rt_eprint" { return f"console.error({text})"; }
@@ -247,11 +369,18 @@ pub struct JsDialect : ISourceDialect {
         if name == "to_str" { return f"pilot_show({args[0]})"; }
         if name == "list_get" { return f"pilot_map_get({joined(args)})"; }
         if name == "list_set" { return f"pilot_map_set({joined(args)})"; }
-        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open"] {
+        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_byte_at", "list_extend", "list_remove_at", "stdin_read_line"] {
             if name == helper { return f"pilot_{helper}({joined(args)})"; }
         }
         return none;
     }
+    pub fn call_value(fv: str, args: List<str>) -> str? {
+        var all: List<str> = [];
+        for x in args { all.push(x); }
+        all.push(f"...{fv}.slice(1)");
+        return f"pilot_fns[Number({fv}[0])](" + joined(all) + ")";
+    }
+    pub fn function_table(names: List<str>) -> List<str> => ["const pilot_fns = [" + joined(names) + "];"];
     pub fn make_record(values: List<str>) -> str? => "[" + joined(values) + "]";
     pub fn get_field(rec: str, i: i64) -> str? => f"{rec}[{i}]";
     pub fn set_field(rec: str, i: i64, v: str) -> str? => f"{rec}[{i}] = {v};";

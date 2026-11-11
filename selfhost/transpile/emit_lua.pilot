@@ -26,7 +26,7 @@ pub struct LuaDialect : ISourceDialect {
         if is_int(p) && !is_signed(p) && p.bit_width >= 64 { return none; }
         if is_int(p) && p.bit_width > 64 { return none; }
         if is_float(p) && p.bit_width != 64 { return none; }
-        if p.reg_class == reg_class_simd_vector() || p.reg_class == reg_class_raw_ptr() { return none; }
+        if p.reg_class == reg_class_simd_vector() { return none; }
         return "";
     }
     pub fn prelude() -> List<str> => [
@@ -79,13 +79,25 @@ pub struct LuaDialect : ISourceDialect {
         "    if x == nil then return \"none\" end",
         "    return tostring(x)",
         "end",
+        "local pilot_unset = {}",
+        "local function pilot_global(v, message)",
+        "    if v == pilot_unset then pilot_trap(message) end",
+        "    return v",
+        "end",
+        "local function pilot_truth(v)",
+        "    if type(v) ~= \"boolean\" then pilot_trap(\"condition must be a boolean, found \" .. (math.type(v) or type(v))) end",
+        "    return v",
+        "end",
         "local function pilot_add(a, b)",
         "    if type(a) == \"string\" or type(b) == \"string\" then return pilot_show(a) .. pilot_show(b) end",
         "    return a + b",
         "end",
         "",
     ];
-    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => f"local {name} = nil";
+    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => f"local {name} = pilot_unset";
+    pub fn global_read(name: str, message: str) -> str => f"pilot_global({name}, {message})";
+    pub fn global_write(name: str, v: str) -> str => f"{name} = {v}";
+    pub fn truth(v: str) -> str? => f"pilot_truth({v})";
     pub fn module_open(protos: List<str>) -> List<str> => [];
     pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str => "";
     pub fn module_close(entry: str, has_code: bool) -> List<str> {
@@ -166,7 +178,7 @@ pub struct LuaDialect : ISourceDialect {
         return f"pilot_wrap({n}, {to.bit_width}, {lua_bool(is_signed(to))})";
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
-    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
         var text = "";
         for a in args {
             if text.len() > 0 { text = text + " .. \" \" .. "; }
@@ -177,6 +189,13 @@ pub struct LuaDialect : ISourceDialect {
         if name == "rt_eprint" { return f"io.stderr:write({text} .. \"\\n\")"; }
         return none;
     }
+    pub fn call_value(fv: str, args: List<str>) -> str? {
+        var all: List<str> = [];
+        for x in args { all.push(x); }
+        all.push(f"table.unpack({fv}, 2)");
+        return f"pilot_fns[{fv}[1] + 1](" + joined(all) + ")";
+    }
+    pub fn function_table(names: List<str>) -> List<str> => ["pilot_fns = {" + joined(names) + "}"];
     pub fn make_record(values: List<str>) -> str? => "{" + joined(values) + "}";
     pub fn get_field(rec: str, i: i64) -> str? => f"{rec}[{i + 1}]";
     pub fn set_field(rec: str, i: i64, v: str) -> str? => f"{rec}[{i + 1}] = {v}";

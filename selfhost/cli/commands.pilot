@@ -18,6 +18,7 @@ use Pilot.SelfHost.Cli.Host;
 use Pilot.SelfHost.Cli.Report;
 use Pilot.SelfHost.Cli.TestCmd;
 use Pilot.SelfHost.Cli.TestIr;
+use Pilot.SelfHost.Cli.TestEmit;
 use Pilot.SelfHost.Cli.BenchCmd;
 
 /// Exit code for a command used wrongly.
@@ -183,8 +184,11 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     return 0;
 }
 
-/// `pilot test [paths...] [--filter text]`
+/// `pilot test [paths...] [--filter text] [--ir | --emit <lang>]`
 pub fn cmd_test(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    if parsed_has_flag(p, "emit") {
+        return test_emit_command(parsed_get_str(p, "emit", ""), cli_positionals(p), parsed_get_str(p, "filter", ""));
+    }
     if parsed_has_flag(p, "ir") { return test_ir_command(cli_positionals(p), parsed_get_str(p, "filter", "")); }
     return test_command(cli_positionals(p), parsed_get_str(p, "filter", ""));
 }

@@ -21,12 +21,12 @@ pub struct PythonDialect : ISourceDialect {
         "with", "yield", "print", "int", "float", "str", "list", "len", "math", "sys", "decimal",
     ];
     pub fn type_name(p: IrTypePhysics) -> str? {
-        if is_float(p) && p.bit_width != 64 { return none; }
-        if p.reg_class == reg_class_simd_vector() || p.reg_class == reg_class_raw_ptr() { return none; }
+        if is_float(p) && p.bit_width != 64 && p.bit_width != 32 { return none; }
+        if p.reg_class == reg_class_simd_vector() { return none; }
         return "";
     }
     pub fn prelude() -> List<str> => [
-        "import decimal, math, sys",
+        "import decimal, math, struct, sys",
         "",
         "def pilot_wrap(x, bits, signed):",
         "    x &= (1 << bits) - 1",
@@ -69,7 +69,93 @@ pub struct PythonDialect : ISourceDialect {
         "def pilot_add(a, b):",
         "    if isinstance(a, str) or isinstance(b, str):",
         "        return pilot_show(a) + pilot_show(b)",
-        "    return a + b",
+        "    return pilot_arith('+', a, b)",
+        "def pilot_f32(x):",
+        "    try:",
+        "        return struct.unpack('f', struct.pack('f', x))[0]",
+        "    except OverflowError:",
+        "        return math.copysign(math.inf, x)",
+        "",
+        "def pilot_fdiv(x, y):",
+        "    if y == 0:",
+        "        return math.nan if x == 0 or x != x else math.copysign(math.inf, x) * math.copysign(1.0, y)",
+        "    return x / y",
+        "",
+        "def pilot_frem(x, y):",
+        "    return math.nan if y == 0 or math.isinf(x) else math.fmod(x, y)",
+        "pilot_unset = object()",
+        "",
+        "def pilot_unset_read(message):",
+        "    pilot_trap(message)",
+        "",
+        "def pilot_truth(v):",
+        "    if not isinstance(v, bool):",
+        "        pilot_trap('condition must be a boolean, found ' + pilot_kind(v))",
+        "    return v",
+        "",
+        "def pilot_convert(v, kind, bits, signed):",
+        "    if kind == 'int' and bits >= 64 and (isinstance(v, (list, dict)) or callable(v)):",
+        "        return v",
+        "    if isinstance(v, bool):",
+        "        n = int(v)",
+        "    elif pilot_is_num(v):",
+        "        n = v",
+        "    else:",
+        "        pilot_trap('cannot convert ' + pilot_kind(v) + ' to a number')",
+        "    if kind == 'bool':",
+        "        return n != 0",
+        "    if kind == 'float':",
+        "        return pilot_f32(float(n)) if bits == 32 else float(n)",
+        "    if isinstance(n, float):",
+        "        if n != n or math.isinf(n) or not (-9223372036854775808.0 <= math.trunc(n) < (18446744073709551616.0 if not signed else 9223372036854775808.0)):",
+        "            pilot_trap(pilot_show(n) + ' does not fit an integer')",
+        "        n = math.trunc(n)",
+        "    return pilot_wrap(n, bits, signed)",
+        "def pilot_proc_args():",
+        "    return list(sys.argv[1:])",
+        "",
+        "def pilot_is_num(x):",
+        "    return isinstance(x, (int, float)) and not isinstance(x, bool)",
+        "",
+        "def pilot_type_error(sym, a, b):",
+        "    pilot_trap('cannot apply `' + sym + '` to ' + pilot_kind(a) + ' and ' + pilot_kind(b))",
+        "",
+        "def pilot_arith(sym, a, b):",
+        "    if not (pilot_is_num(a) and pilot_is_num(b)):",
+        "        pilot_type_error(sym, a, b)",
+        "    if isinstance(a, int) and isinstance(b, int):",
+        "        if sym == '/':",
+        "            return pilot_div(a, b, 64, True)",
+        "        if sym == '%':",
+        "            return pilot_rem(a, b, 64, True)",
+        "        return pilot_wrap(a + b if sym == '+' else a - b if sym == '-' else a * b, 64, True)",
+        "    x, y = float(a), float(b)",
+        "    if sym == '+':",
+        "        return x + y",
+        "    if sym == '-':",
+        "        return x - y",
+        "    if sym == '*':",
+        "        return x * y",
+        "    if sym == '%':",
+        "        return math.nan if y == 0 or math.isinf(x) else math.fmod(x, y)",
+        "    if y == 0:",
+        "        return math.nan if x == 0 or x != x else math.copysign(math.inf, x) * math.copysign(1.0, y)",
+        "    return x / y",
+        "",
+        "def pilot_bits(sym, a, b):",
+        "    if isinstance(a, bool) and isinstance(b, bool) and sym in ('&', '|', '^'):",
+        "        return (a and b) if sym == '&' else (a or b) if sym == '|' else (a != b)",
+        "    if not (isinstance(a, int) and isinstance(b, int)) or isinstance(a, bool) or isinstance(b, bool):",
+        "        pilot_type_error(sym, a, b)",
+        "    n = b & 63",
+        "    r = a & b if sym == '&' else a | b if sym == '|' else a ^ b if sym == '^' else a << n if sym == '<<' else a >> n",
+        "    return pilot_wrap(r, 64, True)",
+        "",
+        "def pilot_str_byte_at(s, i):",
+        "    raw = s.encode()",
+        "    if 0 <= i < len(raw):",
+        "        return raw[i]",
+        "    pilot_trap('byte index ' + str(i) + ' out of bounds for length ' + str(len(raw)))",
         "def pilot_eq(a, b):",
         "    if isinstance(a, list) and isinstance(b, list):",
         "        return a is b or (len(a) == len(b) and all(pilot_eq(x, y) for x, y in zip(a, b)))",
@@ -80,6 +166,44 @@ pub struct PythonDialect : ISourceDialect {
         "    if isinstance(a, (str, bool)) and type(a) is type(b):",
         "        return a == b",
         "    return a is b",
+        "def pilot_boundary(b, at):",
+        "    u = min(max(at, 0), len(b))",
+        "    while u < len(b) and (b[u] & 0xC0) == 0x80:",
+        "        u += 1",
+        "    return u",
+        "",
+        "def pilot_str_slice(v, a, b):",
+        "    if isinstance(v, list):",
+        "        n = len(v)",
+        "        a, b = min(max(a, 0), n), min(max(b, 0), n)",
+        "        return v[a:max(a, b)]",
+        "    raw = v.encode()",
+        "    a, b = pilot_boundary(raw, a), pilot_boundary(raw, b)",
+        "    return raw[a:max(a, b)].decode()",
+        "",
+        "def pilot_leaves(v, deep, out):",
+        "    for e in v:",
+        "        if deep and isinstance(e, list):",
+        "            pilot_leaves(e, True, out)",
+        "        else:",
+        "            out.append(e)",
+        "",
+        "def pilot_list_extend(l, other, deep):",
+        "    leaves = []",
+        "    pilot_leaves(other, deep is True, leaves)",
+        "    l.extend(leaves)",
+        "    return l",
+        "",
+        "def pilot_list_remove_at(l, i):",
+        "    return l.pop(pilot_index(l, i))",
+        "",
+        "def pilot_stdin_read_line():",
+        "    line = sys.stdin.readline()",
+        "    if line == '':",
+        "        return None",
+        "    if line.endswith('\\n'):",
+        "        line = line[:-1]",
+        "    return line[:-1] if line.endswith('\\r') else line",
         "def pilot_kind(x):",
         "    if x is None:",
         "        return 'null'",
@@ -164,7 +288,10 @@ pub struct PythonDialect : ISourceDialect {
         "    pilot_trap('SEAM001: unconnected seam `' + id + '`: ' + ('' if note is None else pilot_show(note)))",
         "",
     ];
-    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => name + " = None";
+    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => name + " = pilot_unset";
+    pub fn global_read(name: str, message: str) -> str => f"({name} if {name} is not pilot_unset else pilot_unset_read({message}))";
+    pub fn global_write(name: str, v: str) -> str => f"{name} = {v}";
+    pub fn truth(v: str) -> str? => f"pilot_truth({v})";
     pub fn module_open(protos: List<str>) -> List<str> => [];
     pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str => "";
     pub fn module_close(entry: str, has_code: bool) -> List<str> {
@@ -196,21 +323,19 @@ pub struct PythonDialect : ISourceDialect {
     pub fn int_lit(digits: str, p: IrTypePhysics) -> str? => digits;
     pub fn bool_lit(b: bool) -> str => py_bool(b);
     pub fn float_lit(text: str, p: IrTypePhysics) -> str? {
-        if p.bit_width != 64 { return none; }
+        if self.type_name(p) == none { return none; }
         if text == "NaN" { return "math.nan"; }
         if text == "inf" { return "math.inf"; }
         if text == "-inf" { return "-math.inf"; }
-        return text;
+        return if p.bit_width == 32 { f"pilot_f32({text})" } else { text };
     }
     pub fn str_lit(raw: str) -> str => escaped(raw, (b) => "\\x" + hex2(b));
     pub fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str? {
         if is_float(p) {
-            if op == "add" { return f"({a} + {b})"; }
-            if op == "sub" { return f"({a} - {b})"; }
-            if op == "mul" { return f"({a} * {b})"; }
-            if op == "div" { return f"({a} / {b})"; }
-            if op == "rem" { return f"math.fmod({a}, {b})"; }
-            return none;
+            let e = if op == "add" { f"{a} + {b}" } else if op == "sub" { f"{a} - {b}" } else if op == "mul" { f"{a} * {b}" }
+                else if op == "div" { f"pilot_fdiv({a}, {b})" } else if op == "rem" { f"pilot_frem({a}, {b})" } else { "" };
+            if e == "" { return none; }
+            return if p.bit_width == 32 { f"pilot_f32({e})" } else { f"({e})" };
         }
         if is_bool(p) {
             if op == "and" { return f"({a} & {b})"; }
@@ -219,7 +344,10 @@ pub struct PythonDialect : ISourceDialect {
             return none;
         }
         if !is_int(p) {
-            return if op == "add" { f"pilot_add({a}, {b})" } else { none };
+            if op == "add" { return f"pilot_add({a}, {b})"; }
+            let sym = operator_symbols().get(op);
+            let helper = if op == "sub" || op == "mul" || op == "div" || op == "rem" { "pilot_arith" } else { "pilot_bits" };
+            return f"{helper}('{sym}', {a}, {b})";
         }
         let w = f"{p.bit_width}, {py_bool(is_signed(p))}";
         if op == "div" { return f"pilot_div({a}, {b}, {w})"; }
@@ -241,13 +369,22 @@ pub struct PythonDialect : ISourceDialect {
         return f"({a} {cmp_symbol(pred)} {b})";
     }
     pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
+        if !(is_int(from) || is_bool(from)) && !(is_float(from) && is_float(to)) {
+            // The kind of `v` is checked at run time, as the seed does.
+            let kind = if is_bool(to) { "bool" } else if is_float(to) { "float" } else { "int" };
+            if !(is_bool(to) || is_float(to) || is_int(to)) || self.type_name(to) == none { return none; }
+            return f"pilot_convert({v}, '{kind}', {to.bit_width}, {py_bool(is_signed(to))})";
+        }
         if is_bool(to) { return if is_bool(from) { v } else { f"({v} != 0)" }; }
-        if is_float(to) { return if to.bit_width == 64 { f"float({v})" } else { none }; }
+        if is_float(to) {
+            if self.type_name(to) == none { return none; }
+            return if to.bit_width == 32 { f"pilot_f32(float({v}))" } else { f"float({v})" };
+        }
         if !is_int(to) { return none; }
         return f"pilot_wrap(int({v}), {to.bit_width}, {py_bool(is_signed(to))})";
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
-    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
         var shown: List<str> = [];
         for a in args { shown.push(f"pilot_show({a})"); }
         let text = if shown.len() == 0 { "''" } else { "' '.join([" + joined(shown) + "])" };
@@ -260,6 +397,13 @@ pub struct PythonDialect : ISourceDialect {
         }
         return none;
     }
+    pub fn call_value(fv: str, args: List<str>) -> str? {
+        var all: List<str> = [];
+        for x in args { all.push(x); }
+        all.push(f"*{fv}[1:]");
+        return f"pilot_fns[{fv}[0]](" + joined(all) + ")";
+    }
+    pub fn function_table(names: List<str>) -> List<str> => ["pilot_fns = [" + joined(names) + "]"];
     pub fn make_record(values: List<str>) -> str? => "[" + joined(values) + "]";
     pub fn get_field(rec: str, i: i64) -> str? => f"{rec}[{i}]";
     pub fn set_field(rec: str, i: i64, v: str) -> str? => f"{rec}[{i}] = {v}";
@@ -275,7 +419,7 @@ fn dynamic_engine_ops() -> Map<str, str> {
     ops.set("to_str", "pilot_show");
     ops.set("list_get", "pilot_map_get");
     ops.set("list_set", "pilot_map_set");
-    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open"] {
+    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_byte_at", "list_extend", "list_remove_at", "stdin_read_line"] {
         ops.set(name, "pilot_" + name);
     }
     return ops;

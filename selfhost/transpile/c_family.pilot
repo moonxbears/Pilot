@@ -29,10 +29,32 @@ pub struct CFamilyDialect : ISourceDialect {
             "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum",
             "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return",
             "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void",
-            "volatile", "while", "bool", "true", "false", "main", "exit", "abort", "printf", "fprintf", "fputc",
-            "fputs", "fwrite", "snprintf", "strtod", "atoi", "fmod", "isinf", "signbit", "stdout", "stderr",
-            "NAN", "INFINITY",
+            "volatile", "while", "bool", "true", "false", "main",
         ];
+        // What the prelude's headers (C11 stdio, stdlib, string, math,
+        // inttypes) declare.
+        for k in [
+            "abs", "labs", "llabs", "div", "ldiv", "lldiv", "atof", "atoi", "atol", "atoll", "strtol",
+            "strtoll", "strtoul", "strtoull", "strtof", "strtod", "strtold", "rand", "srand", "calloc",
+            "malloc", "realloc", "free", "aligned_alloc", "abort", "atexit", "at_quick_exit", "exit", "_Exit",
+            "quick_exit", "getenv", "system", "bsearch", "qsort", "mblen", "mbtowc", "wctomb", "mbstowcs",
+            "wcstombs", "remove", "rename", "tmpfile", "tmpnam", "fclose", "fflush", "fopen", "freopen",
+            "setbuf", "setvbuf", "fprintf", "fscanf", "printf", "scanf", "snprintf", "sprintf", "sscanf",
+            "vfprintf", "vfscanf", "vprintf", "vscanf", "vsnprintf", "vsprintf", "vsscanf", "fgetc", "fgets",
+            "fputc", "fputs", "getc", "getchar", "putc", "putchar", "puts", "ungetc", "fread", "fwrite",
+            "fgetpos", "fseek", "fsetpos", "ftell", "rewind", "clearerr", "feof", "ferror", "perror", "stdin",
+            "stdout", "stderr", "memcpy", "memmove", "strcpy", "strncpy", "strcat", "strncat", "memcmp",
+            "strcmp", "strcoll", "strncmp", "strxfrm", "memchr", "strchr", "strcspn", "strpbrk", "strrchr",
+            "strspn", "strstr", "strtok", "memset", "strerror", "strlen", "acos", "asin", "atan", "atan2",
+            "cos", "sin", "tan", "acosh", "asinh", "atanh", "cosh", "sinh", "tanh", "exp", "exp2", "expm1",
+            "frexp", "ilogb", "ldexp", "log", "log10", "log1p", "log2", "logb", "modf", "scalbn", "scalbln",
+            "cbrt", "fabs", "hypot", "pow", "sqrt", "erf", "erfc", "lgamma", "tgamma", "ceil", "floor",
+            "nearbyint", "rint", "lrint", "llrint", "round", "lround", "llround", "trunc", "fmod",
+            "remainder", "remquo", "copysign", "nan", "nextafter", "nexttoward", "fdim", "fmax", "fmin",
+            "fma", "fpclassify", "isfinite", "isinf", "isnan", "isnormal", "signbit", "isgreater",
+            "isgreaterequal", "isless", "islessequal", "islessgreater", "isunordered", "imaxabs", "imaxdiv",
+            "strtoimax", "strtoumax", "NAN", "INFINITY", "HUGE_VAL", "EOF", "NULL", "FILE",
+        ] { out.push(k); }
         if .cpp {
             for k in [
                 "alignas", "alignof", "and", "asm", "catch", "class", "constexpr", "decltype", "delete",
@@ -66,9 +88,16 @@ pub struct CFamilyDialect : ISourceDialect {
         "#include <stdlib.h>",
         "#include <string.h>",
         "",
+        "#define PILOT_NEGATIVE_EXPONENT " + self.str_lit(negative_exponent_seam()),
         "static inline void pilot_trap(const char *message) {",
         "    fprintf(stderr, \"runtime error: %s\\n\", message);",
         "    exit(1);",
+        "}",
+        "static inline uint64_t pilot_ipow(int64_t a, int64_t b) {",
+        "    if (b < 0) pilot_trap(PILOT_NEGATIVE_EXPONENT);",
+        "    uint64_t x = (uint64_t)a, r = 1, n = (uint64_t)b > 4294967295u ? 4294967295u : (uint64_t)b;",
+        "    while (n) { if (n & 1) r *= x; x *= x; n >>= 1; }",
+        "    return r;",
         "}",
         "static inline int64_t pilot_sdiv(int64_t a, int64_t b) {",
         "    if (b == 0) pilot_trap(\"integer division by zero\");",
@@ -127,8 +156,11 @@ pub struct CFamilyDialect : ISourceDialect {
     pub fn global_decl(name: str, p: IrTypePhysics) -> str? {
         guard some t = self.type_name(p) else { return none; };
         if t == "void" { return none; }
-        return f"static {t} {name} = {self.zero(p)};";
+        return f"static {t} {name} = {self.zero(p)}; static int {name}_set = 0;";
     }
+    pub fn global_read(name: str, message: str) -> str => f"({name}_set ? {name} : (pilot_trap({message}), {name}))";
+    pub fn global_write(name: str, v: str) -> str => f"{name} = {v}; {name}_set = 1;";
+    pub fn truth(v: str) -> str? => none;
     pub fn module_open(protos: List<str>) -> List<str> {
         var out: List<str> = [];
         for p in protos { out.push(p); }
@@ -241,7 +273,13 @@ pub struct CFamilyDialect : ISourceDialect {
         return f"(({t})({v}))";
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
-    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
+        if name == "num_pow" {
+            guard some t = self.type_name(ret) else { return none; };
+            if is_float(ret) { return f"(({t})pow((double)({args[0]}), (double)({args[1]})))"; }
+            if !is_int(ret) || !is_int(phys[0]) || !is_int(phys[1]) { return none; }
+            return f"(({t})pilot_ipow((int64_t)({args[0]}), (int64_t)({args[1]})))";
+        }
         let stream = if name == "rt_print" { "stdout" } else if name == "rt_eprint" { "stderr" } else { "" };
         if stream == "" { return none; }
         var parts: List<str> = [];
@@ -258,6 +296,8 @@ pub struct CFamilyDialect : ISourceDialect {
         parts.push(f"fputc('\\n', {stream})");
         return "(" + joined(parts) + ")";
     }
+    pub fn call_value(fv: str, args: List<str>) -> str? => none;
+    pub fn function_table(names: List<str>) -> List<str> => [];
     pub fn make_record(values: List<str>) -> str? => none;
     pub fn get_field(rec: str, i: i64) -> str? => none;
     pub fn set_field(rec: str, i: i64, v: str) -> str? => none;

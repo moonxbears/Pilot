@@ -51,10 +51,23 @@ pub struct CsharpDialect : ISourceDialect {
     pub fn global_decl(name: str, p: IrTypePhysics) -> str? {
         guard some t = self.type_name(p) else { return none; };
         if t == "void" { return none; }
-        return f"    static {t} {name} = {self.zero(p)};";
+        return f"    static {t} {name} = {self.zero(p)}; static bool {name}_set = false;";
     }
+    pub fn global_read(name: str, message: str) -> str => f"({name}_set ? {name} : pilot_unset_read({name}, {message}))";
+    pub fn global_write(name: str, v: str) -> str => f"{name} = {v}; {name}_set = true;";
+    pub fn truth(v: str) -> str? => none;
     pub fn module_open(protos: List<str>) -> List<str> => [
         "public static class PilotProgram {",
+        "    static T pilot_unset_read<T>(T v, string message) {",
+        "        pilot_trap(message);",
+        "        return v;",
+        "    }",
+        "    static ulong pilot_ipow(long a, long b) {",
+        "        if (b < 0) pilot_trap(" + self.str_lit(negative_exponent_seam()) + ");",
+        "        ulong x = unchecked((ulong)a), r = 1, n = b > 4294967295L ? 4294967295UL : (ulong)b;",
+        "        while (n != 0) { if ((n & 1) != 0) r = unchecked(r * x); x = unchecked(x * x); n >>= 1; }",
+        "        return r;",
+        "    }",
         "    static void pilot_trap(string message) {",
         "        Console.Error.WriteLine(\"runtime error: \" + message);",
         "        Environment.Exit(1);",
@@ -213,7 +226,13 @@ pub struct CsharpDialect : ISourceDialect {
         return f"unchecked(({t})({v}))";
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
-    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
+        if name == "num_pow" {
+            guard some t = self.type_name(ret) else { return none; };
+            if is_float(ret) { return f"unchecked(({t})Math.Pow((double)({args[0]}), (double)({args[1]})))"; }
+            if !is_int(ret) || !is_int(phys[0]) || !is_int(phys[1]) { return none; }
+            return f"unchecked(({t})pilot_ipow((long)({args[0]}), (long)({args[1]})))";
+        }
         let stream = if name == "rt_print" { "Console.Out" } else if name == "rt_eprint" { "Console.Error" } else { "" };
         if stream == "" { return none; }
         var shown: List<str> = [];
@@ -225,6 +244,8 @@ pub struct CsharpDialect : ISourceDialect {
         }
         return f"{stream}.WriteLine(string.Join(\" \", new string[] " + "{ " + joined(shown) + " }))";
     }
+    pub fn call_value(fv: str, args: List<str>) -> str? => none;
+    pub fn function_table(names: List<str>) -> List<str> => [];
     pub fn make_record(values: List<str>) -> str? => none;
     pub fn get_field(rec: str, i: i64) -> str? => none;
     pub fn set_field(rec: str, i: i64, v: str) -> str? => none;

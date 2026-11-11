@@ -37,6 +37,11 @@ pub struct RustDialect : ISourceDialect {
         return none;
     }
     pub fn prelude() -> List<str> => [
+        "const PILOT_NEGATIVE_EXPONENT: &str = " + self.str_lit(negative_exponent_seam()) + ";",
+        "fn pilot_ipow(a: i64, b: i64) -> u64 {",
+        "    if b < 0 { pilot_trap(PILOT_NEGATIVE_EXPONENT); }",
+        "    (a as u64).wrapping_pow(b.min(4294967295) as u32)",
+        "}",
         "fn pilot_trap(message: &str) -> ! {",
         "    eprintln!(\"runtime error: {}\", message);",
         "    std::process::exit(1);",
@@ -44,6 +49,9 @@ pub struct RustDialect : ISourceDialect {
         "",
     ];
     pub fn global_decl(name: str, p: IrTypePhysics) -> str? => none;
+    pub fn global_read(name: str, message: str) -> str => name;
+    pub fn global_write(name: str, v: str) -> str => f"{name} = {v};";
+    pub fn truth(v: str) -> str? => none;
     pub fn module_open(protos: List<str>) -> List<str> => [];
     pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str => "";
     pub fn module_close(entry: str, has_code: bool) -> List<str> {
@@ -159,7 +167,13 @@ pub struct RustDialect : ISourceDialect {
         return f"(({v}) as {t})";
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
-    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
+        if name == "num_pow" {
+            guard some t = self.type_name(ret) else { return none; };
+            if is_float(ret) { return f"((({args[0]}) as f64).powf(({args[1]}) as f64) as {t})"; }
+            if !is_int(ret) || !is_int(phys[0]) || !is_int(phys[1]) { return none; }
+            return f"(pilot_ipow(({args[0]}) as i64, ({args[1]}) as i64) as {t})";
+        }
         let mac = if name == "rt_print" { "println!" } else if name == "rt_eprint" { "eprintln!" } else { "" };
         if mac == "" { return none; }
         var holes = "";
@@ -173,6 +187,8 @@ pub struct RustDialect : ISourceDialect {
         if args.len() == 0 { return mac + "()"; }
         return mac + "(\"" + holes + "\", " + joined(args) + ")";
     }
+    pub fn call_value(fv: str, args: List<str>) -> str? => none;
+    pub fn function_table(names: List<str>) -> List<str> => [];
     pub fn make_record(values: List<str>) -> str? => none;
     pub fn get_field(rec: str, i: i64) -> str? => none;
     pub fn set_field(rec: str, i: i64, v: str) -> str? => none;

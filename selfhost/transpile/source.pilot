@@ -47,7 +47,18 @@ pub interface ISourceDialect {
     /// The lines that start the file: imports and runtime helpers.
     fn prelude() -> List<str>;
     /// A module variable `name` of physics `p`, or none when unsupported.
+    /// Declares module variable `name`, not yet set (reading it before a
+    /// write stops the program); none when the language has no module
+    /// variables of physics `p`.
     fn global_decl(name: str, p: IrTypePhysics) -> str?;
+    /// Reads module variable `name`; when it is not set yet the program
+    /// stops with `message` (a string literal of the dialect).
+    fn global_read(name: str, message: str) -> str;
+    /// Sets module variable `name` to `v` (a statement).
+    fn global_write(name: str, v: str) -> str;
+    /// Branch condition `v` of a value whose kind is known only at run
+    /// time: stops the program unless it is a boolean.
+    fn truth(v: str) -> str?;
     /// Lines before the module variables and functions (forward
     /// declarations, a class).
     fn module_open(protos: List<str>) -> List<str>;
@@ -101,8 +112,15 @@ pub interface ISourceDialect {
     fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str?;
     fn call(name: str, args: List<str>) -> str;
     /// Engine operation `name` on `args` (physics `phys`; `literal[i]` when
-    /// argument i is a string literal), or none when unsupported.
-    fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str?;
+    /// argument i is a string literal) giving physics `ret`, or none when
+    /// unsupported.
+    fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str?;
+    /// A call of function value `fv` (a record of the function's index, then
+    /// its captured values) with `args`, the captured values following
+    /// them; none when the language has no function values.
+    fn call_value(fv: str, args: List<str>) -> str?;
+    /// Declares the table `call_value` looks a function index up in.
+    fn function_table(names: List<str>) -> List<str>;
     fn make_record(values: List<str>) -> str?;
     fn get_field(rec: str, i: i64) -> str?;
     fn set_field(rec: str, i: i64, v: str) -> str?;
@@ -181,12 +199,27 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
         emit_function(u, m.functions[fi], u.fn_names[fi]);
         fi = fi + 1;
     }
+    if calls_values(m) {
+        for line in d.function_table(u.fn_names) { u.out.push(line); }
+    }
     let start = m.functions[0];
     let entry = if starts_anything(start) { u.fn_names[0] } else { "" };
     for line in d.module_close(entry, start.ret_physics.layout_id != 0) { u.out.push(line); }
     var text = "";
     for line in u.out { text = text + line + "\n"; }
     return text;
+}
+
+/// Whether any function calls through a function value.
+fn calls_values(m: IrModule) -> bool {
+    for f in m.functions {
+        for b in f.blocks {
+            for inst in b.insts {
+                if inst.opcode == op_call_indirect() { return true; }
+            }
+        }
+    }
+    return false;
 }
 
 /// Whether running the start function does anything: anything but jumps
@@ -492,6 +525,21 @@ fn use_of(sf: SourceFn, v: u32) -> str {
     return f"v{v}";
 }
 
+/// The index of the module global named `cell`, or -1 for a stack slot.
+fn global_of(sf: SourceFn, cell: str) -> i64 {
+    var g = 0;
+    while g < sf.u.global_names.len() {
+        if sf.u.global_names[g] == cell { return g; }
+        g = g + 1;
+    }
+    return -1;
+}
+
+/// The seed's name for the kind of a value of physics `p`, in run-time
+/// errors.
+fn kind_label(p: IrTypePhysics) -> str =>
+    if is_bool(p) { "boolean" } else if is_float(p) { "float" } else if is_int(p) { "integer" } else { "value" };
+
 fn cell_of(sf: SourceFn, v: u32) -> str {
     if sf.cell[v] == "" {
         return seam("emit.instruction", f"the {sf.u.d.language()} emitter reads and writes only slots and globals (`v{v}` in `{sf.f.name}`)");
@@ -501,6 +549,16 @@ fn cell_of(sf: SourceFn, v: u32) -> str {
 
 fn unsupported(sf: SourceFn, what: str) -> str =>
     seam("emit.instruction", f"the {sf.u.d.language()} emitter has no spelling for {what} (in `{sf.f.name}`)");
+
+/// The Pilot spelling of each binary operator name `binary` is given, for
+/// run-time type errors.
+pub fn operator_symbols() -> Map<str, str> {
+    let syms = Map<str, str>();
+    for pair in [["add", "+"], ["sub", "-"], ["mul", "*"], ["div", "/"], ["rem", "%"], ["and", "&"], ["or", "|"], ["xor", "^"], ["shl", "<<"], ["shr", ">>"]] {
+        syms.set(pair[0], pair[1]);
+    }
+    return syms;
+}
 
 /// The binary operator each arithmetic opcode is, by opcode.
 fn binary_ops() -> Map<str, str> {
@@ -577,6 +635,15 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
     }
     if ops.has(f"{op}") {
         let p = f.value_physics[r];
+        let name = ops.get(f"{op}");
+        let pa0 = f.value_physics[a[0]];
+        let pb0 = f.value_physics[a[1]];
+        let arith = name == "add" || name == "sub" || name == "mul" || name == "div" || name == "rem";
+        if arith && is_scalar(pa0) && is_scalar(pb0) && (is_bool(pa0) || is_bool(pb0)) {
+            // Arithmetic on a boolean fails, as on the seed.
+            line(sf, d.trap(f"cannot apply `{operator_symbols().get(name)}` to {kind_label(pa0)} and {kind_label(pb0)}"));
+            return;
+        }
         let e = d.binary(ops.get(f"{op}"), widened(sf, a[0], p), widened(sf, a[1], p), operand_physics(f, a[0], p), operand_physics(f, a[1], p), p)
             ?? unsupported(sf, f"`{opcode_name(op)}` on {reg_class_name(inst.physics.reg_class)} values");
         line(sf, d.assign(f"v{r}", e));
@@ -600,11 +667,21 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
         return;
     }
     if op == op_load() {
-        if carries(sf, inst.physics) { line(sf, d.assign(f"v{r}", cell_of(sf, a[0]))); }
+        if !carries(sf, inst.physics) { return; }
+        let cell = cell_of(sf, a[0]);
+        let g = global_of(sf, cell);
+        if g < 0 {
+            line(sf, d.assign(f"v{r}", cell));
+        } else {
+            let message = d.str_lit(f"`{m.globals[g].name}` is read before its declaration has run");
+            line(sf, d.assign(f"v{r}", d.global_read(cell, message)));
+        }
         return;
     }
     if op == op_store() {
-        if carries(sf, f.value_physics[a[1]]) { line(sf, d.assign(cell_of(sf, a[0]), use_of(sf, a[1]))); }
+        if !carries(sf, f.value_physics[a[1]]) { return; }
+        let cell = cell_of(sf, a[0]);
+        line(sf, if global_of(sf, cell) < 0 { d.assign(cell, use_of(sf, a[1])) } else { d.global_write(cell, use_of(sf, a[1])) });
         return;
     }
     if op == op_call_direct() {
@@ -613,6 +690,16 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
             if carries(sf, f.value_physics[v]) { args.push(use_of(sf, v)); }
         }
         define(sf, inst, d.call(sf.u.fn_names[inst.subop], args));
+        return;
+    }
+    if op == op_call_indirect() {
+        var args: List<str> = [];
+        var i = 1;
+        while i < a.len() {
+            if carries(sf, f.value_physics[a[i]]) { args.push(use_of(sf, a[i])); }
+            i = i + 1;
+        }
+        define(sf, inst, d.call_value(use_of(sf, a[0]), args) ?? unsupported(sf, "a call through a function value"));
         return;
     }
     if op == op_call_intrinsic() {
@@ -625,7 +712,7 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
             phys.push(f.value_physics[v]);
             lits.push(sf.literal[v]);
         }
-        define(sf, inst, d.intrinsic(name, args, phys, lits) ?? unsupported(sf, f"the engine operation `{name}`"));
+        define(sf, inst, d.intrinsic(name, args, phys, lits, inst.physics) ?? unsupported(sf, f"the engine operation `{name}`"));
         return;
     }
     if op == op_construct_aggregate() {
@@ -658,7 +745,14 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
         let then_vals = slice_args(a, 3, a[2]);
         let at = 3 + a[2];
         let else_vals = slice_args(a, at + 2, a[at + 1]);
-        line(sf, d.if_open(use_of(sf, a[0])));
+        let pc = f.value_physics[a[0]];
+        if is_int(pc) || is_float(pc) {
+            // Only booleans are conditions; this one never is.
+            line(sf, d.trap(f"condition must be a boolean, found {kind_label(pc)}"));
+            return;
+        }
+        let cond = if is_bool(pc) { use_of(sf, a[0]) } else { d.truth(use_of(sf, a[0])) ?? unsupported(sf, "a condition of unknown kind") };
+        line(sf, d.if_open(cond));
         sf.depth = sf.depth + 1;
         go_to(sf, a[1], then_vals);
         sf.depth = sf.depth - 1;
@@ -778,4 +872,10 @@ pub fn joined(items: List<str>) -> str {
 }
 
 /// The operator of comparison predicate `pred` in most languages.
+/// The message a typed emitter stops with when `**` on integers has a
+/// negative exponent: the seed's answer is a float, which a value typed as
+/// an integer cannot hold.
+pub fn negative_exponent_seam() -> str =>
+    "SEAM001: unconnected seam `emit.representation`: a negative integer exponent gives a float, which a value typed as an integer cannot hold";
+
 pub fn cmp_symbol(pred: i64) -> str => ["==", "!=", "<", "<=", ">", ">="][pred];

@@ -1,0 +1,270 @@
+// ==============================================================================
+// FILE: selfhost/cli/test_emit.pilot
+// `pilot test --emit <lang>`: the conformance corpus through `pilot emit`,
+// built and run with the host's own toolchain for that language.
+// ==============================================================================
+// Every case `pilot test --ir` finds eligible is eligible here. Each case is
+// emitted with `pilot emit <lang> <case>`:
+//   - a case the compiler rejects is checked against its expectation files
+//     exactly as `pilot test` checks `pilot run` (the same diagnostics, the
+//     same exit code);
+//   - a case whose emission stops at a registered `emit.*` or `ir.*` seam is
+//     counted as stopped at a seam: neither passed nor failed;
+//   - any other case is written to `target/test-emit/<lang>/`, built when the
+//     language is compiled, and run with its `.args` and `.stdin`. Its stdout
+//     and exit code must be the expected ones, and its stderr must hold each
+//     expected stderr line, a runtime error from `runtime error:` on. An
+//     emitted program carries no source positions, so the position lines of
+//     a runtime error's trace are not checked. A program the host compiler
+//     rejects is a failure.
+// A tool the language needs that the host does not have stops the command.
+pub lvl(0) pkg Pilot.SelfHost.Cli.TestEmit;
+
+use Pilot.Core.File;
+use std.proc;
+use Pilot.SelfHost.Cli.TestCmd;
+use Pilot.SelfHost.Cli.TestIr;
+
+/// How the host builds and runs a program in one language: `compile` (empty
+/// for an interpreted language) and `run` are argument lists in which
+/// `{src}` is the emitted file and `{bin}` the built program.
+pub struct EmitRunner : IObject {
+    pub lang:    str;
+    pub ext:     str;
+    pub compile: List<str>;
+    pub run:     List<str>;
+}
+
+fn runner(lang: str, ext: str, compile: List<str>, run: List<str>) -> EmitRunner =>
+    EmitRunner { lang: lang, ext: ext, compile: compile, run: run };
+
+/// How each `pilot emit` target is built and run.
+pub fn emit_runners() -> List<EmitRunner> => [
+    runner("python", "py", [], ["python3", "{src}"]),
+    runner("js", "js", [], ["node", "{src}"]),
+    runner("lua", "lua", [], ["lua", "{src}"]),
+    runner("c", "c", ["cc", "-std=c11", "-w", "{src}", "-o", "{bin}", "-lm"], ["{bin}"]),
+    runner("cpp", "cpp", ["c++", "-std=c++17", "-w", "{src}", "-o", "{bin}"], ["{bin}"]),
+    runner("rust", "rs", ["rustc", "-A", "warnings", "-o", "{bin}", "{src}"], ["{bin}"]),
+    runner("csharp", "cs", ["mcs", "-nowarn:162,168,219,429", "-out:{bin}", "{src}"], ["mono", "{bin}"]),
+];
+
+/// The runner of target `lang`.
+pub fn emit_runner(lang: str) -> EmitRunner? {
+    for r in emit_runners() {
+        if r.lang == lang { return r; }
+    }
+    return none;
+}
+
+/// One process to start: the program, its arguments and its input.
+struct Job : IObject {
+    pub program: str;
+    pub args:    List<str>;
+    pub input:   str;
+}
+
+/// The totals of a `pilot test --emit` run.
+struct EmitTally : IObject {
+    pub passed:       i64;
+    pub failed:       i64;
+    pub at_seam:      i64;
+    pub not_eligible: i64;
+}
+
+fn read_or_empty(path: str) -> str => if File.exists(path) { File.read_text(path) } else { "" };
+
+/// `template` with `{src}` and `{bin}` filled in.
+fn filled(template: List<str>, src: str, bin: str) -> List<str> {
+    var out: List<str> = [];
+    for t in template {
+        out.push(if t.find("{src}", 0) >= 0 { t.replace("{src}", src) } else { t.replace("{bin}", bin) });
+    }
+    return out;
+}
+
+fn job_of(argv: List<str>, input: str) -> Job {
+    var rest: List<str> = [];
+    var i = 1;
+    while i < argv.len() {
+        rest.push(argv[i]);
+        i = i + 1;
+    }
+    return Job { program: argv[0], args: rest, input: input };
+}
+
+/// Runs `jobs`, as many at once as the machine has CPUs; their results in
+/// order.
+fn run_jobs(jobs: List<Job>) -> List<proc.ProcessOutput> {
+    let window = if proc.cpu_count() > 1 { proc.cpu_count() } else { 1 };
+    var running: List<proc.ProcessHandle> = [];
+    var started = 0;
+    while started < jobs.len() && started < window {
+        running.push(proc.spawn(jobs[started].program, jobs[started].args, jobs[started].input));
+        started = started + 1;
+    }
+    var out: List<proc.ProcessOutput> = [];
+    var i = 0;
+    while i < jobs.len() {
+        out.push(running[i].wait());
+        if started < jobs.len() {
+            running.push(proc.spawn(jobs[started].program, jobs[started].args, jobs[started].input));
+            started = started + 1;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+fn stopped_at_seam(out: proc.ProcessOutput) -> bool =>
+    out.stderr.find(seam_code(), 0) >= 0 && (out.stderr.find("`emit.", 0) >= 0 || out.stderr.find(ir_seam_prefix(), 0) >= 0);
+
+fn seam_line(out: proc.ProcessOutput) -> str {
+    for line in test_lines(out.stderr) {
+        if line.find(seam_code(), 0) >= 0 { return line; }
+    }
+    return "";
+}
+
+/// Every way the run `out` of the emitted case `program` differs from its
+/// expectation files; `emitted` is what `pilot emit` printed on stderr.
+fn check_emitted(program: str, emitted: str, out: proc.ProcessOutput) -> List<str> {
+    let stem = test_stem(program);
+    var problems: List<str> = [];
+    let expected_stdout = File.read_text(stem + ".stdout");
+    let expected_exit = text_exit(stem);
+    if out.stdout != expected_stdout {
+        problems.push(f"stdout differs\n--- expected ---\n{expected_stdout}--- actual ---\n{out.stdout}--- stderr ---\n{out.stderr}");
+    }
+    if out.exit_code != expected_exit {
+        problems.push(f"exit code {out.exit_code}, expected {expected_exit}\n--- stderr ---\n{out.stderr}");
+    }
+    let stderr = emitted + out.stderr;
+    for line in test_lines(read_or_empty(stem + ".stderr")) {
+        var want = line.trim();
+        let at = want.find("runtime error: ", 0);
+        if at >= 0 {
+            want = want.slice(at, want.len());
+        } else if want.find(".pilot:", 0) >= 0 {
+            // A source position of a runtime error's trace.
+            continue;
+        }
+        if want.len() > 0 && stderr.find(want, 0) < 0 {
+            problems.push(f"stderr lacks `{want}`\n--- stderr ---\n{stderr}");
+        }
+    }
+    return problems;
+}
+
+/// The exit code case `stem` expects.
+fn text_exit(stem: str) -> i64 {
+    let t = read_or_empty(stem + ".exit").trim();
+    if t == "" { return 0; }
+    var n = 0;
+    var neg = false;
+    var i = 0;
+    while i < t.len() {
+        let c = t.byte_at(i);
+        if c == 45 && i == 0 { neg = true; } else { n = n * 10 + (c - 48); }
+        i = i + 1;
+    }
+    return if neg { 0 - n } else { n };
+}
+
+fn fail(program: str, problems: List<str>, var ref tally: EmitTally) {
+    tally.failed = tally.failed + 1;
+    print(f"FAIL {program}");
+    for p in problems { print("  " + p); }
+}
+
+/// `pilot test --emit <lang> [paths...] [--filter text]`: exit 0 when no
+/// eligible case fails, 1 when one does, 2 when `lang` is not a target.
+pub fn test_emit_command(lang: str, paths: List<str>, filter: str) -> i64 {
+    guard some r = emit_runner(lang) else {
+        eprint(f"error: `pilot emit` has no target `{lang}`");
+        return 2;
+    };
+    var tally = EmitTally { passed: 0, failed: 0, at_seam: 0, not_eligible: 0 };
+    let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
+    var cases: List<str> = [];
+    for root in roots {
+        let programs = if root.ends_with(".pilot") { [root] } else { test_programs_in(root) };
+        for program in programs {
+            if program.find(filter, 0) < 0 || !File.exists(test_stem(program) + ".stdout") { continue; }
+            if ir_eligible(program) { cases.push(program); } else { tally.not_eligible = tally.not_eligible + 1; }
+        }
+    }
+    let exe = proc.current_exe() ?? "pilot";
+    var emits: List<Job> = [];
+    for c in cases { emits.push(Job { program: exe, args: ["emit", lang, c], input: "" }); }
+    let emitted = run_jobs(emits);
+
+    // Cases that emitted, with their files.
+    var built: List<str> = [];
+    var built_stderr: List<str> = [];
+    var srcs: List<str> = [];
+    var bins: List<str> = [];
+    let dir = f"target/test-emit/{lang}";
+    var i = 0;
+    while i < cases.len() {
+        let out = emitted[i];
+        if stopped_at_seam(out) {
+            tally.at_seam = tally.at_seam + 1;
+            print(f"SEAM {cases[i]}: {seam_line(out)}");
+        } else if out.exit_code != 0 {
+            let res = test_check_case(cases[i], out);
+            if res.problems.len == 0 { tally.passed = tally.passed + 1; } else { fail(cases[i], res.problems, tally); }
+        } else {
+            let base = test_base_name(test_stem(cases[i]));
+            let src = f"{dir}/{base}.{r.ext}";
+            if !File.write_text(src, out.stdout) {
+                fail(cases[i], [f"cannot write `{src}`"], tally);
+            } else {
+                built.push(cases[i]);
+                built_stderr.push(out.stderr);
+                srcs.push(src);
+                bins.push(f"{dir}/{base}.bin");
+            }
+        }
+        i = i + 1;
+    }
+
+    // Build, when the language is compiled.
+    var runnable: List<i64> = [];
+    if r.compile.len() == 0 {
+        i = 0;
+        while i < built.len() { runnable.push(i); i = i + 1; }
+    } else {
+        var builds: List<Job> = [];
+        for k in 0 .. built.len() { builds.push(job_of(filled(r.compile, srcs[k], bins[k]), "")); }
+        let outs = run_jobs(builds);
+        i = 0;
+        while i < built.len() {
+            if outs[i].exit_code == 0 {
+                runnable.push(i);
+            } else {
+                fail(built[i], [f"the host compiler rejected `{srcs[i]}`\n{outs[i].stdout}{outs[i].stderr}"], tally);
+            }
+            i = i + 1;
+        }
+    }
+
+    // Run.
+    var runs: List<Job> = [];
+    for k in runnable {
+        let stem = test_stem(built[k]);
+        var argv = filled(r.run, srcs[k], bins[k]);
+        for a in test_lines(read_or_empty(stem + ".args")) { argv.push(a); }
+        runs.push(job_of(argv, read_or_empty(stem + ".stdin")));
+    }
+    let outs = run_jobs(runs);
+    i = 0;
+    while i < runnable.len() {
+        let k = runnable[i];
+        let problems = check_emitted(built[k], built_stderr[k], outs[i]);
+        if problems.len() == 0 { tally.passed = tally.passed + 1; } else { fail(built[k], problems, tally); }
+        i = i + 1;
+    }
+    print(f"RESULT (emit {lang}): {tally.passed} passed, {tally.failed} failed, {tally.at_seam} stopped at a seam, {tally.not_eligible} not eligible");
+    return if tally.failed == 0 { 0 } else { 1 };
+}

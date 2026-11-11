@@ -66,6 +66,7 @@ pub fn default_command_registry() -> CommandRegistry {
     );
     spec_command_add_flag(cmd_test, spec_new_flag("filter", "", 3, "", "", "", false, false, "Filter test cases by name substring"));
     spec_command_add_flag(cmd_test, spec_new_flag("ir", "", 0, "false", "", "", false, false, "Run the conformance cases on the PilIR interpreter (`pilot ir run`) and check their text round trip"));
+    spec_command_add_flag(cmd_test, spec_new_flag("emit", "", 3, "", "", "", false, false, "Run the conformance cases through `pilot emit <lang>` and the host's toolchain for that language"));
     let _ = spec_registry_register(reg, cmd_test);
 
     let cmd_bench = spec_new_command(

@@ -22,6 +22,7 @@ const CLI: &[&str] = &[
     "selfhost/cli/report.pilot",
     "selfhost/cli/test_cmd.pilot",
     "selfhost/cli/test_ir.pilot",
+    "selfhost/cli/test_emit.pilot",
     "selfhost/cli/bench_cmd.pilot",
     "selfhost/cli/commands.pilot",
     "selfhost/cli/main.pilot",
