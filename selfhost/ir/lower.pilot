@@ -806,12 +806,22 @@ fn lower_type_query(lw: Lowerer, n: i64, query: str, arg: i64) -> u32 {
     return emit(lw, op_const_bits(), 0, physics_of(lw, n), [pool_int(lw, e.size as i64)], n);
 }
 
+/// The seam a call-quote mode stops at, with the seed's message
+/// (crates/pilot-vm/src/lower_call.rs QUOTED_CALL_SEAM).
+pub fn call_quote_seam() -> str =>
+    "SEAM001: unconnected seam `vm.call_quote`: call-quote modes build their carrier values once the type checker exists (F4)";
+
 pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
-    // A call-quote mode (`f!(..)`, `sig f(..)`, ..) is recorded in the call's
-    // flags; its carrier values do not exist yet.
-    if flags(s, n) != 0 { return unsupported(lw, n); }
     let ch = children(s, n);
+    // A call-quote mode (`f!(..)`, `sig f(..)`, ..) is recorded in the call's
+    // flags; its carrier values do not exist yet, so it stops at the seed's
+    // seam, at the callee as the seed reports it.
+    if flags(s, n) != 0 {
+        emit_trap(lw, call_quote_seam(), ch[0]);
+        switch_to(lw, ir_add_block(lw.f));
+        return unit_value(lw, n);
+    }
     var i = 1;
     let callee = ch[0];
     if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 && ch.len() == 2 {
