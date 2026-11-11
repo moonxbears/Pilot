@@ -393,12 +393,13 @@ pub struct PlannedProbe {
 }
 
 /// The drop plan of the program at `path`: its rows, and how to drop a value
-/// of each type it names (`[type, destructor owner or "", fields]`); and the
-/// probes the checker plans around statements.
+/// of each type it names (`[type, destructor owner or "", fields, element
+/// type, length op, element op]`, the last three empty for a type that owns
+/// no elements); and the probes the checker plans around statements.
 #[derive(Clone, Debug, Default)]
 pub struct CheckedDropPlan {
     pub rows: Vec<PlannedDrop>,
-    pub glue: Vec<(String, String, Vec<(String, String)>)>,
+    pub glue: Vec<(String, pilot_vm::lower_drop::DropGlue)>,
     /// `[value type, fields]`: the value-type fields a copy copies too.
     pub copy_glue: Vec<(String, Vec<(String, String)>)>,
     pub probes: Vec<PlannedProbe>,
@@ -463,7 +464,18 @@ pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> Chec
                 .unwrap_or_default();
             let fields = raw.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].clone(), c[1].clone())).collect();
             if action == DropAction::Glue {
-                plan.glue.push((s(1), s(2), fields));
+                let elements = (!s(4).is_empty()).then(|| pilot_vm::lower_drop::DropElements {
+                    ty: s(4),
+                    len_op: s(5),
+                    get_op: s(6),
+                });
+                let owner = s(2);
+                let glue = pilot_vm::lower_drop::DropGlue {
+                    destructor_owner: (!owner.is_empty()).then_some(owner),
+                    fields,
+                    elements,
+                };
+                plan.glue.push((s(1), glue));
             } else {
                 plan.copy_glue.push((s(1), fields));
             }

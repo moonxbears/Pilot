@@ -24,6 +24,7 @@ use selfhost.check.snapshot.*;
 use selfhost.check.types.*;
 use selfhost.check.program.*;
 use selfhost.check.infer.*;
+use selfhost.check.own.*;
 use selfhost.check.drops.*;
 use selfhost.check.copies.*;
 use selfhost.ir.model.*;
@@ -197,6 +198,39 @@ fn drop_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) {
             drop_value(lw, property_read(lw, v, t, name, n), ft, n, depth + 1);
         }
     }
+    let ops = owned_elements(lw.plan.flow, t);
+    if ops.len() == 2 {
+        let et = element_type(lw.inf.p, t);
+        if needs_drop(lw.plan, et, 0) == 1 { drop_elements(lw, v, et, ops, n, depth); }
+    }
+}
+
+/// Drops each element of `v`, a collection owning elements of type `et`,
+/// front to back: `ops` are the engine operations giving its length and its
+/// element at a position (selfhost/check/own.pilot `owned_elements`).
+[StandIn("ir.engine_sequence_for", "slice<T> is { ptr<T>, usize } enumerated by its SliceEnumerator", "the value is the engine's own list, as in the seed, and is indexed by engine operations", "F6")]
+fn drop_elements(lw: Lowerer, v: u32, et: i64, ops: List<str>, n: i64, depth: i64) {
+    let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+    let len = emit(lw, op_call_intrinsic(), intrinsic_index(lw, ops[0]), int_phy, [v], n);
+    let slot = emit(lw, op_stack_slot(), 0, int_phy, [], n);
+    emit_void(lw, op_store(), 0, [slot, emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, 0)], n)], n);
+    let head = ir_add_block(lw.f);
+    let body = ir_add_block(lw.f);
+    let exit = ir_add_block(lw.f);
+    emit_void(lw, op_jump(), 0, [head], n);
+    switch_to(lw, head);
+    let i = emit(lw, op_load(), 0, int_phy, [slot], n);
+    // CmpPred 2 is `<`.
+    emit_void(lw, op_cond_br(), 0, [emit(lw, op_cmp(), 2, bool_physics(lw), [i, len], n), body, 0, exit, 0], n);
+    switch_to(lw, body);
+    let item = emit(lw, op_call_intrinsic(), intrinsic_index(lw, ops[1]), layout_of(lw.ls, et), [v, i], n);
+    drop_value(lw, item, et, n, depth + 1);
+    if !ir_is_terminated(lw.f, lw.cur) {
+        let one = emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, 1)], n);
+        emit_void(lw, op_store(), 0, [slot, emit(lw, op_add(), 0, int_phy, [i, one], n)], n);
+        emit_void(lw, op_jump(), 0, [head], n);
+    }
+    switch_to(lw, exit);
 }
 
 /// A copy of `v`, a value of value type `t`: a new value of its layout

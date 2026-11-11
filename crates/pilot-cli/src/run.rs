@@ -14,7 +14,7 @@ use crate::tool;
 use pilot_analysis::PhysicsRegistry;
 use pilot_rt::PilotVal;
 use pilot_span::ByteSpan;
-use pilot_vm::lower_drop::{DropAction, DropGlue, DropItem, DropPlan};
+use pilot_vm::lower_drop::{DropAction, DropItem, DropPlan};
 use pilot_vm::lower_probe::ProbePlan;
 use pilot_vm::{codes, BytecodeCompiler, HostValue, PilVirtualMachine, PilcBinary};
 use std::fs;
@@ -137,14 +137,8 @@ pub fn compile(path: &str, tail: Option<&str>) -> Result<Program, Vec<Diag>> {
 fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropPlan {
     let bases: std::collections::HashMap<&str, u32> = source.units().map(|(p, _, b)| (p, b)).collect();
     let mut out = DropPlan::default();
-    for (ty, owner, fields) in &plan.glue {
-        out.glue.insert(
-            ty.clone(),
-            DropGlue {
-                destructor_owner: (!owner.is_empty()).then(|| owner.clone()),
-                fields: fields.clone(),
-            },
-        );
+    for (ty, glue) in &plan.glue {
+        out.glue.insert(ty.clone(), glue.clone());
     }
     for (ty, fields) in &plan.copy_glue {
         out.copy_glue.insert(ty.clone(), fields.clone());

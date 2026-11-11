@@ -489,3 +489,44 @@ pub fn prog_const(p: Program, e: i64) -> i64? {
     if n >= 0 && kind(p.s, n) == nk_int() { return lit_value(p.s, n); }
     return none;
 }
+/// The seed token for engine calls.
+pub pure fn engine_token() -> str => "__engine";
+
+/// The text of a binding argument: `nameof(f)` is `f`, a string its value,
+/// a name itself.
+fn engine_arg_text(p: Program, n: i64) -> str {
+    let s = p.s;
+    let k = kind(s, n);
+    if k == nk_call() {
+        let ch = children(s, n);
+        return if ch.len() == 2 { engine_arg_text(p, ch[1]) } else { "" };
+    }
+    if k == nk_str() || k == nk_ident() { return node_name(s, n); }
+    // `Cfg.Hooks.receptor`, `33`: what the constant tables make of it.
+    return prog_const_text(p, n);
+}
+
+/// Every `__engine("<hook>", args..)` call of the linked program whose hook
+/// is a string: `[hook, args..]` as text.
+pub fn prog_engine_bindings(p: Program) -> List<List<str>> {
+    let s = p.s;
+    var out: List<List<str>> = [];
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_call() {
+            let ch = children(s, n);
+            if ch.len() >= 3 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == engine_token() && engine_arg_text(p, ch[1]) != "" {
+                var row: List<str> = [];
+                var i = 1;
+                while i < ch.len() {
+                    row.push(engine_arg_text(p, ch[i]));
+                    i = i + 1;
+                }
+                out.push(row);
+            }
+        }
+        n = n + 1;
+    }
+    return out;
+}
+

@@ -1,0 +1,2 @@
+error[OWN004]: this element is owned by its collection and cannot be moved out of it; take it out with `pop` or `remove_at`
+err_own_element_move.pilot:18:13

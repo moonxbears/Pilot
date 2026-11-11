@@ -1,0 +1,16 @@
+// F7: a map of values that need dropping must drop each value. Lists do
+// (drop_list_elements); until maps, `opt` and other generics do too, binding
+// one stops at the `own.collection_drop` seam.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn main() {
+    print("before");
+    let m: Map<str, Res> = Map<str, Res>();
+    print(m.len());
+}

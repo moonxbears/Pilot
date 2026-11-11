@@ -1,0 +1,44 @@
+// F7: a list that owns its elements drops each of them, front to back, when
+// the list itself is dropped (after its last use). Reading an element by
+// index or walking the list with `for` borrows the element: the borrower is
+// not dropped itself, and the list stays alive while a borrower is used.
+// An element taken out with `pop` is owned by whoever takes it.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+// No destructor of its own: dropping a pair drops its fields in order.
+struct Pair {
+    pub left: Res;
+    pub right: Res;
+}
+
+fn make(names: List<str>) -> List<Res> {
+    var out: List<Res> = [];
+    for n in names {
+        out.push(Res { name: n });
+    }
+    return out;
+}
+
+fn main() {
+    print("before");
+    let rs: List<Res> = [Res { name: "a" }, Res { name: "b" }];
+    let first = rs[0];
+    print(f"first {first.name}");
+    for r in rs {
+        print(f"see {r.name}");
+    }
+    print("after loop");
+    let pairs: List<Pair> = [Pair { left: Res { name: "l" }, right: Res { name: "r" } }];
+    print(pairs.len());
+    var made = make(["x", "y"]);
+    let popped = made.pop();
+    print(f"popped {popped.name}");
+    print(made.len());
+    print("end");
+}

@@ -1,0 +1,15 @@
+before
+first a
+see a
+see b
+drop a
+drop b
+after loop
+1
+drop l
+drop r
+popped y
+drop y
+1
+drop x
+end

@@ -59,6 +59,14 @@ pub partial struct List<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerato
     };
 }
 
+// A list owns its elements: dropping a list drops each element, front to
+// back (selfhost/check/drops.pilot), walked by the engine operations giving
+// its length and its element at a position. Reading an element by index, or
+// with `for`, borrows it.
+comptime {
+    __engine("bind_owned_elements", nameof(List), "str_len", "list_get");
+}
+
 /// Walks a `List<T>` front to back, borrowing it.
 pub struct ListEnumerator<T: IAnyValue> : ICursor<T> {
     pub ref items:   List<T>;

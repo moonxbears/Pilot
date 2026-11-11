@@ -21,9 +21,11 @@
 //! Dropping a value calls its type's destructor, then drops the fields the
 //! type's glue lists, in order. Types are named only as the plan names them.
 
+use crate::instruction::Opcode;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId};
 use std::collections::HashMap;
+use pilot_rt::PilotVal;
 use std::rc::Rc;
 
 /// What a row of the drop plan says, numbered as `DropAction` in
@@ -76,11 +78,23 @@ pub struct DropItem {
 }
 
 /// How to drop a value of one type: the type whose destructor runs (none
-/// when it has none), then each field to drop with the field's type.
+/// when it has none), then each field to drop with the field's type, then,
+/// for a collection that owns its elements, each element.
 #[derive(Clone, Debug, Default)]
 pub struct DropGlue {
     pub destructor_owner: Option<String>,
     pub fields: Vec<(String, String)>,
+    pub elements: Option<DropElements>,
+}
+
+/// The elements a collection owns: their type as the glue lists it, and the
+/// engine operations that give the collection's length and its element at a
+/// position (both named by the plan).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DropElements {
+    pub ty: String,
+    pub len_op: String,
+    pub get_op: String,
 }
 
 /// Where the program's owned values are dropped.
@@ -134,11 +148,13 @@ pub(crate) enum Deferred {
 const PLAN_SEAMS: &[(&str, &str)] = &[
     ("own.capture", "SEAM001: unconnected seam `own.capture`"),
     ("own.collection_drop", "SEAM001: unconnected seam `own.collection_drop`"),
+    ("own.element_replace", "SEAM001: unconnected seam `own.element_replace`"),
 ];
 
 /// Glue nesting deeper than this is a planner error: a type that holds
-/// itself does so through an `opt` or a collection, which the plan stops at
-/// `own.collection_drop`.
+/// itself does so through an `opt`, a map or another generic, which the plan
+/// stops at `own.collection_drop`, or through a list, whose elements are
+/// dropped by a loop.
 const MAX_GLUE_DEPTH: usize = 32;
 
 fn key_of(arena: &AstArena, id: NodeId) -> NodeKey {
@@ -300,7 +316,7 @@ impl BytecodeCompiler {
             };
             let _ = arena;
             let flag = self.drop_flags.get(&item.binding).copied();
-            let skip = flag.map(|f| self.emit_branch(crate::instruction::Opcode::JumpIfFalse, f, 0));
+            let skip = flag.map(|f| self.emit_branch(Opcode::JumpIfFalse, f, 0));
             self.emit_drop_value(r, &item.ty, 0);
             if let Some(j) = skip {
                 self.patch_to_here(j);
@@ -328,6 +344,29 @@ impl BytecodeCompiler {
             let rf = self.emit_member_read(r, Some(ty), field);
             self.emit_drop_value(rf, field_ty, depth + 1);
         }
+        if let Some(el) = &glue.elements {
+            self.emit_drop_elements(r, el, depth);
+        }
         self.release_to(mark);
+    }
+
+    /// Drops each element of the collection in register `r`, front to back.
+    fn emit_drop_elements(&mut self, r: u8, el: &DropElements, depth: usize) {
+        let r_idx = self.alloc_reg();
+        let r_zero = self.emit_const(PilotVal::from_int(0));
+        self.emit(Opcode::Move, r_idx, r_zero, 0);
+        let r_len = self.emit_intrinsic(&el.len_op, &[r]);
+        let start = self.here();
+        let r_more = self.alloc_reg();
+        self.emit(Opcode::CmpLt, r_more, r_idx, r_len);
+        let exit = self.emit_branch(Opcode::JumpIfFalse, r_more, 0);
+        let mark = self.next_reg;
+        let r_item = self.emit_intrinsic(&el.get_op, &[r, r_idx]);
+        self.emit_drop_value(r_item, &el.ty, depth + 1);
+        self.release_to(mark);
+        let r_one = self.emit_const(PilotVal::from_int(1));
+        self.emit(Opcode::Add, r_idx, r_idx, r_one);
+        self.emit_jump(start);
+        self.patch_to_here(exit);
     }
 }

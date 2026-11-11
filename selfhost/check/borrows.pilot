@@ -30,6 +30,10 @@
 //              list: a guard stays bound to the block that made it.
 // A closure's body is checked for what it returns of its own locals only.
 //
+// A binding that borrows an element a collection owns (`let x = rs[i]`,
+// `for x in rs`; selfhost/check/own.pilot `borrows_element`) has the roots of
+// the collection.
+//
 // The drop plan (selfhost/check/drops.pilot) asks `borrowers_of`: a value
 // is not dropped while a binding that borrows from it is still used.
 pub lvl(0) pkg Pilot.SelfHost.Check.Borrows;
@@ -125,13 +129,21 @@ pub fn binding_roots(bw: Borrows, b: i64) -> List<i64> {
     if bw.state[b] == 1 { return []; }
     let f = bw.flow;
     let r = f.inf.r;
-    if !borrows_type(f.inf.p, flow_binding_type(f, b)) || r.bind_kind[b] == BindKind::Param {
+    let element = borrows_element(f, b);
+    if (!element && !borrows_type(f.inf.p, flow_binding_type(f, b))) || r.bind_kind[b] == BindKind::Param {
         bw.roots[b] = [b];
         bw.state[b] = 2;
         return bw.roots[b];
     }
     bw.state[b] = 1;
     var out: List<i64> = [];
+    if element {
+        // `let x = rs[i]` and `for x in rs` borrow from `rs`.
+        add_all(out, place_roots(bw, r.source[b]));
+        bw.roots[b] = out;
+        bw.state[b] = 2;
+        return out;
+    }
     if r.source[b] >= 0 { add_all(out, expr_roots(bw, r.source[b])); }
     for e in bw.assigned[b] { add_all(out, expr_roots(bw, e)); }
     bw.roots[b] = out;
@@ -356,7 +368,8 @@ pub fn borrowers_of(bw: Borrows, b: i64) -> List<i64> {
     var out: List<i64> = [];
     var v = 0;
     while v < r.site.len() {
-        if v != b && r.owner[v] == r.owner[b] && borrows_type(bw.flow.inf.p, flow_binding_type(bw.flow, v)) {
+        let lends = borrows_type(bw.flow.inf.p, flow_binding_type(bw.flow, v)) || borrows_element(bw.flow, v);
+        if v != b && r.owner[v] == r.owner[b] && lends {
             for x in binding_roots(bw, v) {
                 if x == b { out.push(v); }
             }

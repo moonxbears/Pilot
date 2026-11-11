@@ -1,6 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/check/own.pilot
 // OWN001: using an owned value after it was moved.
+// OWN004: moving out an element a collection owns.
 // ==============================================================================
 // A local or parameter whose type is owned (lattice bit 1) is moved when it
 // is used by value: bound by `let`/`var`, assigned, returned, put in a list
@@ -21,6 +22,12 @@
 //     reported at its use inside the closure) and moves each captured owned
 //     binding the closure's body moves, whether or not it is ever called.
 // Each closure body is also walked on its own, for its own bindings.
+//
+// A collection whose type the engine bindings name as owning its elements
+// (`bind_owned_elements`) drops them with itself. Reading one by index, or
+// walking them with `for`, borrows it: `let x = rs[i]` and `for x in rs`
+// make `x` a borrower of `rs` (selfhost/check/borrows.pilot), never dropped
+// itself. Moving the element, or a binding borrowing it, is OWN004.
 pub lvl(0) pkg Pilot.SelfHost.Check.Own;
 
 use selfhost.check.snapshot.*;
@@ -39,14 +46,74 @@ pub struct Flow {
     /// Assignment to a local -> whether, on some walk, the local may have
     /// been moved just before it is assigned (`walk_bodies` fills it).
     pub moved_at: Map<str, bool>;
+    /// The program's engine bindings (`prog_engine_bindings`).
+    pub engine: List<List<str>>;
+    /// Binding -> whether it borrows an owned element: 1, 0, -1 not asked.
+    pub element: List<i64>;
 }
 
 /// A flow over the program `inf` describes, reporting to `sink`.
 pub fn flow_new(inf: Infer, sink: DiagSink) -> Flow {
     var owned: List<i64> = [];
+    var element: List<i64> = [];
     var i = 0;
-    while i < inf.r.site.len() { owned.push(-1); i = i + 1; }
-    return Flow { inf: inf, sink: sink, owned: owned, moved_at: Map<str, bool>() };
+    while i < inf.r.site.len() {
+        owned.push(-1);
+        element.push(-1);
+        i = i + 1;
+    }
+    return Flow { inf: inf, sink: sink, owned: owned, moved_at: Map<str, bool>(), engine: prog_engine_bindings(inf.p), element: element };
+}
+
+/// The binding hook naming a type the engine holds whose elements it owns,
+/// with the engine operations that give its length and its element at a
+/// position (stdlib/core/builtins/native_calls.pilot).
+pub pure fn owned_elements_hook() -> str => "bind_owned_elements";
+
+/// The length and element-at operations of `t` when values of `t` own their
+/// elements and those elements are owned; else empty.
+pub fn owned_elements(f: Flow, t: i64) -> List<str> {
+    let p = f.inf.p;
+    if !ty_is_named(p.tt, t) || !prog_is_owned(p, element_type(p, t)) { return []; }
+    let name = p.tt.name[t];
+    for row in f.engine {
+        if row.len() == 4 && row[0] == owned_elements_hook() && row[1] == name { return [row[2], row[3]]; }
+    }
+    return [];
+}
+
+/// Whether `n` reads an element that a collection owns (`rs[i]`).
+pub fn is_owned_element(f: Flow, n: i64) -> bool {
+    let s = f.inf.p.s;
+    return n >= 0 && kind(s, n) == nk_index() && owned_elements(f, type_of(f.inf, lhs(s, n))).len() > 0;
+}
+
+/// Whether binding `b` borrows an element a collection owns: `let x = rs[i]`
+/// or the variable of `for x in rs`. It is never dropped itself and cannot
+/// be moved out (OWN004).
+pub fn borrows_element(f: Flow, b: i64) -> bool {
+    if f.element[b] < 0 {
+        let r = f.inf.r;
+        let s = f.inf.p.s;
+        let src = r.source[b];
+        var yes = false;
+        if src >= 0 && r.bind_kind[b] == BindKind::Loop { yes = owned_elements(f, type_of(f.inf, src)).len() > 0; }
+        else if src >= 0 && r.bind_kind[b] == BindKind::Local { yes = kind(s, r.site[b]) == nk_let() && is_owned_element(f, src); }
+        f.element[b] = if yes { 1 } else { 0 };
+    }
+    return f.element[b] == 1;
+}
+
+/// OWN004: an element a collection owns, or a binding borrowing one, used
+/// where it would be moved.
+fn check_element_move(f: Flow, n: i64, what: str) {
+    let p = f.inf.p;
+    let up = p.parents[n];
+    // `let x = rs[i]` borrows the element.
+    if up >= 0 && kind(p.s, up) == nk_let() && is_owned_element(f, n) { return; }
+    if is_move_position(f, n) {
+        sink_error(f.sink, n, "OWN004", f"{what} is owned by its collection and cannot be moved out of it; take it out with `pop` or `remove_at`");
+    }
 }
 
 fn has(xs: List<i64>, b: i64) -> bool {
@@ -237,6 +304,10 @@ fn walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
             sink_error(f.sink, n, "OWN001", f"`{inf.r.name[b]}` is used after it was moved");
             return flow_state(moved, true);
         }
+        if borrows_element(f, b) {
+            check_element_move(f, n, f"`{inf.r.name[b]}` borrows an element that");
+            return flow_state(moved, true);
+        }
         if is_owned_binding(f, b) && is_move_position(f, n) {
             var out = copy(moved);
             add(out, b);
@@ -244,6 +315,7 @@ fn walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
         }
         return flow_state(moved, true);
     }
+    if k == nk_index() && is_owned_element(f, n) { check_element_move(f, n, "this element"); }
     if k == nk_assign() {
         let st = walk(f, rhs(s, n), moved);
         let target = lhs(s, n);

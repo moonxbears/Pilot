@@ -384,7 +384,8 @@ impl PilVirtualMachine {
                 Ok(copy)
             }
             "map_set" => self.put(arg(args, 0, op)?, arg(args, 1, op)?, arg(args, 2, op)?, op),
-            "map_get" => self.get(arg(args, 0, op)?, arg(args, 1, op)?, op),
+            // `list_get` is the name the bindings give a list's element at a position.
+            "map_get" | "list_get" => self.get(arg(args, 0, op)?, arg(args, 1, op)?, op),
             "map_has" => {
                 let slot = self.map_slot(arg(args, 0, op)?, op)?;
                 let k = key_of(arg(args, 1, op)?);

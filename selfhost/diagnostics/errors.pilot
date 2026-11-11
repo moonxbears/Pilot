@@ -148,7 +148,7 @@ pub let ERRORS = [
     },
 
     // -------------------------------------------------------------------------
-    // 4. Perceus Ownership & Borrow Physics (OWN001 - OWN003, ESCAPE001 - ESCAPE003)
+    // 4. Perceus Ownership & Borrow Physics (OWN001 - OWN004, ESCAPE001 - ESCAPE003)
     // -------------------------------------------------------------------------
     ErrorDef {
         code: "OWN001",
@@ -170,6 +170,13 @@ pub let ERRORS = [
         description: "Cannot mutate value or take mutable reference while an active reference view exists",
         category: "PerceusOwnership",
         reference: "Rust E0502",
+    },
+    ErrorDef {
+        code: "OWN004",
+        title: "Move Out of an Owned Element",
+        description: "An element a collection owns, or a binding borrowing one, used where it would be moved; take it out of the collection instead",
+        category: "PerceusOwnership",
+        reference: "Rust E0507",
     },
     ErrorDef {
         code: "ESCAPE001",

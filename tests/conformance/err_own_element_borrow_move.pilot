@@ -1,0 +1,26 @@
+// F7: `let x = rs[i]` borrows the element, and `for x in rs` borrows each
+// one; neither binding owns it, so moving it (returning it, or passing it to
+// a parameter that takes ownership) is OWN004.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn consume(r: Res) {
+    print(f"consume {r.name}");
+}
+
+fn first_of(rs: List<Res>) -> Res {
+    let x = rs[0];
+    return x;
+}
+
+fn main() {
+    let rs: List<Res> = [Res { name: "a" }];
+    for r in rs {
+        consume(r);
+    }
+}
