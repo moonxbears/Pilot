@@ -1,0 +1,13 @@
+// F6 benchmark: building a string by concatenation.
+// "0,1,...,19999," has 10*1 + 90*2 + 900*3 + 9000*4 + 10000*5 = 88,890
+// digits and 20,000 commas: 108,890 bytes.
+fn main() {
+    var s = "";
+    var i = 0;
+    while i < 20000 {
+        s = s + f"{i},";
+        i = i + 1;
+    }
+    print(s.len());
+    print(s.slice(0, 10));
+}

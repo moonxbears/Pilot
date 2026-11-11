@@ -10,9 +10,18 @@
 // wrap as the seed's do instead of overflowing (undefined in C); shift
 // counts are taken modulo the width; division and remainder go through
 // helpers that stop the program on a zero divisor and wrap `MIN / -1`.
-// Booleans are `bool`, floats `double` / `float`. Strings appear only as
-// literals passed to `print`; records and other values without a C type
-// stop at the representation seam. `print` shows values as the seed does.
+// Booleans are `bool`, floats `double` / `float`. `print` shows values as
+// the seed does.
+//
+// C carries every other value (strings, lists, maps, records, function
+// values, values of unknown type) as the runtime's dynamic `pilot_val`
+// (runtime/c/pilot_rt.h), converting at each boundary with a scalar
+// (`represent`); a function value is called through a wrapper taking its
+// arguments as an array. C++ has no dynamic values: such a value stops at
+// the representation seam.
+//
+// Blocks are labels and branches are `goto`s, so the C compiler sees the
+// program's own control flow.
 pub lvl(0) pkg Pilot.SelfHost.Transpile.CFamily;
 
 use selfhost.ir.model.*;
@@ -23,7 +32,12 @@ pub struct CFamilyDialect : ISourceDialect {
     pub cpp: bool;
 
     pub fn language() -> str => if .cpp { "C++" } else { "C" };
-    pub fn typed() -> bool => true;
+    /// Whether values without a C scalar type are the runtime's dynamic
+    /// values (C) rather than unsupported (C++).
+    [StandIn("emit.c_dynamic_values", "strings, lists, maps, struct values and function values laid out by their physics ([Layout] structs held in place, { ptr, len, cap } buffers, a code pointer and an environment)", "the C backend carries every value that is not a number or a boolean as one tagged 16-byte runtime value (pilot_val): a struct value is a heap-allocated C struct of its fields in their C types (pilot_r<layout>) reached through that value rather than held in place, and strings, lists, maps, variants, tuples and function values are the runtime's own dynamic values; checked at run time where the IR's types say scalar", "F6")]
+    pub fn carries_dynamic() -> bool => !self.cpp;
+    pub fn typed() -> bool => .cpp;
+    pub fn widens_mixed_kinds() -> bool => self.carries_dynamic();
     pub fn reserved() -> List<str> {
         var out: List<str> = [
             "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum",
@@ -54,6 +68,10 @@ pub struct CFamilyDialect : ISourceDialect {
             "fma", "fpclassify", "isfinite", "isinf", "isnan", "isnormal", "signbit", "isgreater",
             "isgreaterequal", "isless", "islessequal", "islessgreater", "isunordered", "imaxabs", "imaxdiv",
             "strtoimax", "strtoumax", "NAN", "INFINITY", "HUGE_VAL", "EOF", "NULL", "FILE",
+            // runtime/c/pilot_rt.h; its other names start with `pilot_`.
+            "PILOT_RT_H", "PILOT_NEGATIVE_EXPONENT", "PILOT_V_NULL", "PILOT_V_LIT", "PILOT_V_NULL_TAG",
+            "PILOT_V_BOOL", "PILOT_V_INT", "PILOT_V_UINT", "PILOT_V_FLOAT", "PILOT_V_STR", "PILOT_V_LIST",
+            "PILOT_V_MAP", "trunc", "memchr", "memmove", "calloc",
         ] { out.push(k); }
         if .cpp {
             for k in [
@@ -76,93 +94,29 @@ pub struct CFamilyDialect : ISourceDialect {
             let base = if is_signed(p) { "int" } else { "uint" };
             return f"{base}{p.bit_width}_t";
         }
+        if is_int(p) || is_float(p) { return none; }
+        if .carries_dynamic() { return "pilot_val"; }
         if p.layout_id == 0 { return "void"; }
         return none;
     }
     pub fn prelude() -> List<str> => [
-        "#include <inttypes.h>",
-        "#include <math.h>",
-        "#include <stdbool.h>",
-        "#include <stdint.h>",
-        "#include <stdio.h>",
-        "#include <stdlib.h>",
-        "#include <string.h>",
-        "",
         "#define PILOT_NEGATIVE_EXPONENT " + self.str_lit(negative_exponent_seam()),
-        "static inline void pilot_trap(const char *message) {",
-        "    fprintf(stderr, \"runtime error: %s\\n\", message);",
-        "    exit(1);",
-        "}",
-        "static inline uint64_t pilot_ipow(int64_t a, int64_t b) {",
-        "    if (b < 0) pilot_trap(PILOT_NEGATIVE_EXPONENT);",
-        "    uint64_t x = (uint64_t)a, r = 1, n = (uint64_t)b > 4294967295u ? 4294967295u : (uint64_t)b;",
-        "    while (n) { if (n & 1) r *= x; x *= x; n >>= 1; }",
-        "    return r;",
-        "}",
-        "static inline int64_t pilot_sdiv(int64_t a, int64_t b) {",
-        "    if (b == 0) pilot_trap(\"integer division by zero\");",
-        "    if (b == -1) return (int64_t)(0u - (uint64_t)a);",
-        "    return a / b;",
-        "}",
-        "static inline int64_t pilot_srem(int64_t a, int64_t b) {",
-        "    if (b == 0) pilot_trap(\"integer division by zero\");",
-        "    if (b == -1) return 0;",
-        "    return a % b;",
-        "}",
-        "static inline uint64_t pilot_udiv(uint64_t a, uint64_t b) {",
-        "    if (b == 0) pilot_trap(\"integer division by zero\");",
-        "    return a / b;",
-        "}",
-        "static inline uint64_t pilot_urem(uint64_t a, uint64_t b) {",
-        "    if (b == 0) pilot_trap(\"integer division by zero\");",
-        "    return a % b;",
-        "}",
-        "static inline void pilot_put_i64(FILE *f, int64_t x) { fprintf(f, \"%\" PRId64, x); }",
-        "static inline void pilot_put_u64(FILE *f, uint64_t x) { fprintf(f, \"%\" PRIu64, x); }",
-        "static inline void pilot_put_bool(FILE *f, bool x) { fputs(x ? \"true\" : \"false\", f); }",
-        "static inline void pilot_put_str(FILE *f, const char *x) { fputs(x, f); }",
-        "/* The shortest digits that read back as x, written without an exponent. */",
-        "static inline void pilot_put_f64(FILE *f, double x) {",
-        "    if (x != x) { fputs(\"NaN\", f); return; }",
-        "    if (isinf(x)) { fputs(x > 0 ? \"inf\" : \"-inf\", f); return; }",
-        "    if (x == 0) { fputs(signbit(x) ? \"-0\" : \"0\", f); return; }",
-        "    char buf[64];",
-        "    for (int p = 1; p <= 17; p++) {",
-        "        snprintf(buf, sizeof buf, \"%.*e\", p - 1, x);",
-        "        if (strtod(buf, NULL) == x) break;",
-        "    }",
-        "    char digits[32];",
-        "    int nd = 0;",
-        "    const char *s = buf;",
-        "    if (*s == '-') { fputc('-', f); s++; }",
-        "    while (*s && *s != 'e') { if (*s != '.') digits[nd++] = *s; s++; }",
-        "    int point = atoi(s + 1) + 1;",
-        "    while (nd > 1 && digits[nd - 1] == '0') nd--;",
-        "    if (point <= 0) {",
-        "        fputs(\"0.\", f);",
-        "        for (int i = 0; i < -point; i++) fputc('0', f);",
-        "        fwrite(digits, 1, nd, f);",
-        "    } else if (point >= nd) {",
-        "        fwrite(digits, 1, nd, f);",
-        "        for (int i = nd; i < point; i++) fputc('0', f);",
-        "    } else {",
-        "        fwrite(digits, 1, point, f);",
-        "        fputc('.', f);",
-        "        fwrite(digits + point, 1, nd - point, f);",
-        "    }",
-        "}",
+        "#include \"pilot_rt.h\"",
         "",
     ];
     pub fn global_decl(name: str, p: IrTypePhysics) -> str? {
         guard some t = self.type_name(p) else { return none; };
         if t == "void" { return none; }
-        return f"static {t} {name} = {self.zero(p)}; static int {name}_set = 0;";
+        let init = if t == "pilot_val" { "{0}" } else { self.zero(p) };
+        return f"static {t} {name} = {init}; static int {name}_set = 0;";
     }
     pub fn global_read(name: str, message: str) -> str => f"({name}_set ? {name} : (pilot_trap({message}), {name}))";
     pub fn global_write(name: str, v: str) -> str => f"{name} = {v}; {name}_set = 1;";
-    pub fn truth(v: str) -> str? => none;
+    pub fn truth(v: str) -> str? => if .carries_dynamic() { f"pilot_v_truth({v})" } else { none };
     pub fn module_open(protos: List<str>) -> List<str> {
         var out: List<str> = [];
+        // Defined after the functions when the module calls function values.
+        if self.carries_dynamic() { out.push("static pilot_val pilot_fn_call(int64_t index, int32_t argc, pilot_val *argv);"); }
         for p in protos { out.push(p); }
         out.push("");
         return out;
@@ -170,12 +124,19 @@ pub struct CFamilyDialect : ISourceDialect {
     pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str =>
         self.signature(name, params, phys, ret) + ";";
     pub fn module_close(entry: str, has_code: bool) -> List<str> {
+        let head = if .carries_dynamic() { "int main(int argc, char **argv) { pilot_rt_init(argc, argv); " } else { "int main(void) { " };
+        // A module with no entry point is a library: whoever links it
+        // writes `main`.
         if entry == "" { return []; }
-        if has_code { return [f"int main(void) " + "{ " + f"return (int){entry}(); " + "}"]; }
-        return ["int main(void) " + "{ " + f"{entry}(); return 0; " + "}"];
+        if has_code { return [head + f"return (int){entry}(); " + "}"]; }
+        return [head + f"{entry}(); return 0; " + "}"];
     }
-    pub fn fn_open(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str =>
-        self.signature(name, params, phys, ret) + " {";
+    /// Opens the function; a C function names its result type
+    /// `pilot_ret_t`, for a return that carries no value.
+    pub fn fn_open(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str {
+        let open = self.signature(name, params, phys, ret) + " {";
+        return if .carries_dynamic() { open + f" typedef {self.c_type(ret)} pilot_ret_t;" } else { open };
+    }
     pub fn fn_close() -> str => "}";
     pub fn fn_globals(globals: List<str>) -> List<str> => [];
     pub fn param_prologue(name: str, p: IrTypePhysics) -> List<str> => [];
@@ -188,17 +149,19 @@ pub struct CFamilyDialect : ISourceDialect {
         }
         return out;
     }
-    pub fn zero(p: IrTypePhysics) -> str => if is_bool(p) { "false" } else if is_float(p) { "0.0" } else { "0" };
-    pub fn unit_value() -> str? => none;
-    pub fn state_decl(name: str) -> str => f"int {name} = 0;";
-    pub fn dispatch_open() -> str => "for (;;) {";
-    pub fn dispatch_close() -> str => "}";
-    pub fn case_open(state: str, b: i64, first: bool) -> str => (if first { "" } else { "} else " }) + f"if ({state} == {b}) " + "{";
+    pub fn zero(p: IrTypePhysics) -> str =>
+        if is_bool(p) { "false" } else if is_float(p) { "0.0" } else if is_int(p) || !self.carries_dynamic() { "0" } else { "PILOT_V_NULL" };
+    pub fn unit_value() -> str? => if .carries_dynamic() { "PILOT_V_NULL" } else { none };
+    // Each block is a label; going to a block is a `goto` (see `assign`).
+    pub fn state_decl(name: str) -> str => "";
+    pub fn dispatch_open() -> str => "";
+    pub fn dispatch_close() -> str => "";
+    pub fn case_open(state: str, b: i64, first: bool) -> str => (if first { "" } else { "} " }) + f"pilot_b{b}: " + "{";
     pub fn cases_close() -> str => "}";
     pub fn if_open(cond: str) -> str => f"if ({cond}) " + "{";
     pub fn else_line() -> str => "} else {";
     pub fn if_close() -> str => "}";
-    pub fn assign(lhs: str, rhs: str) -> str => f"{lhs} = {rhs};";
+    pub fn assign(lhs: str, rhs: str) -> str => if lhs == state_name() { f"goto pilot_b{rhs};" } else { f"{lhs} = {rhs};" };
     pub fn parallel_assign(lhs: List<str>, rhs: List<str>, phys: List<IrTypePhysics>) -> List<str> {
         var text = "{ ";
         var i = 0;
@@ -214,9 +177,11 @@ pub struct CFamilyDialect : ISourceDialect {
         return [text + "}"];
     }
     pub fn expr_stmt(e: str) -> str => e + ";";
-    pub fn ret(e: str) -> str => if e == "" { "return;" } else { f"return {e};" };
+    pub fn ret(e: str) -> str => if e != "" { f"return {e};" } else if .carries_dynamic() { "return (pilot_ret_t){0};" } else { "return;" };
     pub fn trap(message: str) -> str => f"pilot_trap({self.str_lit(message)});";
     pub fn int_lit(digits: str, p: IrTypePhysics) -> str? {
+        // A constant of a type that is not an integer (an enum's tag).
+        if self.carries_dynamic() && !scalar(p) { return f"pilot_v_int(INT64_C({digits}))"; }
         guard some t = self.type_name(p) else { return none; };
         if is_signed(p) {
             let v = if digits == "-9223372036854775808" { "INT64_MIN" } else { f"INT64_C({digits})" };
@@ -226,6 +191,10 @@ pub struct CFamilyDialect : ISourceDialect {
     }
     pub fn bool_lit(b: bool) -> str => if b { "true" } else { "false" };
     pub fn float_lit(text: str, p: IrTypePhysics) -> str? {
+        if self.carries_dynamic() && !scalar(p) {
+            guard some x = self.float_lit(text, ir_physics_new(1, reg_class_simd_float(), 64, 3, 0)) else { return none; };
+            return f"pilot_v_float({x})";
+        }
         let suffix = if p.bit_width == 32 { "f" } else { "" };
         if p.bit_width != 32 && p.bit_width != 64 { return none; }
         if text == "NaN" { return "NAN"; }
@@ -235,6 +204,17 @@ pub struct CFamilyDialect : ISourceDialect {
     }
     pub fn str_lit(raw: str) -> str => escaped(raw, (b) => "\\" + octal3(b));
     pub fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str? {
+        if .carries_dynamic() && !(scalar(pa) && scalar(pb) && scalar(p)) {
+            // At least one side's kind is known only at run time.
+            let x = self.box(a, pa);
+            let y = self.box(b, pb);
+            let sym = dynamic_operator(op);
+            if sym == "" { return none; }
+            let e = if op == "add" { f"pilot_v_add({x}, {y})" }
+                else if op == "sub" || op == "mul" || op == "div" || op == "rem" { f"pilot_v_arith('{sym}', {x}, {y})" }
+                else { f"pilot_v_bits('{sym}', {x}, {y})" };
+            return self.unbox(e, p);
+        }
         if is_float(p) {
             if op == "add" { return f"({a} + {b})"; }
             if op == "sub" { return f"({a} - {b})"; }
@@ -265,8 +245,27 @@ pub struct CFamilyDialect : ISourceDialect {
         if op == "rem" { return f"(({t})pilot_{s}rem({a}, {b}))"; }
         return none;
     }
-    pub fn compare(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {cmp_symbol(pred)} {b})";
+    pub fn compare(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? {
+        if .carries_dynamic() && !scalar(p) {
+            // Both sides are dynamic values (`compared` in source.pilot).
+            if pred == 0 { return f"pilot_v_eq({a}, {b})"; }
+            if pred == 1 { return f"(!pilot_v_eq({a}, {b}))"; }
+            if pred == 2 { return f"pilot_v_lt({a}, {b})"; }
+            if pred == 3 { return f"pilot_v_le({a}, {b})"; }
+            if pred == 4 { return f"pilot_v_lt({b}, {a})"; }
+            return f"pilot_v_le({b}, {a})";
+        }
+        return f"({a} {cmp_symbol(pred)} {b})";
+    }
     pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
+        if .carries_dynamic() && !(scalar(from) && scalar(to)) {
+            if !scalar(to) { return self.box(v, from); }
+            // A dynamic value converted as the seed converts it.
+            if is_bool(to) { return f"pilot_v_to_bool({v})"; }
+            guard some t = self.type_name(to) else { return none; };
+            if is_float(to) { return f"(({t})pilot_v_to_f64({v}))"; }
+            return f"(({t})pilot_v_to_int({v}, {to.bit_width}, {is_signed(to)}))";
+        }
         if is_bool(to) { return if is_bool(from) { v } else { f"(({v}) != 0)" }; }
         guard some t = self.type_name(to) else { return none; };
         if self.type_name(from) == none { return none; }
@@ -274,40 +273,187 @@ pub struct CFamilyDialect : ISourceDialect {
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
     pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
-        if name == "num_pow" {
+        if name == "num_pow" && scalar(ret) && scalar(phys[0]) && scalar(phys[1]) {
             guard some t = self.type_name(ret) else { return none; };
             if is_float(ret) { return f"(({t})pow((double)({args[0]}), (double)({args[1]})))"; }
             if !is_int(ret) || !is_int(phys[0]) || !is_int(phys[1]) { return none; }
             return f"(({t})pilot_ipow((int64_t)({args[0]}), (int64_t)({args[1]})))";
         }
         let stream = if name == "rt_print" { "stdout" } else if name == "rt_eprint" { "stderr" } else { "" };
-        if stream == "" { return none; }
+        if stream == "" {
+            if !self.carries_dynamic() { return none; }
+            return self.engine_op(name, args, phys, ret);
+        }
         var parts: List<str> = [];
         var i = 0;
         while i < args.len() {
             if i > 0 { parts.push(f"fputc(' ', {stream})"); }
             let p = phys[i];
-            let put = if literal[i] { "pilot_put_str" } else if is_bool(p) { "pilot_put_bool" } else if is_float(p) { "pilot_put_f64" }
-                else if is_int(p) && is_signed(p) { "pilot_put_i64" } else if is_int(p) { "pilot_put_u64" } else { "" };
+            let put = if .carries_dynamic() && !scalar(p) { "pilot_v_put" } else if literal[i] { "pilot_put_str" } else if is_bool(p) { "pilot_put_bool" }
+                else if is_float(p) { "pilot_put_f64" } else if is_int(p) && is_signed(p) { "pilot_put_i64" } else if is_int(p) { "pilot_put_u64" } else { "" };
             if put == "" { return none; }
             parts.push(f"{put}({stream}, {args[i]})");
             i = i + 1;
         }
         parts.push(f"fputc('\\n', {stream})");
+        if .carries_dynamic() { parts.push(self.zero(ret)); }
         return "(" + joined(parts) + ")";
     }
-    pub fn call_value(fv: str, args: List<str>) -> str? => none;
-    pub fn function_table(names: List<str>) -> List<str> => [];
-    pub fn make_record(values: List<str>) -> str? => none;
-    pub fn get_field(rec: str, i: i64) -> str? => none;
-    pub fn set_field(rec: str, i: i64, v: str) -> str? => none;
+    /// Engine operation `name` through its runtime helper `pilot_<name>`,
+    /// which takes and gives dynamic values; none for an operation the
+    /// runtime does not have, or a wrong number of arguments.
+    pub fn engine_op(name: str, args: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str? {
+        let ops = engine_arity();
+        if !ops.has(name) { return none; }
+        let arity = ops.get(name);
+        let most = arity % 10;
+        let least = arity / 10;
+        if args.len() < least || args.len() > most { return none; }
+        var boxed: List<str> = [];
+        var i = 0;
+        while i < args.len() {
+            boxed.push(self.box(args[i], phys[i]));
+            i = i + 1;
+        }
+        if name == "rt_assert" || name == "seam_open" {
+            // The note is optional.
+            let note = if boxed.len() > 1 { boxed[1] } else { "PILOT_V_NULL" };
+            return self.unbox(f"pilot_{name}({boxed[0]}, {boxed.len() > 1}, {note})", ret);
+        }
+        while boxed.len() < most { boxed.push("PILOT_V_NULL"); }
+        return self.unbox(f"pilot_{name}({joined(boxed)})", ret);
+    }
+    pub fn call_value(fv: str, args: List<str>) -> str? {
+        if !self.carries_dynamic() { return none; }
+        if args.len() == 0 { return f"pilot_call_value(pilot_fn_call, {fv}, 0, NULL)"; }
+        return f"pilot_call_value(pilot_fn_call, {fv}, {args.len()}, (pilot_val[])" + "{" + joined(args) + "})";
+    }
+    pub fn function_table(names: List<str>) -> List<str> {
+        if !self.carries_dynamic() { return []; }
+        var entries: List<str> = [];
+        for n in names { entries.push(value_entry_name(n)); }
+        return [
+            "static const pilot_v_fn pilot_fns[] = { " + joined(entries) + " };",
+            "static pilot_val pilot_fn_call(int64_t index, int32_t argc, pilot_val *argv) {",
+            f"    if (index < 0 || index >= {names.len()}) pilot_trap(\"call of an unknown function\");",
+            "    return pilot_fns[index](argc, argv);",
+            "}",
+        ];
+    }
+    pub fn value_entry(name: str, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> List<str> {
+        if !self.carries_dynamic() { return []; }
+        var args: List<str> = [];
+        var i = 0;
+        while i < phys.len() {
+            args.push(self.unbox(f"argv[{i}]", phys[i]));
+            i = i + 1;
+        }
+        return [
+            f"static pilot_val {value_entry_name(name)}(int32_t argc, pilot_val *argv) " + "{",
+            f"    pilot_arity(argc, {phys.len()});",
+            "    return " + self.box(f"{name}({joined(args)})", ret) + ";",
+            "}",
+        ];
+    }
+    pub fn make_record(values: List<str>) -> str? {
+        if !self.carries_dynamic() { return none; }
+        if values.len() == 0 { return "pilot_v_record(0, NULL)"; }
+        return f"pilot_v_record({values.len()}, (pilot_val[])" + "{" + joined(values) + "})";
+    }
+    /// Each record layout as a C struct `pilot_r<layout>`: a header holding
+    /// the layout id, then the fields in their C types. Per layout, a
+    /// constructor `pilot_mk<layout>`, a typed reader and writer per field
+    /// (`pilot_get<layout>_<i>`, `pilot_set<layout>_<i>`) and the dynamic
+    /// reader and writer the runtime's generic operations use, listed in
+    /// `pilot_rt_layouts`. A typed reader or writer given a value that is not
+    /// of its layout goes through the generic path.
+    pub fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>) -> List<str> {
+        if !self.carries_dynamic() || layouts.len() == 0 { return []; }
+        var out: List<str> = [];
+        var table: List<str> = [];
+        var k = 0;
+        while k < layouts.len() {
+            let l = layouts[k];
+            let fs = fields[k];
+            let t = f"pilot_r{l}";
+            let mine = f"(v.tag == PILOT_V_REC && v.as.r->layout == {l})";
+            var members = "pilot_v_rec h;";
+            var params: List<str> = [];
+            var sets = "";
+            var gets = "";
+            var puts = "";
+            var i = 0;
+            while i < fs.len() {
+                let ct = self.c_type(fs[i]);
+                members = members + f" {ct} f{i};";
+                params.push(f"{ct} f{i}");
+                sets = sets + f" r->f{i} = f{i};";
+                gets = gets + f" case {i}: return " + self.box(f"r->f{i}", fs[i]) + ";";
+                puts = puts + f" case {i}: r->f{i} = " + self.unbox("x", fs[i]) + "; return;";
+                i = i + 1;
+            }
+            out.push(f"typedef struct {t} " + "{ " + members + " } " + t + ";");
+            let plist = if params.len() == 0 { "void" } else { joined(params) };
+            out.push(f"static pilot_val pilot_mk{l}({plist}) " + "{ " + f"{t} *r = ({t} *)pilot_alloc(sizeof({t})); r->h.layout = {l};" + sets + " return pilot_v_rec_val(&r->h); }");
+            out.push(f"static pilot_val pilot_rget{l}(pilot_val v, int32_t i) " + "{ " + f"{t} *r = ({t} *)v.as.r; (void)r; switch (i) " + "{" + gets + " default: return PILOT_V_NULL; } }");
+            out.push(f"static void pilot_rset{l}(pilot_val v, int32_t i, pilot_val x) " + "{ " + f"{t} *r = ({t} *)v.as.r; (void)r; (void)x; switch (i) " + "{" + puts + " default: return; } }");
+            i = 0;
+            while i < fs.len() {
+                let ct = self.c_type(fs[i]);
+                out.push(f"static inline {ct} pilot_get{l}_{i}(pilot_val v) " + "{ " + f"if {mine} return (({t} *)v.as.r)->f{i}; return " + self.unbox(f"pilot_v_field(v, {i})", fs[i]) + "; }");
+                out.push(f"static inline void pilot_set{l}_{i}(pilot_val v, {ct} x) " + "{ " + f"if {mine} " + "{ " + f"(({t} *)v.as.r)->f{i} = x; return; " + "} " + f"pilot_v_set_field(v, {i}, " + self.box("x", fs[i]) + "); }");
+                i = i + 1;
+            }
+            table.push(f"[{l}] = " + "{ " + f"{fs.len()}, pilot_rget{l}, pilot_rset{l}" + " }");
+            k = k + 1;
+        }
+        out.push("static const pilot_v_layout pilot_layout_table[] = { " + joined(table) + " };");
+        out.push("static const pilot_v_layout *pilot_rt_layouts = pilot_layout_table;");
+        out.push("");
+        return out;
+    }
+    pub fn typed_record(layout: i64, values: List<str>) -> str? => if .carries_dynamic() { f"pilot_mk{layout}({joined(values)})" } else { none };
+    pub fn typed_field(layout: i64, rec: str, i: i64) -> str? => if .carries_dynamic() { f"pilot_get{layout}_{i}({rec})" } else { none };
+    pub fn typed_set_field(layout: i64, rec: str, i: i64, v: str) -> str? => if .carries_dynamic() { f"pilot_set{layout}_{i}({rec}, {v});" } else { none };
+    pub fn get_field(rec: str, i: i64) -> str? => if .carries_dynamic() { f"pilot_v_field({rec}, {i})" } else { none };
+    pub fn set_field(rec: str, i: i64, v: str) -> str? => if .carries_dynamic() { f"pilot_v_set_field({rec}, {i}, {v});" } else { none };
+    pub fn represent(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str {
+        if !self.carries_dynamic() { return v; }
+        if scalar(from) && !scalar(to) { return self.box(v, from); }
+        if !scalar(from) && scalar(to) { return self.unbox(v, to); }
+        if scalar(from) && scalar(to) && self.type_name(from) != self.type_name(to) {
+            guard some t = self.type_name(to) else { return v; };
+            return f"(({t})({v}))";
+        }
+        return v;
+    }
+    [StandIn("emit.c_string_length", "a string is (ptr<u8>, usize)", "the C runtime keeps a string's length in 32 bits; a longer string stops with a runtime error", "F6")]
+    pub fn text_value(lit: str) -> str => if .carries_dynamic() { f"PILOT_V_LIT({lit})" } else { lit };
+
+    /// Scalar `v` of physics `p` as a dynamic value; a dynamic `v` as it is.
+    pub fn box(v: str, p: IrTypePhysics) -> str {
+        if is_bool(p) { return f"pilot_v_bool({v})"; }
+        if is_float(p) { return f"pilot_v_float((double)({v}))"; }
+        if is_int(p) && is_signed(p) { return f"pilot_v_int((int64_t)({v}))"; }
+        if is_int(p) { return f"pilot_v_uint((uint64_t)({v}))"; }
+        return v;
+    }
+    /// Dynamic value `v` as a value of physics `p`: a C scalar when `p` is
+    /// one, checked to be of that kind; `v` itself otherwise.
+    pub fn unbox(v: str, p: IrTypePhysics) -> str {
+        if !scalar(p) { return v; }
+        if is_bool(p) { return f"pilot_v_truth({v})"; }
+        let t = self.c_type(p);
+        if is_float(p) { return f"(({t})pilot_v_as_f64({v}))"; }
+        return f"(({t})pilot_v_as_i64({v}))";
+    }
 
     /// `ret name(params)` with the C types of `phys`.
     pub fn signature(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str {
         var ps: List<str> = [];
         var i = 0;
         while i < params.len() {
-            if phys[i].layout_id != 0 { ps.push(f"{self.c_type(phys[i])} {params[i]}"); }
+            if phys[i].layout_id != 0 || .carries_dynamic() { ps.push(f"{self.c_type(phys[i])} {params[i]}"); }
             i = i + 1;
         }
         let list = if ps.len() == 0 { "void" } else { joined(ps) };
@@ -316,6 +462,35 @@ pub struct CFamilyDialect : ISourceDialect {
 
     /// The C type of `p`; `void` when it has none (the caller checked).
     pub fn c_type(p: IrTypePhysics) -> str => self.type_name(p) ?? "void";
+}
+
+/// Whether `p` is a C scalar: a number or a boolean.
+fn scalar(p: IrTypePhysics) -> bool => is_int(p) || is_float(p) || is_bool(p);
+
+/// The character the runtime's `pilot_v_arith` / `pilot_v_bits` name binary
+/// operator `op` by (`<` and `>` for the shifts), or "".
+fn dynamic_operator(op: str) -> str {
+    for pair in [["add", "+"], ["sub", "-"], ["mul", "*"], ["div", "/"], ["rem", "%"], ["and", "&"], ["or", "|"], ["xor", "^"], ["shl", "<"], ["shr", ">"]] {
+        if pair[0] == op { return pair[1]; }
+    }
+    return "";
+}
+
+/// The wrapper through which a function value calls function `name`.
+fn value_entry_name(name: str) -> str => "pilot_fv_" + name;
+
+/// The engine operations the C runtime has, by name: the fewest arguments
+/// times 10 plus the most.
+fn engine_arity() -> Map<str, i64> {
+    let ops = Map<str, i64>();
+    for name in ["list_new", "map_new", "proc_args", "stdin_read_line"] { ops.set(name, 0); }
+    for name in ["is_null", "to_str", "list_pop", "str_len"] { ops.set(name, 11); }
+    for name in ["list_get", "map_get", "map_has", "map_remove", "list_push", "num_pow", "str_byte_at", "list_remove_at"] { ops.set(name, 22); }
+    for name in ["list_set", "map_set", "str_slice"] { ops.set(name, 33); }
+    ops.set("list_extend", 23);
+    ops.set("rt_assert", 12);
+    ops.set("seam_open", 12);
+    return ops;
 }
 
 /// `b` as three octal digits, for a `\ooo` escape.

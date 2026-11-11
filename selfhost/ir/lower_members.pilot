@@ -120,6 +120,17 @@ pub fn field_physics(lw: Lowerer, t: i64, name: str) -> IrTypePhysics {
     return layout_unknown(lw.ls);
 }
 
+/// Records in the module that layout `phy` (of struct type `t`) holds its
+/// physical fields with their layouts, so a backend can lay it out.
+pub fn note_record(lw: Lowerer, t: i64, phy: IrTypePhysics) {
+    let p = lw.inf.p;
+    if phy.layout_id == 0 || !ty_is_named(p.tt, t) || kind(p.s, ty_decl(p.tt, t)) != nk_struct() { return; }
+    if some _known = ir_record_of(lw.ls.m, phy.layout_id) { return; }
+    var fields: List<u32> = [];
+    for f in fields_of(lw, t) { fields.push(field_physics(lw, t, f.canonical_name).layout_id); }
+    lw.ls.m.records.push(IrRecord { layout: phy.layout_id, fields: fields });
+}
+
 /// The value of an omitted field: its default, else zero (as the seed
 /// zero-fills it) for a register, else `undef`.
 pub fn field_default_value(lw: Lowerer, t: i64, name: str, n: i64) -> u32 {
@@ -161,7 +172,9 @@ pub fn lower_struct_literal(lw: Lowerer, n: i64, map: i64) -> u32 {
             args.push(field_default_value(lw, t, name, n));
         }
     }
-    return emit(lw, op_construct_aggregate(), 0, physics_of(lw, n), args, n);
+    let phy = physics_of(lw, n);
+    note_record(lw, t, phy);
+    return emit(lw, op_construct_aggregate(), 0, phy, args, n);
 }
 
 pub fn is_implied(lw: Lowerer, n: i64) -> bool {
@@ -737,7 +750,9 @@ pub fn lower_construction(lw: Lowerer, n: i64, t: i64) -> u32 {
         }
         i = i + 1;
     }
-    let rec = emit(lw, op_construct_aggregate(), 0, layout_of(lw.ls, t), vals, n);
+    let phy = layout_of(lw.ls, t);
+    note_record(lw, t, phy);
+    let rec = emit(lw, op_construct_aggregate(), 0, phy, vals, n);
     if ctor < 0 { return rec; }
     let params = decl_params(s, ctor);
     let placed = arrange_args(lw, params, 0, arg_nodes);

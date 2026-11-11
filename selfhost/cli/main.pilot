@@ -24,11 +24,11 @@ pub fn default_command_registry() -> CommandRegistry {
 
     let cmd_build = spec_new_command(
         "build", "", "Run & Build",
-        "Compile Pilot program to Native/LLVM/C/WASM/GPU",
-        "pilot build app.pilot --target wasm --release -o app.wasm"
+        "Compile a Pilot program to a native executable through C11",
+        "pilot build app.pilot -o app"
     );
-    spec_command_add_flag(cmd_build, spec_new_flag("target", "t", 5, "native", "", "native,c,llvm,wasm,gpu,asm", false, false, "Compilation target backend"));
-    spec_command_add_flag(cmd_build, spec_new_flag("release", "r", 0, "false", "", "", false, false, "Optimize binary for release mode"));
+    spec_command_add_flag(cmd_build, spec_new_flag("target", "t", 5, "native", "", "native,c,llvm,wasm,gpu,asm", false, false, "Backend: native (an executable) or c (the C source); the others are not built yet"));
+    spec_command_add_flag(cmd_build, spec_new_flag("release", "r", 0, "false", "", "", false, false, "Compile the C at -O3 instead of -O2"));
     spec_command_add_flag(cmd_build, spec_new_flag("output", "o", 4, "", "", "", false, false, "Output destination path"));
     let _ = spec_registry_register(reg, cmd_build);
 

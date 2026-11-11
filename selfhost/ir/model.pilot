@@ -348,6 +348,15 @@ pub struct IrLayout : IValue {
     pub physics: IrTypePhysics;
 }
 
+/// The fields of a record layout: the layout of each field, in the order
+/// `construct_aggregate` gives them and `extract_field` numbers them. Only a
+/// struct type's layout has one; other aggregates (variants, tuples,
+/// closures) are not described.
+pub struct IrRecord : IObject {
+    pub layout: u32;
+    pub fields: List<u32>;
+}
+
 /// A module global: storage that lives as long as the program, named for
 /// printing, holding a value of `physics`.
 pub struct IrGlobal : IValue {
@@ -371,10 +380,20 @@ pub struct IrModule : IObject {
     pub intrinsics: List<str>;
     /// `global_addr` subops.
     pub globals:    List<IrGlobal>;
+    /// The record layouts, one entry per struct layout the program builds.
+    pub records:    List<IrRecord>;
 }
 
 pub fn ir_module_new() -> IrModule {
-    return IrModule { layouts: [], functions: [], ints: [], floats: [], strings: [], intrinsics: [], globals: [] };
+    return IrModule { layouts: [], functions: [], ints: [], floats: [], strings: [], intrinsics: [], globals: [], records: [] };
+}
+
+/// The fields of record layout `layout`, or none when it is not a record.
+pub fn ir_record_of(m: IrModule, layout: u32) -> IrRecord? {
+    for r in m.records {
+        if r.layout == layout { return r; }
+    }
+    return none;
 }
 
 pub fn ir_function_new(name: str, ret: IrTypePhysics) -> IrFunction {

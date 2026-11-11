@@ -1,0 +1,18 @@
+// F6 benchmark: inserting and reading string keys in a map.
+// The reads sum 0 + 1 + ... + 199,999 = 199,999 * 200,000 / 2 = 19,999,900,000.
+fn main() {
+    let m = Map<str, i64>();
+    var i = 0;
+    while i < 200000 {
+        m.set(f"k{i}", i);
+        i = i + 1;
+    }
+    var total = 0;
+    i = 0;
+    while i < 200000 {
+        total = total + m[f"k{i}"];
+        i = i + 1;
+    }
+    print(m.len());
+    print(total);
+}

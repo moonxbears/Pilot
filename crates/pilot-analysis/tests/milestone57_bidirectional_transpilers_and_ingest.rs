@@ -357,7 +357,9 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
             format!("#include <stdio.h>\n{}\nint main(void) {{ printf(\"%lld\\n\", (long long){}({}, {})); return 0; }}\n", c_code, fn_entry, arg_a, arg_b),
         )
         .unwrap();
-        let c_val = compile_and_run(trial, "clang", "clang", &["-std=c11"], &file("c"), &bin("c"), &c_code);
+        // The emitted C and C++ include the runtime header (F6).
+        let rt = format!("-I{}", ws_root().join("runtime/c").display());
+        let c_val = compile_and_run(trial, "clang", "clang", &["-std=c11", &rt, "-lm"], &file("c"), &bin("c"), &c_code);
         assert_eq!(c_val, expected, "Trial {}: Transpiled C output mismatch!", trial);
 
         // 3. C++ (`clang++`)
@@ -367,7 +369,7 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
             format!("#include <iostream>\n{}\nint main() {{ std::cout << {}({}, {}) << \"\\n\"; return 0; }}\n", cpp_code, fn_entry, arg_a, arg_b),
         )
         .unwrap();
-        let cpp_val = compile_and_run(trial, "clang++", "clang++", &["-std=c++17"], &file("cpp"), &bin("cpp"), &cpp_code);
+        let cpp_val = compile_and_run(trial, "clang++", "clang++", &["-std=c++17", &rt], &file("cpp"), &bin("cpp"), &cpp_code);
         assert_eq!(cpp_val, expected, "Trial {}: Transpiled C++ output mismatch!", trial);
 
         // 4. C# (`mcs` + `mono`)

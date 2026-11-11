@@ -17,4 +17,3 @@ pilot-parser = { path = "../pilot-parser" }
 pilot-analysis = { path = "../pilot-analysis" }
 pilot-rt = { path = "../pilot-rt" }
 pilot-vm = { path = "../pilot-vm" }
-pilot-codegen = { path = "../pilot-codegen" }

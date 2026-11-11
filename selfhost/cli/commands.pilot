@@ -243,6 +243,18 @@ pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     return host_program_tool(args[1], files, cli_ir_decls(), f"emit_program({lang}_dialect());");
 }
 
+/// `pilot build <file> [-o out]`: a native executable through C11
+/// (selfhost/cli/native_build.pilot).
+pub fn cmd_build(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+    let args = cli_positionals(p);
+    if args.len == 0 { return usage_error("`pilot build` needs a program file"); }
+    if !File.exists(args[0]) { return usage_error(f"no such file `{args[0]}`"); }
+    let out = parsed_get_str(p, "output", "");
+    let target = parsed_get_str(p, "target", "native");
+    let release = parsed_has_flag(p, "release");
+    return native_build(args[0], if out == "" { default_build_output(args[0]) } else { out }, target, release);
+}
+
 /// Whether `name` is lowercase letters, digits and `_` only.
 fn identifier(name: str) -> str {
     var i = 0;
@@ -350,6 +362,7 @@ pub fn cli_handlers() -> i64 {
     let _ = cli_map_set(h, "bench", cmd_bench);
     let _ = cli_map_set(h, "gate", cmd_gate);
     let _ = cli_map_set(h, "emit", cmd_emit);
+    let _ = cli_map_set(h, "build", cmd_build);
     let _ = cli_map_set(h, "ir", cmd_ir);
     return h;
 }

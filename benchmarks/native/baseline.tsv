@@ -1,0 +1,6 @@
+benchmark	pilot_us	c_us	pilot_over_c
+fib	2706	2751	0.98
+numeric_loop	36801	37274	0.99
+string_build	439465	35670	12.32
+map_workload	72243	42583	1.70
+records	42694	1379	30.96

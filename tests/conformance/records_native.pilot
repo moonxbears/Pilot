@@ -1,0 +1,49 @@
+// F6: records with number, boolean, string and record fields, built,
+// read, written through methods, kept in lists, passed through a generic
+// function and printed. (Nothing here depends on whether a struct is
+// copied when bound: see known_bugs/value_struct_shared.)
+struct Point {
+    pub x: i64;
+    pub y: i64;
+
+    pub fn shift(dx: i64) {
+        self.x = self.x + dx;
+    }
+}
+
+struct Label {
+    pub name: str;
+    pub at: Point;
+    pub weight: f64;
+    pub shown: bool;
+}
+
+fn same<T>(v: T) -> T => v;
+
+fn total(ps: List<Point>) -> i64 {
+    var sum = 0;
+    for p in ps { sum = sum + p.x * p.y; }
+    return sum;
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 };
+    p.shift(2);
+    print(p.x);
+    let l = Label { name: "origin", at: p, weight: 0.5, shown: true };
+    l.at.shift(10);
+    print(l.at.x);
+    print(l.name + " " + f"{l.at.x},{l.at.y}");
+    print(l.weight * 3.0);
+    print(l.shown);
+    let q = same(p);
+    print(q.y);
+    var ps: List<Point> = [];
+    var i = 0;
+    while i < 4 {
+        ps.push(Point { x: i, y: i + 1 });
+        i = i + 1;
+    }
+    print(ps[2].y);
+    print(total(ps));
+}

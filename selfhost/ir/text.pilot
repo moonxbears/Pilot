@@ -11,6 +11,7 @@
 //   str <index> "<escaped text>"
 //   intrinsic <index> <engine operation>
 //   global <index> "<name>" <layout>
+//   record <layout> <field layout>..        (a struct layout's fields, in order)
 //   fn <index> "<name>" -> <return layout> {
 //     b<id>(v<n>:<layout>, ..):
 //       [v<n> =] <opcode>[.<subop>] <operands> :<layout> !<source offset>
@@ -114,6 +115,11 @@ pub fn print_ir_module(m: IrModule) -> str {
     while i < m.globals.len {
         out = out + f"global {i} " + quote_text(m.globals[i].name) + f" {m.globals[i].physics.layout_id}\n";
         i = i + 1;
+    }
+    for rec in m.records {
+        out = out + f"record {rec.layout}";
+        for fl in rec.fields { out = out + f" {fl}"; }
+        out = out + "\n";
     }
     i = 0;
     while i < m.functions.len {
@@ -274,6 +280,19 @@ fn parse_header(r: Reader, w: List<str>) {
         let l = number(r, w[3], "");
         if l < 0 || l >= r.m.layouts.len { let _ = fail(r, f"global `{w[2]}` names layout {l}, which is not declared"); return; }
         r.m.globals.push(IrGlobal { name: unquote(w[2]), physics: r.m.layouts[l].physics });
+    } else if tag == "record" && w.len() >= 2 {
+        // `record <layout> <field layout>...`
+        let l = number(r, w[1], "");
+        var fields: List<u32> = [];
+        var j = 2;
+        while j < w.len() {
+            let fl = number(r, w[j], "");
+            if fl < 0 || fl >= r.m.layouts.len { let _ = fail(r, f"record {l} names layout {fl}, which is not declared"); return; }
+            fields.push(fl as u32);
+            j = j + 1;
+        }
+        if l < 0 || l >= r.m.layouts.len { let _ = fail(r, f"record names layout {l}, which is not declared"); return; }
+        r.m.records.push(IrRecord { layout: l as u32, fields: fields });
     } else {
         let _ = fail(r, f"unexpected `{tag}` line");
     }

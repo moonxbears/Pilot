@@ -109,6 +109,8 @@ fn every_listed_command_works_or_says_it_is_not_implemented() {
         ("emit", &["emit", "python", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot"]),
         ("ir", &["ir", "print", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot"]),
         ("completions", &["completions", "bash"]),
+        // F6: the C it writes goes to standard output here.
+        ("build", &["build", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot", "--target", "c", "-o", "/dev/stdout"]),
     ];
     for name in &commands {
         let out = match working.iter().find(|(n, _)| n == name) {

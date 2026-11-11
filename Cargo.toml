@@ -10,7 +10,6 @@ members = [
     "crates/pilot-analysis",
     "crates/pilot-rt",
     "crates/pilot-vm",
-    "crates/pilot-codegen",
     "crates/pilot-ffi",
     "crates/pilot-cli",
 ]

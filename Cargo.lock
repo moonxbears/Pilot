@@ -35,7 +35,6 @@ version = "1.1.51"
 dependencies = [
  "pilot-analysis",
  "pilot-ast",
- "pilot-codegen",
  "pilot-intern",
  "pilot-lexer",
  "pilot-parser",
@@ -45,25 +44,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilot-codegen"
-version = "0.1.0"
-dependencies = [
- "pilot-analysis",
- "pilot-ast",
- "pilot-intern",
- "pilot-parser",
- "pilot-rt",
- "pilot-span",
-]
-
-[[package]]
 name = "pilot-ffi"
 version = "1.1.51"
 dependencies = [
  "pilot-analysis",
  "pilot-arena",
  "pilot-ast",
- "pilot-codegen",
  "pilot-intern",
  "pilot-lexer",
  "pilot-parser",

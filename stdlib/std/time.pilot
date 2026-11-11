@@ -20,3 +20,7 @@ pub struct Instant : IValue {
 }
 
 pub pure fn instant_new(nanos: u64) -> Instant => Instant { timestamp_nanos: nanos };
+
+/// Microseconds on the host's monotonic clock, from an unspecified start:
+/// only the difference between two readings means anything.
+pub fn monotonic_micros() -> i64 => __engine("time_now_us");

@@ -1,0 +1,74 @@
+// ==============================================================================
+// FILE: benchmarks/native/record.pilot
+// Records the F6 native baseline: each benchmark built by `pilot build` and
+// its C reference built by `cc -O2`, timed, in benchmarks/native/baseline.tsv.
+// ==============================================================================
+// Run from the repository root:
+//     pilot run benchmarks/native/record.pilot
+// Each program is run `runs()` times and its fastest wall-clock time kept
+// (process start included). A program whose output is not its `.stdout`
+// stops the recording. The table's columns: benchmark, Pilot microseconds,
+// C microseconds, and Pilot's time as a multiple of C's.
+use Pilot.Core.File;
+use std.proc;
+use std.time;
+
+fn dir() -> str => "benchmarks/native";
+fn out_dir() -> str => "target/bench-native";
+fn runs() -> i64 => 5;
+
+/// The fastest of `runs()` runs of `bin`, in microseconds; -1 when its
+/// output is not `want`.
+fn fastest(bin: str, want: str) -> i64 {
+    var best = -1;
+    var i = 0;
+    while i < runs() {
+        let t0 = time.monotonic_micros();
+        let out = proc.run(bin, [], "");
+        let dt = time.monotonic_micros() - t0;
+        if out.stdout != want || out.exit_code != 0 {
+            eprint(f"{bin}: wrong output\n{out.stdout}{out.stderr}");
+            return -1;
+        }
+        if best < 0 || dt < best { best = dt; }
+        i = i + 1;
+    }
+    return best;
+}
+
+/// `x / y` with two decimals.
+fn ratio(x: i64, y: i64) -> str {
+    let hundredths = (x * 100 + y / 2) / y;
+    let frac = hundredths % 100;
+    return f"{hundredths / 100}." + (if frac < 10 { "0" } else { "" }) + f"{frac}";
+}
+
+fn main() -> i64 {
+    let exe = proc.current_exe() ?? "pilot";
+    var table = "benchmark\tpilot_us\tc_us\tpilot_over_c\n";
+    for b in ["fib", "numeric_loop", "string_build", "map_workload", "records"] {
+        let want = File.read_text(f"{dir()}/{b}.stdout");
+        let bin = f"{out_dir()}/{b}";
+        let built = proc.run(exe, ["build", f"{dir()}/{b}.pilot", "-o", bin], "");
+        if built.exit_code != 0 {
+            eprint(f"{b}: pilot build failed\n{built.stderr}");
+            return 1;
+        }
+        let c_bin = f"{out_dir()}/{b}_c";
+        let cc = proc.run("cc", ["-O2", "-std=c11", "-D_POSIX_C_SOURCE=200809L", f"{dir()}/{b}.c", "-o", c_bin], "");
+        if cc.exit_code != 0 {
+            eprint(f"{b}: cc failed\n{cc.stderr}");
+            return 1;
+        }
+        let p = fastest(bin, want);
+        let c = fastest(c_bin, want);
+        if p < 0 || c < 0 { return 1; }
+        print(f"{b}: pilot {p} us, C {c} us, {ratio(p, c)}x");
+        table = table + f"{b}\t{p}\t{c}\t{ratio(p, c)}\n";
+    }
+    if !File.write_text(f"{dir()}/baseline.tsv", table) {
+        eprint("cannot write the baseline");
+        return 1;
+    }
+    return 0;
+}

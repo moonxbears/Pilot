@@ -128,18 +128,6 @@ pub unsafe extern "C" fn pilot_vm_execute_bytes(vm: *mut pilot_vm::PilVirtualMac
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn pilot_codegen_build(name_ptr: *const u8, name_len: usize, target: u8, out_len: *mut usize) -> *mut u8 {
-    let name = if name_ptr.is_null() || name_len == 0 { "main" } else { str_from_raw(name_ptr, name_len) };
-    let build_target = match target {
-        0 => pilot_codegen::BuildTarget::Llvm, 1 => pilot_codegen::BuildTarget::C,
-        2 => pilot_codegen::BuildTarget::Wasm, _ => pilot_codegen::BuildTarget::Native,
-    };
-    let opts = pilot_codegen::BuildOptions { target: build_target, ..Default::default() };
-    let res = pilot_codegen::BuildDriver::compile_source_to_artifact(name, &opts).unwrap_or_default();
-    into_raw_str(res, out_len)
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn pilot_polyglot_verify_spdx(spdx_ptr: *const u8, spdx_len: usize) -> u8 {
     let s = str_from_raw(spdx_ptr, spdx_len).trim();
     u8::from(["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "CC0-1.0", "Unlicense", "0BSD"].iter().any(|&l| l.eq_ignore_ascii_case(s)))

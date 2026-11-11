@@ -27,7 +27,8 @@ use Pilot.SelfHost.Cli.TestIr;
 
 /// How the host builds and runs a program in one language: `compile` (empty
 /// for an interpreted language) and `run` are argument lists in which
-/// `{src}` is the emitted file and `{bin}` the built program.
+/// `{src}` is the emitted file, `{bin}` the built program and `{rt}` the
+/// directory of the C runtime header (`c_runtime_dir()`).
 pub struct EmitRunner : IObject {
     pub lang:    str;
     pub ext:     str;
@@ -43,8 +44,8 @@ pub fn emit_runners() -> List<EmitRunner> => [
     runner("python", "py", [], ["python3", "{src}"]),
     runner("js", "js", [], ["node", "{src}"]),
     runner("lua", "lua", [], ["lua", "{src}"]),
-    runner("c", "c", ["cc", "-std=c11", "-w", "{src}", "-o", "{bin}", "-lm"], ["{bin}"]),
-    runner("cpp", "cpp", ["c++", "-std=c++17", "-w", "{src}", "-o", "{bin}"], ["{bin}"]),
+    runner("c", "c", ["cc", "-std=c11", "-w", "-I", "{rt}", "{src}", "-o", "{bin}", "-lm"], ["{bin}"]),
+    runner("cpp", "cpp", ["c++", "-std=c++17", "-w", "-I", "{rt}", "{src}", "-o", "{bin}"], ["{bin}"]),
     runner("rust", "rs", ["rustc", "-A", "warnings", "-o", "{bin}", "{src}"], ["{bin}"]),
     runner("csharp", "cs", ["mcs", "-nowarn:162,168,219,429", "-out:{bin}", "{src}"], ["mono", "{bin}"]),
 ];
@@ -78,9 +79,29 @@ fn read_or_empty(path: str) -> str => if File.exists(path) { File.read_text(path
 fn filled(template: List<str>, src: str, bin: str) -> List<str> {
     var out: List<str> = [];
     for t in template {
-        out.push(if t.find("{src}", 0) >= 0 { t.replace("{src}", src) } else { t.replace("{bin}", bin) });
+        out.push(t.replace("{src}", src).replace("{bin}", bin).replace("{rt}", c_runtime_dir()));
     }
     return out;
+}
+
+/// The directory holding the native backend's runtime header
+/// (`runtime/c/pilot_rt.h`): under the working directory or one of its
+/// parents, or above the running toolchain.
+pub fn c_runtime_dir() -> str {
+    let rel = "runtime/c";
+    for up in ["", "../", "../../"] {
+        if File.exists(up + rel + "/pilot_rt.h") { return up + rel; }
+    }
+    var dir = proc.current_exe() ?? "";
+    var cut = dir.len() - 1;
+    while cut > 0 {
+        if dir.byte_at(cut) == 47 {
+            dir = dir.slice(0, cut);
+            if File.exists(dir + "/" + rel + "/pilot_rt.h") { return dir + "/" + rel; }
+        }
+        cut = cut - 1;
+    }
+    return rel;
 }
 
 fn job_of(argv: List<str>, input: str) -> Job {
