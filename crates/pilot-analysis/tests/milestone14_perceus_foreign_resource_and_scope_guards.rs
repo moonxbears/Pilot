@@ -55,6 +55,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             required_pub_fns: &[
                 "verify_retained_escape",
                 "esc_fn_is_retained",
+                "emit_foreign_drop_op",
             ],
             required_code_markers: &[
                 "ESCAPE004",
@@ -64,14 +65,14 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             forbidden_string_substrings: &["dsp", "@hard_realtime"],
         },
         anticheat::FileAuditRule {
-            path: "selfhost/perceus/arc.pilot",
+            path: "selfhost/perceus/lattice.pilot",
             max_lines: 1500,
             name_blind: true,
             required_pub_fns: &[
-                "emit_foreign_drop_op",
+                "lat_deduce_type_lattice",
             ],
             required_code_markers: &[
-                "emit_foreign_drop_op",
+                "lat_deduce_type_lattice",
             ],
             forbidden_code_markers: &["@hard_realtime"],
             forbidden_string_substrings: &["dsp", "@hard_realtime"],
@@ -245,7 +246,7 @@ fn perceus_diags(program: &str) -> Vec<String> {
 
     let mut pass = String::new();
     for rel in [
-        "selfhost/perceus/arc.pilot",
+        "selfhost/perceus/lattice.pilot",
         "selfhost/perceus/escape.pilot",
         "selfhost/perceus/realtime.pilot",
         "selfhost/perceus/optimizer.pilot",
@@ -325,7 +326,7 @@ fn test_m14_3_escape004_on_parsed_programs_and_foreign_drop_seam() {
 
     // A ForeignDrop has no PilIR to go into yet: it stops at its seam.
     let res = eval_m14(
-        &["selfhost/perceus/arc.pilot"],
+        &["selfhost/perceus/lattice.pilot", "selfhost/perceus/escape.pilot"],
         "pub fn main() -> i64 { let op = emit_foreign_drop_op(\"native_res\", \"c_free\"); return 1; }",
     );
     assert!(

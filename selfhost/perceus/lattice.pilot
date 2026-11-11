@@ -1,0 +1,203 @@
+// ============================================================================
+// FILE: selfhost/perceus/lattice.pilot
+// The 2-bit lattice of a type in a parsed unit, for the escape, realtime and
+// cue verifiers (selfhost/perceus/escape.pilot, optimizer.pilot).
+// Zero hardcoded type names: a type's lattice (`0b00` Value, `0b01` Reference
+// View, `0b10` Owned Object, `0b11` Scoped Guard) comes from `[Lattice(mask)]`
+// attributes, the core lattice interfaces, `~self()` and its stored fields.
+// The string-emitting drop schedulers that used to live beside these helpers
+// (selfhost/perceus/arc.pilot) are replaced by F7's drop plan
+// (selfhost/check/drops.pilot) and reference counts in PilIR
+// (selfhost/ir/pass_perceus.pilot).
+// ============================================================================
+
+// Finds `StructDecl` (`kind_tag == 1`) with matching `sym_id` (`-1` if not found).
+pub fn lat_find_struct_decl(type_sym: i64, node_count: i64) -> i64 {
+    if type_sym <= 0 {
+        return -1;
+    }
+    var i = 0;
+    while i < node_count {
+        if __engine("ast_node_kind", i) == 1 && __engine("ast_node_sym", i) == type_sym {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Finds `InterfaceDecl` (`kind_tag == 2`) with matching `sym_id` (`-1` if not found).
+pub fn lat_find_interface_decl(type_sym: i64, node_count: i64) -> i64 {
+    if type_sym <= 0 {
+        return -1;
+    }
+    var i = 0;
+    while i < node_count {
+        if __engine("ast_node_kind", i) == 2 && __engine("ast_node_sym", i) == type_sym {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Finds `FnDecl` (`kind_tag == 3`) with matching `sym_id` (`-1` if not found).
+pub fn lat_find_fn_decl_by_sym(fn_sym: i64, node_count: i64) -> i64 {
+    if fn_sym <= 0 {
+        return -1;
+    }
+    var i = 0;
+    while i < node_count {
+        if __engine("ast_node_kind", i) == 3 && __engine("ast_node_sym", i) == fn_sym {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Reads explicit `[Lattice(mask)]` attribute mask on `decl_nid` (`-1` if absent).
+pub fn lat_read_lattice_attr(decl_nid: i64) -> i64 {
+    let acnt = __engine("ast_attr_decl_count", decl_nid);
+    var ai = 0;
+    while ai < acnt {
+        let aname = __engine("sym_str", __engine("ast_attr_name", decl_nid, ai));
+        if aname == nameof(Lattice) && __engine("ast_attr_decl_arg_count", decl_nid, ai) >= 1 {
+            return __engine("ast_attr_decl_arg", decl_nid, ai, 0) & 3;
+        }
+        ai = ai + 1;
+    }
+    return -1;
+}
+
+// Checks whether `struct_nid` owns a `~self()` destructor (`decl_flags & 1024` or `DestructorDecl`).
+pub fn lat_struct_has_dtor(struct_nid: i64) -> bool {
+    if (__engine("ast_decl_flags", struct_nid) & 1024) != 0 {
+        return true;
+    }
+    let cc = __engine("ast_child_count", struct_nid);
+    var ci = 0;
+    while ci < cc {
+        let ch = __engine("ast_child_at", struct_nid, ci);
+        if __engine("ast_orig_kind", ch) == 14 {
+            return true;
+        }
+        ci = ci + 1;
+    }
+    return false;
+}
+
+// Deduces the 2-bit lattice (`0..3`) for `type_sym` from `[Lattice(mask)]`, core lattice
+// interfaces (`IValue`, `IReference`, `IObject`, `IGuard`), `~self()`, and stored fields.
+pub fn lat_deduce_type_lattice(type_sym: i64, node_count: i64, memo: i64, depth: i64) -> i64 {
+    if type_sym <= 0 || depth > 16 {
+        return 0;
+    }
+    let cached = __engine("map_get", memo, "lat_" + type_sym) ?? 0;
+    if cached > 0 {
+        return (cached - 1) & 3;
+    }
+
+    let tname = __engine("sym_str", type_sym);
+    if tname == nameof(IAnyValue) || tname == nameof(IValue) {
+        __engine("map_set", memo, "lat_" + type_sym, 1);
+        return 0;
+    }
+    if tname == nameof(IReference) {
+        __engine("map_set", memo, "lat_" + type_sym, 2);
+        return 1;
+    }
+    if tname == nameof(IObject) {
+        __engine("map_set", memo, "lat_" + type_sym, 3);
+        return 2;
+    }
+    if tname == nameof(IGuard) {
+        __engine("map_set", memo, "lat_" + type_sym, 4);
+        return 3;
+    }
+
+    // Break potential recursive cycles conservatively at 0 before unfolding bases/fields
+    __engine("map_set", memo, "lat_" + type_sym, 1);
+
+    let iface_nid = lat_find_interface_decl(type_sym, node_count);
+    if iface_nid >= 0 {
+        var ibits = 0;
+        let lat_attr = lat_read_lattice_attr(iface_nid);
+        if lat_attr >= 0 {
+            ibits = ibits | lat_attr;
+        }
+        let bcnt = __engine("ast_base_count", iface_nid);
+        var bi = 0;
+        while bi < bcnt {
+            let bsym = __engine("ast_base_at", iface_nid, bi);
+            ibits = ibits | lat_deduce_type_lattice(bsym, node_count, memo, depth + 1);
+            bi = bi + 1;
+        }
+        ibits = ibits & 3;
+        __engine("map_set", memo, "lat_" + type_sym, ibits + 1);
+        return ibits;
+    }
+
+    let struct_nid = lat_find_struct_decl(type_sym, node_count);
+    if struct_nid >= 0 {
+        var sbits = 0;
+        let slat_attr = lat_read_lattice_attr(struct_nid);
+        if slat_attr >= 0 {
+            sbits = sbits | slat_attr;
+        }
+        let sbcnt = __engine("ast_base_count", struct_nid);
+        var sbi = 0;
+        while sbi < sbcnt {
+            let sbsym = __engine("ast_base_at", struct_nid, sbi);
+            sbits = sbits | lat_deduce_type_lattice(sbsym, node_count, memo, depth + 1);
+            sbi = sbi + 1;
+        }
+        if lat_struct_has_dtor(struct_nid) {
+            sbits = sbits | 2;
+        }
+        let fcnt = __engine("ast_child_count", struct_nid);
+        var fi = 0;
+        while fi < fcnt {
+            let fnid = __engine("ast_child_at", struct_nid, fi);
+            let fk = __engine("ast_node_kind", fnid);
+            if fk == 21 || fk == 4 {
+                let ftsym = __engine("ast_node_raw_bits", fnid);
+                if ftsym > 0 && ftsym != type_sym {
+                    sbits = sbits | lat_deduce_type_lattice(ftsym, node_count, memo, depth + 1);
+                }
+            }
+            fi = fi + 1;
+        }
+        sbits = sbits & 3;
+        __engine("map_set", memo, "lat_" + type_sym, sbits + 1);
+        return sbits;
+    }
+
+    return 0;
+}
+
+// Infers `type_sym` for an unannotated RHS expression when possible.
+pub fn lat_infer_rhs_type_sym(rhs_nid: i64, state: i64, node_count: i64) -> i64 {
+    if rhs_nid <= 0 {
+        return 0;
+    }
+    let k = __engine("ast_node_kind", rhs_nid);
+    if k == 14 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", rhs_nid));
+        let ts_plus = __engine("map_get", state, "vts_" + vname) ?? 0;
+        if ts_plus > 0 {
+            return ts_plus - 1;
+        }
+        return 0;
+    }
+    if k == 16 && __engine("ast_child_count", rhs_nid) > 0 {
+        let callee = __engine("ast_child_at", rhs_nid, 0);
+        if __engine("ast_node_kind", callee) == 14 {
+            let csym = __engine("ast_node_sym", callee);
+            if lat_find_struct_decl(csym, node_count) >= 0 {
+                return csym;
+            }
+        }
+    }
+    return 0;
+}

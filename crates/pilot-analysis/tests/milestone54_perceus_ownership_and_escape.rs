@@ -3,35 +3,19 @@
 //! Milestone 54 — Uncheatable Lattice-Driven Perceus ARC, Escape & Realtime Gate
 //!
 //! Required `.pilot` Contracts (all tested simultaneously on randomized ASTs):
-//!   All passes in `selfhost/perceus/{arc,escape,realtime,optimizer}.pilot` MUST walk
+//!   All passes in `selfhost/perceus/{lattice,escape,realtime,optimizer}.pilot` MUST walk
 //!   real parsed Pilot programs in `PhysicsRegistry` (`RawAstArena` + `LayoutTable` +
 //!   `source_slice` spans) with ZERO caller-passed `has_alloc` or `lattice_bits` hints
 //!   and ZERO function/type name sniffing (e.g., `"dsp"` is strictly prohibited!).
 //!
-//!   1. `selfhost/perceus/arc.pilot` & `selfhost/perceus/optimizer.pilot`:
-//!      - Deduce every struct's 2-bit lattice (`0b00..0b11`) strictly from:
-//!        * `[Lattice(mask)]` attributes on implemented `interface`s in the unit
-//!          (plus `IValue`=0, `IReference`=1, `IObject`=2, `IGuard`=3),
-//!        * `~self()` destructor flag (`(ast_decl_flags(struct_nid) & 1024) != 0` => `| 2`),
-//!        * bitwise-OR of all stored field types' lattice bits (`kind_tag == 21`).
-//!      - `pub fn perceus_schedule_fn(fn_name: str) -> str`
-//!        Walks the `FnDecl` named `fn_name` in `RawAstArena` and returns `;`-separated
-//!        ARC / lifecycle instructions in execution order:
-//!        * `0b00` (`IValue`) & `0b01` (`IReference`): 0 `Dup`, 0 `Drop`, 0 `ScopeExitDrop`.
-//!        * `0b10` (`IObject`):
-//!          - When a binding `v` is read `K >= 2` times, emits `K - 1` `"Dup:<v>"` ops
-//!            before the first `K - 1` reads and moves on the final read (no drop after move).
-//!          - When a binding `v`'s last read (or dead binding) is in the statement
-//!            immediately preceding `let new_v: NewObj = ...` where `NewObj` is ALSO `0b10`
-//!            and its `LayoutTable` `byte_size` (`layout_metrics`) equals `v`'s `byte_size`,
-//!            emits `"DropReuse:<v>-><new_v>"` instead of `"Drop:<v>"`!
-//!          - Otherwise, if `v`'s last read occurs before subsequent statements (and is not
-//!            returned/moved as the final result), or if `v` is never read, emits `"Drop:<v>"`
-//!            at its last-use / dead point!
-//!        * `0b11` (`IGuard`):
-//!          - NEVER drops early at last use!
-//!          - Emits `"ScopeExitDrop:<g>"` at block exit / `return` in strict **LIFO reverse
-//!            declaration order** (`"ScopeExitDrop:g3;ScopeExitDrop:g2;ScopeExitDrop:g1"`).
+//!   1. `selfhost/perceus/lattice.pilot`: every struct's 2-bit lattice (`0b00..0b11`)
+//!      comes from `[Lattice(mask)]` attributes on its interfaces (plus `IValue`=0,
+//!      `IReference`=1, `IObject`=2, `IGuard`=3), its `~self()` destructor (`| 2`) and
+//!      the bitwise-OR of its stored field types' lattice bits.
+//!      Test 54.1 checks these lattices on randomized programs. (It used to check the
+//!      string-emitting ARC schedule `perceus_schedule_fn` of the former
+//!      `selfhost/perceus/arc.pilot`, deleted by F7, which replaced it with the checker's
+//!      drop plan and PilIR reference counts: see `crates/pilot-cli/tests/cli_f7.rs`.)
 //!   2. `selfhost/perceus/escape.pilot`, `selfhost/perceus/realtime.pilot` & `optimizer.pilot`:
 //!      - `pub fn verify_perceus_unit() -> i64`
 //!        Walks all `FnDecl`s in `RawAstArena`, emits diagnostics via
@@ -65,7 +49,7 @@ use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 mod anticheat;
 
 const PERCEUS_GROUP: &[&str] = &[
-    "selfhost/perceus/arc.pilot",
+    "selfhost/perceus/lattice.pilot",
     "selfhost/perceus/escape.pilot",
     "selfhost/perceus/realtime.pilot",
     "selfhost/perceus/optimizer.pilot",
@@ -77,7 +61,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     expected_test_count: 2,
     files: &[
         anticheat::FileAuditRule {
-            path: "selfhost/perceus/arc.pilot",
+            path: "selfhost/perceus/lattice.pilot",
             max_lines: 1500,
             name_blind: true,
             required_pub_fns: &[],
@@ -113,10 +97,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             forbidden_string_substrings: &["dsp", "@hard_realtime"],
         },
     ],
-    required_group_pub_fns: &[
-        ("perceus_schedule_fn", PERCEUS_GROUP),
-        ("verify_perceus_unit", PERCEUS_GROUP),
-    ],
+    required_group_pub_fns: &[("verify_perceus_unit", PERCEUS_GROUP)],
 };
 
 struct Rng(u64);
@@ -206,14 +187,14 @@ fn run_perceus_on_program(target_program: &str, tail_expr: &str) -> (PilotVal, V
     run_pilot_analyzer(&mut registry, None).expect("analyzer.pilot must run cleanly");
     registry.diagnostics.clear();
 
-    let arc_src = read_ws("selfhost/perceus/arc.pilot");
+    let lat_src = read_ws("selfhost/perceus/lattice.pilot");
     let esc_src = read_ws("selfhost/perceus/escape.pilot");
     let rt_src = read_ws("selfhost/perceus/realtime.pilot");
     let opt_src = read_ws("selfhost/perceus/optimizer.pilot");
 
     let pass_script = format!(
         "{}\n{}\n{}\n{}\nlet __out = {};\n__out;\n",
-        arc_src, esc_src, rt_src, opt_src, tail_expr
+        lat_src, esc_src, rt_src, opt_src, tail_expr
     );
     let pass_arena = parse(&pass_script);
     assert!(
@@ -243,19 +224,14 @@ fn run_perceus_on_program(target_program: &str, tail_expr: &str) -> (PilotVal, V
 }
 
 #[test]
-pub fn test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards() {
+pub fn test_54_1_real_ast_lattice_from_attributes_destructors_and_fields() {
     let guard = anticheat::AntiCheatGuard::arm(
-        "test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards",
+        "test_54_1_real_ast_lattice_from_attributes_destructors_and_fields",
         &ANTICHEAT_SPEC,
     );
     let mut rng = Rng::new(0x5401);
     let snap = BootstrapSnapshot::global();
-    for rel in [
-        "selfhost/perceus/arc.pilot",
-        "selfhost/perceus/escape.pilot",
-        "selfhost/perceus/realtime.pilot",
-        "selfhost/perceus/optimizer.pilot",
-    ] {
+    for rel in PERCEUS_GROUP {
         let src = read_ws(rel);
         let mut tables = snap.tables.clone();
         let mut vm = snap.vm.clone();
@@ -264,163 +240,56 @@ pub fn test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards() 
     }
 
     for trial in 0..6 {
-        // Randomized scalar, interface, struct, variable, and function names!
+        // Randomized names: the lattice comes from the declarations only.
         let sc64 = rng.lower_ident("u64x");
-        let sc32 = rng.lower_ident("u32x");
         let if_val = rng.pascal_ident("ICustVal");
         let if_ref = rng.pascal_ident("ICustRef");
         let if_guard = rng.pascal_ident("ICustGuard");
-
         let val_st = rng.pascal_ident("ValPair");
         let view_st = rng.pascal_ident("WinView");
-        let obj16_a = rng.pascal_ident("Buf16A"); // 2 * 64-bit = 16 bytes, has ~self() -> 0b10
-        let obj16_b = rng.pascal_ident("Buf16B"); // 4 * 32-bit = 16 bytes, has ~self() -> 0b10 (SAME 16B size!)
-        let obj24_c = rng.pascal_ident("Buf24C"); // 3 * 64-bit = 24 bytes, has ~self() -> 0b10 (DIFFERENT 24B size!)
-        let guard_st = rng.pascal_ident("ScopeLock"); // : ICustRef + ~self() -> 0b01 | 0b10 = 0b11!
-
-        let fn_dup = rng.lower_ident("fn_dup_test");
-        let fn_reuse = rng.lower_ident("fn_reuse_match");
-        let fn_noreuse = rng.lower_ident("fn_reuse_mismatch");
-        let fn_guards = rng.lower_ident("fn_lifo_guards");
-
-        let v_val = rng.lower_ident("v_copy");
-        let v_view = rng.lower_ident("v_lens");
-        let v_multi = rng.lower_ident("owned_multi");
-        let v_unused = rng.lower_ident("owned_unused");
-        let v_old = rng.lower_ident("old_pkt");
-        let v_new = rng.lower_ident("new_pkt");
-        let g1 = rng.lower_ident("g_alpha");
-        let g2 = rng.lower_ident("g_beta");
-        let g3 = rng.lower_ident("g_gamma");
+        let obj_st = rng.pascal_ident("Buf16A");
+        let lock_st = rng.pascal_ident("ScopeLock");
+        let held_st = rng.pascal_ident("Holder");
+        let lens_st = rng.pascal_ident("LensBox");
+        let attr_guard_st = rng.pascal_ident("Lease");
 
         let program = format!(
             "[Bits(64, 2)]\npub struct {sc64} {{}}\n\
-             [Bits(32, 2)]\npub struct {sc32} {{}}\n\
              [Lattice(0)]\npub interface {if_val} {{}}\n\
              [Lattice(1)]\npub interface {if_ref} {{}}\n\
              [Lattice(3)]\npub interface {if_guard} {{}}\n\
              pub struct {val_st} : {if_val} {{ pub a: {sc64}; pub b: {sc64}; }}\n\
              pub struct {view_st} : {if_ref} {{ pub p: {sc64}; pub len: {sc64}; }}\n\
-             pub struct {obj16_a} {{ pub x: {sc64}; pub y: {sc64}; ~self() {{}} }}\n\
-             pub struct {obj16_b} {{ pub p0: {sc32}; pub p1: {sc32}; pub p2: {sc32}; pub p3: {sc32}; ~self() {{}} }}\n\
-             pub struct {obj24_c} {{ pub x: {sc64}; pub y: {sc64}; pub z: {sc64}; ~self() {{}} }}\n\
-             pub struct {guard_st} : {if_ref} {{ pub handle: {sc64}; ~self() {{}} }}\n\
-             \n\
-             pub fn consume16({obj16_a}_in: {obj16_a}) -> {sc64} {{ return {obj16_a}_in.x; }}\n\
-             pub fn touch_val(x: {val_st}, w: {view_st}) -> {sc64} {{ return x.a; }}\n\
-             pub fn touch_guard(g: {sc64}) -> {sc64} {{ return g; }}\n\
-             \n\
-             // 1) Multi-use 0b10 emits 2 Dups + final move; unused 0b10 drops; 0b00 & 0b01 emit 0 ARC ops!\n\
-             pub fn {fn_dup}(seed_v: {val_st}, seed_w: {view_st}, init_a: {obj16_a}, dead_a: {obj16_a}) -> {sc64} {{\n\
-                 let {v_val}: {val_st} = seed_v;\n\
-                 let {v_view}: {view_st} = seed_w;\n\
-                 let {v_multi}: {obj16_a} = init_a;\n\
-                 let {v_unused}: {obj16_a} = dead_a;\n\
-                 let t0 = touch_val({v_val}, {v_view});\n\
-                 let t1 = touch_val({v_val}, {v_view});\n\
-                 let u1 = consume16({v_multi});\n\
-                 let u2 = consume16({v_multi});\n\
-                 let u3 = consume16({v_multi});\n\
-                 return u1 + u2 + u3 + t0 + t1;\n\
-             }}\n\
-             \n\
-             // 2) Same byte_size (16B -> 16B across distinct field counts 2x64b vs 4x32b!) -> DropReuse!\n\
-             pub fn {fn_reuse}(src_a: {obj16_a}, c0: {sc32}) -> {obj16_b} {{\n\
-                 let {v_old}: {obj16_a} = src_a;\n\
-                 let extracted = consume16({v_old});\n\
-                 let {v_new}: {obj16_b} = {obj16_b} {{ p0: c0, p1: c0, p2: c0, p3: c0 }};\n\
-                 return {v_new};\n\
-             }}\n\
-             \n\
-             // 3) Mismatched byte_size (16B -> 24B) -> plain Drop (MUST NOT emit DropReuse)!\n\
-             pub fn {fn_noreuse}(src_a: {obj16_a}, c64: {sc64}) -> {obj24_c} {{\n\
-                 let {v_old}: {obj16_a} = src_a;\n\
-                 let extracted = consume16({v_old});\n\
-                 let {v_new}: {obj24_c} = {obj24_c} {{ x: c64, y: c64, z: c64 }};\n\
-                 return {v_new};\n\
-             }}\n\
-             \n\
-             // 4) Three 0b11 guards (derived from 0b01 interface + ~self() 0b10 = 0b11!): LIFO ScopeExitDrop!\n\
-             pub fn {fn_guards}(h: {sc64}) -> {sc64} {{\n\
-                 let {g1}: {guard_st} = {guard_st} {{ handle: h }};\n\
-                 let {g2}: {guard_st} = {guard_st} {{ handle: h }};\n\
-                 let {g3}: {guard_st} = {guard_st} {{ handle: h }};\n\
-                 let early = touch_guard(h);\n\
-                 return early;\n\
-             }}\n",
+             pub struct {obj_st} {{ pub x: {sc64}; ~self() {{}} }}\n\
+             pub struct {lock_st} : {if_ref} {{ pub handle: {sc64}; ~self() {{}} }}\n\
+             pub struct {held_st} : {if_val} {{ pub inner: {obj_st}; }}\n\
+             pub struct {lens_st} : {if_val} {{ pub w: {view_st}; }}\n\
+             pub struct {attr_guard_st} : {if_guard} {{ pub h: {sc64}; }}\n",
         );
 
-        let tail = format!(
-            "perceus_schedule_fn({f1}) + \"|||\" + perceus_schedule_fn({f2}) + \"|||\" + perceus_schedule_fn({f3}) + \"|||\" + perceus_schedule_fn({f4})",
-            f1 = escape_pilot_str(&fn_dup),
-            f2 = escape_pilot_str(&fn_reuse),
-            f3 = escape_pilot_str(&fn_noreuse),
-            f4 = escape_pilot_str(&fn_guards),
-        );
-        let (res, _) = run_perceus_on_program(&program, &tail);
-        let schedules_str = res.to_string_repr();
-        let schedules: Vec<&str> = schedules_str.split("|||").collect();
-        assert_eq!(schedules.len(), 4, "Trial {}: unexpected schedule format `{}`", trial, schedules_str);
+        // Each struct's lattice as one base-4 digit, first struct lowest.
+        let mut terms = Vec::new();
+        for (i, name) in [&val_st, &view_st, &obj_st, &lock_st, &held_st, &lens_st, &attr_guard_st].iter().enumerate() {
+            terms.push(format!(
+                "{} * lat_deduce_type_lattice(__engine(\"sym_lookup\", {}), __engine(\"ast_node_count\", 0), __engine(\"map_new\"), 0)",
+                4i64.pow(i as u32),
+                escape_pilot_str(name)
+            ));
+        }
+        let (res, _) = run_perceus_on_program(&program, &terms.join(" + "));
 
-        let (s_dup, s_reuse, s_noreuse, s_guards) = (schedules[0], schedules[1], schedules[2], schedules[3]);
-
-        // Verify 1: `v_multi` has exactly 2 `Dup:` and 0 `Drop:` (moved on 3rd use); `v_unused` has 1 `Drop:`;
-        // `v_val` (0b00) and `v_view` (0b01) never appear in ARC ops!
-        let dup_token = format!("Dup:{}", v_multi);
+        // By the lattice rules, worked by hand: a value 0b00; a view 0b01
+        // (its interface's [Lattice(1)]); ~self() alone 0b10; a view with
+        // ~self() 0b01 | 0b10 = 0b11; a value holding an owned field 0b10;
+        // a value holding a view 0b01; [Lattice(3)] on the interface 0b11.
+        let expected = [0i64, 1, 2, 3, 2, 1, 3];
+        let want: i64 = expected.iter().enumerate().map(|(i, l)| l * 4i64.pow(i as u32)).sum();
         assert_eq!(
-            s_dup.matches(&dup_token).count(),
-            2,
-            "Trial {}: 3 reads of 0b10 `{}` must emit 2 `{}` ops, got `{}`",
-            trial, v_multi, dup_token, s_dup
-        );
-        assert!(
-            !s_dup.contains(&format!("Drop:{}", v_multi)),
-            "Trial {}: `{}` moved on final read must NOT also Drop: `{}`",
-            trial, v_multi, s_dup
-        );
-        assert!(
-            s_dup.contains(&format!("Drop:{}", v_unused)),
-            "Trial {}: unused 0b10 `{}` must emit `Drop:{}`: got `{}`",
-            trial, v_unused, v_unused, s_dup
-        );
-        assert!(
-            !s_dup.contains(&v_val) && !s_dup.contains(&v_view),
-            "Trial {}: 0b00 `{}` and 0b01 `{}` must have 0 retain/drop ops, got `{}`",
-            trial, v_val, v_view, s_dup
-        );
-
-        // Verify 2 & 3: Layout-size-verified DropReuse (16B == 16B) vs size mismatch (16B != 24B)
-        let expected_reuse = format!("DropReuse:{}->{}", v_old, v_new);
-        assert!(
-            s_reuse.contains(&expected_reuse),
-            "Trial {}: Same-size 16B->16B 0b10 allocation must emit `{}`, got `{}`",
-            trial, expected_reuse, s_reuse
-        );
-        assert!(
-            !s_noreuse.contains("DropReuse:"),
-            "Trial {}: Different-size 16B->24B 0b10 allocation MUST NOT emit DropReuse, got `{}`",
-            trial, s_noreuse
-        );
-
-        // Verify 4: Strict LIFO reverse guard order (g3, then g2, then g1) and zero early `Drop:`!
-        let expected_lifo = format!(
-            "ScopeExitDrop:{};ScopeExitDrop:{};ScopeExitDrop:{}",
-            g3, g2, g1
-        );
-        assert!(
-            !s_guards.split(';').any(|op| {
-                let t = op.trim();
-                t == format!("Drop:{}", g1)
-                    || t == format!("Drop:{}", g2)
-                    || t == format!("Drop:{}", g3)
-            }),
-            "Trial {}: 0b11 guards (`{}`, `{}`, `{}`) must never drop early before scope exit: `{}`",
-            trial, g1, g2, g3, s_guards
-        );
-        assert!(
-            s_guards.contains(&expected_lifo),
-            "Trial {}: 0b11 guards must drop in strict LIFO order `{}`, got `{}`",
-            trial, expected_lifo, s_guards
+            res.to_string_repr(),
+            want.to_string(),
+            "Trial {}: lattices (base 4, first struct lowest) of {:?}",
+            trial,
+            [&val_st, &view_st, &obj_st, &lock_st, &held_st, &lens_st, &attr_guard_st]
         );
     }
     guard.finish();
@@ -436,7 +305,7 @@ pub fn test_54_2_and_54_3_real_ast_escape_realtime_cue_verifiers_and_dsp_decoy_t
 
     // Static check: forbid `"dsp"` name sniffing or `@hard_realtime` in selfhost/perceus/*.pilot
     for rel in [
-        "selfhost/perceus/arc.pilot",
+        "selfhost/perceus/lattice.pilot",
         "selfhost/perceus/escape.pilot",
         "selfhost/perceus/realtime.pilot",
         "selfhost/perceus/optimizer.pilot",

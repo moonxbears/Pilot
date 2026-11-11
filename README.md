@@ -23,7 +23,7 @@ Pilot unifies C#-grade ergonomics (`interface` hierarchies, implicit `field`/`va
   Every type originates from `IAnyValue` (**0 runtime header bytes**) and is classified in 1 CPU cycle via bitwise-OR of its stored fields and `~self()` destructor (`Bit 0` = borrows memory, `Bit 1` = owns `~self()` destructor):
   - **`0b00` `IValue`:** Trivial `memcpy` value types (`i64`, `f64`, `Vec3`, `array<T, N>`, `RangeWindow<T>`, `Dual<T, G>`), eligible for zero-copy `.pchor` cues and `as view` casts.
   - **`0b01` `IReference`:** Borrowed zero-copy windows (`slice<T>`, `stride<T>`, `str`, `SliceView<T>`, `OffsetLens<T>`); lexical escape verified by `selfhost/perceus/escape.pilot` (`ESCAPE001`–`ESCAPE003`).
-  - **`0b10` `IObject`:** Owned heap/resource handles with `~self()` (`SliceBuffer<T>`, `List<T>`, `Signal<T>`, `EffectPlan<T>`); Perceus move-by-default, exact last-use `Drop`, and same-size `DropReuse` in-place recycling (`selfhost/perceus/arc.pilot`).
+  - **`0b10` `IObject`:** Owned heap/resource handles with `~self()` (`SliceBuffer<T>`, `List<T>`, `Signal<T>`, `EffectPlan<T>`); Perceus move-by-default and exact last-use drops (`selfhost/check/drops.pilot`, `selfhost/ir/pass_perceus.pilot`); same-size `DropReuse` in-place recycling is still to come.
   - **`0b11` `IGuard`:** Scoped RAII guards (`MutexGuard<T>`, `ArenaScope`, `TxLease`) combining borrowed references with strict reverse-declaration **LIFO `ScopeExitDrop`**.
 
 - **4-Tier `MethodTable`, `*Bundle` & `*Facet` Composition:**

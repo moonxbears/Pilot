@@ -109,8 +109,8 @@ pub fn esc_expr_lattice(expr_nid: i64, env: i64, memo: i64, node_count: i64) -> 
         let callee = __engine("ast_child_at", expr_nid, 0);
         if __engine("ast_node_kind", callee) == 14 {
             let csym = __engine("ast_node_sym", callee);
-            if arc_find_struct_decl(csym, node_count) >= 0 {
-                return arc_deduce_type_lattice(csym, node_count, memo, 0);
+            if lat_find_struct_decl(csym, node_count) >= 0 {
+                return lat_deduce_type_lattice(csym, node_count, memo, 0);
             }
         }
     }
@@ -232,8 +232,8 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
         return cnt;
     }
 
-    if arc_find_struct_decl(csym, node_count) >= 0 {
-        let st_lat = arc_deduce_type_lattice(csym, node_count, memo, 0);
+    if lat_find_struct_decl(csym, node_count) >= 0 {
+        let st_lat = lat_deduce_type_lattice(csym, node_count, memo, 0);
         if st_lat == 2 {
             if in_rt {
                 let pcode = verify_noalloc_escape(2, true);
@@ -271,7 +271,7 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
         return cnt;
     }
 
-    let target_fn = arc_find_fn_decl_by_sym(csym, node_count);
+    let target_fn = lat_find_fn_decl_by_sym(csym, node_count);
     if target_fn >= 0 && rt_fn_is_cue(target_fn) {
         var qai = 1;
         while qai < cc {
@@ -327,9 +327,9 @@ pub fn esc_walk_perceus_node(nid: i64, env: i64, memo: i64, node_count: i64, in_
         let vname = __engine("sym_str", __engine("ast_node_sym", nid));
         var vtsym = __engine("ast_node_raw_bits", nid);
         if vtsym == 0 && rhs_nid > 0 {
-            vtsym = arc_infer_rhs_type_sym(rhs_nid, env, node_count);
+            vtsym = lat_infer_rhs_type_sym(rhs_nid, env, node_count);
         }
-        var vlat = arc_deduce_type_lattice(vtsym, node_count, memo, 0);
+        var vlat = lat_deduce_type_lattice(vtsym, node_count, memo, 0);
         if rhs_nid > 0 && __engine("ast_orig_kind", rhs_nid) == 218 {
             vlat = 2;
         } else if rhs_nid > 0 && vlat == 0 {
@@ -428,4 +428,12 @@ pub fn esc_walk_perceus_node(nid: i64, env: i64, memo: i64, node_count: i64, in_
         ci = ci + 1;
     }
     return total;
+}
+
+// Milestone 14: hands a ForeignDrop of `var_name` through the foreign
+// destructor `dtor_sym` to PilIR. The drop of an owned value is PilIR's
+// `perceus_drop` (selfhost/ir/pass_perceus.pilot); a drop calling a foreign
+// destructor pointer has no instruction yet.
+pub fn emit_foreign_drop_op(var_name: str, dtor_sym: str) -> str {
+    return seam("perceus.foreign_drop_ir", "PilIR ForeignDrop instruction calling a foreign destructor pointer");
 }

@@ -52,7 +52,7 @@ pub fn opt_verify_single_fn(fn_nid: i64, memo: i64, node_count: i64) -> i64 {
         if __engine("ast_node_kind", pid) == 21 {
             let pname = __engine("sym_str", __engine("ast_node_sym", pid));
             let ptsym = __engine("ast_node_raw_bits", pid);
-            let plat = arc_deduce_type_lattice(ptsym, node_count, memo, 0);
+            let plat = lat_deduce_type_lattice(ptsym, node_count, memo, 0);
             var is_ref = 0;
             if rt_param_has_modifier(pid, nameof(ref)) {
                 is_ref = 1;
