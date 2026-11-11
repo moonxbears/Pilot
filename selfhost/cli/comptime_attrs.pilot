@@ -1,0 +1,117 @@
+// ==============================================================================
+// FILE: selfhost/cli/comptime_attrs.pilot
+// Running `[Live]` and `[Generate]` functions when a program is checked, built or run.
+// ==============================================================================
+// Each command runs the calls of one moment (`LiveWhen` in
+// stdlib/core/live.pilot) once the program has passed the checks:
+// `pilot check` and `pilot build` those of `::Compile`, `pilot run` those of
+// `::Run` before `main`. `::Debug` belongs to `pilot debug` and `::OnSave` to
+// the language server's `textDocument/didSave`; neither command has a handler
+// yet (the `cli.command_handler` seam), so nothing runs those calls today.
+// The attributed functions of the program (selfhost/cli/comptime_tool.pilot)
+// all run in one go, on the seed, as an entry linked after the program in
+// place of `main` (functions of the user's files the program imports run too):
+//
+//   [Live(3, 4)] fn add(..)            prints `<file>:<line>: live: add(3, 4) = 7`
+//   [Generate("out/schema.sql")] fn s  writes what `s()` returns to
+//                                      `out/schema.sql` beside the source file,
+//                                      then prints `<file>:<line>: generated <path>`
+//                                      (on `::Compile` only)
+//
+// The lines come in source order. A function that stops with a run-time error
+// fails the command, as does a file that cannot be written.
+pub lvl(0) pkg Pilot.SelfHost.Cli.ComptimeAttrs;
+
+use Pilot.SelfHost.Cli.Host;
+use Pilot.SelfHost.Cli.Report;
+
+/// The sources of the tool that finds the attributed functions: the type
+/// checker's, then the tool.
+fn comptime_tool_files() -> List<str> {
+    var out = cli_checker_files();
+    out.push("selfhost/cli/comptime_tool.pilot");
+    return out;
+}
+
+/// The moments a command runs `[Live]` calls at: `LiveWhen` flag names.
+pub pure fn live_phase_compile() -> str => "Compile";
+pub pure fn live_phase_run() -> str => "Run";
+pub pure fn live_phase_debug() -> str => "Debug";
+pub pure fn live_phase_on_save() -> str => "OnSave";
+
+/// What the entry links: the chain of steps (stdlib/core/attr_flow.pilot),
+/// and what a `[Generate]` writes its file with.
+fn comptime_entry_links(needs_files: bool) -> List<str> {
+    var out: List<str> = ["stdlib/core/attr_flow.pilot"];
+    if needs_files { out.push("stdlib/core/file.pilot"); }
+    return out;
+}
+
+/// `text` as a Pilot string literal.
+fn quoted(text: str) -> str => "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+
+/// The directory part of `path`, with its final `/`, or "".
+fn dir_of(path: str) -> str {
+    var at = path.len();
+    while at > 0 && path.byte_at(at - 1) != 47 { at = at - 1; }
+    return path.slice(0, at);
+}
+
+/// The entry that runs the steps `records` describes (`comptime_runs` in
+/// selfhost/cli/comptime_tool.pilot), each function's through its own
+/// `AttrChain` (stdlib/core/attr_flow.pilot).
+fn comptime_entry(records: List<List<str>>) -> str {
+    var out = "";
+    var group = "";
+    var i = 0;
+    for r in records {
+        let chain = f"pilot_chain_{r[3]}";
+        if r[3] != group {
+            group = r[3];
+            out = out + f"var {chain} = attr_chain_start();\n";
+        }
+        let place = r[1] + ":" + r[2] + ": ";
+        if r[0] == "runtime" {
+            out = out + "attr_runtime_steps(" + quoted(r[4]) + ");\n";
+        } else if r[0] == "step" {
+            let value = f"pilot_step_{i}";
+            out = out + f"let {value} = {r[4]};\n";
+            out = out + f"{chain} = {chain}.enter({value}.always());\n";
+            out = out + "if " + chain + ".go { " + chain + " = " + chain + ".after(" + value + ".step(" + quoted(r[5]) + ")); }\n";
+        } else {
+            out = out + f"{chain} = {chain}.enter(false);\n";
+            if r[0] == "live" {
+                let value = f"pilot_live_value_{i}";
+                out = out + "if " + chain + ".go {\n    let " + value + " = " + r[4] + ";\n";
+                out = out + "    print(" + quoted(place + "live: " + r[4] + " = ") + " + " + value + ");\n}\n";
+            } else if r[0] == "generate" {
+                let target = if r[5].starts_with("/") { r[5] } else { dir_of(r[1]) + r[5] };
+                out = out + "if " + chain + ".go {\n";
+                out = out + "    assert(File.write_text(" + quoted(target) + ", " + r[4] + "()), " + quoted("cannot write `" + target + "`") + ");\n";
+                out = out + "    print(" + quoted(place + "generated " + target) + ");\n}\n";
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// Runs the `[Live]` and `[Generate]` functions of `program` that run at
+/// moment `phase` (`live_phase_*`); the number of errors (a run that did not
+/// compile or stopped counts one).
+pub fn comptime_attrs_run(program: str, phase: str) -> i64 {
+    let found = host_program_eval(program, comptime_tool_files(), cli_checker_decls(), f"comptime_runs(\"{phase}\");");
+    if found == none { return 0; }
+    var records: List<List<str>> = [];
+    var needs_files = false;
+    for r in found {
+        let row: List<str> = r;
+        records.push(row);
+        if row[0] == "generate" { needs_files = true; }
+    }
+    if records.len() == 0 { return 0; }
+    let run = host_run_with(program, [], comptime_entry(records), comptime_entry_links(needs_files));
+    let errors = report_diagnostics(run.diags);
+    if errors > 0 { return errors; }
+    return if run.exit_code != 0 { 1 } else { 0 };
+}

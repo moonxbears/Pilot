@@ -1,0 +1,188 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_probe.pilot
+// Probes in PilIR: the calls the type checker plans around statements.
+// ==============================================================================
+// The checker's probe plan (selfhost/check/probes.pilot) names, per
+// statement, whether to read the text of its target before it runs and which
+// function to call after it, with what. The seed carries out the same plan
+// (crates/pilot-vm/src/lower_probe.rs). Here it becomes ordinary PilIR, so
+// the interpreter and every emitter run it. A call goes before the
+// statement, after it, or on every way out of the block it is in (`defer`):
+//   - a target's text is `"" + value`, as an f-string shows a value;
+//   - the target of a `let` / `var` is its binding, that of an assignment the
+//     place it writes, read with the drop plan set aside (a probe only looks).
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerProbe;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.probes.*;
+use selfhost.check.coverage.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+
+/// The probes of the program `p` describes, by statement node: the rows
+/// planned for it, in plan order (`[Debug]` from probes.pilot, then
+/// `[Coverage]` from coverage.pilot). Each row is `[node, capture, call,
+/// args, at]`; deferred calls collect under `deferred_key()`.
+pub fn probe_rows(p: Program) -> Map<str, List<any>> {
+    let out = Map<str, List<any>>();
+    for row in probe_plan(p) {
+        let n: i64 = row[0];
+        add_row(out, n, [row[0], row[1], row[2], row[3], ProbeAt::After as i64]);
+    }
+    for row in coverage_plan(p) {
+        let n: i64 = row[0];
+        add_row(out, n, row);
+    }
+    out.set(deferred_key(), []);
+    return out;
+}
+
+fn add_row(out: Map<str, List<any>>, n: i64, row: List<any>) {
+    var rows: List<any> = if out.has(key(n)) { out.get(key(n)) } else { [] };
+    rows.push(row);
+    out.set(key(n), rows);
+}
+
+/// Where the rows of `ProbeAt::Defer` calls go once their statement is
+/// reached; a scope holds `-(index + 1)` for one (selfhost/ir/lower_defer.pilot).
+fn deferred_key() -> str => "deferred";
+
+/// Whether the plan puts a probe around node `n`.
+pub fn probed(lw: Lowerer, n: i64) -> bool => lw.probes.has(key(n));
+
+fn text_physics(lw: Lowerer) -> IrTypePhysics =>
+    layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_str())));
+
+fn text_const(lw: Lowerer, text: str, n: i64) -> u32 =>
+    emit(lw, op_const_bytes(), 0, text_physics(lw), [pool_str(lw, text)], n);
+
+/// The value the target of statement `n` holds.
+fn target_value(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let saved = lw.plan.at;
+    lw.plan.at = Map<str, List<List<any>>>();
+    var v = ir_no_value();
+    if kind(s, n) == nk_assign() {
+        v = lower_expr(lw, lhs(s, n));
+    } else if lw.binding_of.has(key(n)) {
+        let b = lw.binding_of.get(key(n));
+        let k = key(b);
+        if lw.values.has(k) { v = lw.values.get(k); }
+        else if lw.slots.has(k) { v = emit(lw, op_load(), 0, layout_of(lw.ls, binding_type(lw.inf, b)), [lw.slots.get(k)], n); }
+    }
+    lw.plan.at = saved;
+    return v;
+}
+
+/// The text of the target of statement `n`.
+fn target_text(lw: Lowerer, n: i64) -> u32 {
+    let v = target_value(lw, n);
+    if v == ir_no_value() { return text_const(lw, "", n); }
+    return emit(lw, op_add(), 0, text_physics(lw), [text_const(lw, "", n), v], n);
+}
+
+fn rows_at(lw: Lowerer, n: i64) -> List<any> => if probed(lw, n) { lw.probes.get(key(n)) } else { [] };
+
+/// Before statement `n` is lowered: its `ProbeAt::Before` calls, its
+/// `ProbeAt::Defer` calls registered with the innermost scope, and the text
+/// of its target when an after-call captures it (else no value).
+pub fn probe_before(lw: Lowerer, n: i64) -> u32 {
+    var captured = ir_no_value();
+    for r in rows_at(lw, n) {
+        let row: List<any> = r;
+        let at: i64 = row[4];
+        let capture: bool = row[1];
+        if at == ProbeAt::Before as i64 {
+            probe_call(lw, row, n, ir_no_value());
+        } else if at == ProbeAt::Defer as i64 {
+            if lw.defers.len() == 0 {
+                emit_trap(lw, "internal error: the probe plan defers a call outside any block", n);
+                ensure_open(lw);
+            } else {
+                var later: List<any> = lw.probes.get(deferred_key());
+                later.push([row, n]);
+                lw.probes.set(deferred_key(), later);
+                lw.defers[lw.defers.len() - 1].push(0 - later.len());
+            }
+        } else if capture && captured == ir_no_value() {
+            captured = target_text(lw, n);
+        }
+    }
+    return captured;
+}
+
+/// After statement `n` is lowered: its `ProbeAt::After` calls, `captured`
+/// the text `probe_before` read.
+pub fn probe_after(lw: Lowerer, n: i64, captured: u32) {
+    for r in rows_at(lw, n) {
+        let row: List<any> = r;
+        let at: i64 = row[4];
+        if at == ProbeAt::After as i64 { probe_call(lw, row, n, captured); }
+    }
+}
+
+/// A deferred probe call, `marker` the `-(index + 1)` its scope holds.
+pub fn run_deferred_probe(lw: Lowerer, marker: i64) {
+    let later: List<any> = lw.probes.get(deferred_key());
+    let entry: List<any> = later[0 - marker - 1];
+    let row: List<any> = entry[0];
+    let n: i64 = entry[1];
+    probe_call(lw, row, n, ir_no_value());
+}
+
+/// The text of the binding declared at `node` (a parameter or `let`), `""`
+/// when it has no value.
+fn binding_text(lw: Lowerer, node: i64, n: i64) -> u32 {
+    // A parameter's value is held under its binding.
+    let b = if lw.binding_of.has(key(node)) { lw.binding_of.get(key(node)) } else { node };
+    let k = key(b);
+    var v = ir_no_value();
+    if lw.values.has(k) { v = lw.values.get(k); }
+    else if lw.slots.has(k) { v = emit(lw, op_load(), 0, layout_of(lw.ls, binding_type(lw.inf, b)), [lw.slots.get(k)], n); }
+    if v == ir_no_value() { return text_const(lw, "", n); }
+    return emit(lw, op_add(), 0, text_physics(lw), [text_const(lw, "", n), v], n);
+}
+
+/// The call of probe `row` at statement `n`.
+fn probe_call(lw: Lowerer, row: List<any>, n: i64, captured: u32) {
+    if ir_is_terminated(lw.f, lw.cur) { return; }
+    let call: str = row[2];
+    let args: List<any> = row[3];
+    let decls = nl_get(lw.inf.p.fns, call);
+    if decls.len() != 1 {
+        emit_trap(lw, f"internal error: the probe plan calls `{call}`, which the program does not declare once", n);
+        ensure_open(lw);
+        return;
+    }
+    let bool_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
+    let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+    var values: List<u32> = [];
+    for a in args {
+        let pair: List<any> = a;
+        let code: i64 = pair[0];
+        if code == ProbeArgKind::Text as i64 {
+            let t: str = pair[1];
+            values.push(text_const(lw, t, n));
+        } else if code == ProbeArgKind::Flag as i64 {
+            let on: bool = pair[1];
+            values.push(emit(lw, op_const_bits(), 0, bool_phy, [pool_int(lw, if on { 1 } else { 0 })], n));
+        } else if code == ProbeArgKind::TargetText as i64 {
+            values.push(target_text(lw, n));
+        } else if code == ProbeArgKind::BindingText as i64 {
+            let b: i64 = pair[2];
+            values.push(binding_text(lw, b, n));
+        } else if code == ProbeArgKind::Engine as i64 {
+            // Run by the seed; the IR interpreter and the C emitter stop at
+            // their seams for an engine operation they lack.
+            let op: str = pair[1];
+            values.push(emit(lw, op_call_intrinsic(), intrinsic_index(lw, op), int_phy, [], n));
+        } else {
+            values.push(if captured == ir_no_value() { text_const(lw, "", n) } else { captured });
+        }
+    }
+    let _ = call_decl(lw, decls[0], values, [], layout_unknown(lw.ls), n);
+}

@@ -1,0 +1,62 @@
+// `[Debug]` traces every `let`, `var` and assignment of a function to stderr
+// (stdlib/core/debug.pilot gives the line formats):
+//   ::Medium   `[debug] x = 3`
+//   ::Debug    `[debug] x = 3 (was 1)`        (the default)
+//   ::Verbose  `[debug] f:12: x = x + 2 => x = 3 (was 1)`
+// `changed_only: true` leaves out an assignment that kept the value.
+// A function without the attribute is not traced. (A struct value is left
+// out: PilIR and C show a struct as its field list, the seed by field name.)
+
+[Debug(::Medium)]
+fn medium() -> i64 {
+    var x = 1;
+    x = x + 2;
+    return x;
+}
+
+[Debug]
+fn standard() -> i64 {
+    var y = 10;
+    y *= 3;
+    return y;
+}
+
+[Debug(::Verbose)]
+fn verbose(a: i64) -> i64 {
+    var z = a;
+    z = z -   1;
+    return z;
+}
+
+[Debug(::Debug, changed_only: true)]
+fn changed() -> i64 {
+    var w = 5;
+    w = w * 1;
+    w = w + 1;
+    return w;
+}
+
+[Debug(changed_only: true, level: ::Medium)]
+fn labelled() -> str {
+    var s = "a";
+    s = "a";
+    s = s + "b";
+    return s;
+}
+
+[Debug]
+fn elements() -> i64 {
+    var xs = [1, 2];
+    xs[0] = 7;
+    return xs[0] + xs[1];
+}
+
+fn quiet() -> i64 {
+    var q = 1;
+    q = q + 1;
+    return q;
+}
+
+fn main() {
+    print(f"{medium()} {standard()} {verbose(4)} {changed()} {labelled()} {elements()} {quiet()}");
+}

@@ -21,6 +21,10 @@ use selfhost.check.contracts.*;
 use selfhost.check.access.*;
 use selfhost.check.drops.*;
 use selfhost.check.copies.*;
+use selfhost.check.probes.*;
+use selfhost.check.attr_inherit.*;
+use selfhost.check.attr_chain.*;
+use selfhost.check.coverage.*;
 
 pub fn check_program() -> List<List<any>> {
     let s = snap_load();
@@ -35,6 +39,10 @@ pub fn check_program() -> List<List<any>> {
     check_type_tables(p, sink);
     check_contracts(p, sink);
     check_access(inf, sink);
+    check_comptime_attrs(p, sink);
+    check_attr_inherit(p, sink);
+    check_attr_chains(p, sink);
+    check_coverage(p, sink);
     return sink.rows;
 }
 
@@ -48,4 +56,27 @@ pub fn drop_plan() -> List<List<any>> {
     let pl = drop_planner(inf);
     plan_copies(pl);
     return pl.rows;
+}
+
+/// Everything the seed carries out around the program's nodes, as rows for
+/// crates/pilot-cli/src/check.rs `run_plan`: the drop plan (`drop_plan`),
+/// then the probes of `[Debug]` functions (selfhost/check/probes.pilot),
+/// each `[span start, span end, node kind, capture, call, args]`.
+pub fn run_plan() -> List<any> {
+    let s = snap_load();
+    let p = prog_new(s);
+    let r = resolve_program(p, sink_new(s));
+    let inf = infer_new(p, r);
+    let pl = drop_planner(inf);
+    plan_copies(pl);
+    var probes: List<List<any>> = [];
+    for row in probe_plan(p) {
+        let n: i64 = row[0];
+        probes.push([span_start(s, n), span_end(s, n), kind(s, n), row[1], row[2], row[3], ProbeAt::After as i64]);
+    }
+    for row in coverage_plan(p) {
+        let n: i64 = row[0];
+        probes.push([span_start(s, n), span_end(s, n), kind(s, n), row[1], row[2], row[3], row[4]]);
+    }
+    return [pl.rows, probes];
 }

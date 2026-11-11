@@ -1,0 +1,4 @@
+[coverage] total: statements 4/4 (100%), calls 2, O(n) by code, O(n) measured
+[coverage] grid: statements 9/9 (100%), calls 2, O(n^2) by code, O(n^2) measured
+[coverage] sign: statements 2/3 (66%), missed lines 44, calls 1, O(1) by code, not measured (one input size)
+[coverage] pkg Demo.Cover: statements 15/16 (93%) in 3 function(s), calls 5

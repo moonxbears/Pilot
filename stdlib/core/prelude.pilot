@@ -22,5 +22,11 @@ use Pilot.Core.Generator;
 // `Pending<T>` / `pending(..)` and `[StandIn(..)]`: gaps kept in data.
 use Pilot.Core.Pending;
 
+// `[Debug]`'s trace lines (`debug_trace_line`), which a traced function calls.
+use Pilot.Core.Debug;
+
+// `[Coverage]`'s counters and report, which a covered function calls.
+use Pilot.Core.Coverage;
+
 // `a union b`, `a intersect b` and `a except b` on sequences.
 use Pilot.Db.SetOps;

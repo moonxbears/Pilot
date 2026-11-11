@@ -40,6 +40,7 @@ impl BytecodeCompiler {
                         self.compile_node(arena, *stmt);
                     }
                     Deferred::Drop(d) => self.emit_drops(arena, std::slice::from_ref(d)),
+                    Deferred::Probe(p) => self.emit_probe_call(arena, NodeId::NONE, p, None),
                 }
                 self.next_reg = mark;
             }

@@ -525,6 +525,27 @@ pub let ERRORS = [
         reference: "Pilot SSA Weaving Contract",
     },
     ErrorDef {
+        code: "ATTR003",
+        title: "Bad Attribute Argument",
+        description: "An argument of [Debug], [Live] or [Generate] is not one the attribute takes: an unknown level or argument name, a count that does not match the function, or a missing file name",
+        category: "AttributeWeaver",
+        reference: "stdlib/core/meta.pilot DebugAttr / LiveAttr / GenerateAttr",
+    },
+    ErrorDef {
+        code: "ATTR004",
+        title: "Generating Function Has the Wrong Shape",
+        description: "A [Generate] function must take no parameters and return the `str` written to the file",
+        category: "AttributeWeaver",
+        reference: "stdlib/core/meta.pilot GenerateAttr",
+    },
+    ErrorDef {
+        code: "ATTR005",
+        title: "Attribute Cannot Apply Here",
+        description: "A function attribute written on a package, struct, interface or ext block that its functions cannot inherit, on another kind of declaration, or a [NoInherit(X)] with no inherited [X]",
+        category: "AttributeWeaver",
+        reference: "stdlib/core/attr_flow.pilot IInheritedAttribute",
+    },
+    ErrorDef {
         code: "PREPROC001",
         title: "Malformed Preprocessor Directive",
         description: "Unknown preprocessor directive or empty #define identifier",

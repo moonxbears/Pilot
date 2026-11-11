@@ -1,9 +1,0 @@
-// A JSON \u escape outside printable ASCII needs a str built from a code
-// point, which the VM cannot make yet: parsing stops at its seam.
-use std.polyglot.transport.json;
-
-fn main() {
-    print((json_parse("\"caf\\u0065\"")?).str_val);
-    print((json_parse("\"caf\\u00e9\"")?).str_val);
-    print("unreachable");
-}

@@ -1,0 +1,275 @@
+// ==============================================================================
+// FILE: selfhost/check/attr_chain.pilot
+// The chain of step attributes on a function: which they are, their order,
+// and how a user attribute's value is built from its arguments.
+// ==============================================================================
+// The steps of a function (stdlib/core/attr_flow.pilot) are the `[Live]`,
+// `[Generate]` and `[Name(..)]` attributes that apply to it, written on it
+// or inherited (selfhost/check/attr_inherit.pilot), where `NameAttr`
+// reaches `IStepAttribute` or `IRuntimeStepAttribute` through its bases.
+// They run highest `weight` first; equal weights keep their order (inherited
+// ones first, as written). A `weight:` argument gives the weight (an
+// integer, as written); without one, a user attribute takes its struct's
+// `weight` default, and any other step 0.
+//
+// A user attribute's arguments fill its struct: an argument without a label
+// fills the next field in declaration order, `name: value` fills field
+// `name`, and a field left out takes its default. An attribute merged by
+// `::Coalesce` fills from each argument list in turn, the closer ones over
+// the outer. Checked here (ATTR003): a user step is on a function or method,
+// no argument is left over or names a field the struct lacks or fills one
+// twice, every field without a default is filled, and a weight is an integer.
+pub lvl(0) pkg Pilot.SelfHost.Check.AttrChain;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.diag.*;
+use selfhost.check.attr_text.*;
+use selfhost.check.attr_inherit.*;
+use selfhost.check.probes.*;
+
+/// What kind of step an attribute is.
+pub enum StepKind : u8 {
+    /// Not a step.
+    None,
+    Live,
+    Generate,
+    /// An attribute whose struct implements `IStepAttribute`.
+    User,
+    /// An attribute whose struct implements `IRuntimeStepAttribute`.
+    Runtime,
+}
+
+/// One step of a function: its attribute, kind and weight.
+pub struct ChainStep {
+    pub kind: StepKind;
+    pub name: str;
+    /// Its argument lists, outermost first (more than one after `::Coalesce`).
+    pub layers: List<List<i64>>;
+    /// The arguments of the closest one.
+    pub args: List<i64>;
+    pub site: i64;
+    pub inherited: bool;
+    pub weight: i64;
+}
+
+/// The struct that declares user step attribute `[name]` (either kind), or -1.
+pub fn step_attr_decl(p: Program, name: str) -> i64 {
+    let d = attr_decl_with(p, name, step_interface());
+    return if d >= 0 { d } else { attr_decl_with(p, name, runtime_step_interface()) };
+}
+
+/// The kind of step attribute `[name]` is.
+pub fn step_kind(p: Program, name: str) -> StepKind {
+    if name == live_attr() { return ::Live; }
+    if name == generate_attr() { return ::Generate; }
+    if attr_decl_with(p, name, step_interface()) >= 0 { return ::User; }
+    return if attr_decl_with(p, name, runtime_step_interface()) >= 0 { ::Runtime } else { ::None };
+}
+
+/// Whether a step of kind `k` is a user attribute built from its arguments.
+pub fn is_user_step(k: StepKind) -> bool => k == StepKind::User || k == StepKind::Runtime;
+
+/// The stored fields of struct `d`, in declaration order.
+fn struct_fields(s: Snap, d: i64) -> List<i64> {
+    var out: List<i64> = [];
+    for m in type_members(s, d) {
+        let k = kind(s, m);
+        if k == nk_param() || ((k == nk_let() || k == nk_var()) && annot(s, m) >= 0) { out.push(m); }
+    }
+    return out;
+}
+
+/// The `weight:` argument among `args`, or -1.
+fn weight_arg(s: Snap, args: List<i64>) -> i64 {
+    for a in args {
+        if attr_arg_label(s, a) == weight_label() { return a; }
+    }
+    return -1;
+}
+
+/// `args` without the `weight:` argument.
+pub fn without_weight(s: Snap, args: List<i64>) -> List<i64> {
+    let w = weight_arg(s, args);
+    var out: List<i64> = [];
+    for a in args {
+        if a != w { out.push(a); }
+    }
+    return out;
+}
+
+/// The integer `text` writes (`12`, `-3`), or none.
+fn int_text(text: str) -> i64? {
+    var i = 0;
+    var negative = false;
+    if text.len() > 0 && text.byte_at(0) == 45 {
+        negative = true;
+        i = 1;
+    }
+    if i >= text.len() { return none; }
+    var v = 0;
+    while i < text.len() {
+        let b = text.byte_at(i);
+        if b == 95 {
+            i = i + 1;
+            continue;
+        }
+        if b < 48 || b > 57 { return none; }
+        v = v * 10 + (b - 48);
+        i = i + 1;
+    }
+    return if negative { 0 - v } else { v };
+}
+
+/// The integer node `e` writes, or none.
+fn int_node(s: Snap, e: i64) -> i64? {
+    if e < 0 { return none; }
+    if kind(s, e) == nk_int() { return lit_value(s, e); }
+    return int_text(attr_one_line(node_text(s, e)).replace(" ", ""));
+}
+
+/// The weight of step `[name]` of kind `k` with argument lists `layers`
+/// (the closest `weight:` counts); reports a weight that is not an integer.
+fn step_weight(p: Program, sink: DiagSink, k: StepKind, name: str, layers: List<List<i64>>) -> i64 {
+    let s = p.s;
+    var w = -1;
+    for args in layers {
+        let here = weight_arg(s, args);
+        if here >= 0 { w = here; }
+    }
+    if w >= 0 {
+        let given = int_node(s, w);
+        if given == none {
+            sink_error(sink, w, "ATTR003", f"the `weight` of `[{name}]` must be an integer");
+            return 0;
+        }
+        let v: i64 = given;
+        return v;
+    }
+    if !is_user_step(k) { return 0; }
+    for f in struct_fields(s, step_attr_decl(p, name)) {
+        if node_name(s, f) == weight_label() {
+            let v = int_node(s, field_default(s, f));
+            if v != none {
+                let n: i64 = v;
+                return n;
+            }
+        }
+    }
+    return 0;
+}
+
+/// The steps of function `f`, in the order they run; reports bad weights.
+/// `pkgs` is `package_decls(p)`.
+pub fn chain_steps(p: Program, sink: DiagSink, pkgs: Map<str, i64>, f: i64) -> List<ChainStep> {
+    var steps: List<ChainStep> = [];
+    for e in effective_attrs(p, pkgs, f) {
+        let k = step_kind(p, e.name);
+        if k != StepKind::None {
+            let closest = e.layers[e.layers.len() - 1];
+            steps.push(ChainStep {
+                kind: k, name: e.name, layers: e.layers, args: closest, site: e.site,
+                inherited: e.inherited, weight: step_weight(p, sink, k, e.name, e.layers),
+            });
+        }
+    }
+    // Highest weight first; equal weights keep their order (each round
+    // takes the earliest step of the highest weight left).
+    var out: List<ChainStep> = [];
+    var taken: List<bool> = [];
+    for st in steps { taken.push(false); }
+    while out.len() < steps.len() {
+        var best = -1;
+        var i = 0;
+        while i < steps.len() {
+            if !taken[i] && (best < 0 || steps[i].weight > steps[best].weight) { best = i; }
+            i = i + 1;
+        }
+        taken[best] = true;
+        out.push(steps[best]);
+    }
+    return out;
+}
+
+/// The value of user step `[name]` written with argument lists `layers`
+/// (outermost first) as a struct literal (`NameAttr { a: 1, b: "x" }`), or
+/// none after reporting why it cannot be built. A closer list fills over the
+/// fields an outer one gave.
+pub fn step_value(p: Program, sink: DiagSink, name: str, layers: List<List<i64>>, site: i64) -> str? {
+    let s = p.s;
+    let fields = struct_fields(s, step_attr_decl(p, name));
+    let given = Map<str, str>();
+    var ok = true;
+    for layer in layers {
+        let here = Map<str, bool>();
+        var next = 0;
+        for a in without_weight(s, layer) {
+            let label = attr_arg_label(s, a);
+            var field = label;
+            if label == "" {
+                // The next field without a label that is not the weight.
+                while next < fields.len() && node_name(s, fields[next]) == weight_label() { next = next + 1; }
+                if next >= fields.len() {
+                    sink_error(sink, a, "ATTR003", f"`[{name}]` has more arguments than `{name}{attr_struct_suffix()}` has fields");
+                    ok = false;
+                    continue;
+                }
+                field = node_name(s, fields[next]);
+                next = next + 1;
+            } else {
+                var known = false;
+                for fd in fields {
+                    if node_name(s, fd) == label { known = true; }
+                }
+                if !known {
+                    sink_error(sink, a, "ATTR003", f"`[{name}]` has no argument `{label}`");
+                    ok = false;
+                    continue;
+                }
+            }
+            if here.has(field) {
+                sink_error(sink, a, "ATTR003", f"`[{name}]` gives `{field}` twice");
+                ok = false;
+                continue;
+            }
+            here.set(field, true);
+            given.set(field, attr_one_line(node_text(s, a)));
+        }
+    }
+    var parts = "";
+    for fd in fields {
+        let fname = node_name(s, fd);
+        if given.has(fname) {
+            if parts != "" { parts = parts + ", "; }
+            parts = parts + fname + ": " + given.get(fname);
+        } else if field_default(s, fd) < 0 {
+            sink_error(sink, site, "ATTR003", f"`[{name}]` needs `{fname}`: `{name}{attr_struct_suffix()}` gives it no default");
+            ok = false;
+        }
+    }
+    if !ok { return none; }
+    let body = if parts == "" { "{}" } else { "{ " + parts + " }" };
+    return name + attr_struct_suffix() + " " + body;
+}
+
+/// Reports every misused user step attribute and step weight, over every
+/// function and method in the user's files.
+pub fn check_attr_chains(p: Program, sink: DiagSink) {
+    let s = p.s;
+    let pkgs = package_decls(p);
+    var f = 0;
+    while f < s.count {
+        if is_attr_fn(s, f) && in_user_file(s, f) {
+            for st in chain_steps(p, sink, pkgs, f) {
+                if is_user_step(st.kind) {
+                    if kind(s, f) != nk_fn() {
+                        sink_error(sink, st.site, "ATTR003", f"`[{st.name}]` is a step attribute, which runs on a function or method; this is not one");
+                    } else {
+                        let _ = step_value(p, sink, st.name, st.layers, st.site);
+                    }
+                }
+            }
+        }
+        f = f + 1;
+    }
+}

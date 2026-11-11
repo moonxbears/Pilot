@@ -19,6 +19,10 @@ pub struct PythonDialect : ISourceDialect {
         "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import",
         "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
         "with", "yield", "print", "int", "float", "str", "list", "len", "math", "sys", "decimal",
+        // Builtins and modules the prelude calls: a program function of the
+        // same name (`fn bool(..)`) would replace them.
+        "abs", "all", "bool", "callable", "dict", "isinstance", "max", "min", "object", "pow", "repr",
+        "sorted", "struct", "tuple", "type", "zip",
     ];
     pub fn type_name(p: IrTypePhysics) -> str? {
         if is_float(p) && p.bit_width != 64 && p.bit_width != 32 { return none; }
@@ -156,6 +160,13 @@ pub struct PythonDialect : ISourceDialect {
         "    if 0 <= i < len(raw):",
         "        return raw[i]",
         "    pilot_trap('byte index ' + str(i) + ' out of bounds for length ' + str(len(raw)))",
+        "def pilot_str_from_bytes(xs):",
+        "    if any(isinstance(x, bool) or not isinstance(x, int) or x < 0 or x > 255 for x in xs):",
+        "        pilot_trap('`str_from_bytes` takes bytes (0 to 255)')",
+        "    try:",
+        "        return bytes(xs).decode('utf-8')",
+        "    except UnicodeDecodeError:",
+        "        return None",
         "def pilot_eq(a, b):",
         "    if isinstance(a, list) and isinstance(b, list):",
         "        return a is b or (len(a) == len(b) and all(pilot_eq(x, y) for x, y in zip(a, b)))",
@@ -419,7 +430,7 @@ fn dynamic_engine_ops() -> Map<str, str> {
     ops.set("to_str", "pilot_show");
     ops.set("list_get", "pilot_map_get");
     ops.set("list_set", "pilot_map_set");
-    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_byte_at", "list_extend", "list_remove_at", "stdin_read_line"] {
+    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_byte_at", "str_from_bytes", "list_extend", "list_remove_at", "stdin_read_line"] {
         ops.set(name, "pilot_" + name);
     }
     return ops;

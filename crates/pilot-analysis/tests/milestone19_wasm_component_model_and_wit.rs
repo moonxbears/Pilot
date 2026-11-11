@@ -463,20 +463,20 @@ fn test_m19_3_sandboxed_wasm_runtime_bounds_and_fuel_traps() {
         "Memory, UTF-8, fuel and export checks must pass, then execution must stop at its seam, got {res}"
     );
 
-    // Turning validated linear-memory bytes into a str needs a bytes-to-str intrinsic.
+    // Validated linear-memory bytes come back as the str that was stored:
+    // "héllo" is 6 UTF-8 bytes (U+00E9 is C3 A9), and reading 2 bytes
+    // from offset 1 gives just the e-acute.
     let load_script = r##"
-        pub fn main() -> i64 {
+        pub fn main() -> str {
             var mem = wasm_memory_new(1, 1);
-            wasm_memory_store_str(var mem, 0, "hello");
-            let s = wasm_memory_load_str(mem, 0, 5);
-            return 43;
+            wasm_memory_store_str(var mem, 0, "héllo");
+            let whole = wasm_memory_load_str(mem, 0, 6);
+            let acute = wasm_memory_load_str(mem, 1, 2);
+            return whole.unwrap_str() + "|" + acute.unwrap_str();
         }
     "##;
     let res = eval_m19(deps, load_script);
-    assert!(
-        res.starts_with("FAULT: SEAM001: unconnected seam `wasm.load_str`"),
-        "Loading a string must stop at its seam after validation, got {res}"
-    );
+    assert_eq!(res, "h\u{e9}llo|\u{e9}", "Loading a string must give back the stored UTF-8 text");
 
     guard.finish();
 }

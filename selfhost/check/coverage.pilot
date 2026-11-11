@@ -1,0 +1,398 @@
+// ==============================================================================
+// FILE: selfhost/check/coverage.pilot
+// `[Coverage]`: its arguments are checked here, and the calls into
+// stdlib/core/coverage.pilot that measure the covered functions are planned.
+// ==============================================================================
+// Checking (`check_coverage`): the modes are `CoverageMode` flags joined
+// with `|` (first argument or `modes:`), the outputs `CoverageOut` flags
+// (`to:`), as stdlib/core/coverage.pilot declares them (ATTR003). Where the
+// attribute may be written is checked with the other inherited attributes
+// (selfhost/check/attr_inherit.pilot).
+//
+// Planning (`coverage_plan`): probe rows `[node, capture, call, args, at]`
+// (selfhost/check/probes.pilot), for every function the attribute applies
+// to, written on it or inherited:
+//   - before each of its statements: `coverage_line(unit, index)`;
+//   - on entry, before its first statement: `coverage_enter(unit, size,
+//     kind)`, and on every way out (deferred): `coverage_exit(unit)`; the
+//     `_timed` forms, which also read the clock, under `::Speed`;
+//   - on entry to `main`, first: `coverage_group(..)` for each package,
+//     struct, interface or ext block carrying the attribute and
+//     `coverage_unit(..)` for each covered function; on its way out, last:
+//     `coverage_report()`, then `coverage_write_file(path)` when a report
+//     line goes to `::File`.
+// An expression body counts as one statement; its calls come before and
+// after it.
+pub lvl(0) pkg Pilot.SelfHost.Check.Coverage;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.diag.*;
+use selfhost.check.attr_text.*;
+use selfhost.check.attr_inherit.*;
+use selfhost.check.probes.*;
+
+/// The flags enums of stdlib/core/coverage.pilot, the arguments that take
+/// them, and the outputs flag used when `to:` is not written.
+pub pure fn coverage_mode_type() -> str => "CoverageMode";
+pub pure fn coverage_out_type() -> str => "CoverageOut";
+pub pure fn coverage_modes_label() -> str => "modes";
+pub pure fn coverage_to_label() -> str => "to";
+pub pure fn coverage_default_out() -> str => "Stderr";
+pub pure fn coverage_file_out() -> str => "File";
+
+/// The functions of stdlib/core/coverage.pilot (and coverage_file.pilot)
+/// the plan calls.
+pub pure fn cov_hook_group() -> str => "coverage_group";
+pub pure fn cov_hook_unit() -> str => "coverage_unit";
+pub pure fn cov_hook_enter() -> str => "coverage_enter";
+pub pure fn cov_hook_enter_timed() -> str => "coverage_enter_timed";
+pub pure fn cov_hook_exit() -> str => "coverage_exit";
+pub pure fn cov_hook_exit_timed() -> str => "coverage_exit_timed";
+pub pure fn cov_hook_line() -> str => "coverage_line";
+pub pure fn cov_hook_report() -> str => "coverage_report";
+pub pure fn cov_hook_write_file() -> str => "coverage_write_file";
+
+/// The clock `::Speed` reads: the engine operation behind
+/// `std.time.monotonic_micros` (stdlib/std/time.pilot).
+pub pure fn cov_clock_op() -> str => "time_now_us";
+/// The function the report runs on the way out of.
+pub pure fn cov_entry_fn() -> str => "main";
+/// What the `::File` report is named after its source: `<stem><suffix>`.
+pub pure fn cov_file_suffix() -> str => ".coverage.txt";
+
+/// What one `[Coverage]` asks for.
+pub struct CoverageSettings : IValue {
+    pub modes: i64;
+    pub outs: i64;
+}
+
+fn all_flags(known: List<List<any>>) -> i64 {
+    var m = 0;
+    for f in known {
+        let v: i64 = f[1];
+        m = m | v;
+    }
+    return m;
+}
+
+/// The settings of a `[Coverage]` with arguments `args`; none after
+/// reporting a wrong one to `sink`.
+pub fn coverage_settings(p: Program, sink: DiagSink, args: List<i64>) -> CoverageSettings? {
+    let s = p.s;
+    let modes_known = enum_flags(p, coverage_mode_type());
+    let outs_known = enum_flags(p, coverage_out_type());
+    var modes = all_flags(modes_known);
+    var outs = flag_value(outs_known, coverage_default_out());
+    var ok = true;
+    var i = 0;
+    for a in args {
+        let label = attr_arg_label(s, a);
+        let param = if label != "" { label } else if i == 0 { coverage_modes_label() } else { "" };
+        if param == coverage_modes_label() {
+            let m = flags_mask(p, sink, modes_known, a, coverage_attr(), "a mode");
+            if m < 0 { ok = false; } else { modes = m; }
+        } else if param == coverage_to_label() {
+            let o = flags_mask(p, sink, outs_known, a, coverage_attr(), "an output");
+            if o < 0 { ok = false; } else { outs = o; }
+        } else if param != weight_label() {
+            let shown = if label != "" { label } else { attr_one_line(node_text(s, a)) };
+            sink_error(sink, a, "ATTR003", f"`[Coverage]` has no argument `{shown}`: its arguments are `modes` and `to`");
+            ok = false;
+        }
+        if label == "" { i = i + 1; }
+    }
+    if !ok { return none; }
+    return CoverageSettings { modes: modes, outs: outs };
+}
+
+/// Reports every wrong `[Coverage]` argument in the user's files.
+pub fn check_coverage(p: Program, sink: DiagSink) {
+    for row in p.s.attrs {
+        let t: i64 = row[0];
+        if t >= 0 && in_user_file(p.s, t) && sym_text(p.s, row[1]) == coverage_attr() {
+            let args: List<i64> = row[2];
+            let _ = coverage_settings(p, sink, args);
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// The plan
+// ------------------------------------------------------------------------------
+
+fn text_row(n: i64, call: str, args: List<any>, at: ProbeAt) -> List<any> => [n, false, call, args, at as i64];
+
+/// The statements of function `f` in source order: every node directly in a
+/// block whose nearest function is `f`.
+fn fn_statements(p: Program, f: i64) -> List<i64> {
+    let s = p.s;
+    var found: List<i64> = [];
+    var n = 0;
+    while n < s.count {
+        let up = p.parents[n];
+        if up >= 0 && kind(s, up) == nk_block() && unit_of(s, n) == unit_of(s, f) && enclosing_fn(p, n) == f {
+            found.push(n);
+        }
+        n = n + 1;
+    }
+    // By position (insertion into a fresh list).
+    var out: List<i64> = [];
+    for x in found {
+        var at = 0;
+        while at < out.len() && span_start(s, out[at]) <= span_start(s, x) { at = at + 1; }
+        var next: List<i64> = [];
+        var j = 0;
+        while j < out.len() {
+            if j == at { next.push(x); }
+            next.push(out[j]);
+            j = j + 1;
+        }
+        if at == out.len() { next.push(x); }
+        out = next;
+    }
+    return out;
+}
+
+fn line_of_node(s: Snap, n: i64) -> i64 {
+    let f = file_of(s, n);
+    let base: i64 = f[0];
+    let text: str = f[1];
+    return attr_line_at(text, span_start(s, n) - base);
+}
+
+fn is_loop(s: Snap, n: i64) -> bool => kind(s, n) == nk_for() || kind(s, n) == nk_while();
+
+/// The big-O of `f` by its code: the deepest nesting of loops, or
+/// `recursive` when it calls itself.
+fn by_code(p: Program, f: i64) -> str {
+    let s = p.s;
+    let name = node_name(s, f);
+    var deepest = 0;
+    var n = 0;
+    while n < s.count {
+        if unit_of(s, n) == unit_of(s, f) && enclosing_fn(p, n) == f {
+            if kind(s, n) == nk_call() {
+                let callee = lhs(s, n);
+                let called = if callee >= 0 && kind(s, callee) == nk_ident() { node_name(s, callee) }
+                    else if callee >= 0 && kind(s, callee) == nk_member() { sym_text(s, rhs(s, callee)) }
+                    else { "" };
+                if called == name { return "recursive"; }
+            }
+            if is_loop(s, n) {
+                var depth = 1;
+                var up = p.parents[n];
+                while up >= 0 && up != f {
+                    if is_loop(s, up) { depth = depth + 1; }
+                    up = p.parents[up];
+                }
+                if depth > deepest { deepest = depth; }
+            }
+        }
+        n = n + 1;
+    }
+    if deepest == 0 { return "O(1)"; }
+    if deepest == 1 { return "O(n)"; }
+    return f"O(n^{deepest})";
+}
+
+/// The parameter whose size a call's input size is, and how to read it:
+/// `[param node, "i" | "s" | "l"]`, or none.
+fn size_param(p: Program, f: i64) -> List<any>? {
+    let s = p.s;
+    let text = prog_slot_type(p, literal_slot(nk_str()));
+    let list = prog_slot_type(p, list_slot());
+    for prm in fn_params(s, f) {
+        let tn = rhs(s, prm);
+        if tn >= 0 {
+            let t = prog_annot_type(p, tn);
+            if t == text { return [prm, "s"]; }
+            if is_integer_class(prog_value_class(p, t)) { return [prm, "i"]; }
+            if ty_is_named(p.tt, t) && ty_is_named(p.tt, list) && ty_decl(p.tt, t) == ty_decl(p.tt, list) { return [prm, "l"]; }
+        }
+    }
+    return none;
+}
+
+/// The settings `[Coverage]` gives function `f`, or none when it does not
+/// apply to it.
+fn fn_settings(p: Program, pkgs: Map<str, i64>, quiet: DiagSink, f: i64) -> CoverageSettings? {
+    var found: CoverageSettings? = none;
+    for e in effective_attrs(p, pkgs, f) {
+        if e.name == coverage_attr() { found = coverage_settings(p, quiet, e.layers[e.layers.len() - 1]); }
+    }
+    return found;
+}
+
+/// The settings of the `[Coverage]` written on container `c`, or none.
+fn own_settings(p: Program, quiet: DiagSink, c: i64) -> CoverageSettings? {
+    var found: CoverageSettings? = none;
+    for row_index in nl_get(p.attrs, f"{c}") {
+        let row: List<any> = p.s.attrs[row_index];
+        if sym_text(p.s, row[1]) == coverage_attr() {
+            let args: List<i64> = row[2];
+            found = coverage_settings(p, quiet, args);
+        }
+    }
+    return found;
+}
+
+fn group_label(s: Snap, c: i64) -> str {
+    let k = kind(s, c);
+    if k == nk_struct() { return "struct " + node_name(s, c); }
+    if k == nk_interface() { return "interface " + node_name(s, c); }
+    if k == nk_extend() { return "ext " + node_name(s, c); }
+    return "pkg " + node_name(s, c);
+}
+
+/// Where the calls on entry to `f` go, and whether its way out is
+/// deferred: `[node, deferred]`; none for a function without a body.
+fn entry_of(s: Snap, f: i64) -> List<any>? {
+    let body = fn_body(s, f);
+    if body < 0 { return none; }
+    if kind(s, body) == nk_block() {
+        let parts = children(s, body);
+        if parts.len() > 0 { return [parts[0], true]; }
+    }
+    return [body, false];
+}
+
+fn flag_text(v: i64) -> List<any> => text_arg(f"{v}");
+
+/// The probe rows that measure the covered functions of the program.
+pub fn coverage_plan(p: Program) -> List<List<any>> {
+    let s = p.s;
+    var out: List<List<any>> = [];
+    let pkgs = package_decls(p);
+    let quiet = sink_new(s);
+    let speed = flag_value(enum_flags(p, coverage_mode_type()), "Speed");
+    let file_out = flag_value(enum_flags(p, coverage_out_type()), coverage_file_out());
+    // Covered functions, in source order.
+    var units: List<i64> = [];
+    var f = 0;
+    while f < s.count {
+        if is_attr_fn(s, f) && in_user_file(s, f) && fn_settings(p, pkgs, quiet, f) != none && entry_of(s, f) != none {
+            var at = 0;
+            while at < units.len() && span_start(s, units[at]) <= span_start(s, f) { at = at + 1; }
+            var next: List<i64> = [];
+            var j = 0;
+            while j < units.len() {
+                if j == at { next.push(f); }
+                next.push(units[j]);
+                j = j + 1;
+            }
+            if at == units.len() { next.push(f); }
+            units = next;
+        }
+        f = f + 1;
+    }
+    if units.len() == 0 { return out; }
+    var mains: List<i64> = [];
+    for m in nl_get(p.fns, cov_entry_fn()) {
+        if in_user_file(s, m) && entry_of(s, m) != none { mains.push(m); }
+    }
+    if mains.len() != 1 { return out; }
+    let main_fn = mains[0];
+    let main_entry: List<any> = entry_of(s, main_fn) ?? [];
+    let main_node: i64 = main_entry[0];
+    let main_deferred: bool = main_entry[1];
+
+    // Groups: the containers that carry the attribute, the package last.
+    var groups: List<i64> = [];
+    var packages: List<i64> = [];
+    for row in s.attrs {
+        let c: i64 = row[0];
+        if c >= 0 && in_user_file(s, c) && is_container(s, c) && sym_text(s, row[1]) == coverage_attr() {
+            var seen = false;
+            for g in groups { if g == c { seen = true; } }
+            for g in packages { if g == c { seen = true; } }
+            if !seen {
+                if kind(s, c) == nk_import_decl() { packages.push(c); } else { groups.push(c); }
+            }
+        }
+    }
+    for g in packages { groups.push(g); }
+    var any_file = false;
+    for g in groups {
+        if some st = own_settings(p, quiet, g) {
+            out.push(text_row(main_node, cov_hook_group(), [text_arg(f"g{g}"), text_arg(group_label(s, g)), flag_text(st.modes), flag_text(st.outs)], ::Before));
+            if (st.outs & file_out) != 0 { any_file = true; }
+        }
+    }
+    for u in units {
+        let st: CoverageSettings = fn_settings(p, pkgs, quiet, u) ?? CoverageSettings { modes: 0, outs: 0 };
+        if (st.outs & file_out) != 0 { any_file = true; }
+        var in_groups = "";
+        for c in containers_of(p, pkgs, u) {
+            for g in groups {
+                if g == c {
+                    if in_groups != "" { in_groups = in_groups + ","; }
+                    in_groups = in_groups + f"g{g}";
+                }
+            }
+        }
+        var stmts = fn_statements(p, u);
+        if stmts.len() == 0 { stmts = [fn_body(s, u)]; }
+        var lines = "";
+        for n in stmts {
+            if lines != "" { lines = lines + ","; }
+            lines = lines + f"{line_of_node(s, n)}";
+        }
+        out.push(text_row(main_node, cov_hook_unit(), [
+            text_arg(f"u{u}"), text_arg(fn_shown_name(p, pkgs, u)), text_arg(in_groups), text_arg(lines),
+            flag_text(st.modes), flag_text(st.outs), text_arg(by_code(p, u)),
+        ], ::Before));
+    }
+    // The way out of `main`. Deferred calls run last-registered first, and
+    // these are registered before any covered function's own: the report
+    // runs after the rest, then the file is written.
+    let out_at = if main_deferred { ProbeAt::Defer } else { ProbeAt::After };
+    if any_file {
+        let src = file_row_path(s, main_fn);
+        let stem = if src.ends_with(".pilot") { src.slice(0, src.len() - 6) } else { src };
+        out.push(text_row(main_node, cov_hook_write_file(), [text_arg(stem + cov_file_suffix())], out_at));
+    }
+    out.push(text_row(main_node, cov_hook_report(), [], out_at));
+
+    for u in units {
+        let st: CoverageSettings = fn_settings(p, pkgs, quiet, u) ?? CoverageSettings { modes: 0, outs: 0 };
+        let timed = (st.modes & speed) != 0;
+        let key = f"u{u}";
+        let entry: List<any> = entry_of(s, u) ?? [];
+        let node: i64 = entry[0];
+        let deferred: bool = entry[1];
+        var enter_args: List<any> = [text_arg(key)];
+        if some sized = size_param(p, u) {
+            let prm: i64 = sized[0];
+            let how: str = sized[1];
+            enter_args.push([ProbeArgKind::BindingText as i64, node_name(s, prm), prm]);
+            enter_args.push(text_arg(how));
+        } else {
+            enter_args.push(text_arg(""));
+            enter_args.push(text_arg(""));
+        }
+        var exit_args: List<any> = [text_arg(key)];
+        if timed {
+            enter_args.push([ProbeArgKind::Engine as i64, cov_clock_op()]);
+            exit_args.push([ProbeArgKind::Engine as i64, cov_clock_op()]);
+        }
+        out.push(text_row(node, if timed { cov_hook_enter_timed() } else { cov_hook_enter() }, enter_args, ::Before));
+        out.push(text_row(node, if timed { cov_hook_exit_timed() } else { cov_hook_exit() }, exit_args, if deferred { ProbeAt::Defer } else { ProbeAt::After }));
+        var stmts = fn_statements(p, u);
+        if stmts.len() == 0 { stmts = [fn_body(s, u)]; }
+        var i = 0;
+        while i < stmts.len() {
+            out.push(text_row(stmts[i], cov_hook_line(), [text_arg(key), text_arg(f"{i}")], ::Before));
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+/// The path of the file node `n` is in.
+fn file_row_path(s: Snap, n: i64) -> str {
+    let row: List<any> = s.files[unit_of(s, n)];
+    let path: str = row[0];
+    return path;
+}

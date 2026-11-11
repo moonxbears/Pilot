@@ -1,1 +1,0 @@
-err_drop_reassign_maybe_moved.pilot:20:5: runtime error: SEAM001: unconnected seam `own.reassign`

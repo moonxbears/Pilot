@@ -38,6 +38,7 @@ use selfhost.ir.lower_destructure.*;
 use selfhost.ir.lower_generator.*;
 use selfhost.check.drops.*;
 use selfhost.ir.lower_drop.*;
+use selfhost.ir.lower_probe.*;
 
 /// The state of one lowering run.
 pub struct Lowerer : IObject {
@@ -155,6 +156,12 @@ pub struct Lowerer : IObject {
     /// guard bindings released at scope exit, by their `let` node.
     pub plan: DropPlanner;
     pub releases: Map<str, List<any>>;
+    /// Binding -> the stack slot of its drop flag, for a binding moved on
+    /// only some paths (selfhost/ir/lower_drop.pilot).
+    pub drop_flags: Map<str, i64>;
+    /// The calls planned around statements (selfhost/ir/lower_probe.pilot),
+    /// by statement node.
+    pub probes: Map<str, List<any>>;
 }
 
 /// Lowers `n` expecting type `t` (for target-typed variants).
@@ -275,7 +282,8 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
         setter_arg: ir_no_value(), setter_arg_type: ty_unknown(),
         gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
         resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, i64>(),
-        loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, List<any>>(),
+        loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, List<any>>(), drop_flags: Map<str, i64>(),
+        probes: probe_rows(p),
     };
     // Function 0 is `<start>` (selfhost/ir/lower_global.pilot).
     lw.queue.push(-1);
@@ -553,10 +561,13 @@ pub fn unsupported(lw: Lowerer, n: i64) -> u32 {
 /// Lowers `n` and returns its value (an `undef` of its type when it has none),
 /// with the drops and copies the plan puts around it.
 pub fn lower_expr(lw: Lowerer, n: i64) -> u32 {
-    if !planned(lw, n) { return lower_node(lw, n); }
+    if !planned(lw, n) && !probed(lw, n) { return lower_node(lw, n); }
     ensure_open(lw);
     plan_before(lw, n);
-    return plan_after(lw, n, lower_node(lw, n));
+    let captured = probe_before(lw, n);
+    let v = lower_node(lw, n);
+    probe_after(lw, n, captured);
+    return plan_after(lw, n, v);
 }
 
 fn lower_node(lw: Lowerer, n: i64) -> u32 {
@@ -705,6 +716,7 @@ pub fn lower_assign(lw: Lowerer, n: i64) -> u32 {
     }
     plan_replace(lw, n);
     emit_void(lw, op_store(), 0, [slot, coerce(lw, v, physics_of(lw, target), n)], n);
+    rearm_flag(lw, b, n);
     return unit_value(lw, n);
 }
 
@@ -907,16 +919,20 @@ pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
         if ty_is_named(lw.inf.p.tt, as_type) && ch.len() == 2 && kind(s, ch[1]) == nk_map() {
             return lower_struct_literal(lw, n, ch[1]);
         }
+        // A function the program declares shadows a type of the same name
+        // (`fn order(..)` over the core `order`), as in the checker's
+        // `infer_call` and the seed: `order(4)` calls it.
+        let names_fn = nl_get(lw.inf.p.fns, node_name(s, callee)).len() > 0;
         // A type the engine holds (`List()`, `Map()`) is built by the engine
         // operation bound to its name, unless the program links a
         // constructor of it.
         let engine_built = bound(lw, native_fn_hook(), [node_name(s, callee)]) != "" && !links_constructor(lw, as_type);
         // A type held in one register converts its one argument.
-        if ty_is_named(lw.inf.p.tt, as_type) && ch.len() == 2 && !engine_built && !links_constructor(lw, as_type)
+        if ty_is_named(lw.inf.p.tt, as_type) && ch.len() == 2 && !names_fn && !engine_built && !links_constructor(lw, as_type)
             && kind(s, ch[1]) != nk_call_arg() && in_register(layout_of(lw.ls, as_type)) {
             return lower_cast(lw, n, ch[1]);
         }
-        if ty_is_named(lw.inf.p.tt, as_type) && called_fn(lw.inf, n) < 0 && !engine_built { return lower_construction(lw, n, as_type); }
+        if ty_is_named(lw.inf.p.tt, as_type) && !names_fn && !engine_built { return lower_construction(lw, n, as_type); }
     }
     if kind(s, callee) == nk_member() { return lower_method_call(lw, n); }
     if some v = lower_sibling_call(lw, n) { return v; }

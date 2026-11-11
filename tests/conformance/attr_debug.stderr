@@ -1,0 +1,12 @@
+[debug] x = 1
+[debug] x = 3
+[debug] y = 10
+[debug] y = 30 (was 10)
+[debug] verbose:26: var z = a => z = 4
+[debug] verbose:27: z = z - 1 => z = 3 (was 4)
+[debug] w = 5
+[debug] w = 6 (was 5)
+[debug] s = a
+[debug] s = ab
+[debug] xs = [1, 2]
+[debug] xs[0] = 7 (was 1)

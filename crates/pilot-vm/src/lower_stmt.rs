@@ -340,6 +340,7 @@ impl BytecodeCompiler {
                     Some(&slot) => {
                         self.emit_drops(arena, &replace);
                         self.emit(Opcode::Move, slot, rhs_r, 0);
+                        self.rearm_drop_flag(&name);
                         slot
                     }
                     None if self.is_captured_name(&name) => self.error(

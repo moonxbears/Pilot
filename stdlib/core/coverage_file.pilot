@@ -1,0 +1,19 @@
+// =========================================================================
+// FILE: stdlib/core/coverage_file.pilot
+// Writing the `[Coverage]` report's `::File` part.
+// =========================================================================
+// Linked by `pilot run` (selfhost/cli/commands.pilot) and called when `main`
+// returns, after the report, for a program whose `[Coverage]` sends lines to
+// `::File`. Only the seed writes files: PilIR and C have no file intrinsics
+// yet, so other commands do not link it.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.CoverageFile;
+
+use Pilot.Core.File;
+use Pilot.Core.Coverage;
+
+/// Writes what the report sent to `::File` to `path`.
+pub fn coverage_write_file(path: str) {
+    let text = coverage_file_text();
+    if text != "" { assert(File.write_text(path, text), "cannot write the coverage report to `" + path + "`"); }
+}

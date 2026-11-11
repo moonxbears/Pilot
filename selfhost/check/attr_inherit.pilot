@@ -1,0 +1,412 @@
+// ==============================================================================
+// FILE: selfhost/check/attr_inherit.pilot
+// Which attributes apply to a function: its own, and those it inherits from
+// the package, struct, interface or ext block it is written in.
+// ==============================================================================
+// The rules are stated in stdlib/core/attr_flow.pilot. Here:
+//   - `effective_attrs` gives a function's attributes, the inherited ones
+//     first (outermost first, as written), after `[NoInherit]` and each
+//     inherited attribute's `InheritPolicy` against one of the same name
+//     written closer. An attribute merged by `::Coalesce` keeps every
+//     argument list it was written with, outermost first (`layers`).
+//   - `check_attr_inherit` reports an attribute that cannot reach the
+//     functions it is written over (ATTR005): one that is not inherited, a
+//     `[Generate]` on a container that names one file, a function attribute
+//     on another kind of declaration, and a `[NoInherit(X)]` with no `[X]`
+//     to drop.
+// An attribute counts here when the checker knows it as a function
+// attribute: `[Debug]`, `[Live]`, `[Generate]`, `[NoInherit]`, or a
+// `[Name]` whose `NameAttr` struct implements `IStepAttribute`,
+// `IRuntimeStepAttribute` or `IInheritedAttribute`. Others (`[Layout]`,
+// `[EnforceCoreNaming]`, ..) are left to whatever reads them.
+pub lvl(0) pkg Pilot.SelfHost.Check.AttrInherit;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.diag.*;
+use selfhost.check.attr_text.*;
+
+/// The built-in function attributes, as written in `[Name(..)]`.
+pub pure fn debug_attr() -> str => "Debug";
+pub pure fn live_attr() -> str => "Live";
+pub pure fn generate_attr() -> str => "Generate";
+pub pure fn no_inherit_attr() -> str => "NoInherit";
+pub pure fn coverage_attr() -> str => "Coverage";
+
+/// The names stdlib/core/attr_flow.pilot declares, which this file reads.
+pub pure fn step_interface() -> str => "IStepAttribute";
+pub pure fn runtime_step_interface() -> str => "IRuntimeStepAttribute";
+pub pure fn inherited_interface() -> str => "IInheritedAttribute";
+pub pure fn inherit_policy_type() -> str => "InheritPolicy";
+pub pure fn inherit_policy_member() -> str => "policy";
+/// `[Name]` is declared by struct `NameAttr`.
+pub pure fn attr_struct_suffix() -> str => "Attr";
+/// The label of `[Generate(ext: "..")]`, the form a container may carry.
+pub pure fn generate_ext_label() -> str => "ext";
+
+/// The parser's node kind of a `pkg` / `use` declaration
+/// (`NodeKind::ImportDecl` in crates/pilot-ast/src/lib.rs).
+pub pure fn nk_import_decl() -> i64 => 1;
+
+/// What an inherited attribute does to one of the same name written
+/// closer: the variants of `InheritPolicy`, by their order.
+pub enum InheritRule : u8 {
+    Override,
+    Append,
+    Coalesce,
+}
+
+/// One attribute that applies to a function.
+pub struct EffAttr {
+    pub name: str;
+    /// Its argument lists, outermost first: one, or more after `::Coalesce`.
+    pub layers: List<List<i64>>;
+    /// Where a diagnostic about it points.
+    pub site: i64;
+    /// How deep the declaration it is written on lies: 0 for the outermost
+    /// container; the function's own come deepest.
+    pub depth: i64;
+    pub inherited: bool;
+}
+
+fn key_of(n: i64) -> str => f"{n}";
+
+/// `[base offset, text]` of the file node `n` is in.
+pub fn file_of(s: Snap, n: i64) -> List<any> {
+    let u = unit_of(s, n);
+    if u < 0 || u >= s.files.len() { return [0, ""]; }
+    let row: List<any> = s.files[u];
+    return [row[2], row[3]];
+}
+
+/// The name written before attribute argument `a`, or "".
+pub fn attr_arg_label(s: Snap, a: i64) -> str {
+    let f = file_of(s, a);
+    let base: i64 = f[0];
+    let text: str = f[1];
+    return attr_label_before(text, span_start(s, a) - base);
+}
+
+/// Where a diagnostic about an attribute with arguments `args` on `n` points.
+pub fn attr_site(args: List<i64>, n: i64) -> i64 => if args.len() > 0 { args[0] } else { n };
+
+/// Whether the type named `name` is `target` or reaches it through its bases.
+fn reaches_named(p: Program, name: str, target: str, depth: i64) -> bool {
+    if name == target { return true; }
+    if depth > 16 { return false; }
+    for b in nl_get(p.bases, name) {
+        if reaches_named(p, node_name(p.s, b), target, depth + 1) { return true; }
+    }
+    return false;
+}
+
+/// The struct that declares attribute `[name]` when it implements interface
+/// `iface`, or -1.
+pub fn attr_decl_with(p: Program, name: str, iface: str) -> i64 {
+    let type_name = name + attr_struct_suffix();
+    let d = prog_type_decl(p, type_name);
+    if d < 0 || kind(p.s, d) != nk_struct() { return -1; }
+    return if reaches_named(p, type_name, iface, 0) { d } else { -1 };
+}
+
+/// Whether node `n` is a declaration whose attributes its functions inherit.
+pub fn is_container(s: Snap, n: i64) -> bool {
+    let k = kind(s, n);
+    if k == nk_struct() || k == nk_interface() || k == nk_extend() { return true; }
+    return k == nk_import_decl() && is_package_decl(s, n);
+}
+
+/// Whether node `n` is a function an attribute applies to directly.
+pub fn is_attr_fn(s: Snap, n: i64) -> bool => kind(s, n) == nk_fn() || kind(s, n) == nk_operator();
+
+/// The `pkg` declaration of each file that carries attributes, by unit.
+pub fn package_decls(p: Program) -> Map<str, i64> {
+    let out = Map<str, i64>();
+    for row in p.s.attrs {
+        let t: i64 = row[0];
+        if t >= 0 && kind(p.s, t) == nk_import_decl() && is_package_decl(p.s, t) {
+            out.set(key_of(unit_of(p.s, t)), t);
+        }
+    }
+    return out;
+}
+
+/// The containers node `n` is written in, outermost first: its file's
+/// package, then the structs, interfaces and ext blocks around it.
+pub fn containers_of(p: Program, pkgs: Map<str, i64>, n: i64) -> List<i64> {
+    var inner: List<i64> = [];
+    var cur = p.parents[n];
+    while cur >= 0 {
+        if is_container(p.s, cur) { inner.push(cur); }
+        cur = p.parents[cur];
+    }
+    var out: List<i64> = [];
+    let u = key_of(unit_of(p.s, n));
+    if pkgs.has(u) && pkgs.get(u) != n { out.push(pkgs.get(u)); }
+    var i = inner.len() - 1;
+    while i >= 0 {
+        out.push(inner[i]);
+        i = i - 1;
+    }
+    return out;
+}
+
+/// The attribute rows on node `n`, as written.
+fn rows_on(p: Program, n: i64) -> List<i64> => nl_get(p.attrs, key_of(n));
+
+fn row_name(p: Program, r: i64) -> str {
+    let row: List<any> = p.s.attrs[r];
+    return sym_text(p.s, row[1]);
+}
+
+fn row_args(p: Program, r: i64) -> List<i64> {
+    let row: List<any> = p.s.attrs[r];
+    let args: List<i64> = row[2];
+    return args;
+}
+
+/// Whether `[name(args)]` is a function attribute the checker knows.
+pub fn known_fn_attr(p: Program, name: str) -> bool {
+    if name == debug_attr() || name == live_attr() || name == generate_attr() || name == no_inherit_attr()
+        || name == coverage_attr() { return true; }
+    return attr_decl_with(p, name, step_interface()) >= 0
+        || attr_decl_with(p, name, runtime_step_interface()) >= 0
+        || attr_decl_with(p, name, inherited_interface()) >= 0;
+}
+
+/// Whether `[name(args)]` written on a container reaches its functions.
+pub fn inheritable(p: Program, name: str, args: List<i64>) -> bool {
+    if name == debug_attr() || name == coverage_attr() { return true; }
+    if name == generate_attr() {
+        for a in args {
+            if attr_arg_label(p.s, a) == generate_ext_label() { return true; }
+        }
+        return false;
+    }
+    if name == live_attr() || name == no_inherit_attr() { return false; }
+    return attr_decl_with(p, name, inherited_interface()) >= 0;
+}
+
+/// The variant `policy()` of `[name]`'s struct returns, or "" when it keeps
+/// the interface's default.
+fn written_policy(p: Program, name: str) -> str {
+    let s = p.s;
+    let d = attr_decl_with(p, name, inherited_interface());
+    if d < 0 { return ""; }
+    for m in type_members(s, d) {
+        if kind(s, m) == nk_fn() && node_name(s, m) == inherit_policy_member() {
+            var e = fn_body(s, m);
+            // `{ return ::X; }` as well as `=> ::X`.
+            if e >= 0 && kind(s, e) == nk_block() {
+                let parts = children(s, e);
+                e = if parts.len() == 1 && kind(s, parts[0]) == nk_return() { lhs(s, parts[0]) } else { -1 };
+            }
+            if e >= 0 && kind(s, e) == nk_member() { e = rhs(s, e); }
+            return if e >= 0 && kind(s, e) == nk_ident() { node_name(s, e) } else { "" };
+        }
+    }
+    return "";
+}
+
+/// What an inherited `[name]` does to one written closer.
+pub fn inherit_rule(p: Program, name: str) -> InheritRule {
+    let written = written_policy(p, name);
+    if written == "" { return ::Override; }
+    let d = prog_type_decl(p, inherit_policy_type());
+    if d < 0 { return ::Override; }
+    var ordinal = 0;
+    for v in children(p.s, d) {
+        if kind(p.s, v) == nk_variant() {
+            if node_name(p.s, v) == written {
+                if ordinal == 1 { return ::Append; }
+                if ordinal == 2 { return ::Coalesce; }
+                return ::Override;
+            }
+            ordinal = ordinal + 1;
+        }
+    }
+    return ::Override;
+}
+
+/// The names `[NoInherit(..)]` on node `n` drops: none when it carries no
+/// `[NoInherit]`, an empty list for a bare `[NoInherit]` (it drops all).
+fn no_inherit_names(p: Program, n: i64) -> List<str>? {
+    var found = false;
+    var names: List<str> = [];
+    for r in rows_on(p, n) {
+        if row_name(p, r) == no_inherit_attr() {
+            let args = row_args(p, r);
+            if found && names.len() == 0 { return names; }
+            if args.len() == 0 { return []; }
+            found = true;
+            for a in args { names.push(node_name(p.s, a)); }
+        }
+    }
+    return if found { names } else { none };
+}
+
+fn listed(names: List<str>, name: str) -> bool {
+    for n in names {
+        if n == name { return true; }
+    }
+    return false;
+}
+
+/// `list` without what `[NoInherit]` on node `n` drops.
+fn drop_inherited(p: Program, n: i64, list: List<EffAttr>) -> List<EffAttr> {
+    let names = no_inherit_names(p, n);
+    if names == none { return list; }
+    let drop: List<str> = names;
+    var out: List<EffAttr> = [];
+    if drop.len() == 0 { return out; }
+    for e in list {
+        if !listed(drop, e.name) { out.push(e); }
+    }
+    return out;
+}
+
+/// `list` with `a` added, under the policy of what it meets.
+fn merge(p: Program, list: List<EffAttr>, a: EffAttr) -> List<EffAttr> {
+    var met = -1;
+    var i = 0;
+    while i < list.len() {
+        if list[i].name == a.name && list[i].depth < a.depth { met = i; }
+        i = i + 1;
+    }
+    var out: List<EffAttr> = [];
+    if met < 0 {
+        for e in list { out.push(e); }
+        out.push(a);
+        return out;
+    }
+    let rule = inherit_rule(p, a.name);
+    if rule == InheritRule::Coalesce {
+        i = 0;
+        while i < list.len() {
+            if i == met {
+                let e = list[i];
+                var layers: List<List<i64>> = [];
+                for l in e.layers { layers.push(l); }
+                for l in a.layers { layers.push(l); }
+                out.push(EffAttr { name: e.name, layers: layers, site: a.site, depth: a.depth, inherited: e.inherited });
+            } else {
+                out.push(list[i]);
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+    for e in list {
+        if rule == InheritRule::Append || e.name != a.name || e.depth >= a.depth { out.push(e); }
+    }
+    out.push(a);
+    return out;
+}
+
+/// What the containers around node `n` give it, before `n`'s own
+/// `[NoInherit]` and attributes.
+fn inherited_attrs(p: Program, pkgs: Map<str, i64>, n: i64) -> List<EffAttr> {
+    var list: List<EffAttr> = [];
+    var depth = 0;
+    for c in containers_of(p, pkgs, n) {
+        list = drop_inherited(p, c, list);
+        for r in rows_on(p, c) {
+            let name = row_name(p, r);
+            let args = row_args(p, r);
+            if inheritable(p, name, args) {
+                list = merge(p, list, EffAttr { name: name, layers: [args], site: attr_site(args, c), depth: depth, inherited: true });
+            }
+        }
+        depth = depth + 1;
+    }
+    return list;
+}
+
+/// The attributes that apply to function `f`: inherited ones first, then
+/// its own, as written (`[NoInherit]` itself left out).
+pub fn effective_attrs(p: Program, pkgs: Map<str, i64>, f: i64) -> List<EffAttr> {
+    var list = drop_inherited(p, f, inherited_attrs(p, pkgs, f));
+    let depth = containers_of(p, pkgs, f).len();
+    for r in rows_on(p, f) {
+        let name = row_name(p, r);
+        if name != no_inherit_attr() {
+            let args = row_args(p, r);
+            list = merge(p, list, EffAttr { name: name, layers: [args], site: attr_site(args, f), depth: depth, inherited: false });
+        }
+    }
+    return list;
+}
+
+/// The name function `f` is shown by: `Type.method` inside a struct,
+/// interface or ext block.
+pub fn fn_shown_name(p: Program, pkgs: Map<str, i64>, f: i64) -> str {
+    let s = p.s;
+    let around = containers_of(p, pkgs, f);
+    var i = around.len() - 1;
+    while i >= 0 {
+        let c = around[i];
+        if kind(s, c) != nk_import_decl() { return node_name(s, c) + "." + node_name(s, f); }
+        i = i - 1;
+    }
+    return node_name(s, f);
+}
+
+/// What the functions inside container `c` are, for a message.
+fn reach_text(s: Snap, c: i64) -> str {
+    let k = kind(s, c);
+    if k == nk_struct() { return "the methods of a struct"; }
+    if k == nk_interface() { return "the methods of an interface"; }
+    if k == nk_extend() { return "the functions of an ext block"; }
+    return "the functions of a package";
+}
+
+fn container_text(s: Snap, c: i64) -> str {
+    let k = kind(s, c);
+    if k == nk_struct() { return "a struct"; }
+    if k == nk_interface() { return "an interface"; }
+    if k == nk_extend() { return "an ext block"; }
+    return "a package";
+}
+
+/// Reports every function attribute that cannot apply where it is written.
+pub fn check_attr_inherit(p: Program, sink: DiagSink) {
+    let s = p.s;
+    let pkgs = package_decls(p);
+    for row in s.attrs {
+        let t: i64 = row[0];
+        let name = sym_text(s, row[1]);
+        let args: List<i64> = row[2];
+        if t >= 0 && in_user_file(s, t) && known_fn_attr(p, name) {
+            let site = attr_site(args, t);
+            if name == no_inherit_attr() {
+                if is_attr_fn(s, t) || is_container(s, t) {
+                    let given = inherited_attrs(p, pkgs, t);
+                    for a in args {
+                        let dropped = node_name(s, a);
+                        var found = false;
+                        for e in given {
+                            if e.name == dropped { found = true; }
+                        }
+                        if !found {
+                            let who = if is_container(s, t) && kind(s, t) == nk_import_decl() { "the package" } else { f"`{node_name(s, t)}`" };
+                            sink_error(sink, a, "ATTR005", f"{who} inherits no `[{dropped}]`");
+                        }
+                    }
+                } else {
+                    sink_error(sink, site, "ATTR005", "`[NoInherit]` applies to a function, struct, interface or ext block; this is not one");
+                }
+            } else if is_container(s, t) {
+                if name == generate_attr() && !inheritable(p, name, args) {
+                    sink_error(sink, site, "ATTR005", f"`[Generate]` on {container_text(s, t)} writes one file per function: name the extension, `[Generate(ext: \"..\")]`");
+                } else if !inheritable(p, name, args) {
+                    let why = if attr_decl_with(p, name, step_interface()) >= 0 || attr_decl_with(p, name, runtime_step_interface()) >= 0 {
+                        f": `{name}{attr_struct_suffix()}` does not implement `{inherited_interface()}`"
+                    } else { "" };
+                    sink_error(sink, site, "ATTR005", f"`[{name}]` is not inherited, so it cannot apply to {reach_text(s, t)}{why}");
+                }
+            } else if !is_attr_fn(s, t) {
+                sink_error(sink, site, "ATTR005", f"`[{name}]` applies to a function, or through a package, struct, interface or ext block; this is not one");
+            }
+        }
+    }
+}

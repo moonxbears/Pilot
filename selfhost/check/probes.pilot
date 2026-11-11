@@ -1,0 +1,471 @@
+// ==============================================================================
+// FILE: selfhost/check/probes.pilot
+// The compile-time attributes `[Debug]`, `[Live]` and `[Generate]`: their
+// arguments are checked here, and `[Debug]`'s trace is planned here.
+// ==============================================================================
+// Checking (`check_comptime_attrs`, run by `check_program`):
+//   - `[Debug(level, changed_only)]`: `level` is a variant of `DebugLevel`
+//     (stdlib/core/debug.pilot), `changed_only` is `true` or `false`; an
+//     argument goes by position or by name (ATTR003).
+//   - `[Live(args, when: flags)]` is on a top-level function, gives it as
+//     many arguments as it takes, and `when:` combines `LiveWhen` flags
+//     (stdlib/core/live.pilot) with `|` (ATTR003).
+//   - `[Generate("name.ext")]` / `[Generate(ext: "ext")]` is on a top-level
+//     function, names its file with one string (ATTR003), and the function
+//     takes nothing and returns `str` (ATTR004).
+//
+// Planning (`probe_plan`): every `let`, `var` and assignment statement of a
+// `[Debug]` function gets a probe, a row `[node, capture, call, args]`:
+//   - `capture`: the backend reads the text of the statement's target
+//     before the statement runs;
+//   - after the statement, the backend calls function `call` with `args`,
+//     each `[ProbeArgKind, value]`: a fixed string, a fixed flag, the text
+//     of the target as it is now, or the text captured before.
+// The seed (crates/pilot-vm/src/lower_probe.rs) and PilIR
+// (selfhost/ir/lower_probe.pilot) carry the rows out as they are; what the
+// trace line says is decided here and in stdlib/core/debug.pilot.
+pub lvl(0) pkg Pilot.SelfHost.Check.Probes;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.diag.*;
+use selfhost.check.attr_text.*;
+use selfhost.check.attr_inherit.*;
+
+/// The function a `[Debug]` probe calls, and the enum of its levels
+/// (stdlib/core/debug.pilot).
+pub pure fn debug_hook() -> str => "debug_trace_line";
+pub pure fn debug_level_type() -> str => "DebugLevel";
+
+/// The flags of `[Live]`'s `when:` (stdlib/core/live.pilot), the argument
+/// that takes them, and the flag that applies when it is not written.
+pub pure fn live_when_type() -> str => "LiveWhen";
+pub pure fn live_when_label() -> str => "when";
+pub pure fn live_default_flag() -> str => "Compile";
+
+/// The argument every attribute may take to order it among the steps of its
+/// function (selfhost/check/attr_chain.pilot).
+pub pure fn weight_label() -> str => "weight";
+
+/// What a probe passes for one argument of its call. The codes are shared
+/// with crates/pilot-vm/src/lower_probe.rs (`ProbeArg`).
+pub enum ProbeArgKind : u8 {
+    /// The string given with it.
+    Text,
+    /// The flag given with it.
+    Flag,
+    /// The text of the statement's target after the statement.
+    TargetText,
+    /// The text of the target the probe captured before the statement.
+    Captured,
+    /// The text of the binding named by the string given with it (in a
+    /// PilIR row, its declaring node follows).
+    BindingText,
+    /// The value of the engine operation named by the string given with it.
+    Engine,
+}
+
+/// When a probe calls, relative to its node. The codes are shared with
+/// crates/pilot-vm/src/lower_probe.rs (`ProbeAt`).
+pub enum ProbeAt : u8 {
+    /// After the node.
+    After,
+    /// Before the node.
+    Before,
+    /// As if `defer` were written just before the node: on every way out of
+    /// the block around it, after a return value is computed.
+    Defer,
+}
+
+/// How one `[Debug]` function is traced.
+pub struct DebugSettings : IValue {
+    /// The ordinal of its `DebugLevel`.
+    pub level: i64;
+    pub changed_only: bool;
+}
+
+fn key_of(n: i64) -> str => f"{n}";
+
+/// Statement `n` as written, on one line: a `let` or `var` from its keyword
+/// (its node starts at the name it binds).
+fn statement_text(s: Snap, n: i64) -> str {
+    let f = file_of(s, n);
+    let base: i64 = f[0];
+    let text: str = f[1];
+    var start = span_start(s, n) - base;
+    if kind(s, n) == nk_let() || kind(s, n) == nk_var() { start = attr_word_start_before(text, start); }
+    return attr_one_line(text.slice(start, span_end(s, n) - base));
+}
+
+/// The line of node `n` in its file.
+fn line_of(s: Snap, n: i64) -> i64 {
+    let f = file_of(s, n);
+    let base: i64 = f[0];
+    let text: str = f[1];
+    return attr_line_at(text, span_start(s, n) - base);
+}
+
+/// Every attribute named `name` on node `n`, each as its argument nodes.
+pub fn attr_uses(p: Program, n: i64, name: str) -> List<List<i64>> {
+    var out: List<List<i64>> = [];
+    for row_index in nl_get(p.attrs, key_of(n)) {
+        let row: List<any> = p.s.attrs[row_index];
+        if sym_text(p.s, row[1]) == name {
+            let args: List<i64> = row[2];
+            out.push(args);
+        }
+    }
+    return out;
+}
+
+/// The variant names of enum `DebugLevel`, in order (their ordinals).
+fn debug_levels(p: Program) -> List<str> {
+    var out: List<str> = [];
+    let d = prog_type_decl(p, debug_level_type());
+    if d < 0 { return out; }
+    for v in children(p.s, d) {
+        if kind(p.s, v) == nk_variant() { out.push(node_name(p.s, v)); }
+    }
+    return out;
+}
+
+fn ordinal_of(names: List<str>, name: str) -> i64 {
+    var i = 0;
+    while i < names.len() {
+        if names[i] == name { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+/// `a`, `b` `join` `c`, each in backticks after `prefix`.
+pub fn word_list(words: List<str>, prefix: str, join: str) -> str {
+    var out = "";
+    var i = 0;
+    while i < words.len() {
+        if i > 0 { out = out + (if i == words.len() - 1 { " " + join + " " } else { ", " }); }
+        out = out + "`" + prefix + words[i] + "`";
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The settings of `[Debug]` with argument nodes `args` on function `f`;
+/// `none` when an argument is wrong (reported as ATTR003).
+fn debug_settings(p: Program, sink: DiagSink, args: List<i64>) -> DebugSettings? {
+    let s = p.s;
+    let levels = debug_levels(p);
+    let params = ["level", "changed_only"];
+    var level = ordinal_of(levels, "Debug");
+    var changed_only = false;
+    var ok = true;
+    var i = 0;
+    while i < args.len() {
+        let a = args[i];
+        let label = attr_arg_label(s, a);
+        let param = if label != "" { label } else if i < params.len() { params[i] } else { "" };
+        if param == weight_label() {
+            // `[Debug]` is not a step; its weight orders nothing.
+        } else if param == params[0] {
+            let at = if kind(s, a) == nk_ident() { ordinal_of(levels, node_name(s, a)) } else { -1 };
+            if at < 0 {
+                let shown = if kind(s, a) == nk_ident() { node_name(s, a) } else { attr_one_line(node_text(s, a)) };
+                let choices = word_list(levels, "::", "or");
+                sink_error(sink, a, "ATTR003", f"`{shown}` is not a level of `[Debug]`: use {choices}");
+                ok = false;
+            } else {
+                level = at;
+            }
+        } else if param == params[1] {
+            if kind(s, a) == nk_bool() {
+                changed_only = lit_value(s, a) != 0;
+            } else {
+                sink_error(sink, a, "ATTR003", "`changed_only` of `[Debug]` is `true` or `false`");
+                ok = false;
+            }
+        } else {
+            let shown = if label != "" { label } else { attr_one_line(node_text(s, a)) };
+            let names = word_list(params, "", "and");
+            sink_error(sink, a, "ATTR003", f"`[Debug]` has no argument `{shown}`: its arguments are {names}");
+            ok = false;
+        }
+        i = i + 1;
+    }
+    if !ok { return none; }
+    return DebugSettings { level: level, changed_only: changed_only };
+}
+
+pub fn is_top_level_fn(p: Program, f: i64) -> bool {
+    let up = p.parents[f];
+    return kind(p.s, f) == nk_fn() && (up < 0 || kind(p.s, up) == nk_program());
+}
+
+
+/// The `when:` argument among the arguments `args` of a `[Live]`, or -1.
+fn live_when_arg(s: Snap, args: List<i64>) -> i64 {
+    for a in args {
+        if attr_arg_label(s, a) == live_when_label() { return a; }
+    }
+    return -1;
+}
+
+/// The arguments of a `[Live]` that go to its function: all but `when:`
+/// and `weight:`.
+pub fn live_call_args(s: Snap, args: List<i64>) -> List<i64> {
+    let w = live_when_arg(s, args);
+    var out: List<i64> = [];
+    for a in args {
+        if a != w && attr_arg_label(s, a) != weight_label() { out.push(a); }
+    }
+    return out;
+}
+
+/// The variants of flags enum `type_name`, each `[name, value]`.
+pub fn enum_flags(p: Program, type_name: str) -> List<List<any>> {
+    var out: List<List<any>> = [];
+    let d = prog_type_decl(p, type_name);
+    if d < 0 { return out; }
+    for v in children(p.s, d) {
+        if kind(p.s, v) == nk_variant() {
+            let value = field_default(p.s, v);
+            if value >= 0 && kind(p.s, value) == nk_int() { out.push([node_name(p.s, v), lit_value(p.s, value)]); }
+        }
+    }
+    return out;
+}
+
+fn live_flags(p: Program) -> List<List<any>> => enum_flags(p, live_when_type());
+
+pub fn flag_value(known: List<List<any>>, name: str) -> i64 {
+    for f in known {
+        let n: str = f[0];
+        if n == name {
+            let v: i64 = f[1];
+            return v;
+        }
+    }
+    return -1;
+}
+
+/// The value of `LiveWhen` flag `name`, or -1.
+pub fn live_flag(p: Program, name: str) -> i64 => flag_value(live_flags(p), name);
+
+/// The flags expression `e` (`::A | ::B`) as a mask of the flags `known`;
+/// -1 after reporting what in it is not one, as `not <what> of [<attr>]` (`what` with its article).
+pub fn flags_mask(p: Program, sink: DiagSink, known: List<List<any>>, e: i64, attr: str, what: str) -> i64 {
+    let s = p.s;
+    if kind(s, e) == nk_binary() && flags(s, e) == snap_op_bit_or() {
+        let a = flags_mask(p, sink, known, lhs(s, e), attr, what);
+        let b = flags_mask(p, sink, known, rhs(s, e), attr, what);
+        return if a < 0 || b < 0 { -1 } else { a | b };
+    }
+    let v = if kind(s, e) == nk_ident() { flag_value(known, node_name(s, e)) } else { -1 };
+    if v < 0 {
+        var names: List<str> = [];
+        for f in known {
+            let n: str = f[0];
+            names.push(n);
+        }
+        let choices = word_list(names, "::", "or");
+        let shown = if kind(s, e) == nk_ident() { node_name(s, e) } else { attr_one_line(node_text(s, e)) };
+        sink_error(sink, e, "ATTR003", f"`{shown}` is not {what} of `[{attr}]`: use {choices}, joined with `|`");
+    }
+    return v;
+}
+
+/// The moments a `[Live]` with arguments `args` runs, as a mask of
+/// `LiveWhen` flags; -1 when `when:` is wrong (reported to `sink`).
+pub fn live_when_mask(p: Program, sink: DiagSink, args: List<i64>) -> i64 {
+    let known = live_flags(p);
+    let w = live_when_arg(p.s, args);
+    if w < 0 { return flag_value(known, live_default_flag()); }
+    return flags_mask(p, sink, known, w, live_attr(), "a flag");
+}
+
+fn check_live(p: Program, sink: DiagSink, f: i64, args: List<i64>) {
+    let name = node_name(p.s, f);
+    if !is_top_level_fn(p, f) {
+        sink_error(sink, attr_site(args, f), "ATTR003", f"`[Live]` runs a top-level function; `{name}` is not one");
+        return;
+    }
+    let _ = live_when_mask(p, sink, args);
+    let given = live_call_args(p.s, args).len();
+    let want = fn_params(p.s, f).len();
+    if given != want {
+        sink_error(sink, attr_site(args, f), "ATTR003", f"`[Live]` gives `{name}` {given} argument(s); it takes {want}");
+    }
+}
+
+/// The file a `[Generate]` with arguments `args` names: `[path, ext]`, one
+/// of them empty; `none` when it names none or more than one.
+pub fn generate_target(s: Snap, given: List<i64>) -> List<str>? {
+    var args: List<i64> = [];
+    for a in given {
+        if attr_arg_label(s, a) != weight_label() { args.push(a); }
+    }
+    if args.len() != 1 || kind(s, args[0]) != nk_str() { return none; }
+    let label = attr_arg_label(s, args[0]);
+    let value = str_value(s, args[0]);
+    if value == "" { return none; }
+    if label == "" || label == "path" { return [value, ""]; }
+    if label == "ext" { return ["", value]; }
+    return none;
+}
+
+fn check_generate(p: Program, sink: DiagSink, f: i64, args: List<i64>) {
+    let s = p.s;
+    let name = node_name(s, f);
+    if !is_top_level_fn(p, f) {
+        sink_error(sink, attr_site(args, f), "ATTR003", f"`[Generate]` runs a top-level function; `{name}` is not one");
+        return;
+    }
+    if generate_target(s, args) == none {
+        sink_error(sink, attr_site(args, f), "ATTR003", "`[Generate]` needs the file to write: `[Generate(\"name.ext\")]` or `[Generate(ext: \"ext\")]`");
+    }
+    if fn_params(s, f).len() > 0 {
+        sink_error(sink, f, "ATTR004", f"`[Generate]` function `{name}` must take no parameters");
+    }
+    let text = prog_slot_type(p, literal_slot(nk_str()));
+    if annot(s, f) < 0 || prog_annot_type(p, annot(s, f)) != text {
+        sink_error(sink, f, "ATTR004", f"`[Generate]` function `{name}` must return `str`");
+    }
+}
+
+/// Whether `[Generate]` can run function `f`: a top-level function that
+/// takes nothing and returns `str`.
+pub fn generate_fits(p: Program, f: i64) -> bool {
+    let s = p.s;
+    if !is_top_level_fn(p, f) || fn_params(s, f).len() > 0 || annot(s, f) < 0 { return false; }
+    return prog_annot_type(p, annot(s, f)) == prog_slot_type(p, literal_slot(nk_str()));
+}
+
+/// Reports every misuse of `[Debug]`, `[Live]` and `[Generate]`: their
+/// arguments wherever they are written (a package, struct or ext block
+/// passes them on), the function rules where they are on a function.
+pub fn check_comptime_attrs(p: Program, sink: DiagSink) {
+    let s = p.s;
+    let hooked = nl_get(p.fns, debug_hook()).len() > 0;
+    for row in s.attrs {
+        let t: i64 = row[0];
+        let name = sym_text(s, row[1]);
+        let args: List<i64> = row[2];
+        if t >= 0 && in_user_file(s, t) {
+            if name == debug_attr() {
+                let _ = debug_settings(p, sink, args);
+                if !hooked {
+                    sink_error(sink, attr_site(args, t), "ATTR003", f"`[Debug]` calls `{debug_hook()}` (stdlib/core/debug.pilot), which the program does not link");
+                }
+            } else if name == live_attr() && is_attr_fn(s, t) {
+                check_live(p, sink, t, args);
+            } else if name == generate_attr() && is_attr_fn(s, t) {
+                check_generate(p, sink, t, args);
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// The `[Debug]` trace plan
+// ------------------------------------------------------------------------------
+
+/// Whether assignment target `t` can be read again without running a call:
+/// a variable, a field of one, or an element at a variable or literal index.
+fn readable_target(s: Snap, t: i64) -> bool {
+    if t < 0 { return false; }
+    let k = kind(s, t);
+    if k == nk_ident() { return true; }
+    if k == nk_member() { return readable_target(s, lhs(s, t)); }
+    if k == nk_index() {
+        let i = rhs(s, t);
+        if i < 0 { return false; }
+        let ik = kind(s, i);
+        return readable_target(s, lhs(s, t))
+            && (ik == nk_int() || ik == nk_str() || readable_target(s, i));
+    }
+    return false;
+}
+
+/// The function a statement belongs to: its nearest enclosing `fn`, -1 when
+/// none.
+pub fn enclosing_fn(p: Program, n: i64) -> i64 {
+    var cur = p.parents[n];
+    while cur >= 0 {
+        if kind(p.s, cur) == nk_fn() || kind(p.s, cur) == nk_operator() { return cur; }
+        cur = p.parents[cur];
+    }
+    return -1;
+}
+
+pub fn text_arg(v: str) -> List<any> => [ProbeArgKind::Text as i64, v];
+fn flag_arg(v: bool) -> List<any> => [ProbeArgKind::Flag as i64, v];
+
+/// The probe of statement `n` in function `f`, traced with `cfg`.
+fn statement_probe(p: Program, levels: List<str>, cfg: DebugSettings, f: i64, n: i64) -> List<any> {
+    let s = p.s;
+    let assigns = kind(s, n) == nk_assign();
+    let target = if assigns { attr_one_line(node_text(s, lhs(s, n))) } else { node_name(s, n) };
+    let show_before = assigns && cfg.level >= ordinal_of(levels, "Debug");
+    let compare = assigns && cfg.changed_only;
+    let capture = show_before || compare;
+    let head = if cfg.level >= ordinal_of(levels, "Verbose") {
+        f"{node_name(s, f)}:{line_of(s, n)}: {statement_text(s, n)} => "
+    } else { "" };
+    let args: List<any> = [
+        text_arg(head),
+        text_arg(target),
+        [ProbeArgKind::TargetText as i64, 0],
+        if capture { [ProbeArgKind::Captured as i64, 0] } else { text_arg("") },
+        flag_arg(compare),
+        flag_arg(show_before),
+    ];
+    return [n, capture, debug_hook(), args];
+}
+
+/// Whether node `n` is a statement a trace covers: a `let` or `var` that
+/// binds one name, or an assignment to a readable target, directly in a block.
+fn traced_statement(p: Program, n: i64) -> bool {
+    let s = p.s;
+    let k = kind(s, n);
+    let up = p.parents[n];
+    if up < 0 || kind(s, up) != nk_block() { return false; }
+    if k == nk_let() || k == nk_var() { return flags(s, n) != 1; }
+    return k == nk_assign() && readable_target(s, lhs(s, n));
+}
+
+/// The probes of every function in the user's files that `[Debug]` applies
+/// to, written on it or inherited (selfhost/check/attr_inherit.pilot).
+pub fn probe_plan(p: Program) -> List<List<any>> {
+    var out: List<List<any>> = [];
+    let traced = Map<str, DebugSettings>();
+    let quiet = sink_new(p.s);
+    let pkgs = package_decls(p);
+    var any_traced = false;
+    var f = 0;
+    while f < p.s.count {
+        if is_attr_fn(p.s, f) && in_user_file(p.s, f) {
+            for e in effective_attrs(p, pkgs, f) {
+                if e.name == debug_attr() {
+                    if some cfg = debug_settings(p, quiet, e.layers[e.layers.len() - 1]) {
+                        traced.set(key_of(f), cfg);
+                        any_traced = true;
+                    }
+                }
+            }
+        }
+        f = f + 1;
+    }
+    if !any_traced || nl_get(p.fns, debug_hook()).len() == 0 { return out; }
+    let levels = debug_levels(p);
+    var n = 0;
+    while n < p.s.count {
+        if traced_statement(p, n) && in_user_file(p.s, n) {
+            let f = enclosing_fn(p, n);
+            if f >= 0 && traced.has(key_of(f)) {
+                out.push(statement_probe(p, levels, traced.get(key_of(f)), f, n));
+            }
+        }
+        n = n + 1;
+    }
+    return out;
+}

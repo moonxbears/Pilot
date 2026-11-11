@@ -15,6 +15,7 @@ use pilot_analysis::PhysicsRegistry;
 use pilot_rt::PilotVal;
 use pilot_span::ByteSpan;
 use pilot_vm::lower_drop::{DropAction, DropGlue, DropItem, DropPlan};
+use pilot_vm::lower_probe::ProbePlan;
 use pilot_vm::{codes, BytecodeCompiler, HostValue, PilVirtualMachine, PilcBinary};
 use std::fs;
 
@@ -158,6 +159,8 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
             DropAction::Exit => out.exit.entry(key).or_default().push(item()),
             DropAction::Else => out.on_else.entry(key).or_default().push(item()),
             DropAction::Replace => out.replace.entry(key).or_default().push(item()),
+            DropAction::Flag => out.flag.entry(key).or_default().push(item()),
+            DropAction::Moved => out.moved.entry(key).or_default().push(item()),
             DropAction::Guard => out.guard.entry(key).or_default().push(item()),
             DropAction::Seam => out.seams.entry(key).or_default().push((r.a.clone(), r.b.clone())),
             DropAction::Copy => {
@@ -169,8 +172,33 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
     out
 }
 
+/// The seed's probe plan from the checker's probes, their statements moved
+/// into the offsets of `source`.
+fn seed_probe_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> ProbePlan {
+    let bases: std::collections::HashMap<&str, u32> = source.units().map(|(p, _, b)| (p, b)).collect();
+    let mut out = ProbePlan::default();
+    for p in &plan.probes {
+        let Some(&base) = bases.get(p.file.as_str()) else { continue };
+        out.at.entry((base + p.start, base + p.end, p.kind)).or_default().push(p.probe.clone());
+    }
+    out
+}
+
 /// `compile`, dropping owned values where the checker's `plan` says (F7).
 pub fn compile_planned(path: &str, tail: Option<&str>, plan: Option<&check::CheckedDropPlan>) -> Result<Program, Vec<Diag>> {
+    compile_entry(path, tail, &[], plan)
+}
+
+/// `compile_planned`, with the files `tail_links` link (toolchain sources,
+/// each with the files it imports, as the loader orders them) linked before
+/// the tail (before the program's own file when there is no tail), unless
+/// the program links them already: the tail may use what they declare.
+pub fn compile_entry(
+    path: &str,
+    tail: Option<&str>,
+    tail_links: &[String],
+    plan: Option<&check::CheckedDropPlan>,
+) -> Result<Program, Vec<Diag>> {
     if path.ends_with(".pilc") {
         return fs::read(path)
             .map_err(|e| e.to_string())
@@ -189,8 +217,33 @@ pub fn compile_planned(path: &str, tail: Option<&str>, plan: Option<&check::Chec
             Err(e) => return Err(vec![Diag::whole_file(&p, UNREADABLE, format!("cannot read file: {e}"))]),
         }
     }
-    if let Some(t) = tail {
-        files.push(("<entry>".to_string(), t.to_string()));
+    let canonical = |p: &str| fs::canonicalize(p).map_or_else(|_| p.to_string(), |c| c.to_string_lossy().into_owned());
+    let mut seen: std::collections::HashSet<String> = files.iter().map(|(p, _)| canonical(p)).collect();
+    let mut extras = Vec::new();
+    for extra in tail_links {
+        // A toolchain source, found under the toolchain's root.
+        let rooted = std::path::Path::new(&tool::toolchain_root()).join(extra);
+        for p in link_plan(&rooted.to_string_lossy().replace('\\', "/"))? {
+            if !seen.insert(canonical(&p)) {
+                continue;
+            }
+            match fs::read_to_string(&p) {
+                Ok(src) => extras.push((p, src)),
+                Err(e) => return Err(vec![Diag::whole_file(&p, UNREADABLE, format!("cannot read file: {e}"))]),
+            }
+        }
+    }
+    match tail {
+        Some(t) => {
+            files.extend(extras);
+            files.push(("<entry>".to_string(), t.to_string()));
+        }
+        // The program's own file stays last: the entry unit is the last one.
+        None => {
+            let entry = files.pop();
+            files.extend(extras);
+            files.extend(entry);
+        }
     }
     let source = LinkedSource::parse(files);
     let locate = |span: ByteSpan, code: &str, message: &str| {
@@ -214,7 +267,8 @@ pub fn compile_planned(path: &str, tail: Option<&str>, plan: Option<&check::Chec
         return Err(parse_diags);
     }
     let drops = plan.map(|p| seed_drop_plan(&source, p)).unwrap_or_default();
-    let bin = BytecodeCompiler::compile_linked_with_drops(&source.arena, drops);
+    let probes = plan.map(|p| seed_probe_plan(&source, p)).unwrap_or_default();
+    let bin = BytecodeCompiler::compile_linked_with_plans(&source.arena, drops, probes);
     if !bin.diagnostics.is_empty() {
         return Err(bin
             .diagnostics

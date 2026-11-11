@@ -14,7 +14,10 @@
 //   - copying a value type reads its fields and builds a new value of the
 //     same layout, copying the value-type fields inside it too;
 //   - a node the plan stops at a seam ends in `unreachable` carrying the
-//     seed's SEAM001 message.
+//     seed's SEAM001 message;
+//   - a binding moved on only some paths has a drop flag in a stack slot:
+//     set where it is bound and by each assignment, cleared after the node
+//     where a move of it completes; its drops branch on it.
 pub lvl(0) pkg Pilot.SelfHost.Ir.LowerDrop;
 
 use selfhost.check.snapshot.*;
@@ -27,6 +30,7 @@ use selfhost.ir.model.*;
 use selfhost.ir.layouts.*;
 use selfhost.ir.lower.*;
 use selfhost.ir.lower_members.*;
+use selfhost.ir.lower_switch.*;
 
 /// Glue nesting deeper than this is a planner error (a type that holds
 /// itself does so through an `opt` or a collection, a seam in the plan).
@@ -50,7 +54,8 @@ fn is(r: List<any>, a: DropAction) -> bool {
     return code == a as i64;
 }
 
-/// Before node `n` is lowered: its seam, then its `Before` drops.
+/// Before node `n` is lowered: its seam, its drop flags, then its `Before`
+/// drops.
 pub fn plan_before(lw: Lowerer, n: i64) {
     for r in rows_at(lw, n) {
         if is(r, ::Seam) {
@@ -61,8 +66,28 @@ pub fn plan_before(lw: Lowerer, n: i64) {
             return;
         }
     }
+    for r in rows_at(lw, n) {
+        if is(r, ::Flag) {
+            let b: i64 = r[1];
+            let slot = emit(lw, op_stack_slot(), 0, bool_physics(lw), [], n);
+            lw.drop_flags.set(key(b), slot);
+            set_flag(lw, b, true, n);
+        }
+    }
     drop_rows(lw, n, ::Before);
 }
+
+/// Stores `on` in the drop flag of binding `b`, when it has one.
+fn set_flag(lw: Lowerer, b: i64, on: bool, n: i64) {
+    if !lw.drop_flags.has(key(b)) || ir_is_terminated(lw.f, lw.cur) { return; }
+    let slot = lw.drop_flags.get(key(b));
+    let v = emit(lw, op_const_bits(), 0, bool_physics(lw), [pool_int(lw, if on { 1 } else { 0 })], n);
+    emit_void(lw, op_store(), 0, [slot, v], n);
+}
+
+/// After an assignment stores a new value in binding `b`: its drop flag,
+/// when it has one, is set again.
+pub fn rearm_flag(lw: Lowerer, b: i64, n: i64) { set_flag(lw, b, true, n); }
 
 /// After node `n` is lowered to `v`: its `After` drops, and the guards it
 /// binds join the innermost scope's releases. Gives the value of `n`: a
@@ -80,6 +105,12 @@ pub fn plan_after(lw: Lowerer, n: i64, v: u32) -> u32 {
         }
     }
     drop_rows(lw, n, ::After);
+    for r in rows_at(lw, n) {
+        if is(r, ::Moved) {
+            let b: i64 = r[1];
+            set_flag(lw, b, false, n);
+        }
+    }
     return out;
 }
 
@@ -122,7 +153,20 @@ fn drop_binding(lw: Lowerer, b: i64, t: i64, n: i64) {
     if lw.values.has(k) { v = lw.values.get(k); }
     else if lw.slots.has(k) { v = emit(lw, op_load(), 0, layout_of(lw.ls, t), [lw.slots.get(k)], n); }
     if v == ir_no_value() { return; }
+    if !lw.drop_flags.has(k) {
+        drop_value(lw, v, t, n, 0);
+        return;
+    }
+    // Moved on some paths: dropped only while the flag is set.
+    let slot = lw.drop_flags.get(k);
+    let on = emit(lw, op_load(), 0, bool_physics(lw), [slot], n);
+    let yes = ir_add_block(lw.f);
+    let join = ir_add_block(lw.f);
+    emit_void(lw, op_cond_br(), 0, [on, yes, 0, join, 0], n);
+    switch_to(lw, yes);
     drop_value(lw, v, t, n, 0);
+    if !ir_is_terminated(lw.f, lw.cur) { emit_void(lw, op_jump(), 0, [join], n); }
+    switch_to(lw, join);
 }
 
 /// The destructor of struct type `t` with a body to run, or -1.

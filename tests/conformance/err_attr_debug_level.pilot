@@ -1,0 +1,14 @@
+// `[Debug]` takes a verbosity level of `DebugLevel` (stdlib/core/debug.pilot)
+// and `changed_only`; anything else is ATTR003, and the program does not run.
+[Debug(::Loud)]
+fn f() -> i64 {
+    var x = 1;
+    return x;
+}
+
+[Debug(::Medium, every: true)]
+fn g() -> i64 => 2;
+
+fn main() {
+    print(f() + g());
+}

@@ -1,0 +1,63 @@
+// F7: a value moved on only some paths is dropped on the others. A flag kept
+// at run time says whether the binding still holds its value: set when it
+// is bound or assigned, cleared where a move completes (for an argument, at
+// the call). Drops of the binding happen only while the flag is set.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn take(r: Res) -> bool {
+    print(f"took {r.name}");
+    return true;
+}
+
+fn consume(r: Res) {
+    print(f"consume {r.name}");
+}
+
+fn half(n: i64) -> i64? {
+    if n % 2 == 0 { return n / 2; }
+    return none;
+}
+
+fn wrap(r: Res, h: i64) -> i64 {
+    print(f"wrap {r.name} {h}");
+    return h;
+}
+
+// Moved only when `keep` is true (`&&` stops early otherwise).
+fn short(keep: bool) {
+    let r = Res { name: f"s{keep}" };
+    let taken = keep && take(r);
+    print(taken);
+}
+
+// Moved on one branch, then assigned: the old value is dropped only when
+// it was not moved.
+fn branchy(give: bool) {
+    var r = Res { name: f"b{give}" };
+    if give { consume(r); }
+    r = Res { name: "fresh" };
+    print(r.name);
+}
+
+// `r` is read as an argument before `half(n)?` fails: the call never
+// happens, so `r` is still ours and is dropped as the `?` leaves.
+fn in_order(n: i64) -> i64? {
+    let r = Res { name: f"o{n}" };
+    return wrap(r, half(n)?);
+}
+
+fn main() {
+    short(true);
+    short(false);
+    branchy(true);
+    branchy(false);
+    print(in_order(4) ?? -1);
+    print(in_order(3) ?? -1);
+    print("end");
+}

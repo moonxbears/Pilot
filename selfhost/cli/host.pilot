@@ -58,6 +58,12 @@ pub fn host_typecheck(path: str, checker: List<str>, decls: List<str>) -> List<H
 pub fn host_program_tool(path: str, files: List<str>, decls: List<str>, entry: str) -> i64 =>
     __engine("cli_program_tool", path, files, decls, entry);
 
+/// Runs the tool made of `files`, calling `entry`, over the program at
+/// `path` linked with `decls`, as `host_program_tool` does; gives the value
+/// `entry` returns, or `none` when the program does not link.
+pub fn host_program_eval(path: str, files: List<str>, decls: List<str>, entry: str) -> any =>
+    __engine("cli_program_eval", path, files, decls, entry);
+
 /// Runs the tool made of `files`, calling `entry`, on the text of the file
 /// at `path`. Its result is the tool's exit code.
 pub fn host_text_tool(path: str, files: List<str>, entry: str) -> i64 =>
@@ -66,11 +72,13 @@ pub fn host_text_tool(path: str, files: List<str>, entry: str) -> i64 =>
 /// The declarations every program is checked against, linked after the
 /// program: files, or directories whose `.pilot` files are taken in name
 /// order. `core.pilot` holds the `Cfg` tables (lattice masks, register
-/// classes), `operator.pilot` the root and operator interfaces.
+/// classes), `operator.pilot` the root and operator interfaces, `live.pilot`
+/// the flags of `[Live]`.
 pub fn cli_checker_decls() -> List<str> => [
     "stdlib/core/core.pilot",
     "stdlib/core/operator.pilot",
     "stdlib/core/primitives",
+    "stdlib/core/live.pilot",
 ];
 
 /// The type checker's sources (`selfhost/check/`), in link order.
@@ -92,6 +100,11 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/borrows.pilot",
     "selfhost/check/drops.pilot",
     "selfhost/check/copies.pilot",
+    "selfhost/check/attr_text.pilot",
+    "selfhost/check/attr_inherit.pilot",
+    "selfhost/check/probes.pilot",
+    "selfhost/check/attr_chain.pilot",
+    "selfhost/check/coverage.pilot",
     "selfhost/check/contracts.pilot",
     "selfhost/check/access.pilot",
     "selfhost/check/main.pilot",
@@ -101,8 +114,12 @@ pub fn cli_checker_files() -> List<str> => [
 /// `tail` is linked after the program as its entry and runs instead of `main`.
 /// Owned values are dropped where the type checker's drop plan
 /// (`selfhost/check/drops.pilot`) says.
-pub fn host_run(path: str, args: List<str>, tail: str) -> RunOutcome {
-    let raw = __engine("cli_run", path, args, tail, cli_checker_files(), cli_checker_decls());
+pub fn host_run(path: str, args: List<str>, tail: str) -> RunOutcome => host_run_with(path, args, tail, []);
+
+/// `host_run`, with the files `links` names (and those they import) linked
+/// before `tail`, so the tail can use what they declare.
+pub fn host_run_with(path: str, args: List<str>, tail: str, links: List<str>) -> RunOutcome {
+    let raw = __engine("cli_run", path, args, tail, cli_checker_files(), cli_checker_decls(), links);
     return RunOutcome { exit_code: raw[0], diags: host_diags(raw[1]) };
 }
 

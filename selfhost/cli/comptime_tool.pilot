@@ -1,0 +1,139 @@
+// ==============================================================================
+// FILE: selfhost/cli/comptime_tool.pilot
+// Finding the step attributes of a program's functions, in the order they run.
+// ==============================================================================
+// Run by `pilot check`, `pilot build` and `pilot run` (selfhost/cli/comptime_attrs.pilot)
+// over the type checker's snapshot of the program, for one moment: a
+// `LiveWhen` flag (stdlib/core/live.pilot) named by `phase`. Gives one row
+// per step of each function and method in the user's files (`[Live]`,
+// `[Generate]` and user step attributes, written on it or inherited:
+// selfhost/check/attr_chain.pilot), the functions in source order and each
+// one's steps in the order they run:
+//
+//   ["live",     file, line, group, call]     `add(3, 4)`: the function's name
+//                                              and the attribute's arguments
+//                                              as written
+//   ["generate", file, line, group, function, name]
+//                                              the file the attribute names
+//                                              (`ext: "e"` names `<function>.e`)
+//   ["step",     file, line, group, value, function]
+//                                              `NameAttr { a: 1 }`: the
+//                                              attribute's value
+//   ["runtime",  file, line, group, function] a step that decides on every
+//                                              call (`IRuntimeStepAttribute`);
+//                                              stops at seam `attr.runtime_step`
+//   ["idle",     file, line, group]           a `[Live]` or `[Generate]` that
+//                                              does not run at this moment; it
+//                                              keeps its place in the chain
+//
+// `group` tells the functions apart. `line` is where the attribute's
+// arguments start (on the package or struct, for an inherited one), or the
+// line of what it is written on when it has none. A step is told a
+// method's name as `Type.method`. The type checker
+// has checked the attributes already: a misused one never reaches this tool.
+pub lvl(0) pkg Pilot.SelfHost.Cli.ComptimeTool;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.diag.*;
+use selfhost.check.attr_text.*;
+use selfhost.check.attr_inherit.*;
+use selfhost.check.probes.*;
+use selfhost.check.attr_chain.*;
+
+/// `[path, base offset, text]` of the file node `n` is in.
+fn file_row(s: Snap, n: i64) -> List<any> {
+    let row: List<any> = s.files[unit_of(s, n)];
+    return [row[0], row[2], row[3]];
+}
+
+fn row_of(p: Program, sink: DiagSink, pkgs: Map<str, i64>, f: i64, st: ChainStep, runs: bool) -> List<str>? {
+    let s = p.s;
+    let file = file_row(s, st.site);
+    let path: str = file[0];
+    let base: i64 = file[1];
+    let text: str = file[2];
+    let line = f"{attr_line_at(text, span_start(s, st.site) - base)}";
+    let group = f"{f}";
+    let name = node_name(s, f);
+    if st.kind == StepKind::Runtime { return ["runtime", path, line, group, fn_shown_name(p, pkgs, f)]; }
+    if st.kind == StepKind::User {
+        let value = step_value(p, sink, st.name, st.layers, st.site);
+        if value == none { return none; }
+        let v: str = value;
+        return ["step", path, line, group, v, fn_shown_name(p, pkgs, f)];
+    }
+    if !runs { return ["idle", path, line, group]; }
+    if st.kind == StepKind::Live {
+        let given = live_call_args(s, st.args);
+        var call = name + "(";
+        var i = 0;
+        while i < given.len() {
+            if i > 0 { call = call + ", "; }
+            call = call + attr_one_line(node_text(s, given[i]));
+            i = i + 1;
+        }
+        return ["live", path, line, group, call + ")"];
+    }
+    let target = generate_target(s, st.args) ?? ["", ""];
+    let named = if target[0] != "" { target[0] } else { name + "." + target[1] };
+    // The file is beside the source that names it.
+    let src = file_row(s, f);
+    let src_path: str = src[0];
+    return ["generate", src_path, line, group, name, named];
+}
+
+/// Whether `f` is a function or method of the user's files the chain runs
+/// for: not one written inside another function.
+fn chain_fn(p: Program, f: i64) -> bool {
+    let s = p.s;
+    if kind(s, f) != nk_fn() || !in_user_file(s, f) { return false; }
+    var cur = p.parents[f];
+    while cur >= 0 {
+        if is_attr_fn(s, cur) { return false; }
+        cur = p.parents[cur];
+    }
+    return true;
+}
+
+/// The steps of the functions and methods in the user's files at moment
+/// `phase` (a `LiveWhen` flag name), as rows; a function none of whose
+/// steps runs then gives none.
+pub fn comptime_runs(phase: str) -> List<List<str>> {
+    let s = snap_load();
+    let p = prog_new(s);
+    var out: List<List<str>> = [];
+    let now = live_flag(p, phase);
+    if now < 0 { return out; }
+    let quiet = sink_new(s);
+    let pkgs = package_decls(p);
+    let compile = live_flag(p, live_default_flag());
+    var f = 0;
+    while f < s.count {
+        if chain_fn(p, f) {
+            var rows: List<List<str>> = [];
+            var active = false;
+            for st in chain_steps(p, quiet, pkgs, f) {
+                // An inherited `[Generate]` writes only for a function it can run.
+                let skip = st.kind == StepKind::Generate && st.inherited && !generate_fits(p, f);
+                if !skip {
+                    let mask = if st.kind == StepKind::Live { live_when_mask(p, quiet, st.args) }
+                        else if st.kind == StepKind::Generate { compile }
+                        else { now };
+                    let runs = mask > 0 && (mask & now) != 0;
+                    let row = row_of(p, quiet, pkgs, f, st, runs);
+                    if row != none {
+                        let r: List<str> = row;
+                        if r[0] != "idle" { active = true; }
+                        rows.push(r);
+                    }
+                }
+            }
+            if active {
+                for r in rows { out.push(r); }
+            }
+        }
+        f = f + 1;
+    }
+    return out;
+}

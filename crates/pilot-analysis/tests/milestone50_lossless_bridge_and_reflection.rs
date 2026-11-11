@@ -744,7 +744,7 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
     let meta_src = std::fs::read_to_string(root.join("stdlib/core/meta.pilot"))
         .expect("read stdlib/core/meta.pilot");
     let meta_attr_decls = {
-        let start = meta_src.find("pub struct InheritPolicy").expect("InheritPolicy in meta.pilot");
+        let start = meta_src.find("// 1. THE 7-PILLAR").expect("section 1 in meta.pilot");
         let end = meta_src
             .find("// 3. PILOT-HOSTED")
             .and_then(|i| meta_src[..i].rfind("// ====="))

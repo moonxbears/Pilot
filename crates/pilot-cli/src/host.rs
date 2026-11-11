@@ -9,10 +9,11 @@
 //! | operation | arguments | result |
 //! | --- | --- | --- |
 //! | `cli_check` | path | diagnostics (`run::Diag::to_host`) |
-//! | `cli_run` | path, args, tail | `[exit_code, diagnostics]`; not run when there are diagnostics |
+//! | `cli_run` | path, args, tail, checker files, declaration files, tail links | `[exit_code, diagnostics]`; not run when there are diagnostics; the files `tail links` names are linked before the tail |
 //! | `cli_analyze` | path | the self-hosted analyzer's diagnostics for the file |
 //! | `cli_typecheck` | path, checker files, declaration files | the type checker's diagnostics in the program's own files (`check.rs`) |
 //! | `cli_program_tool` | path, tool files, declaration files, entry call | the tool's exit code; the tool reads the program's snapshot (`check::run_on_program`) |
+//! | `cli_program_eval` | path, tool files, declaration files, entry call | the value the entry call returns (`check::eval_on_program`), or `none` when the program does not link |
 //! | `cli_text_tool` | path, tool files, entry call | the tool's exit code; the tool reads the file's text through `tool_input_text` (`tool::run_on_text`) |
 //! | `cli_functions` | path | `[name, [attributes]]` per top-level function, or `none` |
 //! | `cli_tool` | files, entry call | the tool's result as text |
@@ -49,7 +50,7 @@ pub fn cli_host_ops() -> HostOpHandler {
                 // values are dropped where its drop plan says (F7).
                 let checker = texts(3);
                 let plan = (!checker.is_empty()).then(|| check::drop_plan(&text(0), &checker, &texts(4)));
-                match run::compile_planned(&text(0), tail, plan.as_ref()) {
+                match run::compile_entry(&text(0), tail, &texts(5), plan.as_ref()) {
                     Ok(program) => {
                         let code = run::execute(program, texts(1));
                         HostValue::List(vec![HostValue::Int(i64::from(code)), HostValue::List(Vec::new())])
@@ -62,6 +63,7 @@ pub fn cli_host_ops() -> HostOpHandler {
             "cli_program_tool" => {
                 HostValue::Int(i64::from(check::run_on_program(&text(0), &texts(1), &texts(2), &text(3))))
             }
+            "cli_program_eval" => check::eval_on_program(&text(0), &texts(1), &texts(2), &text(3)),
             "cli_text_tool" => HostValue::Int(i64::from(tool::run_on_text(&text(0), &texts(1), &text(2)))),
             "cli_functions" => run::declared_functions(&text(0)).unwrap_or(HostValue::Null),
             "cli_tool" | "cli_tool_on" => {

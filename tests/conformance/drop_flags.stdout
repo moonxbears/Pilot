@@ -1,0 +1,18 @@
+took strue
+drop strue
+true
+drop sfalse
+false
+consume btrue
+drop btrue
+fresh
+drop fresh
+drop bfalse
+fresh
+drop fresh
+wrap o4 2
+drop o4
+2
+drop o3
+-1
+end

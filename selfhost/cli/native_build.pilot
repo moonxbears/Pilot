@@ -15,6 +15,9 @@
 // PILOT_LIVE_COUNT: the executable reports on standard error, when it ends
 // normally, the heap objects still allocated (`live allocations: N`).
 //
+// Once the program compiles, its `[Live]` and `[Generate]` functions run
+// (selfhost/cli/comptime_attrs.pilot) before the C compiler does.
+//
 // Exit codes: 0 built, 1 the program or the C compiler rejected it,
 // 2 bad usage.
 pub lvl(0) pkg Pilot.SelfHost.Cli.NativeBuild;
@@ -22,6 +25,7 @@ pub lvl(0) pkg Pilot.SelfHost.Cli.NativeBuild;
 use Pilot.Core.File;
 use std.proc;
 use Pilot.SelfHost.Cli.TestEmit;
+use Pilot.SelfHost.Cli.ComptimeAttrs;
 
 /// The executable `pilot build` writes for `program` when no `-o` is given:
 /// its file name without `.pilot`, in the working directory.
@@ -46,6 +50,8 @@ pub fn native_build(program: str, out: str, target: str, release: bool, live: bo
     // Diagnostics, warnings included, as `pilot emit` reported them.
     if emitted.stderr.len() > 0 { eprint(emitted.stderr.slice(0, emitted.stderr.len() - 1)); }
     if emitted.exit_code != 0 { return 1; }
+    // The program compiles: its `[Live]` and `[Generate]` functions run.
+    if comptime_attrs_run(program, live_phase_compile()) > 0 { return 1; }
     let c_path = if target == "c" { out } else { out + ".c" };
     if !File.write_text(c_path, emitted.stdout) {
         eprint(f"error: cannot write `{c_path}`");

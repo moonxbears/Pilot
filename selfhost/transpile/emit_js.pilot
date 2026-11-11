@@ -130,6 +130,14 @@ pub struct JsDialect : ISourceDialect {
         "    if (i >= 0n && i < BigInt(raw.length)) return BigInt(raw[Number(i)]);",
         "    pilot_trap(\"byte index \" + i + \" out of bounds for length \" + raw.length);",
         "}",
+        "function pilot_str_from_bytes(xs) {",
+        "    if (!xs.every((x) => typeof x === \"bigint\" && x >= 0n && x <= 255n)) pilot_trap(\"`str_from_bytes` takes bytes (0 to 255)\");",
+        "    try {",
+        "        return new TextDecoder(\"utf-8\", { fatal: true }).decode(Uint8Array.from(xs, Number));",
+        "    } catch (e) {",
+        "        return null;",
+        "    }",
+        "}",
         "function pilot_eq(a, b) {",
         "    if (Array.isArray(a) && Array.isArray(b)) {",
         "        return a === b || (a.length === b.length && a.every((x, i) => pilot_eq(x, b[i])));",
@@ -369,7 +377,7 @@ pub struct JsDialect : ISourceDialect {
         if name == "to_str" { return f"pilot_show({args[0]})"; }
         if name == "list_get" { return f"pilot_map_get({joined(args)})"; }
         if name == "list_set" { return f"pilot_map_set({joined(args)})"; }
-        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_byte_at", "list_extend", "list_remove_at", "stdin_read_line"] {
+        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_byte_at", "str_from_bytes", "list_extend", "list_remove_at", "stdin_read_line"] {
             if name == helper { return f"pilot_{helper}({joined(args)})"; }
         }
         return none;

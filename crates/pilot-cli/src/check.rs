@@ -381,18 +381,59 @@ pub struct PlannedDrop {
     pub b: String,
 }
 
+/// One probe of the plan (selfhost/check/probes.pilot), its statement named
+/// by file and the node's offsets in it.
+#[derive(Clone, Debug)]
+pub struct PlannedProbe {
+    pub file: String,
+    pub start: u32,
+    pub end: u32,
+    pub kind: u16,
+    pub probe: pilot_vm::lower_probe::Probe,
+}
+
 /// The drop plan of the program at `path`: its rows, and how to drop a value
-/// of each type it names (`[type, destructor owner or "", fields]`).
+/// of each type it names (`[type, destructor owner or "", fields]`); and the
+/// probes the checker plans around statements.
 #[derive(Clone, Debug, Default)]
 pub struct CheckedDropPlan {
     pub rows: Vec<PlannedDrop>,
     pub glue: Vec<(String, String, Vec<(String, String)>)>,
     /// `[value type, fields]`: the value-type fields a copy copies too.
     pub copy_glue: Vec<(String, Vec<(String, String)>)>,
+    pub probes: Vec<PlannedProbe>,
 }
 
-/// Runs the checker's `drop_plan()` over the program at `path`. A program
-/// that does not link has no plan.
+/// The probe in row `[start, end, kind, capture, call, args, at]` of the
+/// checker's `run_plan()`, each argument `[code, value]`.
+fn planned_probe(linked: &LinkedSource, row: &HostValue) -> Option<PlannedProbe> {
+    let f = row.as_list()?;
+    let n = |i: usize| f.get(i).and_then(HostValue::as_int).unwrap_or(0);
+    let mut args = Vec::new();
+    for a in f.get(5)?.as_list()? {
+        let pair = a.as_list()?;
+        let code = pair.first()?.as_int()?;
+        let text = pair.get(1).and_then(HostValue::as_str).unwrap_or("");
+        let flag = matches!(pair.get(1), Some(HostValue::Bool(true)));
+        args.push(pilot_vm::lower_probe::ProbeArg::from_code(code, text, flag)?);
+    }
+    let (file, start, end) = linked.resolve(ByteSpan::new(n(0) as u32, n(1) as u32));
+    Some(PlannedProbe {
+        file,
+        start,
+        end,
+        kind: n(2) as u16,
+        probe: pilot_vm::lower_probe::Probe {
+            capture: matches!(f.get(3), Some(HostValue::Bool(true))),
+            call: f.get(4)?.as_str()?.to_string(),
+            args,
+            at: pilot_vm::lower_probe::ProbeAt::from_code(n(6))?,
+        },
+    })
+}
+
+/// Runs the checker's `run_plan()` over the program at `path`: its drop plan
+/// and its probes. A program that does not link has no plan.
 pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> CheckedDropPlan {
     let Some((linked, _, snap)) = program_snapshot(path, decls) else {
         return CheckedDropPlan::default();
@@ -402,9 +443,13 @@ pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> Chec
         _ => None,
     });
     let tool_paths: Vec<&str> = checker_files.iter().map(String::as_str).collect();
-    let out = tool::eval_to_host(&tool_paths, "drop_plan();", ops);
+    let out = tool::eval_to_host(&tool_paths, "run_plan();", ops);
+    let parts = out.as_list().unwrap_or_default();
     let mut plan = CheckedDropPlan::default();
-    for r in out.as_list().unwrap_or_default() {
+    for r in parts.get(1).and_then(HostValue::as_list).unwrap_or_default() {
+        plan.probes.extend(planned_probe(&linked, r));
+    }
+    for r in parts.first().and_then(HostValue::as_list).unwrap_or_default() {
         let Some(f) = r.as_list() else { continue };
         let s = |i: usize| f.get(i).and_then(HostValue::as_str).unwrap_or("").to_string();
         let n = |i: usize| f.get(i).and_then(HostValue::as_int).unwrap_or(0);
@@ -452,6 +497,22 @@ pub fn run_on_program(path: &str, tool_files: &[String], decls: &[String], entry
     });
     let tool_paths: Vec<&str> = tool_files.iter().map(String::as_str).collect();
     tool::eval_cli(&tool_paths, entry, ops)
+}
+
+/// Runs the tool made of `tool_files`, calling `entry`, with the snapshot of
+/// the program at `path` served as `chk_snapshot`, like `run_on_program`;
+/// gives the value `entry` returns. A program that does not link gives
+/// `HostValue::Null`.
+pub fn eval_on_program(path: &str, tool_files: &[String], decls: &[String], entry: &str) -> HostValue {
+    let Some((_, _, snap)) = program_snapshot(path, decls) else {
+        return HostValue::Null;
+    };
+    let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
+        "chk_snapshot" => Some(Ok(snap.clone())),
+        _ => None,
+    });
+    let tool_paths: Vec<&str> = tool_files.iter().map(String::as_str).collect();
+    tool::eval_to_host(&tool_paths, entry, ops)
 }
 
 /// The program at `path` linked with the declaration files `decls`: its

@@ -315,6 +315,20 @@ impl PilVirtualMachine {
                     .map(|b| PilotVal::from_int(*b as i64))
                     .ok_or_else(|| format!("byte index {i} out of bounds for length {}", s.len()))
             }
+            // The str whose UTF-8 bytes are the list's elements; none when
+            // they are not valid UTF-8 (RFC 3629).
+            "str_from_bytes" => {
+                let slot = self.list_slot(arg(args, 0, op)?, op)?;
+                let mut bytes = Vec::with_capacity(self.heap_lists[slot].len());
+                for v in &self.heap_lists[slot] {
+                    let b = v
+                        .as_int()
+                        .filter(|b| (0..=255).contains(b))
+                        .ok_or_else(|| format!("`{op}` takes bytes (0 to 255), found {}", v.to_string_repr()))?;
+                    bytes.push(b as u8);
+                }
+                Ok(String::from_utf8(bytes).map_or(PilotVal::NULL, |s| PilotVal::from_str(&s)))
+            }
             "str_slice" => self.slice(args, op),
             "str_find" => {
                 let (h, n) = (str_arg(args, 0, op)?, str_arg(args, 1, op)?);

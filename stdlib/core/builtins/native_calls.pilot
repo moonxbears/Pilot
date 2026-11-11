@@ -27,6 +27,9 @@ comptime {
     // `seam("id", "note")`: an intentionally unconnected entry or exit point.
     // It always fails; every call is listed in `selfhost/gate/ledger/seams.pilot`.
     __engine("bind_native_fn", nameof(seam),    "seam_open");
+    // `from_utf8(bytes)`: the str whose UTF-8 bytes are `bytes` (each 0 to
+    // 255), or none when they are not valid UTF-8 (RFC 3629).
+    __engine("bind_native_fn", nameof(from_utf8), "str_from_bytes");
 
     // Methods on strings, lists and records: `value.name(args)`.
     __engine("bind_native_method", nameof(len),         "str_len");

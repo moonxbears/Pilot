@@ -13,8 +13,9 @@
 //     ends; one declared in a loop body is dropped in each iteration;
 //   - a `return`, or a `break` / `continue` that leaves its scope, taken
 //     while it is live drops it first (after a returned value is computed);
-//     so does a failed `?` that leaves the function, unless its operand
-//     moved it.
+//     so does a failed `?` that leaves the function, or jumps to `catch`
+//     out of the `try` block it was declared in, unless its operand moved
+//     it.
 // A scoped guard (lattice 0b11) is released when its block ends, the last
 // declared first, whatever its last use.
 //
@@ -25,19 +26,21 @@
 // one is made; a var moved away before the assignment, on every path, has
 // nothing to drop.
 //
-// What the analysis cannot place yet stops at a seam where it runs:
-// assigning a var moved on only some paths before (own.reassign: the old
-// value needs a flag kept at run time), a closure capturing an owned
-// value (own.capture), a move on one branch of a conditional expression
-// (own.conditional_move), `?` jumping to `catch` out of the `try` block an
-// owned value was declared in, or in a statement that also moves it
-// (own.try_exit),
-// and collections of values that need dropping (own.collection_drop).
+// A binding moved on only some paths (a move under `&&`, `??` or a
+// conditional expression, a var assigned after a move on one branch, a `?`
+// in a statement that also moves it) gets a drop flag kept at run time: set
+// when it is bound or assigned, cleared where a move completes (for a value
+// passed to a call or put in a literal, once the call or literal is made).
+// Its drops happen only while the flag is set.
+//
+// What the analysis cannot place yet stops at a seam where it runs: a
+// closure capturing an owned value (own.capture), and collections of values
+// that need dropping (own.collection_drop).
 //
 // The plan is rows for crates/pilot-cli/src/check.rs (`drop_plan`), each
 // led by its `DropAction` and naming a node by its program-wide span and kind:
 //   [action, start, end, kind, binding, type]  Before, After, Exit, Else, Guard,
-//                                              Replace
+//                                              Replace, Flag, Moved
 //   [Seam, start, end, kind, id, note]
 //   [Glue, type, destructor owner or "", [field, field type, ..]]
 pub lvl(0) pkg Pilot.SelfHost.Check.Drops;
@@ -74,8 +77,15 @@ pub enum DropAction : u8 {
     /// How to copy a value of one type: the value-type fields to copy too.
     CopyGlue,
     /// An assignment drops the value its target held, after the new value
-    /// is made and before it is stored.
+    /// is made and before it is stored; a flagged binding's flag is set
+    /// again once the new value is stored.
     Replace,
+    /// The binding gets its drop flag, set, before the node runs (its
+    /// declaration, or the function body for a parameter).
+    Flag,
+    /// A move of the binding completes when the node has run: its flag is
+    /// cleared.
+    Moved,
 }
 
 /// What planning the drops of one program keeps.
@@ -100,6 +110,9 @@ pub struct DropPlanner : IObject {
     /// The bindings that borrow from the binding being planned: it lives
     /// until their last use too.
     pub borrowers: List<i64>;
+    /// Whether the binding being planned is moved on only some paths, so
+    /// its drops depend on a flag kept at run time.
+    pub flagged: bool;
 }
 
 pub fn row(pl: DropPlanner, action: DropAction, n: i64, a: str, b: str) {
@@ -235,6 +248,8 @@ fn exits(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
     if k == nk_lambda() || k == nk_fn() { return; }
     if k == nk_return() {
         if !moves(pl, n, b) { row(pl, ::Exit, n, pl.flow.inf.r.name[b], key); }
+        // A `?` in the returned value leaves before the return does.
+        for c in children(s, n) { exits(pl, c, b, site, key); }
         return;
     }
     if k == nk_break() || k == nk_continue() {
@@ -273,27 +288,21 @@ fn statement_of(pl: DropPlanner, n: i64) -> i64 {
     return at;
 }
 
-/// A `?` (node `n`) reached while `b` is live. Leaving the function, it
-/// drops `b` unless its operand moved it. Jumping to a `catch` in the same
-/// function keeps `b` when it was declared outside the `try` block (the
-/// statement holding the `try` drops it); one declared inside, and a `?` in
-/// a statement that also moves `b` elsewhere (whether the move came first
-/// depends on the order of evaluation), stop at the seam.
+/// A `?` (node `n`) reached while `b` is live. A failure leaves the
+/// function, or jumps to the `catch` of a `try` block in it. Leaving `b`'s
+/// scope either way (the function, or the try block `b` was declared in),
+/// it drops `b` unless its operand moved it; jumping to a `catch` that `b`
+/// is still in scope for keeps it (the statement holding the `try` drops
+/// it). In a statement that also moves `b`, the drop depends on `b`'s flag.
 fn try_exit(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
     let s = pl.flow.inf.p.s;
     let name = pl.flow.inf.r.name[b];
     let region = try_region(pl, n);
-    if region >= 0 {
-        if nested_in(s, site, region) {
-            row(pl, ::Seam, n, "own.try_exit", f"`?` jumps to `catch` while `{name}`, declared in the `try` block it leaves, is live; dropping it on that jump is not planned yet");
-        }
-        return;
-    }
+    if region >= 0 && !nested_in(s, site, region) { return; }
     if moves(pl, lhs(s, n), b) { return; }
-    if moves(pl, statement_of(pl, n), b) {
-        row(pl, ::Seam, n, "own.try_exit", f"`?` can leave the function in a statement that also moves `{name}`; whether to drop it on that path depends on the order of evaluation, which the plan does not follow yet");
-        return;
-    }
+    // In a statement that also moves `b`, whether the move came first is
+    // known only at run time: the flag says.
+    if moves(pl, statement_of(pl, n), b) { pl.flagged = true; }
     row(pl, ::Exit, n, name, key);
 }
 
@@ -349,8 +358,12 @@ fn place(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
         return;
     }
     if moves(pl, n, b) {
+        // A `?` before the move completes leaves with the value still ours.
+        exits(pl, n, b, site, key);
         if conditional_move(pl, n, b) {
-            row(pl, ::Seam, n, "own.conditional_move", f"`{name}` is moved on only some paths through this statement; dropping it on the others comes with the PilIR drop pass (F7)");
+            // Dropped after the statement on the paths that did not move it.
+            pl.flagged = true;
+            row(pl, ::After, n, name, key);
         }
         return;
     }
@@ -437,9 +450,9 @@ fn assigns(pl: DropPlanner, n: i64, b: i64) -> bool {
     return false;
 }
 
-/// Writes a `Replace` row on each assignment to `b` while it holds a value,
-/// and a seam row on each assignment after a move on only some paths and
-/// on every closure that captures it; true when there is a seam.
+/// Writes a `Replace` row on each assignment to `b` that may find it holding
+/// a value (flagging `b` when it was moved on only some paths before), and
+/// a seam row on every closure that captures it; true when there is a seam.
 fn unsupported_uses(pl: DropPlanner, body: i64, b: i64, key: str) -> bool {
     let s = pl.flow.inf.p.s;
     var ids: List<i64> = [];
@@ -453,8 +466,9 @@ fn unsupported_uses(pl: DropPlanner, body: i64, b: i64, key: str) -> bool {
             let maybe = pl.flow.moved_at.has(at) && pl.flow.moved_at.get(at);
             if !maybe { row(pl, ::Replace, up, name, key); }
             else if !moved_before(pl, up, b) {
-                row(pl, ::Seam, up, "own.reassign", f"`{name}` is moved on only some paths before this assignment; dropping the value it still holds on the others needs a flag kept at run time");
-                found = true;
+                // Moved on some paths only: the flag says whether to drop.
+                pl.flagged = true;
+                row(pl, ::Replace, up, name, key);
             }
         }
         let lam = ancestor_of_kind(pl, i, body, [nk_lambda()]);
@@ -479,6 +493,7 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
     pl.cur_binding = b;
     pl.cur_type = t;
     pl.borrowers = borrowers_of(pl.borrows, b);
+    pl.flagged = false;
     let need = needs_drop(pl, t, 0);
     if need == 0 { return; }
     let key = ty_display(p.tt, t);
@@ -496,16 +511,68 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
     }
     if kindof == BindKind::Param {
         place_seq(pl, body, children(s, body), 0, b, body, key, true);
-        return;
+    } else {
+        // A local: the statements after its declaration in its block.
+        let blk = p.parents[site];
+        if blk < 0 || kind(s, blk) != nk_block() { return; }
+        let stmts = children(s, blk);
+        let at = index_in(s, stmts, site);
+        if !place_seq(pl, blk, stmts, at + 1, b, site, key, false) {
+            row(pl, ::After, site, r.name[b], key);
+        }
     }
-    // A local: the statements after its declaration in its block.
-    let blk = p.parents[site];
-    if blk < 0 || kind(s, blk) != nk_block() { return; }
-    let stmts = children(s, blk);
-    let at = index_in(s, stmts, site);
-    if !place_seq(pl, blk, stmts, at + 1, b, site, key, false) {
-        row(pl, ::After, site, r.name[b], key);
+    if pl.flagged { flag_rows(pl, b, decl, body, key); }
+}
+
+/// The node where a move of `b` through identifier `i` completes: the call
+/// it is passed to, or the list, tuple or struct literal it is put in; else
+/// the identifier itself (bound, assigned or returned).
+fn move_completes_at(pl: DropPlanner, i: i64) -> i64 {
+    let p = pl.flow.inf.p;
+    let s = p.s;
+    var up = p.parents[i];
+    if up < 0 { return i; }
+    if kind(s, up) == nk_call_arg() { up = p.parents[up]; }
+    else if kind(s, up) == nk_map() && p.parents[up] >= 0 && kind(s, p.parents[up]) == nk_call() { up = p.parents[up]; }
+    if up >= 0 && (kind(s, up) == nk_call() || kind(s, up) == nk_list() || kind(s, up) == nk_tuple()) { return up; }
+    return i;
+}
+
+/// The rows a flagged binding `b` needs: its flag at `decl`, cleared where
+/// each move of it completes, and a `Replace` on every assignment (which
+/// sets it again).
+fn flag_rows(pl: DropPlanner, b: i64, decl: i64, body: i64, key: str) {
+    let p = pl.flow.inf.p;
+    let s = p.s;
+    let name = pl.flow.inf.r.name[b];
+    row(pl, ::Flag, decl, name, key);
+    var ids: List<i64> = [];
+    refs(pl, body, b, ids);
+    for i in ids {
+        if ancestor_of_kind(pl, i, body, [nk_lambda()]) >= 0 { continue; }
+        let up = p.parents[i];
+        if up >= 0 && kind(s, up) == nk_assign() && lhs(s, up) == i {
+            if !has_row(pl, up, DropAction::Replace) { row(pl, ::Replace, up, name, key); }
+            continue;
+        }
+        if is_move_position(pl.flow, i) {
+            let at = move_completes_at(pl, i);
+            if !has_row(pl, at, DropAction::Moved) { row(pl, ::Moved, at, name, key); }
+        }
     }
+}
+
+/// Whether node `n` already has a row of `action` for the binding being
+/// planned.
+fn has_row(pl: DropPlanner, n: i64, action: DropAction) -> bool {
+    let k = f"{n}";
+    if !pl.at.has(k) { return false; }
+    for r in pl.at.get(k) {
+        let a: i64 = r[0];
+        let b: i64 = r[1];
+        if a == action as i64 && b == pl.cur_binding { return true; }
+    }
+    return false;
 }
 
 /// A planner over `inf` that has planned the drops of every function body
@@ -519,7 +586,7 @@ pub fn drop_planner(inf: Infer) -> DropPlanner {
     let pl = DropPlanner {
         flow: f, rows: [], needs: Map<str, i64>(), glued: Map<str, bool>(),
         at: Map<str, List<List<any>>>(), cur_binding: -1, cur_type: ty_unknown(),
-        borrows: borrows_new(f), borrowers: [],
+        borrows: borrows_new(f), borrowers: [], flagged: false,
     };
     var b = 0;
     while b < inf.r.site.len() {

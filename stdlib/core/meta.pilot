@@ -16,17 +16,16 @@ use Pilot.Core.Option.*;
 use Pilot.Core.Result.*;
 use Pilot.Core.Callables.*;
 use Pilot.Core.Builtins.*;
+use Pilot.Core.Debug.*;
+use Pilot.Core.Live.*;
+use Pilot.Core.AttrFlow.*;
+use Pilot.Core.Coverage.*;
 
 // =========================================================================
 // 1. THE 7-PILLAR `[...]` ATTRIBUTE INTERFACES & PILOT-HOSTED `quote` WEAVERS
 // =========================================================================
-pub struct InheritPolicy : IValue {
-    pub code: u8;
-    pub static pure:
-        fn override_policy() -> InheritPolicy => InheritPolicy { code: 0 };
-        fn append_policy()   -> InheritPolicy => InheritPolicy { code: 1 };
-        fn coalesce_policy() -> InheritPolicy => InheritPolicy { code: 2 };
-}
+// Pillar 6, hierarchical propagation (`IInheritedAttribute`, `InheritPolicy`),
+// is declared in stdlib/core/attr_flow.pilot, which programs link.
 
 pub interface {
     // Pillar 2: Compile-Time AOP Function Entry/Exit Interceptor
@@ -68,11 +67,6 @@ pub interface {
                 self.on_changed(__old_val, $backing_field);
             }
         };
-    }
-
-    // Pillar 6: Hierarchical Interface-to-Struct Attribute Propagation
-    IInheritedAttribute : IAttribute {
-        pub policy: InheritPolicy { get => InheritPolicy.override_policy(); }
     }
 
     // Pillar 7: Declarative ECS & `.pchor` Archetype Rule Scheduler
@@ -162,6 +156,62 @@ pub struct {
     [Layout(c_abi)] WcetAttr         : IInheritedAttribute, IValue { pub budget_ns: u64; pub weight: i32; }
     [Layout(c_abi)] ZeroRuntimeAttr  : IInheritedAttribute, IValue { pub weight: i32; }
     [Layout(c_abi)] KernelAttr       : IAttribute,          IValue { pub workgroup_size: u32; pub weight: i32; }
+
+    // Tracing a function's bindings and assignments to stderr when it runs:
+    // `[Debug]`, `[Debug(::Verbose)]`, `[Debug(::Medium, changed_only: true)]`.
+    // The line formats are in stdlib/core/debug.pilot; the type checker plans
+    // the trace (selfhost/check/probes.pilot).
+    [Layout(c_abi)]
+    DebugAttr : IInheritedAttribute, IValue {
+        pub level:        DebugLevel = ::Debug;
+        pub changed_only: bool = false;
+        pub weight:       i32;
+    }
+
+    // Measuring what functions do while the program runs:
+    // `[Coverage]`, `[Coverage(::Speed | ::Calls, to: ::Stdout | ::File)]`.
+    // Every mode when none is written; the report goes to stderr unless
+    // `to:` says otherwise. On a package, struct, interface or ext block it
+    // covers every function inside and adds a total
+    // (stdlib/core/coverage.pilot, selfhost/check/coverage.pilot).
+    [Layout(c_abi)]
+    CoverageAttr : IInheritedAttribute, IValue {
+        pub modes:  CoverageMode = ::Speed | ::Calls | ::Intrinsics;
+        pub to:     CoverageOut = ::Stderr;
+        pub weight: i32;
+    }
+
+    // Leaving inherited attributes out: `[NoInherit]` drops every attribute
+    // inherited from outside the declaration, `[NoInherit(Debug, Flow)]`
+    // those named (stdlib/core/attr_flow.pilot).
+    [Layout(c_abi)]
+    NoInheritAttr : IAttribute, IValue {
+        pub weight: i32;
+    }
+
+    // Running a function as the program is worked on: `[Live(3, 4)]` on
+    // `fn add(a, b)` calls `add(3, 4)` and prints
+    // `<file>:<line>: live: add(3, 4) = 7`. The arguments are the function's
+    // own, in order; `when:` names the moments it runs (`LiveWhen` in
+    // stdlib/core/live.pilot, combined with `|`, `::Compile` by default):
+    // `[Live(3, 4, when: ::Compile | ::Run)]` (selfhost/cli/comptime_attrs.pilot).
+    [Layout(c_abi)]
+    LiveAttr : IAttribute, IValue {
+        pub when:   LiveWhen = ::Compile;
+        pub weight: i32;
+    }
+
+    // Generating a file at compile time: `[Generate("out/schema.sql")]` on a
+    // function that takes nothing and returns `str` writes what it returns to
+    // that file, beside the source, when the program is checked or built.
+    // `[Generate(ext: "sql")]` names the file after the function
+    // (`schema.sql`). The path's extension is the file's.
+    [Layout(c_abi)]
+    GenerateAttr : IInheritedAttribute, IValue {
+        pub path:   str = "";
+        pub ext:    str = "";
+        pub weight: i32;
+    }
 }
 
 // =========================================================================

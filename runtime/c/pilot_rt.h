@@ -1159,6 +1159,49 @@ static inline pilot_val pilot_str_byte_at(pilot_val s, pilot_val k) {
     pilot_trap(m);
     return PILOT_V_NULL;
 }
+/* Whether `s[0..n)` is well-formed UTF-8 (RFC 3629 section 4): no overlong
+   forms, no surrogates, nothing past U+10FFFF. */
+static inline bool pilot_v_utf8_ok(const unsigned char *s, size_t n) {
+    size_t i = 0;
+    while (i < n) {
+        unsigned char b = s[i];
+        size_t len = b < 0x80 ? 1 : b >= 0xC2 && b <= 0xDF ? 2 : b >= 0xE0 && b <= 0xEF ? 3 : b >= 0xF0 && b <= 0xF4 ? 4 : 0;
+        if (len == 0 || i + len > n) return false;
+        unsigned char lo = 0x80, hi = 0xBF;
+        if (b == 0xE0) lo = 0xA0;
+        else if (b == 0xED) hi = 0x9F;
+        else if (b == 0xF0) lo = 0x90;
+        else if (b == 0xF4) hi = 0x8F;
+        for (size_t k = 1; k < len; k++) {
+            unsigned char c = s[i + k];
+            if (c < (k == 1 ? lo : 0x80) || c > (k == 1 ? hi : 0xBF)) return false;
+        }
+        i += len;
+    }
+    return true;
+}
+/* `str_from_bytes`: the str whose UTF-8 bytes are the list's elements, or
+   none when they are not valid UTF-8. */
+static inline pilot_val pilot_str_from_bytes(pilot_val l) {
+    if (l.tag != PILOT_V_LIST) pilot_v_type_error("from_utf8", l, PILOT_V_NULL);
+    size_t n = (size_t)l.as.l->len;
+    char *s;
+    pilot_val out = pilot_v_strbuf(n, &s);
+    for (size_t i = 0; i < n; i++) {
+        pilot_val b = l.as.l->items[i];
+        int64_t x = b.tag == PILOT_V_INT ? b.as.i : -1;
+        if (x < 0 || x > 255) {
+            pilot_v_drop(out);
+            pilot_trap("`str_from_bytes` takes bytes (0 to 255)");
+        }
+        s[i] = (char)x;
+    }
+    if (!pilot_v_utf8_ok((const unsigned char *)s, n)) {
+        pilot_v_drop(out);
+        return PILOT_V_NULL;
+    }
+    return out;
+}
 static inline pilot_val pilot_rt_assert(pilot_val cond, bool has_note, pilot_val note) {
     if (cond.tag == PILOT_V_BOOL && cond.as.b) return PILOT_V_NULL;
     if (!has_note) pilot_trap("assertion failed");

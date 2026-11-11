@@ -572,16 +572,29 @@ pure fn json_hex4(src: str, at: usize) -> i64 {
     return v;
 }
 
-/// The str holding the single Unicode scalar `cp`. Printable ASCII, LF, CR
-/// and tab can be written as Pilot literals; any other scalar needs a str
-/// built from a code point, which the VM cannot do yet.
+/// The str holding the code point `cp`, encoded as UTF-8 (RFC 3629
+/// section 3). A lone surrogate (U+D800 to U+DFFF, an escape RFC 8259
+/// section 8.2 lets through) is not a Unicode scalar, so its encoding is not
+/// valid UTF-8; it becomes U+FFFD, as a WHATWG UTF-8 decoder makes it.
 pure fn json_code_point_str(cp: i64) -> str {
-    let printable = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
-    if cp >= 32 && cp <= 126 { return printable.slice(cp - 32, cp - 31); }
-    if cp == 10 { return "\n"; }
-    if cp == 13 { return "\r"; }
-    if cp == 9 { return "\t"; }
-    return seam("json.code_point_str", "a str holding one Unicode scalar (code-point-to-str intrinsic) for \\b, \\f and \\u escapes outside printable ASCII");
+    var bytes: List<i64> = [];
+    if cp < 128 {
+        bytes.push(cp);
+    } else if cp < 2048 {
+        bytes.push(192 + cp / 64);
+        bytes.push(128 + cp % 64);
+    } else if cp < 65536 {
+        bytes.push(224 + cp / 4096);
+        bytes.push(128 + (cp / 64) % 64);
+        bytes.push(128 + cp % 64);
+    } else {
+        bytes.push(240 + cp / 262144);
+        bytes.push(128 + (cp / 4096) % 64);
+        bytes.push(128 + (cp / 64) % 64);
+        bytes.push(128 + cp % 64);
+    }
+    let replacement: List<i64> = [239, 191, 189];
+    return from_utf8(bytes) ?? from_utf8(replacement) ?? "";
 }
 
 /// The binary64 value of the decimal `int_digits.frac_digits * 10^exp10`.

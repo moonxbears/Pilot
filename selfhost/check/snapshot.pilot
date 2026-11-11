@@ -91,6 +91,7 @@ pub pure fn splice_without() -> i64 => 2;
 // --- Binary and unary operators --------------------------------------------
 pub pure fn op_eq() -> i64 => 8;
 pub pure fn op_or() -> i64 => 15;
+pub pure fn snap_op_bit_or() -> i64 => 17;
 pub pure fn op_ge() -> i64 => 13;
 pub pure fn op_and() -> i64 => 14;
 pub pure fn op_coalesce() -> i64 => 22;

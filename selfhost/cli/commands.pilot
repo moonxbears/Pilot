@@ -20,6 +20,7 @@ use Pilot.SelfHost.Cli.TestCmd;
 use Pilot.SelfHost.Cli.TestIr;
 use Pilot.SelfHost.Cli.TestEmit;
 use Pilot.SelfHost.Cli.BenchCmd;
+use Pilot.SelfHost.Cli.ComptimeAttrs;
 
 /// Exit code for a command used wrongly.
 pub pure fn cli_exit_usage() -> i64 => 2;
@@ -109,7 +110,8 @@ pub fn cmd_completions(p: ParsedArgs, reg: CommandRegistry) -> i64 {
 
 /// `pilot run <file> [-- args...]`: compiles the program and runs the
 /// analyzer over it, reports their errors and warnings, and refuses to run
-/// it if any is an error; else runs it and exits with its exit code.
+/// it if any is an error; else runs its `[Live]` calls marked `::Run`, then
+/// the program, and exits with its exit code.
 pub fn cmd_run(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     if args.len == 0 { return usage_error("`pilot run` needs a program file"); }
@@ -125,14 +127,23 @@ pub fn cmd_run(p: ParsedArgs, reg: CommandRegistry) -> i64 {
         if report_diagnostics(compiled) > 0 { return 1; }
         let analyzed = report_at_least(semantic_diags(program), diag_severity_warning());
         if report_diagnostics(analyzed) > 0 { return 1; }
+        // Its `[Live(.., when: ::Run)]` calls run before `main`.
+        if comptime_attrs_run(program, live_phase_run()) > 0 { return 1; }
     }
-    let outcome = host_run(program, script_args, "");
+    // `[Coverage(to: ::File)]` writes its report through this file.
+    let outcome = host_run_with(program, script_args, "", [coverage_file_link()]);
     let _ = report_diagnostics(outcome.diags);
     return outcome.exit_code;
 }
 
-/// `pilot check <files...>`: reports every diagnostic without running
-/// anything; exits 1 when there is one.
+/// What `pilot run` links for `[Coverage(to: ::File)]`: only the seed
+/// writes files, so only `pilot run` links it.
+pub pure fn coverage_file_link() -> str => "stdlib/core/coverage_file.pilot";
+
+/// `pilot check <files...>`: reports every diagnostic, then runs the
+/// `[Live]` and `[Generate]` functions of each file that has none
+/// (selfhost/cli/comptime_attrs.pilot); exits 1 when there is one or a run
+/// fails.
 pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     if parsed_has_flag(p, "fix") {
         return seam("cli.check_fix", "`pilot check --fix` needs analyzer diagnostics with CST fixes (F4)");
@@ -142,9 +153,12 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     var errors = 0;
     for f in files {
         let compiled = host_check(f);
-        errors = errors + report_diagnostics(compiled);
+        var found = report_diagnostics(compiled);
         // The analyzer reads a program the seed accepted.
-        if compiled.len == 0 { errors = errors + report_diagnostics(semantic_diags(f)); }
+        if compiled.len == 0 { found = found + report_diagnostics(semantic_diags(f)); }
+        // A program that passed runs its `[Live]` and `[Generate]` functions.
+        if found == 0 { found = comptime_attrs_run(f, live_phase_compile()); }
+        errors = errors + found;
     }
     if errors > 0 {
         eprint(f"check failed: {errors} error(s)");
@@ -262,6 +276,7 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/lower_destructure.pilot",
         "selfhost/ir/lower_defer.pilot",
         "selfhost/ir/lower_drop.pilot",
+        "selfhost/ir/lower_probe.pilot",
         "selfhost/ir/lower_closure.pilot",
         "selfhost/ir/lower_generator.pilot",
         "selfhost/ir/verify.pilot",

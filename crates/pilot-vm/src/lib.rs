@@ -24,6 +24,7 @@ mod lower_global;
 mod lower_members;
 mod lower_native;
 mod lower_pipe;
+pub mod lower_probe;
 mod lower_program;
 mod lower_stmt;
 mod lower_struct;
@@ -119,6 +120,7 @@ struct TryCtx {
 /// Per-function compiler state, saved and restored around nested functions.
 struct FnState {
     captures: Vec<CaptureCtx>,
+    drop_flags: HashMap<String, u8>,
     defers: Vec<Vec<lower_drop::Deferred>>,
     var_slots: HashMap<String, u8>,
     var_types: HashMap<String, String>,
@@ -152,6 +154,11 @@ pub struct BytecodeCompiler {
     /// The `replace` drops of the assignment being lowered: the value its
     /// target held, dropped once the new value is made.
     pending_replace: Vec<lower_drop::DropItem>,
+    /// Binding -> the register holding its drop flag, for a binding moved
+    /// on only some paths: its drops run only while the flag is set.
+    drop_flags: HashMap<String, u8>,
+    /// Calls made around statements (`lower_probe`), when the CLI gave a plan.
+    probe_plan: Option<std::rc::Rc<lower_probe::ProbePlan>>,
     pub constants: Vec<PilotVal>,
     pub pc_spans: Vec<ByteSpan>,
     pub reg_symbols: Vec<(u8, u32, u32)>,
@@ -260,8 +267,19 @@ impl BytecodeCompiler {
 
     /// `compile_linked`, dropping owned values where `plan` says (F7).
     pub fn compile_linked_with_drops(arena: &AstArena, plan: lower_drop::DropPlan) -> PilcBinary {
+        Self::compile_linked_with_plans(arena, plan, lower_probe::ProbePlan::default())
+    }
+
+    /// `compile_linked_with_drops`, also making the calls `probes` plans
+    /// around statements.
+    pub fn compile_linked_with_plans(
+        arena: &AstArena,
+        plan: lower_drop::DropPlan,
+        probes: lower_probe::ProbePlan,
+    ) -> PilcBinary {
         let mut c = Self::new();
         c.set_drop_plan(plan);
+        c.set_probe_plan(probes);
         let units = Self::unit_items(arena);
         let last = c.compile_units(arena, &units);
         let root = arena.units.last().map_or(NodeId::NONE, |u| u.root);
@@ -531,6 +549,7 @@ impl BytecodeCompiler {
     fn save_fn_state(&mut self) -> FnState {
         FnState {
             captures: std::mem::take(&mut self.captures),
+            drop_flags: std::mem::take(&mut self.drop_flags),
             defers: std::mem::take(&mut self.defers),
             var_slots: std::mem::take(&mut self.var_slots),
             var_types: std::mem::take(&mut self.var_types),
@@ -549,6 +568,7 @@ impl BytecodeCompiler {
 
     fn restore_fn_state(&mut self, s: FnState) {
         self.captures = s.captures;
+        self.drop_flags = s.drop_flags;
         self.defers = s.defers;
         self.var_slots = s.var_slots;
         self.var_types = s.var_types;
@@ -582,6 +602,7 @@ impl BytecodeCompiler {
 
     fn reset_fn_state(&mut self) {
         self.var_slots.clear();
+        self.drop_flags.clear();
         self.var_types.clear();
         self.cur_ret_type = None;
         self.cur_owner = None;

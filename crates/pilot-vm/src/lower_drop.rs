@@ -10,6 +10,10 @@
 //! - `on_else`: an `if` without `else` drops them on its false path;
 //! - `replace`: an assignment drops the value its target held, after the
 //!   new value is made and before it is stored;
+//! - `flag` / `moved`: a binding moved on only some paths gets a drop flag,
+//!   set before the node runs (its declaration, or the body for a
+//!   parameter) and again by each assignment, and cleared after the node
+//!   where a move of it completes; its drops run only while it is set;
 //! - `guard`: a `let` binds a scoped guard, released when its block ends,
 //!   with the block's deferred statements (last in, first out);
 //! - `seams`: the node stops at a seam when it runs.
@@ -36,6 +40,8 @@ pub enum DropAction {
     Copy = 7,
     CopyGlue = 8,
     Replace = 9,
+    Flag = 10,
+    Moved = 11,
 }
 
 impl DropAction {
@@ -51,6 +57,8 @@ impl DropAction {
             Self::Copy,
             Self::CopyGlue,
             Self::Replace,
+            Self::Flag,
+            Self::Moved,
         ]
             .into_iter()
             .find(|a| *a as i64 == code)
@@ -83,6 +91,8 @@ pub struct DropPlan {
     pub exit: HashMap<NodeKey, Vec<DropItem>>,
     pub on_else: HashMap<NodeKey, Vec<DropItem>>,
     pub replace: HashMap<NodeKey, Vec<DropItem>>,
+    pub flag: HashMap<NodeKey, Vec<DropItem>>,
+    pub moved: HashMap<NodeKey, Vec<DropItem>>,
     pub guard: HashMap<NodeKey, Vec<DropItem>>,
     /// Seam id and note.
     pub seams: HashMap<NodeKey, Vec<(String, String)>>,
@@ -100,6 +110,7 @@ impl DropPlan {
             && self.exit.is_empty()
             && self.on_else.is_empty()
             && self.replace.is_empty()
+            && self.flag.is_empty()
             && self.guard.is_empty()
             && self.seams.is_empty()
             && self.copies.is_empty()
@@ -113,6 +124,9 @@ pub(crate) enum Deferred {
     Stmt(NodeId),
     /// Releasing a scoped guard.
     Drop(DropItem),
+    /// A probe the checker planned to run on the block's way out
+    /// (`lower_probe`).
+    Probe(crate::lower_probe::Probe),
 }
 
 /// The seams a drop plan may stop a node at, each with the start of the
@@ -120,9 +134,6 @@ pub(crate) enum Deferred {
 const PLAN_SEAMS: &[(&str, &str)] = &[
     ("own.capture", "SEAM001: unconnected seam `own.capture`"),
     ("own.collection_drop", "SEAM001: unconnected seam `own.collection_drop`"),
-    ("own.conditional_move", "SEAM001: unconnected seam `own.conditional_move`"),
-    ("own.reassign", "SEAM001: unconnected seam `own.reassign`"),
-    ("own.try_exit", "SEAM001: unconnected seam `own.try_exit`"),
 ];
 
 /// Glue nesting deeper than this is a planner error: a type that holds
@@ -169,6 +180,17 @@ impl BytecodeCompiler {
             };
             self.emit_trap(message);
         }
+        for item in self.plan_items(key, |p| &p.flag) {
+            let reg = match self.drop_flags.get(&item.binding) {
+                Some(&r) => r,
+                None => {
+                    let r = self.alloc_local_reg();
+                    self.drop_flags.insert(item.binding.clone(), r);
+                    r
+                }
+            };
+            self.set_drop_flag(reg, true);
+        }
         let before = self.plan_items(key, |p| &p.before);
         self.emit_drops(arena, &before);
         let exit = self.plan_items(key, |p| &p.exit);
@@ -196,6 +218,11 @@ impl BytecodeCompiler {
         let key = key_of(arena, id);
         let after = self.plan_items(key, |p| &p.after);
         self.emit_drops(arena, &after);
+        for item in self.plan_items(key, |p| &p.moved) {
+            if let Some(&reg) = self.drop_flags.get(&item.binding) {
+                self.set_drop_flag(reg, false);
+            }
+        }
         for g in self.plan_items(key, |p| &p.guard) {
             if let Some(scope) = self.defers.last_mut() {
                 scope.push(Deferred::Drop(g));
@@ -248,13 +275,36 @@ impl BytecodeCompiler {
         self.emit_drops(arena, &items);
     }
 
+    /// Sets the drop flag in register `reg`.
+    fn set_drop_flag(&mut self, reg: u8, on: bool) {
+        let mark = self.next_reg;
+        let v = self.emit_const(crate::PilotVal::from_bool(on));
+        self.emit(crate::instruction::Opcode::Move, reg, v, 0);
+        self.release_to(mark);
+    }
+
+    /// Sets the drop flag of `binding` again, when it has one: an assignment
+    /// has stored a new value in it.
+    pub(crate) fn rearm_drop_flag(&mut self, binding: &str) {
+        if let Some(&reg) = self.drop_flags.get(binding) {
+            self.set_drop_flag(reg, true);
+        }
+    }
+
+    /// Drops each item's binding; a flagged binding only while its flag is
+    /// set.
     pub(crate) fn emit_drops(&mut self, arena: &AstArena, items: &[DropItem]) {
         for item in items {
             let Some(&r) = self.var_slots.get(&item.binding) else {
                 continue;
             };
             let _ = arena;
+            let flag = self.drop_flags.get(&item.binding).copied();
+            let skip = flag.map(|f| self.emit_branch(crate::instruction::Opcode::JumpIfFalse, f, 0));
             self.emit_drop_value(r, &item.ty, 0);
+            if let Some(j) = skip {
+                self.patch_to_here(j);
+            }
         }
     }
 

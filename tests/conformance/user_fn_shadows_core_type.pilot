@@ -1,0 +1,24 @@
+// A function the program declares shadows a core type of the same name in
+// call position: `order(4)` calls the function below instead of building the
+// core `order` type. In type position the core names still mean the types.
+
+fn half(n: i64) -> i64? { if n % 2 == 0 { return n / 2; } return none; }
+
+// `order` is a register-sized core type: `order(x)` would otherwise convert.
+fn order(n: i64) -> i64? { return half(n)?; }
+
+// `span` is a core record type: `span(a, b)` would otherwise construct it.
+fn span(a: i64, b: i64) -> i64 => b - a;
+
+// `bool` is shadowed as a function, yet `-> bool` still names the type.
+fn bool(n: i64) -> bool => n > 10;
+
+fn main() {
+    print(order(4) ?? -1);
+    print(order(7) ?? -1);
+    print(span(3, 10));
+    print(bool(11));
+    print(bool(2));
+    let flag: bool = true;
+    print(flag);
+}

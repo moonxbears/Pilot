@@ -1,0 +1,4 @@
+error[ATTR003]: `Loud` is not a level of `[Debug]`: use `::Medium`, `::Debug` or `::Verbose`
+err_attr_debug_level.pilot:3:8
+error[ATTR003]: `[Debug]` has no argument `every`: its arguments are `level` and `changed_only`
+err_attr_debug_level.pilot:9:25
