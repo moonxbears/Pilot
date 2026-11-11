@@ -132,7 +132,7 @@ fn rc_track(rc: RcFunction, v: u32, k: i64) {
     rc.counted.push(v);
 }
 
-fn rc_live_in(rc: RcFunction, b: u32, v: u32) -> bool => rc.live_in[b * rc.counted.len() + rc.index[v]];
+fn rc_live_in(rc: RcFunction, b: i64, v: u32) -> bool => rc.live_in[b * rc.counted.len() + rc.index[v]];
 
 /// The counted values an instruction uses, each as often as it is used.
 fn rc_uses(rc: RcFunction, inst: IrInst) -> List<u32> {
@@ -158,7 +158,7 @@ fn rc_liveness(rc: RcFunction) {
         changed = false;
         var b = f.blocks.len() - 1;
         while b >= 0 {
-            let live = rc_live_out(rc, b);
+            var live = rc_live_out(rc, b);
             let insts = f.blocks[b].insts;
             var k = insts.len() - 1;
             while k >= 0 {
@@ -184,7 +184,7 @@ fn rc_liveness(rc: RcFunction) {
 }
 
 /// The counted values live out of block `b`: those its successors need.
-fn rc_live_out(rc: RcFunction, b: u32) -> List<bool> {
+fn rc_live_out(rc: RcFunction, b: i64) -> List<bool> {
     let n = rc.counted.len();
     var live: List<bool> = [];
     for _i in rc.counted { live.push(false); }
@@ -215,7 +215,7 @@ fn rc_edges_into(f: IrFunction, s: u32) -> i64 {
 fn rc_block(rc: RcFunction, b: u32) -> List<IrInst> {
     let f = rc.f;
     let insts = f.blocks[b].insts;
-    let live = rc_live_out(rc, b);
+    var live = rc_live_out(rc, b);
     // Built back to front: `tail` holds the instructions after the one
     // being looked at, in reverse order.
     var tail: List<IrInst> = [];
@@ -353,8 +353,7 @@ fn rc_terminator(rc: RcFunction, b: u32, t: IrInst, live: List<bool>) -> List<Ir
         if moved.len() > 0 { term = rc_retarget(rc, t, targets, args); }
     } else {
         for v in rc_uses(rc, t) { live[rc.index[v]] = true; }
-        var rev: List<IrInst> = [term];
-        return rev;
+        return [term];
     }
     // `return` uses its value.
     for v in rc_uses(rc, t) { live[rc.index[v]] = true; }
@@ -377,7 +376,8 @@ fn rc_edge(rc: RcFunction, held: List<u32>, s: u32, args: List<u32>, span: u32) 
             if x == v { uses = uses + 1; }
         }
         if rc.kind[v] == rc_owned() {
-            let need = uses + if rc_live_in(rc, s, v) { 1 } else { 0 };
+            var need = uses;
+            if rc_live_in(rc, s, v) { need = need + 1; }
             if need == 0 { code.push(rc_op(rc, op_perceus_drop(), v, span)); }
             var d = 1;
             while d < need {

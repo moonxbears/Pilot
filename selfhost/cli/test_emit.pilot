@@ -18,6 +18,10 @@
 //     a runtime error's trace are not checked. A program the host compiler
 //     rejects is a failure.
 // A tool the language needs that the host does not have stops the command.
+//
+// `--live-allocations` (C only) compiles each case with PILOT_LIVE_COUNT,
+// so its binary reports the heap objects still allocated when it ends
+// normally; a case that reports any fails.
 pub lvl(0) pkg Pilot.SelfHost.Cli.TestEmit;
 
 use Pilot.Core.File;
@@ -74,6 +78,22 @@ struct EmitTally : IObject {
 }
 
 fn read_or_empty(path: str) -> str => if File.exists(path) { File.read_text(path) } else { "" };
+
+/// The C compiler option that makes a binary count its heap objects
+/// (runtime/c/pilot_rt.h).
+pub fn live_count_define() -> str => "-DPILOT_LIVE_COUNT";
+
+/// The prefix of the line a counting binary ends with.
+fn live_prefix() -> str => "live allocations: ";
+
+/// The objects a counting binary reported still allocated, or none when it
+/// reported nothing (it stopped early).
+fn live_count(stderr: str) -> str? {
+    for line in test_lines(stderr) {
+        if line.starts_with(live_prefix()) { return line.slice(live_prefix().len(), line.len()).trim(); }
+    }
+    return none;
+}
 
 /// `template` with `{src}` and `{bin}` filled in.
 fn filled(template: List<str>, src: str, bin: str) -> List<str> {
@@ -198,13 +218,22 @@ fn fail(program: str, problems: List<str>, var ref tally: EmitTally) {
     for p in problems { print("  " + p); }
 }
 
-/// `pilot test --emit <lang> [paths...] [--filter text]`: exit 0 when no
+/// `pilot test --emit <lang> [paths...] [--filter text] [--live-allocations]`: exit 0 when no
 /// eligible case fails, 1 when one does, 2 when `lang` is not a target.
-pub fn test_emit_command(lang: str, paths: List<str>, filter: str) -> i64 {
+pub fn test_emit_command(lang: str, paths: List<str>, filter: str, live: bool) -> i64 {
     guard some r = emit_runner(lang) else {
         eprint(f"error: `pilot emit` has no target `{lang}`");
         return 2;
     };
+    if live && lang != "c" {
+        eprint("error: `--live-allocations` counts the heap objects of C binaries: use it with `--emit c`");
+        return 2;
+    }
+    var compile: List<str> = [];
+    for a in r.compile {
+        compile.push(a);
+        if live && a == "-std=c11" { compile.push(live_count_define()); }
+    }
     var tally = EmitTally { passed: 0, failed: 0, at_seam: 0, not_eligible: 0 };
     let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
     var cases: List<str> = [];
@@ -257,7 +286,7 @@ pub fn test_emit_command(lang: str, paths: List<str>, filter: str) -> i64 {
         while i < built.len() { runnable.push(i); i = i + 1; }
     } else {
         var builds: List<Job> = [];
-        for k in 0 .. built.len() { builds.push(job_of(filled(r.compile, srcs[k], bins[k]), "")); }
+        for k in 0 .. built.len() { builds.push(job_of(filled(compile, srcs[k], bins[k]), "")); }
         let outs = run_jobs(builds);
         i = 0;
         while i < built.len() {
@@ -282,7 +311,12 @@ pub fn test_emit_command(lang: str, paths: List<str>, filter: str) -> i64 {
     i = 0;
     while i < runnable.len() {
         let k = runnable[i];
-        let problems = check_emitted(built[k], built_stderr[k], outs[i]);
+        var problems = check_emitted(built[k], built_stderr[k], outs[i]);
+        if live {
+            if some n = live_count(outs[i].stderr) {
+                if n != "0" { problems.push(f"{n} heap objects still allocated at the end"); }
+            }
+        }
         if problems.len() == 0 { tally.passed = tally.passed + 1; } else { fail(built[k], problems, tally); }
         i = i + 1;
     }

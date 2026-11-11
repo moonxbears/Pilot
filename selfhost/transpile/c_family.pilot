@@ -69,7 +69,7 @@ pub struct CFamilyDialect : ISourceDialect {
             "isgreaterequal", "isless", "islessequal", "islessgreater", "isunordered", "imaxabs", "imaxdiv",
             "strtoimax", "strtoumax", "NAN", "INFINITY", "HUGE_VAL", "EOF", "NULL", "FILE",
             // runtime/c/pilot_rt.h; its other names start with `pilot_`.
-            "PILOT_RT_H", "PILOT_NEGATIVE_EXPONENT", "PILOT_V_NULL", "PILOT_V_LIT", "PILOT_V_NULL_TAG",
+            "PILOT_RT_H", "PILOT_NEGATIVE_EXPONENT", "PILOT_V_NULL", "PILOT_V_STATIC", "PILOT_V_STATIC_VAL", "PILOT_V_NULL_TAG",
             "PILOT_V_BOOL", "PILOT_V_INT", "PILOT_V_UINT", "PILOT_V_FLOAT", "PILOT_V_STR", "PILOT_V_LIST",
             "PILOT_V_MAP", "trunc", "memchr", "memmove", "calloc",
         ] { out.push(k); }
@@ -128,8 +128,10 @@ pub struct CFamilyDialect : ISourceDialect {
         // A module with no entry point is a library: whoever links it
         // writes `main`.
         if entry == "" { return []; }
-        if has_code { return [head + f"return (int){entry}(); " + "}"]; }
-        return [head + f"{entry}(); return 0; " + "}"];
+        // A dynamic module reports its live objects when it counts them.
+        let finish = if .carries_dynamic() { "pilot_rt_finish(); " } else { "" };
+        if has_code { return [head + f"int pilot_status = (int){entry}(); " + finish + "return pilot_status; }"]; }
+        return [head + f"{entry}(); " + finish + "return 0; }"];
     }
     /// Opens the function; a C function names its result type
     /// `pilot_ret_t`, for a return that carries no value.
@@ -361,12 +363,15 @@ pub struct CFamilyDialect : ISourceDialect {
         return f"pilot_v_record({values.len()}, (pilot_val[])" + "{" + joined(values) + "})";
     }
     /// Each record layout as a C struct `pilot_r<layout>`: a header holding
-    /// the layout id, then the fields in their C types. Per layout, a
-    /// constructor `pilot_mk<layout>`, a typed reader and writer per field
-    /// (`pilot_get<layout>_<i>`, `pilot_set<layout>_<i>`) and the dynamic
-    /// reader and writer the runtime's generic operations use, listed in
-    /// `pilot_rt_layouts`. A typed reader or writer given a value that is not
-    /// of its layout goes through the generic path.
+    /// the layout id and reference count, then the fields in their C types.
+    /// Per layout, a constructor `pilot_mk<layout>`, a typed reader and
+    /// writer per field (`pilot_get<layout>_<i>`, `pilot_set<layout>_<i>`)
+    /// and the dynamic reader, writer and release of the fields the
+    /// runtime's generic operations use, listed in `pilot_rt_layouts`. A
+    /// typed reader or writer given a value that is not of its layout goes
+    /// through the generic path. Readers borrow; the constructor and the
+    /// writers take a reference to each dynamic field value they store, and
+    /// a writer releases the value it replaces.
     pub fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>) -> List<str> {
         if !self.carries_dynamic() || layouts.len() == 0 { return []; }
         var out: List<str> = [];
@@ -382,29 +387,34 @@ pub struct CFamilyDialect : ISourceDialect {
             var sets = "";
             var gets = "";
             var puts = "";
+            var drops = "";
             var i = 0;
             while i < fs.len() {
                 let ct = self.c_type(fs[i]);
+                let counted = !scalar(fs[i]);
                 members = members + f" {ct} f{i};";
                 params.push(f"{ct} f{i}");
-                sets = sets + f" r->f{i} = f{i};";
+                sets = sets + if counted { f" pilot_v_dup(f{i}); r->f{i} = f{i};" } else { f" r->f{i} = f{i};" };
                 gets = gets + f" case {i}: return " + self.box(f"r->f{i}", fs[i]) + ";";
-                puts = puts + f" case {i}: r->f{i} = " + self.unbox("x", fs[i]) + "; return;";
+                puts = puts + if counted { f" case {i}: pilot_v_replace(&r->f{i}, x); return;" } else { f" case {i}: r->f{i} = " + self.unbox("x", fs[i]) + "; return;" };
+                if counted { drops = drops + f" pilot_v_drop(r->f{i});"; }
                 i = i + 1;
             }
             out.push(f"typedef struct {t} " + "{ " + members + " } " + t + ";");
             let plist = if params.len() == 0 { "void" } else { joined(params) };
-            out.push(f"static pilot_val pilot_mk{l}({plist}) " + "{ " + f"{t} *r = ({t} *)pilot_alloc_obj(sizeof({t})); r->h.layout = {l};" + sets + " return pilot_v_rec_val(&r->h); }");
+            out.push(f"static pilot_val pilot_mk{l}({plist}) " + "{ " + f"{t} *r = ({t} *)pilot_v_rec_new(sizeof({t}), {l});" + sets + " return pilot_v_rec_val(&r->h); }");
             out.push(f"static pilot_val pilot_rget{l}(pilot_val v, int32_t i) " + "{ " + f"{t} *r = ({t} *)v.as.r; (void)r; switch (i) " + "{" + gets + " default: return PILOT_V_NULL; } }");
             out.push(f"static void pilot_rset{l}(pilot_val v, int32_t i, pilot_val x) " + "{ " + f"{t} *r = ({t} *)v.as.r; (void)r; (void)x; switch (i) " + "{" + puts + " default: return; } }");
+            out.push(f"static void pilot_rdrop{l}(pilot_v_rec *h) " + "{ " + f"{t} *r = ({t} *)h; (void)r;" + drops + " }");
             i = 0;
             while i < fs.len() {
                 let ct = self.c_type(fs[i]);
                 out.push(f"static inline {ct} pilot_get{l}_{i}(pilot_val v) " + "{ " + f"if {mine} return (({t} *)v.as.r)->f{i}; return " + self.unbox(f"pilot_v_field(v, {i})", fs[i]) + "; }");
-                out.push(f"static inline void pilot_set{l}_{i}(pilot_val v, {ct} x) " + "{ " + f"if {mine} " + "{ " + f"(({t} *)v.as.r)->f{i} = x; return; " + "} " + f"pilot_v_set_field(v, {i}, " + self.box("x", fs[i]) + "); }");
+                let store = if scalar(fs[i]) { f"(({t} *)v.as.r)->f{i} = x;" } else { f"pilot_v_replace(&(({t} *)v.as.r)->f{i}, x);" };
+                out.push(f"static inline void pilot_set{l}_{i}(pilot_val v, {ct} x) " + "{ " + f"if {mine} " + "{ " + store + " return; " + "} " + f"pilot_v_set_field(v, {i}, " + self.box("x", fs[i]) + "); }");
                 i = i + 1;
             }
-            table.push(f"[{l}] = " + "{ " + f"{fs.len()}, pilot_rget{l}, pilot_rset{l}" + " }");
+            table.push(f"[{l}] = " + "{ " + f"{fs.len()}, pilot_rget{l}, pilot_rset{l}, pilot_rdrop{l}, sizeof({t})" + " }");
             k = k + 1;
         }
         out.push("static const pilot_v_layout pilot_layout_table[] = { " + joined(table) + " };");
@@ -427,7 +437,23 @@ pub struct CFamilyDialect : ISourceDialect {
         }
         return v;
     }
-    pub fn text_value(lit: str) -> str => if .carries_dynamic() { f"PILOT_V_LIT({lit})" } else { lit };
+    pub fn text_value(lit: str) -> str => lit;
+    /// Each string constant as a static string object, `pilot_s<index>`,
+    /// whose reference count is 0: never counted or freed.
+    pub fn string_pool(strings: List<str>) -> List<str> {
+        if !self.carries_dynamic() { return []; }
+        var out: List<str> = [];
+        var i = 0;
+        while i < strings.len() {
+            out.push(f"PILOT_V_STATIC(pilot_s{i}, {self.str_lit(strings[i])});");
+            i = i + 1;
+        }
+        return out;
+    }
+    pub fn pooled_text(index: i64) -> str? => if .carries_dynamic() { f"PILOT_V_STATIC_VAL(pilot_s{index})" } else { none };
+    pub fn counts_references() -> bool => self.carries_dynamic();
+    pub fn dup(v: str) -> str => f"pilot_v_dup({v});";
+    pub fn drop(v: str) -> str => f"pilot_v_drop({v});";
 
     /// Scalar `v` of physics `p` as a dynamic value; a dynamic `v` as it is.
     pub fn box(v: str, p: IrTypePhysics) -> str {

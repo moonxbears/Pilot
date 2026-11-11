@@ -154,10 +154,10 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     return 0;
 }
 
-/// `pilot test [paths...] [--filter text] [--ir | --emit <lang>]`
+/// `pilot test [paths...] [--filter text] [--ir | --emit <lang> [--live-allocations]]`
 pub fn cmd_test(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     if parsed_has_flag(p, "emit") {
-        return test_emit_command(parsed_get_str(p, "emit", ""), cli_positionals(p), parsed_get_str(p, "filter", ""));
+        return test_emit_command(parsed_get_str(p, "emit", ""), cli_positionals(p), parsed_get_str(p, "filter", ""), parsed_has_flag(p, "live-allocations"));
     }
     if parsed_has_flag(p, "ir") { return test_ir_command(cli_positionals(p), parsed_get_str(p, "filter", "")); }
     return test_command(cli_positionals(p), parsed_get_str(p, "filter", ""));
@@ -206,13 +206,14 @@ pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     // The emitter is a toolchain source, found from the toolchain's own
     // search roots (a language without one stops as an internal error).
     var files = cli_ir_files();
+    files.push("selfhost/ir/pass_perceus.pilot");
     files.push("selfhost/transpile/source.pilot");
     files.push("selfhost/transpile/c_family.pilot");
     files.push(f"selfhost/transpile/emit_{lang}.pilot");
     return host_program_tool(args[1], files, cli_ir_decls(), f"emit_program({lang}_dialect());");
 }
 
-/// `pilot build <file> [-o out]`: a native executable through C11
+/// `pilot build <file> [-o out] [--live-allocations]`: a native executable through C11
 /// (selfhost/cli/native_build.pilot).
 pub fn cmd_build(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
@@ -221,7 +222,8 @@ pub fn cmd_build(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let out = parsed_get_str(p, "output", "");
     let target = parsed_get_str(p, "target", "native");
     let release = parsed_has_flag(p, "release");
-    return native_build(args[0], if out == "" { default_build_output(args[0]) } else { out }, target, release);
+    let live = parsed_has_flag(p, "live-allocations");
+    return native_build(args[0], if out == "" { default_build_output(args[0]) } else { out }, target, release, live);
 }
 
 /// Whether `name` is lowercase letters, digits and `_` only.

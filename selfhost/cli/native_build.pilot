@@ -2,7 +2,7 @@
 // FILE: selfhost/cli/native_build.pilot
 // `pilot build`: a Pilot program to a native executable through C11 (F6).
 // ==============================================================================
-// `pilot build <file> [-o out] [--target native|c] [--release]`
+// `pilot build <file> [-o out] [--target native|c] [--release] [--live-allocations]`
 //
 // The program is emitted as C by `pilot emit c` (selfhost/transpile/, from
 // typed PilIR), which checks it first: a program the compiler rejects is
@@ -11,7 +11,9 @@
 // compiled by the host's `cc` against the runtime header
 // (runtime/c/pilot_rt.h) at `-O2` (`-O3` with `--release`). `--target c`
 // writes the C source to `out` without compiling it. Other targets stop at
-// the seam `build.target`.
+// the seam `build.target`. `--live-allocations` compiles the C with
+// PILOT_LIVE_COUNT: the executable reports on standard error, when it ends
+// normally, the heap objects still allocated (`live allocations: N`).
 //
 // Exit codes: 0 built, 1 the program or the C compiler rejected it,
 // 2 bad usage.
@@ -35,7 +37,7 @@ pub fn default_build_output(program: str) -> str {
 }
 
 /// Builds `program` for `target` into `out`; the command's exit code.
-pub fn native_build(program: str, out: str, target: str, release: bool) -> i64 {
+pub fn native_build(program: str, out: str, target: str, release: bool, live: bool) -> i64 {
     if target != "native" && target != "c" {
         return seam("build.target", f"`pilot build --target {target}`: the only backend is C11 (`native`, `c`); LLVM, WASM, GPU and assembly backends come later");
     }
@@ -51,7 +53,10 @@ pub fn native_build(program: str, out: str, target: str, release: bool) -> i64 {
     }
     if target == "c" { return 0; }
     let level = if release { "-O3" } else { "-O2" };
-    let cc = proc.run("cc", ["-std=c11", level, "-w", "-I", c_runtime_dir(), c_path, "-o", out, "-lm"], "");
+    var flags = ["-std=c11", level, "-w"];
+    if live { flags.push(live_count_define()); }
+    for a in ["-I", c_runtime_dir(), c_path, "-o", out, "-lm"] { flags.push(a); }
+    let cc = proc.run("cc", flags, "");
     if cc.exit_code != 0 {
         eprint(f"error: the C compiler rejected `{c_path}`");
         eprint(cc.stdout + cc.stderr);
