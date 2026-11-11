@@ -341,10 +341,7 @@ fn check_node(bw: Borrows, n: i64) {
 /// Runs ESCAPE001-ESCAPE003 over the user's files.
 pub fn check_escapes(inf: Infer, sink: DiagSink) {
     let s = inf.p.s;
-    var owned: List<i64> = [];
-    var i = 0;
-    while i < inf.r.site.len() { owned.push(-1); i = i + 1; }
-    let bw = borrows_new(Flow { inf: inf, sink: sink, owned: owned });
+    let bw = borrows_new(flow_new(inf, sink));
     var n = 0;
     while n < s.count {
         if in_user_file(s, n) { check_node(bw, n); }

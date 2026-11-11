@@ -7,7 +7,8 @@
 // seed carries out the same plan (crates/pilot-vm/src/lower_drop.rs). Here
 // it becomes ordinary PilIR, so the interpreter and every emitter run it:
 //   - dropping a value calls its type's destructor, then drops the fields
-//     that need dropping, in declaration order;
+//     that need dropping, in declaration order; an assignment drops the
+//     value its target held once the new value is made;
 //   - a guard joins its block's deferred statements and is released when
 //     the block is left, last in first out (selfhost/ir/lower_defer.pilot);
 //   - copying a value type reads its fields and builds a new value of the
@@ -85,6 +86,10 @@ pub fn plan_after(lw: Lowerer, n: i64, v: u32) -> u32 {
 /// The drops a `return`, `break` or `continue` (node `n`) makes as it
 /// leaves, after a returned value is computed.
 pub fn plan_exit(lw: Lowerer, n: i64) { drop_rows(lw, n, ::Exit); }
+
+/// The drop an assignment (node `n`) makes of the value its target held,
+/// after the new value is made and before it is stored.
+pub fn plan_replace(lw: Lowerer, n: i64) { drop_rows(lw, n, ::Replace); }
 
 /// The drops on the false path of `if` node `n` without `else`.
 pub fn plan_else(lw: Lowerer, n: i64) { drop_rows(lw, n, ::Else); }

@@ -703,6 +703,7 @@ pub fn lower_assign(lw: Lowerer, n: i64) -> u32 {
         let old = emit(lw, op_load(), 0, physics_of(lw, target), [slot], n);
         v = emit(lw, ir_op, 0, physics_of(lw, target), [old, v], n);
     }
+    plan_replace(lw, n);
     emit_void(lw, op_store(), 0, [slot, coerce(lw, v, physics_of(lw, target), n)], n);
     return unit_value(lw, n);
 }

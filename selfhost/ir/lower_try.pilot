@@ -35,6 +35,7 @@ use selfhost.ir.lower.*;
 use selfhost.ir.lower_members.*;
 use selfhost.ir.lower_switch.*;
 use selfhost.ir.lower_defer.*;
+use selfhost.ir.lower_drop.*;
 
 /// The bindings that name the protocol's members and constructors.
 pub pure fn try_protocol_hook() -> str => "bind_try_protocol";
@@ -238,6 +239,8 @@ pub fn lower_try_propagate(lw: Lowerer, n: i64) -> u32 {
     let fail = ir_add_block(lw.f);
     emit_void(lw, op_cond_br(), 0, [ok, pass, 0, fail, 0], n);
     switch_to(lw, fail);
+    // A failure that leaves the function drops what the plan lists for it.
+    plan_exit(lw, n);
     fail_exit(lw, v, t, n);
     switch_to(lw, pass);
     return unwrap(lw, v, t, physics_of(lw, n), n);

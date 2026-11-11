@@ -1,0 +1,22 @@
+// F7: a var moved on only some paths before it is assigned again holds a
+// value to drop on the others. Dropping it there needs a flag kept at run
+// time; until then the assignment stops at the `own.reassign` seam.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn consume(r: Res) {
+    print(f"consume {r.name}");
+}
+
+fn main() {
+    var r = Res { name: "a" };
+    let give = true;
+    if give { consume(r); }
+    r = Res { name: "b" };
+    print(r.name);
+}

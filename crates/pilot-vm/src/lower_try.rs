@@ -21,7 +21,10 @@ use pilot_ast::{AstArena, NodeId, NodeKind};
 
 impl BytecodeCompiler {
     /// Postfix `expr?`.
+    /// A failure that leaves the function first drops the owned values the
+    /// drop plan lists for it.
     pub(crate) fn compile_try_propagate(&mut self, arena: &AstArena, inner: u32) -> u8 {
+        let exit_drops = std::mem::take(&mut self.pending_exit_drops);
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r = self.compile_node(arena, NodeId(inner));
@@ -34,6 +37,7 @@ impl BytecodeCompiler {
         if let Some(j) = failed {
             self.patch_to_here(j);
         }
+        self.emit_drops(arena, &exit_drops);
         self.emit_failure_exit(arena, dst);
         self.patch_to_here(done);
         self.release_to(mark);

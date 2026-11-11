@@ -1,0 +1,26 @@
+// F7: a `?` inside `try` jumps to the `catch` clause, leaving the try block;
+// an owned value declared in that block must be dropped on the jump. Until
+// the drop plan places that, the `?` stops at the `own.try_exit` seam.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn half(n: i64) -> i64? {
+    if n % 2 == 0 { return n / 2; }
+    return none;
+}
+
+fn main() {
+    print("before");
+    try {
+        let r = Res { name: "a" };
+        let h = half(3)?;
+        print(f"{r.name} {h}");
+    } catch e {
+        print("caught");
+    }
+}

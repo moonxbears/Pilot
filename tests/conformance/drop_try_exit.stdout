@@ -1,0 +1,11 @@
+r4 half 2
+drop r4
+2
+drop r3
+-1
+drop a
+-1
+consume h
+drop h
+-1
+end

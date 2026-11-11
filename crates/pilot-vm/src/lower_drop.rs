@@ -8,6 +8,8 @@
 //! - `exit`: a `return`, `break` or `continue` drops them before it leaves
 //!   (after a returned value is computed);
 //! - `on_else`: an `if` without `else` drops them on its false path;
+//! - `replace`: an assignment drops the value its target held, after the
+//!   new value is made and before it is stored;
 //! - `guard`: a `let` binds a scoped guard, released when its block ends,
 //!   with the block's deferred statements (last in, first out);
 //! - `seams`: the node stops at a seam when it runs.
@@ -33,6 +35,7 @@ pub enum DropAction {
     Seam = 6,
     Copy = 7,
     CopyGlue = 8,
+    Replace = 9,
 }
 
 impl DropAction {
@@ -47,6 +50,7 @@ impl DropAction {
             Self::Seam,
             Self::Copy,
             Self::CopyGlue,
+            Self::Replace,
         ]
             .into_iter()
             .find(|a| *a as i64 == code)
@@ -78,6 +82,7 @@ pub struct DropPlan {
     pub after: HashMap<NodeKey, Vec<DropItem>>,
     pub exit: HashMap<NodeKey, Vec<DropItem>>,
     pub on_else: HashMap<NodeKey, Vec<DropItem>>,
+    pub replace: HashMap<NodeKey, Vec<DropItem>>,
     pub guard: HashMap<NodeKey, Vec<DropItem>>,
     /// Seam id and note.
     pub seams: HashMap<NodeKey, Vec<(String, String)>>,
@@ -94,6 +99,7 @@ impl DropPlan {
             && self.after.is_empty()
             && self.exit.is_empty()
             && self.on_else.is_empty()
+            && self.replace.is_empty()
             && self.guard.is_empty()
             && self.seams.is_empty()
             && self.copies.is_empty()
@@ -169,6 +175,16 @@ impl BytecodeCompiler {
         if !exit.is_empty() {
             self.pending_exit_drops = exit;
         }
+        let replace = self.plan_items(key, |p| &p.replace);
+        if !replace.is_empty() {
+            self.pending_replace = replace;
+        }
+    }
+
+    /// Takes the `replace` drops of the assignment about to be lowered; the
+    /// assignment emits them once its new value is made.
+    pub(crate) fn take_replace_drops(&mut self) -> Vec<DropItem> {
+        std::mem::take(&mut self.pending_replace)
     }
 
     /// Runs after node `id` is compiled: its `after` drops, and the guards

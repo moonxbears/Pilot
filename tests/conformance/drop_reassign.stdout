@@ -1,0 +1,16 @@
+make a
+a
+make b
+drop a
+b
+consume b
+drop b
+make c
+c
+make d0
+drop c
+make d1
+drop d0
+d1
+drop d1
+end

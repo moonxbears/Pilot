@@ -326,6 +326,7 @@ impl BytecodeCompiler {
 
     pub(crate) fn compile_assign(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
         let lhs_n = *arena.node(NodeId(lhs));
+        let replace = self.take_replace_drops();
         let rhs_r = self.compile_node(arena, NodeId(rhs));
         match lhs_n.node_kind() {
             NodeKind::IdentExpr => {
@@ -337,6 +338,7 @@ impl BytecodeCompiler {
                 let rhs_r = self.convert_for_binding(rhs_r, ty.as_deref());
                 match self.var_slots.get(&name) {
                     Some(&slot) => {
+                        self.emit_drops(arena, &replace);
                         self.emit(Opcode::Move, slot, rhs_r, 0);
                         slot
                     }

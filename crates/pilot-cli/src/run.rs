@@ -157,6 +157,7 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
             DropAction::After => out.after.entry(key).or_default().push(item()),
             DropAction::Exit => out.exit.entry(key).or_default().push(item()),
             DropAction::Else => out.on_else.entry(key).or_default().push(item()),
+            DropAction::Replace => out.replace.entry(key).or_default().push(item()),
             DropAction::Guard => out.guard.entry(key).or_default().push(item()),
             DropAction::Seam => out.seams.entry(key).or_default().push((r.a.clone(), r.b.clone())),
             DropAction::Copy => {

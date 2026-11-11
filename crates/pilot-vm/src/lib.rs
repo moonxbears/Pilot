@@ -149,6 +149,9 @@ pub struct BytecodeCompiler {
     drop_plan: Option<std::rc::Rc<lower_drop::DropPlan>>,
     /// The `exit` drops of the `return` / `break` / `continue` being lowered.
     pending_exit_drops: Vec<lower_drop::DropItem>,
+    /// The `replace` drops of the assignment being lowered: the value its
+    /// target held, dropped once the new value is made.
+    pending_replace: Vec<lower_drop::DropItem>,
     pub constants: Vec<PilotVal>,
     pub pc_spans: Vec<ByteSpan>,
     pub reg_symbols: Vec<(u8, u32, u32)>,

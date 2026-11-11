@@ -36,6 +36,17 @@ pub struct Flow {
     pub sink: DiagSink;
     /// Binding -> whether its type is owned: 1 owned, 0 not, -1 not asked.
     pub owned: List<i64>;
+    /// Assignment to a local -> whether, on some walk, the local may have
+    /// been moved just before it is assigned (`walk_bodies` fills it).
+    pub moved_at: Map<str, bool>;
+}
+
+/// A flow over the program `inf` describes, reporting to `sink`.
+pub fn flow_new(inf: Infer, sink: DiagSink) -> Flow {
+    var owned: List<i64> = [];
+    var i = 0;
+    while i < inf.r.site.len() { owned.push(-1); i = i + 1; }
+    return Flow { inf: inf, sink: sink, owned: owned, moved_at: Map<str, bool>() };
 }
 
 fn has(xs: List<i64>, b: i64) -> bool {
@@ -237,6 +248,9 @@ fn walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
         let st = walk(f, rhs(s, n), moved);
         let target = lhs(s, n);
         if target >= 0 && kind(s, target) == nk_ident() && inf.r.ref_of[target] >= 0 {
+            let at = f"{n}";
+            let was = f.moved_at.has(at) && f.moved_at.get(at);
+            f.moved_at.set(at, was || has(st.moved, inf.r.ref_of[target]));
             return flow_state(drop_binding(st.moved, inf.r.ref_of[target]), st.falls_through);
         }
         return walk(f, target, st.moved);
@@ -285,14 +299,11 @@ fn walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
     return walk_seq(f, children(s, n), moved);
 }
 
-/// Runs OWN001 over every function body in the user's files.
-pub fn check_ownership(inf: Infer, sink: DiagSink) {
-    let s = inf.p.s;
-    var owned: List<i64> = [];
+/// Walks every function body in the user's files: reports OWN001 to the
+/// flow's sink and fills its `moved_at`.
+pub fn walk_bodies(f: Flow) {
+    let s = f.inf.p.s;
     var i = 0;
-    while i < inf.r.site.len() { owned.push(-1); i = i + 1; }
-    let f = Flow { inf: inf, sink: sink, owned: owned };
-    i = 0;
     while i < s.count {
         let k = kind(s, i);
         if (k == nk_fn() || k == nk_operator() || k == nk_lambda()) && in_user_file(s, i) {
@@ -305,3 +316,6 @@ pub fn check_ownership(inf: Infer, sink: DiagSink) {
         i = i + 1;
     }
 }
+
+/// Runs OWN001 over every function body in the user's files.
+pub fn check_ownership(inf: Infer, sink: DiagSink) { walk_bodies(flow_new(inf, sink)); }

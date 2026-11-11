@@ -12,22 +12,32 @@
 //   - a value used in a loop it was not declared in lives until the loop
 //     ends; one declared in a loop body is dropped in each iteration;
 //   - a `return`, or a `break` / `continue` that leaves its scope, taken
-//     while it is live drops it first (after a returned value is computed).
+//     while it is live drops it first (after a returned value is computed);
+//     so does a failed `?` that leaves the function, unless its operand
+//     moved it.
 // A scoped guard (lattice 0b11) is released when its block ends, the last
 // declared first, whatever its last use.
 //
 // Dropping a value runs its type's destructor, then drops its fields that
 // need dropping, in declaration order.
 //
+// Assigning an owned `var` a new value drops the value it held, once the new
+// one is made; a var moved away before the assignment, on every path, has
+// nothing to drop.
+//
 // What the analysis cannot place yet stops at a seam where it runs:
-// reassigning an owned `var` (own.reassign), a closure capturing an owned
+// assigning a var moved on only some paths before (own.reassign: the old
+// value needs a flag kept at run time), a closure capturing an owned
 // value (own.capture), a move on one branch of a conditional expression
-// (own.conditional_move), `?` while an owned value is live (own.try_exit),
+// (own.conditional_move), `?` jumping to `catch` out of the `try` block an
+// owned value was declared in, or in a statement that also moves it
+// (own.try_exit),
 // and collections of values that need dropping (own.collection_drop).
 //
 // The plan is rows for crates/pilot-cli/src/check.rs (`drop_plan`), each
 // led by its `DropAction` and naming a node by its program-wide span and kind:
-//   [action, start, end, kind, binding, type]  Before, After, Exit, Else, Guard
+//   [action, start, end, kind, binding, type]  Before, After, Exit, Else, Guard,
+//                                              Replace
 //   [Seam, start, end, kind, id, note]
 //   [Glue, type, destructor owner or "", [field, field type, ..]]
 pub lvl(0) pkg Pilot.SelfHost.Check.Drops;
@@ -63,6 +73,9 @@ pub enum DropAction : u8 {
     Copy,
     /// How to copy a value of one type: the value-type fields to copy too.
     CopyGlue,
+    /// An assignment drops the value its target held, after the new value
+    /// is made and before it is stored.
+    Replace,
 }
 
 /// What planning the drops of one program keeps.
@@ -230,10 +243,58 @@ fn exits(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
         if leaves { row(pl, ::Exit, n, pl.flow.inf.r.name[b], key); }
         return;
     }
-    if k == nk_try_propagate() {
-        row(pl, ::Seam, n, "own.try_exit", "`?` can leave the function while an owned value is live; dropping it on that path comes with the PilIR drop pass (F7)");
-    }
+    if k == nk_try_propagate() { try_exit(pl, n, b, site, key); }
     for c in children(s, n) { exits(pl, c, b, site, key); }
+}
+
+/// The `try` block that a failed `?` (node `n`) jumps out of, inside the
+/// same function, or -1 when it leaves the function.
+fn try_region(pl: DropPlanner, n: i64) -> i64 {
+    let p = pl.flow.inf.p;
+    let s = p.s;
+    var at = p.parents[n];
+    while at >= 0 {
+        let k = kind(s, at);
+        if k == nk_fn() || k == nk_operator() || k == nk_lambda() { return -1; }
+        if k == nk_try() {
+            let ch = children(s, at);
+            if ch.len() > 0 && nested_in(s, n, ch[0]) { return ch[0]; }
+        }
+        at = p.parents[at];
+    }
+    return -1;
+}
+
+/// The statement of a block that `n` lies in.
+fn statement_of(pl: DropPlanner, n: i64) -> i64 {
+    let p = pl.flow.inf.p;
+    var at = n;
+    while p.parents[at] >= 0 && kind(p.s, p.parents[at]) != nk_block() { at = p.parents[at]; }
+    return at;
+}
+
+/// A `?` (node `n`) reached while `b` is live. Leaving the function, it
+/// drops `b` unless its operand moved it. Jumping to a `catch` in the same
+/// function keeps `b` when it was declared outside the `try` block (the
+/// statement holding the `try` drops it); one declared inside, and a `?` in
+/// a statement that also moves `b` elsewhere (whether the move came first
+/// depends on the order of evaluation), stop at the seam.
+fn try_exit(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
+    let s = pl.flow.inf.p.s;
+    let name = pl.flow.inf.r.name[b];
+    let region = try_region(pl, n);
+    if region >= 0 {
+        if nested_in(s, site, region) {
+            row(pl, ::Seam, n, "own.try_exit", f"`?` jumps to `catch` while `{name}`, declared in the `try` block it leaves, is live; dropping it on that jump is not planned yet");
+        }
+        return;
+    }
+    if moves(pl, lhs(s, n), b) { return; }
+    if moves(pl, statement_of(pl, n), b) {
+        row(pl, ::Seam, n, "own.try_exit", f"`?` can leave the function in a statement that also moves `{name}`; whether to drop it on that path depends on the order of evaluation, which the plan does not follow yet");
+        return;
+    }
+    row(pl, ::Exit, n, name, key);
 }
 
 /// Whether `n` moves `b`: some identifier naming it stands where it is
@@ -329,9 +390,57 @@ fn index_in(s: Snap, stmts: List<i64>, n: i64) -> i64 {
     return -1;
 }
 
-/// Writes a seam row on every assignment to `b` and every closure that
-/// captures it; true when there is one.
-fn unsupported_uses(pl: DropPlanner, body: i64, b: i64) -> bool {
+/// Whether `b` is moved by `st` on every path through it: a move standing
+/// outside any branch, short-circuit, loop or closure inside `st`.
+fn moves_always(pl: DropPlanner, st: i64, b: i64) -> bool {
+    let s = pl.flow.inf.p.s;
+    let k = kind(s, st);
+    let branching: List<i64> = [nk_if(), nk_match(), nk_coalesce(), nk_binary(), nk_while(), nk_for(), nk_lambda()];
+    for x in branching { if k == x { return false; } }
+    var ids: List<i64> = [];
+    refs(pl, st, b, ids);
+    for i in ids {
+        if is_move_position(pl.flow, i) && ancestor_of_kind(pl, i, st, branching) < 0 { return true; }
+    }
+    return false;
+}
+
+/// Whether `b`, which may have been moved before assignment `n`, was moved
+/// on every path: by `n`'s own right-hand side, or by an earlier statement
+/// of the same block with no assignment to `b` after it.
+fn moved_before(pl: DropPlanner, n: i64, b: i64) -> bool {
+    let p = pl.flow.inf.p;
+    let s = p.s;
+    if moves_always(pl, rhs(s, n), b) { return true; }
+    let blk = p.parents[n];
+    if blk < 0 || kind(s, blk) != nk_block() { return false; }
+    let stmts = children(s, blk);
+    var i = index_in(s, stmts, n) - 1;
+    while i >= 0 {
+        let st = stmts[i];
+        if assigns(pl, st, b) { return false; }
+        if moves(pl, st, b) { return moves_always(pl, st, b); }
+        i = i - 1;
+    }
+    return false;
+}
+
+/// Whether `n` assigns `b` a new value somewhere inside it.
+fn assigns(pl: DropPlanner, n: i64, b: i64) -> bool {
+    let p = pl.flow.inf.p;
+    var ids: List<i64> = [];
+    refs(pl, n, b, ids);
+    for i in ids {
+        let up = p.parents[i];
+        if up >= 0 && kind(p.s, up) == nk_assign() && lhs(p.s, up) == i { return true; }
+    }
+    return false;
+}
+
+/// Writes a `Replace` row on each assignment to `b` while it holds a value,
+/// and a seam row on each assignment after a move on only some paths and
+/// on every closure that captures it; true when there is a seam.
+fn unsupported_uses(pl: DropPlanner, body: i64, b: i64, key: str) -> bool {
     let s = pl.flow.inf.p.s;
     var ids: List<i64> = [];
     refs(pl, body, b, ids);
@@ -340,8 +449,13 @@ fn unsupported_uses(pl: DropPlanner, body: i64, b: i64) -> bool {
     for i in ids {
         let up = pl.flow.inf.p.parents[i];
         if up >= 0 && kind(s, up) == nk_assign() && lhs(s, up) == i {
-            row(pl, ::Seam, up, "own.reassign", f"assigning `{name}` a new value drops its old one; that comes with the PilIR drop pass (F7)");
-            found = true;
+            let at = f"{up}";
+            let maybe = pl.flow.moved_at.has(at) && pl.flow.moved_at.get(at);
+            if !maybe { row(pl, ::Replace, up, name, key); }
+            else if !moved_before(pl, up, b) {
+                row(pl, ::Seam, up, "own.reassign", f"`{name}` is moved on only some paths before this assignment; dropping the value it still holds on the others needs a flag kept at run time");
+                found = true;
+            }
         }
         let lam = ancestor_of_kind(pl, i, body, [nk_lambda()]);
         if lam >= 0 {
@@ -375,7 +489,7 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
         return;
     }
     glue(pl, t);
-    if unsupported_uses(pl, body, b) { return; }
+    if unsupported_uses(pl, body, b, key) { return; }
     if declares_guard(p, t) && kindof == BindKind::Local {
         row(pl, ::Guard, site, r.name[b], key);
         return;
@@ -398,10 +512,10 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
 /// in the user's files.
 pub fn drop_planner(inf: Infer) -> DropPlanner {
     let s = inf.p.s;
-    var owned: List<i64> = [];
-    var i = 0;
-    while i < inf.r.site.len() { owned.push(-1); i = i + 1; }
-    let f = Flow { inf: inf, sink: sink_new(s), owned: owned };
+    let f = flow_new(inf, sink_new(s));
+    // The moves before each assignment (moved_at); OWN001 is reported by
+    // check_program, not here.
+    walk_bodies(f);
     let pl = DropPlanner {
         flow: f, rows: [], needs: Map<str, i64>(), glued: Map<str, bool>(),
         at: Map<str, List<List<any>>>(), cur_binding: -1, cur_type: ty_unknown(),
