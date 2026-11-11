@@ -81,6 +81,11 @@ comptime {
     // `x[a..b]` (and `x[a..=b]`, one further): the seed slices a string or a
     // list with one engine operation, from `a` up to `b`.
     __engine("bind_range_index", "str_slice");
+    // Slice patterns (`[a, ..rest, z]`): a list's length, its element at an
+    // index, and its part between two indices. Record patterns on a value
+    // that is no struct (`{ "key": p }`): whether a key is there, and its value.
+    __engine("bind_slice_pattern", "str_len", "list_get", "str_slice");
+    __engine("bind_record_pattern", "map_has", "map_get");
     // A list literal `[a, b]` is `List()` followed by `push(a)`, `push(b)`.
     __engine("bind_list_literal", nameof(List), nameof(push));
     // Inside a list literal, `*xs` appends xs's elements and `*..xs` its

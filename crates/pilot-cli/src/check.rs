@@ -26,6 +26,7 @@
 //! | 13 | declarations, `[node, is partial, is static, visibility tier or -1 when none is written, is package declaration]` each |
 //! | 14 | field defaults and explicit enum values, `[field node, value node]` each |
 //! | 15 | switch arm guards (`case x if x < 0`), `[arm node, guard node]` each |
+//! | 16 | property setters, `[setter body node, parameter node, guard node]` each (`set(v: T) if cond => ..`) |
 //!
 //! Absent node references are `-1`. The checker returns its diagnostics as
 //! `[code, message, start, end, severity]` with program-wide offsets; only
@@ -241,6 +242,11 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
             Some(pair(i as i64, reference(guard.0)))
         })
         .collect();
+    let setters = arena
+        .property_setters
+        .iter()
+        .map(|(body, param, guard)| ints(vec![i64::from(body.0), reference(param.0), reference(guard.0)]))
+        .collect();
     let tables = pilot_parser::bootstrap_tables();
     let receiver_words = [&tables.receiver_ident, &tables.backing_ident, &tables.setter_value_ident]
         .into_iter()
@@ -263,6 +269,7 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
         HostValue::List(modifiers),
         HostValue::List(field_defaults),
         HostValue::List(arm_guards),
+        HostValue::List(setters),
     ])
 }
 

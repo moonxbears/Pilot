@@ -1,0 +1,182 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_destructure.pilot
+// F5: lowering of slice and record patterns, and of destructuring `let`.
+// ==============================================================================
+// The seed's meaning (crates/pilot-vm lower_destructure.rs):
+// - `[a, b]` matches a list of exactly that length; `[a, ..rest, z]` (or
+//   `*rest`) one at least as long as the other elements, binding the middle
+//   to `rest` as a new list.
+// - `{ "key": p, name }` matches a value that has every listed key (a bare
+//   `name` is the key of that name) and each value against its sub-pattern;
+//   `Name { .. }` also requires the value to be a `Name`. On a struct the
+//   keys are its fields; on anything else the engine's map operations the
+//   program binds (`bind_record_pattern`) look them up.
+// - `let <pattern> = value;` binds through the pattern; a value it does not
+//   match stops the program. At top level each bound name is a global.
+// The engine operations a slice pattern needs are the ones the program binds
+// (`bind_slice_pattern`: length, element, middle part).
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerDestructure;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_members.*;
+use selfhost.ir.lower_switch.*;
+use selfhost.ir.lower_global.*;
+use selfhost.ir.lower_unit.*;
+
+/// The binding words naming the engine operations of slice patterns
+/// (length, element, middle part) and of record patterns on maps (has key,
+/// value of key).
+pub pure fn slice_pattern_hook() -> str => "bind_slice_pattern";
+pub pure fn record_pattern_hook() -> str => "bind_record_pattern";
+
+/// `PatBind.flags` of a rest element (`..rest`, `*rest`) in a slice pattern,
+/// and `PatRecord.flags` when its first child names the type.
+pub pure fn pattern_rest() -> i64 => 2;
+pub pure fn record_pattern_typed() -> i64 => 1;
+
+/// The arguments of the first binding `hook(..)`, or none.
+fn binding_args(lw: Lowerer, hook: str) -> List<str>? {
+    for row in lw.bindings {
+        if row.len() > 1 && row[0] == hook { return row.slice(1, row.len()); }
+    }
+    return none;
+}
+
+fn int_physics(lw: Lowerer) -> IrTypePhysics => layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+
+fn int_const(lw: Lowerer, v: i64, n: i64) -> u32 => emit(lw, op_const_bits(), 0, int_physics(lw), [pool_int(lw, v)], n);
+
+/// Continues in a fresh block when `cond` holds, else goes to `fail`.
+fn pass_if(lw: Lowerer, cond: u32, fail: u32, n: i64) {
+    let pass = ir_add_block(lw.f);
+    emit_void(lw, op_cond_br(), 0, [cond, pass, 0, fail, 0], n);
+    switch_to(lw, pass);
+}
+
+/// Tests `v` (of type `t`) against slice pattern `pat`. False when it is
+/// not lowered.
+pub fn match_slice(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
+    let s = lw.inf.p.s;
+    guard some ops = binding_args(lw, slice_pattern_hook()) else { return false; };
+    if ops.len() != 3 { return false; }
+    let elems = children(s, pat);
+    var rest_at = -1;
+    var i = 0;
+    while i < elems.len() {
+        if kind(s, elems[i]) == nk_pat_bind() && flags(s, elems[i]) == pattern_rest() {
+            if rest_at >= 0 { return false; }
+            rest_at = i;
+        }
+        i = i + 1;
+    }
+    let fixed = if rest_at >= 0 { elems.len() - 1 } else { elems.len() };
+    let len = emit(lw, op_call_intrinsic(), intrinsic_index(lw, ops[0]), int_physics(lw), [v], pat);
+    // CmpPred 0 is `==`, 5 is `>=`.
+    pass_if(lw, emit(lw, op_cmp(), if rest_at >= 0 { 5 } else { 0 }, bool_physics(lw), [len, int_const(lw, fixed, pat)], pat), fail, pat);
+    let et = element_type(lw.inf.p, t);
+    i = 0;
+    while i < elems.len() {
+        let e = elems[i];
+        if i == rest_at {
+            // The middle: from `i` up to `len - (elements after it)`.
+            let to = emit(lw, op_sub(), 0, int_physics(lw), [len, int_const(lw, elems.len() - 1 - i, e)], e);
+            let mid = emit(lw, op_call_intrinsic(), intrinsic_index(lw, ops[2]), layout_of(lw.ls, t), [v, int_const(lw, i, e), to], e);
+            if !bind_name(lw, e, mid, t) { return false; }
+        } else {
+            let at = if rest_at >= 0 && i > rest_at {
+                emit(lw, op_sub(), 0, int_physics(lw), [len, int_const(lw, elems.len() - i, e)], e)
+            } else {
+                int_const(lw, i, e)
+            };
+            let x = emit(lw, op_call_intrinsic(), intrinsic_index(lw, ops[1]), layout_of(lw.ls, et), [v, at], e);
+            if !match_pattern(lw, e, x, et, fail) { return false; }
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Tests `v` (of type `t`) against record pattern `pat`. False when it is
+/// not lowered.
+pub fn match_record(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
+    let p = lw.inf.p;
+    let s = p.s;
+    let ch = children(s, pat);
+    let typed = flags(s, pat) == record_pattern_typed();
+    // A struct the program builds; a type the engine holds (a map literal's)
+    // is looked up through the engine's map operations.
+    let is_struct = ty_is_named(p.tt, t) && kind(s, ty_decl(p.tt, t)) == nk_struct() && runs_in_program(lw, ty_decl(p.tt, t));
+    if typed {
+        // `Name { .. }` on a value known to be a `Name` needs no test; any
+        // other subject would need the value's type at run time.
+        if ch.len() == 0 || !is_struct || node_name(s, ch[0]) != type_name_of(lw, t) { return false; }
+    }
+    let map_ops = binding_args(lw, record_pattern_hook()) ?? [];
+    if !is_struct && map_ops.len() != 2 { return false; }
+    var i = if typed { 1 } else { 0 };
+    while i < ch.len() {
+        let f = ch[i];
+        let name = node_name(s, f);
+        let sub = if kind(s, f) == nk_call_arg() { rhs(s, f) } else { f };
+        if is_struct {
+            guard some m = prog_member(p, t, name) else { return false; }
+            let ft = prog_member_type(p, m);
+            if !match_pattern(lw, sub, property_read(lw, v, t, name, f), ft, fail) { return false; }
+        } else {
+            let k = emit(lw, op_const_bytes(), 0, layout_of(lw.ls, prog_slot_type(p, literal_slot(nk_str()))), [pool_str(lw, name)], f);
+            pass_if(lw, emit(lw, op_call_intrinsic(), intrinsic_index(lw, map_ops[0]), bool_physics(lw), [v, k], f), fail, f);
+            let x = emit(lw, op_call_intrinsic(), intrinsic_index(lw, map_ops[1]), layout_unknown(lw.ls), [v, k], f);
+            if !match_pattern(lw, sub, x, ty_unknown(), fail) { return false; }
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Binds the name pattern `pat` introduces to `v` of type `t`: a local, or
+/// the global of a top-level destructuring `let`.
+pub fn bind_name(lw: Lowerer, pat: i64, v: u32, t: i64) -> bool {
+    if lw.binding_of.has(key(pat)) {
+        let b = lw.binding_of.get(key(pat));
+        lw.values.set(key(b), v);
+        if !ty_is_unknown(lw.inf.p.tt, t) { lw.known_types.set(key(b), t); }
+        return true;
+    }
+    if !is_global_pattern_name(lw, pat) { return false; }
+    lower_global_write(lw, pat, v, pat);
+    return true;
+}
+
+/// Whether name pattern `pat` lies in a top-level destructuring `let`
+/// (`global_names` counts it as a global binding).
+fn is_global_pattern_name(lw: Lowerer, pat: i64) -> bool {
+    let name = node_name(lw.inf.p.s, pat);
+    if !lw.global_named.has(name) { return false; }
+    for d in lw.global_named.get(name) {
+        if d == pat { return true; }
+    }
+    return false;
+}
+
+/// `let <pattern> = value;`: a value the pattern does not match stops the
+/// program.
+pub fn lower_pattern_let(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    if rhs(s, n) < 0 || kind(s, n) != nk_let() { return unsupported(lw, n); }
+    let t = value_type(lw, rhs(s, n));
+    let v = lower_expr(lw, rhs(s, n));
+    let fail = ir_add_block(lw.f);
+    if !match_pattern(lw, lhs(s, n), v, t, fail) { return unsupported(lw, n); }
+    let done = ir_add_block(lw.f);
+    jump_to(lw, done, [], n);
+    switch_to(lw, fail);
+    emit_void(lw, op_unreachable(), 0, [], n);
+    switch_to(lw, done);
+    return unit_value(lw, n);
+}

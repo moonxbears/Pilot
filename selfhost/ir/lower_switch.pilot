@@ -20,6 +20,7 @@ use selfhost.check.infer.*;
 use selfhost.ir.model.*;
 use selfhost.ir.layouts.*;
 use selfhost.ir.lower.*;
+use selfhost.ir.lower_destructure.*;
 use selfhost.ir.lower_members.*;
 use selfhost.ir.lower_try.*;
 use selfhost.ir.lower_variant.*;
@@ -83,11 +84,9 @@ pub fn match_pattern(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
     if pat < 0 { return false; }
     let k = kind(s, pat);
     if k == nk_pat_wildcard() { return true; }
-    if k == nk_pat_bind() {
-        if !lw.binding_of.has(key(pat)) { return false; }
-        lw.values.set(key(lw.binding_of.get(key(pat))), v);
-        return true;
-    }
+    if k == nk_pat_bind() { return bind_name(lw, pat, v, t); }
+    if k == nk_pat_slice() { return match_slice(lw, pat, v, t, fail); }
+    if k == nk_pat_record() { return match_record(lw, pat, v, t, fail); }
     if k == nk_pat_literal() {
         let lit = lower_hinted(lw, lhs(s, pat), t);
         test(lw, emit(lw, op_cmp(), 0, bool_physics(lw), [v, coerce(lw, lit, lw.f.value_physics[v], pat)], pat), fail, pat);

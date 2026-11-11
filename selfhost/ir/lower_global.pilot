@@ -28,6 +28,7 @@ use selfhost.ir.model.*;
 use selfhost.ir.layouts.*;
 use selfhost.ir.lower.*;
 use selfhost.ir.lower_members.*;
+use selfhost.ir.lower_destructure.*;
 
 /// Whether `d` is a top-level `let`, `var` or `const`.
 pub fn is_global_decl(lw: Lowerer, d: i64) -> bool {
@@ -44,7 +45,8 @@ pub fn is_global_decl(lw: Lowerer, d: i64) -> bool {
 pub fn is_pattern_let(s: Snap, d: i64) -> bool => flags(s, d) == 1;
 
 /// Name -> top-level bindings of that name in the files the program links
-/// (pattern bindings are left out).
+/// (each name a top-level pattern binds counts, its name pattern standing
+/// for the binding).
 pub fn global_names(p: Program) -> Map<str, List<i64>> {
     let s = p.s;
     let out = Map<str, List<i64>>();
@@ -58,9 +60,32 @@ pub fn global_names(p: Program) -> Map<str, List<i64>> {
                     if !out.has(name) { out.set(name, []); }
                     out.get(name).push(c);
                 }
+                if (k == nk_let() || k == nk_var() || k == nk_const()) && is_pattern_let(s, c) {
+                    // Each name a top-level pattern binds is a global.
+                    for b in pattern_binds(s, lhs(s, c)) {
+                        let name = node_name(s, b);
+                        if !out.has(name) { out.set(name, []); }
+                        out.get(name).push(b);
+                    }
+                }
             }
         }
         i = i + 1;
+    }
+    return out;
+}
+
+/// The name patterns pattern `pat` binds, in source order.
+pub fn pattern_binds(s: Snap, pat: i64) -> List<i64> {
+    var out: List<i64> = [];
+    if pat < 0 { return out; }
+    if kind(s, pat) == nk_pat_bind() {
+        out.push(pat);
+        return out;
+    }
+    if kind(s, pat) == nk_call_arg() { return pattern_binds(s, rhs(s, pat)); }
+    for c in children(s, pat) {
+        for b in pattern_binds(s, c) { out.push(b); }
     }
     return out;
 }
@@ -87,6 +112,7 @@ pub fn find_global(lw: Lowerer, n: i64) -> i64 {
 
 /// The type global `d` holds: its binding's, else its value's.
 pub fn global_type(lw: Lowerer, d: i64) -> i64 {
+    if kind(lw.inf.p.s, d) == nk_pat_bind() { return ty_unknown(); }
     if lw.binding_of.has(key(d)) {
         let t = binding_type(lw.inf, lw.binding_of.get(key(d)));
         if !ty_is_unknown(lw.inf.p.tt, t) { return t; }
@@ -232,7 +258,10 @@ pub fn lower_start(lw: Lowerer, main: i64) {
             if !runs_at_start(s, c) || ir_is_terminated(f, lw.cur) { continue; }
             let k = kind(s, c);
             if k == nk_let() || k == nk_var() || k == nk_const() {
-                if is_pattern_let(s, c) { let _ = unsupported(lw, c); return; }
+                if is_pattern_let(s, c) {
+                    let _ = lower_pattern_let(lw, c);
+                    continue;
+                }
                 if rhs(s, c) >= 0 { lower_global_write(lw, c, lower_hinted(lw, rhs(s, c), global_type(lw, c)), c); }
             } else {
                 let _ = lower_expr(lw, c);
@@ -282,6 +311,11 @@ pub fn extend_start(lw: Lowerer) -> bool {
         let d = lw.global_decls[lw.globals_done];
         lw.globals_done = lw.globals_done + 1;
         if kind(s, d) == nk_comptime() || in_user_file(s, d) || rhs(s, d) < 0 { continue; }
+        if kind(s, d) == nk_pat_bind() {
+            // A name an imported file's top-level pattern binds.
+            let _ = unsupported(lw, d);
+            continue;
+        }
         changed = true;
         lower_global_write(lw, d, lower_hinted(lw, rhs(s, d), global_type(lw, d)), d);
     }

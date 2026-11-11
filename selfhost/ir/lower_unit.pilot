@@ -6,8 +6,10 @@
 // (`__engine("bind_unit_literal", convert, classify)`; today
 // stdlib/core/syntax/unit_decl.pilot). The seed runs it while compiling
 // (crates/pilot-vm lower_unit.rs); the lowering calls it with the literal's
-// text, so the IR computes the same value in the family's base unit. The
-// checker has already refused a unit no family declares.
+// text, so the IR computes the same value in the family's base unit, but at
+// run time each time the literal is evaluated (stand-in
+// `ir.unit_literal_call`, until IR constants are valued while compiling).
+// The checker has already refused a unit no family declares.
 pub lvl(0) pkg Pilot.SelfHost.Ir.LowerUnit;
 
 use selfhost.check.snapshot.*;
@@ -41,6 +43,7 @@ fn unit_converter(lw: Lowerer) -> i64 {
 }
 
 /// The literal spelled `text` (`250ms`): its value in the base unit.
+[StandIn("ir.unit_literal_call", "a dimensional literal is a constant in the output, valued while the program is compiled", "the IR calls the bound converter on the literal's text each time the literal is evaluated", "M30")]
 pub fn lower_unit_text(lw: Lowerer, text: str, n: i64) -> u32 {
     let f = unit_converter(lw);
     if f < 0 { return unsupported(lw, n); }

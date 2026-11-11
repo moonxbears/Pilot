@@ -87,6 +87,13 @@ pub fn has_accessors(s: Snap, decl: i64) -> bool {
     return false;
 }
 
+/// Whether `name` is a property of `t` with storage of its own the program
+/// builds.
+pub fn is_stored_property(lw: Lowerer, t: i64, name: str) -> bool {
+    guard some m = prog_member(lw.inf.p, t, name) else { return false; }
+    return has_accessors(lw.inf.p.s, m.decl) && runs_in_program(lw, m.decl) && storage_slot(lw, t, name) >= 0;
+}
+
 /// The slot of stored field `name` of type `t`, or -1 (also for a property
 /// with accessors, which is read and written through them).
 pub fn field_slot(lw: Lowerer, t: i64, name: str) -> i64 {
@@ -139,7 +146,8 @@ pub fn lower_struct_literal(lw: Lowerer, n: i64, map: i64) -> u32 {
     var i = 0;
     while i + 1 < entries.len() {
         let name = node_name(s, entries[i]);
-        if field_slot(lw, t, name) < 0 { return unsupported(lw, n); }
+        // A property is built with its storage set directly, as on the seed.
+        if field_slot(lw, t, name) < 0 && !is_stored_property(lw, t, name) { return unsupported(lw, n); }
         given.set(name, entries[i + 1]);
         i = i + 2;
     }
@@ -274,19 +282,7 @@ pub fn member_call(lw: Lowerer, recv: u32, t: i64, name: str, arg_nodes: List<i6
         return call_value(lw, property_read(lw, recv, t, name, n), [], arg_nodes, phy, n);
     }
     if some m = prog_member(p, t, name) {
-        let mk = kind(s, m.decl);
-        if (mk == nk_fn() || mk == nk_operator()) && fn_body(s, m.decl) >= 0 && runs_in_program(lw, m.decl) && !is_static_decl(s, m.decl) {
-            let params = method_params(s, m.decl);
-            guard some order = arrange_args(lw, params, 0, arg_nodes) else { return unsupported(lw, n); }
-            var i = 0;
-            while i < order.len() {
-                args.push(coerce(lw, lower_hinted(lw, order[i], prog_annot_type(lw.inf.p, rhs(s, params[i]))), physics_of_type_node(lw, rhs(s, params[i])), order[i]));
-                i = i + 1;
-            }
-            let ret = layout_of(lw.ls, prog_member_type(p, m));
-            let out = if ret.layout_id != 0 { ret } else { phy };
-            return emit(lw, op_call_direct(), function_index(lw, m.decl, t), out, args, n);
-        }
+        if runs_as_method(lw, m) { return call_method(lw, recv, t, m, arg_nodes, phy, n); }
     }
     let hook = native_for(lw, t, name, native_method_hook());
     if hook == "" { return unsupported(lw, n); }
@@ -295,6 +291,46 @@ pub fn member_call(lw: Lowerer, recv: u32, t: i64, name: str, arg_nodes: List<i6
         args.push(lower_expr(lw, a));
     }
     return emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), phy, args, n);
+}
+
+/// Whether member `m` is a method with a body the program runs.
+fn runs_as_method(lw: Lowerer, m: Member) -> bool {
+    let s = lw.inf.p.s;
+    let mk = kind(s, m.decl);
+    return (mk == nk_fn() || mk == nk_operator()) && fn_body(s, m.decl) >= 0 && runs_in_program(lw, m.decl) && !is_static_decl(s, m.decl);
+}
+
+/// Calls method `m` on `recv`, a value of type `t`, with `arg_nodes`.
+pub fn call_method(lw: Lowerer, recv: u32, t: i64, m: Member, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    var args: List<u32> = [recv];
+    let params = method_params(s, m.decl);
+    guard some order = arrange_args(lw, params, 0, arg_nodes) else { return unsupported(lw, n); }
+    var i = 0;
+    while i < order.len() {
+        args.push(coerce(lw, lower_hinted(lw, order[i], prog_annot_type(lw.inf.p, rhs(s, params[i]))), physics_of_type_node(lw, rhs(s, params[i])), order[i]));
+        i = i + 1;
+    }
+    let ret = layout_of(lw.ls, prog_member_type(lw.inf.p, m));
+    let out = if ret.layout_id != 0 { ret } else { phy };
+    return emit(lw, op_call_direct(), function_index(lw, m.decl, t), out, args, n);
+}
+
+/// `Bundle.method(var ref self, args..)`: the method of the splice `Bundle`
+/// itself, run on the host value, whatever the host hides, renames or
+/// overrides; none when the call is no such delegation.
+fn lower_delegation(lw: Lowerer, n: i64) -> u32? {
+    let p = lw.inf.p;
+    let s = p.s;
+    let ch = children(s, n);
+    if ch.len() < 2 || kind(s, ch[1]) == nk_call_arg() { return none; }
+    let bundle_t = type_receiver(lw.inf, lhs(s, ch[0]));
+    if !ty_is_named(p.tt, bundle_t) || kind(s, ty_decl(p.tt, bundle_t)) != nk_struct() { return none; }
+    let host = value_type(lw, ch[1]);
+    if !ty_is_named(p.tt, host) { return none; }
+    guard some m = prog_delegate(p, host, node_name(s, ty_decl(p.tt, bundle_t)), sym_text(s, rhs(s, ch[0]))) else { return none; };
+    if !runs_as_method(lw, m) { return none; }
+    return call_method(lw, lower_expr(lw, ch[1]), host, m, ch.slice(2, ch.len()), physics_of(lw, n), n);
 }
 
 /// The type `get_enumerator()` of type `t` returns, or the unknown type.
@@ -327,6 +363,13 @@ pub fn value_type(lw: Lowerer, n: i64) -> i64 {
         if in_module >= 0 {
             return if annot(s, in_module) >= 0 { prog_annot_type(lw.inf.p, annot(s, in_module)) } else { inferred_return(lw, in_module) };
         }
+        if kind(s, callee) == nk_member() {
+            // A method of a receiver whose type the lowering knows (`self.get_at(i)`).
+            let rt = member_receiver_type(lw, callee);
+            if some m = prog_member(lw.inf.p, rt, sym_text(s, rhs(s, callee))) {
+                if kind(s, m.decl) == nk_fn() && !ty_is_union(lw.inf.p.tt, rt) { return prog_member_type(lw.inf.p, m); }
+            }
+        }
         if kind(s, callee) == nk_member() && !is_implied(lw, callee) {
             // A method of a union: what the members' methods return.
             let rt = union_method_return(lw, value_type(lw, lhs(s, callee)), sym_text(s, rhs(s, callee)));
@@ -343,14 +386,23 @@ pub fn value_type(lw: Lowerer, n: i64) -> i64 {
     }
     if ty_is_unknown(lw.inf.p.tt, t) && kind(s, n) == nk_comptime() { return value_type(lw, lhs(s, n)); }
     if ty_is_unknown(lw.inf.p.tt, t) && kind(s, n) == nk_cascade() { return value_type(lw, lhs(s, n)); }
+    if ty_is_unknown(lw.inf.p.tt, t) && kind(s, n) == nk_member() {
+        // A field of a receiver whose type the lowering knows (`p.val`).
+        let rt = member_receiver_type(lw, n);
+        if some m = prog_member(lw.inf.p, rt, sym_text(s, rhs(s, n))) {
+            if kind(s, m.decl) != nk_fn() { return prog_member_type(lw.inf.p, m); }
+        }
+    }
     if ty_is_unknown(lw.inf.p.tt, t) && kind(s, n) == nk_index() && kind(s, rhs(s, n)) == nk_binary()
         && (flags(s, rhs(s, n)) == op_range() || flags(s, rhs(s, n)) == op_range_inclusive()) { return value_type(lw, lhs(s, n)); }
     if ty_is_unknown(lw.inf.p.tt, t) && kind(s, n) == nk_index() { return element_type(lw.inf.p, value_type(lw, lhs(s, n))); }
+    if kind(s, n) == nk_ident() && binding_index(lw, n) < 0 && is_receiver_word(lw, n) { return lw.self_type; }
     if kind(s, n) == nk_ident() {
         // What the lowering learned about a binding is at least as precise
         // as the checker's type for it.
         let b = binding_index(lw, n);
         if b >= 0 && lw.known_types.has(key(b)) { return lw.known_types.get(key(b)); }
+        if b < 0 && is_setter_word(lw, n) { return lw.setter_arg_type; }
         if ty_is_unknown(lw.inf.p.tt, t) {
             let g = find_global(lw, n);
             if g >= 0 { return global_type(lw, g); }
@@ -509,6 +561,9 @@ pub fn lower_field_assign(lw: Lowerer, n: i64) -> u32 {
     let t = member_receiver_type(lw, target);
     let name = sym_text(s, rhs(s, target));
     let slot = field_slot(lw, t, name);
+    if slot < 0 && flags(s, n) == 0 {
+        if some v = lower_property_write(lw, member_receiver(lw, target), t, name, rhs(s, n), n) { return v; }
+    }
     if slot < 0 { return unsupported(lw, n); }
     let recv = member_receiver(lw, target);
     let phy = field_physics(lw, t, name);
@@ -547,6 +602,7 @@ pub fn lower_method_call(lw: Lowerer, n: i64) -> u32 {
         }
         return member_call(lw, member_receiver(lw, callee), rt, sym_text(s, rhs(s, callee)), arg_nodes, physics_of(lw, n), n);
     }
+    if some v = lower_delegation(lw, n) { return v; }
     guard some m = prog_member(p, rt, sym_text(s, rhs(s, callee))) else { return unsupported(lw, n); }
     if kind(s, m.decl) != nk_fn() || fn_body(s, m.decl) < 0 || !is_static_decl(s, m.decl) {
         return unsupported(lw, n);

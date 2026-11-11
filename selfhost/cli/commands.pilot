@@ -251,6 +251,8 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/lower_union.pilot",
         "selfhost/ir/lower_global.pilot",
         "selfhost/ir/lower_unit.pilot",
+        "selfhost/ir/lower_setter.pilot",
+        "selfhost/ir/lower_destructure.pilot",
         "selfhost/ir/lower_defer.pilot",
         "selfhost/ir/lower_closure.pilot",
         "selfhost/ir/verify.pilot",

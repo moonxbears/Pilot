@@ -1,0 +1,154 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_setter.pilot
+// F5: lowering of property setters (`set => ..`, `set(v: T) if cond => ..`).
+// ==============================================================================
+// Assigning a property that has setters calls one function, `Owner.field:=`,
+// with the record and the value. It tries the setters in declaration order,
+// as the seed does (crates/pilot-vm lower_members.rs `compile_setters`): the
+// first whose guard holds runs; when none does, the program stops. Where the
+// seed tests the value's type at run time to pass over a setter whose
+// parameter names another type, the lowering knows the value's type and
+// leaves such a setter out of the function it builds for that type, so the
+// function is built once per property, receiver type and value type.
+// Inside a setter the parameter, or the setter-value word (`value`) when it
+// names none, is the value, and the backing word (`field`) is the record's
+// own storage for the property.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerSetter;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_members.*;
+
+/// The accessor block of property `field`, or -1.
+fn accessor_block(s: Snap, field: i64) -> i64 {
+    for row in s.properties {
+        if row[0] == field && row.len() > 2 { return row[2]; }
+    }
+    return -1;
+}
+
+/// The setter bodies of property `field`, in declaration order.
+pub fn setter_bodies(s: Snap, field: i64) -> List<i64> {
+    let block = accessor_block(s, field);
+    if block < 0 { return []; }
+    let bodies = children(s, block);
+    var out: List<i64> = [];
+    var i = flags(s, block);
+    while i < bodies.len() {
+        out.push(bodies[i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// `[body, parameter or -1, guard or -1]` of setter `body`.
+fn setter_row(s: Snap, body: i64) -> List<i64> {
+    for row in s.setters {
+        if row[0] == body { return row; }
+    }
+    return [body, -1, -1];
+}
+
+/// The function that assigns property `field` of a `t` a value of type `vt`.
+fn setter_index(lw: Lowerer, field: i64, t: i64, vt: i64) -> i64 {
+    let s = lw.inf.p.s;
+    let k = f"{field}:=@{t}:{ty_display(lw.inf.p.tt, vt)}";
+    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
+    let idx = lw.queue.len();
+    lw.fn_index.set(k, idx);
+    lw.queue.push(field);
+    lw.queue_self.push(t);
+    lw.queue_body.push(accessor_block(s, field));
+    lw.queue_args.push([vt]);
+    lw.m.functions.push(ir_function_new(ty_display(lw.inf.p.tt, t) + "." + node_name(s, field) + ":=", layout_unknown(lw.ls)));
+    return idx;
+}
+
+/// Whether queued function `idx` is a property's setter function.
+pub fn is_setter_fn(lw: Lowerer, idx: i64) -> bool {
+    let body = lw.queue_body[idx];
+    return body >= 0 && body == accessor_block(lw.inf.p.s, lw.queue[idx]);
+}
+
+/// `recv.name = value` where property `name` of `t` has setters: none when
+/// it has none the program runs.
+pub fn lower_property_write(lw: Lowerer, recv: u32, t: i64, name: str, value: i64, n: i64) -> u32? {
+    let p = lw.inf.p;
+    guard some m = prog_member(p, t, name) else { return none; };
+    if setter_bodies(p.s, m.decl).len() == 0 || !runs_in_program(lw, m.decl) { return none; }
+    let vt = value_type(lw, value);
+    let v = lower_expr(lw, value);
+    // A call always gives a result, here the setter's nothing.
+    return emit(lw, op_call_direct(), setter_index(lw, m.decl, t, vt), layout_unknown(lw.ls), [recv, v], n);
+}
+
+/// The body of setter function `idx`, whose receiver is bound already.
+pub fn lower_setters(lw: Lowerer, idx: i64) {
+    let s = lw.inf.p.s;
+    let field = lw.queue[idx];
+    let vt = lw.queue_args[idx][0];
+    let known = !ty_is_unknown(lw.inf.p.tt, vt);
+    lw.cur_field = field;
+    let v = ir_add_param(lw.f, lw.cur, if known { layout_of(lw.ls, vt) } else { field_physics(lw, lw.self_type, node_name(s, field)) });
+    let bodies = setter_bodies(s, field);
+    var settled = false;
+    for body in bodies {
+        let row = setter_row(s, body);
+        let param = row[1];
+        let guard = row[2];
+        if bodies.len() > 1 && param >= 0 && rhs(s, param) >= 0 {
+            // A setter that names its parameter's type takes only that type.
+            if !known {
+                let _ = seam("ir.lower_construct", f"the setters of `{node_name(s, field)}` overload on the value's type, which is not known here");
+                return;
+            }
+            if ty_display(lw.inf.p.tt, prog_annot_type(lw.inf.p, rhs(s, param))) != ty_display(lw.inf.p.tt, vt) { continue; }
+        }
+        lw.setter_arg = ir_no_value();
+        if param >= 0 && lw.binding_of.has(key(param)) {
+            let b = lw.binding_of.get(key(param));
+            lw.values.set(key(b), v);
+            if known { lw.known_types.set(key(b), vt); }
+        } else {
+            lw.setter_arg = v;
+            lw.setter_arg_type = vt;
+        }
+        var next = 0;
+        if guard >= 0 {
+            let ok = ir_add_block(lw.f);
+            next = ir_add_block(lw.f);
+            emit_void(lw, op_cond_br(), 0, [lower_expr(lw, guard), ok, 0, next, 0], guard);
+            switch_to(lw, ok);
+        }
+        let _ = lower_expr(lw, body);
+        if !ir_is_terminated(lw.f, lw.cur) { emit_void(lw, op_return(), 0, [], body); }
+        if guard < 0 {
+            settled = true;
+            break;
+        }
+        switch_to(lw, next);
+    }
+    // No setter takes the value.
+    if !settled { emit_void(lw, op_unreachable(), 0, [], field); }
+}
+
+/// Inside a setter, the setter-value word names the assigned value.
+pub fn is_setter_word(lw: Lowerer, n: i64) -> bool {
+    let s = lw.inf.p.s;
+    return lw.setter_arg != ir_no_value() && s.setter_value.len() > 0 && node_name(s, n) == s.setter_value;
+}
+
+/// `field = v` inside an accessor: the record's own storage for the property.
+pub fn lower_backing_write(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let name = node_name(s, lw.cur_field);
+    let slot = storage_slot(lw, lw.self_type, name);
+    if slot < 0 || flags(s, n) != 0 { return unsupported(lw, n); }
+    let phy = field_physics(lw, lw.self_type, name);
+    emit_void(lw, op_insert_field(), slot, [lw.self_value, coerce(lw, lower_expr(lw, rhs(s, n)), phy, n)], n);
+    return unit_value(lw, n);
+}

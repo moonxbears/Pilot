@@ -145,6 +145,12 @@ pub struct Snap {
     pub field_defaults: List<i64>;
     /// Switch arm node -> its guard (`case x if x < 0`), or -1.
     pub arm_guards: List<i64>;
+    /// The word that names the value a setter is given (`value`) when the
+    /// setter names no parameter, or "".
+    pub setter_value: str;
+    /// `[setter body, parameter node or -1, guard node or -1]` per setter
+    /// (`set(v: T) if cond => ..`).
+    pub setters: List<List<i64>>;
     pub count: i64;
 }
 
@@ -188,6 +194,8 @@ pub fn snap_load() -> Snap {
         modifiers: decl_bits(raw[13], nodes.len() / snap_columns()),
         field_defaults: node_map(raw[14], nodes.len() / snap_columns()),
         arm_guards: node_map(raw[15], nodes.len() / snap_columns()),
+        setter_value: snap_word(raw[12], 2),
+        setters: raw[16],
         count: nodes.len() / snap_columns(),
     };
 }
@@ -313,7 +321,7 @@ pub fn children(s: Snap, n: i64) -> List<i64> {
     if k == nk_program() || k == nk_block() || k == nk_call() || k == nk_tuple()
         || k == nk_list() || k == nk_map() || k == nk_match() || k == nk_try()
         || k == nk_ctor() || k == nk_indexer() || k == nk_type_tuple()
-        || k == nk_pat_tuple() || k == nk_pat_slice() {
+        || k == nk_pat_tuple() || k == nk_pat_slice() || k == nk_pat_record() {
         return extra_slice(s, lhs(s, n), rhs(s, n));
     }
     if k == nk_fn() || k == nk_operator() || k == nk_variant() || k == nk_pat_variant()

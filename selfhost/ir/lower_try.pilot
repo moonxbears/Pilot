@@ -224,7 +224,9 @@ fn fail_exit(lw: Lowerer, v: u32, t: i64, n: i64) {
 pub fn lower_try_propagate(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let operand = lhs(s, n);
-    let t = type_of(lw.inf, operand);
+    // The lowering may know the operand's type where the checker does not
+    // (`self.parse_string()?` on an explicit receiver).
+    let t = value_type(lw, operand);
     let v = lower_expr(lw, operand);
     if !can_fail(lw, t) { return v; }
     let ok = success_test(lw, v, t, n);

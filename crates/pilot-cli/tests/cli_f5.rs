@@ -111,8 +111,8 @@ fn malformed_ir_is_rejected_with_its_code() {
 
 #[test]
 fn an_unlowered_construct_stops_at_its_seam() {
-    // Destructuring `let (a, b) = ..` is not lowered yet.
-    let out = pilot(&["ir", "run", "tests/conformance/destructuring.pilot"]);
+    // A generator's `yield` (F5b) is not lowered yet.
+    let out = pilot(&["ir", "run", "tests/ir/unlowered_yield.pilot"]);
     let stderr = text(&out.stderr);
     assert_ne!(out.status.code(), Some(0), "{stderr}");
     assert!(stderr.contains("SEAM001") && stderr.contains("ir.lower_construct"), "{stderr}");
