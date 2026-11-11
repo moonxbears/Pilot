@@ -1,0 +1,58 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_defer.pilot
+// F5: lowering of `defer` to PilIR.
+// ==============================================================================
+// Each block opens a scope that collects its `defer` statements. PilIR has
+// no unwinding, so the deferred statements are emitted at every edge that
+// leaves a scope, innermost scope first and each scope's statements in
+// reverse order:
+//   - the end of the block, after its value is computed;
+//   - `return`, after the returned value is computed: every open scope;
+//   - `break` / `continue`: the scopes opened inside the loop (or switch);
+//   - a failing `?`: the scopes opened inside the innermost `try` region,
+//     before control reaches its catch, or every scope when it returns.
+// A deferred statement is lowered once per exit it runs on.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerDefer;
+
+use selfhost.check.snapshot.*;
+use selfhost.ir.model.*;
+use selfhost.ir.lower.*;
+
+/// The number of open scopes.
+pub fn scope_depth(lw: Lowerer) -> i64 => lw.defers.len();
+
+pub fn open_scope(lw: Lowerer) { lw.defers.push([]); }
+
+/// Runs the innermost scope's deferred statements, unless control already
+/// left the block, and closes the scope.
+pub fn close_scope(lw: Lowerer) {
+    if !ir_is_terminated(lw.f, lw.cur) { run_scope(lw, lw.defers.len() - 1); }
+    let _ = lw.defers.pop();
+}
+
+/// Emits the deferred statements of scope `i`, last deferred first.
+fn run_scope(lw: Lowerer, i: i64) {
+    let stmts = lw.defers[i];
+    var k = stmts.len() - 1;
+    while k >= 0 && !ir_is_terminated(lw.f, lw.cur) {
+        let _ = lower_expr(lw, stmts[k]);
+        k = k - 1;
+    }
+}
+
+/// Emits the deferred statements of every scope at depth `depth` or deeper,
+/// innermost first: what leaving them runs.
+pub fn run_defers_to(lw: Lowerer, depth: i64) {
+    var i = lw.defers.len() - 1;
+    while i >= depth {
+        run_scope(lw, i);
+        i = i - 1;
+    }
+}
+
+/// `defer stmt;`: registers `stmt` with the innermost scope.
+pub fn lower_defer(lw: Lowerer, n: i64) -> u32 {
+    if lw.defers.len() == 0 { return unsupported(lw, n); }
+    lw.defers[lw.defers.len() - 1].push(lhs(lw.inf.p.s, n));
+    return unit_value(lw, n);
+}

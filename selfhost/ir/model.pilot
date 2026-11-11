@@ -250,6 +250,10 @@ pub pure fn op_switch_table() -> u16 => 43;
 pub pure fn op_return()       -> u16 => 44;
 pub pure fn op_unreachable()  -> u16 => 45;
 
+// Module storage (46): `global_addr #g` is the address of module global g,
+// read and written with `load` and `store` like a stack slot.
+pub pure fn op_global_addr()  -> u16 => 46;
+
 /// Opcode -> its printed name; index 0 is unused.
 pub fn opcode_names() -> List<str> => [
     "",
@@ -259,6 +263,7 @@ pub fn opcode_names() -> List<str> => [
     "perceus_dup", "perceus_drop", "perceus_drop_reuse", "construct_reuse", "iso_freeze", "guard_enter", "guard_exit_lifo",
     "call_direct", "call_indirect", "call_intrinsic", "pack_abi_frame", "init_signal", "diff_adjoint", "begin_effect_plan",
     "jump", "cond_br", "switch_table", "return", "unreachable",
+    "global_addr",
 ];
 
 pub fn opcode_name(op: u16) -> str {
@@ -339,6 +344,13 @@ pub struct IrLayout : IValue {
     pub physics: IrTypePhysics;
 }
 
+/// A module global: storage that lives as long as the program, named for
+/// printing, holding a value of `physics`.
+pub struct IrGlobal : IValue {
+    pub name:    str;
+    pub physics: IrTypePhysics;
+}
+
 /// A lowered program. Constants are pooled: an instruction names a pool
 /// entry by index.
 pub struct IrModule : IObject {
@@ -353,10 +365,12 @@ pub struct IrModule : IObject {
     pub strings:    List<str>;
     /// `call_intrinsic` subops: the engine operations the program calls.
     pub intrinsics: List<str>;
+    /// `global_addr` subops.
+    pub globals:    List<IrGlobal>;
 }
 
 pub fn ir_module_new() -> IrModule {
-    return IrModule { layouts: [], functions: [], ints: [], floats: [], strings: [], intrinsics: [] };
+    return IrModule { layouts: [], functions: [], ints: [], floats: [], strings: [], intrinsics: [], globals: [] };
 }
 
 pub fn ir_function_new(name: str, ret: IrTypePhysics) -> IrFunction {

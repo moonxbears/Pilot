@@ -69,14 +69,23 @@ comptime {
     // The seed holds a slice as its own list; the PilIR lowering indexes it
     // the same way (stand-in `ir.engine_sequence_for`).
     __engine("bind_native_member", nameof(slice), "[]",  "list_get");
+    // The seed holds a `map<K, V>` as its own map, read and written by key.
+    __engine("bind_native_member", nameof(map), "[]",  "map_get");
+    __engine("bind_native_member", nameof(map), "[]=", "map_set");
     // An operator with no PilIR instruction of its own runs as an engine
     // operation: `a ** b` (an integer power wraps; a float power is `powf`).
     __engine("bind_operator_intrinsic", "**", "num_pow");
     // The test for an absent value (`a ?? b`): the seed holds none as its
     // null (stand-in `ir.absent_as_null`).
     __engine("bind_absent_test", "is_null");
+    // `x[a..b]` (and `x[a..=b]`, one further): the seed slices a string or a
+    // list with one engine operation, from `a` up to `b`.
+    __engine("bind_range_index", "str_slice");
     // A list literal `[a, b]` is `List()` followed by `push(a)`, `push(b)`.
     __engine("bind_list_literal", nameof(List), nameof(push));
+    // Inside a list literal, `*xs` appends xs's elements and `*..xs` its
+    // leaves at any depth: the engine's `list_extend(list, xs, deep)`.
+    __engine("bind_list_splat", nameof(List), "list_extend");
     // A map literal `["k": v]` (or `{k: v}`) is `Map()` followed by `set(k, v)`.
     __engine("bind_map_literal", nameof(Map), nameof(set));
 }

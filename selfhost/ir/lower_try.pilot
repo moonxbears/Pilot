@@ -34,6 +34,7 @@ use selfhost.ir.layouts.*;
 use selfhost.ir.lower.*;
 use selfhost.ir.lower_members.*;
 use selfhost.ir.lower_switch.*;
+use selfhost.ir.lower_defer.*;
 
 /// The bindings that name the protocol's members and constructors.
 pub pure fn try_protocol_hook() -> str => "bind_try_protocol";
@@ -100,6 +101,36 @@ pub fn lower_target_call(lw: Lowerer, n: i64) -> u32? {
     while i < ch.len() {
         if kind(s, ch[i]) == nk_call_arg() { return none; }
         args.push(lower_hinted(lw, ch[i], prog_annot_type(lw.inf.p, rhs(s, params[i - 1]))));
+        i = i + 1;
+    }
+    return call_static(lw, m, t, args, n);
+}
+
+/// A bare call `name(args..)` inside a method where `name` is a method of
+/// the receiver's type: that method, on the receiver when it is not static.
+/// It wins over a top-level function of the same name.
+pub fn lower_sibling_call(lw: Lowerer, n: i64) -> u32? {
+    let s = lw.inf.p.s;
+    let ch = children(s, n);
+    let callee = ch[0];
+    if kind(s, callee) != nk_ident() || binding_index(lw, callee) >= 0 || lw.self_value == ir_no_value() { return none; }
+    let t = lw.self_type;
+    guard some m = prog_member(lw.inf.p, t, node_name(s, callee)) else { return none; }
+    if kind(s, m.decl) != nk_fn() || decl_body(s, m.decl) < 0 { return none; }
+    var arg_nodes: List<i64> = [];
+    var i = 1;
+    while i < ch.len() {
+        arg_nodes.push(ch[i]);
+        i = i + 1;
+    }
+    if !is_static_decl(s, m.decl) { return member_call(lw, lw.self_value, t, node_name(s, callee), arg_nodes, physics_of(lw, n), n); }
+    var args: List<u32> = [];
+    let params = decl_params(s, m.decl);
+    if arg_nodes.len() != params.len() { return none; }
+    i = 0;
+    while i < arg_nodes.len() {
+        if kind(s, arg_nodes[i]) == nk_call_arg() { return none; }
+        args.push(lower_hinted(lw, arg_nodes[i], prog_annot_type(lw.inf.p, rhs(s, params[i]))));
         i = i + 1;
     }
     return call_static(lw, m, t, args, n);
@@ -179,11 +210,13 @@ fn can_fail(lw: Lowerer, t: i64) -> bool => has_protocol(lw, t) || ty_is_unknown
 fn fail_exit(lw: Lowerer, v: u32, t: i64, n: i64) {
     let depth = lw.try_blocks.len();
     if depth == 0 {
-        emit_void(lw, op_return(), 0, [coerce(lw, v, lw.f.ret_physics, n)], n);
+        run_defers_to(lw, 0);
+        if !ir_is_terminated(lw.f, lw.cur) { emit_void(lw, op_return(), 0, [coerce(lw, v, lw.f.ret_physics, n)], n); }
         return;
     }
     let e = if lw.try_binds[depth - 1] { failure_of(lw, v, t, n) } else { v };
     note_failure(lw, t);
+    run_defers_to(lw, lw.try_depths[depth - 1]);
     jump_to(lw, lw.try_blocks[depth - 1], [e], n);
 }
 
@@ -213,6 +246,7 @@ fn open_region(lw: Lowerer, clause: i64) -> u32 {
     lw.try_blocks.push(block);
     lw.try_binds.push(sym_text(s, lhs(s, clause)) != "");
     lw.try_types.push(-1);
+    lw.try_depths.push(scope_depth(lw));
     return block;
 }
 
@@ -221,6 +255,7 @@ fn open_region(lw: Lowerer, clause: i64) -> u32 {
 fn close_region(lw: Lowerer) -> i64 {
     lw.try_blocks.pop();
     lw.try_binds.pop();
+    lw.try_depths.pop();
     let t = lw.try_types.pop() ?? ty_unknown();
     return if t < 0 { ty_unknown() } else { t };
 }

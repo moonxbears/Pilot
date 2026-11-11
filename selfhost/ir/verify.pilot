@@ -136,7 +136,7 @@ pub fn ir_dominates(f: IrFunction, a: u32, b: u32) -> bool {
 
 /// The operand positions of `inst` that hold values (the others name blocks,
 /// counts or pool entries).
-fn value_positions(f: IrFunction, inst: IrInst) -> List<i64> {
+pub fn value_positions(f: IrFunction, inst: IrInst) -> List<i64> {
     let a = ir_args(f, inst);
     var out: List<i64> = [];
     let op = inst.opcode;

@@ -68,6 +68,7 @@ pub pure fn nk_float() -> i64 => 302;
 pub pure fn nk_bool() -> i64 => 303;
 pub pure fn nk_str() -> i64 => 304;
 pub pure fn nk_none() -> i64 => 305;
+pub pure fn nk_unit_lit() -> i64 => 307;
 pub pure fn nk_type_named() -> i64 => 400;
 pub pure fn nk_type_tuple() -> i64 => 409;
 pub pure fn nk_pat_wildcard() -> i64 => 500;
@@ -100,6 +101,7 @@ pub pure fn op_as() -> i64 => 32;
 pub pure fn op_as_view() -> i64 => 33;
 pub pure fn unary_some() -> i64 => 9;
 pub pure fn unary_splat() -> i64 => 6;
+pub pure fn unary_deep_flatten() -> i64 => 8;
 /// `MemberExpr` flags of `.name`, whose receiver is implied
 /// (`MEMBER_IMPLIED_RECEIVER` in crates/pilot-parser/src/lib.rs).
 pub pure fn member_implied() -> i64 => 2;

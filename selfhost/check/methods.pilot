@@ -232,6 +232,12 @@ fn byte_align(p: Program, t: i64, depth: i64) -> usize {
 
 /// The lattice bits of type `t` (0 when it is not derived).
 pub fn lattice_of(p: Program, t: i64) -> i64 {
+    if ty_is_union(p.tt, t) {
+        // A union holds any one of its members: the bits of all of them.
+        var bits = 0;
+        for m in ty_args(p.tt, t) { bits = bits | lattice_of(p, m); }
+        return bits;
+    }
     if !ty_is_named(p.tt, t) { return 0; }
     return build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).lattice;
 }

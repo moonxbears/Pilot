@@ -13,6 +13,8 @@
 pub lvl(0) pkg Pilot.SelfHost.Ir.Interp;
 
 use selfhost.ir.model.*;
+use std.io;
+use std.env;
 
 /// One activation of a function.
 pub struct IrFrame : IObject {
@@ -22,6 +24,9 @@ pub struct IrFrame : IObject {
     pub vals: List<any>;
     /// Stack slot cells; a `stack_slot` value is an index into this list.
     pub cells: List<any>;
+    /// The module's globals, shared by every frame; a `global_addr` value
+    /// is `-1 - g`, so it never collides with a stack slot index.
+    pub globals: List<any>;
     /// Where control goes after a terminator: the block, or -1 to return.
     pub next: i64;
     /// Arguments for the next block's parameters.
@@ -31,16 +36,19 @@ pub struct IrFrame : IObject {
     pub hooks: Map<str, any>;
 }
 
-/// Runs `main` (function 0) and returns the exit code `pilot run` would.
+/// Runs function 0 (the lowering's start function, or `main` in hand-written
+/// IR) and returns the exit code `pilot run` would.
 pub fn ir_run(m: IrModule) -> i64 {
     let handlers = interp_handlers();
     let hooks = interp_hooks();
-    let out = interp_call(m, 0, [], handlers, hooks);
+    var globals: List<any> = [];
+    for g in m.globals { globals.push(none); }
+    let out = interp_call(m, 0, [], handlers, hooks, globals);
     // `main` without a value exits 0, as on the seed.
     return if out == none { 0 } else { out };
 }
 
-fn interp_call(m: IrModule, fi: i64, args: List<any>, handlers: List<any>, hooks: Map<str, any>) -> any {
+fn interp_call(m: IrModule, fi: i64, args: List<any>, handlers: List<any>, hooks: Map<str, any>, globals: List<any>) -> any {
     let f = m.functions[fi];
     var vals: List<any> = [];
     var i = 0;
@@ -48,7 +56,7 @@ fn interp_call(m: IrModule, fi: i64, args: List<any>, handlers: List<any>, hooks
         vals.push(none);
         i = i + 1;
     }
-    let fr = IrFrame { m: m, f: f, vals: vals, cells: [], next: 0, next_args: args, ret: none, handlers: handlers, hooks: hooks };
+    let fr = IrFrame { m: m, f: f, vals: vals, cells: [], globals: globals, next: 0, next_args: args, ret: none, handlers: handlers, hooks: hooks };
     while fr.next >= 0 {
         let b = f.blocks[fr.next];
         var p = 0;
@@ -150,15 +158,34 @@ fn run_stack_slot(fr: IrFrame, inst: IrInst) {
     put(fr, inst, fr.cells.len - 1);
 }
 
-fn run_load(fr: IrFrame, inst: IrInst) { put(fr, inst, fr.cells[fr.vals[ir_args(fr.f, inst)[0]]]); }
+fn run_global_addr(fr: IrFrame, inst: IrInst) { put(fr, inst, -1 - inst.subop); }
+
+fn run_load(fr: IrFrame, inst: IrInst) {
+    let addr = fr.vals[ir_args(fr.f, inst)[0]];
+    put(fr, inst, if addr < 0 { fr.globals[-1 - addr] } else { fr.cells[addr] });
+}
 
 fn run_store(fr: IrFrame, inst: IrInst) {
     let a = ir_args(fr.f, inst);
-    fr.cells[fr.vals[a[0]]] = fr.vals[a[1]];
+    let addr = fr.vals[a[0]];
+    if addr < 0 { fr.globals[-1 - addr] = fr.vals[a[1]]; } else { fr.cells[addr] = fr.vals[a[1]]; }
 }
 
 fn run_call_direct(fr: IrFrame, inst: IrInst) {
-    put(fr, inst, interp_call(fr.m, inst.subop, arg_values(fr, inst), fr.handlers, fr.hooks));
+    put(fr, inst, interp_call(fr.m, inst.subop, arg_values(fr, inst), fr.handlers, fr.hooks, fr.globals));
+}
+
+/// `call_indirect f, args..`: the function record `f` names, called with
+/// `args` then the record's captured values (selfhost/ir/lower_closure.pilot).
+fn run_call_indirect(fr: IrFrame, inst: IrInst) {
+    let a = arg_values(fr, inst);
+    let rec: List<any> = a[0];
+    var args: List<any> = [];
+    var i = 1;
+    while i < a.len() { args.push(a[i]); i = i + 1; }
+    i = 1;
+    while i < rec.len() { args.push(rec[i]); i = i + 1; }
+    put(fr, inst, interp_call(fr.m, rec[0], args, fr.handlers, fr.hooks, fr.globals));
 }
 
 fn run_call_intrinsic(fr: IrFrame, inst: IrInst) {
@@ -261,9 +288,11 @@ pub fn interp_handlers() -> List<any> {
     hs[op_extract_field()] = run_extract_field;
     hs[op_insert_field()] = run_insert_field;
     hs[op_stack_slot()] = run_stack_slot;
+    hs[op_global_addr()] = run_global_addr;
     hs[op_load()] = run_load;
     hs[op_store()] = run_store;
     hs[op_call_direct()] = run_call_direct;
+    hs[op_call_indirect()] = run_call_indirect;
     hs[op_call_intrinsic()] = run_call_intrinsic;
     hs[op_jump()] = run_jump;
     hs[op_cond_br()] = run_cond_br;
@@ -275,10 +304,15 @@ pub fn interp_handlers() -> List<any> {
 /// on the seed, so each one is the same operation on the seed's own values.
 pub fn interp_hooks() -> Map<str, any> {
     let hooks = Map<str, any>();
-    hooks.set("rt_print", (a) => print(a[0]));
-    hooks.set("rt_eprint", (a) => eprint(a[0]));
+    hooks.set("rt_print", (a) => print(spaced(a)));
+    hooks.set("rt_eprint", (a) => eprint(spaced(a)));
+    hooks.set("rt_assert", (a) => if a.len() > 1 { engine_assert(a[0], a[1]) } else { engine_assert1(a[0]) });
+    hooks.set("stdin_read_line", (a) => io.read_line());
+    hooks.set("stdin_read_all", (a) => io.read_all());
+    hooks.set("proc_args", (a) => env.args());
     hooks.set("list_new", (a) => new_list());
     hooks.set("list_push", (a) => list_push(a[0], a[1]));
+    hooks.set("list_extend", (a) => list_extend(a[0], a[1], a[2]));
     hooks.set("list_pop", (a) => list_pop(a[0]));
     hooks.set("list_remove_at", (a) => list_remove_at(a[0], a[1]));
     hooks.set("list_get", (a) => list_get(a[0], a[1]));
@@ -303,6 +337,22 @@ pub fn interp_hooks() -> Map<str, any> {
     return hooks;
 }
 
+/// The values of `a` as `print` shows them, one space apart.
+fn spaced(a: List<any>) -> str {
+    var out = "";
+    var i = 0;
+    while i < a.len() {
+        if i > 0 { out = out + " "; }
+        out = out + f"{a[i]}";
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The seed's `assert`: fails the run unless `cond` holds.
+fn engine_assert(cond: any, note: any) -> any => __engine("rt_assert", cond, note);
+fn engine_assert1(cond: any) -> any => __engine("rt_assert", cond);
+
 fn new_list() -> List<any> {
     var xs: List<any> = [];
     return xs;
@@ -313,6 +363,10 @@ fn list_push(list: any, item: any) -> any {
     xs.push(item);
     return xs;
 }
+
+/// The seed's `list_extend`: appends `items`' elements to `list`, or with
+/// `deep` its leaves at any depth.
+fn list_extend(list: any, items: any, deep: any) -> any => __engine("list_extend", list, items, deep);
 
 fn list_pop(list: any) -> any {
     let xs: List<any> = list;

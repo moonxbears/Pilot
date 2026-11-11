@@ -58,39 +58,29 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             forbidden_string_substrings: &[],
         },
         anticheat::FileAuditRule {
-            path: "selfhost/ir/pass_manager.pilot",
+            path: "selfhost/ir/passes.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "pass_registry_add",
-                "pass_registry_count",
-                "pass_registry_get",
-                "check_iteration_cap",
-            ],
-            required_code_markers: &[
-                "PassResult",
-                "max_fixed_point_iterations",
-                "IR007",
-            ],
+            required_pub_fns: &["pass_register", "default_passes", "run_passes"],
+            required_code_markers: &["IPilIrPass", "IR007", "verify_ir_function"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
         anticheat::FileAuditRule {
-            path: "selfhost/ir/passes_core.pilot",
+            path: "selfhost/ir/pass_fold.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "fold_binary_const",
-                "simplify_algebraic_identity",
-                "can_eliminate_dead_instruction",
-                "can_fold_branch",
-            ],
-            required_code_markers: &[
-                "ConstPropAndFold",
-                "DeadCodeElim",
-                "CfgSimplify",
-                "IDENTITY_ARG1",
-            ],
+            required_pub_fns: &["fold_function"],
+            required_code_markers: &["ConstFoldPass", "op_cond_br", "holds"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/ir/pass_dce.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["eliminate_dead_code"],
+            required_code_markers: &["DeadCodePass", "op_unreachable", "value_positions"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -140,8 +130,6 @@ fn eval_ir(script: &str) -> String {
         "stdlib/core/pending.pilot",
         "selfhost/ir/model.pilot",
         "selfhost/ir/verifier.pilot",
-        "selfhost/ir/pass_manager.pilot",
-        "selfhost/ir/passes_core.pilot",
         "selfhost/ir/printer.pilot",
         "selfhost/ir/lower_ast.pilot",
     ];
@@ -288,64 +276,44 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
 // -----------------------------------------------------------------------------
 // Test 3: Constant Folding & Dead Code Elimination
 // -----------------------------------------------------------------------------
+// Constant folding and dead-code elimination run on real PilIR
+// (selfhost/ir/pass_fold.pilot and pass_dce.pilot, driven by passes.pilot),
+// reached through `pilot ir opt` / `pilot ir run`. More cases are in
+// crates/pilot-cli/tests/cli_f5.rs.
 #[test]
 pub fn test_m6_3_constant_folding_and_dead_code_elimination() {
     let guard = anticheat::AntiCheatGuard::arm("test_m6_3_constant_folding_and_dead_code_elimination", &ANTICHEAT_SPEC);
 
-    let script = r#"
-        // 1. Algebraic Identities:
-        // x + 0 -> x
-        let id_add0 = simplify_algebraic_identity(op_add(), false, 0, true, 0);
-        // 0 + x -> x
-        let id_0add = simplify_algebraic_identity(op_add(), true, 0, false, 0);
-        // x * 1 -> x
-        let id_mul1 = simplify_algebraic_identity(op_mul(), false, 0, true, 1);
-        // x * 0 -> 0
-        let id_mul0 = simplify_algebraic_identity(op_mul(), false, 0, true, 0);
-        // x - 0 -> x
-        let id_sub0 = simplify_algebraic_identity(op_sub(), false, 0, true, 0);
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+    let bin = root.join("target/debug/pilot");
+    if !bin.exists() {
+        let st = std::process::Command::new("cargo")
+            .args(["build", "-q", "-p", "pilot-cli"])
+            .current_dir(&root)
+            .status()
+            .expect("cargo build -p pilot-cli");
+        assert!(st.success(), "Failed building pilot-cli binary");
+    }
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new(&bin).args(args).current_dir(&root).output().expect("run pilot");
+        assert_eq!(out.status.code(), Some(0), "pilot {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
 
-        // 2. Constant Arithmetic Folding:
-        let fold_add = fold_binary_const(op_add(), 15, 27);
-        let fold_mul = fold_binary_const(op_mul(), 7, 8);
-        let fold_sub = fold_binary_const(op_sub(), 50, 18);
+    // tests/ir/loop_params.pir prints 6 * 7, then sums 0..5 in a loop whose
+    // values travel in block parameters. Hand-worked: the product is the
+    // pool's new fifth entry, 42; the constant 7 feeds nothing else and goes;
+    // the loop, which depends on its parameters, is left alone.
+    let opt = run(&["ir", "opt", "tests/ir/loop_params.pir"]);
+    assert!(opt.contains("int 4 42\n"), "42 is pooled: {opt}");
+    assert!(opt.contains("v2 = const_bits #4 :1 !0\n"), "6 * 7 folds: {opt}");
+    assert!(!opt.contains(" mul "), "no multiplication is left: {opt}");
+    assert!(!opt.contains("v1 = "), "the unused constant 7 is removed: {opt}");
+    assert!(opt.contains("v10 = add v5, v9 :1 !0\n"), "the loop step stays: {opt}");
 
-        // 3. Dead Code Elimination:
-        let dce_unused_pure = can_eliminate_dead_instruction(op_add(), 0);
-        let dce_used_pure = can_eliminate_dead_instruction(op_add(), 2);
-        let dce_store = can_eliminate_dead_instruction(op_store(), 0); // stores have side effects!
-        let dce_ret = can_eliminate_dead_instruction(op_return(), 0); // terminators have side effects!
-
-        // 4. Fixed-Point Iteration Cap (IR007):
-        let cap_ok = check_iteration_cap(12);
-        let cap_exceeded = check_iteration_cap(65);
-
-        id_add0 + "|" + id_0add + "|" + id_mul1 + "|" + id_mul0 + "|" + id_sub0 + "|" +
-        fold_add + "|" + fold_mul + "|" + fold_sub + "|" +
-        (if dce_unused_pure { "DCE_OK" } else { "FAIL" }) + "|" +
-        (if !dce_used_pure { "RETAIN_USED" } else { "FAIL" }) + "|" +
-        (if !dce_store { "RETAIN_STORE" } else { "FAIL" }) + "|" +
-        (if !dce_ret { "RETAIN_TERM" } else { "FAIL" }) + "|" +
-        cap_ok + "|" + (if cap_exceeded.slice(0, 5) == "IR007" { "IR007_OK" } else { "FAIL" });
-    "#;
-
-    let res = eval_ir(script);
-    let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts.len(), 14, "Expected 14 parts, got: {}", res);
-    assert_eq!(parts[0], "IDENTITY_ARG1", "x + 0 -> x identity failed");
-    assert_eq!(parts[1], "IDENTITY_ARG2", "0 + x -> x identity failed");
-    assert_eq!(parts[2], "IDENTITY_ARG1", "x * 1 -> x identity failed");
-    assert_eq!(parts[3], "ZERO", "x * 0 -> 0 identity failed");
-    assert_eq!(parts[4], "IDENTITY_ARG1", "x - 0 -> x identity failed");
-    assert_eq!(parts[5], "42", "15 + 27 constant fold failed");
-    assert_eq!(parts[6], "56", "7 * 8 constant fold failed");
-    assert_eq!(parts[7], "32", "50 - 18 constant fold failed");
-    assert_eq!(parts[8], "DCE_OK", "Unused arithmetic should be eliminated");
-    assert_eq!(parts[9], "RETAIN_USED", "Used arithmetic must be retained");
-    assert_eq!(parts[10], "RETAIN_STORE", "Memory store has side effects and must be retained");
-    assert_eq!(parts[11], "RETAIN_TERM", "Terminators must be retained");
-    assert_eq!(parts[12], "OK", "Iteration cap <= 64 should be OK");
-    assert_eq!(parts[13], "IR007_OK", "Iteration cap > 64 should trigger IR007");
+    // The optimised and unoptimised modules print the same.
+    assert_eq!(run(&["ir", "run", "tests/ir/loop_params.pir"]), "42\n15\n");
+    assert_eq!(run(&["ir", "run-unopt", "tests/ir/loop_params.pir"]), "42\n15\n");
 
     guard.finish();
 }

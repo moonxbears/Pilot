@@ -136,7 +136,7 @@ pub struct BytecodeCompiler {
     var_types: HashMap<String, String>,
     block_scopes: Vec<BlockScope>,
     fn_ret_types: HashMap<String, String>,
-    fn_entries: HashMap<String, (u16, Vec<String>)>,
+    fn_entries: HashMap<String, (u32, Vec<String>)>,
     /// The declaration whose parameters each callee takes (`f`, `Owner.m`,
     /// `Owner.self`), for binding named arguments.
     param_decls: HashMap<String, NodeId>,
@@ -241,7 +241,7 @@ impl BytecodeCompiler {
             }
         }
         c.resolve_calls();
-        if c.instructions.len() > u16::MAX as usize {
+        if c.instructions.len() > u32::MAX as usize {
             let span = arena.span(root);
             c.diagnostics.push(CompileDiagnostic {
                 span,
@@ -249,7 +249,7 @@ impl BytecodeCompiler {
                 message: format!(
                     "program needs {} instructions; PilVM jump targets address at most {}",
                     c.instructions.len(),
-                    u16::MAX
+                    u32::MAX
                 ),
             });
         }
@@ -367,7 +367,7 @@ impl BytecodeCompiler {
         r
     }
 
-    fn add_constant(&mut self, val: PilotVal) -> u16 {
+    fn add_constant(&mut self, val: PilotVal) -> u32 {
         let i = self
             .constants
             .iter()
@@ -376,7 +376,7 @@ impl BytecodeCompiler {
                 self.constants.push(val);
                 self.constants.len() - 1
             });
-        i as u16
+        i as u32
     }
 
     fn emit(&mut self, op: Opcode, dst: u8, src1: u8, src2: u8) -> usize {
@@ -389,20 +389,20 @@ impl BytecodeCompiler {
         self.instructions.len() - 1
     }
 
-    fn here(&self) -> u16 {
-        self.instructions.len() as u16
+    fn here(&self) -> u32 {
+        self.instructions.len() as u32
     }
 
-    fn emit_jump(&mut self, target: u16) -> usize {
+    fn emit_jump(&mut self, target: u32) -> usize {
         self.push_ins(Instruction::encode_wide(Opcode::Jump, 0, target))
     }
 
-    fn emit_branch(&mut self, op: Opcode, cond: u8, target: u16) -> usize {
+    fn emit_branch(&mut self, op: Opcode, cond: u8, target: u32) -> usize {
         self.push_ins(Instruction::encode_branch(op, cond, target))
     }
 
     /// Points the jump or branch at `idx` to `target`.
-    fn patch_jump(&mut self, idx: usize, target: u16) {
+    fn patch_jump(&mut self, idx: usize, target: u32) {
         let ins = self.instructions[idx];
         self.instructions[idx] = match ins.opcode() {
             Opcode::Jump => Instruction::encode_wide(Opcode::Jump, 0, target),

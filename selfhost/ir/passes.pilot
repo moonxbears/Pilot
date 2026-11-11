@@ -1,0 +1,74 @@
+// ==============================================================================
+// FILE: selfhost/ir/passes.pilot
+// F5: the PilIR pass driver and its open pass registry.
+// ==============================================================================
+// A pass is any type that implements `IPilIrPass`: it rewrites one function
+// in place and says whether it changed anything. The driver runs every
+// registered pass over each function, in registration order, and repeats
+// the round until a whole round changes nothing. It verifies the module
+// after every pass that changed something, so a pass that breaks the IR is
+// named at once. A function still changing after `max_pass_rounds()` rounds
+// stops the run with IR007. Adding a pass is one `pass_register` call.
+pub lvl(0) pkg Pilot.SelfHost.Ir.Passes;
+
+use selfhost.ir.model.*;
+use selfhost.ir.verify.*;
+use selfhost.ir.pass_fold.*;
+use selfhost.ir.pass_dce.*;
+
+/// A PilIR rewrite.
+pub interface IPilIrPass {
+    /// The name the pass is reported under.
+    fn name() -> str;
+    /// Rewrites `f` (a function of `m`) in place; true when it changed it.
+    fn run(f: IrFunction, m: IrModule) -> bool;
+}
+
+/// The passes to run, in order.
+pub struct PassRegistry : IObject {
+    pub passes: List<IPilIrPass>;
+}
+
+pub fn pass_registry_new() -> PassRegistry => PassRegistry { passes: [] };
+
+pub fn pass_register(r: PassRegistry, p: IPilIrPass) { r.passes.push(p); }
+
+/// The passes `pilot ir opt` and `pilot ir run` apply: constant folding
+/// (with branch folding), then dead-code elimination.
+pub fn default_passes() -> PassRegistry {
+    let r = pass_registry_new();
+    pass_register(r, ConstFoldPass {});
+    pass_register(r, DeadCodePass {});
+    return r;
+}
+
+/// The most rounds a function may take before the driver gives up (IR007).
+pure fn max_pass_rounds() -> i64 => 64;
+
+/// Runs the passes of `r` over every function of `m` until none changes
+/// anything; returns the issues that stopped it (empty when it finished).
+pub fn run_passes(m: IrModule, r: PassRegistry) -> List<IrIssue> {
+    for f in m.functions {
+        var rounds = 0;
+        var changed = true;
+        while changed {
+            if rounds == max_pass_rounds() {
+                return [IrIssue { code: "IR007", function: f.name, message: f"the passes still change it after {max_pass_rounds()} rounds" }];
+            }
+            changed = false;
+            for p in r.passes {
+                if p.run(f, m) {
+                    changed = true;
+                    let issues = verify_ir_function(f);
+                    if issues.len() > 0 {
+                        var out: List<IrIssue> = [];
+                        for i in issues { out.push(IrIssue { code: i.code, function: i.function, message: f"after pass `{p.name()}`: {i.message}" }); }
+                        return out;
+                    }
+                }
+            }
+            rounds = rounds + 1;
+        }
+    }
+    return [];
+}

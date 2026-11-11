@@ -5,7 +5,8 @@ use pilot_span::ByteSpan;
 use crate::instruction::Instruction;
 
 pub const PILC_V3_MAGIC: &[u8; 4] = b"PIL3";
-pub const PILC_V3_VERSION: u32 = 4;
+/// Version 5: 64-bit instruction words with a 32-bit operand.
+pub const PILC_V3_VERSION: u32 = 5;
 
 /// A construct the compiler could not lower, with the span it came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,8 +76,8 @@ impl PilcBinary {
         if offset + 4 > bytes.len() { return Err("Truncated code header".into()); }
         let ins_count = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
         offset += 4;
-        if offset + ins_count * 4 > bytes.len() { return Err("Truncated code".into()); }
-        let instructions = (0..ins_count).map(|i| { let o = offset + i * 4; Instruction(u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap())) }).collect();
+        if offset + ins_count * 8 > bytes.len() { return Err("Truncated code".into()); }
+        let instructions = (0..ins_count).map(|i| { let o = offset + i * 8; Instruction(u64::from_le_bytes(bytes[o..o + 8].try_into().unwrap())) }).collect();
         Ok(Self::new(constants, instructions))
     }
 }

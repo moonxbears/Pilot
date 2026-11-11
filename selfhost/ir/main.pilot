@@ -7,7 +7,11 @@
 // file). Either way the module is verified, then, by `mode`:
 //   verify     stops there;
 //   print      prints the module's text;
-//   run        runs it on the IR interpreter; the exit code is the program's;
+//   opt        runs the default passes (selfhost/ir/passes.pilot) and
+//              prints the optimised module's text;
+//   run        runs the default passes, then runs the module on the IR
+//              interpreter; the exit code is the program's;
+//   run-unopt  runs it on the IR interpreter without the passes;
 //   roundtrip  prints it, parses that text, prints the parsed module, and
 //              fails unless the two texts are the same byte for byte (for a
 //              `.pir` file, the file's own text is the first).
@@ -26,6 +30,7 @@ use selfhost.ir.lower.*;
 use selfhost.ir.verify.*;
 use selfhost.ir.text.*;
 use selfhost.ir.interp.*;
+use selfhost.ir.passes.*;
 
 fn lowered() -> IrModule {
     let s = snap_load();
@@ -83,7 +88,18 @@ fn finish(m: IrModule, mode: str, first: str) -> i64 {
         }
         return 0;
     }
-    if mode == "run" { return ir_run(m); }
-    eprint(f"error: unknown `pilot ir` mode `{mode}` (verify, print, run, roundtrip)");
+    if mode == "run-unopt" { return ir_run(m); }
+    if mode == "opt" || mode == "run" {
+        let failed = run_passes(m, default_passes());
+        if failed.len() > 0 {
+            for i in failed { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
+            return 1;
+        }
+        if mode == "run" { return ir_run(m); }
+        let text = print_ir_module(m);
+        print(text.slice(0, text.len() - 1));
+        return 0;
+    }
+    eprint(f"error: unknown `pilot ir` mode `{mode}` (verify, print, opt, run, run-unopt, roundtrip)");
     return 2;
 }

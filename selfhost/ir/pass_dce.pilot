@@ -1,0 +1,76 @@
+// ==============================================================================
+// FILE: selfhost/ir/pass_dce.pilot
+// F5: dead-code elimination on PilIR.
+// ==============================================================================
+// A block no path from the entry reaches is emptied down to `unreachable`
+// (its id and parameters stay, so no branch has to be renumbered). An
+// instruction whose result no reachable instruction uses is removed when
+// removing it cannot change what the program does: it has no effect besides
+// its result and cannot fail. Calls, stores, field writes, division and
+// remainder (which fail on zero) and every lifecycle and memory operation
+// other than `stack_slot` and `load` stay.
+pub lvl(0) pkg Pilot.SelfHost.Ir.PassDce;
+
+use selfhost.ir.model.*;
+use selfhost.ir.verify.*;
+use selfhost.ir.passes.*;
+
+pub struct DeadCodePass : IPilIrPass {
+    pub fn name() -> str => "dce";
+    pub fn run(f: IrFunction, m: IrModule) -> bool => eliminate_dead_code(f);
+}
+
+/// The opcodes whose only effect is their result.
+fn removable_opcodes() -> List<u16> => [
+    op_const_bits(), op_const_float(), op_const_bytes(), op_undef(),
+    op_construct_aggregate(), op_extract_field(),
+    op_add(), op_sub(), op_mul(), op_bit_and(), op_bit_or(), op_bit_xor(),
+    op_shl(), op_shr(), op_cmp(), op_cast(),
+    op_stack_slot(), op_load(), op_global_addr(),
+];
+
+/// Removes `f`'s dead blocks and instructions; true when anything changed.
+pub fn eliminate_dead_code(f: IrFunction) -> bool {
+    let order = ir_compute_dominators(f);
+    var reachable: List<bool> = [];
+    for _b in f.blocks { reachable.push(false); }
+    for b in order { reachable[b] = true; }
+    var changed = false;
+    for b in f.blocks {
+        if reachable[b.id] { continue; }
+        let only_end = b.insts.len == 1 && b.insts[0].opcode == op_unreachable();
+        if !only_end {
+            let span = if b.insts.len > 0 { b.insts[0].span_id } else { 0 };
+            b.insts = [ir_inst_new(ir_no_value(), op_unreachable(), 0, f.ret_physics, f.operand_pool.len, 0, span)];
+            changed = true;
+        }
+    }
+    // Opcode -> whether it may be removed.
+    var removable: List<bool> = [];
+    for _n in opcode_names() { removable.push(false); }
+    for op in removable_opcodes() { removable[op] = true; }
+    // Remove until no instruction loses its last use.
+    var again = true;
+    while again {
+        again = false;
+        var uses: List<i64> = [];
+        for _v in f.value_physics { uses.push(0); }
+        for b in f.blocks {
+            if !reachable[b.id] { continue; }
+            for inst in b.insts {
+                let a = ir_args(f, inst);
+                for pos in value_positions(f, inst) { uses[a[pos]] = uses[a[pos]] + 1; }
+            }
+        }
+        for b in f.blocks {
+            if !reachable[b.id] { continue; }
+            var kept: List<IrInst> = [];
+            for inst in b.insts {
+                let dead = inst.result != ir_no_value() && uses[inst.result] == 0 && inst.opcode < removable.len() && removable[inst.opcode];
+                if dead { again = true; } else { kept.push(inst); }
+            }
+            if kept.len() != b.insts.len { b.insts = kept; changed = true; }
+        }
+    }
+    return changed;
+}

@@ -440,6 +440,19 @@ pub fn prog_const_name(p: Program, e: i64) -> str {
     return if n >= 0 && kind(p.s, n) == nk_ident() { node_name(p.s, n) } else { "" };
 }
 
+/// A constant expression as text: a string's contents, a name, or an
+/// integer's digits (`Cfg.Hooks.receptor` -> `bind_receptor`); "" when it is
+/// none of these.
+pub fn prog_const_text(p: Program, e: i64) -> str {
+    let n = const_node(p, e, 0);
+    if n < 0 { return ""; }
+    let k = kind(p.s, n);
+    if k == nk_str() { return str_value(p.s, n); }
+    if k == nk_ident() { return node_name(p.s, n); }
+    if k == nk_int() { return f"{lit_value(p.s, n)}"; }
+    return "";
+}
+
 /// The integer a constant expression evaluates to, or none.
 pub fn prog_const(p: Program, e: i64) -> i64? {
     let n = const_node(p, e, 0);

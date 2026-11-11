@@ -16,7 +16,7 @@
 //!        `PIL3` v3 binary bytes encoded as lowercase hexadecimal!
 //!      - Exact `PIL3` v3 Wire Format consumed by `PilcBinary::load_from_bytes`:
 //!        * Bytes `0..4`: `"PIL3"` (`50494c33`)
-//!        * Bytes `4..8`: `4u32` little-endian (`04000000`)
+//!        * Bytes `4..8`: `5u32` little-endian (`05000000`)
 //!        * Bytes `8..12`: `const_count: u32` LE
 //!        * `const_count * 16` bytes: `(tag_meta: u64 LE, payload: u64 LE)`:
 //!          - `TAG_NULL = 0`, `TAG_BOOL = 2` (`payload = 0|1`), `TAG_INT = 3` (`payload = i64 as u64`),
@@ -25,7 +25,8 @@
 //!          - `TAG_HEAP_STR = 9` (for UTF-8 len `> 14`: `tag_meta = 9 | (len << 8)`, `payload = byte_offset_in_heap_blob`,
 //!            where `heap_blob` stores `u32_len_le` + raw UTF-8 bytes for each heap string!).
 //!        * `heap_len: u32` LE + `heap_len` bytes of `heap_blob`
-//!        * `ins_count: u32` LE + `ins_count` entries of `u32` LE (`(op << 24) | (dst << 16) | (src1 << 8) | src2`).
+//!        * `ins_count: u32` LE + `ins_count` entries of `u64` LE (`(ext << 32) | (op << 24) | (dst << 16) | (src1 << 8) | src2`,
+//!          where `ext` is the 32-bit jump target, call entry or constant index).
 //!      - `pub fn compile_arena_debug_manifest() -> str`
 //!        Returns debug metadata formatted as:
 //!        `"SPANS:<pc>:<start>:<end>,...|REGS:<reg>:<sym_id>:<name>,..."`

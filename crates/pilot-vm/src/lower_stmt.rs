@@ -44,7 +44,7 @@ impl BytecodeCompiler {
         arena: &AstArena,
         fn_id: NodeId,
         owner: Option<&str>,
-        entry: &mut Option<u16>,
+        entry: &mut Option<u32>,
     ) {
         self.compile_fn_decl_as(arena, fn_id, owner, None, entry);
     }
@@ -57,7 +57,7 @@ impl BytecodeCompiler {
         fn_id: NodeId,
         owner: Option<&str>,
         alias: Option<&str>,
-        entry: &mut Option<u16>,
+        entry: &mut Option<u32>,
     ) {
         let cn = *arena.node(fn_id);
         let fn_name = alias.unwrap_or(Self::name(arena, cn.lhs)).to_string();
@@ -174,7 +174,7 @@ impl BytecodeCompiler {
     }
 
     /// Lowers the methods of a `struct` or `extend` body.
-    pub(crate) fn compile_type_members(&mut self, arena: &AstArena, id: NodeId, entry: &mut Option<u16>) {
+    pub(crate) fn compile_type_members(&mut self, arena: &AstArena, id: NodeId, entry: &mut Option<u32>) {
         let cn = *arena.node(id);
         if cn.rhs == 0 || cn.rhs == u32::MAX {
             return;

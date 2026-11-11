@@ -22,6 +22,9 @@ pub enum TypeForm : u8 {
     /// A function value: its arguments are the parameter types written in
     /// the type (or of the closure), then the return type.
     Func,
+    /// One of several types: its arguments are the member types, distinct
+    /// and in ascending order (`Circle | Square`).
+    Union,
 }
 
 pub struct TypeTable {
@@ -80,6 +83,37 @@ pub fn ty_func(tt: TypeTable, name: str, args: List<i64>) -> i64 =>
 
 pub fn ty_is_func(tt: TypeTable, t: i64) -> bool => t > 0 && tt.form[t] == TypeForm::Func;
 
+/// The type that is any one of `members`: unions among them are flattened,
+/// duplicates dropped, and a single member is that type itself. The unknown
+/// type when a member is unknown.
+pub fn ty_union(tt: TypeTable, members: List<i64>) -> i64 {
+    var flat: List<i64> = [];
+    for m in members {
+        if m <= 0 { return 0; }
+        let parts: List<i64> = if ty_is_union(tt, m) { tt.args[m] } else { [m] };
+        for x in parts {
+            // Insert in ascending order, once.
+            var at = 0;
+            while at < flat.len() && flat[at] < x { at = at + 1; }
+            if at == flat.len() { flat.push(x); } else if flat[at] != x {
+                var moved: List<i64> = [];
+                var i = 0;
+                while i < flat.len() {
+                    if i == at { moved.push(x); }
+                    moved.push(flat[i]);
+                    i = i + 1;
+                }
+                flat = moved;
+            }
+        }
+    }
+    if flat.len() == 0 { return 0; }
+    if flat.len() == 1 { return flat[0]; }
+    return tt_intern(tt, TypeForm::Union, "U", -1, "|", flat);
+}
+
+pub fn ty_is_union(tt: TypeTable, t: i64) -> bool => t > 0 && tt.form[t] == TypeForm::Union;
+
 /// The return type of a function type, or the unknown type.
 pub fn ty_func_return(tt: TypeTable, t: i64) -> i64 {
     if !ty_is_func(tt, t) { return 0; }
@@ -107,6 +141,14 @@ pub fn ty_is_open(tt: TypeTable, t: i64) -> bool {
 pub fn ty_display(tt: TypeTable, t: i64) -> str {
     if t <= 0 { return "_"; }
     let args = tt.args[t];
+    if ty_is_union(tt, t) {
+        var u = "";
+        for a in args {
+            if u.len() > 0 { u = u + " | "; }
+            u = u + ty_display(tt, a);
+        }
+        return u;
+    }
     if args.len() == 0 { return tt.name[t]; }
     var out = tt.name[t] + "<";
     var i = 0;
@@ -137,5 +179,6 @@ pub fn ty_subst(tt: TypeTable, t: i64, names: List<str>, values: List<i64>) -> i
     var out: List<i64> = [];
     for a in args { out.push(ty_subst(tt, a, names, values)); }
     if ty_is_func(tt, t) { return ty_func(tt, tt.name[t], out); }
+    if ty_is_union(tt, t) { return ty_union(tt, out); }
     return ty_named(tt, tt.decl[t], tt.name[t], out);
 }

@@ -1,0 +1,155 @@
+// ==============================================================================
+// FILE: selfhost/ir/pass_fold.pilot
+// F5: constant folding and branch folding on PilIR.
+// ==============================================================================
+// An integer instruction whose operands are all `const_bits` of integer
+// layouts becomes a `const_bits` of its result. Only results that the
+// result's layout holds exactly are folded: a result that would wrap, a
+// division by zero, or a shift by the width or more is left to run, so
+// folding never changes what a program does. `cmp` of two integer
+// constants becomes a 1-bit constant. A `cond_br` on a 1-bit constant
+// becomes a `jump` to the side it takes.
+pub lvl(0) pkg Pilot.SelfHost.Ir.PassFold;
+
+use selfhost.ir.model.*;
+use selfhost.ir.passes.*;
+
+pub struct ConstFoldPass : IPilIrPass {
+    pub fn name() -> str => "const_fold";
+    pub fn run(f: IrFunction, m: IrModule) -> bool => fold_function(f, m);
+}
+
+/// Whether `p` is an integer register of more than one bit and at most 64.
+fn is_int(p: IrTypePhysics) -> bool =>
+    p.layout_id != 0 && (p.reg_class == reg_class_gpr_signed() || p.reg_class == reg_class_gpr_unsigned()) && p.bit_width > 1 && p.bit_width <= 64;
+
+/// Whether `p` is a 1-bit register (a `bool`).
+fn is_bit(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.bit_width == 1;
+
+/// Whether integer layout `p` holds `v` exactly.
+fn holds(p: IrTypePhysics, v: i64) -> bool {
+    let w = p.bit_width;
+    if p.reg_class == reg_class_gpr_unsigned() {
+        // A 64-bit unsigned constant above 2^63 - 1 does not fit the pool's i64.
+        return v >= 0 && (w >= 64 || v < (1 << w));
+    }
+    if w >= 64 { return true; }
+    let half = 1 << (w - 1);
+    return v >= 0 - half && v < half;
+}
+
+/// The magnitude below which `+`, `-` and `*` of two values cannot leave i64.
+fn small(v: i64, limit: i64) -> bool => v > 0 - limit && v < limit;
+
+/// The folded value of integer opcode `op` on `a` and `b`, or `none` when it
+/// cannot be folded without changing what the program does.
+fn fold_int(op: u16, a: i64, b: i64, p: IrTypePhysics) -> i64? {
+    var r = 0;
+    if op == op_add() || op == op_sub() {
+        let limit = 1 << 62;
+        if !small(a, limit) || !small(b, limit) { return none; }
+        r = if op == op_add() { a + b } else { a - b };
+    } else if op == op_mul() {
+        let limit = 1 << 31;
+        if !small(a, limit) || !small(b, limit) { return none; }
+        r = a * b;
+    } else if op == op_div() || op == op_rem() {
+        if b == 0 { return none; }
+        r = if op == op_div() { a / b } else { a % b };
+    } else if op == op_bit_and() { r = a & b; }
+    else if op == op_bit_or() { r = a | b; }
+    else if op == op_bit_xor() { r = a ^ b; }
+    else if op == op_shl() || op == op_shr() {
+        if b < 0 || b >= p.bit_width || a < 0 { return none; }
+        if op == op_shl() {
+            if b >= 62 || !small(a, 1 << (62 - b)) { return none; }
+            r = a << b;
+        } else { r = a >> b; }
+    } else { return none; }
+    return if holds(p, r) { r } else { none };
+}
+
+/// The result of comparison predicate `pred` (0 `==`, 1 `!=`, 2 `<`, 3 `<=`,
+/// 4 `>`, 5 `>=`) on `a` and `b`.
+fn compare(pred: u16, a: i64, b: i64) -> bool {
+    if pred == 0 { return a == b; }
+    if pred == 1 { return a != b; }
+    if pred == 2 { return a < b; }
+    if pred == 3 { return a <= b; }
+    if pred == 4 { return a > b; }
+    return a >= b;
+}
+
+/// The pool entry of integer `v`, adding it when it is new.
+fn pool_index(m: IrModule, v: i64) -> u32 {
+    var i = 0;
+    while i < m.ints.len {
+        if m.ints[i] == v { return i; }
+        i = i + 1;
+    }
+    m.ints.push(v);
+    return m.ints.len - 1;
+}
+
+/// `inst` with opcode `op` and operands `args`, its result and span kept.
+fn rewrite(f: IrFunction, inst: IrInst, op: u16, args: List<u32>) -> IrInst {
+    let offset = f.operand_pool.len;
+    for a in args { f.operand_pool.push(a); }
+    return ir_inst_new(inst.result, op, 0, inst.physics, offset, args.len(), inst.span_id);
+}
+
+/// Folds what can be folded in `f`; true when anything changed.
+pub fn fold_function(f: IrFunction, m: IrModule) -> bool {
+    // Value id -> its constant, for `const_bits` results of integer or
+    // 1-bit layouts.
+    var known = Map<str, i64>();
+    for b in f.blocks {
+        for inst in b.insts {
+            if inst.opcode == op_const_bits() && (is_int(inst.physics) || is_bit(inst.physics)) {
+                known.set(f"{inst.result}", m.ints[ir_args(f, inst)[0]]);
+            }
+        }
+    }
+    var changed = false;
+    for b in f.blocks {
+        var i = 0;
+        while i < b.insts.len {
+            let inst = b.insts[i];
+            let a = ir_args(f, inst);
+            let op = inst.opcode;
+            if op == op_cond_br() && known.has(f"{a[0]}") {
+                // [cond, then, n_then, then args.., else, n_else, else args..]
+                let take_then = known.get(f"{a[0]}") != 0;
+                let start = if take_then { 1 } else { 3 + a[2] };
+                let count = a[start + 1];
+                var args: List<u32> = [a[start]];
+                var k = 0;
+                while k < count {
+                    args.push(a[start + 2 + k]);
+                    k = k + 1;
+                }
+                b.insts[i] = rewrite(f, inst, op_jump(), args);
+                changed = true;
+            } else if a.len() == 2 && known.has(f"{a[0]}") && known.has(f"{a[1]}") && inst.result != ir_no_value() {
+                let x = known.get(f"{a[0]}");
+                let y = known.get(f"{a[1]}");
+                let left = f.value_physics[a[0]];
+                let right = f.value_physics[a[1]];
+                if op == op_cmp() && is_int(left) && is_int(right) && is_bit(inst.physics) {
+                    let r = if compare(inst.subop, x, y) { 1 } else { 0 };
+                    b.insts[i] = rewrite(f, inst, op_const_bits(), [pool_index(m, r)]);
+                    known.set(f"{inst.result}", r);
+                    changed = true;
+                } else if op != op_cmp() && is_int(left) && is_int(right) && is_int(inst.physics) {
+                    if some r = fold_int(op, x, y, inst.physics) {
+                        b.insts[i] = rewrite(f, inst, op_const_bits(), [pool_index(m, r)]);
+                        known.set(f"{inst.result}", r);
+                        changed = true;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+    }
+    return changed;
+}

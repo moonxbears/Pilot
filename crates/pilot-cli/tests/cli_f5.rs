@@ -80,6 +80,17 @@ fn hand_written_ir_runs_on_the_interpreter() {
     assert_eq!(trip.status.code(), Some(0), "{}", text(&trip.stderr));
 }
 
+#[test]
+fn module_globals_are_shared_by_every_function() {
+    // main stores 5 in global 0, `bump` adds 2 to it twice: 5 + 2 + 2.
+    let out = pilot(&["ir", "run", "tests/ir/globals.pir"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout), "9\n");
+    let printed = pilot(&["ir", "print", "tests/ir/globals.pir"]);
+    let input = std::fs::read_to_string(root().join("tests/ir/globals.pir")).unwrap();
+    assert_eq!(text(&printed.stdout), input);
+}
+
 fn assert_rejected(file: &str, code: &str, detail: &str) {
     let out = pilot(&["ir", "verify", file]);
     let stderr = text(&out.stderr);
@@ -100,8 +111,8 @@ fn malformed_ir_is_rejected_with_its_code() {
 
 #[test]
 fn an_unlowered_construct_stops_at_its_seam() {
-    // Closures are not lowered yet.
-    let out = pilot(&["ir", "run", "tests/conformance/closures.pilot"]);
+    // Destructuring `let (a, b) = ..` is not lowered yet.
+    let out = pilot(&["ir", "run", "tests/conformance/destructuring.pilot"]);
     let stderr = text(&out.stderr);
     assert_ne!(out.status.code(), Some(0), "{stderr}");
     assert!(stderr.contains("SEAM001") && stderr.contains("ir.lower_construct"), "{stderr}");
@@ -116,4 +127,30 @@ fn struct_sizes_follow_the_c_abi() {
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let expected = std::fs::read_to_string(root().join("tests/ir/c_abi_layout.stdout")).expect("expected sizes");
     assert_eq!(text(&out.stdout), expected);
+}
+
+#[test]
+fn passes_fold_constants_and_remove_dead_code() {
+    // Hand-worked in tests/ir/fold_dce.opt.pir: 6 * 7 = 42, 42 > 40 takes
+    // b1, which prints 42 - 6 = 36; the unused 42 + 7 is folded, then
+    // removed; b2 becomes `unreachable`.
+    let out = pilot(&["ir", "opt", "tests/ir/fold_dce.pir"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let expected = std::fs::read_to_string(root().join("tests/ir/fold_dce.opt.pir")).unwrap();
+    assert_eq!(text(&out.stdout), expected);
+    for mode in ["run", "run-unopt"] {
+        let run = pilot(&["ir", mode, "tests/ir/fold_dce.pir"]);
+        assert_eq!(run.status.code(), Some(0), "{mode}: {}", text(&run.stderr));
+        assert_eq!(text(&run.stdout), "36\n", "{mode}");
+    }
+}
+
+#[test]
+fn passes_leave_what_would_change_the_program() {
+    // 100 + 100 does not fit an i8, 7 / 0 fails at run time and 7 << 64
+    // shifts by the width: none is folded, and the unused division stays.
+    let out = pilot(&["ir", "opt", "tests/ir/fold_kept.pir"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let input = std::fs::read_to_string(root().join("tests/ir/fold_kept.pir")).unwrap();
+    assert_eq!(text(&out.stdout), input);
 }

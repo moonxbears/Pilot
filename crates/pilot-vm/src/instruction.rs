@@ -1,13 +1,15 @@
-//! 32-bit fixed-width 3-address register instruction architecture (`[opcode:8 | dst:8 | src1:8 | src2:8]`).
+//! 64-bit fixed-width 3-address register instruction architecture: the low
+//! word is `[opcode:8 | dst:8 | src1:8 | src2:8]`, the high word a 32-bit
+//! operand (`ext`).
 //!
 //! Arithmetic and comparison opcodes are polymorphic over the runtime value
 //! tag: the VM selects integer, float or string behaviour from the operand
 //! kinds and faults on operands the operation does not accept.
 //!
-//! Jump encodings: `Jump` keeps its 16-bit target in `src1:src2`; the
-//! conditional jumps keep the tested register in `src1` and the target split
-//! across `dst` (high byte) and `src2` (low byte). `LoadConst` and `Trap` keep a
-//! 16-bit constant-pool index in `src1:src2`.
+//! Jump encodings: `Jump` keeps its target in `ext`; the conditional jumps
+//! keep the tested register in `src1` and the target in `ext`. `Call` keeps
+//! its entry in `ext`, and `LoadConst` and `Trap` keep a constant-pool index
+//! there.
 
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -105,29 +107,29 @@ impl Opcode {
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub struct Instruction(pub u32);
+pub struct Instruction(pub u64);
 
 impl Instruction {
     #[inline]
     pub const fn encode(op: Opcode, r_dst: u8, r_src1: u8, r_src2: u8) -> Self {
-        Self(((op as u32) << 24) | ((r_dst as u32) << 16) | ((r_src1 as u32) << 8) | (r_src2 as u32))
+        Self(((op as u64) << 24) | ((r_dst as u64) << 16) | ((r_src1 as u64) << 8) | (r_src2 as u64))
     }
 
-    /// Encodes an instruction whose 16-bit operand lives in `src1:src2`.
+    /// Encodes an instruction whose 32-bit operand lives in `ext`.
     #[inline]
-    pub const fn encode_wide(op: Opcode, r_dst: u8, wide: u16) -> Self {
-        Self::encode(op, r_dst, (wide >> 8) as u8, (wide & 0xFF) as u8)
+    pub const fn encode_wide(op: Opcode, r_dst: u8, wide: u32) -> Self {
+        Self(Self::encode(op, r_dst, 0, 0).0 | ((wide as u64) << 32))
     }
 
     /// Encodes a conditional jump testing `r_cond` with target `target`.
     #[inline]
-    pub const fn encode_branch(op: Opcode, r_cond: u8, target: u16) -> Self {
-        Self::encode(op, (target >> 8) as u8, r_cond, (target & 0xFF) as u8)
+    pub const fn encode_branch(op: Opcode, r_cond: u8, target: u32) -> Self {
+        Self(Self::encode(op, 0, r_cond, 0).0 | ((target as u64) << 32))
     }
 
     #[inline]
     pub fn opcode(self) -> Opcode {
-        Opcode::from_u8((self.0 >> 24) as u8)
+        Opcode::from_u8(((self.0 >> 24) & 0xFF) as u8)
     }
 
     #[inline]
@@ -146,13 +148,13 @@ impl Instruction {
     }
 
     #[inline]
-    pub const fn wide(self) -> u16 {
-        (self.0 & 0xFFFF) as u16
+    pub const fn wide(self) -> u32 {
+        (self.0 >> 32) as u32
     }
 
     #[inline]
-    pub const fn branch_target(self) -> u16 {
-        ((self.dst() as u16) << 8) | (self.src2() as u16)
+    pub const fn branch_target(self) -> u32 {
+        self.wide()
     }
 }
 

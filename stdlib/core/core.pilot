@@ -252,6 +252,7 @@ comptime {
             kw_self:      "self",
             kw_field:     "field",
             kw_value:     "value",
+            kw_nameof:    "nameof",
 
             ring_public:  0,
             ring_simd:    80,

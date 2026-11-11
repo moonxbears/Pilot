@@ -20,7 +20,7 @@ use pilot_rt::PilotVal;
 pub(crate) struct ComptimeRun {
     /// Where it starts in the source, which orders the runs.
     pos: u32,
-    entry: u16,
+    entry: u32,
     /// For an expression, the hidden global its value is kept in.
     result: Option<String>,
 }
@@ -90,7 +90,7 @@ impl BytecodeCompiler {
         let n = *arena.node(id);
         let saved = self.save_fn_state();
         let skip = self.emit_jump(0);
-        let entry = self.here() as u16;
+        let entry = self.here();
         self.reset_fn_state();
         let r = self.compile_node(arena, NodeId(n.lhs));
         self.emit(Opcode::Move, 0, r, 0);
@@ -113,7 +113,7 @@ impl BytecodeCompiler {
     /// jump at the program's start, which the runs return to `body` from.
     /// Without runs that jump becomes a no-op. When the program falls off its
     /// end (no `main`), a jump past the runs ends it.
-    pub(crate) fn place_comptime_runs(&mut self, to_runs: usize, body: u16, falls_through: bool) {
+    pub(crate) fn place_comptime_runs(&mut self, to_runs: usize, body: u32, falls_through: bool) {
         if self.comptime_runs.is_empty() {
             self.instructions[to_runs] = Instruction::encode(Opcode::Nop, 0, 0, 0);
             return;

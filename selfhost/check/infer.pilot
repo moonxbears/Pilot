@@ -238,8 +238,33 @@ fn call_type(inf: Infer, n: i64) -> i64 {
             let mk = kind(s, m.decl);
             if mk == nk_fn() || mk == nk_operator() { return prog_member_type(p, m); }
         }
+        let f = module_fn(inf, callee);
+        if f >= 0 && annot(s, f) >= 0 { return prog_annot_type(p, annot(s, f)); }
     }
     return ty_unknown();
+}
+
+/// The top-level function a module-qualified callee (`io.read_line`) names:
+/// `X` is no binding or type, and a linked file named `X` (`.../X.pilot`)
+/// declares one function of that name; -1 otherwise.
+pub fn module_fn(inf: Infer, callee: i64) -> i64 {
+    let s = inf.p.s;
+    if kind(s, callee) != nk_member() { return -1; }
+    let recv = lhs(s, callee);
+    if kind(s, recv) != nk_ident() || inf.r.ref_of[recv] >= 0 { return -1; }
+    if !ty_is_unknown(inf.p.tt, type_receiver(inf, recv)) { return -1; }
+    let tail = "/" + node_name(s, recv) + ".pilot";
+    var found = -1;
+    for f in nl_get(inf.p.fns, sym_text(s, rhs(s, callee))) {
+        let u = unit_of(s, f);
+        if u < 0 || u >= s.files.len() || !in_linked_file(s, f) { continue; }
+        let row: List<any> = s.files[u];
+        let path: str = row[0];
+        if !path.replace("\\", "/").ends_with(tail) { continue; }
+        if found >= 0 { return -1; }
+        found = f;
+    }
+    return found;
 }
 
 fn member_type(inf: Infer, n: i64) -> i64 {

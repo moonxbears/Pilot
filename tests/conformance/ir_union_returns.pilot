@@ -1,0 +1,43 @@
+// A function that returns values of different types returns one of them,
+// and a method call on the result runs the method of the type it holds.
+// A list literal of different types holds each item as what it is.
+struct Coin {
+    cents: i64 = 25;
+    fn worth() -> i64 => .cents;
+    fn label() -> str => "coin";
+}
+
+struct Note {
+    dollars: i64 = 5;
+    fn worth() -> i64 => .dollars * 100;
+    fn label() -> str => "note";
+}
+
+struct Gem {
+    carats: i64 = 2;
+    fn worth() -> i64 => .carats * 1000;
+    fn label() -> i64 => .carats;
+}
+
+fn find(n: i64) {
+    if n == 0 { return Coin(); }
+    if n == 1 { return Note { dollars: 20 }; }
+    return Gem();
+}
+
+fn main() {
+    var n = 0;
+    while n < 3 {
+        print(find(n).worth());
+        n = n + 1;
+    }
+    // `label` returns a str on two members and an i64 on the third.
+    print(find(0).label());
+    print(find(2).label());
+    var total = 0;
+    let items = [Coin { cents: 10 }, Gem { carats: 3 }, Note()];
+    for item in items {
+        total = total + item.worth();
+    }
+    print(total);
+}

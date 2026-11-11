@@ -238,6 +238,8 @@ pub fn cli_ir_files() -> List<str> {
     }
     for f in [
         "stdlib/std/text.pilot",
+        "stdlib/std/io.pilot",
+        "stdlib/std/env.pilot",
         "stdlib/core/result.pilot",
         "selfhost/ir/model.pilot",
         "selfhost/ir/layouts.pilot",
@@ -246,7 +248,15 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/lower_switch.pilot",
         "selfhost/ir/lower_try.pilot",
         "selfhost/ir/lower_variant.pilot",
+        "selfhost/ir/lower_union.pilot",
+        "selfhost/ir/lower_global.pilot",
+        "selfhost/ir/lower_unit.pilot",
+        "selfhost/ir/lower_defer.pilot",
+        "selfhost/ir/lower_closure.pilot",
         "selfhost/ir/verify.pilot",
+        "selfhost/ir/passes.pilot",
+        "selfhost/ir/pass_fold.pilot",
+        "selfhost/ir/pass_dce.pilot",
         "selfhost/ir/text.pilot",
         "selfhost/ir/interp.pilot",
         "selfhost/ir/main.pilot",
@@ -260,6 +270,7 @@ pub fn cli_ir_decls() -> List<str> {
     var out = cli_checker_decls();
     out.push("stdlib/core/builtins/native_calls.pilot");
     out.push("stdlib/core/syntax/try_catch.pilot");
+    out.push("stdlib/core/syntax/unit_decl.pilot");
     return out;
 }
 
@@ -270,7 +281,7 @@ pub pure fn ir_text_ext() -> str => ".pir";
 /// or reads PilIR text from a `.pir` file (F5).
 pub fn cmd_ir(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
-    if args.len < 2 { return usage_error("`pilot ir` needs a mode (verify, print, run, roundtrip) and a file"); }
+    if args.len < 2 { return usage_error("`pilot ir` needs a mode (verify, print, opt, run, run-unopt, roundtrip) and a file"); }
     if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
     if args[1].ends_with(ir_text_ext()) {
         return host_text_tool(args[1], cli_ir_files(), f"ir_text_main(\"{args[0]}\");");

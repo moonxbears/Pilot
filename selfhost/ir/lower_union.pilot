@@ -1,0 +1,153 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_union.pilot
+// F5: lowering of values that may be one of several types to PilIR.
+// ==============================================================================
+// A function without a return annotation returns the type of its `return`
+// values. When they are different types it returns their union
+// (`Circle | Square`, selfhost/check/types.pilot). A list literal whose items
+// are different types holds their union. Nothing is decided at run time by
+// name: a union value is one record, its tag (the member's place in the
+// union's ascending member order, as a value of the integer literals' layout)
+// then the member value. A method call on a union switches on the tag and
+// calls the member type's own method in each arm; the arms join with the
+// result, itself wrapped when the members' methods return different types.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerUnion;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_members.*;
+
+/// The `return` nodes of the body at `n`, not those of lambdas inside it.
+fn collect_returns(s: Snap, n: i64, out: List<i64>) {
+    if n < 0 { return; }
+    let k = kind(s, n);
+    if k == nk_lambda() || k == nk_fn() { return; }
+    if k == nk_return() { out.push(n); }
+    for c in children(s, n) { collect_returns(s, c, out); }
+}
+
+/// The type function `decl`, written without a return annotation, returns:
+/// the `=> expr` body's type, or the union of the types its `return`
+/// statements give. Unknown when one of them is unknown or none returns a
+/// value.
+pub fn inferred_return(lw: Lowerer, decl: i64) -> i64 {
+    let s = lw.inf.p.s;
+    let body = decl_body(s, decl);
+    if body < 0 || annot(s, decl) >= 0 { return ty_unknown(); }
+    if kind(s, body) != nk_block() { return type_of(lw.inf, body); }
+    var rets: List<i64> = [];
+    collect_returns(s, body, rets);
+    var types: List<i64> = [];
+    for r in rets {
+        if lhs(s, r) < 0 { return ty_unknown(); }
+        types.push(type_of(lw.inf, lhs(s, r)));
+    }
+    return ty_union(lw.inf.p.tt, types);
+}
+
+/// Whether type `t` is a union or has one among its type arguments.
+pub fn holds_union(tt: TypeTable, t: i64) -> bool {
+    if t <= 0 { return false; }
+    if ty_is_union(tt, t) { return true; }
+    for a in ty_args(tt, t) {
+        if holds_union(tt, a) { return true; }
+    }
+    return false;
+}
+
+/// The union of the item types of list literal `n` when they are different
+/// structs the program declares; unknown otherwise. Lists of the engine's
+/// own values (`[1, [2, 3]]`) and lists with spread items stay as they are.
+pub fn mixed_item_type(lw: Lowerer, n: i64) -> i64 {
+    let s = lw.inf.p.s;
+    let tt = lw.inf.p.tt;
+    var types: List<i64> = [];
+    for item in children(s, n) {
+        let t = value_type(lw, item);
+        if !ty_is_named(tt, t) || ty_decl(tt, t) < 0 || kind(s, ty_decl(tt, t)) != nk_struct() || !in_linked_file(s, ty_decl(tt, t)) {
+            return ty_unknown();
+        }
+        // A type the engine builds (`List`, `Map`) holds the engine's values.
+        if bound(lw, native_fn_hook(), [node_name(s, ty_decl(tt, t))]) != "" { return ty_unknown(); }
+        types.push(t);
+    }
+    let u = ty_union(lw.inf.p.tt, types);
+    return if ty_is_union(lw.inf.p.tt, u) { u } else { ty_unknown() };
+}
+
+/// `v` of type `from` as a value of type `to`: wrapped in `to`'s record when
+/// `to` is a union `from` is a member of; `v` itself otherwise.
+pub fn as_member_of(lw: Lowerer, v: u32, from: i64, to: i64, n: i64) -> u32 {
+    let tt = lw.inf.p.tt;
+    if !ty_is_union(tt, to) || from == to { return v; }
+    let members = ty_args(tt, to);
+    var tag = 0;
+    while tag < members.len() && members[tag] != from { tag = tag + 1; }
+    if tag == members.len() { return unsupported(lw, n); }
+    let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+    let t = emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, tag)], n);
+    return emit(lw, op_construct_aggregate(), 0, layout_of(lw.ls, to), [t, v], n);
+}
+
+/// Argument `v` (of type `t`) of an engine operation: the member value of a
+/// union, which the engine takes as the value it is.
+[StandIn("ir.engine_union_arg", "an engine operation is called with typed arguments, a union passed as its tagged record", "the engine takes any value, so a union's member value is passed in place of the record", "F6")]
+pub fn engine_arg(lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {
+    if !ty_is_union(lw.inf.p.tt, t) { return v; }
+    return emit(lw, op_extract_field(), 1, layout_unknown(lw.ls), [v], n);
+}
+
+/// What method `name` returns on a value of union `u`: the union of what each
+/// member's method returns; unknown when `u` is no union or a member lacks it.
+pub fn union_method_return(lw: Lowerer, u: i64, name: str) -> i64 {
+    let p = lw.inf.p;
+    if !ty_is_union(p.tt, u) { return ty_unknown(); }
+    var rets: List<i64> = [];
+    for mt in ty_args(p.tt, u) {
+        guard some m = prog_member(p, mt, name) else { return ty_unknown(); }
+        rets.push(prog_member_type(p, m));
+    }
+    return ty_union(p.tt, rets);
+}
+
+/// `recv.name(args)` where `recv` is a value of union `u`: one arm per
+/// member, chosen by the tag.
+pub fn union_member_call(lw: Lowerer, recv: u32, u: i64, name: str, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
+    let p = lw.inf.p;
+    let members = ty_args(p.tt, u);
+    var rets: List<i64> = [];
+    for mt in members {
+        guard some m = prog_member(p, mt, name) else { return unsupported(lw, n); }
+        rets.push(prog_member_type(p, m));
+    }
+    let rt = ty_union(p.tt, rets);
+    let out = if ty_is_unknown(p.tt, rt) { phy } else { layout_of(lw.ls, rt) };
+    let int_phy = layout_of(lw.ls, prog_slot_type(p, literal_slot(nk_int())));
+    let bool_phy = layout_of(lw.ls, prog_slot_type(p, literal_slot(nk_bool())));
+    let tag = emit(lw, op_extract_field(), 0, int_phy, [recv], n);
+    let join = ir_add_block(lw.f);
+    let result = ir_add_param(lw.f, join, out);
+    var i = 0;
+    while i < members.len() {
+        let hit = ir_add_block(lw.f);
+        let next = ir_add_block(lw.f);
+        let want = emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, i)], n);
+        // CmpPred 0 is `==`.
+        emit_void(lw, op_cond_br(), 0, [emit(lw, op_cmp(), 0, bool_phy, [tag, want], n), hit, 0, next, 0], n);
+        switch_to(lw, hit);
+        let value = emit(lw, op_extract_field(), 1, layout_of(lw.ls, members[i]), [recv], n);
+        let r = member_call(lw, value, members[i], name, arg_nodes, layout_of(lw.ls, rets[i]), n);
+        jump_to(lw, join, [as_member_of(lw, r, rets[i], rt, n)], n);
+        switch_to(lw, next);
+        i = i + 1;
+    }
+    // The tag is always one of the members.
+    emit_void(lw, op_unreachable(), 0, [], n);
+    switch_to(lw, join);
+    return result;
+}

@@ -2,7 +2,7 @@
 // FILE: selfhost/vm/pilc_writer.pilot
 // Milestone 55.1: Self-Hosted `.pilc` v3 Binary Container & Debug Table Writer
 // Formats `PIL3` magic headers, version 3 metadata, SSO (`<=14B`) + heap (`>14B`)
-// constant pool descriptors, 32-bit instruction streams, and PC-to-ByteSpan /
+// constant pool descriptors, 64-bit instruction streams, and PC-to-ByteSpan /
 // register-to-symbol debug manifests in pure Pilot.
 // ============================================================================
 
@@ -22,7 +22,7 @@ pub pure fn pilc_v3_magic() -> str {
 }
 
 pub pure fn pilc_v3_version() -> i64 {
-    return 4;
+    return 5;
 }
 
 // Computes the exact serialized byte size of a `.pilc` v3 binary image.
@@ -35,7 +35,7 @@ pub pure fn compute_pilc_v3_byte_size(
 ) -> i64 {
     let header_and_counts = 4 + 4 + 4 + 4 + 4;
     let const_bytes = const_count * 16;
-    let code_bytes = instruction_count * 4;
+    let code_bytes = instruction_count * 8;
     let debug_bytes = (debug_span_count * 8) + (debug_reg_count * 12);
     return header_and_counts + const_bytes + heap_str_bytes + code_bytes + debug_bytes;
 }
@@ -184,7 +184,7 @@ pub fn pilc_serialize_state_hex(st: i64) -> str {
     var pc = 0;
     while pc < icount {
         let word = (__engine("map_get", st, "ins_" + pc) ?? 0);
-        code_hex = code_hex + pilc_u32_le_hex(word);
+        code_hex = code_hex + pilc_u64_le_hex(word);
         pc = pc + 1;
     }
 

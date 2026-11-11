@@ -10,6 +10,7 @@
 //   int <index> <value>
 //   str <index> "<escaped text>"
 //   intrinsic <index> <engine operation>
+//   global <index> "<name>" <layout>
 //   fn <index> "<name>" -> <return layout> {
 //     b<id>(v<n>:<layout>, ..):
 //       [v<n> =] <opcode>[.<subop>] <operands> :<layout> !<source offset>
@@ -99,6 +100,11 @@ pub fn print_ir_module(m: IrModule) -> str {
     while i < m.strings.len { out = out + f"str {i} " + quote_text(m.strings[i]) + "\n"; i = i + 1; }
     i = 0;
     while i < m.intrinsics.len { out = out + f"intrinsic {i} {m.intrinsics[i]}\n"; i = i + 1; }
+    i = 0;
+    while i < m.globals.len {
+        out = out + f"global {i} " + quote_text(m.globals[i].name) + f" {m.globals[i].physics.layout_id}\n";
+        i = i + 1;
+    }
     i = 0;
     while i < m.functions.len {
         let f = m.functions[i];
@@ -254,6 +260,10 @@ fn parse_header(r: Reader, w: List<str>) {
         r.m.strings.push(unquote(w[2]));
     } else if tag == "intrinsic" && w.len() == 3 {
         r.m.intrinsics.push(w[2]);
+    } else if tag == "global" && w.len() == 4 {
+        let l = number(r, w[3], "");
+        if l < 0 || l >= r.m.layouts.len { let _ = fail(r, f"global `{w[2]}` names layout {l}, which is not declared"); return; }
+        r.m.globals.push(IrGlobal { name: unquote(w[2]), physics: r.m.layouts[l].physics });
     } else {
         let _ = fail(r, f"unexpected `{tag}` line");
     }

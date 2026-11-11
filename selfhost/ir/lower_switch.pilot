@@ -23,6 +23,7 @@ use selfhost.ir.lower.*;
 use selfhost.ir.lower_members.*;
 use selfhost.ir.lower_try.*;
 use selfhost.ir.lower_variant.*;
+use selfhost.ir.lower_defer.*;
 
 pub fn lower_switch(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
@@ -36,12 +37,14 @@ pub fn lower_switch(lw: Lowerer, n: i64) -> u32 {
     // `break` in an arm leaves the switch with no value.
     let leave = ir_add_block(lw.f);
     lw.loop_exits.push(leave);
+    lw.exit_depths.push(scope_depth(lw));
     var i = 1;
     while i < ch.len() {
         let arm = ch[i];
         let next = ir_add_block(lw.f);
         if !match_pattern(lw, lhs(s, arm), subject, subject_t, next) {
             let _ = lw.loop_exits.pop();
+            let _ = lw.exit_depths.pop();
             return unsupported(lw, arm);
         }
         let guard = arm_guard(s, arm);
@@ -56,6 +59,7 @@ pub fn lower_switch(lw: Lowerer, n: i64) -> u32 {
         i = i + 1;
     }
     let _ = lw.loop_exits.pop();
+    let _ = lw.exit_depths.pop();
     jump_to(lw, join, [emit(lw, op_undef(), 0, phy, [], n)], n);
     switch_to(lw, leave);
     jump_to(lw, join, [emit(lw, op_undef(), 0, phy, [], n)], n);
