@@ -330,7 +330,7 @@ pub struct JsDialect : ISourceDialect {
         if e == "" { return none; }
         return f"{wrap_fn(p)}({p.bit_width}, {e})";
     }
-    pub fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? {
+    pub fn compare(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? {
         // `==` on values that are not numbers or booleans compares as the
         // seed does: lists element by element, other handles by identity.
         if pred <= 1 && !(is_int(p) || is_float(p) || is_bool(p)) {

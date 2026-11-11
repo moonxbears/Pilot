@@ -9,14 +9,17 @@
 //! goes to the one non-struct type (`ext` block) declaring `method`, else the
 //! seed's builtin method of that name, else a free function
 //! `method(recv, args)`; with none of these the call stops the program with
-//! an error naming the method. A field of the receiver's struct that is not
+//! an error naming the method. A receiver whose static type is an interface
+//! declaring `method` is only ever a record of a struct implementing it, so
+//! its call never goes to a free function: a record that matches no struct
+//! stops the program. A field of the receiver's struct that is not
 //! also a method is called as the function it holds.
 
 use crate::instruction::Opcode;
 use crate::lower_native::native;
 use crate::BytecodeCompiler;
 use pilot_parser::NativeKind;
-use pilot_ast::{AstArena, NodeId};
+use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_rt::PilotVal;
 
 impl BytecodeCompiler {
@@ -27,6 +30,32 @@ impl BytecodeCompiler {
             .iter()
             .find(|(o, _)| o == owner)
             .map(|&(_, is_static)| is_static)
+    }
+
+    /// Whether `owner` is an interface that declares `method`, itself or
+    /// through an interface it extends.
+    fn interface_declares(&self, arena: &AstArena, owner: &str, method: &str) -> bool {
+        let mut queue: Vec<NodeId> = self.decls_of(arena, owner, NodeKind::InterfaceDecl);
+        let mut seen = std::collections::HashSet::new();
+        while let Some(d) = queue.pop() {
+            if !seen.insert(d) {
+                continue;
+            }
+            let body = NodeId(arena.node(d).rhs);
+            let declared = Self::type_members(arena, body)
+                .into_iter()
+                .any(|m| Self::is_method_decl(arena, m) && Self::name(arena, arena.node(m).lhs) == method);
+            if declared {
+                return true;
+            }
+            for &(of, base) in &arena.base_types {
+                if of == d && !base.is_none() {
+                    let name = Self::name(arena, arena.node(base).lhs).to_string();
+                    queue.extend(self.decls_of(arena, &name, NodeKind::InterfaceDecl));
+                }
+            }
+        }
+        false
     }
 
     /// Calls `method` on the value in `r_recv`, whose static type (or, without
@@ -53,6 +82,7 @@ impl BytecodeCompiler {
         if self.declares(owner, method) == Some(false) || self.fn_entries.contains_key(&full) {
             return self.emit_user_call(full, method.to_string(), &regs);
         }
+        let via_interface = self.interface_declares(arena, owner, method);
         let instance_owners: Vec<String> = self
             .method_owners
             .get(method)
@@ -61,6 +91,9 @@ impl BytecodeCompiler {
         if instance_owners.is_empty() {
             if let Some(hook) = native(NativeKind::Method, method) {
                 return self.emit_intrinsic(hook, &regs);
+            }
+            if via_interface {
+                return self.emit_trap(format!("no struct implements `{owner}.{method}`"));
             }
             return self.emit_user_call(full, method.to_string(), &regs);
         }
@@ -76,12 +109,20 @@ impl BytecodeCompiler {
             );
         }
         records.sort();
-        self.emit_dynamic_dispatch(method, &records, others.first(), &regs)
+        self.emit_dynamic_dispatch(method, &records, others.first(), !via_interface, &regs)
     }
 
     /// Tests the receiver's struct against each of `records`, in order, then
-    /// falls back as the module documentation describes.
-    fn emit_dynamic_dispatch(&mut self, method: &str, records: &[String], other: Option<&String>, regs: &[u8]) -> u8 {
+    /// falls back as the module documentation describes; to a free function
+    /// only when `free_fallback`.
+    fn emit_dynamic_dispatch(
+        &mut self,
+        method: &str,
+        records: &[String],
+        other: Option<&String>,
+        free_fallback: bool,
+        regs: &[u8],
+    ) -> u8 {
         let dst = self.alloc_reg();
         let r_type = self.emit_intrinsic("record_type", &regs[..1]);
         let mark = self.next_reg;
@@ -102,7 +143,7 @@ impl BytecodeCompiler {
             self.emit_user_call(format!("{o}.{method}"), method.to_string(), regs)
         } else if let Some(hook) = native(NativeKind::Method, method) {
             self.emit_intrinsic(hook, regs)
-        } else if self.known_fns.contains_key(method) {
+        } else if free_fallback && self.known_fns.contains_key(method) {
             self.emit_user_call(method.to_string(), method.to_string(), regs)
         } else {
             self.emit_trap(format!("no method `{method}` for this value"))

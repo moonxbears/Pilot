@@ -164,7 +164,7 @@ pub struct LuaDialect : ISourceDialect {
         if p.bit_width >= 64 { return f"({e})"; }
         return f"pilot_wrap({e}, {p.bit_width}, {lua_bool(is_signed(p))})";
     }
-    pub fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {lua_cmp(pred)} {b})";
+    pub fn compare(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {lua_cmp(pred)} {b})";
     pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
         if is_bool(to) { return if is_bool(from) { v } else { f"({v} ~= 0)" }; }
         if is_float(to) {

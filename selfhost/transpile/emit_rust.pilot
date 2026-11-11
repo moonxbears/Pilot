@@ -155,7 +155,7 @@ pub struct RustDialect : ISourceDialect {
         if op == "rem" { return guarded + f"{x}.wrapping_rem({y})" + " } }"; }
         return none;
     }
-    pub fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {cmp_symbol(pred)} {b})";
+    pub fn compare(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {cmp_symbol(pred)} {b})";
     pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
         guard some t = self.type_name(to) else { return none; };
         if self.type_name(from) == none { return none; }

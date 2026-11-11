@@ -81,6 +81,10 @@ impl BytecodeCompiler {
     }
 
     /// Emits a call to `full`, falling back to `bare` when `full` is unknown.
+    /// A `full` that is declared but not compiled yet (an imported function
+    /// or method compiles on first use, or a dispatcher built after the
+    /// program) is called through a patch, never through a `bare` function
+    /// that happens to be compiled already.
     pub(crate) fn emit_user_call(&mut self, full: String, bare: String, args: &[u8]) -> u8 {
         self.check_exported(&full);
         if let Some((owner, _)) = full.rsplit_once('.') {
@@ -88,11 +92,12 @@ impl BytecodeCompiler {
         }
         self.stage_args(args);
         let dst = self.alloc_reg();
-        let entry = self
-            .fn_entries
-            .get(&full)
-            .or_else(|| self.fn_entries.get(&bare))
-            .map(|&(e, _)| e);
+        let pending = self.lazy_decls.contains_key(&full) || self.dispatchers.contains_key(&full);
+        let entry = match self.fn_entries.get(&full) {
+            Some(&(e, _)) => Some(e),
+            None if pending => None,
+            None => self.fn_entries.get(&bare).map(|&(e, _)| e),
+        };
         match entry {
             Some(e) => {
                 self.push_ins(Instruction::encode_wide(Opcode::Call, dst, e));

@@ -265,7 +265,7 @@ pub struct CFamilyDialect : ISourceDialect {
         if op == "rem" { return f"(({t})pilot_{s}rem({a}, {b}))"; }
         return none;
     }
-    pub fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {cmp_symbol(pred)} {b})";
+    pub fn compare(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {cmp_symbol(pred)} {b})";
     pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
         if is_bool(to) { return if is_bool(from) { v } else { f"(({v}) != 0)" }; }
         guard some t = self.type_name(to) else { return none; };

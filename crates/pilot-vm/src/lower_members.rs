@@ -158,7 +158,7 @@ impl BytecodeCompiler {
     }
 
     /// The declarations named `name` of node kind `kind`.
-    fn decls_of(&self, arena: &AstArena, name: &str, kind: NodeKind) -> Vec<NodeId> {
+    pub(crate) fn decls_of(&self, arena: &AstArena, name: &str, kind: NodeKind) -> Vec<NodeId> {
         let all = self.type_decls.get(name).map(Vec::as_slice).unwrap_or_default();
         all.iter().copied().filter(|&d| arena.node(d).node_kind() == kind).collect()
     }

@@ -108,7 +108,7 @@ pub interface ISourceDialect {
     fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str?;
     /// Comparison predicate `pred` (0 `==`, 1 `!=`, 2 `<`, 3 `<=`, 4 `>`,
     /// 5 `>=`) of operands of physics `p`.
-    fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str?;
+    fn compare(pred: i64, a: str, b: str, p: IrTypePhysics) -> str?;
     fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str?;
     fn call(name: str, args: List<str>) -> str;
     /// Engine operation `name` on `args` (physics `phys`; `literal[i]` when
@@ -653,7 +653,7 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
         let pa = f.value_physics[a[0]];
         let pb = f.value_physics[a[1]];
         let p = comparison_physics(pa, pb);
-        let e = d.compare_op(inst.subop, widened(sf, a[0], p), widened(sf, a[1], p), p) ?? unsupported(sf, "this comparison");
+        let e = d.compare(inst.subop, widened(sf, a[0], p), widened(sf, a[1], p), p) ?? unsupported(sf, "this comparison");
         line(sf, d.assign(f"v{r}", e));
         return;
     }
