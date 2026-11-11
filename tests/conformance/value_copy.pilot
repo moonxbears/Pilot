@@ -1,0 +1,29 @@
+// F7: a value type (`: IValue`, lattice 0b00) is copied when it is bound,
+// passed, returned or stored: changing the copy never changes the original.
+struct Point : IValue {
+    pub x: i64;
+    pub y: i64;
+}
+
+fn bump(p: Point) -> Point {
+    var q = p;
+    q.x = q.x + 100;
+    return q;
+}
+
+fn main() {
+    let a = Point { x: 1, y: 2 };
+    var b = a;
+    b.x = 10;
+    print(a.x);
+    let c = bump(a);
+    print(a.x);
+    print(c.x);
+    var ps: List<Point> = [];
+    ps.push(a);
+    b = ps[0];
+    b.y = 50;
+    print(ps[0].y);
+    print(a.y);
+    print(b.y);
+}

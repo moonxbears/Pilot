@@ -1,4 +1,4 @@
-// F6 benchmark: building a string by concatenation.
+// F6 benchmark: building a string by concatenation (s = s + x).
 // "0,1,...,19999," has 10*1 + 90*2 + 900*3 + 9000*4 + 10000*5 = 88,890
 // digits and 20,000 commas: 108,890 bytes.
 fn main() {

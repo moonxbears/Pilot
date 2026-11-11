@@ -1,0 +1,29 @@
+// Strings are immutable: building a longer string from one never changes
+// it or any other string, however the backend stores them (the C runtime
+// appends in place into a shared buffer when it can).
+fn main() {
+    var s = "ab";
+    s = s + "c";
+    let t = s + "d";
+    let u = s + "e";
+    print(t);
+    print(u);
+    print(s);
+    print(t + "z");
+    print(t);
+    var acc = "";
+    var keep: List<str> = [];
+    var i = 0;
+    while i < 5 {
+        acc = acc + f"{i}";
+        keep.push(acc);
+        i = i + 1;
+    }
+    print(keep[0] + "|" + keep[2] + "|" + keep[4]);
+    let p = acc.slice(0, 2);
+    print(p + "x");
+    print(acc + "!");
+    print(acc);
+    print(keep[1] + keep[1]);
+    print(keep[3].len());
+}

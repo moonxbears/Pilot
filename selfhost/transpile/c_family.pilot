@@ -394,7 +394,7 @@ pub struct CFamilyDialect : ISourceDialect {
             }
             out.push(f"typedef struct {t} " + "{ " + members + " } " + t + ";");
             let plist = if params.len() == 0 { "void" } else { joined(params) };
-            out.push(f"static pilot_val pilot_mk{l}({plist}) " + "{ " + f"{t} *r = ({t} *)pilot_alloc(sizeof({t})); r->h.layout = {l};" + sets + " return pilot_v_rec_val(&r->h); }");
+            out.push(f"static pilot_val pilot_mk{l}({plist}) " + "{ " + f"{t} *r = ({t} *)pilot_alloc_obj(sizeof({t})); r->h.layout = {l};" + sets + " return pilot_v_rec_val(&r->h); }");
             out.push(f"static pilot_val pilot_rget{l}(pilot_val v, int32_t i) " + "{ " + f"{t} *r = ({t} *)v.as.r; (void)r; switch (i) " + "{" + gets + " default: return PILOT_V_NULL; } }");
             out.push(f"static void pilot_rset{l}(pilot_val v, int32_t i, pilot_val x) " + "{ " + f"{t} *r = ({t} *)v.as.r; (void)r; (void)x; switch (i) " + "{" + puts + " default: return; } }");
             i = 0;
@@ -427,7 +427,6 @@ pub struct CFamilyDialect : ISourceDialect {
         }
         return v;
     }
-    [StandIn("emit.c_string_length", "a string is (ptr<u8>, usize)", "the C runtime keeps a string's length in 32 bits; a longer string stops with a runtime error", "F6")]
     pub fn text_value(lit: str) -> str => if .carries_dynamic() { f"PILOT_V_LIT({lit})" } else { lit };
 
     /// Scalar `v` of physics `p` as a dynamic value; a dynamic `v` as it is.

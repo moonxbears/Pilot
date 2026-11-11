@@ -10,13 +10,14 @@
  * stop the program on a zero divisor and wrap as the seed does.
  *
  * Dynamic values (`pilot_val`). A value whose physics is not a scalar (a string, a
- * list, a map, a record, a function value) or is unknown is one `pilot_val`: a tag,
- * a 32-bit length for strings, and a payload. Records and function values
- * are lists of their fields; a function value's field 0 is its index in the
- * module's function table, the captured values follow. This is the
- * registered stand-in `emit.c_dynamic_values`: the design lays records and
- * containers out by their physics. A string longer than 4 GiB stops with a
- * runtime error (stand-in `emit.c_string_length`).
+ * list, a map, a record, a function value) or is unknown is one 16-byte
+ * `pilot_val`: a tag, a string's length, and a payload. A struct value is a
+ * C struct the emitted module declares (see "Records"); other records and
+ * function values are lists of their fields, a function value's field 0
+ * being its index in the module's function table. This is the registered
+ * stand-in `emit.c_dynamic_values`: the design lays every value out by its
+ * physics and holds value types in place. A string's length is 64 bits (see
+ * "Strings").
  *
  * Memory is allocated and never freed; reference counting is F7.
  *
@@ -157,7 +158,8 @@ struct pilot_v_rec;
 
 typedef struct pilot_val {
     uint32_t tag;
-    /* The byte length of a string. */
+    /* A string's byte length; PILOT_V_LONG when it is longer than
+       PILOT_V_SHORT_MAX and its length is the 64-bit word before its bytes. */
     uint32_t n;
     union {
         int64_t i;
@@ -196,12 +198,84 @@ typedef struct pilot_v_map {
 typedef pilot_val (*pilot_v_fn)(int32_t argc, pilot_val *argv);
 
 #define PILOT_V_NULL ((pilot_val){0})
+/*
+ * Strings. A string is its bytes (followed by a 0 byte that is not part of
+ * it) and a 64-bit length. A length up to PILOT_V_SHORT_MAX is kept in the
+ * value itself; a longer one in the 8 bytes before the string's bytes, with
+ * `n` set to PILOT_V_LONG. Tests lower PILOT_V_SHORT_MAX to run the long
+ * form on small strings.
+ */
+#define PILOT_V_LONG UINT32_MAX
+#ifndef PILOT_V_SHORT_MAX
+#define PILOT_V_SHORT_MAX (UINT32_MAX - 1)
+#endif
+
+static inline size_t pilot_v_len(pilot_val v) {
+    return v.n != PILOT_V_LONG ? (size_t)v.n : (size_t)((const uint64_t *)(const void *)v.as.s)[-1];
+}
+
+static inline void *pilot_alloc(size_t size);
+
+/* A string of `len` bytes, uninitialised, for the caller to fill. */
+static inline pilot_val pilot_v_strbuf(size_t len, char **bytes) {
+    pilot_val v = PILOT_V_NULL;
+    v.tag = PILOT_V_STR;
+    char *s;
+    if (len <= PILOT_V_SHORT_MAX) {
+        s = (char *)pilot_alloc(len + 1);
+        v.n = (uint32_t)len;
+    } else {
+        uint64_t *base = (uint64_t *)pilot_alloc(sizeof(uint64_t) + len + 1);
+        base[0] = (uint64_t)len;
+        s = (char *)(base + 1);
+        v.n = PILOT_V_LONG;
+    }
+    s[len] = 0;
+    v.as.s = s;
+    *bytes = s;
+    return v;
+}
+
+/* Bytes `bytes[0..len)` as a string that shares them when its length fits
+   in the value; else a copy in the long form. */
+static inline pilot_val pilot_v_borrow(const char *bytes, size_t len) {
+    if (len <= PILOT_V_SHORT_MAX) {
+        pilot_val v = PILOT_V_NULL;
+        v.tag = PILOT_V_STR;
+        v.n = (uint32_t)len;
+        v.as.s = bytes;
+        return v;
+    }
+    char *s;
+    pilot_val v = pilot_v_strbuf(len, &s);
+    memcpy(s, bytes, len);
+    return v;
+}
 /* A string literal, without copying it. */
-#define PILOT_V_LIT(lit) ((pilot_val){.tag = PILOT_V_STR, .n = (uint32_t)(sizeof(lit) - 1), .as.s = (lit)})
+#define PILOT_V_LIT(lit) pilot_v_borrow((lit), sizeof(lit) - 1)
 
 static inline void *pilot_alloc(size_t size) {
     void *p = malloc(size ? size : 1);
     if (!p) pilot_trap("out of memory");
+    return p;
+}
+
+/*
+ * Small fixed-size objects (struct values): carved in 16-byte steps from
+ * 64 KiB chunks rather than one malloc each. They are never handed back
+ * one by one; F7's freeing gives this allocator per-size free lists.
+ */
+#define PILOT_OBJ_CHUNK ((size_t)64 * 1024)
+static char *pilot_obj_at, *pilot_obj_end;
+static inline void *pilot_alloc_obj(size_t size) {
+    size = (size + 15) & ~(size_t)15;
+    if (size > PILOT_OBJ_CHUNK / 4) return pilot_alloc(size);
+    if ((size_t)(pilot_obj_end - pilot_obj_at) < size) {
+        pilot_obj_at = (char *)pilot_alloc(PILOT_OBJ_CHUNK);
+        pilot_obj_end = pilot_obj_at + PILOT_OBJ_CHUNK;
+    }
+    void *p = pilot_obj_at;
+    pilot_obj_at += size;
     return p;
 }
 
@@ -231,14 +305,9 @@ static inline pilot_val pilot_v_float(double f) {
 }
 /* A string of `len` bytes copied from `bytes`. */
 static inline pilot_val pilot_v_str(const char *bytes, size_t len) {
-    if (len > UINT32_MAX) pilot_trap("a string longer than 4 GiB");
-    char *s = (char *)pilot_alloc(len + 1);
+    char *s;
+    pilot_val v = pilot_v_strbuf(len, &s);
     if (len) memcpy(s, bytes, len);
-    s[len] = 0;
-    pilot_val v = PILOT_V_NULL;
-    v.tag = PILOT_V_STR;
-    v.n = (uint32_t)len;
-    v.as.s = s;
     return v;
 }
 static inline pilot_val pilot_v_cstr(const char *s) { return pilot_v_str(s, strlen(s)); }
@@ -326,10 +395,10 @@ static void pilot_v_show_into(pilot_v_buf *b, pilot_val v);
 
 static inline int pilot_v_cmp_text(const void *a, const void *b) {
     const pilot_val *x = (const pilot_val *)a, *y = (const pilot_val *)b;
-    size_t n = x->n < y->n ? x->n : y->n;
-    int c = memcmp(x->as.s, y->as.s, n);
+    size_t xn = pilot_v_len(*x), yn = pilot_v_len(*y);
+    int c = memcmp(x->as.s, y->as.s, xn < yn ? xn : yn);
     if (c) return c;
-    return x->n < y->n ? -1 : x->n > y->n ? 1 : 0;
+    return xn < yn ? -1 : xn > yn ? 1 : 0;
 }
 
 static inline pilot_val pilot_v_show(pilot_val v) {
@@ -349,7 +418,7 @@ static void pilot_v_show_into(pilot_v_buf *b, pilot_val v) {
     case PILOT_V_INT: snprintf(tmp, sizeof tmp, "%" PRId64, v.as.i); pilot_v_buf_cstr(b, tmp); return;
     case PILOT_V_UINT: snprintf(tmp, sizeof tmp, "%" PRIu64, v.as.u); pilot_v_buf_cstr(b, tmp); return;
     case PILOT_V_FLOAT: pilot_v_buf_add(b, tmp, (size_t)pilot_fmt_f64(tmp, v.as.f)); return;
-    case PILOT_V_STR: pilot_v_buf_add(b, v.as.s, v.n); return;
+    case PILOT_V_STR: pilot_v_buf_add(b, v.as.s, pilot_v_len(v)); return;
     case PILOT_V_LIST:
         pilot_v_buf_cstr(b, "[");
         for (int64_t i = 0; i < v.as.l->len; i++) {
@@ -377,7 +446,7 @@ static void pilot_v_show_into(pilot_v_buf *b, pilot_val v) {
         for (int64_t i = 0; i < m->cap; i++) {
             if (m->slots[i].state != 1) continue;
             pilot_v_buf e = {0};
-            pilot_v_buf_add(&e, m->slots[i].key.as.s, m->slots[i].key.n);
+            pilot_v_buf_add(&e, m->slots[i].key.as.s, pilot_v_len(m->slots[i].key));
             pilot_v_buf_cstr(&e, ": ");
             pilot_v_show_into(&e, m->slots[i].val);
             parts[n++] = pilot_v_str(e.data ? e.data : "", e.len);
@@ -387,7 +456,7 @@ static void pilot_v_show_into(pilot_v_buf *b, pilot_val v) {
         pilot_v_buf_cstr(b, "{ ");
         for (int64_t i = 0; i < n; i++) {
             if (i) pilot_v_buf_cstr(b, ", ");
-            pilot_v_buf_add(b, parts[i].as.s, parts[i].n);
+            pilot_v_buf_add(b, parts[i].as.s, pilot_v_len(parts[i]));
         }
         pilot_v_buf_cstr(b, " }");
         free(parts);
@@ -398,22 +467,76 @@ static void pilot_v_show_into(pilot_v_buf *b, pilot_val v) {
 
 static inline void pilot_v_put(FILE *f, pilot_val v) {
     if (v.tag == PILOT_V_STR) {
-        fwrite(v.as.s, 1, v.n, f);
+        fwrite(v.as.s, 1, pilot_v_len(v), f);
         return;
     }
     pilot_val s = pilot_v_show(v);
-    fwrite(s.as.s, 1, s.n, f);
+    fwrite(s.as.s, 1, pilot_v_len(s), f);
 }
+
+/*
+ * Appending in place. Strings are immutable, so `a + b` may write `b` just
+ * past `a` when `a` ends where its buffer's written bytes end: every other
+ * string in that buffer is a prefix of `a`, and its bytes do not change.
+ * The runtime remembers the buffers concatenation made most recently (the
+ * largest are kept), with how far each is written and its capacity, and a
+ * buffer that runs out of room is replaced by one twice as large, so a loop
+ * of `s = s + x` copies O(n) bytes in all rather than O(n^2). Only strings
+ * whose length is kept in the value take part (a long string's length
+ * lives in its buffer, which the strings sharing it read). F7, which frees
+ * buffers, must forget a buffer here when it frees it.
+ */
+#ifndef PILOT_V_GROW_SLOTS
+#define PILOT_V_GROW_SLOTS 8
+#endif
+typedef struct pilot_v_grow {
+    const char *base;
+    size_t fill;
+    size_t cap;
+} pilot_v_grow;
+static pilot_v_grow pilot_v_grows[PILOT_V_GROW_SLOTS];
 
 static inline pilot_val pilot_v_concat(pilot_val a, pilot_val b) {
     if (a.tag != PILOT_V_STR) a = pilot_v_show(a);
     if (b.tag != PILOT_V_STR) b = pilot_v_show(b);
-    size_t n = (size_t)a.n + b.n;
-    if (n > UINT32_MAX) pilot_trap("a string longer than 4 GiB");
-    char *s = (char *)pilot_alloc(n + 1);
-    memcpy(s, a.as.s, a.n);
-    memcpy(s + a.n, b.as.s, b.n);
+    size_t an = pilot_v_len(a), bn = pilot_v_len(b), n = an + bn;
+    char *s;
+    if (a.n == PILOT_V_LONG || n > PILOT_V_SHORT_MAX) {
+        pilot_val v = pilot_v_strbuf(n, &s);
+        memcpy(s, a.as.s, an);
+        memcpy(s + an, b.as.s, bn);
+        return v;
+    }
+    /* The buffer `a` ends at the written end of, if any; else the slot of
+       the smallest buffer, which the new one replaces. */
+    int slot = 0;
+    bool grows = false;
+    for (int i = 0; i < PILOT_V_GROW_SLOTS; i++) {
+        pilot_v_grow *g = &pilot_v_grows[i];
+        if (g->base == a.as.s && g->fill == an) {
+            if (n <= g->cap) {
+                char *at = (char *)g->base;
+                memcpy(at + an, b.as.s, bn);
+                at[n] = 0;
+                g->fill = n;
+                pilot_val v = a;
+                v.n = (uint32_t)n;
+                return v;
+            }
+            slot = i;
+            grows = true;
+            break;
+        }
+        if (g->cap < pilot_v_grows[slot].cap) slot = i;
+    }
+    /* A string that keeps growing gets twice the room it needs. */
+    size_t cap = grows ? n * 2 : n;
+    if (cap > PILOT_V_SHORT_MAX) cap = PILOT_V_SHORT_MAX;
+    s = (char *)pilot_alloc(cap + 1);
+    memcpy(s, a.as.s, an);
+    memcpy(s + an, b.as.s, bn);
     s[n] = 0;
+    pilot_v_grows[slot] = (pilot_v_grow){s, n, cap};
     pilot_val v = PILOT_V_NULL;
     v.tag = PILOT_V_STR;
     v.n = (uint32_t)n;
@@ -559,7 +682,7 @@ static inline bool pilot_v_eq(pilot_val a, pilot_val b) {
     switch (a.tag) {
     case PILOT_V_NULL_TAG: return true;
     case PILOT_V_BOOL: return a.as.b == b.as.b;
-    case PILOT_V_STR: return a.n == b.n && memcmp(a.as.s, b.as.s, a.n) == 0;
+    case PILOT_V_STR: return pilot_v_len(a) == pilot_v_len(b) && memcmp(a.as.s, b.as.s, pilot_v_len(a)) == 0;
     case PILOT_V_LIST:
         if (a.as.l == b.as.l) return true;
         if (a.as.l->len != b.as.l->len) return false;
@@ -688,7 +811,7 @@ static inline pilot_val pilot_v_map_new(void) {
 static inline pilot_val pilot_v_key(pilot_val k) { return k.tag == PILOT_V_STR ? k : pilot_v_show(k); }
 static inline uint64_t pilot_v_hash(pilot_val k) {
     uint64_t h = 1469598103934665603u;
-    for (uint32_t i = 0; i < k.n; i++) {
+    for (size_t i = 0, n = pilot_v_len(k); i < n; i++) {
         h ^= (unsigned char)k.as.s[i];
         h *= 1099511628211u;
     }
@@ -705,7 +828,7 @@ static inline pilot_v_map_entry *pilot_v_map_slot(pilot_v_map *m, pilot_val key,
             if (!tomb) tomb = e;
             continue;
         }
-        if (e->hash == h && e->key.n == key.n && memcmp(e->key.as.s, key.as.s, key.n) == 0) return e;
+        if (e->hash == h && pilot_v_len(e->key) == pilot_v_len(key) && memcmp(e->key.as.s, key.as.s, pilot_v_len(key)) == 0) return e;
     }
 }
 static inline void pilot_v_map_grow(pilot_v_map *m) {
@@ -725,7 +848,7 @@ static inline pilot_v_map *pilot_v_need_map(pilot_val v, const char *what, pilot
     if (v.tag != PILOT_V_MAP) {
         char m[160];
         pilot_val key = pilot_v_key(k);
-        snprintf(m, sizeof m, "cannot %s `%.*s` %s %s", what, (int)key.n, key.as.s, what[0] == 'r' ? "from" : "on", pilot_v_kind(v));
+        snprintf(m, sizeof m, "cannot %s `%.*s` %s %s", what, (int)pilot_v_len(key), key.as.s, what[0] == 'r' ? "from" : "on", pilot_v_kind(v));
         pilot_trap(m);
     }
     return v.as.m;
@@ -765,9 +888,9 @@ static inline pilot_val pilot_to_str(pilot_val v) { return pilot_v_show(v); }
 static inline pilot_val pilot_map_get(pilot_val o, pilot_val k) {
     if (o.tag == PILOT_V_LIST) return o.as.l->items[pilot_v_index(o.as.l, k)];
     if (o.tag == PILOT_V_STR && pilot_v_is_intlike(k)) {
-        if (k.as.i >= 0 && k.as.i < (int64_t)o.n) return pilot_v_int((unsigned char)o.as.s[k.as.i]);
+        if (k.as.i >= 0 && k.as.i < (int64_t)pilot_v_len(o)) return pilot_v_int((unsigned char)o.as.s[k.as.i]);
         char m[128];
-        snprintf(m, sizeof m, "string index %" PRId64 " out of bounds for length %" PRIu32, k.as.i, o.n);
+        snprintf(m, sizeof m, "string index %" PRId64 " out of bounds for length %" PRIu64, k.as.i, (uint64_t)pilot_v_len(o));
         pilot_trap(m);
     }
     return pilot_v_map_lookup(pilot_v_need_map(o, "read", k), k);
@@ -808,7 +931,7 @@ static inline pilot_val pilot_list_pop(pilot_val l) {
     return p->items[--p->len];
 }
 static inline pilot_val pilot_str_len(pilot_val x) {
-    if (x.tag == PILOT_V_STR) return pilot_v_int(x.n);
+    if (x.tag == PILOT_V_STR) return pilot_v_int((int64_t)pilot_v_len(x));
     if (x.tag == PILOT_V_MAP) return pilot_v_int(x.as.m->count);
     return pilot_v_int(pilot_v_need_list(x, "take the length of")->len);
 }
@@ -843,8 +966,9 @@ static inline pilot_val pilot_list_remove_at(pilot_val l, pilot_val k) {
 }
 /* The first byte at or after `at` that starts a UTF-8 character. */
 static inline int64_t pilot_v_boundary(pilot_val s, int64_t at) {
-    int64_t u = at < 0 ? 0 : at > (int64_t)s.n ? (int64_t)s.n : at;
-    while (u < (int64_t)s.n && ((unsigned char)s.as.s[u] & 0xC0) == 0x80) u++;
+    int64_t len = (int64_t)pilot_v_len(s);
+    int64_t u = at < 0 ? 0 : at > len ? len : at;
+    while (u < len && ((unsigned char)s.as.s[u] & 0xC0) == 0x80) u++;
     return u;
 }
 static inline pilot_val pilot_str_slice(pilot_val v, pilot_val a, pilot_val b) {
@@ -859,17 +983,13 @@ static inline pilot_val pilot_str_slice(pilot_val v, pilot_val a, pilot_val b) {
     if (v.tag != PILOT_V_STR) pilot_v_type_error("slice", v, b);
     int64_t x = pilot_v_boundary(v, from), y = pilot_v_boundary(v, to);
     if (y < x) y = x;
-    pilot_val out = PILOT_V_NULL;
-    out.tag = PILOT_V_STR;
-    out.n = (uint32_t)(y - x);
-    out.as.s = v.as.s + x;
-    return out;
+    return pilot_v_borrow(v.as.s + x, (size_t)(y - x));
 }
 static inline pilot_val pilot_str_byte_at(pilot_val s, pilot_val k) {
     int64_t i = pilot_v_as_i64(k);
-    if (s.tag == PILOT_V_STR && i >= 0 && i < (int64_t)s.n) return pilot_v_int((unsigned char)s.as.s[i]);
+    if (s.tag == PILOT_V_STR && i >= 0 && i < (int64_t)pilot_v_len(s)) return pilot_v_int((unsigned char)s.as.s[i]);
     char m[128];
-    snprintf(m, sizeof m, "byte index %" PRId64 " out of bounds for length %" PRIu32, i, s.tag == PILOT_V_STR ? s.n : 0);
+    snprintf(m, sizeof m, "byte index %" PRId64 " out of bounds for length %" PRIu64, i, (uint64_t)(s.tag == PILOT_V_STR ? pilot_v_len(s) : 0));
     pilot_trap(m);
     return PILOT_V_NULL;
 }

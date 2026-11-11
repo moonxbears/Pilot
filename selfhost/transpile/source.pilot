@@ -186,6 +186,12 @@ pub struct SourceUnit : IObject {
     /// Global index -> its variable name.
     pub global_names: List<str>;
     pub out: List<str>;
+    /// Function index -> value id -> the layout the IR gave the value,
+    /// before `widen_mixed_kinds` made some of them dynamic. A field access
+    /// on a value whose layout is a record uses that record's typed reader
+    /// even when the value is carried as a dynamic one (a list element, an
+    /// engine operation's result).
+    pub declared: List<List<u32>>;
 }
 
 /// One function being emitted.
@@ -200,6 +206,8 @@ pub struct SourceFn : IObject {
     /// Value id -> whether a string literal is written for it.
     pub literal: List<bool>;
     pub depth: i64;
+    /// Value id -> the layout the IR gave it (SourceUnit.declared).
+    pub declared: List<u32>;
 }
 
 /// The name of the state variable of a function of several blocks.
@@ -209,11 +217,14 @@ pub pure fn helper_prefix() -> str => "pilot_";
 
 /// The whole module as text, one line per entry, ending in a newline.
 pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
-    let u = SourceUnit { m: m, d: d, fn_names: function_names(m, d), global_names: [], out: [] };
-    if d.widens_mixed_kinds() {
-        for f in m.functions { type_untyped_results(f); }
-        widen_mixed_kinds(m);
+    let u = SourceUnit { m: m, d: d, fn_names: function_names(m, d), global_names: [], out: [], declared: [] };
+    for f in m.functions {
+        type_untyped_results(f);
+        var ls: List<u32> = [];
+        for p in f.value_physics { ls.push(p.layout_id); }
+        u.declared.push(ls);
     }
+    if d.widens_mixed_kinds() { widen_mixed_kinds(m); }
     for line in d.prelude() { u.out.push(line); }
     var protos: List<str> = [];
     var fi = 0;
@@ -245,7 +256,7 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
     }
     fi = 0;
     while fi < m.functions.len() {
-        emit_function(u, m.functions[fi], u.fn_names[fi]);
+        emit_function(u, m.functions[fi], u.fn_names[fi], u.declared[fi]);
         fi = fi + 1;
     }
     if calls_values(m) {
@@ -379,7 +390,7 @@ fn require_type(sf: SourceFn, p: IrTypePhysics, what: str) {
     }
 }
 
-fn emit_function(u: SourceUnit, f: IrFunction, name: str) {
+fn emit_function(u: SourceUnit, f: IrFunction, name: str, declared: List<u32>) {
     let d = u.d;
     var inline: List<str> = [];
     var cell: List<str> = [];
@@ -389,7 +400,7 @@ fn emit_function(u: SourceUnit, f: IrFunction, name: str) {
         cell.push("");
         literal.push(false);
     }
-    let sf = SourceFn { u: u, f: f, inline: inline, cell: cell, literal: literal, depth: 0 };
+    let sf = SourceFn { u: u, f: f, inline: inline, cell: cell, literal: literal, depth: 0, declared: declared };
     type_untyped_results(f);
     let params = param_names(f);
     let pphys = param_phys(f);
@@ -693,6 +704,18 @@ fn record_fields(u: SourceUnit, layout: u32) -> List<IrTypePhysics>? {
     return fs;
 }
 
+/// The record layout value `v` holds: its own, else the one the IR gave
+/// it before widening (0 when neither is a record).
+fn record_layout(sf: SourceFn, v: u32) -> u32 {
+    let own = sf.f.value_physics[v].layout_id;
+    if some _r = ir_record_of(sf.u.m, own) { return own; }
+    if v < sf.declared.len() {
+        let was = sf.declared[v];
+        if some _r = ir_record_of(sf.u.m, was) { return was; }
+    }
+    return 0;
+}
+
 fn as_physics(sf: SourceFn, v: u32, to: IrTypePhysics) -> str =>
     sf.u.d.represent(use_of(sf, v), sf.f.value_physics[v], to);
 
@@ -930,7 +953,7 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
         return;
     }
     if op == op_extract_field() {
-        let rl = f.value_physics[a[0]].layout_id;
+        let rl = record_layout(sf, a[0]);
         if some fs = record_fields(sf.u, rl) {
             if inst.subop < fs.len() {
                 if some e = d.typed_field(rl as i64, as_physics(sf, a[0], dynamic_physics()), inst.subop) {
@@ -945,7 +968,7 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
     }
     if op == op_insert_field() {
         let rec = as_physics(sf, a[0], dynamic_physics());
-        let rl = f.value_physics[a[0]].layout_id;
+        let rl = record_layout(sf, a[0]);
         if some fs = record_fields(sf.u, rl) {
             if inst.subop < fs.len() {
                 if some st = d.typed_set_field(rl as i64, rec, inst.subop, as_physics(sf, a[1], fs[inst.subop])) {

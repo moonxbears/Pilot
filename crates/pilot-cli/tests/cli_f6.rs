@@ -220,3 +220,52 @@ fn the_records_benchmark_matches_its_c_reference() {
     assert!(cc.status.success(), "{}", text(&cc.stderr));
     assert_eq!(text(&run_binary(&c_bin, &[], "").stdout), want, "records (C)");
 }
+
+/// A string's length is 64 bits: one longer than the length a value holds
+/// itself (`PILOT_V_SHORT_MAX`, about 4 GiB) keeps it before its bytes.
+/// Lowering that limit to 4 bytes puts nearly every string of these
+/// programs in the long form; their output is unchanged.
+#[test]
+fn strings_past_the_short_length_limit_keep_their_length() {
+    let dir = scratch("long_strings");
+    for stem in [
+        "tests/conformance/collections",
+        "tests/conformance/containers",
+        "tests/conformance/json_rfc8259",
+        "tests/conformance/records_native",
+        "benchmarks/native/string_build",
+    ] {
+        let name = stem.rsplit('/').next().expect("file name");
+        let c = dir.join(format!("{name}.c"));
+        let out = pilot(&["build", &format!("{stem}.pilot"), "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
+        assert_eq!(out.status.code(), Some(0), "{stem}: {}", text(&out.stderr));
+        let bin = dir.join(name);
+        let cc = Command::new("cc")
+            .args(["-std=c11", "-O1", "-w", "-DPILOT_V_SHORT_MAX=4", "-I"])
+            .arg(root().join("runtime/c"))
+            .arg(&c)
+            .arg("-o")
+            .arg(&bin)
+            .arg("-lm")
+            .output()
+            .expect("run cc");
+        assert!(cc.status.success(), "{stem}: {}", text(&cc.stderr));
+        assert_eq!(text(&run_binary(&bin, &[], "").stdout), expected(stem), "{stem}");
+    }
+}
+
+/// A struct value read out of a list (`bodies[j]`, a dynamic value in C)
+/// has its fields read by its layout's typed readers, not looked up as
+/// dynamic fields.
+#[test]
+fn a_struct_read_from_a_list_uses_its_typed_fields() {
+    let dir = scratch("typed_reads");
+    let c = dir.join("records.c");
+    let out = pilot(&["build", "benchmarks/native/records.pilot", "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let src = std::fs::read_to_string(&c).expect("emitted C");
+    // The function bodies, without the per-layout helpers declared first.
+    let bodies: Vec<&str> = src.lines().filter(|l| !l.starts_with("static ") && !l.starts_with("typedef ")).collect();
+    assert!(bodies.iter().all(|l| !l.contains("pilot_v_field(")), "dynamic field reads remain");
+    assert!(bodies.iter().filter(|l| l.contains("pilot_get")).count() >= 4, "no typed field reads");
+}
