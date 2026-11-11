@@ -1,0 +1,380 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_try.pilot
+// F5: lowering of values-first failures to PilIR: implicit lifting, `none`,
+// postfix `?`, `try { .. } catch e { .. }`, `expr catch e => fallback`, `??`,
+// `some x = v` conditions and `guard`.
+// ==============================================================================
+// A type takes part through the try protocol its library binds
+// (`bind_try_protocol`: the success test, the unwrap operator and the
+// failure accessor, stdlib/core/syntax/try_catch.pilot) and through the
+// constructors it binds for lifting (`bind_lift`: the static member that
+// wraps a success value) and for the empty value (`bind_absent`). No type or
+// member name is written here: every one is read from those bindings.
+//
+// In PilIR a value of such a type is always its record. A plain value that
+// reaches a spot typed with such a type (a return, an argument, a typed
+// binding) is lifted through the bound constructor, and `none` there is the
+// bound empty value. Only where no type is known does `none` stay the
+// engine's null (stand-in `ir.absent_as_null`).
+//
+// A failing `?` leaves for the innermost `try` region's catch block, or
+// returns the failed value from the function. `catch e` binds `e` to the
+// failed value's failure accessor, called at the spot that failed, so each
+// spot uses its own type's accessor.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerTry;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.methods.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_members.*;
+use selfhost.ir.lower_switch.*;
+
+/// The bindings that name the protocol's members and constructors.
+pub pure fn try_protocol_hook() -> str => "bind_try_protocol";
+pub pure fn lift_hook() -> str => "bind_lift";
+pub pure fn absent_hook() -> str => "bind_absent";
+
+/// The try protocol's member names: the success test, the unwrap operator
+/// and the failure accessor; empty when the program binds none.
+fn protocol(lw: Lowerer) -> List<str> {
+    for row in lw.bindings {
+        if row.len() == 4 && row[0] == try_protocol_hook() { return [row[1], row[2], row[3]]; }
+    }
+    return [];
+}
+
+/// Whether type `t` takes part in the try protocol.
+pub fn has_protocol(lw: Lowerer, t: i64) -> bool {
+    let names = protocol(lw);
+    if names.len() == 0 || !ty_is_named(lw.inf.p.tt, t) { return false; }
+    return prog_member(lw.inf.p, t, names[0]) != none;
+}
+
+/// The static member of `t` that one of `hook`'s bindings names, or `none`.
+fn bound_ctor(lw: Lowerer, t: i64, hook: str) -> Member? {
+    if !ty_is_named(lw.inf.p.tt, t) { return none; }
+    for row in lw.bindings {
+        if row.len() != 2 || row[0] != hook { continue; }
+        if some m = prog_member(lw.inf.p, t, row[1]) {
+            if is_static_decl(lw.inf.p.s, m.decl) && decl_body(lw.inf.p.s, m.decl) >= 0 { return m; }
+        }
+    }
+    return none;
+}
+
+/// Calls static member `m` of `t` with the values `args`.
+fn call_static(lw: Lowerer, m: Member, t: i64, args: List<u32>, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let params = decl_params(s, m.decl);
+    var given: List<u32> = [];
+    var i = 0;
+    while i < args.len() {
+        given.push(if i < params.len() { coerce(lw, args[i], physics_of_type_node(lw, rhs(s, params[i])), n) } else { args[i] });
+        i = i + 1;
+    }
+    return emit(lw, op_call_direct(), function_index(lw, m.decl, t), layout_of(lw.ls, t), given, n);
+}
+
+/// A bare call `name(args..)` that names no function but a static member of
+/// the type expected at that spot: `ok(3)` where a `result<i64, str>` is
+/// expected is `result<i64, str>.ok(3)`. `none` for any other call.
+pub fn lower_target_call(lw: Lowerer, n: i64) -> u32? {
+    let s = lw.inf.p.s;
+    let ch = children(s, n);
+    let callee = ch[0];
+    if kind(s, callee) != nk_ident() || binding_index(lw, callee) >= 0 || resolve_fn(lw, callee) >= 0 { return none; }
+    if !ty_is_named(lw.inf.p.tt, lw.hint) { return none; }
+    let t = lw.hint;
+    guard some m = prog_member(lw.inf.p, t, node_name(s, callee)) else { return none; }
+    if !is_static_decl(s, m.decl) || decl_body(s, m.decl) < 0 { return none; }
+    let params = decl_params(s, m.decl);
+    if ch.len() - 1 != params.len() { return none; }
+    var args: List<u32> = [];
+    var i = 1;
+    while i < ch.len() {
+        if kind(s, ch[i]) == nk_call_arg() { return none; }
+        args.push(lower_hinted(lw, ch[i], prog_annot_type(lw.inf.p, rhs(s, params[i - 1]))));
+        i = i + 1;
+    }
+    return call_static(lw, m, t, args, n);
+}
+
+/// `v` (of type `src`) where a `dst` is expected: wrapped by `dst`'s lifting
+/// constructor when `dst` takes part in the try protocol and `src` is not
+/// already a `dst`; otherwise `v` itself.
+pub fn lift_to(lw: Lowerer, v: u32, src: i64, dst: i64, n: i64) -> u32 {
+    let p = lw.inf.p;
+    let tt = p.tt;
+    if v == ir_no_value() || !has_protocol(lw, dst) || ty_is_unknown(tt, src) || ty_is_param(tt, src) { return v; }
+    if prog_is_never(p, src) { return v; }
+    if ty_is_named(tt, src) && ty_decl(tt, src) == ty_decl(tt, dst) { return v; }
+    guard some m = bound_ctor(lw, dst, lift_hook()) else { return v; }
+    return call_static(lw, m, dst, [v], n);
+}
+
+/// `none` where a `t` is expected: `t`'s bound empty value, or `none` when
+/// `t` binds none.
+pub fn absent_of(lw: Lowerer, t: i64, n: i64) -> u32? {
+    guard some m = bound_ctor(lw, t, absent_hook()) else { return none; }
+    return call_static(lw, m, t, [], n);
+}
+
+/// Whether `v` (of type `t`) holds a success: the protocol's test, or for a
+/// value of no protocol type, that it is not the engine's null.
+fn success_test(lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {
+    if has_protocol(lw, t) {
+        return member_call(lw, v, t, protocol(lw)[0], [], bool_physics(lw), n);
+    }
+    let hook = bound(lw, absent_test_hook(), []);
+    if hook == "" { return unsupported(lw, n); }
+    let absent = emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), bool_physics(lw), [v], n);
+    let yes = emit(lw, op_const_bits(), 0, bool_physics(lw), [pool_int(lw, 1)], n);
+    return emit(lw, op_bit_xor(), 0, bool_physics(lw), [absent, yes], n);
+}
+
+/// The success value inside `v` (of type `t`); `v` itself for a value of no
+/// protocol type.
+fn unwrap(lw: Lowerer, v: u32, t: i64, phy: IrTypePhysics, n: i64) -> u32 =>
+    if has_protocol(lw, t) { member_call(lw, v, t, protocol(lw)[1], [], phy, n) } else { v };
+
+/// The failure accessor of type `t`, or `none`.
+fn failure_member(lw: Lowerer, t: i64) -> Member? {
+    let names = protocol(lw);
+    if !has_protocol(lw, t) || names[2] == "" { return none; }
+    return prog_member(lw.inf.p, t, names[2]);
+}
+
+/// What `catch e` binds for failed `v` of type `t`: its failure accessor's
+/// result, or `v` itself.
+fn failure_of(lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {
+    guard some m = failure_member(lw, t) else { return v; }
+    return member_call(lw, v, t, protocol(lw)[2], [], layout_of(lw.ls, prog_member_type(lw.inf.p, m)), n);
+}
+
+/// The type of `failure_of(v)` for `v` of type `t`.
+fn failure_type(lw: Lowerer, t: i64) -> i64 {
+    guard some m = failure_member(lw, t) else { return t; }
+    return prog_member_type(lw.inf.p, m);
+}
+
+/// Notes that the innermost region's catch receives a failure of type `t`.
+fn note_failure(lw: Lowerer, t: i64) {
+    let top = lw.try_types.len() - 1;
+    let ft = if lw.try_binds[top] { failure_type(lw, t) } else { t };
+    if lw.try_types[top] == -1 { lw.try_types[top] = ft; }
+    else if lw.try_types[top] != ft { lw.try_types[top] = ty_unknown(); }
+}
+
+/// Whether a value of type `t` can fail at all.
+fn can_fail(lw: Lowerer, t: i64) -> bool => has_protocol(lw, t) || ty_is_unknown(lw.inf.p.tt, t);
+
+/// Leaves with failed `v` of type `t`: to the innermost `try` region's catch
+/// block, or out of the function.
+fn fail_exit(lw: Lowerer, v: u32, t: i64, n: i64) {
+    let depth = lw.try_blocks.len();
+    if depth == 0 {
+        emit_void(lw, op_return(), 0, [coerce(lw, v, lw.f.ret_physics, n)], n);
+        return;
+    }
+    let e = if lw.try_binds[depth - 1] { failure_of(lw, v, t, n) } else { v };
+    note_failure(lw, t);
+    jump_to(lw, lw.try_blocks[depth - 1], [e], n);
+}
+
+/// Postfix `expr?`.
+pub fn lower_try_propagate(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let operand = lhs(s, n);
+    let t = type_of(lw.inf, operand);
+    let v = lower_expr(lw, operand);
+    if !can_fail(lw, t) { return v; }
+    let ok = success_test(lw, v, t, n);
+    let pass = ir_add_block(lw.f);
+    let fail = ir_add_block(lw.f);
+    emit_void(lw, op_cond_br(), 0, [ok, pass, 0, fail, 0], n);
+    switch_to(lw, fail);
+    fail_exit(lw, v, t, n);
+    switch_to(lw, pass);
+    return unwrap(lw, v, t, physics_of(lw, n), n);
+}
+
+/// Opens a `try` region for catch clause `clause`; failures in it reach the
+/// returned block, whose one parameter is the failure.
+fn open_region(lw: Lowerer, clause: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let block = ir_add_block(lw.f);
+    let _ = ir_add_param(lw.f, block, layout_unknown(lw.ls));
+    lw.try_blocks.push(block);
+    lw.try_binds.push(sym_text(s, lhs(s, clause)) != "");
+    lw.try_types.push(-1);
+    return block;
+}
+
+/// Closes the innermost region; returns the type its failures share, or
+/// the unknown type.
+fn close_region(lw: Lowerer) -> i64 {
+    lw.try_blocks.pop();
+    lw.try_binds.pop();
+    let t = lw.try_types.pop() ?? ty_unknown();
+    return if t < 0 { ty_unknown() } else { t };
+}
+
+/// Runs the body of catch clause `clause` in `block`, its name bound to the
+/// block's parameter.
+fn lower_handler(lw: Lowerer, clause: i64, block: u32, caught_type: i64, hint: i64) -> u32 {
+    switch_to(lw, block);
+    if lw.binding_of.has(key(clause)) {
+        let b = key(lw.binding_of.get(key(clause)));
+        lw.values.set(b, lw.f.blocks[block].params[0]);
+        if !ty_is_unknown(lw.inf.p.tt, caught_type) { lw.known_types.set(b, caught_type); }
+    }
+    return lower_hinted(lw, rhs(lw.inf.p.s, clause), hint);
+}
+
+/// `try { body } catch e { handler }`.
+pub fn lower_try_stmt(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let ch = children(s, n);
+    if ch.len() != 2 || kind(s, ch[1]) != nk_catch() { return unsupported(lw, n); }
+    let after = ir_add_block(lw.f);
+    let caught = open_region(lw, ch[1]);
+    let _ = lower_expr(lw, ch[0]);
+    let caught_type = close_region(lw);
+    jump_to(lw, after, [], n);
+    let _ = lower_handler(lw, ch[1], caught, caught_type, ty_unknown());
+    jump_to(lw, after, [], n);
+    switch_to(lw, after);
+    return unit_value(lw, n);
+}
+
+/// `expr catch e => fallback`: the success value of `expr`, or the fallback
+/// when `expr` failed or a `?` inside it did.
+pub fn lower_catch_recovery(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let expr = lhs(s, n);
+    let clause = rhs(s, n);
+    if clause < 0 || kind(s, clause) != nk_catch() { return unsupported(lw, n); }
+    let phy = physics_of(lw, n);
+    let t = type_of(lw.inf, expr);
+    let caught = open_region(lw, clause);
+    let v = lower_expr(lw, expr);
+    let direct = can_fail(lw, t) && !ir_is_terminated(lw.f, lw.cur);
+    if direct { note_failure(lw, t); }
+    let caught_type = close_region(lw);
+    var ok_value = v;
+    if direct {
+        let ok = success_test(lw, v, t, n);
+        let pass = ir_add_block(lw.f);
+        let fail = ir_add_block(lw.f);
+        emit_void(lw, op_cond_br(), 0, [ok, pass, 0, fail, 0], n);
+        switch_to(lw, fail);
+        let e = if sym_text(s, lhs(s, clause)) != "" { failure_of(lw, v, t, n) } else { v };
+        jump_to(lw, caught, [e], n);
+        switch_to(lw, pass);
+        ok_value = unwrap(lw, v, t, phy, n);
+    }
+    let ok_end = lw.cur;
+    let fb = lower_handler(lw, clause, caught, caught_type, type_of(lw.inf, n));
+    let fb_end = lw.cur;
+    // The arms join at one value; when the fallback's value is of another
+    // kind than the success value, the join holds either.
+    let join_phy = join_physics(lw, phy, fb);
+    let join = ir_add_block(lw.f);
+    let result = ir_add_param(lw.f, join, join_phy);
+    switch_to(lw, ok_end);
+    jump_to(lw, join, [coerce(lw, ok_value, join_phy, n)], n);
+    switch_to(lw, fb_end);
+    jump_to(lw, join, [coerce(lw, fb, join_phy, n)], n);
+    switch_to(lw, join);
+    return result;
+}
+
+/// The physics two arms of physics `phy` and of value `other` join at: `phy`
+/// when `other` is of it or converts to it as a number does, else the
+/// unknown layout.
+fn join_physics(lw: Lowerer, phy: IrTypePhysics, other: u32) -> IrTypePhysics {
+    if other == ir_no_value() || other >= lw.f.value_physics.len { return phy; }
+    let o = lw.f.value_physics[other];
+    if o.layout_id == phy.layout_id || !in_register(o) { return phy; }
+    let numeric = in_register(phy) && phy.bit_width > 1 && o.bit_width > 1
+        && (phy.reg_class == reg_class_simd_float()) == (o.reg_class == reg_class_simd_float());
+    return if numeric { phy } else { layout_unknown(lw.ls) };
+}
+
+/// `a ?? b` on a value of a protocol type: its success value, or `b`, which
+/// runs only when `a` failed. Returns `none` for any other `a`.
+pub fn lower_protocol_coalesce(lw: Lowerer, n: i64) -> u32? {
+    let s = lw.inf.p.s;
+    let t = type_of(lw.inf, lhs(s, n));
+    if !has_protocol(lw, t) { return none; }
+    let phy = physics_of(lw, n);
+    let a = lower_expr(lw, lhs(s, n));
+    let ok = success_test(lw, a, t, n);
+    let pass = ir_add_block(lw.f);
+    let fallback = ir_add_block(lw.f);
+    let join = ir_add_block(lw.f);
+    let result = ir_add_param(lw.f, join, phy);
+    emit_void(lw, op_cond_br(), 0, [ok, pass, 0, fallback, 0], n);
+    switch_to(lw, pass);
+    jump_to(lw, join, [coerce(lw, unwrap(lw, a, t, phy, n), phy, n)], n);
+    switch_to(lw, fallback);
+    let b = lower_hinted(lw, rhs(s, n), type_of(lw.inf, n));
+    jump_to(lw, join, [coerce(lw, b, phy, n)], n);
+    switch_to(lw, join);
+    return result;
+}
+
+/// The success test of `some x = v` or `some v`. A bound name gets a stack
+/// slot holding the success value, stored only on success, so it can be
+/// read in any block the test leads to.
+fn some_test(lw: Lowerer, operand: i64, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let binds = kind(s, operand) == nk_assign() && kind(s, lhs(s, operand)) == nk_ident();
+    let value_node = if binds { rhs(s, operand) } else { operand };
+    let t = type_of(lw.inf, value_node);
+    let v = lower_expr(lw, value_node);
+    let ok = success_test(lw, v, t, n);
+    if !binds { return ok; }
+    let target = lhs(s, operand);
+    if !lw.binding_of.has(key(target)) { return unsupported(lw, n); }
+    let bi = lw.binding_of.get(key(target));
+    let phy = layout_of(lw.ls, binding_type(lw.inf, bi));
+    let slot = emit(lw, op_stack_slot(), 0, phy, [], n);
+    let store = ir_add_block(lw.f);
+    let join = ir_add_block(lw.f);
+    let out = ir_add_param(lw.f, join, bool_physics(lw));
+    emit_void(lw, op_cond_br(), 0, [ok, store, 0, join, 1, ok], n);
+    switch_to(lw, store);
+    emit_void(lw, op_store(), 0, [slot, coerce(lw, unwrap(lw, v, t, phy, n), phy, n)], n);
+    jump_to(lw, join, [ok], n);
+    switch_to(lw, join);
+    lw.slots.set(key(bi), slot);
+    return out;
+}
+
+/// `some x = v` / `some v` as a value: whether `v` holds a success.
+pub fn lower_some(lw: Lowerer, n: i64) -> u32 => some_test(lw, lhs(lw.inf.p.s, n), n);
+
+/// `guard cond else { .. }` and `guard some x = v else { .. }`: the else
+/// block runs when the test fails and must leave; a binding stays in scope.
+pub fn lower_guard(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let cond = lhs(s, n);
+    let is_some = (flags(s, n) & 1) != 0;
+    let ok = if is_some { some_test(lw, cond, n) } else { lower_expr(lw, cond) };
+    let pass = ir_add_block(lw.f);
+    let fail = ir_add_block(lw.f);
+    emit_void(lw, op_cond_br(), 0, [ok, pass, 0, fail, 0], n);
+    switch_to(lw, fail);
+    let _ = lower_expr(lw, rhs(s, n));
+    // An else block that does not leave falls through, as on the seed.
+    jump_to(lw, pass, [], n);
+    switch_to(lw, pass);
+    return unit_value(lw, n);
+}

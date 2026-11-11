@@ -26,6 +26,8 @@ use selfhost.ir.model.*;
 use selfhost.ir.layouts.*;
 use selfhost.ir.lower_members.*;
 use selfhost.ir.lower_switch.*;
+use selfhost.ir.lower_try.*;
+use selfhost.ir.lower_variant.*;
 
 /// The state of one lowering run.
 pub struct Lowerer : IObject {
@@ -72,6 +74,16 @@ pub struct Lowerer : IObject {
     pub hint: i64;
     /// The declared return type of the function being lowered.
     pub ret_type: i64;
+    /// Innermost `try` region last: the block its failures go to, and
+    /// whether its catch clause binds a name.
+    pub try_blocks: List<u32>;
+    pub try_binds: List<bool>;
+    /// The type of the failures each region's catch receives: -1 before
+    /// the first, the unknown type once two differ.
+    pub try_types: List<i64>;
+    /// Binding index -> the type the lowering knows for a binding the
+    /// checker gives none (a `catch e` whose failures share one type).
+    pub known_types: Map<str, i64>;
 }
 
 /// Lowers `n` expecting type `t` (for target-typed variants).
@@ -80,7 +92,8 @@ pub fn lower_hinted(lw: Lowerer, n: i64, t: i64) -> u32 {
     lw.hint = t;
     let v = lower_expr(lw, n);
     lw.hint = outer;
-    return v;
+    // A plain value where a failure-capable type is expected is lifted.
+    return lift_to(lw, v, type_of(lw.inf, n), t, n);
 }
 
 pub fn key(n: i64) -> str => f"{n}";
@@ -170,6 +183,7 @@ pub fn lower_program(inf: Infer) -> IrModule {
         f: ir_function_new("", ir_physics_new(0, 0, 0, 0, 0)), cur: 0,
         values: Map<str, i64>(), slots: Map<str, i64>(), loop_heads: [], loop_exits: [],
         int_pool: Map<str, i64>(), str_pool: Map<str, i64>(), self_value: ir_no_value(), self_type: ty_unknown(), hint: ty_unknown(), ret_type: ty_unknown(),
+        try_blocks: [], try_binds: [], try_types: [], known_types: Map<str, i64>(),
     };
     let mains = nl_get(p.fns, "main");
     if mains.len() == 0 {
@@ -237,6 +251,10 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
     lw.slots = Map<str, i64>();
     lw.loop_heads = [];
     lw.loop_exits = [];
+    lw.try_blocks = [];
+    lw.try_binds = [];
+    lw.try_types = [];
+    lw.known_types = Map<str, i64>();
     lw.cur = ir_add_block(f);
     lw.self_value = ir_no_value();
     if ty_is_named(lw.inf.p.tt, lw.queue_self[idx]) {
@@ -262,7 +280,8 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
         let _ = seam("ir.lower_construct", f"`{node_name(s, decl)}` has no body to lower");
         return;
     }
-    let v = lower_expr(lw, body);
+    // `=> expr` is the returned value, so it is lowered against the return type.
+    let v = if kind(s, body) == nk_block() { lower_expr(lw, body) } else { lower_hinted(lw, body, lw.ret_type) };
     if !ir_is_terminated(f, lw.cur) {
         // `=> expr` and a function with a declared return type return the
         // body's value; a block body without one returns nothing.
@@ -374,6 +393,11 @@ pub fn lower_expr(lw: Lowerer, n: i64) -> u32 {
     if k == nk_match() { return lower_switch(lw, n); }
     if k == nk_tuple() { return lower_tuple(lw, n); }
     if k == nk_none() { return lower_none(lw, n); }
+    if k == nk_coalesce() { return lower_coalesce(lw, n); }
+    if k == nk_try_propagate() { return lower_try_propagate(lw, n); }
+    if k == nk_catch_recovery() { return lower_catch_recovery(lw, n); }
+    if k == nk_try() { return lower_try_stmt(lw, n); }
+    if k == nk_guard() { return lower_guard(lw, n); }
     if k == nk_let() || k == nk_var() || k == nk_const() { return lower_binding(lw, n); }
     if k == nk_assign() { return lower_assign(lw, n); }
     if k == nk_return() { return lower_return(lw, n); }
@@ -411,6 +435,7 @@ pub fn lower_ident(lw: Lowerer, n: i64) -> u32 {
         if some tag = variant_tag(lw.inf.p, t, node_name(lw.inf.p.s, n)) {
             return emit(lw, op_const_bits(), 0, layout_of(lw.ls, t), [pool_int(lw, tag)], n);
         }
+        if some v = lower_variant_name(lw, n) { return v; }
     }
     if b < 0 { return unsupported(lw, n); }
     let k = key(b);
@@ -559,6 +584,7 @@ pub fn lower_unary(lw: Lowerer, n: i64) -> u32 {
     // UnaryExpr flags (crates/pilot-vm lower_expr.rs): 0 neg, 1 identity,
     // 4 bitwise not, 5 logical not.
     if op == 1 { return lower_expr(lw, lhs(s, n)); }
+    if op == unary_some() { return lower_some(lw, n); }
     if op != 0 && op != 4 && op != 5 { return unsupported(lw, n); }
     let x = lower_expr(lw, lhs(s, n));
     let phy = physics_of(lw, n);
@@ -567,8 +593,9 @@ pub fn lower_unary(lw: Lowerer, n: i64) -> u32 {
         return emit(lw, op_sub(), 0, phy, [zero, x], n);
     }
     if op == 5 {
-        // `!x` is `x == false`: a zero constant of the operand's 1-bit layout.
-        let f_val = emit(lw, op_const_bits(), 0, physics_of(lw, lhs(s, n)), [pool_int(lw, 0)], n);
+        // `!x` is `x == false`: a zero constant of the operand value's 1-bit
+        // layout (the checker may not know it, as inside a getter).
+        let f_val = emit(lw, op_const_bits(), 0, lw.f.value_physics[x], [pool_int(lw, 0)], n);
         return emit(lw, op_cmp(), 0, phy, [x, f_val], n);
     }
     let mask = emit(lw, op_const_bits(), 0, phy, [pool_int(lw, -1)], n);
@@ -601,6 +628,7 @@ pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
         let query = bound(lw, type_query_hook(), [node_name(s, callee)]);
         if query != "" { return lower_type_query(lw, n, query, ch[1]); }
     }
+    if some v = lower_variant_call(lw, n) { return v; }
     if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 {
         let as_type = type_receiver(lw.inf, callee);
         if ty_is_named(lw.inf.p.tt, as_type) && ch.len() == 2 && kind(s, ch[1]) == nk_map() {
@@ -618,6 +646,7 @@ pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
         if ty_is_named(lw.inf.p.tt, as_type) && called_fn(lw.inf, n) < 0 && !engine_built { return lower_construction(lw, n, as_type); }
     }
     if kind(s, callee) == nk_member() { return lower_method_call(lw, n); }
+    if some v = lower_target_call(lw, n) { return v; }
     var arg_nodes: List<i64> = [];
     i = 1;
     while i < ch.len() {

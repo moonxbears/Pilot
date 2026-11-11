@@ -21,6 +21,8 @@ use selfhost.ir.model.*;
 use selfhost.ir.layouts.*;
 use selfhost.ir.lower.*;
 use selfhost.ir.lower_members.*;
+use selfhost.ir.lower_try.*;
+use selfhost.ir.lower_variant.*;
 
 pub fn lower_switch(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
@@ -72,7 +74,7 @@ fn arm_value(lw: Lowerer, v: u32, phy: IrTypePhysics, n: i64) -> u32 {
 /// Emits the test of `pat` against `v` (of type `t`): on a mismatch control
 /// goes to `fail`; on a match it continues in the current block with the
 /// pattern's names bound. False when the pattern is not lowered yet.
-fn match_pattern(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
+pub fn match_pattern(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
     let s = lw.inf.p.s;
     if pat < 0 { return false; }
     let k = kind(s, pat);
@@ -98,6 +100,7 @@ fn match_pattern(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
         return true;
     }
     if k == nk_pat_variant() {
+        if some matched = variant_pattern(lw, pat, v, t, fail) { return matched; }
         if flags(s, pat) != 0 { return false; }
         guard some tag = variant_tag(lw.inf.p, t, last_segment(node_name(s, pat))) else { return false; }
         let c = emit(lw, op_const_bits(), 0, lw.f.value_physics[v], [pool_int(lw, tag)], pat);
@@ -135,7 +138,7 @@ fn test(lw: Lowerer, cond: u32, fail: u32, n: i64) {
     switch_to(lw, pass);
 }
 
-fn bool_physics(lw: Lowerer) -> IrTypePhysics => layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
+pub fn bool_physics(lw: Lowerer) -> IrTypePhysics => layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
 
 /// `Color.Blue` -> `Blue`.
 fn last_segment(name: str) -> str {
@@ -159,13 +162,18 @@ pub fn lower_tuple(lw: Lowerer, n: i64) -> u32 {
 /// The engine operation that tells whether a value is absent.
 pub pure fn absent_test_hook() -> str => "bind_absent_test";
 
-/// `none`: the absent value.
-[StandIn("ir.absent_as_null", "opt<T> is a tagged or niche-packed value whose tag says none or some", "none is the engine's null (`undef` in the IR) and some(x) is x itself, as on the seed", "F6")]
-pub fn lower_none(lw: Lowerer, n: i64) -> u32 => emit(lw, op_undef(), 0, physics_of(lw, n), [], n);
+/// `none`: the expected type's bound empty value; with no type expected,
+/// the absent value.
+[StandIn("ir.absent_as_null", "opt<T> is a tagged or niche-packed value whose tag says none or some", "where no type is expected, none is the engine's null (`undef` in the IR) and a `?`, `??` or `some` test on a value of unknown type treats null as absent, as on the seed", "F6")]
+pub fn lower_none(lw: Lowerer, n: i64) -> u32 {
+    if some v = absent_of(lw, lw.hint, n) { return v; }
+    return emit(lw, op_undef(), 0, physics_of(lw, n), [], n);
+}
 
 /// `a ?? b`: `a` unless it is none; `b` runs only when it is.
 pub fn lower_coalesce(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
+    if some v = lower_protocol_coalesce(lw, n) { return v; }
     let hook = bound(lw, absent_test_hook(), []);
     if hook == "" { return unsupported(lw, n); }
     let phy = physics_of(lw, n);

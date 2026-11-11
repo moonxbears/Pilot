@@ -16,6 +16,12 @@ comptime {
     // value is its `op ?`, otherwise `x` itself leaves as the failure. A
     // `catch e` clause binds `e` to the failed record's `failure()`.
     __engine("bind_try_protocol", nameof(is_success), "?", nameof(failure));
+    // Lifting: a plain value where a failure-capable type is expected is
+    // wrapped by that type's static `some` or `ok`; `none` there is its
+    // static `none`. Read by the PilIR lowerer (selfhost/ir/lower_try.pilot).
+    __engine("bind_lift", "some");
+    __engine("bind_lift", "ok");
+    __engine("bind_absent", "none");
 }
 
 pub syntax {

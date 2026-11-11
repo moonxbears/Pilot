@@ -22,6 +22,7 @@ use selfhost.check.methods.*;
 use selfhost.ir.model.*;
 use selfhost.ir.layouts.*;
 use selfhost.ir.lower.*;
+use selfhost.ir.lower_variant.*;
 
 /// Whether a value of physics `p` lives in a register.
 pub fn in_register(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.reg_class < reg_class_aggregate();
@@ -171,9 +172,12 @@ pub fn lower_member(lw: Lowerer, n: i64) -> u32 {
         if some tag = variant_tag(lw.inf.p, type_receiver(lw.inf, recv), sym_text(s, rhs(s, n))) {
             return emit(lw, op_const_bits(), 0, physics_of(lw, n), [pool_int(lw, tag)], n);
         }
+        if some v = lower_variant_name(lw, n) { return v; }
     }
-    let t = member_receiver_type(lw, n);
-    return property_read(lw, member_receiver(lw, n), t, sym_text(s, rhs(s, n)), n);
+    let t = if is_implied(lw, n) { lw.self_type } else { variant_value_type(lw, recv) };
+    let r = member_receiver(lw, n);
+    if some v = lower_variant_field(lw, r, t, sym_text(s, rhs(s, n)), n) { return v; }
+    return property_read(lw, r, t, sym_text(s, rhs(s, n)), n);
 }
 
 /// The name of named type `t`, or "".
@@ -285,7 +289,12 @@ pub fn value_type(lw: Lowerer, n: i64) -> i64 {
             if kind(s, m.decl) != nk_fn() { return prog_member_type(lw.inf.p, m); }
         }
     }
-    return type_of(lw.inf, n);
+    let t = type_of(lw.inf, n);
+    if ty_is_unknown(lw.inf.p.tt, t) && kind(s, n) == nk_ident() {
+        let b = binding_index(lw, n);
+        if b >= 0 && lw.known_types.has(key(b)) { return lw.known_types.get(key(b)); }
+    }
+    return t;
 }
 
 /// `x[i]`: the type's `op []`.

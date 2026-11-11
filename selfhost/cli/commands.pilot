@@ -244,6 +244,8 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/lower.pilot",
         "selfhost/ir/lower_members.pilot",
         "selfhost/ir/lower_switch.pilot",
+        "selfhost/ir/lower_try.pilot",
+        "selfhost/ir/lower_variant.pilot",
         "selfhost/ir/verify.pilot",
         "selfhost/ir/text.pilot",
         "selfhost/ir/interp.pilot",
@@ -253,10 +255,11 @@ pub fn cli_ir_files() -> List<str> {
 }
 
 /// The declarations `pilot ir` links with the program: the checker's, and the
-/// native function bindings the lowering reads.
+/// native function and try-protocol bindings the lowering reads.
 pub fn cli_ir_decls() -> List<str> {
     var out = cli_checker_decls();
     out.push("stdlib/core/builtins/native_calls.pilot");
+    out.push("stdlib/core/syntax/try_catch.pilot");
     return out;
 }
 

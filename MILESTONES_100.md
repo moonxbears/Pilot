@@ -63,11 +63,11 @@ Ground rules:
 
 | # | Milestone | Done when | Absorbs (spec text) |
 | :--- | :--- | :--- | :--- |
-| `M35` | Whole-program specialisation | Every generic instantiation and `comptime` parameter yields a concrete function; no dynamic dispatch remains on a benchmark hot path, shown in the printed IR | old `M81` (without profiling) |
+| `M35` | Whole-program specialisation | Every generic instantiation and `comptime` parameter yields a concrete function; no dynamic dispatch remains on a benchmark hot path, shown in the printed IR; the same whole-program analysis chooses packed or addressable storage for each collection (see Packed Representations below) | old `M81` (without profiling) |
 | `M36` | Perceus borrow inference and in-place reuse | Reference-count operations removed where a borrow is proven; `drop_reuse` recycles memory in place; leak count zero across the corpus | old `M31` |
 | `M37` | Arenas and the `noalloc` checker | `with arena` scopes, and `noalloc` functions rejected when any path allocates | old `M32` |
-| `M38` | Layout control | `[Layout(optimal)]` reordering; niche-packed `opt`; overlapping storage for `union`, `res` and payload enums; the `as view` family with alignment, remainder, valid-bit-pattern and padding rules; per-target scalar alignment | layout gaps in `selfhost/gate/ledger/wiring.pilot` |
-| `M39` | `.pchor` storage blueprints | AoS, SoA, AoSoA and hot/cold layouts chosen by a blueprint and applied as a real IR pass, with no domain-code change; measured speedup | `M24` (storage part), `M25` |
+| `M38` | Layout control | `[Layout(optimal)]` reordering; niche-packed `opt`; overlapping storage for `union`, `res` and payload enums; the `as view` family with alignment, remainder, valid-bit-pattern and padding rules; per-target scalar alignment; `[Layout(packed)]` and packed collections with element and word views (see Packed Representations below) | layout gaps in `selfhost/gate/ledger/wiring.pilot` |
+| `M39` | `.pchor` storage blueprints | AoS, SoA, AoSoA, hot/cold, bit-packed and word-packed layouts chosen by a blueprint and applied as a real IR pass, with no domain-code change; the tags of `opt`, `res` and payload enums in SoA become bitmap or tag columns; measured speedup | `M24` (storage part), `M25` |
 | `M40` | Pipeline fusion and `each` vectorisation | Chained stream operations compile to one loop with no intermediate allocation | `M23` |
 | `M41` | Portable SIMD (`T@N`) | `simd<T, N>` lowers to vector instructions on x86-64 and AArch64 | old `M34` |
 | `M42` | Optimising LLVM backend | `PilIR` lowers to LLVM IR with full optimisation; C11 remains the bootstrap backend | old `M33` |
@@ -84,6 +84,63 @@ Ground rules:
 | `M48` | Minimal packages | `pkg.pilot` manifest with local and git dependencies and a lockfile | old `M41` (minimal part) |
 | `M49` | Edition 1.0 freeze, `pilot doctor`, onboarding | Language reference frozen; friendly guidance for the four learning tiers | old `M49`, `M28` (part) |
 | `M50` | **PILOT 1.0 RELEASE** | The three proofs pass (below) and the flagship demo runs | old `M50` |
+
+### Packed Representations (design, 2026-11-10; delivered by `M35`, `M38`, `M39`)
+
+A type declares facts about itself: its width in bits (`[Bits]`) and its valid values. A **collection** of that type chooses how to store many of them. Code keeps writing `xs[i]`, `xs[i] = v` and `for x in xs`; only the storage changes.
+
+**Addressing.** A `k`-bit element `i` starts at bit `i * k`: word `(i * k) >> 6`, offset `(i * k) & 63`. For `k = 1` that is word `i >> 6`, bit `i & 63`. A read is a shift and a mask; a write is a read-modify-write of the word.
+
+**Representations:**
+
+| Representation | Use it when | Costs |
+| :--- | :--- | :--- |
+| Addressable (one byte or more per element; the default) | Code takes element references or `slice`s; elements go to foreign code one by one; several threads write single elements; collections under about 64 elements | Up to 8× the memory of 1-bit packing |
+| Bit- or field-packed (values may cross a word boundary) | Large collections, bulk scans and bitwise work, memory-bound loops, values needing few bits, one writer | 2–3 extra instructions per single-element access; no element references; a straddling value needs two word loads |
+| Word-aligned packing (`⌊64 / k⌋` values per word, none crossing) | As above, with frequent random access to widths that do not divide 64 (3, 5, 21 bits) | A few spare bits per word |
+| Columnar with bitmaps (SoA; the Apache Arrow layout) | Tags of `opt`, `res` and payload enums in SoA: presence bitmap plus value columns | Rows are split across columns |
+| Sparse and run containers (Roaring-style) | Mostly-empty or run-heavy bitmaps | Library feature after 1.0, not a compiler layout |
+
+**Packing unit: bytes or exact bits.** A packed collection stores each element in a unit chosen from the element's valid range:
+- **Byte narrowing** rounds the needed width up to 8, 16 or 32 bits (a `u16` whose values fit in 0–200 is stored as a `u8`). Access needs no shift or mask, values never straddle, and SIMD widens on load in one instruction.
+- **Exact bits** store exactly the needed width (values 0–127 in 7 bits). Densest, at a shift and mask per access.
+
+For 1,000,000 values in 0–127 held as `u16` (2,000,000 bytes): byte-narrowed to `u8` is 1,000,000 bytes; word-aligned 7-bit (9 per word) 888,896 bytes; exact 7-bit 875,000 bytes. Going from 8 bits to 7 saves only a further 12.5%. Starting rule of thumb, to be replaced by a cost model calibrated by the `M43` benchmarks:
+
+| Bits needed | Default unit | Why |
+| :--- | :--- | :--- |
+| 1–4 | Exact bits | 2× to 8× smaller than a byte |
+| 5–8 | One byte | Bit packing saves at most 37.5%, at a cost on every access |
+| 9–16 | Two bytes | Same reasoning |
+| 17–32 | Four bytes; exact bits when the loop is memory-bound | A 21-bit `c32`, three per 64-bit word, saves a third |
+| Odd widths | Byte-aligned groups (two 12-bit values in 3 bytes) | Avoids straddling |
+
+Memory-bound bulk loops favour exact bits; random access favours bytes. A blueprint or `[Layout(..)]` attribute can fix the unit.
+
+**Types.** The element type never changes: its bit patterns mean the same values, and a packed read yields an ordinary `T`. Inside packed storage only the bits that carry information are kept (narrowed on write, widened on read, sign-extended for signed types), which is lossless for every valid value. The new types are containers and views, defined in `stdlib/core` on `[Bits]` and the lattice with no engine change:
+
+| Type | Lattice | Role |
+| :--- | :--- | :--- |
+| `BitLens<T>` | `0b01` | Borrowed view over packed storage: indexing copies, assignment is a read-modify-write, iteration works; never hands out element references |
+| `PackedBuffer<T>` | `0b10` | Owns the packed words; reference-counted like any owned buffer; its layout includes the packing unit |
+| `slice<u64>` | existing | The word view |
+
+Everyday code keeps the collection type it wrote (`List<bool>`): the representation is a compile-time property of the collection, inferred by `M35` or set by a blueprint or attribute, so indexing, assignment and loops do not change when it does. Code that needs element references asks for `slice<T>`, which forces the addressable form; slicing a packed collection (`xs[a..b]`) yields a `BitLens<T>`. Functions meant for either form take an interface (`IIndexGet<usize, T>`, `IEnumerable<T>`), and specialisation generates one version per representation. A separate user-facing `PackedList<T>` is rejected: changing representation would then edit every signature that names the collection.
+
+**Views over one packed buffer:**
+- **Element view** (`BitLens<T>`, `0b01`): indexing returns copies; taking a reference or `slice` to an element is a compile error. This avoids the C++ `vector<bool>` failure, where a packed container pretends to hand out references.
+- **Word view** (`slice<u64>`): an ordinary borrowable view. Bulk bitwise work, `popcount`, find-next-set-bit, SIMD and foreign code that understands bitmaps use it.
+- **Unpacked copy:** an explicit O(n) conversion to an addressable array. Changing representation is never O(1) and never implicit.
+
+**Rules the compiler enforces:**
+1. **No references into packed elements** (element views only copy).
+2. **One writer per word.** Parallel work on packed storage splits it at word boundaries, or uses atomic word updates; only uniquely owned (`iso`) packed buffers cross a `.pchor` cue.
+3. **Packing below a type's full width needs its declared valid range.** A type with no declared range is packed at its full `[Bits]` width.
+4. **Foreign boundaries see the addressable form** unless the foreign side understands the packed layout (Arrow bitmaps).
+
+**Who chooses.** With whole-program analysis (`M35`; slow compilation is acceptable), the compiler packs a collection when no code takes an element reference, hands its elements to foreign code one by one, or writes it from several threads; otherwise it keeps it addressable and can report the use that prevented packing. A `.pchor` blueprint (`M39`) or `[Layout(..)]` attribute (`M38`) overrides the choice. `pilot inspect --layout` shows the representation, the bit positions and the reason. The choice is fixed when the collection is created.
+
+**Measured basis** (C, `-O3 -march=native`, Core Ultra 9 275HX, best of 200 warm runs, XOR over 1,000,000 values): `u8` 37,442 TSC ticks; `u16` 74,968; the `u8` array as 64-bit words 37,454; 1-bit packed (125 KB) 4,628. Bitwise work scales with bytes, not element count, so a byte array already behaves as packed words for bitwise operations; packing to the needed width gives the large win. `M43` turns this into a gated benchmark.
 
 **The 1.0 proofs (all through the CLI):**
 - **Adaptability:** a new primitive type and operator added from a library file, with zero engine changes.

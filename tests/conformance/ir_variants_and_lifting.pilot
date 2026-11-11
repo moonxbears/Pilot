@@ -1,0 +1,51 @@
+// F5: payload enum values built target-typed (`::Circle(..)` in a return,
+// `::Empty`), a field two variants keep at the same place, and plain values
+// lifted into `opt`/`res` at an argument and a `?` inside `try`.
+enum Shape {
+    Circle(r: f64),
+    Square(r: f64),
+    Empty,
+}
+
+fn make(k: i64) -> Shape {
+    if k == 0 { return ::Circle(1.5); }
+    if k == 1 { return ::Square(2.0); }
+    return ::Empty;
+}
+
+fn size(s: Shape) -> f64 {
+    return switch s {
+        case Empty: -1.0;
+        default: s.r;
+    };
+}
+
+fn describe(x: i64?) -> str {
+    if some v = x { return f"has {v}"; }
+    return "empty";
+}
+
+fn parse(c: str) -> i64 ! str {
+    if c == "1" { return 1; }
+    return err(f"bad {c}");
+}
+
+fn sum(a: str, b: str) -> i64 ! str {
+    return parse(a)? + parse(b)?;
+}
+
+fn main() {
+    print(size(make(0)));
+    print(size(make(1)));
+    print(size(make(2)));
+    print(describe(4));
+    print(describe(none));
+    try {
+        let total = sum("1", "1")?;
+        print(total);
+        let never = sum("1", "x")?;
+        print(never);
+    } catch e {
+        print(f"caught {e}");
+    }
+}
