@@ -30,22 +30,40 @@ use selfhost.ir.lower.*;
 use selfhost.ir.verify.*;
 use selfhost.ir.text.*;
 use selfhost.ir.interp.*;
+use selfhost.ir.fault.*;
 use selfhost.ir.passes.*;
 
-fn lowered() -> IrModule {
-    let s = snap_load();
+fn lowered(s: Snap) -> IrModule => lowered_program(s, false);
+
+/// The program in snapshot `s` lowered to PilIR; with `every_function`,
+/// every concrete top-level function of the user's files is lowered too.
+pub fn lowered_program(s: Snap, every_function: bool) -> IrModule {
     let p = prog_new(s);
     let r = resolve_program(p, sink_new(s));
-    return lower_program(infer_new(p, r));
+    return lower_program_rooted(infer_new(p, r), every_function);
+}
+
+/// The linked files of the program, to place its runtime errors.
+fn source_map(s: Snap) -> IrSourceMap {
+    let map = ir_source_map_empty();
+    for f in s.files {
+        let row: List<any> = f;
+        map.paths.push(row[0]);
+        map.bases.push(row[2]);
+        map.texts.push(row[3]);
+    }
+    return map;
 }
 
 /// The text of the file the host runs this tool on (`tool::run_on_text`).
 fn input_text() -> str => __engine("tool_input_text");
 
-/// `pilot ir <mode> <program>.pilot`.
-pub fn ir_main(mode: str) -> i64 {
-    let m = lowered();
-    return finish(m, mode, print_ir_module(m));
+/// `pilot ir <mode> <program>.pilot [-- args..]`; a run gives the program
+/// `args` as its script arguments.
+pub fn ir_main(mode: str, args: List<str>) -> i64 {
+    let s = snap_load();
+    let m = lowered(s);
+    return finish(m, mode, print_ir_module(m), source_map(s), args);
 }
 
 /// `pilot ir <mode> <file>.pir`.
@@ -53,7 +71,7 @@ pub fn ir_text_main(mode: str) -> i64 {
     let text = input_text();
     try {
         let m = parse_ir_module(text)?;
-        return finish(m, mode, text);
+        return finish(m, mode, text, ir_source_map_empty(), []);
     } catch e {
         eprint(f"error: {e.message}");
         return 1;
@@ -61,8 +79,9 @@ pub fn ir_text_main(mode: str) -> i64 {
     return 1;
 }
 
-/// Verifies `m` (whose text is `first`) and does what `mode` asks.
-fn finish(m: IrModule, mode: str, first: str) -> i64 {
+/// Verifies `m` (whose text is `first`) and does what `mode` asks; a run
+/// places its runtime errors in `sources`.
+fn finish(m: IrModule, mode: str, first: str, sources: IrSourceMap, args: List<str>) -> i64 {
     let issues = verify_ir_module(m);
     if issues.len() > 0 {
         for i in issues { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
@@ -88,14 +107,14 @@ fn finish(m: IrModule, mode: str, first: str) -> i64 {
         }
         return 0;
     }
-    if mode == "run-unopt" { return ir_run(m); }
+    if mode == "run-unopt" { return ir_run(m, sources, args); }
     if mode == "opt" || mode == "run" {
         let failed = run_passes(m, default_passes());
         if failed.len() > 0 {
             for i in failed { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
             return 1;
         }
-        if mode == "run" { return ir_run(m); }
+        if mode == "run" { return ir_run(m, sources, args); }
         let text = print_ir_module(m);
         print(text.slice(0, text.len() - 1));
         return 0;

@@ -1,240 +1,193 @@
-// ============================================================================
+// ==============================================================================
 // FILE: selfhost/transpile/emit_lua.pilot
-// Milestone 57.2: Modular Lua 5.4 Source Emitter (`pilot --emit lua`)
-// Emits clean Lua 5.4 modules and functions from Name-Blind Transpile IR.
-// ============================================================================
+// `pilot emit lua`: PilIR as Lua 5.3 or later (selfhost/transpile/source.pilot).
+// ==============================================================================
+// Integers are Lua integers (64-bit, wrapping), narrower ones wrapped to
+// their width; `/` and `%` on integers truncate toward zero as the seed's
+// do. Unsigned 64-bit integers and 32-bit floats have no Lua form here and
+// stop at the representation seam. Records are tables (field i at i + 1).
+// Functions are global, so one may call another declared after it. `print`
+// shows values as the seed does.
+pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitLua;
 
-pub pure fn emit_lua_function_source(
-    fn_name: str,
-    params_list: str,
-    body_expr: str
-) -> str {
-    return "local function " + fn_name + "(" + params_list + ")\n"
-        + "  " + nameof(return) + " " + body_expr + "\n"
-        + "end\n";
-}
+use selfhost.ir.model.*;
+use selfhost.transpile.source.*;
 
-pub fn tlua_emit_expr(nid: i64) -> str {
-    if nid < 0 { return "0"; }
-    let k = __engine("ast_node_kind", nid);
-    let ok = __engine("ast_orig_kind", nid);
-
-    if k == 14 {
-        return __engine("sym_str", __engine("ast_node_sym", nid));
-    }
-    if k == 15 {
-        let lk = __engine("ast_node_lit_kind", nid);
-        if lk == 1 {
-            return "" + __engine("ast_node_raw_bits", nid);
-        }
-        if lk == 2 {
-            return __engine("source_slice", __engine("ast_span_start", nid), __engine("ast_span_end", nid));
-        }
-        if lk == 3 {
-            return tir_escape_str_lit(__engine("sym_str", __engine("ast_node_sym", nid)));
-        }
-        if lk == 4 {
-            if __engine("ast_node_raw_bits", nid) != 0 { return "true"; }
-            return "false";
-        }
-        return seam("emit.unlowered_literal", f"the lua emitter has no lowering for literal kind {lk}");
-    }
-    if ok == 206 {
-        let inner = tlua_emit_expr(__engine("ast_child_at", nid, 0));
-        let fl = __engine("ast_node_flags", nid);
-        if fl == 5 { return "(not " + inner + ")"; }
-        if fl == 4 { return "(~" + inner + ")"; }
-        return "(-" + inner + ")";
-    }
-    if k == 19 {
-        let op = __engine("ast_node_raw_bits", nid);
-        let lhs = tlua_emit_expr(__engine("ast_child_at", nid, 0));
-        let rhs = tlua_emit_expr(__engine("ast_child_at", nid, 1));
-        if op == 4 { return "(" + lhs + " // " + rhs + ")"; }
-        if op == 9 { return "(" + lhs + " ~= " + rhs + ")"; }
-        if op == 14 { return "(" + lhs + " and " + rhs + ")"; }
-        if op == 15 { return "(" + lhs + " or " + rhs + ")"; }
-        if op == 18 { return "(" + lhs + " ~ " + rhs + ")"; }
-        return "(" + lhs + " " + tir_binop_sym(op) + " " + rhs + ")";
-    }
-    if k == 16 {
-        let cc = __engine("ast_child_count", nid);
-        if cc <= 0 { return seam("emit.unlowered_expr", "a call node without a callee reached the lua emitter"); }
-        let callee_nid = __engine("ast_child_at", nid, 0);
-        let cname = __engine("sym_str", __engine("ast_node_sym", callee_nid));
-        if tir_is_struct_literal_call(nid) {
-            let map_nid = __engine("ast_child_at", nid, 1);
-            let mcc = __engine("ast_child_count", map_nid);
-            var fields_s = "";
-            var mi = 0;
-            while mi + 1 < mcc {
-                let k_nid = __engine("ast_child_at", map_nid, mi);
-                let v_nid = __engine("ast_child_at", map_nid, mi + 1);
-                let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
-                if fields_s.len() > 0 {
-                    fields_s = fields_s + ", ";
-                }
-                fields_s = fields_s + fname + " = " + tlua_emit_expr(v_nid);
-                mi = mi + 2;
-            }
-            return "{ " + fields_s + " }";
-        }
-        var args_s = "";
-        var ai = 1;
-        while ai < cc {
-            if ai > 1 { args_s = args_s + ", "; }
-            args_s = args_s + tlua_emit_expr(__engine("ast_child_at", nid, ai));
-            ai = ai + 1;
-        }
-        return cname + "(" + args_s + ")";
-    }
-    if k == 17 {
-        let recv = tlua_emit_expr(__engine("ast_child_at", nid, 0));
-        let fld = __engine("sym_str", __engine("ast_node_sym", nid));
-        return recv + "." + fld;
-    }
-    if ok == 210 {
-        let base_e = tlua_emit_expr(__engine("ast_child_at", nid, 0));
-        let idx_e = tlua_emit_expr(__engine("ast_child_at", nid, 1));
-        return base_e + "[(" + idx_e + ") + 1]";
-    }
-    return seam("emit.unlowered_expr", f"the lua emitter has no lowering for AST node kind {k} (original kind {ok})");
-}
-
-pub fn tlua_emit_block_body(blk_nid: i64, depth: i64) -> str {
-    if blk_nid < 0 { return ""; }
-    if __engine("ast_node_kind", blk_nid) != 18 {
-        return tlua_emit_stmt(blk_nid, depth);
-    }
-    let cc = __engine("ast_child_count", blk_nid);
-    var out = "";
-    var i = 0;
-    while i < cc {
-        out = out + tlua_emit_stmt(__engine("ast_child_at", blk_nid, i), depth);
-        i = i + 1;
-    }
-    return out;
-}
-
-pub fn tlua_emit_stmt(nid: i64, depth: i64) -> str {
-    if nid < 0 { return ""; }
-    let k = __engine("ast_node_kind", nid);
-    let ok = __engine("ast_orig_kind", nid);
-    let ind = tir_indent_spaces(depth);
-
-    if k == 18 {
-        return tlua_emit_block_body(nid, depth);
-    }
-    if k == 4 {
-        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        let init_s = if __engine("ast_child_count", nid) > 0 {
-            tlua_emit_expr(__engine("ast_child_at", nid, 0))
-        } else {
-            "0"
-        };
-        return ind + "local " + vname + " = " + init_s + "\n";
-    }
-    if k == 20 {
-        let lhs = tlua_emit_expr(__engine("ast_child_at", nid, 0));
-        let rhs = tlua_emit_expr(__engine("ast_child_at", nid, 1));
-        return ind + lhs + " = " + rhs + "\n";
-    }
-    if k == 6 {
-        let cond_s = tlua_emit_expr(__engine("ast_child_at", nid, 0));
-        let then_s = tlua_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
-        var res = ind + "if " + cond_s + " then\n" + then_s;
-        if __engine("ast_child_count", nid) >= 3 {
-            let else_s = tlua_emit_block_body(__engine("ast_child_at", nid, 2), depth + 1);
-            res = res + ind + "else\n" + else_s;
-        }
-        return res + ind + "end\n";
-    }
-    if k == 7 || ok == 106 {
-        if ok == 105 {
-            let lbody = tlua_emit_block_body(__engine("ast_child_at", nid, 0), depth + 1);
-            return ind + "while true do\n" + lbody + ind + "end\n";
-        }
-        let wcond = tlua_emit_expr(__engine("ast_child_at", nid, 0));
-        let wbody = tlua_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
-        return ind + "while " + wcond + " do\n" + wbody + ind + "end\n";
-    }
-    if ok == 107 { return ind + "break\n"; }
-    if k == 8 {
-        if __engine("ast_child_count", nid) > 0 {
-            return ind + "return " + tlua_emit_expr(__engine("ast_child_at", nid, 0)) + "\n";
-        }
-        return ind + "return\n";
-    }
-    if ok == 110 {
-        if __engine("ast_child_count", nid) > 0 {
-            return ind + tlua_emit_expr(__engine("ast_child_at", nid, 0)) + "\n";
-        }
+pub struct LuaDialect : ISourceDialect {
+    pub fn language() -> str => "Lua";
+    pub fn typed() -> bool => false;
+    pub fn reserved() -> List<str> => [
+        "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
+        "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+        "print", "io", "os", "math", "string", "table", "type", "tostring", "tonumber", "pairs",
+        "ipairs", "error", "select", "next", "require", "assert", "pcall", "setmetatable", "getmetatable",
+    ];
+    pub fn type_name(p: IrTypePhysics) -> str? {
+        if is_int(p) && !is_signed(p) && p.bit_width >= 64 { return none; }
+        if is_int(p) && p.bit_width > 64 { return none; }
+        if is_float(p) && p.bit_width != 64 { return none; }
+        if p.reg_class == reg_class_simd_vector() || p.reg_class == reg_class_raw_ptr() { return none; }
         return "";
     }
-    return ind + tlua_emit_expr(nid) + "\n";
+    pub fn prelude() -> List<str> => [
+        "local function pilot_trap(message)",
+        "    io.stderr:write(\"runtime error: \" .. message .. \"\\n\")",
+        "    os.exit(1)",
+        "end",
+        "local function pilot_wrap(x, bits, signed)",
+        "    if bits >= 64 then return x end",
+        "    x = x & ((1 << bits) - 1)",
+        "    if signed and (x >> (bits - 1)) & 1 == 1 then x = x - (1 << bits) end",
+        "    return x",
+        "end",
+        "local function pilot_div(a, b)",
+        "    if b == 0 then pilot_trap(\"integer division by zero\") end",
+        "    local q = a // b",
+        "    if a % b ~= 0 and (a < 0) ~= (b < 0) then q = q + 1 end",
+        "    return q",
+        "end",
+        "local function pilot_rem(a, b)",
+        "    return a - b * pilot_div(a, b)",
+        "end",
+        "local function pilot_sar(a, n)",
+        "    if a < 0 then return ~((~a) >> n) end",
+        "    return a >> n",
+        "end",
+        "local function pilot_show(x)",
+        "    local t = math.type(x)",
+        "    if t == \"integer\" then return string.format(\"%d\", x) end",
+        "    if t == \"float\" then",
+        "        if x ~= x then return \"NaN\" end",
+        "        if x == math.huge then return \"inf\" end",
+        "        if x == -math.huge then return \"-inf\" end",
+        "        if x == 0 then return (1 / x < 0) and \"-0\" or \"0\" end",
+        "        local s",
+        "        for p = 1, 17 do",
+        "            s = string.format(\"%.\" .. p .. \"g\", x)",
+        "            if tonumber(s) == x then break end",
+        "        end",
+        "        local sign, mant, exp = s:match(\"^(-?)([%d%.]+)e([-+]%d+)$\")",
+        "        if not mant then return s end",
+        "        local ip, fp = mant:match(\"^(%d+)%.?(%d*)$\")",
+        "        local digits = ip .. fp",
+        "        local e = tonumber(exp) - #fp",
+        "        if e >= 0 then return sign .. digits .. string.rep(\"0\", e) end",
+        "        local k = #digits + e",
+        "        if k > 0 then return sign .. digits:sub(1, k) .. \".\" .. digits:sub(k + 1) end",
+        "        return sign .. \"0.\" .. string.rep(\"0\", -k) .. digits",
+        "    end",
+        "    if x == nil then return \"none\" end",
+        "    return tostring(x)",
+        "end",
+        "local function pilot_add(a, b)",
+        "    if type(a) == \"string\" or type(b) == \"string\" then return pilot_show(a) .. pilot_show(b) end",
+        "    return a + b",
+        "end",
+        "",
+    ];
+    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => f"local {name} = nil";
+    pub fn module_open(protos: List<str>) -> List<str> => [];
+    pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str => "";
+    pub fn module_close(entry: str, has_code: bool) -> List<str> {
+        if entry == "" { return []; }
+        if has_code { return [f"os.exit({entry}())"]; }
+        return [f"{entry}()"];
+    }
+    pub fn fn_open(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str =>
+        f"function {name}({joined(params)})";
+    pub fn fn_close() -> str => "end";
+    pub fn fn_globals(globals: List<str>) -> List<str> => [];
+    pub fn param_prologue(name: str, p: IrTypePhysics) -> List<str> => [];
+    pub fn locals(names: List<str>, phys: List<IrTypePhysics>) -> List<str> => if names.len() == 0 { [] } else { ["local " + joined(names)] };
+    pub fn zero(p: IrTypePhysics) -> str => if is_bool(p) { "false" } else if is_float(p) { "0.0" } else if is_int(p) { "0" } else { "nil" };
+    pub fn unit_value() -> str? => "nil";
+    pub fn state_decl(name: str) -> str => f"local {name} = 0";
+    pub fn dispatch_open() -> str => "while true do";
+    pub fn dispatch_close() -> str => "end";
+    pub fn case_open(state: str, b: i64, first: bool) -> str => (if first { "if " } else { "elseif " }) + f"{state} == {b} then";
+    pub fn cases_close() -> str => "end";
+    pub fn if_open(cond: str) -> str => f"if {cond} then";
+    pub fn else_line() -> str => "else";
+    pub fn if_close() -> str => "end";
+    pub fn assign(lhs: str, rhs: str) -> str => f"{lhs} = {rhs}";
+    pub fn parallel_assign(lhs: List<str>, rhs: List<str>, phys: List<IrTypePhysics>) -> List<str> => [joined(lhs) + " = " + joined(rhs)];
+    pub fn expr_stmt(e: str) -> str => e;
+    pub fn ret(e: str) -> str => if e == "" { "return" } else { "return " + e };
+    pub fn trap(message: str) -> str => f"pilot_trap({self.str_lit(message)})";
+    pub fn int_lit(digits: str, p: IrTypePhysics) -> str? => if digits == "-9223372036854775808" { "math.mininteger" } else { digits };
+    pub fn bool_lit(b: bool) -> str => if b { "true" } else { "false" };
+    pub fn float_lit(text: str, p: IrTypePhysics) -> str? {
+        if p.bit_width != 64 { return none; }
+        if text == "NaN" { return "(0.0 / 0.0)"; }
+        if text == "inf" { return "math.huge"; }
+        if text == "-inf" { return "(-math.huge)"; }
+        return text;
+    }
+    pub fn str_lit(raw: str) -> str => escaped(raw, (b) => "\\" + three_digits(b));
+    pub fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str? {
+        if is_float(p) {
+            if op == "add" { return f"({a} + {b})"; }
+            if op == "sub" { return f"({a} - {b})"; }
+            if op == "mul" { return f"({a} * {b})"; }
+            if op == "div" { return f"({a} / {b})"; }
+            if op == "rem" { return f"math.fmod({a}, {b})"; }
+            return none;
+        }
+        if is_bool(p) {
+            if op == "and" { return f"({a} and {b})"; }
+            if op == "or" { return f"({a} or {b})"; }
+            if op == "xor" { return f"({a} ~= {b})"; }
+            return none;
+        }
+        if !is_int(p) {
+            return if op == "add" { f"pilot_add({a}, {b})" } else { none };
+        }
+        let mask = p.bit_width - 1;
+        let e = if op == "add" { f"{a} + {b}" } else if op == "sub" { f"{a} - {b}" } else if op == "mul" { f"{a} * {b}" }
+            else if op == "div" { f"pilot_div({a}, {b})" } else if op == "rem" { f"pilot_rem({a}, {b})" }
+            else if op == "and" { f"{a} & {b}" } else if op == "or" { f"{a} | {b}" } else if op == "xor" { f"{a} ~ {b}" }
+            else if op == "shl" { f"{a} << ({b} & {mask})" }
+            else if op == "shr" { if is_signed(p) { f"pilot_sar({a}, {b} & {mask})" } else { f"{a} >> ({b} & {mask})" } } else { "" };
+        if e == "" { return none; }
+        if p.bit_width >= 64 { return f"({e})"; }
+        return f"pilot_wrap({e}, {p.bit_width}, {lua_bool(is_signed(p))})";
+    }
+    pub fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {lua_cmp(pred)} {b})";
+    pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
+        if is_bool(to) { return if is_bool(from) { v } else { f"({v} ~= 0)" }; }
+        if is_float(to) {
+            if to.bit_width != 64 { return none; }
+            return if is_bool(from) { f"({v} and 1.0 or 0.0)" } else { f"({v} + 0.0)" };
+        }
+        if !is_int(to) { return none; }
+        let n = if is_bool(from) { f"({v} and 1 or 0)" }
+            else if is_float(from) { f"math.tointeger({v} >= 0 and math.floor({v}) or math.ceil({v}))" } else { v };
+        if to.bit_width >= 64 { return n; }
+        return f"pilot_wrap({n}, {to.bit_width}, {lua_bool(is_signed(to))})";
+    }
+    pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+        var text = "";
+        for a in args {
+            if text.len() > 0 { text = text + " .. \" \" .. "; }
+            text = text + f"pilot_show({a})";
+        }
+        if text == "" { text = "\"\""; }
+        if name == "rt_print" { return f"print({text})"; }
+        if name == "rt_eprint" { return f"io.stderr:write({text} .. \"\\n\")"; }
+        return none;
+    }
+    pub fn make_record(values: List<str>) -> str? => "{" + joined(values) + "}";
+    pub fn get_field(rec: str, i: i64) -> str? => f"{rec}[{i + 1}]";
+    pub fn set_field(rec: str, i: i64, v: str) -> str? => f"{rec}[{i + 1}] = {v}";
 }
 
-pub fn transpile_arena_to_lua() -> str {
-    let prog = tir_target_prog_nid();
-    if prog < 0 { return ""; }
-    let cc = __engine("ast_child_count", prog);
-    var out = "";
+pub fn lua_dialect() -> ISourceDialect => LuaDialect {};
 
-    // 1. Emit table constructor helpers for composite structs
-    var i = 0;
-    while i < cc {
-        let ch = __engine("ast_child_at", prog, i);
-        if __engine("ast_node_kind", ch) == 1 && tir_struct_has_stored_fields(ch) {
-            let sname = __engine("sym_str", __engine("ast_node_sym", ch));
-            let fcc = __engine("ast_child_count", ch);
-            var fparams = "";
-            var ffields = "";
-            var fi = 0;
-            while fi < fcc {
-                let fch = __engine("ast_child_at", ch, fi);
-                if __engine("ast_node_kind", fch) == 21 {
-                    let fname = __engine("sym_str", __engine("ast_node_sym", fch));
-                    if fparams.len() > 0 {
-                        fparams = fparams + ", ";
-                        ffields = ffields + ", ";
-                    }
-                    fparams = fparams + fname;
-                    ffields = ffields + fname + " = " + fname;
-                }
-                fi = fi + 1;
-            }
-            out = out + "function new_" + sname + "(" + fparams + ")\n    return { " + ffields + " }\nend\n\n";
-        }
-        i = i + 1;
-    }
+fn lua_bool(b: bool) -> str => if b { "true" } else { "false" };
 
-    // 2. Emit functions
-    i = 0;
-    while i < cc {
-        let fn_nid = __engine("ast_child_at", prog, i);
-        if __engine("ast_node_kind", fn_nid) == 3 && (__engine("ast_decl_flags", fn_nid) & 256) == 0 {
-            let fname = __engine("sym_str", __engine("ast_node_sym", fn_nid));
-            let fcc = __engine("ast_child_count", fn_nid);
-            var params_s = "";
-            var pi = 1;
-            while pi < fcc {
-                let pch = __engine("ast_child_at", fn_nid, pi);
-                if __engine("ast_node_kind", pch) == 21 {
-                    let pname = __engine("sym_str", __engine("ast_node_sym", pch));
-                    if params_s.len() > 0 { params_s = params_s + ", "; }
-                    params_s = params_s + pname;
-                }
-                pi = pi + 1;
-            }
-            let body_s = if fcc > 0 {
-                tlua_emit_block_body(__engine("ast_child_at", fn_nid, 0), 1)
-            } else {
-                ""
-            };
-            out = out + "function " + fname + "(" + params_s + ")\n" + body_s + "end\n\n";
-        }
-        i = i + 1;
-    }
+/// The Lua operator of comparison predicate `pred`.
+fn lua_cmp(pred: i64) -> str => ["==", "~=", "<", "<=", ">", ">="][pred];
 
-    return out;
-}
+/// `b` as three decimal digits, for a `\ddd` escape.
+fn three_digits(b: i64) -> str => f"{b / 100}{(b / 10) % 10}{b % 10}";

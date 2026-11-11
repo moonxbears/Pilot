@@ -1,0 +1,96 @@
+// ==============================================================================
+// FILE: selfhost/ir/fault.pilot
+// F5: runtime errors of programs the PilIR interpreter runs.
+// ==============================================================================
+// A fault stops the program the way the seed stops it (crates/pilot-cli
+// run.rs): `<file>:<line>:<col>: runtime error: <message>` at the
+// instruction that failed, then `  called from <file>:<line>:<col>` for each
+// call it was inside, innermost first (consecutive calls from one place print
+// once with their count), and exit code 1. The message is the seed's own:
+// the interpreter runs each operator, branch condition and engine operation
+// through the engine operation `op_checked`, which gives the failure back as
+// a value instead of stopping (crates/pilot-vm checked.rs).
+pub lvl(0) pkg Pilot.SelfHost.Ir.Fault;
+
+use selfhost.ir.model.*;
+
+/// The runtime error of the program being run, shared by every frame.
+pub struct IrFault : IObject {
+    pub active: bool;
+    pub message: str;
+    /// The source offset of the instruction that failed, then of each call
+    /// it unwound through; `ir_no_span()` where there is no source place.
+    pub spans: List<i64>;
+}
+
+pub fn ir_fault_new() -> IrFault => IrFault { active: false, message: "", spans: [] };
+
+/// Stops the program with `message`, unless it has stopped already.
+pub fn raise_fault(fault: IrFault, message: str) {
+    if fault.active { return; }
+    fault.active = true;
+    fault.message = message;
+}
+
+/// The source files of the program a module was lowered from: each file's
+/// path, its first offset in the linked program, and its text.
+pub struct IrSourceMap : IObject {
+    pub paths: List<str>;
+    pub bases: List<i64>;
+    pub texts: List<str>;
+}
+
+/// A map with no files, for IR read from text.
+pub fn ir_source_map_empty() -> IrSourceMap => IrSourceMap { paths: [], bases: [], texts: [] };
+
+/// `<path>:<line>:<col>` of offset `at` (1-based, columns in bytes), as the
+/// seed's `LinkedSource::locate`; `<program>` when no file holds it.
+pub fn ir_locate(map: IrSourceMap, at: i64) -> str {
+    // The file starting last at or before `at`.
+    var f = -1;
+    var i = 0;
+    while i < map.bases.len() {
+        if map.bases[i] <= at && (f < 0 || map.bases[i] > map.bases[f]) { f = i; }
+        i = i + 1;
+    }
+    if at < 0 || f < 0 { return "<program>"; }
+    let text = map.texts[f];
+    var off = at - map.bases[f];
+    if off > text.len() { off = text.len(); }
+    var line = 1;
+    var col = 1;
+    i = 0;
+    while i < off {
+        if text.byte_at(i) == 10 {
+            line = line + 1;
+            col = 1;
+        } else {
+            col = col + 1;
+        }
+        i = i + 1;
+    }
+    return f"{map.paths[f]}:{line}:{col}";
+}
+
+/// Prints the fault as the seed does.
+pub fn report_fault(fault: IrFault, map: IrSourceMap) {
+    eprint(f"{ir_locate(map, if fault.spans.len() > 0 { fault.spans[0] } else { ir_no_span() })}: runtime error: {fault.message}");
+    var calls: List<i64> = [];
+    var i = 1;
+    while i < fault.spans.len() {
+        if fault.spans[i] != ir_no_span() { calls.push(fault.spans[i]); }
+        i = i + 1;
+    }
+    i = 0;
+    while i < calls.len() {
+        var run = 1;
+        while i + run < calls.len() && calls[i + run] == calls[i] { run = run + 1; }
+        let at = ir_locate(map, calls[i]);
+        eprint(if run == 1 { f"  called from {at}" } else { f"  called from {at} ({run} times)" });
+        i = i + run;
+    }
+}
+
+/// Runs operator, condition test or engine operation `name` on `args`:
+/// `[true, value]`, or `[false, message]` with the seed's failure message.
+pub fn op_checked(name: str, args: List<any>) -> List<any> => __engine("op_checked", name, args);

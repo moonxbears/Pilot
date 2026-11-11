@@ -3,19 +3,16 @@
 //! Milestone 57 — Uncheatable 7-Target Transpilers, 6-Lang Ingesters & SPDX Gate
 //!
 //! Required `.pilot` Contracts (all tested simultaneously on randomized inputs):
-//!   1. `selfhost/transpile/ir.pilot` & `selfhost/transpile/emit_{rust,c,cpp,csharp,python,js,lua}.pilot`:
-//!      Every transpiler MUST lower directly from `PhysicsRegistry` (`RawAstArena` +
-//!      `LayoutTable` + `source_slice`) with **randomized `[Bits(...)]` type names**
-//!      and zero caller-supplied target source strings:
-//!      - `pub fn transpile_arena_to_rust() -> str`   (compiled & executed via `rustc`!)
-//!      - `pub fn transpile_arena_to_c() -> str`      (compiled & executed via `clang`!)
-//!      - `pub fn transpile_arena_to_cpp() -> str`    (compiled & executed via `clang++`!)
-//!      - `pub fn transpile_arena_to_csharp() -> str` (verified C# struct + static methods)
-//!      - `pub fn transpile_arena_to_python() -> str` (executed via `python3`!)
-//!      - `pub fn transpile_arena_to_js() -> str`     (executed via `node`!)
-//!      - `pub fn transpile_arena_to_lua() -> str`    (verified Lua `function`..`while..do`..`if..then..else..end`)
-//!      Note on JS `BigInt` vs `Number`: emit standard JS numbers (`Number`) or consistent
-//!      arithmetic so calling `<fn_name>(a, b)` in Node returns the exact integer value!
+//!   1. `pilot emit <lang>` (`selfhost/transpile/source.pilot`, `c_family.pilot` and
+//!      `emit_{rust,c,cpp,csharp,python,js,lua}.pilot`): every emitter reads the
+//!      program's typed PilIR (`selfhost/ir/*`), not the raw AST, so a program with
+//!      **randomized `[Bits(...)]` type names** and randomized function names and
+//!      constants is emitted with zero caller-supplied target source strings:
+//!      - Rust (compiled with `rustc` and executed), C (`clang`), C++ (`clang++`),
+//!        C# (`mcs` + `mono`), Python (`python3`), JavaScript (`node`), each
+//!        compared with the value computed by hand in this test;
+//!      - Lua (no interpreter on the host: structural `function`..`while..do`..
+//!        `if..then..else..end` check).
 //!   2. `selfhost/transpile/ingest.pilot`:
 //!      - `pub fn ingest_foreign_source(source_lang: str, foreign_src: str) -> str`
 //!        Accepts `"python"`, `"rust"`, `"js"`, `"csharp"`, `"c"` (and `"cpp"`), and `"lua"`
@@ -36,7 +33,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pilot_analysis::{flatten_ast, handle_engine_intrinsic, run_pilot_analyzer, PhysicsRegistry};
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
@@ -57,19 +53,28 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     expected_test_count: 2,
     files: &[
         anticheat::FileAuditRule {
-            path: "selfhost/transpile/ir.pilot",
+            path: "selfhost/transpile/source.pilot",
             max_lines: 1500,
             name_blind: true,
+            required_pub_fns: &["emit_program"],
+            required_code_markers: &[],
+            forbidden_code_markers: &["__engine"],
+            forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/c_family.pilot",
+            max_lines: 1500,
+            name_blind: false,
             required_pub_fns: &[],
-            required_code_markers: &["__engine"],
-            forbidden_code_markers: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &["__engine"],
             forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
         },
         anticheat::FileAuditRule {
             path: "selfhost/transpile/emit_rust.pilot",
             max_lines: 1500,
             name_blind: false,
-            required_pub_fns: &["transpile_arena_to_rust"],
+            required_pub_fns: &["rust_dialect"],
             required_code_markers: &[],
             forbidden_code_markers: &[],
             forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
@@ -78,7 +83,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/transpile/emit_c.pilot",
             max_lines: 1500,
             name_blind: false,
-            required_pub_fns: &["transpile_arena_to_c"],
+            required_pub_fns: &["c_dialect"],
             required_code_markers: &[],
             forbidden_code_markers: &[],
             forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
@@ -87,7 +92,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/transpile/emit_cpp.pilot",
             max_lines: 1500,
             name_blind: false,
-            required_pub_fns: &["transpile_arena_to_cpp"],
+            required_pub_fns: &["cpp_dialect"],
             required_code_markers: &[],
             forbidden_code_markers: &[],
             forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
@@ -96,7 +101,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/transpile/emit_csharp.pilot",
             max_lines: 1500,
             name_blind: false,
-            required_pub_fns: &["transpile_arena_to_csharp"],
+            required_pub_fns: &["csharp_dialect"],
             required_code_markers: &[],
             forbidden_code_markers: &[],
             forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
@@ -105,7 +110,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/transpile/emit_python.pilot",
             max_lines: 1500,
             name_blind: false,
-            required_pub_fns: &["transpile_arena_to_python"],
+            required_pub_fns: &["python_dialect"],
             required_code_markers: &[],
             forbidden_code_markers: &[],
             forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
@@ -114,7 +119,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/transpile/emit_js.pilot",
             max_lines: 1500,
             name_blind: false,
-            required_pub_fns: &["transpile_arena_to_js"],
+            required_pub_fns: &["js_dialect"],
             required_code_markers: &[],
             forbidden_code_markers: &[],
             forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
@@ -123,7 +128,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/transpile/emit_lua.pilot",
             max_lines: 1500,
             name_blind: false,
-            required_pub_fns: &["transpile_arena_to_lua"],
+            required_pub_fns: &["lua_dialect"],
             required_code_markers: &[],
             forbidden_code_markers: &[],
             forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
@@ -224,58 +229,55 @@ fn escape_pilot_str(s: &str) -> String {
     out
 }
 
-fn run_transpiler_on_arena(target_program: &str, call_expr: &str) -> String {
-    let target_arena = parse(target_program);
+/// `pilot emit <lang> <program>`: the emitted source, after the command
+/// succeeded.
+fn pilot_emit(lang: &str, program: &Path) -> String {
+    let out = Command::new("cargo")
+        .args(["run", "-q", "-p", "pilot-cli", "--", "emit", lang, program.to_str().unwrap()])
+        .current_dir(ws_root())
+        .output()
+        .expect("run pilot emit");
     assert!(
-        target_arena.diagnostics.is_empty(),
-        "Target Pilot program failed to parse: {:?}",
-        target_arena.diagnostics
+        out.status.success(),
+        "pilot emit {} failed:\n{}{}",
+        lang,
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
     );
-    let (flat, syms) = flatten_ast(&target_arena, target_arena.root);
-    let mut registry = PhysicsRegistry::new(flat, syms);
-    registry.source_text = target_program.to_string();
-    run_pilot_analyzer(&mut registry, None).expect("analyzer.pilot must bind layouts");
-
-    let files = [
-        "selfhost/transpile/ir.pilot",
-        "selfhost/transpile/emit_rust.pilot",
-        "selfhost/transpile/emit_c.pilot",
-        "selfhost/transpile/emit_cpp.pilot",
-        "selfhost/transpile/emit_csharp.pilot",
-        "selfhost/transpile/emit_python.pilot",
-        "selfhost/transpile/emit_js.pilot",
-        "selfhost/transpile/emit_lua.pilot",
-    ];
-    let mut script = String::new();
-    for rel in files {
-        let src = read_ws(rel);
-        for banned in [
-            "get_service_data",
-            "Shape::Circle",
-            "Channel::receive",
-            "String.prototype.shout",
-            "head_pt",
-        ] {
-            assert!(!src.contains(banned), "{} contains banned benchmark cheat `{}`", rel, banned);
-        }
-        script.push_str(&src);
-        script.push('\n');
+    let code = String::from_utf8_lossy(&out.stdout).to_string();
+    for banned in TRANSPILE_BANNED_CHEATS {
+        assert!(!code.contains(banned), "emitted {} contains banned benchmark cheat `{}`", lang, banned);
     }
-    script.push_str(&format!("let __out = {};\n__out;\n", call_expr));
+    code
+}
 
-    let driver_arena = parse(&script);
+/// Runs a host compiler or program, which must succeed; its stdout.
+fn run_ok(trial: usize, what: &str, cmd: &mut Command, code: &str) -> String {
+    let out = cmd.output().unwrap_or_else(|e| panic!("Trial {}: cannot start {}: {}", trial, what, e));
     assert!(
-        driver_arena.diagnostics.is_empty(),
-        "Transpiler Pilot files failed to parse: {:?}",
-        driver_arena.diagnostics
+        out.status.success(),
+        "Trial {}: {} rejected the emitted code:\n{}{}\nCode:\n{}",
+        trial,
+        what,
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+        code
     );
-    let reg_ptr = &mut registry as *mut PhysicsRegistry;
-    let mut vm = PilVirtualMachine::new();
-    vm.engine_handler = Some(Box::new(move |op, args| {
-        handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)
-    }));
-    vm.load_binary(BytecodeCompiler::compile(&driver_arena, driver_arena.root));
-    vm.run().to_string_repr()
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// A program's stdout as one integer.
+fn integer(trial: usize, what: &str, stdout: &str) -> i64 {
+    stdout
+        .trim()
+        .parse()
+        .unwrap_or_else(|_| panic!("Trial {}: {} printed no integer: {:?}", trial, what, stdout))
+}
+
+/// Compiles with `compiler args.. src -o bin`, runs `bin`; its integer.
+fn compile_and_run(trial: usize, what: &str, compiler: &str, args: &[&str], src: &Path, bin: &Path, code: &str) -> i64 {
+    run_ok(trial, what, Command::new(compiler).args(args).arg(src).arg("-o").arg(bin), code);
+    integer(trial, what, &run_ok(trial, what, &mut Command::new(bin), code))
 }
 
 #[test]
@@ -300,7 +302,7 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
         let arg_b = rng.range(5, 14);
 
         let pilot_prog = format!(
-            "[Bits(64, 2)]\npub struct {ty_int} {{}}\n\
+            "[Bits(Cfg.Reg.b64, Cfg.Reg.gpr_s)]\npub struct {ty_int} {{}}\n\
              pub struct {st_box} {{\n\
                  pub u: {ty_int};\n\
                  pub v: {ty_int};\n\
@@ -332,143 +334,86 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
             }
         }
 
-        let all_str = run_transpiler_on_arena(
-            &pilot_prog,
-            "transpile_arena_to_rust() + \"<<<T>>>\" + transpile_arena_to_c() + \"<<<T>>>\" + transpile_arena_to_cpp() + \"<<<T>>>\" + transpile_arena_to_csharp() + \"<<<T>>>\" + transpile_arena_to_python() + \"<<<T>>>\" + transpile_arena_to_js() + \"<<<T>>>\" + transpile_arena_to_lua()",
-        );
-        let parts: Vec<&str> = all_str.split("<<<T>>>").collect();
-        assert_eq!(parts.len(), 7);
-        let (rs_code, c_code, cpp_code, cs_code, py_code, js_code, lua_code) = (
-            parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6],
-        );
+        let src = tmp.join(format!("t_{}.pilot", trial));
+        std::fs::write(&src, &pilot_prog).unwrap();
+        let emitted = |lang: &str| pilot_emit(lang, &src);
+        let file = |ext: &str| tmp.join(format!("t_{}.{}", trial, ext));
+        let bin = |tag: &str| tmp.join(format!("t_{}_{}.bin", tag, trial));
 
         // 1. Rust (`rustc`)
-        let rs_file = tmp.join(format!("t_{}.rs", trial));
-        let rs_bin = tmp.join(format!("t_rs_{}.bin", trial));
+        let rs_code = emitted("rust");
         std::fs::write(
-            &rs_file,
+            file("rs"),
             format!("#![allow(warnings)]\n{}\nfn main() {{ println!(\"{{}}\", {}({}, {})); }}\n", rs_code, fn_entry, arg_a, arg_b),
         )
         .unwrap();
-        let rs_comp = Command::new("rustc")
-            .args([rs_file.to_str().unwrap(), "-O", "-o", rs_bin.to_str().unwrap()])
-            .output()
-            .expect("rustc compile transpiled Rust");
-        assert!(
-            rs_comp.status.success(),
-            "Trial {}: rustc rejected transpiled Rust:\n{}\nCode:\n{}",
-            trial,
-            String::from_utf8_lossy(&rs_comp.stderr),
-            rs_code
-        );
-        let rs_val: i64 = String::from_utf8_lossy(&Command::new(&rs_bin).output().unwrap().stdout)
-            .trim()
-            .parse()
-            .unwrap();
+        let rs_val = compile_and_run(trial, "rustc", "rustc", &["-O"], &file("rs"), &bin("rs"), &rs_code);
         assert_eq!(rs_val, expected, "Trial {}: Transpiled Rust output mismatch!", trial);
 
         // 2. C (`clang`)
-        let c_file = tmp.join(format!("t_{}.c", trial));
-        let c_bin = tmp.join(format!("t_c_{}.bin", trial));
+        let c_code = emitted("c");
         std::fs::write(
-            &c_file,
-            format!("#include <stdio.h>\n#include <stdint.h>\n{}\nint main(void) {{ printf(\"%lld\\n\", (long long){}({}, {})); return 0; }}\n", c_code, fn_entry, arg_a, arg_b),
+            file("c"),
+            format!("#include <stdio.h>\n{}\nint main(void) {{ printf(\"%lld\\n\", (long long){}({}, {})); return 0; }}\n", c_code, fn_entry, arg_a, arg_b),
         )
         .unwrap();
-        let c_comp = Command::new("clang")
-            .args(["-std=c11", c_file.to_str().unwrap(), "-o", c_bin.to_str().unwrap()])
-            .output()
-            .unwrap();
-        assert!(
-            c_comp.status.success(),
-            "Trial {}: clang rejected transpiled C:\n{}\nCode:\n{}",
-            trial,
-            String::from_utf8_lossy(&c_comp.stderr),
-            c_code
-        );
-        let c_val: i64 = String::from_utf8_lossy(&Command::new(&c_bin).output().unwrap().stdout)
-            .trim()
-            .parse()
-            .unwrap();
+        let c_val = compile_and_run(trial, "clang", "clang", &["-std=c11"], &file("c"), &bin("c"), &c_code);
         assert_eq!(c_val, expected, "Trial {}: Transpiled C output mismatch!", trial);
 
         // 3. C++ (`clang++`)
-        let cpp_file = tmp.join(format!("t_{}.cpp", trial));
-        let cpp_bin = tmp.join(format!("t_cpp_{}.bin", trial));
+        let cpp_code = emitted("cpp");
         std::fs::write(
-            &cpp_file,
-            format!("#include <iostream>\n#include <cstdint>\n{}\nint main() {{ std::cout << {}({}, {}) << \"\\n\"; return 0; }}\n", cpp_code, fn_entry, arg_a, arg_b),
+            file("cpp"),
+            format!("#include <iostream>\n{}\nint main() {{ std::cout << {}({}, {}) << \"\\n\"; return 0; }}\n", cpp_code, fn_entry, arg_a, arg_b),
         )
         .unwrap();
-        let cpp_comp = Command::new("clang++")
-            .args(["-std=c++17", cpp_file.to_str().unwrap(), "-o", cpp_bin.to_str().unwrap()])
-            .output()
-            .unwrap();
-        assert!(
-            cpp_comp.status.success(),
-            "Trial {}: clang++ rejected transpiled C++:\n{}\nCode:\n{}",
-            trial,
-            String::from_utf8_lossy(&cpp_comp.stderr),
-            cpp_code
-        );
-        let cpp_val: i64 = String::from_utf8_lossy(&Command::new(&cpp_bin).output().unwrap().stdout)
-            .trim()
-            .parse()
-            .unwrap();
+        let cpp_val = compile_and_run(trial, "clang++", "clang++", &["-std=c++17"], &file("cpp"), &bin("cpp"), &cpp_code);
         assert_eq!(cpp_val, expected, "Trial {}: Transpiled C++ output mismatch!", trial);
 
-        // 4. Python (`python3`)
-        let py_file = tmp.join(format!("t_{}.py", trial));
-        std::fs::write(&py_file, format!("{}\nprint({}({}, {}))\n", py_code, fn_entry, arg_a, arg_b)).unwrap();
-        let py_out = Command::new("python3").arg(&py_file).output().unwrap();
-        assert!(
-            py_out.status.success(),
-            "Trial {}: python3 rejected transpiled Python:\n{}\nCode:\n{}",
-            trial,
-            String::from_utf8_lossy(&py_out.stderr),
-            py_code
-        );
-        let py_val: i64 = String::from_utf8_lossy(&py_out.stdout).trim().parse().unwrap();
-        assert_eq!(py_val, expected, "Trial {}: Transpiled Python output mismatch!", trial);
-
-        // 5. JavaScript (`node`)
-        let js_file = tmp.join(format!("t_{}.js", trial));
+        // 4. C# (`mcs` + `mono`)
+        let cs_code = emitted("csharp");
         std::fs::write(
-            &js_file,
-            format!("{}\nconsole.log(String({}({}, {})));\n", js_code, fn_entry, arg_a, arg_b),
+            file("cs"),
+            format!(
+                "{}\npublic static class M57Harness {{ public static void Main() {{ System.Console.WriteLine(PilotProgram.{}({}, {})); }} }}\n",
+                cs_code, fn_entry, arg_a, arg_b
+            ),
         )
         .unwrap();
-        let js_out = Command::new("node").arg(&js_file).output().unwrap();
-        assert!(
-            js_out.status.success(),
-            "Trial {}: node rejected transpiled JS:\n{}\nCode:\n{}",
+        let cs_exe = tmp.join(format!("t_{}.exe", trial));
+        run_ok(
             trial,
-            String::from_utf8_lossy(&js_out.stderr),
-            js_code
+            "mcs",
+            Command::new("mcs").arg(format!("-out:{}", cs_exe.display())).arg(file("cs")),
+            &cs_code,
         );
-        let js_val: i64 = String::from_utf8_lossy(&js_out.stdout).trim().parse().unwrap();
+        let cs_val = integer(trial, "mono", &run_ok(trial, "mono", Command::new("mono").arg(&cs_exe), &cs_code));
+        assert_eq!(cs_val, expected, "Trial {}: Transpiled C# output mismatch!", trial);
+
+        // 5. Python (`python3`)
+        let py_code = emitted("python");
+        std::fs::write(file("py"), format!("{}\nprint({}({}, {}))\n", py_code, fn_entry, arg_a, arg_b)).unwrap();
+        let py_val = integer(trial, "python3", &run_ok(trial, "python3", Command::new("python3").arg(file("py")), &py_code));
+        assert_eq!(py_val, expected, "Trial {}: Transpiled Python output mismatch!", trial);
+
+        // 6. JavaScript (`node`)
+        let js_code = emitted("js");
+        std::fs::write(file("js"), format!("{}\nconsole.log(String({}({}, {})));\n", js_code, fn_entry, arg_a, arg_b)).unwrap();
+        let js_val = integer(trial, "node", &run_ok(trial, "node", Command::new("node").arg(file("js")), &js_code));
         assert_eq!(js_val, expected, "Trial {}: Transpiled JS output mismatch!", trial);
 
-        // 6. C# & 7. Lua structural lowering checks on randomized AST symbols & constants
-        assert!(
-            cs_code.contains(&st_box)
-                && cs_code.contains(&fn_helper)
-                && cs_code.contains(&fn_entry)
-                && cs_code.contains("while")
-                && cs_code.contains(&k_add.to_string()),
-            "Trial {}: Transpiled C# missing lowered AST constructs:\n{}",
-            trial,
-            cs_code
-        );
+        // 7. Lua: structural check on the randomized symbols and constants
+        let lua_code = emitted("lua");
         assert!(
             lua_code.contains(&format!("function {}", fn_entry))
                 && lua_code.contains(&fn_helper)
                 && lua_code.contains("while ")
                 && lua_code.contains(" do")
                 && lua_code.contains("then")
+                && lua_code.contains("else")
                 && lua_code.contains("end")
                 && lua_code.contains(&k_add.to_string()),
-            "Trial {}: Transpiled Lua missing lowered AST constructs:\n{}",
+            "Trial {}: Transpiled Lua missing lowered constructs:\n{}",
             trial,
             lua_code
         );

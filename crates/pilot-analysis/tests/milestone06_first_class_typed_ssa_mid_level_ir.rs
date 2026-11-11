@@ -102,24 +102,6 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
-        anticheat::FileAuditRule {
-            path: "selfhost/ir/lower_ast.pilot",
-            max_lines: 1500,
-            name_blind: true,
-            required_pub_fns: &[
-                "scope_cleanup_push",
-                "scope_cleanup_count",
-                "scope_cleanup_unwind_to_depth",
-                "lower_short_circuit_and",
-            ],
-            required_code_markers: &[
-                "lower_short_circuit_and",
-                "lower_short_circuit_or",
-                "lower_loop_header",
-            ],
-            forbidden_code_markers: &[],
-            forbidden_string_substrings: &[],
-        },
     ],
     required_group_pub_fns: &[],
 };
@@ -131,7 +113,6 @@ fn eval_ir(script: &str) -> String {
         "selfhost/ir/model.pilot",
         "selfhost/ir/verifier.pilot",
         "selfhost/ir/printer.pilot",
-        "selfhost/ir/lower_ast.pilot",
     ];
     let mut combined = String::new();
     for rel in &deps {
@@ -240,35 +221,43 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
         let two_blocks = parse_ir_count_blocks(two_block_ir);
         let two_insts = parse_ir_count_instructions(two_block_ir);
 
-        let header = lower_loop_header(loop_tier_fixed_scalar(), "i", phy_i64, phy_bool, "v0", "v1", 3);
-
         let block_cnt = parse_ir_count_blocks(textual_ir);
         let inst_cnt = parse_ir_count_instructions(textual_ir);
 
-        // Scope cleanup unwinding test
-        var clean_stack = scope_cleanup_new();
-        clean_stack = scope_cleanup_push(clean_stack, "lease_a");
-        clean_stack = scope_cleanup_push(clean_stack, "lease_b");
-        let unwound = scope_cleanup_unwind_to_depth(clean_stack, 0);
-
-        block_cnt + "|" + inst_cnt + "|" + unwound + "|" + two_blocks + "|" + two_insts + "|" + header;
+        block_cnt + "|" + inst_cnt + "|" + two_blocks + "|" + two_insts;
     "#;
 
     let res = eval_ir(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts.len(), 6, "Expected 6 parts, got: {}", res);
+    assert_eq!(parts.len(), 4, "Expected 4 parts, got: {}", res);
     assert_eq!(parts[0], "1", "Expected 1 block");
     assert_eq!(parts[1], "3", "Expected 3 instructions");
-    // Entries pushed a then b unwind b then a.
-    assert_eq!(parts[2], "lease_b;lease_a;", "LIFO scope unwinding failed");
-    assert_eq!(parts[3], "2", "A jump naming block1 is not a block header");
-    assert_eq!(parts[4], "3", "Expected 3 instructions in the two-block function");
-    // The loop header carries physics, never a source type name.
-    assert_eq!(
-        parts[5],
-        "block3(i: gpr_signed[64:IValue] = v0, i_end: gpr_signed[64:IValue] = v1):",
-        "Fixed-scalar loop header"
-    );
+    assert_eq!(parts[2], "2", "A jump naming block1 is not a block header");
+    assert_eq!(parts[3], "3", "Expected 3 instructions in the two-block function");
+
+    // The real PilIR text (selfhost/ir/text.pilot): printing a lowered
+    // program, parsing that text and printing it again gives the same bytes
+    // (`pilot ir roundtrip` fails otherwise), for hand-written IR and for
+    // programs lowered from source. F5 deleted the text-template lowering
+    // (selfhost/ir/lower_ast.pilot) this test used to call.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+    let bin = root.join("target/debug/pilot");
+    if !bin.exists() {
+        let st = std::process::Command::new("cargo")
+            .args(["build", "-q", "-p", "pilot-cli"])
+            .current_dir(&root)
+            .status()
+            .expect("cargo build -p pilot-cli");
+        assert!(st.success(), "Failed building pilot-cli binary");
+    }
+    for file in ["tests/ir/loop_params.pir", "tests/conformance/closures.pilot", "tests/conformance/guard_try.pilot", "tests/conformance/defer.pilot"] {
+        let out = std::process::Command::new(&bin)
+            .args(["ir", "roundtrip", file])
+            .current_dir(&root)
+            .output()
+            .expect("run pilot ir roundtrip");
+        assert_eq!(out.status.code(), Some(0), "{file}: {}", String::from_utf8_lossy(&out.stderr));
+    }
 
     guard.finish();
 }

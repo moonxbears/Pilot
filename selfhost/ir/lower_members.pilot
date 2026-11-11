@@ -245,9 +245,13 @@ pub fn property_read(lw: Lowerer, recv: u32, t: i64, name: str, n: i64) -> u32 {
         // the seed, when the type declares no member of that name.
         let get = native_for(lw, t, op_index(), native_member_hook());
         let is_literal_map = ty_is_named(p.tt, t) && ty_decl(p.tt, t) == ty_decl(p.tt, map_literal_type(lw));
-        if is_literal_map && get != "" && prog_member(p, t, name) == none {
+        // A register value (an integer) has no fields: the seed reads it as
+        // a record, which fails at run time with its error.
+        let record_get = native_for(lw, map_literal_type(lw), op_index(), native_member_hook());
+        let no_fields = in_register(lw.f.value_physics[recv]) && prog_member(p, t, name) == none;
+        if (is_literal_map && get != "" || no_fields && record_get != "") && prog_member(p, t, name) == none {
             let k = emit(lw, op_const_bytes(), 0, layout_of(lw.ls, prog_slot_type(p, literal_slot(nk_str()))), [pool_str(lw, name)], n);
-            return emit(lw, op_call_intrinsic(), intrinsic_index(lw, get), physics_of(lw, n), [recv, k], n);
+            return emit(lw, op_call_intrinsic(), intrinsic_index(lw, if is_literal_map { get } else { record_get }), physics_of(lw, n), [recv, k], n);
         }
         return unsupported(lw, n);
     }

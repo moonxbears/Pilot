@@ -176,7 +176,7 @@ pub fn lower_pattern_let(lw: Lowerer, n: i64) -> u32 {
     let done = ir_add_block(lw.f);
     jump_to(lw, done, [], n);
     switch_to(lw, fail);
-    emit_void(lw, op_unreachable(), 0, [], n);
+    emit_trap(lw, "the value does not match the destructuring pattern", n);
     switch_to(lw, done);
     return unit_value(lw, n);
 }

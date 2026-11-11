@@ -96,7 +96,9 @@ pub fn lower_setters(lw: Lowerer, idx: i64) {
     let v = ir_add_param(lw.f, lw.cur, if known { layout_of(lw.ls, vt) } else { field_physics(lw, lw.self_type, node_name(s, field)) });
     let bodies = setter_bodies(s, field);
     var settled = false;
+    var last = field;
     for body in bodies {
+        last = body;
         let row = setter_row(s, body);
         let param = row[1];
         let guard = row[2];
@@ -133,7 +135,7 @@ pub fn lower_setters(lw: Lowerer, idx: i64) {
         switch_to(lw, next);
     }
     // No setter takes the value.
-    if !settled { emit_void(lw, op_unreachable(), 0, [], field); }
+    if !settled { emit_trap(lw, f"no setter of `{ty_display(lw.inf.p.tt, lw.self_type)}.{node_name(s, field)}` accepts this value", last); }
 }
 
 /// Inside a setter, the setter-value word names the assigned value.

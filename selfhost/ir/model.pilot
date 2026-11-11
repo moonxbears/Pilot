@@ -254,6 +254,10 @@ pub pure fn op_unreachable()  -> u16 => 45;
 // read and written with `load` and `store` like a stack slot.
 pub pure fn op_global_addr()  -> u16 => 46;
 
+/// The span of an instruction with no place in the source (the start
+/// function's call of `main`); a runtime error's trace leaves it out.
+pub pure fn ir_no_span() -> i64 => -1;
+
 /// Opcode -> its printed name; index 0 is unused.
 pub fn opcode_names() -> List<str> => [
     "",

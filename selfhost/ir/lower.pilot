@@ -219,7 +219,12 @@ pub pure fn symbol_quote_slot() -> str => "25";
 pub pure fn byte_size_query() -> str => "byte_size";
 
 /// Lowers the program the checker analysed, starting at its `main`.
-pub fn lower_program(inf: Infer) -> IrModule {
+pub fn lower_program(inf: Infer) -> IrModule => lower_program_rooted(inf, false);
+
+/// Lowers the program; with `every_function`, also every concrete function
+/// the user's files declare at top level, whether or not anything calls it
+/// (a library emitted to another language, selfhost/transpile/source.pilot).
+pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
     let p = inf.p;
     let m = ir_module_new();
     let binding_of = Map<str, i64>();
@@ -248,6 +253,9 @@ pub fn lower_program(inf: Infer) -> IrModule {
     m.functions.push(ir_function_new("<start>", layout_unknown(lw.ls)));
     let mains = nl_get(p.fns, "main");
     lower_start(lw, if mains.len() > 0 { mains[mains.len() - 1] } else { -1 });
+    if every_function {
+        for d in user_functions(lw) { let _ = function_index(lw, d, ty_unknown()); }
+    }
     var i = 1;
     var more = true;
     while more {
@@ -410,6 +418,13 @@ pub fn emit(lw: Lowerer, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>,
 
 pub fn emit_void(lw: Lowerer, op: u16, sub: u16, args: List<u32>, n: i64) {
     let _ = ir_emit(lw.f, lw.cur, op, sub, layout_unknown(lw.ls), args, false, span_start(lw.inf.p.s, n));
+}
+
+/// Ends the current block with `unreachable` carrying the runtime error
+/// `message`, the one the seed's trap at that place reports.
+pub fn emit_trap(lw: Lowerer, message: str, n: i64) {
+    let text = emit(lw, op_const_bytes(), 0, layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_str()))), [pool_str(lw, message)], n);
+    emit_void(lw, op_unreachable(), 0, [text], n);
 }
 
 /// The value of a construct that has none.
@@ -776,7 +791,9 @@ pub fn lower_unary(lw: Lowerer, n: i64) -> u32 {
 pub fn lower_cast(lw: Lowerer, n: i64, value: i64) -> u32 {
     let to = physics_of(lw, n);
     let v = lower_expr(lw, value);
-    if !in_register(to) || !in_register(lw.f.value_physics[v]) { return unsupported(lw, n); }
+    // A value outside a register (a string) is converted as the seed does:
+    // the `cast` fails at run time with the seed's error.
+    if !in_register(to) { return unsupported(lw, n); }
     return emit(lw, op_cast(), 0, to, [v], n);
 }
 
@@ -791,6 +808,9 @@ fn lower_type_query(lw: Lowerer, n: i64, query: str, arg: i64) -> u32 {
 
 pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
+    // A call-quote mode (`f!(..)`, `sig f(..)`, ..) is recorded in the call's
+    // flags; its carrier values do not exist yet.
+    if flags(s, n) != 0 { return unsupported(lw, n); }
     let ch = children(s, n);
     var i = 1;
     let callee = ch[0];

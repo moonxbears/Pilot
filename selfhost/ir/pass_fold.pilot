@@ -117,7 +117,9 @@ pub fn fold_function(f: IrFunction, m: IrModule) -> bool {
             let inst = b.insts[i];
             let a = ir_args(f, inst);
             let op = inst.opcode;
-            if op == op_cond_br() && known.has(f"{a[0]}") {
+            // Only a 1-bit condition is known to be a boolean; any other
+            // value fails the branch at run time, so it is left to do so.
+            if op == op_cond_br() && known.has(f"{a[0]}") && is_bit(f.value_physics[a[0]]) {
                 // [cond, then, n_then, then args.., else, n_else, else args..]
                 let take_then = known.get(f"{a[0]}") != 0;
                 let start = if take_then { 1 } else { 3 + a[2] };

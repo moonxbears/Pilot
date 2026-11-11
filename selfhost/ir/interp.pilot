@@ -7,14 +7,15 @@
 // follows its physics: a 1-bit register constant is a boolean, a 64-bit
 // unsigned register constant is unsigned. Each opcode is run by the handler
 // registered for it in `interp_handlers()`; an opcode with none stops at the
-// seam `ir.interp_opcode`. Engine operations (`call_intrinsic`) are run by
-// the hook registered for them in `interp_hooks()`; a hook with none stops at
-// the seam `ir.interp_hook`.
+// seam `ir.interp_opcode`. Engine operations (`call_intrinsic`) are the
+// seed's own, run under the names registered in `interp_engine_ops()`; one
+// with none stops at the seam `ir.interp_hook`. Operators, branch
+// conditions, engine operations and global reads that fail stop the program
+// with the seed's runtime error (selfhost/ir/fault.pilot).
 pub lvl(0) pkg Pilot.SelfHost.Ir.Interp;
 
 use selfhost.ir.model.*;
-use std.io;
-use std.env;
+use selfhost.ir.fault.*;
 
 /// One activation of a function.
 pub struct IrFrame : IObject {
@@ -27,28 +28,50 @@ pub struct IrFrame : IObject {
     /// The module's globals, shared by every frame; a `global_addr` value
     /// is `-1 - g`, so it never collides with a stack slot index.
     pub globals: List<any>;
+    /// Whether each global's declaration has run (stored it), shared.
+    pub assigned: List<bool>;
     /// Where control goes after a terminator: the block, or -1 to return.
     pub next: i64;
     /// Arguments for the next block's parameters.
     pub next_args: List<any>;
     pub ret: any;
     pub handlers: List<any>;
-    pub hooks: Map<str, any>;
+    pub engine_ops: Map<str, str>;
+    /// The program's runtime error, shared by every frame.
+    pub fault: IrFault;
+    /// The program's script arguments.
+    pub args: List<str>;
 }
 
+/// The engine operation that gives the program its script arguments; the
+/// interpreter answers it with the arguments of the program it runs, not
+/// those of the tool it runs in.
+pub pure fn program_args_op() -> str => "proc_args";
+
 /// Runs function 0 (the lowering's start function, or `main` in hand-written
-/// IR) and returns the exit code `pilot run` would.
-pub fn ir_run(m: IrModule) -> i64 {
-    let handlers = interp_handlers();
-    let hooks = interp_hooks();
+/// IR) and returns the exit code `pilot run` would: on a runtime error, 1
+/// after reporting it with the places in `sources`. `args` are the program's
+/// script arguments.
+pub fn ir_run(m: IrModule, sources: IrSourceMap, args: List<str>) -> i64 {
     var globals: List<any> = [];
-    for g in m.globals { globals.push(none); }
-    let out = interp_call(m, 0, [], handlers, hooks, globals);
+    var assigned: List<bool> = [];
+    for g in m.globals {
+        globals.push(none);
+        assigned.push(false);
+    }
+    let top = IrFrame { m: m, f: m.functions[0], vals: [], cells: [], globals: globals, assigned: assigned, next: 0, next_args: [], ret: none, handlers: interp_handlers(), engine_ops: interp_engine_ops(), fault: ir_fault_new(), args: args };
+    let out = interp_call(top, 0, []);
+    if top.fault.active {
+        report_fault(top.fault, sources);
+        return 1;
+    }
     // `main` without a value exits 0, as on the seed.
     return if out == none { 0 } else { out };
 }
 
-fn interp_call(m: IrModule, fi: i64, args: List<any>, handlers: List<any>, hooks: Map<str, any>, globals: List<any>) -> any {
+/// Calls function `fi` with `args` from frame `caller`.
+fn interp_call(caller: IrFrame, fi: i64, args: List<any>) -> any {
+    let m = caller.m;
     let f = m.functions[fi];
     var vals: List<any> = [];
     var i = 0;
@@ -56,7 +79,8 @@ fn interp_call(m: IrModule, fi: i64, args: List<any>, handlers: List<any>, hooks
         vals.push(none);
         i = i + 1;
     }
-    let fr = IrFrame { m: m, f: f, vals: vals, cells: [], globals: globals, next: 0, next_args: args, ret: none, handlers: handlers, hooks: hooks };
+    let fr = IrFrame { m: m, f: f, vals: vals, cells: [], globals: caller.globals, assigned: caller.assigned, next: 0, next_args: args, ret: none, handlers: caller.handlers, engine_ops: caller.engine_ops, fault: caller.fault, args: caller.args };
+    let handlers = fr.handlers;
     while fr.next >= 0 {
         let b = f.blocks[fr.next];
         var p = 0;
@@ -71,9 +95,23 @@ fn interp_call(m: IrModule, fi: i64, args: List<any>, handlers: List<any>, hooks
                 return seam("ir.interp_opcode", f"the IR interpreter has no handler for `{opcode_name(inst.opcode)}`");
             }
             h(fr, inst);
+            if fr.fault.active {
+                // Unwinding: the failing instruction's place, then each call's.
+                fr.fault.spans.push(f.spans[inst.span_id]);
+                return none;
+            }
         }
     }
     return fr.ret;
+}
+
+/// Engine operation `name` on `args` as the seed runs it; on failure the
+/// program stops with the seed's message.
+fn checked(fr: IrFrame, name: str, args: List<any>) -> any {
+    let r = op_checked(name, args);
+    if r[0] == true { return r[1]; }
+    raise_fault(fr.fault, r[1]);
+    return none;
 }
 
 fn arg_values(fr: IrFrame, inst: IrInst) -> List<any> {
@@ -128,30 +166,24 @@ fn run_undef(fr: IrFrame, inst: IrInst) { put(fr, inst, none); }
 
 fn binary(fr: IrFrame, inst: IrInst) -> List<any> => arg_values(fr, inst);
 
-fn run_add(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] + a[1]); }
-fn run_sub(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] - a[1]); }
-fn run_mul(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] * a[1]); }
-fn run_div(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] / a[1]); }
-fn run_rem(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] % a[1]); }
-fn run_bit_and(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] & a[1]); }
-fn run_bit_or(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] | a[1]); }
-fn run_shl(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] << a[1]); }
-fn run_shr(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] >> a[1]); }
+/// A binary operator on the instruction's two operands, as the seed's.
+fn run_binary(fr: IrFrame, inst: IrInst, symbol: str) { put(fr, inst, checked(fr, symbol, binary(fr, inst))); }
 
-fn run_bit_xor(fr: IrFrame, inst: IrInst) { let a = binary(fr, inst); put(fr, inst, a[0] ^ a[1]); }
+fn run_add(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "+"); }
+fn run_sub(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "-"); }
+fn run_mul(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "*"); }
+fn run_div(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "/"); }
+fn run_rem(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "%"); }
+fn run_bit_and(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "&"); }
+fn run_bit_or(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "|"); }
+fn run_bit_xor(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "^"); }
+fn run_shl(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "<<"); }
+fn run_shr(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, ">>"); }
 
-fn run_cmp(fr: IrFrame, inst: IrInst) {
-    let a = binary(fr, inst);
-    let p = inst.subop;
-    var r = false;
-    if p == 0 { r = a[0] == a[1]; }
-    else if p == 1 { r = a[0] != a[1]; }
-    else if p == 2 { r = a[0] < a[1]; }
-    else if p == 3 { r = a[0] <= a[1]; }
-    else if p == 4 { r = a[0] > a[1]; }
-    else { r = a[0] >= a[1]; }
-    put(fr, inst, r);
-}
+/// The operator of each comparison predicate (`CmpPred` 0..5).
+fn cmp_symbols() -> List<str> => ["==", "!=", "<", "<=", ">", ">="];
+
+fn run_cmp(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, cmp_symbols()[inst.subop]); }
 
 fn run_stack_slot(fr: IrFrame, inst: IrInst) {
     fr.cells.push(none);
@@ -162,17 +194,31 @@ fn run_global_addr(fr: IrFrame, inst: IrInst) { put(fr, inst, -1 - inst.subop); 
 
 fn run_load(fr: IrFrame, inst: IrInst) {
     let addr = fr.vals[ir_args(fr.f, inst)[0]];
-    put(fr, inst, if addr < 0 { fr.globals[-1 - addr] } else { fr.cells[addr] });
+    if addr >= 0 {
+        put(fr, inst, fr.cells[addr]);
+        return;
+    }
+    let g = -1 - addr;
+    if !fr.assigned[g] {
+        raise_fault(fr.fault, f"`{fr.m.globals[g].name}` is read before its declaration has run");
+        return;
+    }
+    put(fr, inst, fr.globals[g]);
 }
 
 fn run_store(fr: IrFrame, inst: IrInst) {
     let a = ir_args(fr.f, inst);
     let addr = fr.vals[a[0]];
-    if addr < 0 { fr.globals[-1 - addr] = fr.vals[a[1]]; } else { fr.cells[addr] = fr.vals[a[1]]; }
+    if addr < 0 {
+        fr.globals[-1 - addr] = fr.vals[a[1]];
+        fr.assigned[-1 - addr] = true;
+    } else {
+        fr.cells[addr] = fr.vals[a[1]];
+    }
 }
 
 fn run_call_direct(fr: IrFrame, inst: IrInst) {
-    put(fr, inst, interp_call(fr.m, inst.subop, arg_values(fr, inst), fr.handlers, fr.hooks, fr.globals));
+    put(fr, inst, interp_call(fr, inst.subop, arg_values(fr, inst)));
 }
 
 /// `call_indirect f, args..`: the function record `f` names, called with
@@ -185,17 +231,22 @@ fn run_call_indirect(fr: IrFrame, inst: IrInst) {
     while i < a.len() { args.push(a[i]); i = i + 1; }
     i = 1;
     while i < rec.len() { args.push(rec[i]); i = i + 1; }
-    put(fr, inst, interp_call(fr.m, rec[0], args, fr.handlers, fr.hooks, fr.globals));
+    put(fr, inst, interp_call(fr, rec[0], args));
 }
 
 fn run_call_intrinsic(fr: IrFrame, inst: IrInst) {
     let name = fr.m.intrinsics[inst.subop];
-    if !fr.hooks.has(name) {
+    if name == program_args_op() {
+        var copy: List<any> = [];
+        for a in fr.args { copy.push(a); }
+        put(fr, inst, copy);
+        return;
+    }
+    if !fr.engine_ops.has(name) {
         put(fr, inst, seam("ir.interp_hook", f"the IR interpreter does not run the engine operation `{name}`"));
         return;
     }
-    let hook = fr.hooks.get(name);
-    put(fr, inst, hook(arg_values(fr, inst)));
+    put(fr, inst, checked(fr, fr.engine_ops.get(name), arg_values(fr, inst)));
 }
 
 /// An aggregate is a record of its field values. Records are shared, not
@@ -222,11 +273,8 @@ fn run_insert_field(fr: IrFrame, inst: IrInst) {
 fn run_cast(fr: IrFrame, inst: IrInst) {
     let v = fr.vals[ir_args(fr.f, inst)[0]];
     let phy = inst.physics;
-    put(fr, inst, num_convert(v, reg_class_name(phy.reg_class), phy.bit_width));
+    put(fr, inst, checked(fr, "num_convert", [v, reg_class_name(phy.reg_class), phy.bit_width]));
 }
-
-/// The seed's numeric conversion to register class `class` of `width` bits.
-fn num_convert(v: any, class: str, width: i64) -> any => __engine("num_convert", v, class, width);
 
 fn run_jump(fr: IrFrame, inst: IrInst) {
     let a = ir_args(fr.f, inst);
@@ -242,7 +290,8 @@ fn run_jump(fr: IrFrame, inst: IrInst) {
 
 fn run_cond_br(fr: IrFrame, inst: IrInst) {
     let a = ir_args(fr.f, inst);
-    let taken = fr.vals[a[0]] == true;
+    let taken = checked(fr, "if", [fr.vals[a[0]]]) == true;
+    if fr.fault.active { return; }
     let at = if taken { 1 } else { 3 + a[2] };
     var args: List<any> = [];
     var i = 0;
@@ -252,6 +301,12 @@ fn run_cond_br(fr: IrFrame, inst: IrInst) {
     }
     fr.next = a[at];
     fr.next_args = args;
+}
+
+/// `unreachable [message]`: stops the program with `message`.
+fn run_unreachable(fr: IrFrame, inst: IrInst) {
+    let a = ir_args(fr.f, inst);
+    raise_fault(fr.fault, if a.len() > 0 { fr.vals[a[0]] } else { "entered code the program cannot reach" });
 }
 
 fn run_return(fr: IrFrame, inst: IrInst) {
@@ -297,116 +352,27 @@ pub fn interp_handlers() -> List<any> {
     hs[op_jump()] = run_jump;
     hs[op_cond_br()] = run_cond_br;
     hs[op_return()] = run_return;
+    hs[op_unreachable()] = run_unreachable;
     return hs;
 }
 
-/// Engine operation -> the function that runs it. The IR interpreter runs
-/// on the seed, so each one is the same operation on the seed's own values.
-pub fn interp_hooks() -> Map<str, any> {
-    let hooks = Map<str, any>();
-    hooks.set("rt_print", (a) => print(spaced(a)));
-    hooks.set("rt_eprint", (a) => eprint(spaced(a)));
-    hooks.set("rt_assert", (a) => if a.len() > 1 { engine_assert(a[0], a[1]) } else { engine_assert1(a[0]) });
-    hooks.set("stdin_read_line", (a) => io.read_line());
-    hooks.set("stdin_read_all", (a) => io.read_all());
-    hooks.set("proc_args", (a) => env.args());
-    hooks.set("list_new", (a) => new_list());
-    hooks.set("list_push", (a) => list_push(a[0], a[1]));
-    hooks.set("list_extend", (a) => list_extend(a[0], a[1], a[2]));
-    hooks.set("list_pop", (a) => list_pop(a[0]));
-    hooks.set("list_remove_at", (a) => list_remove_at(a[0], a[1]));
-    hooks.set("list_get", (a) => list_get(a[0], a[1]));
-    hooks.set("list_set", (a) => list_set(a[0], a[1], a[2]));
-    hooks.set("is_null", (a) => a[0] == none);
-    hooks.set("num_pow", (a) => a[0] ** a[1]);
-    hooks.set("str_len", (a) => a[0].len());
-    hooks.set("str_slice", (a) => a[0].slice(a[1], a[2]));
-    hooks.set("str_find", (a) => if a.len() > 2 { a[0].find(a[1], a[2]) } else { a[0].find(a[1], 0) });
-    hooks.set("str_contains", (a) => a[0].contains(a[1]));
-    hooks.set("str_starts_with", (a) => a[0].starts_with(a[1]));
-    hooks.set("str_ends_with", (a) => a[0].ends_with(a[1]));
-    hooks.set("str_trim", (a) => a[0].trim());
-    hooks.set("str_replace", (a) => a[0].replace(a[1], a[2]));
-    hooks.set("str_byte_at", (a) => a[0].byte_at(a[1]));
-    hooks.set("to_str", (a) => a[0].to_str());
-    hooks.set("map_new", (a) => new_map());
-    hooks.set("map_get", (a) => map_get(a[0], a[1]));
-    hooks.set("map_set", (a) => map_set(a[0], a[1], a[2]));
-    hooks.set("map_has", (a) => map_has(a[0], a[1]));
-    hooks.set("map_remove", (a) => map_remove(a[0], a[1]));
-    return hooks;
-}
-
-/// The values of `a` as `print` shows them, one space apart.
-fn spaced(a: List<any>) -> str {
-    var out = "";
-    var i = 0;
-    while i < a.len() {
-        if i > 0 { out = out + " "; }
-        out = out + f"{a[i]}";
-        i = i + 1;
+/// Engine operation the lowering calls -> the seed engine operation that
+/// runs it. The IR interpreter runs on the seed, so each is the seed's own
+/// operation on the seed's own values; indexing reads and writes are the
+/// seed's record and list access, and `num_pow` is its `**` operator.
+pub fn interp_engine_ops() -> Map<str, str> {
+    let ops = Map<str, str>();
+    for name in [
+        "rt_print", "rt_eprint", "rt_assert", "stdin_read_line", "stdin_read_all",
+        "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
+        "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
+        "str_trim", "str_replace", "str_byte_at", "to_str",
+        "map_new", "map_get", "map_set", "map_has", "map_remove", "seam_open",
+    ] {
+        ops.set(name, name);
     }
-    return out;
-}
-
-/// The seed's `assert`: fails the run unless `cond` holds.
-fn engine_assert(cond: any, note: any) -> any => __engine("rt_assert", cond, note);
-fn engine_assert1(cond: any) -> any => __engine("rt_assert", cond);
-
-fn new_list() -> List<any> {
-    var xs: List<any> = [];
-    return xs;
-}
-
-fn list_push(list: any, item: any) -> any {
-    let xs: List<any> = list;
-    xs.push(item);
-    return xs;
-}
-
-/// The seed's `list_extend`: appends `items`' elements to `list`, or with
-/// `deep` its leaves at any depth.
-fn list_extend(list: any, items: any, deep: any) -> any => __engine("list_extend", list, items, deep);
-
-fn list_pop(list: any) -> any {
-    let xs: List<any> = list;
-    return xs.pop();
-}
-
-fn list_remove_at(list: any, i: any) -> any {
-    let xs: List<any> = list;
-    return xs.remove_at(i);
-}
-
-fn list_get(list: any, i: any) -> any {
-    let xs: List<any> = list;
-    return xs[i];
-}
-
-fn list_set(list: any, i: any, v: any) {
-    let xs: List<any> = list;
-    xs[i] = v;
-}
-
-fn new_map() -> Map<any, any> => Map<any, any>();
-
-fn map_get(map: any, k: any) -> any {
-    let m: Map<any, any> = map;
-    return m.get(k);
-}
-
-fn map_set(map: any, k: any, v: any) -> any {
-    let m: Map<any, any> = map;
-    m.set(k, v);
-    return m;
-}
-
-fn map_has(map: any, k: any) -> bool {
-    let m: Map<any, any> = map;
-    return m.has(k);
-}
-
-fn map_remove(map: any, k: any) -> any {
-    let m: Map<any, any> = map;
-    return m.remove(k);
+    ops.set("list_get", "map_get");
+    ops.set("list_set", "map_set");
+    ops.set("num_pow", "**");
+    return ops;
 }

@@ -1,254 +1,287 @@
-// ============================================================================
+// ==============================================================================
 // FILE: selfhost/transpile/emit_python.pilot
-// Milestone 57.2: Modular Python 3 Source Emitter (`pilot --emit python`)
-// Emits clean Python 3 functions and classes from Name-Blind Transpile IR.
-// ============================================================================
+// `pilot emit python`: PilIR as Python 3 (selfhost/transpile/source.pilot).
+// ==============================================================================
+// Integers are Python integers wrapped to their register width after every
+// operation that can leave it; `/` and `%` on integers truncate toward zero
+// as the seed's do. Floats are binary64 only. Records are lists. `print`
+// shows values as the seed does (`true`, `1` for 1.0, no exponent).
+pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitPython;
 
-pub pure fn emit_python_function_source(
-    fn_name: str,
-    params_list: str,
-    body_expr: str
-) -> str {
-    return "def " + fn_name + "(" + params_list + "):\n"
-        + "    " + nameof(return) + " " + body_expr + "\n";
-}
+use selfhost.ir.model.*;
+use selfhost.transpile.source.*;
 
-pub fn tpy_emit_expr(nid: i64) -> str {
-    if nid < 0 { return "0"; }
-    let k = __engine("ast_node_kind", nid);
-    let ok = __engine("ast_orig_kind", nid);
-
-    if k == 14 {
-        return __engine("sym_str", __engine("ast_node_sym", nid));
-    }
-    if k == 15 {
-        let lk = __engine("ast_node_lit_kind", nid);
-        if lk == 1 {
-            return "" + __engine("ast_node_raw_bits", nid);
-        }
-        if lk == 2 {
-            return __engine("source_slice", __engine("ast_span_start", nid), __engine("ast_span_end", nid));
-        }
-        if lk == 3 {
-            return tir_escape_str_lit(__engine("sym_str", __engine("ast_node_sym", nid)));
-        }
-        if lk == 4 {
-            if __engine("ast_node_raw_bits", nid) != 0 { return "True"; }
-            return "False";
-        }
-        return seam("emit.unlowered_literal", f"the python emitter has no lowering for literal kind {lk}");
-    }
-    if ok == 206 {
-        let inner = tpy_emit_expr(__engine("ast_child_at", nid, 0));
-        let fl = __engine("ast_node_flags", nid);
-        if fl == 5 { return "(not " + inner + ")"; }
-        if fl == 4 { return "(~" + inner + ")"; }
-        return "(-" + inner + ")";
-    }
-    if k == 19 {
-        let op = __engine("ast_node_raw_bits", nid);
-        let lhs = tpy_emit_expr(__engine("ast_child_at", nid, 0));
-        let rhs = tpy_emit_expr(__engine("ast_child_at", nid, 1));
-        if op == 4 {
-            return "int(" + lhs + " / " + rhs + ")";
-        }
-        if op == 14 {
-            return "(" + lhs + " and " + rhs + ")";
-        }
-        if op == 15 {
-            return "(" + lhs + " or " + rhs + ")";
-        }
-        return "(" + lhs + " " + tir_binop_sym(op) + " " + rhs + ")";
-    }
-    if k == 16 {
-        let cc = __engine("ast_child_count", nid);
-        if cc <= 0 { return seam("emit.unlowered_expr", "a call node without a callee reached the python emitter"); }
-        let callee_nid = __engine("ast_child_at", nid, 0);
-        let cname = __engine("sym_str", __engine("ast_node_sym", callee_nid));
-        if tir_is_struct_literal_call(nid) {
-            let map_nid = __engine("ast_child_at", nid, 1);
-            let mcc = __engine("ast_child_count", map_nid);
-            var fields_s = "";
-            var mi = 0;
-            while mi + 1 < mcc {
-                let k_nid = __engine("ast_child_at", map_nid, mi);
-                let v_nid = __engine("ast_child_at", map_nid, mi + 1);
-                let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
-                if fields_s.len() > 0 {
-                    fields_s = fields_s + ", ";
-                }
-                fields_s = fields_s + fname + "=" + tpy_emit_expr(v_nid);
-                mi = mi + 2;
-            }
-            return cname + "(" + fields_s + ")";
-        }
-        var args_s = "";
-        var ai = 1;
-        while ai < cc {
-            if ai > 1 { args_s = args_s + ", "; }
-            args_s = args_s + tpy_emit_expr(__engine("ast_child_at", nid, ai));
-            ai = ai + 1;
-        }
-        return cname + "(" + args_s + ")";
-    }
-    if k == 17 {
-        let recv = tpy_emit_expr(__engine("ast_child_at", nid, 0));
-        let fld = __engine("sym_str", __engine("ast_node_sym", nid));
-        return recv + "." + fld;
-    }
-    if ok == 210 {
-        let base_e = tpy_emit_expr(__engine("ast_child_at", nid, 0));
-        let idx_e = tpy_emit_expr(__engine("ast_child_at", nid, 1));
-        return base_e + "[" + idx_e + "]";
-    }
-    return seam("emit.unlowered_expr", f"the python emitter has no lowering for AST node kind {k} (original kind {ok})");
-}
-
-pub fn tpy_emit_block_body(blk_nid: i64, depth: i64) -> str {
-    let ind = tir_indent_spaces(depth);
-    if blk_nid < 0 { return ind + "pass\n"; }
-    if __engine("ast_node_kind", blk_nid) != 18 {
-        let single = tpy_emit_stmt(blk_nid, depth);
-        if single.len() == 0 {
-            return ind + "pass\n";
-        }
-        return single;
-    }
-    let cc = __engine("ast_child_count", blk_nid);
-    if cc == 0 {
-        return ind + "pass\n";
-    }
-    var out = "";
-    var i = 0;
-    while i < cc {
-        out = out + tpy_emit_stmt(__engine("ast_child_at", blk_nid, i), depth);
-        i = i + 1;
-    }
-    if out.len() == 0 {
-        return ind + "pass\n";
-    }
-    return out;
-}
-
-pub fn tpy_emit_stmt(nid: i64, depth: i64) -> str {
-    if nid < 0 { return ""; }
-    let k = __engine("ast_node_kind", nid);
-    let ok = __engine("ast_orig_kind", nid);
-    let ind = tir_indent_spaces(depth);
-
-    if k == 18 {
-        return tpy_emit_block_body(nid, depth);
-    }
-    if k == 4 {
-        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        let init_s = if __engine("ast_child_count", nid) > 0 {
-            tpy_emit_expr(__engine("ast_child_at", nid, 0))
-        } else {
-            "0"
-        };
-        return ind + vname + " = " + init_s + "\n";
-    }
-    if k == 20 {
-        let lhs = tpy_emit_expr(__engine("ast_child_at", nid, 0));
-        let rhs = tpy_emit_expr(__engine("ast_child_at", nid, 1));
-        return ind + lhs + " = " + rhs + "\n";
-    }
-    if k == 6 {
-        let cond_s = tpy_emit_expr(__engine("ast_child_at", nid, 0));
-        let then_s = tpy_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
-        var res = ind + "if " + cond_s + ":\n" + then_s;
-        if __engine("ast_child_count", nid) >= 3 {
-            let else_s = tpy_emit_block_body(__engine("ast_child_at", nid, 2), depth + 1);
-            res = res + ind + "else:\n" + else_s;
-        }
-        return res;
-    }
-    if k == 7 || ok == 106 {
-        if ok == 105 {
-            let lbody = tpy_emit_block_body(__engine("ast_child_at", nid, 0), depth + 1);
-            return ind + "while True:\n" + lbody;
-        }
-        let wcond = tpy_emit_expr(__engine("ast_child_at", nid, 0));
-        let wbody = tpy_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
-        return ind + "while " + wcond + ":\n" + wbody;
-    }
-    if ok == 107 { return ind + "break\n"; }
-    if ok == 108 { return ind + "continue\n"; }
-    if k == 8 {
-        if __engine("ast_child_count", nid) > 0 {
-            return ind + "return " + tpy_emit_expr(__engine("ast_child_at", nid, 0)) + "\n";
-        }
-        return ind + "return None\n";
-    }
-    if ok == 110 {
-        if __engine("ast_child_count", nid) > 0 {
-            return ind + tpy_emit_expr(__engine("ast_child_at", nid, 0)) + "\n";
-        }
+pub struct PythonDialect : ISourceDialect {
+    pub fn language() -> str => "Python";
+    pub fn typed() -> bool => false;
+    pub fn reserved() -> List<str> => [
+        "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue",
+        "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import",
+        "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
+        "with", "yield", "print", "int", "float", "str", "list", "len", "math", "sys", "decimal",
+    ];
+    pub fn type_name(p: IrTypePhysics) -> str? {
+        if is_float(p) && p.bit_width != 64 { return none; }
+        if p.reg_class == reg_class_simd_vector() || p.reg_class == reg_class_raw_ptr() { return none; }
         return "";
     }
-    return ind + tpy_emit_expr(nid) + "\n";
+    pub fn prelude() -> List<str> => [
+        "import decimal, math, sys",
+        "",
+        "def pilot_wrap(x, bits, signed):",
+        "    x &= (1 << bits) - 1",
+        "    return x - (1 << bits) if signed and x >> (bits - 1) else x",
+        "",
+        "def pilot_trap(message):",
+        "    print('runtime error: ' + message, file=sys.stderr)",
+        "    sys.exit(1)",
+        "",
+        "def pilot_div(a, b, bits, signed):",
+        "    if b == 0:",
+        "        pilot_trap('integer division by zero')",
+        "    q = abs(a) // abs(b)",
+        "    return pilot_wrap(q if (a < 0) == (b < 0) else -q, bits, signed)",
+        "",
+        "def pilot_rem(a, b, bits, signed):",
+        "    if b == 0:",
+        "        pilot_trap('integer division by zero')",
+        "    q = abs(a) // abs(b)",
+        "    return pilot_wrap(a - b * (q if (a < 0) == (b < 0) else -q), bits, signed)",
+        "",
+        "def pilot_show(x):",
+        "    if isinstance(x, bool):",
+        "        return 'true' if x else 'false'",
+        "    if isinstance(x, float):",
+        "        if x != x:",
+        "            return 'NaN'",
+        "        if x in (float('inf'), float('-inf')):",
+        "            return 'inf' if x > 0 else '-inf'",
+        "        s = format(decimal.Decimal(repr(x)), 'f')",
+        "        return s.rstrip('0').rstrip('.') if '.' in s else s",
+        "    if x is None:",
+        "        return 'null'",
+        "    if isinstance(x, list):",
+        "        return '[' + ', '.join(pilot_show(e) for e in x) + ']'",
+        "    if isinstance(x, dict):",
+        "        return '{ ' + ', '.join(sorted(k + ': ' + pilot_show(v) for k, v in x.items())) + ' }'",
+        "    return str(x)",
+        "",
+        "def pilot_add(a, b):",
+        "    if isinstance(a, str) or isinstance(b, str):",
+        "        return pilot_show(a) + pilot_show(b)",
+        "    return a + b",
+        "def pilot_eq(a, b):",
+        "    if isinstance(a, list) and isinstance(b, list):",
+        "        return a is b or (len(a) == len(b) and all(pilot_eq(x, y) for x, y in zip(a, b)))",
+        "    na = isinstance(a, (int, float)) and not isinstance(a, bool)",
+        "    nb = isinstance(b, (int, float)) and not isinstance(b, bool)",
+        "    if na and nb:",
+        "        return a == b if isinstance(a, int) and isinstance(b, int) else float(a) == float(b)",
+        "    if isinstance(a, (str, bool)) and type(a) is type(b):",
+        "        return a == b",
+        "    return a is b",
+        "def pilot_kind(x):",
+        "    if x is None:",
+        "        return 'null'",
+        "    if isinstance(x, bool):",
+        "        return 'boolean'",
+        "    if isinstance(x, int):",
+        "        return 'integer'",
+        "    if isinstance(x, float):",
+        "        return 'float'",
+        "    if isinstance(x, str):",
+        "        return 'string'",
+        "    if isinstance(x, list):",
+        "        return 'list'",
+        "    if isinstance(x, dict):",
+        "        return 'record'",
+        "    return 'function'",
+        "",
+        "def pilot_key(k):",
+        "    return k if isinstance(k, str) else pilot_show(k)",
+        "",
+        "def pilot_index(o, k):",
+        "    if isinstance(k, bool) or not isinstance(k, int):",
+        "        pilot_trap('list index must be an integer, found ' + pilot_kind(k))",
+        "    if k < 0 or k >= len(o):",
+        "        pilot_trap('list index ' + str(k) + ' out of bounds for length ' + str(len(o)))",
+        "    return k",
+        "",
+        "def pilot_map_get(o, k):",
+        "    if isinstance(o, list):",
+        "        return o[pilot_index(o, k)]",
+        "    if isinstance(o, str) and isinstance(k, int) and not isinstance(k, bool):",
+        "        b = o.encode()",
+        "        if 0 <= k < len(b):",
+        "            return b[k]",
+        "        pilot_trap('string index ' + str(k) + ' out of bounds for length ' + str(len(b)))",
+        "    if isinstance(o, dict):",
+        "        return o.get(pilot_key(k))",
+        "    pilot_trap('cannot read `' + pilot_key(k) + '` from ' + pilot_kind(o))",
+        "",
+        "def pilot_map_set(o, k, v):",
+        "    if isinstance(o, list):",
+        "        o[pilot_index(o, k)] = v",
+        "        return o",
+        "    if isinstance(o, dict):",
+        "        o[pilot_key(k)] = v",
+        "        return o",
+        "    pilot_trap('cannot write `' + pilot_key(k) + '` on ' + pilot_kind(o))",
+        "",
+        "def pilot_map_has(m, k):",
+        "    return pilot_key(k) in m",
+        "",
+        "def pilot_map_remove(m, k):",
+        "    return m.pop(pilot_key(k), None)",
+        "",
+        "def pilot_list_push(l, x):",
+        "    l.append(x)",
+        "    return l",
+        "",
+        "def pilot_list_pop(l):",
+        "    if not l:",
+        "        pilot_trap('pop from an empty list')",
+        "    return l.pop()",
+        "",
+        "def pilot_str_len(x):",
+        "    return len(x.encode()) if isinstance(x, str) else len(x)",
+        "",
+        "def pilot_num_pow(a, b):",
+        "    if isinstance(a, int) and isinstance(b, int) and not isinstance(a, bool):",
+        "        if b < 0:",
+        "            return float(a) ** b",
+        "        return pilot_wrap(pow(a, b, 1 << 64), 64, True)",
+        "    try:",
+        "        return math.pow(a, b)",
+        "    except (ValueError, OverflowError):",
+        "        return math.nan if a < 0 else math.inf",
+        "",
+        "def pilot_rt_assert(cond, note=None):",
+        "    if cond is not True:",
+        "        pilot_trap('assertion failed' + ('' if note is None else ': ' + pilot_show(note)))",
+        "",
+        "def pilot_seam_open(id, note=None):",
+        "    pilot_trap('SEAM001: unconnected seam `' + id + '`: ' + ('' if note is None else pilot_show(note)))",
+        "",
+    ];
+    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => name + " = None";
+    pub fn module_open(protos: List<str>) -> List<str> => [];
+    pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str => "";
+    pub fn module_close(entry: str, has_code: bool) -> List<str> {
+        if entry == "" { return []; }
+        if has_code { return [f"sys.exit({entry}())"]; }
+        return [f"{entry}()"];
+    }
+    pub fn fn_open(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str =>
+        f"def {name}({joined(params)}):";
+    pub fn fn_close() -> str => "";
+    pub fn fn_globals(globals: List<str>) -> List<str> => if globals.len() == 0 { [] } else { ["global " + joined(globals)] };
+    pub fn param_prologue(name: str, p: IrTypePhysics) -> List<str> => [];
+    pub fn locals(names: List<str>, phys: List<IrTypePhysics>) -> List<str> => [];
+    pub fn zero(p: IrTypePhysics) -> str => if is_bool(p) { "False" } else if is_float(p) { "0.0" } else if is_int(p) { "0" } else { "None" };
+    pub fn unit_value() -> str? => "None";
+    pub fn state_decl(name: str) -> str => name + " = 0";
+    pub fn dispatch_open() -> str => "while True:";
+    pub fn dispatch_close() -> str => "";
+    pub fn case_open(state: str, b: i64, first: bool) -> str => (if first { "if " } else { "elif " }) + f"{state} == {b}:";
+    pub fn cases_close() -> str => "";
+    pub fn if_open(cond: str) -> str => f"if {cond}:";
+    pub fn else_line() -> str => "else:";
+    pub fn if_close() -> str => "";
+    pub fn assign(lhs: str, rhs: str) -> str => f"{lhs} = {rhs}";
+    pub fn parallel_assign(lhs: List<str>, rhs: List<str>, phys: List<IrTypePhysics>) -> List<str> => [joined(lhs) + " = " + joined(rhs)];
+    pub fn expr_stmt(e: str) -> str => e;
+    pub fn ret(e: str) -> str => if e == "" { "return" } else { "return " + e };
+    pub fn trap(message: str) -> str => f"pilot_trap({self.str_lit(message)})";
+    pub fn int_lit(digits: str, p: IrTypePhysics) -> str? => digits;
+    pub fn bool_lit(b: bool) -> str => py_bool(b);
+    pub fn float_lit(text: str, p: IrTypePhysics) -> str? {
+        if p.bit_width != 64 { return none; }
+        if text == "NaN" { return "math.nan"; }
+        if text == "inf" { return "math.inf"; }
+        if text == "-inf" { return "-math.inf"; }
+        return text;
+    }
+    pub fn str_lit(raw: str) -> str => escaped(raw, (b) => "\\x" + hex2(b));
+    pub fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str? {
+        if is_float(p) {
+            if op == "add" { return f"({a} + {b})"; }
+            if op == "sub" { return f"({a} - {b})"; }
+            if op == "mul" { return f"({a} * {b})"; }
+            if op == "div" { return f"({a} / {b})"; }
+            if op == "rem" { return f"math.fmod({a}, {b})"; }
+            return none;
+        }
+        if is_bool(p) {
+            if op == "and" { return f"({a} & {b})"; }
+            if op == "or" { return f"({a} | {b})"; }
+            if op == "xor" { return f"({a} ^ {b})"; }
+            return none;
+        }
+        if !is_int(p) {
+            return if op == "add" { f"pilot_add({a}, {b})" } else { none };
+        }
+        let w = f"{p.bit_width}, {py_bool(is_signed(p))}";
+        if op == "div" { return f"pilot_div({a}, {b}, {w})"; }
+        if op == "rem" { return f"pilot_rem({a}, {b}, {w})"; }
+        let mask = p.bit_width - 1;
+        let e = if op == "add" { f"{a} + {b}" } else if op == "sub" { f"{a} - {b}" } else if op == "mul" { f"{a} * {b}" }
+            else if op == "and" { f"{a} & {b}" } else if op == "or" { f"{a} | {b}" } else if op == "xor" { f"{a} ^ {b}" }
+            else if op == "shl" { f"{a} << ({b} & {mask})" } else if op == "shr" { f"{a} >> ({b} & {mask})" } else { "" };
+        if e == "" { return none; }
+        return f"pilot_wrap({e}, {w})";
+    }
+    pub fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? {
+        // `==` on values that are not numbers or booleans compares as the
+        // seed does: lists element by element, other handles by identity.
+        if pred <= 1 && !(is_int(p) || is_float(p) || is_bool(p)) {
+            let neg = if pred == 1 { "not " } else { "" };
+            return f"({neg}pilot_eq({a}, {b}))";
+        }
+        return f"({a} {cmp_symbol(pred)} {b})";
+    }
+    pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
+        if is_bool(to) { return if is_bool(from) { v } else { f"({v} != 0)" }; }
+        if is_float(to) { return if to.bit_width == 64 { f"float({v})" } else { none }; }
+        if !is_int(to) { return none; }
+        return f"pilot_wrap(int({v}), {to.bit_width}, {py_bool(is_signed(to))})";
+    }
+    pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+        var shown: List<str> = [];
+        for a in args { shown.push(f"pilot_show({a})"); }
+        let text = if shown.len() == 0 { "''" } else { "' '.join([" + joined(shown) + "])" };
+        if name == "rt_print" { return f"print({text})"; }
+        if name == "rt_eprint" { return f"print({text}, file=sys.stderr)"; }
+        let ops = dynamic_engine_ops();
+        if ops.has(name) {
+            let helper = ops.get(name);
+            return if helper == "" { "[]" } else if helper == "{}" { "{}" } else { f"{helper}({joined(args)})" };
+        }
+        return none;
+    }
+    pub fn make_record(values: List<str>) -> str? => "[" + joined(values) + "]";
+    pub fn get_field(rec: str, i: i64) -> str? => f"{rec}[{i}]";
+    pub fn set_field(rec: str, i: i64, v: str) -> str? => f"{rec}[{i}] = {v}";
 }
 
-pub fn transpile_arena_to_python() -> str {
-    let prog = tir_target_prog_nid();
-    if prog < 0 { return ""; }
-    let cc = __engine("ast_child_count", prog);
-    var out = "";
-
-    // 1. Emit classes for composite structs with stored fields
-    var i = 0;
-    while i < cc {
-        let ch = __engine("ast_child_at", prog, i);
-        if __engine("ast_node_kind", ch) == 1 && tir_struct_has_stored_fields(ch) {
-            let sname = __engine("sym_str", __engine("ast_node_sym", ch));
-            let fcc = __engine("ast_child_count", ch);
-            var init_params = "self";
-            var init_body = "";
-            var fi = 0;
-            while fi < fcc {
-                let fch = __engine("ast_child_at", ch, fi);
-                if __engine("ast_node_kind", fch) == 21 {
-                    let fname = __engine("sym_str", __engine("ast_node_sym", fch));
-                    init_params = init_params + ", " + fname + "=0";
-                    init_body = init_body + "        self." + fname + " = " + fname + "\n";
-                }
-                fi = fi + 1;
-            }
-            if init_body.len() == 0 {
-                init_body = "        pass\n";
-            }
-            out = out + "class " + sname + ":\n    def __init__(" + init_params + "):\n" + init_body + "\n";
-        }
-        i = i + 1;
+/// Engine operation -> the Python helper that runs it (`[]` / `{}` for a new
+/// list or map).
+fn dynamic_engine_ops() -> Map<str, str> {
+    let ops = Map<str, str>();
+    ops.set("list_new", "");
+    ops.set("map_new", "{}");
+    ops.set("is_null", "(lambda x: x is None)");
+    ops.set("to_str", "pilot_show");
+    ops.set("list_get", "pilot_map_get");
+    ops.set("list_set", "pilot_map_set");
+    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open"] {
+        ops.set(name, "pilot_" + name);
     }
-
-    // 2. Emit functions
-    i = 0;
-    while i < cc {
-        let fn_nid = __engine("ast_child_at", prog, i);
-        if __engine("ast_node_kind", fn_nid) == 3 && (__engine("ast_decl_flags", fn_nid) & 256) == 0 {
-            let fname = __engine("sym_str", __engine("ast_node_sym", fn_nid));
-            let fcc = __engine("ast_child_count", fn_nid);
-            var params_s = "";
-            var pi = 1;
-            while pi < fcc {
-                let pch = __engine("ast_child_at", fn_nid, pi);
-                if __engine("ast_node_kind", pch) == 21 {
-                    let pname = __engine("sym_str", __engine("ast_node_sym", pch));
-                    if params_s.len() > 0 { params_s = params_s + ", "; }
-                    params_s = params_s + pname;
-                }
-                pi = pi + 1;
-            }
-            let body_s = if fcc > 0 {
-                tpy_emit_block_body(__engine("ast_child_at", fn_nid, 0), 1)
-            } else {
-                "    pass\n"
-            };
-            out = out + "def " + fname + "(" + params_s + "):\n" + body_s + "\n";
-        }
-        i = i + 1;
-    }
-
-    return out;
+    return ops;
 }
+
+pub fn python_dialect() -> ISourceDialect => PythonDialect {};
+
+/// A Python boolean literal.
+fn py_bool(b: bool) -> str => if b { "True" } else { "False" };

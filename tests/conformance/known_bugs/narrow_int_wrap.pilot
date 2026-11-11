@@ -1,0 +1,14 @@
+// Arithmetic on an integer narrower than 64 bits wraps to its width, as a
+// conversion does (`u8(300)` is 44): in two's complement i32 2147483647 + 1
+// is -2147483648 (2^31 - 1 + 1 = 2^31, minus 2^32), u8 255 + 1 is 0
+// (256 mod 256), and an i32 shift count is taken mod 32 (40 mod 32 = 8,
+// 1 << 8 = 256).
+fn main() {
+    let a: i32 = 2147483647;
+    let b: i32 = a + 1;
+    print(b);
+    let c: u8 = 255;
+    print(c + 1);
+    let s: i32 = 1;
+    print(s << 40);
+}

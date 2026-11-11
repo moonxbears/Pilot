@@ -429,6 +429,8 @@ impl PilVirtualMachine {
                 self.forward(op, args)
             }
             "proc_args" => Ok(self.proc_args()),
+            // An operation whose failure comes back as a value (checked.rs).
+            "op_checked" => self.op_checked(args),
             // An intentionally unconnected entry or exit point was reached.
             "seam_open" => {
                 let id = str_arg(args, 0, op)?;

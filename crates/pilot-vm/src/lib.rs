@@ -5,6 +5,7 @@
 //! diagnostic in `PilcBinary::diagnostics` and compiles to a `Trap`, so a
 //! construct the seed cannot run is reported instead of silently dropped.
 
+mod checked;
 pub mod codes;
 mod heap;
 pub mod instruction;

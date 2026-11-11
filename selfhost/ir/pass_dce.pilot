@@ -8,7 +8,12 @@
 // removing it cannot change what the program does: it has no effect besides
 // its result and cannot fail. Calls, stores, field writes, division and
 // remainder (which fail on zero) and every lifecycle and memory operation
-// other than `stack_slot` and `load` stay.
+// other than `stack_slot` and `load` stay. An operator stays unless its
+// operands are numbers in registers (on anything else the seed's operator
+// fails at run time), a cast stays unless it converts a register value that
+// is not a float (a float may not fit an integer), a field read stays unless
+// its record's layout is known, and a load stays unless it reads a stack
+// slot (a global may be read before its declaration has run).
 pub lvl(0) pkg Pilot.SelfHost.Ir.PassDce;
 
 use selfhost.ir.model.*;
@@ -28,6 +33,29 @@ fn removable_opcodes() -> List<u16> => [
     op_shl(), op_shr(), op_cmp(), op_cast(),
     op_stack_slot(), op_load(), op_global_addr(),
 ];
+
+/// Whether `v` is a number or boolean in a register.
+fn numeric(f: IrFunction, v: u32) -> bool {
+    let p = f.value_physics[v];
+    return p.layout_id != 0 && p.reg_class < reg_class_aggregate() && p.reg_class != reg_class_raw_ptr();
+}
+
+/// Whether running `inst` cannot fail, by what its operands are.
+fn cannot_fail(f: IrFunction, inst: IrInst, producers: List<i64>) -> bool {
+    let op = inst.opcode;
+    let a = ir_args(f, inst);
+    if op == op_cmp() && inst.subop <= 1 { return true; }
+    if op >= op_add() && op <= op_cmp() {
+        for v in a {
+            if !numeric(f, v) { return false; }
+        }
+        return true;
+    }
+    if op == op_cast() { return numeric(f, a[0]) && f.value_physics[a[0]].reg_class != reg_class_simd_float(); }
+    if op == op_extract_field() { return f.value_physics[a[0]].layout_id != 0; }
+    if op == op_load() { return producers[a[0]] == op_stack_slot(); }
+    return true;
+}
 
 /// Removes `f`'s dead blocks and instructions; true when anything changed.
 pub fn eliminate_dead_code(f: IrFunction) -> bool {
@@ -54,10 +82,17 @@ pub fn eliminate_dead_code(f: IrFunction) -> bool {
     while again {
         again = false;
         var uses: List<i64> = [];
-        for _v in f.value_physics { uses.push(0); }
+        // Value -> the opcode of the instruction that defines it (0 for a
+        // block parameter).
+        var producers: List<i64> = [];
+        for _v in f.value_physics {
+            uses.push(0);
+            producers.push(0);
+        }
         for b in f.blocks {
             if !reachable[b.id] { continue; }
             for inst in b.insts {
+                if inst.result != ir_no_value() { producers[inst.result] = inst.opcode; }
                 let a = ir_args(f, inst);
                 for pos in value_positions(f, inst) { uses[a[pos]] = uses[a[pos]] + 1; }
             }
@@ -66,7 +101,7 @@ pub fn eliminate_dead_code(f: IrFunction) -> bool {
             if !reachable[b.id] { continue; }
             var kept: List<IrInst> = [];
             for inst in b.insts {
-                let dead = inst.result != ir_no_value() && uses[inst.result] == 0 && inst.opcode < removable.len() && removable[inst.opcode];
+                let dead = inst.result != ir_no_value() && uses[inst.result] == 0 && inst.opcode < removable.len() && removable[inst.opcode] && cannot_fail(f, inst, producers);
                 if dead { again = true; } else { kept.push(inst); }
             }
             if kept.len() != b.insts.len { b.insts = kept; changed = true; }

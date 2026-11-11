@@ -1,303 +1,184 @@
-// ============================================================================
+// ==============================================================================
 // FILE: selfhost/transpile/emit_rust.pilot
-// Milestone 57.2: Modular Rust Source Emitter (`pilot --emit rust`)
-// Maps `(reg_class, bit_width)` physics into Rust types (`i8..i64`, `u8..u64`,
-// `f32`, `f64`, `bool`, `&str`) with zero hardcoded Pilot type names.
-// ============================================================================
+// `pilot emit rust`: PilIR as Rust (selfhost/transpile/source.pilot).
+// ==============================================================================
+// Integers are Rust integers of their width with the seed's wrapping
+// arithmetic (`wrapping_add`, `wrapping_shl`, ..); division and remainder
+// stop the program on a zero divisor. Booleans are `bool`, floats `f64` /
+// `f32`, and `print` uses Rust's own formatting, which is the seed's.
+// Strings appear only as literals passed to `print`; module variables and
+// records stop at the representation seam.
+pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitRust;
 
-[Layout(c_abi)]
-pub struct EmittedTargetSource : IValue {
-    pub target_lang: str;
-    pub source_code: str;
+use selfhost.ir.model.*;
+use selfhost.transpile.source.*;
+
+pub struct RustDialect : ISourceDialect {
+    pub fn language() -> str => "Rust";
+    pub fn typed() -> bool => true;
+    pub fn reserved() -> List<str> => [
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if",
+        "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self",
+        "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while", "async",
+        "await", "dyn", "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof",
+        "unsized", "virtual", "yield", "try", "union", "main", "std", "core", "println", "eprintln",
+    ];
+    pub fn type_name(p: IrTypePhysics) -> str? {
+        if is_bool(p) { return "bool"; }
+        if is_float(p) {
+            if p.bit_width == 64 || p.bit_width == 32 { return f"f{p.bit_width}"; }
+            return none;
+        }
+        if is_int(p) && (p.bit_width == 8 || p.bit_width == 16 || p.bit_width == 32 || p.bit_width == 64 || p.bit_width == 128) {
+            let base = if is_signed(p) { "i" } else { "u" };
+            return f"{base}{p.bit_width}";
+        }
+        if p.layout_id == 0 { return "()"; }
+        return none;
+    }
+    pub fn prelude() -> List<str> => [
+        "fn pilot_trap(message: &str) -> ! {",
+        "    eprintln!(\"runtime error: {}\", message);",
+        "    std::process::exit(1);",
+        "}",
+        "",
+    ];
+    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => none;
+    pub fn module_open(protos: List<str>) -> List<str> => [];
+    pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str => "";
+    pub fn module_close(entry: str, has_code: bool) -> List<str> {
+        if entry == "" { return []; }
+        if has_code { return ["fn main() " + "{ " + f"std::process::exit({entry}() as i32); " + "}"]; }
+        return ["fn main() " + "{ " + f"{entry}(); " + "}"];
+    }
+    pub fn fn_open(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str {
+        var ps: List<str> = [];
+        var i = 0;
+        while i < params.len() {
+            if phys[i].layout_id != 0 { ps.push(f"mut {params[i]}: {self.rust_type(phys[i])}"); }
+            i = i + 1;
+        }
+        let r = if ret.layout_id == 0 { "" } else { " -> " + self.rust_type(ret) };
+        return f"fn {name}({joined(ps)}){r} " + "{";
+    }
+    pub fn fn_close() -> str => "}";
+    pub fn fn_globals(globals: List<str>) -> List<str> => [];
+    pub fn param_prologue(name: str, p: IrTypePhysics) -> List<str> => [];
+    pub fn locals(names: List<str>, phys: List<IrTypePhysics>) -> List<str> {
+        var out: List<str> = [];
+        var i = 0;
+        while i < names.len() {
+            out.push(f"let mut {names[i]}: {self.rust_type(phys[i])} = {self.zero(phys[i])};");
+            i = i + 1;
+        }
+        return out;
+    }
+    pub fn zero(p: IrTypePhysics) -> str => if is_bool(p) { "false" } else if is_float(p) { "0.0" } else { "0" };
+    pub fn unit_value() -> str? => none;
+    pub fn state_decl(name: str) -> str => f"let mut {name}: u32 = 0;";
+    pub fn dispatch_open() -> str => "loop {";
+    pub fn dispatch_close() -> str => "}";
+    pub fn case_open(state: str, b: i64, first: bool) -> str => (if first { "" } else { "} else " }) + f"if {state} == {b} " + "{";
+    pub fn cases_close() -> str => "}";
+    pub fn if_open(cond: str) -> str => f"if {cond} " + "{";
+    pub fn else_line() -> str => "} else {";
+    pub fn if_close() -> str => "}";
+    pub fn assign(lhs: str, rhs: str) -> str => f"{lhs} = {rhs};";
+    pub fn parallel_assign(lhs: List<str>, rhs: List<str>, phys: List<IrTypePhysics>) -> List<str> {
+        var text = "{ ";
+        var i = 0;
+        while i < lhs.len() {
+            text = text + f"let t{i} = {rhs[i]}; ";
+            i = i + 1;
+        }
+        i = 0;
+        while i < lhs.len() {
+            text = text + f"{lhs[i]} = t{i}; ";
+            i = i + 1;
+        }
+        return [text + "}"];
+    }
+    pub fn expr_stmt(e: str) -> str => e + ";";
+    pub fn ret(e: str) -> str => if e == "" { "return;" } else { f"return {e};" };
+    pub fn trap(message: str) -> str => f"pilot_trap({self.str_lit(message)});";
+    pub fn int_lit(digits: str, p: IrTypePhysics) -> str? {
+        guard some t = self.type_name(p) else { return none; };
+        return f"({digits}{t})";
+    }
+    pub fn bool_lit(b: bool) -> str => if b { "true" } else { "false" };
+    pub fn float_lit(text: str, p: IrTypePhysics) -> str? {
+        guard some t = self.type_name(p) else { return none; };
+        if text == "NaN" { return f"{t}::NAN"; }
+        if text == "inf" { return f"{t}::INFINITY"; }
+        if text == "-inf" { return f"{t}::NEG_INFINITY"; }
+        return f"({text}{t})";
+    }
+    pub fn str_lit(raw: str) -> str => escaped(raw, (b) => "\\x" + hex2(b));
+    pub fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str? {
+        if is_float(p) {
+            if op == "add" { return f"({a} + {b})"; }
+            if op == "sub" { return f"({a} - {b})"; }
+            if op == "mul" { return f"({a} * {b})"; }
+            if op == "div" { return f"({a} / {b})"; }
+            if op == "rem" { return f"({a} % {b})"; }
+            return none;
+        }
+        if is_bool(p) {
+            if op == "and" { return f"({a} & {b})"; }
+            if op == "or" { return f"({a} | {b})"; }
+            if op == "xor" { return f"({a} ^ {b})"; }
+            return none;
+        }
+        guard some t = self.type_name(p) else { return none; };
+        if !is_int(p) { return none; }
+        // Operands of another layout of the same width are converted first.
+        let x = if pa.layout_id == p.layout_id { a } else { f"({a} as {t})" };
+        let y = if pb.layout_id == p.layout_id { b } else { f"({b} as {t})" };
+        if op == "add" { return f"{x}.wrapping_add({y})"; }
+        if op == "sub" { return f"{x}.wrapping_sub({y})"; }
+        if op == "mul" { return f"{x}.wrapping_mul({y})"; }
+        if op == "shl" { return f"{x}.wrapping_shl({b} as u32)"; }
+        if op == "shr" { return f"{x}.wrapping_shr({b} as u32)"; }
+        if op == "and" { return f"({x} & {y})"; }
+        if op == "or" { return f"({x} | {y})"; }
+        if op == "xor" { return f"({x} ^ {y})"; }
+        let guarded = "{ " + f"if {y} == 0 " + "{ pilot_trap(\"integer division by zero\") } else { ";
+        if op == "div" { return guarded + f"{x}.wrapping_div({y})" + " } }"; }
+        if op == "rem" { return guarded + f"{x}.wrapping_rem({y})" + " } }"; }
+        return none;
+    }
+    pub fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {cmp_symbol(pred)} {b})";
+    pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
+        guard some t = self.type_name(to) else { return none; };
+        if self.type_name(from) == none { return none; }
+        if is_bool(to) {
+            if is_bool(from) { return v; }
+            return if is_float(from) { f"({v} != 0.0)" } else { f"({v} != 0)" };
+        }
+        if is_bool(from) && is_float(to) { return f"(({v} as u8) as {t})"; }
+        return f"(({v}) as {t})";
+    }
+    pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+        let mac = if name == "rt_print" { "println!" } else if name == "rt_eprint" { "eprintln!" } else { "" };
+        if mac == "" { return none; }
+        var holes = "";
+        var i = 0;
+        while i < args.len() {
+            if !literal[i] && self.type_name(phys[i]) == none { return none; }
+            if i > 0 { holes = holes + " "; }
+            holes = holes + "{}";
+            i = i + 1;
+        }
+        if args.len() == 0 { return mac + "()"; }
+        return mac + "(\"" + holes + "\", " + joined(args) + ")";
+    }
+    pub fn make_record(values: List<str>) -> str? => none;
+    pub fn get_field(rec: str, i: i64) -> str? => none;
+    pub fn set_field(rec: str, i: i64, v: str) -> str? => none;
+
+    /// The Rust type of `p`; `()` when it has none (the caller checked).
+    pub fn rust_type(p: IrTypePhysics) -> str => self.type_name(p) ?? "()";
 }
 
-pub pure fn rust_type_for_physics(reg_class: i64, bit_width: i64) -> str {
-    if reg_class == 0 || reg_class == 1 { return "()"; }
-    if reg_class == 2 {
-        if bit_width <= 8 { return "i8"; }
-        if bit_width <= 16 { return "i16"; }
-        if bit_width <= 32 { return "i32"; }
-        return "i64";
-    }
-    if reg_class == 3 {
-        if bit_width == 1 { return "bool"; }
-        if bit_width <= 8 { return "u8"; }
-        if bit_width <= 16 { return "u16"; }
-        if bit_width <= 32 { return "u32"; }
-        return "u64";
-    }
-    if reg_class == 4 {
-        if bit_width <= 32 { return "f32"; }
-        return "f64";
-    }
-    return "&'static str";
-}
-
-pub fn emit_rust_function(
-    fn_name: str,
-    param_name: str,
-    param_reg: i64,
-    param_bits: i64,
-    ret_reg: i64,
-    ret_bits: i64,
-    body_expr: str
-) -> EmittedTargetSource {
-    let p_ty = rust_type_for_physics(param_reg, param_bits);
-    let r_ty = rust_type_for_physics(ret_reg, ret_bits);
-    let code = "pub " + nameof(fn) + " " + fn_name + "(" + param_name + ": " + p_ty + ") -> " + r_ty + " {\n"
-        + "    " + body_expr + "\n"
-        + "}\n";
-    return EmittedTargetSource {
-        target_lang: "rust",
-        source_code: code,
-    };
-}
-
-pub fn trs_map_type_name(type_name: str) -> str {
-    if type_name.len() == 0 {
-        return "()";
-    }
-    let ph = tir_resolve_type_physics(type_name);
-    if ph.reg_class == 7 {
-        return type_name;
-    }
-    return rust_type_for_physics(ph.reg_class, ph.bit_width);
-}
-
-pub fn trs_emit_expr(nid: i64) -> str {
-    if nid < 0 { return "0"; }
-    let k = __engine("ast_node_kind", nid);
-    let ok = __engine("ast_orig_kind", nid);
-
-    if k == 14 {
-        return __engine("sym_str", __engine("ast_node_sym", nid));
-    }
-    if k == 15 {
-        let lk = __engine("ast_node_lit_kind", nid);
-        if lk == 1 {
-            return "" + __engine("ast_node_raw_bits", nid);
-        }
-        if lk == 2 {
-            return __engine("source_slice", __engine("ast_span_start", nid), __engine("ast_span_end", nid));
-        }
-        if lk == 3 {
-            return tir_escape_str_lit(__engine("sym_str", __engine("ast_node_sym", nid)));
-        }
-        if lk == 4 {
-            if __engine("ast_node_raw_bits", nid) != 0 { return "true"; }
-            return "false";
-        }
-        return seam("emit.unlowered_literal", f"the rust emitter has no lowering for literal kind {lk}");
-    }
-    if ok == 206 {
-        let inner = trs_emit_expr(__engine("ast_child_at", nid, 0));
-        let fl = __engine("ast_node_flags", nid);
-        if fl == 5 || fl == 4 {
-            return "!(" + inner + ")";
-        }
-        return "-(" + inner + ")";
-    }
-    if k == 19 {
-        let op = __engine("ast_node_raw_bits", nid);
-        let lhs = trs_emit_expr(__engine("ast_child_at", nid, 0));
-        let rhs = trs_emit_expr(__engine("ast_child_at", nid, 1));
-        return "(" + lhs + " " + tir_binop_sym(op) + " " + rhs + ")";
-    }
-    if k == 16 {
-        let cc = __engine("ast_child_count", nid);
-        if cc <= 0 { return seam("emit.unlowered_expr", "a call node without a callee reached the rust emitter"); }
-        let callee_nid = __engine("ast_child_at", nid, 0);
-        let cname = __engine("sym_str", __engine("ast_node_sym", callee_nid));
-        if tir_is_struct_literal_call(nid) {
-            let map_nid = __engine("ast_child_at", nid, 1);
-            let mcc = __engine("ast_child_count", map_nid);
-            var fields_s = "";
-            var mi = 0;
-            while mi + 1 < mcc {
-                let k_nid = __engine("ast_child_at", map_nid, mi);
-                let v_nid = __engine("ast_child_at", map_nid, mi + 1);
-                let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
-                if fields_s.len() > 0 {
-                    fields_s = fields_s + ", ";
-                }
-                fields_s = fields_s + fname + ": " + trs_emit_expr(v_nid);
-                mi = mi + 2;
-            }
-            return cname + " { " + fields_s + " }";
-        }
-        var args_s = "";
-        var ai = 1;
-        while ai < cc {
-            if ai > 1 { args_s = args_s + ", "; }
-            args_s = args_s + trs_emit_expr(__engine("ast_child_at", nid, ai));
-            ai = ai + 1;
-        }
-        return cname + "(" + args_s + ")";
-    }
-    if k == 17 {
-        let recv = trs_emit_expr(__engine("ast_child_at", nid, 0));
-        let fld = __engine("sym_str", __engine("ast_node_sym", nid));
-        return recv + "." + fld;
-    }
-    if ok == 210 {
-        let base_e = trs_emit_expr(__engine("ast_child_at", nid, 0));
-        let idx_e = trs_emit_expr(__engine("ast_child_at", nid, 1));
-        return base_e + "[(" + idx_e + ") as usize]";
-    }
-    return seam("emit.unlowered_expr", f"the rust emitter has no lowering for AST node kind {k} (original kind {ok})");
-}
-
-pub fn trs_emit_block_body(blk_nid: i64, depth: i64) -> str {
-    if blk_nid < 0 { return ""; }
-    if __engine("ast_node_kind", blk_nid) != 18 {
-        return trs_emit_stmt(blk_nid, depth);
-    }
-    let cc = __engine("ast_child_count", blk_nid);
-    var out = "";
-    var i = 0;
-    while i < cc {
-        out = out + trs_emit_stmt(__engine("ast_child_at", blk_nid, i), depth);
-        i = i + 1;
-    }
-    return out;
-}
-
-pub fn trs_emit_stmt(nid: i64, depth: i64) -> str {
-    if nid < 0 { return ""; }
-    let k = __engine("ast_node_kind", nid);
-    let ok = __engine("ast_orig_kind", nid);
-    let ind = tir_indent_spaces(depth);
-
-    if k == 18 {
-        return trs_emit_block_body(nid, depth);
-    }
-    if k == 4 {
-        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        let tsym = __engine("ast_node_raw_bits", nid);
-        var ty_ann = "";
-        if tsym != 0 {
-            let tname = __engine("sym_str", tsym);
-            if tname.len() > 0 {
-                ty_ann = ": " + trs_map_type_name(tname);
-            }
-        }
-        let init_s = if __engine("ast_child_count", nid) > 0 {
-            trs_emit_expr(__engine("ast_child_at", nid, 0))
-        } else {
-            "0"
-        };
-        let kw_prefix = if ok == 101 { "let " + "mut " } else { "let " };
-        return ind + kw_prefix + vname + ty_ann + " = " + init_s + ";\n";
-    }
-    if k == 20 {
-        let lhs = trs_emit_expr(__engine("ast_child_at", nid, 0));
-        let rhs = trs_emit_expr(__engine("ast_child_at", nid, 1));
-        return ind + lhs + " = " + rhs + ";\n";
-    }
-    if k == 6 {
-        let cond_s = trs_emit_expr(__engine("ast_child_at", nid, 0));
-        let then_s = trs_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
-        var res = ind + "if " + cond_s + " {\n" + then_s + ind + "}";
-        if __engine("ast_child_count", nid) >= 3 {
-            let else_nid = __engine("ast_child_at", nid, 2);
-            let else_s = trs_emit_block_body(else_nid, depth + 1);
-            res = res + " else {\n" + else_s + ind + "}";
-        }
-        return res + "\n";
-    }
-    if k == 7 || ok == 106 {
-        if ok == 105 {
-            let lbody = trs_emit_block_body(__engine("ast_child_at", nid, 0), depth + 1);
-            return ind + "loop {\n" + lbody + ind + "}\n";
-        }
-        let wcond = trs_emit_expr(__engine("ast_child_at", nid, 0));
-        let wbody = trs_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
-        return ind + "while " + wcond + " {\n" + wbody + ind + "}\n";
-    }
-    if ok == 107 {
-        return ind + "break;\n";
-    }
-    if ok == 108 {
-        return ind + "continue;\n";
-    }
-    if k == 8 {
-        if __engine("ast_child_count", nid) > 0 {
-            return ind + "return " + trs_emit_expr(__engine("ast_child_at", nid, 0)) + ";\n";
-        }
-        return ind + "return;\n";
-    }
-    if ok == 110 {
-        if __engine("ast_child_count", nid) > 0 {
-            return ind + trs_emit_expr(__engine("ast_child_at", nid, 0)) + ";\n";
-        }
-        return "";
-    }
-    return ind + trs_emit_expr(nid) + ";\n";
-}
-
-pub fn transpile_arena_to_rust() -> str {
-    let prog = tir_target_prog_nid();
-    if prog < 0 { return ""; }
-    let cc = __engine("ast_child_count", prog);
-    var out = "";
-
-    // 1. Emit composite structs with stored fields
-    var i = 0;
-    while i < cc {
-        let ch = __engine("ast_child_at", prog, i);
-        if __engine("ast_node_kind", ch) == 1 && tir_struct_has_stored_fields(ch) {
-            let sname = __engine("sym_str", __engine("ast_node_sym", ch));
-            out = out + "#[derive(Clone, Copy, Debug)]\npub struct " + sname + " {\n";
-            let fcc = __engine("ast_child_count", ch);
-            var fi = 0;
-            while fi < fcc {
-                let fch = __engine("ast_child_at", ch, fi);
-                if __engine("ast_node_kind", fch) == 21 {
-                    let fname = __engine("sym_str", __engine("ast_node_sym", fch));
-                    let fty = trs_map_type_name(__engine("sym_str", __engine("ast_node_raw_bits", fch)));
-                    out = out + "    pub " + fname + ": " + fty + ",\n";
-                }
-                fi = fi + 1;
-            }
-            out = out + "}\n\n";
-        }
-        i = i + 1;
-    }
-
-    // 2. Emit functions
-    i = 0;
-    while i < cc {
-        let fn_nid = __engine("ast_child_at", prog, i);
-        if __engine("ast_node_kind", fn_nid) == 3 && (__engine("ast_decl_flags", fn_nid) & 256) == 0 {
-            let fname = __engine("sym_str", __engine("ast_node_sym", fn_nid));
-            let fcc = __engine("ast_child_count", fn_nid);
-            var params_s = "";
-            var pi = 1;
-            while pi < fcc {
-                let pch = __engine("ast_child_at", fn_nid, pi);
-                if __engine("ast_node_kind", pch) == 21 {
-                    let pname = __engine("sym_str", __engine("ast_node_sym", pch));
-                    let pty = trs_map_type_name(__engine("sym_str", __engine("ast_node_raw_bits", pch)));
-                    if params_s.len() > 0 { params_s = params_s + ", "; }
-                    params_s = params_s + pname + ": " + pty;
-                }
-                pi = pi + 1;
-            }
-            let rname = tir_fn_return_type_name(fn_nid);
-            let rph = tir_resolve_type_physics(rname);
-            var ret_clause = "";
-            if rph.reg_class != 0 && rph.reg_class != 1 {
-                ret_clause = " -> " + trs_map_type_name(rname);
-            }
-            let body_s = if fcc > 0 {
-                trs_emit_block_body(__engine("ast_child_at", fn_nid, 0), 1)
-            } else {
-                ""
-            };
-            out = out + "pub fn " + fname + "(" + params_s + ")" + ret_clause + " {\n" + body_s + "}\n\n";
-        }
-        i = i + 1;
-    }
-
-    return out;
-}
+pub fn rust_dialect() -> ISourceDialect => RustDialect {};

@@ -1,242 +1,266 @@
-// ============================================================================
+// ==============================================================================
 // FILE: selfhost/transpile/emit_js.pilot
-// Milestone 57.2: Modular JavaScript Source Emitter (`pilot --emit js`)
-// Emits clean JavaScript functions and struct objects with zero prototype hacks.
-// ============================================================================
+// `pilot emit js`: PilIR as JavaScript for Node (selfhost/transpile/source.pilot).
+// ==============================================================================
+// Integers are `BigInt`s wrapped to their register width (`BigInt.asIntN` /
+// `asUintN`), so 64-bit arithmetic is exact; a function converts integer
+// arguments it is given as plain numbers. `/` and `%` on integers truncate
+// toward zero, as `BigInt`'s do and the seed's do. Floats are numbers
+// (`Math.fround` keeps a 32-bit float). Records are arrays. `print` shows
+// values as the seed does.
+pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitJs;
 
-pub pure fn emit_js_function_source(
-    fn_name: str,
-    params_list: str,
-    body_expr: str
-) -> str {
-    return "export function " + fn_name + "(" + params_list + ") {\n"
-        + "  " + nameof(return) + " " + body_expr + ";\n"
-        + "}\n";
-}
+use selfhost.ir.model.*;
+use selfhost.transpile.source.*;
 
-pub fn tjs_emit_expr(nid: i64) -> str {
-    if nid < 0 { return "0"; }
-    let k = __engine("ast_node_kind", nid);
-    let ok = __engine("ast_orig_kind", nid);
-
-    if k == 14 {
-        return __engine("sym_str", __engine("ast_node_sym", nid));
-    }
-    if k == 15 {
-        let lk = __engine("ast_node_lit_kind", nid);
-        if lk == 1 {
-            return "" + __engine("ast_node_raw_bits", nid);
-        }
-        if lk == 2 {
-            return __engine("source_slice", __engine("ast_span_start", nid), __engine("ast_span_end", nid));
-        }
-        if lk == 3 {
-            return tir_escape_str_lit(__engine("sym_str", __engine("ast_node_sym", nid)));
-        }
-        if lk == 4 {
-            if __engine("ast_node_raw_bits", nid) != 0 { return "true"; }
-            return "false";
-        }
-        return seam("emit.unlowered_literal", f"the js emitter has no lowering for literal kind {lk}");
-    }
-    if ok == 206 {
-        let inner = tjs_emit_expr(__engine("ast_child_at", nid, 0));
-        let fl = __engine("ast_node_flags", nid);
-        if fl == 5 { return "(!" + inner + ")"; }
-        if fl == 4 { return "(~" + inner + ")"; }
-        return "(-" + inner + ")";
-    }
-    if k == 19 {
-        let op = __engine("ast_node_raw_bits", nid);
-        let lhs = tjs_emit_expr(__engine("ast_child_at", nid, 0));
-        let rhs = tjs_emit_expr(__engine("ast_child_at", nid, 1));
-        if op == 4 {
-            return "Math.trunc(" + lhs + " / " + rhs + ")";
-        }
-        if op == 8 {
-            return "(" + lhs + " === " + rhs + ")";
-        }
-        if op == 9 {
-            return "(" + lhs + " !== " + rhs + ")";
-        }
-        return "(" + lhs + " " + tir_binop_sym(op) + " " + rhs + ")";
-    }
-    if k == 16 {
-        let cc = __engine("ast_child_count", nid);
-        if cc <= 0 { return seam("emit.unlowered_expr", "a call node without a callee reached the js emitter"); }
-        let callee_nid = __engine("ast_child_at", nid, 0);
-        let cname = __engine("sym_str", __engine("ast_node_sym", callee_nid));
-        if tir_is_struct_literal_call(nid) {
-            let map_nid = __engine("ast_child_at", nid, 1);
-            let mcc = __engine("ast_child_count", map_nid);
-            var fields_s = "";
-            var mi = 0;
-            while mi + 1 < mcc {
-                let k_nid = __engine("ast_child_at", map_nid, mi);
-                let v_nid = __engine("ast_child_at", map_nid, mi + 1);
-                let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
-                if fields_s.len() > 0 {
-                    fields_s = fields_s + ", ";
-                }
-                fields_s = fields_s + fname + ": " + tjs_emit_expr(v_nid);
-                mi = mi + 2;
-            }
-            return "({ " + fields_s + " })";
-        }
-        var args_s = "";
-        var ai = 1;
-        while ai < cc {
-            if ai > 1 { args_s = args_s + ", "; }
-            args_s = args_s + tjs_emit_expr(__engine("ast_child_at", nid, ai));
-            ai = ai + 1;
-        }
-        return cname + "(" + args_s + ")";
-    }
-    if k == 17 {
-        let recv = tjs_emit_expr(__engine("ast_child_at", nid, 0));
-        let fld = __engine("sym_str", __engine("ast_node_sym", nid));
-        return recv + "." + fld;
-    }
-    if ok == 210 {
-        let base_e = tjs_emit_expr(__engine("ast_child_at", nid, 0));
-        let idx_e = tjs_emit_expr(__engine("ast_child_at", nid, 1));
-        return base_e + "[" + idx_e + "]";
-    }
-    return seam("emit.unlowered_expr", f"the js emitter has no lowering for AST node kind {k} (original kind {ok})");
-}
-
-pub fn tjs_emit_block_body(blk_nid: i64, depth: i64) -> str {
-    if blk_nid < 0 { return ""; }
-    if __engine("ast_node_kind", blk_nid) != 18 {
-        return tjs_emit_stmt(blk_nid, depth);
-    }
-    let cc = __engine("ast_child_count", blk_nid);
-    var out = "";
-    var i = 0;
-    while i < cc {
-        out = out + tjs_emit_stmt(__engine("ast_child_at", blk_nid, i), depth);
-        i = i + 1;
-    }
-    return out;
-}
-
-pub fn tjs_emit_stmt(nid: i64, depth: i64) -> str {
-    if nid < 0 { return ""; }
-    let k = __engine("ast_node_kind", nid);
-    let ok = __engine("ast_orig_kind", nid);
-    let ind = tir_indent_spaces(depth);
-
-    if k == 18 {
-        return tjs_emit_block_body(nid, depth);
-    }
-    if k == 4 {
-        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
-        let init_s = if __engine("ast_child_count", nid) > 0 {
-            tjs_emit_expr(__engine("ast_child_at", nid, 0))
-        } else {
-            "0"
-        };
-        return ind + "let " + vname + " = " + init_s + ";\n";
-    }
-    if k == 20 {
-        let lhs = tjs_emit_expr(__engine("ast_child_at", nid, 0));
-        let rhs = tjs_emit_expr(__engine("ast_child_at", nid, 1));
-        return ind + lhs + " = " + rhs + ";\n";
-    }
-    if k == 6 {
-        let cond_s = tjs_emit_expr(__engine("ast_child_at", nid, 0));
-        let then_s = tjs_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
-        var res = ind + "if (" + cond_s + ") {\n" + then_s + ind + "}";
-        if __engine("ast_child_count", nid) >= 3 {
-            let else_s = tjs_emit_block_body(__engine("ast_child_at", nid, 2), depth + 1);
-            res = res + " else {\n" + else_s + ind + "}";
-        }
-        return res + "\n";
-    }
-    if k == 7 || ok == 106 {
-        if ok == 105 {
-            let lbody = tjs_emit_block_body(__engine("ast_child_at", nid, 0), depth + 1);
-            return ind + "while (true) {\n" + lbody + ind + "}\n";
-        }
-        let wcond = tjs_emit_expr(__engine("ast_child_at", nid, 0));
-        let wbody = tjs_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
-        return ind + "while (" + wcond + ") {\n" + wbody + ind + "}\n";
-    }
-    if ok == 107 { return ind + "break;\n"; }
-    if ok == 108 { return ind + "continue;\n"; }
-    if k == 8 {
-        if __engine("ast_child_count", nid) > 0 {
-            return ind + "return " + tjs_emit_expr(__engine("ast_child_at", nid, 0)) + ";\n";
-        }
-        return ind + "return;\n";
-    }
-    if ok == 110 {
-        if __engine("ast_child_count", nid) > 0 {
-            return ind + tjs_emit_expr(__engine("ast_child_at", nid, 0)) + ";\n";
-        }
+pub struct JsDialect : ISourceDialect {
+    pub fn language() -> str => "JavaScript";
+    pub fn typed() -> bool => false;
+    pub fn reserved() -> List<str> => [
+        "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
+        "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in",
+        "instanceof", "let", "new", "null", "return", "super", "switch", "this", "throw", "true", "try",
+        "typeof", "var", "void", "while", "with", "yield", "await", "static", "implements", "interface",
+        "package", "private", "protected", "public", "arguments", "eval", "undefined", "NaN", "Infinity",
+        "process", "console", "BigInt", "Math", "Number", "String", "Object",
+    ];
+    pub fn type_name(p: IrTypePhysics) -> str? {
+        if p.reg_class == reg_class_simd_vector() || p.reg_class == reg_class_raw_ptr() { return none; }
         return "";
     }
-    return ind + tjs_emit_expr(nid) + ";\n";
+    pub fn prelude() -> List<str> => [
+        "\"use strict\";",
+        "function pilot_trap(message) {",
+        "    process.stderr.write(\"runtime error: \" + message + \"\\n\");",
+        "    process.exit(1);",
+        "}",
+        "function pilot_div(a, b) {",
+        "    if (b === 0n) pilot_trap(\"integer division by zero\");",
+        "    return a / b;",
+        "}",
+        "function pilot_rem(a, b) {",
+        "    if (b === 0n) pilot_trap(\"integer division by zero\");",
+        "    return a % b;",
+        "}",
+        "function pilot_show(x) {",
+        "    if (typeof x === \"number\") {",
+        "        if (Number.isNaN(x)) return \"NaN\";",
+        "        if (!Number.isFinite(x)) return x > 0 ? \"inf\" : \"-inf\";",
+        "        if (Object.is(x, -0)) return \"-0\";",
+        "        const s = String(x);",
+        "        const m = s.match(/^(-?)(\\d+)(?:\\.(\\d+))?e([+-]\\d+)$/);",
+        "        if (!m) return s;",
+        "        const frac = m[3] || \"\";",
+        "        const digits = m[2] + frac;",
+        "        const exp = parseInt(m[4], 10) - frac.length;",
+        "        if (exp >= 0) return m[1] + digits + \"0\".repeat(exp);",
+        "        const k = digits.length + exp;",
+        "        if (k > 0) return m[1] + digits.slice(0, k) + \".\" + digits.slice(k);",
+        "        return m[1] + \"0.\" + \"0\".repeat(-k) + digits;",
+        "    }",
+        "    if (x === null || x === undefined) return \"null\";",
+        "    if (Array.isArray(x)) return \"[\" + x.map(pilot_show).join(\", \") + \"]\";",
+        "    if (x instanceof Map) return \"{ \" + [...x].map(([k, v]) => k + \": \" + pilot_show(v)).sort().join(\", \") + \" }\";",
+        "    return String(x);",
+        "}",
+        "function pilot_add(a, b) {",
+        "    if (typeof a === \"string\" || typeof b === \"string\") return pilot_show(a) + pilot_show(b);",
+        "    return a + b;",
+        "}",
+        "function pilot_eq(a, b) {",
+        "    if (Array.isArray(a) && Array.isArray(b)) {",
+        "        return a === b || (a.length === b.length && a.every((x, i) => pilot_eq(x, b[i])));",
+        "    }",
+        "    const na = typeof a === \"bigint\" || typeof a === \"number\";",
+        "    const nb = typeof b === \"bigint\" || typeof b === \"number\";",
+        "    if (na && nb) return typeof a === typeof b ? a === b : Number(a) === Number(b);",
+        "    if ((a === null || a === undefined) && (b === null || b === undefined)) return true;",
+        "    return a === b;",
+        "}",
+        "function pilot_kind(x) {",
+        "    if (x === null || x === undefined) return \"null\";",
+        "    if (typeof x === \"boolean\") return \"boolean\";",
+        "    if (typeof x === \"bigint\") return \"integer\";",
+        "    if (typeof x === \"number\") return \"float\";",
+        "    if (typeof x === \"string\") return \"string\";",
+        "    if (Array.isArray(x)) return \"list\";",
+        "    if (x instanceof Map) return \"record\";",
+        "    return \"function\";",
+        "}",
+        "function pilot_key(k) {",
+        "    return typeof k === \"string\" ? k : pilot_show(k);",
+        "}",
+        "function pilot_index(o, k) {",
+        "    if (typeof k !== \"bigint\") pilot_trap(\"list index must be an integer, found \" + pilot_kind(k));",
+        "    if (k < 0n || k >= BigInt(o.length)) pilot_trap(\"list index \" + k + \" out of bounds for length \" + o.length);",
+        "    return Number(k);",
+        "}",
+        "function pilot_map_get(o, k) {",
+        "    if (Array.isArray(o)) return o[pilot_index(o, k)];",
+        "    if (typeof o === \"string\" && typeof k === \"bigint\") {",
+        "        const b = Buffer.from(o, \"utf8\");",
+        "        if (k >= 0n && k < BigInt(b.length)) return BigInt(b[Number(k)]);",
+        "        pilot_trap(\"string index \" + k + \" out of bounds for length \" + b.length);",
+        "    }",
+        "    if (o instanceof Map) {",
+        "        const v = o.get(pilot_key(k));",
+        "        return v === undefined ? null : v;",
+        "    }",
+        "    pilot_trap(\"cannot read `\" + pilot_key(k) + \"` from \" + pilot_kind(o));",
+        "}",
+        "function pilot_map_set(o, k, v) {",
+        "    if (Array.isArray(o)) { o[pilot_index(o, k)] = v; return o; }",
+        "    if (o instanceof Map) { o.set(pilot_key(k), v); return o; }",
+        "    pilot_trap(\"cannot write `\" + pilot_key(k) + \"` on \" + pilot_kind(o));",
+        "}",
+        "function pilot_map_has(m, k) {",
+        "    return m.has(pilot_key(k));",
+        "}",
+        "function pilot_map_remove(m, k) {",
+        "    const key = pilot_key(k);",
+        "    const v = m.has(key) ? m.get(key) : null;",
+        "    m.delete(key);",
+        "    return v;",
+        "}",
+        "function pilot_list_push(l, x) {",
+        "    l.push(x);",
+        "    return l;",
+        "}",
+        "function pilot_list_pop(l) {",
+        "    if (l.length === 0) pilot_trap(\"pop from an empty list\");",
+        "    return l.pop();",
+        "}",
+        "function pilot_str_len(x) {",
+        "    if (typeof x === \"string\") return BigInt(Buffer.byteLength(x, \"utf8\"));",
+        "    return BigInt(x instanceof Map ? x.size : x.length);",
+        "}",
+        "function pilot_num_pow(a, b) {",
+        "    if (typeof a === \"bigint\" && typeof b === \"bigint\") {",
+        "        if (b < 0n) return Math.pow(Number(a), Number(b));",
+        "        return BigInt.asIntN(64, a ** b);",
+        "    }",
+        "    return Math.pow(Number(a), Number(b));",
+        "}",
+        "function pilot_rt_assert(cond, note) {",
+        "    if (cond !== true) pilot_trap(\"assertion failed\" + (note === undefined ? \"\" : \": \" + pilot_show(note)));",
+        "}",
+        "function pilot_seam_open(id, note) {",
+        "    pilot_trap(\"SEAM001: unconnected seam `\" + id + \"`: \" + (note === undefined ? \"\" : pilot_show(note)));",
+        "}",
+        "",
+    ];
+    pub fn global_decl(name: str, p: IrTypePhysics) -> str? => f"let {name};";
+    pub fn module_open(protos: List<str>) -> List<str> => [];
+    pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str => "";
+    pub fn module_close(entry: str, has_code: bool) -> List<str> {
+        if entry == "" { return []; }
+        if has_code { return [f"process.exitCode = Number({entry}());"]; }
+        return [f"{entry}();"];
+    }
+    pub fn fn_open(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str =>
+        f"function {name}({joined(params)}) " + "{";
+    pub fn fn_close() -> str => "}";
+    pub fn fn_globals(globals: List<str>) -> List<str> => [];
+    pub fn param_prologue(name: str, p: IrTypePhysics) -> List<str> {
+        if !is_int(p) { return []; }
+        return [f"{name} = {wrap_fn(p)}({p.bit_width}, BigInt({name}));"];
+    }
+    pub fn locals(names: List<str>, phys: List<IrTypePhysics>) -> List<str> => if names.len() == 0 { [] } else { ["let " + joined(names) + ";"] };
+    pub fn zero(p: IrTypePhysics) -> str => if is_bool(p) { "false" } else if is_float(p) { "0" } else if is_int(p) { "0n" } else { "undefined" };
+    pub fn unit_value() -> str? => "undefined";
+    pub fn state_decl(name: str) -> str => f"let {name} = 0;";
+    pub fn dispatch_open() -> str => "for (;;) {";
+    pub fn dispatch_close() -> str => "}";
+    pub fn case_open(state: str, b: i64, first: bool) -> str => (if first { "" } else { "} else " }) + f"if ({state} === {b}) " + "{";
+    pub fn cases_close() -> str => "}";
+    pub fn if_open(cond: str) -> str => f"if ({cond}) " + "{";
+    pub fn else_line() -> str => "} else {";
+    pub fn if_close() -> str => "}";
+    pub fn assign(lhs: str, rhs: str) -> str => f"{lhs} = {rhs};";
+    pub fn parallel_assign(lhs: List<str>, rhs: List<str>, phys: List<IrTypePhysics>) -> List<str> => ["[" + joined(lhs) + "] = [" + joined(rhs) + "];"];
+    pub fn expr_stmt(e: str) -> str => e + ";";
+    pub fn ret(e: str) -> str => if e == "" { "return;" } else { f"return {e};" };
+    pub fn trap(message: str) -> str => f"pilot_trap({self.str_lit(message)});";
+    pub fn int_lit(digits: str, p: IrTypePhysics) -> str? => digits + "n";
+    pub fn bool_lit(b: bool) -> str => if b { "true" } else { "false" };
+    pub fn float_lit(text: str, p: IrTypePhysics) -> str? {
+        if text == "NaN" { return "NaN"; }
+        if text == "inf" { return "Infinity"; }
+        if text == "-inf" { return "-Infinity"; }
+        return if p.bit_width == 32 { f"Math.fround({text})" } else { text };
+    }
+    pub fn str_lit(raw: str) -> str => escaped(raw, (b) => "\\x" + hex2(b));
+    pub fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str? {
+        if is_float(p) {
+            let e = if op == "add" { f"{a} + {b}" } else if op == "sub" { f"{a} - {b}" } else if op == "mul" { f"{a} * {b}" }
+                else if op == "div" { f"{a} / {b}" } else if op == "rem" { f"{a} % {b}" } else { "" };
+            if e == "" { return none; }
+            return if p.bit_width == 32 { f"Math.fround({e})" } else { f"({e})" };
+        }
+        if is_bool(p) {
+            if op == "and" { return f"({a} && {b})"; }
+            if op == "or" { return f"({a} || {b})"; }
+            if op == "xor" { return f"({a} !== {b})"; }
+            return none;
+        }
+        if !is_int(p) {
+            return if op == "add" { f"pilot_add({a}, {b})" } else { none };
+        }
+        let mask = p.bit_width - 1;
+        let e = if op == "add" { f"{a} + {b}" } else if op == "sub" { f"{a} - {b}" } else if op == "mul" { f"{a} * {b}" }
+            else if op == "div" { f"pilot_div({a}, {b})" } else if op == "rem" { f"pilot_rem({a}, {b})" }
+            else if op == "and" { f"{a} & {b}" } else if op == "or" { f"{a} | {b}" } else if op == "xor" { f"{a} ^ {b}" }
+            else if op == "shl" { f"{a} << ({b} & {mask}n)" } else if op == "shr" { f"{a} >> ({b} & {mask}n)" } else { "" };
+        if e == "" { return none; }
+        return f"{wrap_fn(p)}({p.bit_width}, {e})";
+    }
+    pub fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? {
+        // `==` on values that are not numbers or booleans compares as the
+        // seed does: lists element by element, other handles by identity.
+        if pred <= 1 && !(is_int(p) || is_float(p) || is_bool(p)) {
+            let neg = if pred == 1 { "!" } else { "" };
+            return f"({neg}pilot_eq({a}, {b}))";
+        }
+        return f"({a} {js_cmp(pred)} {b})";
+    }
+    pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
+        if is_bool(to) {
+            if is_bool(from) { return v; }
+            return if is_int(from) { f"({v} !== 0n)" } else { f"({v} !== 0)" };
+        }
+        if is_float(to) {
+            let n = if is_int(from) { f"Number({v})" } else if is_bool(from) { f"({v} ? 1 : 0)" } else { v };
+            return if to.bit_width == 32 { f"Math.fround({n})" } else { n };
+        }
+        if !is_int(to) { return none; }
+        let n = if is_int(from) { v } else if is_bool(from) { f"({v} ? 1n : 0n)" } else { f"BigInt(Math.trunc({v}))" };
+        return f"{wrap_fn(to)}({to.bit_width}, {n})";
+    }
+    pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+        let text = "[" + joined(args) + "].map(pilot_show).join(\" \")";
+        if name == "rt_print" { return f"console.log({text})"; }
+        if name == "rt_eprint" { return f"console.error({text})"; }
+        if name == "list_new" { return "[]"; }
+        if name == "map_new" { return "new Map()"; }
+        if name == "is_null" { return f"({args[0]} === null || {args[0]} === undefined)"; }
+        if name == "to_str" { return f"pilot_show({args[0]})"; }
+        if name == "list_get" { return f"pilot_map_get({joined(args)})"; }
+        if name == "list_set" { return f"pilot_map_set({joined(args)})"; }
+        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open"] {
+            if name == helper { return f"pilot_{helper}({joined(args)})"; }
+        }
+        return none;
+    }
+    pub fn make_record(values: List<str>) -> str? => "[" + joined(values) + "]";
+    pub fn get_field(rec: str, i: i64) -> str? => f"{rec}[{i}]";
+    pub fn set_field(rec: str, i: i64, v: str) -> str? => f"{rec}[{i}] = {v};";
 }
 
-pub fn transpile_arena_to_js() -> str {
-    let prog = tir_target_prog_nid();
-    if prog < 0 { return ""; }
-    let cc = __engine("ast_child_count", prog);
-    var out = "";
+pub fn js_dialect() -> ISourceDialect => JsDialect {};
 
-    // 1. Emit constructor helper classes for composite structs
-    var i = 0;
-    while i < cc {
-        let ch = __engine("ast_child_at", prog, i);
-        if __engine("ast_node_kind", ch) == 1 && tir_struct_has_stored_fields(ch) {
-            let sname = __engine("sym_str", __engine("ast_node_sym", ch));
-            let fcc = __engine("ast_child_count", ch);
-            var cparams = "";
-            var cbody = "";
-            var fi = 0;
-            while fi < fcc {
-                let fch = __engine("ast_child_at", ch, fi);
-                if __engine("ast_node_kind", fch) == 21 {
-                    let fname = __engine("sym_str", __engine("ast_node_sym", fch));
-                    if cparams.len() > 0 { cparams = cparams + ", "; }
-                    cparams = cparams + fname;
-                    cbody = cbody + "        this." + fname + " = " + fname + ";\n";
-                }
-                fi = fi + 1;
-            }
-            out = out + "class " + sname + " {\n    constructor(" + cparams + ") {\n" + cbody + "    }\n}\n\n";
-        }
-        i = i + 1;
-    }
+/// The JavaScript operator of comparison predicate `pred`.
+fn js_cmp(pred: i64) -> str => ["===", "!==", "<", "<=", ">", ">="][pred];
 
-    // 2. Emit functions (standard JS declarations runnable directly in Node)
-    i = 0;
-    while i < cc {
-        let fn_nid = __engine("ast_child_at", prog, i);
-        if __engine("ast_node_kind", fn_nid) == 3 && (__engine("ast_decl_flags", fn_nid) & 256) == 0 {
-            let fname = __engine("sym_str", __engine("ast_node_sym", fn_nid));
-            let fcc = __engine("ast_child_count", fn_nid);
-            var params_s = "";
-            var pi = 1;
-            while pi < fcc {
-                let pch = __engine("ast_child_at", fn_nid, pi);
-                if __engine("ast_node_kind", pch) == 21 {
-                    let pname = __engine("sym_str", __engine("ast_node_sym", pch));
-                    if params_s.len() > 0 { params_s = params_s + ", "; }
-                    params_s = params_s + pname;
-                }
-                pi = pi + 1;
-            }
-            let body_s = if fcc > 0 {
-                tjs_emit_block_body(__engine("ast_child_at", fn_nid, 0), 1)
-            } else {
-                ""
-            };
-            out = out + "function " + fname + "(" + params_s + ") {\n" + body_s + "}\n\n";
-        }
-        i = i + 1;
-    }
-
-    return out;
-}
+/// The `BigInt` function that wraps a value to integer physics `p`.
+fn wrap_fn(p: IrTypePhysics) -> str => if is_signed(p) { "BigInt.asIntN" } else { "BigInt.asUintN" };

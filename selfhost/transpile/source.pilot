@@ -1,0 +1,781 @@
+// ==============================================================================
+// FILE: selfhost/transpile/source.pilot
+// `pilot emit <lang>`: PilIR to the source text of another language.
+// ==============================================================================
+// Every emitter reads the same typed PilIR the interpreter runs (F5), never
+// the AST: the program is lowered with every concrete top-level function as
+// a root (a library has no `main` to reach them from), verified and run
+// through the default passes. This file turns each function's control-flow
+// graph into source; a language is a dialect (`ISourceDialect`, one per
+// `emit_<lang>.pilot`) that spells types, constants, operators, statements
+// and the few engine operations it supports.
+//
+// Structure. A function of one block is its body. A function of several
+// blocks becomes a loop over a state variable naming the block to run, one
+// case per block: a branch sets the state (after assigning the target
+// block's parameters, all at once) and the loop goes round; a return leaves.
+// This keeps any control flow PilIR can express, loops and early exits
+// included, without recovering `while`/`if` from the graph.
+//
+// Values. Every value is a local named `v<id>`; constants and `undef` are
+// written where they are used. A stack slot is a local holding the cell's
+// value, read by `load` and written by `store`; a module global is a
+// variable of the module. A slot or global address used any other way, an
+// opcode the dialect cannot spell, or a value whose physics the language
+// has no type for stops at a seam naming the language and what is missing.
+pub lvl(0) pkg Pilot.SelfHost.Transpile.Source;
+
+use selfhost.check.snapshot.*;
+use selfhost.ir.model.*;
+use selfhost.ir.verify.*;
+use selfhost.ir.passes.*;
+use selfhost.ir.interp.*;
+use selfhost.ir.main.*;
+
+/// How one language spells PilIR.
+pub interface ISourceDialect {
+    /// The language's name in messages.
+    fn language() -> str;
+    /// Whether the language declares a type for every local.
+    fn typed() -> bool;
+    /// Identifiers a function may not be named: keywords, the native entry
+    /// point and the dialect's own helpers.
+    fn reserved() -> List<str>;
+    /// The type of values of physics `p`, or none when the language has no
+    /// representation for them here (a dynamic language answers "").
+    fn type_name(p: IrTypePhysics) -> str?;
+    /// The lines that start the file: imports and runtime helpers.
+    fn prelude() -> List<str>;
+    /// A module variable `name` of physics `p`, or none when unsupported.
+    fn global_decl(name: str, p: IrTypePhysics) -> str?;
+    /// Lines before the module variables and functions (forward
+    /// declarations, a class).
+    fn module_open(protos: List<str>) -> List<str>;
+    /// A forward declaration of a function, or "" when none is needed.
+    fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str;
+    /// Lines after the functions. `entry` is the start function's name, or
+    /// "" when starting the program does nothing; `has_code` when it gives
+    /// the exit code.
+    fn module_close(entry: str, has_code: bool) -> List<str>;
+    fn fn_open(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str;
+    fn fn_close() -> str;
+    /// Statements a function needs before its body to write `globals`.
+    fn fn_globals(globals: List<str>) -> List<str>;
+    /// Statements that bring parameter `name` into the function's form.
+    fn param_prologue(name: str, p: IrTypePhysics) -> List<str>;
+    /// The declarations of the locals `names` (physics `phys`).
+    fn locals(names: List<str>, phys: List<IrTypePhysics>) -> List<str>;
+    /// The value a local of physics `p` starts with.
+    fn zero(p: IrTypePhysics) -> str;
+    /// A value that carries nothing (an unknown physics), or none.
+    fn unit_value() -> str?;
+    fn state_decl(name: str) -> str;
+    fn dispatch_open() -> str;
+    fn dispatch_close() -> str;
+    /// The line choosing block `b` (`first` for the first block).
+    fn case_open(state: str, b: i64, first: bool) -> str;
+    fn cases_close() -> str;
+    fn if_open(cond: str) -> str;
+    fn else_line() -> str;
+    fn if_close() -> str;
+    fn assign(lhs: str, rhs: str) -> str;
+    /// Assigns every value to its target at once.
+    fn parallel_assign(lhs: List<str>, rhs: List<str>, phys: List<IrTypePhysics>) -> List<str>;
+    fn expr_stmt(e: str) -> str;
+    /// `return e`, or a bare return when `e` is "".
+    fn ret(e: str) -> str;
+    /// Stops the program with runtime error `message`.
+    fn trap(message: str) -> str;
+    fn int_lit(digits: str, p: IrTypePhysics) -> str?;
+    fn bool_lit(b: bool) -> str;
+    /// A float of physics `p` written in decimal (`text` has a `.`), or
+    /// `NaN`, `inf`, `-inf`.
+    fn float_lit(text: str, p: IrTypePhysics) -> str?;
+    fn str_lit(raw: str) -> str;
+    /// Binary operator `op` (add, sub, mul, div, rem, and, or, xor, shl,
+    /// shr) on `a` (physics `pa`) and `b` (`pb`), giving physics `p`.
+    fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str?;
+    /// Comparison predicate `pred` (0 `==`, 1 `!=`, 2 `<`, 3 `<=`, 4 `>`,
+    /// 5 `>=`) of operands of physics `p`.
+    fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str?;
+    fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str?;
+    fn call(name: str, args: List<str>) -> str;
+    /// Engine operation `name` on `args` (physics `phys`; `literal[i]` when
+    /// argument i is a string literal), or none when unsupported.
+    fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str?;
+    fn make_record(values: List<str>) -> str?;
+    fn get_field(rec: str, i: i64) -> str?;
+    fn set_field(rec: str, i: i64, v: str) -> str?;
+}
+
+/// `pilot emit <lang> <program>`: prints the program in the language of
+/// dialect `d`.
+pub fn emit_program(d: ISourceDialect) -> i64 {
+    let m = lowered_program(snap_load(), true);
+    var issues = verify_ir_module(m);
+    if issues.len() == 0 { issues = run_passes(m, default_passes()); }
+    if issues.len() > 0 {
+        for i in issues { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
+        return 1;
+    }
+    let text = emit_module(m, d);
+    print(text.slice(0, text.len() - 1));
+    return 0;
+}
+
+/// What emitting one module needs to know across functions.
+pub struct SourceUnit : IObject {
+    pub m: IrModule;
+    pub d: ISourceDialect;
+    /// Function index -> its name in the target.
+    pub fn_names: List<str>;
+    /// Global index -> its variable name.
+    pub global_names: List<str>;
+    pub out: List<str>;
+}
+
+/// One function being emitted.
+pub struct SourceFn : IObject {
+    pub u: SourceUnit;
+    pub f: IrFunction;
+    /// Value id -> the expression written for it ("" for a local).
+    pub inline: List<str>;
+    /// Value id -> the variable an address names (a slot's cell or a
+    /// global), "" for other values.
+    pub cell: List<str>;
+    /// Value id -> whether a string literal is written for it.
+    pub literal: List<bool>;
+    pub depth: i64;
+}
+
+/// The name of the state variable of a function of several blocks.
+pub pure fn state_name() -> str => "blk";
+/// The prefix of the runtime helpers a dialect writes.
+pub pure fn helper_prefix() -> str => "pilot_";
+
+/// The whole module as text, one line per entry, ending in a newline.
+pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
+    let u = SourceUnit { m: m, d: d, fn_names: function_names(m, d), global_names: [], out: [] };
+    for line in d.prelude() { u.out.push(line); }
+    var protos: List<str> = [];
+    var fi = 0;
+    while fi < m.functions.len() {
+        let f = m.functions[fi];
+        let p = d.prototype(u.fn_names[fi], param_names(f), param_phys(f), f.ret_physics);
+        if p != "" { protos.push(p); }
+        fi = fi + 1;
+    }
+    for line in d.module_open(protos) { u.out.push(line); }
+    var g = 0;
+    while g < m.globals.len() {
+        let name = f"g{g}";
+        u.global_names.push(name);
+        guard some decl = d.global_decl(name, m.globals[g].physics) else {
+            return seam("emit.representation", f"the {d.language()} emitter has no module variables (global `{m.globals[g].name}`)");
+        };
+        u.out.push(decl);
+        g = g + 1;
+    }
+    fi = 0;
+    while fi < m.functions.len() {
+        emit_function(u, m.functions[fi], u.fn_names[fi]);
+        fi = fi + 1;
+    }
+    let start = m.functions[0];
+    let entry = if starts_anything(start) { u.fn_names[0] } else { "" };
+    for line in d.module_close(entry, start.ret_physics.layout_id != 0) { u.out.push(line); }
+    var text = "";
+    for line in u.out { text = text + line + "\n"; }
+    return text;
+}
+
+/// Whether running the start function does anything: anything but jumps
+/// and a bare return.
+fn starts_anything(f: IrFunction) -> bool {
+    for b in f.blocks {
+        for inst in b.insts {
+            if inst.opcode != op_jump() && inst.opcode != op_return() { return true; }
+        }
+    }
+    return false;
+}
+
+/// `name` as an identifier: letters, digits and `_`, not starting with a
+/// digit.
+pub fn identifier(name: str) -> str {
+    var out = "";
+    var i = 0;
+    while i < name.len() {
+        let b = name.byte_at(i);
+        let ok = (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+        out = out + if ok { name.slice(i, i + 1) } else { "_" };
+        i = i + 1;
+    }
+    if out.len() == 0 || (out.byte_at(0) >= 48 && out.byte_at(0) <= 57) { out = "f_" + out; }
+    return out;
+}
+
+/// Whether `name` is a letter then only digits, as the names of locals
+/// (`v<id>`) and globals (`g<n>`) are.
+fn looks_generated(name: str) -> bool {
+    if name.len() < 2 { return false; }
+    var i = 1;
+    while i < name.len() {
+        let b = name.byte_at(i);
+        if b < 48 || b > 57 { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Each function's name in the target: its PilIR name as an identifier,
+/// moved aside (`_` appended) when it is reserved or looks like a local,
+/// then numbered when two would be the same. Function 0 is the start.
+fn function_names(m: IrModule, d: ISourceDialect) -> List<str> {
+    let reserved = Map<str, bool>();
+    for r in d.reserved() { reserved.set(r, true); }
+    reserved.set(state_name(), true);
+    let taken = Map<str, bool>();
+    var out: List<str> = [];
+    var i = 0;
+    while i < m.functions.len() {
+        var name = if i == 0 { helper_prefix() + "start" } else { identifier(m.functions[i].name) };
+        if i > 0 && (reserved.has(name) || looks_generated(name) || name.starts_with(helper_prefix())) { name = name + "_"; }
+        if taken.has(name) { name = f"{name}_{i}"; }
+        taken.set(name, true);
+        out.push(name);
+        i = i + 1;
+    }
+    return out;
+}
+
+fn param_names(f: IrFunction) -> List<str> {
+    var out: List<str> = [];
+    if f.blocks.len() > 0 {
+        for v in f.blocks[0].params { out.push(f"v{v}"); }
+    }
+    return out;
+}
+
+fn param_phys(f: IrFunction) -> List<IrTypePhysics> {
+    var out: List<IrTypePhysics> = [];
+    if f.blocks.len() > 0 {
+        for v in f.blocks[0].params { out.push(f.value_physics[v]); }
+    }
+    return out;
+}
+
+fn line(sf: SourceFn, text: str) {
+    if text == "" { return; }
+    var pad = "";
+    var i = 0;
+    while i < sf.depth {
+        pad = pad + "    ";
+        i = i + 1;
+    }
+    sf.u.out.push(pad + text);
+}
+
+fn lines(sf: SourceFn, texts: List<str>) {
+    for t in texts { line(sf, t); }
+}
+
+/// Whether a value of physics `p` is written in the target: in a typed
+/// language only values of a known layout are; a dynamic one writes all.
+fn carries(sf: SourceFn, p: IrTypePhysics) -> bool => !sf.u.d.typed() || p.layout_id != 0;
+
+/// Stops at the representation seam unless the language has a type for `p`.
+fn require_type(sf: SourceFn, p: IrTypePhysics, what: str) {
+    if sf.u.d.type_name(p) == none {
+        let _ = seam("emit.representation", f"the {sf.u.d.language()} emitter has no type for {what} ({reg_class_name(p.reg_class)}, {p.bit_width} bits, layout {p.layout_id})");
+    }
+}
+
+fn emit_function(u: SourceUnit, f: IrFunction, name: str) {
+    let d = u.d;
+    var inline: List<str> = [];
+    var cell: List<str> = [];
+    var literal: List<bool> = [];
+    for _p in f.value_physics {
+        inline.push("");
+        cell.push("");
+        literal.push(false);
+    }
+    let sf = SourceFn { u: u, f: f, inline: inline, cell: cell, literal: literal, depth: 0 };
+    type_untyped_results(f);
+    let params = param_names(f);
+    let pphys = param_phys(f);
+    var i = 0;
+    while i < pphys.len() {
+        if carries(sf, pphys[i]) { require_type(sf, pphys[i], f"parameter {i + 1} of `{f.name}`"); }
+        i = i + 1;
+    }
+    if carries(sf, f.ret_physics) { require_type(sf, f.ret_physics, f"the result of `{f.name}`"); }
+    let globals = classify_values(sf);
+    line(sf, d.fn_open(name, params, pphys, f.ret_physics));
+    sf.depth = 1;
+    lines(sf, d.fn_globals(globals));
+    i = 0;
+    while i < params.len() {
+        lines(sf, d.param_prologue(params[i], pphys[i]));
+        i = i + 1;
+    }
+    let decl = local_declarations(sf);
+    lines(sf, d.locals(decl.names, decl.phys));
+    if f.blocks.len() == 1 {
+        emit_block_body(sf, f.blocks[0]);
+    } else {
+        line(sf, d.state_decl(state_name()));
+        line(sf, d.dispatch_open());
+        sf.depth = 2;
+        var first = true;
+        for b in f.blocks {
+            line(sf, d.case_open(state_name(), b.id, first));
+            first = false;
+            sf.depth = 3;
+            emit_block_body(sf, b);
+            sf.depth = 2;
+        }
+        line(sf, d.cases_close());
+        sf.depth = 1;
+        line(sf, d.dispatch_close());
+    }
+    sf.depth = 0;
+    line(sf, d.fn_close());
+    u.out.push("");
+}
+
+/// Gives an arithmetic result the checker left untyped the physics of its
+/// left operand, or of its right one: the seed's operators keep their
+/// operands' kind, and an integer meeting a float gives a float.
+fn type_untyped_results(f: IrFunction) {
+    for b in f.blocks {
+        for inst in b.insts {
+            let op = inst.opcode;
+            if op < op_add() || op > op_shr() || inst.result == ir_no_value() { continue; }
+            let a = ir_args(f, inst);
+            let pa = f.value_physics[a[0]];
+            let pb = f.value_physics[a[1]];
+            let mixed = (is_float(pa) && is_int(pb)) || (is_int(pa) && is_float(pb));
+            if f.value_physics[inst.result].layout_id != 0 && !mixed { continue; }
+            // An integer meeting a float is computed as the float, as the seed does.
+            f.value_physics[inst.result] = if mixed { if is_float(pa) { pa } else { pb } } else if pa.layout_id != 0 { pa } else { pb };
+        }
+    }
+}
+
+/// Fills in which values are written inline (constants) or name a cell
+/// (slots, globals); returns the globals the function writes.
+fn classify_values(sf: SourceFn) -> List<str> {
+    let f = sf.f;
+    let d = sf.u.d;
+    let m = sf.u.m;
+    var written: List<str> = [];
+    for b in f.blocks {
+        for inst in b.insts {
+            let a = ir_args(f, inst);
+            let op = inst.opcode;
+            let r = inst.result;
+            if op == op_const_bits() {
+                sf.inline[r] = int_text(sf, m.ints[a[0]], inst.physics);
+            } else if op == op_const_float() {
+                sf.inline[r] = float_text(sf, f64_from_bits(m.floats[a[0]]), inst.physics);
+            } else if op == op_const_bytes() {
+                sf.inline[r] = d.str_lit(m.strings[a[0]]);
+                sf.literal[r] = true;
+            } else if op == op_undef() {
+                sf.inline[r] = if carries(sf, inst.physics) { d.zero(inst.physics) } else { unit_text(sf) };
+            } else if op == op_stack_slot() {
+                sf.cell[r] = f"v{r}";
+            } else if op == op_global_addr() {
+                sf.cell[r] = sf.u.global_names[inst.subop];
+            } else if op == op_store() {
+                let target = a[0];
+                // A store to a global's address writes the global.
+                for b2 in f.blocks {
+                    for i2 in b2.insts {
+                        if i2.result == target && i2.opcode == op_global_addr() {
+                            let gname = sf.u.global_names[i2.subop];
+                            var seen = false;
+                            for w in written {
+                                if w == gname { seen = true; }
+                            }
+                            if !seen { written.push(gname); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return written;
+}
+
+/// The locals a function declares: block parameters other than the
+/// entry's, slot cells and instruction results that are not inline.
+struct LocalDecls : IObject {
+    pub names: List<str>;
+    pub phys: List<IrTypePhysics>;
+}
+
+fn local_declarations(sf: SourceFn) -> LocalDecls {
+    let f = sf.f;
+    let out = LocalDecls { names: [], phys: [] };
+    var bi = 0;
+    for b in f.blocks {
+        if bi > 0 {
+            for v in b.params {
+                let p = f.value_physics[v];
+                if carries(sf, p) {
+                    require_type(sf, p, f"a block parameter of `{f.name}`");
+                    out.names.push(f"v{v}");
+                    out.phys.push(p);
+                }
+            }
+        }
+        bi = bi + 1;
+        for inst in b.insts {
+            let r = inst.result;
+            if r == ir_no_value() || sf.inline[r] != "" || inst.opcode == op_global_addr() { continue; }
+            let p = f.value_physics[r];
+            if !carries(sf, p) { continue; }
+            require_type(sf, p, f"a value of `{f.name}`");
+            out.names.push(f"v{r}");
+            out.phys.push(p);
+        }
+    }
+    return out;
+}
+
+fn unit_text(sf: SourceFn) -> str => sf.u.d.unit_value() ?? "";
+
+/// Integer constant `v` of physics `p`: a boolean when it is one bit wide,
+/// unsigned digits when the register is unsigned.
+fn int_text(sf: SourceFn, v: i64, p: IrTypePhysics) -> str {
+    let d = sf.u.d;
+    if p.bit_width == 1 { return d.bool_lit(v != 0); }
+    let digits = if p.reg_class == reg_class_gpr_unsigned() && v < 0 { f"{v as u64}" } else { f"{v}" };
+    guard some t = d.int_lit(digits, p) else {
+        return seam("emit.representation", f"the {d.language()} emitter has no integer literal of {p.bit_width} bits");
+    };
+    return t;
+}
+
+/// Float constant `x` in decimal, as the seed shows it, with a `.` so every
+/// language reads a float.
+fn float_text(sf: SourceFn, x: f64, p: IrTypePhysics) -> str {
+    let d = sf.u.d;
+    var text = f"{x}";
+    if x != x {
+        text = "NaN";
+    } else if text.find(".", 0) < 0 && text.find("inf", 0) < 0 {
+        text = text + ".0";
+    }
+    guard some t = d.float_lit(text, p) else {
+        return seam("emit.representation", f"the {d.language()} emitter has no float literal of {p.bit_width} bits");
+    };
+    return t;
+}
+
+/// What is written where value `v` is used.
+fn use_of(sf: SourceFn, v: u32) -> str {
+    if sf.cell[v] != "" {
+        return seam("emit.instruction", f"the {sf.u.d.language()} emitter gives a slot or global address no value (`v{v}` in `{sf.f.name}`)");
+    }
+    if sf.inline[v] != "" { return sf.inline[v]; }
+    let p = sf.f.value_physics[v];
+    if !carries(sf, p) {
+        guard some u = sf.u.d.unit_value() else {
+            return seam("emit.representation", f"the {sf.u.d.language()} emitter has no value for `v{v}` of unknown type in `{sf.f.name}`");
+        };
+        return u;
+    }
+    return f"v{v}";
+}
+
+fn cell_of(sf: SourceFn, v: u32) -> str {
+    if sf.cell[v] == "" {
+        return seam("emit.instruction", f"the {sf.u.d.language()} emitter reads and writes only slots and globals (`v{v}` in `{sf.f.name}`)");
+    }
+    return sf.cell[v];
+}
+
+fn unsupported(sf: SourceFn, what: str) -> str =>
+    seam("emit.instruction", f"the {sf.u.d.language()} emitter has no spelling for {what} (in `{sf.f.name}`)");
+
+/// The binary operator each arithmetic opcode is, by opcode.
+fn binary_ops() -> Map<str, str> {
+    let ops = Map<str, str>();
+    ops.set(f"{op_add()}", "add");
+    ops.set(f"{op_sub()}", "sub");
+    ops.set(f"{op_mul()}", "mul");
+    ops.set(f"{op_div()}", "div");
+    ops.set(f"{op_rem()}", "rem");
+    ops.set(f"{op_bit_and()}", "and");
+    ops.set(f"{op_bit_or()}", "or");
+    ops.set(f"{op_bit_xor()}", "xor");
+    ops.set(f"{op_shl()}", "shl");
+    ops.set(f"{op_shr()}", "shr");
+    return ops;
+}
+
+/// Writes `expr` as the result of `inst`, or as a statement when the
+/// result carries nothing.
+fn define(sf: SourceFn, inst: IrInst, expr: str) {
+    let d = sf.u.d;
+    if inst.result != ir_no_value() && carries(sf, sf.f.value_physics[inst.result]) {
+        line(sf, d.assign(f"v{inst.result}", expr));
+    } else {
+        line(sf, d.expr_stmt(expr));
+    }
+}
+
+/// Whether `p` is a number or a boolean.
+fn is_scalar(p: IrTypePhysics) -> bool => is_int(p) || is_float(p) || is_bool(p);
+
+/// Value `v` as an operand of a number operation of physics `p`: a number
+/// or boolean of another layout is converted to `p` first.
+fn widened(sf: SourceFn, v: i64, p: IrTypePhysics) -> str {
+    let pv = sf.f.value_physics[v];
+    if !converts(pv, p) { return use_of(sf, v); }
+    return sf.u.d.cast(use_of(sf, v), pv, p) ?? unsupported(sf, "a number conversion");
+}
+
+fn converts(pv: IrTypePhysics, p: IrTypePhysics) -> bool =>
+    (is_int(p) || is_float(p)) && is_scalar(pv) && pv.layout_id != 0 && pv.layout_id != p.layout_id;
+
+/// The physics value `v` has once `widened` to an operation of physics `p`.
+fn operand_physics(f: IrFunction, v: i64, p: IrTypePhysics) -> IrTypePhysics {
+    let pv = f.value_physics[v];
+    return if converts(pv, p) { p } else { pv };
+}
+
+/// The physics two numbers are compared in: a float over an integer, then
+/// the wider of the two; the seed compares numbers by value.
+fn comparison_physics(pa: IrTypePhysics, pb: IrTypePhysics) -> IrTypePhysics {
+    if !is_scalar(pa) || !is_scalar(pb) || pa.layout_id == 0 || pb.layout_id == 0 { return pa; }
+    if is_float(pa) != is_float(pb) { return if is_float(pa) { pa } else { pb }; }
+    return if pb.bit_width > pa.bit_width { pb } else { pa };
+}
+
+fn emit_block_body(sf: SourceFn, b: IrBlock) {
+    let ops = binary_ops();
+    for inst in b.insts {
+        emit_inst(sf, inst, ops);
+    }
+}
+
+fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
+    let d = sf.u.d;
+    let f = sf.f;
+    let m = sf.u.m;
+    let a = ir_args(f, inst);
+    let op = inst.opcode;
+    let r = inst.result;
+    if op == op_const_bits() || op == op_const_float() || op == op_const_bytes() || op == op_undef()
+        || op == op_stack_slot() || op == op_global_addr() {
+        return;
+    }
+    if ops.has(f"{op}") {
+        let p = f.value_physics[r];
+        let e = d.binary(ops.get(f"{op}"), widened(sf, a[0], p), widened(sf, a[1], p), operand_physics(f, a[0], p), operand_physics(f, a[1], p), p)
+            ?? unsupported(sf, f"`{opcode_name(op)}` on {reg_class_name(inst.physics.reg_class)} values");
+        line(sf, d.assign(f"v{r}", e));
+        return;
+    }
+    if op == op_cmp() {
+        let pa = f.value_physics[a[0]];
+        let pb = f.value_physics[a[1]];
+        let p = comparison_physics(pa, pb);
+        let e = d.compare_op(inst.subop, widened(sf, a[0], p), widened(sf, a[1], p), p) ?? unsupported(sf, "this comparison");
+        line(sf, d.assign(f"v{r}", e));
+        return;
+    }
+    if op == op_cast() {
+        let from = f.value_physics[a[0]];
+        // Between layouts of one register class and width (`i64` and a
+        // `[Bits]` type like it) the value is the same.
+        let same = from.reg_class == inst.physics.reg_class && from.bit_width == inst.physics.bit_width && from.layout_id != 0;
+        let e = if same { use_of(sf, a[0]) } else { d.cast(use_of(sf, a[0]), from, inst.physics) ?? unsupported(sf, "this conversion") };
+        line(sf, d.assign(f"v{r}", e));
+        return;
+    }
+    if op == op_load() {
+        if carries(sf, inst.physics) { line(sf, d.assign(f"v{r}", cell_of(sf, a[0]))); }
+        return;
+    }
+    if op == op_store() {
+        if carries(sf, f.value_physics[a[1]]) { line(sf, d.assign(cell_of(sf, a[0]), use_of(sf, a[1]))); }
+        return;
+    }
+    if op == op_call_direct() {
+        var args: List<str> = [];
+        for v in a {
+            if carries(sf, f.value_physics[v]) { args.push(use_of(sf, v)); }
+        }
+        define(sf, inst, d.call(sf.u.fn_names[inst.subop], args));
+        return;
+    }
+    if op == op_call_intrinsic() {
+        let name = m.intrinsics[inst.subop];
+        var args: List<str> = [];
+        var phys: List<IrTypePhysics> = [];
+        var lits: List<bool> = [];
+        for v in a {
+            args.push(use_of(sf, v));
+            phys.push(f.value_physics[v]);
+            lits.push(sf.literal[v]);
+        }
+        define(sf, inst, d.intrinsic(name, args, phys, lits) ?? unsupported(sf, f"the engine operation `{name}`"));
+        return;
+    }
+    if op == op_construct_aggregate() {
+        var vals: List<str> = [];
+        for v in a { vals.push(use_of(sf, v)); }
+        line(sf, d.assign(f"v{r}", d.make_record(vals) ?? unsupported(sf, "a record")));
+        return;
+    }
+    if op == op_extract_field() {
+        let e = d.get_field(use_of(sf, a[0]), inst.subop) ?? unsupported(sf, "a field read");
+        if carries(sf, inst.physics) { line(sf, d.assign(f"v{r}", e)); }
+        return;
+    }
+    if op == op_insert_field() {
+        line(sf, d.set_field(use_of(sf, a[0]), inst.subop, use_of(sf, a[1])) ?? unsupported(sf, "a field write"));
+        return;
+    }
+    if op == op_jump() {
+        var vals: List<u32> = [];
+        var i = 1;
+        while i < a.len() {
+            vals.push(a[i]);
+            i = i + 1;
+        }
+        go_to(sf, a[0], vals);
+        return;
+    }
+    if op == op_cond_br() {
+        // [cond, then, n_then, then args.., else, n_else, else args..]
+        let then_vals = slice_args(a, 3, a[2]);
+        let at = 3 + a[2];
+        let else_vals = slice_args(a, at + 2, a[at + 1]);
+        line(sf, d.if_open(use_of(sf, a[0])));
+        sf.depth = sf.depth + 1;
+        go_to(sf, a[1], then_vals);
+        sf.depth = sf.depth - 1;
+        line(sf, d.else_line());
+        sf.depth = sf.depth + 1;
+        go_to(sf, a[at], else_vals);
+        sf.depth = sf.depth - 1;
+        line(sf, d.if_close());
+        return;
+    }
+    if op == op_return() {
+        let carried = a.len() > 0 && carries(sf, f.value_physics[a[0]]) && carries(sf, f.ret_physics);
+        line(sf, d.ret(if carried { use_of(sf, a[0]) } else { "" }));
+        return;
+    }
+    if op == op_unreachable() {
+        let message = if a.len() > 0 && sf.literal[a[0]] { m.strings[ir_args(f, producer(sf, a[0]))[0]] } else { "entered code the program cannot reach" };
+        line(sf, d.trap(message));
+        return;
+    }
+    let _ = unsupported(sf, f"`{opcode_name(op)}`");
+}
+
+/// The instruction defining value `v`.
+fn producer(sf: SourceFn, v: u32) -> IrInst {
+    for b in sf.f.blocks {
+        for inst in b.insts {
+            if inst.result == v { return inst; }
+        }
+    }
+    return seam("emit.instruction", f"value `v{v}` has no defining instruction in `{sf.f.name}`");
+}
+
+fn slice_args(a: List<u32>, from: i64, count: i64) -> List<u32> {
+    var out: List<u32> = [];
+    var i = 0;
+    while i < count {
+        out.push(a[from + i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// Passes `vals` to block `target`'s parameters and goes there.
+fn go_to(sf: SourceFn, target: u32, vals: List<u32>) {
+    let d = sf.u.d;
+    let f = sf.f;
+    let params = f.blocks[target].params;
+    var lhs: List<str> = [];
+    var rhs: List<str> = [];
+    var phys: List<IrTypePhysics> = [];
+    var i = 0;
+    while i < params.len() {
+        let p = f.value_physics[params[i]];
+        if carries(sf, p) {
+            lhs.push(f"v{params[i]}");
+            rhs.push(use_of(sf, vals[i]));
+            phys.push(p);
+        }
+        i = i + 1;
+    }
+    if lhs.len() == 1 {
+        line(sf, d.assign(lhs[0], rhs[0]));
+    } else if lhs.len() > 1 {
+        lines(sf, d.parallel_assign(lhs, rhs, phys));
+    }
+    line(sf, d.assign(state_name(), f"{target}"));
+}
+
+/// Text escaped for a double-quoted literal in the C family of syntaxes:
+/// `"`, `\` and line breaks escaped; other control bytes through `ctrl`.
+pub fn escaped(raw: str, ctrl: (i64) => str) -> str {
+    var out = "";
+    var i = 0;
+    while i < raw.len() {
+        let b = raw.byte_at(i);
+        if b == 34 {
+            out = out + "\\\"";
+        } else if b == 92 {
+            out = out + "\\\\";
+        } else if b == 10 {
+            out = out + "\\n";
+        } else if b == 13 {
+            out = out + "\\r";
+        } else if b == 9 {
+            out = out + "\\t";
+        } else if b < 32 || b == 127 {
+            out = out + ctrl(b);
+        } else {
+            out = out + raw.slice(i, i + 1);
+        }
+        i = i + 1;
+    }
+    return "\"" + out + "\"";
+}
+
+/// `b` as two hexadecimal digits.
+pub fn hex2(b: i64) -> str {
+    let digits = "0123456789abcdef";
+    return digits.slice(b / 16, b / 16 + 1) + digits.slice(b % 16, b % 16 + 1);
+}
+
+/// Physics helpers the dialects share.
+pub fn is_bool(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.bit_width == 1 && p.reg_class <= reg_class_gpr_unsigned();
+pub fn is_int(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.bit_width > 1 && p.reg_class <= reg_class_gpr_unsigned();
+pub fn is_signed(p: IrTypePhysics) -> bool => p.reg_class == reg_class_gpr_signed();
+pub fn is_float(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.reg_class == reg_class_simd_float();
+
+/// `items` separated by `, `.
+pub fn joined(items: List<str>) -> str {
+    var out = "";
+    for x in items {
+        if out.len() > 0 { out = out + ", "; }
+        out = out + x;
+    }
+    return out;
+}
+
+/// The operator of comparison predicate `pred` in most languages.
+pub fn cmp_symbol(pred: i64) -> str => ["==", "!=", "<", "<=", ">", ">="][pred];

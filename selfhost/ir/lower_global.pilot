@@ -235,6 +235,26 @@ fn user_programs(lw: Lowerer, main: i64) -> List<i64> {
     return first;
 }
 
+/// The functions the user's files declare at top level whose types are all
+/// written: no type parameters, every parameter annotated. The others are
+/// lowered per call, for the types they are called with.
+pub fn user_functions(lw: Lowerer) -> List<i64> {
+    let p = lw.inf.p;
+    let s = p.s;
+    var out: List<i64> = [];
+    for prog in user_programs(lw, -1) {
+        for c in children(s, prog) {
+            if kind(s, c) != nk_fn() || nl_get(p.tparams, key(c)).len() > 0 { continue; }
+            var typed = true;
+            for param in decl_params(s, c) {
+                if rhs(s, param) < 0 { typed = false; }
+            }
+            if typed { out.push(c); }
+        }
+    }
+    return out;
+}
+
 /// Whether top-level item `c` runs when the program starts.
 fn runs_at_start(s: Snap, c: i64) -> bool {
     let k = kind(s, c);
@@ -276,7 +296,8 @@ pub fn lower_start(lw: Lowerer, main: i64) {
     }
     let ret = physics_of_type_node(lw, annot(s, main));
     f.ret_physics = ret;
-    let v = emit(lw, op_call_direct(), function_index(lw, main, ty_unknown()), ret, [], main);
+    // The seed does not list this call in a runtime error's trace.
+    let v = ir_emit(f, lw.cur, op_call_direct(), function_index(lw, main, ty_unknown()), ret, [], true, ir_no_span());
     let args: List<u32> = if annot(s, main) >= 0 { [v] } else { [] };
     let _ = ir_emit(f, lw.cur, op_return(), 0, ret, args, false, span_start(s, main));
 }

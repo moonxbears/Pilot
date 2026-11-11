@@ -211,7 +211,7 @@ impl PilVirtualMachine {
 
     /// `==`: lists (and tuples) compare element by element; everything else
     /// as `ops::equals`.
-    fn values_equal(&self, a: PilotVal, b: PilotVal) -> bool {
+    pub(crate) fn values_equal(&self, a: PilotVal, b: PilotVal) -> bool {
         let list = |v: PilotVal| v.as_list_handle().and_then(|slot| self.heap_lists.get(slot));
         match (list(a), list(b)) {
             (Some(x), Some(y)) => {
@@ -253,40 +253,25 @@ impl PilVirtualMachine {
             let (r1, r2) = (self.registers[src1], self.registers[src2]);
             match ins.opcode() {
                 Opcode::Nop => {}
-                Opcode::Add => {
-                    let v = if r1.is_str() || r2.is_str() {
-                        let mut s = self.display(r1);
-                        s.push_str(&self.display(r2));
-                        PilotVal::from_str(&s)
-                    } else {
-                        ops::arith(Opcode::Add, r1, r2)?
-                    };
-                    self.set(dst, v);
-                }
-                op @ (Opcode::Sub
+                op @ (Opcode::Add
+                | Opcode::Sub
                 | Opcode::Mul
                 | Opcode::Div
                 | Opcode::Rem
                 | Opcode::Pow
-                | Opcode::FloorDiv) => {
-                    let v = ops::arith(op, r1, r2)?;
-                    self.set(dst, v);
-                }
-                op @ (Opcode::BitAnd | Opcode::BitOr | Opcode::Xor | Opcode::Shl | Opcode::Shr) => {
-                    let v = ops::bitwise(op, r1, r2)?;
-                    self.set(dst, v);
-                }
-                op @ (Opcode::CmpEq
+                | Opcode::FloorDiv
+                | Opcode::BitAnd
+                | Opcode::BitOr
+                | Opcode::Xor
+                | Opcode::Shl
+                | Opcode::Shr
+                | Opcode::CmpEq
                 | Opcode::CmpNe
                 | Opcode::CmpLt
                 | Opcode::CmpLe
                 | Opcode::CmpGt
                 | Opcode::CmpGe) => {
-                    let v = match op {
-                        Opcode::CmpEq => PilotVal::from_bool(self.values_equal(r1, r2)),
-                        Opcode::CmpNe => PilotVal::from_bool(!self.values_equal(r1, r2)),
-                        _ => ops::compare(op, r1, r2)?,
-                    };
+                    let v = self.binary_op(op, r1, r2)?;
                     self.set(dst, v);
                 }
                 op @ (Opcode::Neg | Opcode::Not | Opcode::BitNot) => {

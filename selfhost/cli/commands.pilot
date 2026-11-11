@@ -215,19 +215,38 @@ pub fn cmd_gate(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     return text.parse_i64(report.slice(0, nl)) ?? 1;
 }
 
-/// `pilot emit <lang> <file>`: transpiles a program with the emitter of `lang`.
+/// `pilot emit <lang> <file>`: the program, lowered to PilIR, written in
+/// language `lang` by its dialect (selfhost/transpile/emit_<lang>.pilot,
+/// whose `<lang>_dialect()` gives it). A program the compiler rejects is
+/// reported as `pilot run` reports it.
 pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     if args.len < 2 { return usage_error("`pilot emit` needs a target language and a file"); }
     let lang = args[0];
+    if identifier(lang) != lang { return usage_error(f"`{lang}` is not a language name"); }
+    if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
+    let compiled = without_seed_limits(host_check(args[1]));
+    if report_diagnostics(compiled) > 0 { return 1; }
+    let analyzed = report_at_least(semantic_diags(args[1]), diag_severity_warning());
+    if report_diagnostics(analyzed) > 0 { return 1; }
     // The emitter is a toolchain source, found from the toolchain's own
     // search roots (a language without one stops as an internal error).
-    let emitter = f"selfhost/transpile/emit_{lang}.pilot";
-    if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
-    var out = host_tool_on(["selfhost/transpile/ir.pilot", emitter], f"transpile_arena_to_{lang}();", args[1]);
-    if out.ends_with("\n") { out = out.slice(0, out.len() - 1); }
-    print(out);
-    return 0;
+    var files = cli_ir_files();
+    files.push("selfhost/transpile/source.pilot");
+    files.push("selfhost/transpile/c_family.pilot");
+    files.push(f"selfhost/transpile/emit_{lang}.pilot");
+    return host_program_tool(args[1], files, cli_ir_decls(), f"emit_program({lang}_dialect());");
+}
+
+/// Whether `name` is lowercase letters, digits and `_` only.
+fn identifier(name: str) -> str {
+    var i = 0;
+    while i < name.len() {
+        let b = name.byte_at(i);
+        if !((b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 95) { return ""; }
+        i = i + 1;
+    }
+    return name;
 }
 
 /// The sources of `pilot ir`: the type checker's analysis, then PilIR.
@@ -260,6 +279,7 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/pass_fold.pilot",
         "selfhost/ir/pass_dce.pilot",
         "selfhost/ir/text.pilot",
+        "selfhost/ir/fault.pilot",
         "selfhost/ir/interp.pilot",
         "selfhost/ir/main.pilot",
     ] { out.push(f); }
@@ -292,8 +312,23 @@ pub fn cmd_ir(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     // construct only the seed cannot run does not stop it.
     let compiled = without_seed_limits(host_check(args[1]));
     if report_diagnostics(compiled) > 0 { return 1; }
-    return host_program_tool(args[1], cli_ir_files(), cli_ir_decls(), f"ir_main(\"{args[0]}\");");
+    // The checker's and analyzer's errors and warnings, as `pilot run` reports them.
+    let analyzed = report_at_least(semantic_diags(args[1]), diag_severity_warning());
+    if report_diagnostics(analyzed) > 0 { return 1; }
+    // The script arguments after `--` reach the program the interpreter runs.
+    var script_args = "[";
+    var i: usize = 0;
+    while i < cli_list_len(p.passthrough_args) {
+        if i > 0 { script_args = script_args + ", "; }
+        script_args = script_args + pilot_string_literal(cli_list_get_str(p.passthrough_args, i));
+        i = i + 1;
+    }
+    script_args = script_args + "]";
+    return host_program_tool(args[1], cli_ir_files(), cli_ir_decls(), f"ir_main(\"{args[0]}\", {script_args});");
 }
+
+/// `text` as a Pilot string literal: quoted, with `\\` and `"` escaped.
+fn pilot_string_literal(text: str) -> str => "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
 
 /// The handler of every command that has one, by command name (a CLI map,
 /// `cli_map_*` in `spec.pilot`).

@@ -1,0 +1,282 @@
+// ==============================================================================
+// FILE: selfhost/transpile/c_family.pilot
+// The C11 and C++17 dialect of `pilot emit` (selfhost/transpile/source.pilot).
+// ==============================================================================
+// One dialect serves both languages: the code it writes is C11 that is also
+// C++17, and only the language's name and reserved words differ.
+//
+// Integers are the `<stdint.h>` type of their width. Addition, subtraction,
+// multiplication and left shifts run on `uint64_t` and convert back, so they
+// wrap as the seed's do instead of overflowing (undefined in C); shift
+// counts are taken modulo the width; division and remainder go through
+// helpers that stop the program on a zero divisor and wrap `MIN / -1`.
+// Booleans are `bool`, floats `double` / `float`. Strings appear only as
+// literals passed to `print`; records and other values without a C type
+// stop at the representation seam. `print` shows values as the seed does.
+pub lvl(0) pkg Pilot.SelfHost.Transpile.CFamily;
+
+use selfhost.ir.model.*;
+use selfhost.transpile.source.*;
+
+pub struct CFamilyDialect : ISourceDialect {
+    /// True for C++, false for C.
+    pub cpp: bool;
+
+    pub fn language() -> str => if .cpp { "C++" } else { "C" };
+    pub fn typed() -> bool => true;
+    pub fn reserved() -> List<str> {
+        var out: List<str> = [
+            "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum",
+            "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return",
+            "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void",
+            "volatile", "while", "bool", "true", "false", "main", "exit", "abort", "printf", "fprintf", "fputc",
+            "fputs", "fwrite", "snprintf", "strtod", "atoi", "fmod", "isinf", "signbit", "stdout", "stderr",
+            "NAN", "INFINITY",
+        ];
+        if .cpp {
+            for k in [
+                "alignas", "alignof", "and", "asm", "catch", "class", "constexpr", "decltype", "delete",
+                "explicit", "export", "friend", "mutable", "namespace", "new", "noexcept", "not", "nullptr",
+                "operator", "or", "private", "protected", "public", "template", "this", "throw", "try",
+                "typeid", "typename", "using", "virtual", "xor", "std",
+            ] { out.push(k); }
+        }
+        return out;
+    }
+    pub fn type_name(p: IrTypePhysics) -> str? {
+        if is_bool(p) { return "bool"; }
+        if is_float(p) {
+            if p.bit_width == 64 { return "double"; }
+            if p.bit_width == 32 { return "float"; }
+            return none;
+        }
+        if is_int(p) && (p.bit_width == 8 || p.bit_width == 16 || p.bit_width == 32 || p.bit_width == 64) {
+            let base = if is_signed(p) { "int" } else { "uint" };
+            return f"{base}{p.bit_width}_t";
+        }
+        if p.layout_id == 0 { return "void"; }
+        return none;
+    }
+    pub fn prelude() -> List<str> => [
+        "#include <inttypes.h>",
+        "#include <math.h>",
+        "#include <stdbool.h>",
+        "#include <stdint.h>",
+        "#include <stdio.h>",
+        "#include <stdlib.h>",
+        "#include <string.h>",
+        "",
+        "static inline void pilot_trap(const char *message) {",
+        "    fprintf(stderr, \"runtime error: %s\\n\", message);",
+        "    exit(1);",
+        "}",
+        "static inline int64_t pilot_sdiv(int64_t a, int64_t b) {",
+        "    if (b == 0) pilot_trap(\"integer division by zero\");",
+        "    if (b == -1) return (int64_t)(0u - (uint64_t)a);",
+        "    return a / b;",
+        "}",
+        "static inline int64_t pilot_srem(int64_t a, int64_t b) {",
+        "    if (b == 0) pilot_trap(\"integer division by zero\");",
+        "    if (b == -1) return 0;",
+        "    return a % b;",
+        "}",
+        "static inline uint64_t pilot_udiv(uint64_t a, uint64_t b) {",
+        "    if (b == 0) pilot_trap(\"integer division by zero\");",
+        "    return a / b;",
+        "}",
+        "static inline uint64_t pilot_urem(uint64_t a, uint64_t b) {",
+        "    if (b == 0) pilot_trap(\"integer division by zero\");",
+        "    return a % b;",
+        "}",
+        "static inline void pilot_put_i64(FILE *f, int64_t x) { fprintf(f, \"%\" PRId64, x); }",
+        "static inline void pilot_put_u64(FILE *f, uint64_t x) { fprintf(f, \"%\" PRIu64, x); }",
+        "static inline void pilot_put_bool(FILE *f, bool x) { fputs(x ? \"true\" : \"false\", f); }",
+        "static inline void pilot_put_str(FILE *f, const char *x) { fputs(x, f); }",
+        "/* The shortest digits that read back as x, written without an exponent. */",
+        "static inline void pilot_put_f64(FILE *f, double x) {",
+        "    if (x != x) { fputs(\"NaN\", f); return; }",
+        "    if (isinf(x)) { fputs(x > 0 ? \"inf\" : \"-inf\", f); return; }",
+        "    if (x == 0) { fputs(signbit(x) ? \"-0\" : \"0\", f); return; }",
+        "    char buf[64];",
+        "    for (int p = 1; p <= 17; p++) {",
+        "        snprintf(buf, sizeof buf, \"%.*e\", p - 1, x);",
+        "        if (strtod(buf, NULL) == x) break;",
+        "    }",
+        "    char digits[32];",
+        "    int nd = 0;",
+        "    const char *s = buf;",
+        "    if (*s == '-') { fputc('-', f); s++; }",
+        "    while (*s && *s != 'e') { if (*s != '.') digits[nd++] = *s; s++; }",
+        "    int point = atoi(s + 1) + 1;",
+        "    while (nd > 1 && digits[nd - 1] == '0') nd--;",
+        "    if (point <= 0) {",
+        "        fputs(\"0.\", f);",
+        "        for (int i = 0; i < -point; i++) fputc('0', f);",
+        "        fwrite(digits, 1, nd, f);",
+        "    } else if (point >= nd) {",
+        "        fwrite(digits, 1, nd, f);",
+        "        for (int i = nd; i < point; i++) fputc('0', f);",
+        "    } else {",
+        "        fwrite(digits, 1, point, f);",
+        "        fputc('.', f);",
+        "        fwrite(digits + point, 1, nd - point, f);",
+        "    }",
+        "}",
+        "",
+    ];
+    pub fn global_decl(name: str, p: IrTypePhysics) -> str? {
+        guard some t = self.type_name(p) else { return none; };
+        if t == "void" { return none; }
+        return f"static {t} {name} = {self.zero(p)};";
+    }
+    pub fn module_open(protos: List<str>) -> List<str> {
+        var out: List<str> = [];
+        for p in protos { out.push(p); }
+        out.push("");
+        return out;
+    }
+    pub fn prototype(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str =>
+        self.signature(name, params, phys, ret) + ";";
+    pub fn module_close(entry: str, has_code: bool) -> List<str> {
+        if entry == "" { return []; }
+        if has_code { return [f"int main(void) " + "{ " + f"return (int){entry}(); " + "}"]; }
+        return ["int main(void) " + "{ " + f"{entry}(); return 0; " + "}"];
+    }
+    pub fn fn_open(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str =>
+        self.signature(name, params, phys, ret) + " {";
+    pub fn fn_close() -> str => "}";
+    pub fn fn_globals(globals: List<str>) -> List<str> => [];
+    pub fn param_prologue(name: str, p: IrTypePhysics) -> List<str> => [];
+    pub fn locals(names: List<str>, phys: List<IrTypePhysics>) -> List<str> {
+        var out: List<str> = [];
+        var i = 0;
+        while i < names.len() {
+            out.push(f"{self.c_type(phys[i])} {names[i]} = {self.zero(phys[i])};");
+            i = i + 1;
+        }
+        return out;
+    }
+    pub fn zero(p: IrTypePhysics) -> str => if is_bool(p) { "false" } else if is_float(p) { "0.0" } else { "0" };
+    pub fn unit_value() -> str? => none;
+    pub fn state_decl(name: str) -> str => f"int {name} = 0;";
+    pub fn dispatch_open() -> str => "for (;;) {";
+    pub fn dispatch_close() -> str => "}";
+    pub fn case_open(state: str, b: i64, first: bool) -> str => (if first { "" } else { "} else " }) + f"if ({state} == {b}) " + "{";
+    pub fn cases_close() -> str => "}";
+    pub fn if_open(cond: str) -> str => f"if ({cond}) " + "{";
+    pub fn else_line() -> str => "} else {";
+    pub fn if_close() -> str => "}";
+    pub fn assign(lhs: str, rhs: str) -> str => f"{lhs} = {rhs};";
+    pub fn parallel_assign(lhs: List<str>, rhs: List<str>, phys: List<IrTypePhysics>) -> List<str> {
+        var text = "{ ";
+        var i = 0;
+        while i < lhs.len() {
+            text = text + f"{self.c_type(phys[i])} t{i} = {rhs[i]}; ";
+            i = i + 1;
+        }
+        i = 0;
+        while i < lhs.len() {
+            text = text + f"{lhs[i]} = t{i}; ";
+            i = i + 1;
+        }
+        return [text + "}"];
+    }
+    pub fn expr_stmt(e: str) -> str => e + ";";
+    pub fn ret(e: str) -> str => if e == "" { "return;" } else { f"return {e};" };
+    pub fn trap(message: str) -> str => f"pilot_trap({self.str_lit(message)});";
+    pub fn int_lit(digits: str, p: IrTypePhysics) -> str? {
+        guard some t = self.type_name(p) else { return none; };
+        if is_signed(p) {
+            let v = if digits == "-9223372036854775808" { "INT64_MIN" } else { f"INT64_C({digits})" };
+            return if p.bit_width == 64 { v } else { f"(({t}){v})" };
+        }
+        return if p.bit_width == 64 { f"UINT64_C({digits})" } else { f"(({t})UINT64_C({digits}))" };
+    }
+    pub fn bool_lit(b: bool) -> str => if b { "true" } else { "false" };
+    pub fn float_lit(text: str, p: IrTypePhysics) -> str? {
+        let suffix = if p.bit_width == 32 { "f" } else { "" };
+        if p.bit_width != 32 && p.bit_width != 64 { return none; }
+        if text == "NaN" { return "NAN"; }
+        if text == "inf" { return "INFINITY"; }
+        if text == "-inf" { return "(-INFINITY)"; }
+        return text + suffix;
+    }
+    pub fn str_lit(raw: str) -> str => escaped(raw, (b) => "\\" + octal3(b));
+    pub fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str? {
+        if is_float(p) {
+            if op == "add" { return f"({a} + {b})"; }
+            if op == "sub" { return f"({a} - {b})"; }
+            if op == "mul" { return f"({a} * {b})"; }
+            if op == "div" { return f"({a} / {b})"; }
+            if op == "rem" { return f"fmod({a}, {b})"; }
+            return none;
+        }
+        if is_bool(p) {
+            if op == "and" { return f"({a} && {b})"; }
+            if op == "or" { return f"({a} || {b})"; }
+            if op == "xor" { return f"({a} != {b})"; }
+            return none;
+        }
+        guard some t = self.type_name(p) else { return none; };
+        if !is_int(p) { return none; }
+        let mask = p.bit_width - 1;
+        if op == "add" { return f"(({t})((uint64_t)({a}) + (uint64_t)({b})))"; }
+        if op == "sub" { return f"(({t})((uint64_t)({a}) - (uint64_t)({b})))"; }
+        if op == "mul" { return f"(({t})((uint64_t)({a}) * (uint64_t)({b})))"; }
+        if op == "shl" { return f"(({t})((uint64_t)({a}) << (({b}) & {mask})))"; }
+        if op == "shr" { return f"(({t})(({a}) >> (({b}) & {mask})))"; }
+        if op == "and" { return f"(({t})({a} & {b}))"; }
+        if op == "or" { return f"(({t})({a} | {b}))"; }
+        if op == "xor" { return f"(({t})({a} ^ {b}))"; }
+        let s = if is_signed(p) { "s" } else { "u" };
+        if op == "div" { return f"(({t})pilot_{s}div({a}, {b}))"; }
+        if op == "rem" { return f"(({t})pilot_{s}rem({a}, {b}))"; }
+        return none;
+    }
+    pub fn compare_op(pred: i64, a: str, b: str, p: IrTypePhysics) -> str? => f"({a} {cmp_symbol(pred)} {b})";
+    pub fn cast(v: str, from: IrTypePhysics, to: IrTypePhysics) -> str? {
+        if is_bool(to) { return if is_bool(from) { v } else { f"(({v}) != 0)" }; }
+        guard some t = self.type_name(to) else { return none; };
+        if self.type_name(from) == none { return none; }
+        return f"(({t})({v}))";
+    }
+    pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
+    pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>) -> str? {
+        let stream = if name == "rt_print" { "stdout" } else if name == "rt_eprint" { "stderr" } else { "" };
+        if stream == "" { return none; }
+        var parts: List<str> = [];
+        var i = 0;
+        while i < args.len() {
+            if i > 0 { parts.push(f"fputc(' ', {stream})"); }
+            let p = phys[i];
+            let put = if literal[i] { "pilot_put_str" } else if is_bool(p) { "pilot_put_bool" } else if is_float(p) { "pilot_put_f64" }
+                else if is_int(p) && is_signed(p) { "pilot_put_i64" } else if is_int(p) { "pilot_put_u64" } else { "" };
+            if put == "" { return none; }
+            parts.push(f"{put}({stream}, {args[i]})");
+            i = i + 1;
+        }
+        parts.push(f"fputc('\\n', {stream})");
+        return "(" + joined(parts) + ")";
+    }
+    pub fn make_record(values: List<str>) -> str? => none;
+    pub fn get_field(rec: str, i: i64) -> str? => none;
+    pub fn set_field(rec: str, i: i64, v: str) -> str? => none;
+
+    /// `ret name(params)` with the C types of `phys`.
+    pub fn signature(name: str, params: List<str>, phys: List<IrTypePhysics>, ret: IrTypePhysics) -> str {
+        var ps: List<str> = [];
+        var i = 0;
+        while i < params.len() {
+            if phys[i].layout_id != 0 { ps.push(f"{self.c_type(phys[i])} {params[i]}"); }
+            i = i + 1;
+        }
+        let list = if ps.len() == 0 { "void" } else { joined(ps) };
+        return f"{self.c_type(ret)} {name}({list})";
+    }
+
+    /// The C type of `p`; `void` when it has none (the caller checked).
+    pub fn c_type(p: IrTypePhysics) -> str => self.type_name(p) ?? "void";
+}
+
+/// `b` as three octal digits, for a `\ooo` escape.
+fn octal3(b: i64) -> str => f"{b / 64}{(b / 8) % 8}{b % 8}";
