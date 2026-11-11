@@ -5,6 +5,7 @@ use pilot_lexer::{tokenize, TokenKind, TokenTape}; use pilot_span::ByteSpan;
 mod accessors;
 pub use accessors::{INDEX_GET_OP, INDEX_SET_OP};
 mod attr_hooks;
+mod generic_params;
 mod generic_receiver;
 mod op_decl;
 mod modules;
@@ -500,39 +501,6 @@ impl<'a> Parser<'a> {
             4 => out.push(self.parse_enum_decl(&mods, 15, true)), _ => { let saved = self.active_hdr.clone();
                 self.active_hdr = Some(ScopeHeader { mods, target: 0 }); self.parse_item(out, in_type_body); self.active_hdr = saved; }
         } }
-    /// `<T : IA + IB, U, const N = 4>`: each parameter's name and the bound
-    /// types after its `:`.
-    fn parse_generic_params(&mut self) -> Vec<(SymbolId, Vec<NodeId>, NodeId)> { let mut out = Vec::new(); if !self.eat(TokenKind::Less) { return out; }
-        while !self.at_end() && !self.at(TokenKind::Greater) && !self.at(TokenKind::ShiftRight) {
-                        if self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Const) { self.advance(); }
-            if self.is_word() || is_seed_kw(self.peek()) { out.push((self.intern_cur(), Vec::new(), NodeId::NONE)); } else { self.advance(); }
-            if self.eat(TokenKind::Colon) {
-                let mut bounds = vec![self.parse_type()];
-                while self.eat(TokenKind::Plus) { bounds.push(self.parse_type()); }
-                if let Some(last) = out.last_mut() { last.1.extend(bounds.into_iter().filter(|b| b.is_some())); }
-            }
-            // `<TSent = void>`: the type a use that leaves the parameter out gets.
-            if self.eat(TokenKind::Equal) {
-                let default = self.parse_type();
-                if let Some(last) = out.last_mut() {
-                    last.2 = default;
-                }
-            }
-            if self.eat(TokenKind::Comma) {
-                                if self.at(TokenKind::Greater) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in generic parameters".into())); break; }
-            } else { break; } }
-        if !self.eat(TokenKind::Greater) && self.at(TokenKind::ShiftRight) { let p = self.cur(); self.tape.kinds[p] = TokenKind::Greater; }
-        out }
-    /// Records the generic parameters and their bounds on `owner`.
-    fn add_type_params(&mut self, owner: NodeId, tps: Vec<(SymbolId, Vec<NodeId>, NodeId)>) {
-        for (tp, bounds, default) in tps {
-            self.arena.type_params.push((owner, tp));
-            if default.is_some() {
-                self.arena.type_param_defaults.push((owner, tp, default));
-            }
-            for b in bounds { self.arena.type_param_bounds.push((owner, tp, b)); }
-        }
-    }
     fn parse_type_decl(&mut self, kind: NodeKind, mods: &DeclMods, def_vis: u8, headless: bool) -> NodeId {
         let sp = self.span(); if !headless { self.advance(); }
         let (name_sym, tparams, mut bases) = (self.intern_cur(), self.parse_generic_params(), Vec::new());

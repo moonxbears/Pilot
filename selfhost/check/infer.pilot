@@ -153,7 +153,8 @@ fn lambda_type(inf: Infer, n: i64) -> i64 {
         args.push(if kind(s, prm) == nk_param() { prog_annot_type(p, rhs(s, prm)) } else { ty_unknown() });
         i = i + 1;
     }
-    args.push(block_value(inf, rhs(s, n)));
+    // A lambda that yields returns the generator over its items.
+    args.push(if is_generator(p, n) { generator_type(inf, yielded_type(inf, n)) } else { block_value(inf, rhs(s, n)) });
     return ty_func(p.tt, prog_slot_name(p, fn_slot()), args);
 }
 

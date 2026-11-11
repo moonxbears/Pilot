@@ -1,0 +1,18 @@
+// F5b: `yield splat(xs)` is the readable form of `yield *xs` and lowers to
+// the same delegation.
+fn inner() -> Generator<i64> {
+    yield 1;
+    yield 2;
+}
+
+fn outer() -> Generator<i64> {
+    yield splat([7, 8]);
+    yield splat(inner());
+    yield 9;
+}
+
+fn main() {
+    for x in outer() {
+        print(x);
+    }
+}

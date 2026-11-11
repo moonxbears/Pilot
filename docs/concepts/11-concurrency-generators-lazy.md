@@ -49,7 +49,7 @@ pub struct Generator<TItem: IAnyValue, TSent: IAnyValue = void> : IObject, IEnum
 }
 ```
 
-It is declared in [`stdlib/core/generator.pilot`](../../stdlib/core/generator.pilot) and bound to the engine with `bind_generator`. The return type is written (`-> Generator<i64>`, `-> Generator<i64, i64>`), or inferred from the `yield` operands when the function declares none. `TSent` defaults to `void`.
+It is declared in [`stdlib/core/generator.pilot`](../../stdlib/core/generator.pilot) and bound to the engine with `bind_generator`. The return type is written (`-> Generator<i64>`, `-> Generator<i64, i64>`), or inferred from the `yield` operands when the function declares none. `TSent` defaults to `void`. A lambda whose body yields is a generator too; its frame keeps its parameters, captured values and receiver.
 
 ### 3.2 `yield` is an expression
 
@@ -175,7 +175,7 @@ stateDiagram-v2
 ### 5.3 Not done yet
 
 - On the seed, `Generator.frame` holds the engine's integer handle for the frame; the PilIR frame record is untyped (`GeneratorFrameHandle` declares none of its fields). This is the registered stand-in `seed.generator_frame`, owned by `F6`.
-- A lambda that yields stops at `SEED001` on the seed and at the `ir.lower_construct` seam in PilIR.
+- A collecting `for` gives the engine's own list, not the `SliceBuffer<T>` the design calls for; `SliceBuffer<T>` needs typed pointers and owned allocation (`F6`, `F7`). This is the registered stand-in `for.collect_list`.
 - Freeing an unfinished generator's live values is checked by Perceus in `F7`.
 
 ---

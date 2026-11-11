@@ -205,6 +205,7 @@ pub fn stand_in_registry() -> List<StandInEntry> {
         stand_in_entry("check.field_size", "the byte size of every field type", "fields of a generic parameter, interface or enum type count 0 bytes", "F5"),
         stand_in_entry("c.type_layout", "size and alignment of the resolved C type per target", "unknown types and aggregates count as 8 bytes", "F4"),
         stand_in_entry("db.fingerprint", "128-bit truncated BLAKE3", "two FNV-style lanes; weaker and different collisions", "M5"),
+        stand_in_entry("for.collect_list", "a collecting `for` is a SliceBuffer<T> of what it yielded (F5b)", "the value is the engine's own list, built by the operation bound to the `for`'s list type, on the seed and in PilIR", "F7"),
         stand_in_entry("ffi.int_address", "ptr<T> data pointer and native destructor fn pointer", "addresses held as i64 with no type or provenance", "F6"),
         stand_in_entry("json.decimal_to_f64", "correctly rounded decimal to binary64 conversion (IEEE 754 roundTiesToEven)", "exact up to 15 significant digits and |exponent| <= 22; beyond that repeated scaling can be off by an ulp or more", "F6"),
         stand_in_entry("inspect.cache_line", "cache line size of the inspected target", "64 bytes on every target", "F3"),

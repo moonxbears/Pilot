@@ -90,6 +90,7 @@ fn write_field(lw: Lowerer, rec: u32, i: i64, v: u32, n: i64) { emit_void(lw, op
 
 /// Starts the list a collecting `for` fills; none when `n` is no `for` in
 /// value position whose body yields.
+[StandIn("for.collect_list", "a collecting `for` is a SliceBuffer<T> of what it yielded (F5b)", "the value is the engine's own list, built by the operation bound to the `for`'s list type, on the seed and in PilIR", "F7")]
 pub fn begin_collecting(lw: Lowerer, n: i64) -> u32? {
     let p = lw.inf.p;
     if !for_collects(p, n) || owned_yields(p, n).len() == 0 { return none; }
@@ -148,13 +149,14 @@ pub fn close_loop_enumerators(lw: Lowerer, n: i64) {
 // Generator functions
 // ------------------------------------------------------------------------------
 
-/// Whether queued function `idx` is a generator function (not its resume
-/// function).
+/// Whether queued function `idx` is a generator function or lambda (not its
+/// resume function). A lambda's frame holds its parameters, then its
+/// captured values and receiver, as its lifted function takes them.
 pub fn is_generator_creator(lw: Lowerer, idx: i64) -> bool {
     if idx == 0 || lw.queue_body[idx] >= 0 || is_resume_function(lw, idx) { return false; }
     let decl = lw.queue[idx];
     let k = kind(lw.inf.p.s, decl);
-    if k != nk_fn() && k != nk_operator() { return false; }
+    if k != nk_fn() && k != nk_operator() && k != nk_lambda() { return false; }
     return is_generator(lw.inf.p, decl);
 }
 

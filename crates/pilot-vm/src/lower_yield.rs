@@ -2,7 +2,7 @@
 //!
 //! A `yield` inside a `for` in value position (`let ys = for ..`, an
 //! argument, a returned value) appends its value to the list that `for`
-//! evaluates to. Any other `yield` in a function body makes the function a
+//! evaluates to. Any other `yield` in a function or lambda body makes it a
 //! generator. A `for` that is an item of a block is in statement position
 //! and collects nothing.
 //!
@@ -86,10 +86,6 @@ impl BytecodeCompiler {
                 *last = YieldOwner::Collect(r_list, true);
             }
             return self.emit_null();
-        }
-        if !self.captures.is_empty() {
-            let msg = "a lambda that yields is not lowered by the seed yet";
-            return self.error(crate::codes::SEED, msg.to_string());
         }
         self.gen_body.get_or_insert(self.cur_span);
         let on = arena.node(operand);

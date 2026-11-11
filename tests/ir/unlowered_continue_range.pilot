@@ -1,9 +1,8 @@
-// A generator body (`yield`, F5b) has no PilIR lowering yet: `pilot ir run`
-// stops at the seam `ir.lower_construct` instead of running it.
-fn count() {
-    yield 1;
-}
-
+// `continue a..b` (a loop that resets its bounds, AGENTS.md section 5.4) has
+// no PilIR lowering yet: `pilot ir run` stops at the seam
+// `ir.lower_construct` instead of running it.
 fn main() {
-    count();
+    for i in 0..3 {
+        continue 5..6;
+    }
 }
