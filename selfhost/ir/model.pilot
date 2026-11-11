@@ -445,7 +445,10 @@ pub fn ir_is_terminated(f: IrFunction, b: u32) -> bool {
 }
 
 /// The blocks a terminator can go to. `jump` is `[target, args..]`;
-/// `cond_br` is `[cond, then, n_then, then args.., else, n_else, else args..]`.
+/// `cond_br` is `[cond, then, n_then, then args.., else, n_else, else args..]`;
+/// `switch_table` is `[index, default, target 0, target 1, ..]`, going to
+/// target `index`, or to `default` when there is none, none of them taking
+/// arguments.
 pub fn ir_successors(f: IrFunction, inst: IrInst) -> List<u32> {
     var out: List<u32> = [];
     let a = ir_args(f, inst);
@@ -454,6 +457,12 @@ pub fn ir_successors(f: IrFunction, inst: IrInst) -> List<u32> {
     } else if inst.opcode == op_cond_br() {
         out.push(a[1]);
         out.push(a[3 + a[2]]);
+    } else if inst.opcode == op_switch_table() {
+        var i = 1;
+        while i < a.len() {
+            out.push(a[i]);
+            i = i + 1;
+        }
     }
     return out;
 }

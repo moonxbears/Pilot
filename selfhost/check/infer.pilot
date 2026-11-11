@@ -21,6 +21,7 @@ use selfhost.check.types.*;
 use selfhost.check.program.*;
 use selfhost.check.methods.*;
 use selfhost.check.resolve.*;
+use selfhost.check.generators.*;
 
 pub struct Infer {
     pub p: Program;
@@ -107,7 +108,7 @@ pub fn agree(p: Program, a: i64, b: i64) -> i64 {
 /// The element type values of type `t` yield when iterated.
 pub fn element_type(p: Program, t: i64) -> i64 {
     let proto = p.s.enumeration;
-    if proto.len() == 3 {
+    if proto.len() >= 3 {
         if some g = prog_member(p, t, proto[0]) {
             if some c = prog_member(p, prog_member_type(p, g), proto[2]) { return prog_member_type(p, c); }
         }
@@ -227,7 +228,7 @@ fn call_type(inf: Infer, n: i64) -> i64 {
         // `Type(args)` with no function of that name constructs the type.
         if f < 0 && ty_is_named(p.tt, as_type) && nl_get(p.fns, node_name(s, callee)).len() == 0 { return as_type; }
         if f < 0 { return ty_unknown(); }
-        let ret = prog_annot_type(p, annot(s, f));
+        let ret = fn_return_type(inf, f);
         return ty_subst(p.tt, ret, prog_tparam_names(p, f), call_generic_args(inf, f, n));
     }
     if ck == nk_member() {
@@ -332,6 +333,8 @@ fn compute(inf: Infer, n: i64) -> i64 {
     if k == nk_expr_stmt() { return type_of(inf, lhs(s, n)); }
     if k == nk_lambda() { return lambda_type(inf, n); }
     if k == nk_list() { return list_type(inf, n); }
+    if k == nk_yield() { return sent_type(inf, n); }
+    if k == nk_for() && for_collects(p, n) { return collected_type(inf, n); }
     if k == nk_block() { return block_value(inf, n); }
     if k == nk_if() {
         let ch = children(s, n);
@@ -350,6 +353,65 @@ fn compute(inf: Infer, n: i64) -> i64 {
         return t;
     }
     return ty_unknown();
+}
+
+/// The return type of function `f`: its annotation, or for a generator
+/// written without one, the generator type over the items it yields.
+pub fn fn_return_type(inf: Infer, f: i64) -> i64 {
+    let p = inf.p;
+    if annot(p.s, f) >= 0 { return prog_annot_type(p, annot(p.s, f)); }
+    if is_generator(p, f) { return generator_type(inf, yielded_type(inf, f)); }
+    return ty_unknown();
+}
+
+/// The generator type over items of type `item`, its other parameters at
+/// their defaults; the unknown type when no generator type is bound.
+pub fn generator_type(inf: Infer, item: i64) -> i64 {
+    let p = inf.p;
+    let d = generator_decl(p);
+    if d < 0 { return ty_unknown(); }
+    let name = p.s.generator[0];
+    var args: List<i64> = [item];
+    let defaults = prog_tparam_defaults(p, name);
+    while args.len() < defaults.len() && defaults[args.len()] >= 0 {
+        args.push(prog_annot_type(p, defaults[args.len()]));
+    }
+    return ty_named(p.tt, d, name, args);
+}
+
+/// The type the `yield`s belonging to `owner` agree on: each `yield e`
+/// gives `e`, each `yield *xs` an element of `xs`.
+pub fn yielded_type(inf: Infer, owner: i64) -> i64 {
+    let p = inf.p;
+    var t = ty_unknown();
+    var first = true;
+    for y in owned_yields(p, owner) {
+        let v = lhs(p.s, y);
+        let item = if is_delegation(p, y) { iterated_type(inf, lhs(p.s, v)) } else { type_of(inf, v) };
+        t = if first { item } else { agree(p, t, item) };
+        first = false;
+    }
+    return t;
+}
+
+/// The value of `yield` node `y`: what a `send` passes in, the generator
+/// type's second argument; unknown inside a collecting `for`.
+fn sent_type(inf: Infer, y: i64) -> i64 {
+    let p = inf.p;
+    let owner = yield_owner(p, y);
+    if owner < 0 || kind(p.s, owner) == nk_for() || is_delegation(p, y) { return ty_unknown(); }
+    let g = fn_return_type(inf, owner);
+    if !ty_is_named(p.tt, g) || ty_decl(p.tt, g) != generator_decl(p) { return ty_unknown(); }
+    let args = ty_args(p.tt, g);
+    return if args.len() > 1 { args[1] } else { ty_unknown() };
+}
+
+/// A collecting `for`: a list (the `list_t` slot) of what it yields.
+fn collected_type(inf: Infer, f: i64) -> i64 {
+    let p = inf.p;
+    let lt = prog_slot_type(p, list_slot());
+    if !ty_is_named(p.tt, lt) { return ty_unknown(); }
+    return ty_named(p.tt, ty_decl(p.tt, lt), p.tt.name[lt], [yielded_type(inf, f)]);
 }
 
 /// The type of expression `n` (the unknown type when not derived).

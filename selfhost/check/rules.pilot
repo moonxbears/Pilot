@@ -23,6 +23,10 @@
 //   CALL001  static delegation, or a call through a local closure, with a
 //            wrong number of arguments (TYPE001 for an argument of the wrong
 //            type)
+//   GEN001   a `yield` that belongs to no generator function and no
+//            collecting `for` (selfhost/check/generators.pilot)
+//   GEN002   `return` with a value inside a generator
+//            (an item of the wrong type is TYPE001)
 //
 // A type can hold `none` when it declares `op ??`; a value is fallible when
 // its type unwraps (`op ?`) but cannot hold `none`. No type is known by name.
@@ -39,6 +43,7 @@ use selfhost.check.methods.*;
 use selfhost.check.resolve.*;
 use selfhost.check.infer.*;
 use selfhost.check.diag.*;
+use selfhost.check.generators.*;
 
 /// The expression with any unary minus taken off.
 fn strip_negation(s: Snap, e: i64) -> i64 {
@@ -212,6 +217,10 @@ fn check_return(inf: Infer, sink: DiagSink, n: i64) {
     let v = lhs(s, n);
     if v < 0 { return; }
     let f = enclosing_function(p, n);
+    if is_generator(p, f) {
+        sink_error(sink, n, "GEN002", "`return` with a value inside a generator");
+        return;
+    }
     if f < 0 || kind(s, f) == nk_lambda() || annot(s, f) < 0 { return; }
     let dst = prog_annot_type(p, annot(s, f));
     if is_none_literal(s, v) {
@@ -265,6 +274,42 @@ fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
 
 /// A call through a local closure: as many arguments as the closure's type
 /// has parameters (CALL001), each fitting its parameter (TYPE001).
+/// A method call `recv.m(args)` on a value of a known type: each positional
+/// argument must fit its parameter over the receiver's type arguments
+/// (TYPE001). A parameter named by the receiver word is the receiver, not an
+/// argument.
+fn check_method_args(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let ch = children(s, n);
+    if ch.len() == 0 || kind(s, ch[0]) != nk_member() { return; }
+    let callee = ch[0];
+    let rt = type_of(inf, lhs(s, callee));
+    if !ty_is_named(p.tt, rt) { return; }
+    let name = sym_text(s, rhs(s, callee));
+    guard some m = prog_member(p, rt, name) else { return; };
+    if kind(s, m.decl) != nk_fn() || is_static_decl(s, m.decl) { return; }
+    var params: List<i64> = [];
+    for prm in fn_params(s, m.decl) {
+        if s.receiver.len() == 0 || node_name(s, prm) != s.receiver { params.push(prm); }
+    }
+    if params.len() + 1 != ch.len() { return; }
+    for a in ch { if kind(s, a) == nk_call_arg() { return; } }
+    let label = f"{p.tt.name[rt]}.{name}";
+    var i = 0;
+    while i < params.len() {
+        let arg = ch[i + 1];
+        let want = ty_subst(p.tt, prog_annot_type(p, rhs(s, params[i])), m.names, m.values);
+        if !ty_is_open(p.tt, want) && !ty_is_unknown(p.tt, want) && !is_none_literal(s, arg) {
+            let src = type_of(inf, arg);
+            if !assignable(inf, src, want, arg) {
+                sink_error(sink, arg, "TYPE001", f"argument {i + 1} of `{label}`: " + mismatch(inf, src, want));
+            }
+        }
+        i = i + 1;
+    }
+}
+
 fn check_closure_call(inf: Infer, sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
@@ -471,12 +516,36 @@ fn check_missing_return(inf: Infer, sink: DiagSink, n: i64) {
     let s = p.s;
     let body = fn_body(s, n);
     if annot(s, n) < 0 || body < 0 || kind(s, body) != nk_block() { return; }
+    // A generator ends by running off its body.
+    if is_generator(p, n) { return; }
     let ret = prog_annot_type(p, annot(s, n));
     if ty_is_unknown(p.tt, ret) || prog_is_zero_width(p, ret) { return; }
     if !terminates(inf, body) {
         sink_error(sink, n, "FLOW001",
             f"`{node_name(s, n)}` must return `{ty_display(p.tt, ret)}`, but not every path returns a value");
     }
+}
+
+/// A `yield`: it must belong to a generator or a collecting `for` (GEN001),
+/// and in a generator whose type is written, its item must fit that type's
+/// item type (TYPE001).
+fn check_yield(inf: Infer, sink: DiagSink, y: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let owner = yield_owner(p, y);
+    if owner == -2 { return; }
+    if owner < 0 {
+        sink_error(sink, y, "GEN001", "`yield` outside a generator function or a collecting `for`");
+        return;
+    }
+    if kind(s, owner) == nk_for() || annot(s, owner) < 0 || is_delegation(p, y) { return; }
+    let g = prog_annot_type(p, annot(s, owner));
+    if !ty_is_named(p.tt, g) || ty_decl(p.tt, g) != generator_decl(p) { return; }
+    let args = ty_args(p.tt, g);
+    let v = lhs(s, y);
+    if args.len() == 0 || v < 0 { return; }
+    let src = type_of(inf, v);
+    if !assignable(inf, src, args[0], v) { sink_error(sink, v, "TYPE001", mismatch(inf, src, args[0])); }
 }
 
 /// Whether a switch arm's pattern matches anything.
@@ -588,9 +657,15 @@ pub fn check_rules(inf: Infer, sink: DiagSink) {
             let k = kind(s, i);
             if k == nk_let() || k == nk_var() || k == nk_const() { check_binding_value(inf, sink, i); }
             else if k == nk_return() { check_return(inf, sink, i); }
+            else if k == nk_yield() { check_yield(inf, sink, i); }
             else if k == nk_assign() { check_assign(inf, sink, i); }
             else if k == nk_expr_stmt() { check_dropped_result(inf, sink, i); }
-            else if k == nk_call() { check_call_args(inf, sink, i); check_closure_call(inf, sink, i); check_delegation(inf, sink, i); }
+            else if k == nk_call() {
+                check_call_args(inf, sink, i);
+                check_method_args(inf, sink, i);
+                check_closure_call(inf, sink, i);
+                check_delegation(inf, sink, i);
+            }
             else if k == nk_fn() || k == nk_operator() { check_missing_return(inf, sink, i); }
             else if k == nk_match() { check_switch(inf, sink, i); }
             else if k == nk_member() { check_optional_access(inf, sink, i, sym_text(s, rhs(s, i)), false); }

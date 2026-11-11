@@ -110,9 +110,14 @@ pub fn find_global(lw: Lowerer, n: i64) -> i64 {
     return -1;
 }
 
-/// The type global `d` holds: its binding's, else its value's.
+/// The type global `d` holds: its annotation's, else its binding's, else
+/// its value's.
 pub fn global_type(lw: Lowerer, d: i64) -> i64 {
     if kind(lw.inf.p.s, d) == nk_pat_bind() { return ty_unknown(); }
+    if annot(lw.inf.p.s, d) >= 0 {
+        let a = prog_annot_type(lw.inf.p, annot(lw.inf.p.s, d));
+        if !ty_is_unknown(lw.inf.p.tt, a) { return a; }
+    }
     if lw.binding_of.has(key(d)) {
         let t = binding_type(lw.inf, lw.binding_of.get(key(d)));
         if !ty_is_unknown(lw.inf.p.tt, t) { return t; }

@@ -158,7 +158,8 @@ fn test_loop_break_and_yield() {
 }
 
 fn test_statement_yield() -> i64 {
-    // LOOP004 + OPT002: Cannot yield inside statement-position for in non-generator
+    // GEN002: a `yield` in a statement-position `for` makes this a generator,
+    // which cannot return a value
     for i in 0 .. 10 {
         yield i;
     }

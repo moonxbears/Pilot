@@ -1,0 +1,4 @@
+error[TYPE001]: expected `i64`, found `str`
+err_gen_item_type.pilot:4:11
+error[TYPE001]: argument 1 of `Generator.send`: expected `i64`, found `str`
+err_gen_item_type.pilot:9:12

@@ -1,220 +1,91 @@
 // ==============================================================================
-// Concept 11: Structured Async/Await, Channels, `select`, Generators & Lazy Eval
+// Concept 11: Generators & Collecting `for` Expressions
 // ==============================================================================
+// Runs with `pilot run` and on the PilIR interpreter (`pilot ir run`).
+// Tasks, channels, `select` and lazy values are not built yet; see
+// docs/concepts/11-concurrency-generators-lazy.md.
 
-println("==================================================");
-println(" PILOT SHOWCASE 11: Async/Await, Channels & Lazy");
-println("==================================================");
+// --- 1. A generator runs only as items are asked for ---
 
-// --- 1. Cooperative EventLoop, `async fn`, `spawn` & `await` ---
-println("\n--- 1. Structured Async/Await, Tasks & EventLoop ---");
-
-fn async_loop_new() -> i64 {
-    let ev = __engine("map_new");
-    __engine("map_set", ev, "tick", 0);
-    __engine("map_set", ev, "task_count", 0);
-    return ev;
+// The return type is inferred from the `yield` operands: Generator<i64>.
+fn fibonacci(limit: i64) {
+    var a = 0;
+    var b = 1;
+    var count = 0;
+    while count < limit {
+        yield a;
+        let next = a + b;
+        a = b;
+        b = next;
+        count = count + 1;
+    }
 }
 
-fn async_spawn_task(ev_loop: i64, name: str, ready_ticks: i64, payload: any) -> i64 {
-    let idx = __engine("map_get", ev_loop, "task_count");
-    let now_t = __engine("map_get", ev_loop, "tick");
-    let t = __engine("map_new");
-    __engine("map_set", t, "kind", "Task");
-    __engine("map_set", t, "name", name);
-    __engine("map_set", t, "state", "PENDING");
-    __engine("map_set", t, "ready_tick", now_t + ready_ticks);
-    __engine("map_set", t, "pending_val", payload);
-    __engine("map_set", ev_loop, "task_" + idx, t);
-    __engine("map_set", ev_loop, "task_count", idx + 1);
-    return t;
+// --- 2. `yield` is an expression: `.send(v)` gives it a value ---
+
+fn accumulator(start: i64) -> Generator<i64, i64> {
+    var total = start;
+    loop {
+        let delta = yield total;
+        total = total + delta;
+    }
 }
 
-fn async_loop_step(ev_loop: i64) -> i64 {
-    let nt = __engine("map_get", ev_loop, "tick") + 1;
-    __engine("map_set", ev_loop, "tick", nt);
-    let cnt = __engine("map_get", ev_loop, "task_count");
-    var done_now = 0;
+// --- 3. `yield *xs` hands out every item of another sequence ---
+
+fn header_then(rows: Generator<str>) -> Generator<str> {
+    yield *["id", "name"];
+    yield *rows;
+}
+
+fn rows() -> Generator<str> {
+    yield "1 ada";
+    yield "2 grace";
+}
+
+// --- 4. Leaving early ends the generator and runs its `defer`s ---
+
+fn naturals() -> Generator<i64> {
+    defer { print("naturals: closed"); }
     var i = 0;
-    while i < cnt {
-        let t = __engine("map_get", ev_loop, "task_" + i);
-        if __engine("map_get", t, "state") == "PENDING" {
-            if nt >= __engine("map_get", t, "ready_tick") {
-                __engine("map_set", t, "result", __engine("map_get", t, "pending_val"));
-                __engine("map_set", t, "state", "FINISHED");
-                done_now = done_now + 1;
-            }
-        }
+    loop {
+        yield i;
         i = i + 1;
     }
-    return done_now;
 }
 
-fn async_await_task(ev_loop: i64, task_h: i64) -> any {
-    var guard_steps = 0;
-    while __engine("map_get", task_h, "state") == "PENDING" && guard_steps < 64 {
-        async_loop_step(ev_loop);
-        guard_steps = guard_steps + 1;
+fn main() {
+    print("--- 1. Pulling items ---");
+    let fib = fibonacci(7);
+    print(fib.next() ?? -1);
+    print(fib.next() ?? -1);
+    for x in fib {
+        print(x);
     }
-    return __engine("map_get", task_h, "result");
-}
+    print(fib.is_done);
 
-pub async fn compute_heavy_hash(seed: i64) -> str {
-    return "HASH_0x" + (seed * 1337);
-}
+    print("--- 2. Sending values in ---");
+    let acc = accumulator(10);
+    print(acc.next() ?? -1);
+    print(acc.send(25) ?? -1);
+    print(acc.send(-5) ?? -1);
+    acc.close();
+    print(acc.is_done);
 
-pub async fn fetch_shard_metric(shard_id: i64) -> i64 {
-    return shard_id * 100 + 21;
-}
-
-let kw_task = spawn(compute_heavy_hash(42));
-assert(kw_task.kind == "Task");
-assert(kw_task.state == "PENDING");
-assert(kw_task.is_completed == false);
-println("Keyword `spawn(...)` created Task: state=" + kw_task.state);
-
-let kw_val = await(kw_task);
-assert(kw_task.state == "FINISHED");
-assert(kw_task.is_completed == true);
-assert(kw_val == "HASH_0x56154");
-println("Keyword `await(...)` resolved Task: result=" + kw_val + " (state=" + kw_task.state + ")");
-
-let ev_loop = async_loop_new();
-let hash_task = async_spawn_task(ev_loop, "hash-worker", 2, compute_heavy_hash(42));
-let st_before = __engine("map_get", hash_task, "state");
-println("Spawned event-loop task `hash-worker`: state before await = " + st_before);
-assert(st_before == "PENDING");
-
-let computed_val = await(async_await_task(ev_loop, hash_task));
-let st_after = __engine("map_get", hash_task, "state");
-println("Awaited `hash-worker` result: " + computed_val + " (state=" + st_after + ")");
-assert(st_after == "FINISHED");
-assert(computed_val == "HASH_0x56154");
-
-// Concurrent `gather` across multiple spawned tasks:
-let t_shard1 = spawn(fetch_shard_metric(1));
-let t_shard2 = spawn(fetch_shard_metric(2));
-assert(t_shard1.state == "PENDING" && t_shard2.state == "PENDING");
-let gathered_sum = await(t_shard1) + await(t_shard2);
-assert(t_shard1.state == "FINISHED" && t_shard2.state == "FINISHED");
-println("Gathered concurrent shard metrics sum = " + gathered_sum);
-assert(gathered_sum == 342);
-
-// --- 2. Async Channels & `select` Readiness Multiplexing ---
-println("\n--- 2. Bounded Async Channels & `select` Multiplexer ---");
-
-fn channel_new(cap: i64) -> i64 {
-    let ch = __engine("map_new");
-    __engine("map_set", ch, "cap", cap);
-    __engine("map_set", ch, "head", 0);
-    __engine("map_set", ch, "tail", 0);
-    return ch;
-}
-
-fn channel_len(ch: i64) -> i64 {
-    return __engine("map_get", ch, "tail") - __engine("map_get", ch, "head");
-}
-
-fn channel_send(ch: i64, msg: any) -> bool {
-    let cap = __engine("map_get", ch, "cap");
-    if cap > 0 && channel_len(ch) >= cap { return false; }
-    let tl = __engine("map_get", ch, "tail");
-    __engine("map_set", ch, "slot_" + tl, msg);
-    __engine("map_set", ch, "tail", tl + 1);
-    return true;
-}
-
-fn channel_recv(ch: i64) -> any {
-    let hd = __engine("map_get", ch, "head");
-    let v = __engine("map_get", ch, "slot_" + hd);
-    __engine("map_set", ch, "head", hd + 1);
-    return v;
-}
-
-let telemetry_ch = channel_new(4);
-let control_ch = channel_new(4);
-
-spawn {
-    channel_send(control_ch, "CTRL_ACK_OK");
-    channel_send(telemetry_ch, "TELEM_FRAME_1");
-};
-
-var selected_msg = "";
-select {
-    if channel_len(control_ch) > 0 {
-        selected_msg = channel_recv(control_ch);
-    } else if channel_len(telemetry_ch) > 0 {
-        selected_msg = channel_recv(telemetry_ch);
+    print("--- 3. Delegation ---");
+    for line in header_then(rows()) {
+        print(line);
     }
-};
-let next_telem = channel_recv(telemetry_ch);
-println("Selected priority channel message: " + selected_msg + ", next telemetry: " + next_telem);
-assert(selected_msg == "CTRL_ACK_OK");
-assert(next_telem == "TELEM_FRAME_1");
 
-// --- 3. Stateful Coroutine Generator Stream (Fibonacci) ---
-println("\n--- 3. Stateful Generator Stream (Resumable State Machine) ---");
-
-fn fib_generator_new(limit: i64) -> i64 {
-    let g = __engine("map_new");
-    __engine("map_set", g, "a", 0);
-    __engine("map_set", g, "b", 1);
-    __engine("map_set", g, "count", 0);
-    __engine("map_set", g, "limit", limit);
-    return g;
-}
-
-fn fib_generator_next(g: i64) -> i64 {
-    let cur_a = __engine("map_get", g, "a");
-    let cur_b = __engine("map_get", g, "b");
-    let cnt = __engine("map_get", g, "count");
-    __engine("map_set", g, "a", cur_b);
-    __engine("map_set", g, "b", cur_a + cur_b);
-    __engine("map_set", g, "count", cnt + 1);
-    return cur_a;
-}
-
-let stream = fib_generator_new(7);
-let s1 = fib_generator_next(stream);
-let s2 = fib_generator_next(stream);
-let s3 = fib_generator_next(stream);
-println("Pulled first 3 items: " + s1 + ", " + s2 + ", " + s3);
-
-var rem_out = "";
-while __engine("map_get", stream, "count") < __engine("map_get", stream, "limit") {
-    let item = fib_generator_next(stream);
-    if rem_out.len() > 0 { rem_out = rem_out + ", "; }
-    rem_out = rem_out + item;
-}
-println("Streamed remaining items: " + rem_out);
-assert(rem_out == "2, 3, 5, 8");
-
-// --- 4. Memoized Lazy Evaluation (On-Demand Thunk) ---
-println("\n--- 4. Lazy Evaluation (On-Demand Memoized Thunk) ---");
-
-let lazy_cell = __engine("map_new");
-__engine("map_set", lazy_cell, "eval_count", 0);
-__engine("map_set", lazy_cell, "cached", 0);
-
-fn lazy_force(cell: i64) -> i64 {
-    if __engine("map_get", cell, "cached") == 1 {
-        return __engine("map_get", cell, "value");
+    print("--- 4. Early exit ---");
+    for n in naturals() {
+        if n == 3 { break; }
+        print(n);
     }
-    let c = __engine("map_get", cell, "eval_count") + 1;
-    __engine("map_set", cell, "eval_count", c);
-    let computed = 999 * 888;
-    __engine("map_set", cell, "value", computed);
-    __engine("map_set", cell, "cached", 1);
-    return computed;
+
+    print("--- 5. Collecting for ---");
+    let squares = for i in 1..=5 { yield i * i; };
+    print(squares);
+    let odd_squares = for s in squares { if s % 2 != 0 { yield s; } };
+    print(odd_squares);
 }
-
-assert(__engine("map_get", lazy_cell, "eval_count") == 0);
-let first_v = lazy_force(lazy_cell);
-let second_v = lazy_force(lazy_cell);
-let total_evals = __engine("map_get", lazy_cell, "eval_count");
-println("Lazy value = " + first_v + " (second read = " + second_v + ", total evaluations = " + total_evals + ")");
-assert(first_v == 887112);
-assert(second_v == 887112);
-assert(total_evals == 1);
-
-println("\n>>> Concept 11 Async/Await & Concurrency Showcase Verified! <<<");

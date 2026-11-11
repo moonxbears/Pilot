@@ -1,178 +1,188 @@
-# Concept 11: Concurrency, Stateful Generators & Lazy Evaluation
+# Concept 11: Generators, Collecting `for` & Concurrency
 
 [← Prev: Native Database & SQL](./10-database-and-sql.md) | [🏠 Documentation Hub](../index.md) | [🔤 Lexical Reference](../lexical-reference.md) | [📐 Syntax Reference](../syntax-reference.md) | [⚙️ Functions & API](../functions-and-apis.md) | [Next: Polyglot Interoperability →](./12-polyglot-interoperability.md)
 
 ---
 
-## 1. Concept Overview & Design Rationale
+## 1. What works today
 
-Pilot provides three distinct execution models for deferred, incremental, and multi-threaded computation:
+`yield` is one of Pilot's 14 seed tokens. It has two uses, and both run on the seed VM (`pilot run`) and on the PilIR interpreter (`pilot ir run`):
 
-1. **Stateful Resumable Generators (`yield`, `PilotGenerator`)**: Functions containing `yield` compile into true pausable coroutines backed by a dedicated synchronization handshake (`ManualResetEventSlim`). Unlike batch-collected iterators, Pilot generators pause immediately at each `yield`, preserve their exact lexical call stack and local variables, accept bidirectional values via `.send(val)`, and can be closed deterministically via `.close()`.
-2. **Thread-Isolated Futures & Data Parallelism (`spawn`, `await`, `parallel_map`)**: `spawn(fn, args...)` launches `fn` on a background thread with an **isolated clone of the execution context** (`Context.CloneIsolated()`), returning a `PilotFuture` handle (`await`, `.get_result(timeout_ms)`, `.cancel()`). `parallel_map(fn, list)` distributes collection items across worker threads using `Parallel.For` while maintaining deterministic output ordering.
-3. **Memoized Lazy Thunks (`lazy(callable)`, `PilotLazy`)**: Wraps an expensive computation in a thread-safe deferred thunk. The computation runs at most once—either when `.value` / `.eval()` is accessed or **transparently** when any member or method is accessed on the lazy proxy.
+1. **Generator functions.** A function whose body has a `yield` that no collecting `for` owns returns a `Generator<TItem, TSent>`. Calling it runs nothing; each `.next()` or `.send(v)` runs the body up to its next `yield`.
+2. **Collecting `for` expressions.** A `for` in value position (`let ys = for ..`, `return for ..`, an argument) is the list of what its body yields.
 
----
-
-## 2. Exact Lexical Tokens Used
-
-| Token Name | Lexeme(s) | Lexical Category & Purpose |
-| :--- | :--- | :--- |
-| `YIELD`, `FROM` | `yield`, `from` | Suspends a generator and produces a value (`yield x` or `yield from seq`) |
-| `ASYNC`, `AWAIT` | `async`, `await` | Asynchronous function modifier and `Future` suspension expression |
-| `SPAWN`, `GO` | `spawn`, `go` | Spawns a concurrent task or `PilotFuture` |
-| `PARALLEL`, `FOR` | `parallel`, `for` | Data-parallel loop modifier (`parallel for x in items`) |
-| `ACTOR`, `CHANNEL`, `SELECT`, `TIMEOUT` | `actor`, `channel`, `select`, `timeout` | Actor declarations, typed channels, and channel multiplexing |
-| `CHAN_SEND` | `<-` | Channel send (`ch <- msg`) and channel receive (`<-ch`) operator |
-| `ATOMIC`, `SYNC`, `LOCK`, `ISOLATE` | `atomic`, `sync`, `lock`, `isolate` | Concurrency synchronization blocks |
+Tasks (`spawn` / `await`), channels, `select`, actors and lazy values are **not built**. The standard-library migration in `M9` owns `std.task`, `std.chan` and `std.sync` (`Task<T>`, `Chan<T>`, `select`, `Mutex<T>`); no milestone owns lazy values yet. Nothing below describes them.
 
 ---
 
-## 3. Exact Syntax & Grammar Rules
+## 2. Which construct a `yield` belongs to
 
-Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
+| Where the `yield` is | What it does |
+| :--- | :--- |
+| In the body of a `for` in value position | Appends its value to that loop's result list |
+| Anywhere else in a function or lambda body, including a `for` in statement position | Makes that function a generator |
+| At a script's top level or in a `comptime` block | `GEN001` |
 
-```antlr
-// 1. Yield Expression & Statement
-yield_expr
-    : YIELD (FROM expr | testlist_star_expr)?
-    ;
-
-// 2. Spawn & Await
-spawn_stmt
-    : (SPAWN | GO) (suite | expr)
-    ;
-
-unary_expr
-    : (PLUS | MINUS | TILDE | NOT | AWAIT | CHAN_SEND | AMPERSAND | STAR) unary_expr
-    | primary (cascade_arm+ | trailer*)
-    ;
-
-// 3. Channel Select & Concurrency Blocks
-select_stmt
-    : SELECT LBRACE NEWLINE? select_clause* RBRACE
-    ;
-
-select_clause
-    : CASE (IDENTIFIER ASSIGN)? CHAN_SEND expr (COLON suite | FAT_ARROW (stmt | expr) COMMA? NEWLINE?)
-    | CASE expr CHAN_SEND expr (COLON suite | FAT_ARROW (stmt | expr) COMMA? NEWLINE?)
-    | TIMEOUT expr (COLON suite | FAT_ARROW (stmt | expr) COMMA? NEWLINE?)
-    | DEFAULT (COLON suite | FAT_ARROW (stmt | expr) COMMA? NEWLINE?)
-    ;
-
-concurrency_block
-    : (ATOMIC | SYNC (LPAREN expr RPAREN)? | LOCK LPAREN expr RPAREN | ISOLATE) suite
-    ;
-```
-
----
-
-## 4. Runtime Execution Mechanics
-
-### 4.1 True Stateful Coroutines (`Generator`)
-In the runtime engine ([`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)):
-- **Generator Detection**: Before executing a function, the compiler checks for any `yield` statement or expression. If present, calling the function returns a `Generator` object in state `Created`.
-- **Two-Way Handshake**:
-  1. Calling `gen.next()` (or `next(gen)` or iterating in a `for` loop) signals the generator coroutine to advance.
-  2. The generator coroutine executes until it reaches a `yield val`, transitions state to `Suspended`, and returns `val` to the caller.
-  3. Calling `gen.send(sentVal)` passes `sentVal` into the suspended `yield` expression, which becomes the return value of the `(yield ...)` expression inside the generator!
-  4. When the generator body returns or `gen.close()` is called, state transitions to `Completed` and `gen.is_done` becomes `true`.
-
-```mermaid
-stateDiagram-v2
-    [*] --> Created : gen = counter()
-    Created --> Running : gen.next() / next(gen)
-    Running --> Suspended : yield val
-    Suspended --> Running : gen.next() / gen.send(v)
-    Running --> Completed : return / end of body
-    Suspended --> Completed : gen.close()
-    Running --> Faulted : unhandled exception
-```
-
-### 4.2 Thread-Isolated Futures (`Future`) & `parallel_map`
-In [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) and [`std.asyncio`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/asyncio/asyncio.pilot):
-- **`spawn(fn, args...)`**: Creates an isolated execution context so the background thread has its own independent call stack while reading variable bindings safely.
-- **Awaiting**: Both `await fut` and `fut.await()` / `fut.get_result(timeout_ms)` block until the task finishes, propagating any uncaught background exceptions on the awaiting thread.
-- **`parallel_map(fn, list)`**: Evaluates items across a worker pool concurrently and writes results to a synchronized result array in original order.
-
-### 4.3 Transparent Memoized Lazy Values (`Lazy`)
-In the runtime ([`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)):
-- Created via `lazy(fn, args...)`. Stores a deferred computation thunk.
-- Accessing `.value` or `.eval()` evaluates the thunk once, caches the result, and sets `is_evaluated = true`.
-- **Transparent Forwarding**: If a member access (`lazy_val.prop`) or subscript (`lazy_val[0]`) is performed on a lazy value for any member other than `value`, `eval`, or `is_evaluated`, Pilot automatically forces evaluation and forwards the access to the underlying value!
-
----
-
-## 5. Available Functions, Methods & Properties
-
-### Global Concurrency & Lazy Functions
-| Function | Signature | Description |
-| :--- | :--- | :--- |
-| `next` | `next(gen: Generator[, default]) -> any` | Advances `gen` to the next `yield`. Returns `default` (or `none`) when exhausted. |
-| `spawn` | `spawn(fn: callable, *args) -> Future` | Executes `fn(*args)` asynchronously on a worker thread and returns a `Future`. |
-| `parallel_map` | `parallel_map(fn: callable, items: list) -> list` | Evaluates `fn(item)` across all elements in parallel, preserving order. |
-| `lazy` | `lazy(fn: callable, *args) -> Lazy` | Creates a deferred, memoized `Lazy` wrapper around `fn(*args)`. |
-
-### Object Members (`Generator`, `Future`, `Lazy`)
-- **`Generator`**: `.next()`, `.send(val)`, `.close()`, `.is_done` (`bool`), `.state` (`"created"`, `"running"`, `"suspended"`, `"completed"`, `"faulted"`)
-- **`Future`**: `.await()`, `.get_result([timeout_ms])`, `.cancel()`, `.is_completed` (`bool`), `.is_faulted` (`bool`), `.is_cancelled` (`bool`)
-- **`Lazy`**: `.value`, `.eval()`, `.is_evaluated` (`bool`), plus transparent member/subscript forwarding
-
----
-
-## 6. Complete Runnable Examples
-
-See [`examples/showcase/11_concurrency_generators_and_lazy.pilot`](../../examples/showcase/11_concurrency_generators_and_lazy.pilot) for the full executable showcase.
+A `for` is in statement position when it is an item of a block (or of the program); anywhere else it is in value position.
 
 ```pilot
-// 1. True stateful coroutine generator with bidirectional .send()
-def accumulator(start: int) {
-    let total = start
-    while true {
-        let delta = yield total
-        if delta != null {
-            total = total + delta
-        } else {
-            total = total + 1
-        }
+fn evens_then_odds(xs: i64[]) {
+    let evens = for x in xs { if x % 2 == 0 { yield x; } };  // collects
+    for e in evens {
+        yield e;                                              // generator
+    }
+}
+```
+
+---
+
+## 3. Generators
+
+### 3.1 The type
+
+```pilot
+pub struct Generator<TItem: IAnyValue, TSent: IAnyValue = void> : IObject, IEnumerator<TItem> {
+    pub fn next() -> TItem?;           // run to the next `yield`; `none` once the body ended
+    pub fn send(v: TSent) -> TItem?;   // the same, with the waiting `yield` worth `v`
+    pub fn close();                    // end it now, running its pending `defer`s
+    pub is_done: bool { get; }
+}
+```
+
+It is declared in [`stdlib/core/generator.pilot`](../../stdlib/core/generator.pilot) and bound to the engine with `bind_generator`. The return type is written (`-> Generator<i64>`, `-> Generator<i64, i64>`), or inferred from the `yield` operands when the function declares none. `TSent` defaults to `void`.
+
+### 3.2 `yield` is an expression
+
+`yield e` hands `e` to the caller and suspends. When the generator is resumed with `.send(v)`, the `yield` expression is worth `v`:
+
+```pilot
+fn running_total() -> Generator<i64, i64> {
+    var total = 0;
+    loop {
+        let v = yield total;
+        total = total + v;
     }
 }
 
-let gen = accumulator(10)
-assert(gen.state == "created")
-assert(gen.next() == 10)          // Runs to first yield; pauses at total=10
-assert(gen.state == "suspended")
-assert(gen.send(25) == 35)        // Resumes with delta=25; yields 35
-assert(gen.next() == 36)          // Resumes with delta=null; yields 36
-gen.close()
-assert(gen.is_done == true)
+let g = running_total();
+print(g.next() ?? -1);    // 0: runs to the first `yield`
+print(g.send(5) ?? -1);   // 5
+print(g.send(10) ?? -1);  // 15
+```
 
-// 2. Concurrent Futures (spawn / await) & Data Parallelism (parallel_map)
-def compute_heavy(n: int) -> int {
-    return n * n + 1
+The first `.next()` (or `.send(v)`) starts the body. A generator that has not started has no `yield` waiting, so a value sent to it is dropped.
+
+### 3.3 Walking a generator
+
+A generator is its own enumerator, so `for` walks it to the end:
+
+```pilot
+fn count(n: i64) -> Generator<i64> {
+    var i = 0;
+    while i < n {
+        yield i;
+        i = i + 1;
+    }
 }
 
-let fut1 = spawn(compute_heavy, 12)
-let fut2 = spawn(compute_heavy, 20)
-assert((await fut1) + fut2.get_result(5000) == 145 + 401)
-
-let batch = parallel_map((x) => x * 10, [1, 2, 3, 4, 5])
-assert(batch == [10, 20, 30, 40, 50])
-
-// 3. Memoized Lazy evaluation with transparent member forwarding
-let eval_count = 0
-let deferred_list = lazy(() => {
-    eval_count = eval_count + 1
-    return ["alpha", "beta", "gamma"]
-})
-
-assert(deferred_list.is_evaluated == false and eval_count == 0)
-// Transparently forces evaluation on first member/index access
-assert(deferred_list[1] == "beta")
-assert(deferred_list.is_evaluated == true and eval_count == 1)
-// Subsequent accesses reuse cached value without re-running the factory
-assert(deferred_list.value == ["alpha", "beta", "gamma"] and eval_count == 1)
+for x in count(3) { print(x); }   // 0, 1, 2
 ```
+
+### 3.4 Delegation: `yield *xs`
+
+`yield *xs` (readable form `yield splat(xs)`) yields every item of `xs` in order. `xs` may be any enumerable. When it is a generator, values sent to the outer generator go on to it:
+
+```pilot
+fn mixed() -> Generator<str> {
+    yield *["x", "y"];
+    yield *letters();
+    yield "z";
+}
+```
+
+### 3.5 Cleanup
+
+Leaving a `for` over a generator early (`break`, `return`), or calling `.close()`, ends the generator and runs the `defer`s pending in its frame. A generator that never started has none pending. Closing an ended generator does nothing.
+
+```pilot
+fn naturals() -> Generator<i64> {
+    defer { print("cleanup"); }
+    var i = 0;
+    loop {
+        yield i;
+        i = i + 1;
+    }
+}
+
+for x in naturals() {
+    if x == 2 { break; }      // prints "cleanup" here
+    print(x);
+}
+```
+
+The `for` loop calls the enumeration protocol's `close` on any enumerator that declares one, however the loop is left.
+
+### 3.6 Diagnostics
+
+| Code | When |
+| :--- | :--- |
+| `GEN001` | A `yield` with nothing to belong to (top level, `comptime`) |
+| `GEN002` | A `return` with a value inside a generator |
+| `GEN003` | A generator resumed while it runs (from inside itself); a run-time error |
+
+An item or sent value of the wrong type is an ordinary type error.
+
+---
+
+## 4. Collecting `for`
+
+```pilot
+let squares = for i in 1..=4 { yield i * i; };   // [1, 4, 9, 16]
+let picked = for x in [3, 4, 7, 8, 10] { if x % 2 == 0 { yield x; } };
+print(picked.len());                              // 3
+```
+
+The value is the list of what the body yielded, in order; a body that yields nothing gives the empty list.
+
+---
+
+## 5. How it runs
+
+### 5.1 The seed VM
+
+Calling a generator function builds a frame holding the call's registers and the address to resume at, without running the body ([`crates/pilot-vm/src/lower_yield.rs`](../../crates/pilot-vm/src/lower_yield.rs), [`vm_gen.rs`](../../crates/pilot-vm/src/vm_gen.rs)). Resuming a frame enters it like a call; `yield` saves its registers and returns to the resumer. No OS threads are involved.
+
+### 5.2 PilIR
+
+Before any backend, a generator becomes two ordinary functions ([`selfhost/ir/lower_generator.pilot`](../../selfhost/ir/lower_generator.pilot)):
+
+- the generator function builds a **frame record** (the resume function, a state index, the last item, a closing flag, the call's arguments, then the values the body keeps across a `yield`) and returns `generator_of(frame)`;
+- the **resume function** `<name>$resume(frame, sent)` dispatches on the state with `switch_table`. State 0 starts the body; state `k` continues after the `k`-th `yield`. Each `yield` stores the item and its state in the frame and returns.
+
+Values live across a `yield`, and stack slots, are moved into frame fields after the body is lowered. The IR interpreter and the native backends therefore see no coroutines.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Fresh : gen = count(3)
+    Fresh --> Running : next() / send(v)
+    Fresh --> Done : close()
+    Running --> Suspended : yield e
+    Suspended --> Running : next() / send(v)
+    Suspended --> Done : close() runs pending defers
+    Running --> Done : end of body / return
+```
+
+### 5.3 Not done yet
+
+- On the seed, `Generator.frame` holds the engine's integer handle for the frame; the PilIR frame record is untyped (`GeneratorFrameHandle` declares none of its fields). This is the registered stand-in `seed.generator_frame`, owned by `F6`.
+- A lambda that yields stops at `SEED001` on the seed and at the `ir.lower_construct` seam in PilIR.
+- Freeing an unfinished generator's live values is checked by Perceus in `F7`.
+
+---
+
+## 6. Runnable example
+
+[`examples/showcase/11_concurrency_generators_lazy.pilot`](../../examples/showcase/11_concurrency_generators_lazy.pilot) runs every feature above with `pilot run` and `pilot ir run`, and prints the same output on both.
 
 ---
 

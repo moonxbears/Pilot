@@ -125,8 +125,13 @@ pub struct Snap {
     /// member a `*Bundle` collision modifier lists.
     pub splice_mods: List<List<i64>>;
     /// The member names of the enumeration protocol `for` uses: the call
-    /// that gives the enumerator, the step, and the current element.
+    /// that gives the enumerator, the step, the current element, and the
+    /// method that closes an enumerator a loop leaves early ("" for none).
     pub enumeration: List<str>;
+    /// The generator protocol (`bind_generator`): the generator type, its
+    /// frame field, its constructor and the function `yield *xs` walks a
+    /// non-generator with; empty when none is bound.
+    pub generator: List<str>;
     /// `[field node, number of accessor bodies, accessor block]` per field
     /// written with an accessor block; `{ get; }` has none. The block lists
     /// the getter bodies first, their count in its `flags`.
@@ -196,6 +201,7 @@ pub fn snap_load() -> Snap {
         arm_guards: node_map(raw[15], nodes.len() / snap_columns()),
         setter_value: snap_word(raw[12], 2),
         setters: raw[16],
+        generator: raw[17],
         count: nodes.len() / snap_columns(),
     };
 }

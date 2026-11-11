@@ -715,32 +715,9 @@ pub fn verify_loop_ergonomics(i: i64, node_count: i64) -> i64 {
             if has_valued_break && has_yield { emit_diag(i, 1, "LOOP001: Cannot mix 'break <expr>' and 'yield <expr>' in the same 'for' loop"); return 1; }
             if has_void_break && has_valued_break { emit_diag(i, 1, "LOOP002: Cannot mix valueless 'break;' and valued 'break <expr>;' in the same 'for' loop"); return 1; }
             if has_then && !has_valued_break { emit_diag(i, 1, "LOOP003: Loop completion 'then' branch is only valid on a ScalarBreak 'for' loop containing 'break <expr>'"); return 1; }
-            if has_yield {
-                let p = __engine(Cfg.ast.ast_parent, i);
-                if p != 4294967295 && p >= 0 {
-                    let pok = __engine(Cfg.ast.ast_orig_kind, p);
-                    if pok == 110 || pok == 200 {
-                        var cur = i; var enc_fn = -1; var depth = 0;
-                        while cur != 4294967295 && cur >= 0 && depth < 30 {
-                            depth = depth + 1;
-                            if __engine(Cfg.ast.ast_node_kind, cur) == 3 { enc_fn = cur; cur = -1; }
-                            else { cur = __engine(Cfg.ast.ast_parent, cur); }
-                        }
-                        if enc_fn >= 0 {
-                            let r_sym = __engine(Cfg.ast.ast_node_raw_bits, enc_fn);
-                            var is_gen = false;
-                            if r_sym > 0 {
-                                let r_name = __engine(Cfg.ast.sym_str, r_sym);
-                                if r_name.len() >= 6 && r_name.byte_at(0) == 115 && r_name.byte_at(1) == 116 { is_gen = true; }
-                            }
-                            if !is_gen {
-                                emit_diag(i, 1, "LOOP004: Cannot 'yield' inside a statement-position 'for' loop in a non-generator function");
-                                return 1;
-                            }
-                        }
-                    }
-                }
-            }
+            // A `yield` in a `for` in statement position belongs to the
+            // enclosing function, which is then a generator (F5b,
+            // selfhost/check/generators.pilot).
         }
     }
     if ok == 108 && __engine(Cfg.ast.ast_child_count, i) > 0 {

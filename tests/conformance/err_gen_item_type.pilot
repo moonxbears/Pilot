@@ -1,0 +1,10 @@
+// F5b: items and sent values are type-checked like any other value.
+fn count() -> Generator<i64, i64> {
+    let step = yield 0;
+    yield "one";
+}
+
+fn main() {
+    let g = count();
+    g.send("two");
+}

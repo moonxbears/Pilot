@@ -16,8 +16,9 @@ comptime {
     __engine("bind_receptor", nameof(break),    13, 0);
     __engine("bind_receptor", nameof(continue), 13, 1);
     // The protocol the expansion below calls, for compilers that lower `for`
-    // directly: `get_enumerator()` once, then `move_next()` and `current`.
-    __engine("bind_enumerator", nameof(get_enumerator), nameof(move_next), nameof(current));
+    // directly: `get_enumerator()` once, then `move_next()` and `current`;
+    // leaving the loop calls `close()` on an enumerator whose type has it.
+    __engine("bind_enumerator", nameof(get_enumerator), nameof(move_next), nameof(current), nameof(close));
 }
 
 pub syntax {

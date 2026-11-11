@@ -21,8 +21,13 @@
 //!     // `sizeof(T)` is answered from `T`'s register layout.
 //!     __engine("bind_type_query", nameof(sizeof), "byte_size");
 //!     // `for x in e` over a value that is not a list or range calls
-//!     // `e.get_enumerator()`, then `move_next()` and `current` on the result.
-//!     __engine("bind_enumerator", nameof(get_enumerator), nameof(move_next), nameof(current));
+//!     // `e.get_enumerator()`, then `move_next()` and `current` on the result;
+//!     // a loop left early calls `close()` on an enumerator that has one.
+//!     __engine("bind_enumerator", nameof(get_enumerator), nameof(move_next), nameof(current), nameof(close));
+//!     // Calling a function whose body yields builds a `Generator` record
+//!     // with `generator_of(frame)`, the engine frame in field `frame`;
+//!     // `yield *xs` over a value that is not one walks `each_item(xs)`.
+//!     __engine("bind_generator", nameof(Generator), nameof(frame), nameof(generator_of), nameof(each_item));
 //!     // `x?` on a record unwraps it through its `op ?` when `x.is_success()`;
 //!     // `catch e` binds a failed record's `failure()`.
 //!     __engine("bind_try_protocol", nameof(is_success), "?", nameof(failure));
@@ -63,6 +68,8 @@ const RECEPTOR_SYMBOL_QUOTE: (u8, u8) = (33, 25);
 
 /// The hook that names the enumerator protocol `for` loops use.
 pub const HOOK_ENUMERATOR: &str = "bind_enumerator";
+/// The hook that names the generator type and the functions that build it.
+pub const HOOK_GENERATOR: &str = "bind_generator";
 /// The hook that names the success predicate of the `op ?` protocol.
 pub const HOOK_TRY_PROTOCOL: &str = "bind_try_protocol";
 
@@ -89,6 +96,24 @@ pub struct EnumeratorProtocol {
     pub move_next: String,
     /// Read after a successful `move_next`: the element.
     pub current: String,
+    /// Called on the enumerator when the loop is left (by `break`, `return`
+    /// or its end), when the enumerator's type declares it; empty when none
+    /// is bound.
+    pub close: String,
+}
+
+/// What calling a generator function builds, and how `yield *xs` reaches
+/// the items of `xs`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeneratorProtocol {
+    /// The struct a generator function's call returns.
+    pub type_name: String,
+    /// Its field holding the engine's frame handle.
+    pub frame_field: String,
+    /// `fn(frame) -> Generator`: builds the record around a new frame.
+    pub construct: String,
+    /// `fn(xs) -> Generator`: a generator yielding each item of `xs`.
+    pub each_item: String,
 }
 
 /// Which table a native binding goes into.
@@ -142,14 +167,25 @@ impl ParserTables {
         self.enumerator.as_ref()
     }
 
+    /// The generator type and its builders, if bound.
+    pub fn generator(&self) -> Option<&GeneratorProtocol> {
+        self.generator.as_ref()
+    }
+
     /// The methods postfix `x?` calls on a record, if bound.
     pub fn try_protocol(&self) -> Option<&TryProtocol> {
         self.try_protocol.as_ref()
     }
 
-    pub(crate) fn bind_enumerator(&mut self, get_enumerator: String, move_next: String, current: String) {
+    pub(crate) fn bind_enumerator(&mut self, get_enumerator: String, move_next: String, current: String, close: String) {
         if !get_enumerator.is_empty() && !move_next.is_empty() && !current.is_empty() {
-            self.enumerator = Some(EnumeratorProtocol { get_enumerator, move_next, current });
+            self.enumerator = Some(EnumeratorProtocol { get_enumerator, move_next, current, close });
+        }
+    }
+
+    pub(crate) fn bind_generator(&mut self, type_name: String, frame_field: String, construct: String, each_item: String) {
+        if [&type_name, &frame_field, &construct, &each_item].iter().all(|s| !s.is_empty()) {
+            self.generator = Some(GeneratorProtocol { type_name, frame_field, construct, each_item });
         }
     }
 

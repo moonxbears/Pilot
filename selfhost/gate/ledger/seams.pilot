@@ -219,6 +219,7 @@ pub fn stand_in_registry() -> List<StandInEntry> {
         stand_in_entry("ir.target_defaults", "target descriptor from --target and the compile driver", "backend llvm and little-endian on every target", "F3"),
         stand_in_entry("proto.packet_bytes", "borrowed slice<u8> wire view (0b01)", "generated views hold an owned List<i64>, one byte per element", "F7"),
         stand_in_entry("py.buffer_layout", "CPython Py_buffer C layout with typed pointers", "pointers are usize and format is a str, so the layout does not match", "F6"),
+        stand_in_entry("seed.generator_frame", "a frame record of the body's live locals and a state index (F5b)", "on the seed the engine keeps the frame (its registers and resume point) and the value is its integer handle; the type declares none of the record's fields", "F6"),
         stand_in_entry("soa.row_base", "ptr<u8> base of the table's column planes", "integer address with no allocation behind it", "F7"),
     ];
     return entries;

@@ -132,8 +132,11 @@ fn check_type_node(inf: Infer, b: Bounds, sink: DiagSink, t: i64) {
     let ty = prog_annot_type(p, t);
     if !ty_is_named(p.tt, ty) { return; }
     let wanted = tparam_count(p, name);
+    var required = 0;
+    for d in prog_tparam_defaults(p, name) { if d < 0 { required = required + 1; } }
+    if prog_tparam_defaults(p, name).len() == 0 { required = wanted; }
     let given = children(s, t).len();
-    if given != wanted {
+    if given < required || given > wanted {
         sink_error(sink, t, "TYPE004",
             f"`{name}` takes {wanted} type argument(s), found {given}");
         return;

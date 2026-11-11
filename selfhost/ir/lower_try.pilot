@@ -142,7 +142,11 @@ pub fn lower_sibling_call(lw: Lowerer, n: i64) -> u32? {
 pub fn lift_to(lw: Lowerer, v: u32, src: i64, dst: i64, n: i64) -> u32 {
     let p = lw.inf.p;
     let tt = p.tt;
-    if v == ir_no_value() || !has_protocol(lw, dst) || ty_is_unknown(tt, src) || ty_is_param(tt, src) { return v; }
+    if v == ir_no_value() || !has_protocol(lw, dst) || ty_is_unknown(tt, src) { return v; }
+    // A value of a type parameter is lifted only into a type over that same
+    // parameter (`T` into `T?`): any other parameter may be the failure
+    // type itself.
+    if ty_is_param(tt, src) && (!ty_is_named(tt, dst) || ty_args(tt, dst).len() == 0 || ty_args(tt, dst)[0] != src) { return v; }
     if prog_is_never(p, src) { return v; }
     if ty_is_named(tt, src) && ty_decl(tt, src) == ty_decl(tt, dst) { return v; }
     guard some m = bound_ctor(lw, dst, lift_hook()) else { return v; }
@@ -348,7 +352,7 @@ fn join_physics(lw: Lowerer, phy: IrTypePhysics, other: u32) -> IrTypePhysics {
 /// runs only when `a` failed. Returns `none` for any other `a`.
 pub fn lower_protocol_coalesce(lw: Lowerer, n: i64) -> u32? {
     let s = lw.inf.p.s;
-    let t = type_of(lw.inf, lhs(s, n));
+    let t = value_type(lw, lhs(s, n));
     if !has_protocol(lw, t) { return none; }
     let phy = physics_of(lw, n);
     let a = lower_expr(lw, lhs(s, n));

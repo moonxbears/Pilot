@@ -1,0 +1,10 @@
+// F5b: a generator ends by returning nothing; `return` with a value inside
+// one is GEN002.
+fn numbers() {
+    yield 1;
+    return 5;
+}
+
+fn main() {
+    for n in numbers() { print(n); }
+}

@@ -1,0 +1,90 @@
+// ==============================================================================
+// FILE: selfhost/check/generators.pilot
+// Who each `yield` belongs to (F5b).
+// ==============================================================================
+// A `for` in value position (`let ys = for ..`, an argument, a returned
+// value) collects what its body yields. A `for` that is an item of a block,
+// or of the program, is in statement position and collects nothing. A
+// `yield` belongs to the nearest collecting `for` whose body it is in, else
+// to the nearest function or lambda around it, which is then a generator. A
+// `yield` with neither (a script's top level, a `comptime` block) belongs to
+// nothing: GEN001.
+pub lvl(0) pkg Pilot.SelfHost.Check.Generators;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+
+/// Whether the `for` at `f` is in value position.
+pub fn for_collects(p: Program, f: i64) -> bool {
+    var item = f;
+    var par = p.parents[f];
+    if par >= 0 && kind(p.s, par) == nk_expr_stmt() {
+        item = par;
+        par = p.parents[par];
+    }
+    if par < 0 { return false; }
+    let k = kind(p.s, par);
+    return k != nk_block() && k != nk_program();
+}
+
+/// The collecting `for`, function or lambda `yield` node `y` belongs to;
+/// -1 for none, -2 when `y` is not part of the program (a node a syntax
+/// rule copied, whose copy is what the program holds).
+pub fn yield_owner(p: Program, y: i64) -> i64 {
+    var child = y;
+    var cur = p.parents[y];
+    while cur >= 0 {
+        let k = kind(p.s, cur);
+        if k == nk_for() && child == rhs(p.s, cur) && for_collects(p, cur) { return cur; }
+        if k == nk_fn() || k == nk_lambda() || k == nk_operator() { return cur; }
+        if k == nk_comptime() { return -1; }
+        child = cur;
+        cur = p.parents[cur];
+    }
+    return if kind(p.s, child) == nk_program() { -1 } else { -2 };
+}
+
+/// The `yield` nodes that belong to `owner` (a function, lambda or
+/// collecting `for`), in source order.
+pub fn owned_yields(p: Program, owner: i64) -> List<i64> {
+    var out: List<i64> = [];
+    for y in all_yields(p) {
+        if yield_owner(p, y) == owner { out.push(y); }
+    }
+    return out;
+}
+
+/// Every `yield` node of the program.
+pub fn all_yields(p: Program) -> List<i64> {
+    let memo = "yields";
+    if !p.gen_memo.has(memo) {
+        var ys: List<i64> = [];
+        var i = 0;
+        while i < p.s.count {
+            if kind(p.s, i) == nk_yield() { ys.push(i); }
+            i = i + 1;
+        }
+        p.gen_memo.set(memo, ys);
+    }
+    return p.gen_memo.get(memo);
+}
+
+/// Whether function or lambda `f` is a generator: some `yield` belongs to it.
+pub fn is_generator(p: Program, f: i64) -> bool {
+    if f < 0 { return false; }
+    let k = kind(p.s, f);
+    if k != nk_fn() && k != nk_lambda() && k != nk_operator() { return false; }
+    return owned_yields(p, f).len() > 0;
+}
+
+/// Whether `yield` node `y` is a delegation, `yield *xs`.
+pub fn is_delegation(p: Program, y: i64) -> bool {
+    let v = lhs(p.s, y);
+    return v >= 0 && kind(p.s, v) == nk_unary() && flags(p.s, v) == unary_splat();
+}
+
+/// The declaration of the generator type, or -1 when none is bound.
+pub fn generator_decl(p: Program) -> i64 {
+    if p.s.generator.len() == 0 { return -1; }
+    return prog_type_decl(p, p.s.generator[0]);
+}

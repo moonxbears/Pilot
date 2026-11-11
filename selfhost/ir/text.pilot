@@ -68,6 +68,16 @@ fn operands_text(f: IrFunction, inst: IrInst) -> str {
         let e = 3 + a[2];
         return value_ref(a[0]) + f", b{a[1]}(" + value_list(f, a, 3, a[2]) + f"), b{a[e]}(" + value_list(f, a, e + 2, a[e + 1]) + ")";
     }
+    if op == op_switch_table() {
+        // The default target first, then target 0, 1, ..
+        var out = value_ref(a[0]);
+        var t = 1;
+        while t < a.len() {
+            out = out + f", b{a[t]}()";
+            t = t + 1;
+        }
+        return out;
+    }
     return value_list(f, a, 0, a.len());
 }
 
@@ -306,6 +316,10 @@ fn parse_inst(r: Reader, f: IrFunction, b: u32, w: List<str>) {
         args.push(number(r, w[i], "v"));
         i = parse_target(r, w, i + 2, args, true);
         i = parse_target(r, w, i + 1, args, true);
+    } else if op == op_switch_table() {
+        args.push(number(r, w[i], "v"));
+        i = parse_target(r, w, i + 2, args, false);
+        while i < w.len() && w[i] == "," { i = parse_target(r, w, i + 1, args, false); }
     } else {
         while i < w.len() && w[i] != ":" {
             if w[i] != "," {

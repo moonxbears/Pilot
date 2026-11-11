@@ -16,6 +16,9 @@ use Pilot.Core.Result;
 // (`contains`, `add`, `clear`, `count`, enumeration).
 use Pilot.Core.Primitives.List;
 
+// `Generator<TItem, TSent>`: what calling a function that yields returns.
+use Pilot.Core.Generator;
+
 // `Pending<T>` / `pending(..)` and `[StandIn(..)]`: gaps kept in data.
 use Pilot.Core.Pending;
 

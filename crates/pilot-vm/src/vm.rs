@@ -74,6 +74,11 @@ pub struct PilVirtualMachine {
     /// Child processes started with `proc_spawn`, by handle; `None` once
     /// waited for.
     pub children: Vec<Option<crate::host::Child>>,
+    /// Generator frames, by handle (`vm_gen`).
+    pub generators: Vec<crate::vm_gen::GenFrame>,
+    /// The generator bodies running, innermost last: the call depth each
+    /// was entered at, and its frame.
+    pub gen_stack: Vec<(usize, usize)>,
 }
 
 impl Default for PilVirtualMachine {
@@ -105,6 +110,8 @@ impl PilVirtualMachine {
             host_ops: None,
             script_args: Vec::new(),
             children: Vec::new(),
+            generators: Vec::new(),
+            gen_stack: Vec::new(),
             shared_symbols: None,
             fuel_limit: None,
             fuel_used: 0,
@@ -123,6 +130,8 @@ impl PilVirtualMachine {
         self.reg_stack.clear();
         self.heap_lists.clear();
         self.globals.clear();
+        self.generators.clear();
+        self.gen_stack.clear();
         self.registers = [PilotVal::NULL; 256];
         self.fuel_used = 0;
         self.fuel_exhausted = false;
@@ -193,7 +202,7 @@ impl PilVirtualMachine {
     }
 
     /// Saves the live registers and jumps to `entry`; `Ret` writes the result to `dst`.
-    fn enter_call(&mut self, entry: usize, dst: u8) -> Result<(), String> {
+    pub(crate) fn enter_call(&mut self, entry: usize, dst: u8) -> Result<(), String> {
         if self.call_stack.len() >= MAX_CALL_DEPTH {
             return Err(format!("call depth exceeded {MAX_CALL_DEPTH} frames"));
         }
@@ -207,6 +216,20 @@ impl PilVirtualMachine {
         self.call_stack.push((self.pc, st, act as u16, dst));
         self.pc = entry;
         Ok(())
+    }
+
+    /// Returns from the current frame with `ret`: the caller's registers come
+    /// back and `ret` lands in its destination register.
+    pub(crate) fn leave_frame(&mut self, ret: PilotVal) {
+        let Some((ret_pc, st, act, d)) = self.call_stack.pop() else {
+            return;
+        };
+        let n = act as usize;
+        self.registers[..n].copy_from_slice(&self.reg_stack[st..st + n]);
+        self.registers[n..].fill(PilotVal::NULL);
+        self.reg_stack.truncate(st);
+        self.set(d as usize, ret);
+        self.pc = ret_pc;
     }
 
     /// `==`: lists (and tuples) compare element by element; everything else
@@ -320,21 +343,20 @@ impl PilVirtualMachine {
                 }
                 Opcode::Ret => {
                     let ret = if src1 != 0 { r1 } else { self.registers[0] };
-                    let Some((ret_pc, st, act, d)) = self.call_stack.pop() else {
+                    let ret = self.gen_return(ret);
+                    if self.call_stack.is_empty() {
                         return Ok(ret);
-                    };
-                    let n = act as usize;
-                    self.registers[..n].copy_from_slice(&self.reg_stack[st..st + n]);
-                    self.registers[n..].fill(PilotVal::NULL);
-                    self.reg_stack.truncate(st);
-                    self.set(d as usize, ret);
-                    self.pc = ret_pc;
+                    }
+                    self.leave_frame(ret);
                 }
                 Opcode::EngineIntrinsic => {
                     let args: Vec<PilotVal> = self.registers[1..=src2.min(255)].to_vec();
                     let hook = r1
                         .with_str(|s| s.to_string())
                         .ok_or_else(|| format!("intrinsic name must be a string, found {}", r1.kind_label()))?;
+                    if self.gen_intrinsic(&hook, ins, &args[..src2])? {
+                        continue;
+                    }
                     let v = self.intrinsic(&hook, &args[..src2])?;
                     self.set(dst, v);
                 }

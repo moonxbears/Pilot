@@ -1,0 +1,4 @@
+// F5b: a `yield` at a script's top level belongs to no generator and no
+// collecting `for`: GEN001.
+print("start");
+yield 1;

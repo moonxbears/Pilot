@@ -21,6 +21,8 @@ impl BytecodeCompiler {
         let mut last = 0;
         for (i, &c) in children.iter().enumerate() {
             let mark = self.next_reg;
+            // A `for` that is a block item collects nothing (`lower_yield`).
+            self.stmt_for = Self::item_for(arena, NodeId(c));
             last = self.compile_node(arena, NodeId(c));
             if i + 1 < children.len() {
                 self.next_reg = mark;
@@ -89,6 +91,8 @@ impl BytecodeCompiler {
             params.insert(0, receiver.to_string());
         }
         let pc = self.here();
+        // Becomes a jump to the generator stub when the body yields.
+        self.emit(Opcode::Nop, 0, 0, 0);
         if params.is_empty() && fn_name == "main" && owner.is_none() {
             *entry = Some(pc);
         }
@@ -162,6 +166,9 @@ impl BytecodeCompiler {
         let r = if returns_value { self.convert_for_binding(b, ret.as_deref()) } else { self.emit_const(PilotVal::NULL) };
         self.emit(Opcode::Move, 0, r, 0);
         self.emit(Opcode::Ret, 0, 0, 0);
+        if self.gen_body.is_some() {
+            self.emit_generator_stub(pc as usize);
+        }
     }
 
     /// Whether a block item supplies the block's value: an expression or a
@@ -301,7 +308,9 @@ impl BytecodeCompiler {
             (format!("{l_real}.{}", Self::name(arena, cn.rhs)), td)
         } else {
             let nm = ident_of(NodeId(arena.extra_children[rn.lhs as usize]))?;
-            (nm.to_string(), nm)
+            // A bare call names a type only when it constructs a struct; a
+            // function without a declared return type gives no type.
+            (nm.to_string(), if self.structs.contains_key(nm) { nm } else { "" })
         };
         let ty = self.fn_ret_types.get(&fc).map(|s| s.as_str()).unwrap_or(type_name);
         (!ty.is_empty()).then(|| ty.to_string())
@@ -386,11 +395,18 @@ impl BytecodeCompiler {
 
     /// Runs `body` inside a loop context; returns the context's jump lists.
     pub(crate) fn loop_body(&mut self, arena: &AstArena, body: NodeId) -> LoopCtx {
+        self.loop_body_releasing(arena, body, None)
+    }
+
+    /// `loop_body` for a loop whose enumerator, in local `release`, is closed
+    /// when the loop is left.
+    pub(crate) fn loop_body_releasing(&mut self, arena: &AstArena, body: NodeId, release: Option<u8>) -> LoopCtx {
         self.loops.push(LoopCtx {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
             is_switch: false,
             defer_depth: self.defers.len(),
+            release,
         });
         let mark = self.next_reg;
         self.compile_node(arena, body);
@@ -400,6 +416,7 @@ impl BytecodeCompiler {
             break_jumps: Vec::new(),
             is_switch: false,
             defer_depth: self.defers.len(),
+            release,
         })
     }
 
@@ -474,6 +491,7 @@ impl BytecodeCompiler {
         // The value is computed before deferred statements run.
         let keep = self.alloc_reg();
         self.emit(Opcode::Move, keep, r_ret, 0);
+        self.emit_loop_releases(0);
         self.emit_defers_above(arena, 0);
         self.emit(Opcode::Move, 0, keep, 0);
         self.emit(Opcode::Ret, 0, 0, 0);

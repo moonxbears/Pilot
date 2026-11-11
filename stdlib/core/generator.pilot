@@ -1,0 +1,86 @@
+// =========================================================================
+// FILE: stdlib/core/generator.pilot
+// GENERATORS (`Generator<TItem, TSent>`, 0b10 through IObject)
+// =========================================================================
+// A function whose body has a `yield` that no collecting `for` owns is a
+// generator: calling it runs nothing and returns a `Generator`. Each
+// `next()` or `send(v)` runs the body up to its next `yield e`, which hands
+// out `e`; the `yield` expression itself is then worth the `v` of the
+// `send` that resumes it. When the body ends the generator is done and
+// `next()` gives `none`. `close()` ends it early and runs the `defer`s its
+// frame has pending. The prelude links this file into every program.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Generator;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+comptime {
+    // A generator function's call builds `generator_of(frame)` around a new
+    // engine frame; `yield *xs` over a value that is not a `Generator`
+    // walks `each_item(xs)`.
+    __engine("bind_generator", nameof(Generator), nameof(frame), nameof(generator_of), nameof(each_item));
+}
+
+/// The frame of a suspended generator body. In PilIR it is the record the
+/// lowering builds: the resume function, the state, the item last handed
+/// out, whether it is being closed, then the values the body keeps across a
+/// `yield` (selfhost/ir/lower_generator.pilot).
+[StandIn("seed.generator_frame", "a frame record of the body's live locals and a state index (F5b)", "on the seed the engine keeps the frame (its registers and resume point) and the value is its integer handle; the type declares none of the record's fields", "F6")]
+pub struct GeneratorFrameHandle : IObject {
+}
+
+/// A suspended function body handing out items of type `TItem` and taking
+/// values of type `TSent` back through `send`.
+pub struct Generator<TItem: IAnyValue, TSent: IAnyValue = void> : IObject, IEnumerator<TItem> {
+    /// The frame of the suspended body: what it keeps and where it resumes.
+    pub frame: GeneratorFrameHandle;
+
+    /// Runs the body to its next `yield` and gives that item, or `none` once
+    /// the body has ended.
+    pub fn next() -> TItem? {
+        let item: TItem = __engine("gen_resume", .frame, none);
+        if __engine("gen_done", .frame) { return none; }
+        return item;
+    }
+
+    /// Like `next()`, with the waiting `yield` worth `v`. A generator that
+    /// has not started yet has no `yield` waiting, and `v` is dropped.
+    pub fn send(v: TSent) -> TItem? {
+        let item: TItem = __engine("gen_resume", .frame, v);
+        if __engine("gen_done", .frame) { return none; }
+        return item;
+    }
+
+    /// Ends the generator, running the `defer`s pending in its frame. A
+    /// generator that has ended already is left as it is.
+    pub fn close() {
+        __engine("gen_close", .frame);
+    }
+
+    /// Whether the body has ended or the generator was closed.
+    pub is_done: bool { get => __engine("gen_done", .frame); }
+
+    /// A generator enumerates itself.
+    pub fn get_enumerator() -> Generator<TItem, TSent> => self;
+
+    /// Runs the body to its next `yield`; `false` once it has ended.
+    pub var fn move_next() -> bool {
+        __engine("gen_resume", .frame, none);
+        return !__engine("gen_done", .frame);
+    }
+
+    /// The item the last `yield` handed out.
+    pub current: TItem { get => __engine("gen_current", .frame); }
+}
+
+/// The generator around the new engine frame `frame`.
+pub fn generator_of<TItem: IAnyValue, TSent: IAnyValue>(frame: GeneratorFrameHandle) -> Generator<TItem, TSent> =>
+    Generator<TItem, TSent> { frame: frame };
+
+/// A generator yielding each item of `xs` in order.
+pub fn each_item(xs) {
+    for x in xs {
+        yield x;
+    }
+}

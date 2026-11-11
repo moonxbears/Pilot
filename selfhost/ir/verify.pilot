@@ -146,6 +146,10 @@ pub fn value_positions(f: IrFunction, inst: IrInst) -> List<i64> {
         while i < a.len() { out.push(i); i = i + 1; }
         return out;
     }
+    if op == op_switch_table() {
+        out.push(0);
+        return out;
+    }
     if op == op_cond_br() {
         out.push(0);
         var i = 0;
@@ -205,6 +209,13 @@ pub fn verify_ir_function(f: IrFunction) -> List<IrIssue> {
                 let a = ir_args(f, inst);
                 check_target(out, f, b.id, a[1], a[2]);
                 check_target(out, f, b.id, a[3 + a[2]], a[4 + a[2]]);
+            } else if inst.opcode == op_switch_table() {
+                let a = ir_args(f, inst);
+                var t = 1;
+                while t < a.len() {
+                    check_target(out, f, b.id, a[t], 0);
+                    t = t + 1;
+                }
             }
             i = i + 1;
         }

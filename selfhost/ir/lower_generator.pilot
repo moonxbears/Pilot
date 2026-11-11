@@ -1,0 +1,605 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_generator.pilot
+// F5b: lowering of generators and collecting `for` to PilIR.
+// ==============================================================================
+// A `for` in value position whose body yields builds a list before the loop
+// and appends what each `yield` gives; the `for` is worth that list.
+//
+// A generator function lowers to two ordinary functions, so the IR
+// interpreter and every backend see no suspended frames:
+//   - the function itself builds the frame record and returns the bound
+//     `generator_of(frame)`;
+//   - its resume function `<name>$resume(frame, sent)` runs the body from
+//     where it last stopped up to its next `yield`, and returns that item.
+// The frame record holds, in order: the resume function (a function record,
+// as lower_closure.pilot builds), the state, the item last yielded, whether
+// it is being closed, the receiver and arguments of the call, then the
+// values the body keeps across a `yield`. The state is 0 before the body
+// runs, `k` while it waits at its `k`-th `yield`, -1 once it ended and -2
+// while it runs.
+//
+// The resume function's entry dispatches on the state with `switch_table`:
+// state 0 enters the body with the arguments the frame holds, state `k`
+// continues right after the `k`-th `yield`. `yield e` stores `e` and `k` in
+// the frame and returns `e`; where it continues, the value of the `yield` is
+// the `sent` parameter. A frame resumed to be closed leaves at its `yield`,
+// closing the enumerators of the loops it is in, running its pending
+// `defer`s and ending. After the body is lowered, every value that is live
+// across a `yield`, and every stack slot, moves into a field of the frame
+// (`demote_across_yields`).
+//
+// The engine operations the bound `Generator` methods run on its frame
+// (`gen_resume`, `gen_done`, `gen_current`, `gen_close`) lower to field
+// reads and writes and a call through the frame's resume function.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerGenerator;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.generators.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.verify.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_members.*;
+use selfhost.ir.lower_defer.*;
+use selfhost.ir.lower_switch.*;
+use selfhost.ir.lower_unit.*;
+
+/// The fields of a frame record.
+pub pure fn frame_resume() -> i64 => 0;
+pub pure fn frame_state() -> i64 => 1;
+pub pure fn frame_current() -> i64 => 2;
+pub pure fn frame_closing() -> i64 => 3;
+/// The first field holding the call's receiver and arguments.
+pub pure fn frame_locals() -> i64 => 4;
+
+/// The states of a frame other than "waiting at `yield` k".
+pub pure fn state_fresh() -> i64 => 0;
+pub pure fn state_done() -> i64 => -1;
+pub pure fn state_running() -> i64 => -2;
+
+/// The runtime error of resuming a generator from inside itself, as the seed
+/// reports it (crates/pilot-vm vm_gen.rs).
+pub pure fn resumed_while_running() -> str => "GEN003: a generator cannot be resumed while it runs";
+
+/// The engine operations the bound generator type runs on its frame.
+pub pure fn gen_resume_op() -> str => "gen_resume";
+pub pure fn gen_done_op() -> str => "gen_done";
+pub pure fn gen_current_op() -> str => "gen_current";
+pub pure fn gen_close_op() -> str => "gen_close";
+
+fn int_phy(lw: Lowerer) -> IrTypePhysics => layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+
+fn int_value(lw: Lowerer, v: i64, n: i64) -> u32 => emit(lw, op_const_bits(), 0, int_phy(lw), [pool_int(lw, v)], n);
+
+fn bool_value(lw: Lowerer, b: bool, n: i64) -> u32 =>
+    emit(lw, op_const_bits(), 0, bool_physics(lw), [pool_int(lw, if b { 1 } else { 0 })], n);
+
+fn undef_value(lw: Lowerer, n: i64) -> u32 => emit(lw, op_undef(), 0, layout_unknown(lw.ls), [], n);
+
+fn read_field(lw: Lowerer, rec: u32, i: i64, phy: IrTypePhysics, n: i64) -> u32 =>
+    emit(lw, op_extract_field(), i, phy, [rec], n);
+
+fn write_field(lw: Lowerer, rec: u32, i: i64, v: u32, n: i64) { emit_void(lw, op_insert_field(), i, [rec, v], n); }
+
+// ------------------------------------------------------------------------------
+// Collecting `for`
+// ------------------------------------------------------------------------------
+
+/// Starts the list a collecting `for` fills; none when `n` is no `for` in
+/// value position whose body yields.
+pub fn begin_collecting(lw: Lowerer, n: i64) -> u32? {
+    let p = lw.inf.p;
+    if !for_collects(p, n) || owned_yields(p, n).len() == 0 { return none; }
+    let t = value_type(lw, n);
+    let make = bound(lw, native_fn_hook(), [type_name_of(lw, t)]);
+    if make == "" {
+        let _ = unsupported(lw, n);
+        return none;
+    }
+    let list = emit(lw, op_call_intrinsic(), intrinsic_index(lw, make), layout_of(lw.ls, t), [], n);
+    lw.collect_lists.set(key(n), list);
+    return list;
+}
+
+/// `yield e` owned by collecting `for` node `owner`: appends `e`.
+fn collect(lw: Lowerer, owner: i64, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    if !lw.collect_lists.has(key(owner)) || lhs(s, n) < 0 { return unsupported(lw, n); }
+    let list = lw.collect_lists.get(key(owner));
+    let t = value_type(lw, owner);
+    let append = bound(lw, list_literal_hook(), [type_name_of(lw, t)]);
+    let hook = native_for(lw, t, append, native_method_hook());
+    if hook == "" { return unsupported(lw, n); }
+    let v = lower_expr(lw, lhs(s, n));
+    let _ = emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), layout_of(lw.ls, t), [list, v], n);
+    return unit_value(lw, n);
+}
+
+// ------------------------------------------------------------------------------
+// Enumerators of open loops
+// ------------------------------------------------------------------------------
+
+/// Closes enumerator `en` of type `en_t` with the enumeration protocol's
+/// close method, when the struct it is declares one.
+pub fn close_loop_enumerator(lw: Lowerer, en: u32, en_t: i64, n: i64) {
+    let p = lw.inf.p;
+    let s = p.s;
+    if ir_is_terminated(lw.f, lw.cur) || s.enumeration.len() < 4 || s.enumeration[3] == "" { return; }
+    if !ty_is_named(p.tt, en_t) || kind(s, ty_decl(p.tt, en_t)) != nk_struct() { return; }
+    guard some m = prog_member(p, en_t, s.enumeration[3]) else { return; }
+    if !runs_in_program(lw, m.decl) { return; }
+    let _ = member_call(lw, en, en_t, s.enumeration[3], [], layout_unknown(lw.ls), n);
+}
+
+/// Closes the enumerators of every open loop, innermost first: what leaving
+/// the function from inside them does.
+pub fn close_loop_enumerators(lw: Lowerer, n: i64) {
+    var i = lw.loop_enums.len() - 1;
+    while i >= 0 {
+        close_loop_enumerator(lw, lw.loop_enums[i], lw.loop_enum_types[i], n);
+        i = i - 1;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Generator functions
+// ------------------------------------------------------------------------------
+
+/// Whether queued function `idx` is a generator function (not its resume
+/// function).
+pub fn is_generator_creator(lw: Lowerer, idx: i64) -> bool {
+    if idx == 0 || lw.queue_body[idx] >= 0 || is_resume_function(lw, idx) { return false; }
+    let decl = lw.queue[idx];
+    let k = kind(lw.inf.p.s, decl);
+    if k != nk_fn() && k != nk_operator() { return false; }
+    return is_generator(lw.inf.p, decl);
+}
+
+pub fn is_resume_function(lw: Lowerer, idx: i64) -> bool => lw.resume_of.has(f"r{idx}");
+
+/// The index of the resume function of generator function `idx`, queuing
+/// it with the same receiver type and argument types.
+pub fn resume_index(lw: Lowerer, idx: i64) -> i64 {
+    if lw.resume_of.has(key(idx)) { return lw.resume_of.get(key(idx)); }
+    let ri = lw.queue.len();
+    lw.queue.push(lw.queue[idx]);
+    lw.queue_self.push(lw.queue_self[idx]);
+    lw.queue_body.push(-1);
+    lw.queue_args.push(lw.queue_args[idx]);
+    lw.m.functions.push(ir_function_new(lw.m.functions[idx].name + "$resume", layout_unknown(lw.ls)));
+    lw.resume_of.set(key(idx), ri);
+    lw.resume_of.set(f"r{ri}", idx);
+    return ri;
+}
+
+/// The body of generator function `idx`, whose entry block holds its
+/// receiver and parameters: builds the frame and returns the generator.
+pub fn lower_creator(lw: Lowerer, idx: i64, decl: i64) {
+    let s = lw.inf.p.s;
+    let ctor = generator_constructor(lw);
+    if ctor < 0 {
+        let _ = seam("ir.lower_construct", f"`{node_name(s, decl)}` yields, and no generator type is bound (`bind_generator`)");
+        return;
+    }
+    let ri = resume_index(lw, idx);
+    let unknown = layout_unknown(lw.ls);
+    // The resume function as a function value (stand-in ir.closure_record).
+    let resume = emit(lw, op_construct_aggregate(), 0, unknown, [int_value(lw, ri, decl)], decl);
+    var fields: List<u32> = [resume, int_value(lw, state_fresh(), decl), undef_value(lw, decl), bool_value(lw, false, decl)];
+    for v in lw.f.blocks[lw.cur].params { fields.push(v); }
+    let size = if lw.frame_sizes.has(key(ri)) { lw.frame_sizes.get(key(ri)) } else { fields.len() };
+    if fields.len() < size {
+        let empty = undef_value(lw, decl);
+        while fields.len() < size { fields.push(empty); }
+    }
+    let frame = emit(lw, op_construct_aggregate(), 0, unknown, fields, decl);
+    let g = emit(lw, op_call_direct(), specialized_index(lw, ctor, ty_unknown(), []), lw.f.ret_physics, [frame], decl);
+    emit_void(lw, op_return(), 0, [g], decl);
+}
+
+/// The declaration of the bound `generator_of`, or -1.
+fn generator_constructor(lw: Lowerer) -> i64 {
+    let p = lw.inf.p;
+    if p.s.generator.len() < 4 { return -1; }
+    let fns = nl_get(p.fns, p.s.generator[2]);
+    return if fns.len() == 1 { fns[0] } else { -1 };
+}
+
+/// Starts resume function `lw.f`: its entry block takes the frame and the
+/// sent value; the dispatch is filled in by `finish_resume`.
+pub fn begin_resume(lw: Lowerer, decl: i64) {
+    let f = lw.f;
+    let unknown = layout_unknown(lw.ls);
+    f.ret_physics = unknown;
+    lw.ret_type = ty_unknown();
+    let entry = ir_add_block(f);
+    lw.gen_frame = ir_add_param(f, entry, unknown);
+    lw.gen_sent = ir_add_param(f, entry, unknown);
+    lw.gen_dispatch.push(entry);
+}
+
+/// Ends the generator: it is done, and the resumer gets nothing.
+pub fn finish_generator(lw: Lowerer, n: i64) {
+    write_field(lw, lw.gen_frame, frame_state(), int_value(lw, state_done(), n), n);
+    write_field(lw, lw.gen_frame, frame_current(), undef_value(lw, n), n);
+    emit_void(lw, op_return(), 0, [undef_value(lw, n)], n);
+}
+
+/// Ends resume function `idx` of generator `decl`: the body's end ends the
+/// generator, the dispatch is built, and the values kept across a `yield`
+/// move into the frame.
+pub fn finish_resume(lw: Lowerer, idx: i64, decl: i64) {
+    if !ir_is_terminated(lw.f, lw.cur) { finish_generator(lw, decl); }
+    build_dispatch(lw, decl);
+    lw.frame_sizes.set(key(idx), demote_across_yields(lw, decl));
+}
+
+fn dispatch_block(lw: Lowerer) -> u32 {
+    let b = ir_add_block(lw.f);
+    lw.gen_dispatch.push(b);
+    return b;
+}
+
+/// The resume function's entry: GEN003 when the frame runs; nothing when it
+/// ended; otherwise it runs, from the body's start (or, when closed before
+/// it started, it just ends) or from the `yield` it waits at.
+fn build_dispatch(lw: Lowerer, n: i64) {
+    let frame = lw.gen_frame;
+    let body_start: u32 = 1;
+    switch_to(lw, 0);
+    let state = read_field(lw, frame, frame_state(), int_phy(lw), n);
+    let trap = dispatch_block(lw);
+    let live = dispatch_block(lw);
+    // CmpPred 0 is `==`, 2 is `<`.
+    let running = emit(lw, op_cmp(), 0, bool_physics(lw), [state, int_value(lw, state_running(), n)], n);
+    emit_void(lw, op_cond_br(), 0, [running, trap, 0, live, 0], n);
+    switch_to(lw, trap);
+    emit_trap(lw, resumed_while_running(), n);
+    switch_to(lw, live);
+    let ended = dispatch_block(lw);
+    let go = dispatch_block(lw);
+    let done = emit(lw, op_cmp(), 2, bool_physics(lw), [state, int_value(lw, 0, n)], n);
+    emit_void(lw, op_cond_br(), 0, [done, ended, 0, go, 0], n);
+    switch_to(lw, ended);
+    emit_void(lw, op_return(), 0, [undef_value(lw, n)], n);
+    switch_to(lw, go);
+    write_field(lw, frame, frame_state(), int_value(lw, state_running(), n), n);
+    let bad = dispatch_block(lw);
+    let fresh = dispatch_block(lw);
+    var table: List<u32> = [state, bad, fresh];
+    for r in lw.gen_resumes { table.push(r); }
+    emit_void(lw, op_switch_table(), 0, table, n);
+    switch_to(lw, bad);
+    emit_void(lw, op_unreachable(), 0, [], n);
+    switch_to(lw, fresh);
+    let closed = dispatch_block(lw);
+    let enter = dispatch_block(lw);
+    let closing = read_field(lw, frame, frame_closing(), bool_physics(lw), n);
+    emit_void(lw, op_cond_br(), 0, [closing, closed, 0, enter, 0], n);
+    switch_to(lw, closed);
+    finish_generator(lw, n);
+    switch_to(lw, enter);
+    var args: List<u32> = [];
+    var i = 0;
+    for v in lw.f.blocks[body_start].params {
+        args.push(read_field(lw, frame, frame_locals() + i, lw.f.value_physics[v], n));
+        i = i + 1;
+    }
+    jump_to(lw, body_start, args, n);
+}
+
+// ------------------------------------------------------------------------------
+// `yield`
+// ------------------------------------------------------------------------------
+
+/// `yield e`, `yield *xs`.
+pub fn lower_yield(lw: Lowerer, n: i64) -> u32 {
+    let p = lw.inf.p;
+    let s = p.s;
+    let owner = yield_owner(p, n);
+    if owner >= 0 && kind(s, owner) == nk_for() { return collect(lw, owner, n); }
+    if lw.gen_frame == ir_no_value() { return unsupported(lw, n); }
+    let operand = lhs(s, n);
+    if operand >= 0 && is_delegation(p, n) { return lower_yield_from(lw, lhs(s, operand), n); }
+    let v = if operand >= 0 { lower_expr(lw, operand) } else { undef_value(lw, n) };
+    return suspend(lw, v, ir_no_value(), n);
+}
+
+/// Hands `v` out and suspends; returns the value sent in on resuming. A
+/// frame resumed to be closed leaves here, closing `inner` first (the frame
+/// a `yield *` delegates to) when there is one.
+fn suspend(lw: Lowerer, v: u32, inner: u32, n: i64) -> u32 {
+    let frame = lw.gen_frame;
+    write_field(lw, frame, frame_current(), v, n);
+    write_field(lw, frame, frame_state(), int_value(lw, lw.gen_resumes.len() + 1, n), n);
+    emit_void(lw, op_return(), 0, [v], n);
+    lw.gen_yielders.push(lw.cur);
+    let resumed = ir_add_block(lw.f);
+    lw.gen_resumes.push(resumed);
+    switch_to(lw, resumed);
+    let leave = ir_add_block(lw.f);
+    let go_on = ir_add_block(lw.f);
+    let closing = read_field(lw, frame, frame_closing(), bool_physics(lw), n);
+    emit_void(lw, op_cond_br(), 0, [closing, leave, 0, go_on, 0], n);
+    switch_to(lw, leave);
+    if inner != ir_no_value() { close_frame(lw, inner, n); }
+    close_loop_enumerators(lw, n);
+    run_defers_to(lw, 0);
+    if !ir_is_terminated(lw.f, lw.cur) { finish_generator(lw, n); }
+    switch_to(lw, go_on);
+    return lw.gen_sent;
+}
+
+/// `yield *xs`: resumes the generator `xs` (any other value through the bound
+/// `each_item(xs)`) until it ends, yielding each of its items and passing on
+/// each value sent in.
+fn lower_yield_from(lw: Lowerer, xs: i64, n: i64) -> u32 {
+    let p = lw.inf.p;
+    let s = p.s;
+    let gen_decl = generator_decl(p);
+    if gen_decl < 0 || s.generator.len() < 4 { return unsupported(lw, n); }
+    let t = value_type(lw, xs);
+    var gt = t;
+    var g = ir_no_value();
+    if ty_is_named(p.tt, t) && ty_decl(p.tt, t) == gen_decl {
+        g = lower_expr(lw, xs);
+    } else {
+        let walkers = nl_get(p.fns, s.generator[3]);
+        if walkers.len() != 1 { return unsupported(lw, n); }
+        gt = owner_type(lw, gen_decl);
+        g = call_decl(lw, walkers[0], [], [xs], layout_of(lw.ls, gt), n);
+    }
+    let slot = field_slot(lw, gt, s.generator[1]);
+    if slot < 0 { return unsupported(lw, n); }
+    let inner = emit(lw, op_extract_field(), slot, field_physics(lw, gt, s.generator[1]), [g], n);
+    let head = ir_add_block(lw.f);
+    let sent = ir_add_param(lw.f, head, layout_unknown(lw.ls));
+    let body = ir_add_block(lw.f);
+    let exit = ir_add_block(lw.f);
+    jump_to(lw, head, [undef_value(lw, n)], n);
+    switch_to(lw, head);
+    let item = resume_frame(lw, inner, sent, layout_unknown(lw.ls), n);
+    let ended = emit(lw, op_cmp(), 0, bool_physics(lw), [read_field(lw, inner, frame_state(), int_phy(lw), n), int_value(lw, state_done(), n)], n);
+    emit_void(lw, op_cond_br(), 0, [ended, exit, 0, body, 0], n);
+    switch_to(lw, body);
+    let next = suspend(lw, item, inner, n);
+    jump_to(lw, head, [next], n);
+    switch_to(lw, exit);
+    return unit_value(lw, n);
+}
+
+// ------------------------------------------------------------------------------
+// The engine operations on a frame
+// ------------------------------------------------------------------------------
+
+/// Runs frame `fr` to its next `yield` with `sent` as the waiting `yield`'s
+/// value; the item it hands out.
+fn resume_frame(lw: Lowerer, fr: u32, sent: u32, phy: IrTypePhysics, n: i64) -> u32 {
+    let resume = read_field(lw, fr, frame_resume(), layout_unknown(lw.ls), n);
+    return emit(lw, op_call_indirect(), 0, phy, [resume, fr, sent], n);
+}
+
+/// Ends frame `fr`: one waiting at a `yield` leaves there, running its
+/// pending `defer`s; one that never ran just ends.
+fn close_frame(lw: Lowerer, fr: u32, n: i64) {
+    write_field(lw, fr, frame_closing(), bool_value(lw, true, n), n);
+    let _ = resume_frame(lw, fr, undef_value(lw, n), layout_unknown(lw.ls), n);
+}
+
+/// A library body's engine operation on a generator frame; none for any
+/// other operation.
+pub fn lower_generator_op(lw: Lowerer, hook: str, args: List<u32>, phy: IrTypePhysics, n: i64) -> u32? {
+    if hook == gen_resume_op() && args.len() == 2 { return resume_frame(lw, args[0], args[1], phy, n); }
+    if hook == gen_done_op() && args.len() == 1 {
+        let state = read_field(lw, args[0], frame_state(), int_phy(lw), n);
+        return emit(lw, op_cmp(), 0, bool_physics(lw), [state, int_value(lw, state_done(), n)], n);
+    }
+    if hook == gen_current_op() && args.len() == 1 { return read_field(lw, args[0], frame_current(), phy, n); }
+    if hook == gen_close_op() && args.len() == 1 {
+        close_frame(lw, args[0], n);
+        return emit(lw, op_undef(), 0, phy, [], n);
+    }
+    return none;
+}
+
+// ------------------------------------------------------------------------------
+// Keeping values across a `yield`
+// ------------------------------------------------------------------------------
+
+/// An instruction of `f` with `args` placed in its operand pool.
+fn make_inst(f: IrFunction, result: u32, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, span_id: u32) -> IrInst {
+    let offset = f.operand_pool.len;
+    for a in args { f.operand_pool.push(a); }
+    return ir_inst_new(result, op, sub, phy, offset, args.len(), span_id);
+}
+
+/// The state of moving values of a resume function into its frame.
+struct FrameDemotion : IObject {
+    pub f: IrFunction;
+    pub frame: u32;
+    /// Block -> whether it belongs to the dispatch.
+    pub dispatch: List<bool>;
+    /// Value -> its frame field, or -1.
+    pub field: List<i64>;
+    /// Value -> the block defining it, or -1.
+    pub def_block: List<i64>;
+    pub next_field: i64;
+}
+
+/// Moves the stack slots of resume function `lw.f`, and every value live
+/// across a `yield`, into fields of its frame: a slot's `load` and `store`
+/// become field reads and writes, a kept value is written to its field
+/// where it is defined and read back at the top of each other block that
+/// uses it. Returns how many fields the frame has.
+fn demote_across_yields(lw: Lowerer, n: i64) -> i64 {
+    let f = lw.f;
+    var dispatch: List<bool> = [];
+    for _b in f.blocks { dispatch.push(false); }
+    for b in lw.gen_dispatch { dispatch[b] = true; }
+    var field: List<i64> = [];
+    var def_block: List<i64> = [];
+    for _v in f.value_physics {
+        field.push(-1);
+        def_block.push(-1);
+    }
+    let d = FrameDemotion {
+        f: f, frame: lw.gen_frame, dispatch: dispatch, field: field, def_block: def_block,
+        next_field: frame_locals() + f.blocks[1].params.len,
+    };
+    slots_to_fields(d);
+    record_definitions(d);
+    let live = live_in(d, lw.gen_yielders, lw.gen_resumes);
+    for r in lw.gen_resumes { keep_live(d, live[r]); }
+    rewrite_kept(d);
+    return d.next_field;
+}
+
+/// Each stack slot becomes a frame field; its `load` and `store` read and
+/// write that field.
+fn slots_to_fields(d: FrameDemotion) {
+    let f = d.f;
+    for b in f.blocks {
+        if d.dispatch[b.id] { continue; }
+        for inst in b.insts {
+            if inst.opcode == op_stack_slot() {
+                d.field[inst.result] = d.next_field;
+                d.next_field = d.next_field + 1;
+            }
+        }
+    }
+    for b in f.blocks {
+        if d.dispatch[b.id] { continue; }
+        var kept: List<IrInst> = [];
+        for inst in b.insts {
+            let a = ir_args(f, inst);
+            let op = inst.opcode;
+            if op == op_stack_slot() { continue; }
+            if op == op_load() && d.field[a[0]] >= 0 {
+                kept.push(make_inst(f, inst.result, op_extract_field(), d.field[a[0]], inst.physics, [d.frame], inst.span_id));
+            } else if op == op_store() && d.field[a[0]] >= 0 {
+                kept.push(make_inst(f, ir_no_value(), op_insert_field(), d.field[a[0]], inst.physics, [d.frame, a[1]], inst.span_id));
+            } else {
+                for pos in value_positions(f, inst) {
+                    if d.field[a[pos]] >= 0 {
+                        let _ = seam("ir.lower_construct", f"a stack slot in generator `{f.name}` is used other than by `load` and `store`");
+                    }
+                }
+                kept.push(inst);
+            }
+        }
+        b.insts = kept;
+    }
+}
+
+fn record_definitions(d: FrameDemotion) {
+    for b in d.f.blocks {
+        for v in b.params { d.def_block[v] = b.id; }
+        for inst in b.insts {
+            if inst.result != ir_no_value() { d.def_block[inst.result] = b.id; }
+        }
+    }
+}
+
+/// Per block, whether each value is live on entry to it, where a `yield`
+/// also continues (on a later call) at the block it resumes at.
+fn live_in(d: FrameDemotion, yielders: List<u32>, resumes: List<u32>) -> List<List<bool>> {
+    let f = d.f;
+    let nv = f.value_physics.len;
+    var live: List<List<bool>> = [];
+    var succs: List<List<u32>> = [];
+    for b in f.blocks {
+        var row: List<bool> = [];
+        for _v in f.value_physics { row.push(false); }
+        for inst in b.insts {
+            let a = ir_args(f, inst);
+            for pos in value_positions(f, inst) {
+                if d.def_block[a[pos]] != b.id { row[a[pos]] = true; }
+            }
+        }
+        live.push(row);
+        succs.push(if b.insts.len > 0 { ir_successors(f, b.insts[b.insts.len - 1]) } else { [] });
+    }
+    var i = 0;
+    while i < yielders.len() {
+        succs[yielders[i]].push(resumes[i]);
+        i = i + 1;
+    }
+    var changed = true;
+    while changed {
+        changed = false;
+        var b = f.blocks.len - 1;
+        while b >= 0 {
+            let row = live[b];
+            for t in succs[b] {
+                let need = live[t];
+                var v = 0;
+                while v < nv {
+                    if need[v] && !row[v] && d.def_block[v] != b {
+                        row[v] = true;
+                        changed = true;
+                    }
+                    v = v + 1;
+                }
+            }
+            b = b - 1;
+        }
+    }
+    return live;
+}
+
+/// Gives each body value in `live` a frame field.
+fn keep_live(d: FrameDemotion, live: List<bool>) {
+    var v = 0;
+    while v < live.len() {
+        let at = d.def_block[v];
+        if live[v] && d.field[v] < 0 && at >= 0 && !d.dispatch[at] {
+            d.field[v] = d.next_field;
+            d.next_field = d.next_field + 1;
+        }
+        v = v + 1;
+    }
+}
+
+/// Writes each kept value to its field where it is defined, and reads it
+/// back at the top of each other block that uses it.
+fn rewrite_kept(d: FrameDemotion) {
+    for b in d.f.blocks {
+        if !d.dispatch[b.id] { rewrite_block(d, b); }
+    }
+}
+
+fn rewrite_block(d: FrameDemotion, b: IrBlock) {
+    let f = d.f;
+    let span = if b.insts.len > 0 { b.insts[0].span_id } else { 0 };
+    var out: List<IrInst> = [];
+    var body: List<IrInst> = [];
+    let reloaded = Map<str, i64>();
+    for v in b.params {
+        if d.field[v] >= 0 { out.push(make_inst(f, ir_no_value(), op_insert_field(), d.field[v], f.value_physics[v], [d.frame, v], span)); }
+    }
+    for inst in b.insts {
+        let a = ir_args(f, inst);
+        var moved = false;
+        for pos in value_positions(f, inst) {
+            let v = a[pos];
+            if d.field[v] >= 0 && d.def_block[v] != b.id {
+                if !reloaded.has(key(v)) {
+                    let r = ir_new_value(f, f.value_physics[v]);
+                    out.push(make_inst(f, r, op_extract_field(), d.field[v], f.value_physics[v], [d.frame], span));
+                    reloaded.set(key(v), r);
+                }
+                a[pos] = reloaded.get(key(v));
+                moved = true;
+            }
+        }
+        body.push(if moved { make_inst(f, inst.result, inst.opcode, inst.subop, inst.physics, a, inst.span_id) } else { inst });
+        if inst.result != ir_no_value() && d.field[inst.result] >= 0 {
+            body.push(make_inst(f, ir_no_value(), op_insert_field(), d.field[inst.result], inst.physics, [d.frame, inst.result], inst.span_id));
+        }
+    }
+    for x in body { out.push(x); }
+    b.insts = out;
+}

@@ -35,6 +35,7 @@ impl BytecodeCompiler {
         let clause = (node.flags as usize)
             .checked_sub(1)
             .and_then(|i| arena.for_clauses.get(i).copied());
+        let collects = self.for_collects(node_id);
         let Some((iter_id, then_id)) = clause else {
             return self.error(crate::codes::SYNTAX, "malformed `for` expression".to_string());
         };
@@ -67,6 +68,10 @@ impl BytecodeCompiler {
         let r_end = self.alloc_local_reg();
         let r_seq = self.alloc_local_reg();
         let r_enum = self.alloc_local_reg();
+        if collects {
+            let r_list = self.alloc_local_reg();
+            self.begin_collect(r_list);
+        }
 
         let mark = self.next_reg;
         if is_range {
@@ -141,7 +146,9 @@ impl BytecodeCompiler {
             self.patch_to_here(j);
         }
         self.next_reg = mark;
-        let ctx = self.loop_body(arena, NodeId(node.rhs));
+        let enumerates = matches!(walk, Walk::Enumerate | Walk::Either);
+        let release = enumerates.then_some(r_enum);
+        let ctx = self.loop_body_releasing(arena, NodeId(node.rhs), release);
         for j in ctx.continue_jumps {
             self.patch_to_here(j);
         }
@@ -150,6 +157,13 @@ impl BytecodeCompiler {
         self.emit_jump(start);
         for j in exits.into_iter().chain(ctx.break_jumps) {
             self.patch_to_here(j);
+        }
+        // An enumerator that has one is closed however the loop ends.
+        if enumerates {
+            self.emit_release(r_enum);
+        }
+        if collects {
+            return self.end_collect();
         }
         self.emit_null()
     }

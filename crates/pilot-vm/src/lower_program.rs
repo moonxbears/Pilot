@@ -114,6 +114,7 @@ impl BytecodeCompiler {
                     continue;
                 }
                 let mark = self.next_reg;
+                self.stmt_for = Self::item_for(arena, id);
                 last = if self.is_global_decl(arena, id) {
                     self.compile_global_let(arena, id)
                 } else {
@@ -124,6 +125,7 @@ impl BytecodeCompiler {
                 }
             }
         }
+        self.check_top_level_yield();
         let result = match entry {
             Some(ep) => {
                 // The program's own call into `main` has no source position.

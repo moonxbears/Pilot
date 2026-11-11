@@ -303,6 +303,15 @@ fn run_cond_br(fr: IrFrame, inst: IrInst) {
     fr.next_args = args;
 }
 
+/// `switch_table index, default, targets..`: goes to target `index`, or to
+/// the default when there is none.
+fn run_switch_table(fr: IrFrame, inst: IrInst) {
+    let a = ir_args(fr.f, inst);
+    let i = fr.vals[a[0]];
+    fr.next = if i >= 0 && i + 2 < a.len() { a[2 + i] } else { a[1] };
+    fr.next_args = [];
+}
+
 /// `unreachable [message]`: stops the program with `message`.
 fn run_unreachable(fr: IrFrame, inst: IrInst) {
     let a = ir_args(fr.f, inst);
@@ -351,6 +360,7 @@ pub fn interp_handlers() -> List<any> {
     hs[op_call_intrinsic()] = run_call_intrinsic;
     hs[op_jump()] = run_jump;
     hs[op_cond_br()] = run_cond_br;
+    hs[op_switch_table()] = run_switch_table;
     hs[op_return()] = run_return;
     hs[op_unreachable()] = run_unreachable;
     return hs;

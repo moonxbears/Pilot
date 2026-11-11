@@ -1,0 +1,3 @@
+runtime error: GEN003: a generator cannot be resumed while it runs
+err_gen_resume_self.pilot:6:17
+err_gen_resume_self.pilot:13:11

@@ -35,6 +35,7 @@ use selfhost.ir.lower_global.*;
 use selfhost.ir.lower_unit.*;
 use selfhost.ir.lower_setter.*;
 use selfhost.ir.lower_destructure.*;
+use selfhost.ir.lower_generator.*;
 
 /// The state of one lowering run.
 pub struct Lowerer : IObject {
@@ -126,6 +127,28 @@ pub struct Lowerer : IObject {
     /// its type (selfhost/ir/lower_setter.pilot), else `ir_no_value()`.
     pub setter_arg: u32;
     pub setter_arg_type: i64;
+    /// In a generator's resume function (selfhost/ir/lower_generator.pilot):
+    /// its frame and sent-value parameters, else `ir_no_value()`; the block
+    /// each `yield` resumes at and the block it left from; the blocks of the
+    /// dispatch on the frame's state.
+    pub gen_frame: u32;
+    pub gen_sent: u32;
+    pub gen_resumes: List<u32>;
+    pub gen_yielders: List<u32>;
+    pub gen_dispatch: List<u32>;
+    /// Generator function index -> its resume function's index; resume
+    /// function index -> how many fields its frame has.
+    pub resume_of: Map<str, i64>;
+    pub frame_sizes: Map<str, i64>;
+    /// The function indices lowered already.
+    pub lowered: Map<str, bool>;
+    /// Collecting `for` node -> the list it fills.
+    pub collect_lists: Map<str, i64>;
+    /// Per open loop, innermost last: the enumerator a `for` walks
+    /// (`ir_no_value()` for other loops) and its type, closed when the loop
+    /// is left.
+    pub loop_enums: List<u32>;
+    pub loop_enum_types: List<i64>;
 }
 
 /// Lowers `n` expecting type `t` (for target-typed variants).
@@ -244,6 +267,9 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
         global_named: global_names(p), global_of: Map<str, i64>(), global_decls: [],
         comptime_nodes: [], comptime_called: Map<str, bool>(), start_cur: 0, start_body: 0, globals_done: 0,
         setter_arg: ir_no_value(), setter_arg_type: ty_unknown(),
+        gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
+        resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, i64>(),
+        loop_enums: [], loop_enum_types: [],
     };
     // Function 0 is `<start>` (selfhost/ir/lower_global.pilot).
     lw.queue.push(-1);
@@ -289,6 +315,13 @@ pub fn begin_function(lw: Lowerer, f: IrFunction) {
     lw.self_type = ty_unknown();
     lw.cur_field = -1;
     lw.ret_type = ty_unknown();
+    lw.gen_frame = ir_no_value();
+    lw.gen_sent = ir_no_value();
+    lw.gen_resumes = [];
+    lw.gen_yielders = [];
+    lw.gen_dispatch = [];
+    lw.loop_enums = [];
+    lw.loop_enum_types = [];
 }
 
 /// The index of the function declared by `decl` for receiver type `self_t`
@@ -349,9 +382,16 @@ pub fn physics_of_type_node(lw: Lowerer, t: i64) -> IrTypePhysics {
 pub fn physics_of(lw: Lowerer, n: i64) -> IrTypePhysics => layout_of(lw.ls, type_of(lw.inf, n));
 
 pub fn lower_function(lw: Lowerer, idx: i64) {
+    if lw.lowered.has(key(idx)) { return; }
+    lw.lowered.set(key(idx), true);
     let s = lw.inf.p.s;
     let decl = lw.queue[idx];
     let f = lw.m.functions[idx];
+    // A generator function builds its frame, whose size its resume
+    // function decides, so that is lowered first.
+    let creator = is_generator_creator(lw, idx);
+    if creator { lower_function(lw, resume_index(lw, idx)); }
+    let resume = is_resume_function(lw, idx);
     begin_function(lw, f);
     if kind(s, decl) == nk_comptime() {
         lower_comptime_run(lw, decl, f);
@@ -359,6 +399,7 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
     }
     lw.ret_type = if annot(s, decl) >= 0 { prog_annot_type(lw.inf.p, annot(s, decl)) } else if lw.queue_body[idx] < 0 && kind(s, decl) != nk_lambda() { inferred_return(lw, decl) } else { ty_unknown() };
     f.ret_physics = if annot(s, decl) >= 0 { physics_of_type_node(lw, annot(s, decl)) } else { layout_of(lw.ls, lw.ret_type) };
+    if resume { begin_resume(lw, decl); }
     lw.cur = ir_add_block(f);
     if ty_is_named(lw.inf.p.tt, lw.queue_self[idx]) {
         // A method's receiver is its first parameter.
@@ -393,6 +434,10 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
         }
         pi = pi + 1;
     }
+    if creator {
+        lower_creator(lw, idx, decl);
+        return;
+    }
     let body = if accessor >= 0 { accessor } else if is_lambda { rhs(s, decl) } else { decl_body(s, decl) };
     if body < 0 {
         let _ = seam("ir.lower_construct", f"`{node_name(s, decl)}` has no body to lower");
@@ -400,6 +445,10 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
     }
     // `=> expr` is the returned value, so it is lowered against the return type.
     let v = if kind(s, body) == nk_block() { lower_expr(lw, body) } else { lower_hinted(lw, body, lw.ret_type) };
+    if resume {
+        finish_resume(lw, idx, decl);
+        return;
+    }
     if !ir_is_terminated(f, lw.cur) {
         // `=> expr` and a function with a declared return type return the
         // body's value; a block body without one returns nothing.
@@ -511,6 +560,7 @@ pub fn lower_expr(lw: Lowerer, n: i64) -> u32 {
     if k == nk_list() { return lower_list_literal(lw, n); }
     if k == nk_map() { return lower_map_literal(lw, n); }
     if k == nk_for() { return lower_for(lw, n); }
+    if k == nk_yield() { return lower_yield(lw, n); }
     if k == nk_block() { return lower_block(lw, n); }
     if k == nk_expr_stmt() { return lower_expr(lw, lhs(s, n)); }
     if k == nk_if() { return lower_if(lw, n); }
@@ -938,7 +988,9 @@ pub fn lower_fn_call(lw: Lowerer, callee: i64, pre: List<u32>, arg_nodes: List<i
             args.push(engine_arg(lw, lower_expr(lw, arg_nodes[i]), value_type(lw, arg_nodes[i]), arg_nodes[i]));
             i = i + 1;
         }
-        return emit(lw, op_call_intrinsic(), intrinsic_index(lw, str_value(s, arg_nodes[0])), phy, args, n);
+        let hook = str_value(s, arg_nodes[0]);
+        if some v = lower_generator_op(lw, hook, args, phy, n) { return v; }
+        return emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), phy, args, n);
     }
     let native = if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 { bound(lw, native_fn_hook(), [node_name(s, callee)]) } else { "" };
     if native == "" { return unsupported(lw, n); }
@@ -1037,11 +1089,20 @@ pub fn lower_while(lw: Lowerer, n: i64) -> u32 {
     return unit_value(lw, n);
 }
 
+/// A `for` in value position whose body yields is the list of what it
+/// yields (selfhost/ir/lower_generator.pilot); any other is the loop.
+pub fn lower_for(lw: Lowerer, n: i64) -> u32 {
+    guard some list = begin_collecting(lw, n) else { return lower_for_loop(lw, n); }
+    let _ = lower_for_loop(lw, n);
+    return list;
+}
+
 /// `for x in a..b` / `a..=b` counts in a stack slot; `for x in e` over any
 /// other value runs the enumerator protocol the syntax binds
-/// (`get_enumerator()`, then `move_next()` and `current`). `continue` goes
-/// to the step.
-pub fn lower_for(lw: Lowerer, n: i64) -> u32 {
+/// (`get_enumerator()`, then `move_next()` and `current`), and closes the
+/// enumerator when the loop is left (`close_loop_enumerator`). `continue`
+/// goes to the step.
+fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let clause = flags(s, n) - 1;
     if clause < 0 || clause >= s.for_clauses.len() || !lw.binding_of.has(key(n)) { return unsupported(lw, n); }
@@ -1096,7 +1157,7 @@ pub fn lower_for(lw: Lowerer, n: i64) -> u32 {
     if !runs_as_code(lw, it_t, s.enumeration[0]) && native_for(lw, it_t, "[]", native_method_hook()) != "" {
         return lower_for_indexed(lw, n, iterable, it_t, var_key, elem_phy, head, body, step, exit);
     }
-    if s.enumeration.len() != 3 { return unsupported(lw, n); }
+    if s.enumeration.len() < 3 { return unsupported(lw, n); }
     let it = lower_expr(lw, iterable);
     let en_t = enumerator_type(lw, it_t);
     if !ty_is_named(lw.inf.p.tt, en_t) { return unsupported(lw, n); }
@@ -1107,10 +1168,15 @@ pub fn lower_for(lw: Lowerer, n: i64) -> u32 {
     emit_void(lw, op_cond_br(), 0, [more, body, 0, exit, 0], n);
     switch_to(lw, body);
     lw.values.set(var_key, coerce(lw, property_read(lw, en, en_t, s.enumeration[2], n), elem_phy, n));
+    lw.loop_enums.push(en);
+    lw.loop_enum_types.push(en_t);
     lower_loop_body(lw, rhs(s, n), step, exit, n);
+    let _ = lw.loop_enums.pop();
+    let _ = lw.loop_enum_types.pop();
     switch_to(lw, step);
     jump_to(lw, head, [], n);
     switch_to(lw, exit);
+    close_loop_enumerator(lw, en, en_t, n);
     return unit_value(lw, n);
 }
 
@@ -1182,9 +1248,16 @@ pub fn lower_return(lw: Lowerer, n: i64) -> u32 {
         let v = lower_hinted(lw, lhs(s, n), lw.ret_type);
         args.push(coerce(lw, as_member_of(lw, v, value_type(lw, lhs(s, n)), lw.ret_type, n), lw.f.ret_physics, n));
     }
-    // Deferred statements run after the value is computed.
+    // The loops left close their enumerators; deferred statements run after
+    // the value is computed.
+    close_loop_enumerators(lw, n);
     run_defers_to(lw, 0);
     if ir_is_terminated(lw.f, lw.cur) { return ir_no_value(); }
+    if lw.gen_frame != ir_no_value() {
+        // A generator's body ending ends the generator.
+        finish_generator(lw, n);
+        return ir_no_value();
+    }
     emit_void(lw, op_return(), 0, args, n);
     return ir_no_value();
 }

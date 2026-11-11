@@ -77,6 +77,9 @@ fn run_tool(src: &LinkedSource, mut phy: PhysicsRegistry, host_ops: Option<HostO
     if let Some(fault) = vm.fault.take() {
         let at = fault.span.map_or_else(|| "<tool>".to_string(), |s| src.locate(s));
         eprintln!("{at}: internal error: {}", fault.message);
+        for call in &fault.trace {
+            eprintln!("  called from {}", src.locate(*call));
+        }
         std::process::exit(EXIT_INTERNAL);
     }
     (vm, out)

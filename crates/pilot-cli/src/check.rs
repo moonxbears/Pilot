@@ -133,10 +133,18 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
         })
         .collect();
     let pair = |a: i64, b: i64| ints([a, b]);
+    // `[owner, parameter, default type or -1]`.
     let type_params = arena
         .type_params
         .iter()
-        .map(|(owner, sym)| pair(i64::from(owner.0), i64::from(sym.0)))
+        .map(|&(owner, sym)| {
+            let default = arena
+                .type_param_defaults
+                .iter()
+                .find(|&&(o, s, _)| o == owner && s == sym)
+                .map_or(-1, |&(_, _, ty)| reference(ty.0));
+            ints([i64::from(owner.0), i64::from(sym.0), default])
+        })
         .collect();
     let bases = arena
         .base_types
@@ -201,7 +209,7 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
     let protocol = pilot_parser::bootstrap_tables()
         .enumerator()
         .map(|e| {
-            [&e.get_enumerator, &e.move_next, &e.current]
+            [&e.get_enumerator, &e.move_next, &e.current, &e.close]
                 .into_iter()
                 .map(|n| HostValue::Str(n.clone()))
                 .collect()
@@ -248,6 +256,16 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
         .map(|(body, param, guard)| ints(vec![i64::from(body.0), reference(param.0), reference(guard.0)]))
         .collect();
     let tables = pilot_parser::bootstrap_tables();
+    // `[type, frame field, constructor, each-item function]`, or empty.
+    let generator = tables
+        .generator()
+        .map(|g| {
+            [&g.type_name, &g.frame_field, &g.construct, &g.each_item]
+                .into_iter()
+                .map(|n| HostValue::Str(n.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
     let receiver_words = [&tables.receiver_ident, &tables.backing_ident, &tables.setter_value_ident]
         .into_iter()
         .map(|w| HostValue::Str(w.clone()))
@@ -270,6 +288,7 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
         HostValue::List(field_defaults),
         HostValue::List(arm_guards),
         HostValue::List(setters),
+        HostValue::List(generator),
     ])
 }
 

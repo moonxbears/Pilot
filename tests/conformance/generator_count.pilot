@@ -1,0 +1,36 @@
+// F5b: a generator function runs its body only as it is asked for items.
+// `for` walks it to the end; `.next()` gives one item, then `none` once the
+// body has finished, and `is_done` turns true.
+fn count(n: i64) -> Generator<i64> {
+    var i = 0;
+    while i < n {
+        yield i;
+        i = i + 1;
+    }
+}
+
+// The return type is inferred from the `yield` operands.
+fn squares_below(limit: i64) {
+    var k = 1;
+    while k * k < limit {
+        yield k * k;
+        k = k + 1;
+    }
+}
+
+fn main() {
+    for x in count(3) {
+        print(x);
+    }
+    let g = count(2);
+    print(g.is_done);
+    print(g.next() ?? -1);
+    print(g.next() ?? -1);
+    print(g.next() ?? -1);
+    print(g.is_done);
+    var total = 0;
+    for s in squares_below(30) {
+        total = total + s;
+    }
+    print(total);
+}

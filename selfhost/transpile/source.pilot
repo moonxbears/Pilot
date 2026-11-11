@@ -763,6 +763,23 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
         line(sf, d.if_close());
         return;
     }
+    if op == op_switch_table() {
+        // [index, default, target 0, target 1, ..]: the default, unless the
+        // index names a target.
+        let p = f.value_physics[a[0]];
+        go_to(sf, a[1], []);
+        var t = 2;
+        while t < a.len() {
+            let k = d.int_lit(f"{t - 2}", p) ?? unsupported(sf, "a table index");
+            line(sf, d.if_open(d.compare(0, use_of(sf, a[0]), k, p) ?? unsupported(sf, "a table index")));
+            sf.depth = sf.depth + 1;
+            go_to(sf, a[t], []);
+            sf.depth = sf.depth - 1;
+            line(sf, d.if_close());
+            t = t + 1;
+        }
+        return;
+    }
     if op == op_return() {
         let carried = a.len() > 0 && carries(sf, f.value_physics[a[0]]) && carries(sf, f.ret_physics);
         line(sf, d.ret(if carried { use_of(sf, a[0]) } else { "" }));

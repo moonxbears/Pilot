@@ -11,7 +11,7 @@ mod modules;
 mod pilot_impls;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
 use modules::EXCLUDE_RECEPTOR;
-pub use pilot_impls::{EnumeratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
+pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
 use pilot_impls::*;
 pub use attr_hooks::RegLayout;
 #[derive(Clone, Debug)]
@@ -149,6 +149,7 @@ pub struct ParserTables { modifiers: HashMap<String, ModAct>, param_modifiers: H
     /// Names bound to engine intrinsics, by kind (see `pilot_impls`).
     natives: HashMap<(NativeKind, String), String>,
     enumerator: Option<EnumeratorProtocol>,
+    generator: Option<GeneratorProtocol>,
     try_protocol: Option<TryProtocol>, }
 impl ParserTables {
     pub fn new() -> Self { Self::default() }
@@ -193,7 +194,8 @@ impl ParserTables {
                     HOOK_NATIVE_PROPERTY => self.bind_native(NativeKind::Property, s_arg(2), s_arg(3)),
                     HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(2), s_arg(3)),
                     HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(2), s_arg(3)),
-                    HOOK_ENUMERATOR => self.bind_enumerator(s_arg(2), s_arg(3), s_arg(4)),
+                    HOOK_ENUMERATOR => self.bind_enumerator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
+                    HOOK_GENERATOR => self.bind_generator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
                     HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3), s_arg(4)),
                     "bind_receiver_ident" => { let (w, b, v) = (s_arg(2), s_arg(3), s_arg(4)); if !w.is_empty() { self.receiver_ident = w; }
                         self.backing_ident = b; self.setter_value_ident = v; }
@@ -230,6 +232,7 @@ const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/syntax/module_ext.pilot",
     "stdlib/core/syntax/attribute.pilot",
     "stdlib/core/syntax/for.pilot",
+    "stdlib/core/generator.pilot",
     "stdlib/core/syntax/while.pilot",
     "stdlib/core/syntax/until.pilot",
     "stdlib/core/syntax/switch.pilot",
@@ -499,25 +502,34 @@ impl<'a> Parser<'a> {
         } }
     /// `<T : IA + IB, U, const N = 4>`: each parameter's name and the bound
     /// types after its `:`.
-    fn parse_generic_params(&mut self) -> Vec<(SymbolId, Vec<NodeId>)> { let mut out = Vec::new(); if !self.eat(TokenKind::Less) { return out; }
+    fn parse_generic_params(&mut self) -> Vec<(SymbolId, Vec<NodeId>, NodeId)> { let mut out = Vec::new(); if !self.eat(TokenKind::Less) { return out; }
         while !self.at_end() && !self.at(TokenKind::Greater) && !self.at(TokenKind::ShiftRight) {
                         if self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Const) { self.advance(); }
-            if self.is_word() || is_seed_kw(self.peek()) { out.push((self.intern_cur(), Vec::new())); } else { self.advance(); }
+            if self.is_word() || is_seed_kw(self.peek()) { out.push((self.intern_cur(), Vec::new(), NodeId::NONE)); } else { self.advance(); }
             if self.eat(TokenKind::Colon) {
                 let mut bounds = vec![self.parse_type()];
                 while self.eat(TokenKind::Plus) { bounds.push(self.parse_type()); }
                 if let Some(last) = out.last_mut() { last.1.extend(bounds.into_iter().filter(|b| b.is_some())); }
             }
-            if self.eat(TokenKind::Equal) { let _ = self.parse_expr_bp(20); }
+            // `<TSent = void>`: the type a use that leaves the parameter out gets.
+            if self.eat(TokenKind::Equal) {
+                let default = self.parse_type();
+                if let Some(last) = out.last_mut() {
+                    last.2 = default;
+                }
+            }
             if self.eat(TokenKind::Comma) {
                                 if self.at(TokenKind::Greater) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in generic parameters".into())); break; }
             } else { break; } }
         if !self.eat(TokenKind::Greater) && self.at(TokenKind::ShiftRight) { let p = self.cur(); self.tape.kinds[p] = TokenKind::Greater; }
         out }
     /// Records the generic parameters and their bounds on `owner`.
-    fn add_type_params(&mut self, owner: NodeId, tps: Vec<(SymbolId, Vec<NodeId>)>) {
-        for (tp, bounds) in tps {
+    fn add_type_params(&mut self, owner: NodeId, tps: Vec<(SymbolId, Vec<NodeId>, NodeId)>) {
+        for (tp, bounds, default) in tps {
             self.arena.type_params.push((owner, tp));
+            if default.is_some() {
+                self.arena.type_param_defaults.push((owner, tp, default));
+            }
             for b in bounds { self.arena.type_param_bounds.push((owner, tp, b)); }
         }
     }
@@ -1111,6 +1123,14 @@ impl<'a> Parser<'a> {
         }
         lhs }
     fn parse_prefix(&mut self) -> NodeId { let sp = self.span(); match self.peek() {
+            // `yield e` in an expression: its value is what the next
+            // `send(v)` passes in.
+            TokenKind::KwYield => {
+                self.advance();
+                let v = self.parse_expr();
+                let span = ByteSpan::new(sp.start, self.prev_span().end);
+                self.arena.alloc_node(NodeKind::YieldStmt, 0, span, v.0, 0)
+            }
             TokenKind::IntLit | TokenKind::FloatLit if self.tape.flag(self.cur()).contains(pilot_lexer::TokenFlags::IS_DIMENSIONAL) => {
                 let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::UnitLit, 1, sp, sym.0, 0) }
             TokenKind::IntLit => { let t = self.text().replace('_', ""); let v = t.parse::<i64>().or_else(|_| t.parse::<u64>().map(|u| u as i64)).unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }

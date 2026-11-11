@@ -262,13 +262,6 @@ fn test_semantic_values_first_error_and_loop_diagnostics() {
     let res = check_src("fn test_good_then() -> i64 { return for i in 0 .. 10 { if i == 5 { break i; } } then 0; }");
     assert!(!res.diagnostics.iter().any(|d| d.message.contains("LOOP003")), "Unexpected LOOP003 on valid then: {:?}", res.diagnostics);
 
-    // 6. LOOP004: Cannot yield inside statement-position for in non-generator function
-    let res = check_src("fn test_stmt_yield() -> i64 { for i in 0 .. 10 { yield i; } return 0; }");
-    assert!(res.diagnostics.iter().any(|d| d.message.contains("LOOP004")), "Expected LOOP004 on statement yield: {:?}", res.diagnostics);
-
-    // Valid: Expression-position for loop with yield
-    let res = check_src("fn test_expr_yield() { let items = for i in 0 .. 10 { yield i; }; }");
-    assert!(!res.diagnostics.iter().any(|d| d.message.contains("LOOP004")), "Unexpected LOOP004 on expression yield: {:?}", res.diagnostics);
 }
 
 #[test]

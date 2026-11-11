@@ -399,7 +399,12 @@ pub fn value_type(lw: Lowerer, n: i64) -> i64 {
     }
     if ty_is_unknown(lw.inf.p.tt, t) && kind(s, n) == nk_index() && kind(s, rhs(s, n)) == nk_binary()
         && (flags(s, rhs(s, n)) == op_range() || flags(s, rhs(s, n)) == op_range_inclusive()) { return value_type(lw, lhs(s, n)); }
-    if ty_is_unknown(lw.inf.p.tt, t) && kind(s, n) == nk_index() { return element_type(lw.inf.p, value_type(lw, lhs(s, n))); }
+    // An element the checker types only as the indexer's type parameter
+    // (indexing a global) is an element of the sequence's type.
+    if (ty_is_unknown(lw.inf.p.tt, t) || ty_is_param(lw.inf.p.tt, t)) && kind(s, n) == nk_index() {
+        let et = element_type(lw.inf.p, value_type(lw, lhs(s, n)));
+        if !ty_is_unknown(lw.inf.p.tt, et) || ty_is_unknown(lw.inf.p.tt, t) { return et; }
+    }
     if kind(s, n) == nk_ident() && binding_index(lw, n) < 0 && is_receiver_word(lw, n) { return lw.self_type; }
     if kind(s, n) == nk_ident() {
         // What the lowering learned about a binding is at least as precise

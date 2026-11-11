@@ -1,0 +1,18 @@
+// F5b: a generator held in a local is walked by `for` like any enumerable,
+// also when its function's return type is inferred from the `yield`s.
+fn evens(limit: i64) {
+    var i = 0;
+    while i < limit {
+        yield i;
+        i = i + 2;
+    }
+}
+
+fn main() {
+    let g = evens(7);
+    print(g.next() ?? -1);
+    for x in g {
+        print(x);
+    }
+    print(g.is_done);
+}

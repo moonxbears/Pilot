@@ -1,0 +1,2 @@
+error[GEN002]: `return` with a value inside a generator
+err_gen_return_value.pilot:5:5

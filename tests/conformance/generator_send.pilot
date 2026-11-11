@@ -1,0 +1,21 @@
+// F5b: `yield e` is an expression whose value is what the next `.send(v)`
+// passed. `.next()` starts the generator; a running total answers each
+// `.send(v)` with the total including `v`.
+fn running_total() -> Generator<i64, i64> {
+    var total = 0;
+    loop {
+        let v = yield total;
+        total = total + v;
+    }
+}
+
+fn main() {
+    let g = running_total();
+    print(g.next() ?? -1);
+    print(g.send(5) ?? -1);
+    print(g.send(10) ?? -1);
+    print(g.send(-3) ?? -1);
+    g.close();
+    print(g.is_done);
+    print(g.send(1) ?? -1);
+}

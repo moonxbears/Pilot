@@ -82,6 +82,9 @@ pub struct Program {
     pub attrs: NodeLists;
     /// Owner node -> generic parameter symbols.
     pub tparams: NodeLists;
+    /// Owner node -> the default type node of each generic parameter, in
+    /// the same order (-1 for a parameter without one).
+    pub tparam_defaults: NodeLists;
     /// Slot key -> declaration.
     pub slots: Map<str, i64>;
     /// Type name -> `[Bits]` register class and width keys. A type's
@@ -98,6 +101,8 @@ pub struct Program {
     pub built: List<any>;
     /// Receptor slot -> the name its table gives it (`prog_slot_name`).
     pub slot_names: Map<str, str>;
+    /// Node lists computed once on demand (selfhost/check/generators.pilot).
+    pub gen_memo: Map<str, List<i64>>;
 }
 
 fn key(n: i64) -> str => f"{n}";
@@ -160,6 +165,7 @@ pub fn prog_new(s: Snap) -> Program {
         bases: nl_new(),
         attrs: nl_new(),
         tparams: nl_new(),
+        tparam_defaults: nl_new(),
         slots: Map<str, i64>(),
         bits_class: Map<str, str>(),
         bits_width: Map<str, str>(),
@@ -168,6 +174,7 @@ pub fn prog_new(s: Snap) -> Program {
         built_index: Map<str, i64>(),
         built: [],
         slot_names: Map<str, str>(),
+        gen_memo: Map<str, List<i64>>(),
     };
     var r = 0;
     while r < s.attrs.len() {
@@ -175,7 +182,10 @@ pub fn prog_new(s: Snap) -> Program {
         nl_add(p.attrs, key(row[0]), r);
         r = r + 1;
     }
-    for tp in s.type_params { nl_add(p.tparams, key(tp[0]), tp[1]); }
+    for tp in s.type_params {
+        nl_add(p.tparams, key(tp[0]), tp[1]);
+        nl_add(p.tparam_defaults, key(tp[0]), if tp.len() > 2 { tp[2] } else { -1 });
+    }
     i = 0;
     while i < s.count {
         let k = kind(s, i);
@@ -230,6 +240,18 @@ pub fn prog_tparam_names(p: Program, owner: i64) -> List<str> {
     var out: List<str> = [];
     for sym in nl_get(p.tparams, key(owner)) { out.push(sym_text(p.s, sym)); }
     return out;
+}
+
+/// The default type nodes of the generic parameters of the type named
+/// `name` (-1 for a parameter without one), from the declaration that
+/// lists them.
+pub fn prog_tparam_defaults(p: Program, name: str) -> List<i64> {
+    for d in nl_get(p.type_decls, name) {
+        let defaults = nl_get(p.tparam_defaults, key(d));
+        if defaults.len() > 0 { return defaults; }
+    }
+    let empty: List<i64> = [];
+    return empty;
 }
 
 /// The type of the declaration bound to `slot`, with no type arguments,
@@ -347,6 +369,14 @@ pub fn prog_annot_type(p: Program, n: i64) -> i64 {
             let is_fn = d < 0 && name == prog_slot_name(p, fn_slot());
             if d >= 0 {
                 for a in children(p.s, n) { args.push(prog_annot_type(p, a)); }
+                // Parameters left out take their defaults (`Generator<i64>`
+                // is `Generator<i64, void>`).
+                if args.len() > 0 {
+                    let defaults = prog_tparam_defaults(p, name);
+                    while args.len() < defaults.len() && defaults[args.len()] >= 0 {
+                        args.push(prog_annot_type(p, defaults[args.len()]));
+                    }
+                }
             } else if is_fn {
                 // `(A, B) => R` gives the parameters as one tuple type
                 // (`()` for none); each of its items is a parameter.

@@ -1,0 +1,36 @@
+// F5b: leaving a `for` over a generator early, or calling `.close()`, ends
+// the generator and runs the `defer`s pending in its frame. A generator that
+// never started has none pending; closing twice does nothing more.
+fn naturals() -> Generator<i64> {
+    defer { print("cleanup"); }
+    var i = 0;
+    loop {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn once() -> Generator<i64> {
+    defer { print("once done"); }
+    yield 1;
+}
+
+fn main() {
+    for x in naturals() {
+        if x == 2 { break; }
+        print(x);
+    }
+    print("after break");
+    let g = naturals();
+    print(g.next() ?? -1);
+    g.close();
+    g.close();
+    print(g.is_done);
+    let fresh = naturals();
+    fresh.close();
+    print(fresh.is_done);
+    for y in once() {
+        print(y);
+    }
+    print("end");
+}

@@ -96,6 +96,7 @@ impl BytecodeCompiler {
             NodeKind::ComptimeExpr => self.compile_comptime(arena, node_id),
             NodeKind::CatchRecoveryExpr => self.compile_catch_recovery(arena, node.lhs, node.rhs),
             NodeKind::ReturnStmt => self.compile_return(arena, node.lhs),
+            NodeKind::YieldStmt => self.compile_yield(arena, node_id),
             NodeKind::ExprStmt => self.compile_node(arena, NodeId(node.lhs)),
             NodeKind::MapExpr => self.compile_map_literal(arena, node.lhs, node.rhs),
             NodeKind::ListExpr => self.compile_list_literal(arena, node.lhs, node.rhs),

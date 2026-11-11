@@ -30,9 +30,11 @@ mod lower_switch;
 mod lower_try;
 mod lower_unit;
 mod lower_variant;
+mod lower_yield;
 mod ops;
 pub mod pilc;
 pub mod vm;
+mod vm_gen;
 
 pub use instruction::{Instruction, Opcode};
 pub use pilc::{CompileDiagnostic, PilcBinary, PILC_V3_MAGIC, PILC_V3_VERSION};
@@ -80,6 +82,17 @@ struct LoopCtx {
     /// Number of `defer` scopes open when the loop or switch began; leaving
     /// it runs the deferred statements of the scopes above.
     defer_depth: usize,
+    /// The local holding the enumerator of a `for` that walks one; leaving
+    /// the loop early closes it (`lower_yield`).
+    release: Option<u8>,
+}
+
+/// Who a `yield` hands its value to (`lower_yield`).
+#[derive(Clone, Copy)]
+enum YieldOwner {
+    /// A `for` in value position, collecting into the list in this local.
+    /// Its `bool` records that some `yield` did.
+    Collect(u8, bool),
 }
 
 /// A lambda being compiled: what its enclosing scope can see, which of those
@@ -116,6 +129,8 @@ struct FnState {
     loops: Vec<LoopCtx>,
     tries: Vec<TryCtx>,
     block_scopes: Vec<BlockScope>,
+    yield_owners: Vec<YieldOwner>,
+    gen_body: Option<ByteSpan>,
 }
 
 /// The bindings visible where a block starts. A `let` in the block that
@@ -169,6 +184,15 @@ pub struct BytecodeCompiler {
     captures: Vec<CaptureCtx>,
     /// Deferred statements of each open block, innermost last.
     defers: Vec<Vec<NodeId>>,
+    /// The collecting `for`s around the code being compiled, innermost last;
+    /// a `yield` outside all of them makes the function a generator.
+    yield_owners: Vec<YieldOwner>,
+    /// Where the function being compiled first yields, when it does: it is
+    /// a generator.
+    gen_body: Option<ByteSpan>,
+    /// The `for` about to be compiled as a block item (statement position),
+    /// which collects nothing.
+    stmt_for: Option<NodeId>,
     /// Declared structs: fields with defaults, and whether `self(..)` exists.
     structs: HashMap<String, lower_struct::StructInfo>,
     /// Arity of every top-level function, so a function can be used as a
@@ -504,6 +528,8 @@ impl BytecodeCompiler {
             loops: std::mem::take(&mut self.loops),
             tries: std::mem::take(&mut self.tries),
             block_scopes: std::mem::take(&mut self.block_scopes),
+            yield_owners: std::mem::take(&mut self.yield_owners),
+            gen_body: std::mem::take(&mut self.gen_body),
         }
     }
 
@@ -520,6 +546,8 @@ impl BytecodeCompiler {
         self.loops = s.loops;
         self.tries = s.tries;
         self.block_scopes = s.block_scopes;
+        self.yield_owners = s.yield_owners;
+        self.gen_body = s.gen_body;
     }
 
     /// Compiles `id` with `hint` as the expected type.
@@ -548,6 +576,8 @@ impl BytecodeCompiler {
         self.tries.clear();
         self.block_scopes.clear();
         self.defers.clear();
+        self.yield_owners.clear();
+        self.gen_body = None;
         self.next_local_reg = FIRST_LOCAL_REG;
         self.next_reg = FIRST_TEMP_REG;
     }
