@@ -18,6 +18,7 @@ fn workspace_root() -> PathBuf {
 }
 
 #[test]
+#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
 fn conformance_corpus_passes_under_pilot_test() {
     let out = Command::new(env!("CARGO_BIN_EXE_pilot"))
         .arg("test")

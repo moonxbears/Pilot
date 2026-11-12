@@ -3,7 +3,8 @@
 // `re` accepts them, so the expected codes and offsets come from the module's
 // specification (stdlib/std/text/regex.pilot header): the offset is the
 // construct's first byte. A refused pattern reaches the caller as a value,
-// and `?` passes it on.
+// and `?` passes it on. `(?i)a` is an inline flag, accepted since flags
+// were added (it matches, as in Python).
 use std.text.regex;
 
 fn try_pattern(p: str) -> res<bool, RegexError> {

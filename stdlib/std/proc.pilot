@@ -4,6 +4,9 @@
 // ==============================================================================
 pub pkg std.proc;
 
+use Pilot.Core.File;
+use std.text;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 [Layout(c_abi)]
@@ -55,6 +58,103 @@ pub struct ProcessHandle : IObject {
 /// be started stops the caller with an intrinsic failure.
 pub fn spawn(program: str, args: List<str>, input: str) -> ProcessHandle {
     return ProcessHandle { id: __engine("proc_spawn", program, args, input) };
+}
+
+/// One process to start: the program, its arguments and its standard input.
+pub struct ProcessJob : IObject {
+    pub program: str;
+    pub args:    List<str>;
+    pub input:   str;
+}
+
+/// The job that runs `program` with `args` and `input`.
+pub fn job(program: str, args: List<str>, input: str) -> ProcessJob => ProcessJob { program: program, args: args, input: input };
+
+/// Starts the job `start` like `spawn`.
+pub fn spawn_job(ref start: ProcessJob) -> ProcessHandle => ProcessHandle { id: __engine("proc_spawn", start.program, start.args, start.input) };
+
+/// Waits until one of `running` has finished and returns its position in
+/// `running`; that handle's `wait` then returns at once.
+pub fn first_finished(ref running: List<ProcessHandle>) -> i64 {
+    var ids: List<i64> = [];
+    for h in running { ids.push(h.id); }
+    let done: i64 = __engine("proc_first_done", ids);
+    var k = 0;
+    while running[k].id != done { k = k + 1; }
+    return k;
+}
+
+/// Memory to keep free for each job started since the last one finished:
+/// a new job can grow to about this much (bytes) before its share shows in
+/// the memory the OS reports as available.
+pub fn job_memory_reserve() -> i64 => 2 * 1024 * 1024 * 1024;
+
+/// Whether another job may start now, with `running` jobs running, `fresh`
+/// of them started since the last one finished: always when none is running,
+/// else when the machine has a CPU and, if the OS reports its available
+/// memory, `job_memory_reserve()` for the new job and each fresh one.
+fn may_start(running: i64, fresh: i64, cpus: i64) -> bool {
+    if running == 0 { return true; }
+    if running >= cpus { return false; }
+    guard some free = memory_available() else { return true; };
+    return free >= job_memory_reserve() * (fresh + 1);
+}
+
+/// Runs every job in `jobs`, at most as many at once as the machine has
+/// CPUs, starting the next as soon as any one finishes, so one slow job never
+/// holds the others back. A job starts only while the machine has memory
+/// for it (`may_start`), so jobs that each need a lot of memory are not
+/// stacked until the machine runs out; one job always runs. Returns what
+/// each left, in the order of `jobs`.
+pub fn run_all(ref jobs: List<ProcessJob>) -> List<ProcessOutput> {
+    let cpus = if cpu_count() > 1 { cpu_count() } else { 1 };
+    var running: List<ProcessHandle> = [];
+    var slots: List<i64> = [];
+    var started = 0;
+    var fresh = 0;
+    // What each finished job left, and which job it was.
+    var done: List<ProcessOutput> = [];
+    var done_slots: List<i64> = [];
+    while started < jobs.len() || running.len() > 0 {
+        while started < jobs.len() && may_start(running.len() as i64, fresh, cpus) {
+            running.push(spawn_job(jobs[started]));
+            slots.push(started);
+            started = started + 1;
+            fresh = fresh + 1;
+        }
+        let k = first_finished(running);
+        done.push(running[k].wait());
+        done_slots.push(slots[k]);
+        running.remove_at(k);
+        slots.remove_at(k);
+        fresh = 0;
+    }
+    var out: List<ProcessOutput> = [];
+    for i in 0 .. jobs.len() {
+        var j = 0;
+        while done_slots[j] != i { j = j + 1; }
+        out.push(done[j]);
+    }
+    return out;
+}
+
+/// The memory (bytes) the OS can give new processes without swapping, or
+/// `none` when it does not say.
+[StandIn("proc.memory_available", "each OS's own report of available memory (Linux /proc/meminfo, macOS host_statistics64, Windows GlobalMemoryStatusEx)", "only Linux's /proc/meminfo is read; on other OSes it is none, and run_all is limited by the CPU count alone", "F6")]
+pub fn memory_available() -> i64? {
+    let path = "/proc/meminfo";
+    if !File.exists(path) { return none; }
+    let info = File.read_text(path);
+    let key = "MemAvailable:";
+    let at = info.find(key, 0);
+    if at < 0 { return none; }
+    var end = info.find("\n", at);
+    if end < 0 { end = info.len() as i64; }
+    var field = info.slice((at + key.len() as i64) as usize, end as usize).trim();
+    if !field.ends_with(" kB") { return none; }
+    field = field.slice(0, field.len() - 3).trim();
+    guard some kb = text.parse_i64(field) else { return none; };
+    return kb * 1024;
 }
 
 /// How many processes the machine runs at once (its logical CPUs).

@@ -68,6 +68,8 @@ pub fn default_command_registry() -> CommandRegistry {
     spec_command_add_flag(cmd_test, spec_new_flag("filter", "", 3, "", "", "", false, false, "Filter test cases by name substring"));
     spec_command_add_flag(cmd_test, spec_new_flag("ir", "", 0, "false", "", "", false, false, "Run the conformance cases on the PilIR interpreter (`pilot ir run`) and check their text round trip"));
     spec_command_add_flag(cmd_test, spec_new_flag("emit", "", 3, "", "", "", false, false, "Run the conformance cases through `pilot emit <lang>` and the host's toolchain for that language"));
+    spec_command_add_flag(cmd_test, spec_new_flag("changed", "", 0, "false", "", "", false, false, "Run only the cases the files git reports changed can reach (selfhost/cli/test_changed.pilot)"));
+    spec_command_add_flag(cmd_test, spec_new_flag("since", "", 3, "HEAD", "", "", false, false, "With `--changed`: the revision to compare with (`HEAD` by default; `A..B` compares two commits)"));
     spec_command_add_flag(cmd_test, spec_new_flag("live-allocations", "", 0, "false", "", "", false, false, "With `--emit c`: build each case to count its heap objects and fail one that ends with any still allocated"));
     let _ = spec_registry_register(reg, cmd_test);
 

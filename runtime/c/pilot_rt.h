@@ -1079,6 +1079,30 @@ static inline pilot_val pilot_list_push(pilot_val l, pilot_val x) {
     pilot_v_dup(l);
     return l;
 }
+static inline int pilot_v_cmp_entry_key(const void *a, const void *b) {
+    const pilot_v_map_entry *x = *(const pilot_v_map_entry *const *)a;
+    const pilot_v_map_entry *y = *(const pilot_v_map_entry *const *)b;
+    return pilot_v_cmp_text(&x->key, &y->key);
+}
+/* `map_values(m)`: a new list of the map's values in the order of their
+   keys (the order a map is shown in); the list holds its own references. */
+static inline pilot_val pilot_map_values(pilot_val o) {
+    pilot_v_map *m = pilot_v_need_map(o, "read", PILOT_V_NULL);
+    pilot_v_map_entry **es = (pilot_v_map_entry **)pilot_alloc(sizeof(pilot_v_map_entry *) * (size_t)(m->count ? m->count : 1));
+    int64_t n = 0;
+    for (int64_t i = 0; i < m->cap; i++) {
+        if (m->slots[i].state == 1) es[n++] = &m->slots[i];
+    }
+    qsort(es, (size_t)n, sizeof(pilot_v_map_entry *), pilot_v_cmp_entry_key);
+    pilot_val out = pilot_v_list_new(n ? n : 1);
+    pilot_v_list *p = out.as.l;
+    for (int64_t i = 0; i < n; i++) {
+        pilot_v_dup(es[i]->val);
+        p->items[p->len++] = es[i]->val;
+    }
+    free(es);
+    return out;
+}
 /* The popped element: the list's reference passes to the caller. */
 static inline pilot_val pilot_list_pop(pilot_val l) {
     pilot_v_list *p = pilot_v_need_list(l, "pop from");
@@ -1150,6 +1174,25 @@ static inline pilot_val pilot_str_slice(pilot_val v, pilot_val a, pilot_val b) {
     if (y < x) y = x;
     /* A copy: a string's bytes start its buffer. */
     return pilot_v_str(v.as.s + x, (size_t)(y - x));
+}
+/* `h.find(n)` / `h.find(n, start)`: the byte offset of the first `n` in `h`
+   at or after `start` (moved forward to a character boundary), or -1. */
+static inline pilot_val pilot_str_find(pilot_val h, pilot_val n, pilot_val start) {
+    if (h.tag != PILOT_V_STR || n.tag != PILOT_V_STR) pilot_v_type_error("find", h, n);
+    int64_t from = pilot_v_is_num(start) ? pilot_v_as_i64(start) : 0;
+    if (from < 0) return pilot_v_int(-1);
+    int64_t len = (int64_t)pilot_v_len(h), m = (int64_t)pilot_v_len(n);
+    int64_t u = pilot_v_boundary(h, from);
+    if (m == 0) return pilot_v_int(u);
+    const char *hs = h.as.s, *ns = n.as.s;
+    while (u + m <= len) {
+        const char *hit = memchr(hs + u, ns[0], (size_t)(len - m + 1 - u));
+        if (!hit) break;
+        int64_t at = (int64_t)(hit - hs);
+        if (memcmp(hit, ns, (size_t)m) == 0) return pilot_v_int(at);
+        u = at + 1;
+    }
+    return pilot_v_int(-1);
 }
 static inline pilot_val pilot_str_byte_at(pilot_val s, pilot_val k) {
     int64_t i = pilot_v_as_i64(k);

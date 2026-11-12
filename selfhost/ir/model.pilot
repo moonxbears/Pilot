@@ -381,19 +381,32 @@ pub struct IrModule : IObject {
     /// `global_addr` subops.
     pub globals:    List<IrGlobal>;
     /// The record layouts, one entry per struct layout the program builds.
+    /// Add them with `ir_add_record`, which keeps `record_slot` current.
     pub records:    List<IrRecord>;
+    /// Layout id -> 1 + the position of its record in `records`, or 0 (so
+    /// `ir_record_of` does not scan every record).
+    pub record_slot: List<i64>;
 }
 
 pub fn ir_module_new() -> IrModule {
-    return IrModule { layouts: [], functions: [], ints: [], floats: [], strings: [], intrinsics: [], globals: [], records: [] };
+    return IrModule { layouts: [], functions: [], ints: [], floats: [], strings: [], intrinsics: [], globals: [], records: [], record_slot: [] };
 }
 
 /// The fields of record layout `layout`, or none when it is not a record.
 pub fn ir_record_of(m: IrModule, layout: u32) -> IrRecord? {
-    for r in m.records {
-        if r.layout == layout { return r; }
-    }
-    return none;
+    let at = layout as i64;
+    if at >= m.record_slot.len() { return none; }
+    let slot = m.record_slot[at];
+    if slot == 0 { return none; }
+    return m.records[slot - 1];
+}
+
+/// Adds record `rec` to `m`; a layout's first record is the one `ir_record_of` finds.
+pub fn ir_add_record(m: IrModule, rec: IrRecord) {
+    m.records.push(rec);
+    let at = rec.layout as i64;
+    while m.record_slot.len() <= at { m.record_slot.push(0); }
+    if m.record_slot[at] == 0 { m.record_slot[at] = m.records.len(); }
 }
 
 pub fn ir_function_new(name: str, ret: IrTypePhysics) -> IrFunction {

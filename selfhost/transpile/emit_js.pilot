@@ -138,6 +138,9 @@ pub struct JsDialect : ISourceDialect {
         "        return null;",
         "    }",
         "}",
+        "function pilot_map_values(m) {",
+        "    return [...m.entries()].sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0)).map((e) => e[1]);",
+        "}",
         "function pilot_eq(a, b) {",
         "    if (Array.isArray(a) && Array.isArray(b)) {",
         "        return a === b || (a.length === b.length && a.every((x, i) => pilot_eq(x, b[i])));",
@@ -152,6 +155,13 @@ pub struct JsDialect : ISourceDialect {
         "    let u = Math.min(Math.max(Number(at), 0), b.length);",
         "    while (u < b.length && (b[u] & 0xC0) === 0x80) u++;",
         "    return u;",
+        "}",
+        "function pilot_str_find(h, n, start = 0n) {",
+        "    if (start < 0n) return -1n;",
+        "    const raw = Buffer.from(h, \"utf8\");",
+        "    const from = pilot_boundary(raw, start);",
+        "    if (from > raw.length) return -1n;",
+        "    return BigInt(raw.indexOf(Buffer.from(n, \"utf8\"), from));",
         "}",
         "function pilot_str_slice(v, a, b) {",
         "    if (Array.isArray(v)) {",
@@ -377,7 +387,7 @@ pub struct JsDialect : ISourceDialect {
         if name == "to_str" { return f"pilot_show({args[0]})"; }
         if name == "list_get" { return f"pilot_map_get({joined(args)})"; }
         if name == "list_set" { return f"pilot_map_set({joined(args)})"; }
-        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_byte_at", "str_from_bytes", "list_extend", "list_remove_at", "stdin_read_line"] {
+        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line"] {
             if name == helper { return f"pilot_{helper}({joined(args)})"; }
         }
         return none;

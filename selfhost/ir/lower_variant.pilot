@@ -107,14 +107,21 @@ pub fn named_variant(lw: Lowerer, name: str, hint: i64) -> VariantRef? {
     }
     if some v = payload_variant(lw, hint, parts[1]) { return v; }
     var found: List<VariantRef> = [];
-    var d = 0;
-    while d < s.count {
-        if kind(s, d) == nk_adt() {
-            if some v = variant_in(s, d, enum_type(lw, d), parts[1]) { found.push(v); }
-        }
-        d = d + 1;
+    for d in lw.adt_decls {
+        if some v = variant_in(s, d, enum_type(lw, d), parts[1]) { found.push(v); }
     }
     return if found.len() == 1 { found[0] } else { none };
+}
+
+/// Every enum declaration of the program, in node order.
+pub fn adt_nodes(s: Snap) -> List<i64> {
+    var out: List<i64> = [];
+    var d = 0;
+    while d < s.count {
+        if kind(s, d) == nk_adt() { out.push(d); }
+        d = d + 1;
+    }
+    return out;
 }
 
 /// The payload variant callee `c` names (`Shape.Circle`, `Shape::Circle`,

@@ -11,7 +11,7 @@
 //! | `cli_check` | path | diagnostics (`run::Diag::to_host`) |
 //! | `cli_run` | path, args, tail, checker files, declaration files, tail links | `[exit_code, diagnostics]`; not run when there are diagnostics; the files `tail links` names are linked before the tail |
 //! | `cli_analyze` | path | the self-hosted analyzer's diagnostics for the file |
-//! | `cli_typecheck` | path, checker files, declaration files | the type checker's diagnostics in the program's own files (`check.rs`) |
+//! | `cli_typecheck` | path, checker files, declaration files, keep plan | the type checker's diagnostics in the program's own files (`check.rs`); with keep plan set, the run plan is made in the same pass and kept for the `cli_run` that follows |
 //! | `cli_program_tool` | path, tool files, declaration files, entry call | the tool's exit code; the tool reads the program's snapshot (`check::run_on_program`) |
 //! | `cli_program_eval` | path, tool files, declaration files, entry call | the value the entry call returns (`check::eval_on_program`), or `none` when the program does not link |
 //! | `cli_text_tool` | path, tool files, entry call | the tool's exit code; the tool reads the file's text through `tool_input_text` (`tool::run_on_text`) |
@@ -59,7 +59,10 @@ pub fn cli_host_ops() -> HostOpHandler {
                 }
             }
             "cli_analyze" => diags(&run::analyze(&text(0))),
-            "cli_typecheck" => diags(&check::check(&text(0), &texts(1), &texts(2))),
+            "cli_typecheck" => {
+                let keep_plan = matches!(args.get(3), Some(HostValue::Bool(true)));
+                diags(&check::check(&text(0), &texts(1), &texts(2), keep_plan))
+            }
             "cli_program_tool" => {
                 HostValue::Int(i64::from(check::run_on_program(&text(0), &texts(1), &texts(2), &text(3))))
             }

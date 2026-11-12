@@ -49,8 +49,10 @@ pub fn host_analyze(path: str) -> List<HostDiag> => host_diags(__engine("cli_ana
 
 /// The type checker's diagnostics for the program at `path`, in the
 /// program's own files. `checker` lists the checker's sources in link order.
-pub fn host_typecheck(path: str, checker: List<str>, decls: List<str>) -> List<HostDiag> =>
-    host_diags(__engine("cli_typecheck", path, checker, decls));
+/// With `for_run`, the checker also makes the program's run plan in the same
+/// pass, for the `host_run` that follows.
+pub fn host_typecheck(path: str, checker: List<str>, decls: List<str>, for_run: bool) -> List<HostDiag> =>
+    host_diags(__engine("cli_typecheck", path, checker, decls, for_run));
 
 /// Runs the tool made of `files`, calling `entry`, over the program at
 /// `path` linked with `decls`; the tool reads the program the way the type

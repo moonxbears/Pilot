@@ -32,6 +32,7 @@ use selfhost.ir.verify.*;
 use selfhost.ir.passes.*;
 use selfhost.ir.interp.*;
 use selfhost.ir.main.*;
+use std.text;
 
 /// How one language spells PilIR.
 pub interface ISourceDialect {
@@ -222,6 +223,8 @@ pub struct SourceFn : IObject {
     pub cell: List<str>;
     /// Value id -> whether a string literal is written for it.
     pub literal: List<bool>;
+    /// Value id -> the string pool entry of its literal, -1 for other values.
+    pub literal_at: List<i64>;
     pub depth: i64;
     /// Value id -> the layout the IR gave it (SourceUnit.declared).
     pub declared: List<u32>;
@@ -292,9 +295,8 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
     let start = m.functions[0];
     let entry = if starts_anything(start) { u.fn_names[0] } else { "" };
     for line in d.module_close(entry, start.ret_physics.layout_id != 0) { u.out.push(line); }
-    var text = "";
-    for line in u.out { text = text + line + "\n"; }
-    return text;
+    u.out.push("");
+    return text.join_text(u.out, "\n");
 }
 
 /// Whether any function calls through a function value.
@@ -416,12 +418,14 @@ fn emit_function(u: SourceUnit, f: IrFunction, name: str, declared: List<u32>) {
     var inline: List<str> = [];
     var cell: List<str> = [];
     var literal: List<bool> = [];
+    var literal_at: List<i64> = [];
     for _p in f.value_physics {
         inline.push("");
         cell.push("");
         literal.push(false);
+        literal_at.push(-1);
     }
-    let sf = SourceFn { u: u, f: f, inline: inline, cell: cell, literal: literal, depth: 0, declared: declared };
+    let sf = SourceFn { u: u, f: f, inline: inline, cell: cell, literal: literal, literal_at: literal_at, depth: 0, declared: declared };
     type_untyped_results(f);
     let params = param_names(f);
     let pphys = param_phys(f);
@@ -487,9 +491,10 @@ fn widen_mixed_kinds(m: IrModule) {
     while changed {
         changed = false;
         for f in m.functions {
+            let slots = defined_by(f, op_stack_slot());
             for b in f.blocks {
                 for inst in b.insts {
-                    if widen_inst(m, f, inst) { changed = true; }
+                    if widen_inst(m, f, slots, inst) { changed = true; }
                 }
             }
         }
@@ -497,7 +502,7 @@ fn widen_mixed_kinds(m: IrModule) {
 }
 
 /// One instruction's part of `widen_mixed_kinds`.
-fn widen_inst(m: IrModule, f: IrFunction, inst: IrInst) -> bool {
+fn widen_inst(m: IrModule, f: IrFunction, slots: List<i64>, inst: IrInst) -> bool {
     let a = ir_args(f, inst);
     let op = inst.opcode;
     var changed = false;
@@ -522,9 +527,9 @@ fn widen_inst(m: IrModule, f: IrFunction, inst: IrInst) -> bool {
             i = i + 1;
         }
     } else if op == op_store() {
-        if is_slot(f, a[0]) && widen_to(f, a[0], f.value_physics[a[1]]) { changed = true; }
+        if slots[a[0]] >= 0 && widen_to(f, a[0], f.value_physics[a[1]]) { changed = true; }
     } else if op == op_load() {
-        if is_slot(f, a[0]) && widen_to(f, inst.result, f.value_physics[a[0]]) { changed = true; }
+        if slots[a[0]] >= 0 && widen_to(f, inst.result, f.value_physics[a[0]]) { changed = true; }
     } else if op == op_return() {
         if a.len() > 0 && !is_scalar(f.value_physics[a[0]]) && is_scalar(f.ret_physics) {
             let src = f.value_physics[a[0]];
@@ -554,14 +559,18 @@ fn widen_inst(m: IrModule, f: IrFunction, inst: IrInst) -> bool {
     return changed;
 }
 
-/// Whether value `v` of `f` is a stack slot.
-fn is_slot(f: IrFunction, v: u32) -> bool {
+/// Value id -> the sub-operation of the instruction defining it when that
+/// instruction is an `opcode`, else -1: one walk of `f`, so a lookup per
+/// instruction does not walk it again.
+fn defined_by(f: IrFunction, opcode: u16) -> List<i64> {
+    var out: List<i64> = [];
+    for _p in f.value_physics { out.push(-1); }
     for b in f.blocks {
         for inst in b.insts {
-            if inst.result == v { return inst.opcode == op_stack_slot(); }
+            if inst.opcode == opcode && inst.result != ir_no_value() { out[inst.result] = inst.subop + 0; }
         }
     }
-    return false;
+    return out;
 }
 
 /// Gives an arithmetic result the checker left untyped the physics of its
@@ -590,6 +599,7 @@ fn classify_values(sf: SourceFn) -> List<str> {
     let d = sf.u.d;
     let m = sf.u.m;
     var written: List<str> = [];
+    let globals = defined_by(f, op_global_addr());
     for b in f.blocks {
         for inst in b.insts {
             let a = ir_args(f, inst);
@@ -602,6 +612,7 @@ fn classify_values(sf: SourceFn) -> List<str> {
             } else if op == op_const_bytes() {
                 sf.inline[r] = d.pooled_text(a[0]) ?? d.text_value(d.str_lit(m.strings[a[0]]));
                 sf.literal[r] = true;
+                sf.literal_at[r] = a[0] + 0;
             } else if op == op_undef() {
                 sf.inline[r] = if carries(sf, inst.physics) { d.zero(inst.physics) } else { unit_text(sf) };
             } else if op == op_stack_slot() {
@@ -611,17 +622,13 @@ fn classify_values(sf: SourceFn) -> List<str> {
             } else if op == op_store() {
                 let target = a[0];
                 // A store to a global's address writes the global.
-                for b2 in f.blocks {
-                    for i2 in b2.insts {
-                        if i2.result == target && i2.opcode == op_global_addr() {
-                            let gname = sf.u.global_names[i2.subop];
-                            var seen = false;
-                            for w in written {
-                                if w == gname { seen = true; }
-                            }
-                            if !seen { written.push(gname); }
-                        }
+                if globals[target] >= 0 {
+                    let gname = sf.u.global_names[globals[target]];
+                    var seen = false;
+                    for w in written {
+                        if w == gname { seen = true; }
                     }
+                    if !seen { written.push(gname); }
                 }
             }
         }
@@ -1082,21 +1089,11 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
         return;
     }
     if op == op_unreachable() {
-        let message = if a.len() > 0 && sf.literal[a[0]] { m.strings[ir_args(f, producer(sf, a[0]))[0]] } else { "entered code the program cannot reach" };
+        let message = if a.len() > 0 && sf.literal[a[0]] { m.strings[sf.literal_at[a[0]]] } else { "entered code the program cannot reach" };
         line(sf, d.trap(message));
         return;
     }
     let _ = unsupported(sf, f"`{opcode_name(op)}`");
-}
-
-/// The instruction defining value `v`.
-fn producer(sf: SourceFn, v: u32) -> IrInst {
-    for b in sf.f.blocks {
-        for inst in b.insts {
-            if inst.result == v { return inst; }
-        }
-    }
-    return seam("emit.instruction", f"value `v{v}` has no defining instruction in `{sf.f.name}`");
 }
 
 fn slice_args(a: List<u32>, from: i64, count: i64) -> List<u32> {
@@ -1138,28 +1135,37 @@ fn go_to(sf: SourceFn, target: u32, vals: List<u32>) {
 /// Text escaped for a double-quoted literal in the C family of syntaxes:
 /// `"`, `\` and line breaks escaped; other control bytes through `ctrl`.
 pub fn escaped(raw: str, ctrl: (i64) => str) -> str {
-    var out = "";
+    // Runs of bytes that need no escape are copied whole, and the pieces
+    // joined once.
+    var parts: List<str> = ["\""];
+    var run = 0;
     var i = 0;
     while i < raw.len() {
         let b = raw.byte_at(i);
+        var esc = "";
         if b == 34 {
-            out = out + "\\\"";
+            esc = "\\\"";
         } else if b == 92 {
-            out = out + "\\\\";
+            esc = "\\\\";
         } else if b == 10 {
-            out = out + "\\n";
+            esc = "\\n";
         } else if b == 13 {
-            out = out + "\\r";
+            esc = "\\r";
         } else if b == 9 {
-            out = out + "\\t";
+            esc = "\\t";
         } else if b < 32 || b == 127 {
-            out = out + ctrl(b);
-        } else {
-            out = out + raw.slice(i, i + 1);
+            esc = ctrl(b);
+        }
+        if esc.len() > 0 {
+            if run < i { parts.push(raw.slice(run, i)); }
+            parts.push(esc);
+            run = i + 1;
         }
         i = i + 1;
     }
-    return "\"" + out + "\"";
+    if run < raw.len() { parts.push(raw.slice(run, raw.len())); }
+    parts.push("\"");
+    return text.join_text(parts, "");
 }
 
 /// `b` as two hexadecimal digits.
@@ -1175,13 +1181,16 @@ pub fn is_signed(p: IrTypePhysics) -> bool => p.reg_class == reg_class_gpr_signe
 pub fn is_float(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.reg_class == reg_class_simd_float();
 
 /// `items` separated by `, `.
+/// Leading empty items add nothing.
 pub fn joined(items: List<str>) -> str {
-    var out = "";
-    for x in items {
-        if out.len() > 0 { out = out + ", "; }
-        out = out + x;
+    var from = 0;
+    while from < items.len() && items[from].len() == 0 { from = from + 1; }
+    var rest: List<str> = [];
+    while from < items.len() {
+        rest.push(items[from]);
+        from = from + 1;
     }
-    return out;
+    return text.join_text(rest, ", ");
 }
 
 /// The operator of comparison predicate `pred` in most languages.

@@ -10,9 +10,11 @@
 // A PikeVm holds the thread lists and is reused for every search of one
 // pattern (`find_all`, `replace`, `split` make one and search many times).
 // An unanchored search adds a new start thread at each position, at the
-// lowest priority, until a match is found; when no thread is alive and the
-// pattern must start with a known byte, it jumps to that byte's next
-// occurrence.
+// lowest priority, until a match is found; when no thread is alive it jumps
+// to the next place a match can start: the next occurrence of the pattern's
+// literal prefix (a native substring search), or the next code point in the
+// class the pattern starts with. A pattern that is only a literal is found by
+// the substring search alone.
 pub pkg std.text.regex_vm;
 
 use std.text.regex_syntax;
@@ -70,10 +72,14 @@ pub struct PikeVm : IObject {
     ~self() {}
 }
 
-/// A VM sized for `prog`.
-pub fn new_vm(ref prog: ReProgram) -> PikeVm {
+/// A VM sized for `prog` that records every group's offsets.
+pub fn new_vm(ref prog: ReProgram) -> PikeVm => new_vm_slots(prog, true);
+
+/// A VM sized for `prog`, recording every group's offsets when `groups`, or
+/// only where the whole match starts and ends (less to copy per thread).
+pub fn new_vm_slots(ref prog: ReProgram, groups: bool) -> PikeVm {
     let size = prog.ops.len() as i64;
-    let nslots = 2 * (prog.groups + 1);
+    let nslots = if groups { 2 * (prog.groups + 1) } else { 2 };
     var vm = PikeVm {
         nslots: nslots, cur_pc: [], cur_slots: [], cur_len: 0,
         next_pc: [], next_slots: [], next_len: 0, seen: [], generation: 1,
@@ -135,10 +141,14 @@ fn add_thread(ref prog: ReProgram, var ref vm: PikeVm, pc: i64, text: str, pos: 
         add_thread(prog, vm, prog.arg_y[pc], text, pos);
     } else if op == ReOp::Save {
         let slot = prog.arg_x[pc];
-        let old = vm.scratch[slot];
-        vm.scratch[slot] = pos;
-        add_thread(prog, vm, pc + 1, text, pos);
-        vm.scratch[slot] = old;
+        if slot < vm.nslots {
+            let old = vm.scratch[slot];
+            vm.scratch[slot] = pos;
+            add_thread(prog, vm, pc + 1, text, pos);
+            vm.scratch[slot] = old;
+        } else {
+            add_thread(prog, vm, pc + 1, text, pos);
+        }
     } else if op == ReOp::Assert {
         if assertion_holds(prog, prog.arg_x[pc], prog.arg_y[pc], text, pos) {
             add_thread(prog, vm, pc + 1, text, pos);
@@ -156,12 +166,18 @@ fn add_thread(ref prog: ReProgram, var ref vm: PikeVm, pc: i64, text: str, pos: 
     }
 }
 
-/// The first byte at or after `from` equal to `b`, or -1.
-fn next_byte(text: str, b: i64, from: i64, n: i64) -> i64 {
+/// The first byte at or after `from` where a match can start, by what every
+/// match starts with (its literal prefix, or a class its first code point is
+/// in), or -1 when none can. `from` itself when nothing is known.
+fn next_start(ref prog: ReProgram, text: str, from: i64, n: i64) -> i64 {
+    if prog.prefix.len() > 0 { return text.find(prog.prefix, from); }
+    if prog.first_class < 0 { return from; }
     var i = from;
     while i < n {
-        if (text.byte_at(i as usize) as i64) == b { return i; }
-        i = i + 1;
+        let b = text.byte_at(i as usize) as i64;
+        let c = if b < 128 { b } else { code_point_at(text, i) };
+        if prog.classes.has(prog.first_class, c) { return i; }
+        i = i + utf8_width(b);
     }
     return -1;
 }
@@ -175,9 +191,15 @@ pub fn pike_search(ref prog: ReProgram, var ref vm: PikeVm, text: str, from: i64
     if from > n { return false; }
     let floating = !anchored && !prog.text_anchored;
     var pos = from;
-    if floating && prog.first_byte >= 0 {
-        pos = next_byte(text, prog.first_byte, pos, n);
+    if floating {
+        pos = next_start(prog, text, pos, n);
         if pos < 0 { return false; }
+        if prog.literal && pos != no_empty_at {
+            // The whole pattern is its prefix: where it is found is the match.
+            vm.found[0] = pos;
+            vm.found[1] = pos + (prog.prefix.len() as i64);
+            return true;
+        }
     }
     var matched = false;
     vm.generation = vm.generation + 1;
@@ -239,8 +261,8 @@ pub fn pike_search(ref prog: ReProgram, var ref vm: PikeVm, text: str, from: i64
         if pos >= n { break; }
         var next_pos = pos + w;
         if floating && !matched {
-            if vm.next_len == 0 && prog.first_byte >= 0 {
-                next_pos = next_byte(text, prog.first_byte, next_pos, n);
+            if vm.next_len == 0 {
+                next_pos = next_start(prog, text, next_pos, n);
                 if next_pos < 0 { break; }
             }
             vm.clear_scratch();

@@ -9,9 +9,10 @@
 //! reaches is never lowered, so an imported module can hold constructs the
 //! seed does not lower yet without breaking programs that do not use them.
 //!
-//! At run time the `comptime` code of every unit runs first, then the
-//! top-level statements of each unit in link order (an imported module's
-//! globals are set before its importers run), then the entry unit's `main`.
+//! At run time each unit, in link order, runs its `comptime` code and then
+//! its top-level statements, so an imported module's globals are set before
+//! any module that imports it runs, its `comptime` code included; then the
+//! entry unit's `main` runs.
 //!
 //! `without Item;` and `without Item { member, .. };` in a unit hide those
 //! names from every other unit; a reference from another unit is an error.
@@ -74,8 +75,9 @@ impl BytecodeCompiler {
     /// Lowers the units of a program; the last is the entry unit. Constants,
     /// enums, types, functions and globals of every unit are registered
     /// first, then the entry unit's functions and methods are compiled, then
-    /// the `comptime` code, then the top-level statements of each unit, then
-    /// a call to a zero-argument `main` when the entry unit declares one.
+    /// the `comptime` code, then each unit's top-level statements, each unit
+    /// starting with its `comptime` runs, then a call to a zero-argument
+    /// `main` when the entry unit declares one.
     pub(crate) fn compile_units(&mut self, arena: &AstArena, units: &[Vec<NodeId>]) -> u8 {
         let Some((entry_items, imported)) = units.split_last() else {
             return self.emit_null();
@@ -105,12 +107,13 @@ impl BytecodeCompiler {
         }
         self.patch_to_here(skip);
         self.reset_fn_state();
-        // The comptime runs go after the program, once every one is compiled,
-        // and run first: the program starts by jumping to them.
-        let to_runs = self.emit_jump(0);
-        let body = self.here();
+        // Each unit's comptime runs go after the program, once every one is
+        // compiled; the unit's top-level statements start by jumping to them.
+        let mut unit_starts: Vec<(usize, u32)> = Vec::with_capacity(units.len());
         let mut last = 0;
         for items in units {
+            let to_runs = self.emit_jump(0);
+            unit_starts.push((to_runs, self.here()));
             for &id in items {
                 if !Self::runs_at_top_level(arena.node(id).node_kind()) {
                     continue;
@@ -138,7 +141,7 @@ impl BytecodeCompiler {
             }
             None => last,
         };
-        self.place_comptime_runs(to_runs, body, entry.is_none());
+        self.place_comptime_runs(&unit_starts, entry.is_none());
         result
     }
 

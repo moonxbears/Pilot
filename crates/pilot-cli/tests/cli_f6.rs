@@ -64,15 +64,9 @@ fn expected(stem: &str) -> String {
     std::fs::read_to_string(root().join(format!("{stem}.stdout"))).expect("expected stdout")
 }
 
-#[test]
-fn the_corpus_passes_when_built_natively() {
-    let out = pilot(&["test", "--emit", "c"]);
-    let stdout = text(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}{}", text(&out.stderr));
-    let result = stdout.lines().find(|l| l.starts_with("RESULT (emit c):")).expect("a result line");
-    assert!(result.contains(" 0 failed"), "{result}");
-    assert!(result.contains(" 0 stopped at a seam"), "{result}\n{stdout}");
-}
+// The whole corpus is built natively once, in `cli_f7.rs`
+// (`the_corpus_passes_natively_with_no_live_allocations`): that run checks
+// every program's output and exit code as well as its live allocations.
 
 #[test]
 fn pilot_build_writes_a_binary_with_the_seed_output() {

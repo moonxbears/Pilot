@@ -31,6 +31,7 @@ fn text(bytes: &[u8]) -> String {
 }
 
 #[test]
+#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
 fn the_corpus_runs_on_the_ir_interpreter_or_stops_at_a_seam() {
     let out = pilot(&["test", "--ir"]);
     let stdout = text(&out.stdout);

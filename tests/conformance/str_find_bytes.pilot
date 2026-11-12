@@ -1,0 +1,14 @@
+// `str.find(needle, from)`: the byte offset of the first `needle` at or after
+// byte `from`, or -1. Worked by hand: in "héllo wörld, hello" `é` and `ö` are
+// two bytes each, so the bytes are h0 é1-2 l3 l4 o5 ' '6 w7 ö8-9 r10 l11 d12
+// ,13 ' '14 h15 e16 l17 l18 o19.
+fn main() {
+    let t = "héllo wörld, hello";
+    print(t.find("l", 0));
+    print(t.find("hello", 1));
+    print(t.find("x", 0));
+    print(t.find("", 3));
+    print(t.find("l", 2));
+    print(t.find("o", 100));
+    print(t.find("w", 7));
+}

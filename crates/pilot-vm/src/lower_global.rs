@@ -18,7 +18,9 @@ use pilot_rt::PilotVal;
 
 /// One `comptime` block or expression, compiled out of line.
 pub(crate) struct ComptimeRun {
-    /// Where it starts in the source, which orders the runs.
+    /// The unit it belongs to, in link order: it runs when that unit starts.
+    unit: usize,
+    /// Where it starts in the source, which orders the runs of a unit.
     pos: u32,
     entry: u32,
     /// For an expression, the hidden global its value is kept in.
@@ -98,7 +100,11 @@ impl BytecodeCompiler {
         self.restore_fn_state(saved);
         self.patch_to_here(skip);
         let result = (n.flags == 1).then(|| format!("comptime#{entry}"));
+        // `arena.units` is in link order and by first node, so the unit a
+        // node belongs to is the last one starting at or before it.
+        let unit = arena.units.partition_point(|u| u.first_node <= id.0).saturating_sub(1);
         self.comptime_runs.push(ComptimeRun {
+            unit,
             pos: arena.span(id).start,
             entry,
             result: result.clone(),
@@ -109,36 +115,41 @@ impl BytecodeCompiler {
         }
     }
 
-    /// Emits the scheduled `comptime` runs after the program. `to_runs` is the
-    /// jump at the program's start, which the runs return to `body` from.
-    /// Without runs that jump becomes a no-op. When the program falls off its
-    /// end (no `main`), a jump past the runs ends it.
-    pub(crate) fn place_comptime_runs(&mut self, to_runs: usize, body: u32, falls_through: bool) {
-        if self.comptime_runs.is_empty() {
-            self.instructions[to_runs] = Instruction::encode(Opcode::Nop, 0, 0, 0);
-            return;
+    /// Emits the scheduled `comptime` runs after the program, one block per
+    /// unit. `unit_starts` holds, per unit in link order, the jump that starts
+    /// its top-level statements and the address the block returns to. A unit
+    /// without runs gets a no-op instead of its jump. When the program falls
+    /// off its end (no `main`), a jump past the blocks ends it.
+    pub(crate) fn place_comptime_runs(&mut self, unit_starts: &[(usize, u32)], falls_through: bool) {
+        let mut runs = std::mem::take(&mut self.comptime_runs);
+        runs.sort_by_key(|r| r.pos);
+        let last_unit = unit_starts.len().saturating_sub(1);
+        let over = (falls_through && !runs.is_empty()).then(|| self.emit_jump(0));
+        for (k, &(to_runs, back)) in unit_starts.iter().enumerate() {
+            let mine: Vec<&ComptimeRun> = runs.iter().filter(|r| r.unit.min(last_unit) == k).collect();
+            if mine.is_empty() {
+                self.instructions[to_runs] = Instruction::encode(Opcode::Nop, 0, 0, 0);
+                continue;
+            }
+            self.patch_to_here(to_runs);
+            for run in mine {
+                self.emit_comptime_run(run);
+            }
+            self.emit_jump(back);
         }
-        let over = falls_through.then(|| self.emit_jump(0));
-        self.patch_to_here(to_runs);
-        self.emit_comptime_runs();
-        self.emit_jump(body);
         if let Some(j) = over {
             self.patch_to_here(j);
         }
     }
 
-    /// Emits a call to every scheduled `comptime` run, in source order.
-    fn emit_comptime_runs(&mut self) {
-        let mut runs = std::mem::take(&mut self.comptime_runs);
-        runs.sort_by_key(|r| r.pos);
-        for run in &runs {
-            let mark = self.next_reg;
-            let dst = self.alloc_reg();
-            self.push_ins(Instruction::encode_wide(Opcode::Call, dst, run.entry));
-            if let Some(g) = &run.result {
-                self.emit_global_set(g, dst);
-            }
-            self.release_to(mark);
+    /// Emits a call to `comptime` run `run`, keeping an expression's value.
+    fn emit_comptime_run(&mut self, run: &ComptimeRun) {
+        let mark = self.next_reg;
+        let dst = self.alloc_reg();
+        self.push_ins(Instruction::encode_wide(Opcode::Call, dst, run.entry));
+        if let Some(g) = &run.result {
+            self.emit_global_set(g, dst);
         }
+        self.release_to(mark);
     }
 }

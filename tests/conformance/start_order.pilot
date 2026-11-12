@@ -1,0 +1,20 @@
+// Start order of a linked program: each module, imported ones first, runs its
+// `comptime` code and then its top-level statements, so a module's globals
+// are set before any module that imports it runs its own `comptime` code.
+// `FIRST` calls into lib.start_order at compile time (the stand-in
+// ir.comptime_at_start runs it when the program starts): `calls` and `base`
+// are already set, so it is 40 + 1; the next call from main is 40 + 2.
+use lib.start_order;
+
+comptime {
+    print("main: comptime");
+}
+
+const FIRST = comptime next_id();
+
+print("main: top level");
+
+fn main() {
+    print(FIRST);
+    print(next_id());
+}

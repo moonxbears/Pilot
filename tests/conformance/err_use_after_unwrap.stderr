@@ -1,0 +1,2 @@
+error[OWN001]: `c` is used after it was moved
+err_use_after_unwrap.pilot:20:16

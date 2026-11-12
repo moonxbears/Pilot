@@ -80,18 +80,109 @@ pub fn emit_diag(nid: i64, sev: i64, msg: str) {
     if is_suppressed(nid, code, msg) { return; }
     __engine(Cfg.ast.ast_emit_diag, nid, sev, msg);
 }
-pub fn resolve_type_sym(type_sym: i64, node_count: i64) -> i64 {
+// ------------------------------------------------------------------------------
+// Indexes over the linked program, built once by `build_indexes` before any
+// pass. A node's kind, name, type name and place never change while the
+// analyzer runs (only the layouts and targets bound to it do), so instead of
+// scanning every node for the ones a lookup wants, a lookup walks the list of
+// just those nodes. Every list keeps node order, so a lookup meets the same
+// nodes in the same order a full scan would.
+// ------------------------------------------------------------------------------
+// By name: the first declaration (node kind 1, 2, 3, 4 or 21) with that name,
+// or -1; by node: the next declaration with the same name, or -1.
+var decl_head: List<i64> = [];
+var decl_next: List<i64> = [];
+// By name: the declaration `last_decl_before` found for the previous use of
+// that name, or -1. Inference visits uses in node order, so the next lookup
+// carries on from there instead of walking the chain from its start.
+var decl_seen: List<i64> = [];
+// By type name: the first parameter (node kind 21) of that type, or -1; by
+// node: the next parameter of the same type, or -1.
+var param_head: List<i64> = [];
+var param_next: List<i64> = [];
+// The struct declarations (node kind 1).
+var struct_nodes: List<i64> = [];
+// The `break` and `yield` statements (original kinds 107, 109).
+var exit_nodes: List<i64> = [];
+// The functions, constructors, indexers, operators and closures (`is_fn_like_kind`).
+var fn_like_nodes: List<i64> = [];
+// The `while` and `for` loops and `switch` statements (original kinds 106, 204, 202).
+var jump_target_nodes: List<i64> = [];
+pub fn is_decl_kind(k: i64) -> bool => k == 1 || k == 2 || k == 3 || k == 4 || k == 21;
+/// Whether `s` is a name an index can hold (not the engine's "none").
+pub fn is_index_key(s: i64) -> bool => s >= 0 && s < 4294967295;
+/// The first node of the chain for `key` in `head`, or -1 when none has it.
+pub fn chain_start(head: List<i64>, key: i64) -> i64 {
+    if key >= 0 && key < head.len() { return head[key]; }
+    return -1;
+}
+pub fn build_indexes(node_count: i64) {
+    var top = 0;
     var j = 0;
     while j < node_count {
         let k = __engine(Cfg.ast.ast_node_kind, j);
-        if k == 1 && __engine(Cfg.ast.ast_node_sym, j) == type_sym {
-            return infer_struct(j, node_count);
+        if is_decl_kind(k) {
+            let s = __engine(Cfg.ast.ast_node_sym, j);
+            if is_index_key(s) && s >= top { top = s + 1; }
         }
-        if k == 21 && __engine(Cfg.ast.ast_node_raw_bits, j) == type_sym {
-            let ex = __engine(Cfg.ast.ast_get_bound_layout, j);
-            if ex != 4294967295 { return ex; }
+        if k == 21 {
+            let t = __engine(Cfg.ast.ast_node_raw_bits, j);
+            if is_index_key(t) && t >= top { top = t + 1; }
         }
+        decl_next.push(-1);
+        param_next.push(-1);
         j = j + 1;
+    }
+    var n = 0;
+    while n < top { decl_head.push(-1); param_head.push(-1); decl_seen.push(-1); n = n + 1; }
+    // Linked from the last node back, so each chain runs in node order.
+    j = node_count - 1;
+    while j >= 0 {
+        let k = __engine(Cfg.ast.ast_node_kind, j);
+        if is_decl_kind(k) {
+            let s = __engine(Cfg.ast.ast_node_sym, j);
+            if is_index_key(s) { decl_next[j] = decl_head[s]; decl_head[s] = j; }
+        }
+        if k == 21 {
+            let t = __engine(Cfg.ast.ast_node_raw_bits, j);
+            if is_index_key(t) { param_next[j] = param_head[t]; param_head[t] = j; }
+        }
+        j = j - 1;
+    }
+    j = 0;
+    while j < node_count {
+        if __engine(Cfg.ast.ast_node_kind, j) == 1 { struct_nodes.push(j); }
+        let ok = __engine(Cfg.ast.ast_orig_kind, j);
+        if ok == 107 || ok == 109 { exit_nodes.push(j); }
+        if is_fn_like_kind(ok) { fn_like_nodes.push(j); }
+        if ok == 106 || ok == 204 || ok == 202 { jump_target_nodes.push(j); }
+        j = j + 1;
+    }
+}
+/// The last declaration named `s` before node `i`, or -1.
+pub fn last_decl_before(s: i64, i: i64) -> i64 {
+    if s < 0 || s >= decl_head.len() { return -1; }
+    var last = decl_seen[s];
+    var j = -1;
+    if last >= 0 && last < i { j = decl_next[last]; } else { last = -1; j = decl_head[s]; }
+    while j >= 0 && j < i { last = j; j = decl_next[j]; }
+    decl_seen[s] = last;
+    return last;
+}
+pub fn resolve_type_sym(type_sym: i64, node_count: i64) -> i64 {
+    // The first struct named `type_sym` or parameter of that type with a
+    // bound layout, in node order: the two chains merged.
+    var a = chain_start(decl_head, type_sym);
+    var b = chain_start(param_head, type_sym);
+    while a >= 0 || b >= 0 {
+        if b < 0 || (a >= 0 && a <= b) {
+            if __engine(Cfg.ast.ast_node_kind, a) == 1 { return infer_struct(a, node_count); }
+            a = decl_next[a];
+        } else {
+            let ex = __engine(Cfg.ast.ast_get_bound_layout, b);
+            if ex != 4294967295 { return ex; }
+            b = param_next[b];
+        }
     }
     return __engine(Cfg.ast.layout_scalar, 64, 1, 0);
 }
@@ -215,35 +306,34 @@ pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
 }
 pub fn scan_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
     // 1. Check for StructDecl with matching 1-arg attribute (e.g. [DefaultLit(1)])
-    var j = 0;
-    while j < node_count {
-        if __engine(Cfg.ast.ast_node_kind, j) == 1 && __engine(Cfg.ast.ast_attr_count, j) == 1 && __engine(Cfg.ast.ast_attr_arg, j, 0) == lit_kind {
+    var si = 0;
+    while si < struct_nodes.len() {
+        let j = struct_nodes[si];
+        if __engine(Cfg.ast.ast_attr_count, j) == 1 && __engine(Cfg.ast.ast_attr_arg, j, 0) == lit_kind {
             let s_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
             if s_lid != 4294967295 { return s_lid; }
         }
-        j = j + 1;
+        si = si + 1;
     }
     // 2. Check for StructDecl with matching physical geometry (1-byte scalar for bool, 8-byte scalar for int/float)
-    j = 0;
-    while j < node_count {
-        let k = __engine(Cfg.ast.ast_node_kind, j);
-        if k == 1 {
-            let attr_cnt = __engine(Cfg.ast.ast_attr_count, j);
-            if attr_cnt >= 2 {
-                let s_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
-                if s_lid != 4294967295 {
-                    let sz = __engine(Cfg.ast.layout_metrics, s_lid);
-                    let bank = if attr_cnt >= 3 { __engine(Cfg.ast.ast_attr_arg, j, 2) } else { __engine(Cfg.ast.ast_attr_arg, j, 1) };
-                    if lit_kind == 4 && sz == 1 { return s_lid; }
-                    else if lit_kind == 1 && sz == 8 && bank != 1 && bank != 6 { return s_lid; }
-                    else if lit_kind == 2 && sz == 8 && bank == 1 { return s_lid; }
-                }
+    si = 0;
+    while si < struct_nodes.len() {
+        let j = struct_nodes[si];
+        let attr_cnt = __engine(Cfg.ast.ast_attr_count, j);
+        if attr_cnt >= 2 {
+            let s_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
+            if s_lid != 4294967295 {
+                let sz = __engine(Cfg.ast.layout_metrics, s_lid);
+                let bank = if attr_cnt >= 3 { __engine(Cfg.ast.ast_attr_arg, j, 2) } else { __engine(Cfg.ast.ast_attr_arg, j, 1) };
+                if lit_kind == 4 && sz == 1 { return s_lid; }
+                else if lit_kind == 1 && sz == 8 && bank != 1 && bank != 6 { return s_lid; }
+                else if lit_kind == 2 && sz == 8 && bank == 1 { return s_lid; }
             }
         }
-        j = j + 1;
+        si = si + 1;
     }
     // 3. Reuse previously bound literal of same lit_kind in this AST
-    j = 0;
+    var j = 0;
     while j < node_count {
         if __engine(Cfg.ast.ast_node_kind, j) == 15 && __engine(Cfg.ast.ast_node_lit_kind, j) == lit_kind {
             let ex = __engine(Cfg.ast.ast_get_bound_layout, j);
@@ -262,9 +352,10 @@ pub fn infer_member_expr(i: i64, node_count: i64) -> i64 {
     let recv_lid = __engine(Cfg.ast.ast_get_bound_layout, recv_id);
     if recv_lid == 4294967295 { return 0; }
     let field_sym = __engine(Cfg.ast.ast_node_sym, i);
-    var s_id = 0;
-    while s_id < node_count {
-        if __engine(Cfg.ast.ast_node_kind, s_id) == 1 && __engine(Cfg.ast.ast_get_bound_layout, s_id) == recv_lid {
+    var si = 0;
+    while si < struct_nodes.len() {
+        let s_id = struct_nodes[si];
+        if __engine(Cfg.ast.ast_get_bound_layout, s_id) == recv_lid {
             let f_cnt = __engine(Cfg.ast.ast_child_count, s_id);
             var f_idx = 0;
             while f_idx < f_cnt {
@@ -278,7 +369,7 @@ pub fn infer_member_expr(i: i64, node_count: i64) -> i64 {
                 f_idx = f_idx + 1;
             }
         }
-        s_id = s_id + 1;
+        si = si + 1;
     }
     return 0;
 }
@@ -293,16 +384,16 @@ pub fn infer_call_expr(i: i64, node_count: i64) -> i64 {
     if __engine(Cfg.ast.ast_child_count, i) > 0 {
         let callee_id = __engine(Cfg.ast.ast_child_at, i, 0);
         let callee_sym = __engine(Cfg.ast.ast_node_sym, callee_id);
-        var j = 0;
-        while j < node_count {
+        var j = chain_start(decl_head, callee_sym);
+        while j >= 0 {
             let jk = __engine(Cfg.ast.ast_node_kind, j);
-            if (jk == 1 || jk == 3) && __engine(Cfg.ast.ast_node_sym, j) == callee_sym {
+            if jk == 1 || jk == 3 {
                 __engine(Cfg.ast.ast_bind_target, i, j); __engine(Cfg.ast.ast_bind_target, callee_id, j);
                 let decl_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
                 if decl_lid != 4294967295 { __engine(Cfg.ast.ast_bind_layout, i, decl_lid); }
                 return decl_lid;
             }
-            j = j + 1;
+            j = decl_next[j];
         }
     }
     return 0;
@@ -330,17 +421,13 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
         return lit_lid;
     }
     if kind == 14 {
-        let sym = __engine(Cfg.ast.ast_node_sym, i);
-        var j = i - 1;
-        while j >= 0 {
-            let jk = __engine(Cfg.ast.ast_node_kind, j);
-            if (jk == 1 || jk == 2 || jk == 3 || jk == 4 || jk == 21) && __engine(Cfg.ast.ast_node_sym, j) == sym {
-                __engine(Cfg.ast.ast_bind_target, i, j);
-                let target_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
-                if target_lid != 4294967295 { __engine(Cfg.ast.ast_bind_layout, i, target_lid); }
-                return 1;
-            }
-            j = j - 1;
+        // The last declaration with this name before the use.
+        let last = last_decl_before(__engine(Cfg.ast.ast_node_sym, i), i);
+        if last >= 0 {
+            __engine(Cfg.ast.ast_bind_target, i, last);
+            let target_lid = __engine(Cfg.ast.ast_get_bound_layout, last);
+            if target_lid != 4294967295 { __engine(Cfg.ast.ast_bind_layout, i, target_lid); }
+            return 1;
         }
         return 0;
     }
@@ -349,10 +436,10 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
         if ann_sym > 0 {
             let ann_lid = resolve_type_sym(ann_sym, node_count);
             __engine(Cfg.ast.ast_bind_layout, i, ann_lid);
-            var sj = 0;
-            while sj < node_count {
-                if __engine(Cfg.ast.ast_node_kind, sj) == 1 && __engine(Cfg.ast.ast_node_sym, sj) == ann_sym { __engine(Cfg.ast.ast_bind_target, i, sj); }
-                sj = sj + 1;
+            var sj = chain_start(decl_head, ann_sym);
+            while sj >= 0 {
+                if __engine(Cfg.ast.ast_node_kind, sj) == 1 { __engine(Cfg.ast.ast_bind_target, i, sj); }
+                sj = decl_next[sj];
             }
             return ann_lid;
         }
@@ -362,10 +449,11 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
             let rhs_tid = __engine(Cfg.ast.ast_get_bound_target, rhs_id);
             if rhs_tid != 4294967295 && rhs_tid >= 0 { __engine(Cfg.ast.ast_bind_target, i, rhs_tid); }
             else if rhs_lid != 4294967295 {
-                var sj = 0;
-                while sj < node_count {
-                    if __engine(Cfg.ast.ast_node_kind, sj) == 1 && __engine(Cfg.ast.ast_get_bound_layout, sj) == rhs_lid { __engine(Cfg.ast.ast_bind_target, i, sj); }
-                    sj = sj + 1;
+                var si = 0;
+                while si < struct_nodes.len() {
+                    let sj = struct_nodes[si];
+                    if __engine(Cfg.ast.ast_get_bound_layout, sj) == rhs_lid { __engine(Cfg.ast.ast_bind_target, i, sj); }
+                    si = si + 1;
                 }
             }
             if rhs_lid != 4294967295 { __engine(Cfg.ast.ast_bind_layout, i, rhs_lid); return rhs_lid; }
@@ -693,8 +781,9 @@ pub fn verify_loop_ergonomics(i: i64, node_count: i64) -> i64 {
             let b_start = __engine(Cfg.ast.ast_span_start, body);
             let b_end = __engine(Cfg.ast.ast_span_end, body);
             var has_yield = false; var has_valued_break = false; var has_void_break = false;
-            var k = 0;
-            while k < node_count {
+            var ei = 0;
+            while ei < exit_nodes.len() {
+                let k = exit_nodes[ei];
                 let k_start = __engine(Cfg.ast.ast_span_start, k);
                 let k_end = __engine(Cfg.ast.ast_span_end, k);
                 if k_start >= b_start && k_end <= b_end && k != i {
@@ -710,7 +799,7 @@ pub fn verify_loop_ergonomics(i: i64, node_count: i64) -> i64 {
                         }
                     }
                 }
-                k = k + 1;
+                ei = ei + 1;
             }
             if has_valued_break && has_yield { emit_diag(i, 1, "LOOP001: Cannot mix 'break <expr>' and 'yield <expr>' in the same 'for' loop"); return 1; }
             if has_void_break && has_valued_break { emit_diag(i, 1, "LOOP002: Cannot mix valueless 'break;' and valued 'break <expr>;' in the same 'for' loop"); return 1; }
@@ -793,8 +882,8 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
         var bi = 0;
         while bi < bc {
             let bsym = __engine(Cfg.ast.ast_base_at, i, bi);
-            var iface_nid = -1; var j = 0;
-            while j < node_count && iface_nid < 0 { if __engine(Cfg.ast.ast_node_kind, j) == 2 && __engine(Cfg.ast.ast_node_sym, j) == bsym { iface_nid = j; } j = j + 1; }
+            var iface_nid = -1; var j = chain_start(decl_head, bsym);
+            while j >= 0 && iface_nid < 0 { if __engine(Cfg.ast.ast_node_kind, j) == 2 { iface_nid = j; } j = decl_next[j]; }
             if iface_nid >= 0 {
                 let icc = __engine(Cfg.ast.ast_child_count, iface_nid); var mi = 0;
                 while mi < icc {
@@ -813,13 +902,13 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
                                 let fch = __engine(Cfg.ast.ast_child_at, i, fi);
                                 if has_attr_named(fch, "Delegate") || has_attr_named(fch, "AutoImplement") || has_attr_named(i, "Delegate") {
                                     let f_ty = __engine(Cfg.ast.ast_node_raw_bits, fch); if f_ty == bsym { s_has = true; }
-                                    var tj = 0;
-                                    while tj < node_count && !s_has {
-                                        if (__engine(Cfg.ast.ast_node_kind, tj) == 1 || __engine(Cfg.ast.ast_node_kind, tj) == 2) && __engine(Cfg.ast.ast_node_sym, tj) == f_ty {
+                                    var tj = chain_start(decl_head, f_ty);
+                                    while tj >= 0 && !s_has {
+                                        if __engine(Cfg.ast.ast_node_kind, tj) == 1 || __engine(Cfg.ast.ast_node_kind, tj) == 2 {
                                             let tcc = __engine(Cfg.ast.ast_child_count, tj); var tmi = 0;
                                             while tmi < tcc && !s_has { if __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, tj, tmi)) == msym { s_has = true; } tmi = tmi + 1; }
                                         }
-                                        tj = tj + 1;
+                                        tj = decl_next[tj];
                                     }
                                 }
                                 fi = fi + 1;
@@ -946,13 +1035,14 @@ pub fn innermost_fn_like_start(i: i64, node_count: i64) -> i64 {
     let s = __engine(Cfg.ast.ast_span_start, i);
     let e = __engine(Cfg.ast.ast_span_end, i);
     var best = -1;
-    var j = 0;
-    while j < node_count {
-        if j != i && is_fn_like_kind(__engine(Cfg.ast.ast_orig_kind, j)) {
+    var fi = 0;
+    while fi < fn_like_nodes.len() {
+        let j = fn_like_nodes[fi];
+        if j != i {
             let js = __engine(Cfg.ast.ast_span_start, j);
             if js <= s && e <= __engine(Cfg.ast.ast_span_end, j) && js > best { best = js; }
         }
-        j = j + 1;
+        fi = fi + 1;
     }
     return best;
 }
@@ -962,14 +1052,15 @@ pub fn has_enclosing_jump_target(i: i64, node_count: i64, allow_switch: bool) ->
     let s = __engine(Cfg.ast.ast_span_start, i);
     let e = __engine(Cfg.ast.ast_span_end, i);
     let floor = innermost_fn_like_start(i, node_count);
-    var j = 0;
-    while j < node_count {
+    var ti = 0;
+    while ti < jump_target_nodes.len() {
+        let j = jump_target_nodes[ti];
         let ok = __engine(Cfg.ast.ast_orig_kind, j);
         if ok == 106 || ok == 204 || (allow_switch && ok == 202) {
             let js = __engine(Cfg.ast.ast_span_start, j);
             if js > floor && js <= s && e <= __engine(Cfg.ast.ast_span_end, j) { return true; }
         }
-        j = j + 1;
+        ti = ti + 1;
     }
     return false;
 }
@@ -1177,6 +1268,7 @@ pub fn analyze_unit(lo: i64, hi: i64, node_count: i64, kw_set: str) -> i64 {
 pub fn analyze_program() -> i64 {
     let node_count = __engine(Cfg.ast.ast_node_count);
     if node_count == 0 { return 0; }
+    build_indexes(node_count);
     // Pass 1 & 2: Resolve StructDecl & param layouts
     var i = 0;
     while i < node_count {

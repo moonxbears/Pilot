@@ -30,20 +30,29 @@ use std.text.*;
 // ------------------------------------------------------------------------------
 
 /// `s` quoted, with `\`, `"`, newline, tab and carriage return escaped.
+/// Runs of bytes that need no escape are copied whole.
 fn quote_text(s: str) -> str {
-    var out = "\"";
+    var parts: List<str> = ["\""];
+    var run = 0;
     var i = 0;
     while i < s.len() {
         let b = s.byte_at(i);
-        if b == 92 { out = out + "\\\\"; }
-        else if b == 34 { out = out + "\\\""; }
-        else if b == 10 { out = out + "\\n"; }
-        else if b == 9 { out = out + "\\t"; }
-        else if b == 13 { out = out + "\\r"; }
-        else { out = out + s.slice(i, i + 1); }
+        var esc = "";
+        if b == 92 { esc = "\\\\"; }
+        else if b == 34 { esc = "\\\""; }
+        else if b == 10 { esc = "\\n"; }
+        else if b == 9 { esc = "\\t"; }
+        else if b == 13 { esc = "\\r"; }
+        if esc.len() > 0 {
+            if run < i { parts.push(s.slice(run, i)); }
+            parts.push(esc);
+            run = i + 1;
+        }
         i = i + 1;
     }
-    return out + "\"";
+    if run < s.len() { parts.push(s.slice(run, s.len())); }
+    parts.push("\"");
+    return join_text(parts, "");
 }
 
 fn value_ref(v: u32) -> str => f"v{v}";
@@ -92,55 +101,51 @@ fn inst_text(f: IrFunction, inst: IrInst) -> str {
     return out + f" :{inst.physics.layout_id} !{f.spans[inst.span_id]}";
 }
 
-/// The text of module `m`.
+/// The text of module `m`, one line per entry, ending in a newline. The
+/// lines are joined once at the end (`join_text`).
 pub fn print_ir_module(m: IrModule) -> str {
-    var out = "pilir 1\n";
+    var lines: List<str> = ["pilir 1"];
     var i = 0;
     while i < m.layouts.len {
         let l = m.layouts[i];
         let p = l.physics;
-        out = out + f"layout {i} " + quote_text(l.name)
-            + f" {reg_class_name(p.reg_class)} {p.bit_width} {p.align_pow2} {p.lattice_bits}\n";
+        lines.push(f"layout {i} " + quote_text(l.name)
+            + f" {reg_class_name(p.reg_class)} {p.bit_width} {p.align_pow2} {p.lattice_bits}");
         i = i + 1;
     }
     i = 0;
-    while i < m.ints.len { out = out + f"int {i} {m.ints[i]}\n"; i = i + 1; }
+    while i < m.ints.len { lines.push(f"int {i} {m.ints[i]}"); i = i + 1; }
     i = 0;
-    while i < m.floats.len { out = out + f"float {i} {m.floats[i]}\n"; i = i + 1; }
+    while i < m.floats.len { lines.push(f"float {i} {m.floats[i]}"); i = i + 1; }
     i = 0;
-    while i < m.strings.len { out = out + f"str {i} " + quote_text(m.strings[i]) + "\n"; i = i + 1; }
+    while i < m.strings.len { lines.push(f"str {i} " + quote_text(m.strings[i])); i = i + 1; }
     i = 0;
-    while i < m.intrinsics.len { out = out + f"intrinsic {i} {m.intrinsics[i]}\n"; i = i + 1; }
+    while i < m.intrinsics.len { lines.push(f"intrinsic {i} {m.intrinsics[i]}"); i = i + 1; }
     i = 0;
     while i < m.globals.len {
-        out = out + f"global {i} " + quote_text(m.globals[i].name) + f" {m.globals[i].physics.layout_id}\n";
+        lines.push(f"global {i} " + quote_text(m.globals[i].name) + f" {m.globals[i].physics.layout_id}");
         i = i + 1;
     }
     for rec in m.records {
-        out = out + f"record {rec.layout}";
-        for fl in rec.fields { out = out + f" {fl}"; }
-        out = out + "\n";
+        var line = f"record {rec.layout}";
+        for fl in rec.fields { line = line + f" {fl}"; }
+        lines.push(line);
     }
     i = 0;
     while i < m.functions.len {
         let f = m.functions[i];
-        out = out + f"fn {i} " + quote_text(f.name) + f" -> {f.ret_physics.layout_id}" + " {\n";
+        lines.push(f"fn {i} " + quote_text(f.name) + f" -> {f.ret_physics.layout_id}" + " {");
         for b in f.blocks {
-            out = out + f"  b{b.id}(";
-            var j = 0;
-            while j < b.params.len {
-                if j > 0 { out = out + ", "; }
-                let v = b.params[j];
-                out = out + value_ref(v) + f":{f.value_physics[v].layout_id}";
-                j = j + 1;
-            }
-            out = out + "):\n";
-            for inst in b.insts { out = out + inst_text(f, inst) + "\n"; }
+            var params: List<str> = [];
+            for v in b.params { params.push(value_ref(v) + f":{f.value_physics[v].layout_id}"); }
+            lines.push(f"  b{b.id}(" + join_text(params, ", ") + "):");
+            for inst in b.insts { lines.push(inst_text(f, inst)); }
         }
-        out = out + "}\n";
+        lines.push("}");
         i = i + 1;
     }
-    return out;
+    lines.push("");
+    return join_text(lines, "\n");
 }
 
 // ------------------------------------------------------------------------------
@@ -210,25 +215,29 @@ fn words(line: str) -> List<str> {
     return out;
 }
 
-/// The text a quoted word spells, escapes undone.
+/// The text a quoted word spells, escapes undone. Runs of bytes with no
+/// escape are copied whole.
 fn unquote(w: str) -> str {
-    var out = "";
+    var parts: List<str> = [];
+    let end = w.len() - 1;
+    var run = 1;
     var i = 1;
-    while i < w.len() - 1 {
-        let b = w.byte_at(i);
-        if b == 92 && i + 1 < w.len() - 1 {
+    while i < end {
+        if w.byte_at(i) == 92 && i + 1 < end {
+            if run < i { parts.push(w.slice(run, i)); }
             let e = w.byte_at(i + 1);
-            if e == 110 { out = out + "\n"; }
-            else if e == 116 { out = out + "\t"; }
-            else if e == 114 { out = out + "\r"; }
-            else { out = out + w.slice(i + 1, i + 2); }
+            if e == 110 { parts.push("\n"); }
+            else if e == 116 { parts.push("\t"); }
+            else if e == 114 { parts.push("\r"); }
+            else { parts.push(w.slice(i + 1, i + 2)); }
             i = i + 2;
+            run = i;
         } else {
-            out = out + w.slice(i, i + 1);
             i = i + 1;
         }
     }
-    return out;
+    if run < end { parts.push(w.slice(run, end)); }
+    return join_text(parts, "");
 }
 
 fn fail(r: Reader, message: str) -> i64 {
@@ -292,7 +301,7 @@ fn parse_header(r: Reader, w: List<str>) {
             j = j + 1;
         }
         if l < 0 || l >= r.m.layouts.len { let _ = fail(r, f"record names layout {l}, which is not declared"); return; }
-        r.m.records.push(IrRecord { layout: l as u32, fields: fields });
+        ir_add_record(r.m, IrRecord { layout: l as u32, fields: fields });
     } else {
         let _ = fail(r, f"unexpected `{tag}` line");
     }

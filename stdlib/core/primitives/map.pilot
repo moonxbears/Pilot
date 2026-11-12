@@ -122,6 +122,16 @@ pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDiction
     }
 }
 
+// A map owns its values: dropping a map drops each value in the order of
+// their keys (selfhost/check/drops.pilot). The engine holds a map by itself
+// (stdlib/core/builtins/native_calls.pilot), so `map_values` lists its
+// values for `str_len` and `list_get` to walk, and `map_get` reads the value
+// an assignment replaces (none when the key is new). Reading a value by key,
+// or with `for`, borrows it.
+comptime {
+    __engine("bind_owned_elements", nameof(Map), "str_len", "list_get", "map_values", "map_get");
+}
+
 // Canonical type alias & high-level dynamic dictionary
 pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuffer<TKey, TVal> {
     pub inner: MapBuffer<TKey, TVal>;

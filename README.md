@@ -222,6 +222,13 @@ bash examples/showcase/run_all.sh
 python3 scripts/gate1_check.py && python3 scripts/gate2_check.py
 python3 scripts/gate3_check.py && python3 scripts/gate4_selfhost_contraction.py
 
-# Run all workspace tests
+# Run the workspace tests, skipping the slow whole-corpus ones
 cargo test --workspace
+
+# Run every workspace test, the slow ones included (before a commit)
+cargo test-full
+
+# While working: run only the conformance cases your uncommitted changes
+# reach (add --ir or --emit <lang> for the other engines; --since <rev>)
+./target/debug/pilot test --changed
 ```

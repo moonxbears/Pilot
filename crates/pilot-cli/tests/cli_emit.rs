@@ -42,16 +42,19 @@ fn corpus_passes(lang: &str) {
 }
 
 #[test]
+#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
 fn the_corpus_runs_as_emitted_python() {
     corpus_passes("python");
 }
 
 #[test]
+#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
 fn the_corpus_runs_as_emitted_javascript() {
     corpus_passes("js");
 }
 
 #[test]
+#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
 fn the_corpus_runs_as_emitted_c_or_stops_at_a_seam() {
     corpus_passes("c");
 }

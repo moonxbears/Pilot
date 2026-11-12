@@ -38,26 +38,37 @@
 // `plan_discard`); a method handing back its receiver makes nothing new.
 //
 // A collection that owns its elements (selfhost/check/own.pilot
-// `owned_elements`, from the `bind_owned_elements` engine binding) drops
-// each element after its own fields: its glue row names the element type and
-// the engine operations that walk it. `let x = rs[i]` and `for x in rs`
-// borrow the element, so `x` is not dropped and `rs` lives while `x` is used.
-// Assigning an element (`rs[i] = v`) drops the one it replaces
-// (ReplaceElement rows, `plan_element_replace`).
+// `owned_elements`, from the `bind_owned_elements` engine binding: a list,
+// a map's values) drops each element; the engine holds the collection
+// itself, so its declared fields are not dropped. Its glue row names the
+// element type and the engine operations that walk it. `let x = rs[i]` and
+// `for x in rs` borrow the element, so `x` is not dropped and `rs` lives
+// while `x` is used. Assigning an element (`rs[i] = v`, `m[k] = v`) drops the
+// one it replaces, if there was one (ReplaceElement rows,
+// `plan_element_replace`).
+//
+// An optional the engine holds as its payload or none (`owned_payload`, from
+// `bind_owned_payload`) drops its payload unless the absent test says none.
+// Unwrapping it (`o?`, `o ?? d`, `if some x = o`, `guard some x = o`) moves
+// it; the unwrapped `x` owns the payload in its branch, or for the rest of the
+// block after a guard.
 //
 // What the analysis cannot place yet stops at a seam where it runs: a
 // closure capturing an owned value (own.capture), and other values holding
-// values that need dropping, an `opt`, a map or a type that holds itself
+// values that need dropping, a result, a tuple or a type that holds itself
 // through its elements (own.collection_drop).
 //
 // The plan is rows for crates/pilot-cli/src/check.rs (`drop_plan`), each
 // led by its `DropAction` and naming a node by its program-wide span and kind:
 //   [action, start, end, kind, binding, type]  Before, After, Exit, Else, Guard,
 //                                              Replace, Flag, Moved, Discard (""),
-//                                              ReplaceElement ("", collection type)
+//                                              ReplaceElement (lookup op, collection type)
 //   [Seam, start, end, kind, id, note]
 //   [Glue, type, destructor owner or "", [field, field type, ..],
-//    element type, length op, element op]  (the last three "" without elements)
+//    element type, length op, element op, sequence op,
+//    payload type, absent op]  (the element four "" without elements, the
+//    sequence op "" when the collection is walked as is; the payload two ""
+//    without a payload)
 pub lvl(0) pkg Pilot.SelfHost.Check.Drops;
 
 use selfhost.check.snapshot.*;
@@ -180,12 +191,13 @@ pub fn stored_fields(p: Program, t: i64) -> List<List<any>> {
 }
 
 /// 1 when a value of type `t` needs dropping (its destructor, its fields,
-/// or the elements a collection owns: `owned_elements`), 2 when it holds
-/// values that do some other way (an `opt`, a map, another generic, or a
-/// type that holds itself through its elements), else 0.
+/// the elements a collection owns: `owned_elements`, or an optional's
+/// payload: `owned_payload`), 2 when it holds values that do some other way
+/// (a result, a tuple, another generic, or a type that holds itself through
+/// its elements), else 0.
 pub fn needs_drop(pl: DropPlanner, t: i64, depth: i64) -> i64 {
     let p = pl.flow.inf.p;
-    if !prog_is_owned(p, t) || depth > 16 { return 0; }
+    if !owns(pl.flow, t) || depth > 16 { return 0; }
     let key = ty_display(p.tt, t);
     if pl.needs.has(key) {
         // -1: met again while it is being decided, so it holds itself. That
@@ -199,7 +211,12 @@ pub fn needs_drop(pl: DropPlanner, t: i64, depth: i64) -> i64 {
     }
     pl.needs.set(key, -1);
     var verdict = 0;
-    let d = struct_decl(p, t);
+    // A collection that owns its elements is held by the engine itself: its
+    // declared fields are not what runs.
+    let pt = owned_payload(pl.flow, t);
+    let has_payload = !ty_is_unknown(p.tt, pt);
+    let held = owned_elements(pl.flow, t).len() > 0 || has_payload;
+    let d = if held { -1 } else { struct_decl(p, t) };
     if d >= 0 {
         if has_dtor(p, d) { verdict = 1; }
         for fl in stored_fields(p, t) {
@@ -209,12 +226,13 @@ pub fn needs_drop(pl: DropPlanner, t: i64, depth: i64) -> i64 {
         }
     }
     if ty_is_named(p.tt, t) {
-        // A collection that owns its elements drops each; any other generic
-        // holding values that need dropping stops at a seam.
-        let elem = if owned_elements(pl.flow, t).len() > 0 { element_type(p, t) } else { ty_unknown() };
+        // A collection that owns its elements drops each, an optional its
+        // payload; any other generic holding values that need dropping stops
+        // at a seam.
+        let elem = if owned_elements(pl.flow, t).len() > 0 { owned_element_type(p, t) } else { ty_unknown() };
         for a in ty_args(p.tt, t) {
             let v = needs_drop(pl, a, depth + 1);
-            if a == elem && v == 1 { if verdict == 0 { verdict = 1; } }
+            if (a == elem || (has_payload && a == pt)) && v == 1 { if verdict == 0 { verdict = 1; } }
             else if v != 0 { verdict = 2; }
         }
     }
@@ -231,11 +249,20 @@ fn glue(pl: DropPlanner, t: i64) {
     let key = ty_display(p.tt, t);
     if pl.glued.has(key) { return; }
     pl.glued.set(key, true);
-    let d = struct_decl(p, t);
+    let ops = owned_elements(pl.flow, t);
+    let pt = owned_payload(pl.flow, t);
+    var payload_key = "";
+    var absent_op = "";
+    if !ty_is_unknown(p.tt, pt) && needs_drop(pl, pt, 0) == 1 {
+        payload_key = ty_display(p.tt, pt);
+        absent_op = payload_absent_op(pl.flow, t);
+        glue(pl, pt);
+    }
+    let d = if ops.len() > 0 || payload_key != "" { -1 } else { struct_decl(p, t) };
     var fields: List<str> = [];
     for fl in stored_fields(p, t) {
         let ft: i64 = fl[1];
-        if needs_drop(pl, ft, 0) == 1 {
+        if d >= 0 && needs_drop(pl, ft, 0) == 1 {
             fields.push(fl[0]);
             fields.push(ty_display(p.tt, ft));
             glue(pl, ft);
@@ -245,17 +272,18 @@ fn glue(pl: DropPlanner, t: i64) {
     var elem_key = "";
     var len_op = "";
     var get_op = "";
-    let ops = owned_elements(pl.flow, t);
-    if ops.len() == 2 {
-        let et = element_type(p, t);
+    var seq_op = "";
+    if ops.len() == 4 {
+        let et = owned_element_type(p, t);
         if needs_drop(pl, et, 0) == 1 {
             elem_key = ty_display(p.tt, et);
             len_op = ops[0];
             get_op = ops[1];
+            seq_op = ops[2];
             glue(pl, et);
         }
     }
-    pl.rows.push([DropAction::Glue as i64, key, owner, fields, elem_key, len_op, get_op]);
+    pl.rows.push([DropAction::Glue as i64, key, owner, fields, elem_key, len_op, get_op, seq_op, payload_key, absent_op]);
 }
 
 // --- Walking the tree --------------------------------------------------------
@@ -400,6 +428,10 @@ fn place(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
     }
     if k == nk_if() {
         let ch = children(s, n);
+        // A condition that moves it (`if some y = c`) leaves nothing to drop;
+        // one that may move it leaves the branches' drops behind its flag.
+        if ch.len() > 0 && moves_always(pl, ch[0], b) { return; }
+        if ch.len() > 0 && moves(pl, ch[0], b) { pl.flagged = true; }
         var i = 1;
         while i < ch.len() {
             if uses(pl, ch[i], b) { place(pl, ch[i], b, site, key); } else { row(pl, ::Before, ch[i], name, key); }
@@ -547,7 +579,7 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
     let s = p.s;
     let r = f.inf.r;
     let kindof = r.bind_kind[b];
-    if kindof != BindKind::Local && kindof != BindKind::Param { return; }
+    if kindof != BindKind::Local && kindof != BindKind::Param && kindof != BindKind::Unwrapped { return; }
     if kindof == BindKind::Param && flags(s, r.site[b]) != 0 { return; }
     // `let x = rs[i]` borrows the element; `rs` drops it.
     if borrows_element(f, b) { return; }
@@ -560,9 +592,11 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
     if need == 0 { return; }
     let key = ty_display(p.tt, t);
     let site = r.site[b];
-    let decl = if kindof == BindKind::Local { site } else { body };
+    let scope = if kindof == BindKind::Unwrapped { unwrap_scope(pl, site) } else { [] };
+    if kindof == BindKind::Unwrapped && scope.len() == 0 { return; }
+    let decl = if kindof == BindKind::Local { site } else if kindof == BindKind::Unwrapped { scope[0] } else { body };
     if need == 2 {
-        row(pl, ::Seam, decl, "own.collection_drop", f"`{r.name[b]}` holds values that need dropping inside an `opt`, a map or another generic, or a type that holds itself; dropping those comes with the PilIR drop pass (F7)");
+        row(pl, ::Seam, decl, "own.collection_drop", f"`{r.name[b]}` holds values that need dropping inside a result, a tuple or another generic, or a type that holds itself; dropping those comes with the PilIR drop pass (F7)");
         return;
     }
     glue(pl, t);
@@ -573,6 +607,15 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
     }
     if kindof == BindKind::Param {
         place_seq(pl, body, children(s, body), 0, b, body, key, true);
+    } else if kindof == BindKind::Unwrapped {
+        // `if some x = o { .. }`: the branch's statements, dropped as the
+        // branch starts when it never uses `x`. `guard some x = o else ..;`:
+        // the statements after the guard.
+        let blk = scope[1];
+        let from = scope[2];
+        if !place_seq(pl, blk, children(s, blk), from, b, site, key, from == 0) && from > 0 {
+            row(pl, ::After, scope[0], r.name[b], key);
+        }
     } else {
         // A local: the statements after its declaration in its block.
         let blk = p.parents[site];
@@ -584,6 +627,33 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
         }
     }
     if pl.flagged { flag_rows(pl, b, decl, body, key); }
+}
+
+/// Where the binding an unwrap (`if some x = o`, `guard some x = o`) makes
+/// at identifier `site` lives: `[decl, block, first statement]`, where
+/// `decl` is the `if`'s branch or the guard statement; empty when the shape
+/// is not one of these.
+fn unwrap_scope(pl: DropPlanner, site: i64) -> List<i64> {
+    let p = pl.flow.inf.p;
+    let s = p.s;
+    let a = p.parents[site];
+    if a < 0 || kind(s, a) != nk_assign() { return []; }
+    let up = p.parents[a];
+    if up < 0 { return []; }
+    if kind(s, up) == nk_guard() {
+        let blk = ancestor_of_kind(pl, up, -1, [nk_block()]);
+        if blk < 0 { return []; }
+        let stmts = children(s, blk);
+        let at = index_in(s, stmts, up);
+        if at < 0 { return []; }
+        return [stmts[at], blk, at + 1];
+    }
+    let cond = up;
+    let iff = p.parents[cond];
+    if iff < 0 || kind(s, iff) != nk_if() { return []; }
+    let ch = children(s, iff);
+    if ch.len() < 2 || ch[0] != cond || kind(s, ch[1]) != nk_block() { return []; }
+    return [ch[1], ch[1], 0];
 }
 
 /// The node where a move of `b` through identifier `i` completes: the call
@@ -721,15 +791,17 @@ fn plan_element_replace(pl: DropPlanner, n: i64) {
     let t = type_of(f.inf, lhs(s, target));
     pl.cur_binding = -1;
     pl.cur_type = t;
-    let need = needs_drop(pl, element_type(f.inf.p, t), 0);
+    let need = needs_drop(pl, owned_element_type(f.inf.p, t), 0);
     if need == 0 { return; }
     if need == 2 || flags(s, n) != 0 {
-        row(pl, ::Seam, n, "own.collection_drop", f"the element this assignment replaces holds values that need dropping inside an `opt`, a map or another generic, or a type that holds itself, or is updated in place; dropping those comes with the PilIR drop pass (F7)");
+        row(pl, ::Seam, n, "own.collection_drop", f"the element this assignment replaces holds values that need dropping inside a result, a tuple or another generic, or a type that holds itself, or is updated in place; dropping those comes with the PilIR drop pass (F7)");
         return;
     }
+    let lookup: str = owned_elements(f, t)[3];
     glue(pl, t);
-    row(pl, ::ReplaceElement, n, "", ty_display(f.inf.p.tt, t));
+    row(pl, ::ReplaceElement, n, lookup, ty_display(f.inf.p.tt, t));
 }
+
 
 /// Plans the drop of the owned value expression statement `n` makes and
 /// throws away (a statement ending in `;`, not a block's value).
@@ -744,7 +816,7 @@ fn plan_discard(pl: DropPlanner, n: i64) {
     pl.cur_binding = -1;
     pl.cur_type = t;
     if need == 2 {
-        row(pl, ::Seam, n, "own.collection_drop", f"the value this statement throws away holds values that need dropping inside an `opt`, a map or another generic, or a type that holds itself; dropping those comes with the PilIR drop pass (F7)");
+        row(pl, ::Seam, n, "own.collection_drop", f"the value this statement throws away holds values that need dropping inside a result, a tuple or another generic, or a type that holds itself; dropping those comes with the PilIR drop pass (F7)");
         return;
     }
     glue(pl, t);

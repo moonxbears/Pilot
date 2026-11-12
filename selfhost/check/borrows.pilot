@@ -57,12 +57,14 @@ pub struct Borrows : IObject {
     pub assigned: List<List<i64>>;
 }
 
-/// The type of binding `b`: its annotation, else its initializer's type,
-/// else its parameter annotation.
+/// The type of binding `b`: its annotation, else its initializer's type (an
+/// unwrapped binding's: the owned payload), else its parameter annotation.
 pub fn flow_binding_type(f: Flow, b: i64) -> i64 {
     let r = f.inf.r;
     if r.annot[b] >= 0 { return prog_annot_type(f.inf.p, r.annot[b]); }
     if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Local { return type_of(f.inf, r.source[b]); }
+    // `if some x = o`: the payload `o` holds, when it is owned.
+    if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Unwrapped { return owned_payload(f, type_of(f.inf, r.source[b])); }
     if r.bind_kind[b] == BindKind::Param && kind(f.inf.p.s, r.site[b]) == nk_param() {
         let a = rhs(f.inf.p.s, r.site[b]);
         if a >= 0 { return prog_annot_type(f.inf.p, a); }

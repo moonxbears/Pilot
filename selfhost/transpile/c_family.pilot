@@ -509,10 +509,11 @@ fn value_entry_name(name: str) -> str => "pilot_fv_" + name;
 fn engine_arity() -> Map<str, i64> {
     let ops = Map<str, i64>();
     for name in ["list_new", "map_new", "proc_args", "stdin_read_line"] { ops.set(name, 0); }
-    for name in ["is_null", "to_str", "list_pop", "str_len", "str_from_bytes"] { ops.set(name, 11); }
+    for name in ["is_null", "to_str", "list_pop", "str_len", "str_from_bytes", "map_values"] { ops.set(name, 11); }
     for name in ["list_get", "map_get", "map_has", "map_remove", "list_push", "num_pow", "str_byte_at", "list_remove_at"] { ops.set(name, 22); }
     for name in ["list_set", "map_set", "str_slice"] { ops.set(name, 33); }
     ops.set("list_extend", 23);
+    ops.set("str_find", 23);
     ops.set("rt_assert", 12);
     ops.set("seam_open", 12);
     return ops;

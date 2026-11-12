@@ -180,7 +180,57 @@ pub fn binding_type(inf: Infer, b: i64) -> i64 {
     if r.bind_kind[b] == BindKind::Unwrapped && r.source[b] >= 0 {
         return unwrap_type(inf.p, type_of(inf, r.source[b]));
     }
+    if r.bind_kind[b] == BindKind::Param && r.owner[b] >= 0 && kind(inf.p.s, r.owner[b]) == nk_lambda() {
+        return lambda_param_type(inf, r.owner[b], r.site[b]);
+    }
     return ty_unknown();
+}
+
+/// The type of unannotated parameter `prm` of lambda `lam` passed straight
+/// to a call: the matching parameter of the function type the callee
+/// declares for that argument (`(c) => ..` given as `f: (Captures) => str`
+/// makes `c` a `Captures`); unknown otherwise.
+fn lambda_param_type(inf: Infer, lam: i64, prm: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    let lch = children(s, lam);
+    var index = -1;
+    var i = 0;
+    while i + 1 < lch.len() {
+        if lch[i] == prm { index = i; }
+        i = i + 1;
+    }
+    let call = p.parents[lam];
+    if index < 0 || call < 0 || kind(s, call) != nk_call() { return ty_unknown(); }
+    let ch = children(s, call);
+    var arg = -1;
+    i = 1;
+    while i < ch.len() {
+        if ch[i] == lam { arg = i - 1; }
+        i = i + 1;
+    }
+    if arg < 0 { return ty_unknown(); }
+    var f = called_fn(inf, call);
+    if f < 0 && kind(s, ch[0]) == nk_member() {
+        let recv = lhs(s, ch[0]);
+        var rt = type_of(inf, recv);
+        if ty_is_unknown(p.tt, rt) { rt = type_receiver(inf, recv); }
+        if some m = prog_member(p, rt, sym_text(s, rhs(s, ch[0]))) {
+            if kind(s, m.decl) == nk_fn() { f = m.decl; }
+        }
+    }
+    if f < 0 { return ty_unknown(); }
+    var params: List<i64> = [];
+    for q in fn_params(s, f) {
+        let is_receiver = params.len() == 0 && s.receiver.len() > 0 && node_name(s, q) == s.receiver;
+        if kind(s, q) == nk_param() && !is_receiver { params.push(q); }
+    }
+    if arg >= params.len() { return ty_unknown(); }
+    let ft = prog_annot_type(p, rhs(s, params[arg]));
+    if !ty_is_func(p.tt, ft) { return ty_unknown(); }
+    let fargs = ty_args(p.tt, ft);
+    if index + 1 >= fargs.len() { return ty_unknown(); }
+    return fargs[index];
 }
 
 /// Binds the generic parameters of function `f` from the argument types of

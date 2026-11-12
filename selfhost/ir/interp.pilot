@@ -376,7 +376,7 @@ pub fn interp_engine_ops() -> Map<str, str> {
         "rt_print", "rt_eprint", "rt_assert", "stdin_read_line", "stdin_read_all",
         "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
         "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
-        "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "to_str",
+        "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "map_values", "to_str",
         "map_new", "map_get", "map_set", "map_has", "map_remove", "seam_open",
     ] {
         ops.set(name, name);

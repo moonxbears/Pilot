@@ -1,0 +1,13 @@
+// A struct whose fields are named `enter` and `exit` (the labels of a
+// `scope self { enter: ... exit: ... }` block) is a plain struct: its
+// literal builds it like any other.
+
+struct Window : IValue {
+    pub enter: i64;
+    pub exit: i64;
+}
+
+fn main() {
+    let w = Window { enter: 3, exit: 8 };
+    print(w.exit - w.enter);
+}

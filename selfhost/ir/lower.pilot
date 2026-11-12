@@ -126,6 +126,12 @@ pub struct Lowerer : IObject {
     pub start_cur: u32;
     pub start_body: u32;
     pub globals_done: i64;
+    /// Per user file, in the order `<start>` runs them: its unit, the block
+    /// its `comptime` runs are added to, and the block of its top-level
+    /// statements, which that block jumps to.
+    pub start_units: List<i64>;
+    pub start_run_blocks: List<u32>;
+    pub start_unit_bodies: List<u32>;
     /// Inside a setter that names no parameter: the value it is given and
     /// its type (selfhost/ir/lower_setter.pilot), else `ir_no_value()`.
     pub setter_arg: u32;
@@ -162,6 +168,9 @@ pub struct Lowerer : IObject {
     /// The calls planned around statements (selfhost/ir/lower_probe.pilot),
     /// by statement node.
     pub probes: Map<str, List<any>>;
+    /// The program's enum declarations (`adt_nodes`), found once: a name
+    /// that may be a variant is looked up among them, not among every node.
+    pub adt_decls: List<i64>;
 }
 
 /// Lowers `n` expecting type `t` (for target-typed variants).
@@ -238,11 +247,12 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
         try_blocks: [], try_binds: [], try_types: [], try_depths: [], known_types: Map<str, i64>(),
         global_named: global_names(p), global_of: Map<str, i64>(), global_decls: [],
         comptime_nodes: [], comptime_called: Map<str, bool>(), start_cur: 0, start_body: 0, globals_done: 0,
+        start_units: [], start_run_blocks: [], start_unit_bodies: [],
         setter_arg: ir_no_value(), setter_arg_type: ty_unknown(),
         gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
         resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, i64>(),
         loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, List<any>>(), drop_flags: Map<str, i64>(),
-        probes: probe_rows(p),
+        probes: probe_rows(p), adt_decls: adt_nodes(p.s),
     };
     // Function 0 is `<start>` (selfhost/ir/lower_global.pilot).
     lw.queue.push(-1);

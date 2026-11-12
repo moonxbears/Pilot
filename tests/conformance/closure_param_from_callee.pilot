@@ -1,0 +1,25 @@
+// An unannotated closure parameter takes the type the callee declares for
+// it: `(p) => p.x * 10` passed as `f: (Point) => i64` reads `p` as a Point,
+// through a top-level function and through a method. Hand-worked: 3*10 = 30;
+// (2 + 5) = 7 then 7*7 = 49; "x=4".
+struct Point : IValue {
+    pub x: i64;
+    pub y: i64;
+}
+
+struct Shape : IObject {
+    pub corner: Point;
+
+    pub fn measure(ref self, f: (Point) => i64) -> i64 => f(self.corner);
+    pub fn describe(ref self, scale: i64, f: (Point, i64) => str) -> str => f(self.corner, scale);
+    ~self() {}
+}
+
+fn apply(p: Point, f: (Point) => i64) -> i64 => f(p);
+
+fn main() {
+    print(apply(Point { x: 3, y: 1 }, (p) => p.x * 10));
+    let s = Shape { corner: Point { x: 2, y: 5 } };
+    print(s.measure((q) => (q.x + q.y) * (q.x + q.y)));
+    print(s.describe(2, (q, k) => "x=" + f"{q.x * k}"));
+}

@@ -24,6 +24,46 @@ pub fn string_builder_new() -> StringBuilder {
     return StringBuilder { content: "" };
 }
 
+/// `parts` in order, with `sep` between each two, as one string. The parts
+/// are concatenated in pairs, then the pairs in pairs, and so on, so each
+/// byte is copied about log2(parts) times; appending the parts one at a time
+/// to a growing string copies everything before a part once per later part.
+pub fn join_text(parts: List<str>, sep: str) -> str {
+    if parts.len() == 0 { return ""; }
+    var level: List<str> = [];
+    var i = 0;
+    while i < parts.len() {
+        level.push(if i + 1 < parts.len() { parts[i] + sep } else { parts[i] });
+        i = i + 1;
+    }
+    while level.len() > 1 {
+        var next: List<str> = [];
+        var k = 0;
+        while k + 1 < level.len() {
+            next.push(level[k] + level[k + 1]);
+            k = k + 2;
+        }
+        if k < level.len() { next.push(level[k]); }
+        level = next;
+    }
+    return level[0];
+}
+
+/// The pieces of `whole` between occurrences of `sep` (not empty), in
+/// order: `n` occurrences give `n + 1` pieces, some of which may be empty.
+pub fn split_text(whole: str, sep: str) -> List<str> {
+    var out: List<str> = [];
+    var at = 0;
+    while true {
+        let next = whole.find(sep, at);
+        if next < 0 { break; }
+        out.push(whole.slice(at, next));
+        at = next + sep.len();
+    }
+    out.push(whole.slice(at, whole.len()));
+    return out;
+}
+
 /// The decimal integer `text` spells (an optional sign, then digits, with no
 /// surrounding space), or `none` when it spells something else or does not
 /// fit in an `i64`.

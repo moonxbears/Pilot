@@ -30,8 +30,26 @@ pub fn check_program() -> List<List<any>> {
     let s = snap_load();
     let sink = sink_new(s);
     let p = prog_new(s);
-    let r = resolve_program(p, sink);
-    let inf = infer_new(p, r);
+    let inf = infer_new(p, resolve_program(p, sink));
+    check_all(inf, sink);
+    return sink.rows;
+}
+
+/// `check_program` and `run_plan` in one pass over the program, sharing its
+/// resolution and inference: `[diagnostic rows, run plan]`. `pilot run`
+/// checks a program and then runs it, so it needs both.
+pub fn check_and_plan() -> List<any> {
+    let s = snap_load();
+    let sink = sink_new(s);
+    let p = prog_new(s);
+    let inf = infer_new(p, resolve_program(p, sink));
+    check_all(inf, sink);
+    return [sink.rows, plan_of(s, inf)];
+}
+
+/// Applies every rule of the checker to the inferred program.
+fn check_all(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
     check_rules(inf, sink);
     check_generics(inf, sink);
     check_ownership(inf, sink);
@@ -43,7 +61,6 @@ pub fn check_program() -> List<List<any>> {
     check_attr_inherit(p, sink);
     check_attr_chains(p, sink);
     check_coverage(p, sink);
-    return sink.rows;
 }
 
 /// Where each owned value of the program is dropped (selfhost/check/drops.pilot),
@@ -65,8 +82,12 @@ pub fn drop_plan() -> List<List<any>> {
 pub fn run_plan() -> List<any> {
     let s = snap_load();
     let p = prog_new(s);
-    let r = resolve_program(p, sink_new(s));
-    let inf = infer_new(p, r);
+    return plan_of(s, infer_new(p, resolve_program(p, sink_new(s))));
+}
+
+/// The run plan (`run_plan`) of the inferred program.
+fn plan_of(s: Snap, inf: Infer) -> List<any> {
+    let p = inf.p;
     let pl = drop_planner(inf);
     plan_copies(pl);
     var probes: List<List<any>> = [];

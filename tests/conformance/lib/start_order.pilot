@@ -1,0 +1,18 @@
+// A module whose functions keep state in its own globals; imported by
+// tests/conformance/start_order.pilot.
+pkg lib.start_order;
+
+var calls = 0;
+let base = 40;
+
+comptime {
+    print("start_order: comptime");
+}
+
+print("start_order: top level");
+
+/// The next number after `base`, counting calls in the module's global.
+pub fn next_id() -> i64 {
+    calls = calls + 1;
+    return base + calls;
+}

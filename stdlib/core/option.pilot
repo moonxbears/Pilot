@@ -9,6 +9,13 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Option;
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 
+// The engine holds an option as its payload itself, or as none (stand-in
+// `ir.absent_as_null`): dropping an option drops its payload, the type of
+// `val`, unless `is_null` says it is none (selfhost/check/drops.pilot).
+comptime {
+    __engine("bind_owned_payload", nameof(option), nameof(val), "is_null");
+}
+
 [Lang(Cfg.Lang.opt_t), Layout(c_abi)]
 pub partial struct option<T: IAnyValue> : IEquatable<option<T>>, ITryOperator<T, option<never>>, ICoalesceOperator<T> {
     pub val:       T;

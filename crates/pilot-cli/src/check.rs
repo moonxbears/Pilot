@@ -329,8 +329,10 @@ pub(crate) fn in_stdlib(path: &str) -> bool {
 /// Runs the checker made of `checker_files` over the program at `path`,
 /// linked with the declarations `decls` names, and returns its diagnostics
 /// in the user's files. A program that does not link gives none here:
-/// `cli_check` reports why it does not.
-pub fn check(path: &str, checker_files: &[String], decls: &[String]) -> Vec<Diag> {
+/// `cli_check` reports why it does not. With `keep_plan`, the same pass also
+/// makes the program's run plan and keeps it for `drop_plan`, for a caller
+/// that runs the program next.
+pub fn check(path: &str, checker_files: &[String], decls: &[String], keep_plan: bool) -> Vec<Diag> {
     let Some((linked, files, snap)) = program_snapshot(path, decls) else {
         return Vec::new();
     };
@@ -339,7 +341,16 @@ pub fn check(path: &str, checker_files: &[String], decls: &[String]) -> Vec<Diag
         _ => None,
     });
     let tool_paths: Vec<&str> = checker_files.iter().map(String::as_str).collect();
-    let out = tool::eval_to_host(&tool_paths, "check_program();", ops);
+    let out = if keep_plan {
+        let both = tool::eval_to_host(&tool_paths, "check_and_plan();", ops);
+        let mut parts = both.as_list().unwrap_or_default().to_vec().into_iter();
+        let out = parts.next().unwrap_or(HostValue::Null);
+        let plan = parts.next().unwrap_or(HostValue::Null);
+        KEPT_PLAN.with(|k| *k.borrow_mut() = Some((plan_key(path, checker_files, decls), plan)));
+        out
+    } else {
+        tool::eval_to_host(&tool_paths, "check_program();", ops)
+    };
     let user: Vec<&str> = files
         .iter()
         .filter(|(_, u)| *u)
@@ -394,8 +405,9 @@ pub struct PlannedProbe {
 
 /// The drop plan of the program at `path`: its rows, and how to drop a value
 /// of each type it names (`[type, destructor owner or "", fields, element
-/// type, length op, element op]`, the last three empty for a type that owns
-/// no elements); and the probes the checker plans around statements.
+/// type, length op, element op, sequence op, payload type, absent op]`, the
+/// element four empty for a type that owns no elements, the payload two for
+/// one without a payload); and the probes the checker plans around statements.
 #[derive(Clone, Debug, Default)]
 pub struct CheckedDropPlan {
     pub rows: Vec<PlannedDrop>,
@@ -433,18 +445,35 @@ fn planned_probe(linked: &LinkedSource, row: &HostValue) -> Option<PlannedProbe>
     })
 }
 
+thread_local! {
+    /// The run plan `check` last computed, with the program, checker and
+    /// declarations it was computed for (`plan_key`).
+    static KEPT_PLAN: std::cell::RefCell<Option<(String, HostValue)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// What a run plan depends on: the program, the checker and the declarations.
+fn plan_key(path: &str, checker_files: &[String], decls: &[String]) -> String {
+    format!("{path}\0{}\0{}", checker_files.join("\n"), decls.join("\n"))
+}
+
 /// Runs the checker's `run_plan()` over the program at `path`: its drop plan
-/// and its probes. A program that does not link has no plan.
+/// and its probes. A program that does not link has no plan. The plan `check`
+/// computed for the same program, checker and declarations in this process
+/// is used instead of computing it again.
 pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> CheckedDropPlan {
     let Some((linked, _, snap)) = program_snapshot(path, decls) else {
         return CheckedDropPlan::default();
     };
-    let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
-        "chk_snapshot" => Some(Ok(snap.clone())),
-        _ => None,
+    let key = plan_key(path, checker_files, decls);
+    let kept = KEPT_PLAN.with(|k| k.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, p)| p.clone()));
+    let out = kept.unwrap_or_else(|| {
+        let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
+            "chk_snapshot" => Some(Ok(snap.clone())),
+            _ => None,
+        });
+        let tool_paths: Vec<&str> = checker_files.iter().map(String::as_str).collect();
+        tool::eval_to_host(&tool_paths, "run_plan();", ops)
     });
-    let tool_paths: Vec<&str> = checker_files.iter().map(String::as_str).collect();
-    let out = tool::eval_to_host(&tool_paths, "run_plan();", ops);
     let parts = out.as_list().unwrap_or_default();
     let mut plan = CheckedDropPlan::default();
     for r in parts.get(1).and_then(HostValue::as_list).unwrap_or_default() {
@@ -468,12 +497,15 @@ pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> Chec
                     ty: s(4),
                     len_op: s(5),
                     get_op: s(6),
+                    seq_op: (!s(7).is_empty()).then(|| s(7)),
                 });
                 let owner = s(2);
+                let payload = (!s(8).is_empty()).then(|| (s(8), s(9)));
                 let glue = pilot_vm::lower_drop::DropGlue {
                     destructor_owner: (!owner.is_empty()).then_some(owner),
                     fields,
                     elements,
+                    payload,
                 };
                 plan.glue.push((s(1), glue));
             } else {

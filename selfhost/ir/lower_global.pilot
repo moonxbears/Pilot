@@ -278,7 +278,18 @@ pub fn lower_start(lw: Lowerer, main: i64) {
     lw.start_body = ir_add_block(f);
     switch_to(lw, lw.start_body);
     schedule_comptime(lw);
+    // Each file runs its `comptime` code (a block `extend_start` fills) and
+    // then its top-level statements, imported files first, so a file's
+    // globals are set before the files that import it run.
     for prog in user_programs(lw, main) {
+        if ir_is_terminated(f, lw.cur) { break; }
+        let runs = ir_add_block(f);
+        let body = ir_add_block(f);
+        jump_to(lw, runs, [], 0);
+        lw.start_units.push(unit_of(s, prog));
+        lw.start_run_blocks.push(runs);
+        lw.start_unit_bodies.push(body);
+        switch_to(lw, body);
         for c in children(s, prog) {
             if !runs_at_start(s, c) || ir_is_terminated(f, lw.cur) { continue; }
             let k = kind(s, c);
@@ -307,10 +318,11 @@ pub fn lower_start(lw: Lowerer, main: i64) {
     let _ = ir_emit(f, lw.cur, op_return(), 0, ret, args, false, span_start(s, main));
 }
 
-/// Adds to `<start>`'s entry block what lowering has found since the last
-/// call: the `comptime` runs not yet called (in source order), then the
-/// globals of files outside the user's that the program reads. True when it
-/// added anything; lowering what it added may queue more functions.
+/// Adds to `<start>` what lowering has found since the last call: the
+/// `comptime` runs not yet called, in source order, to the block of runs of
+/// the file each belongs to; the globals of files outside the user's that
+/// the program reads to the entry block, which runs before every file. True
+/// when it added anything; lowering what it added may queue more functions.
 pub fn extend_start(lw: Lowerer) -> bool {
     let s = lw.inf.p.s;
     let f = lw.m.functions[0];
@@ -325,6 +337,8 @@ pub fn extend_start(lw: Lowerer) -> bool {
     for n in runs {
         lw.comptime_called.set(key(n), true);
         changed = true;
+        let k = start_unit_index(lw, unit_of(s, n));
+        if k >= 0 { lw.cur = lw.start_run_blocks[k]; }
         let fi = comptime_index(lw, n);
         let ret = lw.m.functions[fi].ret_physics;
         let v = emit(lw, op_call_direct(), fi, ret, [], n);
@@ -332,6 +346,12 @@ pub fn extend_start(lw: Lowerer) -> bool {
             let g = global_index(lw, n, type_of(lw.inf, lhs(s, n)), f"comptime@{span_start(s, n)}");
             emit_void(lw, op_store(), 0, [global_addr(lw, g, n), coerce(lw, v, lw.m.globals[g].physics, n)], n);
         }
+        if k >= 0 {
+            lw.start_run_blocks[k] = lw.cur;
+        } else {
+            lw.start_cur = lw.cur;
+        }
+        lw.cur = lw.start_cur;
     }
     while lw.globals_done < lw.global_decls.len() {
         let d = lw.global_decls[lw.globals_done];
@@ -349,11 +369,29 @@ pub fn extend_start(lw: Lowerer) -> bool {
     return changed;
 }
 
-/// Ends `<start>`'s entry block with the jump to the top-level statements.
+/// Ends `<start>`'s entry block with the jump to the top-level statements,
+/// and each file's block of `comptime` runs with the jump to its statements.
 pub fn close_start(lw: Lowerer) {
     begin_function(lw, lw.m.functions[0]);
     lw.cur = lw.start_cur;
     jump_to(lw, lw.start_body, [], 0);
+    var k = 0;
+    while k < lw.start_run_blocks.len() {
+        lw.cur = lw.start_run_blocks[k];
+        jump_to(lw, lw.start_unit_bodies[k], [], 0);
+        k = k + 1;
+    }
+}
+
+/// Which of `<start>`'s files unit `u` is (an index into `start_units`): the
+/// first file when `u` is none of them, -1 when there are none.
+fn start_unit_index(lw: Lowerer, u: i64) -> i64 {
+    var k = 0;
+    while k < lw.start_units.len() {
+        if lw.start_units[k] == u { return k; }
+        k = k + 1;
+    }
+    return if lw.start_units.len() > 0 { 0 } else { -1 };
 }
 
 /// Sorts nodes by where they start in the source.

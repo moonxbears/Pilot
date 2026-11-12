@@ -19,6 +19,7 @@ use Pilot.SelfHost.Cli.Report;
 use Pilot.SelfHost.Cli.TestCmd;
 use Pilot.SelfHost.Cli.TestIr;
 use Pilot.SelfHost.Cli.TestEmit;
+use Pilot.SelfHost.Cli.TestChanged;
 use Pilot.SelfHost.Cli.BenchCmd;
 use Pilot.SelfHost.Cli.ComptimeAttrs;
 
@@ -50,11 +51,12 @@ fn diag_before(a: HostDiag, b: HostDiag) -> bool =>
     a.file < b.file || (a.file == b.file && a.start < b.start);
 
 /// The analyzer's and the type checker's diagnostics for a program the seed
-/// accepted, in source order.
-fn semantic_diags(path: str) -> List<HostDiag> {
+/// accepted, in source order. `for_run`: the program is run next, so the
+/// checker makes its run plan in the same pass (`host_typecheck`).
+fn semantic_diags(path: str, for_run: bool) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in host_analyze(path) { out.push(d); }
-    for d in host_typecheck(path, cli_checker_files(), cli_checker_decls()) {
+    for d in host_typecheck(path, cli_checker_files(), cli_checker_decls(), for_run) {
         out.push(d);
         var at = out.len - 1;
         while at > 0 && diag_before(d, out[at - 1]) {
@@ -125,7 +127,7 @@ pub fn cmd_run(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     if !program.ends_with(".pilc") {
         let compiled = host_check(program);
         if report_diagnostics(compiled) > 0 { return 1; }
-        let analyzed = report_at_least(semantic_diags(program), diag_severity_warning());
+        let analyzed = report_at_least(semantic_diags(program, true), diag_severity_warning());
         if report_diagnostics(analyzed) > 0 { return 1; }
         // Its `[Live(.., when: ::Run)]` calls run before `main`.
         if comptime_attrs_run(program, live_phase_run()) > 0 { return 1; }
@@ -155,7 +157,7 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
         let compiled = host_check(f);
         var found = report_diagnostics(compiled);
         // The analyzer reads a program the seed accepted.
-        if compiled.len == 0 { found = found + report_diagnostics(semantic_diags(f)); }
+        if compiled.len == 0 { found = found + report_diagnostics(semantic_diags(f, false)); }
         // A program that passed runs its `[Live]` and `[Generate]` functions.
         if found == 0 { found = comptime_attrs_run(f, live_phase_compile()); }
         errors = errors + found;
@@ -170,12 +172,35 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
 
 /// `pilot test [paths...] [--filter text] [--ir | --emit <lang> [--live-allocations]]`
 pub fn cmd_test(p: ParsedArgs, reg: CommandRegistry) -> i64 {
-    if parsed_has_flag(p, "emit") {
-        return test_emit_command(parsed_get_str(p, "emit", ""), cli_positionals(p), parsed_get_str(p, "filter", ""), parsed_has_flag(p, "live-allocations"));
+    var paths = cli_positionals(p);
+    let lang = parsed_get_str(p, "emit", "");
+    if parsed_has_flag(p, "changed") {
+        // Only the cases the changed files reach (selfhost/cli/test_changed.pilot).
+        var engine = TestEngine::Seed;
+        var sources = cli_seed_tool_files();
+        if parsed_has_flag(p, "emit") {
+            engine = TestEngine::Emit;
+            sources = cli_emit_files(lang);
+        } else if parsed_has_flag(p, "ir") {
+            engine = TestEngine::Ir;
+            sources = cli_ir_files();
+        }
+        for f in cli_ir_decls() { sources.push(f); }
+        let plan = plan_changed(parsed_get_str(p, "since", "HEAD"), paths, engine, lang, sources);
+        if plan.action == 2 { return 2; }
+        if plan.action == 1 { return 0; }
+        paths = plan.paths;
     }
-    if parsed_has_flag(p, "ir") { return test_ir_command(cli_positionals(p), parsed_get_str(p, "filter", "")); }
-    return test_command(cli_positionals(p), parsed_get_str(p, "filter", ""));
+    if parsed_has_flag(p, "emit") {
+        return test_emit_command(lang, paths, parsed_get_str(p, "filter", ""), parsed_has_flag(p, "live-allocations"));
+    }
+    if parsed_has_flag(p, "ir") { return test_ir_command(paths, parsed_get_str(p, "filter", "")); }
+    return test_command(paths, parsed_get_str(p, "filter", ""));
 }
+
+/// The self-hosted sources `pilot run` uses on every program: the type
+/// checker's (the analyzer is the seed's own, under `crates/`).
+fn cli_seed_tool_files() -> List<str> => cli_checker_files();
 
 /// `pilot bench [dir] [--filter text]`: the milestone tests' run times.
 pub fn cmd_bench(p: ParsedArgs, reg: CommandRegistry) -> i64 {
@@ -215,16 +240,22 @@ pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
     let compiled = without_seed_limits(host_check(args[1]));
     if report_diagnostics(compiled) > 0 { return 1; }
-    let analyzed = report_at_least(semantic_diags(args[1]), diag_severity_warning());
+    let analyzed = report_at_least(semantic_diags(args[1], false), diag_severity_warning());
     if report_diagnostics(analyzed) > 0 { return 1; }
     // The emitter is a toolchain source, found from the toolchain's own
     // search roots (a language without one stops as an internal error).
+    return host_program_tool(args[1], cli_emit_files(lang), cli_ir_decls(), f"emit_program({lang}_dialect());");
+}
+
+/// The sources of `pilot emit <lang>`: PilIR, then the source emitters and
+/// the dialect of `lang`.
+pub fn cli_emit_files(lang: str) -> List<str> {
     var files = cli_ir_files();
     files.push("selfhost/ir/pass_perceus.pilot");
     files.push("selfhost/transpile/source.pilot");
     files.push("selfhost/transpile/c_family.pilot");
     files.push(f"selfhost/transpile/emit_{lang}.pilot");
-    return host_program_tool(args[1], files, cli_ir_decls(), f"emit_program({lang}_dialect());");
+    return files;
 }
 
 /// `pilot build <file> [-o out] [--live-allocations]`: a native executable through C11
@@ -318,7 +349,7 @@ pub fn cmd_ir(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let compiled = without_seed_limits(host_check(args[1]));
     if report_diagnostics(compiled) > 0 { return 1; }
     // The checker's and analyzer's errors and warnings, as `pilot run` reports them.
-    let analyzed = report_at_least(semantic_diags(args[1]), diag_severity_warning());
+    let analyzed = report_at_least(semantic_diags(args[1], false), diag_severity_warning());
     if report_diagnostics(analyzed) > 0 { return 1; }
     // The script arguments after `--` reach the program the interpreter runs.
     var script_args = "[";

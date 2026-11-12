@@ -124,14 +124,19 @@ fn the_allocation_counter_sees_objects_that_are_not_freed() {
     assert!(n >= 7, "only {n} live allocations without freeing");
 }
 
+/// The one native run of the whole corpus: every program's output and exit
+/// code must match its expectation files (as plain `test --emit c` checks),
+/// and no heap object may be left allocated at the end.
 #[test]
-fn the_corpus_ends_with_no_live_allocations_natively() {
+#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
+fn the_corpus_passes_natively_with_no_live_allocations() {
     let out = pilot(&["test", "--emit", "c", "--live-allocations"]);
     let stdout = text(&out.stdout);
-    assert!(
-        stdout.contains(" 0 failed, 0 stopped at a seam"),
-        "{stdout}{}",
-        text(&out.stderr)
-    );
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert_eq!(out.status.code(), Some(0), "{stdout}{}", text(&out.stderr));
+    let result = stdout
+        .lines()
+        .find(|l| l.starts_with("RESULT (emit c):"))
+        .expect("a result line");
+    assert!(result.contains(" 0 failed"), "{result}\n{stdout}");
+    assert!(result.contains(" 0 stopped at a seam"), "{result}\n{stdout}");
 }

@@ -43,7 +43,7 @@ pub struct Regex : IObject {
 
     /// Whether the pattern matches anywhere in `text`.
     pub fn is_match(ref self, text: str) -> bool {
-        var vm = new_vm(self.prog);
+        var vm = new_vm_slots(self.prog, false);
         return pike_search(self.prog, vm, text, 0, -1, false, false);
     }
 
@@ -53,7 +53,7 @@ pub struct Regex : IObject {
     /// The leftmost match starting at or after byte `pos`, or `none`. `^`
     /// and `\b` still look at the text before `pos`.
     pub fn find_at(ref self, text: str, pos: i64) -> Match? {
-        var vm = new_vm(self.prog);
+        var vm = new_vm_slots(self.prog, false);
         if !pike_search(self.prog, vm, text, pos, -1, false, false) { return none; }
         return make_match(text, vm.found);
     }
@@ -61,14 +61,14 @@ pub struct Regex : IObject {
     /// The match starting exactly at byte `pos` (Python's `re.match` at 0),
     /// or `none`.
     pub fn match_at(ref self, text: str, pos: i64) -> Match? {
-        var vm = new_vm(self.prog);
+        var vm = new_vm_slots(self.prog, false);
         if !pike_search(self.prog, vm, text, pos, -1, true, false) { return none; }
         return make_match(text, vm.found);
     }
 
     /// The match covering all of `text` (Python's `re.fullmatch`), or `none`.
     pub fn full_match(ref self, text: str) -> Match? {
-        var vm = new_vm(self.prog);
+        var vm = new_vm_slots(self.prog, false);
         if !pike_search(self.prog, vm, text, 0, -1, true, true) { return none; }
         return make_match(text, vm.found);
     }
@@ -91,7 +91,7 @@ pub struct Regex : IObject {
     /// is never taken right where the previous match, also empty, was.
     pub fn find_all(ref self, text: str) -> List<Match> {
         var out: List<Match> = [];
-        for slots in all_slots(self.prog, text, -1) {
+        for slots in all_slots(self.prog, text, -1, false) {
             out.push(make_match(text, slots));
         }
         return out;
@@ -100,7 +100,7 @@ pub struct Regex : IObject {
     /// Every match in `text` with its capture groups.
     pub fn captures_all(ref self, text: str) -> List<Captures> {
         var out: List<Captures> = [];
-        for slots in all_slots(self.prog, text, -1) {
+        for slots in all_slots(self.prog, text, -1, true) {
             out.push(Captures { text: text, slots: slots, names: self.prog.names });
         }
         return out;
@@ -115,7 +115,7 @@ pub struct Regex : IObject {
         var out: List<str> = [];
         var last = 0;
         let limit = if count > 0 { count } else { -1 };
-        for slots in all_slots(self.prog, text, limit) {
+        for slots in all_slots(self.prog, text, limit, false) {
             out.push(text.slice(last as usize, slots[0] as usize));
             last = slots[1];
         }
@@ -138,7 +138,7 @@ pub struct Regex : IObject {
         var out = "";
         var last = 0;
         let limit = if count > 0 { count } else { -1 };
-        for slots in all_slots(self.prog, text, limit) {
+        for slots in all_slots(self.prog, text, limit, template_needs_groups(parts)) {
             out = out + text.slice(last as usize, slots[0] as usize);
             for part in parts {
                 if part.group < 0 {
@@ -156,7 +156,7 @@ pub struct Regex : IObject {
     pub fn replace_with(ref self, text: str, f: (Captures) => str) -> str {
         var out = "";
         var last = 0;
-        for slots in all_slots(self.prog, text, -1) {
+        for slots in all_slots(self.prog, text, -1, true) {
             let start = slots[0];
             let end = slots[1];
             out = out + text.slice(last as usize, start as usize);
@@ -303,11 +303,12 @@ pub fn escape(text: str) -> str {
 // Searching many times with one VM
 // ------------------------------------------------------------------------------
 
-/// Capture offsets of every non-overlapping match, at most `limit` (-1: all).
+/// Capture offsets of every non-overlapping match, at most `limit` (-1: all);
+/// every group's when `groups`, else only the whole match's.
 /// After an empty match the next one must not be empty at the same place.
-fn all_slots(ref prog: ReProgram, text: str, limit: i64) -> List<List<i64>> {
+fn all_slots(ref prog: ReProgram, text: str, limit: i64, groups: bool) -> List<List<i64>> {
     var out: List<List<i64>> = [];
-    var vm = new_vm(prog);
+    var vm = new_vm_slots(prog, groups);
     let n = text.len() as i64;
     var pos = 0;
     var no_empty_at = -1;
@@ -329,6 +330,14 @@ fn all_slots(ref prog: ReProgram, text: str, limit: i64) -> List<List<i64>> {
 struct TemplatePart : IValue {
     pub text: str;
     pub group: i64;
+}
+
+/// Whether a replacement made of `parts` inserts a group other than 0.
+fn template_needs_groups(ref parts: List<TemplatePart>) -> bool {
+    for part in parts {
+        if part.group > 0 { return true; }
+    }
+    return false;
 }
 
 fn parse_template(ref prog: ReProgram, template: str) -> res<List<TemplatePart>, RegexError> {

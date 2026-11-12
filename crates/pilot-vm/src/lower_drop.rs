@@ -83,22 +83,31 @@ pub struct DropItem {
 
 /// How to drop a value of one type: the type whose destructor runs (none
 /// when it has none), then each field to drop with the field's type, then,
-/// for a collection that owns its elements, each element.
+/// for a collection that owns its elements, each element, and for an
+/// optional, its payload when there is one.
 #[derive(Clone, Debug, Default)]
 pub struct DropGlue {
     pub destructor_owner: Option<String>,
     pub fields: Vec<(String, String)>,
     pub elements: Option<DropElements>,
+    /// For a value the engine holds as its payload itself or as none: the
+    /// payload's type as the glue lists it, and the operation testing for
+    /// none.
+    pub payload: Option<(String, String)>,
 }
 
 /// The elements a collection owns: their type as the glue lists it, and the
 /// engine operations that give the collection's length and its element at a
-/// position (both named by the plan).
+/// position, after its sequence operation when it has one (all named by the
+/// plan).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DropElements {
     pub ty: String,
     pub len_op: String,
     pub get_op: String,
+    /// The operation that first turns the collection into a list of its
+    /// elements (a map's values), when it is not walked as it is.
+    pub seq_op: Option<String>,
 }
 
 /// Where the program's owned values are dropped.
@@ -122,7 +131,9 @@ pub struct DropPlan {
     pub discards: HashMap<NodeKey, String>,
     /// Element assignments (`rs[i] = v`) that drop the element they
     /// replace, with the collection's type as the glue lists it.
-    pub element_replace: HashMap<NodeKey, String>,
+    /// The operation that reads the element (none for a new key) comes
+    /// first, then the collection's type.
+    pub element_replace: HashMap<NodeKey, (String, String)>,
     /// The value-type fields a copy of each value type copies too.
     pub copy_glue: HashMap<String, Vec<(String, String)>>,
 }
@@ -267,17 +278,20 @@ impl BytecodeCompiler {
     }
 
     /// When assignment `id` replaces an element its collection owns, drops
-    /// the element at `r_key` of the collection in `r_obj`.
+    /// the element at `r_key` of the collection in `r_obj`, if there is one.
     pub(crate) fn drop_replaced_element(&mut self, arena: &AstArena, id: NodeId, r_obj: u8, r_key: u8) {
-        let Some(ty) = self.drop_plan.as_ref().and_then(|p| p.element_replace.get(&key_of(arena, id)).cloned()) else {
+        let Some((lookup, ty)) = self.drop_plan.as_ref().and_then(|p| p.element_replace.get(&key_of(arena, id)).cloned())
+        else {
             return;
         };
         let Some(el) = self.drop_plan.as_ref().and_then(|p| p.glue.get(&ty)).and_then(|g| g.elements.clone()) else {
             return;
         };
         let mark = self.next_reg;
-        let r_old = self.emit_intrinsic(&el.get_op, &[r_obj, r_key]);
+        let r_old = self.emit_intrinsic(&lookup, &[r_obj, r_key]);
+        let absent = self.emit_branch(Opcode::JumpIfNull, r_old, 0);
         self.emit_drop_value(r_old, &el.ty, 0);
+        self.patch_to_here(absent);
         self.release_to(mark);
     }
 
@@ -382,11 +396,21 @@ impl BytecodeCompiler {
         if let Some(el) = &glue.elements {
             self.emit_drop_elements(r, el, depth);
         }
+        if let Some((payload_ty, absent_op)) = &glue.payload {
+            let r_none = self.emit_intrinsic(absent_op, &[r]);
+            let skip = self.emit_branch(Opcode::JumpIfTrue, r_none, 0);
+            self.emit_drop_value(r, payload_ty, depth + 1);
+            self.patch_to_here(skip);
+        }
         self.release_to(mark);
     }
 
     /// Drops each element of the collection in register `r`, front to back.
     fn emit_drop_elements(&mut self, r: u8, el: &DropElements, depth: usize) {
+        let r = match &el.seq_op {
+            Some(op) => self.emit_intrinsic(op, &[r]),
+            None => r,
+        };
         let r_idx = self.alloc_reg();
         let r_zero = self.emit_const(PilotVal::from_int(0));
         self.emit(Opcode::Move, r_idx, r_zero, 0);

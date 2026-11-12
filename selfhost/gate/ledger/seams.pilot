@@ -115,7 +115,7 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("mem.slice_buffer_grow", ::Exit, "heap allocator behind libpilot_rt to grow a SliceBuffer past its capacity", "F6"),
         seam_entry("os.host_info", ::Entry, "host OS/arch query intrinsic", "F6"),
         seam_entry("own.capture", ::Entry, "PilIR drop pass: a closure owning the owned locals it captures and dropping them with itself", "F7"),
-        seam_entry("own.collection_drop", ::Entry, "PilIR drop pass: dropping the values a map, an `opt` or another generic holds when they need dropping (lists drop their elements)", "F7"),
+        seam_entry("own.collection_drop", ::Entry, "PilIR drop pass: dropping the values a result, a tuple or another generic holds when they need dropping (lists, maps and `opt` drop theirs)", "F7"),
         seam_entry("perceus.foreign_drop_ir", ::Exit, "PilIR ForeignDrop instruction calling a foreign destructor pointer (IR function builder)", "F5"),
         seam_entry("pilir.gil_scopes", ::Entry, "PyGilGuard scope enter/exit instructions in lowered PilIR", "F5"),
         seam_entry("pilot_cst.parse_lossless", ::Entry, "lossless CST parser linked behind the pilot.cst facade", "F3"),
@@ -223,6 +223,7 @@ pub fn stand_in_registry() -> List<StandInEntry> {
         stand_in_entry("ir.engine_sequence_for", "slice<T> is { ptr<T>, usize } enumerated by its SliceEnumerator", "the value is the engine's own list, as in the seed, and is indexed by engine operations", "F6"),
         stand_in_entry("ir.fixed_layout_ids", "layout ids handed out by the type registry from [Bits] and [Layout]", "each helper returns a fixed id (0-3) and fixed register facts", "F4"),
         stand_in_entry("ir.target_defaults", "target descriptor from --target and the compile driver", "backend llvm and little-endian on every target", "F3"),
+        stand_in_entry("proc.memory_available", "each OS's own report of available memory (Linux /proc/meminfo, macOS host_statistics64, Windows GlobalMemoryStatusEx)", "only Linux's /proc/meminfo is read; on other OSes it is none, and run_all is limited by the CPU count alone", "F6"),
         stand_in_entry("proto.packet_bytes", "borrowed slice<u8> wire view (0b01)", "generated views hold an owned List<i64>, one byte per element", "F7"),
         stand_in_entry("py.buffer_layout", "CPython Py_buffer C layout with typed pointers", "pointers are usize and format is a str, so the layout does not match", "F6"),
         stand_in_entry("seed.generator_frame", "a frame record of the body's live locals and a state index (F5b)", "on the seed the engine keeps the frame (its registers and resume point) and the value is its integer handle; the type declares none of the record's fields", "F6"),
@@ -290,9 +291,13 @@ pub fn bug_registry() -> List<KnownBug> {
             "returns the element; prints 4 and a", "thread 'main' panicked: index out of bounds (crates/pilot-ast/src/lib.rs:382)",
             "tests/conformance/known_bugs/return_local_index.pilot", "F7"),
         known_bug("seed.if_some_foreign_let", "selfhost/analyzer.pilot DECL004 over crates/pilot-analysis binding targets",
-            "`if some m = e` is checked as an assignment whose target is a `let m` declared in another function (any linked file, a std module included), so it is refused as reassigning an immutable binding",
+            "`if some m = e` (and `guard some m = e`) is checked as an assignment whose target is a `let m` declared in another function (any linked file, a std module included: `let g` in stdlib/core/reactive.pilot refuses `guard some g = ..`), so it is refused as reassigning an immutable binding",
             "`m` is a new binding in the `if`; prints 2, 3", "error[DECL004]: Cannot reassign to immutable 'let' binding 'm'",
             "tests/conformance/known_bugs/if_some_foreign_let.pilot", "F4"),
+        known_bug("seed.struct_field_scope_label", "crates/pilot-parser struct literals over the `enter`/`exit` receptors of stdlib/core/syntax/lifecycle.pilot",
+            "a struct literal with a field named `enter` or `exit` (`Window { enter: 3, exit: 8 }`) is not parsed as a struct literal, so its type name is reported undefined; any other field name (`leave`, `opened`) works",
+            "builds the struct; prints 5", "error[DECL001]: undefined name `Window`",
+            "tests/conformance/known_bugs/struct_field_scope_label.pilot", "F4"),
     ];
     return entries;
 }

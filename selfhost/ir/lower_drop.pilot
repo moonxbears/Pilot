@@ -32,6 +32,7 @@ use selfhost.ir.layouts.*;
 use selfhost.ir.lower.*;
 use selfhost.ir.lower_members.*;
 use selfhost.ir.lower_switch.*;
+use selfhost.ir.lower_try.*;
 
 /// Glue nesting deeper than this is a planner error (a type that holds
 /// itself does so through an `opt` or a collection, a seam in the plan).
@@ -193,28 +194,51 @@ fn drop_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) {
         ensure_open(lw);
         return;
     }
-    let dtor = destructor_of(lw, t);
-    if dtor >= 0 { let _ = emit(lw, op_call_direct(), function_index(lw, dtor, t), layout_unknown(lw.ls), [v], n); }
-    for fl in stored_fields(lw.inf.p, t) {
-        let name: str = fl[0];
-        let ft: i64 = fl[1];
-        if needs_drop(lw.plan, ft, 0) == 1 {
-            drop_value(lw, property_read(lw, v, t, name, n), ft, n, depth + 1);
+    let ops = owned_elements(lw.plan.flow, t);
+    let pt = owned_payload(lw.plan.flow, t);
+    if !ty_is_unknown(lw.inf.p.tt, pt) {
+        // An optional: its payload, unless it is none. PilIR holds it as its
+        // record, so the try protocol tests it and takes the payload out.
+        if needs_drop(lw.plan, pt, 0) != 1 { return; }
+        let ok = success_test(lw, v, t, n);
+        let present = ir_add_block(lw.f);
+        let join = ir_add_block(lw.f);
+        emit_void(lw, op_cond_br(), 0, [ok, present, 0, join, 0], n);
+        switch_to(lw, present);
+        drop_value(lw, unwrap(lw, v, t, layout_of(lw.ls, pt), n), pt, n, depth + 1);
+        if !ir_is_terminated(lw.f, lw.cur) { emit_void(lw, op_jump(), 0, [join], n); }
+        switch_to(lw, join);
+        return;
+    }
+    // A collection that owns its elements is held by the engine itself: its
+    // declared fields and destructor are not what runs.
+    if ops.len() == 0 {
+        let dtor = destructor_of(lw, t);
+        if dtor >= 0 { let _ = emit(lw, op_call_direct(), function_index(lw, dtor, t), layout_unknown(lw.ls), [v], n); }
+        for fl in stored_fields(lw.inf.p, t) {
+            let name: str = fl[0];
+            let ft: i64 = fl[1];
+            if needs_drop(lw.plan, ft, 0) == 1 {
+                drop_value(lw, property_read(lw, v, t, name, n), ft, n, depth + 1);
+            }
         }
     }
-    let ops = owned_elements(lw.plan.flow, t);
-    if ops.len() == 2 {
-        let et = element_type(lw.inf.p, t);
+    if ops.len() == 4 {
+        let et = owned_element_type(lw.inf.p, t);
         if needs_drop(lw.plan, et, 0) == 1 { drop_elements(lw, v, et, ops, n, depth); }
     }
 }
 
 /// Drops each element of `v`, a collection owning elements of type `et`,
 /// front to back: `ops` are the engine operations giving its length and its
-/// element at a position (selfhost/check/own.pilot `owned_elements`).
+/// element at a position, walking what its sequence operation gives when it
+/// has one (selfhost/check/own.pilot `owned_elements`).
 [StandIn("ir.engine_sequence_for", "slice<T> is { ptr<T>, usize } enumerated by its SliceEnumerator", "the value is the engine's own list, as in the seed, and is indexed by engine operations", "F6")]
-fn drop_elements(lw: Lowerer, v: u32, et: i64, ops: List<str>, n: i64, depth: i64) {
+fn drop_elements(lw: Lowerer, whole: u32, et: i64, ops: List<str>, n: i64, depth: i64) {
     let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+    let seq_op: str = ops[2];
+    let list_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, list_slot()));
+    let v = if seq_op == "" { whole } else { emit(lw, op_call_intrinsic(), intrinsic_index(lw, seq_op), list_phy, [whole], n) };
     let len = emit(lw, op_call_intrinsic(), intrinsic_index(lw, ops[0]), int_phy, [v], n);
     let slot = emit(lw, op_stack_slot(), 0, int_phy, [], n);
     emit_void(lw, op_store(), 0, [slot, emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, 0)], n)], n);
@@ -271,21 +295,32 @@ pub fn replaces_element(lw: Lowerer, n: i64) -> bool {
 }
 
 /// `rs[i] = v` where `rs` owns its elements: the collection, the index and
-/// the new value, then the old element dropped, then the store through the
-/// engine operation bound to the type's `[]=`.
+/// the new value, then the old element dropped if there was one (a map's new
+/// key has none), then the store through the engine operation bound to the
+/// type's `[]=`.
 pub fn lower_element_replace(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let target = lhs(s, n);
     let t = value_type(lw, lhs(s, target));
     let ops = owned_elements(lw.plan.flow, t);
     let set = native_for(lw, t, op_index_set(), native_method_hook());
-    if ops.len() != 2 || set == "" { return unsupported(lw, n); }
-    let et = element_type(lw.inf.p, t);
+    if ops.len() != 4 || set == "" { return unsupported(lw, n); }
+    let et = owned_element_type(lw.inf.p, t);
     let recv = lower_expr(lw, lhs(s, target));
     let idx = lower_expr(lw, rhs(s, target));
     let v = lower_expr(lw, rhs(s, n));
-    let old = emit(lw, op_call_intrinsic(), intrinsic_index(lw, ops[1]), layout_of(lw.ls, et), [recv, idx], n);
+    // The old element, or none for a key the collection does not hold yet.
+    let old = emit(lw, op_call_intrinsic(), intrinsic_index(lw, ops[3]), layout_of(lw.ls, et), [recv, idx], n);
+    let absent_hook = bound(lw, absent_test_hook(), []);
+    if absent_hook == "" { return unsupported(lw, n); }
+    let absent = emit(lw, op_call_intrinsic(), intrinsic_index(lw, absent_hook), bool_physics(lw), [old], n);
+    let present = ir_add_block(lw.f);
+    let join = ir_add_block(lw.f);
+    emit_void(lw, op_cond_br(), 0, [absent, join, 0, present, 0], n);
+    switch_to(lw, present);
     drop_value(lw, old, et, n, 0);
+    if !ir_is_terminated(lw.f, lw.cur) { emit_void(lw, op_jump(), 0, [join], n); }
+    switch_to(lw, join);
     if !ir_is_terminated(lw.f, lw.cur) {
         let _ = emit(lw, op_call_intrinsic(), intrinsic_index(lw, set), layout_unknown(lw.ls), [recv, idx, v], n);
     }

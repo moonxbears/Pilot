@@ -16,6 +16,15 @@ pub lvl(0) pkg Pilot.SelfHost.Ir.Verify;
 
 use selfhost.ir.model.*;
 
+/// Where each block sits in a depth-first walk of the dominator tree: block
+/// `a` dominates block `b` exactly when `a` is entered before `b` and left
+/// after it (`dom_holds`), so a test costs O(1) instead of a walk up the tree.
+/// Blocks the walk does not reach have -1.
+pub struct DomIntervals : IValue {
+    pub opened: List<i64>;
+    pub closed: List<i64>;
+}
+
 /// A verifier finding: the code, the function, and what is wrong.
 pub struct IrIssue : IValue {
     pub code: str;
@@ -134,6 +143,48 @@ pub fn ir_dominates(f: IrFunction, a: u32, b: u32) -> bool {
     return false;
 }
 
+/// The intervals of `f`'s dominator tree; `order` is what
+/// `ir_compute_dominators` returned (the reachable blocks, entry first).
+pub fn ir_dom_intervals(f: IrFunction, order: List<u32>) -> DomIntervals {
+    var kids: List<List<u32>> = [];
+    var enter: List<i64> = [];
+    var leave: List<i64> = [];
+    for b in f.blocks {
+        kids.push([]);
+        enter.push(-1);
+        leave.push(-1);
+    }
+    for b in order {
+        if b != 0 { kids[f.blocks[b].idom].push(b); }
+    }
+    var clock = 0;
+    var stack: List<u32> = [0];
+    var next: List<i64> = [0];
+    enter[0] = clock;
+    clock = clock + 1;
+    while stack.len > 0 {
+        let top = stack.len - 1;
+        let b = stack[top];
+        if next[top] < kids[b].len() {
+            let c = kids[b][next[top]];
+            next[top] = next[top] + 1;
+            enter[c] = clock;
+            clock = clock + 1;
+            stack.push(c);
+            next.push(0);
+        } else {
+            leave[b] = clock;
+            clock = clock + 1;
+            let _ = stack.pop();
+            let _ = next.pop();
+        }
+    }
+    return DomIntervals { opened: enter, closed: leave };
+}
+
+/// Whether block `a` dominates block `b`, both reached by the walk.
+pub fn dom_holds(d: DomIntervals, a: u32, b: u32) -> bool => d.opened[a] <= d.opened[b] && d.closed[b] <= d.closed[a];
+
 /// The operand positions of `inst` that hold values (the others name blocks,
 /// counts or pool entries).
 pub fn value_positions(f: IrFunction, inst: IrInst) -> List<i64> {
@@ -181,6 +232,7 @@ fn check_target(out: List<IrIssue>, f: IrFunction, from: u32, target: u32, count
 pub fn verify_ir_function(f: IrFunction) -> List<IrIssue> {
     var out: List<IrIssue> = [];
     let order = ir_compute_dominators(f);
+    let dom = ir_dom_intervals(f, order);
     // Where each value is defined: its block and position (-1 for a parameter).
     var def_block: List<i64> = [];
     var def_pos: List<i64> = [];
@@ -236,7 +288,7 @@ pub fn verify_ir_function(f: IrFunction) -> List<IrIssue> {
                     issue(out, "IR001", f, f"b{b.id} uses v{v}, which is never defined");
                 } else if def_block[v] == b.id {
                     if def_pos[v] >= i { issue(out, "IR001", f, f"b{b.id} uses v{v} before it is defined"); }
-                } else if !reachable[def_block[v]] || !ir_dominates(f, def_block[v], b.id) {
+                } else if !reachable[def_block[v]] || !dom_holds(dom, def_block[v], b.id) {
                     issue(out, "IR001", f, f"v{v} is defined in b{def_block[v]}, which does not dominate its use in b{b.id}");
                 }
             }

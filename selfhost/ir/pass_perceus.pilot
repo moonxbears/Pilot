@@ -43,8 +43,14 @@ struct RcFunction : IObject {
     pub index: List<i64>;
     /// The counted values, by index.
     pub counted: List<u32>;
-    /// Block * counted.len + index -> whether the value is live into the block.
-    pub live_in: List<bool>;
+    /// Block id -> the indices of the counted values live into the block,
+    /// ascending: a set as large as what is live, not as all counted values.
+    pub live_in: List<List<i64>>;
+    /// Counted index -> scratch membership of the set being built; all false
+    /// between uses (`rc_take` clears what it marked).
+    pub mark: List<bool>;
+    /// Block id -> the number of branches into it in the original function.
+    pub edges_in: List<i64>;
     /// The counted stack slots, released before each return.
     pub slots: List<u32>;
     /// The global cells released before each return (the start function).
@@ -76,7 +82,7 @@ fn rc_op(rc: RcFunction, op: u16, v: u32, span: u32) -> IrInst => rc_inst(rc.f, 
 
 fn rc_function(m: IrModule, f: IrFunction, start: bool, counted: (IrTypePhysics) => bool) {
     if f.blocks.len() == 0 { return; }
-    let rc = RcFunction { f: f, kind: [], index: [], counted: [], live_in: [], slots: [], globals: [], entry_code: [] };
+    let rc = RcFunction { f: f, kind: [], index: [], counted: [], live_in: [], mark: [], edges_in: [], slots: [], globals: [], entry_code: [] };
     for _v in f.value_physics {
         rc.kind.push(0);
         rc.index.push(-1);
@@ -109,6 +115,12 @@ fn rc_function(m: IrModule, f: IrFunction, start: bool, counted: (IrTypePhysics)
     // Blocks added on edges are complete when added; only the original
     // blocks are rewritten.
     let original = f.blocks.len();
+    for _b in f.blocks { rc.edges_in.push(0); }
+    for blk in f.blocks {
+        for t in block_successors(f, blk.id) {
+            if t < original { rc.edges_in[t] = rc.edges_in[t] + 1; }
+        }
+    }
     var rewritten: List<List<IrInst>> = [];
     var b = 0;
     while b < original {
@@ -132,7 +144,68 @@ fn rc_track(rc: RcFunction, v: u32, k: i64) {
     rc.counted.push(v);
 }
 
-fn rc_live_in(rc: RcFunction, b: i64, v: u32) -> bool => rc.live_in[b * rc.counted.len() + rc.index[v]];
+/// Whether counted value `v` is live into block `b` (a binary search of its
+/// ascending set).
+fn rc_live_in(rc: RcFunction, b: i64, v: u32) -> bool {
+    let set = rc.live_in[b];
+    let want = rc.index[v];
+    var lo = 0;
+    var hi = set.len();
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if set[mid] < want { lo = mid + 1; } else { hi = mid; }
+    }
+    return lo < set.len() && set[lo] == want;
+}
+
+/// Marks counted index `i` in `rc.mark`, noting it in `touched` once.
+fn rc_mark(rc: RcFunction, touched: List<i64>, i: i64) {
+    if !rc.mark[i] {
+        rc.mark[i] = true;
+        touched.push(i);
+    }
+}
+
+/// The indices in `touched` still marked, ascending; clears every mark.
+fn rc_take(rc: RcFunction, touched: List<i64>) -> List<i64> {
+    var out: List<i64> = [];
+    for i in touched {
+        if rc.mark[i] {
+            out.push(i);
+            rc.mark[i] = false;
+        }
+    }
+    return rc_ascending(out);
+}
+
+/// `xs` sorted ascending (a merge sort: its length times its logarithm).
+fn rc_ascending(xs: List<i64>) -> List<i64> {
+    var cur = xs;
+    var width = 1;
+    while width < cur.len() {
+        var next: List<i64> = [];
+        var lo = 0;
+        while lo < cur.len() {
+            let mid = if lo + width < cur.len() { lo + width } else { cur.len() };
+            let hi = if lo + 2 * width < cur.len() { lo + 2 * width } else { cur.len() };
+            var i = lo;
+            var j = mid;
+            while i < mid || j < hi {
+                if j >= hi || (i < mid && cur[i] <= cur[j]) {
+                    next.push(cur[i]);
+                    i = i + 1;
+                } else {
+                    next.push(cur[j]);
+                    j = j + 1;
+                }
+            }
+            lo = hi;
+        }
+        cur = next;
+        width = width * 2;
+    }
+    return cur;
+}
 
 /// The counted values an instruction uses, each as often as it is used.
 fn rc_uses(rc: RcFunction, inst: IrInst) -> List<u32> {
@@ -146,82 +219,64 @@ fn rc_uses(rc: RcFunction, inst: IrInst) -> List<u32> {
 }
 
 /// Fills `live_in`: the counted values each block needs from before it.
+/// Sets do not shrink from one round to the next, so a set that keeps its
+/// size is unchanged.
 fn rc_liveness(rc: RcFunction) {
     let f = rc.f;
-    let n = rc.counted.len();
-    for _b in f.blocks {
-        for _i in rc.counted { rc.live_in.push(false); }
-    }
-    if n == 0 { return; }
+    for _b in f.blocks { rc.live_in.push([]); }
+    for _i in rc.counted { rc.mark.push(false); }
+    if rc.counted.len() == 0 { return; }
     var changed = true;
     while changed {
         changed = false;
         var b = f.blocks.len() - 1;
         while b >= 0 {
-            var live = rc_live_out(rc, b);
+            let touched = rc_live_out(rc, b);
             let insts = f.blocks[b].insts;
             var k = insts.len() - 1;
             while k >= 0 {
                 let inst = insts[k];
-                if inst.result != ir_no_value() && inst.result < rc.index.len() && rc.index[inst.result] >= 0 { live[rc.index[inst.result]] = false; }
-                for v in rc_uses(rc, inst) { live[rc.index[v]] = true; }
+                if inst.result != ir_no_value() && inst.result < rc.index.len() && rc.index[inst.result] >= 0 { rc.mark[rc.index[inst.result]] = false; }
+                for v in rc_uses(rc, inst) { rc_mark(rc, touched, rc.index[v]); }
                 k = k - 1;
             }
             for p in f.blocks[b].params {
-                if rc.index[p] >= 0 { live[rc.index[p]] = false; }
+                if rc.index[p] >= 0 { rc.mark[rc.index[p]] = false; }
             }
-            var i = 0;
-            while i < n {
-                if live[i] && !rc.live_in[b * n + i] {
-                    rc.live_in[b * n + i] = true;
-                    changed = true;
-                }
-                i = i + 1;
+            let now = rc_take(rc, touched);
+            if now.len() != rc.live_in[b].len() {
+                rc.live_in[b] = now;
+                changed = true;
             }
             b = b - 1;
         }
     }
 }
 
-/// The counted values live out of block `b`: those its successors need.
-fn rc_live_out(rc: RcFunction, b: i64) -> List<bool> {
-    let n = rc.counted.len();
-    var live: List<bool> = [];
-    for _i in rc.counted { live.push(false); }
+/// Marks the counted values live out of block `b` (those its successors
+/// need) in `rc.mark` and returns their indices; the caller clears them.
+fn rc_live_out(rc: RcFunction, b: i64) -> List<i64> {
+    var touched: List<i64> = [];
     for s in block_successors(rc.f, b) {
-        if s >= rc.f.blocks.len() { continue; }
-        var i = 0;
-        while i < n {
-            if rc.live_in[s * n + i] { live[i] = true; }
-            i = i + 1;
-        }
+        if s >= rc.live_in.len() { continue; }
+        for i in rc.live_in[s] { rc_mark(rc, touched, i); }
     }
-    return live;
-}
-
-/// The number of branches into block `s` (a `cond_br` naming it twice
-/// counts twice).
-fn rc_edges_into(f: IrFunction, s: u32) -> i64 {
-    var count = 0;
-    for b in f.blocks {
-        for t in block_successors(f, b.id) {
-            if t == s { count = count + 1; }
-        }
-    }
-    return count;
+    return touched;
 }
 
 /// Block `b`'s instructions with their reference counts.
 fn rc_block(rc: RcFunction, b: u32) -> List<IrInst> {
     let f = rc.f;
     let insts = f.blocks[b].insts;
-    var live = rc_live_out(rc, b);
+    // `rc.mark` holds the values live after the instruction being looked at;
+    // `touched` every index marked, to clear at the end.
+    let touched = rc_live_out(rc, b);
     // Built back to front: `tail` holds the instructions after the one
     // being looked at, in reverse order.
     var tail: List<IrInst> = [];
     var k = insts.len() - 1;
     if k >= 0 && opcode_is_terminator(insts[k].opcode) {
-        for i in rc_terminator(rc, b, insts[k], live) { tail.push(i); }
+        for i in rc_terminator(rc, b, insts[k], touched) { tail.push(i); }
         k = k - 1;
     }
     while k >= 0 {
@@ -230,7 +285,7 @@ fn rc_block(rc: RcFunction, b: u32) -> List<IrInst> {
         var after: List<IrInst> = [];
         let mine = r != ir_no_value() && r < rc.index.len() && rc.index[r] >= 0;
         if mine {
-            let used = live[rc.index[r]];
+            let used = rc.mark[rc.index[r]];
             let op = inst.opcode;
             let shares = op == op_load() || op == op_extract_field() || op == op_cast();
             if used && shares {
@@ -238,11 +293,11 @@ fn rc_block(rc: RcFunction, b: u32) -> List<IrInst> {
             } else if !used && !shares && rc.kind[r] == rc_owned() {
                 after.push(rc_op(rc, op_perceus_drop(), r, inst.span_id));
             }
-            live[rc.index[r]] = false;
+            rc.mark[rc.index[r]] = false;
         }
         for v in rc_uses(rc, inst) {
-            if !live[rc.index[v]] {
-                live[rc.index[v]] = true;
+            if !rc.mark[rc.index[v]] {
+                rc_mark(rc, touched, rc.index[v]);
                 if rc.kind[v] == rc_owned() { after.push(rc_op(rc, op_perceus_drop(), v, inst.span_id)); }
             }
         }
@@ -256,11 +311,12 @@ fn rc_block(rc: RcFunction, b: u32) -> List<IrInst> {
     }
     if b != 0 {
         for p in f.blocks[b].params {
-            if rc.index[p] >= 0 && !live[rc.index[p]] && rc.kind[p] == rc_owned() {
+            if rc.index[p] >= 0 && !rc.mark[rc.index[p]] && rc.kind[p] == rc_owned() {
                 tail.push(rc_op(rc, op_perceus_drop(), p, 0));
             }
         }
     }
+    let _ = rc_take(rc, touched);
     var out: List<IrInst> = [];
     var i = tail.len() - 1;
     while i >= 0 {
@@ -271,10 +327,10 @@ fn rc_block(rc: RcFunction, b: u32) -> List<IrInst> {
 }
 
 /// The terminator `t` of block `b` with the code before it, in reverse
-/// order; `live` (the values live out of `b`) becomes the values live
-/// before it. Code for an edge that cannot go before `t` goes to its
+/// order; the values marked in `rc.mark` (live out of `b`, their indices in
+/// `touched`) become the values live before it. Code for an edge that cannot go before `t` goes to its
 /// successor's start or to a new block.
-fn rc_terminator(rc: RcFunction, b: u32, t: IrInst, live: List<bool>) -> List<IrInst> {
+fn rc_terminator(rc: RcFunction, b: u32, t: IrInst, touched: List<i64>) -> List<IrInst> {
     let f = rc.f;
     let a = ir_args(f, t);
     let op = t.opcode;
@@ -295,12 +351,10 @@ fn rc_terminator(rc: RcFunction, b: u32, t: IrInst, live: List<bool>) -> List<Ir
     } else if op == op_jump() || op == op_cond_br() || op == op_switch_table() {
         // The values held at the branch: live after it or used by it.
         var held: List<u32> = [];
-        for v in rc.counted {
-            if live[rc.index[v]] { held.push(v); }
-        }
+        for i in rc_ascending(touched) { held.push(rc.counted[i]); }
         for v in rc_uses(rc, t) {
-            if !live[rc.index[v]] {
-                live[rc.index[v]] = true;
+            if !rc.mark[rc.index[v]] {
+                rc_mark(rc, touched, rc.index[v]);
                 held.push(v);
             }
         }
@@ -331,7 +385,7 @@ fn rc_terminator(rc: RcFunction, b: u32, t: IrInst, live: List<bool>) -> List<Ir
                 let s = targets[e];
                 if op == op_jump() {
                     for c in code { before.push(c); }
-                } else if s != b && s != 0 && rc_edges_into(f, s) == 1 {
+                } else if s != b && s != 0 && rc.edges_in[s] == 1 {
                     for c in code { rc.entry_code[s].push(c); }
                 } else {
                     // A new block on the edge, passing the arguments on.
@@ -352,11 +406,11 @@ fn rc_terminator(rc: RcFunction, b: u32, t: IrInst, live: List<bool>) -> List<Ir
         }
         if moved.len() > 0 { term = rc_retarget(rc, t, targets, args); }
     } else {
-        for v in rc_uses(rc, t) { live[rc.index[v]] = true; }
+        for v in rc_uses(rc, t) { rc_mark(rc, touched, rc.index[v]); }
         return [term];
     }
     // `return` uses its value.
-    for v in rc_uses(rc, t) { live[rc.index[v]] = true; }
+    for v in rc_uses(rc, t) { rc_mark(rc, touched, rc.index[v]); }
     var rev: List<IrInst> = [term];
     var i = before.len() - 1;
     while i >= 0 {

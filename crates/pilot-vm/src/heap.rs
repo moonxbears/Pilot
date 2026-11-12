@@ -251,6 +251,34 @@ impl PilVirtualMachine {
                     .ok_or_else(|| format!("`proc_wait`: no running child process {handle}"))?;
                 self.finish_child(child)
             }
+            // `proc_first_done(handles)`: blocks until one of the running
+            // children in `handles` has finished, and returns its handle.
+            "proc_first_done" => {
+                let handles = self
+                    .list_items(arg(args, 0, op)?)
+                    .ok_or_else(|| format!("`{op}` expects a list of process handles"))?;
+                let mut slots = Vec::with_capacity(handles.len());
+                for h in handles {
+                    let id = h.as_int().ok_or_else(|| format!("`{op}` expects a list of process handles"))?;
+                    match usize::try_from(id).ok().and_then(|i| self.children.get(i)) {
+                        Some(Some(_)) => slots.push(id),
+                        _ => return Err(format!("`{op}`: no running child process {id}")),
+                    }
+                }
+                if slots.is_empty() {
+                    return Err(format!("`{op}`: no child processes to wait for"));
+                }
+                loop {
+                    for &id in &slots {
+                        if let Some(Some(child)) = self.children.get(id as usize) {
+                            if child.1.is_finished() {
+                                return Ok(PilotVal::from_int(id));
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
             "proc_cpus" => Ok(PilotVal::from_int(crate::host::cpu_count())),
             // `field_or_native(obj, key, intrinsic)`: the record's field
             // `key` if it has one, else `intrinsic(obj)` (a native property).
@@ -356,6 +384,15 @@ impl PilVirtualMachine {
                 Ok(PilotVal::from_bool(h.ends_with(&n)))
             }
             "map_new" => Ok(self.new_map(HashMap::new())),
+            // `map_values(m)`: the values of map `m` as a new list, in the
+            // order of their keys (the order a map is shown in).
+            "map_values" => {
+                let slot = self.map_slot(arg(args, 0, op)?, op)?;
+                let mut entries: Vec<(&String, &PilotVal)> = self.heap_maps[slot].iter().collect();
+                entries.sort_by(|a, b| a.0.cmp(b.0));
+                let values = entries.into_iter().map(|(_, v)| *v).collect();
+                Ok(self.new_list(values))
+            }
             // `record_set_type(obj, name)` marks a record as built from struct `name`.
             "record_set_type" => {
                 let obj = arg(args, 0, op)?;

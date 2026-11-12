@@ -8,7 +8,8 @@
 // or struct literal, or passed for a plain parameter (one written without
 // `ref`, `var`, `iso` or `comptime`) of the function or method the call
 // resolves to. Reading a field of it, calling a method on it or comparing it
-// is not a move. Assigning the binding a new value makes it usable again.
+// is not a move. Unwrapping it (`o?`, `o ?? d`, `if some x = o`) moves it.
+// Assigning the binding a new value makes it usable again.
 //
 // Each function body is walked in evaluation order with the set of bindings
 // that may have been moved:
@@ -70,16 +71,75 @@ pub fn flow_new(inf: Infer, sink: DiagSink) -> Flow {
 /// position (stdlib/core/builtins/native_calls.pilot).
 pub pure fn owned_elements_hook() -> str => "bind_owned_elements";
 
-/// The length and element-at operations of `t` when values of `t` own their
-/// elements and those elements are owned; else empty.
+/// The type of the elements a collection of type `t` owns: what its `[]`
+/// gives (a map's values), else what iterating it gives.
+pub fn owned_element_type(p: Program, t: i64) -> i64 {
+    if some m = prog_member(p, t, op_index()) { return prog_member_type(p, m); }
+    return element_type(p, t);
+}
+
+/// When values of `t` own their elements and those elements are owned, the
+/// engine operations that reach them: `[length, element at, sequence,
+/// lookup]`. A non-empty `sequence` first turns the collection into a list of
+/// its elements (a map's values) that `length` and `element at` walk by
+/// position; `lookup` reads the element an index or key names, or none when
+/// a key is absent. Else empty.
 pub fn owned_elements(f: Flow, t: i64) -> List<str> {
     let p = f.inf.p;
-    if !ty_is_named(p.tt, t) || !prog_is_owned(p, element_type(p, t)) { return []; }
+    if !ty_is_named(p.tt, t) || !prog_is_owned(p, owned_element_type(p, t)) { return []; }
     let name = p.tt.name[t];
     for row in f.engine {
-        if row.len() == 4 && row[0] == owned_elements_hook() && row[1] == name { return [row[2], row[3]]; }
+        if row.len() == 6 && row[0] == owned_elements_hook() && row[1] == name { return [row[2], row[3], row[4], row[5]]; }
     }
     return [];
+}
+
+/// The binding hook naming a type the engine holds as its payload itself, or
+/// as none (stdlib/core/option.pilot): the member whose type is the payload,
+/// and the engine operation that tests for none.
+pub pure fn owned_payload_hook() -> str => "bind_owned_payload";
+
+/// The payload type of `t` when the engine holds a value of `t` as its
+/// payload or none and the payload is owned; else the unknown type.
+pub fn owned_payload(f: Flow, t: i64) -> i64 {
+    let p = f.inf.p;
+    if !ty_is_named(p.tt, t) { return ty_unknown(); }
+    let name = p.tt.name[t];
+    for row in f.engine {
+        if row.len() == 4 && row[0] == owned_payload_hook() && row[1] == name {
+            if some m = prog_member(p, t, row[2]) {
+                let pt = prog_member_type(p, m);
+                if prog_is_owned(p, pt) { return pt; }
+            }
+        }
+    }
+    return ty_unknown();
+}
+
+/// The engine operation that tests a value of `t` for none, when `t` has
+/// an owned payload (`owned_payload`); else "".
+pub fn payload_absent_op(f: Flow, t: i64) -> str {
+    let p = f.inf.p;
+    if !ty_is_named(p.tt, t) { return ""; }
+    let name = p.tt.name[t];
+    for row in f.engine {
+        if row.len() == 4 && row[0] == owned_payload_hook() && row[1] == name { return row[3]; }
+    }
+    return "";
+}
+
+/// Whether values of `t` are owned: its lattice says so, or it holds a
+/// value that is (an optional's payload, a result's value or error, any
+/// generic argument).
+pub fn owns(f: Flow, t: i64) -> bool => owns_at(f.inf.p, t, 0);
+
+fn owns_at(p: Program, t: i64, depth: i64) -> bool {
+    if prog_is_owned(p, t) { return true; }
+    if depth > 8 || !ty_is_named(p.tt, t) { return false; }
+    for a in ty_args(p.tt, t) {
+        if owns_at(p, a, depth + 1) { return true; }
+    }
+    return false;
 }
 
 /// Whether `n` reads an element that a collection owns (`rs[i]`).
@@ -143,7 +203,8 @@ pub fn is_owned_binding(f: Flow, b: i64) -> bool {
         var t = ty_unknown();
         if r.annot[b] >= 0 { t = prog_annot_type(f.inf.p, r.annot[b]); }
         else if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Local { t = type_of(f.inf, r.source[b]); }
-        f.owned[b] = if prog_is_owned(f.inf.p, t) { 1 } else { 0 };
+        else if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Unwrapped { t = owned_payload(f, type_of(f.inf, r.source[b])); }
+        f.owned[b] = if owns(f, t) { 1 } else { 0 };
     }
     return f.owned[b] == 1;
 }
@@ -182,6 +243,8 @@ pub fn is_move_position(f: Flow, n: i64) -> bool {
     }
     if (k == nk_let() || k == nk_var() || k == nk_const() || k == nk_assign()) { return rhs(s, up) == n; }
     if k == nk_return() { return lhs(s, up) == n; }
+    // Unwrapping an optional or a result (`o?`, `o ?? d`) takes its payload.
+    if k == nk_try_propagate() || k == nk_coalesce() { return true; }
     if k == nk_list() { return true; }
     if k == nk_map() {
         // A struct literal's value for a `ref` field is borrowed, not moved.

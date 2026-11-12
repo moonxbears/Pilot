@@ -62,13 +62,6 @@ pub fn emit_runner(lang: str) -> EmitRunner? {
     return none;
 }
 
-/// One process to start: the program, its arguments and its input.
-struct Job : IObject {
-    pub program: str;
-    pub args:    List<str>;
-    pub input:   str;
-}
-
 /// The totals of a `pilot test --emit` run.
 struct EmitTally : IObject {
     pub passed:       i64;
@@ -124,37 +117,14 @@ pub fn c_runtime_dir() -> str {
     return rel;
 }
 
-fn job_of(argv: List<str>, input: str) -> Job {
+fn job_of(argv: List<str>, input: str) -> proc.ProcessJob {
     var rest: List<str> = [];
     var i = 1;
     while i < argv.len() {
         rest.push(argv[i]);
         i = i + 1;
     }
-    return Job { program: argv[0], args: rest, input: input };
-}
-
-/// Runs `jobs`, as many at once as the machine has CPUs; their results in
-/// order.
-fn run_jobs(jobs: List<Job>) -> List<proc.ProcessOutput> {
-    let window = if proc.cpu_count() > 1 { proc.cpu_count() } else { 1 };
-    var running: List<proc.ProcessHandle> = [];
-    var started = 0;
-    while started < jobs.len() && started < window {
-        running.push(proc.spawn(jobs[started].program, jobs[started].args, jobs[started].input));
-        started = started + 1;
-    }
-    var out: List<proc.ProcessOutput> = [];
-    var i = 0;
-    while i < jobs.len() {
-        out.push(running[i].wait());
-        if started < jobs.len() {
-            running.push(proc.spawn(jobs[started].program, jobs[started].args, jobs[started].input));
-            started = started + 1;
-        }
-        i = i + 1;
-    }
-    return out;
+    return proc.job(argv[0], rest, input);
 }
 
 fn stopped_at_seam(out: proc.ProcessOutput) -> bool =>
@@ -245,9 +215,9 @@ pub fn test_emit_command(lang: str, paths: List<str>, filter: str, live: bool) -
         }
     }
     let exe = proc.current_exe() ?? "pilot";
-    var emits: List<Job> = [];
-    for c in cases { emits.push(Job { program: exe, args: ["emit", lang, c], input: "" }); }
-    let emitted = run_jobs(emits);
+    var emits: List<proc.ProcessJob> = [];
+    for c in cases { emits.push(proc.job(exe, ["emit", lang, c], "")); }
+    let emitted = proc.run_all(emits);
 
     // Cases that emitted, with their files.
     var built: List<str> = [];
@@ -285,9 +255,9 @@ pub fn test_emit_command(lang: str, paths: List<str>, filter: str, live: bool) -
         i = 0;
         while i < built.len() { runnable.push(i); i = i + 1; }
     } else {
-        var builds: List<Job> = [];
+        var builds: List<proc.ProcessJob> = [];
         for k in 0 .. built.len() { builds.push(job_of(filled(compile, srcs[k], bins[k]), "")); }
-        let outs = run_jobs(builds);
+        let outs = proc.run_all(builds);
         i = 0;
         while i < built.len() {
             if outs[i].exit_code == 0 {
@@ -300,14 +270,14 @@ pub fn test_emit_command(lang: str, paths: List<str>, filter: str, live: bool) -
     }
 
     // Run.
-    var runs: List<Job> = [];
+    var runs: List<proc.ProcessJob> = [];
     for k in runnable {
         let stem = test_stem(built[k]);
         var argv = filled(r.run, srcs[k], bins[k]);
         for a in test_lines(read_or_empty(stem + ".args")) { argv.push(a); }
         runs.push(job_of(argv, read_or_empty(stem + ".stdin")));
     }
-    let outs = run_jobs(runs);
+    let outs = proc.run_all(runs);
     i = 0;
     while i < runnable.len() {
         let k = runnable[i];

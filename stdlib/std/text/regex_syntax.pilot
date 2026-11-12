@@ -149,12 +149,25 @@ pub fn code_point_before(s: str, i: i64) -> i64 {
     return code_point_at(s, j);
 }
 
-/// The first byte of the UTF-8 encoding of code point `c`.
-pub fn utf8_lead_byte(c: i64) -> i64 {
-    if c < 128 { return c; }
-    if c < 2048 { return 192 | (c >> 6); }
-    if c < 65536 { return 224 | (c >> 12); }
-    return 240 | (c >> 18);
+/// The UTF-8 encoding of code point `c`.
+pub fn encode_code_point(c: i64) -> str {
+    var bytes: List<i64> = [];
+    if c < 128 {
+        bytes.push(c);
+    } else if c < 2048 {
+        bytes.push(192 | (c >> 6));
+        bytes.push(128 | (c & 63));
+    } else if c < 65536 {
+        bytes.push(224 | (c >> 12));
+        bytes.push(128 | ((c >> 6) & 63));
+        bytes.push(128 | (c & 63));
+    } else {
+        bytes.push(240 | (c >> 18));
+        bytes.push(128 | ((c >> 12) & 63));
+        bytes.push(128 | ((c >> 6) & 63));
+        bytes.push(128 | (c & 63));
+    }
+    return from_utf8(bytes) ?? "";
 }
 
 fn hex_value(b: i64) -> i64 {
@@ -177,9 +190,15 @@ pub struct ReClasses : IObject {
     pub range_hi: List<i64>;
     pub class_start: List<i64>;
     pub class_len: List<i64>;
+    /// Per class, which code points 0..63 and 64..127 it holds, one bit each.
+    pub ascii_lo: List<i64>;
+    pub ascii_hi: List<i64>;
 
-    /// Whether code point `c` is in class `k` (binary search).
+    /// Whether code point `c` is in class `k`: a bit test for ASCII, a
+    /// binary search over the ranges otherwise.
     pub fn has(ref self, k: i64, c: i64) -> bool {
+        if c < 64 { return ((self.ascii_lo[k] >> c) & 1) == 1; }
+        if c < 128 { return ((self.ascii_hi[k] >> (c - 64)) & 1) == 1; }
         var lo = self.class_start[k];
         var hi = lo + self.class_len[k] - 1;
         while lo <= hi {
@@ -198,12 +217,21 @@ pub struct ReClasses : IObject {
     /// Adds a class of the sorted, disjoint ranges `lo`/`hi`; its number.
     pub fn add(var ref self, lo: List<i64>, hi: List<i64>) -> i64 {
         let first = self.range_lo.len() as i64;
+        var bits_lo = 0;
+        var bits_hi = 0;
         var i = 0;
         while i < (lo.len() as i64) {
             self.range_lo.push(lo[i]);
             self.range_hi.push(hi[i]);
+            var c = lo[i];
+            while c <= hi[i] && c < 128 {
+                if c < 64 { bits_lo = bits_lo | (1 << c); } else { bits_hi = bits_hi | (1 << (c - 64)); }
+                c = c + 1;
+            }
             i = i + 1;
         }
+        self.ascii_lo.push(bits_lo);
+        self.ascii_hi.push(bits_hi);
         self.class_start.push(first);
         self.class_len.push((lo.len() as i64));
         return (self.class_start.len() as i64) - 1;
@@ -223,8 +251,12 @@ pub struct ReProgram : IObject {
     pub groups: i64;
     /// Group names by group number - 1 (`""` for an unnamed group).
     pub names: List<str>;
-    /// A byte every match starts with, or -1.
-    pub first_byte: i64;
+    /// Text every match starts with (`""` when there is none).
+    pub prefix: str;
+    /// Whether the pattern is exactly `prefix`, without groups.
+    pub literal: bool;
+    /// A class the first code point of every match is in, or -1.
+    pub first_class: i64;
     /// Whether a match can only start at the start of the text.
     pub text_anchored: bool;
 
@@ -341,30 +373,16 @@ pub struct ReTree : IObject {
     ~self() {}
 }
 
-/// Unicode data, read from std.text.unicode the first time a pattern needs it.
-struct UnicodeCache : IObject {
-    pub word: List<i64>;
-    pub digit: List<i64>;
-    pub space: List<i64>;
-    pub groups: List<i64>;
-    /// Which lists are read: 1 word, 2 digit, 4 space, 8 groups.
-    pub loaded: i64;
-
-    pub fn ranges(var ref self, which: i64) -> List<i64> {
-        if (self.loaded & which) == 0 {
-            if which == 1 { self.word = word_ranges(); }
-            if which == 2 { self.digit = digit_ranges(); }
-            if which == 4 { self.space = space_ranges(); }
-            if which == 8 { self.groups = case_groups(); }
-            self.loaded = self.loaded | which;
-        }
-        if which == 1 { return self.word; }
-        if which == 2 { return self.digit; }
-        if which == 4 { return self.space; }
-        return self.groups;
-    }
-
-    ~self() {}
+/// The Unicode list `which` names: 1 `\w` ranges, 2 `\d`, 4 `\s`, 8 case
+/// groups, 16 the case groups holding an ASCII code point, 32 those holding
+/// one below U+0600 (decoded once per program by std.text.unicode).
+fn unicode_list(which: i64) -> List<i64> {
+    if which == 1 { return word_ranges(); }
+    if which == 2 { return digit_ranges(); }
+    if which == 4 { return space_ranges(); }
+    if which == 16 { return ascii_case_groups(); }
+    if which == 32 { return small_case_groups(); }
+    return case_groups();
 }
 
 struct RegexParser : IObject {
@@ -374,7 +392,6 @@ struct RegexParser : IObject {
     pub flags: i64;
     pub tree: ReTree;
     pub classes: ReClasses;
-    pub uni: UnicodeCache;
     pub groups: i64;
     pub names: List<str>;
     /// The class of word characters for `\b` / `\B`, by mode: [unicode, ascii].
@@ -715,7 +732,10 @@ struct RegexParser : IObject {
             }
             return;
         }
-        let groups = self.uni.ranges(8);
+        // Code points below a bound only meet the groups that hold one
+        // below it: the smallest table that covers the class is enough.
+        let top = if shi.len() == 0 { 0 } else { shi[shi.len() - 1] };
+        let groups = unicode_list(if top < 128 { 16 } else if top < 1536 { 32 } else { 8 });
         let total = groups.len() as i64;
         var i = 0;
         while i < total {
@@ -755,7 +775,7 @@ struct RegexParser : IObject {
     /// The ranges of class escape `which` (1 word, 2 digit, 4 space).
     pub fn escape_ranges(var ref self, which: i64, var ref lo: List<i64>, var ref hi: List<i64>) {
         if !self.has_flag(RegexFlag::Ascii) {
-            let r = self.uni.ranges(which);
+            let r = unicode_list(which);
             var i = 0;
             while i < (r.len() as i64) {
                 lo.push(r[i]);
@@ -1070,8 +1090,7 @@ pub fn compile_program(pattern: str, flags: i64) -> res<ReProgram, RegexError> {
     var p = RegexParser {
         src: pattern, pos: 0, n: pattern.len() as i64, flags: flags,
         tree: ReTree { kinds: [], arg_a: [], arg_b: [], arg_c: [], arg_d: [], kids: [] },
-        classes: ReClasses { range_lo: [], range_hi: [], class_start: [], class_len: [] },
-        uni: UnicodeCache { word: [], digit: [], space: [], groups: [], loaded: 0 },
+        classes: ReClasses { range_lo: [], range_hi: [], class_start: [], class_len: [], ascii_lo: [], ascii_hi: [] },
         groups: 0, names: [], word_class: [-1, -1], failed: false,
         error: RegexError { kind: RegexErrorKind::BadEscape, pos: 0, message: "" },
     };
@@ -1082,18 +1101,32 @@ pub fn compile_program(pattern: str, flags: i64) -> res<ReProgram, RegexError> {
     if p.failed { return err(p.error); }
     var prog = ReProgram {
         ops: [], arg_x: [], arg_y: [],
-        classes: ReClasses { range_lo: [], range_hi: [], class_start: [], class_len: [] },
-        groups: p.groups, names: [], first_byte: -1, text_anchored: false,
+        classes: ReClasses { range_lo: [], range_hi: [], class_start: [], class_len: [], ascii_lo: [], ascii_hi: [] },
+        groups: p.groups, names: [], prefix: "", literal: false, first_class: -1, text_anchored: false,
     };
     prog.emit(ReOp::Save, 0, 0);
     prog.compile_node(p.tree, root);
     prog.emit(ReOp::Save, 1, 0);
     prog.emit(ReOp::Match, 0, 0);
-    // What a match must start with, read off its first instruction.
-    let first = prog.ops[1];
-    if first == ReOp::Char {
-        prog.first_byte = utf8_lead_byte(prog.arg_x[1]);
-    } else if first == ReOp::Assert && prog.arg_x[1] == ReAssert::TextStart as i64 {
+    // What a match must start with, read off its first instructions (saves
+    // consume nothing, so they are passed over).
+    var pc = 1;
+    var prefix = "";
+    while prog.ops[pc] == ReOp::Save || prog.ops[pc] == ReOp::Char {
+        if prog.ops[pc] == ReOp::Char {
+            // A lone surrogate has no UTF-8 form: the prefix ends before it.
+            let e = encode_code_point(prog.arg_x[pc]);
+            if e.len() == 0 { break; }
+            prefix = prefix + e;
+        }
+        pc = pc + 1;
+    }
+    prog.prefix = prefix;
+    prog.literal = prog.ops[pc] == ReOp::Match && prog.groups == 0 && prefix.len() > 0;
+    let first = prog.ops[pc];
+    if prefix.len() == 0 && first == ReOp::Class {
+        prog.first_class = prog.arg_x[pc];
+    } else if prefix.len() == 0 && first == ReOp::Assert && prog.arg_x[pc] == ReAssert::TextStart as i64 {
         prog.text_anchored = true;
     }
     prog.names = p.names;

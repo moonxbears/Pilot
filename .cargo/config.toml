@@ -1,0 +1,5 @@
+[alias]
+# Every test, including the slow ones marked `#[ignore = "slow: ..."]` (each
+# runs the whole conformance corpus under one engine). Plain
+# `cargo test --workspace` skips those; run this before a commit.
+test-full = "test --workspace -- --include-ignored"

@@ -163,7 +163,7 @@ pub fn absent_of(lw: Lowerer, t: i64, n: i64) -> u32? {
 
 /// Whether `v` (of type `t`) holds a success: the protocol's test, or for a
 /// value of no protocol type, that it is not the engine's null.
-fn success_test(lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {
+pub fn success_test(lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {
     if has_protocol(lw, t) {
         return member_call(lw, v, t, protocol(lw)[0], [], bool_physics(lw), n);
     }
@@ -176,7 +176,7 @@ fn success_test(lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {
 
 /// The success value inside `v` (of type `t`); `v` itself for a value of no
 /// protocol type.
-fn unwrap(lw: Lowerer, v: u32, t: i64, phy: IrTypePhysics, n: i64) -> u32 =>
+pub fn unwrap(lw: Lowerer, v: u32, t: i64, phy: IrTypePhysics, n: i64) -> u32 =>
     if has_protocol(lw, t) { member_call(lw, v, t, protocol(lw)[1], [], phy, n) } else { v };
 
 /// The failure accessor of type `t`, or `none`.

@@ -48,7 +48,7 @@ pub fn ir_eligible(program: str) -> bool {
     return expected_stderr.find(seed_limit_code(), 0) < 0;
 }
 
-fn start(program: str, mode: str) -> proc.ProcessHandle {
+fn job(program: str, mode: str) -> proc.ProcessJob {
     let input = read_optional(test_stem(program) + ".stdin") ?? "";
     let exe = proc.current_exe() ?? "pilot";
     var argv: List<str> = ["ir", mode, program, "--"];
@@ -56,29 +56,14 @@ fn start(program: str, mode: str) -> proc.ProcessHandle {
     if arg_text != none {
         for a in test_lines(arg_text) { argv.push(a); }
     }
-    return proc.spawn(exe, argv, input);
+    return proc.job(exe, argv, input);
 }
 
-/// Runs `mode` on each of `programs`, as many at once as the machine has CPUs.
+/// Runs `mode` on each of `programs` (`proc.run_all`).
 fn run_all(programs: List<str>, mode: str) -> List<proc.ProcessOutput> {
-    let window = if proc.cpu_count() > 1 { proc.cpu_count() } else { 1 };
-    var running: List<proc.ProcessHandle> = [];
-    var started = 0;
-    while started < programs.len() && started < window {
-        running.push(start(programs[started], mode));
-        started = started + 1;
-    }
-    var out: List<proc.ProcessOutput> = [];
-    var i = 0;
-    while i < programs.len() {
-        out.push(running[i].wait());
-        if started < programs.len() {
-            running.push(start(programs[started], mode));
-            started = started + 1;
-        }
-        i = i + 1;
-    }
-    return out;
+    var jobs: List<proc.ProcessJob> = [];
+    for program in programs { jobs.push(job(program, mode)); }
+    return proc.run_all(jobs);
 }
 
 fn stopped_at_seam(out: proc.ProcessOutput) -> bool =>

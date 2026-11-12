@@ -1,6 +1,0 @@
-use std.text.zz_a;
-fn wrap() -> res<i64, BErr> {
-    let v = a_run()?;
-    return ok(v);
-}
-fn main() { let r = wrap(); print(r.err_val.code); }

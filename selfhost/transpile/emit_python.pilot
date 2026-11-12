@@ -167,6 +167,8 @@ pub struct PythonDialect : ISourceDialect {
         "        return bytes(xs).decode('utf-8')",
         "    except UnicodeDecodeError:",
         "        return None",
+        "def pilot_map_values(m):",
+        "    return [v for k, v in sorted(m.items(), key=lambda e: str(e[0]))]",
         "def pilot_eq(a, b):",
         "    if isinstance(a, list) and isinstance(b, list):",
         "        return a is b or (len(a) == len(b) and all(pilot_eq(x, y) for x, y in zip(a, b)))",
@@ -191,6 +193,12 @@ pub struct PythonDialect : ISourceDialect {
         "    raw = v.encode()",
         "    a, b = pilot_boundary(raw, a), pilot_boundary(raw, b)",
         "    return raw[a:max(a, b)].decode()",
+        "",
+        "def pilot_str_find(h, n, start=0):",
+        "    if start < 0:",
+        "        return -1",
+        "    raw = h.encode()",
+        "    return raw.find(n.encode(), pilot_boundary(raw, start))",
         "",
         "def pilot_leaves(v, deep, out):",
         "    for e in v:",
@@ -430,7 +438,7 @@ fn dynamic_engine_ops() -> Map<str, str> {
     ops.set("to_str", "pilot_show");
     ops.set("list_get", "pilot_map_get");
     ops.set("list_set", "pilot_map_set");
-    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_byte_at", "str_from_bytes", "list_extend", "list_remove_at", "stdin_read_line"] {
+    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line"] {
         ops.set(name, "pilot_" + name);
     }
     return ops;

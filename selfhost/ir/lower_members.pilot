@@ -128,7 +128,7 @@ pub fn note_record(lw: Lowerer, t: i64, phy: IrTypePhysics) {
     if some _known = ir_record_of(lw.ls.m, phy.layout_id) { return; }
     var fields: List<u32> = [];
     for f in fields_of(lw, t) { fields.push(field_physics(lw, t, f.canonical_name).layout_id); }
-    lw.ls.m.records.push(IrRecord { layout: phy.layout_id, fields: fields });
+    ir_add_record(lw.ls.m, IrRecord { layout: phy.layout_id, fields: fields });
 }
 
 /// The value of an omitted field: its default, else zero (as the seed

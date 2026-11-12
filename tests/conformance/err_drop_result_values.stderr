@@ -1,0 +1,1 @@
+err_drop_result_values.pilot:17:5: runtime error: SEAM001: unconnected seam `own.collection_drop`
