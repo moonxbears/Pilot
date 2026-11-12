@@ -5,6 +5,8 @@
 // and AST body expressions into CUDA, ROCm/HIP, OpenCL C, and OpenMP Offload.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct GpuKernelArtifact : IValue {
     pub backend_name: str;
@@ -250,7 +252,7 @@ pub fn gc_emit_stmt(nid: i64, dialect: str, indent: str) -> str {
 
 pub fn gc_emit_block_stmts(blk_nid: i64, dialect: str, indent: str) -> str {
     let cc = __engine("ast_child_count", blk_nid);
-    var out = "";
+    var out: List<str> = [];
     var ci = 0;
     while ci < cc {
         let st_nid = __engine("ast_child_at", blk_nid, ci);
@@ -264,20 +266,20 @@ pub fn gc_emit_block_stmts(blk_nid: i64, dialect: str, indent: str) -> str {
                     if __engine("ast_node_kind", cond_nid) == 19 && __engine("ast_node_raw_bits", cond_nid) == 10 {
                         let bound_s = gc_emit_expr(__engine("ast_child_at", cond_nid, 1), dialect);
                         let inner_s = gc_emit_stmt(__engine("ast_child_at", next_nid, 1), dialect, indent + "  ");
-                        out = out + indent + "#pragma omp target teams distribute parallel for simd\n"
+                        out.push(indent + "#pragma omp target teams distribute parallel for simd\n"
                             + indent + "for (int64_t " + vname + " = 0; " + vname + " < " + bound_s + "; ++" + vname + ") {\n"
                             + inner_s
-                            + indent + "}\n";
+                            + indent + "}\n");
                         ci = ci + 2;
                         continue;
                     }
                 }
             }
         }
-        out = out + gc_emit_stmt(st_nid, dialect, indent);
+        out.push(gc_emit_stmt(st_nid, dialect, indent));
         ci = ci + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 pub fn gc_emit_c_dialect_kernel(dialect: str, kernel_name: str) -> str {

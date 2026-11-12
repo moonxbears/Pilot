@@ -5,6 +5,7 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.Diagnostics.Renderer;
 
+use std.text;
 use Pilot.Diagnostics.Model::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
@@ -402,20 +403,20 @@ pub fn render_explain(code: str, use_color: bool) -> str {
 // JSON and SARIF 2.1.0 Emitter
 // ------------------------------------------------------------------------------
 pub fn escape_json_str(s: str) -> str {
-    var out = "";
+    var out: List<str> = [];
     var i = 0;
     let n = s.len();
     while i < n {
         let b = s.byte_at(i);
-        if b == 34 { out = out + "\\\""; }
-        else if b == 92 { out = out + "\\\\"; }
-        else if b == 10 { out = out + "\\n"; }
-        else if b == 13 { out = out + "\\r"; }
-        else if b == 9  { out = out + "\\t"; }
-        else { out = out + s.slice(i, i + 1); }
+        if b == 34 { out.push("\\\""); }
+        else if b == 92 { out.push("\\\\"); }
+        else if b == 10 { out.push("\\n"); }
+        else if b == 13 { out.push("\\r"); }
+        else if b == 9  { out.push("\\t"); }
+        else { out.push(s.slice(i, i + 1)); }
         i = i + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 pub fn render_diagnostic_json(diag: Diagnostic, file_path: str, src: str) -> str {
@@ -448,6 +449,7 @@ pub fn render_sarif_report(diags: List<Diagnostic>, file_path: str, src: str) ->
     out = out + "        }\n";
     out = out + "      },\n";
     out = out + "      \"results\": [\n";
+    var parts: List<str> = [out];
 
     var i = 0;
     while i < diags.len {
@@ -456,40 +458,40 @@ pub fn render_sarif_report(diags: List<Diagnostic>, file_path: str, src: str) ->
                        else if d.severity == diag_severity_warning() { "warning"; }
                        else { "note"; };
 
-        out = out + "        {\n";
-        out = out + "          \"ruleId\": \"" + d.code + "\",\n";
-        out = out + "          \"level\": \"" + sev_rule + "\",\n";
-        out = out + "          \"message\": { \"text\": \"" + escape_json_str(d.message) + "\" }";
+        parts.push("        {\n");
+        parts.push("          \"ruleId\": \"" + d.code + "\",\n");
+        parts.push("          \"level\": \"" + sev_rule + "\",\n");
+        parts.push("          \"message\": { \"text\": \"" + escape_json_str(d.message) + "\" }");
 
         if d.labels.len > 0 {
             let prim = d.labels[0];
             let loc = find_line_col_at(src, prim.span.start as usize);
-            out = out + ",\n          \"locations\": [\n";
-            out = out + "            {\n";
-            out = out + "              \"physicalLocation\": {\n";
-            out = out + "                \"artifactLocation\": { \"uri\": \"" + escape_json_str(file_path) + "\" },\n";
-            out = out + "                \"region\": {\n";
-            out = out + "                  \"startLine\": " + int_to_str(loc.line) + ",\n";
-            out = out + "                  \"startColumn\": " + int_to_str(loc.col) + "\n";
-            out = out + "                }\n";
-            out = out + "              }\n";
-            out = out + "            }\n";
-            out = out + "          ]\n";
+            parts.push(",\n          \"locations\": [\n");
+            parts.push("            {\n");
+            parts.push("              \"physicalLocation\": {\n");
+            parts.push("                \"artifactLocation\": { \"uri\": \"" + escape_json_str(file_path) + "\" },\n");
+            parts.push("                \"region\": {\n");
+            parts.push("                  \"startLine\": " + int_to_str(loc.line) + ",\n");
+            parts.push("                  \"startColumn\": " + int_to_str(loc.col) + "\n");
+            parts.push("                }\n");
+            parts.push("              }\n");
+            parts.push("            }\n");
+            parts.push("          ]\n");
         } else {
-            out = out + "\n";
+            parts.push("\n");
         }
 
-        out = out + "        }";
+        parts.push("        }");
         if i + 1 < diags.len {
-            out = out + ",";
+            parts.push(",");
         }
-        out = out + "\n";
+        parts.push("\n");
         i = i + 1;
     }
 
-    out = out + "      ]\n";
-    out = out + "    }\n";
-    out = out + "  ]\n";
-    out = out + "}\n";
-    return out;
+    parts.push("      ]\n");
+    parts.push("    }\n");
+    parts.push("  ]\n");
+    parts.push("}\n");
+    return text.join_text(parts, "");
 }

@@ -45,7 +45,7 @@ impl PilVirtualMachine {
             Opcode::Add if r1.is_str() || r2.is_str() => {
                 let mut s = self.display(r1);
                 s.push_str(&self.display(r2));
-                Ok(PilotVal::from_str(&s))
+                Ok(self.new_str(&s))
             }
             Opcode::Add | Opcode::Sub | Opcode::Mul | Opcode::Div | Opcode::Rem | Opcode::Pow | Opcode::FloorDiv => {
                 ops::arith(op, r1, r2)
@@ -79,7 +79,7 @@ impl PilVirtualMachine {
         Ok(match outcome {
             Ok(v) => self.new_list(vec![PilotVal::from_bool(true), v]),
             Err(message) => {
-                let m = PilotVal::from_str(&message);
+                let m = self.new_str(&message);
                 self.new_list(vec![PilotVal::from_bool(false), m])
             }
         })

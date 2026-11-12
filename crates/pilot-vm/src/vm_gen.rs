@@ -64,7 +64,7 @@ impl PilVirtualMachine {
                     closing: false,
                     current: PilotVal::NULL,
                 });
-                self.registers[dst] = PilotVal::from_int(self.generators.len() as i64 - 1);
+                self.set(dst, PilotVal::from_int(self.generators.len() as i64 - 1));
             }
             "gen_resume" => {
                 let id = self.frame_id(args.first())?;
@@ -83,7 +83,7 @@ impl PilVirtualMachine {
                     GenState::Running => return Err(RESUMED_WHILE_RUNNING.to_string()),
                     GenState::Done => {}
                 }
-                self.registers[dst] = PilotVal::NULL;
+                self.set(dst, PilotVal::NULL);
             }
             "gen_yield" => {
                 let Some(&(depth, id)) = self.gen_stack.last() else {
@@ -105,15 +105,15 @@ impl PilVirtualMachine {
             }
             "gen_done" => {
                 let id = self.frame_id(args.first())?;
-                self.registers[dst] = PilotVal::from_bool(self.generators[id].state == GenState::Done);
+                self.set(dst, PilotVal::from_bool(self.generators[id].state == GenState::Done));
             }
             "gen_current" => {
                 let id = self.frame_id(args.first())?;
-                self.registers[dst] = self.generators[id].current;
+                self.set(dst, self.generators[id].current);
             }
             "gen_closing" => {
                 let closing = self.gen_stack.last().is_some_and(|&(_, id)| self.generators[id].closing);
-                self.registers[dst] = PilotVal::from_bool(closing);
+                self.set(dst, PilotVal::from_bool(closing));
             }
             _ => return Ok(false),
         }
@@ -154,7 +154,7 @@ impl PilVirtualMachine {
     fn resume(&mut self, id: usize, sent: PilotVal, dst: u8) -> Result<(), String> {
         match self.generators[id].state {
             GenState::Done => {
-                self.registers[dst as usize] = PilotVal::NULL;
+                self.set(dst as usize, PilotVal::NULL);
                 return Ok(());
             }
             GenState::Running => return Err(RESUMED_WHILE_RUNNING.to_string()),
@@ -166,17 +166,25 @@ impl PilVirtualMachine {
         frame.state = GenState::Running;
         let regs = std::mem::take(&mut frame.regs);
         let sent_dst = frame.sent_dst;
-        self.registers.fill(PilotVal::NULL);
+        self.registers[..self.reg_top].fill(PilotVal::NULL);
         self.registers[..regs.len()].copy_from_slice(&regs);
+        self.reg_top = regs.len();
         if let Some(d) = sent_dst {
-            self.registers[d as usize] = sent;
+            self.set(d as usize, sent);
         }
         self.gen_stack.push((self.call_stack.len(), id));
         Ok(())
     }
 
+    /// Every value a generator frame holds.
+    pub(crate) fn generator_values(&self) -> impl Iterator<Item = &PilotVal> {
+        self.generators
+            .iter()
+            .flat_map(|g| g.regs.iter().chain(std::iter::once(&g.current)))
+    }
+
     /// The number of registers up to the last one holding a value.
     pub(crate) fn active_registers(&self) -> usize {
-        self.registers.iter().rposition(|r| !r.is_null()).map_or(0, |i| i + 1)
+        self.registers[..self.reg_top].iter().rposition(|r| !r.is_null()).map_or(0, |i| i + 1)
     }
 }

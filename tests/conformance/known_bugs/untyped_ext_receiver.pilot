@@ -1,0 +1,24 @@
+// KNOWN BUG seed.untyped_ext_receiver: when several primitive `ext` blocks
+// declare a method, the checker still knows each receiver's type: the
+// literal 5 is an i64, `let s = "x"` is a str, and `n.twice()` (on the i64
+// `n`) is an i64, so the calls print i64, str and i64. The seed only knows
+// the type of an annotated binding, a parameter or a plain function call,
+// and refuses the others with SEED001 ("give the receiver a type"). PilIR's
+// interpreter prints i64, str, i64.
+ext i64 {
+    fn who() -> str => "i64";
+    fn twice() -> i64 => self * 2;
+}
+
+ext str {
+    fn who() -> str => "str";
+    fn twice() -> str => self + self;
+}
+
+fn main() {
+    print(5.who());
+    let s = "x";
+    print(s.who());
+    let n: i64 = 4;
+    print(n.twice().who());
+}

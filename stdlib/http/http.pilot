@@ -6,6 +6,8 @@
 // directly over `tcp_connect`, `tcp_send`, `tcp_recv`, and `tcp_close`.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct HttpResponse : IValue {
     pub status: i64;
@@ -203,7 +205,7 @@ pub pure fn http_lookup_header_in_raw(headers_raw: str, header_name: str) -> str
 pub pure fn http_decode_chunked_body(raw_body: str) -> str {
     let n = raw_body.len();
     var pos = 0;
-    var out = "";
+    var out: List<str> = [];
     while pos < n {
         let eol = http_find_crlf(raw_body, pos);
         if eol < 0 {
@@ -217,14 +219,14 @@ pub pure fn http_decode_chunked_body(raw_body: str) -> str {
         let data_start = eol + 2;
         let data_end = data_start + chunk_len;
         if data_end <= n {
-            out = out + raw_body.slice(data_start, data_end);
+            out.push(raw_body.slice(data_start, data_end));
         } else {
-            out = out + raw_body.slice(data_start, n);
+            out.push(raw_body.slice(data_start, n));
             break;
         }
         pos = data_end + 2;
     }
-    return out;
+    return join_text(out, "");
 }
 
 pub fn http_parse_raw_response(raw: str) -> HttpResponse {

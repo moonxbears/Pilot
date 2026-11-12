@@ -1,0 +1,53 @@
+// Checked conversions with bool and char (stdlib/core/convert).
+// bool -> number: false is 0, true is 1 (Rust's `i64::from(bool)`).
+// integer -> bool: only 0 and 1; any other value is ::OutOfRange.
+// integer -> char: a Unicode scalar value, as Rust's `char::try_from(u32)`:
+// 0..0xD7FF and 0xE000..0x10FFFF; a surrogate 0xD800..0xDFFF is
+// ::OutOfRange, above 0x10FFFF ::Overflow, negative ::Underflow.
+// char -> integer: its code point, range-checked (€ is 8364, é is 233).
+// A char is shown by its code point (`to_u32`).
+use Pilot.Core.Convert;
+use lib.convert_show;
+
+fn code_of_int(v: i64) -> u32 ! ConvertError {
+    let c: char = v.to_char()?;
+    return c.to_u32()?;
+}
+
+fn main() {
+    let t: bool = true;
+    let f: bool = false;
+    show("true -> i64", t.to_i64());
+    show("false -> u8", f.to_u8());
+    show("true -> f64", t.to_f64());
+    show("true -> bool", t.to_bool());
+
+    let ints: List<i64> = [0, 1, 2, -1];
+    for i in ints {
+        let v: i64 = i;
+        show(f"i64 {v} -> bool", v.to_bool());
+    }
+    let one: u64 = 1;
+    show("u64 1 -> bool", one.to_bool());
+    let seven: u64 = 7;
+    show("u64 7 -> bool", seven.to_bool());
+
+    let codes: List<i64> = [65, 0x10FFFF, 0x110000, 0xD800, 0xDFFF, 0xD7FF, 0xE000, -1, 0];
+    for i in codes {
+        show(f"i64 {i} -> char code", code_of_int(i));
+    }
+    let byte: u8 = 233;
+    let c1: char = byte.to_char() catch e => {
+        print("unreachable");
+        return;
+    };
+    show("u8 233 -> char -> i8", c1.to_i8());
+    show("u8 233 -> char -> u8", c1.to_u8());
+    let euro: str = "€";
+    let c2: char = euro.to_char() catch e => {
+        print("unreachable");
+        return;
+    };
+    show("char 8364 -> u8", c2.to_u8());
+    show("char 8364 -> i16", c2.to_i16());
+}

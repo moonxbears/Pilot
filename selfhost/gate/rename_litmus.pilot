@@ -14,6 +14,8 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Gate.RenameLitmus;
 
+use std.text;
+
 pub fn rl_make_pair(from_ident: str, to_ident: str) -> i64 {
     let p = __engine("map_new");
     __engine("map_set", p, "from", from_ident);
@@ -84,7 +86,7 @@ fn rl_pairs_to_map(rename_pairs: i64) -> i64 {
 // Lexer-aware whole-identifier alpha-renamer (preserves comments & string literals)
 pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
     let n = src.len();
-    var out = "";
+    var out: List<str> = [];
     var chunk_start = 0;
     var pos = 0;
     while pos < n {
@@ -138,7 +140,7 @@ pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
             let word = src.slice(st, pos);
             let repl = __engine("map_get", rmap, word) ?? "";
             if repl.len() > 0 {
-                out = out + src.slice(chunk_start, st) + repl;
+                out.push(src.slice(chunk_start, st) + repl);
                 chunk_start = pos;
             }
         } else {
@@ -146,9 +148,9 @@ pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
         }
     }
     if n > chunk_start {
-        out = out + src.slice(chunk_start, n);
+        out.push(src.slice(chunk_start, n));
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 /// Where the conformance corpus lives, relative to the workspace root.
@@ -188,30 +190,30 @@ fn rl_violation(file_path: str, snippet: str, message: str, remediation: str) ->
 
 /// Renames whole words in plain text, such as the diagnostics a `.stderr`
 /// expectation file quotes (`option<Pair>` -> `maybe<Pair>`).
-pub pure fn rl_rename_words(text: str, rmap: i64) -> str {
-    let n = text.len();
+pub pure fn rl_rename_words(words: str, rmap: i64) -> str {
+    let n = words.len();
     var out = "";
     var chunk_start = 0;
     var pos = 0;
     while pos < n {
-        let b = text.byte_at(pos);
+        let b = words.byte_at(pos);
         if sa_is_upper(b) || sa_is_lower(b) || b == 95 {
             let st = pos;
             pos = pos + 1;
-            while pos < n && sa_is_id_char(text.byte_at(pos)) { pos = pos + 1; }
-            let repl = __engine("map_get", rmap, text.slice(st, pos)) ?? "";
+            while pos < n && sa_is_id_char(words.byte_at(pos)) { pos = pos + 1; }
+            let repl = __engine("map_get", rmap, words.slice(st, pos)) ?? "";
             if repl.len() > 0 {
-                out = out + text.slice(chunk_start, st) + repl;
+                out = out + words.slice(chunk_start, st) + repl;
                 chunk_start = pos;
             }
         } else if b >= 48 && b <= 57 {
             pos = pos + 1;
-            while pos < n && sa_is_id_char(text.byte_at(pos)) { pos = pos + 1; }
+            while pos < n && sa_is_id_char(words.byte_at(pos)) { pos = pos + 1; }
         } else {
             pos = pos + 1;
         }
     }
-    return out + text.slice(chunk_start, n);
+    return out + words.slice(chunk_start, n);
 }
 
 /// The decimal number `s` holds, or -1 when it holds anything else.
@@ -266,9 +268,9 @@ fn rl_source_lines(s: str) -> i64 {
 
 /// A `.stderr` expectation file renamed to match its renamed program, whose
 /// original source is `program_src`.
-fn rl_rename_stderr(text: str, program_src: str, rmap: i64) -> str {
+fn rl_rename_stderr(body: str, program_src: str, rmap: i64) -> str {
     let src_lines = rl_source_lines(program_src);
-    let lines = gm_split_lines(text);
+    let lines = gm_split_lines(body);
     var out = "";
     var i = 0;
     while i < glist_len(lines) {
@@ -289,13 +291,13 @@ fn rl_copy_renamed_tree(root: str, src_rel: str, sandbox_dir: str, dst_rel: str,
     while i < n {
         let path = glist_get(files, i);
         let rel = path.slice(base.len() + 1, path.len());
-        let text = gate_fs_read_text(path);
-        var out_text = text;
+        let file_text = gate_fs_read_text(path);
+        var out_text = file_text;
         if gm_ends_with(rel, ".pilot") {
-            out_text = rl_rename_pilot_identifiers(text, rmap);
+            out_text = rl_rename_pilot_identifiers(file_text, rmap);
         } else if gm_ends_with(rel, ".stderr") {
             let program = path.slice(0, path.len() - 7) + ".pilot";
-            out_text = rl_rename_stderr(text, gate_fs_read_text(program), rmap);
+            out_text = rl_rename_stderr(file_text, gate_fs_read_text(program), rmap);
         }
         let out_path = gm_join_path(sandbox_dir, dst_rel + "/" + rel);
         if gate_fs_write_text(out_path, out_text) {

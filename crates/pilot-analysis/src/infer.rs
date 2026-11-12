@@ -40,6 +40,8 @@ pub struct PhysicsRegistry {
     /// Set when the self-hosted analyzer faulted; its results are then incomplete.
     pub analyzer_error: Option<String>,
     pub categories: Vec<CategoryRecord>, pub registered_symbols: Vec<(i64, String, String)>,
+    /// The field layouts of the aggregate being built (`layout_aggregate_*`).
+    pub pending_fields: Vec<LayoutId>,
 }
 
 impl PhysicsRegistry {
@@ -49,7 +51,7 @@ impl PhysicsRegistry {
             arena, layouts: LayoutTable::new(), node_layouts: vec![None; count], node_targets: vec![None; count],
             symbol_strings, diagnostics: Vec::new(), source_text: String::new(),
             lsp_method: String::new(), lsp_offset: 0, lsp_result: String::new(), analyzer_error: None,
-            categories: Vec::new(), registered_symbols: Vec::new(),
+            categories: Vec::new(), registered_symbols: Vec::new(), pending_fields: Vec::new(),
         };
         reg.index_arena_symbols(0);
         reg
@@ -286,8 +288,19 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
         }
         "layout_scalar" => Ok(PilotVal::from_int(registry.layouts.register_scalar(arg_i(0) as u16, arg_i(1).max(1) as u16, arg_i(2) as u8).0 as i64)),
         "layout_ptr" => Ok(PilotVal::from_int(registry.layouts.register_pointer(LayoutId(arg_i(0) as u32), CapabilityBits(arg_i(1) as u8), arg_i(2) as u8).0 as i64)),
-        "layout_aggregate" => {
-            let fields: Vec<LayoutId> = args.iter().filter_map(|a| a.as_int().map(|v| LayoutId(v as u32))).collect();
+        // An aggregate is built one field per call (a call takes at most 16
+        // arguments): `begin`, then `field(layout)` per field, then `end`,
+        // which registers it and gives its layout.
+        "layout_aggregate_begin" => {
+            registry.pending_fields.clear();
+            Ok(PilotVal::from_int(0))
+        }
+        "layout_aggregate_field" => {
+            registry.pending_fields.push(LayoutId(arg_i(0) as u32));
+            Ok(PilotVal::from_int(registry.pending_fields.len() as i64))
+        }
+        "layout_aggregate_end" => {
+            let fields = std::mem::take(&mut registry.pending_fields);
             Ok(PilotVal::from_int(registry.layouts.register_aggregate(&fields, false, false).0 as i64))
         }
         "layout_union" => {

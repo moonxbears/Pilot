@@ -9,7 +9,42 @@
 //!   the file cannot be read.
 
 use crate::vm::PilVirtualMachine;
+use pilot_parser::ModuleDecl;
 use pilot_rt::PilotVal;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
+
+/// A file's header as last read: its modification time and length when it
+/// was read, and its declarations.
+type HeaderEntry = (Option<SystemTime>, u64, Arc<Vec<ModuleDecl>>);
+
+/// Headers already read in this process, by path. One command runs several
+/// tools that each load the same modules; a file is read again only when
+/// its modification time or length has changed.
+static HEADERS: OnceLock<Mutex<HashMap<String, HeaderEntry>>> = OnceLock::new();
+
+fn cached_header(path: &str) -> Option<Arc<Vec<ModuleDecl>>> {
+    let meta = std::fs::metadata(path).ok()?;
+    let (mtime, len) = (meta.modified().ok(), meta.len());
+    let cache = HEADERS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(map) = cache.lock() {
+        if let Some((m, l, decls)) = map.get(path) {
+            if mtime.is_some() && *m == mtime && *l == len {
+                return Some(Arc::clone(decls));
+            }
+        }
+    }
+    let src = std::fs::read_to_string(path).ok()?;
+    let decls = Arc::new(pilot_parser::parse_header(&src));
+    // A file whose length changed while it was read is not kept.
+    if src.len() as u64 == len {
+        if let Ok(mut map) = cache.lock() {
+            map.insert(path.to_string(), (mtime, len, Arc::clone(&decls)));
+        }
+    }
+    Some(decls)
+}
 
 impl PilVirtualMachine {
     /// Sets the arguments `proc_args()` returns.
@@ -23,11 +58,11 @@ impl PilVirtualMachine {
     }
 
     pub(crate) fn unit_header(&mut self, path: &str) -> PilotVal {
-        let Ok(src) = std::fs::read_to_string(path) else {
+        let Some(header) = cached_header(path) else {
             return PilotVal::NULL;
         };
-        let decls: Vec<PilotVal> = pilot_parser::parse_header(&src)
-            .into_iter()
+        let decls: Vec<PilotVal> = header
+            .iter()
             .map(|d| {
                 let fields = vec![
                     PilotVal::from_bool(d.is_package),
@@ -43,13 +78,13 @@ impl PilVirtualMachine {
 
     /// The elements of a list value.
     pub fn list_items(&self, v: PilotVal) -> Option<Vec<PilotVal>> {
-        let slot = v.as_list_handle()?;
+        let slot = v.as_list_handle().filter(|&s| !self.list_is_dead(s))?;
         self.heap_lists.get(slot).cloned()
     }
 
     /// Field `name` of a record value.
     pub fn record_field(&self, v: PilotVal, name: &str) -> Option<PilotVal> {
-        let slot = v.as_map_handle()?;
+        let slot = v.as_map_handle().filter(|&s| !self.map_is_dead(s))?;
         self.heap_maps.get(slot)?.get(name).copied()
     }
 }
@@ -118,7 +153,7 @@ impl PilVirtualMachine {
             HostValue::Bool(b) => PilotVal::from_bool(b),
             HostValue::Int(i) => PilotVal::from_int(i),
             HostValue::Float(f) => PilotVal::from_float(f),
-            HostValue::Str(s) => PilotVal::from_str(&s),
+            HostValue::Str(s) => self.new_str(&s),
             HostValue::List(items) => {
                 let vals = items.into_iter().map(|i| self.from_host(i)).collect();
                 self.new_list(vals)
@@ -153,8 +188,8 @@ impl PilVirtualMachine {
             .map_err(|e| format!("cannot wait for `{program}`: {e}"))?;
         let fields = vec![
             PilotVal::from_int(out.status.code().map_or(-1, i64::from)),
-            PilotVal::from_str(&String::from_utf8_lossy(&out.stdout)),
-            PilotVal::from_str(&String::from_utf8_lossy(&out.stderr)),
+            self.new_str(&String::from_utf8_lossy(&out.stdout)),
+            self.new_str(&String::from_utf8_lossy(&out.stderr)),
         ];
         Ok(self.new_list(fields))
     }
@@ -198,25 +233,25 @@ pub(crate) fn cpu_count() -> i64 {
     std::thread::available_parallelism().map_or(1, |n| n.get() as i64)
 }
 
-/// The next line of standard input without its line ending, or `none` at
+/// The next line of standard input without its line ending, or `None` at
 /// the end of input.
-pub(crate) fn stdin_read_line() -> PilotVal {
+pub(crate) fn stdin_read_line() -> Option<String> {
     let mut line = String::new();
     match std::io::stdin().read_line(&mut line) {
-        Ok(0) | Err(_) => PilotVal::NULL,
+        Ok(0) | Err(_) => None,
         Ok(_) => {
             let trimmed = line.strip_suffix('\n').unwrap_or(&line);
-            PilotVal::from_str(trimmed.strip_suffix('\r').unwrap_or(trimmed))
+            Some(trimmed.strip_suffix('\r').unwrap_or(trimmed).to_string())
         }
     }
 }
 
 /// The rest of standard input.
-pub(crate) fn stdin_read_all() -> PilotVal {
+pub(crate) fn stdin_read_all() -> String {
     use std::io::Read;
     let mut text = String::new();
     let _ = std::io::stdin().read_to_string(&mut text);
-    PilotVal::from_str(&text)
+    text
 }
 
 /// The path of the running executable, with `/` separators, or `none`.

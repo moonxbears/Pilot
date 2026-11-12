@@ -1,0 +1,95 @@
+// Checked conversions with floats (stdlib/core/convert).
+// float -> integer truncates toward zero and then checks the range, like
+// C#'s `checked((int)x)`: NaN is ::NotRepresentable, +inf ::Overflow,
+// -inf ::Underflow. integer -> float is the nearest float, ties to even.
+// f64 -> f32 is the nearest f32; only a finite value beyond the f32 range
+// fails. Printed floats are the shortest digits that read back the same
+// value (Python's repr gives the same digits).
+// Hand-worked rounding cases:
+//   2^53 + 1 = 9007199254740993 is halfway between 2^53 and 2^53 + 2; the
+//   even one is 2^53 = 9007199254740992.
+//   2^24 + 1 = 16777217 -> f32 is halfway; the even one is 16777216.
+//   2^60 + 2^36 + 1 = 1152921573326323713 -> f32: the f32 step there is
+//   2^37, and the value is just above the halfway point 2^60 + 2^36, so the
+//   nearest f32 is 2^60 + 2^37 = 1152921642045800448 (shortest digits
+//   1152921642045800400). Rounding to an f64 first would land exactly on
+//   the halfway point and then round to 2^60.
+use Pilot.Core.Convert;
+use lib.convert_show;
+
+fn main() {
+    let a: f64 = 3.99;
+    show("f64 3.99 -> i64", a.to_i64());
+    let b: f64 = -3.99;
+    show("f64 -3.99 -> i64", b.to_i64());
+    show("f64 -3.99 -> u8", b.to_u8());
+    let c: f64 = -0.5;
+    show("f64 -0.5 -> u8", c.to_u8());
+    let d: f64 = 255.9;
+    show("f64 255.9 -> u8", d.to_u8());
+    let e: f64 = 256.0;
+    show("f64 256.0 -> u8", e.to_u8());
+    let f: f64 = -1.0;
+    show("f64 -1.0 -> u8", f.to_u8());
+    let inf: f64 = 1.0 / 0.0;
+    let nan: f64 = inf - inf;
+    show("f64 NaN -> i32", nan.to_i32());
+    show("f64 inf -> i64", inf.to_i64());
+    let ninf: f64 = -inf;
+    show("f64 -inf -> i64", ninf.to_i64());
+    show("f64 -inf -> u64", ninf.to_u64());
+    let p63: f64 = 9223372036854775808.0;
+    show("f64 2^63 -> i64", p63.to_i64());
+    show("f64 2^63 -> u64", p63.to_u64());
+    let m63: f64 = -9223372036854775808.0;
+    show("f64 -2^63 -> i64", m63.to_i64());
+    let below: f64 = 9223372036854774784.0;
+    show("f64 2^63-1024 -> i64", below.to_i64());
+    let p64: f64 = 18446744073709551616.0;
+    show("f64 2^64 -> u64", p64.to_u64());
+    let below64: f64 = 18446744073709549568.0;
+    show("f64 2^64-2048 -> u64", below64.to_u64());
+    let g: f64 = 2147483647.9;
+    show("f64 2147483647.9 -> i32", g.to_i32());
+    let h: f64 = 2147483648.0;
+    show("f64 2147483648.0 -> i32", h.to_i32());
+    let k: f64 = -2147483648.9;
+    show("f64 -2147483648.9 -> i32", k.to_i32());
+    let l: f64 = -2147483649.0;
+    show("f64 -2147483649.0 -> i32", l.to_i32());
+    let fa: f32 = f32(2.5);
+    show("f32 2.5 -> i8", fa.to_i8());
+    let fb: f32 = f32(10000000000.0);
+    show("f32 1e10 -> i32", fb.to_i32());
+    show("f32 1e10 -> i64", fb.to_i64());
+    let fc: f32 = f32(0.1);
+    show("f32 0.1 -> f64", fc.to_f64());
+
+    let i53: i64 = 9007199254740993;
+    show("i64 2^53+1 -> f64", i53.to_f64());
+    let i24: i64 = 16777217;
+    show("i64 2^24+1 -> f32", i24.to_f32());
+    let i60: i64 = 1152921573326323713;
+    show("i64 2^60+2^36+1 -> f32", i60.to_f32());
+    let imin: i64 = -9223372036854775808;
+    show("i64 min -> f32", imin.to_f32());
+    show("i64 min -> f64", imin.to_f64());
+    let umax: u64 = 18446744073709551615;
+    show("u64 max -> f64", umax.to_f64());
+    show("u64 max -> f32", umax.to_f32());
+    let small: u8 = 7;
+    show("u8 7 -> f64", small.to_f64());
+
+    let big: f64 = 1.0e39;
+    show("f64 1e39 -> f32", big.to_f32());
+    let nbig: f64 = -1.0e39;
+    show("f64 -1e39 -> f32", nbig.to_f32());
+    let tenth: f64 = 0.1;
+    show("f64 0.1 -> f32", tenth.to_f32());
+    let fmax: f64 = 3.4028234663852886e38;
+    show("f64 f32-max -> f32", fmax.to_f32());
+    show("f64 inf -> f32", inf.to_f32());
+    show("f64 NaN -> f32", nan.to_f32());
+    let tiny: f64 = 1.0e-50;
+    show("f64 1e-50 -> f32", tiny.to_f32());
+}

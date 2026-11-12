@@ -1,0 +1,13 @@
+// Float text outside the exact fast path stops at the seam
+// `convert.float_parse_slow_path` instead of returning a value that may be
+// rounded wrongly: 2^53 + 1 = 9007199254740993 has a mantissa too wide to be
+// exact in an f64. Text inside the fast path converts before it.
+use Pilot.Core.Convert;
+
+fn main() {
+    let fast: str = "9007199254740992";
+    print(fast.to_f64() catch e => 0.0);
+    let slow: str = "9007199254740993";
+    print(slow.to_f64() catch e => 0.0);
+    print("unreachable");
+}

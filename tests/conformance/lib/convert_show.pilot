@@ -1,0 +1,29 @@
+// Prints a checked conversion's outcome as `label: ok <value>` or
+// `label: err <kind>`, for the convert_* conformance programs.
+pkg lib.convert_show;
+
+use Pilot.Core.Convert;
+
+pub fn kind_name(e: ConvertError) -> str {
+    let k = e.kind;
+    if k == ConvertErrorKind::Overflow { return "Overflow"; }
+    if k == ConvertErrorKind::Underflow { return "Underflow"; }
+    if k == ConvertErrorKind::OutOfRange { return "OutOfRange"; }
+    if k == ConvertErrorKind::InvalidFormat { return "InvalidFormat"; }
+    return "NotRepresentable";
+}
+
+pub fn show<T: IAnyValue>(label: str, r: T ! ConvertError) {
+    var failed = false;
+    var kind = "";
+    let v = r catch e => {
+        failed = true;
+        kind = kind_name(e);
+        r
+    };
+    if failed {
+        print(f"{label}: err {kind}");
+    } else {
+        print(f"{label}: ok {v}");
+    }
+}

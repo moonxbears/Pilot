@@ -6,6 +6,8 @@
 
 pub pkg std.polyglot.transport.xml;
 
+use std.text;
+
 // ------------------------------------------------------------------------------
 // 1. XML Node Kinds
 // ------------------------------------------------------------------------------
@@ -121,34 +123,34 @@ pub struct XmlNode : IObject {
             return "<!-- " + self.text_content + " -->";
         }
         if self.kind == XmlKind::Element {
-            var out = "<" + self.tag_name;
+            var out: List<str> = ["<" + self.tag_name];
             var i: usize = 0;
             let an = self.attributes.len();
             while i < an {
                 let a = self.attributes[i];
-                out = out + " " + a.name + "=\"" + a.val + "\"";
+                out.push(" " + a.name + "=\"" + a.val + "\"");
                 i = i + 1;
             }
 
             if self.children.len() == 0 && self.text_content.len() == 0 {
-                out = out + " />";
-                return out;
+                out.push(" />");
+                return join_text(out, "");
             }
 
-            out = out + ">";
+            out.push(">");
             if self.text_content.len() > 0 {
-                out = out + self.text_content;
+                out.push(self.text_content);
             }
 
             var j: usize = 0;
             let cn = self.children.len();
             while j < cn {
-                out = out + self.children[j].emit();
+                out.push(self.children[j].emit());
                 j = j + 1;
             }
 
-            out = out + "</" + self.tag_name + ">";
-            return out;
+            out.push("</" + self.tag_name + ">");
+            return join_text(out, "");
         }
         return "";
     }

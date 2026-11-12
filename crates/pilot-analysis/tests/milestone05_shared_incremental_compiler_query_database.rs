@@ -117,6 +117,7 @@ fn eval_db(script: &str) -> String {
     let root = anticheat::workspace_root();
     let deps = [
         "stdlib/core/file.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/lexer.pilot",
         "selfhost/db/revision.pilot",
         "selfhost/db/engine.pilot",

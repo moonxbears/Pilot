@@ -33,6 +33,7 @@ pub pure fn cli_version_text() -> str => "Pilot v1.1.51 (Self-Hosted PilVM v3)";
 pub fn cli_gate_files() -> List<str> => [
     "stdlib/crypto/hash.pilot",
     "stdlib/std/proc.pilot",
+    "stdlib/std/text.pilot",
     "selfhost/lexer.pilot",
     "selfhost/ast.pilot",
     "selfhost/parser.pilot",
@@ -252,6 +253,7 @@ pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
 pub fn cli_emit_files(lang: str) -> List<str> {
     var files = cli_ir_files();
     files.push("selfhost/ir/pass_perceus.pilot");
+    files.push("stdlib/core/byte_rank.pilot");
     files.push("selfhost/transpile/source.pilot");
     files.push("selfhost/transpile/c_family.pilot");
     files.push(f"selfhost/transpile/emit_{lang}.pilot");

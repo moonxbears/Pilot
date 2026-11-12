@@ -6,6 +6,7 @@
 //! construct the seed cannot run is reported instead of silently dropped.
 
 mod checked;
+pub mod collect;
 pub mod codes;
 mod heap;
 pub mod instruction;
@@ -35,6 +36,7 @@ mod lower_variant;
 mod lower_yield;
 mod ops;
 pub mod pilc;
+pub mod strings;
 pub mod vm;
 mod vm_gen;
 
@@ -394,7 +396,7 @@ impl BytecodeCompiler {
         let r = self.next_local_reg;
         if r > LAST_LOCAL_REG {
             self.error(codes::SEED, format!(
-                "function needs more than {} local variables",
+                "function needs more than {} local variables in scope at once",
                 LAST_LOCAL_REG - FIRST_LOCAL_REG + 1
             ));
             return LAST_LOCAL_REG;

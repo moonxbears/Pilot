@@ -7,6 +7,7 @@ pub lvl(0) pkg Pilot.SelfHost.Adapter.RustBridge;
 
 use Pilot.Diagnostics.Model;
 use Pilot.SelfHost.Adapter.RustSig;
+use std.text;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -94,20 +95,20 @@ pub pure fn rust_bridge_cache_key(crate_name: str, src: str) -> str {
 // ------------------------------------------------------------------------------
 
 pub fn rust_synthesize_dyn_vtable(trait_decl: ref<RustTraitDecl>) -> str {
-    var out = f"// DynTraitFatPtr vtable layout for trait '{trait_decl.name}'\n";
-    out = out + f"#[repr(C)]\npub struct {trait_decl.name}Vtable {{\n";
-    out = out + "    pub destructor: unsafe extern \"C\" fn(*mut ()),\n";
-    out = out + "    pub size: usize,\n";
-    out = out + "    pub align: usize,\n";
+    var out: List<str> = [f"// DynTraitFatPtr vtable layout for trait '{trait_decl.name}'\n"];
+    out.push(f"#[repr(C)]\npub struct {trait_decl.name}Vtable {{\n");
+    out.push("    pub destructor: unsafe extern \"C\" fn(*mut ()),\n");
+    out.push("    pub size: usize,\n");
+    out.push("    pub align: usize,\n");
 
     var m_idx: usize = 0;
     while m_idx < trait_decl.methods.len() {
         let m = trait_decl.methods[m_idx];
-        out = out + f"    pub {m.name}: unsafe extern \"C\" fn(*const (),\n";
+        out.push(f"    pub {m.name}: unsafe extern \"C\" fn(*const (),\n");
         m_idx = m_idx + 1;
     }
-    out = out + "}\n";
-    return out;
+    out.push("}\n");
+    return text.join_text(out, "");
 }
 
 // ------------------------------------------------------------------------------
@@ -196,74 +197,74 @@ fn bridge_param_arg(p: RustParamDecl) -> str {
 }
 
 pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) -> str {
-    var out = "// ==============================================================================\n";
-    out = out + f"// Auto-generated Pilot C-ABI bridge crate for '{crate_name}'\n";
-    out = out + "// Enforces std::panic::catch_unwind safety boundary and zero-copy slices\n";
-    out = out + "// ==============================================================================\n";
-    out = out + "#![allow(non_snake_case, dead_code, improper_ctypes_definitions)]\n";
-    out = out + "use std::panic::{catch_unwind, AssertUnwindSafe};\n";
-    out = out + f"use {crate_name}::*;\n\n";
+    var out: List<str> = ["// ==============================================================================\n"];
+    out.push(f"// Auto-generated Pilot C-ABI bridge crate for '{crate_name}'\n");
+    out.push("// Enforces std::panic::catch_unwind safety boundary and zero-copy slices\n");
+    out.push("// ==============================================================================\n");
+    out.push("#![allow(non_snake_case, dead_code, improper_ctypes_definitions)]\n");
+    out.push("use std::panic::{catch_unwind, AssertUnwindSafe};\n");
+    out.push(f"use {crate_name}::*;\n\n");
 
-    out = out + "/// Bridge Result payload structure\n";
-    out = out + "#[repr(C)]\n";
-    out = out + "pub struct BridgeResult<T> {\n";
-    out = out + "    pub is_ok: bool,\n";
-    out = out + "    pub val: T,\n";
-    out = out + "    pub panic_msg: *const u8,\n";
-    out = out + "    pub panic_len: usize,\n";
-    out = out + "}\n\n";
+    out.push("/// Bridge Result payload structure\n");
+    out.push("#[repr(C)]\n");
+    out.push("pub struct BridgeResult<T> {\n");
+    out.push("    pub is_ok: bool,\n");
+    out.push("    pub val: T,\n");
+    out.push("    pub panic_msg: *const u8,\n");
+    out.push("    pub panic_len: usize,\n");
+    out.push("}\n\n");
 
-    out = out + "/// Zero-copy slice view passed between Pilot and Rust\n";
-    out = out + "#[repr(C)]\n#[derive(Clone, Copy)]\n";
-    out = out + "pub struct PilotSliceView<T> {\n";
-    out = out + "    pub ptr: *const T,\n";
-    out = out + "    pub len: usize,\n";
-    out = out + "}\n\n";
+    out.push("/// Zero-copy slice view passed between Pilot and Rust\n");
+    out.push("#[repr(C)]\n#[derive(Clone, Copy)]\n");
+    out.push("pub struct PilotSliceView<T> {\n");
+    out.push("    pub ptr: *const T,\n");
+    out.push("    pub len: usize,\n");
+    out.push("}\n\n");
 
-    out = out + "/// Zero-copy mutable slice view\n";
-    out = out + "#[repr(C)]\n#[derive(Clone, Copy)]\n";
-    out = out + "pub struct PilotSliceMut<T> {\n";
-    out = out + "    pub ptr: *mut T,\n";
-    out = out + "    pub len: usize,\n";
-    out = out + "}\n\n";
+    out.push("/// Zero-copy mutable slice view\n");
+    out.push("#[repr(C)]\n#[derive(Clone, Copy)]\n");
+    out.push("pub struct PilotSliceMut<T> {\n");
+    out.push("    pub ptr: *mut T,\n");
+    out.push("    pub len: usize,\n");
+    out.push("}\n\n");
 
-    out = out + "/// An owned Rust Vec<T> / String handed to Pilot; freed by the free_* functions\n";
-    out = out + "#[repr(C)]\n";
-    out = out + "pub struct PilotVecParts<T> {\n";
-    out = out + "    pub ptr: *mut T,\n";
-    out = out + "    pub cap: usize,\n";
-    out = out + "    pub len: usize,\n";
-    out = out + "}\n\n";
+    out.push("/// An owned Rust Vec<T> / String handed to Pilot; freed by the free_* functions\n");
+    out.push("#[repr(C)]\n");
+    out.push("pub struct PilotVecParts<T> {\n");
+    out.push("    pub ptr: *mut T,\n");
+    out.push("    pub cap: usize,\n");
+    out.push("    pub len: usize,\n");
+    out.push("}\n\n");
 
-    out = out + "/// DynTrait fat pointer representation { data, vtable }\n";
-    out = out + "#[repr(C)]\n";
-    out = out + "pub struct DynTraitFatPtr {\n";
-    out = out + "    pub data: *mut (),\n";
-    out = out + "    pub vtable: *const (),\n";
-    out = out + "}\n\n";
+    out.push("/// DynTrait fat pointer representation { data, vtable }\n");
+    out.push("#[repr(C)]\n");
+    out.push("pub struct DynTraitFatPtr {\n");
+    out.push("    pub data: *mut (),\n");
+    out.push("    pub vtable: *const (),\n");
+    out.push("}\n\n");
 
-    out = out + "/// Panic payload text. A String payload is leaked so the pointer stays valid.\n";
-    out = out + "fn bridge_panic_text(e: Box<dyn std::any::Any + Send>) -> &'static str {\n";
-    out = out + "    if let Some(s) = e.downcast_ref::<&'static str>() { return s; }\n";
-    out = out + "    if let Some(s) = e.downcast_ref::<String>() { return Box::leak(s.clone().into_boxed_str()); }\n";
-    out = out + "    \"[RST004] Rust panic unwound\"\n";
-    out = out + "}\n\n";
+    out.push("/// Panic payload text. A String payload is leaked so the pointer stays valid.\n");
+    out.push("fn bridge_panic_text(e: Box<dyn std::any::Any + Send>) -> &'static str {\n");
+    out.push("    if let Some(s) = e.downcast_ref::<&'static str>() { return s; }\n");
+    out.push("    if let Some(s) = e.downcast_ref::<String>() { return Box::leak(s.clone().into_boxed_str()); }\n");
+    out.push("    \"[RST004] Rust panic unwound\"\n");
+    out.push("}\n\n");
 
-    out = out + "/// Free function for Rust Vec<T>\n";
-    out = out + "#[no_mangle]\n";
-    out = out + f"pub unsafe extern \"C\" fn pilot_rust_free_vec_{crate_name}(ptr: *mut u8, cap: usize, len: usize) {{\n";
-    out = out + "    if !ptr.is_null() && cap > 0 {\n";
-    out = out + "        let _ = Vec::from_raw_parts(ptr, len, cap);\n";
-    out = out + "    }\n";
-    out = out + "}\n\n";
+    out.push("/// Free function for Rust Vec<T>\n");
+    out.push("#[no_mangle]\n");
+    out.push(f"pub unsafe extern \"C\" fn pilot_rust_free_vec_{crate_name}(ptr: *mut u8, cap: usize, len: usize) {{\n");
+    out.push("    if !ptr.is_null() && cap > 0 {\n");
+    out.push("        let _ = Vec::from_raw_parts(ptr, len, cap);\n");
+    out.push("    }\n");
+    out.push("}\n\n");
 
-    out = out + "/// Free function for Rust String\n";
-    out = out + "#[no_mangle]\n";
-    out = out + f"pub unsafe extern \"C\" fn pilot_rust_free_string_{crate_name}(ptr: *mut u8, cap: usize, len: usize) {{\n";
-    out = out + "    if !ptr.is_null() && cap > 0 {\n";
-    out = out + "        let _ = String::from_raw_parts(ptr, len, cap);\n";
-    out = out + "    }\n";
-    out = out + "}\n\n";
+    out.push("/// Free function for Rust String\n");
+    out.push("#[no_mangle]\n");
+    out.push(f"pub unsafe extern \"C\" fn pilot_rust_free_string_{crate_name}(ptr: *mut u8, cap: usize, len: usize) {{\n");
+    out.push("    if !ptr.is_null() && cap > 0 {\n");
+    out.push("        let _ = String::from_raw_parts(ptr, len, cap);\n");
+    out.push("    }\n");
+    out.push("}\n\n");
 
     var f_idx: usize = 0;
     while f_idx < module.functions.len() {
@@ -280,50 +281,50 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
         }
         let carrier = bridge_return_carrier(ref f);
 
-        out = out + f"/// Trampoline for function '{f.name}'\n";
-        out = out + "#[no_mangle]\n";
-        out = out + f"pub unsafe extern \"C\" fn bridge_{crate_name}_{f.name}(";
+        out.push(f"/// Trampoline for function '{f.name}'\n");
+        out.push("#[no_mangle]\n");
+        out.push(f"pub unsafe extern \"C\" fn bridge_{crate_name}_{f.name}(");
         var call_args = "";
         p_idx = 0;
         while p_idx < f.params.len() {
             let p = f.params[p_idx];
             if p_idx > 0 {
-                out = out + ", ";
+                out.push(", ");
                 call_args = call_args + ", ";
             }
-            out = out + f"{p.name}: " + bridge_param_type(p);
+            out.push(f"{p.name}: " + bridge_param_type(p));
             call_args = call_args + bridge_param_arg(p);
             p_idx = p_idx + 1;
         }
-        out = out + f") -> BridgeResult<{carrier}> {{\n";
+        out.push(f") -> BridgeResult<{carrier}> {{\n");
         let lifted = bridge_return_lift(ref f, f"{f.name}({call_args})");
-        out = out + f"    let res = catch_unwind(AssertUnwindSafe(|| {lifted}));\n";
-        out = out + "    match res {\n";
-        out = out + "        Ok(v) => BridgeResult { is_ok: true, val: v, panic_msg: std::ptr::null(), panic_len: 0 },\n";
-        out = out + "        Err(e) => {\n";
-        out = out + "            // RST004: Foreign panic unwind safely captured at boundary\n";
-        out = out + "            let msg = bridge_panic_text(e);\n";
-        out = out + "            BridgeResult { is_ok: false, val: std::mem::zeroed(), panic_msg: msg.as_ptr(), panic_len: msg.len() }\n";
-        out = out + "        }\n";
-        out = out + "    }\n";
-        out = out + "}\n\n";
+        out.push(f"    let res = catch_unwind(AssertUnwindSafe(|| {lifted}));\n");
+        out.push("    match res {\n");
+        out.push("        Ok(v) => BridgeResult { is_ok: true, val: v, panic_msg: std::ptr::null(), panic_len: 0 },\n");
+        out.push("        Err(e) => {\n");
+        out.push("            // RST004: Foreign panic unwind safely captured at boundary\n");
+        out.push("            let msg = bridge_panic_text(e);\n");
+        out.push("            BridgeResult { is_ok: false, val: std::mem::zeroed(), panic_msg: msg.as_ptr(), panic_len: msg.len() }\n");
+        out.push("        }\n");
+        out.push("    }\n");
+        out.push("}\n\n");
 
         // A returned Vec<T> is freed with its own element layout.
         if f.ret_kind == RustTypeKind::Vec {
             let elem = rust_elem_type(f.return_type, f.ret_kind);
-            out = out + f"/// Frees the Vec<{elem}> returned by '{f.name}' on Rust's allocator\n";
-            out = out + "#[no_mangle]\n";
-            out = out + f"pub unsafe extern \"C\" fn bridge_free_{crate_name}_{f.name}(ptr: *mut {elem}, cap: usize, len: usize) {{\n";
-            out = out + "    if !ptr.is_null() && cap > 0 {\n";
-            out = out + "        let _ = Vec::from_raw_parts(ptr, len, cap);\n";
-            out = out + "    }\n";
-            out = out + "}\n\n";
+            out.push(f"/// Frees the Vec<{elem}> returned by '{f.name}' on Rust's allocator\n");
+            out.push("#[no_mangle]\n");
+            out.push(f"pub unsafe extern \"C\" fn bridge_free_{crate_name}_{f.name}(ptr: *mut {elem}, cap: usize, len: usize) {{\n");
+            out.push("    if !ptr.is_null() && cap > 0 {\n");
+            out.push("        let _ = Vec::from_raw_parts(ptr, len, cap);\n");
+            out.push("    }\n");
+            out.push("}\n\n");
         }
 
         f_idx = f_idx + 1;
     }
 
-    return out;
+    return text.join_text(out, "");
 }
 
 // ------------------------------------------------------------------------------

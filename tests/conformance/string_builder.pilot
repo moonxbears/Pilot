@@ -1,0 +1,18 @@
+// std.text.StringBuilder: pieces appended, read back in order; the length
+// counts bytes ("0,1,2,3,4," is 10, with "end" 13).
+
+use std.text;
+
+fn main() {
+    var b = text.string_builder_new();
+    var i = 0;
+    while i < 5 {
+        b.append(f"{i},");
+        i = i + 1;
+    }
+    print(b.len());
+    print(b.to_string());
+    b.append("end");
+    print(b.to_string());
+    print(b.len());
+}

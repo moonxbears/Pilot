@@ -5,6 +5,8 @@
 // `COM_QUERY` (`0x03`) packet encoding and decoding in pure Pilot.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct MysqlWirePacket : IValue {
     pub sequence_id: i64;
@@ -39,13 +41,13 @@ pub pure fn my_hex_u8(b: i64) -> str {
 
 pub pure fn my_str_to_hex(s: str) -> str {
     let n = s.len();
-    var out = "";
+    var out: List<str> = [];
     var i = 0;
     while i < n {
-        out = out + my_hex_u8(s.byte_at(i));
+        out.push(my_hex_u8(s.byte_at(i)));
         i = i + 1;
     }
-    return out;
+    return join_text(out, "");
 }
 
 pub pure fn my_unhex_nib(b: i64) -> i64 {
@@ -98,12 +100,12 @@ pub fn mysql_decode_com_query(frame_hex: str) -> str {
         return "";
     }
     let str_len = payload_len - 1;
-    var q_out = "";
+    var q_out: List<str> = [];
     var i = 0;
     while i < str_len {
         let ch_b = my_read_u8(frame_hex, 5 + i);
-        q_out = q_out + my_ascii_char(ch_b);
+        q_out.push(my_ascii_char(ch_b));
         i = i + 1;
     }
-    return "" + seq_id + "|" + q_out;
+    return "" + seq_id + "|" + join_text(q_out, "");
 }

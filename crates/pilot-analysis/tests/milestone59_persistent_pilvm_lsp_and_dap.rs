@@ -562,6 +562,7 @@ pub fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_
 
     let ide_db_src = std::fs::read_to_string(root.join("selfhost/lsp/ide_db.pilot")).unwrap();
     let lsp_srv_src = std::fs::read_to_string(root.join("selfhost/lsp/server.pilot")).unwrap();
+    let text_src = std::fs::read_to_string(root.join("stdlib/std/text.pilot")).unwrap();
     assert!(ide_db_src.lines().count() <= 1500);
     assert!(lsp_srv_src.lines().count() <= 1500);
 
@@ -636,7 +637,7 @@ pub fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_
     );
 
     let script = format!(
-        "{ide_db_src}\n{lsp_srv_src}\n{edit_stmts}\n\
+        "{text_src}\n{ide_db_src}\n{lsp_srv_src}\n{edit_stmts}\n\
          let c1 = should_early_cutoff(\"{base}\", \"{e1}\");\n\
          let c2 = should_early_cutoff(\"{base}\", \"{e2}\");\n\
          let c3 = should_early_cutoff(\"{base}\", \"{e3}\");\n\

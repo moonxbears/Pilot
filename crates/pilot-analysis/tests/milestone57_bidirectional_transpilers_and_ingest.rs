@@ -432,7 +432,7 @@ pub fn test_57_3_and_57_4_six_language_foreign_ingesters_vm_execution_spdx_and_c
         &ANTICHEAT_SPEC,
     );
     let mut rng = Rng::new(0x5703);
-    let ingest_mod = read_ws("selfhost/transpile/ingest.pilot");
+    let ingest_mod = format!("{}\n{}", read_ws("stdlib/std/text.pilot"), read_ws("selfhost/transpile/ingest.pilot"));
     let license_mod = read_ws("stdlib/pkg/licensing.pilot");
 
     // 1. Compound & atomic SPDX license verification

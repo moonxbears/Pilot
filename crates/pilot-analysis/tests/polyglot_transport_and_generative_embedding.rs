@@ -87,7 +87,7 @@ fn test_polyglot_json_bidirectional_manipulation() {
         }
     "##;
 
-    let deps = &["stdlib/std/polyglot/transport/json.pilot"];
+    let deps = &["stdlib/std/text.pilot", "stdlib/std/polyglot/transport/json.pilot"];
     let res = eval_transport(deps, script);
     assert_eq!(res, "42", "JSON bidirectional manipulation and path querying must pass");
 }
@@ -132,7 +132,7 @@ fn test_polyglot_yaml_bidirectional_manipulation() {
         }
     "##;
 
-    let deps = &["stdlib/std/polyglot/transport/yaml.pilot"];
+    let deps = &["stdlib/std/text.pilot", "stdlib/std/polyglot/transport/yaml.pilot"];
     let res = eval_transport(deps, script);
     assert_eq!(res, "42", "YAML bidirectional mapping and sequence operations must pass");
 }
@@ -186,7 +186,7 @@ fn test_polyglot_xml_bidirectional_manipulation() {
         }
     "##;
 
-    let deps = &["stdlib/std/polyglot/transport/xml.pilot"];
+    let deps = &["stdlib/std/text.pilot", "stdlib/std/polyglot/transport/xml.pilot"];
     let res = eval_transport(deps, script);
     assert_eq!(res, "42", "XML bidirectional DOM manipulation and attribute queries must pass");
 }
@@ -243,6 +243,7 @@ fn test_polyglot_toml_and_taxonomy_duality() {
     "##;
 
     let deps = &[
+        "stdlib/std/text.pilot",
         "stdlib/std/polyglot/transport/json.pilot",
         "stdlib/std/polyglot/transport/yaml.pilot",
         "stdlib/std/polyglot/transport/xml.pilot",

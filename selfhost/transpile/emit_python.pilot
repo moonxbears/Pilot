@@ -200,6 +200,27 @@ pub struct PythonDialect : ISourceDialect {
         "    raw = h.encode()",
         "    return raw.find(n.encode(), pilot_boundary(raw, start))",
         "",
+        "def pilot_str_contains(h, n):",
+        "    if isinstance(h, list):",
+        "        return any(pilot_eq(x, n) for x in h)",
+        "    if isinstance(h, dict):",
+        "        return pilot_map_has(h, n)",
+        "    return n in h",
+        "",
+        "def pilot_str_starts_with(h, n):",
+        "    return h.startswith(n)",
+        "",
+        "def pilot_str_ends_with(h, n):",
+        "    return h.endswith(n)",
+        "",
+        "PILOT_WHITE = ''.join(map(chr, [9, 10, 11, 12, 13, 32, 0x85, 0xA0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000]))",
+        "",
+        "def pilot_str_trim(s):",
+        "    return s.strip(PILOT_WHITE)",
+        "",
+        "def pilot_str_replace(h, a, b):",
+        "    return h if a == '' else h.replace(a, b)",
+        "",
         "def pilot_leaves(v, deep, out):",
         "    for e in v:",
         "        if deep and isinstance(e, list):",
@@ -438,7 +459,7 @@ fn dynamic_engine_ops() -> Map<str, str> {
     ops.set("to_str", "pilot_show");
     ops.set("list_get", "pilot_map_get");
     ops.set("list_set", "pilot_map_set");
-    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line"] {
+    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line"] {
         ops.set(name, "pilot_" + name);
     }
     return ops;

@@ -1,0 +1,929 @@
+// =========================================================================
+// FILE: stdlib/core/convert/convert.pilot
+// CHECKED PRIMITIVE CONVERSIONS: THE CONVERSIONS
+// =========================================================================
+// What each conversion does (the contracts are in `convertible.pilot`):
+//
+//   integer -> integer  the value, or `::Overflow` above the target's
+//                       maximum and `::Underflow` below its minimum (Rust's
+//                       `TryFrom`, C#'s `checked` casts).
+//   float -> integer    truncates toward zero, then checks the range as
+//                       above; NaN is `::NotRepresentable`, +inf `::Overflow`
+//                       and -inf `::Underflow` (C#'s `checked((int)x)`).
+//   integer -> float    the nearest float, ties to even; it cannot fail
+//                       (C#'s `Convert.ToDouble(long)`).
+//   f64 -> f32          the nearest f32; a finite value beyond the f32
+//                       range is `::Overflow` / `::Underflow`; NaN and the
+//                       infinities carry over.
+//   bool -> number      false is 0 and true is 1.
+//   integer -> bool     0 and 1 only; any other value is `::OutOfRange`.
+//   integer -> char     a Unicode scalar value: negative is `::Underflow`,
+//                       above 0x10FFFF `::Overflow`, a surrogate
+//                       (0xD800..0xDFFF) `::OutOfRange` (Rust's
+//                       `char::try_from(u32)`).
+//   char -> integer     its code point, range-checked like an integer.
+//   str -> integer      Rust's `from_str`: an optional sign (`+` only for
+//                       unsigned targets) and decimal digits, nothing else;
+//                       empty text, a lone sign or any other character is
+//                       `::InvalidFormat`, and a value out of range is
+//                       `::Overflow` / `::Underflow` (reported at the first
+//                       digit that leaves the range, as Rust does).
+//   str -> float        Rust's float grammar (`1`, `-1.5`, `.5`, `2.`,
+//                       `6.02e23`, `inf`, `infinity`, `nan`, any case for the
+//                       words); a finite value beyond the target's range is
+//                       `::Overflow` / `::Underflow` (Rust gives an infinity
+//                       instead), and a value too small to hold rounds to
+//                       zero. Text that needs more than the exact fast path
+//                       stops at the seam `convert.float_parse_slow_path`.
+//   str -> bool         exactly `true` or `false`.
+//   str -> char         exactly one Unicode scalar value.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Convert;
+
+/// The error of a conversion that failed for reason `kind`.
+pub fn convert_error(kind: ConvertErrorKind) -> ConvertError => ConvertError { kind: kind };
+
+pub fn bool_bit(b: bool) -> i64 {
+    if b { return 1; }
+    return 0;
+}
+
+fn positive_infinity() -> f64 => 1.0 / 0.0;
+
+// ---- The 128-bit and half/quad-precision targets ----
+pub fn wide_scalar_i128() -> i128 ! ConvertError {
+    return seam("convert.wide_scalar", "the engine's values are 64 bits wide: i128 and u128 need a 128-bit integer value, f16 and f128 their own float formats");
+}
+pub fn wide_scalar_u128() -> u128 ! ConvertError {
+    return seam("convert.wide_scalar", "the engine's values are 64 bits wide: i128 and u128 need a 128-bit integer value, f16 and f128 their own float formats");
+}
+pub fn wide_scalar_f16() -> f16 ! ConvertError {
+    return seam("convert.wide_scalar", "the engine's values are 64 bits wide: i128 and u128 need a 128-bit integer value, f16 and f128 their own float formats");
+}
+pub fn wide_scalar_f128() -> f128 ! ConvertError {
+    return seam("convert.wide_scalar", "the engine's values are 64 bits wide: i128 and u128 need a 128-bit integer value, f16 and f128 their own float formats");
+}
+
+// ---- Integers to floats ----
+pub fn signed_to_f64(v: i64) -> f64 ! ConvertError {
+    return v as f64;
+}
+
+pub fn unsigned_to_f64(v: u64) -> f64 ! ConvertError {
+    return v as f64;
+}
+
+/// The f32 nearest to `m` (ties to even), as the f64 that holds it exactly.
+/// An integer of more than 24 significant bits is rounded here, in one step:
+/// the engine's own cast rounds to an f64 first and then to an f32, which
+/// rounds some values twice.
+[Workaround("seed.int_to_f32_double_round", "rounds the integer to 24 significant bits before the cast, so the cast itself is exact")]
+fn nearest_f32(m: u64) -> f64 {
+    let limit: u64 = 16777216;
+    if m <= limit { return m as f64; }
+    let one: u64 = 1;
+    var q = m;
+    var s: u32 = 0;
+    while q >= limit {
+        q = q >> 1;
+        s = s + 1;
+    }
+    let rem = m - (q << s);
+    let half = one << (s - 1);
+    if rem > half || (rem == half && (q & one) == one) { q = q + one; }
+    return (q as f64) * ((one << s) as f64);
+}
+
+pub fn signed_to_f32(v: i64) -> f32 ! ConvertError {
+    if v >= 0 { return nearest_f32(v as u64) as f32; }
+    var magnitude: u64 = 9223372036854775808;
+    if v != -9223372036854775808 { magnitude = (-v) as u64; }
+    return (-nearest_f32(magnitude)) as f32;
+}
+
+pub fn unsigned_to_f32(v: u64) -> f32 ! ConvertError {
+    return nearest_f32(v) as f32;
+}
+
+// ---- Floats to floats ----
+pub fn float_to_f64(x: f64) -> f64 ! ConvertError {
+    return x;
+}
+
+pub fn float_to_f32(x: f64) -> f32 ! ConvertError {
+    let r = x as f32;
+    let inf = positive_infinity();
+    if x != x || x == inf || x == -inf { return r; }
+    if (r as f64) == inf { return res<f32, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    if (r as f64) == -inf { return res<f32, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    return r;
+}
+
+// ---- Integers to bool and char ----
+pub fn signed_to_bool(v: i64) -> bool ! ConvertError {
+    if v == 0 { return false; }
+    if v == 1 { return true; }
+    return res<bool, ConvertError>.err(convert_error(ConvertErrorKind::OutOfRange));
+}
+
+pub fn unsigned_to_bool(v: u64) -> bool ! ConvertError {
+    let one: u64 = 1;
+    if v == one { return true; }
+    if v > one { return res<bool, ConvertError>.err(convert_error(ConvertErrorKind::OutOfRange)); }
+    return false;
+}
+
+pub fn unsigned_to_char(v: u64) -> char ! ConvertError {
+    let top: u64 = 0x10FFFF;
+    let surrogate_lo: u64 = 0xD800;
+    let surrogate_hi: u64 = 0xDFFF;
+    if v > top { return res<char, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    if v >= surrogate_lo && v <= surrogate_hi {
+        return res<char, ConvertError>.err(convert_error(ConvertErrorKind::OutOfRange));
+    }
+    return v as char;
+}
+
+pub fn signed_to_char(v: i64) -> char ! ConvertError {
+    if v < 0 { return res<char, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    return unsigned_to_char(v as u64);
+}
+
+// ---- Text to integers ----
+
+fn invalid_i64() -> i64 ! ConvertError => res<i64, ConvertError>.err(convert_error(ConvertErrorKind::InvalidFormat));
+
+/// The decimal digits of `s` from byte `start` on, as a magnitude no greater
+/// than `limit`. Each digit is checked before the next is read, so text that
+/// leaves the range fails with `too_big` at that digit even when a later
+/// character is not a digit (Rust's `from_str` order).
+fn parse_magnitude(s: str, start: usize, limit: u64, too_big: ConvertErrorKind) -> u64 ! ConvertError {
+    if start >= s.len {
+        return res<u64, ConvertError>.err(convert_error(ConvertErrorKind::InvalidFormat));
+    }
+    var mag: u64 = 0;
+    var i = start;
+    while i < s.len {
+        let b = s.byte_at(i);
+        if b < 48 || b > 57 {
+            return res<u64, ConvertError>.err(convert_error(ConvertErrorKind::InvalidFormat));
+        }
+        let d: u64 = (b - 48) as u64;
+        if mag > (limit - d) / 10 {
+            return res<u64, ConvertError>.err(convert_error(too_big));
+        }
+        mag = mag * 10 + d;
+        i = i + 1;
+    }
+    return mag;
+}
+
+/// Signed decimal text whose value lies in `-neg_limit ..= pos_limit`.
+pub fn parse_signed(s: str, neg_limit: u64, pos_limit: u64) -> i64 ! ConvertError {
+    if s.len == 0 { return invalid_i64(); }
+    let first = s.byte_at(0);
+    if first == 45 {
+        let mag = parse_magnitude(s, 1, neg_limit, ConvertErrorKind::Underflow)?;
+        let min_mag: u64 = 9223372036854775808;
+        if mag == min_mag { return -9223372036854775808; }
+        return -(mag as i64);
+    }
+    var start: usize = 0;
+    if first == 43 { start = 1; }
+    let mag = parse_magnitude(s, start, pos_limit, ConvertErrorKind::Overflow)?;
+    return mag as i64;
+}
+
+/// Unsigned decimal text whose value is at most `limit`; a `-` sign is not a
+/// digit, so `-0` is invalid (as in Rust).
+pub fn parse_unsigned(s: str, limit: u64) -> u64 ! ConvertError {
+    if s.len == 0 {
+        return res<u64, ConvertError>.err(convert_error(ConvertErrorKind::InvalidFormat));
+    }
+    var start: usize = 0;
+    if s.byte_at(0) == 43 { start = 1; }
+    return parse_magnitude(s, start, limit, ConvertErrorKind::Overflow);
+}
+
+// ---- Text to bool and char ----
+pub fn parse_bool(s: str) -> bool ! ConvertError {
+    if s == "true" { return true; }
+    if s == "false" { return false; }
+    return res<bool, ConvertError>.err(convert_error(ConvertErrorKind::InvalidFormat));
+}
+
+/// Exactly one Unicode scalar value, decoded from the text's UTF-8 bytes.
+pub fn parse_char(s: str) -> char ! ConvertError {
+    if s.len == 0 {
+        return res<char, ConvertError>.err(convert_error(ConvertErrorKind::InvalidFormat));
+    }
+    let b0 = s.byte_at(0) as u64;
+    var width: usize = 1;
+    var cp: u64 = b0;
+    if b0 >= 0xF0 {
+        width = 4;
+        cp = b0 & 0x07;
+    } else if b0 >= 0xE0 {
+        width = 3;
+        cp = b0 & 0x0F;
+    } else if b0 >= 0xC0 {
+        width = 2;
+        cp = b0 & 0x1F;
+    }
+    if s.len != width {
+        return res<char, ConvertError>.err(convert_error(ConvertErrorKind::InvalidFormat));
+    }
+    var i: usize = 1;
+    while i < width {
+        cp = (cp << 6) | ((s.byte_at(i) as u64) & 0x3F);
+        i = i + 1;
+    }
+    return unsigned_to_char(cp);
+}
+
+// ---- Text to floats ----
+
+/// What float text spells.
+pub enum FloatTextKind : u8 {
+    Finite,
+    Infinite,
+    NotANumber,
+}
+
+/// Float text read as `mantissa * 10^exponent`: at most 19 significant
+/// digits are kept, and `truncated` says a non-zero digit was dropped.
+pub struct DecimalText : IValue {
+    pub kind: FloatTextKind;
+    pub negative: bool;
+    pub mantissa: u64;
+    pub exponent: i64;
+    pub truncated: bool;
+}
+
+fn is_digit(b: u8) -> bool => b >= 48 && b <= 57;
+
+/// Whether `s` from byte `start` on is `word`, ignoring ASCII case.
+fn rest_is_word(s: str, start: usize, word: str) -> bool {
+    if s.len - start != word.len { return false; }
+    var i: usize = 0;
+    while i < word.len {
+        var b = s.byte_at(start + i);
+        if b >= 65 && b <= 90 { b = b + 32; }
+        if b != word.byte_at(i) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn invalid_decimal() -> DecimalText ! ConvertError =>
+    res<DecimalText, ConvertError>.err(convert_error(ConvertErrorKind::InvalidFormat));
+
+/// Reads float text (Rust's grammar, see the top of the file).
+[Workaround("seed.struct_ok_unwrapped", "builds the success with `res<..>.ok(..)` instead of returning the record")]
+pub fn read_decimal(s: str) -> DecimalText ! ConvertError {
+    if s.len == 0 { return invalid_decimal(); }
+    var i: usize = 0;
+    var negative = false;
+    if s.byte_at(0) == 45 || s.byte_at(0) == 43 {
+        negative = s.byte_at(0) == 45;
+        i = 1;
+    }
+    if rest_is_word(s, i, "inf") || rest_is_word(s, i, "infinity") {
+        return res<DecimalText, ConvertError>.ok(DecimalText { kind: FloatTextKind::Infinite, negative: negative, mantissa: 0, exponent: 0, truncated: false });
+    }
+    if rest_is_word(s, i, "nan") {
+        return res<DecimalText, ConvertError>.ok(DecimalText { kind: FloatTextKind::NotANumber, negative: negative, mantissa: 0, exponent: 0, truncated: false });
+    }
+    var mantissa: u64 = 0;
+    var kept = 0;
+    var exponent: i64 = 0;
+    var truncated = false;
+    var digits = 0;
+    var after_point = false;
+    while i < s.len {
+        let b = s.byte_at(i);
+        if b == 46 && !after_point {
+            after_point = true;
+        } else if is_digit(b) {
+            let d: u64 = (b - 48) as u64;
+            digits = digits + 1;
+            if mantissa == 0 && d == 0 {
+                if after_point { exponent = exponent - 1; }
+            } else if kept < 19 {
+                mantissa = mantissa * 10 + d;
+                kept = kept + 1;
+                if after_point { exponent = exponent - 1; }
+            } else {
+                if d != 0 { truncated = true; }
+                if !after_point { exponent = exponent + 1; }
+            }
+        } else {
+            break;
+        }
+        i = i + 1;
+    }
+    if digits == 0 { return invalid_decimal(); }
+    if i < s.len {
+        if s.byte_at(i) != 101 && s.byte_at(i) != 69 { return invalid_decimal(); }
+        i = i + 1;
+        var exp_negative = false;
+        if i < s.len && (s.byte_at(i) == 45 || s.byte_at(i) == 43) {
+            exp_negative = s.byte_at(i) == 45;
+            i = i + 1;
+        }
+        if i >= s.len { return invalid_decimal(); }
+        var e: i64 = 0;
+        while i < s.len {
+            let b = s.byte_at(i);
+            if !is_digit(b) { return invalid_decimal(); }
+            // Past 100000 the value is zero or out of range either way.
+            if e < 100000 { e = e * 10 + (b - 48) as i64; }
+            i = i + 1;
+        }
+        exponent = if exp_negative { exponent - e } else { exponent + e };
+    }
+    while mantissa != 0 && mantissa % 10 == 0 {
+        mantissa = mantissa / 10;
+        exponent = exponent + 1;
+    }
+    return res<DecimalText, ConvertError>.ok(DecimalText { kind: FloatTextKind::Finite, negative: negative, mantissa: mantissa, exponent: exponent, truncated: truncated });
+}
+
+fn power_of_ten(e: i64) -> f64 {
+    var p = 1.0;
+    var i: i64 = 0;
+    while i < e {
+        p = p * 10.0;
+        i = i + 1;
+    }
+    return p;
+}
+
+fn digit_count(m: u64) -> i64 {
+    var n: i64 = 0;
+    var v = m;
+    while v != 0 {
+        v = v / 10;
+        n = n + 1;
+    }
+    return n;
+}
+
+/// The exact fast path for the float format described by its limits:
+/// `mantissa * 10^exponent` is one correctly rounded operation when the
+/// mantissa (`<= mant_limit`) and the power of ten (`10^e`, `e <= exp_limit`)
+/// are both exact in the target format.
+fn fast_path(d: DecimalText, mant_limit: u64, exp_limit: i64) -> f64? {
+    if d.truncated || d.mantissa > mant_limit { return none; }
+    let m = d.mantissa as f64;
+    if d.exponent >= 0 && d.exponent <= exp_limit { return m * power_of_ten(d.exponent); }
+    if d.exponent < 0 && -d.exponent <= exp_limit { return m / power_of_ten(-d.exponent); }
+    if d.exponent > exp_limit {
+        // `123e25` is `123000e22`: shift digits into the mantissa while it stays exact.
+        var scaled = d.mantissa;
+        var e = d.exponent;
+        while e > exp_limit {
+            if scaled > mant_limit / 10 { return none; }
+            scaled = scaled * 10;
+            e = e - 1;
+        }
+        return (scaled as f64) * power_of_ten(e);
+    }
+    return none;
+}
+
+/// Converts read text to a float of the format given by its limits:
+/// `max_order` is the smallest `k` with `10^k` above the largest finite value,
+/// `zero_order` the largest `k` with `10^k` below half the smallest one.
+fn decimal_to_float(d: DecimalText, mant_limit: u64, exp_limit: i64, max_order: i64, zero_order: i64) -> f64 ! ConvertError {
+    let inf = positive_infinity();
+    if d.kind == FloatTextKind::NotANumber { return inf - inf; }
+    if d.kind == FloatTextKind::Infinite { return if d.negative { -inf } else { inf }; }
+    if d.mantissa == 0 { return if d.negative { -0.0 } else { 0.0 }; }
+    // The value lies in [10^(order - 1), 10^order).
+    let order = digit_count(d.mantissa) + d.exponent;
+    if order - 1 >= max_order {
+        let kind = if d.negative { ConvertErrorKind::Underflow } else { ConvertErrorKind::Overflow };
+        return res<f64, ConvertError>.err(convert_error(kind));
+    }
+    if order <= zero_order { return if d.negative { -0.0 } else { 0.0 }; }
+    if some v = fast_path(d, mant_limit, exp_limit) {
+        return if d.negative { -v } else { v };
+    }
+    return seam("convert.float_parse_slow_path", "correctly rounded parsing of text outside the exact fast path (more than 19 significant digits, or a mantissa and power of ten that are not both exact): needs a big-integer or Eisel-Lemire algorithm");
+}
+
+pub fn parse_f64(s: str) -> f64 ! ConvertError {
+    let d = read_decimal(s)?;
+    // 2^53; 10^22; 1.8e308 < 10^309; half of 4.9e-324 is above 10^-324.
+    return decimal_to_float(d, 9007199254740992, 22, 309, -324);
+}
+
+pub fn parse_f32(s: str) -> f32 ! ConvertError {
+    let d = read_decimal(s)?;
+    // 2^24; 10^10; 3.4e38 < 10^39; half of 1.4e-45 is above 10^-46.
+    let v = decimal_to_float(d, 16777216, 10, 39, -46)?;
+    return v as f32;
+}
+
+
+// ---- From a signed integer (every signed source widens to i64 first) ----
+
+pub fn signed_to_i8(v: i64) -> i8 ! ConvertError {
+    if v < -128 { return res<i8, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if v > 127 { return res<i8, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as i8;
+}
+
+pub fn signed_to_i16(v: i64) -> i16 ! ConvertError {
+    if v < -32768 { return res<i16, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if v > 32767 { return res<i16, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as i16;
+}
+
+pub fn signed_to_i32(v: i64) -> i32 ! ConvertError {
+    if v < -2147483648 { return res<i32, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if v > 2147483647 { return res<i32, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as i32;
+}
+
+pub fn signed_to_i64(v: i64) -> i64 ! ConvertError {
+    return v as i64;
+}
+
+pub fn signed_to_isize(v: i64) -> isize ! ConvertError {
+    return v as isize;
+}
+
+pub fn signed_to_u8(v: i64) -> u8 ! ConvertError {
+    if v < 0 { return res<u8, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if v > 255 { return res<u8, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as u8;
+}
+
+pub fn signed_to_u16(v: i64) -> u16 ! ConvertError {
+    if v < 0 { return res<u16, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if v > 65535 { return res<u16, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as u16;
+}
+
+pub fn signed_to_u32(v: i64) -> u32 ! ConvertError {
+    if v < 0 { return res<u32, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if v > 4294967295 { return res<u32, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as u32;
+}
+
+pub fn signed_to_u64(v: i64) -> u64 ! ConvertError {
+    if v < 0 { return res<u64, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    return v as u64;
+}
+
+pub fn signed_to_usize(v: i64) -> usize ! ConvertError {
+    if v < 0 { return res<usize, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    return v as usize;
+}
+
+// ---- From an unsigned integer (every unsigned source widens to u64 first) ----
+
+pub fn unsigned_to_i8(v: u64) -> i8 ! ConvertError {
+    let hi: u64 = 127;
+    if v > hi { return res<i8, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as i8;
+}
+
+pub fn unsigned_to_i16(v: u64) -> i16 ! ConvertError {
+    let hi: u64 = 32767;
+    if v > hi { return res<i16, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as i16;
+}
+
+pub fn unsigned_to_i32(v: u64) -> i32 ! ConvertError {
+    let hi: u64 = 2147483647;
+    if v > hi { return res<i32, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as i32;
+}
+
+pub fn unsigned_to_i64(v: u64) -> i64 ! ConvertError {
+    let hi: u64 = 9223372036854775807;
+    if v > hi { return res<i64, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as i64;
+}
+
+pub fn unsigned_to_isize(v: u64) -> isize ! ConvertError {
+    let hi: u64 = 9223372036854775807;
+    if v > hi { return res<isize, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as isize;
+}
+
+pub fn unsigned_to_u8(v: u64) -> u8 ! ConvertError {
+    let hi: u64 = 255;
+    if v > hi { return res<u8, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as u8;
+}
+
+pub fn unsigned_to_u16(v: u64) -> u16 ! ConvertError {
+    let hi: u64 = 65535;
+    if v > hi { return res<u16, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as u16;
+}
+
+pub fn unsigned_to_u32(v: u64) -> u32 ! ConvertError {
+    let hi: u64 = 4294967295;
+    if v > hi { return res<u32, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return v as u32;
+}
+
+pub fn unsigned_to_u64(v: u64) -> u64 ! ConvertError {
+    return v as u64;
+}
+
+pub fn unsigned_to_usize(v: u64) -> usize ! ConvertError {
+    return v as usize;
+}
+
+// ---- From a float: truncate toward zero, then check the range ----
+
+// `x` converts when its truncation is in range: the bounds are the first
+// values just outside it (`lo - 1`, `hi + 1`), each exact in an f64.
+
+pub fn float_to_i8(x: f64) -> i8 ! ConvertError {
+    if x != x { return res<i8, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x <= -129.0 { return res<i8, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 128.0 { return res<i8, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as i8;
+}
+
+pub fn float_to_i16(x: f64) -> i16 ! ConvertError {
+    if x != x { return res<i16, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x <= -32769.0 { return res<i16, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 32768.0 { return res<i16, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as i16;
+}
+
+pub fn float_to_i32(x: f64) -> i32 ! ConvertError {
+    if x != x { return res<i32, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x <= -2147483649.0 { return res<i32, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 2147483648.0 { return res<i32, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as i32;
+}
+
+pub fn float_to_i64(x: f64) -> i64 ! ConvertError {
+    if x != x { return res<i64, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x < -9223372036854775808.0 { return res<i64, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 9223372036854775808.0 { return res<i64, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as i64;
+}
+
+pub fn float_to_isize(x: f64) -> isize ! ConvertError {
+    if x != x { return res<isize, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x < -9223372036854775808.0 { return res<isize, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 9223372036854775808.0 { return res<isize, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as isize;
+}
+
+pub fn float_to_u8(x: f64) -> u8 ! ConvertError {
+    if x != x { return res<u8, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x <= -1.0 { return res<u8, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 256.0 { return res<u8, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as u8;
+}
+
+pub fn float_to_u16(x: f64) -> u16 ! ConvertError {
+    if x != x { return res<u16, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x <= -1.0 { return res<u16, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 65536.0 { return res<u16, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as u16;
+}
+
+pub fn float_to_u32(x: f64) -> u32 ! ConvertError {
+    if x != x { return res<u32, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x <= -1.0 { return res<u32, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 4294967296.0 { return res<u32, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as u32;
+}
+
+pub fn float_to_u64(x: f64) -> u64 ! ConvertError {
+    if x != x { return res<u64, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x <= -1.0 { return res<u64, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 18446744073709551616.0 { return res<u64, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as u64;
+}
+
+pub fn float_to_usize(x: f64) -> usize ! ConvertError {
+    if x != x { return res<usize, ConvertError>.err(convert_error(ConvertErrorKind::NotRepresentable)); }
+    if x <= -1.0 { return res<usize, ConvertError>.err(convert_error(ConvertErrorKind::Underflow)); }
+    if x >= 18446744073709551616.0 { return res<usize, ConvertError>.err(convert_error(ConvertErrorKind::Overflow)); }
+    return x as usize;
+}
+
+// =========================================================================
+// The primitives adopt the conversions.
+// =========================================================================
+
+ext i8 {
+    pub fn to_i8() -> i8 ! ConvertError => signed_to_i8(self as i64);
+    pub fn to_i16() -> i16 ! ConvertError => signed_to_i16(self as i64);
+    pub fn to_i32() -> i32 ! ConvertError => signed_to_i32(self as i64);
+    pub fn to_i64() -> i64 ! ConvertError => signed_to_i64(self as i64);
+    pub fn to_isize() -> isize ! ConvertError => signed_to_isize(self as i64);
+    pub fn to_u8() -> u8 ! ConvertError => signed_to_u8(self as i64);
+    pub fn to_u16() -> u16 ! ConvertError => signed_to_u16(self as i64);
+    pub fn to_u32() -> u32 ! ConvertError => signed_to_u32(self as i64);
+    pub fn to_u64() -> u64 ! ConvertError => signed_to_u64(self as i64);
+    pub fn to_usize() -> usize ! ConvertError => signed_to_usize(self as i64);
+    pub fn to_f32() -> f32 ! ConvertError => signed_to_f32(self as i64);
+    pub fn to_f64() -> f64 ! ConvertError => signed_to_f64(self as i64);
+    pub fn to_bool() -> bool ! ConvertError => signed_to_bool(self as i64);
+    pub fn to_char() -> char ! ConvertError => signed_to_char(self as i64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext i16 {
+    pub fn to_i8() -> i8 ! ConvertError => signed_to_i8(self as i64);
+    pub fn to_i16() -> i16 ! ConvertError => signed_to_i16(self as i64);
+    pub fn to_i32() -> i32 ! ConvertError => signed_to_i32(self as i64);
+    pub fn to_i64() -> i64 ! ConvertError => signed_to_i64(self as i64);
+    pub fn to_isize() -> isize ! ConvertError => signed_to_isize(self as i64);
+    pub fn to_u8() -> u8 ! ConvertError => signed_to_u8(self as i64);
+    pub fn to_u16() -> u16 ! ConvertError => signed_to_u16(self as i64);
+    pub fn to_u32() -> u32 ! ConvertError => signed_to_u32(self as i64);
+    pub fn to_u64() -> u64 ! ConvertError => signed_to_u64(self as i64);
+    pub fn to_usize() -> usize ! ConvertError => signed_to_usize(self as i64);
+    pub fn to_f32() -> f32 ! ConvertError => signed_to_f32(self as i64);
+    pub fn to_f64() -> f64 ! ConvertError => signed_to_f64(self as i64);
+    pub fn to_bool() -> bool ! ConvertError => signed_to_bool(self as i64);
+    pub fn to_char() -> char ! ConvertError => signed_to_char(self as i64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext i32 {
+    pub fn to_i8() -> i8 ! ConvertError => signed_to_i8(self as i64);
+    pub fn to_i16() -> i16 ! ConvertError => signed_to_i16(self as i64);
+    pub fn to_i32() -> i32 ! ConvertError => signed_to_i32(self as i64);
+    pub fn to_i64() -> i64 ! ConvertError => signed_to_i64(self as i64);
+    pub fn to_isize() -> isize ! ConvertError => signed_to_isize(self as i64);
+    pub fn to_u8() -> u8 ! ConvertError => signed_to_u8(self as i64);
+    pub fn to_u16() -> u16 ! ConvertError => signed_to_u16(self as i64);
+    pub fn to_u32() -> u32 ! ConvertError => signed_to_u32(self as i64);
+    pub fn to_u64() -> u64 ! ConvertError => signed_to_u64(self as i64);
+    pub fn to_usize() -> usize ! ConvertError => signed_to_usize(self as i64);
+    pub fn to_f32() -> f32 ! ConvertError => signed_to_f32(self as i64);
+    pub fn to_f64() -> f64 ! ConvertError => signed_to_f64(self as i64);
+    pub fn to_bool() -> bool ! ConvertError => signed_to_bool(self as i64);
+    pub fn to_char() -> char ! ConvertError => signed_to_char(self as i64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext i64 {
+    pub fn to_i8() -> i8 ! ConvertError => signed_to_i8(self as i64);
+    pub fn to_i16() -> i16 ! ConvertError => signed_to_i16(self as i64);
+    pub fn to_i32() -> i32 ! ConvertError => signed_to_i32(self as i64);
+    pub fn to_i64() -> i64 ! ConvertError => signed_to_i64(self as i64);
+    pub fn to_isize() -> isize ! ConvertError => signed_to_isize(self as i64);
+    pub fn to_u8() -> u8 ! ConvertError => signed_to_u8(self as i64);
+    pub fn to_u16() -> u16 ! ConvertError => signed_to_u16(self as i64);
+    pub fn to_u32() -> u32 ! ConvertError => signed_to_u32(self as i64);
+    pub fn to_u64() -> u64 ! ConvertError => signed_to_u64(self as i64);
+    pub fn to_usize() -> usize ! ConvertError => signed_to_usize(self as i64);
+    pub fn to_f32() -> f32 ! ConvertError => signed_to_f32(self as i64);
+    pub fn to_f64() -> f64 ! ConvertError => signed_to_f64(self as i64);
+    pub fn to_bool() -> bool ! ConvertError => signed_to_bool(self as i64);
+    pub fn to_char() -> char ! ConvertError => signed_to_char(self as i64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext isize {
+    pub fn to_i8() -> i8 ! ConvertError => signed_to_i8(self as i64);
+    pub fn to_i16() -> i16 ! ConvertError => signed_to_i16(self as i64);
+    pub fn to_i32() -> i32 ! ConvertError => signed_to_i32(self as i64);
+    pub fn to_i64() -> i64 ! ConvertError => signed_to_i64(self as i64);
+    pub fn to_isize() -> isize ! ConvertError => signed_to_isize(self as i64);
+    pub fn to_u8() -> u8 ! ConvertError => signed_to_u8(self as i64);
+    pub fn to_u16() -> u16 ! ConvertError => signed_to_u16(self as i64);
+    pub fn to_u32() -> u32 ! ConvertError => signed_to_u32(self as i64);
+    pub fn to_u64() -> u64 ! ConvertError => signed_to_u64(self as i64);
+    pub fn to_usize() -> usize ! ConvertError => signed_to_usize(self as i64);
+    pub fn to_f32() -> f32 ! ConvertError => signed_to_f32(self as i64);
+    pub fn to_f64() -> f64 ! ConvertError => signed_to_f64(self as i64);
+    pub fn to_bool() -> bool ! ConvertError => signed_to_bool(self as i64);
+    pub fn to_char() -> char ! ConvertError => signed_to_char(self as i64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext u8 {
+    pub fn to_i8() -> i8 ! ConvertError => unsigned_to_i8(self as u64);
+    pub fn to_i16() -> i16 ! ConvertError => unsigned_to_i16(self as u64);
+    pub fn to_i32() -> i32 ! ConvertError => unsigned_to_i32(self as u64);
+    pub fn to_i64() -> i64 ! ConvertError => unsigned_to_i64(self as u64);
+    pub fn to_isize() -> isize ! ConvertError => unsigned_to_isize(self as u64);
+    pub fn to_u8() -> u8 ! ConvertError => unsigned_to_u8(self as u64);
+    pub fn to_u16() -> u16 ! ConvertError => unsigned_to_u16(self as u64);
+    pub fn to_u32() -> u32 ! ConvertError => unsigned_to_u32(self as u64);
+    pub fn to_u64() -> u64 ! ConvertError => unsigned_to_u64(self as u64);
+    pub fn to_usize() -> usize ! ConvertError => unsigned_to_usize(self as u64);
+    pub fn to_f32() -> f32 ! ConvertError => unsigned_to_f32(self as u64);
+    pub fn to_f64() -> f64 ! ConvertError => unsigned_to_f64(self as u64);
+    pub fn to_bool() -> bool ! ConvertError => unsigned_to_bool(self as u64);
+    pub fn to_char() -> char ! ConvertError => unsigned_to_char(self as u64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext u16 {
+    pub fn to_i8() -> i8 ! ConvertError => unsigned_to_i8(self as u64);
+    pub fn to_i16() -> i16 ! ConvertError => unsigned_to_i16(self as u64);
+    pub fn to_i32() -> i32 ! ConvertError => unsigned_to_i32(self as u64);
+    pub fn to_i64() -> i64 ! ConvertError => unsigned_to_i64(self as u64);
+    pub fn to_isize() -> isize ! ConvertError => unsigned_to_isize(self as u64);
+    pub fn to_u8() -> u8 ! ConvertError => unsigned_to_u8(self as u64);
+    pub fn to_u16() -> u16 ! ConvertError => unsigned_to_u16(self as u64);
+    pub fn to_u32() -> u32 ! ConvertError => unsigned_to_u32(self as u64);
+    pub fn to_u64() -> u64 ! ConvertError => unsigned_to_u64(self as u64);
+    pub fn to_usize() -> usize ! ConvertError => unsigned_to_usize(self as u64);
+    pub fn to_f32() -> f32 ! ConvertError => unsigned_to_f32(self as u64);
+    pub fn to_f64() -> f64 ! ConvertError => unsigned_to_f64(self as u64);
+    pub fn to_bool() -> bool ! ConvertError => unsigned_to_bool(self as u64);
+    pub fn to_char() -> char ! ConvertError => unsigned_to_char(self as u64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext u32 {
+    pub fn to_i8() -> i8 ! ConvertError => unsigned_to_i8(self as u64);
+    pub fn to_i16() -> i16 ! ConvertError => unsigned_to_i16(self as u64);
+    pub fn to_i32() -> i32 ! ConvertError => unsigned_to_i32(self as u64);
+    pub fn to_i64() -> i64 ! ConvertError => unsigned_to_i64(self as u64);
+    pub fn to_isize() -> isize ! ConvertError => unsigned_to_isize(self as u64);
+    pub fn to_u8() -> u8 ! ConvertError => unsigned_to_u8(self as u64);
+    pub fn to_u16() -> u16 ! ConvertError => unsigned_to_u16(self as u64);
+    pub fn to_u32() -> u32 ! ConvertError => unsigned_to_u32(self as u64);
+    pub fn to_u64() -> u64 ! ConvertError => unsigned_to_u64(self as u64);
+    pub fn to_usize() -> usize ! ConvertError => unsigned_to_usize(self as u64);
+    pub fn to_f32() -> f32 ! ConvertError => unsigned_to_f32(self as u64);
+    pub fn to_f64() -> f64 ! ConvertError => unsigned_to_f64(self as u64);
+    pub fn to_bool() -> bool ! ConvertError => unsigned_to_bool(self as u64);
+    pub fn to_char() -> char ! ConvertError => unsigned_to_char(self as u64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext u64 {
+    pub fn to_i8() -> i8 ! ConvertError => unsigned_to_i8(self as u64);
+    pub fn to_i16() -> i16 ! ConvertError => unsigned_to_i16(self as u64);
+    pub fn to_i32() -> i32 ! ConvertError => unsigned_to_i32(self as u64);
+    pub fn to_i64() -> i64 ! ConvertError => unsigned_to_i64(self as u64);
+    pub fn to_isize() -> isize ! ConvertError => unsigned_to_isize(self as u64);
+    pub fn to_u8() -> u8 ! ConvertError => unsigned_to_u8(self as u64);
+    pub fn to_u16() -> u16 ! ConvertError => unsigned_to_u16(self as u64);
+    pub fn to_u32() -> u32 ! ConvertError => unsigned_to_u32(self as u64);
+    pub fn to_u64() -> u64 ! ConvertError => unsigned_to_u64(self as u64);
+    pub fn to_usize() -> usize ! ConvertError => unsigned_to_usize(self as u64);
+    pub fn to_f32() -> f32 ! ConvertError => unsigned_to_f32(self as u64);
+    pub fn to_f64() -> f64 ! ConvertError => unsigned_to_f64(self as u64);
+    pub fn to_bool() -> bool ! ConvertError => unsigned_to_bool(self as u64);
+    pub fn to_char() -> char ! ConvertError => unsigned_to_char(self as u64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext usize {
+    pub fn to_i8() -> i8 ! ConvertError => unsigned_to_i8(self as u64);
+    pub fn to_i16() -> i16 ! ConvertError => unsigned_to_i16(self as u64);
+    pub fn to_i32() -> i32 ! ConvertError => unsigned_to_i32(self as u64);
+    pub fn to_i64() -> i64 ! ConvertError => unsigned_to_i64(self as u64);
+    pub fn to_isize() -> isize ! ConvertError => unsigned_to_isize(self as u64);
+    pub fn to_u8() -> u8 ! ConvertError => unsigned_to_u8(self as u64);
+    pub fn to_u16() -> u16 ! ConvertError => unsigned_to_u16(self as u64);
+    pub fn to_u32() -> u32 ! ConvertError => unsigned_to_u32(self as u64);
+    pub fn to_u64() -> u64 ! ConvertError => unsigned_to_u64(self as u64);
+    pub fn to_usize() -> usize ! ConvertError => unsigned_to_usize(self as u64);
+    pub fn to_f32() -> f32 ! ConvertError => unsigned_to_f32(self as u64);
+    pub fn to_f64() -> f64 ! ConvertError => unsigned_to_f64(self as u64);
+    pub fn to_bool() -> bool ! ConvertError => unsigned_to_bool(self as u64);
+    pub fn to_char() -> char ! ConvertError => unsigned_to_char(self as u64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext f32 {
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_i8() -> i8 ! ConvertError => float_to_i8((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_i16() -> i16 ! ConvertError => float_to_i16((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_i32() -> i32 ! ConvertError => float_to_i32((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_i64() -> i64 ! ConvertError => float_to_i64((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_isize() -> isize ! ConvertError => float_to_isize((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_u8() -> u8 ! ConvertError => float_to_u8((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_u16() -> u16 ! ConvertError => float_to_u16((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_u32() -> u32 ! ConvertError => float_to_u32((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_u64() -> u64 ! ConvertError => float_to_u64((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_usize() -> usize ! ConvertError => float_to_usize((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_f32() -> f32 ! ConvertError => float_to_f32((self as f32) as f64);
+    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
+    pub fn to_f64() -> f64 ! ConvertError => float_to_f64((self as f32) as f64);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext f64 {
+    pub fn to_i8() -> i8 ! ConvertError => float_to_i8(self);
+    pub fn to_i16() -> i16 ! ConvertError => float_to_i16(self);
+    pub fn to_i32() -> i32 ! ConvertError => float_to_i32(self);
+    pub fn to_i64() -> i64 ! ConvertError => float_to_i64(self);
+    pub fn to_isize() -> isize ! ConvertError => float_to_isize(self);
+    pub fn to_u8() -> u8 ! ConvertError => float_to_u8(self);
+    pub fn to_u16() -> u16 ! ConvertError => float_to_u16(self);
+    pub fn to_u32() -> u32 ! ConvertError => float_to_u32(self);
+    pub fn to_u64() -> u64 ! ConvertError => float_to_u64(self);
+    pub fn to_usize() -> usize ! ConvertError => float_to_usize(self);
+    pub fn to_f32() -> f32 ! ConvertError => float_to_f32(self);
+    pub fn to_f64() -> f64 ! ConvertError => float_to_f64(self);
+    pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
+    pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
+    pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();
+    pub fn to_f128() -> f128 ! ConvertError => wide_scalar_f128();
+}
+
+ext bool {
+    pub fn to_i8() -> i8 ! ConvertError => signed_to_i8(bool_bit(self));
+    pub fn to_i16() -> i16 ! ConvertError => signed_to_i16(bool_bit(self));
+    pub fn to_i32() -> i32 ! ConvertError => signed_to_i32(bool_bit(self));
+    pub fn to_i64() -> i64 ! ConvertError => signed_to_i64(bool_bit(self));
+    pub fn to_isize() -> isize ! ConvertError => signed_to_isize(bool_bit(self));
+    pub fn to_u8() -> u8 ! ConvertError => signed_to_u8(bool_bit(self));
+    pub fn to_u16() -> u16 ! ConvertError => signed_to_u16(bool_bit(self));
+    pub fn to_u32() -> u32 ! ConvertError => signed_to_u32(bool_bit(self));
+    pub fn to_u64() -> u64 ! ConvertError => signed_to_u64(bool_bit(self));
+    pub fn to_usize() -> usize ! ConvertError => signed_to_usize(bool_bit(self));
+    pub fn to_f32() -> f32 ! ConvertError => signed_to_f32(bool_bit(self));
+    pub fn to_f64() -> f64 ! ConvertError => signed_to_f64(bool_bit(self));
+    pub fn to_bool() -> bool ! ConvertError => signed_to_bool(bool_bit(self));
+}
+
+ext char {
+    pub fn to_i8() -> i8 ! ConvertError => unsigned_to_i8(self as u64);
+    pub fn to_i16() -> i16 ! ConvertError => unsigned_to_i16(self as u64);
+    pub fn to_i32() -> i32 ! ConvertError => unsigned_to_i32(self as u64);
+    pub fn to_i64() -> i64 ! ConvertError => unsigned_to_i64(self as u64);
+    pub fn to_isize() -> isize ! ConvertError => unsigned_to_isize(self as u64);
+    pub fn to_u8() -> u8 ! ConvertError => unsigned_to_u8(self as u64);
+    pub fn to_u16() -> u16 ! ConvertError => unsigned_to_u16(self as u64);
+    pub fn to_u32() -> u32 ! ConvertError => unsigned_to_u32(self as u64);
+    pub fn to_u64() -> u64 ! ConvertError => unsigned_to_u64(self as u64);
+    pub fn to_usize() -> usize ! ConvertError => unsigned_to_usize(self as u64);
+    pub fn to_char() -> char ! ConvertError => unsigned_to_char(self as u64);
+}
+
+ext str {
+    pub fn to_i8() -> i8 ! ConvertError => signed_to_i8(parse_signed(self, 128, 127)?);
+    pub fn to_i16() -> i16 ! ConvertError => signed_to_i16(parse_signed(self, 32768, 32767)?);
+    pub fn to_i32() -> i32 ! ConvertError => signed_to_i32(parse_signed(self, 2147483648, 2147483647)?);
+    pub fn to_i64() -> i64 ! ConvertError => signed_to_i64(parse_signed(self, 9223372036854775808, 9223372036854775807)?);
+    pub fn to_isize() -> isize ! ConvertError => signed_to_isize(parse_signed(self, 9223372036854775808, 9223372036854775807)?);
+    pub fn to_u8() -> u8 ! ConvertError => unsigned_to_u8(parse_unsigned(self, 255)?);
+    pub fn to_u16() -> u16 ! ConvertError => unsigned_to_u16(parse_unsigned(self, 65535)?);
+    pub fn to_u32() -> u32 ! ConvertError => unsigned_to_u32(parse_unsigned(self, 4294967295)?);
+    pub fn to_u64() -> u64 ! ConvertError => unsigned_to_u64(parse_unsigned(self, 18446744073709551615)?);
+    pub fn to_usize() -> usize ! ConvertError => unsigned_to_usize(parse_unsigned(self, 18446744073709551615)?);
+    pub fn to_f32() -> f32 ! ConvertError => parse_f32(self);
+    pub fn to_f64() -> f64 ! ConvertError => parse_f64(self);
+    pub fn to_bool() -> bool ! ConvertError => parse_bool(self);
+    pub fn to_char() -> char ! ConvertError => parse_char(self);
+}

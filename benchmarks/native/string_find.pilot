@@ -1,0 +1,47 @@
+// Native benchmark: substring search.
+// The text is "the quick brown fox jumps over the lazy dog " (44 bytes)
+// 20,000 times, 880,000 bytes, then "expression": its `e`s and `o`s make a
+// search keyed on the needle's first byte stop often. "expression" is at
+// 880,000 (searched 20 times); "lazy" occurs once per sentence, 20,000
+// times. The second text is 100,000 a's then "b": a needle of 20 a's then
+// "b" is at 100,000 - 20 = 99,980, and a search that compares from every
+// `a` does 20 comparisons at each of 99,980 places.
+
+fn repeat(piece: str, n: i64) -> str {
+    var out = "";
+    var i = 0;
+    while i < n {
+        out = out + piece;
+        i = i + 1;
+    }
+    return out;
+}
+
+fn main() {
+    let text = repeat("the quick brown fox jumps over the lazy dog ", 20000) + "expression";
+    var at = -1;
+    var k = 0;
+    while k < 20 {
+        at = text.find("expression", 0);
+        k = k + 1;
+    }
+    print(at);
+    var count = 0;
+    var from = 0;
+    while true {
+        let hit = text.find("lazy", from);
+        if hit < 0 { break; }
+        count = count + 1;
+        from = hit + 1;
+    }
+    print(count);
+    let flat = repeat("a", 100000) + "b";
+    let needle = repeat("a", 20) + "b";
+    var found = -1;
+    k = 0;
+    while k < 20 {
+        found = flat.find(needle, 0);
+        k = k + 1;
+    }
+    print(found);
+}

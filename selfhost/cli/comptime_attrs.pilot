@@ -22,6 +22,7 @@
 // fails the command, as does a file that cannot be written.
 pub lvl(0) pkg Pilot.SelfHost.Cli.ComptimeAttrs;
 
+use std.text;
 use Pilot.SelfHost.Cli.Host;
 use Pilot.SelfHost.Cli.Report;
 
@@ -48,7 +49,7 @@ fn comptime_entry_links(needs_files: bool) -> List<str> {
 }
 
 /// `text` as a Pilot string literal.
-fn quoted(text: str) -> str => "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+fn quoted(s: str) -> str => "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
 
 /// The directory part of `path`, with its final `/`, or "".
 fn dir_of(path: str) -> str {
@@ -61,39 +62,39 @@ fn dir_of(path: str) -> str {
 /// selfhost/cli/comptime_tool.pilot), each function's through its own
 /// `AttrChain` (stdlib/core/attr_flow.pilot).
 fn comptime_entry(records: List<List<str>>) -> str {
-    var out = "";
+    var out: List<str> = [];
     var group = "";
     var i = 0;
     for r in records {
         let chain = f"pilot_chain_{r[3]}";
         if r[3] != group {
             group = r[3];
-            out = out + f"var {chain} = attr_chain_start();\n";
+            out.push(f"var {chain} = attr_chain_start();\n");
         }
         let place = r[1] + ":" + r[2] + ": ";
         if r[0] == "runtime" {
-            out = out + "attr_runtime_steps(" + quoted(r[4]) + ");\n";
+            out.push("attr_runtime_steps(" + quoted(r[4]) + ");\n");
         } else if r[0] == "step" {
             let value = f"pilot_step_{i}";
-            out = out + f"let {value} = {r[4]};\n";
-            out = out + f"{chain} = {chain}.enter({value}.always());\n";
-            out = out + "if " + chain + ".go { " + chain + " = " + chain + ".after(" + value + ".step(" + quoted(r[5]) + ")); }\n";
+            out.push(f"let {value} = {r[4]};\n");
+            out.push(f"{chain} = {chain}.enter({value}.always());\n");
+            out.push("if " + chain + ".go { " + chain + " = " + chain + ".after(" + value + ".step(" + quoted(r[5]) + ")); }\n");
         } else {
-            out = out + f"{chain} = {chain}.enter(false);\n";
+            out.push(f"{chain} = {chain}.enter(false);\n");
             if r[0] == "live" {
                 let value = f"pilot_live_value_{i}";
-                out = out + "if " + chain + ".go {\n    let " + value + " = " + r[4] + ";\n";
-                out = out + "    print(" + quoted(place + "live: " + r[4] + " = ") + " + " + value + ");\n}\n";
+                out.push("if " + chain + ".go {\n    let " + value + " = " + r[4] + ";\n");
+                out.push("    print(" + quoted(place + "live: " + r[4] + " = ") + " + " + value + ");\n}\n");
             } else if r[0] == "generate" {
                 let target = if r[5].starts_with("/") { r[5] } else { dir_of(r[1]) + r[5] };
-                out = out + "if " + chain + ".go {\n";
-                out = out + "    assert(File.write_text(" + quoted(target) + ", " + r[4] + "()), " + quoted("cannot write `" + target + "`") + ");\n";
-                out = out + "    print(" + quoted(place + "generated " + target) + ");\n}\n";
+                out.push("if " + chain + ".go {\n");
+                out.push("    assert(File.write_text(" + quoted(target) + ", " + r[4] + "()), " + quoted("cannot write `" + target + "`") + ");\n");
+                out.push("    print(" + quoted(place + "generated " + target) + ");\n}\n");
             }
         }
         i = i + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 /// Runs the `[Live]` and `[Generate]` functions of `program` that run at

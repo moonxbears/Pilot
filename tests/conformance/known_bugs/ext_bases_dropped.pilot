@@ -1,0 +1,22 @@
+// KNOWN BUG seed.ext_bases_dropped: an `ext` block's base list
+// (`ext i64 : IHalf { .. }`) makes the type implement those interfaces
+// (selfhost/check/generics.pilot: a type satisfies a bound it names "on any
+// of its declarations or `ext` blocks"), so `i64` meets `T : IHalf` and
+// `halve(7)` calls the extension: 7 / 2 = 3, and 10 / 2 = 5. The seed parser
+// reads the list and drops it (crates/pilot-parser `parse_extend_decl`),
+// so the bound is reported unmet (TYPE005).
+interface IHalf {
+    fn half() -> i64;
+}
+
+ext i64 : IHalf {
+    fn half() -> i64 => self / 2;
+}
+
+fn halve<T: IHalf>(x: T) -> i64 => x.half();
+
+fn main() {
+    print(halve(7));
+    let ten: i64 = 10;
+    print(halve(ten));
+}

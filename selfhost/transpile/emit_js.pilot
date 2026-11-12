@@ -163,6 +163,21 @@ pub struct JsDialect : ISourceDialect {
         "    if (from > raw.length) return -1n;",
         "    return BigInt(raw.indexOf(Buffer.from(n, \"utf8\"), from));",
         "}",
+        "function pilot_str_contains(h, n) {",
+        "    if (Array.isArray(h)) return h.some((x) => pilot_eq(x, n));",
+        "    if (h instanceof Map) return pilot_map_has(h, n);",
+        "    return h.includes(n);",
+        "}",
+        "function pilot_str_starts_with(h, n) { return h.startsWith(n); }",
+        "function pilot_str_ends_with(h, n) { return h.endsWith(n); }",
+        "const PILOT_WHITE = new Set([9, 10, 11, 12, 13, 32, 0x85, 0xA0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000].map((c) => String.fromCharCode(c)));",
+        "function pilot_str_trim(s) {",
+        "    let a = 0, b = s.length;",
+        "    while (a < b && PILOT_WHITE.has(s[a])) a++;",
+        "    while (b > a && PILOT_WHITE.has(s[b - 1])) b--;",
+        "    return s.slice(a, b);",
+        "}",
+        "function pilot_str_replace(h, a, b) { return a === \"\" ? h : h.split(a).join(b); }",
         "function pilot_str_slice(v, a, b) {",
         "    if (Array.isArray(v)) {",
         "        const n = v.length;",
@@ -387,7 +402,7 @@ pub struct JsDialect : ISourceDialect {
         if name == "to_str" { return f"pilot_show({args[0]})"; }
         if name == "list_get" { return f"pilot_map_get({joined(args)})"; }
         if name == "list_set" { return f"pilot_map_set({joined(args)})"; }
-        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line"] {
+        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line"] {
             if name == helper { return f"pilot_{helper}({joined(args)})"; }
         }
         return none;

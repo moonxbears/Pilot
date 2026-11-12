@@ -26,10 +26,45 @@ fn int_arg(args: &[PilotVal], i: usize, op: &str) -> Result<i64, String> {
         .ok_or_else(|| format!("`{op}` argument {} must be an integer, found {}", i + 1, v.kind_label()))
 }
 
-fn str_arg(args: &[PilotVal], i: usize, op: &str) -> Result<String, String> {
+/// A string argument, read without copying it to the heap: a short string
+/// is held inline, a long one is borrowed where it is stored. An intrinsic
+/// reads its arguments before it returns, and the VM frees strings only
+/// between instructions, so the borrow cannot outlive the bytes.
+enum StrArg {
+    Inline([u8; 14], usize),
+    Stored(*const u8, usize),
+}
+
+impl std::ops::Deref for StrArg {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        match self {
+            StrArg::Inline(buf, len) => std::str::from_utf8(&buf[..*len]).unwrap_or(""),
+            StrArg::Stored(ptr, len) => {
+                let bytes = unsafe { std::slice::from_raw_parts(*ptr, *len) };
+                std::str::from_utf8(bytes).unwrap_or("")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for StrArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self)
+    }
+}
+
+fn str_arg(args: &[PilotVal], i: usize, op: &str) -> Result<StrArg, String> {
     let v = arg(args, i, op)?;
-    v.with_str(|s| s.to_string())
-        .ok_or_else(|| format!("`{op}` argument {} must be a string, found {}", i + 1, v.kind_label()))
+    if let Some((ptr, len)) = v.heap_parts() {
+        return Ok(StrArg::Stored(ptr, len));
+    }
+    let mut buf = [0u8; 14];
+    match v.str_in(&mut buf).map(str::len) {
+        Some(len) => Ok(StrArg::Inline(buf, len)),
+        None => Err(format!("`{op}` argument {} must be a string, found {}", i + 1, v.kind_label())),
+    }
 }
 
 /// Clamps a byte offset into `s` and moves it forward to a char boundary.
@@ -45,6 +80,16 @@ fn char_floor(s: &str, at: i64) -> usize {
 fn key_of(k: PilotVal) -> String {
     k.with_str(|s| s.to_string())
         .unwrap_or_else(|| k.to_string_repr())
+}
+
+/// Calls `f` with the key `k` names, borrowing it when `k` is a string so
+/// that reading a field allocates nothing.
+fn with_key<R>(k: PilotVal, f: impl FnOnce(&str) -> R) -> R {
+    let mut buf = [0u8; 14];
+    match k.str_in(&mut buf) {
+        Some(s) => f(s),
+        None => f(&k.to_string_repr()),
+    }
 }
 
 impl PilVirtualMachine {
@@ -82,9 +127,14 @@ impl PilVirtualMachine {
     }
 
     fn list_slot(&self, v: PilotVal, op: &str) -> Result<usize, String> {
-        v.as_list_handle()
+        let slot = v
+            .as_list_handle()
             .filter(|s| *s < self.heap_lists.len())
-            .ok_or_else(|| format!("`{op}` expects a list, found {}", v.kind_label()))
+            .ok_or_else(|| format!("`{op}` expects a list, found {}", v.kind_label()))?;
+        if self.list_is_dead(slot) {
+            return Err(format!("internal error: `{op}` reads a list the collector freed"));
+        }
+        Ok(slot)
     }
 
     /// The elements of the list `v`, or with `deep` its leaves at any depth.
@@ -101,9 +151,14 @@ impl PilVirtualMachine {
     }
 
     fn map_slot(&self, v: PilotVal, op: &str) -> Result<usize, String> {
-        v.as_map_handle()
+        let slot = v
+            .as_map_handle()
             .filter(|s| *s < self.heap_maps.len())
-            .ok_or_else(|| format!("`{op}` expects a record, found {}", v.kind_label()))
+            .ok_or_else(|| format!("`{op}` expects a record, found {}", v.kind_label()))?;
+        if self.map_is_dead(slot) {
+            return Err(format!("internal error: `{op}` reads a record the collector freed"));
+        }
+        Ok(slot)
     }
 
     fn list_index(&self, slot: usize, k: PilotVal, op: &str) -> Result<usize, String> {
@@ -118,13 +173,11 @@ impl PilVirtualMachine {
     }
 
     pub fn new_list(&mut self, items: Vec<PilotVal>) -> PilotVal {
-        self.heap_lists.push(items);
-        PilotVal::from_list_handle(self.heap_lists.len() - 1)
+        PilotVal::from_list_handle(self.alloc_list_slot(items))
     }
 
     pub fn new_map(&mut self, m: HashMap<String, PilotVal>) -> PilotVal {
-        self.heap_maps.push(m);
-        PilotVal::from_map_handle(self.heap_maps.len() - 1)
+        PilotVal::from_map_handle(self.alloc_map_slot(m))
     }
 
     fn length(&self, v: PilotVal, op: &str) -> IntrinsicResult {
@@ -149,14 +202,14 @@ impl PilVirtualMachine {
             return Ok(self.heap_lists[slot][i]);
         }
         if obj.is_str() && k.as_int().is_some() {
-            let s = obj.with_str(|s| s.to_string()).unwrap_or_default();
             let i = k.as_int().unwrap_or(0);
-            return s
-                .as_bytes()
-                .get(i.max(0) as usize)
+            let (byte, len) = obj
+                .with_str(|s| (s.as_bytes().get(i.max(0) as usize).copied(), s.len()))
+                .unwrap_or((None, 0));
+            return byte
                 .filter(|_| i >= 0)
-                .map(|b| PilotVal::from_int(*b as i64))
-                .ok_or_else(|| format!("string index {i} out of bounds for length {}", s.len()));
+                .map(|b| PilotVal::from_int(b as i64))
+                .ok_or_else(|| format!("string index {i} out of bounds for length {len}"));
         }
         let slot = self.map_slot(obj, op).map_err(|_| {
             format!(
@@ -165,7 +218,8 @@ impl PilVirtualMachine {
                 obj.kind_label()
             )
         })?;
-        Ok(self.heap_maps[slot].get(&key_of(k)).copied().unwrap_or(PilotVal::NULL))
+        let m = &self.heap_maps[slot];
+        Ok(with_key(k, |key| m.get(key).copied()).unwrap_or(PilotVal::NULL))
     }
 
     fn put(&mut self, obj: PilotVal, k: PilotVal, v: PilotVal, op: &str) -> IntrinsicResult {
@@ -178,7 +232,13 @@ impl PilVirtualMachine {
         let slot = self.map_slot(obj, op).map_err(|_| {
             format!("cannot assign `{}` on {}", key_of(k), obj.kind_label())
         })?;
-        self.heap_maps[slot].insert(key_of(k), v);
+        let m = &mut self.heap_maps[slot];
+        match with_key(k, |key| m.get_mut(key).map(|e| *e = v)) {
+            Some(()) => {}
+            None => {
+                m.insert(key_of(k), v);
+            }
+        }
         Ok(obj)
     }
 
@@ -192,11 +252,12 @@ impl PilVirtualMachine {
         }
         if hay.is_map() {
             let slot = self.map_slot(hay, op)?;
-            return Ok(PilotVal::from_bool(self.heap_maps[slot].contains_key(&key_of(needle))));
+            let m = &self.heap_maps[slot];
+            return Ok(PilotVal::from_bool(with_key(needle, |key| m.contains_key(key))));
         }
         let h = str_arg(&[hay], 0, op)?;
         let n = str_arg(&[needle], 0, op)?;
-        Ok(PilotVal::from_bool(h.contains(&n)))
+        Ok(PilotVal::from_bool(h.contains(&*n)))
     }
 
     fn slice(&mut self, args: &[PilotVal], op: &str) -> IntrinsicResult {
@@ -211,12 +272,40 @@ impl PilVirtualMachine {
         }
         let s = str_arg(args, 0, op)?;
         let (a, b) = (char_floor(&s, a), char_floor(&s, b));
-        Ok(PilotVal::from_str(&s[a..b.max(a)]))
+        Ok(self.new_str(&s[a..b.max(a)]))
     }
 
     /// Executes a VM intrinsic by name.
     pub fn intrinsic(&mut self, op: &str, args: &[PilotVal]) -> IntrinsicResult {
         match op {
+            // The calls the tools make most come first.
+            "map_set" => self.put(arg(args, 0, op)?, arg(args, 1, op)?, arg(args, 2, op)?, op),
+            // `list_get` is the name the bindings give a list's element at a position.
+            "map_get" | "list_get" => self.get(arg(args, 0, op)?, arg(args, 1, op)?, op),
+            "map_has" => {
+                let slot = self.map_slot(arg(args, 0, op)?, op)?;
+                let m = &self.heap_maps[slot];
+                Ok(PilotVal::from_bool(with_key(arg(args, 1, op)?, |k| m.contains_key(k))))
+            }
+            "str_len" => self.length(arg(args, 0, op)?, op),
+            "list_new" => Ok(self.new_list(Vec::new())),
+            "list_len" => {
+                let v = arg(args, 0, op)?;
+                let slot = v
+                    .as_list_handle()
+                    .filter(|s| *s < self.heap_lists.len())
+                    .ok_or_else(|| format!("{} is not iterable", v.kind_label()))?;
+                if self.list_is_dead(slot) {
+                    return Err(format!("internal error: `{op}` reads a list the collector freed"));
+                }
+                Ok(PilotVal::from_int(self.heap_lists[slot].len() as i64))
+            }
+            "list_push" => {
+                let list = arg(args, 0, op)?;
+                let slot = self.list_slot(list, op)?;
+                self.heap_lists[slot].push(arg(args, 1, op)?);
+                Ok(list)
+            }
             "rt_print" => {
                 let parts: Vec<String> = args.iter().map(|a| self.display(*a)).collect();
                 println!("{}", parts.join(" "));
@@ -227,8 +316,14 @@ impl PilVirtualMachine {
                 eprintln!("{}", parts.join(" "));
                 Ok(PilotVal::NULL)
             }
-            "stdin_read_line" => Ok(crate::host::stdin_read_line()),
-            "stdin_read_all" => Ok(crate::host::stdin_read_all()),
+            "stdin_read_line" => Ok(match crate::host::stdin_read_line() {
+                Some(line) => self.new_str(&line),
+                None => PilotVal::NULL,
+            }),
+            "stdin_read_all" => {
+                let text = crate::host::stdin_read_all();
+                Ok(self.new_str(&text))
+            }
             "proc_exe" => Ok(crate::host::proc_exe()),
             "proc_run" | "proc_spawn" => {
                 let program = str_arg(args, 0, op)?;
@@ -284,8 +379,9 @@ impl PilVirtualMachine {
             // `key` if it has one, else `intrinsic(obj)` (a native property).
             "field_or_native" => {
                 let (obj, key) = (arg(args, 0, op)?, arg(args, 1, op)?);
-                if let Some(slot) = obj.as_map_handle().filter(|s| *s < self.heap_maps.len()) {
-                    if let Some(v) = self.heap_maps[slot].get(&key_of(key)) {
+                if obj.is_map() {
+                    let slot = self.map_slot(obj, op)?;
+                    if let Some(v) = with_key(key, |k| self.heap_maps[slot].get(k).copied()).as_ref() {
                         return Ok(*v);
                     }
                 }
@@ -300,22 +396,6 @@ impl PilVirtualMachine {
                     Some(false) => Err(format!("assertion failed{note}")),
                     None => Err(format!("assert expects a boolean, found {}", v.kind_label())),
                 }
-            }
-            "str_len" => self.length(arg(args, 0, op)?, op),
-            "list_new" => Ok(self.new_list(Vec::new())),
-            "list_len" => {
-                let v = arg(args, 0, op)?;
-                let slot = v
-                    .as_list_handle()
-                    .filter(|s| *s < self.heap_lists.len())
-                    .ok_or_else(|| format!("{} is not iterable", v.kind_label()))?;
-                Ok(PilotVal::from_int(self.heap_lists[slot].len() as i64))
-            }
-            "list_push" => {
-                let list = arg(args, 0, op)?;
-                let slot = self.list_slot(list, op)?;
-                self.heap_lists[slot].push(arg(args, 1, op)?);
-                Ok(list)
             }
             // `list_extend(list, other, deep)`: appends `other`'s elements;
             // with `deep` set, nested lists are flattened down to their leaves.
@@ -355,7 +435,7 @@ impl PilVirtualMachine {
                         .ok_or_else(|| format!("`{op}` takes bytes (0 to 255), found {}", v.to_string_repr()))?;
                     bytes.push(b as u8);
                 }
-                Ok(String::from_utf8(bytes).map_or(PilotVal::NULL, |s| PilotVal::from_str(&s)))
+                Ok(String::from_utf8(bytes).map_or(PilotVal::NULL, |s| self.new_str(&s)))
             }
             "str_slice" => self.slice(args, op),
             "str_find" => {
@@ -365,23 +445,23 @@ impl PilVirtualMachine {
                     return Ok(PilotVal::from_int(-1));
                 }
                 let u = char_floor(&h, start);
-                Ok(PilotVal::from_int(h[u..].find(&n).map_or(-1, |o| (u + o) as i64)))
+                Ok(PilotVal::from_int(h[u..].find(&*n).map_or(-1, |o| (u + o) as i64)))
             }
             "str_replace" => {
                 let (h, from, to) = (str_arg(args, 0, op)?, str_arg(args, 1, op)?, str_arg(args, 2, op)?);
                 if from.is_empty() {
-                    return Ok(PilotVal::from_str(&h));
+                    return Ok(self.new_str(&h));
                 }
-                Ok(PilotVal::from_str(&h.replace(&from, &to)))
+                Ok(self.new_str(&h.replace(&*from, &*to)))
             }
             "str_contains" => self.contains(arg(args, 0, op)?, arg(args, 1, op)?, op),
             "str_starts_with" => {
                 let (h, n) = (str_arg(args, 0, op)?, str_arg(args, 1, op)?);
-                Ok(PilotVal::from_bool(h.starts_with(&n)))
+                Ok(PilotVal::from_bool(h.starts_with(&*n)))
             }
             "str_ends_with" => {
                 let (h, n) = (str_arg(args, 0, op)?, str_arg(args, 1, op)?);
-                Ok(PilotVal::from_bool(h.ends_with(&n)))
+                Ok(PilotVal::from_bool(h.ends_with(&*n)))
             }
             "map_new" => Ok(self.new_map(HashMap::new())),
             // `map_values(m)`: the values of map `m` as a new list, in the
@@ -420,31 +500,22 @@ impl PilVirtualMachine {
                 }
                 Ok(copy)
             }
-            "map_set" => self.put(arg(args, 0, op)?, arg(args, 1, op)?, arg(args, 2, op)?, op),
-            // `list_get` is the name the bindings give a list's element at a position.
-            "map_get" | "list_get" => self.get(arg(args, 0, op)?, arg(args, 1, op)?, op),
-            "map_has" => {
-                let slot = self.map_slot(arg(args, 0, op)?, op)?;
-                let k = key_of(arg(args, 1, op)?);
-                Ok(PilotVal::from_bool(self.heap_maps[slot].contains_key(&k)))
-            }
             "map_remove" => {
                 let slot = self.map_slot(arg(args, 0, op)?, op)?;
-                let k = key_of(arg(args, 1, op)?);
-                Ok(PilotVal::from_bool(self.heap_maps[slot].remove(&k).is_some()))
+                let m = &mut self.heap_maps[slot];
+                Ok(PilotVal::from_bool(with_key(arg(args, 1, op)?, |k| m.remove(k)).is_some()))
             }
             "is_null" => Ok(PilotVal::from_bool(arg(args, 0, op)?.is_null())),
             // `closure_new(entry, arity, captured...)` builds a function value.
             "closure_new" => {
-                let slot = self.heap_lists.len();
-                self.heap_lists.push(args.to_vec());
-                Ok(PilotVal::from_fn_handle(slot))
+                Ok(PilotVal::from_fn_handle(self.alloc_list_slot(args.to_vec())))
             }
             // `closure_env(fn, i)` reads the i-th captured value of a closure.
             "closure_env" => {
                 let f = arg(args, 0, op)?;
                 let i = arg(args, 1, op)?.as_int().unwrap_or(-1);
                 f.as_fn_handle()
+                    .filter(|&slot| !self.list_is_dead(slot))
                     .and_then(|slot| self.heap_lists.get(slot))
                     .and_then(|env| usize::try_from(i).ok().and_then(|i| env.get(i + 2)))
                     .copied()
@@ -453,13 +524,13 @@ impl PilVirtualMachine {
             "global_get" => {
                 let name = str_arg(args, 0, op)?;
                 self.globals
-                    .get(&name)
+                    .get(&*name)
                     .copied()
                     .ok_or_else(|| format!("`{name}` is read before its declaration has run"))
             }
             "global_set" => {
                 let v = arg(args, 1, op)?;
-                self.globals.insert(str_arg(args, 0, op)?, v);
+                self.globals.insert(str_arg(args, 0, op)?.to_string(), v);
                 Ok(v)
             }
             // `num_fits(v, register_class, width)`: see `ops::fits`.
@@ -480,10 +551,13 @@ impl PilVirtualMachine {
                     .pop()
                     .ok_or_else(|| "pop from an empty list".to_string())
             }
-            "str_trim" => Ok(PilotVal::from_str(str_arg(args, 0, op)?.trim())),
+            "str_trim" => {
+                let s = str_arg(args, 0, op)?;
+                Ok(self.new_str(s.trim()))
+            }
             "to_str" => {
-                let v = arg(args, 0, op)?;
-                Ok(PilotVal::from_str(&self.display(v)))
+                let text = self.display(arg(args, 0, op)?);
+                Ok(self.new_str(&text))
             }
             // The comptime environment record is heap slot 0 (see pilot-analysis comptime.rs).
             "get_env" => Ok(PilotVal::from_map_handle(0)),

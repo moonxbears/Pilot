@@ -6,6 +6,8 @@
 // register-to-symbol debug manifests in pure Pilot.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct PilcContainerSummary : IValue {
     pub magic: str;
@@ -102,13 +104,13 @@ pub pure fn pilc_u64_le_hex(v: i64) -> str {
 // Encodes raw ASCII/UTF-8 bytes of `s` as lowercase hex (`2 * s.len()` chars).
 pub pure fn pilc_raw_str_hex(s: str) -> str {
     let n = s.len();
-    var out = "";
+    var out: List<str> = [];
     var i = 0;
     while i < n {
-        out = out + pilc_byte_hex(s.byte_at(i));
+        out.push(pilc_byte_hex(s.byte_at(i)));
         i = i + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 // Encodes a `TAG_SSO_STR = 8` (`len <= 14`) 16-byte constant entry (`meta[0..8] + payload[0..8]`).
@@ -147,32 +149,32 @@ pub fn pilc_serialize_state_hex(st: i64) -> str {
     let magic_hex = pilc_raw_str_hex(pilc_v3_magic());
     let ver_hex = pilc_u32_le_hex(pilc_v3_version());
     let ccount = (__engine("map_get", st, "ccount") ?? 0);
-    var consts_hex = "";
-    var heap_hex = "";
+    var consts_hex: List<str> = [];
+    var heap_hex: List<str> = [];
     var heap_byte_len = 0;
 
     var ci = 0;
     while ci < ccount {
         let ctag = (__engine("map_get", st, "ctag_" + ci) ?? 0);
         if ctag == 0 {
-            consts_hex = consts_hex + pilc_u64_le_hex(0) + pilc_u64_le_hex(0);
+            consts_hex.push(pilc_u64_le_hex(0) + pilc_u64_le_hex(0));
         } else if ctag == 2 {
             let bval = (__engine("map_get", st, "cpay_" + ci) ?? 0);
-            consts_hex = consts_hex + pilc_u64_le_hex(2) + pilc_u64_le_hex(bval);
+            consts_hex.push(pilc_u64_le_hex(2) + pilc_u64_le_hex(bval));
         } else if ctag == 3 {
             let ival = (__engine("map_get", st, "cpay_" + ci) ?? 0);
-            consts_hex = consts_hex + pilc_u64_le_hex(3) + pilc_u64_le_hex(ival);
+            consts_hex.push(pilc_u64_le_hex(3) + pilc_u64_le_hex(ival));
         } else if ctag == 5 {
             let fbits = (__engine("map_get", st, "cpay_" + ci) ?? 0);
-            consts_hex = consts_hex + pilc_u64_le_hex(5) + pilc_u64_le_hex(fbits);
+            consts_hex.push(pilc_u64_le_hex(5) + pilc_u64_le_hex(fbits));
         } else if ctag == 8 {
             let sval = __engine("map_get", st, "cstr_" + ci);
             let slen = sval.len();
             if slen <= 14 {
-                consts_hex = consts_hex + pilc_sso_str_entry_hex(sval);
+                consts_hex.push(pilc_sso_str_entry_hex(sval));
             } else {
-                consts_hex = consts_hex + pilc_heap_str_entry_hex(slen, heap_byte_len);
-                heap_hex = heap_hex + pilc_u32_le_hex(slen) + pilc_raw_str_hex(sval);
+                consts_hex.push(pilc_heap_str_entry_hex(slen, heap_byte_len));
+                heap_hex.push(pilc_u32_le_hex(slen) + pilc_raw_str_hex(sval));
                 heap_byte_len = heap_byte_len + 4 + slen;
             }
         }
@@ -180,52 +182,46 @@ pub fn pilc_serialize_state_hex(st: i64) -> str {
     }
 
     let icount = (__engine("map_get", st, "icount") ?? 0);
-    var code_hex = "";
+    var code_hex: List<str> = [];
     var pc = 0;
     while pc < icount {
         let word = (__engine("map_get", st, "ins_" + pc) ?? 0);
-        code_hex = code_hex + pilc_u64_le_hex(word);
+        code_hex.push(pilc_u64_le_hex(word));
         pc = pc + 1;
     }
 
     return magic_hex
         + ver_hex
         + pilc_u32_le_hex(ccount)
-        + consts_hex
+        + text.join_text(consts_hex, "")
         + pilc_u32_le_hex(heap_byte_len)
-        + heap_hex
+        + text.join_text(heap_hex, "")
         + pilc_u32_le_hex(icount)
-        + code_hex;
+        + text.join_text(code_hex, "");
 }
 
 // Formats `"SPANS:<pc>:<start>:<end>,...|REGS:<reg>:<sym_id>:<name>,..."` from compiled state `st`.
 pub fn pilc_format_debug_manifest(st: i64) -> str {
     let icount = (__engine("map_get", st, "icount") ?? 0);
-    var spans_out = "SPANS:";
+    var spans: List<str> = [];
     var pc = 0;
     while pc < icount {
         let s0 = (__engine("map_get", st, "isp0_" + pc) ?? 0);
         let s1 = (__engine("map_get", st, "isp1_" + pc) ?? 0);
-        if pc > 0 {
-            spans_out = spans_out + ",";
-        }
-        spans_out = spans_out + pc + ":" + s0 + ":" + s1;
+        spans.push("" + pc + ":" + s0 + ":" + s1);
         pc = pc + 1;
     }
 
     let rcount = (__engine("map_get", st, "dbg_rcount") ?? 0);
-    var regs_out = "REGS:";
+    var regs: List<str> = [];
     var ri = 0;
     while ri < rcount {
         let rslot = (__engine("map_get", st, "dbg_rslot_" + ri) ?? 0);
         let rsym = (__engine("map_get", st, "dbg_rsym_" + ri) ?? 0);
         let rname = __engine("map_get", st, "dbg_rname_" + ri);
-        if ri > 0 {
-            regs_out = regs_out + ",";
-        }
-        regs_out = regs_out + rslot + ":" + rsym + ":" + rname;
+        regs.push("" + rslot + ":" + rsym + ":" + rname);
         ri = ri + 1;
     }
 
-    return spans_out + "|" + regs_out;
+    return "SPANS:" + text.join_text(spans, ",") + "|REGS:" + text.join_text(regs, ",");
 }

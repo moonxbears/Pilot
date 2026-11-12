@@ -1,0 +1,58 @@
+// The text operations every engine binds natively: contains, starts_with,
+// ends_with, trim and replace, at the edges where they differ: empty
+// needles, needles at either end, non-ASCII text, and Unicode white space.
+//
+// Expected output, worked by hand:
+// 1. contains: "hello world" has "lo w" (true), "" (true: every string has
+//    the empty string), not "world!" (false); "naïve" has "ï" (true); an
+//    ASCII text never has "é" (false). A list has the element 3 (true), not
+//    9 (false); a map has the key "b" (true), not "z" (false).
+// 2. starts_with / ends_with: "prefix_body_suffix" starts with "prefix"
+//    (true) and "" (true), not "body" (false); ends with "suffix" (true),
+//    not "prefix" (false); "ab" does not start with the longer "abc"
+//    (false).
+// 3. trim (Unicode White_Space at both ends, shown between brackets):
+//    "  a b \t\n" -> [a b]; a no-break space (U+00A0) and an ideographic
+//    space (U+3000) around "x" -> [x]; "é" with no space is unchanged -> [é];
+//    all white space -> []; "" -> [].
+// 4. replace, left to right without overlaps: "aaaa" with "aa" -> "b" is
+//    "bb"; "abcabc" with "b" -> "XY" is "aXYcaXYc"; an absent needle leaves
+//    "abc"; an empty needle leaves "abc"; "café café" with "é" -> "e" is
+//    "cafe cafe"; replacing with "" deletes: "a-b-c" -> "abc".
+
+fn main() {
+    print("hello world".contains("lo w"));
+    print("hello world".contains(""));
+    print("hello world".contains("world!"));
+    print("naïve".contains("ï"));
+    print("plain".contains("é"));
+    let xs = [1, 2, 3];
+    print(xs.contains(3));
+    print(xs.contains(9));
+    let m = Map<str, i64>();
+    m.set("a", 1);
+    m.set("b", 2);
+    print(m.contains("b"));
+    print(m.contains("z"));
+
+    let s = "prefix_body_suffix";
+    print(s.starts_with("prefix"));
+    print(s.starts_with(""));
+    print(s.starts_with("body"));
+    print(s.ends_with("suffix"));
+    print(s.ends_with("prefix"));
+    print("ab".starts_with("abc"));
+
+    print("[" + "  a b \t\n".trim() + "]");
+    print("[" + " x　".trim() + "]");
+    print("[" + "é".trim() + "]");
+    print("[" + " \t　 ".trim() + "]");
+    print("[" + "".trim() + "]");
+
+    print("aaaa".replace("aa", "b"));
+    print("abcabc".replace("b", "XY"));
+    print("abc".replace("z", "y"));
+    print("abc".replace("", "y"));
+    print("café café".replace("é", "e"));
+    print("a-b-c".replace("-", ""));
+}

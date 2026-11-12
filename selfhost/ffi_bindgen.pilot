@@ -5,6 +5,8 @@
 // `LibraryImport` / `dlopen` bindings from `LayoutTable` physics descriptors.
 // ============================================================================
 
+use std.text;
+
 pub struct FfiBindingBundle {
     pub symbol_name: str;
     pub c_prototype: str;
@@ -307,7 +309,7 @@ pub fn ffi_emit_fn_params(fn_nid: i64) -> str {
 }
 
 pub fn generate_arena_c_ffi_header() -> str {
-    var out = "#ifndef PILOT_ARENA_FFI_H\n#define PILOT_ARENA_FFI_H\n#include <stdint.h>\n#include <stdbool.h>\n#include <stddef.h>\n\n";
+    var out: List<str> = ["#ifndef PILOT_ARENA_FFI_H\n#define PILOT_ARENA_FFI_H\n#include <stdint.h>\n#include <stdbool.h>\n#include <stddef.h>\n\n"];
     let prog = ffi_target_prog_nid();
     if prog >= 0 {
         let cc = __engine("ast_child_count", prog);
@@ -316,7 +318,7 @@ pub fn generate_arena_c_ffi_header() -> str {
             let item = __engine("ast_child_at", prog, ci);
             let ik = __engine("ast_node_kind", item);
             if ik == 1 && ffi_struct_has_stored_fields(item) {
-                out = out + ffi_emit_struct_typedef(item);
+                out.push(ffi_emit_struct_typedef(item));
             }
             ci = ci + 1;
         }
@@ -330,11 +332,11 @@ pub fn generate_arena_c_ffi_header() -> str {
                 let rty_name = ffi_fn_return_type_name(item);
                 let ret_c = ffi_resolve_c_type_name(rty_name);
                 let psig = ffi_emit_fn_params(item);
-                out = out + "extern " + ret_c + " " + fname + "(" + psig + ");\n";
+                out.push("extern " + ret_c + " " + fname + "(" + psig + ");\n");
             }
             ci = ci + 1;
         }
     }
-    out = out + "\n#endif\n";
-    return out;
+    out.push("\n#endif\n");
+    return text.join_text(out, "");
 }

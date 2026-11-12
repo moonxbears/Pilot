@@ -5,6 +5,8 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Gate.SeedAudit;
 
+use std.text;
+
 pub pure fn sa_is_upper(b: i64) -> bool {
     return b >= 65 && b <= 90;
 }
@@ -392,7 +394,7 @@ pub pure fn verify_rust_source_name_blind(
     var col = 1;
     var line_start = 0;
     var in_cfg_test = false;
-    var code_only = "";
+    var code_parts: List<str> = [];
 
     while pos < len {
         if pos == line_start {
@@ -424,7 +426,7 @@ pub pure fn verify_rust_source_name_blind(
             col = col + 1;
         } else if b == 47 && pos + 1 < len && rs_source.byte_at(pos + 1) == 47 {
             // Strip `//` line comment using chunked slice
-            if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+            if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
             while pos < len && rs_source.byte_at(pos) != 10 {
                 pos = pos + 1;
                 col = col + 1;
@@ -432,7 +434,7 @@ pub pure fn verify_rust_source_name_blind(
             chunk_start = pos;
         } else if b == 47 && pos + 1 < len && rs_source.byte_at(pos + 1) == 42 {
             // Strip `/* ... */` nested block comment using chunked slice
-            if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+            if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
             var depth = 1;
             pos = pos + 2;
             col = col + 2;
@@ -447,7 +449,7 @@ pub pure fn verify_rust_source_name_blind(
                     pos = pos + 2;
                     col = col + 2;
                 } else if cb == 10 {
-                    code_only = code_only + "\n";
+                    code_parts.push("\n");
                     pos = pos + 1;
                     line = line + 1;
                     col = 1;
@@ -461,12 +463,12 @@ pub pure fn verify_rust_source_name_blind(
         } else if b == 39 {
             // Distinguish Rust char literal `'x'` / `'\x'` from lifetime `'a`
             if pos + 2 < len && rs_source.byte_at(pos + 1) != 92 && rs_source.byte_at(pos + 2) == 39 {
-                if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+                if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
                 pos = pos + 3;
                 col = col + 3;
                 chunk_start = pos;
             } else if pos + 3 < len && rs_source.byte_at(pos + 1) == 92 && rs_source.byte_at(pos + 3) == 39 {
-                if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+                if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
                 pos = pos + 4;
                 col = col + 4;
                 chunk_start = pos;
@@ -483,7 +485,7 @@ pub pure fn verify_rust_source_name_blind(
                 k = k + 1;
             }
             if k < len && rs_source.byte_at(k) == 34 {
-                if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+                if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
                 let lit_ln = line;
                 let lit_col = col;
                 let cur_ln_str = sa_line_at(rs_source, line_start);
@@ -506,7 +508,7 @@ pub pure fn verify_rust_source_name_blind(
                         }
                     }
                     if rb == 10 {
-                        code_only = code_only + "\n";
+                        code_parts.push("\n");
                         line = line + 1;
                         col = 1;
                         line_start = pos + 1;
@@ -542,7 +544,7 @@ pub pure fn verify_rust_source_name_blind(
             }
         } else if b == 34 {
             // Standard double-quoted string literal `"..."`
-            if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+            if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
             let lit_ln = line;
             let lit_col = col;
             let cur_ln_str = sa_line_at(rs_source, line_start);
@@ -563,7 +565,7 @@ pub pure fn verify_rust_source_name_blind(
                     col = col + 1;
                     break;
                 } else if sb == 10 {
-                    code_only = code_only + "\n";
+                    code_parts.push("\n");
                     pos = pos + 1;
                     line = line + 1;
                     col = 1;
@@ -618,8 +620,9 @@ pub pure fn verify_rust_source_name_blind(
         }
     }
     if len > chunk_start {
-        code_only = code_only + rs_source.slice(chunk_start, len);
+        code_parts.push(rs_source.slice(chunk_start, len));
     }
+    let code_only = text.join_text(code_parts, "");
 
     // Stub macro checks on comment-stripped Rust code
     let stubs = glist_new();

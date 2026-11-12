@@ -1,0 +1,32 @@
+// Native benchmark: a map keyed by long strings sharing a prefix.
+// 50,000 keys "config.section.subsection.key_<i>" (30 to 34 bytes, the
+// first 30 shared) map to i; reading every key back 4 times sums
+// 4 * (0 + 1 + ... + 49,999) = 4 * 1,249,975,000 = 4,999,900,000; none of
+// 50,000 keys with "x" added is present.
+
+fn main() {
+    let m = Map<str, i64>();
+    var i = 0;
+    while i < 50000 {
+        m.set(f"config.section.subsection.key_{i}", i);
+        i = i + 1;
+    }
+    var sum = 0;
+    var r = 0;
+    while r < 4 {
+        i = 0;
+        while i < 50000 {
+            sum = sum + m.get(f"config.section.subsection.key_{i}");
+            i = i + 1;
+        }
+        r = r + 1;
+    }
+    print(sum);
+    var misses = 0;
+    i = 0;
+    while i < 50000 {
+        if !m.has(f"config.section.subsection.key_{i}x") { misses = misses + 1; }
+        i = i + 1;
+    }
+    print(misses);
+}

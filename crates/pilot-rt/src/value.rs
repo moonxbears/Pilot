@@ -143,6 +143,50 @@ impl PilotVal {
     #[inline] pub fn as_float(self) -> Option<f64> { if self.is_float() { Some(f64::from_bits(self.payload)) } else { None } }
     #[inline] pub fn as_bool(self) -> Option<bool> { if self.is_bool() { Some(self.payload != 0) } else { None } }
 
+    /// The string this value holds, without allocating: a short string is
+    /// decoded into `buf`, a long one is borrowed where it is stored.
+    pub fn str_in<'a>(&self, buf: &'a mut [u8; 14]) -> Option<&'a str> {
+        match self.tag() {
+            TAG_SSO_STR => {
+                let (meta_bytes, payload_bytes) = (self.tag_meta.to_le_bytes(), self.payload.to_le_bytes());
+                let len = meta_bytes[1] as usize;
+                let meta_copy = len.min(6);
+                buf[..meta_copy].copy_from_slice(&meta_bytes[2..2 + meta_copy]);
+                if len > 6 {
+                    buf[6..len].copy_from_slice(&payload_bytes[..len - 6]);
+                }
+                Some(core::str::from_utf8(&buf[..len]).unwrap_or(""))
+            }
+            TAG_HEAP_STR => {
+                let (ptr, len) = self.heap_parts()?;
+                // The bytes outlive this borrow: they are interned for good,
+                // or owned by the VM, which frees them only between
+                // instructions.
+                let bytes = unsafe { core::slice::from_raw_parts(ptr, len) };
+                Some(core::str::from_utf8(bytes).unwrap_or(""))
+            }
+            _ => None,
+        }
+    }
+
+    /// A long string whose bytes someone else owns: the VM's run-time
+    /// strings (`pilot_vm`), which it frees once no value refers to them.
+    ///
+    /// # Safety
+    /// `ptr` must point to `len` bytes of UTF-8 that stay valid for as long
+    /// as the value (or any copy of it) is read.
+    pub unsafe fn from_heap_parts(ptr: *const u8, len: usize) -> Self {
+        Self { tag_meta: (TAG_HEAP_STR as u64) | ((len as u64) << 8), payload: ptr as usize as u64 }
+    }
+
+    /// The address and length of a long string's bytes.
+    pub fn heap_parts(&self) -> Option<(*const u8, usize)> {
+        if self.tag() != TAG_HEAP_STR || self.payload == 0 {
+            return None;
+        }
+        Some((self.payload as usize as *const u8, ((self.tag_meta >> 8) & 0xFFFF_FFFF) as usize))
+    }
+
     pub fn with_str<R>(&self, f: impl FnOnce(&str) -> R) -> Option<R> {
         match self.tag() {
             TAG_SSO_STR => {

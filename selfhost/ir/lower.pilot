@@ -39,6 +39,7 @@ use selfhost.ir.lower_generator.*;
 use selfhost.check.drops.*;
 use selfhost.ir.lower_drop.*;
 use selfhost.ir.lower_probe.*;
+use std.text;
 
 /// The state of one lowering run.
 pub struct Lowerer : IObject {
@@ -55,6 +56,9 @@ pub struct Lowerer : IObject {
     /// The engine bindings of the program's `comptime` blocks: the hook word
     /// then its arguments, each as text (`nameof(f)` is `f`).
     pub bindings: List<List<str>>;
+    /// `bound`'s answers: `bound_key(hook, keys)` -> the value of the first
+    /// binding with that hook and those leading arguments.
+    pub bound_index: Map<str, str>;
     /// The accessor body each queued function lowers (a getter), or -1 for
     /// the declaration's own body.
     pub queue_body: List<i64>;
@@ -188,17 +192,35 @@ pub fn key(n: i64) -> str => f"{n}";
 /// The last argument of the binding `hook(keys.., value)` whose leading
 /// arguments are `keys`, or "".
 pub fn bound(lw: Lowerer, hook: str, keys: List<str>) -> str {
-    for row in lw.bindings {
-        if row.len() != keys.len() + 2 || row[0] != hook { continue; }
-        var i = 0;
-        var same = true;
-        while i < keys.len() {
-            if row[i + 1] != keys[i] { same = false; }
+    let k = bound_key(hook, keys);
+    if lw.bound_index.has(k) { return lw.bound_index.get(k); }
+    return "";
+}
+
+/// One key per hook and leading arguments: each part with its length in
+/// front, so no two lists of parts give the same key.
+fn bound_key(hook: str, keys: List<str>) -> str {
+    var parts: List<str> = [f"{hook.len()}:{hook}"];
+    for k in keys { parts.push(f"{k.len()}:{k}"); }
+    return text.join_text(parts, "");
+}
+
+/// `bound`'s index of `rows`: the first row of each hook and leading
+/// arguments wins, as a walk of the rows in order would find it.
+fn bound_rows_index(rows: List<List<str>>) -> Map<str, str> {
+    let index = Map<str, str>();
+    for row in rows {
+        if row.len() < 2 { continue; }
+        var keys: List<str> = [];
+        var i = 1;
+        while i < row.len() - 1 {
+            keys.push(row[i]);
             i = i + 1;
         }
-        if same { return row[row.len() - 1]; }
+        let k = bound_key(row[0], keys);
+        if !index.has(k) { index.set(k, row[row.len() - 1]); }
     }
-    return "";
+    return index;
 }
 
 /// The binding words (stdlib/core/builtins/native_calls.pilot): a function,
@@ -237,9 +259,10 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
         binding_of.set(key(inf.r.site[b]), b);
         b = b + 1;
     }
+    let engine_bindings = prog_engine_bindings(p);
     let lw = Lowerer {
         inf: inf, ls: layouts_new(p, m), m: m, fn_index: Map<str, i64>(), queue: [], queue_self: [],
-        bindings: prog_engine_bindings(p), queue_body: [], queue_args: [], cur_field: -1, binding_of: binding_of,
+        bindings: engine_bindings, bound_index: bound_rows_index(engine_bindings), queue_body: [], queue_args: [], cur_field: -1, binding_of: binding_of,
         f: ir_function_new("", ir_physics_new(0, 0, 0, 0, 0)), cur: 0,
         values: Map<str, i64>(), slots: Map<str, i64>(), loop_heads: [], loop_exits: [], head_depths: [], exit_depths: [], defers: [],
         lambda_captures: Map<str, List<i64>>(), lambda_self: Map<str, i64>(),

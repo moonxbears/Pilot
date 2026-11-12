@@ -1,0 +1,23 @@
+true -> i64: ok 1
+false -> u8: ok 0
+true -> f64: ok 1
+true -> bool: ok true
+i64 0 -> bool: ok false
+i64 1 -> bool: ok true
+i64 2 -> bool: err OutOfRange
+i64 -1 -> bool: err OutOfRange
+u64 1 -> bool: ok true
+u64 7 -> bool: err OutOfRange
+i64 65 -> char code: ok 65
+i64 1114111 -> char code: ok 1114111
+i64 1114112 -> char code: err Overflow
+i64 55296 -> char code: err OutOfRange
+i64 57343 -> char code: err OutOfRange
+i64 55295 -> char code: ok 55295
+i64 57344 -> char code: ok 57344
+i64 -1 -> char code: err Underflow
+i64 0 -> char code: ok 0
+u8 233 -> char -> i8: err Overflow
+u8 233 -> char -> u8: ok 233
+char 8364 -> u8: err Overflow
+char 8364 -> i16: ok 8364

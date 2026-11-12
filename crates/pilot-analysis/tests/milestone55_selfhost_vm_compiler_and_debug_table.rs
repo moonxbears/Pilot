@@ -173,7 +173,7 @@ fn selfhost_compile_program(target_program: &str) -> (PilcBinary, String) {
     registry.source_text = target_program.to_string();
 
     let vm_compiler = read_ws("selfhost/vm/compiler.pilot");
-    let pilc_writer = read_ws("selfhost/vm/pilc_writer.pilot");
+    let pilc_writer = format!("{}\n{}", read_ws("stdlib/std/text.pilot"), read_ws("selfhost/vm/pilc_writer.pilot"));
 
     let driver = format!(
         "{}\n{}\n\

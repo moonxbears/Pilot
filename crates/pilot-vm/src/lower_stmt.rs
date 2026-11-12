@@ -18,6 +18,8 @@ impl BytecodeCompiler {
             types: self.var_types.clone(),
         });
         self.defers.push(Vec::new());
+        let local_mark = self.next_local_reg;
+        let flags_before = self.drop_flags.len();
         let mut last = 0;
         for (i, &c) in children.iter().enumerate() {
             let mark = self.next_reg;
@@ -37,6 +39,34 @@ impl BytecodeCompiler {
             self.var_slots = scope.slots;
             self.var_types = scope.types;
         }
+        self.release_block_locals(local_mark, flags_before, r)
+    }
+
+    /// Gives the registers of a block's locals back once the block ends, so
+    /// a function's limit counts the locals live at once rather than every
+    /// `let` it contains. A drop flag (F7) lives as long as its function, so
+    /// a block that allocated one keeps its registers. Returns where the
+    /// block's value is: moved to a scratch register when it sat in one of
+    /// the registers given back.
+    fn release_block_locals(&mut self, local_mark: u8, flags_before: usize, r: u8) -> u8 {
+        if self.next_local_reg == local_mark || self.drop_flags.len() != flags_before {
+            return r;
+        }
+        let r = if r >= local_mark && r < crate::FIRST_TEMP_REG {
+            let keep = self.alloc_reg();
+            self.emit(Opcode::Move, keep, r, 0);
+            keep
+        } else {
+            r
+        };
+        // The locals' scope has ended: their registers stop holding the
+        // values, so the collector frees what only they reached even while
+        // the function goes on (`collect`).
+        let null = self.add_constant(PilotVal::NULL);
+        for reg in local_mark..self.next_local_reg {
+            self.push_ins(crate::Instruction::encode_wide(Opcode::LoadConst, reg, null));
+        }
+        self.next_local_reg = local_mark;
         r
     }
 

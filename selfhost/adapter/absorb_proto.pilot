@@ -7,6 +7,7 @@
 pub lvl(0) pkg Pilot.SelfHost.Adapter.AbsorbProto;
 
 use Pilot.SelfHost.Adapter.AbsorbSql;
+use std.text;
 
 // ------------------------------------------------------------------------------
 // 1. Protobuf Wire Types & Tag Packing
@@ -404,21 +405,21 @@ pub fn proto_field_wire_type(doc: ProtoDoc, f: ProtoFieldDef) -> i64 {
 
 [StandIn("proto.packet_bytes", "borrowed slice<u8> wire view (0b01)", "generated views hold an owned List<i64>, one byte per element", "F7")]
 pub fn proto_synthesize_dual_views(doc: ProtoDoc, msg: ProtoMessageDef) -> str {
-    var out = "// ------------------------------------------------------------------\n";
-    out = out + "// 0b10 Owned Mutable Builder\n";
-    out = out + "pub struct " + msg.name + " : IObject {\n";
+    var out: List<str> = ["// ------------------------------------------------------------------\n"];
+    out.push("// 0b10 Owned Mutable Builder\n");
+    out.push("pub struct " + msg.name + " : IObject {\n");
     var i = 0;
     while i < msg.fields.len() {
         let f = msg.fields.get(i);
-        out = out + "    pub " + f.name + ": " + f.field_type + ";\n";
+        out.push("    pub " + f.name + ": " + f.field_type + ";\n");
         i = i + 1;
     }
-    out = out + "    ~self() {}\n";
-    out = out + "}\n\n";
+    out.push("    ~self() {}\n");
+    out.push("}\n\n");
 
-    out = out + "// 0b01 Zero-Copy Borrowed Wire View\n";
-    out = out + "pub struct " + msg.name + "View : IReference {\n";
-    out = out + "    pub packet: List<i64>;\n";
+    out.push("// 0b01 Zero-Copy Borrowed Wire View\n");
+    out.push("pub struct " + msg.name + "View : IReference {\n");
+    out.push("    pub packet: List<i64>;\n");
     var j = 0;
     while j < msg.fields.len() {
         let f = msg.fields.get(j);
@@ -426,15 +427,15 @@ pub fn proto_synthesize_dual_views(doc: ProtoDoc, msg: ProtoMessageDef) -> str {
         let wire = proto_field_wire_type(doc, f);
         if f.is_repeated || wire == 2 {
             // Repeated, packed and length-delimited fields hand back the span.
-            out = out + "    pub fn " + f.name + "_span(ref self) -> ProtoFieldSpan => " + find + ";\n";
+            out.push("    pub fn " + f.name + "_span(ref self) -> ProtoFieldSpan => " + find + ";\n");
         } else if f.field_type.starts_with("sint") {
-            out = out + "    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => proto_zigzag_decode64(" + find + ".value);\n";
+            out.push("    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => proto_zigzag_decode64(" + find + ".value);\n");
         } else {
-            out = out + "    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => " + find + ".value;\n";
+            out.push("    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => " + find + ".value;\n");
         }
         j = j + 1;
     }
-    out = out + "}\n";
+    out.push("}\n");
 
-    return out;
+    return text.join_text(out, "");
 }

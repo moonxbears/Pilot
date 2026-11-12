@@ -45,6 +45,13 @@ impl std::fmt::Display for VmFault {
 }
 
 pub struct PilVirtualMachine {
+    /// Every register from this one up holds `NULL`, so calls save and
+    /// returns clear only the registers below it.
+    pub(crate) reg_top: usize,
+    /// The strings this VM made while running (`strings`).
+    pub strings: crate::strings::RuntimeStrings,
+    /// Dead slots and collection bookkeeping (`collect`).
+    pub heap: crate::collect::HeapState,
     pub registers: [PilotVal; 256],
     pub constants: Vec<PilotVal>,
     pub instructions: Vec<Instruction>,
@@ -90,9 +97,18 @@ impl Default for PilVirtualMachine {
 /// Upper bound on nested calls before the VM faults instead of exhausting memory.
 const MAX_CALL_DEPTH: usize = 10_000;
 
+/// Intrinsic calls with at most this many arguments pass them on the stack.
+const INLINE_ARGS: usize = 16;
+
+/// The names of the generator intrinsics (`vm_gen`) start with this.
+const GEN_PREFIX: &str = "gen_";
+
 impl PilVirtualMachine {
     pub fn new() -> Self {
         Self {
+            reg_top: 0,
+            strings: Default::default(),
+            heap: crate::collect::HeapState::new(),
             registers: [PilotVal::NULL; 256],
             constants: Vec::new(),
             instructions: Vec::new(),
@@ -133,13 +149,20 @@ impl PilVirtualMachine {
         self.generators.clear();
         self.gen_stack.clear();
         self.registers = [PilotVal::NULL; 256];
+        self.reg_top = 0;
         self.fuel_used = 0;
         self.fuel_exhausted = false;
         self.fault = None;
+        // A loaded program starts with an empty heap: records left by the
+        // program before would leak and could hold handles to its lists.
         // Heap record slot 0 is the program environment record (`ENV`).
-        if self.heap_maps.is_empty() {
-            self.heap_maps.push(HashMap::new());
-        }
+        self.heap_maps.clear();
+        self.heap_maps.push(HashMap::new());
+        self.record_types.clear();
+        self.heap.reset();
+        // The host may still hold a value the last program returned; its
+        // strings are kept for good rather than collected under it.
+        drop(std::mem::take(&mut self.strings));
     }
 
     pub fn set_hook(&mut self, hook: Option<VmHook>) {
@@ -177,11 +200,15 @@ impl PilVirtualMachine {
     }
 
     #[inline]
-    fn set(&mut self, reg: usize, v: PilotVal) {
+    pub(crate) fn set(&mut self, reg: usize, v: PilotVal) {
         self.registers[reg] = v;
+        if reg >= self.reg_top {
+            self.reg_top = reg + 1;
+        }
     }
 
     pub fn run(&mut self) -> PilotVal {
+        self.pin_host_slots();
         match self.execute() {
             Ok(v) => v,
             Err(message) => {
@@ -206,11 +233,7 @@ impl PilVirtualMachine {
         if self.call_stack.len() >= MAX_CALL_DEPTH {
             return Err(format!("call depth exceeded {MAX_CALL_DEPTH} frames"));
         }
-        let act = self
-            .registers
-            .iter()
-            .rposition(|r| !r.is_null())
-            .map_or(0, |i| i + 1);
+        let act = self.active_registers();
         let st = self.reg_stack.len();
         self.reg_stack.extend_from_slice(&self.registers[..act]);
         self.call_stack.push((self.pc, st, act as u16, dst));
@@ -226,7 +249,10 @@ impl PilVirtualMachine {
         };
         let n = act as usize;
         self.registers[..n].copy_from_slice(&self.reg_stack[st..st + n]);
-        self.registers[n..].fill(PilotVal::NULL);
+        if self.reg_top > n {
+            self.registers[n..self.reg_top].fill(PilotVal::NULL);
+        }
+        self.reg_top = n;
         self.reg_stack.truncate(st);
         self.set(d as usize, ret);
         self.pc = ret_pc;
@@ -248,6 +274,7 @@ impl PilVirtualMachine {
     fn closure_target(&self, f: PilotVal) -> Result<(usize, usize), String> {
         let env = f
             .as_fn_handle()
+            .filter(|&slot| !self.list_is_dead(slot))
             .and_then(|slot| self.heap_lists.get(slot))
             .ok_or_else(|| format!("{} is not callable", f.kind_label()))?;
         let field = |i: usize| env.get(i).and_then(|v| v.as_int()).and_then(|n| usize::try_from(n).ok());
@@ -296,6 +323,9 @@ impl PilVirtualMachine {
                 | Opcode::CmpGe) => {
                     let v = self.binary_op(op, r1, r2)?;
                     self.set(dst, v);
+                    if v.is_str() {
+                        self.collect_if_due();
+                    }
                 }
                 op @ (Opcode::Neg | Opcode::Not | Opcode::BitNot) => {
                     let v = ops::unary(op, r1)?;
@@ -338,7 +368,7 @@ impl PilVirtualMachine {
                         return Err(format!("function expects {arity} argument(s), got {src2}"));
                     }
                     // The callee finds its environment right after its arguments.
-                    self.registers[src2 + 1] = r1;
+                    self.set(src2 + 1, r1);
                     self.enter_call(entry, ins.dst())?;
                 }
                 Opcode::Ret => {
@@ -350,15 +380,28 @@ impl PilVirtualMachine {
                     self.leave_frame(ret);
                 }
                 Opcode::EngineIntrinsic => {
-                    let args: Vec<PilotVal> = self.registers[1..=src2.min(255)].to_vec();
+                    // Neither the name nor the arguments are copied to the
+                    // heap: intrinsics are the hottest calls the tools make.
+                    let mut name_buf = [0u8; 14];
                     let hook = r1
-                        .with_str(|s| s.to_string())
+                        .str_in(&mut name_buf)
                         .ok_or_else(|| format!("intrinsic name must be a string, found {}", r1.kind_label()))?;
-                    if self.gen_intrinsic(&hook, ins, &args[..src2])? {
+                    let n = src2.min(255);
+                    let mut small = [PilotVal::NULL; INLINE_ARGS];
+                    let spilled: Vec<PilotVal>;
+                    let args: &[PilotVal] = if n <= INLINE_ARGS {
+                        small[..n].copy_from_slice(&self.registers[1..=n]);
+                        &small[..n]
+                    } else {
+                        spilled = self.registers[1..=n].to_vec();
+                        &spilled
+                    };
+                    if hook.starts_with(GEN_PREFIX) && self.gen_intrinsic(hook, ins, args)? {
                         continue;
                     }
-                    let v = self.intrinsic(&hook, &args[..src2])?;
+                    let v = self.intrinsic(hook, args)?;
                     self.set(dst, v);
+                    self.collect_if_due();
                 }
                 Opcode::Trap => {
                     let msg = self

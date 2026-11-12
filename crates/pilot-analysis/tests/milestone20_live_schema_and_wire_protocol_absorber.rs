@@ -320,6 +320,7 @@ fn test_m20_2_openapi_schema_dag_allof_and_client_interfaces() {
 
     let deps = &[
         "selfhost/adapter/absorb_sql.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/adapter/absorb_openapi.pilot",
     ];
     let res = eval_m20(deps, script);
@@ -414,6 +415,7 @@ fn test_m20_3_protobuf_zigzag_varint_and_wire_packet_codecs() {
 
     let deps = &[
         "selfhost/adapter/absorb_sql.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/adapter/absorb_proto.pilot",
     ];
     let res = eval_m20(deps, script);
@@ -510,6 +512,7 @@ fn test_m20_4_protobuf_reserved_tags_and_dual_view_synthesis() {
 
     let deps = &[
         "selfhost/adapter/absorb_sql.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/adapter/absorb_proto.pilot",
     ];
     let res = eval_m20(deps, script);

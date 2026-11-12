@@ -7,6 +7,7 @@
 pub lvl(0) pkg Pilot.SelfHost.Adapter.CPp;
 
 use Pilot.Core.File.File;
+use std.text;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -708,7 +709,7 @@ pub fn cpp_expand_fn_macro(ref m: CppMacro, args: List<str>) -> str {
 
 pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
     let n = line.len();
-    var out = "";
+    var out: List<str> = [];
     var chunk_start: usize = 0;
     var i: usize = 0;
     var has_expansion = false;
@@ -738,7 +739,7 @@ pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
                     var cur = cpp_skip_space(line, next_i);
                     if cur < n && line.byte_at(cur) == 40 { // '('
                         if i > chunk_start {
-                            out = out + line.slice(chunk_start, i);
+                            out.push(line.slice(chunk_start, i));
                         }
                         has_expansion = true;
 
@@ -765,7 +766,7 @@ pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
                         }
 
                         let expanded_fn = cpp_expand_fn_macro(m, args);
-                        out = out + expanded_fn;
+                        out.push(expanded_fn);
                         i = cur;
                         chunk_start = cur;
                         continue;
@@ -773,10 +774,10 @@ pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
                 } else {
                     // Object-like macro
                     if i > chunk_start {
-                        out = out + line.slice(chunk_start, i);
+                        out.push(line.slice(chunk_start, i));
                     }
                     has_expansion = true;
-                    out = out + m.val;
+                    out.push(m.val);
                     i = next_i;
                     chunk_start = next_i;
                     continue;
@@ -794,9 +795,9 @@ pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
     }
 
     if chunk_start < n {
-        out = out + line.slice(chunk_start, n);
+        out.push(line.slice(chunk_start, n));
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 // ------------------------------------------------------------------------------
@@ -815,7 +816,7 @@ pub fn cpp_process_source(
     }
 
     let n = src.len();
-    var out = "";
+    var out: List<str> = [];
     var pos: usize = 0;
 
     var cond_stack: List<CppCondFrame> = [];
@@ -1004,7 +1005,8 @@ pub fn cpp_process_source(
                 if resolved_path.len() > 0 {
                     let inc_src = File.read_text(resolved_path);
                     let inc_out = cpp_process_source(inc_src, resolved_path, include_dirs, var env);
-                    out = out + inc_out + "\n";
+                    out.push(inc_out);
+                    out.push("\n");
                 } else {
                     // CAB001: Header Not Found in the include paths
                     cpp_set_error(var env, "CAB001", f"{file_path}: header not found: {dir_arg}");
@@ -1023,11 +1025,11 @@ pub fn cpp_process_source(
 
         if is_active {
             let expanded = cpp_expand_tokens(line, env);
-            out = out + expanded + "\n";
+            out.push(expanded + "\n");
         }
     }
 
-    return out;
+    return text.join_text(out, "");
 }
 
 // ------------------------------------------------------------------------------

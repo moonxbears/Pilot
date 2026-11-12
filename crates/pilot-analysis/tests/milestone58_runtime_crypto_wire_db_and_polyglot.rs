@@ -651,6 +651,8 @@ pub fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
     let ffi_bg_src = std::fs::read_to_string(root.join("selfhost/ffi_bindgen.pilot"))
         .expect("selfhost/ffi_bindgen.pilot must exist");
     assert!(ffi_bg_src.lines().count() <= 1500);
+    let text_src = std::fs::read_to_string(root.join("stdlib/std/text.pilot"))
+        .expect("stdlib/std/text.pilot must exist");
 
     let tag = rng.next_u64() & 0xFFFF_FFFF;
     let struct_name = format!("PacketFrame_{:08x}", tag);
@@ -679,12 +681,12 @@ pub fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
     let analysis = AnalysisPipeline::analyze(&target_arena, target_arena.root);
 
     let driver = format!(
-        "{}\n\
+        "{}\n{}\n\
          let b = generate_ffi_binding(\"pilot_rt\", \"{}\", \"x_arg\", 2, 64, 4, 64);\n\
          let hdr = generate_arena_c_ffi_header();\n\
          let __out = b.c_prototype + \"\\n===HDR===\\n\" + hdr;\n\
          __out;\n",
-        ffi_bg_src, fn_name
+        text_src, ffi_bg_src, fn_name
     );
 
     let drv_arena = parse(&driver);
@@ -905,6 +907,7 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     let reactive_src = std::fs::read_to_string(root.join("stdlib/core/reactive.pilot")).unwrap();
     let effects_src = std::fs::read_to_string(root.join("stdlib/core/effects.pilot")).unwrap();
     let http_src = std::fs::read_to_string(root.join("stdlib/http/http.pilot")).unwrap();
+    let text_src = std::fs::read_to_string(root.join("stdlib/std/text.pilot")).unwrap();
     assert!(reactive_src.lines().count() <= 1500);
     assert!(effects_src.lines().count() <= 1500);
     assert!(http_src.lines().count() <= 1500);
@@ -994,7 +997,7 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     let v_new = rng.ascii_payload(11);
 
     let script = format!(
-        "{reactive_src}\n{effects_src}\n{http_src}\n\
+        "{text_src}\n{reactive_src}\n{effects_src}\n{http_src}\n\
          let g = rx_graph_new();\n\
          let src = rx_source(g, {s0});\n\
          let left = rx_derived(g, src, 0, 1, {k1});\n\
@@ -1153,6 +1156,7 @@ pub fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
     let shm_src = std::fs::read_to_string(root.join("stdlib/polyglot/shm.pilot")).unwrap();
     let marshal_src = std::fs::read_to_string(root.join("stdlib/polyglot/marshal.pilot")).unwrap();
     let bridge_src = std::fs::read_to_string(root.join("stdlib/polyglot/bridge.pilot")).unwrap();
+    let text_src = std::fs::read_to_string(root.join("stdlib/std/text.pilot")).unwrap();
     assert!(shm_src.lines().count() <= 1500);
     assert!(marshal_src.lines().count() <= 1500);
     assert!(bridge_src.lines().count() <= 1500);
@@ -1171,7 +1175,7 @@ pub fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
     let bindings_json = format!("{{\"x\":{},\"y\":{}}}", v_a, v_b);
 
     let script = format!(
-        "{shm_src}\n{marshal_src}\n{bridge_src}\n\
+        "{text_src}\n{shm_src}\n{marshal_src}\n{bridge_src}\n\
          let buf = create_shm_owned_buffer(8192, 128, 16);\n\
          let v_ok = project_shm_borrowed_view(buf, 4, 8, 8);\n\
          let v_oob = project_shm_borrowed_view(buf, 12, 8, 8);\n\
@@ -1244,6 +1248,7 @@ pub fn test_58_4b_relational_sql_sqlite3_oracle_and_postgres_mysql_binary_wire_f
     let sql_src = std::fs::read_to_string(root.join("stdlib/db/sql_engine.pilot")).unwrap();
     let pg_src = std::fs::read_to_string(root.join("stdlib/db/postgres_wire.pilot")).unwrap();
     let my_src = std::fs::read_to_string(root.join("stdlib/db/mysql_wire.pilot")).unwrap();
+    let text_src = std::fs::read_to_string(root.join("stdlib/std/text.pilot")).unwrap();
     assert!(sql_src.lines().count() <= 1500);
     assert!(pg_src.lines().count() <= 1500);
     assert!(my_src.lines().count() <= 1500);
@@ -1370,7 +1375,7 @@ print(json.dumps(select_outputs))
     }
 
     let script = format!(
-        "{sql_src}\n{pg_src}\n{my_src}\n{pilot_sql_block}\n\
+        "{text_src}\n{sql_src}\n{pg_src}\n{my_src}\n{pilot_sql_block}\n\
          let pg_st = pg_encode_startup_hex(\"{pg_user}\", \"{pg_db}\");\n\
          let pg_st_dec = pg_decode_startup_info(pg_st);\n\
          let pg_q = pg_encode_query_hex(\"{long_sql_esc}\");\n\

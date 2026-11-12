@@ -101,6 +101,7 @@ fn load_gate_bundle(root: &Path) -> String {
     let deps = [
         "stdlib/crypto/hash.pilot",
         "stdlib/std/proc.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/lexer.pilot",
         "selfhost/ast.pilot",
         "selfhost/parser.pilot",

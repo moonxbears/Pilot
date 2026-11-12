@@ -264,7 +264,7 @@ pub fn test_m10_3_type_reflection_lattice_classes_and_ir_pipeline() {
         ("" + (if lattice_ok { "LATTICE_OK" } else { "LATTICE_FAIL" }) + "|" + (if ir_ok { "IR_OK" } else { "IR_FAIL" }) + "|" + (if fmt_ok { "FMT_OK" } else { "FMT_FAIL" }));
     "#;
 
-    let res = eval_m10(&["stdlib/pilot/types.pilot", "stdlib/pilot/ir.pilot", "stdlib/pilot/fmt.pilot"], script);
+    let res = eval_m10(&["stdlib/std/text.pilot", "stdlib/pilot/types.pilot", "stdlib/pilot/ir.pilot", "stdlib/pilot/fmt.pilot"], script);
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 3, "Expected 3 parts, got: {}", res);
     assert_eq!(parts[0], "LATTICE_OK");
@@ -280,7 +280,7 @@ pub fn test_m10_3_type_reflection_lattice_classes_and_ir_pipeline() {
         "ir_pass_pipeline_run must stop at its seam, got: {}",
         ran
     );
-    let formatted = eval_m10(&["stdlib/pilot/fmt.pilot"], r#"format_str("let t = f!^(a);", fmt_style_readable());"#);
+    let formatted = eval_m10(&["stdlib/std/text.pilot", "stdlib/pilot/fmt.pilot"], r#"format_str("let t = f!^(a);", fmt_style_readable());"#);
     assert!(
         formatted.starts_with("FAULT: SEAM001: unconnected seam `pilot_fmt.format_str`"),
         "format_str must stop at its seam, got: {}",
@@ -335,7 +335,7 @@ pub fn test_m10_4_in_memory_compiler_session_and_vm_sandbox_capabilities() {
         ("" + (if sess_ok { "SESSION_OK" } else { "SESSION_FAIL" }) + "|" + (if vm_cap_denied_ok { "VM_CAP_DENIED_OK" } else { "VM_CAP_FAIL" }) + "|" + (if vm_fuel_trap_ok { "VM_FUEL_TRAP_OK" } else { "VM_FUEL_FAIL" }) + "|" + (if json_ok && diag_is_err { "DIAG_OK" } else { "DIAG_FAIL" }));
     "#;
 
-    let res = eval_m10(&["stdlib/pilot/db.pilot", "stdlib/pilot/vm.pilot", "stdlib/pilot/diag.pilot"], script);
+    let res = eval_m10(&["stdlib/std/text.pilot", "stdlib/pilot/db.pilot", "stdlib/pilot/vm.pilot", "stdlib/pilot/diag.pilot"], script);
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 4, "Expected 4 parts, got: {}", res);
     assert_eq!(parts[0], "SESSION_OK");

@@ -13,16 +13,16 @@ use Pilot.Core.Keywords::*;
 [Lang(Cfg.Lang.char_t), Bits(Cfg.Reg.b32, Cfg.Reg.gpr_u)]
 pub partial struct char : IComparable<char>, IValue {
     pub pure:
-        fn to_u32()         -> u32  => __ssa_cast(Cfg.Ssa.bitcast, self, u32);
-        op == (rhs: char)   -> bool => .to_u32() == rhs.to_u32();
-        op != (rhs: char)   -> bool => .to_u32() != rhs.to_u32();
-        op <  (rhs: char)   -> bool => .to_u32() <  rhs.to_u32();
-        op <= (rhs: char)   -> bool => .to_u32() <= rhs.to_u32();
-        op >  (rhs: char)   -> bool => .to_u32() >  rhs.to_u32();
-        op >= (rhs: char)   -> bool => .to_u32() >= rhs.to_u32();
-        fn is_ascii()       -> bool => .to_u32() <= 0x7F;
-        fn is_ascii_digit() -> bool => (.to_u32() >= 0x30) && (.to_u32() <= 0x39);
+        fn code_point()     -> u32  => __ssa_cast(Cfg.Ssa.bitcast, self, u32);
+        op == (rhs: char)   -> bool => .code_point() == rhs.code_point();
+        op != (rhs: char)   -> bool => .code_point() != rhs.code_point();
+        op <  (rhs: char)   -> bool => .code_point() <  rhs.code_point();
+        op <= (rhs: char)   -> bool => .code_point() <= rhs.code_point();
+        op >  (rhs: char)   -> bool => .code_point() >  rhs.code_point();
+        op >= (rhs: char)   -> bool => .code_point() >= rhs.code_point();
+        fn is_ascii()       -> bool => .code_point() <= 0x7F;
+        fn is_ascii_digit() -> bool => (.code_point() >= 0x30) && (.code_point() <= 0x39);
         fn is_ascii_alpha() -> bool =>
-            ((.to_u32() >= 0x41) && (.to_u32() <= 0x5A)) ||
-            ((.to_u32() >= 0x61) && (.to_u32() <= 0x7A));
+            ((.code_point() >= 0x41) && (.code_point() <= 0x5A)) ||
+            ((.code_point() >= 0x61) && (.code_point() <= 0x7A));
 }

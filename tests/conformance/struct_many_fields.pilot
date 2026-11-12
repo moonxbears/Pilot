@@ -1,0 +1,31 @@
+// A struct may have more fields than a call takes arguments (16): the
+// analyzer lays it out one field at a time.
+struct Wide {
+    f0: i64;
+    f1: i64;
+    f2: i64;
+    f3: i64;
+    f4: i64;
+    f5: i64;
+    f6: i64;
+    f7: i64;
+    f8: i64;
+    f9: i64;
+    f10: i64;
+    f11: i64;
+    f12: i64;
+    f13: i64;
+    f14: i64;
+    f15: i64;
+    f16: i64;
+    f17: i64;
+    f18: i64;
+    f19: i64;
+}
+
+fn main() {
+    let w = Wide { f0: 0, f1: 1, f2: 4, f3: 9, f4: 16, f5: 25, f6: 36, f7: 49, f8: 64, f9: 81, f10: 100, f11: 121, f12: 144, f13: 169, f14: 196, f15: 225, f16: 256, f17: 289, f18: 324, f19: 361 };
+    print(w.f19);
+    print(w.f16);
+    print(w.f0 + w.f1 + w.f2);
+}

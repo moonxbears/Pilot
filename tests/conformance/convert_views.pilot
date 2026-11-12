@@ -1,0 +1,89 @@
+// Same-width bit views (stdlib/core/convert/view.pilot): `x.as_<prim>()`
+// reads the bits of `x` as another primitive of the same width.
+// Expected values are the IEEE 754 encodings Python's `struct` module packs
+// (`struct.unpack('<Q', struct.pack('<d', x))`, and `'<I'`/`'<f'` for f32),
+// and two's complement for the integer pairs:
+//   1.0 = 0x3FF0000000000000, -2.0 = 0xC000000000000000 (as i64 that is
+//   -2^62 = -4611686018427387904), 0.1 = 0x3FB999999999999A, -0.0 = 2^63,
+//   inf = 0x7FF0000000000000, the smallest subnormal 5e-324 = 1, the largest
+//   finite f64 = 0x7FEFFFFFFFFFFFFF, pi = 0x400921FB54442D18, the smallest
+//   normal 2.2250738585072014e-308 = 0x0010000000000000;
+//   f32 1.0 = 0x3F800000, -1.5 = 0xBFC00000, 0.1 = 0x3DCCCCCD, the smallest
+//   subnormal = 1, the largest finite = 0x7F7FFFFF, pi = 0x40490FDB.
+use Pilot.Core.Convert;
+
+fn main() {
+    let a: f64 = 1.0;
+    print(a.as_u64());
+    let b: f64 = -2.0;
+    print(b.as_u64());
+    print(b.as_i64());
+    let c: f64 = 0.1;
+    print(c.as_u64());
+    let z: f64 = -0.0;
+    print(z.as_u64());
+    let inf: f64 = 1.0 / 0.0;
+    print(inf.as_u64());
+    let sub: f64 = 5e-324;
+    print(sub.as_u64());
+    let max: f64 = 1.7976931348623157e308;
+    print(max.as_u64());
+    let pi: f64 = 3.141592653589793;
+    print(pi.as_u64());
+    let normal: f64 = 2.2250738585072014e-308;
+    print(normal.as_u64());
+
+    let one: f32 = f32(1.0);
+    print(one.as_u32());
+    let x: f32 = f32(-1.5);
+    print(x.as_u32());
+    print(x.as_i32());
+    let tenth: f32 = f32(0.1);
+    print(tenth.as_u32());
+    let fsub: f32 = f32(1.401298464324817e-45);
+    print(fsub.as_u32());
+    let fmax: f32 = f32(3.4028234663852886e38);
+    print(fmax.as_u32());
+
+    let pi_bits: u64 = 4614256656552045848;
+    print(pi_bits.as_f64());
+    let neg_bits: i64 = -4611686018427387904;
+    print(neg_bits.as_f64());
+    let three: u64 = 3;
+    print(three.as_f64() == 3.0 * 5e-324);
+    let inf_bits: u64 = 9218868437227405312;
+    print(inf_bits.as_f64());
+    let fpi_bits: u32 = 1078530011;
+    print(fpi_bits.as_f32());
+    let fneg_bits: i32 = -1077936128;
+    print(fneg_bits.as_f32());
+
+    let m1: i32 = -1;
+    print(m1.as_u32());
+    let full: u32 = 4294967295;
+    print(full.as_i32());
+    let byte: u8 = 255;
+    print(byte.as_i8());
+    let sb: i8 = -128;
+    print(sb.as_u8());
+    let h: i16 = -2;
+    print(h.as_u16());
+    let w: u16 = 32768;
+    print(w.as_i16());
+    let big: u64 = 18446744073709551615;
+    print(big.as_i64());
+    let neg: i64 = -9223372036854775808;
+    print(neg.as_u64());
+    let sz: isize = -1;
+    print(sz.as_usize());
+    let usz: usize = 18446744073709551615;
+    print(usz.as_isize());
+
+    // Round trips keep the bits.
+    let r: f64 = 123.456;
+    let rb: u64 = r.as_u64();
+    print(rb.as_f64() == r);
+    let n: f64 = -1.0e-310;
+    let nb: u64 = n.as_u64();
+    print(nb.as_f64() == n);
+}

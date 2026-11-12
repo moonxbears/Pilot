@@ -24,6 +24,7 @@
 // std.text.regex_vm.
 pub pkg std.text.regex;
 
+use std.text;
 use std.text.regex_syntax;
 use std.text.regex_vm;
 
@@ -135,35 +136,37 @@ pub struct Regex : IObject {
     /// As `replace`, replacing at most `count` matches (all when `count` is 0).
     pub fn replace_n(ref self, text: str, template: str, count: i64) -> res<str, RegexError> {
         let parts = parse_template(self.prog, template)?;
-        var out = "";
+        var out: List<str> = [];
         var last = 0;
         let limit = if count > 0 { count } else { -1 };
         for slots in all_slots(self.prog, text, limit, template_needs_groups(parts)) {
-            out = out + text.slice(last as usize, slots[0] as usize);
+            out.push(text.slice(last as usize, slots[0] as usize));
             for part in parts {
                 if part.group < 0 {
-                    out = out + part.text;
+                    out.push(part.text);
                 } else if slots[2 * part.group] >= 0 {
-                    out = out + text.slice(slots[2 * part.group] as usize, slots[2 * part.group + 1] as usize);
+                    out.push(text.slice(slots[2 * part.group] as usize, slots[2 * part.group + 1] as usize));
                 }
             }
             last = slots[1];
         }
-        return ok(out + text.slice(last as usize, text.len()));
+        out.push(text.slice(last as usize, text.len()));
+        return ok(join_text(out, ""));
     }
 
     /// `text` with every match replaced by what `f` returns for it.
     pub fn replace_with(ref self, text: str, f: (Captures) => str) -> str {
-        var out = "";
+        var out: List<str> = [];
         var last = 0;
         for slots in all_slots(self.prog, text, -1, true) {
             let start = slots[0];
             let end = slots[1];
-            out = out + text.slice(last as usize, start as usize);
-            out = out + f(Captures { text: text, slots: slots, names: self.prog.names });
+            out.push(text.slice(last as usize, start as usize));
+            out.push(f(Captures { text: text, slots: slots, names: self.prog.names }));
             last = end;
         }
-        return out + text.slice(last as usize, text.len());
+        out.push(text.slice(last as usize, text.len()));
+        return join_text(out, "");
     }
 
     ~self() {}
@@ -278,7 +281,7 @@ pub fn must_compile(pattern: str) -> Regex {
 /// result matches `text` literally.
 pub fn escape(text: str) -> str {
     let special = "()[]{}?*+-|^$\\.&~# ";
-    var out = "";
+    var out: List<str> = [];
     var last = 0;
     let n = text.len() as i64;
     var i = 0;
@@ -291,12 +294,13 @@ pub fn escape(text: str) -> str {
             k = k + 1;
         }
         if hit {
-            out = out + text.slice(last as usize, i as usize) + "\\";
+            out.push(text.slice(last as usize, i as usize) + "\\");
             last = i;
         }
         i = i + 1;
     }
-    return out + text.slice(last as usize, text.len());
+    out.push(text.slice(last as usize, text.len()));
+    return join_text(out, "");
 }
 
 // ------------------------------------------------------------------------------

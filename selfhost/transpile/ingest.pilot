@@ -7,6 +7,8 @@
 // for Pilot seed keywords.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct IngestedPilotModule : IValue {
     pub source_lang: str;
@@ -125,18 +127,18 @@ pub fn ing_replace_substr(src_s: str, pat: str, rep: str) -> str {
     if pn == 0 || pn > sn {
         return src_s;
     }
-    var out = "";
+    var out: List<str> = [];
     var i = 0;
     while i < sn {
         if i + pn <= sn && src_s.slice(i, i + pn) == pat {
-            out = out + rep;
+            out.push(rep);
             i = i + pn;
         } else {
-            out = out + src_s.slice(i, i + 1);
+            out.push(src_s.slice(i, i + 1));
             i = i + 1;
         }
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 pub fn ing_replace_word(src_s: str, word: str, rep: str) -> str {
@@ -145,25 +147,25 @@ pub fn ing_replace_word(src_s: str, word: str, rep: str) -> str {
     if wn == 0 || wn > sn {
         return src_s;
     }
-    var out = "";
+    var out: List<str> = [];
     var i = 0;
     while i < sn {
         if i + wn <= sn && src_s.slice(i, i + wn) == word {
             let prev_ok = if i == 0 { true } else { !ing_is_ident_byte(src_s.byte_at(i - 1)) };
             let next_ok = if i + wn >= sn { true } else { !ing_is_ident_byte(src_s.byte_at(i + wn)) };
             if prev_ok && next_ok {
-                out = out + rep;
+                out.push(rep);
                 i = i + wn;
             } else {
-                out = out + src_s.slice(i, i + 1);
+                out.push(src_s.slice(i, i + 1));
                 i = i + 1;
             }
         } else {
-            out = out + src_s.slice(i, i + 1);
+            out.push(src_s.slice(i, i + 1));
             i = i + 1;
         }
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 pub fn ing_strip_line_comment(line: str, c0: i64, c1: i64) -> str {
@@ -339,7 +341,7 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
     var top = 0;
     var expect_indent = 0;
     var seen_vars = __engine("map_new");
-    var out = "";
+    var out: List<str> = [];
 
     var li = 0;
     while li < cnt {
@@ -367,7 +369,7 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
                     top = top - 1;
                     let at_target = cur_ind == ((__engine("map_get", st, "ind_" + top) ?? 0));
                     if !(is_else_hdr && at_target) {
-                        out = out + ing_indent(top) + "}\n";
+                        out.push(ing_indent(top) + "}\n");
                     }
                 }
             }
@@ -392,35 +394,35 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
                         ret_clause = " -> " + mapped_r;
                     }
                 }
-                out = out + pad + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ")" + ret_clause + " {\n";
+                out.push(pad + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ")" + ret_clause + " {\n");
                 expect_indent = 1;
             } else if ing_starts_with(tline, "while ") && ing_ends_with(tline, ":") {
                 let wcond = ing_norm_py_expr(tline.slice(6, tline.len() - 1));
-                out = out + pad + "while " + wcond + " {\n";
+                out.push(pad + "while " + wcond + " {\n");
                 expect_indent = 1;
             } else if ing_starts_with(tline, "if ") && ing_ends_with(tline, ":") {
                 let icond = ing_norm_py_expr(tline.slice(3, tline.len() - 1));
-                out = out + pad + nameof(if) + " " + icond + " {\n";
+                out.push(pad + nameof(if) + " " + icond + " {\n");
                 expect_indent = 1;
             } else if ing_starts_with(tline, elif_kw) && ing_ends_with(tline, ":") {
                 let econd = ing_norm_py_expr(tline.slice(5, tline.len() - 1));
-                out = out + pad + "} else " + nameof(if) + " " + econd + " {\n";
+                out.push(pad + "} else " + nameof(if) + " " + econd + " {\n");
                 expect_indent = 1;
             } else if tline == "else:" {
-                out = out + pad + "} else {\n";
+                out.push(pad + "} else {\n");
                 expect_indent = 1;
             } else if ing_starts_with(tline, "return ") {
                 let rexpr = ing_norm_py_expr(tline.slice(7, tline.len()));
-                out = out + pad + nameof(return) + " " + rexpr + ";\n";
+                out.push(pad + nameof(return) + " " + rexpr + ";\n");
             } else if tline == "return" {
-                out = out + pad + nameof(return) + ";\n";
+                out.push(pad + nameof(return) + ";\n");
             } else if tline == "pass" {
                 // Empty block placeholder requires no statement in `{ ... }`
                 expect_indent = 0;
             } else if tline == "break" {
-                out = out + pad + "break;\n";
+                out.push(pad + "break;\n");
             } else if tline == "continue" {
-                out = out + pad + "continue;\n";
+                out.push(pad + "continue;\n");
             } else {
                 let eq_pos = ing_find_single_eq(tline);
                 if eq_pos > 0 {
@@ -432,12 +434,12 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
                     let brk_p = ing_find_byte(vname, 91, 0);
                     if dot_p < 0 && brk_p < 0 && ((__engine("map_get", seen_vars, "v_" + vname) ?? 0)) == 0 {
                         __engine("map_set", seen_vars, "v_" + vname, 1);
-                        out = out + pad + "var " + vname + " = " + rhs_e + ";\n";
+                        out.push(pad + "var " + vname + " = " + rhs_e + ";\n");
                     } else {
-                        out = out + pad + vname + " = " + rhs_e + ";\n";
+                        out.push(pad + vname + " = " + rhs_e + ";\n");
                     }
                 } else {
-                    out = out + pad + ing_ensure_semicolon(ing_norm_py_expr(tline)) + "\n";
+                    out.push(pad + ing_ensure_semicolon(ing_norm_py_expr(tline)) + "\n");
                 }
             }
         }
@@ -446,9 +448,9 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
 
     while top > 0 {
         top = top - 1;
-        out = out + ing_indent(top) + "}\n";
+        out.push(ing_indent(top) + "}\n");
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 // ============================================================================
@@ -459,7 +461,7 @@ pub fn ing_ingest_rust(foreign_src: str) -> str {
     let lm = ing_split_lines(foreign_src);
     let cnt = (__engine("map_get", lm, "cnt") ?? 0);
     let rust_let_mut = "let " + "mut ";
-    var out = "";
+    var out: List<str> = [];
     var li = 0;
     while li < cnt {
         let raw_line = "" + __engine("map_get", lm, "line_" + li);
@@ -470,11 +472,11 @@ pub fn ing_ingest_rust(foreign_src: str) -> str {
             if ing_starts_with(line_s, "fn ") {
                 line_s = "pub " + line_s;
             }
-            out = out + line_s + "\n";
+            out.push(line_s + "\n");
         }
         li = li + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 // ============================================================================
@@ -485,7 +487,7 @@ pub fn ing_ingest_js(foreign_src: str) -> str {
     let lm = ing_split_lines(foreign_src);
     let cnt = (__engine("map_get", lm, "cnt") ?? 0);
     var depth = 0;
-    var out = "";
+    var out: List<str> = [];
     var li = 0;
     while li < cnt {
         let raw_line = "" + __engine("map_get", lm, "line_" + li);
@@ -500,35 +502,35 @@ pub fn ing_ingest_js(foreign_src: str) -> str {
 
             if tline == "}" || tline == "};" {
                 if depth > 0 { depth = depth - 1; }
-                out = out + ing_indent(depth) + "}\n";
+                out.push(ing_indent(depth) + "}\n");
             } else if ing_starts_with(tline, "} else") {
                 var eff_d = depth;
                 if eff_d > 0 { eff_d = eff_d - 1; }
-                out = out + ing_indent(eff_d) + tline + "\n";
+                out.push(ing_indent(eff_d) + tline + "\n");
             } else if ing_starts_with(tline, "function ") && ing_ends_with(tline, "{") {
                 let hdr = ing_trim(tline.slice(9, tline.len() - 1));
                 let lp = ing_find_byte(hdr, 40, 0);
                 let rp = ing_find_byte(hdr, 41, lp + 1);
                 let fname = ing_trim(hdr.slice(0, lp));
                 let pil_params = ing_untyped_params_to_pilot(hdr.slice(lp + 1, rp));
-                out = out + ing_indent(depth) + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ") -> i64 {\n";
+                out.push(ing_indent(depth) + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ") -> i64 {\n");
                 depth = depth + 1;
             } else if ing_ends_with(tline, "{") {
-                out = out + ing_indent(depth) + tline + "\n";
+                out.push(ing_indent(depth) + tline + "\n");
                 depth = depth + 1;
             } else if ing_starts_with(tline, "let ") {
                 let rest = tline.slice(4, tline.len());
-                out = out + ing_indent(depth) + ing_ensure_semicolon("var " + rest) + "\n";
+                out.push(ing_indent(depth) + ing_ensure_semicolon("var " + rest) + "\n");
             } else if ing_starts_with(tline, "const ") {
                 let rest_c = tline.slice(6, tline.len());
-                out = out + ing_indent(depth) + ing_ensure_semicolon(nameof(let) + " " + rest_c) + "\n";
+                out.push(ing_indent(depth) + ing_ensure_semicolon(nameof(let) + " " + rest_c) + "\n");
             } else {
-                out = out + ing_indent(depth) + ing_ensure_semicolon(tline) + "\n";
+                out.push(ing_indent(depth) + ing_ensure_semicolon(tline) + "\n");
             }
         }
         li = li + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 // ============================================================================
@@ -588,7 +590,7 @@ pub fn ing_ingest_c_family(foreign_src: str) -> str {
     let st = __engine("map_new");
     var wrap_cnt = 0;
     var brace_depth = 0;
-    var out = "";
+    var out: List<str> = [];
 
     var li = 0;
     while li < cnt {
@@ -603,11 +605,11 @@ pub fn ing_ingest_c_family(foreign_src: str) -> str {
                     wrap_cnt = wrap_cnt - 1;
                 } else {
                     let close_ind = if brace_depth > wrap_cnt { brace_depth - wrap_cnt } else { 0 };
-                    out = out + ing_indent(close_ind) + "}\n";
+                    out.push(ing_indent(close_ind) + "}\n");
                 }
             } else if ing_starts_with(tline, "} else") {
                 let else_ind = if eff_indent > 0 { eff_indent - 1 } else { 0 };
-                out = out + ing_indent(else_ind) + tline + "\n";
+                out.push(ing_indent(else_ind) + tline + "\n");
             } else {
                 let clean = ing_strip_c_modifiers(tline);
                 let class_kw = "cl" + "ass ";
@@ -616,7 +618,7 @@ pub fn ing_ingest_c_family(foreign_src: str) -> str {
                     wrap_cnt = wrap_cnt + 1;
                     brace_depth = brace_depth + 1;
                 } else if (ing_starts_with(clean, "while ") || ing_starts_with(clean, "while(") || ing_starts_with(clean, "if ") || ing_starts_with(clean, "if(") || ing_starts_with(clean, "else")) && ing_ends_with(clean, "{") {
-                    out = out + ing_indent(eff_indent) + clean + "\n";
+                    out.push(ing_indent(eff_indent) + clean + "\n");
                     brace_depth = brace_depth + 1;
                 } else if ing_ends_with(clean, "{") && ing_find_byte(clean, 40, 0) > 0 {
                     let hdr = ing_trim(clean.slice(0, clean.len() - 1));
@@ -629,7 +631,7 @@ pub fn ing_ingest_c_family(foreign_src: str) -> str {
                     let pil_params = ing_c_params_to_pilot(hdr.slice(lp + 1, rp));
                     let mapped_r = ing_map_foreign_type(raw_ret);
                     let ret_s = if mapped_r.len() == 0 { "" } else { " -> " + mapped_r };
-                    out = out + ing_indent(eff_indent) + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ")" + ret_s + " {\n";
+                    out.push(ing_indent(eff_indent) + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ")" + ret_s + " {\n");
                     brace_depth = brace_depth + 1;
                 } else {
                     let eq_pos = ing_find_single_eq(clean);
@@ -642,19 +644,19 @@ pub fn ing_ingest_c_family(foreign_src: str) -> str {
                         let sp_l = ing_rfind_space(lhs_part);
                         if sp_l > 0 {
                             let vname = ing_trim(lhs_part.slice(sp_l + 1, lhs_part.len()));
-                            out = out + ing_indent(eff_indent) + "var " + vname + " = " + rhs_part + ";\n";
+                            out.push(ing_indent(eff_indent) + "var " + vname + " = " + rhs_part + ";\n");
                         } else {
-                            out = out + ing_indent(eff_indent) + lhs_part + " = " + rhs_part + ";\n";
+                            out.push(ing_indent(eff_indent) + lhs_part + " = " + rhs_part + ";\n");
                         }
                     } else {
-                        out = out + ing_indent(eff_indent) + ing_ensure_semicolon(clean) + "\n";
+                        out.push(ing_indent(eff_indent) + ing_ensure_semicolon(clean) + "\n");
                     }
                 }
             }
         }
         li = li + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 // ============================================================================
@@ -674,7 +676,7 @@ pub fn ing_ingest_lua(foreign_src: str) -> str {
     let lm = ing_split_lines(foreign_src);
     let cnt = (__engine("map_get", lm, "cnt") ?? 0);
     var depth = 0;
-    var out = "";
+    var out: List<str> = [];
     let lua_local_fn = "local " + "function ";
     let lua_fn = "function ";
     let lua_local = "local ";
@@ -695,57 +697,57 @@ pub fn ing_ingest_lua(foreign_src: str) -> str {
                 let rp = ing_find_byte(hdr, 41, lp + 1);
                 let fname = ing_trim(hdr.slice(0, lp));
                 let pil_params = ing_untyped_params_to_pilot(hdr.slice(lp + 1, rp));
-                out = out + ing_indent(depth) + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ") -> i64 {\n";
+                out.push(ing_indent(depth) + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ") -> i64 {\n");
                 depth = depth + 1;
             } else if ing_starts_with(tline, "while ") && ing_ends_with(tline, " do") {
                 let wcond = ing_norm_lua_expr(tline.slice(6, tline.len() - 3));
-                out = out + ing_indent(depth) + "while " + wcond + " {\n";
+                out.push(ing_indent(depth) + "while " + wcond + " {\n");
                 depth = depth + 1;
             } else if ing_starts_with(tline, lua_elseif) && ing_ends_with(tline, " then") {
                 let econd = ing_norm_lua_expr(tline.slice(7, tline.len() - 5));
                 let ed = if depth > 0 { depth - 1 } else { 0 };
-                out = out + ing_indent(ed) + "} else " + nameof(if) + " " + econd + " {\n";
+                out.push(ing_indent(ed) + "} else " + nameof(if) + " " + econd + " {\n");
             } else if ing_starts_with(tline, "if ") && ing_ends_with(tline, " then") {
                 let icond = ing_norm_lua_expr(tline.slice(3, tline.len() - 5));
-                out = out + ing_indent(depth) + nameof(if) + " " + icond + " {\n";
+                out.push(ing_indent(depth) + nameof(if) + " " + icond + " {\n");
                 depth = depth + 1;
             } else if tline == "else" {
                 let ed2 = if depth > 0 { depth - 1 } else { 0 };
-                out = out + ing_indent(ed2) + "} else {\n";
+                out.push(ing_indent(ed2) + "} else {\n");
             } else if tline == "end" {
                 if depth > 0 { depth = depth - 1; }
-                out = out + ing_indent(depth) + "}\n";
+                out.push(ing_indent(depth) + "}\n");
             } else if ing_starts_with(tline, lua_local) {
                 let rest = tline.slice(6, tline.len());
                 let eq_p = ing_find_single_eq(rest);
                 if eq_p > 0 {
                     let vname = ing_trim(rest.slice(0, eq_p));
                     let rhs_e = ing_norm_lua_expr(rest.slice(eq_p + 1, rest.len()));
-                    out = out + ing_indent(depth) + "var " + vname + " = " + rhs_e + ";\n";
+                    out.push(ing_indent(depth) + "var " + vname + " = " + rhs_e + ";\n");
                 } else {
-                    out = out + ing_indent(depth) + "var " + ing_trim(rest) + " = 0;\n";
+                    out.push(ing_indent(depth) + "var " + ing_trim(rest) + " = 0;\n");
                 }
             } else if ing_starts_with(tline, "return ") {
                 let rexpr = ing_norm_lua_expr(tline.slice(7, tline.len()));
-                out = out + ing_indent(depth) + ing_ensure_semicolon(nameof(return) + " " + rexpr) + "\n";
+                out.push(ing_indent(depth) + ing_ensure_semicolon(nameof(return) + " " + rexpr) + "\n");
             } else if tline == "return" {
-                out = out + ing_indent(depth) + nameof(return) + ";\n";
+                out.push(ing_indent(depth) + nameof(return) + ";\n");
             } else if tline == "break" {
-                out = out + ing_indent(depth) + "break;\n";
+                out.push(ing_indent(depth) + "break;\n");
             } else {
                 let eq_p2 = ing_find_single_eq(tline);
                 if eq_p2 > 0 {
                     let lhs_s = ing_trim(tline.slice(0, eq_p2));
                     let rhs_s = ing_norm_lua_expr(tline.slice(eq_p2 + 1, tline.len()));
-                    out = out + ing_indent(depth) + lhs_s + " = " + rhs_s + ";\n";
+                    out.push(ing_indent(depth) + lhs_s + " = " + rhs_s + ";\n");
                 } else {
-                    out = out + ing_indent(depth) + ing_ensure_semicolon(ing_norm_lua_expr(tline)) + "\n";
+                    out.push(ing_indent(depth) + ing_ensure_semicolon(ing_norm_lua_expr(tline)) + "\n");
                 }
             }
         }
         li = li + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 pub fn ingest_foreign_source(source_lang: str, foreign_src: str) -> str {

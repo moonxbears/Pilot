@@ -5,6 +5,8 @@
 // and emits SSA modules, `alloca` stack slots, branches, loops, and calls.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct LlvmModuleArtifact : IValue {
     pub module_name: str;
@@ -437,13 +439,13 @@ pub fn emit_arena_llvm_ir() -> str {
         }
     }
 
-    var defs = "";
+    var defs: List<str> = [];
     let fcnt = (__engine("map_get", meta, "fcnt") ?? 0);
     var fi = 0;
     while fi < fcnt {
-        defs = defs + ll_emit_fn_decl((__engine("map_get", meta, "fnid_" + fi) ?? 0), meta);
+        defs.push(ll_emit_fn_decl((__engine("map_get", meta, "fnid_" + fi) ?? 0), meta));
         fi = fi + 1;
     }
 
-    return emit_llvm_module_header("arena_module") + defs;
+    return emit_llvm_module_header("arena_module") + text.join_text(defs, "");
 }

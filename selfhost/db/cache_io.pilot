@@ -5,6 +5,7 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Db.CacheIo;
 
+use std.text;
 use Pilot.Core.File::*;
 use Pilot.SelfHost.Db.Revision::*;
 use Pilot.SelfHost.Db.Engine::*;
@@ -80,7 +81,7 @@ pub fn db_serialize_cache(db: i64, compiler_build_hash: str) -> str {
     let rev = pilotdb_current_rev(db);
     let scnt = (__engine("map_get", db, "source_count") ?? 0);
 
-    var out = "PDB1\n" + compiler_build_hash + "\n" + rev + "\n" + scnt + "\n";
+    var out: List<str> = ["PDB1\n" + compiler_build_hash + "\n" + rev + "\n" + scnt + "\n"];
 
     var i = 0;
     while i < scnt {
@@ -89,10 +90,10 @@ pub fn db_serialize_cache(db: i64, compiler_build_hash: str) -> str {
         let k = query_key_new(stage_source_text(), 0, fid);
         let enc_k = query_key_encode(k);
         let dur = pilotdb_memo_durability(db, enc_k);
-        out = out + fid + "|" + dur + "|" + src + "\n";
+        out.push("" + fid + "|" + dur + "|" + src + "\n");
         i = i + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 pub fn db_deserialize_cache(db: i64, cache_data: str, expected_compiler_hash: str) -> bool {

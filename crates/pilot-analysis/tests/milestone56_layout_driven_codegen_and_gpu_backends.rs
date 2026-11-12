@@ -292,7 +292,9 @@ fn run_codegen_on_arena(target_program: &str, codegen_files: &[&str], call_expr:
     registry.source_text = target_program.to_string();
     run_pilot_analyzer(&mut registry, None).expect("analyzer.pilot must bind layouts");
 
-    let mut script = String::new();
+    // The codegen modules build text with `std.text` (`use std.text;`).
+    let mut script = read_ws("stdlib/std/text.pilot");
+    script.push('\n');
     for rel in codegen_files {
         script.push_str(&read_ws(rel));
         script.push('\n');

@@ -563,7 +563,9 @@ pub fn build_allowed_infer_strings() -> i64 {
     let _ = gset_insert(s, "layout_hw_header");
     let _ = gset_insert(s, "layout_scalar");
     let _ = gset_insert(s, "layout_ptr");
-    let _ = gset_insert(s, "layout_aggregate");
+    let _ = gset_insert(s, "layout_aggregate_begin");
+    let _ = gset_insert(s, "layout_aggregate_field");
+    let _ = gset_insert(s, "layout_aggregate_end");
     let _ = gset_insert(s, "layout_union");
     let _ = gset_insert(s, "layout_fn_abi");
     let _ = gset_insert(s, "layout_metrics");

@@ -6,6 +6,8 @@
 
 pub pkg std.polyglot.transport.json;
 
+use std.text;
+
 // ------------------------------------------------------------------------------
 // 1. JSON Value Kinds
 // ------------------------------------------------------------------------------
@@ -194,29 +196,25 @@ pub struct JsonValue : IObject {
             return json_quote(self.str_val);
         }
         if self.kind == JsonKind::Array {
-            var out = "[";
+            var items: List<str> = [];
             var i: usize = 0;
             let n = self.len();
             while i < n {
-                if i > 0 { out = out + ", "; }
-                out = out + self.get_at(i).stringify();
+                items.push(self.get_at(i).stringify());
                 i = i + 1;
             }
-            out = out + "]";
-            return out;
+            return "[" + join_text(items, ", ") + "]";
         }
         if self.kind == JsonKind::Object {
-            var out = "{";
+            var members: List<str> = [];
             var i: usize = 0;
             let n = self.object_val.len();
             while i < n {
-                if i > 0 { out = out + ", "; }
                 let p = self.object_val[i];
-                out = out + json_quote(p.key) + ": " + p.val.stringify();
+                members.push(json_quote(p.key) + ": " + p.val.stringify());
                 i = i + 1;
             }
-            out = out + "}";
-            return out;
+            return "{" + join_text(members, ", ") + "}";
         }
         return "null";
     }
@@ -466,30 +464,32 @@ pub struct JsonCursor : IReference {
     /// U+001F must be escaped.
     pub fn parse_string(var ref self) -> res<str, JsonError> {
         self.pos = self.pos + 1;
-        var out = "";
+        var out: List<str> = [];
         var run_start = self.pos;
         while self.pos < self.src.len() {
             let b = self.src.byte_at(self.pos);
             if b == 34 {
-                out = out + self.src.slice(run_start, self.pos);
+                let tail = self.src.slice(run_start, self.pos);
                 self.pos = self.pos + 1;
-                return result<str, JsonError>.ok(out);
+                if out.len() == 0 { return result<str, JsonError>.ok(tail); }
+                out.push(tail);
+                return result<str, JsonError>.ok(join_text(out, ""));
             }
             if b < 32 {
                 return result<str, JsonError>.err(JsonError { pos: self.pos, message: "unescaped control character in a string" });
             }
             if b == 92 {
-                out = out + self.src.slice(run_start, self.pos);
+                out.push(self.src.slice(run_start, self.pos));
                 self.pos = self.pos + 1;
                 let e = self.peek();
-                if e == 34 { out = out + "\""; }
-                else if e == 92 { out = out + "\\"; }
-                else if e == 47 { out = out + "/"; }
-                else if e == 110 { out = out + "\n"; }
-                else if e == 114 { out = out + "\r"; }
-                else if e == 116 { out = out + "\t"; }
+                if e == 34 { out.push("\""); }
+                else if e == 92 { out.push("\\"); }
+                else if e == 47 { out.push("/"); }
+                else if e == 110 { out.push("\n"); }
+                else if e == 114 { out.push("\r"); }
+                else if e == 116 { out.push("\t"); }
                 else if e == 98 || e == 102 {
-                    out = out + json_code_point_str(if e == 98 { 8 } else { 12 });
+                    out.push(json_code_point_str(if e == 98 { 8 } else { 12 }));
                 } else if e == 117 {
                     var cp = json_hex4(self.src, self.pos + 1);
                     if cp < 0 {
@@ -508,7 +508,7 @@ pub struct JsonCursor : IReference {
                             self.pos = self.pos + 6;
                         }
                     }
-                    out = out + json_code_point_str(cp);
+                    out.push(json_code_point_str(cp));
                 } else {
                     return result<str, JsonError>.err(JsonError { pos: self.pos, message: "invalid escape in a string" });
                 }
@@ -525,25 +525,28 @@ pub struct JsonCursor : IReference {
 /// `s` as an RFC 8259 string: quoted, with `"`, `\\` and controls escaped.
 pub pure fn json_quote(s: str) -> str {
     let hex = "0123456789abcdef";
-    var out = "\"";
+    var out: List<str> = ["\""];
     var run_start = 0;
     var i = 0;
     let n = s.len();
     while i < n {
         let b = s.byte_at(i);
         if b == 34 || b == 92 || b < 32 {
-            out = out + s.slice(run_start, i);
-            if b == 34 { out = out + "\\\""; }
-            else if b == 92 { out = out + "\\\\"; }
-            else if b == 10 { out = out + "\\n"; }
-            else if b == 13 { out = out + "\\r"; }
-            else if b == 9 { out = out + "\\t"; }
-            else { out = out + "\\u00" + hex.slice(b / 16, b / 16 + 1) + hex.slice(b % 16, b % 16 + 1); }
+            out.push(s.slice(run_start, i));
+            if b == 34 { out.push("\\\""); }
+            else if b == 92 { out.push("\\\\"); }
+            else if b == 10 { out.push("\\n"); }
+            else if b == 13 { out.push("\\r"); }
+            else if b == 9 { out.push("\\t"); }
+            else { out.push("\\u00" + hex.slice(b / 16, b / 16 + 1) + hex.slice(b % 16, b % 16 + 1)); }
             run_start = i + 1;
         }
         i = i + 1;
     }
-    return out + s.slice(run_start, n) + "\"";
+    if out.len() == 1 { return "\"" + s + "\""; }
+    out.push(s.slice(run_start, n));
+    out.push("\"");
+    return join_text(out, "");
 }
 
 pure fn json_is_space(b: i64) -> bool {

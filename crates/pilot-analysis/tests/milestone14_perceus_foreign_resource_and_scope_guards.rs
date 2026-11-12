@@ -321,7 +321,11 @@ fn test_m14_3_escape004_on_parsed_programs_and_foreign_drop_seam() {
             return 200;
         }
     "#;
-    let deps = &["selfhost/diagnostics/model.pilot", "selfhost/diagnostics/renderer.pilot"];
+    let deps = &[
+        "stdlib/std/text.pilot",
+        "selfhost/diagnostics/model.pilot",
+        "selfhost/diagnostics/renderer.pilot",
+    ];
     assert_eq!(eval_m14(deps, script), "200");
 
     // A ForeignDrop has no PilIR to go into yet: it stops at its seam.

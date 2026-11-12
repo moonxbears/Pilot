@@ -5,6 +5,8 @@
 // =========================================================================
 pub pkg Pilot.SelfHost.Lsp.Server;
 
+use std.text;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 fn lsp_find_substr(haystack: str, needle: str, start_pos: i64) -> i64 {
@@ -60,33 +62,33 @@ fn lsp_extract_json_str_field(json_str: str, key: str) -> str {
     }
     let n = json_str.len();
     var i = idx + pat.len();
-    var out = "";
+    var out: List<str> = [];
     while i < n {
         let b = json_str.byte_at(i);
         if b == 92 && i + 1 < n {
             let nb = json_str.byte_at(i + 1);
             if nb == 110 {
-                out = out + "\n";
+                out.push("\n");
             } else if nb == 114 {
-                out = out + "\r";
+                out.push("\r");
             } else if nb == 116 {
-                out = out + "\t";
+                out.push("\t");
             } else if nb == 34 {
-                out = out + "\"";
+                out.push("\"");
             } else if nb == 92 {
-                out = out + "\\";
+                out.push("\\");
             } else {
-                out = out + json_str.slice(i + 1, i + 2);
+                out.push(json_str.slice(i + 1, i + 2));
             }
             i = i + 2;
         } else if b == 34 {
-            return out;
+            return text.join_text(out, "");
         } else {
-            out = out + json_str.slice(i, i + 1);
+            out.push(json_str.slice(i, i + 1));
             i = i + 1;
         }
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 fn lsp_extract_json_int_field(json_str: str, key: str) -> i64 {
@@ -100,26 +102,26 @@ fn lsp_extract_json_int_field(json_str: str, key: str) -> i64 {
 
 fn lsp_escape_json_str(s: str) -> str {
     let n = s.len();
-    var out = "";
+    var out: List<str> = [];
     var i = 0;
     while i < n {
         let b = s.byte_at(i);
         if b == 34 {
-            out = out + "\\\"";
+            out.push("\\\"");
         } else if b == 92 {
-            out = out + "\\\\";
+            out.push("\\\\");
         } else if b == 10 {
-            out = out + "\\n";
+            out.push("\\n");
         } else if b == 13 {
-            out = out + "\\r";
+            out.push("\\r");
         } else if b == 9 {
-            out = out + "\\t";
+            out.push("\\t");
         } else {
-            out = out + s.slice(i, i + 1);
+            out.push(s.slice(i, i + 1));
         }
         i = i + 1;
     }
-    return out;
+    return text.join_text(out, "");
 }
 
 fn lsp_position_to_offset(doc: str, line: i64, character: i64) -> i64 {
@@ -351,7 +353,7 @@ pub fn lsp_session_new() -> i64 {
 pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
     let total_len = framed_stream.len();
     var pos = 0;
-    var out_frames = "";
+    var out_frames: List<str> = [];
     while pos < total_len {
         let cl_idx = lsp_find_substr(framed_stream, "Content-Length:", pos);
         if cl_idx < 0 {
@@ -375,7 +377,7 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
 
         if method == "initialize" {
             let init_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"capabilities\":{\"textDocumentSync\":1,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"referencesProvider\":true,\"renameProvider\":{\"prepareProvider\":true}}}}";
-            out_frames = out_frames + encode_lsp_frame(init_json);
+            out_frames.push(encode_lsp_frame(init_json));
         } else if method == "textDocument/didOpen" || method == "textDocument/didChange" {
             var new_text = lsp_extract_json_str_field(msg, "text");
             if uri != "" {
@@ -408,7 +410,7 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
             let ov_md = lsp_format_hover_overloads(doc, ident, sig);
             let tr_md = lsp_format_hover_type_refs(doc, ident, sig);
             let hover_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + esc_sig + "\\n```" + p_md + r_md + ov_md + tr_md + "\"}}}";
-            out_frames = out_frames + encode_lsp_frame(hover_json);
+            out_frames.push(encode_lsp_frame(hover_json));
         } else if method == "textDocument/completion" {
             var doc = "";
             if uri != "" { doc = __engine("map_get", sess, "doc:" + uri); }
@@ -472,7 +474,7 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
                     ",{\"label\":\"sha256_hex\",\"kind\":3,\"detail\":\"pub fn sha256_hex(data: str) -> str\"}";
             }
             comp_json = comp_json + "]}";
-            out_frames = out_frames + encode_lsp_frame(comp_json);
+            out_frames.push(encode_lsp_frame(comp_json));
         } else if method == "textDocument/definition" {
             var offset = lsp_extract_json_int_field(msg, "offset");
             var doc = "";
@@ -509,11 +511,11 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
             } else {
                 "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":null}"
             };
-            out_frames = out_frames + encode_lsp_frame(def_json);
+            out_frames.push(encode_lsp_frame(def_json));
         } else if method == "shutdown" {
             let shut_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":null}";
-            out_frames = out_frames + encode_lsp_frame(shut_json);
+            out_frames.push(encode_lsp_frame(shut_json));
         }
     }
-    return out_frames;
+    return text.join_text(out_frames, "");
 }

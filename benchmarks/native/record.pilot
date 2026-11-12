@@ -46,7 +46,7 @@ fn ratio(x: i64, y: i64) -> str {
 fn main() -> i64 {
     let exe = proc.current_exe() ?? "pilot";
     var table = "benchmark\tpilot_us\tc_us\tpilot_over_c\n";
-    for b in ["fib", "numeric_loop", "string_build", "map_workload", "records"] {
+    for b in ["fib", "numeric_loop", "string_build", "map_workload", "records", "string_compare", "string_find", "string_map"] {
         let want = File.read_text(f"{dir()}/{b}.stdout");
         let bin = f"{out_dir()}/{b}";
         let built = proc.run(exe, ["build", f"{dir()}/{b}.pilot", "-o", bin], "");

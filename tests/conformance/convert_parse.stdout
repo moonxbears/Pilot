@@ -1,0 +1,72 @@
+"0" -> i8: ok 0
+"+42" -> i8: ok 42
+"-42" -> i8: ok -42
+"0255" -> i8: err Overflow
+"-0" -> i8: ok 0
+"127" -> i8: ok 127
+"128" -> i8: err Overflow
+"-128" -> i8: ok -128
+"-129" -> i8: err Underflow
+"999x" -> i8: err Overflow
+"" -> i8: err InvalidFormat
+"-" -> i8: err InvalidFormat
+"+" -> i8: err InvalidFormat
+"12a" -> i8: err InvalidFormat
+" 12" -> i8: err InvalidFormat
+"1_000" -> i8: err InvalidFormat
+"9223372036854775807" -> i64: ok 9223372036854775807
+"9223372036854775808" -> i64: err Overflow
+"-9223372036854775808" -> i64: ok -9223372036854775808
+"-9223372036854775809" -> i64: err Underflow
+"+7" -> u8: ok 7
+"0255" -> u8: ok 255
+"255" -> u8: ok 255
+"256" -> u8: err Overflow
+"-0" -> u8: err InvalidFormat
+"-1" -> u8: err InvalidFormat
+"18446744073709551615" -> u8: err Overflow
+"18446744073709551615" -> u64: ok 18446744073709551615
+"18446744073709551616" -> u64: err Overflow
+"-2147483648" -> i32: ok -2147483648
+"65536" -> u16: err Overflow
+"true" -> bool: ok true
+"false" -> bool: ok false
+"True" -> bool: err InvalidFormat
+"1" -> bool: err InvalidFormat
+"" -> bool: err InvalidFormat
+"A" -> char code: ok 65
+"é" -> char code: ok 233
+"€" -> char code: ok 8364
+"😀" -> char code: ok 128512
+"" -> char code: err InvalidFormat
+"ab" -> char code: err InvalidFormat
+"1" -> f64: ok 1
+"-1.5" -> f64: ok -1.5
+".5" -> f64: ok 0.5
+"2." -> f64: ok 2
+"6.02e23" -> f64: ok 602000000000000000000000
+"1e-7" -> f64: ok 0.0000001
+"+3.25E2" -> f64: ok 325
+"0.1" -> f64: ok 0.1
+"1e22" -> f64: ok 10000000000000000000000
+"1e+5" -> f64: ok 100000
+"-0.0" -> f64: ok -0
+"1e400" -> f64: err Overflow
+"-1e400" -> f64: err Underflow
+"1e-400" -> f64: ok 0
+"inf" -> f64: ok inf
+"-Infinity" -> f64: ok -inf
+"NaN" -> f64: ok NaN
+"" -> f64: err InvalidFormat
+"." -> f64: err InvalidFormat
+"e5" -> f64: err InvalidFormat
+"1e" -> f64: err InvalidFormat
+"1.2.3" -> f64: err InvalidFormat
+"0x10" -> f64: err InvalidFormat
+"-" -> f64: err InvalidFormat
+"0.1" -> f32: ok 0.10000000149011612
+"1.5" -> f32: ok 1.5
+"1e10" -> f32: ok 10000000000
+"1e39" -> f32: err Overflow
+"-1e39" -> f32: err Underflow
+"abc" -> f32: err InvalidFormat

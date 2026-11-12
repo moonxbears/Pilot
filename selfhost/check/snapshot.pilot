@@ -157,6 +157,8 @@ pub struct Snap {
     /// `[setter body, parameter node or -1, guard node or -1]` per setter
     /// (`set(v: T) if cond => ..`).
     pub setters: List<List<i64>>;
+    /// Node kind -> where its children are (`child_shapes`).
+    pub shapes: List<ChildShape>;
     pub count: i64;
 }
 
@@ -203,6 +205,7 @@ pub fn snap_load() -> Snap {
         setter_value: snap_word(raw[12], 2),
         setters: raw[16],
         generator: raw[17],
+        shapes: child_shapes(),
         count: nodes.len() / snap_columns(),
     };
 }
@@ -321,35 +324,93 @@ fn push_present(out: List<i64>, n: i64) {
     if n >= 0 { out.push(n); }
 }
 
+/// Where a node kind keeps its children.
+pub enum ChildShape : u8 {
+    /// No children.
+    Leaf,
+    /// `rhs` of them from extra slot `lhs`.
+    ExtraAtLhs,
+    /// `flags` of them from extra slot `rhs`.
+    ExtraAtRhs,
+    /// An `enum`: its variants from extra slot `rhs`, or the one `rhs`.
+    Adt,
+    /// The `lhs` node.
+    Lhs,
+    /// The `rhs` node.
+    Rhs,
+    /// The `lhs` node, then the `rhs` node.
+    LhsRhs,
+    /// A closure: its parameters from extra slot `lhs`, then its body `rhs`.
+    Lambda,
+    /// A `for` loop: its pattern, its sequence `rhs`, then its body.
+    For,
+    /// An `if`: its condition `lhs`, then its branches.
+    If,
+}
+
+fn set_shape(out: List<ChildShape>, kinds: List<i64>, shape: ChildShape) {
+    for k in kinds { out[k] = shape; }
+}
+
+/// Node kind -> where its children are, built once per snapshot so that
+/// `children` looks a kind up instead of comparing it with every kind.
+fn child_shapes() -> List<ChildShape> {
+    var out: List<ChildShape> = [];
+    var i = 0;
+    while i <= nk_pat_range() { out.push(ChildShape::Leaf); i = i + 1; }
+    set_shape(out, [nk_program(), nk_block(), nk_call(), nk_tuple(), nk_list(), nk_map(),
+        nk_match(), nk_try(), nk_ctor(), nk_indexer(), nk_type_tuple(), nk_pat_tuple(),
+        nk_pat_slice(), nk_pat_record(),], ChildShape::ExtraAtLhs);
+    set_shape(out, [nk_fn(), nk_operator(), nk_variant(), nk_pat_variant(), nk_type_named(),],
+        ChildShape::ExtraAtRhs);
+    set_shape(out, [nk_adt(),], ChildShape::Adt);
+    set_shape(out, [nk_struct(), nk_interface(), nk_extend(), nk_call_arg(), nk_let(), nk_var(),
+        nk_const(), nk_catch(), nk_param(),], ChildShape::Rhs);
+    set_shape(out, [nk_lambda(),], ChildShape::Lambda);
+    set_shape(out, [nk_for(),], ChildShape::For);
+    set_shape(out, [nk_if(),], ChildShape::If);
+    set_shape(out, [nk_binary(), nk_assign(), nk_while(), nk_index(), nk_cascade(), nk_pipe(),
+        nk_catch_recovery(), nk_coalesce(), nk_range(), nk_guard(), nk_arm(), nk_scope(),
+        nk_pat_or(), nk_pat_range(),], ChildShape::LhsRhs);
+    set_shape(out, [nk_member(), nk_unary(), nk_return(), nk_yield(), nk_defer(), nk_break(),
+        nk_continue(), nk_expr_stmt(), nk_try_propagate(), nk_dtor(), nk_comptime(),
+        nk_pat_literal(),], ChildShape::Lhs);
+    return out;
+}
+
 /// The children of node `n`, in source order.
 pub fn children(s: Snap, n: i64) -> List<i64> {
     let k = kind(s, n);
     var out: List<i64> = [];
-    if k == nk_program() || k == nk_block() || k == nk_call() || k == nk_tuple()
-        || k == nk_list() || k == nk_map() || k == nk_match() || k == nk_try()
-        || k == nk_ctor() || k == nk_indexer() || k == nk_type_tuple()
-        || k == nk_pat_tuple() || k == nk_pat_slice() || k == nk_pat_record() {
-        return extra_slice(s, lhs(s, n), rhs(s, n));
+    if k < 0 || k >= s.shapes.len() { return out; }
+    let shape = s.shapes[k];
+    if shape == ChildShape::Leaf { return out; }
+    if shape == ChildShape::ExtraAtLhs { return extra_slice(s, lhs(s, n), rhs(s, n)); }
+    if shape == ChildShape::ExtraAtRhs { return extra_slice(s, rhs(s, n), flags(s, n)); }
+    if shape == ChildShape::Rhs {
+        push_present(out, rhs(s, n));
+        return out;
     }
-    if k == nk_fn() || k == nk_operator() || k == nk_variant() || k == nk_pat_variant()
-        || k == nk_type_named() {
-        return extra_slice(s, rhs(s, n), flags(s, n));
+    if shape == ChildShape::Lhs {
+        push_present(out, lhs(s, n));
+        return out;
     }
-    if k == nk_adt() {
+    if shape == ChildShape::LhsRhs {
+        push_present(out, lhs(s, n));
+        push_present(out, rhs(s, n));
+        return out;
+    }
+    if shape == ChildShape::Adt {
         if flags(s, n) > 0 { return extra_slice(s, rhs(s, n), flags(s, n)); }
         push_present(out, rhs(s, n));
         return out;
     }
-    if k == nk_struct() || k == nk_interface() || k == nk_extend() {
-        push_present(out, rhs(s, n));
-        return out;
-    }
-    if k == nk_lambda() {
+    if shape == ChildShape::Lambda {
         out = extra_slice(s, lhs(s, n), flags(s, n));
         push_present(out, rhs(s, n));
         return out;
     }
-    if k == nk_for() {
+    if shape == ChildShape::For {
         let clause = flags(s, n) - 1;
         if clause >= 0 && clause < s.for_clauses.len() {
             let c: List<i64> = s.for_clauses[clause];
@@ -361,38 +422,12 @@ pub fn children(s: Snap, n: i64) -> List<i64> {
         }
         return out;
     }
-    if k == nk_if() {
-        push_present(out, lhs(s, n));
-        if flags(s, n) >= 2 {
-            for c in extra_slice(s, rhs(s, n), flags(s, n)) { out.push(c); }
-        } else {
-            push_present(out, rhs(s, n));
-        }
-        return out;
-    }
-    if k == nk_binary() || k == nk_assign() || k == nk_while() || k == nk_index()
-        || k == nk_cascade() || k == nk_pipe() || k == nk_catch_recovery()
-        || k == nk_coalesce() || k == nk_range() || k == nk_guard() || k == nk_arm()
-        || k == nk_scope() || k == nk_pat_or() || k == nk_pat_range() {
-        push_present(out, lhs(s, n));
+    // `ChildShape::If`
+    push_present(out, lhs(s, n));
+    if flags(s, n) >= 2 {
+        for c in extra_slice(s, rhs(s, n), flags(s, n)) { out.push(c); }
+    } else {
         push_present(out, rhs(s, n));
-        return out;
-    }
-    if k == nk_call_arg() || k == nk_let() || k == nk_var() || k == nk_const()
-        || k == nk_catch() {
-        push_present(out, rhs(s, n));
-        return out;
-    }
-    if k == nk_member() || k == nk_unary() || k == nk_return() || k == nk_yield()
-        || k == nk_defer() || k == nk_break() || k == nk_continue() || k == nk_expr_stmt()
-        || k == nk_try_propagate() || k == nk_dtor() || k == nk_comptime()
-        || k == nk_pat_literal() {
-        push_present(out, lhs(s, n));
-        return out;
-    }
-    if k == nk_param() {
-        push_present(out, rhs(s, n));
-        return out;
     }
     return out;
 }

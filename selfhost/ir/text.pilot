@@ -58,14 +58,13 @@ fn quote_text(s: str) -> str {
 fn value_ref(v: u32) -> str => f"v{v}";
 
 fn value_list(f: IrFunction, vs: List<u32>, from: i64, count: i64) -> str {
-    var out = "";
+    var out: List<str> = [];
     var i = 0;
     while i < count {
-        if i > 0 { out = out + ", "; }
-        out = out + value_ref(vs[from + i]);
+        out.push(value_ref(vs[from + i]));
         i = i + 1;
     }
-    return out;
+    return join_text(out, ", ");
 }
 
 /// The operands of `inst`, as the module documentation spells them.
@@ -80,13 +79,13 @@ fn operands_text(f: IrFunction, inst: IrInst) -> str {
     }
     if op == op_switch_table() {
         // The default target first, then target 0, 1, ..
-        var out = value_ref(a[0]);
+        var out: List<str> = [value_ref(a[0])];
         var t = 1;
         while t < a.len() {
-            out = out + f", b{a[t]}()";
+            out.push(f"b{a[t]}()");
             t = t + 1;
         }
-        return out;
+        return join_text(out, ", ");
     }
     return value_list(f, a, 0, a.len());
 }

@@ -63,7 +63,7 @@ fn input_text() -> str => __engine("tool_input_text");
 pub fn ir_main(mode: str, args: List<str>) -> i64 {
     let s = snap_load();
     let m = lowered(s);
-    return finish(m, mode, print_ir_module(m), source_map(s), args);
+    return finish(m, mode, none, source_map(s), args);
 }
 
 /// `pilot ir <mode> <file>.pir`.
@@ -79,9 +79,10 @@ pub fn ir_text_main(mode: str) -> i64 {
     return 1;
 }
 
-/// Verifies `m` (whose text is `first`) and does what `mode` asks; a run
-/// places its runtime errors in `sources`.
-fn finish(m: IrModule, mode: str, first: str, sources: IrSourceMap, args: List<str>) -> i64 {
+/// Verifies `m` and does what `mode` asks; a run places its runtime errors
+/// in `sources`. `given` is the text `m` was read from, if any; a roundtrip
+/// of a lowered module prints it first (only that mode needs the text).
+fn finish(m: IrModule, mode: str, given: str?, sources: IrSourceMap, args: List<str>) -> i64 {
     let issues = verify_ir_module(m);
     if issues.len() > 0 {
         for i in issues { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
@@ -95,6 +96,7 @@ fn finish(m: IrModule, mode: str, first: str, sources: IrSourceMap, args: List<s
         return 0;
     }
     if mode == "roundtrip" {
+        let first = given ?? print_ir_module(m);
         try {
             let second = print_ir_module(parse_ir_module(first)?);
             if second != first {

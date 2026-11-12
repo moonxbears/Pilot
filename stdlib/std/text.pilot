@@ -6,22 +6,32 @@ pub pkg std.text;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
+/// Text built a piece at a time. The pieces are kept and joined once, when
+/// the text is read (`join_text`), so building n bytes copies each about
+/// log2(pieces) times instead of once per later piece.
 pub struct StringBuilder : IObject {
-    pub content: str;
+    pub pieces: List<str>;
+    pub size: usize;
 
-    pub pure fn len(ref self) -> usize => self.content.len();
+    pub pure fn len(ref self) -> usize => self.size;
 
     pub fn append(var ref self, piece: str) {
-        self.content = self.content + piece;
+        self.pieces.push(piece);
+        self.size = self.size + piece.len();
     }
 
-    pub fn to_string(ref self) -> str => self.content;
+    /// The text so far; the pieces become one, so reading again is cheap.
+    pub fn to_string(var ref self) -> str {
+        if self.pieces.len() == 0 { return ""; }
+        if self.pieces.len() > 1 { self.pieces = [join_text(self.pieces, "")]; }
+        return self.pieces[0];
+    }
 
     ~self() {}
 }
 
 pub fn string_builder_new() -> StringBuilder {
-    return StringBuilder { content: "" };
+    return StringBuilder { pieces: [], size: 0 };
 }
 
 /// `parts` in order, with `sep` between each two, as one string. The parts

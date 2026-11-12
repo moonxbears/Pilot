@@ -142,7 +142,7 @@ fn bad_usage_exits_2() {
 #[test]
 fn the_benchmarks_build_natively_and_match_their_c_references() {
     let dir = scratch("bench");
-    for b in ["fib", "numeric_loop", "string_build", "map_workload"] {
+    for b in ["fib", "numeric_loop", "string_build", "map_workload", "string_compare", "string_find", "string_map"] {
         let stem = format!("benchmarks/native/{b}");
         let want = expected(&stem);
 
@@ -165,7 +165,7 @@ fn the_benchmarks_build_natively_and_match_their_c_references() {
     // The recorded baseline: a header, then one row per benchmark.
     let baseline = std::fs::read_to_string(root().join("benchmarks/native/baseline.tsv")).expect("baseline");
     let rows: Vec<&str> = baseline.lines().skip(1).collect();
-    for b in ["fib", "numeric_loop", "string_build", "map_workload"] {
+    for b in ["fib", "numeric_loop", "string_build", "map_workload", "string_compare", "string_find", "string_map"] {
         let row = rows.iter().find(|r| r.split('\t').next() == Some(b)).unwrap_or_else(|| panic!("no row for {b}"));
         assert_eq!(row.split('\t').count(), 4, "{row}");
     }
@@ -216,9 +216,10 @@ fn the_records_benchmark_matches_its_c_reference() {
 }
 
 /// A string's length is 64 bits: one longer than the length a value holds
-/// itself (`PILOT_V_SHORT_MAX`, about 4 GiB) keeps it before its bytes.
+/// itself (`PILOT_V_SHORT_MAX`, about 8 MiB) keeps it before its bytes.
 /// Lowering that limit to 4 bytes puts nearly every string of these
-/// programs in the long form; their output is unchanged.
+/// programs in the long form (and keeps strings of 5 to 12 bytes out of the
+/// value); their output is unchanged.
 #[test]
 fn strings_past_the_short_length_limit_keep_their_length() {
     let dir = scratch("long_strings");
@@ -228,6 +229,7 @@ fn strings_past_the_short_length_limit_keep_their_length() {
         "tests/conformance/json_rfc8259",
         "tests/conformance/records_native",
         "benchmarks/native/string_build",
+        "tests/conformance/str_kernels",
     ] {
         let name = stem.rsplit('/').next().expect("file name");
         let c = dir.join(format!("{name}.c"));

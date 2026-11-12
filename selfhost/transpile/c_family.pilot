@@ -26,6 +26,8 @@ pub lvl(0) pkg Pilot.SelfHost.Transpile.CFamily;
 
 use selfhost.ir.model.*;
 use selfhost.transpile.source.*;
+use Pilot.Core.ByteRank::*;
+use std.text;
 
 pub struct CFamilyDialect : ISourceDialect {
     /// True for C++, false for C.
@@ -70,6 +72,8 @@ pub struct CFamilyDialect : ISourceDialect {
             "strtoimax", "strtoumax", "NAN", "INFINITY", "HUGE_VAL", "EOF", "NULL", "FILE",
             // runtime/c/pilot_rt.h; its other names start with `pilot_`.
             "PILOT_RT_H", "PILOT_NEGATIVE_EXPONENT", "PILOT_V_NULL", "PILOT_V_STATIC", "PILOT_V_STATIC_VAL", "PILOT_V_NULL_TAG",
+            "PILOT_V_HDR_LONG", "PILOT_V_HDR_MAX_LEN", "PILOT_V_SHORT_MAX", "PILOT_V_INLINE_MAX", "PILOT_V_INLINE_HDR",
+            "PILOT_V_COUNTED", "PILOT_X86", "PILOT_NEON",
             "PILOT_V_BOOL", "PILOT_V_INT", "PILOT_V_UINT", "PILOT_V_FLOAT", "PILOT_V_STR", "PILOT_V_LIST",
             "PILOT_V_MAP", "trunc", "memchr", "memmove", "calloc",
         ] { out.push(k); }
@@ -438,14 +442,18 @@ pub struct CFamilyDialect : ISourceDialect {
         return v;
     }
     pub fn text_value(lit: str) -> str => lit;
-    /// Each string constant as a static string object, `pilot_s<index>`,
-    /// whose reference count is 0: never counted or freed.
+    /// The byte rank table substring search reads (`pilot_byte_rank`, from
+    /// stdlib/core/byte_rank.pilot), then each string constant as a static
+    /// string object, `pilot_s<index>`, whose reference count is 0: never
+    /// counted or freed. A constant's flag says whether a byte is 0x80 or
+    /// above.
     pub fn string_pool(strings: List<str>) -> List<str> {
         if !self.carries_dynamic() { return []; }
-        var out: List<str> = [];
+        var out: List<str> = [byte_rank_c()];
         var i = 0;
         while i < strings.len() {
-            out.push(f"PILOT_V_STATIC(pilot_s{i}, {self.str_lit(strings[i])});");
+            let high = if has_high_byte(strings[i]) { 1 } else { 0 };
+            out.push(f"PILOT_V_STATIC(pilot_s{i}, {self.str_lit(strings[i])}, {high});");
             i = i + 1;
         }
         return out;
@@ -509,14 +517,37 @@ fn value_entry_name(name: str) -> str => "pilot_fv_" + name;
 fn engine_arity() -> Map<str, i64> {
     let ops = Map<str, i64>();
     for name in ["list_new", "map_new", "proc_args", "stdin_read_line"] { ops.set(name, 0); }
-    for name in ["is_null", "to_str", "list_pop", "str_len", "str_from_bytes", "map_values"] { ops.set(name, 11); }
-    for name in ["list_get", "map_get", "map_has", "map_remove", "list_push", "num_pow", "str_byte_at", "list_remove_at"] { ops.set(name, 22); }
-    for name in ["list_set", "map_set", "str_slice"] { ops.set(name, 33); }
+    for name in ["is_null", "to_str", "list_pop", "str_len", "str_from_bytes", "map_values", "str_trim"] { ops.set(name, 11); }
+    for name in [
+        "list_get", "map_get", "map_has", "map_remove", "list_push", "num_pow", "str_byte_at", "list_remove_at",
+        "str_contains", "str_starts_with", "str_ends_with",
+    ] {
+        ops.set(name, 22);
+    }
+    for name in ["list_set", "map_set", "str_slice", "str_replace"] { ops.set(name, 33); }
     ops.set("list_extend", 23);
     ops.set("str_find", 23);
     ops.set("rt_assert", 12);
     ops.set("seam_open", 12);
     return ops;
+}
+
+/// Whether a byte of `s` is 0x80 or above (`s` is not all ASCII).
+fn has_high_byte(s: str) -> bool {
+    let n = s.len();
+    var i: usize = 0;
+    while i < n {
+        if s.byte_at(i) >= 128 { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+/// `pilot_byte_rank` (runtime/c/pilot_rt_str.h) as C, from the Pilot table.
+fn byte_rank_c() -> str {
+    var parts: List<str> = [];
+    for r in byte_rank() { parts.push(f"{r}"); }
+    return "static const unsigned char pilot_byte_rank[256] = { " + join_text(parts, ", ") + " };";
 }
 
 /// `b` as three octal digits, for a `\ooo` escape.
