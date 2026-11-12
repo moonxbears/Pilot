@@ -291,11 +291,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        // Name-blind dimensional unit suffix check (`250ms`, `2.4GHz`, `64KB`, `100mol`, etc.):
-        // Any adjacent non-seed alphabetic identifier run marks `TokenFlags::IS_DIMENSIONAL`.
+        // Name-blind suffix check: a unit (`250ms`, `2.4GHz`, `64KB`) or a type
+        // name (`200u8`, `0xFFu8`). Any adjacent non-seed alphabetic identifier
+        // run marks `TokenFlags::IS_DIMENSIONAL`; the parser tells them apart.
         let mut flags = TokenFlags::NONE;
-        if (kind == TokenKind::IntLit || kind == TokenKind::FloatLit)
-            && cur < self.bytes.len()
+        if cur < self.bytes.len()
             && self.bytes[cur].is_ascii_alphabetic()
         {
             let unit_len = scan_ident_run(self.bytes, cur);

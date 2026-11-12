@@ -1,0 +1,22 @@
+// A regular expression compiled by `comptime` into a constant: the pattern
+// is parsed once, before main runs, and every use shares the program.
+// Expected values worked by hand: the dates in the text are 2024-01-05 and
+// 1999-12-31; "x-1-2" has no 4-digit year.
+use std.text.regex;
+
+const DATE = comptime must_compile(r"(?P<y>\d{4})-(?P<m>\d\d)-(?P<d>\d\d)");
+
+fn years(text: str) -> str {
+    var out = "";
+    for c in DATE.captures_all(text) {
+        out = out + (c.name("y") ?? "?") + ";";
+    }
+    return out;
+}
+
+fn main() {
+    print(years("from 2024-01-05 to 1999-12-31."));
+    print(years("x-1-2"));
+    print(DATE.is_match("on 2000-02-29"));
+    print(DATE.groups());
+}

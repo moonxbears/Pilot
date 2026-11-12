@@ -11,6 +11,7 @@ mod op_decl;
 mod modules;
 mod pilot_impls;
 mod fstring;
+mod num_suffix;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
 use modules::EXCLUDE_RECEPTOR;
 pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
@@ -1104,8 +1105,8 @@ impl<'a> Parser<'a> {
                 let span = ByteSpan::new(sp.start, self.prev_span().end);
                 self.arena.alloc_node(NodeKind::YieldStmt, 0, span, v.0, 0)
             }
-            TokenKind::IntLit | TokenKind::FloatLit if self.tape.flag(self.cur()).contains(pilot_lexer::TokenFlags::IS_DIMENSIONAL) => {
-                let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::UnitLit, 1, sp, sym.0, 0) }
+            TokenKind::IntLit | TokenKind::FloatLit | TokenKind::HexIntLit | TokenKind::BinIntLit | TokenKind::OctIntLit
+                if self.tape.flag(self.cur()).contains(pilot_lexer::TokenFlags::IS_DIMENSIONAL) => self.parse_suffixed_number(sp),
             TokenKind::IntLit => { let t = self.text().replace('_', ""); let v = t.parse::<i64>().or_else(|_| t.parse::<u64>().map(|u| u as i64)).unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
             TokenKind::HexIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 16).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }
             TokenKind::BinIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 2).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }

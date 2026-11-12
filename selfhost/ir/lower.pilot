@@ -648,7 +648,10 @@ pub fn lower_assign(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let target = lhs(s, n);
     if kind(s, target) == nk_member() { return lower_field_assign(lw, n); }
-    if kind(s, target) == nk_index() { return lower_index_assign(lw, n); }
+    if kind(s, target) == nk_index() {
+        if replaces_element(lw, n) { return lower_element_replace(lw, n); }
+        return lower_index_assign(lw, n);
+    }
     if kind(s, target) != nk_ident() { return unsupported(lw, n); }
     if binding_index(lw, target) < 0 && is_backing_word(lw, target) { return lower_backing_write(lw, n); }
     let global = find_global(lw, target);

@@ -42,17 +42,19 @@
 // each element after its own fields: its glue row names the element type and
 // the engine operations that walk it. `let x = rs[i]` and `for x in rs`
 // borrow the element, so `x` is not dropped and `rs` lives while `x` is used.
+// Assigning an element (`rs[i] = v`) drops the one it replaces
+// (ReplaceElement rows, `plan_element_replace`).
 //
 // What the analysis cannot place yet stops at a seam where it runs: a
-// closure capturing an owned value (own.capture), an assignment replacing an
-// element a collection owns (own.element_replace), and other values holding
+// closure capturing an owned value (own.capture), and other values holding
 // values that need dropping, an `opt`, a map or a type that holds itself
 // through its elements (own.collection_drop).
 //
 // The plan is rows for crates/pilot-cli/src/check.rs (`drop_plan`), each
 // led by its `DropAction` and naming a node by its program-wide span and kind:
 //   [action, start, end, kind, binding, type]  Before, After, Exit, Else, Guard,
-//                                              Replace, Flag, Moved, Discard ("")
+//                                              Replace, Flag, Moved, Discard (""),
+//                                              ReplaceElement ("", collection type)
 //   [Seam, start, end, kind, id, note]
 //   [Glue, type, destructor owner or "", [field, field type, ..],
 //    element type, length op, element op]  (the last three "" without elements)
@@ -102,6 +104,10 @@ pub enum DropAction : u8 {
     /// The expression statement throws away the owned value it makes: it is
     /// dropped once the statement has run.
     Discard,
+    /// The assignment `rs[i] = v` drops the element it replaces once `v` is
+    /// made and before it is stored; the row names the collection's type,
+    /// whose glue walks its elements.
+    ReplaceElement,
 }
 
 /// What planning the drops of one program keeps.
@@ -506,8 +512,7 @@ fn assigns(pl: DropPlanner, n: i64, b: i64) -> bool {
 
 /// Writes a `Replace` row on each assignment to `b` that may find it holding
 /// a value (flagging `b` when it was moved on only some paths before), and
-/// a seam row on every closure that captures it and on every assignment to
-/// an element it owns (own.element_replace); true when there is a seam.
+/// a seam row on every closure that captures it; true when there is a seam.
 fn unsupported_uses(pl: DropPlanner, body: i64, b: i64, key: str) -> bool {
     let s = pl.flow.inf.p.s;
     var ids: List<i64> = [];
@@ -524,13 +529,6 @@ fn unsupported_uses(pl: DropPlanner, body: i64, b: i64, key: str) -> bool {
                 // Moved on some paths only: the flag says whether to drop.
                 pl.flagged = true;
                 row(pl, ::Replace, up, name, key);
-            }
-        }
-        if up >= 0 && kind(s, up) == nk_index() && lhs(s, up) == i && is_owned_element(pl.flow, up) {
-            let set = pl.flow.inf.p.parents[up];
-            if set >= 0 && kind(s, set) == nk_assign() && lhs(s, set) == up {
-                row(pl, ::Seam, set, "own.element_replace", f"replacing an element `{name}` owns would lose the old one; dropping it comes with the PilIR drop pass (F7)");
-                found = true;
             }
         }
         let lam = ancestor_of_kind(pl, i, body, [nk_lambda()]);
@@ -665,6 +663,7 @@ pub fn drop_planner(inf: Infer) -> DropPlanner {
     var n = 0;
     while n < s.count {
         if kind(s, n) == nk_expr_stmt() && in_user_file(s, n) { plan_discard(pl, n); }
+        if kind(s, n) == nk_assign() && in_user_file(s, n) { plan_element_replace(pl, n); }
         n = n + 1;
     }
     return pl;
@@ -710,6 +709,26 @@ fn makes_new_value(pl: DropPlanner, c: i64) -> bool {
     if target < 0 { return false; }
     let body = fn_body(s, target);
     return body >= 0 && !may_give_receiver(s, body);
+}
+
+/// Plans the drop of the element assignment `n` (`rs[i] = v`) replaces in a
+/// collection that owns its elements.
+fn plan_element_replace(pl: DropPlanner, n: i64) {
+    let f = pl.flow;
+    let s = f.inf.p.s;
+    let target = lhs(s, n);
+    if !is_owned_element(f, target) { return; }
+    let t = type_of(f.inf, lhs(s, target));
+    pl.cur_binding = -1;
+    pl.cur_type = t;
+    let need = needs_drop(pl, element_type(f.inf.p, t), 0);
+    if need == 0 { return; }
+    if need == 2 || flags(s, n) != 0 {
+        row(pl, ::Seam, n, "own.collection_drop", f"the element this assignment replaces holds values that need dropping inside an `opt`, a map or another generic, or a type that holds itself, or is updated in place; dropping those comes with the PilIR drop pass (F7)");
+        return;
+    }
+    glue(pl, t);
+    row(pl, ::ReplaceElement, n, "", ty_display(f.inf.p.tt, t));
 }
 
 /// Plans the drop of the owned value expression statement `n` makes and

@@ -1,0 +1,24 @@
+// A number literal followed by a scalar type's name is that number converted
+// to the type (`200u8` is `200 as u8`). Units keep their meaning (`250ms`).
+// Expected output by hand: 0xFF = 255, 0b1010_1010 = 170, 2 / 4 = 0.5,
+// 250 ms = 250000000 ns, u64 max = 18446744073709551615.
+fn takes_u8(b: u8) -> u8 => b;
+
+fn main() {
+    let a = 200u8;
+    print(a);
+    print(takes_u8(7u8));
+    let big = 18446744073709551615u64;
+    print(big);
+    print(0xFFu8);
+    print(0b1010_1010u8);
+    print(1_000i64 * 3);
+    let f = 1.5f32;
+    print(f);
+    print(2f64 / 4.0);
+    let w = 7usize;
+    print(w);
+    print(-5i8);
+    print(1e3f64);
+    print(250ms);
+}

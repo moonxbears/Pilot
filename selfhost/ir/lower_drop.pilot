@@ -262,3 +262,32 @@ fn copy_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) -> u32 {
     note_record(lw, t, phy);
     return emit(lw, op_construct_aggregate(), 0, phy, args, n);
 }
+
+/// Whether assignment `n` replaces an element its collection owns, so the
+/// old element is dropped (a `ReplaceElement` row).
+pub fn replaces_element(lw: Lowerer, n: i64) -> bool {
+    for r in rows_at(lw, n) { if is(r, ::ReplaceElement) { return true; } }
+    return false;
+}
+
+/// `rs[i] = v` where `rs` owns its elements: the collection, the index and
+/// the new value, then the old element dropped, then the store through the
+/// engine operation bound to the type's `[]=`.
+pub fn lower_element_replace(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let target = lhs(s, n);
+    let t = value_type(lw, lhs(s, target));
+    let ops = owned_elements(lw.plan.flow, t);
+    let set = native_for(lw, t, op_index_set(), native_method_hook());
+    if ops.len() != 2 || set == "" { return unsupported(lw, n); }
+    let et = element_type(lw.inf.p, t);
+    let recv = lower_expr(lw, lhs(s, target));
+    let idx = lower_expr(lw, rhs(s, target));
+    let v = lower_expr(lw, rhs(s, n));
+    let old = emit(lw, op_call_intrinsic(), intrinsic_index(lw, ops[1]), layout_of(lw.ls, et), [recv, idx], n);
+    drop_value(lw, old, et, n, 0);
+    if !ir_is_terminated(lw.f, lw.cur) {
+        let _ = emit(lw, op_call_intrinsic(), intrinsic_index(lw, set), layout_unknown(lw.ls), [recv, idx, v], n);
+    }
+    return unit_value(lw, n);
+}

@@ -1,0 +1,1102 @@
+// ==============================================================================
+// FILE: stdlib/std/text/regex_syntax.pilot
+// Ring 2: Regular expression syntax and compiler (pub pkg std.text.regex_syntax;)
+// ==============================================================================
+// Parses a pattern into a syntax tree and compiles it to the program the Pike
+// VM (std.text.regex_vm) runs. Flags are resolved here, while compiling, so
+// the VM never looks at them: ignoring case turns a literal or a class into
+// the class of its case variants, `.` under DotAll matches every code point,
+// `^`/`$` under Multiline are line assertions, and `\w \d \s` are Unicode or
+// ASCII sets. The user-facing API is std.text.regex.
+pub pkg std.text.regex_syntax;
+
+use std.text.unicode;
+
+// ------------------------------------------------------------------------------
+// 1. Errors and flags
+// ------------------------------------------------------------------------------
+
+pub enum RegexErrorKind : u8 {
+    MissingParen = 1,
+    UnbalancedParen = 2,
+    NothingToRepeat = 3,
+    UnterminatedClass = 4,
+    BadEscape = 5,
+    BadRange = 6,
+    Unsupported = 7,
+    BadGroupRef = 8,
+}
+
+pub struct RegexError : IValue {
+    pub kind: RegexErrorKind;
+    pub pos: i64;
+    pub message: str;
+
+    /// The diagnostic code for this error (`REGEX001`..`REGEX008`).
+    pub fn code(ref self) -> str {
+        if self.kind == RegexErrorKind::MissingParen { return "REGEX001"; }
+        if self.kind == RegexErrorKind::UnbalancedParen { return "REGEX002"; }
+        if self.kind == RegexErrorKind::NothingToRepeat { return "REGEX003"; }
+        if self.kind == RegexErrorKind::UnterminatedClass { return "REGEX004"; }
+        if self.kind == RegexErrorKind::BadEscape { return "REGEX005"; }
+        if self.kind == RegexErrorKind::BadRange { return "REGEX006"; }
+        if self.kind == RegexErrorKind::Unsupported { return "REGEX007"; }
+        return "REGEX008";
+    }
+}
+
+/// Matching options, given to `compile_with` or written inline as
+/// `(?imsxa)` at the start of a pattern or `(?i:...)` / `(?-i:...)` around a
+/// part of it (the letter after each name).
+pub enum RegexFlag : u8 {
+    /// `i`: letters match their other cases (Unicode case groups).
+    IgnoreCase = 1,
+    /// `m`: `^` and `$` also match at line starts and ends.
+    Multiline = 2,
+    /// `s`: `.` also matches a newline.
+    DotAll = 4,
+    /// `x`: white space and `#` comments outside classes are ignored.
+    Verbose = 8,
+    /// `a`: `\w \d \s \b` and ignoring case cover ASCII only.
+    Ascii = 16,
+}
+
+/// The bit of flag letter `c` (`i m s x a`), 0 for any other letter.
+fn flag_bit(c: i64) -> i64 {
+    if c == 105 { return RegexFlag::IgnoreCase as i64; }
+    if c == 109 { return RegexFlag::Multiline as i64; }
+    if c == 115 { return RegexFlag::DotAll as i64; }
+    if c == 120 { return RegexFlag::Verbose as i64; }
+    if c == 97 { return RegexFlag::Ascii as i64; }
+    return 0;
+}
+
+/// Whether `c` is a flag letter: one of RegexFlag's, or `u` (Unicode
+/// matching, which is the default).
+fn is_flag_letter(c: i64) -> bool => flag_bit(c) != 0 || c == 117;
+
+// ------------------------------------------------------------------------------
+// 2. Syntax tree, program and instruction kinds
+// ------------------------------------------------------------------------------
+
+pub enum ReNode : u8 {
+    Empty = 0,
+    Char = 1,
+    Any = 2,
+    Class = 3,
+    Assert = 4,
+    Concat = 5,
+    Alt = 6,
+    Group = 7,
+    Repeat = 8,
+    AnyNl = 9,
+}
+
+pub enum ReOp : u8 {
+    Char = 1,
+    Any = 2,
+    AnyNl = 3,
+    Class = 4,
+    Split = 5,
+    Jmp = 6,
+    Save = 7,
+    Assert = 8,
+    Match = 9,
+}
+
+pub enum ReAssert : u8 {
+    TextStart = 1,
+    TextEnd = 2,
+    /// `$` without Multiline: the end, or before a final newline.
+    EndOrFinalNewline = 3,
+    LineStart = 4,
+    LineEnd = 5,
+    WordEdge = 6,
+    NotWordEdge = 7,
+}
+
+// ------------------------------------------------------------------------------
+// 3. UTF-8 helpers
+// ------------------------------------------------------------------------------
+
+/// The byte length of the UTF-8 sequence whose first byte is `b`.
+pub fn utf8_width(b: i64) -> i64 {
+    if b < 128 { return 1; }
+    if b >= 240 { return 4; }
+    if b >= 224 { return 3; }
+    if b >= 192 { return 2; }
+    return 1;
+}
+
+/// The code point of the UTF-8 sequence starting at byte `i` of `s`.
+pub fn code_point_at(s: str, i: i64) -> i64 {
+    let b0 = s.byte_at(i as usize) as i64;
+    let w = utf8_width(b0);
+    let n = s.len() as i64;
+    if w == 1 || i + w > n { return b0; }
+    let b1 = (s.byte_at((i + 1) as usize) as i64) & 63;
+    if w == 2 { return ((b0 & 31) << 6) | b1; }
+    let b2 = (s.byte_at((i + 2) as usize) as i64) & 63;
+    if w == 3 { return ((b0 & 15) << 12) | (b1 << 6) | b2; }
+    let b3 = (s.byte_at((i + 3) as usize) as i64) & 63;
+    return ((b0 & 7) << 18) | (b1 << 12) | (b2 << 6) | b3;
+}
+
+/// The code point that ends just before byte `i` of `s`.
+pub fn code_point_before(s: str, i: i64) -> i64 {
+    var j = i - 1;
+    while j > 0 && ((s.byte_at(j as usize) as i64) & 192) == 128 { j = j - 1; }
+    return code_point_at(s, j);
+}
+
+/// The first byte of the UTF-8 encoding of code point `c`.
+pub fn utf8_lead_byte(c: i64) -> i64 {
+    if c < 128 { return c; }
+    if c < 2048 { return 192 | (c >> 6); }
+    if c < 65536 { return 224 | (c >> 12); }
+    return 240 | (c >> 18);
+}
+
+fn hex_value(b: i64) -> i64 {
+    if b >= 48 && b <= 57 { return b - 48; }
+    if b >= 65 && b <= 70 { return b - 55; }
+    if b >= 97 && b <= 102 { return b - 87; }
+    return -1;
+}
+
+fn is_ascii_letter(c: i64) -> bool => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+
+// ------------------------------------------------------------------------------
+// 4. Character classes and the compiled program
+// ------------------------------------------------------------------------------
+
+/// Character classes: class `k` is the sorted, disjoint code point ranges
+/// `range_lo/hi[class_start[k] .. class_start[k] + class_len[k]]`.
+pub struct ReClasses : IObject {
+    pub range_lo: List<i64>;
+    pub range_hi: List<i64>;
+    pub class_start: List<i64>;
+    pub class_len: List<i64>;
+
+    /// Whether code point `c` is in class `k` (binary search).
+    pub fn has(ref self, k: i64, c: i64) -> bool {
+        var lo = self.class_start[k];
+        var hi = lo + self.class_len[k] - 1;
+        while lo <= hi {
+            let mid = (lo + hi) / 2;
+            if c < self.range_lo[mid] {
+                hi = mid - 1;
+            } else if c > self.range_hi[mid] {
+                lo = mid + 1;
+            } else {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Adds a class of the sorted, disjoint ranges `lo`/`hi`; its number.
+    pub fn add(var ref self, lo: List<i64>, hi: List<i64>) -> i64 {
+        let first = self.range_lo.len() as i64;
+        var i = 0;
+        while i < (lo.len() as i64) {
+            self.range_lo.push(lo[i]);
+            self.range_hi.push(hi[i]);
+            i = i + 1;
+        }
+        self.class_start.push(first);
+        self.class_len.push((lo.len() as i64));
+        return (self.class_start.len() as i64) - 1;
+    }
+
+    ~self() {}
+}
+
+/// A compiled pattern: instructions as parallel arrays, its classes, groups
+/// and what the VM may use to skip ahead.
+pub struct ReProgram : IObject {
+    pub ops: List<ReOp>;
+    pub arg_x: List<i64>;
+    pub arg_y: List<i64>;
+    pub classes: ReClasses;
+    /// Capture groups, not counting the whole match (group 0).
+    pub groups: i64;
+    /// Group names by group number - 1 (`""` for an unnamed group).
+    pub names: List<str>;
+    /// A byte every match starts with, or -1.
+    pub first_byte: i64;
+    /// Whether a match can only start at the start of the text.
+    pub text_anchored: bool;
+
+    pub fn emit(var ref self, op: ReOp, x: i64, y: i64) -> i64 {
+        self.ops.push(op);
+        self.arg_x.push(x);
+        self.arg_y.push(y);
+        return (self.ops.len() as i64) - 1;
+    }
+
+    pub fn pc(ref self) -> i64 => self.ops.len() as i64;
+
+    /// Emits the code for syntax-tree node `n` of `t`.
+    pub fn compile_node(var ref self, ref t: ReTree, n: i64) {
+        let k = t.kinds[n];
+        if k == ReNode::Char {
+            self.emit(ReOp::Char, t.arg_a[n], 0);
+        } else if k == ReNode::Any {
+            self.emit(ReOp::Any, 0, 0);
+        } else if k == ReNode::AnyNl {
+            self.emit(ReOp::AnyNl, 0, 0);
+        } else if k == ReNode::Class {
+            self.emit(ReOp::Class, t.arg_a[n], 0);
+        } else if k == ReNode::Assert {
+            self.emit(ReOp::Assert, t.arg_a[n], t.arg_b[n]);
+        } else if k == ReNode::Concat {
+            var i = 0;
+            while i < t.arg_b[n] {
+                self.compile_node(t, t.kids[t.arg_a[n] + i]);
+                i = i + 1;
+            }
+        } else if k == ReNode::Alt {
+            var jumps: List<i64> = [];
+            let count = t.arg_b[n];
+            var i = 0;
+            while i < count {
+                let kid = t.kids[t.arg_a[n] + i];
+                if i + 1 < count {
+                    let split = self.emit(ReOp::Split, self.pc() + 1, 0);
+                    self.compile_node(t, kid);
+                    jumps.push(self.emit(ReOp::Jmp, 0, 0));
+                    self.arg_y[split] = self.pc();
+                } else {
+                    self.compile_node(t, kid);
+                }
+                i = i + 1;
+            }
+            for j in jumps {
+                self.arg_x[j] = self.pc();
+            }
+        } else if k == ReNode::Group {
+            let g = t.arg_a[n];
+            self.emit(ReOp::Save, 2 * g, 0);
+            self.compile_node(t, t.arg_b[n]);
+            self.emit(ReOp::Save, 2 * g + 1, 0);
+        } else if k == ReNode::Repeat {
+            self.compile_repeat(t, t.arg_a[n], t.arg_b[n], t.arg_c[n], t.arg_d[n] == 1);
+        }
+    }
+
+    /// `kid{lo,hi}` (`hi` -1 for no upper bound), greedy or lazy.
+    pub fn compile_repeat(var ref self, ref t: ReTree, kid: i64, lo: i64, hi: i64, greedy: bool) {
+        var i = 0;
+        while i < lo {
+            self.compile_node(t, kid);
+            i = i + 1;
+        }
+        if hi < 0 {
+            let top = self.emit(ReOp::Split, 0, 0);
+            self.compile_node(t, kid);
+            self.emit(ReOp::Jmp, top, 0);
+            self.set_split(top, top + 1, self.pc(), greedy);
+            return;
+        }
+        var splits: List<i64> = [];
+        while i < hi {
+            splits.push(self.emit(ReOp::Split, 0, 0));
+            self.compile_node(t, kid);
+            i = i + 1;
+        }
+        let end = self.pc();
+        for s in splits {
+            self.set_split(s, s + 1, end, greedy);
+        }
+    }
+
+    /// Points split `s` at `body` and `out`, preferring `body` when greedy.
+    pub fn set_split(var ref self, s: i64, body: i64, out: i64, greedy: bool) {
+        if greedy {
+            self.arg_x[s] = body;
+            self.arg_y[s] = out;
+        } else {
+            self.arg_x[s] = out;
+            self.arg_y[s] = body;
+        }
+    }
+
+    ~self() {}
+}
+
+// ------------------------------------------------------------------------------
+// 5. Parser: pattern text -> syntax tree (struct of arrays)
+// ------------------------------------------------------------------------------
+
+/// Syntax-tree nodes as parallel arrays; a list node's children sit at
+/// `kids[arg_a .. arg_a + arg_b]`.
+pub struct ReTree : IObject {
+    pub kinds: List<ReNode>;
+    pub arg_a: List<i64>;
+    pub arg_b: List<i64>;
+    pub arg_c: List<i64>;
+    pub arg_d: List<i64>;
+    pub kids: List<i64>;
+    ~self() {}
+}
+
+/// Unicode data, read from std.text.unicode the first time a pattern needs it.
+struct UnicodeCache : IObject {
+    pub word: List<i64>;
+    pub digit: List<i64>;
+    pub space: List<i64>;
+    pub groups: List<i64>;
+    /// Which lists are read: 1 word, 2 digit, 4 space, 8 groups.
+    pub loaded: i64;
+
+    pub fn ranges(var ref self, which: i64) -> List<i64> {
+        if (self.loaded & which) == 0 {
+            if which == 1 { self.word = word_ranges(); }
+            if which == 2 { self.digit = digit_ranges(); }
+            if which == 4 { self.space = space_ranges(); }
+            if which == 8 { self.groups = case_groups(); }
+            self.loaded = self.loaded | which;
+        }
+        if which == 1 { return self.word; }
+        if which == 2 { return self.digit; }
+        if which == 4 { return self.space; }
+        return self.groups;
+    }
+
+    ~self() {}
+}
+
+struct RegexParser : IObject {
+    pub src: str;
+    pub pos: i64;
+    pub n: i64;
+    pub flags: i64;
+    pub tree: ReTree;
+    pub classes: ReClasses;
+    pub uni: UnicodeCache;
+    pub groups: i64;
+    pub names: List<str>;
+    /// The class of word characters for `\b` / `\B`, by mode: [unicode, ascii].
+    pub word_class: List<i64>;
+    pub failed: bool;
+    pub error: RegexError;
+
+    pub fn fail(var ref self, kind: RegexErrorKind, pos: i64, message: str) -> i64 {
+        if !self.failed {
+            self.failed = true;
+            self.error = RegexError { kind: kind, pos: pos, message: message };
+        }
+        return -1;
+    }
+
+    pub fn has_flag(ref self, f: RegexFlag) -> bool => (self.flags & (f as i64)) != 0;
+
+    pub fn peek(ref self) -> i64 {
+        if self.pos >= self.n { return -1; }
+        return self.src.byte_at(self.pos as usize) as i64;
+    }
+
+    pub fn peek_at(ref self, i: i64) -> i64 {
+        if i >= self.n { return -1; }
+        return self.src.byte_at(i as usize) as i64;
+    }
+
+    /// In verbose mode, skips white space and `#` comments.
+    pub fn skip_verbose(var ref self) {
+        if !self.has_flag(RegexFlag::Verbose) { return; }
+        while self.pos < self.n {
+            let c = self.peek();
+            if c == 32 || (c >= 9 && c <= 13) {
+                self.pos = self.pos + 1;
+            } else if c == 35 {
+                while self.pos < self.n && self.peek() != 10 { self.pos = self.pos + 1; }
+            } else {
+                return;
+            }
+        }
+    }
+
+    pub fn node(var ref self, kind: ReNode, a: i64, b: i64, c: i64, d: i64) -> i64 {
+        self.tree.kinds.push(kind);
+        self.tree.arg_a.push(a);
+        self.tree.arg_b.push(b);
+        self.tree.arg_c.push(c);
+        self.tree.arg_d.push(d);
+        return (self.tree.kinds.len() as i64) - 1;
+    }
+
+    /// A node with children `items`, stored contiguously in `kids`.
+    pub fn list_node(var ref self, kind: ReNode, items: List<i64>) -> i64 {
+        let first = self.tree.kids.len() as i64;
+        for it in items {
+            self.tree.kids.push(it);
+        }
+        return self.node(kind, first, items.len() as i64, 0, 0);
+    }
+
+    // alternation := concat ('|' concat)*
+    pub fn parse_alt(var ref self) -> i64 {
+        var items: List<i64> = [];
+        items.push(self.parse_concat());
+        while !self.failed && self.peek() == 124 {
+            self.pos = self.pos + 1;
+            items.push(self.parse_concat());
+        }
+        if self.failed { return -1; }
+        if items.len() == 1 { return items[0]; }
+        return self.list_node(ReNode::Alt, items);
+    }
+
+    // concat := repeat*
+    pub fn parse_concat(var ref self) -> i64 {
+        var items: List<i64> = [];
+        self.skip_verbose();
+        while !self.failed && self.pos < self.n && self.peek() != 124 && self.peek() != 41 {
+            let item = self.parse_repeat();
+            if item >= 0 { items.push(item); }
+            self.skip_verbose();
+        }
+        if self.failed { return -1; }
+        if items.len() == 0 { return self.node(ReNode::Empty, 0, 0, 0, 0); }
+        if items.len() == 1 { return items[0]; }
+        return self.list_node(ReNode::Concat, items);
+    }
+
+    /// Whether a `{n}`, `{n,}`, `{,m}` or `{n,m}` quantifier starts at `i`.
+    pub fn is_brace_quantifier(ref self, i: i64) -> bool {
+        if self.peek_at(i) != 123 { return false; }
+        var j = i + 1;
+        var digits = 0;
+        while self.peek_at(j) >= 48 && self.peek_at(j) <= 57 { j = j + 1; digits = digits + 1; }
+        if self.peek_at(j) == 125 { return digits > 0; }
+        if self.peek_at(j) != 44 { return false; }
+        j = j + 1;
+        while self.peek_at(j) >= 48 && self.peek_at(j) <= 57 { j = j + 1; }
+        return self.peek_at(j) == 125;
+    }
+
+    pub fn read_int(var ref self) -> i64 {
+        var v = -1;
+        while self.peek() >= 48 && self.peek() <= 57 {
+            if v < 0 { v = 0; }
+            v = v * 10 + (self.peek() - 48);
+            self.pos = self.pos + 1;
+        }
+        return v;
+    }
+
+    pub fn is_quantifier_at(ref self, i: i64) -> bool {
+        let c = self.peek_at(i);
+        return c == 42 || c == 43 || c == 63 || self.is_brace_quantifier(i);
+    }
+
+    // repeat := atom quantifier?; -1 for a construct that matches nothing
+    // and is not repeatable (an inline global flag group).
+    pub fn parse_repeat(var ref self) -> i64 {
+        let atom = self.parse_atom();
+        if self.failed || atom < 0 { return -1; }
+        self.skip_verbose();
+        if !self.is_quantifier_at(self.pos) { return atom; }
+        let qpos = self.pos;
+        let c = self.peek();
+        var lo = 0;
+        var hi = -1;
+        if c == 42 {
+            self.pos = self.pos + 1;
+        } else if c == 43 {
+            lo = 1;
+            self.pos = self.pos + 1;
+        } else if c == 63 {
+            hi = 1;
+            self.pos = self.pos + 1;
+        } else {
+            self.pos = self.pos + 1;
+            let a = self.read_int();
+            lo = if a < 0 { 0 } else { a };
+            if self.peek() == 44 {
+                self.pos = self.pos + 1;
+                hi = self.read_int();
+            } else {
+                hi = lo;
+            }
+            self.pos = self.pos + 1;
+            if hi >= 0 && lo > hi {
+                return self.fail(RegexErrorKind::BadRange, qpos + 1, "min repeat greater than max repeat");
+            }
+        }
+        var greedy = 1;
+        if self.peek() == 63 {
+            greedy = 0;
+            self.pos = self.pos + 1;
+        }
+        self.skip_verbose();
+        if self.is_quantifier_at(self.pos) {
+            return self.fail(RegexErrorKind::NothingToRepeat, self.pos, "multiple repeat");
+        }
+        return self.node(ReNode::Repeat, atom, lo, hi, greedy);
+    }
+
+    pub fn parse_atom(var ref self) -> i64 {
+        let start = self.pos;
+        let c = self.peek();
+        if c == 40 { return self.parse_group(); }
+        if self.is_quantifier_at(start) {
+            return self.fail(RegexErrorKind::NothingToRepeat, start, "nothing to repeat");
+        }
+        if c == 91 { return self.parse_class(); }
+        if c == 46 {
+            self.pos = self.pos + 1;
+            if self.has_flag(RegexFlag::DotAll) { return self.node(ReNode::AnyNl, 0, 0, 0, 0); }
+            return self.node(ReNode::Any, 0, 0, 0, 0);
+        }
+        if c == 94 {
+            self.pos = self.pos + 1;
+            let kind = if self.has_flag(RegexFlag::Multiline) { ReAssert::LineStart } else { ReAssert::TextStart };
+            return self.node(ReNode::Assert, kind as i64, 0, 0, 0);
+        }
+        if c == 36 {
+            self.pos = self.pos + 1;
+            let kind = if self.has_flag(RegexFlag::Multiline) { ReAssert::LineEnd } else { ReAssert::EndOrFinalNewline };
+            return self.node(ReNode::Assert, kind as i64, 0, 0, 0);
+        }
+        if c == 92 { return self.parse_escape(); }
+        let cp = code_point_at(self.src, start);
+        self.pos = start + utf8_width(c);
+        return self.char_node(cp);
+    }
+
+    /// Code point `cp` as a node: under IgnoreCase, the class of its cases.
+    pub fn char_node(var ref self, cp: i64) -> i64 {
+        if self.has_flag(RegexFlag::IgnoreCase) {
+            var lo: List<i64> = [cp];
+            var hi: List<i64> = [cp];
+            self.close_over_case(lo, hi);
+            if lo.len() > 1 { return self.class_node(lo, hi, false); }
+        }
+        return self.node(ReNode::Char, cp, 0, 0, 0);
+    }
+
+    /// Reads flag letters at the cursor; their bits.
+    pub fn read_flag_letters(var ref self) -> i64 {
+        var bits = 0;
+        while self.pos < self.n && is_flag_letter(self.peek()) {
+            bits = bits | flag_bit(self.peek());
+            self.pos = self.pos + 1;
+        }
+        return bits;
+    }
+
+    /// `(?flags)` / `(?flags-flags:...)` after `(?` at `start`; -1 for a
+    /// global flag group, which sets flags and matches nothing. Error
+    /// offsets are the ones Python's `re` reports.
+    pub fn parse_flag_group(var ref self, start: i64) -> i64 {
+        let on = self.read_flag_letters();
+        var off = 0;
+        if self.peek() == 45 {
+            self.pos = self.pos + 1;
+            if !is_flag_letter(self.peek()) {
+                return self.fail(RegexErrorKind::Unsupported, self.pos, "missing flag");
+            }
+            let off_start = self.pos;
+            off = self.read_flag_letters();
+            if (off & (RegexFlag::Ascii as i64)) != 0 || self.read_back_has_u(off_start) {
+                return self.fail(RegexErrorKind::Unsupported, self.pos, "bad inline flags: cannot turn off flags 'a', 'u' and 'L'");
+            }
+            if (on & off) != 0 {
+                return self.fail(RegexErrorKind::Unsupported, self.pos, "bad inline flags: flag turned on and off");
+            }
+        }
+        if self.peek() == 41 && off == 0 {
+            // A global flag group: only at the start of the pattern.
+            if !self.only_flag_groups_before(start) {
+                return self.fail(RegexErrorKind::Unsupported, start, "global flags not at the start of the expression");
+            }
+            self.pos = self.pos + 1;
+            self.flags = self.flags | on;
+            return -1;
+        }
+        if self.peek() != 58 {
+            return self.fail(RegexErrorKind::Unsupported, self.pos, "missing -, : or )");
+        }
+        self.pos = self.pos + 1;
+        let saved = self.flags;
+        let merged = self.flags | on;
+        self.flags = merged ^ (merged & off);
+        let inner = self.parse_alt();
+        self.flags = saved;
+        if self.failed { return -1; }
+        if self.peek() != 41 {
+            return self.fail(RegexErrorKind::MissingParen, start, "missing ), unterminated subpattern");
+        }
+        self.pos = self.pos + 1;
+        return inner;
+    }
+
+    /// Whether a `u` is among the flag letters from `from` to the cursor.
+    pub fn read_back_has_u(ref self, from: i64) -> bool {
+        var i = from;
+        while i < self.pos {
+            if self.peek_at(i) == 117 { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    /// Whether the pattern before byte `end` is only global flag groups.
+    pub fn only_flag_groups_before(ref self, end: i64) -> bool {
+        var i = 0;
+        while i < end {
+            if self.peek_at(i) != 40 || self.peek_at(i + 1) != 63 { return false; }
+            i = i + 2;
+            while i < end && is_flag_letter(self.peek_at(i)) { i = i + 1; }
+            if self.peek_at(i) != 41 { return false; }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    pub fn parse_group(var ref self) -> i64 {
+        let start = self.pos;
+        self.pos = self.pos + 1;
+        var group = 0;
+        if self.peek() == 63 {
+            let next = self.peek_at(self.pos + 1);
+            if next == 58 {
+                self.pos = self.pos + 2;
+                group = -1;
+            } else if next == 80 && self.peek_at(self.pos + 2) == 60 {
+                self.pos = self.pos + 3;
+                let name_start = self.pos;
+                while self.pos < self.n && self.peek() != 62 { self.pos = self.pos + 1; }
+                if self.pos >= self.n || self.pos == name_start {
+                    return self.fail(RegexErrorKind::BadGroupRef, name_start, "missing group name");
+                }
+                let name = self.src.slice(name_start as usize, self.pos as usize);
+                self.pos = self.pos + 1;
+                self.groups = self.groups + 1;
+                group = self.groups;
+                self.names.push(name);
+            } else if is_flag_letter(next) || next == 45 {
+                self.pos = self.pos + 1;
+                return self.parse_flag_group(start);
+            } else {
+                return self.fail(RegexErrorKind::Unsupported, start, "lookaround and other (?...) groups are not supported");
+            }
+        } else {
+            self.groups = self.groups + 1;
+            group = self.groups;
+            self.names.push("");
+        }
+        let inner = self.parse_alt();
+        if self.failed { return -1; }
+        if self.peek() != 41 {
+            return self.fail(RegexErrorKind::MissingParen, start, "missing ), unterminated subpattern");
+        }
+        self.pos = self.pos + 1;
+        if group < 0 { return inner; }
+        return self.node(ReNode::Group, group, inner, 0, 0);
+    }
+
+    /// Adds every case variant of the code points in `lo`/`hi` (Unicode case
+    /// groups, or ASCII letters under the Ascii flag).
+    pub fn close_over_case(var ref self, var ref lo: List<i64>, var ref hi: List<i64>) {
+        var slo: List<i64> = [];
+        var shi: List<i64> = [];
+        normalize_ranges(lo, hi, slo, shi);
+        if self.has_flag(RegexFlag::Ascii) {
+            var c = 65;
+            while c <= 90 {
+                if ranges_have(slo, shi, c) || ranges_have(slo, shi, c + 32) {
+                    lo.push(c); hi.push(c);
+                    lo.push(c + 32); hi.push(c + 32);
+                }
+                c = c + 1;
+            }
+            return;
+        }
+        let groups = self.uni.ranges(8);
+        let total = groups.len() as i64;
+        var i = 0;
+        while i < total {
+            let count = groups[i];
+            var hit = false;
+            var k = 1;
+            while k <= count && !hit {
+                hit = ranges_have(slo, shi, groups[i + k]);
+                k = k + 1;
+            }
+            if hit {
+                k = 1;
+                while k <= count {
+                    lo.push(groups[i + k]);
+                    hi.push(groups[i + k]);
+                    k = k + 1;
+                }
+            }
+            i = i + count + 1;
+        }
+    }
+
+    /// A class node holding the ranges `lo`/`hi` (closed over case under
+    /// IgnoreCase), negated when `negate`.
+    pub fn class_node(var ref self, var ref lo: List<i64>, var ref hi: List<i64>, negate: bool) -> i64 {
+        if self.has_flag(RegexFlag::IgnoreCase) { self.close_over_case(lo, hi); }
+        var mlo: List<i64> = [];
+        var mhi: List<i64> = [];
+        normalize_ranges(lo, hi, mlo, mhi);
+        if !negate { return self.node(ReNode::Class, self.classes.add(mlo, mhi), 0, 0, 0); }
+        var nlo: List<i64> = [];
+        var nhi: List<i64> = [];
+        complement_ranges(mlo, mhi, nlo, nhi);
+        return self.node(ReNode::Class, self.classes.add(nlo, nhi), 0, 0, 0);
+    }
+
+    /// The ranges of class escape `which` (1 word, 2 digit, 4 space).
+    pub fn escape_ranges(var ref self, which: i64, var ref lo: List<i64>, var ref hi: List<i64>) {
+        if !self.has_flag(RegexFlag::Ascii) {
+            let r = self.uni.ranges(which);
+            var i = 0;
+            while i < (r.len() as i64) {
+                lo.push(r[i]);
+                hi.push(r[i + 1]);
+                i = i + 2;
+            }
+            return;
+        }
+        if which == 2 || which == 1 { lo.push(48); hi.push(57); }
+        if which == 1 {
+            lo.push(65); hi.push(90);
+            lo.push(95); hi.push(95);
+            lo.push(97); hi.push(122);
+        }
+        if which == 4 {
+            lo.push(9); hi.push(13);
+            lo.push(32); hi.push(32);
+        }
+    }
+
+    /// Adds the ranges of the class escape letter `e` (`d w s`, upper case
+    /// for the complement) to `lo`/`hi`; whether `e` is one.
+    pub fn add_class_escape(var ref self, e: i64, var ref lo: List<i64>, var ref hi: List<i64>) -> bool {
+        let lower = e | 32;
+        let which = if lower == 119 { 1 } else if lower == 100 { 2 } else if lower == 115 { 4 } else { 0 };
+        if which == 0 { return false; }
+        if e == lower {
+            self.escape_ranges(which, lo, hi);
+            return true;
+        }
+        var dl: List<i64> = [];
+        var dh: List<i64> = [];
+        self.escape_ranges(which, dl, dh);
+        var ml: List<i64> = [];
+        var mh: List<i64> = [];
+        normalize_ranges(dl, dh, ml, mh);
+        complement_ranges(ml, mh, lo, hi);
+        return true;
+    }
+
+    /// The class used by `\b` / `\B` in the current mode.
+    pub fn word_class_id(var ref self) -> i64 {
+        let slot = if self.has_flag(RegexFlag::Ascii) { 1 } else { 0 };
+        if self.word_class[slot] < 0 {
+            var lo: List<i64> = [];
+            var hi: List<i64> = [];
+            self.escape_ranges(1, lo, hi);
+            var mlo: List<i64> = [];
+            var mhi: List<i64> = [];
+            normalize_ranges(lo, hi, mlo, mhi);
+            self.word_class[slot] = self.classes.add(mlo, mhi);
+        }
+        return self.word_class[slot];
+    }
+
+    /// The code point of a single-character escape whose backslash is at
+    /// `self.pos - 1` and letter at `self.pos` (`\n`, `\x41`, `\.`), advancing
+    /// past it; -1 after a failure.
+    pub fn escape_code_point(var ref self, in_class: bool) -> i64 {
+        let bs = self.pos - 1;
+        let e = self.peek();
+        if e == 110 { self.pos = self.pos + 1; return 10; }
+        if e == 116 { self.pos = self.pos + 1; return 9; }
+        if e == 114 { self.pos = self.pos + 1; return 13; }
+        if e == 102 { self.pos = self.pos + 1; return 12; }
+        if e == 118 { self.pos = self.pos + 1; return 11; }
+        if e == 97 { self.pos = self.pos + 1; return 7; }
+        if e == 98 && in_class { self.pos = self.pos + 1; return 8; }
+        if e == 48 { self.pos = self.pos + 1; return 0; }
+        if e == 120 || e == 117 || e == 85 {
+            let digits = if e == 120 { 2 } else if e == 117 { 4 } else { 8 };
+            var v = 0;
+            var i = 0;
+            while i < digits {
+                let h = hex_value(self.peek_at(self.pos + 1 + i));
+                if h < 0 {
+                    return self.fail(RegexErrorKind::BadEscape, bs, "incomplete hexadecimal escape");
+                }
+                v = v * 16 + h;
+                i = i + 1;
+            }
+            self.pos = self.pos + 1 + digits;
+            return v;
+        }
+        if e >= 49 && e <= 57 {
+            return self.fail(RegexErrorKind::Unsupported, bs, "backreferences are not supported");
+        }
+        if is_ascii_letter(e) || (e >= 48 && e <= 57) {
+            return self.fail(RegexErrorKind::BadEscape, bs, "bad escape");
+        }
+        let cp = code_point_at(self.src, self.pos);
+        self.pos = self.pos + utf8_width(e);
+        return cp;
+    }
+
+    pub fn parse_escape(var ref self) -> i64 {
+        let bs = self.pos;
+        self.pos = self.pos + 1;
+        if self.pos >= self.n {
+            return self.fail(RegexErrorKind::BadEscape, bs, "bad escape (end of pattern)");
+        }
+        let e = self.peek();
+        var lo: List<i64> = [];
+        var hi: List<i64> = [];
+        if self.add_class_escape(e, lo, hi) {
+            self.pos = self.pos + 1;
+            var mlo: List<i64> = [];
+            var mhi: List<i64> = [];
+            normalize_ranges(lo, hi, mlo, mhi);
+            return self.node(ReNode::Class, self.classes.add(mlo, mhi), 0, 0, 0);
+        }
+        if e == 98 || e == 66 {
+            self.pos = self.pos + 1;
+            let kind = if e == 98 { ReAssert::WordEdge } else { ReAssert::NotWordEdge };
+            return self.node(ReNode::Assert, kind as i64, self.word_class_id(), 0, 0);
+        }
+        if e == 65 || e == 90 {
+            self.pos = self.pos + 1;
+            let kind = if e == 65 { ReAssert::TextStart } else { ReAssert::TextEnd };
+            return self.node(ReNode::Assert, kind as i64, 0, 0, 0);
+        }
+        let cp = self.escape_code_point(false);
+        if self.failed { return -1; }
+        return self.char_node(cp);
+    }
+
+    pub fn parse_class(var ref self) -> i64 {
+        let start = self.pos;
+        self.pos = self.pos + 1;
+        var negate = false;
+        if self.peek() == 94 {
+            negate = true;
+            self.pos = self.pos + 1;
+        }
+        var lo: List<i64> = [];
+        var hi: List<i64> = [];
+        var first = true;
+        while true {
+            if self.pos >= self.n {
+                return self.fail(RegexErrorKind::UnterminatedClass, start, "unterminated character set");
+            }
+            let c = self.peek();
+            if c == 93 && !first { break; }
+            first = false;
+            let item_start = self.pos;
+            var item = -1;
+            if c == 92 {
+                self.pos = self.pos + 1;
+                if self.pos >= self.n {
+                    return self.fail(RegexErrorKind::UnterminatedClass, start, "unterminated character set");
+                }
+                if self.add_class_escape(self.peek(), lo, hi) {
+                    self.pos = self.pos + 1;
+                    if self.peek() == 45 && self.peek_at(self.pos + 1) != 93 && self.pos + 1 < self.n {
+                        return self.fail(RegexErrorKind::BadRange, item_start, "bad character range");
+                    }
+                    continue;
+                }
+                item = self.escape_code_point(true);
+                if self.failed { return -1; }
+            } else {
+                item = code_point_at(self.src, self.pos);
+                self.pos = self.pos + utf8_width(c);
+            }
+            if self.peek() == 45 && self.pos + 1 < self.n && self.peek_at(self.pos + 1) != 93 {
+                self.pos = self.pos + 1;
+                var top = -1;
+                let hc = self.peek();
+                if hc == 92 {
+                    self.pos = self.pos + 1;
+                    if self.pos >= self.n {
+                        return self.fail(RegexErrorKind::UnterminatedClass, start, "unterminated character set");
+                    }
+                    let lower = self.peek() | 32;
+                    if lower == 119 || lower == 100 || lower == 115 {
+                        return self.fail(RegexErrorKind::BadRange, item_start, "bad character range");
+                    }
+                    top = self.escape_code_point(true);
+                    if self.failed { return -1; }
+                } else {
+                    top = code_point_at(self.src, self.pos);
+                    self.pos = self.pos + utf8_width(hc);
+                }
+                if top < item {
+                    return self.fail(RegexErrorKind::BadRange, item_start, "bad character range");
+                }
+                lo.push(item);
+                hi.push(top);
+            } else {
+                lo.push(item);
+                hi.push(item);
+            }
+        }
+        self.pos = self.pos + 1;
+        return self.class_node(lo, hi, negate);
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 6. Range sets
+// ------------------------------------------------------------------------------
+
+/// Sorts the ranges `lo`/`hi` and merges overlapping and adjacent ones into
+/// `out_lo`/`out_hi`.
+pub fn normalize_ranges(ref lo: List<i64>, ref hi: List<i64>, var ref out_lo: List<i64>, var ref out_hi: List<i64>) {
+    let k = lo.len() as i64;
+    var slo: List<i64> = [];
+    var shi: List<i64> = [];
+    var i = 0;
+    while i < k {
+        slo.push(lo[i]);
+        shi.push(hi[i]);
+        i = i + 1;
+    }
+    sort_ranges(slo, shi, 0, k - 1);
+    i = 0;
+    while i < k {
+        let last = (out_lo.len() as i64) - 1;
+        if last >= 0 && slo[i] <= out_hi[last] + 1 {
+            if shi[i] > out_hi[last] { out_hi[last] = shi[i]; }
+        } else {
+            out_lo.push(slo[i]);
+            out_hi.push(shi[i]);
+        }
+        i = i + 1;
+    }
+}
+
+/// Sorts `lo[a..=b]` (with `hi` alongside) by lower bound: quicksort, then
+/// insertion sort for short runs.
+fn sort_ranges(var ref lo: List<i64>, var ref hi: List<i64>, a: i64, b: i64) {
+    if b - a < 12 {
+        var i = a + 1;
+        while i <= b {
+            var j = i;
+            while j > a && lo[j - 1] > lo[j] {
+                let tl = lo[j - 1];
+                let th = hi[j - 1];
+                lo[j - 1] = lo[j];
+                hi[j - 1] = hi[j];
+                lo[j] = tl;
+                hi[j] = th;
+                j = j - 1;
+            }
+            i = i + 1;
+        }
+        return;
+    }
+    let pivot = lo[(a + b) / 2];
+    var i = a;
+    var j = b;
+    while i <= j {
+        while lo[i] < pivot { i = i + 1; }
+        while lo[j] > pivot { j = j - 1; }
+        if i <= j {
+            let tl = lo[i];
+            let th = hi[i];
+            lo[i] = lo[j];
+            hi[i] = hi[j];
+            lo[j] = tl;
+            hi[j] = th;
+            i = i + 1;
+            j = j - 1;
+        }
+    }
+    if a < j { sort_ranges(lo, hi, a, j); }
+    if i < b { sort_ranges(lo, hi, i, b); }
+}
+
+/// The code points 0..=0x10FFFF outside the sorted, disjoint ranges `lo`/`hi`.
+pub fn complement_ranges(ref lo: List<i64>, ref hi: List<i64>, var ref out_lo: List<i64>, var ref out_hi: List<i64>) {
+    var next = 0;
+    var i = 0;
+    while i < (lo.len() as i64) {
+        if lo[i] > next {
+            out_lo.push(next);
+            out_hi.push(lo[i] - 1);
+        }
+        next = hi[i] + 1;
+        i = i + 1;
+    }
+    if next <= 1114111 {
+        out_lo.push(next);
+        out_hi.push(1114111);
+    }
+}
+
+/// Whether `c` is in the sorted, disjoint ranges `lo`/`hi`.
+pub fn ranges_have(ref lo: List<i64>, ref hi: List<i64>, c: i64) -> bool {
+    var a = 0;
+    var b = (lo.len() as i64) - 1;
+    while a <= b {
+        let mid = (a + b) / 2;
+        if c < lo[mid] {
+            b = mid - 1;
+        } else if c > hi[mid] {
+            a = mid + 1;
+        } else {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ------------------------------------------------------------------------------
+// 7. compile_program
+// ------------------------------------------------------------------------------
+
+/// Parses and compiles `pattern` under `flags` (bits of RegexFlag), or
+/// reports the first syntax error with its byte offset.
+pub fn compile_program(pattern: str, flags: i64) -> res<ReProgram, RegexError> {
+    var p = RegexParser {
+        src: pattern, pos: 0, n: pattern.len() as i64, flags: flags,
+        tree: ReTree { kinds: [], arg_a: [], arg_b: [], arg_c: [], arg_d: [], kids: [] },
+        classes: ReClasses { range_lo: [], range_hi: [], class_start: [], class_len: [] },
+        uni: UnicodeCache { word: [], digit: [], space: [], groups: [], loaded: 0 },
+        groups: 0, names: [], word_class: [-1, -1], failed: false,
+        error: RegexError { kind: RegexErrorKind::BadEscape, pos: 0, message: "" },
+    };
+    let root = p.parse_alt();
+    if !p.failed && p.pos < p.n {
+        p.fail(RegexErrorKind::UnbalancedParen, p.pos, "unbalanced parenthesis");
+    }
+    if p.failed { return err(p.error); }
+    var prog = ReProgram {
+        ops: [], arg_x: [], arg_y: [],
+        classes: ReClasses { range_lo: [], range_hi: [], class_start: [], class_len: [] },
+        groups: p.groups, names: [], first_byte: -1, text_anchored: false,
+    };
+    prog.emit(ReOp::Save, 0, 0);
+    prog.compile_node(p.tree, root);
+    prog.emit(ReOp::Save, 1, 0);
+    prog.emit(ReOp::Match, 0, 0);
+    // What a match must start with, read off its first instruction.
+    let first = prog.ops[1];
+    if first == ReOp::Char {
+        prog.first_byte = utf8_lead_byte(prog.arg_x[1]);
+    } else if first == ReOp::Assert && prog.arg_x[1] == ReAssert::TextStart as i64 {
+        prog.text_anchored = true;
+    }
+    prog.names = p.names;
+    prog.classes = p.classes;
+    return ok(prog);
+}

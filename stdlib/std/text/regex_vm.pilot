@@ -1,0 +1,253 @@
+// ==============================================================================
+// FILE: stdlib/std/text/regex_vm.pilot
+// Ring 2: Pike VM for compiled regular expressions (pub pkg std.text.regex_vm;)
+// ==============================================================================
+// Runs a ReProgram (std.text.regex_syntax) over UTF-8 text in one pass:
+// every live thread steps over the same code point, in priority order, so
+// the leftmost match with the highest priority wins (the match a
+// backtracking engine like Python's `re` finds), in time linear in the text.
+//
+// A PikeVm holds the thread lists and is reused for every search of one
+// pattern (`find_all`, `replace`, `split` make one and search many times).
+// An unanchored search adds a new start thread at each position, at the
+// lowest priority, until a match is found; when no thread is alive and the
+// pattern must start with a known byte, it jumps to that byte's next
+// occurrence.
+pub pkg std.text.regex_vm;
+
+use std.text.regex_syntax;
+
+/// Thread lists for searches with one program. A list holds program counters
+/// in priority order and, per entry, `nslots` capture offsets.
+pub struct PikeVm : IObject {
+    pub nslots: i64;
+    pub cur_pc: List<i64>;
+    pub cur_slots: List<i64>;
+    pub cur_len: i64;
+    pub next_pc: List<i64>;
+    pub next_slots: List<i64>;
+    pub next_len: i64;
+    /// Per program counter: the generation in which it was last added.
+    pub seen: List<i64>;
+    pub generation: i64;
+    /// The capture offsets of the thread being followed.
+    pub scratch: List<i64>;
+    /// The capture offsets of the last match found.
+    pub found: List<i64>;
+
+    pub fn swap(var ref self) {
+        let pcs = self.cur_pc;
+        self.cur_pc = self.next_pc;
+        self.next_pc = pcs;
+        let slots = self.cur_slots;
+        self.cur_slots = self.next_slots;
+        self.next_slots = slots;
+        self.cur_len = self.next_len;
+        self.next_len = 0;
+        self.generation = self.generation + 1;
+    }
+
+    /// Clears the capture offsets of the thread being followed.
+    pub fn clear_scratch(var ref self) {
+        var i = 0;
+        while i < self.nslots {
+            self.scratch[i] = -1;
+            i = i + 1;
+        }
+    }
+
+    /// A copy of the capture offsets of the last match.
+    pub fn found_slots(ref self) -> List<i64> {
+        var out: List<i64> = [];
+        var i = 0;
+        while i < self.nslots {
+            out.push(self.found[i]);
+            i = i + 1;
+        }
+        return out;
+    }
+
+    ~self() {}
+}
+
+/// A VM sized for `prog`.
+pub fn new_vm(ref prog: ReProgram) -> PikeVm {
+    let size = prog.ops.len() as i64;
+    let nslots = 2 * (prog.groups + 1);
+    var vm = PikeVm {
+        nslots: nslots, cur_pc: [], cur_slots: [], cur_len: 0,
+        next_pc: [], next_slots: [], next_len: 0, seen: [], generation: 1,
+        scratch: [], found: [],
+    };
+    var i = 0;
+    while i < size {
+        vm.cur_pc.push(0);
+        vm.next_pc.push(0);
+        vm.seen.push(0);
+        i = i + 1;
+    }
+    i = 0;
+    while i < size * nslots {
+        vm.cur_slots.push(-1);
+        vm.next_slots.push(-1);
+        i = i + 1;
+    }
+    i = 0;
+    while i < nslots {
+        vm.scratch.push(-1);
+        vm.found.push(-1);
+        i = i + 1;
+    }
+    return vm;
+}
+
+/// Whether assertion `kind` holds at byte `pos` of `text`; `cls` is the
+/// word-character class for `\b` / `\B`.
+fn assertion_holds(ref prog: ReProgram, kind: i64, cls: i64, text: str, pos: i64) -> bool {
+    let n = text.len() as i64;
+    if kind == ReAssert::TextStart as i64 { return pos == 0; }
+    if kind == ReAssert::TextEnd as i64 { return pos == n; }
+    if kind == ReAssert::EndOrFinalNewline as i64 {
+        return pos == n || (pos == n - 1 && (text.byte_at(pos as usize) as i64) == 10);
+    }
+    if kind == ReAssert::LineStart as i64 {
+        return pos == 0 || (text.byte_at((pos - 1) as usize) as i64) == 10;
+    }
+    if kind == ReAssert::LineEnd as i64 {
+        return pos == n || (text.byte_at(pos as usize) as i64) == 10;
+    }
+    let before = pos > 0 && prog.classes.has(cls, code_point_before(text, pos));
+    let after = pos < n && prog.classes.has(cls, code_point_at(text, pos));
+    if kind == ReAssert::WordEdge as i64 { return before != after; }
+    return before == after;
+}
+
+/// Adds the thread at `pc` (capture offsets in `vm.scratch`) to the next
+/// list, following jumps, splits, saves and assertions at byte `pos`.
+fn add_thread(ref prog: ReProgram, var ref vm: PikeVm, pc: i64, text: str, pos: i64) {
+    if vm.seen[pc] == vm.generation { return; }
+    vm.seen[pc] = vm.generation;
+    let op = prog.ops[pc];
+    if op == ReOp::Jmp {
+        add_thread(prog, vm, prog.arg_x[pc], text, pos);
+    } else if op == ReOp::Split {
+        add_thread(prog, vm, prog.arg_x[pc], text, pos);
+        add_thread(prog, vm, prog.arg_y[pc], text, pos);
+    } else if op == ReOp::Save {
+        let slot = prog.arg_x[pc];
+        let old = vm.scratch[slot];
+        vm.scratch[slot] = pos;
+        add_thread(prog, vm, pc + 1, text, pos);
+        vm.scratch[slot] = old;
+    } else if op == ReOp::Assert {
+        if assertion_holds(prog, prog.arg_x[pc], prog.arg_y[pc], text, pos) {
+            add_thread(prog, vm, pc + 1, text, pos);
+        }
+    } else {
+        let at = vm.next_len;
+        vm.next_pc[at] = pc;
+        let base = at * vm.nslots;
+        var i = 0;
+        while i < vm.nslots {
+            vm.next_slots[base + i] = vm.scratch[i];
+            i = i + 1;
+        }
+        vm.next_len = at + 1;
+    }
+}
+
+/// The first byte at or after `from` equal to `b`, or -1.
+fn next_byte(text: str, b: i64, from: i64, n: i64) -> i64 {
+    var i = from;
+    while i < n {
+        if (text.byte_at(i as usize) as i64) == b { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+/// Searches `text` from byte `from` for the leftmost match; true when found,
+/// its capture offsets then in `vm.found`. `anchored`: the match must start
+/// at `from`. `end_required`: it must end at the end of the text. An empty
+/// match starting at `no_empty_at` is skipped.
+pub fn pike_search(ref prog: ReProgram, var ref vm: PikeVm, text: str, from: i64, no_empty_at: i64, anchored: bool, end_required: bool) -> bool {
+    let n = text.len() as i64;
+    if from > n { return false; }
+    let floating = !anchored && !prog.text_anchored;
+    var pos = from;
+    if floating && prog.first_byte >= 0 {
+        pos = next_byte(text, prog.first_byte, pos, n);
+        if pos < 0 { return false; }
+    }
+    var matched = false;
+    vm.generation = vm.generation + 1;
+    vm.next_len = 0;
+    vm.clear_scratch();
+    add_thread(prog, vm, 0, text, pos);
+    vm.swap();
+    let nslots = vm.nslots;
+    while vm.cur_len > 0 || (floating && !matched) {
+        var c = -1;
+        var w = 1;
+        if pos < n {
+            let b = text.byte_at(pos as usize) as i64;
+            w = utf8_width(b);
+            c = if b < 128 { b } else { code_point_at(text, pos) };
+        }
+        var k = 0;
+        while k < vm.cur_len {
+            let pc = vm.cur_pc[k];
+            let op = prog.ops[pc];
+            var step = false;
+            if op == ReOp::Match {
+                let base = k * nslots;
+                let start = vm.cur_slots[base];
+                let empty_skip = start == pos && pos == no_empty_at;
+                let end_skip = end_required && pos != n;
+                if !empty_skip && !end_skip {
+                    var j = 0;
+                    while j < nslots {
+                        vm.found[j] = vm.cur_slots[base + j];
+                        j = j + 1;
+                    }
+                    matched = true;
+                    // Lower-priority threads can no longer win.
+                    break;
+                }
+            } else if c >= 0 {
+                if op == ReOp::Char {
+                    step = prog.arg_x[pc] == c;
+                } else if op == ReOp::Any {
+                    step = c != 10;
+                } else if op == ReOp::AnyNl {
+                    step = true;
+                } else if op == ReOp::Class {
+                    step = prog.classes.has(prog.arg_x[pc], c);
+                }
+            }
+            if step {
+                let base = k * nslots;
+                var j = 0;
+                while j < nslots {
+                    vm.scratch[j] = vm.cur_slots[base + j];
+                    j = j + 1;
+                }
+                add_thread(prog, vm, pc + 1, text, pos + w);
+            }
+            k = k + 1;
+        }
+        if pos >= n { break; }
+        var next_pos = pos + w;
+        if floating && !matched {
+            if vm.next_len == 0 && prog.first_byte >= 0 {
+                next_pos = next_byte(text, prog.first_byte, next_pos, n);
+                if next_pos < 0 { break; }
+            }
+            vm.clear_scratch();
+            add_thread(prog, vm, 0, text, next_pos);
+        }
+        pos = next_pos;
+        vm.swap();
+    }
+    return matched;
+}

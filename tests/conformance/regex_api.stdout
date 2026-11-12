@@ -1,0 +1,54 @@
+0..5 [12345]
+none
+0..2 [ab]
+0..3 [aab]
+0..0 []
+0..3 [éa]
+none
+none
+2..4 [12]
+3..4 [2]
+none
+none
+1..2 [b]
+1..5 [éé]
+2..4 [22]
+3..4 [2]
+none
+3..4 [c]
+none
+2..2 []
+none
+<a><b><><c>
+<a><b><c ><d>
+<a><b><c3d>
+<><a><><b><c><>
+<><ab>< ><cd><>
+<>
+<a><béc>
+<x><y><z>
+a\.b
+true
+1\+1=2
+true
+\(x\)\[y\]\{z\}
+true
+path/to\\file
+true
+tab\	here
+true
+50%\ off\ \&\ more
+true
+\#hash\ \~tilde\ \-dash
+true
+naïve
+true
+\^\$\|\?\*
+true
+<a> <b> c
+x <12> y <345>
+<-><b>
+<>a<>b<>
+2 4
+5 6
+-1 -1

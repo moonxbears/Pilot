@@ -84,7 +84,7 @@ impl BytecodeCompiler {
             NodeKind::MemberExpr => self.compile_member(arena, node_id),
             NodeKind::IndexExpr => self.compile_index(arena, node.lhs, node.rhs),
             NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => self.compile_let(arena, node_id),
-            NodeKind::AssignStmt => self.compile_assign(arena, node.lhs, node.rhs),
+            NodeKind::AssignStmt => self.compile_assign(arena, node_id, node.lhs, node.rhs),
             NodeKind::BinaryExpr => self.compile_binary(arena, node.flags, node.lhs, node.rhs),
             NodeKind::UnaryExpr => self.compile_unary(arena, node.flags, node.lhs),
             NodeKind::IfExpr => self.compile_if(arena, node_id),

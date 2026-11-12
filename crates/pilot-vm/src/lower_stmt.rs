@@ -324,7 +324,7 @@ impl BytecodeCompiler {
         (!ty.is_empty()).then(|| ty.to_string())
     }
 
-    pub(crate) fn compile_assign(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
+    pub(crate) fn compile_assign(&mut self, arena: &AstArena, id: NodeId, lhs: u32, rhs: u32) -> u8 {
         let lhs_n = *arena.node(NodeId(lhs));
         let replace = self.take_replace_drops();
         let rhs_r = self.compile_node(arena, NodeId(rhs));
@@ -369,6 +369,7 @@ impl BytecodeCompiler {
                 let ty = self.static_type(arena, NodeId(lhs_n.lhs));
                 let r_obj = self.compile_node(arena, NodeId(lhs_n.lhs));
                 let r_key = self.compile_node(arena, NodeId(lhs_n.rhs));
+                self.drop_replaced_element(arena, id, r_obj, r_key);
                 self.emit_index_write(r_obj, ty.as_deref(), r_key, rhs_r)
             }
             other => self.error(crate::codes::SYNTAX, format!("cannot assign to {other:?}")),

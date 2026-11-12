@@ -1,5 +1,5 @@
 (a)\1: REGEX007 at 3
 (?=a): REGEX007 at 0
-(?i)a: REGEX007 at 0
+(?i)a: matched true
 (?<=a)b: REGEX007 at 0
 a+b: matched true

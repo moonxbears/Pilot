@@ -45,6 +45,7 @@ pub enum DropAction {
     Flag = 10,
     Moved = 11,
     Discard = 12,
+    ReplaceElement = 13,
 }
 
 impl DropAction {
@@ -63,6 +64,7 @@ impl DropAction {
             Self::Flag,
             Self::Moved,
             Self::Discard,
+            Self::ReplaceElement,
         ]
             .into_iter()
             .find(|a| *a as i64 == code)
@@ -118,6 +120,9 @@ pub struct DropPlan {
     /// Expression statements that throw away the owned value they make,
     /// with the type it is dropped as.
     pub discards: HashMap<NodeKey, String>,
+    /// Element assignments (`rs[i] = v`) that drop the element they
+    /// replace, with the collection's type as the glue lists it.
+    pub element_replace: HashMap<NodeKey, String>,
     /// The value-type fields a copy of each value type copies too.
     pub copy_glue: HashMap<String, Vec<(String, String)>>,
 }
@@ -134,6 +139,7 @@ impl DropPlan {
             && self.seams.is_empty()
             && self.copies.is_empty()
             && self.discards.is_empty()
+            && self.element_replace.is_empty()
     }
 }
 
@@ -154,7 +160,6 @@ pub(crate) enum Deferred {
 const PLAN_SEAMS: &[(&str, &str)] = &[
     ("own.capture", "SEAM001: unconnected seam `own.capture`"),
     ("own.collection_drop", "SEAM001: unconnected seam `own.collection_drop`"),
-    ("own.element_replace", "SEAM001: unconnected seam `own.element_replace`"),
 ];
 
 /// Glue nesting deeper than this is a planner error: a type that holds
@@ -259,6 +264,21 @@ impl BytecodeCompiler {
             return r;
         };
         self.emit_copy_value(r, &ty, 0)
+    }
+
+    /// When assignment `id` replaces an element its collection owns, drops
+    /// the element at `r_key` of the collection in `r_obj`.
+    pub(crate) fn drop_replaced_element(&mut self, arena: &AstArena, id: NodeId, r_obj: u8, r_key: u8) {
+        let Some(ty) = self.drop_plan.as_ref().and_then(|p| p.element_replace.get(&key_of(arena, id)).cloned()) else {
+            return;
+        };
+        let Some(el) = self.drop_plan.as_ref().and_then(|p| p.glue.get(&ty)).and_then(|g| g.elements.clone()) else {
+            return;
+        };
+        let mark = self.next_reg;
+        let r_old = self.emit_intrinsic(&el.get_op, &[r_obj, r_key]);
+        self.emit_drop_value(r_old, &el.ty, 0);
+        self.release_to(mark);
     }
 
     /// Drops the value in register `r` when node `id` is a statement that

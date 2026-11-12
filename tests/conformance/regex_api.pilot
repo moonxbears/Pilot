@@ -1,0 +1,89 @@
+// std.text.regex's matching API against Python 3.12's `re` on the same
+// cases: full_match = re.fullmatch, match_at = Pattern.match(text, pos),
+// find_at = Pattern.search(text, pos), split / split_n = re.split (patterns
+// without groups), escape = re.escape, replace_with = re.sub with a function,
+// name_start / name_end = Match.start / end by name, must_compile on a valid
+// pattern. Offsets are UTF-8 byte offsets (Python's converted).
+use std.text.regex;
+
+fn show(m: Match?) {
+    if some x = m {
+        print(f"{x.start}..{x.end} [{x.text}]");
+    } else {
+        print("none");
+    }
+}
+
+fn span_text(s: i64, e: i64) -> str => f"{s} {e}";
+
+fn found(m: Match?) -> bool {
+    if some x = m { return x.end >= x.start; }
+    return false;
+}
+
+fn show_split(parts: List<str>) {
+    var line = "";
+    for p in parts {
+        line = line + "<" + p + ">";
+    }
+    print(line);
+}
+
+fn main() {
+    show(must_compile("\\d+").full_match("12345"));
+    show(must_compile("\\d+").full_match("123a"));
+    show(must_compile("a|ab").full_match("ab"));
+    show(must_compile("(a*)(b?)").full_match("aab"));
+    show(must_compile("x*").full_match(""));
+    show(must_compile("é.").full_match("éa"));
+    show(must_compile("a$").full_match("a\n"));
+    show(must_compile("\\d+").match_at("ab12cd", 0));
+    show(must_compile("\\d+").match_at("ab12cd", 2));
+    show(must_compile("\\d+").match_at("ab12cd", 3));
+    show(must_compile("^b").match_at("ab", 1));
+    show(must_compile("\\bb").match_at("ab", 1));
+    show(must_compile("\\Bb").match_at("ab", 1));
+    show(must_compile("é+").match_at("xéé", 1));
+    show(must_compile("\\d+").find_at("1 22 333", 1));
+    show(must_compile("\\d+").find_at("1 22 333", 3));
+    show(must_compile("^\\d").find_at("1 2", 1));
+    show(must_compile("\\b\\w").find_at("ab cd", 1));
+    show(must_compile("x").find_at("abc", 2));
+    show(must_compile("").find_at("ab", 2));
+    show(must_compile("c").find_at("abc", 4));
+    show_split(must_compile(",").split_n("a,b,,c", 0));
+    show_split(must_compile(",\\s*").split_n("a, b,c ,  d", 0));
+    show_split(must_compile("\\d").split_n("a1b2c3d", 2));
+    show_split(must_compile("x*").split_n("axbc", 0));
+    show_split(must_compile("\\b").split_n("ab cd", 0));
+    show_split(must_compile("-").split_n("", 0));
+    show_split(must_compile("é").split_n("aébéc", 1));
+    show_split(must_compile("(?:ab)+").split_n("xababyabz", 0));
+    print(escape("a.b"));
+    print(found(must_compile(escape("a.b")).full_match("a.b")));
+    print(escape("1+1=2"));
+    print(found(must_compile(escape("1+1=2")).full_match("1+1=2")));
+    print(escape("(x)[y]{z}"));
+    print(found(must_compile(escape("(x)[y]{z}")).full_match("(x)[y]{z}")));
+    print(escape("path/to\\file"));
+    print(found(must_compile(escape("path/to\\file")).full_match("path/to\\file")));
+    print(escape("tab\there"));
+    print(found(must_compile(escape("tab\there")).full_match("tab\there")));
+    print(escape("50% off & more"));
+    print(found(must_compile(escape("50% off & more")).full_match("50% off & more")));
+    print(escape("#hash ~tilde -dash"));
+    print(found(must_compile(escape("#hash ~tilde -dash")).full_match("#hash ~tilde -dash")));
+    print(escape("naïve"));
+    print(found(must_compile(escape("naïve")).full_match("naïve")));
+    print(escape("^$|?*"));
+    print(found(must_compile(escape("^$|?*")).full_match("^$|?*")));
+    print(must_compile("(\\w)(\\d)").replace_with("a1 b2 c", (c) => "<" + (c.get(1) ?? "-") + ">"));
+    print(must_compile("\\d+").replace_with("x 12 y 345", (c) => "<" + (c.get(0) ?? "-") + ">"));
+    print(must_compile("(a)|(b)").replace_with("ab", (c) => "<" + (c.get(2) ?? "-") + ">"));
+    print(must_compile("").replace_with("ab", (c) => "<" + (c.get(0) ?? "-") + ">"));
+    if some c = must_compile("(?P<key>\\w+)=(?P<val>\\w*)").captures("  é=x k=") {
+        print(span_text(c.name_start("key"), c.name_end("key")));
+        print(span_text(c.name_start("val"), c.name_end("val")));
+        print(span_text(c.name_start("nope"), c.name_end("nope")));
+    }
+}
