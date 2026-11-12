@@ -1,0 +1,2 @@
+error[TAIL002]: `become` cannot hand over the frame while a `defer` or `errdefer` above it has still to run
+err_become_defer.pilot:6:5

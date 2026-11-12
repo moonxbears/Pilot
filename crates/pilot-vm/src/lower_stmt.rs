@@ -541,7 +541,12 @@ impl BytecodeCompiler {
         self.emit(Opcode::Move, keep, r_ret, 0);
         self.emit_exit_drops(arena);
         self.emit_loop_releases(0);
-        self.emit_defers_above(arena, 0);
+        let exit = if NodeId(value).is_some() {
+            crate::lower_defer::DeferExit::Returning(keep)
+        } else {
+            crate::lower_defer::DeferExit::Normal
+        };
+        self.emit_defers_on(arena, 0, exit);
         self.emit(Opcode::Move, 0, keep, 0);
         self.emit(Opcode::Ret, 0, 0, 0);
         0

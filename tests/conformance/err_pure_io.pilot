@@ -1,0 +1,9 @@
+// PURE001: a `pure` function must not print.
+pure fn loud_double(n: i64) -> i64 {
+    print(n);
+    return n * 2;
+}
+
+fn main() {
+    print(loud_double(4));
+}

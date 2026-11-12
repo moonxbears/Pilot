@@ -25,6 +25,15 @@ use Pilot.Core.Generator;
 // `Pending<T>` / `pending(..)` and `[StandIn(..)]`: gaps kept in data.
 use Pilot.Core.Pending;
 
+// `assume(cond)` and `unreachable()`: facts the programmer states.
+use Pilot.Core.Hint;
+
+// `assume(cond)` and `unreachable()`: facts the programmer states.
+use Pilot.Core.Hint;
+
+// What native calls do besides giving their result (`pure`, `noalloc`).
+use Pilot.Core.NativeEffects;
+
 // `[Debug]`'s trace lines (`debug_trace_line`), which a traced function calls.
 use Pilot.Core.Debug;
 

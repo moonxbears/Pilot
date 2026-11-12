@@ -1,0 +1,2 @@
+error[PURE001]: `pure` function `loud_double` calls `print`, which does IO
+err_pure_io.pilot:3:5

@@ -1,0 +1,95 @@
+// ==============================================================================
+// FILE: selfhost/check/noalloc.pilot
+// NOALLOC001: a `noalloc` function that takes heap memory.
+// ==============================================================================
+// `noalloc fn f()` promises that a call of `f` takes no heap memory, so it
+// may run where allocation is not allowed (real-time loops, interrupt
+// handlers). The modifier is the word registered with action
+// "effect_noalloc" (stdlib/realtime/rt_syntax.pilot). Its body (closures
+// included) must not:
+//   - build a list or map literal, or a struct literal or `T(..)` value of
+//     an owned type (lattice bit 1);
+//   - build a new string (concatenation, an f-string);
+//   - make a closure, or a collecting `for` (`let ys = for x in xs { yield .. }`);
+//   - call a native bound with effect "alloc"
+//     (stdlib/core/native_effects.pilot);
+//   - call a declared function or method that is not itself `noalloc`;
+//   - be a generator (a `yield` it owns): calling it builds its frame on the
+//     heap.
+// A method declared without a body is answered by the engine and judged by
+// its native effects alone.
+pub lvl(0) pkg Pilot.SelfHost.Check.NoAlloc;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.methods.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.own.*;
+use selfhost.check.generators.*;
+use selfhost.check.effects.*;
+
+/// Whether `t` is the type string literals take.
+fn is_text(p: Program, t: i64) -> bool {
+    let text = prog_slot_type(p, literal_slot(nk_str()));
+    return t > 0 && ty_is_named(p.tt, t) && ty_is_named(p.tt, text) && ty_decl(p.tt, t) == ty_decl(p.tt, text);
+}
+
+/// What node `n` allocates, as the rest of a NOALLOC001 message, or "".
+fn allocation(e: Effects, n: i64) -> str {
+    let inf = e.inf;
+    let p = inf.p;
+    let s = p.s;
+    let k = kind(s, n);
+    if k == nk_list() { return "builds a list"; }
+    if k == nk_map() {
+        let t = type_of(inf, n);
+        return if owns(e.flow, t) { f"builds a `{ty_display(p.tt, t)}`, which takes heap memory" } else { "" };
+    }
+    if k == nk_lambda() { return "makes a closure"; }
+    if k == nk_for() && for_collects(p, n) { return "collects a list with `for`"; }
+    if k == nk_binary() && is_text(p, type_of(inf, n)) { return "builds a new string"; }
+    if k != nk_call() { return ""; }
+    let target = call_target(e.flow, n);
+    let ch = children(s, n);
+    let is_method = ch.len() > 0 && kind(s, ch[0]) == nk_member();
+    if target < 0 || (is_method && fn_body(s, target) < 0) {
+        let native = if is_method { native_method_called(e, n) } else { native_fn_called(e, n) };
+        if native_has_effect(e, native, effect_alloc()) { return f"calls `{native}`, which takes heap memory"; }
+        if target < 0 {
+            // `T(args)`: a value of an owned type.
+            let t = type_of(inf, n);
+            if !is_method && ch.len() > 0 && kind(s, ch[0]) == nk_ident() && prog_type_decl(p, node_name(s, ch[0])) >= 0 && owns(e.flow, t) {
+                return f"builds a `{ty_display(p.tt, t)}`, which takes heap memory";
+            }
+        }
+        return "";
+    }
+    let tk = kind(s, target);
+    if (tk == nk_fn() || tk == nk_operator()) && !has_modifier(e, target, act_noalloc()) {
+        return f"calls `{node_name(s, target)}`, which is not `noalloc`";
+    }
+    return "";
+}
+
+/// NOALLOC001 on each allocation in the body of each `noalloc` function of
+/// the user's files.
+pub fn check_noalloc(inf: Infer, sink: DiagSink) {
+    let s = inf.p.s;
+    let e = effects_new(flow_new(inf, sink));
+    var d = 0;
+    while d < s.count {
+        let k = kind(s, d);
+        if (k == nk_fn() || k == nk_operator()) && in_user_file(s, d) && has_modifier(e, d, act_noalloc()) {
+            if is_generator(inf.p, d) {
+                sink_error(sink, d, "NOALLOC001", f"`noalloc` function `{node_name(s, d)}` is a generator: calling it builds its frame on the heap");
+            }
+            for n in body_nodes(s, d) {
+                let why = allocation(e, n);
+                if why != "" { sink_error(sink, n, "NOALLOC001", f"`noalloc` function `{node_name(s, d)}` {why}"); }
+            }
+        }
+        d = d + 1;
+    }
+}

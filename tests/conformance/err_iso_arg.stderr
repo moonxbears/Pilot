@@ -1,0 +1,6 @@
+error[ISO001]: `iso` parameter `xs` of `total` takes a moved, unaliased owner: `xs` was only lent to this function
+err_iso_arg.pilot:13:44
+error[ISO001]: `iso` parameter `xs` of `total` takes a moved, unaliased owner: `a` is used after it was moved into the call
+err_iso_arg.pilot:17:17
+error[ISO001]: `iso` parameter `xs` of `total` takes a moved, unaliased owner: `b.items` is part of another value, which still reaches it
+err_iso_arg.pilot:20:17

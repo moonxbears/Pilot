@@ -1,0 +1,11 @@
+// The callee's value becomes the caller's value unchanged, so both must
+// return the same type (TAIL003).
+fn label(n: i64) -> bool => n > 0;
+
+fn step(n: i64) -> i64 {
+    become label(n);
+}
+
+fn main() {
+    print(step(3));
+}

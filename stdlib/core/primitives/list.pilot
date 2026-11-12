@@ -20,15 +20,19 @@ pub partial struct List<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerato
     /// The number of items.
     pub fn len() -> usize;
     /// Appends `item` and returns the list.
+    [Mutates]
     pub fn push(item: T) -> List<T>;
     /// Removes and returns the last item; an empty list stops the program.
+    [Mutates]
     pub fn pop() -> T;
     /// Removes and returns the item at `index`; an index out of range stops
     /// the program.
+    [Mutates]
     pub fn remove_at(index: usize) -> T;
     /// The item at `index`; an index out of range stops the program.
     pub op [] (index: usize) -> T;
     /// Replaces the item at `index`.
+    [Mutates]
     pub op []= (index: usize, item: T);
 
     /// The number of items.

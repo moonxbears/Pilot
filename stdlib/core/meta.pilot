@@ -189,6 +189,15 @@ pub struct {
         pub weight: i32;
     }
 
+    // Changing the receiver: `[Mutates]` on a method whose body the engine
+    // gives (it has none to read) and that changes the value it is called
+    // on. Calling one on a constant is CONST001 (selfhost/check/consts.pilot);
+    // a method with a body is read for the changes it makes.
+    [Layout(c_abi)]
+    MutatesAttr : IAttribute, IValue {
+        pub weight: i32;
+    }
+
     // Running a function as the program is worked on: `[Live(3, 4)]` on
     // `fn add(a, b)` calls `add(3, 4)` and prints
     // `<file>:<line>: live: add(3, 4) = 7`. The arguments are the function's

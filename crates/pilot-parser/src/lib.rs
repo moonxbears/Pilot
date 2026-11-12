@@ -12,11 +12,16 @@ mod modules;
 mod pilot_impls;
 mod fstring;
 mod num_suffix;
+mod comptime_if;
+mod exits;
+mod contracts;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
 use modules::EXCLUDE_RECEPTOR;
 pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
 use pilot_impls::*;
 pub use attr_hooks::RegLayout;
+pub use exits::{DEFER_ON_FAILURE, RETURN_TAIL_CALL};
+pub use contracts::{CONTRACT_ENSURES, CONTRACT_REQUIRES};
 #[derive(Clone, Debug)]
 pub enum TemplateNode { Splice(String), TypeNamed(String, Vec<TemplateNode>), TypeTuple(Vec<TemplateNode>),
     Block(Vec<TemplateNode>), If(Box<TemplateNode>, Box<TemplateNode>, Option<Box<TemplateNode>>),
@@ -243,6 +248,7 @@ const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/syntax/until.pilot",
     "stdlib/core/syntax/switch.pilot",
     "stdlib/core/syntax/guard.pilot",
+    "stdlib/core/syntax/exits.pilot",
     "stdlib/core/syntax/try_catch.pilot",
     "stdlib/core/syntax/expr_sugar.pilot",
     "stdlib/core/syntax/fstring.pilot",
@@ -315,8 +321,8 @@ pub fn bootstrap_tables() -> &'static ParserTables {
     })
 }
 pub fn parse(src: &str) -> AstArena { parse_with_tables(src, bootstrap_tables()) }
-pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: false, }; p.parse_program(); p.arena }
-pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } tables.finish_ingest(src); arena }
+pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: false, folds: Default::default(), in_ensures: false, }; p.parse_program(); p.arena }
+pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, folds: Default::default(), in_ensures: false, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } tables.finish_ingest(src); arena }
 #[inline]
 fn is_seed_kw(k: TokenKind) -> bool { matches!(k, TokenKind::KwEngine | TokenKind::KwStruct | TokenKind::KwInterface | TokenKind::KwFn
         | TokenKind::KwLet | TokenKind::KwRef | TokenKind::KwIf | TokenKind::KwLoop
@@ -343,7 +349,11 @@ struct Parser<'a> { src: &'a str, tape: TokenTape, pos: usize, arena: AstArena, 
     /// Parsing a cascade step (`..f(x)`, `..field = value`), which ends at the next step.
     in_cascade_step: bool,
     /// Feeding the bootstrap tables: every item is ingested, not only engine calls.
-    ingest: bool, }
+    ingest: bool,
+    /// The constants and run-time names `comptime if` folds against.
+    folds: comptime_if::FoldScope,
+    /// Parsing an `ensures` clause, where `old(..)` is the entry value.
+    in_ensures: bool, }
 impl<'a> Parser<'a> {
     #[inline] fn cur(&self) -> usize { self.next_non_nl(self.pos) }
     #[inline] fn skip_seps(&mut self) { while self.eat(TokenKind::Semicolon) {} }
@@ -436,6 +446,10 @@ impl<'a> Parser<'a> {
                 ModAct::Ext => m.is_ext = true, ModAct::Iso | ModAct::Async | ModAct::Ring => {} } }
         m }
     fn parse_item(&mut self, out: &mut Vec<NodeId>, in_type_body: bool) { let start_pos = self.pos;
+        if self.at_comptime_if() {
+            out.push(self.parse_comptime_if());
+            return;
+        }
         let raw_mods = self.parse_mods(in_type_body); if raw_mods.is_non_empty() { let (mut target, saved) = (0u8, self.pos);
             if self.eat(TokenKind::KwFn) { target = 1; }
             else if self.eat(TokenKind::KwStruct) { target = 2; }
@@ -551,6 +565,7 @@ impl<'a> Parser<'a> {
             while self.eat(TokenKind::KwRef) || self.eat(TokenKind::KwComptime) || (self.is_word() && matches!(self.tables.modifiers.get(self.text()), Some(ModAct::Mut | ModAct::Iso))) {
                 pflags = 1; if !matches!(self.tape.kind(self.pos.saturating_sub(1)), TokenKind::KwRef | TokenKind::KwComptime) { self.advance(); } }
             let _ = self.eat(TokenKind::Star) || self.eat(TokenKind::DoubleStar); let psym = self.intern_cur();
+            self.note_runtime(psym);
             let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
             if self.eat(TokenKind::Equal) { let _ = self.parse_expr(); }
             let pid = self.arena.alloc_node(NodeKind::ParamDecl, pflags, ByteSpan::new(psp.start, self.prev_span().end.max(psp.end)), psym.0, ty.0);
@@ -562,13 +577,21 @@ impl<'a> Parser<'a> {
     fn parse_fn(&mut self, mods: &DeclMods, def_vis: u8, headless: bool) -> NodeId { let sp = self.span(); if !headless { self.advance(); }
         let mut full_name = self.text().to_string(); self.advance(); let mut tparams = self.parse_generic_params();
         if self.eat(TokenKind::InfixDot) { full_name.push('.'); full_name.push_str(self.text()); self.advance(); tparams.extend(self.parse_generic_params()); }
+        let outer_runtime = self.folds.take_runtime();
         let (name_sym, params) = (self.arena.interner.intern(&full_name), self.parse_param_list());
         let ret_ty = if self.eat(TokenKind::Arrow) { self.parse_type() } else { NodeId::NONE };
-        while self.is_rec(28) || self.receptor().is_some_and(|(rk, pl)| rk == 33 && matches!(pl, 18 | 19)) {
-            self.advance(); while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::FatArrow) && !self.at(TokenKind::Semicolon) { self.advance(); }
+        let mut clauses = Vec::new();
+        while self.is_rec(28) || self.at_contract_clause() {
+            if self.at_contract_clause() {
+                clauses.push(self.parse_contract_clause());
+                continue;
+            }
+            self.advance(); while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::FatArrow) && !self.at(TokenKind::Semicolon) && !self.at_contract_clause() { self.advance(); }
         }
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
         else if self.at(TokenKind::LBrace) { self.parse_block() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
+        let body = self.with_contracts(body, &clauses);
+        self.folds.restore_runtime(outer_runtime);
         let mut ch = vec![body]; ch.extend(params); let (st, ln) = self.arena.alloc_child_slice(&ch);
         let id = self.arena.alloc_node(NodeKind::FnDecl, ln as u16, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), name_sym.0, st);
         if ret_ty.is_some() { self.arena.set_type_annot(id, ret_ty); }
@@ -767,6 +790,11 @@ impl<'a> Parser<'a> {
         let _ = self.eat(TokenKind::Semicolon);
         let id = self.arena.alloc_node(kind, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), sym.0, init.0);
         if ty.is_some() { self.arena.set_type_annot(id, ty); }
+        if kind == NodeKind::ConstDecl {
+            self.note_const(sym, init);
+        } else {
+            self.note_runtime(sym);
+        }
         self.apply_mods(id, mods, def_vis); out.push(id); }
     /// The `= value` of a binding, or `NONE` without one. An `=` followed
     /// by no value is an error.
@@ -878,6 +906,8 @@ impl<'a> Parser<'a> {
                                 let cb = if self.eat(TokenKind::FatArrow) { self.parse_expr() } else { self.parse_block() }; ch.push(self.arena.alloc_node(NodeKind::CatchClause, 0, csp, psym.0, cb.0)); }
                             let _ = self.eat(TokenKind::Semicolon); return self.arena.alloc_list_node(NodeKind::TryStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch); }
                         32 if matches!(self.tape.kind(self.next_non_nl(self.cur() + 1)), TokenKind::LBrace | TokenKind::LParen) => return self.parse_polyglot_inline(),
+                        exits::ERRDEFER_RECEPTOR => return self.parse_errdefer(),
+                        exits::BECOME_RECEPTOR => return self.parse_become(),
                         _ => {} } }
                 if self.receptor() == Some(EXCLUDE_RECEPTOR) && self.word_follows() {
                     return self.parse_exclude_decl();
@@ -1117,6 +1147,7 @@ impl<'a> Parser<'a> {
             TokenKind::KwIf => self.parse_if(),
             TokenKind::KwQuote => { self.advance(); if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() } }
             // `comptime expr` / `comptime { .. }` as a value: flags = 1.
+            TokenKind::KwComptime if self.at_comptime_if() => self.parse_comptime_if(),
             TokenKind::KwComptime => { self.advance(); let e = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() };
                 self.arena.alloc_node(NodeKind::ComptimeExpr, 1, ByteSpan::new(sp.start, self.prev_span().end), e.0, 0) }
             TokenKind::Dollar => { self.advance(); if self.eat(TokenKind::LParen) { let e = self.parse_expr(); self.expect(TokenKind::RParen); e }
@@ -1141,6 +1172,7 @@ impl<'a> Parser<'a> {
                         1 => { self.advance(); return self.arena.alloc_node(NodeKind::BoolLit, 0, sp, pl as u32, 0); }
                         2 => { self.advance(); return self.arena.alloc_node(NodeKind::NoneLit, 0, sp, 0, 0); }
                         9 => return self.parse_for(), 14 => return self.parse_switch(), 18 => { self.advance(); return self.parse_expr_bp(6); }
+                        contracts::CONTRACT_RECEPTOR if pl == contracts::OLD_SUB && self.in_ensures => return self.parse_old(),
                         31 if pl == 1 => { self.advance(); let v = self.parse_expr_bp(16); return self.arena.alloc_node(NodeKind::UnaryExpr, 5, sp, v.0, 0); }
                         31 if pl == 2 => { self.advance(); return self.parse_expr_bp(80); }
                         32 if nx < self.tape.len() && (matches!(self.tape.kind(nx), TokenKind::LParen) || (!self.no_struct_lit && matches!(self.tape.kind(nx), TokenKind::LBrace))) => return self.parse_polyglot_inline(),

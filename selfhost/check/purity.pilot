@@ -1,0 +1,117 @@
+// ==============================================================================
+// FILE: selfhost/check/purity.pilot
+// PURE001: a `pure` function that does more than compute its result.
+// ==============================================================================
+// A `pure` function gives the same result for the same arguments and does
+// nothing else, so a later pass may share or move its calls. Its body
+// (closures included) must not:
+//   - print or do other IO: call a native function bound with effect "io"
+//     (stdlib/core/native_effects.pilot);
+//   - call a declared function or method that is not `pure`;
+//   - write a module global (`total = total + 1`, `cache[k] = v`);
+//   - write through a parameter that lends the caller's value (`ref`, `var`,
+//     `iso`): assign to it or into it, or call a method that changes it (a
+//     declared method that changes its receiver, a native bound "mutates").
+// A method that is not `pure` may still be called when its body does
+// nothing but change its own receiver (`out.push(x)` on the function's own
+// list); changing a receiver the caller lent, or a global, is reported.
+// A call through a closure value is not followed; `__engine` operations
+// stay with the library code that wraps them.
+pub lvl(0) pkg Pilot.SelfHost.Check.Purity;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.own.*;
+use selfhost.check.consts.*;
+use selfhost.check.effects.*;
+
+/// The name a function declaration is reported by.
+fn decl_label(s: Snap, d: i64) -> str => node_name(s, d);
+
+/// What finding effects keeps.
+pub struct PurityScan : IObject {
+    pub e: Effects;
+    pub cs: ConstScan;
+    /// Method declaration -> the first effect of its body other than
+    /// changing its own receiver ("" for none); "?" while being worked out.
+    pub methods: Map<str, str>;
+}
+
+/// The first effect method `m` has besides changing its own receiver, or
+/// "". A method reached again through itself adds nothing on that path.
+fn method_effect(ps: PurityScan, m: i64) -> str {
+    let k = f"{m}";
+    if ps.methods.has(k) {
+        let known = ps.methods.get(k);
+        return if known == "?" { "" } else { known };
+    }
+    ps.methods.set(k, "?");
+    var found = "";
+    for n in body_nodes(ps.e.inf.p.s, m) {
+        if found != "" { break; }
+        found = impure_effect(ps, n);
+    }
+    ps.methods.set(k, found);
+    return found;
+}
+
+/// The effect node `n` has, as the rest of a PURE001 message, or "".
+fn impure_effect(ps: PurityScan, n: i64) -> str {
+    let e = ps.e;
+    let inf = e.inf;
+    let s = inf.p.s;
+    let k = kind(s, n);
+    if k == nk_call() {
+        let native = native_fn_called(e, n);
+        if native_has_effect(e, native, effect_io()) { return f"calls `{native}`, which does IO"; }
+        let target = call_target(e.flow, n);
+        let ch = children(s, n);
+        let is_method = ch.len() > 0 && kind(s, ch[0]) == nk_member();
+        if target >= 0 && !is_pure_decl(s, target) {
+            let tk = kind(s, target);
+            if (tk == nk_fn() || tk == nk_operator()) && (!is_method || method_effect(ps, target) != "") {
+                return f"calls `{decl_label(s, target)}`, which is not `pure`";
+            }
+        }
+        if !is_method { return ""; }
+        // A method that changes a value the caller lent, or a global.
+        let root = place_root(s, lhs(s, ch[0]));
+        let global = names_global(e, root);
+        if lent_param(e, root) < 0 && !global { return ""; }
+        let method = sym_text(s, rhs(s, ch[0]));
+        var changes = false;
+        if target < 0 || fn_body(s, target) < 0 { changes = native_has_effect(e, method, effect_mutates()); }
+        if !changes && target >= 0 { changes = method_mutates(ps.cs, target); }
+        if !changes { return ""; }
+        let what = node_name(s, root);
+        return if global { f"changes the global `{what}`" } else { f"changes `{what}`, which the caller lent" };
+    }
+    if k == nk_assign() {
+        let root = place_root(s, lhs(s, n));
+        if root < 0 { return ""; }
+        if names_global(e, root) { return f"writes the global `{node_name(s, root)}`"; }
+        if lent_param(e, root) >= 0 { return f"writes through `{node_name(s, root)}`, which the caller lent"; }
+    }
+    return "";
+}
+
+/// PURE001 on each effect in the body of each `pure` function of the
+/// user's files.
+pub fn check_purity(inf: Infer, sink: DiagSink) {
+    let s = inf.p.s;
+    let f = flow_new(inf, sink);
+    let ps = PurityScan { e: effects_new(f), cs: const_scan(f), methods: Map<str, str>() };
+    var d = 0;
+    while d < s.count {
+        let k = kind(s, d);
+        if (k == nk_fn() || k == nk_operator()) && is_pure_decl(s, d) && in_user_file(s, d) {
+            for n in body_nodes(s, d) {
+                let why = impure_effect(ps, n);
+                if why != "" { sink_error(sink, n, "PURE001", f"`pure` function `{decl_label(s, d)}` {why}"); }
+            }
+        }
+        d = d + 1;
+    }
+}

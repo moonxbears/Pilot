@@ -1,0 +1,7 @@
+// A zero-argument pure function gives the same value every call, so its
+// result is a constant too: changing it in place is CONST001.
+pure fn table() -> List<i64> => [10, 20];
+
+fn main() {
+    table().push(30);
+}

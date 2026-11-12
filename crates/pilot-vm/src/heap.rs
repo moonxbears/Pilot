@@ -150,6 +150,37 @@ impl PilVirtualMachine {
         Ok(())
     }
 
+    /// A deep copy of `v`: lists and maps (records) are copied with their
+    /// contents copied the same way, keeping a record's type; anything else
+    /// (strings, scalars, function values) is shared.
+    fn value_clone(&mut self, v: PilotVal, depth: usize) -> IntrinsicResult {
+        if depth > 4096 {
+            return Err("a value nests too deeply to copy".to_string());
+        }
+        if let Some(slot) = v.as_list_handle().filter(|s| *s < self.heap_lists.len()) {
+            let items = self.heap_lists[slot].clone();
+            let mut out = Vec::with_capacity(items.len());
+            for x in items {
+                out.push(self.value_clone(x, depth + 1)?);
+            }
+            return Ok(self.new_list(out));
+        }
+        if let Some(slot) = v.as_map_handle().filter(|s| *s < self.heap_maps.len()) {
+            let entries: Vec<(String, PilotVal)> = self.heap_maps[slot].iter().map(|(k, x)| (k.clone(), *x)).collect();
+            let mut out = HashMap::with_capacity(entries.len());
+            for (k, x) in entries {
+                out.insert(k, self.value_clone(x, depth + 1)?);
+            }
+            let copy = self.new_map(out);
+            if let Some(ty) = self.record_types.get(&slot).copied() {
+                let new_slot = self.map_slot(copy, "value_clone")?;
+                self.record_types.insert(new_slot, ty);
+            }
+            return Ok(copy);
+        }
+        Ok(v)
+    }
+
     fn map_slot(&self, v: PilotVal, op: &str) -> Result<usize, String> {
         let slot = v
             .as_map_handle()
@@ -500,6 +531,9 @@ impl PilVirtualMachine {
                 }
                 Ok(copy)
             }
+            // `value_clone(v)`: a deep copy of `v` sharing nothing that could
+            // change (a constant's copy, `var x = CONST;`); strings are shared.
+            "value_clone" => self.value_clone(arg(args, 0, op)?, 0),
             "map_remove" => {
                 let slot = self.map_slot(arg(args, 0, op)?, op)?;
                 let m = &mut self.heap_maps[slot];

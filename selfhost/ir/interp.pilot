@@ -41,6 +41,57 @@ pub struct IrFrame : IObject {
     pub fault: IrFault;
     /// The program's script arguments.
     pub args: List<str>;
+    /// The steps left, shared by every frame (see `IrBudget`).
+    pub budget: IrBudget;
+}
+
+/// How far a run may go. `pilot ir run` runs without a limit; evaluating a
+/// function while compiling (`ir_eval`) stops after `left` instructions or
+/// `max_eval_depth()` nested calls, and stops at anything with an effect: an
+/// engine operation outside `eval_engine_ops()`, a store to a global, a
+/// call through a function value. A stop is a fault, never a hang.
+pub struct IrBudget : IObject {
+    /// Instructions left to run; -1 for no limit.
+    pub left: i64;
+    /// Calls currently open.
+    pub depth: i64;
+    /// Whether this is an evaluation while compiling.
+    pub eval: bool;
+    /// The engine operations it may run (`eval_engine_ops()`), when `eval`.
+    pub allowed: Map<str, bool>;
+}
+
+/// The deepest an evaluation while compiling may nest calls.
+pub pure fn max_eval_depth() -> i64 => 200;
+
+/// The engine operations an evaluation while compiling may run: those that
+/// only compute (building, reading and changing values it made itself).
+/// Printing, reading input, the program's arguments and seams are not.
+pub fn eval_engine_ops() -> Map<str, bool> {
+    let ops = Map<str, bool>();
+    for name in [
+        "rt_assert", "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
+        "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
+        "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "map_values", "to_str",
+        "map_new", "map_get", "map_set", "map_has", "map_remove", "value_clone", "list_get", "list_set",
+        "num_pow",
+    ] {
+        ops.set(name, true);
+    }
+    return ops;
+}
+
+/// Runs function `fi` of `m` (which takes nothing) while compiling, with the
+/// globals `globals` (those `assigned` marks as set) and at most `fuel`
+/// instructions. Gives `[true, value, steps]`, or `[false, why, steps]`
+/// when it stopped: a runtime error, an effect, or the budget running out.
+/// `steps` is how many instructions it ran.
+pub fn ir_eval(m: IrModule, fi: i64, globals: List<any>, assigned: List<bool>, fuel: i64) -> List<any> {
+    let top = IrFrame { m: m, f: m.functions[fi], vals: [], cells: [], globals: globals, assigned: assigned, next: 0, next_args: [], ret: none, handlers: interp_handlers(), engine_ops: interp_engine_ops(), fault: ir_fault_new(), args: [], budget: IrBudget { left: fuel, depth: 0, eval: true, allowed: eval_engine_ops() } };
+    let out = interp_call(top, fi, []);
+    let steps = if top.budget.left < 0 { fuel } else { fuel - top.budget.left };
+    if top.fault.active { return [false, top.fault.message, steps]; }
+    return [true, out, steps];
 }
 
 /// The engine operation that gives the program its script arguments; the
@@ -59,7 +110,7 @@ pub fn ir_run(m: IrModule, sources: IrSourceMap, args: List<str>) -> i64 {
         globals.push(none);
         assigned.push(false);
     }
-    let top = IrFrame { m: m, f: m.functions[0], vals: [], cells: [], globals: globals, assigned: assigned, next: 0, next_args: [], ret: none, handlers: interp_handlers(), engine_ops: interp_engine_ops(), fault: ir_fault_new(), args: args };
+    let top = IrFrame { m: m, f: m.functions[0], vals: [], cells: [], globals: globals, assigned: assigned, next: 0, next_args: [], ret: none, handlers: interp_handlers(), engine_ops: interp_engine_ops(), fault: ir_fault_new(), args: args, budget: IrBudget { left: -1, depth: 0, eval: false, allowed: Map<str, bool>() } };
     let out = interp_call(top, 0, []);
     if top.fault.active {
         report_fault(top.fault, sources);
@@ -71,6 +122,19 @@ pub fn ir_run(m: IrModule, sources: IrSourceMap, args: List<str>) -> i64 {
 
 /// Calls function `fi` with `args` from frame `caller`.
 fn interp_call(caller: IrFrame, fi: i64, args: List<any>) -> any {
+    let budget = caller.budget;
+    if !budget.eval { return interp_body(caller, fi, args); }
+    if budget.depth >= max_eval_depth() {
+        raise_fault(caller.fault, "calls nest too deeply to compute while compiling");
+        return none;
+    }
+    budget.depth = budget.depth + 1;
+    let out = interp_body(caller, fi, args);
+    budget.depth = budget.depth - 1;
+    return out;
+}
+
+fn interp_body(caller: IrFrame, fi: i64, args: List<any>) -> any {
     let m = caller.m;
     let f = m.functions[fi];
     var vals: List<any> = [];
@@ -79,10 +143,18 @@ fn interp_call(caller: IrFrame, fi: i64, args: List<any>) -> any {
         vals.push(none);
         i = i + 1;
     }
-    let fr = IrFrame { m: m, f: f, vals: vals, cells: [], globals: caller.globals, assigned: caller.assigned, next: 0, next_args: args, ret: none, handlers: caller.handlers, engine_ops: caller.engine_ops, fault: caller.fault, args: caller.args };
+    let fr = IrFrame { m: m, f: f, vals: vals, cells: [], globals: caller.globals, assigned: caller.assigned, next: 0, next_args: args, ret: none, handlers: caller.handlers, engine_ops: caller.engine_ops, fault: caller.fault, args: caller.args, budget: caller.budget };
     let handlers = fr.handlers;
+    let budget = fr.budget;
     while fr.next >= 0 {
         let b = f.blocks[fr.next];
+        if budget.left >= 0 {
+            budget.left = budget.left - b.insts.len;
+            if budget.left < 0 {
+                raise_fault(fr.fault, "it takes too long to compute while compiling");
+                return none;
+            }
+        }
         var p = 0;
         while p < b.params.len {
             fr.vals[b.params[p]] = fr.next_args[p];
@@ -92,6 +164,10 @@ fn interp_call(caller: IrFrame, fi: i64, args: List<any>) -> any {
         for inst in b.insts {
             let h = if inst.opcode < handlers.len { handlers[inst.opcode] } else { none };
             if h == none {
+                if budget.eval {
+                    raise_fault(fr.fault, f"`{opcode_name(inst.opcode)}` is not computed while compiling");
+                    return none;
+                }
                 return seam("ir.interp_opcode", f"the IR interpreter has no handler for `{opcode_name(inst.opcode)}`");
             }
             h(fr, inst);
@@ -209,6 +285,10 @@ fn run_load(fr: IrFrame, inst: IrInst) {
 fn run_store(fr: IrFrame, inst: IrInst) {
     let a = ir_args(fr.f, inst);
     let addr = fr.vals[a[0]];
+    if addr < 0 && fr.budget.eval {
+        raise_fault(fr.fault, "a global is changed");
+        return;
+    }
     if addr < 0 {
         fr.globals[-1 - addr] = fr.vals[a[1]];
         fr.assigned[-1 - addr] = true;
@@ -224,6 +304,10 @@ fn run_call_direct(fr: IrFrame, inst: IrInst) {
 /// `call_indirect f, args..`: the function record `f` names, called with
 /// `args` then the record's captured values (selfhost/ir/lower_closure.pilot).
 fn run_call_indirect(fr: IrFrame, inst: IrInst) {
+    if fr.budget.eval {
+        raise_fault(fr.fault, "a function value is called");
+        return;
+    }
     let a = arg_values(fr, inst);
     let rec: List<any> = a[0];
     var args: List<any> = [];
@@ -236,6 +320,10 @@ fn run_call_indirect(fr: IrFrame, inst: IrInst) {
 
 fn run_call_intrinsic(fr: IrFrame, inst: IrInst) {
     let name = fr.m.intrinsics[inst.subop];
+    if fr.budget.eval && !fr.budget.allowed.has(name) {
+        raise_fault(fr.fault, f"the engine operation `{name}` is not run while compiling");
+        return;
+    }
     if name == program_args_op() {
         var copy: List<any> = [];
         for a in fr.args { copy.push(a); }
@@ -377,7 +465,7 @@ pub fn interp_engine_ops() -> Map<str, str> {
         "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
         "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
         "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "map_values", "to_str",
-        "map_new", "map_get", "map_set", "map_has", "map_remove", "seam_open",
+        "map_new", "map_get", "map_set", "map_has", "map_remove", "seam_open", "value_clone",
     ] {
         ops.set(name, name);
     }

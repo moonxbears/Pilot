@@ -1,0 +1,11 @@
+// PURE001: a `pure` function must not write a module global.
+var calls = 0;
+
+pure fn counted(n: i64) -> i64 {
+    calls = calls + 1;
+    return n + 1;
+}
+
+fn main() {
+    print(counted(1));
+}

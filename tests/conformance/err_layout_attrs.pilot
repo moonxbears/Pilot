@@ -1,0 +1,29 @@
+// LAYOUT001: `[Align(N)]` takes a power of two (12 is not one).
+// LAYOUT002: a packed struct's field may sit at any address, so it cannot
+// be lent to a `var ref` parameter; copy it into a local first.
+// LAYOUT003: a struct cannot be both packed and aligned above 1.
+[Align(12)]
+struct Odd {
+    pub a: i64;
+}
+
+[Layout(packed), Align(8)]
+struct Both {
+    pub a: u8;
+}
+
+[Layout(packed)]
+struct Header {
+    pub tag: u8;
+    pub size: u32;
+}
+
+fn grow(var ref n: u32) { n = n + 1; }
+
+fn main() {
+    var h = Header { tag: 7, size: 40 };
+    grow(h.size);
+    print(h.size);
+    print(Odd { a: 1 }.a);
+    print(Both { a: 2 }.a);
+}

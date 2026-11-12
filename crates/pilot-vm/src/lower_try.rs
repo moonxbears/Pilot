@@ -47,15 +47,16 @@ impl BytecodeCompiler {
     /// Leaves with the failure in `r_fail`: to the innermost `try`'s catch
     /// clause, or out of the function.
     fn emit_failure_exit(&mut self, arena: &AstArena, r_fail: u8) {
+        let failure = crate::lower_defer::DeferExit::Failure;
         let Some(depth) = self.tries.last().map(|t| t.defer_depth) else {
-            self.emit_defers_above(arena, 0);
+            self.emit_defers_on(arena, 0, failure);
             self.emit(Opcode::Move, 0, r_fail, 0);
             self.emit(Opcode::Ret, 0, 0, 0);
             return;
         };
         let fail_reg = self.tries.last().map_or(0, |t| t.fail_reg);
         self.emit(Opcode::Move, fail_reg, r_fail, 0);
-        self.emit_defers_above(arena, depth);
+        self.emit_defers_on(arena, depth, failure);
         let jump = self.emit_jump(0);
         if let Some(t) = self.tries.last_mut() {
             t.fail_jumps.push(jump);

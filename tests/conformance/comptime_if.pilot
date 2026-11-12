@@ -1,0 +1,46 @@
+// `comptime if` picks a branch while compiling. The condition must be known
+// then (constants, literals, comptime calls), and the branch not taken is
+// dropped before names and types are checked, so it may name things that
+// do not exist in this build.
+//
+// Expected output, worked by hand: WIDE is true, so width() takes the first
+// branch (64); NARROW_BITS is 8, so 8 > 16 is false and bits() takes the
+// else branch (8); depth() has no else and its condition is false, so the
+// block does nothing and 3 is returned; the statement form in main prints
+// "wide build".
+const WIDE = true;
+const NARROW_BITS = 8;
+
+fn width() -> i64 {
+    comptime if WIDE {
+        return 64;
+    } else {
+        return missing_in_this_build();
+    }
+}
+
+fn bits() -> i64 {
+    comptime if NARROW_BITS > 16 {
+        return not_declared_either;
+    } else {
+        return NARROW_BITS;
+    }
+}
+
+fn depth() -> i64 {
+    comptime if !WIDE {
+        print("narrow");
+    }
+    return 3;
+}
+
+fn main() {
+    print(width());
+    print(bits());
+    print(depth());
+    comptime if WIDE {
+        print("wide build");
+    } else {
+        print("narrow build");
+    }
+}

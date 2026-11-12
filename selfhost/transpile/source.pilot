@@ -32,6 +32,7 @@ use selfhost.ir.verify.*;
 use selfhost.ir.passes.*;
 use selfhost.ir.interp.*;
 use selfhost.ir.main.*;
+use selfhost.transpile.static_data.*;
 use std.text;
 
 /// How one language spells PilIR.
@@ -146,6 +147,19 @@ pub interface ISourceDialect {
     /// and writes its `perceus_dup` and `perceus_drop` with `dup` and `drop`,
     /// and a store releases the value it replaces.
     fn counts_references() -> bool => false;
+    /// Whether the language lays constant lists of numbers out in the
+    /// program image (selfhost/transpile/static_data.pilot): it then
+    /// answers the four `static_` calls below.
+    fn lays_out_static_data() -> bool => false;
+    /// Static item for scalar constant `text` (as `int_lit`, `float_lit` or
+    /// `bool_lit` wrote it) of physics `p`.
+    fn static_scalar(text: str, p: IrTypePhysics) -> str? => none;
+    /// Lines declaring static list `name` holding `items` (static items).
+    fn static_list(name: str, items: List<str>) -> List<str> => [];
+    /// Static item for static list `name`.
+    fn static_list_value(name: str) -> str => "";
+    /// Declares module variable `name` already holding static item `value`.
+    fn static_global(name: str, value: str) -> str => "";
     /// The statement taking one more reference to `v`.
     fn dup(v: str) -> str => "";
     /// The statement releasing one reference to `v`.
@@ -247,6 +261,8 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
     if d.widens_mixed_kinds() { widen_mixed_kinds(m); }
     // Once every value's representation is final: which values the emitted
     // code holds references to depends on it.
+    let statics = if d.lays_out_static_data() { find_static_globals(m) } else { no_static_globals(m) };
+    drop_static_builds(m, statics);
     if d.counts_references() { insert_reference_counts(m, (p) => !is_scalar(p)); }
     for line in d.prelude() { u.out.push(line); }
     var protos: List<str> = [];
@@ -268,10 +284,20 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
     }
     for line in d.record_decls(laid, laid_fields) { u.out.push(line); }
     for line in d.string_pool(m.strings) { u.out.push(line); }
+    for li in static_order(statics) {
+        var items: List<str> = [];
+        for it in statics.lists[li].items { items.push(static_item_text(u, it)); }
+        for line in d.static_list(f"pilot_k{li}", items) { u.out.push(line); }
+    }
     var g = 0;
     while g < m.globals.len() {
         let name = f"g{g}";
         u.global_names.push(name);
+        if statics.root[g] >= 0 {
+            u.out.push(d.static_global(name, d.static_list_value(f"pilot_k{statics.root[g]}")));
+            g = g + 1;
+            continue;
+        }
         guard some decl = d.global_decl(name, m.globals[g].physics) else {
             return seam("emit.representation", f"the {d.language()} emitter has no module variables (global `{m.globals[g].name}`)");
         };
@@ -686,17 +712,47 @@ fn int_text(sf: SourceFn, v: i64, p: IrTypePhysics) -> str {
     return t;
 }
 
-/// Float constant `x` in decimal, as the seed shows it, with a `.` so every
-/// language reads a float.
-fn float_text(sf: SourceFn, x: f64, p: IrTypePhysics) -> str {
-    let d = sf.u.d;
+/// Static item `it` of a static list (selfhost/transpile/static_data.pilot).
+fn static_item_text(u: SourceUnit, it: StaticItem) -> str {
+    let d = u.d;
+    if it.list >= 0 { return d.static_list_value(f"pilot_k{it.list}"); }
+    let p = it.physics;
+    var text = "";
+    if it.opcode == op_const_float() {
+        text = float_digits(f64_from_bits(u.m.floats[it.pool]));
+        text = d.float_lit(text, p) ?? "";
+    } else {
+        let v = u.m.ints[it.pool];
+        if p.bit_width == 1 {
+            text = d.bool_lit(v != 0);
+        } else {
+            let digits = if p.reg_class == reg_class_gpr_unsigned() && v < 0 { f"{v as u64}" } else { f"{v}" };
+            text = d.int_lit(digits, p) ?? "";
+        }
+    }
+    guard some item = d.static_scalar(text, p) else {
+        return seam("emit.representation", f"the {d.language()} emitter has no static item of {p.bit_width} bits");
+    };
+    return item;
+}
+
+/// Float `x` in decimal, as the seed shows it, with a `.` so every language
+/// reads a float.
+fn float_digits(x: f64) -> str {
     var text = f"{x}";
     if x != x {
         text = "NaN";
     } else if text.find(".", 0) < 0 && text.find("inf", 0) < 0 {
         text = text + ".0";
     }
-    guard some t = d.float_lit(text, p) else {
+    return text;
+}
+
+/// Float constant `x` in decimal, as the seed shows it, with a `.` so every
+/// language reads a float.
+fn float_text(sf: SourceFn, x: f64, p: IrTypePhysics) -> str {
+    let d = sf.u.d;
+    guard some t = d.float_lit(float_digits(x), p) else {
         return seam("emit.representation", f"the {d.language()} emitter has no float literal of {p.bit_width} bits");
     };
     return t;
@@ -908,7 +964,8 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
         let cell = cell_of(sf, a[0]);
         let g = global_of(sf, cell);
         let held = cell_physics(sf, a[0], cell);
-        if g < 0 {
+        if g < 0 || m.globals[g].ready {
+            // A `ready` global is set before anything reads it.
             line(sf, d.assign(f"v{r}", d.represent(cell, held, want)));
         } else {
             let message = d.str_lit(f"`{m.globals[g].name}` is read before its declaration has run");

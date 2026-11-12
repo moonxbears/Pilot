@@ -1,0 +1,11 @@
+// HINT002: control reached `unreachable()`.
+fn name(d: i64) -> str {
+    if d == 0 { return "zero"; }
+    if d == 1 { return "one"; }
+    return unreachable();
+}
+
+fn main() {
+    print(name(1));
+    print(name(2));
+}

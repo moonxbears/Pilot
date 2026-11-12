@@ -340,6 +340,11 @@ pub struct IrFunction : IObject {
     pub value_physics: List<IrTypePhysics>;
     /// Span id -> byte offset of the source the instruction came from.
     pub spans:         List<i64>;
+    /// Whether the function takes nothing and gives the same value on every
+    /// call, which no caller changes (a `const` initializer, or a
+    /// zero-argument `pure` function): its result may be computed once and
+    /// shared (selfhost/ir/pass_const_eval.pilot).
+    pub once:          bool;
 }
 
 /// A layout the module's values use, named for printing.
@@ -362,6 +367,10 @@ pub struct IrRecord : IObject {
 pub struct IrGlobal : IValue {
     pub name:    str;
     pub physics: IrTypePhysics;
+    /// Whether `<start>` stores the global before anything can read it (a
+    /// constant computed while compiling), so a read needs no check that
+    /// its declaration has run.
+    pub ready:   bool;
 }
 
 /// A lowered program. Constants are pooled: an instruction names a pool
@@ -410,7 +419,7 @@ pub fn ir_add_record(m: IrModule, rec: IrRecord) {
 }
 
 pub fn ir_function_new(name: str, ret: IrTypePhysics) -> IrFunction {
-    return IrFunction { name: name, ret_physics: ret, blocks: [], operand_pool: [], value_physics: [], spans: [] };
+    return IrFunction { name: name, ret_physics: ret, blocks: [], operand_pool: [], value_physics: [], spans: [], once: false };
 }
 
 /// Adds an empty block to `f` and returns its id.

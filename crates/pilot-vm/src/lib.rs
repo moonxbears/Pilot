@@ -373,7 +373,14 @@ impl BytecodeCompiler {
                 .or_else(|| self.fn_entries.get(&bare))
                 .map(|&(e, _)| e);
             match entry {
-                Some(e) => self.instructions[idx] = Instruction::encode_wide(Opcode::Call, dst, e),
+                Some(e) => {
+                    // A `become` call keeps its tail-call opcode.
+                    let op = match self.instructions[idx].opcode() {
+                        Opcode::TailCall => Opcode::TailCall,
+                        _ => Opcode::Call,
+                    };
+                    self.instructions[idx] = Instruction::encode_wide(op, dst, e)
+                }
                 None => {
                     let message = format!("no function named `{full}`");
                     let c = self.add_constant(PilotVal::from_str(&message));

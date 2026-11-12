@@ -1,0 +1,6 @@
+error[STACK001]: `[Stack]` value `buf` lives in its function's frame and cannot be moved out of it
+err_stack_escape.pilot:5:12
+error[STACK001]: `[Stack]` value `buf` lives in its function's frame and cannot be moved out of it
+err_stack_escape.pilot:10:17
+error[STACK001]: `[Stack]` value `buf` lives in its function's frame and cannot be captured by a closure, which may outlive it
+err_stack_escape.pilot:16:18

@@ -1,0 +1,194 @@
+// ==============================================================================
+// FILE: selfhost/check/aliasing.pilot
+// ALIAS001: one place lent to a `var ref` parameter and reached another way
+// in the same call.
+// ISO001: an `iso` argument that is not a moved, unaliased owner.
+// ==============================================================================
+// A `var ref` parameter (any parameter written with the word registered as
+// "binding_mutable") is the only way the callee reaches the caller's value
+// while the call runs, so a backend may treat it as not aliased (C
+// `restrict`). Passing the same place, or a place inside it or around it, to
+// another parameter of the same call, or calling a method on it, breaks
+// that: ALIAS001. Places are compared by their root binding and the fields
+// and elements written after it; an element whose index is not an integer
+// literal may be any element.
+//
+// An `iso` parameter (the word registered as "perceus_isolated") takes its
+// argument isolated: the caller hands over the only reference to it. The
+// argument must be:
+//   - a fresh value (a call's result, a literal), or a local or by-value
+//     parameter of the caller (not a field or element of another value, not
+//     a global, not a parameter the caller was only lent, not a view);
+//   - unaliased: not passed again in the same call, and no binding that
+//     borrows from it is used after the call;
+//   - not used afterwards (until it is assigned a new value).
+pub lvl(0) pkg Pilot.SelfHost.Check.Aliasing;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.own.*;
+use selfhost.check.borrows.*;
+use selfhost.check.effects.*;
+
+/// The components of place `n`: its root (`b<binding>` or `g<name>`), then
+/// `.field` and `[index]` steps (`[*]` for an index that is not an integer
+/// literal). Empty when `n` is no place.
+pub fn place_path(e: Effects, n: i64) -> List<str> {
+    let s = e.inf.p.s;
+    if n < 0 { return []; }
+    let k = kind(s, n);
+    if k == nk_ident() {
+        let b = e.inf.r.ref_of[n];
+        if b >= 0 { return [f"b{b}"]; }
+        return if names_global(e, n) { ["g" + node_name(s, n)] } else { [] };
+    }
+    if k == nk_member() {
+        var out = place_path(e, lhs(s, n));
+        if out.len() > 0 { out.push("." + sym_text(s, rhs(s, n))); }
+        return out;
+    }
+    if k == nk_index() {
+        var out = place_path(e, lhs(s, n));
+        let i = rhs(s, n);
+        if out.len() > 0 { out.push(if i >= 0 && kind(s, i) == nk_int() { "[" + node_text(s, i) + "]" } else { "[*]" }); }
+        return out;
+    }
+    return [];
+}
+
+/// Whether two places may share storage: one is the other or lies inside it.
+pub fn paths_overlap(a: List<str>, b: List<str>) -> bool {
+    if a.len() == 0 || b.len() == 0 { return false; }
+    let n = if a.len() < b.len() { a.len() } else { b.len() };
+    var i = 0;
+    while i < n {
+        let x = a[i];
+        let y = b[i];
+        if x != y && !(x.starts_with("[") && y.starts_with("[") && (x == "[*]" || y == "[*]")) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// ALIAS001 on `call`: an argument lent to an exclusive parameter that
+/// another argument, or the receiver, also reaches.
+fn check_alias(e: Effects, call: i64, target: i64) {
+    let s = e.inf.p.s;
+    let args = call_args(s, call, target);
+    let ch = children(s, call);
+    let receiver = if ch.len() > 0 && kind(s, ch[0]) == nk_member() { lhs(s, ch[0]) } else { -1 };
+    for a in args {
+        let prm = a[1];
+        if prm < 0 || !is_exclusive_param(e, prm) { continue; }
+        let mine = place_path(e, a[0]);
+        if mine.len() == 0 { continue; }
+        var others: List<i64> = [];
+        for b in args { if b[0] != a[0] { others.push(b[0]); } }
+        if receiver >= 0 { others.push(receiver); }
+        for o in others {
+            if paths_overlap(mine, place_path(e, o)) {
+                sink_error(e.flow.sink, o, "ALIAS001",
+                    f"`{node_text(s, o)}` is also lent to `var ref` parameter `{node_name(s, prm)}` of `{callee_label(s, call)}`; a `var ref` argument must be the only way the call reaches its value");
+            }
+        }
+    }
+}
+
+/// The function-like node `n` sits in, or -1.
+fn owner_fn(p: Program, n: i64) -> i64 {
+    var at = p.parents[n];
+    while at >= 0 {
+        let k = kind(p.s, at);
+        if k == nk_fn() || k == nk_operator() || k == nk_lambda() { return at; }
+        at = p.parents[at];
+    }
+    return -1;
+}
+
+/// The first use of binding `b` that starts after `after` in function-like
+/// node `owner`, or -1.
+fn next_use(e: Effects, owner: i64, b: i64, after: i64) -> i64 {
+    let s = e.inf.p.s;
+    var best = -1;
+    for n in body_nodes(s, owner) {
+        if kind(s, n) != nk_ident() || e.inf.r.ref_of[n] != b || span_start(s, n) <= after { continue; }
+        if best < 0 || span_start(s, n) < span_start(s, best) { best = n; }
+    }
+    return best;
+}
+
+/// Whether identifier `n` is the target of an assignment (`x = ..`).
+fn assigned_here(p: Program, n: i64) -> bool {
+    let up = p.parents[n];
+    return up >= 0 && kind(p.s, up) == nk_assign() && lhs(p.s, up) == n;
+}
+
+/// Why argument `arg` cannot be passed to `iso` parameter `prm` of `call`,
+/// or "".
+fn iso_problem(e: Effects, bw: Borrows, call: i64, arg: i64, args: List<List<i64>>) -> str {
+    let inf = e.inf;
+    let p = inf.p;
+    let s = p.s;
+    let k = kind(s, arg);
+    let text = node_text(s, arg);
+    if k == nk_member() || k == nk_index() { return f"`{text}` is part of another value, which still reaches it"; }
+    if k != nk_ident() {
+        return if borrows_type(p, type_of(inf, arg)) { f"`{text}` borrows from another value" } else { "" };
+    }
+    let b = inf.r.ref_of[arg];
+    if b < 0 { return if names_global(e, arg) { f"`{text}` is a global, which the whole program reaches" } else { "" }; }
+    let site = inf.r.site[b];
+    if inf.r.bind_kind[b] == BindKind::Param && kind(s, site) == nk_param() && flags(s, site) != 0 && !is_iso_param(e, site) {
+        return f"`{text}` was only lent to this function";
+    }
+    if borrows_type(p, flow_binding_type(e.flow, b)) || borrows_element(e.flow, b) { return f"`{text}` borrows from another value"; }
+    for o in args {
+        if o[0] != arg && kind(s, o[0]) == nk_ident() && inf.r.ref_of[o[0]] == b { return f"`{text}` is passed to this call twice"; }
+    }
+    let owner = owner_fn(p, call);
+    if owner < 0 { return ""; }
+    for v in borrowers_of(bw, b) {
+        if next_use(e, owner, v, span_end(s, call)) >= 0 { return f"`{inf.r.name[v]}` borrows from `{text}` and is used after the call"; }
+    }
+    let later = next_use(e, owner, b, span_end(s, call));
+    if later >= 0 && !assigned_here(p, later) { return f"`{text}` is used after it was moved into the call"; }
+    return "";
+}
+
+/// ISO001 on `call`: each argument of an `iso` parameter.
+fn check_iso(e: Effects, bw: Borrows, call: i64, target: i64) {
+    let s = e.inf.p.s;
+    let args = call_args(s, call, target);
+    for a in args {
+        let prm = a[1];
+        if prm < 0 || a[0] < 0 || !is_iso_param(e, prm) { continue; }
+        let why = iso_problem(e, bw, call, a[0], args);
+        if why != "" {
+            sink_error(e.flow.sink, a[0], "ISO001",
+                f"`iso` parameter `{node_name(s, prm)}` of `{callee_label(s, call)}` takes a moved, unaliased owner: {why}");
+        }
+    }
+}
+
+/// ALIAS001 and ISO001 over the calls of the user's files.
+pub fn check_aliasing(inf: Infer, sink: DiagSink) {
+    let s = inf.p.s;
+    let f = flow_new(inf, sink);
+    let e = effects_new(f);
+    let bw = borrows_new(f);
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_call() && in_user_file(s, n) {
+            let target = call_target(f, n);
+            if target >= 0 {
+                check_alias(e, n, target);
+                check_iso(e, bw, n, target);
+            }
+        }
+        n = n + 1;
+    }
+}

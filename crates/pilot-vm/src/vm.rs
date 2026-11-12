@@ -362,6 +362,9 @@ impl PilVirtualMachine {
                     }
                 }
                 Opcode::Call => self.enter_call(ins.wide() as usize, ins.dst())?,
+                // The callee takes over this frame: its `Ret` returns to
+                // this frame's caller, so the call stack does not grow.
+                Opcode::TailCall => self.pc = ins.wide() as usize,
                 Opcode::CallClosure => {
                     let (entry, arity) = self.closure_target(r1)?;
                     if src2 != arity {

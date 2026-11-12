@@ -10,9 +10,9 @@
 //   int <index> <value>
 //   str <index> "<escaped text>"
 //   intrinsic <index> <engine operation>
-//   global <index> "<name>" <layout>
+//   global <index> "<name>" <layout> [ready]
 //   record <layout> <field layout>..        (a struct layout's fields, in order)
-//   fn <index> "<name>" -> <return layout> {
+//   fn <index> "<name>" [once] -> <return layout> {
 //     b<id>(v<n>:<layout>, ..):
 //       [v<n> =] <opcode>[.<subop>] <operands> :<layout> !<source offset>
 //   }
@@ -122,7 +122,7 @@ pub fn print_ir_module(m: IrModule) -> str {
     while i < m.intrinsics.len { lines.push(f"intrinsic {i} {m.intrinsics[i]}"); i = i + 1; }
     i = 0;
     while i < m.globals.len {
-        lines.push(f"global {i} " + quote_text(m.globals[i].name) + f" {m.globals[i].physics.layout_id}");
+        lines.push(f"global {i} " + quote_text(m.globals[i].name) + f" {m.globals[i].physics.layout_id}" + (if m.globals[i].ready { " ready" } else { "" }));
         i = i + 1;
     }
     for rec in m.records {
@@ -133,7 +133,7 @@ pub fn print_ir_module(m: IrModule) -> str {
     i = 0;
     while i < m.functions.len {
         let f = m.functions[i];
-        lines.push(f"fn {i} " + quote_text(f.name) + f" -> {f.ret_physics.layout_id}" + " {");
+        lines.push(f"fn {i} " + quote_text(f.name) + (if f.once { " once" } else { "" }) + f" -> {f.ret_physics.layout_id}" + " {");
         for b in f.blocks {
             var params: List<str> = [];
             for v in b.params { params.push(value_ref(v) + f":{f.value_physics[v].layout_id}"); }
@@ -284,10 +284,10 @@ fn parse_header(r: Reader, w: List<str>) {
         r.m.strings.push(unquote(w[2]));
     } else if tag == "intrinsic" && w.len() == 3 {
         r.m.intrinsics.push(w[2]);
-    } else if tag == "global" && w.len() == 4 {
+    } else if tag == "global" && (w.len() == 4 || (w.len() == 5 && w[4] == "ready")) {
         let l = number(r, w[3], "");
         if l < 0 || l >= r.m.layouts.len { let _ = fail(r, f"global `{w[2]}` names layout {l}, which is not declared"); return; }
-        r.m.globals.push(IrGlobal { name: unquote(w[2]), physics: r.m.layouts[l].physics });
+        r.m.globals.push(IrGlobal { name: unquote(w[2]), physics: r.m.layouts[l].physics, ready: w.len() == 5 });
     } else if tag == "record" && w.len() >= 2 {
         // `record <layout> <field layout>...`
         let l = number(r, w[1], "");
@@ -375,8 +375,11 @@ fn set_value_physics(f: IrFunction, v: u32, phy: IrTypePhysics) {
 }
 
 fn parse_function(r: Reader, w: List<str>) {
-    if w.len() != 6 || w[3] != "->" || w[5] != "{" { let _ = fail(r, "expected `fn <index> \"<name>\" -> <layout> {`"); return; }
-    let f = ir_function_new(unquote(w[2]), layout_physics(r, number(r, w[4], "")));
+    let once = w.len() == 7 && w[3] == "once";
+    let at = if once { 4 } else { 3 };
+    if w.len() != at + 3 || w[at] != "->" || w[at + 2] != "{" { let _ = fail(r, "expected `fn <index> \"<name>\" [once] -> <layout> {`"); return; }
+    let f = ir_function_new(unquote(w[2]), layout_physics(r, number(r, w[at + 1], "")));
+    f.once = once;
     r.m.functions.push(f);
     var b: u32 = 0;
     var has_block = false;

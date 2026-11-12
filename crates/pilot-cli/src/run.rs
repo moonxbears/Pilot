@@ -166,6 +166,9 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
             DropAction::ReplaceElement => {
                 out.element_replace.insert(key, (r.a.clone(), r.b.clone()));
             }
+            DropAction::ReceiverType => {
+                out.receivers.insert(key, r.a.clone());
+            }
             DropAction::Glue | DropAction::CopyGlue => {}
         }
     }
@@ -261,7 +264,10 @@ pub fn compile_entry(
         .arena
         .diagnostics
         .iter()
-        .map(|(span, msg)| locate(*span, codes::SYNTAX, msg))
+        .map(|(span, msg)| {
+            let (code, text) = leading_code(msg).unwrap_or((codes::SYNTAX, msg));
+            locate(*span, code, text)
+        })
         .collect();
     if !parse_diags.is_empty() {
         return Err(parse_diags);
@@ -280,6 +286,16 @@ pub fn compile_entry(
         source: Some(source),
         bin,
     })
+}
+
+/// A parser message that names its own code (`CTIME007: ..`): the code and
+/// the text after it.
+fn leading_code(msg: &str) -> Option<(&str, &str)> {
+    let (code, text) = msg.split_once(": ")?;
+    let letters = code.bytes().take_while(u8::is_ascii_uppercase).count();
+    let digits = code.len() - letters;
+    let shaped = letters >= 2 && digits == 3 && code[letters..].bytes().all(|b| b.is_ascii_digit());
+    shaped.then_some((code, text))
 }
 
 /// Runs a compiled program with the script arguments `args`. Runtime faults

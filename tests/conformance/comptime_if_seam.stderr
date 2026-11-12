@@ -1,0 +1,2 @@
+error[SEAM001]: unconnected seam `comptime_if.condition`
+comptime_if_seam.pilot:7:17

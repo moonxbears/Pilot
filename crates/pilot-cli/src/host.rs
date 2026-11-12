@@ -22,7 +22,7 @@
 use crate::check;
 use crate::run::{self, Diag, EXIT_FAILURE};
 use crate::tool;
-use pilot_vm::{HostOpHandler, HostValue};
+use pilot_vm::{codes, HostOpHandler, HostValue};
 
 fn diags(list: &[Diag]) -> HostValue {
     HostValue::List(list.iter().map(Diag::to_host).collect())
@@ -39,10 +39,24 @@ pub fn cli_host_ops() -> HostOpHandler {
                 .unwrap_or_default()
         };
         let result = match op {
-            "cli_check" => match run::compile(&text(0), None) {
-                Ok(_) => HostValue::List(Vec::new()),
-                Err(d) => diags(&d),
-            },
+            "cli_check" => {
+                // A seed limit the checker's run plan lifts (a method-call
+                // receiver whose type only the checker knows) is compiled
+                // again with that plan, given the checker's sources (1) and
+                // declarations (2), as `cli_run` compiles it.
+                let checker = texts(1);
+                let compiled = run::compile(&text(0), None).or_else(|d| {
+                    if checker.is_empty() || !d.iter().any(|x| x.code == codes::SEED) {
+                        return Err(d);
+                    }
+                    let plan = check::drop_plan(&text(0), &checker, &texts(2));
+                    run::compile_planned(&text(0), None, Some(&plan))
+                });
+                match compiled {
+                    Ok(_) => HostValue::List(Vec::new()),
+                    Err(d) => diags(&d),
+                }
+            }
             "cli_run" => {
                 let tail = text(2);
                 let tail = (!tail.is_empty()).then_some(tail.as_str());

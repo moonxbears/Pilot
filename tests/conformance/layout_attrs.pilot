@@ -1,0 +1,28 @@
+// `[Align(N)]` and `[Layout(packed)]` change where a struct's bytes sit,
+// not what it holds: the program reads and writes the fields as usual.
+// Copying a packed field into a local and lending the local is fine.
+[Align(16)]
+struct Slot {
+    pub key: i64;
+    pub value: i64;
+}
+
+[Layout(packed)]
+struct Header {
+    pub tag: u8;
+    pub size: u32;
+}
+
+fn next(ref n: u32) -> u32 => n + 1;
+
+fn main() {
+    let s = Slot { key: 3, value: 4 };
+    // 3 * 4 = 12.
+    print(s.key * s.value);
+    var h = Header { tag: 7, size: 40 };
+    let size = h.size;
+    h.size = next(size);
+    // 40 + 1 = 41.
+    print(h.size);
+    print(h.tag);
+}

@@ -1,0 +1,99 @@
+// ==============================================================================
+// FILE: selfhost/check/exits.pilot
+// TAIL001-TAIL003 (`become`) and FLOW006 (`errdefer`).
+// ==============================================================================
+// `become f(args);` hands the caller's frame to `f` (stdlib/core/syntax/
+// exits.pilot). That needs:
+//   TAIL001  a call after `become`: no other expression has a frame to take;
+//   TAIL002  nothing of the caller still to run: no `defer` or `errdefer`
+//            earlier in a block the `become` is inside;
+//   TAIL003  the callee returning the caller's type, since its value becomes
+//            the caller's value unchanged.
+// `errdefer` runs only when its block is left by a failure, so in a function
+// whose return type cannot carry one (no `op ?`) it would never run (FLOW006).
+pub lvl(0) pkg Pilot.SelfHost.Check.Exits;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.own.*;
+use selfhost.check.probes.*;
+
+/// `ReturnStmt.flags` of a `become` and `DeferStmt.flags` of an `errdefer`
+/// (crates/pilot-parser/src/exits.rs).
+fn tail_call_flag() -> i64 => 1;
+fn on_failure_flag() -> i64 => 1;
+
+/// Whether a `defer` or `errdefer` runs before node `n` leaves function `f`:
+/// one written earlier in any block that holds `n`.
+fn deferred_above(p: Program, n: i64, f: i64) -> bool {
+    let s = p.s;
+    var cur = n;
+    var par = p.parents[n];
+    while par >= 0 && par != f {
+        if kind(s, par) == nk_block() {
+            for c in children(s, par) {
+                if c == cur { break; }
+                if kind(s, c) == nk_defer() { return true; }
+            }
+        }
+        cur = par;
+        par = p.parents[par];
+    }
+    return false;
+}
+
+fn check_become(fl: Flow, sink: DiagSink, n: i64) {
+    let inf = fl.inf;
+    let p = inf.p;
+    let s = p.s;
+    let call = lhs(s, n);
+    if call < 0 || kind(s, call) != nk_call() {
+        sink_error(sink, n, "TAIL001", "`become` must be followed by a call to a function");
+        return;
+    }
+    let f = enclosing_fn(p, n);
+    if f < 0 { return; }
+    if deferred_above(p, n, f) {
+        sink_error(sink, n, "TAIL002", "`become` cannot hand over the frame while a `defer` or `errdefer` above it has still to run");
+        return;
+    }
+    let target = call_target(fl, call);
+    if target < 0 { return; }
+    let callee_t = fn_return_type(inf, target);
+    let caller_t = fn_return_type(inf, f);
+    if ty_is_unknown(p.tt, callee_t) || ty_is_unknown(p.tt, caller_t) { return; }
+    let callee_text = ty_display(p.tt, callee_t);
+    let caller_text = ty_display(p.tt, caller_t);
+    if callee_text != caller_text {
+        let callee = node_name(s, target);
+        let caller = node_name(s, f);
+        sink_error(sink, n, "TAIL003", f"`become` calls `{callee}`, which returns `{callee_text}`, but `{caller}` returns `{caller_text}`");
+    }
+}
+
+fn check_errdefer(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let f = enclosing_fn(p, n);
+    if f < 0 { return; }
+    if is_unwrappable(p, fn_return_type(inf, f)) { return; }
+    let name = node_name(p.s, f);
+    sink_error(sink, n, "FLOW006", f"`errdefer` never runs in `{name}`: its return type cannot carry a failure");
+}
+
+/// Reports TAIL001-TAIL003 and FLOW006 in the user's files.
+pub fn check_exits(inf: Infer, sink: DiagSink) {
+    let fl = flow_new(inf, sink);
+    let s = inf.p.s;
+    var n = 0;
+    while n < s.count {
+        if in_user_file(s, n) {
+            let k = kind(s, n);
+            if k == nk_return() && flags(s, n) == tail_call_flag() { check_become(fl, sink, n); }
+            if k == nk_defer() && flags(s, n) == on_failure_flag() { check_errdefer(inf, sink, n); }
+        }
+        n = n + 1;
+    }
+}

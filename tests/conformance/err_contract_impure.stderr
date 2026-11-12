@@ -1,0 +1,2 @@
+error[DBC002]: a contract clause of `twice` calls `note`, which is not `pure`
+err_contract_impure.pilot:11:34

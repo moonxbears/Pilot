@@ -1,0 +1,25 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/exits.pilot
+// HOW A FUNCTION IS LEFT: `errdefer` AND `become`
+// =========================================================================
+// `errdefer stmt` / `errdefer { .. }` is a `defer` that runs only when its
+// block is left by a failure: a `?` that propagates, or a `return` of a
+// value `?` would propagate. Leaving any other way skips it. It runs
+// last-in, first-out together with the block's `defer`s. It is a `defer`
+// node whose flags are 1.
+//
+// `become f(args);` is a guaranteed tail call: `f` takes over the caller's
+// frame and its value is the caller's value, so a chain of any length runs
+// in constant stack. The callee must return the caller's type (TAIL003),
+// it must be a call (TAIL001), and no `defer` or `errdefer` may still be
+// waiting to run (TAIL002). It is a `return` node whose flags are 1.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Exits;
+
+use Pilot.Core.Genesis.*;
+
+comptime {
+    __engine("bind_receptor", nameof(errdefer), 38, 0);
+    __engine("bind_receptor", nameof(become),   39, 0);
+}

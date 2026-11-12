@@ -1,0 +1,112 @@
+// ==============================================================================
+// FILE: selfhost/check/stack.pilot
+// STACK001: a `[Stack]` value that leaves the frame that made it.
+// ==============================================================================
+// `[Stack] let buf = [0, 0, 0, 0];` asks for the value to live in the
+// function's own frame instead of the heap (a backend may place it there;
+// the seed keeps it on the heap and behaves the same). It is gone when the
+// function returns, so nothing may carry it out. The rules reuse the
+// ownership and borrow facts (selfhost/check/own.pilot,
+// selfhost/check/borrows.pilot, the ESCAPE checks):
+//   - the binding moved anywhere (`return buf`, `let other = buf`, stored
+//     in a field, an element or a list, passed to a plain parameter): an
+//     owned value that moves leaves the frame's control;
+//   - a value that borrows from it returned, or stored where it outlives
+//     the function;
+//   - the binding captured by a closure, which may outlive the call.
+// Lending it to a `ref`/`var ref` parameter, reading its fields and calling
+// its methods keep it where it is.
+pub lvl(0) pkg Pilot.SelfHost.Check.Stack;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.own.*;
+use selfhost.check.borrows.*;
+
+/// The attribute that asks for frame placement.
+pub pure fn stack_attr() -> str => "Stack";
+
+/// Whether `let`/`var` node `n` is written `[Stack]`.
+pub fn is_stack_binding(p: Program, n: i64) -> bool {
+    if some _ = prog_attr_nodes(p, n, stack_attr()) { return true; }
+    return false;
+}
+
+fn has(xs: List<i64>, b: i64) -> bool {
+    for x in xs { if x == b { return true; } }
+    return false;
+}
+
+/// Whether node `n` lies inside a closure that sits inside function-like
+/// node `owner`.
+fn in_closure(p: Program, n: i64, owner: i64) -> bool {
+    var at = p.parents[n];
+    while at >= 0 && at != owner {
+        if kind(p.s, at) == nk_lambda() { return true; }
+        at = p.parents[at];
+    }
+    return false;
+}
+
+/// Whether place `target` (assigned to) outlives function-like `owner`: it
+/// is not rooted in one of the function's own bindings.
+fn outlives_fn(inf: Infer, target: i64, owner: i64) -> bool {
+    let s = inf.p.s;
+    var cur = target;
+    while cur >= 0 && (kind(s, cur) == nk_member() || kind(s, cur) == nk_index()) { cur = lhs(s, cur); }
+    if cur < 0 || kind(s, cur) != nk_ident() { return true; }
+    let b = inf.r.ref_of[cur];
+    if b < 0 { return true; }
+    if inf.r.owner[b] != owner { return true; }
+    let site = inf.r.site[b];
+    return inf.r.bind_kind[b] == BindKind::Param && kind(s, site) == nk_param() && flags(s, site) != 0;
+}
+
+fn report(sink: DiagSink, n: i64, name: str, how: str) {
+    sink_error(sink, n, "STACK001", f"`[Stack]` value `{name}` lives in its function's frame and {how}");
+}
+
+/// STACK001 for binding `b` (declared `[Stack]` in `owner`).
+fn check_binding(f: Flow, bw: Borrows, b: i64, owner: i64) {
+    let inf = f.inf;
+    let p = inf.p;
+    let s = p.s;
+    let name = inf.r.name[b];
+    var n = 0;
+    while n < s.count {
+        let k = kind(s, n);
+        if k == nk_ident() && inf.r.ref_of[n] == b {
+            if in_closure(p, n, owner) {
+                report(f.sink, n, name, "cannot be captured by a closure, which may outlive it");
+            } else if is_owned_binding(f, b) && is_move_position(f, n) {
+                report(f.sink, n, name, "cannot be moved out of it");
+            }
+        } else if k == nk_return() && lhs(s, n) >= 0 && kind(s, lhs(s, n)) != nk_ident() && has(expr_roots(bw, lhs(s, n)), b) {
+            report(f.sink, lhs(s, n), name, "cannot be returned, nor anything that borrows from it");
+        } else if k == nk_assign() && rhs(s, n) >= 0 && kind(s, rhs(s, n)) != nk_ident() && outlives_fn(inf, lhs(s, n), owner) && has(expr_roots(bw, rhs(s, n)), b) {
+            report(f.sink, rhs(s, n), name, "cannot be stored where it outlives the function, nor anything that borrows from it");
+        }
+        n = n + 1;
+    }
+}
+
+/// STACK001 over the `[Stack]` bindings of the user's files.
+pub fn check_stack(inf: Infer, sink: DiagSink) {
+    let r = inf.r;
+    let p = inf.p;
+    let s = p.s;
+    let f = flow_new(inf, sink);
+    let bw = borrows_new(f);
+    var b = 0;
+    while b < r.site.len() {
+        let site = r.site[b];
+        if r.bind_kind[b] == BindKind::Local && in_user_file(s, site) && is_stack_binding(p, site) && r.owner[b] >= 0 {
+            check_binding(f, bw, b, r.owner[b]);
+        }
+        b = b + 1;
+    }
+}

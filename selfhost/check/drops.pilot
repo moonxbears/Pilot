@@ -119,6 +119,10 @@ pub enum DropAction : u8 {
     /// made and before it is stored; the row names the collection's type,
     /// whose glue walks its elements.
     ReplaceElement,
+    /// The node is the receiver of a method call and has the named type
+    /// (selfhost/check/receivers.pilot); the seed reads it where it cannot
+    /// tell the receiver's type itself.
+    ReceiverType,
 }
 
 /// What planning the drops of one program keeps.

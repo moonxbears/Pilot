@@ -184,6 +184,9 @@ pub const UNARY_OP_DEEP_FLATTEN: u16 = 8;
 /// `some x = v` / `some v` as a condition: true when the value is present,
 /// binding it to `x`. The operand is `AssignStmt(x, v)` or the value itself.
 pub const UNARY_OP_SOME: u16 = 9;
+/// `old(e)` inside an `ensures` clause: `e`'s value when the function was
+/// entered (crates/pilot-parser/src/contracts.rs).
+pub const UNARY_OP_OLD: u16 = 10;
 
 pub const DECL_VIS_MASK: u16 = 0x000F;
 pub const DECL_FLAG_PARTIAL: u16 = 16;

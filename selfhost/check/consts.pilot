@@ -1,0 +1,352 @@
+// ==============================================================================
+// FILE: selfhost/check/consts.pilot
+// CONST001: changing a constant; where a constant is copied.
+// ==============================================================================
+// A `const` is known data: it is computed once and never changes, so every
+// engine may build it once and share it (selfhost/ir/pass_const_eval.pilot
+// computes it while compiling when it can). The result of a call to a
+// zero-argument `pure` function is the same every call and is treated the
+// same way. A place rooted in one of these (the constant itself, a field or
+// an element of it, a `for` variable walking it, or the call) is a constant
+// place:
+//   - changing it is CONST001: assigning a field or element through it, or
+//     calling a method on it that changes its receiver (a method marked
+//     `[Mutates]`, or one whose body assigns through its receiver or calls
+//     such a method on it);
+//   - using it by value (binding it, assigning it, returning it, putting it
+//     in a list or struct literal, passing it to a plain parameter the
+//     callee may change) gives a deep copy of its own (a `Copy` row whose
+//     type has no copy glue: the engines run `value_clone`). A plain
+//     parameter the callee only reads is passed without a copy.
+// Only values that own memory (lattice bit 1: lists, maps, owned records)
+// are copied; text and scalars never change and are shared as they are.
+pub lvl(0) pkg Pilot.SelfHost.Check.Consts;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.methods.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.own.*;
+
+/// What finding constant places keeps.
+pub struct ConstScan : IObject {
+    pub f: Flow;
+    /// Method declaration -> whether it changes its receiver: 1 yes, 0 no,
+    /// 2 being worked out (a method reached again through itself is taken as
+    /// not changing it on that path).
+    pub mutates: Map<str, i64>;
+    /// `fn@param` -> whether the function may change that parameter's value:
+    /// 1 yes, 0 no, 2 being worked out.
+    pub changes: Map<str, i64>;
+}
+
+fn key(n: i64) -> str => f"{n}";
+
+pub fn const_scan(f: Flow) -> ConstScan => ConstScan { f: f, mutates: Map<str, i64>(), changes: Map<str, i64>() };
+
+/// The top-level `const` identifier `n` names, or -1.
+fn const_decl_of(cs: ConstScan, n: i64) -> i64 {
+    let inf = cs.f.inf;
+    let s = inf.p.s;
+    let b = inf.r.ref_of[n];
+    if b >= 0 {
+        let site = inf.r.site[b];
+        if site >= 0 && kind(s, site) == nk_const() && inf.p.parents[site] >= 0 && kind(s, inf.p.parents[site]) == nk_program() { return site; }
+        return -1;
+    }
+    return global_const(inf, n);
+}
+
+/// Whether call `n` calls a zero-argument `pure` function whose result owns
+/// memory: the same value every call, so a constant.
+pub fn is_pure_result(cs: ConstScan, n: i64) -> bool {
+    let inf = cs.f.inf;
+    let s = inf.p.s;
+    if kind(s, n) != nk_call() || children(s, n).len() != 1 { return false; }
+    let target = called_fn(inf, n);
+    if target < 0 || fn_params(s, target).len() != 0 || !is_pure_decl(s, target) { return false; }
+    return owns(cs.f, type_of(inf, n));
+}
+
+/// The constant place `n` is rooted in (a `const` declaration, or a call
+/// giving a pure result), or -1.
+pub fn const_root(cs: ConstScan, n: i64) -> i64 {
+    let inf = cs.f.inf;
+    let s = inf.p.s;
+    if n < 0 { return -1; }
+    let k = kind(s, n);
+    if k == nk_ident() {
+        let d = const_decl_of(cs, n);
+        if d >= 0 { return d; }
+        let b = inf.r.ref_of[n];
+        // A `for` variable walking a constant is part of it.
+        if b >= 0 && inf.r.bind_kind[b] == BindKind::Loop && inf.r.source[b] >= 0 && inf.r.source[b] != n {
+            return const_root(cs, inf.r.source[b]);
+        }
+        return -1;
+    }
+    if k == nk_call() { return if is_pure_result(cs, n) { n } else { -1 }; }
+    if k == nk_member() || k == nk_index() { return const_root(cs, lhs(s, n)); }
+    return -1;
+}
+
+/// How CONST001 names root `root`.
+fn root_message(cs: ConstScan, root: i64) -> str {
+    let s = cs.f.inf.p.s;
+    if kind(s, root) == nk_call() {
+        let name = node_name(s, children(s, root)[0]) + "()";
+        return f"the value `{name}` gives is a constant and cannot be changed; copy it into a variable first (`var copy = {name};`)";
+    }
+    let name = node_name(s, root);
+    return f"`{name}` is a constant and cannot be changed; copy it into a variable first (`var copy = {name};`)";
+}
+
+// ------------------------------------------------------------------------------
+// What changes a value
+// ------------------------------------------------------------------------------
+
+/// Whether place `n` reaches into the receiver of the method it is in
+/// (`.x`, `self.xs[i]`).
+fn on_receiver(s: Snap, n: i64) -> bool {
+    var cur = n;
+    while cur >= 0 && (kind(s, cur) == nk_member() || kind(s, cur) == nk_index()) { cur = lhs(s, cur); }
+    return cur >= 0 && kind(s, cur) == nk_ident() && s.receiver.len() > 0 && node_name(s, cur) == s.receiver;
+}
+
+/// The nodes inside `n`, `n` first.
+fn subtree(s: Snap, n: i64, out: List<i64>) {
+    out.push(n);
+    for c in children(s, n) {
+        if c >= 0 { subtree(s, c, out); }
+    }
+}
+
+/// Whether method `m` changes the value it is called on.
+pub fn method_mutates(cs: ConstScan, m: i64) -> bool {
+    let p = cs.f.inf.p;
+    let s = p.s;
+    let k = key(m);
+    if cs.mutates.has(k) { return cs.mutates.get(k) == 1; }
+    if some _ = prog_attr_args(p, m, "Mutates") {
+        cs.mutates.set(k, 1);
+        return true;
+    }
+    cs.mutates.set(k, 2);
+    var nodes: List<i64> = [];
+    subtree(s, m, nodes);
+    var found = false;
+    for n in nodes {
+        if found { break; }
+        let nk = kind(s, n);
+        if nk == nk_assign() && on_receiver(s, lhs(s, n)) && (kind(s, lhs(s, n)) == nk_member() || kind(s, lhs(s, n)) == nk_index()) {
+            found = true;
+        } else if nk == nk_call() {
+            let ch = children(s, n);
+            if ch.len() > 0 && kind(s, ch[0]) == nk_member() && on_receiver(s, lhs(s, ch[0])) {
+                let target = call_target(cs.f, n);
+                if target >= 0 && target != m && method_mutates(cs, target) { found = true; }
+            }
+        }
+    }
+    cs.mutates.set(k, if found { 1 } else { 0 });
+    return found;
+}
+
+/// The method call whose receiver is place `cur`, or -1.
+fn receiver_call(s: Snap, parents: List<i64>, cur: i64) -> i64 {
+    let up = parents[cur];
+    if up < 0 || kind(s, up) != nk_member() || lhs(s, up) != cur { return -1; }
+    let call = parents[up];
+    if call < 0 || kind(s, call) != nk_call() || children(s, call)[0] != up { return -1; }
+    return call;
+}
+
+/// Where a use of a value at `n` goes: the outermost place built on it
+/// (`n.a[i]` for `n`) and the node that uses that place.
+fn outer_place(s: Snap, parents: List<i64>, n: i64) -> i64 {
+    var cur = n;
+    while true {
+        let up = parents[cur];
+        if up < 0 { return cur; }
+        let k = kind(s, up);
+        if (k == nk_member() || k == nk_index()) && lhs(s, up) == cur && receiver_call(s, parents, cur) < 0 {
+            cur = up;
+            continue;
+        }
+        return cur;
+    }
+    return cur;
+}
+
+/// Whether the use of the value at `n` changes it: an assignment through
+/// it, a call of a method that changes its receiver (directly or as a
+/// cascade step, `n..push(1)`, `n..x = 1`), or passing it to a `ref`, `var`
+/// or `iso` parameter the callee changes.
+fn use_changes(cs: ConstScan, n: i64) -> bool {
+    let inf = cs.f.inf;
+    let p = inf.p;
+    let s = p.s;
+    let cur = outer_place(s, p.parents, n);
+    let up = p.parents[cur];
+    if up >= 0 && kind(s, up) == nk_assign() && lhs(s, up) == cur && cur != n { return true; }
+    let call = receiver_call(s, p.parents, cur);
+    if call >= 0 {
+        let target = call_target(cs.f, call);
+        return target >= 0 && method_mutates(cs, target);
+    }
+    // Cascade steps all act on the receiver the first one is given.
+    let t = type_of(inf, cur);
+    var c = cur;
+    while p.parents[c] >= 0 && kind(s, p.parents[c]) == nk_cascade() && lhs(s, p.parents[c]) == c {
+        if step_changes(cs, rhs(s, p.parents[c]), t) { return true; }
+        c = p.parents[c];
+    }
+    if up >= 0 && (kind(s, up) == nk_call_arg() || kind(s, up) == nk_call()) {
+        let at = if kind(s, up) == nk_call() { up } else { p.parents[up] };
+        if at >= 0 && kind(s, at) == nk_call() && children(s, at)[0] != cur {
+            let target = call_target(cs.f, at);
+            if target >= 0 {
+                let prm = param_for(s, at, target, cur);
+                if prm >= 0 && !plain_param(s, prm) && param_changes(cs, target, prm) { return true; }
+            }
+        }
+    }
+    return false;
+}
+
+/// Whether cascade step `step` on a receiver of type `t` changes it: a
+/// field assignment, or a call of a method that changes its receiver.
+fn step_changes(cs: ConstScan, step: i64, t: i64) -> bool {
+    let s = cs.f.inf.p.s;
+    if step < 0 { return false; }
+    let k = kind(s, step);
+    if k == nk_assign() { return true; }
+    if k != nk_call() { return false; }
+    let callee = children(s, step)[0];
+    if kind(s, callee) != nk_ident() { return false; }
+    if some m = prog_member(cs.f.inf.p, t, node_name(s, callee)) {
+        let mk = kind(s, m.decl);
+        if mk == nk_fn() || mk == nk_operator() { return method_mutates(cs, m.decl); }
+    }
+    return false;
+}
+
+/// Whether function `fnode` may change the value passed for its parameter
+/// `prm`: it changes it, or lets it go where it could be changed (binds,
+/// returns or stores it, walks it with `for` binding values that own
+/// memory, passes it on to a parameter that may change it, hands it to the
+/// engine). A function with no body the checker can read may change it.
+pub fn param_changes(cs: ConstScan, fnode: i64, prm: i64) -> bool {
+    let inf = cs.f.inf;
+    let p = inf.p;
+    let s = p.s;
+    let k = f"{fnode}@{prm}";
+    if cs.changes.has(k) { return cs.changes.get(k) == 1; }
+    cs.changes.set(k, 2);
+    var nodes: List<i64> = [];
+    subtree(s, fnode, nodes);
+    var found = false;
+    for n in nodes {
+        if found { break; }
+        if kind(s, n) != nk_ident() { continue; }
+        let b = inf.r.ref_of[n];
+        if b < 0 || inf.r.site[b] != prm { continue; }
+        if use_changes(cs, n) || escapes(cs, n, true) { found = true; }
+    }
+    if !found && fn_body(s, fnode) < 0 { found = true; }
+    cs.changes.set(k, if found { 1 } else { 0 });
+    return found;
+}
+
+/// Whether the value at `n` goes where it could be changed later: bound,
+/// assigned, returned (an expression body included), stored, passed on to a
+/// parameter that may change it, handed to the engine, or used anywhere this
+/// does not know to only read it. Walking it with `for` binds its items;
+/// `items_free` says whether items that own memory could then be changed
+/// (true for a parameter; a constant's `for` variable is constant itself).
+fn escapes(cs: ConstScan, n: i64, items_free: bool) -> bool {
+    let inf = cs.f.inf;
+    let p = inf.p;
+    let s = p.s;
+    let cur = outer_place(s, p.parents, n);
+    if receiver_call(s, p.parents, cur) >= 0 { return false; }
+    let up = p.parents[cur];
+    if up < 0 { return false; }
+    let k = kind(s, up);
+    if k == nk_let() || k == nk_var() || k == nk_const() || k == nk_assign() { return rhs(s, up) == cur; }
+    if k == nk_for() { return items_free && owns(cs.f, element_type(p, type_of(inf, cur))); }
+    if k == nk_call_arg() || k == nk_call() {
+        let call = if k == nk_call() { up } else { p.parents[up] };
+        if call < 0 || kind(s, call) != nk_call() { return true; }
+        let target = call_target(cs.f, call);
+        if target < 0 { return true; }
+        let prm = param_for(s, call, target, cur);
+        // A `ref`/`var`/`iso` parameter the callee changes is CONST001 for a
+        // constant (use_changes); one it only reads takes the value as it is.
+        return prm < 0 || param_changes(cs, target, prm);
+    }
+    // Only read: an operand of an operator, a discarded statement, a loop
+    // condition, an index key.
+    if k == nk_binary() || k == nk_expr_stmt() || k == nk_while() { return false; }
+    if k == nk_index() && rhs(s, up) == cur { return false; }
+    return true;
+}
+
+/// The parameter of `target` that argument node `arg` of `call` is passed
+/// for, or -1.
+fn param_for(s: Snap, call: i64, target: i64, arg: i64) -> i64 {
+    let params = fn_params(s, target);
+    let ch = children(s, call);
+    var i = 1;
+    while i < ch.len() {
+        let c = ch[i];
+        if c == arg && i - 1 < params.len() { return params[i - 1]; }
+        if kind(s, c) == nk_call_arg() && rhs(s, c) == arg {
+            for prm in params {
+                if node_name(s, prm) == node_name(s, c) { return prm; }
+            }
+            return -1;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// ------------------------------------------------------------------------------
+// CONST001 and copies
+// ------------------------------------------------------------------------------
+
+/// Whether `n` starts a constant place: a constant's identifier or a call
+/// giving a pure result (the places built on them are reached from it).
+fn starts_place(cs: ConstScan, n: i64) -> i64 {
+    let k = kind(cs.f.inf.p.s, n);
+    if k != nk_ident() && k != nk_call() { return -1; }
+    return const_root(cs, n);
+}
+
+/// CONST001 for each change of a constant place in the user's files.
+pub fn check_consts(inf: Infer, sink: DiagSink) {
+    let cs = const_scan(flow_new(inf, sink));
+    let s = inf.p.s;
+    var n = 0;
+    while n < s.count {
+        if in_user_file(s, n) {
+            let root = starts_place(cs, n);
+            if root >= 0 && use_changes(cs, n) { sink_error(sink, n, "CONST001", root_message(cs, root)); }
+        }
+        n = n + 1;
+    }
+}
+
+/// Whether constant place `n`, used where it stands, needs a copy of its
+/// own: it is used by value and owns memory, and where it goes it could be
+/// changed (a plain parameter the callee only reads gets the constant).
+pub fn needs_const_copy(cs: ConstScan, n: i64, t: i64) -> bool {
+    let k = kind(cs.f.inf.p.s, n);
+    if k != nk_ident() && k != nk_member() && k != nk_index() && k != nk_call() { return false; }
+    if const_root(cs, n) < 0 || !owns(cs.f, t) { return false; }
+    return escapes(cs, n, false) && outer_place(cs.f.inf.p.s, cs.f.inf.p.parents, n) == n;
+}

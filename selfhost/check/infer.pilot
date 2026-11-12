@@ -28,13 +28,45 @@ pub struct Infer {
     pub r: Resolution;
     /// Node -> its type; -1 not computed yet, -2 being computed.
     pub memo: List<i64>;
+    /// Name -> the top-level `const` declarations of that name in the files
+    /// the program links.
+    pub consts: Map<str, List<i64>>;
 }
 
 pub fn infer_new(p: Program, r: Resolution) -> Infer {
     var memo: List<i64> = [];
     var i = 0;
     while i < p.s.count { memo.push(-1); i = i + 1; }
-    return Infer { p: p, r: r, memo: memo };
+    let consts = Map<str, List<i64>>();
+    i = 0;
+    while i < p.s.count {
+        if kind(p.s, i) == nk_program() && in_linked_file(p.s, i) {
+            for c in children(p.s, i) {
+                if kind(p.s, c) == nk_const() && lhs(p.s, c) >= 0 {
+                    let name = node_name(p.s, c);
+                    if !consts.has(name) { consts.set(name, []); }
+                    consts.get(name).push(c);
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return Infer { p: p, r: r, memo: memo, consts: consts };
+}
+
+/// The top-level `const` identifier `n` names when no local binding covers
+/// it (the only one of that name, or the one in `n`'s file), or -1.
+pub fn global_const(inf: Infer, n: i64) -> i64 {
+    let s = inf.p.s;
+    if inf.r.ref_of[n] >= 0 { return -1; }
+    let name = node_name(s, n);
+    if !inf.consts.has(name) { return -1; }
+    let found = inf.consts.get(name);
+    if found.len() == 1 { return found[0]; }
+    for d in found {
+        if unit_of(s, d) == unit_of(s, n) { return d; }
+    }
+    return -1;
 }
 
 /// The operator symbols whose declarations the checker reads.
@@ -371,6 +403,11 @@ fn compute(inf: Infer, n: i64) -> i64 {
             if !is_receiver || !ty_is_unknown(p.tt, bt) { return bt; }
         }
         if is_receiver { return receiver_type(inf, n); }
+        let c = global_const(inf, n);
+        if c >= 0 {
+            if annot(s, c) >= 0 { return prog_annot_type(p, annot(s, c)); }
+            if rhs(s, c) >= 0 { return type_of(inf, rhs(s, c)); }
+        }
         return ty_unknown();
     }
     if k == nk_call() { return call_type(inf, n); }

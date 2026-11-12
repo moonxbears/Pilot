@@ -1,0 +1,16 @@
+// KNOWN BUG seed.ok_result_members: a `T ! E` value has the members of
+// `result` (stdlib/core/result.pilot) whether it holds a success or a
+// failure: `half(4)` is a success, so `.is_err` is false and `.is_ok` true;
+// `half(3)` is a failure, so `.is_err` is true. The seed keeps a success as
+// the bare value, so reading a member of it stops with "cannot read
+// `is_err` from integer". PilIR's interpreter prints false, true, true.
+fn half(n: i64) -> i64 ! str {
+    if n % 2 != 0 { return res<i64, str>.err("odd"); }
+    return n / 2;
+}
+
+fn main() {
+    print(half(4).is_err);
+    print(half(4).is_ok);
+    print(half(3).is_err);
+}

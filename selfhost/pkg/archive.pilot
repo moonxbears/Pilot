@@ -25,7 +25,7 @@ pub pure fn archive_detect_format(archive_blob: str) -> ArchiveFormat {
     return ::PilPkgV1;
 }
 
-fn ar_find(haystack: str, needle: str, start: i64) -> i64 {
+pure fn ar_find(haystack: str, needle: str, start: i64) -> i64 {
     let hl = haystack.len();
     let nl = needle.len();
     if nl == 0 || start < 0 || start + nl > hl { return -1; }

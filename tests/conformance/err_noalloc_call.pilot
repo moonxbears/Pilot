@@ -1,0 +1,9 @@
+// NOALLOC001: a `noalloc` function may only call functions that are
+// `noalloc` themselves.
+fn helper(n: i64) -> i64 => n + 1;
+
+noalloc fn twice(n: i64) -> i64 => helper(helper(n));
+
+fn main() {
+    print(twice(1));
+}

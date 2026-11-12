@@ -46,6 +46,8 @@ pub enum DropAction {
     Moved = 11,
     Discard = 12,
     ReplaceElement = 13,
+    /// The node is a method-call receiver of the named type.
+    ReceiverType = 14,
 }
 
 impl DropAction {
@@ -65,6 +67,7 @@ impl DropAction {
             Self::Moved,
             Self::Discard,
             Self::ReplaceElement,
+            Self::ReceiverType,
         ]
             .into_iter()
             .find(|a| *a as i64 == code)
@@ -136,6 +139,10 @@ pub struct DropPlan {
     pub element_replace: HashMap<NodeKey, (String, String)>,
     /// The value-type fields a copy of each value type copies too.
     pub copy_glue: HashMap<String, Vec<(String, String)>>,
+    /// Method-call receivers, with the type the checker inferred for each
+    /// (selfhost/check/receivers.pilot). Dispatch reads one only where the
+    /// seed does not know the receiver's type itself.
+    pub receivers: HashMap<NodeKey, String>,
 }
 
 impl DropPlan {
@@ -151,6 +158,7 @@ impl DropPlan {
             && self.copies.is_empty()
             && self.discards.is_empty()
             && self.element_replace.is_empty()
+            && self.receivers.is_empty()
     }
 }
 
@@ -159,6 +167,8 @@ impl DropPlan {
 pub(crate) enum Deferred {
     /// A `defer` statement.
     Stmt(NodeId),
+    /// An `errdefer` statement: run only when the block is left by a failure.
+    OnFailure(NodeId),
     /// Releasing a scoped guard.
     Drop(DropItem),
     /// A probe the checker planned to run on the block's way out
@@ -185,6 +195,11 @@ fn key_of(arena: &AstArena, id: NodeId) -> NodeKey {
 }
 
 impl BytecodeCompiler {
+    /// The type the checker inferred for method-call receiver `id`, if any.
+    pub(crate) fn planned_receiver(&self, arena: &AstArena, id: NodeId) -> Option<String> {
+        self.drop_plan.as_ref()?.receivers.get(&key_of(arena, id)).cloned()
+    }
+
     pub(crate) fn set_drop_plan(&mut self, plan: DropPlan) {
         if !plan.is_empty() {
             self.drop_plan = Some(Rc::new(plan));
@@ -307,6 +322,12 @@ impl BytecodeCompiler {
     /// A copy of the value in register `r`, of value type `ty`, in a new
     /// register.
     fn emit_copy_value(&mut self, r: u8, ty: &str, depth: usize) -> u8 {
+        // Every value type the plan copies has copy glue (even with no
+        // fields); a copy of any other type is a constant's, made deeply
+        // (selfhost/check/consts.pilot).
+        if self.drop_plan.as_ref().is_some_and(|p| !p.copy_glue.contains_key(ty)) {
+            return self.emit_intrinsic("value_clone", &[r]);
+        }
         let copy = self.emit_intrinsic("record_copy", &[r]);
         if depth > MAX_GLUE_DEPTH {
             self.emit_trap(format!(

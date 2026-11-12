@@ -460,6 +460,27 @@ pub struct CFamilyDialect : ISourceDialect {
     }
     pub fn pooled_text(index: i64) -> str? => if .carries_dynamic() { f"PILOT_V_STATIC_VAL(pilot_s{index})" } else { none };
     pub fn counts_references() -> bool => self.carries_dynamic();
+    // A constant list of numbers is a static pilot_v_list whose count never
+    // reaches 0 (PILOT_RC_STATIC), so it is never freed nor counted live.
+    pub fn lays_out_static_data() -> bool => self.carries_dynamic();
+    pub fn static_scalar(text: str, p: IrTypePhysics) -> str? {
+        if text == "" { return none; }
+        if is_bool(p) { return "{ .tag = PILOT_V_BOOL, .as.b = " + text + " }"; }
+        if is_float(p) { return "{ .tag = PILOT_V_FLOAT, .as.f = " + text + " }"; }
+        if is_int(p) && is_signed(p) { return "{ .tag = PILOT_V_INT, .as.i = " + text + " }"; }
+        if is_int(p) { return "{ .tag = PILOT_V_UINT, .as.u = " + text + " }"; }
+        return none;
+    }
+    pub fn static_list(name: str, items: List<str>) -> List<str> {
+        let n = items.len();
+        if n == 0 { return [f"static pilot_v_list {name} = " + "{ PILOT_RC_STATIC, 0, 0, NULL };"]; }
+        return [
+            f"static pilot_val {name}_items[{n}] = " + "{ " + text.join_text(items, ", ") + " };",
+            f"static pilot_v_list {name} = " + "{ " + f"PILOT_RC_STATIC, {n}, {n}, {name}_items" + " };",
+        ];
+    }
+    pub fn static_list_value(name: str) -> str => "{ .tag = PILOT_V_LIST, .as.l = &" + name + " }";
+    pub fn static_global(name: str, value: str) -> str => f"static pilot_val {name} = {value};";
     pub fn dup(v: str) -> str => f"pilot_v_dup({v});";
     pub fn drop(v: str) -> str => f"pilot_v_drop({v});";
 
@@ -517,7 +538,7 @@ fn value_entry_name(name: str) -> str => "pilot_fv_" + name;
 fn engine_arity() -> Map<str, i64> {
     let ops = Map<str, i64>();
     for name in ["list_new", "map_new", "proc_args", "stdin_read_line"] { ops.set(name, 0); }
-    for name in ["is_null", "to_str", "list_pop", "str_len", "str_from_bytes", "map_values", "str_trim"] { ops.set(name, 11); }
+    for name in ["is_null", "to_str", "list_pop", "str_len", "str_from_bytes", "map_values", "str_trim", "value_clone"] { ops.set(name, 11); }
     for name in [
         "list_get", "map_get", "map_has", "map_remove", "list_push", "num_pow", "str_byte_at", "list_remove_at",
         "str_contains", "str_starts_with", "str_ends_with",

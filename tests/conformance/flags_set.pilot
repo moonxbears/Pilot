@@ -1,0 +1,30 @@
+// `[Flags]` enums: each variant one bit, sets of them in a `FlagSet`
+// (stdlib/core/flags.pilot).
+use Pilot.Core.Flags;
+
+[Flags]
+enum Perm : u32 {
+    None = 0,
+    Read = 1,
+    Write = 2,
+    Exec = 4,
+}
+
+fn main() {
+    let rw: FlagSet<Perm> = flag_set(Perm::Read).with(Perm::Write);
+    // Read | Write = 1 + 2 = 3.
+    print(rw.bits);
+    print(rw.has(Perm::Write));
+    print(rw.has(Perm::Exec));
+    // 3 ^ 1 = 2.
+    let w: FlagSet<Perm> = rw.toggled(Perm::Read);
+    print(w.bits);
+    // 3 | 4 = 7; 7 & 4 = 4; 7 without Write = 5; 7 ^ 3 = 4.
+    let all: FlagSet<Perm> = rw.union(flag_set(Perm::Exec));
+    print(all.bits);
+    print(all.intersect(flag_set(Perm::Exec)).bits);
+    print(all.without(Perm::Write).bits);
+    print(all.difference(rw).bits);
+    print(flag_set(Perm::None).is_empty());
+    print(w.overlaps(rw));
+}

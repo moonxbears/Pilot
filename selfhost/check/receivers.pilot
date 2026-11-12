@@ -1,0 +1,44 @@
+// ==============================================================================
+// FILE: selfhost/check/receivers.pilot
+// The types of method-call receivers, for the seed's dispatch.
+// ==============================================================================
+// The seed picks the method a call `recv.m(..)` runs from the receiver's
+// type. It knows that type for an annotated binding, a parameter and a plain
+// function call, but not for a literal (`5.m()`), an unannotated binding
+// (`let s = "x"; s.m()`) or another method call's result (`a.f().m()`), and
+// when several types declare `m` it cannot choose. The checker has inferred
+// every one of them (literals by their receptor slot), so the run plan names
+// the receiver's type: one `ReceiverType` row per method call in the user's
+// files whose receiver has a named type, `[action, span start, span end,
+// node kind, type name, ""]` for the receiver node.
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Check.Receivers;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.infer.*;
+use selfhost.check.drops.*;
+
+/// Adds a `ReceiverType` row to `rows` for each method call of the user's
+/// files whose receiver's type is named.
+pub fn plan_receivers(inf: Infer, rows: List<List<any>>) {
+    let p = inf.p;
+    let s = p.s;
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_call() && in_user_file(s, n) {
+            let ch = children(s, n);
+            if ch.len() > 0 && kind(s, ch[0]) == nk_member() {
+                let recv = lhs(s, ch[0]);
+                if recv >= 0 {
+                    let t = type_of(inf, recv);
+                    if ty_is_named(p.tt, t) {
+                        let name = node_name(s, ty_decl(p.tt, t));
+                        rows.push([DropAction::ReceiverType as i64, span_start(s, recv), span_end(s, recv), kind(s, recv), name, ""]);
+                    }
+                }
+            }
+        }
+        n = n + 1;
+    }
+}

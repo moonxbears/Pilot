@@ -144,7 +144,7 @@ pub pure fn glob_matches(glob: str, path: str) -> bool {
     return glob_match_at(glob, 0, path, 0);
 }
 
-fn glob_match_at(glob: str, gi: i64, path: str, pi: i64) -> bool {
+pure fn glob_match_at(glob: str, gi: i64, path: str, pi: i64) -> bool {
     let gn = glob.len();
     let pn = path.len();
     if gi == gn { return pi == pn; }

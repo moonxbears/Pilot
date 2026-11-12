@@ -32,6 +32,14 @@ impl BytecodeCompiler {
             .map(|&(_, is_static)| is_static)
     }
 
+    /// How many types other than structs (primitives, through `ext`
+    /// blocks) declare instance method `method`.
+    pub(crate) fn non_struct_owners(&self, method: &str) -> usize {
+        self.method_owners
+            .get(method)
+            .map_or(0, |v| v.iter().filter(|(o, st)| !st && !self.structs.contains_key(o)).count())
+    }
+
     /// Whether `owner` is an interface that declares `method`, itself or
     /// through an interface it extends.
     fn interface_declares(&self, arena: &AstArena, owner: &str, method: &str) -> bool {

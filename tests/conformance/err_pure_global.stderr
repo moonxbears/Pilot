@@ -1,0 +1,2 @@
+error[PURE001]: `pure` function `counted` writes the global `calls`
+err_pure_global.pilot:5:5

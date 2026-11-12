@@ -27,6 +27,7 @@ use selfhost.check.methods.*;
 use selfhost.check.infer.*;
 use selfhost.check.own.*;
 use selfhost.check.drops.*;
+use selfhost.check.consts.*;
 
 /// Whether `t` is a struct that declares itself a value type and stores
 /// fields of its own (a scalar such as an integer stores none: it is one
@@ -110,12 +111,19 @@ pub fn plan_copies(pl: DropPlanner) {
     let p = inf.p;
     let s = p.s;
     let count = s.nodes.len() / 9;
+    let cs = const_scan(pl.flow);
     var n = 0;
     while n < count {
-        if is_place(kind(s, n)) && in_user_file(s, n) {
+        let k = kind(s, n);
+        if (is_place(k) || k == nk_call()) && in_user_file(s, n) {
             let t = type_of(inf, n);
-            if declares_value(p, t) && copy_position(pl.flow, n) {
+            if is_place(k) && declares_value(p, t) && copy_position(pl.flow, n) {
                 copy_glue(pl, t);
+                pl.cur_binding = -1;
+                pl.cur_type = t;
+                row(pl, ::Copy, n, ty_display(p.tt, t), "");
+            } else if !declares_value(p, t) && needs_const_copy(cs, n, t) {
+                // A constant's value, copied deeply: no copy glue.
                 pl.cur_binding = -1;
                 pl.cur_type = t;
                 row(pl, ::Copy, n, ty_display(p.tt, t), "");

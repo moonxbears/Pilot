@@ -1,0 +1,60 @@
+// =========================================================================
+// FILE: stdlib/core/flags.pilot
+// BIT-FLAG SETS OVER `[Flags]` ENUMS
+// =========================================================================
+// `[Flags] enum Perm : u32 { Read = 1, Write = 2, Exec = 4, }` declares an
+// enum whose variants are single bits of the type it is declared over. The
+// checker holds it to that (selfhost/check/layout_attrs.pilot):
+//   FLAGS001  more single-bit variants than the type has bits, or a bit the
+//             type does not have;
+//   FLAGS002  a variant whose value is neither 0 nor a single bit (write
+//             each value: `Write = 2`; counting on from the variant before
+//             gives 0, 1, 2, 3, ..).
+// A set of flags is a `FlagSet<E>`: one value holding the bits, built with
+// `flag_set(E::Read)` and grown with `with`. It is a 0b00 value: copying it
+// copies the bits.
+//
+// Not yet: `|`, `&`, `^` and `!` written directly between enum values (the
+// seed does not dispatch a declared binary operator to a struct, and an
+// enum cannot take an interface base or a method PilIR lowers); the methods
+// below do the same work.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Flags;
+
+use Pilot.Core.Interfaces.*;
+
+/// A set of the flags of `[Flags]` enum `E`.
+pub struct FlagSet<E: IAnyValue> : IValue {
+    /// The set's bits; bit k is set when the flag whose value is 2^k is in.
+    pub bits: u64;
+
+    /// Whether every bit of `flag` is in the set.
+    pub fn has(flag: E) -> bool => (.bits & (flag as u64)) == (flag as u64);
+
+    /// Whether the set and `other` share a flag.
+    pub fn overlaps(other: FlagSet<E>) -> bool => (.bits & other.bits) != 0;
+
+    /// The set with `flag` added.
+    pub fn with(flag: E) -> FlagSet<E> => FlagSet<E> { bits: .bits | (flag as u64) };
+
+    /// The set with `flag` taken out.
+    pub fn without(flag: E) -> FlagSet<E> => FlagSet<E> { bits: .bits ^ (.bits & (flag as u64)) };
+
+    /// The set with `flag` flipped: added when absent, taken out when present.
+    pub fn toggled(flag: E) -> FlagSet<E> => FlagSet<E> { bits: .bits ^ (flag as u64) };
+
+    /// The flags in either set (`a | b`).
+    pub fn union(other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits | other.bits };
+
+    /// The flags in both sets (`a & b`).
+    pub fn intersect(other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits & other.bits };
+
+    /// The flags in exactly one of the sets (`a ^ b`).
+    pub fn difference(other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits ^ other.bits };
+
+    /// Whether no flag is in the set.
+    pub fn is_empty() -> bool => .bits == 0;
+}
+
+/// The set holding just `flag`.
+pub fn flag_set<E: IAnyValue>(flag: E) -> FlagSet<E> => FlagSet<E> { bits: flag as u64 };

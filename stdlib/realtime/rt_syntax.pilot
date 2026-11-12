@@ -7,7 +7,9 @@ pub pkg Pilot.Realtime.Syntax;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("register_modifier", nameof(noalloc), nameof(effect_async));
+    // `noalloc fn f()`: the function takes no heap memory (NOALLOC001,
+    // selfhost/check/noalloc.pilot). It is no `async` effect.
+    __engine("register_modifier", nameof(noalloc), "effect_noalloc");
 }
 
 pub struct RealtimeScopeGuard : IGuard {

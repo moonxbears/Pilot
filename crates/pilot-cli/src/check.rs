@@ -23,7 +23,7 @@
 //! | 10 | the enumeration protocol `for` uses: `[get, move next, current]` member names, or empty |
 //! | 11 | properties, `[field node, number of accessor bodies, accessor block node]` each; the block lists the getters first, their count in its `flags` |
 //! | 12 | the receiver words: `[receiver, accessor backing storage, setter value]` (`bind_receiver_ident`), empty strings when unbound |
-//! | 13 | declarations, `[node, is partial, is static, visibility tier or -1 when none is written, is package declaration]` each |
+//! | 13 | declarations, `[node, is partial, is static, visibility tier or -1 when none is written, is package declaration, is pure]` each |
 //! | 14 | field defaults and explicit enum values, `[field node, value node]` each |
 //! | 15 | switch arm guards (`case x if x < 0`), `[arm node, guard node]` each |
 //! | 16 | property setters, `[setter body node, parameter node, guard node]` each (`set(v: T) if cond => ..`) |
@@ -36,7 +36,7 @@ use crate::link::LinkedSource;
 use crate::run::{self, Diag};
 use crate::tool;
 use pilot_ast::{
-    AstArena, NodeId, NodeKind, DECL_FLAG_PARTIAL, DECL_FLAG_PKG, DECL_FLAG_STATIC,
+    AstArena, NodeId, NodeKind, DECL_FLAG_PARTIAL, DECL_FLAG_PKG, DECL_FLAG_PURE, DECL_FLAG_STATIC,
     DECL_FLAG_VIS_WRITTEN, DECL_VIS_MASK,
 };
 use pilot_span::ByteSpan;
@@ -231,6 +231,7 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
                     -1
                 },
                 i64::from(f & DECL_FLAG_PKG != 0),
+                i64::from(f & DECL_FLAG_PURE != 0),
             ])
         })
         .collect();

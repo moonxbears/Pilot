@@ -1,0 +1,2 @@
+error[TAIL001]: `become` must be followed by a call to a function
+err_become_not_call.pilot:4:5

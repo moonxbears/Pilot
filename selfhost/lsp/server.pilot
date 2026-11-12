@@ -9,7 +9,7 @@ use std.text;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-fn lsp_find_substr(haystack: str, needle: str, start_pos: i64) -> i64 {
+pure fn lsp_find_substr(haystack: str, needle: str, start_pos: i64) -> i64 {
     let h_len = haystack.len();
     let n_len = needle.len();
     if n_len == 0 || start_pos < 0 || start_pos + n_len > h_len {
@@ -100,7 +100,7 @@ fn lsp_extract_json_int_field(json_str: str, key: str) -> i64 {
     return lsp_parse_int_at(json_str, idx + pat.len());
 }
 
-fn lsp_escape_json_str(s: str) -> str {
+pure fn lsp_escape_json_str(s: str) -> str {
     let n = s.len();
     var out: List<str> = [];
     var i = 0;
@@ -146,7 +146,7 @@ fn lsp_position_to_offset(doc: str, line: i64, character: i64) -> i64 {
     return if character < n { character } else { n - 1 };
 }
 
-fn lsp_extract_hover_signature(doc: str, offset: i64) -> str {
+pure fn lsp_extract_hover_signature(doc: str, offset: i64) -> str {
     let n = doc.len();
     if n == 0 {
         return "";

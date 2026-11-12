@@ -1,0 +1,22 @@
+// ISO001: an `iso` argument must be a moved, unaliased owner that the
+// caller does not use afterwards.
+struct Box {
+    pub items: List<i64>;
+}
+
+fn total(iso xs: List<i64>) -> i64 {
+    var t = 0;
+    for x in xs { t = t + x; }
+    return t;
+}
+
+fn lent(ref xs: List<i64>) -> i64 => total(xs);
+
+fn main() {
+    let a = [1, 2];
+    print(total(a));
+    print(a.len());
+    let b = Box { items: [3] };
+    print(total(b.items));
+    print(lent([4]));
+}

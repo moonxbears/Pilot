@@ -205,7 +205,7 @@ pub partial struct {
     [KeywordDefAttr(0, "Schedules cleanup expressions at block exit.")]
     defer {}
 
-    [KeywordDefAttr(0, "Evaluates expressions at compile time.")]
+    [KeywordDefAttr(0, "Evaluates expressions at compile time; `comptime if` picks a branch while compiling and drops the other before it is checked.")]
     comptime {}
 
     [KeywordDefAttr(0, "Captures Pilot AST expressions.")]
@@ -238,6 +238,12 @@ pub partial struct {
 
     [KeywordDefAttr(1, "Advances execution to the next loop iteration.")]
     continue {}
+
+    [KeywordDefAttr(1, "Schedules cleanup that runs only when a failure leaves the block (a failing `?`, or returning a failed value).")]
+    errdefer {}
+
+    [KeywordDefAttr(1, "Guaranteed tail call: the callee takes over the caller's frame, so a chain of any length runs in constant stack.")]
+    become {}
 
     [KeywordDefAttr(1, "Early exit guard assertion evaluating else branch on false.")]
     guard {}

@@ -262,8 +262,13 @@ fn drop_elements(lw: Lowerer, whole: u32, et: i64, ops: List<str>, n: i64, depth
 }
 
 /// A copy of `v`, a value of value type `t`: a new value of its layout
-/// holding its fields, the value-type ones copied too.
+/// holding its fields, the value-type ones copied too. A value of any other
+/// type is copied only when it is a constant's (selfhost/check/consts.pilot):
+/// deeply, by the engine operation `value_clone`.
 fn copy_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) -> u32 {
+    if depth == 0 && !declares_value(lw.inf.p, t) {
+        return emit(lw, op_call_intrinsic(), intrinsic_index(lw, "value_clone"), lw.f.value_physics[v], [v], n);
+    }
     if depth > max_glue_depth() {
         emit_trap(lw, f"internal error: the copy glue of `{ty_display(lw.inf.p.tt, t)}` nests more than {max_glue_depth()} levels of fields", n);
         ensure_open(lw);

@@ -254,6 +254,7 @@ pub fn cli_emit_files(lang: str) -> List<str> {
     var files = cli_ir_files();
     files.push("selfhost/ir/pass_perceus.pilot");
     files.push("stdlib/core/byte_rank.pilot");
+    files.push("selfhost/transpile/static_data.pilot");
     files.push("selfhost/transpile/source.pilot");
     files.push("selfhost/transpile/c_family.pilot");
     files.push(f"selfhost/transpile/emit_{lang}.pilot");
@@ -316,6 +317,7 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/passes.pilot",
         "selfhost/ir/pass_fold.pilot",
         "selfhost/ir/pass_dce.pilot",
+        "selfhost/ir/pass_const_eval.pilot",
         "selfhost/ir/text.pilot",
         "selfhost/ir/fault.pilot",
         "selfhost/ir/interp.pilot",

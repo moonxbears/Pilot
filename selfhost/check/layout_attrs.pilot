@@ -1,0 +1,199 @@
+// ==============================================================================
+// FILE: selfhost/check/layout_attrs.pilot
+// LAYOUT001-LAYOUT003: `[Align(N)]` and `[Layout(packed)]` on a struct.
+// FLAGS001-FLAGS002: the variants of a `[Flags]` enum.
+// ==============================================================================
+// `[Align(N)]` places every value of the struct at an address that is a
+// multiple of N bytes; `[Layout(packed)]` lays its fields out with no
+// padding, so a field may sit at any address. The checker reports:
+//   LAYOUT001  `[Align(N)]` whose N is not a constant power of two;
+//   LAYOUT002  a field of a packed struct lent to a parameter (`ref`, `var`,
+//              `iso`): the callee would reach a value that may not be
+//              aligned for its type; copy the field into a local first;
+//   LAYOUT003  `[Layout(packed)]` and `[Align(N)]` with N > 1 on one type.
+// `type_align_pow2` and `type_is_packed` give the facts for the layout table
+// (selfhost/ir/layouts.pilot `align_pow2`) and the emitters to read.
+//
+// `[Flags] enum E : T` (stdlib/core/flags.pilot) must keep each variant a
+// single bit of `T` (its `[Bits]` width): FLAGS001 when there are more
+// single-bit variants than bits, or a bit past the width; FLAGS002 when a
+// variant is neither 0 nor a single bit.
+pub lvl(0) pkg Pilot.SelfHost.Check.LayoutAttrs;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.own.*;
+use selfhost.check.effects.*;
+
+/// The attribute names and the `[Layout]` argument these rules read.
+pub pure fn align_attr() -> str => "Align";
+pub pure fn layout_attr() -> str => "Layout";
+pub pure fn packed_arg() -> str => "packed";
+pub pure fn flags_attr() -> str => "Flags";
+
+/// log2 of `n` when `n` is a positive power of two, else -1.
+pub fn log2_exact(n: i64) -> i64 {
+    if n <= 0 { return -1; }
+    var v = n;
+    var k = 0;
+    while v > 1 {
+        if v % 2 != 0 { return -1; }
+        v = v / 2;
+        k = k + 1;
+    }
+    return k;
+}
+
+/// The `[Align(N)]` written on any declaration of type `name`, as log2 of N;
+/// none when no valid one is written.
+pub fn type_align_pow2(p: Program, name: str) -> i64? {
+    for d in nl_get(p.type_decls, name) {
+        if some args = prog_attr_nodes(p, d, align_attr()) {
+            if args.len() == 1 {
+                if some n = prog_const(p, args[0]) {
+                    let k = log2_exact(n);
+                    if k >= 0 { return k; }
+                }
+            }
+        }
+    }
+    return none;
+}
+
+/// Whether some declaration of type `name` is written `[Layout(packed)]`.
+pub fn type_is_packed(p: Program, name: str) -> bool {
+    for d in nl_get(p.type_decls, name) {
+        if some args = prog_attr_args(p, d, layout_attr()) {
+            for a in args { if a == packed_arg() { return true; } }
+        }
+    }
+    return false;
+}
+
+fn check_align(p: Program, sink: DiagSink, d: i64) {
+    guard some args = prog_attr_nodes(p, d, align_attr()) else { return; }
+    let name = node_name(p.s, d);
+    var ok = false;
+    if args.len() == 1 {
+        if some n = prog_const(p, args[0]) { ok = log2_exact(n) >= 0; }
+    }
+    if !ok {
+        sink_error(sink, d, "LAYOUT001", f"`[Align(..)]` on `{name}` takes one constant power of two (1, 2, 4, 8, ..)");
+        return;
+    }
+    if type_is_packed(p, name) {
+        if some k = type_align_pow2(p, name) {
+            if k > 0 { sink_error(sink, d, "LAYOUT003", f"`{name}` cannot be both `[Layout(packed)]` and `[Align(..)]` above 1: packed fields may sit at any address"); }
+        }
+    }
+}
+
+/// LAYOUT002 on each field of a packed struct passed to a lending parameter.
+fn check_packed_lends(e: Effects, sink: DiagSink) {
+    let inf = e.inf;
+    let p = inf.p;
+    let s = p.s;
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_call() && in_user_file(s, n) {
+            let target = call_target(e.flow, n);
+            if target >= 0 {
+                for a in call_args(s, n, target) {
+                    let arg = a[0];
+                    let prm = a[1];
+                    if arg < 0 || prm < 0 || kind(s, arg) != nk_member() || plain_param(s, prm) || kind(s, prm) != nk_param() { continue; }
+                    let base = type_of(inf, lhs(s, arg));
+                    if ty_is_named(p.tt, base) && type_is_packed(p, p.tt.name[base]) {
+                        sink_error(sink, arg, "LAYOUT002",
+                            f"`{node_text(s, arg)}` is a field of packed `{ty_display(p.tt, base)}` and may not be aligned; copy it into a local before lending it to `{node_name(s, prm)}`");
+                    }
+                }
+            }
+        }
+        n = n + 1;
+    }
+}
+
+/// The values of the variants of enum `d`, in order: the written value, else
+/// one more than the variant before it (from 0); -1 for one not constant.
+fn variant_values(p: Program, d: i64) -> List<i64> {
+    var out: List<i64> = [];
+    var next = 0;
+    for v in children(p.s, d) {
+        if kind(p.s, v) != nk_variant() { continue; }
+        let written = field_default(p.s, v);
+        var value = next;
+        if written >= 0 {
+            value = -1;
+            if some w = prog_const(p, written) { value = w; }
+        }
+        out.push(value);
+        next = if value >= 0 { value + 1 } else { 0 };
+    }
+    return out;
+}
+
+/// The bit width of the type enum `d` is declared over (its `[Bits]`), or -1.
+fn enum_width(p: Program, d: i64) -> i64 {
+    for b in nl_get(p.bases, node_name(p.s, d)) {
+        let t = prog_annot_type(p, b);
+        if !ty_is_named(p.tt, t) { continue; }
+        for td in nl_get(p.type_decls, p.tt.name[t]) {
+            if some bits = prog_attr_nodes(p, td, "Bits") {
+                if bits.len() >= 1 {
+                    if some w = prog_const(p, bits[0]) { return w; }
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+fn check_flags(p: Program, sink: DiagSink, d: i64) {
+    let s = p.s;
+    let name = node_name(s, d);
+    let width = enum_width(p, d);
+    let values = variant_values(p, d);
+    var vs: List<i64> = [];
+    for v in children(s, d) { if kind(s, v) == nk_variant() { vs.push(v); } }
+    var bits = 0;
+    var i = 0;
+    while i < values.len() {
+        let value = values[i];
+        let k = log2_exact(value);
+        let vname = node_name(s, vs[i]);
+        if value != 0 && k < 0 {
+            sink_error(sink, vs[i], "FLAGS002", f"`{name}::{vname}` is `{value}`, which is not a single bit; a `[Flags]` variant is 0 or a power of two (write `= 1`, `= 2`, `= 4`, ..)");
+        } else if k >= 0 {
+            bits = bits + 1;
+            if width >= 0 && k >= width {
+                sink_error(sink, vs[i], "FLAGS001", f"`{name}::{vname}` is bit {k}, past the {width} bits `{name}` is declared over");
+            }
+        }
+        i = i + 1;
+    }
+    if width >= 0 && bits > width {
+        sink_error(sink, d, "FLAGS001", f"`[Flags]` enum `{name}` has {bits} single-bit variants, more than the {width} bits it is declared over");
+    }
+}
+
+/// LAYOUT001-LAYOUT003 and FLAGS001-FLAGS002 over the user's files.
+pub fn check_layout_attrs(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    var d = 0;
+    while d < s.count {
+        if in_user_file(s, d) {
+            let k = kind(s, d);
+            if k == nk_struct() { check_align(p, sink, d); }
+            if k == nk_adt() {
+                if some _ = prog_attr_args(p, d, flags_attr()) { check_flags(p, sink, d); }
+            }
+        }
+        d = d + 1;
+    }
+    check_packed_lends(effects_new(flow_new(inf, sink)), sink);
+}

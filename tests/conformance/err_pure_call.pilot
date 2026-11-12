@@ -1,0 +1,11 @@
+// PURE001: a `pure` function must not call a function that is not `pure`.
+fn noisy(n: i64) -> i64 {
+    print("noisy");
+    return n;
+}
+
+pure fn twice(n: i64) -> i64 => noisy(n) + noisy(n);
+
+fn main() {
+    print(twice(2));
+}

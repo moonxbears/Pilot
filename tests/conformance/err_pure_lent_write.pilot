@@ -1,0 +1,12 @@
+// PURE001: a `pure` function must not change what its caller lent it
+// through a `var ref` parameter.
+pure fn fill(var ref xs: List<i64>, n: i64) -> i64 {
+    xs.push(n);
+    xs[0] = n;
+    return n;
+}
+
+fn main() {
+    var xs = [1];
+    print(fill(xs, 5));
+}

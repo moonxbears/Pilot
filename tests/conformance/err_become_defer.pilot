@@ -1,0 +1,11 @@
+// A tail call hands its frame to the callee, so nothing of the caller may
+// still be waiting to run: a `defer` above `become` is an error (TAIL002).
+fn step(n: i64) -> i64 {
+    defer print("after");
+    if n == 0 { return 0; }
+    become step(n - 1);
+}
+
+fn main() {
+    print(step(3));
+}

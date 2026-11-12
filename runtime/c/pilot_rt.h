@@ -180,6 +180,10 @@ typedef struct pilot_val {
     } as;
 } pilot_val;
 
+/* The count of a list laid out as static data (a constant): never reaches
+   0, so it is never freed. */
+#define PILOT_RC_STATIC (INT64_MAX / 2)
+
 typedef struct pilot_v_list {
     int64_t rc;
     int64_t len;
@@ -1029,6 +1033,53 @@ static inline pilot_val pilot_map_values(pilot_val o) {
     free(es);
     return out;
 }
+/* `value_clone(v)`: a deep copy of `v` that shares nothing that could
+   change: lists, maps and struct values are copied with their contents
+   copied the same way; strings, which never change, and scalars are shared.
+   A constant's copy (`var x = CONST;`) is made this way. `v` is borrowed. */
+static PILOT_OUTLINE pilot_val pilot_v_clone(pilot_val v, int depth) {
+    if (depth > 4096) pilot_trap("a value nests too deeply to copy");
+    switch (v.tag) {
+    case PILOT_V_LIST: {
+        pilot_v_list *l = v.as.l;
+        pilot_val out = pilot_v_list_new(l->len);
+        for (int64_t i = 0; i < l->len; i++) out.as.l->items[i] = pilot_v_clone(l->items[i], depth + 1);
+        out.as.l->len = l->len;
+        return out;
+    }
+    case PILOT_V_MAP: {
+        pilot_v_map *m = v.as.m;
+        pilot_val out = pilot_v_map_new();
+        for (int64_t i = 0; i < m->cap; i++) {
+            if (m->slots[i].state != 1) continue;
+            pilot_val c = pilot_v_clone(m->slots[i].val, depth + 1);
+            pilot_v_map_store(out.as.m, m->slots[i].key, c);
+            pilot_v_drop(c);
+        }
+        return out;
+    }
+    case PILOT_V_REC: {
+        const pilot_v_layout *rl = pilot_v_rec_layout(v);
+        pilot_v_rec *h = pilot_v_rec_new(rl->size, v.as.r->layout);
+        memcpy((char *)h + sizeof(pilot_v_rec), (const char *)v.as.r + sizeof(pilot_v_rec), rl->size - sizeof(pilot_v_rec));
+        pilot_val out = pilot_v_rec_val(h);
+        for (int32_t i = 0; i < rl->n; i++) {
+            /* The copied bytes hold the original's references: take one of
+               our own, then replace the field with its copy. */
+            pilot_val f = rl->get(out, i);
+            pilot_v_dup(f);
+            pilot_val c = pilot_v_clone(f, depth + 1);
+            rl->set(out, i, c);
+            pilot_v_drop(c);
+        }
+        return out;
+    }
+    default:
+        pilot_v_dup(v);
+        return v;
+    }
+}
+static inline pilot_val pilot_value_clone(pilot_val v) { return pilot_v_clone(v, 0); }
 /* The popped element: the list's reference passes to the caller. */
 static inline pilot_val pilot_list_pop(pilot_val l) {
     pilot_v_list *p = pilot_v_need_list(l, "pop from");

@@ -1,0 +1,38 @@
+// =========================================================================
+// FILE: stdlib/core/native_effects.pilot
+// WHAT EACH NATIVE CALL DOES BESIDES GIVING ITS RESULT
+// =========================================================================
+// The calls stdlib/core/builtins/native_calls.pilot binds to engine
+// operations have no Pilot body for the checker to read. These rows say
+// what each one does, for the `pure` (PURE001) and `noalloc` (NOALLOC001)
+// checks (selfhost/check/effects.pilot):
+//   "io"       reads or writes outside the program;
+//   "alloc"    takes heap memory;
+//   "mutates"  changes the value the method is called on.
+// A native with no row only computes its result. The prelude links this
+// file into every program.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.NativeEffects;
+
+use Pilot.Core.Genesis.*;
+
+comptime {
+    __engine("bind_native_effect", nameof(print),     "io");
+    __engine("bind_native_effect", nameof(println),   "io");
+    __engine("bind_native_effect", nameof(eprint),    "io");
+    __engine("bind_native_effect", nameof(List),      "alloc");
+    __engine("bind_native_effect", nameof(Map),       "alloc");
+    __engine("bind_native_effect", nameof(from_utf8), "alloc");
+    __engine("bind_native_effect", nameof(push),      "alloc");
+    __engine("bind_native_effect", nameof(push),      "mutates");
+    __engine("bind_native_effect", nameof(set),       "alloc");
+    __engine("bind_native_effect", nameof(set),       "mutates");
+    __engine("bind_native_effect", nameof(pop),       "mutates");
+    __engine("bind_native_effect", nameof(remove),    "mutates");
+    __engine("bind_native_effect", nameof(remove_at), "mutates");
+    __engine("bind_native_effect", nameof(trim),      "alloc");
+    __engine("bind_native_effect", nameof(to_str),    "alloc");
+    __engine("bind_native_effect", nameof(slice),     "alloc");
+    __engine("bind_native_effect", nameof(substring), "alloc");
+    __engine("bind_native_effect", nameof(replace),   "alloc");
+}

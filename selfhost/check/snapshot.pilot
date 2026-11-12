@@ -211,15 +211,16 @@ pub fn snap_load() -> Snap {
 }
 
 /// The declaration rows the host serves (`[node, is partial, is static,
-/// visibility tier or -1, is package declaration]`) as one entry per node:
-/// bit 0 partial, bit 1 static, bit 2 package declaration, the tier plus one
-/// from bit 4 (0 when no visibility is written).
+/// visibility tier or -1, is package declaration, is pure]`) as one entry
+/// per node: bit 0 partial, bit 1 static, bit 2 package declaration, bit 3
+/// pure, the tier plus one from bit 4 (0 when no visibility is written).
 fn decl_bits(rows: List<List<i64>>, count: i64) -> List<i64> {
     var out: List<i64> = [];
     var i = 0;
     while i < count { out.push(-1); i = i + 1; }
     for row in rows {
-        out[row[0]] = row[1] + row[2] * 2 + row[4] * 4 + (row[3] + 1) * 16;
+        let pure_bit = if row.len() > 5 { row[5] * 8 } else { 0 };
+        out[row[0]] = row[1] + row[2] * 2 + row[4] * 4 + pure_bit + (row[3] + 1) * 16;
     }
     return out;
 }
@@ -234,6 +235,9 @@ pub fn is_partial_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 1);
 
 /// Whether declaration `n` is written `static`.
 pub fn is_static_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 2);
+
+/// Whether declaration `n` is written `pure`.
+pub fn is_pure_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 8);
 
 /// Whether node `n` is a `pkg Name;` package declaration.
 pub fn is_package_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 4);

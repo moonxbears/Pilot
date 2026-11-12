@@ -1,0 +1,13 @@
+// Assigning a `var ref` parameter changes the caller's variable: the
+// parameter lends the caller's storage, so after `grow(x)` with x = 1 the
+// caller sees 1 + 1 = 2, and after `grow(x)` again 3. The seed assigns a
+// local copy and the caller still sees 1.
+fn grow(var ref n: i64) { n = n + 1; }
+
+fn main() {
+    var x = 1;
+    grow(x);
+    print(x);
+    grow(x);
+    print(x);
+}

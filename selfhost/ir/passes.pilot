@@ -15,6 +15,7 @@ use selfhost.ir.model.*;
 use selfhost.ir.verify.*;
 use selfhost.ir.pass_fold.*;
 use selfhost.ir.pass_dce.*;
+use selfhost.ir.pass_const_eval.*;
 
 /// A PilIR rewrite.
 pub interface IPilIrPass {
@@ -27,16 +28,21 @@ pub interface IPilIrPass {
 /// The passes to run, in order.
 pub struct PassRegistry : IObject {
     pub passes: List<IPilIrPass>;
+    /// Whether functions that take nothing are computed while compiling
+    /// before the passes run (selfhost/ir/pass_const_eval.pilot).
+    pub computes_constants: bool;
 }
 
-pub fn pass_registry_new() -> PassRegistry => PassRegistry { passes: [] };
+pub fn pass_registry_new() -> PassRegistry => PassRegistry { passes: [], computes_constants: false };
 
 pub fn pass_register(r: PassRegistry, p: IPilIrPass) { r.passes.push(p); }
 
-/// The passes `pilot ir opt` and `pilot ir run` apply: constant folding
-/// (with branch folding), then dead-code elimination.
+/// The passes `pilot ir opt` and `pilot ir run` apply: computing functions
+/// that take nothing, then constant folding (with branch folding), then
+/// dead-code elimination.
 pub fn default_passes() -> PassRegistry {
     let r = pass_registry_new();
+    r.computes_constants = true;
     pass_register(r, ConstFoldPass {});
     pass_register(r, DeadCodePass {});
     return r;
@@ -48,6 +54,17 @@ pure fn max_pass_rounds() -> i64 => 64;
 /// Runs the passes of `r` over every function of `m` until none changes
 /// anything; returns the issues that stopped it (empty when it finished).
 pub fn run_passes(m: IrModule, r: PassRegistry) -> List<IrIssue> {
+    // Functions that take nothing are computed while compiling first
+    // (selfhost/ir/pass_const_eval.pilot); the passes below fold what that
+    // leaves constant.
+    if r.computes_constants && const_eval_module(m) {
+        let issues = verify_ir_module(m);
+        if issues.len() > 0 {
+            var out: List<IrIssue> = [];
+            for i in issues { out.push(IrIssue { code: i.code, function: i.function, message: f"after computing constants: {i.message}" }); }
+            return out;
+        }
+    }
     for f in m.functions {
         var rounds = 0;
         var changed = true;

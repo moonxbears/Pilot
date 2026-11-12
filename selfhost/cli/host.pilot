@@ -42,7 +42,7 @@ fn host_diags(raw: List<any>) -> List<HostDiag> {
 }
 
 /// Links, parses and compiles `path` without running it.
-pub fn host_check(path: str) -> List<HostDiag> => host_diags(__engine("cli_check", path));
+pub fn host_check(path: str) -> List<HostDiag> => host_diags(__engine("cli_check", path, cli_checker_files(), cli_checker_decls()));
 
 /// The self-hosted analyzer's diagnostics for the file `path`.
 pub fn host_analyze(path: str) -> List<HostDiag> => host_diags(__engine("cli_analyze", path));
@@ -75,12 +75,13 @@ pub fn host_text_tool(path: str, files: List<str>, entry: str) -> i64 =>
 /// program: files, or directories whose `.pilot` files are taken in name
 /// order. `core.pilot` holds the `Cfg` tables (lattice masks, register
 /// classes), `operator.pilot` the root and operator interfaces, `live.pilot`
-/// the flags of `[Live]`.
+/// the flags of `[Live]`, `rt_syntax.pilot` the `noalloc` modifier.
 pub fn cli_checker_decls() -> List<str> => [
     "stdlib/core/core.pilot",
     "stdlib/core/operator.pilot",
     "stdlib/core/primitives",
     "stdlib/core/live.pilot",
+    "stdlib/realtime/rt_syntax.pilot",
 ];
 
 /// The type checker's sources (`selfhost/check/`), in link order.
@@ -101,14 +102,23 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/own.pilot",
     "selfhost/check/borrows.pilot",
     "selfhost/check/drops.pilot",
+    "selfhost/check/consts.pilot",
     "selfhost/check/copies.pilot",
+    "selfhost/check/receivers.pilot",
     "selfhost/check/attr_text.pilot",
     "selfhost/check/attr_inherit.pilot",
     "selfhost/check/probes.pilot",
+    "selfhost/check/exits.pilot",
     "selfhost/check/attr_chain.pilot",
     "selfhost/check/coverage.pilot",
     "selfhost/check/contracts.pilot",
     "selfhost/check/access.pilot",
+    "selfhost/check/effects.pilot",
+    "selfhost/check/purity.pilot",
+    "selfhost/check/noalloc.pilot",
+    "selfhost/check/aliasing.pilot",
+    "selfhost/check/layout_attrs.pilot",
+    "selfhost/check/stack.pilot",
     "selfhost/check/main.pilot",
 ];
 

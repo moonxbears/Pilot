@@ -217,8 +217,18 @@ impl BytecodeCompiler {
         let known = self.fn_entries.contains_key(&full) || (!is_var && self.declares(&l_nm, &r_nm).is_some());
         let receiver_is_value = is_var || (!lhs_is_name && !known);
         if receiver_is_value || (!known && native(NativeKind::Method, &r_nm).is_some()) {
+            // A receiver whose type the seed does not know (a literal, an
+            // unannotated binding, another call's result) takes the type the
+            // checker inferred for it, when the run plan has one and several
+            // non-struct types declare the method, so the seed cannot choose.
+            let untyped = if is_var { !self.var_types.contains_key(&raw_l) } else { !lhs_is_name };
+            let owner = if untyped && self.non_struct_owners(&r_nm) > 1 {
+                self.planned_receiver(arena, NodeId(callee.lhs)).unwrap_or_else(|| l_nm.clone())
+            } else {
+                l_nm.clone()
+            };
             let r_recv = self.compile_node(arena, NodeId(callee.lhs));
-            return self.emit_method_call(arena, r_recv, &l_nm, &r_nm, args);
+            return self.emit_method_call(arena, r_recv, &owner, &r_nm, args);
         }
         if !known && self.variant_payloads.contains_key(&full) {
             return self.compile_variant_ctor(arena, &full, args);

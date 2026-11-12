@@ -138,6 +138,15 @@ pub struct JsDialect : ISourceDialect {
         "        return null;",
         "    }",
         "}",
+        "function pilot_value_clone(v) {",
+        "    if (Array.isArray(v)) return v.map(pilot_value_clone);",
+        "    if (v instanceof Map) {",
+        "        const out = new Map();",
+        "        for (const [k, x] of v) out.set(k, pilot_value_clone(x));",
+        "        return out;",
+        "    }",
+        "    return v;",
+        "}",
         "function pilot_map_values(m) {",
         "    return [...m.entries()].sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0)).map((e) => e[1]);",
         "}",
@@ -402,7 +411,7 @@ pub struct JsDialect : ISourceDialect {
         if name == "to_str" { return f"pilot_show({args[0]})"; }
         if name == "list_get" { return f"pilot_map_get({joined(args)})"; }
         if name == "list_set" { return f"pilot_map_set({joined(args)})"; }
-        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line"] {
+        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line", "value_clone"] {
             if name == helper { return f"pilot_{helper}({joined(args)})"; }
         }
         return none;

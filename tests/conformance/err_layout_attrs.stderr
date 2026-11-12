@@ -1,0 +1,4 @@
+error[LAYOUT001]: `[Align(..)]` on `Odd` takes one constant power of two (1, 2, 4, 8, ..)
+error[LAYOUT003]: `Both` cannot be both `[Layout(packed)]` and `[Align(..)]` above 1: packed fields may sit at any address
+error[LAYOUT002]: `h.size` is a field of packed `Header` and may not be aligned; copy it into a local before lending it to `n`
+err_layout_attrs.pilot:25:10

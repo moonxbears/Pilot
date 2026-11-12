@@ -131,7 +131,7 @@ pub fn global_type(lw: Lowerer, d: i64) -> i64 {
 pub fn global_index(lw: Lowerer, d: i64, t: i64, name: str) -> i64 {
     if lw.global_of.has(key(d)) { return lw.global_of.get(key(d)); }
     let g = lw.m.globals.len();
-    lw.m.globals.push(IrGlobal { name: name, physics: layout_of(lw.ls, t) });
+    lw.m.globals.push(IrGlobal { name: name, physics: layout_of(lw.ls, t), ready: false });
     lw.global_of.set(key(d), g);
     lw.global_decls.push(d);
     return g;
@@ -152,6 +152,52 @@ pub fn lower_global_read(lw: Lowerer, d: i64, n: i64) -> u32 {
 pub fn lower_global_write(lw: Lowerer, d: i64, v: u32, n: i64) {
     let g = global_of_decl(lw, d);
     emit_void(lw, op_store(), 0, [global_addr(lw, g, n), coerce(lw, v, lw.m.globals[g].physics, n)], n);
+}
+
+/// The value global binding `d` is declared with, computed where `<start>`
+/// stands: a `const`'s by a call of its initializer function.
+fn global_value(lw: Lowerer, d: i64) -> u32 {
+    let s = lw.inf.p.s;
+    if kind(s, d) != nk_const() { return lower_hinted(lw, rhs(s, d), global_type(lw, d)); }
+    let fi = const_init_index(lw, d);
+    let g = global_of_decl(lw, d);
+    return emit(lw, op_call_direct(), fi, lw.m.globals[g].physics, [], d);
+}
+
+// ------------------------------------------------------------------------------
+// const
+// ------------------------------------------------------------------------------
+
+/// The function that computes `const` declaration `d`'s value, queued on
+/// first use. It takes nothing and gives the same value every time
+/// (`once`), so selfhost/ir/pass_const_eval.pilot may compute it while
+/// compiling.
+pub fn const_init_index(lw: Lowerer, d: i64) -> i64 {
+    let k = f"const:{d}";
+    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
+    let idx = lw.queue.len();
+    lw.fn_index.set(k, idx);
+    lw.queue.push(d);
+    lw.queue_self.push(ty_unknown());
+    lw.queue_body.push(-1);
+    lw.queue_args.push([]);
+    let f = ir_function_new(f"const@{node_name(lw.inf.p.s, d)}", lw.m.globals[global_of_decl(lw, d)].physics);
+    f.once = true;
+    lw.m.functions.push(f);
+    return idx;
+}
+
+/// The body of `const` declaration `d`'s initializer function: it returns
+/// the declared value.
+pub fn lower_const_init(lw: Lowerer, d: i64, f: IrFunction) {
+    let s = lw.inf.p.s;
+    lw.cur = ir_add_block(f);
+    let g = global_of_decl(lw, d);
+    f.ret_physics = lw.m.globals[g].physics;
+    f.once = true;
+    let v = lower_hinted(lw, rhs(s, d), global_type(lw, d));
+    if ir_is_terminated(f, lw.cur) { return; }
+    let _ = ir_emit(f, lw.cur, op_return(), 0, f.ret_physics, [coerce(lw, v, f.ret_physics, rhs(s, d))], false, span_start(s, rhs(s, d)));
 }
 
 // ------------------------------------------------------------------------------
@@ -298,7 +344,7 @@ pub fn lower_start(lw: Lowerer, main: i64) {
                     let _ = lower_pattern_let(lw, c);
                     continue;
                 }
-                if rhs(s, c) >= 0 { lower_global_write(lw, c, lower_hinted(lw, rhs(s, c), global_type(lw, c)), c); }
+                if rhs(s, c) >= 0 { lower_global_write(lw, c, global_value(lw, c), c); }
             } else {
                 let _ = lower_expr(lw, c);
             }
@@ -363,7 +409,7 @@ pub fn extend_start(lw: Lowerer) -> bool {
             continue;
         }
         changed = true;
-        lower_global_write(lw, d, lower_hinted(lw, rhs(s, d), global_type(lw, d)), d);
+        lower_global_write(lw, d, global_value(lw, d), d);
     }
     lw.start_cur = lw.cur;
     return changed;

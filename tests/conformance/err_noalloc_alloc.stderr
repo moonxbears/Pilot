@@ -1,0 +1,8 @@
+error[NOALLOC001]: `noalloc` function `first_two` builds a list
+err_noalloc_alloc.pilot:5:15
+error[NOALLOC001]: `noalloc` function `label` builds a new string
+err_noalloc_alloc.pilot:9:36
+error[NOALLOC001]: `noalloc` function `grow` calls `push`, which takes heap memory
+err_noalloc_alloc.pilot:11:42
+error[NOALLOC001]: `noalloc` function `counter` is a generator: calling it builds its frame on the heap
+err_noalloc_alloc.pilot:13:9

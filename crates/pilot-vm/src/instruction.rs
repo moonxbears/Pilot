@@ -52,11 +52,14 @@ pub enum Opcode {
     /// Calls the function value in `src1` with `src2` arguments staged in
     /// `r1..`; the result lands in `dst`.
     CallClosure = 36,
+    /// Calls `wide` with the arguments staged in `r1..`, reusing the current
+    /// frame: the callee returns straight to this frame's caller (`become`).
+    TailCall = 37,
     /// Any byte that does not decode to a known opcode. Executing it faults.
     Invalid = 255,
 }
 
-const OPCODE_TABLE: [Opcode; 35] = [
+const OPCODE_TABLE: [Opcode; 36] = [
     Opcode::Nop,
     Opcode::Add,
     Opcode::Sub,
@@ -92,6 +95,7 @@ const OPCODE_TABLE: [Opcode; 35] = [
     Opcode::EngineIntrinsic,
     Opcode::Trap,
     Opcode::CallClosure,
+    Opcode::TailCall,
 ];
 
 impl Opcode {

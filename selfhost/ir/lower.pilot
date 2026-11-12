@@ -405,6 +405,14 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
         lower_comptime_run(lw, decl, f);
         return;
     }
+    if kind(s, decl) == nk_const() {
+        lower_const_init(lw, decl, f);
+        return;
+    }
+    // A zero-argument `pure` function (not a method, an accessor or a
+    // generator) gives the same value every call.
+    f.once = kind(s, decl) == nk_fn() && is_pure_decl(s, decl) && fn_params(s, decl).len() == 0
+        && !ty_is_named(lw.inf.p.tt, lw.queue_self[idx]) && lw.queue_body[idx] < 0 && !creator && !resume;
     lw.ret_type = if annot(s, decl) >= 0 { prog_annot_type(lw.inf.p, annot(s, decl)) } else if lw.queue_body[idx] < 0 && kind(s, decl) != nk_lambda() { inferred_return(lw, decl) } else { ty_unknown() };
     f.ret_physics = if annot(s, decl) >= 0 { physics_of_type_node(lw, annot(s, decl)) } else { layout_of(lw.ls, lw.ret_type) };
     if resume { begin_resume(lw, decl); }
@@ -1278,6 +1286,11 @@ pub fn lower_loop_exit(lw: Lowerer, n: i64) -> u32 {
 
 pub fn lower_return(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
+    // `become` (flags 1) is a tail call; PilIR has no tail-call instruction
+    // yet, and an ordinary call would grow the stack.
+    if flags(s, n) == 1 {
+        let _ = seam("ir.lower_construct", "`become` is not lowered to PilIR yet: it needs a tail-call instruction");
+    }
     var args: List<u32> = [];
     if lhs(s, n) >= 0 {
         let v = lower_hinted(lw, lhs(s, n), lw.ret_type);

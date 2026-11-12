@@ -21,10 +21,18 @@ use selfhost.check.contracts.*;
 use selfhost.check.access.*;
 use selfhost.check.drops.*;
 use selfhost.check.copies.*;
+use selfhost.check.consts.*;
+use selfhost.check.receivers.*;
+use selfhost.check.exits.*;
 use selfhost.check.probes.*;
 use selfhost.check.attr_inherit.*;
 use selfhost.check.attr_chain.*;
 use selfhost.check.coverage.*;
+use selfhost.check.purity.*;
+use selfhost.check.noalloc.*;
+use selfhost.check.aliasing.*;
+use selfhost.check.layout_attrs.*;
+use selfhost.check.stack.*;
 
 pub fn check_program() -> List<List<any>> {
     let s = snap_load();
@@ -53,6 +61,8 @@ fn check_all(inf: Infer, sink: DiagSink) {
     check_rules(inf, sink);
     check_generics(inf, sink);
     check_ownership(inf, sink);
+    check_consts(inf, sink);
+    check_exits(inf, sink);
     check_escapes(inf, sink);
     check_type_tables(p, sink);
     check_contracts(p, sink);
@@ -61,6 +71,11 @@ fn check_all(inf: Infer, sink: DiagSink) {
     check_attr_inherit(p, sink);
     check_attr_chains(p, sink);
     check_coverage(p, sink);
+    check_purity(inf, sink);
+    check_noalloc(inf, sink);
+    check_aliasing(inf, sink);
+    check_layout_attrs(inf, sink);
+    check_stack(inf, sink);
 }
 
 /// Where each owned value of the program is dropped (selfhost/check/drops.pilot),
@@ -90,6 +105,7 @@ fn plan_of(s: Snap, inf: Infer) -> List<any> {
     let p = inf.p;
     let pl = drop_planner(inf);
     plan_copies(pl);
+    plan_receivers(inf, pl.rows);
     var probes: List<List<any>> = [];
     for row in probe_plan(p) {
         let n: i64 = row[0];
