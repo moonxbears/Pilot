@@ -450,6 +450,10 @@ impl<'a> Parser<'a> {
             out.push(self.parse_comptime_if());
             return;
         }
+        if self.at_invariant() {
+            self.parse_invariant();
+            return;
+        }
         let raw_mods = self.parse_mods(in_type_body); if raw_mods.is_non_empty() { let (mut target, saved) = (0u8, self.pos);
             if self.eat(TokenKind::KwFn) { target = 1; }
             else if self.eat(TokenKind::KwStruct) { target = 2; }

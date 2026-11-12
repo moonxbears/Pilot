@@ -1,0 +1,11 @@
+// An `ensures` clause checks the value after the call returns, so the frame
+// cannot be handed over (TAIL002).
+fn count(n: i64) -> i64 => n;
+
+fn down(n: i64) -> i64 ensures(r => r >= 0) {
+    become count(n);
+}
+
+fn main() {
+    print(down(3));
+}

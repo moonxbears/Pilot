@@ -1,0 +1,14 @@
+// `old(e)` is evaluated when the function is entered, so `e` must not
+// change anything either (DBC003).
+var calls = 0;
+
+fn tick() -> i64 {
+    calls = calls + 1;
+    return calls;
+}
+
+fn bump(x: i64) -> i64 ensures(r => r > old(tick())) => x + 1;
+
+fn main() {
+    print(bump(3));
+}

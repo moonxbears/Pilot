@@ -589,7 +589,14 @@ fn lower_node(lw: Lowerer, n: i64) -> u32 {
     if k == nk_for() { return lower_for(lw, n); }
     if k == nk_yield() { return lower_yield(lw, n); }
     if k == nk_block() { return lower_block(lw, n); }
-    if k == nk_expr_stmt() { return lower_expr(lw, lhs(s, n)); }
+    if k == nk_expr_stmt() {
+        // A `requires` / `ensures` clause (flags 1 / 2): its check is woven
+        // in by a later pass (selfhost/ir/pass_contracts.pilot), not yet.
+        if flags(s, n) != 0 {
+            let _ = seam("ir.lower_construct", "contract clauses are not lowered to PilIR yet: `requires` needs a check on entry, `ensures` one on every exit");
+        }
+        return lower_expr(lw, lhs(s, n));
+    }
     if k == nk_if() { return lower_if(lw, n); }
     if k == nk_while() { return lower_while(lw, n); }
     if k == nk_match() { return lower_switch(lw, n); }

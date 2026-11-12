@@ -9,7 +9,8 @@
 //!     result name, `ensures(r => q)`, `q` is the lambda `(r) => q`;
 //!   - `old(e)` is `UnaryExpr(e)` with flags `UNARY_OP_OLD`: `e`'s value when
 //!     the function was entered.
-//! An expression body `=> e` becomes the block `{ clauses..; e }`.
+//! The body `b` (a block or the expression after `=>`) becomes the block
+//! `{ clauses..; b }`.
 
 use crate::Parser;
 use pilot_ast::{NodeId, NodeKind, UNARY_OP_OLD};
@@ -20,7 +21,13 @@ use pilot_span::ByteSpan;
 pub(crate) const CONTRACT_RECEPTOR: u8 = 33;
 pub(crate) const REQUIRES_SUB: u8 = 18;
 pub(crate) const ENSURES_SUB: u8 = 19;
+pub(crate) const INVARIANT_SUB: u8 = 20;
 pub(crate) const OLD_SUB: u8 = 24;
+
+/// Struct invariants are parsed and stopped here: nothing checks them yet.
+const INVARIANT_UNCONNECTED: &str = "SEAM001: unconnected seam `contracts.invariant`: \
+    a struct `invariant` is not checked yet: it needs a check after each construction \
+    and at the exit of each method that changes the struct (DBC005)";
 
 /// `ExprStmt.flags` of a `requires` clause.
 pub const CONTRACT_REQUIRES: u16 = 1;
@@ -31,6 +38,24 @@ impl<'a> Parser<'a> {
     /// At `requires` or `ensures`.
     pub(crate) fn at_contract_clause(&self) -> bool {
         matches!(self.receptor(), Some((CONTRACT_RECEPTOR, REQUIRES_SUB | ENSURES_SUB)))
+    }
+
+    /// At `invariant`.
+    pub(crate) fn at_invariant(&self) -> bool {
+        self.receptor() == Some((CONTRACT_RECEPTOR, INVARIANT_SUB))
+    }
+
+    /// `invariant(cond);` in a struct body: parsed, then stopped at its seam,
+    /// so an invariant can never look checked while it is not.
+    pub(crate) fn parse_invariant(&mut self) {
+        let sp = self.span();
+        self.advance();
+        self.expect(TokenKind::LParen);
+        let _ = self.parse_expr();
+        self.expect(TokenKind::RParen);
+        let span = ByteSpan::new(sp.start, self.prev_span().end);
+        self.eat(TokenKind::Semicolon);
+        self.arena.diagnostics.push((span, INVARIANT_UNCONNECTED.into()));
     }
 
     /// One `requires(..)` / `ensures(..)` clause, as its body statement.
@@ -59,7 +84,6 @@ impl<'a> Parser<'a> {
     fn parse_result_lambda(&mut self) -> NodeId {
         let sp = self.span();
         let name = self.intern_cur();
-        self.advance();
         self.expect(TokenKind::FatArrow);
         let param = self.arena.alloc_node(NodeKind::ParamDecl, 0, sp, name.0, 0);
         let body = self.parse_expr();
@@ -79,21 +103,16 @@ impl<'a> Parser<'a> {
         self.arena.alloc_node(NodeKind::UnaryExpr, UNARY_OP_OLD, span, e.0, 0)
     }
 
-    /// Puts `clauses` in front of `body`: a block gets them as its first
-    /// items, an expression body becomes `{ clauses..; body }`.
+    /// Puts `clauses` in front of `body`: the body becomes
+    /// `{ clauses..; body }`. A block body is kept whole as the last item
+    /// rather than copied, so every node keeps the one parent it has.
     pub(crate) fn with_contracts(&mut self, body: NodeId, clauses: &[NodeId]) -> NodeId {
         if clauses.is_empty() || body.is_none() {
             return body;
         }
         let span = self.arena.span(body);
-        let n = *self.arena.node(body);
         let mut items = clauses.to_vec();
-        if n.node_kind() == NodeKind::BlockExpr {
-            let inner: Vec<NodeId> = self.arena.children_slice(n.lhs, n.rhs).iter().map(|&c| NodeId(c)).collect();
-            items.extend(inner);
-        } else {
-            items.push(self.arena.alloc_node(NodeKind::ExprStmt, 0, span, body.0, 0));
-        }
+        items.push(self.arena.alloc_node(NodeKind::ExprStmt, 0, span, body.0, 0));
         self.arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &items)
     }
 }

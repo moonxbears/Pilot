@@ -16,6 +16,7 @@ mod lower_call;
 mod lower_cascade;
 mod lower_closure;
 mod lower_defer;
+mod lower_contract;
 mod lower_destructure;
 pub mod lower_drop;
 mod lower_dispatch;
@@ -136,6 +137,8 @@ struct FnState {
     block_scopes: Vec<BlockScope>,
     yield_owners: Vec<YieldOwner>,
     gen_body: Option<ByteSpan>,
+    /// The contract clauses of the function being compiled (`lower_contract`).
+    contract: lower_contract::ContractCtx,
 }
 
 /// The bindings visible where a block starts. A `let` in the block that
@@ -207,6 +210,8 @@ pub struct BytecodeCompiler {
     /// Where the function being compiled first yields, when it does: it is
     /// a generator.
     gen_body: Option<ByteSpan>,
+    /// The contract clauses of the function being compiled (`lower_contract`).
+    contract: lower_contract::ContractCtx,
     /// The `for` about to be compiled as a block item (statement position),
     /// which collects nothing.
     stmt_for: Option<NodeId>,
@@ -572,6 +577,7 @@ impl BytecodeCompiler {
             block_scopes: std::mem::take(&mut self.block_scopes),
             yield_owners: std::mem::take(&mut self.yield_owners),
             gen_body: std::mem::take(&mut self.gen_body),
+            contract: std::mem::take(&mut self.contract),
         }
     }
 
@@ -591,6 +597,7 @@ impl BytecodeCompiler {
         self.block_scopes = s.block_scopes;
         self.yield_owners = s.yield_owners;
         self.gen_body = s.gen_body;
+        self.contract = s.contract;
     }
 
     /// Compiles `id` with `hint` as the expected type.
@@ -614,6 +621,7 @@ impl BytecodeCompiler {
         self.drop_flags.clear();
         self.var_types.clear();
         self.cur_ret_type = None;
+        self.contract = Default::default();
         self.cur_owner = None;
         self.backing = None;
         self.loops.clear();

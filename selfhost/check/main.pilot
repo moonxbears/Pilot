@@ -29,6 +29,7 @@ use selfhost.check.attr_inherit.*;
 use selfhost.check.attr_chain.*;
 use selfhost.check.coverage.*;
 use selfhost.check.purity.*;
+use selfhost.check.contract_clauses.*;
 use selfhost.check.noalloc.*;
 use selfhost.check.aliasing.*;
 use selfhost.check.layout_attrs.*;
@@ -72,6 +73,7 @@ fn check_all(inf: Infer, sink: DiagSink) {
     check_attr_chains(p, sink);
     check_coverage(p, sink);
     check_purity(inf, sink);
+    check_contract_clauses(inf, sink);
     check_noalloc(inf, sink);
     check_aliasing(inf, sink);
     check_layout_attrs(inf, sink);

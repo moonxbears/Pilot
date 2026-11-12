@@ -1,0 +1,67 @@
+// ==============================================================================
+// FILE: selfhost/check/contract_clauses.pilot
+// DBC002 / DBC003: a `requires` or `ensures` clause that does more than read.
+// ==============================================================================
+// A contract clause states a fact about the values a function is called
+// with and returns (crates/pilot-parser/src/contracts.rs puts the clauses at
+// the start of the body as statements with contract flags). Checking it must
+// not change what it checks, so a clause has the effects a `pure` function
+// may not have (selfhost/check/purity.pilot) reported: DBC002 in the clause,
+// DBC003 inside `old(..)`, whose operand is evaluated when the function is
+// entered.
+pub lvl(0) pkg Pilot.SelfHost.Check.ContractClauses;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.own.*;
+use selfhost.check.consts.*;
+use selfhost.check.effects.*;
+use selfhost.check.purity.*;
+
+/// `UnaryExpr.flags` of `old(e)` (UNARY_OP_OLD in crates/pilot-ast).
+fn old_flag() -> i64 => 10;
+
+/// The contract clauses of function `f`: the leading statements of its body
+/// that carry contract flags.
+pub fn contract_clauses(s: Snap, f: i64) -> List<i64> {
+    var out: List<i64> = [];
+    let body = fn_body(s, f);
+    if body < 0 || kind(s, body) != nk_block() { return out; }
+    for c in children(s, body) {
+        if kind(s, c) != nk_expr_stmt() || flags(s, c) == 0 { break; }
+        out.push(c);
+    }
+    return out;
+}
+
+fn report_clause(ps: PurityScan, sink: DiagSink, name: str, n: i64, in_old: bool) {
+    let s = ps.e.inf.p.s;
+    let why = impure_effect(ps, n);
+    if why != "" {
+        if in_old {
+            sink_error(sink, n, "DBC003", f"`old(..)` in a contract clause of `{name}` {why}");
+        } else {
+            sink_error(sink, n, "DBC002", f"a contract clause of `{name}` {why}");
+        }
+    }
+    let inner = in_old || (kind(s, n) == nk_unary() && flags(s, n) == old_flag());
+    for c in children(s, n) { report_clause(ps, sink, name, c, inner); }
+}
+
+/// Reports DBC002 and DBC003 in the user's files.
+pub fn check_contract_clauses(inf: Infer, sink: DiagSink) {
+    let s = inf.p.s;
+    let f = flow_new(inf, sink);
+    let ps = PurityScan { e: effects_new(f), cs: const_scan(f), methods: Map<str, str>() };
+    var d = 0;
+    while d < s.count {
+        let k = kind(s, d);
+        if (k == nk_fn() || k == nk_operator()) && in_user_file(s, d) {
+            let name = node_name(s, d);
+            for c in contract_clauses(s, d) { report_clause(ps, sink, name, lhs(s, c), false); }
+        }
+        d = d + 1;
+    }
+}

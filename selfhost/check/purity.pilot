@@ -58,7 +58,7 @@ fn method_effect(ps: PurityScan, m: i64) -> str {
 }
 
 /// The effect node `n` has, as the rest of a PURE001 message, or "".
-fn impure_effect(ps: PurityScan, n: i64) -> str {
+pub fn impure_effect(ps: PurityScan, n: i64) -> str {
     let e = ps.e;
     let inf = e.inf;
     let s = inf.p.s;

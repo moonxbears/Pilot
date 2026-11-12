@@ -181,6 +181,34 @@ pub let ERRORS = [
         category: "Comptime",
         reference: "Zig comptime / C++ if constexpr",
     },
+    ErrorDef {
+        code: "DBC002",
+        title: "Contract Clause Has An Effect",
+        description: "a 'requires' or 'ensures' clause calls a function that is not 'pure', does IO, or writes a global or a lent parameter; checking it would change what it checks",
+        category: "Contracts",
+        reference: "Eiffel Design by Contract / Ada 2012 Pre and Post aspects",
+    },
+    ErrorDef {
+        code: "DBC003",
+        title: "old(..) Operand Has An Effect",
+        description: "the operand of 'old(..)' is evaluated when the function is entered and must not change anything",
+        category: "Contracts",
+        reference: "Eiffel old expressions / Ada 2012 'Old attribute",
+    },
+    ErrorDef {
+        code: "DBC006",
+        title: "requires Clause Does Not Hold",
+        description: "a function was called with arguments its 'requires' clause rejects; the program stops at the call",
+        category: "Contracts",
+        reference: "Eiffel Design by Contract / Ada 2012 Pre aspect",
+    },
+    ErrorDef {
+        code: "DBC007",
+        title: "ensures Clause Does Not Hold",
+        description: "a function returned a value its 'ensures' clause rejects; the program stops at the return",
+        category: "Contracts",
+        reference: "Eiffel Design by Contract / Ada 2012 Post aspect",
+    },
 
     // -------------------------------------------------------------------------
     // 4. Perceus Ownership & Borrow Physics (OWN001 - OWN004, ESCAPE001 - ESCAPE003)

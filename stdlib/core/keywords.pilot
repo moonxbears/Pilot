@@ -187,7 +187,7 @@ pub partial struct {
     [KeywordDefAttr(0, "Declares an immutable variable binding.")]
     let {}
 
-    [KeywordDefAttr(0, "Passes a value by reference.")]
+    [KeywordDefAttr(0, "Passes a value by reference; a plain parameter already borrows (`in`), `var ref` lends for changing.")]
     ref {}
 
     [KeywordDefAttr(0, "Conditional branching construct.")]
@@ -264,7 +264,7 @@ pub partial struct {
     catch {}
 
     // Category 2: Declarations
-    [KeywordDefAttr(2, "Declares a mutable variable binding.")]
+    [KeywordDefAttr(2, "Declares a mutable variable binding; a `var ref` parameter is the only way the call reaches the caller's value (ALIAS001).")]
     var {}
 
     [KeywordDefAttr(2, "Declares a compile-time constant.")]
@@ -311,14 +311,26 @@ pub partial struct {
     lvl {}
 
     // Category 4: Modifiers
-    [KeywordDefAttr(4, "Pure referentially transparent function without side effects.")]
+    [KeywordDefAttr(4, "Pure function: same result for the same arguments and no other effect; no IO, no call of a function that is not pure, no global write, no write through a lent parameter (PURE001).")]
     pure {}
 
     [KeywordDefAttr(4, "Static member bound to type rather than instances.")]
     static {}
 
-    [KeywordDefAttr(4, "Isolated reference guarantee for Perceus borrow checking.")]
+    [KeywordDefAttr(4, "Isolated parameter: takes a moved, unaliased owner the caller does not use afterwards (ISO001).")]
     iso {}
+
+    [KeywordDefAttr(4, "Attribute [Align(N)]: places every value of a struct at a multiple of N bytes, N a power of two (LAYOUT001, LAYOUT003).")]
+    Align {}
+
+    [KeywordDefAttr(4, "Argument of [Layout(packed)]: lays a struct's fields out with no padding; its fields cannot be lent (LAYOUT002).")]
+    packed {}
+
+    [KeywordDefAttr(4, "Attribute [Flags] on an enum: each variant one bit of its type (FLAGS001, FLAGS002); sets in FlagSet<E>.")]
+    Flags {}
+
+    [KeywordDefAttr(4, "Attribute [Stack] on a let: the value lives in the function's frame and may not leave it (STACK001).")]
+    Stack {}
 
     [KeywordDefAttr(4, "Partial declaration enabling multi-file struct or interface aggregation.")]
     partial {}
@@ -354,14 +366,23 @@ pub partial struct {
     exit {}
 
     // Category 8: Contract & Verification
-    [KeywordDefAttr(8, "Precondition contract clause asserted at function entry.")]
+    [KeywordDefAttr(8, "Precondition after a function's signature, `requires(cond)`: checked on entry, stopping with DBC006 when false; it must not have effects (DBC002).")]
     requires {}
 
-    [KeywordDefAttr(8, "Postcondition contract clause asserted at function exit.")]
+    [KeywordDefAttr(8, "Postcondition after a function's signature, `ensures(cond)` or `ensures(r => cond)` naming the result: checked at every return, stopping with DBC007 when false; a failed result skips it.")]
     ensures {}
 
-    [KeywordDefAttr(8, "Captures entry-state value of an expression for postconditions.")]
+    [KeywordDefAttr(8, "Inside `ensures`, `old(e)` is the value `e` had when the function was entered (its operand must not have effects, DBC003).")]
     old {}
+
+    [KeywordDefAttr(8, "Struct invariant, `invariant(cond);` in a struct body: parsed; checking it is not connected yet (seam contracts.invariant).")]
+    invariant {}
+
+    [KeywordDefAttr(8, "assume(cond): states a fact an optimizer may build on; checked on the reference run (HINT001).")]
+    assume {}
+
+    [KeywordDefAttr(8, "unreachable(): states that control never gets here; returns never; reaching it stops the program (HINT002).")]
+    unreachable {}
 
     // Category 9: Adapter & Dependency Injection
     [KeywordDefAttr(9, "Context ambient dependency injection parameter or block.")]
@@ -414,7 +435,7 @@ pub partial struct {
     [KeywordDefAttr(11, "Constrains buffer, channel, or loop execution to bounded bounds.")]
     bounded {}
 
-    [KeywordDefAttr(11, "Guarantees zero heap allocation within decorated function scope.")]
+    [KeywordDefAttr(11, "noalloc fn: takes no heap memory: no allocating construct, no call of a function that is not noalloc (NOALLOC001).")]
     noalloc {}
 
     [KeywordDefAttr(11, "Encloses allocation within an explicit arena region.")]

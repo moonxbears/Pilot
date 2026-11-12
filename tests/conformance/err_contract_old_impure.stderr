@@ -1,0 +1,2 @@
+error[DBC003]: `old(..)` in a contract clause of `bump` calls `tick`, which is not `pure`
+err_contract_old_impure.pilot:10:45

@@ -1,0 +1,6 @@
+// A `requires` clause holds here; the seed VM checks it and runs on.
+fn half(n: i64) -> i64 requires(n % 2 == 0) => n / 2;
+
+fn main() {
+    print(half(8));
+}

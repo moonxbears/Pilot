@@ -1,0 +1,11 @@
+// A struct `invariant` is parsed, but nothing checks it yet: the build
+// stops at the seam `contracts.invariant` instead of running unchecked.
+struct Account {
+    pub balance: i64;
+    invariant(.balance >= 0);
+}
+
+fn main() {
+    let a = Account { balance: 5 };
+    print(a.balance);
+}

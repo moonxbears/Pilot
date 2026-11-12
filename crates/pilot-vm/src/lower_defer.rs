@@ -151,7 +151,8 @@ impl BytecodeCompiler {
         }
         // Not a call, or deferred statements still to run: the checker reports
         // it (TAIL001, TAIL002); lowered as the plain `return` it reads as.
-        let deferred = self.defers.iter().flatten().any(|d| matches!(d, Deferred::Stmt(_) | Deferred::OnFailure(_)));
+        let deferred = self.defers.iter().flatten().any(|d| matches!(d, Deferred::Stmt(_) | Deferred::OnFailure(_)))
+            || !self.contract.ensures.is_empty();
         if deferred || arena.node(NodeId(call)).node_kind() != pilot_ast::NodeKind::CallExpr {
             return self.compile_return(arena, call);
         }

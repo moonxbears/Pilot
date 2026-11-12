@@ -6,7 +6,8 @@
 // exits.pilot). That needs:
 //   TAIL001  a call after `become`: no other expression has a frame to take;
 //   TAIL002  nothing of the caller still to run: no `defer` or `errdefer`
-//            earlier in a block the `become` is inside;
+//            earlier in a block the `become` is inside, and no `ensures`
+//            clause of the function;
 //   TAIL003  the callee returning the caller's type, since its value becomes
 //            the caller's value unchanged.
 // `errdefer` runs only when its block is left by a failure, so in a function
@@ -45,6 +46,21 @@ fn deferred_above(p: Program, n: i64, f: i64) -> bool {
     return false;
 }
 
+/// `ExprStmt.flags` of an `ensures` clause (crates/pilot-parser/src/contracts.rs).
+fn ensures_flag() -> i64 => 2;
+
+/// Whether function `f` has an `ensures` clause, which is checked after its
+/// value is computed and so still has to run when the value is ready.
+fn has_ensures(s: Snap, f: i64) -> bool {
+    let body = fn_body(s, f);
+    if body < 0 || kind(s, body) != nk_block() { return false; }
+    for c in children(s, body) {
+        if kind(s, c) != nk_expr_stmt() || flags(s, c) == 0 { return false; }
+        if flags(s, c) == ensures_flag() { return true; }
+    }
+    return false;
+}
+
 fn check_become(fl: Flow, sink: DiagSink, n: i64) {
     let inf = fl.inf;
     let p = inf.p;
@@ -58,6 +74,11 @@ fn check_become(fl: Flow, sink: DiagSink, n: i64) {
     if f < 0 { return; }
     if deferred_above(p, n, f) {
         sink_error(sink, n, "TAIL002", "`become` cannot hand over the frame while a `defer` or `errdefer` above it has still to run");
+        return;
+    }
+    if has_ensures(s, f) {
+        let name = node_name(s, f);
+        sink_error(sink, n, "TAIL002", f"`become` cannot hand over the frame of `{name}`: its `ensures` clauses still have to check the value");
         return;
     }
     let target = call_target(fl, call);

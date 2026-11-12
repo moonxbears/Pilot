@@ -128,6 +128,10 @@ pub fn wiring_ledger() -> List<Capability> {
             "tests/conformance/become_tail.pilot, err_become_not_call.pilot, err_become_defer.pilot, err_become_type.pilot; seed opcode TailCall (crates/pilot-vm/src/vm.rs); PilIR stops at ir.lower_construct (pilot test --ir)", "ir.lower_construct"),
         cap("F4", "`comptime if`: the branch is chosen while parsing and the other is dropped before it is checked, so every engine runs only the taken branch; CTIME007 for a run-time condition", ::Wired,
             "tests/conformance/comptime_if.pilot (seed, --ir and --emit c), err_comptime_if_runtime.pilot (CTIME007), comptime_if_seam.pilot; crates/pilot-parser/src/comptime_if.rs folds literals and the file's own constants", "comptime_if.condition"),
+        cap("F4", "`requires(cond)` / `ensures(r => cond)` / `old(e)` on functions: checked by the seed on entry (DBC006) and at every return (DBC007), a failed result skipping `ensures`; DBC002/DBC003 when a clause or `old` operand has an effect; TAIL002 for `become` under `ensures`", ::Wired,
+            "tests/conformance/contracts.pilot (expected output worked by hand), err_requires_failed.pilot, err_ensures_failed.pilot, err_contract_impure.pilot, err_contract_old_impure.pilot, err_become_ensures.pilot; grammar crates/pilot-parser/src/contracts.rs, seed crates/pilot-vm/src/lower_contract.rs, check selfhost/check/contract_clauses.pilot; PilIR stops at ir.lower_construct (requires_ir_seam.pilot under pilot test --ir); the binder `r` is not typed by the checker", "ir.lower_construct"),
+        cap("F4", "struct `invariant(cond);` checked after construction and each mutating method (DBC005)", ::Spec,
+            "parsed and stopped at contracts.invariant (tests/conformance/invariant_seam.pilot)", "contracts.invariant"),
         cap("F4", "2-bit lattice classification stored on each type", ::Draft,
             "selfhost/check/methods.pilot: declared by a [Lattice] interface the type reaches (Cfg.Lattice), otherwise bundle_splice compute_struct_layout ORs field lattices with ~self(); OWN001 reads bit 1 (cli_f4 moves_are_followed_through_control_flow); field sizes and alignments follow the C ABI for [Bits] and struct fields, other field types are a stand-in", "check.field_size F5"),
         cap("F4", "OWN001 beyond `let b = a;` in straight-line code (moves into calls, returns, loops, branches)", ::Wired,
@@ -719,7 +723,7 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M26", "comptime proof of requires at call sites (DBC001)", ::Spec,
             "selfhost/ir/pass_contracts.pilot:159 stops at seam; test_m26_4", "F4 contracts.prove_requires"),
         cap("M26", "requires/ensures/old/invariant woven into PilIR and enforced at run time (incl. DBC005)", ::Spec,
-            "selfhost/ir/pass_contracts.pilot:173 stops at seam (test_m26_3); `requires n > 0` on f(0) still runs", "F5 contracts.weave_ir"),
+            "selfhost/ir/pass_contracts.pilot:173 stops at seam (test_m26_3); the seed VM checks requires/ensures (F4 row above), PilIR stops at ir.lower_construct", "F5 contracts.weave_ir"),
 
         // M27 user syntax and hygiene
         cap("M27", "pattern arm diagnostics SYN001 overlap and SYN002 direct left recursion (from pattern text)", ::Core,

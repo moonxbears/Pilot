@@ -77,6 +77,7 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("contracts.prove_requires", ::Entry, "comptime evaluator for requires clauses over constant call arguments (DBC001)", "F4"),
         seam_entry("contracts.weave_ir", ::Exit, "PilIR function bodies to insert requires/ensures/old/invariant checks into", "F5"),
         seam_entry("convert.float_parse_slow_path", ::Entry, "correctly rounded decimal-to-float parsing beyond the exact fast path (big-integer or Eisel-Lemire), for `str.to_f64()` / `to_f32()` (stdlib/core/convert/convert.pilot)", "M30"),
+        seam_entry("contracts.invariant", ::Entry, "checking a struct `invariant(cond);` after each construction and at the exit of each method that changes the struct, DBC005 (crates/pilot-parser/src/contracts.rs parses it and stops)", "F4"),
         seam_entry("comptime_if.condition", ::Entry, "evaluating calls, members and other files' constants in a `comptime if` condition (crates/pilot-parser/src/comptime_if.rs folds literals and the file's own constants)", "M30"),
         seam_entry("convert.wide_scalar", ::Entry, "128-bit integer and f16/f128 values in the engine, for the `to_i128`, `to_u128`, `to_f16` and `to_f128` conversions (stdlib/core/convert/convert.pilot)", "M30"),
         seam_entry("cpp.catch_boundary", ::Entry, "compiled C++ catch shim (__cxa_begin_catch) around native calls", "F6"),

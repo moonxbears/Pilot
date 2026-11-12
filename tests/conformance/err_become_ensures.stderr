@@ -1,0 +1,2 @@
+error[TAIL002]: `become` cannot hand over the frame of `down`: its `ensures` clauses still have to check the value
+err_become_ensures.pilot:6:5

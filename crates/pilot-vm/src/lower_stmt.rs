@@ -152,6 +152,7 @@ impl BytecodeCompiler {
             self.fn_ret_types.entry(key).or_insert(ret_name.clone());
         }
         self.reset_fn_state();
+        self.contract.fn_name = Self::name(arena, cn.lhs).to_string();
         self.cur_owner = owner.map(str::to_string);
         self.cur_ret_type = (!ret_name.is_empty()).then(|| ret_name.clone());
         if fn_len > 1 {
@@ -194,6 +195,7 @@ impl BytecodeCompiler {
             || arena.node(body_node).node_kind() != NodeKind::BlockExpr;
         let ret = self.cur_ret_type.clone();
         let r = if returns_value { self.convert_for_binding(b, ret.as_deref()) } else { self.emit_const(PilotVal::NULL) };
+        self.emit_ensures(arena, r);
         self.emit(Opcode::Move, 0, r, 0);
         self.emit(Opcode::Ret, 0, 0, 0);
         if self.gen_body.is_some() {
@@ -539,6 +541,7 @@ impl BytecodeCompiler {
         // The value is computed before deferred statements run.
         let keep = self.alloc_reg();
         self.emit(Opcode::Move, keep, r_ret, 0);
+        self.emit_ensures(arena, keep);
         self.emit_exit_drops(arena);
         self.emit_loop_releases(0);
         let exit = if NodeId(value).is_some() {
