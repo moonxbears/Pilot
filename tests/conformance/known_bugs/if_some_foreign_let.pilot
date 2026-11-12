@@ -1,0 +1,17 @@
+// `if some m = ...` in one function must bind a new `m`; a `let m` in another
+// function (here `other`, or any linked library function) is unrelated.
+// Correct output by hand: find_it(2) is some 2, other() returns 3.
+fn find_it(x: i64) -> i64? {
+    if x > 0 { return x; }
+    return none;
+}
+fn other() -> i64 {
+    let m = 3;
+    return m;
+}
+fn main() {
+    if some m = find_it(2) {
+        print(m);
+    }
+    print(other());
+}

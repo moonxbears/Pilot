@@ -44,6 +44,7 @@ pub enum DropAction {
     Replace = 9,
     Flag = 10,
     Moved = 11,
+    Discard = 12,
 }
 
 impl DropAction {
@@ -61,6 +62,7 @@ impl DropAction {
             Self::Replace,
             Self::Flag,
             Self::Moved,
+            Self::Discard,
         ]
             .into_iter()
             .find(|a| *a as i64 == code)
@@ -113,6 +115,9 @@ pub struct DropPlan {
     pub glue: HashMap<String, DropGlue>,
     /// Nodes whose value is copied, with the value type it is copied as.
     pub copies: HashMap<NodeKey, String>,
+    /// Expression statements that throw away the owned value they make,
+    /// with the type it is dropped as.
+    pub discards: HashMap<NodeKey, String>,
     /// The value-type fields a copy of each value type copies too.
     pub copy_glue: HashMap<String, Vec<(String, String)>>,
 }
@@ -128,6 +133,7 @@ impl DropPlan {
             && self.guard.is_empty()
             && self.seams.is_empty()
             && self.copies.is_empty()
+            && self.discards.is_empty()
     }
 }
 
@@ -253,6 +259,15 @@ impl BytecodeCompiler {
             return r;
         };
         self.emit_copy_value(r, &ty, 0)
+    }
+
+    /// Drops the value in register `r` when node `id` is a statement that
+    /// throws it away.
+    pub(crate) fn drop_if_discarded(&mut self, arena: &AstArena, id: NodeId, r: u8) {
+        let Some(ty) = self.drop_plan.as_ref().and_then(|p| p.discards.get(&key_of(arena, id)).cloned()) else {
+            return;
+        };
+        self.emit_drop_value(r, &ty, 0);
     }
 
     /// A copy of the value in register `r`, of value type `ty`, in a new

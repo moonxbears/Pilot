@@ -313,8 +313,14 @@ fn compute(inf: Infer, n: i64) -> i64 {
     }
     if k == nk_ident() {
         let b = inf.r.ref_of[n];
-        if b >= 0 { return binding_type(inf, b); }
-        if s.receiver.len() > 0 && node_name(s, n) == s.receiver { return receiver_type(inf, n); }
+        let is_receiver = s.receiver.len() > 0 && node_name(s, n) == s.receiver;
+        if b >= 0 {
+            // A method's own `self` / `ref self` parameter carries no type
+            // annotation: it is the type whose body holds the method.
+            let bt = binding_type(inf, b);
+            if !is_receiver || !ty_is_unknown(p.tt, bt) { return bt; }
+        }
+        if is_receiver { return receiver_type(inf, n); }
         return ty_unknown();
     }
     if k == nk_call() { return call_type(inf, n); }

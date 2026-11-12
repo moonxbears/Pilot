@@ -12,6 +12,9 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Prelude;
 use Pilot.Core.Option;
 use Pilot.Core.Result;
 
+// `f"{n:#_###}"`: the function an f-string hole's format pattern calls.
+use Pilot.Core.Format;
+
 // `List<T>`: the members written in Pilot over the engine's list
 // (`contains`, `add`, `clear`, `count`, enumeration).
 use Pilot.Core.Primitives.List;

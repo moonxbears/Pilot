@@ -1,0 +1,23 @@
+// Constructs std.text.regex refuses by design (REGEX007): they are not
+// regular, and the Pike VM keeps search time linear in the text. Python's
+// `re` accepts them, so the expected codes and offsets come from the module's
+// specification (stdlib/std/text/regex.pilot header): the offset is the
+// construct's first byte. A refused pattern reaches the caller as a value,
+// and `?` passes it on.
+use std.text.regex;
+
+fn try_pattern(p: str) -> res<bool, RegexError> {
+    let re = compile(p)?;
+    return ok(re.is_match("aab"));
+}
+
+fn main() {
+    for p in ["(a)\\1", "(?=a)", "(?i)a", "(?<=a)b", "a+b"] {
+        let r = try_pattern(p);
+        if r.is_ok {
+            print(f"{p}: matched {r.ok_val}");
+        } else {
+            print(f"{p}: {r.err_val.code()} at {r.err_val.pos}");
+        }
+    }
+}

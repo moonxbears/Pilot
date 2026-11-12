@@ -10,6 +10,7 @@ mod generic_receiver;
 mod op_decl;
 mod modules;
 mod pilot_impls;
+mod fstring;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
 use modules::EXCLUDE_RECEPTOR;
 pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
@@ -151,7 +152,9 @@ pub struct ParserTables { modifiers: HashMap<String, ModAct>, param_modifiers: H
     natives: HashMap<(NativeKind, String), String>,
     enumerator: Option<EnumeratorProtocol>,
     generator: Option<GeneratorProtocol>,
-    try_protocol: Option<TryProtocol>, }
+    try_protocol: Option<TryProtocol>,
+    /// The Pilot function an f-string hole's `:pattern` calls (see `fstring`).
+    format_spec: Option<String>, }
 impl ParserTables {
     pub fn new() -> Self { Self::default() }
     fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
@@ -198,6 +201,7 @@ impl ParserTables {
                     HOOK_ENUMERATOR => self.bind_enumerator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
                     HOOK_GENERATOR => self.bind_generator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
                     HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3), s_arg(4)),
+                    HOOK_FORMAT_SPEC => self.bind_format_spec(s_arg(2)),
                     "bind_receiver_ident" => { let (w, b, v) = (s_arg(2), s_arg(3), s_arg(4)); if !w.is_empty() { self.receiver_ident = w; }
                         self.backing_ident = b; self.setter_value_ident = v; }
                     "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
@@ -241,6 +245,7 @@ const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/syntax/try_catch.pilot",
     "stdlib/core/syntax/expr_sugar.pilot",
     "stdlib/core/syntax/fstring.pilot",
+    "stdlib/core/format.pilot",
     "stdlib/core/syntax/call_quote.pilot",
     "stdlib/core/syntax/unit_decl.pilot",
     "stdlib/core/builtins/native_calls.pilot",
@@ -1106,13 +1111,7 @@ impl<'a> Parser<'a> {
             TokenKind::BinIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 2).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }
             TokenKind::OctIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 8).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }
             TokenKind::FloatLit => { let v = self.text().replace('_', "").parse().unwrap_or(0.0); self.advance(); self.arena.alloc_float(v, sp) }
-            TokenKind::StrLit | TokenKind::TripleStrLit => { let raw = self.text(); let is_f = raw.starts_with('f') || raw.starts_with('F');
-                let s = if is_f { &raw[1..] } else { raw };
-                let inner = if (s.starts_with("\"\"\"") || s.starts_with("'''")) && s.len() >= 6 { &s[3..s.len() - 3] }
-                else if s.len() >= 2 { &s[1..s.len() - 1] } else { s }; self.advance();
-                if is_f { return self.lower_fstring(inner, sp); }
-                let unesc = unescape_str(inner);
-                let sym = self.arena.interner.intern(&unesc); self.arena.alloc_node(NodeKind::StrLit, 0, sp, sym.0, 0) }
+            TokenKind::StrLit | TokenKind::TripleStrLit => self.parse_str_lit(sp),
             TokenKind::KeywordLit => { let t = self.text(); self.advance(); self.arena.alloc_keyword(t, sp) }
             TokenKind::KwIf => self.parse_if(),
             TokenKind::KwQuote => { self.advance(); if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() } }
@@ -1193,90 +1192,6 @@ impl<'a> Parser<'a> {
                 } else { let a = self.parse_expr(); if a.is_some() { ch.push(a); } } }
             if self.eat(TokenKind::Comma) { if self.at(TokenKind::RParen) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in argument list".into())); break; } } else { break; } }
         self.expect(TokenKind::RParen); self.arena.alloc_list_node(NodeKind::CallExpr, qk, ByteSpan::new(self.arena.span(callee).start, self.prev_span().end), &ch) }
-    /// Lowers the body of `f"..."` into string concatenation: literal
-    /// segments become string literals and every `{expr}` hole is parsed as an
-    /// expression. `{{` and `}}` stand for literal braces. The chain starts
-    /// with a string so `+` concatenates instead of adding numbers.
-    fn lower_fstring(&mut self, body: &'a str, sp: ByteSpan) -> NodeId {
-        let bytes = body.as_bytes();
-        let mut parts: Vec<NodeId> = Vec::new();
-        let mut lit = String::new();
-        let mut i = 0;
-        while i < bytes.len() {
-            let c = bytes[i];
-            if (c == b'{' || c == b'}') && bytes.get(i + 1) == Some(&c) {
-                lit.push(c as char);
-                i += 2;
-                continue;
-            }
-            if c == b'}' {
-                self.arena.diagnostics.push((sp, "SyntaxError: unmatched `}` in f-string; write `}}` for a literal brace".into()));
-                i += 1;
-                continue;
-            }
-            if c != b'{' {
-                let ch = body[i..].chars().next().unwrap_or('?');
-                lit.push(ch);
-                i += ch.len_utf8();
-                continue;
-            }
-            let Some(end) = fstring_hole_end(bytes, i + 1) else {
-                self.arena.diagnostics.push((sp, "SyntaxError: unterminated `{` in f-string".into()));
-                break;
-            };
-            if !lit.is_empty() {
-                let sym = self.arena.interner.intern(&unescape_str(&lit));
-                parts.push(self.arena.alloc_node(NodeKind::StrLit, 0, sp, sym.0, 0));
-                lit.clear();
-            }
-            let hole = &body[i + 1..end];
-            let offset = (hole.as_ptr() as usize).saturating_sub(self.src.as_ptr() as usize) as u32;
-            parts.push(self.parse_fstring_hole(unescape_hole_quotes(hole), offset, sp));
-            i = end + 1;
-        }
-        if !lit.is_empty() || parts.is_empty() {
-            let sym = self.arena.interner.intern(&unescape_str(&lit));
-            parts.push(self.arena.alloc_node(NodeKind::StrLit, 0, sp, sym.0, 0));
-        }
-        let first_is_str = self.arena.node(parts[0]).node_kind() == NodeKind::StrLit;
-        let mut acc = if first_is_str { parts[0] } else {
-            let empty = self.arena.interner.intern("");
-            let e = self.arena.alloc_node(NodeKind::StrLit, 0, sp, empty.0, 0);
-            self.arena.alloc_node(NodeKind::BinaryExpr, BinaryOp::Add as u16, sp, e.0, parts[0].0)
-        };
-        for &p in &parts[1..] {
-            acc = self.arena.alloc_node(NodeKind::BinaryExpr, BinaryOp::Add as u16, sp, acc.0, p.0);
-        }
-        acc
-    }
-
-    /// Parses one `{expr}` hole of an f-string with a temporary token tape.
-    /// Spans of the hole's nodes are shifted back into the enclosing source.
-    /// `offset` is where the hole starts in the enclosing source.
-    fn parse_fstring_hole(&mut self, hole: &'a str, offset: u32, sp: ByteSpan) -> NodeId {
-        let first_node = self.arena.nodes.len();
-        let first_diag = self.arena.diagnostics.len();
-        let saved_tape = std::mem::replace(&mut self.tape, tokenize(hole));
-        let saved_src = std::mem::replace(&mut self.src, hole);
-        let saved_pos = std::mem::replace(&mut self.pos, 0);
-        let e = if self.at_end() { NodeId::NONE } else { self.parse_expr() };
-        let trailing = !self.at_end();
-        self.tape = saved_tape;
-        self.src = saved_src;
-        self.pos = saved_pos;
-        for span in &mut self.arena.spans[first_node..] {
-            *span = ByteSpan::new(span.start + offset, span.end + offset);
-        }
-        for d in &mut self.arena.diagnostics[first_diag..] {
-            d.0 = ByteSpan::new(d.0.start + offset, d.0.end + offset);
-        }
-        if e.is_none() {
-            self.arena.diagnostics.push((sp, "SyntaxError: empty `{}` in f-string".into()));
-        } else if trailing {
-            self.arena.diagnostics.push((sp, "SyntaxError: f-string hole must be a single expression (format specifiers are not supported yet)".into()));
-        }
-        e
-    }
 
     fn parse_paren_or_lambda(&mut self) -> NodeId { let sp = self.span(); if let Some(close) = self.tape.matching_bracket(self.cur()) {
             let nx = self.next_non_nl(close as usize + 1); if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::FatArrow {
@@ -1400,73 +1315,3 @@ fn compile_type_rule(pat: &[(TokenKind, String)], template: TemplateNode) -> Opt
         return Some(TypeConstructRule::Infix { op: clean[1].1.clone(), bp, right_assoc: ra, lhs_param: clean[0].1.clone(), rhs_param: clean[2].1.clone(), template });
     }
     None }
-/// Index of the `}` closing an f-string hole that starts at `start`, skipping
-/// nested braces and quoted strings inside the hole.
-/// Marks a string inside a hole delimited by escaped quotes (`\"`), the only
-/// way to write a double-quoted string inside `f"..."`.
-const ESCAPED_QUOTE: u8 = 0;
-
-/// A hole with its escaped quotes made plain: `m[\"k\"]` becomes `m[ "k" ]`.
-/// Each `\"` becomes two characters, so every offset in the hole is kept.
-/// The rewritten text must live as long as the source it stands in for; only
-/// holes that contain `\"` are copied, and each copy is kept for the life of
-/// the process.
-fn unescape_hole_quotes(hole: &str) -> &str {
-    if !hole.contains("\\\"") {
-        return hole;
-    }
-    let b = hole.as_bytes();
-    let (mut out, mut j, mut open) = (String::with_capacity(hole.len()), 0, false);
-    while j < b.len() {
-        if b[j] == b'\\' && b.get(j + 1) == Some(&b'"') {
-            out.push_str(if open { "\" " } else { " \"" });
-            open = !open;
-            j += 2;
-        } else {
-            let ch = hole[j..].chars().next().unwrap_or(' ');
-            out.push(ch);
-            j += ch.len_utf8();
-        }
-    }
-    Box::leak(out.into_boxed_str())
-}
-
-fn fstring_hole_end(b: &[u8], start: usize) -> Option<usize> {
-    let (mut depth, mut j, mut quote) = (1usize, start, None::<u8>);
-    while j < b.len() {
-        let c = b[j];
-        let escaped_quote = c == b'\\' && b.get(j + 1) == Some(&b'"');
-        if let Some(q) = quote {
-            if q == ESCAPED_QUOTE && escaped_quote {
-                quote = None;
-                j += 1;
-            } else if c == b'\\' {
-                j += 1;
-            } else if c == q {
-                quote = None;
-            }
-        } else if escaped_quote {
-            quote = Some(ESCAPED_QUOTE);
-            j += 1;
-        } else if c == b'"' || c == b'\'' {
-            quote = Some(c);
-        } else if c == b'{' {
-            depth += 1;
-        } else if c == b'}' {
-            depth -= 1;
-            if depth == 0 {
-                return Some(j);
-            }
-        }
-        j += 1;
-    }
-    None
-}
-
-fn unescape_str(s: &str) -> String { if !s.contains('\\') { return s.to_string(); }
-    let (mut out, mut ch) = (String::with_capacity(s.len()), s.chars()); while let Some(c) = ch.next() { if c == '\\' {
-            match ch.next() { Some('n') => out.push('\n'), Some('t') => out.push('\t'), Some('r') => out.push('\r'),
-                Some('\\') => out.push('\\'), Some('"') => out.push('"'), Some('\'') => out.push('\''),
-                Some(o) => { out.push('\\'); out.push(o); } None => out.push('\\'), }
-        } else { out.push(c); } }
-    out }

@@ -31,6 +31,8 @@
 //!     // `x?` on a record unwraps it through its `op ?` when `x.is_success()`;
 //!     // `catch e` binds a failed record's `failure()`.
 //!     __engine("bind_try_protocol", nameof(is_success), "?", nameof(failure));
+//!     // `f"{x:#_###}"` calls `format_by_pattern(x, "#_###")`.
+//!     __engine("bind_format_spec", nameof(format_by_pattern));
 //! }
 //! ```
 
@@ -72,6 +74,9 @@ pub const HOOK_ENUMERATOR: &str = "bind_enumerator";
 pub const HOOK_GENERATOR: &str = "bind_generator";
 /// The hook that names the success predicate of the `op ?` protocol.
 pub const HOOK_TRY_PROTOCOL: &str = "bind_try_protocol";
+/// The hook that names the function an f-string hole's `:pattern` calls:
+/// `f"{x:#_###}"` is `f(x, "#_###")`.
+pub const HOOK_FORMAT_SPEC: &str = "bind_format_spec";
 
 /// The methods postfix `x?` calls on a struct record `x`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -175,6 +180,17 @@ impl ParserTables {
     /// The methods postfix `x?` calls on a record, if bound.
     pub fn try_protocol(&self) -> Option<&TryProtocol> {
         self.try_protocol.as_ref()
+    }
+
+    /// The function an f-string hole's format pattern calls, if one is bound.
+    pub fn format_spec(&self) -> Option<&str> {
+        self.format_spec.as_deref()
+    }
+
+    pub(crate) fn bind_format_spec(&mut self, function: String) {
+        if !function.is_empty() {
+            self.format_spec = Some(function);
+        }
     }
 
     pub(crate) fn bind_enumerator(&mut self, get_enumerator: String, move_next: String, current: String, close: String) {

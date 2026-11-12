@@ -87,6 +87,7 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("emit.instruction", ::Exit, "an emitter spelling for every PilIR opcode and engine operation (typed emitters: the list, map and string engine operations; every emitter: address arithmetic, views, Perceus and guard opcodes)", "F6"),
         seam_entry("emit.representation", ::Exit, "a target representation for every value physics (typed emitters: strings, records, lists, maps, function values, and the float that `**` on integers gives for a negative exponent; dynamic emitters: SIMD vectors)", "F6"),
         seam_entry("ffi.call_destructor", ::Exit, "native destructor call through PilVM native calls", "F6"),
+        seam_entry("fmt.pattern_wide_float", ::Exit, "float-to-decimal conversion (shortest round-trip digits) for formatting a float of magnitude 2^63 or more by a pattern (stdlib/core/format.pilot)", "M30"),
         seam_entry("fs.open", ::Entry, "host file-descriptor open/close intrinsics", "F6"),
         seam_entry("fusion.rewrite_ir", ::Exit, "PilIR rewrite of a combinator chain into one fused loop", "F5"),
         seam_entry("http.invoke_handler", ::Exit, "calling the [Service] handler a matched route names, with bound params, decoded body and requires->422", "F4"),
@@ -289,6 +290,10 @@ pub fn bug_registry() -> List<KnownBug> {
             "`return xs[i]` where `xs` is a list bound in the same function panics in crates/pilot-ast `node` with node id u32::MAX; the same index printed instead of returned works",
             "returns the element; prints 4 and a", "thread 'main' panicked: index out of bounds (crates/pilot-ast/src/lib.rs:382)",
             "tests/conformance/known_bugs/return_local_index.pilot", "F7"),
+        known_bug("seed.if_some_foreign_let", "selfhost/analyzer.pilot DECL004 over crates/pilot-analysis binding targets",
+            "`if some m = e` is checked as an assignment whose target is a `let m` declared in another function (any linked file, a std module included), so it is refused as reassigning an immutable binding",
+            "`m` is a new binding in the `if`; prints 2, 3", "error[DECL004]: Cannot reassign to immutable 'let' binding 'm'",
+            "tests/conformance/known_bugs/if_some_foreign_let.pilot", "F4"),
     ];
     return entries;
 }

@@ -1,0 +1,21 @@
+// String literal forms. Expected output by hand from each form's rule:
+//   "..."         escapes processed;     r"..."      raw: every backslash kept;
+//   """..."""     multi-line;            r"""..."""  raw multi-line;
+//   f"..."        interpolated;          rf"..." / fr"..."  raw interpolated.
+fn main() {
+    let n = 42;
+    print("tab[\t] quote[\"]");
+    print(r"\d+\.\w*");
+    print(r"\d+".len());
+    print(r"C:\temp\new");
+    print("""one
+two "quoted" \t""");
+    print(r"""raw
+\n kept""");
+    print(f"n={n} {{braces}}\t!");
+    print(rf"n={n} \t {{braces}}");
+    print(fR"{n}\n");
+    print(Rf"""{n}
+\w""");
+    print(1_000_000 + 0x_FF + 0b1_0000);
+}

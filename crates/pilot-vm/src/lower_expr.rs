@@ -57,6 +57,7 @@ impl BytecodeCompiler {
         let captured = self.probes_before(arena, node_id);
         let r = self.compile_node_kind(arena, node_id);
         let r = self.copy_if_planned(arena, node_id, r);
+        self.drop_if_discarded(arena, node_id, r);
         self.probes_after(arena, node_id, &captured);
         self.drops_after(arena, node_id);
         self.cur_span = parent_span;

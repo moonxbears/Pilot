@@ -1,0 +1,15 @@
+drop t
+after call
+drop lit
+after literal
+3
+drop c
+after pop
+drop k2
+after renamed
+k
+drop k
+2
+drop a
+drop b
+end

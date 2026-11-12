@@ -160,6 +160,9 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
             DropAction::Copy => {
                 out.copies.insert(key, r.a.clone());
             }
+            DropAction::Discard => {
+                out.discards.insert(key, r.b.clone());
+            }
             DropAction::Glue | DropAction::CopyGlue => {}
         }
     }

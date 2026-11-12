@@ -1,0 +1,124 @@
+// std.text.regex against Python 3.12's `re` module (with re.ASCII) on the
+// same patterns and texts: re.search, re.finditer, re.sub and re.compile
+// errors. Offsets are UTF-8 byte offsets (Python's code-point offsets
+// converted). Error codes map Python's messages: missing ) REGEX001,
+// unbalanced parenthesis REGEX002, nothing to repeat / multiple repeat
+// REGEX003, unterminated character set REGEX004, bad escape REGEX005, bad
+// character range / min repeat greater than max REGEX006, invalid group
+// reference / unterminated name REGEX008; the position is Python's.
+use std.text.regex;
+
+fn show_find(p: str, t: str) {
+    let r = compile(p);
+    if !r.is_ok {
+        print(f"error {r.err_val.code()} at {r.err_val.pos}");
+        return;
+    }
+    let re = r.ok_val;
+    if some m = re.find(t) {
+        var line = f"{m.start}..{m.end} [{m.text}]";
+        if some c = re.captures(t) {
+            var g = 1;
+            while g < c.len() {
+                if some s = c.get(g) {
+                    line = line + f" {c.start(g)}:{s}";
+                } else {
+                    line = line + " -";
+                }
+                g = g + 1;
+            }
+        }
+        print(line);
+    } else {
+        print("none");
+        return;
+    }
+    print(re.is_match(t));
+}
+
+fn show_all(p: str, t: str) {
+    let re = compile(p).ok_val;
+    var line = "";
+    for m in re.find_all(t) {
+        if line.len() > 0 { line = line + " "; }
+        line = line + f"{m.start}..{m.end} [{m.text}]";
+    }
+    print(line);
+}
+
+fn show_replace(p: str, t: str, rep: str, count: i64) {
+    let re = compile(p).ok_val;
+    let r = re.replace_n(t, rep, count);
+    if r.is_ok {
+        print(r.ok_val);
+    } else {
+        print(f"error {r.err_val.code()} at {r.err_val.pos}");
+    }
+}
+
+fn main() {
+    show_find("abc", "xxabcxx");
+    show_find("a.c", "a\nc abc");
+    show_find("\\d+", "order 66 and 123");
+    show_find("[a-c]+", "xxbcaz");
+    show_find("[^a-c]+", "abcxyzabc");
+    show_find("colou?r", "the color red");
+    show_find("a{2,3}", "aaaa");
+    show_find("a{2,}?", "aaaa");
+    show_find("a{3}", "aa aaa");
+    show_find("(\\w+)@(\\w+)\\.com", "mail bob@example.com now");
+    show_find("(a|ab)(c|bcd)(d*)", "abcd");
+    show_find("^\\s*(\\w+)", "   hello world");
+    show_find("world$", "hello world\n");
+    show_find("\\bcat\\b", "concat cat category");
+    show_find("\\Bcat", "cat concat");
+    show_find("(?:ab)+", "xababab");
+    show_find("x*", "abc");
+    show_find(".*?b", "aaab");
+    show_find("[\\d.]+", "v1.25b");
+    show_find("[\\]a-]+", "x]a-]y");
+    show_find("a|b|", "c");
+    show_find("\\$\\d+\\.\\d\\d", "cost $12.50 now");
+    show_find("(a+)+b", "aaaaaaaaaaaaaaaaaaaac");
+    show_find("h.llo", "say héllo");
+    show_find("[à-ü]+", "caféteria");
+    show_find("(x)?y", "y");
+    show_find("\\Aab|cd\\Z", "xabcd");
+    show_find("[\\s\\S]+", "a b");
+    show_find("\\W+", "ab, cd");
+    show_find("a(?:b|c)*?d", "abcbd");
+    show_find("(a)|(b)", "b");
+    show_find("[A-Fa-f0-9]{2}", "0x3Fz");
+    show_find("\\t\\n", "a\t\nb");
+    show_find("\\x41é", "zAé");
+    show_all("\\d+", "a1b22c333");
+    show_all("a*", "baaca");
+    show_all("a??", "aa");
+    show_all("(\\w)(\\d)", "a1 b2 c3");
+    show_all("\\b", "ab cd");
+    show_all("", "héj");
+    show_replace("\\d+", "a1b22c333", "#", 0);
+    show_replace("x*", "abxd", "-", 0);
+    show_replace("(\\w+)@(\\w+)", "bob@site amy@web", "\\2 at \\1", 0);
+    show_replace("(?P<w>o+)", "foo boo", "[\\g<w>|\\g<1>]", 0);
+    show_replace("a", "banana", "\\\\", 0);
+    show_replace("\\s+", "a  b\t\nc", " ", 0);
+    show_replace("a", "banana", "o", 2);
+    show_replace("(b)(?:x)?", "abc", "<\\1\\n>", 0);
+    let named = compile("(?P<year>\\d{4})-(?P<month>\\d\\d)").ok_val.captures("on 2026-11-11");
+    if some c = named {
+        print((c.name("year") ?? "?") + " " + (c.name("month") ?? "?"));
+    }
+    show_find("(ab", "");
+    show_find("ab)", "");
+    show_find("*a", "");
+    show_find("a**", "");
+    show_find("[abc", "");
+    show_find("abc\\", "");
+    show_find("\\q", "");
+    show_find("[z-a]", "");
+    show_find("a{3,1}", "");
+    show_find("x|+", "");
+    show_replace("a", "a", "\\2", 0);
+    show_replace("(a)", "a", "\\g<1", 0);
+}

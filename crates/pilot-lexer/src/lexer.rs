@@ -84,6 +84,16 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
+            // Raw interpolated strings (`rf"..."`, `fr"..."`, any case)
+            let is_r = |b: u8| b == b'r' || b == b'R';
+            let is_f = |b: u8| b == b'f' || b == b'F';
+            if ((is_r(b0) && is_f(b1)) || (is_f(b0) && is_r(b1))) && (b2 == b'"' || b2 == b'\'') {
+                let mut extra = TokenFlags::IS_RAW_STRING;
+                extra.insert(TokenFlags::IS_INTERPOLATED);
+                self.scan_string_literal(start, start + 2, b2, extra);
+                continue;
+            }
+
             // Prefixed strings (`f"..."`, `r"..."`, `b"..."`)
             if (b0 == b'f' || b0 == b'F' || b0 == b'r' || b0 == b'R' || b0 == b'b' || b0 == b'B')
                 && (b1 == b'"' || b1 == b'\'')

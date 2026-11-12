@@ -100,6 +100,10 @@ pub fn plan_after(lw: Lowerer, n: i64, v: u32) -> u32 {
             let t: i64 = r[2];
             out = copy_value(lw, v, t, n, 0);
         }
+        if is(r, ::Discard) && v != ir_no_value() && !ir_is_terminated(lw.f, lw.cur) {
+            let t: i64 = r[2];
+            drop_value(lw, v, t, n, 0);
+        }
         if is(r, ::Guard) && lw.defers.len() > 0 {
             lw.defers[lw.defers.len() - 1].push(n);
             lw.releases.set(key(n), r);

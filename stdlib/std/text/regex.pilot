@@ -1,0 +1,1166 @@
+// ==============================================================================
+// FILE: stdlib/std/text/regex.pilot
+// Ring 2: Regular expressions (pub pkg std.text.regex;)
+// ==============================================================================
+// `compile(r"(\w+)@(\w+)")` parses a pattern into a program for a Pike VM
+// (Thompson NFA simulation with capture slots): every thread advances in
+// lock step over the text, so a search costs O(pattern x text) whatever the
+// pattern, with no backtracking. Matches follow leftmost-first priority, the
+// same answer a backtracking engine such as Python's `re` gives.
+//
+// Syntax (Python `re` with the ASCII flag): literals, `.`, `[...]` / `[^...]`
+// with ranges, `\d \w \s \D \W \S`, `^ $ \A \Z \b \B`, groups `(...)`,
+// `(?:...)`, `(?P<name>...)`, alternation `|`, quantifiers `* + ? {n} {n,}
+// {,m} {n,m}` and their lazy forms (`*?` ...), escapes `\n \t \r \f \v \a \0
+// \xHH \uHHHH \UHHHHHHHH`. `.` and classes match whole UTF-8 code points;
+// offsets are byte offsets into the text. Backreferences, lookaround and
+// inline flags are refused (REGEX007): they are not regular, and the engine
+// keeps its linear-time guarantee.
+pub pkg std.text.regex;
+
+// ------------------------------------------------------------------------------
+// 1. Errors
+// ------------------------------------------------------------------------------
+
+pub enum RegexErrorKind : u8 {
+    MissingParen = 1,
+    UnbalancedParen = 2,
+    NothingToRepeat = 3,
+    UnterminatedClass = 4,
+    BadEscape = 5,
+    BadRange = 6,
+    Unsupported = 7,
+    BadGroupRef = 8,
+}
+
+pub struct RegexError : IValue {
+    pub kind: RegexErrorKind;
+    pub pos: i64;
+    pub message: str;
+
+    /// The diagnostic code for this error (`REGEX001`..`REGEX008`).
+    pub fn code(ref self) -> str {
+        if self.kind == RegexErrorKind::MissingParen { return "REGEX001"; }
+        if self.kind == RegexErrorKind::UnbalancedParen { return "REGEX002"; }
+        if self.kind == RegexErrorKind::NothingToRepeat { return "REGEX003"; }
+        if self.kind == RegexErrorKind::UnterminatedClass { return "REGEX004"; }
+        if self.kind == RegexErrorKind::BadEscape { return "REGEX005"; }
+        if self.kind == RegexErrorKind::BadRange { return "REGEX006"; }
+        if self.kind == RegexErrorKind::Unsupported { return "REGEX007"; }
+        return "REGEX008";
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 2. Syntax tree, program and instruction kinds
+// ------------------------------------------------------------------------------
+
+enum ReNode : u8 {
+    Empty = 0,
+    Char = 1,
+    Any = 2,
+    Class = 3,
+    Assert = 4,
+    Concat = 5,
+    Alt = 6,
+    Group = 7,
+    Repeat = 8,
+}
+
+enum ReOp : u8 {
+    Char = 1,
+    Any = 2,
+    AnyNl = 3,
+    Class = 4,
+    Split = 5,
+    Jmp = 6,
+    Save = 7,
+    Assert = 8,
+    Match = 9,
+}
+
+enum ReAssert : u8 {
+    LineStart = 1,
+    LineEnd = 2,
+    TextStart = 3,
+    TextEnd = 4,
+    WordEdge = 5,
+    NotWordEdge = 6,
+}
+
+// ------------------------------------------------------------------------------
+// 3. UTF-8 helpers
+// ------------------------------------------------------------------------------
+
+/// The byte length of the UTF-8 sequence whose first byte is `b`.
+fn utf8_width(b: i64) -> i64 {
+    if b < 128 { return 1; }
+    if b >= 240 { return 4; }
+    if b >= 224 { return 3; }
+    if b >= 192 { return 2; }
+    return 1;
+}
+
+/// The code point of the UTF-8 sequence starting at byte `i` of `s`.
+fn code_point_at(s: str, i: i64) -> i64 {
+    let b0 = s.byte_at(i) as i64;
+    let w = utf8_width(b0);
+    let n = s.len() as i64;
+    if w == 1 || i + w > n { return b0; }
+    if w == 2 {
+        return ((b0 & 31) << 6) | ((s.byte_at(i + 1) as i64) & 63);
+    }
+    if w == 3 {
+        return ((b0 & 15) << 12) | (((s.byte_at(i + 1) as i64) & 63) << 6) | ((s.byte_at(i + 2) as i64) & 63);
+    }
+    return ((b0 & 7) << 18) | (((s.byte_at(i + 1) as i64) & 63) << 12) | (((s.byte_at(i + 2) as i64) & 63) << 6) | ((s.byte_at(i + 3) as i64) & 63);
+}
+
+/// Whether byte `b` is an ASCII word character (`[A-Za-z0-9_]`).
+fn is_word_byte(b: i64) -> bool {
+    return (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+}
+
+fn hex_value(b: i64) -> i64 {
+    if b >= 48 && b <= 57 { return b - 48; }
+    if b >= 65 && b <= 70 { return b - 55; }
+    if b >= 97 && b <= 102 { return b - 87; }
+    return -1;
+}
+
+// ------------------------------------------------------------------------------
+// 4. Parser: pattern text -> syntax tree (struct of arrays)
+// ------------------------------------------------------------------------------
+
+/// Syntax-tree nodes as parallel arrays; a list node's children sit at
+/// `kids[arg_a .. arg_a + arg_b]`.
+struct ReTree : IObject {
+    pub kinds: List<ReNode>;
+    pub arg_a: List<i64>;
+    pub arg_b: List<i64>;
+    pub arg_c: List<i64>;
+    pub arg_d: List<i64>;
+    pub kids: List<i64>;
+    ~self() {}
+}
+
+/// Character classes: class `k` is the sorted, disjoint code point ranges
+/// `range_lo/hi[class_start[k] .. class_start[k] + class_len[k]]`.
+pub struct ReClasses : IObject {
+    pub range_lo: List<i64>;
+    pub range_hi: List<i64>;
+    pub class_start: List<i64>;
+    pub class_len: List<i64>;
+
+    /// Whether code point `c` is in class `k` (binary search).
+    pub fn has(ref self, k: i64, c: i64) -> bool {
+        var lo = self.class_start[k];
+        var hi = lo + self.class_len[k] - 1;
+        while lo <= hi {
+            let mid = (lo + hi) / 2;
+            if c < self.range_lo[mid] {
+                hi = mid - 1;
+            } else if c > self.range_hi[mid] {
+                lo = mid + 1;
+            } else {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    ~self() {}
+}
+
+struct RegexParser : IObject {
+    pub src: str;
+    pub pos: i64;
+    pub n: i64;
+    pub tree: ReTree;
+    pub classes: ReClasses;
+    pub groups: i64;
+    pub names: List<str>;
+    pub failed: bool;
+    pub error: RegexError;
+
+    pub fn fail(var ref self, kind: RegexErrorKind, pos: i64, message: str) -> i64 {
+        if !self.failed {
+            self.failed = true;
+            self.error = RegexError { kind: kind, pos: pos, message: message };
+        }
+        return -1;
+    }
+
+    pub fn peek(ref self) -> i64 {
+        if self.pos >= self.n { return -1; }
+        return self.src.byte_at(self.pos) as i64;
+    }
+
+    pub fn peek_at(ref self, i: i64) -> i64 {
+        if i >= self.n { return -1; }
+        return self.src.byte_at(i) as i64;
+    }
+
+    pub fn node(var ref self, kind: ReNode, a: i64, b: i64, c: i64, d: i64) -> i64 {
+        self.tree.kinds.push(kind);
+        self.tree.arg_a.push(a);
+        self.tree.arg_b.push(b);
+        self.tree.arg_c.push(c);
+        self.tree.arg_d.push(d);
+        return (self.tree.kinds.len() as i64) - 1;
+    }
+
+    /// A node with children `items`, stored contiguously in `kids`.
+    pub fn list_node(var ref self, kind: ReNode, items: List<i64>) -> i64 {
+        let first = self.tree.kids.len() as i64;
+        for it in items {
+            self.tree.kids.push(it);
+        }
+        return self.node(kind, first, items.len() as i64, 0, 0);
+    }
+
+    // alternation := concat ('|' concat)*
+    pub fn parse_alt(var ref self) -> i64 {
+        var items: List<i64> = [];
+        items.push(self.parse_concat());
+        while !self.failed && self.peek() == 124 {
+            self.pos = self.pos + 1;
+            items.push(self.parse_concat());
+        }
+        if self.failed { return -1; }
+        if items.len() == 1 { return items[0]; }
+        return self.list_node(ReNode::Alt, items);
+    }
+
+    // concat := repeat*
+    pub fn parse_concat(var ref self) -> i64 {
+        var items: List<i64> = [];
+        while !self.failed && self.pos < self.n && self.peek() != 124 && self.peek() != 41 {
+            items.push(self.parse_repeat());
+        }
+        if self.failed { return -1; }
+        if items.len() == 0 { return self.node(ReNode::Empty, 0, 0, 0, 0); }
+        if items.len() == 1 { return items[0]; }
+        return self.list_node(ReNode::Concat, items);
+    }
+
+    /// Whether a `{n}`, `{n,}`, `{,m}` or `{n,m}` quantifier starts at `i`.
+    pub fn is_brace_quantifier(ref self, i: i64) -> bool {
+        if self.peek_at(i) != 123 { return false; }
+        var j = i + 1;
+        var digits = 0;
+        while self.peek_at(j) >= 48 && self.peek_at(j) <= 57 { j = j + 1; digits = digits + 1; }
+        if self.peek_at(j) == 125 { return digits > 0; }
+        if self.peek_at(j) != 44 { return false; }
+        j = j + 1;
+        while self.peek_at(j) >= 48 && self.peek_at(j) <= 57 { j = j + 1; }
+        return self.peek_at(j) == 125;
+    }
+
+    pub fn read_int(var ref self) -> i64 {
+        var v = -1;
+        while self.peek() >= 48 && self.peek() <= 57 {
+            if v < 0 { v = 0; }
+            v = v * 10 + (self.peek() - 48);
+            self.pos = self.pos + 1;
+        }
+        return v;
+    }
+
+    pub fn is_quantifier_at(ref self, i: i64) -> bool {
+        let c = self.peek_at(i);
+        return c == 42 || c == 43 || c == 63 || self.is_brace_quantifier(i);
+    }
+
+    // repeat := atom quantifier?
+    pub fn parse_repeat(var ref self) -> i64 {
+        var atom = self.parse_atom();
+        if self.failed { return -1; }
+        if !self.is_quantifier_at(self.pos) { return atom; }
+        let qpos = self.pos;
+        let c = self.peek();
+        var lo = 0;
+        var hi = -1;
+        if c == 42 {
+            self.pos = self.pos + 1;
+        } else if c == 43 {
+            lo = 1;
+            self.pos = self.pos + 1;
+        } else if c == 63 {
+            hi = 1;
+            self.pos = self.pos + 1;
+        } else {
+            self.pos = self.pos + 1;
+            let a = self.read_int();
+            lo = if a < 0 { 0 } else { a };
+            if self.peek() == 44 {
+                self.pos = self.pos + 1;
+                hi = self.read_int();
+            } else {
+                hi = lo;
+            }
+            self.pos = self.pos + 1;
+            if hi >= 0 && lo > hi {
+                return self.fail(RegexErrorKind::BadRange, qpos + 1, "min repeat greater than max repeat");
+            }
+        }
+        var greedy = 1;
+        if self.peek() == 63 {
+            greedy = 0;
+            self.pos = self.pos + 1;
+        }
+        if self.is_quantifier_at(self.pos) {
+            return self.fail(RegexErrorKind::NothingToRepeat, self.pos, "multiple repeat");
+        }
+        return self.node(ReNode::Repeat, atom, lo, hi, greedy);
+    }
+
+    pub fn parse_atom(var ref self) -> i64 {
+        let start = self.pos;
+        let c = self.peek();
+        if c == 40 { return self.parse_group(); }
+        if self.is_quantifier_at(start) {
+            return self.fail(RegexErrorKind::NothingToRepeat, start, "nothing to repeat");
+        }
+        if c == 91 { return self.parse_class(); }
+        if c == 46 {
+            self.pos = self.pos + 1;
+            return self.node(ReNode::Any, 0, 0, 0, 0);
+        }
+        if c == 94 {
+            self.pos = self.pos + 1;
+            return self.node(ReNode::Assert, ReAssert::LineStart as i64, 0, 0, 0);
+        }
+        if c == 36 {
+            self.pos = self.pos + 1;
+            return self.node(ReNode::Assert, ReAssert::LineEnd as i64, 0, 0, 0);
+        }
+        if c == 92 { return self.parse_escape(); }
+        let cp = code_point_at(self.src, start);
+        self.pos = start + utf8_width(c);
+        return self.node(ReNode::Char, cp, 0, 0, 0);
+    }
+
+    pub fn parse_group(var ref self) -> i64 {
+        let start = self.pos;
+        self.pos = self.pos + 1;
+        var group = 0;
+        if self.peek() == 63 {
+            let next = self.peek_at(self.pos + 1);
+            if next == 58 {
+                self.pos = self.pos + 2;
+                group = -1;
+            } else if next == 80 && self.peek_at(self.pos + 2) == 60 {
+                self.pos = self.pos + 3;
+                let name_start = self.pos;
+                while self.pos < self.n && self.peek() != 62 { self.pos = self.pos + 1; }
+                if self.pos >= self.n || self.pos == name_start {
+                    return self.fail(RegexErrorKind::BadGroupRef, name_start, "missing group name");
+                }
+                let name = self.src.slice(name_start, self.pos);
+                self.pos = self.pos + 1;
+                self.groups = self.groups + 1;
+                group = self.groups;
+                self.names.push(name);
+            } else {
+                return self.fail(RegexErrorKind::Unsupported, start, "lookaround, inline flags and other (?...) groups are not supported");
+            }
+        } else {
+            self.groups = self.groups + 1;
+            group = self.groups;
+            self.names.push("");
+        }
+        let inner = self.parse_alt();
+        if self.failed { return -1; }
+        if self.peek() != 41 {
+            return self.fail(RegexErrorKind::MissingParen, start, "missing ), unterminated subpattern");
+        }
+        self.pos = self.pos + 1;
+        if group < 0 { return inner; }
+        return self.node(ReNode::Group, group, inner, 0, 0);
+    }
+
+    /// A class node holding the ranges `lo`/`hi`, negated when `negate`.
+    [Workaround("seed.if_some_foreign_let", "the merge index is named last_merged, not m, so a caller's `if some m = re.find(..)` is not taken for it")]
+    pub fn class_node(var ref self, lo: List<i64>, hi: List<i64>, negate: bool) -> i64 {
+        // Sort by lower bound (insertion sort: classes are short), then merge.
+        var slo: List<i64> = [];
+        var shi: List<i64> = [];
+        var i = 0;
+        let k = lo.len() as i64;
+        while i < k {
+            slo.push(lo[i]);
+            shi.push(hi[i]);
+            var j = (slo.len() as i64) - 1;
+            while j > 0 && slo[j - 1] > slo[j] {
+                let tl = slo[j - 1];
+                let th = shi[j - 1];
+                slo[j - 1] = slo[j];
+                shi[j - 1] = shi[j];
+                slo[j] = tl;
+                shi[j] = th;
+                j = j - 1;
+            }
+            i = i + 1;
+        }
+        var mlo: List<i64> = [];
+        var mhi: List<i64> = [];
+        i = 0;
+        while i < k {
+            let last_merged = (mlo.len() as i64) - 1;
+            if last_merged >= 0 && slo[i] <= mhi[last_merged] + 1 {
+                if shi[i] > mhi[last_merged] { mhi[last_merged] = shi[i]; }
+            } else {
+                mlo.push(slo[i]);
+                mhi.push(shi[i]);
+            }
+            i = i + 1;
+        }
+        let first = self.classes.range_lo.len() as i64;
+        if negate {
+            var next = 0;
+            i = 0;
+            while i < (mlo.len() as i64) {
+                if mlo[i] > next {
+                    self.classes.range_lo.push(next);
+                    self.classes.range_hi.push(mlo[i] - 1);
+                }
+                next = mhi[i] + 1;
+                i = i + 1;
+            }
+            if next <= 1114111 {
+                self.classes.range_lo.push(next);
+                self.classes.range_hi.push(1114111);
+            }
+        } else {
+            i = 0;
+            while i < (mlo.len() as i64) {
+                self.classes.range_lo.push(mlo[i]);
+                self.classes.range_hi.push(mhi[i]);
+                i = i + 1;
+            }
+        }
+        self.classes.class_start.push(first);
+        self.classes.class_len.push((self.classes.range_lo.len() as i64) - first);
+        return self.node(ReNode::Class, (self.classes.class_start.len() as i64) - 1, 0, 0, 0);
+    }
+
+    /// Adds the ranges of the class escape letter `e` (`d w s`, any case) to
+    /// `lo`/`hi`; returns whether `e` is one.
+    pub fn add_class_escape(ref self, e: i64, var ref lo: List<i64>, var ref hi: List<i64>) -> bool {
+        var dl: List<i64> = [];
+        var dh: List<i64> = [];
+        let lower = e | 32;
+        if lower == 100 {
+            dl.push(48); dh.push(57);
+        } else if lower == 119 {
+            dl.push(48); dh.push(57);
+            dl.push(65); dh.push(90);
+            dl.push(95); dh.push(95);
+            dl.push(97); dh.push(122);
+        } else if lower == 115 {
+            dl.push(9); dh.push(13);
+            dl.push(32); dh.push(32);
+        } else {
+            return false;
+        }
+        if e == lower {
+            var i = 0;
+            while i < (dl.len() as i64) {
+                lo.push(dl[i]);
+                hi.push(dh[i]);
+                i = i + 1;
+            }
+            return true;
+        }
+        // Upper case: the complement over all code points.
+        var next = 0;
+        var i = 0;
+        while i < (dl.len() as i64) {
+            if dl[i] > next {
+                lo.push(next);
+                hi.push(dl[i] - 1);
+            }
+            next = dh[i] + 1;
+            i = i + 1;
+        }
+        lo.push(next);
+        hi.push(1114111);
+        return true;
+    }
+
+    /// The code point of a single-character escape whose backslash is at
+    /// `self.pos - 1` and letter at `self.pos` (`\n`, `\x41`, `\.`), advancing
+    /// past it; -1 after a failure.
+    pub fn escape_code_point(var ref self, in_class: bool) -> i64 {
+        let bs = self.pos - 1;
+        let e = self.peek();
+        if e == 110 { self.pos = self.pos + 1; return 10; }
+        if e == 116 { self.pos = self.pos + 1; return 9; }
+        if e == 114 { self.pos = self.pos + 1; return 13; }
+        if e == 102 { self.pos = self.pos + 1; return 12; }
+        if e == 118 { self.pos = self.pos + 1; return 11; }
+        if e == 97 { self.pos = self.pos + 1; return 7; }
+        if e == 98 && in_class { self.pos = self.pos + 1; return 8; }
+        if e == 48 { self.pos = self.pos + 1; return 0; }
+        if e == 120 || e == 117 || e == 85 {
+            let digits = if e == 120 { 2 } else if e == 117 { 4 } else { 8 };
+            var v = 0;
+            var i = 0;
+            while i < digits {
+                let h = hex_value(self.peek_at(self.pos + 1 + i));
+                if h < 0 {
+                    return self.fail(RegexErrorKind::BadEscape, bs, "incomplete hexadecimal escape");
+                }
+                v = v * 16 + h;
+                i = i + 1;
+            }
+            self.pos = self.pos + 1 + digits;
+            return v;
+        }
+        if e >= 49 && e <= 57 {
+            return self.fail(RegexErrorKind::Unsupported, bs, "backreferences are not supported");
+        }
+        if (e >= 65 && e <= 90) || (e >= 97 && e <= 122) || (e >= 48 && e <= 57) {
+            return self.fail(RegexErrorKind::BadEscape, bs, "bad escape");
+        }
+        let cp = code_point_at(self.src, self.pos);
+        self.pos = self.pos + utf8_width(e);
+        return cp;
+    }
+
+    pub fn parse_escape(var ref self) -> i64 {
+        let bs = self.pos;
+        self.pos = self.pos + 1;
+        if self.pos >= self.n {
+            return self.fail(RegexErrorKind::BadEscape, bs, "bad escape (end of pattern)");
+        }
+        let e = self.peek();
+        var lo: List<i64> = [];
+        var hi: List<i64> = [];
+        if self.add_class_escape(e, lo, hi) {
+            self.pos = self.pos + 1;
+            return self.class_node(lo, hi, false);
+        }
+        if e == 98 || e == 66 || e == 65 || e == 90 {
+            self.pos = self.pos + 1;
+            var kind = ReAssert::WordEdge;
+            if e == 66 { kind = ReAssert::NotWordEdge; }
+            if e == 65 { kind = ReAssert::TextStart; }
+            if e == 90 { kind = ReAssert::TextEnd; }
+            return self.node(ReNode::Assert, kind as i64, 0, 0, 0);
+        }
+        let cp = self.escape_code_point(false);
+        if self.failed { return -1; }
+        return self.node(ReNode::Char, cp, 0, 0, 0);
+    }
+
+    pub fn parse_class(var ref self) -> i64 {
+        let start = self.pos;
+        self.pos = self.pos + 1;
+        var negate = false;
+        if self.peek() == 94 {
+            negate = true;
+            self.pos = self.pos + 1;
+        }
+        var lo: List<i64> = [];
+        var hi: List<i64> = [];
+        var first = true;
+        while true {
+            if self.pos >= self.n {
+                return self.fail(RegexErrorKind::UnterminatedClass, start, "unterminated character set");
+            }
+            let c = self.peek();
+            if c == 93 && !first { break; }
+            first = false;
+            let item_start = self.pos;
+            var item = -1;
+            if c == 92 {
+                self.pos = self.pos + 1;
+                if self.pos >= self.n {
+                    return self.fail(RegexErrorKind::UnterminatedClass, start, "unterminated character set");
+                }
+                if self.add_class_escape(self.peek(), lo, hi) {
+                    self.pos = self.pos + 1;
+                    if self.peek() == 45 && self.peek_at(self.pos + 1) != 93 && self.pos + 1 < self.n {
+                        return self.fail(RegexErrorKind::BadRange, item_start, "bad character range");
+                    }
+                    continue;
+                }
+                item = self.escape_code_point(true);
+                if self.failed { return -1; }
+            } else {
+                item = code_point_at(self.src, self.pos);
+                self.pos = self.pos + utf8_width(c);
+            }
+            if self.peek() == 45 && self.pos + 1 < self.n && self.peek_at(self.pos + 1) != 93 {
+                self.pos = self.pos + 1;
+                var top = -1;
+                let hc = self.peek();
+                if hc == 92 {
+                    self.pos = self.pos + 1;
+                    if self.pos >= self.n {
+                        return self.fail(RegexErrorKind::UnterminatedClass, start, "unterminated character set");
+                    }
+                    var probe_lo: List<i64> = [];
+                    var probe_hi: List<i64> = [];
+                    if self.add_class_escape(self.peek(), probe_lo, probe_hi) {
+                        return self.fail(RegexErrorKind::BadRange, item_start, "bad character range");
+                    }
+                    top = self.escape_code_point(true);
+                    if self.failed { return -1; }
+                } else {
+                    top = code_point_at(self.src, self.pos);
+                    self.pos = self.pos + utf8_width(hc);
+                }
+                if top < item {
+                    return self.fail(RegexErrorKind::BadRange, item_start, "bad character range");
+                }
+                lo.push(item);
+                hi.push(top);
+            } else {
+                lo.push(item);
+                hi.push(item);
+            }
+        }
+        self.pos = self.pos + 1;
+        return self.class_node(lo, hi, negate);
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 5. Compiled regular expression and its program
+// ------------------------------------------------------------------------------
+
+pub struct Regex : IObject {
+    pub pattern: str;
+    /// Capture groups, not counting the whole match (group 0).
+    pub groups: i64;
+    /// Group names by group number - 1 (`""` for an unnamed group).
+    pub names: List<str>;
+    pub ops: List<ReOp>;
+    pub arg_x: List<i64>;
+    pub arg_y: List<i64>;
+    pub classes: ReClasses;
+
+    pub fn emit(var ref self, op: ReOp, x: i64, y: i64) -> i64 {
+        self.ops.push(op);
+        self.arg_x.push(x);
+        self.arg_y.push(y);
+        return (self.ops.len() as i64) - 1;
+    }
+
+    pub fn pc(ref self) -> i64 => self.ops.len() as i64;
+
+    /// Emits the code for syntax-tree node `n` of `p`.
+    pub fn compile_node(var ref self, ref p: RegexParser, n: i64) {
+        let k = p.tree.kinds[n];
+        if k == ReNode::Char {
+            self.emit(ReOp::Char, p.tree.arg_a[n], 0);
+        } else if k == ReNode::Any {
+            self.emit(ReOp::Any, 0, 0);
+        } else if k == ReNode::Class {
+            self.emit(ReOp::Class, p.tree.arg_a[n], 0);
+        } else if k == ReNode::Assert {
+            self.emit(ReOp::Assert, p.tree.arg_a[n], 0);
+        } else if k == ReNode::Concat {
+            var i = 0;
+            while i < p.tree.arg_b[n] {
+                self.compile_node(p, p.tree.kids[p.tree.arg_a[n] + i]);
+                i = i + 1;
+            }
+        } else if k == ReNode::Alt {
+            var jumps: List<i64> = [];
+            let count = p.tree.arg_b[n];
+            var i = 0;
+            while i < count {
+                let kid = p.tree.kids[p.tree.arg_a[n] + i];
+                if i + 1 < count {
+                    let split = self.emit(ReOp::Split, self.pc() + 1, 0);
+                    self.compile_node(p, kid);
+                    jumps.push(self.emit(ReOp::Jmp, 0, 0));
+                    self.arg_y[split] = self.pc();
+                } else {
+                    self.compile_node(p, kid);
+                }
+                i = i + 1;
+            }
+            for j in jumps {
+                self.arg_x[j] = self.pc();
+            }
+        } else if k == ReNode::Group {
+            let g = p.tree.arg_a[n];
+            self.emit(ReOp::Save, 2 * g, 0);
+            self.compile_node(p, p.tree.arg_b[n]);
+            self.emit(ReOp::Save, 2 * g + 1, 0);
+        } else if k == ReNode::Repeat {
+            self.compile_repeat(p, p.tree.arg_a[n], p.tree.arg_b[n], p.tree.arg_c[n], p.tree.arg_d[n] == 1);
+        }
+    }
+
+    /// `kid{lo,hi}` (`hi` -1 for no upper bound), greedy or lazy.
+    pub fn compile_repeat(var ref self, ref p: RegexParser, kid: i64, lo: i64, hi: i64, greedy: bool) {
+        var i = 0;
+        while i < lo {
+            self.compile_node(p, kid);
+            i = i + 1;
+        }
+        if hi < 0 {
+            let top = self.emit(ReOp::Split, 0, 0);
+            self.compile_node(p, kid);
+            self.emit(ReOp::Jmp, top, 0);
+            self.set_split(top, top + 1, self.pc(), greedy);
+            return;
+        }
+        var splits: List<i64> = [];
+        while i < hi {
+            splits.push(self.emit(ReOp::Split, 0, 0));
+            self.compile_node(p, kid);
+            i = i + 1;
+        }
+        let end = self.pc();
+        for s in splits {
+            self.set_split(s, s + 1, end, greedy);
+        }
+    }
+
+    /// Points split `s` at `body` and `out`, preferring `body` when greedy.
+    pub fn set_split(var ref self, s: i64, body: i64, out: i64, greedy: bool) {
+        if greedy {
+            self.arg_x[s] = body;
+            self.arg_y[s] = out;
+        } else {
+            self.arg_x[s] = out;
+            self.arg_y[s] = body;
+        }
+    }
+
+    /// The number of the group named `name`, or -1.
+    pub fn group_index(ref self, name: str) -> i64 {
+        var i = 0;
+        while i < (self.names.len() as i64) {
+            if self.names[i] == name { return i + 1; }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // --------------------------------------------------------------------------
+    // Searching
+    // --------------------------------------------------------------------------
+
+    /// Whether the pattern matches anywhere in `text`.
+    pub fn is_match(ref self, text: str) -> bool => search(self, text, 0, -1).len() > 0;
+
+    /// The leftmost match in `text`, or `none`.
+    pub fn find(ref self, text: str) -> Match? {
+        let slots = search(self, text, 0, -1);
+        if slots.len() == 0 { return none; }
+        return Match { start: slots[0], end: slots[1], text: text.slice(slots[0], slots[1]) };
+    }
+
+    /// The leftmost match in `text` with its capture groups, or `none`.
+    pub fn captures(ref self, text: str) -> Captures? {
+        let slots = search(self, text, 0, -1);
+        if slots.len() == 0 { return none; }
+        return Captures { text: text, slots: slots, names: self.names };
+    }
+
+    /// Every match in `text`, left to right, without overlaps. An empty match
+    /// is never taken right where the previous match, also empty, was.
+    pub fn find_all(ref self, text: str) -> List<Match> {
+        var out: List<Match> = [];
+        for slots in all_slots(self, text, -1) {
+            out.push(Match { start: slots[0], end: slots[1], text: text.slice(slots[0], slots[1]) });
+        }
+        return out;
+    }
+
+    /// Every match in `text` with its capture groups.
+    pub fn captures_all(ref self, text: str) -> List<Captures> {
+        var out: List<Captures> = [];
+        for slots in all_slots(self, text, -1) {
+            out.push(Captures { text: text, slots: slots, names: self.names });
+        }
+        return out;
+    }
+
+    /// `text` with every match replaced by `template`, in which `\1`..`\99`
+    /// and `\g<n>` / `\g<name>` insert a group, `\\` a backslash and `\n`,
+    /// `\t`, `\r` their control characters.
+    pub fn replace(ref self, text: str, template: str) -> res<str, RegexError> => self.replace_n(text, template, 0);
+
+    /// As `replace`, replacing at most `count` matches (all when `count` is 0).
+    pub fn replace_n(ref self, text: str, template: str, count: i64) -> res<str, RegexError> {
+        let parts = parse_template(self, template)?;
+        var out = "";
+        var last = 0;
+        let limit = if count > 0 { count } else { -1 };
+        for slots in all_slots(self, text, limit) {
+            out = out + text.slice(last, slots[0]);
+            for part in parts {
+                if part.group < 0 {
+                    out = out + part.text;
+                } else if slots[2 * part.group] >= 0 {
+                    out = out + text.slice(slots[2 * part.group], slots[2 * part.group + 1]);
+                }
+            }
+            last = slots[1];
+        }
+        return ok(out + text.slice(last, text.len()));
+    }
+
+    ~self() {}
+}
+
+/// One match: byte offsets into the searched text and the matched text.
+pub struct Match : IValue {
+    pub start: i64;
+    pub end: i64;
+    pub text: str;
+}
+
+/// A match with its capture groups (group 0 is the whole match).
+pub struct Captures : IObject {
+    pub text: str;
+    /// `2 * g` and `2 * g + 1` hold group `g`'s byte offsets, -1 if unset.
+    pub slots: List<i64>;
+    pub names: List<str>;
+
+    /// The number of groups, counting group 0.
+    pub fn len(ref self) -> i64 => (self.slots.len() as i64) / 2;
+
+    /// The text group `g` matched, or `none` when it did not take part.
+    pub fn get(ref self, g: i64) -> str? {
+        if g < 0 || 2 * g >= (self.slots.len() as i64) || self.slots[2 * g] < 0 { return none; }
+        return self.text.slice(self.slots[2 * g], self.slots[2 * g + 1]);
+    }
+
+    /// The text the group named `name` matched, or `none`.
+    pub fn name(ref self, name: str) -> str? {
+        var i = 0;
+        while i < (self.names.len() as i64) {
+            if self.names[i] == name { return self.get(i + 1); }
+            i = i + 1;
+        }
+        return none;
+    }
+
+    /// Byte offset where group `g` starts, -1 when it did not take part.
+    pub fn start(ref self, g: i64) -> i64 => self.slots[2 * g];
+
+    /// Byte offset where group `g` ends, -1 when it did not take part.
+    pub fn end(ref self, g: i64) -> i64 => self.slots[2 * g + 1];
+
+    ~self() {}
+}
+
+// ------------------------------------------------------------------------------
+// 6. compile
+// ------------------------------------------------------------------------------
+
+/// Compiles `pattern`, or reports the first syntax error with its byte offset.
+pub fn compile(pattern: str) -> res<Regex, RegexError> {
+    var p = RegexParser {
+        src: pattern, pos: 0, n: pattern.len() as i64,
+        tree: ReTree { kinds: [], arg_a: [], arg_b: [], arg_c: [], arg_d: [], kids: [] },
+        classes: ReClasses { range_lo: [], range_hi: [], class_start: [], class_len: [] },
+        groups: 0, names: [], failed: false,
+        error: RegexError { kind: RegexErrorKind::BadEscape, pos: 0, message: "" },
+    };
+    let root = p.parse_alt();
+    if !p.failed && p.pos < p.n {
+        p.fail(RegexErrorKind::UnbalancedParen, p.pos, "unbalanced parenthesis");
+    }
+    if p.failed { return err(p.error); }
+    var re = Regex {
+        pattern: pattern, groups: p.groups, names: [],
+        ops: [], arg_x: [], arg_y: [],
+        classes: ReClasses { range_lo: [], range_hi: [], class_start: [], class_len: [] },
+    };
+    // Unanchored search: a lazy `(?s:.)*?` prefix lets a match start anywhere,
+    // preferring the leftmost start.
+    re.emit(ReOp::Split, 3, 1);
+    re.emit(ReOp::AnyNl, 0, 0);
+    re.emit(ReOp::Jmp, 0, 0);
+    re.emit(ReOp::Save, 0, 0);
+    re.compile_node(p, root);
+    re.emit(ReOp::Save, 1, 0);
+    re.emit(ReOp::Match, 0, 0);
+    re.names = p.names;
+    re.classes = p.classes;
+    return ok(re);
+}
+
+// ------------------------------------------------------------------------------
+// 7. Pike VM
+// ------------------------------------------------------------------------------
+
+/// Thread lists for one search. A list holds program counters in priority
+/// order and, per entry, `nslots` capture offsets.
+struct PikeThreads : IObject {
+    pub nslots: i64;
+    pub cur_pc: List<i64>;
+    pub cur_slots: List<i64>;
+    pub cur_len: i64;
+    pub next_pc: List<i64>;
+    pub next_slots: List<i64>;
+    pub next_len: i64;
+    /// Per program counter: the generation in which it was last added.
+    pub seen: List<i64>;
+    pub generation: i64;
+    /// The capture offsets of the thread being followed.
+    pub scratch: List<i64>;
+
+    pub fn swap(var ref self) {
+        let pcs = self.cur_pc;
+        self.cur_pc = self.next_pc;
+        self.next_pc = pcs;
+        let slots = self.cur_slots;
+        self.cur_slots = self.next_slots;
+        self.next_slots = slots;
+        self.cur_len = self.next_len;
+        self.next_len = 0;
+        self.generation = self.generation + 1;
+    }
+
+    ~self() {}
+}
+
+/// Whether assertion `kind` holds at byte `pos` of `text`.
+fn assertion_holds(kind: i64, text: str, pos: i64) -> bool {
+    let n = text.len() as i64;
+    if kind == ReAssert::LineStart as i64 || kind == ReAssert::TextStart as i64 { return pos == 0; }
+    if kind == ReAssert::TextEnd as i64 { return pos == n; }
+    if kind == ReAssert::LineEnd as i64 {
+        return pos == n || (pos == n - 1 && (text.byte_at(pos) as i64) == 10);
+    }
+    let before = pos > 0 && is_word_byte(text.byte_at(pos - 1) as i64);
+    let after = pos < n && is_word_byte(text.byte_at(pos) as i64);
+    if kind == ReAssert::WordEdge as i64 { return before != after; }
+    return before == after;
+}
+
+/// Adds the thread at `pc` (capture offsets in `t.scratch`) to the next list,
+/// following jumps, splits, saves and assertions at byte `pos`.
+fn add_thread(ref re: Regex, var ref t: PikeThreads, pc: i64, text: str, pos: i64) {
+    if t.seen[pc] == t.generation { return; }
+    t.seen[pc] = t.generation;
+    let op = re.ops[pc];
+    if op == ReOp::Jmp {
+        add_thread(re, t, re.arg_x[pc], text, pos);
+    } else if op == ReOp::Split {
+        add_thread(re, t, re.arg_x[pc], text, pos);
+        add_thread(re, t, re.arg_y[pc], text, pos);
+    } else if op == ReOp::Save {
+        let slot = re.arg_x[pc];
+        if slot < t.nslots {
+            let old = t.scratch[slot];
+            t.scratch[slot] = pos;
+            add_thread(re, t, pc + 1, text, pos);
+            t.scratch[slot] = old;
+        } else {
+            add_thread(re, t, pc + 1, text, pos);
+        }
+    } else if op == ReOp::Assert {
+        if assertion_holds(re.arg_x[pc], text, pos) {
+            add_thread(re, t, pc + 1, text, pos);
+        }
+    } else {
+        let at = t.next_len;
+        t.next_pc[at] = pc;
+        var i = 0;
+        let base = at * t.nslots;
+        while i < t.nslots {
+            t.next_slots[base + i] = t.scratch[i];
+            i = i + 1;
+        }
+        t.next_len = at + 1;
+    }
+}
+
+/// The capture offsets (`2 * (groups + 1)` entries) of the leftmost match
+/// starting at or after byte `from`, or an empty list. A match that is empty
+/// and ends at byte `no_empty_at` is skipped.
+fn search(ref re: Regex, text: str, from: i64, no_empty_at: i64) -> List<i64> {
+    let size = re.ops.len() as i64;
+    let nslots = 2 * (re.groups + 1);
+    var t = PikeThreads {
+        nslots: nslots, cur_pc: [], cur_slots: [], cur_len: 0,
+        next_pc: [], next_slots: [], next_len: 0, seen: [], generation: 1, scratch: [],
+    };
+    var i = 0;
+    while i < size {
+        t.cur_pc.push(0);
+        t.next_pc.push(0);
+        t.seen.push(0);
+        i = i + 1;
+    }
+    i = 0;
+    while i < size * nslots {
+        t.cur_slots.push(-1);
+        t.next_slots.push(-1);
+        i = i + 1;
+    }
+    i = 0;
+    while i < nslots {
+        t.scratch.push(-1);
+        i = i + 1;
+    }
+    var found: List<i64> = [];
+    let n = text.len() as i64;
+    var pos = from;
+    add_thread(re, t, 0, text, pos);
+    t.swap();
+    while t.cur_len > 0 {
+        var c = -1;
+        var w = 1;
+        if pos < n {
+            let b = text.byte_at(pos) as i64;
+            w = utf8_width(b);
+            c = if b < 128 { b } else { code_point_at(text, pos) };
+        }
+        var k = 0;
+        while k < t.cur_len {
+            let pc = t.cur_pc[k];
+            let op = re.ops[pc];
+            var step = false;
+            if op == ReOp::Match {
+                let base = k * nslots;
+                let start = t.cur_slots[base];
+                if !(start == pos && pos == no_empty_at) {
+                    found = [];
+                    var j = 0;
+                    while j < nslots {
+                        found.push(t.cur_slots[base + j]);
+                        j = j + 1;
+                    }
+                    found[1] = pos;
+                    // Lower-priority threads can no longer win.
+                    break;
+                }
+            } else if c >= 0 {
+                if op == ReOp::Char {
+                    step = re.arg_x[pc] == c;
+                } else if op == ReOp::Any {
+                    step = c != 10;
+                } else if op == ReOp::AnyNl {
+                    step = found.len() == 0;
+                } else if op == ReOp::Class {
+                    step = re.classes.has(re.arg_x[pc], c);
+                }
+            }
+            if step {
+                let base = k * nslots;
+                var j = 0;
+                while j < nslots {
+                    t.scratch[j] = t.cur_slots[base + j];
+                    j = j + 1;
+                }
+                add_thread(re, t, pc + 1, text, pos + w);
+            }
+            k = k + 1;
+        }
+        if pos >= n { break; }
+        pos = pos + w;
+        t.swap();
+    }
+    return found;
+}
+
+/// Capture offsets of every non-overlapping match, at most `limit` (-1: all).
+/// After an empty match the next one must not be empty at the same place.
+fn all_slots(ref re: Regex, text: str, limit: i64) -> List<List<i64>> {
+    var out: List<List<i64>> = [];
+    let n = text.len() as i64;
+    var pos = 0;
+    var no_empty_at = -1;
+    while pos <= n && (limit < 0 || (out.len() as i64) < limit) {
+        let slots = search(re, text, pos, no_empty_at);
+        if slots.len() == 0 { break; }
+        no_empty_at = if slots[0] == slots[1] { slots[1] } else { -1 };
+        pos = slots[1];
+        out.push(slots);
+    }
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// 8. Replacement templates
+// ------------------------------------------------------------------------------
+
+/// A piece of a replacement: literal text, or a group number (`group` >= 0).
+struct TemplatePart : IValue {
+    pub text: str;
+    pub group: i64;
+}
+
+fn parse_template(ref re: Regex, template: str) -> res<List<TemplatePart>, RegexError> {
+    var parts: List<TemplatePart> = [];
+    var lit = "";
+    let n = template.len() as i64;
+    var i = 0;
+    while i < n {
+        let b = template.byte_at(i) as i64;
+        if b != 92 || i + 1 >= n {
+            lit = lit + template.slice(i, i + 1);
+            i = i + 1;
+            continue;
+        }
+        let e = template.byte_at(i + 1) as i64;
+        var group = -1;
+        if e >= 48 && e <= 57 {
+            group = e - 48;
+            var j = i + 2;
+            if j < n && (template.byte_at(j) as i64) >= 48 && (template.byte_at(j) as i64) <= 57 {
+                group = group * 10 + ((template.byte_at(j) as i64) - 48);
+                j = j + 1;
+            }
+            if group > re.groups {
+                return err(RegexError { kind: RegexErrorKind::BadGroupRef, pos: i + 1, message: "invalid group reference" });
+            }
+            i = j;
+        } else if e == 103 && i + 2 < n && (template.byte_at(i + 2) as i64) == 60 {
+            let name_start = i + 3;
+            var j = name_start;
+            while j < n && (template.byte_at(j) as i64) != 62 { j = j + 1; }
+            if j >= n {
+                return err(RegexError { kind: RegexErrorKind::BadGroupRef, pos: name_start, message: "missing >, unterminated name" });
+            }
+            let name = template.slice(name_start, j);
+            group = re.group_index(name);
+            if group < 0 {
+                var v = 0;
+                var k = 0;
+                while k < name.len() as i64 {
+                    let d = name.byte_at(k) as i64;
+                    if d < 48 || d > 57 { v = -1; break; }
+                    v = v * 10 + (d - 48);
+                    k = k + 1;
+                }
+                if name.len() == 0 || v < 0 || v > re.groups {
+                    return err(RegexError { kind: RegexErrorKind::BadGroupRef, pos: name_start, message: "invalid group reference" });
+                }
+                group = v;
+            }
+            i = j + 1;
+        } else {
+            if e == 110 { lit = lit + "\n"; }
+            else if e == 116 { lit = lit + "\t"; }
+            else if e == 114 { lit = lit + "\r"; }
+            else if e == 92 { lit = lit + "\\"; }
+            else { lit = lit + template.slice(i, i + 2); }
+            i = i + 2;
+            continue;
+        }
+        if lit.len() > 0 {
+            parts.push(TemplatePart { text: lit, group: -1 });
+            lit = "";
+        }
+        parts.push(TemplatePart { text: "", group: group });
+    }
+    if lit.len() > 0 {
+        parts.push(TemplatePart { text: lit, group: -1 });
+    }
+    return ok(parts);
+}

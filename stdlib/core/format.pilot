@@ -1,0 +1,148 @@
+// =========================================================================
+// FILE: stdlib/core/format.pilot
+// NUMBER FORMAT PATTERNS FOR `f"{value:pattern}"`
+// =========================================================================
+// An f-string hole may end in `:pattern`: `f"{n:#_###}"` is `1_234_567` for
+// 1234567. The parser turns such a hole into a call of the function bound
+// below, with the hole's value and the pattern text.
+//
+// A pattern is an integer part, then optionally `.` and a fraction part:
+//   `0`  a digit always shown (`{5:000}` is `005`, `{0.5:0.00}` is `0.50`);
+//   `#`  a digit shown when significant (`{2.5:#.##}` is `2.5`);
+//   `,` / `_`  in the integer part: group the digits, the group size being
+//        the number of placeholders after the last separator (`#,###` makes
+//        groups of 3, `#_##` of 2), the separator being the character written.
+// The integer part always shows at least one digit. The value is rounded to
+// the fraction's places, halves away from zero (`{0.125:0.00}` is `0.13`); a
+// minus sign is shown only when the rounded value is not zero. Integers are
+// formatted exactly; a float must be smaller than 2^63 in magnitude.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Format;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+/// The digits of `w` (any sign) in order, at least `min_digits` of them.
+fn magnitude_digits(w: i64, min_digits: i64) -> str {
+    var digits = "";
+    var rest = w;
+    var count = 0;
+    while rest != 0 {
+        var d = rest % 10;
+        if d < 0 { d = -d; }
+        digits = "0123456789".slice(d as usize, (d + 1) as usize) + digits;
+        rest = rest / 10;
+        count = count + 1;
+    }
+    while count < min_digits {
+        digits = "0" + digits;
+        count = count + 1;
+    }
+    return digits;
+}
+
+/// Whether `text` is an integer written in decimal that fits in an i64.
+fn fits_i64_text(text: str) -> bool {
+    let n = text.len() as i64;
+    var i = 0;
+    if n > 0 && text.byte_at(0) == 45 { i = 1; }
+    let digits = n - i;
+    if digits == 0 || digits > 19 { return false; }
+    var k = i;
+    while k < n {
+        let b = text.byte_at(k as usize);
+        if b < 48 || b > 57 { return false; }
+        k = k + 1;
+    }
+    if digits < 19 { return true; }
+    let limit = if i == 1 { "9223372036854775808" } else { "9223372036854775807" };
+    return text.slice(i as usize, n as usize) <= limit;
+}
+
+/// `digits` with `sep` before every `size` digits counted from the right.
+fn group_digits(digits: str, size: i64, sep: str) -> str {
+    if size <= 0 || sep.len() == 0 { return digits; }
+    let n = digits.len() as i64;
+    var out = "";
+    var i = 0;
+    while i < n {
+        if i > 0 && (n - i) % size == 0 { out = out + sep; }
+        out = out + digits.slice(i as usize, (i + 1) as usize);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// `value` (an integer or a float) written by `pattern` (see the file header).
+pub fn format_by_pattern(value, pattern: str) -> str {
+    let n = pattern.len() as i64;
+    // Integer part: placeholders, required digits, grouping.
+    var i = 0;
+    var placeholders = 0;
+    var first_zero = -1;
+    var after_sep = -1;
+    var sep = "";
+    while i < n && pattern.byte_at(i as usize) != 46 {
+        let b = pattern.byte_at(i as usize);
+        if b == 35 || b == 48 {
+            if b == 48 && first_zero < 0 { first_zero = placeholders; }
+            placeholders = placeholders + 1;
+            if after_sep >= 0 { after_sep = after_sep + 1; }
+        } else if b == 44 || b == 95 {
+            sep = pattern.slice(i as usize, (i + 1) as usize);
+            after_sep = 0;
+        }
+        i = i + 1;
+    }
+    let int_min = if first_zero < 0 { 1 } else { placeholders - first_zero };
+    // Fraction part: places, and how many of them always show.
+    var places = 0;
+    var frac_min = 0;
+    if i < n {
+        i = i + 1;
+        while i < n {
+            let b = pattern.byte_at(i as usize);
+            if b == 35 || b == 48 {
+                places = places + 1;
+                if b == 48 { frac_min = places; }
+            }
+            i = i + 1;
+        }
+    }
+    // Split the value into its whole part and fraction (zero for an integer).
+    // At 2^63 or more in magnitude only an integer near the i64 limits can
+    // still be cast; its decimal text is what tells it from a float there.
+    let fv = value as f64;
+    if (fv >= 9223372036854775808.0 || fv < -9223372036854775808.0) && !fits_i64_text(f"{value}") {
+        return seam("fmt.pattern_wide_float", "formatting a float of magnitude 2^63 or more needs a float-to-decimal conversion (shortest round trip digits)");
+    }
+    var whole = value as i64;
+    let frac = fv - (whole as f64);
+    let negative = whole < 0 || frac < 0.0;
+    var scale: i64 = 1;
+    var k = 0;
+    while k < places {
+        scale = scale * 10;
+        k = k + 1;
+    }
+    let mag = if frac < 0.0 { -frac } else { frac };
+    var scaled = (mag * (scale as f64) + 0.5) as i64;
+    if scaled >= scale {
+        scaled = scaled - scale;
+        whole = if negative { whole - 1 } else { whole + 1 };
+    }
+    var out = group_digits(magnitude_digits(whole, int_min), after_sep, sep);
+    if places > 0 {
+        var digits = magnitude_digits(scaled, places);
+        var keep = places;
+        while keep > frac_min && digits.byte_at((keep - 1) as usize) == 48 { keep = keep - 1; }
+        if keep > 0 { out = out + "." + digits.slice(0, keep as usize); }
+    }
+    if negative && (whole != 0 || scaled != 0) { out = "-" + out; }
+    return out;
+}
+
+// `f"{x:pattern}"` calls `format_by_pattern(x, "pattern")`.
+comptime {
+    __engine("bind_format_spec", nameof(format_by_pattern));
+}

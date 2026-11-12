@@ -33,6 +33,10 @@
 // passed to a call or put in a literal, once the call or literal is made).
 // Its drops happen only while the flag is set.
 //
+// An expression statement that makes an owned value and throws it away
+// (`make();`, `rs.pop();`) drops it once the statement has run (Discard rows,
+// `plan_discard`); a method handing back its receiver makes nothing new.
+//
 // A collection that owns its elements (selfhost/check/own.pilot
 // `owned_elements`, from the `bind_owned_elements` engine binding) drops
 // each element after its own fields: its glue row names the element type and
@@ -48,7 +52,7 @@
 // The plan is rows for crates/pilot-cli/src/check.rs (`drop_plan`), each
 // led by its `DropAction` and naming a node by its program-wide span and kind:
 //   [action, start, end, kind, binding, type]  Before, After, Exit, Else, Guard,
-//                                              Replace, Flag, Moved
+//                                              Replace, Flag, Moved, Discard ("")
 //   [Seam, start, end, kind, id, note]
 //   [Glue, type, destructor owner or "", [field, field type, ..],
 //    element type, length op, element op]  (the last three "" without elements)
@@ -95,6 +99,9 @@ pub enum DropAction : u8 {
     /// A move of the binding completes when the node has run: its flag is
     /// cleared.
     Moved,
+    /// The expression statement throws away the owned value it makes: it is
+    /// dropped once the statement has run.
+    Discard,
 }
 
 /// What planning the drops of one program keeps.
@@ -104,6 +111,8 @@ pub struct DropPlanner : IObject {
     /// Type display -> 1 needs dropping, 0 not, 2 a collection of values
     /// that do (not supported yet).
     pub needs: Map<str, i64>;
+    /// Type display -> met again while its verdict was being decided.
+    pub cyclic: Map<str, bool>;
     /// Type display -> its glue row was written.
     pub glued: Map<str, bool>;
     /// Node -> the rows naming it, for a reader in the same program (the
@@ -139,9 +148,14 @@ pub fn struct_decl(p: Program, t: i64) -> i64 {
     return if d >= 0 && kind(p.s, d) == nk_struct() { d } else { -1 };
 }
 
+/// Whether struct `d` declares a destructor with something in it: running
+/// an empty `~self() {}` does nothing, so it needs no drop.
 fn has_dtor(p: Program, d: i64) -> bool {
     for m in type_members(p.s, d) {
-        if kind(p.s, m) == nk_dtor() { return true; }
+        if kind(p.s, m) == nk_dtor() {
+            let body = lhs(p.s, m);
+            return body < 0 || kind(p.s, body) != nk_block() || children(p.s, body).len() > 0;
+        }
     }
     return false;
 }
@@ -168,9 +182,14 @@ pub fn needs_drop(pl: DropPlanner, t: i64, depth: i64) -> i64 {
     if !prog_is_owned(p, t) || depth > 16 { return 0; }
     let key = ty_display(p.tt, t);
     if pl.needs.has(key) {
-        // -1: met again while it is being decided, so it holds itself.
+        // -1: met again while it is being decided, so it holds itself. That
+        // matters only if it needs dropping, decided below.
         let known = pl.needs.get(key);
-        return if known < 0 { 2 } else { known };
+        if known < 0 {
+            pl.cyclic.set(key, true);
+            return 0;
+        }
+        return known;
     }
     pl.needs.set(key, -1);
     var verdict = 0;
@@ -193,6 +212,9 @@ pub fn needs_drop(pl: DropPlanner, t: i64, depth: i64) -> i64 {
             else if v != 0 { verdict = 2; }
         }
     }
+    // A type that needs dropping and holds itself would need glue as deep
+    // as its values are.
+    if verdict == 1 && pl.cyclic.has(key) { verdict = 2; }
     pl.needs.set(key, verdict);
     return verdict;
 }
@@ -626,7 +648,7 @@ pub fn drop_planner(inf: Infer) -> DropPlanner {
     // check_program, not here.
     walk_bodies(f);
     let pl = DropPlanner {
-        flow: f, rows: [], needs: Map<str, i64>(), glued: Map<str, bool>(),
+        flow: f, rows: [], needs: Map<str, i64>(), cyclic: Map<str, bool>(), glued: Map<str, bool>(),
         at: Map<str, List<List<any>>>(), cur_binding: -1, cur_type: ty_unknown(),
         borrows: borrows_new(f), borrowers: [], flagged: false,
     };
@@ -640,5 +662,72 @@ pub fn drop_planner(inf: Infer) -> DropPlanner {
         }
         b = b + 1;
     }
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_expr_stmt() && in_user_file(s, n) { plan_discard(pl, n); }
+        n = n + 1;
+    }
     return pl;
+}
+
+/// Whether `n`, an identifier, names the receiver of the method it is in.
+fn names_receiver(s: Snap, n: i64) -> bool => s.receiver != "" && kind(s, n) == nk_ident() && node_name(s, n) == s.receiver;
+
+/// Whether some value `body` gives may be the receiver itself: an
+/// expression body that is it, or a `return` of it.
+fn may_give_receiver(s: Snap, body: i64) -> bool {
+    if body < 0 { return false; }
+    if names_receiver(s, body) { return true; }
+    if kind(s, body) == nk_block() {
+        var out = false;
+        for c in children(s, body) { if gives_receiver(s, c) { out = true; } }
+        return out;
+    }
+    return false;
+}
+
+fn gives_receiver(s: Snap, n: i64) -> bool {
+    if n < 0 { return false; }
+    let k = kind(s, n);
+    if k == nk_lambda() || k == nk_fn() { return false; }
+    if k == nk_return() && lhs(s, n) >= 0 && names_receiver(s, lhs(s, n)) { return true; }
+    for c in children(s, n) { if gives_receiver(s, c) { return true; } }
+    return false;
+}
+
+/// Whether call `c` makes a new value: a function's, a constructor's or a
+/// struct literal's result, or a method's that is not the receiver handed
+/// back. A method returning its receiver's own type with no body (an engine
+/// method such as `push`) is taken to hand the receiver back.
+fn makes_new_value(pl: DropPlanner, c: i64) -> bool {
+    let f = pl.flow;
+    let s = f.inf.p.s;
+    let ch = children(s, c);
+    if ch.len() == 0 || kind(s, ch[0]) != nk_member() { return true; }
+    let recv_t = type_of(f.inf, lhs(s, ch[0]));
+    if type_of(f.inf, c) != recv_t { return true; }
+    let target = call_target(f, c);
+    if target < 0 { return false; }
+    let body = fn_body(s, target);
+    return body >= 0 && !may_give_receiver(s, body);
+}
+
+/// Plans the drop of the owned value expression statement `n` makes and
+/// throws away (a statement ending in `;`, not a block's value).
+fn plan_discard(pl: DropPlanner, n: i64) {
+    let f = pl.flow;
+    let s = f.inf.p.s;
+    let e = lhs(s, n);
+    if e < 0 || kind(s, e) != nk_call() || span_end(s, n) == span_end(s, e) { return; }
+    let t = type_of(f.inf, e);
+    let need = needs_drop(pl, t, 0);
+    if need == 0 || !makes_new_value(pl, e) { return; }
+    pl.cur_binding = -1;
+    pl.cur_type = t;
+    if need == 2 {
+        row(pl, ::Seam, n, "own.collection_drop", f"the value this statement throws away holds values that need dropping inside an `opt`, a map or another generic, or a type that holds itself; dropping those comes with the PilIR drop pass (F7)");
+        return;
+    }
+    glue(pl, t);
+    row(pl, ::Discard, n, "", ty_display(f.inf.p.tt, t));
 }

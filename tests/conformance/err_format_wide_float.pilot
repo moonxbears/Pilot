@@ -1,0 +1,7 @@
+// Formatting a float of magnitude 2^63 or more by a pattern needs a
+// float-to-decimal conversion that does not exist yet: it stops at the
+// registered seam fmt.pattern_wide_float (SEAM001). Smaller values format.
+fn main() {
+    print(f"{123456.5:#,###}");
+    print(f"{1.0e19:#,###}");
+}

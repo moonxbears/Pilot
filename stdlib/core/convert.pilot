@@ -1,0 +1,9 @@
+[EnforceCoreNaming]
+pub pkg Pilot.Core.Convert;
+
+pub static fn {
+    to_string<T:INumber<T>>(num: T) str ! {
+        
+        return newstr
+    }
+}
