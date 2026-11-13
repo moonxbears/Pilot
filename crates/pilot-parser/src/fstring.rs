@@ -19,14 +19,10 @@ impl<'a> Parser<'a> {
         let is_raw = flags.contains(TokenFlags::IS_RAW_STRING);
         let is_f = flags.contains(TokenFlags::IS_INTERPOLATED);
         let s = raw_text.trim_start_matches(|c: char| c.is_ascii_alphabetic());
-        let triple = (s.starts_with("\"\"\"") || s.starts_with("'''")) && s.len() >= 6;
-        let inner = if triple {
-            &s[3..s.len() - 3]
-        } else if s.len() >= 2 {
-            &s[1..s.len() - 1]
-        } else {
-            s
-        };
+        let (inner, closed) = literal_body(s);
+        if !closed {
+            self.arena.diagnostics.push((sp, "SyntaxError: unterminated string literal".into()));
+        }
         self.advance();
         if is_f {
             return self.lower_fstring(inner, sp, is_raw);
@@ -140,8 +136,17 @@ impl<'a> Parser<'a> {
             d.0 = ByteSpan::new(d.0.start + offset, d.0.end + offset);
         }
         if e.is_none() {
-            self.arena.diagnostics.push((sp, "SyntaxError: empty `{}` in f-string".into()));
-        } else if trailing {
+            // The error stops compilation; the empty segment only keeps the
+            // concatenation well formed until the error is reported.
+            let message = if hole.trim().is_empty() {
+                "SyntaxError: empty `{}` in f-string".to_string()
+            } else {
+                format!("SyntaxError: f-string hole `{{{hole}}}` does not start with an expression")
+            };
+            self.arena.diagnostics.push((sp, message));
+            return self.fstring_segment("", sp, true);
+        }
+        if trailing {
             self.arena.diagnostics.push((sp, "SyntaxError: f-string hole must be a single expression, optionally followed by `:` and a format pattern of `# 0 , _ .`".into()));
         }
         e
@@ -278,4 +283,18 @@ pub(crate) fn unescape_str(s: &str) -> String {
         }
     }
     out
+}
+
+/// The text between a literal's quotes, and whether the closing quote is
+/// there. An unterminated literal runs to the end of the file.
+fn literal_body(s: &str) -> (&str, bool) {
+    for quote in ["\"\"\"", "'''", "\"", "'"] {
+        if let Some(rest) = s.strip_prefix(quote) {
+            return match rest.strip_suffix(quote) {
+                Some(inner) => (inner, true),
+                None => (rest, false),
+            };
+        }
+    }
+    (s, true)
 }

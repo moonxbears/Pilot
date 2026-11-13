@@ -34,8 +34,8 @@
 
 | # | Finding | Evidence |
 |---|---|---|
-| C1 | **`case 1, 2:` (a `switch` arm with several values) crashes the parser** (`crates/pilot-ast/src/lib.rs:401`, index out of bounds on a missing node). | `fn main() { switch 1 { case 1, 2: print("low"); default: print("hi"); } }` |
-| C2 | **One file the parser cannot read breaks every program in its folder tree.** Running a program indexes every `.pilot` file under the program's folder, recursively (`selfhost/loader/module_graph.pilot` `mg_build_index`), so the crash of C1 in one file made all 110 probes beside it crash, and every one-off program in a parent folder too. The same walk makes each run parse files it never links. | Any program run from a folder that also holds the C1 program. |
+| C1 | **`case 1, 2:` (a `switch` arm with several values) crashes the parser** (`crates/pilot-ast/src/lib.rs:401`, index out of bounds on a missing node). | `fn main() { switch 1 { case 1, 2: print("low"); default: print("hi"); } }` **Fixed 2026-11-13:** a comma list in a `case` now means `case a \| b:` (`crates/pilot-parser/src/switch.rs`; `tests/conformance/control/switch_case_list`). |
+| C2 | **One file the parser cannot read breaks every program in its folder tree.** Running a program indexes every `.pilot` file under the program's folder, recursively (`selfhost/loader/module_graph.pilot` `mg_build_index`), so the crash of C1 in one file made all 110 probes beside it crash, and every one-off program in a parent folder too. The same walk makes each run parse files it never links. | Any program run from a folder that also holds the C1 program. **Fixed 2026-11-13:** the header reader stops before the first item that is not `pkg`/`use`, so indexing never parses a body (`crates/pilot-parser/src/modules.rs` `at_module_decl`). A parse-only fuzz pass over every `.pilot` file then found and fixed six more parser crashes (see the wiring row "a file the parser cannot read ..."). |
 
 ### 2.2 Silent wrong answers
 
@@ -131,7 +131,7 @@ Columns: **S** seed, **I** PilIR, **C** emitted C. `ok` = probe output correct; 
 | `break`, `continue` | receptor 13 | ok | ok | ok | REAL; `break value` needs a `for .. then`. |
 | `then` | receptor 11 | ok | ok | ok | REAL. |
 | `switch`, `default` | receptors 14, 16 | ok | ok | ok | REAL: values, ranges, guards (`case n if ..`), variants with payloads, value form, FLOW005 exhaustiveness. |
-| `case` | receptor 15 | ok | ok | ok | PARTIAL: `case 1, 2:` is crash C1. |
+| `case` | receptor 15 | ok | ok | ok | REAL (C1 fixed: `case 1, 2:` is an or-pattern). |
 | `else` | receptor 3 | ok | ok | ok | REAL. |
 | `guard` | receptor 17 | ok | ok | ok | REAL, boolean and `some` forms. |
 | `try`, `catch` | receptors 18, 19 | ok | ok | ok | REAL, block and expression forms. |

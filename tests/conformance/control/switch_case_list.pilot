@@ -1,0 +1,41 @@
+// `case a, b:` matches when any of the listed patterns does, like `case a | b:`.
+// Expected output worked by hand from that rule.
+enum Shade {
+    Light,
+    Dark,
+    Dim,
+}
+
+fn size(n: i64) -> str {
+    switch n {
+        case 1, 2: return "small";
+        case 3, 4, 5: return "medium";
+        default: return "large";
+    }
+}
+
+fn tone(s: Shade) -> str {
+    return switch s {
+        case ::Light, ::Dim: "pale";
+        case ::Dark: "deep";
+    };
+}
+
+fn word(w: str) -> i64 {
+    return switch w {
+        case "a", "e", "i", "o", "u" => 1,
+        case _ => 0,
+    };
+}
+
+fn main() {
+    print(size(1));
+    print(size(2));
+    print(size(4));
+    print(size(5));
+    print(size(6));
+    print(tone(Shade::Light));
+    print(tone(Shade::Dim));
+    print(tone(Shade::Dark));
+    print(word("e") + word("x") + word("u"));
+}

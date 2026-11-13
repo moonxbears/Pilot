@@ -1,0 +1,2 @@
+error[SYN001]: SyntaxError: this `{` is never closed
+err_inline_block_unclosed.pilot:4:9

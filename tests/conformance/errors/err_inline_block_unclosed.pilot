@@ -1,0 +1,5 @@
+// An inline foreign block must close its `{` (SYN001); the text runs to the
+// end of the file otherwise.
+fn main() {
+    asm {
+        nop

@@ -1,0 +1,5 @@
+// An f-string hole must hold an expression; `{,x}` starts with none (SYN001).
+fn main() {
+    let x = 1;
+    print(f"{,x}");
+}

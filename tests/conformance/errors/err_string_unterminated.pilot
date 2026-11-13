@@ -1,0 +1,4 @@
+// A string literal must be closed before the end of the file (SYN001), even
+// when it ends in a character of several bytes.
+fn main() {
+    print("café

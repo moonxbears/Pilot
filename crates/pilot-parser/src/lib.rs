@@ -22,6 +22,7 @@ mod open_range;
 mod ret_type;
 mod tuple_member;
 mod switch;
+mod inline_block;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
 use modules::EXCLUDE_RECEPTOR;
 pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
@@ -230,7 +231,7 @@ impl ParserTables {
                 if let Some(v) = self.eval_cval(arena, NodeId(n.rhs)) { self.const_maps.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), v); }
             }
             NodeKind::CallExpr => { let ch = arena.children_slice(n.lhs, n.rhs);
-                if ch.len() < 2 || arena.node(NodeId(ch[0])).node_kind() != NodeKind::IdentExpr || arena.interner.resolve(SymbolId(arena.node(NodeId(ch[0])).lhs)) != "__engine" { return; }
+                if ch.len() < 2 || NodeId(ch[0]).is_none() || arena.node(NodeId(ch[0])).node_kind() != NodeKind::IdentExpr || arena.interner.resolve(SymbolId(arena.node(NodeId(ch[0])).lhs)) != "__engine" { return; }
                 let s_arg = |i: usize| ch.get(i).and_then(|&x| match self.eval_cval(arena, NodeId(x))? { CVal::Str(s) => Some(s), _ => None }).unwrap_or_default();
                 let i_arg = |i: usize| ch.get(i).and_then(|&x| match self.eval_cval(arena, NodeId(x))? { CVal::Int(v) => Some(v), _ => None });
                 match s_arg(1).as_str() { "register_modifier" => {
@@ -417,6 +418,11 @@ impl<'a> Parser<'a> {
     fn expect(&mut self, k: TokenKind) {
         if !self.eat(k) { let (sp, got) = (self.span(), self.peek()); self.arena.diagnostics.push((sp, format!("Expected {:?}, found {:?}", k, got))); }
     }
+    /// Whether a line break separates the previous token from the cursor.
+    fn newline_before_cur(&self) -> bool {
+        let (from, to) = (self.prev_span().end as usize, self.span().start as usize);
+        self.src.as_bytes().get(from..to).is_some_and(|gap| gap.contains(&b'\n'))
+    }
     fn next_non_nl(&self, mut p: usize) -> usize {
         while p < self.tape.len() && matches!(self.tape.kind(p), TokenKind::Newline | TokenKind::Comment | TokenKind::BlockComment | TokenKind::Shebang) { p += 1; }
         p }
@@ -437,6 +443,7 @@ impl<'a> Parser<'a> {
     fn parse_program(&mut self) { let mut items = Vec::new(); while !self.at_end() { self.skip_seps(); if self.at_end() { break; }
             let mark = self.pos; self.parse_item(&mut items, false); if self.pos == mark { self.advance(); }
             if let Some(&last) = items.last() { if self.ingest || self.src.contains("__engine") { self.tables.to_mut().ingest_node(&self.arena, last); } } }
+        self.report_stray_characters();
         self.arena.root = self.arena.alloc_list_node(NodeKind::Program, 0, ByteSpan::new(0, self.src.len() as u32), &items); }
     fn is_attr_prefix(&self, _in_type_body: bool) -> bool { if self.peek() != TokenKind::LBracket { return false; }
         let mut p = self.cur(); while p < self.tape.len() && self.tape.kind(p) == TokenKind::LBracket {
@@ -970,8 +977,8 @@ impl<'a> Parser<'a> {
             TokenKind::KwYield => { self.advance(); let v = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); self.arena.alloc_node(NodeKind::YieldStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0) }
             TokenKind::KwDefer => { self.advance(); let b = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() }; self.arena.alloc_node(NodeKind::DeferStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), b.0, 0) }
             TokenKind::KwLoop => { self.advance(); let (tr, b) = (self.arena.alloc_node(NodeKind::BoolLit, 0, sp, 1, 0), self.parse_block()); self.arena.alloc_node(NodeKind::WhileStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), tr.0, b.0) }
-            TokenKind::KwIf => self.parse_if(), TokenKind::KwAsm => { self.advance(); let bsp = self.span(); if self.at(TokenKind::LBrace) {
-                    let close = self.tape.matching_bracket(self.cur()).unwrap_or(self.cur() as u32) as usize; let code = &self.src[bsp.end as usize..self.tape.span(close).start as usize]; self.pos = close + 1;
+            TokenKind::KwIf => self.parse_if(), TokenKind::KwAsm => { self.advance(); if self.at(TokenKind::LBrace) {
+                    let code = self.inline_block_code();
                     self.arena.alloc_polyglot_block("asm", code.trim(), 0, ByteSpan::new(sp.start, self.prev_span().end)) } else { NodeId::NONE } }
             TokenKind::RawDslBlock => { let raw = self.text(); self.advance(); let inner = raw.trim_start_matches('`').trim_end_matches('`'); let (lang, code) = inner.split_once('\n').unwrap_or(("dsl", inner)); self.arena.alloc_polyglot_block(lang.trim(), code.trim(), 0, sp) }
             _ if self.is_word() && self.at_with_scope() => self.parse_with_scope(),
@@ -1009,7 +1016,7 @@ impl<'a> Parser<'a> {
                     && self.tables.receptors.get(self.tape.text(nx, self.src)).map_or(true, |&(rk, _)| !matches!(rk, 19 | 29 | 31))
                 { self.arena.diagnostics.push((sp, format!("Unregistered keyword or unexpected identifier '{}'", w)));
                     while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::RBrace) {
-                        if self.src[self.prev_span().end as usize..self.span().start as usize].contains('\n') { break; }
+                        if self.newline_before_cur() { break; }
                         self.advance(); }
                     let _ = self.eat(TokenKind::Semicolon); return self.arena.alloc_node(NodeKind::ErrorNode, 0, sp, 0, 0); }
                 self.parse_expr_or_assign(sp) }
@@ -1120,12 +1127,11 @@ impl<'a> Parser<'a> {
             if !self.eat(TokenKind::Comma) { self.skip_seps(); if !self.at(TokenKind::RBrace) { break; } } }
         self.expect(TokenKind::RBrace); fields }
     fn parse_polyglot_inline(&mut self) -> NodeId { let (sp, lang) = (self.span(), self.text().to_string()); self.advance();
-        if self.at(TokenKind::LBrace) { let bsp = self.span();
-            let close = self.tape.matching_bracket(self.cur()).unwrap_or(self.cur() as u32) as usize;
-            let code = &self.src[bsp.end as usize..self.tape.span(close).start as usize]; self.pos = close + 1;
+        if self.at(TokenKind::LBrace) {
+            let code = self.inline_block_code();
             self.arena.alloc_polyglot_block(&lang, code.trim(), 0, ByteSpan::new(sp.start, self.prev_span().end))
         } else if self.eat(TokenKind::LParen) { let e = self.parse_expr(); self.expect(TokenKind::RParen);
-            let txt = if self.arena.node(e).node_kind() == NodeKind::StrLit { self.arena.interner.resolve(SymbolId(self.arena.node(e).lhs)).to_string() } else { String::new() };
+            let txt = if !e.is_none() && self.arena.node(e).node_kind() == NodeKind::StrLit { self.arena.interner.resolve(SymbolId(self.arena.node(e).lhs)).to_string() } else { String::new() };
             self.arena.alloc_polyglot_block(&lang, &txt, 1, ByteSpan::new(sp.start, self.prev_span().end))
         } else { NodeId::NONE } }
     pub fn parse_expr(&mut self) -> NodeId { self.parse_expr_bp(0) }
@@ -1151,10 +1157,10 @@ impl<'a> Parser<'a> {
                 continue; }
             if k == TokenKind::LParen || matches!(k, TokenKind::CallQuoteShallow | TokenKind::CallQuoteDeep | TokenKind::CallQuoteAbi | TokenKind::CallQuoteReact | TokenKind::CallQuoteAdjoint | TokenKind::CallQuoteEffect) {
                 let (pend, cstart) = (self.arena.span(lhs).end as usize, self.span().start as usize);
-                if pend <= cstart && cstart <= self.src.len() && self.src[pend..cstart].contains('\n') { break; }
+                if self.src.as_bytes().get(pend..cstart).is_some_and(|gap| gap.contains(&b'\n')) { break; }
                 lhs = self.parse_call(lhs); continue; }
             if k == TokenKind::LBracket { let (pend, cstart) = (self.arena.span(lhs).end as usize, self.span().start as usize);
-                if pend <= cstart && cstart <= self.src.len() && self.src[pend..cstart].contains('\n') { break; }
+                if self.src.as_bytes().get(pend..cstart).is_some_and(|gap| gap.contains(&b'\n')) { break; }
                 self.advance(); let idx = if self.at(TokenKind::RBracket) { NodeId::NONE } else if matches!(self.peek(), TokenKind::DotDot | TokenKind::DotDotEqual) { self.parse_open_range() } else { self.parse_expr() };
                 while self.eat(TokenKind::Comma) { if self.at(TokenKind::RBracket) { break; } let _ = self.parse_expr(); }
                 self.expect(TokenKind::RBracket);

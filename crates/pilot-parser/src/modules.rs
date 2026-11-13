@@ -71,6 +71,11 @@ pub fn parse_header(src: &str) -> Vec<ModuleDecl> {
         if p.at_end() {
             break;
         }
+        // Stop before any other item: its body is not part of the header,
+        // and a file must not fail to report its imports because of it.
+        if !p.at_module_decl() {
+            break;
+        }
         let (mark, before) = (p.pos, items.len());
         p.parse_item(&mut items, false);
         if p.pos == mark {
@@ -100,6 +105,54 @@ pub fn parse_header(src: &str) -> Vec<ModuleDecl> {
         .collect()
 }
 impl<'a> Parser<'a> {
+    /// Whether the item at the cursor, after its attributes (`[A]`) and
+    /// modifiers (`pub`, `lvl(0)`), is a `pkg` or `use` declaration.
+    fn at_module_decl(&self) -> bool {
+        let mut i = self.cur();
+        while i < self.tape.len() {
+            let kind = self.tape.kind(i);
+            if kind == TokenKind::LBracket {
+                i = self.next_non_nl(self.after_group(i, TokenKind::LBracket, TokenKind::RBracket));
+                continue;
+            }
+            let word = self.tape.text(i, self.src);
+            if self.tables.module_kws.contains_key(word) {
+                // `pkg Name;` or `use path;`, not the `pkg` visibility of
+                // `pkg fn`.
+                let next = self.next_non_nl(i + 1);
+                return next < self.tape.len() && matches!(self.tape.kind(next), TokenKind::Ident | TokenKind::LBrace);
+            }
+            if !self.tables.modifiers.contains_key(word) && !self.tables.param_modifiers.contains(word) {
+                return false;
+            }
+            i = self.next_non_nl(i + 1);
+            if i < self.tape.len() && self.tape.kind(i) == TokenKind::LParen {
+                i = self.next_non_nl(self.after_group(i, TokenKind::LParen, TokenKind::RParen));
+            }
+        }
+        false
+    }
+
+    /// The token after the group that opens at `open_at`, or the end of the
+    /// tape when the group is not closed.
+    fn after_group(&self, open_at: usize, open: TokenKind, close: TokenKind) -> usize {
+        let mut depth = 0usize;
+        let mut i = open_at;
+        while i < self.tape.len() {
+            let kind = self.tape.kind(i);
+            if kind == open {
+                depth += 1;
+            } else if kind == close {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            i += 1;
+        }
+        i
+    }
+
     pub(crate) fn parse_module_decl(&mut self, is_pkg: bool, mods: &DeclMods, out: &mut Vec<NodeId>) {
         let sp = self.span(); self.advance();
         if !is_pkg && self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Ext) { self.advance(); self.advance(); if self.at(TokenKind::LBrace) { out.push(self.parse_block()); return; } }
@@ -110,7 +163,7 @@ impl<'a> Parser<'a> {
             // Commas inside `{ .. }` (`use A.{X, Y};`) separate selected names, not declarations.
             let mut depth = 0usize;
             while !self.at_end() && !self.at(TokenKind::Semicolon) && (depth > 0 || !self.at(TokenKind::Comma)) && (depth > 0 || !in_block || !self.at(TokenKind::RBrace)) {
-                if depth == 0 && (self.is_rec(29) || (!path.is_empty() && self.src[self.prev_span().end as usize..self.span().start as usize].contains('\n') && !in_block)) { break; }
+                if depth == 0 && (self.is_rec(29) || (!path.is_empty() && self.newline_before_cur() && !in_block)) { break; }
                 if self.at(TokenKind::LBrace) { depth += 1; } else if self.at(TokenKind::RBrace) { depth = depth.saturating_sub(1); }
                 path.push_str(self.text()); self.advance();
             }

@@ -1,0 +1,7 @@
+// A comma in a `case` list must be followed by another pattern (PAT001).
+fn main() {
+    switch 2 {
+        case 1, : print("one");
+        default: print("other");
+    }
+}

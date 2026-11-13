@@ -387,7 +387,12 @@ impl<'a> Lexer<'a> {
             (b'>', b'>', _) => (TokenKind::ShiftRight, 2, false),
             (b'>', b'=', _) => (TokenKind::GreaterEqual, 2, false),
             (b'>', _, _) => (TokenKind::Greater, 1, false),
-            _ => (TokenKind::ErrorToken, 1, false),
+            // A character no rule takes is one error token, all its bytes,
+            // so a token never ends inside a multi-byte character.
+            _ => {
+                let width = self.source.get(start..).and_then(|rest| rest.chars().next()).map_or(1, char::len_utf8);
+                (TokenKind::ErrorToken, width, false)
+            }
         };
         self.pos = start + len;
         self.emit(kind, TokenFlags::NONE, start, self.pos, can_infix_dot);

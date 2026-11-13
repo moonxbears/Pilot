@@ -70,7 +70,7 @@ impl<'a> Parser<'a> {
     fn parse_arm_patterns(&mut self) -> NodeId {
         let mut lhs = self.parse_pattern();
         while self.eat(TokenKind::Comma) {
-            let sp = self.arena.span(lhs);
+            let sp = if lhs.is_none() { self.prev_span() } else { self.arena.span(lhs) };
             let rhs = self.parse_pattern();
             lhs = self.arena.alloc_node(NodeKind::PatOr, 0, sp, lhs.0, rhs.0);
         }
