@@ -10,8 +10,8 @@
 //     linked by the prelude): "io" (reads or writes
 //     outside the program), "alloc" (takes heap memory), "mutates" (changes
 //     the value it is called on);
-//   - modifier words are found by the action they are registered with
-//     (`register_modifier`), never by their spelling.
+//   - modifiers are the flags the parser records for the action each word
+//     is registered with (`register_modifier`), never their spelling.
 pub lvl(0) pkg Pilot.SelfHost.Check.Effects;
 
 use selfhost.check.snapshot.*;
@@ -19,12 +19,6 @@ use selfhost.check.program.*;
 use selfhost.check.resolve.*;
 use selfhost.check.infer.*;
 use selfhost.check.own.*;
-
-/// The modifier actions the checks read (stdlib/core/core.pilot `act_*`,
-/// stdlib/realtime/rt_syntax.pilot).
-pub pure fn act_mutable() -> str => "binding_mutable";
-pub pure fn act_isolated() -> str => "perceus_isolated";
-pub pure fn act_noalloc() -> str => "effect_noalloc";
 
 /// The native effects a check asks about.
 pub pure fn effect_io() -> str => "io";
@@ -37,8 +31,6 @@ pub struct Effects : IObject {
     pub flow: Flow;
     /// `name@effect` -> 1 for every `bind_native_effect` row.
     pub native_effects: Map<str, i64>;
-    /// Modifier action -> the words registered for it, joined by spaces.
-    pub modifier_words: Map<str, str>;
     /// Names of the top-level `let`/`var` bindings of the linked files.
     pub globals: Map<str, i64>;
 }
@@ -50,17 +42,12 @@ pub fn effects_new(f: Flow) -> Effects {
         inf: inf,
         flow: f,
         native_effects: Map<str, i64>(),
-        modifier_words: Map<str, str>(),
         globals: Map<str, i64>(),
     };
     for row in f.engine {
         if row.len() < 3 { continue; }
         let hook = row[0];
         if hook == "bind_native_effect" { e.native_effects.set(row[1] + "@" + row[2], 1); }
-        else if hook == "register_modifier" {
-            let before = if e.modifier_words.has(row[2]) { e.modifier_words.get(row[2]) + " " } else { " " };
-            e.modifier_words.set(row[2], before + row[1] + " ");
-        }
     }
     var i = 0;
     while i < s.count {
@@ -75,83 +62,17 @@ pub fn effects_new(f: Flow) -> Effects {
     return e;
 }
 
-/// Whether `word` is registered as a modifier with action `act`.
-pub fn is_modifier_for(e: Effects, word: str, act: str) -> bool {
-    if !e.modifier_words.has(act) { return false; }
-    return e.modifier_words.get(act).contains(" " + word + " ");
-}
-
-/// The words written before declaration `n` on its own line of source (its
-/// modifiers: `pub noalloc fn`), nearest first. The parser keeps the
-/// declaration flags it knows (`pure`, `static`, ..) and drops the others,
-/// so a modifier with no flag of its own is read from the text.
-[StandIn("check.decl_modifier_words", "a declaration flag the parser records and the snapshot serves for every registered modifier", "the checker reads the modifier words written just before the declaration from the source text", "checker")]
-pub fn written_modifiers(s: Snap, n: i64) -> List<str> {
-    var out: List<str> = [];
-    let u = unit_of(s, n);
-    if u < 0 || u >= s.files.len() { return out; }
-    let row: List<any> = s.files[u];
-    let base: i64 = row[2];
-    let text: str = row[3];
-    var at = span_start(s, n) - base;
-    while at > 0 {
-        while at > 0 && (text.byte_at(at - 1) == 32 || text.byte_at(at - 1) == 9) { at = at - 1; }
-        var start = at;
-        while start > 0 && is_word_byte(text.byte_at(start - 1)) { start = start - 1; }
-        if start == at { return out; }
-        out.push(text.slice(start, at));
-        at = start;
-    }
-    return out;
-}
-
-fn is_word_byte(c: i64) -> bool => (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95;
-
-/// Whether declaration `n` is written with a modifier registered for `act`.
-pub fn has_modifier(e: Effects, n: i64, act: str) -> bool {
-    for w in written_modifiers(e.inf.p.s, n) {
-        if is_modifier_for(e, w, act) { return true; }
-    }
-    return false;
-}
-
-/// The words written before the name of parameter `prm` (`var ref xs: T`
-/// gives `var`, `ref`). The parser keeps one flag for any of them.
-[StandIn("check.param_modifier_words", "the modifiers of a parameter recorded word by word by the parser", "the checker reads the words written before the parameter's name from the source text", "F4")]
-pub fn param_words(s: Snap, prm: i64) -> List<str> {
-    var out: List<str> = [];
-    if kind(s, prm) != nk_param() || flags(s, prm) == 0 { return out; }
-    let name = node_name(s, prm);
-    let text = node_text(s, prm);
-    var at = 0;
-    while at < text.len() {
-        while at < text.len() && !is_word_byte(text.byte_at(at)) { at = at + 1; }
-        var end = at;
-        while end < text.len() && is_word_byte(text.byte_at(end)) { end = end + 1; }
-        if end == at { return out; }
-        let w = text.slice(at, end);
-        if w == name { return out; }
-        out.push(w);
-        at = end;
-    }
-    return out;
-}
-
-/// Whether parameter `prm` is written with a modifier registered for `act`.
-pub fn param_has(e: Effects, prm: i64, act: str) -> bool {
-    for w in param_words(e.inf.p.s, prm) {
-        if is_modifier_for(e, w, act) { return true; }
-    }
-    return false;
-}
+/// Whether declaration `n` is written with the modifier registered for
+/// action "effect_noalloc" (`noalloc fn`); the parser records it.
+pub fn is_noalloc_fn(s: Snap, n: i64) -> bool => is_noalloc_decl(s, n);
 
 /// Whether parameter `prm` lends its argument for changing (`var ref xs`,
 /// `var xs`): the caller's value is changed in place, and nothing else may
 /// reach it during the call.
-pub fn is_exclusive_param(e: Effects, prm: i64) -> bool => param_has(e, prm, act_mutable());
+pub fn is_exclusive_param(e: Effects, prm: i64) -> bool => param_flag(e.inf.p.s, prm, param_flag_mutable());
 
 /// Whether parameter `prm` takes its argument isolated (`iso xs`).
-pub fn is_iso_param(e: Effects, prm: i64) -> bool => param_has(e, prm, act_isolated());
+pub fn is_iso_param(e: Effects, prm: i64) -> bool => param_flag(e.inf.p.s, prm, param_flag_isolated());
 
 /// The nodes of the body of function-like node `fnode`, closures inside it
 /// included and nested function declarations left out.

@@ -6,7 +6,7 @@
 // printing what it read gives the same text byte for byte.
 //
 //   pilir 1
-//   layout <id> "<type>" <register class> <bit width> <align log2> <lattice>
+//   layout <id> "<type>" <register class> <bit width> <align log2> <lattice> [packed]
 //   int <index> <value>
 //   str <index> "<escaped text>"
 //   intrinsic <index> <engine operation>
@@ -109,7 +109,7 @@ pub fn print_ir_module(m: IrModule) -> str {
         let l = m.layouts[i];
         let p = l.physics;
         lines.push(f"layout {i} " + quote_text(l.name)
-            + f" {reg_class_name(p.reg_class)} {p.bit_width} {p.align_pow2} {p.lattice_bits}");
+            + f" {reg_class_name(p.reg_class)} {p.bit_width} {p.align_pow2} {p.lattice_bits}" + if l.packed { " packed" } else { "" });
         i = i + 1;
     }
     i = 0;
@@ -270,11 +270,12 @@ fn reg_class_from(r: Reader, name: str) -> u8 {
 
 fn parse_header(r: Reader, w: List<str>) {
     let tag = w[0];
-    if tag == "layout" && w.len() == 7 {
+    if tag == "layout" && (w.len() == 7 || (w.len() == 8 && w[7] == "packed")) {
         let id = number(r, w[1], "");
         r.m.layouts.push(IrLayout {
             name: unquote(w[2]),
             physics: ir_physics_new(id, reg_class_from(r, w[3]), number(r, w[4], ""), number(r, w[5], ""), number(r, w[6], "")),
+            packed: w.len() == 8,
         });
     } else if tag == "int" && w.len() == 3 {
         r.m.ints.push(number(r, w[2], ""));

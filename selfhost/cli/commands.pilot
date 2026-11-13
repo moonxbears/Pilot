@@ -313,6 +313,7 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/lower_probe.pilot",
         "selfhost/ir/lower_closure.pilot",
         "selfhost/ir/lower_generator.pilot",
+        "selfhost/ir/lower_outs.pilot",
         "selfhost/ir/verify.pilot",
         "selfhost/ir/passes.pilot",
         "selfhost/ir/pass_fold.pilot",

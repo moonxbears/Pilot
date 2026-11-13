@@ -198,6 +198,22 @@ pub const DECL_FLAG_PKG: u16 = 512;
 pub const DECL_FLAG_DTOR: u16 = 1024;
 /// The declaration's visibility was written (`priv`, `pub:`, ..), not defaulted.
 pub const DECL_FLAG_VIS_WRITTEN: u16 = 2048;
+/// The declaration is written with the modifier registered for action
+/// `effect_noalloc` (`noalloc fn`): calling it takes no heap memory.
+pub const DECL_FLAG_NOALLOC: u16 = 4096;
+
+/// `ParamDecl.flags`: the parameter is written with any modifier (`ref`,
+/// `comptime`, or a word registered `binding_mutable` / `perceus_isolated`),
+/// so it lends the caller's value instead of taking a copy or a move.
+pub const PARAM_FLAG_LENT: u16 = 1;
+/// The parameter is written with the seed word `ref`.
+pub const PARAM_FLAG_REF: u16 = 2;
+/// The parameter is written with a word registered `binding_mutable`.
+pub const PARAM_FLAG_MUT: u16 = 4;
+/// The parameter is written with a word registered `perceus_isolated`.
+pub const PARAM_FLAG_ISO: u16 = 8;
+/// The parameter is written `comptime`.
+pub const PARAM_FLAG_COMPTIME: u16 = 16;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct AstAttribute {

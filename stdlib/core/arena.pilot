@@ -1,0 +1,23 @@
+// =========================================================================
+// FILE: stdlib/core/arena.pilot
+// ARENA SCOPES: `with arena a { .. }`
+// =========================================================================
+// `with arena a { .. }` (crates/pilot-parser with_scope.rs) runs the block
+// with `a` bound to the scope `arena()` starts; leaving the block, however
+// it is left, drops the scope and so ends it. `ArenaScope` is a `0b11`
+// guard, so it cannot leave the block (ESCAPE001-004).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Arena;
+
+
+/// Tier-1 64KB lexical bump region guard: the region the scope's values
+/// are allocated from.
+[Layout(c_abi)]
+pub struct ArenaScope : IGuard {
+    pub region_view: slice<u8>;
+    ~self() {}
+}
+
+/// Starts an arena scope.
+[StandIn("mem.arena_region", "a 64KB bump region the values made inside the scope are allocated from, released at once when the scope ends", "the scope holds an empty region; values made inside it are allocated and released one by one, as outside any scope", "F7")]
+pub fn arena() -> ArenaScope => ArenaScope { region_view: [] };

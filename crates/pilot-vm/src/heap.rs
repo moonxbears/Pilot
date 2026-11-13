@@ -578,6 +578,11 @@ impl PilVirtualMachine {
                 let class = str_arg(args, 1, op)?;
                 crate::ops::convert(arg(args, 0, op)?, &class, int_arg(args, 2, op)?)
             }
+            // `num_wrap(v, register_class, width)`: see `ops::wrap`.
+            "num_wrap" => {
+                let class = str_arg(args, 1, op)?;
+                crate::ops::wrap(arg(args, 0, op)?, &class, int_arg(args, 2, op)?)
+            }
             "list_pop" => {
                 let list = arg(args, 0, op)?;
                 let slot = self.list_slot(list, op)?;
@@ -606,6 +611,8 @@ impl PilVirtualMachine {
             // An operation whose failure comes back as a value (checked.rs).
             "op_checked" => self.op_checked(args),
             // An intentionally unconnected entry or exit point was reached.
+            // The program states it cannot go on; the message is its own.
+            "rt_fault" => Err(self.display(arg(args, 0, op)?)),
             "seam_open" => {
                 let id = str_arg(args, 0, op)?;
                 let note = args.get(1).map(|&v| self.display(v)).unwrap_or_default();

@@ -350,7 +350,12 @@ pub struct IrFunction : IObject {
 /// A layout the module's values use, named for printing.
 pub struct IrLayout : IValue {
     pub name:    str;
+    /// For a struct, `align_pow2` is its `[Align(N)]` (log2 N) when one is
+    /// written, else 0.
     pub physics: IrTypePhysics;
+    /// The struct is written `[Layout(packed)]`: its fields follow each
+    /// other with no padding.
+    pub packed:  bool;
 }
 
 /// The fields of a record layout: the layout of each field, in the order

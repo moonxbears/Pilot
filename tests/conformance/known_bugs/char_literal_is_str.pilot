@@ -1,0 +1,9 @@
+// A single-quoted literal is a `char`: it can be bound to a `char`, and
+// `as i64` gives its Unicode scalar value, 65 for 'A' and 8364 for the
+// euro sign (U+20AC).
+fn main() {
+    let a: char = 'A';
+    print(a as i64);
+    let euro = '€';
+    print(euro as i64);
+}

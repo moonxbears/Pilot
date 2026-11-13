@@ -199,10 +199,8 @@ ext u64 {
 }
 
 ext f32 {
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before reading its bits")]
-    pub fn as_u32() -> u32 => float_bits((self as f32) as f64, binary32()) as u32;
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before reading its bits")]
-    pub fn as_i32() -> i32 => float_bits((self as f32) as f64, binary32()) as i32;
+    pub fn as_u32() -> u32 => float_bits(self as f64, binary32()) as u32;
+    pub fn as_i32() -> i32 => float_bits(self as f64, binary32()) as i32;
 }
 
 ext f64 {

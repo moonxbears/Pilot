@@ -20,6 +20,17 @@ pub pure fn seq_has<T: IEquatable<T>>(xs: T[], x: T) -> bool {
     return false;
 }
 
+// `x in xs`: whether `xs` holds an element equal to `x`.
+// Both are lent, so asking does not move the sequence.
+pub pure fn seq_member<T: IEquatable<T>>(ref x: T, ref xs: T[]) -> bool {
+    for y in xs {
+        if y == x {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Every element of `a`, then every element of `b`, each once.
 pub fn seq_union<T: IEquatable<T>>(a: T[], b: T[]) -> T[] {
     var out: T[] = [];
@@ -62,4 +73,5 @@ comptime {
     __engine("bind_operator_fn", nameof(union),     nameof(seq_union));
     __engine("bind_operator_fn", nameof(intersect), nameof(seq_intersect));
     __engine("bind_operator_fn", nameof(except),    nameof(seq_except));
+    __engine("bind_membership", nameof(seq_member));
 }

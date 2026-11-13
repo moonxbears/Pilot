@@ -55,11 +55,16 @@ pub enum Opcode {
     /// Calls `wide` with the arguments staged in `r1..`, reusing the current
     /// frame: the callee returns straight to this frame's caller (`become`).
     TailCall = 37,
+    /// Copies `src1` into out-slot `dst` just before a `Ret`: the final value
+    /// of a parameter that lends the caller's storage for changing (`var ref`).
+    SetOut = 38,
+    /// Loads out-slot `src1`, which the callee just returned, into `dst`.
+    GetOut = 39,
     /// Any byte that does not decode to a known opcode. Executing it faults.
     Invalid = 255,
 }
 
-const OPCODE_TABLE: [Opcode; 36] = [
+const OPCODE_TABLE: [Opcode; 38] = [
     Opcode::Nop,
     Opcode::Add,
     Opcode::Sub,
@@ -96,6 +101,8 @@ const OPCODE_TABLE: [Opcode; 36] = [
     Opcode::Trap,
     Opcode::CallClosure,
     Opcode::TailCall,
+    Opcode::SetOut,
+    Opcode::GetOut,
 ];
 
 impl Opcode {

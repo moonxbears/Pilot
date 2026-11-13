@@ -330,6 +330,10 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
             let k = kind(s, m);
             let member = Member { decl: m, names: bt.tparams, values: args };
             if k == nk_dtor() { has_dtor = true; }
+            if k == nk_scope() {
+                // Parsed, but nothing runs its clauses: stop, not skip.
+                let _ = seam("lifecycle.scope_self", f"`{name}` declares a `scope` block, whose enter and exit clauses are not run yet: which block enters a value of the type is not decided");
+            }
             if is_method_kind(k) {
                 let mname = node_name(s, m);
                 if kind(s, d) == nk_interface() && fn_body(s, m) < 0 {

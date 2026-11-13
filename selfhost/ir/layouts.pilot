@@ -10,7 +10,8 @@
 //     arguments index, e.g. `Cfg.Reg`);
 //   - a function type is a code pointer;
 //   - any other type is an aggregate of the lattice class the checker
-//     computes for it;
+//     computes for it, aligned to its `[Align(N)]` and packed when written
+//     `[Layout(packed)]` (selfhost/check/layout_attrs.pilot);
 //   - a value the checker could not type gets the layout of the unknown type.
 pub lvl(0) pkg Pilot.SelfHost.Ir.Layouts;
 
@@ -18,6 +19,7 @@ use selfhost.check.snapshot.*;
 use selfhost.check.types.*;
 use selfhost.check.program.*;
 use selfhost.check.methods.*;
+use selfhost.check.layout_attrs.*;
 use selfhost.ir.model.*;
 
 /// The layouts of one module, with the index that keeps them unique.
@@ -35,10 +37,12 @@ pub fn layouts_new(p: Program, m: IrModule) -> IrLayouts {
     return ls;
 }
 
-fn layout_add(ls: IrLayouts, name: str, phy: IrTypePhysics) -> IrTypePhysics {
+fn layout_add(ls: IrLayouts, name: str, phy: IrTypePhysics) -> IrTypePhysics => layout_add_packed(ls, name, phy, false);
+
+fn layout_add_packed(ls: IrLayouts, name: str, phy: IrTypePhysics, packed: bool) -> IrTypePhysics {
     let id = ls.m.layouts.len;
     let placed = ir_physics_new(id, phy.reg_class, phy.bit_width, phy.align_pow2, phy.lattice_bits);
-    ls.m.layouts.push(IrLayout { name: name, physics: placed });
+    ls.m.layouts.push(IrLayout { name: name, physics: placed, packed: packed });
     ls.index.set(name, id);
     return placed;
 }
@@ -96,6 +100,11 @@ pub fn layout_of(ls: IrLayouts, t: i64) -> IrTypePhysics {
         for b in nl_get(p.bases, node_name(p.s, d)) { tag = prog_annot_type(p, b); }
         let tp = layout_of(ls, tag);
         return layout_add(ls, name, ir_physics_new(0, tp.reg_class, tp.bit_width, tp.align_pow2, lattice));
+    }
+    if ty_is_named(p.tt, t) {
+        let decl_name = p.tt.name[t];
+        let align: u8 = if some k = type_align_pow2(p, decl_name) { k as u8 } else { 0 };
+        return layout_add_packed(ls, name, ir_physics_new(0, reg_class_aggregate(), 0, align, lattice), type_is_packed(p, decl_name));
     }
     return layout_add(ls, name, ir_physics_new(0, reg_class_aggregate(), 0, 0, lattice));
 }

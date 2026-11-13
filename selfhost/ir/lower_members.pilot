@@ -27,6 +27,7 @@ use selfhost.ir.lower_closure.*;
 use selfhost.ir.lower_union.*;
 use selfhost.ir.lower_global.*;
 use selfhost.ir.lower_unit.*;
+use selfhost.ir.lower_outs.*;
 
 /// Whether a value of physics `p` lives in a register.
 pub fn in_register(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.reg_class < reg_class_aggregate();
@@ -330,7 +331,7 @@ pub fn call_method(lw: Lowerer, recv: u32, t: i64, m: Member, arg_nodes: List<i6
     }
     let ret = layout_of(lw.ls, prog_member_type(lw.inf.p, m));
     let out = if ret.layout_id != 0 { ret } else { phy };
-    return emit(lw, op_call_direct(), function_index(lw, m.decl, t), out, args, n);
+    return call_with_outs(lw, m.decl, params, function_index(lw, m.decl, t), args, 0, order, out, n);
 }
 
 /// `Bundle.method(var ref self, args..)`: the method of the splice `Bundle`

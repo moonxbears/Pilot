@@ -1,0 +1,36 @@
+// A struct aligned past the 16 bytes the C object pool gives (`[Align(64)]`)
+// and a packed struct of register fields hold and change their values like
+// any other struct, across many records made and dropped.
+//   sum of k * 3 for k in 0..100 = 3 * (99 * 100 / 2) = 14850;
+//   the packed header ends with tag 7 + 99 = 106 and size 100 * 2 = 200.
+[Align(64)]
+struct Line {
+    pub a: i64;
+    pub b: i64;
+}
+
+[Layout(packed)]
+struct Header {
+    pub tag: u8;
+    pub size: u32;
+}
+
+fn main() {
+    var total = 0;
+    var k = 0;
+    while k < 100 {
+        let line = Line { a: k, b: k * 2 };
+        total = total + line.a + line.b;
+        k = k + 1;
+    }
+    print(total);
+    var h = Header { tag: 7, size: 0 };
+    var i = 0;
+    while i < 100 {
+        h.size = h.size + 2;
+        i = i + 1;
+    }
+    h.tag = h.tag + 99;
+    print(h.tag);
+    print(h.size);
+}

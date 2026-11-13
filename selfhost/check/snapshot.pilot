@@ -211,16 +211,18 @@ pub fn snap_load() -> Snap {
 }
 
 /// The declaration rows the host serves (`[node, is partial, is static,
-/// visibility tier or -1, is package declaration, is pure]`) as one entry
-/// per node: bit 0 partial, bit 1 static, bit 2 package declaration, bit 3
-/// pure, the tier plus one from bit 4 (0 when no visibility is written).
+/// visibility tier or -1, is package declaration, is pure, is noalloc]`) as
+/// one entry per node: bit 0 partial, bit 1 static, bit 2 package
+/// declaration, bit 3 pure, bit 4 noalloc, the tier plus one from bit 5 (0
+/// when no visibility is written).
 fn decl_bits(rows: List<List<i64>>, count: i64) -> List<i64> {
     var out: List<i64> = [];
     var i = 0;
     while i < count { out.push(-1); i = i + 1; }
     for row in rows {
         let pure_bit = if row.len() > 5 { row[5] * 8 } else { 0 };
-        out[row[0]] = row[1] + row[2] * 2 + row[4] * 4 + pure_bit + (row[3] + 1) * 16;
+        let noalloc_bit = if row.len() > 6 { row[6] * 16 } else { 0 };
+        out[row[0]] = row[1] + row[2] * 2 + row[4] * 4 + pure_bit + noalloc_bit + (row[3] + 1) * 32;
     }
     return out;
 }
@@ -239,6 +241,18 @@ pub fn is_static_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 2);
 /// Whether declaration `n` is written `pure`.
 pub fn is_pure_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 8);
 
+/// Whether declaration `n` is written with the modifier registered for
+/// action `effect_noalloc` (`noalloc fn`).
+pub fn is_noalloc_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 16);
+
+/// `ParamDecl` flag bits (crates/pilot-ast `PARAM_FLAG_*`): written with
+/// a word registered `binding_mutable` (`var`), or `perceus_isolated` (`iso`).
+pub pure fn param_flag_mutable() -> i64 => 4;
+pub pure fn param_flag_isolated() -> i64 => 8;
+
+/// Whether parameter `prm` carries flag bit `bit`.
+pub fn param_flag(s: Snap, prm: i64, bit: i64) -> bool => kind(s, prm) == nk_param() && (flags(s, prm) / bit) % 2 == 1;
+
 /// Whether node `n` is a `pkg Name;` package declaration.
 pub fn is_package_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 4);
 
@@ -249,7 +263,7 @@ pub fn is_declaration(s: Snap, n: i64) -> bool => s.modifiers[n] >= 0;
 /// is written or `n` is no declaration.
 pub fn decl_tier(s: Snap, n: i64) -> i64 {
     let m = s.modifiers[n];
-    return if m < 0 { -1 } else { m / 16 - 1 };
+    return if m < 0 { -1 } else { m / 32 - 1 };
 }
 
 /// Word `i` of a list of words the host serves, or "".

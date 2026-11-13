@@ -1,0 +1,135 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_outs.pilot
+// `var ref` parameters a function assigns: their final values go back to the
+// caller's variables.
+// ==============================================================================
+// `fn grow(var ref n: i64) { n = n + 1; }` changes the caller's `x` in
+// `grow(x)`. A PilIR stack slot belongs to its own frame, so the lowering
+// copies in and out instead of passing an address:
+//   - the callee keeps each such parameter in a stack slot of its own, and
+//     every `return` hands back one record: the result first (0 when the
+//     function returns nothing), then each parameter's final value;
+//   - a direct call of such a function takes the result from field 0 and
+//     stores field 1.. into the variables passed for those parameters.
+// Only a parameter written with a word registered `binding_mutable` (the
+// parser's PARAM_FLAG_MUT) and assigned as a whole in the body takes part:
+// one that is only read, or changed through its methods or fields (a heap
+// value the caller shares), keeps the plain convention. A function that
+// takes part cannot be used as a function value yet (ir.lower_construct).
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerOuts;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_global.*;
+
+/// Whether binding `b` is assigned as a whole somewhere under node `n`.
+fn assigns_binding(lw: Lowerer, n: i64, b: i64) -> bool {
+    let s = lw.inf.p.s;
+    if kind(s, n) == nk_assign() {
+        let target = lhs(s, n);
+        if target >= 0 && kind(s, target) == nk_ident() && lw.inf.r.ref_of[target] == b { return true; }
+    }
+    for c in children(s, n) {
+        if c >= 0 && assigns_binding(lw, c, b) { return true; }
+    }
+    return false;
+}
+
+/// The positions in `params` (the parameters of `decl` as its calls
+/// arrange them) of the `var ref` parameters its body assigns.
+pub fn out_positions(lw: Lowerer, decl: i64, params: List<i64>) -> List<i64> {
+    let s = lw.inf.p.s;
+    var out: List<i64> = [];
+    let body = fn_body(s, decl);
+    if body < 0 || kind(s, decl) != nk_fn() { return out; }
+    var i = 0;
+    while i < params.len() {
+        let prm = params[i];
+        if param_flag(s, prm, param_flag_mutable()) && lw.binding_of.has(key(prm)) && assigns_binding(lw, body, lw.binding_of.get(key(prm))) {
+            out.push(i);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// In the function being lowered, whose parameters `params` are bound:
+/// moves each assigned `var ref` parameter into a stack slot of its own and
+/// records it, so every return hands its final value back.
+pub fn bind_out_params(lw: Lowerer, decl: i64, params: List<i64>) {
+    lw.outs = [];
+    lw.out_phys = [];
+    for i in out_positions(lw, decl, params) {
+        let b = lw.binding_of.get(key(params[i]));
+        if !lw.values.has(key(b)) { continue; }
+        let v = lw.values.get(key(b));
+        let phy = lw.f.value_physics[v];
+        let slot = emit(lw, op_stack_slot(), 0, phy, [], decl);
+        emit_void(lw, op_store(), 0, [slot, v], decl);
+        let _ = lw.values.remove(key(b));
+        lw.slots.set(key(b), slot);
+        lw.outs.push(slot);
+        lw.out_phys.push(phy);
+    }
+}
+
+/// The arguments of a `return` with `args` (the result, or none): the same
+/// unless the function hands parameters back, else one record of the result
+/// then each parameter's final value.
+pub fn out_return_args(lw: Lowerer, args: List<u32>, n: i64) -> List<u32> {
+    if lw.outs.len() == 0 { return args; }
+    let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+    var vals: List<u32> = [];
+    vals.push(if args.len() > 0 { args[0] } else { emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, 0)], n) });
+    var i = 0;
+    while i < lw.outs.len() {
+        vals.push(emit(lw, op_load(), 0, lw.out_phys[i], [lw.outs[i]], n));
+        i = i + 1;
+    }
+    return [emit(lw, op_construct_aggregate(), 0, layout_unknown(lw.ls), vals, n)];
+}
+
+/// Once the function's body is lowered: a function that hands parameters
+/// back returns their record.
+pub fn finish_out_params(lw: Lowerer) {
+    if lw.outs.len() > 0 { lw.f.ret_physics = layout_unknown(lw.ls); }
+}
+
+/// A direct call of `decl` (function index `fi`) with `args`, `pre` of them
+/// given before the arranged argument nodes `nodes`, whose result has
+/// physics `ret`: the result, after the final values of the `var ref`
+/// parameters `decl` assigns are stored into the variables passed for them.
+pub fn call_with_outs(lw: Lowerer, decl: i64, params: List<i64>, fi: u16, args: List<u32>, pre: i64, nodes: List<i64>, ret: IrTypePhysics, n: i64) -> u32 {
+    let outs = out_positions(lw, decl, params);
+    if outs.len() == 0 { return emit(lw, op_call_direct(), fi, ret, args, n); }
+    let rec = emit(lw, op_call_direct(), fi, layout_unknown(lw.ls), args, n);
+    let v = emit(lw, op_extract_field(), 0, ret, [rec], n);
+    var k = 0;
+    while k < outs.len() {
+        let at = outs[k] - pre;
+        if at >= 0 && at < nodes.len() {
+            write_back(lw, nodes[at], emit(lw, op_extract_field(), (k + 1) as u16, physics_of_type_node(lw, rhs(lw.inf.p.s, params[outs[k]])), [rec], n), n);
+        }
+        k = k + 1;
+    }
+    return v;
+}
+
+/// Stores `v` into the variable `arg` names: a `var` (its stack slot) or a
+/// module global. Any other argument has no storage of the caller's.
+fn write_back(lw: Lowerer, arg: i64, v: u32, n: i64) {
+    let s = lw.inf.p.s;
+    if kind(s, arg) != nk_ident() { return; }
+    let g = find_global(lw, arg);
+    if g >= 0 {
+        lower_global_write(lw, g, v, n);
+        return;
+    }
+    let b = binding_index(lw, arg);
+    if b < 0 || !lw.slots.has(key(b)) { return; }
+    emit_void(lw, op_store(), 0, [lw.slots.get(key(b)), coerce(lw, v, physics_of(lw, arg), n)], n);
+}

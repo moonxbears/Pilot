@@ -12,7 +12,8 @@
 //! that has none is a compile error.
 
 use crate::BytecodeCompiler;
-use pilot_ast::{AstArena, NodeId, NodeKind};
+use crate::instruction::Opcode;
+use pilot_ast::{AstArena, NodeId, NodeKind, PARAM_FLAG_MUT};
 use pilot_rt::PilotVal;
 
 
@@ -45,6 +46,57 @@ impl BytecodeCompiler {
                 name != receiver && name != &receiver[1..]
             })
             .collect()
+    }
+
+    /// Whether parameter declaration `p` lends the caller's storage for
+    /// changing: written with a word registered `binding_mutable` (`var ref n`).
+    fn lends_for_change(arena: &AstArena, p: NodeId) -> bool {
+        arena.node(p).flags & PARAM_FLAG_MUT != 0
+    }
+
+    /// Records the slots of the `var ref` parameters of `decl`, whose
+    /// parameters are bound: each `Ret` then hands their final values back
+    /// to the caller (`SetOut`).
+    pub(crate) fn bind_ret_outs(&mut self, arena: &AstArena, decl: NodeId) {
+        self.ret_outs.clear();
+        for (i, p) in Self::decl_params(arena, decl).into_iter().enumerate() {
+            if !Self::lends_for_change(arena, p) {
+                continue;
+            }
+            let name = Self::name(arena, arena.node(p).lhs);
+            if let Some(&slot) = self.var_slots.get(name) {
+                self.ret_outs.push((i as u8, slot));
+            }
+        }
+    }
+
+    /// After a call to `key`, writes the final value of each `var ref`
+    /// parameter back to the variable passed for it (`GetOut`). An argument
+    /// that is not a variable (a field, an element) shares the caller's
+    /// value already when it is a heap value, and has no storage to write
+    /// to when it is a temporary.
+    pub(crate) fn emit_out_writebacks(&mut self, arena: &AstArena, key: &str, args: &[NodeId]) {
+        let Some(&decl) = self.param_decls.get(key) else { return };
+        for (i, p) in Self::decl_params(arena, decl).into_iter().enumerate() {
+            if !Self::lends_for_change(arena, p) {
+                continue;
+            }
+            let Some(&a) = args.get(i) else { continue };
+            let an = arena.node(a);
+            if an.node_kind() != NodeKind::IdentExpr {
+                continue;
+            }
+            let name = Self::name(arena, an.lhs).to_string();
+            if let Some(&slot) = self.var_slots.get(&name) {
+                self.emit(Opcode::GetOut, slot, i as u8, 0);
+            } else if self.globals.contains(&name) && !self.is_captured_name(&name) {
+                let mark = self.next_reg;
+                let r = self.alloc_reg();
+                self.emit(Opcode::GetOut, r, i as u8, 0);
+                self.emit_global_set(&name, r);
+                self.release_to(mark);
+            }
+        }
     }
 
     /// Parameter names of a function or constructor declaration, without the

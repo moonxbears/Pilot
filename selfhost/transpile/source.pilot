@@ -178,7 +178,7 @@ pub interface ISourceDialect {
     /// `module_open`. A language that lays a struct value out by its fields
     /// declares it here and answers the three `typed_` calls below; the
     /// others leave every record to `make_record`.
-    fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>) -> List<str> => [];
+    fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>, shapes: List<IrLayout>) -> List<str> => [];
     /// A record of layout `layout` (declared by `record_decls`) from its
     /// field values, each of its field's physics; a dynamic value.
     fn typed_record(layout: i64, values: List<str>) -> str? => none;
@@ -276,13 +276,15 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
     for line in d.module_open(protos) { u.out.push(line); }
     var laid: List<i64> = [];
     var laid_fields: List<List<IrTypePhysics>> = [];
+    var laid_shapes: List<IrLayout> = [];
     for rec in m.records {
         if some fs = record_fields(u, rec.layout) {
             laid.push(rec.layout as i64);
             laid_fields.push(fs);
+            laid_shapes.push(m.layouts[rec.layout]);
         }
     }
-    for line in d.record_decls(laid, laid_fields) { u.out.push(line); }
+    for line in d.record_decls(laid, laid_fields, laid_shapes) { u.out.push(line); }
     for line in d.string_pool(m.strings) { u.out.push(line); }
     for li in static_order(statics) {
         var items: List<str> = [];

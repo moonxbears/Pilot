@@ -1,0 +1,24 @@
+// `x in xs` is whether the sequence `xs` holds an element equal to `x`.
+//
+// Expected output, worked by hand:
+//   2 in [1, 2, 3] true; 9 in [1, 2, 3] false.
+//   "b" in ["a", "b"] true; "z" false.
+//   in an `if` head, and negated: 4 is not in the list, so "absent".
+//   it binds tighter than `&&`: (1 in xs) && (3 in xs) true.
+//   a `for` loop's own `in` is unchanged: counts 2 of [2, 5, 3] found in xs.
+fn main() {
+    let xs: List<i64> = [1, 2, 3];
+    print(2 in xs);
+    print(9 in xs);
+    let names: List<str> = ["a", "b"];
+    print("b" in names);
+    print("z" in names);
+    if 4 in xs { print("present"); } else { print("absent"); }
+    if !(3 in xs) { print("no three"); } else { print("three"); }
+    print(1 in xs && 3 in xs);
+    var found = 0;
+    for y in [2, 5, 3] {
+        if y in xs { found = found + 1; }
+    }
+    print(found);
+}

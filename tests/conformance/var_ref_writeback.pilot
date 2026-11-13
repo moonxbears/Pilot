@@ -1,0 +1,50 @@
+// Assigning a `var ref` parameter changes the caller's variable; the
+// parameter lends the caller's storage for changing.
+//   grow(x) twice from x = 1: 1 + 1 = 2, then 2 + 1 = 3.
+//   swap(a, b) with a = 10, b = 20 gives a = 20, b = 10.
+//   bump returns its old value 5 and leaves n = 5 * 2 = 10.
+//   Counter.add_to(total) with step 4 from total = 1: 1 + 4 = 5.
+//   a plain parameter assigned inside the callee (shadowed copy) leaves the
+//   caller's 7 alone.
+fn grow(var ref n: i64) { n = n + 1; }
+
+fn swap(var ref a: i64, var ref b: i64) {
+    let t = a;
+    a = b;
+    b = t;
+}
+
+fn bump(var ref n: i64) -> i64 {
+    let old = n;
+    n = n * 2;
+    return old;
+}
+
+struct Counter : IValue {
+    step: i64;
+    fn add_to(var ref total: i64) { total = total + .step; }
+}
+
+fn reads(n: i64) -> i64 => n + 100;
+
+fn main() {
+    var x = 1;
+    grow(x);
+    print(x);
+    grow(x);
+    print(x);
+    var a = 10;
+    var b = 20;
+    swap(a, b);
+    print(f"{a} {b}");
+    var n = 5;
+    let old = bump(n);
+    print(f"{old} {n}");
+    let c = Counter { step: 4 };
+    var total = 1;
+    c.add_to(total);
+    print(total);
+    var k = 7;
+    print(reads(k));
+    print(k);
+}

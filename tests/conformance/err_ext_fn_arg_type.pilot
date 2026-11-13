@@ -1,0 +1,7 @@
+// A one-line extension method is checked like any method: `add` takes an
+// i64, so a str argument is TYPE001, named by its owner and method.
+ext fn i64.add(n: i64) -> i64 => self + n;
+
+fn main() {
+    print(4.add("x"));
+}

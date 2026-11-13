@@ -88,7 +88,9 @@ impl BytecodeCompiler {
         let mut regs = vec![r_recv];
         regs.extend(self.compile_args(arena, args));
         if self.declares(owner, method) == Some(false) || self.fn_entries.contains_key(&full) {
-            return self.emit_user_call(full, method.to_string(), &regs);
+            let r = self.emit_user_call(full.clone(), method.to_string(), &regs);
+            self.emit_out_writebacks(arena, &full, args);
+            return r;
         }
         let via_interface = self.interface_declares(arena, owner, method);
         let instance_owners: Vec<String> = self
@@ -103,7 +105,9 @@ impl BytecodeCompiler {
             if via_interface {
                 return self.emit_trap(format!("no struct implements `{owner}.{method}`"));
             }
-            return self.emit_user_call(full, method.to_string(), &regs);
+            let r = self.emit_user_call(full.clone(), method.to_string(), &regs);
+            self.emit_out_writebacks(arena, &full, args);
+            return r;
         }
         let (mut records, others): (Vec<String>, Vec<String>) =
             instance_owners.into_iter().partition(|o| self.structs.contains_key(o));

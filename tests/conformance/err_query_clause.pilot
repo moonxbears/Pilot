@@ -1,0 +1,6 @@
+// A query clause other than `where` between `from` and `select` is not
+// silently skipped: it is rejected with SYN001.
+fn main() {
+    let xs: List<i64> = [2, 1];
+    print(from x in xs order x select x);
+}

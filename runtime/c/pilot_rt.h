@@ -346,21 +346,46 @@ typedef struct pilot_v_rec {
 } pilot_v_rec;
 
 /* A layout's field count, its dynamic field reader (borrowed) and writer,
-   what releasing a value of it releases (its fields), and its size. */
+   what releasing a value of it releases (its fields), its size and its
+   alignment (above 16 bytes for a struct written `[Align(N)]`). */
 typedef struct pilot_v_layout {
     int32_t n;
     pilot_val (*get)(pilot_val rec, int32_t i);
     void (*set)(pilot_val rec, int32_t i, pilot_val v);
     void (*drop)(pilot_v_rec *rec);
     size_t size;
+    size_t align;
 } pilot_v_layout;
 
 /* Defined by the emitted module when it has record layouts. */
 static const pilot_v_layout *pilot_rt_layouts;
 
 /* A new struct value of `size` bytes and layout `layout`, one reference. */
+/* Records aligned above what the object pool gives (16 bytes) come from the
+   platform's aligned allocator and go back to it. */
+static inline size_t pilot_v_rec_align(uint32_t layout) {
+    return pilot_rt_layouts ? pilot_rt_layouts[layout].align : 0;
+}
+static inline void *pilot_alloc_aligned(size_t align, size_t size) {
+    size = (size + align - 1) & ~(align - 1);
+#if defined(_WIN32)
+    void *p = _aligned_malloc(size, align);
+#else
+    void *p = aligned_alloc(align, size);
+#endif
+    if (!p) pilot_trap("out of memory");
+    return p;
+}
+static inline void pilot_free_aligned(void *p) {
+#if defined(_WIN32)
+    _aligned_free(p);
+#else
+    free(p);
+#endif
+}
 static inline pilot_v_rec *pilot_v_rec_new(size_t size, uint32_t layout) {
-    pilot_v_rec *h = (pilot_v_rec *)pilot_alloc_obj(size);
+    size_t align = pilot_v_rec_align(layout);
+    pilot_v_rec *h = (pilot_v_rec *)(align > 16 ? pilot_alloc_aligned(align, size) : pilot_alloc_obj(size));
     h->layout = layout;
     h->rc = 1;
     PILOT_LIVE(1);
@@ -914,7 +939,8 @@ static void pilot_v_free(pilot_val v) {
     default: {
         const pilot_v_layout *l = pilot_v_rec_layout(v);
         l->drop(v.as.r);
-        pilot_free_obj(v.as.r, l->size);
+        if (l->align > 16) pilot_free_aligned(v.as.r);
+        else pilot_free_obj(v.as.r, l->size);
         break;
     }
     }
@@ -1313,6 +1339,10 @@ static inline pilot_val pilot_rt_assert(pilot_val cond, bool has_note, pilot_val
     if (!has_note) pilot_trap("assertion failed");
     pilot_val text = pilot_v_concat(pilot_v_cstr("assertion failed: "), note);
     pilot_trap_text(text);
+    return PILOT_V_NULL;
+}
+static inline pilot_val pilot_rt_fault(pilot_val message) {
+    pilot_trap_text(message);
     return PILOT_V_NULL;
 }
 static inline pilot_val pilot_seam_open(pilot_val id, bool has_note, pilot_val note) {

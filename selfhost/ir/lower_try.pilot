@@ -36,6 +36,7 @@ use selfhost.ir.lower_members.*;
 use selfhost.ir.lower_switch.*;
 use selfhost.ir.lower_defer.*;
 use selfhost.ir.lower_drop.*;
+use selfhost.ir.lower_outs.*;
 
 /// The bindings that name the protocol's members and constructors.
 pub pure fn try_protocol_hook() -> str => "bind_try_protocol";
@@ -216,7 +217,7 @@ fn fail_exit(lw: Lowerer, v: u32, t: i64, n: i64) {
     let depth = lw.try_blocks.len();
     if depth == 0 {
         run_defers_to(lw, 0);
-        if !ir_is_terminated(lw.f, lw.cur) { emit_void(lw, op_return(), 0, [coerce(lw, v, lw.f.ret_physics, n)], n); }
+        if !ir_is_terminated(lw.f, lw.cur) { emit_void(lw, op_return(), 0, out_return_args(lw, [coerce(lw, v, lw.f.ret_physics, n)], n), n); }
         return;
     }
     let e = if lw.try_binds[depth - 1] { failure_of(lw, v, t, n) } else { v };

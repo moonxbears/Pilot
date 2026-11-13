@@ -70,7 +70,7 @@ pub pure fn max_eval_depth() -> i64 => 200;
 pub fn eval_engine_ops() -> Map<str, bool> {
     let ops = Map<str, bool>();
     for name in [
-        "rt_assert", "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
+        "rt_assert", "rt_fault", "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
         "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
         "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "map_values", "to_str",
         "map_new", "map_get", "map_set", "map_has", "map_remove", "value_clone", "list_get", "list_set",
@@ -245,16 +245,44 @@ fn binary(fr: IrFrame, inst: IrInst) -> List<any> => arg_values(fr, inst);
 /// A binary operator on the instruction's two operands, as the seed's.
 fn run_binary(fr: IrFrame, inst: IrInst, symbol: str) { put(fr, inst, checked(fr, symbol, binary(fr, inst))); }
 
-fn run_add(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "+"); }
-fn run_sub(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "-"); }
-fn run_mul(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "*"); }
-fn run_div(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "/"); }
-fn run_rem(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "%"); }
-fn run_bit_and(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "&"); }
-fn run_bit_or(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "|"); }
-fn run_bit_xor(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "^"); }
-fn run_shl(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, "<<"); }
-fn run_shr(fr: IrFrame, inst: IrInst) { run_binary(fr, inst, ">>"); }
+/// Whether a register is narrower than the engine's own numbers: an integer
+/// register of 2 to 63 bits, or a 32-bit float register.
+fn is_narrow_register(phy: IrTypePhysics) -> bool {
+    let is_int = phy.reg_class == reg_class_gpr_signed() || phy.reg_class == reg_class_gpr_unsigned();
+    if is_int { return phy.bit_width > 1 && phy.bit_width < 64; }
+    return phy.reg_class == reg_class_simd_float() && phy.bit_width == 32;
+}
+
+/// An arithmetic operator on the instruction's two operands. The engine
+/// computes integers in 64 bits and floats as f64, so a result in a narrower
+/// register is wrapped or rounded to it, and a shift count in a narrow
+/// integer register is taken modulo the register's width.
+fn run_arith(fr: IrFrame, inst: IrInst, symbol: str, is_shift: bool) {
+    let phy = inst.physics;
+    if !is_narrow_register(phy) {
+        run_binary(fr, inst, symbol);
+        return;
+    }
+    var args = binary(fr, inst);
+    if is_shift && phy.reg_class != reg_class_simd_float() {
+        let width: i64 = phy.bit_width;
+        args = [args[0], checked(fr, "&", [args[1], width - 1])];
+    }
+    let v = checked(fr, symbol, args);
+    let bits: i64 = phy.bit_width;
+    put(fr, inst, checked(fr, "num_wrap", [v, reg_class_name(phy.reg_class), bits]));
+}
+
+fn run_add(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, "+", false); }
+fn run_sub(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, "-", false); }
+fn run_mul(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, "*", false); }
+fn run_div(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, "/", false); }
+fn run_rem(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, "%", false); }
+fn run_bit_and(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, "&", false); }
+fn run_bit_or(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, "|", false); }
+fn run_bit_xor(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, "^", false); }
+fn run_shl(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, "<<", true); }
+fn run_shr(fr: IrFrame, inst: IrInst) { run_arith(fr, inst, ">>", true); }
 
 /// The operator of each comparison predicate (`CmpPred` 0..5).
 fn cmp_symbols() -> List<str> => ["==", "!=", "<", "<=", ">", ">="];
@@ -461,7 +489,7 @@ pub fn interp_handlers() -> List<any> {
 pub fn interp_engine_ops() -> Map<str, str> {
     let ops = Map<str, str>();
     for name in [
-        "rt_print", "rt_eprint", "rt_assert", "stdin_read_line", "stdin_read_all",
+        "rt_print", "rt_eprint", "rt_assert", "rt_fault", "stdin_read_line", "stdin_read_all",
         "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
         "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
         "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "map_values", "to_str",

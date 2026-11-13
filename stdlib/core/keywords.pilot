@@ -398,7 +398,7 @@ pub partial struct {
     [KeywordDefAttr(10, "Coalesces duplicate bundle fields or methods into a single member.")]
     coalesce {}
 
-    [KeywordDefAttr(10, "Includes bundle members with specific aliasing or transformation.")]
+    [KeywordDefAttr(10, "Includes bundle members with specific aliasing or transformation; as a statement, `with f name { .. }` runs the block with `name` bound to the scope guard `f()` makes (`with arena a { .. }`), ended when the block is left.")]
     with {}
 
     [KeywordDefAttr(10, "Excludes specific bundle members from being spliced into struct.")]

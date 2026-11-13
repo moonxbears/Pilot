@@ -353,6 +353,13 @@ pub pure fn fn_slot() -> str => "fn_t";
 /// The receptor slot of the list a collection literal builds.
 pub pure fn list_slot() -> str => "list_t";
 
+/// Whether type declaration `d` is `type Name = Target;` with no generic
+/// parameters: it has no variants and its right side is the target type.
+pub fn is_plain_alias(p: Program, d: i64) -> bool {
+    if kind(p.s, d) != nk_adt() || flags(p.s, d) != 0 || rhs(p.s, d) < 0 { return false; }
+    return nl_get(p.tparams, key(d)).len() == 0;
+}
+
 /// The type a type node denotes.
 pub fn prog_annot_type(p: Program, n: i64) -> i64 {
     if n < 0 { return ty_unknown(); }
@@ -391,7 +398,12 @@ pub fn prog_annot_type(p: Program, n: i64) -> i64 {
                     i = i + 1;
                 }
             }
-            if d >= 0 {
+            if d >= 0 && is_plain_alias(p, d) {
+                // `type Meters = i64;` is another name for its target. The
+                // memo is set first so an alias of itself ends as unknown.
+                p.annot_memo[n] = ty_unknown();
+                t = prog_annot_type(p, rhs(p.s, d));
+            } else if d >= 0 {
                 t = ty_named(p.tt, d, name, args);
             } else if name == prog_slot_name(p, fn_slot()) {
                 t = ty_func(p.tt, name, args);

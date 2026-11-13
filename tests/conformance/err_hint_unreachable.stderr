@@ -1,1 +1,1 @@
-assertion failed: HINT002: control reached `unreachable()`
+HINT002: control reached `unreachable()`

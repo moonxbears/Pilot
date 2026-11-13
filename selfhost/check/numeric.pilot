@@ -1,0 +1,68 @@
+// ==============================================================================
+// FILE: selfhost/check/numeric.pilot
+// The types of arithmetic results, for the seed's narrow numbers.
+// ==============================================================================
+// The seed computes every integer in 64 bits and every float as an f64. An
+// operation whose result type is narrower (an `i8` .. `u32`, an `f32`) must
+// give a value of that type: `u8 255 + 1` is 0, `f32(0.1) * f32(3.0)` is the
+// nearest f32. The seed does not know the type of an expression, so the run
+// plan names it: one `NumericType` row per arithmetic or bitwise expression
+// whose type is an integer or float type of another width than the type an
+// integer or float literal takes, `[action, span start, span end, node kind,
+// type name, ""]`. The seed reads the type's `[Bits]` register and wraps or
+// rounds the result to it (crates/pilot-vm/src/lower_expr.rs
+// compile_arithmetic); a type as wide as the engine's numbers needs no row.
+//
+// PilIR needs no rows: each instruction carries its result's register, and
+// the interpreter narrows to it (selfhost/ir/interp.pilot run_arith).
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Check.Numeric;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.drops.*;
+
+/// `BinaryOp` codes (crates/pilot-ast): arithmetic is 1..7 (`+` .. `**`),
+/// bitwise and shifts are 16..20 (`&` .. `>>`).
+fn is_arithmetic_op(op: i64) -> bool => (op >= 1 && op <= 7) || (op >= 16 && op <= 20);
+
+/// The `[Bits]` width key of named type `t`, or "".
+fn width_key(p: Program, t: i64) -> str {
+    if !ty_is_named(p.tt, t) { return ""; }
+    let d = node_name(p.s, ty_decl(p.tt, t));
+    return if p.bits_width.has(d) { p.bits_width.get(d) } else { "" };
+}
+
+/// Whether `t` is an integer or float type of another width than the type
+/// a literal of its kind takes (the engine's own width).
+fn is_other_width(p: Program, t: i64, int_width: str, float_width: str) -> bool {
+    let class = prog_class(p, t);
+    let w = width_key(p, t);
+    if w == "" { return false; }
+    if is_integer_class(class) { return w != int_width; }
+    if is_float_class(class) { return w != float_width; }
+    return false;
+}
+
+/// Adds a `NumericType` row to `rows` for each arithmetic expression of the
+/// linked program whose result is narrower or wider than the engine's
+/// numbers.
+pub fn plan_numeric(inf: Infer, rows: List<List<any>>) {
+    let p = inf.p;
+    let s = p.s;
+    let int_width = width_key(p, prog_slot_type(p, literal_slot(nk_int())));
+    let float_width = width_key(p, prog_slot_type(p, literal_slot(nk_float())));
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_binary() && is_arithmetic_op(flags(s, n)) {
+            let t = type_of(inf, n);
+            if is_other_width(p, t, int_width, float_width) {
+                let name = node_name(s, ty_decl(p.tt, t));
+                rows.push([DropAction::NumericType as i64, span_start(s, n), span_end(s, n), kind(s, n), name, ""]);
+            }
+        }
+        n = n + 1;
+    }
+}

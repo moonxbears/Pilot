@@ -14,10 +14,10 @@
 // `flag_set(E::Read)` and grown with `with`. It is a 0b00 value: copying it
 // copies the bits.
 //
-// Not yet: `|`, `&`, `^` and `!` written directly between enum values (the
-// seed does not dispatch a declared binary operator to a struct, and an
-// enum cannot take an interface base or a method PilIR lowers); the methods
-// below do the same work.
+// `|`, `&` and `^` work directly between the enum's values
+// (`Perm::Read | Perm::Write` is 3, a value of the enum's type), and
+// between two sets (`a | b` is `a.union(b)`, `a & b` `a.intersect(b)`,
+// `a ^ b` `a.difference(b)`).
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Flags;
 
@@ -54,6 +54,15 @@ pub struct FlagSet<E: IAnyValue> : IValue {
 
     /// Whether no flag is in the set.
     pub fn is_empty() -> bool => .bits == 0;
+
+    /// `a | b`: the flags in either set.
+    pub op | (other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits | other.bits };
+
+    /// `a & b`: the flags in both sets.
+    pub op & (other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits & other.bits };
+
+    /// `a ^ b`: the flags in exactly one of the sets.
+    pub op ^ (other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits ^ other.bits };
 }
 
 /// The set holding just `flag`.

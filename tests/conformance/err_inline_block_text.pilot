@@ -1,0 +1,7 @@
+// A language word followed by a string literal in parentheses is still an
+// inline foreign block when the file declares no function of that name;
+// the seed cannot run one and says so (SEED001).
+fn main() {
+    let v = c("int x = 1;");
+    print(v);
+}

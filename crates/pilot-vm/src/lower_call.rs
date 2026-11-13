@@ -195,7 +195,9 @@ impl BytecodeCompiler {
         }
         let regs = self.compile_args_for(arena, name, args);
         let key = self.unit_fn_key(name);
-        self.emit_user_call(key.clone(), key, &regs)
+        let r = self.emit_user_call(key.clone(), key.clone(), &regs);
+        self.emit_out_writebacks(arena, &key, args);
+        r
     }
 
     fn compile_method_call(&mut self, arena: &AstArena, callee_id: NodeId, args: &[NodeId]) -> u8 {
@@ -234,11 +236,27 @@ impl BytecodeCompiler {
             return self.compile_variant_ctor(arena, &full, args);
         }
         let regs = self.compile_args_for(arena, &full, args);
-        self.emit_user_call(full, r_nm, &regs)
+        let r = self.emit_user_call(full.clone(), r_nm, &regs);
+        self.emit_out_writebacks(arena, &full, args);
+        r
     }
 
     /// Converts the value in `r` to a primitive's register layout: `T(x)` and
     /// `x as T` for a type `T` declared with `[Bits(..)]`.
+    /// `r` as the result of arithmetic in `layout`'s register: wrapped or
+    /// rounded when it is a number (`ops::wrap`), itself otherwise.
+    pub(crate) fn emit_wrap(&mut self, r: u8, layout: &pilot_parser::RegLayout) -> u8 {
+        let mark = self.next_reg;
+        let r_class = self.emit_const(PilotVal::from_str(&layout.class));
+        let r_width = self.emit_const(PilotVal::from_int(layout.width));
+        let dst = self.emit_intrinsic("num_wrap", &[r, r_class, r_width]);
+        if dst >= mark {
+            self.emit(Opcode::Move, mark, dst, 0);
+        }
+        self.release_to(mark + 1);
+        mark
+    }
+
     pub(crate) fn emit_conversion(&mut self, r: u8, layout: &pilot_parser::RegLayout) -> u8 {
         let mark = self.next_reg;
         let r_class = self.emit_const(PilotVal::from_str(&layout.class));

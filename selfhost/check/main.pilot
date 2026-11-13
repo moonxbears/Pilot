@@ -23,6 +23,7 @@ use selfhost.check.drops.*;
 use selfhost.check.copies.*;
 use selfhost.check.consts.*;
 use selfhost.check.receivers.*;
+use selfhost.check.numeric.*;
 use selfhost.check.exits.*;
 use selfhost.check.probes.*;
 use selfhost.check.attr_inherit.*;
@@ -108,6 +109,7 @@ fn plan_of(s: Snap, inf: Infer) -> List<any> {
     let pl = drop_planner(inf);
     plan_copies(pl);
     plan_receivers(inf, pl.rows);
+    plan_numeric(inf, pl.rows);
     var probes: List<List<any>> = [];
     for row in probe_plan(p) {
         let n: i64 = row[0];

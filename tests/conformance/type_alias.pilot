@@ -1,0 +1,31 @@
+// `type Name = Target;` is another name for `Target`: a value of one is a
+// value of the other, in annotations, parameters, returns and fields.
+//
+// Expected output, worked by hand:
+//   m = 9 (an i64 bound as Meters); double(m) = 18.
+//   to_meters(4) = 4 as Meters; 4 + m = 13.
+//   names is a List<str> under the alias Names with 2 items; first is "ada".
+//   Track { length: 7 }.length + 1 = 8.
+type Meters = i64;
+type Names = List<str>;
+
+struct Track : IValue {
+    pub length: Meters;
+}
+
+fn double(d: Meters) -> Meters => d * 2;
+
+fn to_meters(n: i64) -> Meters => n;
+
+fn main() {
+    let m: Meters = 9;
+    print(m);
+    print(double(m));
+    let plain: i64 = to_meters(4) + m;
+    print(plain);
+    let names: Names = ["ada", "grace"];
+    print(names.len());
+    print(names[0]);
+    let t = Track { length: 7 };
+    print(t.length + 1);
+}

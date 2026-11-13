@@ -320,7 +320,13 @@ fn call_type(inf: Infer, n: i64) -> i64 {
         if ty_is_unknown(p.tt, rt) { rt = type_receiver(inf, recv); }
         if some m = prog_member(p, rt, sym_text(s, rhs(s, callee))) {
             let mk = kind(s, m.decl);
-            if mk == nk_fn() || mk == nk_operator() { return prog_member_type(p, m); }
+            if mk == nk_fn() || mk == nk_operator() {
+                // A generator method written without a return type returns
+                // the generator over its items, as a function does.
+                let mt = prog_member_type(p, m);
+                if ty_is_unknown(p.tt, mt) && mk == nk_fn() && is_generator(p, m.decl) { return fn_return_type(inf, m.decl); }
+                return mt;
+            }
         }
         let f = module_fn(inf, callee);
         if f >= 0 && annot(s, f) >= 0 { return prog_annot_type(p, annot(s, f)); }
@@ -379,9 +385,23 @@ fn binary_type(inf: Infer, n: i64) -> i64 {
         let inner = unwrap_type(p, type_of(inf, lhs(s, n)));
         return if ty_is_unknown(p.tt, inner) { type_of(inf, rhs(s, n)) } else { inner };
     }
-    if op >= 1 && op <= 7 {
+    // Arithmetic (1..7) and bitwise (`&` 16, `|` 17, `^` 18, `<<` 19,
+    // `>>` 20) operators give their left operand's type, or the right's
+    // when the left's is unknown.
+    if (op >= 1 && op <= 7) || (op >= 16 && op <= 20) {
         let l = type_of(inf, lhs(s, n));
-        return if ty_is_unknown(p.tt, l) { type_of(inf, rhs(s, n)) } else { l };
+        if ty_is_unknown(p.tt, l) { return type_of(inf, rhs(s, n)); }
+        // A literal on the left takes the other side's numeric type
+        // (`1 + b` for a `u8` `b` is a `u8`), as one on the right does.
+        // Shifts keep the type of the value shifted.
+        let lk = kind(s, lhs(s, n));
+        if (lk == nk_int() || lk == nk_float()) && op != 19 && op != 20 {
+            let r = type_of(inf, rhs(s, n));
+            let rc = prog_class(p, r);
+            if lk == nk_int() && (is_integer_class(rc) || is_float_class(rc)) { return r; }
+            if lk == nk_float() && is_float_class(rc) { return r; }
+        }
+        return l;
     }
     return ty_unknown();
 }
@@ -413,6 +433,13 @@ fn compute(inf: Infer, n: i64) -> i64 {
     if k == nk_call() { return call_type(inf, n); }
     if k == nk_member() { return member_type(inf, n); }
     if k == nk_index() {
+        // `x[a..b]` is the part of `x` between the bounds: a value of `x`'s
+        // own type, as every engine gives it (the part of a list is a
+        // list, of a string a string).
+        let idx = rhs(s, n);
+        if idx >= 0 && ((kind(s, idx) == nk_binary() && (flags(s, idx) == op_range() || flags(s, idx) == op_range_inclusive())) || kind(s, idx) == nk_range()) {
+            return type_of(inf, lhs(s, n));
+        }
         if some m = prog_member(p, type_of(inf, lhs(s, n)), op_index()) { return prog_member_type(p, m); }
         return ty_unknown();
     }

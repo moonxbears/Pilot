@@ -11,6 +11,7 @@ use Pilot.Core.Keywords::*;
 
 [KeywordDefAttr(22, "16-bit IEEE 754 half-precision floating-point number.")]
 [Lang(Cfg.Lang.f16_t), Bits(Cfg.Reg.b16, Cfg.Reg.simd_f)]
+[StandIn("prim.wide_scalar_64", "a float of this type's own format", "held as an f64: results are not rounded to the type's precision or range", "F6")]
 pub partial struct f16 : INumber<f16>, INegOperator<f16> {
     pub pure:
         op +  (rhs: f16) -> f16  => __ssa(Cfg.Ssa.fadd, self, rhs);

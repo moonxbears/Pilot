@@ -85,7 +85,7 @@ impl BytecodeCompiler {
             NodeKind::IndexExpr => self.compile_index(arena, node.lhs, node.rhs),
             NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => self.compile_let(arena, node_id),
             NodeKind::AssignStmt => self.compile_assign(arena, node_id, node.lhs, node.rhs),
-            NodeKind::BinaryExpr => self.compile_binary(arena, node.flags, node.lhs, node.rhs),
+            NodeKind::BinaryExpr => self.compile_arithmetic(arena, node_id, node.flags, node.lhs, node.rhs),
             NodeKind::UnaryExpr if node.flags == pilot_ast::UNARY_OP_OLD => self.compile_old(node_id),
             NodeKind::UnaryExpr => self.compile_unary(arena, node.flags, node.lhs),
             NodeKind::IfExpr => self.compile_if(arena, node_id),
@@ -245,7 +245,24 @@ impl BytecodeCompiler {
         self.emit_index_read(r_obj, ty.as_deref(), r_key)
     }
 
-    fn compile_binary(&mut self, arena: &AstArena, flags: u16, lhs: u32, rhs: u32) -> u8 {
+    /// A binary expression. When the checker's plan names a numeric type
+    /// for it that is narrower than the engine's own numbers (an `i8` ..
+    /// `u32`, an `f32`), the result is wrapped or rounded to that type's
+    /// register, and a shift count is taken modulo its width.
+    fn compile_arithmetic(&mut self, arena: &AstArena, id: NodeId, flags: u16, lhs: u32, rhs: u32) -> u8 {
+        let narrow = self
+            .planned_numeric(arena, id)
+            .and_then(|t| pilot_parser::bootstrap_tables().reg_layout(&t).cloned())
+            .filter(crate::lower_stmt::is_narrow_register);
+        let Some(layout) = narrow else {
+            return self.compile_binary(arena, flags, lhs, rhs, None);
+        };
+        let r = self.compile_binary(arena, flags, lhs, rhs, Some(layout.width));
+        self.emit_wrap(r, &layout)
+    }
+
+    /// `shift_width`: the register width a shift count is reduced to.
+    fn compile_binary(&mut self, arena: &AstArena, flags: u16, lhs: u32, rhs: u32, shift_width: Option<i64>) -> u8 {
         let Some(op) = BinaryOp::from_u16(flags) else {
             return self.error(crate::codes::SYNTAX, "unknown binary operator".to_string());
         };
@@ -275,6 +292,14 @@ impl BytecodeCompiler {
             }
             _ => {}
         }
+        // Comparisons keep the seed's own meaning (structural equality, and
+        // `x == none` on an optional, which the seed holds as null).
+        let compares = matches!(op, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge);
+        if !compares {
+            if let Some(r) = self.compile_declared_operator(arena, op.symbol(), NodeId(lhs), NodeId(rhs)) {
+                return r;
+            }
+        }
         let Some(opcode) = direct_opcode(op) else {
             if matches!(op, BinaryOp::RangeInclusive | BinaryOp::RangeHalfOpen) {
                 return self.error(crate::codes::SEED, 
@@ -298,10 +323,36 @@ impl BytecodeCompiler {
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_l = self.compile_with_hint(arena, NodeId(lhs), hint_l);
-        let r_r = self.compile_with_hint(arena, NodeId(rhs), hint_r);
+        let mut r_r = self.compile_with_hint(arena, NodeId(rhs), hint_r);
+        if let (Some(width), true, Some(and)) =
+            (shift_width, matches!(op, BinaryOp::Shl | BinaryOp::Shr), direct_opcode(BinaryOp::BitAnd))
+        {
+            let r_mask = self.emit_const(PilotVal::from_int(width - 1));
+            let r_count = self.alloc_reg();
+            self.emit(and, r_count, r_r, r_mask);
+            r_r = r_count;
+        }
         self.emit(opcode, dst, r_l, r_r);
         self.release_to(mark);
         dst
+    }
+
+    /// `a op b` (not a comparison) where `a`'s struct declares `op`
+    /// (`pub op | (other: T) -> T`):
+    /// a call of that operator on `a` with `b`, or `None` when the left
+    /// operand's type is not known to be such a struct.
+    fn compile_declared_operator(&mut self, arena: &AstArena, symbol: &str, lhs: NodeId, rhs: NodeId) -> Option<u8> {
+        let ty = self.static_type(arena, lhs)?;
+        if !self.structs.contains_key(&ty) || self.declares(&ty, symbol) != Some(false) {
+            return None;
+        }
+        let dst = self.alloc_reg();
+        let mark = self.next_reg;
+        let r_l = self.compile_node(arena, lhs);
+        let r = self.emit_method_call(arena, r_l, &ty, symbol, &[rhs]);
+        self.emit(Opcode::Move, dst, r, 0);
+        self.release_to(mark);
+        Some(dst)
     }
 
     /// Declared type of a variable or call result, when statically known.

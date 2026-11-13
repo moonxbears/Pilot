@@ -39,6 +39,7 @@ use selfhost.ir.lower_generator.*;
 use selfhost.check.drops.*;
 use selfhost.ir.lower_drop.*;
 use selfhost.ir.lower_probe.*;
+use selfhost.ir.lower_outs.*;
 use std.text;
 
 /// The state of one lowering run.
@@ -157,6 +158,11 @@ pub struct Lowerer : IObject {
     pub lowered: Map<str, bool>;
     /// Collecting `for` node -> the list it fills.
     pub collect_lists: Map<str, i64>;
+    /// The stack slots of the `var ref` parameters the function being
+    /// lowered hands back at each return, and their physics
+    /// (selfhost/ir/lower_outs.pilot).
+    pub outs: List<u32>;
+    pub out_phys: List<IrTypePhysics>;
     /// Per open loop, innermost last: the enumerator a `for` walks
     /// (`ir_no_value()` for other loops) and its type, closed when the loop
     /// is left.
@@ -273,7 +279,7 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
         start_units: [], start_run_blocks: [], start_unit_bodies: [],
         setter_arg: ir_no_value(), setter_arg_type: ty_unknown(),
         gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
-        resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, i64>(),
+        resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, i64>(), outs: [], out_phys: [],
         loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, List<any>>(), drop_flags: Map<str, i64>(),
         probes: probe_rows(p), adt_decls: adt_nodes(p.s),
     };
@@ -306,6 +312,8 @@ pub fn begin_function(lw: Lowerer, f: IrFunction) {
     lw.f = f;
     lw.values = Map<str, i64>();
     lw.slots = Map<str, i64>();
+    lw.outs = [];
+    lw.out_phys = [];
     lw.loop_heads = [];
     lw.loop_exits = [];
     lw.head_depths = [];
@@ -450,6 +458,7 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
         }
         pi = pi + 1;
     }
+    if accessor < 0 && !is_lambda && !creator && !resume { bind_out_params(lw, decl, params); }
     if creator {
         lower_creator(lw, idx, decl);
         return;
@@ -470,8 +479,9 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
         // body's value; a block body without one returns nothing.
         let returns_value = annot(s, decl) >= 0 || kind(s, body) != nk_block();
         let args: List<u32> = if returns_value { [coerce(lw, as_member_of(lw, v, value_type(lw, body), lw.ret_type, body), f.ret_physics, body)] } else { [] };
-        let _ = ir_emit(f, lw.cur, op_return(), 0, f.ret_physics, args, false, span_start(s, body));
+        let _ = ir_emit(f, lw.cur, op_return(), 0, f.ret_physics, out_return_args(lw, args, body), false, span_start(s, body));
     }
+    finish_out_params(lw);
 }
 
 // ------------------------------------------------------------------------------
@@ -1079,7 +1089,7 @@ pub fn call_decl(lw: Lowerer, decl: i64, pre: List<u32>, arg_nodes: List<i64>, p
     }
     let ret = if annot(s, decl) >= 0 { physics_of_type_node(lw, annot(s, decl)) } else { layout_of(lw.ls, inferred_return(lw, decl)) };
     let fi = specialized_index(lw, decl, ty_unknown(), if specialized { spec } else { [] });
-    return emit(lw, op_call_direct(), fi, if ret.layout_id != 0 { ret } else { phy }, args, n);
+    return call_with_outs(lw, decl, params, fi, args, pre.len(), nodes, if ret.layout_id != 0 { ret } else { phy }, n);
 }
 
 pub fn lower_if(lw: Lowerer, n: i64) -> u32 {
@@ -1314,6 +1324,6 @@ pub fn lower_return(lw: Lowerer, n: i64) -> u32 {
         finish_generator(lw, n);
         return ir_no_value();
     }
-    emit_void(lw, op_return(), 0, args, n);
+    emit_void(lw, op_return(), 0, out_return_args(lw, args, n), n);
     return ir_no_value();
 }

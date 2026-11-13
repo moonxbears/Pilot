@@ -67,7 +67,7 @@ fn allocation(e: Effects, n: i64) -> str {
         return "";
     }
     let tk = kind(s, target);
-    if (tk == nk_fn() || tk == nk_operator()) && !has_modifier(e, target, act_noalloc()) {
+    if (tk == nk_fn() || tk == nk_operator()) && !is_noalloc_fn(s, target) {
         return f"calls `{node_name(s, target)}`, which is not `noalloc`";
     }
     return "";
@@ -81,7 +81,7 @@ pub fn check_noalloc(inf: Infer, sink: DiagSink) {
     var d = 0;
     while d < s.count {
         let k = kind(s, d);
-        if (k == nk_fn() || k == nk_operator()) && in_user_file(s, d) && has_modifier(e, d, act_noalloc()) {
+        if (k == nk_fn() || k == nk_operator()) && in_user_file(s, d) && is_noalloc_fn(s, d) {
             if is_generator(inf.p, d) {
                 sink_error(sink, d, "NOALLOC001", f"`noalloc` function `{node_name(s, d)}` is a generator: calling it builds its frame on the heap");
             }

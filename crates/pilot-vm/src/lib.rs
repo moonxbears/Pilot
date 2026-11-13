@@ -139,6 +139,8 @@ struct FnState {
     gen_body: Option<ByteSpan>,
     /// The contract clauses of the function being compiled (`lower_contract`).
     contract: lower_contract::ContractCtx,
+    /// `(parameter position, slot)` of each `var ref` parameter (`lower_args`).
+    ret_outs: Vec<(u8, u8)>,
 }
 
 /// The bindings visible where a block starts. A `let` in the block that
@@ -212,6 +214,10 @@ pub struct BytecodeCompiler {
     gen_body: Option<ByteSpan>,
     /// The contract clauses of the function being compiled (`lower_contract`).
     contract: lower_contract::ContractCtx,
+    /// `(parameter position, slot)` of each parameter of the function being
+    /// compiled that lends the caller's storage for changing (`var ref n`):
+    /// each `Ret` hands their final values back (`lower_args`).
+    ret_outs: Vec<(u8, u8)>,
     /// The `for` about to be compiled as a block item (statement position),
     /// which collects nothing.
     stmt_for: Option<NodeId>,
@@ -451,6 +457,12 @@ impl BytecodeCompiler {
     }
 
     fn emit(&mut self, op: Opcode, dst: u8, src1: u8, src2: u8) -> usize {
+        if op == Opcode::Ret {
+            for i in 0..self.ret_outs.len() {
+                let (pos, slot) = self.ret_outs[i];
+                self.push_ins(Instruction::encode(Opcode::SetOut, pos, slot, 0));
+            }
+        }
         self.push_ins(Instruction::encode(op, dst, src1, src2))
     }
 
@@ -578,6 +590,7 @@ impl BytecodeCompiler {
             yield_owners: std::mem::take(&mut self.yield_owners),
             gen_body: std::mem::take(&mut self.gen_body),
             contract: std::mem::take(&mut self.contract),
+            ret_outs: std::mem::take(&mut self.ret_outs),
         }
     }
 
@@ -598,6 +611,7 @@ impl BytecodeCompiler {
         self.yield_owners = s.yield_owners;
         self.gen_body = s.gen_body;
         self.contract = s.contract;
+        self.ret_outs = s.ret_outs;
     }
 
     /// Compiles `id` with `hint` as the expected type.
@@ -630,6 +644,7 @@ impl BytecodeCompiler {
         self.defers.clear();
         self.yield_owners.clear();
         self.gen_body = None;
+        self.ret_outs.clear();
         self.next_local_reg = FIRST_LOCAL_REG;
         self.next_reg = FIRST_TEMP_REG;
     }

@@ -8,6 +8,15 @@ use pilot_rt::PilotVal;
 
 /// The register class `[Bits]` descriptors give unsigned integers.
 const UNSIGNED_REGISTER: &str = "gpr_unsigned";
+const SIGNED_REGISTER: &str = "gpr_signed";
+const FLOAT_REGISTER: &str = "simd_float";
+
+/// Whether a register is narrower than the engine's own numbers: an integer
+/// register of 2 to 63 bits, or a 32-bit float register.
+pub(crate) fn is_narrow_register(l: &pilot_parser::RegLayout) -> bool {
+    let is_int = l.class == UNSIGNED_REGISTER || l.class == SIGNED_REGISTER;
+    (is_int && l.width > 1 && l.width < 64) || (l.class == FLOAT_REGISTER && l.width == 32)
+}
 impl BytecodeCompiler {
     /// Lowers a `{ ... }` block. Scratch registers used by one statement are
     /// released before the next; the block's value is its last statement's.
@@ -177,6 +186,7 @@ impl BytecodeCompiler {
                 self.var_slots.insert(receiver.to_string(), s);
             }
         }
+        self.bind_ret_outs(arena, fn_id);
         // Arguments are converted once all are in their slots: a conversion
         // stages its own arguments in the argument registers.
         for p in &params {
@@ -188,6 +198,7 @@ impl BytecodeCompiler {
             }
             self.release_to(mark);
         }
+        self.reserve_old_slots(arena, body_node);
         let b = self.compile_node(arena, body_node);
         // A block-bodied function without a declared return type returns
         // nothing when it falls off the end; `=> expr` bodies return `expr`.
@@ -325,6 +336,10 @@ impl BytecodeCompiler {
         let layout = ty.and_then(|t| pilot_parser::bootstrap_tables().reg_layout(t).cloned());
         match layout {
             Some(l) if l.class == UNSIGNED_REGISTER && l.width >= 64 => self.emit_conversion(r, &l),
+            // A binding narrower than the engine's own numbers holds only
+            // values of its width: `let b: u8 = a + 1` wraps, an `f32`
+            // binding holds the nearest f32.
+            Some(l) if is_narrow_register(&l) => self.emit_wrap(r, &l),
             _ => r,
         }
     }

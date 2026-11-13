@@ -1,0 +1,34 @@
+// `ext fn Owner.name(..)` declares one extension method; it is the same
+// declaration as `ext Owner { fn name(..) }`, with `self` the receiver.
+//
+// Expected output, worked by hand:
+//   4.is_even() true; 3.is_even() false.
+//   "ab".twice() = "abab".
+//   Pt { x: 3, y: 4 }.norm1() = 3 + 4 = 7.
+//   6.half().is_even(): 3 is odd -> false.
+struct Pt : IValue {
+    pub x: i64;
+    pub y: i64;
+}
+
+pub pure ext fn i64.is_even() -> bool => (self & 1) == 0;
+
+ext fn i64.half() -> i64 => self / 2;
+
+ext fn str.twice() -> str => self + self;
+
+ext fn Pt.norm1() -> i64 {
+    return self.x + self.y;
+}
+
+fn main() {
+    print(4.is_even());
+    let n = 3;
+    print(n.is_even());
+    let s = "ab";
+    print(s.twice());
+    let p = Pt { x: 3, y: 4 };
+    print(p.norm1());
+    let six: i64 = 6;
+    print(six.half().is_even());
+}

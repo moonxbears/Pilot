@@ -1,0 +1,30 @@
+// `old(e)` in an `ensures` clause of a function that returns nothing and
+// falls off the end of its body: the clause is checked after the body
+// block has ended, and `old(e)` is still the value `e` had on entry.
+//
+// Expected output, worked by hand:
+//   bump(a) with a = 5: n becomes 6 = old(n) + 1, so a prints 6.
+//   tick() with count = 1: count becomes 3 = old(count) + 2; prints 3.
+//   both again: a = 7, count = 5.
+var count = 1;
+
+fn bump(var ref n: i64) ensures(n == old(n) + 1) {
+    n = n + 1;
+}
+
+fn tick() ensures(count == old(count) + 2) {
+    let step = 2;
+    count = count + step;
+}
+
+fn main() {
+    var a = 5;
+    bump(a);
+    print(a);
+    tick();
+    print(count);
+    bump(a);
+    tick();
+    print(a);
+    print(count);
+}

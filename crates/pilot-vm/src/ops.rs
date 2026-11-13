@@ -300,6 +300,19 @@ pub fn fits(v: PilotVal, class: &str, width: i64) -> bool {
     }
 }
 
+/// The result of arithmetic in a register of `class` and `width`: an
+/// integer wrapped to an integer register's width, a float rounded to a
+/// float register's. Any other value (a record an operator method made, a
+/// string) is given back as it is.
+pub fn wrap(v: PilotVal, class: &str, width: i64) -> Result<PilotVal, String> {
+    let is_int_class = matches!(class, "gpr_signed" | "gpr_unsigned");
+    match num(v) {
+        Some(Num::Int(_)) | Some(Num::UInt(_)) if is_int_class && width > 1 => convert(v, class, width),
+        Some(Num::Float(_)) if class == "simd_float" => convert(v, class, width),
+        _ => Ok(v),
+    }
+}
+
 pub fn convert(v: PilotVal, class: &str, width: i64) -> Result<PilotVal, String> {
     let is_int_class = matches!(class, "gpr_signed" | "gpr_unsigned");
     // A heap handle (record, list, function) in a pointer-width integer

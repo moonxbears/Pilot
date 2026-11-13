@@ -1,0 +1,2 @@
+error[ESCAPE003]: guard `a` is bound in `leak` and is released when it ends; return the expression that makes the guard instead
+err_arena_escape.pilot:5:16

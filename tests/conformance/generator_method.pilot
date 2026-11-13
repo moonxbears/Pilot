@@ -1,0 +1,20 @@
+// A generator method of a struct: `c.items()` yields the struct's own
+// values, and `for` walks them.
+//   items of Bag { a: 2, b: 5 }: 2, 5, then 2 + 5 = 7.
+struct Bag : IValue {
+    a: i64;
+    b: i64;
+
+    fn items() {
+        yield .a;
+        yield .b;
+        yield .a + .b;
+    }
+}
+
+fn main() {
+    let c = Bag { a: 2, b: 5 };
+    for x in c.items() {
+        print(x);
+    }
+}

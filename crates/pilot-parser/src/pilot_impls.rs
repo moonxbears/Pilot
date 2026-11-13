@@ -78,6 +78,9 @@ pub const HOOK_TRY_PROTOCOL: &str = "bind_try_protocol";
 /// `f"{x:#_###}"` is `f(x, "#_###")`.
 pub const HOOK_FORMAT_SPEC: &str = "bind_format_spec";
 
+/// The hook that names the function `x in xs` calls: `f(x, xs)`.
+pub const HOOK_MEMBERSHIP: &str = "bind_membership";
+
 /// The methods postfix `x?` calls on a struct record `x`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TryProtocol {
@@ -185,6 +188,17 @@ impl ParserTables {
     /// The function an f-string hole's format pattern calls, if one is bound.
     pub fn format_spec(&self) -> Option<&str> {
         self.format_spec.as_deref()
+    }
+
+    /// The function `x in xs` calls, if one is bound.
+    pub fn membership(&self) -> Option<&str> {
+        self.membership.as_deref()
+    }
+
+    pub(crate) fn bind_membership(&mut self, function: String) {
+        if !function.is_empty() {
+            self.membership = Some(function);
+        }
     }
 
     pub(crate) fn bind_format_spec(&mut self, function: String) {

@@ -330,6 +330,9 @@ pub struct PythonDialect : ISourceDialect {
         "    if cond is not True:",
         "        pilot_trap('assertion failed' + ('' if note is None else ': ' + pilot_show(note)))",
         "",
+        "def pilot_rt_fault(message):",
+        "    pilot_trap(pilot_show(message))",
+        "",
         "def pilot_seam_open(id, note=None):",
         "    pilot_trap('SEAM001: unconnected seam `' + id + '`: ' + ('' if note is None else pilot_show(note)))",
         "",
@@ -465,7 +468,7 @@ fn dynamic_engine_ops() -> Map<str, str> {
     ops.set("to_str", "pilot_show");
     ops.set("list_get", "pilot_map_get");
     ops.set("list_set", "pilot_map_set");
-    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line", "value_clone"] {
+    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "rt_fault", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line", "value_clone"] {
         ops.set(name, "pilot_" + name);
     }
     return ops;

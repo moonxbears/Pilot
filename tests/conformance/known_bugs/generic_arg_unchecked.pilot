@@ -1,0 +1,11 @@
+// The arguments of a generic function must agree on each type parameter:
+// `same<T>(a: T, b: T)` called with an i64 and a str has no `T`, and
+// `"two" in xs` looks a str up in a list of integers. Both are rejected
+// when the program is checked (TYPE001), before anything runs.
+fn same<T: IEquatable<T>>(a: T, b: T) -> bool => a == b;
+
+fn main() {
+    let xs: List<i64> = [1, 2, 3];
+    print(same(1, "two"));
+    print("two" in xs);
+}

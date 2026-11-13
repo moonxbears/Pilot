@@ -1,0 +1,31 @@
+// `x[a..b]` is the part of `x` from `a` up to `b`, and `x[a..=b]` through
+// `b`. It has `x`'s own type: the part of a list is a list, the part of a
+// string is a string.
+//
+// Expected output, worked by hand:
+//   xs = [1, 2, 3, 4, 5]. xs[1..4] = [2, 3, 4], 3 items, total 9.
+//   xs[0..=1] = [1, 2].   an empty part xs[2..2] has 0 items.
+//   "hello"[1..4] = "ell"; "hello"[0..=0] = "h".
+//   the list is unchanged: 5 items.
+fn total(ref xs: i64[]) -> i64 {
+    var sum = 0;
+    for x in xs { sum = sum + x; }
+    return sum;
+}
+
+fn main() {
+    let xs: List<i64> = [1, 2, 3, 4, 5];
+    let mid = xs[1..4];
+    print(mid);
+    print(mid.len());
+    print(total(mid));
+    let head: List<i64> = xs[0..=1];
+    print(head);
+    let none_of: List<i64> = xs[2..2];
+    print(none_of.len());
+    let word = "hello";
+    let inner: str = word[1..4];
+    print(inner);
+    print(word[0..=0]);
+    print(xs.len());
+}

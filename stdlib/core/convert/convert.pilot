@@ -832,30 +832,18 @@ ext usize {
 }
 
 ext f32 {
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_i8() -> i8 ! ConvertError => float_to_i8((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_i16() -> i16 ! ConvertError => float_to_i16((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_i32() -> i32 ! ConvertError => float_to_i32((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_i64() -> i64 ! ConvertError => float_to_i64((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_isize() -> isize ! ConvertError => float_to_isize((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_u8() -> u8 ! ConvertError => float_to_u8((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_u16() -> u16 ! ConvertError => float_to_u16((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_u32() -> u32 ! ConvertError => float_to_u32((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_u64() -> u64 ! ConvertError => float_to_u64((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_usize() -> usize ! ConvertError => float_to_usize((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_f32() -> f32 ! ConvertError => float_to_f32((self as f32) as f64);
-    [Workaround("seed.f32_not_rounded", "rounds `self` to f32 again before converting it")]
-    pub fn to_f64() -> f64 ! ConvertError => float_to_f64((self as f32) as f64);
+    pub fn to_i8() -> i8 ! ConvertError => float_to_i8(self as f64);
+    pub fn to_i16() -> i16 ! ConvertError => float_to_i16(self as f64);
+    pub fn to_i32() -> i32 ! ConvertError => float_to_i32(self as f64);
+    pub fn to_i64() -> i64 ! ConvertError => float_to_i64(self as f64);
+    pub fn to_isize() -> isize ! ConvertError => float_to_isize(self as f64);
+    pub fn to_u8() -> u8 ! ConvertError => float_to_u8(self as f64);
+    pub fn to_u16() -> u16 ! ConvertError => float_to_u16(self as f64);
+    pub fn to_u32() -> u32 ! ConvertError => float_to_u32(self as f64);
+    pub fn to_u64() -> u64 ! ConvertError => float_to_u64(self as f64);
+    pub fn to_usize() -> usize ! ConvertError => float_to_usize(self as f64);
+    pub fn to_f32() -> f32 ! ConvertError => float_to_f32(self as f64);
+    pub fn to_f64() -> f64 ! ConvertError => float_to_f64(self as f64);
     pub fn to_i128() -> i128 ! ConvertError => wide_scalar_i128();
     pub fn to_u128() -> u128 ! ConvertError => wide_scalar_u128();
     pub fn to_f16() -> f16 ! ConvertError => wide_scalar_f16();

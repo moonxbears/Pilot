@@ -123,6 +123,9 @@ pub enum DropAction : u8 {
     /// (selfhost/check/receivers.pilot); the seed reads it where it cannot
     /// tell the receiver's type itself.
     ReceiverType,
+    /// The node is arithmetic whose result has the named numeric type, of
+    /// another width than the engine's numbers (selfhost/check/numeric.pilot).
+    NumericType,
 }
 
 /// What planning the drops of one program keeps.

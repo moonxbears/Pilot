@@ -1,0 +1,23 @@
+// `with arena a { .. }` runs a block inside an arena scope; `with arena { .. }`
+// does the same without naming the scope. Values made inside behave as
+// anywhere else, and the program goes on after the block.
+//   xs holds 1..4, sum 1 + 2 + 3 + 4 = 10; the nested scope adds 5 and 6.
+fn main() {
+    var total = 0;
+    with arena a {
+        var xs: List<i64> = [];
+        var i = 1;
+        while i <= 4 {
+            xs.push(i);
+            i = i + 1;
+        }
+        for x in xs {
+            total = total + x;
+        }
+        print(total);
+        with arena {
+            total = total + 5 + 6;
+        }
+    }
+    print(total);
+}

@@ -26,6 +26,11 @@ pub(crate) struct ContractCtx {
     pub(crate) ensures: Vec<NodeId>,
     /// The register holding the entry value of each `old(e)` node.
     pub(crate) olds: HashMap<u32, u8>,
+    /// Registers set aside at function scope for the `old(e)` values, in
+    /// the order the clauses take them. The clauses stand inside the body
+    /// block, whose registers are released when the block ends; a function
+    /// that falls off the end checks `ensures` after that.
+    pub(crate) reserved: std::collections::VecDeque<u8>,
 }
 
 impl BytecodeCompiler {
@@ -46,32 +51,44 @@ impl BytecodeCompiler {
         self.emit_null()
     }
 
+    /// Sets aside, before the body of a function is compiled, one register
+    /// at function scope for each `old(e)` in the `ensures` clauses that
+    /// open `body`.
+    pub(crate) fn reserve_old_slots(&mut self, arena: &AstArena, body: NodeId) {
+        self.contract.reserved.clear();
+        if body.is_none() || arena.node(body).node_kind() != NodeKind::BlockExpr {
+            return;
+        }
+        let b = *arena.node(body);
+        let mut olds = Vec::new();
+        for &s in arena.children_slice(b.lhs, b.rhs) {
+            let st = *arena.node(NodeId(s));
+            if st.node_kind() == NodeKind::ExprStmt && st.flags == pilot_parser::CONTRACT_ENSURES {
+                old_nodes(arena, NodeId(st.lhs), &mut olds);
+            }
+        }
+        for _ in olds {
+            let slot = self.alloc_local_reg();
+            self.contract.reserved.push_back(slot);
+        }
+    }
+
     /// Stores the entry value of every `old(e)` under `id` in a register
     /// of its own.
     fn take_olds(&mut self, arena: &AstArena, id: NodeId) {
-        if id.is_none() {
-            return;
-        }
-        let n = *arena.node(id);
-        let list = |n: &pilot_ast::AstNode| arena.children_slice(n.lhs, n.rhs).to_vec();
-        let kids: Vec<u32> = match n.node_kind() {
-            NodeKind::UnaryExpr if n.flags == UNARY_OP_OLD => {
-                let mark = self.next_reg;
-                let r = self.compile_node(arena, NodeId(n.lhs));
-                let slot = self.alloc_local_reg();
-                self.emit(Opcode::Move, slot, r, 0);
-                self.release_to(mark);
-                self.contract.olds.insert(id.0, slot);
-                return;
-            }
-            NodeKind::BinaryExpr | NodeKind::IndexExpr => vec![n.lhs, n.rhs],
-            NodeKind::UnaryExpr | NodeKind::ExprStmt | NodeKind::MemberExpr => vec![n.lhs],
-            NodeKind::LambdaExpr | NodeKind::CallArg => vec![n.rhs],
-            NodeKind::CallExpr | NodeKind::BlockExpr | NodeKind::TupleExpr | NodeKind::ListExpr => list(&n),
-            _ => Vec::new(),
-        };
-        for k in kids {
-            self.take_olds(arena, NodeId(k));
+        let mut olds = Vec::new();
+        old_nodes(arena, id, &mut olds);
+        for o in olds {
+            let n = *arena.node(o);
+            let mark = self.next_reg;
+            let r = self.compile_node(arena, NodeId(n.lhs));
+            let slot = match self.contract.reserved.pop_front() {
+                Some(s) => s,
+                None => self.alloc_local_reg(),
+            };
+            self.emit(Opcode::Move, slot, r, 0);
+            self.release_to(mark);
+            self.contract.olds.insert(o.0, slot);
         }
     }
 
@@ -141,5 +158,29 @@ impl BytecodeCompiler {
         let p = pilot_parser::bootstrap_tables().try_protocol()?.clone();
         let owners = self.method_owners.get(&p.is_success)?;
         owners.iter().any(|(o, _)| o == ret).then_some(p)
+    }
+}
+
+/// Every `old(e)` node under `id`, in source order.
+fn old_nodes(arena: &AstArena, id: NodeId, out: &mut Vec<NodeId>) {
+    if id.is_none() {
+        return;
+    }
+    let n = *arena.node(id);
+    let kids: Vec<u32> = match n.node_kind() {
+        NodeKind::UnaryExpr if n.flags == UNARY_OP_OLD => {
+            out.push(id);
+            return;
+        }
+        NodeKind::BinaryExpr | NodeKind::IndexExpr => vec![n.lhs, n.rhs],
+        NodeKind::UnaryExpr | NodeKind::ExprStmt | NodeKind::MemberExpr => vec![n.lhs],
+        NodeKind::LambdaExpr | NodeKind::CallArg => vec![n.rhs],
+        NodeKind::CallExpr | NodeKind::BlockExpr | NodeKind::TupleExpr | NodeKind::ListExpr => {
+            arena.children_slice(n.lhs, n.rhs).to_vec()
+        }
+        _ => Vec::new(),
+    };
+    for k in kids {
+        old_nodes(arena, NodeId(k), out);
     }
 }

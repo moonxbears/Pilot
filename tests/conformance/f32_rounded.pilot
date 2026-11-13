@@ -1,0 +1,12 @@
+// An f32 holds only f32 values. Binding 0.1 to an f32 keeps the f32 nearest
+// to 0.1, 0.100000001490116119384765625, which is not the f64 0.1, so
+// `y == 0.1` is false. f32(0.1) * f32(3.0) is 0.300000004470348358154296875
+// before rounding; the f32 values around it are 0.2999999821186065673828125
+// and 0.300000011920928955078125 (= f32(0.3)), and the second is nearer, so
+// the product equals f32(0.3).
+fn main() {
+    let y: f32 = 0.1;
+    print(y == 0.1);
+    let z: f32 = f32(0.1) * f32(3.0);
+    print(z == f32(0.3));
+}

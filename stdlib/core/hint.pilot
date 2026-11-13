@@ -8,7 +8,7 @@
 // trap followed by an assumption); the reference run checks them instead:
 //   HINT001  an assumed condition was false;
 //   HINT002  control reached `unreachable()`.
-// Each stops the program like a failed `assert`, with the code in its
+// Each stops the program through `fault`, with the code first in its
 // message. `unreachable()` returns `never`, so it stands in any branch
 // whatever type the other branches have.
 [EnforceCoreNaming]
@@ -16,11 +16,11 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Hint;
 
 /// States that `cond` holds here. A false `cond` stops the program (HINT001).
 pub fn assume(cond: bool) {
-    assert(cond, "HINT001: an assumed condition is false");
+    if !cond { fault("HINT001: an assumed condition is false"); }
 }
 
 /// States that control never reaches this call. Reaching it stops the
 /// program (HINT002).
 pub fn unreachable() -> never {
-    assert(false, "HINT002: control reached `unreachable()`");
+    fault("HINT002: control reached `unreachable()`");
 }

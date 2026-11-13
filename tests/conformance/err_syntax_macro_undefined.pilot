@@ -1,0 +1,10 @@
+// A `syntax` rule expands to code that is checked like any other: this
+// template names `missing`, which is not defined where it is expanded, so
+// the program is rejected with DECL001.
+syntax {
+    bad(x) => quote { ($x) + missing };
+}
+
+fn main() {
+    print(bad(1));
+}

@@ -86,6 +86,9 @@ pub struct PilVirtualMachine {
     /// The generator bodies running, innermost last: the call depth each
     /// was entered at, and its frame.
     pub gen_stack: Vec<(usize, usize)>,
+    /// The final values of the `var ref` parameters of the call that just
+    /// returned, by parameter position (`SetOut` / `GetOut`).
+    pub outs: Vec<PilotVal>,
 }
 
 impl Default for PilVirtualMachine {
@@ -128,6 +131,7 @@ impl PilVirtualMachine {
             children: Vec::new(),
             generators: Vec::new(),
             gen_stack: Vec::new(),
+            outs: Vec::new(),
             shared_symbols: None,
             fuel_limit: None,
             fuel_used: 0,
@@ -365,6 +369,16 @@ impl PilVirtualMachine {
                 // The callee takes over this frame: its `Ret` returns to
                 // this frame's caller, so the call stack does not grow.
                 Opcode::TailCall => self.pc = ins.wide() as usize,
+                Opcode::SetOut => {
+                    if self.outs.len() <= dst {
+                        self.outs.resize(dst + 1, PilotVal::NULL);
+                    }
+                    self.outs[dst] = r1;
+                }
+                Opcode::GetOut => {
+                    let v = self.outs.get(src1).copied().unwrap_or(PilotVal::NULL);
+                    self.set(dst, v);
+                }
                 Opcode::CallClosure => {
                     let (entry, arity) = self.closure_target(r1)?;
                     if src2 != arity {

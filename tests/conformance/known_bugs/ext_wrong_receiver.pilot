@@ -1,0 +1,11 @@
+// An extension method belongs to the type it is declared on: `is_even` is
+// declared on i64, so calling it on a str is rejected when the program is
+// checked (METH001), before anything runs.
+ext i64 {
+    fn is_even() -> bool => (self & 1) == 0;
+}
+
+fn main() {
+    let s = "four";
+    print(s.is_even());
+}

@@ -1,0 +1,21 @@
+// `from x in xs where cond select e` is the list of `e` for each `x` of
+// `xs`, in order, that every `where` holds for.
+//
+// Expected output, worked by hand:
+//   xs = [1, 2, 3, 4, 5, 6].
+//   x > 2, x * 10: 3, 4, 5, 6 -> [30, 40, 50, 60].
+//   x > 1 and x % 2 == 0: [2, 4, 6].
+//   no `where`: x + 1 -> [2, 3, 4, 5, 6, 7].
+//   nothing passes x > 9: [].
+//   names longer than 2 letters, upper-cased length: "ada" 3, "grace" 5 -> [3, 5].
+fn main() {
+    let xs: List<i64> = [1, 2, 3, 4, 5, 6];
+    let big = from x in xs where x > 2 select x * 10;
+    print(big);
+    print(from x in xs where x > 1 where x % 2 == 0 select x);
+    print(from x in xs select x + 1);
+    let empty = from x in xs where x > 9 select x;
+    print(empty.len());
+    let names: List<str> = ["al", "ada", "grace"];
+    print(from n in names where n.len() > 2 select n.len());
+}

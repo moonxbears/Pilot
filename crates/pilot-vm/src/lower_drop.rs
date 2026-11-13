@@ -48,6 +48,8 @@ pub enum DropAction {
     ReplaceElement = 13,
     /// The node is a method-call receiver of the named type.
     ReceiverType = 14,
+    /// The node is arithmetic whose result has the named numeric type.
+    NumericType = 15,
 }
 
 impl DropAction {
@@ -68,6 +70,7 @@ impl DropAction {
             Self::Discard,
             Self::ReplaceElement,
             Self::ReceiverType,
+            Self::NumericType,
         ]
             .into_iter()
             .find(|a| *a as i64 == code)
@@ -143,6 +146,10 @@ pub struct DropPlan {
     /// (selfhost/check/receivers.pilot). Dispatch reads one only where the
     /// seed does not know the receiver's type itself.
     pub receivers: HashMap<NodeKey, String>,
+    /// Arithmetic nodes whose result is narrower than the engine's own
+    /// numbers, with the type the checker inferred for each
+    /// (selfhost/check/numeric.pilot).
+    pub numeric: HashMap<NodeKey, String>,
 }
 
 impl DropPlan {
@@ -159,6 +166,7 @@ impl DropPlan {
             && self.discards.is_empty()
             && self.element_replace.is_empty()
             && self.receivers.is_empty()
+            && self.numeric.is_empty()
     }
 }
 
@@ -198,6 +206,12 @@ impl BytecodeCompiler {
     /// The type the checker inferred for method-call receiver `id`, if any.
     pub(crate) fn planned_receiver(&self, arena: &AstArena, id: NodeId) -> Option<String> {
         self.drop_plan.as_ref()?.receivers.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The numeric type the checker inferred for arithmetic node `id`, when
+    /// it is narrower than the engine's own numbers.
+    pub(crate) fn planned_numeric(&self, arena: &AstArena, id: NodeId) -> Option<String> {
+        self.drop_plan.as_ref()?.numeric.get(&key_of(arena, id)).cloned()
     }
 
     pub(crate) fn set_drop_plan(&mut self, plan: DropPlan) {

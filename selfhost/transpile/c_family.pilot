@@ -375,8 +375,13 @@ pub struct CFamilyDialect : ISourceDialect {
     /// typed reader or writer given a value that is not of its layout goes
     /// through the generic path. Readers borrow; the constructor and the
     /// writers take a reference to each dynamic field value they store, and
-    /// a writer releases the value it replaces.
-    pub fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>) -> List<str> {
+    /// a writer releases the value it replaces. A struct written
+    /// `[Align(N)]` aligns its header, so the whole record, to N bytes; one
+    /// written `[Layout(packed)]` whose fields are all register values packs
+    /// them with no padding (`#pragma pack`, which GCC, Clang and MSVC read;
+    /// a field holding a dynamic value keeps its alignment, since the
+    /// runtime takes its address).
+    pub fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>, shapes: List<IrLayout>) -> List<str> {
         if !self.carries_dynamic() || layouts.len() == 0 { return []; }
         var out: List<str> = [];
         var table: List<str> = [];
@@ -386,7 +391,10 @@ pub struct CFamilyDialect : ISourceDialect {
             let fs = fields[k];
             let t = f"pilot_r{l}";
             let mine = f"(v.tag == PILOT_V_REC && v.as.r->layout == {l})";
-            var members = "pilot_v_rec h;";
+            let shape = shapes[k];
+            let align = shape.physics.align_pow2 as i64;
+            var members = if align > 0 { f"_Alignas({pow2(align)}) pilot_v_rec h;" } else { "pilot_v_rec h;" };
+            var packs = shape.packed;
             var params: List<str> = [];
             var sets = "";
             var gets = "";
@@ -396,6 +404,7 @@ pub struct CFamilyDialect : ISourceDialect {
             while i < fs.len() {
                 let ct = self.c_type(fs[i]);
                 let counted = !scalar(fs[i]);
+                if counted { packs = false; }
                 members = members + f" {ct} f{i};";
                 params.push(f"{ct} f{i}");
                 sets = sets + if counted { f" pilot_v_dup(f{i}); r->f{i} = f{i};" } else { f" r->f{i} = f{i};" };
@@ -404,7 +413,9 @@ pub struct CFamilyDialect : ISourceDialect {
                 if counted { drops = drops + f" pilot_v_drop(r->f{i});"; }
                 i = i + 1;
             }
+            if packs { out.push("#pragma pack(push, 1)"); }
             out.push(f"typedef struct {t} " + "{ " + members + " } " + t + ";");
+            if packs { out.push("#pragma pack(pop)"); }
             let plist = if params.len() == 0 { "void" } else { joined(params) };
             out.push(f"static pilot_val pilot_mk{l}({plist}) " + "{ " + f"{t} *r = ({t} *)pilot_v_rec_new(sizeof({t}), {l});" + sets + " return pilot_v_rec_val(&r->h); }");
             out.push(f"static pilot_val pilot_rget{l}(pilot_val v, int32_t i) " + "{ " + f"{t} *r = ({t} *)v.as.r; (void)r; switch (i) " + "{" + gets + " default: return PILOT_V_NULL; } }");
@@ -418,7 +429,7 @@ pub struct CFamilyDialect : ISourceDialect {
                 out.push(f"static inline void pilot_set{l}_{i}(pilot_val v, {ct} x) " + "{ " + f"if {mine} " + "{ " + store + " return; " + "} " + f"pilot_v_set_field(v, {i}, " + self.box("x", fs[i]) + "); }");
                 i = i + 1;
             }
-            table.push(f"[{l}] = " + "{ " + f"{fs.len()}, pilot_rget{l}, pilot_rset{l}, pilot_rdrop{l}, sizeof({t})" + " }");
+            table.push(f"[{l}] = " + "{ " + f"{fs.len()}, pilot_rget{l}, pilot_rset{l}, pilot_rdrop{l}, sizeof({t}), _Alignof({t})" + " }");
             k = k + 1;
         }
         out.push("static const pilot_v_layout pilot_layout_table[] = { " + joined(table) + " };");
@@ -549,6 +560,7 @@ fn engine_arity() -> Map<str, i64> {
     ops.set("list_extend", 23);
     ops.set("str_find", 23);
     ops.set("rt_assert", 12);
+    ops.set("rt_fault", 11);
     ops.set("seam_open", 12);
     return ops;
 }
@@ -573,3 +585,14 @@ fn byte_rank_c() -> str {
 
 /// `b` as three octal digits, for a `\ooo` escape.
 fn octal3(b: i64) -> str => f"{b / 64}{(b / 8) % 8}{b % 8}";
+
+/// 2 to the power `k`.
+fn pow2(k: i64) -> i64 {
+    var v = 1;
+    var i = 0;
+    while i < k {
+        v = v * 2;
+        i = i + 1;
+    }
+    return v;
+}

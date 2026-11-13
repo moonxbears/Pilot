@@ -15,6 +15,9 @@ mod num_suffix;
 mod comptime_if;
 mod exits;
 mod contracts;
+mod with_scope;
+mod declared_names;
+mod int_lit;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
 use modules::EXCLUDE_RECEPTOR;
 pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
@@ -74,7 +77,16 @@ impl TemplateNode {
                 let a: Vec<NodeId> = args.iter().map(|x| x.instantiate(arena, bindings, span)).collect();
                 let sym = arena.interner.intern(base); arena.alloc_type_named(sym, &a, span) }
             Self::TypeTuple(v) => { let ch: Vec<NodeId> = v.iter().map(|x| x.instantiate(arena, bindings, span)).collect(); arena.alloc_list_node(NodeKind::TypeTuple, 0, span, &ch) }
-            Self::Block(v) => { let ch: Vec<NodeId> = v.iter().map(|x| x.instantiate(arena, bindings, span)).filter(|i| i.is_some()).collect(); arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &ch) }
+            Self::Block(v) => {
+                let mut ch: Vec<NodeId> = Vec::new();
+                for x in v {
+                    let i = x.instantiate(arena, bindings, span);
+                    if i.is_some() {
+                        ch.push(as_block_item(arena, i, span));
+                    }
+                }
+                arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &ch)
+            }
             Self::If(c, t, e) => { let (cid, tid) = (c.instantiate(arena, bindings, span), t.instantiate(arena, bindings, span));
                 if let Some(el) = e { let eid = el.instantiate(arena, bindings, span);
                     let (st, _) = arena.alloc_child_slice(&[tid, eid]); arena.alloc_node(NodeKind::IfExpr, 2, span, cid.0, st)
@@ -104,6 +116,32 @@ impl TemplateNode {
             Self::Float(v) => arena.alloc_float(*v, span), Self::Bool(b) => arena.alloc_node(NodeKind::BoolLit, 0, span, *b as u32, 0),
             Self::Str(s, f) => { let sym = arena.interner.intern(s); arena.alloc_node(NodeKind::StrLit, *f, span, sym.0, 0) }
             Self::NoneLit => arena.alloc_node(NodeKind::NoneLit, 0, span, 0, 0), } } }
+/// A block item made from a template: an expression stands as an
+/// expression statement, as the parser makes it, so a block whose last item
+/// is an expression has that expression's value (`quote { $x + $x }`).
+fn as_block_item(arena: &mut AstArena, id: NodeId, span: ByteSpan) -> NodeId {
+    let is_expr = matches!(
+        arena.node(id).node_kind(),
+        NodeKind::BinaryExpr
+            | NodeKind::UnaryExpr
+            | NodeKind::CallExpr
+            | NodeKind::MemberExpr
+            | NodeKind::IndexExpr
+            | NodeKind::TupleExpr
+            | NodeKind::ListExpr
+            | NodeKind::IdentExpr
+            | NodeKind::IntLit
+            | NodeKind::FloatLit
+            | NodeKind::BoolLit
+            | NodeKind::StrLit
+            | NodeKind::NoneLit
+    );
+    if is_expr {
+        arena.alloc_node(NodeKind::ExprStmt, 0, span, id.0, 0)
+    } else {
+        id
+    }
+}
 fn clone_ast(arena: &mut AstArena, id: NodeId) -> NodeId { if id.is_none() || (id.0 as usize) >= arena.nodes.len() { return NodeId::NONE; }
     let (n, sp, ann) = (*arena.node(id), arena.span(id), arena.type_annot(id)); let out = match n.node_kind() { NodeKind::TypeNamed => {
             let args: Vec<NodeId> = arena.type_args(id).to_vec().into_iter().map(|c| clone_ast(arena, NodeId(c))).collect();
@@ -134,7 +172,7 @@ pub enum TypeConstructRule { Prefix { op: String, param: String, template: Templ
 #[derive(Clone, Debug)]
 pub struct SyntaxMacroRule { pub params: Vec<String>, pub template: TemplateNode }
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, Async, Ring }
+enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, Async, NoAlloc, Ring }
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PrattEntry { pub bp: u8, pub right_assoc: bool, pub bin_op: u16 }
 #[derive(Clone, Debug)]
@@ -160,7 +198,9 @@ pub struct ParserTables { modifiers: HashMap<String, ModAct>, param_modifiers: H
     generator: Option<GeneratorProtocol>,
     try_protocol: Option<TryProtocol>,
     /// The Pilot function an f-string hole's `:pattern` calls (see `fstring`).
-    format_spec: Option<String>, }
+    format_spec: Option<String>,
+    /// The function `x in xs` calls, as `f(x, xs)`, when one is bound.
+    membership: Option<String>, }
 impl ParserTables {
     pub fn new() -> Self { Self::default() }
     fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
@@ -193,7 +233,7 @@ impl ParserTables {
                         let (w, act) = (s_arg(2), if let Some(v) = i_arg(3) { ModAct::Vis(v as u8) } else { match s_arg(3).as_str() {
                                 "merge_type_members" => ModAct::Partial, "storage_static" => ModAct::Static, "effect_pure" => ModAct::Pure,
                                 "binding_mutable" => ModAct::Mut, "binding_const" => ModAct::Const, "perceus_isolated" => ModAct::Iso,
-                                "extension_member" => ModAct::Ext, "effect_async" => ModAct::Async, _ => ModAct::Ring, }
+                                "extension_member" => ModAct::Ext, "effect_async" => ModAct::Async, "effect_noalloc" => ModAct::NoAlloc, _ => ModAct::Ring, }
                         }); if !w.is_empty() { self.modifiers.insert(w, act); } }
                     "register_parametric_modifier" => { let w = s_arg(2); if !w.is_empty() { self.param_modifiers.insert(w); } }
                     "register_module_kw" => { let w = s_arg(2); if !w.is_empty() { self.module_kws.insert(w, s_arg(3) == "declare_package_scope"); } }
@@ -208,6 +248,7 @@ impl ParserTables {
                     HOOK_GENERATOR => self.bind_generator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
                     HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3), s_arg(4)),
                     HOOK_FORMAT_SPEC => self.bind_format_spec(s_arg(2)),
+                    HOOK_MEMBERSHIP => self.bind_membership(s_arg(2)),
                     "bind_receiver_ident" => { let (w, b, v) = (s_arg(2), s_arg(3), s_arg(4)); if !w.is_empty() { self.receiver_ident = w; }
                         self.backing_ident = b; self.setter_value_ident = v; }
                     "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
@@ -221,6 +262,8 @@ impl ParserTables {
 /// `MemberExpr.flags` of a prefix-dot member (`.name`), whose receiver the
 /// parser filled in. `0` is `a.b` and `1` is `a?.b`.
 pub const MEMBER_IMPLIED_RECEIVER: u16 = 2;
+/// The binding power of `x in xs`, that of the comparison words.
+const MEMBERSHIP_BP: u8 = 45;
 fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
         "+" => Add, "-" => Sub, "*" => Mul, "/" => Div, "//" => FloorDiv, "%" => Rem, "**" => Pow,
         "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" | "and" => And,
@@ -443,7 +486,8 @@ impl<'a> Parser<'a> {
                 ModAct::Vis(v) => m.vis = Some(v), ModAct::Partial => m.flags |= DECL_FLAG_PARTIAL,
                 ModAct::Static => m.flags |= DECL_FLAG_STATIC, ModAct::Pure => m.flags |= DECL_FLAG_PURE,
                 ModAct::Mut => m.flags |= DECL_FLAG_MUT, ModAct::Const => m.is_const = true,
-                ModAct::Ext => m.is_ext = true, ModAct::Iso | ModAct::Async | ModAct::Ring => {} } }
+                ModAct::Ext => m.is_ext = true, ModAct::NoAlloc => m.flags |= DECL_FLAG_NOALLOC,
+                ModAct::Iso | ModAct::Async | ModAct::Ring => {} } }
         m }
     fn parse_item(&mut self, out: &mut Vec<NodeId>, in_type_body: bool) { let start_pos = self.pos;
         if self.at_comptime_if() {
@@ -479,6 +523,7 @@ impl<'a> Parser<'a> {
             self.parse_headless_or_item(out, hdr_snap.unwrap().target, in_type_body); return; }
         match self.peek() { TokenKind::KwStruct => out.push(self.parse_type_decl(NodeKind::StructDecl, &mods, def_vis, false)),
             TokenKind::KwInterface => out.push(self.parse_type_decl(NodeKind::InterfaceDecl, &mods, def_vis, false)),
+            TokenKind::KwFn if mods.is_ext && self.at_ext_fn() => out.push(self.parse_ext_fn(&mods)),
             TokenKind::KwFn => out.push(self.parse_fn(&mods, def_vis, false)),
             TokenKind::KwLet => self.parse_bindings(out, &mods, def_vis, false), TokenKind::KwComptime => { self.advance();
                 let b = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() };
@@ -547,6 +592,34 @@ impl<'a> Parser<'a> {
         self.apply_mods(id, &fm, def_vis); self.add_type_params(id, tparams);
         for b in bases { self.arena.base_types.push((id, b)); }
         id }
+    /// At `fn Owner.name` after the extension modifier.
+    fn at_ext_fn(&self) -> bool {
+        let owner = self.next_non_nl(self.cur() + 1);
+        let dot = owner + 1;
+        let name = dot + 1;
+        name < self.tape.len()
+            && is_word_tok(self.tape.kind(owner))
+            && self.tape.kind(dot) == TokenKind::InfixDot
+            && is_word_tok(self.tape.kind(name))
+    }
+    /// `ext fn Owner.name(..) ..`: one extension method, the same
+    /// declaration as the block `ext Owner { fn name(..) .. }`. The other
+    /// modifiers written before it belong to the method.
+    fn parse_ext_fn(&mut self, mods: &DeclMods) -> NodeId {
+        let sp = self.span();
+        self.advance();
+        let owner_sym = self.intern_cur();
+        self.expect(TokenKind::InfixDot);
+        let mut fn_mods = mods.clone();
+        fn_mods.is_ext = false;
+        let member = self.parse_fn(&fn_mods, 0, true);
+        let span = ByteSpan::new(sp.start, self.prev_span().end);
+        let body = self.arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &[member]);
+        let id = self.arena.alloc_node(NodeKind::ExtendDecl, 0, span, owner_sym.0, body.0);
+        let ext_mods = DeclMods { is_ext: true, ..Default::default() };
+        self.apply_mods(id, &ext_mods, 7);
+        id
+    }
     fn parse_extend_decl(&mut self, mods: &DeclMods) -> NodeId { let (sp, name_sym) = (self.span(), self.intern_cur());
         let _ = self.parse_generic_params();
         if self.eat(TokenKind::Colon) { while !self.at_end() && !self.at(TokenKind::LBrace) { let _ = self.parse_type(); if !self.eat(TokenKind::Comma) { break; } } }
@@ -566,8 +639,14 @@ impl<'a> Parser<'a> {
                 if self.at(TokenKind::RParen) || self.eat(TokenKind::Comma) { continue; }
             }
             let (psp, mut pflags) = (self.span(), 0u16);
-            while self.eat(TokenKind::KwRef) || self.eat(TokenKind::KwComptime) || (self.is_word() && matches!(self.tables.modifiers.get(self.text()), Some(ModAct::Mut | ModAct::Iso))) {
-                pflags = 1; if !matches!(self.tape.kind(self.pos.saturating_sub(1)), TokenKind::KwRef | TokenKind::KwComptime) { self.advance(); } }
+            loop {
+                let bit = if self.eat(TokenKind::KwRef) { PARAM_FLAG_REF }
+                    else if self.eat(TokenKind::KwComptime) { PARAM_FLAG_COMPTIME }
+                    else if self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Mut) { self.advance(); PARAM_FLAG_MUT }
+                    else if self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Iso) { self.advance(); PARAM_FLAG_ISO }
+                    else { break };
+                pflags |= PARAM_FLAG_LENT | bit;
+            }
             let _ = self.eat(TokenKind::Star) || self.eat(TokenKind::DoubleStar); let psym = self.intern_cur();
             self.note_runtime(psym);
             let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
@@ -891,6 +970,7 @@ impl<'a> Parser<'a> {
                     let close = self.tape.matching_bracket(self.cur()).unwrap_or(self.cur() as u32) as usize; let code = &self.src[bsp.end as usize..self.tape.span(close).start as usize]; self.pos = close + 1;
                     self.arena.alloc_polyglot_block("asm", code.trim(), 0, ByteSpan::new(sp.start, self.prev_span().end)) } else { NodeId::NONE } }
             TokenKind::RawDslBlock => { let raw = self.text(); self.advance(); let inner = raw.trim_start_matches('`').trim_end_matches('`'); let (lang, code) = inner.split_once('\n').unwrap_or(("dsl", inner)); self.arena.alloc_polyglot_block(lang.trim(), code.trim(), 0, sp) }
+            _ if self.is_word() && self.at_with_scope() => self.parse_with_scope(),
             _ if self.is_word() => { if let Some((rk, pl)) = self.receptor() { match rk { 9 => return self.parse_for(), 13 => { self.advance();
                             let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE }
                             else { let first = self.parse_expr(); if self.at(TokenKind::Comma) { let mut items = vec![first]; while self.eat(TokenKind::Comma) { items.push(self.parse_expr()); } self.arena.alloc_list_node(NodeKind::TupleExpr, 0, sp, &items) } else { first } }; let _ = self.eat(TokenKind::Semicolon);
@@ -917,7 +997,7 @@ impl<'a> Parser<'a> {
                     return self.parse_exclude_decl();
                 }
                 let w = self.text().to_string(); let nx = self.next_non_nl(self.cur() + 1);
-                if let Some(mac) = self.tables.syntax_macros.get(&w).cloned() {
+                if let Some(mac) = self.tables.syntax_macros.get(&w).cloned().filter(|_| !self.file_declares_fn(&w)) {
                     if nx < self.tape.len() && !matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::InfixDot | TokenKind::RBrace | TokenKind::Semicolon | TokenKind::Comma | TokenKind::RParen | TokenKind::RBracket) {
                         return self.expand_syntax_macro(&mac); } }
                 if nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || matches!(self.tape.kind(nx), TokenKind::IntLit | TokenKind::StrLit | TokenKind::KwFn))
@@ -1115,6 +1195,19 @@ impl<'a> Parser<'a> {
                 let clause = self.arena.alloc_node(NodeKind::CatchClause, 0, ByteSpan::new(csp.start, self.prev_span().end), psym.0, fb.0);
                 lhs = self.arena.alloc_node(NodeKind::CatchRecoveryExpr, 0, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, clause.0);
                 continue; }
+            // `x in xs`: the word that heads a `for` loop's iterable, between
+            // two expressions, calls the bound membership function.
+            if self.receptor() == Some((10, 0)) && min_bp <= MEMBERSHIP_BP {
+                if let Some(function) = self.tables.membership().map(str::to_string) {
+                    let wsp = self.span();
+                    self.advance();
+                    let rhs = self.parse_expr_bp(MEMBERSHIP_BP + 1);
+                    let callee = self.arena.alloc_ident(&function, wsp);
+                    let span = ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end);
+                    lhs = self.arena.alloc_list_node(NodeKind::CallExpr, 0, span, &[callee, lhs, rhs]);
+                    continue;
+                }
+            }
             // `x as T`: its binding power is the one Pilot registers for the word.
             if self.receptor() == Some((29, 0)) { let Some(bp) = self.tables.infix_ops.get(self.text()).map(|e| e.bp) else { break; }; if bp < min_bp { break; } self.advance();
                 let is_view = self.receptor() == Some((29, 1)); if is_view { self.advance(); }
@@ -1141,10 +1234,8 @@ impl<'a> Parser<'a> {
             }
             TokenKind::IntLit | TokenKind::FloatLit | TokenKind::HexIntLit | TokenKind::BinIntLit | TokenKind::OctIntLit
                 if self.tape.flag(self.cur()).contains(pilot_lexer::TokenFlags::IS_DIMENSIONAL) => self.parse_suffixed_number(sp),
-            TokenKind::IntLit => { let t = self.text().replace('_', ""); let v = t.parse::<i64>().or_else(|_| t.parse::<u64>().map(|u| u as i64)).unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
-            TokenKind::HexIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 16).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }
-            TokenKind::BinIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 2).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }
-            TokenKind::OctIntLit => { let v = u64::from_str_radix(&self.text()[2..].replace('_', ""), 8).map_or(0, |v| v as i64); self.advance(); self.arena.alloc_int(v, sp) }
+            TokenKind::IntLit => self.parse_int_lit(sp, 10), TokenKind::HexIntLit => self.parse_int_lit(sp, 16),
+            TokenKind::BinIntLit => self.parse_int_lit(sp, 2), TokenKind::OctIntLit => self.parse_int_lit(sp, 8),
             TokenKind::FloatLit => { let v = self.text().replace('_', "").parse().unwrap_or(0.0); self.advance(); self.arena.alloc_float(v, sp) }
             TokenKind::StrLit | TokenKind::TripleStrLit => self.parse_str_lit(sp),
             TokenKind::KeywordLit => { let t = self.text(); self.advance(); self.arena.alloc_keyword(t, sp) }
@@ -1179,14 +1270,14 @@ impl<'a> Parser<'a> {
                         contracts::CONTRACT_RECEPTOR if pl == contracts::OLD_SUB && self.in_ensures => return self.parse_old(),
                         31 if pl == 1 => { self.advance(); let v = self.parse_expr_bp(16); return self.arena.alloc_node(NodeKind::UnaryExpr, 5, sp, v.0, 0); }
                         31 if pl == 2 => { self.advance(); return self.parse_expr_bp(80); }
-                        32 if nx < self.tape.len() && (matches!(self.tape.kind(nx), TokenKind::LParen) || (!self.no_struct_lit && matches!(self.tape.kind(nx), TokenKind::LBrace))) => return self.parse_polyglot_inline(),
+                        32 if nx < self.tape.len() && ((matches!(self.tape.kind(nx), TokenKind::LParen) && self.opens_inline_text(nx)) || (!self.no_struct_lit && matches!(self.tape.kind(nx), TokenKind::LBrace))) => return self.parse_polyglot_inline(),
                         33 if pl == 6 => { let p2 = self.next_non_nl(nx + 1);
                             if p2 < self.tape.len() && is_word_tok(self.tape.kind(nx)) && self.tables.receptors.get(self.tape.text(p2, self.src)) == Some(&(10, 0)) {
                                 return self.parse_linq_query(); } }
                         33 if matches!(pl, 17 | 23) && nx < self.tape.len() && !matches!(self.tape.kind(nx), TokenKind::RParen | TokenKind::Comma | TokenKind::Semicolon | TokenKind::InfixDot) => {
                             self.advance(); return self.parse_expr_bp(80); }
                         33 if pl == 7 && nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LBrace => { self.advance(); return self.parse_block(); }
-                        35 if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen => {
+                        35 if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen && !self.file_declares_fn(self.text()) => {
                             self.advance(); self.expect(TokenKind::LParen); let arg = self.parse_expr(); self.expect(TokenKind::RParen);
                             let fl = match pl { 1 => UNARY_OP_SPLAT, 2 => UNARY_OP_DOUBLE_SPLAT, 3 => UNARY_OP_DEEP_FLATTEN, _ => UNARY_OP_SPLAT };
                             return self.arena.alloc_node(NodeKind::UnaryExpr, fl, ByteSpan::new(sp.start, self.prev_span().end), arg.0, 0); }
@@ -1201,7 +1292,7 @@ impl<'a> Parser<'a> {
                                             callee = self.arena.alloc_node(NodeKind::MemberExpr, safe, ByteSpan::new(self.arena.span(callee).start, self.prev_span().end), callee.0, sym.0); }
                                         return self.parse_call_args(callee, pl as u16); } } } }
                         _ => {} } }
-                let w = self.text().to_string(); if let Some(mac) = self.tables.syntax_macros.get(&w).cloned() {
+                let w = self.text().to_string(); if let Some(mac) = self.tables.syntax_macros.get(&w).cloned().filter(|_| !self.file_declares_fn(&w)) {
                     // In the head of `for`, `if` or `switch` a `{` opens the body, so
                     // a binding named like a macro (`for x in set { .. }`) stays a name.
                     if nx < self.tape.len() && (self.tape.kind(nx) == TokenKind::LParen || (!self.no_struct_lit && self.tape.kind(nx) == TokenKind::LBrace)) { return self.expand_syntax_macro(&mac); }
@@ -1276,12 +1367,48 @@ impl<'a> Parser<'a> {
             } else if k.is_some() { pairs.push(k); }
             let _ = self.eat(TokenKind::Comma) || self.eat(TokenKind::Semicolon); if self.pos == mp { self.advance(); } }
         self.expect(TokenKind::RBrace); self.arena.alloc_list_node(NodeKind::MapExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &pairs) }
-    fn parse_linq_query(&mut self) -> NodeId { let sp = self.span(); self.advance(); let vsym = self.intern_cur();
-        if self.is_rec(10) { self.advance(); }
-        let src_e = self.parse_expr_bp(20); while !self.at_end() && self.receptor() != Some((33, 7)) {
-            if self.is_rec(28) { self.advance(); let _ = self.parse_expr_bp(20); } else { self.advance(); } }
-        let proj = if self.receptor() == Some((33, 7)) { self.advance(); self.parse_expr_bp(15) } else { NodeId::NONE };
-        self.arena.alloc_for(vsym, src_e, proj, NodeId::NONE, ByteSpan::new(sp.start, self.prev_span().end)) }
+    /// `from x in src [where cond]* select e`: the list of `e` for each `x`
+    /// of `src` that every `where` holds for, built as the collecting
+    /// `for x in src { if cond { yield e; } }`. Any other clause is an
+    /// error, not skipped.
+    fn parse_linq_query(&mut self) -> NodeId {
+        let sp = self.span();
+        self.advance();
+        let vsym = self.intern_cur();
+        if self.is_rec(10) {
+            self.advance();
+        }
+        let src_e = self.parse_expr_bp(20);
+        let mut conds = Vec::new();
+        while !self.at_end() && self.receptor() != Some((33, 7)) {
+            if self.is_rec(28) {
+                self.advance();
+                conds.push(self.parse_expr_bp(20));
+            } else {
+                let (csp, word) = (self.span(), self.text().to_string());
+                self.arena.diagnostics.push((
+                    csp,
+                    format!("query clause `{word}` is not supported: a query is `from x in xs`, any number of `where cond`, then `select e`"),
+                ));
+                return NodeId::NONE;
+            }
+        }
+        if self.receptor() != Some((33, 7)) {
+            let csp = self.span();
+            self.arena.diagnostics.push((csp, "a query must end with `select e`".to_string()));
+            return NodeId::NONE;
+        }
+        self.advance();
+        let proj = self.parse_expr_bp(15);
+        let span = ByteSpan::new(sp.start, self.prev_span().end);
+        let mut item = self.arena.alloc_node(NodeKind::YieldStmt, 0, span, proj.0, 0);
+        for &c in conds.iter().rev() {
+            let then_b = self.arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &[item]);
+            item = self.arena.alloc_node(NodeKind::IfExpr, 0, span, c.0, then_b.0);
+        }
+        let body = self.arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &[item]);
+        self.arena.alloc_for(vsym, src_e, body, NodeId::NONE, span)
+    }
     fn try_skip_generic_expr_args(&self) -> Option<usize> { let (mut p, mut d) = (self.cur(), 0i32); while p < self.tape.len() {
             match self.tape.kind(p) { TokenKind::Less => d += 1, TokenKind::Greater => { d -= 1; if d == 0 { break; } }
                 TokenKind::ShiftRight => { d -= 2; if d <= 0 { break; } }
