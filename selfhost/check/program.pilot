@@ -27,6 +27,32 @@ pub fn literal_slot(lit_kind: i64) -> str {
     return "";
 }
 
+/// The slot of the type whose values are Unicode scalar values (characters).
+pub pure fn scalar_slot() -> str => "char_t";
+
+/// The code point of `text` when it holds exactly one Unicode scalar value
+/// in UTF-8 (RFC 3629), or -1.
+pub fn scalar_code(text: str) -> i64 {
+    let n = text.len();
+    if n == 0 || n > 4 { return -1; }
+    let b0: i64 = text.byte_at(0);
+    if b0 < 128 { return if n == 1 { b0 } else { -1 }; }
+    var need = 0;
+    var code = 0;
+    if b0 >= 192 && b0 < 224 { need = 2; code = b0 - 192; }
+    else if b0 >= 224 && b0 < 240 { need = 3; code = b0 - 224; }
+    else if b0 >= 240 && b0 < 248 { need = 4; code = b0 - 240; }
+    if need == 0 || n != need { return -1; }
+    var i = 1;
+    while i < n {
+        let b: i64 = text.byte_at(i);
+        if b < 128 || b >= 192 { return -1; }
+        code = code * 64 + (b - 128);
+        i = i + 1;
+    }
+    return code;
+}
+
 /// The slot of the bottom type, which a call that never returns has.
 pub pure fn never_slot() -> str => "never_t";
 
@@ -348,6 +374,8 @@ fn find_slot_name(p: Program, slot: str) -> str {
     return "";
 }
 
+/// The receptor slot of the two-member union type (`A | B`).
+pub pure fn union_slot() -> str => "union_t";
 /// The receptor slot of function values.
 pub pure fn fn_slot() -> str => "fn_t";
 /// The receptor slot of the list a collection literal builds.
@@ -359,6 +387,17 @@ pub fn is_plain_alias(p: Program, d: i64) -> bool {
     if kind(p.s, d) != nk_adt() || flags(p.s, d) != 0 || rhs(p.s, d) < 0 { return false; }
     return nl_get(p.tparams, key(d)).len() == 0;
 }
+
+/// Whether `t` is the character type (the `char_t` slot).
+pub fn is_scalar_type(p: Program, t: i64) -> bool {
+    let ct = prog_slot_type(p, scalar_slot());
+    return ty_is_named(p.tt, t) && ty_is_named(p.tt, ct) && ty_decl(p.tt, t) == ty_decl(p.tt, ct);
+}
+
+/// Whether node `e` is a string literal that holds exactly one Unicode
+/// scalar value: where a character is expected, it is that character.
+pub fn is_scalar_literal(p: Program, e: i64) -> bool =>
+    e >= 0 && kind(p.s, e) == nk_str() && scalar_code(node_name(p.s, e)) >= 0;
 
 /// The type a type node denotes.
 pub fn prog_annot_type(p: Program, n: i64) -> i64 {
@@ -403,6 +442,10 @@ pub fn prog_annot_type(p: Program, n: i64) -> i64 {
                 // memo is set first so an alias of itself ends as unknown.
                 p.annot_memo[n] = ty_unknown();
                 t = prog_annot_type(p, rhs(p.s, d));
+            } else if d >= 0 && args.len() >= 2 && name == prog_slot_name(p, union_slot()) {
+                // `union<A, B>` (`A | B`) is the union of its members: a
+                // value of either fits it.
+                t = ty_union(p.tt, args);
             } else if d >= 0 {
                 t = ty_named(p.tt, d, name, args);
             } else if name == prog_slot_name(p, fn_slot()) {

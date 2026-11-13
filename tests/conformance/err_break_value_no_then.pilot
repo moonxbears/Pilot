@@ -1,0 +1,10 @@
+// `break value;` gives the value of a `for .. then` loop. In a loop with no
+// `then` clause there is nothing to give it to, and the program is rejected.
+fn main() {
+    var i = 0;
+    while i < 3 {
+        if i == 1 { break i; }
+        i = i + 1;
+    }
+    print(i);
+}

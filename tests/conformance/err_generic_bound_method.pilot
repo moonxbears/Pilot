@@ -1,0 +1,16 @@
+// A generic parameter offers only what its bound declares: `IShape` has no
+// `volume`, so calling it on a `T : IShape` is rejected.
+interface IShape {
+    fn area(self) -> i64;
+}
+
+struct Square : IShape {
+    pub side: i64;
+    pub fn area(self) -> i64 => self.side * self.side;
+}
+
+fn volume_of<T : IShape>(shape: T) -> i64 => shape.volume();
+
+fn main() {
+    print(volume_of(Square { side: 2 }));
+}

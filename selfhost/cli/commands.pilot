@@ -302,6 +302,7 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/lower_members.pilot",
         "selfhost/ir/lower_switch.pilot",
         "selfhost/ir/lower_try.pilot",
+        "selfhost/ir/lower_contract.pilot",
         "selfhost/ir/lower_variant.pilot",
         "selfhost/ir/lower_union.pilot",
         "selfhost/ir/lower_global.pilot",

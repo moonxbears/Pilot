@@ -1,0 +1,24 @@
+// A `union<A, B>` (also written `A | B`) holds a value of either type: an
+// `A` or a `B` fits where the union is expected.
+//
+// Expected output, worked by hand:
+//   show(5) = "<5>"; show("hi") = "<hi>".
+//   pick(3) = 3; pick(0) = "none".
+//   a union binding holds 7, then "seven".
+fn show(v: union<i64, str>) -> str => f"<{v}>";
+
+fn pick(n: i64) -> i64 | str {
+    if n > 0 { return n; }
+    return "none";
+}
+
+fn main() {
+    print(show(5));
+    print(show("hi"));
+    print(pick(3));
+    print(pick(0));
+    var u: i64 | str = 7;
+    print(u);
+    u = "seven";
+    print(u);
+}

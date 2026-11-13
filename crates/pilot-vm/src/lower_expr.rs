@@ -95,7 +95,7 @@ impl BytecodeCompiler {
             NodeKind::TryPropagateExpr => self.compile_try_propagate(arena, node.lhs),
             NodeKind::WhileStmt => self.compile_while(arena, node.lhs, node.rhs),
             NodeKind::ForExpr => self.compile_for(arena, node_id),
-            NodeKind::BreakStmt => self.compile_break(arena, NodeId(node.lhs).is_some()),
+            NodeKind::BreakStmt => self.compile_break(arena, NodeId(node.lhs)),
             NodeKind::ContinueStmt => self.compile_continue(arena, NodeId(node.lhs).is_some()),
             NodeKind::DeferStmt => self.compile_defer(node.lhs, node.flags),
             NodeKind::TryStmt => self.compile_try_stmt(arena, node_id),
@@ -228,10 +228,20 @@ impl BytecodeCompiler {
     fn compile_index_value(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
         let idx = arena.node(NodeId(rhs));
         if idx.node_kind() == NodeKind::BinaryExpr && matches!(idx.flags, OP_RANGE_INCLUSIVE | OP_RANGE_HALF_OPEN) {
+            // A bound left out is the start (0) or the end (the length).
             let r_obj = self.compile_node(arena, NodeId(lhs));
-            let r_a = self.compile_node(arena, NodeId(idx.lhs));
-            let mut r_b = self.compile_node(arena, NodeId(idx.rhs));
-            if idx.flags == OP_RANGE_INCLUSIVE {
+            let r_a = if NodeId(idx.lhs).is_some() {
+                self.compile_node(arena, NodeId(idx.lhs))
+            } else {
+                self.emit_const(PilotVal::from_int(0))
+            };
+            let open_end = NodeId(idx.rhs).is_none();
+            let mut r_b = if open_end {
+                self.emit_intrinsic("str_len", &[r_obj])
+            } else {
+                self.compile_node(arena, NodeId(idx.rhs))
+            };
+            if idx.flags == OP_RANGE_INCLUSIVE && !open_end {
                 let r_one = self.emit_const(PilotVal::from_int(1));
                 let r_end = self.alloc_reg();
                 self.emit(Opcode::Add, r_end, r_b, r_one);
@@ -250,15 +260,19 @@ impl BytecodeCompiler {
     /// `u32`, an `f32`), the result is wrapped or rounded to that type's
     /// register, and a shift count is taken modulo its width.
     fn compile_arithmetic(&mut self, arena: &AstArena, id: NodeId, flags: u16, lhs: u32, rhs: u32) -> u8 {
-        let narrow = self
-            .planned_numeric(arena, id)
-            .and_then(|t| pilot_parser::bootstrap_tables().reg_layout(&t).cloned())
+        let planned = self.planned_numeric(arena, id);
+        let narrow = planned
+            .as_deref()
+            .and_then(|t| pilot_parser::bootstrap_tables().reg_layout(t).cloned())
             .filter(crate::lower_stmt::is_narrow_register);
+        let scalar = planned.as_deref().is_some_and(Self::is_scalar_text);
         let Some(layout) = narrow else {
             return self.compile_binary(arena, flags, lhs, rhs, None);
         };
         let r = self.compile_binary(arena, flags, lhs, rhs, Some(layout.width));
-        self.emit_wrap(r, &layout)
+        let r = self.emit_wrap(r, &layout);
+        // Arithmetic on a character gives a character.
+        if scalar { self.emit_scalar(r) } else { r }
     }
 
     /// `shift_width`: the register width a shift count is reduced to.
@@ -279,8 +293,17 @@ impl BytecodeCompiler {
             BinaryOp::Pipe => return self.compile_pipe(arena, NodeId(lhs), NodeId(rhs)),
             BinaryOp::PipeBackward => return self.compile_pipe(arena, NodeId(rhs), NodeId(lhs)),
             BinaryOp::As | BinaryOp::AsView => {
-                let r = self.compile_node(arena, NodeId(lhs));
+                let mut r = self.compile_node(arena, NodeId(lhs));
                 let ty = NodeId(rhs);
+                let to_scalar = op == BinaryOp::As && ty.is_some() && Self::is_scalar_text(Self::name(arena, arena.node(ty).lhs));
+                // A one-character literal is cast as the character it holds;
+                // a cast to the character type gives a character.
+                if op == BinaryOp::As && (to_scalar || arena.node(NodeId(lhs)).node_kind() == NodeKind::StrLit) {
+                    r = self.emit_scalar(r);
+                }
+                if to_scalar {
+                    return r;
+                }
                 let layout = (op == BinaryOp::As && ty.is_some())
                     .then(|| pilot_parser::bootstrap_tables().reg_layout(Self::name(arena, arena.node(ty).lhs)))
                     .flatten()
@@ -301,13 +324,15 @@ impl BytecodeCompiler {
             }
         }
         let Some(opcode) = direct_opcode(op) else {
+            // A range outside a `for` head or an index is a value: the
+            // function Pilot binds to the operator builds it.
+            if let Some(r) = self.compile_operator_fn(op.symbol(), arena, NodeId(lhs), NodeId(rhs)) {
+                return r;
+            }
             if matches!(op, BinaryOp::RangeInclusive | BinaryOp::RangeHalfOpen) {
                 return self.error(crate::codes::SEED, 
                     "range values are only lowered as `for` iterables and slice indices by the seed".to_string(),
                 );
-            }
-            if let Some(r) = self.compile_operator_fn(op.symbol(), arena, NodeId(lhs), NodeId(rhs)) {
-                return r;
             }
             return self.error(
                 crate::codes::SEED,
@@ -322,8 +347,19 @@ impl BytecodeCompiler {
         };
         let dst = self.alloc_reg();
         let mark = self.next_reg;
-        let r_l = self.compile_with_hint(arena, NodeId(lhs), hint_l);
+        let mut r_l = self.compile_with_hint(arena, NodeId(lhs), hint_l);
         let mut r_r = self.compile_with_hint(arena, NodeId(rhs), hint_r);
+        // A character compared with a one-character literal: the literal is
+        // that character.
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge) {
+            let is_lit = |n: u32| arena.node(NodeId(n)).node_kind() == NodeKind::StrLit;
+            let scalar_side = |c: &Self, n: u32| c.static_type(arena, NodeId(n)).as_deref().is_some_and(Self::is_scalar_text);
+            if is_lit(rhs) && scalar_side(self, lhs) {
+                r_r = self.emit_scalar(r_r);
+            } else if is_lit(lhs) && scalar_side(self, rhs) {
+                r_l = self.emit_scalar(r_l);
+            }
+        }
         if let (Some(width), true, Some(and)) =
             (shift_width, matches!(op, BinaryOp::Shl | BinaryOp::Shr), direct_opcode(BinaryOp::BitAnd))
         {

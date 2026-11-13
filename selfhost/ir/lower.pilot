@@ -40,6 +40,7 @@ use selfhost.check.drops.*;
 use selfhost.ir.lower_drop.*;
 use selfhost.ir.lower_probe.*;
 use selfhost.ir.lower_outs.*;
+use selfhost.ir.lower_contract.*;
 use std.text;
 
 /// The state of one lowering run.
@@ -105,6 +106,16 @@ pub struct Lowerer : IObject {
     pub hint: i64;
     /// The declared return type of the function being lowered.
     pub ret_type: i64;
+    /// Whether the exit being lowered is a failure's way out, on which
+    /// `errdefer` statements run (selfhost/ir/lower_defer.pilot).
+    pub failing: bool;
+    /// The function's name, its `ensures` clauses and the entry value of
+    /// each `old(e)` in them (selfhost/ir/lower_contract.pilot).
+    pub contract_fn: str;
+    pub ensures: List<i64>;
+    pub olds: Map<str, i64>;
+    /// Exit block of a `for .. then` loop -> the stack slot of its value.
+    pub result_slots: Map<str, i64>;
     /// Innermost `try` region last: the block its failures go to, and
     /// whether its catch clause binds a name.
     pub try_blocks: List<u32>;
@@ -273,6 +284,7 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
         values: Map<str, i64>(), slots: Map<str, i64>(), loop_heads: [], loop_exits: [], head_depths: [], exit_depths: [], defers: [],
         lambda_captures: Map<str, List<i64>>(), lambda_self: Map<str, i64>(),
         int_pool: Map<str, i64>(), str_pool: Map<str, i64>(), self_value: ir_no_value(), self_type: ty_unknown(), hint: ty_unknown(), ret_type: ty_unknown(),
+        contract_fn: "", ensures: [], olds: Map<str, i64>(), result_slots: Map<str, i64>(), failing: false,
         try_blocks: [], try_binds: [], try_types: [], try_depths: [], known_types: Map<str, i64>(),
         global_named: global_names(p), global_of: Map<str, i64>(), global_decls: [],
         comptime_nodes: [], comptime_called: Map<str, bool>(), start_cur: 0, start_body: 0, globals_done: 0,
@@ -324,6 +336,9 @@ pub fn begin_function(lw: Lowerer, f: IrFunction) {
     lw.try_types = [];
     lw.try_depths = [];
     lw.known_types = Map<str, i64>();
+    lw.ensures = [];
+    lw.olds = Map<str, i64>();
+    lw.result_slots = Map<str, i64>();
     lw.self_value = ir_no_value();
     lw.setter_arg = ir_no_value();
     lw.self_type = ty_unknown();
@@ -409,6 +424,7 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
     if creator { lower_function(lw, resume_index(lw, idx)); }
     let resume = is_resume_function(lw, idx);
     begin_function(lw, f);
+    lw.contract_fn = node_name(s, decl);
     if kind(s, decl) == nk_comptime() {
         lower_comptime_run(lw, decl, f);
         return;
@@ -479,6 +495,7 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
         // body's value; a block body without one returns nothing.
         let returns_value = annot(s, decl) >= 0 || kind(s, body) != nk_block();
         let args: List<u32> = if returns_value { [coerce(lw, as_member_of(lw, v, value_type(lw, body), lw.ret_type, body), f.ret_physics, body)] } else { [] };
+        check_ensures(lw, if returns_value { args[0] } else { ir_no_value() }, body);
         let _ = ir_emit(f, lw.cur, op_return(), 0, f.ret_physics, out_return_args(lw, args, body), false, span_start(s, body));
     }
     finish_out_params(lw);
@@ -587,7 +604,11 @@ fn lower_node(lw: Lowerer, n: i64) -> u32 {
     if k == nk_int() { return emit(lw, op_const_bits(), 0, physics_of(lw, n), [pool_int(lw, lit_value(s, n))], n); }
     if k == nk_float() { return emit(lw, op_const_float(), 0, physics_of(lw, n), [pool_float(lw, lit_value(s, n))], n); }
     if k == nk_bool() { return emit(lw, op_const_bits(), 0, physics_of(lw, n), [pool_int(lw, lit_value(s, n))], n); }
-    if k == nk_str() { return emit(lw, op_const_bytes(), 0, physics_of(lw, n), [pool_str(lw, node_name(s, n))], n); }
+    if k == nk_str() {
+        // A one-character literal where a character is expected.
+        if is_scalar_type(lw.inf.p, lw.hint) && is_scalar_literal(lw.inf.p, n) { return scalar_const(lw, n, lw.hint); }
+        return emit(lw, op_const_bytes(), 0, physics_of(lw, n), [pool_str(lw, node_name(s, n))], n);
+    }
     if k == nk_ident() { return lower_ident(lw, n); }
     if k == nk_binary() { return lower_binary(lw, n); }
     if k == nk_unary() { return lower_unary(lw, n); }
@@ -600,11 +621,8 @@ fn lower_node(lw: Lowerer, n: i64) -> u32 {
     if k == nk_yield() { return lower_yield(lw, n); }
     if k == nk_block() { return lower_block(lw, n); }
     if k == nk_expr_stmt() {
-        // A `requires` / `ensures` clause (flags 1 / 2): its check is woven
-        // in by a later pass (selfhost/ir/pass_contracts.pilot), not yet.
-        if flags(s, n) != 0 {
-            let _ = seam("ir.lower_construct", "contract clauses are not lowered to PilIR yet: `requires` needs a check on entry, `ensures` one on every exit");
-        }
+        // A `requires` / `ensures` clause (flags 1 / 2).
+        if flags(s, n) != 0 { return lower_contract_clause(lw, n); }
         return lower_expr(lw, lhs(s, n));
     }
     if k == nk_if() { return lower_if(lw, n); }
@@ -690,7 +708,8 @@ pub fn lower_binding(lw: Lowerer, n: i64) -> u32 {
         if !ty_is_unknown(lw.inf.p.tt, vt) && better { lw.known_types.set(key(bi), vt); }
     }
     let phy = layout_of(lw.ls, binding_type(lw.inf, bi));
-    let v = if value_node >= 0 { coerce(lw, lower_hinted(lw, value_node, binding_type(lw.inf, bi)), phy, n) } else { emit(lw, op_undef(), 0, phy, [], n) };
+    // A value bound where a union is declared is held as a member of it.
+    let v = if value_node >= 0 { coerce(lw, as_member_of(lw, lower_hinted(lw, value_node, binding_type(lw.inf, bi)), value_type(lw, value_node), binding_type(lw.inf, bi), n), phy, n) } else { emit(lw, op_undef(), 0, phy, [], n) };
     let b = key(bi);
     if kind(s, n) == nk_var() {
         let slot = emit(lw, op_stack_slot(), 0, phy, [], n);
@@ -726,8 +745,8 @@ pub fn lower_assign(lw: Lowerer, n: i64) -> u32 {
     let b = binding_index(lw, target);
     if b < 0 || !lw.slots.has(key(b)) { return unsupported(lw, n); }
     let slot = lw.slots.get(key(b));
-    var v = lower_expr(lw, rhs(s, n));
     let op = flags(s, n);
+    var v = if op == 0 { as_member_of(lw, lower_hinted(lw, rhs(s, n), binding_type(lw.inf, b)), value_type(lw, rhs(s, n)), binding_type(lw.inf, b), n) } else { lower_expr(lw, rhs(s, n)) };
     if op != 0 {
         let ir_op = arith_opcode(op);
         if ir_op == 0 { return unsupported(lw, n); }
@@ -858,6 +877,7 @@ pub fn lower_unary(lw: Lowerer, n: i64) -> u32 {
     // 4 bitwise not, 5 logical not.
     if op == 1 { return lower_expr(lw, lhs(s, n)); }
     if op == unary_some() { return lower_some(lw, n); }
+    if op == unary_old() { return lower_old(lw, n); }
     if op != 0 && op != 4 && op != 5 { return unsupported(lw, n); }
     let x = lower_expr(lw, lhs(s, n));
     let phy = physics_of(lw, n);
@@ -886,14 +906,34 @@ pub fn lower_unary(lw: Lowerer, n: i64) -> u32 {
     return emit(lw, op_bit_xor(), 0, phy, [x, mask], n);
 }
 
-/// `x as T` and `T(x)`: `x` converted to `T`'s register layout.
+/// The engine operation that makes a character of a code point.
+pub pure fn scalar_op() -> str => "scalar_from";
+
+/// The one-character literal `n` as a value of the character type `t`: its
+/// code point, made a character.
+fn scalar_const(lw: Lowerer, n: i64, t: i64) -> u32 {
+    let phy = layout_of(lw.ls, t);
+    let code = emit(lw, op_const_bits(), 0, phy, [pool_int(lw, scalar_code(node_name(lw.inf.p.s, n)))], n);
+    return emit(lw, op_call_intrinsic(), intrinsic_index(lw, scalar_op()), phy, [code], n);
+}
+
+/// `x as T` and `T(x)`: `x` converted to `T`'s register layout. A cast to
+/// the character type gives a character, and a one-character literal is
+/// cast as the character it holds.
 pub fn lower_cast(lw: Lowerer, n: i64, value: i64) -> u32 {
+    let p = lw.inf.p;
     let to = physics_of(lw, n);
+    let to_scalar = is_scalar_type(p, type_of(lw.inf, n));
+    if is_scalar_literal(p, value) && in_register(to) {
+        let code = emit(lw, op_const_bits(), 0, to, [pool_int(lw, scalar_code(node_name(p.s, value)))], n);
+        return if to_scalar { emit(lw, op_call_intrinsic(), intrinsic_index(lw, scalar_op()), to, [code], n) } else { code };
+    }
     let v = lower_expr(lw, value);
     // A value outside a register (a string) is converted as the seed does:
     // the `cast` fails at run time with the seed's error.
     if !in_register(to) { return unsupported(lw, n); }
-    return emit(lw, op_cast(), 0, to, [v], n);
+    let c = emit(lw, op_cast(), 0, to, [v], n);
+    return if to_scalar { emit(lw, op_call_intrinsic(), intrinsic_index(lw, scalar_op()), to, [c], n) } else { c };
 }
 
 /// `sizeof(T)`: the size the checker's layout of `T` gives, as a constant.
@@ -1063,13 +1103,16 @@ pub fn call_decl(lw: Lowerer, decl: i64, pre: List<u32>, arg_nodes: List<i64>, p
     let params = fn_params(s, decl);
     if pre.len() > params.len() { return unsupported(lw, n); }
     guard some nodes = arrange_args(lw, params, pre.len(), arg_nodes) else { return unsupported(lw, n); }
-    // An unannotated parameter takes the type of its argument.
+    // An unannotated parameter takes the type of its argument, and so does
+    // one typed by a generic parameter (`t: T`): the function is lowered
+    // once per argument type, so `t.method()` reaches that type's method.
     var spec: List<i64> = [];
     var specialized = false;
     var i = 0;
     while i < params.len() {
         var t = ty_unknown();
-        if rhs(s, params[i]) < 0 && i >= pre.len() && i - pre.len() < nodes.len() {
+        let open_param = rhs(s, params[i]) < 0 || ty_is_param(lw.inf.p.tt, prog_annot_type(lw.inf.p, rhs(s, params[i])));
+        if open_param && i >= pre.len() && i - pre.len() < nodes.len() {
             t = value_type(lw, nodes[i - pre.len()]);
             if !ty_is_unknown(lw.inf.p.tt, t) { specialized = true; }
         }
@@ -1167,7 +1210,12 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
     if clause < 0 || clause >= s.for_clauses.len() || !lw.binding_of.has(key(n)) { return unsupported(lw, n); }
     let c: List<i64> = s.for_clauses[clause];
     let iterable = c[0];
-    if c[1] >= 0 { return unsupported(lw, n); }
+    // `for .. then fallback`: the loop's value lives in a stack slot that a
+    // `break value` or the `then` clause fills; `break` leaves for `done`.
+    let then_clause = c[1];
+    let result_phy = physics_of(lw, n);
+    let result_slot = if then_clause >= 0 { emit(lw, op_stack_slot(), 0, result_phy, [], n) } else { ir_no_value() };
+    if then_clause >= 0 { emit_void(lw, op_store(), 0, [result_slot, unit_value(lw, n)], n); }
     let bi = lw.binding_of.get(key(n));
     let var_key = key(bi);
     let ik = kind(s, iterable);
@@ -1190,6 +1238,8 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
     let body = ir_add_block(lw.f);
     let step = ir_add_block(lw.f);
     let exit = ir_add_block(lw.f);
+    let done = if then_clause >= 0 { ir_add_block(lw.f) } else { exit };
+    if then_clause >= 0 { lw.result_slots.set(key(done), result_slot); }
     if is_range {
         let start = coerce(lw, lower_expr(lw, lhs(s, iterable)), elem_phy, iterable);
         let end = coerce(lw, lower_expr(lw, rhs(s, iterable)), elem_phy, iterable);
@@ -1204,17 +1254,16 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
         emit_void(lw, op_cond_br(), 0, [more, body, 0, exit, 0], n);
         switch_to(lw, body);
         lw.values.set(var_key, i);
-        lower_loop_body(lw, rhs(s, n), step, exit, n);
+        lower_loop_body(lw, rhs(s, n), step, done, n);
         switch_to(lw, step);
         let cur = emit(lw, op_load(), 0, elem_phy, [slot], n);
         let one = emit(lw, op_const_bits(), 0, elem_phy, [pool_int(lw, 1)], n);
         emit_void(lw, op_store(), 0, [slot, emit(lw, op_add(), 0, elem_phy, [cur, one], n)], n);
         jump_to(lw, head, [], n);
-        switch_to(lw, exit);
-        return unit_value(lw, n);
+        return finish_for(lw, n, exit, done, then_clause, result_slot);
     }
     if !runs_as_code(lw, it_t, s.enumeration[0]) && native_for(lw, it_t, "[]", native_method_hook()) != "" {
-        return lower_for_indexed(lw, n, iterable, it_t, var_key, elem_phy, head, body, step, exit);
+        return lower_for_indexed(lw, n, iterable, it_t, var_key, elem_phy, head, body, step, exit, done, then_clause, result_slot);
     }
     if s.enumeration.len() < 3 { return unsupported(lw, n); }
     let it = lower_expr(lw, iterable);
@@ -1229,21 +1278,34 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
     lw.values.set(var_key, coerce(lw, property_read(lw, en, en_t, s.enumeration[2], n), elem_phy, n));
     lw.loop_enums.push(en);
     lw.loop_enum_types.push(en_t);
-    lower_loop_body(lw, rhs(s, n), step, exit, n);
+    lower_loop_body(lw, rhs(s, n), step, done, n);
     let _ = lw.loop_enums.pop();
     let _ = lw.loop_enum_types.pop();
     switch_to(lw, step);
     jump_to(lw, head, [], n);
-    switch_to(lw, exit);
+    let value = finish_for(lw, n, exit, done, then_clause, result_slot);
     close_loop_enumerator(lw, en, en_t, n);
-    return unit_value(lw, n);
+    return value;
+}
+
+/// Ends a `for` whose loop leaves for `exit` when it runs out: without a
+/// `then` clause it has no value. With one, the clause's value is stored
+/// and the loop's value, set there or by a `break value`, is read in `done`.
+fn finish_for(lw: Lowerer, n: i64, exit: u32, done: u32, then_clause: i64, result_slot: u32) -> u32 {
+    switch_to(lw, exit);
+    if then_clause < 0 { return unit_value(lw, n); }
+    let phy = physics_of(lw, n);
+    emit_void(lw, op_store(), 0, [result_slot, coerce(lw, lower_expr(lw, then_clause), phy, then_clause)], n);
+    jump_to(lw, done, [], n);
+    switch_to(lw, done);
+    return emit(lw, op_load(), 0, phy, [result_slot], n);
 }
 
 /// `for x in xs` over a sequence the engine holds by itself: the elements
 /// `xs[0] .. xs[len - 1]`, read with the engine operations bound to the
 /// type's `[]` and to `len`.
 [StandIn("ir.engine_sequence_for", "slice<T> is { ptr<T>, usize } enumerated by its SliceEnumerator", "the value is the engine's own list, as in the seed, and is indexed by engine operations", "F6")]
-fn lower_for_indexed(lw: Lowerer, n: i64, iterable: i64, it_t: i64, var_key: str, elem_phy: IrTypePhysics, head: u32, body: u32, step: u32, exit: u32) -> u32 {
+fn lower_for_indexed(lw: Lowerer, n: i64, iterable: i64, it_t: i64, var_key: str, elem_phy: IrTypePhysics, head: u32, body: u32, step: u32, exit: u32, done: u32, then_clause: i64, result_slot: u32) -> u32 {
     let s = lw.inf.p.s;
     let len_hook = native_for(lw, it_t, "len", native_property_hook());
     if len_hook == "" { return unsupported(lw, n); }
@@ -1261,14 +1323,13 @@ fn lower_for_indexed(lw: Lowerer, n: i64, iterable: i64, it_t: i64, var_key: str
     switch_to(lw, body);
     let get = native_for(lw, it_t, "[]", native_method_hook());
     lw.values.set(var_key, emit(lw, op_call_intrinsic(), intrinsic_index(lw, get), elem_phy, [seq, i], n));
-    lower_loop_body(lw, rhs(s, n), step, exit, n);
+    lower_loop_body(lw, rhs(s, n), step, done, n);
     switch_to(lw, step);
     let cur = emit(lw, op_load(), 0, int_phy, [slot], n);
     let one = emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, 1)], n);
     emit_void(lw, op_store(), 0, [slot, emit(lw, op_add(), 0, int_phy, [cur, one], n)], n);
     jump_to(lw, head, [], n);
-    switch_to(lw, exit);
-    return unit_value(lw, n);
+    return finish_for(lw, n, exit, done, then_clause, result_slot);
 }
 
 /// The body of a loop whose `continue` goes to `step` and `break` to `exit`;
@@ -1292,11 +1353,28 @@ pub fn lower_loop_exit(lw: Lowerer, n: i64) -> u32 {
     // innermost loop's next round.
     let is_break = kind(s, n) == nk_break();
     let targets = if is_break { lw.loop_exits } else { lw.loop_heads };
+    if is_break && lhs(s, n) >= 0 { return lower_break_value(lw, n); }
     if lhs(s, n) >= 0 || targets.len == 0 { return unsupported(lw, n); }
     let target = targets[targets.len - 1];
     let depths = if is_break { lw.exit_depths } else { lw.head_depths };
     plan_exit(lw, n);
     run_defers_to(lw, depths[depths.len - 1]);
+    jump_to(lw, target, [], n);
+    return ir_no_value();
+}
+
+/// `break value;`: the value of the innermost `for .. then` loop, which is
+/// left at once.
+fn lower_break_value(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    var at = lw.loop_exits.len - 1;
+    while at >= 0 && !lw.result_slots.has(key(lw.loop_exits[at])) { at = at - 1; }
+    if at < 0 { return unsupported(lw, n); }
+    let target = lw.loop_exits[at];
+    let slot: u32 = lw.result_slots.get(key(target));
+    emit_void(lw, op_store(), 0, [slot, lower_expr(lw, lhs(s, n))], n);
+    plan_exit(lw, n);
+    run_defers_to(lw, lw.exit_depths[at]);
     jump_to(lw, target, [], n);
     return ir_no_value();
 }
@@ -1312,6 +1390,21 @@ pub fn lower_return(lw: Lowerer, n: i64) -> u32 {
     if lhs(s, n) >= 0 {
         let v = lower_hinted(lw, lhs(s, n), lw.ret_type);
         args.push(coerce(lw, as_member_of(lw, v, value_type(lw, lhs(s, n)), lw.ret_type, n), lw.f.ret_physics, n));
+    }
+    check_ensures(lw, if args.len() > 0 { args[0] } else { ir_no_value() }, n);
+    // Returning a failed value is a failure's way out: `errdefer`
+    // statements run on it, with the others.
+    if args.len() > 0 && has_errdefer(lw) && has_protocol(lw, lw.ret_type) {
+        let good = ir_add_block(lw.f);
+        let bad = ir_add_block(lw.f);
+        emit_void(lw, op_cond_br(), 0, [success_test(lw, args[0], lw.ret_type, n), good, 0, bad, 0], n);
+        switch_to(lw, bad);
+        close_loop_enumerators(lw, n);
+        lw.failing = true;
+        run_defers_to(lw, 0);
+        lw.failing = false;
+        if !ir_is_terminated(lw.f, lw.cur) { emit_void(lw, op_return(), 0, out_return_args(lw, args, n), n); }
+        switch_to(lw, good);
     }
     // The loops left close their enumerators; drops and deferred statements
     // run after the value is computed.

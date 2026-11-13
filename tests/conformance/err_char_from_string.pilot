@@ -1,0 +1,6 @@
+// Only a literal that holds exactly one character fits a char: a
+// two-character literal is a str, and binding it to a char is TYPE001.
+fn main() {
+    let c: char = 'ab';
+    print(c);
+}

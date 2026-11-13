@@ -33,6 +33,7 @@ impl BytecodeCompiler {
             is_switch: true,
             defer_depth: self.defers.len(),
             release: None,
+            result: None,
         });
         let mut end_jumps = Vec::new();
         for &arm in arms {

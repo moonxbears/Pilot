@@ -494,6 +494,7 @@ pub fn interp_engine_ops() -> Map<str, str> {
         "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
         "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "map_values", "to_str",
         "map_new", "map_get", "map_set", "map_has", "map_remove", "seam_open", "value_clone",
+        "scalar_from",
     ] {
         ops.set(name, name);
     }

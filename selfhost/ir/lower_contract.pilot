@@ -1,0 +1,116 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_contract.pilot
+// Lowering of contracts to PilIR: `requires(cond)`, `ensures(r => cond)` and
+// `old(e)`.
+// ==============================================================================
+// The parser puts each clause at the start of its function's body, as an
+// expression statement whose flags say which clause it is.
+//
+// A `requires` clause is checked where it stands, on entry: when it is
+// false the program stops with DBC006. An `ensures` clause takes, where it
+// stands, the entry value of every `old(e)` in it, and is checked at every
+// `return` and at the end of the body, after the returned value is made:
+// when it is false the program stops with DBC007. In a function whose
+// return type takes part in the try protocol a failed result skips the
+// clauses, and the clause's parameter is the success value. The messages
+// are the seed's (crates/pilot-vm/src/lower_contract.rs).
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerContract;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_try.*;
+
+/// `ExprStmt` flags of the clauses (crates/pilot-parser/src/contracts.rs).
+pub pure fn contract_requires() -> i64 => 1;
+pub pure fn contract_ensures() -> i64 => 2;
+/// `UnaryExpr` flags of `old(e)` (crates/pilot-ast UNARY_OP_OLD).
+pub pure fn unary_old() -> i64 => 10;
+
+/// Continues where `cond` holds; where it does not, the program stops with
+/// `message`.
+fn hold_or_stop(lw: Lowerer, cond: u32, message: str, n: i64) {
+    let ok = ir_add_block(lw.f);
+    let bad = ir_add_block(lw.f);
+    emit_void(lw, op_cond_br(), 0, [cond, ok, 0, bad, 0], n);
+    switch_to(lw, bad);
+    emit_trap(lw, message, n);
+    switch_to(lw, ok);
+}
+
+/// Takes the entry value of every `old(e)` under `n`.
+fn take_olds(lw: Lowerer, n: i64) {
+    let s = lw.inf.p.s;
+    if n < 0 { return; }
+    if kind(s, n) == nk_unary() && flags(s, n) == unary_old() {
+        lw.olds.set(key(n), lower_expr(lw, lhs(s, n)));
+        return;
+    }
+    for c in children(s, n) { take_olds(lw, c); }
+}
+
+/// The clause statement `n`: a `requires` is checked here, an `ensures` is
+/// kept for the function's exits.
+pub fn lower_contract_clause(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let clause = lhs(s, n);
+    if flags(s, n) == contract_requires() {
+        let cond = lower_expr(lw, clause);
+        hold_or_stop(lw, cond, f"DBC006: a `requires` clause of `{lw.contract_fn}` does not hold", n);
+    } else {
+        take_olds(lw, clause);
+        lw.ensures.push(clause);
+    }
+    return unit_value(lw, n);
+}
+
+/// `old(e)`: the value `e` had on entry.
+pub fn lower_old(lw: Lowerer, n: i64) -> u32 {
+    if lw.olds.has(key(n)) { return lw.olds.get(key(n)); }
+    return unsupported(lw, n);
+}
+
+/// Checks each clause against the result `value`.
+fn check_clauses(lw: Lowerer, value: u32, n: i64) {
+    let s = lw.inf.p.s;
+    for clause in lw.ensures {
+        var cond = ir_no_value();
+        if kind(s, clause) == nk_lambda() {
+            // `r => cond`: `r` is the result.
+            let ch = children(s, clause);
+            if ch.len() >= 2 && value != ir_no_value() && lw.binding_of.has(key(ch[0])) {
+                lw.values.set(key(lw.binding_of.get(key(ch[0]))), value);
+            }
+            cond = lower_expr(lw, ch[ch.len() - 1]);
+        } else {
+            cond = lower_expr(lw, clause);
+        }
+        hold_or_stop(lw, cond, f"DBC007: an `ensures` clause of `{lw.contract_fn}` does not hold", n);
+    }
+}
+
+/// Checks the function's `ensures` clauses where it returns `value` (no
+/// value for a function that returns nothing), at node `n`.
+pub fn check_ensures(lw: Lowerer, value: u32, n: i64) {
+    if lw.ensures.len() == 0 || ir_is_terminated(lw.f, lw.cur) { return; }
+    let t = lw.ret_type;
+    if value == ir_no_value() || !has_protocol(lw, t) {
+        check_clauses(lw, value, n);
+        return;
+    }
+    // A failed result skips the clauses; a success is checked as its value.
+    let ok = success_test(lw, value, t, n);
+    let checks = ir_add_block(lw.f);
+    let done = ir_add_block(lw.f);
+    emit_void(lw, op_cond_br(), 0, [ok, checks, 0, done, 0], n);
+    switch_to(lw, checks);
+    let inner = unwrap(lw, value, t, layout_of(lw.ls, unwrap_type(lw.inf.p, t)), n);
+    check_clauses(lw, inner, n);
+    jump_to(lw, done, [], n);
+    switch_to(lw, done);
+}

@@ -90,6 +90,9 @@ struct LoopCtx {
     /// The local holding the enumerator of a `for` that walks one; leaving
     /// the loop early closes it (`lower_yield`).
     release: Option<u8>,
+    /// The local holding the value of a `for .. then` expression, which a
+    /// `break value` inside the loop sets.
+    result: Option<u8>,
 }
 
 /// Who a `yield` hands its value to (`lower_yield`).
@@ -181,6 +184,8 @@ pub struct BytecodeCompiler {
     call_patches: Vec<(usize, String, String, ByteSpan)>,
     const_maps: HashMap<String, CMap>,
     loops: Vec<LoopCtx>,
+    /// The value local of the `for .. then` loop about to open its body.
+    next_loop_result: Option<u8>,
     tries: Vec<TryCtx>,
     cur_span: ByteSpan,
     /// Declared return type of the function being compiled.

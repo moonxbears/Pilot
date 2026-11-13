@@ -83,14 +83,31 @@ pub fn assignable(inf: Infer, src: i64, dst: i64, e: i64) -> bool {
         return true;
     }
     if is_literal_list(p, src) && !is_literal_list(p, dst) && ty_is_named(tt, dst) {
+        // A list fits another collection when its items fit that
+        // collection's elements. A type with no elements (an `i64`) takes
+        // the rules below, which refuse it.
         let elem = element_type(p, dst);
         let args = ty_args(tt, src);
-        return ty_is_unknown(tt, elem) || args.len() == 0 || assignable(inf, args[0], elem, -1);
+        if !ty_is_unknown(tt, elem) { return args.len() == 0 || assignable(inf, args[0], elem, -1); }
     }
     if ty_is_unknown(tt, src) || ty_is_unknown(tt, dst) || src == dst { return true; }
     if ty_is_param(tt, src) || ty_is_param(tt, dst) { return true; }
     if prog_is_never(p, src) { return true; }
     if ty_is_func(tt, src) && ty_is_func(tt, dst) { return func_assignable(inf, src, dst); }
+    // A union takes a value of any of its members; a union fits where
+    // every one of its members does.
+    if ty_is_union(tt, src) {
+        for m in ty_args(tt, src) {
+            if !assignable(inf, m, dst, -1) { return false; }
+        }
+        return true;
+    }
+    if ty_is_union(tt, dst) {
+        for m in ty_args(tt, dst) {
+            if assignable(inf, src, m, e) { return true; }
+        }
+        return false;
+    }
     if !ty_is_named(tt, src) || !ty_is_named(tt, dst) { return true; }
     let sd = ty_decl(tt, src);
     let dd = ty_decl(tt, dst);
@@ -107,6 +124,9 @@ pub fn assignable(inf: Infer, src: i64, dst: i64, e: i64) -> bool {
         return true;
     }
     if e >= 0 && literal_fits(p.s, e, prog_class(p, dst)) { return true; }
+    // A one-character literal where a character is expected is that
+    // character.
+    if is_scalar_literal(p, e) && is_scalar_type(p, dst) { return true; }
     // Implicit lifting: a value fits a type that unwraps (`op ?`) to it.
     let inner = unwrap_type(p, dst);
     if !ty_is_unknown(tt, inner) && inner != dst && assignable(inf, src, inner, e) { return true; }
@@ -432,6 +452,8 @@ fn check_cast(inf: Infer, sink: DiagSink, n: i64) {
     if !ty_is_named(p.tt, src) || !ty_is_named(p.tt, dst) || ty_is_open(p.tt, src) || ty_is_open(p.tt, dst) { return; }
     if assignable(inf, src, dst, lhs(s, n)) { return; }
     if prog_value_class(p, src) != "" && prog_value_class(p, dst) != "" { return; }
+    // A one-character literal is cast as the character it holds.
+    if is_scalar_literal(p, lhs(s, n)) && is_integer_class(prog_value_class(p, dst)) { return; }
     if some _m = prog_member(p, src, "as") { return; }
     sink_error(sink, n, "TYPE003",
         f"cannot cast `{ty_display(p.tt, src)}` to `{ty_display(p.tt, dst)}`");

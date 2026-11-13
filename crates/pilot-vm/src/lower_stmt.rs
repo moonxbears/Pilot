@@ -300,12 +300,15 @@ impl BytecodeCompiler {
                 .then(|| Self::name(arena, an.lhs).to_string())
         });
         let kept = if shadows { None } else { self.var_types.get(&name).cloned() };
-        let ty = annotated
-            .or(kept)
+        // The value is converted to a type the binding declares; a type
+        // guessed from the call that makes the value only picks methods.
+        let declared = annotated.or(kept);
+        let ty = declared
+            .clone()
             .or_else(|| rhs.is_some().then(|| self.infer_call_type(arena, rhs)).flatten());
         let mark = self.next_reg;
         let r_val = if rhs.is_some() { self.compile_with_hint(arena, rhs, ty.clone()) } else { self.emit_null() };
-        let r_val = self.convert_for_binding(r_val, ty.as_deref());
+        let r_val = self.convert_for_binding(r_val, declared.as_deref());
         match ty {
             Some(t) => {
                 self.var_types.insert(name.clone(), t);
@@ -333,6 +336,11 @@ impl BytecodeCompiler {
     /// signed integer tag cannot, so the value is converted to that layout;
     /// every other binding keeps the value as it is.
     pub(crate) fn convert_for_binding(&mut self, r: u8, ty: Option<&str>) -> u8 {
+        // A binding of the character type holds a character: a
+        // one-character literal or a code point bound to it becomes one.
+        if ty.is_some_and(Self::is_scalar_text) {
+            return self.emit_scalar(r);
+        }
         let layout = ty.and_then(|t| pilot_parser::bootstrap_tables().reg_layout(t).cloned());
         match layout {
             Some(l) if l.class == UNSIGNED_REGISTER && l.width >= 64 => self.emit_conversion(r, &l),
@@ -470,6 +478,7 @@ impl BytecodeCompiler {
             is_switch: false,
             defer_depth: self.defers.len(),
             release,
+            result: self.next_loop_result.take(),
         });
         let mark = self.next_reg;
         self.compile_node(arena, body);
@@ -480,6 +489,7 @@ impl BytecodeCompiler {
             is_switch: false,
             defer_depth: self.defers.len(),
             release,
+            result: None,
         })
     }
 
@@ -501,12 +511,35 @@ impl BytecodeCompiler {
         self.emit_null()
     }
 
-    pub(crate) fn compile_break(&mut self, arena: &AstArena, has_value: bool) -> u8 {
-        if has_value {
+    /// `break value;`: the value of the innermost `for .. then` loop, which
+    /// is left at once (its `then` clause does not run).
+    fn compile_break_value(&mut self, arena: &AstArena, value: NodeId) -> u8 {
+        let Some(at) = self.loops.iter().rposition(|l| !l.is_switch) else {
+            return self.error(
+                crate::codes::BREAK_OUTSIDE_LOOP,
+                "`break` outside of a loop or switch".to_string(),
+            );
+        };
+        let (Some(r_result), depth) = (self.loops[at].result, self.loops[at].defer_depth) else {
             return self.error(
                 crate::codes::SEED,
-                "`break` with a value is not lowered by the seed yet".to_string(),
+                "`break` with a value needs a `for .. then` loop to give the value to".to_string(),
             );
+        };
+        let mark = self.next_reg;
+        let r = self.compile_node(arena, value);
+        self.emit(Opcode::Move, r_result, r, 0);
+        self.release_to(mark);
+        self.emit_exit_drops(arena);
+        self.emit_defers_above(arena, depth);
+        let j = self.emit_jump(0);
+        self.loops[at].break_jumps.push(j);
+        0
+    }
+
+    pub(crate) fn compile_break(&mut self, arena: &AstArena, value: NodeId) -> u8 {
+        if value.is_some() {
+            return self.compile_break_value(arena, value);
         }
         let Some(depth) = self.loops.last().map(|l| l.defer_depth) else {
             return self.error(

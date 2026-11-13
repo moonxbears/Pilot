@@ -1,0 +1,7 @@
+// Only a value of one of a union's types fits it: a float is neither an
+// i64 nor a str, so passing one is TYPE001.
+fn show(v: union<i64, str>) -> str => f"<{v}>";
+
+fn main() {
+    print(show(1.5));
+}

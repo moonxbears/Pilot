@@ -141,6 +141,8 @@ impl PilotVal {
 
     #[inline] pub fn as_int(self) -> Option<i64> { if self.is_int() { Some(self.payload as i64) } else { None } }
     #[inline] pub fn as_float(self) -> Option<f64> { if self.is_float() { Some(f64::from_bits(self.payload)) } else { None } }
+    /// The Unicode scalar value of a character value.
+    #[inline] pub fn as_char(self) -> Option<char> { if self.tag() == TAG_CHAR { char::from_u32(self.payload as u32) } else { None } }
     #[inline] pub fn as_bool(self) -> Option<bool> { if self.is_bool() { Some(self.payload != 0) } else { None } }
 
     /// The string this value holds, without allocating: a short string is
@@ -217,7 +219,7 @@ impl PilotVal {
             TAG_INT => (self.payload as i64).to_string(),
             TAG_UINT => self.payload.to_string(),
             TAG_FLOAT => f64::from_bits(self.payload).to_string(),
-            TAG_CHAR => (self.payload as u8 as char).to_string(),
+            TAG_CHAR => char::from_u32(self.payload as u32).unwrap_or(char::REPLACEMENT_CHARACTER).to_string(),
             TAG_KEYWORD => format!(":kw#{}", self.payload),
             TAG_SSO_STR | TAG_HEAP_STR => self.with_str(|s| s.to_string()).unwrap_or_default(),
             TAG_LIST => format!("<list #{}>", self.payload),

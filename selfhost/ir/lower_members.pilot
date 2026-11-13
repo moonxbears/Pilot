@@ -191,10 +191,30 @@ pub fn member_receiver_type(lw: Lowerer, n: i64) -> i64 =>
     if is_implied(lw, n) { lw.self_type } else { value_type(lw, lhs(lw.inf.p.s, n)) };
 
 /// `x.field`: an `extract_field` of a stored field.
+/// The position a tuple member name (`0`, `1`, ..) names, or -1 for any
+/// other name.
+fn tuple_position(name: str) -> i64 {
+    if name.len() == 0 { return -1; }
+    var at = 0;
+    var value = 0;
+    while at < name.len() {
+        let b: i64 = name.byte_at(at);
+        if b < 48 || b > 57 { return -1; }
+        value = value * 10 + (b - 48);
+        at = at + 1;
+    }
+    return value;
+}
+
 pub fn lower_member(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     if is_implied(lw, n) && lw.self_value == ir_no_value() { return unsupported(lw, n); }
     let recv = lhs(s, n);
+    // `t.0`: the item of a tuple at that position.
+    let position = tuple_position(sym_text(s, rhs(s, n)));
+    if position >= 0 && recv >= 0 && !is_implied(lw, n) {
+        return emit(lw, op_extract_field(), position, physics_of(lw, n), [lower_expr(lw, recv)], n);
+    }
     if recv >= 0 && kind(s, recv) == nk_ident() && binding_index(lw, recv) < 0 {
         // `Color.Red`: a variant of the enum the receiver names.
         if some tag = variant_tag(lw.inf.p, type_receiver(lw.inf, recv), sym_text(s, rhs(s, n))) {
@@ -468,10 +488,19 @@ pub fn lower_index(lw: Lowerer, n: i64) -> u32 {
     let bounds = kind(s, idx) == nk_binary() && (flags(s, idx) == op_range() || flags(s, idx) == op_range_inclusive());
     if bounds && bound(lw, range_index_hook(), []) != "" {
         // `x[a..b]`: the part of `x` from `a` up to `b` (`a..=b`: through `b`).
+        // A bound left out is the start (0) or the end (the length).
         let obj = lower_expr(lw, lhs(s, n));
-        let a = lower_expr(lw, lhs(s, idx));
-        var b = lower_expr(lw, rhs(s, idx));
-        if flags(s, idx) == op_range_inclusive() {
+        let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+        let a = if lhs(s, idx) >= 0 { lower_expr(lw, lhs(s, idx)) } else { emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, 0)], idx) };
+        var b = ir_no_value();
+        if rhs(s, idx) >= 0 {
+            b = lower_expr(lw, rhs(s, idx));
+        } else {
+            let len_hook = native_for(lw, value_type(lw, lhs(s, n)), "len", native_property_hook());
+            if len_hook == "" { return unsupported(lw, n); }
+            b = emit(lw, op_call_intrinsic(), intrinsic_index(lw, len_hook), int_phy, [obj], idx);
+        }
+        if rhs(s, idx) >= 0 && flags(s, idx) == op_range_inclusive() {
             let one = emit(lw, op_const_bits(), 0, lw.f.value_physics[b], [pool_int(lw, 1)], idx);
             b = emit(lw, op_add(), 0, lw.f.value_physics[b], [b, one], idx);
         }

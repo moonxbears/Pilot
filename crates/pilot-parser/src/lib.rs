@@ -18,6 +18,9 @@ mod contracts;
 mod with_scope;
 mod declared_names;
 mod int_lit;
+mod open_range;
+mod ret_type;
+mod tuple_member;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
 use modules::EXCLUDE_RECEPTOR;
 pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
@@ -200,7 +203,7 @@ pub struct ParserTables { modifiers: HashMap<String, ModAct>, param_modifiers: H
     /// The Pilot function an f-string hole's `:pattern` calls (see `fstring`).
     format_spec: Option<String>,
     /// The function `x in xs` calls, as `f(x, xs)`, when one is bound.
-    membership: Option<String>, }
+    membership: Option<String>, scalar_text: Option<String>, }
 impl ParserTables {
     pub fn new() -> Self { Self::default() }
     fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
@@ -248,7 +251,7 @@ impl ParserTables {
                     HOOK_GENERATOR => self.bind_generator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
                     HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3), s_arg(4)),
                     HOOK_FORMAT_SPEC => self.bind_format_spec(s_arg(2)),
-                    HOOK_MEMBERSHIP => self.bind_membership(s_arg(2)),
+                    HOOK_MEMBERSHIP => self.bind_membership(s_arg(2)), HOOK_SCALAR_TEXT => self.bind_scalar_text(s_arg(2)),
                     "bind_receiver_ident" => { let (w, b, v) = (s_arg(2), s_arg(3), s_arg(4)); if !w.is_empty() { self.receiver_ident = w; }
                         self.backing_ident = b; self.setter_value_ident = v; }
                     "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
@@ -662,7 +665,7 @@ impl<'a> Parser<'a> {
         if self.eat(TokenKind::InfixDot) { full_name.push('.'); full_name.push_str(self.text()); self.advance(); tparams.extend(self.parse_generic_params()); }
         let outer_runtime = self.folds.take_runtime();
         let (name_sym, params) = (self.arena.interner.intern(&full_name), self.parse_param_list());
-        let ret_ty = if self.eat(TokenKind::Arrow) { self.parse_type() } else { NodeId::NONE };
+        let ret_ty = if !self.eat(TokenKind::Arrow) { NodeId::NONE } else if self.tuple_return_before_body() { self.parse_type_bp(ret_type::ABOVE_FN_ARROW) } else { self.parse_type() };
         let mut clauses = Vec::new();
         while self.is_rec(28) || self.at_contract_clause() {
             if self.at_contract_clause() {
@@ -1161,6 +1164,7 @@ impl<'a> Parser<'a> {
                 continue; }
             if matches!(k, TokenKind::InfixDot | TokenKind::SafeNav | TokenKind::ColonColon) {
                 let safe = (k == TokenKind::SafeNav) as u16; self.advance();
+                if let Some(path) = self.parse_tuple_path(lhs) { lhs = path; continue; }
                 let sym = if self.eat(TokenKind::Tilde) { let dsym = self.intern_cur(); let dnm = format!("~{}", self.arena.interner.resolve(dsym)); self.arena.interner.intern(&dnm) } else { self.intern_cur() };
                 lhs = self.arena.alloc_node(NodeKind::MemberExpr, safe, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, sym.0);
                 continue; }
@@ -1170,7 +1174,7 @@ impl<'a> Parser<'a> {
                 lhs = self.parse_call(lhs); continue; }
             if k == TokenKind::LBracket { let (pend, cstart) = (self.arena.span(lhs).end as usize, self.span().start as usize);
                 if pend <= cstart && cstart <= self.src.len() && self.src[pend..cstart].contains('\n') { break; }
-                self.advance(); let idx = if self.at(TokenKind::RBracket) { NodeId::NONE } else { self.parse_expr() };
+                self.advance(); let idx = if self.at(TokenKind::RBracket) { NodeId::NONE } else if matches!(self.peek(), TokenKind::DotDot | TokenKind::DotDotEqual) { self.parse_open_range() } else { self.parse_expr() };
                 while self.eat(TokenKind::Comma) { if self.at(TokenKind::RBracket) { break; } let _ = self.parse_expr(); }
                 self.expect(TokenKind::RBracket);
                 lhs = self.arena.alloc_node(NodeKind::IndexExpr, 0, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, idx.0);

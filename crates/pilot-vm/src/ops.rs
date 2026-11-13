@@ -19,6 +19,10 @@ enum Num {
 }
 
 fn num(v: PilotVal) -> Option<Num> {
+    // A character counts as its code point.
+    if let Some(c) = v.as_char() {
+        return Some(Num::UInt(c as u64));
+    }
     match v.as_int() {
         Some(i) if v.is_uint() => Some(Num::UInt(i as u64)),
         Some(i) => Some(Num::Int(i)),
@@ -298,6 +302,27 @@ pub fn fits(v: PilotVal, class: &str, width: i64) -> bool {
         "gpr_signed" | "gpr_unsigned" => v.as_int().is_some(),
         _ => false,
     }
+}
+
+/// `v` as a character: a character itself, or the character an integer
+/// codes. An integer that is not a Unicode scalar value (above 0x10FFFF or
+/// a surrogate) is an error; any other value is given back as it is.
+pub fn scalar_from(v: PilotVal) -> Result<PilotVal, String> {
+    if v.as_char().is_some() {
+        return Ok(v);
+    }
+    match num(v) {
+        Some(Num::Int(i)) => scalar_of(u64::try_from(i).ok(), i.to_string()),
+        Some(Num::UInt(u)) => scalar_of(Some(u), u.to_string()),
+        _ => Ok(v),
+    }
+}
+
+fn scalar_of(code: Option<u64>, shown: String) -> Result<PilotVal, String> {
+    code.and_then(|u| u32::try_from(u).ok())
+        .and_then(char::from_u32)
+        .map(PilotVal::from_char)
+        .ok_or_else(|| format!("{shown} is not a Unicode scalar value"))
 }
 
 /// The result of arithmetic in a register of `class` and `width`: an

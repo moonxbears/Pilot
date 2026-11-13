@@ -578,6 +578,22 @@ impl PilVirtualMachine {
                 let class = str_arg(args, 1, op)?;
                 crate::ops::convert(arg(args, 0, op)?, &class, int_arg(args, 2, op)?)
             }
+            // `scalar_from(v)`: `v` as a character. A string that holds
+            // exactly one character is that character; see `ops::scalar_from`.
+            "scalar_from" => {
+                let v = arg(args, 0, op)?;
+                let one = v.with_str(|s| {
+                    let mut it = s.chars();
+                    match (it.next(), it.next()) {
+                        (Some(c), None) => Some(c),
+                        _ => None,
+                    }
+                });
+                match one.flatten() {
+                    Some(c) => Ok(PilotVal::from_char(c)),
+                    None => crate::ops::scalar_from(v),
+                }
+            }
             // `num_wrap(v, register_class, width)`: see `ops::wrap`.
             "num_wrap" => {
                 let class = str_arg(args, 1, op)?;

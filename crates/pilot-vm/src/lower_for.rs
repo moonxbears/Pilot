@@ -39,10 +39,8 @@ impl BytecodeCompiler {
         let Some((iter_id, then_id)) = clause else {
             return self.error(crate::codes::SYNTAX, "malformed `for` expression".to_string());
         };
-        if then_id.is_some() {
-            let msg = "`for ... then` expressions are not lowered by the seed yet";
-            return self.error(crate::codes::SEED, msg.to_string());
-        }
+        // A `for .. then` gives one value, not the list of what it yields.
+        let collects = collects && then_id.is_none();
         let iter_n = *arena.node(iter_id);
         let is_range = iter_n.node_kind() == NodeKind::BinaryExpr
             && matches!(iter_n.flags, OP_RANGE_INCLUSIVE | OP_RANGE_HALF_OPEN);
@@ -71,6 +69,13 @@ impl BytecodeCompiler {
         if collects {
             let r_list = self.alloc_local_reg();
             self.begin_collect(r_list);
+        }
+        // `for .. then fallback`: the loop's value is what a `break value`
+        // gives, or the `then` clause when the loop runs to its end.
+        let r_result = then_id.is_some().then(|| self.alloc_local_reg());
+        if let Some(r) = r_result {
+            let r_null = self.emit_null();
+            self.emit(Opcode::Move, r, r_null, 0);
         }
 
         let mark = self.next_reg;
@@ -148,6 +153,7 @@ impl BytecodeCompiler {
         self.next_reg = mark;
         let enumerates = matches!(walk, Walk::Enumerate | Walk::Either);
         let release = enumerates.then_some(r_enum);
+        self.next_loop_result = r_result;
         let ctx = self.loop_body_releasing(arena, NodeId(node.rhs), release);
         for j in ctx.continue_jumps {
             self.patch_to_here(j);
@@ -155,7 +161,16 @@ impl BytecodeCompiler {
         let r_one = self.emit_const(PilotVal::from_int(1));
         self.emit(Opcode::Add, r_idx, r_idx, r_one);
         self.emit_jump(start);
-        for j in exits.into_iter().chain(ctx.break_jumps) {
+        for j in exits {
+            self.patch_to_here(j);
+        }
+        if let Some(r) = r_result {
+            let then_mark = self.next_reg;
+            let r_then = self.compile_node(arena, then_id);
+            self.emit(Opcode::Move, r, r_then, 0);
+            self.release_to(then_mark);
+        }
+        for j in ctx.break_jumps {
             self.patch_to_here(j);
         }
         // An enumerator that has one is closed however the loop ends.
@@ -165,7 +180,10 @@ impl BytecodeCompiler {
         if collects {
             return self.end_collect();
         }
-        self.emit_null()
+        match r_result {
+            Some(r) => r,
+            None => self.emit_null(),
+        }
     }
 
     /// `if !e.move_next() { exit } x = e.current;` for the enumerator in

@@ -1,0 +1,46 @@
+// A tuple holds a fixed number of values of their own types. `t.0`, `t.1`
+// read its items by position; `let (a, b) = t` takes them apart. A tuple
+// type may be a function's return type before an expression body, and
+// `(A) => R` there is still a function type when a body follows it.
+//
+// Expected output, worked by hand:
+//   pair() = (1, "b"): t.0 = 1, t.1 = "b".
+//   swap(1, 2) = (2, 1): x * 10 + y = 21.
+//   min_max([4, 9, 2]) = (2, 9): 9 - 2 = 7.
+//   apply((v) => v * 3, 4) = 12; adder(2)(5) = 7.
+//   a tuple in a tuple: ((1, 2), 3).0.1 = 2.
+fn pair() -> (i64, str) => (1, "b");
+
+fn swap(a: i64, b: i64) -> (i64, i64) => (b, a);
+
+fn min_max(ref xs: i64[]) -> (i64, i64) {
+    var lo = xs[0];
+    var hi = xs[0];
+    for x in xs {
+        if x < lo { lo = x; }
+        if x > hi { hi = x; }
+    }
+    return (lo, hi);
+}
+
+fn apply(f: (i64) => i64, x: i64) -> i64 => f(x);
+
+fn adder(n: i64) -> (i64) => i64 {
+    return (x) => x + n;
+}
+
+fn main() {
+    let t = pair();
+    print(t.0);
+    print(t.1);
+    let (x, y) = swap(1, 2);
+    print(x * 10 + y);
+    let xs: List<i64> = [4, 9, 2];
+    let range = min_max(xs);
+    print(range.1 - range.0);
+    print(apply((v) => v * 3, 4));
+    let add2 = adder(2);
+    print(add2(5));
+    let nested = ((1, 2), 3);
+    print(nested.0.1);
+}

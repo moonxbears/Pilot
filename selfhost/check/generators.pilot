@@ -15,7 +15,17 @@ use selfhost.check.snapshot.*;
 use selfhost.check.program.*;
 
 /// Whether the `for` at `f` is in value position.
+/// The `then` clause of `for` node `f`, or -1.
+pub fn for_then(s: Snap, f: i64) -> i64 {
+    let c = flags(s, f) - 1;
+    if c < 0 || c >= s.for_clauses.len() { return -1; }
+    let clause: List<i64> = s.for_clauses[c];
+    return clause[1];
+}
+
 pub fn for_collects(p: Program, f: i64) -> bool {
+    // A `for .. then` gives one value, not the list of what it yields.
+    if for_then(p.s, f) >= 0 { return false; }
     var item = f;
     var par = p.parents[f];
     if par >= 0 && kind(p.s, par) == nk_expr_stmt() {

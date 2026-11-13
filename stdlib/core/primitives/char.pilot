@@ -9,6 +9,12 @@ use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
 use Pilot.Core.Keywords::*;
 
+// The values of this type are Unicode scalar values: the engine shows one as
+// its character, and a one-character literal bound to it is that character.
+comptime {
+    __engine("bind_scalar_text", nameof(char));
+}
+
 [KeywordDefAttr(23, "32-bit Unicode scalar character value (`0x0000`..`0x10FFFF`).")]
 [Lang(Cfg.Lang.char_t), Bits(Cfg.Reg.b32, Cfg.Reg.gpr_u)]
 pub partial struct char : IComparable<char>, IValue {

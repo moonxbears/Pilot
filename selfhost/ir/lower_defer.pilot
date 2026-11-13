@@ -40,6 +40,10 @@ fn run_scope(lw: Lowerer, i: i64) {
         // A deferred probe call (a negative marker), a guard's release, or
         // a `defer` statement.
         if stmts[k] < 0 { run_deferred_probe(lw, stmts[k]); }
+        else if is_errdefer(lw, stmts[k]) {
+            // Only on a failure's way out.
+            if lw.failing { let _ = lower_expr(lw, lhs(lw.inf.p.s, stmts[k])); }
+        }
         else if !run_release(lw, stmts[k]) { let _ = lower_expr(lw, stmts[k]); }
         k = k - 1;
     }
@@ -55,14 +59,27 @@ pub fn run_defers_to(lw: Lowerer, depth: i64) {
     }
 }
 
-/// `defer stmt;`: registers `stmt` with the innermost scope.
+/// Whether registered statement `stmt` is an `errdefer` (the `defer` node
+/// itself, flags 1): it runs only on a failure's way out, a failing `?` or
+/// the return of a failed value (stdlib/core/syntax/exits.pilot).
+fn is_errdefer(lw: Lowerer, stmt: i64) -> bool =>
+    kind(lw.inf.p.s, stmt) == nk_defer() && flags(lw.inf.p.s, stmt) == 1;
+
+/// Whether an open scope holds an `errdefer`.
+pub fn has_errdefer(lw: Lowerer) -> bool {
+    for scope in lw.defers {
+        for stmt in scope {
+            if stmt >= 0 && is_errdefer(lw, stmt) { return true; }
+        }
+    }
+    return false;
+}
+
+/// `defer stmt;`: registers `stmt` with the innermost scope. An `errdefer`
+/// is registered as its own node, so the exits can tell it apart.
 pub fn lower_defer(lw: Lowerer, n: i64) -> u32 {
     if lw.defers.len() == 0 { return unsupported(lw, n); }
-    // `errdefer` (flags 1) runs only on a failure's way out; PilIR has no
-    // failure edges for it yet (stdlib/core/syntax/exits.pilot).
-    if flags(lw.inf.p.s, n) == 1 {
-        let _ = seam("ir.lower_construct", "`errdefer` is not lowered to PilIR yet: it needs the failure edge of each way out");
-    }
-    lw.defers[lw.defers.len() - 1].push(lhs(lw.inf.p.s, n));
+    let stmt = if flags(lw.inf.p.s, n) == 1 { n } else { lhs(lw.inf.p.s, n) };
+    lw.defers[lw.defers.len() - 1].push(stmt);
     return unit_value(lw, n);
 }

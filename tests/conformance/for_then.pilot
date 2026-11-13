@@ -1,0 +1,44 @@
+// `for .. { .. break value; .. } then fallback` is one value: the value a
+// `break value` gives, or `fallback` when the loop runs to its end. A
+// `break value` leaves the innermost loop only.
+//
+// Expected output, worked by hand:
+//   find([1, 2], 9): no item is 9, so -1.
+//   find([0, 1, 2, 3, 7], 7): the item at index 4, so 4.
+//   first_even([3, 5, 8, 9]) = 8; first_even([1, 3]) = 0 (the fallback).
+//   nested: i = 0: 0 * j is never 2, inner gives -1; i = 1: j = 2 gives
+//   1 * 2 == 2, inner gives 2, outer breaks with 1 * 10 + 2 = 12.
+//   the fallback is not evaluated after a break: `noted` stays 0, then the
+//   loop over nothing evaluates it once: 1.
+var noted = 0;
+
+fn note() -> i64 {
+    noted = noted + 1;
+    return -5;
+}
+
+fn find(xs: List<i64>, t: i64) -> i64 {
+    return for i in 0..xs.len() { if xs[i] == t { break i; } } then -1;
+}
+
+fn first_even(ref xs: i64[]) -> i64 => for x in xs { if x % 2 == 0 { break x; } } then 0;
+
+fn main() {
+    print(find([1, 2], 9));
+    print(find([0, 1, 2, 3, 7], 7));
+    let xs: List<i64> = [3, 5, 8, 9];
+    print(first_even(xs));
+    let odd: List<i64> = [1, 3];
+    print(first_even(odd));
+    let pos = for i in 0..3 {
+        let hit = for j in 0..3 { if i * j == 2 { break j; } } then -1;
+        if hit >= 0 { break i * 10 + hit; }
+    } then -1;
+    print(pos);
+    let early = for i in 0..3 { if i == 1 { break i; } } then note();
+    print(early);
+    print(noted);
+    let none_found = for i in 0..0 { if i == 1 { break i; } } then note();
+    print(none_found);
+    print(noted);
+}

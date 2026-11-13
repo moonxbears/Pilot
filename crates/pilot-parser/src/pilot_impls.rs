@@ -78,6 +78,10 @@ pub const HOOK_TRY_PROTOCOL: &str = "bind_try_protocol";
 /// `f"{x:#_###}"` is `f(x, "#_###")`.
 pub const HOOK_FORMAT_SPEC: &str = "bind_format_spec";
 
+/// The hook that names the type whose values are Unicode scalar values
+/// shown as their character.
+pub const HOOK_SCALAR_TEXT: &str = "bind_scalar_text";
+
 /// The hook that names the function `x in xs` calls: `f(x, xs)`.
 pub const HOOK_MEMBERSHIP: &str = "bind_membership";
 
@@ -188,6 +192,17 @@ impl ParserTables {
     /// The function an f-string hole's format pattern calls, if one is bound.
     pub fn format_spec(&self) -> Option<&str> {
         self.format_spec.as_deref()
+    }
+
+    /// The type whose values are Unicode scalar values, if one is bound.
+    pub fn scalar_text_type(&self) -> Option<&str> {
+        self.scalar_text.as_deref()
+    }
+
+    pub(crate) fn bind_scalar_text(&mut self, type_name: String) {
+        if !type_name.is_empty() {
+            self.scalar_text = Some(type_name);
+        }
     }
 
     /// The function `x in xs` calls, if one is bound.

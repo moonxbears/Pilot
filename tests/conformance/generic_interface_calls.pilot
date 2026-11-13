@@ -1,0 +1,41 @@
+// A function generic over `T : IShape` calls the interface's methods on its
+// parameter; each call reaches the method of the argument's own type.
+//
+// Expected output, worked by hand:
+//   Square { side: 3 }: area 9, name "square".
+//   Rect { w: 2, h: 5 }: area 10, name "rect".
+//   total of the two areas through bigger(): the larger is 10.
+//   describe twice in a row on the same value gives the same line.
+interface IShape {
+    fn area(self) -> i64;
+    fn name(self) -> str;
+}
+
+struct Square : IShape {
+    pub side: i64;
+    pub fn area(self) -> i64 => self.side * self.side;
+    pub fn name(self) -> str => "square";
+}
+
+struct Rect : IShape {
+    pub w: i64;
+    pub h: i64;
+    pub fn area(self) -> i64 => self.w * self.h;
+    pub fn name(self) -> str => "rect";
+}
+
+fn describe<T : IShape>(shape: T) -> str => f"{shape.name()} {shape.area()}";
+
+fn bigger<A : IShape, B : IShape>(a: A, b: B) -> i64 {
+    if a.area() > b.area() { return a.area(); }
+    return b.area();
+}
+
+fn main() {
+    let s = Square { side: 3 };
+    let r = Rect { w: 2, h: 5 };
+    print(describe(s));
+    print(describe(r));
+    print(bigger(s, r));
+    print(describe(s));
+}

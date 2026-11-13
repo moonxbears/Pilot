@@ -243,6 +243,23 @@ impl BytecodeCompiler {
 
     /// Converts the value in `r` to a primitive's register layout: `T(x)` and
     /// `x as T` for a type `T` declared with `[Bits(..)]`.
+    /// Whether `ty` is the type whose values are characters
+    /// (`bind_scalar_text`).
+    pub(crate) fn is_scalar_text(ty: &str) -> bool {
+        pilot_parser::bootstrap_tables().scalar_text_type() == Some(ty)
+    }
+
+    /// `r` as a character (`ops::scalar_from`).
+    pub(crate) fn emit_scalar(&mut self, r: u8) -> u8 {
+        let mark = self.next_reg;
+        let dst = self.emit_intrinsic("scalar_from", &[r]);
+        if dst >= mark {
+            self.emit(Opcode::Move, mark, dst, 0);
+        }
+        self.release_to(mark + 1);
+        mark
+    }
+
     /// `r` as the result of arithmetic in `layout`'s register: wrapped or
     /// rounded when it is a number (`ops::wrap`), itself otherwise.
     pub(crate) fn emit_wrap(&mut self, r: u8, layout: &pilot_parser::RegLayout) -> u8 {
