@@ -162,7 +162,7 @@ fn a_documentation_commit_runs_only_the_cases_that_never_link() {
     assert!(stdout.starts_with("CHANGED 1 files since fcd1a7a~1..fcd1a7a: 2 of "), "{stdout}");
     assert_eq!(
         picked(&stdout),
-        ["tests/conformance/err_import_cycle.pilot", "tests/conformance/err_import_missing.pilot"],
+        ["tests/conformance/errors/err_import_missing.pilot", "tests/conformance/modules/err_import_cycle.pilot"],
         "{stdout}"
     );
 }

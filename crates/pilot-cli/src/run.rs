@@ -172,6 +172,9 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
             DropAction::NumericType => {
                 out.numeric.insert(key, r.a.clone());
             }
+            DropAction::TypeTest => {
+                out.type_tests.insert(key, (r.a.clone(), r.b.clone()));
+            }
             DropAction::Glue | DropAction::CopyGlue => {}
         }
     }

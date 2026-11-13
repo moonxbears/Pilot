@@ -24,6 +24,7 @@ use selfhost.check.copies.*;
 use selfhost.check.consts.*;
 use selfhost.check.receivers.*;
 use selfhost.check.numeric.*;
+use selfhost.check.type_tests.*;
 use selfhost.check.exits.*;
 use selfhost.check.probes.*;
 use selfhost.check.attr_inherit.*;
@@ -79,6 +80,7 @@ fn check_all(inf: Infer, sink: DiagSink) {
     check_aliasing(inf, sink);
     check_layout_attrs(inf, sink);
     check_stack(inf, sink);
+    check_type_tests(inf, sink);
 }
 
 /// Where each owned value of the program is dropped (selfhost/check/drops.pilot),
@@ -110,6 +112,7 @@ fn plan_of(s: Snap, inf: Infer) -> List<any> {
     plan_copies(pl);
     plan_receivers(inf, pl.rows);
     plan_numeric(inf, pl.rows);
+    plan_type_tests(inf, pl.rows);
     var probes: List<List<any>> = [];
     for row in probe_plan(p) {
         let n: i64 = row[0];

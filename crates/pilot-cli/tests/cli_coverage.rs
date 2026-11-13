@@ -1,6 +1,6 @@
 //! Acceptance tests for `[Coverage(modes, to: outputs)]`
 //! (stdlib/core/coverage.pilot; the cross-backend case is
-//! tests/conformance/attr_coverage.pilot).
+//! tests/conformance/types/attr_coverage.pilot).
 //!
 //! - Modes are `CoverageMode` flags joined with `|`: `::Speed` (time and
 //!   statements run), `::Calls`, `::Intrinsics` (big-O by code and

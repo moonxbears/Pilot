@@ -40,7 +40,9 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-const OWNERSHIP: [&str; 4] = ["drop_last_use", "drop_branches_loops", "guard_scope_order", "value_copy"];
+/// Each case as its folder and name under `tests/conformance/`.
+const OWNERSHIP: [&str; 4] =
+    ["memory/drop_last_use", "memory/drop_branches_loops", "control/guard_scope_order", "memory/value_copy"];
 
 fn expected(case: &str) -> String {
     std::fs::read_to_string(root().join(format!("tests/conformance/{case}.stdout"))).expect("expected stdout")
@@ -68,7 +70,7 @@ fn the_ir_interpreter_runs_destructors_guards_and_copies_as_specified() {
 fn native_binaries_run_destructors_guards_and_copies_as_specified() {
     let dir = scratch("ownership");
     for case in OWNERSHIP {
-        let bin = dir.join(case);
+        let bin = dir.join(case.replace('/', "_"));
         let out = pilot(&["build", &format!("tests/conformance/{case}.pilot"), "-o", bin.to_str().expect("utf-8 path")]);
         assert_eq!(out.status.code(), Some(0), "{case}: {}", text(&out.stderr));
         let run = Command::new(&bin).output().expect("run binary");
@@ -80,15 +82,15 @@ fn native_binaries_run_destructors_guards_and_copies_as_specified() {
 fn a_binary_built_to_count_allocations_reports_none_left() {
     let dir = scratch("counted");
     let bin = dir.join("drop_last_use");
-    let out = pilot(&["build", "tests/conformance/drop_last_use.pilot", "-o", bin.to_str().expect("utf-8 path"), "--live-allocations"]);
+    let out = pilot(&["build", "tests/conformance/memory/drop_last_use.pilot", "-o", bin.to_str().expect("utf-8 path"), "--live-allocations"]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let run = Command::new(&bin).output().expect("run binary");
-    assert_eq!(text(&run.stdout), expected("drop_last_use"));
+    assert_eq!(text(&run.stdout), expected("memory/drop_last_use"));
     assert!(text(&run.stderr).contains("live allocations: 0"), "stderr: {}", text(&run.stderr));
 
     // Without the flag the binary says nothing about allocations.
     let plain = dir.join("plain");
-    let out = pilot(&["build", "tests/conformance/drop_last_use.pilot", "-o", plain.to_str().expect("utf-8 path")]);
+    let out = pilot(&["build", "tests/conformance/memory/drop_last_use.pilot", "-o", plain.to_str().expect("utf-8 path")]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let run = Command::new(&plain).output().expect("run binary");
     assert!(!text(&run.stderr).contains("live allocations"), "stderr: {}", text(&run.stderr));
@@ -100,7 +102,7 @@ fn a_binary_built_to_count_allocations_reports_none_left() {
 fn the_allocation_counter_sees_objects_that_are_not_freed() {
     let dir = scratch("unfreed");
     let c = dir.join("records_native.c");
-    let out = pilot(&["build", "tests/conformance/records_native.pilot", "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
+    let out = pilot(&["build", "tests/conformance/types/records_native.pilot", "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let bin = dir.join("records_native");
     let cc = Command::new("cc")

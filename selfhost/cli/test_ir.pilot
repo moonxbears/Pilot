@@ -100,6 +100,7 @@ pub fn test_ir_command(paths: List<str>, filter: str) -> i64 {
     var ran: List<str> = [];
     // The stderr of each case that ran, by position in `ran`.
     var ran_stderr: List<str> = [];
+    var ran_exit: List<i64> = [];
     var i = 0;
     while i < cases.len() {
         let out = runs[i];
@@ -111,6 +112,7 @@ pub fn test_ir_command(paths: List<str>, filter: str) -> i64 {
             if r.problems.len == 0 {
                 ran.push(cases[i]);
                 ran_stderr.push(out.stderr);
+                ran_exit.push(out.exit_code);
             } else {
                 fail(cases[i], r.problems, tally);
             }
@@ -122,8 +124,9 @@ pub fn test_ir_command(paths: List<str>, filter: str) -> i64 {
     while i < ran.len() {
         let out = trips[i];
         // A program the compiler rejects has no PilIR: the round trip stops
-        // with the same diagnostics the run gave.
-        let rejected = out.exit_code == 1 && out.stdout == "" && out.stderr == ran_stderr[i] && out.stderr != "";
+        // as the run did, with the same exit code and diagnostics (1 for a
+        // rejected program, the internal-error code for a checker seam).
+        let rejected = out.exit_code != 0 && out.exit_code == ran_exit[i] && out.stdout == "" && out.stderr == ran_stderr[i] && out.stderr != "";
         if out.exit_code == 0 || rejected {
             tally.passed = tally.passed + 1;
         } else {

@@ -1,0 +1,75 @@
+// ==============================================================================
+// FILE: selfhost/check/type_tests.pilot
+// `x is T`: what kind of value `T` holds, for the seed's test.
+// ==============================================================================
+// The seed holds values by kind (an integer, a float, a string, a record of
+// a named type), not by type, and does not know what `T` names. The run plan
+// tells it: one `TypeTest` row per `x is T` whose `T` is a type the checker
+// knows, `[action, span start, span end, node kind, kind of value, type
+// name]`. The kinds are `whole_number`, `fraction`, `truth`, `text`,
+// `character` and `record` (a struct, by its name). An `is` with no row
+// is refused by the seed.
+//
+// PilIR needs no rows: a union value carries which member it is
+// (selfhost/ir/lower_union.pilot lower_is).
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Check.TypeTests;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.drops.*;
+use selfhost.check.diag.*;
+
+/// Whether `t` is the type at receptor slot `slot`.
+fn is_slot_type(p: Program, t: i64, slot: str) -> bool {
+    let st = prog_slot_type(p, slot);
+    return ty_is_named(p.tt, t) && ty_is_named(p.tt, st) && ty_decl(p.tt, t) == ty_decl(p.tt, st);
+}
+
+/// The kind of value type `t` holds on the seed, or "" when it has none
+/// the seed can test for.
+pub fn value_kind(p: Program, t: i64) -> str {
+    if !ty_is_named(p.tt, t) { return ""; }
+    if is_scalar_type(p, t) { return "character"; }
+    if is_slot_type(p, t, literal_slot(nk_bool())) { return "truth"; }
+    if is_slot_type(p, t, literal_slot(nk_str())) { return "text"; }
+    let class = prog_class(p, t);
+    if is_integer_class(class) { return "whole_number"; }
+    if is_float_class(class) { return "fraction"; }
+    if kind(p.s, ty_decl(p.tt, t)) == nk_struct() { return "record"; }
+    return "";
+}
+
+/// TYPE002: the right side of `x is T` must name a type.
+pub fn check_type_tests(inf: Infer, sink: DiagSink) {
+    let s = inf.p.s;
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_binary() && flags(s, n) == op_is() && rhs(s, n) >= 0 && in_user_file(s, n) {
+            if !ty_is_named(inf.p.tt, type_receiver(inf, rhs(s, n))) {
+                sink_error(sink, rhs(s, n), "TYPE002", f"`{node_text(s, rhs(s, n))}` is not a type: the right side of `is` names the type to test for");
+            }
+        }
+        n = n + 1;
+    }
+}
+
+/// Adds a `TypeTest` row to `rows` for each `x is T` of the linked program
+/// whose `T` names a type with a kind.
+pub fn plan_type_tests(inf: Infer, rows: List<List<any>>) {
+    let p = inf.p;
+    let s = p.s;
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_binary() && flags(s, n) == op_is() && rhs(s, n) >= 0 {
+            let t = type_receiver(inf, rhs(s, n));
+            let k = value_kind(p, t);
+            if k != "" {
+                rows.push([DropAction::TypeTest as i64, span_start(s, n), span_end(s, n), kind(s, n), k, node_name(s, ty_decl(p.tt, t))]);
+            }
+        }
+        n = n + 1;
+    }
+}

@@ -232,7 +232,7 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
     // 3. Verify -- passthrough forwards tokens verbatim to the script without
     //    parsing them as flags. `script_args.pilot` prints the argument count,
     //    then each argument in brackets.
-    let (out_run, err_run, code_run) = pilot_cli("run tests/conformance/script_args.pilot -- --target=native --release");
+    let (out_run, err_run, code_run) = pilot_cli("run tests/conformance/runtime/script_args.pilot -- --target=native --release");
     assert_eq!(
         (out_run.as_str(), code_run),
         ("2\n[--target=native]\n[--release]\n", 0),

@@ -47,16 +47,16 @@ fn the_corpus_runs_on_the_ir_interpreter_or_stops_at_a_seam() {
 #[test]
 fn a_lowered_program_runs_with_the_seed_output() {
     // 10+11+12+13+14 = 60 > 50, so `big`.
-    let out = pilot(&["ir", "run", "tests/conformance/ir_loop_call_join.pilot"]);
+    let out = pilot(&["ir", "run", "tests/conformance/ir/ir_loop_call_join.pilot"]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert_eq!(text(&out.stdout), "60\nbig\n");
-    let trip = pilot(&["ir", "roundtrip", "tests/conformance/ir_loop_call_join.pilot"]);
+    let trip = pilot(&["ir", "roundtrip", "tests/conformance/ir/ir_loop_call_join.pilot"]);
     assert_eq!(trip.status.code(), Some(0), "{}", text(&trip.stderr));
 }
 
 #[test]
 fn printed_ir_is_text_the_parser_reads_back() {
-    let printed = pilot(&["ir", "print", "tests/conformance/structs_methods.pilot"]);
+    let printed = pilot(&["ir", "print", "tests/conformance/types/structs_methods.pilot"]);
     assert_eq!(printed.status.code(), Some(0), "{}", text(&printed.stderr));
     let dir = std::env::temp_dir().join(format!("pilot_f5_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");

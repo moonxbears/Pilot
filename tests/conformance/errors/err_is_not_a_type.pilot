@@ -1,0 +1,7 @@
+// The right side of `is` names a type: `limit` is a value, so the test is
+// rejected.
+fn main() {
+    let limit = 5;
+    let n = 3;
+    print(n is limit);
+}

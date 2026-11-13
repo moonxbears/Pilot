@@ -1,0 +1,92 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_spread.pilot
+// Lowering of a spread call argument to PilIR: `f(a, *xs)`.
+// ==============================================================================
+// The one spread argument fills the parameters the other arguments leave,
+// one item each, read by position. A sequence the engine holds by itself (a
+// list) is read with the engine operation bound to its `[]`, and must hold
+// exactly that many items: with another number the program stops with the
+// seed's CALL001 (crates/pilot-vm/src/lower_args.rs emit_spread). Any other
+// value (a tuple) is an aggregate, read field by field.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerSpread;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_members.*;
+use selfhost.ir.lower_union.*;
+use selfhost.ir.lower_outs.*;
+
+/// `UnaryExpr` flags of `*x` (crates/pilot-ast UNARY_OP_SPLAT).
+pub pure fn unary_spread() -> i64 => 6;
+
+fn is_spread_arg(s: Snap, a: i64) -> bool => kind(s, a) == nk_unary() && flags(s, a) == unary_spread();
+
+/// The call of `decl` with `arg_nodes` when exactly one of them is a spread;
+/// none when there is no spread to lower here (no spread, several, or a
+/// named argument beside it).
+pub fn lower_spread_call(lw: Lowerer, decl: i64, pre: List<u32>, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32? {
+    let s = lw.inf.p.s;
+    var spreads = 0;
+    for a in arg_nodes {
+        if is_spread_arg(s, a) { spreads = spreads + 1; }
+        if kind(s, a) == nk_call_arg() { return none; }
+    }
+    if spreads != 1 { return none; }
+    let params = fn_params(s, decl);
+    let take = params.len() - pre.len() - (arg_nodes.len() - 1);
+    if take < 0 { return none; }
+    let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+    let bool_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
+    var args: List<u32> = [];
+    var at = 0;
+    while at < pre.len() {
+        args.push(coerce(lw, pre[at], physics_of_type_node(lw, rhs(s, params[at])), n));
+        at = at + 1;
+    }
+    for a in arg_nodes {
+        if !is_spread_arg(s, a) {
+            let want = physics_of_type_node(lw, rhs(s, params[at]));
+            args.push(coerce(lw, lower_hinted(lw, a, prog_annot_type(lw.inf.p, rhs(s, params[at]))), want, a));
+            at = at + 1;
+            continue;
+        }
+        let seq_t = value_type(lw, lhs(s, a));
+        let seq = lower_expr(lw, lhs(s, a));
+        let get = if ty_is_named(lw.inf.p.tt, seq_t) { native_for(lw, seq_t, "[]", native_method_hook()) } else { "" };
+        let len_hook = if get != "" { native_for(lw, seq_t, "len", native_property_hook()) } else { "" };
+        if len_hook != "" {
+            // CmpPred 0 is `==`.
+            let len = emit(lw, op_call_intrinsic(), intrinsic_index(lw, len_hook), int_phy, [seq], a);
+            let want_len = emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, take)], a);
+            let ok = ir_add_block(lw.f);
+            let bad = ir_add_block(lw.f);
+            emit_void(lw, op_cond_br(), 0, [emit(lw, op_cmp(), 0, bool_phy, [len, want_len], a), ok, 0, bad, 0], a);
+            switch_to(lw, bad);
+            emit_trap(lw, f"CALL001: `{node_name(s, decl)}` takes {take} argument(s) from the sequence spread with `*`, which holds another number", a);
+            switch_to(lw, ok);
+        }
+        var k = 0;
+        while k < take {
+            let want = physics_of_type_node(lw, rhs(s, params[at]));
+            var item = ir_no_value();
+            if get != "" {
+                let pos = emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, k)], a);
+                item = emit(lw, op_call_intrinsic(), intrinsic_index(lw, get), want, [seq, pos], a);
+            } else {
+                item = emit(lw, op_extract_field(), k, want, [seq], a);
+            }
+            args.push(coerce(lw, item, want, a));
+            at = at + 1;
+            k = k + 1;
+        }
+    }
+    let ret = if annot(s, decl) >= 0 { physics_of_type_node(lw, annot(s, decl)) } else { layout_of(lw.ls, inferred_return(lw, decl)) };
+    let fi = specialized_index(lw, decl, ty_unknown(), []);
+    let no_nodes: List<i64> = [];
+    return call_with_outs(lw, decl, params, fi, args, pre.len(), no_nodes, if ret.layout_id != 0 { ret } else { phy }, n);
+}

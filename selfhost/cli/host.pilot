@@ -105,6 +105,7 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/copies.pilot",
     "selfhost/check/receivers.pilot",
     "selfhost/check/numeric.pilot",
+    "selfhost/check/type_tests.pilot",
     "selfhost/check/attr_text.pilot",
     "selfhost/check/attr_inherit.pilot",
     "selfhost/check/probes.pilot",

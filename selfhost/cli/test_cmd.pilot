@@ -21,8 +21,9 @@
 // expectation files hold the correct output, so each must still fail; one
 // that passes means its bug is fixed and its entry must be retired.
 //
-// Only the top-level `.pilot` files of a directory are programs: packages they
-// import live in subdirectories.
+// The programs of a directory are its top-level `.pilot` files and those of
+// its case folders (subfolders that hold `.stdout` files, one per area of the
+// language); packages the cases import live in subfolders without any.
 pub lvl(0) pkg Pilot.SelfHost.Cli.TestCmd;
 
 use Pilot.Core.File;
@@ -79,16 +80,49 @@ pub fn test_base_name(path: str) -> str {
     return path.slice(at, path.len());
 }
 
-/// The top-level `.pilot` files directly inside `dir`, sorted.
+/// `path` below `prefix` (which ends with `/`), or "" when it is not below it.
+fn test_below(path: str, prefix: str) -> str {
+    let at = path.find(prefix, 0);
+    if at < 0 { return ""; }
+    return path.slice(at + prefix.len(), path.len());
+}
+
+fn test_listed(names: List<str>, name: str) -> bool {
+    for n in names {
+        if n == name { return true; }
+    }
+    return false;
+}
+
+/// The programs of `dir`: its own top-level `.pilot` files, and those of
+/// each case folder directly inside it. A case folder is a subfolder that
+/// holds an expectation file (`.stdout`) of its own, such as
+/// `tests/conformance/errors/`; a folder of packages the cases import
+/// (`lib/`) holds none, and `known_bugs/` is run apart.
 pub fn test_programs_in(dir: str) -> List<str> {
     var out: List<str> = [];
     let prefix = if dir.ends_with("/") { dir } else { dir + "/" };
-    for f in test_lines(File.walk_files(dir)) {
+    let files = test_lines(File.walk_files(dir));
+    var case_dirs: List<str> = [];
+    for f in files {
+        if !f.ends_with(".stdout") { continue; }
+        let rest = test_below(f, prefix);
+        let slash = rest.find("/", 0);
+        if slash > 0 && rest.find("/", slash + 1) < 0 {
+            let sub = rest.slice(0, slash);
+            if sub != test_known_bugs_dir() && !test_listed(case_dirs, sub) { case_dirs.push(sub); }
+        }
+    }
+    for f in files {
         if !f.ends_with(".pilot") { continue; }
-        let at = f.find(prefix, 0);
-        if at < 0 { continue; }
-        let rest = f.slice(at + prefix.len(), f.len());
-        if rest.find("/", 0) < 0 { out.push(f); }
+        let rest = test_below(f, prefix);
+        if rest == "" { continue; }
+        let slash = rest.find("/", 0);
+        if slash < 0 {
+            out.push(f);
+        } else if rest.find("/", slash + 1) < 0 && test_listed(case_dirs, rest.slice(0, slash)) {
+            out.push(f);
+        }
     }
     return out;
 }

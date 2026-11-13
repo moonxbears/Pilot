@@ -594,6 +594,29 @@ impl PilVirtualMachine {
                     None => crate::ops::scalar_from(v),
                 }
             }
+            // `is_kind(v, kind, name)`: whether `v` is a value of the kind the
+            // checker names for a type (`x is T`): a whole number, a fraction,
+            // a truth value, text, a character, the absent value, or a
+            // record of the type `name`.
+            "is_kind" => {
+                let v = arg(args, 0, op)?;
+                let kind = str_arg(args, 1, op)?;
+                let yes = match &*kind {
+                    "whole_number" => v.is_int(),
+                    "fraction" => v.is_float(),
+                    "truth" => v.is_bool(),
+                    "text" => v.is_str(),
+                    "character" => v.as_char().is_some(),
+                    "absent" => v.is_null(),
+                    "record" => {
+                        let name = str_arg(args, 2, op)?;
+                        let ty = v.as_map_handle().and_then(|slot| self.record_types.get(&slot)).copied();
+                        ty.and_then(|t| t.with_str(|s| s == &*name)).unwrap_or(false)
+                    }
+                    other => return Err(format!("`is` cannot test for a value of kind `{other}`")),
+                };
+                Ok(PilotVal::from_bool(yes))
+            }
             // `num_wrap(v, register_class, width)`: see `ops::wrap`.
             "num_wrap" => {
                 let class = str_arg(args, 1, op)?;

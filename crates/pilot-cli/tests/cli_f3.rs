@@ -32,18 +32,18 @@ fn text(out: &Output) -> (String, String, i32) {
 
 #[test]
 fn check_reports_coded_diagnostics_without_running() {
-    let (stdout, stderr, code) = text(&pilot(&["check", "tests/conformance/err_undefined_name.pilot"]));
+    let (stdout, stderr, code) = text(&pilot(&["check", "tests/conformance/errors/err_undefined_name.pilot"]));
     assert_eq!(code, 1, "{stderr}");
     assert_eq!(stdout, "", "check must not run the program");
     assert!(stderr.contains("error[DECL001]: undefined name `missing_value`"), "{stderr}");
-    assert!(stderr.contains("--> tests/conformance/err_undefined_name.pilot:4:11"), "{stderr}");
+    assert!(stderr.contains("--> tests/conformance/errors/err_undefined_name.pilot:4:11"), "{stderr}");
     assert!(stderr.contains("print(missing_value);"), "the source line is shown: {stderr}");
 }
 
 #[test]
 fn check_passes_a_valid_program_without_running_it() {
     // `stdin_lines.pilot` prints as soon as it runs; check prints only its summary.
-    let (stdout, stderr, code) = text(&pilot(&["check", "tests/conformance/stdin_lines.pilot"]));
+    let (stdout, stderr, code) = text(&pilot(&["check", "tests/conformance/runtime/stdin_lines.pilot"]));
     assert_eq!(
         (code, stdout.as_str(), stderr.as_str()),
         (0, "check passed: 1 file(s), no errors\n", "")
@@ -54,8 +54,8 @@ fn check_passes_a_valid_program_without_running_it() {
 fn check_reports_every_file() {
     let (_, stderr, code) = text(&pilot(&[
         "check",
-        "tests/conformance/err_break_outside.pilot",
-        "tests/conformance/err_continue_outside.pilot",
+        "tests/conformance/errors/err_break_outside.pilot",
+        "tests/conformance/errors/err_continue_outside.pilot",
     ]));
     assert_eq!(code, 1);
     assert!(stderr.contains("error[FLOW003]"), "{stderr}");
@@ -134,7 +134,7 @@ fn every_listed_command_works_or_says_it_is_not_implemented() {
 
 #[test]
 fn check_fix_stops_at_its_seam() {
-    let (_, stderr, code) = text(&pilot(&["check", "--fix", "tests/conformance/stdin_lines.pilot"]));
+    let (_, stderr, code) = text(&pilot(&["check", "--fix", "tests/conformance/runtime/stdin_lines.pilot"]));
     assert_ne!(code, 0);
     assert!(stderr.contains("SEAM001: unconnected seam `cli.check_fix`"), "{stderr}");
 }

@@ -71,9 +71,10 @@ fn expected(stem: &str) -> String {
 #[test]
 fn pilot_build_writes_a_binary_with_the_seed_output() {
     let dir = scratch("build");
-    for case in ["closures", "collections", "generator_local", "structs_methods"] {
+    // Each case as its folder and name under `tests/conformance/`.
+    for case in ["control/closures", "collections/collections", "generators/generator_local", "types/structs_methods"] {
         let stem = format!("tests/conformance/{case}");
-        let bin = dir.join(case);
+        let bin = dir.join(case.replace('/', "_"));
         let out = build(&format!("{stem}.pilot"), &bin);
         assert_eq!(out.status.code(), Some(0), "{case}: {}{}", text(&out.stdout), text(&out.stderr));
         let ran = run_binary(&bin, &[], "");
@@ -86,13 +87,13 @@ fn pilot_build_writes_a_binary_with_the_seed_output() {
 fn a_built_binary_reads_its_arguments_and_standard_input() {
     let dir = scratch("io");
     let args_bin = dir.join("script_args");
-    let out = build("tests/conformance/script_args.pilot", &args_bin);
+    let out = build("tests/conformance/runtime/script_args.pilot", &args_bin);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let ran = run_binary(&args_bin, &["--verbose", "two words", ""], "");
     assert_eq!(text(&ran.stdout), "3\n[--verbose]\n[two words]\n[]\n");
 
     let stdin_bin = dir.join("stdin_lines");
-    let out = build("tests/conformance/stdin_lines.pilot", &stdin_bin);
+    let out = build("tests/conformance/runtime/stdin_lines.pilot", &stdin_bin);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     // 5 + 0 + 10 + 20 bytes.
     let ran = run_binary(&stdin_bin, &[], "first\n\nthird line\nlast without newline");
@@ -178,7 +179,7 @@ fn the_benchmarks_build_natively_and_match_their_c_references() {
 fn struct_values_are_c_structs_of_their_field_types() {
     let dir = scratch("records");
     let c = dir.join("records_native.c");
-    let out = pilot(&["build", "tests/conformance/records_native.pilot", "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
+    let out = pilot(&["build", "tests/conformance/types/records_native.pilot", "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let src = std::fs::read_to_string(&c).expect("emitted C");
     let structs: Vec<&str> = src.lines().filter(|l| l.starts_with("typedef struct ")).collect();
@@ -187,9 +188,9 @@ fn struct_values_are_c_structs_of_their_field_types() {
     assert!(structs.iter().any(|l| l.contains("double f2; bool f3; }")), "{structs:?}");
 
     let bin = dir.join("records_native");
-    let out = build("tests/conformance/records_native.pilot", &bin);
+    let out = build("tests/conformance/types/records_native.pilot", &bin);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
-    assert_eq!(text(&run_binary(&bin, &[], "").stdout), expected("tests/conformance/records_native"));
+    assert_eq!(text(&run_binary(&bin, &[], "").stdout), expected("tests/conformance/types/records_native"));
 }
 
 /// The records benchmark (struct values in a list) builds natively and
@@ -224,12 +225,12 @@ fn the_records_benchmark_matches_its_c_reference() {
 fn strings_past_the_short_length_limit_keep_their_length() {
     let dir = scratch("long_strings");
     for stem in [
-        "tests/conformance/collections",
-        "tests/conformance/containers",
-        "tests/conformance/json_rfc8259",
-        "tests/conformance/records_native",
+        "tests/conformance/collections/collections",
+        "tests/conformance/collections/containers",
+        "tests/conformance/text/json_rfc8259",
+        "tests/conformance/types/records_native",
         "benchmarks/native/string_build",
-        "tests/conformance/str_kernels",
+        "tests/conformance/text/str_kernels",
     ] {
         let name = stem.rsplit('/').next().expect("file name");
         let c = dir.join(format!("{name}.c"));

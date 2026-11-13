@@ -2,7 +2,7 @@
 //! seen in the optimized PilIR (`pilot ir opt`) and the emitted C.
 //!
 //! What the programs print is checked by the conformance corpus
-//! (tests/conformance/const_values, const_effects); these tests check how:
+//! (tests/conformance/runtime/const_values, const_effects); these tests check how:
 //! - every `const` holding a number, a boolean or text, and every
 //!   zero-argument function giving one, is no longer called: its value is a
 //!   constant where it was used;
@@ -59,7 +59,7 @@ fn global_line<'a>(ir: &'a str, name: &str) -> &'a str {
 
 #[test]
 fn constants_with_scalar_values_are_not_called() {
-    let ir = pilot_stdout(&["ir", "opt", "tests/conformance/const_values.pilot"]);
+    let ir = pilot_stdout(&["ir", "opt", "tests/conformance/runtime/const_values.pilot"]);
     for name in [
         "const@LIMIT",
         "const@SCALE",
@@ -76,7 +76,7 @@ fn constants_with_scalar_values_are_not_called() {
 
 #[test]
 fn constant_lists_and_maps_are_built_once_at_the_start() {
-    let ir = pilot_stdout(&["ir", "opt", "tests/conformance/const_values.pilot"]);
+    let ir = pilot_stdout(&["ir", "opt", "tests/conformance/runtime/const_values.pilot"]);
     for name in ["PRIMES", "GRID", "INDEX", "once@table"] {
         assert!(global_line(&ir, name).ends_with(" ready"), "{}", global_line(&ir, name));
     }
@@ -84,13 +84,13 @@ fn constant_lists_and_maps_are_built_once_at_the_start() {
     for name in ["const@PRIMES", "const@GRID", "const@INDEX", "table"] {
         assert_eq!(calls_of(&ir, function_index(&ir, name)), 1, "`{name}`");
     }
-    let c = pilot_stdout(&["emit", "c", "tests/conformance/const_values.pilot"]);
+    let c = pilot_stdout(&["emit", "c", "tests/conformance/runtime/const_values.pilot"]);
     assert!(!c.contains("_set ?"), "a global read is still checked");
 }
 
 #[test]
 fn functions_with_effects_or_no_end_are_still_called() {
-    let ir = pilot_stdout(&["ir", "opt", "tests/conformance/const_effects.pilot"]);
+    let ir = pilot_stdout(&["ir", "opt", "tests/conformance/contracts/const_effects.pilot"]);
     assert_eq!(calls_of(&ir, function_index(&ir, "noisy")), 2);
     assert_eq!(calls_of(&ir, function_index(&ir, "forever")), 1);
     assert_eq!(calls_of(&ir, function_index(&ir, "steady")), 0);
@@ -106,7 +106,7 @@ fn c_function<'a>(c: &'a str, name: &str) -> &'a str {
 
 #[test]
 fn constant_lists_of_numbers_are_static_data_in_c() {
-    let c = pilot_stdout(&["emit", "c", "tests/conformance/const_values.pilot"]);
+    let c = pilot_stdout(&["emit", "c", "tests/conformance/runtime/const_values.pilot"]);
     // `const PRIMES = [2, 3, 5, 7, 11];` and the rows of
     // `const GRID = [[1, 2], [3, 4]];` are laid out item by item, and
     // `pure fn table()` (whose body builds [10, 20, 30]) too.

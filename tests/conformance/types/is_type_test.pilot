@@ -1,0 +1,42 @@
+// `x is T` is whether the value `x` is a `T`. For a union it tells which
+// member the value is; for any other value it is whether its type is `T`.
+//
+// Expected output, worked by hand:
+//   kind(5) = "int"; kind("x") = "text".
+//   a Point is a Point, and is not a Size.
+//   5 is an i64 and not a str; 'a' bound to a char is a char.
+//   count_ints over 1, "two", 3: two integers.
+struct Point : IValue {
+    pub x: i64;
+}
+
+struct Size : IValue {
+    pub w: i64;
+}
+
+fn kind(v: union<i64, str>) -> str {
+    if v is i64 { return "int"; }
+    return "text";
+}
+
+fn count_ints(a: i64 | str, b: i64 | str, c: i64 | str) -> i64 {
+    var n = 0;
+    if a is i64 { n = n + 1; }
+    if b is i64 { n = n + 1; }
+    if c is i64 { n = n + 1; }
+    return n;
+}
+
+fn main() {
+    print(kind(5));
+    print(kind("x"));
+    let p = Point { x: 1 };
+    print(p is Point);
+    print(p is Size);
+    let n = 5;
+    print(n is i64);
+    print(n is str);
+    let c: char = 'a';
+    print(c is char);
+    print(count_ints(1, "two", 3));
+}

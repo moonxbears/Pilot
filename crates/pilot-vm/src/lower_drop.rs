@@ -50,6 +50,8 @@ pub enum DropAction {
     ReceiverType = 14,
     /// The node is arithmetic whose result has the named numeric type.
     NumericType = 15,
+    /// The node is `x is T`: the kind of value `T` holds, and `T`'s name.
+    TypeTest = 16,
 }
 
 impl DropAction {
@@ -71,6 +73,7 @@ impl DropAction {
             Self::ReplaceElement,
             Self::ReceiverType,
             Self::NumericType,
+            Self::TypeTest,
         ]
             .into_iter()
             .find(|a| *a as i64 == code)
@@ -150,6 +153,9 @@ pub struct DropPlan {
     /// numbers, with the type the checker inferred for each
     /// (selfhost/check/numeric.pilot).
     pub numeric: HashMap<NodeKey, String>,
+    /// `x is T` nodes, with the kind of value `T` holds and `T`'s name
+    /// (selfhost/check/numeric.pilot plan_type_tests).
+    pub type_tests: HashMap<NodeKey, (String, String)>,
 }
 
 impl DropPlan {
@@ -167,6 +173,7 @@ impl DropPlan {
             && self.element_replace.is_empty()
             && self.receivers.is_empty()
             && self.numeric.is_empty()
+            && self.type_tests.is_empty()
     }
 }
 
@@ -212,6 +219,11 @@ impl BytecodeCompiler {
     /// it is narrower than the engine's own numbers.
     pub(crate) fn planned_numeric(&self, arena: &AstArena, id: NodeId) -> Option<String> {
         self.drop_plan.as_ref()?.numeric.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The kind and type name the checker gives the `x is T` node `id`.
+    pub(crate) fn planned_type_test(&self, arena: &AstArena, id: NodeId) -> Option<(String, String)> {
+        self.drop_plan.as_ref()?.type_tests.get(&key_of(arena, id)).cloned()
     }
 
     pub(crate) fn set_drop_plan(&mut self, plan: DropPlan) {

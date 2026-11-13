@@ -21,6 +21,7 @@ mod int_lit;
 mod open_range;
 mod ret_type;
 mod tuple_member;
+mod switch;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
 use modules::EXCLUDE_RECEPTOR;
 pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
@@ -1060,26 +1061,6 @@ impl<'a> Parser<'a> {
         let body = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() };
         let then_n = if self.is_rec(11) { self.advance(); if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() } } else { NodeId::NONE };
         self.arena.alloc_for(vsym, iter, body, then_n, ByteSpan::new(sp.start, self.prev_span().end)) }
-    fn parse_switch(&mut self) -> NodeId { let sp = self.span(); self.advance();
-        self.no_struct_lit = true; let scrut = self.parse_expr(); self.no_struct_lit = false; self.expect(TokenKind::LBrace);
-        let mut ch = vec![scrut]; while !self.at_end() && !self.at(TokenKind::RBrace) {
-            self.skip_seps(); if self.at(TokenKind::RBrace) || self.at_end() { break; }
-            let asp = self.span(); let pat = if self.is_rec(16) || (self.is_word() && self.text() == "_") { self.advance();
-                self.arena.alloc_node(NodeKind::PatWildcard, 0, asp, 0, 0)
-            } else { if self.is_rec(15) { self.advance(); } self.parse_pattern() };
-            let mut guard = NodeId::NONE;
-            if self.eat(TokenKind::KwIf) || self.is_rec(28) {
-                if self.is_rec(28) { self.advance(); }
-                self.no_struct_lit = true; guard = self.parse_expr(); self.no_struct_lit = false; }
-            let is_colon = self.eat(TokenKind::Colon); if !is_colon { let _ = self.eat(TokenKind::FatArrow); }
-            let body = if self.at(TokenKind::LBrace) { self.parse_block() }
-            else { let mut stmts = Vec::new(); while !self.at_end() && !self.at(TokenKind::RBrace) && !self.is_rec(15) && !self.is_rec(16) {
-                    let m = self.pos; stmts.push(self.parse_stmt()); if self.eat(TokenKind::Comma) || self.pos == m || (!is_colon && stmts.len() == 1) { break; } }
-                if stmts.len() == 1 { let s = stmts[0]; if self.arena.node(s).node_kind() == NodeKind::ExprStmt { NodeId(self.arena.node(s).lhs) } else { s } }
-                else { self.arena.alloc_list_node(NodeKind::BlockExpr, 0, asp, &stmts) } };
-            let _ = self.eat(TokenKind::Comma) || self.eat(TokenKind::Semicolon);
-            ch.push(self.arena.alloc_match_arm(pat, guard, body, ByteSpan::new(asp.start, self.prev_span().end))); }
-        self.expect(TokenKind::RBrace); self.arena.alloc_list_node(NodeKind::MatchExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch) }
     /// Binding power for a literal inside a pattern: tighter than the range
     /// operators (from the Pilot operator table), so `case 4 ..= 9:` keeps the
     /// range as a pattern instead of folding it into the literal.

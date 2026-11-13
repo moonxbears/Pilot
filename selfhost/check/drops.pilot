@@ -126,6 +126,9 @@ pub enum DropAction : u8 {
     /// The node is arithmetic whose result has the named numeric type, of
     /// another width than the engine's numbers (selfhost/check/numeric.pilot).
     NumericType,
+    /// The node is `x is T`: the kind of value `T` holds and `T`'s name
+    /// (selfhost/check/type_tests.pilot).
+    TypeTest,
 }
 
 /// What planning the drops of one program keeps.

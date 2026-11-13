@@ -430,11 +430,15 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
         .and_then(|t| t.split(|c: char| !c.is_ascii_digit()).next())
         .and_then(|n| n.parse().ok())
         .unwrap_or(0);
-    let conformance_programs = std::fs::read_dir(root.join("tests/conformance"))
+    // The programs live in case folders, one per area, under the corpus root.
+    let is_case = |p: &std::path::PathBuf| p.extension().is_some_and(|x| x == "pilot") && p.with_extension("stdout").exists();
+    let conformance_programs: usize = std::fs::read_dir(root.join("tests/conformance"))
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "pilot") && p.with_extension("stdout").exists())
-        .count();
+        .filter(|p| p.is_dir() && p.file_name().is_some_and(|n| n != "known_bugs"))
+        .map(|dir| std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok().map(|e| e.path())).filter(is_case).count())
+        .sum();
+    assert!(conformance_programs > 0, "no conformance programs found under tests/conformance/<area>/");
     assert!(
         scanned >= 2 * conformance_programs,
         "the sandbox must hold every conformance program in both passes ({scanned} < 2 x {conformance_programs})"

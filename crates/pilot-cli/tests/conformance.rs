@@ -1,7 +1,7 @@
 //! Phase F conformance corpus (`MILESTONES_100.md` F1, F3).
 //!
 //! The corpus is run by `pilot test` (`selfhost/cli/test_cmd.pilot`), which
-//! compares each `tests/conformance/<name>.pilot` program's stdout, exit code
+//! compares each `tests/conformance/<area>/<name>.pilot` program's stdout, exit code
 //! and stderr with its expectation files and requires every
 //! `tests/conformance/known_bugs/` program to keep failing. This test only
 //! runs it from the workspace root; `cli_f3.rs` checks that the runner really

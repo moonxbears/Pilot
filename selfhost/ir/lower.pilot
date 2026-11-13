@@ -41,6 +41,7 @@ use selfhost.ir.lower_drop.*;
 use selfhost.ir.lower_probe.*;
 use selfhost.ir.lower_outs.*;
 use selfhost.ir.lower_contract.*;
+use selfhost.ir.lower_spread.*;
 use std.text;
 
 /// The state of one lowering run.
@@ -820,6 +821,7 @@ pub fn lower_binary(lw: Lowerer, n: i64) -> u32 {
     if op == op_pipe() { return lower_pipe(lw, n, lhs(s, n), rhs(s, n)); }
     if op == op_as() { return lower_cast(lw, n, lhs(s, n)); }
     if op == op_coalesce() { return lower_coalesce(lw, n); }
+    if op == op_is() { return lower_is(lw, n); }
     if op == op_pipe_back() { return lower_pipe(lw, n, rhs(s, n), lhs(s, n)); }
     let symbols = binary_op_symbols();
     let bound_fn = if op > 0 && op < symbols.len() { bound(lw, "bind_operator_fn", [symbols[op]]) } else { "" };
@@ -847,8 +849,9 @@ pub fn lower_binary(lw: Lowerer, n: i64) -> u32 {
     // Each side is lowered against the other's type (`x == none`,
     // `c == ::Red`), as far as the lowering knows it.
     // Arithmetic (`"<" + line`) takes each side as it is.
-    let a = if pred < 0 { lower_expr(lw, lhs(s, n)) } else { lower_hinted(lw, lhs(s, n), value_type(lw, rhs(s, n))) };
-    let b = if pred < 0 { lower_expr(lw, rhs(s, n)) } else { lower_hinted(lw, rhs(s, n), value_type(lw, lhs(s, n))) };
+    // An operand that is a union is used as the value it holds.
+    let a = engine_arg(lw, if pred < 0 { lower_expr(lw, lhs(s, n)) } else { lower_hinted(lw, lhs(s, n), value_type(lw, rhs(s, n))) }, value_type(lw, lhs(s, n)), lhs(s, n));
+    let b = engine_arg(lw, if pred < 0 { lower_expr(lw, rhs(s, n)) } else { lower_hinted(lw, rhs(s, n), value_type(lw, lhs(s, n))) }, value_type(lw, rhs(s, n)), rhs(s, n));
     if native != "" { return emit(lw, op_call_intrinsic(), intrinsic_index(lw, native), physics_of(lw, n), [a, b], n); }
     if ir_op != 0 { return emit(lw, ir_op, 0, physics_of(lw, n), [a, b], n); }
     return emit(lw, op_cmp(), pred, physics_of(lw, n), [a, b], n);
@@ -1102,6 +1105,7 @@ pub fn call_decl(lw: Lowerer, decl: i64, pre: List<u32>, arg_nodes: List<i64>, p
     let s = lw.inf.p.s;
     let params = fn_params(s, decl);
     if pre.len() > params.len() { return unsupported(lw, n); }
+    if some spread = lower_spread_call(lw, decl, pre, arg_nodes, phy, n) { return spread; }
     guard some nodes = arrange_args(lw, params, pre.len(), arg_nodes) else { return unsupported(lw, n); }
     // An unannotated parameter takes the type of its argument, and so does
     // one typed by a generic parameter (`t: T`): the function is lowered
@@ -1127,7 +1131,10 @@ pub fn call_decl(lw: Lowerer, decl: i64, pre: List<u32>, arg_nodes: List<i64>, p
     }
     for a in nodes {
         let phy_i = if ty_is_unknown(lw.inf.p.tt, spec[i]) { physics_of_type_node(lw, rhs(s, params[i])) } else { layout_of(lw.ls, spec[i]) };
-        args.push(coerce(lw, lower_hinted(lw, a, prog_annot_type(lw.inf.p, rhs(s, params[i]))), phy_i, a));
+        // An argument for a parameter declared as a union is passed as a
+        // member of it.
+        let param_t = prog_annot_type(lw.inf.p, rhs(s, params[i]));
+        args.push(coerce(lw, as_member_of(lw, lower_hinted(lw, a, param_t), value_type(lw, a), param_t, a), phy_i, a));
         i = i + 1;
     }
     let ret = if annot(s, decl) >= 0 { physics_of_type_node(lw, annot(s, decl)) } else { layout_of(lw.ls, inferred_return(lw, decl)) };

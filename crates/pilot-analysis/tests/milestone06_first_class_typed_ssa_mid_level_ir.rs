@@ -250,7 +250,7 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
             .expect("cargo build -p pilot-cli");
         assert!(st.success(), "Failed building pilot-cli binary");
     }
-    for file in ["tests/ir/loop_params.pir", "tests/conformance/closures.pilot", "tests/conformance/guard_try.pilot", "tests/conformance/defer.pilot"] {
+    for file in ["tests/ir/loop_params.pir", "tests/conformance/control/closures.pilot", "tests/conformance/control/guard_try.pilot", "tests/conformance/control/defer.pilot"] {
         let out = std::process::Command::new(&bin)
             .args(["ir", "roundtrip", file])
             .current_dir(&root)

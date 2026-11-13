@@ -70,7 +70,7 @@ fn program(dir: &Path, file: &str, src: &str) -> String {
     p.to_str().expect("utf-8 path").to_string()
 }
 
-const DEBUG_CASE: &str = "tests/conformance/attr_debug.pilot";
+const DEBUG_CASE: &str = "tests/conformance/types/attr_debug.pilot";
 
 /// Every trace line of `attr_debug.pilot`, in the order the program makes
 /// them (the calls in `main`'s f-string run left to right). `quiet` has no
@@ -147,7 +147,7 @@ fn debug_traces_natively() {
 
 #[test]
 fn debug_rejects_bad_arguments() {
-    let out = pilot(&["run", "tests/conformance/err_attr_debug_level.pilot"]);
+    let out = pilot(&["run", "tests/conformance/errors/err_attr_debug_level.pilot"]);
     let err = text(&out.stderr);
     assert_eq!(out.status.code(), Some(1));
     assert!(err.contains("error[ATTR003]: `Loud` is not a level of `[Debug]`"), "{err}");

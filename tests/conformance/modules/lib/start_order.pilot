@@ -1,5 +1,5 @@
 // A module whose functions keep state in its own globals; imported by
-// tests/conformance/start_order.pilot.
+// tests/conformance/modules/start_order.pilot.
 pkg lib.start_order;
 
 var calls = 0;

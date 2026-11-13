@@ -260,6 +260,24 @@ impl BytecodeCompiler {
     /// `u32`, an `f32`), the result is wrapped or rounded to that type's
     /// register, and a shift count is taken modulo its width.
     fn compile_arithmetic(&mut self, arena: &AstArena, id: NodeId, flags: u16, lhs: u32, rhs: u32) -> u8 {
+        // `x is T`: the checker's plan says what kind of value `T` holds.
+        if flags == BinaryOp::Is as u16 {
+            // The checker rejects an `is` whose right side is no type
+            // (TYPE002); without its plan the test cannot run.
+            let Some((kind, name)) = self.planned_type_test(arena, id) else {
+                return self.emit_trap("`is` needs a type the checker knows on its right".to_string());
+            };
+            let mark = self.next_reg;
+            let r_v = self.compile_node(arena, NodeId(lhs));
+            let r_kind = self.emit_const(PilotVal::from_str(&kind));
+            let r_name = self.emit_const(PilotVal::from_str(&name));
+            let dst = self.emit_intrinsic("is_kind", &[r_v, r_kind, r_name]);
+            if dst >= mark {
+                self.emit(Opcode::Move, mark, dst, 0);
+            }
+            self.release_to(mark + 1);
+            return mark;
+        }
         let planned = self.planned_numeric(arena, id);
         let narrow = planned
             .as_deref()

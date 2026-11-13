@@ -82,6 +82,32 @@ pub fn mixed_item_type(lw: Lowerer, n: i64) -> i64 {
 
 /// `v` of type `from` as a value of type `to`: wrapped in `to`'s record when
 /// `to` is a union `from` is a member of; `v` itself otherwise.
+/// `x is T`: for a union value, whether it holds its member `T` (the tag
+/// says which); for any other value, whether its type is `T`, which the
+/// checker already knows.
+pub fn lower_is(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let tt = lw.inf.p.tt;
+    let vt = value_type(lw, lhs(s, n));
+    let t = type_receiver(lw.inf, rhs(s, n));
+    let bool_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
+    let v = lower_expr(lw, lhs(s, n));
+    if !ty_is_named(tt, t) { return unsupported(lw, n); }
+    if !ty_is_union(tt, vt) {
+        let same = ty_is_named(tt, vt) && ty_decl(tt, vt) == ty_decl(tt, t);
+        return emit(lw, op_const_bits(), 0, bool_phy, [pool_int(lw, if same { 1 } else { 0 })], n);
+    }
+    let members = ty_args(tt, vt);
+    var tag = 0;
+    while tag < members.len() && !(ty_is_named(tt, members[tag]) && ty_decl(tt, members[tag]) == ty_decl(tt, t)) { tag = tag + 1; }
+    if tag == members.len() { return emit(lw, op_const_bits(), 0, bool_phy, [pool_int(lw, 0)], n); }
+    let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+    let held = emit(lw, op_extract_field(), 0, int_phy, [v], n);
+    let want = emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, tag)], n);
+    // CmpPred 0 is `==`.
+    return emit(lw, op_cmp(), 0, bool_phy, [held, want], n);
+}
+
 pub fn as_member_of(lw: Lowerer, v: u32, from: i64, to: i64, n: i64) -> u32 {
     let tt = lw.inf.p.tt;
     if !ty_is_union(tt, to) || from == to { return v; }

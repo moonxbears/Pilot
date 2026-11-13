@@ -119,13 +119,52 @@ impl BytecodeCompiler {
                 .collect(),
             None => Vec::new(),
         };
-        args.iter()
-            .enumerate()
-            .map(|(i, &a)| {
-                let hint = hints.get(i).cloned().flatten();
-                self.compile_with_hint(arena, a, hint)
-            })
-            .collect()
+        // `f(a, *xs)`: the one spread argument fills the parameters the
+        // others leave, one item each.
+        let is_spread = |a: NodeId| {
+            let n = arena.node(a);
+            n.node_kind() == NodeKind::UnaryExpr && n.flags == pilot_ast::UNARY_OP_SPLAT
+        };
+        let spreads = args.iter().filter(|&&a| is_spread(a)).count();
+        let known = self.param_decls.contains_key(key);
+        let take = (hints.len() + spreads).saturating_sub(args.len());
+        let mut regs = Vec::new();
+        for &a in args {
+            if is_spread(a) && spreads == 1 && known {
+                let r_seq = self.compile_node(arena, NodeId(arena.node(a).lhs));
+                self.emit_spread(r_seq, take, key, &mut regs);
+                continue;
+            }
+            let hint = hints.get(regs.len()).cloned().flatten();
+            regs.push(self.compile_with_hint(arena, a, hint));
+        }
+        regs
+    }
+
+    /// The `take` items of the sequence in `r_seq`, each in a register of
+    /// its own appended to `regs`; the program stops when the sequence
+    /// holds another number of items.
+    fn emit_spread(&mut self, r_seq: u8, take: usize, callee: &str, regs: &mut Vec<u8>) {
+        let mark = self.next_reg;
+        let r_len = self.emit_intrinsic("list_len", &[r_seq]);
+        let r_want = self.emit_const(PilotVal::from_int(take as i64));
+        let r_ok = self.alloc_reg();
+        self.emit(Opcode::CmpEq, r_ok, r_len, r_want);
+        let ok = self.emit_branch(Opcode::JumpIfTrue, r_ok, 0);
+        self.emit_trap(format!(
+            "CALL001: `{callee}` takes {take} argument(s) from the sequence spread with `*`, which holds another number"
+        ));
+        self.patch_to_here(ok);
+        self.release_to(mark);
+        for k in 0..take {
+            let r_item = self.alloc_reg();
+            let inner = self.next_reg;
+            let r_k = self.emit_const(PilotVal::from_int(k as i64));
+            let r_v = self.emit_intrinsic("map_get", &[r_seq, r_k]);
+            self.emit(Opcode::Move, r_item, r_v, 0);
+            self.release_to(inner);
+            regs.push(r_item);
+        }
     }
 
     /// Whether any of `args` is named.
