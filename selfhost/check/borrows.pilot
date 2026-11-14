@@ -357,7 +357,8 @@ pub fn check_escapes(inf: Infer, sink: DiagSink) {
     let s = inf.p.s;
     let bw = borrows_new(flow_new(inf, sink));
     var n = 0;
-    while n < s.count {
+    n = s.user_lo;
+    while n < s.user_hi {
         if in_user_file(s, n) { check_node(bw, n); }
         n = n + 1;
     }

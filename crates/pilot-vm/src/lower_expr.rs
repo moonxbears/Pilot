@@ -182,7 +182,7 @@ impl BytecodeCompiler {
             Some(cm) => return self.materialize_cmap(&cm),
             None => {}
         }
-        let field = Self::name(arena, node.rhs).to_string();
+        let field = self.stored_field(arena, NodeId(node.lhs), Self::name(arena, node.rhs));
         // A property of a compile-time collection that is not one of its keys.
         if let (Some(container), Some(hook)) = (
             self.resolve_cmap(arena, NodeId(node.lhs)),

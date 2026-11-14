@@ -104,7 +104,8 @@ pub fn check_purity(inf: Infer, sink: DiagSink) {
     let f = flow_new(inf, sink);
     let ps = PurityScan { e: effects_new(f), cs: const_scan(f), methods: Map<str, str>() };
     var d = 0;
-    while d < s.count {
+    d = s.user_lo;
+    while d < s.user_hi {
         let k = kind(s, d);
         if (k == nk_fn() || k == nk_operator()) && is_pure_decl(s, d) && in_user_file(s, d) {
             for n in body_nodes(s, d) {

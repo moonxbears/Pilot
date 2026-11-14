@@ -1,10 +1,12 @@
 // `become f(x);` is a guaranteed tail call: the callee reuses the caller's
 // frame, so a chain of any length runs in constant stack. Ordinary calls
-// stop at the seed's 10,000-frame limit; this chain is 1,000,000 deep.
+// stop at the seed's 10,000-frame limit; each chain is 100,000 deep or more,
+// ten times that limit. (The chains were 1,000,000 deep until 2026-11-13;
+// on the PilIR interpreter that took over a minute and proved no more.)
 //
 // Expected output, worked by hand:
-//   count(1000000, 0) adds 1 per step: 1000000.
-//   is_even(1000001) alternates even/odd 1,000,001 times and ends in
+//   count(100000, 0) adds 1 per step: 100000.
+//   is_even(100001) alternates even/odd 100,001 times and ends in
 //   is_odd(0) = false.
 //   sum_to(100000, 0) = 100000 * 100001 / 2 = 5000050000.
 fn count(n: i64, acc: i64) -> i64 {
@@ -28,7 +30,7 @@ fn sum_to(n: i64, acc: i64) -> i64 {
 }
 
 fn main() {
-    print(count(1000000, 0));
-    print(is_even(1000001));
+    print(count(100000, 0));
+    print(is_even(100001));
     print(sum_to(100000, 0));
 }

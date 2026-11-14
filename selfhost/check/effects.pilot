@@ -49,17 +49,26 @@ pub fn effects_new(f: Flow) -> Effects {
         let hook = row[0];
         if hook == "bind_native_effect" { e.native_effects.set(row[1] + "@" + row[2], 1); }
     }
+    if inf.p.globals_memo.len() == 0 { inf.p.globals_memo.push(linked_globals(s)); }
+    e.globals = inf.p.globals_memo[0];
+    return e;
+}
+
+/// Every top-level `let` / `var` of the linked program that has a value, by
+/// name. Computed once for a program (`Program.globals_memo`) and shared.
+fn linked_globals(s: Snap) -> Map<str, i64> {
+    let out = Map<str, i64>();
     var i = 0;
     while i < s.count {
         if kind(s, i) == nk_program() && in_linked_file(s, i) {
             for c in children(s, i) {
                 let k = kind(s, c);
-                if (k == nk_let() || k == nk_var()) && lhs(s, c) >= 0 { e.globals.set(node_name(s, c), c); }
+                if (k == nk_let() || k == nk_var()) && lhs(s, c) >= 0 { out.set(node_name(s, c), c); }
             }
         }
         i = i + 1;
     }
-    return e;
+    return out;
 }
 
 /// Whether declaration `n` is written with the modifier registered for

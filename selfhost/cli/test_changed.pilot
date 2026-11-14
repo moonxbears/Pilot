@@ -12,7 +12,8 @@
 //   lowerer for `--ir`, the emitter for `--emit <lang>`), or of the CLI itself,
 //   reaches every case: the tool behaves differently for all of them;
 // * a path in `change_rules()` reaches every case of the modes its rule
-//   names, or none (the gate's ledgers, documentation);
+//   names, or none (the gate's ledgers, documentation, a seed crate's own
+//   `tests/`, which `cargo test` runs);
 // * an expectation file of a case (`<name>.stdout`, `.stderr`, `.exit`,
 //   `.args`, `.stdin`) reaches that case;
 // * a `.pilot` file reaches every case that links it, as the loader resolves
@@ -83,6 +84,10 @@ pub fn change_rules() -> List<ChangeRule> => [
 
 /// The file extensions of documentation, which no case runs.
 fn is_document(path: str) -> bool => path.ends_with(".md") || path.ends_with(".txt");
+
+/// Whether `path` is a test of a seed crate (`crates/<crate>/tests/..`). It
+/// is run by `cargo test`, and no conformance case goes through it.
+fn is_crate_test(path: str) -> bool => path.starts_with("crates/") && path.contains("/tests/");
 
 /// The language of emitter dialect `path` (`selfhost/transpile/emit_<lang>.pilot`), or none.
 fn dialect_lang(path: str) -> str? {
@@ -229,7 +234,7 @@ pub fn select_cases(changed: List<str>, programs: List<str>, engine: TestEngine,
         i = i + 1;
     }
     for f in changed {
-        if is_document(f) { continue; }
+        if is_document(f) || is_crate_test(f) { continue; }
         if is_source_of(f, tool_sources) || is_source_of(f, cli_sources) {
             sel.everything = true;
             sel.why = f"`{f}` is a source of the tools this mode runs";

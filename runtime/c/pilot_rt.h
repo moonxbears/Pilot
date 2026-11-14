@@ -156,6 +156,8 @@ enum {
     PILOT_V_MAP,
     /* A struct value laid out as a C struct (see "Records" below). */
     PILOT_V_REC,
+    /* A character: its Unicode scalar value in `as.u`. */
+    PILOT_V_CHAR,
 };
 
 struct pilot_v_list;
@@ -312,6 +314,41 @@ static inline pilot_val pilot_v_float(double f) {
     return v;
 }
 
+static inline pilot_val pilot_v_char(uint32_t c) {
+    pilot_val v = PILOT_V_NULL;
+    v.tag = PILOT_V_CHAR;
+    v.as.u = c;
+    return v;
+}
+/* The UTF-8 bytes of scalar value `c` into `out`; their count. */
+static inline int pilot_utf8_encode(uint32_t c, char out[4]) {
+    if (c < 0x80) { out[0] = (char)c; return 1; }
+    if (c < 0x800) { out[0] = (char)(0xC0 | (c >> 6)); out[1] = (char)(0x80 | (c & 0x3F)); return 2; }
+    if (c < 0x10000) {
+        out[0] = (char)(0xE0 | (c >> 12)); out[1] = (char)(0x80 | ((c >> 6) & 0x3F)); out[2] = (char)(0x80 | (c & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (c >> 18)); out[1] = (char)(0x80 | ((c >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((c >> 6) & 0x3F)); out[3] = (char)(0x80 | (c & 0x3F));
+    return 4;
+}
+static inline void pilot_put_char(FILE *f, uint32_t c) {
+    char b[4];
+    fwrite(b, 1, (size_t)pilot_utf8_encode(c, b), f);
+}
+/* Integer `v` as a character's code: stops unless it is a Unicode scalar
+   value (at most 0x10FFFF and not a surrogate). */
+static inline uint32_t pilot_scalar_code(int64_t v, bool is_signed) {
+    uint64_t u = (uint64_t)v;
+    if ((is_signed && v < 0) || u > 0x10FFFF || (u >= 0xD800 && u <= 0xDFFF)) {
+        char m[96];
+        if (is_signed) snprintf(m, sizeof m, "%" PRId64 " is not a Unicode scalar value", v);
+        else snprintf(m, sizeof m, "%" PRIu64 " is not a Unicode scalar value", u);
+        pilot_trap(m);
+    }
+    return (uint32_t)u;
+}
+
 static inline bool pilot_v_is_num(pilot_val v) { return v.tag == PILOT_V_INT || v.tag == PILOT_V_UINT || v.tag == PILOT_V_FLOAT; }
 static inline bool pilot_v_is_intlike(pilot_val v) { return v.tag == PILOT_V_INT || v.tag == PILOT_V_UINT; }
 
@@ -325,6 +362,7 @@ static inline const char *pilot_v_kind(pilot_val v) {
     case PILOT_V_FLOAT: return "float";
     case PILOT_V_STR: return "string";
     case PILOT_V_LIST: return "list";
+    case PILOT_V_CHAR: return "character";
     default: return "record";  /* a map or a struct value */
     }
 }
@@ -459,6 +497,7 @@ static void pilot_v_show_into(pilot_v_buf *b, pilot_val v) {
     case PILOT_V_UINT: snprintf(tmp, sizeof tmp, "%" PRIu64, v.as.u); pilot_v_buf_cstr(b, tmp); return;
     case PILOT_V_FLOAT: pilot_v_buf_add(b, tmp, (size_t)pilot_fmt_f64(tmp, v.as.f)); return;
     case PILOT_V_STR: pilot_v_buf_add(b, pilot_v_bytes(&v), pilot_v_len(v)); return;
+    case PILOT_V_CHAR: pilot_v_buf_add(b, tmp, (size_t)pilot_utf8_encode((uint32_t)v.as.u, tmp)); return;
     case PILOT_V_LIST:
         pilot_v_buf_cstr(b, "[");
         for (int64_t i = 0; i < v.as.l->len; i++) {
@@ -582,7 +621,7 @@ static inline pilot_val pilot_v_concat(pilot_val a, pilot_val b) {
 
 /* A value the program's types say is a number: its integer bits. */
 static inline int64_t pilot_v_as_i64(pilot_val v) {
-    if (pilot_v_is_intlike(v)) return v.as.i;
+    if (pilot_v_is_intlike(v) || v.tag == PILOT_V_CHAR) return v.as.i;
     if (v.tag == PILOT_V_BOOL) return v.as.b;
     if (v.tag == PILOT_V_FLOAT) return (int64_t)v.as.f;
     char m[96];
@@ -629,7 +668,7 @@ static inline double pilot_v_to_f64(pilot_val v) {
 /* An integer of `bits` bits, signed or not, as 64 bits the caller narrows. */
 static inline int64_t pilot_v_to_int(pilot_val v, int bits, bool is_signed) {
     if (v.tag == PILOT_V_BOOL) return v.as.b;
-    if (pilot_v_is_intlike(v)) return v.as.i;
+    if (pilot_v_is_intlike(v) || v.tag == PILOT_V_CHAR) return v.as.i;
     if (v.tag != PILOT_V_FLOAT) pilot_v_not_number(v);
     double t = trunc(v.as.f);
     double hi = is_signed ? 9223372036854775808.0 : 18446744073709551616.0;
@@ -716,6 +755,7 @@ static inline bool pilot_v_eq(pilot_val a, pilot_val b) {
     switch (a.tag) {
     case PILOT_V_NULL_TAG: return true;
     case PILOT_V_BOOL: return a.as.b == b.as.b;
+    case PILOT_V_CHAR: return a.as.u == b.as.u;
     case PILOT_V_STR: return pilot_v_str_eq(a, b);
     case PILOT_V_LIST:
         if (a.as.l == b.as.l) return true;
@@ -746,6 +786,7 @@ static inline int pilot_v_order(pilot_val a, pilot_val b) {
     if (a.tag == PILOT_V_STR && b.tag == PILOT_V_STR) {
         return pilot_v_str_cmp(a, b);
     }
+    if (a.tag == PILOT_V_CHAR && b.tag == PILOT_V_CHAR) return a.as.u < b.as.u ? -1 : a.as.u > b.as.u;
     pilot_v_type_error("<", a, b);
     return 0;
 }
@@ -1133,6 +1174,21 @@ static inline pilot_val pilot_str_len(pilot_val x) {
     return pilot_v_int(pilot_v_need_list(x, "take the length of")->len);
 }
 static inline pilot_val pilot_num_pow(pilot_val a, pilot_val b) { return pilot_v_pow(a, b); }
+/* `v` as a character: a character itself, the character an integer codes,
+   or the one character a string holds; any other value as it is. */
+static inline pilot_val pilot_scalar_from(pilot_val v) {
+    if (v.tag == PILOT_V_INT) return pilot_v_char(pilot_scalar_code(v.as.i, true));
+    if (v.tag == PILOT_V_UINT) return pilot_v_char(pilot_scalar_code(v.as.i, false));
+    if (v.tag != PILOT_V_STR) return v;
+    const unsigned char *s = (const unsigned char *)pilot_v_bytes(&v);
+    size_t n = pilot_v_len(v);
+    size_t want = n == 0 ? 0 : s[0] < 0x80 ? 1 : s[0] >= 0xF0 ? 4 : s[0] >= 0xE0 ? 3 : 2;
+    if (n == 0 || n != want) return v;
+    uint32_t c = want == 1 ? s[0] : want == 2 ? (s[0] & 0x1Fu) : want == 3 ? (s[0] & 0x0Fu) : (s[0] & 0x07u);
+    for (size_t i = 1; i < want; i++) c = (c << 6) | (s[i] & 0x3Fu);
+    pilot_v_drop(v);
+    return pilot_v_char(c);
+}
 /* Appends the elements of list `v` (its leaves, when `deep`) to `out`,
    borrowed. */
 static inline void pilot_v_leaves(pilot_v_buf *out, pilot_val v, bool deep) {

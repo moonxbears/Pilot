@@ -55,10 +55,22 @@ fn diag_before(a: HostDiag, b: HostDiag) -> bool =>
 /// The analyzer's and the type checker's diagnostics for a program the seed
 /// accepted, in source order. `for_run`: the program is run next, so the
 /// checker makes its run plan in the same pass (`host_typecheck`).
-fn semantic_diags(path: str, for_run: bool) -> List<HostDiag> {
+fn semantic_diags(path: str, for_run: bool) -> List<HostDiag> =>
+    in_source_order(host_analyze(path), host_typecheck(path, cli_checker_files(), cli_checker_decls(), for_run));
+
+/// Reports the diagnostics a checking tool is waiting on (`host_checked_tool`)
+/// as `pilot run` reports them, errors and warnings; gives the number of
+/// errors. The host calls this as the entry of its own run of the CLI.
+pub fn report_pending_diags() -> i64 {
+    let pending = host_pending_diags();
+    return report_diagnostics(report_at_least(in_source_order(pending[0], pending[1]), diag_severity_warning()));
+}
+
+/// The analyzer's diagnostics and the type checker's, in source order.
+fn in_source_order(analyzed: List<HostDiag>, checked: List<HostDiag>) -> List<HostDiag> {
     var out: List<HostDiag> = [];
-    for d in host_analyze(path) { out.push(d); }
-    for d in host_typecheck(path, cli_checker_files(), cli_checker_decls(), for_run) {
+    for d in analyzed { out.push(d); }
+    for d in checked {
         out.push(d);
         var at = out.len - 1;
         while at > 0 && diag_before(d, out[at - 1]) {
@@ -242,11 +254,11 @@ pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
     let compiled = without_seed_limits(host_check(args[1]));
     if report_diagnostics(compiled) > 0 { return 1; }
-    let analyzed = report_at_least(semantic_diags(args[1], false), diag_severity_warning());
-    if report_diagnostics(analyzed) > 0 { return 1; }
     // The emitter is a toolchain source, found from the toolchain's own
-    // search roots (a language without one stops as an internal error).
-    return host_program_tool(args[1], cli_emit_files(lang), cli_ir_decls(), f"emit_program({lang}_dialect());");
+    // search roots (a language without one stops as an internal error). It
+    // checks the program first; the checker's and analyzer's errors and
+    // warnings are reported as `pilot run` reports them.
+    return host_checked_tool(args[1], cli_emit_files(lang), cli_ir_decls(), f"emit_program_checked({lang}_dialect());");
 }
 
 /// The sources of `pilot emit <lang>`: PilIR, then the source emitters and
@@ -289,9 +301,7 @@ fn identifier(name: str) -> str {
 /// The sources of `pilot ir`: the type checker's analysis, then PilIR.
 pub fn cli_ir_files() -> List<str> {
     var out: List<str> = [];
-    for f in cli_checker_files() {
-        if f != "selfhost/check/main.pilot" { out.push(f); }
-    }
+    for f in cli_checker_files() { out.push(f); }
     for f in [
         "stdlib/std/text.pilot",
         "stdlib/std/io.pilot",
@@ -348,7 +358,7 @@ pub pure fn ir_text_ext() -> str => ".pir";
 /// or reads PilIR text from a `.pir` file (F5).
 pub fn cmd_ir(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
-    if args.len < 2 { return usage_error("`pilot ir` needs a mode (verify, print, opt, run, run-unopt, roundtrip) and a file"); }
+    if args.len < 2 { return usage_error("`pilot ir` needs a mode (verify, print, opt, run, run-unopt, roundtrip, run-roundtrip) and a file"); }
     if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
     if args[1].ends_with(ir_text_ext()) {
         return host_text_tool(args[1], cli_ir_files(), f"ir_text_main(\"{args[0]}\");");
@@ -357,9 +367,6 @@ pub fn cmd_ir(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     // construct only the seed cannot run does not stop it.
     let compiled = without_seed_limits(host_check(args[1]));
     if report_diagnostics(compiled) > 0 { return 1; }
-    // The checker's and analyzer's errors and warnings, as `pilot run` reports them.
-    let analyzed = report_at_least(semantic_diags(args[1], false), diag_severity_warning());
-    if report_diagnostics(analyzed) > 0 { return 1; }
     // The script arguments after `--` reach the program the interpreter runs.
     var script_args = "[";
     var i: usize = 0;
@@ -369,7 +376,9 @@ pub fn cmd_ir(p: ParsedArgs, reg: CommandRegistry) -> i64 {
         i = i + 1;
     }
     script_args = script_args + "]";
-    return host_program_tool(args[1], cli_ir_files(), cli_ir_decls(), f"ir_main(\"{args[0]}\", {script_args});");
+    // The tool checks the program first; the checker's and analyzer's errors
+    // and warnings are reported as `pilot run` reports them.
+    return host_checked_tool(args[1], cli_ir_files(), cli_ir_decls(), f"ir_main_checked(\"{args[0]}\", {script_args});");
 }
 
 /// `text` as a Pilot string literal: quoted, with `\\` and `"` escaped.

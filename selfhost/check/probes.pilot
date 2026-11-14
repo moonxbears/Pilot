@@ -442,7 +442,8 @@ pub fn probe_plan(p: Program) -> List<List<any>> {
     let pkgs = package_decls(p);
     var any_traced = false;
     var f = 0;
-    while f < p.s.count {
+    f = p.s.user_lo;
+    while f < p.s.user_hi {
         if is_attr_fn(p.s, f) && in_user_file(p.s, f) {
             for e in effective_attrs(p, pkgs, f) {
                 if e.name == debug_attr() {
@@ -458,7 +459,8 @@ pub fn probe_plan(p: Program) -> List<List<any>> {
     if !any_traced || nl_get(p.fns, debug_hook()).len() == 0 { return out; }
     let levels = debug_levels(p);
     var n = 0;
-    while n < p.s.count {
+    n = p.s.user_lo;
+    while n < p.s.user_hi {
         if traced_statement(p, n) && in_user_file(p.s, n) {
             let f = enclosing_fn(p, n);
             if f >= 0 && traced.has(key_of(f)) {

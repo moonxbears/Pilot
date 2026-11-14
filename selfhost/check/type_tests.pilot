@@ -46,7 +46,8 @@ pub fn value_kind(p: Program, t: i64) -> str {
 pub fn check_type_tests(inf: Infer, sink: DiagSink) {
     let s = inf.p.s;
     var n = 0;
-    while n < s.count {
+    n = s.user_lo;
+    while n < s.user_hi {
         if kind(s, n) == nk_binary() && flags(s, n) == op_is() && rhs(s, n) >= 0 && in_user_file(s, n) {
             if !ty_is_named(inf.p.tt, type_receiver(inf, rhs(s, n))) {
                 sink_error(sink, rhs(s, n), "TYPE002", f"`{node_text(s, rhs(s, n))}` is not a type: the right side of `is` names the type to test for");

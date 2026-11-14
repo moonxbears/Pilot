@@ -124,6 +124,25 @@ fn an_untracked_case_is_run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// A seed crate's own test is run by `cargo test`; no case goes through it.
+/// A source file of the same crate changes the engine, so every case runs.
+#[test]
+fn a_crate_test_reaches_no_case_but_a_crate_source_reaches_all() {
+    let dir = scratch_repo("crate_test");
+    fs::create_dir_all(dir.join("crates/some/tests")).unwrap();
+    fs::create_dir_all(dir.join("crates/some/src")).unwrap();
+    fs::write(dir.join("crates/some/tests/it.rs"), "// a test\n").unwrap();
+    let (stdout, stderr, code) = pilot_in(&dir, &["test", "--changed"]);
+    assert_eq!((code, stderr.as_str()), (0, ""), "{stdout}");
+    assert_eq!(stdout, "CHANGED 1 files since HEAD: 0 of 2 cases reached\n");
+    fs::write(dir.join("crates/some/src/lib.rs"), "// engine\n").unwrap();
+    let (stdout, stderr, code) = pilot_in(&dir, &["test", "--changed"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("is under `crates/`, which reaches every case of this mode"), "{stdout}");
+    assert_eq!(result_line(&stdout), "RESULT: 2 passed, 0 failed, 0 known bugs reproduced, 0 known bugs fixed");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn nothing_runs_when_no_case_is_reached() {
     let dir = scratch_repo("nothing");

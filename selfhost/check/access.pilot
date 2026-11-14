@@ -98,7 +98,8 @@ pub fn check_access(inf: Infer, sink: DiagSink) {
     let s = p.s;
     let pkgs = unit_packages(s);
     var n = 0;
-    while n < s.count {
+    n = s.user_lo;
+    while n < s.user_hi {
         let k = kind(s, n);
         if (k == nk_ident() || k == nk_member()) && in_user_file(s, n) {
             if k == nk_ident() && inf.r.ref_of[n] < 0 && node_name(s, n) != s.receiver {

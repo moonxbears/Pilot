@@ -81,6 +81,31 @@ fn hand_written_ir_runs_on_the_interpreter() {
     assert_eq!(trip.status.code(), Some(0), "{}", text(&trip.stderr));
 }
 
+/// `run-roundtrip` is `roundtrip` then `run` in one process (what
+/// `pilot test --ir` runs for each case): text that parses but is not what
+/// the printer writes is reported and not run.
+#[test]
+fn run_roundtrip_runs_only_a_module_that_round_trips() {
+    // As `hand_written_ir_runs_on_the_interpreter`: 6 * 7, then 0 + 1 + .. + 5.
+    let out = pilot(&["ir", "run-roundtrip", "tests/ir/loop_params.pir"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout), "42\n15\n");
+    // The same module with a blank line the printer does not write.
+    let dir = std::env::temp_dir().join(format!("pilot_f5_trip_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("spaced.pir");
+    let input = std::fs::read_to_string(root().join("tests/ir/loop_params.pir")).unwrap();
+    std::fs::write(&file, format!("{input}\n")).expect("write IR");
+    let path = file.to_string_lossy().into_owned();
+    let run = pilot(&["ir", "run", &path]);
+    assert_eq!(text(&run.stdout), "42\n15\n", "it still runs: {}", text(&run.stderr));
+    let out = pilot(&["ir", "run-roundtrip", &path]);
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout), "", "a module that does not round-trip is not run");
+    assert!(text(&out.stderr).contains("error: the PilIR text does not round-trip; the program was not run"), "{}", text(&out.stderr));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn module_globals_are_shared_by_every_function() {
     // main stores 5 in global 0, `bump` adds 2 to it twice: 5 + 2 + 2.

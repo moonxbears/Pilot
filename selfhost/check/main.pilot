@@ -59,6 +59,24 @@ pub fn check_and_plan() -> List<any> {
     return [sink.rows, plan_of(s, inf)];
 }
 
+/// The program of snapshot `s`, resolved, inferred and checked, for a tool
+/// that goes on to use it (`pilot ir`, `pilot emit`): the checker's work is
+/// done once, not once to check and again to lower. The host is handed the
+/// diagnostics and reports them as `pilot check` does; it answers with the
+/// number of errors, and a program with any gives none here.
+pub fn checked_program(s: Snap) -> Infer? {
+    let sink = sink_new(s);
+    let p = prog_new(s);
+    let inf = infer_new(p, resolve_program(p, sink));
+    check_all(inf, sink);
+    if report_to_host(sink.rows) > 0 { return none; }
+    return inf;
+}
+
+/// Hands the checker's diagnostic rows to the host (`chk_report` in
+/// crates/pilot-cli/src/check.rs); gives the number of errors it reported.
+fn report_to_host(rows: List<List<any>>) -> i64 => __engine("chk_report", rows);
+
 /// Applies every rule of the checker to the inferred program.
 fn check_all(inf: Infer, sink: DiagSink) {
     let p = inf.p;

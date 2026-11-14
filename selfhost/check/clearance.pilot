@@ -68,7 +68,8 @@ pub fn check_clearance(inf: Infer, sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     var n = 0;
-    while n < s.count {
+    n = s.user_lo;
+    while n < s.user_hi {
         if kind(s, n) == nk_ident() && in_user_file(s, n) && inf.r.ref_of[n] < 0 && node_name(s, n) != s.receiver {
             let name = node_name(s, n);
             let fns = nl_get(p.fns, name);

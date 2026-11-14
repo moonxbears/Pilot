@@ -336,3 +336,12 @@ Probe programs and raw results: `/tmp/claude-1000/-home-moony-Documents-dev-proj
 ### K1: known bug `engine.struct_copy_aliases` fixed (2026-11-13)
 
 A struct that declares no lattice and holds only values (`struct P { pub a: i64; }`) is now copied where it is bound, passed, returned or stored, on every engine: `selfhost/check/copies.pilot` reads the lattice worked out from the fields. The repro moved to `tests/conformance/types/struct_copy_independent.pilot`, with `struct_copy_passed.pilot` beside it; the bug entry is deleted. An optional or a collection (types the engine holds itself) is not copied field by field.
+
+### K1: known bug `engine.with_renamed_field_unseen` fixed (2026-11-13)
+
+After `*Bundle with { count as hits }` the bundle's own methods now read, write and call the host's members under their new names, on the seed and PilIR (and so C, JavaScript and Python). The repro moved to `tests/conformance/types/splice_with_renamed_field.pilot`, with `splice_with_renamed_members.pilot` beside it; the bug entry is deleted. Not covered: a rename through two levels of splicing on the seed, `other.count` on another value of the host type, and a bundle's property accessor reading a renamed field.
+
+### Test fixes (2026-11-13)
+
+- `test_51_3` (crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs) asserted that `database` and `adapter` parse cleanly and used `requires cond` without parentheses. It now uses `requires(..)`/`ensures(..)` and asserts that `database` and `adapter` stop at `keyword.unbuilt`.
+- cli_f7 `the_corpus_passes_natively_with_no_live_allocations` wants 0 seams on `--emit c`. The C emitter now carries `char` (wiring row K1 `char` in emitted C), and `--emit` no longer tries to lower a bodiless `extern` declaration nothing calls (selfhost/ir/lower_global.pilot `user_functions`).

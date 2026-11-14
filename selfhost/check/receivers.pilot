@@ -25,7 +25,8 @@ pub fn plan_receivers(inf: Infer, rows: List<List<any>>) {
     let p = inf.p;
     let s = p.s;
     var n = 0;
-    while n < s.count {
+    n = s.user_lo;
+    while n < s.user_hi {
         if kind(s, n) == nk_call() && in_user_file(s, n) {
             let ch = children(s, n);
             if ch.len() > 0 && kind(s, ch[0]) == nk_member() {

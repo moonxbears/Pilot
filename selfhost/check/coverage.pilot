@@ -271,7 +271,8 @@ pub fn coverage_plan(p: Program) -> List<List<any>> {
     // Covered functions, in source order.
     var units: List<i64> = [];
     var f = 0;
-    while f < s.count {
+    f = s.user_lo;
+    while f < s.user_hi {
         if is_attr_fn(s, f) && in_user_file(s, f) && fn_settings(p, pkgs, quiet, f) != none && entry_of(s, f) != none {
             var at = 0;
             while at < units.len() && span_start(s, units[at]) <= span_start(s, f) { at = at + 1; }

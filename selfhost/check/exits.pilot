@@ -109,7 +109,8 @@ pub fn check_exits(inf: Infer, sink: DiagSink) {
     let fl = flow_new(inf, sink);
     let s = inf.p.s;
     var n = 0;
-    while n < s.count {
+    n = s.user_lo;
+    while n < s.user_hi {
         if in_user_file(s, n) {
             let k = kind(s, n);
             if k == nk_return() && flags(s, n) == tail_call_flag() { check_become(fl, sink, n); }

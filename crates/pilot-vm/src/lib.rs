@@ -249,6 +249,11 @@ pub struct BytecodeCompiler {
     bodiless_fns: std::collections::HashSet<String>,
     /// Functions and methods of imported units, compiled on first use.
     lazy_decls: HashMap<String, lower_program::LazyDecl>,
+    /// `Owner.method` of a method a splice gives -> the names the splice's
+    /// fields have in `Owner` (`*Bundle with { count as hits }`).
+    splice_fields: HashMap<String, std::rc::Rc<HashMap<String, String>>>,
+    /// The renames of the spliced method being compiled, if any.
+    cur_splice_fields: Option<std::rc::Rc<HashMap<String, String>>>,
     /// Names a unit hides with `without`, and that unit.
     excluded: HashMap<String, Option<pilot_span::FileId>>,
     /// The unit of the node being compiled, in a linked program.

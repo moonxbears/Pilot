@@ -206,7 +206,7 @@ impl BytecodeCompiler {
     fn compile_method_call(&mut self, arena: &AstArena, callee_id: NodeId, args: &[NodeId]) -> u8 {
         let callee = *arena.node(callee_id);
         let ln = *arena.node(NodeId(callee.lhs));
-        let r_nm = Self::name(arena, callee.rhs).to_string();
+        let r_nm = self.stored_field(arena, NodeId(callee.lhs), Self::name(arena, callee.rhs));
         let lhs_is_name = matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed);
         let raw_l = if lhs_is_name { Self::name(arena, ln.lhs).to_string() } else { String::new() };
         // A local or module-level binding is a value, not a type name.

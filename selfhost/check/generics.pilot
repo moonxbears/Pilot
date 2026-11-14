@@ -151,7 +151,8 @@ pub fn check_generics(inf: Infer, sink: DiagSink) {
     let b = bounds_new(s);
     var roots: List<i64> = [];
     var i = 0;
-    while i < s.count {
+    i = s.user_lo;
+    while i < s.user_hi {
         if in_user_file(s, i) {
             let k = kind(s, i);
             if annot(s, i) >= 0 { roots.push(annot(s, i)); }

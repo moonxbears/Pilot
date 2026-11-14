@@ -8,4 +8,4 @@ pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitCpp;
 use selfhost.transpile.source.*;
 use selfhost.transpile.c_family.*;
 
-pub fn cpp_dialect() -> ISourceDialect => CFamilyDialect { cpp: true };
+pub fn cpp_dialect() -> ISourceDialect => CFamilyDialect { cpp: true, text_scalars: [] };

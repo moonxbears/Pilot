@@ -450,7 +450,8 @@ fn walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
 pub fn walk_bodies(f: Flow) {
     let s = f.inf.p.s;
     var i = 0;
-    while i < s.count {
+    i = s.user_lo;
+    while i < s.user_hi {
         let k = kind(s, i);
         if (k == nk_fn() || k == nk_operator() || k == nk_lambda()) && in_user_file(s, i) {
             let body = if k == nk_lambda() { rhs(s, i) } else { fn_body(s, i) };

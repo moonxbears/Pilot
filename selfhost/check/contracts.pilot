@@ -82,7 +82,8 @@ pub fn check_contracts(p: Program, sink: DiagSink) {
     let bodies = ct_accessor_bodies(s);
     var done = Map<str, i64>();
     var i = 0;
-    while i < s.count {
+    i = s.user_lo;
+    while i < s.user_hi {
         if kind(s, i) == nk_struct() && in_user_file(s, i) && !done.has(node_name(s, i)) {
             let name = node_name(s, i);
             done.set(name, i);

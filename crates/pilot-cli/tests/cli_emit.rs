@@ -53,11 +53,10 @@ fn the_corpus_runs_as_emitted_javascript() {
     corpus_passes("js");
 }
 
-#[test]
-#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
-fn the_corpus_runs_as_emitted_c_or_stops_at_a_seam() {
-    corpus_passes("c");
-}
+// The corpus as emitted C is run once, by
+// `the_corpus_passes_natively_with_no_live_allocations` in cli_f7.rs: the
+// same `pilot test --emit c` with `--live-allocations`, which checks every
+// expectation this run checked and allows no seam.
 
 #[test]
 fn a_wrong_emitted_output_is_reported() {

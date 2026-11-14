@@ -129,6 +129,12 @@ pub struct Program {
     pub slot_names: Map<str, str>;
     /// Node lists computed once on demand (selfhost/check/generators.pilot).
     pub gen_memo: Map<str, List<i64>>;
+    /// The engine bindings (`prog_engine_bindings`), once computed: empty
+    /// before, one list after.
+    pub engine_memo: List<List<List<str>>>;
+    /// The top-level bindings by name (selfhost/check/effects.pilot), once
+    /// computed: empty before, one map after.
+    pub globals_memo: List<Map<str, i64>>;
 }
 
 fn key(n: i64) -> str => f"{n}";
@@ -201,6 +207,8 @@ pub fn prog_new(s: Snap) -> Program {
         built: [],
         slot_names: Map<str, str>(),
         gen_memo: Map<str, List<i64>>(),
+        engine_memo: [],
+        globals_memo: [],
     };
     var r = 0;
     while r < s.attrs.len() {
@@ -562,8 +570,14 @@ fn engine_arg_text(p: Program, n: i64) -> str {
 }
 
 /// Every `__engine("<hook>", args..)` call of the linked program whose hook
-/// is a string: `[hook, args..]` as text.
+/// is a string: `[hook, args..]` as text. The program is walked once; the
+/// list is shared, so a caller must not change it.
 pub fn prog_engine_bindings(p: Program) -> List<List<str>> {
+    if p.engine_memo.len() == 0 { p.engine_memo.push(scan_engine_bindings(p)); }
+    return p.engine_memo[0];
+}
+
+fn scan_engine_bindings(p: Program) -> List<List<str>> {
     let s = p.s;
     var out: List<List<str>> = [];
     var n = 0;

@@ -41,6 +41,10 @@ pub interface ISourceDialect {
     fn language() -> str;
     /// Whether the language declares a type for every local.
     fn typed() -> bool;
+    /// Told, before anything is emitted, the layouts of the program's
+    /// character values (the results of `text_scalar_op()`), for a dialect
+    /// that holds a character as its code in an integer register.
+    fn note_text_scalars(layouts: List<i64>) {}
     /// Identifiers a function may not be named: keywords, the native entry
     /// point and the dialect's own helpers.
     fn reserved() -> List<str>;
@@ -200,8 +204,17 @@ pub fn dynamic_physics() -> IrTypePhysics => ir_physics_new(0, reg_class_aggrega
 
 /// `pilot emit <lang> <program>`: prints the program in the language of
 /// dialect `d`.
-pub fn emit_program(d: ISourceDialect) -> i64 {
-    let m = lowered_program(snap_load(), true);
+pub fn emit_program(d: ISourceDialect) -> i64 => emit_lowered(lowered_program(snap_load(), true), d);
+
+/// `emit_program` for a program not checked yet: checks it
+/// (`checked_program`) and, when it has no error, lowers what the checker
+/// inferred.
+pub fn emit_program_checked(d: ISourceDialect) -> i64 {
+    if some inf = checked_program(snap_load()) { return emit_lowered(lower_program_rooted(inf, true), d); }
+    return 1;
+}
+
+fn emit_lowered(m: IrModule, d: ISourceDialect) -> i64 {
     var issues = verify_ir_module(m);
     if issues.len() == 0 { issues = run_passes(m, default_passes()); }
     if issues.len() > 0 {
@@ -254,7 +267,29 @@ pub pure fn state_name() -> str => "blk";
 pub pure fn helper_prefix() -> str => "pilot_";
 
 /// The whole module as text, one line per entry, ending in a newline.
+/// The engine operation that makes a character (selfhost/ir/lower.pilot
+/// `scalar_op`).
+pub pure fn text_scalar_op() -> str => "scalar_from";
+
+/// The layouts of the values `text_scalar_op()` gives in `m`.
+fn text_scalar_layouts(m: IrModule) -> List<i64> {
+    var out: List<i64> = [];
+    for f in m.functions {
+        for b in f.blocks {
+            for inst in b.insts {
+                if inst.opcode == op_call_intrinsic() && m.intrinsics[inst.subop] == text_scalar_op() && inst.physics.layout_id != 0 {
+                    var seen = false;
+                    for id in out { if id == inst.physics.layout_id { seen = true; } }
+                    if !seen { out.push(inst.physics.layout_id); }
+                }
+            }
+        }
+    }
+    return out;
+}
+
 pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
+    d.note_text_scalars(text_scalar_layouts(m));
     let u = SourceUnit { m: m, d: d, fn_names: function_names(m, d), global_names: [], out: [], declared: [] };
     for f in m.functions {
         type_untyped_results(f);

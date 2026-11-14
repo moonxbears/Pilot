@@ -97,7 +97,8 @@ fn check_packed_lends(e: Effects, sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     var n = 0;
-    while n < s.count {
+    n = s.user_lo;
+    while n < s.user_hi {
         if kind(s, n) == nk_call() && in_user_file(s, n) {
             let target = call_target(e.flow, n);
             if target >= 0 {
@@ -185,7 +186,8 @@ pub fn check_layout_attrs(inf: Infer, sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     var d = 0;
-    while d < s.count {
+    d = s.user_lo;
+    while d < s.user_hi {
         if in_user_file(s, d) {
             let k = kind(s, d);
             if k == nk_struct() { check_align(p, sink, d); }

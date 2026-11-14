@@ -295,7 +295,8 @@ pub fn user_functions(lw: Lowerer) -> List<i64> {
     var out: List<i64> = [];
     for prog in user_programs(lw, -1) {
         for c in children(s, prog) {
-            if kind(s, c) != nk_fn() || nl_get(p.tparams, key(c)).len() > 0 { continue; }
+            // A declaration without a body (an `extern`) has nothing to lower.
+            if kind(s, c) != nk_fn() || nl_get(p.tparams, key(c)).len() > 0 || fn_body(s, c) < 0 { continue; }
             var typed = true;
             for param in decl_params(s, c) {
                 if rhs(s, param) < 0 { typed = false; }

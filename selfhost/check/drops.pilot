@@ -740,8 +740,8 @@ pub fn drop_planner(inf: Infer) -> DropPlanner {
         }
         b = b + 1;
     }
-    var n = 0;
-    while n < s.count {
+    var n = s.user_lo;
+    while n < s.user_hi {
         if kind(s, n) == nk_expr_stmt() && in_user_file(s, n) { plan_discard(pl, n); }
         if kind(s, n) == nk_assign() && in_user_file(s, n) { plan_element_replace(pl, n); }
         n = n + 1;

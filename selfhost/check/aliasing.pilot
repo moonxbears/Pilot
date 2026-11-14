@@ -181,7 +181,8 @@ pub fn check_aliasing(inf: Infer, sink: DiagSink) {
     let e = effects_new(f);
     let bw = borrows_new(f);
     var n = 0;
-    while n < s.count {
+    n = s.user_lo;
+    while n < s.user_hi {
         if kind(s, n) == nk_call() && in_user_file(s, n) {
             let target = call_target(f, n);
             if target >= 0 {

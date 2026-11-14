@@ -28,6 +28,22 @@ fn diags(list: &[Diag]) -> HostValue {
     HostValue::List(list.iter().map(Diag::to_host).collect())
 }
 
+/// Reports the analyzer's and the checker's diagnostics of a program a tool
+/// is checking, through the CLI's own `report_pending_diags()`, and gives the
+/// number of errors. With nothing to report the CLI is not run.
+fn report_pending(analyzed: &[Diag], checked: &[Diag]) -> i64 {
+    if analyzed.is_empty() && checked.is_empty() {
+        return 0;
+    }
+    let pending = HostValue::List(vec![diags(analyzed), diags(checked)]);
+    let mut cli = cli_host_ops();
+    let ops: HostOpHandler = Box::new(move |op, args| match op {
+        "cli_pending_diags" => Some(Ok(pending.clone())),
+        _ => cli(op, args),
+    });
+    i64::from(tool::eval_cli(crate::CLI, "report_pending_diags();", ops))
+}
+
 /// The CLI's host operations.
 pub fn cli_host_ops() -> HostOpHandler {
     Box::new(|op, args| {
@@ -79,6 +95,11 @@ pub fn cli_host_ops() -> HostOpHandler {
             }
             "cli_program_tool" => {
                 HostValue::Int(i64::from(check::run_on_program(&text(0), &texts(1), &texts(2), &text(3))))
+            }
+            "cli_checked_tool" => {
+                let path = text(0);
+                let report = move |checked: Vec<Diag>| report_pending(&run::analyze(&path), &checked);
+                HostValue::Int(i64::from(check::run_checked_on_program(&text(0), &texts(1), &texts(2), &text(3), report)))
             }
             "cli_program_eval" => check::eval_on_program(&text(0), &texts(1), &texts(2), &text(3)),
             "cli_text_tool" => HostValue::Int(i64::from(tool::run_on_text(&text(0), &texts(1), &text(2)))),

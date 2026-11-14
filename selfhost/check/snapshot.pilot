@@ -168,6 +168,31 @@ pub struct Snap {
     /// Node kind -> where its children are (`child_shapes`).
     pub shapes: List<ChildShape>;
     pub count: i64;
+    /// The nodes of the user's own files all lie in `user_lo .. user_hi`
+    /// (`user_range`); a walk that keeps only those nodes need not leave it.
+    pub user_lo: i64;
+    pub user_hi: i64;
+}
+
+/// `[first, one past the last]` node of a user file (`[0, 0]` when there is
+/// none), from each node's unit and the unit's `is_user` entry in `files`.
+fn user_range(nodes: List<i64>, files: List<List<any>>) -> List<i64> {
+    var user: List<bool> = [];
+    for row in files { user.push(row[1]); }
+    let count = nodes.len() / snap_columns();
+    var lo = -1;
+    var hi = 0;
+    var n = 0;
+    while n < count {
+        let u = nodes[n * 9 + 8];
+        if u >= 0 && u < user.len() && user[u] {
+            if lo < 0 { lo = n; }
+            hi = n + 1;
+        }
+        n = n + 1;
+    }
+    if lo < 0 { return [0, 0]; }
+    return [lo, hi];
 }
 
 /// `[node, value]` rows as a node -> value list (-1 where no row names it).
@@ -192,6 +217,7 @@ pub fn arm_guard(s: Snap, arm: i64) -> i64 => s.arm_guards[arm];
 pub fn snap_load() -> Snap {
     let raw = __engine("chk_snapshot");
     let nodes: List<i64> = raw[0];
+    let range = user_range(nodes, raw[6]);
     return Snap {
         nodes: nodes,
         extra: raw[1],
@@ -215,6 +241,8 @@ pub fn snap_load() -> Snap {
         generator: raw[17],
         shapes: child_shapes(),
         count: nodes.len() / snap_columns(),
+        user_lo: range[0],
+        user_hi: range[1],
     };
 }
 

@@ -5,12 +5,13 @@
 // Every conformance case is eligible except one whose expected stderr is a
 // seed limit (SEED001): that expectation describes what the seed cannot run,
 // which the PilIR interpreter is not bound by. Each case is run as
-// `pilot ir run <case> -- <args>` (its `.stdin` as input) and checked
-// against its expectation files exactly as `pilot test` checks `pilot run`:
-// its output, its diagnostics and runtime errors, and its exit code. Then
-// `pilot ir roundtrip <case>` must succeed: the printed module, parsed and
-// printed again, is the same text; a program the compiler rejects has no
-// module, and its round trip must stop with the same diagnostics.
+// `pilot ir run-roundtrip <case> -- <args>` (its `.stdin` as input), one
+// process that does what `pilot ir roundtrip` and then `pilot ir run` do.
+// The module must round-trip: printed, parsed and printed again, it is the
+// same text (a program the compiler rejects has no module). The run is then
+// checked against the case's expectation files exactly as `pilot test`
+// checks `pilot run`: its output, its diagnostics and runtime errors, and
+// its exit code.
 //
 // A case whose lowering or run stops at a registered `ir.*` seam is counted
 // as stopped at a seam: neither passed nor failed. Every other difference is
@@ -25,6 +26,10 @@ use Pilot.SelfHost.Cli.Report;
 
 /// The seam prefix of the PilIR lowering and interpreter.
 pub pure fn ir_seam_prefix() -> str => "`ir.";
+/// The line `pilot ir run-roundtrip` writes when a module does not
+/// round-trip (`roundtrip_failed()` in selfhost/ir/main.pilot; the CLI does
+/// not link the lowerer).
+pub pure fn roundtrip_failed_line() -> str => "error: the PilIR text does not round-trip; the program was not run";
 /// The diagnostic code of an unconnected seam.
 pub pure fn seam_code() -> str => "SEAM001";
 
@@ -96,41 +101,22 @@ pub fn test_ir_command(paths: List<str>, filter: str) -> i64 {
             if ir_eligible(program) { cases.push(program); } else { tally.not_eligible = tally.not_eligible + 1; }
         }
     }
-    let runs = run_all(cases, "run");
-    var ran: List<str> = [];
-    // The stderr of each case that ran, by position in `ran`.
-    var ran_stderr: List<str> = [];
-    var ran_exit: List<i64> = [];
+    let runs = run_all(cases, "run-roundtrip");
     var i = 0;
     while i < cases.len() {
         let out = runs[i];
         if stopped_at_seam(out) {
             tally.at_seam = tally.at_seam + 1;
             print(f"SEAM {cases[i]}: {seam_line(out)}");
+        } else if out.stderr.find(roundtrip_failed_line(), 0) >= 0 {
+            fail(cases[i], [f"the PilIR text does not round-trip\n--- stderr ---\n{out.stderr}"], tally);
         } else {
             let r = test_check_case(cases[i], out);
             if r.problems.len == 0 {
-                ran.push(cases[i]);
-                ran_stderr.push(out.stderr);
-                ran_exit.push(out.exit_code);
+                tally.passed = tally.passed + 1;
             } else {
                 fail(cases[i], r.problems, tally);
             }
-        }
-        i = i + 1;
-    }
-    let trips = run_all(ran, "roundtrip");
-    i = 0;
-    while i < ran.len() {
-        let out = trips[i];
-        // A program the compiler rejects has no PilIR: the round trip stops
-        // as the run did, with the same exit code and diagnostics (1 for a
-        // rejected program, the internal-error code for a checker seam).
-        let rejected = out.exit_code != 0 && out.exit_code == ran_exit[i] && out.stdout == "" && out.stderr == ran_stderr[i] && out.stderr != "";
-        if out.exit_code == 0 || rejected {
-            tally.passed = tally.passed + 1;
-        } else {
-            fail(ran[i], [f"the PilIR text does not round-trip\n--- stderr ---\n{out.stderr}"], tally);
         }
         i = i + 1;
     }

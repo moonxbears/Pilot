@@ -258,7 +258,8 @@ pub fn check_attr_chains(p: Program, sink: DiagSink) {
     let s = p.s;
     let pkgs = package_decls(p);
     var f = 0;
-    while f < s.count {
+    f = s.user_lo;
+    while f < s.user_hi {
         if is_attr_fn(s, f) && in_user_file(s, f) {
             for st in chain_steps(p, sink, pkgs, f) {
                 if is_user_step(st.kind) {

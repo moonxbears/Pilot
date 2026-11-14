@@ -3,9 +3,9 @@
 // Every chain is deeper than the 10,000 frames ordinary calls may nest.
 //
 // Expected output, worked by hand:
-//   walk(300001, 0, 3): an odd n goes through skip, which only lowers n; an
-//   even n above 0 adds 3. The even values 300000, 299998, .. 2 are 150,000
-//   steps, so acc ends at 450000 and finish doubles it: 900000.
+//   walk(30001, 0, 3): an odd n goes through skip, which only lowers n; an
+//   even n above 0 adds 3. The even values 30000, 29998, .. 2 are 15,000
+//   steps, so acc ends at 45000 and finish doubles it: 90000.
 //   label(3, "x") appends "ab" three times: xababab.
 //   label(20000, "").len() is 2 * 20000 = 40000.
 //   countdown(50000) prints done once and gives nothing back.
@@ -63,7 +63,7 @@ fn build(n: i64, xs: List<i64>) -> i64 {
 }
 
 fn main() {
-    print(walk(300001, 0, 3));
+    print(walk(30001, 0, 3));
     print(label(3, "x"));
     print(label(20000, "").len());
     countdown(50000);

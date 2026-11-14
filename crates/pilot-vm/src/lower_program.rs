@@ -280,7 +280,9 @@ impl BytecodeCompiler {
         let mut no_entry = None;
         match (&decl.kind, decl.owner.as_deref()) {
             (LazyKind::Method { alias }, owner) => {
-                self.compile_fn_decl_as(arena, decl.node, owner, alias.as_deref(), &mut no_entry)
+                let outer = std::mem::replace(&mut self.cur_splice_fields, self.splice_fields.get(name).cloned());
+                self.compile_fn_decl_as(arena, decl.node, owner, alias.as_deref(), &mut no_entry);
+                self.cur_splice_fields = outer;
             }
             (LazyKind::Destructor, Some(owner)) => self.compile_destructor(arena, owner, decl.node),
             (kind, Some(owner)) => self.compile_accessor(arena, name, decl.node, owner, kind),

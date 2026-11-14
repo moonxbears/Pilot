@@ -69,6 +69,11 @@ pub struct BuiltType {
     /// `[bundle name, splice node]` per splice written in a `partial`
     /// declaration, where a finding about that splice is reported.
     pub partial_splices: List<List<any>>;
+    /// `Bundle.member` -> the name a splice's `with { member as name }`
+    /// gives that member in this type, for the splices it writes and the
+    /// ones those splice in turn; `alias_keys` lists the keys.
+    pub aliases: Map<str, str>;
+    pub alias_keys: List<str>;
 }
 
 fn is_method_kind(k: i64) -> bool => k == nk_fn() || k == nk_operator() || k == nk_indexer();
@@ -306,6 +311,8 @@ fn empty_built(p: Program, name: str) -> BuiltType {
         spliced: [],
         delegates: Map<str, i64>(),
         partial_splices: [],
+        aliases: Map<str, str>(),
+        alias_keys: [],
     };
 }
 
@@ -390,6 +397,11 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
         dir.from_partial = in_partial;
         if in_partial { bt.partial_splices.push([bname, u]); }
         bt.spliced.push(bname);
+        for old_name in dir.with_names { note_alias(bt, bname + "." + old_name, dir.with_aliases[old_name]); }
+        for k in sub.alias_keys {
+            let inner = sub.aliases.get(k);
+            note_alias(bt, k, if dir.with_aliases.has(inner) { dir.with_aliases[inner] } else { inner });
+        }
         for mname in sub.names {
             if some m = winner(sub, mname) {
                 let key = bname + "." + mname;
@@ -504,6 +516,20 @@ pub fn prog_member(p: Program, t: i64, member: str) -> Member? {
     return none;
 }
 
+fn note_alias(bt: BuiltType, key: str, name: str) {
+    if !bt.aliases.has(key) { bt.alias_keys.push(key); }
+    bt.aliases.set(key, name);
+}
+
+/// The name member `member` of the splice `bundle` has in type `t`: the
+/// alias `t` gives it (`*Bundle with { member as alias }`), else `member`.
+pub fn prog_spliced_name(p: Program, t: i64, bundle: str, member: str) -> str {
+    if !ty_is_named(p.tt, t) { return member; }
+    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
+    let key = bundle + "." + member;
+    return if bt.aliases.has(key) { bt.aliases.get(key) } else { member };
+}
+
 /// Whether type `t` splices the type named `bundle`.
 pub fn prog_splices(p: Program, t: i64, bundle: str) -> bool {
     if !ty_is_named(p.tt, t) { return false; }
@@ -574,7 +600,8 @@ pub fn check_type_tables(p: Program, sink: DiagSink) {
     let s = p.s;
     var done = Map<str, i64>();
     var i = 0;
-    while i < s.count {
+    i = s.user_lo;
+    while i < s.user_hi {
         let k = kind(s, i);
         if (k == nk_struct() || k == nk_interface()) && in_user_file(s, i) {
             let name = node_name(s, i);

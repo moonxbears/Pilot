@@ -1,7 +1,7 @@
 // `*Bundle with { member as new_name }` splices a bundle's method under a
 // new name; the struct may then declare a method with the old name.
-// (A renamed field the bundle's own methods read is known bug
-// `engine.with_renamed_field_unseen`.)
+// (A renamed field the bundle's own methods read is in
+// splice_with_renamed_field.pilot.)
 //
 // Expected output, worked by hand:
 //   Gauge splices CountBundle with `bump as add_one` and declares its own

@@ -332,7 +332,8 @@ pub fn check_consts(inf: Infer, sink: DiagSink) {
     let cs = const_scan(flow_new(inf, sink));
     let s = inf.p.s;
     var n = 0;
-    while n < s.count {
+    n = s.user_lo;
+    while n < s.user_hi {
         if in_user_file(s, n) {
             let root = starts_place(cs, n);
             if root >= 0 && use_changes(cs, n) { sink_error(sink, n, "CONST001", root_message(cs, root)); }

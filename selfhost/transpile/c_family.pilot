@@ -32,6 +32,19 @@ use std.text;
 pub struct CFamilyDialect : ISourceDialect {
     /// True for C++, false for C.
     pub cpp: bool;
+    /// The layouts of character values (`note_text_scalars`): a register
+    /// of one is boxed and printed as the character it codes.
+    pub text_scalars: List<i64>;
+
+    pub fn note_text_scalars(layouts: List<i64>) {
+        for id in layouts { .text_scalars.push(id); }
+    }
+    fn is_text_scalar(p: IrTypePhysics) -> bool {
+        for id in .text_scalars {
+            if id == p.layout_id { return true; }
+        }
+        return false;
+    }
 
     pub fn language() -> str => if .cpp { "C++" } else { "C" };
     /// Whether values without a C scalar type are the runtime's dynamic
@@ -285,6 +298,13 @@ pub struct CFamilyDialect : ISourceDialect {
             if !is_int(ret) || !is_int(phys[0]) || !is_int(phys[1]) { return none; }
             return f"(({t})pilot_ipow((int64_t)({args[0]}), (int64_t)({args[1]})))";
         }
+        if name == text_scalar_op() && .carries_dynamic() {
+            // A character of an integer's code (checked to be a scalar
+            // value), or of a dynamic value.
+            let made = if is_int(phys[0]) { f"pilot_v_char(pilot_scalar_code((int64_t)({args[0]}), {is_signed(phys[0])}))" }
+                else { f"pilot_scalar_from({self.box(args[0], phys[0])})" };
+            return self.unbox(made, ret);
+        }
         let stream = if name == "rt_print" { "stdout" } else if name == "rt_eprint" { "stderr" } else { "" };
         if stream == "" {
             if !self.carries_dynamic() { return none; }
@@ -296,6 +316,7 @@ pub struct CFamilyDialect : ISourceDialect {
             if i > 0 { parts.push(f"fputc(' ', {stream})"); }
             let p = phys[i];
             let put = if .carries_dynamic() && !scalar(p) { "pilot_v_put" } else if literal[i] { "pilot_put_str" } else if is_bool(p) { "pilot_put_bool" }
+                else if is_int(p) && .is_text_scalar(p) { "pilot_put_char" }
                 else if is_float(p) { "pilot_put_f64" } else if is_int(p) && is_signed(p) { "pilot_put_i64" } else if is_int(p) { "pilot_put_u64" } else { "" };
             if put == "" { return none; }
             parts.push(f"{put}({stream}, {args[i]})");
@@ -504,6 +525,7 @@ pub struct CFamilyDialect : ISourceDialect {
     pub fn box(v: str, p: IrTypePhysics) -> str {
         if is_bool(p) { return f"pilot_v_bool({v})"; }
         if is_float(p) { return f"pilot_v_float((double)({v}))"; }
+        if is_int(p) && .is_text_scalar(p) { return f"pilot_v_char((uint32_t)({v}))"; }
         if is_int(p) && is_signed(p) { return f"pilot_v_int((int64_t)({v}))"; }
         if is_int(p) { return f"pilot_v_uint((uint64_t)({v}))"; }
         return v;

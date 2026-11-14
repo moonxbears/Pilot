@@ -7,7 +7,7 @@ mod run;
 mod tool;
 
 /// The sources of the self-hosted CLI, linked in this order.
-const CLI: &[&str] = &[
+pub(crate) const CLI: &[&str] = &[
     "stdlib/core/file.pilot",
     "stdlib/core/env.pilot",
     "stdlib/core/primitives/map.pilot",

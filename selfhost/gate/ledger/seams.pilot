@@ -351,10 +351,6 @@ pub fn bug_registry() -> List<KnownBug> {
             "a struct literal field key (`Note { summary: s }`) is checked as a use of the top-level item of that name, so a package that builds a record is refused when an importing file declares a private function named like one of its fields",
             "the field is built and read; prints kept, private", "error[MOD003]: `summary` is private to its package and cannot be used here",
             "tests/conformance/known_bugs/field_name_private_fn.pilot", "F4"),
-        known_bug("engine.with_renamed_field_unseen", "bundle splicing on the seed and PilIR",
-            "after `*Bundle with { count as hits }` the bundle's own methods still read `.count`, which the record no longer has: the seed reads none and PilIR stops at `ir.lower_construct`",
-            "the bundle's method reads the renamed field; prints 2, 3, 2", "runtime error: cannot apply `+` to null and integer",
-            "tests/conformance/known_bugs/with_renamed_field_unseen.pilot", "K1"),
     ];
     return entries;
 }

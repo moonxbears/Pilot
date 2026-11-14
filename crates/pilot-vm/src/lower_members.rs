@@ -106,6 +106,7 @@ impl BytecodeCompiler {
                     _ => {}
                 }
             }
+            let renames = std::rc::Rc::new(aliases.clone());
             for source in self.decls_of(arena, &bundle, NodeKind::StructDecl) {
                 for fm in Self::type_members(arena, NodeId(arena.node(source).rhs)) {
                     if !Self::is_method_decl(arena, fm) {
@@ -121,6 +122,9 @@ impl BytecodeCompiler {
                     let exposed = aliases.get(&name).cloned().unwrap_or(name);
                     if taken.insert(exposed.clone()) {
                         self.add_inherited(arena, owner, &exposed, fm);
+                        if !aliases.is_empty() {
+                            self.splice_fields.insert(format!("{owner}.{exposed}"), renames.clone());
+                        }
                     }
                 }
             }
@@ -155,6 +159,23 @@ impl BytecodeCompiler {
                 }
             }
         }
+    }
+
+    /// The name member `field` of `obj` goes by: inside a method a splice
+    /// gives its host, a member of the receiver that the host renamed
+    /// (`with { count as hits }`) is read, written and called under the new
+    /// name.
+    pub(crate) fn stored_field(&self, arena: &AstArena, obj: NodeId, field: &str) -> String {
+        if let Some(renames) = &self.cur_splice_fields {
+            let on = arena.node(obj);
+            let name = if on.node_kind() == NodeKind::IdentExpr { Self::name(arena, on.lhs) } else { "" };
+            if name == crate::RECEIVER || name == &crate::RECEIVER[1..] {
+                if let Some(new) = renames.get(field) {
+                    return new.clone();
+                }
+            }
+        }
+        field.to_string()
     }
 
     /// The declarations named `name` of node kind `kind`.

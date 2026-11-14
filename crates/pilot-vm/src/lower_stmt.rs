@@ -418,7 +418,7 @@ impl BytecodeCompiler {
             NodeKind::MemberExpr => {
                 let ty = self.static_type(arena, NodeId(lhs_n.lhs));
                 let r_obj = self.compile_node(arena, NodeId(lhs_n.lhs));
-                let field = Self::name(arena, lhs_n.rhs).to_string();
+                let field = self.stored_field(arena, NodeId(lhs_n.lhs), Self::name(arena, lhs_n.rhs));
                 let field_ty = ty.as_deref().and_then(|t| self.field_type(t, &field));
                 let rhs_r = self.convert_for_binding(rhs_r, field_ty.as_deref());
                 self.emit_member_write(r_obj, ty.as_deref(), &field, rhs_r)

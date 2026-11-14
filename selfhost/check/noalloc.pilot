@@ -79,7 +79,8 @@ pub fn check_noalloc(inf: Infer, sink: DiagSink) {
     let s = inf.p.s;
     let e = effects_new(flow_new(inf, sink));
     var d = 0;
-    while d < s.count {
+    d = s.user_lo;
+    while d < s.user_hi {
         let k = kind(s, d);
         if (k == nk_fn() || k == nk_operator()) && in_user_file(s, d) && is_noalloc_fn(s, d) {
             if is_generator(inf.p, d) {

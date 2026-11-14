@@ -56,7 +56,8 @@ pub fn check_contract_clauses(inf: Infer, sink: DiagSink) {
     let f = flow_new(inf, sink);
     let ps = PurityScan { e: effects_new(f), cs: const_scan(f), methods: Map<str, str>() };
     var d = 0;
-    while d < s.count {
+    d = s.user_lo;
+    while d < s.user_hi {
         let k = kind(s, d);
         if (k == nk_fn() || k == nk_operator()) && in_user_file(s, d) {
             let name = node_name(s, d);
