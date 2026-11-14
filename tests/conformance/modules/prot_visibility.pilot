@@ -1,0 +1,21 @@
+// `prot` reaches derived types and `ext` blocks, and `pkg` reaches other files in the same package.
+use lib.vault;
+
+interface IBase {
+    prot pure fn tag() -> i64 => 42;
+}
+
+struct Sub : IBase {
+    pub fn read_tag() -> i64 => self.tag();
+}
+
+ext Safe {
+    pub fn read_badge() -> i64 => self.badge;
+}
+
+fn main() {
+    let s = safe(10);
+    let sub = Sub {};
+    // s.badge == 12, sub.read_tag() == 42, peer_shared() == 100
+    println(f"{s.read_badge()} {sub.read_tag()} {peer_shared()}");
+}

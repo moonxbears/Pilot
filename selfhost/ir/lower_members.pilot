@@ -567,6 +567,23 @@ pub fn lower_index_assign(lw: Lowerer, n: i64) -> u32 {
 
 /// `[a, b]`: the literal's type built and appended to as `bind_list_literal`
 /// names (`List()`, then `push(a)`, `push(b)`).
+pub fn unpack_method_type(lw: Lowerer, t: i64, method: str) -> i64 {
+    if some m = prog_member(lw.inf.p, t, method) {
+        return prog_member_type(lw.inf.p, m);
+    }
+    return t;
+}
+
+pub fn lower_unpack_operand(lw: Lowerer, operand: i64, method: str) -> u32 {
+    let t = value_type(lw, operand);
+    let v = lower_expr(lw, operand);
+    if some m = prog_member(lw.inf.p, t, method) {
+        let ret_t = prog_member_type(lw.inf.p, m);
+        return call_method(lw, v, t, m, [], layout_of(lw.ls, ret_t), operand);
+    }
+    return v;
+}
+
 pub fn lower_list_literal(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let t = value_type(lw, n);
@@ -585,7 +602,8 @@ pub fn lower_list_literal(lw: Lowerer, n: i64) -> u32 {
         if is_spread(s, item) {
             let deep = if flags(s, item) == unary_deep_flatten() { 1 } else { 0 };
             let d = emit(lw, op_const_bits(), 0, bool_phy, [pool_int(lw, deep)], item);
-            let v = lower_expr(lw, lhs(s, item));
+            let method = if deep == 1 { "flat" } else { "unpack" };
+            let v = lower_unpack_operand(lw, lhs(s, item), method);
             let _ = emit(lw, op_call_intrinsic(), intrinsic_index(lw, extend), phy, [list, v, d], item);
         } else if ty_is_union(lw.inf.p.tt, element_type(lw.inf.p, t)) {
             // An item of a mixed list is pushed as a value of the union.
@@ -610,6 +628,55 @@ fn is_spread(s: Snap, item: i64) -> bool {
 /// `["k": v]` and `{name: v}`: the engine-built map the core binds for map
 /// literals, filled with its bound `set`. A bare name before `:` is its own
 /// text as the key.
+fn lower_map_spread_item(lw: Lowerer, map: u32, set: str, item: i64) -> bool {
+    let s = lw.inf.p.s;
+    let operand = lhs(s, item);
+    if operand < 0 { return false; }
+    let raw_t = value_type(lw, operand);
+    let src_t = unpack_method_type(lw, raw_t, "unpack_pairs");
+    let src = lower_unpack_operand(lw, operand, "unpack_pairs");
+    let src_name = type_name_of(lw, src_t);
+    let keys_hook = bound(lw, native_member_hook(), [src_name, "for_seq"]);
+    let len_hook = bound(lw, native_member_hook(), [src_name, "for_len"]);
+    let key_get = bound(lw, native_member_hook(), [src_name, "for_get"]);
+    let val_get = native_for(lw, src_t, "[]", native_method_hook());
+    if keys_hook != "" && len_hook != "" && key_get != "" && val_get != "" {
+        let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+        let bool_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
+        let keys = emit(lw, op_call_intrinsic(), intrinsic_index(lw, keys_hook), layout_unknown(lw.ls), [src], item);
+        let len = emit(lw, op_call_intrinsic(), intrinsic_index(lw, len_hook), int_phy, [keys], item);
+        let slot = emit(lw, op_stack_slot(), 0, int_phy, [], item);
+        emit_void(lw, op_store(), 0, [slot, emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, 0)], item)], item);
+        let head = ir_add_block(lw.f);
+        let body = ir_add_block(lw.f);
+        let exit = ir_add_block(lw.f);
+        jump_to(lw, head, [], item);
+        switch_to(lw, head);
+        let idx = emit(lw, op_load(), 0, int_phy, [slot], item);
+        emit_void(lw, op_cond_br(), 0, [emit(lw, op_cmp(), 2, bool_phy, [idx, len], item), body, 0, exit, 0], item);
+        switch_to(lw, body);
+        let k = emit(lw, op_call_intrinsic(), intrinsic_index(lw, key_get), layout_unknown(lw.ls), [keys, idx], item);
+        let v = emit(lw, op_call_intrinsic(), intrinsic_index(lw, val_get), layout_unknown(lw.ls), [src, k], item);
+        let _ = emit(lw, op_call_intrinsic(), intrinsic_index(lw, set), layout_unknown(lw.ls), [map, k, v], item);
+        let one = emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, 1)], item);
+        emit_void(lw, op_store(), 0, [slot, emit(lw, op_add(), 0, int_phy, [idx, one], item)], item);
+        jump_to(lw, head, [], item);
+        switch_to(lw, exit);
+        return true;
+    }
+    let fs = fields_of(lw, src_t);
+    if fs.len() == 0 { return false; }
+    var slot = 0;
+    while slot < fs.len() {
+        let f = fs[slot];
+        let k = emit(lw, op_const_bytes(), 0, layout_unknown(lw.ls), [pool_str(lw, f.canonical_name)], item);
+        let v = emit(lw, op_extract_field(), slot, field_physics(lw, src_t, f.canonical_name), [src], item);
+        let _ = emit(lw, op_call_intrinsic(), intrinsic_index(lw, set), layout_unknown(lw.ls), [map, k, v], item);
+        slot = slot + 1;
+    }
+    return true;
+}
+
 pub fn lower_map_literal(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     var map_type = "";
@@ -629,7 +696,13 @@ pub fn lower_map_literal(lw: Lowerer, n: i64) -> u32 {
     let map = emit(lw, op_call_intrinsic(), intrinsic_index(lw, make), phy, [], n);
     let ch = children(s, n);
     var i = 0;
-    while i + 1 < ch.len() {
+    while i < ch.len() {
+        if kind(s, ch[i]) == nk_unary() && flags(s, ch[i]) == unary_double_splat() {
+            if !lower_map_spread_item(lw, map, set, ch[i]) { return unsupported(lw, n); }
+            i = i + 1;
+            continue;
+        }
+        if i + 1 >= ch.len() { return unsupported(lw, n); }
         let k = ch[i];
         let key_value = if kind(s, k) == nk_ident() && binding_index(lw, k) < 0 {
             emit(lw, op_const_bytes(), 0, layout_unknown(lw.ls), [pool_str(lw, node_name(s, k))], k)
@@ -639,7 +712,6 @@ pub fn lower_map_literal(lw: Lowerer, n: i64) -> u32 {
         let _ = emit(lw, op_call_intrinsic(), intrinsic_index(lw, set), layout_unknown(lw.ls), [map, key_value, lower_expr(lw, ch[i + 1])], k);
         i = i + 2;
     }
-    if i < ch.len() { return unsupported(lw, n); }
     return map;
 }
 

@@ -538,6 +538,25 @@ pub fn prog_spliced_name(p: Program, t: i64, bundle: str, member: str) -> str {
     return if bt.aliases.has(key) { bt.aliases.get(key) } else { member };
 }
 
+/// The method declaration that `type_name.method_name` overrides from a spliced
+/// bundle/facet or a base interface, or -1 if none exists.
+pub fn prog_overridden_member(p: Program, type_name: str, method_name: str) -> i64 {
+    let s = p.s;
+    let bt = build_type(p, type_name, 0);
+    for bname in bt.spliced {
+        let sub = build_type(p, bname, 0);
+        if some m = winner(sub, method_name) { return m.decl; }
+    }
+    for b in nl_get(p.bases, type_name) {
+        let it = prog_annot_type(p, b);
+        if !ty_is_named(p.tt, it) { continue; }
+        let iname = node_name(s, ty_decl(p.tt, it));
+        let sub = build_type(p, iname, 0);
+        if some m = winner(sub, method_name) { return m.decl; }
+    }
+    return -1;
+}
+
 /// Whether type `t` splices the type named `bundle`.
 pub fn prog_splices(p: Program, t: i64, bundle: str) -> bool {
     if !ty_is_named(p.tt, t) { return false; }

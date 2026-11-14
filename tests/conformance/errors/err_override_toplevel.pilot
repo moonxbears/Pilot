@@ -1,0 +1,5 @@
+override fn describe() -> str => "shop";
+
+fn main() {
+    println("never");
+}

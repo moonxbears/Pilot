@@ -410,12 +410,56 @@ fn member_type(inf: Infer, n: i64) -> i64 {
     return ty_unknown();
 }
 
+/// `xs as view T` (selfhost/check/view_cast.pilot checks it).
+/// The operator symbol `as view` is bound under (crates/pilot-ast
+/// `BinaryOp::symbol`).
+pub pure fn view_symbol() -> str => "as view";
+
+/// The function `as view` node `n` calls, or -1: of the functions the
+/// program binds `as view` to, the one whose first parameter takes the
+/// type of `xs` (a `List`), else the first bound.
+pub fn view_fn(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    let src = type_of(inf, lhs(s, n));
+    var first = -1;
+    for row in prog_engine_bindings(p) {
+        if row.len() >= 3 && row[0] == "bind_operator_fn" && row[1] == view_symbol() {
+            let fns = nl_get(p.fns, row[2]);
+            if fns.len() == 1 {
+                if first < 0 { first = fns[0]; }
+                let params = fn_params(s, fns[0]);
+                if params.len() > 0 && ty_is_named(p.tt, src) {
+                    let pt = prog_annot_type(p, rhs(s, params[0]));
+                    if ty_is_named(p.tt, pt) && ty_decl(p.tt, pt) == ty_decl(p.tt, src) { return fns[0]; }
+                }
+            }
+        }
+    }
+    return first;
+}
+
+/// The type of `xs as view T`: the chosen function's return type over the
+/// element type of `xs` and `T`, or the unknown type.
+pub fn view_type(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    let f = view_fn(inf, n);
+    if f < 0 || annot(s, f) < 0 { return ty_unknown(); }
+    let ret = prog_annot_type(p, annot(s, f));
+    if !ty_is_named(p.tt, ret) { return ty_unknown(); }
+    let elem = element_type(p, type_of(inf, lhs(s, n)));
+    let target = prog_annot_type(p, rhs(s, n));
+    return ty_named(p.tt, ty_decl(p.tt, ret), p.tt.name[ret], [elem, target]);
+}
+
 fn binary_type(inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     let op = flags(s, n);
     if (op >= op_eq() && op <= op_or()) || op == op_is() { return prog_slot_type(p, literal_slot(nk_bool())); }
-    if op == op_as() || op == op_as_view() { return prog_annot_type(p, rhs(s, n)); }
+    if op == op_as() { return prog_annot_type(p, rhs(s, n)); }
+    if op == op_as_view() { return view_type(inf, n); }
     if op == op_coalesce() {
         let inner = unwrap_type(p, type_of(inf, lhs(s, n)));
         return if ty_is_unknown(p.tt, inner) { type_of(inf, rhs(s, n)) } else { inner };

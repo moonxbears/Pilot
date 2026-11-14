@@ -175,6 +175,10 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
             DropAction::TypeTest => {
                 out.type_tests.insert(key, (r.a.clone(), r.b.clone()));
             }
+            DropAction::ViewCast => {
+                let args = r.b.split_whitespace().filter_map(|w| w.parse().ok()).collect();
+                out.view_casts.insert(key, (r.a.clone(), args));
+            }
             DropAction::Glue | DropAction::CopyGlue => {}
         }
     }

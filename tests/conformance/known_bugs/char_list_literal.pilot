@@ -1,0 +1,11 @@
+// KNOWN BUG engine.char_list_literal: the elements of a `char[]` literal are
+// kept as one-character text, not as characters, so `cs[i] as u32` fails
+// (the seed after the first read, PilIR and C at once) or prints the text
+// (JavaScript, Python).
+// Expected by hand: the code points of 'A' and 'b' are 65 and 98.
+fn main() {
+    let cs: char[] = ['A', 'b'];
+    let c: char = cs[0];
+    print(c as u32);
+    print(cs[1] as u32);
+}

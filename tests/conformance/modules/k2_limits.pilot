@@ -1,0 +1,77 @@
+// Comprehensive runnable verification of K2 visibility (`pub`, `pkg`, `prot`, `priv`, `file`)
+// and K1 unpacking (`pairs`/`**`, `splat`/`*`, `flat`/`*..`, `ISplatOperator`, `IPairsOperator`, `IFlattenOperator`).
+use lib.vault;
+
+// --- 1. Multi-level `prot` inheritance across interfaces & structs ---
+interface IGrandBase {
+    prot pure fn grand_code() -> i64 => 100;
+}
+
+interface IMid : IGrandBase {
+    prot pure fn mid_code() -> i64 => 20;
+}
+
+struct Leaf : IMid {
+    priv inner: i64;
+    prot shared_prot: i64;
+    pub fn compute() -> i64 => self.grand_code() + self.mid_code() + self.inner + self.shared_prot;
+}
+
+// `ext` on a local struct can read `prot` members (but not `priv` members).
+ext Leaf {
+    pub fn ext_prot() -> i64 => self.shared_prot;
+}
+
+// `ext` on an imported struct (`lib.vault.Safe`) can read its `prot` member `.badge`.
+ext Safe {
+    pub fn ext_badge() -> i64 => self.badge;
+}
+
+// --- 2. File-local, pkg-local, and priv top-level functions ---
+priv fn local_priv() -> i64 => 1;
+file fn local_file() -> i64 => 2;
+pkg fn local_pkg() -> i64 => 3;
+
+// --- 3. `pairs` / `splat` / `flat` + operator interfaces ---
+struct PairSrc {
+    a: i64,
+    b: i64,
+}
+
+struct CustomSeq : ISplatOperator<List<i64>>, IFlattenOperator<i64> {
+    items: List<i64>,
+    nested: List<List<i64>>,
+    pub pure fn unpack() -> List<i64> => self.items;
+    pub pure fn flat() -> slice<i64> => self.nested[0];
+}
+
+struct CustomPairs : IPairsOperator<Map<str, i64>> {
+    k_val: i64,
+    pub pure fn unpack_pairs() -> Map<str, i64> => ["custom": self.k_val, "b": 99];
+}
+
+fn sum3(x: i64, y: i64, z: i64) -> i64 => x + y + z;
+
+fn main() {
+    // Cross-package `pub`, `pkg` (via `lib.vault_peer.peer_shared()`), and `prot` (via `ext Safe`)
+    let s = safe(10); // peek=20, rank=11, badge=12, total=1111, peer_shared=100
+    println(f"vault: total={total()} peer_shared={peer_shared()} peek={s.peek()} rank={s.rank()} ext_badge={s.ext_badge()}");
+
+    // Transitive `prot` inheritance + `priv` in-struct + `ext` `prot` + top-level `priv`/`file`/`pkg`
+    let leaf = Leaf { inner: 4, shared_prot: 5 };
+    let local_vis = local_priv() + local_file() + local_pkg();
+    println(f"leaf: compute={leaf.compute()} ext_prot={leaf.ext_prot()} local_vis={local_vis}");
+
+    // `**` / `pairs(...)` on maps, structs, and `IPairsOperator` (later entry overrides earlier)
+    let m_base: Map<str, i64> = ["a": 1, "b": 2];
+    let cp = CustomPairs { k_val: 77 };
+    let merged: Map<str, i64> = ["init": 0, **m_base, pairs(cp), "tail": 8];
+    let from_struct: Map<str, i64> = { **PairSrc { a: 10, b: 20 }, c: 30 };
+    println(f"pairs: init={merged[\"init\"]} a={merged[\"a\"]} b={merged[\"b\"]} custom={merged[\"custom\"]} tail={merged[\"tail\"]}");
+    println(f"struct_pairs: a={from_struct[\"a\"]} b={from_struct[\"b\"]} c={from_struct[\"c\"]}");
+
+    // `*` / `splat` and `*..` / `flat` on lists, `ISplatOperator`, `IFlattenOperator`, and spread calls
+    let seq = CustomSeq { items: [20, 30], nested: [[7, 8], [9]] };
+    let flat_list = [1, *seq, *..seq, 99];
+    println(f"splat_flat: len={flat_list.len()} sum3={sum3(10, *seq)} last={flat_list[flat_list.len() - 1]}");
+}

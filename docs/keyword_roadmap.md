@@ -144,11 +144,11 @@ These keywords cannot become real until the owner says what they mean. An agent 
 - `pairs`: structural unpack on all engines (SEED001 and `ir.lower_construct` today).
 - `become`: **done 2026-11-13.** A tail call becomes a jump in PilIR (selfhost/ir/lower_tail.pilot), so the interpreter, C, JavaScript and Python all run it in constant stack. Left: a call through a function value, and a `become` with a value to release after the call (`ir.lower_construct`).
 - `use`: an aliased module call lowered on PilIR and C.
-- `as`: the `as view` family (known bug `seed.view_reinterpret_identity`).
+- `as`: the `as view` family: views between primitive integers and floats of any width, little-endian, writable over a `List`, work on every engine through a stand-in (`reinterpret.element_bits`, done 2026-11-14, `numbers/as_view_slices`, `numbers/as_view_widths`); `char` views wait for known bug `engine.char_list_literal`; records and views over real memory are M38.
 - `ext`: a call on the wrong receiver type is rejected (known bug `check.ext_wrong_receiver`).
 - `coalesce`, `with`, `without`: a hidden member is rejected by the checker, not at run time.
 - `self`: drop timing matches the registry's promise, or the promise is corrected.
-- Rows held back only by an open known bug: `let`, `if`, `return`, `guard`, `catch`. Fix the bug (for example `if_some_foreign_let`, `struct_ok_unwrapped`), move its program into the corpus, and remove its workarounds.
+- Rows held back only by an open known bug: `let`, `if`, `return`, `guard`, `catch`. Fix the bug (for example `struct_ok_unwrapped`; `if_some_foreign_let` was fixed 2026-11-14, `control/if_some_foreign_let`), move its program into the corpus, and remove its workarounds.
 
 **Exit:** every keyword above at rung 4, or moved to a later phase with its blocker named.
 

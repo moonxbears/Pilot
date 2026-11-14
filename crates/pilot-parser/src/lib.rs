@@ -47,7 +47,7 @@ pub enum TypeConstructRule { Prefix { op: String, param: String, template: Templ
     NamedGeneric { name: String, params: Vec<String>, template: TemplateNode }, }
 pub use rule_arms::SyntaxMacroRule;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, NoAlloc, Unbuilt }
+enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, NoAlloc, Override, Unbuilt }
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PrattEntry { pub bp: u8, pub right_assoc: bool, pub bin_op: u16 }
 #[derive(Clone, Debug)]
@@ -130,6 +130,7 @@ impl ParserTables {
                                 "merge_type_members" => ModAct::Partial, "storage_static" => ModAct::Static, "effect_pure" => ModAct::Pure,
                                 "binding_mutable" => ModAct::Mut, "binding_const" => ModAct::Const, "perceus_isolated" => ModAct::Iso,
                                 "extension_member" => ModAct::Ext, "effect_noalloc" => ModAct::NoAlloc,
+                                "override_member" => ModAct::Override,
                                 // An action the parser does not know is not built either.
                                 _ => ModAct::Unbuilt, }
                         }); if !w.is_empty() { self.modifiers.insert(w, act); } }
@@ -446,6 +447,7 @@ impl<'a> Parser<'a> {
                 ModAct::Static => m.flags |= DECL_FLAG_STATIC, ModAct::Pure => m.flags |= DECL_FLAG_PURE,
                 ModAct::Mut => m.flags |= DECL_FLAG_MUT, ModAct::Const => m.is_const = true,
                 ModAct::Ext => m.is_ext = true, ModAct::NoAlloc => m.flags |= DECL_FLAG_NOALLOC,
+                ModAct::Override => m.flags |= DECL_FLAG_OVERRIDE,
                 ModAct::Iso => {} } }
         m }
     fn parse_item(&mut self, out: &mut Vec<NodeId>, in_type_body: bool) { let start_pos = self.pos;
@@ -1335,12 +1337,16 @@ impl<'a> Parser<'a> {
             if self.at(TokenKind::RBracket) { break; }
             let mp = self.pos; let k = self.parse_expr();
             if self.eat(TokenKind::Colon) { is_map = true; let v = self.parse_expr(); if k.is_some() { items.push(k); } if v.is_some() { items.push(v); } }
-            else if k.is_some() { items.push(k); }
+            else if k.is_some() {
+                let kn = self.arena.node(k);
+                if kn.node_kind() == NodeKind::UnaryExpr && kn.flags == UNARY_OP_DOUBLE_SPLAT { is_map = true; }
+                items.push(k);
+            }
             if self.eat(TokenKind::Comma) { } else if self.pos == mp { self.advance(); } else { break; } }
         self.expect(TokenKind::RBracket);
         self.arena.alloc_list_node(if is_map { NodeKind::MapExpr } else { NodeKind::ListExpr }, 0, ByteSpan::new(sp.start, self.prev_span().end), &items) }
     fn looks_like_brace_map(&self) -> bool { let p1 = self.next_non_nl(self.cur() + 1); if p1 >= self.tape.len() { return false; }
-        if self.tape.kind(p1) == TokenKind::RBrace { return true; }
+        if matches!(self.tape.kind(p1), TokenKind::RBrace | TokenKind::DoubleStar) { return true; }
         let p2 = self.next_non_nl(p1 + 1);
         if p2 < self.tape.len() && (is_word_tok(self.tape.kind(p1)) || matches!(self.tape.kind(p1), TokenKind::StrLit | TokenKind::IntLit))
             && matches!(self.tape.kind(p2), TokenKind::Colon | TokenKind::Equal)

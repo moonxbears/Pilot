@@ -1,0 +1,5 @@
+use lib.file_peer;
+
+fn main() {
+    println(f"{ok()}");
+}

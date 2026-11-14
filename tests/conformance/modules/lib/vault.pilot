@@ -11,10 +11,11 @@ pub fn total() -> i64 => secret() + hidden() + shared() + plain();
 
 pub struct Safe {
     priv code: i64;
+    prot badge: i64;
     pub label: str;
     level: i64;
     pub fn peek() -> i64 => .code * 2;
     pub fn rank() -> i64 => .level;
 }
 
-pub fn safe(code: i64) -> Safe => Safe { code: code, label: "safe", level: code + 1 };
+pub fn safe(code: i64) -> Safe => Safe { code: code, badge: code + 2, label: "safe", level: code + 1 };

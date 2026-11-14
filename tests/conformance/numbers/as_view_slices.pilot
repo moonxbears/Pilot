@@ -1,0 +1,63 @@
+// `xs as view T` reads each element's bits as a `T` of the same width,
+// without copying (stdlib/core/reinterpret.pilot). Was known bug
+// seed.view_reinterpret_identity: the seed returned `xs` unchanged.
+// Expected values are Python's `struct` module packing each element and
+// unpacking the bytes as the target (`struct.unpack('<I',
+// struct.pack('<i', -1))`), which is two's complement for the integers:
+//   i32 -1, 7, -2 as u32: 2^32 - 1 = 4294967295, 7, 2^32 - 2 = 4294967294
+//   u32 4294967295, 2147483648 as i32: -1, -2^31 = -2147483648
+//   u8 255, 128, 127 as i8: -1, -128, 127
+//   i16 -2 as u16: 2^16 - 2 = 65534; u64 2^64 - 1 as i64: -1
+// and the IEEE 754 encodings for the floats:
+//   f64 1.0 = 0x3FF0000000000000 = 4607182418800017408,
+//   -2.0 = 0xC000000000000000 = 13835058055282163712,
+//   0.1 = 0x3FB999999999999A = 4591870180066957722;
+//   u64 0x400921FB54442D18 = 4614256656552045848 as f64: 3.141592653589793
+//   f32 -1.5 = 0xBFC00000, as i32 3217031168 - 2^32 = -1077936128
+//   i32 0x40490FDB = 1078530011 as f32: 3.1415927410125732 (the f32 nearest
+//   pi, printed as the f64 that holds it)
+// A view reads its source: after `xs[0] = -3` it reads 2^32 - 3 = 4294967293.
+fn main() {
+    let xs: i32[] = [-1, 7, -2];
+    let us = xs as view u32;
+    print(us[0]);
+    print(us[1]);
+    print(us[2]);
+    print(us.len);
+    for u in us { print(u); }
+
+    let big: u32[] = [4294967295, 2147483648];
+    let signed = big as view i32;
+    print(signed[0]);
+    print(signed[1]);
+
+    let bytes: u8[] = [255, 128, 127];
+    let sb = bytes as view i8;
+    print(sb[0]);
+    print(sb[1]);
+    print(sb[2]);
+
+    let halves: i16[] = [-2];
+    print((halves as view u16)[0]);
+    let wide: u64[] = [18446744073709551615];
+    print((wide as view i64)[0]);
+
+    let fs: f64[] = [1.0, -2.0, 0.1];
+    let fb = fs as view u64;
+    print(fb[0]);
+    print(fb[1]);
+    print(fb[2]);
+    let pi_bits: u64[] = [4614256656552045848];
+    print((pi_bits as view f64)[0]);
+
+    let gs: f32[] = [f32(-1.5)];
+    print((gs as view i32)[0]);
+    let fpi_bits: i32[] = [1078530011];
+    print((fpi_bits as view f32)[0]);
+
+    var live: List<i32> = [-1, 7];
+    let lv = live as view u32;
+    print(lv[0]);
+    live[0] = -3;
+    print(lv[0]);
+}

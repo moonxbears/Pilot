@@ -111,6 +111,7 @@ pub pure fn op_pipe_backward() -> i64 => 31;
 pub pure fn unary_not() -> i64 => 5;
 pub pure fn unary_some() -> i64 => 9;
 pub pure fn unary_splat() -> i64 => 6;
+pub pure fn unary_double_splat() -> i64 => 7;
 pub pure fn unary_deep_flatten() -> i64 => 8;
 /// `MemberExpr` flags of `.name`, whose receiver is implied
 /// (`MEMBER_IMPLIED_RECEIVER` in crates/pilot-parser/src/lib.rs).
@@ -290,7 +291,8 @@ fn decl_bits(rows: List<List<i64>>, count: i64) -> List<i64> {
     for row in rows {
         let pure_bit = if row.len() > 5 { row[5] * 8 } else { 0 };
         let noalloc_bit = if row.len() > 6 { row[6] * 16 } else { 0 };
-        out[row[0]] = row[1] + row[2] * 2 + row[4] * 4 + pure_bit + noalloc_bit + (row[3] + 1) * 32;
+        let override_bit = if row.len() > 7 { row[7] * 1024 } else { 0 };
+        out[row[0]] = row[1] + row[2] * 2 + row[4] * 4 + pure_bit + noalloc_bit + override_bit + (row[3] + 1) * 32;
     }
     return out;
 }
@@ -313,6 +315,9 @@ pub fn is_pure_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 8);
 /// action `effect_noalloc` (`noalloc fn`).
 pub fn is_noalloc_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 16);
 
+/// Whether declaration `n` is written `override`.
+pub fn is_override_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 1024);
+
 /// `ParamDecl` flag bits (crates/pilot-ast `PARAM_FLAG_*`): written with
 /// a word registered `binding_mutable` (`var`), or `perceus_isolated` (`iso`).
 pub pure fn param_flag_mutable() -> i64 => 4;
@@ -331,7 +336,7 @@ pub fn is_declaration(s: Snap, n: i64) -> bool => s.modifiers[n] >= 0;
 /// is written or `n` is no declaration.
 pub fn decl_tier(s: Snap, n: i64) -> i64 {
     let m = s.modifiers[n];
-    return if m < 0 { -1 } else { m / 32 - 1 };
+    return if m < 0 { -1 } else { (m % 1024) / 32 - 1 };
 }
 
 /// Word `i` of a list of words the host serves, or "".

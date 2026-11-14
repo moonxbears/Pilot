@@ -1,0 +1,8 @@
+struct Plain {
+    pub override pure fn nope() -> i64 => 1;
+}
+
+fn main() {
+    let p = Plain {};
+    println(f"{p.nope()}");
+}

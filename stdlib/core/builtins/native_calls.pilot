@@ -99,6 +99,9 @@ comptime {
     __engine("bind_native_member", nameof(List), "for_get", "list_get");
     __engine("bind_native_member", nameof(slice), "for_len", "str_len");
     __engine("bind_native_member", nameof(slice), "for_get", "list_get");
+    __engine("bind_native_member", "unpack_op", "6", "unpack");
+    __engine("bind_native_member", "unpack_op", "7", "unpack_pairs");
+    __engine("bind_native_member", "unpack_op", "8", "flat");
     // An operator with no PilIR instruction of its own runs as an engine
     // operation: `a ** b` (an integer power wraps; a float power is `powf`).
     __engine("bind_operator_intrinsic", "**", "num_pow");

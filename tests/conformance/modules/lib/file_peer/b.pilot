@@ -1,0 +1,3 @@
+pkg lib.file_peer;
+
+pub fn bad_cross_file() -> i64 => only_in_a();

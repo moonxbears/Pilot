@@ -1035,6 +1035,37 @@ pub fn innermost_fn_like_start(i: i64, node_count: i64) -> i64 {
     }
     return best;
 }
+// Whether assignment `i` is the binding of `if some x = v` (operand of the
+// `some` test, UnaryExpr 206 with flags 9) or `guard some x = v` (GuardStmt
+// 104 with flags 1): it declares `x`, it does not assign to it.
+pub fn is_some_binding(i: i64) -> bool {
+    let up = __engine(Cfg.ast.ast_parent, i);
+    if !is_node(up) { return false; }
+    let uk = __engine(Cfg.ast.ast_orig_kind, up);
+    let uf = __engine(Cfg.ast.ast_node_flags, up);
+    return (uk == 206 && uf == 9) || (uk == 104 && uf == 1);
+}
+// Whether the `let` node `target` can be what node `i` names: a `let`
+// inside a function or closure is seen only within that function. The
+// binding pass may resolve a name to a `let` of the same name in another
+// function (known bug seed.if_some_foreign_let).
+pub fn let_reaches(target: i64, i: i64, node_count: i64) -> bool {
+    let ts = __engine(Cfg.ast.ast_span_start, target);
+    var fi = 0;
+    var owner = -1;
+    var owner_start = -1;
+    while fi < fn_like_nodes.len() {
+        let j = fn_like_nodes[fi];
+        let js = __engine(Cfg.ast.ast_span_start, j);
+        if js <= ts && __engine(Cfg.ast.ast_span_end, target) <= __engine(Cfg.ast.ast_span_end, j) && js > owner_start {
+            owner = j;
+            owner_start = js;
+        }
+        fi = fi + 1;
+    }
+    if owner < 0 { return true; }
+    return owner_start <= __engine(Cfg.ast.ast_span_start, i) && __engine(Cfg.ast.ast_span_end, i) <= __engine(Cfg.ast.ast_span_end, owner);
+}
 // Whether a loop (or, when `allow_switch`, a switch) inside the innermost
 // function or closure of node `i` contains it.
 pub fn has_enclosing_jump_target(i: i64, node_count: i64, allow_switch: bool) -> bool {
@@ -1098,7 +1129,8 @@ pub fn verify_type_and_decl(i: i64, node_count: i64) -> i64 {
     // DECL004: Reassignment to immutable 'let' binding
     if ok == 102 && __engine(Cfg.ast.ast_child_count, i) > 0 {
         let target = __engine(Cfg.ast.ast_get_bound_target, __engine(Cfg.ast.ast_child_at, i, 0));
-        if target != 4294967295 && target >= 0 && __engine(Cfg.ast.ast_orig_kind, target) == 100 {
+        if target != 4294967295 && target >= 0 && __engine(Cfg.ast.ast_orig_kind, target) == 100
+            && !is_some_binding(i) && let_reaches(target, i, node_count) {
             emit_diag(i, 1, "DECL004: Cannot reassign to immutable 'let' binding '" + __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, target)) + "'; declare with 'var' to permit mutation");
         }
     }

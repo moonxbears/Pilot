@@ -45,3 +45,5 @@ use Pilot.Core.Coverage;
 
 // `a union b`, `a intersect b` and `a except b` on sequences.
 use Pilot.Db.SetOps;
+
+use Pilot.Core.Reinterpret;

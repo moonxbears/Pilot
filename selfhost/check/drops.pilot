@@ -129,6 +129,9 @@ pub enum DropAction : u8 {
     /// The node is `x is T`: the kind of value `T` holds and `T`'s name
     /// (selfhost/check/type_tests.pilot).
     TypeTest,
+    /// The node is `xs as view T`: the function that builds the view and
+    /// the integers it takes after `xs` (selfhost/check/view_cast.pilot).
+    ViewCast,
 }
 
 /// What planning the drops of one program keeps.

@@ -1,0 +1,34 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_view.pilot
+// `xs as view T` in PilIR: a call of the function the program binds it to.
+// ==============================================================================
+// The checker (selfhost/check/view_cast.pilot, infer.pilot view_fn) gives
+// the function and the six integers it takes after `xs`, the register
+// shapes of the element type and of `T`; the seed makes the same call from
+// its run plan. A view the
+// checker cannot plan (refused with TYPE003) stops at the lowering seam.
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerView;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.view_cast.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+
+/// `xs as view T`: `f(xs, from_float, from_signed, from_width, to_float,
+/// to_signed, to_width)` for `f` the bound function.
+pub fn lower_view_cast(lw: Lowerer, n: i64) -> u32 {
+    let p = lw.inf.p;
+    var why: List<str> = [];
+    let ints = view_shapes(lw.inf, n, why);
+    let f = view_fn(lw.inf, n);
+    if ints.len() != 6 || f < 0 { return unsupported(lw, n); }
+    let int_layout = layout_of(lw.ls, prog_slot_type(p, literal_slot(nk_int())));
+    var args: List<u32> = [lower_expr(lw, lhs(p.s, n))];
+    for v in ints { args.push(emit(lw, op_const_bits(), 0, int_layout, [pool_int(lw, v)], n)); }
+    return call_decl(lw, f, args, [], physics_of(lw, n), n);
+}

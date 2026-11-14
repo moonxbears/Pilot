@@ -43,6 +43,7 @@ use selfhost.ir.lower_outs.*;
 use selfhost.ir.lower_contract.*;
 use selfhost.ir.lower_spread.*;
 use selfhost.ir.lower_tail.*;
+use selfhost.ir.lower_view.*;
 use std.text;
 
 /// The state of one lowering run.
@@ -834,6 +835,7 @@ pub fn lower_binary(lw: Lowerer, n: i64) -> u32 {
     if op == op_and() || op == op_or() { return lower_short_circuit(lw, n, op == op_and()); }
     if op == op_pipe() { return lower_pipe(lw, n, lhs(s, n), rhs(s, n)); }
     if op == op_as() { return lower_cast(lw, n, lhs(s, n)); }
+    if op == op_as_view() { return lower_view_cast(lw, n); }
     if op == op_coalesce() { return lower_coalesce(lw, n); }
     if op == op_is() { return lower_is(lw, n); }
     if op == op_pipe_back() { return lower_pipe(lw, n, rhs(s, n), lhs(s, n)); }

@@ -1,0 +1,6 @@
+use lib.vault;
+
+fn main() {
+    let s = safe(5);
+    println(f"{s.badge}");
+}

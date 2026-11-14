@@ -1,0 +1,30 @@
+// `if some m = ...` and `guard some g = ...` bind a new name; a `let` of the
+// same name in another function (here `other` and `third`, or any linked
+// library function) is unrelated, so neither is a reassignment (DECL004).
+// Was known bug seed.if_some_foreign_let.
+// Correct output by hand: find_it(2) is some 2, other() returns 3,
+// first_of(7) binds g = 7 and returns 8, third() returns 4.
+fn find_it(x: i64) -> i64? {
+    if x > 0 { return x; }
+    return none;
+}
+fn other() -> i64 {
+    let m = 3;
+    return m;
+}
+fn third() -> i64 {
+    let g = 4;
+    return g;
+}
+fn first_of(x: i64) -> i64 {
+    guard some g = find_it(x) else { return 0; }
+    return g + 1;
+}
+fn main() {
+    if some m = find_it(2) {
+        print(m);
+    }
+    print(other());
+    print(first_of(7));
+    print(third());
+}

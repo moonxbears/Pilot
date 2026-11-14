@@ -27,9 +27,8 @@ comptime {
     // (docs/keyword_roadmap.md K5): every use stops at the seam
     // `keyword.unbuilt` instead of behaving as `pub`.
     __engine("register_modifier", nameof(export),      "keyword_unbuilt");
-    // `override` (docs/keyword_roadmap.md K2) and `module` (K2, decision
-    // D3) are not built yet: each stops at the seam `keyword.unbuilt`.
-    __engine("register_modifier", nameof(override),    "keyword_unbuilt");
+    // `module` (K2, decision D3) is not built yet: it stops at `keyword.unbuilt`.
+    __engine("register_modifier", nameof(override),    "override_member");
     __engine("bind_receptor", nameof(module),          40, 1);
 
     // Axis 2: Compile-Time Clearance Rings (`lvl(N)` & shorthand `lvl0`..`lvl100`)
@@ -71,6 +70,8 @@ pub pure fn default_visibility_tier() -> i64 => visibility_tier_of(nameof(pkg));
 pub enum VisReach : u8 {
     /// The declaring scope: a member's own type body, a top-level item's file.
     Scope,
+    /// The declaring type, types derived from it, and extensions (`ext`) on it.
+    Protected,
     /// The file it is declared in.
     File,
     /// Every file of its package.
@@ -79,12 +80,11 @@ pub enum VisReach : u8 {
     Program,
 }
 
-/// How far a declaration of visibility `tier` reaches. `prot` reaches the
-/// package: derived types and extensions in other packages are not told
-/// apart yet.
+/// How far a declaration of visibility `tier` reaches.
 pub pure fn visibility_reach(tier: i64) -> VisReach {
     if tier < visibility_tier_of(nameof(file)) { return ::Scope; }
     if tier < visibility_tier_of(nameof(prot)) { return ::File; }
+    if tier < visibility_tier_of(nameof(pkg)) { return ::Protected; }
     if tier < visibility_tier_of(nameof(int)) { return ::Package; }
     return ::Program;
 }

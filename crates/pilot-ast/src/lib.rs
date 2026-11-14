@@ -203,6 +203,7 @@ pub const DECL_FLAG_VIS_WRITTEN: u16 = 2048;
 /// The declaration is written with the modifier registered for action
 /// `effect_noalloc` (`noalloc fn`): calling it takes no heap memory.
 pub const DECL_FLAG_NOALLOC: u16 = 4096;
+pub const DECL_FLAG_OVERRIDE: u16 = 8192;
 
 /// `ParamDecl.flags`: the parameter is written with any modifier (`ref`,
 /// `comptime`, or a word registered `binding_mutable` / `perceus_isolated`),

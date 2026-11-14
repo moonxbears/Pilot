@@ -299,6 +299,23 @@ impl BytecodeCompiler {
             self.release_to(mark + 1);
             return mark;
         }
+        // `xs as view T`: the checker's plan names the function that builds
+        // the view and the integers it takes after `xs`.
+        if flags == BinaryOp::AsView as u16 {
+            // The checker refuses a view it cannot plan (TYPE003).
+            let Some((function, ints)) = self.planned_view_cast(arena, id) else {
+                return self.emit_trap("`as view` needs a view the checker planned".to_string());
+            };
+            let mark = self.next_reg;
+            let mut args = vec![self.compile_node(arena, NodeId(lhs))];
+            for v in ints {
+                args.push(self.emit_const(PilotVal::from_int(v)));
+            }
+            let r = self.emit_user_call(function.clone(), function, &args);
+            self.emit(Opcode::Move, mark, r, 0);
+            self.release_to(mark + 1);
+            return mark;
+        }
         let planned = self.planned_numeric(arena, id);
         let narrow = planned
             .as_deref()
@@ -320,7 +337,7 @@ impl BytecodeCompiler {
             return self.error(crate::codes::SYNTAX, "unknown binary operator".to_string());
         };
         // `As` keeps its target type outside the operand slots.
-        if NodeId(lhs).is_none() || (NodeId(rhs).is_none() && !matches!(op, BinaryOp::As | BinaryOp::AsView)) {
+        if NodeId(lhs).is_none() || (NodeId(rhs).is_none() && op != BinaryOp::As) {
             return self.error(
                 crate::codes::SYNTAX,
                 format!("operator `{}` is missing an operand", op.symbol()),
@@ -331,19 +348,19 @@ impl BytecodeCompiler {
             BinaryOp::Coalesce => return self.compile_coalesce(arena, lhs, rhs),
             BinaryOp::Pipe => return self.compile_pipe(arena, NodeId(lhs), NodeId(rhs)),
             BinaryOp::PipeBackward => return self.compile_pipe(arena, NodeId(rhs), NodeId(lhs)),
-            BinaryOp::As | BinaryOp::AsView => {
+            BinaryOp::As => {
                 let mut r = self.compile_node(arena, NodeId(lhs));
                 let ty = NodeId(rhs);
-                let to_scalar = op == BinaryOp::As && ty.is_some() && Self::is_scalar_text(Self::name(arena, arena.node(ty).lhs));
+                let to_scalar = ty.is_some() && Self::is_scalar_text(Self::name(arena, arena.node(ty).lhs));
                 // A one-character literal is cast as the character it holds;
                 // a cast to the character type gives a character.
-                if op == BinaryOp::As && (to_scalar || arena.node(NodeId(lhs)).node_kind() == NodeKind::StrLit) {
+                if to_scalar || arena.node(NodeId(lhs)).node_kind() == NodeKind::StrLit {
                     r = self.emit_scalar(r);
                 }
                 if to_scalar {
                     return r;
                 }
-                let layout = (op == BinaryOp::As && ty.is_some())
+                let layout = ty.is_some()
                     .then(|| pilot_parser::bootstrap_tables().reg_layout(Self::name(arena, arena.node(ty).lhs)))
                     .flatten()
                     .cloned();
@@ -559,24 +576,46 @@ impl BytecodeCompiler {
         dst
     }
 
+    pub(crate) fn compile_unpack_operand(&mut self, arena: &AstArena, id: NodeId, op_flag: u16) -> u8 {
+        let r = self.compile_node(arena, id);
+        let tables = pilot_parser::bootstrap_tables();
+        let method = tables.native_member("unpack_op", &op_flag.to_string()).map(str::to_string);
+        if let (Some(ty), Some(method)) = (self.static_type(arena, id), method) {
+            if self.declares(&ty, &method).is_some() {
+                return self.emit_method_call(arena, r, &ty, &method, &[]);
+            }
+        }
+        r
+    }
+
     pub(crate) fn compile_map_literal(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
         let children: Vec<u32> = arena.children_slice(lhs, rhs).to_vec();
         let r_map = self.emit_intrinsic("map_new", &[]);
         let mark = self.next_reg;
-        for pair in children.chunks(2) {
-            if pair.len() != 2 {
+        let mut i = 0;
+        while i < children.len() {
+            let cn = *arena.node(NodeId(children[i]));
+            if cn.node_kind() == NodeKind::UnaryExpr && cn.flags == pilot_ast::UNARY_OP_DOUBLE_SPLAT {
+                let r_src = self.compile_unpack_operand(arena, NodeId(cn.lhs), cn.flags);
+                self.emit_intrinsic("map_extend", &[r_map, r_src]);
+                self.release_to(mark);
+                i += 1;
+                continue;
+            }
+            if i + 1 >= children.len() {
                 return self.error(
                     crate::codes::SYNTAX,
                     "map literal entry without a value".to_string(),
                 );
             }
-            let r_k = match Self::map_key(arena, NodeId(pair[0])) {
+            let r_k = match Self::map_key(arena, NodeId(children[i])) {
                 Some(k) => self.emit_const(PilotVal::from_str(&k)),
-                None => self.compile_node(arena, NodeId(pair[0])),
+                None => self.compile_node(arena, NodeId(children[i])),
             };
-            let r_v = self.compile_node(arena, NodeId(pair[1]));
+            let r_v = self.compile_node(arena, NodeId(children[i + 1]));
             self.emit_intrinsic("map_set", &[r_map, r_k, r_v]);
             self.release_to(mark);
+            i += 2;
         }
         r_map
     }
@@ -591,8 +630,9 @@ impl BytecodeCompiler {
             match unpack {
                 // `*xs` adds xs's elements; `*..xs` adds its leaves at any depth.
                 Some(f @ (pilot_ast::UNARY_OP_SPLAT | pilot_ast::UNARY_OP_DEEP_FLATTEN)) => {
-                    let r_v = self.compile_node(arena, NodeId(cn.lhs));
-                    let r_deep = self.emit_const(PilotVal::from_bool(f == pilot_ast::UNARY_OP_DEEP_FLATTEN));
+                    let deep = f == pilot_ast::UNARY_OP_DEEP_FLATTEN;
+                    let r_v = self.compile_unpack_operand(arena, NodeId(cn.lhs), f);
+                    let r_deep = self.emit_const(PilotVal::from_bool(deep));
                     self.emit_intrinsic("list_extend", &[r_list, r_v, r_deep]);
                 }
                 Some(pilot_ast::UNARY_OP_DOUBLE_SPLAT) => {

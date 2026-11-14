@@ -36,7 +36,7 @@ use crate::link::LinkedSource;
 use crate::run::{self, Diag};
 use crate::tool;
 use pilot_ast::{
-    AstArena, NodeId, NodeKind, DECL_FLAG_NOALLOC, DECL_FLAG_PARTIAL, DECL_FLAG_PKG, DECL_FLAG_PURE,
+    AstArena, NodeId, NodeKind, DECL_FLAG_NOALLOC, DECL_FLAG_OVERRIDE, DECL_FLAG_PARTIAL, DECL_FLAG_PKG, DECL_FLAG_PURE,
     DECL_FLAG_STATIC, DECL_FLAG_VIS_WRITTEN, DECL_VIS_MASK,
 };
 use pilot_span::ByteSpan;
@@ -233,6 +233,7 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
                 i64::from(f & DECL_FLAG_PKG != 0),
                 i64::from(f & DECL_FLAG_PURE != 0),
                 i64::from(f & DECL_FLAG_NOALLOC != 0),
+                i64::from(f & DECL_FLAG_OVERRIDE != 0),
             ])
         })
         .collect();

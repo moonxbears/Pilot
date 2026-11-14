@@ -59,6 +59,7 @@ pub pure fn never_slot() -> str => "never_t";
 /// Register classes (`Cfg.Reg` keys) whose types hold integers and floats.
 pub fn is_integer_class(class: str) -> bool => class == "gpr_s" || class == "gpr_u";
 pub fn is_float_class(class: str) -> bool => class == "simd_f";
+pub fn is_signed_class(class: str) -> bool => class == "gpr_s";
 /// The `Cfg.Reg` width key of a type that holds no value.
 pub pure fn zero_width() -> str => "b0";
 

@@ -131,7 +131,7 @@ impl BytecodeCompiler {
         let mut regs = Vec::new();
         for &a in args {
             if is_spread(a) && spreads == 1 && known {
-                let r_seq = self.compile_node(arena, NodeId(arena.node(a).lhs));
+                let r_seq = self.compile_unpack_operand(arena, NodeId(arena.node(a).lhs), arena.node(a).flags);
                 self.emit_spread(r_seq, take, key, &mut regs);
                 continue;
             }

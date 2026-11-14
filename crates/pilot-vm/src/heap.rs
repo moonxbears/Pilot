@@ -443,6 +443,17 @@ impl PilVirtualMachine {
                 self.heap_lists[slot].extend(leaves);
                 Ok(list)
             }
+            "map_extend" => {
+                let map = arg(args, 0, op)?;
+                let dst = self.map_slot(map, op)?;
+                let src = self.map_slot(arg(args, 1, op)?, op)?;
+                let entries: Vec<(String, PilotVal)> = self.heap_maps[src]
+                    .iter()
+                    .map(|(k, v)| (k.clone(), *v))
+                    .collect();
+                self.heap_maps[dst].extend(entries);
+                Ok(map)
+            }
             "list_remove_at" => {
                 let list = arg(args, 0, op)?;
                 let slot = self.list_slot(list, op)?;

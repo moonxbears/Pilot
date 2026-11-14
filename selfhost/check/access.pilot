@@ -36,15 +36,33 @@ fn unit_packages(p: Program) -> List<str> {
     return out;
 }
 
-/// The name of the type whose body holds `n`, or "" outside any.
-fn owner_name(p: Program, n: i64) -> str {
+/// The enclosing type or `ext` node that holds `n`, or -1 outside any.
+fn owner_node(p: Program, n: i64) -> i64 {
     var cur = p.parents[n];
     while cur >= 0 {
         let k = kind(p.s, cur);
-        if k == nk_struct() || k == nk_interface() || k == nk_extend() { return node_name(p.s, cur); }
+        if k == nk_struct() || k == nk_interface() || k == nk_extend() { return cur; }
         cur = p.parents[cur];
     }
-    return "";
+    return -1;
+}
+
+/// The name of the type whose body holds `n`, or "" outside any.
+fn owner_name(p: Program, n: i64) -> str {
+    let on = owner_node(p, n);
+    return if on >= 0 { node_name(p.s, on) } else { "" };
+}
+
+/// Whether `sub` derives from or implements `base` (directly or transitively).
+fn is_derived_from(p: Program, sub: str, base: str, depth: i64) -> bool {
+    if sub.len() == 0 || depth > 32 { return false; }
+    for b in nl_get(p.bases, sub) {
+        let bt = prog_annot_type(p, b);
+        if !ty_is_named(p.tt, bt) { continue; }
+        let bname = node_name(p.s, ty_decl(p.tt, bt));
+        if bname == base || is_derived_from(p, bname, base, depth + 1) { return true; }
+    }
+    return false;
 }
 
 /// Whether `from` lies in the same package as `decl`: the same file, or
@@ -72,15 +90,24 @@ fn reaches(p: Program, pkgs: List<str>, decl: i64, from: i64) -> bool {
     if reach == ::Program { return true; }
     if reach == ::Package { return same_package(s, pkgs, decl, from); }
     if reach == ::File { return unit_of(s, decl) == unit_of(s, from); }
-    let owner = owner_name(p, decl);
-    if owner.len() == 0 { return unit_of(s, decl) == unit_of(s, from); }
-    return owner_name(p, from) == owner;
+    let d_on = owner_node(p, decl);
+    if d_on < 0 { return unit_of(s, decl) == unit_of(s, from); }
+    let owner = node_name(s, d_on);
+    if reach == ::Protected {
+        let from_owner = owner_name(p, from);
+        if from_owner.len() == 0 { return false; }
+        return from_owner == owner || is_derived_from(p, from_owner, owner, 0);
+    }
+    if kind(s, d_on) == nk_extend() { return owner_node(p, from) == d_on; }
+    let f_on = owner_node(p, from);
+    return f_on >= 0 && kind(s, f_on) != nk_extend() && node_name(s, f_on) == owner;
 }
 
 /// The word for how far a declaration of tier `tier` reaches.
 fn reach_word(tier: i64) -> str {
     let reach = visibility_reach(tier);
     if reach == ::Scope { return "private"; }
+    if reach == ::Protected { return "protected"; }
     if reach == ::File { return "private to its file"; }
     return "private to its package";
 }
@@ -93,6 +120,33 @@ fn top_level(p: Program, name: str) -> List<i64> {
     return out;
 }
 
+fn check_override_decl(p: Program, pkgs: List<str>, sink: DiagSink, n: i64) {
+    let s = p.s;
+    let on = owner_node(p, n);
+    if on < 0 || (kind(s, on) != nk_struct() && kind(s, on) != nk_interface()) {
+        sink_error(sink, n, "METH001",
+            f"`{node_name(s, n)}` is marked `override`, which only applies to methods of a struct or interface");
+        return;
+    }
+    let tname = node_name(s, on);
+    let mname = member_name(s, n);
+    let base_decl = prog_overridden_member(p, tname, mname);
+    if base_decl < 0 {
+        sink_error(sink, n, "METH001",
+            f"`{tname}.{mname}` is marked `override`, but no base interface or spliced bundle provides `{mname}`");
+        return;
+    }
+    if !same_package(s, pkgs, base_decl, n) {
+        let open_tier = visibility_tier_of(nameof(open));
+        let base_on = owner_node(p, base_decl);
+        let is_open = tier_of(s, base_decl) >= open_tier || (base_on >= 0 && tier_of(s, base_on) >= open_tier);
+        if !is_open {
+            sink_error(sink, n, "VIS001",
+                f"`{tname}.{mname}` cannot override `{mname}` from another package because it is not `open`");
+        }
+    }
+}
+
 pub fn check_access(inf: Infer, sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
@@ -101,6 +155,9 @@ pub fn check_access(inf: Infer, sink: DiagSink) {
     n = s.user_lo;
     while n < s.user_hi {
         let k = kind(s, n);
+        if is_override_decl(s, n) && in_user_file(s, n) {
+            check_override_decl(p, pkgs, sink, n);
+        }
         if (k == nk_ident() || k == nk_member()) && in_user_file(s, n) {
             if k == nk_ident() && inf.r.ref_of[n] < 0 && node_name(s, n) != s.receiver {
                 let decls = top_level(p, node_name(s, n));
@@ -120,6 +177,12 @@ pub fn check_access(inf: Infer, sink: DiagSink) {
                     if !reaches(p, pkgs, m.decl, n) {
                         sink_error(sink, n, "VIS001",
                             f"Member '{name}' is {reach_word(tier_of(s, m.decl))} and cannot be used from external scope");
+                    }
+                } else {
+                    let mf = module_fn(inf, n);
+                    if mf >= 0 && !reaches(p, pkgs, mf, n) {
+                        sink_error(sink, n, "MOD003",
+                            f"`{name}` is {reach_word(tier_of(s, mf))} and cannot be used here");
                     }
                 }
             }

@@ -52,6 +52,9 @@ pub enum DropAction {
     NumericType = 15,
     /// The node is `x is T`: the kind of value `T` holds, and `T`'s name.
     TypeTest = 16,
+    /// The node is `xs as view T`: the function that builds the view, and
+    /// the integers it takes after `xs`, separated by spaces.
+    ViewCast = 17,
 }
 
 impl DropAction {
@@ -74,6 +77,7 @@ impl DropAction {
             Self::ReceiverType,
             Self::NumericType,
             Self::TypeTest,
+            Self::ViewCast,
         ]
             .into_iter()
             .find(|a| *a as i64 == code)
@@ -156,6 +160,10 @@ pub struct DropPlan {
     /// `x is T` nodes, with the kind of value `T` holds and `T`'s name
     /// (selfhost/check/numeric.pilot plan_type_tests).
     pub type_tests: HashMap<NodeKey, (String, String)>,
+    /// `xs as view T` nodes, with the function that builds the view and
+    /// the integer arguments that follow `xs`
+    /// (selfhost/check/view_cast.pilot).
+    pub view_casts: HashMap<NodeKey, (String, Vec<i64>)>,
 }
 
 impl DropPlan {
@@ -174,6 +182,7 @@ impl DropPlan {
             && self.receivers.is_empty()
             && self.numeric.is_empty()
             && self.type_tests.is_empty()
+            && self.view_casts.is_empty()
     }
 }
 
@@ -224,6 +233,12 @@ impl BytecodeCompiler {
     /// The kind and type name the checker gives the `x is T` node `id`.
     pub(crate) fn planned_type_test(&self, arena: &AstArena, id: NodeId) -> Option<(String, String)> {
         self.drop_plan.as_ref()?.type_tests.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The function and integer arguments the checker planned for the
+    /// `xs as view T` node `id`.
+    pub(crate) fn planned_view_cast(&self, arena: &AstArena, id: NodeId) -> Option<(String, Vec<i64>)> {
+        self.drop_plan.as_ref()?.view_casts.get(&key_of(arena, id)).cloned()
     }
 
     pub(crate) fn set_drop_plan(&mut self, plan: DropPlan) {

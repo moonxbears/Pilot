@@ -1,0 +1,4 @@
+fn main() {
+    let m: Map<str, i64> = [**42];
+    println(f"{m.len()}");
+}

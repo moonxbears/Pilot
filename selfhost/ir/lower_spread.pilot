@@ -55,8 +55,9 @@ pub fn lower_spread_call(lw: Lowerer, decl: i64, pre: List<u32>, arg_nodes: List
             at = at + 1;
             continue;
         }
-        let seq_t = value_type(lw, lhs(s, a));
-        let seq = lower_expr(lw, lhs(s, a));
+        let raw_t = value_type(lw, lhs(s, a));
+        let seq_t = unpack_method_type(lw, raw_t, "unpack");
+        let seq = lower_unpack_operand(lw, lhs(s, a), "unpack");
         let get = if ty_is_named(lw.inf.p.tt, seq_t) { native_for(lw, seq_t, "[]", native_method_hook()) } else { "" };
         let len_hook = if get != "" { native_for(lw, seq_t, "len", native_property_hook()) } else { "" };
         if len_hook != "" {

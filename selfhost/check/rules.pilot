@@ -875,9 +875,16 @@ fn check_unpack(inf: Infer, sink: DiagSink, n: i64) {
     let operand = lhs(p.s, n);
     if operand < 0 { return; }
     let t = type_of(inf, operand);
+    let fl = flags(p.s, n);
+    let method = if fl == unary_double_splat() { "unpack_pairs" } else if fl == unary_splat() { "unpack" } else { "flat" };
     if prog_class(p, t) == "" { return; }
-    let form = if flags(p.s, n) == unary_splat() { "*" } else { "*.." };
-    sink_error(sink, n, "TYPE001", f"`{form}` unpacks a sequence, found `{ty_display(p.tt, t)}`");
+    if some _ = prog_member(p, t, method) { return; }
+    if fl == unary_double_splat() {
+        sink_error(sink, n, "TYPE001", f"`**` unpacks key-value pairs, found `{ty_display(p.tt, t)}`");
+    } else {
+        let form = if fl == unary_splat() { "*" } else { "*.." };
+        sink_error(sink, n, "TYPE001", f"`{form}` unpacks a sequence, found `{ty_display(p.tt, t)}`");
+    }
 }
 
 pub fn check_rules(inf: Infer, sink: DiagSink) {
@@ -917,7 +924,7 @@ pub fn check_rules(inf: Infer, sink: DiagSink) {
             else if k == nk_index() { check_optional_access(inf, sink, i, op_index(), true); }
             else if k == nk_binary() && flags(s, i) == op_as() { check_cast(inf, sink, i); }
             else if k == nk_if() || k == nk_while() { check_condition(inf, sink, condition_operand(s, lhs(s, i)), "condition"); }
-            else if k == nk_unary() && (flags(s, i) == unary_splat() || flags(s, i) == unary_deep_flatten()) {
+            else if k == nk_unary() && (flags(s, i) == unary_splat() || flags(s, i) == unary_double_splat() || flags(s, i) == unary_deep_flatten()) {
                 check_unpack(inf, sink, i);
             }
             else if k == nk_unary() && flags(s, i) == unary_not() && !is_condition_not(p, i) {
