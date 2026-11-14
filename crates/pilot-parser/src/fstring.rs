@@ -223,8 +223,34 @@ fn unescape_hole_quotes(hole: &str) -> &str {
     Box::leak(out.into_boxed_str())
 }
 
+fn is_fstring_prefix(b: &[u8], quote_pos: usize) -> bool {
+    if quote_pos == 0 { return false; }
+    let b1 = b[quote_pos - 1].to_ascii_lowercase();
+    let bound1 = quote_pos == 1 || !(b[quote_pos - 2].is_ascii_alphanumeric() || b[quote_pos - 2] == b'_');
+    if bound1 { return b1 == b'f'; }
+    let b2 = b[quote_pos - 2].to_ascii_lowercase();
+    let bound2 = quote_pos == 2 || !(b[quote_pos - 3].is_ascii_alphanumeric() || b[quote_pos - 3] == b'_');
+    bound2 && ((b2 == b'r' && b1 == b'f') || (b2 == b'f' && b1 == b'r'))
+}
+
+fn skip_nested_fstring(b: &[u8], mut j: usize, quote: u8) -> usize {
+    while j < b.len() {
+        let c = b[j];
+        if c == b'\\' { j += 2; continue; }
+        if c == quote { return j; }
+        if c == b'{' {
+            if b.get(j + 1) == Some(&b'{') { j += 2; continue; }
+            if let Some(end) = fstring_hole_end(b, j + 1) { j = end + 1; continue; }
+            return b.len();
+        }
+        if c == b'}' && b.get(j + 1) == Some(&b'}') { j += 2; continue; }
+        j += 1;
+    }
+    b.len()
+}
+
 /// Index of the `}` closing an f-string hole that starts at `start`, skipping
-/// nested braces and quoted strings inside the hole.
+/// nested braces and quoted strings (including nested `f"..."`) inside the hole.
 fn fstring_hole_end(b: &[u8], start: usize) -> Option<usize> {
     let (mut depth, mut j, mut quote) = (1usize, start, None::<u8>);
     while j < b.len() {
@@ -243,7 +269,11 @@ fn fstring_hole_end(b: &[u8], start: usize) -> Option<usize> {
             quote = Some(ESCAPED_QUOTE);
             j += 1;
         } else if c == b'"' || c == b'\'' {
-            quote = Some(c);
+            if is_fstring_prefix(b, j) {
+                j = skip_nested_fstring(b, j + 1, c);
+            } else {
+                quote = Some(c);
+            }
         } else if c == b'{' {
             depth += 1;
         } else if c == b'}' {

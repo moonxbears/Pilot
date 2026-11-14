@@ -7,8 +7,8 @@
 use pilot_span::ByteSpan;
 use crate::keywords::lookup_keyword;
 use crate::simd::{
-    scan_ident_run, scan_quoted_string_end, scan_to_block_comment_end,
-    scan_to_newline, scan_triple_string_end, scan_whitespace_run,
+    scan_ident_run, scan_interpolated_string_end, scan_quoted_string_end,
+    scan_to_block_comment_end, scan_to_newline, scan_triple_string_end, scan_whitespace_run,
 };
 use crate::token::{TokenFlags, TokenKind, TokenTape};
 
@@ -228,12 +228,22 @@ impl<'a> Lexer<'a> {
     }
 
     fn scan_string_literal(&mut self, token_start: usize, quote_pos: usize, quote: u8, extra_flags: TokenFlags) {
+        let is_interp = extra_flags.contains(TokenFlags::IS_INTERPOLATED);
+        let is_raw = extra_flags.contains(TokenFlags::IS_RAW_STRING);
         if self.peek_at(quote_pos + 1) == quote && self.peek_at(quote_pos + 2) == quote {
-            let end = scan_triple_string_end(self.bytes, quote_pos + 3, quote);
+            let end = if is_interp {
+                scan_interpolated_string_end(self.bytes, quote_pos + 3, quote, is_raw, true)
+            } else {
+                scan_triple_string_end(self.bytes, quote_pos + 3, quote)
+            };
             self.pos = end;
             self.emit(TokenKind::TripleStrLit, extra_flags, token_start, end, true);
         } else {
-            let close_idx = scan_quoted_string_end(self.bytes, quote_pos + 1, quote);
+            let close_idx = if is_interp {
+                scan_interpolated_string_end(self.bytes, quote_pos + 1, quote, is_raw, false)
+            } else {
+                scan_quoted_string_end(self.bytes, quote_pos + 1, quote)
+            };
             let end = if close_idx < self.bytes.len() && self.bytes[close_idx] == quote {
                 close_idx + 1
             } else {
