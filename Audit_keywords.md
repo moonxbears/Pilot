@@ -332,3 +332,7 @@ Probe programs and raw results: `/tmp/claude-1000/-home-moony-Documents-dev-proj
 ### K1: `become` runs on every engine (2026-11-13)
 
 `become f(args);` no longer stops at `ir.lower_construct` on PilIR. The tail call becomes a jump: `selfhost/ir/lower_tail.pilot` copies the blocks of each function a tail call reaches into the caller and jumps to the copy. `control/become_tail` and the new `control/become_shapes` pass on the seed, PilIR, C, JavaScript and Python. Still stopping at the seam: a call through a function value, a `become` in a function with `var ref` parameters or in a generator, and a `become` with a value to release after the call.
+
+### K1: known bug `engine.struct_copy_aliases` fixed (2026-11-13)
+
+A struct that declares no lattice and holds only values (`struct P { pub a: i64; }`) is now copied where it is bound, passed, returned or stored, on every engine: `selfhost/check/copies.pilot` reads the lattice worked out from the fields. The repro moved to `tests/conformance/types/struct_copy_independent.pilot`, with `struct_copy_passed.pilot` beside it; the bug entry is deleted. An optional or a collection (types the engine holds itself) is not copied field by field.

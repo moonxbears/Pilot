@@ -266,7 +266,7 @@ fn drop_elements(lw: Lowerer, whole: u32, et: i64, ops: List<str>, n: i64, depth
 /// type is copied only when it is a constant's (selfhost/check/consts.pilot):
 /// deeply, by the engine operation `value_clone`.
 fn copy_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) -> u32 {
-    if depth == 0 && !declares_value(lw.inf.p, t) {
+    if depth == 0 && !declares_value(lw.inf.p, lw.bindings, t) {
         return emit(lw, op_call_intrinsic(), intrinsic_index(lw, "value_clone"), lw.f.value_physics[v], [v], n);
     }
     if depth > max_glue_depth() {
@@ -282,7 +282,7 @@ fn copy_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) -> u32 {
         var fv = emit(lw, op_extract_field(), slot, field_physics(lw, t, name), [v], n);
         if some m = prog_member(p, t, name) {
             let ft = prog_member_type(p, m);
-            if declares_value(p, ft) { fv = copy_value(lw, fv, ft, n, depth + 1); }
+            if declares_value(p, lw.bindings, ft) { fv = copy_value(lw, fv, ft, n, depth + 1); }
         }
         args.push(fv);
         slot = slot + 1;

@@ -1,0 +1,39 @@
+// A struct that declares no lattice and holds only values is a value type
+// (lattice 0b00, worked out from its fields): passing it, returning it,
+// storing it in a list or in another struct's field gives a copy.
+//
+// Expected output, worked by hand:
+//   bump changes its own copy and returns it: prints 9, then p.a is still 4.
+//   xs holds a copy of p: after p.a = 5 the element is still 4.
+//   w.inner is a copy of p (now 5): after p.a = 6 it is still 5; v copies w,
+//   so v.inner.a = 7 leaves w.inner.a at 5.
+struct P {
+    pub a: i64;
+}
+
+struct Wrap {
+    pub inner: P;
+    pub n: i64;
+}
+
+fn bump(q: P) -> P {
+    q.a = 9;
+    return q;
+}
+
+fn main() {
+    var p = P { a: 4 };
+    let r = bump(p);
+    print(r.a);
+    print(p.a);
+    let xs = [p];
+    p.a = 5;
+    print(xs[0].a);
+    var w = Wrap { inner: p, n: 1 };
+    p.a = 6;
+    print(w.inner.a);
+    var v = w;
+    v.inner.a = 7;
+    print(w.inner.a);
+    print(v.inner.a);
+}

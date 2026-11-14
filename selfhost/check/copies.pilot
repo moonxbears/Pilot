@@ -2,7 +2,8 @@
 // FILE: selfhost/check/copies.pilot
 // F7: where value types are copied.
 // ==============================================================================
-// A value type (a struct that declares `IValue`, lattice 0b00) behaves as its
+// A value type (a struct of lattice 0b00: one that declares `IValue`, or one
+// that declares no lattice and whose fields are all values) behaves as its
 // fields: binding it, passing it, returning it or storing it gives the
 // receiver its own copy, so changing one never changes the other.
 //
@@ -29,13 +30,14 @@ use selfhost.check.own.*;
 use selfhost.check.drops.*;
 use selfhost.check.consts.*;
 
-/// Whether `t` is a struct that declares itself a value type and stores
-/// fields of its own (a scalar such as an integer stores none: it is one
-/// register, which every engine already copies).
-pub fn declares_value(p: Program, t: i64) -> bool {
-    if !ty_is_named(p.tt, t) || struct_decl(p, t) < 0 { return false; }
+/// Whether `t` is a struct that is a value type (lattice 0b00, declared or
+/// worked out from its fields) and stores fields of its own (a scalar such
+/// as an integer stores none: it is one register, which every engine
+/// already copies). A type the engine holds itself (`engine_holds`) is not.
+pub fn declares_value(p: Program, engine: List<List<str>>, t: i64) -> bool {
+    if !ty_is_named(p.tt, t) || struct_decl(p, t) < 0 || engine_holds(engine, p.tt.name[t]) { return false; }
     let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
-    return bt.declares_lattice && (bt.declared & 3) == 0 && stored_fields(p, t).len() > 0;
+    return (bt.lattice & 3) == 0 && stored_fields(p, t).len() > 0;
 }
 
 /// Writes the copy glue of value type `t` and of the value-type fields it
@@ -49,7 +51,7 @@ fn copy_glue(pl: DropPlanner, t: i64) {
     var fields: List<str> = [];
     for fl in stored_fields(p, t) {
         let ft: i64 = fl[1];
-        if declares_value(p, ft) {
+        if declares_value(p, pl.flow.engine, ft) {
             fields.push(fl[0]);
             fields.push(ty_display(p.tt, ft));
             copy_glue(pl, ft);
@@ -117,12 +119,12 @@ pub fn plan_copies(pl: DropPlanner) {
         let k = kind(s, n);
         if (is_place(k) || k == nk_call()) && in_user_file(s, n) {
             let t = type_of(inf, n);
-            if is_place(k) && declares_value(p, t) && copy_position(pl.flow, n) {
+            if is_place(k) && declares_value(p, pl.flow.engine, t) && copy_position(pl.flow, n) {
                 copy_glue(pl, t);
                 pl.cur_binding = -1;
                 pl.cur_type = t;
                 row(pl, ::Copy, n, ty_display(p.tt, t), "");
-            } else if !declares_value(p, t) && needs_const_copy(cs, n, t) {
+            } else if !declares_value(p, pl.flow.engine, t) && needs_const_copy(cs, n, t) {
                 // A constant's value, copied deeply: no copy glue.
                 pl.cur_binding = -1;
                 pl.cur_type = t;

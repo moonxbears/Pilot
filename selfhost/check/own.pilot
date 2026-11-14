@@ -116,6 +116,17 @@ pub fn owned_payload(f: Flow, t: i64) -> i64 {
     return ty_unknown();
 }
 
+/// Whether the engine bindings `engine` name `name` as a type the engine
+/// holds itself (an optional kept as its payload or none, a collection): it
+/// is not a record of its declared fields, so it is never copied field by
+/// field.
+pub fn engine_holds(engine: List<List<str>>, name: str) -> bool {
+    for row in engine {
+        if row.len() >= 2 && row[1] == name && (row[0] == owned_payload_hook() || row[0] == owned_elements_hook()) { return true; }
+    }
+    return false;
+}
+
 /// The engine operation that tests a value of `t` for none, when `t` has
 /// an owned payload (`owned_payload`); else "".
 pub fn payload_absent_op(f: Flow, t: i64) -> str {
