@@ -1,0 +1,50 @@
+// Iterating a `Map` (its keys in key order), `Map.keys()`, and a `str` (its bytes).
+
+fn main() {
+    let m = Map<str, i64>();
+    m.set("beta", 2);
+    m.set("alpha", 1);
+    m.set("gamma", 3);
+
+    for k in m {
+        print(k);
+    }
+
+    let ks = m.keys();
+    print(ks.len());
+    print(ks[0]);
+    print(ks[2]);
+
+    let empty = Map<str, i64>();
+    var count = 0;
+    for k in empty {
+        count = count + 1;
+    }
+    print(count);
+
+    for b in "abc" {
+        print(b);
+    }
+
+    var empty_bytes = 0;
+    for b in "" {
+        empty_bytes = empty_bytes + 1;
+    }
+    print(empty_bytes);
+
+    let collected = List<str>();
+    for k in m {
+        if k == "beta" { continue; }
+        collected.push(k);
+    }
+    print(collected.len());
+    print(collected[0]);
+    print(collected[1]);
+
+    var sum = 0;
+    for b in "abcd" {
+        if b == 99 { break; }
+        sum = sum + (b as i64);
+    }
+    print(sum);
+}

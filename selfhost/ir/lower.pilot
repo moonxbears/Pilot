@@ -194,6 +194,8 @@ pub struct Lowerer : IObject {
     /// The program's enum declarations (`adt_nodes`), found once: a name
     /// that may be a variant is looked up among them, not among every node.
     pub adt_decls: List<i64>;
+    /// The sequence-membership function bound by `bind_membership`, or "".
+    pub membership_fn: str;
 }
 
 /// Lowers `n` expecting type `t` (for target-typed variants).
@@ -242,6 +244,14 @@ fn bound_rows_index(rows: List<List<str>>) -> Map<str, str> {
     return index;
 }
 
+/// The first argument of the first `bind_membership` row, or "".
+fn find_membership_fn(rows: List<List<str>>) -> str {
+    for row in rows {
+        if row.len() >= 2 && row[0] == "bind_membership" { return row[1]; }
+    }
+    return "";
+}
+
 /// The binding words (stdlib/core/builtins/native_calls.pilot): a function,
 /// method, property, or member of one type answered by an engine operation,
 /// and how a list literal is built.
@@ -282,6 +292,7 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
     let lw = Lowerer {
         inf: inf, ls: layouts_new(p, m), m: m, fn_index: Map<str, i64>(), queue: [], queue_self: [],
         bindings: engine_bindings, bound_index: bound_rows_index(engine_bindings), queue_body: [], queue_args: [], cur_field: -1, binding_of: binding_of,
+        membership_fn: find_membership_fn(engine_bindings),
         f: ir_function_new("", ir_physics_new(0, 0, 0, 0, 0)), cur: 0,
         values: Map<str, i64>(), slots: Map<str, i64>(), loop_heads: [], loop_exits: [], head_depths: [], exit_depths: [], defers: [],
         lambda_captures: Map<str, List<i64>>(), lambda_self: Map<str, i64>(),
@@ -988,6 +999,14 @@ pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
             return emit(lw, op_const_bytes(), 0, physics_of(lw, n), [pool_str(lw, node_name(s, ch[1]))], n);
         }
     }
+    if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 && ch.len() == 3 && lw.membership_fn != "" && node_name(s, callee) == lw.membership_fn {
+        let mem_op = bound(lw, native_member_hook(), [type_name_of(lw, value_type(lw, ch[2])), "in"]);
+        if mem_op != "" {
+            let rhs_v = lower_expr(lw, ch[2]);
+            let lhs_v = lower_expr(lw, ch[1]);
+            return emit(lw, op_call_intrinsic(), intrinsic_index(lw, mem_op), layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool()))), [rhs_v, lhs_v], n);
+        }
+    }
     if some v = lower_variant_call(lw, n) { return v; }
     if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 {
         let as_type = type_receiver(lw.inf, callee);
@@ -1285,7 +1304,8 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
         jump_to(lw, head, [], n);
         return finish_for(lw, n, exit, done, then_clause, result_slot);
     }
-    if !runs_as_code(lw, it_t, s.enumeration[0]) && native_for(lw, it_t, "[]", native_method_hook()) != "" {
+    if bound(lw, native_member_hook(), [type_name_of(lw, it_t), "for_get"]) != ""
+        || (!runs_as_code(lw, it_t, s.enumeration[0]) && native_for(lw, it_t, "[]", native_method_hook()) != "") {
         return lower_for_indexed(lw, n, iterable, it_t, var_key, elem_phy, head, body, step, exit, done, then_clause, result_slot);
     }
     if s.enumeration.len() < 3 { return unsupported(lw, n); }
@@ -1347,11 +1367,17 @@ fn finish_for(lw: Lowerer, n: i64, exit: u32, done: u32, then_clause: i64, resul
 [StandIn("ir.engine_sequence_for", "slice<T> is { ptr<T>, usize } enumerated by its SliceEnumerator", "the value is the engine's own list, as in the seed, and is indexed by engine operations", "F6")]
 fn lower_for_indexed(lw: Lowerer, n: i64, iterable: i64, it_t: i64, var_key: str, elem_phy: IrTypePhysics, head: u32, body: u32, step: u32, exit: u32, done: u32, then_clause: i64, result_slot: u32) -> u32 {
     let s = lw.inf.p.s;
-    let len_hook = native_for(lw, it_t, "len", native_property_hook());
+    let it_name = type_name_of(lw, it_t);
+    let seq_hook = bound(lw, native_member_hook(), [it_name, "for_seq"]);
+    let custom_len = bound(lw, native_member_hook(), [it_name, "for_len"]);
+    let len_hook = if custom_len != "" { custom_len } else { native_for(lw, it_t, "len", native_property_hook()) };
     if len_hook == "" { return unsupported(lw, n); }
     let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
     let bool_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
-    let seq = lower_expr(lw, iterable);
+    var seq = lower_expr(lw, iterable);
+    if seq_hook != "" {
+        seq = emit(lw, op_call_intrinsic(), intrinsic_index(lw, seq_hook), physics_of(lw, iterable), [seq], n);
+    }
     let len = emit(lw, op_call_intrinsic(), intrinsic_index(lw, len_hook), int_phy, [seq], n);
     let slot = emit(lw, op_stack_slot(), 0, int_phy, [], n);
     emit_void(lw, op_store(), 0, [slot, emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, 0)], n)], n);
@@ -1361,7 +1387,8 @@ fn lower_for_indexed(lw: Lowerer, n: i64, iterable: i64, it_t: i64, var_key: str
     // CmpPred 2 is `<`.
     emit_void(lw, op_cond_br(), 0, [emit(lw, op_cmp(), 2, bool_phy, [i, len], n), body, 0, exit, 0], n);
     switch_to(lw, body);
-    let get = native_for(lw, it_t, "[]", native_method_hook());
+    let custom_get = bound(lw, native_member_hook(), [it_name, "for_get"]);
+    let get = if custom_get != "" { custom_get } else { native_for(lw, it_t, "[]", native_method_hook()) };
     lw.values.set(var_key, emit(lw, op_call_intrinsic(), intrinsic_index(lw, get), elem_phy, [seq, i], n));
     lower_loop_body(lw, rhs(s, n), step, done, n);
     switch_to(lw, step);

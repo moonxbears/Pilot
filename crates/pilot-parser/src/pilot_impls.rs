@@ -210,9 +210,37 @@ impl ParserTables {
         self.membership.as_deref()
     }
 
-    pub(crate) fn bind_membership(&mut self, function: String) {
+    /// The function `x in a..b` or `x in a..=b` calls, if bound.
+    pub fn membership_range(&self, inclusive: bool) -> Option<&str> {
+        if inclusive { self.membership_range.1.as_deref() } else { self.membership_range.0.as_deref() }
+    }
+
+    /// The engine operation bound to `(type_name, member)` via `bind_native_member`.
+    pub fn native_member(&self, type_name: &str, member: &str) -> Option<&str> {
+        self.native_members.get(&(type_name.to_string(), member.to_string())).map(String::as_str)
+    }
+
+    /// The engine operation bound to membership (`receptor (10, 0)`) on `type_name`.
+    pub fn membership_native(&self, type_name: &str) -> Option<&str> {
+        let word = self.receptors.iter().find(|(_, &v)| v == (10, 0)).map(|(k, _)| k.as_str())?;
+        self.native_member(type_name, word)
+    }
+
+    pub(crate) fn bind_membership(&mut self, function: String, range_fn: String, range_incl_fn: String) {
         if !function.is_empty() {
             self.membership = Some(function);
+        }
+        if !range_fn.is_empty() {
+            self.membership_range.0 = Some(range_fn);
+        }
+        if !range_incl_fn.is_empty() {
+            self.membership_range.1 = Some(range_incl_fn);
+        }
+    }
+
+    pub(crate) fn bind_native_member(&mut self, type_name: String, member: String, op: String) {
+        if !type_name.is_empty() && !member.is_empty() && !op.is_empty() {
+            self.native_members.insert((type_name, member), op);
         }
     }
 

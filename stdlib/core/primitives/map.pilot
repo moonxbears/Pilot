@@ -142,6 +142,8 @@ pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuf
 
     pub count: usize { get => .inner.count; }
     pub pure fn has(key: TKey) -> bool => .inner.has(key);
+    pub pure fn keys() -> List<TKey> => List<TKey>();
+    pub fn get_enumerator() -> ListEnumerator<TKey> => .keys().get_enumerator();
     pub pure fn get(key: TKey) -> option<TVal> => .inner.get(key);
     pub fn set(key: TKey, val: TVal) { .inner.set(key, val); }
     pub fn remove(key: TKey) -> bool => .inner.remove(key);

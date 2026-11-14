@@ -1115,6 +1115,25 @@ static inline pilot_val pilot_map_values(pilot_val o) {
     free(es);
     return out;
 }
+/* `map_keys(m)`: a new list of the map's keys in sorted key order; the list
+   holds its own references. */
+static inline pilot_val pilot_map_keys(pilot_val o) {
+    pilot_v_map *m = pilot_v_need_map(o, "read", PILOT_V_NULL);
+    pilot_v_map_entry **es = (pilot_v_map_entry **)pilot_alloc(sizeof(pilot_v_map_entry *) * (size_t)(m->count ? m->count : 1));
+    int64_t n = 0;
+    for (int64_t i = 0; i < m->cap; i++) {
+        if (m->slots[i].state == 1) es[n++] = &m->slots[i];
+    }
+    qsort(es, (size_t)n, sizeof(pilot_v_map_entry *), pilot_v_cmp_entry_key);
+    pilot_val out = pilot_v_list_new(n ? n : 1);
+    pilot_v_list *p = out.as.l;
+    for (int64_t i = 0; i < n; i++) {
+        pilot_v_dup(es[i]->key);
+        p->items[p->len++] = es[i]->key;
+    }
+    free(es);
+    return out;
+}
 /* `value_clone(v)`: a deep copy of `v` that shares nothing that could
    change: lists, maps and struct values are copied with their contents
    copied the same way; strings, which never change, and scalars are shared.

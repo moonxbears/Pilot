@@ -48,9 +48,22 @@ impl BytecodeCompiler {
             && matches!(iter_n.flags, OP_RANGE_INCLUSIVE | OP_RANGE_HALF_OPEN);
         let proto = pilot_parser::bootstrap_tables().enumerator().cloned();
         let static_type = if is_range { None } else { self.static_type(arena, iter_id) };
+        let native_for_ops = static_type.as_deref().and_then(|t| {
+            let tables = pilot_parser::bootstrap_tables();
+            let get = tables.native_member(t, "for_get")?;
+            let len = tables.native_member(t, "for_len")?;
+            Some((
+                tables.native_member(t, "for_seq").map(str::to_string),
+                len.to_string(),
+                get.to_string(),
+            ))
+        });
         let walk = match &proto {
             _ if is_range => Walk::Range,
-            Some(p) if self.method_owners.contains_key(&p.get_enumerator) => match &static_type {
+            _ if native_for_ops.is_some() => Walk::Index,
+            Some(p) if self.method_owners.contains_key(&p.get_enumerator)
+                && self.method_owners.contains_key(&p.move_next) =>
+            match &static_type {
                 Some(t) if self.declares(t, &p.get_enumerator).is_some() => Walk::Enumerate,
                 Some(t) if self.structs.contains_key(t) => Walk::Enumerate,
                 Some(_) => Walk::Index,
@@ -126,7 +139,17 @@ impl BytecodeCompiler {
             self.patch_to_here(j);
         }
         if matches!(walk, Walk::Index | Walk::Either) {
-            let r_len = self.emit_intrinsic("list_len", &[r_seq]);
+            if let Some((Some(to_seq), _, _)) = &native_for_ops {
+                let r_converted = self.emit_intrinsic(to_seq, &[r_seq]);
+                self.emit(Opcode::Move, r_seq, r_converted, 0);
+                self.release_to(mark);
+            } else if walk == Walk::Either {
+                let r_converted = self.emit_intrinsic("for_seq", &[r_seq]);
+                self.emit(Opcode::Move, r_seq, r_converted, 0);
+                self.release_to(mark);
+            }
+            let len_op = native_for_ops.as_ref().map(|(_, l, _)| l.as_str()).unwrap_or("str_len");
+            let r_len = self.emit_intrinsic(len_op, &[r_seq]);
             self.emit(Opcode::Move, r_end, r_len, 0);
             self.release_to(mark);
         }
@@ -156,7 +179,8 @@ impl BytecodeCompiler {
             if is_range {
                 self.emit(Opcode::Move, slot, r_idx, 0);
             } else {
-                let r_item = self.emit_intrinsic("map_get", &[r_seq, r_idx]);
+                let get_op = native_for_ops.as_ref().map(|(_, _, g)| g.as_str()).unwrap_or("list_get");
+                let r_item = self.emit_intrinsic(get_op, &[r_seq, r_idx]);
                 self.emit(Opcode::Move, slot, r_item, 0);
                 self.release_to(mark);
             }

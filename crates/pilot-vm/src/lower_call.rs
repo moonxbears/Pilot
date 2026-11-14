@@ -133,6 +133,26 @@ impl BytecodeCompiler {
     }
 
     fn compile_named_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> u8 {
+        if args.len() == 2 && pilot_parser::bootstrap_tables().membership() == Some(name) {
+            if let Some(t) = self.static_type(arena, args[1]) {
+                if let Some(op) = pilot_parser::bootstrap_tables().membership_native(&t) {
+                    let r_lhs = self.compile_node(arena, args[0]);
+                    let r_rhs = self.compile_node(arena, args[1]);
+                    return self.emit_intrinsic(op, &[r_rhs, r_lhs]);
+                }
+            } else {
+                let r_lhs = self.compile_node(arena, args[0]);
+                let r_rhs = self.compile_node(arena, args[1]);
+                let r_hit = self.emit_intrinsic("native_in_check", &[r_rhs, r_lhs]);
+                let j_fallback = self.emit_branch(Opcode::JumpIfNull, r_hit, 0);
+                let j_done = self.emit_jump(0);
+                self.patch_to_here(j_fallback);
+                let r_seq = self.emit_user_call(name.to_string(), name.to_string(), &[r_lhs, r_rhs]);
+                self.emit(Opcode::Move, r_hit, r_seq, 0);
+                self.patch_to_here(j_done);
+                return r_hit;
+            }
+        }
         // A name the program declares wins over a native function. The seed
         // token and receptors such as `nameof` are syntax and always win.
         let syntax =

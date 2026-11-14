@@ -69,9 +69,15 @@ pub fn seq_except<T: IEquatable<T>>(a: T[], b: T[]) -> T[] {
     return out;
 }
 
+/// `x in lo..hi`: whether `x` is in the half-open range `[lo, hi)`.
+pub pure fn range_member<T: IComparable<T>>(x: T, lo: T, hi: T) -> bool => x >= lo && x < hi;
+
+/// `x in lo..=hi`: whether `x` is in the inclusive range `[lo, hi]`.
+pub pure fn range_member_inclusive<T: IComparable<T>>(x: T, lo: T, hi: T) -> bool => x >= lo && x <= hi;
+
 comptime {
     __engine("bind_operator_fn", nameof(union),     nameof(seq_union));
     __engine("bind_operator_fn", nameof(intersect), nameof(seq_intersect));
     __engine("bind_operator_fn", nameof(except),    nameof(seq_except));
-    __engine("bind_membership", nameof(seq_member));
+    __engine("bind_membership", nameof(seq_member), nameof(range_member), nameof(range_member_inclusive));
 }

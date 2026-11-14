@@ -481,13 +481,13 @@ pub partial struct {
     [KeywordDefAttr(12, "Filters query dataset using predicate boolean expression.")]
     where {}
 
-    [KeywordDefAttr(12, "Orders query results by specified key expressions. Target, not built yet: as a query clause it stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
+    [KeywordDefAttr(12, "Orders query results by specified key expressions over in-memory sequences; elsewhere an ordinary name.")]
     order {}
 
-    [KeywordDefAttr(12, "Sorts query order ascending. Target, not built yet: as a query clause it stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
+    [KeywordDefAttr(12, "Sorts query order ascending after `order`; elsewhere an ordinary name.")]
     ascending {}
 
-    [KeywordDefAttr(12, "Sorts query order descending. Target, not built yet: as a query clause it stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
+    [KeywordDefAttr(12, "Sorts query order descending after `order`; elsewhere an ordinary name.")]
     descending {}
 
     [KeywordDefAttr(12, "Inserts records into a database table. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]

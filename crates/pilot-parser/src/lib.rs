@@ -23,6 +23,7 @@ mod ret_type;
 mod tuple_member;
 mod switch;
 mod inline_block;
+mod query;
 mod unbuilt;
 mod param_mods;
 mod rule_arms;
@@ -74,7 +75,10 @@ pub struct ParserTables { modifiers: HashMap<String, ModAct>, param_modifiers: H
     /// The Pilot function an f-string hole's `:pattern` calls (see `fstring`).
     format_spec: Option<String>,
     /// The function `x in xs` calls, as `f(x, xs)`, when one is bound.
-    membership: Option<String>, scalar_text: Option<String>, }
+    membership: Option<String>,
+    membership_range: (Option<String>, Option<String>),
+    native_members: HashMap<(String, String), String>,
+    scalar_text: Option<String>, }
 impl ParserTables {
     pub fn new() -> Self { Self::default() }
     fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
@@ -137,12 +141,13 @@ impl ParserTables {
                     HOOK_NATIVE_METHOD => self.bind_native(NativeKind::Method, s_arg(2), s_arg(3)),
                     HOOK_NATIVE_PROPERTY => self.bind_native(NativeKind::Property, s_arg(2), s_arg(3)),
                     HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(2), s_arg(3)),
+                    "bind_native_member" => self.bind_native_member(s_arg(2), s_arg(3), s_arg(4)),
                     HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(2), s_arg(3)),
                     HOOK_ENUMERATOR => self.bind_enumerator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
                     HOOK_GENERATOR => self.bind_generator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
                     HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3), s_arg(4)),
                     HOOK_FORMAT_SPEC => self.bind_format_spec(s_arg(2)),
-                    HOOK_MEMBERSHIP => self.bind_membership(s_arg(2)), HOOK_SCALAR_TEXT => self.bind_scalar_text(s_arg(2)),
+                    HOOK_MEMBERSHIP => self.bind_membership(s_arg(2), s_arg(3), s_arg(4)), HOOK_SCALAR_TEXT => self.bind_scalar_text(s_arg(2)),
                     "bind_receiver_ident" => { let (w, b, v) = (s_arg(2), s_arg(3), s_arg(4)); if !w.is_empty() { self.receiver_ident = w; }
                         self.backing_ident = b; self.setter_value_ident = v; }
                     "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
@@ -156,8 +161,8 @@ impl ParserTables {
 /// `MemberExpr.flags` of a prefix-dot member (`.name`), whose receiver the
 /// parser filled in. `0` is `a.b` and `1` is `a?.b`.
 pub const MEMBER_IMPLIED_RECEIVER: u16 = 2;
-/// The binding power of `x in xs`, that of the comparison words.
-const MEMBERSHIP_BP: u8 = 45;
+/// The binding power of `x in xs`, below `..` (40) and above `&&` (20).
+const MEMBERSHIP_BP: u8 = 25;
 fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
         "+" => Add, "-" => Sub, "*" => Mul, "/" => Div, "//" => FloorDiv, "%" => Rem, "**" => Pow,
         "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" | "and" => And,
@@ -1168,9 +1173,22 @@ impl<'a> Parser<'a> {
                     let wsp = self.span();
                     self.advance();
                     let rhs = self.parse_expr_bp(MEMBERSHIP_BP + 1);
-                    let callee = self.arena.alloc_ident(&function, wsp);
+                    let rhs_node = *self.arena.node(rhs);
                     let span = ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end);
-                    lhs = self.arena.alloc_list_node(NodeKind::CallExpr, 0, span, &[callee, lhs, rhs]);
+                    let range_fn = if rhs_node.node_kind() == NodeKind::BinaryExpr
+                        && matches!(rhs_node.flags, 23 | 24)
+                    {
+                        self.tables.membership_range(rhs_node.flags == 23).map(str::to_string)
+                    } else {
+                        None
+                    };
+                    if let Some(rf) = range_fn {
+                        let callee = self.arena.alloc_ident(&rf, wsp);
+                        lhs = self.arena.alloc_list_node(NodeKind::CallExpr, 0, span, &[callee, lhs, NodeId(rhs_node.lhs), NodeId(rhs_node.rhs)]);
+                    } else {
+                        let callee = self.arena.alloc_ident(&function, wsp);
+                        lhs = self.arena.alloc_list_node(NodeKind::CallExpr, 0, span, &[callee, lhs, rhs]);
+                    }
                     continue;
                 }
             }
@@ -1351,48 +1369,6 @@ impl<'a> Parser<'a> {
     /// of `src` that every `where` holds for, built as the collecting
     /// `for x in src { if cond { yield e; } }`. Any other clause is an
     /// error, not skipped.
-    fn parse_linq_query(&mut self) -> NodeId {
-        let sp = self.span();
-        self.advance();
-        let vsym = self.intern_cur();
-        if self.is_rec(10) {
-            self.advance();
-        }
-        let src_e = self.parse_expr_bp(20);
-        let mut conds = Vec::new();
-        while !self.at_end() && self.receptor() != Some((33, 7)) {
-            if self.is_rec(28) {
-                self.advance();
-                conds.push(self.parse_expr_bp(20));
-            } else if self.at_unbuilt_clause() {
-                let (csp, word) = (self.span(), self.text().to_string());
-                self.report_unbuilt(csp, &word);
-                return NodeId::NONE;
-            } else {
-                let (csp, word) = (self.span(), self.text().to_string());
-                self.arena.diagnostics.push((
-                    csp,
-                    format!("query clause `{word}` is not supported: a query is `from x in xs`, any number of `where cond`, then `select e`"),
-                ));
-                return NodeId::NONE;
-            }
-        }
-        if self.receptor() != Some((33, 7)) {
-            let csp = self.span();
-            self.arena.diagnostics.push((csp, "a query must end with `select e`".to_string()));
-            return NodeId::NONE;
-        }
-        self.advance();
-        let proj = self.parse_expr_bp(15);
-        let span = ByteSpan::new(sp.start, self.prev_span().end);
-        let mut item = self.arena.alloc_node(NodeKind::YieldStmt, 0, span, proj.0, 0);
-        for &c in conds.iter().rev() {
-            let then_b = self.arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &[item]);
-            item = self.arena.alloc_node(NodeKind::IfExpr, 0, span, c.0, then_b.0);
-        }
-        let body = self.arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &[item]);
-        self.arena.alloc_for(vsym, src_e, body, NodeId::NONE, span)
-    }
     fn try_skip_generic_expr_args(&self) -> Option<usize> { let (mut p, mut d) = (self.cur(), 0i32); while p < self.tape.len() {
             match self.tape.kind(p) { TokenKind::Less => d += 1, TokenKind::Greater => { d -= 1; if d == 0 { break; } }
                 TokenKind::ShiftRight => { d -= 2; if d <= 0 { break; } }

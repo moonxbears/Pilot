@@ -188,6 +188,8 @@ pub struct PythonDialect : ISourceDialect {
         "    return v",
         "def pilot_map_values(m):",
         "    return [v for k, v in sorted(m.items(), key=lambda e: str(e[0]))]",
+        "def pilot_map_keys(m):",
+        "    return [k for k, v in sorted(m.items(), key=lambda e: str(e[0]))]",
         "def pilot_eq(a, b):",
         "    if isinstance(a, list) and isinstance(b, list):",
         "        return a is b or (len(a) == len(b) and all(pilot_eq(x, y) for x, y in zip(a, b)))",
@@ -482,7 +484,7 @@ fn dynamic_engine_ops() -> Map<str, str> {
     ops.set("to_str", "pilot_show");
     ops.set("list_get", "pilot_map_get");
     ops.set("list_set", "pilot_map_set");
-    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_fault", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line", "value_clone"] {
+    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_fault", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "map_keys", "list_extend", "list_remove_at", "stdin_read_line", "value_clone"] {
         ops.set(name, "pilot_" + name);
     }
     return ops;

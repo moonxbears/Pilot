@@ -232,6 +232,13 @@ impl PilVirtualMachine {
         Err(format!("`{op}` expects a string, list or record, found {}", v.kind_label()))
     }
 
+    fn sorted_map_keys(&mut self, slot: usize) -> PilotVal {
+        let mut keys: Vec<String> = self.heap_maps[slot].keys().cloned().collect();
+        keys.sort();
+        let vals = keys.into_iter().map(|k| self.new_str(&k)).collect();
+        self.new_list(vals)
+    }
+
     pub(crate) fn get(&self, obj: PilotVal, k: PilotVal, op: &str) -> IntrinsicResult {
         if obj.is_list() {
             let slot = self.list_slot(obj, op)?;
@@ -500,6 +507,36 @@ impl PilVirtualMachine {
                 entries.sort_by(|a, b| a.0.cmp(b.0));
                 let values = entries.into_iter().map(|(_, v)| *v).collect();
                 Ok(self.new_list(values))
+            }
+            "map_keys" => {
+                let slot = self.map_slot(arg(args, 0, op)?, op)?;
+                Ok(self.sorted_map_keys(slot))
+            }
+            "for_seq" => {
+                let v = arg(args, 0, op)?;
+                if v.is_list() || v.is_str() {
+                    Ok(v)
+                } else if v.is_map() {
+                    let slot = self.map_slot(v, op)?;
+                    Ok(self.sorted_map_keys(slot))
+                } else {
+                    Err(format!("{} is not iterable", v.kind_label()))
+                }
+            }
+            "native_in_check" => {
+                let haystack = arg(args, 0, op)?;
+                let needle = arg(args, 1, op)?;
+                if haystack.is_str() {
+                    let h = str_arg(args, 0, op)?;
+                    let n = str_arg(args, 1, op)?;
+                    Ok(PilotVal::from_bool(h.contains(&*n)))
+                } else if haystack.is_map() {
+                    let slot = self.map_slot(haystack, op)?;
+                    let m = &self.heap_maps[slot];
+                    Ok(PilotVal::from_bool(with_key(needle, |k| m.contains_key(k))))
+                } else {
+                    Ok(PilotVal::NULL)
+                }
             }
             // `record_set_type(obj, name)` marks a record as built from struct `name`.
             "record_set_type" => {

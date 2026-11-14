@@ -38,6 +38,7 @@ comptime {
     __engine("bind_native_method", nameof(get),         "map_get");
     __engine("bind_native_method", nameof(set),         "map_set");
     __engine("bind_native_method", nameof(has),         "map_has");
+    __engine("bind_native_method", nameof(keys),        "map_keys");
     __engine("bind_native_method", nameof(remove),      "map_remove");
     __engine("bind_native_method", nameof(push),        "list_push");
     __engine("bind_native_method", nameof(pop),         "list_pop");
@@ -82,6 +83,22 @@ comptime {
     // The seed holds a `map<K, V>` as its own map, read and written by key.
     __engine("bind_native_member", nameof(map), "[]",  "map_get");
     __engine("bind_native_member", nameof(map), "[]=", "map_set");
+    // Membership (`x in y`) and native iteration (`for x in y`) per type.
+    __engine("bind_native_member", nameof(str), "in",      "str_contains");
+    __engine("bind_native_member", nameof(Map), "in",      "map_has");
+    __engine("bind_native_member", nameof(map), "in",      "map_has");
+    __engine("bind_native_member", nameof(Map), "for_seq", "map_keys");
+    __engine("bind_native_member", nameof(Map), "for_len", "str_len");
+    __engine("bind_native_member", nameof(Map), "for_get", "list_get");
+    __engine("bind_native_member", nameof(map), "for_seq", "map_keys");
+    __engine("bind_native_member", nameof(map), "for_len", "str_len");
+    __engine("bind_native_member", nameof(map), "for_get", "list_get");
+    __engine("bind_native_member", nameof(str), "for_len", "str_len");
+    __engine("bind_native_member", nameof(str), "for_get", "str_byte_at");
+    __engine("bind_native_member", nameof(List), "for_len", "str_len");
+    __engine("bind_native_member", nameof(List), "for_get", "list_get");
+    __engine("bind_native_member", nameof(slice), "for_len", "str_len");
+    __engine("bind_native_member", nameof(slice), "for_get", "list_get");
     // An operator with no PilIR instruction of its own runs as an engine
     // operation: `a ** b` (an integer power wraps; a float power is `powf`).
     __engine("bind_operator_intrinsic", "**", "num_pow");
