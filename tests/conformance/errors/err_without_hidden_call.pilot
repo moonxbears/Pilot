@@ -1,0 +1,16 @@
+// METH001: a bundle member hidden by `without` in the same file is rejected
+// by the checker before anything runs.
+struct GreetFacet {
+    pub fn greet() -> str => "hello";
+    pub fn wave() -> str => "wave";
+}
+
+struct Robot {
+    *GreetFacet without { greet };
+    pub id: i64;
+}
+
+fn main() {
+    let r = Robot { id: 1 };
+    print(r.greet());
+}

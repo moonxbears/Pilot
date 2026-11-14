@@ -234,12 +234,20 @@ pub fn lower_member(lw: Lowerer, n: i64) -> u32 {
     if position >= 0 && recv >= 0 && !is_implied(lw, n) {
         return emit(lw, op_extract_field(), position, physics_of(lw, n), [lower_expr(lw, recv)], n);
     }
-    if recv >= 0 && kind(s, recv) == nk_ident() && binding_index(lw, recv) < 0 {
+    if recv >= 0 && (kind(s, recv) == nk_ident() || kind(s, recv) == nk_type_named()) && binding_index(lw, recv) < 0 {
+        let as_t = type_receiver(lw.inf, recv);
         // `Color.Red`: a variant of the enum the receiver names.
-        if some tag = variant_tag(lw.inf.p, type_receiver(lw.inf, recv), sym_text(s, rhs(s, n))) {
+        if some tag = variant_tag(lw.inf.p, as_t, sym_text(s, rhs(s, n))) {
             return emit(lw, op_const_bits(), 0, physics_of(lw, n), [pool_int(lw, tag)], n);
         }
         if some v = lower_variant_name(lw, n) { return v; }
+        if ty_is_named(lw.inf.p.tt, as_t) {
+            if some m = prog_member(lw.inf.p, as_t, sym_text(s, rhs(s, n))) {
+                if is_static_decl(s, m.decl) && is_field(s, m.decl) {
+                    return lower_global_read(lw, m.decl, n);
+                }
+            }
+        }
     }
     var t = if is_implied(lw, n) { lw.self_type } else { variant_value_type(lw, recv) };
     // A member of the value an optional holds (`m.title` after `?..`): the
@@ -640,8 +648,28 @@ pub fn lower_field_assign(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let target = lhs(s, n);
     if is_implied(lw, target) && lw.self_value == ir_no_value() { return unsupported(lw, n); }
-    let t = member_receiver_type(lw, target);
     let name = member_word(lw, target);
+    let recv_node = lhs(s, target);
+    if !is_implied(lw, target) && recv_node >= 0 && (kind(s, recv_node) == nk_ident() || kind(s, recv_node) == nk_type_named()) && binding_index(lw, recv_node) < 0 {
+        let as_t = type_receiver(lw.inf, recv_node);
+        if ty_is_named(lw.inf.p.tt, as_t) {
+            if some m = prog_member(lw.inf.p, as_t, name) {
+                if is_static_decl(s, m.decl) && is_field(s, m.decl) {
+                    var gv = lower_expr(lw, rhs(s, n));
+                    let op = flags(s, n);
+                    if op != 0 {
+                        let ir_op = arith_opcode(op);
+                        if ir_op == 0 { return unsupported(lw, n); }
+                        let old = lower_global_read(lw, m.decl, target);
+                        gv = emit(lw, ir_op, 0, physics_of(lw, target), [old, gv], n);
+                    }
+                    lower_global_write(lw, m.decl, gv, n);
+                    return unit_value(lw, n);
+                }
+            }
+        }
+    }
+    let t = member_receiver_type(lw, target);
     let slot = field_slot(lw, t, name);
     if slot < 0 && flags(s, n) == 0 {
         if some v = lower_property_write(lw, member_receiver(lw, target), t, name, rhs(s, n), n) { return v; }

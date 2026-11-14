@@ -418,9 +418,20 @@ impl BytecodeCompiler {
                 }
             }
             NodeKind::MemberExpr => {
+                let inner = *arena.node(NodeId(lhs_n.lhs));
+                let field_raw = Self::name(arena, lhs_n.rhs);
+                if matches!(inner.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) {
+                    let owner = Self::name(arena, inner.lhs);
+                    if !self.var_slots.contains_key(owner) && self.has_static_field(owner, field_raw) {
+                        let fty = self.static_field_type(owner, field_raw);
+                        let rhs_r = self.convert_for_binding(rhs_r, fty.as_deref());
+                        self.emit_global_set(&format!("{owner}.{field_raw}"), rhs_r);
+                        return rhs_r;
+                    }
+                }
                 let ty = self.static_type(arena, NodeId(lhs_n.lhs));
                 let r_obj = self.compile_node(arena, NodeId(lhs_n.lhs));
-                let field = self.stored_field(arena, NodeId(lhs_n.lhs), Self::name(arena, lhs_n.rhs));
+                let field = self.stored_field(arena, NodeId(lhs_n.lhs), field_raw);
                 let field_ty = ty.as_deref().and_then(|t| self.field_type(t, &field));
                 let rhs_r = self.convert_for_binding(rhs_r, field_ty.as_deref());
                 self.emit_member_write(r_obj, ty.as_deref(), &field, rhs_r)

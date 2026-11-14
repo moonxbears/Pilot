@@ -1,0 +1,30 @@
+// `sizeof` over primitive register layouts and struct layouts (with alignment and nesting).
+
+struct Empty {}
+
+struct Point {
+    x: i64;
+    y: i64;
+}
+
+struct Padded {
+    a: u8;
+    b: i64;
+}
+
+struct Nested {
+    p: Padded;
+    tail: u8;
+}
+
+fn main() {
+    print(sizeof(u8));
+    print(sizeof(i32));
+    print(sizeof(i64));
+    print(sizeof(f64));
+    print(sizeof(bool));
+    print(sizeof(Empty));
+    print(sizeof(Point));
+    print(sizeof(Padded));
+    print(sizeof(Nested));
+}

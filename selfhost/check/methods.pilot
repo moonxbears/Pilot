@@ -361,19 +361,25 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
                 }
             } else if is_field(s, m) {
                 let fname = node_name(s, m);
-                let ft = prog_annot_type(p, field_type_node(s, m));
-                let fdef = BundleFieldDef {
-                    name: fname,
-                    type_name: node_text(s, field_type_node(s, m)),
-                    layout_id: 0,
-                    byte_size: byte_size(p, ft, depth),
-                    byte_align: byte_align(p, ft, depth),
-                    lattice_bits: field_lattice(p, m, ft) as u8,
-                    is_mutable: kind(s, m) == nk_var(),
-                };
-                primary.push(fdef);
-                bt.own_fields.push(fdef);
-                bt.field_decls.set(fname, add_found(bt, member));
+                if is_static_decl(s, m) {
+                    let fidx = add_found(bt, member);
+                    bt.field_decls.set(fname, fidx);
+                    bt.fields.set(fname, fidx);
+                } else {
+                    let ft = prog_annot_type(p, field_type_node(s, m));
+                    let fdef = BundleFieldDef {
+                        name: fname,
+                        type_name: node_text(s, field_type_node(s, m)),
+                        layout_id: 0,
+                        byte_size: byte_size(p, ft, depth),
+                        byte_align: byte_align(p, ft, depth),
+                        lattice_bits: field_lattice(p, m, ft) as u8,
+                        is_mutable: kind(s, m) == nk_var(),
+                    };
+                    primary.push(fdef);
+                    bt.own_fields.push(fdef);
+                    bt.field_decls.set(fname, add_found(bt, member));
+                }
             } else if k == nk_expr_stmt() {
                 let u = lhs(s, m);
                 if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 {
@@ -559,6 +565,22 @@ pub fn type_provides(p: Program, name: str, member: str) -> bool? {
     if !bt.complete { return none; }
     if bt.fields.has(member) { return true; }
     if some _m = winner(bt, member) { return true; }
+    return false;
+}
+
+/// Whether `t` splices a bundle that declares `name`, and `t` itself hides
+/// or renames `name` (`without { name }` or `with { name as ... }`) without
+/// providing a replacement of that name.
+pub fn prog_has_hidden_splice_member(p: Program, t: i64, name: str) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
+    if bt.spliced.len() == 0 { return false; }
+    if some _m = prog_member(p, t, name) { return false; }
+    for bundle in bt.spliced {
+        if some has = type_provides(p, bundle, name) {
+            if has { return true; }
+        }
+    }
     return false;
 }
 

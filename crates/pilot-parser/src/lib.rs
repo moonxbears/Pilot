@@ -748,7 +748,7 @@ impl<'a> Parser<'a> {
             id
         } else { let rhs = self.parse_type(); let _ = self.eat(TokenKind::Semicolon);
             let id = self.arena.alloc_node(NodeKind::TypeAdtDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, rhs.0);
-            self.apply_mods(id, mods, def_vis); id } }
+            self.apply_mods(id, mods, def_vis); self.add_type_params(id, tps); id } }
     fn parse_enum_decl(&mut self, mods: &DeclMods, def_vis: u8, headless: bool) -> NodeId { let sp = self.span(); if !headless { self.advance(); }
         let sym = self.intern_cur(); self.generics_loudly("an `enum`"); let base = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
         let mut variants = Vec::new(); if self.eat(TokenKind::LBrace) { while !self.at_end() && !self.at(TokenKind::RBrace) {

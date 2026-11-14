@@ -28,6 +28,10 @@ pub(crate) struct StructInfo {
     pub(crate) ctor: Option<NodeId>,
     /// The declared type of each field written with a plain type name.
     pub(crate) field_types: std::collections::HashMap<String, String>,
+    /// Static fields in declaration order, with their default initializer or `NONE`.
+    pub(crate) static_fields: Vec<(String, NodeId)>,
+    /// The declared type of each static field written with a plain type name.
+    pub(crate) static_field_types: std::collections::HashMap<String, String>,
 }
 
 impl BytecodeCompiler {
@@ -109,20 +113,28 @@ impl BytecodeCompiler {
         for m in Self::type_members(arena, NodeId(dn.rhs)) {
             let mn = arena.node(m);
             let is_field = matches!(mn.node_kind(), NodeKind::ParamDecl | NodeKind::VarStmt | NodeKind::LetStmt);
+            let is_static = arena.decl_flags.get(m.0 as usize).copied().unwrap_or(0) & pilot_ast::DECL_FLAG_STATIC != 0;
             if let Some(t) = Self::annot_name(arena, m).filter(|_| is_field) {
-                info.field_types.insert(Self::name(arena, mn.lhs).to_string(), t);
+                let fname = Self::name(arena, mn.lhs).to_string();
+                if is_static {
+                    info.static_field_types.insert(fname, t);
+                } else {
+                    info.field_types.insert(fname, t);
+                }
             }
             match mn.node_kind() {
                 // A property whose accessors have bodies is computed, not
                 // stored, unless it has a default: then its storage (`field`)
                 // starts at that value.
                 NodeKind::ParamDecl if self.is_computed_property(arena, m) && arena.field_default(m).is_none() => {}
-                NodeKind::ParamDecl => info
-                    .fields
-                    .push((Self::name(arena, mn.lhs).to_string(), arena.field_default(m))),
+                NodeKind::ParamDecl => {
+                    let entry = (Self::name(arena, mn.lhs).to_string(), arena.field_default(m));
+                    if is_static { info.static_fields.push(entry); } else { info.fields.push(entry); }
+                }
                 // `var x: T = v;` and `let x: T;` in a struct body are fields too.
                 NodeKind::VarStmt | NodeKind::LetStmt => {
-                    info.fields.push((Self::name(arena, mn.lhs).to_string(), NodeId(mn.rhs)))
+                    let entry = (Self::name(arena, mn.lhs).to_string(), NodeId(mn.rhs));
+                    if is_static { info.static_fields.push(entry); } else { info.fields.push(entry); }
                 }
                 NodeKind::ConstructorDecl => {
                     info.ctor = Some(m);
@@ -138,6 +150,31 @@ impl BytecodeCompiler {
     /// The declared type of field `field` of struct `owner`.
     pub(crate) fn field_type(&self, owner: &str, field: &str) -> Option<String> {
         self.structs.get(owner)?.field_types.get(field).cloned()
+    }
+
+    pub(crate) fn has_static_field(&self, owner: &str, field: &str) -> bool {
+        self.structs.get(owner).is_some_and(|s| s.static_fields.iter().any(|(f, _)| f == field))
+    }
+
+    pub(crate) fn static_field_type(&self, owner: &str, field: &str) -> Option<String> {
+        self.structs.get(owner)?.static_field_types.get(field).cloned()
+    }
+
+    pub(crate) fn compile_struct_static_fields(&mut self, arena: &AstArena, decl: NodeId) -> u8 {
+        let dn = *arena.node(decl);
+        let owner = Self::name(arena, dn.lhs).to_string();
+        let fields = self.structs.get(&owner).map(|s| s.static_fields.clone()).unwrap_or_default();
+        for (fname, default_id) in fields {
+            let mark = self.next_reg;
+            let r_v = if default_id.is_some() {
+                self.compile_node(arena, default_id)
+            } else {
+                self.emit_null()
+            };
+            self.emit_global_set(&format!("{owner}.{fname}"), r_v);
+            self.release_to(mark);
+        }
+        self.emit_null()
     }
 
     pub(crate) fn struct_fields(&self, name: &str) -> Vec<(String, NodeId)> {

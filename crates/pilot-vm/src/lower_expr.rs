@@ -177,6 +177,14 @@ impl BytecodeCompiler {
 
     fn compile_member(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
         let node = *arena.node(node_id);
+        let lhs_node = *arena.node(NodeId(node.lhs));
+        if matches!(lhs_node.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) {
+            let owner = Self::name(arena, lhs_node.lhs);
+            let field = Self::name(arena, node.rhs);
+            if !self.var_slots.contains_key(owner) && self.has_static_field(owner, field) {
+                return self.emit_global_get(&format!("{owner}.{field}"));
+            }
+        }
         match self.resolve_cmap(arena, node_id) {
             Some(CMap::Val(v)) => return self.emit_const(v),
             Some(cm) => return self.materialize_cmap(&cm),

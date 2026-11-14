@@ -108,15 +108,42 @@ impl BytecodeCompiler {
                 format!("`{name}` asks `{query}`, which the seed cannot answer"),
             );
         }
-        match pilot_parser::bootstrap_tables().reg_layout(&ty) {
-            Some(layout) => self.emit_const(PilotVal::from_int((layout.width + 7) / 8)),
+        match self.type_extent(&ty, 0) {
+            Some((size, _align)) => self.emit_const(PilotVal::from_int(size)),
             None => self.error(
                 crate::codes::SEED,
                 format!(
-                    "`{name}({ty})`: the seed knows only the register layouts of primitive types; struct layouts come with the type checker (F4)"
+                    "`{name}({ty})`: layout is not known for `{ty}`"
                 ),
             ),
         }
+    }
+
+    fn type_extent(&self, ty: &str, depth: usize) -> Option<(i64, i64)> {
+        if let Some(layout) = pilot_parser::bootstrap_tables().reg_layout(ty) {
+            let size = ((layout.width + 7) / 8) as i64;
+            let mut align = 1_i64;
+            while align < size {
+                align *= 2;
+            }
+            return Some((size, align));
+        }
+        if depth > 8 {
+            return None;
+        }
+        let info = self.structs.get(ty)?;
+        let mut offset = 0_i64;
+        let mut max_align = 1_i64;
+        for (fname, _) in &info.fields {
+            let ftype = info.field_types.get(fname)?;
+            let (fsize, falign) = self.type_extent(ftype, depth + 1)?;
+            let align = falign.max(1);
+            offset = ((offset + align - 1) / align) * align;
+            offset += fsize;
+            max_align = max_align.max(align);
+        }
+        let total_size = ((offset + max_align - 1) / max_align) * max_align;
+        Some((total_size, max_align))
     }
 
     /// `name` on its own, when it is a native value.

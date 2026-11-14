@@ -339,7 +339,7 @@ pub fn prog_is_never(p: Program, t: i64) -> bool {
 
 /// The generic parameter `name` visible at node `at`, as a type, or the
 /// unknown type when no enclosing declaration introduces it.
-fn visible_tparam(p: Program, at: i64, name: str) -> i64 {
+pub fn visible_tparam(p: Program, at: i64, name: str) -> i64 {
     var cur = at;
     var depth = 0;
     while cur >= 0 && depth < 200 {
@@ -395,10 +395,16 @@ pub pure fn fn_slot() -> str => "fn_t";
 /// The receptor slot of the list a collection literal builds.
 pub pure fn list_slot() -> str => "list_t";
 
+/// Whether type declaration `d` is `type Name = Target;` (or generic
+/// `type Name<T> = Target;`): it has no variants and its right side is the
+/// target type.
+pub fn is_type_alias(p: Program, d: i64) -> bool =>
+    kind(p.s, d) == nk_adt() && flags(p.s, d) == 0 && rhs(p.s, d) >= 0;
+
 /// Whether type declaration `d` is `type Name = Target;` with no generic
 /// parameters: it has no variants and its right side is the target type.
 pub fn is_plain_alias(p: Program, d: i64) -> bool {
-    if kind(p.s, d) != nk_adt() || flags(p.s, d) != 0 || rhs(p.s, d) < 0 { return false; }
+    if !is_type_alias(p, d) { return false; }
     return nl_get(p.tparams, key(d)).len() == 0;
 }
 
@@ -451,11 +457,20 @@ pub fn prog_annot_type(p: Program, n: i64) -> i64 {
                     i = i + 1;
                 }
             }
-            if d >= 0 && is_plain_alias(p, d) {
-                // `type Meters = i64;` is another name for its target. The
-                // memo is set first so an alias of itself ends as unknown.
+            if d >= 0 && is_type_alias(p, d) {
+                // `type Meters = i64;` or `type Pair<T> = (T, T);` is another
+                // name for its target. The memo is set first so a cyclic
+                // alias ends as unknown.
                 p.annot_memo[n] = ty_unknown();
-                t = prog_annot_type(p, rhs(p.s, d));
+                let tp_names = prog_tparam_names(p, d);
+                if tp_names.len() > 0 {
+                    if args.len() > 0 {
+                        let target = prog_annot_type(p, rhs(p.s, d));
+                        t = ty_subst(p.tt, target, tp_names, args);
+                    }
+                } else {
+                    t = prog_annot_type(p, rhs(p.s, d));
+                }
             } else if d >= 0 && args.len() >= 2 && name == prog_slot_name(p, union_slot()) {
                 // `union<A, B>` (`A | B`) is the union of its members: a
                 // value of either fits it.

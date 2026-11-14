@@ -356,16 +356,76 @@ fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
 /// argument must fit its parameter over the receiver's type arguments
 /// (TYPE001). A parameter named by the receiver word is the receiver, not an
 /// argument.
+/// If `expr` is an identifier inside the `then` branch of `if expr is T`,
+/// returns `T`; otherwise `ty_unknown()`.
+fn narrowed_is_type(inf: Infer, at: i64, expr: i64) -> i64 {
+    let p = inf.p;
+    let s = p.s;
+    if kind(s, expr) != nk_ident() { return ty_unknown(); }
+    let b = inf.r.ref_of[expr];
+    if b < 0 { return ty_unknown(); }
+    var child = at;
+    var cur = p.parents[at];
+    var depth = 0;
+    while cur >= 0 && depth < 128 {
+        let k = kind(s, cur);
+        if k == nk_fn() || k == nk_lambda() { break; }
+        if k == nk_if() {
+            let cond = lhs(s, cur);
+            let then_n = if flags(s, cur) >= 2 { children(s, cur)[1] } else { rhs(s, cur) };
+            if child == then_n && cond >= 0 && kind(s, cond) == nk_binary() && flags(s, cond) == op_is() {
+                let tested = lhs(s, cond);
+                if tested >= 0 && kind(s, tested) == nk_ident() && inf.r.ref_of[tested] == b {
+                    return prog_annot_type(p, rhs(s, cond));
+                }
+            }
+        }
+        child = cur;
+        cur = p.parents[cur];
+        depth = depth + 1;
+    }
+    return ty_unknown();
+}
+
+/// Whether `name` is declared as an extension method (`ext Type { fn name.. }`
+/// or `ext fn Type.name(..)`) on some type in the program.
+fn is_declared_ext_method(p: Program, name: str) -> bool {
+    let s = p.s;
+    for ex in nodes_of(s, nk_extend()) {
+        for m in type_members(s, ex) {
+            if kind(s, m) == nk_fn() && node_name(s, m) == name { return true; }
+        }
+    }
+    let suffix = "." + name;
+    for f in nodes_of(s, nk_fn()) {
+        let fn_name = node_name(s, f);
+        if fn_name.ends_with(suffix) && p.parents[f] >= 0 && kind(s, p.parents[f]) == nk_program() {
+            return true;
+        }
+    }
+    return false;
+}
+
 fn check_method_args(inf: Infer, sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let ch = children(s, n);
     if ch.len() == 0 || kind(s, ch[0]) != nk_member() { return; }
     let callee = ch[0];
-    let rt = type_of(inf, lhs(s, callee));
+    let recv_node = lhs(s, callee);
+    var rt = type_of(inf, recv_node);
+    let narrowed = narrowed_is_type(inf, n, recv_node);
+    if !ty_is_unknown(p.tt, narrowed) { rt = narrowed; }
     if !ty_is_named(p.tt, rt) { return; }
     let name = sym_text(s, rhs(s, callee));
-    guard some m = prog_member(p, rt, name) else { return; };
+    guard some m = prog_member(p, rt, name) else {
+        if !ty_is_open(p.tt, rt)
+            && node_name(s, ty_decl(p.tt, rt)) != prog_slot_name(p, "any_t")
+            && (is_declared_ext_method(p, name) || prog_has_hidden_splice_member(p, rt, name)) {
+            sink_error(sink, n, "METH001", f"`{ty_display(p.tt, rt)}` has no member `{name}`");
+        }
+        return;
+    };
     if kind(s, m.decl) != nk_fn() || is_static_decl(s, m.decl) { return; }
     var params: List<i64> = [];
     for prm in fn_params(s, m.decl) {
@@ -707,11 +767,61 @@ fn check_optional_access(inf: Infer, sink: DiagSink, n: i64, member: str, is_ind
     }
 }
 
+/// The enclosing lambda of `u` that does not enclose `site`, or -1.
+fn capturing_lambda(p: Program, u: i64, site: i64) -> i64 {
+    var cur = p.parents[u];
+    var depth = 0;
+    while cur >= 0 && depth < 128 {
+        if kind(p.s, cur) == nk_lambda() {
+            // Confirm `site` is outside `cur` (so `cur` captured it).
+            var sc = site;
+            var sdepth = 0;
+            var inside = false;
+            while sc >= 0 && sdepth < 128 {
+                if sc == cur { inside = true; break; }
+                sc = p.parents[sc];
+                sdepth = sdepth + 1;
+            }
+            if !inside { return cur; }
+        }
+        cur = p.parents[cur];
+        depth = depth + 1;
+    }
+    return -1;
+}
+
 fn check_assign(inf: Infer, sink: DiagSink, n: i64) {
-    let s = inf.p.s;
+    let p = inf.p;
+    let s = p.s;
     let target = lhs(s, n);
-    if !is_none_literal(s, rhs(s, n)) || target < 0 || kind(s, target) != nk_ident() { return; }
-    if rejects_none(inf.p, type_of(inf, target)) {
+    if target < 0 || kind(s, target) != nk_ident() { return; }
+    let b = inf.r.ref_of[target];
+    if b >= 0 && b < inf.r.site.len() {
+        let site = inf.r.site[b];
+        let n_start = span_start(s, n);
+        for u in nodes_of(s, nk_ident()) {
+            if u < s.user_lo || u >= s.user_hi || inf.r.ref_of[u] != b { continue; }
+            let lam = capturing_lambda(p, u, site);
+            if lam >= 0 && span_start(s, lam) < n_start {
+                // Make sure `n` is not inside `lam` itself.
+                var nc = n;
+                var nd = 0;
+                var in_lam = false;
+                while nc >= 0 && nd < 128 {
+                    if nc == lam { in_lam = true; break; }
+                    nc = p.parents[nc];
+                    nd = nd + 1;
+                }
+                if !in_lam {
+                    sink_warning(sink, n, "DECL004",
+                        f"'{inf.r.name[b]}' was captured by value in a closure; this write will not be seen by that closure");
+                    break;
+                }
+            }
+        }
+    }
+    if !is_none_literal(s, rhs(s, n)) { return; }
+    if rejects_none(p, type_of(inf, target)) {
         sink_error(sink, n, "NULL001", "Cannot assign 'none' to non-nullable variable");
     }
 }
@@ -793,7 +903,17 @@ pub fn check_rules(inf: Infer, sink: DiagSink) {
             else if k == nk_fn() || k == nk_operator() { check_missing_return(inf, sink, i); }
             else if k == nk_param() { check_param_default(inf, sink, i); }
             else if k == nk_match() { check_switch(inf, sink, i); }
-            else if k == nk_member() { check_optional_access(inf, sink, i, sym_text(s, rhs(s, i)), false); }
+            else if k == nk_member() {
+                let mname = sym_text(s, rhs(s, i));
+                check_optional_access(inf, sink, i, mname, false);
+                let par = p.parents[i];
+                if par < 0 || kind(s, par) != nk_call() || children(s, par)[0] != i {
+                    let rt = type_of(inf, lhs(s, i));
+                    if prog_has_hidden_splice_member(p, rt, mname) {
+                        sink_error(sink, i, "METH001", f"`{ty_display(p.tt, rt)}` has no member `{mname}`");
+                    }
+                }
+            }
             else if k == nk_index() { check_optional_access(inf, sink, i, op_index(), true); }
             else if k == nk_binary() && flags(s, i) == op_as() { check_cast(inf, sink, i); }
             else if k == nk_if() || k == nk_while() { check_condition(inf, sink, condition_operand(s, lhs(s, i)), "condition"); }

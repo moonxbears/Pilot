@@ -1,0 +1,8 @@
+// Writing a variable after a closure captured it by value emits warning[DECL004].
+fn main() {
+    var count = 10;
+    let read = () => count;
+    count = 20;
+    print(read());
+    print(count);
+}

@@ -1,0 +1,1 @@
+warning[DECL004]: 'count' was captured by value in a closure; this write will not be seen by that closure

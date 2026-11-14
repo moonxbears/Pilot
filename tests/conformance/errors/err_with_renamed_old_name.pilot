@@ -1,0 +1,15 @@
+// METH001: a bundle field renamed by `with { x as px }` cannot be read under
+// its old name `x`.
+struct PointBundle {
+    pub x: i64 = 0;
+}
+
+struct Node {
+    *PointBundle with { x as px };
+    pub id: i64;
+}
+
+fn main() {
+    let n = Node { px: 3, id: 1 };
+    print(n.x);
+}

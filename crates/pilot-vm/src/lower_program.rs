@@ -120,6 +120,13 @@ impl BytecodeCompiler {
             let to_runs = self.emit_jump(0);
             unit_starts.push((to_runs, self.here()));
             for &id in items {
+                if arena.node(id).node_kind() == NodeKind::StructDecl {
+                    let mark = self.next_reg;
+                    self.stmt_for = Self::item_for(arena, id);
+                    let _ = self.compile_struct_static_fields(arena, id);
+                    self.next_reg = mark;
+                    continue;
+                }
                 if !Self::runs_at_top_level(arena.node(id).node_kind()) {
                     continue;
                 }

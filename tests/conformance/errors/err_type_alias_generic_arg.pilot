@@ -1,0 +1,7 @@
+// A generic type alias written with the wrong number of type arguments (TYPE004).
+type Pair<T> = (T, T);
+
+fn main() {
+    let p: Pair<i64, str> = (1, 2);
+    print(p.0);
+}
