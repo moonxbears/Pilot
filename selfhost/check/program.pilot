@@ -135,6 +135,12 @@ pub struct Program {
     /// The top-level bindings by name (selfhost/check/effects.pilot), once
     /// computed: empty before, one map after.
     pub globals_memo: List<Map<str, i64>>;
+    /// Map literal node -> index into `entry_maps`, for the map literals
+    /// `map_entry` has looked into.
+    pub entry_index: Map<str, i64>;
+    /// Entry name -> value node of a map literal (the first entry of each
+    /// name), built on first lookup.
+    pub entry_maps: List<Map<str, i64>>;
 }
 
 fn key(n: i64) -> str => f"{n}";
@@ -169,7 +175,8 @@ fn index_members(p: Program, owner_name: str, decl: i64, into: NodeLists) {
         let k = kind(s, m);
         if k == nk_param() || k == nk_fn() || k == nk_operator() || k == nk_indexer()
             || ((k == nk_let() || k == nk_var()) && annot(s, m) >= 0) {
-            nl_add(into, owner_name + "." + node_name(s, m), m);
+            let mname = if k == nk_indexer() { "[]" } else { node_name(s, m) };
+            nl_add(into, owner_name + "." + mname, m);
         } else if k == nk_expr_stmt() {
             let u = lhs(s, m);
             if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 {
@@ -181,9 +188,7 @@ fn index_members(p: Program, owner_name: str, decl: i64, into: NodeLists) {
 
 /// Indexes the declarations of the snapshot.
 pub fn prog_new(s: Snap) -> Program {
-    var memo: List<i64> = [];
-    var i = 0;
-    while i < s.count { memo.push(-1); i = i + 1; }
+    let memo = filled(s.count, -1);
     let p = Program {
         s: s,
         tt: tt_new(),
@@ -209,6 +214,8 @@ pub fn prog_new(s: Snap) -> Program {
         gen_memo: Map<str, List<i64>>(),
         engine_memo: [],
         globals_memo: [],
+        entry_index: Map<str, i64>(),
+        entry_maps: [],
     };
     var r = 0;
     while r < s.attrs.len() {
@@ -220,8 +227,8 @@ pub fn prog_new(s: Snap) -> Program {
         nl_add(p.tparams, key(tp[0]), tp[1]);
         nl_add(p.tparam_defaults, key(tp[0]), if tp.len() > 2 { tp[2] } else { -1 });
     }
-    i = 0;
-    while i < s.count {
+    // Every node indexed here is a declaration (`Snap.decl_nodes`).
+    for i in s.decl_nodes {
         let k = kind(s, i);
         if is_type_decl_kind(k) {
             let name = node_name(s, i);
@@ -253,7 +260,6 @@ pub fn prog_new(s: Snap) -> Program {
                 }
             }
         }
-        i = i + 1;
     }
     for b in s.bases {
         let owner = b[0];
@@ -373,7 +379,7 @@ fn find_slot_name(p: Program, slot: str) -> str {
         if sym_text(s, row[1]) == "Lang" && args.len() > 0 && kind(s, args[0]) == nk_member() {
             let table = const_node(p, lhs(s, args[0]), 0);
             if table >= 0 && kind(s, table) == nk_map() {
-                let v = map_entry(s, table, slot);
+                let v = map_entry(p, table, slot);
                 return if v >= 0 && kind(s, v) == nk_str() { str_value(s, v) } else { "" };
             }
         }
@@ -496,15 +502,30 @@ pub fn prog_attr_nodes(p: Program, n: i64, name: str) -> List<i64>? {
     return none;
 }
 
+/// Every node of kind `k`, in node order (`nodes_of`, built once with the
+/// snapshot). The list is shared: a caller must not change it.
+pub fn prog_nodes_of_kind(p: Program, k: i64) -> List<i64> => nodes_of(p.s, k);
+
 /// The value of entry `name` in map literal `m`, or -1.
-fn map_entry(s: Snap, m: i64, name: str) -> i64 {
-    let ch = children(s, m);
-    var i = 0;
-    while i + 1 < ch.len() {
-        if node_name(s, ch[i]) == name { return ch[i + 1]; }
-        i = i + 2;
+fn map_entry(p: Program, m: i64, name: str) -> i64 {
+    let at = key(m);
+    if !p.entry_index.has(at) {
+        // The constant tables are large map literals read many times: their
+        // entries are indexed by name once, the first entry of a name kept.
+        let s = p.s;
+        let entries = Map<str, i64>();
+        let ch = children(s, m);
+        var i = 0;
+        while i + 1 < ch.len() {
+            let entry = node_name(s, ch[i]);
+            if !entries.has(entry) { entries.set(entry, ch[i + 1]); }
+            i = i + 2;
+        }
+        p.entry_index.set(at, p.entry_maps.len());
+        p.entry_maps.push(entries);
     }
-    return -1;
+    let entries = p.entry_maps[p.entry_index.get(at)];
+    return if entries.has(name) { entries.get(name) } else { -1 };
 }
 
 /// The node a constant expression stands for: a literal is itself; a member
@@ -521,7 +542,7 @@ fn const_node(p: Program, e: i64, depth: i64) -> i64 {
     if k == nk_member() {
         let base = const_node(p, lhs(s, e), depth + 1);
         if base < 0 || kind(s, base) != nk_map() { return -1; }
-        return map_entry(s, base, sym_text(s, rhs(s, e)));
+        return map_entry(p, base, sym_text(s, rhs(s, e)));
     }
     return e;
 }
@@ -580,9 +601,15 @@ pub fn prog_engine_bindings(p: Program) -> List<List<str>> {
 fn scan_engine_bindings(p: Program) -> List<List<str>> {
     let s = p.s;
     var out: List<List<str>> = [];
-    var n = 0;
-    while n < s.count {
-        if kind(s, n) == nk_call() {
+    let ident_kind = nk_ident();
+    let token = engine_token();
+    for n in nodes_of(s, nk_call()) {
+        // Most calls are not engine calls: their callee (the first present
+        // child) is looked at before their children are listed.
+        var c = lhs(s, n);
+        let end = c + rhs(s, n);
+        while c < end && s.extra[c] < 0 { c = c + 1; }
+        if c < end && kind(s, s.extra[c]) == ident_kind && node_name(s, s.extra[c]) == token {
             let ch = children(s, n);
             if ch.len() >= 3 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == engine_token() && engine_arg_text(p, ch[1]) != "" {
                 var row: List<str> = [];
@@ -594,7 +621,6 @@ fn scan_engine_bindings(p: Program) -> List<List<str>> {
                 out.push(row);
             }
         }
-        n = n + 1;
     }
     return out;
 }

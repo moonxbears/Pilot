@@ -14,12 +14,12 @@
 
 use crate::vm::PilVirtualMachine;
 use pilot_rt::PilotVal;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// The run-time strings of one VM, by the address of their bytes.
 #[derive(Default)]
 pub struct RuntimeStrings {
-    owned: HashMap<usize, Box<str>>,
+    owned: crate::collect::KeyMap<usize, Box<str>>,
     /// Bytes owned now.
     bytes: usize,
 }

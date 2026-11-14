@@ -54,6 +54,23 @@ impl BytecodeCompiler {
                 format!("{} expects an intrinsic name", crate::ENGINE_TOKEN),
             );
         };
+        // A name known while compiling is a constant: the call reads it
+        // from there.
+        let hn = arena.node(hook);
+        let known = match hn.node_kind() {
+            NodeKind::StrLit => Some(PilotVal::from_str(Self::name(arena, hn.lhs))),
+            _ => match self.resolve_cmap(arena, hook) {
+                Some(crate::CMap::Val(v)) if v.is_str() => Some(v),
+                _ => None,
+            },
+        };
+        if let Some(name) = known {
+            let c = self.add_constant(name);
+            let regs = self.compile_args(arena, rest);
+            let dst = self.alloc_reg();
+            self.emit_named_intrinsic(dst, c, &regs);
+            return dst;
+        }
         let r_hook = self.compile_node(arena, hook);
         let regs = self.compile_args(arena, rest);
         self.stage_args(&regs);
@@ -120,7 +137,7 @@ impl BytecodeCompiler {
                 let r_hook = self.emit_const(PilotVal::from_str(hook));
                 self.emit_intrinsic("field_or_native", &[r_obj, r_key, r_hook])
             }
-            None => self.emit_intrinsic("map_get", &[r_obj, r_key]),
+            None => self.emit_keyed_read(r_obj, r_key),
         }
     }
 }

@@ -5,8 +5,8 @@
 //! count of who holds them, so the VM finds what is live by tracing. The
 //! roots are every value the program can still read:
 //!
-//! - the registers of the running frame and the saved registers of every
-//!   frame below it (a block's locals are cleared when the block ends, so a
+//! - the registers of the running frame and of every frame below it, which
+//!   lie before it in the register windows (a block's locals are cleared when the block ends, so a
 //!   value whose scope has closed is no longer held there);
 //! - module globals, the constants, and the registers of generator frames;
 //! - record slot 0 (the environment record) and every slot the host made
@@ -41,6 +41,53 @@ const MIN_STRING_BYTES_BETWEEN: usize = 8 << 20;
 const VERIFY_ALLOCATIONS_BETWEEN: usize = 1024;
 /// The environment variable that turns verify mode on.
 pub const VERIFY_ENV: &str = "PILOT_HEAP_VERIFY";
+
+/// The hash of record keys and heap slots. Keys come from the program being
+/// run, not from an adversary, so a multiply-and-rotate hash (eight bytes a
+/// step) replaces the standard library's keyed SipHash.
+#[derive(Default, Clone, Copy)]
+pub struct KeyHasher(u64);
+
+impl KeyHasher {
+    #[inline]
+    fn mix(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl std::hash::Hasher for KeyHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0u8; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.mix(u64::from_le_bytes(word));
+        }
+    }
+
+    #[inline]
+    fn write_u8(&mut self, v: u8) {
+        self.mix(v as u64);
+    }
+
+    #[inline]
+    fn write_usize(&mut self, v: usize) {
+        self.mix(v as u64);
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        // The table reads its bucket from the low bits and its tag from
+        // the high ones; fold so both depend on every input bit.
+        self.0 ^ (self.0 >> 29)
+    }
+}
+
+/// A map hashed with `KeyHasher`: a record's fields by name (`Record`), or
+/// values by heap slot or address.
+pub type KeyMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<KeyHasher>>;
+/// A record's fields, by name.
+pub type Record = KeyMap<String, PilotVal>;
 
 /// What the collector knows about the heap.
 #[derive(Default)]
@@ -99,7 +146,7 @@ impl PilVirtualMachine {
     }
 
     /// A slot for a new record, reusing a dead one when there is one.
-    pub(crate) fn alloc_map_slot(&mut self, m: std::collections::HashMap<String, PilotVal>) -> usize {
+    pub(crate) fn alloc_map_slot(&mut self, m: Record) -> usize {
         self.heap.allocations += 1;
         if let Some(slot) = self.heap.free_maps.pop() {
             self.heap_maps[slot] = m;
@@ -159,8 +206,7 @@ impl PilVirtualMachine {
         let mut map_marks = vec![false; maps];
         let mut strings: HashSet<usize> = HashSet::new();
         let mut work: Vec<PilotVal> = Vec::new();
-        work.extend_from_slice(&self.registers[..self.reg_top]);
-        work.extend_from_slice(&self.reg_stack);
+        work.extend_from_slice(&self.registers[..self.base + self.reg_top()]);
         work.extend_from_slice(&self.constants);
         work.extend(self.globals.values().copied());
         work.extend(self.generator_values().copied());

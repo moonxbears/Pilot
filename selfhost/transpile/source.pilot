@@ -34,6 +34,7 @@ use selfhost.ir.interp.*;
 use selfhost.ir.main.*;
 use selfhost.transpile.static_data.*;
 use std.text;
+use Pilot.Core.File;
 
 /// How one language spells PilIR.
 pub interface ISourceDialect {
@@ -212,6 +213,41 @@ pub fn emit_program(d: ISourceDialect) -> i64 => emit_lowered(lowered_program(sn
 pub fn emit_program_checked(d: ISourceDialect) -> i64 {
     if some inf = checked_program(snap_load()) { return emit_lowered(lower_program_rooted(inf, true), d); }
     return 1;
+}
+
+/// The line `emit_program_checked_to` prints once the program is checked:
+/// what follows it depends on a target, what comes before does not.
+pub pure fn emit_checked_line() -> str => "checked";
+/// The first word of the line it prints for each target it wrote.
+pub pure fn emit_wrote_word() -> str => "emitted";
+
+/// `pilot emit <lang>,<lang>.. <program> -o <file>,<file>..`: checks the
+/// program once and writes it in the language of each dialect of `ds` to
+/// the file of `outs` at the same place. Each target gets a module of its
+/// own (emitting changes the module to suit the dialect). Prints
+/// `emit_checked_line()` after the check, then `emitted <language> <file>`
+/// per file written.
+pub fn emit_program_checked_to(ds: List<ISourceDialect>, outs: List<str>) -> i64 {
+    guard some inf = checked_program(snap_load()) else { return 1; };
+    print(emit_checked_line());
+    var k = 0;
+    while k < ds.len() {
+        let m = lower_program_rooted(inf, true);
+        var issues = verify_ir_module(m);
+        if issues.len() == 0 { issues = run_passes(m, default_passes()); }
+        if issues.len() > 0 {
+            for i in issues { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
+            return 1;
+        }
+        let text = emit_module(m, ds[k]);
+        if !File.write_text(outs[k], text) {
+            eprint(f"error: cannot write `{outs[k]}`");
+            return 1;
+        }
+        print(f"{emit_wrote_word()} {ds[k].language()} {outs[k]}");
+        k = k + 1;
+    }
+    return 0;
 }
 
 fn emit_lowered(m: IrModule, d: ISourceDialect) -> i64 {

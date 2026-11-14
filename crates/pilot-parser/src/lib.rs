@@ -81,7 +81,12 @@ impl ParserTables {
         let n = arena.node(id); match n.node_kind() { NodeKind::StrLit => Some(CVal::Str(arena.interner.resolve(SymbolId(n.lhs)).to_string())),
             NodeKind::IntLit => Some(CVal::Int(arena.i64_pool.get(n.lhs as usize).copied().unwrap_or(0))),
             NodeKind::IdentExpr => { let s = arena.interner.resolve(SymbolId(n.lhs)); self.const_maps.get(s).cloned().or_else(|| Some(CVal::Str(s.to_string()))) }
-            NodeKind::MemberExpr => if let Some(CVal::Map(m)) = self.eval_cval(arena, NodeId(n.lhs)) { m.get(arena.interner.resolve(SymbolId(n.rhs))).cloned() } else { None },
+            // A member of a named constant is looked up in place: copying the
+            // maps on the way made ingesting a file quadratic in its size.
+            NodeKind::MemberExpr => match self.cval_ref(arena, id) {
+                Some(v) => Some(v.clone()),
+                None => if let Some(CVal::Map(m)) = self.eval_cval(arena, NodeId(n.lhs)) { m.get(arena.interner.resolve(SymbolId(n.rhs))).cloned() } else { None },
+            },
             NodeKind::CallExpr => { let ch = arena.children_slice(n.lhs, n.rhs); ch.get(1).and_then(|&x| self.eval_cval(arena, NodeId(x))) },
             NodeKind::MapExpr => { let (ch, mut m, mut i) = (arena.children_slice(n.lhs, n.rhs), HashMap::new(), 0);
                 while i + 1 < ch.len() { let kn = arena.node(NodeId(ch[i])); if matches!(kn.node_kind(), NodeKind::IdentExpr | NodeKind::StrLit) {
@@ -90,6 +95,19 @@ impl ParserTables {
                     i += 2; }
                 Some(CVal::Map(m)) }
             _ => None, } }
+    /// The constant a chain of names (`a.b.c`) refers to, found without
+    /// copying the maps on the way. `None` sends `eval_cval` the long way.
+    fn cval_ref(&self, arena: &AstArena, id: NodeId) -> Option<&CVal> {
+        let n = arena.node(id);
+        match n.node_kind() {
+            NodeKind::IdentExpr => self.const_maps.get(arena.interner.resolve(SymbolId(n.lhs))),
+            NodeKind::MemberExpr => match self.cval_ref(arena, NodeId(n.lhs))? {
+                CVal::Map(m) => m.get(arena.interner.resolve(SymbolId(n.rhs))),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
     fn ingest_node(&mut self, arena: &AstArena, id: NodeId) { if id.is_none() { return; }
         let n = *arena.node(id); match n.node_kind() {
             NodeKind::Program | NodeKind::BlockExpr => for &c in arena.children_slice(n.lhs, n.rhs).to_vec().iter() { self.ingest_node(arena, NodeId(c)); },
@@ -263,7 +281,9 @@ pub fn bootstrap_tables() -> &'static ParserTables {
 }
 pub fn parse(src: &str) -> AstArena { parse_with_tables(src, bootstrap_tables()) }
 pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: false, folds: Default::default(), in_ensures: false, fn_body_depth: 0, }; p.parse_program(); p.arena }
-pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, folds: Default::default(), in_ensures: false, fn_body_depth: 0, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } tables.finish_ingest(src); arena }
+pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Owned(std::mem::take(tables)), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, folds: Default::default(), in_ensures: false, fn_body_depth: 0, };
+    // The parser owns the tables while it fills them: moved in and back out, never copied.
+    p.parse_program(); *tables = p.tables.into_owned(); tables.finish_ingest(src); p.arena }
 #[inline]
 fn is_seed_kw(k: TokenKind) -> bool { matches!(k, TokenKind::KwEngine | TokenKind::KwStruct | TokenKind::KwInterface | TokenKind::KwFn
         | TokenKind::KwLet | TokenKind::KwRef | TokenKind::KwIf | TokenKind::KwLoop
@@ -335,9 +355,12 @@ impl<'a> Parser<'a> {
         if let Some(rt) = &mods.ret_ty { if self.arena.type_annot(id).is_none() {
                 let sp = self.arena.span(id); let tid = rt.instantiate(&mut self.arena, &[], sp); self.arena.set_type_annot(id, tid); }
         } }
-    fn parse_program(&mut self) { let mut items = Vec::new(); while !self.at_end() { self.skip_seps(); if self.at_end() { break; }
+    fn parse_program(&mut self) {
+        // Whether the items feed the tables; the whole text is searched once, not once per item.
+        let ingests = self.ingest || self.src.contains("__engine");
+        let mut items = Vec::new(); while !self.at_end() { self.skip_seps(); if self.at_end() { break; }
             let mark = self.pos; self.parse_item(&mut items, false); if self.pos == mark { self.advance(); }
-            if let Some(&last) = items.last() { if self.ingest || self.src.contains("__engine") { self.tables.to_mut().ingest_node(&self.arena, last); } } }
+            if let Some(&last) = items.last() { if ingests { self.tables.to_mut().ingest_node(&self.arena, last); } } }
         self.report_stray_characters();
         self.arena.root = self.arena.alloc_list_node(NodeKind::Program, 0, ByteSpan::new(0, self.src.len() as u32), &items); }
     fn is_attr_prefix(&self, _in_type_body: bool) -> bool { if self.peek() != TokenKind::LBracket { return false; }
@@ -644,9 +667,11 @@ impl<'a> Parser<'a> {
             let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
             params.push(self.arena.alloc_node(NodeKind::ParamDecl, 0, psp, psym.0, ty.0)); if !self.eat(TokenKind::Comma) { break; } }
         self.expect(TokenKind::RBracket); let ret = if self.eat(TokenKind::Arrow) { self.parse_type() } else { NodeId::NONE };
+        let is_block = self.at(TokenKind::LBrace);
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
-        else if self.at(TokenKind::LBrace) { self.skip_accessor_block() } else { NodeId::NONE }; let mut ch = vec![body]; ch.extend(params);
+        else if is_block { self.skip_accessor_block() } else { NodeId::NONE }; let mut ch = vec![body]; ch.extend(params);
         let id = self.arena.alloc_list_node(NodeKind::IndexerDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch);
+        if is_block { self.arena.property_accessors.push((id, body)); }
         if ret.is_some() { self.arena.set_type_annot(id, ret); }
         self.apply_mods(id, mods, def_vis); id }
     fn parse_op_decl(&mut self, mods: &DeclMods, def_vis: u8) -> NodeId { let sp = self.span(); self.advance(); let mut op_txt = String::new();

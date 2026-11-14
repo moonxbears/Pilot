@@ -78,7 +78,7 @@ pub fn checked_program(s: Snap) -> Infer? {
 fn report_to_host(rows: List<List<any>>) -> i64 => __engine("chk_report", rows);
 
 /// Applies every rule of the checker to the inferred program.
-fn check_all(inf: Infer, sink: DiagSink) {
+pub fn check_all(inf: Infer, sink: DiagSink) {
     let p = inf.p;
     check_rules(inf, sink);
     check_generics(inf, sink);
@@ -126,7 +126,7 @@ pub fn run_plan() -> List<any> {
 }
 
 /// The run plan (`run_plan`) of the inferred program.
-fn plan_of(s: Snap, inf: Infer) -> List<any> {
+pub fn plan_of(s: Snap, inf: Infer) -> List<any> {
     let p = inf.p;
     let pl = drop_planner(inf);
     plan_copies(pl);

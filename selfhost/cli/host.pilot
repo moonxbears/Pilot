@@ -47,12 +47,22 @@ pub fn host_check(path: str) -> List<HostDiag> => host_diags(__engine("cli_check
 /// The self-hosted analyzer's diagnostics for the file `path`.
 pub fn host_analyze(path: str) -> List<HostDiag> => host_diags(__engine("cli_analyze", path));
 
-/// The type checker's diagnostics for the program at `path`, in the
-/// program's own files. `checker` lists the checker's sources in link order.
-/// With `for_run`, the checker also makes the program's run plan in the same
-/// pass, for the `host_run` that follows.
-pub fn host_typecheck(path: str, checker: List<str>, decls: List<str>, for_run: bool) -> List<HostDiag> =>
-    host_diags(__engine("cli_typecheck", path, checker, decls, for_run));
+/// What `host_typecheck` gives: the type checker's diagnostics in the
+/// program's own files, and what else its entry found in the same pass.
+pub struct CheckedProgram {
+    pub diags: List<HostDiag>;
+    pub rest:  any;
+}
+
+/// Runs the type checker made of `checker` (its sources in link order) over
+/// the program at `path`, calling `entry`, which gives `[diagnostic rows, run
+/// plan or none, anything else]` (`check_with_steps` in
+/// selfhost/cli/comptime_tool.pilot). A run plan is kept for the `host_run`
+/// that follows.
+pub fn host_typecheck(path: str, checker: List<str>, decls: List<str>, entry: str) -> CheckedProgram {
+    let raw: List<any> = __engine("cli_typecheck", path, checker, decls, entry);
+    return CheckedProgram { diags: host_diags(raw[0]), rest: raw[1] };
+}
 
 /// Runs the tool made of `files`, calling `entry`, over the program at
 /// `path` linked with `decls`; the tool reads the program the way the type
@@ -137,6 +147,7 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/stack.pilot",
     "selfhost/check/clearance.pilot",
     "selfhost/check/main.pilot",
+    "selfhost/cli/comptime_tool.pilot",
 ];
 
 /// Compiles and runs `path` with the script arguments `args`. A non-empty

@@ -290,6 +290,10 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
     let tmp = std::env::temp_dir().join(format!("pilot_m57_{}_{}", std::process::id(), rng.next_u64()));
     std::fs::create_dir_all(&tmp).unwrap();
 
+    // The trials are drawn in order from one generator, then each one runs
+    // on its own thread: a trial is seven `pilot emit` runs and four host
+    // compilers, one after another.
+    std::thread::scope(|scope| {
     for trial in 0..4 {
         let ty_int = rng.ident("num64");
         let st_box = rng.pascal("BoxPair");
@@ -334,6 +338,8 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
             }
         }
 
+        let tmp = &tmp;
+        scope.spawn(move || {
         let src = tmp.join(format!("t_{}.pilot", trial));
         std::fs::write(&src, &pilot_prog).unwrap();
         let emitted = |lang: &str| pilot_emit(lang, &src);
@@ -419,7 +425,9 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
             trial,
             lua_code
         );
+        });
     }
+    });
 
     let _ = std::fs::remove_dir_all(&tmp);
     guard.finish();

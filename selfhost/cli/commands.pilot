@@ -53,10 +53,16 @@ fn diag_before(a: HostDiag, b: HostDiag) -> bool =>
     a.file < b.file || (a.file == b.file && a.start < b.start);
 
 /// The analyzer's and the type checker's diagnostics for a program the seed
-/// accepted, in source order. `for_run`: the program is run next, so the
-/// checker makes its run plan in the same pass (`host_typecheck`).
-fn semantic_diags(path: str, for_run: bool) -> List<HostDiag> =>
-    in_source_order(host_analyze(path), host_typecheck(path, cli_checker_files(), cli_checker_decls(), for_run));
+/// accepted, in source order, and the step rows of the program at moment
+/// `phase` (`comptime_runs`), found in the checker's pass: `none` when it
+/// did not look. `for_run`: the program is run next, so the checker makes
+/// its run plan in the same pass (`host_typecheck`).
+fn semantic_diags(path: str, for_run: bool, phase: str) -> CheckedProgram {
+    let analyzed = host_analyze(path);
+    let entry = if for_run { f"check_with_steps(\"{phase}\", true);" } else { f"check_with_steps(\"{phase}\", false);" };
+    let checked = host_typecheck(path, cli_checker_files(), cli_checker_decls(), entry);
+    return CheckedProgram { diags: in_source_order(analyzed, checked.diags), rest: checked.rest };
+}
 
 /// Reports the diagnostics a checking tool is waiting on (`host_checked_tool`)
 /// as `pilot run` reports them, errors and warnings; gives the number of
@@ -141,10 +147,11 @@ pub fn cmd_run(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     if !program.ends_with(".pilc") {
         let compiled = host_check(program);
         if report_diagnostics(compiled) > 0 { return 1; }
-        let analyzed = report_at_least(semantic_diags(program, true), diag_severity_warning());
+        let semantic = semantic_diags(program, true, live_phase_run());
+        let analyzed = report_at_least(semantic.diags, diag_severity_warning());
         if report_diagnostics(analyzed) > 0 { return 1; }
         // Its `[Live(.., when: ::Run)]` calls run before `main`.
-        if comptime_attrs_run(program, live_phase_run()) > 0 { return 1; }
+        if comptime_steps_run(program, live_phase_run(), semantic.rest) > 0 { return 1; }
     }
     // `[Coverage(to: ::File)]` writes its report through this file.
     let outcome = host_run_with(program, script_args, "", [coverage_file_link()]);
@@ -171,9 +178,14 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
         let compiled = host_check(f);
         var found = report_diagnostics(compiled);
         // The analyzer reads a program the seed accepted.
-        if compiled.len == 0 { found = found + report_diagnostics(semantic_diags(f, false)); }
+        var steps: any = none;
+        if compiled.len == 0 {
+            let semantic = semantic_diags(f, false, live_phase_compile());
+            found = found + report_diagnostics(semantic.diags);
+            steps = semantic.rest;
+        }
         // A program that passed runs its `[Live]` and `[Generate]` functions.
-        if found == 0 { found = comptime_attrs_run(f, live_phase_compile()); }
+        if found == 0 { found = comptime_steps_run(f, live_phase_compile(), steps); }
         errors = errors + found;
     }
     if errors > 0 {
@@ -250,10 +262,35 @@ pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     if args.len < 2 { return usage_error("`pilot emit` needs a target language and a file"); }
     let lang = args[0];
-    if identifier(lang) != lang { return usage_error(f"`{lang}` is not a language name"); }
+    let langs = text.split_text(lang, ",");
+    for l in langs {
+        if l == "" || identifier(l) != l { return usage_error(f"`{l}` is not a language name"); }
+    }
     if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
     let compiled = without_seed_limits(host_check(args[1]));
     if report_diagnostics(compiled) > 0 { return 1; }
+    if langs.len() > 1 {
+        // Several targets from one check and one tool run, each written to
+        // its own `-o` file.
+        let outs = text.split_text(parsed_get_str(p, "output", ""), ",");
+        if outs.len() != langs.len() { return usage_error("`pilot emit` with several languages needs `-o` with one file per language, separated by `,`"); }
+        var files = cli_emit_files(langs[0]);
+        var dialects = "";
+        var paths = "";
+        var k = 0;
+        while k < langs.len() {
+            if k > 0 {
+                files.push(f"selfhost/transpile/emit_{langs[k]}.pilot");
+                dialects = dialects + ", ";
+                paths = paths + ", ";
+            }
+            dialects = dialects + f"{langs[k]}_dialect()";
+            paths = paths + "\"" + outs[k].replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+            k = k + 1;
+        }
+        files.push("stdlib/core/file.pilot");
+        return host_checked_tool(args[1], files, cli_ir_decls(), f"emit_program_checked_to([{dialects}], [{paths}]);");
+    }
     // The emitter is a toolchain source, found from the toolchain's own
     // search roots (a language without one stops as an internal error). It
     // checks the program first; the checker's and analyzer's errors and

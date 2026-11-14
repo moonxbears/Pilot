@@ -596,7 +596,6 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
     let t = flow_binding_type(f, b);
     pl.cur_binding = b;
     pl.cur_type = t;
-    pl.borrowers = borrowers_of(pl.borrows, b);
     pl.flagged = false;
     let need = needs_drop(pl, t, 0);
     if need == 0 { return; }
@@ -610,6 +609,8 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
         return;
     }
     glue(pl, t);
+    // Only a binding that is dropped needs its borrowers (`uses`).
+    pl.borrowers = borrowers_of(pl.borrows, b);
     if unsupported_uses(pl, body, b, key) { return; }
     if declares_guard(p, t) && kindof == BindKind::Local {
         row(pl, ::Guard, site, r.name[b], key);

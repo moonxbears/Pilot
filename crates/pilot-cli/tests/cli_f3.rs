@@ -112,24 +112,30 @@ fn every_listed_command_works_or_says_it_is_not_implemented() {
         // F6: the C it writes goes to standard output here.
         ("build", &["build", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot", "--target", "c", "-o", "/dev/stdout"]),
     ];
-    for name in &commands {
-        let out = match working.iter().find(|(n, _)| n == name) {
-            Some((_, args)) => pilot(args),
-            None => pilot(&[name.as_str()]),
-        };
-        let (stdout, stderr, code) = text(&out);
-        if working.iter().any(|(n, _)| n == name) {
-            assert_eq!(code, 0, "`pilot {name}` has a handler and must succeed\n{stdout}{stderr}");
-            assert!(!stdout.is_empty(), "`pilot {name}` printed nothing");
-        } else {
-            assert_ne!(code, 0, "`pilot {name}` has no handler and must fail");
-            assert!(
-                stderr.contains(&format!("`pilot {name}` is not implemented yet")),
-                "`pilot {name}` must say it is not implemented: {stderr}"
-            );
-            assert!(stderr.contains("SEAM001"), "{stderr}");
+    // Each command runs on its own thread; none depends on another. A failed
+    // assertion fails the test once every command has finished.
+    std::thread::scope(|scope| {
+        for name in &commands {
+            scope.spawn(move || {
+                let out = match working.iter().find(|(n, _)| n == name) {
+                    Some((_, args)) => pilot(args),
+                    None => pilot(&[name.as_str()]),
+                };
+                let (stdout, stderr, code) = text(&out);
+                if working.iter().any(|(n, _)| n == name) {
+                    assert_eq!(code, 0, "`pilot {name}` has a handler and must succeed\n{stdout}{stderr}");
+                    assert!(!stdout.is_empty(), "`pilot {name}` printed nothing");
+                } else {
+                    assert_ne!(code, 0, "`pilot {name}` has no handler and must fail");
+                    assert!(
+                        stderr.contains(&format!("`pilot {name}` is not implemented yet")),
+                        "`pilot {name}` must say it is not implemented: {stderr}"
+                    );
+                    assert!(stderr.contains("SEAM001"), "{stderr}");
+                }
+            });
         }
-    }
+    });
 }
 
 #[test]

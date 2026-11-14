@@ -66,17 +66,7 @@ pub fn owned_yields(p: Program, owner: i64) -> List<i64> {
 
 /// Every `yield` node of the program.
 pub fn all_yields(p: Program) -> List<i64> {
-    let memo = "yields";
-    if !p.gen_memo.has(memo) {
-        var ys: List<i64> = [];
-        var i = 0;
-        while i < p.s.count {
-            if kind(p.s, i) == nk_yield() { ys.push(i); }
-            i = i + 1;
-        }
-        p.gen_memo.set(memo, ys);
-    }
-    return p.gen_memo.get(memo);
+    return prog_nodes_of_kind(p, nk_yield());
 }
 
 /// Whether function or lambda `f` is a generator: some `yield` belongs to it.

@@ -12,9 +12,13 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-static PANIC_SITE: Mutex<String> = Mutex::new(String::new());
+thread_local! {
+    /// Where the last panic on this thread happened.
+    static PANIC_SITE: RefCell<String> = const { RefCell::new(String::new()) };
+}
 
 const INSERTS: [&str; 6] = [",", "{", "(", "\"", "[", "f\"{"];
 
@@ -50,6 +54,50 @@ fn damaged(src: &str, at: usize) -> Vec<String> {
     out
 }
 
+/// Panic site -> (count, smallest damaged input that hit it).
+type Crashes = BTreeMap<String, (usize, String)>;
+
+/// Parses `path` damaged at each of its points; returns the number of
+/// parses and records every crash in `crashes`.
+fn damage_file(root: &Path, path: &Path, points: usize, seed: usize, crashes: &mut Crashes) -> usize {
+    let mut runs = 0usize;
+    let Ok(src) = std::fs::read_to_string(path) else { return 0 };
+    let name = path.strip_prefix(root).unwrap_or(path).display().to_string();
+    for k in 0..points {
+        let mut at = (src.len() * k / points + seed * 7919) % (src.len() + 1);
+        while !src.is_char_boundary(at) {
+            at -= 1;
+        }
+        for text in damaged(&src, at) {
+            runs += 1;
+            let result = std::panic::catch_unwind(|| {
+                let _ = pilot_parser::parse_header(&text);
+                let _ = pilot_parser::parse(&text);
+            });
+            if let Err(payload) = result {
+                let message = payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_default();
+                let site = PANIC_SITE.with(|s| s.borrow().clone());
+                let key = format!("{site}: {}", message.chars().take(80).collect::<String>());
+                let lo = at.saturating_sub(60);
+                let lo = (0..=lo).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
+                let hi = (at + 40).min(text.len());
+                let hi = (hi..=text.len()).find(|&i| text.is_char_boundary(i)).unwrap_or(text.len());
+                let example = format!("{name} at byte {at}: {:?}", &text[lo..hi]);
+                let entry = crashes.entry(key).or_insert((0, example.clone()));
+                entry.0 += 1;
+                if example.len() < entry.1.len() {
+                    entry.1 = example;
+                }
+            }
+        }
+    }
+    runs
+}
+
 #[test]
 #[ignore = "slow: parses every .pilot file damaged at many points; `cargo test-full` runs it"]
 fn the_parser_reports_damaged_source_instead_of_crashing() {
@@ -64,44 +112,38 @@ fn the_parser_reports_damaged_source_instead_of_crashing() {
 
     std::panic::set_hook(Box::new(|info| {
         let site = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
-        *PANIC_SITE.lock().unwrap_or_else(|e| e.into_inner()) = site;
+        PANIC_SITE.with(|s| *s.borrow_mut() = site);
     }));
-    // Panic site -> (count, smallest damaged input that hit it).
-    let mut crashes: BTreeMap<String, (usize, String)> = BTreeMap::new();
-    let mut runs = 0usize;
-    for path in &files {
-        let Ok(src) = std::fs::read_to_string(path) else { continue };
-        let name = path.strip_prefix(&root).unwrap_or(path).display().to_string();
-        for k in 0..points {
-            let mut at = (src.len() * k / points + seed * 7919) % (src.len() + 1);
-            while !src.is_char_boundary(at) {
-                at -= 1;
-            }
-            for text in damaged(&src, at) {
-                runs += 1;
-                let result = std::panic::catch_unwind(|| {
-                    let _ = pilot_parser::parse_header(&text);
-                    let _ = pilot_parser::parse(&text);
-                });
-                if let Err(payload) = result {
-                    let message = payload
-                        .downcast_ref::<String>()
-                        .cloned()
-                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                        .unwrap_or_default();
-                    let site = PANIC_SITE.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                    let key = format!("{site}: {}", message.chars().take(80).collect::<String>());
-                    let lo = at.saturating_sub(60);
-                    let lo = (0..=lo).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
-                    let hi = (at + 40).min(text.len());
-                    let hi = (hi..=text.len()).find(|&i| text.is_char_boundary(i)).unwrap_or(text.len());
-                    let example = format!("{name} at byte {at}: {:?}", &text[lo..hi]);
-                    let entry = crashes.entry(key).or_insert((0, example.clone()));
-                    entry.0 += 1;
-                    if example.len() < entry.1.len() {
-                        entry.1 = example;
+    // The files are shared out over the machine's cores; each worker keeps
+    // its own crash table and they are merged below.
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).min(files.len());
+    let next = AtomicUsize::new(0);
+    let tables: Vec<(Crashes, usize)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut crashes = Crashes::new();
+                    let mut runs = 0usize;
+                    loop {
+                        let Some(path) = files.get(next.fetch_add(1, Ordering::Relaxed)) else { break };
+                        runs += damage_file(&root, path, points, seed, &mut crashes);
                     }
-                }
+                    (crashes, runs)
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("worker thread")).collect()
+    });
+    // Panic site -> (count, smallest damaged input that hit it).
+    let mut crashes = Crashes::new();
+    let mut runs = 0usize;
+    for (table, n) in tables {
+        runs += n;
+        for (key, (count, example)) in table {
+            let entry = crashes.entry(key).or_insert((0, example.clone()));
+            entry.0 += count;
+            if example.len() < entry.1.len() {
+                entry.1 = example;
             }
         }
     }

@@ -28,6 +28,7 @@ use selfhost.ir.lower_union.*;
 use selfhost.ir.lower_global.*;
 use selfhost.ir.lower_unit.*;
 use selfhost.ir.lower_outs.*;
+use selfhost.ir.lower_setter.*;
 
 /// Whether a value of physics `p` lives in a register.
 pub fn in_register(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.reg_class < reg_class_aggregate();
@@ -339,6 +340,16 @@ pub fn member_call(lw: Lowerer, recv: u32, t: i64, name: str, arg_nodes: List<i6
     }
     if some m = prog_member(p, t, name) {
         if runs_as_method(lw, m) { return call_method(lw, recv, t, m, arg_nodes, phy, n); }
+        if kind(s, m.decl) == nk_indexer() && has_accessors(s, m.decl) && name == op_index() {
+            if some idx_val = lower_indexer_read(lw, recv, t, m.decl, arg_nodes, phy, n) { return idx_val; }
+        }
+    }
+    if name == op_index_set() {
+        if some m = prog_member(p, t, op_index()) {
+            if kind(s, m.decl) == nk_indexer() && has_accessors(s, m.decl) {
+                if some idx_val = lower_indexer_write(lw, recv, t, m.decl, arg_nodes, n) { return idx_val; }
+            }
+        }
     }
     let hook = native_for(lw, t, name, native_method_hook());
     if hook == "" { return unsupported(lw, n); }
@@ -353,7 +364,8 @@ pub fn member_call(lw: Lowerer, recv: u32, t: i64, name: str, arg_nodes: List<i6
 fn runs_as_method(lw: Lowerer, m: Member) -> bool {
     let s = lw.inf.p.s;
     let mk = kind(s, m.decl);
-    return (mk == nk_fn() || mk == nk_operator()) && fn_body(s, m.decl) >= 0 && runs_in_program(lw, m.decl) && !is_static_decl(s, m.decl);
+    return (mk == nk_fn() || mk == nk_operator() || (mk == nk_indexer() && !has_accessors(s, m.decl)))
+        && fn_body(s, m.decl) >= 0 && runs_in_program(lw, m.decl) && !is_static_decl(s, m.decl);
 }
 
 /// Calls method `m` on `recv`, a value of type `t`, with `arg_nodes`.
@@ -722,7 +734,7 @@ pub fn method_params(s: Snap, decl: i64) -> List<i64> {
 pub fn decl_params(s: Snap, decl: i64) -> List<i64> {
     // A destructor takes only its receiver.
     if kind(s, decl) == nk_dtor() { return []; }
-    if kind(s, decl) != nk_ctor() { return fn_params(s, decl); }
+    if kind(s, decl) != nk_ctor() && kind(s, decl) != nk_indexer() { return fn_params(s, decl); }
     let ch = children(s, decl);
     var out: List<i64> = [];
     var i = 1;
@@ -733,10 +745,10 @@ pub fn decl_params(s: Snap, decl: i64) -> List<i64> {
     return out;
 }
 
-/// The body of a function or constructor declaration, or -1.
+/// The body of a function, constructor or indexer declaration, or -1.
 pub fn decl_body(s: Snap, decl: i64) -> i64 {
     if kind(s, decl) == nk_dtor() { return lhs(s, decl); }
-    if kind(s, decl) != nk_ctor() { return fn_body(s, decl); }
+    if kind(s, decl) != nk_ctor() && kind(s, decl) != nk_indexer() { return fn_body(s, decl); }
     let ch = children(s, decl);
     return if ch.len() > 0 { ch[0] } else { -1 };
 }

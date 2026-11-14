@@ -57,7 +57,7 @@ impl ComptimeEngine {
         let (flat_arena, symbol_strings) = crate::infer::flatten_ast(arena, node_id);
         let mut registry = crate::infer::PhysicsRegistry::new(flat_arena, symbol_strings);
         registry.layouts = self.layout_table.clone();
-        let (mut env_m, mut tgt_m, mut ast_m, mut sym_m) = (std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new());
+        let (mut env_m, mut tgt_m, mut ast_m, mut sym_m) = (pilot_vm::Record::default(), pilot_vm::Record::default(), pilot_vm::Record::default(), pilot_vm::Record::default());
         // ENV.target: the host the seed VM runs on, which is the target of a
         // comptime evaluation. SIMD width, cache line size and optimisation
         // level are not published: they belong to a `--target` descriptor from

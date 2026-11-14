@@ -22,16 +22,16 @@ use selfhost.check.diag.*;
 use Pilot.Core.Syntax.Visibility;
 
 /// The package each unit declares, by unit index ("" for none).
-fn unit_packages(s: Snap) -> List<str> {
+fn unit_packages(p: Program) -> List<str> {
+    let s = p.s;
     var out: List<str> = [];
     for _f in s.files { out.push(""); }
-    var n = 0;
-    while n < s.count {
+    // A package declaration is an import declaration written `pkg`.
+    for n in prog_nodes_of_kind(p, nk_import_decl()) {
         if is_package_decl(s, n) {
             let u = unit_of(s, n);
             if u >= 0 && u < out.len() { out[u] = node_name(s, n); }
         }
-        n = n + 1;
     }
     return out;
 }
@@ -96,7 +96,7 @@ fn top_level(p: Program, name: str) -> List<i64> {
 pub fn check_access(inf: Infer, sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
-    let pkgs = unit_packages(s);
+    let pkgs = unit_packages(p);
     var n = 0;
     n = s.user_lo;
     while n < s.user_hi {

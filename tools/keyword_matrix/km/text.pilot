@@ -12,15 +12,14 @@ pub fn lines_of(text: str) -> List<str> {
     var out: List<str> = [];
     let n = text.len();
     var start: usize = 0;
-    var i: usize = 0;
-    while i < n {
-        if text.byte_at(i) == 10 {
-            var end = i;
-            if end > start && text.byte_at(end - 1) == 13 { end = end - 1; }
-            out.push(text.slice(start, end));
-            start = i + 1;
-        }
-        i = i + 1;
+    var at = text.find("\n", 0);
+    while at >= 0 {
+        let i = at as usize;
+        var end = i;
+        if end > start && text.byte_at(end - 1) == 13 { end = end - 1; }
+        out.push(text.slice(start, end));
+        start = i + 1;
+        at = text.find("\n", start);
     }
     if start < n { out.push(text.slice(start, n)); }
     return out;
@@ -56,32 +55,41 @@ pub fn code_lines(text: str) -> List<str> {
     var out: List<str> = [];
     var in_block = false;
     for line in lines_of(text) {
+        // Most lines hold no comment mark and are outside a block comment.
+        if !in_block && line.find("/", 0) < 0 {
+            out.push(line);
+            continue;
+        }
         var kept = "";
         var from: usize = 0;
         var i: usize = 0;
         let n = line.len();
         while i < n {
-            let b = line.byte_at(i);
             if in_block {
-                if b == 42 && i + 1 < n && line.byte_at(i + 1) == 47 {
-                    in_block = false;
-                    i = i + 2;
-                    from = i;
-                    continue;
+                let close = line.find("*/", i);
+                if close < 0 {
+                    i = n;
+                    break;
                 }
-                i = i + 1;
+                in_block = false;
+                i = (close as usize) + 2;
+                from = i;
                 continue;
             }
-            if b == 47 && i + 1 < n && line.byte_at(i + 1) == 47 {
+            let slashes = line.find("//", i);
+            let open = line.find("/*", i);
+            if slashes >= 0 && (open < 0 || slashes < open) {
+                i = slashes as usize;
                 break;
             }
-            if b == 47 && i + 1 < n && line.byte_at(i + 1) == 42 {
-                kept = kept + line.slice(from, i);
-                in_block = true;
-                i = i + 2;
-                continue;
+            if open < 0 {
+                i = n;
+                break;
             }
-            i = i + 1;
+            i = open as usize;
+            kept = kept + line.slice(from, i);
+            in_block = true;
+            i = i + 2;
         }
         if !in_block {
             kept = kept + line.slice(from, i);
@@ -93,15 +101,7 @@ pub fn code_lines(text: str) -> List<str> {
 
 /// The number of bytes of `s` that are not spaces, tabs or line breaks.
 pub fn code_size(s: str) -> i64 {
-    var n = 0;
-    var i: usize = 0;
-    let len = s.len();
-    while i < len {
-        let b = s.byte_at(i);
-        if b != 32 && b != 9 && b != 13 && b != 10 { n = n + 1; }
-        i = i + 1;
-    }
-    return n;
+    return s.replace(" ", "").replace("\t", "").replace("\r", "").replace("\n", "").len() as i64;
 }
 
 /// Whether `word` occurs in `s` with no identifier byte on either side.

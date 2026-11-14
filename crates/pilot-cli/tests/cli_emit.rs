@@ -27,30 +27,23 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// `pilot test --emit <lang>` passes, and every case that did not run names
-/// the seam it stopped at.
-fn corpus_passes(lang: &str) {
-    let out = pilot(&["test", "--emit", lang]);
+/// `pilot test --emit js,python` passes for both languages, and every case
+/// that did not run names its `emit.*` or `ir.*` seam. Both languages come
+/// from one emit process per case (the program is checked once).
+#[test]
+#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
+fn the_corpus_runs_as_emitted_javascript_and_python() {
+    let out = pilot(&["test", "--emit", "js,python"]);
     let stdout = text(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}{}", text(&out.stderr));
-    let head = format!("RESULT (emit {lang}):");
-    let result = stdout.lines().find(|l| l.starts_with(&head)).expect("a result line");
-    assert!(result.contains(" 0 failed"), "{result}");
+    for lang in ["js", "python"] {
+        let head = format!("RESULT (emit {lang}):");
+        let result = stdout.lines().find(|l| l.starts_with(&head)).expect("a result line");
+        assert!(result.contains(" 0 failed"), "{result}");
+    }
     for line in stdout.lines().filter(|l| l.starts_with("SEAM ")) {
         assert!(line.contains("SEAM001") && (line.contains("`emit.") || line.contains("`ir.")), "{line}");
     }
-}
-
-#[test]
-#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
-fn the_corpus_runs_as_emitted_python() {
-    corpus_passes("python");
-}
-
-#[test]
-#[ignore = "slow: runs the whole conformance corpus; `cargo test-full` runs it"]
-fn the_corpus_runs_as_emitted_javascript() {
-    corpus_passes("js");
 }
 
 // The corpus as emitted C is run once, by

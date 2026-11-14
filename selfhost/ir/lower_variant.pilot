@@ -114,15 +114,7 @@ pub fn named_variant(lw: Lowerer, name: str, hint: i64) -> VariantRef? {
 }
 
 /// Every enum declaration of the program, in node order.
-pub fn adt_nodes(s: Snap) -> List<i64> {
-    var out: List<i64> = [];
-    var d = 0;
-    while d < s.count {
-        if kind(s, d) == nk_adt() { out.push(d); }
-        d = d + 1;
-    }
-    return out;
-}
+pub fn adt_nodes(p: Program) -> List<i64> => prog_nodes_of_kind(p, nk_adt());
 
 /// The payload variant callee `c` names (`Shape.Circle`, `Shape::Circle`,
 /// `::Circle` or `Circle`), or `none`.

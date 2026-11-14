@@ -7,12 +7,17 @@
 
 use crate::vm::PilVirtualMachine;
 use pilot_rt::PilotVal;
-use std::collections::HashMap;
+use crate::collect::Record;
 
 /// Display nesting limit; deeper containers print as `...`.
 const DISPLAY_DEPTH: usize = 8;
 
 type IntrinsicResult = Result<PilotVal, String>;
+
+/// The intrinsics that read one element or field (`get`): the calls the
+/// tools make most by far, so the run loop recognises them by value
+/// (`PilVirtualMachine::reads`) before it decodes a name.
+pub(crate) const READS: [&str; 2] = ["map_get", "list_get"];
 
 fn arg(args: &[PilotVal], i: usize, op: &str) -> Result<PilotVal, String> {
     args.get(i)
@@ -40,11 +45,12 @@ impl std::ops::Deref for StrArg {
 
     fn deref(&self) -> &str {
         match self {
-            StrArg::Inline(buf, len) => std::str::from_utf8(&buf[..*len]).unwrap_or(""),
-            StrArg::Stored(ptr, len) => {
-                let bytes = unsafe { std::slice::from_raw_parts(*ptr, *len) };
-                std::str::from_utf8(bytes).unwrap_or("")
-            }
+            // Both were read from a string value, whose bytes are UTF-8
+            // (`PilotVal::str_in`).
+            StrArg::Inline(buf, len) => unsafe { std::str::from_utf8_unchecked(&buf[..*len]) },
+            StrArg::Stored(ptr, len) => unsafe {
+                std::str::from_utf8_unchecked(std::slice::from_raw_parts(*ptr, *len))
+            },
         }
     }
 }
@@ -167,7 +173,7 @@ impl PilVirtualMachine {
         }
         if let Some(slot) = v.as_map_handle().filter(|s| *s < self.heap_maps.len()) {
             let entries: Vec<(String, PilotVal)> = self.heap_maps[slot].iter().map(|(k, x)| (k.clone(), *x)).collect();
-            let mut out = HashMap::with_capacity(entries.len());
+            let mut out = Record::with_capacity_and_hasher(entries.len(), Default::default());
             for (k, x) in entries {
                 out.insert(k, self.value_clone(x, depth + 1)?);
             }
@@ -207,7 +213,7 @@ impl PilVirtualMachine {
         PilotVal::from_list_handle(self.alloc_list_slot(items))
     }
 
-    pub fn new_map(&mut self, m: HashMap<String, PilotVal>) -> PilotVal {
+    pub fn new_map(&mut self, m: Record) -> PilotVal {
         PilotVal::from_map_handle(self.alloc_map_slot(m))
     }
 
@@ -226,7 +232,7 @@ impl PilVirtualMachine {
         Err(format!("`{op}` expects a string, list or record, found {}", v.kind_label()))
     }
 
-    fn get(&self, obj: PilotVal, k: PilotVal, op: &str) -> IntrinsicResult {
+    pub(crate) fn get(&self, obj: PilotVal, k: PilotVal, op: &str) -> IntrinsicResult {
         if obj.is_list() {
             let slot = self.list_slot(obj, op)?;
             let i = self.list_index(slot, k, op)?;
@@ -485,7 +491,7 @@ impl PilVirtualMachine {
                 let (h, n) = (str_arg(args, 0, op)?, str_arg(args, 1, op)?);
                 Ok(PilotVal::from_bool(h.ends_with(&*n)))
             }
-            "map_new" => Ok(self.new_map(HashMap::new())),
+            "map_new" => Ok(self.new_map(Record::default())),
             // `map_values(m)`: the values of map `m` as a new list, in the
             // order of their keys (the order a map is shown in).
             "map_values" => {

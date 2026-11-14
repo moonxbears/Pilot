@@ -42,28 +42,23 @@ use selfhost.check.diag.*;
 pub struct Flow {
     pub inf: Infer;
     pub sink: DiagSink;
-    /// Binding -> whether its type is owned: 1 owned, 0 not, -1 not asked.
-    pub owned: List<i64>;
+    /// Binding -> whether its type is owned, once asked.
+    pub owned: Map<i64, bool>;
     /// Assignment to a local -> whether, on some walk, the local may have
     /// been moved just before it is assigned (`walk_bodies` fills it).
     pub moved_at: Map<str, bool>;
     /// The program's engine bindings (`prog_engine_bindings`).
     pub engine: List<List<str>>;
-    /// Binding -> whether it borrows an owned element: 1, 0, -1 not asked.
-    pub element: List<i64>;
+    /// Binding -> whether it borrows an owned element, once asked.
+    pub element: Map<i64, bool>;
 }
 
 /// A flow over the program `inf` describes, reporting to `sink`.
 pub fn flow_new(inf: Infer, sink: DiagSink) -> Flow {
-    var owned: List<i64> = [];
-    var element: List<i64> = [];
-    var i = 0;
-    while i < inf.r.site.len() {
-        owned.push(-1);
-        element.push(-1);
-        i = i + 1;
-    }
-    return Flow { inf: inf, sink: sink, owned: owned, moved_at: Map<str, bool>(), engine: prog_engine_bindings(inf.p), element: element };
+    return Flow {
+        inf: inf, sink: sink, owned: Map<i64, bool>(), moved_at: Map<str, bool>(),
+        engine: prog_engine_bindings(inf.p), element: Map<i64, bool>(),
+    };
 }
 
 /// The binding hook naming a type the engine holds whose elements it owns,
@@ -163,16 +158,16 @@ pub fn is_owned_element(f: Flow, n: i64) -> bool {
 /// or the variable of `for x in rs`. It is never dropped itself and cannot
 /// be moved out (OWN004).
 pub fn borrows_element(f: Flow, b: i64) -> bool {
-    if f.element[b] < 0 {
+    if !f.element.has(b) {
         let r = f.inf.r;
         let s = f.inf.p.s;
         let src = r.source[b];
         var yes = false;
         if src >= 0 && r.bind_kind[b] == BindKind::Loop { yes = owned_elements(f, type_of(f.inf, src)).len() > 0; }
         else if src >= 0 && r.bind_kind[b] == BindKind::Local { yes = kind(s, r.site[b]) == nk_let() && is_owned_element(f, src); }
-        f.element[b] = if yes { 1 } else { 0 };
+        f.element.set(b, yes);
     }
-    return f.element[b] == 1;
+    return f.element.get(b);
 }
 
 /// OWN004: an element a collection owns, or a binding borrowing one, used
@@ -209,15 +204,15 @@ fn drop_binding(xs: List<i64>, b: i64) -> List<i64> {
 }
 
 pub fn is_owned_binding(f: Flow, b: i64) -> bool {
-    if f.owned[b] < 0 {
+    if !f.owned.has(b) {
         let r = f.inf.r;
         var t = ty_unknown();
         if r.annot[b] >= 0 { t = prog_annot_type(f.inf.p, r.annot[b]); }
         else if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Local { t = type_of(f.inf, r.source[b]); }
         else if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Unwrapped { t = owned_payload(f, type_of(f.inf, r.source[b])); }
-        f.owned[b] = if owns(f, t) { 1 } else { 0 };
+        f.owned.set(b, owns(f, t));
     }
-    return f.owned[b] == 1;
+    return f.owned.get(b);
 }
 
 /// The declaration a call resolves to (a function, or a method of the

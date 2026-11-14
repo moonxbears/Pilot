@@ -76,6 +76,7 @@ impl BytecodeCompiler {
             .collect();
         for &m in &members {
             self.register_property(arena, owner, m);
+            self.register_indexer(arena, owner, m);
         }
         // Tier 2: spliced facets and bundles.
         for &m in &members {
@@ -112,6 +113,7 @@ impl BytecodeCompiler {
                     if !Self::is_method_decl(arena, fm) {
                         if !dropped.contains(Self::name(arena, arena.node(fm).lhs)) {
                             self.register_property(arena, owner, fm);
+                            self.register_indexer(arena, owner, fm);
                         }
                         continue;
                     }
@@ -145,6 +147,7 @@ impl BytecodeCompiler {
                     for fm in Self::type_members(arena, NodeId(arena.node(source).rhs)) {
                         if !Self::is_method_decl(arena, fm) {
                             self.register_property(arena, owner, fm);
+                            self.register_indexer(arena, owner, fm);
                             continue;
                         }
                         if !Self::has_body(arena, fm) {
@@ -254,16 +257,95 @@ impl BytecodeCompiler {
         }
     }
 
+    /// Registers an indexer declaration (`self[i: T] -> R`) as `Owner.[]`
+    /// and `Owner.[]=`, when it has a getter or setter body.
+    fn register_indexer(&mut self, arena: &AstArena, owner: &str, m: NodeId) {
+        if arena.node(m).node_kind() != NodeKind::IndexerDecl {
+            return;
+        }
+        let mn = *arena.node(m);
+        let ch: Vec<NodeId> = arena.children_slice(mn.lhs, mn.rhs).iter().map(|&c| NodeId(c)).collect();
+        let Some(&body_or_block) = ch.first() else {
+            return;
+        };
+        if body_or_block.is_none() {
+            return;
+        }
+        let idx_params: Vec<NodeId> = ch[1..].to_vec();
+        let mut add_owner = |op: &str, decl: LazyDecl, is_set: bool| {
+            let key = format!("{owner}.{op}");
+            if !self.lazy_decls.contains_key(&key) && !self.fn_entries.contains_key(&key) {
+                let owners = self.method_owners.entry(op.to_string()).or_default();
+                if !owners.iter().any(|(o, _)| o == owner) {
+                    owners.push((owner.to_string(), false));
+                }
+                self.lazy_decls.insert(key, decl);
+                if is_set {
+                    self.index_setters.insert(owner.to_string());
+                } else {
+                    self.index_getters.insert(owner.to_string());
+                }
+            }
+        };
+        if let Some(&block) = self.accessor_blocks.get(&m.0) {
+            let bn = *arena.node(block);
+            let bodies: Vec<NodeId> = arena.children_slice(bn.lhs, bn.rhs).iter().map(|&b| NodeId(b)).collect();
+            let (getters, setters) = bodies.split_at((bn.flags as usize).min(bodies.len()));
+            if let Some(&body) = getters.first() {
+                add_owner(
+                    pilot_parser::INDEX_GET_OP,
+                    LazyDecl {
+                        node: body,
+                        owner: Some(owner.to_string()),
+                        kind: LazyKind::IndexerGetter { params: idx_params.clone() },
+                        inherited: true,
+                    },
+                    false,
+                );
+            }
+            if let Some(&body) = setters.first() {
+                add_owner(
+                    pilot_parser::INDEX_SET_OP,
+                    LazyDecl {
+                        node: body,
+                        owner: Some(owner.to_string()),
+                        kind: LazyKind::IndexerSetter { params: idx_params, bodies: setters.to_vec() },
+                        inherited: true,
+                    },
+                    true,
+                );
+            }
+        } else {
+            add_owner(
+                pilot_parser::INDEX_GET_OP,
+                LazyDecl {
+                    node: body_or_block,
+                    owner: Some(owner.to_string()),
+                    kind: LazyKind::IndexerGetter { params: idx_params },
+                    inherited: true,
+                },
+                false,
+            );
+        }
+    }
+
     /// Lowers a property accessor of `owner` as the function `key`: its
     /// first parameter is the record, a setter's second is the new value.
     pub(crate) fn compile_accessor(&mut self, arena: &AstArena, key: &str, body: NodeId, owner: &str, kind: &LazyKind) {
-        let (field, setters) = match kind {
-            LazyKind::Getter { field } => (field.clone(), None),
-            LazyKind::Setter { field, bodies } => (field.clone(), Some(bodies.clone())),
+        let (field, idx_params, setters) = match kind {
+            LazyKind::Getter { field } => (field.clone(), Vec::new(), None),
+            LazyKind::Setter { field, bodies } => (field.clone(), Vec::new(), Some(bodies.clone())),
+            LazyKind::IndexerGetter { params } => (pilot_parser::INDEX_GET_OP.to_string(), params.clone(), None),
+            LazyKind::IndexerSetter { params, bodies } => {
+                (pilot_parser::INDEX_SET_OP.to_string(), params.clone(), Some(bodies.clone()))
+            }
             LazyKind::Method { .. } | LazyKind::Destructor => return,
         };
         let receiver = crate::RECEIVER;
         let mut params = vec![receiver.to_string()];
+        for &p in &idx_params {
+            params.push(Self::name(arena, arena.node(p).lhs).to_string());
+        }
         if setters.is_some() {
             // The value travels in a hidden slot; each setter names it.
             params.push("#value".to_string());
@@ -279,9 +361,14 @@ impl BytecodeCompiler {
             self.emit(Opcode::Move, slot, (i + 1) as u8, 0);
             self.var_slots.insert(p.clone(), slot);
         }
+        for &p in &idx_params {
+            if let Some(t) = Self::annot_name(arena, p) {
+                self.var_types.insert(Self::name(arena, arena.node(p).lhs).to_string(), t);
+            }
+        }
         let self_slot = self.var_slots[receiver];
         self.var_slots.insert(receiver[1..].to_string(), self_slot);
-        self.backing = Some(field.clone());
+        self.backing = idx_params.is_empty().then(|| field.clone());
         let r = match setters {
             None => self.compile_node(arena, body),
             Some(bodies) => self.compile_setters(arena, owner, &field, &bodies),
@@ -439,6 +526,17 @@ impl BytecodeCompiler {
                 return self.error(
                     crate::codes::GET_ONLY_ASSIGN,
                     format!("`{f}` of `{t}` has a getter and no setter, so it cannot be assigned"),
+                );
+            }
+        }
+        if let (Switch::IndexSet, Some(t)) = (&kind, ty) {
+            if self.index_getters.contains(t)
+                && !self.index_setters.contains(t)
+                && !self.method_owners.get(pilot_parser::INDEX_SET_OP).is_some_and(|v| v.iter().any(|(o, _)| o == t))
+            {
+                return self.error(
+                    crate::codes::GET_ONLY_ASSIGN,
+                    format!("indexer of `{t}` has a getter and no setter, so it cannot be assigned"),
                 );
             }
         }

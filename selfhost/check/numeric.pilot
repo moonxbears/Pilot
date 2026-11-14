@@ -47,22 +47,25 @@ fn is_other_width(p: Program, t: i64, int_width: str, float_width: str) -> bool 
 }
 
 /// Adds a `NumericType` row to `rows` for each arithmetic expression of the
-/// linked program whose result is narrower or wider than the engine's
+/// files the program links whose result is narrower or wider than the engine's
 /// numbers.
 pub fn plan_numeric(inf: Infer, rows: List<List<any>>) {
     let p = inf.p;
     let s = p.s;
     let int_width = width_key(p, prog_slot_type(p, literal_slot(nk_int())));
     let float_width = width_key(p, prog_slot_type(p, literal_slot(nk_float())));
-    var n = 0;
-    while n < s.count {
-        if kind(s, n) == nk_binary() && is_arithmetic_op(flags(s, n)) {
+    // Only a file the program links is run: the declaration files the
+    // checker reads beside it need no rows.
+    // Type -> whether it is of another width (`is_other_width`), asked once.
+    var other = Map<i64, bool>();
+    for n in prog_nodes_of_kind(p, nk_binary()) {
+        if is_arithmetic_op(flags(s, n)) && in_linked_file(s, n) {
             let t = type_of(inf, n);
-            if is_other_width(p, t, int_width, float_width) {
+            if !other.has(t) { other.set(t, is_other_width(p, t, int_width, float_width)); }
+            if other.get(t) {
                 let name = node_name(s, ty_decl(p.tt, t));
                 rows.push([DropAction::NumericType as i64, span_start(s, n), span_end(s, n), kind(s, n), name, ""]);
             }
         }
-        n = n + 1;
     }
 }

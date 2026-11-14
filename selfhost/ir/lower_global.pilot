@@ -50,9 +50,8 @@ pub fn is_pattern_let(s: Snap, d: i64) -> bool => flags(s, d) == 1;
 pub fn global_names(p: Program) -> Map<str, List<i64>> {
     let s = p.s;
     let out = Map<str, List<i64>>();
-    var i = 0;
-    while i < s.count {
-        if kind(s, i) == nk_program() && in_linked_file(s, i) {
+    for i in prog_nodes_of_kind(p, nk_program()) {
+        if in_linked_file(s, i) {
             for c in children(s, i) {
                 let k = kind(s, c);
                 if (k == nk_let() || k == nk_var() || k == nk_const()) && !is_pattern_let(s, c) {
@@ -70,7 +69,6 @@ pub fn global_names(p: Program) -> Map<str, List<i64>> {
                 }
             }
         }
-        i = i + 1;
     }
     return out;
 }
@@ -250,10 +248,8 @@ pub fn lower_comptime(lw: Lowerer, n: i64) -> u32 {
 /// `comptime` contains, as the seed compiles them all.
 fn schedule_comptime(lw: Lowerer) {
     let s = lw.inf.p.s;
-    var i = 0;
-    while i < s.count {
-        if kind(s, i) == nk_comptime() && in_user_file(s, i) && !inside_comptime(lw, i) { let _ = comptime_index(lw, i); }
-        i = i + 1;
+    for i in prog_nodes_of_kind(lw.inf.p, nk_comptime()) {
+        if in_user_file(s, i) && !inside_comptime(lw, i) { let _ = comptime_index(lw, i); }
     }
 }
 
@@ -275,12 +271,10 @@ fn user_programs(lw: Lowerer, main: i64) -> List<i64> {
     let s = lw.inf.p.s;
     var first: List<i64> = [];
     var last: List<i64> = [];
-    var i = 0;
-    while i < s.count {
-        if kind(s, i) == nk_program() && in_user_file(s, i) {
+    for i in prog_nodes_of_kind(lw.inf.p, nk_program()) {
+        if in_user_file(s, i) {
             if main >= 0 && unit_of(s, i) == unit_of(s, main) { last.push(i); } else { first.push(i); }
         }
-        i = i + 1;
     }
     for x in last { first.push(x); }
     return first;

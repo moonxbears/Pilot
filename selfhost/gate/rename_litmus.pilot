@@ -70,6 +70,7 @@ pub fn build_seeded_litmus_pairs(seed_val: i64) -> i64 {
 fn rl_pairs_to_map(rename_pairs: i64) -> i64 {
     let rmap = __engine("map_new");
     let n = glist_len(rename_pairs);
+    var kept = 0;
     var i = 0;
     while i < n {
         let item = glist_get(rename_pairs, i);
@@ -77,74 +78,123 @@ fn rl_pairs_to_map(rename_pairs: i64) -> i64 {
         let v = __engine("map_get", item, "to");
         if k.len() > 0 && v.len() > 0 {
             __engine("map_set", rmap, k, v);
+            // The names are also kept by position, so the renamer can look
+            // for each one. `#n` and a number are not identifiers, so they
+            // never meet a name.
+            __engine("map_set", rmap, kept, k);
+            kept = kept + 1;
         }
         i = i + 1;
     }
+    __engine("map_set", rmap, "#n", kept);
     return rmap;
 }
 
-// Lexer-aware whole-identifier alpha-renamer (preserves comments & string literals)
+/// The first place at or after `from` where `key` is a whole identifier as
+/// the renamer reads one (a run of identifier bytes from its first letter or
+/// `_`), or -1.
+pure fn rl_next_identifier(src: str, key: str, from: i64) -> i64 {
+    let n = src.len();
+    let kl = key.len();
+    var at = gm_find(src, key, from);
+    while at >= 0 {
+        if at + kl >= n || !sa_is_id_char(src.byte_at(at + kl)) {
+            var st = at;
+            while st > 0 && sa_is_id_char(src.byte_at(st - 1)) { st = st - 1; }
+            while st < at && src.byte_at(st) >= 48 && src.byte_at(st) <= 57 { st = st + 1; }
+            if st == at { return at; }
+        }
+        at = gm_find(src, key, at + 1);
+    }
+    return -1;
+}
+
+/// Where the string or char literal opened just before `from` ends: after
+/// its `closer`, or at the end of `src`. A backslash takes the byte
+/// after it.
+pure fn rl_literal_end(src: str, closer: str, from: i64) -> i64 {
+    let n = src.len();
+    var p = from;
+    var esc = gm_find(src, "\\", p);
+    while p < n {
+        let close = gm_find(src, closer, p);
+        if esc >= 0 && esc < p { esc = gm_find(src, "\\", p); }
+        if esc >= 0 && (close < 0 || esc < close) {
+            p = esc + 2;
+        } else if close >= 0 {
+            return close + 1;
+        } else {
+            return n;
+        }
+    }
+    return n;
+}
+
+// Lexer-aware whole-identifier alpha-renamer (preserves comments & string
+// literals). It jumps from one comment, literal or name to be renamed to the
+// next with `gm_find`, so the bytes between them are never read one by one:
+// this runs over the whole stdlib, toolchain and corpus in each pass.
 pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
     let n = src.len();
+    let key_count = (__engine("map_get", rmap, "#n") ?? 0) + 0;
+    var keys: List<str> = [];
+    var repls: List<str> = [];
+    // Per name, its next whole-identifier place; -1 when there is none
+    // left, -2 before the first search.
+    var key_at: List<i64> = [];
+    var k = 0;
+    while k < key_count {
+        let key = __engine("map_get", rmap, k);
+        keys.push(key);
+        repls.push(__engine("map_get", rmap, key));
+        key_at.push(-2);
+        k = k + 1;
+    }
+    // The next `"`, `'`, `//` and `/*`, kept the same way.
+    var quote_at = -2;
+    var tick_at = -2;
+    var line_at = -2;
+    var block_at = -2;
     var out: List<str> = [];
     var chunk_start = 0;
     var pos = 0;
     while pos < n {
-        let b = src.byte_at(pos);
-        if b == 47 && pos + 1 < n && src.byte_at(pos + 1) == 47 {
-            pos = pos + 2;
-            while pos < n && src.byte_at(pos) != 10 {
-                pos = pos + 1;
+        if quote_at != -1 && quote_at < pos { quote_at = gm_find(src, "\"", pos); }
+        if tick_at != -1 && tick_at < pos { tick_at = gm_find(src, "'", pos); }
+        if line_at != -1 && line_at < pos { line_at = gm_find(src, "//", pos); }
+        if block_at != -1 && block_at < pos { block_at = gm_find(src, "/*", pos); }
+        var first = n;
+        var what = -1;
+        if quote_at >= 0 && quote_at < first { first = quote_at; what = -2; }
+        if tick_at >= 0 && tick_at < first { first = tick_at; what = -3; }
+        if line_at >= 0 && line_at < first { first = line_at; what = -4; }
+        if block_at >= 0 && block_at < first { first = block_at; what = -5; }
+        k = 0;
+        while k < key_count {
+            var at = key_at[k];
+            if at != -1 && at < pos {
+                at = rl_next_identifier(src, keys[k], pos);
+                key_at[k] = at;
             }
-        } else if b == 47 && pos + 1 < n && src.byte_at(pos + 1) == 42 {
-            pos = pos + 2;
-            while pos + 1 < n {
-                if src.byte_at(pos) == 42 && src.byte_at(pos + 1) == 47 {
-                    pos = pos + 2;
-                    break;
-                }
-                pos = pos + 1;
-            }
-        } else if b == 34 {
-            pos = pos + 1;
-            while pos < n {
-                let sb = src.byte_at(pos);
-                if sb == 92 && pos + 1 < n {
-                    pos = pos + 2;
-                } else if sb == 34 {
-                    pos = pos + 1;
-                    break;
-                } else {
-                    pos = pos + 1;
-                }
-            }
-        } else if b == 39 {
-            pos = pos + 1;
-            while pos < n {
-                let cb = src.byte_at(pos);
-                if cb == 92 && pos + 1 < n {
-                    pos = pos + 2;
-                } else if cb == 39 {
-                    pos = pos + 1;
-                    break;
-                } else {
-                    pos = pos + 1;
-                }
-            }
-        } else if sa_is_upper(b) || sa_is_lower(b) || b == 95 {
-            let st = pos;
-            pos = pos + 1;
-            while pos < n && sa_is_id_char(src.byte_at(pos)) {
-                pos = pos + 1;
-            }
-            let word = src.slice(st, pos);
-            let repl = __engine("map_get", rmap, word) ?? "";
-            if repl.len() > 0 {
-                out.push(src.slice(chunk_start, st) + repl);
-                chunk_start = pos;
-            }
+            if at >= 0 && at < first { first = at; what = k; }
+            k = k + 1;
+        }
+        if what == -1 {
+            break;
+        } else if what == -2 {
+            pos = rl_literal_end(src, "\"", first + 1);
+        } else if what == -3 {
+            pos = rl_literal_end(src, "'", first + 1);
+        } else if what == -4 {
+            let nl = gm_find(src, "\n", first + 2);
+            pos = if nl < 0 { n } else { nl };
+        } else if what == -5 {
+            let close = gm_find(src, "*/", first + 2);
+            pos = if close < 0 { n } else { close + 2 };
         } else {
-            pos = pos + 1;
+            out.push(src.slice(chunk_start, first) + repls[what]);
+            pos = first + keys[what].len();
+            chunk_start = pos;
         }
     }
     if n > chunk_start {
@@ -341,27 +391,58 @@ fn rl_corpus_violations(run: LitmusRun, violations: i64) {
     }
 }
 
-/// One litmus pass: build the renamed sandbox, then run the corpus in it.
-/// Returns the number of files copied plus programs run.
-fn rl_run_pass(root: str, rename_pairs: i64, violations: i64) -> usize {
+/// A renamed sandbox: where it is, the guard that removes it, and the
+/// number of files copied into it.
+struct LitmusSandbox : IValue {
+    pub dir: str;
+    pub guard: TempDirGuard;
+    pub copied: usize;
+}
+
+/// Builds the renamed sandbox for `rename_pairs`: every tree of
+/// `rl_sandbox_trees()` copied from `root` with the names renamed.
+fn rl_build_sandbox(root: str, rename_pairs: i64, violations: i64) -> LitmusSandbox {
     let rmap = rl_pairs_to_map(rename_pairs);
     let sandbox_dir = "/tmp/pilot_litmus_" + gate_proc_pid() + "_" + gate_time_now_us();
     let guard = temp_guard_new(sandbox_dir);
-    var scanned = 0;
+    var copied = 0;
     for tree in rl_sandbox_trees() {
-        scanned = scanned + rl_copy_renamed_tree(root, tree, sandbox_dir, tree, rmap, violations);
+        copied = copied + rl_copy_renamed_tree(root, tree, sandbox_dir, tree, rmap, violations);
     }
-    if glist_len(violations) == 0 {
-        rl_corpus_violations(rl_run_corpus(sandbox_dir), violations);
-    }
+    return LitmusSandbox { dir: sandbox_dir, guard: guard, copied: copied };
+}
 
-    let _ = temp_guard_cleanup(guard);
-    if gate_fs_exists(sandbox_dir) {
-        let _ = glist_push(violations, rl_violation(sandbox_dir, sandbox_dir,
+/// Removes the sandbox; one that is still there is a violation.
+fn rl_remove_sandbox(sb: LitmusSandbox, violations: i64) {
+    let _ = temp_guard_cleanup(sb.guard);
+    if gate_fs_exists(sb.dir) {
+        let _ = glist_push(violations, rl_violation(sb.dir, sb.dir,
             "TempDirGuard failed to unlink ephemeral litmus sandbox directory",
             "Ensure fs_remove_all cleans up /tmp/pilot_litmus_* on scope exit"));
     }
-    return scanned;
+}
+
+/// Starts `pilot test <corpus>` in the sandbox `dir` and returns at once.
+fn rl_start_corpus(dir: str) -> ProcessHandle {
+    let exe = current_exe() ?? "pilot";
+    return spawn_in(dir, exe, ["test", rl_conformance_dir()], "");
+}
+
+/// What the corpus run started by `rl_start_corpus` left.
+fn rl_finish_corpus(running: ProcessHandle) -> LitmusRun {
+    let out = running.wait();
+    return LitmusRun { stdout: out.stdout, stderr: out.stderr, exit_code: out.exit_code };
+}
+
+/// One litmus pass: build the renamed sandbox, then run the corpus in it.
+/// Returns the number of files copied plus programs run.
+fn rl_run_pass(root: str, rename_pairs: i64, violations: i64) -> usize {
+    let sb = rl_build_sandbox(root, rename_pairs, violations);
+    if glist_len(violations) == 0 {
+        rl_corpus_violations(rl_run_corpus(sb.dir), violations);
+    }
+    rl_remove_sandbox(sb, violations);
+    return sb.copied;
 }
 
 pub fn execute_universal_rename_litmus(workspace_root: str, rename_pairs: i64) -> GateReport {
@@ -381,21 +462,34 @@ pub fn execute_universal_rename_litmus(workspace_root: str, rename_pairs: i64) -
     };
 }
 
+/// Both passes. The two sandboxes are built first, then both corpus runs
+/// go at once, so the end of one run, when only its slowest programs are
+/// left, overlaps the other instead of leaving the machine idle.
 pub fn execute_dual_pass_rename_gate(workspace_root: str, opts: ref<GateRunOptions>) -> GateReport {
     let t0 = gate_time_now_us();
-    let pass0 = execute_universal_rename_litmus(workspace_root, build_canonical_litmus_pairs());
-    let pass1 = execute_universal_rename_litmus(workspace_root, build_seeded_litmus_pairs(opts.seed));
+    let root = resolve_workspace_root(workspace_root);
+    let violations0 = glist_new();
+    let violations1 = glist_new();
+    let sb0 = rl_build_sandbox(root, build_canonical_litmus_pairs(), violations0);
+    let sb1 = rl_build_sandbox(root, build_seeded_litmus_pairs(opts.seed), violations1);
+    if glist_len(violations0) == 0 && glist_len(violations1) == 0 {
+        let run0 = rl_start_corpus(sb0.dir);
+        let run1 = rl_start_corpus(sb1.dir);
+        rl_corpus_violations(rl_finish_corpus(run0), violations0);
+        rl_corpus_violations(rl_finish_corpus(run1), violations1);
+    }
+    rl_remove_sandbox(sb0, violations0);
+    rl_remove_sandbox(sb1, violations1);
     let combined = glist_new();
-    let _ = glist_extend(combined, pass0.violations);
-    let _ = glist_extend(combined, pass1.violations);
-    let scanned = pass0.items_scanned + pass1.items_scanned;
+    let _ = glist_extend(combined, violations0);
+    let _ = glist_extend(combined, violations1);
     let dt = gate_time_now_us() - t0;
     return GateReport {
         gate_id: "rename_litmus",
         category: GateCategoryId.Adaptability,
-        passed: glist_len(combined) == 0 && pass0.passed && pass1.passed,
+        passed: glist_len(combined) == 0,
         elapsed_us: if dt >= 0 { dt } else { 0 },
-        items_scanned: scanned,
+        items_scanned: sb0.copied + sb1.copied,
         violations: combined,
         at_seam: "",
     };

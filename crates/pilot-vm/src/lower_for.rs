@@ -85,8 +85,10 @@ impl BytecodeCompiler {
         if is_range {
             let r_s = self.compile_node(arena, NodeId(iter_n.lhs));
             self.emit(Opcode::Move, r_idx, r_s, 0);
+            self.release_to(mark);
             let r_e = self.compile_node(arena, NodeId(iter_n.rhs));
             self.emit(Opcode::Move, r_end, r_e, 0);
+            self.release_to(mark);
             if let (Some(step), Some(r_step)) = (step_id, r_step) {
                 let r_v = self.compile_node(arena, step);
                 self.emit(Opcode::Move, r_step, r_v, 0);
@@ -96,14 +98,16 @@ impl BytecodeCompiler {
             let r_it = self.compile_node(arena, iter_id);
             self.emit(Opcode::Move, r_seq, r_it, 0);
         }
-        self.next_reg = mark;
+        self.release_to(mark);
         // `r_enum` is `none` while indexing, the enumerator while enumerating.
         let r_null = self.emit_null();
         self.emit(Opcode::Move, r_enum, r_null, 0);
+        self.release_to(mark);
         if !is_range {
             // The step at the loop's end counts in every mode.
             let r_zero = self.emit_const(PilotVal::from_int(0));
             self.emit(Opcode::Move, r_idx, r_zero, 0);
+            self.release_to(mark);
         }
         let to_index = match walk {
             Walk::Either => {
@@ -124,6 +128,7 @@ impl BytecodeCompiler {
         if matches!(walk, Walk::Index | Walk::Either) {
             let r_len = self.emit_intrinsic("list_len", &[r_seq]);
             self.emit(Opcode::Move, r_end, r_len, 0);
+            self.release_to(mark);
         }
         if let Some(j) = skip_index {
             self.patch_to_here(j);
@@ -147,12 +152,13 @@ impl BytecodeCompiler {
             let inclusive = is_range && iter_n.flags == OP_RANGE_INCLUSIVE;
             let cmp = if inclusive { Opcode::CmpLe } else { Opcode::CmpLt };
             self.emit(cmp, r_cond, r_idx, r_end);
-            exits.push(self.emit_branch(Opcode::JumpIfFalse, r_cond, 0));
+            exits.push(self.emit_branch_unless(r_cond, r_cond));
             if is_range {
                 self.emit(Opcode::Move, slot, r_idx, 0);
             } else {
                 let r_item = self.emit_intrinsic("map_get", &[r_seq, r_idx]);
                 self.emit(Opcode::Move, slot, r_item, 0);
+                self.release_to(mark);
             }
         }
         if let Some(j) = to_body {

@@ -112,19 +112,23 @@ pub fn plan_copies(pl: DropPlanner) {
     let inf = pl.flow.inf;
     let p = inf.p;
     let s = p.s;
-    let count = s.nodes.len() / 9;
     let cs = const_scan(pl.flow);
-    var n = 0;
-    while n < count {
+    // Type -> whether it is a value type (`declares_value`), asked once.
+    var value_types = Map<i64, bool>();
+    // Only nodes of the user's files are kept (`Snap.user_lo`).
+    var n = s.user_lo;
+    while n < s.user_hi {
         let k = kind(s, n);
         if (is_place(k) || k == nk_call()) && in_user_file(s, n) {
             let t = type_of(inf, n);
-            if is_place(k) && declares_value(p, pl.flow.engine, t) && copy_position(pl.flow, n) {
+            if !value_types.has(t) { value_types.set(t, declares_value(p, pl.flow.engine, t)); }
+            let is_value = value_types.get(t);
+            if is_place(k) && is_value && copy_position(pl.flow, n) {
                 copy_glue(pl, t);
                 pl.cur_binding = -1;
                 pl.cur_type = t;
                 row(pl, ::Copy, n, ty_display(p.tt, t), "");
-            } else if !declares_value(p, pl.flow.engine, t) && needs_const_copy(cs, n, t) {
+            } else if !is_value && needs_const_copy(cs, n, t) {
                 // A constant's value, copied deeply: no copy glue.
                 pl.cur_binding = -1;
                 pl.cur_type = t;

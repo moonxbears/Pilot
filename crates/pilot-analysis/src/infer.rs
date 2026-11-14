@@ -253,6 +253,18 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
 }
 
 pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, args: &[PilotVal]) -> Result<PilotVal, String> {
+    engine_intrinsic(registry, op_code, args).unwrap_or(Ok(PilotVal::NULL))
+}
+
+/// `handle_engine_intrinsic`, or `None` when `op_code` is not an intrinsic
+/// the registry answers (the caller's next handler may know it).
+pub fn engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, args: &[PilotVal]) -> Option<Result<PilotVal, String>> {
+    let mut known = true;
+    let out = engine_intrinsic_in(registry, op_code, args, &mut known);
+    known.then_some(out)
+}
+
+fn engine_intrinsic_in(registry: &mut PhysicsRegistry, op_code: &str, args: &[PilotVal], known: &mut bool) -> Result<PilotVal, String> {
     let arg_i = |i: usize| args.get(i).and_then(|v| v.as_int()).unwrap_or(0);
     let arg_s = |i: usize| args.get(i).and_then(|v| v.with_str(|s| s.to_string())).unwrap_or_default();
     let nid = arg_i(0) as usize;
@@ -399,7 +411,10 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
         "lsp_query_method" => Ok(PilotVal::from_str(&registry.lsp_method)),
         "lsp_query_offset" => Ok(PilotVal::from_int(registry.lsp_offset as i64)),
         "lsp_set_result" => { registry.lsp_result = arg_s(0); Ok(PilotVal::NULL) }
-        _ => Ok(PilotVal::NULL),
+        _ => {
+            *known = false;
+            Ok(PilotVal::NULL)
+        }
     }
 }
 

@@ -76,8 +76,10 @@ fn check_binding(f: Flow, bw: Borrows, b: i64, owner: i64) {
     let p = inf.p;
     let s = p.s;
     let name = inf.r.name[b];
-    var n = 0;
-    while n < s.count {
+    // `b` is a local of a function in the user's files: what names it, and
+    // what borrows from it, lies there too (`Snap.user_lo`).
+    var n = s.user_lo;
+    while n < s.user_hi {
         let k = kind(s, n);
         if k == nk_ident() && inf.r.ref_of[n] == b {
             if in_closure(p, n, owner) {
@@ -99,13 +101,15 @@ pub fn check_stack(inf: Infer, sink: DiagSink) {
     let r = inf.r;
     let p = inf.p;
     let s = p.s;
-    let f = flow_new(inf, sink);
-    let bw = borrows_new(f);
+    // The flow and the borrow analysis are made for the first `[Stack]`
+    // binding; most programs have none.
+    var made: List<Borrows> = [];
     var b = 0;
     while b < r.site.len() {
         let site = r.site[b];
         if r.bind_kind[b] == BindKind::Local && in_user_file(s, site) && is_stack_binding(p, site) && r.owner[b] >= 0 {
-            check_binding(f, bw, b, r.owner[b]);
+            if made.len() == 0 { made.push(borrows_new(flow_new(inf, sink))); }
+            check_binding(made[0].flow, made[0], b, r.owner[b]);
         }
         b = b + 1;
     }

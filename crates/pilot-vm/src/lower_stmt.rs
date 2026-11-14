@@ -36,7 +36,7 @@ impl BytecodeCompiler {
             self.stmt_for = Self::item_for(arena, NodeId(c));
             last = self.compile_node(arena, NodeId(c));
             if i + 1 < children.len() {
-                self.next_reg = mark;
+                self.release_to(mark);
             }
         }
         let value = match children.last() {
@@ -71,10 +71,8 @@ impl BytecodeCompiler {
         // The locals' scope has ended: their registers stop holding the
         // values, so the collector frees what only they reached even while
         // the function goes on (`collect`).
-        let null = self.add_constant(PilotVal::NULL);
-        for reg in local_mark..self.next_local_reg {
-            self.push_ins(crate::Instruction::encode_wide(Opcode::LoadConst, reg, null));
-        }
+        let count = self.next_local_reg - local_mark;
+        self.push_ins(crate::Instruction::encode(Opcode::Clear, local_mark, count, 0));
         self.next_local_reg = local_mark;
         r
     }
@@ -138,6 +136,7 @@ impl BytecodeCompiler {
         if params.is_empty() && fn_name == "main" && owner.is_none() {
             *entry = Some(pc);
         }
+        let entry_key = owner.map_or_else(|| fn_name.clone(), |p| format!("{p}.{fn_name}"));
         // A method is reached through its type (`Owner.name`), never by its
         // bare name, which belongs to free functions.
         match owner {
@@ -210,10 +209,13 @@ impl BytecodeCompiler {
         let ret = self.cur_ret_type.clone();
         let r = if returns_value { self.convert_for_binding(b, ret.as_deref()) } else { self.emit_const(PilotVal::NULL) };
         self.emit_ensures(arena, r);
-        self.emit(Opcode::Move, 0, r, 0);
-        self.emit(Opcode::Ret, 0, 0, 0);
+        self.emit_fn_return(r);
         if self.gen_body.is_some() {
             self.emit_generator_stub(pc as usize);
+        } else if let Some(e) = self.fn_entries.get_mut(&entry_key).filter(|e| e.0 == pc) {
+            // Not a generator: the entry's placeholder stays a `Nop`, and
+            // calls from here on start after it.
+            e.0 = pc + 1;
         }
     }
 
@@ -441,7 +443,7 @@ impl BytecodeCompiler {
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_cond = self.compile_node(arena, NodeId(node.lhs));
-        let jf = self.emit_branch(Opcode::JumpIfFalse, r_cond, 0);
+        let jf = self.emit_branch_unless(r_cond, mark);
         self.release_to(mark);
         let (then_n, else_n) = if node.flags == 2 {
             let ch = arena.children_slice(node.rhs, 2);
@@ -485,7 +487,7 @@ impl BytecodeCompiler {
         });
         let mark = self.next_reg;
         self.compile_node(arena, body);
-        self.next_reg = mark;
+        self.release_to(mark);
         self.loops.pop().unwrap_or(LoopCtx {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
@@ -500,7 +502,7 @@ impl BytecodeCompiler {
         let start = self.here();
         let mark = self.next_reg;
         let r_cond = self.compile_node(arena, NodeId(cond));
-        let jf = self.emit_branch(Opcode::JumpIfFalse, r_cond, 0);
+        let jf = self.emit_branch_unless(r_cond, mark);
         self.release_to(mark);
         let ctx = self.loop_body(arena, NodeId(body));
         for j in ctx.continue_jumps {
@@ -591,6 +593,7 @@ impl BytecodeCompiler {
         };
         // The value is computed before deferred statements run.
         let keep = self.alloc_reg();
+        let keep_at = self.instructions.len();
         self.emit(Opcode::Move, keep, r_ret, 0);
         self.emit_ensures(arena, keep);
         self.emit_exit_drops(arena);
@@ -601,8 +604,14 @@ impl BytecodeCompiler {
             crate::lower_defer::DeferExit::Normal
         };
         self.emit_defers_on(arena, 0, exit);
-        self.emit(Opcode::Move, 0, keep, 0);
-        self.emit(Opcode::Ret, 0, 0, 0);
+        // Nothing ran after the value was kept: it is returned from where it is.
+        if self.instructions.len() == keep_at + 1 && self.label.get() as usize <= keep_at {
+            self.instructions.pop();
+            self.pc_spans.pop();
+            self.emit_ret_of(r_ret);
+        } else {
+            self.emit_ret_of(keep);
+        }
         0
     }
 }

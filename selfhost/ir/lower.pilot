@@ -295,7 +295,7 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
         gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
         resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, i64>(), outs: [], out_phys: [],
         loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, List<any>>(), drop_flags: Map<str, i64>(),
-        probes: probe_rows(p), adt_decls: adt_nodes(p.s),
+        probes: probe_rows(p), adt_decls: adt_nodes(p),
     };
     // Function 0 is `<start>` (selfhost/ir/lower_global.pilot).
     lw.queue.push(-1);
@@ -404,7 +404,8 @@ pub fn accessor_index(lw: Lowerer, field: i64, body: i64, self_t: i64) -> i64 {
     lw.queue_self.push(self_t);
     lw.queue_body.push(body);
     lw.queue_args.push([]);
-    lw.m.functions.push(ir_function_new(ty_display(lw.inf.p.tt, self_t) + "." + node_name(s, field), layout_unknown(lw.ls)));
+    let mname = if kind(s, field) == nk_indexer() { "[]" } else { node_name(s, field) };
+    lw.m.functions.push(ir_function_new(ty_display(lw.inf.p.tt, self_t) + "." + mname, layout_unknown(lw.ls)));
     return idx;
 }
 
@@ -457,7 +458,7 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
     lw.cur_field = if accessor >= 0 { decl } else { -1 };
     let is_lambda = kind(s, decl) == nk_lambda();
     if is_lambda { lambda_params(lw, decl, f); }
-    var params: List<i64> = if accessor >= 0 || is_lambda { [] } else { decl_params(s, decl) };
+    var params: List<i64> = if (accessor >= 0 && kind(s, decl) != nk_indexer()) || is_lambda { [] } else { decl_params(s, decl) };
     if lw.self_value != ir_no_value() && accessor < 0 {
         // `fn f(self, ..)`: the explicit receiver is the receiver parameter.
         let r = receiver_param(s, decl);
@@ -834,12 +835,21 @@ pub fn lower_binary(lw: Lowerer, n: i64) -> u32 {
         let b = lower_expr(lw, rhs(s, n));
         return call_decl(lw, fns[0], [a, b], [], physics_of(lw, n), n);
     }
-    // A type that declares the operator (`op ==`, `op +`) runs its own.
-    if op > 0 && op < symbols.len() {
+    // A type that declares the operator (`op ==`, `op +`) runs its own,
+    // except `== none` / `!= none` on an optional.
+    let none_cmp = (op == op_eq() || op == op_eq() + 1) && (kind(s, lhs(s, n)) == nk_none() || kind(s, rhs(s, n)) == nk_none());
+    if !none_cmp && op > 0 && op < symbols.len() {
         let lt = value_type(lw, lhs(s, n));
         if runs_as_code(lw, lt, symbols[op]) {
             let recv = lower_expr(lw, lhs(s, n));
             return member_call(lw, recv, lt, symbols[op], [rhs(s, n)], physics_of(lw, n), n);
+        }
+        if op == op_eq() + 1 && runs_as_code(lw, lt, "==") {
+            let recv = lower_expr(lw, lhs(s, n));
+            let eq = member_call(lw, recv, lt, "==", [rhs(s, n)], physics_of(lw, n), n);
+            let truth = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
+            let f_val = emit(lw, op_const_bits(), 0, truth, [pool_int(lw, 0)], n);
+            return emit(lw, op_cmp(), 0, truth, [eq, f_val], n);
         }
     }
     let ir_op = arith_opcode(op);

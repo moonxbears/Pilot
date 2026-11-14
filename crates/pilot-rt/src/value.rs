@@ -145,19 +145,40 @@ impl PilotVal {
     #[inline] pub fn as_char(self) -> Option<char> { if self.tag() == TAG_CHAR { char::from_u32(self.payload as u32) } else { None } }
     #[inline] pub fn as_bool(self) -> Option<bool> { if self.is_bool() { Some(self.payload != 0) } else { None } }
 
+    /// The text of a string value's bytes. Every string value is built from
+    /// a `&str` (`from_str_sso`, `from_str`) or under `from_heap_parts`'s
+    /// contract, and a short string's length byte counts whole characters'
+    /// bytes, so the bytes are UTF-8 and are not checked again on each read.
+    #[inline]
+    fn text(bytes: &[u8]) -> &str {
+        unsafe { core::str::from_utf8_unchecked(bytes) }
+    }
+
+    /// Whether a value read from outside (a `.pilc` image) keeps what `text`
+    /// relies on: a short string of at most 14 bytes of UTF-8.
+    pub fn is_well_formed(self) -> bool {
+        if self.tag() != TAG_SSO_STR {
+            return true;
+        }
+        let len = ((self.tag_meta >> 8) & 0xFF) as usize;
+        let mut bytes = [0u8; 16];
+        bytes[..8].copy_from_slice(&self.tag_meta.to_le_bytes());
+        bytes[8..].copy_from_slice(&self.payload.to_le_bytes());
+        len <= 14 && core::str::from_utf8(&bytes[2..2 + len]).is_ok()
+    }
+
     /// The string this value holds, without allocating: a short string is
     /// decoded into `buf`, a long one is borrowed where it is stored.
     pub fn str_in<'a>(&self, buf: &'a mut [u8; 14]) -> Option<&'a str> {
         match self.tag() {
             TAG_SSO_STR => {
                 let (meta_bytes, payload_bytes) = (self.tag_meta.to_le_bytes(), self.payload.to_le_bytes());
-                let len = meta_bytes[1] as usize;
-                let meta_copy = len.min(6);
-                buf[..meta_copy].copy_from_slice(&meta_bytes[2..2 + meta_copy]);
-                if len > 6 {
-                    buf[6..len].copy_from_slice(&payload_bytes[..len - 6]);
-                }
-                Some(core::str::from_utf8(&buf[..len]).unwrap_or(""))
+                // All 14 bytes are copied whatever the length: two fixed
+                // moves instead of two calls that depend on it.
+                let len = (meta_bytes[1] as usize).min(14);
+                buf[..6].copy_from_slice(&meta_bytes[2..]);
+                buf[6..].copy_from_slice(&payload_bytes);
+                Some(Self::text(&buf[..len]))
             }
             TAG_HEAP_STR => {
                 let (ptr, len) = self.heap_parts()?;
@@ -165,7 +186,7 @@ impl PilotVal {
                 // or owned by the VM, which frees them only between
                 // instructions.
                 let bytes = unsafe { core::slice::from_raw_parts(ptr, len) };
-                Some(core::str::from_utf8(bytes).unwrap_or(""))
+                Some(Self::text(bytes))
             }
             _ => None,
         }
@@ -193,18 +214,17 @@ impl PilotVal {
         match self.tag() {
             TAG_SSO_STR => {
                 let (meta_bytes, payload_bytes) = (self.tag_meta.to_le_bytes(), self.payload.to_le_bytes());
-                let len = meta_bytes[1] as usize;
+                let len = (meta_bytes[1] as usize).min(14);
                 let mut buf = [0u8; 14];
-                let meta_copy = len.min(6);
-                buf[..meta_copy].copy_from_slice(&meta_bytes[2..2 + meta_copy]);
-                if len > 6 { buf[6..len].copy_from_slice(&payload_bytes[..len - 6]); }
-                Some(f(core::str::from_utf8(&buf[..len]).unwrap_or("")))
+                buf[..6].copy_from_slice(&meta_bytes[2..]);
+                buf[6..].copy_from_slice(&payload_bytes);
+                Some(f(Self::text(&buf[..len])))
             }
             TAG_HEAP_STR => {
                 let len = ((self.tag_meta >> 8) & 0xFFFF_FFFF) as usize;
                 let ptr = self.payload as usize as *const u8;
                 if ptr.is_null() { None } else {
-                    Some(f(core::str::from_utf8(unsafe { core::slice::from_raw_parts(ptr, len) }).unwrap_or("")))
+                    Some(f(Self::text(unsafe { core::slice::from_raw_parts(ptr, len) })))
                 }
             }
             _ => None,

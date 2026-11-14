@@ -40,6 +40,9 @@ use selfhost.check.attr_text.*;
 use selfhost.check.attr_inherit.*;
 use selfhost.check.probes.*;
 use selfhost.check.attr_chain.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.main.*;
 
 /// `[path, base offset, text]` of the file node `n` is in.
 fn file_row(s: Snap, n: i64) -> List<any> {
@@ -99,17 +102,44 @@ fn chain_fn(p: Program, f: i64) -> bool {
 /// The steps of the functions and methods in the user's files at moment
 /// `phase` (a `LiveWhen` flag name), as rows; a function none of whose
 /// steps runs then gives none.
-pub fn comptime_runs(phase: str) -> List<List<str>> {
+pub fn comptime_runs(phase: str) -> List<List<str>> => steps_of(prog_new(snap_load()), phase);
+
+/// The checker's diagnostic rows, the run plan when `plan` is set, and the
+/// rows of `comptime_runs(phase)`, from one pass over the program:
+/// `[diagnostic rows, run plan or none, step rows or none]`, for
+/// `host_typecheck`. The steps of a program with an error are not looked
+/// for (a misused attribute must not reach `steps_of`): `none`.
+pub fn check_with_steps(phase: str, plan: bool) -> List<any> {
     let s = snap_load();
+    let sink = sink_new(s);
     let p = prog_new(s);
+    let inf = infer_new(p, resolve_program(p, sink));
+    check_all(inf, sink);
+    var made: any = none;
+    if plan { made = plan_of(s, inf); }
+    var failed = false;
+    for row in sink.rows {
+        let severity: i64 = row[4];
+        if severity == 1 { failed = true; }
+    }
+    var steps: any = none;
+    if !failed { steps = steps_of(p, phase); }
+    return [sink.rows, made, steps];
+}
+
+/// `comptime_runs` over the program `p`.
+fn steps_of(p: Program, phase: str) -> List<List<str>> {
+    let s = p.s;
     var out: List<List<str>> = [];
     let now = live_flag(p, phase);
     if now < 0 { return out; }
     let quiet = sink_new(s);
     let pkgs = package_decls(p);
     let compile = live_flag(p, live_default_flag());
-    var f = 0;
-    while f < s.count {
+    // `chain_fn` keeps functions of the user's files only, which all lie
+    // in `user_lo .. user_hi` (selfhost/check/snapshot.pilot).
+    var f = s.user_lo;
+    while f < s.user_hi {
         if chain_fn(p, f) {
             var rows: List<List<str>> = [];
             var active = false;

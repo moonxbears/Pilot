@@ -49,6 +49,11 @@ pub(crate) enum LazyKind {
     /// The setters of property `field`: its setter bodies in declaration
     /// order, tried in that order.
     Setter { field: String, bodies: Vec<NodeId> },
+    /// The getter of an indexer (`self[i]`), with its index parameter nodes.
+    IndexerGetter { params: Vec<NodeId> },
+    /// The setters of an indexer (`self[i] { set => .. }`), with its index
+    /// parameter nodes and setter bodies in declaration order.
+    IndexerSetter { params: Vec<NodeId>, bodies: Vec<NodeId> },
     /// The type's `~self()`, called when one of its values is dropped.
     Destructor,
 }

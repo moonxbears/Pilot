@@ -60,6 +60,11 @@ pub fn spawn(program: str, args: List<str>, input: str) -> ProcessHandle {
     return ProcessHandle { id: __engine("proc_spawn", program, args, input) };
 }
 
+/// Starts `program` like `spawn`, with `dir` as its working directory.
+pub fn spawn_in(dir: str, program: str, args: List<str>, input: str) -> ProcessHandle {
+    return ProcessHandle { id: __engine("proc_spawn", program, args, input, dir) };
+}
+
 /// One process to start: the program, its arguments and its standard input.
 pub struct ProcessJob : IObject {
     pub program: str;

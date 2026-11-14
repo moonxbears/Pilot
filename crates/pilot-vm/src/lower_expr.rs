@@ -346,13 +346,10 @@ impl BytecodeCompiler {
             }
             _ => {}
         }
-        // Comparisons keep the seed's own meaning (structural equality, and
-        // `x == none` on an optional, which the seed holds as null).
-        let compares = matches!(op, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge);
-        if !compares {
-            if let Some(r) = self.compile_declared_operator(arena, op.symbol(), NodeId(lhs), NodeId(rhs)) {
-                return r;
-            }
+        // A struct that declares an operator (`op ==`, `op +`, ..) runs its own.
+        // Comparisons with `none` (null on the seed) keep the seed's null comparison.
+        if let Some(r) = self.compile_declared_operator(arena, op, NodeId(lhs), NodeId(rhs)) {
+            return r;
         }
         let Some(opcode) = direct_opcode(op) else {
             // A range outside a `for` head or an index is a value: the
@@ -399,25 +396,66 @@ impl BytecodeCompiler {
             self.emit(and, r_count, r_r, r_mask);
             r_r = r_count;
         }
-        self.emit(opcode, dst, r_l, r_r);
+        // A right operand just loaded from the constants is read from there.
+        if self.loaded_constant(r_r, mark).is_some() && r_l != r_r {
+            let k = self.instructions.pop().map_or(0, |k| k.wide());
+            self.pc_spans.pop();
+            let ins = crate::Instruction::encode(opcode, dst, r_l, crate::instruction::CONST_REG);
+            self.push_ins(crate::Instruction(ins.0 | ((k as u64) << 32)));
+        } else {
+            self.emit(opcode, dst, r_l, r_r);
+        }
         self.release_to(mark);
         dst
     }
 
-    /// `a op b` (not a comparison) where `a`'s struct declares `op`
-    /// (`pub op | (other: T) -> T`):
-    /// a call of that operator on `a` with `b`, or `None` when the left
-    /// operand's type is not known to be such a struct.
-    fn compile_declared_operator(&mut self, arena: &AstArena, symbol: &str, lhs: NodeId, rhs: NodeId) -> Option<u8> {
-        let ty = self.static_type(arena, lhs)?;
-        if !self.structs.contains_key(&ty) || self.declares(&ty, symbol) != Some(false) {
+    /// `a op b` where `a`'s struct declares `op` (`pub op | (other: T) -> T`,
+    /// `pub op == (other: T) -> bool`, ..): a call of that operator on `a`
+    /// with `b`, or `None` when the left operand's type is not known to be
+    /// such a struct. For `!=` when only `op ==` is declared, calls `!(a == b)`.
+    fn compile_declared_operator(&mut self, arena: &AstArena, op: BinaryOp, lhs: NodeId, rhs: NodeId) -> Option<u8> {
+        let is_eq_ne = matches!(op, BinaryOp::Eq | BinaryOp::Ne);
+        if is_eq_ne
+            && (arena.node(lhs).node_kind() == NodeKind::NoneLit || arena.node(rhs).node_kind() == NodeKind::NoneLit)
+        {
             return None;
         }
+        let ty = self.static_type(arena, lhs)?;
+        if !self.structs.contains_key(&ty) {
+            return None;
+        }
+        let sym = op.symbol();
+        let (call_sym, negate) = if self.declares(&ty, sym) == Some(false) {
+            (sym, false)
+        } else if op == BinaryOp::Ne && self.declares(&ty, "==") == Some(false) {
+            ("==", true)
+        } else {
+            return None;
+        };
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_l = self.compile_node(arena, lhs);
-        let r = self.emit_method_call(arena, r_l, &ty, symbol, &[rhs]);
-        self.emit(Opcode::Move, dst, r, 0);
+        if is_eq_ne {
+            let r_r = self.compile_node(arena, rhs);
+            let l_null = self.emit_branch(Opcode::JumpIfNull, r_l, 0);
+            let r_null = self.emit_branch(Opcode::JumpIfNull, r_r, 0);
+            let full = format!("{ty}.{call_sym}");
+            let r = self.emit_user_call(full, call_sym.to_string(), &[r_l, r_r]);
+            if negate {
+                self.emit(Opcode::Not, dst, r, 0);
+            } else {
+                self.emit(Opcode::Move, dst, r, 0);
+            }
+            let done = self.emit_jump(0);
+            self.patch_to_here(l_null);
+            self.patch_to_here(r_null);
+            let cmp = if op == BinaryOp::Eq { Opcode::CmpEq } else { Opcode::CmpNe };
+            self.emit(cmp, dst, r_l, r_r);
+            self.patch_to_here(done);
+        } else {
+            let r = self.emit_method_call(arena, r_l, &ty, call_sym, &[rhs]);
+            self.emit(Opcode::Move, dst, r, 0);
+        }
         self.release_to(mark);
         Some(dst)
     }
@@ -500,7 +538,15 @@ impl BytecodeCompiler {
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_op = self.compile_node(arena, NodeId(operand));
-        self.emit(opcode, dst, r_op, 0);
+        // An operand just loaded from the constants is folded: `-1` loads -1.
+        if let Some(v) = self.loaded_constant(r_op, mark).and_then(|v| crate::ops::unary(opcode, v).ok()) {
+            self.instructions.pop();
+            self.pc_spans.pop();
+            let c = self.add_constant(v);
+            self.push_ins(crate::Instruction::encode_wide(Opcode::LoadConst, dst, c));
+        } else {
+            self.emit(opcode, dst, r_op, 0);
+        }
         self.release_to(mark);
         dst
     }

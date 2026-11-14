@@ -89,6 +89,9 @@ pub struct ModuleGraph : IObject {
     /// Files declaring each package, once the index is built.
     pub pkg_files: Map<str, List<str>>;
     pub indexed: bool;
+    /// The `pkg` declarations found under each root so far, as package and
+    /// file by turns; shared by the graphs one tool run builds.
+    pub root_index: Map<str, List<str>>;
     pub roots: List<str>;
     pub topo_order: List<FileUnitId>;
     pub diagnostics: List<ModuleDiagnostic>;
@@ -205,14 +208,25 @@ pub fn mg_conventional_paths(root: str, pkg: str) -> List<str> {
 pub fn mg_build_index(g: ModuleGraph) {
     g.indexed = true;
     for root in g.roots {
-        for file in mg_lines(File.walk_files(root)) {
-            if !file.ends_with(".pilot") { continue; }
-            let path = mg_normalize_path(file);
-            guard some h = UnitHeader.read(path) else { continue; };
-            let pkg = h.package_name();
-            if pkg == "" { continue; }
-            if !g.pkg_files.has(pkg) { g.pkg_files.set(pkg, []); }
-            g.pkg_files.get(pkg).push(path);
+        if !g.root_index.has(root) {
+            var found: List<str> = [];
+            for file in mg_lines(File.walk_files(root)) {
+                if !file.ends_with(".pilot") { continue; }
+                let path = mg_normalize_path(file);
+                guard some h = UnitHeader.read(path) else { continue; };
+                let pkg = h.package_name();
+                if pkg == "" { continue; }
+                found.push(pkg);
+                found.push(path);
+            }
+            g.root_index.set(root, found);
+        }
+        let pairs = g.root_index.get(root);
+        var i = 0;
+        while i < pairs.len() {
+            if !g.pkg_files.has(pairs[i]) { g.pkg_files.set(pairs[i], []); }
+            g.pkg_files.get(pairs[i]).push(pairs[i + 1]);
+            i = i + 2;
         }
     }
 }
@@ -327,13 +341,19 @@ fn mg_visit(g: ModuleGraph, u: i64, state: List<i64>, stack: List<i64>) {
 }
 
 /// The module graph of the program whose entry file is `entry_file`.
-pub fn mg_build_graph(entry_file: str, toolchain_root: str) -> ModuleGraph {
+pub fn mg_build_graph(entry_file: str, toolchain_root: str) -> ModuleGraph => mg_build_graph_sharing(entry_file, toolchain_root, [:]);
+
+/// `mg_build_graph`, taking the `pkg` declarations of a root already in
+/// `root_index` from there and adding those of each root it has to read.
+/// The files under the roots must not change between the graphs sharing it.
+pub fn mg_build_graph_sharing(entry_file: str, toolchain_root: str, root_index: Map<str, List<str>>) -> ModuleGraph {
     let entry = mg_normalize_path(entry_file);
     let g = ModuleGraph {
         units: [],
         by_path: [:],
         pkg_files: [:],
         indexed: false,
+        root_index: root_index,
         roots: mg_default_search_roots(mg_dir_of(entry), toolchain_root),
         topo_order: [],
         diagnostics: [],

@@ -16,8 +16,15 @@
 //   `tests/`, which `cargo test` runs);
 // * an expectation file of a case (`<name>.stdout`, `.stderr`, `.exit`,
 //   `.args`, `.stdin`) reaches that case;
+// * a `.pilot` file that no longer declares the package it declared (the
+//   `pkg` line was removed or renamed, or the file was deleted) reaches every
+//   case whose loader looks for packages there, whatever the case links
+//   now: under `tests/` the cases of the directories above the file,
+//   anywhere else every case;
 // * a `.pilot` file reaches every case that links it, as the loader resolves
 //   the case's `use` declarations (selfhost/loader/link_lines.pilot);
+// * a deleted expectation file under `tests/` whose program is not a case
+//   any more reaches none;
 // * a `.pilot` file under `tests/` that no case links reaches none;
 // * anything else (a stdlib file no case links, an engine file the rules do
 //   not name) may reach anything, so it reaches every case.
@@ -74,10 +81,13 @@ pub fn change_rules() -> List<ChangeRule> => [
     rule("selfhost/diagnostics/", ChangeReach::Everything, ""),
     rule("selfhost/check/", ChangeReach::Everything, ""),
     rule("selfhost/ir/", ChangeReach::LoweredModes, ""),
-    rule("selfhost/perceus/", ChangeReach::LoweredModes, ""),
     rule("selfhost/transpile/", ChangeReach::EmitModes, ""),
     rule("runtime/c/", ChangeReach::EmitModes, "c"),
     rule("selfhost/gate/", ChangeReach::Nothing, ""),
+    // No tool of `pilot test` links a file of it (a file a tool list names is
+    // a tool source, which is checked before these rules); the milestone
+    // tests under `crates/` run it.
+    rule("selfhost/perceus/", ChangeReach::Nothing, ""),
     rule("benchmarks/", ChangeReach::Nothing, ""),
     rule("docs/", ChangeReach::Nothing, ""),
 ];
@@ -125,6 +135,14 @@ fn rule_for(path: str) -> ChangeRule? {
 
 /// The expectation-file extensions of a case.
 fn expectation_exts() -> List<str> => [".stdout", ".stderr", ".exit", ".args", ".stdin"];
+
+/// Whether `path` has an expectation-file extension.
+fn is_expectation(path: str) -> bool {
+    for ext in expectation_exts() {
+        if path.ends_with(ext) { return true; }
+    }
+    return false;
+}
 
 /// What `git` reports changed: the files, or why it could not say.
 pub struct GitChanges : IObject {
@@ -199,6 +217,67 @@ fn link_table(programs: List<str>) -> LinkTable {
     return table;
 }
 
+/// Where the earlier text of changed files is written for the loader to read.
+fn earlier_dir() -> str => "target/test-changed";
+
+/// The revision the changes are measured from: the left side of `A..B`, or
+/// `since` itself.
+fn earlier_rev(since: str) -> str {
+    let dots = since.find("..", 0);
+    return if dots < 0 { since } else { since.slice(0, dots) };
+}
+
+/// The package each of `files` declares, as the loader reads it ("" for
+/// none, or for a file that is not there).
+fn packages_of(files: List<str>) -> List<str> {
+    var out: List<str> = [];
+    if files.len() == 0 { return out; }
+    let entries = text.join_text(files, "|");
+    let answer = host_tool(link_tool_files(), f"mg_package_lines(\"{entries}\");");
+    let lines = test_lines(answer);
+    for i in 0 .. files.len() {
+        var pkg = "";
+        if i < lines.len() {
+            let tab = lines[i].find("\t", 0);
+            if tab >= 0 { pkg = lines[i].slice(tab + 1, lines[i].len()); }
+        }
+        out.push(pkg);
+    }
+    return out;
+}
+
+/// The files among `changed` (`.pilot` files) that declared a package at
+/// `rev` and do not declare that package now.
+fn repackaged(changed: List<str>, rev: str) -> List<str> {
+    var sources: List<str> = [];
+    var earlier: List<str> = [];
+    for f in changed {
+        if !f.ends_with(".pilot") { continue; }
+        let old = proc.run("git", ["show", f"{rev}:{f}"], "");
+        let copy = f"{earlier_dir()}/{sources.len()}.pilot";
+        // A file that was not there declared nothing.
+        let _ = File.write_text(copy, if old.exit_code == 0 { old.stdout } else { "" });
+        sources.push(f);
+        earlier.push(copy);
+    }
+    let now = packages_of(sources);
+    let before = packages_of(earlier);
+    var out: List<str> = [];
+    for i in 0 .. sources.len() {
+        // A file that declared no package was linked only as an entry; what
+        // it declares now reaches the cases that link it now.
+        if before[i] != "" && now[i] != before[i] { out.push(sources[i]); }
+    }
+    return out;
+}
+
+/// The directory of `path`, with its final `/` ("" at the top).
+fn dir_prefix(path: str) -> str {
+    var at = path.len();
+    while at > 0 && path.slice(at - 1, at) != "/" { at = at - 1; }
+    return path.slice(0, at);
+}
+
 /// Which of `programs` the changes reach.
 pub struct ChangeSelection : IObject {
     /// Every case is reached, because of `why`.
@@ -210,7 +289,7 @@ pub struct ChangeSelection : IObject {
 /// The cases among `programs` that `changed` reaches when they run on
 /// `engine` (emitting `mode_lang`), where `tool_sources` are the sources of
 /// the tools that mode runs.
-pub fn select_cases(changed: List<str>, programs: List<str>, engine: TestEngine, mode_lang: str, tool_sources: List<str>) -> ChangeSelection {
+pub fn select_cases(changed: List<str>, programs: List<str>, engine: TestEngine, mode_lang: str, tool_sources: List<str>, moved: List<str>) -> ChangeSelection {
     let sel = ChangeSelection { everything: false, why: "", picked: [] };
     // The CLI's own sources, as the loader resolves them, when the CLI is in
     // this tree.
@@ -232,6 +311,17 @@ pub fn select_cases(changed: List<str>, programs: List<str>, engine: TestEngine,
         let k = index_of(programs, table.programs[i]);
         if k >= 0 && table.links[i] == none { wanted[k] = true; }
         i = i + 1;
+    }
+    // A file whose package changed: every case that searches its directory.
+    for f in moved {
+        if !f.starts_with("tests/") {
+            sel.everything = true;
+            sel.why = f"the package `{f}` declares changed";
+            return sel;
+        }
+        for k in 0 .. programs.len() {
+            if f.starts_with(dir_prefix(programs[k])) { wanted[k] = true; }
+        }
     }
     for f in changed {
         if is_document(f) || is_crate_test(f) { continue; }
@@ -268,6 +358,10 @@ pub fn select_cases(changed: List<str>, programs: List<str>, engine: TestEngine,
             }
         }
         if reached { continue; }
+        // A deleted expectation file of a program that is not a candidate:
+        // only `pilot test` reads expectation files, each for its own
+        // program, and removing one cannot make a folder a case folder.
+        if is_expectation(f) && f.starts_with("tests/") && !File.exists(f) { continue; }
         if f.ends_with(".pilot") {
             i = 0;
             while i < table.programs.len() {
@@ -357,7 +451,7 @@ pub fn plan_changed(since: str, roots: List<str>, engine: TestEngine, mode_lang:
     }
     let changed = git.files;
     let programs = candidate_programs(given, engine);
-    let sel = select_cases(changed, programs, engine, mode_lang, tool_sources);
+    let sel = select_cases(changed, programs, engine, mode_lang, tool_sources, repackaged(changed, earlier_rev(since)));
     if sel.everything {
         print(f"CHANGED {changed.len()} files since {since}: {sel.why}; running every case");
         return ChangedPlan { action: 0, paths: given };

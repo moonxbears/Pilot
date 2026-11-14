@@ -119,15 +119,21 @@ fn follow_calls(var ref c: Corpus, first: i64, last: i64, stamp: i64) -> i64 {
 /// The names a line calls: identifiers followed by `(`.
 fn called_names(line: str) -> List<str> {
     var out: List<str> = [];
+    if !line.contains("(") { return out; }
     let n = line.len();
     var i: usize = 0;
     while i < n {
-        if !is_ident_byte(line.byte_at(i)) {
+        // `is_ident_byte`, written out: this loop reads every byte.
+        let b = line.byte_at(i);
+        if !((b >= 97 && b <= 122) || b == 95 || (b >= 65 && b <= 90) || (b >= 48 && b <= 57)) {
             i = i + 1;
             continue;
         }
         let start = i;
-        while i < n && is_ident_byte(line.byte_at(i)) {
+        i = i + 1;
+        while i < n {
+            let t = line.byte_at(i);
+            if !((t >= 97 && t <= 122) || t == 95 || (t >= 65 && t <= 90) || (t >= 48 && t <= 57)) { break; }
             i = i + 1;
         }
         var j = i;
@@ -174,25 +180,38 @@ fn file_name(path: str) -> str {
 /// The lines holding one of the search's keys, in order, each once.
 fn key_lines(ref c: Corpus, ref search: Search) -> List<i64> {
     var hit: Map<i64, bool> = [:];
+    var out: List<i64> = [];
     for key in search.keys {
         let anchor = rarest_token(c, key);
         if anchor.len() == 0 || !c.token_lines.has(anchor) { continue; }
         for line in c.token_lines[anchor] {
-            if !hit.has(line) && find_word(c.lines[line], key, 0) >= 0 { hit.set(line, true); }
+            if !hit.has(line) && find_word(c.lines[line], key, 0) >= 0 {
+                hit.set(line, true);
+                insert_line(out, line);
+            }
         }
     }
     if search.rule_word.len() > 0 && c.token_lines.has(search.rule_word) {
         for line in c.token_lines[search.rule_word] {
-            if !hit.has(line) && is_rule_header(c.lines[line], search.rule_word) { hit.set(line, true); }
+            if !hit.has(line) && is_rule_header(c.lines[line], search.rule_word) {
+                hit.set(line, true);
+                insert_line(out, line);
+            }
         }
     }
-    var out: List<i64> = [];
-    var i = 0;
-    while i < c.lines.len() {
-        if hit.has(i) { out.push(i); }
-        i = i + 1;
-    }
     return out;
+}
+
+/// Puts `line` in its place in `lines`, which is in order. A token's lines
+/// come in order, so a line is nearly always the last and nothing moves.
+fn insert_line(var ref lines: List<i64>, line: i64) {
+    lines.push(line);
+    var at = lines.len() - 1;
+    while at > 0 && lines[at - 1] > line {
+        lines[at] = lines[at - 1];
+        at = at - 1;
+    }
+    lines[at] = line;
 }
 
 /// The token of `key` found on the fewest lines: the cheapest place to look.

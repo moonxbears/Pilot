@@ -201,7 +201,7 @@ impl BytecodeCompiler {
     fn emit_test(&mut self, op: Opcode, r_a: u8, r_b: u8, fails: &mut Vec<usize>) {
         let r_c = self.alloc_reg();
         self.emit(op, r_c, r_a, r_b);
-        fails.push(self.emit_branch(Opcode::JumpIfFalse, r_c, 0));
+        fails.push(self.emit_branch_unless(r_c, r_c));
     }
 
     /// `Enum.Variant` names its enum; a bare or `::` variant is resolved

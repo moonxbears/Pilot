@@ -49,12 +49,14 @@ use selfhost.check.own.*;
 
 pub struct Borrows : IObject {
     pub flow: Flow;
-    /// Binding -> 0 not computed, 1 being computed, 2 done.
-    pub state: List<i64>;
+    /// Binding -> 1 while its roots are being computed, 2 once they are;
+    /// no entry before.
+    pub state: Map<i64, i64>;
     /// Binding -> its roots, once computed.
-    pub roots: List<List<i64>>;
-    /// Binding -> the right-hand sides of assignments to it.
-    pub assigned: List<List<i64>>;
+    pub roots: Map<i64, List<i64>>;
+    /// Binding -> the right-hand sides of assignments to it (no entry for a
+    /// binding never assigned).
+    pub assigned: Map<i64, List<i64>>;
 }
 
 /// The type of binding `b`: its annotation, else its initializer's type (an
@@ -90,29 +92,38 @@ fn guard_type(p: Program, t: i64) -> bool => declares_guard(p, t);
 
 /// The borrow analysis of the program `f` reads.
 pub fn borrows_new(f: Flow) -> Borrows {
-    let r = f.inf.r;
-    let s = f.inf.p.s;
-    var state: List<i64> = [];
-    var roots: List<List<i64>> = [];
-    var assigned: List<List<i64>> = [];
-    var b = 0;
-    while b < r.site.len() {
-        state.push(0);
-        roots.push([]);
-        assigned.push([]);
-        b = b + 1;
+    var assigned = Map<i64, List<i64>>();
+    let pairs = binding_assignments(f.inf);
+    var i = 0;
+    while i < pairs.len() {
+        if !assigned.has(pairs[i]) { assigned.set(pairs[i], []); }
+        assigned.get(pairs[i]).push(pairs[i + 1]);
+        i = i + 2;
     }
-    var n = 0;
-    while n < s.count {
-        if kind(s, n) == nk_assign() {
+    return Borrows { flow: f, state: Map<i64, i64>(), roots: Map<i64, List<i64>>(), assigned: assigned };
+}
+
+/// Every assignment of the program to a binding, in node order, as
+/// `binding, right-hand side` pairs laid end to end. The program is walked
+/// once (`Program.gen_memo`); the list is shared, so a caller must not
+/// change it.
+fn binding_assignments(inf: Infer) -> List<i64> {
+    let p = inf.p;
+    let memo = "binding_assignments";
+    if !p.gen_memo.has(memo) {
+        let s = p.s;
+        let ref_of = inf.r.ref_of;
+        var out: List<i64> = [];
+        for n in prog_nodes_of_kind(p, nk_assign()) {
             let target = lhs(s, n);
-            if target >= 0 && kind(s, target) == nk_ident() && r.ref_of[target] >= 0 && rhs(s, n) >= 0 {
-                assigned[r.ref_of[target]].push(rhs(s, n));
+            if target >= 0 && kind(s, target) == nk_ident() && ref_of[target] >= 0 && rhs(s, n) >= 0 {
+                out.push(ref_of[target]);
+                out.push(rhs(s, n));
             }
         }
-        n = n + 1;
+        p.gen_memo.set(memo, out);
     }
-    return Borrows { flow: f, state: state, roots: roots, assigned: assigned };
+    return p.gen_memo.get(memo);
 }
 
 fn add_all(into: List<i64>, xs: List<i64>) {
@@ -125,31 +136,34 @@ fn add_all(into: List<i64>, xs: List<i64>) {
 
 /// The roots of binding `b`.
 pub fn binding_roots(bw: Borrows, b: i64) -> List<i64> {
-    if bw.state[b] == 2 { return bw.roots[b]; }
+    let state = if bw.state.has(b) { bw.state.get(b) } else { 0 };
+    if state == 2 { return bw.roots.get(b); }
     // A binding met again while its roots are being computed (`x = f(x)`)
     // adds nothing new.
-    if bw.state[b] == 1 { return []; }
+    if state == 1 { return []; }
     let f = bw.flow;
     let r = f.inf.r;
     let element = borrows_element(f, b);
     if (!element && !borrows_type(f.inf.p, flow_binding_type(f, b))) || r.bind_kind[b] == BindKind::Param {
-        bw.roots[b] = [b];
-        bw.state[b] = 2;
-        return bw.roots[b];
+        bw.roots.set(b, [b]);
+        bw.state.set(b, 2);
+        return bw.roots.get(b);
     }
-    bw.state[b] = 1;
+    bw.state.set(b, 1);
     var out: List<i64> = [];
     if element {
         // `let x = rs[i]` and `for x in rs` borrow from `rs`.
         add_all(out, place_roots(bw, r.source[b]));
-        bw.roots[b] = out;
-        bw.state[b] = 2;
+        bw.roots.set(b, out);
+        bw.state.set(b, 2);
         return out;
     }
     if r.source[b] >= 0 { add_all(out, expr_roots(bw, r.source[b])); }
-    for e in bw.assigned[b] { add_all(out, expr_roots(bw, e)); }
-    bw.roots[b] = out;
-    bw.state[b] = 2;
+    if bw.assigned.has(b) {
+        for e in bw.assigned.get(b) { add_all(out, expr_roots(bw, e)); }
+    }
+    bw.roots.set(b, out);
+    bw.state.set(b, 2);
     return out;
 }
 
@@ -370,11 +384,16 @@ pub fn borrowers_of(bw: Borrows, b: i64) -> List<i64> {
     let r = bw.flow.inf.r;
     var out: List<i64> = [];
     var v = 0;
-    while v < r.site.len() {
-        let lends = borrows_type(bw.flow.inf.p, flow_binding_type(bw.flow, v)) || borrows_element(bw.flow, v);
-        if v != b && r.owner[v] == r.owner[b] && lends {
-            for x in binding_roots(bw, v) {
-                if x == b { out.push(v); }
+    let owner = r.owner[b];
+    let owners = r.owner;
+    let count = owners.len();
+    while v < count {
+        // Only a binding of the same function is asked for its type.
+        if owners[v] == owner && v != b {
+            if borrows_type(bw.flow.inf.p, flow_binding_type(bw.flow, v)) || borrows_element(bw.flow, v) {
+                for x in binding_roots(bw, v) {
+                    if x == b { out.push(v); }
+                }
             }
         }
         v = v + 1;

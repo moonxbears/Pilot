@@ -44,9 +44,6 @@ pub pure fn attr_struct_suffix() -> str => "Attr";
 /// The label of `[Generate(ext: "..")]`, the form a container may carry.
 pub pure fn generate_ext_label() -> str => "ext";
 
-/// The parser's node kind of a `pkg` / `use` declaration
-/// (`NodeKind::ImportDecl` in crates/pilot-ast/src/lib.rs).
-pub pure fn nk_import_decl() -> i64 => 1;
 
 /// What an inherited attribute does to one of the same name written
 /// closer: the variants of `InheritPolicy`, by their order.

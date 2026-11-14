@@ -459,9 +459,10 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     //    `fn f(a: utf8, ` (14 bytes), so `b` moves to column 15.
     let moved = eval_gate_script(
         &bundle,
-        "let rmap = __engine(\"map_new\");\n\
-         __engine(\"map_set\", rmap, \"str\", \"utf8\");\n\
-         __engine(\"map_set\", rmap, \"res\", \"outcome\");\n\
+        "let pairs = glist_new();\n\
+         let _ = glist_push(pairs, rl_make_pair(\"str\", \"utf8\"));\n\
+         let _ = glist_push(pairs, rl_make_pair(\"res\", \"outcome\"));\n\
+         let rmap = rl_pairs_to_map(pairs);\n\
          rl_rename_stderr(\"error[X]: `res<str>` here\\np.pilot:2:14\\n\", \"// head\\nfn f(a: str, b: res) {\\n}\\n\", rmap);",
     );
     assert_eq!(moved, "error[X]: `outcome<utf8>` here\np.pilot:2:15\n");

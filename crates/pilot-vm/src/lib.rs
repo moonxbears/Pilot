@@ -44,6 +44,7 @@ mod vm_gen;
 pub use instruction::{Instruction, Opcode};
 pub use pilc::{CompileDiagnostic, PilcBinary, PILC_V3_MAGIC, PILC_V3_VERSION};
 pub use host::HostValue;
+pub use collect::{KeyMap, Record};
 pub use vm::{EngineIntrinsicHandler, HostOpHandler, PilVirtualMachine, VmFault, VmHook};
 
 pub mod compiler {
@@ -69,14 +70,14 @@ const FIRST_LOCAL_REG: u8 = 17;
 /// Last register available to locals.
 const LAST_LOCAL_REG: u8 = 127;
 /// First scratch register; scratch registers cycle through `128..=255`.
-const FIRST_TEMP_REG: u8 = 128;
+pub(crate) const FIRST_TEMP_REG: u8 = 128;
 /// Name of the hidden receiver parameter of methods and constructors; the
 /// body sees it as `self` (the name without the leading underscore).
 const RECEIVER: &str = "_self";
 /// The seed token that calls an engine intrinsic by name.
 const ENGINE_TOKEN: &str = "__engine";
 /// Arguments travel in `r1..=r16`.
-const MAX_CALL_ARGS: usize = 16;
+pub(crate) const MAX_CALL_ARGS: usize = 16;
 
 /// Loop bookkeeping: where `continue` jumps and which `break`s to patch.
 struct LoopCtx {
@@ -244,6 +245,9 @@ pub struct BytecodeCompiler {
     /// `LoadConst` instructions that must load a function's entry point once
     /// it is known.
     entry_patches: Vec<(usize, String, ByteSpan)>,
+    /// The last position handed out as a jump or entry target (`here`):
+    /// code at or before it may be reached from elsewhere.
+    label: std::cell::Cell<u32>,
     /// Top-level functions declared without a body (`extern`): a call to one
     /// stops at the seam `abi.extern_call` instead of being undeclared.
     bodiless_fns: std::collections::HashSet<String>,
@@ -275,6 +279,10 @@ pub struct BytecodeCompiler {
     getters: HashMap<String, Vec<String>>,
     /// The structs with a setter for each property name.
     setters: HashMap<String, Vec<String>>,
+    /// Structs that declare an indexer getter (`self[i]`).
+    index_getters: std::collections::HashSet<String>,
+    /// Structs that declare an indexer setter (`self[i] { set => .. }`).
+    index_setters: std::collections::HashSet<String>,
     /// The property whose accessor is being compiled: the backing name
     /// reads and writes its storage on the record.
     backing: Option<String>,
@@ -506,7 +514,9 @@ impl BytecodeCompiler {
     }
 
     fn here(&self) -> u32 {
-        self.instructions.len() as u32
+        let pc = self.instructions.len() as u32;
+        self.label.set(pc);
+        pc
     }
 
     fn emit_jump(&mut self, target: u32) -> usize {
@@ -520,10 +530,25 @@ impl BytecodeCompiler {
     /// Points the jump or branch at `idx` to `target`.
     fn patch_jump(&mut self, idx: usize, target: u32) {
         let ins = self.instructions[idx];
-        self.instructions[idx] = match ins.opcode() {
-            Opcode::Jump => Instruction::encode_wide(Opcode::Jump, 0, target),
-            op => Instruction::encode_branch(op, ins.src1(), target),
-        };
+        self.instructions[idx] = Instruction((ins.0 & 0xFFFF_FFFF) | ((target as u64) << 32));
+    }
+
+    /// A branch taken when the value in `cond` is false. When a comparison
+    /// just computed `cond` and nothing reads it after the branch (`cond`
+    /// was allocated after `mark`), the two are one instruction.
+    fn emit_branch_unless(&mut self, cond: u8, mark: u8) -> usize {
+        if let Some(&cmp) = self.instructions.last() {
+            let at = self.instructions.len() - 1;
+            let op = cmp.opcode();
+            let compares =
+                matches!(op, Opcode::CmpEq | Opcode::CmpNe | Opcode::CmpLt | Opcode::CmpLe | Opcode::CmpGt | Opcode::CmpGe);
+            let dead = cmp.dst() == cond && cond >= mark.max(FIRST_TEMP_REG);
+            if compares && dead && cmp.src2() != instruction::CONST_REG && self.label.get() as usize <= at {
+                self.instructions[at] = Instruction::encode(Opcode::JumpUnless, op as u8, cmp.src1(), cmp.src2());
+                return at;
+            }
+        }
+        self.emit_branch(Opcode::JumpIfFalse, cond, 0)
     }
 
     /// Points the jump or branch at `idx` to the current end of code.
@@ -573,17 +598,150 @@ impl BytecodeCompiler {
     fn emit_intrinsic(&mut self, hook: &str, args: &[u8]) -> u8 {
         let d = self.alloc_reg();
         let mark = self.next_reg;
-        let r = self.emit_const(PilotVal::from_str(hook));
-        self.stage_args(args);
-        self.emit(Opcode::EngineIntrinsic, d, r, args.len() as u8);
+        let c = self.add_constant(PilotVal::from_str(hook));
+        self.emit_named_intrinsic(d, c, args);
         self.next_reg = mark;
         d
+    }
+
+    /// The constant the last instruction loaded into `r`, when `r` was
+    /// allocated after `mark` and no jump lands on or after that load.
+    fn loaded_constant(&self, r: u8, mark: u8) -> Option<PilotVal> {
+        let at = self.instructions.len().checked_sub(1)?;
+        let k = self.instructions[at];
+        let fresh = k.opcode() == Opcode::LoadConst && k.dst() == r && r >= mark;
+        if !fresh || self.label.get() as usize > at || self.entry_patches.iter().any(|p| p.0 == at) {
+            return None;
+        }
+        self.constants.get(k.wide() as usize).copied()
+    }
+
+    /// `map_get` of the value in `r_obj` and the key just loaded into
+    /// `r_key`, which nothing else reads: the call takes the key from the
+    /// constants instead.
+    fn emit_keyed_read(&mut self, r_obj: u8, r_key: u8) -> u8 {
+        let name = self.add_constant(PilotVal::from_str("map_get"));
+        let at = self.instructions.len().wrapping_sub(1);
+        let key = self.instructions.last().copied().filter(|k| {
+            k.opcode() == Opcode::LoadConst && k.dst() == r_key && self.label.get() as usize <= at
+        });
+        match key.map(|k| k.wide()).filter(|&k| k <= u16::MAX as u32 && name <= u16::MAX as u32) {
+            Some(k) if !self.entry_patches.iter().any(|p| p.0 == at) => {
+                self.instructions.pop();
+                self.pc_spans.pop();
+                let d = self.alloc_reg();
+                let ins = Instruction::encode(Opcode::IntrinsicKey, d, r_obj, 0);
+                self.push_ins(Instruction(ins.0 | ((((k << 16) | name) as u64) << 32)));
+                d
+            }
+            _ => self.emit_intrinsic("map_get", &[r_obj, r_key]),
+        }
+    }
+
+    /// Calls the intrinsic named by constant `c` on `args`, into `d`. Up to
+    /// two arguments are read where they are; more are staged in `r1..`.
+    fn emit_named_intrinsic(&mut self, d: u8, c: u32, args: &[u8]) {
+        let ins = if args.len() <= 2 && c <= instruction::ARGS_NAME_MASK {
+            let (a, b) = (args.first().copied().unwrap_or(0), args.get(1).copied().unwrap_or(0));
+            let ext = ((args.len() as u32) << instruction::ARGS_COUNT_SHIFT) | c;
+            Instruction(Instruction::encode(Opcode::IntrinsicArgs, d, a, b).0 | ((ext as u64) << 32))
+        } else {
+            self.stage_args(args);
+            let ins = Instruction::encode(Opcode::EngineIntrinsic, d, instruction::CONST_REG, args.len() as u8);
+            Instruction(ins.0 | ((c as u64) << 32))
+        };
+        self.push_ins(ins);
     }
 
     /// Releases every scratch register allocated after `mark`. Callers
     /// allocate their result register before taking the mark.
     fn release_to(&mut self, mark: u8) {
+        self.drop_dead_tail(mark);
         self.next_reg = mark;
+    }
+
+    /// Returns `r` from the function being lowered. The return clears the
+    /// frame, so the locals cleared just before it (`release_block_locals`)
+    /// need no clearing of their own, and `r` is returned from where it is.
+    fn emit_fn_return(&mut self, r: u8) {
+        let reachable = |c: &Self, at: usize| c.label.get() as usize > at || c.entry_patches.iter().any(|p| p.0 == at);
+        let null = PilotVal::NULL;
+        let is_null_load = |c: &Self, ins: Instruction| {
+            ins.opcode() == Opcode::LoadConst && c.constants.get(ins.wide() as usize) == Some(&null)
+        };
+        let clears_local = |ins: Instruction| {
+            let (from, n) = (ins.dst(), ins.src1());
+            ins.opcode() == Opcode::Clear && from >= FIRST_LOCAL_REG && from as usize + n as usize <= FIRST_TEMP_REG as usize
+                && !(from..from.saturating_add(n)).contains(&r)
+        };
+        let mut value = None;
+        if let Some(&last) = self.instructions.last() {
+            let at = self.instructions.len() - 1;
+            if r >= FIRST_TEMP_REG && last.dst() == r && is_null_load(self, last) && !reachable(self, at) {
+                value = self.instructions.pop().zip(self.pc_spans.pop());
+            }
+        }
+        while let Some(&last) = self.instructions.last() {
+            let at = self.instructions.len() - 1;
+            let local = (FIRST_LOCAL_REG..FIRST_TEMP_REG).contains(&last.dst()) && last.dst() != r;
+            if !(local && is_null_load(self, last) || clears_local(last)) || reachable(self, at) {
+                break;
+            }
+            self.instructions.pop();
+            self.pc_spans.pop();
+        }
+        if let Some((ins, span)) = value {
+            self.instructions.push(ins);
+            self.pc_spans.push(span);
+        }
+        self.emit_ret_of(r);
+    }
+
+    /// Returns the value in `r`; a constant loaded into `r` just before is
+    /// returned from the constants (no register is read after a return).
+    fn emit_ret_of(&mut self, r: u8) {
+        if self.loaded_constant(r, 0).is_some() {
+            let k = self.instructions.pop().map_or(0, |k| k.wide());
+            self.pc_spans.pop();
+            let ret = Instruction::encode(Opcode::Ret, 0, instruction::CONST_REG, 0);
+            // The out-slots are written before the return, as `emit` does.
+            for i in 0..self.ret_outs.len() {
+                let (pos, slot) = self.ret_outs[i];
+                self.push_ins(Instruction::encode(Opcode::SetOut, pos, slot, 0));
+            }
+            self.push_ins(Instruction(ret.0 | ((k as u64) << 32)));
+        } else {
+            self.emit(Opcode::Ret, 0, r, 0);
+        }
+    }
+
+    /// A value left in a register `release_to` gives back is never read.
+    /// While the last instruction only fills such a register and no jump
+    /// lands on or after it, it is dropped; a copy out of one into a kept
+    /// register is folded into the instruction that computed the value.
+    fn drop_dead_tail(&mut self, mark: u8) {
+        let released = |r: u8| r >= mark.max(FIRST_TEMP_REG);
+        while let Some(&last) = self.instructions.last() {
+            let at = self.instructions.len() - 1;
+            if self.label.get() as usize > at {
+                return;
+            }
+            let pure = matches!(last.opcode(), Opcode::LoadConst | Opcode::Move);
+            if pure && released(last.dst()) && !self.entry_patches.iter().any(|p| p.0 == at) {
+                self.instructions.pop();
+                self.pc_spans.pop();
+                continue;
+            }
+            if last.opcode() == Opcode::Move && released(last.src1()) && at > 0 && self.label.get() as usize <= at - 1 {
+                let prev = self.instructions[at - 1];
+                if prev.dst() == last.src1() && prev.opcode().writes_dst() {
+                    self.instructions[at - 1] = prev.with_dst(last.dst());
+                    self.instructions.pop();
+                    self.pc_spans.pop();
+                }
+            }
+            return;
+        }
     }
 
     /// Emits a trap that stops the program with `message` when reached.

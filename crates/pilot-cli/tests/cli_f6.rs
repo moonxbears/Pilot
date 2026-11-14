@@ -60,6 +60,17 @@ fn run_binary(bin: &Path, args: &[&str], input: &str) -> Output {
     child.wait_with_output().expect("wait for built binary")
 }
 
+/// Runs `check` on every item at once, each on its own thread: an item is a
+/// `pilot build`, a C compile and a run, and none depends on another. A
+/// failed assertion fails the test once every item has finished.
+fn each_at_once<T: Sync>(items: &[T], check: impl Fn(&T) + Sync) {
+    std::thread::scope(|scope| {
+        for item in items {
+            scope.spawn(|| check(item));
+        }
+    });
+}
+
 fn expected(stem: &str) -> String {
     std::fs::read_to_string(root().join(format!("{stem}.stdout"))).expect("expected stdout")
 }
@@ -72,7 +83,7 @@ fn expected(stem: &str) -> String {
 fn pilot_build_writes_a_binary_with_the_seed_output() {
     let dir = scratch("build");
     // Each case as its folder and name under `tests/conformance/`.
-    for case in ["control/closures", "collections/collections", "generators/generator_local", "types/structs_methods"] {
+    each_at_once(&["control/closures", "collections/collections", "generators/generator_local", "types/structs_methods"], |case| {
         let stem = format!("tests/conformance/{case}");
         let bin = dir.join(case.replace('/', "_"));
         let out = build(&format!("{stem}.pilot"), &bin);
@@ -80,7 +91,7 @@ fn pilot_build_writes_a_binary_with_the_seed_output() {
         let ran = run_binary(&bin, &[], "");
         assert_eq!(ran.status.code(), Some(0), "{case}: {}", text(&ran.stderr));
         assert_eq!(text(&ran.stdout), expected(&stem), "{case}");
-    }
+    });
 }
 
 #[test]
@@ -143,7 +154,7 @@ fn bad_usage_exits_2() {
 #[test]
 fn the_benchmarks_build_natively_and_match_their_c_references() {
     let dir = scratch("bench");
-    for b in ["fib", "numeric_loop", "string_build", "map_workload", "string_compare", "string_find", "string_map"] {
+    each_at_once(&["fib", "numeric_loop", "string_build", "map_workload", "string_compare", "string_find", "string_map"], |b| {
         let stem = format!("benchmarks/native/{b}");
         let want = expected(&stem);
 
@@ -162,7 +173,7 @@ fn the_benchmarks_build_natively_and_match_their_c_references() {
             .expect("run cc");
         assert!(cc.status.success(), "{b}: {}", text(&cc.stderr));
         assert_eq!(text(&run_binary(&c_bin, &[], "").stdout), want, "{b} (C)");
-    }
+    });
     // The recorded baseline: a header, then one row per benchmark.
     let baseline = std::fs::read_to_string(root().join("benchmarks/native/baseline.tsv")).expect("baseline");
     let rows: Vec<&str> = baseline.lines().skip(1).collect();
@@ -224,14 +235,15 @@ fn the_records_benchmark_matches_its_c_reference() {
 #[test]
 fn strings_past_the_short_length_limit_keep_their_length() {
     let dir = scratch("long_strings");
-    for stem in [
+    let stems = [
         "tests/conformance/collections/collections",
         "tests/conformance/collections/containers",
         "tests/conformance/text/json_rfc8259",
         "tests/conformance/types/records_native",
         "benchmarks/native/string_build",
         "tests/conformance/text/str_kernels",
-    ] {
+    ];
+    each_at_once(&stems, |stem| {
         let name = stem.rsplit('/').next().expect("file name");
         let c = dir.join(format!("{name}.c"));
         let out = pilot(&["build", &format!("{stem}.pilot"), "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
@@ -248,7 +260,7 @@ fn strings_past_the_short_length_limit_keep_their_length() {
             .expect("run cc");
         assert!(cc.status.success(), "{stem}: {}", text(&cc.stderr));
         assert_eq!(text(&run_binary(&bin, &[], "").stdout), expected(stem), "{stem}");
-    }
+    });
 }
 
 /// A struct value read out of a list (`bodies[j]`, a dynamic value in C)

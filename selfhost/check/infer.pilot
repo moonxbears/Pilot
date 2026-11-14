@@ -34,14 +34,10 @@ pub struct Infer {
 }
 
 pub fn infer_new(p: Program, r: Resolution) -> Infer {
-    var memo: List<i64> = [];
-    var i = 0;
-    while i < p.s.count { memo.push(-1); i = i + 1; }
     let consts = Map<str, List<i64>>();
-    i = 0;
-    while i < p.s.count {
-        if kind(p.s, i) == nk_program() && in_linked_file(p.s, i) {
-            for c in children(p.s, i) {
+    for root in nodes_of(p.s, nk_program()) {
+        if in_linked_file(p.s, root) {
+            for c in children(p.s, root) {
                 if kind(p.s, c) == nk_const() && lhs(p.s, c) >= 0 {
                     let name = node_name(p.s, c);
                     if !consts.has(name) { consts.set(name, []); }
@@ -49,9 +45,8 @@ pub fn infer_new(p: Program, r: Resolution) -> Infer {
                 }
             }
         }
-        i = i + 1;
     }
-    return Infer { p: p, r: r, memo: memo, consts: consts };
+    return Infer { p: p, r: r, memo: filled(p.s.count, -1), consts: consts };
 }
 
 /// The top-level `const` identifier `n` names when no local binding covers

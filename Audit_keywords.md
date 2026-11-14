@@ -345,3 +345,11 @@ After `*Bundle with { count as hits }` the bundle's own methods now read, write 
 
 - `test_51_3` (crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs) asserted that `database` and `adapter` parse cleanly and used `requires cond` without parentheses. It now uses `requires(..)`/`ensures(..)` and asserts that `database` and `adapter` stop at `keyword.unbuilt`.
 - cli_f7 `the_corpus_passes_natively_with_no_live_allocations` wants 0 seams on `--emit c`. The C emitter now carries `char` (wiring row K1 `char` in emitted C), and `--emit` no longer tries to lower a bodiless `extern` declaration nothing calls (selfhost/ir/lower_global.pilot `user_functions`).
+
+## 2026-11-14: test-time optimisations landed (K1 session)
+
+`cargo test --workspace -- --include-ignored`: 5:24 -> 1:50, all 88 test binaries passing; `pilot gate --full` 5 passed, bootstrap_parity at its seam. Corpus results unchanged on every engine (seed 457, IR 449, C 449, JS 441, Python 441, 0 failed).
+
+Landed: faster seed VM dispatch and fewer emitted instructions (crates/pilot-vm), parser table reuse, lazily built tool physics, comptime steps found in the checker's own pass, a nodes-by-kind index and lazy flow tables in the checker, prepared steps in the PilIR interpreter, linear IR text parsing, one `pilot emit a,b,..` process for several languages (cli_emit now runs `--emit js,python` once), parallel harness tests (damaged_source, m57, cli_f3, cli_f6, keyword matrix, rename litmus with a find-driven renamer), tighter `--changed` rules. Rust src +511 lines net (19,942 total, budget 30,000).
+
+Held back for an owner decision: the on-disk tool bytecode cache, reuse of unchanged C binaries, a precompiled C header, the link-plan memo, skipping the analyzer's per-file checks on stdlib units, `tool_arg` entry arguments. Not built: forked pre-warmed test workers, one merged test binary, a test-result cache.

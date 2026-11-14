@@ -71,7 +71,11 @@ impl PilcBinary {
                 let str_off = payload as usize;
                 let s_len = if str_off + 4 <= heap_str_data.len() { u32::from_le_bytes(heap_str_data[str_off..str_off + 4].try_into().unwrap()) as usize } else { usize::MAX };
                 constants.push(if str_off.saturating_add(4).saturating_add(s_len) <= heap_str_data.len() { PilotVal::from_str(core::str::from_utf8(&heap_str_data[str_off + 4..str_off + 4 + s_len]).unwrap_or("")) } else { PilotVal::NULL });
-            } else { constants.push(PilotVal { tag_meta, payload }); }
+            } else {
+                let v = PilotVal { tag_meta, payload };
+                if !v.is_well_formed() { return Err("Malformed string constant".into()); }
+                constants.push(v);
+            }
         }
         if offset + 4 > bytes.len() { return Err("Truncated code header".into()); }
         let ins_count = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;

@@ -14,6 +14,7 @@ pub lvl(0) pkg Pilot.SelfHost.Check.Snapshot;
 
 // --- Node kinds ------------------------------------------------------------
 pub pure fn nk_program() -> i64 => 0;
+pub pure fn nk_import_decl() -> i64 => 1;
 pub pure fn nk_fn() -> i64 => 3;
 pub pure fn nk_param() -> i64 => 4;
 pub pure fn nk_adt() -> i64 => 5;
@@ -169,40 +170,67 @@ pub struct Snap {
     pub shapes: List<ChildShape>;
     pub count: i64;
     /// The nodes of the user's own files all lie in `user_lo .. user_hi`
-    /// (`user_range`); a walk that keeps only those nodes need not leave it.
+    /// (`scan_nodes`); a walk that keeps only those nodes need not leave it.
     pub user_lo: i64;
     pub user_hi: i64;
+    /// Node kind -> the nodes of that kind, in node order (`nodes_of`): a
+    /// pass that wants a few kinds of node reads their lists instead of
+    /// walking every node. The lists are shared; a caller must not change them.
+    pub by_kind: List<List<i64>>;
+    /// The declaration nodes (those `modifiers` covers), in node order.
+    pub decl_nodes: List<i64>;
 }
 
-/// `[first, one past the last]` node of a user file (`[0, 0]` when there is
-/// none), from each node's unit and the unit's `is_user` entry in `files`.
-fn user_range(nodes: List<i64>, files: List<List<any>>) -> List<i64> {
+/// A list of `n` copies of `v`, built by doubling (each step one engine
+/// copy) instead of `n` single pushes.
+pub fn filled(n: i64, v: i64) -> List<i64> {
+    var out: List<i64> = [];
+    if n <= 0 { return out; }
+    out.push(v);
+    while out.len() * 2 <= n { out = [*out, *out]; }
+    if out.len() < n { out = [*out, *filled(n - out.len(), v)]; }
+    return out;
+}
+
+/// One walk over the node rows: the node range of the user's files and the
+/// nodes of each kind, as `[[lo, hi], by_kind]`.
+fn scan_nodes(nodes: List<i64>, files: List<List<any>>) -> List<any> {
     var user: List<bool> = [];
     for row in files { user.push(row[1]); }
+    let units = user.len();
     let count = nodes.len() / snap_columns();
+    var by_kind: List<List<i64>> = [];
     var lo = -1;
     var hi = 0;
     var n = 0;
+    var at = 0;
     while n < count {
-        let u = nodes[n * 9 + 8];
-        if u >= 0 && u < user.len() && user[u] {
+        let k = nodes[at];
+        if k >= 0 {
+            while by_kind.len() <= k { by_kind.push([]); }
+            by_kind[k].push(n);
+        }
+        let u = nodes[at + 8];
+        if u >= 0 && u < units && user[u] {
             if lo < 0 { lo = n; }
             hi = n + 1;
         }
         n = n + 1;
+        at = at + 9;
     }
-    if lo < 0 { return [0, 0]; }
-    return [lo, hi];
+    let range: List<i64> = if lo < 0 { [0, 0] } else { [lo, hi] };
+    return [range, by_kind];
+}
+
+/// Every node of kind `k`, in node order (`Snap.by_kind`).
+pub fn nodes_of(s: Snap, k: i64) -> List<i64> {
+    if k >= 0 && k < s.by_kind.len() { return s.by_kind[k]; }
+    return [];
 }
 
 /// `[node, value]` rows as a node -> value list (-1 where no row names it).
 fn node_map(rows: List<List<i64>>, count: i64) -> List<i64> {
-    var out: List<i64> = [];
-    var i = 0;
-    while i < count {
-        out.push(-1);
-        i = i + 1;
-    }
+    let out = filled(count, -1);
     for row in rows { out[row[0]] = row[1]; }
     return out;
 }
@@ -217,7 +245,11 @@ pub fn arm_guard(s: Snap, arm: i64) -> i64 => s.arm_guards[arm];
 pub fn snap_load() -> Snap {
     let raw = __engine("chk_snapshot");
     let nodes: List<i64> = raw[0];
-    let range = user_range(nodes, raw[6]);
+    let scan = scan_nodes(nodes, raw[6]);
+    let range: List<i64> = scan[0];
+    var decl_nodes: List<i64> = [];
+    let decl_rows: List<List<i64>> = raw[13];
+    for row in decl_rows { decl_nodes.push(row[0]); }
     return Snap {
         nodes: nodes,
         extra: raw[1],
@@ -243,6 +275,8 @@ pub fn snap_load() -> Snap {
         count: nodes.len() / snap_columns(),
         user_lo: range[0],
         user_hi: range[1],
+        by_kind: scan[1],
+        decl_nodes: decl_nodes,
     };
 }
 
@@ -252,9 +286,7 @@ pub fn snap_load() -> Snap {
 /// declaration, bit 3 pure, bit 4 noalloc, the tier plus one from bit 5 (0
 /// when no visibility is written).
 fn decl_bits(rows: List<List<i64>>, count: i64) -> List<i64> {
-    var out: List<i64> = [];
-    var i = 0;
-    while i < count { out.push(-1); i = i + 1; }
+    let out = filled(count, -1);
     for row in rows {
         let pure_bit = if row.len() > 5 { row[5] * 8 } else { 0 };
         let noalloc_bit = if row.len() > 6 { row[6] * 16 } else { 0 };
@@ -486,35 +518,96 @@ pub fn children(s: Snap, n: i64) -> List<i64> {
     return out;
 }
 
-/// The parent of every node (-1 for roots and unreachable nodes).
+/// The parent of every node (-1 for roots and unreachable nodes). Each
+/// node's children are visited as `children` lists them, without building
+/// the list.
 pub fn parents_of(s: Snap) -> List<i64> {
-    var out: List<i64> = [];
+    let count = s.count;
+    let out = filled(count, -1);
+    let nodes = s.nodes;
+    var codes: List<i64> = [];
+    for sh in s.shapes { codes.push(sh as i64); }
+    let leaf = ChildShape::Leaf as i64;
+    let at_lhs = ChildShape::ExtraAtLhs as i64;
+    let at_rhs = ChildShape::ExtraAtRhs as i64;
+    let adt = ChildShape::Adt as i64;
+    let only_lhs = ChildShape::Lhs as i64;
+    let only_rhs = ChildShape::Rhs as i64;
+    let both = ChildShape::LhsRhs as i64;
+    let lambda = ChildShape::Lambda as i64;
+    let for_shape = ChildShape::For as i64;
     var i = 0;
-    while i < s.count { out.push(-1); i = i + 1; }
-    i = 0;
-    while i < s.count {
-        for c in children(s, i) {
-            if c < s.count && out[c] < 0 { out[c] = i; }
+    var row = 0;
+    while i < count {
+        let k = nodes[row];
+        let code = if k >= 0 && k < codes.len() { codes[k] } else { leaf };
+        if code != leaf {
+            let l = nodes[row + 1];
+            let r = nodes[row + 2];
+            let f = nodes[row + 3];
+            if code == at_lhs { adopt_extra(s, out, i, l, r); }
+            else if code == at_rhs { adopt_extra(s, out, i, r, f); }
+            else if code == only_rhs { adopt(out, r, i, count); }
+            else if code == only_lhs { adopt(out, l, i, count); }
+            else if code == both { adopt(out, l, i, count); adopt(out, r, i, count); }
+            else if code == adt {
+                if f > 0 { adopt_extra(s, out, i, r, f); } else { adopt(out, r, i, count); }
+            } else if code == lambda {
+                adopt_extra(s, out, i, l, f);
+                adopt(out, r, i, count);
+            } else if code == for_shape {
+                let clause = f - 1;
+                if clause >= 0 && clause < s.for_clauses.len() {
+                    let c: List<i64> = s.for_clauses[clause];
+                    adopt(out, c[0], i, count);
+                    adopt(out, r, i, count);
+                    adopt(out, c[1], i, count);
+                } else {
+                    adopt(out, r, i, count);
+                }
+            } else {
+                // `ChildShape::If`
+                adopt(out, l, i, count);
+                if f >= 2 { adopt_extra(s, out, i, r, f); } else { adopt(out, r, i, count); }
+            }
         }
         // A type annotation sits in a side table; its parent is the node it
         // annotates, so generic parameters resolve from it.
-        let a = annot(s, i);
-        if a >= 0 && a < s.count && out[a] < 0 { out[a] = i; }
+        adopt(out, nodes[row + 6], i, count);
         i = i + 1;
+        row = row + 9;
     }
     // Base types and generic bounds sit in side tables too; their parent is
     // the declaration, so its generic parameters resolve from them.
-    for row in s.bases {
-        if row[1] >= 0 && row[1] < s.count && out[row[1]] < 0 { out[row[1]] = row[0]; }
-    }
-    for row in s.bounds {
-        if row[2] >= 0 && row[2] < s.count && out[row[2]] < 0 { out[row[2]] = row[0]; }
-    }
+    for b in s.bases { adopt(out, b[1], b[0], count); }
+    for b in s.bounds { adopt(out, b[2], b[0], count); }
     return out;
 }
 
-/// The body of a function-like node (`fn`, `op`), or -1.
+/// Makes `parent` the parent of node `c` when `c` is a node without one.
+fn adopt(out: List<i64>, c: i64, parent: i64, count: i64) {
+    if c >= 0 && c < count && out[c] < 0 { out[c] = parent; }
+}
+
+/// `adopt` for each of the `len` extra children from slot `start`.
+fn adopt_extra(s: Snap, out: List<i64>, parent: i64, start: i64, len: i64) {
+    let count = s.count;
+    let extra = s.extra;
+    var j = start;
+    let end = start + len;
+    while j < end {
+        let c = extra[j];
+        if c >= 0 && c < count && out[c] < 0 { out[c] = parent; }
+        j = j + 1;
+    }
+}
+
+/// The body of a function-like node (`fn`, `op`, `indexer`), or -1.
 pub fn fn_body(s: Snap, n: i64) -> i64 {
+    if kind(s, n) == nk_indexer() {
+        let ch = children(s, n);
+        return if ch.len() > 0 { ch[0] } else { -1 };
+    }
     if flags(s, n) == 0 { return -1; }
     return s.extra[rhs(s, n)];
 }

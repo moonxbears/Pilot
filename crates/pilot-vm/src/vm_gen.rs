@@ -59,7 +59,7 @@ impl PilVirtualMachine {
                 self.generators.push(GenFrame {
                     state: GenState::Fresh,
                     resume_pc: ins.wide() as usize,
-                    regs: self.registers[..act].to_vec(),
+                    regs: self.frame()[..act].to_vec(),
                     sent_dst: None,
                     closing: false,
                     current: PilotVal::NULL,
@@ -96,7 +96,7 @@ impl PilVirtualMachine {
                 let item = args.first().copied().unwrap_or(PilotVal::NULL);
                 let act = self.active_registers();
                 let frame = &mut self.generators[id];
-                frame.regs = self.registers[..act].to_vec();
+                frame.regs = self.registers[self.base..self.base + act].to_vec();
                 frame.resume_pc = self.pc;
                 frame.sent_dst = Some(ins.dst());
                 frame.state = GenState::Suspended;
@@ -166,9 +166,11 @@ impl PilVirtualMachine {
         frame.state = GenState::Running;
         let regs = std::mem::take(&mut frame.regs);
         let sent_dst = frame.sent_dst;
-        self.registers[..self.reg_top].fill(PilotVal::NULL);
-        self.registers[..regs.len()].copy_from_slice(&regs);
-        self.reg_top = regs.len();
+        let base = self.base;
+        let top = self.reg_top();
+        self.registers[base..base + top].fill(PilotVal::NULL);
+        self.registers[base..base + regs.len()].copy_from_slice(&regs);
+        self.set_reg_top(regs.len());
         if let Some(d) = sent_dst {
             self.set(d as usize, sent);
         }
@@ -185,6 +187,6 @@ impl PilVirtualMachine {
 
     /// The number of registers up to the last one holding a value.
     pub(crate) fn active_registers(&self) -> usize {
-        self.registers[..self.reg_top].iter().rposition(|r| !r.is_null()).map_or(0, |i| i + 1)
+        self.frame()[..self.reg_top()].iter().rposition(|r| !r.is_null()).map_or(0, |i| i + 1)
     }
 }

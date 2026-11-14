@@ -328,32 +328,30 @@ pub(crate) fn in_stdlib(path: &str) -> bool {
     }
 }
 
-/// Runs the checker made of `checker_files` over the program at `path`,
-/// linked with the declarations `decls` names, and returns its diagnostics
-/// in the user's files. A program that does not link gives none here:
-/// `cli_check` reports why it does not. With `keep_plan`, the same pass also
-/// makes the program's run plan and keeps it for `drop_plan`, for a caller
-/// that runs the program next.
-pub fn check(path: &str, checker_files: &[String], decls: &[String], keep_plan: bool) -> Vec<Diag> {
+/// Runs the checker made of `checker_files`, calling `entry`, over the
+/// program at `path`, linked with the declarations `decls` names. The entry
+/// gives `[diagnostic rows, run plan or none, anything else]`; this returns
+/// the diagnostics in the user's files and the third part. A program that
+/// does not link gives neither: `cli_check` reports why it does not. A run
+/// plan is kept for `drop_plan`, for a caller that runs the program next.
+pub fn check(path: &str, checker_files: &[String], decls: &[String], entry: &str) -> (Vec<Diag>, HostValue) {
     let Some((linked, files, snap)) = program_snapshot(path, decls) else {
-        return Vec::new();
+        return (Vec::new(), HostValue::Null);
     };
     let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
         "chk_snapshot" => Some(Ok(snap.clone())),
         _ => None,
     });
     let tool_paths: Vec<&str> = checker_files.iter().map(String::as_str).collect();
-    let out = if keep_plan {
-        let both = tool::eval_to_host(&tool_paths, "check_and_plan();", ops);
-        let mut parts = both.as_list().unwrap_or_default().to_vec().into_iter();
-        let out = parts.next().unwrap_or(HostValue::Null);
-        let plan = parts.next().unwrap_or(HostValue::Null);
-        KEPT_PLAN.with(|k| *k.borrow_mut() = Some((plan_key(path, checker_files, decls), plan)));
-        out
-    } else {
-        tool::eval_to_host(&tool_paths, "check_program();", ops)
-    };
-    user_diags(&linked, &files, &out)
+    let all = tool::eval_to_host(&tool_paths, entry, ops);
+    let mut parts = all.as_list().unwrap_or_default().to_vec().into_iter();
+    let out = parts.next().unwrap_or(HostValue::Null);
+    let plan = parts.next().unwrap_or(HostValue::Null);
+    if !matches!(plan, HostValue::Null) {
+        let made = decode_plan(&linked, &plan);
+        KEPT_PLAN.with(|k| *k.borrow_mut() = Some((plan_key(path, checker_files, decls), made)));
+    }
+    (user_diags(&linked, &files, &out), parts.next().unwrap_or(HostValue::Null))
 }
 
 /// The checker's diagnostic rows `out` (`[code, message, start, end,
@@ -456,7 +454,7 @@ fn planned_probe(linked: &LinkedSource, row: &HostValue) -> Option<PlannedProbe>
 thread_local! {
     /// The run plan `check` last computed, with the program, checker and
     /// declarations it was computed for (`plan_key`).
-    static KEPT_PLAN: std::cell::RefCell<Option<(String, HostValue)>> = const { std::cell::RefCell::new(None) };
+    static KEPT_PLAN: std::cell::RefCell<Option<(String, CheckedDropPlan)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// What a run plan depends on: the program, the checker and the declarations.
@@ -469,23 +467,28 @@ fn plan_key(path: &str, checker_files: &[String], decls: &[String]) -> String {
 /// computed for the same program, checker and declarations in this process
 /// is used instead of computing it again.
 pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> CheckedDropPlan {
+    let key = plan_key(path, checker_files, decls);
+    if let Some(kept) = KEPT_PLAN.with(|k| k.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, p)| p.clone())) {
+        return kept;
+    }
     let Some((linked, _, snap)) = program_snapshot(path, decls) else {
         return CheckedDropPlan::default();
     };
-    let key = plan_key(path, checker_files, decls);
-    let kept = KEPT_PLAN.with(|k| k.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, p)| p.clone()));
-    let out = kept.unwrap_or_else(|| {
-        let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
-            "chk_snapshot" => Some(Ok(snap.clone())),
-            _ => None,
-        });
-        let tool_paths: Vec<&str> = checker_files.iter().map(String::as_str).collect();
-        tool::eval_to_host(&tool_paths, "run_plan();", ops)
+    let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
+        "chk_snapshot" => Some(Ok(snap.clone())),
+        _ => None,
     });
+    let tool_paths: Vec<&str> = checker_files.iter().map(String::as_str).collect();
+    decode_plan(&linked, &tool::eval_to_host(&tool_paths, "run_plan();", ops))
+}
+
+/// The checker's run plan `out` (`run_plan()`), its nodes placed in the
+/// files of `linked`.
+fn decode_plan(linked: &LinkedSource, out: &HostValue) -> CheckedDropPlan {
     let parts = out.as_list().unwrap_or_default();
     let mut plan = CheckedDropPlan::default();
     for r in parts.get(1).and_then(HostValue::as_list).unwrap_or_default() {
-        plan.probes.extend(planned_probe(&linked, r));
+        plan.probes.extend(planned_probe(linked, r));
     }
     for r in parts.first().and_then(HostValue::as_list).unwrap_or_default() {
         let Some(f) = r.as_list() else { continue };

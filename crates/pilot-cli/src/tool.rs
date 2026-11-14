@@ -51,9 +51,48 @@ fn link_tool(paths: &[&str], tail: &str) -> LinkedSource {
     LinkedSource::parse(files)
 }
 
+/// The registry a tool's `__engine` calls operate on.
+enum Registry {
+    /// Given by the caller (an emitter's input program).
+    Given(PhysicsRegistry),
+    /// The tool's own AST, flattened when the tool first calls an intrinsic
+    /// the registry answers: most tools never do. `probe` is an empty
+    /// registry that tells such an intrinsic from one it does not answer.
+    Own {
+        arena: pilot_ast::AstArena,
+        probe: PhysicsRegistry,
+        built: Option<PhysicsRegistry>,
+    },
+}
+
+impl Registry {
+    fn own(arena: pilot_ast::AstArena) -> Self {
+        let probe = PhysicsRegistry::new(Default::default(), Default::default());
+        Registry::Own { arena, probe, built: None }
+    }
+
+    fn call(&mut self, op: &str, args: &[PilotVal]) -> Result<PilotVal, String> {
+        match self {
+            Registry::Given(phy) => pilot_analysis::handle_engine_intrinsic(phy, op, args),
+            Registry::Own { arena, probe, built } => {
+                if built.is_none() {
+                    if pilot_analysis::engine_intrinsic(probe, op, args).is_none() {
+                        return Ok(PilotVal::NULL);
+                    }
+                    let (flat, syms) = pilot_analysis::flatten_ast(arena, arena.root);
+                    *built = Some(PhysicsRegistry::new(flat, syms));
+                }
+                let phy = built.as_mut().expect("the registry was just built");
+                pilot_analysis::handle_engine_intrinsic(phy, op, args)
+            }
+        }
+    }
+}
+
 /// Compiles and runs a tool, returning the VM and the entry call's value.
-/// `phy` is the physics registry the script's `__engine` calls operate on.
-fn run_tool(src: &LinkedSource, mut phy: PhysicsRegistry, host_ops: Option<HostOpHandler>) -> (PilVirtualMachine, PilotVal) {
+/// `phy`, when given, is the registry the tool's `__engine` calls operate
+/// on; without it they see the tool's own AST.
+fn run_tool(mut src: LinkedSource, phy: Option<PhysicsRegistry>, host_ops: Option<HostOpHandler>) -> (PilVirtualMachine, PilotVal) {
     let mut failed = false;
     for (span, msg) in &src.arena.diagnostics {
         eprintln!("{}: internal error: {msg}", src.locate(*span));
@@ -67,10 +106,12 @@ fn run_tool(src: &LinkedSource, mut phy: PhysicsRegistry, host_ops: Option<HostO
     if failed {
         std::process::exit(EXIT_INTERNAL);
     }
+    let mut registry = match phy {
+        Some(p) => Registry::Given(p),
+        None => Registry::own(std::mem::take(&mut src.arena)),
+    };
     let mut vm = PilVirtualMachine::new();
-    vm.engine_handler = Some(Box::new(move |op, a| {
-        pilot_analysis::handle_engine_intrinsic(&mut phy, op, a)
-    }));
+    vm.engine_handler = Some(Box::new(move |op, a| registry.call(op, a)));
     vm.host_ops = host_ops;
     vm.load_binary(bin);
     let out = vm.run();
@@ -86,7 +127,7 @@ fn run_tool(src: &LinkedSource, mut phy: PhysicsRegistry, host_ops: Option<HostO
 }
 
 /// Compiles and runs a tool script, returning its result rendered as text.
-fn run_script(src: &LinkedSource, phy: PhysicsRegistry) -> String {
+fn run_script(src: LinkedSource, phy: Option<PhysicsRegistry>) -> String {
     let (vm, out) = run_tool(src, phy, None);
     vm.display(out)
 }
@@ -102,17 +143,13 @@ pub fn toolchain_root() -> String {
 
 /// Runs a tool and returns the VM holding its result, and the result.
 pub fn eval_value(paths: &[&str], tail: &str) -> (PilVirtualMachine, PilotVal) {
-    let src = link_tool(paths, tail);
-    let (flat, syms) = pilot_analysis::flatten_ast(&src.arena, src.arena.root);
-    run_tool(&src, PhysicsRegistry::new(flat, syms), None)
+    run_tool(link_tool(paths, tail), None, None)
 }
 
 /// Runs the CLI tool with the host operations `ops`; its result is the
 /// process exit code.
 pub fn eval_cli(paths: &[&str], tail: &str, ops: HostOpHandler) -> i32 {
-    let src = link_tool(paths, tail);
-    let (flat, syms) = pilot_analysis::flatten_ast(&src.arena, src.arena.root);
-    let (_, out) = run_tool(&src, PhysicsRegistry::new(flat, syms), Some(ops));
+    let (_, out) = run_tool(link_tool(paths, tail), None, Some(ops));
     out.as_int().map_or(EXIT_INTERNAL, |c| c.clamp(0, 255) as i32)
 }
 
@@ -138,17 +175,13 @@ pub fn run_on_text(path: &str, tool_files: &[String], entry: &str) -> i32 {
 /// Runs a tool with the host operations `ops` and returns its result as a
 /// host value.
 pub fn eval_to_host(paths: &[&str], tail: &str, ops: HostOpHandler) -> pilot_vm::HostValue {
-    let src = link_tool(paths, tail);
-    let (flat, syms) = pilot_analysis::flatten_ast(&src.arena, src.arena.root);
-    let (vm, out) = run_tool(&src, PhysicsRegistry::new(flat, syms), Some(ops));
+    let (vm, out) = run_tool(link_tool(paths, tail), None, Some(ops));
     vm.to_host(out)
 }
 
 /// Runs a tool whose engine calls see the tool's own AST.
 pub fn eval(paths: &[&str], tail: &str) -> String {
-    let src = link_tool(paths, tail);
-    let (flat, syms) = pilot_analysis::flatten_ast(&src.arena, src.arena.root);
-    run_script(&src, PhysicsRegistry::new(flat, syms))
+    run_script(link_tool(paths, tail), None)
 }
 
 /// Runs an emitter tool whose engine calls see the AST of `input_path`.
@@ -164,5 +197,5 @@ pub fn eval_on_input(paths: &[&str], tail: &str, input_path: &str) -> String {
     let (flat, syms) = pilot_analysis::flatten_ast(&input_arena, input_arena.root);
     let mut phy = PhysicsRegistry::new(flat, syms);
     phy.source_text = input;
-    run_script(&link_tool(paths, tail), phy)
+    run_script(link_tool(paths, tail), Some(phy))
 }

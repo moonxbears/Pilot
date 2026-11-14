@@ -49,11 +49,11 @@ fn run(binary: PilcBinary) -> String {
 
 #[test]
 fn jumps_and_calls_past_sixty_five_thousand_instructions() {
-    // 4 parts x 9,000 statements, each adding 2: total 72,000.
-    let binary = compile(&generated_script(4, 9_000, false));
+    // 4 parts x 18,000 statements, each adding 2: total 144,000.
+    let binary = compile(&generated_script(4, 18_000, false));
     assert!(binary.instructions.len() > 65_535, "only {} instructions", binary.instructions.len());
     // total + 3 * 10^12 + 7 * 10^13
-    assert_eq!(run(binary), "73000000072000");
+    assert_eq!(run(binary), "73000000144000");
 }
 
 #[test]
