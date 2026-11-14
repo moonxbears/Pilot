@@ -1,0 +1,14 @@
+// MATCH002: `default:` takes every value, so an arm after it can never be
+// reached.
+fn day(n: i64) -> str {
+    switch n {
+        case 1: return "start";
+        default: return "middle";
+        // This arm, at line 8, column 9, follows `default`.
+        case 5: return "end";
+    }
+}
+
+fn main() {
+    print(day(5));
+}

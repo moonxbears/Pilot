@@ -64,9 +64,10 @@ impl BytecodeCompiler {
 
     /// `nameof(x)`: the name `x` as a string.
     fn compile_symbol_quote(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> u8 {
-        let Some(&arg) = args.first() else {
+        let [arg] = args else {
             return self.error(crate::codes::ARG_COUNT, format!("`{name}` expects one argument"));
         };
+        let arg = *arg;
         let an = arena.node(arg);
         match an.node_kind() {
             NodeKind::IdentExpr | NodeKind::TypeNamed | NodeKind::StrLit => {

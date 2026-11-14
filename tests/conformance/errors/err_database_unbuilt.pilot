@@ -1,0 +1,10 @@
+// `database Name { .. }` is not built yet (docs/keyword_roadmap.md K9). It
+// used to be read as a struct named `Shop`; now the build stops at the seam
+// `keyword.unbuilt`, so nothing runs and nothing is printed.
+database Shop {
+    pub users: i64;
+}
+
+fn main() {
+    print("ran");
+}

@@ -1,0 +1,8 @@
+// `export fn` (a symbol exported across the foreign ABI) is not built yet
+// (docs/keyword_roadmap.md K5). The modifier used to behave as `pub` with no
+// symbol exported; now the build stops at the seam `keyword.unbuilt`.
+export fn answer() -> i64 => 42;
+
+fn main() {
+    print(answer());
+}

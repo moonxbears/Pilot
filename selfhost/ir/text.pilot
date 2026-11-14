@@ -127,7 +127,11 @@ pub fn print_ir_module(m: IrModule) -> str {
     }
     for rec in m.records {
         var line = f"record {rec.layout}";
-        for fl in rec.fields { line = line + f" {fl}"; }
+        var k = 0;
+        while k < rec.fields.len() {
+            line = line + f" {rec.names[k]}:{rec.fields[k]}";
+            k = k + 1;
+        }
         lines.push(line);
     }
     i = 0;
@@ -290,18 +294,22 @@ fn parse_header(r: Reader, w: List<str>) {
         if l < 0 || l >= r.m.layouts.len { let _ = fail(r, f"global `{w[2]}` names layout {l}, which is not declared"); return; }
         r.m.globals.push(IrGlobal { name: unquote(w[2]), physics: r.m.layouts[l].physics, ready: w.len() == 5 });
     } else if tag == "record" && w.len() >= 2 {
-        // `record <layout> <field layout>...`
+        // `record <layout> <field name>:<field layout>...`
         let l = number(r, w[1], "");
         var fields: List<u32> = [];
+        var names: List<str> = [];
         var j = 2;
         while j < w.len() {
-            let fl = number(r, w[j], "");
+            // `:` is a word of its own: each field is `name`, `:`, `layout`.
+            if j + 2 >= w.len() || w[j + 1] != ":" { let _ = fail(r, f"record {l} field `{w[j]}` is not `name:layout`"); return; }
+            let fl = number(r, w[j + 2], "");
             if fl < 0 || fl >= r.m.layouts.len { let _ = fail(r, f"record {l} names layout {fl}, which is not declared"); return; }
+            names.push(w[j]);
             fields.push(fl as u32);
-            j = j + 1;
+            j = j + 3;
         }
         if l < 0 || l >= r.m.layouts.len { let _ = fail(r, f"record names layout {l}, which is not declared"); return; }
-        ir_add_record(r.m, IrRecord { layout: l as u32, fields: fields });
+        ir_add_record(r.m, IrRecord { layout: l as u32, fields: fields, names: names });
     } else {
         let _ = fail(r, f"unexpected `{tag}` line");
     }

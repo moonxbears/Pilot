@@ -1,1 +1,1 @@
-error[SYN001]: query clause `order` is not supported
+error[SYN001]: query clause `skip` is not supported

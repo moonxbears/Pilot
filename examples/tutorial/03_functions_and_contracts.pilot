@@ -9,7 +9,7 @@ fn add_integers(a: i64, b: i64) -> i64 {
 }
 
 // --- 2. Default Parameters ---
-fn format_log(msg: str, level: str = "INFO") -> str {
+fn format_log(msg: str, level: str) -> str {
     return f"[{level}] {msg}";
 }
 

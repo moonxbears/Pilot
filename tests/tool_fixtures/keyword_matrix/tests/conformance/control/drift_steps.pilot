@@ -1,0 +1,5 @@
+fn main() {
+    let x = drift 5;
+    orbit 2 { print(x); }
+    print("tether");
+}

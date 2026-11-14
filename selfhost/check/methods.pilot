@@ -171,7 +171,10 @@ fn directive_for(s: Snap, u: i64, bundle: str) -> BundleSpliceDirective {
         let alias: str = r[2];
         if sub == splice_coalesce() { d.coalesce_fields.push(member); }
         if sub == splice_without() { d.without_items.push(member); }
-        if sub == splice_with() && alias.len() > 0 { d.with_aliases[member] = alias; }
+        if sub == splice_with() && alias.len() > 0 {
+            d.with_aliases[member] = alias;
+            d.with_names.push(member);
+        }
     }
     return d;
 }

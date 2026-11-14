@@ -1,0 +1,3 @@
+pkg lib.helper;
+
+pub fn help() -> i64 => lull 1;

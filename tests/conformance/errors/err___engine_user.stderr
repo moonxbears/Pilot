@@ -1,0 +1,2 @@
+error[ENGINE001]: Direct '__engine' invocation is banned outside of core; use mapped core classes, structs, or functions (such as File, Map, or Reflect) instead
+err___engine_user.pilot:5:5

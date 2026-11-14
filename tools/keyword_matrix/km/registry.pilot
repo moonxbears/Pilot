@@ -1,0 +1,136 @@
+// The keyword registry (stdlib/core/keywords.pilot) and the receptor
+// bindings in stdlib/core/core.pilot, as the keyword matrix reads them.
+pkg km.registry;
+
+use km.text;
+
+/// One `[KeywordDefAttr(category, "doc"[, "symbol"])] word {}` entry.
+pub struct RegistryEntry {
+    pub word: str;
+    pub category: i64;
+    pub doc: str;
+    pub symbol: str;
+}
+
+/// One `KeywordCategoryDefAttr(id, "scope", "badge"..)` category.
+pub struct Category {
+    pub id: i64;
+    pub badge: str;
+}
+
+/// One `__engine(Cfg.Hooks.receptor, <word>, kind, sub)` binding.
+pub struct Receptor {
+    pub word: str;
+    pub kind: i64;
+    pub sub: i64;
+}
+
+/// Whether the matrix covers category `id`: the keyword categories, not the
+/// primitive types (20-29) or the operators (30-34).
+pub fn in_scope(id: i64) -> bool {
+    return (id >= 0 && id <= 16) || (id >= 35 && id <= 37);
+}
+
+pub fn read_categories(text: str) -> List<Category> {
+    var out: List<Category> = [];
+    let marker = "KeywordCategoryDefAttr(";
+    var at = text.find(marker, 0);
+    while at >= 0 {
+        let from = (at as usize) + marker.len();
+        let id = leading_int(text.slice(from, text.len()));
+        let close = text.find(")", from);
+        let args = string_literals(text.slice(from, if close >= 0 { close as usize } else { text.len() }));
+        if id >= 0 && args.len() >= 2 {
+            out.push(Category { id: id, badge: args[1] });
+        }
+        at = text.find(marker, from);
+    }
+    return out;
+}
+
+/// The registry's entries in file order.
+pub fn read_entries(text: str) -> List<RegistryEntry> {
+    var out: List<RegistryEntry> = [];
+    let lines = lines_of(text);
+    let marker = "[KeywordDefAttr(";
+    var i = 0;
+    while i < lines.len() {
+        let line = lines[i].trim();
+        if line.starts_with(marker) && i + 1 < lines.len() {
+            let rest = line.slice(marker.len(), line.len());
+            let category = leading_int(rest);
+            let args = string_literals(rest);
+            let next = lines[i + 1].trim();
+            let word = entry_word(next);
+            if category >= 0 && args.len() >= 1 && word.len() > 0 {
+                let symbol = if args.len() >= 2 { args[1] } else { "" };
+                out.push(RegistryEntry { word: word, category: category, doc: args[0], symbol: symbol });
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// `word` from a line `word {}`; empty for any other line.
+fn entry_word(line: str) -> str {
+    if !line.ends_with("{}") { return ""; }
+    let word = line.slice(0, (line.len() - 2) as usize).trim();
+    var i: usize = 0;
+    while i < word.len() {
+        if !is_ident_byte(word.byte_at(i)) { return ""; }
+        i = i + 1;
+    }
+    return word;
+}
+
+/// The receptor bindings of core.pilot, with `Cfg.Tokens.<name>` resolved
+/// through the token table written in the same file (`name: "text",`).
+pub fn read_receptors(text: str) -> List<Receptor> {
+    let tokens = token_table(text);
+    var out: List<Receptor> = [];
+    for raw in lines_of(text) {
+        let line = raw.trim();
+        let marker = "__engine(Cfg.Hooks.receptor,";
+        if !line.starts_with(marker) { continue; }
+        let args = split_on(line.slice(marker.len(), line.len()), ",");
+        if args.len() < 3 { continue; }
+        let name = args[0].trim();
+        var word = "";
+        if name.starts_with("nameof(") && name.ends_with(")") {
+            word = name.slice(7, name.len() - 1);
+        } else if name.starts_with("\"") {
+            let lits = string_literals(name);
+            if lits.len() > 0 { word = lits[0]; }
+        } else if name.starts_with("Cfg.Tokens.") {
+            let key = name.slice(11, name.len());
+            if tokens.has(key) { word = tokens[key]; }
+        }
+        let kind = leading_int(args[1].trim());
+        let sub = leading_int(args[2].trim());
+        if word.len() > 0 && kind >= 0 && sub >= 0 {
+            out.push(Receptor { word: word, kind: kind, sub: sub });
+        }
+    }
+    return out;
+}
+
+/// `name: "text",` lines of core.pilot's configuration tables.
+fn token_table(text: str) -> Map<str, str> {
+    var out: Map<str, str> = [:];
+    for raw in lines_of(text) {
+        let line = raw.trim();
+        let colon = line.find(":", 0);
+        if colon <= 0 || !line.ends_with("\",") { continue; }
+        let name = line.slice(0, colon as usize);
+        var ok = true;
+        var i: usize = 0;
+        while i < name.len() {
+            if !is_ident_byte(name.byte_at(i)) { ok = false; }
+            i = i + 1;
+        }
+        let lits = string_literals(line.slice(colon as usize, line.len()));
+        if ok && lits.len() == 1 { out.set(name, lits[0]); }
+    }
+    return out;
+}

@@ -26,6 +26,7 @@ pub fn parse_unit(arena: AstArena, src: &str, file: pilot_span::FileId, base: u3
         ingest: false,
         folds: Default::default(),
         in_ensures: false,
+        fn_body_depth: 0,
     };
     p.parse_program();
     let mut arena = p.arena;
@@ -64,6 +65,7 @@ pub fn parse_header(src: &str) -> Vec<ModuleDecl> {
         ingest: false,
         folds: Default::default(),
         in_ensures: false,
+        fn_body_depth: 0,
     };
     let mut items = Vec::new();
     while !p.at_end() {

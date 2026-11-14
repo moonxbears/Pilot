@@ -1,0 +1,73 @@
+// `become` between functions of different shapes: another parameter count,
+// a text parameter, no result, and a `become` on each side of a branch.
+// Every chain is deeper than the 10,000 frames ordinary calls may nest.
+//
+// Expected output, worked by hand:
+//   walk(300001, 0, 3): an odd n goes through skip, which only lowers n; an
+//   even n above 0 adds 3. The even values 300000, 299998, .. 2 are 150,000
+//   steps, so acc ends at 450000 and finish doubles it: 900000.
+//   label(3, "x") appends "ab" three times: xababab.
+//   label(20000, "").len() is 2 * 20000 = 40000.
+//   countdown(50000) prints done once and gives nothing back.
+//   Counter { step: 2 }.run(30000, 0) adds 2 on each of 30,000 steps: 60000.
+//   build(4, []) pushes 4, 3, 2, 1 and hands the list to total: 10.
+fn finish(total: i64) -> i64 {
+    return total * 2;
+}
+
+fn walk(n: i64, acc: i64, step: i64) -> i64 {
+    if n == 0 { become finish(acc); }
+    if n % 2 == 0 {
+        become walk(n - 1, acc + step, step);
+    } else {
+        become skip(n, acc);
+    }
+}
+
+fn skip(n: i64, acc: i64) -> i64 {
+    become walk(n - 1, acc, 3);
+}
+
+fn label(n: i64, text: str) -> str {
+    if n == 0 { return text; }
+    become label(n - 1, text + "ab");
+}
+
+fn countdown(n: i64) {
+    if n == 0 {
+        print("done");
+        return;
+    }
+    become countdown(n - 1);
+}
+
+struct Counter {
+    pub step: i64;
+    fn run(n: i64, acc: i64) -> i64 {
+        if n == 0 { return acc; }
+        become self.run(n - 1, acc + self.step);
+    }
+}
+
+fn total(xs: List<i64>, i: i64, acc: i64) -> i64 {
+    if i == xs.len() { return acc; }
+    let x = xs[i];
+    become total(xs, i + 1, acc + x);
+}
+
+fn build(n: i64, xs: List<i64>) -> i64 {
+    if n == 0 { become total(xs, 0, 0); }
+    let ys = xs;
+    ys.push(n);
+    become build(n - 1, ys);
+}
+
+fn main() {
+    print(walk(300001, 0, 3));
+    print(label(3, "x"));
+    print(label(20000, "").len());
+    countdown(50000);
+    let c = Counter { step: 2 };
+    print(c.run(30000, 0));
+    print(build(4, []));
+}

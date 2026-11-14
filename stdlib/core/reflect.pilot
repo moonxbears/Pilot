@@ -299,7 +299,7 @@ pub struct CategoryInfo : IValue {
         id:       i64,
         scope:    str,
         badge:    str,
-        lsp_kind: i64 = 14
+        lsp_kind: i64
     ) -> CategoryInfo => CategoryInfo {
         id:       id,
         scope:    scope,
@@ -319,7 +319,7 @@ pub struct KeywordInfo : IValue {
         category_id: i64,
         word:        str,
         doc:         str,
-        suffix:      str = ""
+        suffix:      str
     ) -> KeywordInfo => KeywordInfo {
         category_id: category_id,
         word:        word,
@@ -363,7 +363,7 @@ pub struct ReflectTypeInfo : IValue {
         byte_size:   usize,
         byte_align:  usize,
         lattice:     u8,
-        field_count: usize = 0
+        field_count: usize
     ) -> ReflectTypeInfo => ReflectTypeInfo {
         id:          id,
         name:        name,
@@ -607,10 +607,10 @@ pub fn reflect_is_in_category(cat_id: i64, word: str) -> bool {
 }
 
 // Queries type layout metrics from the compiler physics engine
-pub fn reflect_type_layout(type_id: usize, type_name: str = "") -> ReflectTypeInfo {
+pub fn reflect_type_layout(type_id: usize, type_name: str) -> ReflectTypeInfo {
     let size = __engine(ReflectEngine.layout_size, type_id);
     let lat = __engine(ReflectEngine.lattice_get, type_id);
-    return ReflectTypeInfo.create(type_id, type_name, size, 8, lat as u8);
+    return ReflectTypeInfo.create(type_id, type_name, size, 8, lat as u8, 0);
 }
 
 // =========================================================================

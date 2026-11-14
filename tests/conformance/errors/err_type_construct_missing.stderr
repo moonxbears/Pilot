@@ -1,0 +1,2 @@
+error[SYN001]: a type is needed after `!`
+err_type_construct_missing.pilot:5:16

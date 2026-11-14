@@ -196,6 +196,19 @@ impl BytecodeCompiler {
             self.release_to(mark);
             return dst;
         }
+        // A compile-time collection (an enum's variants, a `comptime` map)
+        // has only its keys: reading another name is an error, not none.
+        if let Some(CMap::Map(_)) = self.resolve_cmap(arena, NodeId(node.lhs)) {
+            let lhs = arena.node(NodeId(node.lhs));
+            let message = match lhs.node_kind() {
+                NodeKind::IdentExpr => {
+                    let owner = Self::name(arena, lhs.lhs);
+                    format!("`{owner}` has no member `{field}`")
+                }
+                _ => format!("this compile-time value has no member `{field}`"),
+            };
+            return self.error(crate::codes::NO_MEMBER, message);
+        }
         let ty = self.static_type(arena, NodeId(node.lhs));
         let dst = self.alloc_reg();
         let mark = self.next_reg;

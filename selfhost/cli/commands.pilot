@@ -45,6 +45,7 @@ pub fn cli_gate_files() -> List<str> => [
     "selfhost/gate/ledger/seams.pilot",
     "selfhost/gate/ledger/wiring.pilot",
     "selfhost/gate/seam_gate.pilot",
+    "selfhost/gate/keyword_gate.pilot",
     "selfhost/gate/runner.pilot",
 ];
 
@@ -304,6 +305,7 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/lower_try.pilot",
         "selfhost/ir/lower_contract.pilot",
         "selfhost/ir/lower_spread.pilot",
+        "selfhost/ir/lower_tail.pilot",
         "selfhost/ir/lower_variant.pilot",
         "selfhost/ir/lower_union.pilot",
         "selfhost/ir/lower_global.pilot",

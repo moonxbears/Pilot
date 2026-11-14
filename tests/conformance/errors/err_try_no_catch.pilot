@@ -1,0 +1,12 @@
+// SYN001: the statement form `try { .. }` handles a failure in its
+// `catch`; without one there is nothing to handle it.
+fn risky() -> i64 ! str {
+    return fail("boom");
+}
+
+fn main() {
+    // `try` starts at line 9, column 5.
+    try {
+        print(risky()?);
+    }
+}

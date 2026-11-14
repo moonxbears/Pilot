@@ -1,0 +1,7 @@
+// With a message, the message comes first, then the expression and both
+// sides. `a < b` with a = 7, b = 5 fails: left 7, right 5.
+fn main() {
+    let a = 7;
+    let b = 5;
+    assert(a < b, "a must stay below b");
+}

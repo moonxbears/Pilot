@@ -321,7 +321,7 @@ pub struct CFamilyDialect : ISourceDialect {
             boxed.push(self.box(args[i], phys[i]));
             i = i + 1;
         }
-        if name == "rt_assert" || name == "seam_open" {
+        if name == "seam_open" {
             // The note is optional.
             let note = if boxed.len() > 1 { boxed[1] } else { "PILOT_V_NULL" };
             return self.unbox(f"pilot_{name}({boxed[0]}, {boxed.len() > 1}, {note})", ret);
@@ -381,7 +381,7 @@ pub struct CFamilyDialect : ISourceDialect {
     /// them with no padding (`#pragma pack`, which GCC, Clang and MSVC read;
     /// a field holding a dynamic value keeps its alignment, since the
     /// runtime takes its address).
-    pub fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>, shapes: List<IrLayout>) -> List<str> {
+    pub fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>, shapes: List<IrLayout>, names: List<List<str>>) -> List<str> {
         if !self.carries_dynamic() || layouts.len() == 0 { return []; }
         var out: List<str> = [];
         var table: List<str> = [];
@@ -429,7 +429,12 @@ pub struct CFamilyDialect : ISourceDialect {
                 out.push(f"static inline void pilot_set{l}_{i}(pilot_val v, {ct} x) " + "{ " + f"if {mine} " + "{ " + store + " return; " + "} " + f"pilot_v_set_field(v, {i}, " + self.box("x", fs[i]) + "); }");
                 i = i + 1;
             }
-            table.push(f"[{l}] = " + "{ " + f"{fs.len()}, pilot_rget{l}, pilot_rset{l}, pilot_rdrop{l}, sizeof({t}), _Alignof({t})" + " }");
+            // Each field's name, for printing the value (`{ name: value, .. }`).
+            var quoted: List<str> = [];
+            for nm in names[k] { quoted.push("\"" + nm + "\""); }
+            quoted.push("0");
+            out.push(f"static const char *const pilot_rnames{l}[] = " + "{ " + joined(quoted) + " };");
+            table.push(f"[{l}] = " + "{ " + f"{fs.len()}, pilot_rget{l}, pilot_rset{l}, pilot_rdrop{l}, sizeof({t}), _Alignof({t}), pilot_rnames{l}" + " }");
             k = k + 1;
         }
         out.push("static const pilot_v_layout pilot_layout_table[] = { " + joined(table) + " };");
@@ -559,7 +564,6 @@ fn engine_arity() -> Map<str, i64> {
     for name in ["list_set", "map_set", "str_slice", "str_replace"] { ops.set(name, 33); }
     ops.set("list_extend", 23);
     ops.set("str_find", 23);
-    ops.set("rt_assert", 12);
     ops.set("rt_fault", 11);
     ops.set("seam_open", 12);
     return ops;

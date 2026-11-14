@@ -137,9 +137,11 @@ pub enum BinaryOp {
     As = 32, AsView = 33, Spaceship = 34, SatAdd = 35, SatSub = 36, SatMul = 37,
     WrapAdd = 38, WrapSub = 39, WrapMul = 40, CheckedAdd = 41, CheckedSub = 42,
     CheckedMul = 43, EucMod = 44, Lens = 45, OpenRange = 46, AfterRange = 47, Swap = 48,
+    /// `a..b : step`: the lhs is the range, the rhs the step.
+    Step = 49,
 }
 
-const BINARY_OPS: [BinaryOp; 48] = [
+const BINARY_OPS: [BinaryOp; 49] = [
     BinaryOp::Add, BinaryOp::Sub, BinaryOp::Mul, BinaryOp::Div, BinaryOp::FloorDiv, BinaryOp::Rem,
     BinaryOp::Pow, BinaryOp::Eq, BinaryOp::Ne, BinaryOp::Lt, BinaryOp::Le, BinaryOp::Gt, BinaryOp::Ge,
     BinaryOp::And, BinaryOp::Or, BinaryOp::BitAnd, BinaryOp::BitOr, BinaryOp::BitXor, BinaryOp::Shl,
@@ -149,7 +151,7 @@ const BINARY_OPS: [BinaryOp; 48] = [
     BinaryOp::Spaceship, BinaryOp::SatAdd, BinaryOp::SatSub, BinaryOp::SatMul, BinaryOp::WrapAdd,
     BinaryOp::WrapSub, BinaryOp::WrapMul, BinaryOp::CheckedAdd, BinaryOp::CheckedSub,
     BinaryOp::CheckedMul, BinaryOp::EucMod, BinaryOp::Lens, BinaryOp::OpenRange,
-    BinaryOp::AfterRange, BinaryOp::Swap,
+    BinaryOp::AfterRange, BinaryOp::Swap, BinaryOp::Step,
 ];
 
 impl BinaryOp {
@@ -173,7 +175,7 @@ impl BinaryOp {
             Self::SatSub => "-|", Self::SatMul => "*|", Self::WrapAdd => "+%",
             Self::WrapSub => "-%", Self::WrapMul => "*%", Self::CheckedAdd => "+?",
             Self::CheckedSub => "-?", Self::CheckedMul => "*?", Self::EucMod => "%%",
-            Self::Lens => "~>", Self::OpenRange => ">..<", Self::AfterRange => ">..", Self::Swap => ":=:",
+            Self::Lens => "~>", Self::OpenRange => ">..<", Self::AfterRange => ">..", Self::Swap => ":=:", Self::Step => ":",
         }
     }
 }
@@ -277,7 +279,8 @@ pub struct AstArena {
     pub for_clauses: Vec<(NodeId, NodeId)>,
     /// `case p if cond:` guards; `MatchArm.flags` holds the index + 1.
     pub arm_guards: Vec<NodeId>,
-    /// `field: T = default` initializers, keyed by the field's `ParamDecl`.
+    /// `field: T = default` initializers and literal parameter defaults
+    /// (`fn f(x: i64 = 4)`), keyed by the field's or parameter's `ParamDecl`.
     pub field_defaults: Vec<(NodeId, NodeId)>,
     pub diagnostics: Vec<(ByteSpan, String)>,
     pub i64_pool: Vec<i64>,

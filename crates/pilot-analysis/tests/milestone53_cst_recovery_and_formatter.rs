@@ -406,7 +406,7 @@ pub fn test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_mar
              let exact_self = suggest_keyword_typo({kw_tr});\n\
              let far_none = suggest_keyword_typo({far});\n\
              // Missing-token recovery with string & comment decoy traps:\n\
-             let decoy_ok = !cst_detect_missing_ident(\"pub fn ok() {{ let s = \\\"fn (\\\"; // struct {t_tr}\\n }}\") \
+             let decoy_ok = !cst_detect_missing_ident(\"pub fn ok() {{ let s = \\\"fn (\\\"; // struct {t_tr_word}\\n }}\") \
                          && !cst_detect_missing_rparen(\"pub fn ok() {{ let s = \\\"(\\\"; /* ( */ }}\") \
                          && !cst_detect_missing_rbrace(\"pub fn ok() {{ let s = \\\"{{\\\"; // {{\\n }}\");\n\
              let real_miss = cst_detect_missing_ident(\"pub fn (x: i64) -> i64 {{ return x; }}\") \
@@ -414,6 +414,8 @@ pub fn test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_mar
                           && cst_detect_missing_rbrace(\"pub fn f(x: i64) {{ if x > 0 {{ return x; }}\");\n\
              fix_trans + \"|\" + fix_del + \"|\" + fix_sub + \"|\" + exact_self + \"|\" + far_none + \"|\" + decoy_ok + \"|\" + real_miss;\n",
             t_tr = escape_pilot_str(&typo_trans),
+            // The bare word: it sits in a comment inside the decoy source string.
+            t_tr_word = typo_trans,
             t_dl = escape_pilot_str(&typo_del),
             t_sb = escape_pilot_str(&typo_sub),
             kw_tr = escape_pilot_str(&kw_trans),

@@ -1,0 +1,2 @@
+error[SYN001]: an index takes one value; indexing by several (`x[a, b]`) is not built yet
+err_multi_index.pilot:5:15

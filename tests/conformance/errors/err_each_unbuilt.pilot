@@ -1,0 +1,9 @@
+// `each xs` (call vectorisation) is not built yet (docs/keyword_roadmap.md
+// K6). The word used to be skipped, so `dbl(each [1, 2, 3])` passed the list
+// itself; now the build stops at the seam `keyword.unbuilt`.
+fn dbl(x: i64) -> i64 => x * 2;
+
+fn main() {
+    print("before");
+    print(dbl(each [1, 2, 3]));
+}

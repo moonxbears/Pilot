@@ -111,6 +111,9 @@ impl BytecodeCompiler {
         // answers it (a native-bound method) or an implementing type gives
         // the body. Compiling it would shadow the native method with a stub.
         if body_node.is_none() {
+            if owner.is_none() {
+                self.bodiless_fns.insert(fn_name);
+            }
             return;
         }
         let receiver = crate::RECEIVER;

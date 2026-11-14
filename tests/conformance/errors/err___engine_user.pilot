@@ -1,0 +1,6 @@
+// ENGINE001: `__engine(..)` is the seed token core uses to bind names to
+// engine intrinsics; a program outside core uses the bound names instead
+// (`print`, `List`, `Map`, ..).
+fn main() {
+    __engine("rt_print", "hi");
+}

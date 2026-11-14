@@ -128,8 +128,12 @@ pub fn note_record(lw: Lowerer, t: i64, phy: IrTypePhysics) {
     if phy.layout_id == 0 || !ty_is_named(p.tt, t) || kind(p.s, ty_decl(p.tt, t)) != nk_struct() { return; }
     if some _known = ir_record_of(lw.ls.m, phy.layout_id) { return; }
     var fields: List<u32> = [];
-    for f in fields_of(lw, t) { fields.push(field_physics(lw, t, f.canonical_name).layout_id); }
-    ir_add_record(lw.ls.m, IrRecord { layout: phy.layout_id, fields: fields });
+    var names: List<str> = [];
+    for f in fields_of(lw, t) {
+        fields.push(field_physics(lw, t, f.canonical_name).layout_id);
+        names.push(f.canonical_name);
+    }
+    ir_add_record(lw.ls.m, IrRecord { layout: phy.layout_id, fields: fields, names: names });
 }
 
 /// The value of an omitted field: its default, else zero (as the seed
@@ -643,8 +647,17 @@ pub fn lower_method_call(lw: Lowerer, n: i64) -> u32 {
     let in_module = if implied { -1 } else { module_fn(lw.inf, callee) };
     if in_module >= 0 { return call_decl(lw, in_module, [], ch.slice(1, ch.len()), physics_of(lw, n), n); }
     var rt = member_receiver_type(lw, callee);
-    let is_static_call = !implied && ty_is_unknown(p.tt, rt);
-    if is_static_call { rt = type_receiver(lw.inf, recv_node); }
+    // A static call names a type (`Type.m(..)`). A receiver of unknown type
+    // that names no type (the result of an engine method, `a.trim().len()`)
+    // is a value: its method is called on it.
+    var is_static_call = false;
+    if !implied && ty_is_unknown(p.tt, rt) {
+        let named = type_receiver(lw.inf, recv_node);
+        if !ty_is_unknown(p.tt, named) {
+            rt = named;
+            is_static_call = true;
+        }
+    }
     if !is_static_call {
         var arg_nodes: List<i64> = [];
         var j = 1;

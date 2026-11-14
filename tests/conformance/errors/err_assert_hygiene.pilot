@@ -1,0 +1,20 @@
+// The names an `assert` template binds for itself cannot capture the
+// caller's names (rule hygiene; until 2026-11-13 known bug
+// parser.rule_template_capture). The caller here declares the template's
+// own names `left_value`, `right_value` and `note_text`, and a function
+// named like the old message helper.
+//
+// Hand-worked: left_value is 5, so `1 == left_value` is `1 == 5`, false;
+// the note is the caller's `note_text`; left is 1, right is 5. If the
+// right side read the template's own `left_value` (1), the assertion would
+// hold and the program would print "held".
+fn assert_compare_failure(a: str, b: str, c: str, d: str) -> str => a + b + c + d;
+
+fn main() {
+    let left_value = 5;
+    let right_value = 9;
+    let note_text = "from the caller";
+    print(right_value);
+    assert(1 == left_value, note_text);
+    print("held");
+}

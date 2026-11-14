@@ -1,0 +1,12 @@
+// METH001: an enum has only the variants it declares. `Color::Purple` is
+// refused when the program is built; it used to read as none and print
+// "null".
+enum Color {
+    Red,
+    Green,
+}
+
+fn main() {
+    let c: Color = Color::Purple;
+    print(c);
+}

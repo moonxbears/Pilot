@@ -1,0 +1,13 @@
+// COMP009: `coalesce { idd }` names a member bundle `G` does not have (it
+// has `id`); a misspelt name used to be ignored.
+struct G {
+    pub id: i64;
+}
+
+struct S {
+    *G coalesce { idd };
+}
+
+fn main() {
+    print(S { id: 1 }.id);
+}

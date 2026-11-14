@@ -365,6 +365,9 @@ pub struct IrLayout : IValue {
 pub struct IrRecord : IObject {
     pub layout: u32;
     pub fields: List<u32>;
+    /// Each field's name, in the order of `fields`: a record prints as
+    /// `{ name: value, .. }` (types/struct_text).
+    pub names: List<str>;
 }
 
 /// A module global: storage that lives as long as the program, named for

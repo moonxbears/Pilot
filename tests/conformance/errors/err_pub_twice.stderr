@@ -1,0 +1,2 @@
+error[SYN001]: a declaration takes one visibility word; `priv` is a second one
+err_pub_twice.pilot:3:5

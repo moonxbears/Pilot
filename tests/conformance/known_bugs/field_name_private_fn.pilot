@@ -1,0 +1,13 @@
+// A struct literal field key is a field name, not a use of a function. The
+// field `summary` of `lib.field_notes.Note` must build and read normally even
+// though this file declares a private `fn summary`: the private function is
+// out of reach of the package, but the package never names it.
+// Expected: `make_note("kept").summary` is "kept"; `summary()` is "private".
+use lib.field_notes;
+
+fn summary() -> str => "private";
+
+fn main() {
+    print(make_note("kept").summary);
+    print(summary());
+}

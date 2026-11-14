@@ -1,0 +1,25 @@
+// `*Bundle with { member as new_name }` splices a bundle's method under a
+// new name; the struct may then declare a method with the old name.
+// (A renamed field the bundle's own methods read is known bug
+// `engine.with_renamed_field_unseen`.)
+//
+// Expected output, worked by hand:
+//   Gauge splices CountBundle with `bump as add_one` and declares its own
+//   `bump`: count 2, add_one() = 2 + 1 = 3, bump() = 2 * 10 = 20.
+struct CountBundle {
+    pub count: i64;
+    pub fn bump() -> i64 => .count + 1;
+}
+
+struct Gauge {
+    *CountBundle with { bump as add_one };
+    pub name: str;
+    pub fn bump() -> i64 => .count * 10;
+}
+
+fn main() {
+    let g = Gauge { count: 2, name: "g" };
+    print(g.count);
+    print(g.add_one());
+    print(g.bump());
+}

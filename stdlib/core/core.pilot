@@ -370,13 +370,14 @@ comptime {
 }
 
 // =========================================================================
-// STEP 2: SELF-BOOTSTRAP THE `syntax` KEYWORD
+// STEP 2: THE `syntax` KEYWORD
 // =========================================================================
-[SyntaxMacro(Cfg.Tokens.kw_syntax)]
-comptime fn __bootstrap_syntax(kw_name, params, body) => quote {
-    [SyntaxMacro($kw_name)]
-    comptime fn __syntax_rule($params) { $body }
-}
+// `syntax` rules are read by the seed parser (parse_syntax_decl in
+// crates/pilot-parser/src/lib.rs). Defining `syntax` here through
+// `[SyntaxMacro]` is not built: the declaration that tried it spliced
+// `$params` into a parameter list, which does not parse, so it never took
+// effect; it was deleted on 2026-11-13 (the bootstrap sources must parse
+// cleanly, crates/pilot-parser/tests/bootstrap_sources.rs).
 
 // =========================================================================
 // STEP 3: REGISTER MODIFIERS, MODULE KEYWORDS, RECEIVER & PRATT PRECEDENCES
@@ -412,6 +413,13 @@ comptime {
     __engine(Cfg.Hooks.receptor, nameof(none),  2, 0);
     __engine(Cfg.Hooks.receptor, nameof(else),  3, 0);
     __engine(Cfg.Hooks.receptor, Cfg.Tokens.kw_syntax, 4, 0);
+    // `macro` is not built yet (docs/keyword_roadmap.md K4; `syntax` rules
+    // are the macros that work): where a declaration starts it stops at the
+    // seam `keyword.unbuilt` (receptor 40, place 1).
+    __engine(Cfg.Hooks.receptor, nameof(macro), 40, 1);
+    // `stringify($p)` in a `syntax` rule's template: the source text of the
+    // argument bound to `p` (crates/pilot-parser/src/rule_arms.rs).
+    __engine(Cfg.Hooks.receptor, nameof(stringify), 36, 4);
     __engine(Cfg.Hooks.receptor, "type_construct",      5, 0);
     __engine(Cfg.Hooks.receptor, "attribute_construct", 6, 0);
     __engine(Cfg.Hooks.receptor, nameof(extern),   7,  0);

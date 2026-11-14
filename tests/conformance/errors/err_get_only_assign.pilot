@@ -1,0 +1,14 @@
+// DECL004: a property with a `get` clause and no `set` clause is read-only.
+// Assigning it is refused; it used to write a hidden field the getter
+// never read.
+struct Box {
+    pub inner: i64 = 2;
+    pub doubled: i64 { get => .inner * 2; }
+}
+
+fn main() {
+    var b = Box();
+    // The assignment starts at line 12, column 5.
+    b.doubled = 5;
+    print(b.doubled);
+}

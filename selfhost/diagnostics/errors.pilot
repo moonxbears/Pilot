@@ -521,6 +521,13 @@ pub let ERRORS = [
         reference: "Pilot *Bundle / *Facet composition (AGENTS.md section 4)",
     },
     ErrorDef {
+        code: "COMP009",
+        title: "Splice Clause Names No Member",
+        description: "A coalesce, with or without clause names a member the spliced bundle does not have",
+        category: "HardwareLattice",
+        reference: "Pilot *Bundle / *Facet composition (AGENTS.md section 4)",
+    },
+    ErrorDef {
         code: "NAMING001",
         title: "Interface Naming Violation",
         description: "Interface must begin with 'I' followed by PascalCase",

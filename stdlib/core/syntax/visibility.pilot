@@ -23,17 +23,28 @@ comptime {
     __engine("register_modifier", nameof(pub),         7);
     __engine("register_modifier", nameof(public),      7);
     __engine("register_modifier", nameof(open),        8);
-    __engine("register_modifier", nameof(export),      9);
+    // `export` (a symbol exported across the foreign ABI) is not built yet
+    // (docs/keyword_roadmap.md K5): every use stops at the seam
+    // `keyword.unbuilt` instead of behaving as `pub`.
+    __engine("register_modifier", nameof(export),      "keyword_unbuilt");
+    // `override` (docs/keyword_roadmap.md K2) and `module` (K2, decision
+    // D3) are not built yet: each stops at the seam `keyword.unbuilt`.
+    __engine("register_modifier", nameof(override),    "keyword_unbuilt");
+    __engine("bind_receptor", nameof(module),          40, 1);
 
     // Axis 2: Compile-Time Clearance Rings (`lvl(N)` & shorthand `lvl0`..`lvl100`)
+    // `lvl(N)` is kept on its declaration (selfhost/check/clearance.pilot
+    // reads it). The shorthand `lvl0`..`lvl100` is not built yet
+    // (docs/keyword_roadmap.md K2): every use stops at the seam
+    // `keyword.unbuilt` instead of being ignored.
     __engine("register_parametric_modifier", nameof(lvl), "set_clearance_ring");
-    __engine("register_modifier", nameof(lvl0),   "set_clearance_ring_0");
-    __engine("register_modifier", nameof(lvl1),   "set_clearance_ring_1");
-    __engine("register_modifier", nameof(lvl2),   "set_clearance_ring_2");
-    __engine("register_modifier", nameof(lvl3),   "set_clearance_ring_3");
-    __engine("register_modifier", nameof(lvl80),  "set_clearance_ring_80");
-    __engine("register_modifier", nameof(lvl90),  "set_clearance_ring_90");
-    __engine("register_modifier", nameof(lvl100), "set_clearance_ring_100");
+    __engine("register_modifier", nameof(lvl0),   "keyword_unbuilt");
+    __engine("register_modifier", nameof(lvl1),   "keyword_unbuilt");
+    __engine("register_modifier", nameof(lvl2),   "keyword_unbuilt");
+    __engine("register_modifier", nameof(lvl3),   "keyword_unbuilt");
+    __engine("register_modifier", nameof(lvl80),  "keyword_unbuilt");
+    __engine("register_modifier", nameof(lvl90),  "keyword_unbuilt");
+    __engine("register_modifier", nameof(lvl100), "keyword_unbuilt");
 }
 
 pub pure fn visibility_tier_of(word: str) -> i32 {

@@ -67,6 +67,7 @@ pub struct BundleSpliceDirective : IObject {
     pub bundle_name:     str;
     pub coalesce_fields: List<str>;
     pub with_aliases:    Map<str, str>; // old_name -> new_name
+    pub with_names:      List<str>;    // the old names `with` renames, in order
     pub without_items:   List<str>;    // excluded fields or methods
     /// Written in a `partial struct` extension rather than the primary
     /// declaration, which seals the layout (COMP001 for a stateful bundle).
@@ -83,11 +84,29 @@ pub fn bundle_def_new(name: str, is_facet: bool) -> BundleDef {
     };
 }
 
+/// The member names a splice directive's `coalesce`, `with` and `without`
+/// clauses name, in that order.
+fn directive_names(dir: BundleSpliceDirective) -> List<str> {
+    var out: List<str> = [];
+    for name in dir.coalesce_fields { out.push(name); }
+    for name in dir.with_names { out.push(name); }
+    for name in dir.without_items { out.push(name); }
+    return out;
+}
+
+/// Whether `name` is a field or method of bundle `bdef`.
+fn bundle_has_member(bdef: BundleDef, name: str) -> bool {
+    for f in bdef.fields { if f.name == name { return true; } }
+    for m in bdef.methods { if m.name == name { return true; } }
+    return false;
+}
+
 pub fn bundle_splice_directive_new(bname: str) -> BundleSpliceDirective {
     return BundleSpliceDirective {
         bundle_name:     bname,
         coalesce_fields: [],
         with_aliases:    [:],
+        with_names:      [],
         without_items:   [],
         from_partial:    false,
     };
@@ -277,6 +296,15 @@ pub fn compute_struct_layout(
             }
             di = di + 1;
             continue;
+        }
+
+        // COMP009: every name `coalesce`, `with` and `without` name must be
+        // a field or method of the bundle; a misspelt name hides nothing.
+        for named in directive_names(dir) {
+            if !bundle_has_member(bdef, named) {
+                plan.diagnostics.push("COMP009: '" + named + "' is not a field or method of bundle '"
+                    + bname + "', so `coalesce`, `with` or `without` cannot name it");
+            }
         }
 
         // Process fields of the bundle

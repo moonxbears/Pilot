@@ -1,0 +1,28 @@
+// `ensures(r => cond)` is checked when the function returns, with `r` the
+// returned value. A promise that holds lets the program run on.
+//
+// Expected output, worked by hand:
+//   clamp(15, 0, 10) = 10, clamp(-3, 0, 10) = 0, clamp(4, 0, 10) = 4;
+//     each lies in 0..=10, so the `ensures` holds.
+//   abs(-7) = 7 and abs(7) = 7, both >= 0.
+fn clamp(x: i64, lo: i64, hi: i64) -> i64
+    ensures(r => r >= lo && r <= hi)
+{
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    return x;
+}
+
+fn abs(x: i64) -> i64
+    ensures(r => r >= 0)
+{
+    return if x < 0 { 0 - x } else { x };
+}
+
+fn main() {
+    print(clamp(15, 0, 10));
+    print(clamp(-3, 0, 10));
+    print(clamp(4, 0, 10));
+    print(abs(-7));
+    print(abs(7));
+}

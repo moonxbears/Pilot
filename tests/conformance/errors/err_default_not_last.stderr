@@ -1,0 +1,2 @@
+error[MATCH002]: Unreachable pattern in switch arm; previous wildcard arm subsumes this case
+err_default_not_last.pilot:8:9

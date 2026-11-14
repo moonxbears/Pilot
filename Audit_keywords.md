@@ -67,9 +67,15 @@ AGENTS.md section 1 forbids rules that imitate a feature and requires legacy one
 | `region(pool, body)` | Binds anything as the pool and runs the body; no arena. `region(5, { .. })` runs. | IGNORED |
 | `noalloc({ .. })` (block form) | Builds a `RealtimeScopeGuard` that is not in scope where it expands. | BROKEN |
 
+**Replaced by seams, 2026-11-13 (keyword roadmap K0):** every rule in this table now stops at a registered seam (`concurrency.*`, `data.*`, `realtime.*`) before its body runs, with an `err_<word>_seam` program per word on all three engines; `TransactionState`, `tx_*` and `RealtimeScopeGuard` are deleted. The table describes the code before that change.
+
 "BROKEN" for the first five rows: the rules expand to raw `__engine(..)` calls or to functions (`tx_begin`) that are not in scope in the user's file, so every use is rejected (ENGINE001 or DECL001). They cannot run, which is the only reason they do no harm.
 
 ### 2.4 Accepted as something else
+
+**Changed 2026-11-13 (keyword roadmap K0):** `adapter`, `database`, `context`, `each`, `async`, `export` and `asm` now stop the build at the seam `keyword.unbuilt` (crates/pilot-parser/src/unbuilt.rs, bound from the library; `err_<word>_unbuilt` programs). `extern`/`lib` and `lvl` are not changed yet. The table describes the code before that change.
+
+**Changed 2026-11-13 (keyword roadmap K0), `extern`, `lib`, `lvl`:** a call of a top-level function declared without a body now stops the build at the seam `abi.extern_call` (selfhost/check/clearance.pilot; `err_extern_call_seam`) instead of DECL001. `lvl(N)` is kept on its declaration as an attribute (crates/pilot-parser/src/param_mods.rs) and a use of a function of a higher level than the user's stops at the seam `lvl.clearance` (`err_lvl_upward_call`; same-level and downward uses run, `lvl_same_or_lower`); this closes W8 as a seam, not as LVL001. Package levels are not read: what they mean is owner decision D11 (docs/keyword_roadmap.md). The shorthand `lvl0`..`lvl100` stops at `keyword.unbuilt`, and a modifier registered with an action the parser does not carry out is no longer ignored (ModAct::Ring is deleted).
 
 | Keyword | What happens |
 |---|---|
@@ -83,6 +89,8 @@ AGENTS.md section 1 forbids rules that imitate a feature and requires legacy one
 ### 2.5 Registered but with no grammar (27)
 
 `actor`, `alignof`, `ascending`, `blueprint`, `bounded`, `connect`, `cue`, `delete`, `descending`, `fields_of`, `insert`, `into`, `jitter`, `macro`, `module`, `offsetof`, `order`, `override`, `priority`, `role`, `route`, `state`, `timeout`, `transition`, `unquote`, `update`, `values`.
+
+**Changed 2026-11-13 (keyword roadmap K0):** all 27, and `connect`, `order`, `values`, `ascending`/`descending` among them, are bound. Declaration and statement words stop at the seam `keyword.unbuilt` where a declaration or statement starts (receptor 40, place 1); query clause words stop there as a query clause (place 2); `override` is an unbuilt modifier; `alignof`, `offsetof`, `fields_of` are type queries the seed refuses with SEED001. Each stays an ordinary name elsewhere (`unbuilt_words_as_names_2`). Per D4 (decided 2026-11-13) the nine symbolic-form names (`call_quote_*`, `op_splat`, `op_pairs`, `op_expand`) are deleted from the registry: each symbol is the Pair of its readable twin. `unquote` keeps its row with Pair `~` and follows the deep splice's seam `vm.call_quote` (`err_unquote_seam`). `err_query_clause` now uses `skip`, which is no keyword, since `order` stops at the seam.
 
 Using any of them is "Unregistered keyword or unexpected identifier" or "undefined name". `blueprint`, `cue`, `role` and `route` belong to `.pchor` files (ledger M24, CORE as a library parser); `state` / `transition` have a library lattice (M26, CORE) with no syntax. Editors highlight all 27 as keywords because the registry lists them.
 
@@ -294,3 +302,33 @@ Not raised where the registry or AGENTS.md implies one: a dimension mismatch (W6
 7. `char` in emitted C and `become` in PilIR, to bring the native corpus test back to zero seams.
 
 Probe programs and raw results: `/tmp/claude-1000/-home-moony-Documents-dev-projects-Pilot/e3ce282f-0a2c-4bb7-9773-d7a6563f2793/scratchpad/audit/` (`p/` the 110 probes, `panic/` the crashing one, `seed.txt`, `ir.txt`, `c.txt`, `results.json`).
+
+## 2026-11-13 — `assert` made a keyword (uncommitted)
+- `assert(cond)` / `assert(cond, note)` is a syntax rule (stdlib/core/assert.pilot) with one arm per comparison operator. A failure reports the expression text and, for a comparison, both sides. The native `rt_assert` is deleted on every engine.
+- A condition of `if`, `while`, `!` or `assert` whose type is known and not `bool` is TYPE001 (err_condition_not_bool, err_assert_not_bool).
+- Rule templates are not hygienic: known bug parser.rule_template_capture.
+- Follow-up the same day: rule templates are hygienic (the names a template binds for itself are hidden from the caller; parser.rule_template_capture fixed, err_assert_hygiene). The assert message is built in the template, so a user function named like a helper cannot change it. `assert true;` and a wrong argument count are SYN001. `!` on a non-bool is TYPE001 with its own wording, and `if !x` is reported once. A template holding a node it cannot carry is SYN001 instead of becoming `none`. The bootstrap `for` and `scope` rules hold such nodes (AssignStmt, DeferStmt); their diagnostics are discarded at bootstrap.
+- Second pass the same day:
+  - A string side of a failed `assert` comparison is shown quoted and escaped.
+  - Rule templates carry assignments and `defer`, so the bootstrap `for` and `scope` rules no longer lose nodes.
+  - A parser test requires every bootstrap source to parse without a diagnostic (crates/pilot-parser/tests/bootstrap_sources.rs). To make it pass, module_ext.pilot moved before visibility.pilot, and the never-parsing `__bootstrap_syntax` in core.pilot was deleted.
+  - PilIR lowers a method called on a method's result.
+  - Open for the owner: the text of a struct differs between the seed and PilIR/C, and an `if` without `else` (so `let v = assert(..)`) gives none as a value.
+- The owner decided (2026-11-13) that a struct prints with its field names. Every engine run by a gate now prints `{ name: value, .. }`, sorted by field name as the seed sorts a map: the seed, PilIR, C, JS and Python (types/struct_text). The Lua, C++, Rust and C# emitters are not changed.
+
+## 2026-11-13 — K0 closed; the parser fails loudly (uncommitted)
+- The `keywords` gate is on (`pilot gate`; GATE021–GATE023, selfhost/gate/keyword_gate.pilot). It was shown to fail on a row with no binding, a fake verdict and an empty matrix.
+- Syntax the parser read and threw away is now reported (crates/pilot-parser/src/loud.rs): a step on a range (W1, `err_range_step`), a default parameter value (seam `fn.param_default`, W2, `err_param_default`), `*args`/`**kwargs`, generic parameters on an `enum`, `catch e: T`, a `where` clause on a type, parameters on `~self()`, `x[a, b]`, a pattern after `for`, `name?: T`, a modifier on one accessor, a stray word in an accessor block, `else` with no `if`, a second visibility word, a visibility word on a local, a missing type after a type operator, and a `nameof` that does not quote one name. Each has an `err_*` program.
+- The checker now reports a wrong argument count for a plain function call (CALL001), `*`/`*..` on a scalar (TYPE001), a missing enum member (METH001), assigning a get-only property (DECL004) and a `coalesce`/`with`/`without` naming no member of the bundle (COMP009).
+- A block `{ i = i + 1; }` passed as an argument is no longer read as a map (this made `until(.., { .. })` loop forever).
+- Not done: generic parameters on a `let` binding are still dropped; the arity check skips method calls, pipes and calls inside type bodies; a get-only assignment is caught only when the receiver's type is known. New known bugs: `engine.struct_copy_aliases`, `engine.with_renamed_field_unseen`.
+
+## 2026-11-13 — K1: W1 and W2 closed (uncommitted)
+- W1: `for i in a..b : step` counts by the step on the seed, PilIR, C, JS and Python (`control/for_range_step`). A step of 0 or less stops the program before the first pass (`err_for_step_zero`). The parser builds `BinaryOp::Step` (49); only a `for` head reads it.
+- W2: a literal parameter default fills an argument a call leaves out, on every engine (`control/fn_param_defaults`: trailing, named, method, loop-element and call-result receivers). A default must be a literal (`err_param_default_not_literal`), a parameter without one may not follow one with one (`err_param_default_gap`), the default must have the parameter's type (`err_param_default_type`), and the arity check allows the range (`err_call_arity_default`). The seam `fn.param_default` is deleted.
+- Not done: a default that names an earlier parameter or a constant (where it is evaluated is not decided); the checker does not check a step's type against the range's bounds; examples/showcase/16 still fails, now on `enum Expr<T>` (generic enum, refused since K0).
+- Found on the way: the PilIR interpreter stored the result of an instruction that has none (a call made for its effect), which crashed with an index out of bounds; fixed in selfhost/ir/interp.pilot `put`.
+
+### K1: `become` runs on every engine (2026-11-13)
+
+`become f(args);` no longer stops at `ir.lower_construct` on PilIR. The tail call becomes a jump: `selfhost/ir/lower_tail.pilot` copies the blocks of each function a tail call reaches into the caller and jumps to the copy. `control/become_tail` and the new `control/become_shapes` pass on the seed, PilIR, C, JavaScript and Python. Still stopping at the seam: a call through a function value, a `become` in a function with `var ref` parameters or in a generator, and a `become` with a value to release after the call.

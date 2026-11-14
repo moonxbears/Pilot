@@ -7,66 +7,49 @@ pub pkg Pilot.Asyncio.Syntax;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("register_modifier", nameof(async), "effect_async");
+    // `async fn` is not built yet (docs/keyword_roadmap.md K7): every use
+    // stops at the seam `keyword.unbuilt` instead of being ignored.
+    __engine("register_modifier", nameof(async), "keyword_unbuilt");
+    // Not built yet (docs/keyword_roadmap.md K7): where a declaration or
+    // statement starts (receptor 40, place 1) each stops at the seam
+    // `keyword.unbuilt`; elsewhere each is an ordinary name. `bounded` waits
+    // for decision D9 and `actor` for D6.
+    __engine("bind_receptor", nameof(actor),     40, 1);
+    __engine("bind_receptor", nameof(timeout),   40, 1);
+    __engine("bind_receptor", nameof(bounded),   40, 1);
+    // `.pchor` choreography words written in a `.pilot` file (K7).
+    __engine("bind_receptor", nameof(blueprint), 40, 1);
+    __engine("bind_receptor", nameof(cue),       40, 1);
+    __engine("bind_receptor", nameof(role),      40, 1);
+    __engine("bind_receptor", nameof(route),     40, 1);
     __engine("bind_receptor", nameof(select),  33, 7);
 
     __engine("register_pratt_op", "<-", infix,  5,  right);
     __engine("register_pratt_op", "<-", prefix, 80, right);
 }
 
+// None of these is built yet (docs/keyword_roadmap.md phase K7). Each rule
+// stops at its seam before its argument runs, instead of running the body at
+// once and pretending (audit 2.3: `spawn` ran its body immediately, `sync`,
+// `atomic` and `isolate` only set a flag, `select` only ran its arms).
 pub syntax {
     spawn(body) => quote {
-        let __spawn_val = $body;
-        let __spawn_task = __engine("map_new");
-        __engine("map_set", __spawn_task, "__async_magic", "__async_task_v1");
-        __engine("map_set", __spawn_task, "kind", "Task");
-        __engine("map_set", __spawn_task, "state", "PENDING");
-        __engine("map_set", __spawn_task, "is_completed", false);
-        __engine("map_set", __spawn_task, "result", __spawn_val)
+        seam("concurrency.spawn", "running a task concurrently needs a task scheduler on OS threads (structured concurrency, M83)")
     };
     await(fut) => quote {
-        let __await_in = $fut;
-        if __engine("map_get", __await_in, "__async_magic") == "__async_task_v1" {
-            __engine("map_set", __await_in, "state", "FINISHED");
-            __engine("map_set", __await_in, "is_completed", true);
-            __engine("map_get", __await_in, "result")
-        } else {
-            __await_in
-        }
+        seam("concurrency.await", "waiting for a task needs tasks that run concurrently (`spawn`, M83)")
     };
     sync(body) => quote {
-        {
-            let __sync_prev = __engine("map_get", __engine("get_env"), "__sync_active");
-            __engine("map_set", __engine("get_env"), "__sync_active", 1);
-            let __sync_res = $body;
-            __engine("map_set", __engine("get_env"), "__sync_active", __sync_prev);
-            __sync_res
-        }
+        seam("concurrency.sync", "holding a lock around a block needs OS threads and a lock intrinsic")
     };
     atomic(body) => quote {
-        {
-            let __atomic_prev = __engine("map_get", __engine("get_env"), "__atomic_active");
-            __engine("map_set", __engine("get_env"), "__atomic_active", 1);
-            let __atomic_res = $body;
-            __engine("map_set", __engine("get_env"), "__atomic_active", __atomic_prev);
-            __atomic_res
-        }
+        seam("concurrency.atomic", "running a block or update atomically needs atomic hardware instructions as engine intrinsics")
     };
     isolate(body) => quote {
-        {
-            let __iso_prev = __engine("map_get", __engine("get_env"), "__isolated_active");
-            __engine("map_set", __engine("get_env"), "__isolated_active", 1);
-            let __iso_res = $body;
-            __engine("map_set", __engine("get_env"), "__isolated_active", __iso_prev);
-            __iso_res
-        }
+        seam("concurrency.isolate", "isolating a memory region from other threads needs threads and a checked isolation boundary")
     };
     select(arms) => quote {
-        {
-            let __sel_ctx = __engine("map_new");
-            __engine("map_set", __sel_ctx, "__async_select", 1);
-            $arms
-        }
+        seam("concurrency.select", "choosing the first ready channel operation needs channels between concurrent tasks (M83)")
     };
 }
 

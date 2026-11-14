@@ -1,0 +1,10 @@
+// SYN001: an optional field puts `?` on its type (`note: str?`); a `?`
+// after the name used to be dropped, leaving the field not optional.
+struct Memo {
+    // `?` is at line 5, column 13.
+    pub note?: str;
+}
+
+fn main() {
+    print(Memo { note: "x" }.note);
+}

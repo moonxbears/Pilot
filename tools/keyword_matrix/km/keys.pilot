@@ -1,0 +1,147 @@
+// The search keys that find the code implementing each keyword, for the
+// Pilot / Rust column of the keyword matrix.
+//
+// For each keyword: Rust keys (seed token `TokenKind::Kw*`, modifier act
+// `ModAct::*`, AST node kinds `NodeKind::*`, or another identifier), Pilot
+// keys (node kinds `nk_*()` or another identifier), and concept words: a
+// function or file whose name holds one as an `_`-separated part is code for
+// the keyword. The tool adds on its own: the keyword's receptor bindings from
+// stdlib/core/core.pilot (`(kind, sub)` and `is_rec(kind)`), its
+// `nameof(word)` and the `word(..) => quote` syntax rules written for it.
+// A keyword missing here is found only through those.
+pkg km.keys;
+
+/// The search keys of one keyword; each list is words separated by spaces.
+pub struct SearchKeys {
+    pub word: str;
+    pub rust: str;
+    pub pilot: str;
+    pub parts: str;
+}
+
+fn search_keys(word: str, rust: str, pilot: str, parts: str) -> SearchKeys {
+    return SearchKeys { word: word, rust: rust, pilot: pilot, parts: parts };
+}
+
+/// The table, by keyword.
+pub fn search_key_table() -> Map<str, SearchKeys> {
+    let rows: List<SearchKeys> = [
+        search_keys("Align", "", "", "align layout"),
+        search_keys("Flags", "", "", "flags bitflags"),
+        search_keys("Stack", "", "", "stack"),
+        search_keys("__engine", "TokenKind::KwEngine", "", ""),
+        search_keys("adapter", "", "", "adapter"),
+        search_keys("as", "", "", "cast casts convert"),
+        search_keys("asm", "TokenKind::KwAsm NodeKind::PolyglotBlock", "", "asm polyglot"),
+        search_keys("assembly", "NodeKind::PolyglotBlock", "", "polyglot"),
+        search_keys("assert", "", "", "assert"),
+        search_keys("assume", "", "", "hint hints"),
+        search_keys("async", "ModAct::Async", "", "async"),
+        search_keys("atomic", "", "", "atomic"),
+        search_keys("await", "", "", "await select"),
+        search_keys("become", "", "", "become tail"),
+        search_keys("break", "NodeKind::BreakStmt", "nk_break()", "break"),
+        search_keys("call", "", "", "call_quote"),
+        search_keys("case", "NodeKind::MatchArm", "nk_arm()", "arm arms pattern patterns"),
+        search_keys("catch", "NodeKind::CatchClause NodeKind::CatchRecoveryExpr", "nk_catch() nk_catch_recovery()", "catch"),
+        search_keys("coalesce", "", "nk_coalesce()", "coalesce"),
+        search_keys("commit", "", "", "sql"),
+        search_keys("comptime", "TokenKind::KwComptime NodeKind::ComptimeExpr", "nk_comptime()", "comptime"),
+        search_keys("const", "ModAct::Const NodeKind::ConstDecl", "nk_const()", "const consts"),
+        search_keys("context", "", "", "context"),
+        search_keys("continue", "NodeKind::ContinueStmt", "nk_continue()", "continue"),
+        search_keys("database", "", "", "database sql"),
+        search_keys("deadline", "", "", "deadline rt"),
+        search_keys("default", "NodeKind::PatWildcard", "nk_pat_wildcard()", "default exhaustive"),
+        search_keys("defer", "TokenKind::KwDefer NodeKind::DeferStmt", "nk_defer()", "defer"),
+        search_keys("each", "", "", "each"),
+        search_keys("else", "", "", "else"),
+        search_keys("ensures", "", "", "contract contracts ensures"),
+        search_keys("enter", "", "", "lifecycle"),
+        search_keys("enum", "NodeKind::TypeAdtDecl NodeKind::AdtVariant", "nk_adt() nk_variant()", "enum variant variants"),
+        search_keys("errdefer", "", "", "errdefer"),
+        search_keys("exit", "", "", "lifecycle"),
+        search_keys("export", "", "", "visibility vis export"),
+        search_keys("ext", "ModAct::Ext NodeKind::ExtendDecl", "nk_extend()", "ext extend extension"),
+        search_keys("extern", "NodeKind::PolyglotBlock", "", "polyglot extern foreign"),
+        search_keys("field", "", "", "accessor accessors property"),
+        search_keys("file", "", "", "visibility vis"),
+        search_keys("flat", "", "", "flat flatten splat"),
+        search_keys("fn", "TokenKind::KwFn NodeKind::FnDecl NodeKind::LambdaExpr", "nk_fn() nk_lambda()", ""),
+        search_keys("for", "NodeKind::ForExpr", "nk_for()", "for enumerator"),
+        search_keys("frame", "AbiFrame", "AbiFrame", "call_quote"),
+        search_keys("from", "", "", "query linq"),
+        search_keys("get", "NodeKind::IndexerDecl", "nk_indexer()", "accessor accessors property properties getter"),
+        search_keys("grad", "", "", "call_quote grad dual"),
+        search_keys("guard", "NodeKind::GuardStmt", "nk_guard()", "guard"),
+        search_keys("if", "TokenKind::KwIf NodeKind::IfExpr", "nk_if()", ""),
+        search_keys("in", "", "", "membership"),
+        search_keys("int", "", "", "visibility vis"),
+        search_keys("interface", "TokenKind::KwInterface NodeKind::InterfaceDecl", "nk_interface()", "interface interfaces"),
+        search_keys("invariant", "", "", "invariant invariants"),
+        search_keys("iso", "ModAct::Iso", "", "iso isolated"),
+        search_keys("isolate", "", "", "isolate"),
+        search_keys("let", "TokenKind::KwLet NodeKind::LetStmt", "nk_let()", ""),
+        search_keys("lib", "", "", "polyglot"),
+        search_keys("loop", "TokenKind::KwLoop NodeKind::WhileStmt", "nk_while()", "loop loops"),
+        search_keys("lvl", "ModAct::Ring", "", "clearance ring"),
+        search_keys("nameof", "", "", "nameof"),
+        search_keys("noalloc", "ModAct::NoAlloc", "", "noalloc"),
+        search_keys("old", "", "", "contract contracts"),
+        search_keys("op", "NodeKind::OperatorDecl", "nk_operator()", "operator operators op"),
+        search_keys("open", "", "", "visibility vis"),
+        search_keys("packed", "", "", "packed layout"),
+        search_keys("pairs", "", "", "pairs"),
+        search_keys("partial", "ModAct::Partial", "", "partial"),
+        search_keys("periodic", "", "", "periodic rt"),
+        search_keys("pkg", "NodeKind::ImportDecl", "", "visibility vis package"),
+        search_keys("plan", "EffectPlan", "EffectPlan", "call_quote"),
+        search_keys("priv", "", "", "visibility vis"),
+        search_keys("prot", "", "", "visibility vis"),
+        search_keys("pub", "", "", "visibility vis"),
+        search_keys("pure", "ModAct::Pure", "", "pure purity effects"),
+        search_keys("quote", "TokenKind::KwQuote", "", "quote"),
+        search_keys("ref", "TokenKind::KwRef", "", "borrow borrows alias"),
+        search_keys("region", "", "", "region arena"),
+        search_keys("requires", "", "", "contract contracts requires"),
+        search_keys("return", "TokenKind::KwReturn NodeKind::ReturnStmt", "nk_return()", "return exits"),
+        search_keys("rollback", "", "", "sql"),
+        search_keys("savepoint", "", "", "sql"),
+        search_keys("scope", "NodeKind::ScopeDecl", "nk_scope()", "scope lifecycle"),
+        search_keys("select", "", "", "select"),
+        search_keys("self", "", "", "receiver"),
+        search_keys("set", "NodeKind::IndexerDecl", "nk_indexer()", "setter setters property properties"),
+        search_keys("sig", "", "", "call_quote signal reactive"),
+        search_keys("sizeof", "", "", "sizeof size"),
+        search_keys("spawn", "", "", "spawn select"),
+        search_keys("splat", "", "", "splat spread"),
+        search_keys("splice", "", "", "splice call_quote quote"),
+        search_keys("static", "ModAct::Static", "", "static"),
+        search_keys("struct", "TokenKind::KwStruct NodeKind::StructDecl", "nk_struct()", "struct structs record records"),
+        search_keys("switch", "NodeKind::MatchExpr", "nk_match()", "switch match"),
+        search_keys("sync", "", "", "sync"),
+        search_keys("syntax", "", "", "syntax macro macros"),
+        search_keys("then", "", "", "then"),
+        search_keys("transaction", "", "", "transaction sql"),
+        search_keys("try", "NodeKind::TryStmt NodeKind::TryPropagateExpr", "nk_try() nk_try_propagate()", "try"),
+        search_keys("type", "", "", "alias aliases"),
+        search_keys("type_construct", "", "", "type_construct construct"),
+        search_keys("unit", "NodeKind::UnitLit unit_literal UNIT_LITERAL HOOK_UNIT_LITERAL compile_unit_lit", "nk_unit_lit() unit_literal unit_decl bind_unit_literal lower_unit_literal convert_unit_literal_to_base unit_literal_call", "units dimension dimensional unit_decl unit_literal"),
+        search_keys("unreachable", "", "", "hint hints unreachable"),
+        search_keys("until", "NodeKind::WhileStmt", "nk_while()", "until"),
+        search_keys("use", "NodeKind::ImportDecl", "", "import imports module modules"),
+        search_keys("value", "", "", "setter setters"),
+        search_keys("var", "ModAct::Mut NodeKind::VarStmt", "nk_var()", "var mutable"),
+        search_keys("where", "", "", "query linq"),
+        search_keys("while", "NodeKind::WhileStmt", "nk_while()", "while loop loops"),
+        search_keys("with", "", "", "with"),
+        search_keys("within", "", "", "within rt"),
+        search_keys("without", "", "", "without"),
+        search_keys("yield", "TokenKind::KwYield NodeKind::YieldStmt", "nk_yield()", "generator yield"),
+    ];
+    var out: Map<str, SearchKeys> = [:];
+    for row in rows {
+        out.set(row.word, row);
+    }
+    return out;
+}

@@ -1,0 +1,127 @@
+// =========================================================================
+// FILE: stdlib/core/assert.pilot
+// `assert(cond)` AND `assert(cond, note)`: A CONDITION THAT MUST HOLD
+// =========================================================================
+// A false condition stops the program at the `assert` with a runtime error
+// (`fault`, exit 1) that names it:
+//
+//   assertion failed: xs.len == 4        (the condition's source text)
+//     left: 3                            (a comparison: both sides)
+//     right: 4
+//
+// With a note, the note comes first and the condition follows as
+// `expression:`. An assertion is not an exception: nothing catches it.
+// Errors a caller should handle are values (`T ! E`).
+//
+// The arms below are tried in order: one per comparison operator, taken
+// when the condition is that comparison, then the plain arm. Each side of a
+// comparison is evaluated once, left before right; the note only when the
+// assertion fails. The condition must be a `bool` (TYPE001 at build time).
+// The names the templates bind (`left_value`, ..) are hidden from the code
+// around the `assert` (crates/pilot-parser/src/rule_arms.rs, hygiene), and
+// the message is built in the template rather than by a helper function, so
+// no name the program declares can change what an assertion reports.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Assert;
+
+pub syntax {
+    assert(left == right, note = "") => quote {
+        {
+            let left_value = $left;
+            let right_value = $right;
+            if !(left_value == right_value) {
+                let note_text = $note;
+                let expression = stringify($left) + " == " + stringify($right);
+                let headline = if note_text == "" { "assertion failed: " + expression }
+                    else { "assertion failed: " + note_text + "\n  expression: " + expression };
+                let left_text = if left_value is str { "\"" + left_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + left_value };
+                let right_text = if right_value is str { "\"" + right_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + right_value };
+                fault(headline + "\n  left: " + left_text + "\n  right: " + right_text);
+            }
+        }
+    };
+    assert(left != right, note = "") => quote {
+        {
+            let left_value = $left;
+            let right_value = $right;
+            if !(left_value != right_value) {
+                let note_text = $note;
+                let expression = stringify($left) + " != " + stringify($right);
+                let headline = if note_text == "" { "assertion failed: " + expression }
+                    else { "assertion failed: " + note_text + "\n  expression: " + expression };
+                let left_text = if left_value is str { "\"" + left_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + left_value };
+                let right_text = if right_value is str { "\"" + right_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + right_value };
+                fault(headline + "\n  left: " + left_text + "\n  right: " + right_text);
+            }
+        }
+    };
+    assert(left < right, note = "") => quote {
+        {
+            let left_value = $left;
+            let right_value = $right;
+            if !(left_value < right_value) {
+                let note_text = $note;
+                let expression = stringify($left) + " < " + stringify($right);
+                let headline = if note_text == "" { "assertion failed: " + expression }
+                    else { "assertion failed: " + note_text + "\n  expression: " + expression };
+                let left_text = if left_value is str { "\"" + left_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + left_value };
+                let right_text = if right_value is str { "\"" + right_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + right_value };
+                fault(headline + "\n  left: " + left_text + "\n  right: " + right_text);
+            }
+        }
+    };
+    assert(left <= right, note = "") => quote {
+        {
+            let left_value = $left;
+            let right_value = $right;
+            if !(left_value <= right_value) {
+                let note_text = $note;
+                let expression = stringify($left) + " <= " + stringify($right);
+                let headline = if note_text == "" { "assertion failed: " + expression }
+                    else { "assertion failed: " + note_text + "\n  expression: " + expression };
+                let left_text = if left_value is str { "\"" + left_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + left_value };
+                let right_text = if right_value is str { "\"" + right_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + right_value };
+                fault(headline + "\n  left: " + left_text + "\n  right: " + right_text);
+            }
+        }
+    };
+    assert(left > right, note = "") => quote {
+        {
+            let left_value = $left;
+            let right_value = $right;
+            if !(left_value > right_value) {
+                let note_text = $note;
+                let expression = stringify($left) + " > " + stringify($right);
+                let headline = if note_text == "" { "assertion failed: " + expression }
+                    else { "assertion failed: " + note_text + "\n  expression: " + expression };
+                let left_text = if left_value is str { "\"" + left_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + left_value };
+                let right_text = if right_value is str { "\"" + right_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + right_value };
+                fault(headline + "\n  left: " + left_text + "\n  right: " + right_text);
+            }
+        }
+    };
+    assert(left >= right, note = "") => quote {
+        {
+            let left_value = $left;
+            let right_value = $right;
+            if !(left_value >= right_value) {
+                let note_text = $note;
+                let expression = stringify($left) + " >= " + stringify($right);
+                let headline = if note_text == "" { "assertion failed: " + expression }
+                    else { "assertion failed: " + note_text + "\n  expression: " + expression };
+                let left_text = if left_value is str { "\"" + left_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + left_value };
+                let right_text = if right_value is str { "\"" + right_value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"" } else { "" + right_value };
+                fault(headline + "\n  left: " + left_text + "\n  right: " + right_text);
+            }
+        }
+    };
+    assert(cond, note = "") => quote {
+        if !($cond) {
+            let note_text = $note;
+            let expression = stringify($cond);
+            let headline = if note_text == "" { "assertion failed: " + expression }
+                else { "assertion failed: " + note_text + "\n  expression: " + expression };
+            fault(headline);
+        }
+    };
+}

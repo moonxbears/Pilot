@@ -1,0 +1,31 @@
+// `else` runs when the `if` condition is false; `else if` chains tests in
+// order and the first that holds wins; `if .. else ..` is also a value.
+//
+// Expected output, worked by hand:
+//   grade(95) "A" (>= 90), grade(85) "B" (>= 80), grade(10) "F" (no test holds).
+//   7 is odd: the `else` branch prints "odd".
+//   the value form: 3 < 4 picks "less"; 5 < 4 is false and picks "not less".
+fn grade(score: i64) -> str {
+    if score >= 90 {
+        return "A";
+    } else if score >= 80 {
+        return "B";
+    } else {
+        return "F";
+    }
+}
+
+fn main() {
+    print(grade(95));
+    print(grade(85));
+    print(grade(10));
+    if 7 % 2 == 0 {
+        print("even");
+    } else {
+        print("odd");
+    }
+    let a = if 3 < 4 { "less" } else { "not less" };
+    let b = if 5 < 4 { "less" } else { "not less" };
+    print(a);
+    print(b);
+}

@@ -346,8 +346,9 @@ typedef struct pilot_v_rec {
 } pilot_v_rec;
 
 /* A layout's field count, its dynamic field reader (borrowed) and writer,
-   what releasing a value of it releases (its fields), its size and its
-   alignment (above 16 bytes for a struct written `[Align(N)]`). */
+   what releasing a value of it releases (its fields), its size, its
+   alignment (above 16 bytes for a struct written `[Align(N)]`) and its
+   fields' names, in field order (for printing a value). */
 typedef struct pilot_v_layout {
     int32_t n;
     pilot_val (*get)(pilot_val rec, int32_t i);
@@ -355,6 +356,7 @@ typedef struct pilot_v_layout {
     void (*drop)(pilot_v_rec *rec);
     size_t size;
     size_t align;
+    const char *const *names;
 } pilot_v_layout;
 
 /* Defined by the emitted module when it has record layouts. */
@@ -466,14 +468,27 @@ static void pilot_v_show_into(pilot_v_buf *b, pilot_val v) {
         pilot_v_buf_cstr(b, "]");
         return;
     case PILOT_V_REC: {
-        /* As a record of dynamic fields is shown: its fields in brackets. */
-        int32_t n = pilot_v_rec_layout(v)->n;
-        pilot_v_buf_cstr(b, "[");
-        for (int32_t i = 0; i < n; i++) {
-            if (i) pilot_v_buf_cstr(b, ", ");
-            pilot_v_show_into(b, pilot_v_rec_get(v, i));
+        /* As the seed shows a struct: `{ name: value, .. }`, the entries'
+           texts in order, as a map is shown. */
+        const pilot_v_layout *l = pilot_v_rec_layout(v);
+        pilot_val *parts = (pilot_val *)pilot_alloc(sizeof(pilot_val) * (size_t)(l->n ? l->n : 1));
+        for (int32_t i = 0; i < l->n; i++) {
+            pilot_v_buf e = {0};
+            pilot_v_buf_cstr(&e, l->names[i]);
+            pilot_v_buf_cstr(&e, ": ");
+            pilot_v_show_into(&e, pilot_v_rec_get(v, i));
+            parts[i] = pilot_v_str(e.data ? e.data : "", e.len);
+            free(e.data);
         }
-        pilot_v_buf_cstr(b, "]");
+        qsort(parts, (size_t)l->n, sizeof(pilot_val), pilot_v_cmp_text);
+        pilot_v_buf_cstr(b, "{ ");
+        for (int32_t i = 0; i < l->n; i++) {
+            if (i) pilot_v_buf_cstr(b, ", ");
+            pilot_v_buf_add(b, pilot_v_bytes(&parts[i]), pilot_v_len(parts[i]));
+            pilot_v_drop(parts[i]);
+        }
+        pilot_v_buf_cstr(b, " }");
+        free(parts);
         return;
     }
     default: {
@@ -1333,13 +1348,6 @@ static inline pilot_val pilot_str_from_bytes(pilot_val l) {
         return PILOT_V_NULL;
     }
     return pilot_v_str_done(s, n);
-}
-static inline pilot_val pilot_rt_assert(pilot_val cond, bool has_note, pilot_val note) {
-    if (cond.tag == PILOT_V_BOOL && cond.as.b) return PILOT_V_NULL;
-    if (!has_note) pilot_trap("assertion failed");
-    pilot_val text = pilot_v_concat(pilot_v_cstr("assertion failed: "), note);
-    pilot_trap_text(text);
-    return PILOT_V_NULL;
 }
 static inline pilot_val pilot_rt_fault(pilot_val message) {
     pilot_trap_text(message);

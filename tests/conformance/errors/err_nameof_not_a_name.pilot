@@ -1,0 +1,6 @@
+// SYN001: `nameof(..)` quotes exactly one name. An expression used to be
+// glued into one word and printed as "1+2".
+fn main() {
+    // `1 + 2` starts at line 5, column 18.
+    print(nameof(1 + 2));
+}

@@ -1,0 +1,24 @@
+// `__engine(..)` is the seed token through which stdlib/core binds names to
+// engine intrinsics (stdlib/core/builtins/native_calls.pilot); a program
+// outside core uses those names, never the token (ENGINE001). Each line
+// here runs a name core binds with `__engine`.
+//
+// Expected output, worked by hand:
+//   "pilot".len() is 5; " hi ".trim() is "hi"; "a-b".replace("-", "+") is "a+b".
+//   a list pushed 3 then 4 holds [3, 4]; pop() gives 4 and leaves length 1.
+//   a map set "k" to 9 has "k" and reads 9.
+fn main() {
+    print("pilot".len());
+    print(" hi ".trim());
+    print("a-b".replace("-", "+"));
+    var xs: List<i64> = [];
+    xs.push(3);
+    xs.push(4);
+    print(xs);
+    print(xs.pop());
+    print(xs.len());
+    var m: Map<str, i64> = Map();
+    m.set("k", 9);
+    print(m.has("k"));
+    print(m.get("k"));
+}

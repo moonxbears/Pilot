@@ -1,0 +1,18 @@
+// `nameof(word)` is the text of one name, fixed at compile time: a local,
+// a function, a type, or a word the language reserves.
+//
+// Expected output, worked by hand: each line is the word between the
+// parentheses, unchanged: "count", "main", "Point", "while", and the
+// length of "count" is 5.
+struct Point {
+    pub x: i64;
+}
+
+fn main() {
+    let count = 1;
+    print(nameof(count));
+    print(nameof(main));
+    print(nameof(Point));
+    print(nameof(while));
+    print(nameof(count).len() + count - 1);
+}

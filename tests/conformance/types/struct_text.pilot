@@ -1,0 +1,30 @@
+// A struct value as text: `{ name: value, .. }`, its fields sorted by name
+// (as a map prints), nested values the same way. Decided by the owner on
+// 2026-11-13: a struct prints with its field names on every engine (until
+// then PilIR and the emitted C printed only the values, `[1, 2]`).
+//
+// Hand-worked: Point is declared y then x, so it prints x first.
+struct Point {
+    y: i64,
+    x: i64,
+}
+
+struct Place {
+    label: str,
+    at: Point,
+}
+
+fn shown<T>(v: T) -> str => "" + v;
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+    print(p);
+    print("p = " + p);
+    print(f"at {p}");
+    let home = Place { label: "home", at: p };
+    print(home);
+    let ps: List<Point> = [p, Point { x: 3, y: 4 }];
+    print(ps);
+    print(shown(p));
+    print(p.x + p.y);
+}

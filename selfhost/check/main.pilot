@@ -36,6 +36,7 @@ use selfhost.check.noalloc.*;
 use selfhost.check.aliasing.*;
 use selfhost.check.layout_attrs.*;
 use selfhost.check.stack.*;
+use selfhost.check.clearance.*;
 
 pub fn check_program() -> List<List<any>> {
     let s = snap_load();
@@ -70,6 +71,7 @@ fn check_all(inf: Infer, sink: DiagSink) {
     check_type_tables(p, sink);
     check_contracts(p, sink);
     check_access(inf, sink);
+    check_clearance(inf, sink);
     check_comptime_attrs(p, sink);
     check_attr_inherit(p, sink);
     check_attr_chains(p, sink);

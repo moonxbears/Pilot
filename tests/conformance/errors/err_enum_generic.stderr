@@ -1,0 +1,2 @@
+error[SYN001]: an `enum` takes no generic parameters yet
+err_enum_generic.pilot:4:9

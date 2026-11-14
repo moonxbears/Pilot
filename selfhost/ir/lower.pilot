@@ -42,6 +42,7 @@ use selfhost.ir.lower_probe.*;
 use selfhost.ir.lower_outs.*;
 use selfhost.ir.lower_contract.*;
 use selfhost.ir.lower_spread.*;
+use selfhost.ir.lower_tail.*;
 use std.text;
 
 /// The state of one lowering run.
@@ -317,6 +318,7 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
         more = extend_start(lw) || i < lw.queue.len();
     }
     close_start(lw);
+    merge_tail_calls(m);
     return m;
 }
 
@@ -789,7 +791,7 @@ pub fn binary_op_symbols() -> List<str> => [
     "", "+", "-", "*", "/", "//", "%", "**", "==", "!=", "<", "<=", ">", ">=", "and", "or",
     "&", "|", "^", "<<", ">>", "|>", "??", "..=", "..", "is", ":=", "<-", "union", "intersect",
     "except", "<|", "as", "as view", "<=>", "+|", "-|", "*|", "+%", "-%", "*%", "+?", "-?", "*?",
-    "%%", "~>", ">..<", ">..", ":=:",
+    "%%", "~>", ">..<", ">..", ":=:", ":",
 ];
 
 /// `x |> f` / `f <| x` is `f(x)`; `x |> f(y)` is `f(x, y)`.
@@ -1225,8 +1227,11 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
     if then_clause >= 0 { emit_void(lw, op_store(), 0, [result_slot, unit_value(lw, n)], n); }
     let bi = lw.binding_of.get(key(n));
     let var_key = key(bi);
-    let ik = kind(s, iterable);
-    let is_range = ik == nk_binary() && (flags(s, iterable) == op_range() || flags(s, iterable) == op_range_inclusive());
+    // `a..b : step`: the range is the step node's lhs, the step its rhs.
+    let stepped = kind(s, iterable) == nk_binary() && flags(s, iterable) == op_step();
+    let bounds = if stepped { lhs(s, iterable) } else { iterable };
+    let ik = kind(s, bounds);
+    let is_range = ik == nk_binary() && (flags(s, bounds) == op_range() || flags(s, bounds) == op_range_inclusive());
     // In a function specialized to its argument types the checker may not
     // know the iterable's type; the element type follows from the one the
     // lowering knows.
@@ -1248,15 +1253,17 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
     let done = if then_clause >= 0 { ir_add_block(lw.f) } else { exit };
     if then_clause >= 0 { lw.result_slots.set(key(done), result_slot); }
     if is_range {
-        let start = coerce(lw, lower_expr(lw, lhs(s, iterable)), elem_phy, iterable);
-        let end = coerce(lw, lower_expr(lw, rhs(s, iterable)), elem_phy, iterable);
+        let start = coerce(lw, lower_expr(lw, lhs(s, bounds)), elem_phy, bounds);
+        let end = coerce(lw, lower_expr(lw, rhs(s, bounds)), elem_phy, bounds);
+        let by = if stepped { lower_step_check(lw, coerce(lw, lower_expr(lw, rhs(s, iterable)), elem_phy, iterable), elem_phy, n) }
+            else { emit(lw, op_const_bits(), 0, elem_phy, [pool_int(lw, 1)], n) };
         let slot = emit(lw, op_stack_slot(), 0, elem_phy, [], n);
         emit_void(lw, op_store(), 0, [slot, start], n);
         jump_to(lw, head, [], n);
         switch_to(lw, head);
         let i = emit(lw, op_load(), 0, elem_phy, [slot], n);
         // CmpPred: 2 is `<`, 3 is `<=`.
-        let pred = if flags(s, iterable) == op_range_inclusive() { 3 } else { 2 };
+        let pred = if flags(s, bounds) == op_range_inclusive() { 3 } else { 2 };
         let more = emit(lw, op_cmp(), pred, layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool()))), [i, end], n);
         emit_void(lw, op_cond_br(), 0, [more, body, 0, exit, 0], n);
         switch_to(lw, body);
@@ -1264,8 +1271,7 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
         lower_loop_body(lw, rhs(s, n), step, done, n);
         switch_to(lw, step);
         let cur = emit(lw, op_load(), 0, elem_phy, [slot], n);
-        let one = emit(lw, op_const_bits(), 0, elem_phy, [pool_int(lw, 1)], n);
-        emit_void(lw, op_store(), 0, [slot, emit(lw, op_add(), 0, elem_phy, [cur, one], n)], n);
+        emit_void(lw, op_store(), 0, [slot, emit(lw, op_add(), 0, elem_phy, [cur, by], n)], n);
         jump_to(lw, head, [], n);
         return finish_for(lw, n, exit, done, then_clause, result_slot);
     }
@@ -1293,6 +1299,23 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
     let value = finish_for(lw, n, exit, done, then_clause, result_slot);
     close_loop_enumerator(lw, en, en_t, n);
     return value;
+}
+
+/// The step of `a..b : step`, after a check that stops the program when it
+/// is 0 or less: the loop would never reach its end.
+fn lower_step_check(lw: Lowerer, by: u32, phy: IrTypePhysics, n: i64) -> u32 {
+    let ok = ir_add_block(lw.f);
+    let bad = ir_add_block(lw.f);
+    let zero = emit(lw, op_const_bits(), 0, phy, [pool_int(lw, 0)], n);
+    let positive = emit(lw, op_cmp(), 2, bool_physics(lw), [zero, by], n);
+    emit_void(lw, op_cond_br(), 0, [positive, ok, 0, bad, 0], n);
+    switch_to(lw, bad);
+    let text_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_str())));
+    let message = emit(lw, op_const_bytes(), 0, text_phy, [pool_str(lw, "the step of `a..b : step` must be greater than 0")], n);
+    emit_void(lw, op_call_intrinsic(), intrinsic_index(lw, "rt_fault"), [message], n);
+    emit_void(lw, op_unreachable(), 0, [], n);
+    switch_to(lw, ok);
+    return by;
 }
 
 /// Ends a `for` whose loop leaves for `exit` when it runs out: without a
@@ -1388,11 +1411,8 @@ fn lower_break_value(lw: Lowerer, n: i64) -> u32 {
 
 pub fn lower_return(lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
-    // `become` (flags 1) is a tail call; PilIR has no tail-call instruction
-    // yet, and an ordinary call would grow the stack.
-    if flags(s, n) == 1 {
-        let _ = seam("ir.lower_construct", "`become` is not lowered to PilIR yet: it needs a tail-call instruction");
-    }
+    // `become` (flags 1) is a tail call (selfhost/ir/lower_tail.pilot).
+    if flags(s, n) == 1 { return lower_become(lw, n); }
     var args: List<u32> = [];
     if lhs(s, n) >= 0 {
         let v = lower_hinted(lw, lhs(s, n), lw.ret_type);

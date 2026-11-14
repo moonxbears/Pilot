@@ -1,0 +1,30 @@
+// `*Bundle coalesce { field }` merges a bundle's field with a field of the
+// same name and type already in the struct: one storage slot, which both
+// bundles' methods read and write.
+//
+// Expected output, worked by hand:
+//   Device { id: 5 }: net_id = 5, disk_id = 5 + 100 = 105.
+//   id = 7: net_id = 7, disk_id = 107 (both see the one field).
+struct NetBundle {
+    pub id: i64;
+    pub fn net_id() -> i64 => .id;
+}
+
+struct DiskBundle {
+    pub id: i64;
+    pub fn disk_id() -> i64 => .id + 100;
+}
+
+struct Device {
+    *NetBundle;
+    *DiskBundle coalesce { id };
+}
+
+fn main() {
+    var d = Device { id: 5 };
+    print(d.net_id());
+    print(d.disk_id());
+    d.id = 7;
+    print(d.net_id());
+    print(d.disk_id());
+}

@@ -125,6 +125,10 @@ pub interface ISourceDialect {
     /// Declares the table `call_value` looks a function index up in.
     fn function_table(names: List<str>) -> List<str>;
     fn make_record(values: List<str>) -> str?;
+    /// A struct value (a record whose fields have `names`, in field order)
+    /// from its field values, kept so it prints as `{ name: value, .. }`;
+    /// none to build it with `make_record`.
+    fn named_record(names: List<str>, values: List<str>) -> str? => none;
     fn get_field(rec: str, i: i64) -> str?;
     fn set_field(rec: str, i: i64, v: str) -> str?;
     /// `v`, a value of physics `from`, where a value of physics `to` is
@@ -178,7 +182,7 @@ pub interface ISourceDialect {
     /// `module_open`. A language that lays a struct value out by its fields
     /// declares it here and answers the three `typed_` calls below; the
     /// others leave every record to `make_record`.
-    fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>, shapes: List<IrLayout>) -> List<str> => [];
+    fn record_decls(layouts: List<i64>, fields: List<List<IrTypePhysics>>, shapes: List<IrLayout>, names: List<List<str>>) -> List<str> => [];
     /// A record of layout `layout` (declared by `record_decls`) from its
     /// field values, each of its field's physics; a dynamic value.
     fn typed_record(layout: i64, values: List<str>) -> str? => none;
@@ -277,14 +281,16 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
     var laid: List<i64> = [];
     var laid_fields: List<List<IrTypePhysics>> = [];
     var laid_shapes: List<IrLayout> = [];
+    var laid_names: List<List<str>> = [];
     for rec in m.records {
         if some fs = record_fields(u, rec.layout) {
             laid.push(rec.layout as i64);
             laid_fields.push(fs);
             laid_shapes.push(m.layouts[rec.layout]);
+            laid_names.push(rec.names);
         }
     }
-    for line in d.record_decls(laid, laid_fields, laid_shapes) { u.out.push(line); }
+    for line in d.record_decls(laid, laid_fields, laid_shapes, laid_names) { u.out.push(line); }
     for line in d.string_pool(m.strings) { u.out.push(line); }
     for li in static_order(statics) {
         var items: List<str> = [];
@@ -1042,7 +1048,11 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
         }
         var vals: List<str> = [];
         for v in a { vals.push(as_physics(sf, v, dynamic_physics())); }
-        line(sf, d.assign(f"v{r}", d.represent(d.make_record(vals) ?? unsupported(sf, "a record"), dynamic_physics(), f.value_physics[r])));
+        var built = d.make_record(vals);
+        if some rec = ir_record_of(sf.u.m, inst.physics.layout_id) {
+            if rec.names.len() == vals.len() { built = d.named_record(rec.names, vals) ?? built; }
+        }
+        line(sf, d.assign(f"v{r}", d.represent(built ?? unsupported(sf, "a record"), dynamic_physics(), f.value_physics[r])));
         return;
     }
     if op == op_extract_field() {

@@ -23,6 +23,11 @@ mod ret_type;
 mod tuple_member;
 mod switch;
 mod inline_block;
+mod unbuilt;
+mod param_mods;
+mod rule_arms;
+mod loud;
+mod template;
 pub use modules::{parse_header, parse_unit, ModuleDecl};
 use modules::EXCLUDE_RECEPTOR;
 pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
@@ -30,143 +35,8 @@ use pilot_impls::*;
 pub use attr_hooks::RegLayout;
 pub use exits::{DEFER_ON_FAILURE, RETURN_TAIL_CALL};
 pub use contracts::{CONTRACT_ENSURES, CONTRACT_REQUIRES};
-#[derive(Clone, Debug)]
-pub enum TemplateNode { Splice(String), TypeNamed(String, Vec<TemplateNode>), TypeTuple(Vec<TemplateNode>),
-    Block(Vec<TemplateNode>), If(Box<TemplateNode>, Box<TemplateNode>, Option<Box<TemplateNode>>),
-    Loop(Box<TemplateNode>), Let(String, bool, Option<Box<TemplateNode>>),
-    Return(Option<Box<TemplateNode>>), Break(Option<Box<TemplateNode>>), Continue(Option<Box<TemplateNode>>),
-    Unary(u16, Box<TemplateNode>), Binary(u16, Box<TemplateNode>, Box<TemplateNode>),
-    Call(u16, Vec<TemplateNode>), Member(Box<TemplateNode>, String), Index(Box<TemplateNode>, Box<TemplateNode>),
-    Tuple(Vec<TemplateNode>), List(Vec<TemplateNode>), Ident(String), Int(i64), Float(f64), Bool(bool), Str(String, u16), NoneLit, }
-impl TemplateNode {
-    pub fn from_arena(arena: &AstArena, id: NodeId) -> Self { if id.is_none() || (id.0 as usize) >= arena.nodes.len() { return Self::NoneLit; }
-        let n = *arena.node(id); match n.node_kind() { NodeKind::IdentExpr => { let s = arena.interner.resolve(SymbolId(n.lhs)).to_string();
-                if n.flags == 1 { Self::Splice(s) } else { Self::Ident(s) } }
-            NodeKind::TypeNamed => { let s = arena.interner.resolve(SymbolId(n.lhs)).to_string();
-                if let Some(rest) = s.strip_prefix('$') { return Self::Splice(rest.to_string()); }
-                if n.rhs == u32::MAX { return Self::Splice(s); }
-                Self::TypeNamed(s, arena.type_args(id).iter().map(|&c| Self::from_arena(arena, NodeId(c))).collect()) }
-            NodeKind::TypeTuple => Self::TypeTuple(arena.children_slice(n.lhs, n.rhs).iter().map(|&c| Self::from_arena(arena, NodeId(c))).collect()),
-            NodeKind::BlockExpr | NodeKind::Program => {
-                let v: Vec<Self> = arena.children_slice(n.lhs, n.rhs).iter().map(|&c| Self::from_arena(arena, NodeId(c))).collect();
-                if v.len() == 1 && matches!(&v[0], Self::Loop(_) | Self::If(..) | Self::Splice(_) | Self::Int(_) | Self::Block(_)) {
-                    v.into_iter().next().unwrap()
-                } else { Self::Block(v) } }
-            NodeKind::ExprStmt | NodeKind::ComptimeExpr => Self::from_arena(arena, NodeId(n.lhs)), NodeKind::IfExpr => {
-                let c = Box::new(Self::from_arena(arena, NodeId(n.lhs))); if n.flags == 2 { let ch = arena.children_slice(n.rhs, 2);
-                    Self::If(c, Box::new(Self::from_arena(arena, NodeId(ch[0]))), Some(Box::new(Self::from_arena(arena, NodeId(ch[1])))))
-                } else { Self::If(c, Box::new(Self::from_arena(arena, NodeId(n.rhs))), None) } }
-            NodeKind::WhileStmt => Self::Loop(Box::new(Self::from_arena(arena, NodeId(n.rhs)))),
-            NodeKind::LetStmt | NodeKind::VarStmt => { let nm = arena.interner.resolve(SymbolId(n.lhs)).to_string();
-                Self::Let(nm, n.node_kind() == NodeKind::VarStmt, NodeId(n.rhs).is_some().then(|| Box::new(Self::from_arena(arena, NodeId(n.rhs)))))
-            }
-            NodeKind::ReturnStmt => Self::Return(NodeId(n.lhs).is_some().then(|| Box::new(Self::from_arena(arena, NodeId(n.lhs))))),
-            NodeKind::BreakStmt => Self::Break(NodeId(n.lhs).is_some().then(|| Box::new(Self::from_arena(arena, NodeId(n.lhs))))),
-            NodeKind::ContinueStmt => Self::Continue(NodeId(n.lhs).is_some().then(|| Box::new(Self::from_arena(arena, NodeId(n.lhs))))),
-            NodeKind::UnaryExpr => Self::Unary(n.flags, Box::new(Self::from_arena(arena, NodeId(n.lhs)))),
-            NodeKind::BinaryExpr => Self::Binary(n.flags, Box::new(Self::from_arena(arena, NodeId(n.lhs))), Box::new(Self::from_arena(arena, NodeId(n.rhs)))),
-            NodeKind::CallExpr => Self::Call(n.flags, arena.children_slice(n.lhs, n.rhs).iter().map(|&c| Self::from_arena(arena, NodeId(c))).collect()),
-            NodeKind::MemberExpr => Self::Member(Box::new(Self::from_arena(arena, NodeId(n.lhs))), arena.interner.resolve(SymbolId(n.rhs)).to_string()),
-            NodeKind::IndexExpr => Self::Index(Box::new(Self::from_arena(arena, NodeId(n.lhs))), Box::new(Self::from_arena(arena, NodeId(n.rhs)))),
-            NodeKind::TupleExpr => Self::Tuple(arena.children_slice(n.lhs, n.rhs).iter().map(|&c| Self::from_arena(arena, NodeId(c))).collect()),
-            NodeKind::ListExpr => Self::List(arena.children_slice(n.lhs, n.rhs).iter().map(|&c| Self::from_arena(arena, NodeId(c))).collect()),
-            NodeKind::IntLit => Self::Int(arena.i64_pool.get(n.lhs as usize).copied().unwrap_or(0)),
-            NodeKind::FloatLit => Self::Float(arena.f64_pool.get(n.lhs as usize).copied().unwrap_or(0.0)),
-            NodeKind::BoolLit => Self::Bool(n.lhs != 0),
-            NodeKind::StrLit => Self::Str(arena.interner.resolve(SymbolId(n.lhs)).to_string(), n.flags), _ => Self::NoneLit, } }
-    pub fn instantiate(&self, arena: &mut AstArena, bindings: &[(String, NodeId)], span: ByteSpan) -> NodeId { match self {
-            Self::Splice(nm) => { if let Some(&(_, id)) = bindings.iter().find(|(k, _)| k == nm) { clone_ast(arena, id) }
-                else { arena.alloc_ident(nm, span) } }
-            Self::TypeNamed(base, args) => {
-                if args.is_empty() { if let Some(&(_, id)) = bindings.iter().find(|(k, _)| k == base) { return clone_ast(arena, id); } }
-                let a: Vec<NodeId> = args.iter().map(|x| x.instantiate(arena, bindings, span)).collect();
-                let sym = arena.interner.intern(base); arena.alloc_type_named(sym, &a, span) }
-            Self::TypeTuple(v) => { let ch: Vec<NodeId> = v.iter().map(|x| x.instantiate(arena, bindings, span)).collect(); arena.alloc_list_node(NodeKind::TypeTuple, 0, span, &ch) }
-            Self::Block(v) => {
-                let mut ch: Vec<NodeId> = Vec::new();
-                for x in v {
-                    let i = x.instantiate(arena, bindings, span);
-                    if i.is_some() {
-                        ch.push(as_block_item(arena, i, span));
-                    }
-                }
-                arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &ch)
-            }
-            Self::If(c, t, e) => { let (cid, tid) = (c.instantiate(arena, bindings, span), t.instantiate(arena, bindings, span));
-                if let Some(el) = e { let eid = el.instantiate(arena, bindings, span);
-                    let (st, _) = arena.alloc_child_slice(&[tid, eid]); arena.alloc_node(NodeKind::IfExpr, 2, span, cid.0, st)
-                } else { arena.alloc_node(NodeKind::IfExpr, 0, span, cid.0, tid.0) } }
-            Self::Loop(b) => { if let Self::Block(stmts) = b.as_ref() { if stmts.len() == 2 { if let Self::If(ec, eb, None) = &stmts[0] {
-                            let is_brk = matches!(eb.as_ref(), Self::Break(None)) || matches!(eb.as_ref(), Self::Block(x) if x.len() == 1 && matches!(x[0], Self::Break(None)));
-                            if is_brk { let wc = if let Self::Unary(5, ic) = ec.as_ref() { ic.instantiate(arena, bindings, span) }
-                                else { let raw = ec.instantiate(arena, bindings, span); arena.alloc_node(NodeKind::UnaryExpr, 5, span, raw.0, 0) };
-                                let wb = stmts[1].instantiate(arena, bindings, span);
-                                return arena.alloc_node(NodeKind::WhileStmt, 0, span, wc.0, wb.0); } } } }
-                let (tr, bid) = (arena.alloc_node(NodeKind::BoolLit, 0, span, 1, 0), b.instantiate(arena, bindings, span));
-                arena.alloc_node(NodeKind::WhileStmt, 0, span, tr.0, bid.0) }
-            Self::Let(nm, m, init) => {
-                let (sym, r) = (arena.interner.intern(nm), init.as_ref().map_or(NodeId::NONE, |v| v.instantiate(arena, bindings, span)));
-                arena.alloc_node(if *m { NodeKind::VarStmt } else { NodeKind::LetStmt }, 0, span, sym.0, r.0) }
-            Self::Return(v) => { let r = v.as_ref().map_or(NodeId::NONE, |x| x.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::ReturnStmt, 0, span, r.0, 0) }
-            Self::Break(v) => { let r = v.as_ref().map_or(NodeId::NONE, |x| x.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::BreakStmt, 0, span, r.0, 0) }
-            Self::Continue(v) => { let r = v.as_ref().map_or(NodeId::NONE, |x| x.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::ContinueStmt, 0, span, r.0, 0) }
-            Self::Unary(f, x) => { let v = x.instantiate(arena, bindings, span); arena.alloc_node(NodeKind::UnaryExpr, *f, span, v.0, 0) }
-            Self::Binary(f, l, r) => { let (lid, rid) = (l.instantiate(arena, bindings, span), r.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::BinaryExpr, *f, span, lid.0, rid.0) }
-            Self::Call(f, v) => { let ch: Vec<NodeId> = v.iter().map(|x| x.instantiate(arena, bindings, span)).collect(); arena.alloc_list_node(NodeKind::CallExpr, *f, span, &ch) }
-            Self::Member(t, fld) => { let (tid, fsym) = (t.instantiate(arena, bindings, span), arena.interner.intern(fld)); arena.alloc_node(NodeKind::MemberExpr, 0, span, tid.0, fsym.0) }
-            Self::Index(t, i) => { let (tid, iid) = (t.instantiate(arena, bindings, span), i.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::IndexExpr, 0, span, tid.0, iid.0) }
-            Self::Tuple(v) => { let ch: Vec<NodeId> = v.iter().map(|x| x.instantiate(arena, bindings, span)).collect(); arena.alloc_list_node(NodeKind::TupleExpr, 0, span, &ch) }
-            Self::List(v) => { let ch: Vec<NodeId> = v.iter().map(|x| x.instantiate(arena, bindings, span)).collect(); arena.alloc_list_node(NodeKind::ListExpr, 0, span, &ch) }
-            Self::Ident(s) => arena.alloc_ident(s, span), Self::Int(v) => arena.alloc_int(*v, span),
-            Self::Float(v) => arena.alloc_float(*v, span), Self::Bool(b) => arena.alloc_node(NodeKind::BoolLit, 0, span, *b as u32, 0),
-            Self::Str(s, f) => { let sym = arena.interner.intern(s); arena.alloc_node(NodeKind::StrLit, *f, span, sym.0, 0) }
-            Self::NoneLit => arena.alloc_node(NodeKind::NoneLit, 0, span, 0, 0), } } }
-/// A block item made from a template: an expression stands as an
-/// expression statement, as the parser makes it, so a block whose last item
-/// is an expression has that expression's value (`quote { $x + $x }`).
-fn as_block_item(arena: &mut AstArena, id: NodeId, span: ByteSpan) -> NodeId {
-    let is_expr = matches!(
-        arena.node(id).node_kind(),
-        NodeKind::BinaryExpr
-            | NodeKind::UnaryExpr
-            | NodeKind::CallExpr
-            | NodeKind::MemberExpr
-            | NodeKind::IndexExpr
-            | NodeKind::TupleExpr
-            | NodeKind::ListExpr
-            | NodeKind::IdentExpr
-            | NodeKind::IntLit
-            | NodeKind::FloatLit
-            | NodeKind::BoolLit
-            | NodeKind::StrLit
-            | NodeKind::NoneLit
-    );
-    if is_expr {
-        arena.alloc_node(NodeKind::ExprStmt, 0, span, id.0, 0)
-    } else {
-        id
-    }
-}
-fn clone_ast(arena: &mut AstArena, id: NodeId) -> NodeId { if id.is_none() || (id.0 as usize) >= arena.nodes.len() { return NodeId::NONE; }
-    let (n, sp, ann) = (*arena.node(id), arena.span(id), arena.type_annot(id)); let out = match n.node_kind() { NodeKind::TypeNamed => {
-            let args: Vec<NodeId> = arena.type_args(id).to_vec().into_iter().map(|c| clone_ast(arena, NodeId(c))).collect();
-            arena.alloc_type_named(SymbolId(n.lhs), &args, sp) }
-        NodeKind::TypeTuple | NodeKind::BlockExpr | NodeKind::TupleExpr | NodeKind::ListExpr | NodeKind::MapExpr | NodeKind::CallExpr => {
-            let ch: Vec<NodeId> = arena.children_slice(n.lhs, n.rhs).to_vec().into_iter().map(|c| clone_ast(arena, NodeId(c))).collect();
-            arena.alloc_list_node(n.node_kind(), n.flags, sp, &ch) }
-        NodeKind::BinaryExpr | NodeKind::AssignStmt | NodeKind::IndexExpr | NodeKind::WhileStmt | NodeKind::GuardStmt => {
-            let (l, r) = (clone_ast(arena, NodeId(n.lhs)), clone_ast(arena, NodeId(n.rhs)));
-            arena.alloc_node(n.node_kind(), n.flags, sp, l.0, r.0) }
-        NodeKind::IfExpr => { let c = clone_ast(arena, NodeId(n.lhs)); if n.flags == 2 { let raw = arena.children_slice(n.rhs, 2).to_vec();
-                let (t, e) = (clone_ast(arena, NodeId(raw[0])), clone_ast(arena, NodeId(raw[1])));
-                let (st, _) = arena.alloc_child_slice(&[t, e]); arena.alloc_node(NodeKind::IfExpr, 2, sp, c.0, st)
-            } else { let t = clone_ast(arena, NodeId(n.rhs)); arena.alloc_node(NodeKind::IfExpr, 0, sp, c.0, t.0) } }
-        NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::BreakStmt | NodeKind::ContinueStmt | NodeKind::ExprStmt | NodeKind::MemberExpr => {
-            let l = clone_ast(arena, NodeId(n.lhs)); arena.alloc_node(n.node_kind(), n.flags, sp, l.0, n.rhs) }
-        NodeKind::LetStmt | NodeKind::VarStmt => { let r = clone_ast(arena, NodeId(n.rhs)); arena.alloc_node(n.node_kind(), n.flags, sp, n.lhs, r.0) }
-        _ => arena.alloc_node(n.node_kind(), n.flags, sp, n.lhs, n.rhs), };
-    if let Some(a) = ann { let ca = clone_ast(arena, a); arena.set_type_annot(out, ca); }
-    out }
+pub use template::TemplateNode;
+use template::clone_ast;
 #[derive(Clone, Debug)]
 pub enum TypePostfixKind { BracketEmpty, BracketDotDot, BracketColon, BracketArgs(usize), Sym(String, bool) }
 #[derive(Clone, Debug)]
@@ -174,10 +44,9 @@ pub enum TypeConstructRule { Prefix { op: String, param: String, template: Templ
     Postfix { kind: TypePostfixKind, params: Vec<String>, template: TemplateNode },
     Infix { op: String, bp: u8, right_assoc: bool, lhs_param: String, rhs_param: String, template: TemplateNode },
     NamedGeneric { name: String, params: Vec<String>, template: TemplateNode }, }
-#[derive(Clone, Debug)]
-pub struct SyntaxMacroRule { pub params: Vec<String>, pub template: TemplateNode }
+pub use rule_arms::SyntaxMacroRule;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, Async, NoAlloc, Ring }
+enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, NoAlloc, Unbuilt }
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PrattEntry { pub bp: u8, pub right_assoc: bool, pub bin_op: u16 }
 #[derive(Clone, Debug)]
@@ -238,7 +107,9 @@ impl ParserTables {
                         let (w, act) = (s_arg(2), if let Some(v) = i_arg(3) { ModAct::Vis(v as u8) } else { match s_arg(3).as_str() {
                                 "merge_type_members" => ModAct::Partial, "storage_static" => ModAct::Static, "effect_pure" => ModAct::Pure,
                                 "binding_mutable" => ModAct::Mut, "binding_const" => ModAct::Const, "perceus_isolated" => ModAct::Iso,
-                                "extension_member" => ModAct::Ext, "effect_async" => ModAct::Async, "effect_noalloc" => ModAct::NoAlloc, _ => ModAct::Ring, }
+                                "extension_member" => ModAct::Ext, "effect_noalloc" => ModAct::NoAlloc,
+                                // An action the parser does not know is not built either.
+                                _ => ModAct::Unbuilt, }
                         }); if !w.is_empty() { self.modifiers.insert(w, act); } }
                     "register_parametric_modifier" => { let w = s_arg(2); if !w.is_empty() { self.param_modifiers.insert(w); } }
                     "register_module_kw" => { let w = s_arg(2); if !w.is_empty() { self.module_kws.insert(w, s_arg(3) == "declare_package_scope"); } }
@@ -285,10 +156,10 @@ fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
 const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/core.pilot",
     "stdlib/core/syntax/type_construct.pilot",
+    "stdlib/core/syntax/module_ext.pilot",
     "stdlib/core/syntax/visibility.pilot",
     "stdlib/core/syntax/lifecycle.pilot",
     "stdlib/core/syntax/properties.pilot",
-    "stdlib/core/syntax/module_ext.pilot",
     "stdlib/core/syntax/attribute.pilot",
     "stdlib/core/syntax/for.pilot",
     "stdlib/core/generator.pilot",
@@ -302,6 +173,7 @@ const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/syntax/fstring.pilot",
     "stdlib/core/format.pilot",
     "stdlib/core/syntax/call_quote.pilot",
+    "stdlib/core/assert.pilot",
     "stdlib/core/syntax/unit_decl.pilot",
     "stdlib/core/builtins/native_calls.pilot",
     "stdlib/db/sql_syntax.pilot",
@@ -336,12 +208,12 @@ pub fn source_root() -> std::path::PathBuf {
 /// The sources of the bootstrap tables: `BOOTSTRAP_SOURCES`, then every
 /// primitive file in file-name order, so adding a primitive file needs no
 /// change here. A missing file is reported and skipped.
-fn bootstrap_sources() -> Vec<String> {
+fn bootstrap_sources() -> Vec<(String, String)> {
     let root = source_root();
     let mut out = Vec::new();
     for rel in BOOTSTRAP_SOURCES {
         match std::fs::read_to_string(root.join(rel)) {
-            Ok(src) => out.push(src),
+            Ok(src) => out.push((rel.to_string(), src)),
             Err(e) => eprintln!("internal error: bootstrap source `{rel}` unreadable: {e}"),
         }
     }
@@ -352,7 +224,28 @@ fn bootstrap_sources() -> Vec<String> {
         .filter(|p| p.extension().is_some_and(|x| x == "pilot"))
         .collect();
     files.sort();
-    out.extend(files.iter().filter_map(|p| std::fs::read_to_string(p).ok()));
+    for p in files {
+        if let Ok(src) = std::fs::read_to_string(&p) {
+            out.push((format!("{PRIMITIVES_DIR}/{}", p.file_name().unwrap_or_default().to_string_lossy()), src));
+        }
+    }
+    out
+}
+
+/// What the parser reported while building the bootstrap tables, as
+/// `file:line: message`, in bootstrap order. The tables are built without
+/// showing these, so a source that does not parse would otherwise lose its
+/// declarations unseen; `tests/bootstrap_sources.rs` requires none.
+pub fn bootstrap_diagnostics() -> Vec<String> {
+    let mut t = ParserTables::new();
+    let mut out = Vec::new();
+    for (rel, src) in bootstrap_sources() {
+        let arena = parse_and_ingest(&src, &mut t);
+        for (span, msg) in &arena.diagnostics {
+            let line = src[..(span.start as usize).min(src.len())].matches('\n').count() + 1;
+            out.push(format!("{rel}:{line}: {msg}"));
+        }
+    }
     out
 }
 
@@ -362,15 +255,15 @@ static BOOTSTRAP_TABLES: OnceLock<ParserTables> = OnceLock::new();
 pub fn bootstrap_tables() -> &'static ParserTables {
     BOOTSTRAP_TABLES.get_or_init(|| {
         let mut t = ParserTables::new();
-        for src in bootstrap_sources() {
+        for (_, src) in bootstrap_sources() {
             let _ = parse_and_ingest(&src, &mut t);
         }
         t
     })
 }
 pub fn parse(src: &str) -> AstArena { parse_with_tables(src, bootstrap_tables()) }
-pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: false, folds: Default::default(), in_ensures: false, }; p.parse_program(); p.arena }
-pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, folds: Default::default(), in_ensures: false, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } tables.finish_ingest(src); arena }
+pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: false, folds: Default::default(), in_ensures: false, fn_body_depth: 0, }; p.parse_program(); p.arena }
+pub fn parse_and_ingest(src: &str, tables: &mut ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: true, folds: Default::default(), in_ensures: false, fn_body_depth: 0, }; p.parse_program(); let (arena, owned) = (p.arena, match p.tables { Cow::Owned(o) => Some(o), _ => None }); if let Some(o) = owned { *tables = o; } tables.finish_ingest(src); arena }
 #[inline]
 fn is_seed_kw(k: TokenKind) -> bool { matches!(k, TokenKind::KwEngine | TokenKind::KwStruct | TokenKind::KwInterface | TokenKind::KwFn
         | TokenKind::KwLet | TokenKind::KwRef | TokenKind::KwIf | TokenKind::KwLoop
@@ -401,7 +294,9 @@ struct Parser<'a> { src: &'a str, tape: TokenTape, pos: usize, arena: AstArena, 
     /// The constants and run-time names `comptime if` folds against.
     folds: comptime_if::FoldScope,
     /// Parsing an `ensures` clause, where `old(..)` is the entry value.
-    in_ensures: bool, }
+    in_ensures: bool,
+    /// How many function bodies enclose the parser.
+    fn_body_depth: u32, }
 impl<'a> Parser<'a> {
     #[inline] fn cur(&self) -> usize { self.next_non_nl(self.pos) }
     #[inline] fn skip_seps(&mut self) { while self.eat(TokenKind::Semicolon) {} }
@@ -481,24 +376,49 @@ impl<'a> Parser<'a> {
             if self.at(TokenKind::KwComptime) && !(nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LBrace) { self.advance(); m.flags |= DECL_FLAG_COMPTIME; continue; }
             if !self.is_word() { break; }
             let w = self.text(); if self.tables.param_modifiers.contains(w) && nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen {
-                self.advance(); self.eat(TokenKind::LParen); let mut d = 1;
-                while !self.at_end() && d > 0 { if self.at(TokenKind::LParen) { d += 1; } else if self.at(TokenKind::RParen) { d -= 1; } self.advance(); }
-                continue; }
+                let attr = self.parse_param_modifier(); m.attrs.push(attr); continue; }
             if self.tables.module_kws.get(w) == Some(&true) && nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || self.tape.kind(nx) == TokenKind::LBrace) && !self.tables.modifiers.contains_key(self.tape.text(nx, self.src)) {
                 break; }
             let Some(&act) = self.tables.modifiers.get(w) else { break; };
+            // An unbuilt modifier followed by what follows a name (`:`, `=`, `(`,
+            // ..) is that name (`pub override: bool;`), not the modifier.
+            if matches!(act, ModAct::Unbuilt) && (nx >= self.tape.len() || matches!(self.tape.kind(nx), TokenKind::Colon | TokenKind::Question
+                | TokenKind::Equal | TokenKind::Semicolon | TokenKind::Comma | TokenKind::InfixDot | TokenKind::LParen)) { break; }
             // After `var`/`const`, a modifier word followed by `=`, `:`, `;` or `,`
             // is the binding's name (`var pkg = 1;`), not another modifier.
             let binding_started = (m.flags & DECL_FLAG_MUT) != 0 || m.is_const;
             if binding_started && nx < self.tape.len()
                 && matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::Colon | TokenKind::Semicolon | TokenKind::Comma)
             { break; }
+            // After a visibility word, a second one followed by what follows a
+            // name is that name (`pub file: str;`).
+            let names_member = nx >= self.tape.len() || matches!(self.tape.kind(nx), TokenKind::Colon | TokenKind::Question
+                | TokenKind::Equal | TokenKind::Semicolon | TokenKind::Comma | TokenKind::InfixDot | TokenKind::LParen);
+            if matches!(act, ModAct::Vis(_)) && m.vis.is_some() && names_member { break; }
+            // A visibility word followed by neither a declaration (a word, a
+            // keyword, `[` attributes) nor a header (`:` or `{`) is a name used
+            // in an expression (`open + text`).
+            let starts_decl = nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || is_seed_kw(self.tape.kind(nx))
+                || matches!(self.tape.kind(nx), TokenKind::Colon | TokenKind::LBrace | TokenKind::LBracket));
+            if matches!(act, ModAct::Vis(_)) && !starts_decl { break; }
+            let (mod_span, mod_word) = (self.span(), w.to_string());
             self.advance(); match act {
-                ModAct::Vis(v) => m.vis = Some(v), ModAct::Partial => m.flags |= DECL_FLAG_PARTIAL,
+                ModAct::Unbuilt => self.report_unbuilt(mod_span, &mod_word),
+                ModAct::Vis(v) => {
+                    if m.vis.is_some() {
+                        let msg = format!("a declaration takes one visibility word; `{mod_word}` is a second one");
+                        self.arena.diagnostics.push((mod_span, msg));
+                    } else if self.fn_body_depth > 0 && !in_type_body {
+                        let msg = format!("`{mod_word}` sets who may use a declaration of a package or type; a local in a block has no such reach");
+                        self.arena.diagnostics.push((mod_span, msg));
+                    }
+                    m.vis = Some(v);
+                }
+                ModAct::Partial => m.flags |= DECL_FLAG_PARTIAL,
                 ModAct::Static => m.flags |= DECL_FLAG_STATIC, ModAct::Pure => m.flags |= DECL_FLAG_PURE,
                 ModAct::Mut => m.flags |= DECL_FLAG_MUT, ModAct::Const => m.is_const = true,
                 ModAct::Ext => m.is_ext = true, ModAct::NoAlloc => m.flags |= DECL_FLAG_NOALLOC,
-                ModAct::Iso | ModAct::Async | ModAct::Ring => {} } }
+                ModAct::Iso => {} } }
         m }
     fn parse_item(&mut self, out: &mut Vec<NodeId>, in_type_body: bool) { let start_pos = self.pos;
         if self.at_comptime_if() {
@@ -560,7 +480,7 @@ impl<'a> Parser<'a> {
                 if self.is_receiver() && in_type_body { let nx = self.next_non_nl(self.cur() + 1);
                     if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen { out.push(self.parse_ctor(&mods)); return; }
                     if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LBracket { out.push(self.parse_indexer(&mods, def_vis)); return; } }
-                if self.receptor().is_some_and(|(rk, pl)| rk == 33 && matches!(pl, 1 | 21 | 22)) { out.push(self.parse_domain_decl(&mods, def_vis)); return; }
+                if self.at_unbuilt_decl() { let _ = self.parse_unbuilt(); return; }
                 if in_type_body || raw_mods.is_non_empty() { let nx = self.next_non_nl(self.cur() + 1);
                     if nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::Colon | TokenKind::Question) { out.push(self.parse_field_or_prop(&mods, def_vis)); return; }
                     if let Some(h) = &hdr_snap { if h.target != 0 { self.parse_headless_or_item(out, h.target, in_type_body); return; } } }
@@ -588,7 +508,7 @@ impl<'a> Parser<'a> {
                 if self.eat(TokenKind::Comma) { if self.at(TokenKind::LBrace) || self.at(TokenKind::Semicolon) {
                         self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in inheritance list".into())); break; }
                 } else { break; } } }
-        while self.is_rec(28) { self.advance(); while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::Semicolon) { self.advance(); } }
+        self.type_where_loudly();
         let mut has_dtor = false; let body = if self.at(TokenKind::LBrace) { let bsp = self.span(); self.advance();
             self.hdr_stack.push(self.active_hdr.take()); let mut members = Vec::new(); while !self.at_end() && !self.at(TokenKind::RBrace) {
                 self.skip_seps(); if self.at_end() || self.at(TokenKind::RBrace) { break; }
@@ -644,6 +564,7 @@ impl<'a> Parser<'a> {
         let id = self.arena.alloc_node(NodeKind::ExtendDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), name_sym.0, body.0);
         self.apply_mods(id, mods, 7); id }
     fn parse_param_list(&mut self) -> Vec<NodeId> { let mut params = Vec::new(); if !self.eat(TokenKind::LParen) { return params; }
+        let mut saw_default = false;
         while !self.at_end() && !self.at(TokenKind::RParen) {
             if matches!(self.peek(), TokenKind::Ellipsis | TokenKind::DotDot | TokenKind::PrefixDot | TokenKind::InfixDot) {
                 while matches!(self.peek(), TokenKind::Ellipsis | TokenKind::DotDot | TokenKind::PrefixDot | TokenKind::InfixDot) { self.advance(); }
@@ -658,12 +579,20 @@ impl<'a> Parser<'a> {
                     else { break };
                 pflags |= PARAM_FLAG_LENT | bit;
             }
-            let _ = self.eat(TokenKind::Star) || self.eat(TokenKind::DoubleStar); let psym = self.intern_cur();
+            self.rest_param_loudly();
+            let psym = self.intern_cur();
             self.note_runtime(psym);
             let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
-            if self.eat(TokenKind::Equal) { let _ = self.parse_expr(); }
+            let default = self.param_default();
             let pid = self.arena.alloc_node(NodeKind::ParamDecl, pflags, ByteSpan::new(psp.start, self.prev_span().end.max(psp.end)), psym.0, ty.0);
             if ty.is_some() { self.arena.set_type_annot(pid, ty); }
+            if default.is_some() {
+                self.arena.field_defaults.push((pid, default));
+                saw_default = true;
+            } else if saw_default && !self.at_end() {
+                let name = self.arena.interner.resolve(psym).to_string();
+                self.arena.diagnostics.push((ByteSpan::new(psp.start, psp.end), format!("`{name}` has no default but follows a parameter that has one")));
+            }
             params.push(pid); if self.eat(TokenKind::Comma) {
                                 if self.at(TokenKind::RParen) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in parameter list".into())); break; }
             } else { break; } }
@@ -683,7 +612,7 @@ impl<'a> Parser<'a> {
             self.advance(); while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::FatArrow) && !self.at(TokenKind::Semicolon) && !self.at_contract_clause() { self.advance(); }
         }
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
-        else if self.at(TokenKind::LBrace) { self.parse_block() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
+        else if self.at(TokenKind::LBrace) { self.parse_fn_body() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
         let body = self.with_contracts(body, &clauses);
         self.folds.restore_runtime(outer_runtime);
         let mut ch = vec![body]; ch.extend(params); let (st, ln) = self.arena.alloc_child_slice(&ch);
@@ -693,12 +622,12 @@ impl<'a> Parser<'a> {
         id }
     fn parse_ctor(&mut self, mods: &DeclMods) -> NodeId { let sp = self.span(); self.advance(); let params = self.parse_param_list();
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
-        else if self.at(TokenKind::LBrace) { self.parse_block() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
+        else if self.at(TokenKind::LBrace) { self.parse_fn_body() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
         let mut ch = vec![body]; ch.extend(params);
         let id = self.arena.alloc_list_node(NodeKind::ConstructorDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch);
         self.apply_mods(id, mods, 7); id }
-    fn parse_dtor(&mut self, mods: &DeclMods) -> NodeId { let sp = self.span(); self.advance(); self.advance(); let _ = self.parse_param_list();
-        let body = if self.at(TokenKind::LBrace) { self.parse_block() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
+    fn parse_dtor(&mut self, mods: &DeclMods) -> NodeId { let sp = self.span(); self.advance(); self.advance(); self.dtor_params_loudly();
+        let body = if self.at(TokenKind::LBrace) { self.parse_fn_body() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
         let id = self.arena.alloc_node(NodeKind::DestructorDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), body.0, 0);
         let mut fm = mods.clone(); fm.flags |= DECL_FLAG_DTOR; self.apply_mods(id, &fm, 7); id }
     fn parse_scope_decl(&mut self) -> NodeId { let sp = self.span(); self.advance(); if self.is_receiver() { self.advance(); }
@@ -725,7 +654,7 @@ impl<'a> Parser<'a> {
         else { while !self.at_end() && !self.at(TokenKind::LParen) { op_txt.push_str(self.text()); self.advance(); } }
         let (params, ret) = (self.parse_param_list(), if self.eat(TokenKind::Arrow) { self.parse_type() } else { NodeId::NONE });
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
-        else if self.at(TokenKind::LBrace) { self.parse_block() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
+        else if self.at(TokenKind::LBrace) { self.parse_fn_body() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };
         // Laid out like a function, named by the operator's text: `op ?` is
         // the method `?` of its type.
         let mut ch = vec![body]; ch.extend(params); let (st, ln) = self.arena.alloc_child_slice(&ch);
@@ -734,10 +663,16 @@ impl<'a> Parser<'a> {
         if ret.is_some() { self.arena.set_type_annot(id, ret); }
         self.apply_mods(id, mods, def_vis); id }
     fn parse_field_or_prop(&mut self, mods: &DeclMods, def_vis: u8) -> NodeId { let (sp, sym) = (self.span(), self.intern_cur());
-        let _ = self.eat(TokenKind::Question); let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
+        self.field_question_loudly(); let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
         let (mut default, mut accessors) = (NodeId::NONE, NodeId::NONE);
+        // A property may have both: `{ get => .. } = v` or `= v { get => .. }`.
         if self.at(TokenKind::LBrace) { accessors = self.skip_accessor_block(); }
-        else if self.eat(TokenKind::Equal) { default = self.parse_expr(); }
+        if self.eat(TokenKind::Equal) {
+            self.no_struct_lit = true;
+            default = self.parse_expr();
+            self.no_struct_lit = false;
+        }
+        if accessors.is_none() && self.at(TokenKind::LBrace) { accessors = self.skip_accessor_block(); }
         let _ = self.eat(TokenKind::Semicolon) || self.eat(TokenKind::Comma);
         let id = self.arena.alloc_node(NodeKind::ParamDecl, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), sym.0, ty.0);
         if default.is_some() { self.arena.field_defaults.push((id, default)); }
@@ -785,7 +720,7 @@ impl<'a> Parser<'a> {
             let id = self.arena.alloc_node(NodeKind::TypeAdtDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, rhs.0);
             self.apply_mods(id, mods, def_vis); id } }
     fn parse_enum_decl(&mut self, mods: &DeclMods, def_vis: u8, headless: bool) -> NodeId { let sp = self.span(); if !headless { self.advance(); }
-        let sym = self.intern_cur(); let _ = self.parse_generic_params(); let base = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
+        let sym = self.intern_cur(); self.generics_loudly("an `enum`"); let base = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
         let mut variants = Vec::new(); if self.eat(TokenKind::LBrace) { while !self.at_end() && !self.at(TokenKind::RBrace) {
                 self.skip_seps(); if self.at(TokenKind::RBrace) || self.at_end() { break; }
                 let _ = self.parse_mods(true); let (vsp, vsym) = (self.span(), self.intern_cur());
@@ -811,15 +746,6 @@ impl<'a> Parser<'a> {
                 let m = self.pos; self.parse_item(&mut fns, false); if self.pos == m { self.advance(); } }
             self.expect(TokenKind::RBrace); }
         self.arena.alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &fns) }
-    fn parse_domain_decl(&mut self, mods: &DeclMods, def_vis: u8) -> NodeId {
-        let (sp, (_, pl)) = (self.span(), self.receptor().unwrap_or((33, 0))); self.advance(); let sym = if pl == 21 {
-            let from_t = self.parse_type(); let _ = self.eat(TokenKind::Arrow); let _ = self.parse_type();
-            if from_t.is_some() { SymbolId(self.arena.node(from_t).lhs) } else { self.arena.interner.intern("_") }
-        } else { let s = if self.is_word() { self.intern_cur() } else { self.arena.interner.intern("_") };
-            if self.eat(TokenKind::LParen) { while !self.at_end() && !self.at(TokenKind::RParen) { self.advance(); } let _ = self.eat(TokenKind::RParen); }
-            s }; let b = if self.at(TokenKind::LBrace) { self.parse_block() } else { NodeId::NONE };
-        let id = self.arena.alloc_node(NodeKind::StructDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, b.0);
-        self.apply_mods(id, mods, def_vis); id }
     fn parse_syntax_decl(&mut self, mods: &DeclMods) -> NodeId { let sp = self.span(); self.advance();
         let (is_tc, is_ac) = (self.is_rec(5), self.is_rec(6)); if is_tc || is_ac { self.advance(); }
         self.expect(TokenKind::LBrace); let mut rules = Vec::new(); while !self.at_end() && !self.at(TokenKind::RBrace) {
@@ -837,12 +763,16 @@ impl<'a> Parser<'a> {
                 } else { self.parse_expr() }; let _ = self.eat(TokenKind::Semicolon); if is_tc && body.is_some() {
                     if let Some(rule) = compile_type_rule(&pat_toks, TemplateNode::from_arena(&self.arena, body)) {
                         let t = self.tables.to_mut(); t.type_rules.retain(|e| !same_type_trigger(e, &rule)); t.type_rules.push(rule); } }
-                rules.push(body); } else { let kw = self.text().to_string(); self.advance(); let params = self.parse_param_list();
-                let pnames: Vec<String> = params.iter().map(|&pid| self.arena.interner.resolve(SymbolId(self.arena.node(pid).lhs)).to_string()).collect();
+                rules.push(body); } else { let kw = self.text().to_string(); self.advance(); let rich = self.rule_head_is_rich();
+                let (params, arm) = if rich { let h = self.parse_rule_head(); (h.nodes, h.arm) } else { let params = self.parse_param_list();
+                    let pnames: Vec<String> = params.iter().map(|&pid| self.arena.interner.resolve(SymbolId(self.arena.node(pid).lhs)).to_string()).collect();
+                    let defaults = vec![None; pnames.len()]; (params, rule_arms::RuleArm { params: pnames, defaults, shape: None, template: TemplateNode::NoneLit }) };
                 self.expect(TokenKind::FatArrow); let has_quote = self.at(TokenKind::KwQuote);
                 let body = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); if has_quote && body.is_some() {
-                    let tpl = TemplateNode::from_arena(&self.arena, body);
-                    self.tables.to_mut().syntax_macros.insert(kw.clone(), SyntaxMacroRule { params: pnames, template: tpl }); }
+                    let tpl = TemplateNode::from_arena(&self.arena, body); let bsp = self.arena.span(body); self.add_rule(&kw, arm, tpl, rich, bsp); }
+                // A rule with arms lives only in the rule table: its template is
+                // no function (`stringify($p)` is no call, and arms share a word).
+                if rich { continue; }
                 let sym = self.arena.interner.intern(&kw); let mut ch = vec![body]; ch.extend(params);
                 let (st, ln) = self.arena.alloc_child_slice(&ch);
                 let f = self.arena.alloc_node(NodeKind::FnDecl, ln as u16, ByteSpan::new(rsp.start, self.prev_span().end), sym.0, st);
@@ -878,6 +808,8 @@ impl<'a> Parser<'a> {
             let found = self.text().to_string();
             self.arena.diagnostics.push((self.span(), format!("expected a name to bind, found `{found}`")));
         }
+        // `let SignedMathFacet<TSelf: ..> = { .. }` (stdlib/core) names a facet's
+        // type parameters, which nothing reads yet: not reported, so core parses.
         let sym = self.intern_cur(); let _ = self.parse_generic_params();
         let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
         let init = self.parse_binding_init();
@@ -957,7 +889,13 @@ impl<'a> Parser<'a> {
             let Some(TypeConstructRule::Infix { bp, right_assoc, lhs_param, rhs_param, template, .. }) =
                 self.tables.type_rules.iter().find(|r| matches!(r, TypeConstructRule::Infix { op, .. } if op == op_str)).cloned()
             else { break; }; if bp < min_bp { break; }
-            self.advance(); let rhs = self.parse_type_bp(if right_assoc { bp } else { bp + 1 });
+            let op_span = self.span();
+            self.advance();
+            let rhs = self.parse_type_bp(if right_assoc { bp } else { bp + 1 });
+            if rhs == NodeId::NONE {
+                let msg = format!("a type is needed after `{op_str}`");
+                self.arena.diagnostics.push((op_span, msg));
+            }
             let lhs_clean = if self.arena.node(lhs).node_kind() == NodeKind::TypeTuple {
                 let ch = self.arena.children_slice(self.arena.node(lhs).lhs, self.arena.node(lhs).rhs);
                 if ch.len() == 1 { NodeId(ch[0]) } else { lhs }
@@ -967,25 +905,36 @@ impl<'a> Parser<'a> {
     fn is_stmt_receptor_start(&self) -> bool { self.receptor().is_some_and(|(rk, _)| matches!(rk, 9 | 13 | 14 | 17 | 18 | 32 | 33))
             || (self.is_word() && self.tables.syntax_macros.contains_key(self.text())) }
     fn parse_block(&mut self) -> NodeId { let sp = self.span(); self.expect(TokenKind::LBrace);
-        self.hdr_stack.push(self.active_hdr.take()); let mut items = Vec::new(); while !self.at_end() && !self.at(TokenKind::RBrace) {
+        self.hdr_stack.push(self.active_hdr.take()); let mut items = Vec::new();
+        while !self.at_end() && !self.at(TokenKind::RBrace) {
             self.skip_seps(); if self.at(TokenKind::RBrace) || self.at_end() { break; }
             let m = self.pos; self.parse_item(&mut items, false); if self.pos == m { self.advance(); } }
         self.expect(TokenKind::RBrace); self.active_hdr = self.hdr_stack.pop().unwrap_or(None);
         self.arena.alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &items) }
-    fn parse_stmt(&mut self) -> NodeId { let sp = self.span(); match self.peek() {
+    fn parse_stmt(&mut self) -> NodeId { if self.at_unbuilt_decl() { return self.parse_unbuilt(); }
+        let sp = self.span(); match self.peek() {
             TokenKind::KwReturn => { self.advance(); let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE } else { self.parse_expr() }; let _ = self.eat(TokenKind::Semicolon); self.arena.alloc_node(NodeKind::ReturnStmt, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), v.0, 0) }
             TokenKind::KwYield => { self.advance(); let v = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); self.arena.alloc_node(NodeKind::YieldStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0) }
             TokenKind::KwDefer => { self.advance(); let b = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() }; self.arena.alloc_node(NodeKind::DeferStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), b.0, 0) }
             TokenKind::KwLoop => { self.advance(); let (tr, b) = (self.arena.alloc_node(NodeKind::BoolLit, 0, sp, 1, 0), self.parse_block()); self.arena.alloc_node(NodeKind::WhileStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), tr.0, b.0) }
-            TokenKind::KwIf => self.parse_if(), TokenKind::KwAsm => { self.advance(); if self.at(TokenKind::LBrace) {
-                    let code = self.inline_block_code();
-                    self.arena.alloc_polyglot_block("asm", code.trim(), 0, ByteSpan::new(sp.start, self.prev_span().end)) } else { NodeId::NONE } }
+            TokenKind::KwIf => self.parse_if(), TokenKind::KwAsm => { let word = self.text().to_string(); self.advance();
+                // No per-target assembler exists yet: the block is read past and the build stops.
+                if self.at(TokenKind::LBrace) { let _ = self.inline_block_code(); }
+                self.report_unbuilt(ByteSpan::new(sp.start, self.prev_span().end), &word); NodeId::NONE }
             TokenKind::RawDslBlock => { let raw = self.text(); self.advance(); let inner = raw.trim_start_matches('`').trim_end_matches('`'); let (lang, code) = inner.split_once('\n').unwrap_or(("dsl", inner)); self.arena.alloc_polyglot_block(lang.trim(), code.trim(), 0, sp) }
             _ if self.is_word() && self.at_with_scope() => self.parse_with_scope(),
             _ if self.is_word() => { if let Some((rk, pl)) = self.receptor() { match rk { 9 => return self.parse_for(), 13 => { self.advance();
                             let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE }
                             else { let first = self.parse_expr(); if self.at(TokenKind::Comma) { let mut items = vec![first]; while self.eat(TokenKind::Comma) { items.push(self.parse_expr()); } self.arena.alloc_list_node(NodeKind::TupleExpr, 0, sp, &items) } else { first } }; let _ = self.eat(TokenKind::Semicolon);
                             return self.arena.alloc_node(if pl == 0 { NodeKind::BreakStmt } else { NodeKind::ContinueStmt }, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), v.0, 0); }
+                        3 => {
+                            // An `else` reached as a statement has no `if` before it.
+                            self.advance();
+                            let msg = "`else` must follow the block of an `if` (or a `guard` condition)";
+                            self.arena.diagnostics.push((sp, msg.into()));
+                            if self.at(TokenKind::LBrace) { let _ = self.parse_block(); } else { let _ = self.parse_stmt(); }
+                            return NodeId::NONE;
+                        }
                         14 => return self.parse_switch(), 17 => { self.advance();
                             // `guard some x [= v] else`: flags = 1, and a binding keeps its name as `AssignStmt(x, v)`.
                             let is_some = self.receptor() == Some((31, 2)) || self.at(TokenKind::KwLet);
@@ -997,7 +946,7 @@ impl<'a> Parser<'a> {
                             let eb = self.parse_block(); return self.arena.alloc_node(NodeKind::GuardStmt, u16::from(is_some), ByteSpan::new(sp.start, self.prev_span().end), c.0, eb.0); }
                         18 => { self.advance(); let tb = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() };
                             let mut ch = vec![tb]; while self.is_rec(19) { let csp = self.span(); self.advance();
-                                let psym = if self.is_word() && !self.at(TokenKind::LBrace) { let s = self.intern_cur(); if self.eat(TokenKind::Colon) { let _ = self.parse_type(); } s } else { SymbolId(0) };
+                                let psym = if self.is_word() && !self.at(TokenKind::LBrace) { let s = self.intern_cur(); self.catch_type_loudly(); s } else { SymbolId(0) };
                                 let cb = if self.eat(TokenKind::FatArrow) { self.parse_expr() } else { self.parse_block() }; ch.push(self.arena.alloc_node(NodeKind::CatchClause, 0, csp, psym.0, cb.0)); }
                             let _ = self.eat(TokenKind::Semicolon); return self.arena.alloc_list_node(NodeKind::TryStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch); }
                         32 if matches!(self.tape.kind(self.next_non_nl(self.cur() + 1)), TokenKind::LBrace | TokenKind::LParen) => return self.parse_polyglot_inline(),
@@ -1032,7 +981,8 @@ impl<'a> Parser<'a> {
         let rhs = self.parse_expr_bp(value_bp);
         let val = if op == 0 { rhs } else { let lc = clone_ast(&mut self.arena, target); self.arena.alloc_node(NodeKind::BinaryExpr, op, sp, lc.0, rhs.0) };
         self.arena.alloc_node(NodeKind::AssignStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), target.0, val.0) }
-    fn expand_syntax_macro(&mut self, mac: &SyntaxMacroRule) -> NodeId { let sp = self.span(); self.advance();
+    fn expand_syntax_macro(&mut self, mac: &SyntaxMacroRule) -> NodeId { if !mac.arms.is_empty() { return self.expand_rule_arms(mac); }
+        let sp = self.span(); self.advance();
         let mut bindings = Vec::new(); let call_form = self.at(TokenKind::LParen) && {
             let close = self.tape.matching_bracket(self.cur()).unwrap_or(0) as usize; let after = self.next_non_nl(close + 1);
             !(mac.params.len() >= 2 && after < self.tape.len() && self.tape.kind(after) == TokenKind::LBrace) };
@@ -1062,7 +1012,7 @@ impl<'a> Parser<'a> {
             c = self.arena.alloc_node(NodeKind::AssignStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), c.0, v.0); }
         Some(self.arena.alloc_node(NodeKind::UnaryExpr, pilot_ast::UNARY_OP_SOME, ByteSpan::new(sp.start, self.prev_span().end), c.0, 0)) }
     fn parse_for(&mut self) -> NodeId { let sp = self.span(); self.advance();
-        let vsym = if matches!(self.peek(), TokenKind::LParen | TokenKind::LBracket) { let _ = self.parse_pattern(); self.arena.interner.intern("_item") }
+        let vsym = if matches!(self.peek(), TokenKind::LParen | TokenKind::LBracket) { self.for_pattern_loudly(); self.arena.interner.intern("_item") }
         else { let s = self.intern_cur(); if self.eat(TokenKind::Comma) { self.advance(); } s }; if self.is_rec(10) { self.advance(); }
         self.no_struct_lit = true; let iter = self.parse_expr(); self.no_struct_lit = false;
         let body = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() };
@@ -1162,7 +1112,7 @@ impl<'a> Parser<'a> {
             if k == TokenKind::LBracket { let (pend, cstart) = (self.arena.span(lhs).end as usize, self.span().start as usize);
                 if self.src.as_bytes().get(pend..cstart).is_some_and(|gap| gap.contains(&b'\n')) { break; }
                 self.advance(); let idx = if self.at(TokenKind::RBracket) { NodeId::NONE } else if matches!(self.peek(), TokenKind::DotDot | TokenKind::DotDotEqual) { self.parse_open_range() } else { self.parse_expr() };
-                while self.eat(TokenKind::Comma) { if self.at(TokenKind::RBracket) { break; } let _ = self.parse_expr(); }
+                self.extra_indices_loudly();
                 self.expect(TokenKind::RBracket);
                 lhs = self.arena.alloc_node(NodeKind::IndexExpr, 0, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, idx.0);
                 continue; }
@@ -1210,8 +1160,8 @@ impl<'a> Parser<'a> {
                 (code != 1 && code != 2).then_some(PrattEntry { bp: if code == 15 { 12 } else if code == 14 { 14 } else { 45 }, right_assoc: false, bin_op: code as u16 })
             } else { self.tables.infix_ops.get(self.text()).copied() }; let Some(pe) = op_entry else { break; }; if pe.bp < min_bp { break; }
             self.advance(); let rhs = self.parse_expr_bp(if pe.right_assoc { pe.bp } else { pe.bp + 1 });
-            if matches!(pe.bin_op, 23 | 24) && self.eat(TokenKind::Colon) { let _ = self.parse_expr_bp(pe.bp + 1); }
             lhs = self.arena.alloc_node(NodeKind::BinaryExpr, pe.bin_op, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, rhs.0);
+            if matches!(pe.bin_op, 23 | 24) { lhs = self.range_step(lhs, pe.bp + 1); }
         }
         lhs }
     fn parse_prefix(&mut self) -> NodeId { let sp = self.span(); match self.peek() {
@@ -1265,8 +1215,7 @@ impl<'a> Parser<'a> {
                         33 if pl == 6 => { let p2 = self.next_non_nl(nx + 1);
                             if p2 < self.tape.len() && is_word_tok(self.tape.kind(nx)) && self.tables.receptors.get(self.tape.text(p2, self.src)) == Some(&(10, 0)) {
                                 return self.parse_linq_query(); } }
-                        33 if matches!(pl, 17 | 23) && nx < self.tape.len() && !matches!(self.tape.kind(nx), TokenKind::RParen | TokenKind::Comma | TokenKind::Semicolon | TokenKind::InfixDot) => {
-                            self.advance(); return self.parse_expr_bp(80); }
+                        unbuilt::UNBUILT_RECEPTOR if self.at_unbuilt() => return self.parse_unbuilt(),
                         33 if pl == 7 && nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LBrace => { self.advance(); return self.parse_block(); }
                         35 if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen && !self.file_declares_fn(self.text()) => {
                             self.advance(); self.expect(TokenKind::LParen); let arg = self.parse_expr(); self.expect(TokenKind::RParen);
@@ -1300,9 +1249,23 @@ impl<'a> Parser<'a> {
     fn parse_call_args(&mut self, callee: NodeId, qk: u16) -> NodeId {
         let is_sym_quote = self.arena.node(callee).node_kind() == NodeKind::IdentExpr && self.tables.quotes_symbol(self.arena.interner.resolve(SymbolId(self.arena.node(callee).lhs)));
         self.expect(TokenKind::LParen); let mut ch = vec![callee]; while !self.at_end() && !self.at(TokenKind::RParen) {
-            if is_sym_quote { let (tsp, mut txt) = (self.span(), String::new());
-                while !self.at_end() && !self.at(TokenKind::RParen) && !self.at(TokenKind::Comma) { txt.push_str(self.text()); self.advance(); }
-                let sym = self.arena.interner.intern(&txt); ch.push(self.arena.alloc_node(NodeKind::StrLit, 0, tsp, sym.0, 0));
+            if is_sym_quote {
+                let tsp = self.span();
+                let one_word = self.is_word() || is_seed_kw(self.peek());
+                let txt = self.text().to_string();
+                if one_word {
+                    self.advance();
+                }
+                if !one_word || !(self.at(TokenKind::RParen) || self.at(TokenKind::Comma)) {
+                    let quoter = self.arena.interner.resolve(SymbolId(self.arena.node(callee).lhs)).to_string();
+                    let msg = format!("`{quoter}` quotes one name, such as `{quoter}(x)`");
+                    self.arena.diagnostics.push((tsp, msg));
+                    while !self.at_end() && !self.at(TokenKind::RParen) && !self.at(TokenKind::Comma) {
+                        self.advance();
+                    }
+                }
+                let sym = self.arena.interner.intern(&txt);
+                ch.push(self.arena.alloc_node(NodeKind::StrLit, 0, tsp, sym.0, 0));
             } else { let nx = self.next_non_nl(self.cur() + 1);
                 // `name: value` keeps its name in a `CallArg` (lhs = name, rhs = value).
                 if self.is_word() && nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::Colon) {
@@ -1338,7 +1301,8 @@ impl<'a> Parser<'a> {
         let p2 = self.next_non_nl(p1 + 1);
         if p2 < self.tape.len() && (is_word_tok(self.tape.kind(p1)) || matches!(self.tape.kind(p1), TokenKind::StrLit | TokenKind::IntLit))
             && matches!(self.tape.kind(p2), TokenKind::Colon | TokenKind::Equal)
-        { let w = self.tape.text(p1, self.src); !matches!(self.tables.receptors.get(w), Some((15 | 16 | 21 | 22, _)))
+        { let w = self.tape.text(p1, self.src);
+            !matches!(self.tables.receptors.get(w), Some((15 | 16 | 21 | 22, _))) && !self.braces_hold_statement()
         } else { false } }
     fn looks_like_struct_lit(&self) -> bool { let p1 = self.next_non_nl(self.cur() + 1);
         if p1 < self.tape.len() && self.tape.kind(p1) == TokenKind::RBrace { return true; }
@@ -1375,6 +1339,10 @@ impl<'a> Parser<'a> {
             if self.is_rec(28) {
                 self.advance();
                 conds.push(self.parse_expr_bp(20));
+            } else if self.at_unbuilt_clause() {
+                let (csp, word) = (self.span(), self.text().to_string());
+                self.report_unbuilt(csp, &word);
+                return NodeId::NONE;
             } else {
                 let (csp, word) = (self.span(), self.text().to_string());
                 self.arena.diagnostics.push((

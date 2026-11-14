@@ -272,9 +272,11 @@ impl BytecodeCompiler {
         let params = Self::decl_param_names(arena, *decl);
         let slots = Self::bind_args(arena, &callee_name, &params, &ids[1..])?;
         let mut out = vec![callee];
-        for (p, slot) in params.iter().zip(slots) {
+        let decl_params = Self::decl_params(arena, *decl);
+        for ((p, slot), pd) in params.iter().zip(slots).zip(decl_params) {
             match slot {
                 Some(a) => out.push(a),
+                None if arena.field_default(pd).is_some() => out.push(arena.field_default(pd)),
                 None => {
                     return Err((
                         crate::codes::ARG_COUNT,
@@ -284,6 +286,76 @@ impl BytecodeCompiler {
             }
         }
         Ok(out)
+    }
+
+    /// The call `ids` (callee, then positional arguments) with the defaults
+    /// of the parameters it leaves out at the end appended, when the callee's
+    /// parameters are known. A call with a spread argument is left as it is.
+    /// A method call whose receiver's type is unknown, to a method that some
+    /// type declares with a default the call would need, is an error.
+    pub(crate) fn fill_defaults(&self, arena: &AstArena, ids: &[NodeId]) -> Result<Vec<NodeId>, ArgError> {
+        let spread = ids[1..].iter().any(|&a| {
+            let n = arena.node(a);
+            n.node_kind() == NodeKind::UnaryExpr && n.flags == pilot_ast::UNARY_OP_SPLAT
+        });
+        if spread {
+            return Ok(ids.to_vec());
+        }
+        let given = ids.len() - 1;
+        let decl = self
+            .named_call_key(arena, ids[0])
+            .and_then(|k| self.param_decls.get(&k).copied())
+            .or_else(|| self.planned_call_decl(arena, ids[0]));
+        let Some(decl) = decl else {
+            return self.unknown_callee_defaults(arena, ids[0], given).map(|()| ids.to_vec());
+        };
+        let mut out = ids.to_vec();
+        for &p in Self::decl_params(arena, decl).iter().skip(given) {
+            let value = arena.field_default(p);
+            if value.is_none() {
+                break;
+            }
+            out.push(value);
+        }
+        Ok(out)
+    }
+
+    /// The declaration a method call reaches through the receiver type the
+    /// checker inferred (the run plan), when the seed does not know it.
+    fn planned_call_decl(&self, arena: &AstArena, callee: NodeId) -> Option<NodeId> {
+        let cn = arena.node(callee);
+        if cn.node_kind() != NodeKind::MemberExpr {
+            return None;
+        }
+        let owner = self.planned_receiver(arena, NodeId(cn.lhs))?;
+        let key = format!("{owner}.{}", Self::name(arena, cn.rhs));
+        self.param_decls.get(&key).copied()
+    }
+
+    /// An error when `callee` is a method call the seed cannot place and a
+    /// type declares that method with a default the `given` arguments
+    /// would leave to it.
+    fn unknown_callee_defaults(&self, arena: &AstArena, callee: NodeId, given: usize) -> Result<(), ArgError> {
+        let cn = arena.node(callee);
+        if cn.node_kind() != NodeKind::MemberExpr {
+            return Ok(());
+        }
+        let method = Self::name(arena, cn.rhs);
+        let owners = self.method_owners.get(method).map(Vec::as_slice).unwrap_or(&[]);
+        let needs_default = owners.iter().any(|(owner, _)| {
+            self.param_decls.get(&format!("{owner}.{method}")).is_some_and(|&d| {
+                Self::decl_params(arena, d)
+                    .get(given)
+                    .is_some_and(|&p| arena.field_default(p).is_some())
+            })
+        });
+        if !needs_default {
+            return Ok(());
+        }
+        Err((
+            crate::codes::SEED,
+            format!("the seed cannot tell which `{method}` this call reaches, so it cannot fill its default arguments; pass every argument"),
+        ))
     }
 
     /// `Name(args)` for a struct without a constructor: sets each field from

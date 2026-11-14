@@ -70,7 +70,7 @@ pub pure fn max_eval_depth() -> i64 => 200;
 pub fn eval_engine_ops() -> Map<str, bool> {
     let ops = Map<str, bool>();
     for name in [
-        "rt_assert", "rt_fault", "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
+        "rt_fault", "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
         "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
         "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "map_values", "to_str",
         "map_new", "map_get", "map_set", "map_has", "map_remove", "value_clone", "list_get", "list_set",
@@ -196,7 +196,11 @@ fn arg_values(fr: IrFrame, inst: IrInst) -> List<any> {
     return out;
 }
 
-fn put(fr: IrFrame, inst: IrInst, v: any) { fr.vals[inst.result] = v; }
+/// Stores the value of `inst`; an instruction with no result (a call made
+/// for its effect) stores nothing.
+fn put(fr: IrFrame, inst: IrInst, v: any) {
+    if inst.result != ir_no_value() { fr.vals[inst.result] = v; }
+}
 
 /// A constant integer as a value of physics `phy`.
 fn bits_value(phy: IrTypePhysics, v: i64) -> any {
@@ -366,18 +370,62 @@ fn run_call_intrinsic(fr: IrFrame, inst: IrInst) {
 }
 
 /// An aggregate is a record of its field values. Records are shared, not
-/// copied, when a value is passed on.
+/// copied, when a value is passed on. A struct (a layout with a record
+/// entry) is held as the seed holds one, a map from field name to value
+/// tagged with its layout (`record_set_type`), so it prints as
+/// `{ name: value, .. }` wherever it goes; any other aggregate (a tuple, a
+/// closure) is a list of its values.
 [StandIn("ir.aggregate_by_reference", "a 0b00 value is copied when it is bound or passed (memcpy)", "the IR interpreter shares one record between every copy, as the seed does", "F5")]
-fn run_construct_aggregate(fr: IrFrame, inst: IrInst) { put(fr, inst, arg_values(fr, inst)); }
+fn run_construct_aggregate(fr: IrFrame, inst: IrInst) {
+    let vals = arg_values(fr, inst);
+    let layout = inst.physics.layout_id;
+    if some rec = ir_record_of(fr.m, layout) {
+        if rec.names.len() == vals.len() {
+            var named = Map<str, any>();
+            var i = 0;
+            while i < vals.len() {
+                named.set(rec.names[i], vals[i]);
+                i = i + 1;
+            }
+            put(fr, inst, checked(fr, "record_set_type", [named, layout as i64]));
+            return;
+        }
+    }
+    put(fr, inst, vals);
+}
+
+/// The name of field `slot` of `v` when `v` is a struct record, else "".
+fn field_name(fr: IrFrame, v: any, slot: i64) -> str {
+    let layout = checked(fr, "record_type", [v]) ?? -1;
+    if layout < 0 { return ""; }
+    if some rec = ir_record_of(fr.m, layout as u32) {
+        if slot < rec.names.len() { return rec.names[slot]; }
+    }
+    return "";
+}
 
 fn run_extract_field(fr: IrFrame, inst: IrInst) {
-    let rec: List<any> = fr.vals[ir_args(fr.f, inst)[0]];
+    let v = fr.vals[ir_args(fr.f, inst)[0]];
+    let name = field_name(fr, v, inst.subop as i64);
+    if name != "" {
+        let rec: Map<str, any> = v;
+        put(fr, inst, rec.get(name));
+        return;
+    }
+    let rec: List<any> = v;
     put(fr, inst, rec[inst.subop]);
 }
 
 fn run_insert_field(fr: IrFrame, inst: IrInst) {
     let a = ir_args(fr.f, inst);
-    let rec: List<any> = fr.vals[a[0]];
+    let v = fr.vals[a[0]];
+    let name = field_name(fr, v, inst.subop as i64);
+    if name != "" {
+        let rec: Map<str, any> = v;
+        rec.set(name, fr.vals[a[1]]);
+        return;
+    }
+    let rec: List<any> = v;
     rec[inst.subop] = fr.vals[a[1]];
 }
 
@@ -489,7 +537,7 @@ pub fn interp_handlers() -> List<any> {
 pub fn interp_engine_ops() -> Map<str, str> {
     let ops = Map<str, str>();
     for name in [
-        "rt_print", "rt_eprint", "rt_assert", "rt_fault", "stdin_read_line", "stdin_read_all",
+        "rt_print", "rt_eprint", "rt_fault", "stdin_read_line", "stdin_read_all",
         "list_new", "list_push", "list_extend", "list_pop", "list_remove_at", "is_null",
         "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
         "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "map_values", "to_str",

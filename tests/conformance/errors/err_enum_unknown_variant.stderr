@@ -1,0 +1,2 @@
+error[METH001]: `Color` has no member `Purple`
+err_enum_unknown_variant.pilot:10:20

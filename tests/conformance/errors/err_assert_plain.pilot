@@ -1,0 +1,6 @@
+// A condition that is not a comparison is reported by its text.
+fn ready(n: i64) -> bool => n > 10;
+
+fn main() {
+    assert(ready(3));
+}

@@ -1,0 +1,12 @@
+// A word registered as a keyword that is not built yet (`database`, `each`,
+// `context`) is still an ordinary name where no construct follows it: as a
+// parameter, before `.`, inside a call, on the left of `=`.
+// Expected: "shop".len() is 4, plus 2 is 6, so the line is "shop 6".
+fn greet(database: str, each: i64) -> str {
+    let context = database.len() + each;
+    return f"{database} {context}";
+}
+
+fn main() {
+    print(greet("shop", 2));
+}

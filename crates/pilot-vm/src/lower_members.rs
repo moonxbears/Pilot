@@ -412,6 +412,15 @@ impl BytecodeCompiler {
     /// path inline and a record goes to the member's dispatcher, which
     /// `emit_dispatchers` builds once the program is linked.
     fn emit_member_access(&mut self, kind: Switch, ty: Option<&str>, regs: &[u8]) -> u8 {
+        if let (Switch::Set(f), Some(t)) = (&kind, ty) {
+            let has = |m: &std::collections::HashMap<String, Vec<String>>| m.get(f).is_some_and(|o| o.iter().any(|o| o == t));
+            if has(&self.getters) && !has(&self.setters) {
+                return self.error(
+                    crate::codes::GET_ONLY_ASSIGN,
+                    format!("`{f}` of `{t}` has a getter and no setter, so it cannot be assigned"),
+                );
+            }
+        }
         let owners = self.switch_owners(&kind);
         if owners.is_empty() {
             return self.emit_plain(&kind, regs);

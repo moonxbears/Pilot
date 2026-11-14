@@ -7,7 +7,22 @@ pub pkg Pilot.Db.Syntax;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("bind_receptor", nameof(database), 33, 1);
+    // `database` is registered but not built yet (docs/keyword_roadmap.md
+    // K9): receptor 40 stops every use at the seam `keyword.unbuilt`.
+    __engine("bind_receptor", nameof(database), 40, 0);
+    // Not built yet (docs/keyword_roadmap.md K9): statements stop at the
+    // seam `keyword.unbuilt` where a statement starts (place 1), and clause
+    // words where a query clause stands (place 2); elsewhere each is an
+    // ordinary name (`values`, `order`, `update(x)`).
+    __engine("bind_receptor", nameof(connect),    40, 1);
+    __engine("bind_receptor", nameof(insert),     40, 1);
+    __engine("bind_receptor", nameof(update),     40, 1);
+    __engine("bind_receptor", nameof(delete),     40, 1);
+    __engine("bind_receptor", nameof(into),       40, 2);
+    __engine("bind_receptor", nameof(values),     40, 2);
+    __engine("bind_receptor", nameof(order),      40, 2);
+    __engine("bind_receptor", nameof(ascending),  40, 2);
+    __engine("bind_receptor", nameof(descending), 40, 2);
     __engine("bind_receptor", nameof(from),     33, 6);
     __engine("bind_receptor", nameof(select),   33, 7);
 
@@ -16,47 +31,20 @@ comptime {
     __engine("register_pratt_op", nameof(except),    infix, 12, left);
 }
 
-pub struct TransactionState : IValue {
-    pub is_active: bool;
-    pub savepoints: i64;
-}
-
-pub var global_tx_state: TransactionState = TransactionState { is_active: false, savepoints: 0 };
-
-pub fn tx_begin() -> bool {
-    global_tx_state.is_active = true;
-    return true;
-}
-
-pub fn tx_commit() -> bool {
-    let was = global_tx_state.is_active;
-    global_tx_state.is_active = false;
-    global_tx_state.savepoints = 0;
-    return was;
-}
-
-pub fn tx_rollback() -> bool {
-    let was = global_tx_state.is_active;
-    global_tx_state.is_active = false;
-    global_tx_state.savepoints = 0;
-    return was;
-}
-
-pub fn tx_savepoint(name: str) -> i64 {
-    global_tx_state.savepoints = global_tx_state.savepoints + 1;
-    return global_tx_state.savepoints;
-}
-
+// `transaction`, `commit`, `rollback` and `savepoint` are not built yet
+// (docs/keyword_roadmap.md phase K9). Each rule stops at its seam instead of
+// flipping a flag that undid nothing (audit 2.3).
 pub syntax {
     transaction(body) => quote {
-        {
-            tx_begin();
-            $body;
-            tx_commit();
-        }
+        seam("data.transaction", "running a block as one transaction needs storage whose writes can be undone (an in-memory `Table<T>` first)")
     };
-
-    savepoint(name) => quote { tx_savepoint($name) };
-    commit()        => quote { tx_commit() };
-    rollback()      => quote { tx_rollback() };
+    savepoint(name) => quote {
+        seam("data.savepoint", "a savepoint needs a transaction log to roll back to")
+    };
+    commit() => quote {
+        seam("data.commit", "committing needs a transaction whose writes are held until commit")
+    };
+    rollback() => quote {
+        seam("data.rollback", "rolling back needs a transaction log that restores what the transaction wrote")
+    };
 }

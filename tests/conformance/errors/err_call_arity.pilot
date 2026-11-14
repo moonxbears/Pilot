@@ -1,0 +1,8 @@
+// CALL001: a positional call gives each parameter one argument. A missing
+// one used to run anyway and read whatever the register held.
+fn add(a: i64, b: i64) -> i64 => a + b;
+
+fn main() {
+    // The call starts at line 7, column 11.
+    print(add(3));
+}

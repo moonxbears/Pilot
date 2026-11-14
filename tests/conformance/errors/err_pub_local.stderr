@@ -1,0 +1,2 @@
+error[SYN001]: `pub` sets who may use a declaration of a package or type; a local in a block has no such reach
+err_pub_local.pilot:7:5

@@ -1,0 +1,11 @@
+// A function declared `extern` (with `lib` naming its library) has no body:
+// calling it needs native calls through the C ABI, which are not built yet
+// (docs/keyword_roadmap.md K5). The call stops the build at the seam
+// `abi.extern_call` instead of "no function named". Declaring it alone is
+// fine; nothing runs, so nothing is printed.
+extern "C" lib "m" fn labs(x: i64) -> i64;
+
+fn main() {
+    print("before");
+    print(labs(-3));
+}

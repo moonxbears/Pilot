@@ -24,7 +24,7 @@ pub struct KeywordCategoryDefAttr : IAttribute, IValue {
         category_id: i64,
         tm_scope:    str,
         badge:       str,
-        lsp_kind:    i64 = 14
+        lsp_kind:    i64
     ) -> KeywordCategoryDefAttr => KeywordCategoryDefAttr {
         category_id: category_id,
         tm_scope:    tm_scope,
@@ -44,7 +44,7 @@ pub struct KeywordDefAttr : IAttribute, IValue {
     pub static pure fn create(
         category_id: i64,
         doc:         str,
-        suffix:      str = ""
+        suffix:      str
     ) -> KeywordDefAttr => KeywordDefAttr {
         category_id: category_id,
         doc:         doc,
@@ -211,7 +211,7 @@ pub partial struct {
     [KeywordDefAttr(0, "Captures Pilot AST expressions.")]
     quote {}
 
-    [KeywordDefAttr(0, "Inline hardware assembly instruction block.")]
+    [KeywordDefAttr(0, "Inline hardware assembly instruction block. Target, not built yet: every use stops at seam keyword.unbuilt; no milestone schedules an assembler (docs/keyword_roadmap.md D5).")]
     asm {}
 
     // Category 1: Control Flow
@@ -273,10 +273,10 @@ pub partial struct {
     [KeywordDefAttr(2, "Declares a closed set of enumerated variants.")]
     enum {}
 
-    [KeywordDefAttr(2, "Declares an actor concurrency entity.")]
+    [KeywordDefAttr(2, "Declares an actor concurrency entity. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K7, decision D6).")]
     actor {}
 
-    [KeywordDefAttr(2, "Declares a finite state automaton typestate variant.")]
+    [KeywordDefAttr(2, "Declares a finite state automaton typestate variant. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K3).")]
     state {}
 
     [KeywordDefAttr(2, "Declares a type alias or type construct.")]
@@ -301,13 +301,13 @@ pub partial struct {
     [KeywordDefAttr(3, "File-scoped visibility accessible only within current source file.")]
     file {}
 
-    [KeywordDefAttr(3, "Open visibility permitting cross-package inheritance and override.")]
+    [KeywordDefAttr(3, "Open visibility permitting cross-package inheritance and override. The visibility works as `pub`; the override permission waits for `override` (docs/keyword_roadmap.md K2).")]
     open {}
 
-    [KeywordDefAttr(3, "Export visibility exported across dynamic foreign ABI boundaries.")]
+    [KeywordDefAttr(3, "Export visibility exported across dynamic foreign ABI boundaries. Target, not built yet: every use stops at seam keyword.unbuilt (docs/keyword_roadmap.md K5).")]
     export {}
 
-    [KeywordDefAttr(3, "Hierarchical security clearance level ring modifier (lvl0..lvl4).", "[0-9]*")]
+    [KeywordDefAttr(3, "Hierarchical security clearance level ring modifier `lvl(N)` (shorthand lvl0..lvl100). Target, not built yet: a use of a function whose level is above the user's stops at seam lvl.clearance; the shorthand stops at keyword.unbuilt; package levels wait for D11 (docs/keyword_roadmap.md K2).", "[0-9]*")]
     lvl {}
 
     // Category 4: Modifiers
@@ -385,13 +385,13 @@ pub partial struct {
     unreachable {}
 
     // Category 9: Adapter & Dependency Injection
-    [KeywordDefAttr(9, "Context ambient dependency injection parameter or block.")]
+    [KeywordDefAttr(9, "Context ambient dependency injection parameter or block. Target, not built yet: every use stops at seam keyword.unbuilt (docs/keyword_roadmap.md K6).")]
     context {}
 
-    [KeywordDefAttr(9, "Type adapter declaring implicit or structural conversion.")]
+    [KeywordDefAttr(9, "Type adapter declaring implicit or structural conversion. Target, not built yet: every use stops at seam keyword.unbuilt (docs/keyword_roadmap.md K6).")]
     adapter {}
 
-    [KeywordDefAttr(9, "Applies operation across elements of a collection or stream.")]
+    [KeywordDefAttr(9, "Applies operation across elements of a collection or stream. Target, not built yet: every use stops at seam keyword.unbuilt (docs/keyword_roadmap.md K6).")]
     each {}
 
     // Category 10: Composition & Collision Resolution
@@ -408,71 +408,71 @@ pub partial struct {
     as {}
 
     // Category 11: Concurrency & Real-Time
-    [KeywordDefAttr(11, "Declares an asynchronous function returning a task.")]
+    [KeywordDefAttr(11, "Declares an asynchronous function returning a task. Target, not built yet: every use stops at seam keyword.unbuilt (docs/keyword_roadmap.md K7).")]
     async {}
 
-    [KeywordDefAttr(11, "Awaits completion of an asynchronous task.")]
+    [KeywordDefAttr(11, "Awaits completion of an asynchronous task. Target, not built yet: every use stops at seam concurrency.await (docs/keyword_roadmap.md K7).")]
     await {}
 
-    [KeywordDefAttr(11, "Spawns a concurrent green task in the runtime executor.")]
+    [KeywordDefAttr(11, "Spawns a concurrent green task in the runtime executor. Target, not built yet: every use stops at seam concurrency.spawn (docs/keyword_roadmap.md K7).")]
     spawn {}
 
-    [KeywordDefAttr(11, "Executes block or updates variable using atomic hardware instructions.")]
+    [KeywordDefAttr(11, "Executes block or updates variable using atomic hardware instructions. Target, not built yet: every use stops at seam concurrency.atomic (docs/keyword_roadmap.md K7).")]
     atomic {}
 
-    [KeywordDefAttr(11, "Synchronizes access across threads using a lock or monitor.")]
+    [KeywordDefAttr(11, "Synchronizes access across threads using a lock or monitor. Target, not built yet: every use stops at seam concurrency.sync (docs/keyword_roadmap.md K7).")]
     sync {}
 
-    [KeywordDefAttr(11, "Isolates memory region to prevent shared-mutable state data races.")]
+    [KeywordDefAttr(11, "Isolates memory region to prevent shared-mutable state data races. Target, not built yet: every use stops at seam concurrency.isolate (docs/keyword_roadmap.md K7).")]
     isolate {}
 
-    [KeywordDefAttr(11, "Selects first available channel operation across multiple cases.")]
+    [KeywordDefAttr(11, "Selects first available channel operation across multiple cases. Target, not built yet: every use stops at seam concurrency.select (docs/keyword_roadmap.md K7).")]
     select {}
 
-    [KeywordDefAttr(11, "Specifies maximum duration for blocking operations before cancel.")]
+    [KeywordDefAttr(11, "Specifies maximum duration for blocking operations before cancel. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K7).")]
     timeout {}
 
-    [KeywordDefAttr(11, "Constrains buffer, channel, or loop execution to bounded bounds.")]
+    [KeywordDefAttr(11, "Constrains buffer, channel, or loop execution to bounded bounds. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K7, decision D9).")]
     bounded {}
 
     [KeywordDefAttr(11, "noalloc fn: takes no heap memory: no allocating construct, no call of a function that is not noalloc (NOALLOC001).")]
     noalloc {}
 
-    [KeywordDefAttr(11, "Encloses allocation within an explicit arena region.")]
+    [KeywordDefAttr(11, "Encloses allocation within an explicit arena region. Target, not built yet: every use stops at seam realtime.region (docs/keyword_roadmap.md K5).")]
     region {}
 
-    [KeywordDefAttr(11, "Real-time execution deadline contract constraint.")]
+    [KeywordDefAttr(11, "Real-time execution deadline contract constraint. Target, not built yet: every use stops at seam realtime.deadline (docs/keyword_roadmap.md K8).")]
     deadline {}
 
-    [KeywordDefAttr(11, "Time-bounded execution window constraint.")]
+    [KeywordDefAttr(11, "Time-bounded execution window constraint. Target, not built yet: every use stops at seam realtime.within (docs/keyword_roadmap.md K8).")]
     within {}
 
-    [KeywordDefAttr(11, "Schedules periodic real-time task execution at fixed frequency.")]
+    [KeywordDefAttr(11, "Schedules periodic real-time task execution at fixed frequency. Target, not built yet: every use stops at seam realtime.periodic (docs/keyword_roadmap.md K8).")]
     periodic {}
 
-    [KeywordDefAttr(11, "Assigns real-time scheduling priority.")]
+    [KeywordDefAttr(11, "Assigns real-time scheduling priority. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K8).")]
     priority {}
 
-    [KeywordDefAttr(11, "Specifies maximum allowable scheduling jitter.")]
+    [KeywordDefAttr(11, "Specifies maximum allowable scheduling jitter. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K8).")]
     jitter {}
 
     // Category 12: Database & LINQ
-    [KeywordDefAttr(12, "Declares a database connection or schema entity.")]
+    [KeywordDefAttr(12, "Declares a database connection or schema entity. Target, not built yet: every use stops at seam keyword.unbuilt (docs/keyword_roadmap.md K9).")]
     database {}
 
-    [KeywordDefAttr(12, "Executes block within an ACID database transaction.")]
+    [KeywordDefAttr(12, "Executes block within an ACID database transaction. Target, not built yet: every use stops at seam data.transaction (docs/keyword_roadmap.md K9).")]
     transaction {}
 
-    [KeywordDefAttr(12, "Commits pending transaction changes to persistent storage.")]
+    [KeywordDefAttr(12, "Commits pending transaction changes to persistent storage. Target, not built yet: every use stops at seam data.commit (docs/keyword_roadmap.md K9).")]
     commit {}
 
-    [KeywordDefAttr(12, "Rolls back pending transaction changes.")]
+    [KeywordDefAttr(12, "Rolls back pending transaction changes. Target, not built yet: every use stops at seam data.rollback (docs/keyword_roadmap.md K9).")]
     rollback {}
 
-    [KeywordDefAttr(12, "Creates a rollback savepoint inside an active transaction.")]
+    [KeywordDefAttr(12, "Creates a rollback savepoint inside an active transaction. Target, not built yet: every use stops at seam data.savepoint (docs/keyword_roadmap.md K9).")]
     savepoint {}
 
-    [KeywordDefAttr(12, "Opens a connection to an external database resource.")]
+    [KeywordDefAttr(12, "Opens a connection to an external database resource. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
     connect {}
 
     [KeywordDefAttr(12, "Specifies query source table or dataset in LINQ expressions.")]
@@ -481,72 +481,72 @@ pub partial struct {
     [KeywordDefAttr(12, "Filters query dataset using predicate boolean expression.")]
     where {}
 
-    [KeywordDefAttr(12, "Orders query results by specified key expressions.")]
+    [KeywordDefAttr(12, "Orders query results by specified key expressions. Target, not built yet: as a query clause it stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
     order {}
 
-    [KeywordDefAttr(12, "Sorts query order ascending.")]
+    [KeywordDefAttr(12, "Sorts query order ascending. Target, not built yet: as a query clause it stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
     ascending {}
 
-    [KeywordDefAttr(12, "Sorts query order descending.")]
+    [KeywordDefAttr(12, "Sorts query order descending. Target, not built yet: as a query clause it stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
     descending {}
 
-    [KeywordDefAttr(12, "Inserts records into a database table.")]
+    [KeywordDefAttr(12, "Inserts records into a database table. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
     insert {}
 
-    [KeywordDefAttr(12, "Specifies destination table for insert operation.")]
+    [KeywordDefAttr(12, "Specifies destination table for insert operation. Target, not built yet: as a query clause it stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
     into {}
 
-    [KeywordDefAttr(12, "Specifies values to insert into database table.")]
+    [KeywordDefAttr(12, "Specifies values to insert into database table. Target, not built yet: as a query clause it stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
     values {}
 
-    [KeywordDefAttr(12, "Updates existing records in database table.")]
+    [KeywordDefAttr(12, "Updates existing records in database table. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
     update {}
 
-    [KeywordDefAttr(12, "Deletes records from a database table.")]
+    [KeywordDefAttr(12, "Deletes records from a database table. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K9).")]
     delete {}
 
     // Category 13: Foreign Function Interface
-    [KeywordDefAttr(13, "Declares an external C-ABI or foreign function symbol.")]
+    [KeywordDefAttr(13, "Declares an external C-ABI or foreign function symbol. Target, not built yet: the declaration is accepted, and every call stops at seam abi.extern_call (docs/keyword_roadmap.md K5).")]
     extern {}
 
-    [KeywordDefAttr(13, "Declares an external linked assembly binary library.")]
+    [KeywordDefAttr(13, "Declares an external linked assembly binary library. Meaning undecided (docs/keyword_roadmap.md D5): today `assembly { .. }` is read as an inline foreign-language block, which stops with SEED001 on the seed and at a seam on PilIR and C.")]
     assembly {}
 
-    [KeywordDefAttr(13, "Declares a modular unit of code compilation and packaging.")]
+    [KeywordDefAttr(13, "Declares a modular unit of code compilation and packaging. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K2, decision D3).")]
     module {}
 
-    [KeywordDefAttr(13, "Links an external native dynamic or static library.")]
+    [KeywordDefAttr(13, "Links an external native dynamic or static library. Target, not built yet: the library is not linked, and every call of a function it declares stops at seam abi.extern_call (docs/keyword_roadmap.md K5).")]
     lib {}
 
     // Category 14: Metaprogramming & Queries
     [KeywordDefAttr(14, "Evaluates byte size of a type at compile time.")]
     sizeof {}
 
-    [KeywordDefAttr(14, "Evaluates byte alignment of a type at compile time.")]
+    [KeywordDefAttr(14, "Evaluates byte alignment of a type at compile time. Target, not built yet: a type query (`byte_align`) the seed refuses with SEED001 and PilIR stops at ir.lower_construct (docs/keyword_roadmap.md K4).")]
     alignof {}
 
-    [KeywordDefAttr(14, "Evaluates byte offset of a struct field at compile time.")]
+    [KeywordDefAttr(14, "Evaluates byte offset of a struct field at compile time. Target, not built yet: a type query (`field_offset`) the seed refuses with SEED001 and PilIR stops at ir.lower_construct (docs/keyword_roadmap.md K4).")]
     offsetof {}
 
-    [KeywordDefAttr(14, "Reflects tuple array of field names and types of a struct.")]
+    [KeywordDefAttr(14, "Reflects tuple array of field names and types of a struct. Target, not built yet: a type query (`field_list`) the seed refuses with SEED001 and PilIR stops at ir.lower_construct (docs/keyword_roadmap.md K4).")]
     fields_of {}
 
     [KeywordDefAttr(14, "Evaluates string identifier name of a symbol at compile time.")]
     nameof {}
 
-    [KeywordDefAttr(14, "Asserts boolean invariant, aborting execution on violation.")]
+    [KeywordDefAttr(14, "Asserts boolean invariant, aborting execution on violation: `assert(cond)` or `assert(cond, note)`, a syntax rule (stdlib/core/assert.pilot) that reports the expression text and, for a comparison, both sides; a non-bool condition is TYPE001.")]
     assert {}
 
-    [KeywordDefAttr(14, "Declares a structural blueprint pattern.")]
+    [KeywordDefAttr(14, "Declares a structural blueprint pattern. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K7).")]
     blueprint {}
 
-    [KeywordDefAttr(14, "Declares a synchronization cue.")]
+    [KeywordDefAttr(14, "Declares a synchronization cue. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K7).")]
     cue {}
 
-    [KeywordDefAttr(14, "Declares an actor or component role.")]
+    [KeywordDefAttr(14, "Declares an actor or component role. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K7).")]
     role {}
 
-    [KeywordDefAttr(14, "Declares a message routing rule.")]
+    [KeywordDefAttr(14, "Declares a message routing rule. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K7).")]
     route {}
 
     [KeywordDefAttr(14, "Declares a standalone compilation unit.")]
@@ -562,11 +562,11 @@ pub partial struct {
     op {}
 
     // Category 15: Algebraic Composition
-    [KeywordDefAttr(15, "Explicitly overrides inherited interface or bundle default implementations.")]
+    [KeywordDefAttr(15, "Explicitly overrides inherited interface or bundle default implementations. Target, not built yet: as a modifier every use stops at seam keyword.unbuilt (docs/keyword_roadmap.md K2).")]
     override {}
 
     // Category 16: Typestate
-    [KeywordDefAttr(16, "Defines a state transition condition in typestate automata.")]
+    [KeywordDefAttr(16, "Defines a state transition condition in typestate automata. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K3).")]
     transition {}
 
     // Category 20: Signed Integers
@@ -836,59 +836,37 @@ pub partial struct {
     [KeywordDefAttr(34, "Null-coalescing fallback operator (??).")]
     op_coalesce {}
 
-    // Category 35: Splat & Unpack Operators
-    [KeywordDefAttr(35, "Positional sequence unpack operator (*).")]
-    op_splat {}
-
-    [KeywordDefAttr(35, "Compile-time structural key-value unpack operator (**).")]
-    op_pairs {}
-
-    [KeywordDefAttr(35, "Recursive deep-flatten unpack operator (*..).")]
-    op_expand {}
+    // Category 35: Splat & Unpack Operators. Each symbol is the Pair of its
+    // readable twin (`splat` `*`, `pairs` `**`, `flat` `*..`) and has no
+    // entry of its own (decision D4, 2026-11-13).
 
     // Category 36: Syntax & Metaprogramming Constructs
     [KeywordDefAttr(36, "Type-position symbolic type rewrite rules.")]
     type_construct {}
 
-    [KeywordDefAttr(36, "AST unquote compile-time evaluation prefix (~).")]
+    [KeywordDefAttr(36, "AST unquote compile-time evaluation prefix: `~x` marks an argument of a deep splice (`f!!(~x)`, `splice f(~x)`) to be evaluated at compile time. Target, not built yet: deep splices stop at seam vm.call_quote (docs/keyword_roadmap.md K4). No readable spelling is bound: `unquote` is free as a name.", "~")]
     unquote {}
 
     [KeywordDefAttr(36, "AST splice compile-time variable insertion prefix ($).")]
     splice {}
 
-    [KeywordDefAttr(36, "Compile-time syntax transformation macro.")]
+    [KeywordDefAttr(36, "Compile-time syntax transformation macro. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K4).")]
     macro {}
 
-    // Category 37: Homoiconic Call-Quoting Modes
-    [KeywordDefAttr(37, "Shallow quote call expression projection (!).", "!")]
-    call_quote_shallow {}
-
+    // Category 37: Homoiconic Call-Quoting Modes. Each symbol is the Pair
+    // of its readable twin (`call` `!`, `splice` `!!`, `frame` `!&`, `sig`
+    // `!^`, `grad` `!@`, `plan` `!?`) and has no entry of its own (D4).
     [KeywordDefAttr(37, "Shallow AST quote call expression projection (readable counterpart of f!(...)).", "!")]
     call {}
-
-    [KeywordDefAttr(37, "Deep compile-time AST splice projection (!!).", "!!")]
-    call_quote_deep {}
 
     [KeywordDefAttr(37, "Deep compile-time AST splice projection (readable counterpart of f!!(~...)).", "!!")]
     splice {}
 
-    [KeywordDefAttr(37, "Zero-marshalling ABI call frame projection (!&).", "!&")]
-    call_quote_abi {}
-
-    [KeywordDefAttr(37, "Glitch-free push-pull reactive signal projection (!^).", "!^")]
-    call_quote_signal {}
-
     [KeywordDefAttr(37, "Glitch-free push-pull reactive signal projection (readable counterpart of f!^(...)).", "!^")]
     sig {}
 
-    [KeywordDefAttr(37, "Symbolic adjoint dual CSE derivative projection (!@).", "!@")]
-    call_quote_dual {}
-
     [KeywordDefAttr(37, "Symbolic adjoint dual CSE derivative projection (readable counterpart of f!@(...)).", "!@")]
     grad {}
-
-    [KeywordDefAttr(37, "CoW transactional dry-run effect plan projection (!?).", "!?")]
-    call_quote_plan {}
 
     [KeywordDefAttr(37, "CoW transactional dry-run effect plan projection (readable counterpart of f!?(...)).", "!?")]
     plan {}

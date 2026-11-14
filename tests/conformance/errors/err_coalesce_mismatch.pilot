@@ -1,0 +1,20 @@
+// COMP003: `coalesce { id }` merges two fields into one slot, which only
+// works when they have the same size, lattice and mutability; an i64 (8
+// bytes) and a u8 (1 byte) cannot share one.
+struct NetBundle {
+    pub id: i64;
+}
+
+struct DiskBundle {
+    pub id: u8;
+}
+
+struct Device {
+    *NetBundle;
+    *DiskBundle coalesce { id };
+}
+
+fn main() {
+    let d = Device { id: 5 };
+    print(d.id);
+}

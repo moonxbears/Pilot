@@ -113,6 +113,7 @@ fn load_gate_bundle(root: &Path) -> String {
         "selfhost/gate/ledger/seams.pilot",
         "selfhost/gate/ledger/wiring.pilot",
         "selfhost/gate/seam_gate.pilot",
+        "selfhost/gate/keyword_gate.pilot",
         "selfhost/gate/runner.pilot",
     ];
     let mut combined = String::with_capacity(96 * 1024);
@@ -297,6 +298,7 @@ pub fn test_m1_2_rust_tamper_unlock_comment_freedom_and_retired_scripts_purged()
         std::os::unix::fs::symlink(root.join("stdlib"), tmp_ws.join("stdlib")).unwrap();
         std::os::unix::fs::symlink(root.join("selfhost"), tmp_ws.join("selfhost")).unwrap();
         std::os::unix::fs::symlink(root.join("tests"), tmp_ws.join("tests")).unwrap();
+        std::os::unix::fs::symlink(root.join("docs"), tmp_ws.join("docs")).unwrap();
         for ent in std::fs::read_dir(root.join("crates")).unwrap().flatten() {
             let cname = ent.file_name();
             if cname.to_string_lossy() != "pilot-cli" {
@@ -409,7 +411,7 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     let parity = gate_entry("bootstrap_parity");
     assert!(
         out.status.success()
-            && res.contains("\"gate_count\":5")
+            && res.contains("\"gate_count\":6")
             && res.contains("\"at_seams\":1")
             && res.contains("\"total_violations\":0")
             && litmus.contains("\"passed\":true,\"at_seam\":\"\""),
@@ -520,7 +522,7 @@ pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status() {
     let fast_json = String::from_utf8(fast_out.stdout).unwrap();
     assert!(
         fast_json.contains("\"passed\":true")
-            && fast_json.contains("\"gate_count\":3")
+            && fast_json.contains("\"gate_count\":4")
             && fast_json.contains("\"at_seams\":0")
             && fast_json.contains("\"total_violations\":0"),
         "Unexpected fast gate JSON: {}",

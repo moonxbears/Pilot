@@ -1,0 +1,2 @@
+error[SYN001]: `else` must follow the block of an `if` (or a `guard` condition)
+err_else_without_if.pilot:7:5

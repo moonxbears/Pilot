@@ -1,0 +1,131 @@
+// ==============================================================================
+// FILE: selfhost/gate/keyword_gate.pilot
+// The `keywords` gate: no registered keyword claims what it does not do
+// (docs/keyword_roadmap.md K0, AGENTS.md section 11 rules 3 and 8).
+// ==============================================================================
+// It reads docs/keyword_matrix.md, the output of tools/keyword_matrix, so it
+// can never disagree with the matrix; `pilot run tools/keyword_matrix/main.pilot
+// -- --check` (run by `cargo test-full`) keeps that file current with the
+// registry, the corpus and the ledgers.
+//
+// Codes:
+//   GATE021  a keyword row with no binding in its `Bound by` column
+//   GATE022  a keyword row whose verdict is below rung 1 (not SEAM, PARTIAL
+//            or REAL): it claims a behaviour nothing gives
+//   GATE023  the matrix has no keyword rows, or lacks the columns read here
+pub lvl(0) pkg Pilot.SelfHost.Gate.KeywordGate;
+
+use selfhost.gate.manifest.*;
+
+fn kg_matrix_file() -> str => "docs/keyword_matrix.md";
+
+/// The verdict words of rung 1 and above (docs/keyword_roadmap.md section 3).
+fn kg_rung_words() -> List<str> => ["SEAM", "PARTIAL", "REAL"];
+
+/// The pieces of `s` between occurrences of `sep`.
+fn kg_split(s: str, sep: str) -> List<str> {
+    var out: List<str> = [];
+    var start: usize = 0;
+    var at = s.find(sep, 0);
+    while at >= 0 {
+        let cut = at as usize;
+        out.push(s.slice(start, cut));
+        start = cut + sep.len();
+        at = s.find(sep, start);
+    }
+    out.push(s.slice(start, s.len()));
+    return out;
+}
+
+/// The cells of a Markdown table row, trimmed, without the outer bars.
+fn kg_cells(line: str) -> List<str> {
+    var out: List<str> = [];
+    let parts = kg_split(line, "|");
+    var i = 1;
+    while i + 1 < parts.len() {
+        out.push(parts[i].trim());
+        i = i + 1;
+    }
+    return out;
+}
+
+fn kg_index_of(cells: List<str>, name: str) -> i64 {
+    var i = 0;
+    while i < cells.len() {
+        if cells[i] == name { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn kg_violation(code: str, line: i64, snippet: str, message: str, fix: str) -> GateViolation {
+    return GateViolation {
+        code: code,
+        file_path: kg_matrix_file(),
+        line: line,
+        column: 1,
+        offending_snippet: snippet,
+        message: message,
+        remediation: fix,
+    };
+}
+
+fn kg_at_rung_one(verdict: str) -> bool {
+    for w in kg_rung_words() {
+        if verdict.contains(w) { return true; }
+    }
+    return false;
+}
+
+fn kg_unbound(bound: str) -> bool => bound == "" || bound == "—" || bound == "-" || bound == "none";
+
+pub fn execute_keyword_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> GateReport {
+    let t0 = gate_time_now_us();
+    let root = resolve_workspace_root(workspace_root);
+    let violations = glist_new();
+    let text = gate_fs_read_text(gm_join_path(root, kg_matrix_file()));
+    let lines = kg_split(text, "\n");
+    var bound_col = -1;
+    var verdict_col = -1;
+    var rows = 0;
+    var n = 0;
+    while n < lines.len() {
+        let line = lines[n];
+        n = n + 1;
+        if !line.starts_with("| ") { continue; }
+        let cells = kg_cells(line);
+        if cells.len() > 0 && cells[0] == "Keyword" && kg_index_of(cells, "Verdict") >= 0 {
+            bound_col = kg_index_of(cells, "Bound by");
+            verdict_col = kg_index_of(cells, "Verdict");
+            continue;
+        }
+        if bound_col < 0 || verdict_col < 0 || !line.starts_with("| `") { continue; }
+        if cells.len() <= bound_col || cells.len() <= verdict_col { continue; }
+        rows = rows + 1;
+        let word = cells[0];
+        if kg_unbound(cells[bound_col]) {
+            glist_push(violations, kg_violation("GATE021", n, word,
+                "registered keyword has no binding",
+                "Bind it to grammar (a receptor, rule or modifier) with a conformance program, or remove it from stdlib/core/keywords.pilot"));
+        }
+        if !kg_at_rung_one(cells[verdict_col]) {
+            glist_push(violations, kg_violation("GATE022", n, word + " " + cells[verdict_col],
+                "keyword verdict is below rung 1 (SEAM)",
+                "Replace the fake with a registered seam or a diagnostic and record the behaviour in the wiring ledger"));
+        }
+    }
+    if rows == 0 {
+        glist_push(violations, kg_violation("GATE023", 1, kg_matrix_file(),
+            "no keyword rows with `Bound by` and `Verdict` columns were found",
+            "Regenerate the matrix: pilot run tools/keyword_matrix/main.pilot"));
+    }
+    let dt = gate_time_now_us() - t0;
+    return GateReport {
+        gate_id: "keywords",
+        category: GateCategoryId.Hygiene,
+        passed: glist_len(violations) == 0,
+        elapsed_us: if dt >= 0 { dt } else { 0 },
+        items_scanned: rows,
+        violations: violations,
+    };
+}

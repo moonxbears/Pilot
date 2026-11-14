@@ -1,0 +1,2 @@
+error[TYPE001]: the default of `b`: expected `i64`, found `str`
+err_param_default_type.pilot:3:25

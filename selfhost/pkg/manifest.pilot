@@ -30,7 +30,7 @@ fn mf_find(haystack: str, needle: str, start: i64) -> i64 {
     return -1;
 }
 
-pub pure fn generate_default_manifest_json(pkg_name: str, version: str = "0.1.0") -> str {
+pub pure fn generate_default_manifest_json(pkg_name: str, version: str) -> str {
     let nm = if pkg_name != "" { pkg_name } else { "pilot_app" };
     return "{\n" +
            "  \"name\": \"" + nm + "\",\n" +

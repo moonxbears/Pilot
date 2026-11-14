@@ -1,0 +1,12 @@
+// A function may call only functions at its own clearance level or below.
+// Checking that (LVL001) and elevation (`if lvl >= N`) are not built yet
+// (docs/keyword_roadmap.md K2), so a call from a lower level to a higher one
+// stops the build at the seam `lvl.clearance` instead of running unchecked
+// (audit W8). Nothing runs, so nothing is printed.
+lvl(9) fn top_secret() -> i64 => 9;
+
+lvl(0) fn low() -> i64 => top_secret();
+
+fn main() {
+    print(low());
+}

@@ -1,0 +1,2 @@
+error[SEED001]
+`alignof` asks `byte_align`, which the seed cannot answer

@@ -1,0 +1,30 @@
+// `default:` in a `switch` takes every value no `case` names. It comes
+// last (an arm after it is MATCH002) and is also the fallback of the value
+// form.
+//
+// Expected output, worked by hand:
+//   day(1) "start", day(5) "end", day(3) and day(9) "middle" (default).
+//   size(0) "none", size(1) "one", size(42) "many" (default, value form).
+fn day(n: i64) -> str {
+    switch n {
+        case 1: return "start";
+        case 5: return "end";
+        default: return "middle";
+    }
+}
+
+fn size(n: i64) -> str => switch n {
+    case 0: "none",
+    case 1: "one",
+    default: "many",
+};
+
+fn main() {
+    print(day(1));
+    print(day(5));
+    print(day(3));
+    print(day(9));
+    print(size(0));
+    print(size(1));
+    print(size(42));
+}

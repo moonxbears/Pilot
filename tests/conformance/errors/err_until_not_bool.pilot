@@ -1,0 +1,8 @@
+// TYPE001: the condition of `until(cond, body)` is a `bool`; an integer
+// is refused, as in `if` and `while`.
+fn main() {
+    var n = 0;
+    // The condition `n` starts at line 6, column 11.
+    until(n, { n = n + 1; });
+    print(n);
+}

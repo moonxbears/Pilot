@@ -10,24 +10,38 @@ comptime {
     // `noalloc fn f()`: the function takes no heap memory (NOALLOC001,
     // selfhost/check/noalloc.pilot). It is no `async` effect.
     __engine("register_modifier", nameof(noalloc), "effect_noalloc");
+    // Not built yet (docs/keyword_roadmap.md K8): where a declaration or
+    // statement starts each stops at the seam `keyword.unbuilt`.
+    __engine("bind_receptor", nameof(priority), 40, 1);
+    __engine("bind_receptor", nameof(jitter),   40, 1);
 }
 
-pub struct RealtimeScopeGuard : IGuard {
-    pub is_noalloc: bool;
-    pub self(noalloc_mode: bool) {
-        .is_noalloc = noalloc_mode;
-    }
-    ~self() {}
-}
-
+// The block forms below are not built yet (docs/keyword_roadmap.md phases K5
+// and K8). Each rule stops at its seam before its body runs, instead of
+// running the body with the budget, pool or period ignored (audit 2.3:
+// `on_missed` always ran, `periodic` was a plain `loop`).
 pub syntax {
-    noalloc(body)        => quote { { let __rt_guard = RealtimeScopeGuard(true); $body } };
-    region(pool, body)   => quote { { let __rt_region = $pool; $body } };
-    deadline(b, body)    => quote { { let __rt_budget = $b; $body } };
-    within(b, body)      => quote { { let __rt_within = $b; $body } };
-    periodic(p, body)    => quote { loop { let __rt_period = $p; $body } };
-    on_missed(body)      => quote { { $body } };
-    fallback(body)       => quote { { $body } };
+    noalloc(body) => quote {
+        seam("realtime.noalloc_block", "checking a block for heap use needs the allocation verifier for blocks (M37); `noalloc fn` is checked today (NOALLOC001)")
+    };
+    region(pool, body) => quote {
+        seam("realtime.region", "allocating a block's values in an arena needs the arena allocator (M37)")
+    };
+    deadline(b, body) => quote {
+        seam("realtime.deadline", "enforcing a deadline needs a monotonic clock and a way to stop or flag the late block (M77)")
+    };
+    within(b, body) => quote {
+        seam("realtime.within", "bounding a block's run time needs a monotonic clock and a way to stop or flag the late block (M77)")
+    };
+    periodic(p, body) => quote {
+        seam("realtime.periodic", "running a block at a fixed period needs a scheduler with timers")
+    };
+    on_missed(body) => quote {
+        seam("realtime.on_missed", "running a handler only when a deadline was missed needs `deadline` to detect a miss")
+    };
+    fallback(body) => quote {
+        seam("realtime.fallback", "running a fallback only when a deadline was missed needs `deadline` to detect a miss")
+    };
 }
 
 pub pure fn is_realtime_construct(word: str) -> bool {

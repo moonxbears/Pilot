@@ -1,0 +1,8 @@
+pkg gate.ledger.wiring;
+
+pub fn wiring_rows() -> List<Cap> => [
+    cap("F4", "`orbit n { .. }` repeats its body n times", ::Wired, "control/orbit_basic", ""),
+    cap("F4", "`drift x` moves `x` by one, and `orbit` counts down", ::Draft, "control/drift_steps", ""),
+    cap("F4", "a `tether` that is never tied is refused", ::Core, "errors/err_tether_loose", ""),
+    cap("F4", "`unit` literals convert to the base", ::Wired, "misc/unit_scale", ""),
+];

@@ -154,6 +154,7 @@ fn iterated_type(inf: Infer, e: i64) -> i64 {
     let s = inf.p.s;
     if e < 0 { return ty_unknown(); }
     let k = kind(s, e);
+    if k == nk_binary() && flags(s, e) == op_step() { return iterated_type(inf, lhs(s, e)); }
     if (k == nk_binary() && (flags(s, e) == op_range() || flags(s, e) == op_range_inclusive())) || k == nk_range() {
         return agree(inf.p, type_of(inf, lhs(s, e)), type_of(inf, rhs(s, e)));
     }

@@ -1,0 +1,22 @@
+// `assume(cond)` states a fact the caller guarantees. While the fact holds,
+// the function computes as if the line were not written.
+//
+// Expected output, worked by hand:
+//   ratio(10, 2) = 10 / 2 = 5; ratio(9, 3) = 3 (the divisor is never 0).
+//   last of [4, 6, 8] = 8 (the list is never empty).
+fn ratio(a: i64, b: i64) -> i64 {
+    assume(b != 0);
+    return a / b;
+}
+
+fn last(xs: List<i64>) -> i64 {
+    assume(xs.len() > 0);
+    return xs[xs.len() - 1];
+}
+
+fn main() {
+    print(ratio(10, 2));
+    print(ratio(9, 3));
+    let xs: List<i64> = [4, 6, 8];
+    print(last(xs));
+}

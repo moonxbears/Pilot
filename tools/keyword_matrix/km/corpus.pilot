@@ -1,0 +1,271 @@
+// An index of one language's source (the Rust seed or the Pilot code) for
+// measuring how much of it implements each keyword: its code lines with
+// comments removed, their sizes, its functions, how often each name is
+// called, and which lines hold each identifier or number.
+pkg km.corpus;
+
+use Pilot.Core.File;
+use km.text;
+
+/// Above this size (characters of code) a function is a shared dispatcher,
+/// never code written for one keyword.
+pub fn dedicated_max() -> i64 => 4000;
+
+pub struct Corpus {
+    pub paths: List<str>;
+    /// Global index of each file's first line, then the line count.
+    pub file_start: List<i64>;
+    pub lines: List<str>;
+    pub sizes: List<i64>;
+    /// The innermost function holding each line, or -1.
+    pub line_fn: List<i64>;
+    pub fn_name: List<str>;
+    pub fn_first: List<i64>;
+    pub fn_last: List<i64>;
+    pub fn_size: List<i64>;
+    /// Whether the function names three or more node kinds: a tree walker.
+    pub fn_generic: List<bool>;
+    /// Call sites per name (`name(` anywhere, its definition included).
+    pub calls: Map<str, i64>;
+    pub fns_named: Map<str, List<i64>>;
+    /// Functions and files by each `_`-separated part of their name.
+    pub fns_by_part: Map<str, List<i64>>;
+    pub files_by_part: Map<str, List<i64>>;
+    /// Lines holding each identifier or number token.
+    pub token_lines: Map<str, List<i64>>;
+    /// Per line: the stamp of the last keyword that counted it.
+    pub mark: List<i64>;
+}
+
+/// The index of `paths` (each read whole).
+pub fn build_corpus(paths: List<str>) -> Corpus {
+    var c = Corpus {
+        paths: paths, file_start: [], lines: [], sizes: [], line_fn: [],
+        fn_name: [], fn_first: [], fn_last: [], fn_size: [], fn_generic: [],
+        calls: [:], fns_named: [:], fns_by_part: [:], files_by_part: [:], token_lines: [:], mark: [],
+    };
+    var line_kinds: Map<i64, List<str>> = [:];
+    var f = 0;
+    for path in c.paths {
+        c.file_start.push(c.lines.len() as i64);
+        let first = c.lines.len() as i64;
+        for line in code_lines(File.read_text(path)) {
+            let id = c.lines.len() as i64;
+            c.lines.push(line);
+            c.sizes.push(code_size(line));
+            c.line_fn.push(-1);
+            c.mark.push(0);
+            index_tokens(c, line, id, line_kinds);
+        }
+        add_functions(c, first, c.lines.len() as i64);
+        index_part(c.files_by_part, base_name(path), f);
+        f = f + 1;
+    }
+    c.file_start.push(c.lines.len() as i64);
+    var i = 0;
+    while i < c.fn_name.len() {
+        c.fn_generic.push(count_kinds(c.fn_first[i], c.fn_last[i], line_kinds) >= 3);
+        i = i + 1;
+    }
+    return c;
+}
+
+/// The file name without folders or extension; `lib`, `mod` and `main`
+/// name no concept, so they come back empty.
+fn base_name(path: str) -> str {
+    var start: usize = 0;
+    var i: usize = 0;
+    while i < path.len() {
+        if path.byte_at(i) == 47 { start = i + 1; }
+        i = i + 1;
+    }
+    var name = path.slice(start, path.len());
+    let dot = name.find(".", 0);
+    if dot >= 0 { name = name.slice(0, dot as usize); }
+    if name == "lib" || name == "mod" || name == "main" { return ""; }
+    return name;
+}
+
+fn index_part(var ref by_part: Map<str, List<i64>>, name: str, id: i64) {
+    if name.len() == 0 { return; }
+    for part in split_on(name.trim(), "_") {
+        let key = part;
+        if key.len() == 0 { continue; }
+        if !by_part.has(key) { by_part.set(key, []); }
+        let ids = by_part[key];
+        if ids.len() == 0 || ids[ids.len() - 1] != id { ids.push(id); }
+    }
+}
+
+/// Records the identifier and number tokens of line `id`, the names it
+/// calls, and the node kinds it names (`NodeKind::X`, `nk_x()`).
+fn index_tokens(var ref c: Corpus, line: str, id: i64, var ref line_kinds: Map<i64, List<str>>) {
+    let n = line.len();
+    var i: usize = 0;
+    var prev = "";
+    while i < n {
+        let b = line.byte_at(i);
+        if !is_ident_byte(b) {
+            i = i + 1;
+            continue;
+        }
+        let start = i;
+        while i < n && is_ident_byte(line.byte_at(i)) {
+            i = i + 1;
+        }
+        let tok = line.slice(start, i);
+        if !c.token_lines.has(tok) { c.token_lines.set(tok, []); }
+        let at = c.token_lines[tok];
+        if at.len() == 0 || at[at.len() - 1] != id { at.push(id); }
+        var j = i;
+        while j < n && (line.byte_at(j) == 32 || line.byte_at(j) == 9) {
+            j = j + 1;
+        }
+        let called = j < n && line.byte_at(j) == 40;
+        let first = tok.byte_at(0);
+        if called && !(first >= 48 && first <= 57) {
+            c.calls.set(tok, (c.calls[tok] ?? 0) + 1);
+        }
+        var kind = "";
+        if prev == "NodeKind" && start >= 2 && line.byte_at(start - 1) == 58 && line.byte_at(start - 2) == 58 {
+            kind = tok;
+        } else if tok.starts_with("nk_") && i + 1 < n && line.byte_at(i) == 40 && line.byte_at(i + 1) == 41 {
+            kind = tok;
+        }
+        if kind.len() > 0 {
+            if !line_kinds.has(id) { line_kinds.set(id, []); }
+            line_kinds[id].push(kind);
+        }
+        prev = tok;
+    }
+}
+
+fn count_kinds(first: i64, last: i64, ref line_kinds: Map<i64, List<str>>) -> i64 {
+    var seen: Map<str, bool> = [:];
+    var count = 0;
+    var i = first;
+    while i <= last {
+        if line_kinds.has(i) {
+            for k in line_kinds[i] {
+                if !seen.has(k) {
+                    seen.set(k, true);
+                    count = count + 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
+/// Finds the functions of the file whose lines are `first..end`: a line
+/// holding `fn name` starts one; its body is `{ .. }` (to the brace that
+/// closes it) or `=> ..;` (to the next line with a `;`).
+fn add_functions(var ref c: Corpus, first: i64, end: i64) {
+    var i = first;
+    while i < end {
+        let line = c.lines[i];
+        let at = find_word(line, "fn", 0);
+        if at < 0 {
+            i = i + 1;
+            continue;
+        }
+        var p = (at as usize) + 2;
+        while p < line.len() && (line.byte_at(p) == 32 || line.byte_at(p) == 9) {
+            p = p + 1;
+        }
+        let name_start = p;
+        while p < line.len() && (is_ident_byte(line.byte_at(p)) || line.byte_at(p) == 46) {
+            p = p + 1;
+        }
+        if p == name_start || p == (at as usize) + 2 {
+            i = i + 1;
+            continue;
+        }
+        var name = line.slice(name_start, p);
+        let dot = last_dot(name);
+        if dot >= 0 { name = name.slice((dot + 1) as usize, name.len()); }
+        let last = body_end(c, i, p, end);
+        if last >= 0 { add_function(c, name, i, last); }
+        i = i + 1;
+    }
+}
+
+fn last_dot(s: str) -> i64 {
+    var at = -1;
+    var i: usize = 0;
+    while i < s.len() {
+        if s.byte_at(i) == 46 { at = i as i64; }
+        i = i + 1;
+    }
+    return at;
+}
+
+/// The last line of the body of the function declared on line `i` (its
+/// name ends at byte `from`), or -1 for a declaration without a body.
+fn body_end(ref c: Corpus, i: i64, from: usize, end: i64) -> i64 {
+    var depth = 0;
+    var started = false;
+    var j = i;
+    while j < end {
+        let seg = if j == i { c.lines[i].slice(from, c.lines[i].len()) } else { c.lines[j] };
+        let arrow = seg.find("=>", 0);
+        let brace = seg.find("{", 0);
+        if !started && arrow >= 0 && (brace < 0 || arrow < brace) {
+            var k = j;
+            while k < end && !c.lines[k].contains(";") {
+                k = k + 1;
+            }
+            return if k < end { k } else { end - 1 };
+        }
+        if !started && seg.contains(";") && brace < 0 {
+            return -1;
+        }
+        var q: usize = 0;
+        while q < seg.len() {
+            let b = seg.byte_at(q);
+            if b == 123 {
+                depth = depth + 1;
+                started = true;
+            } else if b == 125 {
+                depth = depth - 1;
+            }
+            q = q + 1;
+        }
+        if started && depth <= 0 { return j; }
+        j = j + 1;
+    }
+    return -1;
+}
+
+fn add_function(var ref c: Corpus, name: str, first: i64, last: i64) {
+    let id = c.fn_name.len() as i64;
+    c.fn_name.push(name);
+    c.fn_first.push(first);
+    c.fn_last.push(last);
+    var size = 0;
+    var i = first;
+    while i <= last {
+        size = size + c.sizes[i];
+        // Functions are found in line order, so a nested one comes later
+        // and claims its lines from the one around it.
+        c.line_fn[i] = id;
+        i = i + 1;
+    }
+    c.fn_size.push(size);
+    if !c.fns_named.has(name) { c.fns_named.set(name, []); }
+    c.fns_named[name].push(id);
+    index_part(c.fns_by_part, lower(name), id);
+}
+
+/// How many call sites other than its definition `name` has.
+pub fn callers(ref c: Corpus, name: str) -> i64 {
+    let n = c.calls[name] ?? 0;
+    return if n > 0 { n - 1 } else { 0 };
+}
+
+/// Whether function `f` is a handler written for one thing: called from at
+/// most two places, small, and not a walker over many node kinds.
+pub fn dedicated(ref c: Corpus, f: i64) -> bool {
+    return callers(c, c.fn_name[f]) <= 2 && c.fn_size[f] <= dedicated_max() && !c.fn_generic[f];
+}

@@ -1,0 +1,11 @@
+// An `assert` inside a closure reports the closure's arguments: f(3) is 6;
+// f(-1) fails `n > 0` with left -1 and right 0, and the note is an
+// f-string read only when the assertion fails.
+fn main() {
+    let f = (n: i64) => {
+        assert(n > 0, f"n was {n}");
+        return n * 2;
+    };
+    print(f(3));
+    print(f(-1));
+}

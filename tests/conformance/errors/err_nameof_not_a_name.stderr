@@ -1,0 +1,2 @@
+error[SYN001]: `nameof` quotes one name, such as `nameof(x)`
+err_nameof_not_a_name.pilot:5:18

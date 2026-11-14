@@ -1,0 +1,2 @@
+error[TYPE001]: condition must be `bool`, found `i64`
+err_where_not_bool.pilot:6:30

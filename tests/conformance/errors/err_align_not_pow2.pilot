@@ -1,0 +1,10 @@
+// LAYOUT001: `[Align(N)]` places a struct on an N-byte boundary, which a
+// machine can only do for a power of two; 24 = 8 * 3 is not one.
+[Align(24)]
+struct Row {
+    pub a: i64;
+}
+
+fn main() {
+    print(Row { a: 1 }.a);
+}

@@ -1,0 +1,7 @@
+// TYPE001: the default "four" is a str, the parameter an i64.
+// `"four"` is at line 3, column 25.
+fn add(a: i64, b: i64 = "four") -> i64 => a + b;
+
+fn main() {
+    print(add(3));
+}

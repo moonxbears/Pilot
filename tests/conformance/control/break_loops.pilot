@@ -1,0 +1,28 @@
+// `break` leaves the innermost loop at once: `loop`, `while` and `for`.
+//
+// Expected output, worked by hand:
+//   loop counting up, break at 3: prints 0, 1, 2.
+//   for over [5, 8, 11, 14], break at the first > 9: prints 5, 8; 11 is not printed.
+//   nested: the inner `for` breaks at j == 1, the outer runs on:
+//     i = 0: "0-0"; i = 1: "1-0"  (two lines).
+//   a statement after the loop runs: "after".
+fn main() {
+    var k = 0;
+    loop {
+        if k == 3 { break; }
+        print(k);
+        k = k + 1;
+    }
+    let xs: List<i64> = [5, 8, 11, 14];
+    for x in xs {
+        if x > 9 { break; }
+        print(x);
+    }
+    for i in 0..2 {
+        for j in 0..3 {
+            if j == 1 { break; }
+            print(f"{i}-{j}");
+        }
+    }
+    print("after");
+}

@@ -1,0 +1,95 @@
+// ==============================================================================
+// FILE: selfhost/check/clearance.pilot
+// Uses that cannot be carried out yet: calls to functions declared without a
+// body (`extern`), and uses that climb a clearance level (`lvl`).
+// ==============================================================================
+// Both stop the build at a seam (SEAM001) rather than running wrongly:
+//
+// * A top-level function declared without a body (`extern "C" lib "m" fn
+//   labs(x: i64) -> i64;`) has nothing to run until native calls go through
+//   `pilot.abi` frame plans (docs/keyword_roadmap.md K5). Using it stops at
+//   `abi.extern_call`. Declaring it is fine.
+// * A function's clearance level is the integer of the `lvl(N)` written on
+//   it, else 0, the public ring (`Cfg.Tokens.ring_public`). A use of a
+//   top-level function of a higher level than the function using it needs
+//   the clearance check (LVL001) and elevation (`if lvl >= N`), which are
+//   not built yet (docs/keyword_roadmap.md K2), so it stops at
+//   `lvl.clearance`. Uses at the same level or downward run. A level that is
+//   not an integer literal cannot be compared yet and stops at the same
+//   seam. What a package's level (`pub lvl(N) pkg Name;`) grants or demands
+//   is undecided (D11), so package levels are not read here: a function
+//   without its own `lvl` counts as 0, which can stop a use the package rule
+//   will allow, never let through one it forbids.
+pub lvl(0) pkg Pilot.SelfHost.Check.Clearance;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.check.probes.*;
+
+/// The seam a use of a function declared without a body stops at.
+fn extern_seam() -> str => "unconnected seam `abi.extern_call`";
+
+/// The seam a use climbing a clearance level stops at.
+fn clearance_seam() -> str => "unconnected seam `lvl.clearance`";
+
+/// The level written on declaration `n`: `[level]`, `[]` when none is
+/// written, or `[-1]` when the level is not an integer literal.
+fn written_level(p: Program, n: i64) -> List<i64> {
+    for args in attr_uses(p, n, nameof(lvl)) {
+        if args.len() == 1 && kind(p.s, args[0]) == nk_int() { return [lit_value(p.s, args[0])]; }
+        return [-1];
+    }
+    return [];
+}
+
+/// The level of function `n`: the one written on it, else 0.
+fn level_of(p: Program, n: i64) -> i64 {
+    let w = written_level(p, n);
+    return if w.len() == 1 { w[0] } else { 0 };
+}
+
+/// The top-level function whose body holds `n`, or -1.
+fn enclosing_fn(p: Program, n: i64) -> i64 {
+    var cur = p.parents[n];
+    while cur >= 0 {
+        if kind(p.s, cur) == nk_fn() { return cur; }
+        cur = p.parents[cur];
+    }
+    return -1;
+}
+
+/// The words for a level in a message.
+fn level_text(level: i64) -> str => if level < 0 { "a level that is not an integer" } else { f"level {level}" };
+
+pub fn check_clearance(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    var n = 0;
+    while n < s.count {
+        if kind(s, n) == nk_ident() && in_user_file(s, n) && inf.r.ref_of[n] < 0 && node_name(s, n) != s.receiver {
+            let name = node_name(s, n);
+            let fns = nl_get(p.fns, name);
+            if fns.len() > 0 && nl_get(p.type_decls, name).len() == 0 {
+                var bodied = false;
+                for f in fns { if fn_body(s, f) >= 0 { bodied = true; } }
+                if !bodied {
+                    sink_error(sink, n, "SEAM001",
+                        f"{extern_seam()}: `{name}` is declared without a body (`extern`); calling it needs native calls through pilot.abi frame plans, not built yet (docs/keyword_roadmap.md K5)");
+                } else {
+                    let user = enclosing_fn(p, n);
+                    let from = if user >= 0 { level_of(p, user) } else { 0 };
+                    let to = level_of(p, fns[0]);
+                    if from < 0 || to < 0 || to > from {
+                        let who = if user >= 0 { f"`{node_name(s, user)}`" } else { "this code" };
+                        sink_error(sink, n, "SEAM001",
+                            f"{clearance_seam()}: {who} ({level_text(from)}) uses `{name}` ({level_text(to)}); clearance checks (LVL001) and elevation (`if lvl >= N`) are not built yet (docs/keyword_roadmap.md K2)");
+                    }
+                }
+            }
+        }
+        n = n + 1;
+    }
+}

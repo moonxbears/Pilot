@@ -1,0 +1,11 @@
+// A method called on the result of another method. Hand-worked:
+// `q"` with `"` replaced by `x` is `qx`; then `q` replaced by `y` is `yx`.
+// Until 2026-11-13 PilIR took the second call for a call on a type and
+// stopped at ir.lower_construct.
+fn main() {
+    let a = "q\"";
+    print(a.replace("\"", "x").replace("q", "y"));
+    let b = a.replace("q", "z");
+    print(b.replace("\"", "!"));
+    print("  pad  ".trim().len);
+}

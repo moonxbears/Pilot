@@ -30,7 +30,7 @@ struct MathTestCase : IValue {
         self.base.assertAlmostEqual(3.14159265, 3.1415927, 5, "almost equal to 5 decimal places");
     }
 
-    var fn run(result: any = none) -> unittest.TestResult {
+    var fn run(result: any) -> unittest.TestResult {
         var r = if result != none { result } else { unittest.TestResult() };
         r.startTest(self.base);
         self.base.setUp();

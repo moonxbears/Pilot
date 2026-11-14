@@ -1,0 +1,11 @@
+// An `asm { .. }` block needs a per-target assembler, which no milestone
+// schedules yet (docs/keyword_roadmap.md D5). It used to be read as an
+// inline foreign-language block; now the build stops at the seam
+// `keyword.unbuilt` on every engine.
+fn main() {
+    print("before");
+    asm {
+        nop
+    }
+    print("after");
+}

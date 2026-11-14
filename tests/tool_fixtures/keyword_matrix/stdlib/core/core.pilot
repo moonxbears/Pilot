@@ -1,0 +1,8 @@
+// Receptor bindings of the fixture.
+struct Tokens {
+    kw_drift: "drift",
+}
+
+__engine(Cfg.Hooks.receptor, nameof(orbit), 15, 0);
+__engine(Cfg.Hooks.receptor, Cfg.Tokens.kw_drift, 15, 1);
+__engine(Cfg.Hooks.receptor, "tether", 16, 0);

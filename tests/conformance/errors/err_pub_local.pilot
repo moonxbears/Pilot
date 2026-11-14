@@ -1,0 +1,9 @@
+// SYN001: `pub` gives an item of a package or a type its reach; on a local
+// binding it means nothing, and is refused instead of being dropped.
+pub fn twice(n: i64) -> i64 => n * 2;
+
+fn main() {
+    // `pub` starts at line 7, column 5.
+    pub let x = twice(2);
+    print(x);
+}

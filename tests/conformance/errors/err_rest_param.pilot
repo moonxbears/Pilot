@@ -1,0 +1,8 @@
+// SYN001: `*xs` before a parameter name would gather the rest of the
+// arguments; it is not built, and the `*` used to be dropped.
+// `*` is at line 4, column 10.
+fn total(*xs: i64) -> i64 => 0;
+
+fn main() {
+    print(total(1));
+}

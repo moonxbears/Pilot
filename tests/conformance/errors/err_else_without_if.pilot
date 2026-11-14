@@ -1,0 +1,8 @@
+// SYN001: an `else` with no `if` before it is refused; it is not read as
+// a name (it was "undefined name `else`" before).
+fn main() {
+    let x = 1;
+    print(x);
+    // The stray `else` starts at line 7, column 5.
+    else { print(2); }
+}

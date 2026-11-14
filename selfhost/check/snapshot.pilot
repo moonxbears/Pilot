@@ -97,9 +97,17 @@ pub pure fn op_and() -> i64 => 14;
 pub pure fn op_coalesce() -> i64 => 22;
 pub pure fn op_range_inclusive() -> i64 => 23;
 pub pure fn op_range() -> i64 => 24;
+/// `a..b : step` (`BinaryOp::Step`): lhs the range, rhs the step.
+pub pure fn op_step() -> i64 => 49;
 pub pure fn op_is() -> i64 => 25;
 pub pure fn op_as() -> i64 => 32;
 pub pure fn op_as_view() -> i64 => 33;
+/// `BinaryExpr` flags of `x |> f(..)` and `f(..) <| x` (`BinaryOp::Pipe`,
+/// `BinaryOp::PipeBackward` in crates/pilot-ast).
+pub pure fn op_pipe() -> i64 => 21;
+pub pure fn op_pipe_backward() -> i64 => 31;
+/// `UnaryExpr` flags of logical not (`!x`).
+pub pure fn unary_not() -> i64 => 5;
 pub pure fn unary_some() -> i64 => 9;
 pub pure fn unary_splat() -> i64 => 6;
 pub pure fn unary_deep_flatten() -> i64 => 8;
@@ -146,7 +154,7 @@ pub struct Snap {
     /// Node -> its declaration modifiers packed by `decl_bits`, or -1 for a
     /// node that is no declaration.
     pub modifiers: List<i64>;
-    /// Field node -> the node of its default value (`retries: i64 = 3`, an
+    /// Field or parameter node -> the node of its default value (`retries: i64 = 3`, an
     /// enum variant's `= 5`), or -1.
     pub field_defaults: List<i64>;
     /// Switch arm node -> its guard (`case x if x < 0`), or -1.

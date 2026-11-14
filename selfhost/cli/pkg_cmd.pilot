@@ -199,7 +199,7 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let name = manifest_get_name(mf);
         let ver = manifest_get_version(mf);
 
-        let res = resolve_package_dependencies(manifest_json);
+        let res = resolve_package_dependencies(manifest_json, "");
         let summary = format_resolution_summary(res);
         let new_lock = generate_resolved_lockfile_json(name, ver, res);
         let _ = File.write_text("pilot.lock", new_lock);
@@ -218,7 +218,7 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let name = manifest_get_name(mf);
         let ver = manifest_get_version(mf);
 
-        let res = resolve_package_dependencies(manifest_json);
+        let res = resolve_package_dependencies(manifest_json, "");
         let summary = format_resolution_summary(res);
         let new_lock = generate_resolved_lockfile_json(name, ver, res);
         let _ = File.write_text("pilot.lock", new_lock);
@@ -269,7 +269,7 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let mf = parse_manifest_json(updated_json);
         let root_name = manifest_get_name(mf);
         let root_ver = manifest_get_version(mf);
-        let res = resolve_package_dependencies(updated_json);
+        let res = resolve_package_dependencies(updated_json, "");
         let new_lock = generate_resolved_lockfile_json(root_name, root_ver, res);
         let _ = File.write_text("pilot.json", updated_json);
         let _ = File.write_text("pilot.lock", new_lock);
@@ -292,7 +292,7 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let mf = parse_manifest_json(updated_json);
         let root_name = manifest_get_name(mf);
         let root_ver = manifest_get_version(mf);
-        let res = resolve_package_dependencies(updated_json);
+        let res = resolve_package_dependencies(updated_json, "");
         let new_lock = generate_resolved_lockfile_json(root_name, root_ver, res);
         let _ = File.write_text("pilot.json", updated_json);
         let _ = File.write_text("pilot.lock", new_lock);
@@ -312,7 +312,7 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let target_pkg = p_trim(args);
         let mf = parse_manifest_json(manifest_json);
         let root_name = manifest_get_name(mf);
-        let res = resolve_package_dependencies(manifest_json);
+        let res = resolve_package_dependencies(manifest_json, "");
         return explain_package_resolution(res, target_pkg, root_name);
     }
 

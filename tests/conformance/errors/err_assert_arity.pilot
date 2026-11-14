@@ -1,0 +1,5 @@
+// `assert` takes a condition and an optional note; a third argument fits
+// no form of it.
+fn main() {
+    assert(true, "first", "second");
+}

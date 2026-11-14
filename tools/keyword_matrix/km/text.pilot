@@ -1,0 +1,275 @@
+// Text helpers for the keyword matrix tool: lines, splitting, comment
+// stripping, identifier tests, sorting and number formatting.
+pkg km.text;
+
+/// Whether byte `b` can be part of an identifier (letters, digits, `_`).
+pub fn is_ident_byte(b: u8) -> bool {
+    return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+}
+
+/// The lines of `text`, without their line breaks (`\r\n` or `\n`).
+pub fn lines_of(text: str) -> List<str> {
+    var out: List<str> = [];
+    let n = text.len();
+    var start: usize = 0;
+    var i: usize = 0;
+    while i < n {
+        if text.byte_at(i) == 10 {
+            var end = i;
+            if end > start && text.byte_at(end - 1) == 13 { end = end - 1; }
+            out.push(text.slice(start, end));
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    if start < n { out.push(text.slice(start, n)); }
+    return out;
+}
+
+/// `s` cut at every `sep`; empty pieces are kept.
+pub fn split_on(s: str, sep: str) -> List<str> {
+    var out: List<str> = [];
+    var start: usize = 0;
+    var at = s.find(sep, 0);
+    while at >= 0 {
+        let cut = at as usize;
+        out.push(s.slice(start, cut));
+        start = cut + sep.len();
+        at = s.find(sep, start);
+    }
+    out.push(s.slice(start, s.len()));
+    return out;
+}
+
+/// The pieces of `s` between runs of spaces; no empty pieces.
+pub fn words_of(s: str) -> List<str> {
+    var out: List<str> = [];
+    for piece in split_on(s, " ") {
+        if piece.len() > 0 { out.push(piece); }
+    }
+    return out;
+}
+
+/// The lines of `text` with `//` and `/* */` comments blanked out; block
+/// comments keep their line breaks, so line numbers stay the same.
+pub fn code_lines(text: str) -> List<str> {
+    var out: List<str> = [];
+    var in_block = false;
+    for line in lines_of(text) {
+        var kept = "";
+        var from: usize = 0;
+        var i: usize = 0;
+        let n = line.len();
+        while i < n {
+            let b = line.byte_at(i);
+            if in_block {
+                if b == 42 && i + 1 < n && line.byte_at(i + 1) == 47 {
+                    in_block = false;
+                    i = i + 2;
+                    from = i;
+                    continue;
+                }
+                i = i + 1;
+                continue;
+            }
+            if b == 47 && i + 1 < n && line.byte_at(i + 1) == 47 {
+                break;
+            }
+            if b == 47 && i + 1 < n && line.byte_at(i + 1) == 42 {
+                kept = kept + line.slice(from, i);
+                in_block = true;
+                i = i + 2;
+                continue;
+            }
+            i = i + 1;
+        }
+        if !in_block {
+            kept = kept + line.slice(from, i);
+        }
+        out.push(kept);
+    }
+    return out;
+}
+
+/// The number of bytes of `s` that are not spaces, tabs or line breaks.
+pub fn code_size(s: str) -> i64 {
+    var n = 0;
+    var i: usize = 0;
+    let len = s.len();
+    while i < len {
+        let b = s.byte_at(i);
+        if b != 32 && b != 9 && b != 13 && b != 10 { n = n + 1; }
+        i = i + 1;
+    }
+    return n;
+}
+
+/// Whether `word` occurs in `s` with no identifier byte on either side.
+pub fn has_word(s: str, word: str) -> bool {
+    return find_word(s, word, 0) >= 0;
+}
+
+/// Where `key` occurs in `s` at or after `from` with no identifier byte
+/// before it, nor after it when it ends in one; -1 when it does not.
+pub fn find_word(s: str, key: str, from: usize) -> isize {
+    if key.len() == 0 { return -1; }
+    let last = key.byte_at((key.len() - 1) as usize);
+    let first = key.byte_at(0);
+    var at = s.find(key, from);
+    while at >= 0 {
+        let i = at as usize;
+        let end = i + key.len();
+        let clear_before = i == 0 || !is_ident_byte(first) || !is_ident_byte(s.byte_at(i - 1));
+        let clear_after = end >= s.len() || !is_ident_byte(last) || !is_ident_byte(s.byte_at(end));
+        if clear_before && clear_after { return at; }
+        at = s.find(key, i + 1);
+    }
+    return -1;
+}
+
+/// Whether `name`, cut at `_`, contains `part` as a run of whole pieces
+/// (`check_switch` contains `switch`; `call_quote_abi` contains `call_quote`).
+pub fn has_part(name: str, part: str) -> bool {
+    let padded = "_" + name + "_";
+    return padded.contains("_" + part + "_");
+}
+
+/// `items` sorted, shortest first, then by bytes.
+pub fn sort_short_first(items: List<str>) -> List<str> {
+    var out: List<str> = [];
+    for item in items {
+        out.push(item);
+        var at = out.len() - 1;
+        while at > 0 && shorter_first(item, out[at - 1]) {
+            out[at] = out[at - 1];
+            at = at - 1;
+        }
+        out[at] = item;
+    }
+    return out;
+}
+
+/// `items` sorted by bytes.
+pub fn sort_strs(items: List<str>) -> List<str> {
+    var out: List<str> = [];
+    for item in items {
+        out.push(item);
+        var at = out.len() - 1;
+        while at > 0 && item < out[at - 1] {
+            out[at] = out[at - 1];
+            at = at - 1;
+        }
+        out[at] = item;
+    }
+    return out;
+}
+
+fn shorter_first(a: str, b: str) -> bool {
+    if a.len() != b.len() { return a.len() < b.len(); }
+    return a < b;
+}
+
+/// `n` as written in the matrix: `950`, or `1.2k` for thousands (tenths
+/// rounded half up).
+pub fn short_count(n: i64) -> str {
+    if n < 1000 { return f"{n}"; }
+    let tenths = (n + 50) / 100;
+    return f"{tenths / 10}.{tenths % 10}k";
+}
+
+/// `100 * part / whole`, rounded half up.
+pub fn percent(part: i64, whole: i64) -> i64 {
+    return (200 * part + whole) / (2 * whole);
+}
+
+/// `s` for a Markdown table cell: `|` escaped, line breaks as spaces.
+pub fn cell(s: str) -> str {
+    return s.replace("|", "\\|").replace("\n", " ");
+}
+
+/// The first `limit` bytes of `s`, never cutting a character in two, with
+/// `…` when something was cut.
+pub fn clip(s: str, limit: usize) -> str {
+    if s.len() <= limit { return s; }
+    var end = limit;
+    while end > 0 && s.byte_at(end) >= 128 && s.byte_at(end) < 192 {
+        end = end - 1;
+    }
+    return s.slice(0, end) + "…";
+}
+
+/// The decimal number at the start of `s`, or -1 when it has none.
+pub fn leading_int(s: str) -> i64 {
+    var n = -1;
+    var i: usize = 0;
+    while i < s.len() && s.byte_at(i) >= 48 && s.byte_at(i) <= 57 {
+        let d = (s.byte_at(i) - 48) as i64;
+        n = if n < 0 { d } else { n * 10 + d };
+        i = i + 1;
+    }
+    return n;
+}
+
+/// The string literals of `s` in order, with their escapes kept as written.
+pub fn string_literals(s: str) -> List<str> {
+    var out: List<str> = [];
+    var i: usize = 0;
+    let n = s.len();
+    while i < n {
+        if s.byte_at(i) == 34 {
+            var j = i + 1;
+            while j < n && s.byte_at(j) != 34 {
+                if s.byte_at(j) == 92 { j = j + 1; }
+                j = j + 1;
+            }
+            out.push(s.slice(i + 1, if j < n { j } else { n }));
+            i = j + 1;
+            continue;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The texts between backticks in `s`.
+pub fn backtick_spans(s: str) -> List<str> {
+    let pieces = split_on(s, "`");
+    var out: List<str> = [];
+    var i = 1;
+    while i < pieces.len() - 1 {
+        out.push(pieces[i]);
+        i = i + 2;
+    }
+    return out;
+}
+
+/// The files under `dir` (one path per line from the host), sorted.
+pub fn sorted_lines(listing: str) -> List<str> {
+    var out: List<str> = [];
+    for line in lines_of(listing) {
+        if line.len() > 0 { out.push(line); }
+    }
+    return sort_strs(out);
+}
+
+/// `s` with its ASCII capital letters made small.
+pub fn lower(s: str) -> str {
+    var out = "";
+    var from: usize = 0;
+    var i: usize = 0;
+    while i < s.len() {
+        let b = s.byte_at(i);
+        if b >= 65 && b <= 90 {
+            out = out + s.slice(from, i) + char_of(b);
+            from = i + 1;
+        }
+        i = i + 1;
+    }
+    return out + s.slice(from, s.len());
+}
+
+fn char_of(b: u8) -> str {
+    let letters = "abcdefghijklmnopqrstuvwxyz";
+    let at = (b - 65) as usize;
+    return letters.slice(at, at + 1);
+}

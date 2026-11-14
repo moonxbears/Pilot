@@ -1,0 +1,4 @@
+assertion failed: n was -1
+  expression: n > 0
+  left: -1
+  right: 0

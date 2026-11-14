@@ -1,0 +1,5 @@
+// `assert` is written as a call: its condition goes in parentheses.
+fn main() {
+    assert true;
+    print("not reached");
+}

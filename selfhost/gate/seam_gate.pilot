@@ -97,6 +97,9 @@ fn sg_scan_source(src: str, rel: str, sites: List<SeamSite>) {
     sg_scan_marker(src, rel, sg_value_marker(), ::Pending, sites);
     sg_scan_marker(src, rel, sg_stand_in_marker(), ::StandIn, sites);
     sg_scan_marker(src, rel, sg_workaround_marker(), ::Workaround, sites);
+    // A checker or emitter may report a seam as a SEAM001 message it writes
+    // out (selfhost/check/clearance.pilot), as the seed does.
+    sg_scan_seed_source(src, rel, sites);
 }
 
 /// Appends every use of `marker` in `src` as a site of `form`. A use inside a
@@ -125,9 +128,21 @@ fn sg_scan_marker(src: str, rel: str, marker: str, form: SiteForm, sites: List<S
     }
 }
 
-/// Appends every seam a seed Rust file (`rel`) raises by writing out its
-/// SEAM001 message. A message whose id is a format placeholder is the generic
-/// handler for Pilot seams, not a seam of its own.
+/// Whether `id` is a whole seam id (letters, digits, `_` and `.`).
+fn sg_is_seam_id(id: str) -> bool {
+    if id.len() == 0 { return false; }
+    var i = 0;
+    while i < id.len() {
+        if !sg_is_ident_byte(id.byte_at(i)) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Appends every seam a file (`rel`) raises by writing out its SEAM001
+/// message. A message whose id is not written out (a format placeholder, or
+/// a string built around a variable) is a generic handler for other seams,
+/// not a seam of its own.
 fn sg_scan_seed_source(src: str, rel: str, sites: List<SeamSite>) {
     let marker = sg_seed_marker();
     var at = src.find(marker, 0);
@@ -136,7 +151,7 @@ fn sg_scan_seed_source(src: str, rel: str, sites: List<SeamSite>) {
         let id_end = src.find("`", id_start);
         if id_end > id_start {
             let id = src.slice(id_start, id_end);
-            if id.find("{", 0) < 0 {
+            if sg_is_seam_id(id) {
                 let line_start = sg_line_start(src, at);
                 sites.push(SeamSite {
                     id: id,

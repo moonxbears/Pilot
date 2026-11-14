@@ -1,0 +1,4 @@
+fn main() {
+    let d = 5[km];
+    print(d);
+}

@@ -28,6 +28,9 @@ use Pilot.Core.Pending;
 // `assume(cond)` and `unreachable()`: facts the programmer states.
 use Pilot.Core.Hint;
 
+// `assert(cond)` / `assert(cond, note)`: conditions that must hold.
+use Pilot.Core.Assert;
+
 // `with arena a { .. }`: arena scopes.
 use Pilot.Core.Arena;
 

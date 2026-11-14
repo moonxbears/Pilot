@@ -12,6 +12,8 @@ pub const SEED: &str = "SEED001";
 pub const UNDECLARED: &str = "DECL001";
 /// An assignment to a variable a lambda captured by value.
 pub const CAPTURED_ASSIGN: &str = "DECL004";
+/// An assignment to a property that has a getter and no setter.
+pub const GET_ONLY_ASSIGN: &str = "DECL004";
 /// `break` outside a loop or switch.
 pub const BREAK_OUTSIDE_LOOP: &str = "FLOW003";
 /// `continue` outside a loop.

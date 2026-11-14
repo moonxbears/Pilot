@@ -1,0 +1,16 @@
+// Calls at the same clearance level or downward need no check: they run.
+// A function without its own `lvl` is at level 0, the public ring.
+// Expected: higher() = high() = 9 + base() = 9 + 1 = 10; low() = base() = 1.
+lvl(0) fn base() -> i64 => 1;
+
+lvl(9) fn high() -> i64 => 9 + base();
+
+lvl(9) fn higher() -> i64 => high();
+
+fn low() -> i64 => base();
+
+// `main` is at level 9 so it may use `higher` (9) and `low` (0).
+lvl(9) fn main() {
+    print(higher());
+    print(low());
+}

@@ -42,6 +42,11 @@ pub struct JsDialect : ISourceDialect {
         "    if (b === 0n) pilot_trap(\"integer division by zero\");",
         "    return a % b;",
         "}",
+        "// A struct value: an array of its fields that knows their names.",
+        "function pilot_rec(names, vals) {",
+        "    Object.defineProperty(vals, \"pilot_names\", { value: names });",
+        "    return vals;",
+        "}",
         "function pilot_show(x) {",
         "    if (typeof x === \"number\") {",
         "        if (Number.isNaN(x)) return \"NaN\";",
@@ -59,6 +64,7 @@ pub struct JsDialect : ISourceDialect {
         "        return m[1] + \"0.\" + \"0\".repeat(-k) + digits;",
         "    }",
         "    if (x === null || x === undefined) return \"null\";",
+        "    if (Array.isArray(x) && x.pilot_names) return \"{ \" + x.pilot_names.map((k, i) => k + \": \" + pilot_show(x[i])).sort().join(\", \") + \" }\";",
         "    if (Array.isArray(x)) return \"[\" + x.map(pilot_show).join(\", \") + \"]\";",
         "    if (x instanceof Map) return \"{ \" + [...x].map(([k, v]) => k + \": \" + pilot_show(v)).sort().join(\", \") + \" }\";",
         "    return String(x);",
@@ -139,6 +145,7 @@ pub struct JsDialect : ISourceDialect {
         "    }",
         "}",
         "function pilot_value_clone(v) {",
+        "    if (Array.isArray(v) && v.pilot_names) return pilot_rec(v.pilot_names, v.map(pilot_value_clone));",
         "    if (Array.isArray(v)) return v.map(pilot_value_clone);",
         "    if (v instanceof Map) {",
         "        const out = new Map();",
@@ -293,9 +300,6 @@ pub struct JsDialect : ISourceDialect {
         "    }",
         "    return Math.pow(Number(a), Number(b));",
         "}",
-        "function pilot_rt_assert(cond, note) {",
-        "    if (cond !== true) pilot_trap(\"assertion failed\" + (note === undefined ? \"\" : \": \" + pilot_show(note)));",
-        "}",
         "function pilot_rt_fault(message) {",
         "    pilot_trap(pilot_show(message));",
         "}",
@@ -414,7 +418,7 @@ pub struct JsDialect : ISourceDialect {
         if name == "to_str" { return f"pilot_show({args[0]})"; }
         if name == "list_get" { return f"pilot_map_get({joined(args)})"; }
         if name == "list_set" { return f"pilot_map_set({joined(args)})"; }
-        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "rt_fault", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line", "value_clone"] {
+        for helper in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_fault", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line", "value_clone"] {
             if name == helper { return f"pilot_{helper}({joined(args)})"; }
         }
         return none;
@@ -427,6 +431,11 @@ pub struct JsDialect : ISourceDialect {
     }
     pub fn function_table(names: List<str>) -> List<str> => ["const pilot_fns = [" + joined(names) + "];"];
     pub fn make_record(values: List<str>) -> str? => "[" + joined(values) + "]";
+    pub fn named_record(names: List<str>, values: List<str>) -> str? {
+        var quoted: List<str> = [];
+        for n in names { quoted.push("\"" + n + "\""); }
+        return "pilot_rec([" + joined(quoted) + "], [" + joined(values) + "])";
+    }
     pub fn get_field(rec: str, i: i64) -> str? => f"{rec}[{i}]";
     pub fn set_field(rec: str, i: i64, v: str) -> str? => f"{rec}[{i}] = {v};";
 }

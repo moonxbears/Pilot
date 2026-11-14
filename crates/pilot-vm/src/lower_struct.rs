@@ -113,8 +113,10 @@ impl BytecodeCompiler {
                 info.field_types.insert(Self::name(arena, mn.lhs).to_string(), t);
             }
             match mn.node_kind() {
-                // A property whose accessors have bodies is computed, not stored.
-                NodeKind::ParamDecl if self.is_computed_property(arena, m) => {}
+                // A property whose accessors have bodies is computed, not
+                // stored, unless it has a default: then its storage (`field`)
+                // starts at that value.
+                NodeKind::ParamDecl if self.is_computed_property(arena, m) && arena.field_default(m).is_none() => {}
                 NodeKind::ParamDecl => info
                     .fields
                     .push((Self::name(arena, mn.lhs).to_string(), arena.field_default(m))),

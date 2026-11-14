@@ -1,0 +1,7 @@
+// SYN001: the `T ! E` rule of `syntax type_construct` needs both types;
+// `i64 !` with no error type used to be accepted.
+fn main() {
+    // `!` is at line 5, column 16.
+    let x: i64 ! = 3;
+    print(x);
+}

@@ -1,0 +1,233 @@
+// How much code in one language implements a keyword (the Pilot / Rust
+// column of the keyword matrix).
+//
+// Code is found from the keyword's search keys. A key found in a function
+// written for one thing (`dedicated`) counts that whole function; found in a
+// shared function, a dispatcher or a tree walker, it counts only its own
+// line. A function or file whose name holds a concept word counts whole
+// (a function only when it is not larger than `dedicated_max`). Then the
+// dedicated functions that counted code calls count too, one level deep.
+// Size is characters of code, comments and blank space removed. Shared code
+// counts for every keyword that reaches it.
+pkg km.measure;
+
+use km.text;
+use km.corpus;
+
+/// What one keyword's search finds in a corpus.
+pub struct Search {
+    /// Keys matched as whole words (`NodeKind::MatchExpr`, `nk_match()`, `(15, 0)`).
+    pub keys: List<str>;
+    /// Concept words matched against `_`-separated name parts.
+    pub parts: List<str>;
+    /// Whether a line that starts with `word(..) => quote` (a syntax rule
+    /// for the keyword) is a key too.
+    pub rule_word: str;
+}
+
+/// Characters of code in `c` that implement the keyword `search` describes.
+/// `stamp` must differ for every call on the same corpus.
+pub fn measure(var ref c: Corpus, ref search: Search, stamp: i64) -> i64 {
+    var total = 0;
+    // Regions whose calls are followed: first and last line.
+    var from: List<i64> = [];
+    var to: List<i64> = [];
+    for part in search.parts {
+        for f in files_with_part(c, part) {
+            let first = c.file_start[f];
+            let end = c.file_start[f + 1];
+            total = total + mark_lines(c, first, end - 1, stamp);
+            var g = 0;
+            while g < c.fn_name.len() {
+                if c.fn_first[g] >= first && c.fn_first[g] < end {
+                    from.push(c.fn_first[g]);
+                    to.push(c.fn_last[g]);
+                }
+                g = g + 1;
+            }
+        }
+        for f in fns_with_part(c, part) {
+            if c.fn_size[f] <= dedicated_max() {
+                let (first, last) = (c.fn_first[f], c.fn_last[f]);
+                let added = mark_lines(c, first, last, stamp);
+                if added > 0 {
+                    total = total + added;
+                    from.push(first);
+                    to.push(last);
+                }
+            }
+        }
+    }
+    for line in key_lines(c, search) {
+        let f = c.line_fn[line];
+        if f >= 0 && dedicated(c, f) {
+            let (first, last) = (c.fn_first[f], c.fn_last[f]);
+            let added = mark_lines(c, first, last, stamp);
+            if added > 0 {
+                total = total + added;
+                from.push(first);
+                to.push(last);
+            }
+        } else if c.mark[line] != stamp {
+            let at = line;
+            total = total + mark_lines(c, at, at, stamp);
+            from.push(line);
+            to.push(line);
+        }
+    }
+    var r = 0;
+    while r < from.len() {
+        total = total + follow_calls(c, from[r], to[r], stamp);
+        r = r + 1;
+    }
+    return total;
+}
+
+/// Counts the lines `first..=last` not yet counted for `stamp`; their size.
+fn mark_lines(var ref c: Corpus, first: i64, last: i64, stamp: i64) -> i64 {
+    var added = 0;
+    var i = first;
+    while i <= last {
+        if c.mark[i] != stamp {
+            c.mark[i] = stamp;
+            added = added + c.sizes[i];
+        }
+        i = i + 1;
+    }
+    return added;
+}
+
+/// Counts the dedicated functions called from lines `first..=last`.
+fn follow_calls(var ref c: Corpus, first: i64, last: i64, stamp: i64) -> i64 {
+    var added = 0;
+    var i = first;
+    while i <= last {
+        for name in called_names(c.lines[i]) {
+            if callers(c, name) > 2 || !c.fns_named.has(name) { continue; }
+            for f in c.fns_named[name] {
+                if c.fn_size[f] <= dedicated_max() && !c.fn_generic[f] {
+                    let (head, tail) = (c.fn_first[f], c.fn_last[f]);
+                    added = added + mark_lines(c, head, tail, stamp);
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return added;
+}
+
+/// The names a line calls: identifiers followed by `(`.
+fn called_names(line: str) -> List<str> {
+    var out: List<str> = [];
+    let n = line.len();
+    var i: usize = 0;
+    while i < n {
+        if !is_ident_byte(line.byte_at(i)) {
+            i = i + 1;
+            continue;
+        }
+        let start = i;
+        while i < n && is_ident_byte(line.byte_at(i)) {
+            i = i + 1;
+        }
+        var j = i;
+        while j < n && (line.byte_at(j) == 32 || line.byte_at(j) == 9) {
+            j = j + 1;
+        }
+        let first = line.byte_at(start);
+        if j < n && line.byte_at(j) == 40 && !(first >= 48 && first <= 57) {
+            out.push(line.slice(start, i));
+        }
+    }
+    return out;
+}
+
+/// The files whose name holds `part` (a run of `_`-separated pieces).
+fn files_with_part(ref c: Corpus, part: str) -> List<i64> {
+    var out: List<i64> = [];
+    let head = split_on(part, "_")[0];
+    if !c.files_by_part.has(head) { return out; }
+    for f in c.files_by_part[head] {
+        if has_part(file_name(c.paths[f]), part) { out.push(f); }
+    }
+    return out;
+}
+
+/// The functions whose name, in lower case, holds `part`.
+fn fns_with_part(ref c: Corpus, part: str) -> List<i64> {
+    var out: List<i64> = [];
+    let head = split_on(part, "_")[0];
+    if !c.fns_by_part.has(head) { return out; }
+    for f in c.fns_by_part[head] {
+        if part == head || has_part(c.fn_name[f], part) { out.push(f); }
+    }
+    return out;
+}
+
+fn file_name(path: str) -> str {
+    let pieces = split_on(path, "/");
+    let last = pieces[pieces.len() - 1];
+    let dot = last.find(".", 0);
+    return if dot >= 0 { last.slice(0, dot as usize) } else { last };
+}
+
+/// The lines holding one of the search's keys, in order, each once.
+fn key_lines(ref c: Corpus, ref search: Search) -> List<i64> {
+    var hit: Map<i64, bool> = [:];
+    for key in search.keys {
+        let anchor = rarest_token(c, key);
+        if anchor.len() == 0 || !c.token_lines.has(anchor) { continue; }
+        for line in c.token_lines[anchor] {
+            if !hit.has(line) && find_word(c.lines[line], key, 0) >= 0 { hit.set(line, true); }
+        }
+    }
+    if search.rule_word.len() > 0 && c.token_lines.has(search.rule_word) {
+        for line in c.token_lines[search.rule_word] {
+            if !hit.has(line) && is_rule_header(c.lines[line], search.rule_word) { hit.set(line, true); }
+        }
+    }
+    var out: List<i64> = [];
+    var i = 0;
+    while i < c.lines.len() {
+        if hit.has(i) { out.push(i); }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The token of `key` found on the fewest lines: the cheapest place to look.
+fn rarest_token(ref c: Corpus, key: str) -> str {
+    var best = "";
+    var best_count = -1;
+    let n = key.len();
+    var i: usize = 0;
+    while i < n {
+        if !is_ident_byte(key.byte_at(i)) {
+            i = i + 1;
+            continue;
+        }
+        let start = i;
+        while i < n && is_ident_byte(key.byte_at(i)) {
+            i = i + 1;
+        }
+        let tok = key.slice(start, i);
+        let count = if c.token_lines.has(tok) { c.token_lines[tok].len() as i64 } else { 0 };
+        if best_count < 0 || count < best_count {
+            best = tok;
+            best_count = count;
+        }
+    }
+    return best;
+}
+
+/// Whether `line` is `word(params) => quote ..`: a syntax rule for `word`.
+fn is_rule_header(line: str, word: str) -> bool {
+    let t = line.trim();
+    if !t.starts_with(word) { return false; }
+    let rest = t.slice(word.len(), t.len()).trim();
+    if !rest.starts_with("(") { return false; }
+    let close = rest.find(")", 0);
+    if close < 0 { return false; }
+    let after = rest.slice((close as usize) + 1, rest.len()).trim();
+    return after.starts_with("=>") && after.slice(2, after.len()).trim().starts_with("quote");
+}

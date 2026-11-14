@@ -1,0 +1,10 @@
+// SYN001: a `where` clause after a type's header states a constraint
+// nothing checks yet; it used to be skipped without a word.
+// `where` starts at line 4, column 16.
+struct Pair<T> where T: IValue {
+    pub a: T;
+}
+
+fn main() {
+    print(Pair { a: 1 }.a);
+}

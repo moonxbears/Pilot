@@ -1,0 +1,7 @@
+// SYN001: `b` has no default but follows `a`, which has one, so a call could
+// not leave `a` out. `b` is at line 3, column 20.
+fn add(a: i64 = 1, b: i64) -> i64 => a + b;
+
+fn main() {
+    print(add(1, 2));
+}

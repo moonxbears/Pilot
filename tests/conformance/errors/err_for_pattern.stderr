@@ -1,0 +1,2 @@
+error[SYN001]: a pattern in `for` (`for (a, b) in ..`) is not built yet; bind one name
+err_for_pattern.pilot:6:9

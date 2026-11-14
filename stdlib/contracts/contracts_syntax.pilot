@@ -18,8 +18,15 @@ comptime {
     __engine("bind_receptor", nameof(requires),  33, 18);
     __engine("bind_receptor", nameof(ensures),   33, 19);
     __engine("bind_receptor", nameof(invariant), 33, 20);
-    __engine("bind_receptor", nameof(adapter),   33, 21);
-    __engine("bind_receptor", nameof(context),   33, 22);
-    __engine("bind_receptor", nameof(each),      33, 23);
+    // `adapter`, `context` and `each` are registered but not built yet
+    // (docs/keyword_roadmap.md K6): receptor 40 stops every use at the seam
+    // `keyword.unbuilt` (crates/pilot-parser/src/unbuilt.rs).
+    __engine("bind_receptor", nameof(adapter),   40, 0);
+    __engine("bind_receptor", nameof(context),   40, 0);
+    __engine("bind_receptor", nameof(each),      40, 0);
+    // Typestates are not built yet (docs/keyword_roadmap.md K3): where a
+    // declaration starts they stop at the seam `keyword.unbuilt`.
+    __engine("bind_receptor", nameof(state),      40, 1);
+    __engine("bind_receptor", nameof(transition), 40, 1);
     __engine("bind_receptor", nameof(old),       33, 24);
 }

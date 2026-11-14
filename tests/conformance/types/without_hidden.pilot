@@ -1,0 +1,22 @@
+// `*Bundle without { member }` splices a bundle but leaves `member` out, so
+// the struct can declare its own member of that name.
+//
+// Expected output, worked by hand:
+//   Robot leaves out GreetFacet.greet and declares its own: "beep".
+//   wave() still comes from the facet: "wave".
+struct GreetFacet {
+    pub fn greet() -> str => "hello";
+    pub fn wave() -> str => "wave";
+}
+
+struct Robot {
+    *GreetFacet without { greet };
+    pub id: i64;
+    pub fn greet() -> str => "beep";
+}
+
+fn main() {
+    let r = Robot { id: 1 };
+    print(r.greet());
+    print(r.wave());
+}

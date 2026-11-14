@@ -1,0 +1,11 @@
+// SYN001: inside `{ .. }` after a property only `get` and `set` clauses
+// may stand, without modifiers of their own; both used to be skipped.
+struct Cell {
+    // `priv` is at line 5, column 36; `peek` at line 6, column 36.
+    pub value: i64 { get => field; priv set => { field = value; } }
+    pub other: i64 { get => field; peek; }
+}
+
+fn main() {
+    print(Cell { value: 1, other: 2 }.value);
+}

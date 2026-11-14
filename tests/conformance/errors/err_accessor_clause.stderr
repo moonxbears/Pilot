@@ -1,0 +1,4 @@
+error[SYN001]: a modifier on one accessor (`priv set`) is not built yet; it applies to the whole property
+err_accessor_clause.pilot:5:36
+error[SYN001]: an accessor block holds `get` and `set` clauses, found `peek`
+err_accessor_clause.pilot:6:36

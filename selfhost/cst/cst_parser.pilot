@@ -5,10 +5,6 @@
 // MissingIdent, MissingRParen, and MissingRBrace recovery markers.
 // ============================================================================
 
-comptime {
-    __engine("bind_receptor", nameof(cst_detect_missing_ident), 33, 25);
-}
-
 pub enum CstDefect : u16 {
     ::None          = 0,
     ::MissingIdent  = 1,

@@ -1,0 +1,6 @@
+// SYN001: `xs[1, 2]` would index two dimensions; only one index is built.
+// The second used to be dropped, so this printed xs[1] = 6.
+fn main() {
+    let xs: List<i64> = [5, 6, 7];
+    print(xs[1, 2]);
+}

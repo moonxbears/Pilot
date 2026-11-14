@@ -1,0 +1,47 @@
+// Assertions that hold run on and print nothing. Every comparison
+// operator, a note, strings, floats, lists, a `&&` condition, a
+// parenthesized comparison, a generic function and a multi-line call.
+// A note is evaluated only when its assertion fails: `noted()` counts its
+// calls, and the count stays 0. Each side is evaluated once: `tick()`
+// runs once per call of `same`.
+var notes = 0;
+var ticks = 0;
+
+fn noted() -> str {
+    notes = notes + 1;
+    return "never shown";
+}
+
+fn tick() -> i64 {
+    ticks = ticks + 1;
+    return ticks;
+}
+
+fn same<T>(a: T, b: T) {
+    assert(a == b);
+}
+
+fn main() {
+    let xs: List<i64> = [1, 2, 3];
+    assert(xs.len == 3, noted());
+    assert(xs[0] != xs[1], noted());
+    assert(xs[0] < xs[2]);
+    assert(xs[1] <= 2);
+    assert(xs[2] > 1 || xs.len == 0);
+    assert(3 >= xs.len);
+    assert("ab" + "c" == "abc");
+    assert(0.25 + 0.5 > 0.7);
+    assert(xs.len == 3 && xs[2] == 3);
+    assert((xs[0] == 1));
+    assert(
+        xs[0]
+            + xs[1] == xs[2],
+        noted()
+    );
+    same(4, 4);
+    same("x", "x");
+    assert(tick() == 1);
+    assert(tick() == 2, noted());
+    print(notes);
+    print(ticks);
+}

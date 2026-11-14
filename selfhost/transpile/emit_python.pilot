@@ -52,6 +52,15 @@ pub struct PythonDialect : ISourceDialect {
         "    q = abs(a) // abs(b)",
         "    return pilot_wrap(a - b * (q if (a < 0) == (b < 0) else -q), bits, signed)",
         "",
+        "# A struct value: a list of its fields that knows their names.",
+        "class PilotRec(list):",
+        "    __slots__ = ('names',)",
+        "",
+        "def pilot_rec(names, vals):",
+        "    r = PilotRec(vals)",
+        "    r.names = names",
+        "    return r",
+        "",
         "def pilot_show(x):",
         "    if isinstance(x, bool):",
         "        return 'true' if x else 'false'",
@@ -64,6 +73,8 @@ pub struct PythonDialect : ISourceDialect {
         "        return s.rstrip('0').rstrip('.') if '.' in s else s",
         "    if x is None:",
         "        return 'null'",
+        "    if isinstance(x, PilotRec):",
+        "        return '{ ' + ', '.join(sorted(k + ': ' + pilot_show(v) for k, v in zip(x.names, x))) + ' }'",
         "    if isinstance(x, list):",
         "        return '[' + ', '.join(pilot_show(e) for e in x) + ']'",
         "    if isinstance(x, dict):",
@@ -168,6 +179,8 @@ pub struct PythonDialect : ISourceDialect {
         "    except UnicodeDecodeError:",
         "        return None",
         "def pilot_value_clone(v):",
+        "    if isinstance(v, PilotRec):",
+        "        return pilot_rec(v.names, [pilot_value_clone(x) for x in v])",
         "    if isinstance(v, list):",
         "        return [pilot_value_clone(x) for x in v]",
         "    if isinstance(v, dict):",
@@ -326,10 +339,6 @@ pub struct PythonDialect : ISourceDialect {
         "    except (ValueError, OverflowError):",
         "        return math.nan if a < 0 else math.inf",
         "",
-        "def pilot_rt_assert(cond, note=None):",
-        "    if cond is not True:",
-        "        pilot_trap('assertion failed' + ('' if note is None else ': ' + pilot_show(note)))",
-        "",
         "def pilot_rt_fault(message):",
         "    pilot_trap(pilot_show(message))",
         "",
@@ -454,6 +463,11 @@ pub struct PythonDialect : ISourceDialect {
     }
     pub fn function_table(names: List<str>) -> List<str> => ["pilot_fns = [" + joined(names) + "]"];
     pub fn make_record(values: List<str>) -> str? => "[" + joined(values) + "]";
+    pub fn named_record(names: List<str>, values: List<str>) -> str? {
+        var quoted: List<str> = [];
+        for n in names { quoted.push("'" + n + "'"); }
+        return "pilot_rec([" + joined(quoted) + "], [" + joined(values) + "])";
+    }
     pub fn get_field(rec: str, i: i64) -> str? => f"{rec}[{i}]";
     pub fn set_field(rec: str, i: i64, v: str) -> str? => f"{rec}[{i}] = {v}";
 }
@@ -468,7 +482,7 @@ fn dynamic_engine_ops() -> Map<str, str> {
     ops.set("to_str", "pilot_show");
     ops.set("list_get", "pilot_map_get");
     ops.set("list_set", "pilot_map_set");
-    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_assert", "rt_fault", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line", "value_clone"] {
+    for name in ["map_get", "map_set", "map_has", "map_remove", "list_push", "list_pop", "str_len", "num_pow", "rt_fault", "seam_open", "proc_args", "str_slice", "str_find", "str_byte_at", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_from_bytes", "map_values", "list_extend", "list_remove_at", "stdin_read_line", "value_clone"] {
         ops.set(name, "pilot_" + name);
     }
     return ops;

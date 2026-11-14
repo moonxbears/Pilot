@@ -1,0 +1,2 @@
+error[SYN001]: `b` has no default but follows a parameter that has one
+err_param_default_gap.pilot:3:20

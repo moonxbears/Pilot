@@ -101,7 +101,7 @@ pure fn lc_indentation_rules_section(indent: i64) -> str {
            p1 + "}";
 }
 
-pub pure fn dumps_language_configuration(indent: i64 = 2) -> str {
+pub pure fn dumps_language_configuration(indent: i64) -> str {
     return "{\n" +
            lc_comments_section(indent) + ",\n" +
            lc_brackets_section(indent) + ",\n" +
@@ -115,7 +115,7 @@ pub pure fn dumps_language_configuration(indent: i64 = 2) -> str {
 // 3. SNIPPETS CATALOG SERIALIZER
 // =========================================================================
 
-pure fn serialize_snippet(name: str, prefix: str, body_str: str, desc: str, indent: i64 = 2) -> str {
+pure fn serialize_snippet(name: str, prefix: str, body_str: str, desc: str, indent: i64) -> str {
     let pad = json_indent(1, indent);
     let pad_in = json_indent(2, indent);
     let q = '"';
@@ -127,7 +127,7 @@ pure fn serialize_snippet(name: str, prefix: str, body_str: str, desc: str, inde
     return s;
 }
 
-pub pure fn dumps_snippets(indent: i64 = 2) -> str {
+pub pure fn dumps_snippets(indent: i64) -> str {
     let p3 = json_indent(3, indent);
     let p2 = json_indent(2, indent);
     var s = "{\n";
@@ -279,12 +279,12 @@ pub fn reflect_primitives_pattern() -> str {
 
 // Real JSON serializer for TextMate grammar
 pub fn dumps_tm_language(
-    seed_keywords_regex:   str = "",
-    syntax_macros_regex:   str = "",
-    modifiers_regex:       str = "",
-    lang_primitives_regex: str = "",
-    operators_regex:       str = "",
-    indent:                i64 = 2
+    seed_keywords_regex:   str,
+    syntax_macros_regex:   str,
+    modifiers_regex:       str,
+    lang_primitives_regex: str,
+    operators_regex:       str,
+    indent:                i64
 ) -> str {
     let seeds = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_seed_keywords_pattern() };
     let syn = if syntax_macros_regex != "" { syntax_macros_regex } else { reflect_syntax_pattern() };
@@ -359,7 +359,7 @@ pub fn dumps_tm_language(
 // =========================================================================
 
 // Real JSON serializer for package.json
-pub pure fn dumps_package_json(version: str = "1.1.51", indent: i64 = 2) -> str {
+pub pure fn dumps_package_json(version: str, indent: i64) -> str {
     let ver = if version != "" { version } else { "1.1.51" };
     let p1 = json_indent(1, indent);
     let p2 = json_indent(2, indent);

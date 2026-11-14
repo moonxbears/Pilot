@@ -1,0 +1,6 @@
+// CALL001: `nameof(..)` takes one name; a second used to be dropped, so
+// `nameof(a, b)` printed "a".
+fn main() {
+    // The call starts at line 5, column 11.
+    print(nameof(a, b));
+}

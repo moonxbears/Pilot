@@ -1,0 +1,12 @@
+// `~x` (the keyword `unquote`) marks an argument of a deep splice
+// (`f!!(~a, b)`, readable `splice f(~a, b)`) to be evaluated at compile
+// time. Deep splices build an `ast` carrier that does not exist yet, so the
+// splice stops at the `vm.call_quote` seam instead of running as a plain
+// call (docs/keyword_roadmap.md K4). The plain call before it runs: 1 + 2 = 3.
+fn add(a: i64, b: i64) -> i64 => a + b;
+
+fn main() {
+    let a = 1;
+    print(add(a, 2));
+    print(add!!(~a, 2));
+}

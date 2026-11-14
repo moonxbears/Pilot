@@ -121,6 +121,7 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/aliasing.pilot",
     "selfhost/check/layout_attrs.pilot",
     "selfhost/check/stack.pilot",
+    "selfhost/check/clearance.pilot",
     "selfhost/check/main.pilot",
 ];
 

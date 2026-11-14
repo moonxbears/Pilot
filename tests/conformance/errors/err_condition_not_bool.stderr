@@ -1,1 +1,2 @@
-runtime error: condition must be a boolean, found integer
+error[TYPE001]
+condition must be `bool`, found `i64`

@@ -1,0 +1,3 @@
+fn main() {
+    orbit 1 { print(drift 9); }
+}

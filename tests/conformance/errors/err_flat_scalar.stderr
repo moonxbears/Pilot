@@ -1,0 +1,2 @@
+error[TYPE001]: `*..` unpacks a sequence, found `bool`
+err_flat_scalar.pilot:6:15

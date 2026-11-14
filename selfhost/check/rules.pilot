@@ -258,6 +258,61 @@ fn check_return(inf: Infer, sink: DiagSink, n: i64) {
     }
 }
 
+/// A positional call gives each parameter exactly one argument (CALL001).
+/// Named arguments (matched by name), spread arguments (`*xs`, counted when
+/// the sequence is known), a call on the right of `|>` (which supplies the
+/// first argument) and the receiver parameter of a method are left to the
+/// rules that know them.
+fn check_call_count(p: Program, sink: DiagSink, n: i64, f: i64, params: List<i64>) {
+    let s = p.s;
+    let ch = children(s, n);
+    var i = 1;
+    while i < ch.len() {
+        let a = ch[i];
+        if kind(s, a) == nk_call_arg() { return; }
+        if kind(s, a) == nk_unary() && (flags(s, a) == unary_splat() || flags(s, a) == unary_deep_flatten()) { return; }
+        i = i + 1;
+    }
+    let up = p.parents[n];
+    if up >= 0 && (kind(s, up) == nk_pipe()
+        || (kind(s, up) == nk_binary() && (flags(s, up) == op_pipe() || flags(s, up) == op_pipe_backward()))) { return; }
+    // Inside a type body a bare call reaches a sibling method first, which
+    // `called_fn` does not resolve to.
+    var at = up;
+    while at >= 0 {
+        if is_type_decl_kind(kind(s, at)) { return; }
+        at = p.parents[at];
+    }
+    var wanted = 0;
+    var least = 0;
+    for prm in params {
+        if s.receiver.len() == 0 || node_name(s, prm) != s.receiver {
+            wanted = wanted + 1;
+            // A parameter with a default may be left out.
+            if field_default(s, prm) < 0 { least = wanted; }
+        }
+    }
+    let given = ch.len() - 1;
+    if given >= least && given <= wanted { return; }
+    let takes = if least == wanted { f"{wanted}" } else { f"{least} to {wanted}" };
+    sink_error(sink, n, "CALL001", f"`{node_name(s, f)}` takes {takes} argument(s), given {given}");
+}
+
+/// A parameter's default must be a value of the parameter's type.
+fn check_param_default(inf: Infer, sink: DiagSink, prm: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let value = field_default(s, prm);
+    let up = p.parents[prm];
+    if value < 0 || up < 0 || !(kind(s, up) == nk_fn() || kind(s, up) == nk_operator()) { return; }
+    let dst = prog_annot_type(p, rhs(s, prm));
+    if ty_is_open(p.tt, dst) { return; }
+    let src = type_of(inf, value);
+    if !assignable(inf, src, dst, value) {
+        sink_error(sink, value, "TYPE001", f"the default of `{node_name(s, prm)}`: " + mismatch(inf, src, dst));
+    }
+}
+
 fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
@@ -265,7 +320,10 @@ fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
     if f < 0 { return; }
     let params = fn_params(s, f);
     let ch = children(s, n);
-    if ch.len() - 1 != params.len() { return; }
+    if ch.len() - 1 != params.len() {
+        check_call_count(p, sink, n, f, params);
+        return;
+    }
     var i = 0;
     while i < params.len() {
         let arg = ch[i + 1];
@@ -668,7 +726,49 @@ fn check_dropped_result(inf: Infer, sink: DiagSink, n: i64) {
     }
 }
 
+/// What a condition `c` tests: the operand of `!c`, else `c`. A wrong
+/// type under `if !x` (what `assert(x)` expands to) is then reported once,
+/// as a condition.
+fn condition_operand(s: Snapshot, c: i64) -> i64 {
+    if c >= 0 && kind(s, c) == nk_unary() && flags(s, c) == unary_not() { return lhs(s, c); }
+    return c;
+}
+
+/// Whether `!` node `n` is the whole condition of an `if` or `while`.
+fn is_condition_not(p: Program, n: i64) -> bool {
+    let par = p.parents[n];
+    if par < 0 { return false; }
+    let k = kind(p.s, par);
+    return (k == nk_if() || k == nk_while()) && lhs(p.s, par) == n;
+}
+
 /// Runs every rule over the user's files.
+/// A condition (of `if`, `while`, or the operand of `!`, which `assert`
+/// expands to) is a `bool`: the type of the `bool` literal slot. A condition
+/// of another known type is TYPE001 at build time, not a run-time error.
+fn check_condition(inf: Infer, sink: DiagSink, c: i64, what: str) {
+    if c < 0 { return; }
+    let p = inf.p;
+    let t = type_of(inf, c);
+    if !ty_is_named(p.tt, t) { return; }
+    let want = prog_slot_type(p, literal_slot(nk_bool()));
+    if ty_is_unknown(p.tt, want) || t == want { return; }
+    sink_error(sink, c, "TYPE001", f"{what} must be `{ty_display(p.tt, want)}`, found `{ty_display(p.tt, t)}`");
+}
+
+/// `*x` and `*..x` unpack a sequence. An operand whose type is a register
+/// value (it has a `[Bits]` class: an integer, float, bool or char) holds no
+/// elements: TYPE001 at build time, not a run-time error.
+fn check_unpack(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let operand = lhs(p.s, n);
+    if operand < 0 { return; }
+    let t = type_of(inf, operand);
+    if prog_class(p, t) == "" { return; }
+    let form = if flags(p.s, n) == unary_splat() { "*" } else { "*.." };
+    sink_error(sink, n, "TYPE001", f"`{form}` unpacks a sequence, found `{ty_display(p.tt, t)}`");
+}
+
 pub fn check_rules(inf: Infer, sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
@@ -689,10 +789,18 @@ pub fn check_rules(inf: Infer, sink: DiagSink) {
                 check_delegation(inf, sink, i);
             }
             else if k == nk_fn() || k == nk_operator() { check_missing_return(inf, sink, i); }
+            else if k == nk_param() { check_param_default(inf, sink, i); }
             else if k == nk_match() { check_switch(inf, sink, i); }
             else if k == nk_member() { check_optional_access(inf, sink, i, sym_text(s, rhs(s, i)), false); }
             else if k == nk_index() { check_optional_access(inf, sink, i, op_index(), true); }
             else if k == nk_binary() && flags(s, i) == op_as() { check_cast(inf, sink, i); }
+            else if k == nk_if() || k == nk_while() { check_condition(inf, sink, condition_operand(s, lhs(s, i)), "condition"); }
+            else if k == nk_unary() && (flags(s, i) == unary_splat() || flags(s, i) == unary_deep_flatten()) {
+                check_unpack(inf, sink, i);
+            }
+            else if k == nk_unary() && flags(s, i) == unary_not() && !is_condition_not(p, i) {
+                check_condition(inf, sink, lhs(s, i), "the operand of `!`");
+            }
         }
         i = i + 1;
     }

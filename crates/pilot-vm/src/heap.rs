@@ -419,15 +419,6 @@ impl PilVirtualMachine {
                 let hook = str_arg(args, 2, op)?;
                 self.intrinsic(&hook, &[obj])
             }
-            "rt_assert" => {
-                let v = arg(args, 0, op)?;
-                let note = args.get(1).map(|m| format!(": {}", key_of(*m))).unwrap_or_default();
-                match v.as_bool() {
-                    Some(true) => Ok(PilotVal::NULL),
-                    Some(false) => Err(format!("assertion failed{note}")),
-                    None => Err(format!("assert expects a boolean, found {}", v.kind_label())),
-                }
-            }
             // `list_extend(list, other, deep)`: appends `other`'s elements;
             // with `deep` set, nested lists are flattened down to their leaves.
             "list_extend" => {

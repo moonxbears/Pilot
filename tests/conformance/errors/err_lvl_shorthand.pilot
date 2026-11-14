@@ -1,0 +1,7 @@
+// The shorthand `lvl3` (for `lvl(3)`) is registered but not built yet: it
+// stops the build at the seam `keyword.unbuilt` instead of being ignored.
+lvl3 fn top_secret() -> i64 => 3;
+
+fn main() {
+    print(top_secret());
+}

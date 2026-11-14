@@ -154,6 +154,16 @@ struct BlockScope {
     types: HashMap<String, String>,
 }
 
+/// What a call to a function declared without a body stops with. The type
+/// checker reports the same seam before the program runs
+/// (`selfhost/check/clearance.pilot`); this trap is the run-time backstop.
+fn bodiless_call_message(name: &str) -> String {
+    format!(
+        "SEAM001: unconnected seam `abi.extern_call`: `{name}` is declared without a body (`extern`); \
+         calling it needs native calls through pilot.abi frame plans"
+    )
+}
+
 #[derive(Default)]
 pub struct BytecodeCompiler {
     pub instructions: Vec<Instruction>,
@@ -234,6 +244,9 @@ pub struct BytecodeCompiler {
     /// `LoadConst` instructions that must load a function's entry point once
     /// it is known.
     entry_patches: Vec<(usize, String, ByteSpan)>,
+    /// Top-level functions declared without a body (`extern`): a call to one
+    /// stops at the seam `abi.extern_call` instead of being undeclared.
+    bodiless_fns: std::collections::HashSet<String>,
     /// Functions and methods of imported units, compiled on first use.
     lazy_decls: HashMap<String, lower_program::LazyDecl>,
     /// Names a unit hides with `without`, and that unit.
@@ -368,6 +381,11 @@ impl BytecodeCompiler {
                     let c = self.add_constant(PilotVal::from_int(e as i64));
                     self.instructions[idx] = Instruction::encode_wide(Opcode::LoadConst, dst, c);
                 }
+                None if self.bodiless_fns.contains(&name) => {
+                    let message = bodiless_call_message(&name);
+                    let c = self.add_constant(PilotVal::from_str(&message));
+                    self.instructions[idx] = Instruction::encode_wide(Opcode::Trap, 0, c);
+                }
                 None => {
                     let message = format!("no function named `{name}`");
                     let c = self.add_constant(PilotVal::from_str(&message));
@@ -396,6 +414,11 @@ impl BytecodeCompiler {
                         _ => Opcode::Call,
                     };
                     self.instructions[idx] = Instruction::encode_wide(op, dst, e)
+                }
+                None if self.bodiless_fns.contains(&full) || self.bodiless_fns.contains(&bare) => {
+                    let message = bodiless_call_message(&full);
+                    let c = self.add_constant(PilotVal::from_str(&message));
+                    self.instructions[idx] = Instruction::encode_wide(Opcode::Trap, 0, c);
                 }
                 None => {
                     let message = format!("no function named `{full}`");

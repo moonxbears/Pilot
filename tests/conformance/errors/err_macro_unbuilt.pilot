@@ -1,0 +1,11 @@
+// `macro` is registered but not built yet (docs/keyword_roadmap.md K4).
+// Where it starts a declaration or statement it stops the build at the
+// seam `keyword.unbuilt`, instead of failing as an unknown word or being
+// read as something else. Nothing runs, so nothing is printed.
+macro twice {
+    x: i64;
+}
+
+fn main() {
+    print("never");
+}

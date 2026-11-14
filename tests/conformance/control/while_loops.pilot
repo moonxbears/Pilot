@@ -1,0 +1,40 @@
+// `while cond { .. }` runs its body while `cond` holds, checking it first.
+//
+// Expected output, worked by hand:
+//   sum of 1..=4: 1 + 2 + 3 + 4 = 10.
+//   a condition false at the start runs the body 0 times: count stays 0.
+//   halving 40 while it is even: 40, 20, 10, then 5 is odd -> prints 5.
+//   a nested `while` with `break` leaves only the inner loop:
+//     rows 0..2, each stops its columns at 1 -> "0,0", "1,0" (2 rows).
+fn main() {
+    var i = 1;
+    var sum = 0;
+    while i <= 4 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    print(sum);
+
+    var count = 0;
+    while count > 5 {
+        count = count + 1;
+    }
+    print(count);
+
+    var n = 40;
+    while n % 2 == 0 {
+        n = n / 2;
+    }
+    print(n);
+
+    var row = 0;
+    while row < 2 {
+        var col = 0;
+        while true {
+            if col == 1 { break; }
+            print(f"{row},{col}");
+            col = col + 1;
+        }
+        row = row + 1;
+    }
+}

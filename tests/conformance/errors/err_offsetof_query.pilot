@@ -1,0 +1,11 @@
+// `offsetof` asks a compile-time question about a type (`field_offset`). The seed
+// answers only `sizeof` of a primitive, so this stops the build with
+// SEED001 instead of "undefined name" (docs/keyword_roadmap.md K4).
+struct Pair {
+    a: i64;
+    b: i64;
+}
+
+fn main() {
+    print(offsetof(Pair, b));
+}

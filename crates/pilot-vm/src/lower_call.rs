@@ -55,7 +55,10 @@ impl BytecodeCompiler {
                 Err((code, message)) => self.error(code, message),
             };
         }
-        self.compile_call_positional(arena, ids)
+        match self.fill_defaults(arena, ids) {
+            Ok(filled) => self.compile_call_positional(arena, &filled),
+            Err((code, message)) => self.error(code, message),
+        }
     }
 
     /// Calls `ids[0]` with `ids[1..]`, which are positional except for a

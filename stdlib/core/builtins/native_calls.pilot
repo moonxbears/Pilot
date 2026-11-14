@@ -21,7 +21,6 @@ comptime {
     __engine("bind_native_fn", nameof(print),   "rt_print");
     __engine("bind_native_fn", nameof(println), "rt_print");
     __engine("bind_native_fn", nameof(eprint),  "rt_eprint");
-    __engine("bind_native_fn", nameof(assert),  "rt_assert");
     __engine("bind_native_fn", nameof(List),    "list_new");
     __engine("bind_native_fn", nameof(Map),     "map_new");
     // `seam("id", "note")`: an intentionally unconnected entry or exit point.
@@ -64,6 +63,11 @@ comptime {
 
     // Compile-time questions about a type argument.
     __engine("bind_type_query", nameof(sizeof), "byte_size");
+    // Asked but not answered yet (docs/keyword_roadmap.md K4): the seed
+    // stops each with SEED001 and PilIR at its lowering seam.
+    __engine("bind_type_query", nameof(alignof),   "byte_align");
+    __engine("bind_type_query", nameof(offsetof),  "field_offset");
+    __engine("bind_type_query", nameof(fields_of), "field_list");
 
     // Members of a type the engine holds by itself, named per type: the
     // seed indexes its own lists directly; the PilIR lowering
