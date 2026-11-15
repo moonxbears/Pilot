@@ -67,6 +67,7 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("autofix.atomic_rename", ::Exit, "OS atomic rename of <file>.tmp over <file>", "F6"),
         seam_entry("autofix.semantic_defects", ::Entry, "type checker: resolved bindings (DECL004) and callee var-ref parameter modes (BORROW001)", "F4"),
         seam_entry("bootstrap.stage_compile", ::Entry, "self-hosted driver (lex, parse, analyze, PilIR, Perceus, C11) building compiler stage 2 and 3 from selfhost/ for the GATE009 parity gate", "F8"),
+        seam_entry("bridge.ffi_call_target", ::Exit, "raw register FFI trampoline for non-x86_64-unix hosts in crates/pilot-vm/src/bridge.rs", "M13"),
         seam_entry("build.target", ::Entry, "an LLVM, WASM, GPU or assembly backend behind `pilot build --target` (C11 is the only one)", "M56"),
         seam_entry("chor.cue_lattice", ::Entry, "cue payload lattice class from the resolved TypeDef (type checker)", "F4"),
         seam_entry("chor.emit_dispatchers", ::Exit, "PilIR function builder: one dispatcher per lowered .pchor route", "F5"),

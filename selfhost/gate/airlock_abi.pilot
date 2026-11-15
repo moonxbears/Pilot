@@ -1,0 +1,195 @@
+// ==============================================================================
+// FILE: selfhost/gate/airlock_abi.pilot
+// Model B+ Frozen Airlock ABI Snapshot & Drift Verifier (`GATE021`, PROP-002a)
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Gate.AirlockAbi;
+
+use Pilot.SelfHost.Gate.Manifest;
+
+/// Frozen Model B+ `HostOp` table (51 ops: `0..=50`).
+pub fn airlock_host_ops() -> List<List<any>> => [
+    [0,  "SlabAlloc",        "os_slab_alloc"],
+    [1,  "SlabRealloc",      "os_slab_realloc"],
+    [2,  "SlabFree",         "os_slab_free"],
+    [3,  "MemMap",           "os_mem_map"],
+    [4,  "MemCopy",          "os_mem_copy"],
+    [5,  "MemSet",           "os_mem_set"],
+    [6,  "MemCmp",           "os_mem_cmp"],
+    [7,  "LoadInt",          "os_load_int"],
+    [8,  "StoreInt",         "os_store_int"],
+    [9,  "LoadFloat",        "os_load_float"],
+    [10, "StoreFloat",       "os_store_float"],
+    [11, "AtomicInt",        "os_atomic_int"],
+    [12, "ThreadSpawn",      "os_thread_spawn"],
+    [13, "ThreadJoin",       "os_thread_join"],
+    [14, "ThreadCtl",        "os_thread_ctl"],
+    [15, "Futex",            "os_futex"],
+    [16, "FdOpen",           "os_fd_open"],
+    [17, "FdClose",          "os_fd_close"],
+    [18, "FdRead",           "os_fd_read"],
+    [19, "FdWrite",          "os_fd_write"],
+    [20, "FdPread",          "os_fd_pread"],
+    [21, "FdPwrite",         "os_fd_pwrite"],
+    [22, "FdSeekSync",       "os_fd_seek_sync"],
+    [23, "FdPipeDup",        "os_fd_pipe_dup"],
+    [24, "IoPoll",           "os_io_poll"],
+    [25, "FdRawCtl",         "os_fd_raw_ctl"],
+    [26, "FsStat",           "os_fs_stat"],
+    [27, "FsReadDir",        "os_fs_read_dir"],
+    [28, "FsMkdir",          "os_fs_mkdir"],
+    [29, "FsRemove",         "os_fs_remove"],
+    [30, "FsRenameLink",     "os_fs_rename_link"],
+    [31, "FsPathCtl",        "os_fs_path_ctl"],
+    [32, "ProcSpawn",        "os_proc_spawn"],
+    [33, "ProcWait",         "os_proc_wait"],
+    [34, "ProcSignal",       "os_proc_signal"],
+    [35, "EnvCtl",           "os_env_ctl"],
+    [36, "ClockNowNs",       "os_clock_now_ns"],
+    [37, "SleepNs",          "os_sleep_ns"],
+    [38, "OsRandom",         "os_random_bytes"],
+    [39, "NetSocket",        "os_net_socket"],
+    [40, "NetConnectBind",   "os_net_connect_bind"],
+    [41, "NetIo",            "os_net_io"],
+    [42, "NetResolve",       "os_net_resolve"],
+    [43, "DlOpen",           "os_dl_open"],
+    [44, "DlSym",            "os_dl_sym"],
+    [45, "DlClose",          "os_dl_close"],
+    [46, "FfiCall",          "os_ffi_call"],
+    [47, "FfiCallbackAlloc", "os_ffi_callback_alloc"],
+    [48, "FfiCallbackFree",  "os_ffi_callback_free"],
+    [49, "TrapFault",        "os_trap_fault"],
+    [50, "TrapSeam",         "os_trap_seam"],
+];
+
+/// Frozen Model B+ `PilotErr` table (51 codes: `1..=51`).
+pub fn airlock_pilot_errs() -> List<List<any>> => [
+    [1, "Perm"], [2, "Acces"], [3, "Noent"], [4, "Exist"], [5, "Intr"],
+    [6, "Io"], [7, "Again"], [8, "Inprogress"], [9, "Already"], [10, "Nomem"],
+    [11, "Badf"], [12, "Inval"], [13, "Isdir"], [14, "Notdir"], [15, "Notempty"],
+    [16, "Busy"], [17, "Exdev"], [18, "Nospc"], [19, "Rofs"], [20, "Dquot"],
+    [21, "Mfile"], [22, "Nfile"], [23, "Nametoolong"], [24, "Loop"], [25, "Fbig"],
+    [26, "Spipe"], [27, "Pipe"], [28, "Srch"], [29, "Child"], [30, "Timedout"],
+    [31, "Connrefused"], [32, "Connreset"], [33, "Connaborted"], [34, "Notconn"], [35, "Isconn"],
+    [36, "Addrinuse"], [37, "Addrnotavail"], [38, "Netunreach"], [39, "Hostunreach"], [40, "Msgsize"],
+    [41, "Afnosupport"], [42, "Notsup"], [43, "Nosys"], [44, "Range"], [45, "AiNoname"],
+    [46, "AiAgain"], [47, "AiFail"], [48, "Deadlk"], [49, "Ilseq"], [50, "Canceled"],
+    [51, "Other"],
+];
+
+/// Frozen Model B+ `OsArchKind` IDs (`0..=6`).
+pub fn airlock_arch_kinds() -> List<List<any>> => [
+    [0, "HostDefault"],
+    [1, "X86_64SysV"],
+    [2, "X86_64Win64"],
+    [3, "AArch64Aapcs"],
+    [4, "AArch64Darwin"],
+    [5, "Riscv64Lp64d"],
+    [6, "Wasm32C"],
+];
+
+/// Frozen Model B+ `[Layout(c_abi)]` structs: `[name, size, align, field_markers]`.
+pub fn airlock_c_structs() -> List<List<any>> => [
+    ["OsSlice",      16, 8,  ["ptr", "len"]],
+    ["OsPollFd",     16, 8,  ["fd", "events", "revents"]],
+    ["OsStat",       72, 8,  ["kind", "size", "mode", "mtime_ns", "atime_ns", "ctime_ns", "dev", "ino", "nlink"]],
+    ["OsProcSpec",   96, 8,  ["prog_ptr", "prog_len", "argv_ptr", "argc", "envp_ptr", "envc", "cwd_ptr", "cwd_len", "stdin_fd", "stdout_fd", "stderr_fd", "env_mode"]],
+    ["OsSockAddr",   144, 8, ["family", "port", "addr_len", "addr_bytes", "flowinfo", "scope_id"]],
+    ["OsFfiAbiDesc", 32, 8,  ["arch_kind", "gpr_count", "vec_count", "stack_bytes", "variadic_fixed_args", "flags", "sret_ptr", "_reserved"]],
+    ["OsFfiRetRegs", 80, 16, ["gpr", "vec"]],
+];
+
+/// Frozen Model B+ `bridge_lang.pilot` hooks (67 compile-time hooks).
+pub fn airlock_lang_hooks() -> List<str> => [
+    "register_bracket_attribute", "bind_lang_item", "set_register_layout", "set_memory_layout",
+    "set_inline_hint", "register_syntax_keyword", "bind_lattice_kind", "get_lattice_bits",
+    "enforce_core_naming_lint", "seal_bootstrap_bridge",
+    "register_modifier", "register_parametric_modifier", "register_module_kw", "bind_receiver_ident",
+    "bind_receptor", "register_pratt_op", "decl_operator_fn", "cfg_jump_loop_exit", "cfg_jump_loop_head",
+    "emit_ssa_binop", "emit_ssa_unop", "emit_ssa_cast", "emit_ssa_load", "emit_ssa_store", "emit_ssa_gep",
+    "query_is_comptime_vm", "emit_diagnostic_error", "type_name_of", "ast_source_lines",
+    "parse_ast_fragment", "replace_ast_pattern", "register_attr_weaver",
+    "type_sizeof", "type_alignof", "type_offsetof", "type_fields_of", "type_is_copy",
+    "bind_native_fn", "bind_native_method", "bind_native_property", "bind_native_value",
+    "bind_native_member", "bind_native_effect", "bind_type_query", "bind_operator_fn",
+    "bind_operator_intrinsic", "bind_unit_literal", "bind_enumerator", "bind_generator",
+    "bind_try_protocol", "bind_lift", "bind_absent", "bind_absent_test", "bind_format_spec",
+    "bind_membership", "bind_scalar_text", "bind_range_index", "bind_list_literal",
+    "bind_list_splat", "bind_map_literal", "bind_slice_pattern", "bind_record_pattern",
+    "bind_owned_elements", "bind_owned_payload",
+    "register_keyword", "register_keyword_category", "query_registered_symbols",
+    "bind_lang_protocol",
+];
+
+fn ab_viol(file: str, snippet: str, msg: str) -> GateViolation {
+    return GateViolation {
+        code: "GATE021",
+        file_path: file,
+        line: 1,
+        column: 1,
+        offending_snippet: snippet,
+        message: msg,
+        remediation: "Restore the frozen Model B+ airlock ABI in bridge_lang.pilot, bridge_os.pilot, os_abi.pilot, and bridge.rs",
+        severity: GateSeverityId.Blocker,
+    };
+}
+
+/// Verifies the frozen Model B+ airlock ABI across `bridge_os.pilot`, `os_abi.pilot`,
+/// `bridge_lang.pilot`, and `crates/pilot-vm/src/bridge.rs`.
+pub fn verify_airlock_abi(root: str, violations: i64) {
+    let bridge_os = gate_fs_read_text(gm_join_path(root, "stdlib/core/bridge_os.pilot"));
+    let os_abi = gate_fs_read_text(gm_join_path(root, "stdlib/core/os_abi.pilot"));
+    let bridge_lang = gate_fs_read_text(gm_join_path(root, "stdlib/core/bridge_lang.pilot"));
+    let bridge_rs = gate_fs_read_text(gm_join_path(root, "crates/pilot-vm/src/bridge.rs"));
+
+    if bridge_os == "" || os_abi == "" || bridge_lang == "" || bridge_rs == "" {
+        let _ = glist_push(violations, ab_viol("stdlib/core/bridge_os.pilot", "missing airlock file", "One or more Model B+ airlock files are missing"));
+        return;
+    }
+
+    for row in airlock_host_ops() {
+        let id: i64 = row[0];
+        let rs_name: str = row[1];
+        let fn_name: str = row[2];
+        if !gm_contains(bridge_os, f"pub fn {fn_name}(") || !gm_contains(bridge_os, f"__engine(\"host_op\", {id}") {
+            let _ = glist_push(violations, ab_viol("stdlib/core/bridge_os.pilot", fn_name, f"Frozen HostOp {id} ({fn_name}) missing or renumbered in bridge_os.pilot"));
+        }
+        if !gm_contains(bridge_rs, f"{rs_name} = {id},") {
+            let _ = glist_push(violations, ab_viol("crates/pilot-vm/src/bridge.rs", rs_name, f"Frozen HostOp::{rs_name} = {id} missing or renumbered in bridge.rs"));
+        }
+    }
+
+    for row in airlock_pilot_errs() {
+        let code: i64 = row[0];
+        let ename: str = row[1];
+        if !gm_contains(os_abi, ename) || !gm_contains(os_abi, f" {code},") {
+            let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", ename, f"Frozen PilotErr::{ename} = {code} missing in os_abi.pilot"));
+        }
+    }
+
+    for row in airlock_arch_kinds() {
+        let code: i64 = row[0];
+        let aname: str = row[1];
+        if !gm_contains(os_abi, f"{aname}") || !gm_contains(os_abi, f" {code},") {
+            let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", aname, f"Frozen OsArchKind::{aname} = {code} missing in os_abi.pilot"));
+        }
+    }
+
+    for row in airlock_c_structs() {
+        let sname: str = row[0];
+        let fields: List<str> = row[3];
+        if !gm_contains(os_abi, f"pub struct {sname} : IValue") {
+            let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", sname, f"Frozen C-ABI struct {sname} missing in os_abi.pilot"));
+        }
+        for f in fields {
+            if !gm_contains(os_abi, f"pub {f}:") {
+                let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", f, f"Frozen C-ABI field {sname}.{f} missing in os_abi.pilot"));
+            }
+        }
+    }
+
+    for h in airlock_lang_hooks() {
+        if !gm_contains(bridge_lang, f"{h}(") || !gm_contains(bridge_lang, f"__engine(\"{h}\"") {
+            let _ = glist_push(violations, ab_viol("stdlib/core/bridge_lang.pilot", h, f"Frozen bridge_lang hook {h} missing or altered in bridge_lang.pilot"));
+        }
+    }
+}

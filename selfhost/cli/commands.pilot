@@ -31,6 +31,10 @@ pub pure fn cli_version_text() -> str => "Pilot v1.1.51 (Self-Hosted PilVM v3)";
 
 /// The sources of the `pilot gate` runner.
 pub fn cli_gate_files() -> List<str> => [
+    "stdlib/core/os_abi.pilot",
+    "stdlib/core/bridge_os.pilot",
+    "stdlib/core/builtins/native_calls.pilot",
+    "stdlib/core/file.pilot",
     "stdlib/crypto/hash.pilot",
     "stdlib/std/proc.pilot",
     "stdlib/std/text.pilot",
@@ -39,6 +43,7 @@ pub fn cli_gate_files() -> List<str> => [
     "selfhost/parser.pilot",
     "selfhost/pilotc.pilot",
     "selfhost/gate/manifest.pilot",
+    "selfhost/gate/airlock_abi.pilot",
     "selfhost/gate/seed_audit.pilot",
     "selfhost/gate/rename_litmus.pilot",
     "selfhost/gate/bootstrap_parity.pilot",

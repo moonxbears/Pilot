@@ -12,7 +12,7 @@ fn proc_str_buf(s: str) -> i64 {
     let n = s.len();
     let cap = if n > 0 { n } else { 1 };
     let buf = os_slab_alloc(cap, 1);
-    if n > 0 { let _ = str_copy_to_ptr(s, buf); }
+    if n > 0 { let _ = str_copy_to_ptr(s, buf, n); }
     return buf;
 }
 
@@ -178,7 +178,7 @@ pub struct ProcessHandle : IObject {
         if .stdout_fd >= 0 { let _ = os_fd_close(.stdout_fd); }
         if .stderr_fd >= 0 { let _ = os_fd_close(.stderr_fd); }
         var code = .exit_code;
-        if !.exited {
+        if .exited != true {
             let code_ptr = os_slab_alloc(8, 8);
             let rc = os_proc_wait(.id, 0, code_ptr);
             code = if rc >= 0 { os_load_int(code_ptr, 64, 1) } else { -1 };

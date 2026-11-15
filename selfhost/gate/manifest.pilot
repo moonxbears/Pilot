@@ -136,7 +136,7 @@ pub fn gate_fs_remove_all(path: str) -> bool {
     if path == "" { return false; }
     let n = path.len();
     let pbuf = os_slab_alloc(n, 1);
-    let _ = str_copy_to_ptr(path, pbuf);
+    let _ = str_copy_to_ptr(path, pbuf, n);
     let rc = os_fs_remove(pbuf, n, 1);
     let _ = os_slab_free(pbuf, n, 1);
     return rc >= 0;
@@ -474,13 +474,13 @@ pub fn build_crate_ceiling_registry() -> Map<str, CrateCeilingRule> {
     let _ = gm_reg_crate(reg, keys, "crates/pilot-parser", 1100, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-analysis", 780, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-vm", 650, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-codegen", 120, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-rt", 700, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-cli", 100, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-intern", 300, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-span", 250, false);
 
     // Retired crates (must remain permanently absent)
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-codegen", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-rt", 0, true);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-arena", 0, true);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-ffi", 0, true);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-syntax", 0, true);
@@ -514,7 +514,6 @@ pub fn build_file_ceiling_registry() -> i64 {
     let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/comptime.rs", 220);
     let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/pipeline.rs", 80);
     let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/lib.rs", 60);
-    let _ = gm_reg_fcap(reg, keys, "crates/pilot-rt/src/stdlib.rs", 90);
     let _ = gm_reg_fcap(reg, keys, "crates/pilot-cli/src/main.rs", 100);
     let _ = gm_reg_fcap(reg, keys, "selfhost/ide/vscode_gen.pilot", 1000);
     let _ = gm_reg_fcap(reg, keys, "selfhost/lsp/handlers.pilot", 1000);
@@ -657,23 +656,111 @@ pub fn build_banned_cli_lsp_tokens() -> i64 {
 pub pure fn max_total_rust_loc() -> usize => 5900;
 
 // ------------------------------------------------------------------------------
-// Seed Contraction Policy (MILESTONES_100.md Phase F, decided 2026-11-09)
+// Seed Contraction Policy (AGENTS.md §1.1 & §1.2, PROP-002a)
 // ------------------------------------------------------------------------------
-// Rust seed contraction is PAUSED until milestone F8 (real self-hosting fixed
-// point). F1–F3 must make the seed execute the full language correctly, which
-// needs more Rust, not less. While paused:
-//   - the per-crate ceilings in `build_crate_ceiling_registry()`, the per-file
-//     ceilings in `build_file_ceiling_registry()` and `max_total_rust_loc()` are
-//     NOT enforced; they are kept as the pre-pause record for when contraction
-//     resumes after F8;
-//   - each Rust source file must still obey the `<= 1,500` LOC law (MOD001);
-//   - total Rust `src` LOC must stay under `paused_max_total_rust_loc()`, which
-//     leaves room to reformat the dense pre-pause seed (~353 KB in ~5,400 lines)
-//     to normal line lengths and to land F1–F3;
-//   - retired crates must stay absent, and `--ratchet-update` is refused.
-// To resume contraction, set `seed_contraction_paused()` to `false` and run
-// `pilot gate --ratchet-update` once the live LOC is below the recorded ceilings.
+// `crates/pilot-*` is a temporary, actively contracting bootstrap execution seed
+// (`-> ~1,800` LOC -> C11 seed in M46 -> `0` non-Pilot LOC in M95). While
+// `seed_contraction_paused()` is `true` prior to Stage-3 cutover:
+//   - every wave touching `crates/` must hold flat or lower
+//     `paused_max_total_rust_loc()` (`20,408` after PROP-002a);
+//   - each Rust source file must obey the `<= 1,500` LOC law (MOD001);
+//   - retired crates (`pilot-rt`, `pilot-codegen`, etc.) must stay absent.
+// To resume full per-crate contraction, set `seed_contraction_paused()` to
+// `false` at Stage-3 cutover and run `pilot gate --ratchet-update`.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 20450;
+pub pure fn paused_max_total_rust_loc() -> usize => 20408;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
+
+/// Closed Stage-A VM-internal native set (`GATE021`, PROP-002a §4).
+pub fn stage_a_vm_natives() -> List<str> => [
+    "rt_print", "rt_eprint", "rt_fault", "seam_open",
+    "list_new", "list_push", "list_pop", "list_remove_at", "list_get", "list_set", "list_extend",
+    "map_new", "map_get", "map_set", "map_has", "map_remove", "map_keys", "map_values",
+    "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
+    "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "str_copy_to_ptr", "str_from_ptr",
+    "to_str", "scalar_from", "num_pow", "is_null", "value_clone",
+    "gen_resume", "gen_done", "gen_close", "gen_current",
+    "unpack", "unpack_pairs", "flat",
+    "get_env", "byte_size", "byte_align", "field_offset", "field_list",
+    "vm_thread_entry_ptr", "vm_callback_dispatch_ptr",
+];
+
+/// Closed Stage-A host dispatch entry (`GATE021`, PROP-002a §4).
+pub fn stage_a_host_natives() -> List<str> => ["host_op"];
+
+/// Legacy `__engine` call-site ratchet outside `bridge_lang.pilot` and `bridge_os.pilot` (`GATE021`).
+/// Counts are lexer-aware non-comment/non-string `__engine(` occurrences and may only shrink to 0.
+pub fn legacy_engine_ratchet() -> Map<str, i64> {
+    let m = Map<str, i64>();
+    m.set("selfhost/analyzer.pilot", 394);
+    m.set("selfhost/ast_bridge.pilot", 20);
+    m.set("selfhost/ast.pilot", 105);
+    m.set("selfhost/attr_weaver.pilot", 26);
+    m.set("selfhost/bench/bench.pilot", 12);
+    m.set("selfhost/check/main.pilot", 2);
+    m.set("selfhost/check/program.pilot", 2);
+    m.set("selfhost/check/snapshot.pilot", 2);
+    m.set("selfhost/cli/host.pilot", 12);
+    m.set("selfhost/cli/repl.pilot", 50);
+    m.set("selfhost/cli/test_runner.pilot", 8);
+    m.set("selfhost/codegen/asm_emitter.pilot", 109);
+    m.set("selfhost/codegen/c_emitter.pilot", 80);
+    m.set("selfhost/codegen/gpu_c_dialects.pilot", 73);
+    m.set("selfhost/codegen/gpu_llvm.pilot", 67);
+    m.set("selfhost/codegen/gpu_shaders.pilot", 122);
+    m.set("selfhost/codegen/llvm_emitter.pilot", 109);
+    m.set("selfhost/codegen/physics.pilot", 66);
+    m.set("selfhost/codegen/wasm_emitter.pilot", 120);
+    m.set("selfhost/cst/cst.pilot", 20);
+    m.set("selfhost/dap/inspector.pilot", 5);
+    m.set("selfhost/dap/repl_eval.pilot", 20);
+    m.set("selfhost/dap/vm_controller.pilot", 9);
+    m.set("selfhost/db/cache_io.pilot", 3);
+    m.set("selfhost/db/engine.pilot", 85);
+    m.set("selfhost/diagnostics.pilot", 20);
+    m.set("selfhost/ffi_bindgen.pilot", 56);
+    m.set("selfhost/fmt/fmt.pilot", 62);
+    m.set("selfhost/gate/manifest.pilot", 22);
+    m.set("selfhost/gate/rename_litmus.pilot", 15);
+    m.set("selfhost/gate/runner.pilot", 20);
+    m.set("selfhost/gate/seed_audit.pilot", 12);
+    m.set("selfhost/ide/vscode_gen.pilot", 30);
+    m.set("selfhost/ir/fault.pilot", 3);
+    m.set("selfhost/ir/lower.pilot", 2);
+    m.set("selfhost/ir/main.pilot", 2);
+    m.set("selfhost/lexer.pilot", 65);
+    m.set("selfhost/loader/pragma_filter.pilot", 20);
+    m.set("selfhost/lsp/handlers.pilot", 228);
+    m.set("selfhost/lsp/ide_db.pilot", 4);
+    m.set("selfhost/lsp/server.pilot", 12);
+    m.set("selfhost/parser.pilot", 180);
+    m.set("selfhost/perceus/escape.pilot", 90);
+    m.set("selfhost/perceus/lattice.pilot", 40);
+    m.set("selfhost/perceus/optimizer.pilot", 15);
+    m.set("selfhost/perceus/realtime.pilot", 12);
+    m.set("selfhost/perf/optimizer.pilot", 25);
+    m.set("selfhost/perf/profiler.pilot", 15);
+    m.set("selfhost/perf/wcet.pilot", 18);
+    m.set("selfhost/pkg/archive.pilot", 10);
+    m.set("selfhost/pkg/exclusions.pilot", 20);
+    m.set("selfhost/pkg/manifest.pilot", 30);
+    m.set("selfhost/pkg/resolver.pilot", 48);
+    m.set("selfhost/preprocessor.pilot", 48);
+    m.set("selfhost/transpile/ingest.pilot", 30);
+    m.set("selfhost/vm/compiler.pilot", 341);
+    m.set("selfhost/vm/pilc_writer.pilot", 16);
+    m.set("stdlib/core/effects.pilot", 45);
+    m.set("stdlib/core/keywords.pilot", 8);
+    m.set("stdlib/core/primitives/ast.pilot", 22);
+    m.set("stdlib/core/primitives/map.pilot", 10);
+    m.set("stdlib/core/reactive.pilot", 55);
+    m.set("stdlib/core/reflect.pilot", 55);
+    m.set("stdlib/crypto/ed25519.pilot", 168);
+    m.set("stdlib/crypto/hash.pilot", 156);
+    m.set("stdlib/db/sql_engine.pilot", 55);
+    m.set("stdlib/http/http.pilot", 10);
+    m.set("stdlib/pkg/licensing.pilot", 40);
+    m.set("stdlib/polyglot/marshal.pilot", 42);
+    return m;
+}
