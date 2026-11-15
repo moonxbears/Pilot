@@ -1,0 +1,13 @@
+// A rule `probe $r:Rest` is taken where a name, a literal or `{` follows the
+// word (the start a `Rest` hole needs): `probe 7;` is rejected by the rule's
+// `Reject` form. Followed by anything else the word is an ordinary name
+// (rest_hole.pilot), as `probe + 1` is here.
+pub syntax {
+    probe $r:Rest => quote { form(CoreForm::Reject, "SYN010: `probe` takes no code here", $r) };
+}
+
+fn main() {
+    let probe = 4;
+    print(probe + 1);
+    probe 7;
+}

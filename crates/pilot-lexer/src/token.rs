@@ -149,12 +149,6 @@ pub enum TokenKind {
 #[allow(non_upper_case_globals)]
 impl TokenKind {
     pub const ColonColon: Self = Self::DoubleColon;
-
-    #[inline(always)]
-    pub const fn is_keyword(self) -> bool {
-        let v = self as u16;
-        v >= 40 && v <= 53
-    }
 }
 
 /// 8-bit bitflags attached to each token in the SoA `TokenTape`.

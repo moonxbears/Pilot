@@ -8,20 +8,20 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Bridge.Lang;
 use Pilot.Core.Operators.Shapes;
 
-comptime {
-    // `database` is registered but not built yet (docs/keyword_roadmap.md
-    // K9): receptor 40 stops every use at the seam `keyword.unbuilt`.
-    bind_receptor(nameof(database), 40, 0);
-    // Not built yet (docs/keyword_roadmap.md K9): statements stop at the
-    // seam `keyword.unbuilt` where a statement starts (place 1), and clause
-    // words where a query clause stands (place 2); elsewhere each is an
-    // ordinary name (`values`, `order`, `update(x)`).
-    bind_receptor(nameof(connect),    40, 1);
-    bind_receptor(nameof(insert),     40, 1);
-    bind_receptor(nameof(update),     40, 1);
-    bind_receptor(nameof(delete),     40, 1);
-    bind_receptor(nameof(into),       40, 2);
-    bind_receptor(nameof(values),     40, 2);
+// `database` and the statement words `connect`, `insert`, `update` and
+// `delete` are not built yet (docs/keyword_roadmap.md K9).
+// Each rule reads the construct past (`Rest`: up to a `;`, or through the
+// block it opens) and stops the build at the seam `keyword.unbuilt`
+// (PROP-009 section 13). The word starts the construct only when a name, a
+// literal or `{` (for `database`, or `[`) follows it; elsewhere it is an
+// ordinary name (tests/conformance/types/unbuilt_words_as_names, _2).
+pub syntax {
+    database $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `database` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    database [ $r:Rest ] => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `database` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    connect $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `connect` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    insert $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `insert` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    update $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `update` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    delete $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `delete` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 // A query over a sequence (PROP-009; was crates/pilot-parser/src/query.rs):
@@ -74,6 +74,14 @@ pub syntax {
             }
         }
     };
+}
+
+// The query clauses `into` and `values` (K9) are not built yet: a query
+// that writes one stops at the same seam; outside a query each is an
+// ordinary name.
+pub syntax {
+    from $it:Iteration $( $f:Filter )* into $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `into` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    from $it:Iteration $( $f:Filter )* values $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `values` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 // The set operators over sequences (stdlib/db/set_ops.pilot). `intersect`

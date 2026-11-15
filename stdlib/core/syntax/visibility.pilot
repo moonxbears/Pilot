@@ -27,9 +27,7 @@ comptime {
     // (docs/keyword_roadmap.md K5): every use stops at the seam
     // `keyword.unbuilt` instead of behaving as `pub`.
     register_modifier(nameof(export),      "keyword_unbuilt");
-    // `module` (K2, decision D3) is not built yet: it stops at `keyword.unbuilt`.
     register_modifier(nameof(override),    "override_member");
-    bind_receptor(nameof(module),          40, 1);
 
     // Axis 2: Compile-Time Clearance Rings (`lvl(N)` & shorthand `lvl0`..`lvl100`)
     // `lvl(N)` is kept on its declaration (selfhost/check/clearance.pilot
@@ -44,6 +42,18 @@ comptime {
     register_modifier(nameof(lvl80),  "keyword_unbuilt");
     register_modifier(nameof(lvl90),  "keyword_unbuilt");
     register_modifier(nameof(lvl100), "keyword_unbuilt");
+}
+
+// `module` (K2, decision D3) and `macro` (K4; `syntax` rules are the macros
+// that work) are not built yet.
+// Each rule reads the construct past (`Rest`: up to a `;`, or through the
+// block it opens) and stops the build at the seam `keyword.unbuilt`
+// (PROP-009 section 13). The word starts the construct only when a name, a
+// literal or `{` follows it; elsewhere it is an ordinary name
+// (tests/conformance/types/unbuilt_words_as_names, _2).
+pub syntax {
+    module $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `module` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    macro $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `macro` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 pub pure fn visibility_tier_of(word: str) -> i32 {

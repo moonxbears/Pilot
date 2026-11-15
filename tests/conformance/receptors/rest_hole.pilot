@@ -1,0 +1,34 @@
+// A `Rest` hole (stdlib/core/syntax/holes.pilot) starts only at a name, a
+// literal, or a `{` that is not the block after a condition (PROP-009
+// section 13). Where anything else follows the rule's word, the rule is not
+// taken and the word is an ordinary name; err_rest_hole_needs_start is the
+// rule taken.
+//
+// Expected, by hand: probe = 4, so probe + 1 = 5; twice(4) = 8; the `while`
+// counts n up to probe = 4; [4, 2] gives 4 * 2 = 8; `switch 4` takes
+// `case 4`; size("abc") is 3.
+pub syntax {
+    probe $r:Rest => quote { form(CoreForm::Reject, "SYN010: `probe` takes no code here", $r) };
+}
+
+fn twice(x: i64) -> i64 => x * 2;
+
+// `probe` before `.`.
+fn size(probe: str) -> i64 => probe.len();
+
+fn main() {
+    let probe = 4;
+    // before an operator, `)`, `{` after a condition, `,` and `]`
+    print(probe + 1);
+    print(twice(probe));
+    var n = 0;
+    while n < probe { n = n + 1; }
+    print(n);
+    let xs = [probe, 2];
+    print(xs[0] * xs[1]);
+    switch probe {
+        case 4: print("four");
+        default: print("other");
+    }
+    print(size("abc"));
+}

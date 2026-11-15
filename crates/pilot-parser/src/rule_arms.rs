@@ -175,6 +175,7 @@ const HOLE_IDENT: u8 = 3;
 const HOLE_TYPE: u8 = 4;
 const HOLE_STMT: u8 = 5;
 const HOLE_STMTS: u8 = 6;
+const HOLE_REST: u8 = 7;
 
 /// One item of a sequence rule head (PROP-009 step 1a).
 #[derive(Clone, Debug)]
@@ -317,7 +318,7 @@ impl<'a> Parser<'a> {
             let kind_name = self.text().to_string();
             self.advance();
             match self.tables.hole_kind(&kind_name) {
-                Some(k) if k <= HOLE_STMTS => items.push(HeadItem::Hole(name.clone(), k)),
+                Some(k) if k <= HOLE_REST => items.push(HeadItem::Hole(name.clone(), k)),
                 _ if self.tables.syntax_classes.contains_key(&kind_name) => items.push(HeadItem::Class(kind_name)),
                 _ => self.seq_head_error(sp, &format!("`{kind_name}` is not a hole kind (a variant of `HoleKind`) or a syntax class")),
             }
@@ -547,11 +548,12 @@ impl<'a> Parser<'a> {
                         return self.quick_fit(inner, at);
                     }
                 }
+                HeadItem::Hole(_, HOLE_REST) if self.rest_starts(at) => return true,
                 HeadItem::Class(c) => {
                     let arms = self.tables.syntax_classes.get(c);
                     return arms.is_some_and(|arms| arms.iter().any(|a| self.quick_fit(&a[..a.len().min(1)], at)));
                 }
-                HeadItem::Word(_) | HeadItem::Hole(_, HOLE_IDENT) | HeadItem::Hole(_, HOLE_BLOCK) => return false,
+                HeadItem::Word(_) | HeadItem::Hole(_, HOLE_IDENT | HOLE_BLOCK | HOLE_REST) => return false,
                 _ => return true,
             }
         }
@@ -573,11 +575,7 @@ impl<'a> Parser<'a> {
                 }
                 HeadItem::Word(w) => {
                     let (sp, found) = (self.span(), self.text().to_string());
-                    if self.at_unbuilt_clause() {
-                        self.report_unbuilt(sp, &found);
-                    } else {
-                        self.arena.diagnostics.push((sp, format!("SYN010: `{word}` expects `{w}` here, found `{found}`")));
-                    }
+                    self.arena.diagnostics.push((sp, format!("SYN010: `{word}` expects `{w}` here, found `{found}`")));
                     return false;
                 }
                 HeadItem::Hole(name, kind) => {
@@ -798,6 +796,7 @@ impl<'a> Parser<'a> {
             }
             HOLE_STMT => self.parse_stmt(),
             HOLE_STMTS => self.parse_stmts_hole(stops),
+            HOLE_REST if self.rest_starts(self.cur()) => self.parse_rest(),
             _ => NodeId::NONE,
         }
     }
@@ -822,6 +821,54 @@ impl<'a> Parser<'a> {
             [one] => *one,
             _ => self.arena.alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.start)), &stmts),
         }
+    }
+
+    /// Whether a `Rest` hole can start at `at`: at a name, a literal, or a
+    /// `{` where a block may follow (not after the condition of `if`,
+    /// `while` or `switch`, whose block that `{` opens).
+    fn rest_starts(&self, at: usize) -> bool {
+        let at = self.next_non_nl(at);
+        at < self.tape.len()
+            && match self.tape.kind(at) {
+                TokenKind::LBrace => !self.no_struct_lit,
+                k => crate::is_word_tok(k)
+                    || matches!(
+                        k,
+                        TokenKind::IntLit
+                            | TokenKind::HexIntLit
+                            | TokenKind::BinIntLit
+                            | TokenKind::OctIntLit
+                            | TokenKind::FloatLit
+                            | TokenKind::StrLit
+                            | TokenKind::TripleStrLit
+                    ),
+            }
+    }
+
+    /// A `Rest` hole: the code up to a `;` (not read), a closer it did not
+    /// open, or through the `}` that closes a block it opened, read past
+    /// and kept only as its span, for a rule that reports the construct.
+    fn parse_rest(&mut self) -> NodeId {
+        let sp = self.span();
+        let mut depth = 0usize;
+        while !self.at_end() {
+            match self.peek() {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace if depth == 0 => break,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth -= 1;
+                    if depth == 0 && self.peek() == TokenKind::RBrace {
+                        self.advance();
+                        break;
+                    }
+                }
+                TokenKind::Semicolon if depth == 0 => break,
+                _ => {}
+            }
+            self.advance();
+        }
+        let span = ByteSpan::new(sp.start, self.prev_span().end.max(sp.start));
+        self.arena.alloc_node(NodeKind::ErrorNode, 0, span, 0, 0)
     }
 
     /// The hole names in `items`, nested groups and classes included; the

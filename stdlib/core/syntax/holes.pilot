@@ -26,6 +26,10 @@ pub enum HoleKind : u8 {
     Stmts,    // statements up to `}`, `,` or a word that starts the next
               // repetition of the group around it (one statement stands
               // as it is; several make a block)
+    Rest,     // the rest of a construct a rule only reports: from a name, a
+              // literal or `{` (not the `{` after a condition) up to a `;`
+              // or a closer it did not open, or through the `}` that closes
+              // the block it opened
 }
 
 comptime {

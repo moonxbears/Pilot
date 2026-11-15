@@ -662,13 +662,15 @@ pub pure fn max_total_rust_loc() -> usize => 5900;
 // (`-> ~1,800` LOC -> C11 seed in M46 -> `0` non-Pilot LOC in M95). While
 // `seed_contraction_paused()` is `true` prior to Stage-3 cutover:
 //   - every wave touching `crates/` must hold flat or lower
-//     `paused_max_total_rust_loc()` (`20,408` after PROP-002a);
+//     `paused_max_total_rust_loc()` (`20,408` after PROP-002a; raised to
+//     `21,000` by the owner on 2026-11-15, after PROP-009 step 2 and
+//     PROP-010/012 brought the seed to 20,640);
 //   - each Rust source file must obey the `<= 1,500` LOC law (MOD001);
 //   - retired crates (`pilot-rt`, `pilot-codegen`, etc.) must stay absent.
 // To resume full per-crate contraction, set `seed_contraction_paused()` to
 // `false` at Stage-3 cutover and run `pilot gate --ratchet-update`.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 20408;
+pub pure fn paused_max_total_rust_loc() -> usize => 21000;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
 

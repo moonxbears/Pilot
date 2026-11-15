@@ -128,7 +128,7 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("js.ref_new", ::Entry, "napi_create_reference through a loaded Node-API host", "F6"),
         seam_entry("js.typedarray_info", ::Entry, "napi_get_typedarray_info (data pointer, length, byte offset)", "F6"),
         seam_entry("js.typedarray_release", ::Entry, "releasing the reference pinning a TypedArray's ArrayBuffer", "F6"),
-        seam_entry("keyword.unbuilt", ::Entry, "the meaning of each registered keyword the library binds to receptor 40 or registers with the modifier action keyword_unbuilt (crates/pilot-parser/src/unbuilt.rs); docs/keyword_roadmap.md names the phase that builds each one", "K0"),
+        seam_entry("keyword.unbuilt", ::Entry, "the meaning of each registered keyword the library writes as a `syntax` rule with a `Rest` hole and a `Reject` template (PROP-009 section 13) or registers with the modifier action keyword_unbuilt (crates/pilot-parser/src/unbuilt.rs report_unbuilt); docs/keyword_roadmap.md names the phase that builds each one", "K0"),
         seam_entry("lifecycle.scope_self", ::Entry, "running the `enter` and `exit` clauses of a struct's `scope self { .. }` block: which block enters a value of the type is not decided (selfhost/check/methods.pilot build_type stops a program that declares one)", "owner"),
         seam_entry("lifetime.global_drop_queue", ::Entry, "process-wide lock-protected drop queue (runtime globals and locks)", "F7"),
         seam_entry("lvl.clearance", ::Entry, "the clearance check (LVL001) and flow-typed elevation (`if lvl >= N`) for a use of a function whose `lvl(N)` is above the user's (selfhost/check/clearance.pilot stops it); what a package's level means is decision D11", "K2"),

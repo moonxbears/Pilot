@@ -8,12 +8,15 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.UnitDecl;
 use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
 
-// A standalone compilation unit (`unit Name ..`) is not built yet: where a
-// declaration or statement starts it stops at the seam `keyword.unbuilt`
-// (receptor 40, place 1); elsewhere it is an ordinary name. Its old rule
-// passed the declaration through and declared nothing.
-comptime {
-    bind_receptor(nameof(unit), 40, 1);
+// A standalone compilation unit (`unit Name ..`) is not built yet. Its old
+// rule passed the declaration through and declared nothing.
+// Each rule reads the construct past (`Rest`: up to a `;`, or through the
+// block it opens) and stops the build at the seam `keyword.unbuilt`
+// (PROP-009 section 13). The word starts the construct only when a name, a
+// literal or `{` follows it; elsewhere it is an ordinary name
+// (tests/conformance/types/unbuilt_words_as_names, _2).
+pub syntax {
+    unit $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `unit` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 // =========================================================================

@@ -116,7 +116,6 @@ pub fn test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary() {
             word,
             expected_kind
         );
-        assert!(tape.kind(0).is_keyword());
 
         // Near-miss prefix/suffix variants of every seed keyword must lex as Ident
         let suffixed = format!("{}_{}", word, rng.range(1, 999));
@@ -129,7 +128,6 @@ pub fn test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary() {
                 "Seed near-miss '{}' must lex as Ident",
                 near
             );
-            assert!(!nt.kind(0).is_keyword());
         }
     }
 
@@ -155,14 +153,12 @@ pub fn test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary() {
             "Non-seed word '{}' must lex strictly as TokenKind::Ident",
             word
         );
-        assert!(!tape.kind(0).is_keyword());
     }
 
     for _ in 0..40 {
         let rand_id = format!("u_{}_{}", rng.alpha_word(6), rng.range(10, 9999));
         let tape = tokenize(&rand_id);
         assert_eq!(tape.kind(0), TokenKind::Ident);
-        assert!(!tape.kind(0).is_keyword());
     }
     guard.finish();
 }

@@ -188,7 +188,6 @@ impl<'a> Parser<'a> {
                 if self.is_receiver() && in_type_body { let nx = self.next_non_nl(self.cur() + 1);
                     if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen { out.push(self.parse_ctor(&mods)); return; }
                     if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LBracket { out.push(self.parse_indexer(&mods, def_vis)); return; } }
-                if self.at_unbuilt_decl() { let _ = self.parse_unbuilt(); return; }
                 if in_type_body || raw_mods.is_non_empty() { let nx = self.next_non_nl(self.cur() + 1);
                     if nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::Colon | TokenKind::Question) { out.push(self.parse_field_or_prop(&mods, def_vis)); return; }
                     if let Some(h) = &hdr_snap { if h.target != 0 { self.parse_headless_or_item(out, h.target, in_type_body); return; } } }

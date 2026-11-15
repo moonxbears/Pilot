@@ -19,9 +19,10 @@
 | **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — ITEMIZE BEFORE APPROVAL (after PROP-007)` |
 | **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4) NEEDS APPROVAL` |
 | **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED ITEMIZED LISTS` |
-| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 AND BUILT (§11; +186 RUST, OVER THE −15..−40 ESTIMATE, ACCEPTED BY THE OWNER 2026-11-15; `true`/`false`/`none` NOT MOVED); STEP 2C GROUP 1 (`errdefer`/`become`, §12, about −30 RUST) APPROVED 2026-11-15; STEP 3 NEEDS A DECISION` |
+| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 AND BUILT (§11; +186 RUST, OVER THE −15..−40 ESTIMATE, ACCEPTED BY THE OWNER 2026-11-15; `true`/`false`/`none` NOT MOVED); STEP 2C GROUP 1 (`errdefer`/`become`, §12, about −30 RUST) APPROVED 2026-11-15 AND BUILT; STEP 2C GROUP 2 (UNBUILT KEYWORDS, §13, about −90 RUST) APPROVED 2026-11-15 AND BUILT (−63 RUST); STEP 3 NEEDS A DECISION` |
 | **`PROP-010`** | Purge Dead Rust Found 2026-11-15: the Unused Rust `comptime` Evaluator and Unreferenced Items | `-191` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-011`** | Delete the Unrun Bootstrap Stage List `stdlib/core/bootstrap.pilot` (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
+| **`PROP-012`** | Delete Test-Only Rust: the AST S-Expression Printer, the Rust Module Header Scanner and `TokenKind::is_keyword` | `-186` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -1301,6 +1302,71 @@ Net: about −30 Rust LOC (21,050 → about 21,020).
 
 **As built (2026-11-15).** The file list is as approved: `exits.rs` deleted, `forms.rs` +10 (`ERR_DEFER`, `BECOME`, the two flags), `stmt.rs` −2, `lib.rs` −1; net −33 Rust LOC (21,050 → 21,017).
 - One acceptance test differs from the plan. `errdefer }` is not SYN010. A rule word that no code follows is read as a plain name (step 1c: words stay usable as names), so the program fails with DECL001 `undefined name `errdefer`` at the word. `errors/err_errdefer_no_body` pins that. It fails on the old parser, which silently accepted `errdefer }`.
+
+### 13. Step 2c, group 2 — unbuilt keywords (APPROVED BY OWNER 2026-11-15: "Approve §13")
+
+**What.**
+- 24 words are registered but not built yet, and every use stops at the seam `keyword.unbuilt` (SEAM001). They are bound to receptor 40, whose second number says where the word may start a construct:
+  - **place 0 (anywhere):** `adapter`, `context`, `each`, `database`;
+  - **place 1 (declaration/statement):** `actor`, `timeout`, `bounded`, `blueprint`, `cue`, `role`, `route`, `state`, `transition`, `macro`, `unit`, `module`, `connect`, `insert`, `update`, `delete`, `priority`, `jitter`;
+  - **place 2 (query clause):** `into`, `values`.
+- `crates/pilot-parser/src/unbuilt.rs` (136 lines) recognises them, reads past the construct and reports it. Each word becomes a Pilot `syntax` rule that rejects it with the same message. The Rust that knows "receptor 40" goes.
+- Unbuilt *modifiers* (`register_modifier(.., "keyword_unbuilt")`: `async`, `export`, `lvl0`..`lvl100`) are not rule heads and stay with the modifier table (`ModAct::Unbuilt` in `decl.rs`), as does the unbuilt `asm { .. }` block in `stmt.rs`. They keep `report_unbuilt`.
+
+**Matcher addition: hole kind `Rest`.**
+- Appended to `HoleKind` (`stdlib/core/syntax/holes.pilot`, ordinal 7).
+- It must start with a name, a literal or `{`, which is today's test for "a construct follows the word". Then it reads tokens exactly as `parse_unbuilt` does: up to a `;` (read), past a `{ .. }` block, or before a `,` or a closer it did not open.
+- It builds nothing; the rule's `Reject` operand is the hole.
+- So `state.push(x);`, `f(each)`, `values[i] = 1;` and `update(x);` still don't match. As before, the word is then an ordinary name (`unbuilt_words_as_names`, `_2`).
+
+**Pilot rules.**
+- Each file that binds a word today binds it by rule instead:
+  - `stdlib/asyncio/select_syntax.pilot`, `stdlib/contracts/contracts_syntax.pilot`, `stdlib/core/core.pilot` (`macro`);
+  - `stdlib/core/syntax/unit_decl.pilot`, `stdlib/core/syntax/visibility.pilot` (`module`);
+  - `stdlib/db/sql_syntax.pilot`, `stdlib/realtime/rt_syntax.pilot`.
+- For example:
+
+  ```pilot
+  pub syntax {
+      actor $r:Rest => quote { form(CoreForm::Reject,
+          "SEAM001: unconnected seam `keyword.unbuilt`: `actor` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+  }
+  ```
+
+- Place-0 words also take a list (`each [1, 2, 3]`), spelled in the head: `each [ $( $e:Expr ),* ]`.
+- The clause words `into` and `values` become arms of the `from .. select` rule in `sql_syntax.pilot` that reject with the same message, instead of the matcher's `at_unbuilt_clause` branch.
+- A rule word only works where rules are read (statement start, which top-level items fall back to, and expression start) — the same places as today's places 0 and 1.
+
+**Rust file list** (`crates/pilot-parser` only):
+
+| File | Change | LOC |
+| :--- | :--- | ---: |
+| `crates/pilot-parser/src/unbuilt.rs` | keep only `report_unbuilt` (used for unbuilt modifiers and `asm { }`); delete `UNBUILT_RECEPTOR`, the place constants, `unbuilt_place`, `at_unbuilt`, `at_unbuilt_decl`, `at_unbuilt_clause`, `starts_unbuilt_body`, `parse_unbuilt` | about −110 |
+| `crates/pilot-parser/src/rule_arms.rs` | `HOLE_REST = 7` and its reader; drop the `at_unbuilt_clause` branch | about +22 |
+| `crates/pilot-parser/src/expr.rs` | delete the receptor-40 arm | −1 |
+| `crates/pilot-parser/src/stmt.rs` | delete the `at_unbuilt_decl` check at the top of `parse_stmt` | −1 |
+| `crates/pilot-parser/src/decl.rs` | delete the `at_unbuilt_decl` line in the item dispatch | −1 |
+
+Net: about −90 Rust LOC.
+
+**Acceptance.**
+- The 26 `errors/err_*_unbuilt` programs and `unbuilt_words_as_names`, `_2` pass unchanged, with the same message and exit code, on `pilot test`. They are error and seed-only programs, but `_2` also runs on `--ir` and `--emit c`.
+- New: `receptors/err_rest_hole_needs_start`. A rule `$r:Rest` before `.` is not taken, so the word is a name.
+- The keyword matrix "Bound by" for the 24 words becomes "`syntax` rule (unbuilt: `Reject`)".
+- Then `pilot test`, `pilot gate` and `cargo test -p pilot-parser` (`damaged_source --include-ignored`).
+
+**Changes in behaviour.**
+- A place-1 word inside an expression, followed by a name or `{` (`let y = update x;`), now stops at the seam too. Before, it was an unknown name, which was also an error.
+- A place-0 word followed by `(` stays a call, as before.
+
+**As built (2026-11-15).** Rust src is 20,640 → 20,577 (−63, not the estimated −90). `unbuilt.rs` is 136 → 28; `rule_arms.rs` is 857 → 904 (+47, not +22); `expr.rs`, `stmt.rs` and `decl.rs` lose one line each. Only the five listed files changed. Where the build differs from the text above:
+- **`Rest` does not start at the `{` after a condition.** Rules are tried at expression start as well as statement start, so as specified `switch state {` or `while x == unit {` (selfhost/analyzer.pilot has one) would have stopped at the seam. A `Rest` hole now fits a `{` only where a struct literal could stand (the parser's `no_struct_lit` flag), so the word before a condition's block stays a name. `receptors/rest_hole` covers this.
+- **`Rest` stops before a `;` and does not stop at `,`.** The statement reads the `;` itself. Not stopping at `,` lets the list form be `each [ $r:Rest ]` instead of `each [ $( $e:Expr ),* ]`; the repeated form gave `Reject` no operand for `each []`, so it reported nothing.
+- **`macro` is bound in `stdlib/core/syntax/visibility.pilot`, beside `module`, not in `core.pilot`.** `core.pilot` (and `module_ext.pilot`) are read before `holes.pilot` and `forms.pilot` in `BOOTSTRAP_SOURCES`, so a rule there cannot name `Rest` or `form`.
+- **The `into`/`values` rules follow the main `from` rule** in `sql_syntax.pilot`. When no rule matches, the first one to read furthest reports, so `errors/err_query_clause` keeps "`from` expects `select`".
+- **Tests.** The 26 `err_*_unbuilt` programs, `err_unit_decl_seam`, `err_query_clause`, `err_lvl_shorthand` and `unbuilt_words_as_names`, `_2` pass unchanged on `pilot test`. New: `receptors/rest_hole` (passing: the word before an operator, `)`, `.`, `,` or a condition's `{` is a name) and `receptors/err_rest_hole_needs_start`. `cargo test -p pilot-parser`: `damaged_source --include-ignored` passes; `milestone51` has the same 4 failures as before this change (§10).
+- **Changes in behaviour, as built.** A construct word followed by a name, a literal or a `{` (outside a condition) stops at the seam in expression position too, e.g. `let y = update x;` or `let s = state { .. };`. Before, a place-1 word did this only at statement start.
+
 ---
 
 ## `PROP-010` — Purge Dead Rust Found 2026-11-15: the Unused Rust `comptime` Evaluator and Unreferenced Items
@@ -1386,6 +1452,53 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 - `git grep bootstrap.pilot` finds only history (`MILESTONES_100.md`, `proposals.md`).
 
 **As built (2026-11-15).** As listed. `milestone50` passes 3 tests (`test_50_3` among them) and fails only `test_50_4_and_50_5`, as before. The seed suite passes 533 with 0 failures. `pilot gate` shows only GATE003 (20,826 `src` LOC, unchanged). The remaining mentions of `bootstrap.pilot` are history (`MILESTONES_100.md`, `.agents/AI_CODEBASE_INDEX.md`, this file) and the `wiring.pilot` F1 note that records the deletion.
+
+---
+
+## `PROP-012` — Delete Test-Only Rust: the AST S-Expression Printer, the Rust Module Header Scanner and `TokenKind::is_keyword`
+
+**Status: APPROVED BY OWNER 2026-11-15 ("Approve PROP-012").** Logged under Rule 3. These three pieces of `src` are called by no binary, only by tests. Found by searching every `pub fn` in `crates/*/src` (outside `#[cfg(test)]`) for callers in other `src` code.
+
+| Piece | Where | Why it is dead | LOC |
+| :--- | :--- | :--- | ---: |
+| **A.** `AstArena::to_sexpr` / `write_sexpr` | `crates/pilot-ast/src/lib.rs` | Only the crate's own unit test calls it. Pilot has its own printer (`sh_ast_emit_sexpr` in `selfhost/ast.pilot`). | −53 |
+| **B.** `parse_header`, `ModuleDecl`, `at_module_decl`, `after_group` | `crates/pilot-parser/src/modules.rs` (+ the `pub use` in `lib.rs`) | It's a Rust module header scanner, which AGENTS.md §1.1 forbids, and `PROP-003` already lists `parse_header` for removal. Nothing in `src` calls it: Pilot reads `pkg`/`use` headers itself (`selfhost/loader/module_graph.pilot`), and `pilot-cli` links with `parse_unit`, which stays. | about −115 |
+| **C.** `TokenKind::is_keyword` | `crates/pilot-lexer/src/token.rs` | Only `milestone52_seed_lexer_and_preprocessor.rs` calls it, and every call follows an `assert_eq!` on the exact `TokenKind`, so it adds nothing. | −5 |
+
+**Rust file list.**
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-ast/src/lib.rs` | delete `to_sexpr` and `write_sexpr`; in the unit test, delete the arena setup and the `to_sexpr` assertion (the size and precedence assertions stay) |
+| `crates/pilot-parser/src/modules.rs` | delete `ModuleDecl`, `parse_header`, `at_module_decl`, `after_group`; `parse_unit` and `parse_module_decl` stay |
+| `crates/pilot-parser/src/lib.rs` | `pub use modules::parse_unit;` only |
+| `crates/pilot-parser/tests/module_header.rs` | **delete** (it tests only `parse_header`) |
+| `crates/pilot-parser/tests/damaged_source.rs` | drop the `parse_header(&text)` call; the crash check still runs `parse(&text)` on every damaged input |
+| `crates/pilot-lexer/src/token.rs` | delete `is_keyword` (and the `impl` block if it is left empty, keeping `ColonColon`) |
+| `crates/pilot-lexer/tests/milestone52_seed_lexer_and_preprocessor.rs` | delete the four `is_keyword` assertions |
+
+**Net.** About −173 `src` LOC (20,826 → about 20,653).
+
+**Acceptance.**
+- `cargo build`.
+- `cargo test -p pilot-ast`, `-p pilot-lexer` and `-p pilot-parser`: the same results as now, minus the deleted tests. `milestone51`'s 4 known failures are unchanged.
+- `damaged_source --include-ignored` passes.
+- The seed suite and `pilot gate` are unchanged apart from GATE003's number.
+
+**Not included.**
+- `ByteSpan::merge`: two `pilot-analysis` harnesses use it.
+- `PilVirtualMachine::set_hook`: four harnesses drive the VM debug hook through it, and it is the seam the Pilot DAP work needs.
+- `bootstrap_diagnostics`: its test guards that every bootstrap source parses.
+
+**As built (2026-11-15).** Exactly the files listed. Net −186 `src` LOC (20,826 → 20,640, measured by GATE003; the budget of 20,408 is still exceeded).
+- `token.rs`: `impl TokenKind` keeps only `ColonColon`.
+- The `pilot-ast` unit test is renamed `ast_node_is_strictly_16_bytes`.
+- The `damaged_source` doc comment no longer mentions `parse_header`.
+- **Results.**
+  - `pilot-ast`, `pilot-lexer` and `pilot-parser` tests pass, except `milestone51`'s 4 known failures.
+  - `damaged_source --include-ignored` passes.
+  - The seed suite passes 533 with 0 failures; `pilot gate` shows only GATE003.
+- **Budget raised by the owner (2026-11-15).** After this proposal the owner raised `paused_max_total_rust_loc()` from 20,408 to 21,000 (`selfhost/gate/manifest.pilot`). At 20,640, `pilot gate` passes all 4 gates.
 
 ---
 

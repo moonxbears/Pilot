@@ -3,7 +3,7 @@
 //! Every `.pilot` file under `tests/conformance`, `stdlib` and `selfhost` is
 //! damaged at evenly spaced points (truncated, truncated and followed by
 //! stray closers, or with one of `,` `{` `(` `"` `[` `f"{` inserted) and both
-//! `parse_header` and `parse` must return. A crash is reported with its
+//! `parse` must return. A crash is reported with its
 //! panic site and the smallest input that hit it.
 //!
 //! `PILOT_FUZZ_POINTS` sets the points per file (default 16) and
@@ -71,7 +71,6 @@ fn damage_file(root: &Path, path: &Path, points: usize, seed: usize, crashes: &m
         for text in damaged(&src, at) {
             runs += 1;
             let result = std::panic::catch_unwind(|| {
-                let _ = pilot_parser::parse_header(&text);
                 let _ = pilot_parser::parse(&text);
             });
             if let Err(payload) = result {

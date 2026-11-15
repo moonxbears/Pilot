@@ -111,7 +111,7 @@ impl<'a> Parser<'a> {
         let nx = self.next_non_nl(self.cur() + 1);
         nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen
     }
-    pub(crate) fn parse_stmt(&mut self) -> NodeId { if self.at_unbuilt_decl() { return self.parse_unbuilt(); }
+    pub(crate) fn parse_stmt(&mut self) -> NodeId {
         let sp = self.span(); match self.peek() {
             TokenKind::KwReturn => { self.advance(); let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE } else { self.parse_expr() }; let _ = self.eat(TokenKind::Semicolon); self.arena.alloc_node(NodeKind::ReturnStmt, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), v.0, 0) }
             TokenKind::KwYield => { self.advance(); let v = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); self.arena.alloc_node(NodeKind::YieldStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0) }

@@ -449,60 +449,6 @@ impl AstArena {
         if s >= self.extra_children.len() || len == 0 { return &[]; }
         &self.extra_children[s..(s + len as usize).min(self.extra_children.len())]
     }
-
-    pub fn to_sexpr(&self, id: NodeId) -> String {
-        let mut out = String::new(); self.write_sexpr(id, &mut out); out
-    }
-
-    fn write_sexpr(&self, id: NodeId, out: &mut String) {
-        if id.is_none() || (id.0 as usize) >= self.nodes.len() { out.push_str("nil"); return; }
-        let (n, kind) = (self.node(id), self.node(id).node_kind());
-        match kind {
-            NodeKind::Program | NodeKind::BlockExpr | NodeKind::TupleExpr | NodeKind::ListExpr => {
-                out.push('('); out.push_str(kind.name());
-                for &c in self.children_slice(n.lhs, n.rhs) { out.push(' '); self.write_sexpr(NodeId(c), out); }
-                out.push(')');
-            }
-            NodeKind::TypeNamed => {
-                out.push_str("(TypeNamed "); out.push_str(self.interner.resolve(SymbolId(n.lhs)));
-                for &c in self.type_args(id) { out.push(' '); self.write_sexpr(NodeId(c), out); }
-                out.push(')');
-            }
-            NodeKind::IdentExpr | NodeKind::PolyglotBlock => {
-                out.push('('); out.push_str(if kind == NodeKind::IdentExpr { "Ident " } else { "PolyglotBlock " });
-                out.push_str(self.interner.resolve(SymbolId(n.lhs))); out.push(')');
-            }
-            NodeKind::IntLit => out.push_str(&format!("(Int {})", self.i64_pool.get(n.lhs as usize).copied().unwrap_or(0))),
-            NodeKind::FloatLit => out.push_str(&format!("(Float {:?})", self.f64_pool.get(n.lhs as usize).copied().unwrap_or(0.0))),
-            NodeKind::BoolLit => out.push_str(if n.lhs != 0 { "(Bool true)" } else { "(Bool false)" }),
-            NodeKind::StrLit => out.push_str(&format!("(Str {:?})", self.interner.resolve(SymbolId(n.lhs)))),
-            NodeKind::NoneLit => out.push_str("(None)"),
-            NodeKind::KeywordLit => {
-                out.push_str("(Kw :"); out.push_str(self.interner.resolve(SymbolId(n.lhs))); out.push(')');
-            }
-            NodeKind::ImportDecl | NodeKind::FnDecl | NodeKind::TypeAdtDecl
-            | NodeKind::StructDecl | NodeKind::InterfaceDecl | NodeKind::ExtendDecl => {
-                out.push('('); out.push_str(kind.name()); out.push(' ');
-                out.push_str(self.interner.resolve(SymbolId(n.lhs))); out.push(')');
-            }
-            NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
-                out.push('('); out.push_str(kind.name()); out.push(' ');
-                out.push_str(self.interner.resolve(SymbolId(n.lhs))); out.push(' ');
-                self.write_sexpr(NodeId(n.rhs), out); out.push(')');
-            }
-            NodeKind::ReturnStmt => { out.push_str("(ReturnStmt "); self.write_sexpr(NodeId(n.lhs), out); out.push(')'); }
-            NodeKind::BinaryExpr => {
-                out.push_str(&format!("(BinaryExpr op={} ", n.flags));
-                self.write_sexpr(NodeId(n.lhs), out); out.push(' '); self.write_sexpr(NodeId(n.rhs), out); out.push(')');
-            }
-            _ => {
-                out.push('('); out.push_str(kind.name());
-                if n.lhs != u32::MAX { out.push(' '); self.write_sexpr(NodeId(n.lhs), out); }
-                if n.rhs != u32::MAX && n.rhs != 0 { out.push(' '); self.write_sexpr(NodeId(n.rhs), out); }
-                out.push(')');
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -510,16 +456,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ast_node_is_strictly_16_bytes_and_sexpr_roundtrips() {
+    fn ast_node_is_strictly_16_bytes() {
         assert_eq!(core::mem::size_of::<AstNode>(), 16);
         assert!(TypePrecedence::PostfixOptional > TypePrecedence::Intersection && TypePrecedence::Union > TypePrecedence::Fallible);
         assert!(ExprPrecedence::Cascade < ExprPrecedence::Assign && ExprPrecedence::Pipe < ExprPrecedence::PostfixLed);
-        let mut arena = AstArena::with_capacity(16);
-        let (lhs, rhs) = (arena.alloc_int(40, ByteSpan::new(8, 10)), arena.alloc_int(2, ByteSpan::new(13, 14)));
-        let add = arena.alloc_node(NodeKind::BinaryExpr, BinaryOp::Add as u16, ByteSpan::new(8, 14), lhs.0, rhs.0);
-        let sym_x = arena.interner.intern("x");
-        let let_stmt = arena.alloc_node(NodeKind::LetStmt, 0, ByteSpan::new(0, 15), sym_x.0, add.0);
-        arena.root = arena.alloc_list_node(NodeKind::Program, 0, ByteSpan::new(0, 15), &[let_stmt]);
-        assert_eq!(arena.to_sexpr(arena.root), "(Program (LetStmt x (BinaryExpr op=1 (Int 40) (Int 2))))");
     }
 }

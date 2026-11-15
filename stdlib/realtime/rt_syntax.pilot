@@ -10,10 +10,17 @@ comptime {
     // `noalloc fn f()`: the function takes no heap memory (NOALLOC001,
     // selfhost/check/noalloc.pilot). It is no `async` effect.
     register_modifier(nameof(noalloc), "effect_noalloc");
-    // Not built yet (docs/keyword_roadmap.md K8): where a declaration or
-    // statement starts each stops at the seam `keyword.unbuilt`.
-    bind_receptor(nameof(priority), 40, 1);
-    bind_receptor(nameof(jitter),   40, 1);
+}
+
+// `priority` and `jitter` are not built yet (docs/keyword_roadmap.md K8).
+// Each rule reads the construct past (`Rest`: up to a `;`, or through the
+// block it opens) and stops the build at the seam `keyword.unbuilt`
+// (PROP-009 section 13). The word starts the construct only when a name, a
+// literal or `{` follows it; elsewhere it is an ordinary name
+// (tests/conformance/types/unbuilt_words_as_names, _2).
+pub syntax {
+    priority $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `priority` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    jitter $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `jitter` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 // The block forms below are not built yet (docs/keyword_roadmap.md phases K5

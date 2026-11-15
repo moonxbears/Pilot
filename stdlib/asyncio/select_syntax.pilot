@@ -11,19 +11,25 @@ comptime {
     // `async fn` is not built yet (docs/keyword_roadmap.md K7): every use
     // stops at the seam `keyword.unbuilt` instead of being ignored.
     register_modifier(nameof(async), "keyword_unbuilt");
-    // Not built yet (docs/keyword_roadmap.md K7): where a declaration or
-    // statement starts (receptor 40, place 1) each stops at the seam
-    // `keyword.unbuilt`; elsewhere each is an ordinary name. `bounded` waits
-    // for decision D9 and `actor` for D6.
-    bind_receptor(nameof(actor),     40, 1);
-    bind_receptor(nameof(timeout),   40, 1);
-    bind_receptor(nameof(bounded),   40, 1);
-    // `.pchor` choreography words written in a `.pilot` file (K7).
-    bind_receptor(nameof(blueprint), 40, 1);
-    bind_receptor(nameof(cue),       40, 1);
-    bind_receptor(nameof(role),      40, 1);
-    bind_receptor(nameof(route),     40, 1);
     bind_receptor(nameof(select),  33, 7);
+}
+
+// `actor` (waits for decision D6), `timeout`, `bounded` (D9) and the `.pchor`
+// choreography words written in a `.pilot` file (`blueprint`, `cue`, `role`,
+// `route`) are not built yet (docs/keyword_roadmap.md K7).
+// Each rule reads the construct past (`Rest`: up to a `;`, or through the
+// block it opens) and stops the build at the seam `keyword.unbuilt`
+// (PROP-009 section 13). The word starts the construct only when a name, a
+// literal or `{` follows it; elsewhere it is an ordinary name
+// (tests/conformance/types/unbuilt_words_as_names, _2).
+pub syntax {
+    actor $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `actor` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    timeout $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `timeout` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    bounded $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `bounded` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    blueprint $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `blueprint` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    cue $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `cue` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    role $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `role` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    route $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `route` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 // Channel send `ch <- v` and receive `<-ch`: not built yet (K7).

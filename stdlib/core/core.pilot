@@ -277,10 +277,6 @@ comptime {
     bind_receptor(nameof(none),  2, 0);
     bind_receptor(nameof(else),  3, 0);
     bind_receptor(Cfg.Tokens.kw_syntax, 4, 0);
-    // `macro` is not built yet (docs/keyword_roadmap.md K4; `syntax` rules
-    // are the macros that work): where a declaration starts it stops at the
-    // seam `keyword.unbuilt` (receptor 40, place 1).
-    bind_receptor(nameof(macro), 40, 1);
     // `stringify($p)` in a `syntax` rule's template: the source text of the
     // argument bound to `p` (crates/pilot-parser/src/rule_arms.rs).
     bind_receptor(nameof(stringify), 36, 4);

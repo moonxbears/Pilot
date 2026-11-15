@@ -30,7 +30,7 @@ mod param_mods;
 mod rule_arms;
 mod loud;
 mod template;
-pub use modules::{parse_header, parse_unit, ModuleDecl};
+pub use modules::parse_unit;
 use modules::EXCLUDE_RECEPTOR;
 pub use pilot_impls::{EnumeratorProtocol, GeneratorProtocol, NativeKind, OperatorFn, TryProtocol, UnitLiteralHook};
 use pilot_impls::*;
