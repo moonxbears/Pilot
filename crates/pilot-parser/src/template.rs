@@ -14,6 +14,8 @@ pub enum TemplateNode { Splice(String), TypeNamed(String, Vec<TemplateNode>), Ty
     Tuple(Vec<TemplateNode>), List(Vec<TemplateNode>), Ident(String), Int(i64), Float(f64), Bool(bool), Str(String, u16), NoneLit,
     /// `target = value` (`flags` as the parser gives them) and `defer body`.
     Assign(u16, Box<TemplateNode>, Box<TemplateNode>), Defer(u16, Box<TemplateNode>),
+    /// `for name in iter body` (no `then`) and `yield value`.
+    For(String, Box<TemplateNode>, Box<TemplateNode>), Yield(Box<TemplateNode>),
     /// A node a template cannot hold yet; `add_rule` reports it.
     Unsupported(&'static str), }
 impl TemplateNode {
@@ -27,7 +29,7 @@ impl TemplateNode {
             NodeKind::TypeTuple => Self::TypeTuple(arena.children_slice(n.lhs, n.rhs).iter().map(|&c| Self::from_arena(arena, NodeId(c))).collect()),
             NodeKind::BlockExpr | NodeKind::Program => {
                 let v: Vec<Self> = arena.children_slice(n.lhs, n.rhs).iter().map(|&c| Self::from_arena(arena, NodeId(c))).collect();
-                if v.len() == 1 && matches!(&v[0], Self::Loop(_) | Self::If(..) | Self::Splice(_) | Self::Int(_) | Self::Block(_)) {
+                if v.len() == 1 && matches!(&v[0], Self::Loop(_) | Self::If(..) | Self::Splice(_) | Self::Int(_) | Self::Block(_) | Self::Unary(..) | Self::For(..)) {
                     v.into_iter().next().unwrap()
                 } else { Self::Block(v) } }
             NodeKind::ExprStmt | NodeKind::ComptimeExpr | NodeKind::QuoteExpr => Self::from_arena(arena, NodeId(n.lhs)), NodeKind::IfExpr => {
@@ -54,6 +56,12 @@ impl TemplateNode {
             NodeKind::StrLit => Self::Str(arena.interner.resolve(SymbolId(n.lhs)).to_string(), n.flags),
             NodeKind::AssignStmt => Self::Assign(n.flags, Box::new(Self::from_arena(arena, NodeId(n.lhs))), Box::new(Self::from_arena(arena, NodeId(n.rhs)))),
             NodeKind::DeferStmt => Self::Defer(n.flags, Box::new(Self::from_arena(arena, NodeId(n.lhs)))),
+            NodeKind::ForExpr => match arena.for_clauses.get((n.flags as usize).wrapping_sub(1)) {
+                Some(&(it, then)) if then.is_none() => Self::For(arena.interner.resolve(SymbolId(n.lhs)).to_string(),
+                    Box::new(Self::from_arena(arena, it)), Box::new(Self::from_arena(arena, NodeId(n.rhs)))),
+                _ => Self::Unsupported("ForExpr with `then`"),
+            },
+            NodeKind::YieldStmt => Self::Yield(Box::new(Self::from_arena(arena, NodeId(n.lhs)))),
             NodeKind::NoneLit => Self::NoneLit, k => Self::Unsupported(k.name()), } }
     pub fn instantiate(&self, arena: &mut AstArena, bindings: &[(String, NodeId)], span: ByteSpan) -> NodeId { match self {
             Self::Splice(nm) => { if let Some(&(_, id)) = bindings.iter().find(|(k, _)| k == nm) { clone_ast(arena, id) }
@@ -73,7 +81,13 @@ impl TemplateNode {
                 }
                 arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &ch)
             }
-            Self::If(c, t, e) => { let (cid, tid) = (c.instantiate(arena, bindings, span), t.instantiate(arena, bindings, span));
+            Self::If(c, t, e) => { let cid = c.instantiate(arena, bindings, span);
+                // A condition that expands to `true` or `false` is decided here.
+                if cid.is_some() && arena.node(cid).node_kind() == NodeKind::BoolLit {
+                    return match (arena.node(cid).lhs != 0, e) { (true, _) => t.instantiate(arena, bindings, span),
+                        (false, Some(el)) => el.instantiate(arena, bindings, span), _ => arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &[]) };
+                }
+                let tid = t.instantiate(arena, bindings, span);
                 if let Some(el) = e { let eid = el.instantiate(arena, bindings, span);
                     let (st, _) = arena.alloc_child_slice(&[tid, eid]); arena.alloc_node(NodeKind::IfExpr, 2, span, cid.0, st)
                 } else { arena.alloc_node(NodeKind::IfExpr, 0, span, cid.0, tid.0) } }
@@ -86,13 +100,21 @@ impl TemplateNode {
                 let (tr, bid) = (arena.alloc_node(NodeKind::BoolLit, 0, span, 1, 0), b.instantiate(arena, bindings, span));
                 arena.alloc_node(NodeKind::WhileStmt, 0, span, tr.0, bid.0) }
             Self::Let(nm, m, init) => {
-                let (sym, r) = (arena.interner.intern(nm), init.as_ref().map_or(NodeId::NONE, |v| v.instantiate(arena, bindings, span)));
+                let sym = bound_name(arena, nm, bindings);
+                let r = init.as_ref().map_or(NodeId::NONE, |v| v.instantiate(arena, bindings, span));
                 arena.alloc_node(if *m { NodeKind::VarStmt } else { NodeKind::LetStmt }, 0, span, sym.0, r.0) }
             Self::Return(v) => { let r = v.as_ref().map_or(NodeId::NONE, |x| x.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::ReturnStmt, 0, span, r.0, 0) }
             Self::Break(v) => { let r = v.as_ref().map_or(NodeId::NONE, |x| x.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::BreakStmt, 0, span, r.0, 0) }
             Self::Continue(v) => { let r = v.as_ref().map_or(NodeId::NONE, |x| x.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::ContinueStmt, 0, span, r.0, 0) }
             Self::Unary(f, x) => { let v = x.instantiate(arena, bindings, span); arena.alloc_node(NodeKind::UnaryExpr, *f, span, v.0, 0) }
-            Self::Binary(f, l, r) => { let (lid, rid) = (l.instantiate(arena, bindings, span), r.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::BinaryExpr, *f, span, lid.0, rid.0) }
+            Self::Binary(f, l, r) => {
+                // A left operand that uses a repeated hole is repeated: `l1 op (l2 op (.. r))`.
+                if let Some(runs) = crate::rule_arms::repetitions(l, bindings, arena) {
+                    let mut acc = r.instantiate(arena, bindings, span);
+                    for b in runs.iter().rev() { let li = l.instantiate(arena, b, span); acc = arena.alloc_node(NodeKind::BinaryExpr, *f, span, li.0, acc.0); }
+                    return acc;
+                }
+                let (lid, rid) = (l.instantiate(arena, bindings, span), r.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::BinaryExpr, *f, span, lid.0, rid.0) }
             Self::Call(f, v) => { let ch: Vec<NodeId> = v.iter().map(|x| x.instantiate(arena, bindings, span)).collect(); arena.alloc_list_node(NodeKind::CallExpr, *f, span, &ch) }
             Self::Member(t, fld) => { let (tid, fsym) = (t.instantiate(arena, bindings, span), arena.interner.intern(fld)); arena.alloc_node(NodeKind::MemberExpr, 0, span, tid.0, fsym.0) }
             Self::Index(t, i) => { let (tid, iid) = (t.instantiate(arena, bindings, span), i.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::IndexExpr, 0, span, tid.0, iid.0) }
@@ -103,7 +125,17 @@ impl TemplateNode {
             Self::Str(s, f) => { let sym = arena.interner.intern(s); arena.alloc_node(NodeKind::StrLit, *f, span, sym.0, 0) }
             Self::Assign(f, t, v) => { let (tid, vid) = (t.instantiate(arena, bindings, span), v.instantiate(arena, bindings, span)); arena.alloc_node(NodeKind::AssignStmt, *f, span, tid.0, vid.0) }
             Self::Defer(f, b) => { let bid = b.instantiate(arena, bindings, span); arena.alloc_node(NodeKind::DeferStmt, *f, span, bid.0, 0) }
+            Self::For(nm, it, b) => { let (sym, iid) = (bound_name(arena, nm, bindings), it.instantiate(arena, bindings, span));
+                let mut bid = b.instantiate(arena, bindings, span);
+                if bid.is_none() || arena.node(bid).node_kind() != NodeKind::BlockExpr { let item = as_block_item(arena, bid, span); bid = arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &[item]); }
+                arena.alloc_for(sym, iid, bid, NodeId::NONE, span) }
+            Self::Yield(v) => { let vid = v.instantiate(arena, bindings, span); arena.alloc_node(NodeKind::YieldStmt, 0, span, vid.0, 0) }
             Self::NoneLit | Self::Unsupported(_) => arena.alloc_node(NodeKind::NoneLit, 0, span, 0, 0), } } }
+/// The name `nm` declares (`let`, `for`); `$name` is the name bound to hole `name`.
+fn bound_name(arena: &mut AstArena, nm: &str, bindings: &[(String, NodeId)]) -> SymbolId {
+    let bound = nm.strip_prefix('$').and_then(|h| bindings.iter().find(|(k, _)| k == h)).filter(|(_, id)| id.is_some()).map(|&(_, id)| *arena.node(id));
+    match bound { Some(n) if n.node_kind() == NodeKind::IdentExpr => SymbolId(n.lhs), _ => arena.interner.intern(nm) }
+}
 /// A block item made from a template: an expression stands as an
 /// expression statement, as the parser makes it, so a block whose last item
 /// is an expression has that expression's value (`quote { $x + $x }`).

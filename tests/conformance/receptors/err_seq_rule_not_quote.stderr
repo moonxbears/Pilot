@@ -1,0 +1,1 @@
+error[SYN010]: the rule `twice` with a sequence head expands to a `quote { .. }`

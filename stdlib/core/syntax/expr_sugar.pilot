@@ -18,9 +18,6 @@ comptime {
     bind_receptor(nameof(some),   31, 2);
     bind_receptor(nameof(nameof), 33, 25);
 
-    bind_receptor(nameof(splat), 35, 1);
-    bind_receptor(nameof(pairs), 35, 2);
-    bind_receptor(nameof(flat),  35, 3);
 }
 
 // -------------------------------------------------------------------------

@@ -22,6 +22,7 @@ use selfhost.check.program.*;
 use selfhost.check.resolve.*;
 use selfhost.check.infer.*;
 use selfhost.check.methods.*;
+use selfhost.check.asm.*;
 use selfhost.ir.model.*;
 use selfhost.ir.layouts.*;
 use selfhost.ir.lower_members.*;
@@ -46,6 +47,7 @@ use selfhost.ir.lower_tail.*;
 use selfhost.ir.lower_view.*;
 use selfhost.ir.lower_quote.*;
 use selfhost.ir.pass_inline.*;
+use selfhost.ir.lower_asm.*;
 use std.text;
 
 /// The state of one lowering run.
@@ -995,6 +997,7 @@ pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
     }
     var i = 1;
     let callee = ch[0];
+    if is_asm_call(s, n) { return lower_asm(lw, n); }
     if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 && ch.len() == 2 {
         let query = bound(lw, type_query_hook(), [node_name(s, callee)]);
         if query != "" { return lower_type_query(lw, n, query, ch[1]); }

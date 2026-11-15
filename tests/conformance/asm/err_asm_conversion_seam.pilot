@@ -1,0 +1,7 @@
+// A conversion (`SExt`) has no single instruction on any engine yet: the
+// program stops at the seam `asm.machine_op` before printing.
+use Pilot.Core.Asm.MachineOps.*;
+
+fn main() {
+    print(asm(MachineOp::SExt, 5, i64));
+}

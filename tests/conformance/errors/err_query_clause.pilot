@@ -1,7 +1,7 @@
-// A query clause other than `where` between `from` and `select` is not
-// silently skipped: it is rejected with SYN001. (`skip` is no keyword;
-// the registered clause words, such as `order`, stop at a seam instead:
-// err_order_unbuilt.)
+// A query clause other than `where` and `order` between `from` and `select`
+// is not silently skipped: the `from` rule (stdlib/db/sql_syntax.pilot)
+// rejects it with SYN010. (`skip` is no keyword; the registered unbuilt
+// clause words, such as `values`, stop at a seam instead: err_values_unbuilt.)
 fn main() {
     let xs: List<i64> = [2, 1];
     print(from x in xs skip x select x);

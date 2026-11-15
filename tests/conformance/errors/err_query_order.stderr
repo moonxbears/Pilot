@@ -1,1 +1,1 @@
-`ascending` must follow `order by <key>`
+error[SYN010]: `from` expects `select` here, found `ascending`

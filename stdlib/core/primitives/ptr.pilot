@@ -16,8 +16,8 @@ pub partial struct ptr<T: IAnyValue> : IIndexGet<usize, T>, IIndexSet<usize, T>,
         op []  (idx: usize)    -> T      => __ssa_load(__ssa_gep(self, idx));
         op +   (offset: usize) -> ptr<T> => __ssa_gep(self, offset);
         op -   (offset: usize) -> ptr<T> => __ssa_gep(self, 0 - offset);
-        op ==  (rhs: ptr<T>)   -> bool   => __ssa(Cfg.Ssa.eq, self, rhs);
-        fn is_null()           -> bool   => (__ssa_cast(Cfg.Ssa.bitcast, self, usize)) == 0;
+        op ==  (rhs: ptr<T>)   -> bool   => __ssa(MachineOp::Eq, self, rhs);
+        fn is_null()           -> bool   => (__ssa_cast(MachineOp::Bitcast, self, usize)) == 0;
 
     pub var:
         op []= (idx: usize, v: T)        => __ssa_store(__ssa_gep(self, idx), v);

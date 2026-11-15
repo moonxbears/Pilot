@@ -1,0 +1,1 @@
+error[SYN010]: `Word` is not a hole kind (a variant of `HoleKind`)

@@ -1,0 +1,26 @@
+// A `syntax` rule with a sequence head: words and typed holes, read by the
+// same parser that reads every other rule, expanded through `quote`.
+//   `twice 3 + 4` prints 7 twice.
+//   `bind sum = 2 * 5 inside { .. }` binds `sum` to 10 inside the block and the
+//   block prints sum + 1 = 11; the optional `else` part is absent, so only
+//   the block runs. `bind k = 40 inside { .. } else { .. }` prints 40 + 2 = 42,
+//   then the `else` block prints `tail`.
+// A hole of kind `Expr` reads a whole expression, so the word after it must
+// not be an operator (`in` would be read as membership).
+pub syntax {
+    twice $e:Expr => quote { { print($e); print($e); } };
+    bind $name:Ident = $v:Expr inside $body:Block $( else $tail:Block )? =>
+        quote { { let $name = $v; $body $tail } };
+}
+
+fn main() {
+    twice 3 + 4;
+    bind sum = 2 * 5 inside {
+        print(sum + 1);
+    }
+    bind k = 40 inside {
+        print(k + 2);
+    } else {
+        print("tail");
+    }
+}

@@ -1,0 +1,9 @@
+// TYPE001: each side of `&&` and `||` is a condition, so it is a `bool`;
+// an integer is rejected at build time, not at run time.
+fn main() {
+    let a = 1;
+    // `a` starts at line 6, column 8.
+    if a && true {
+        print(1);
+    }
+}

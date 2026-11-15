@@ -14,15 +14,15 @@ use Pilot.Core.Keywords::*;
 [StandIn("prim.wide_scalar_64", "a float of this type's own format", "held as an f64: results are not rounded to the type's precision or range", "F6")]
 pub partial struct f128 : INumber<f128>, INegOperator<f128> {
     pub pure:
-        op +  (rhs: f128) -> f128 => __ssa(Cfg.Ssa.fadd, self, rhs);
-        op -  (rhs: f128) -> f128 => __ssa(Cfg.Ssa.fsub, self, rhs);
-        op *  (rhs: f128) -> f128 => __ssa(Cfg.Ssa.fmul, self, rhs);
-        op /  (rhs: f128) -> f128 => __ssa(Cfg.Ssa.fdiv, self, rhs);
-        op -  ()          -> f128 => __ssa_unary(Cfg.Ssa.fneg, self);
-        op == (rhs: f128) -> bool => __ssa(Cfg.Ssa.feq,  self, rhs);
-        op != (rhs: f128) -> bool => !(__ssa(Cfg.Ssa.feq, self, rhs));
-        op <  (rhs: f128) -> bool => __ssa(Cfg.Ssa.flt,  self, rhs);
-        op <= (rhs: f128) -> bool => __ssa(Cfg.Ssa.fle,  self, rhs);
-        op >  (rhs: f128) -> bool => !(__ssa(Cfg.Ssa.fle, self, rhs));
-        op >= (rhs: f128) -> bool => !(__ssa(Cfg.Ssa.flt, self, rhs));
+        op +  (rhs: f128) -> f128 => __ssa(MachineOp::FAdd, self, rhs);
+        op -  (rhs: f128) -> f128 => __ssa(MachineOp::FSub, self, rhs);
+        op *  (rhs: f128) -> f128 => __ssa(MachineOp::FMul, self, rhs);
+        op /  (rhs: f128) -> f128 => __ssa(MachineOp::FDiv, self, rhs);
+        op -  ()          -> f128 => __ssa_unary(MachineOp::FNeg, self);
+        op == (rhs: f128) -> bool => __ssa(MachineOp::FEq,  self, rhs);
+        op != (rhs: f128) -> bool => !(__ssa(MachineOp::FEq, self, rhs));
+        op <  (rhs: f128) -> bool => __ssa(MachineOp::FLt,  self, rhs);
+        op <= (rhs: f128) -> bool => __ssa(MachineOp::FLe,  self, rhs);
+        op >  (rhs: f128) -> bool => !(__ssa(MachineOp::FLe, self, rhs));
+        op >= (rhs: f128) -> bool => !(__ssa(MachineOp::FLt, self, rhs));
 }

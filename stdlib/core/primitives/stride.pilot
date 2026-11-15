@@ -19,10 +19,10 @@ pub partial struct stride<T: IAnyValue> : IView<T>, IEnumerable<T, StrideEnumera
 
     pub pure:
         op [] (idx: usize) -> T {
-            let base_addr = __ssa_cast(Cfg.Ssa.bitcast, .data, usize);
+            let base_addr = __ssa_cast(MachineOp::Bitcast, .data, usize);
             let step_off  = (idx as isize) * .byte_step;
             let elem_addr = (base_addr as isize + step_off) as usize;
-            let elem_ptr  = __ssa_cast(Cfg.Ssa.bitcast, elem_addr, ptr<T>);
+            let elem_ptr  = __ssa_cast(MachineOp::Bitcast, elem_addr, ptr<T>);
             return __ssa_load(elem_ptr);
         }
 
@@ -48,9 +48,9 @@ pub partial struct stride<T: IAnyValue> : IView<T>, IEnumerable<T, StrideEnumera
                     compile_error("OffsetLens '~>' requires a 0b00 IValue element struct");
                 }
             }
-            let base_addr = (__ssa_cast(Cfg.Ssa.bitcast, .data, usize)) + offsetof(T, field_sym);
+            let base_addr = (__ssa_cast(MachineOp::Bitcast, .data, usize)) + offsetof(T, field_sym);
             return stride<TField> {
-                data:      __ssa_cast(Cfg.Ssa.bitcast, base_addr, ptr<TField>),
+                data:      __ssa_cast(MachineOp::Bitcast, base_addr, ptr<TField>),
                 len:       .len,
                 byte_step: .byte_step,
             };
@@ -74,7 +74,7 @@ pub partial struct stride<T: IAnyValue> : IView<T>, IEnumerable<T, StrideEnumera
                 }
             }
             return stride<TDst> {
-                data:      __ssa_cast(Cfg.Ssa.bitcast, .data, ptr<TDst>),
+                data:      __ssa_cast(MachineOp::Bitcast, .data, ptr<TDst>),
                 len:       .len,
                 byte_step: .byte_step,
             };

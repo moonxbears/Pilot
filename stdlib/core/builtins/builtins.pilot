@@ -27,32 +27,32 @@ use Pilot.Core.Syntax.UnitDecl.*;
 // =========================================================================
 let SignedIntSsaFacet<TSelf: IValue> = {
     pub pure:
-        op +   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.add,      self, rhs);
-        op -   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sub,      self, rhs);
-        op *   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.mul,      self, rhs);
-        op /   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sdiv,     self, rhs);
-        op %   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.srem,     self, rhs);
-        op %%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.srem_euc, self, rhs);
-        op +|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sadd_sat, self, rhs);
-        op -|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.ssub_sat, self, rhs);
-        op *|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.smul_sat, self, rhs);
-        op +%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.add_wrap, self, rhs);
-        op -%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sub_wrap, self, rhs);
-        op *%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.mul_wrap, self, rhs);
-        op -   ()           -> TSelf => __ssa_unary(Cfg.Ssa.neg, self);
-        op &   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.and_b,    self, rhs);
-        op |   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.or_b,     self, rhs);
-        op ^   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.xor_b,    self, rhs);
-        op ~   ()           -> TSelf => __ssa_unary(Cfg.Ssa.bitnot, self);
-        op <<  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.shl,      self, bits);
-        op >>  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.ashr,     self, bits);
-        op ==  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.eq,       self, rhs);
-        op !=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ne,       self, rhs);
-        op <   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.slt,      self, rhs);
-        op <=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.sle,      self, rhs);
-        op >   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.sgt,      self, rhs);
-        op >=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.sge,      self, rhs);
-        op <=> (rhs: TSelf) -> order => __ssa(Cfg.Ssa.cmp3_s,   self, rhs);
+        op +   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Add,      self, rhs);
+        op -   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Sub,      self, rhs);
+        op *   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Mul,      self, rhs);
+        op /   (rhs: TSelf) -> TSelf => __ssa(MachineOp::SDiv,     self, rhs);
+        op %   (rhs: TSelf) -> TSelf => __ssa(MachineOp::SRem,     self, rhs);
+        op %%  (rhs: TSelf) -> TSelf => __ssa(MachineOp::SRemEuc, self, rhs);
+        op +|  (rhs: TSelf) -> TSelf => __ssa(MachineOp::SAddSat, self, rhs);
+        op -|  (rhs: TSelf) -> TSelf => __ssa(MachineOp::SSubSat, self, rhs);
+        op *|  (rhs: TSelf) -> TSelf => __ssa(MachineOp::SMulSat, self, rhs);
+        op +%  (rhs: TSelf) -> TSelf => __ssa(MachineOp::AddWrap, self, rhs);
+        op -%  (rhs: TSelf) -> TSelf => __ssa(MachineOp::SubWrap, self, rhs);
+        op *%  (rhs: TSelf) -> TSelf => __ssa(MachineOp::MulWrap, self, rhs);
+        op -   ()           -> TSelf => __ssa_unary(MachineOp::Neg, self);
+        op &   (rhs: TSelf) -> TSelf => __ssa(MachineOp::And,    self, rhs);
+        op |   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Or,     self, rhs);
+        op ^   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Xor,    self, rhs);
+        op ~   ()           -> TSelf => __ssa_unary(MachineOp::BitNot, self);
+        op <<  (bits: u32)  -> TSelf => __ssa(MachineOp::Shl,      self, bits);
+        op >>  (bits: u32)  -> TSelf => __ssa(MachineOp::AShr,     self, bits);
+        op ==  (rhs: TSelf) -> bool  => __ssa(MachineOp::Eq,       self, rhs);
+        op !=  (rhs: TSelf) -> bool  => __ssa(MachineOp::Ne,       self, rhs);
+        op <   (rhs: TSelf) -> bool  => __ssa(MachineOp::SLt,      self, rhs);
+        op <=  (rhs: TSelf) -> bool  => __ssa(MachineOp::SLe,      self, rhs);
+        op >   (rhs: TSelf) -> bool  => __ssa(MachineOp::SGt,      self, rhs);
+        op >=  (rhs: TSelf) -> bool  => __ssa(MachineOp::SGe,      self, rhs);
+        op <=> (rhs: TSelf) -> order => __ssa(MachineOp::Cmp3S,   self, rhs);
         op ..< (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
         op ..  (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
         op ..= (rhs: TSelf) -> span<TSelf>  => span<TSelf>  { start: self, end: rhs };
@@ -65,31 +65,31 @@ let SignedIntSsaFacet<TSelf: IValue> = {
 
 let UnsignedIntSsaFacet<TSelf: IValue> = {
     pub pure:
-        op +   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.add,      self, rhs);
-        op -   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sub,      self, rhs);
-        op *   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.mul,      self, rhs);
-        op /   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.udiv,     self, rhs);
-        op %   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.urem,     self, rhs);
-        op %%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.urem_euc, self, rhs);
-        op +|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.uadd_sat, self, rhs);
-        op -|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.usub_sat, self, rhs);
-        op *|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.umul_sat, self, rhs);
-        op +%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.add_wrap, self, rhs);
-        op -%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sub_wrap, self, rhs);
-        op *%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.mul_wrap, self, rhs);
-        op &   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.and_b,    self, rhs);
-        op |   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.or_b,     self, rhs);
-        op ^   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.xor_b,    self, rhs);
-        op ~   ()           -> TSelf => __ssa_unary(Cfg.Ssa.bitnot, self);
-        op <<  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.shl,      self, bits);
-        op >>  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.lshr,     self, bits);
-        op ==  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.eq,       self, rhs);
-        op !=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ne,       self, rhs);
-        op <   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ult,      self, rhs);
-        op <=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ule,      self, rhs);
-        op >   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ugt,      self, rhs);
-        op >=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.uge,      self, rhs);
-        op <=> (rhs: TSelf) -> order => __ssa(Cfg.Ssa.cmp3_u,   self, rhs);
+        op +   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Add,      self, rhs);
+        op -   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Sub,      self, rhs);
+        op *   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Mul,      self, rhs);
+        op /   (rhs: TSelf) -> TSelf => __ssa(MachineOp::UDiv,     self, rhs);
+        op %   (rhs: TSelf) -> TSelf => __ssa(MachineOp::URem,     self, rhs);
+        op %%  (rhs: TSelf) -> TSelf => __ssa(MachineOp::URemEuc, self, rhs);
+        op +|  (rhs: TSelf) -> TSelf => __ssa(MachineOp::UAddSat, self, rhs);
+        op -|  (rhs: TSelf) -> TSelf => __ssa(MachineOp::USubSat, self, rhs);
+        op *|  (rhs: TSelf) -> TSelf => __ssa(MachineOp::UMulSat, self, rhs);
+        op +%  (rhs: TSelf) -> TSelf => __ssa(MachineOp::AddWrap, self, rhs);
+        op -%  (rhs: TSelf) -> TSelf => __ssa(MachineOp::SubWrap, self, rhs);
+        op *%  (rhs: TSelf) -> TSelf => __ssa(MachineOp::MulWrap, self, rhs);
+        op &   (rhs: TSelf) -> TSelf => __ssa(MachineOp::And,    self, rhs);
+        op |   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Or,     self, rhs);
+        op ^   (rhs: TSelf) -> TSelf => __ssa(MachineOp::Xor,    self, rhs);
+        op ~   ()           -> TSelf => __ssa_unary(MachineOp::BitNot, self);
+        op <<  (bits: u32)  -> TSelf => __ssa(MachineOp::Shl,      self, bits);
+        op >>  (bits: u32)  -> TSelf => __ssa(MachineOp::LShr,     self, bits);
+        op ==  (rhs: TSelf) -> bool  => __ssa(MachineOp::Eq,       self, rhs);
+        op !=  (rhs: TSelf) -> bool  => __ssa(MachineOp::Ne,       self, rhs);
+        op <   (rhs: TSelf) -> bool  => __ssa(MachineOp::ULt,      self, rhs);
+        op <=  (rhs: TSelf) -> bool  => __ssa(MachineOp::ULe,      self, rhs);
+        op >   (rhs: TSelf) -> bool  => __ssa(MachineOp::UGt,      self, rhs);
+        op >=  (rhs: TSelf) -> bool  => __ssa(MachineOp::UGe,      self, rhs);
+        op <=> (rhs: TSelf) -> order => __ssa(MachineOp::Cmp3U,   self, rhs);
         op ..< (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
         op ..  (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
         op ..= (rhs: TSelf) -> span<TSelf>  => span<TSelf>  { start: self, end: rhs };
@@ -98,17 +98,17 @@ let UnsignedIntSsaFacet<TSelf: IValue> = {
 
 let FloatSsaFacet<TSelf: IValue> = {
     pub pure:
-        op +  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fadd, self, rhs);
-        op -  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fsub, self, rhs);
-        op *  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fmul, self, rhs);
-        op /  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fdiv, self, rhs);
-        op -  ()           -> TSelf => __ssa_unary(Cfg.Ssa.fneg, self);
-        op == (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.feq,  self, rhs);
-        op != (rhs: TSelf) -> bool  => !(__ssa(Cfg.Ssa.feq, self, rhs));
-        op <  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.flt,  self, rhs);
-        op <= (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.fle,  self, rhs);
-        op >  (rhs: TSelf) -> bool  => !(__ssa(Cfg.Ssa.fle, self, rhs));
-        op >= (rhs: TSelf) -> bool  => !(__ssa(Cfg.Ssa.flt, self, rhs));
+        op +  (rhs: TSelf) -> TSelf => __ssa(MachineOp::FAdd, self, rhs);
+        op -  (rhs: TSelf) -> TSelf => __ssa(MachineOp::FSub, self, rhs);
+        op *  (rhs: TSelf) -> TSelf => __ssa(MachineOp::FMul, self, rhs);
+        op /  (rhs: TSelf) -> TSelf => __ssa(MachineOp::FDiv, self, rhs);
+        op -  ()           -> TSelf => __ssa_unary(MachineOp::FNeg, self);
+        op == (rhs: TSelf) -> bool  => __ssa(MachineOp::FEq,  self, rhs);
+        op != (rhs: TSelf) -> bool  => !(__ssa(MachineOp::FEq, self, rhs));
+        op <  (rhs: TSelf) -> bool  => __ssa(MachineOp::FLt,  self, rhs);
+        op <= (rhs: TSelf) -> bool  => __ssa(MachineOp::FLe,  self, rhs);
+        op >  (rhs: TSelf) -> bool  => !(__ssa(MachineOp::FLe, self, rhs));
+        op >= (rhs: TSelf) -> bool  => !(__ssa(MachineOp::FLt, self, rhs));
 };
 
 // =========================================================================
@@ -207,7 +207,7 @@ pub partial struct {
     [Lang(Cfg.Lang.char_t), Bits(Cfg.Reg.b32, Cfg.Reg.gpr_u)]
     char : IComparable<char>, IValue {
         pub pure:
-            fn code_point()     -> u32  => __ssa_cast(Cfg.Ssa.bitcast, self, u32);
+            fn code_point()     -> u32  => __ssa_cast(MachineOp::Bitcast, self, u32);
             op == (rhs: char)   -> bool => .code_point() == rhs.code_point();
             op != (rhs: char)   -> bool => .code_point() != rhs.code_point();
             op <  (rhs: char)   -> bool => .code_point() <  rhs.code_point();

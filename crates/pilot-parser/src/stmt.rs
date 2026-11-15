@@ -103,19 +103,26 @@ impl<'a> Parser<'a> {
             if self.pos == m { self.advance(); } }
         self.expect(TokenKind::RBrace); self.active_hdr = self.hdr_stack.pop().unwrap_or(None);
         self.arena.alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &items) }
+    /// Whether the `asm` at the cursor opens `asm(..)`.
+    fn asm_operation_follows(&self) -> bool {
+        let nx = self.next_non_nl(self.cur() + 1);
+        nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen
+    }
     pub(crate) fn parse_stmt(&mut self) -> NodeId { if self.at_unbuilt_decl() { return self.parse_unbuilt(); }
         let sp = self.span(); match self.peek() {
             TokenKind::KwReturn => { self.advance(); let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE } else { self.parse_expr() }; let _ = self.eat(TokenKind::Semicolon); self.arena.alloc_node(NodeKind::ReturnStmt, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), v.0, 0) }
             TokenKind::KwYield => { self.advance(); let v = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); self.arena.alloc_node(NodeKind::YieldStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0) }
             TokenKind::KwDefer => { self.advance(); let b = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() }; self.arena.alloc_node(NodeKind::DeferStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), b.0, 0) }
             TokenKind::KwLoop => { self.advance(); let (tr, b) = (self.arena.alloc_node(NodeKind::BoolLit, 0, sp, 1, 0), self.parse_block()); self.arena.alloc_node(NodeKind::WhileStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), tr.0, b.0) }
-            TokenKind::KwIf => self.parse_if(), TokenKind::KwAsm => { let word = self.text().to_string(); self.advance();
+            TokenKind::KwIf => self.parse_if(),
+            // `asm(op, ..)` is one machine operation, an expression (PROP-009).
+            TokenKind::KwAsm if !self.asm_operation_follows() => { let word = self.text().to_string(); self.advance();
                 // No per-target assembler exists yet: the block is read past and the build stops.
                 if self.at(TokenKind::LBrace) { let _ = self.inline_block_code(); }
                 self.report_unbuilt(ByteSpan::new(sp.start, self.prev_span().end), &word);
                 NodeId::NONE }
             TokenKind::RawDslBlock => { let raw = self.text(); self.advance(); let inner = raw.trim_start_matches('`').trim_end_matches('`'); let (lang, code) = inner.split_once('\n').unwrap_or(("dsl", inner)); self.arena.alloc_polyglot_block(lang.trim(), code.trim(), 0, sp) }
-            _ if self.is_word() && self.at_with_scope() => self.parse_with_scope(),
+            _ if self.is_word() && self.seq_rule_at().is_some() => self.expand_seq_rule(),
             _ if self.is_word() => { if let Some((rk, pl)) = self.receptor() { match rk { 9 => return self.parse_for(), 13 => { self.advance();
                             let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE }
                             else { let first = self.parse_expr(); if self.at(TokenKind::Comma) { let mut items = vec![first]; while self.eat(TokenKind::Comma) { items.push(self.parse_expr()); } self.arena.alloc_list_node(NodeKind::TupleExpr, 0, sp, &items) } else { first } };
@@ -227,7 +234,7 @@ impl<'a> Parser<'a> {
         Some(self.arena.alloc_node(NodeKind::UnaryExpr, pilot_ast::UNARY_OP_SOME, ByteSpan::new(sp.start, self.prev_span().end), c.0, 0)) }
     pub(crate) fn parse_for(&mut self) -> NodeId { let sp = self.span(); self.advance();
         let vsym = if matches!(self.peek(), TokenKind::LParen | TokenKind::LBracket) { self.for_pattern_loudly(); self.arena.interner.intern("_item") }
-        else { let s = self.intern_cur(); if self.eat(TokenKind::Comma) { self.advance(); } s };
+        else { let s = self.intern_binder(); if self.eat(TokenKind::Comma) { self.advance(); } s };
         if self.is_rec(10) { self.advance(); }
         self.no_struct_lit = true; let iter = self.parse_expr(); self.no_struct_lit = false;
         let body = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() };

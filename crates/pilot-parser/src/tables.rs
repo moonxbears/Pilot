@@ -47,6 +47,8 @@ pub(crate) struct GrammarEnums {
 
 pub(crate) const HOOK_GRAMMAR_ENTRY: &str = "grammar_entry";
 pub(crate) const HOOK_REGISTER_GRAMMAR: &str = "register_grammar";
+pub(crate) const HOOK_REGISTER_MACHINE_OPS: &str = "register_machine_ops";
+pub(crate) const HOOK_REGISTER_HOLE_KINDS: &str = "register_hole_kinds";
 
 /// Parse shapes by position in the shape enum (PROP-008 §4; closed in the
 /// seed, append-only under B+).
@@ -81,6 +83,15 @@ pub struct ParserTables { pub(crate) modifiers: HashMap<String, ModAct>, pub(cra
     pub(crate) grammar_enums: GrammarEnums,
     /// The variant names of every enum ingested, by enum name.
     pub(crate) adt_variants: HashMap<String, Vec<String>>,
+    /// The enum whose variants are the machine operations of `asm(..)`
+    /// (PROP-009 step 1b).
+    pub(crate) machine_ops: String,
+    /// The enum whose variants are the hole kinds of a `syntax` rule's
+    /// sequence head (PROP-009 step 1a).
+    pub(crate) hole_kinds: String,
+    /// `syntax` rules with a sequence head, by trigger word, in the order
+    /// written (`rule_arms::SeqRule`).
+    pub(crate) seq_rules: HashMap<String, Vec<crate::rule_arms::SeqRule>>,
     pub type_rules: Vec<TypeConstructRule>, pub syntax_macros: HashMap<String, SyntaxMacroRule>, pub(crate) const_maps: HashMap<String, CVal>,
     /// Attribute functions by name (see `attr_hooks`).
     pub(crate) attr_hooks: HashMap<String, attr_hooks::AttrHook>,
@@ -171,12 +182,6 @@ impl ParserTables {
                 }
             }
         }
-    }
-
-    /// The binding power one above the tightest infix operator whose native
-    /// code is `op`; `fallback` when none is declared.
-    pub(crate) fn bp_above(&self, op: BinaryOp, fallback: u8) -> u8 {
-        self.infix_ops.values().filter(|e| e.bin_op == op as u16).map(|e| e.bp.saturating_add(1)).max().unwrap_or(fallback)
     }
 
     /// The binding power of the infix operator whose native code is `op`;
@@ -307,6 +312,17 @@ impl ParserTables {
 
     /// Runs genesis hook `hook` with argument values `vals`, from a
     /// `comptime` call or from an attribute on a declaration.
+    /// The position of `variant` in the enum `register_machine_ops` named:
+    /// the machine operation an `asm(..)` names.
+    pub fn machine_op(&self, variant: &str) -> Option<usize> {
+        self.adt_variants.get(&self.machine_ops)?.iter().position(|v| v == variant)
+    }
+
+    /// The position of `variant` in the enum `register_hole_kinds` named.
+    pub(crate) fn hole_kind(&self, variant: &str) -> Option<u8> {
+        self.adt_variants.get(&self.hole_kinds)?.iter().position(|v| v == variant).map(|i| i as u8)
+    }
+
     pub(crate) fn apply_hook(&mut self, hook: &str, vals: &[Option<CVal>]) {
         let s_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Str(s) => Some(s.clone()), _ => None }).unwrap_or_default();
         let i_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Int(v) => Some(*v), _ => None });
@@ -379,6 +395,8 @@ impl ParserTables {
                 }
             }
             HOOK_REGISTER_GRAMMAR => self.register_grammar(&s_arg(0), &s_arg(1), &s_arg(2)),
+            HOOK_REGISTER_MACHINE_OPS => self.machine_ops = s_arg(0),
+            HOOK_REGISTER_HOLE_KINDS => self.hole_kinds = s_arg(0),
             HOOK_GRAMMAR_ENTRY => {
                 // An empty symbol is the declaration's own name: `[Infix(..)]`
                 // on `op +` declares `+`.
@@ -463,10 +481,14 @@ pub(crate) const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/core.pilot",
     "stdlib/core/syntax/type_construct.pilot",
     "stdlib/core/syntax/module_ext.pilot",
+    // The hole kinds of a `syntax` rule's sequence head (PROP-009 step 1a).
+    "stdlib/core/syntax/holes.pilot",
     "stdlib/core/syntax/visibility.pilot",
     "stdlib/core/syntax/lifecycle.pilot",
     "stdlib/core/syntax/properties.pilot",
     "stdlib/core/syntax/attribute.pilot",
+    // The machine operations `asm(..)` names (PROP-009 step 1b).
+    "stdlib/core/asm/machine_ops.pilot",
     // The operator grammar (PROP-008): the levels, the attributes, then every
     // operator's declaration. Files before these use operators too; the
     // bootstrap reads all sources again with the grammar they declare

@@ -23,3 +23,14 @@ pub syntax {
         }
     };
 }
+
+// `with open name { .. }` and `with open { .. }`: the block runs inside a
+// scope that `open()` starts and its value's destructor ends. The value (a
+// `0b11` guard such as `arena()`'s `ArenaScope`) lives exactly as long as
+// the block and is dropped, running its `~self()`, when the block is left.
+// The word keeps its `*Bundle` collision meaning (`with { flags as f }`),
+// where a `{` follows it at once (PROP-009 step 1a).
+pub syntax {
+    with $open:Ident $name:Ident $body:Block => quote { { let $name = $open(); $body } };
+    with $open:Ident $body:Block             => quote { { let scope_value = $open(); $body } };
+}

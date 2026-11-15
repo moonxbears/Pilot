@@ -183,4 +183,16 @@ pub comptime fn {
     // `word` (or empty), read by `shape` at `level` with `assoc`.
     grammar_entry(target, symbol, shape, level, assoc, word) =>
         __engine("grammar_entry", target, symbol, shape, level, assoc, word);
+
+    // 9. Machine Operations (PROP-009 step 1b; appended under B+)
+    // The enum whose variant order names the operations of `asm(op, ..)`;
+    // the seed reads positions only.
+    register_machine_ops(op_enum) =>
+        __engine("register_machine_ops", op_enum);
+
+    // 10. Sequence Rule Heads (PROP-009 step 1a; appended under B+)
+    // The enum whose variant order names the hole kinds of a `syntax`
+    // rule's sequence head; the seed reads positions only.
+    register_hole_kinds(kind_enum) =>
+        __engine("register_hole_kinds", kind_enum);
 }

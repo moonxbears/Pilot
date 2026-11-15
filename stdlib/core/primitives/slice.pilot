@@ -57,9 +57,9 @@ pub partial struct slice<T: IAnyValue> : IView<T>, IEnumerable<T, SliceEnumerato
                     compile_error("OffsetLens '~>' requires a 0b00 IValue element struct");
                 }
             }
-            let base_addr = (__ssa_cast(Cfg.Ssa.bitcast, .data, usize)) + offsetof(T, field_sym);
+            let base_addr = (__ssa_cast(MachineOp::Bitcast, .data, usize)) + offsetof(T, field_sym);
             return stride<TField> {
-                data:      __ssa_cast(Cfg.Ssa.bitcast, base_addr, ptr<TField>),
+                data:      __ssa_cast(MachineOp::Bitcast, base_addr, ptr<TField>),
                 len:       .len,
                 byte_step: sizeof(T) as isize,
             };
@@ -83,7 +83,7 @@ pub partial struct slice<T: IAnyValue> : IView<T>, IEnumerable<T, SliceEnumerato
                 }
             }
             return stride<TDst> {
-                data:      __ssa_cast(Cfg.Ssa.bitcast, .data, ptr<TDst>),
+                data:      __ssa_cast(MachineOp::Bitcast, .data, ptr<TDst>),
                 len:       .len,
                 byte_step: sizeof(T) as isize,
             };

@@ -1,0 +1,7 @@
+// ASM001: the first argument of `asm` must be a variant of `MachineOp`;
+// `Plus` is not one.
+use Pilot.Core.Asm.MachineOps.*;
+
+fn main() {
+    print(asm(Plus, 1, 2));
+}

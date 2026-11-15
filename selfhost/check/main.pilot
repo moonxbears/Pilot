@@ -38,6 +38,7 @@ use selfhost.check.noalloc.*;
 use selfhost.check.aliasing.*;
 use selfhost.check.layout_attrs.*;
 use selfhost.check.grammar_attrs.*;
+use selfhost.check.asm.*;
 use selfhost.check.stack.*;
 use selfhost.check.clearance.*;
 
@@ -103,6 +104,7 @@ pub fn check_all(inf: Infer, sink: DiagSink) {
     check_aliasing(inf, sink);
     check_layout_attrs(inf, sink);
     check_grammar_attrs(inf, sink);
+    check_asm_calls(inf.p, sink);
     check_stack(inf, sink);
     check_type_tests(inf, sink);
     check_view_casts(inf, sink);

@@ -1,4 +1,5 @@
-// SYN001: `ascending` and `descending` are only valid after `order by <key>`.
+// SYN010: `ascending` and `descending` are only valid after `order by <key>`;
+// anywhere else in a query the `from` rule expects `select`.
 fn main() {
     let xs: List<i64> = [3, 1, 2];
     let ys = from x in xs ascending select x;

@@ -1,0 +1,111 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_asm.pilot
+// `asm(op, operands..)` lowered to one PilIR instruction (PROP-009 step 1b).
+// ==============================================================================
+// PilIR instructions take their signedness from their operands' register
+// class, so a signed (`SDiv`), unsigned (`UDiv`) or float (`FAdd`) operation
+// lowers to the instruction only when its operands have that class; on
+// operands of another class, and for the operations PilIR has no single
+// instruction for (conversions, saturating and Euclidean forms, three-way
+// compares, memory access), it stops at the seam `asm.machine_op`, as the
+// seed does.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerAsm;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.asm.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+
+/// The register class an operation needs of its operands.
+enum AsmOperands : u8 { Signed, Unsigned, Float, Integer, Any }
+
+/// One operation PilIR lowers: its instruction (0: none, a compare), its
+/// compare predicate (-1: none) and the operands it needs.
+struct AsmLowering : IValue {
+    pub name:  str;
+    pub ir_op: u16;
+    pub pred:  i64;
+    pub needs: AsmOperands;
+}
+
+fn row(name: str, ir_op: u16, pred: i64, needs: AsmOperands) -> AsmLowering =>
+    AsmLowering { name: name, ir_op: ir_op, pred: pred, needs: needs };
+
+/// Compare predicates (selfhost/ir/model.pilot `CmpPred`): Eq 0, Ne 1, Lt 2,
+/// Le 3, Gt 4, Ge 5.
+fn asm_lowerings() -> List<AsmLowering> => [
+    row("Add", op_add(), -1, ::Integer), row("Sub", op_sub(), -1, ::Integer), row("Mul", op_mul(), -1, ::Integer),
+    row("AddWrap", op_add(), -1, ::Integer), row("SubWrap", op_sub(), -1, ::Integer), row("MulWrap", op_mul(), -1, ::Integer),
+    row("SDiv", op_div(), -1, ::Signed), row("UDiv", op_div(), -1, ::Unsigned),
+    row("SRem", op_rem(), -1, ::Signed), row("URem", op_rem(), -1, ::Unsigned),
+    row("FAdd", op_add(), -1, ::Float), row("FSub", op_sub(), -1, ::Float),
+    row("FMul", op_mul(), -1, ::Float), row("FDiv", op_div(), -1, ::Float),
+    row("And", op_bit_and(), -1, ::Any), row("Or", op_bit_or(), -1, ::Any), row("Xor", op_bit_xor(), -1, ::Any),
+    row("Shl", op_shl(), -1, ::Integer), row("LShr", op_shr(), -1, ::Unsigned), row("AShr", op_shr(), -1, ::Signed),
+    row("Eq", 0, 0, ::Any), row("Ne", 0, 1, ::Any),
+    row("ULt", 0, 2, ::Unsigned), row("ULe", 0, 3, ::Unsigned), row("UGt", 0, 4, ::Unsigned), row("UGe", 0, 5, ::Unsigned),
+    row("SLt", 0, 2, ::Signed), row("SLe", 0, 3, ::Signed), row("SGt", 0, 4, ::Signed), row("SGe", 0, 5, ::Signed),
+    row("FLt", 0, 2, ::Float), row("FLe", 0, 3, ::Float), row("FEq", 0, 0, ::Float),
+    row("Neg", op_sub(), -1, ::Integer), row("FNeg", op_sub(), -1, ::Float),
+    row("Not", 0, 0, ::Any), row("BitNot", op_bit_xor(), -1, ::Integer),
+];
+
+fn has_class(needs: AsmOperands, rc: u8) -> bool {
+    if needs == AsmOperands::Any { return true; }
+    if needs == AsmOperands::Float { return rc == reg_class_simd_float(); }
+    if needs == AsmOperands::Signed { return rc == reg_class_gpr_signed(); }
+    if needs == AsmOperands::Unsigned { return rc == reg_class_gpr_unsigned(); }
+    return rc == reg_class_gpr_signed() || rc == reg_class_gpr_unsigned();
+}
+
+/// The runtime stop where PilIR has no instruction for the operation.
+fn asm_seam(lw: Lowerer, name: str, why: str, n: i64) -> u32 {
+    emit_trap(lw, f"SEAM001: unconnected seam `asm.machine_op`: PilIR has no instruction for `{name}`{why}", n);
+    switch_to(lw, ir_add_block(lw.f));
+    return unit_value(lw, n);
+}
+
+/// `asm(op, operands..)` (ASM001/ASM002 have been checked).
+pub fn lower_asm(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let ch = children(s, n);
+    guard some o = asm_op_of(s, n) else { return unsupported(lw, n); };
+    var low = row("", 0, -1, ::Any);
+    for r in asm_lowerings() { if r.name == o.name { low = r; } }
+    if low.name == "" { return asm_seam(lw, o.name, "", n); }
+    var vals: List<u32> = [];
+    var i = 2;
+    while i < ch.len() {
+        vals.push(lower_expr(lw, ch[i]));
+        i = i + 1;
+    }
+    let x = vals[0];
+    let xp = lw.f.value_physics[x];
+    if !has_class(low.needs, xp.reg_class) {
+        return asm_seam(lw, o.name, f" on operands of register class `{reg_class_name(xp.reg_class)}`", n);
+    }
+    let phy = physics_of(lw, n);
+    if vals.len() == 1 {
+        if o.name == "Not" {
+            // `!x` is `x == false`.
+            let f_val = emit(lw, op_const_bits(), 0, xp, [pool_int(lw, 0)], n);
+            return emit(lw, op_cmp(), 0, phy, [x, f_val], n);
+        }
+        if o.name == "BitNot" {
+            let mask = emit(lw, op_const_bits(), 0, xp, [pool_int(lw, -1)], n);
+            return emit(lw, op_bit_xor(), 0, phy, [x, mask], n);
+        }
+        // A float negates as `-0.0 - x`, which flips the sign of zero too
+        // (IEEE 754-2019 section 6.3); an integer as `0 - x`.
+        let zero = if o.name == "FNeg" {
+            emit(lw, op_const_float(), 0, xp, [pool_float(lw, -9223372036854775807 - 1)], n)
+        } else {
+            emit(lw, op_const_bits(), 0, xp, [pool_int(lw, 0)], n)
+        };
+        return emit(lw, op_sub(), 0, phy, [zero, x], n);
+    }
+    if low.pred >= 0 { return emit(lw, op_cmp(), low.pred, phy, vals, n); }
+    return emit(lw, low.ir_op, 0, phy, vals, n);
+}

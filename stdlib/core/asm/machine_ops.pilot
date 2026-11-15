@@ -1,0 +1,34 @@
+// =========================================================================
+// FILE: stdlib/core/asm/machine_ops.pilot
+// THE MACHINE OPERATIONS OF `asm(op, operands..)` (PROP-009 step 1b)
+// =========================================================================
+// `asm(MachineOp::Add, a, b)` is one machine operation on its operands. The
+// primitive types define their operators with it, through the `__ssa` rules
+// in core.pilot. The seed reads only the position of each variant
+// (`register_machine_ops`): the order is append-only, and renaming a
+// variant changes nothing.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Asm.MachineOps;
+
+use Pilot.Core.Genesis.*;
+
+/// One machine operation. Signed (`S`), unsigned (`U`) and float (`F`)
+/// forms are separate operations, as in the hardware.
+pub enum MachineOp : u8 {
+    Add, Sub, Mul, SDiv, UDiv, SRem, URem,
+    FAdd, FSub, FMul, FDiv,
+    And, Or, Xor, Shl, LShr, AShr,
+    Eq, Ne, ULt, ULe, UGt, UGe, SLt, SLe, SGt, SGe,
+    FLt, FLe, FEq,
+    Neg, FNeg, Not, BitNot,
+    ZExt, SExt, Trunc, Bitcast, SIToFP, UIToFP, FPToSI, FPToUI,
+    SAddSat, UAddSat, SSubSat, USubSat, SMulSat, UMulSat,
+    AddWrap, SubWrap, MulWrap,
+    SRemEuc, URemEuc,
+    Cmp3S, Cmp3U,
+    Load, Store, ElemAddr,
+}
+
+comptime {
+    register_machine_ops(nameof(MachineOp));
+}

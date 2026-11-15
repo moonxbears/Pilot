@@ -215,7 +215,7 @@ fn is_native_name(p: Program, name: str) -> bool {
 }
 
 /// The innermost quote around node `n`, or -1.
-fn enclosing_quote(p: Program, n: i64) -> i64 {
+pub fn enclosing_quote(p: Program, n: i64) -> i64 {
     var cur = p.parents[n];
     while cur >= 0 {
         if kind(p.s, cur) == nk_quote() { return cur; }

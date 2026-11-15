@@ -22,12 +22,60 @@ comptime {
     bind_receptor(nameof(delete),     40, 1);
     bind_receptor(nameof(into),       40, 2);
     bind_receptor(nameof(values),     40, 2);
-    bind_receptor(nameof(order),      33, 8);
-    bind_receptor(nameof(ascending),  33, 9);
-    bind_receptor(nameof(descending), 33, 10);
-    bind_receptor(nameof(by),         33, 11);
-    bind_receptor(nameof(from),       33, 6);
-    bind_receptor(nameof(select),     33, 7);
+}
+
+// A query over a sequence (PROP-009; was crates/pilot-parser/src/query.rs):
+// `from x in xs where cond order by key [ascending|descending], .. select e`
+// is the list of `e` for each `x` of `xs`, in order, that every `where`
+// holds for. With `order`, the kept elements are sorted first by a stable
+// insertion sort on the keys, the first key that differs deciding; `order`,
+// `ascending` and `descending` stay ordinary names outside a query.
+// `if $order` and an empty `where` list are decided when the rule expands.
+pub syntax {
+    from $x:Ident in $src:Expr $( where $c:Expr )*
+        $( order $( by )? $( $k:Expr $( ascending )? $( descending )? ),* )?
+        select $e:Expr
+    => quote {
+        if $order {
+            var items = for $x in $src {
+                if $c && true { yield $x; }
+            };
+            // `loop` with a `break`, not `while`: known bug
+            // parser.rule_template_while.
+            var i = 1;
+            loop {
+                if i >= items.len() { break; }
+                var j = i;
+                loop {
+                    if j == 0 { break; }
+                    // One block per key, chained by `&&`: while the keys
+                    // tie the next one is compared; the first that differs
+                    // sets `c` to 1 (after) or -1 (before).
+                    var c = 0;
+                    let tied = {
+                        let ka = { let $x = items[j - 1]; $k };
+                        let kb = { let $x = items[j]; $k };
+                        if ka != kb {
+                            if (ka > kb) != $descending { c = 1; } else { c = -1; }
+                        }
+                        c == 0
+                    } && true;
+                    if tied || c < 0 { break; }
+                    let t = items[j - 1];
+                    items[j - 1] = items[j];
+                    items[j] = t;
+                    j = j - 1;
+                }
+                i = i + 1;
+            }
+            let out = for $x in items { yield $e; };
+            out
+        } else {
+            for $x in $src {
+                if $c && true { yield $e; }
+            }
+        }
+    };
 }
 
 // The set operators over sequences (stdlib/db/set_ops.pilot). `intersect`

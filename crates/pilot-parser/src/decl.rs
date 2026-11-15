@@ -533,7 +533,26 @@ impl<'a> Parser<'a> {
                 } else {
                 // `[InfixWord(..)] rule(..) => ..`: attributes on one rule.
                 let rule_attrs = if self.at(TokenKind::LBracket) { self.parse_attrs() } else { Vec::new() };
-                let kw = self.text().to_string(); self.advance(); let rich = self.rule_head_is_rich();
+                let kw = self.text().to_string(); self.advance();
+                // `word $a:Kind word $b:Kind => quote { .. }`: a sequence head (PROP-009).
+                if self.rule_head_is_seq() {
+                    let items = self.parse_seq_head(None);
+                    self.expect(TokenKind::FatArrow);
+                    let body = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon);
+                    if body.is_some() && self.arena.node(body).node_kind() == NodeKind::QuoteExpr {
+                        self.arena.nodes[body.0 as usize].flags = 1;
+                        let tpl = TemplateNode::from_arena(&self.arena, body);
+                        let bsp = self.arena.span(body);
+                        self.add_seq_rule(&kw, items, tpl, bsp);
+                    } else {
+                        self.arena.diagnostics.push((rsp, format!("SYN010: the rule `{kw}` with a sequence head expands to a `quote {{ .. }}`")));
+                    }
+                    if !rule_attrs.is_empty() {
+                        self.arena.diagnostics.push((rsp, format!("an attribute on `{kw}`, a rule with a sequence head, is not read yet")));
+                    }
+                    continue;
+                }
+                let rich = self.rule_head_is_rich();
                 let (params, arm) = if rich { let h = self.parse_rule_head(); (h.nodes, h.arm) } else { let params = self.parse_param_list();
                     let pnames: Vec<String> = params.iter().map(|&pid| self.arena.interner.resolve(SymbolId(self.arena.node(pid).lhs)).to_string()).collect();
                     let defaults = vec![None; pnames.len()];
@@ -614,7 +633,8 @@ impl<'a> Parser<'a> {
         }
         // `let SignedMathFacet<TSelf: ..> = { .. }` (stdlib/core) names a facet's
         // type parameters, which nothing reads yet: not reported, so core parses.
-        let sym = self.intern_cur(); let _ = self.parse_generic_params();
+        let sym = self.intern_binder();
+        let _ = self.parse_generic_params();
         let ty = if self.eat(TokenKind::Colon) { self.parse_type() } else { NodeId::NONE };
         let init = self.parse_binding_init();
         let _ = self.eat(TokenKind::Semicolon);

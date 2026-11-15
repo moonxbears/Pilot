@@ -44,6 +44,7 @@ use selfhost.check.resolve.*;
 use selfhost.check.infer.*;
 use selfhost.check.diag.*;
 use selfhost.check.generators.*;
+use selfhost.check.quote_value.*;
 
 /// The expression with any unary minus taken off.
 fn strip_negation(s: Snap, e: i64) -> i64 {
@@ -854,8 +855,8 @@ fn is_condition_not(p: Program, n: i64) -> bool {
 }
 
 /// Runs every rule over the user's files.
-/// A condition (of `if`, `while`, or the operand of `!`, which `assert`
-/// expands to) is a `bool`: the type of the `bool` literal slot. A condition
+/// A condition (of `if`, `while`, a side of `&&` or `||`, or the operand of
+/// `!`, which `assert` expands to) is a `bool`: the type of the `bool` literal slot. A condition
 /// of another known type is TYPE001 at build time, not a run-time error.
 fn check_condition(inf: Infer, sink: DiagSink, c: i64, what: str) {
     if c < 0 { return; }
@@ -923,6 +924,12 @@ pub fn check_rules(inf: Infer, sink: DiagSink) {
             }
             else if k == nk_index() { check_optional_access(inf, sink, i, op_index(), true); }
             else if k == nk_binary() && flags(s, i) == op_as() { check_cast(inf, sink, i); }
+            // Each side of `&&` and `||` is a condition (a query's `where`
+            // clauses are joined by `&&`); quoted code is not run.
+            else if k == nk_binary() && (flags(s, i) == op_and() || flags(s, i) == op_or()) && enclosing_quote(p, i) < 0 {
+                check_condition(inf, sink, lhs(s, i), "condition");
+                check_condition(inf, sink, rhs(s, i), "condition");
+            }
             else if k == nk_if() || k == nk_while() { check_condition(inf, sink, condition_operand(s, lhs(s, i)), "condition"); }
             else if k == nk_unary() && (flags(s, i) == unary_splat() || flags(s, i) == unary_double_splat() || flags(s, i) == unary_deep_flatten()) {
                 check_unpack(inf, sink, i);

@@ -1,0 +1,1 @@
+error[ASM002]: `Add` takes 2 operand(s), but `asm` gives it 3

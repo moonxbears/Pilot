@@ -1,0 +1,9 @@
+// A rule with a sequence head expands to a `quote { .. }`; any other body is
+// rejected with SYN010.
+pub syntax {
+    twice $e:Expr => print($e);
+}
+
+fn main() {
+    print(1);
+}

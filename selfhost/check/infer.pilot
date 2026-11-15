@@ -22,6 +22,7 @@ use selfhost.check.program.*;
 use selfhost.check.methods.*;
 use selfhost.check.resolve.*;
 use selfhost.check.generators.*;
+use selfhost.check.asm.*;
 
 pub struct Infer {
     pub p: Program;
@@ -289,6 +290,17 @@ pub fn call_generic_args(inf: Infer, f: i64, call: i64) -> List<i64> {
     return values;
 }
 
+/// The type of `asm(op, operands..)`: what its machine operation gives.
+fn asm_type(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let ch = children(p.s, n);
+    guard some o = asm_op_of(p.s, n) else { return ty_unknown(); };
+    if o.gives == AsmGives::Truth { return prog_slot_type(p, literal_slot(nk_bool())); }
+    if o.gives == AsmGives::Operand && ch.len() > 2 { return type_of(inf, ch[2]); }
+    if o.gives == AsmGives::Target && ch.len() > 3 { return type_receiver(inf, ch[ch.len() - 1]); }
+    return ty_unknown();
+}
+
 fn call_type(inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
@@ -296,6 +308,7 @@ fn call_type(inf: Infer, n: i64) -> i64 {
     if ch.len() == 0 { return ty_unknown(); }
     let callee = ch[0];
     let ck = kind(s, callee);
+    if ck == nk_ident() && node_name(s, callee) == asm_token() { return asm_type(inf, n); }
     if ck == nk_ident() && inf.r.ref_of[callee] >= 0 {
         return ty_func_return(p.tt, type_of(inf, callee));
     }

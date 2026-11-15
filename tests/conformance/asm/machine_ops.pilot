@@ -1,0 +1,32 @@
+// `asm(op, operands..)` runs one machine operation (PROP-009 step 1b).
+// Expected values, worked by hand:
+//   Add 7 + 5 = 12;  Sub 7 - 5 = 2;  Mul 7 * 5 = 35
+//   SDiv -7 / 2 = -3 (truncates toward zero);  SRem -7 % 2 = -1 (sign of the dividend)
+//   And 12 & 10 = 0b1100 & 0b1010 = 0b1000 = 8;  Or = 0b1110 = 14;  Xor = 0b0110 = 6
+//   Shl 3 << 4 = 48;  AShr -16 >> 2 = -4 (the sign bit is copied in)
+//   SLt 3 < 5 = true;  SGe 3 >= 5 = false;  Eq 4 == 4 = true
+//   Neg of 9 = -9;  BitNot of 0 = -1 (all bits set);  Not of true = false
+//   FAdd 1.5 + 2.25 = 3.75
+//   AddWrap: i64 max + 1 wraps to i64 min = -9223372036854775808
+use Pilot.Core.Asm.MachineOps.*;
+
+fn main() {
+    print(asm(MachineOp::Add, 7, 5));
+    print(asm(MachineOp::Sub, 7, 5));
+    print(asm(MachineOp::Mul, 7, 5));
+    print(asm(MachineOp::SDiv, -7, 2));
+    print(asm(MachineOp::SRem, -7, 2));
+    print(asm(MachineOp::And, 12, 10));
+    print(asm(MachineOp::Or, 12, 10));
+    print(asm(MachineOp::Xor, 12, 10));
+    print(asm(MachineOp::Shl, 3, 4));
+    print(asm(MachineOp::AShr, -16, 2));
+    print(asm(MachineOp::SLt, 3, 5));
+    print(asm(MachineOp::SGe, 3, 5));
+    print(asm(MachineOp::Eq, 4, 4));
+    print(asm(MachineOp::Neg, 9));
+    print(asm(MachineOp::BitNot, 0));
+    print(asm(MachineOp::Not, true));
+    print(asm(MachineOp::FAdd, 1.5, 2.25));
+    print(asm(MachineOp::AddWrap, 9223372036854775807, 1));
+}

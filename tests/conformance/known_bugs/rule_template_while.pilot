@@ -1,0 +1,20 @@
+// A `while` loop inside a `syntax` rule's `quote { .. }` must keep its
+// condition. Today the condition is lost: the checker reports QUOTE003 for
+// the `$n` it held, and the loop has no exit (LOOP005). `loop { if .. {
+// break; } .. }` works in its place (found building PROP-009 step 1a).
+//
+// Expected output, worked by hand: count_to(3) prints i = 0, 1, 2 and
+// stops when i < 3 fails at i = 3.
+pub syntax {
+    count_to(n) => quote { {
+        var i = 0;
+        while i < $n {
+            print(i);
+            i = i + 1;
+        }
+    } };
+}
+
+fn main() {
+    count_to(3);
+}

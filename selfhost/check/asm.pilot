@@ -1,0 +1,96 @@
+// ==============================================================================
+// FILE: selfhost/check/asm.pilot
+// `asm(op, operands..)`: one machine operation (PROP-009 step 1b).
+// ==============================================================================
+// The operation is a variant of `MachineOp` (stdlib/core/asm/machine_ops.pilot),
+// written `MachineOp::Add` or `::Add`. This file says, for each operation,
+// how many operands it takes and what it gives; the checker types the call
+// from it (infer.pilot), and reports in the user's files:
+//   ASM001  the first argument does not name a machine operation;
+//   ASM002  the operation is given the wrong number of operands.
+// A conversion (`ZExt`, `SIToFP`, ..) takes the value and the target type.
+pub lvl(0) pkg Pilot.SelfHost.Check.Asm;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.diag.*;
+
+/// The seed token that runs one machine operation.
+pub pure fn asm_token() -> str => "asm";
+
+/// What a machine operation gives.
+pub enum AsmGives : u8 {
+    Operand,   // a value of its first operand's type
+    Truth,     // a bool
+    Target,    // a value of the type named by its last argument
+    Nothing,   // no value (a store)
+    Unknown,   // a value the checker cannot type yet (a load, a three-way compare)
+}
+
+/// One machine operation: its name, its operand count and what it gives.
+pub struct AsmOp : IValue {
+    pub name:     str;
+    pub operands: i64;
+    pub gives:    AsmGives;
+}
+
+fn op(name: str, operands: i64, gives: AsmGives) -> AsmOp => AsmOp { name: name, operands: operands, gives: gives };
+
+/// Every machine operation, in the order of `MachineOp`.
+pub fn asm_ops() -> List<AsmOp> {
+    var out: List<AsmOp> = [];
+    for n in ["Add", "Sub", "Mul", "SDiv", "UDiv", "SRem", "URem", "FAdd", "FSub", "FMul", "FDiv",
+              "And", "Or", "Xor", "Shl", "LShr", "AShr"] { out.push(op(n, 2, ::Operand)); }
+    for n in ["Eq", "Ne", "ULt", "ULe", "UGt", "UGe", "SLt", "SLe", "SGt", "SGe", "FLt", "FLe", "FEq"] { out.push(op(n, 2, ::Truth)); }
+    for n in ["Neg", "FNeg", "Not", "BitNot"] { out.push(op(n, 1, ::Operand)); }
+    for n in ["ZExt", "SExt", "Trunc", "Bitcast", "SIToFP", "UIToFP", "FPToSI", "FPToUI"] { out.push(op(n, 2, ::Target)); }
+    for n in ["SAddSat", "UAddSat", "SSubSat", "USubSat", "SMulSat", "UMulSat",
+              "AddWrap", "SubWrap", "MulWrap", "SRemEuc", "URemEuc"] { out.push(op(n, 2, ::Operand)); }
+    for n in ["Cmp3S", "Cmp3U"] { out.push(op(n, 2, ::Unknown)); }
+    out.push(op("Load", 1, ::Unknown));
+    out.push(op("Store", 2, ::Nothing));
+    out.push(op("ElemAddr", 2, ::Operand));
+    return out;
+}
+
+/// Whether call `n` is `asm(..)`.
+pub fn is_asm_call(s: Snap, n: i64) -> bool {
+    if kind(s, n) != nk_call() { return false; }
+    let ch = children(s, n);
+    return ch.len() > 0 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == asm_token();
+}
+
+/// The operation node `a` names: `MachineOp::Add` or `::Add`; empty otherwise.
+pub fn asm_op_name(s: Snap, a: i64) -> str {
+    let k = kind(s, a);
+    if k == nk_member() { return sym_text(s, rhs(s, a)); }
+    if k == nk_ident() { return node_name(s, a); }
+    return "";
+}
+
+/// The operation `asm` call `n` names.
+pub fn asm_op_of(s: Snap, n: i64) -> AsmOp? {
+    let ch = children(s, n);
+    if ch.len() < 2 { return none; }
+    let name = asm_op_name(s, ch[1]);
+    for o in asm_ops() { if o.name == name { return o; } }
+    return none;
+}
+
+/// ASM001-ASM002 over the user's files.
+pub fn check_asm_calls(p: Program, sink: DiagSink) {
+    let s = p.s;
+    for n in nodes_of(s, nk_call()) {
+        if !in_user_file(s, n) || !is_asm_call(s, n) { continue; }
+        let ch = children(s, n);
+        guard some o = asm_op_of(s, n) else {
+            let given = if ch.len() >= 2 { node_text(s, ch[1]) } else { "nothing" };
+            sink_error(sink, n, "ASM001", f"`asm` runs a machine operation, a variant of `MachineOp` such as `MachineOp::Add`; `{given}` is not one");
+            continue;
+        };
+        let given = ch.len() - 2;
+        if given != o.operands {
+            sink_error(sink, n, "ASM002", f"`{o.name}` takes {o.operands} operand(s), but `asm` gives it {given}");
+        }
+    }
+}

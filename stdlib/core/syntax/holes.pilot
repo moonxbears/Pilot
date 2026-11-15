@@ -1,0 +1,30 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/holes.pilot
+// THE HOLE KINDS OF A `syntax` RULE'S SEQUENCE HEAD (PROP-009 step 1a)
+// =========================================================================
+// A rule may spell its use as a sequence of words and holes:
+//
+//     with $open:Ident $name:Ident $body:Block => quote { .. };
+//
+// `$name:Kind` is a piece of code of that kind; `$( .. )?` is an optional
+// group and `$( .. ) sep *` a repeated one. The seed reads only the position
+// of each kind (`register_hole_kinds`): the order is append-only, and
+// renaming a kind changes nothing.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Holes;
+
+use Pilot.Core.Genesis.*;
+
+/// What a hole of a sequence head reads.
+pub enum HoleKind : u8 {
+    Expr,     // an expression
+    Block,    // a block `{ .. }`
+    Pattern,  // a `switch` pattern
+    Ident,    // one name
+    Type,     // a type
+    Stmt,     // one statement
+}
+
+comptime {
+    register_hole_kinds(nameof(HoleKind));
+}

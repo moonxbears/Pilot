@@ -13,15 +13,15 @@ use Pilot.Core.Keywords::*;
 [Lang(Cfg.Lang.f64_t), Bits(Cfg.Reg.b64, Cfg.Reg.simd_f)]
 pub partial struct f64 : INumber<f64>, INegOperator<f64> {
     pub pure:
-        op +  (rhs: f64) -> f64  => __ssa(Cfg.Ssa.fadd, self, rhs);
-        op -  (rhs: f64) -> f64  => __ssa(Cfg.Ssa.fsub, self, rhs);
-        op *  (rhs: f64) -> f64  => __ssa(Cfg.Ssa.fmul, self, rhs);
-        op /  (rhs: f64) -> f64  => __ssa(Cfg.Ssa.fdiv, self, rhs);
-        op -  ()         -> f64  => __ssa_unary(Cfg.Ssa.fneg, self);
-        op == (rhs: f64) -> bool => __ssa(Cfg.Ssa.feq,  self, rhs);
-        op != (rhs: f64) -> bool => !(__ssa(Cfg.Ssa.feq, self, rhs));
-        op <  (rhs: f64) -> bool => __ssa(Cfg.Ssa.flt,  self, rhs);
-        op <= (rhs: f64) -> bool => __ssa(Cfg.Ssa.fle,  self, rhs);
-        op >  (rhs: f64) -> bool => !(__ssa(Cfg.Ssa.fle, self, rhs));
-        op >= (rhs: f64) -> bool => !(__ssa(Cfg.Ssa.flt, self, rhs));
+        op +  (rhs: f64) -> f64  => __ssa(MachineOp::FAdd, self, rhs);
+        op -  (rhs: f64) -> f64  => __ssa(MachineOp::FSub, self, rhs);
+        op *  (rhs: f64) -> f64  => __ssa(MachineOp::FMul, self, rhs);
+        op /  (rhs: f64) -> f64  => __ssa(MachineOp::FDiv, self, rhs);
+        op -  ()         -> f64  => __ssa_unary(MachineOp::FNeg, self);
+        op == (rhs: f64) -> bool => __ssa(MachineOp::FEq,  self, rhs);
+        op != (rhs: f64) -> bool => !(__ssa(MachineOp::FEq, self, rhs));
+        op <  (rhs: f64) -> bool => __ssa(MachineOp::FLt,  self, rhs);
+        op <= (rhs: f64) -> bool => __ssa(MachineOp::FLe,  self, rhs);
+        op >  (rhs: f64) -> bool => !(__ssa(MachineOp::FLe, self, rhs));
+        op >= (rhs: f64) -> bool => !(__ssa(MachineOp::FLt, self, rhs));
 }

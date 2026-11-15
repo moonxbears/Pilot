@@ -1,0 +1,8 @@
+// A hole's kind is a variant of `HoleKind`; `Word` is not one, so SYN010.
+pub syntax {
+    twice $e:Word => quote { print($e); };
+}
+
+fn main() {
+    print(1);
+}

@@ -64,6 +64,7 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("abi.invoke_frame", ::Exit, "PilVM bridge to pilot_rt_invoke_abi_frame (crates/pilot-rt/src/c_abi.rs)", "F6"),
         seam_entry("adapter.install_thunks", ::Exit, "PilIR IrFunction emission and MethodTable install of adapted methods", "F5"),
         seam_entry("attr.runtime_step", ::Entry, "weaving IRuntimeStepAttribute steps into each call of their function on the seed, PilIR and C (stdlib/core/attr_flow.pilot attr_runtime_steps)", "M21"),
+        seam_entry("asm.machine_op", ::Entry, "an engine instruction for a machine operation `asm(..)` names: conversions, saturating, Euclidean and three-way forms and memory access on every engine; unsigned division, compare and shift on the seed; a signed or unsigned operation on operands of the other register class on PilIR (PROP-009 step 1b)", "PROP-009"),
         seam_entry("autofix.atomic_rename", ::Exit, "OS atomic rename of <file>.tmp over <file>", "F6"),
         seam_entry("autofix.semantic_defects", ::Entry, "type checker: resolved bindings (DECL004) and callee var-ref parameter modes (BORROW001)", "F4"),
         seam_entry("bootstrap.stage_compile", ::Entry, "self-hosted driver (lex, parse, analyze, PilIR, Perceus, C11) building compiler stage 2 and 3 from selfhost/ for the GATE009 parity gate", "F8"),
@@ -304,6 +305,14 @@ fn known_bug(id: str, component: str, summary: str, expected: str, actual: str, 
 /// Every known bug, ordered by id.
 pub fn bug_registry() -> List<KnownBug> {
     let entries: List<KnownBug> = [
+        known_bug("parser.rule_template_while", "crates/pilot-parser/src/template.rs (a `while` inside a rule's quote)",
+            "a `while` loop inside a `syntax` rule's `quote { .. }` loses its condition: QUOTE003 is reported for a `$hole` in it, and the expanded loop has no exit (LOOP005)",
+            "the loop keeps its condition; prints 0, 1, 2", "error[QUOTE003]: `$n` splices into a quote, and is not inside one",
+            "tests/conformance/known_bugs/rule_template_while.pilot", "PROP-009"),
+        known_bug("check.collecting_for_in_block", "generator detection (selfhost/check/generators.pilot and the engines that follow it)",
+            "a collecting `for` (`yield`) that is the value of a block or of an `if .. else` branch makes the enclosing function a generator instead of a list; `main` then never runs, so the program prints nothing and exits 0",
+            "the block's value is the list; prints 0, [10, 20, 30], [2, 3, 4]", "prints nothing and exits 0 on all three engines",
+            "tests/conformance/known_bugs/block_value_collecting_for.pilot", "PROP-009"),
         known_bug("check.assign_readonly_ref_param", "selfhost/check (assignment target checks)",
             "assigning to a plain `ref` parameter (a read-only borrow; only `var ref` writes back) is accepted: the seed silently drops the write and PilIR stops at the seam `ir.lower_construct`",
             "rejected before running: error[DECL004]", "runs and prints true, -1",

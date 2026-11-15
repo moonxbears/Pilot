@@ -19,7 +19,7 @@
 | **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — ITEMIZE BEFORE APPROVAL (after PROP-007)` |
 | **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4) NEEDS APPROVAL` |
 | **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED ITEMIZED LISTS` |
-| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED DECISIONS` |
+| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEPS 2–3 NEED DECISIONS` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -986,6 +986,80 @@ Under Rule 4 frozen items are never deleted, so they would stay in `bridge_lang.
 2. Is the `CoreForm` direction acceptable for step 2, or should class B words get a different mechanism?
 3. Which option, (a) or (b), for the frozen hooks in step 3?
 4. The `PROP-008` step 1 Rust growth (+382) is still waiting for a decision. Should step 1a's net deletion count against it?
+
+### 8. Steps 1a and 1b as built (2026-11-15) — STOPPED: step 1a is not a net deletion
+
+**Measured Rust LOC.** `crates/**/src/*.rs` went from 20,798 (after `PROP-008` step 1) to **21,101: +303**. Per file: `rule_arms.rs` +255, `lower_native.rs` +54, `decl.rs` +28, `tables.rs` +28, `stmt.rs` +9 net, `template.rs` +5 net, `expr.rs` −7 net, `lib.rs` −1, `with_scope.rs` −65 (deleted). About +70 of this is step 1b (the `asm` lowering, its two `tables.rs` fields and `asm_operation_follows`), as proposed. Step 1a is about **+230**, not a net deletion. As §3 requires, the work stopped here and nothing else moved. The owner decides one of these:
+- (a) keep the matcher and approve moving more words onto it, so later deletions pay it back;
+- (b) revert step 1a and keep step 1b;
+- (c) extend `template.rs` first (below), then delete `query.rs`. This is the only planned deletion big enough to make step 1a negative.
+
+`paused_max_total_rust_loc()` (20,408) has been exceeded since `PROP-008` step 1, and it is not raised here. `rustfmt` is still not installed, so the touched files have not been reformatted.
+
+**What moved to rules in step 1a:**
+- `with arena name { .. }` / `with arena { .. }`. Now a sequence rule in `stdlib/core/syntax/lifecycle.pilot`; `with_scope.rs` is deleted.
+- `splat(x)`, `pairs(x)`, `flat(x)`. The receptor category 35 arm in `expr.rs` and its three `bind_receptor` lines are deleted, and the existing rules in `expr_sugar.pilot` now take these calls. To make that work, `template.rs` now unwraps a quote whose only item is a unary expression (`quote { *$x }`), so a list literal or call sees the `*x` and not a block.
+
+**What did not move, and why:**
+- `nameof`. It is genesis and is used before any rule exists.
+- `guard`. The parser node carries the divergence check that `GuardStmt` needs; a rule would lose it.
+- LINQ (`query.rs`). Templates cannot hold `for`, lambdas or `switch`, and cannot splice a sequence. `template.rs` must be extended first; see option (c).
+- Call-quote words (`call`, `splice`, `frame`, `sig`, `grad`, `plan`). These need a sequence spliced into call arguments, which templates cannot do yet.
+
+**Deviations from the file list:**
+- **`asm` needed no `NodeKind::AsmExpr`.** In expression position `asm(op, ..)` parses as a call whose callee is the identifier `asm`, the same way `__engine(..)` does. So `pilot-ast` and the `expr.rs` asm prefix were not touched.
+- **No seed diagnostics for `asm`.** The seed lowering (`lower_native.rs`) reports no error for an unknown op or a wrong operand count. Those are ASM001 and ASM002 in the Pilot checker (`selfhost/check/asm.pilot`). An op with no seed instruction traps at run time at `seam("asm.machine_op", ..)`.
+- **Seed limits.** The seed has no unsigned or width-specific instructions. Unsigned, saturating, conversion, load, store and element-address ops stop at the seam, and the others run at `i64` width.
+
+**Verified:**
+- seed / `--ir` / `--emit c` on `tests/conformance/asm/` (4) and `tests/conformance/receptors/` (3): all pass on all three engines.
+- The seven splat/pairs/flat programs and `memory/arena_scope`: pass on all three engines.
+- Full seed `pilot test`: 516 passed, 0 failed, 13 known bugs reproduced.
+- `cargo test -p pilot-parser` and `damaged_source --include-ignored`: pass.
+
+**Not run:** the full `--ir` and `--emit c` suites, `pilot gate --full`, `cargo fmt --check` (no `rustfmt`).
+
+### 9. Option (c) as built (2026-11-15, owner: "Extend templates first") — step 1a is now about +56, still not a net deletion
+
+**Measured Rust LOC:** 20,924 (was 21,101 after §8; baseline 20,798 after `PROP-008` step 1). That is **−177 since §8**, and +126 for steps 1a and 1b together. With step 1b at about +70, **step 1a is about +56**. It is still not negative, so the work stopped again for the owner. The rest of the deficit is the sequence matcher itself. The deletion large enough to cover it is the old call-shaped rule machinery (`RuleArm`, `SyntaxMacroRule` and the arms in `rule_arms.rs`): call-shaped heads could become sequence heads (`splat ( $x:Expr )`). That is a new step and needs its own approval.
+
+**Rust changes (all in the approved step 1a file list):**
+- `crates/pilot-parser/src/query.rs`: **deleted** (250 lines), with its `mod` line in `lib.rs` and the receptor 33/6 arm in `expr.rs`. `ParserTables::bp_above` in `tables.rs` was only used there, so it is deleted too.
+- `crates/pilot-parser/src/template.rs`:
+  - Templates can hold `for name in iter { .. }` (no `then`) and `yield`.
+  - An `if` whose condition expands to `true` or `false` is decided when the rule expands.
+  - A binary operator whose left operand uses a repeated hole is repeated once per element, right-nested (`$c && true` is `c1 && (c2 && true)`; with no elements, just `true`).
+  - `let $name` and `for $name` share one `bound_name` helper.
+- `crates/pilot-parser/src/rule_arms.rs`:
+  - An optional group binds a `bool` named after its first word: whether it was written.
+  - A repeated group that starts with a word may be written no times.
+  - Matching stops at the first token that does not fit. An unbuilt query-clause word there still reports SEAM001 `keyword.unbuilt`.
+  - `repetitions` computes each repetition's bindings, and `intern_binder` reads `$name` binders.
+  - Hygiene also renames a template's own `for` names.
+- `stmt.rs` (`parse_for` reads `$name`) and `decl.rs` both use `intern_binder`.
+
+**Pilot side:**
+- **The query rule.** `stdlib/db/sql_syntax.pilot` has the `from $x:Ident in $src:Expr $( where $c:Expr )* $( order $( by )? $( $k:Expr $( ascending )? $( descending )? ),* )? select $e:Expr` rule. Its six `bind_receptor` lines for `from`, `select`, `order`, `by`, `ascending` and `descending` are deleted. `select` stays bound in `stdlib/asyncio/select_syntax.pilot`.
+  - Without `order`, a query is one collecting `for`, the same as `query.rs` built.
+  - With `order`, a stable insertion sort runs on the kept elements. The keys are chained by `&&`, so a later key is computed only while the earlier ones tie.
+- **Checker.** `selfhost/check/rules.pilot` now checks each side of `&&` and `||` as a condition, outside quotes (TYPE001), so `where x + 1` is still rejected at build time. `enclosing_quote` in `quote_value.pilot` is made `pub` for this.
+
+**Design changes a reviewer should check:**
+- `err_query_clause` and `err_query_order` now report `SYN010: `from` expects `select` here, found `…`` instead of their old SYN001 wording. They are still rejected at build time, and their expected `.stderr` was updated.
+- A `where` operand is now a whole expression. `where a && b` reads as one clause; before, `&&` ended the clause.
+- `1 && true` was accepted at build time and failed at run time. It is now TYPE001.
+
+**Known bugs found and registered (true expected output kept):**
+- `check.collecting_for_in_block` (`known_bugs/block_value_collecting_for`). A collecting `for` as the value of a block or `if .. else` branch makes the enclosing function a generator, so `main` never runs, and the program prints nothing and exits 0 on all three engines. The query rule avoids this by deciding `if $order` at expansion and ending its block in a variable.
+- `parser.rule_template_while` (`known_bugs/rule_template_while`). A `while` inside a rule's `quote` loses its condition (QUOTE003, LOOP005). This also happens at HEAD. The query rule uses `loop { if .. { break; } .. }`.
+
+**Not built:** a repeated hole spliced as call arguments or list elements (the call-quote words need it), and the call-quote, `nameof` and `guard` moves.
+
+**Verified:**
+- The query programs (`query_from_select`, `query_where`, `query_order_by`): pass on seed, `--ir` and `--emit c`. Before this change they also passed on all three, with `query.rs`.
+- `receptors/` (5 programs) and `errors/err_and_operand_not_bool`: pass on all three engines.
+- Full seed `pilot test`: 521 passed, 0 failed, 15 known bugs reproduced.
+- `damaged_source --include-ignored`: passes.
 
 ---
 

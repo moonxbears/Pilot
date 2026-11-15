@@ -1,0 +1,29 @@
+// What a sequence rule's template can do (PROP-009):
+// - a binary operator whose left side uses a repeated hole repeats it once
+//   per element, right-nested: `$c && true` is `c1 && (c2 && true)`;
+// - an optional group binds a `bool` named after its first word, and an
+//   `if` on it is decided when the rule expands;
+// - a template may hold a collecting `for` with `yield`.
+//
+// Expected output, worked by hand:
+//   all_of 1 < 2, 3 < 4: true && (true && true) = true.
+//   all_of 1 < 2, 4 < 3: true && (false && true) = false.
+//   say 5: prints 5. say loudly 6: prints 6, then "!".
+//   squares 4: i = 0, 1, 2, 3 -> [0, 1, 4, 9].
+pub syntax {
+    all_of $( $c:Expr ),* => quote { $c && true };
+    say $( loudly )? $e:Expr => quote { {
+        print($e);
+        if $loudly { print("!"); }
+    } };
+    squares $n:Expr => quote { for i in 0 .. $n { yield i * i; } };
+}
+
+fn main() {
+    print(all_of 1 < 2, 3 < 4);
+    print(all_of 1 < 2, 4 < 3);
+    say 5;
+    say loudly 6;
+    let sq = squares 4;
+    print(sq);
+}

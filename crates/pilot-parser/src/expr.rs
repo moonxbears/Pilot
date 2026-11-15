@@ -208,6 +208,7 @@ impl<'a> Parser<'a> {
                     let v = self.parse_expr_bp(bp);
                     return self.arena.alloc_node(NodeKind::UnaryExpr, fl, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0);
                 }
+                if self.seq_rule_at().is_some() { return self.expand_seq_rule(); }
                 if let Some((rk, pl)) = self.receptor() { match rk {
                         1 => { self.advance(); return self.arena.alloc_node(NodeKind::BoolLit, 0, sp, pl as u32, 0); }
                         2 => { self.advance(); return self.arena.alloc_node(NodeKind::NoneLit, 0, sp, 0, 0); }
@@ -220,19 +221,8 @@ impl<'a> Parser<'a> {
                             return self.parse_expr_bp(bp);
                         }
                         32 if nx < self.tape.len() && ((matches!(self.tape.kind(nx), TokenKind::LParen) && self.opens_inline_text(nx)) || (!self.no_struct_lit && matches!(self.tape.kind(nx), TokenKind::LBrace))) => return self.parse_polyglot_inline(),
-                        33 if pl == 6 => { let p2 = self.next_non_nl(nx + 1);
-                            if p2 < self.tape.len() && is_word_tok(self.tape.kind(nx)) && self.tables.receptors.get(self.tape.text(p2, self.src)) == Some(&(10, 0)) {
-                                return self.parse_linq_query(); } }
                         unbuilt::UNBUILT_RECEPTOR if self.at_unbuilt() => return self.parse_unbuilt(),
                         33 if pl == 7 && nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LBrace => { self.advance(); return self.parse_block(); }
-                        35 if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen && !self.file_declares_fn(self.text()) => {
-                            self.advance();
-                            self.expect(TokenKind::LParen);
-                            let arg = self.parse_expr();
-                            self.expect(TokenKind::RParen);
-                            let fl = match pl { 1 => UNARY_OP_SPLAT, 2 => UNARY_OP_DOUBLE_SPLAT, 3 => UNARY_OP_DEEP_FLATTEN, _ => UNARY_OP_SPLAT };
-                            return self.arena.alloc_node(NodeKind::UnaryExpr, fl, ByteSpan::new(sp.start, self.prev_span().end), arg.0, 0);
-                            }
                         37 if pl >= 1 && pl <= 6 => {
                             if nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || is_seed_kw(self.tape.kind(nx))) {
                                 let mut p_check = nx;

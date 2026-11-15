@@ -1,0 +1,1 @@
+error[ASM001]: `asm` runs a machine operation, a variant of `MachineOp` such as `MachineOp::Add`; `Plus` is not one

@@ -101,7 +101,7 @@ pub fn airlock_c_structs() -> List<List<any>> => [
     ["OsFfiRetRegs", 80, 16, ["gpr", "vec"]],
 ];
 
-/// Frozen Model B+ `bridge_lang.pilot` hooks (68 compile-time hooks).
+/// Frozen Model B+ `bridge_lang.pilot` hooks (70 compile-time hooks).
 pub fn airlock_lang_hooks() -> List<str> => [
     "register_bracket_attribute", "bind_lang_item", "set_register_layout", "set_memory_layout",
     "set_inline_hint", "register_syntax_keyword", "bind_lattice_kind", "get_lattice_bits",
@@ -122,6 +122,7 @@ pub fn airlock_lang_hooks() -> List<str> => [
     "register_keyword", "register_keyword_category", "query_registered_symbols",
     "bind_lang_protocol",
     "register_grammar", "grammar_entry",
+    "register_machine_ops", "register_hole_kinds",
 ];
 
 /// Hooks `bridge_lang.pilot` still carries but that are **not** frozen: each is

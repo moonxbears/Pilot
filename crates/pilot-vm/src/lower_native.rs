@@ -12,6 +12,28 @@ use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_parser::NativeKind;
 
+/// The seed token that runs one machine operation: `asm(op, operands..)`.
+const ASM_TOKEN: &str = "asm";
+
+/// The VM instruction of each machine operation, by its position in the
+/// enum `register_machine_ops` names (stdlib/core/asm/machine_ops.pilot,
+/// append-only). `None`: the seed has no instruction that does exactly that
+/// operation (unsigned division, comparison and shift, conversions,
+/// saturating and Euclidean forms, three-way compares, memory access).
+const MACHINE_OPS: &[Option<Opcode>] = &[
+    Some(Opcode::Add), Some(Opcode::Sub), Some(Opcode::Mul), Some(Opcode::Div), None,
+    Some(Opcode::Rem), None, Some(Opcode::Add), Some(Opcode::Sub), Some(Opcode::Mul),
+    Some(Opcode::Div), Some(Opcode::BitAnd), Some(Opcode::BitOr), Some(Opcode::Xor), Some(Opcode::Shl),
+    None, Some(Opcode::Shr), Some(Opcode::CmpEq), Some(Opcode::CmpNe), None,
+    None, None, None, Some(Opcode::CmpLt), Some(Opcode::CmpLe),
+    Some(Opcode::CmpGt), Some(Opcode::CmpGe), Some(Opcode::CmpLt), Some(Opcode::CmpLe), Some(Opcode::CmpEq),
+    Some(Opcode::Neg), Some(Opcode::Neg), Some(Opcode::Not), Some(Opcode::BitNot), None,
+    None, None, None, None, None,
+    None, None, None, None, None,
+    None, None, None, Some(Opcode::Add), Some(Opcode::Sub),
+    Some(Opcode::Mul),
+];
+
 /// The question a `TypeQuery` binding asks: the type's size in bytes.
 const QUERY_BYTE_SIZE: &str = "byte_size";
 
@@ -26,6 +48,9 @@ impl BytecodeCompiler {
     pub(crate) fn compile_native_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> Option<u8> {
         if name == crate::ENGINE_TOKEN {
             return Some(self.compile_engine_call(arena, args));
+        }
+        if name == ASM_TOKEN {
+            return Some(self.compile_asm(arena, args));
         }
         if pilot_parser::bootstrap_tables().quotes_symbol(name) {
             return Some(self.compile_symbol_quote(arena, name, args));
@@ -63,6 +88,35 @@ impl BytecodeCompiler {
     }
 
     /// `__engine("intrinsic", args..)`.
+    /// `asm(MachineOp::Add, a, b)` (or `asm(::Add, a, b)`): the VM
+    /// instruction of that machine operation on the operands. A wrong
+    /// operation or operand count is the checker's to report (ASM001,
+    /// ASM002, selfhost/check/asm.pilot); the seed only stops there.
+    fn compile_asm(&mut self, arena: &AstArena, args: &[NodeId]) -> u8 {
+        let variant = args.first().map_or("", |&op| {
+            let on = arena.node(op);
+            match on.node_kind() {
+                NodeKind::MemberExpr => Self::name(arena, on.rhs),
+                NodeKind::IdentExpr => Self::name(arena, on.lhs),
+                _ => "",
+            }
+        });
+        let index = pilot_parser::bootstrap_tables().machine_op(variant);
+        let Some(opcode) = index.and_then(|i| MACHINE_OPS.get(i).copied().flatten()) else {
+            return self.emit_trap(format!(
+                "SEAM001: unconnected seam `asm.machine_op`: the seed has no instruction for `{variant}`"
+            ));
+        };
+        let unary = matches!(opcode, Opcode::Neg | Opcode::Not | Opcode::BitNot);
+        let dst = self.alloc_reg();
+        let mark = self.next_reg;
+        let r_a = args.get(1).map_or(0, |&a| self.compile_node(arena, a));
+        let r_b = if unary { 0 } else { args.get(2).map_or(0, |&b| self.compile_node(arena, b)) };
+        self.emit(opcode, dst, r_a, r_b);
+        self.release_to(mark);
+        dst
+    }
+
     fn compile_engine_call(&mut self, arena: &AstArena, args: &[NodeId]) -> u8 {
         let Some((&hook, rest)) = args.split_first() else {
             return self.error(

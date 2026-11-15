@@ -17,7 +17,7 @@ pub partial struct array<T: IAnyValue, N: const usize> : IInlineList<T>, IEnumer
     pub is_empty: bool  { get => N == 0; }
 
     pub pure:
-        fn as_ptr() -> ptr<T> => __ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>);
+        fn as_ptr() -> ptr<T> => __ssa_cast(MachineOp::Bitcast, ref self, ptr<T>);
 
         fn as_slice() -> slice<T> => slice<T> {
             data: .as_ptr(),

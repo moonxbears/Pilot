@@ -1,0 +1,6 @@
+// ASM002: `Add` takes two operands; this call gives it three.
+use Pilot.Core.Asm.MachineOps.*;
+
+fn main() {
+    print(asm(MachineOp::Add, 1, 2, 3));
+}

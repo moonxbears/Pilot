@@ -840,6 +840,27 @@ pub let ERRORS = [
         reference: "proposals.md PROP-008 §5",
     },
     ErrorDef {
+        code: "SYN010",
+        title: "Malformed Sequence Rule",
+        description: "A `syntax` rule with a sequence head is malformed (a hole kind that is not a `HoleKind` variant, a group of the wrong form, or a body that is not a `quote { .. }`), or a use of the rule does not fit its head",
+        category: "Grammar",
+        reference: "proposals.md PROP-009 §3",
+    },
+    ErrorDef {
+        code: "ASM001",
+        title: "Unknown Machine Operation",
+        description: "The first argument of `asm(..)` is not a variant of `MachineOp`",
+        category: "Grammar",
+        reference: "proposals.md PROP-009 §4",
+    },
+    ErrorDef {
+        code: "ASM002",
+        title: "Machine Operation Operand Count",
+        description: "`asm(op, ..)` gives the machine operation a different number of operands than it takes",
+        category: "Grammar",
+        reference: "proposals.md PROP-009 §4",
+    },
+    ErrorDef {
         code: "INSP001",
         title: "Inspection Target Not Found",
         description: "The specified file, cursor position, or symbol path could not be resolved in the workspace",

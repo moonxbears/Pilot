@@ -23,12 +23,6 @@ comptime {
             jmp_exit:     "cfg_jump_loop_exit",
             jmp_head:     "cfg_jump_loop_head",
             decl_op:      "decl_operator_fn",
-            ssa_binop:    "emit_ssa_binop",
-            ssa_unop:     "emit_ssa_unop",
-            ssa_cast:     "emit_ssa_cast",
-            ssa_load:     "emit_ssa_load",
-            ssa_store:    "emit_ssa_store",
-            ssa_gep:      "emit_ssa_gep",
             is_comptime:  "query_is_comptime_vm",
             t_sizeof:     "type_sizeof",
             t_alignof:    "type_alignof",
@@ -122,64 +116,7 @@ comptime {
             ide_policy_slot:  "ide_context_policy",
         },
 
-        // 3. Backend SSA Instruction Opcodes
-        Ssa = {
-            add:     "add",
-            sub:     "sub",
-            mul:     "mul",
-            sdiv:    "sdiv",
-            udiv:    "udiv",
-            srem:    "srem",
-            urem:    "urem",
-            fadd:    "fadd",
-            fsub:    "fsub",
-            fmul:    "fmul",
-            fdiv:    "fdiv",
-            and_b:   "and",
-            or_b:    "or",
-            xor_b:   "xor",
-            shl:     "shl",
-            lshr:    "lshr",
-            ashr:    "ashr",
-            eq:      "eq",
-            ne:      "ne",
-            ult:     "ult",
-            ule:     "ule",
-            ugt:     "ugt",
-            uge:     "uge",
-            slt:     "slt",
-            sle:     "sle",
-            sgt:     "sgt",
-            sge:     "sge",
-            flt:     "flt",
-            fle:     "fle",
-            feq:     "feq",
-            neg:     "neg",
-            fneg:    "fneg",
-            not_b:   "not",
-            bitnot:  "bitnot",
-            zext:    "zext",
-            sext:    "sext",
-            trunc:   "trunc",
-            bitcast: "bitcast",
-            sitofp:  "sitofp",
-            uitofp:  "uitofp",
-            fptosi:  "fptosi",
-            fptoui:  "fptoui",
-            sadd_sat:"sadd_sat",
-            uadd_sat:"uadd_sat",
-            ssub_sat:"ssub_sat",
-            usub_sat:"usub_sat",
-            smul_sat:"smul_sat",
-            umul_sat:"umul_sat",
-            add_wrap:"add_wrap",
-            sub_wrap:"sub_wrap",
-            mul_wrap:"mul_wrap",
-            srem_euc:"srem_euc",
-            urem_euc:"urem_euc",
-            cmp3_s:  "cmp3_s",
-            cmp3_u:  "cmp3_u",
-        },
+        // 3. (Machine operations are the variants of `MachineOp`, stdlib/core/asm/machine_ops.pilot.)
 
         // 4. Hardware Register Classes & Bit Widths
         Reg = {
@@ -380,14 +317,16 @@ pub syntax type_construct {
     ((A) => R) => quote { fn<$A, $R> };
 }
 
-// Ring 80 (`lvl(80)`): Restricted to `Pilot.Core` SIMD/Primitive Implementations
-pub lvl(Cfg.Tokens.ring_simd) comptime fn {
-    __ssa(opcode, lhs, rhs)       => emit_ssa_binop(opcode, lhs, rhs);
-    __ssa_unary(opcode, val)      => emit_ssa_unop(opcode, val);
-    __ssa_cast(opcode, val, T)    => emit_ssa_cast(opcode, val, T);
-    __ssa_load(ptr_val)           => emit_ssa_load(ptr_val);
-    __ssa_store(ptr_val, val)     => emit_ssa_store(ptr_val, val);
-    __ssa_gep(base_ptr, elem_idx) => emit_ssa_gep(base_ptr, elem_idx);
+// Ring 80 (`lvl(80)`): Restricted to `Pilot.Core` SIMD/Primitive Implementations.
+// Each form is one machine operation (`asm`, PROP-009 step 1b); the
+// operations are the variants of `MachineOp` (stdlib/core/asm/machine_ops.pilot).
+pub lvl(Cfg.Tokens.ring_simd) syntax {
+    __ssa(op, lhs, rhs)       => quote { asm($op, $lhs, $rhs) };
+    __ssa_unary(op, val)      => quote { asm($op, $val) };
+    __ssa_cast(op, val, T)    => quote { asm($op, $val, $T) };
+    __ssa_load(p)             => quote { asm(MachineOp::Load, $p) };
+    __ssa_store(p, val)       => quote { asm(MachineOp::Store, $p, $val) };
+    __ssa_gep(base, idx)      => quote { asm(MachineOp::ElemAddr, $base, $idx) };
 }
 
 // Ring 0 (`lvl(0)`): Public Compile-Time Reflection & Introspection Intrinsics
@@ -415,33 +354,33 @@ pub partial struct {
     [Lang(Cfg.Lang.bool_t), Bits(Cfg.Reg.b1, Cfg.Reg.gpr_u)]
     bool {
         pub pure:
-            op !  ()          -> bool => __ssa(Cfg.Ssa.xor_b, self, true);
-            op &  (rhs: bool) -> bool => __ssa(Cfg.Ssa.and_b, self, rhs);
-            op |  (rhs: bool) -> bool => __ssa(Cfg.Ssa.or_b,  self, rhs);
-            op ^  (rhs: bool) -> bool => __ssa(Cfg.Ssa.xor_b, self, rhs);
-            op == (rhs: bool) -> bool => __ssa(Cfg.Ssa.eq,    self, rhs);
-            op != (rhs: bool) -> bool => __ssa(Cfg.Ssa.ne,    self, rhs);
+            op !  ()          -> bool => __ssa(MachineOp::Xor, self, true);
+            op &  (rhs: bool) -> bool => __ssa(MachineOp::And, self, rhs);
+            op |  (rhs: bool) -> bool => __ssa(MachineOp::Or,  self, rhs);
+            op ^  (rhs: bool) -> bool => __ssa(MachineOp::Xor, self, rhs);
+            op == (rhs: bool) -> bool => __ssa(MachineOp::Eq,    self, rhs);
+            op != (rhs: bool) -> bool => __ssa(MachineOp::Ne,    self, rhs);
     }
 
     [Lang(Cfg.Lang.usize_t), Bits(Cfg.Reg.b64, Cfg.Reg.gpr_u)]
     usize {
         pub pure:
-            op +  (rhs: usize) -> usize => __ssa(Cfg.Ssa.add,  self, rhs);
-            op -  (rhs: usize) -> usize => __ssa(Cfg.Ssa.sub,  self, rhs);
-            op *  (rhs: usize) -> usize => __ssa(Cfg.Ssa.mul,  self, rhs);
-            op /  (rhs: usize) -> usize => __ssa(Cfg.Ssa.udiv, self, rhs);
-            op %  (rhs: usize) -> usize => __ssa(Cfg.Ssa.urem, self, rhs);
-            op &  (rhs: usize) -> usize => __ssa(Cfg.Ssa.and_b,self, rhs);
-            op |  (rhs: usize) -> usize => __ssa(Cfg.Ssa.or_b, self, rhs);
-            op ^  (rhs: usize) -> usize => __ssa(Cfg.Ssa.xor_b,self, rhs);
-            op << (rhs: usize) -> usize => __ssa(Cfg.Ssa.shl,  self, rhs);
-            op >> (rhs: usize) -> usize => __ssa(Cfg.Ssa.lshr, self, rhs);
-            op == (rhs: usize) -> bool  => __ssa(Cfg.Ssa.eq,   self, rhs);
-            op != (rhs: usize) -> bool  => __ssa(Cfg.Ssa.ne,   self, rhs);
-            op <  (rhs: usize) -> bool  => __ssa(Cfg.Ssa.ult,  self, rhs);
-            op <= (rhs: usize) -> bool  => __ssa(Cfg.Ssa.ule,  self, rhs);
-            op >  (rhs: usize) -> bool  => __ssa(Cfg.Ssa.ugt,  self, rhs);
-            op >= (rhs: usize) -> bool  => __ssa(Cfg.Ssa.uge,  self, rhs);
+            op +  (rhs: usize) -> usize => __ssa(MachineOp::Add,  self, rhs);
+            op -  (rhs: usize) -> usize => __ssa(MachineOp::Sub,  self, rhs);
+            op *  (rhs: usize) -> usize => __ssa(MachineOp::Mul,  self, rhs);
+            op /  (rhs: usize) -> usize => __ssa(MachineOp::UDiv, self, rhs);
+            op %  (rhs: usize) -> usize => __ssa(MachineOp::URem, self, rhs);
+            op &  (rhs: usize) -> usize => __ssa(MachineOp::And,self, rhs);
+            op |  (rhs: usize) -> usize => __ssa(MachineOp::Or, self, rhs);
+            op ^  (rhs: usize) -> usize => __ssa(MachineOp::Xor,self, rhs);
+            op << (rhs: usize) -> usize => __ssa(MachineOp::Shl,  self, rhs);
+            op >> (rhs: usize) -> usize => __ssa(MachineOp::LShr, self, rhs);
+            op == (rhs: usize) -> bool  => __ssa(MachineOp::Eq,   self, rhs);
+            op != (rhs: usize) -> bool  => __ssa(MachineOp::Ne,   self, rhs);
+            op <  (rhs: usize) -> bool  => __ssa(MachineOp::ULt,  self, rhs);
+            op <= (rhs: usize) -> bool  => __ssa(MachineOp::ULe,  self, rhs);
+            op >  (rhs: usize) -> bool  => __ssa(MachineOp::UGt,  self, rhs);
+            op >= (rhs: usize) -> bool  => __ssa(MachineOp::UGe,  self, rhs);
     }
 }
 

@@ -117,6 +117,7 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/types.pilot",
     "selfhost/check/diag.pilot",
     "selfhost/check/program.pilot",
+    "selfhost/check/asm.pilot",
     "selfhost/types/method_table.pilot",
     "selfhost/types/bundle_splice.pilot",
     "selfhost/check/methods.pilot",
