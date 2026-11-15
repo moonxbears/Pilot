@@ -1,6 +1,6 @@
 // Unbuilt HostOp stops loudly at registered seam `bridge.mem_map` (PROP-002a §6 & §7).
-use Pilot.Core.Bridge.Os;
+use Pilot.Core.HostRaw;
 
 fn main() {
-    let _ = os_mem_map(0, 0, 4096, 3, 0, 0);
+    let _ = RawMem.map_pages(0, 0, 4096, 3, 0, 0);
 }

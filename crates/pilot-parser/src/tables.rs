@@ -189,7 +189,6 @@ pub(crate) fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
 /// ingest order. Every `stdlib/core/primitives/*.pilot` file follows them.
 pub(crate) const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/bridge_lang.pilot",
-    "stdlib/core/bridge_os.pilot",
     "stdlib/core/core.pilot",
     "stdlib/core/syntax/type_construct.pilot",
     "stdlib/core/syntax/module_ext.pilot",

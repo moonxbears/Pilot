@@ -1,6 +1,6 @@
 // Unbuilt HostOp stops loudly at registered seam `bridge.futex` (PROP-002a §6 & §7).
-use Pilot.Core.Bridge.Os;
+use Pilot.Core.Env;
 
 fn main() {
-    let _ = os_futex(0, 0, 0, 0);
+    let _ = Thread.futex(0, 0, 0, 0);
 }

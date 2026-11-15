@@ -553,6 +553,8 @@ fn prepare_intrinsic(fr: IrFrame, st: IrStep) {
         st.h = run_intrinsic_refused;
     } else if name == program_args_op() {
         st.h = run_program_args;
+    } else if name == "host_op" {
+        st.h = run_host_op;
     } else if !fr.engine_ops.has(name) {
         st.h = run_intrinsic_seam;
     } else {
@@ -572,6 +574,46 @@ fn run_program_args(fr: IrFrame, st: IrStep) {
 
 fn run_intrinsic_seam(fr: IrFrame, st: IrStep) {
     fr.vals[st.result] = seam("ir.interp_hook", f"the IR interpreter does not run the engine operation `{st.sym}`");
+}
+
+fn run_host_op(fr: IrFrame, st: IrStep) {
+    let vals = fr.vals;
+    let args = values_of(vals, st.a);
+    if args.len() >= 7 && args[0] == 35 && args[1] == 2 {
+        let buf = args[4];
+        let cap = args[5];
+        let out_len_ptr = args[6];
+        var total = 0;
+        for a in fr.args {
+            let s = "" + a;
+            total = total + 4 + s.len();
+        }
+        if out_len_ptr != 0 {
+            let _ = op_checked("host_op", [8, out_len_ptr, total, 64]);
+        }
+        if total > cap {
+            vals[st.result] = -44;
+            return;
+        }
+        var off = 0;
+        for a in fr.args {
+            let s = "" + a;
+            let _ = op_checked("host_op", [8, buf + off, s.len(), 32]);
+            off = off + 4;
+            if s.len() > 0 {
+                let _ = op_checked("str_copy_to_ptr", [s, buf + off, s.len()]);
+                off = off + s.len();
+            }
+        }
+        vals[st.result] = 0;
+        return;
+    }
+    let r = op_checked("host_op", args);
+    if r[0] == true {
+        vals[st.result] = r[1];
+    } else {
+        raise_fault(fr.fault, r[1]);
+    }
 }
 
 fn run_call_intrinsic(fr: IrFrame, st: IrStep) {
@@ -786,7 +828,8 @@ pub fn interp_engine_ops() -> Map<str, str> {
         "str_len", "str_slice", "str_find", "str_contains", "str_starts_with", "str_ends_with",
         "str_trim", "str_replace", "str_byte_at", "str_from_bytes", "map_values", "map_keys", "to_str",
         "map_new", "map_get", "map_set", "map_has", "map_remove", "seam_open", "value_clone",
-        "scalar_from",
+        "scalar_from", "host_op", "str_copy_to_ptr", "str_from_ptr",
+        "vm_thread_entry_ptr", "vm_callback_dispatch_ptr",
     ] {
         ops.set(name, name);
     }

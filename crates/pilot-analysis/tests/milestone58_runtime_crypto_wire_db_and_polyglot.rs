@@ -1000,11 +1000,11 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     let v_new = rng.ascii_payload(11);
 
     let os_abi_src = std::fs::read_to_string(root.join("stdlib/core/os_abi.pilot")).unwrap();
-    let bridge_os_src = std::fs::read_to_string(root.join("stdlib/core/bridge_os.pilot")).unwrap();
+    let host_raw_src = std::fs::read_to_string(root.join("stdlib/core/host_raw.pilot")).unwrap();
     let native_calls_src = std::fs::read_to_string(root.join("stdlib/core/builtins/native_calls.pilot")).unwrap();
     let env_src = std::fs::read_to_string(root.join("stdlib/core/env.pilot")).unwrap();
     let script = format!(
-        "{os_abi_src}\n{bridge_os_src}\n{native_calls_src}\n{env_src}\n{text_src}\n{reactive_src}\n{effects_src}\n{http_src}\n\
+        "{os_abi_src}\n{host_raw_src}\n{native_calls_src}\n{env_src}\n{text_src}\n{reactive_src}\n{effects_src}\n{http_src}\n\
          let g = rx_graph_new();\n\
          let src = rx_source(g, {s0});\n\
          let left = rx_derived(g, src, 0, 1, {k1});\n\
@@ -1119,11 +1119,11 @@ pub fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
     let bindings_json = format!("{{\"x\":{},\"y\":{}}}", v_a, v_b);
 
     let os_abi_src = std::fs::read_to_string(root.join("stdlib/core/os_abi.pilot")).unwrap();
-    let bridge_os_src = std::fs::read_to_string(root.join("stdlib/core/bridge_os.pilot")).unwrap();
+    let host_raw_src = std::fs::read_to_string(root.join("stdlib/core/host_raw.pilot")).unwrap();
     let native_calls_src = std::fs::read_to_string(root.join("stdlib/core/builtins/native_calls.pilot")).unwrap();
     let env_src = std::fs::read_to_string(root.join("stdlib/core/env.pilot")).unwrap();
     let script = format!(
-        "{os_abi_src}\n{bridge_os_src}\n{native_calls_src}\n{env_src}\n{text_src}\n{shm_src}\n{marshal_src}\n{bridge_src}\n\
+        "{os_abi_src}\n{host_raw_src}\n{native_calls_src}\n{env_src}\n{text_src}\n{shm_src}\n{marshal_src}\n{bridge_src}\n\
          let buf = create_shm_owned_buffer(8192, 128, 16);\n\
          let v_ok = project_shm_borrowed_view(buf, 4, 8, 8);\n\
          let v_oob = project_shm_borrowed_view(buf, 12, 8, 8);\n\

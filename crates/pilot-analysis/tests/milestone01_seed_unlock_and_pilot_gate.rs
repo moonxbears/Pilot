@@ -100,7 +100,7 @@ fn workspace_root() -> PathBuf {
 fn load_gate_bundle(root: &Path) -> String {
     let deps = [
         "stdlib/core/os_abi.pilot",
-        "stdlib/core/bridge_os.pilot",
+        "stdlib/core/host_raw.pilot",
         "stdlib/core/builtins/native_calls.pilot",
         "stdlib/core/file.pilot",
         "stdlib/core/env.pilot",

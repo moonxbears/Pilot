@@ -4,7 +4,7 @@
 // =========================================================================
 // Defines the portable `PilotErr` error codes (`1..=51`), `arch_kind` IDs
 // (`0..=6`), multiplexed sub-code constants, and the 7 `[Layout(c_abi)]`
-// memory-mapped structs shared across `bridge_os.pilot` and `bridge.rs`.
+// memory-mapped structs shared by the `[EngineOp]` owners and `bridge.rs`.
 // Field byte offsets and numeric codes are frozen through `airlock_abi.pilot`
 // and checked by `GATE021` + compile-time assertions in `bridge.rs`.
 // =========================================================================

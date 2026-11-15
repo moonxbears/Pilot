@@ -136,6 +136,7 @@ extern "C" {
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     fn dlclose(handle: *mut c_void) -> c_int;
     fn pipe(fds: *mut c_int) -> c_int;
+    fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
     fn poll(fds: *mut LibcPollFd, nfds: usize, timeout: c_int) -> c_int;
 }
 
@@ -691,6 +692,14 @@ unsafe fn dispatch_op(vm: &mut PilVirtualMachine, op_id: i64, args: &[PilotVal])
             }
             if pipe(raw.as_mut_ptr()) != 0 {
                 return Err(OpFail::Code(map_io_err(&io::Error::last_os_error())));
+            }
+            // Close-on-exec (F_SETFD = 2, FD_CLOEXEC = 1 on Linux and macOS):
+            // a spawned child gets only the ends passed as its stdio, so it
+            // sees end-of-input once the parent closes its write end.
+            for fd in raw {
+                if fcntl(fd, 2, 1) != 0 {
+                    return Err(OpFail::Code(map_io_err(&io::Error::last_os_error())));
+                }
             }
             (i_at(1) as *mut [i64; 2]).write_unaligned([vm.bridge.alloc_fd(Desc::File(File::from_raw_fd(raw[0]))), vm.bridge.alloc_fd(Desc::File(File::from_raw_fd(raw[1])))]);
             Ok(0)

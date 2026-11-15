@@ -9,13 +9,13 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.File;
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces::*;
 use Pilot.Core.OsAbi;
-use Pilot.Core.Bridge.Os;
+use Pilot.Core.HostRaw;
 
 fn file_path_buf(path: str) -> i64 {
     let n = path.len();
     let cap = if n > 0 { n } else { 1 };
-    let buf = os_slab_alloc(cap, 1);
-    if n > 0 { let _ = str_copy_to_ptr(path, buf); }
+    let buf = RawMem.alloc(cap, 1);
+    if n > 0 { let _ = str_copy_to_ptr(path, buf, n); }
     return buf;
 }
 
@@ -50,42 +50,57 @@ fn file_join_path(dir: str, name: str) -> str {
     return dir + "/" + name;
 }
 
+/// Whether `path`, following symbolic links, is a directory
+/// (`OsStat.kind` at offset 0 is `stat_kind_dir`).
+fn file_points_to_dir(path: str) -> bool {
+    let pbuf = file_path_buf(path);
+    let sbuf = RawMem.alloc(72, 8);
+    let rc = File.stat(1, pbuf, path.len(), sbuf);
+    let kind = if rc >= 0 { RawMem.load_int(sbuf, 64, 0) } else { -1 };
+    let _ = RawMem.free(sbuf, 72, 8);
+    let _ = RawMem.free(pbuf, path.len(), 1);
+    return kind == 2;
+}
+
 fn file_read_dir_entries(path: str, ref dirs: List<str>, ref files: List<str>) -> bool {
     if path == "" { return false; }
     let pbuf = file_path_buf(path);
-    let out_len_ptr = os_slab_alloc(8, 8);
+    let out_len_ptr = RawMem.alloc(8, 8);
     var cap = 16384;
-    var obuf = os_slab_alloc(cap, 8);
-    var rc = os_fs_read_dir(pbuf, path.len(), obuf, cap, out_len_ptr);
+    var obuf = RawMem.alloc(cap, 8);
+    var rc = File.read_dir(pbuf, path.len(), obuf, cap, out_len_ptr);
     while rc == -44 {
         let next_cap = cap * 2;
-        obuf = os_slab_realloc(obuf, cap, next_cap, 8);
+        obuf = RawMem.realloc(obuf, cap, next_cap, 8);
         cap = next_cap;
-        rc = os_fs_read_dir(pbuf, path.len(), obuf, cap, out_len_ptr);
+        rc = File.read_dir(pbuf, path.len(), obuf, cap, out_len_ptr);
     }
-    let _ = os_slab_free(pbuf, path.len(), 1);
-    let n = os_load_int(out_len_ptr, 64, 0);
-    let _ = os_slab_free(out_len_ptr, 8, 8);
+    let _ = RawMem.free(pbuf, path.len(), 1);
+    let n = RawMem.load_int(out_len_ptr, 64, 0);
+    let _ = RawMem.free(out_len_ptr, 8, 8);
     if rc < 0 {
-        let _ = os_slab_free(obuf, cap, 8);
+        let _ = RawMem.free(obuf, cap, 8);
         return false;
     }
     var off = 0;
     while off + 3 <= n {
-        let kind = os_load_int(obuf + off, 8, 0);
-        let lo = os_load_int(obuf + off + 1, 8, 0);
-        let hi = os_load_int(obuf + off + 2, 8, 0);
+        let kind = RawMem.load_int(obuf + off, 8, 0);
+        let lo = RawMem.load_int(obuf + off + 1, 8, 0);
+        let hi = RawMem.load_int(obuf + off + 2, 8, 0);
         let nlen = lo + hi * 256;
         off = off + 3;
         if off + nlen > n { break; }
         let name = str_from_ptr(obuf + off, nlen);
         off = off + nlen;
         if name != "." && name != ".." {
-            if kind == 2 { dirs.push(name); }
+            // A symbolic link (`stat_kind_symlink`) counts as what it points
+            // to, so a linked directory is listed and walked like a real one.
+            let is_dir = kind == 2 || (kind == 3 && file_points_to_dir(file_join_path(path, name)));
+            if is_dir { dirs.push(name); }
             else { files.push(name); }
         }
     }
-    let _ = os_slab_free(obuf, cap, 8);
+    let _ = RawMem.free(obuf, cap, 8);
     return true;
 }
 
@@ -106,44 +121,69 @@ fn file_ensure_parent_dirs(path: str) {
     }
     if last_slash <= 0 { return; }
     let pbuf = file_path_buf(path);
-    let _ = os_fs_mkdir(pbuf, last_slash, 1, 493);
-    let _ = os_slab_free(pbuf, path.len(), 1);
+    let _ = File.mkdir(pbuf, last_slash, 1, 493);
+    let _ = RawMem.free(pbuf, path.len(), 1);
 }
 
 [KeywordDefAttr(30, "Freestanding core filesystem interface for file I/O operations.")]
 pub struct File : IValue {
+    [EngineOp]
+    priv static fn stat_internal(follow: i64, path_ptr: i64, path_len: i64, out_stat_ptr: i64) -> i64 =>
+        __engine("host_op", 26, follow, path_ptr, path_len, out_stat_ptr);
+    pub static fn stat(follow: i64, path_ptr: i64, path_len: i64, out_stat_ptr: i64) -> i64 => File.stat_internal(follow, path_ptr, path_len, out_stat_ptr);
+
+    [EngineOp]
+    priv static fn read_dir_internal(path_ptr: i64, path_len: i64, dst: i64, cap: i64, out_len_ptr: i64) -> i64 =>
+        __engine("host_op", 27, path_ptr, path_len, dst, cap, out_len_ptr);
+    pub static fn read_dir(path_ptr: i64, path_len: i64, dst: i64, cap: i64, out_len_ptr: i64) -> i64 => File.read_dir_internal(path_ptr, path_len, dst, cap, out_len_ptr);
+
+    [EngineOp]
+    priv static fn mkdir_internal(path_ptr: i64, path_len: i64, parents: i64, mode: i64) -> i64 =>
+        __engine("host_op", 28, path_ptr, path_len, parents, mode);
+    pub static fn mkdir(path_ptr: i64, path_len: i64, parents: i64, mode: i64) -> i64 => File.mkdir_internal(path_ptr, path_len, parents, mode);
+
+    [EngineOp]
+    priv static fn remove_internal(path_ptr: i64, path_len: i64, recursive: i64) -> i64 =>
+        __engine("host_op", 29, path_ptr, path_len, recursive);
+    pub static fn remove(path_ptr: i64, path_len: i64, recursive: i64) -> i64 => File.remove_internal(path_ptr, path_len, recursive);
+
+    [EngineOp]
+    priv static fn rename_link_internal(op: i64, src_ptr: i64, src_len: i64, dst_ptr: i64, dst_len: i64, out_len_ptr: i64) -> i64 =>
+        __engine("host_op", 30, op, src_ptr, src_len, dst_ptr, dst_len, out_len_ptr);
+    pub static fn rename_link(op: i64, src_ptr: i64, src_len: i64, dst_ptr: i64, dst_len: i64, out_len_ptr: i64) -> i64 => File.rename_link_internal(op, src_ptr, src_len, dst_ptr, dst_len, out_len_ptr);
+
     pub static fn exists(path: str) -> bool {
         if path == "" { return false; }
         let pbuf = file_path_buf(path);
-        let sbuf = os_slab_alloc(72, 8);
-        let rc = os_fs_stat(1, pbuf, path.len(), sbuf);
-        let _ = os_slab_free(sbuf, 72, 8);
-        let _ = os_slab_free(pbuf, path.len(), 1);
+        let sbuf = RawMem.alloc(72, 8);
+        let rc = File.stat(1, pbuf, path.len(), sbuf);
+        let _ = RawMem.free(sbuf, 72, 8);
+        let _ = RawMem.free(pbuf, path.len(), 1);
         return rc >= 0;
     }
 
     pub static fn read_text(path: str) -> str {
         if path == "" { return ""; }
         let pbuf = file_path_buf(path);
-        let fd = os_fd_open(pbuf, path.len(), 1, 0);
-        let _ = os_slab_free(pbuf, path.len(), 1);
+        let fd = Fd.open_path(pbuf, path.len(), 1, 0);
+        let _ = RawMem.free(pbuf, path.len(), 1);
         if fd < 0 { return ""; }
         var cap = 16384;
         var len = 0;
-        var buf = os_slab_alloc(cap, 8);
+        var buf = RawMem.alloc(cap, 8);
         while true {
             if cap - len < 4096 {
                 let next_cap = cap * 2;
-                buf = os_slab_realloc(buf, cap, next_cap, 8);
+                buf = RawMem.realloc(buf, cap, next_cap, 8);
                 cap = next_cap;
             }
-            let r = os_fd_read(fd, buf + len, cap - len);
+            let r = Fd.read(fd, buf + len, cap - len);
             if r <= 0 { break; }
             len = len + r;
         }
-        let _ = os_fd_close(fd);
+        let _ = Fd.close(fd);
         let out = if len > 0 { str_from_ptr(buf, len) } else { "" };
-        let _ = os_slab_free(buf, cap, 8);
+        let _ = RawMem.free(buf, cap, 8);
         return out;
     }
 
@@ -153,25 +193,25 @@ pub struct File : IValue {
         file_ensure_parent_dirs(path);
         let pbuf = file_path_buf(path);
         // READ(1) | WRITE(2) | CREAT(4) | TRUNC(8) = 15, mode 0o644 = 420
-        let fd = os_fd_open(pbuf, path.len(), 14, 420);
-        let _ = os_slab_free(pbuf, path.len(), 1);
+        let fd = Fd.open_path(pbuf, path.len(), 14, 420);
+        let _ = RawMem.free(pbuf, path.len(), 1);
         if fd < 0 { return false; }
         let n = content.len();
         if n == 0 {
-            let _ = os_fd_close(fd);
+            let _ = Fd.close(fd);
             return true;
         }
-        let cbuf = os_slab_alloc(n, 1);
-        let _ = str_copy_to_ptr(content, cbuf);
+        let cbuf = RawMem.alloc(n, 1);
+        let _ = str_copy_to_ptr(content, cbuf, n);
         var off = 0;
         var ok = true;
         while off < n {
-            let w = os_fd_write(fd, cbuf + off, n - off);
+            let w = Fd.write(fd, cbuf + off, n - off);
             if w <= 0 { ok = false; break; }
             off = off + w;
         }
-        let _ = os_slab_free(cbuf, n, 1);
-        let _ = os_fd_close(fd);
+        let _ = RawMem.free(cbuf, n, 1);
+        let _ = Fd.close(fd);
         return ok;
     }
 

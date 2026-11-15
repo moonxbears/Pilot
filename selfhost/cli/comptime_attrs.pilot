@@ -38,7 +38,7 @@ fn comptime_entry_links(needs_files: bool) -> List<str> {
     var out: List<str> = ["stdlib/core/attr_flow.pilot"];
     if needs_files {
         out.push("stdlib/core/os_abi.pilot");
-        out.push("stdlib/core/bridge_os.pilot");
+        out.push("stdlib/core/host_raw.pilot");
         out.push("stdlib/core/builtins/native_calls.pilot");
         out.push("stdlib/core/file.pilot");
     }

@@ -1,6 +1,6 @@
 // Unbuilt HostOp stops loudly at registered seam `bridge.thread_join` (PROP-002a §6 & §7).
-use Pilot.Core.Bridge.Os;
+use Pilot.Core.Env;
 
 fn main() {
-    let _ = os_thread_join(1, 0);
+    let _ = Thread.join(1, 0);
 }

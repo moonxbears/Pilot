@@ -4,7 +4,7 @@
 // ==============================================================================
 pub pkg std.io;
 
-use Pilot.Core.Bridge.Os;
+use Pilot.Core.HostRaw;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -13,33 +13,33 @@ pub pure fn nameof(sym: str) -> str => sym;
 pub fn read_line() -> str? {
     var cap = 256;
     var len = 0;
-    var buf = os_slab_alloc(cap, 1);
-    let ch = os_slab_alloc(1, 1);
+    var buf = RawMem.alloc(cap, 1);
+    let ch = RawMem.alloc(1, 1);
     var got_any = false;
     while true {
-        let r = os_fd_read(0, ch, 1);
+        let r = Fd.read(0, ch, 1);
         if r <= 0 { break; }
         got_any = true;
-        let b = os_load_int(ch, 8, 0);
+        let b = RawMem.load_int(ch, 8, 0);
         if b == 10 { break; }
         if len >= cap {
             let next_cap = cap * 2;
-            buf = os_slab_realloc(buf, cap, next_cap, 1);
+            buf = RawMem.realloc(buf, cap, next_cap, 1);
             cap = next_cap;
         }
-        let _ = os_store_int(buf + len, b, 8);
+        let _ = RawMem.store_int(buf + len, b, 8);
         len = len + 1;
     }
-    let _ = os_slab_free(ch, 1, 1);
+    let _ = RawMem.free(ch, 1, 1);
     if !got_any && len == 0 {
-        let _ = os_slab_free(buf, cap, 1);
+        let _ = RawMem.free(buf, cap, 1);
         return none;
     }
-    if len > 0 && os_load_int(buf + len - 1, 8, 0) == 13 {
+    if len > 0 && RawMem.load_int(buf + len - 1, 8, 0) == 13 {
         len = len - 1;
     }
     let out = if len > 0 { str_from_ptr(buf, len) } else { "" };
-    let _ = os_slab_free(buf, cap, 1);
+    let _ = RawMem.free(buf, cap, 1);
     return out;
 }
 
@@ -47,19 +47,19 @@ pub fn read_line() -> str? {
 pub fn read_all() -> str {
     var cap = 8192;
     var len = 0;
-    var buf = os_slab_alloc(cap, 1);
+    var buf = RawMem.alloc(cap, 1);
     while true {
         if cap - len < 2048 {
             let next_cap = cap * 2;
-            buf = os_slab_realloc(buf, cap, next_cap, 1);
+            buf = RawMem.realloc(buf, cap, next_cap, 1);
             cap = next_cap;
         }
-        let r = os_fd_read(0, buf + len, cap - len);
+        let r = Fd.read(0, buf + len, cap - len);
         if r <= 0 { break; }
         len = len + r;
     }
     let out = if len > 0 { str_from_ptr(buf, len) } else { "" };
-    let _ = os_slab_free(buf, cap, 1);
+    let _ = RawMem.free(buf, cap, 1);
     return out;
 }
 

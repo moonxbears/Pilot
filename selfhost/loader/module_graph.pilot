@@ -75,7 +75,7 @@ fn mg_skip_ws_and_comments(src: str, start: i64) -> i64 {
     return i;
 }
 
-fn mg_skip_string(src: str, start: i64, quote: i64) -> i64 {
+fn mg_skip_string(src: str, start: i64, qchar: i64) -> i64 {
     let n = src.len();
     var i = start + 1;
     while i < n {
@@ -84,7 +84,7 @@ fn mg_skip_string(src: str, start: i64, quote: i64) -> i64 {
             i = i + 2;
             continue;
         }
-        if b == quote { return i + 1; }
+        if b == qchar { return i + 1; }
         i = i + 1;
     }
     return n;
@@ -343,7 +343,7 @@ pub pure fn mg_import_package(spec: str) -> str {
 /// Where the name of `pkg` says it lives under `root`.
 pub fn mg_conventional_paths(root: str, pkg: str) -> List<str> {
     if pkg == "Pilot.Core.Bridge.Lang" { return [f"{root}/core/bridge_lang.pilot"]; }
-    if pkg == "Pilot.Core.Bridge.Os"   { return [f"{root}/core/bridge_os.pilot"]; }
+    if pkg == "Pilot.Core.HostRaw"     { return [f"{root}/core/host_raw.pilot"]; }
     if pkg == "Pilot.Core.OsAbi"       { return [f"{root}/core/os_abi.pilot"]; }
     let rel = pkg.replace(".", "/");
     var sub = rel;

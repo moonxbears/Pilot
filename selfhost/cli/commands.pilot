@@ -31,6 +31,11 @@ pub pure fn cli_version_text() -> str => "Pilot v1.1.51 (Self-Hosted PilVM v3)";
 
 /// The sources of the `pilot gate` runner.
 pub fn cli_gate_files() -> List<str> => [
+    "stdlib/core/os_abi.pilot",
+    "stdlib/core/host_raw.pilot",
+    "stdlib/core/builtins/native_calls.pilot",
+    "stdlib/core/file.pilot",
+    "stdlib/core/env.pilot",
     "stdlib/crypto/hash.pilot",
     "stdlib/std/proc.pilot",
     "stdlib/std/text.pilot",
@@ -39,6 +44,7 @@ pub fn cli_gate_files() -> List<str> => [
     "selfhost/parser.pilot",
     "selfhost/pilotc.pilot",
     "selfhost/gate/manifest.pilot",
+    "selfhost/gate/airlock_abi.pilot",
     "selfhost/gate/seed_audit.pilot",
     "selfhost/gate/rename_litmus.pilot",
     "selfhost/gate/bootstrap_parity.pilot",
@@ -289,7 +295,7 @@ pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
             k = k + 1;
         }
         files.push("stdlib/core/os_abi.pilot");
-        files.push("stdlib/core/bridge_os.pilot");
+        files.push("stdlib/core/host_raw.pilot");
         files.push("stdlib/core/file.pilot");
         return host_checked_tool(args[1], files, cli_ir_decls(), f"emit_program_checked_to([{dialects}], [{paths}]);");
     }

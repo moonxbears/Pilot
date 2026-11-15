@@ -33,6 +33,10 @@
 #ifndef PILOT_RT_H
 #define PILOT_RT_H
 
+#if defined(__linux__) && !defined(_POSIX_C_SOURCE) && !defined(_GNU_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <inttypes.h>
 #include <math.h>
 #include <stdbool.h>
@@ -1502,5 +1506,7 @@ static inline void pilot_arity(int32_t argc, int32_t want) {
 }
 
 #endif /* __cplusplus */
+
+#include "pilot_rt_bridge.h"
 
 #endif /* PILOT_RT_H */

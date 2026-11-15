@@ -290,7 +290,7 @@ pub fn wiring_ledger() -> List<Capability> {
 
         // M1 gate
         cap("F1", "u64 values, explicit enum values, closures in fields, `op` as a name", ::Wired,
-            "crates/pilot-rt value.rs TAG_UINT and crates/pilot-vm ops.rs: a value converted to a 64-bit `gpr_unsigned` layout (typed let/var, assignment, parameter, return, struct field) is unsigned for arithmetic, `>>`, comparison and printing (tests/conformance/numbers/u64_values.pilot, u64_right_shift.pilot, hex_literal_u64.pilot); the parser keeps `Low = 5` as the variant's initializer and `enum E : u8` as its base, and the checker casts an enum through its base's register class (enum_explicit_values.pilot); a struct field that is not a method is called as the function it holds (field_closure_call.pilot); `op` followed by an assignment, `.`, `;`, `,` or `)` is a name (local_named_op.pilot)", ""),
+            "crates/pilot-vm value.rs TAG_UINT and ops.rs (retired pilot-rt merged into pilot-vm): a value converted to a 64-bit `gpr_unsigned` layout (typed let/var, assignment, parameter, return, struct field) is unsigned for arithmetic, `>>`, comparison and printing (tests/conformance/numbers/u64_values.pilot, u64_right_shift.pilot, hex_literal_u64.pilot); the parser keeps `Low = 5` as the variant's initializer and `enum E : u8` as its base, and the checker casts an enum through its base's register class (enum_explicit_values.pilot); a struct field that is not a method is called as the function it holds (field_closure_call.pilot); `op` followed by an assignment, `.`, `;`, `,` or `)` is a name (local_named_op.pilot)", ""),
         cap("F1", "programs past 65,535 instructions and constants", ::Wired,
             "crates/pilot-vm instruction.rs: a 64-bit instruction word whose high 32 bits hold the jump target, call entry or constant index; .pilc version 5 stores 8 bytes per instruction, and selfhost/vm/compiler.pilot and pilc_writer.pilot emit the same (milestone55 tests load and run it); crates/pilot-analysis/tests/seed_wide_operands.rs runs programs of more than 65,535 instructions and of more than 65,535 constants and round-trips them through .pilc. A block of more than 65,535 statements still overflows the 16-bit child count in crates/pilot-analysis/src/infer.rs", ""),
         cap("M1", "source scans GATE001-GATE007", ::Wired, "pilot gate; milestone01 test_m1_1_dynamic_vocabulary_harvester_and_fast_gate001_slice_injection", ""),
@@ -450,7 +450,11 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M12", "use c \"header.h\"", ::Spec, "fails with MOD001", "F4 F6"),
 
         // M13 calling conventions
-        cap("M13", "native trampoline (SysV, Win64)", ::Core, "crates/pilot-rt/src/c_abi.rs; test_m13_3 calls real native functions", ""),
+        cap("M13", "native trampoline (SysV, Win64)", ::Core, "crates/pilot-vm/src/bridge.rs (HostOp::FfiCall = 46) and c_abi.rs; test_m13_3 calls real native functions", ""),
+        cap("PROP-002a", "Model B+ airlock and 51 HostOps", ::Wired, "stdlib/core/{bridge_lang,os_abi}.pilot + crates/pilot-vm/src/bridge.rs; verified by 7 err_bridge_*_seam suites and GATE021 (selfhost/gate/airlock_abi.pilot); runtime/host_ops (was runtime/bridge_os) had a TYPE001 on byte_at, fixed but not yet rerun", ""),
+        cap("PROP-002a A1", "one op, one owner: each HostOp in one [EngineOp] owner method", ::Wired, "stdlib/core/{host_raw,file,env}.pilot owners; GATE021 checks 1-4 in selfhost/gate/airlock_abi.pilot, shown failing on a duplicate op site, a missing [EngineOp] and an unlisted native binding", ""),
+        cap("PROP-002a A1", "GATE021 check 5: one implementing *Bundle per engine-backed interface", ::Spec, "not built; lands with MapStorageBundle in PROP-002b", ""),
+        cap("PROP-007", "[Inline] honoured by an engine", ::Spec, "no engine inlines; [Inline] reports INLINE001 (warnings/warn_inline_not_implemented)", ""),
         cap("M13", "calling-convention descriptors and registry", ::Core, "test_m13_1, test_m13_2", ""),
         cap("M13", "SysV eightbyte classification", ::Core,
             "stdlib/pilot/abi/sysv_x64.pilot:36; test_m13_1 checks psABI 3.2.3 answers", "abi.aggregate_fields"),

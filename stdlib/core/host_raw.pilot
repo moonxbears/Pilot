@@ -1,0 +1,136 @@
+// =========================================================================
+// FILE: stdlib/core/host_raw.pilot
+// RAW HOST MEMORY & DESCRIPTOR OWNERS (`RawMem`, `Fd`) — PROP-002a Amendment A1
+// =========================================================================
+// One op, one owner: each `HostOp` below appears exactly once in the tree,
+// as the whole body of a `priv static fn ..._internal` marked `[EngineOp]`,
+// and that method is called only by its matching public method. Everything
+// else reaches the op through the public method. `GATE021` enforces this
+// against the owner registry in `selfhost/gate/airlock_abi.pilot`.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.HostRaw;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces::*;
+
+/// `[EngineOp]` on the one `priv` method that holds an engine op as its whole
+/// body (PROP-002a Amendment A1). `GATE021` reads it; it changes no code.
+[Layout(c_abi)]
+pub struct EngineOpAttr : IAttribute, IValue {
+    pub weight: i32;
+
+    pub static pure fn create() -> EngineOpAttr => EngineOpAttr { weight: 0, };
+}
+
+/// Raw host memory: slab allocation, copies, scalar loads/stores and atomics
+/// on addresses (`HostOp` 0..=11).
+pub struct RawMem : IValue {
+    [EngineOp]
+    priv static fn alloc_internal(size: i64, align: i64) -> i64 =>
+        __engine("host_op", 0, size, align);
+    pub static fn alloc(size: i64, align: i64) -> i64 => RawMem.alloc_internal(size, align);
+
+    [EngineOp]
+    priv static fn realloc_internal(ptr: i64, old_sz: i64, new_sz: i64, align: i64) -> i64 =>
+        __engine("host_op", 1, ptr, old_sz, new_sz, align);
+    pub static fn realloc(ptr: i64, old_sz: i64, new_sz: i64, align: i64) -> i64 => RawMem.realloc_internal(ptr, old_sz, new_sz, align);
+
+    [EngineOp]
+    priv static fn free_internal(ptr: i64, size: i64, align: i64) -> i64 =>
+        __engine("host_op", 2, ptr, size, align);
+    pub static fn free(ptr: i64, size: i64, align: i64) -> i64 => RawMem.free_internal(ptr, size, align);
+
+    [EngineOp]
+    priv static fn map_pages_internal(op: i64, addr_or_fd: i64, len: i64, prot: i64, offset: i64, out_ptr: i64) -> i64 =>
+        __engine("host_op", 3, op, addr_or_fd, len, prot, offset, out_ptr);
+    pub static fn map_pages(op: i64, addr_or_fd: i64, len: i64, prot: i64, offset: i64, out_ptr: i64) -> i64 => RawMem.map_pages_internal(op, addr_or_fd, len, prot, offset, out_ptr);
+
+    [EngineOp]
+    priv static fn copy_internal(dst: i64, src: i64, len: i64) -> i64 =>
+        __engine("host_op", 4, dst, src, len);
+    pub static fn copy(dst: i64, src: i64, len: i64) -> i64 => RawMem.copy_internal(dst, src, len);
+
+    [EngineOp]
+    priv static fn fill_internal(dst: i64, byte: i64, len: i64) -> i64 =>
+        __engine("host_op", 5, dst, byte, len);
+    pub static fn fill(dst: i64, byte: i64, len: i64) -> i64 => RawMem.fill_internal(dst, byte, len);
+
+    [EngineOp]
+    priv static fn compare_internal(a: i64, b: i64, len: i64) -> i64 =>
+        __engine("host_op", 6, a, b, len);
+    pub static fn compare(a: i64, b: i64, len: i64) -> i64 => RawMem.compare_internal(a, b, len);
+
+    [EngineOp]
+    priv static fn load_int_internal(ptr: i64, bits: i64, signed: i64) -> i64 =>
+        __engine("host_op", 7, ptr, bits, signed);
+    pub static fn load_int(ptr: i64, bits: i64, signed: i64) -> i64 => RawMem.load_int_internal(ptr, bits, signed);
+
+    [EngineOp]
+    priv static fn store_int_internal(ptr: i64, val: i64, bits: i64) -> i64 =>
+        __engine("host_op", 8, ptr, val, bits);
+    pub static fn store_int(ptr: i64, val: i64, bits: i64) -> i64 => RawMem.store_int_internal(ptr, val, bits);
+
+    [EngineOp]
+    priv static fn load_float_internal(ptr: i64, bits: i64) -> f64 =>
+        __engine("host_op", 9, ptr, bits);
+    pub static fn load_float(ptr: i64, bits: i64) -> f64 => RawMem.load_float_internal(ptr, bits);
+
+    [EngineOp]
+    priv static fn store_float_internal(ptr: i64, val: f64, bits: i64) -> i64 =>
+        __engine("host_op", 10, ptr, val, bits);
+    pub static fn store_float(ptr: i64, val: f64, bits: i64) -> i64 => RawMem.store_float_internal(ptr, val, bits);
+
+    [EngineOp]
+    priv static fn atomic_int_internal(op: i64, ptr: i64, expected: i64, desired: i64, order: i64) -> i64 =>
+        __engine("host_op", 11, op, ptr, expected, desired, order);
+    pub static fn atomic_int(op: i64, ptr: i64, expected: i64, desired: i64, order: i64) -> i64 => RawMem.atomic_int_internal(op, ptr, expected, desired, order);
+}
+
+/// Raw OS descriptors: open, close, read, write, pipes and poll (`HostOp` 16..=25).
+pub struct Fd : IValue {
+    [EngineOp]
+    priv static fn open_path_internal(path_ptr: i64, path_len: i64, flags: i64, mode: i64) -> i64 =>
+        __engine("host_op", 16, path_ptr, path_len, flags, mode);
+    pub static fn open_path(path_ptr: i64, path_len: i64, flags: i64, mode: i64) -> i64 => Fd.open_path_internal(path_ptr, path_len, flags, mode);
+
+    [EngineOp]
+    priv static fn close_internal(fd: i64) -> i64 =>
+        __engine("host_op", 17, fd);
+    pub static fn close(fd: i64) -> i64 => Fd.close_internal(fd);
+
+    [EngineOp]
+    priv static fn read_internal(fd: i64, dst: i64, cap: i64) -> i64 =>
+        __engine("host_op", 18, fd, dst, cap);
+    pub static fn read(fd: i64, dst: i64, cap: i64) -> i64 => Fd.read_internal(fd, dst, cap);
+
+    [EngineOp]
+    priv static fn write_internal(fd: i64, src: i64, len: i64) -> i64 =>
+        __engine("host_op", 19, fd, src, len);
+    pub static fn write(fd: i64, src: i64, len: i64) -> i64 => Fd.write_internal(fd, src, len);
+
+    [EngineOp]
+    priv static fn pread_internal(fd: i64, dst: i64, cap: i64, offset: i64) -> i64 =>
+        __engine("host_op", 20, fd, dst, cap, offset);
+    pub static fn pread(fd: i64, dst: i64, cap: i64, offset: i64) -> i64 => Fd.pread_internal(fd, dst, cap, offset);
+
+    [EngineOp]
+    priv static fn seek_sync_internal(op: i64, fd: i64, arg: i64) -> i64 =>
+        __engine("host_op", 22, op, fd, arg);
+    pub static fn seek_sync(op: i64, fd: i64, arg: i64) -> i64 => Fd.seek_sync_internal(op, fd, arg);
+
+    [EngineOp]
+    priv static fn pipe_dup_internal(op: i64, a0: i64, a1: i64) -> i64 =>
+        __engine("host_op", 23, op, a0, a1);
+    pub static fn pipe_dup(op: i64, a0: i64, a1: i64) -> i64 => Fd.pipe_dup_internal(op, a0, a1);
+
+    [EngineOp]
+    priv static fn poll_internal(pollfds_ptr: i64, nfds: i64, timeout_ms: i64) -> i64 =>
+        __engine("host_op", 24, pollfds_ptr, nfds, timeout_ms);
+    pub static fn poll(pollfds_ptr: i64, nfds: i64, timeout_ms: i64) -> i64 => Fd.poll_internal(pollfds_ptr, nfds, timeout_ms);
+
+    [EngineOp]
+    priv static fn raw_ctl_internal(op: i64, fd_or_raw: i64, kind_flags: i64, out_raw_ptr: i64) -> i64 =>
+        __engine("host_op", 25, op, fd_or_raw, kind_flags, out_raw_ptr);
+    pub static fn raw_ctl(op: i64, fd_or_raw: i64, kind_flags: i64, out_raw_ptr: i64) -> i64 => Fd.raw_ctl_internal(op, fd_or_raw, kind_flags, out_raw_ptr);
+}

@@ -81,7 +81,7 @@ fn exit_code_of(v: PilotVal) -> i32 {
 /// The Pilot sources of the module loader (`mg_link_plan`).
 const LOADER: &[&str] = &[
     "stdlib/core/os_abi.pilot",
-    "stdlib/core/bridge_os.pilot",
+    "stdlib/core/host_raw.pilot",
     "stdlib/core/file.pilot",
     "selfhost/diagnostics/model.pilot",
     "selfhost/loader/module_graph.pilot",

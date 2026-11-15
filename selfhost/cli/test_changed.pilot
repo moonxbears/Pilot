@@ -186,7 +186,7 @@ struct LinkTable : IObject {
 fn link_tool_files() -> List<str> => [
     "stdlib/core/bridge_lang.pilot",
     "stdlib/core/os_abi.pilot",
-    "stdlib/core/bridge_os.pilot",
+    "stdlib/core/host_raw.pilot",
     "stdlib/core/builtins/native_calls.pilot",
     "stdlib/core/file.pilot",
     "stdlib/std/text.pilot",

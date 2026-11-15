@@ -119,7 +119,7 @@ fn a_module_header_is_read_again_after_its_file_changes() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let loader_src: String = [
         "stdlib/core/os_abi.pilot",
-        "stdlib/core/bridge_os.pilot",
+        "stdlib/core/host_raw.pilot",
         "stdlib/core/builtins/native_calls.pilot",
         "stdlib/core/file.pilot",
         "selfhost/diagnostics/model.pilot",
@@ -135,7 +135,14 @@ fn a_module_header_is_read_again_after_its_file_changes() {
         let (_vm, out) = run(vm_src);
         out.as_int().expect("an integer")
     };
-    let program = format!("{loader_src}\nlet h = UnitHeader.read(\"{path_text}\", 0);\n(if h.package.len > 0 {{ 1 }} else {{ 0 }}) + h.imports.len;\n");
+    // One for the `pkg` line plus one per `use` line (`HeaderDecl` in
+    // selfhost/loader/module_graph.pilot).
+    let program = format!(
+        "{loader_src}\nlet h = UnitHeader.read(\"{path_text}\");\n\
+         var n = if h.package_name() != \"\" {{ 1 }} else {{ 0 }};\n\
+         for d in h.decls {{ if !d.is_package {{ n = n + 1; }} }}\n\
+         n;\n"
+    );
     std::fs::write(&path, "pkg Probe.Header;\nuse std.col;\n\nfn f() {}\n").expect("write");
     assert_eq!(count(&program), 2);
     std::fs::write(&path, "pkg Probe.Header;\nuse std.col;\nuse std.text;\n\nfn f() {}\n").expect("write");

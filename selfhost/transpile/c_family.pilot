@@ -588,6 +588,11 @@ fn engine_arity() -> Map<str, i64> {
     ops.set("str_find", 23);
     ops.set("rt_fault", 11);
     ops.set("seam_open", 12);
+    ops.set("host_op", 17);
+    ops.set("str_copy_to_ptr", 33);
+    ops.set("str_from_ptr", 22);
+    ops.set("vm_thread_entry_ptr", 0);
+    ops.set("vm_callback_dispatch_ptr", 0);
     return ops;
 }
 
