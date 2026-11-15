@@ -1,0 +1,11 @@
+// An arm of a syntax class is chosen by its first token, so two arms that
+// start with the same word cannot be told apart: SYN011 where the class is
+// declared.
+syntax Move {
+    go $to:Expr;
+    go $by:Expr;
+}
+
+fn main() {
+    print(1);
+}

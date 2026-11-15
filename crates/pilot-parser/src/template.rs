@@ -16,7 +16,7 @@ pub enum TemplateNode { Splice(String), TypeNamed(String, Vec<TemplateNode>), Ty
     Assign(u16, Box<TemplateNode>, Box<TemplateNode>), Defer(u16, Box<TemplateNode>),
     /// `for name in iter body` (no `then`) and `yield value`.
     For(String, Box<TemplateNode>, Box<TemplateNode>), Yield(Box<TemplateNode>),
-    /// A node a template cannot hold yet; `add_rule` reports it.
+    /// A node a template cannot hold yet; `add_seq_rule` reports it.
     Unsupported(&'static str), }
 impl TemplateNode {
     pub fn from_arena(arena: &AstArena, id: NodeId) -> Self { if id.is_none() || (id.0 as usize) >= arena.nodes.len() { return Self::NoneLit; }

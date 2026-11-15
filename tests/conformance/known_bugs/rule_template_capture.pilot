@@ -7,7 +7,7 @@
 fn helper() -> i64 => 100;
 
 syntax {
-    use_helper() => quote { helper() };
+    use_helper ( ) => quote { helper() };
 }
 
 fn main() {

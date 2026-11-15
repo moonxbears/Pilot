@@ -3,14 +3,14 @@
 // ends, then main prints "after". Until 2026-11-13 the assignment and the
 // `defer` were turned into `none`, so this printed 0, 4, after.
 syntax {
-    twice(x) => quote {
+    twice ( $x:Expr ) => quote {
         {
             var total = 0;
             total = $x + $x;
             print(total);
         }
     };
-    noisy(x) => quote {
+    noisy ( $x:Expr ) => quote {
         {
             defer print("left");
             print($x);

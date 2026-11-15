@@ -9,7 +9,6 @@ pub enum TypeConstructRule { Prefix { op: String, param: String, template: Templ
     Postfix { kind: TypePostfixKind, params: Vec<String>, template: TemplateNode },
     Infix { op: String, bp: u8, right_assoc: bool, lhs_param: String, rhs_param: String, template: TemplateNode },
     NamedGeneric { name: String, params: Vec<String>, template: TemplateNode }, }
-pub use rule_arms::SyntaxMacroRule;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, NoAlloc, Override, Unbuilt }
 /// An infix operator: its binding power, associativity, native `BinaryOp`
@@ -92,7 +91,9 @@ pub struct ParserTables { pub(crate) modifiers: HashMap<String, ModAct>, pub(cra
     /// `syntax` rules with a sequence head, by trigger word, in the order
     /// written (`rule_arms::SeqRule`).
     pub(crate) seq_rules: HashMap<String, Vec<crate::rule_arms::SeqRule>>,
-    pub type_rules: Vec<TypeConstructRule>, pub syntax_macros: HashMap<String, SyntaxMacroRule>, pub(crate) const_maps: HashMap<String, CVal>,
+    /// Syntax classes (`syntax Name { head; .. }`): each class's arms.
+    pub(crate) syntax_classes: HashMap<String, Vec<Vec<crate::rule_arms::HeadItem>>>,
+    pub type_rules: Vec<TypeConstructRule>, pub(crate) const_maps: HashMap<String, CVal>,
     /// Attribute functions by name (see `attr_hooks`).
     pub(crate) attr_hooks: HashMap<String, attr_hooks::AttrHook>,
     /// Register layouts declared with `[Bits(..)]`, by type name.
@@ -483,6 +484,8 @@ pub(crate) const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/syntax/module_ext.pilot",
     // The hole kinds of a `syntax` rule's sequence head (PROP-009 step 1a).
     "stdlib/core/syntax/holes.pilot",
+    // Clauses shared by rules: syntax classes (PROP-009 step 1c).
+    "stdlib/core/syntax/clauses.pilot",
     "stdlib/core/syntax/visibility.pilot",
     "stdlib/core/syntax/lifecycle.pilot",
     "stdlib/core/syntax/properties.pilot",

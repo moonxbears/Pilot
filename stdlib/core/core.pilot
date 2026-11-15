@@ -310,23 +310,10 @@ pub syntax {
     break()           => cfg_jump_loop_exit();
     continue()        => cfg_jump_loop_head();
     op(sig, body)     => decl_operator_fn(sig, body);
-    while(cond, body) => quote { loop { if !($cond) { break; } $body } };
 }
 
 pub syntax type_construct {
     ((A) => R) => quote { fn<$A, $R> };
-}
-
-// Ring 80 (`lvl(80)`): Restricted to `Pilot.Core` SIMD/Primitive Implementations.
-// Each form is one machine operation (`asm`, PROP-009 step 1b); the
-// operations are the variants of `MachineOp` (stdlib/core/asm/machine_ops.pilot).
-pub lvl(Cfg.Tokens.ring_simd) syntax {
-    __ssa(op, lhs, rhs)       => quote { asm($op, $lhs, $rhs) };
-    __ssa_unary(op, val)      => quote { asm($op, $val) };
-    __ssa_cast(op, val, T)    => quote { asm($op, $val, $T) };
-    __ssa_load(p)             => quote { asm(MachineOp::Load, $p) };
-    __ssa_store(p, val)       => quote { asm(MachineOp::Store, $p, $val) };
-    __ssa_gep(base, idx)      => quote { asm(MachineOp::ElemAddr, $base, $idx) };
 }
 
 // Ring 0 (`lvl(0)`): Public Compile-Time Reflection & Introspection Intrinsics

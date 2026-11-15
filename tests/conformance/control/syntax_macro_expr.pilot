@@ -8,9 +8,9 @@
 //   clamp_low(-4, 0): -4 < 0, so 0; clamp_low(9, 0): 9.
 //   show(twice(5)): prints "value 10".
 syntax {
-    twice(x) => quote { ($x) + ($x) };
-    clamp_low(v, lo) => quote { if $v < $lo { $lo } else { $v } };
-    show(e) => quote { print(f"value {$e}"); };
+    twice ( $x:Expr ) => quote { ($x) + ($x) };
+    clamp_low ( $v:Expr , $lo:Expr ) => quote { if $v < $lo { $lo } else { $v } };
+    show ( $e:Expr ) => quote { print(f"value {$e}"); };
 }
 
 fn main() {

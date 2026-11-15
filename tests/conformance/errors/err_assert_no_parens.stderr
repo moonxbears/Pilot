@@ -1,1 +1,1 @@
-error[SYN001]: `assert` takes its arguments in parentheses: `assert(..)`
+error[SYN010]: `assert` expects `(` here, found `true`

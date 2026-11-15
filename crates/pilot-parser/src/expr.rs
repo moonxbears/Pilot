@@ -208,7 +208,7 @@ impl<'a> Parser<'a> {
                     let v = self.parse_expr_bp(bp);
                     return self.arena.alloc_node(NodeKind::UnaryExpr, fl, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0);
                 }
-                if self.seq_rule_at().is_some() { return self.expand_seq_rule(); }
+                if let Some(n) = self.expand_seq_rule() { return n; }
                 if let Some((rk, pl)) = self.receptor() { match rk {
                         1 => { self.advance(); return self.arena.alloc_node(NodeKind::BoolLit, 0, sp, pl as u32, 0); }
                         2 => { self.advance(); return self.arena.alloc_node(NodeKind::NoneLit, 0, sp, 0, 0); }
@@ -239,11 +239,6 @@ impl<'a> Parser<'a> {
                                         return self.parse_call_args(callee, pl as u16); } } } }
                         _ => {} } }
                 let w = self.text().to_string();
-                if let Some(mac) = self.tables.syntax_macros.get(&w).cloned().filter(|_| !self.file_declares_fn(&w)) {
-                    // In the head of `for`, `if` or `switch` a `{` opens the body, so
-                    // a binding named like a macro (`for x in set { .. }`) stays a name.
-                    if nx < self.tape.len() && (self.tape.kind(nx) == TokenKind::LParen || (!self.no_struct_lit && self.tape.kind(nx) == TokenKind::LBrace)) { return self.expand_syntax_macro(&mac); }
-                }
                 self.advance(); self.arena.alloc_ident(&w, sp) }
             _ if is_seed_kw(self.peek()) => { let w = self.text(); self.advance(); self.arena.alloc_ident(w, sp) }
             _ => NodeId::NONE, } }

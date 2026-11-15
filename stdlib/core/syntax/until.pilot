@@ -8,7 +8,13 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Until;
 use Pilot.Core.Genesis.*;
 
 pub syntax {
-    until(cond, body) => quote {
+    until ( $cond:Expr , $body:Expr ) => quote {
+        loop {
+            if $cond { break; }
+            $body
+        }
+    };
+    until $cond:Expr $body:Block => quote {
         loop {
             if $cond { break; }
             $body

@@ -26,8 +26,3 @@ comptime {
     bind_receptor(nameof(without),  30, 2);
     bind_receptor(nameof(on),       30, 3);
 }
-
-pub syntax {
-    coalesce(fields) => quote { $fields };
-    without(methods) => quote { $methods };
-}

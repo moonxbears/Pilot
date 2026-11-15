@@ -19,7 +19,7 @@
 | **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — ITEMIZE BEFORE APPROVAL (after PROP-007)` |
 | **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4) NEEDS APPROVAL` |
 | **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED ITEMIZED LISTS` |
-| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEPS 2–3 NEED DECISIONS` |
+| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 (§11) — IN PROGRESS; STEP 3 NEEDS A DECISION` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -965,7 +965,7 @@ pub lvl(Cfg.Tokens.ring_simd) syntax {
 - **Tests:** `tests/conformance/asm/` calls primitive ops through their bodies on all three engines, plus `err_asm_*` for a wrong operand count and an unknown op.
 - **Rust LOC:** about +60. Step 1a must offset it.
 
-### 5. Step 2 — core forms (needs its own approval)
+### 5. Step 2 — core forms (DIRECTION APPROVED 2026-11-15: "Approve CoreForm"; the itemized Rust file list below still needs approval)
 
 Class B words need a template to name an AST node that has no other spelling.
 
@@ -1061,6 +1061,169 @@ Under Rule 4 frozen items are never deleted, so they would stay in `bridge_lang.
 - Full seed `pilot test`: 521 passed, 0 failed, 15 known bugs reproduced.
 - `damaged_source --include-ignored`: passes.
 
+### 10. Step 1c — syntax classes: a clause defined once, nested into every rule that uses it (APPROVED 2026-11-15 together with the call-shaped rule deletion: "With the RuleArm deletion")
+
+**Owner direction (2026-11-15):** "For any keyword that doesn't vary in its interpretation between the two contexts, then I think we need to nest quoted syntax."
+
+**Which words are shared.** Each query word was checked against every other place it is parsed:
+
+| Word | In a query | Elsewhere | Same meaning? | Becomes |
+| :--- | :--- | :--- | :--- | :--- |
+| `x in xs` (binding) | `from x in xs`: each element of `xs` as `x` | `for x in xs` (`stmt.rs` `parse_for`): the same | **yes** | shared class `Iteration` |
+| `in` (operator) | — | `x in xs`: membership, a `bool` (`operators/flow.pilot`) | no | stays an operator |
+| `where cond` | keep the element when `cond` holds | `case p where cond` (`switch.rs`): take the arm when `cond` holds | **yes** | shared class `Filter` |
+| `where T : I` | — | a constraint on a type parameter (`decl.rs`, `loud.rs`) | no | stays as it is |
+| `select e` | projection | `select { .. }`: channel select (`asyncio/select_syntax.pilot`) | no | literal word in the `from` rule |
+| `order`, `by`, `ascending`, `descending`, `from` | query only | ordinary names | query-local | class `QueryClause` in `sql_syntax.pilot` |
+
+**Pilot syntax.** A named `syntax` block whose arms have heads but no `=> quote` is a **syntax class**: a hole kind made of words and holes. No new keyword is needed.
+
+```pilot
+// stdlib/core/syntax/clauses.pilot — shared by every rule that iterates or filters
+pub syntax Iteration { $x:Ident in $src:Expr; }
+pub syntax Filter    { where $c:Expr; }
+
+// stdlib/db/sql_syntax.pilot — query-local clauses
+pub syntax QueryClause {
+    $w:Filter;
+    order $( by )? $( $k:Expr $( ascending )? $( descending )? ),*;
+}
+pub syntax {
+    from $it:Iteration $( $q:QueryClause )* select $e:Expr => quote { /* uses $x, $src, $c, $k, $descending */ };
+}
+```
+
+- `$name:ClassName` matches one arm of the class, chosen by its leading word or hole kind with the same no-backtracking lookahead as today. Two arms of a class that the lookahead cannot tell apart are rejected where the class is declared (`SYN011`, the code §3 planned).
+- The holes inside the chosen arm are bound into the using rule as if written there (`$x`, `$src`, `$c`, …). Inside a repeated group they become sequences, as other holes do. Holes of arms not taken are bound as absent, or as empty sequences inside a repeated group. So `from` gets every `where` condition and every `order` key in one fused loop: one pass, no list per clause.
+- Two holes with one name reachable from a rule are rejected (`SYN011`).
+- A class name is a hole kind beside the built-in `HoleKind` variants. Rust never sees a class name; it keeps the names a `syntax Name { .. }` block declares.
+
+**Only the grammar of a shared clause is defined once.** Its meaning stays in each rule that uses it, because a `where` filters a loop in a query but guards an arm in `switch`. A class arm that carries its own template (`where $c:Expr => quote { .. }`) is left for later.
+
+**What moves now, and what waits for step 2:**
+- `from` uses `Iteration` and `QueryClause` (containing `Filter`) at once. Same programs and outputs. `skip` and unbuilt clause words keep their current diagnostics.
+- `for` and `switch` are still parsed in Rust (`parse_for`, `switch.rs`). They take `Iteration` and `Filter` when they move to rules, which is step 2 (core forms). Until then each class has one user, so for those two words the "define once" goal is only half met.
+
+**Rust files (approval needed):**
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-parser/src/decl.rs` | `parse_syntax_decl`: read `syntax Name { head; .. }` (arms without a template) as a class. |
+| `crates/pilot-parser/src/tables.rs` | `syntax_classes: HashMap<String, Vec<Vec<HeadItem>>>`. |
+| `crates/pilot-parser/src/rule_arms.rs` | `HeadItem::Class(name, hole)`; `parse_seq_head` takes a class name as a kind; `quick_fit` / `match_items` choose an arm and bind its holes into the rule; `hole_names` includes a class's holes; SYN011 for an arm the lookahead cannot tell apart and for a duplicate hole name. |
+
+**Rust LOC:** about +50. Step 1a is about +56 today (§9), so the total would be about +106. This step deletes no Rust by itself. The deletion that can cover it is still turning the call-shaped rule machinery (`RuleArm`, `SyntaxMacroRule`, `expand_rule_arms`, `arm_fits`, `parse_rule_head`, and their callers in `stmt.rs` and `expr.rs`, about 300 lines) into sequence heads. Classes make that easier: a call-shaped head `name(a, b = d)` becomes a sequence head plus a class for its argument list. The owner chooses whether this step lands alone, or only together with that deletion, as one step that removes Rust overall.
+
+**Pilot side (no approval needed):** the new file `stdlib/core/syntax/clauses.pilot` (added to `BOOTSTRAP_SOURCES`, which is a `tables.rs` change and already in the list above); the `from` rule rewritten over the classes; `SYN011` in `selfhost/diagnostics/errors.pilot`.
+
+**Tests (Pilot):**
+- `receptors/syntax_class.pilot`: a user class with two arms, used in a repeated group.
+- `receptors/err_syntax_class_ambiguous.pilot` (SYN011).
+- `receptors/err_syntax_class_duplicate_hole.pilot` (SYN011).
+- The `collections/query_*` programs, unchanged.
+
+
+**As built (2026-11-15).**
+- **Call-shaped rule machinery deleted.** `RuleArm`, `SyntaxMacroRule`, `RuleHead`, `rule_head_is_rich`, `parse_rule_head`, `add_rule`, `expand_rule_arms`, `arm_fits` (`rule_arms.rs`), `expand_syntax_macro` and the `syntax_macros` lookups (`stmt.rs`, `expr.rs`), the `syntax_macros` table (`tables.rs`) and the re-export (`lib.rs`). A rule with a `quote` template and no attribute now always has a sequence head. A parameter list `name(params) =>` remains only for an operator's function (`[Infix]`, `[Prefix]`, `[Shaped]`) and for comptime rules (`break()`, `continue()`, `op(sig, body)`). A quote rule still written `name(x) => quote` is SYN010 ("the parameters of the rule are holes").
+- **What the deletion needed in the matcher (`rule_arms.rs`).**
+  - A word's rules are tried in order, with backtracking. A rule that read past a spelled word after its own reports its SYN010. If none did, the word is an ordinary name, except when a name or literal follows (`assert true;`), where the first rule says what it expected.
+  - An expression hole that reads nothing fails the match.
+  - An optional group's holes may have defaults (`$( , $note:Expr = "" )?`).
+  - `stringify($p)` is a hole's source text.
+  - An expression hole beside an operator word stops at that operator (`$left:Expr == $right:Expr`).
+- **Syntax classes as designed above, with one simplification.** `from` reads `$it:Iteration $( $f:Filter )*` and keeps its `order` clause in its own head. There is no `QueryClause` class: a class arm holding a repeated group, inside a repeated group, would bind sequences of sequences, and templates cannot fold those yet. SYN011 covers arms that start alike and a hole name bound twice.
+- **Pilot changes.**
+  - Rewritten as sequence heads:
+    - `__ssa*`, moved from `core.pilot` to `stdlib/core/asm/machine_ops.pilot`, because `core.pilot` is parsed before `HoleKind`;
+    - `while` and `until` (both forms);
+    - the 7 `assert` arms;
+    - `splat`, `pairs`, `flat` calls;
+    - the seam stubs in `rt_syntax.pilot`, `select_syntax.pilot` and `sql_syntax.pilot`, with the bare block forms the docs use (`deadline 50ms { .. }`) as their own arms.
+  - Deleted dead rules, never expanded because receptors parse these words first:
+    - `call`..`plan`, `guard`, `switch`/`case`/`default`, `try`/`catch`, `for`, `get`/`set`;
+    - `coalesce`/`without`, `scope(..)`;
+    - `raw`/`splice`/`splat`/`unquote_eval`/`syntax_overload`/`syntax_case` in `quote.pilot`;
+    - the duplicate `while` in `core.pilot`.
+  - `unit`'s pass-through rule became receptor 40 (seam `keyword.unbuilt`).
+- **Rust LOC:**
+  - 20,864, which is −60 against `eec5220` (20,924), so step 1c alone is a net deletion.
+  - PROP-009 overall is still +66 against the 20,798 baseline: steps 1a/1b added about +126.
+  - `paused_max_total_rust_loc()` is 20,408, already exceeded before this step.
+- **Owner approval needed: `crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs`.**
+  - `test_51_1` writes user rules in the deleted form `name(cond, body) => quote` and uses them bare.
+  - `test_51_3` requires every listed syntax module to have at least 15 lines; `guard.pilot` (12) and `switch.pilot` (14) are now shorter.
+  - Both fail. Proposed change: write the rules in `test_51_1` as sequence heads (`name $cond:Expr $body:Block`), and drop the 15-line floor in `test_51_3`, or delete the test in favour of the Pilot conformance programs (PROP-004 direction).
+  - Not edited, because the file is not in the approved list.
+
+### 11. Step 2 — core forms, itemized (direction approved 2026-11-15; PHASES 2A + 2B APPROVED TOGETHER 2026-11-15: "2a and 2b together")
+
+**Mechanism.**
+- A Pilot enum lists the nodes the seed can build. Its variant order is the ABI, append-only like `MachineOp`:
+
+  ```pilot
+  // stdlib/core/syntax/forms.pilot
+  pub enum CoreForm : u8 { BoolLit, NoneLit, For, Break, Continue, Guard, Try, Catch, .. }
+  comptime { register_core_forms(nameof(CoreForm), nameof(form)); }
+  ```
+
+- A rule's template builds a node with `form(CoreForm::X, operands..)`. The builder word (`form`) is named by the library, not by Rust; Rust stores whichever word the hook names. An operand that holds a repeated hole is expanded once per repetition and spliced in as several operands. A `form(..)` operand is itself a node, so `try` gives one `Catch` per `catch` clause:
+
+  ```pilot
+  pub syntax {
+      true  => quote { form(CoreForm::BoolLit, 1) };
+      for $it:Iteration $body:Block $( then $fallback:Expr )?
+          => quote { form(CoreForm::For, $x, $src, $body, $fallback) };
+      try $body:Block $( $c:CatchClause )*
+          => quote { form(CoreForm::Try, $body, form(CoreForm::Catch, $e, $handler)) };
+  }
+  ```
+
+- Each word's rule replaces its receptor. The Rust routine that parsed the word is deleted in the same change. The node each rule builds is the one Rust built, so the checker, PilIR and the C emitter do not change.
+
+**Phases.** Each phase lands only when every program that uses its words passes on all three engines.
+
+| Phase | Words (receptors) | Needs in the matcher |
+| :--- | :--- | :--- |
+| **2a** | `true`/`false`/`none` (1, 2); `break`/`continue` with an optional value (13); `for x in xs { } then ..` (9–11); `guard [some] cond else { }` (17); `try { } catch [e] { }` / `catch e => ..` (18, 19 as a statement) | `form(..)`; a head that is only its word (`true`); an optional group that starts with a name or block hole (`$( $e:Ident )?`), its flag named after the hole; per-repetition `form(..)` operands |
+| **2b** | `switch`/`case`/`default`/`_` with `case a, b:`, `case p if c:` / `where c` (the shared `Filter` class), `:` or `=>` (14–16) | a hole kind `Stmts` appended to `HoleKind`: statements up to the next token an enclosing head spells, or `}` |
+| **2c** | each later as its own itemized list: `else` misuse, postfix `expr catch e => ..` (19 as an infix clause: needs postfix rules), declaration heads (4–8), accessors (23–25), `type`/`enum`/`where T: I` (26–28), `as`/`view` (29), bundle words (30), `some` (31), polyglot (32), contracts (33), quote words (36), `errdefer`/`become` (38, 39) | to be designed per group |
+
+**Phase 2a file list.**
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-parser/src/forms.rs` (new, about 70 lines) | `build_form(arena, ordinal, operands, span)`: the closed list of node constructors by `CoreForm` ordinal (`BoolLit`, `NoneLit`, `For` via `alloc_for`, `Break`/`Continue`, `Guard`, `Try`, `Catch`); any other ordinal is SYN010 "not a core form yet". |
+| `crates/pilot-parser/src/template.rs` | a `Form` node, built when a template call's callee is the registered builder word; repeated operands spliced. |
+| `crates/pilot-parser/src/tables.rs` | the `register_core_forms` hook (enum and builder word); `core_form(variant)`; `forms.pilot` in `BOOTSTRAP_SOURCES` before any file that writes `true`, `for` and the rest. |
+| `crates/pilot-parser/src/rule_arms.rs` | a head with no items after its word; an optional group led by a name or block hole. |
+| `crates/pilot-parser/src/stmt.rs` | delete receptor arms 9, 13, 17, 18 and `parse_for`; `is_stmt_receptor_start` keeps only the words not yet moved. |
+| `crates/pilot-parser/src/expr.rs` | delete receptor arms 1, 2, 9, 18. |
+| `crates/pilot-parser/src/lib.rs` | `mod forms;`. |
+| `stdlib/core/bridge_lang.pilot` + `selfhost/gate/airlock_abi.pilot` | append `register_core_forms(form_enum, builder_word)` under B+ (§11 of the hooks list). |
+
+**Pilot side.**
+- The new `stdlib/core/syntax/forms.pilot`.
+- Rules in `for.pilot`, `guard.pilot` and `try_catch.pilot`, using `Iteration` from `clauses.pilot`. `true`/`false`/`none` go next to their types in `core.pilot`, or in `forms.pilot` if bootstrap order requires it.
+- The `bind_receptor` lines for the moved words are deleted.
+- Keyword and concept matrix rows are updated, and `wiring.pilot` evidence is added.
+
+**Fixed loudly on the way.** `parse_for` reads `for x, i in xs` and silently drops `i` (`stmt.rs`: `if self.eat(Comma) { self.advance(); }`), which breaks AGENTS.md §11 rule 2. The `for` rule has no such arm, so the program gets SYN010. A destructuring binder (`for (a, b) in ..`) stays loud as it is now (`for_pattern_loudly`) until a pattern-binder arm is built.
+
+**Tests.**
+- Every existing `for`, `break`/`continue`, `guard`, `try`/`catch` and literal program passes unchanged on all three engines.
+- New: `receptors/core_form_rules.pilot`, a user rule built with `form(CoreForm::For, ..)` that behaves like `for`.
+- New: `err_core_form_unknown.pilot`, a `CoreForm` variant with no constructor yet (SYN010).
+- New: `err_for_two_binders.pilot` (SYN010).
+
+**Rust LOC (estimate).**
+
+| Item | Lines |
+| :--- | :--- |
+| added: `forms.rs`, template `Form`, the hook, two matcher features | about +130 |
+| deleted: receptor arms in `stmt.rs`/`expr.rs` and `parse_for` | about −60 to −70 |
+| **phase 2a net** | **about +65** |
+
+The large deletion comes in 2b (`switch.rs`, −101) and 2c (`accessors.rs`, `contracts.rs`, `exits.rs`, `modules.rs`, much of `decl.rs`). Phase 2a is the cost of the mechanism, so the owner decides: approve 2a alone at about +65, or require 2a and 2b to land together: about −15 to −40 net, depending on what the `Stmts` hole costs.
 ---
 
 ## `PROP-003` through `PROP-006` — Subsequent Contraction Waves (Summary)

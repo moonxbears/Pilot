@@ -1,5 +1,5 @@
 // `assert` takes a condition and an optional note; a third argument fits
-// no form of it.
+// no form of it, so the head reports the `)` it expected (SYN010).
 fn main() {
     assert(true, "first", "second");
 }

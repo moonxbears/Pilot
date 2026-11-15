@@ -1,0 +1,10 @@
+// The holes of a class are bound in the rule that uses it, so a rule that
+// reads `Filter` (stdlib/core/syntax/clauses.pilot) twice outside a repeated
+// group binds its `c` twice: SYN011.
+syntax {
+    both $a:Filter also $b:Filter => quote { $c };
+}
+
+fn main() {
+    print(1);
+}

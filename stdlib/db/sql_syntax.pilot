@@ -31,8 +31,10 @@ comptime {
 // insertion sort on the keys, the first key that differs deciding; `order`,
 // `ascending` and `descending` stay ordinary names outside a query.
 // `if $order` and an empty `where` list are decided when the rule expands.
+// `x in xs` and `where` are the shared clauses `Iteration` and `Filter`
+// (stdlib/core/syntax/clauses.pilot): `$x`, `$src` and each `$c` come from them.
 pub syntax {
-    from $x:Ident in $src:Expr $( where $c:Expr )*
+    from $it:Iteration $( $f:Filter )*
         $( order $( by )? $( $k:Expr $( ascending )? $( descending )? ),* )?
         select $e:Expr
     => quote {
@@ -93,16 +95,19 @@ pub syntax {
 // (docs/keyword_roadmap.md phase K9). Each rule stops at its seam instead of
 // flipping a flag that undid nothing (audit 2.3).
 pub syntax {
-    transaction(body) => quote {
+    transaction $body:Block => quote {
         seam("data.transaction", "running a block as one transaction needs storage whose writes can be undone (an in-memory `Table<T>` first)")
     };
-    savepoint(name) => quote {
+    savepoint ( $name:Expr ) => quote {
         seam("data.savepoint", "a savepoint needs a transaction log to roll back to")
     };
-    commit() => quote {
+    savepoint $name:Expr => quote {
+        seam("data.savepoint", "a savepoint needs a transaction log to roll back to")
+    };
+    commit ( ) => quote {
         seam("data.commit", "committing needs a transaction whose writes are held until commit")
     };
-    rollback() => quote {
+    rollback ( ) => quote {
         seam("data.rollback", "rolling back needs a transaction log that restores what the transaction wrote")
     };
 }

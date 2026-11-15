@@ -15,15 +15,6 @@ comptime {
     bind_receptor(nameof(exit),  22, 0);
 }
 
-pub syntax {
-    scope(enter_body, exit_body) => quote {
-        {
-            $enter_body
-            defer { $exit_body }
-        }
-    };
-}
-
 // `with open name { .. }` and `with open { .. }`: the block runs inside a
 // scope that `open()` starts and its value's destructor ends. The value (a
 // `0b11` guard such as `arena()`'s `ArenaScope`) lives exactly as long as

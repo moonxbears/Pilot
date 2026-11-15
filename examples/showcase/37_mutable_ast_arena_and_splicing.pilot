@@ -16,13 +16,13 @@ println("==========================================================");
 
 // --- 1. Custom Surface `syntax` Macros via Homoiconic `quote` Splicing ---
 pub syntax {
-    unless_cond(cond, body) => quote {
+    unless_cond ( $cond:Expr , $body:Expr ) => quote {
         if !($cond) {
             $body
         }
     };
 
-    clamp_floor(val, floor_val) => quote {
+    clamp_floor ( $val:Expr , $floor_val:Expr ) => quote {
         if $val < $floor_val { $floor_val } else { $val }
     };
 }

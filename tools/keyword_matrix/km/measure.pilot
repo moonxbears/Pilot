@@ -239,14 +239,14 @@ fn rarest_token(ref c: Corpus, key: str) -> str {
     return best;
 }
 
-/// Whether `line` is `word(params) => quote ..`: a syntax rule for `word`.
+/// Whether `line` is a syntax rule for `word`: `word(params) => quote ..`
+/// or a sequence head `word $a:Kind .. => quote ..`.
 fn is_rule_header(line: str, word: str) -> bool {
     let t = line.trim();
     if !t.starts_with(word) { return false; }
-    let rest = t.slice(word.len(), t.len()).trim();
-    if !rest.starts_with("(") { return false; }
-    let close = rest.find(")", 0);
-    if close < 0 { return false; }
-    let after = rest.slice((close as usize) + 1, rest.len()).trim();
-    return after.starts_with("=>") && after.slice(2, after.len()).trim().starts_with("quote");
+    let rest = t.slice(word.len(), t.len());
+    if rest.len() == 0 || is_ident_byte(rest.byte_at(0)) { return false; }
+    let arrow = rest.find("=>", 0);
+    if arrow < 0 { return false; }
+    return rest.slice((arrow as usize) + 2, rest.len()).trim().starts_with("quote");
 }

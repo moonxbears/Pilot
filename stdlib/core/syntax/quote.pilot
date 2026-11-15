@@ -121,39 +121,3 @@ comptime {
     bind_receptor(nameof(splice), 36, 2);
     bind_receptor(nameof(splat), 36, 3);
 }
-
-// Canonical Homoiconic Syntax Macros
-pub syntax {
-    // Verbatim literal quote (no hole evaluation)
-    raw(body) => quote {
-        $body
-    };
-
-    // Unquote single AST node into template
-    splice(node) => quote {
-        $node
-    };
-
-    // Unquote-slice sequence of AST nodes into template
-    splat(nodes) => quote {
-        *$nodes
-    };
-
-    // Compile-time unquote escape inside quasiquoted template
-    unquote_eval(expr) => quote {
-        ~$expr
-    };
-
-    // Multi-case syntax macro overloading: dispatch across case arms by arity/pattern
-    syntax_overload(target, arms) => quote {
-        switch $target {
-            $arms
-        }
-    };
-
-    syntax_case(pattern, body) => quote {
-        case $pattern: {
-            return $body;
-        }
-    };
-}

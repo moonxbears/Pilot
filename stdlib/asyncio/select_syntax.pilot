@@ -43,22 +43,28 @@ pub syntax {
 // once and pretending (audit 2.3: `spawn` ran its body immediately, `sync`,
 // `atomic` and `isolate` only set a flag, `select` only ran its arms).
 pub syntax {
-    spawn(body) => quote {
+    spawn ( $body:Expr ) => quote {
         seam("concurrency.spawn", "running a task concurrently needs a task scheduler on OS threads (structured concurrency, M83)")
     };
-    await(fut) => quote {
+    spawn $body:Block => quote {
+        seam("concurrency.spawn", "running a task concurrently needs a task scheduler on OS threads (structured concurrency, M83)")
+    };
+    await ( $fut:Expr ) => quote {
         seam("concurrency.await", "waiting for a task needs tasks that run concurrently (`spawn`, M83)")
     };
-    sync(body) => quote {
+    await $fut:Expr => quote {
+        seam("concurrency.await", "waiting for a task needs tasks that run concurrently (`spawn`, M83)")
+    };
+    sync $body:Block => quote {
         seam("concurrency.sync", "holding a lock around a block needs OS threads and a lock intrinsic")
     };
-    atomic(body) => quote {
+    atomic $body:Block => quote {
         seam("concurrency.atomic", "running a block or update atomically needs atomic hardware instructions as engine intrinsics")
     };
-    isolate(body) => quote {
+    isolate $body:Block => quote {
         seam("concurrency.isolate", "isolating a memory region from other threads needs threads and a checked isolation boundary")
     };
-    select(arms) => quote {
+    select $arms:Block => quote {
         seam("concurrency.select", "choosing the first ready channel operation needs channels between concurrent tasks (M83)")
     };
 }

@@ -4,7 +4,7 @@
 // =========================================================================
 // `asm(MachineOp::Add, a, b)` is one machine operation on its operands. The
 // primitive types define their operators with it, through the `__ssa` rules
-// in core.pilot. The seed reads only the position of each variant
+// below. The seed reads only the position of each variant
 // (`register_machine_ops`): the order is append-only, and renaming a
 // variant changes nothing.
 [EnforceCoreNaming]
@@ -31,4 +31,16 @@ pub enum MachineOp : u8 {
 
 comptime {
     register_machine_ops(nameof(MachineOp));
+}
+
+// Ring 80 (`lvl(80)`): Restricted to `Pilot.Core` SIMD/Primitive Implementations.
+// Each form is one machine operation (`asm`, PROP-009 step 1b), read as a
+// sequence head, so it follows `HoleKind` (stdlib/core/syntax/holes.pilot).
+pub lvl(Cfg.Tokens.ring_simd) syntax {
+    __ssa ( $op:Expr , $lhs:Expr , $rhs:Expr )  => quote { asm($op, $lhs, $rhs) };
+    __ssa_unary ( $op:Expr , $val:Expr )        => quote { asm($op, $val) };
+    __ssa_cast ( $op:Expr , $val:Expr , $T:Expr ) => quote { asm($op, $val, $T) };
+    __ssa_load ( $p:Expr )                      => quote { asm(MachineOp::Load, $p) };
+    __ssa_store ( $p:Expr , $val:Expr )         => quote { asm(MachineOp::Store, $p, $val) };
+    __ssa_gep ( $base:Expr , $idx:Expr )        => quote { asm(MachineOp::ElemAddr, $base, $idx) };
 }

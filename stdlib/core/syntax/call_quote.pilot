@@ -77,12 +77,3 @@ comptime {
     bind_receptor(nameof(grad),   37, 5);
     bind_receptor(nameof(plan),   37, 6);
 }
-
-pub syntax {
-    call(callee, args)   => quote { $callee!($args) };
-    splice(callee, args) => quote { $callee!!($args) };
-    frame(callee, args)  => quote { $callee!&($args) };
-    sig(callee, args)    => quote { $callee!^($args) };
-    grad(callee, args)   => quote { $callee!@($args) };
-    plan(callee, args)   => quote { $callee!?($args) };
-}

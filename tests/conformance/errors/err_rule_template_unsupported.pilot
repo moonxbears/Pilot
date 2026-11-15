@@ -2,7 +2,7 @@
 // closure) is reported where the rule is written. Until 2026-11-13 it was
 // turned into `none` without a word.
 syntax {
-    twice(x) => quote {
+    twice ( $x:Expr ) => quote {
         {
             let add = (n: i64) => n + $x;
             print(add($x));

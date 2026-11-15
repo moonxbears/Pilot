@@ -16,7 +16,5 @@ comptime {
 }
 
 pub syntax {
-    get(body) => quote { $body };
-    set(body) => quote { $body };
     op(sig, body) => decl_operator_fn(sig, body);
 }

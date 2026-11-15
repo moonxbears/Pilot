@@ -17,29 +17,51 @@ comptime {
 }
 
 // The block forms below are not built yet (docs/keyword_roadmap.md phases K5
-// and K8). Each rule stops at its seam before its body runs, instead of
-// running the body with the budget, pool or period ignored (audit 2.3:
+// and K8), each written `word(args, { .. })` or `word args { .. }`. Each
+// rule stops at its seam before its body runs, instead of running the body
+// with the budget, pool or period ignored (audit 2.3:
 // `on_missed` always ran, `periodic` was a plain `loop`).
 pub syntax {
-    noalloc(body) => quote {
+    noalloc ( $body:Expr ) => quote {
         seam("realtime.noalloc_block", "checking a block for heap use needs the allocation verifier for blocks (M37); `noalloc fn` is checked today (NOALLOC001)")
     };
-    region(pool, body) => quote {
+    noalloc $body:Block => quote {
+        seam("realtime.noalloc_block", "checking a block for heap use needs the allocation verifier for blocks (M37); `noalloc fn` is checked today (NOALLOC001)")
+    };
+    region ( $pool:Expr , $body:Expr ) => quote {
         seam("realtime.region", "allocating a block's values in an arena needs the arena allocator (M37)")
     };
-    deadline(b, body) => quote {
+    region $pool:Expr $body:Block => quote {
+        seam("realtime.region", "allocating a block's values in an arena needs the arena allocator (M37)")
+    };
+    deadline ( $b:Expr , $body:Expr ) => quote {
         seam("realtime.deadline", "enforcing a deadline needs a monotonic clock and a way to stop or flag the late block (M77)")
     };
-    within(b, body) => quote {
+    deadline $b:Expr $body:Block => quote {
+        seam("realtime.deadline", "enforcing a deadline needs a monotonic clock and a way to stop or flag the late block (M77)")
+    };
+    within ( $b:Expr , $body:Expr ) => quote {
         seam("realtime.within", "bounding a block's run time needs a monotonic clock and a way to stop or flag the late block (M77)")
     };
-    periodic(p, body) => quote {
+    within $b:Expr $body:Block => quote {
+        seam("realtime.within", "bounding a block's run time needs a monotonic clock and a way to stop or flag the late block (M77)")
+    };
+    periodic ( $p:Expr , $body:Expr ) => quote {
         seam("realtime.periodic", "running a block at a fixed period needs a scheduler with timers")
     };
-    on_missed(body) => quote {
+    periodic $p:Expr $body:Block => quote {
+        seam("realtime.periodic", "running a block at a fixed period needs a scheduler with timers")
+    };
+    on_missed ( $body:Expr ) => quote {
         seam("realtime.on_missed", "running a handler only when a deadline was missed needs `deadline` to detect a miss")
     };
-    fallback(body) => quote {
+    on_missed $body:Block => quote {
+        seam("realtime.on_missed", "running a handler only when a deadline was missed needs `deadline` to detect a miss")
+    };
+    fallback ( $body:Expr ) => quote {
+        seam("realtime.fallback", "running a fallback only when a deadline was missed needs `deadline` to detect a miss")
+    };
+    fallback $body:Block => quote {
         seam("realtime.fallback", "running a fallback only when a deadline was missed needs `deadline` to detect a miss")
     };
 }

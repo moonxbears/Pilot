@@ -1,20 +1,8 @@
-//! Expression `syntax` rules with several arms, default arguments and the
-//! source text of an argument.
-//!
-//! A plain rule (`spawn(body) => quote { .. };`) binds each argument to one
-//! name, as before. A rule head may also:
-//!
-//! * give a parameter a default (`assert(cond, note = "")`), so a call may
-//!   leave the trailing arguments out;
-//! * write its first parameter as `left OP right` with any binary operator
-//!   (`assert(left == right, note = "")`): that arm is taken only when the
-//!   first argument is that operator, and binds its two sides.
-//!
-//! Several arms for one word are tried in the order written; the first whose
-//! shape and argument count fit is expanded. Inside a template,
-//! `stringify($p)` (the word the library binds to receptor
-//! [`SOURCE_TEXT_RECEPTOR`]) is the source text of the argument bound to
-//! `p`, as a string literal. The parser names no rule and no word here.
+//! `syntax` rules written as sequence heads (PROP-009): the words and holes
+//! a use spells, matched at the rule's word, and the template the holes are
+//! put into. Inside a template, `stringify($p)` (the word the library binds
+//! to receptor [`SOURCE_TEXT_RECEPTOR`]) is the source text of the code bound
+//! to `p`, as a string literal. The parser names no rule and no word here.
 
 use crate::{Parser, TemplateNode};
 use pilot_ast::{AstArena, NodeId, NodeKind};
@@ -22,181 +10,18 @@ use pilot_intern::SymbolId;
 use pilot_lexer::TokenKind;
 use pilot_span::ByteSpan;
 
-/// The receptor of the template word that gives an argument's source text.
+/// The receptor of the template word that gives a hole's source text.
 const SOURCE_TEXT_RECEPTOR: (u8, u8) = (36, 4);
 
-/// The binding name under which a parameter's source text is kept. It
-/// starts with a byte no identifier holds, so it cannot meet a user name.
+/// The binding name under which a hole's source text is kept. It starts
+/// with a byte no identifier holds, so it cannot meet a user name.
 fn text_binding(param: &str) -> String {
     format!("\u{1}{param}")
 }
 
-/// One arm of an expression rule.
-#[derive(Clone, Debug)]
-pub struct RuleArm {
-    /// The names the arm binds, in order; with a shape, the first two are
-    /// the operator's left and right sides.
-    pub params: Vec<String>,
-    /// The default of each parameter, if it has one.
-    pub defaults: Vec<Option<TemplateNode>>,
-    /// The binary operator the first argument must be, if any.
-    pub shape: Option<u16>,
-    pub template: TemplateNode,
-}
-
-impl RuleArm {
-    /// How many arguments a call passes at most (a shape takes one).
-    fn max_args(&self) -> usize {
-        self.params.len() - usize::from(self.shape.is_some())
-    }
-
-    /// How many arguments a call must pass.
-    fn min_args(&self) -> usize {
-        let skip = if self.shape.is_some() { 2 } else { 0 };
-        let trailing_defaults = self.defaults[skip..].iter().rev().take_while(|d| d.is_some()).count();
-        self.max_args() - trailing_defaults
-    }
-}
-
-/// An expression rule: one plain arm (`params`, `template`), or `arms`.
-#[derive(Clone, Debug)]
-pub struct SyntaxMacroRule {
-    pub params: Vec<String>,
-    pub template: TemplateNode,
-    pub arms: Vec<RuleArm>,
-}
-
-/// A parsed rule head.
-pub(crate) struct RuleHead {
-    pub nodes: Vec<NodeId>,
-    pub arm: RuleArm,
-}
-
 impl<'a> Parser<'a> {
-    /// Whether the rule head at `(` uses a default or an operator pattern,
-    /// so it needs `parse_rule_head` rather than a plain parameter list.
-    pub(crate) fn rule_head_is_rich(&self) -> bool {
-        if !self.at(TokenKind::LParen) {
-            return false;
-        }
-        let Some(close) = self.tape.matching_bracket(self.cur()) else {
-            return false;
-        };
-        let mut depth = 0i32;
-        for i in self.cur() + 1..close as usize {
-            match self.tape.kind(i) {
-                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
-                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => depth -= 1,
-                TokenKind::Comma | TokenKind::Ident | TokenKind::Newline => {}
-                _ if depth == 0 => return true,
-                _ => {}
-            }
-        }
-        false
-    }
-
-    /// `(p, q = default, ..)` or `(left OP right, ..)`.
-    pub(crate) fn parse_rule_head(&mut self) -> RuleHead {
-        let mut arm = RuleArm { params: Vec::new(), defaults: Vec::new(), shape: None, template: TemplateNode::NoneLit };
-        let mut nodes = Vec::new();
-        self.expect(TokenKind::LParen);
-        while !self.at_end() && !self.at(TokenKind::RParen) {
-            let sp = self.span();
-            let nx = self.next_non_nl(self.cur() + 1);
-            let plain = self.is_word()
-                && nx < self.tape.len()
-                && matches!(self.tape.kind(nx), TokenKind::Comma | TokenKind::RParen | TokenKind::Equal);
-            if plain {
-                let sym = self.intern_cur();
-                let default = if self.eat(TokenKind::Equal) {
-                    let d = self.parse_expr();
-                    Some(TemplateNode::from_arena(&self.arena, d))
-                } else {
-                    None
-                };
-                nodes.push(self.rule_param_node(sym, sp));
-                arm.params.push(self.arena.interner.resolve(sym).to_string());
-                arm.defaults.push(default);
-            } else if arm.params.is_empty() {
-                let e = self.parse_expr();
-                let n = if e.is_some() { Some(*self.arena.node(e)) } else { None };
-                let sides = n.filter(|n| n.node_kind() == NodeKind::BinaryExpr).and_then(|n| {
-                    let side = |id: u32| {
-                        let s = *self.arena.node(NodeId(id));
-                        (s.node_kind() == NodeKind::IdentExpr).then_some(SymbolId(s.lhs))
-                    };
-                    Some((n.flags, side(n.lhs)?, side(n.rhs)?))
-                });
-                match sides {
-                    Some((op, l, r)) => {
-                        arm.shape = Some(op);
-                        for sym in [l, r] {
-                            nodes.push(self.rule_param_node(sym, sp));
-                            arm.params.push(self.arena.interner.resolve(sym).to_string());
-                            arm.defaults.push(None);
-                        }
-                    }
-                    None => self.rule_head_error(sp),
-                }
-            } else {
-                self.rule_head_error(sp);
-                while !self.at_end() && !self.at(TokenKind::Comma) && !self.at(TokenKind::RParen) {
-                    self.advance();
-                }
-            }
-            if !self.eat(TokenKind::Comma) {
-                break;
-            }
-        }
-        self.expect(TokenKind::RParen);
-        RuleHead { nodes, arm }
-    }
-
-    fn rule_param_node(&mut self, sym: SymbolId, sp: ByteSpan) -> NodeId {
-        let span = ByteSpan::new(sp.start, self.prev_span().end.max(sp.end));
-        self.arena.alloc_node(NodeKind::ParamDecl, 0, span, sym.0, NodeId::NONE.0)
-    }
-
-    fn rule_head_error(&mut self, sp: ByteSpan) {
-        self.arena.diagnostics.push((
-            sp,
-            "a rule parameter is a name or `name = default`; only the first may be `left OP right`".to_string(),
-        ));
-    }
-
-    /// Records `arm` (its template not yet set) for `word` with `template`.
-    /// A rich arm joins the word's other rich arms; a plain rule replaces
-    /// whatever the word had, as before. A template holding a construct
-    /// templates cannot carry is reported at `body`, not dropped.
-    pub(crate) fn add_rule(&mut self, word: &str, mut arm: RuleArm, template: TemplateNode, rich: bool, body: ByteSpan) {
-        if let Some(kind) = first_unsupported(&template) {
-            self.arena.diagnostics.push((
-                body,
-                format!("the template of `{word}` holds a node of kind `{kind}`, which a rule template cannot carry yet"),
-            ));
-        }
-        let template = hygienic(self.with_source_text(template), &arm.params);
-        let tables = self.tables.to_mut();
-        if !rich {
-            let rule = SyntaxMacroRule { params: arm.params, template, arms: Vec::new() };
-            tables.syntax_macros.insert(word.to_string(), rule);
-            return;
-        }
-        arm.template = template;
-        let entry = tables.syntax_macros.entry(word.to_string()).or_insert_with(|| SyntaxMacroRule {
-            params: Vec::new(),
-            template: TemplateNode::NoneLit,
-            arms: Vec::new(),
-        });
-        if entry.arms.is_empty() {
-            entry.params.clear();
-            entry.template = TemplateNode::NoneLit;
-        }
-        entry.arms.push(arm);
-    }
-
     /// `template` with each `stringify($p)` replaced by the source text of
-    /// the argument bound to `p`.
+    /// the code bound to `p`.
     fn with_source_text(&self, t: TemplateNode) -> TemplateNode {
         if let TemplateNode::Call(_, v) = &t {
             if let [TemplateNode::Ident(w), TemplateNode::Splice(p)] = v.as_slice() {
@@ -206,73 +31,6 @@ impl<'a> Parser<'a> {
             }
         }
         rebuild(t, &mut |c| self.with_source_text(c))
-    }
-
-    /// Expands a call of a rule with arms: parses the arguments, takes the
-    /// first arm that fits them, and instantiates its template.
-    pub(crate) fn expand_rule_arms(&mut self, rule: &SyntaxMacroRule) -> NodeId {
-        let sp = self.span();
-        let word = self.text().to_string();
-        self.advance();
-        if !self.at(TokenKind::LParen) {
-            self.arena.diagnostics.push((sp, format!("`{word}` takes its arguments in parentheses: `{word}(..)`")));
-            return NodeId::NONE;
-        }
-        let mut args = Vec::new();
-        if self.eat(TokenKind::LParen) {
-            while !self.at_end() && !self.at(TokenKind::RParen) {
-                args.push(self.parse_expr());
-                if !self.eat(TokenKind::Comma) {
-                    break;
-                }
-            }
-            self.expect(TokenKind::RParen);
-        }
-        let _ = self.eat(TokenKind::Semicolon);
-        let span = ByteSpan::new(sp.start, self.prev_span().end.max(sp.end));
-        let Some(arm) = rule.arms.iter().find(|a| self.arm_fits(a, &args)) else {
-            self.arena.diagnostics.push((span, format!("no form of `{word}` takes these {} arguments", args.len())));
-            return NodeId::NONE;
-        };
-        let mut bound: Vec<NodeId> = Vec::new();
-        if arm.shape.is_some() {
-            let n = *self.arena.node(args[0]);
-            bound.push(NodeId(n.lhs));
-            bound.push(NodeId(n.rhs));
-            bound.extend(args.iter().skip(1));
-        } else {
-            bound.extend(args.iter());
-        }
-        let mut bindings = Vec::new();
-        for (i, name) in arm.params.iter().enumerate() {
-            let (node, text) = match bound.get(i) {
-                Some(&id) => (id, self.source_text(id)),
-                None => {
-                    let default = arm.defaults[i].clone().unwrap_or(TemplateNode::NoneLit);
-                    (default.instantiate(&mut self.arena, &[], span), String::new())
-                }
-            };
-            let sym = self.arena.interner.intern(&text);
-            let text_node = self.arena.alloc_node(NodeKind::StrLit, 0, span, sym.0, 0);
-            bindings.push((name.clone(), node));
-            bindings.push((text_binding(name), text_node));
-        }
-        arm.template.instantiate(&mut self.arena, &bindings, span)
-    }
-
-    fn arm_fits(&self, arm: &RuleArm, args: &[NodeId]) -> bool {
-        if args.len() < arm.min_args() || args.len() > arm.max_args() {
-            return false;
-        }
-        match arm.shape {
-            None => true,
-            Some(op) => args.first().is_some_and(|&a| {
-                a.is_some() && {
-                    let n = self.arena.node(a);
-                    n.node_kind() == NodeKind::BinaryExpr && n.flags == op
-                }
-            }),
-        }
     }
 
     /// The source text of node `id`, its white space runs made one space.
@@ -423,8 +181,13 @@ pub enum HeadItem {
     Word(String),
     /// `$name:Kind`: a piece of code of that kind, bound to `name`.
     Hole(String, u8),
+    /// `$name:Class`: one arm of the syntax class `Class`, whose holes are
+    /// bound into the rule as if written there.
+    Class(String),
     /// `$( .. )?`: the items, or nothing; the group starts with a word.
-    Optional(Vec<HeadItem>),
+    /// A hole in it may give the code it stands for when the group is not
+    /// written (`$note:Expr = ""`).
+    Optional(Vec<HeadItem>, Vec<(String, TemplateNode)>),
     /// `$( .. ) sep *`: the items once or more, separated by `sep` (or
     /// by nothing, when the group starts with a word).
     Repeated(Vec<HeadItem>, Option<String>),
@@ -475,16 +238,13 @@ impl<'a> Parser<'a> {
         self.arena.interner.intern(&hole)
     }
 
-    /// Whether the rule head after the rule's word is a sequence (it does
-    /// not open a parameter list).
-    pub(crate) fn rule_head_is_seq(&self) -> bool {
-        !self.at(TokenKind::LParen) && !self.at(TokenKind::FatArrow)
-    }
-
-    /// The items of a sequence head, up to `=>` (or the `)` closing a group).
-    pub(crate) fn parse_seq_head(&mut self, end: Option<usize>) -> Vec<HeadItem> {
+    /// The items of a sequence head, up to `=>` (or `;` when `arm_end`, or
+    /// the `)` closing a group). `defaults` collects the defaults of the
+    /// holes of an optional group.
+    pub(crate) fn parse_seq_head(&mut self, end: Option<usize>, arm_end: bool, mut defaults: Option<&mut Vec<(String, TemplateNode)>>) -> Vec<HeadItem> {
         let mut items = Vec::new();
-        while !self.at_end() && end.map_or(!self.at(TokenKind::FatArrow), |e| self.cur() < e) {
+        let stop = |p: &Self| p.at(TokenKind::FatArrow) || (arm_end && (p.at(TokenKind::Semicolon) || p.at(TokenKind::RBrace)));
+        while !self.at_end() && end.map_or(!stop(self), |e| self.cur() < e) {
             let sp = self.span();
             if !self.eat(TokenKind::Dollar) {
                 items.push(HeadItem::Word(self.text().to_string()));
@@ -494,29 +254,32 @@ impl<'a> Parser<'a> {
             if self.at(TokenKind::LParen) {
                 let close = self.tape.matching_bracket(self.cur()).map_or(self.tape.len(), |c| c as usize);
                 self.advance();
-                let inner = self.parse_seq_head(Some(close));
+                let mut defs = Vec::new();
+                let inner = self.parse_seq_head(Some(close), false, Some(&mut defs));
                 self.expect(TokenKind::RParen);
-                let starts_with_word = matches!(inner.first(), Some(HeadItem::Word(_)));
                 if self.text() == "?" {
                     self.advance();
-                    if !starts_with_word {
+                    if !matches!(inner.first(), Some(HeadItem::Word(_))) {
                         self.seq_head_error(sp, "an optional group `$( .. )?` starts with a word");
                     }
-                    items.push(HeadItem::Optional(inner));
-                } else {
-                    let sep = (self.text() != "*").then(|| self.text().to_string());
-                    if sep.is_some() {
-                        self.advance();
-                    }
-                    if self.text() != "*" {
-                        self.seq_head_error(sp, "a group is `$( .. )?` or `$( .. ) sep *`");
-                    }
-                    self.advance();
-                    if sep.is_none() && !starts_with_word {
-                        self.seq_head_error(sp, "a repeated group with no separator starts with a word");
-                    }
-                    items.push(HeadItem::Repeated(inner, sep));
+                    items.push(HeadItem::Optional(inner, defs));
+                    continue;
                 }
+                let sep = (self.text() != "*").then(|| self.text().to_string());
+                if sep.is_some() {
+                    self.advance();
+                }
+                if self.text() != "*" {
+                    self.seq_head_error(sp, "a group is `$( .. )?` or `$( .. ) sep *`");
+                }
+                self.advance();
+                if sep.is_none() && !self.word_led(&inner) {
+                    self.seq_head_error(sp, "a repeated group with no separator starts with a word");
+                }
+                if !defs.is_empty() {
+                    self.seq_head_error(sp, "only a hole of an optional group `$( .. )?` has a default");
+                }
+                items.push(HeadItem::Repeated(inner, sep));
                 continue;
             }
             let name = self.text().to_string();
@@ -525,8 +288,14 @@ impl<'a> Parser<'a> {
             let kind_name = self.text().to_string();
             self.advance();
             match self.tables.hole_kind(&kind_name) {
-                Some(k) if k <= HOLE_STMT => items.push(HeadItem::Hole(name, k)),
-                _ => self.seq_head_error(sp, &format!("`{kind_name}` is not a hole kind (a variant of `HoleKind`)")),
+                Some(k) if k <= HOLE_STMT => items.push(HeadItem::Hole(name.clone(), k)),
+                _ if self.tables.syntax_classes.contains_key(&kind_name) => items.push(HeadItem::Class(kind_name)),
+                _ => self.seq_head_error(sp, &format!("`{kind_name}` is not a hole kind (a variant of `HoleKind`) or a syntax class")),
+            }
+            if let Some(defs) = defaults.as_deref_mut().filter(|_| self.text() == "=") {
+                self.advance();
+                let d = self.parse_prefix();
+                defs.push((name, TemplateNode::from_arena(&self.arena, d)));
             }
         }
         items
@@ -536,7 +305,18 @@ impl<'a> Parser<'a> {
         self.arena.diagnostics.push((sp, format!("SYN010: {what}")));
     }
 
-    /// Records a sequence rule for `word`.
+    /// Whether every use of `items` starts with a word: a word, or a class
+    /// whose arms all do.
+    fn word_led(&self, items: &[HeadItem]) -> bool {
+        match items.first() {
+            Some(HeadItem::Word(_)) => true,
+            Some(HeadItem::Class(c)) => self.tables.syntax_classes.get(c).is_some_and(|arms| arms.iter().all(|a| self.word_led(a))),
+            _ => false,
+        }
+    }
+
+    /// Records a sequence rule for `word`. Two holes of one name reachable
+    /// from it are SYN011.
     pub(crate) fn add_seq_rule(&mut self, word: &str, items: Vec<HeadItem>, template: TemplateNode, body: ByteSpan) {
         if let Some(kind) = first_unsupported(&template) {
             self.arena.diagnostics.push((
@@ -545,20 +325,101 @@ impl<'a> Parser<'a> {
             ));
         }
         let mut names = Vec::new();
-        hole_names(&items, &mut names);
-        let template = hygienic(template, &names);
+        self.hole_names(&items, &mut names);
+        if let Some(d) = names.iter().enumerate().find(|(i, n)| names[..*i].contains(n)) {
+            self.arena.diagnostics.push((body, format!("SYN011: the rule `{word}` binds `{}` twice", d.1)));
+        }
+        let template = hygienic(self.with_source_text(template), &names);
         self.tables.to_mut().seq_rules.entry(word.to_string()).or_default().push(SeqRule { items, template });
     }
 
-    /// The sequence rule the code at the cursor (a rule's word) takes: the
-    /// first, in the order written, whose leading words, names and blocks
-    /// fit the tokens that follow.
-    pub(crate) fn seq_rule_at(&self) -> Option<SeqRule> {
+    /// Records the syntax class `name` (`syntax Name { head; .. }`). Two
+    /// arms one use could both start (SYN011) are rejected: an arm is
+    /// chosen by its first token.
+    pub(crate) fn add_syntax_class(&mut self, name: &str, arms: Vec<Vec<HeadItem>>, sp: ByteSpan) {
+        for (j, b) in arms.iter().enumerate() {
+            if let Some(i) = arms[..j].iter().position(|a| !self.leads_differ(a, b)) {
+                let msg = format!("SYN011: arms {} and {} of the syntax class `{name}` start alike, so a use cannot tell them apart", i + 1, j + 1);
+                self.arena.diagnostics.push((sp, msg));
+            }
+        }
+        let mut names = Vec::new();
+        for a in &arms {
+            self.hole_names(a, &mut names);
+        }
+        if let Some(d) = names.iter().enumerate().find(|(i, n)| names[..*i].contains(n)) {
+            self.arena.diagnostics.push((sp, format!("SYN011: the syntax class `{name}` binds `{}` twice", d.1)));
+        }
+        self.tables.to_mut().syntax_classes.insert(name.to_string(), arms);
+    }
+
+    /// Whether no token can start both `a` and `b`.
+    fn leads_differ(&self, a: &[HeadItem], b: &[HeadItem]) -> bool {
+        let words = |x: &[HeadItem]| -> Option<Vec<String>> {
+            match x.first() {
+                Some(HeadItem::Word(w)) => Some(vec![w.clone()]),
+                Some(HeadItem::Class(c)) => {
+                    let arms = self.tables.syntax_classes.get(c)?;
+                    arms.iter().map(|a| match a.first() {
+                        Some(HeadItem::Word(w)) => Some(w.clone()),
+                        _ => None,
+                    }).collect()
+                }
+                _ => None,
+            }
+        };
+        match (words(a), words(b)) {
+            (Some(x), Some(y)) => !x.iter().any(|w| y.contains(w)),
+            _ => false,
+        }
+    }
+
+    /// Expands the rule for the word at the cursor: the first, in the order
+    /// written, whose head the code that follows matches. `None` (nothing
+    /// read) when the word is no rule's or no rule matches before its first
+    /// spelled word after the rule's own; otherwise the expansion, or
+    /// `NONE` with the diagnostic of the rule that read furthest.
+    pub(crate) fn expand_seq_rule(&mut self) -> Option<NodeId> {
         if !self.is_word() || self.file_declares_fn(self.text()) {
             return None;
         }
-        let rules = self.tables.seq_rules.get(self.text())?;
-        rules.iter().find(|r| self.quick_fit(&r.items, self.cur() + 1)).cloned()
+        let rules = self.tables.seq_rules.get(self.text())?.clone();
+        let (start, diags, sp) = (self.pos, self.arena.diagnostics.len(), self.span());
+        let word = self.text().to_string();
+        let mut best: Option<(usize, Vec<(ByteSpan, String)>)> = None;
+        let after = self.cur() + 1;
+        let fitting: Vec<&SeqRule> = rules.iter().filter(|r| self.quick_fit(&r.items, after)).collect();
+        for rule in fitting {
+            self.advance();
+            let (mut bindings, mut words) = (Vec::new(), 0usize);
+            if self.match_items(&word, &rule.items, &mut bindings, &mut words) {
+                self.arena.diagnostics.truncate(diags);
+                let span = ByteSpan::new(sp.start, self.prev_span().end.max(sp.end));
+                return Some(rule.template.instantiate(&mut self.arena, &bindings, span));
+            }
+            let reached = self.pos;
+            let found: Vec<_> = self.arena.diagnostics.drain(diags..).collect();
+            if words > 0 && best.as_ref().is_none_or(|(p, _)| reached > *p) {
+                best = Some((reached, found));
+            }
+            self.pos = start;
+        }
+        // No rule read past its first spelled word. Followed by a name or a
+        // literal, the word is still meant as the rule: the first rule says
+        // what it expected.
+        let Some((reached, found)) = best else {
+            let nx = self.next_non_nl(self.cur() + 1);
+            let k = (nx < self.tape.len()).then(|| self.tape.kind(nx))?;
+            if !(crate::is_word_tok(k) || matches!(k, TokenKind::IntLit | TokenKind::StrLit)) {
+                return None;
+            }
+            self.advance();
+            let _ = self.match_items(&word, &rules[0].items, &mut Vec::new(), &mut 0);
+            return Some(NodeId::NONE);
+        };
+        self.pos = reached;
+        self.arena.diagnostics.extend(found);
+        Some(NodeId::NONE)
     }
 
     /// Whether `items` fit the tokens from `at`, as far as words, names and
@@ -573,10 +434,14 @@ impl<'a> Parser<'a> {
                 HeadItem::Hole(_, HOLE_BLOCK) if here.is_some_and(|(k, _)| k == TokenKind::LBrace) => {
                     at = self.tape.matching_bracket(at).map_or(self.tape.len(), |c| c as usize + 1);
                 }
-                HeadItem::Optional(inner) => {
+                HeadItem::Optional(inner, _) => {
                     if self.quick_fit(&inner[..1], at) {
                         return self.quick_fit(inner, at);
                     }
+                }
+                HeadItem::Class(c) => {
+                    let arms = self.tables.syntax_classes.get(c);
+                    return arms.is_some_and(|arms| arms.iter().any(|a| self.quick_fit(&a[..a.len().min(1)], at)));
                 }
                 HeadItem::Word(_) | HeadItem::Hole(_, HOLE_IDENT) | HeadItem::Hole(_, HOLE_BLOCK) => return false,
                 _ => return true,
@@ -585,27 +450,16 @@ impl<'a> Parser<'a> {
         true
     }
 
-    /// Expands the sequence rule `seq_rule_at` gives, at its word.
-    pub(crate) fn expand_seq_rule(&mut self) -> NodeId {
-        let Some(rule) = self.seq_rule_at() else { return NodeId::NONE };
-        let sp = self.span();
-        let word = self.text().to_string();
-        self.advance();
-        let mut bindings = Vec::new();
-        if !self.match_items(&word, &rule.items, &mut bindings) {
-            return NodeId::NONE;
-        }
-        let span = ByteSpan::new(sp.start, self.prev_span().end.max(sp.end));
-        rule.template.instantiate(&mut self.arena, &bindings, span)
-    }
-
-    /// Matches `items` at the cursor, binding their holes into `out`; false
-    /// (with a diagnostic) at the first token that does not fit.
-    fn match_items(&mut self, word: &str, items: &[HeadItem], out: &mut Vec<(String, NodeId)>) -> bool {
+    /// Matches `items` at the cursor, binding their holes into `out` and
+    /// counting the words matched in `words`; false (with a diagnostic) at
+    /// the first token that does not fit.
+    fn match_items(&mut self, word: &str, items: &[HeadItem], out: &mut Vec<(String, NodeId)>, words: &mut usize) -> bool {
         for (i, item) in items.iter().enumerate() {
-            let next_is_block = matches!(items.get(i + 1), Some(HeadItem::Hole(_, HOLE_BLOCK)));
             match item {
-                HeadItem::Word(w) if self.text() == w => self.advance(),
+                HeadItem::Word(w) if self.text() == w => {
+                    self.advance();
+                    *words += 1;
+                }
                 HeadItem::Word(w) => {
                     let (sp, found) = (self.span(), self.text().to_string());
                     if self.at_unbuilt_clause() {
@@ -616,36 +470,70 @@ impl<'a> Parser<'a> {
                     return false;
                 }
                 HeadItem::Hole(name, kind) => {
-                    let node = self.parse_hole(word, name, *kind, next_is_block);
+                    let bp = self.hole_power(items, i);
+                    let before_block = matches!(items.get(i + 1), Some(HeadItem::Hole(_, HOLE_BLOCK)));
+                    let (sp, found) = (self.span(), self.text().to_string());
+                    let node = self.parse_hole(word, name, *kind, before_block, bp);
+                    if node.is_none() {
+                        if !matches!(*kind, HOLE_BLOCK | HOLE_IDENT) {
+                            self.arena.diagnostics.push((sp, format!("SYN010: `{word}` expects code for `${name}`, found `{found}`")));
+                        }
+                        return false;
+                    }
+                    let text = self.source_text(node);
+                    let sym = self.arena.interner.intern(&text);
+                    let text_node = self.arena.alloc_node(NodeKind::StrLit, 0, self.prev_span(), sym.0, 0);
                     out.push((name.clone(), node));
+                    out.push((text_binding(name), text_node));
+                }
+                HeadItem::Class(c) => {
+                    let arms = self.tables.syntax_classes.get(c).cloned().unwrap_or_default();
+                    let at = self.cur();
+                    let Some(k) = arms.iter().position(|a| self.quick_fit(&a[..a.len().min(1)], at)) else {
+                        let msg = format!("SYN010: `{word}` expects {c} here, found `{}`", self.text());
+                        self.arena.diagnostics.push((self.span(), msg));
+                        return false;
+                    };
+                    for (j, arm) in arms.iter().enumerate() {
+                        if j != k {
+                            self.bind_absent(arm, out);
+                        }
+                    }
+                    if !self.match_items(word, &arms[k], out, words) {
+                        return false;
+                    }
                 }
                 // An optional group binds a `bool` named after its first word:
                 // whether it was written.
-                HeadItem::Optional(inner) => {
+                HeadItem::Optional(inner, defaults) => {
                     let Some(HeadItem::Word(w)) = inner.first() else { continue };
                     let written = self.text() == w;
                     let flag = self.arena.alloc_node(NodeKind::BoolLit, 0, self.span(), written as u32, 0);
                     out.push((w.clone(), flag));
                     if written {
-                        if !self.match_items(word, inner, out) {
+                        if !self.match_items(word, inner, out, words) {
                             return false;
                         }
-                    } else {
-                        let mut names = Vec::new();
-                        hole_names(inner, &mut names);
-                        out.extend(names.into_iter().map(|n| (n, NodeId::NONE)));
+                        continue;
+                    }
+                    let mut names = Vec::new();
+                    self.hole_names(inner, &mut names);
+                    let span = self.span();
+                    for n in names.into_iter().filter(|n| n != w) {
+                        let node = match defaults.iter().find(|(d, _)| *d == n) {
+                            Some((_, t)) => t.instantiate(&mut self.arena, &[], span),
+                            None => NodeId::NONE,
+                        };
+                        out.push((n, node));
                     }
                 }
                 // A group that starts with a word may be written no times.
                 HeadItem::Repeated(inner, sep) => {
-                    let lead = match inner.first() {
-                        Some(HeadItem::Word(w)) => Some(w.clone()),
-                        _ => None,
-                    };
+                    let led = self.word_led(inner);
                     let mut runs: Vec<Vec<(String, NodeId)>> = Vec::new();
-                    while !self.at_end() && lead.as_ref().is_none_or(|w| self.text() == w) {
+                    while !self.at_end() && (!led || self.quick_fit(&inner[..1], self.cur())) {
                         let mut one = Vec::new();
-                        if !self.match_items(word, inner, &mut one) {
+                        if !self.match_items(word, inner, &mut one, words) {
                             return false;
                         }
                         runs.push(one);
@@ -654,26 +542,72 @@ impl<'a> Parser<'a> {
                                 break;
                             }
                             self.advance();
-                        } else if lead.is_none() {
+                        } else if !led {
                             break;
                         }
                     }
-                    let mut names = Vec::new();
-                    hole_names(inner, &mut names);
-                    let span = self.prev_span();
-                    for n in names {
-                        let ids: Vec<NodeId> = runs.iter().filter_map(|r| r.iter().find(|(k, _)| *k == n).map(|(_, id)| *id)).collect();
-                        let seq = self.arena.alloc_list_node(NodeKind::TupleExpr, 0, span, &ids);
-                        out.push((seq_binding(&n), NodeId::NONE));
-                        out.push((n, seq));
-                    }
+                    self.bind_runs(inner, &runs, out);
                 }
             }
         }
         true
     }
 
-    fn parse_hole(&mut self, word: &str, name: &str, kind: u8, before_block: bool) -> NodeId {
+    /// Binds each hole name of `inner` to the sequence of what the runs
+    /// bound it to (absent ones left out).
+    fn bind_runs(&mut self, inner: &[HeadItem], runs: &[Vec<(String, NodeId)>], out: &mut Vec<(String, NodeId)>) {
+        let mut names = Vec::new();
+        self.hole_names(inner, &mut names);
+        let span = self.prev_span();
+        for n in names {
+            let ids: Vec<NodeId> = runs.iter().filter_map(|r| r.iter().find(|(k, _)| *k == n).map(|(_, id)| *id)).filter(|id| id.is_some()).collect();
+            let seq = self.arena.alloc_list_node(NodeKind::TupleExpr, 0, span, &ids);
+            out.push((seq_binding(&n), NodeId::NONE));
+            out.push((n, seq));
+        }
+    }
+
+    /// Binds the holes of `items`, which were not written: a flag false, a
+    /// repeated hole an empty sequence, any other hole absent.
+    fn bind_absent(&mut self, items: &[HeadItem], out: &mut Vec<(String, NodeId)>) {
+        for item in items {
+            match item {
+                HeadItem::Hole(n, _) => out.push((n.clone(), NodeId::NONE)),
+                HeadItem::Optional(inner, _) => {
+                    if let Some(HeadItem::Word(w)) = inner.first() {
+                        let flag = self.arena.alloc_node(NodeKind::BoolLit, 0, self.span(), 0, 0);
+                        out.push((w.clone(), flag));
+                    }
+                    self.bind_absent(&inner[1..], out);
+                }
+                HeadItem::Repeated(inner, _) => self.bind_runs(inner, &[], out),
+                HeadItem::Class(c) => {
+                    for arm in self.tables.syntax_classes.get(c).cloned().unwrap_or_default() {
+                        self.bind_absent(&arm, out);
+                    }
+                }
+                HeadItem::Word(_) => {}
+            }
+        }
+    }
+
+    /// The binding power an expression hole at `items[i]` is read at: just
+    /// above an operator word that follows it, or that stands between it
+    /// and an expression hole before it (`$left:Expr == $right:Expr`), so
+    /// the operator is left for the head.
+    fn hole_power(&self, items: &[HeadItem], i: usize) -> Option<u8> {
+        let infix = |it: Option<&HeadItem>| match it {
+            Some(HeadItem::Word(w)) => self.tables.infix_ops.get(w),
+            _ => None,
+        };
+        if let Some(e) = infix(items.get(i + 1)) {
+            return Some(e.bp + 1);
+        }
+        let expr_before = i >= 2 && matches!(items.get(i - 2), Some(HeadItem::Hole(_, HOLE_EXPR)));
+        infix(i.checked_sub(1).and_then(|p| items.get(p))).filter(|_| expr_before).map(|e| e.bp + u8::from(!e.right_assoc))
+    }
+
+    fn parse_hole(&mut self, word: &str, name: &str, kind: u8, before_block: bool, bp: Option<u8>) -> NodeId {
         match kind {
             HOLE_BLOCK if self.at(TokenKind::LBrace) => self.parse_block(),
             HOLE_IDENT if self.is_word() => {
@@ -686,7 +620,10 @@ impl<'a> Parser<'a> {
             HOLE_EXPR => {
                 let saved = self.no_struct_lit;
                 self.no_struct_lit = before_block;
-                let e = self.parse_expr();
+                let e = match bp {
+                    Some(bp) => self.parse_expr_bp(bp),
+                    None => self.parse_expr(),
+                };
                 self.no_struct_lit = saved;
                 e
             }
@@ -700,21 +637,26 @@ impl<'a> Parser<'a> {
             _ => NodeId::NONE,
         }
     }
-}
 
-/// The hole names in `items`, nested groups included.
-fn hole_names(items: &[HeadItem], out: &mut Vec<String>) {
-    for item in items {
-        match item {
-            HeadItem::Hole(n, _) => out.push(n.clone()),
-            HeadItem::Optional(inner) => {
-                if let Some(HeadItem::Word(w)) = inner.first() {
-                    out.push(w.clone());
+    /// The hole names in `items`, nested groups and classes included.
+    fn hole_names(&self, items: &[HeadItem], out: &mut Vec<String>) {
+        for item in items {
+            match item {
+                HeadItem::Hole(n, _) => out.push(n.clone()),
+                HeadItem::Optional(inner, _) => {
+                    if let Some(HeadItem::Word(w)) = inner.first() {
+                        out.push(w.clone());
+                    }
+                    self.hole_names(inner, out);
                 }
-                hole_names(inner, out);
+                HeadItem::Repeated(inner, _) => self.hole_names(inner, out),
+                HeadItem::Class(c) => {
+                    for arm in self.tables.syntax_classes.get(c).map(Vec::as_slice).unwrap_or_default() {
+                        self.hole_names(arm, out);
+                    }
+                }
+                HeadItem::Word(_) => {}
             }
-            HeadItem::Repeated(inner, _) => hole_names(inner, out),
-            HeadItem::Word(_) => {}
         }
     }
 }

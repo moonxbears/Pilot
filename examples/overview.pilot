@@ -181,7 +181,7 @@ pub fn trajectory_planner() -> void {
 
 // --- 6. Homoiconic `syntax` Rules & Call-Quoting Projections ---
 pub syntax {
-    trace_step(label, expr) => quote {
+    trace_step ( $label:Expr , $expr:Expr ) => quote {
         {
             print($label);
             $expr

@@ -92,8 +92,7 @@ impl<'a> Parser<'a> {
             lhs = template.instantiate(&mut self.arena, &[(lhs_param, lhs_clean), (rhs_param, rhs)], ByteSpan::new(sp.start, end));
             }
         lhs }
-    pub(crate) fn is_stmt_receptor_start(&self) -> bool { self.receptor().is_some_and(|(rk, _)| matches!(rk, 9 | 13 | 14 | 17 | 18 | 32 | 33))
-            || (self.is_word() && self.tables.syntax_macros.contains_key(self.text())) }
+    pub(crate) fn is_stmt_receptor_start(&self) -> bool { self.receptor().is_some_and(|(rk, _)| matches!(rk, 9 | 13 | 14 | 17 | 18 | 32 | 33)) }
     pub(crate) fn parse_block(&mut self) -> NodeId { let sp = self.span(); self.expect(TokenKind::LBrace);
         self.hdr_stack.push(self.active_hdr.take()); let mut items = Vec::new();
         while !self.at_end() && !self.at(TokenKind::RBrace) {
@@ -122,8 +121,8 @@ impl<'a> Parser<'a> {
                 self.report_unbuilt(ByteSpan::new(sp.start, self.prev_span().end), &word);
                 NodeId::NONE }
             TokenKind::RawDslBlock => { let raw = self.text(); self.advance(); let inner = raw.trim_start_matches('`').trim_end_matches('`'); let (lang, code) = inner.split_once('\n').unwrap_or(("dsl", inner)); self.arena.alloc_polyglot_block(lang.trim(), code.trim(), 0, sp) }
-            _ if self.is_word() && self.seq_rule_at().is_some() => self.expand_seq_rule(),
-            _ if self.is_word() => { if let Some((rk, pl)) = self.receptor() { match rk { 9 => return self.parse_for(), 13 => { self.advance();
+            _ if self.is_word() => { if let Some(n) = self.expand_seq_rule() { return n; }
+                 if let Some((rk, pl)) = self.receptor() { match rk { 9 => return self.parse_for(), 13 => { self.advance();
                             let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE }
                             else { let first = self.parse_expr(); if self.at(TokenKind::Comma) { let mut items = vec![first]; while self.eat(TokenKind::Comma) { items.push(self.parse_expr()); } self.arena.alloc_list_node(NodeKind::TupleExpr, 0, sp, &items) } else { first } };
                             let _ = self.eat(TokenKind::Semicolon);
@@ -168,9 +167,6 @@ impl<'a> Parser<'a> {
                     return self.parse_exclude_decl();
                 }
                 let w = self.text().to_string(); let nx = self.next_non_nl(self.cur() + 1);
-                if let Some(mac) = self.tables.syntax_macros.get(&w).cloned().filter(|_| !self.file_declares_fn(&w)) {
-                    if nx < self.tape.len() && !matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::InfixDot | TokenKind::RBrace | TokenKind::Semicolon | TokenKind::Comma | TokenKind::RParen | TokenKind::RBracket) {
-                        return self.expand_syntax_macro(&mac); } }
                 if nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || matches!(self.tape.kind(nx), TokenKind::IntLit | TokenKind::StrLit | TokenKind::KwFn))
                     && !self.tables.infix_ops.contains_key(self.tape.text(nx, self.src))
                     && self.tables.receptors.get(self.tape.text(nx, self.src)).map_or(true, |&(rk, _)| !matches!(rk, 19 | 29 | 31))
@@ -194,24 +190,6 @@ impl<'a> Parser<'a> {
         let rhs = self.parse_expr_bp(value_bp);
         let val = if op == 0 { rhs } else { let lc = clone_ast(&mut self.arena, target); self.arena.alloc_node(NodeKind::BinaryExpr, op, sp, lc.0, rhs.0) };
         self.arena.alloc_node(NodeKind::AssignStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), target.0, val.0) }
-    pub(crate) fn expand_syntax_macro(&mut self, mac: &SyntaxMacroRule) -> NodeId { if !mac.arms.is_empty() { return self.expand_rule_arms(mac); }
-        let sp = self.span(); self.advance();
-        let mut bindings = Vec::new(); let call_form = self.at(TokenKind::LParen) && {
-            let close = self.tape.matching_bracket(self.cur()).unwrap_or(0) as usize;
-            let after = self.next_non_nl(close + 1);
-            !(mac.params.len() >= 2 && after < self.tape.len() && self.tape.kind(after) == TokenKind::LBrace) };
-        if mac.params.is_empty() { if self.eat(TokenKind::LParen) { self.expect(TokenKind::RParen); }
-        } else if call_form { self.eat(TokenKind::LParen); for p in &mac.params {
-                let arg = if matches!(self.peek(), TokenKind::KwFn | TokenKind::KwStruct) { let mut v = Vec::new(); self.parse_item(&mut v, false); v.first().copied().unwrap_or(NodeId::NONE) } else { self.parse_expr() };
-                bindings.push((p.clone(), arg)); let _ = self.eat(TokenKind::Comma); }
-            self.expect(TokenKind::RParen);
-            } else { for (i, p) in mac.params.iter().enumerate() {
-                let arg = if i + 1 == mac.params.len() && self.at(TokenKind::LBrace) { self.parse_block() }
-                else { self.no_struct_lit = true; let a = self.parse_expr(); self.no_struct_lit = false; a };
-                bindings.push((p.clone(), arg));
-                } }
-        let _ = self.eat(TokenKind::Semicolon); let end = self.prev_span().end.max(sp.end);
-        mac.template.instantiate(&mut self.arena, &bindings, ByteSpan::new(sp.start, end)) }
     pub(crate) fn parse_if(&mut self) -> NodeId { let sp = self.span(); self.advance();
         self.no_struct_lit = true;
         let cond = self.parse_some_condition().unwrap_or_else(|| self.parse_expr());

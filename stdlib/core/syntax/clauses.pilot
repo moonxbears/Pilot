@@ -1,0 +1,25 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/clauses.pilot
+// CLAUSES SHARED BY RULES (`x in xs`, `where cond`): SYNTAX CLASSES (PROP-009)
+// =========================================================================
+// A syntax class is a hole kind made of words and holes: `$name:Iteration`
+// in a rule's head reads one arm of the class, and the holes of that arm
+// are bound in the rule as if written there. Only the grammar of a clause
+// is shared; what it means stays in each rule that uses it (a `where`
+// filters a query's elements but guards a `switch` arm). An arm is chosen
+// by its first token, so two arms a use could both start are rejected
+// where the class is declared (SYN011), as are two holes of one name.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Clauses;
+
+use Pilot.Core.Genesis.*;
+
+/// `x in xs`: each element of `xs`, as `x`.
+pub syntax Iteration {
+    $x:Ident in $src:Expr;
+}
+
+/// `where cond`: only where `cond` holds.
+pub syntax Filter {
+    where $c:Expr;
+}

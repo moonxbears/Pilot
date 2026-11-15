@@ -43,7 +43,6 @@ use template::clone_ast;
 mod tables;
 pub use tables::{MEMBER_IMPLIED_RECEIVER, PrattEntry, ParserTables, TypeConstructRule, TypePostfixKind};
 pub(crate) use tables::*;
-pub use rule_arms::SyntaxMacroRule;
 mod decl;
 mod stmt;
 pub(crate) use stmt::assign_op_of;

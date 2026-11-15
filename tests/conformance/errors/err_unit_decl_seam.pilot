@@ -1,0 +1,12 @@
+// A standalone compilation unit (`unit Name ..`) is not built yet: where a
+// declaration or statement starts, `unit` stops at the seam
+// `keyword.unbuilt` instead of passing the declaration through and
+// declaring nothing (its old rule did). Elsewhere `unit` is an ordinary
+// name (types/local_named_unit.pilot).
+unit Telemetry {
+    fn sample() -> i64 => 1;
+}
+
+fn main() {
+    print("not reached");
+}

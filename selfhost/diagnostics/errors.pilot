@@ -847,6 +847,13 @@ pub let ERRORS = [
         reference: "proposals.md PROP-009 §3",
     },
     ErrorDef {
+        code: "SYN011",
+        title: "Ambiguous Syntax Class",
+        description: "Two arms of a syntax class (`syntax Name { head; .. }`) could start at the same token, so a use cannot tell them apart; or a rule or class binds one hole name twice, its classes' holes included",
+        category: "Grammar",
+        reference: "proposals.md PROP-009 §10",
+    },
+    ErrorDef {
         code: "ASM001",
         title: "Unknown Machine Operation",
         description: "The first argument of `asm(..)` is not a variant of `MachineOp`",

@@ -25,7 +25,7 @@
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Assert;
 
 pub syntax {
-    assert(left == right, note = "") => quote {
+    assert ( $left:Expr == $right:Expr $( , $note:Expr = "" )? ) => quote {
         {
             let left_value = $left;
             let right_value = $right;
@@ -40,7 +40,7 @@ pub syntax {
             }
         }
     };
-    assert(left != right, note = "") => quote {
+    assert ( $left:Expr != $right:Expr $( , $note:Expr = "" )? ) => quote {
         {
             let left_value = $left;
             let right_value = $right;
@@ -55,7 +55,7 @@ pub syntax {
             }
         }
     };
-    assert(left < right, note = "") => quote {
+    assert ( $left:Expr < $right:Expr $( , $note:Expr = "" )? ) => quote {
         {
             let left_value = $left;
             let right_value = $right;
@@ -70,7 +70,7 @@ pub syntax {
             }
         }
     };
-    assert(left <= right, note = "") => quote {
+    assert ( $left:Expr <= $right:Expr $( , $note:Expr = "" )? ) => quote {
         {
             let left_value = $left;
             let right_value = $right;
@@ -85,7 +85,7 @@ pub syntax {
             }
         }
     };
-    assert(left > right, note = "") => quote {
+    assert ( $left:Expr > $right:Expr $( , $note:Expr = "" )? ) => quote {
         {
             let left_value = $left;
             let right_value = $right;
@@ -100,7 +100,7 @@ pub syntax {
             }
         }
     };
-    assert(left >= right, note = "") => quote {
+    assert ( $left:Expr >= $right:Expr $( , $note:Expr = "" )? ) => quote {
         {
             let left_value = $left;
             let right_value = $right;
@@ -115,7 +115,7 @@ pub syntax {
             }
         }
     };
-    assert(cond, note = "") => quote {
+    assert ( $cond:Expr $( , $note:Expr = "" )? ) => quote {
         if !($cond) {
             let note_text = $note;
             let expression = stringify($cond);

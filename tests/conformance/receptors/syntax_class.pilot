@@ -1,0 +1,41 @@
+// A syntax class is a hole kind made of words and holes (PROP-009 §10).
+// `walk` reads any number of steps, each one arm of the class `Step`; the
+// holes of the arms become sequences in the rule, and an arm not taken in a
+// step adds nothing to its holes.
+//
+// Expected output, worked by hand:
+//   walk up 3 down 1 up 4 end: n = [3, 4], m = [1];
+//     ups = $n + 0 = 3 + (4 + 0) = 7, downs = $m + 0 = 1 + 0 = 1; 7 - 1 = 6.
+//   walk down 2 end: n = [], m = [2]; ups = 0, downs = 2 + 0 = 2; -2.
+//   walk end: n = [], m = []; 0 - 0 = 0.
+//   (A `+` whose left side holds a repeated hole is folded over the
+//   repetitions, ending in its right side, so each sum is its own `let`.)
+//   The shared classes `Iteration` and `Filter` in a user rule:
+//   evens x in [1, 2, 3, 4, 5, 6] where x > 2: the even x above 2 = [4, 6].
+syntax Step {
+    up $n:Expr;
+    down $m:Expr;
+}
+
+syntax {
+    walk $( $s:Step )* end => quote {
+        {
+            let ups = $n + 0;
+            let downs = $m + 0;
+            ups - downs
+        }
+    };
+    evens $it:Iteration $( $f:Filter )* => quote {
+        for $x in $src {
+            if $x % 2 == 0 && $c && true { yield $x; }
+        }
+    };
+}
+
+fn main() {
+    print(walk up 3 down 1 up 4 end);
+    print(walk down 2 end);
+    print(walk end);
+    let picked = evens x in [1, 2, 3, 4, 5, 6] where x > 2;
+    print(picked);
+}

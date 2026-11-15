@@ -1,6 +1,6 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/unit_decl.pilot
-// COMPILATION UNIT WRAPPER MACRO (`unit(decl)`) & DIMENSIONAL UNIT REGISTRY
+// THE `unit` DECLARATION WORD & DIMENSIONAL UNIT REGISTRY
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.UnitDecl;
@@ -8,10 +8,12 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.UnitDecl;
 use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
 
-pub syntax {
-    unit(decl) => quote {
-        $decl
-    };
+// A standalone compilation unit (`unit Name ..`) is not built yet: where a
+// declaration or statement starts it stops at the seam `keyword.unbuilt`
+// (receptor 40, place 1); elsewhere it is an ordinary name. Its old rule
+// passed the declaration through and declared nothing.
+comptime {
+    bind_receptor(nameof(unit), 40, 1);
 }
 
 // =========================================================================

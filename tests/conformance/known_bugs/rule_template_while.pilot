@@ -6,7 +6,7 @@
 // Expected output, worked by hand: count_to(3) prints i = 0, 1, 2 and
 // stops when i < 3 fails at i = 3.
 pub syntax {
-    count_to(n) => quote { {
+    count_to ( $n:Expr ) => quote { {
         var i = 0;
         while i < $n {
             print(i);

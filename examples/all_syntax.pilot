@@ -180,7 +180,7 @@ pub let APP_NAME: str = "Pilot Omnibus";
 priv var g_transaction_id: i64 = 1000;
 
 pub syntax {
-    log_metric(name, value) => quote {
+    log_metric ( $name:Expr , $value:Expr ) => quote {
         print($name + ": " + $value)
     };
 }
