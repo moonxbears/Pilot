@@ -1,0 +1,51 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_quote.pilot
+// `quote { e }` in PilIR: calls that build its tree, never the code itself.
+// ==============================================================================
+// The checker (selfhost/check/quote_value.pilot) writes the quote's tree as
+// text and names the functions the program binds: the tree is decoded, then
+// each hole in source order is filled with the value it splices, made a
+// literal tree first when it is a plain value. The seed makes the same calls
+// from its run plan. A quote the checker refused (QUOTE001, QUOTE002) stops
+// the program when it is reached.
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerQuote;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.quote_value.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+
+/// `quote { e }`: `fill(..fill(decode(wire), h1).., hn)`, each `hi` the
+/// value of hole `i` or `lift(value)`.
+pub fn lower_quote(lw: Lowerer, n: i64) -> u32 {
+    let p = lw.inf.p;
+    var holes: List<i64> = [];
+    var bad: List<i64> = [];
+    let wire = quote_wire(p.s, n, holes, bad);
+    let decode = quote_fn(p);
+    var calls: List<List<i64>> = [];
+    for h in holes { calls.push(hole_fns(lw.inf, h)); }
+    var ok = decode >= 0 && bad.len() == 0 && is_quote_value(p.s, n);
+    for c in calls { if c.len() != 2 { ok = false; } }
+    if !ok {
+        emit_trap(lw, "a quote the checker could not build (QUOTE001, QUOTE002)", n);
+        return unit_value(lw, n);
+    }
+    let shape = physics_of(lw, n);
+    let text_layout = layout_of(lw.ls, prog_slot_type(p, literal_slot(nk_str())));
+    let text = emit(lw, op_const_bytes(), 0, text_layout, [pool_str(lw, wire)], n);
+    var acc = call_decl(lw, decode, [text], [], shape, n);
+    var i = 0;
+    while i < holes.len() {
+        var v = lower_expr(lw, holes[i]);
+        if calls[i][1] >= 0 { v = call_decl(lw, calls[i][1], [v], [], shape, holes[i]); }
+        acc = call_decl(lw, calls[i][0], [acc, v], [], shape, n);
+        i = i + 1;
+    }
+    return acc;
+}

@@ -1,35 +1,257 @@
 // =========================================================================
 // FILE: stdlib/core/primitives/ast.pilot
-// HOMOICONIC ABSTRACT SYNTAX TREE & MUTABLE ARENA PRIMITIVES
-//   - `ast<TReturn>`      (`0b00 : IValue`)     — Typed AST node handle
-//   - `AstNodeSlot`       (`0b00 : IValue`)     — 16-byte packed node descriptor
-//   - `AstSpliceBinding`  (`0b00 : IValue`)     — Homoiconic `$hole` / `$*seq` binding
-//   - `AstSubtreeView`    (`0b01 : IReference`) — Lexical borrowed subtree cursor
-//   - `AstArenaBuffer`    (`0b10 : IObject`)    — Perceus-owned mutable AST arena
+// HOMOICONIC ABSTRACT SYNTAX TREES
+//   - `ast<TReturn>`      (`0b10 : IObject`)    — a quoted piece of code
+//   - `AstNodeSlot`, `AstSpliceBinding`, `AstSubtreeView`, `AstArenaBuffer`
+//     and `Ast`: the compiler arena's node records and accessors
+// =========================================================================
+// `quote { e }` is a value of type `ast<T>`, `T` the type of `e`: a tree of
+// the code, which is checked where it is written and never run. The checker
+// (selfhost/check/quote_value.pilot) gives the engines the tree as text and
+// the engines call the functions bound below:
+//
+// - `quote`: `ast_decode(wire)` builds the tree, its holes open;
+// - `quote hole`: `ast_fill(q, h)` puts `h` in the first open hole of `q`;
+// - `quote lift`: `ast_lift_*(v)` makes the literal tree of a plain value
+//   (an `i64`, `f64`, `bool` or `str`) for a hole that splices one.
+//
+// The tree is kept flat, in preorder: node `i` has a kind word, a text, a
+// number of children and a size (its own subtree's node count), so the
+// first child of `i` is `i + 1` and the next sibling of `c` is
+// `c + size(c)`.
+//
+// Kinds and their text: `int`, `float`, `bool`, `none`, `name` and `type`
+// (the source text); `str` (the text between the quotes, escapes as
+// written); `binary`, `unary` and `assign` (the operator); `member` (the
+// member name); `let` and `var` (the name, then `: T` when written);
+// `call`, `index`, `list`, `tuple`, `block`, `stmt`, `if` and `return`
+// (empty); `hole` (the spliced name, until it is filled).
+//
+// `source()` writes the tree back as code: a binary operand that is itself
+// a binary expression, and a unary operand that is an operator expression,
+// in parentheses; a block as `{ ` + its items + ` }` with each statement
+// ending in `;`; a float literal keeps its point.
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Ast;
 
 use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
-use Pilot.Core.Keywords::*;
+
+comptime {
+    __engine("bind_operator_fn", "quote", nameof(ast_decode));
+    __engine("bind_operator_fn", "quote hole", nameof(ast_fill));
+    __engine("bind_operator_fn", "quote lift", nameof(ast_lift_int));
+    __engine("bind_operator_fn", "quote lift", nameof(ast_lift_float));
+    __engine("bind_operator_fn", "quote lift", nameof(ast_lift_bool));
+    __engine("bind_operator_fn", "quote lift", nameof(ast_lift_str));
+}
+
+/// A quoted piece of code whose value has type `TReturn`.
+[Lang(Cfg.Lang.ast_t)]
+pub struct ast<TReturn: IAnyValue> : IObject {
+    pub kinds: List<str>;
+    pub texts: List<str>;
+    pub arity: List<usize>;
+    pub sizes: List<usize>;
+
+    /// The kind of the root node (`binary`, `call`, `int`, ..).
+    pub fn kind() -> str => .kinds[0];
+
+    /// The text of the root node (an operator, a name, a literal).
+    pub fn text() -> str => .texts[0];
+
+    /// How many children the root node has.
+    pub fn len() -> usize => .arity[0];
+
+    /// Child `i` of the root node, as a tree of its own.
+    pub self[i: usize] -> ast<any> {
+        get => ast_subtree<any>(self, ast_child(self, 0, i));
+    }
+
+    /// The tree written back as source.
+    pub fn source() -> str => ast_render(self, 0);
+}
+
+/// Node `at` of `t` and its subtree, as a tree of its own.
+fn ast_subtree<U: IAnyValue>(t: ast<any>, at: usize) -> ast<U> {
+    var out = ast<U> { kinds: [], texts: [], arity: [], sizes: [] };
+    var i = at;
+    while i < at + t.sizes[at] {
+        out.kinds.push(t.kinds[i]);
+        out.texts.push(t.texts[i]);
+        out.arity.push(t.arity[i]);
+        out.sizes.push(t.sizes[i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The index of child `c` of node `i` of `t`.
+fn ast_child(t: ast<any>, i: usize, c: usize) -> usize {
+    var at = i + 1;
+    var j: usize = 0;
+    while j < c {
+        at = at + t.sizes[at];
+        j = j + 1;
+    }
+    return at;
+}
+
+/// Node `i` of `t` as an operand of an operator of kind `outer`: in
+/// parentheses when it is a binary expression, or under a unary operator
+/// any operator expression.
+fn ast_operand(t: ast<any>, i: usize, outer: str) -> str {
+    let k = t.kinds[i];
+    let wrap = k == "binary" || (outer == "unary" && k == "unary");
+    return if wrap { "(" + ast_render(t, i) + ")" } else { ast_render(t, i) };
+}
+
+/// The children of node `i` of `t`, written back and joined by `sep`.
+fn ast_joined(t: ast<any>, i: usize, from: usize, sep: str) -> str {
+    var out = "";
+    var c = from;
+    while c < t.arity[i] {
+        let part = ast_render(t, ast_child(t, i, c));
+        out = if c == from { part } else { out + sep + part };
+        c = c + 1;
+    }
+    return out;
+}
+
+/// Node `i` of `t` written back as source.
+fn ast_render(t: ast<any>, i: usize) -> str {
+    let k = t.kinds[i];
+    let x = t.texts[i];
+    let n = t.arity[i];
+    if k == "str" { return "\"" + x + "\""; }
+    if k == "binary" {
+        return ast_operand(t, ast_child(t, i, 0), k) + " " + x + " " + ast_operand(t, ast_child(t, i, 1), k);
+    }
+    if k == "unary" { return x + ast_operand(t, ast_child(t, i, 0), k); }
+    if k == "call" { return ast_render(t, i + 1) + "(" + ast_joined(t, i, 1, ", ") + ")"; }
+    if k == "member" { return ast_render(t, i + 1) + "." + x; }
+    if k == "index" { return ast_render(t, i + 1) + "[" + ast_render(t, ast_child(t, i, 1)) + "]"; }
+    if k == "list" { return "[" + ast_joined(t, i, 0, ", ") + "]"; }
+    if k == "tuple" { return "(" + ast_joined(t, i, 0, ", ") + (if n == 1 { "," } else { "" }) + ")"; }
+    if k == "block" { return if n == 0 { "{}" } else { "{ " + ast_joined(t, i, 0, " ") + " }" }; }
+    if k == "stmt" { return ast_render(t, i + 1) + ";"; }
+    if k == "let" || k == "var" {
+        return k + " " + x + (if n > 0 { " = " + ast_render(t, i + 1) } else { "" }) + ";";
+    }
+    if k == "return" { return "return" + (if n > 0 { " " + ast_render(t, i + 1) } else { "" }) + ";"; }
+    if k == "assign" { return ast_render(t, i + 1) + " " + x + " " + ast_render(t, ast_child(t, i, 1)) + ";"; }
+    if k == "if" {
+        let head = "if " + ast_render(t, i + 1) + " " + ast_render(t, ast_child(t, i, 1));
+        return if n > 2 { head + " else " + ast_render(t, ast_child(t, i, 2)) } else { head };
+    }
+    if k == "hole" { return "$" + x; }
+    return x;
+}
+
+/// The digits of `wire` from `at` up to the byte `stop`, as a number, and
+/// the index after `stop`.
+fn ast_wire_number(wire: str, at: usize, stop: u8) -> (usize, usize) {
+    var v: usize = 0;
+    var i = at;
+    while wire.byte_at(i) != stop {
+        v = v * 10 + ((wire.byte_at(i) - 48) as usize);
+        i = i + 1;
+    }
+    return (v, i + 1);
+}
+
+/// The tree the checker wrote as `wire` (selfhost/check/quote_value.pilot):
+/// each node in preorder as `kind/length/text/children;`, the length that
+/// of the text in bytes.
+pub fn ast_decode<T: IAnyValue>(wire: str) -> ast<T> {
+    var out = ast<T> { kinds: [], texts: [], arity: [], sizes: [] };
+    var i: usize = 0;
+    while i < wire.len {
+        var k = i;
+        while wire.byte_at(k) != 47 { k = k + 1; }
+        out.kinds.push(wire.slice(i, k));
+        let (len, at) = ast_wire_number(wire, k + 1, 47);
+        out.texts.push(wire.slice(at, at + len));
+        let (count, next) = ast_wire_number(wire, at + len + 1, 59);
+        out.arity.push(count);
+        out.sizes.push(1);
+        i = next;
+    }
+    ast_size_all(out);
+    return out;
+}
+
+/// Sets the size of every node of `t` from the numbers of children, last
+/// node first.
+fn ast_size_all(t: ast<any>) {
+    var i = t.kinds.len();
+    while i > 0 {
+        i = i - 1;
+        var size: usize = 1;
+        var c: usize = 0;
+        while c < t.arity[i] {
+            size = size + t.sizes[i + size];
+            c = c + 1;
+        }
+        t.sizes[i] = size;
+    }
+}
+
+/// `q` with `h` in its first open hole.
+pub fn ast_fill<T: IAnyValue, U: IAnyValue>(q: ast<T>, h: ast<U>) -> ast<T> {
+    var out = ast<T> { kinds: [], texts: [], arity: [], sizes: [] };
+    var filled = false;
+    var i: usize = 0;
+    while i < q.kinds.len() {
+        if !filled && q.kinds[i] == "hole" {
+            var j: usize = 0;
+            while j < h.kinds.len() {
+                out.kinds.push(h.kinds[j]);
+                out.texts.push(h.texts[j]);
+                out.arity.push(h.arity[j]);
+                out.sizes.push(h.sizes[j]);
+                j = j + 1;
+            }
+            filled = true;
+        } else {
+            out.kinds.push(q.kinds[i]);
+            out.texts.push(q.texts[i]);
+            out.arity.push(q.arity[i]);
+            out.sizes.push(1);
+        }
+        i = i + 1;
+    }
+    ast_size_all(out);
+    return out;
+}
+
+/// The tree of one literal.
+fn ast_leaf<T: IAnyValue>(k: str, text: str) -> ast<T> =>
+    ast<T> { kinds: [k], texts: [text], arity: [0], sizes: [1] };
+
+/// The literal tree of `v`.
+pub fn ast_lift_int(v: i64) -> ast<i64> => ast_leaf<i64>("int", f"{v}");
+
+/// The literal tree of `v`; its text keeps a point (`2.0`), so that it
+/// reads back as a float.
+pub fn ast_lift_float(v: f64) -> ast<f64> {
+    let text = f"{v}";
+    let plain = !text.contains(".") && !text.contains("e") && !text.contains("n") && !text.contains("i");
+    return ast_leaf<f64>("float", if plain { text + ".0" } else { text });
+}
+
+/// The literal tree of `v`.
+pub fn ast_lift_bool(v: bool) -> ast<bool> => ast_leaf<bool>("bool", if v { "true" } else { "false" });
+
+/// The literal tree of `v`, escaped as a string literal is written.
+pub fn ast_lift_str(v: str) -> ast<str> =>
+    ast_leaf<str>("str", v.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n"));
 
 pub interface IMutableAstArena : IAnyValue {
     pub pure fn node_count() -> usize;
     pub pure fn root_node_id() -> usize;
     pub pure fn generation_id() -> u32;
-}
-
-[KeywordDefAttr(29, "Homoiconic abstract syntax tree node representation.")]
-[Lang(Cfg.Lang.ast_t), Layout(c_abi)]
-pub partial struct ast<TReturn: IAnyValue> : IValue {
-    pub node_id: usize;
-
-    pub static pure fn invalid() -> ast<TReturn> => ast<TReturn> { node_id: 4294967295 };
-
-    pub pure:
-        fn is_none()  -> bool => .node_id == 4294967295;
-        fn is_valid() -> bool => .node_id != 4294967295;
 }
 
 pub struct {

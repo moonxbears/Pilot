@@ -189,8 +189,8 @@ These keywords cannot become real until the owner says what they mean. An agent 
 **Keywords:** `quote`, `splice` (both registry roles), `unquote` (`~`), `macro`, `call` (`!`), `fields_of`; `splice` covers `!!`. Close any remaining gaps of `syntax`, `comptime` and `type_construct` here too.
 
 **What moves them:**
-- `quote` yields `ast<T>`, and spliced code is checked again (M31).
-- Hygiene (M27).
+- `quote` yields `ast<T>`, and spliced code is checked again (M31). **Status 2026-11-14:** `quote { e }` is an `ast<T>` value on every engine, typed and checked where it is written (ledger K4 WIRED). Left: putting a tree back into the program at compile time, which needs `comptime` on the IR (M30), then re-checking it there; quotes of declarations; `$*xs` sequence holes.
+- Hygiene (M27). Template-bound names are hidden; free template names are still captured by a caller's local (known bug parser.rule_template_capture).
 - `call f(x)` gives a `CallExpr<T>` value (seam `vm.call_quote`).
 - `splice f(~x)` gives `ast<T>`.
 - `fields_of` reflects through `comptime` on the IR interpreter (M30).

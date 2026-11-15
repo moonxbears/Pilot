@@ -30,6 +30,9 @@ pub enum NodeKind {
     IndexExpr = 210, CascadeExpr = 211, PipeExpr = 212, TryPropagateExpr = 213, CatchRecoveryExpr = 214,
     CoalesceExpr = 215, LambdaExpr = 216, TupleExpr = 217, ListExpr = 218, MapExpr = 219,
     RangeExpr = 220, ComptimeExpr = 221, PolyglotBlock = 222,
+    /// `quote { .. }` / `quote expr`: `lhs` is the quoted code; `flags` is 1
+    /// for a `syntax` rule's template, 0 for a quote value.
+    QuoteExpr = 223,
     IdentExpr = 300, IntLit = 301, FloatLit = 302, BoolLit = 303, StrLit = 304,
     NoneLit = 305, KeywordLit = 306, UnitLit = 307,
     TypeNamed = 400, TypeTuple = 409,
@@ -56,7 +59,7 @@ impl NodeKind {
             211 => Self::CascadeExpr, 212 => Self::PipeExpr, 213 => Self::TryPropagateExpr,
             214 => Self::CatchRecoveryExpr, 215 => Self::CoalesceExpr, 216 => Self::LambdaExpr,
             217 => Self::TupleExpr, 218 => Self::ListExpr, 219 => Self::MapExpr, 220 => Self::RangeExpr,
-            221 => Self::ComptimeExpr, 222 => Self::PolyglotBlock, 300 => Self::IdentExpr,
+            221 => Self::ComptimeExpr, 222 => Self::PolyglotBlock, 223 => Self::QuoteExpr, 300 => Self::IdentExpr,
             301 => Self::IntLit, 302 => Self::FloatLit, 303 => Self::BoolLit, 304 => Self::StrLit,
             305 => Self::NoneLit, 306 => Self::KeywordLit, 307 => Self::UnitLit, 400 => Self::TypeNamed,
             409 => Self::TypeTuple, 500 => Self::PatWildcard, 501 => Self::PatBind, 502 => Self::PatLiteral,
@@ -85,7 +88,7 @@ impl NodeKind {
             Self::TryPropagateExpr => "TryPropagateExpr", Self::CatchRecoveryExpr => "CatchRecoveryExpr",
             Self::CoalesceExpr => "CoalesceExpr", Self::LambdaExpr => "LambdaExpr", Self::TupleExpr => "TupleExpr",
             Self::ListExpr => "ListExpr", Self::MapExpr => "MapExpr", Self::RangeExpr => "RangeExpr",
-            Self::ComptimeExpr => "ComptimeExpr", Self::PolyglotBlock => "PolyglotBlock",
+            Self::ComptimeExpr => "ComptimeExpr", Self::PolyglotBlock => "PolyglotBlock", Self::QuoteExpr => "QuoteExpr",
             Self::IdentExpr => "IdentExpr", Self::IntLit => "IntLit", Self::FloatLit => "FloatLit",
             Self::BoolLit => "BoolLit", Self::StrLit => "StrLit", Self::NoneLit => "NoneLit",
             Self::KeywordLit => "KeywordLit", Self::UnitLit => "UnitLit", Self::TypeNamed => "TypeNamed",

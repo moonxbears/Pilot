@@ -63,6 +63,7 @@ pub pure fn nk_list() -> i64 => 218;
 pub pure fn nk_map() -> i64 => 219;
 pub pure fn nk_range() -> i64 => 220;
 pub pure fn nk_comptime() -> i64 => 221;
+pub pure fn nk_quote() -> i64 => 223;
 pub pure fn nk_ident() -> i64 => 300;
 pub pure fn nk_int() -> i64 => 301;
 pub pure fn nk_float() -> i64 => 302;
@@ -464,7 +465,7 @@ fn child_shapes() -> List<ChildShape> {
         nk_catch_recovery(), nk_coalesce(), nk_range(), nk_guard(), nk_arm(), nk_scope(),
         nk_pat_or(), nk_pat_range(),], ChildShape::LhsRhs);
     set_shape(out, [nk_member(), nk_unary(), nk_return(), nk_yield(), nk_defer(), nk_break(),
-        nk_continue(), nk_expr_stmt(), nk_try_propagate(), nk_dtor(), nk_comptime(),
+        nk_continue(), nk_expr_stmt(), nk_try_propagate(), nk_dtor(), nk_comptime(), nk_quote(),
         nk_pat_literal(),], ChildShape::Lhs);
     return out;
 }

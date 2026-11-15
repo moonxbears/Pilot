@@ -30,7 +30,7 @@ impl TemplateNode {
                 if v.len() == 1 && matches!(&v[0], Self::Loop(_) | Self::If(..) | Self::Splice(_) | Self::Int(_) | Self::Block(_)) {
                     v.into_iter().next().unwrap()
                 } else { Self::Block(v) } }
-            NodeKind::ExprStmt | NodeKind::ComptimeExpr => Self::from_arena(arena, NodeId(n.lhs)), NodeKind::IfExpr => {
+            NodeKind::ExprStmt | NodeKind::ComptimeExpr | NodeKind::QuoteExpr => Self::from_arena(arena, NodeId(n.lhs)), NodeKind::IfExpr => {
                 let c = Box::new(Self::from_arena(arena, NodeId(n.lhs))); if n.flags == 2 { let ch = arena.children_slice(n.rhs, 2);
                     Self::If(c, Box::new(Self::from_arena(arena, NodeId(ch[0]))), Some(Box::new(Self::from_arena(arena, NodeId(ch[1])))))
                 } else { Self::If(c, Box::new(Self::from_arena(arena, NodeId(n.rhs))), None) } }

@@ -1,0 +1,2 @@
+error[DECL001]: undefined name `nosuch`
+err_quote_unknown_name.pilot:4:21

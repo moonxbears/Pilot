@@ -1,0 +1,37 @@
+// `quote { .. }` is a value: an `ast<T>` tree of the code, never its result
+// (`bump` is not called, so "ran" is never printed).
+// How a tree is written back as source (stdlib/core/primitives/ast.pilot):
+// literals, names and operators as in the source; `-n` with no space; an
+// operand that is itself an operator expression in parentheses; a block as
+// `{ ` + each statement ending in `;` + its value + ` }`. A quote whose
+// block holds one value and no statement is that value's tree.
+fn bump(c: i64) -> i64 {
+    print("ran");
+    return c + 1;
+}
+
+fn main() {
+    let a = quote { 1 + 2 };
+    print(a.source());
+    print(a.kind());
+    print(a.text());
+    print(a.len());
+    print(a[0].source());
+    print(a[1].kind());
+    let q = quote { bump(1) };
+    print(q.source());
+    print(q.kind());
+    let blk = quote { let x = 10; x * 2 };
+    print(blk.kind());
+    print(blk.len());
+    print(blk.source());
+    let n = 4;
+    let cond = quote { if n > 3 { "big" } else { "small" } };
+    print(cond.source());
+    let xs = [1, 2];
+    let items = quote { [xs[0], -n] };
+    print(items.source());
+    let call = quote { xs.len() };
+    print(call.source());
+    print(call[0].kind());
+}

@@ -24,9 +24,9 @@ pub partial struct {
         pub frame_size: usize;
     }
 
-    // 3. First-Class Compile-Time Type Descriptor (`type`) & Homoiconic AST Handle (`ast`, `fn!!(...)`)
+    // 3. First-Class Compile-Time Type Descriptor (`type`); the homoiconic
+    // AST value (`ast<T>`) is stdlib/core/primitives/ast.pilot.
     [Lang(Cfg.Lang.type_t), Bits(Cfg.Reg.b64, Cfg.Reg.gpr_u)] type : IValue {}
-    [Lang(Cfg.Lang.ast_t),  Bits(Cfg.Reg.b64, Cfg.Reg.gpr_u)] ast  : IValue {}
 
     // 4. Reactive Signal Cell Type Construct (`T^` -> `signal<T>`) — `0b10` `IObject`
     [Lang(Cfg.Lang.signal_t), Layout(c_abi)]

@@ -101,6 +101,7 @@ impl BytecodeCompiler {
             NodeKind::TryStmt => self.compile_try_stmt(arena, node_id),
             NodeKind::CascadeExpr => self.compile_cascade(arena, node_id),
             NodeKind::ComptimeExpr => self.compile_comptime(arena, node_id),
+            NodeKind::QuoteExpr => self.compile_quote(arena, node_id),
             NodeKind::CatchRecoveryExpr => self.compile_catch_recovery(arena, node.lhs, node.rhs),
             NodeKind::ReturnStmt if node.flags == pilot_parser::RETURN_TAIL_CALL => self.compile_become(arena, node.lhs),
             NodeKind::ReturnStmt => self.compile_return(arena, node.lhs),
@@ -649,5 +650,27 @@ impl BytecodeCompiler {
             self.release_to(mark);
         }
         r_list
+    }
+
+    /// `quote { .. }`: the tree the checker planned, built by the functions
+    /// the program binds; the quoted code itself never runs.
+    fn compile_quote(&mut self, arena: &AstArena, id: NodeId) -> u8 {
+        // The checker refuses a quote it cannot plan (QUOTE001, QUOTE002).
+        let Some((decode, wire)) = self.planned_quote(arena, id) else {
+            return self.emit_trap("a quote the checker could not build (QUOTE001, QUOTE002)".to_string());
+        };
+        let mark = self.next_reg;
+        let text = self.emit_const(PilotVal::from_str(&wire));
+        let mut acc = self.emit_user_call(decode.clone(), decode, &[text]);
+        for (hole, fill, lift) in self.planned_quote_holes(arena, id) {
+            let mut v = self.compile_node(arena, hole);
+            if !lift.is_empty() {
+                v = self.emit_user_call(lift.clone(), lift, &[v]);
+            }
+            acc = self.emit_user_call(fill.clone(), fill, &[acc, v]);
+        }
+        self.emit(Opcode::Move, mark, acc, 0);
+        self.release_to(mark + 1);
+        mark
     }
 }

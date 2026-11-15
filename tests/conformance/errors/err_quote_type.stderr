@@ -1,0 +1,2 @@
+error[TYPE001]: expected `ast<str>`, found `ast<i64>`
+err_quote_type.pilot:3:23

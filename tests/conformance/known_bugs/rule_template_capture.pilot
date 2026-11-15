@@ -1,0 +1,16 @@
+// KNOWN BUG parser.rule_template_capture: a free name in a `syntax` rule's
+// template is resolved where the rule is used, so a caller's local of the
+// same name captures it. `use_helper()` must call the `helper` the rule's
+// own module sees (hygiene, M27); the caller's local `helper` is another
+// binding.
+// Expected by hand: helper() at the rule's definition returns 100.
+fn helper() -> i64 => 100;
+
+syntax {
+    use_helper() => quote { helper() };
+}
+
+fn main() {
+    let helper = () => 7;
+    print(use_helper());
+}

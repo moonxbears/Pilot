@@ -1,0 +1,7 @@
+// A quote value holds literals, names, operators, calls, members, indexing,
+// lists, tuples, blocks, `let`/`var`, `if`, `return` and assignments; a
+// lambda is not held yet (QUOTE001), and is never dropped silently.
+fn main() {
+    let q = quote { (x: i64) => x + 1 };
+    print(q.source());
+}

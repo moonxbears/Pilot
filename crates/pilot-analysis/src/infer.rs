@@ -233,7 +233,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                 NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl | NodeKind::CatchClause => push_ch(node.rhs),
                 NodeKind::MemberExpr | NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::YieldStmt | NodeKind::DeferStmt | NodeKind::BreakStmt | NodeKind::ContinueStmt
                 | NodeKind::ExprStmt | NodeKind::TryPropagateExpr | NodeKind::DestructorDecl | NodeKind::DynamicMemberDecl
-                | NodeKind::ComptimeExpr | NodeKind::PatLiteral => push_ch(node.lhs),
+                | NodeKind::ComptimeExpr | NodeKind::QuoteExpr | NodeKind::PatLiteral => push_ch(node.lhs),
                 _ => {}
             }
         }

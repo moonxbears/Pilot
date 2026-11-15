@@ -55,6 +55,12 @@ pub enum DropAction {
     /// The node is `xs as view T`: the function that builds the view, and
     /// the integers it takes after `xs`, separated by spaces.
     ViewCast = 17,
+    /// The node is `quote { .. }`: the function that decodes its tree, and
+    /// the tree's wire.
+    QuoteBuild = 18,
+    /// The node is a hole `$x` of a quote: the function that fills it, and
+    /// the one that makes its value a literal tree first, or "".
+    QuoteHole = 19,
 }
 
 impl DropAction {
@@ -78,6 +84,8 @@ impl DropAction {
             Self::NumericType,
             Self::TypeTest,
             Self::ViewCast,
+            Self::QuoteBuild,
+            Self::QuoteHole,
         ]
             .into_iter()
             .find(|a| *a as i64 == code)
@@ -164,6 +172,12 @@ pub struct DropPlan {
     /// the integer arguments that follow `xs`
     /// (selfhost/check/view_cast.pilot).
     pub view_casts: HashMap<NodeKey, (String, Vec<i64>)>,
+    /// `quote { .. }` nodes, with the function that decodes the tree and
+    /// its wire (selfhost/check/quote_value.pilot).
+    pub quote_builds: HashMap<NodeKey, (String, String)>,
+    /// The holes of quotes, with the function that fills each and the one
+    /// that lifts its value first ("" for none).
+    pub quote_holes: HashMap<NodeKey, (String, String)>,
 }
 
 impl DropPlan {
@@ -183,6 +197,8 @@ impl DropPlan {
             && self.numeric.is_empty()
             && self.type_tests.is_empty()
             && self.view_casts.is_empty()
+            && self.quote_builds.is_empty()
+            && self.quote_holes.is_empty()
     }
 }
 
@@ -239,6 +255,36 @@ impl BytecodeCompiler {
     /// `xs as view T` node `id`.
     pub(crate) fn planned_view_cast(&self, arena: &AstArena, id: NodeId) -> Option<(String, Vec<i64>)> {
         self.drop_plan.as_ref()?.view_casts.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The decode function and wire the checker planned for quote `id`.
+    pub(crate) fn planned_quote(&self, arena: &AstArena, id: NodeId) -> Option<(String, String)> {
+        self.drop_plan.as_ref()?.quote_builds.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The holes the checker planned inside quote `id`, in source order:
+    /// each hole node with its fill function and lift function ("" for
+    /// none). Every node a quote holds lies inside its span and was parsed
+    /// before it.
+    pub(crate) fn planned_quote_holes(&self, arena: &AstArena, id: NodeId) -> Vec<(NodeId, String, String)> {
+        let Some(plan) = self.drop_plan.as_ref() else { return Vec::new() };
+        if plan.quote_holes.is_empty() {
+            return Vec::new();
+        }
+        let span = arena.span(id);
+        let mut out: Vec<(NodeId, String, String)> = Vec::new();
+        for i in 0..id.0 {
+            let h = NodeId(i);
+            let s = arena.span(h);
+            if s.start < span.start || s.end > span.end {
+                continue;
+            }
+            if let Some((fill, lift)) = plan.quote_holes.get(&key_of(arena, h)) {
+                out.push((h, fill.clone(), lift.clone()));
+            }
+        }
+        out.sort_by_key(|(h, _, _)| arena.span(*h).start);
+        out
     }
 
     pub(crate) fn set_drop_plan(&mut self, plan: DropPlan) {

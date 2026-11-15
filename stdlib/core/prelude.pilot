@@ -47,3 +47,5 @@ use Pilot.Core.Coverage;
 use Pilot.Db.SetOps;
 
 use Pilot.Core.Reinterpret;
+
+use Pilot.Core.Primitives.Ast;

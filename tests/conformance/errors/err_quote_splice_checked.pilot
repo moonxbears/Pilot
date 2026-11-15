@@ -1,0 +1,9 @@
+// A spliced `ast<str>` is a `str` inside the template, so the template is
+// checked as `inc("x")` would be (TYPE001 at the hole).
+fn inc(x: i64) -> i64 => x + 1;
+
+fn main() {
+    let s = quote { "x" };
+    let q = quote { inc($s) };
+    print(q.source());
+}

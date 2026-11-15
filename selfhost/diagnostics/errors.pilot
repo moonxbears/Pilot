@@ -948,6 +948,30 @@ pub let ERRORS = [
         reference: "C++ Itanium diamond inheritance / Milestone 15",
     },
     // -------------------------------------------------------------------------
+    // Quote values (QUOTE001 - QUOTE003; selfhost/check/quote_value.pilot)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "QUOTE001",
+        title: "Construct Not Held by a Quote",
+        description: "A quote holds code its tree cannot represent yet, or no function is bound to build quotes",
+        category: "Metaprogramming",
+        reference: "MetaOCaml typed quotation / Rust proc_macro2",
+    },
+    ErrorDef {
+        code: "QUOTE002",
+        title: "Value Cannot Be Spliced",
+        description: "A hole `$x` splices a value that is neither an `ast` nor a type a bound literal maker takes",
+        category: "Metaprogramming",
+        reference: "Rust quote::ToTokens / Scheme unquote",
+    },
+    ErrorDef {
+        code: "QUOTE003",
+        title: "Hole Outside a Quote",
+        description: "`$x` splices into a quote and is written outside one",
+        category: "Metaprogramming",
+        reference: "Scheme unquote outside quasiquote",
+    },
+    // -------------------------------------------------------------------------
     // Seed compiler diagnostics (SYN001, SEED001, PAT001, INIT001, CALL003, DIM002)
     // Codes the bootstrap compiler attaches (`crates/pilot-vm/src/codes.rs`).
     // -------------------------------------------------------------------------

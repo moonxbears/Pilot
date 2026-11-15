@@ -1,0 +1,32 @@
+// `$x` in a quote splices `x`: an `ast<U>` goes in whole and is a `U` in
+// the template; an integer, float, bool or string goes in as its literal (a
+// float keeps its point, a string is quoted and escaped).
+// Worked: b = (1 + 2) * 3, as `1 + 2` is an operator expression under `*`.
+fn twice(e: ast<i64>) -> ast<i64> => quote { $e + $e };
+
+fn main() {
+    let a = quote { 1 + 2 };
+    let b = quote { $a * 3 };
+    print(b.source());
+    print(b[0].source());
+    let six = quote { 2 * 3 };
+    print(twice(six).source());
+    let n = 5;
+    let c = quote { $n - 1 };
+    print(c.source());
+    print(c[0].kind());
+    let f = 2.0;
+    let g = quote { $f };
+    print(g.source());
+    print(g.kind());
+    let s = "say \"hi\"\n";
+    let h = quote { print($s) };
+    print(h.source());
+    let yes = true;
+    let k = quote { $yes && !$yes };
+    print(k.source());
+    let nested = quote { $b - $c };
+    print(nested.source());
+    let typed: ast<i64> = quote { $a + $n };
+    print(typed.source());
+}

@@ -132,6 +132,12 @@ pub enum DropAction : u8 {
     /// The node is `xs as view T`: the function that builds the view and
     /// the integers it takes after `xs` (selfhost/check/view_cast.pilot).
     ViewCast,
+    /// The node is `quote { .. }`: the function that decodes its tree, and
+    /// the tree's wire (selfhost/check/quote_value.pilot).
+    QuoteBuild,
+    /// The node is a hole `$x` of a quote: the function that fills it, and
+    /// the one that makes its value a literal tree first, or "".
+    QuoteHole,
 }
 
 /// What planning the drops of one program keeps.

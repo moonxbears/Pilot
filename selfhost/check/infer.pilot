@@ -453,6 +453,78 @@ pub fn view_type(inf: Infer, n: i64) -> i64 {
     return ty_named(p.tt, ty_decl(p.tt, ret), p.tt.name[ret], [elem, target]);
 }
 
+/// The binding keys of `quote` values (stdlib/core/primitives/ast.pilot):
+/// the function that builds a quote's tree, the one that fills its next
+/// hole, and the ones that make a literal tree of a plain value.
+pub pure fn quote_symbol() -> str => "quote";
+pub pure fn quote_hole_symbol() -> str => "quote hole";
+pub pure fn quote_lift_symbol() -> str => "quote lift";
+
+/// The functions the program binds `key` to, in binding order.
+pub fn bound_fns(p: Program, key: str) -> List<i64> {
+    var out: List<i64> = [];
+    for row in prog_engine_bindings(p) {
+        if row.len() >= 3 && row[0] == "bind_operator_fn" && row[1] == key {
+            let fns = nl_get(p.fns, row[2]);
+            if fns.len() == 1 { out.push(fns[0]); }
+        }
+    }
+    return out;
+}
+
+/// The function that builds a quote's tree, or -1.
+pub fn quote_fn(p: Program) -> i64 {
+    let fns = bound_fns(p, quote_symbol());
+    return if fns.len() > 0 { fns[0] } else { -1 };
+}
+
+/// Whether `t` is the type of a quote's value (`ast<T>`).
+pub fn is_quote_type(p: Program, t: i64) -> bool {
+    let f = quote_fn(p);
+    if f < 0 || annot(p.s, f) < 0 || !ty_is_named(p.tt, t) { return false; }
+    let ret = prog_annot_type(p, annot(p.s, f));
+    return ty_is_named(p.tt, ret) && ty_decl(p.tt, ret) == ty_decl(p.tt, t);
+}
+
+/// Whether `n` is the value a block ends with: an expression written
+/// without a `;`, or an `if` that ends the block.
+pub fn is_tail(s: Snap, n: i64) -> bool {
+    if kind(s, n) == nk_if() { return true; }
+    return kind(s, n) == nk_expr_stmt() && lhs(s, n) >= 0 && span_end(s, n) == span_end(s, lhs(s, n));
+}
+
+/// The code quote `q` holds: its block's only value when the block has no
+/// statement, else the block (or the expression after `quote`).
+pub fn quoted_root(s: Snap, q: i64) -> i64 {
+    let b = lhs(s, q);
+    if b < 0 || kind(s, b) != nk_block() { return b; }
+    let ch = children(s, b);
+    if ch.len() == 1 && is_tail(s, ch[0]) {
+        return if kind(s, ch[0]) == nk_if() { ch[0] } else { lhs(s, ch[0]) };
+    }
+    return b;
+}
+
+/// The type of `quote { e }`: the quote function's return type over the
+/// type of `e`.
+pub fn quote_type(inf: Infer, n: i64) -> i64 {
+    let p = inf.p;
+    let f = quote_fn(p);
+    if f < 0 || annot(p.s, f) < 0 { return ty_unknown(); }
+    let ret = prog_annot_type(p, annot(p.s, f));
+    if !ty_is_named(p.tt, ret) { return ty_unknown(); }
+    return ty_named(p.tt, ty_decl(p.tt, ret), p.tt.name[ret], [type_of(inf, quoted_root(p.s, n))]);
+}
+
+/// The type hole `$x` has inside its template: `T` when `x` is an
+/// `ast<T>`, else the type of `x` (a value made into its literal).
+pub fn hole_type(inf: Infer, bt: i64) -> i64 {
+    let p = inf.p;
+    if !is_quote_type(p, bt) { return bt; }
+    let args = ty_args(p.tt, bt);
+    return if args.len() > 0 { args[0] } else { ty_unknown() };
+}
+
 fn binary_type(inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
@@ -499,6 +571,8 @@ fn compute(inf: Infer, n: i64) -> i64 {
             // A method's own `self` / `ref self` parameter carries no type
             // annotation: it is the type whose body holds the method.
             let bt = binding_type(inf, b);
+            // `$x` in a quote: what `x` puts into the template.
+            if flags(s, n) == 1 { return hole_type(inf, bt); }
             if !is_receiver || !ty_is_unknown(p.tt, bt) { return bt; }
         }
         if is_receiver { return receiver_type(inf, n); }
@@ -510,6 +584,7 @@ fn compute(inf: Infer, n: i64) -> i64 {
         return ty_unknown();
     }
     if k == nk_call() { return call_type(inf, n); }
+    if k == nk_quote() { return quote_type(inf, n); }
     if k == nk_member() { return member_type(inf, n); }
     if k == nk_index() {
         // `x[a..b]` is the part of `x` between the bounds: a value of `x`'s

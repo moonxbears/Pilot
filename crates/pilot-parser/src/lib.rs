@@ -800,7 +800,13 @@ impl<'a> Parser<'a> {
                     let pnames: Vec<String> = params.iter().map(|&pid| self.arena.interner.resolve(SymbolId(self.arena.node(pid).lhs)).to_string()).collect();
                     let defaults = vec![None; pnames.len()]; (params, rule_arms::RuleArm { params: pnames, defaults, shape: None, template: TemplateNode::NoneLit }) };
                 self.expect(TokenKind::FatArrow); let has_quote = self.at(TokenKind::KwQuote);
-                let body = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); if has_quote && body.is_some() {
+                let body = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon);
+                // A rule's template is expanded where the rule is used: flags = 1
+                // tells it from a quote value.
+                if has_quote && body.is_some() && self.arena.node(body).node_kind() == NodeKind::QuoteExpr {
+                    self.arena.nodes[body.0 as usize].flags = 1;
+                }
+                if has_quote && body.is_some() {
                     let tpl = TemplateNode::from_arena(&self.arena, body); let bsp = self.arena.span(body); self.add_rule(&kw, arm, tpl, rich, bsp); }
                 // A rule with arms lives only in the rule table: its template is
                 // no function (`stringify($p)` is no call, and arms share a word).
@@ -1226,13 +1232,34 @@ impl<'a> Parser<'a> {
             TokenKind::StrLit | TokenKind::TripleStrLit => self.parse_str_lit(sp),
             TokenKind::KeywordLit => { let t = self.text(); self.advance(); self.arena.alloc_keyword(t, sp) }
             TokenKind::KwIf => self.parse_if(),
-            TokenKind::KwQuote => { self.advance(); if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() } }
+            // `quote { .. }` / `quote expr` as a value: the code, never run.
+            TokenKind::KwQuote => {
+                self.advance();
+                let body = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() };
+                let span = ByteSpan::new(sp.start, self.prev_span().end);
+                self.arena.alloc_node(NodeKind::QuoteExpr, 0, span, body.0, 0)
+            }
             // `comptime expr` / `comptime { .. }` as a value: flags = 1.
             TokenKind::KwComptime if self.at_comptime_if() => self.parse_comptime_if(),
             TokenKind::KwComptime => { self.advance(); let e = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() };
                 self.arena.alloc_node(NodeKind::ComptimeExpr, 1, ByteSpan::new(sp.start, self.prev_span().end), e.0, 0) }
-            TokenKind::Dollar => { self.advance(); if self.eat(TokenKind::LParen) { let e = self.parse_expr(); self.expect(TokenKind::RParen); e }
-                else { let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::IdentExpr, 1, sp, sym.0, 0) } }
+            // `$name`: a hole of a quote. `$(expr)` is not a form of the
+            // language: it is reported, never read as `expr`.
+            TokenKind::Dollar => {
+                self.advance();
+                if self.eat(TokenKind::LParen) {
+                    let e = self.parse_expr();
+                    self.expect(TokenKind::RParen);
+                    self.arena.diagnostics.push((
+                        ByteSpan::new(sp.start, self.prev_span().end),
+                        "a hole splices a name (`$x`); bind the value with `let` and splice that name".to_string(),
+                    ));
+                    e
+                } else {
+                    let sym = self.intern_cur();
+                    self.arena.alloc_node(NodeKind::IdentExpr, 1, ByteSpan::new(sp.start, self.prev_span().end), sym.0, 0)
+                }
+            }
             TokenKind::PrefixDot => { self.advance();
                 let rcv_nm = if self.tables.receiver_ident.is_empty() { "_self".to_string() } else { self.tables.receiver_ident.clone() };
                 let (rcv, fld) = (self.arena.alloc_ident(&rcv_nm, sp), self.intern_cur());

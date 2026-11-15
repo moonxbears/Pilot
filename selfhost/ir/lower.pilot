@@ -44,6 +44,7 @@ use selfhost.ir.lower_contract.*;
 use selfhost.ir.lower_spread.*;
 use selfhost.ir.lower_tail.*;
 use selfhost.ir.lower_view.*;
+use selfhost.ir.lower_quote.*;
 use std.text;
 
 /// The state of one lowering run.
@@ -654,6 +655,7 @@ fn lower_node(lw: Lowerer, n: i64) -> u32 {
     if k == nk_defer() { return lower_defer(lw, n); }
     if k == nk_lambda() { return lower_lambda(lw, n); }
     if k == nk_comptime() { return lower_comptime(lw, n); }
+    if k == nk_quote() { return lower_quote(lw, n); }
     if k == nk_unit_lit() { return lower_unit_literal(lw, n); }
     if k == nk_cascade() { return lower_cascade(lw, n); }
     if k == nk_let() || k == nk_var() || k == nk_const() { return lower_binding(lw, n); }

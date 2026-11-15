@@ -1,0 +1,2 @@
+error[TYPE001]: argument 1 of `inc`: expected `i64`, found `str`
+err_quote_splice_checked.pilot:7:25
