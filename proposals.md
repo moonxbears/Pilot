@@ -19,6 +19,7 @@
 | **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — ITEMIZE BEFORE APPROVAL (after PROP-007)` |
 | **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4) NEEDS APPROVAL` |
 | **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED ITEMIZED LISTS` |
+| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED DECISIONS` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -829,6 +830,162 @@ Found while mapping the seed before writing code:
   - A quote whose statement starts with `not` gets `SYN001` (`stmt.rs` statement-start check).
 - **`stmt.rs:229`** (`pattern_literal_bp`) still uses its own floor of 36.
 
+
+---
+
+## `PROP-009` — Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template
+
+**Status:** STEPS 1A AND 1B APPROVED BY OWNER 2026-11-15 ("Approve 1a and 1b"). Owner direction (2026-11-15): "do the same thing [as `PROP-008`] but with `bind_receptor`, and `__ssa`. It should be defined via syntax and quote". Owner answers the same day:
+- **Coverage:** all receptor words, staged. Each step gets its own itemized file list and approval.
+- **`__ssa`:** its template expands to an `asm` instruction.
+
+### 1. What exists today (mapped 2026-11-15)
+
+**Receptors.**
+- `bind_receptor(word, category, slot)` appears 122 times in 19 files. It binds about 120 words to about 40 numbered categories. Each category is a hand-written parse routine in the Rust seed, chosen by number:
+  - `stmt.rs:119` and `expr.rs:211` dispatch on the category number.
+  - The other routines are in `decl.rs`, `switch.rs`, `exits.rs`, `contracts.rs`, `query.rs`, `with_scope.rs`, `modules.rs`, `unbuilt.rs`, `loud.rs`, `rule_arms.rs` and `pilot_impls.rs`.
+- The numbers are magic counts (AGENTS.md §1.4, "zero rigid corners or magic counts"). The grammar each word gets is fixed in Rust and invisible from Pilot.
+- Nine bindings are made twice: `as`, `break`, `continue`, `get`, `set`, `op`, `extern`, `lib`, `nameof`. They appear once in `core.pilot` and again in `stdlib/core/syntax/*.pilot`.
+
+**`__ssa`.**
+- `core.pilot:384-391` declares six comptime functions: `__ssa`, `__ssa_unary`, `__ssa_cast`, `__ssa_load`, `__ssa_store`, `__ssa_gep`. Each calls a frozen `emit_ssa_*` hook.
+- About 465 primitive `op` bodies in `stdlib/core/primitives/*` and `builtins/builtins.pilot` use them (`op + (rhs: i64) -> i64 => __ssa(Cfg.Ssa.add, self, rhs);`).
+- No Rust code implements any `emit_ssa_*` hook. Every engine lowers primitive operators natively and never runs these bodies, so they are decoration, not definition (AGENTS.md §11 rule 6: a fake to be replaced or recorded).
+- `asm` is a seed token, but today it only reports `unbuilt` (`stmt.rs:112`, `errors/err_asm_unbuilt`).
+
+### 2. Classification of the receptor categories
+
+Every word ends as a `syntax` rule in Pilot. The categories differ in what the rule's template can expand to.
+
+| Class | Categories (words) | Template target |
+| :--- | :--- | :--- |
+| **A. Sugar.** The meaning is already other Pilot. | `with` scope (30/1); LINQ `from … in … where … order by … select` (33/6–11); `splat`/`pairs`/`flat` call forms (35); the six call-quote words (37); `nameof` (33/25); `guard c else { }` without `some`; `unless`-style rules already written | `quote` of existing Pilot (`{ let $n = $f(); $body }`, `for` loops, `*$x`, `$f!($args)`, `stringify($x)`) |
+| **B. Core forms.** The word builds an AST node that no other surface syntax produces. | literals `true`/`false`/`none` (1, 2); `else` (3); `for`/`in`/`then` (9–11); `break`/`continue` (13); `switch`/`case`/`default` (14–16); `guard some` (17); `try`/`catch` (18, 19); `scope`/`enter`/`exit` (20–22); `get`/`set`/`op` (23–25); `type`/`enum`/`where` (26–28); `as`/`view` (29); bundle `coalesce`/`with`/`without`/`on` (30); `some` (31); polyglot blocks (32); contracts (33/18–24); quote words `raw`/`splice`/`splat`/`stringify` (36); `errdefer`/`become` (38, 39); declaration heads `syntax`, `type_construct`, `attribute_construct`, `extern`, `lib` (4–8) | needs a way for a template to name a core node (step 2 design) |
+| **C. Unbuilt.** | category 40 (`macro`, `actor`, `adapter`, `module`, `state`, …) | the template is a registered seam (it is today, via `unbuilt.rs`) |
+
+### 3. Step 1a — rule-head patterns, and class A moved to rules
+
+**Pattern language (Pilot side).** A `syntax` rule head may be a sequence instead of a call shape:
+
+```pilot
+pub syntax {
+    with $open:Ident $name:Ident $body:Block => quote { { let $name = $open(); $body } };
+    guard $cond:Expr else $fallback:Block   => quote { if !($cond) $fallback };
+}
+```
+
+- The first item is the trigger word, followed by literal words and typed holes `$name:Kind`.
+- `$( … )?` marks an optional group and `$( … )*` a repeated group. `$` is already reserved for splicing, so neither collides with structural `(`, `)`, `[`, `]`.
+- Hole kinds are the variants of a Pilot enum, `HoleKind { Expr, Block, Pattern, Ident, Type, Stmt }`, in the new file `stdlib/core/syntax/holes.pilot`. They are handed to the seed by ordinal through a new hook, `register_hole_kinds(nameof(HoleKind))`, the way `register_grammar` hands over `OpLevel`.
+- Rust never sees a kind name.
+- Two rules with the same trigger word are tried in the order written; the first that matches wins (the same rule as `rule_arms.rs` today).
+
+**Seed side.** The parser stores each head as a list of `(literal | hole(kind ordinal) | group(optional / repeated))` and matches it against the token tape. Matching is longest-first within a group, with no backtracking past the trigger word. The template is instantiated with the existing `template.rs`, and a repeated group binds `$*name` sequences, which `template.rs` already splices.
+
+**Class A moves.** Each word below gets a Pilot rule, and its Rust routine and `bind_receptor` line are deleted:
+- `with` scope: all of `with_scope.rs`;
+- the LINQ query: all of `query.rs`, written as `for` and `if` in a quote;
+- the `splat`, `pairs` and `flat` call forms: their `expr.rs` arm;
+- the six call-quote words: their `expr.rs` arm;
+- `nameof`: its `pilot_impls.rs` receptor;
+- plain `guard … else`: its part of the `stmt.rs` arm.
+
+While building, each word is checked to be pure sugar on all three engines. A word that is not moves to step 2 and is listed in this entry.
+
+**Duplicates.** The nine double bindings in `core.pilot` are deleted. Each `stdlib/core/syntax/*.pilot` file keeps its own binding until its word moves.
+
+**Rust files (step 1a; approval needed):**
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-parser/src/rule_arms.rs` | Sequence heads: literals, typed holes, `$( )?` and `$( )*` groups; matching against the tape. |
+| `crates/pilot-parser/src/template.rs` | Bind repeated-group captures as sequences. |
+| `crates/pilot-parser/src/decl.rs` | `parse_syntax_decl`: read a sequence head. |
+| `crates/pilot-parser/src/tables.rs` | `register_hole_kinds` hook; rules keyed by trigger word, so a sequence rule may start a statement or an expression. |
+| `crates/pilot-parser/src/stmt.rs` | Try sequence rules at statement start; drop the `guard`-without-`some` path. |
+| `crates/pilot-parser/src/expr.rs` | Try sequence rules in prefix position; delete the category 35 and 37 arms. |
+| `crates/pilot-parser/src/pilot_impls.rs` | Delete `RECEPTOR_SYMBOL_QUOTE` (`nameof`). |
+| `crates/pilot-parser/src/query.rs` | **Delete** (250 lines). |
+| `crates/pilot-parser/src/with_scope.rs` | **Delete** (65 lines). |
+| `crates/pilot-parser/src/lib.rs` | Drop the two `mod` lines. |
+
+- **Pilot side (no approval needed):** `holes.pilot`; the rules in `syntax/module_ext.pilot`, `db/sql_syntax.pilot`, `syntax/expr_sugar.pilot`, `syntax/call_quote.pilot`, `syntax/guard.pilot` and `core.pilot`; `register_hole_kinds` in `bridge_lang.pilot` and appended to `airlock_lang_hooks()` (an append under B+, approved through this entry).
+- **Tests:** one passing and one `err_*` program per moved word, in `tests/conformance/receptors/`.
+- **Diagnostics:**
+  - `SYN010`: a sequence rule matched its trigger, but a hole did not match. The message names the hole and its kind.
+  - `SYN011`: two sequence rules for one trigger, where the earlier one always wins.
+- **Ledgers, maps and matrices** are updated in the same change.
+
+**Rust LOC.** The step must be a **net deletion**, measured before and after. The pattern matcher is expected at about +200, against −315 for `query.rs` and `with_scope.rs` plus the deleted `expr.rs` and `stmt.rs` arms. If the measured result is not negative, the work stops and is reported before anything else moves. The files touched are reformatted to `rustfmt` layout once `rustfmt` is available (it is not installed today; `PROP-008` has the same gap).
+
+### 4. Step 1b — `__ssa` as `syntax` rules over `asm`
+
+**Pilot.**
+- New file `stdlib/core/asm/machine_ops.pilot` declares `enum MachineOp { Add, Sub, Mul, SDiv, UDiv, … }`, one variant for each of the 55 `Cfg.Ssa` entries, in that order, then `Load`, `Store` and `ElemAddr`. It also calls `register_machine_ops(nameof(MachineOp))`, a new hook appended under B+.
+- The six comptime functions in `core.pilot` become rules:
+
+```pilot
+pub lvl(Cfg.Tokens.ring_simd) syntax {
+    __ssa(op, lhs, rhs)        => quote { asm($op, $lhs, $rhs) };
+    __ssa_unary(op, val)       => quote { asm($op, $val) };
+    __ssa_cast(op, val, T)     => quote { asm($op, $val, $T) };
+    __ssa_load(p)              => quote { asm(MachineOp::Load, $p) };
+    __ssa_store(p, val)        => quote { asm(MachineOp::Store, $p, $val) };
+    __ssa_gep(base, idx)       => quote { asm(MachineOp::ElemAddr, $base, $idx) };
+}
+```
+
+- `Cfg.Ssa` is deleted. The 465 call sites are rewritten mechanically from `Cfg.Ssa.add` to `MachineOp::Add`.
+
+**Seed.**
+- `asm(op, operands…)` in expression position parses to a new `NodeKind::AsmExpr`, appended to `pilot-ast`. The opcode is the variant's **ordinal**.
+- The seed VM lowers it to the VM instruction for that ordinal. An ordinal with no VM instruction stops at `seam("asm.machine_op", …)`.
+- `asm { … }` blocks keep reporting `unbuilt`.
+- No opcode name appears in Rust: the seed reads ordinals, as `PROP-008` reads `ParseShape`.
+
+**Pilot engines.**
+- `selfhost/check/infer.pilot` types `AsmExpr`: the operand type; `bool` for compares; `T` for casts; `void` for a store.
+- `selfhost/ir/lower_expr.pilot` lowers it to the matching PilIR instruction.
+- The C emitter prints the C operator.
+
+**What changes for primitive operators.** Nothing at first: the engines still lower `a + b` on `i64` natively. Step 1b makes the op bodies *real* (type-checked and runnable when called directly, e.g. through an interface). A later step makes the engines use them, by forced inlining on PilIR (`PROP-007`) and dropping the native operator table. That step is listed here, not approved.
+
+**Rust files (step 1b; approval needed):**
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-ast/src/lib.rs` | Append `NodeKind::AsmExpr`. |
+| `crates/pilot-parser/src/expr.rs` | `asm(` in prefix position → `AsmExpr`. |
+| `crates/pilot-parser/src/stmt.rs` | The `KwAsm` arm: a `(` form goes to the expression path, and `{` stays `unbuilt`. |
+| `crates/pilot-parser/src/tables.rs` | `register_machine_ops` hook: variant name → ordinal, used to resolve `MachineOp::X` in an `asm` head. |
+| `crates/pilot-vm/src/lower_native.rs` | Lower `AsmExpr` by ordinal onto the existing VM instructions; any other ordinal → seam. |
+
+- **Pilot side:** `machine_ops.pilot`; the `core.pilot` rules; the call-site rewrite; `register_machine_ops` in `bridge_lang.pilot` and `airlock_lang_hooks()`; the checker, PilIR and C emitter support.
+- **Tests:** `tests/conformance/asm/` calls primitive ops through their bodies on all three engines, plus `err_asm_*` for a wrong operand count and an unknown op.
+- **Rust LOC:** about +60. Step 1a must offset it.
+
+### 5. Step 2 — core forms (needs its own approval)
+
+Class B words need a template to name an AST node that has no other spelling.
+
+**Recommended design:** a closed `CoreForm` enum in Pilot (`BoolLit`, `NoneLit`, `For`, `Switch`, `Catch`, …), read by ordinal like `ParseShape`. A rule's template calls `asm`'s compile-time sibling, `quote { __form(CoreForm::For, $item, $seq, $body, $fallback) }`. The seed builds that node kind.
+
+With this design, the grammar of every word lives in Pilot, and the seed keeps only a closed, append-only list of node constructors. Each category's Rust routine is deleted as its rule lands. The itemized list follows once step 1 shows the pattern matcher is enough for `for`, `switch` and `try`.
+
+### 6. Step 3 — retire `bind_receptor` (owner decision needed)
+
+`bind_receptor` and the six `emit_ssa_*` hooks are in the **frozen** B+ list (`airlock_lang_hooks()`, `PROP-002a`). After steps 1–2, nothing calls them.
+
+Under Rule 4 frozen items are never deleted, so they would stay in `bridge_lang.pilot` with no callers, and the seed would keep their dispatch arms. The owner chooses one:
+- **(a)** keep them frozen and uncalled, and add a `GATE021` check that nothing new calls them; or
+- **(b)** explicitly unfreeze these seven hooks, and remove them with their Rust arms. This is the only path that deletes the Rust.
+
+### 7. Open questions for approval
+1. Approve step 1a and step 1b with the file lists above. They are independent of each other.
+2. Is the `CoreForm` direction acceptable for step 2, or should class B words get a different mechanism?
+3. Which option, (a) or (b), for the frozen hooks in step 3?
+4. The `PROP-008` step 1 Rust growth (+382) is still waiting for a decision. Should step 1a's net deletion count against it?
 
 ---
 
