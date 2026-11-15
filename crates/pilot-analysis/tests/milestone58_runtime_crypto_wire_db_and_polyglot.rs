@@ -913,7 +913,7 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     assert!(http_src.lines().count() <= 1500);
 
     // 1. Real OS loopback TCP HTTP/1.1 server serving BOTH chunked GET and Content-Length POST
-    let listener = pilot_rt::tcp_listen("127.0.0.1:0").expect("loopback tcp_listen must succeed");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback TcpListener::bind must succeed");
     let port = listener.local_addr().unwrap().port();
     let get_path = format!("/v1/telemetry/{:x}", rng.next_u64() & 0xFFFF_FFFF);
     let post_path = format!("/v1/ingest/{:x}", rng.next_u64() & 0xFFFF_FFFF);
@@ -1057,7 +1057,7 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     vm.engine_handler = Some(Box::new(move |hook, args| match hook {
         "tcp_connect" => {
             let addr = args.first().map(|v| v.to_string_repr()).unwrap_or_default();
-            match pilot_rt::tcp_connect(&addr) {
+            match std::net::TcpStream::connect(&addr) {
                 Ok(s) => {
                     let mut tbl = sock_ref.lock().unwrap();
                     let fd = tbl.len() as i64;
@@ -1455,14 +1455,7 @@ pub fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
     let rt_cap = anticheat::seed_rust_crate_loc_cap(&root, 700);
     assert!(rt_lines <= rt_cap, "crates/pilot-rt/src total LOC ({}) must be <= {}", rt_lines, rt_cap);
 
-    let mut ffi_lines = 0usize;
-    for entry in std::fs::read_dir(root.join("crates/pilot-ffi/src")).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            ffi_lines += std::fs::read_to_string(&path).unwrap().lines().count();
-        }
-    }
-    let ffi_cap = anticheat::seed_rust_crate_loc_cap(&root, 300);
-    assert!(ffi_lines <= ffi_cap, "crates/pilot-ffi/src total LOC ({}) must be <= {}", ffi_lines, ffi_cap);
+    assert!(!root.join("crates/pilot-ffi").exists(), "Retired crates/pilot-ffi must remain deleted");
+    assert!(!root.join("crates/pilot-arena").exists(), "Retired crates/pilot-arena must remain deleted");
     guard.finish();
 }

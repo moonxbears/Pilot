@@ -435,7 +435,7 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M11", "ADP001-ADP004 diagnostics", ::Core, "selfhost/adapter/compiler.pilot:321; test_m11_4", ""),
         cap("M11", "thunks installed as PilIR + MethodTable", ::Spec, "selfhost/adapter/compiler.pilot:366 stops at seam", "adapter.install_thunks F5"),
         cap("M11", "CError/Errno/NullPtrErr and Posix/Win32 facets", ::Draft, "stdlib/std/polyglot/adapter.pilot:31 errno_is_eagain hardcodes Linux EAGAIN=11", "adapter.errno_values"),
-        cap("M11", "pilot-ffi mock deletion", ::Core, "test_m11_4 checks crates/pilot-ffi/src/lib.rs", ""),
+        cap("M11", "pilot-ffi mock deletion", ::Wired, "crates/pilot-ffi retired in PROP-001; test_m11_4 & pilot gate enforce permanent absence", ""),
 
         // M12 C absorber
         cap("M12", "C preprocessor: macros, #if, #include from disk, target macros, CAB001/CAB003", ::Draft,

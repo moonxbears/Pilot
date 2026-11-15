@@ -6,7 +6,6 @@ version = 4
 name = "pilot-analysis"
 version = "0.1.0"
 dependencies = [
- "pilot-arena",
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
@@ -17,14 +16,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilot-arena"
-version = "1.1.51"
-
-[[package]]
 name = "pilot-ast"
 version = "1.1.51"
 dependencies = [
- "pilot-arena",
  "pilot-intern",
  "pilot-span",
 ]
@@ -34,21 +28,6 @@ name = "pilot-cli"
 version = "1.1.51"
 dependencies = [
  "pilot-analysis",
- "pilot-ast",
- "pilot-intern",
- "pilot-lexer",
- "pilot-parser",
- "pilot-rt",
- "pilot-span",
- "pilot-vm",
-]
-
-[[package]]
-name = "pilot-ffi"
-version = "1.1.51"
-dependencies = [
- "pilot-analysis",
- "pilot-arena",
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
@@ -77,7 +56,6 @@ dependencies = [
 name = "pilot-parser"
 version = "1.1.51"
 dependencies = [
- "pilot-arena",
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
@@ -88,7 +66,6 @@ dependencies = [
 name = "pilot-rt"
 version = "0.1.0"
 dependencies = [
- "pilot-arena",
  "pilot-intern",
 ]
 
@@ -100,7 +77,6 @@ version = "1.1.51"
 name = "pilot-vm"
 version = "0.1.0"
 dependencies = [
- "pilot-arena",
  "pilot-ast",
  "pilot-intern",
  "pilot-parser",

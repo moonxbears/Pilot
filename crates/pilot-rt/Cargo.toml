@@ -8,5 +8,4 @@ name = "pilot_rt"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-pilot-arena = { path = "../pilot-arena" }
 pilot-intern = { path = "../pilot-intern" }

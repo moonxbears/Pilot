@@ -461,13 +461,13 @@ pub fn build_crate_ceiling_registry() -> Map<str, CrateCeilingRule> {
     let _ = gm_reg_crate(reg, keys, "crates/pilot-vm", 650, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-codegen", 120, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-rt", 700, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-ffi", 300, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-cli", 100, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-arena", 400, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-intern", 300, false);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-span", 250, false);
 
     // Retired crates (must remain permanently absent)
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-arena", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-ffi", 0, true);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-syntax", 0, true);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-fmt", 0, true);
     let _ = gm_reg_crate(reg, keys, "crates/pilot-perceus", 0, true);
@@ -529,6 +529,9 @@ pub fn build_retired_files_registry() -> i64 {
     let _ = glist_push(list, "crates/pilot-codegen/src/driver.rs");
     let _ = glist_push(list, "crates/pilot-codegen/src/physics.rs");
     let _ = glist_push(list, "crates/pilot-rt/src/crypto.rs");
+    let _ = glist_push(list, "crates/pilot-rt/src/memory.rs");
+    let _ = glist_push(list, "crates/pilot-rt/src/concurrency.rs");
+    let _ = glist_push(list, "crates/pilot-rt/src/net.rs");
     let _ = glist_push(list, "crates/pilot-cli/src/commands.rs");
     let _ = glist_push(list, "scripts/gate1_check.py");
     let _ = glist_push(list, "scripts/gate2_check.py");
@@ -656,6 +659,6 @@ pub pure fn max_total_rust_loc() -> usize => 5900;
 // To resume contraction, set `seed_contraction_paused()` to `false` and run
 // `pilot gate --ratchet-update` once the live LOC is below the recorded ceilings.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 30000;
+pub pure fn paused_max_total_rust_loc() -> usize => 20450;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;

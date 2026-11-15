@@ -6,7 +6,6 @@ license.workspace = true
 description = "Milestone 28.3: 16-byte cache-packed AstNode, flat AstArena, Pratt binding-power tables, and zero-cost typed AST views."
 
 [dependencies]
-pilot-arena = { path = "../pilot-arena" }
 pilot-span = { path = "../pilot-span" }
 pilot-intern = { path = "../pilot-intern" }
 

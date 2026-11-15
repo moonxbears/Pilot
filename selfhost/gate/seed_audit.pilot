@@ -316,7 +316,7 @@ fn sa_is_bridge_exemption(rs_path: str, cur_line: str) -> bool {
     if gm_ends_with(rs_path, "pilot-ast/src/lib.rs") && gm_contains(cur_line, "Self::") {
         return true;
     }
-    if gm_ends_with(rs_path, "pilot-parser/src/lib.rs") && gm_contains(cur_line, "=> Union") {
+    if gm_ends_with(rs_path, "pilot-parser/src/tables.rs") && gm_contains(cur_line, "=> Union") {
         return true;
     }
     if gm_ends_with(rs_path, "pilot-cli/src/main.rs") && (gm_contains(cur_line, "cmd_from(") || gm_contains(cur_line, "cmd_map(")) {

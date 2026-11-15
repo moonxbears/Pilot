@@ -75,7 +75,6 @@ use pilot_analysis::{
 };
 use pilot_intern::SymbolId;
 use pilot_parser::parse;
-use pilot_span::LineIndex;
 use pilot_vm::{BytecodeCompiler, Opcode, PilVirtualMachine};
 
 #[path = "common/anticheat.rs"]
@@ -779,7 +778,7 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
 
     let dbg_arena = parse(&debuggee);
     assert!(dbg_arena.diagnostics.is_empty(), "debuggee parse diagnostics: {:?}", dbg_arena.diagnostics);
-    let line_index = LineIndex::new(debuggee.as_bytes());
+    let dbg_src = debuggee.clone();
     let dbg_bin = BytecodeCompiler::compile(&dbg_arena, dbg_arena.root);
     let pc_spans = dbg_bin.pc_spans.clone();
     let reg_symbols = dbg_bin.reg_symbols.clone();
@@ -801,7 +800,10 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
         let line = pc_spans
             .get(pc)
             .filter(|s| s.start > 0 || s.end > 0)
-            .map(|s| line_index.lookup(s.start).line as i64)
+            .map(|s| {
+                let end = (s.start as usize).min(dbg_src.len());
+                dbg_src.as_bytes()[..end].iter().filter(|&&b| b == b'\n').count() as i64 + 1
+            })
             .unwrap_or(0);
         let lx_val = local_x_reg
             .and_then(|r| regs[r as usize].as_int())
