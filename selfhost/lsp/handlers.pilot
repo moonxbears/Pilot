@@ -900,7 +900,6 @@ fn resolve_import_path(spec: str) -> str {
     if spec.find("Pilot.Core.Result") >= 0 { return "stdlib/core/result.pilot"; }
     if spec.find("Pilot.Core.Memory") >= 0 { return "stdlib/core/mem.pilot"; }
     if spec.find("Pilot.Core.Meta") >= 0 { return "stdlib/core/meta.pilot"; }
-    if spec.find("Pilot.Core.Bootstrap") >= 0 { return "stdlib/core/bootstrap.pilot"; }
     if spec.find("Pilot.Core.Task") >= 0 { return "stdlib/core/task.pilot"; }
     if spec.find("Pilot.Collections") >= 0 { return "stdlib/std/col.pilot"; }
     if spec.find("Pilot.Crypto") >= 0 { return "stdlib/crypto/hash.pilot"; }

@@ -17,10 +17,18 @@ const CATCH: u8 = 5;
 const SWITCH: u8 = 6;
 const ARM: u8 = 7;
 const REJECT: u8 = 8;
+const ERR_DEFER: u8 = 9;
+const BECOME: u8 = 10;
+
+/// `DeferStmt.flags` of an `errdefer`: it runs only when its block is left
+/// by a failure.
+pub const DEFER_ON_FAILURE: u16 = 1;
+/// `ReturnStmt.flags` of a `become`: a guaranteed tail call.
+pub const RETURN_TAIL_CALL: u16 = 1;
 
 /// Whether the seed can build form `form`.
 pub(crate) fn has_constructor(form: u8) -> bool {
-    form <= REJECT
+    form <= BECOME
 }
 
 /// Builds form `form` from `ops` (an absent operand is `NONE`).
@@ -85,6 +93,8 @@ pub(crate) fn build_form(arena: &mut AstArena, form: u8, ops: &[NodeId], span: B
             }
             NodeId::NONE
         }
+        ERR_DEFER => arena.alloc_node(NodeKind::DeferStmt, DEFER_ON_FAILURE, span, op(0).0, 0),
+        BECOME => arena.alloc_node(NodeKind::ReturnStmt, RETURN_TAIL_CALL, span, op(0).0, 0),
         _ => NodeId::NONE,
     }
 }

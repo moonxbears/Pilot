@@ -15,11 +15,10 @@ pub struct LayoutId(pub u32);
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct CapabilityBits(pub u8);
-pub type CapabilityPhysics = CapabilityBits;
 
 impl CapabilityBits {
-    pub const IMMUTABLE: Self = Self(0); pub const MUTABLE: Self = Self(1); pub const UNIQUE: Self = Self(2);
-    pub const LINEAR: Self = Self(4); pub const PINNED: Self = Self(8); pub const VALUE: Self = Self(0);
+    pub const MUTABLE: Self = Self(1); pub const UNIQUE: Self = Self(2);
+    pub const PINNED: Self = Self(8); pub const VALUE: Self = Self(0);
     pub const BORROW_REF: Self = Self(1); pub const OWNED_OBJ: Self = Self(4); pub const SCOPED_GUARD: Self = Self(5);
 
     #[inline(always)] pub const fn from_raw(b: u8) -> Self { Self(b) }

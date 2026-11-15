@@ -1,0 +1,2 @@
+error[DECL001]: undefined name `errdefer`
+err_errdefer_no_body.pilot:9:5

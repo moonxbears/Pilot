@@ -136,8 +136,6 @@ impl<'a> Parser<'a> {
                             return NodeId::NONE;
                         }
                         32 if matches!(self.tape.kind(self.next_non_nl(self.cur() + 1)), TokenKind::LBrace | TokenKind::LParen) => return self.parse_polyglot_inline(),
-                        exits::ERRDEFER_RECEPTOR => return self.parse_errdefer(),
-                        exits::BECOME_RECEPTOR => return self.parse_become(),
                         _ => {} } }
                 if self.receptor() == Some(EXCLUDE_RECEPTOR) && self.word_follows() {
                     return self.parse_exclude_decl();

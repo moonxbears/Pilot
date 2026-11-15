@@ -512,7 +512,6 @@ pub fn build_file_ceiling_registry() -> i64 {
     let keys = glist_new();
     let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/types.rs", 250);
     let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/infer.rs", 440);
-    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/comptime.rs", 220);
     let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/pipeline.rs", 80);
     let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/lib.rs", 60);
     let _ = gm_reg_fcap(reg, keys, "crates/pilot-cli/src/main.rs", 100);

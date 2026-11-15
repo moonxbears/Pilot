@@ -311,9 +311,6 @@ pub fn harvest_core_vocabulary(workspace_root: str, seed_reg: ref<SeedTokenRegis
 // ------------------------------------------------------------------------------
 
 fn sa_is_bridge_exemption(rs_path: str, cur_line: str) -> bool {
-    if gm_ends_with(rs_path, "pilot-analysis/src/comptime.rs") && gm_contains(cur_line, "env_m.insert(") {
-        return true;
-    }
     if gm_ends_with(rs_path, "pilot-ast/src/lib.rs") && gm_contains(cur_line, "Self::") {
         return true;
     }

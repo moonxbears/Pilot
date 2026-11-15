@@ -23,7 +23,8 @@ use selfhost.check.own.*;
 use selfhost.check.probes.*;
 
 /// `ReturnStmt.flags` of a `become` and `DeferStmt.flags` of an `errdefer`
-/// (crates/pilot-parser/src/exits.rs).
+/// (`form(CoreForm::ErrDefer/Become, ..)` in stdlib/core/syntax/exits.pilot,
+/// built by crates/pilot-parser/src/forms.rs).
 fn tail_call_flag() -> i64 => 1;
 fn on_failure_flag() -> i64 => 1;
 

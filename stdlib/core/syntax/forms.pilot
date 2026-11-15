@@ -28,6 +28,8 @@ pub enum CoreForm : u8 {
     Arm,       // guard, body, then patterns (any of them; none: any value)
     Reject,    // message, code: when the code is present, the message is an
                // error at it and nothing is built
+    ErrDefer,  // body: a block or one statement, run only on failure
+    Become,    // the tail call
 }
 
 comptime {

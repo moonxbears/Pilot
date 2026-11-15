@@ -14,12 +14,6 @@ impl PilVirtualMachine {
         let slot = v.as_list_handle().filter(|&s| !self.list_is_dead(s))?;
         self.heap_lists.get(slot).cloned()
     }
-
-    /// Field `name` of a record value.
-    pub fn record_field(&self, v: PilotVal, name: &str) -> Option<PilotVal> {
-        let slot = v.as_map_handle().filter(|&s| !self.map_is_dead(s))?;
-        self.heap_maps.get(slot)?.get(name).copied()
-    }
 }
 
 /// A value passed between the VM and its embedding host (`STAGE_A_HOST_NATIVES`).

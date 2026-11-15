@@ -170,7 +170,6 @@ impl TokenFlags {
     pub const IS_RAW_STRING: Self = Self(1 << 3);
     pub const IS_INTERPOLATED: Self = Self(1 << 4);
     pub const IS_DIMENSIONAL: Self = Self(1 << 5);
-    pub const IS_INACTIVE_PREPROC: Self = Self(1 << 6);
 
     #[inline(always)]
     pub const fn contains(self, other: Self) -> bool {

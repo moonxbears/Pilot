@@ -23,9 +23,4 @@ impl AnalysisPipeline {
         }
         AnalysisResult { diagnostics, physics }
     }
-
-    pub fn analyze_source(src: &str) -> AnalysisResult {
-        let arena = pilot_parser::parse(src);
-        Self::analyze(&arena, arena.root)
-    }
 }

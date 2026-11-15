@@ -8,8 +8,7 @@
 // ==============================================================================
 
 use pilot_analysis::{
-    analyze_physics, bootstrap_core_file, eval_file_with_tables, handle_engine_intrinsic,
-    CapabilityBits, ComptimeEngine, LayoutId, PhysicsGeometry,
+    analyze_physics, handle_engine_intrinsic, CapabilityBits, LayoutId, PhysicsGeometry,
 };
 use pilot_ast::NodeKind;
 use pilot_intern::SymbolId;
@@ -23,11 +22,8 @@ const ANALYZER_PILOT_SRC: &str = include_str!("../../../selfhost/analyzer.pilot"
 #[test]
 fn test_type_rename_torture_gate_wholenum_truthbit_utf8run() {
     let mut tables = ParserTables::new();
-    let mut vm = ComptimeEngine::new();
-    let _ = bootstrap_core_file(BRIDGE_LANG_SRC, &mut tables, &mut vm)
-        .expect("bridge_lang.pilot must bootstrap cleanly");
-    let _ = bootstrap_core_file(CORE_PILOT_SRC, &mut tables, &mut vm)
-        .expect("core.pilot must bootstrap cleanly");
+    let _ = pilot_parser::parse_and_ingest(BRIDGE_LANG_SRC, &mut tables);
+    let _ = pilot_parser::parse_and_ingest(CORE_PILOT_SRC, &mut tables);
 
     let renamed_src = r#"
         pub partial struct {
@@ -58,8 +54,7 @@ fn test_type_rename_torture_gate_wholenum_truthbit_utf8run() {
         }
     "#;
 
-    let arena = eval_file_with_tables(renamed_src, &mut tables, &mut vm)
-        .expect("Renamed WholeNum/TruthBit/Utf8Run module must parse & evaluate cleanly");
+    let arena = pilot_parser::parse_and_ingest(renamed_src, &mut tables);
 
     let mut registry = analyze_physics(&arena, arena.root, None);
 

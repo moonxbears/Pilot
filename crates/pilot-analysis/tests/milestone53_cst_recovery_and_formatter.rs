@@ -54,7 +54,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pilot_analysis::{
-    eval_file_with_tables, flatten_ast, handle_engine_intrinsic, BootstrapSnapshot, PhysicsRegistry,
+    flatten_ast, handle_engine_intrinsic, PhysicsRegistry,
 };
 use pilot_parser::parse;
 use pilot_vm::PilotVal;
@@ -247,16 +247,13 @@ pub fn test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse() {
     let par_src = read_ws("selfhost/cst/cst_parser.pilot");
     let inc_src = read_ws("selfhost/cst/incremental.pilot");
 
-    let snap = BootstrapSnapshot::global();
-    for (name, src) in [
+    for (_name, src) in [
         ("selfhost/cst/cst.pilot", &cst_src),
         ("selfhost/cst/cst_parser.pilot", &par_src),
         ("selfhost/cst/incremental.pilot", &inc_src),
     ] {
-        let mut tables = snap.tables.clone();
-        let mut vm = snap.vm.clone();
-        eval_file_with_tables(src, &mut tables, &mut vm)
-            .unwrap_or_else(|e| panic!("{} failed bootstrap evaluation: {:?}", name, e));
+        let mut tables = pilot_parser::bootstrap_tables().clone();
+        let _ = pilot_parser::parse_and_ingest(src, &mut tables);
     }
 
     for trial in 0..6 {

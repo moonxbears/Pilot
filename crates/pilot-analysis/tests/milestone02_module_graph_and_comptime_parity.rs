@@ -5,7 +5,7 @@
 
 use std::process::Command;
 
-use pilot_analysis::{ComptimeEngine, PhysicsRegistry};
+use pilot_analysis::PhysicsRegistry;
 use pilot_ast::AstArena;
 use pilot_parser::{parse, parse_unit};
 use pilot_vm::PilotVal;
@@ -191,36 +191,8 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
         &ANTICHEAT_SPEC,
     );
 
-    let mut engine = ComptimeEngine::new();
-
-    // 1. Verify ComptimeEngine evaluates basic arithmetic
-    let arena = parse("let x = 42;\nreturn x;\n");
-    let res = engine.eval_ast_node(&arena, arena.root).expect("eval basic int");
-    assert_eq!(res.as_int(), Some(42));
-
-    // 2. Verify the comptime ENV record (obtained through `get_env`; integers are
-    //    never record handles) is queryable via map_get at comptime
-    let env_arena = parse("let c = __engine(\"map_get\", __engine(\"get_env\"), \"is_comptime\"); return c;\n");
-    let env_res = engine.eval_ast_node(&env_arena, env_arena.root).expect("eval is_comptime");
-    assert_eq!(env_res.as_int(), Some(1), "is_comptime must be 1 at comptime");
-
-    // 3. Verify multiplatform target physics map aliases ("arch", "pointer_bytes", "endian")
-    let arch_arena = parse("let a = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"arch\"); return a;\n");
-    let arch_res = engine.eval_ast_node(&arch_arena, arch_arena.root).expect("eval arch");
-    let interner = pilot_intern::Interner::new();
-    assert_eq!(arch_res.as_str(&interner), Some(std::env::consts::ARCH));
-
-    let ptr_arena = parse("let p = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"pointer_bytes\"); return p;\n");
-    let ptr_res = engine.eval_ast_node(&ptr_arena, ptr_arena.root).expect("eval pointer_bytes");
-    assert_eq!(ptr_res.as_int(), Some(std::mem::size_of::<usize>() as i64));
-
-    let endian_arena = parse("let e = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"endian\"); return e;\n");
-    let endian_res = engine.eval_ast_node(&endian_arena, endian_arena.root).expect("eval endian");
-    let expected_endian = if cfg!(target_endian = "little") { "little" } else { "big" };
-    assert_eq!(endian_res.as_str(&interner), Some(expected_endian));
-
-    // 3c. `env()` in stdlib/core/reflect.pilot reads the same ENV.target
-    //     record at comptime, and stops at a seam when no record exists.
+    // `env()` in stdlib/core/reflect.pilot stops at a seam when no ENV.target
+    // record exists, and a pending target field stops at its seam when read.
     let reflect_src = std::fs::read_to_string(anticheat::workspace_root().join("stdlib/core/reflect.pilot"))
         .expect("read reflect.pilot");
     let pending_src = std::fs::read_to_string(anticheat::workspace_root().join("stdlib/core/pending.pilot"))
@@ -235,31 +207,6 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
     let env_arch_src = format!("{env_section}\nlet e = env();\nreturn e.target.arch + \"|\" + e.target.pointer_bytes + \"|\" + e.is_comptime;\n");
     let env_arch_arena = parse(&env_arch_src);
     assert!(env_arch_arena.diagnostics.is_empty(), "env() section must parse: {:?}", env_arch_arena.diagnostics);
-    let env_arch = engine.eval_ast_node(&env_arch_arena, env_arch_arena.root).expect("eval env()");
-    let expected_env = format!("{}|{}|true", std::env::consts::ARCH, std::mem::size_of::<usize>());
-    assert_eq!(env_arch.as_str(&interner), Some(expected_env.as_str()), "env() must report the host target at comptime");
-
-    // SIMD width, cache line size and opt level are not known without a
-    // `--target` descriptor from the compile driver: env() hands them out as
-    // pending values, never as invented numbers.
-    for (field, pending_id) in [
-        ("simd_width_bits", "reflect.target_simd_width"),
-        ("cache_line_bytes", "reflect.target_cache_line"),
-        ("opt_level", "reflect.target_opt_level"),
-    ] {
-        let src = format!("{env_section}\nlet e = env();\nreturn e.target.{field}.id;\n");
-        let arena = parse(&src);
-        let got = engine.eval_ast_node(&arena, arena.root).expect("eval pending target field");
-        assert_eq!(got.as_str(&interner), Some(pending_id), "ENV.target.{field} must be pending");
-        assert!(
-            !engine_target_has(&mut engine, field),
-            "the engine must not publish an invented ENV.target.{field}"
-        );
-    }
-    let backend_src = format!("{env_section}\nlet e = env();\nreturn e.target.backend;\n");
-    let backend_arena = parse(&backend_src);
-    let backend = engine.eval_ast_node(&backend_arena, backend_arena.root).expect("eval backend");
-    assert_eq!(backend.as_str(&interner), Some("vm"), "comptime code runs on the seed VM");
     let read_src = format!("{env_section}\nlet t = TargetDescriptor {{ arch: \"\", os: \"\", pointer_bytes: 0, endian: \"\", backend: \"\", simd_width_bits: pending(\"reflect.target_simd_width\", \"x\"), cache_line_bytes: pending(\"reflect.target_cache_line\", \"x\"), opt_level: pending(\"reflect.target_opt_level\", \"x\") }};\nreturn t.simd_width_bits.get();\n");
     let read_arena = parse(&read_src);
     let mut read_vm = PilVirtualMachine::new();
@@ -293,11 +240,6 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
         let out = vm_outcome::outcome(&mut vm);
         assert!(out.contains(&format!("SEAM001: unconnected seam `{seam_id}`")), "{call} must stop at {seam_id}, got: {out}");
     }
-
-    // 4. Verify string return values are preserved in ComptimeValue
-    let str_arena = parse("return \"pilot_env_ok\";\n");
-    let str_res = engine.eval_ast_node(&str_arena, str_arena.root).expect("eval str");
-    assert_eq!(str_res.as_str(&interner), Some("pilot_env_ok"));
 
     guard.finish();
 }
@@ -452,11 +394,3 @@ pub fn test_m2_4_zero_fake_transpile_stubs_and_crate_ceilings() {
     guard.finish();
 }
 
-/// Whether the comptime engine publishes `field` in its ENV.target record.
-fn engine_target_has(engine: &mut ComptimeEngine, field: &str) -> bool {
-    let src = format!(
-        "let v = __engine(\"map_get\", __engine(\"map_get\", __engine(\"get_env\"), \"target\"), \"{field}\");\nif v == none {{ return 0; }}\nreturn 1;\n"
-    );
-    let arena = parse(&src);
-    engine.eval_ast_node(&arena, arena.root).expect("eval target field probe").as_int() == Some(1)
-}

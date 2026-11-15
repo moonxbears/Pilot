@@ -193,14 +193,6 @@ impl PilVirtualMachine {
         self.hook = hook;
     }
 
-    #[inline]
-    pub fn current_span(&self) -> Option<ByteSpan> {
-        self.pc_spans
-            .get(self.pc)
-            .copied()
-            .filter(|s| s.start > 0 || s.end > 0)
-    }
-
     /// Records a fault for the instruction at `pc`, with the calls that led
     /// to it.
     fn raise(&mut self, pc: usize, message: String) {

@@ -19,7 +19,9 @@
 | **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — ITEMIZE BEFORE APPROVAL (after PROP-007)` |
 | **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4) NEEDS APPROVAL` |
 | **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED ITEMIZED LISTS` |
-| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 AND BUILT (§11; +186 RUST, OVER THE −15..−40 ESTIMATE, ACCEPTED BY THE OWNER 2026-11-15; `true`/`false`/`none` NOT MOVED); STEP 3 NEEDS A DECISION` |
+| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 AND BUILT (§11; +186 RUST, OVER THE −15..−40 ESTIMATE, ACCEPTED BY THE OWNER 2026-11-15; `true`/`false`/`none` NOT MOVED); STEP 2C GROUP 1 (`errdefer`/`become`, §12, about −30 RUST) APPROVED 2026-11-15; STEP 3 NEEDS A DECISION` |
+| **`PROP-010`** | Purge Dead Rust Found 2026-11-15: the Unused Rust `comptime` Evaluator and Unreferenced Items | `-191` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
+| **`PROP-011`** | Delete the Unrun Bootstrap Stage List `stdlib/core/bootstrap.pilot` (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -1263,6 +1265,128 @@ The large deletion comes in 2b (`switch.rs`, −101) and 2c (`accessors.rs`, `co
   - Now 4 of its tests fail. `test_51_1` uses the deleted call-shaped rules.
   - `test_51_2`, `test_51_3` and `test_51_4` require the code marker `nameof(` in `switch.pilot` and `guard.pilot`. Their `bind_receptor(nameof(..))` lines are gone, because the words are spelled in rule heads.
   - Adding a `nameof(` only to satisfy the marker would be a fake, so it is not done. Proposed change: drop those two markers. The 15-line floor of `test_51_3` is met again (`guard.pilot` 23, `switch.pilot` 36).
+
+### 12. Step 2c, group 1 — `errdefer` and `become` (APPROVED BY OWNER 2026-11-15: "Approve §12")
+
+The first 2c group: the two exit words of `stdlib/core/syntax/exits.pilot` (receptors 38, 39). It reuses the step 2 matcher as it is, so its Rust is a net deletion.
+
+**Pilot side.**
+- `CoreForm` (`stdlib/core/syntax/forms.pilot`) gains two variants, appended: `ErrDefer` (body: a block or one statement) and `Become` (the call).
+- `exits.pilot` replaces its two `bind_receptor` lines with rules:
+
+  ```pilot
+  pub syntax {
+      errdefer $body:Block => quote { form(CoreForm::ErrDefer, $body) };
+      errdefer $body:Stmt  => quote { form(CoreForm::ErrDefer, $body) };
+      become $call:Expr    => quote { form(CoreForm::Become, $call) };
+  }
+  ```
+
+- The nodes stay as Rust built them: `DeferStmt` with flags 1 and `ReturnStmt` with flags 1. The checker (`err_become_*`, `err_errdefer_infallible`), PilIR and the C emitter do not change.
+
+**Rust file list.** Strictly these files, in `crates/pilot-parser` only:
+
+| File | Change | LOC |
+| :--- | :--- | :--- |
+| `crates/pilot-parser/src/exits.rs` | **delete** | −40 |
+| `crates/pilot-parser/src/forms.rs` | constants `ERR_DEFER = 9`, `BECOME = 10` and their two arms; `has_constructor` covers them; `DEFER_ON_FAILURE` and `RETURN_TAIL_CALL` move here from `exits.rs` (`pilot-vm` reads them, unchanged) | about +12 |
+| `crates/pilot-parser/src/stmt.rs` | delete the two receptor arms (38, 39) | −2 |
+| `crates/pilot-parser/src/lib.rs` | drop `mod exits;`; re-export the two flags from `forms` | −1 |
+
+Net: about −30 Rust LOC (21,050 → about 21,020).
+
+**Acceptance.** The existing programs: `contracts/errdefer`, `become_shapes`, `become_tail`, `err_become_defer`, `err_become_ensures`, `err_become_not_call`, `err_become_type`, `err_errdefer_infallible`, and `control/errdefer`. That one already fails on `--ir` and `--emit c` at HEAD, and must fail in the same way after this group. New: `errors/err_errdefer_no_body` (`errdefer` with nothing after it is SYN010, not an empty defer). Each runs on `pilot test`, `--ir` and `--emit c`.
+
+**Left for later 2c groups.** `old(..)` stays a receptor. Today it is a word only inside `ensures(..)`; as a rule it would be read everywhere, so it moves with the contract clauses (`requires`/`ensures`/`invariant`). Those sit after a function signature, where rules are not read yet, so that group needs a declaration-position rule head first.
+
+**As built (2026-11-15).** The file list is as approved: `exits.rs` deleted, `forms.rs` +10 (`ERR_DEFER`, `BECOME`, the two flags), `stmt.rs` −2, `lib.rs` −1; net −33 Rust LOC (21,050 → 21,017).
+- One acceptance test differs from the plan. `errdefer }` is not SYN010. A rule word that no code follows is read as a plain name (step 1c: words stay usable as names), so the program fails with DECL001 `undefined name `errdefer`` at the word. `errors/err_errdefer_no_body` pins that. It fails on the old parser, which silently accepted `errdefer }`.
+---
+
+## `PROP-010` — Purge Dead Rust Found 2026-11-15: the Unused Rust `comptime` Evaluator and Unreferenced Items
+
+**Status: APPROVED BY OWNER 2026-11-15 ("Approve PROP-010").** Logged under Rule 3: dead Rust found while sweeping for junk. Nothing below is called by any binary. `pilot` (`crates/pilot-cli`) and the other crates' `src/` never reach it. The one exception is section B: legacy test harnesses use it.
+
+**How it was found.** Every `fn`, `const` and type in `crates/*/src` was searched for by name across all `src/` files, excluding its own definition and `pub use` re-exports. The hits below were then read by hand. Trait methods (`Hasher::write_u8`, `Deref::deref`) and in-crate `#[test]` functions were left out. `rust.md` already marks `pilot-analysis` "LEGACY → DELETE CRATE" (`PROP-004`), and this removes the part of it nothing needs.
+
+### A. Unreferenced items (no test uses them)
+
+| File | Delete | LOC |
+| :--- | :--- | ---: |
+| `crates/pilot-analysis/src/pipeline.rs` | `AnalysisPipeline::analyze_source` (only `analyze` is called, by `pilot-cli/src/run.rs`) | −4 |
+| `crates/pilot-analysis/src/types.rs` | the alias `CapabilityPhysics`; the constants `CapabilityBits::IMMUTABLE` and `LINEAR` | −1 (and two items off packed lines) |
+| `crates/pilot-lexer/src/token.rs` | `TokenFlags::IS_INACTIVE_PREPROC` (never set or read) | −1 |
+| `crates/pilot-vm/src/host.rs` | `record_field` | −5 |
+| `crates/pilot-vm/src/vm.rs` | `current_span` | −8 |
+
+### B. The Rust `comptime` evaluator: `crates/pilot-analysis/src/comptime.rs` (166 LOC)
+
+`ComptimeEngine`, `ComptimeValue`, `ComptimeEvaluator`, `BootstrapDiagnostic`, `bootstrap_core_file`, `eval_file_with_tables` and `BootstrapSnapshot` are used by no `src/` file outside `comptime.rs`. `BootstrapSnapshot` is also a second bootstrap: it runs `stdlib/core/bootstrap.pilot` in a VM to list stages, beside the one the parser uses (`pilot_parser::bootstrap_tables`). AGENTS.md §6 forbids that kind of parallel path. Real `comptime` runs in Pilot (`selfhost/ir/interp.pilot`), and the parser ingests bootstrap tables itself (`parse_and_ingest`).
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-analysis/src/comptime.rs` | **delete** (−166) |
+| `crates/pilot-analysis/src/lib.rs` | drop `pub mod comptime;` and its `pub use` line (−2) |
+| `crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs`, `milestone52_pilot_preprocessor_and_receptors.rs`, `milestone53_cst_recovery_and_formatter.rs`, `milestone54_perceus_ownership_and_escape.rs`, `phase1_rename_torture_gate.rs` | They parse a file with the bootstrap tables. Replace `BootstrapSnapshot::global().tables.clone()` + `eval_file_with_tables(src, &mut tables, &mut vm)` / `bootstrap_core_file(..)` with `pilot_parser::bootstrap_tables().clone()` + `pilot_parser::parse_and_ingest(src, &mut tables)`. No assertion changes. |
+| `crates/pilot-analysis/tests/milestone02_module_graph_and_comptime_parity.rs` | delete the assertions on `ComptimeEngine::eval_ast_node` (lines ~194–300 and `engine_target_has`): they test the evaluator being deleted. The same facts (`arch`, `pointer_bytes`, `endian`, `env()`) are already checked through the VM in the same test, lines ~274–330, and those stay. This harness already fails 1 of 4 at HEAD. |
+| `crates/pilot-analysis/tests/phase1_ironclad_killswitch.rs` | delete block "2. ComptimeEngine state persistence" (~lines 194–207): it tests that the deleted evaluator keeps its layout table. |
+
+Section B's test harnesses don't count toward the `src` LOC that GATE003 measures.
+
+**Net.** About −187 `src` LOC (21,017 → about 20,830). The Rust LOC budget (20,408) is still exceeded.
+
+**Acceptance.**
+- `cargo build`.
+- `cargo test -p pilot-analysis` for the seven harnesses above: each passes the same tests it passes now, minus the deleted assertions. `milestone02` and `milestone50` already fail 1 and 2 tests at HEAD and must fail the same ones.
+- The seed conformance suite and `pilot gate` are unchanged apart from GATE003's number.
+
+**Not included.**
+- `pilot_parser::bootstrap_diagnostics` and `PilVirtualMachine::set_hook` are used only by tests, but those tests guard live behaviour (no bootstrap parse errors; the debugger hook).
+- The rest of `pilot-analysis` (`infer.rs`, the `__engine` AST bridge `pilot check` runs on) stays until `PROP-004`.
+
+
+**As built (2026-11-15).** Exactly the files listed. Net −191 `src` LOC (21,017 → 20,826, measured by GATE003; the budget of 20,408 is still exceeded).
+- **Deviations from the plan.**
+  - `milestone50` lost two assertions the proposal did not list: `snap.arenas.len() >= 8` and `snap.arenas[0].0 == "Pilot.Core.Genesis"`. They described the deleted snapshot's own stage list and have no equivalent.
+  - `milestone02`: the proposal said the facts behind its evaluator checks were already covered through the VM. That was only partly true: the VM part checks the `env()` and pending-field seams, but nothing checks the `arch`, `pointer_bytes` and `endian` values through the VM any more. Those checks went with the evaluator.
+- **Results.**
+  - `test_50_3` now passes. At HEAD it failed at `res.is_ok()`, because the snapshot's separately built tables gave `AnalysisPipeline` errors on a core file; the parser's canonical tables don't.
+  - The only failures left are those that fail at HEAD: `milestone02` `test_m2_3` and `milestone50` `test_50_4_and_50_5`. The other seven harnesses pass.
+  - The seed suite passes 533 with 0 failures. The gate shows only GATE003.
+- **Pilot cleanup in the same change.**
+  - Deleted the `comptime.rs` exemption in `selfhost/gate/seed_audit.pilot` and its file cap in `selfhost/gate/manifest.pilot`.
+  - Corrected the `wiring.pilot` text.
+  - `stdlib/core/bootstrap.pilot` now has no runner: only `milestone50` reads its text. Its header says so, and deleting it is left for an owner decision.
+---
+
+## `PROP-011` — Delete the Unrun Bootstrap Stage List `stdlib/core/bootstrap.pilot` (Rust Test Edit Only)
+
+**Status: APPROVED BY OWNER 2026-11-15 ("Approve PROP-011").** The owner asked for this proposal ("Yes, propose it") after `PROP-010`.
+
+**Why.**
+- `stdlib/core/bootstrap.pilot` (62 lines) lists the core files to bootstrap, in order (`bootstrap_stage_count`, `bootstrap_stage_path`, `bootstrap_stage_ring`, `bootstrap_stage_at`).
+- Its only runner was `BootstrapSnapshot` in `crates/pilot-analysis/src/comptime.rs`, which `PROP-010` deleted. The parser bootstraps from its own list (`BOOTSTRAP_SOURCES` in `crates/pilot-parser/src/tables.rs`).
+- So the file is a second, unread copy of the bootstrap order, which AGENTS.md §1.1 says to delete on sight.
+- The deletion itself is Pilot. It needs approval only because a Rust test reads the file's text.
+
+**Rust file list** (test only; `src` LOC unchanged):
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs` | Remove the `FileAuditRule` for `stdlib/core/bootstrap.pilot` (it requires the four stage functions and the `.len` marker). Remove the `test_50_3` text check (`.len`, not `return 8;`). Drop `stdlib/core/bootstrap.pilot` from the list of core files `test_50_3` analyzes; `naming_attr.pilot`, `mem.pilot` and `meta.pilot` stay. Drop contract 1 from the header comment. The test count stays 4. |
+
+**Pilot side** (same change):
+- Delete `stdlib/core/bootstrap.pilot`.
+- Delete the `Pilot.Core.Bootstrap` → path branches in `selfhost/lsp/handlers.pilot` and `selfhost/pkg/manifest.pilot`.
+- Remove its row from `pilot.md` and its path from `docs/concept_matrix.md` C02, and correct the `wiring.pilot` F1 text.
+
+**Acceptance.**
+- `cargo test -p pilot-analysis --test milestone50_lossless_bridge_and_reflection` still passes `test_50_3` and fails only `test_50_4_and_50_5`, as now.
+- The seed suite and `pilot gate` are unchanged.
+- `git grep bootstrap.pilot` finds only history (`MILESTONES_100.md`, `proposals.md`).
+
+**As built (2026-11-15).** As listed. `milestone50` passes 3 tests (`test_50_3` among them) and fails only `test_50_4_and_50_5`, as before. The seed suite passes 533 with 0 failures. `pilot gate` shows only GATE003 (20,826 `src` LOC, unchanged). The remaining mentions of `bootstrap.pilot` are history (`MILESTONES_100.md`, `.agents/AI_CODEBASE_INDEX.md`, this file) and the `wiring.pilot` F1 note that records the deletion.
+
 ---
 
 ## `PROP-003` through `PROP-006` — Subsequent Contraction Waves (Summary)

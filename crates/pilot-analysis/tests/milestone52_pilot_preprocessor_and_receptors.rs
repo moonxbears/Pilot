@@ -52,7 +52,6 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pilot_analysis::{eval_file_with_tables, BootstrapSnapshot};
 use pilot_parser::parse;
 use pilot_vm::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
@@ -212,13 +211,10 @@ pub fn test_52_1_nested_if_stack_inactive_isolation_and_boolean_algebra() {
         &ANTICHEAT_SPEC,
     );
     let mut rng = Rng::new(0x5210);
-    let snap = BootstrapSnapshot::global();
-    let mut tables = snap.tables.clone();
-    let mut cvm = snap.vm.clone();
+    let mut tables = pilot_parser::bootstrap_tables().clone();
 
     let preproc_src = read_ws("selfhost/preprocessor.pilot");
-    eval_file_with_tables(&preproc_src, &mut tables, &mut cvm)
-        .expect("selfhost/preprocessor.pilot must evaluate cleanly");
+    let _ = pilot_parser::parse_and_ingest(&preproc_src, &mut tables);
 
     // 1. 12 randomized boolean expression trials (`&&` tighter than `||`, `!`, `defined(...)`, substring trap)
     for trial in 0..12 {

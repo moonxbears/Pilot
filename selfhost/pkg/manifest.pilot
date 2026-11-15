@@ -282,9 +282,6 @@ pub fn resolve_package_import_path(import_spec: str) -> str {
     if mf_find(import_spec, "Pilot.Core.Meta", 0) >= 0 {
         return "stdlib/core/meta.pilot";
     }
-    if mf_find(import_spec, "Pilot.Core.Bootstrap", 0) >= 0 {
-        return "stdlib/core/bootstrap.pilot";
-    }
     if mf_find(import_spec, "Pilot.Core.Task", 0) >= 0 {
         return "stdlib/core/task.pilot";
     }

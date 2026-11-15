@@ -3,11 +3,6 @@
 // Milestone 50 — Uncheatable Adversarial Verification Suite
 //
 // Required `.pilot` Contracts (all tested simultaneously on randomized inputs):
-//   1. `stdlib/core/bootstrap.pilot`:
-//      - `pub pure fn bootstrap_stage_count() -> i64` (derived via `.len`, never hardcoded `8`)
-//      - `pub pure fn bootstrap_stage_path(idx: i64) -> str`
-//      - `pub pure fn bootstrap_stage_ring(idx: i64) -> i64`
-//      - `pub pure fn bootstrap_stage_at(idx: i64) -> BootstrapStage`
 //   2. `selfhost/diagnostics.pilot` & `selfhost/analyzer.pilot` (invoked by `AnalysisPipeline::analyze`):
 //      - `pub fn verify_unit_diagnostics() -> i64`
 //      - Enforces universal `LatticeContractMismatch` (`: IValue` declaring `~self()`)
@@ -39,8 +34,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pilot_analysis::{
-    analyze_physics, eval_file_with_tables, flatten_ast, handle_engine_intrinsic,
-    load_or_compile_analyzer_pilc, AnalysisPipeline, BootstrapSnapshot, CapabilityBits, LayoutId,
+    analyze_physics, flatten_ast, handle_engine_intrinsic,
+    load_or_compile_analyzer_pilc, AnalysisPipeline, CapabilityBits, LayoutId,
     PhysicsGeometry, PhysicsRegistry,
 };
 use pilot_ast::{CallQuoteKind, NodeKind};
@@ -58,20 +53,6 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     test_file_rel: "crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs",
     expected_test_count: 4,
     files: &[
-        anticheat::FileAuditRule {
-            path: "stdlib/core/bootstrap.pilot",
-            max_lines: 1500,
-            name_blind: false,
-            required_pub_fns: &[
-                "bootstrap_stage_count",
-                "bootstrap_stage_path",
-                "bootstrap_stage_ring",
-                "bootstrap_stage_at",
-            ],
-            required_code_markers: &[".len"],
-            forbidden_code_markers: &["return 8;"],
-            forbidden_string_substrings: &[],
-        },
         anticheat::FileAuditRule {
             path: "selfhost/diagnostics.pilot",
             max_lines: 1500,
@@ -577,28 +558,14 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
     let mut rng = Rng::new(0x5003_CAFE);
     let root = workspace_root();
 
-    // 1. Verify bootstrap.pilot uses scalable `.len` map lookup rather than hardcoded `return 8`
-    let bootstrap_src = std::fs::read_to_string(root.join("stdlib/core/bootstrap.pilot"))
-        .expect("read stdlib/core/bootstrap.pilot");
-    assert!(
-        !bootstrap_src.contains("return 8;") && bootstrap_src.contains(".len"),
-        "stdlib/core/bootstrap.pilot must compute stage count dynamically via `.len`, never `return 8;`"
-    );
-
-    let snap = BootstrapSnapshot::global();
-    assert!(snap.arenas.len() >= 8);
-    assert_eq!(snap.arenas[0].0, "Pilot.Core.Genesis");
-
     for rel in [
-        "stdlib/core/bootstrap.pilot",
         "stdlib/core/naming_attr.pilot",
         "stdlib/core/mem.pilot",
         "stdlib/core/meta.pilot",
     ] {
         let src = std::fs::read_to_string(root.join(rel)).unwrap();
-        let mut tables = snap.tables.clone();
-        let mut cvm = snap.vm.clone();
-        let arena = eval_file_with_tables(&src, &mut tables, &mut cvm).expect("parse core file");
+        let mut tables = pilot_parser::bootstrap_tables().clone();
+        let arena = pilot_parser::parse_and_ingest(&src, &mut tables);
         let res = AnalysisPipeline::analyze(&arena, arena.root);
         assert!(
             res.is_ok(),

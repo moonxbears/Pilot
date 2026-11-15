@@ -1,0 +1,15 @@
+// `errdefer` takes a block or one statement to run; with nothing after it
+// there is nothing to defer, and it must not become an empty defer. A rule
+// word that no code follows (here `}`) is read as a plain name (PROP-009
+// step 1c: words stay usable as names), so the program is rejected with
+// DECL001 at the word.
+fn tidy(n: i64) -> i64 ! str {
+    let m = n + 1;
+    // `errdefer` is at line 9, column 5.
+    errdefer }
+    return m;
+}
+
+fn main() {
+    print(tidy(1) ?? 0);
+}

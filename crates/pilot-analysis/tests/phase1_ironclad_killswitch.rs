@@ -190,21 +190,6 @@ fn test_pilot_hosted_div_by_zero_and_comptime_persistence() {
         "Expected DIV001 diagnostic, got: {:?}",
         result.diagnostics
     );
-
-    // 2. ComptimeEngine state persistence
-    let comptime_snippet = r#"
-        __engine("layout_hw_header", 10);
-    "#;
-    let comptime_arena = parse(comptime_snippet);
-    let mut comptime_engine = pilot_analysis::ComptimeEngine::new();
-    assert_eq!(comptime_engine.layout_table.len(), 0);
-    let eval_res = comptime_engine.eval_ast_node(&comptime_arena, comptime_arena.root);
-    assert!(eval_res.is_ok(), "eval_ast_node must succeed: {:?}", eval_res);
-    assert_eq!(
-        comptime_engine.layout_table.len(),
-        1,
-        "eval_ast_node must persist registered layout back into self.layout_table"
-    );
 }
 
 fn check_src(src: &str) -> pilot_analysis::AnalysisResult {
