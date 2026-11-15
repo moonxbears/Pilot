@@ -1,0 +1,35 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/forms.pilot
+// THE NODES A `syntax` RULE'S TEMPLATE BUILDS (PROP-009 step 2)
+// =========================================================================
+// A rule's template writes `form(CoreForm::X, operands..)` to build node X
+// from its operands. The operands are in the order listed below. An operand
+// that uses a repeated hole stands for one operand per repetition. An absent
+// optional hole is an absent operand.
+//
+// The seed reads only the position of each variant (`register_core_forms`):
+// the order is append-only, and renaming a variant changes nothing. A
+// variant is added only together with its constructor
+// (crates/pilot-parser/src/forms.rs).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Forms;
+
+use Pilot.Core.Genesis.*;
+
+/// The nodes a rule template can build.
+pub enum CoreForm : u8 {
+    For,       // binder name, iterable, body, `then` value (or absent)
+    Break,     // values: none, one, or several (a tuple)
+    Continue,  // values, as `Break`
+    Guard,     // unwraps (`some`) or not, condition, bound value, `else` block
+    Try,       // body, then its `Catch` nodes
+    Catch,     // bound name (or absent), handler
+    Switch,    // scrutinee, then its `Arm` nodes
+    Arm,       // guard, body, then patterns (any of them; none: any value)
+    Reject,    // message, code: when the code is present, the message is an
+               // error at it and nothing is built
+}
+
+comptime {
+    register_core_forms(nameof(CoreForm), nameof(form));
+}

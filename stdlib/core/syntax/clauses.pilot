@@ -8,7 +8,9 @@
 // is shared; what it means stays in each rule that uses it (a `where`
 // filters a query's elements but guards a `switch` arm). An arm is chosen
 // by its first token, so two arms a use could both start are rejected
-// where the class is declared (SYN011), as are two holes of one name.
+// where the class is declared (SYN011); only the last arm may start with a
+// hole that reads any code, and is taken when no other arm fits. Arms may
+// bind the same names; one arm binding a name twice is SYN011.
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Clauses;
 

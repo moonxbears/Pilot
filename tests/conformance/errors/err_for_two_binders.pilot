@@ -1,0 +1,7 @@
+// SYN010: `for x, i in xs` would also bind an index; `for` binds one name
+// (the parser used to read `i` and drop it silently).
+fn main() {
+    let xs = [10, 20];
+    // The `,` is at line 6, column 10.
+    for x, i in xs { print(x); }
+}

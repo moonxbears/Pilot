@@ -24,7 +24,7 @@ mod int_lit;
 mod open_range;
 mod ret_type;
 mod tuple_member;
-mod switch;
+mod forms;
 mod inline_block;
 mod unbuilt;
 mod param_mods;

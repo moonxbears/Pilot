@@ -1,0 +1,25 @@
+// `form(CoreForm::X, ..)` in a rule's template builds node X (PROP-009
+// step 2; stdlib/core/syntax/forms.pilot lists the forms). `visit` is `for`
+// under another word, and `quit` is `break`.
+//
+// Expected output, worked by hand:
+//   visit n in [2, 3, 4] adds every element: 2 + 3 + 4 = 9.
+//   visit n in [1, 2, 3, 4] stops when n == 3, so it adds 1 + 2 = 3.
+//   visit w in ["a", "b"] prints a, then b.
+syntax {
+    visit $it:Iteration $body:Block => quote { form(CoreForm::For, $x, $src, $body) };
+    quit => quote { form(CoreForm::Break) };
+}
+
+fn main() {
+    var total = 0;
+    visit n in [2, 3, 4] { total = total + n; }
+    print(total);
+    var seen = 0;
+    visit n in [1, 2, 3, 4] {
+        if n == 3 { quit; }
+        seen = seen + n;
+    }
+    print(seen);
+    visit w in ["a", "b"] { print(w); }
+}

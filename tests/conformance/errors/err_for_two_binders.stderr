@@ -1,0 +1,2 @@
+error[SYN010]: `for` expects `in` here, found `,`
+err_for_two_binders.pilot:6:10

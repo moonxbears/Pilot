@@ -7,6 +7,17 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Guard;
 
 use Pilot.Core.Genesis.*;
 
-comptime {
-    bind_receptor(nameof(guard), 17, 0);
+// `guard cond else { .. }` leaves by its `else` block unless `cond` holds;
+// `guard some x = v else { .. }` (or `guard let ..`) binds `x` to the value
+// inside `v` for the rest of the block.
+pub syntax {
+    guard some $c:Expr $( = $v:Expr )? else $otherwise:Block
+        => quote { form(CoreForm::Guard, true, $c, $v, $otherwise) };
+    guard let $c:Expr $( = $v:Expr )? else $otherwise:Block
+        => quote { form(CoreForm::Guard, true, $c, $v, $otherwise) };
+    guard $c:Expr $( = $v:Expr )? else $otherwise:Block
+        => quote { form(CoreForm::Guard, false, $c, $v, $otherwise) };
+    // Without `else` a guard has no way to leave.
+    guard $( some )? $( let )? $c:Expr $( = $v:Expr )?
+        => quote { form(CoreForm::Reject, "NULL002: 'guard' statement requires an 'else' block with early exit", $c) };
 }

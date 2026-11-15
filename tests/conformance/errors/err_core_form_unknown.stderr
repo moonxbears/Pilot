@@ -1,0 +1,2 @@
+error[SYN010]: `Loop` is not a node the seed can build (a variant of `CoreForm`)
+err_core_form_unknown.pilot:5:25

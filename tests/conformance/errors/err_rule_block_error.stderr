@@ -1,0 +1,2 @@
+error[SYN001]: Unregistered keyword or unexpected identifier 'foo'
+err_rule_block_error.pilot:7:19

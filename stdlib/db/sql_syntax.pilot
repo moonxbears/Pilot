@@ -42,14 +42,10 @@ pub syntax {
             var items = for $x in $src {
                 if $c && true { yield $x; }
             };
-            // `loop` with a `break`, not `while`: known bug
-            // parser.rule_template_while.
             var i = 1;
-            loop {
-                if i >= items.len() { break; }
+            while i < items.len() {
                 var j = i;
-                loop {
-                    if j == 0 { break; }
+                while j > 0 {
                     // One block per key, chained by `&&`: while the keys
                     // tie the next one is compared; the first that differs
                     // sets `c` to 1 (after) or -1 (before).

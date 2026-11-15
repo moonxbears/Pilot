@@ -195,4 +195,11 @@ pub comptime fn {
     // rule's sequence head; the seed reads positions only.
     register_hole_kinds(kind_enum) =>
         __engine("register_hole_kinds", kind_enum);
+
+    // 11. Core Forms (PROP-009 step 2; appended under B+)
+    // The enum whose variant order names the nodes a rule template builds,
+    // and the word a template spells that builder with
+    // (`form(CoreForm::For, ..)`); the seed reads positions only.
+    register_core_forms(form_enum, builder_word) =>
+        __engine("register_core_forms", form_enum, builder_word);
 }

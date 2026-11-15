@@ -16,6 +16,10 @@ pub enum TemplateNode { Splice(String), TypeNamed(String, Vec<TemplateNode>), Ty
     Assign(u16, Box<TemplateNode>, Box<TemplateNode>), Defer(u16, Box<TemplateNode>),
     /// `for name in iter body` (no `then`) and `yield value`.
     For(String, Box<TemplateNode>, Box<TemplateNode>), Yield(Box<TemplateNode>),
+    /// `form(CoreForm::X, operands..)`: core form `X` by position
+    /// (`forms::build_form`); an operand that uses a repeated hole stands
+    /// for one operand per repetition.
+    Form(u8, Vec<TemplateNode>),
     /// A node a template cannot hold yet; `add_seq_rule` reports it.
     Unsupported(&'static str), }
 impl TemplateNode {
@@ -36,7 +40,17 @@ impl TemplateNode {
                 let c = Box::new(Self::from_arena(arena, NodeId(n.lhs))); if n.flags == 2 { let ch = arena.children_slice(n.rhs, 2);
                     Self::If(c, Box::new(Self::from_arena(arena, NodeId(ch[0]))), Some(Box::new(Self::from_arena(arena, NodeId(ch[1])))))
                 } else { Self::If(c, Box::new(Self::from_arena(arena, NodeId(n.rhs))), None) } }
-            NodeKind::WhileStmt => Self::Loop(Box::new(Self::from_arena(arena, NodeId(n.rhs)))),
+            // `while c { b }` is kept as `loop { if !c { break; } b }`, which
+            // `instantiate` builds back into a `while`.
+            NodeKind::WhileStmt => {
+                let body = Self::from_arena(arena, NodeId(n.rhs));
+                let cond = NodeId(n.lhs);
+                if cond.is_none() || (arena.node(cond).node_kind() == NodeKind::BoolLit && arena.node(cond).lhs != 0) {
+                    return Self::Loop(Box::new(body));
+                }
+                let exit = Self::If(Box::new(Self::Unary(5, Box::new(Self::from_arena(arena, cond)))), Box::new(Self::Break(None)), None);
+                Self::Loop(Box::new(Self::Block(vec![exit, body])))
+            }
             NodeKind::LetStmt | NodeKind::VarStmt => { let nm = arena.interner.resolve(SymbolId(n.lhs)).to_string();
                 Self::Let(nm, n.node_kind() == NodeKind::VarStmt, NodeId(n.rhs).is_some().then(|| Box::new(Self::from_arena(arena, NodeId(n.rhs)))))
             }
@@ -130,6 +144,17 @@ impl TemplateNode {
                 if bid.is_none() || arena.node(bid).node_kind() != NodeKind::BlockExpr { let item = as_block_item(arena, bid, span); bid = arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &[item]); }
                 arena.alloc_for(sym, iid, bid, NodeId::NONE, span) }
             Self::Yield(v) => { let vid = v.instantiate(arena, bindings, span); arena.alloc_node(NodeKind::YieldStmt, 0, span, vid.0, 0) }
+            Self::Form(form, ops) => {
+                let span = bindings.iter().find(|(k, _)| k == crate::rule_arms::RUN_SPAN).map_or(span, |&(_, id)| arena.span(id));
+                let mut ids = Vec::new();
+                for o in ops {
+                    match crate::rule_arms::repetitions(o, bindings, arena) {
+                        Some(runs) => runs.iter().for_each(|b| ids.push(o.instantiate(arena, b, span))),
+                        None => ids.push(o.instantiate(arena, bindings, span)),
+                    }
+                }
+                crate::forms::build_form(arena, *form, &ids, span)
+            }
             Self::NoneLit | Self::Unsupported(_) => arena.alloc_node(NodeKind::NoneLit, 0, span, 0, 0), } } }
 /// The name `nm` declares (`let`, `for`); `$name` is the name bound to hole `name`.
 fn bound_name(arena: &mut AstArena, nm: &str, bindings: &[(String, NodeId)]) -> SymbolId {

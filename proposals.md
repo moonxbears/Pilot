@@ -19,7 +19,7 @@
 | **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — ITEMIZE BEFORE APPROVAL (after PROP-007)` |
 | **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4) NEEDS APPROVAL` |
 | **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED ITEMIZED LISTS` |
-| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 (§11) — IN PROGRESS; STEP 3 NEEDS A DECISION` |
+| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 AND BUILT (§11; +186 RUST, OVER THE −15..−40 ESTIMATE, ACCEPTED BY THE OWNER 2026-11-15; `true`/`false`/`none` NOT MOVED); STEP 3 NEEDS A DECISION` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -1224,6 +1224,45 @@ pub syntax {
 | **phase 2a net** | **about +65** |
 
 The large deletion comes in 2b (`switch.rs`, −101) and 2c (`accessors.rs`, `contracts.rs`, `exits.rs`, `modules.rs`, much of `decl.rs`). Phase 2a is the cost of the mechanism, so the owner decides: approve 2a alone at about +65, or require 2a and 2b to land together: about −15 to −40 net, depending on what the `Stmts` hole costs.
+
+**As built (2026-11-15; uncommitted).**
+
+*Over the estimate: phases 2a + 2b are +186 Rust LOC (20,864 → 21,050), not the estimated −15 to −40.* Lines added: `rule_arms.rs` +195 (the matcher features below), `forms.rs` +104, `template.rs` +25, `tables.rs` +11. Lines deleted: `switch.rs` −101, `stmt.rs` −32, `loud.rs` −15, `expr.rs` −1. The estimate counted the matcher at about +60; it needed nine features, not two. PROP-009 overall is now +252 against the 20,798 baseline. **The owner accepted the overage on 2026-11-15.** The phase 2c deletions (`accessors.rs`, `contracts.rs`, `exits.rs`, `modules.rs`, much of `decl.rs`) reuse this matcher and should add little to it.
+
+- **Mechanism.** `stdlib/core/syntax/forms.pilot` holds `enum CoreForm { For, Break, Continue, Guard, Try, Catch, Switch, Arm, Reject }` and `register_core_forms(nameof(CoreForm), nameof(form))`. The hook is appended to `bridge_lang.pilot` §11 and `airlock_lang_hooks()`. `forms.rs` has one constructor per variant. A template `form(CoreForm::X, ..)` becomes a `TemplateNode::Form` when the rule is added; an unknown variant is SYN010. A template that is one `form(..)` builds that node, not a block around it, so a `guard`'s binding outlives the statement.
+- **`Reject`** (not in the plan) is `form(CoreForm::Reject, "message", $code)`. When `$code` is present, the message is an error at it and nothing is built. Loud refusals now live in Pilot: `for (a, b) in ..` and a typed `catch e: T` (it replaces `for_pattern_loudly` and `catch_type_loudly`, deleted from `loud.rs`), and NULL002 for a `guard` with no `else`.
+- **Matcher features** (`rule_arms.rs`):
+  - optional groups led by a name or block hole or a class;
+  - class arms may share hole names; the last arm may start with a hole that reads any code (a fallback);
+  - a repeated group with no leading word runs until the word after it;
+  - the `Stmts` hole kind (appended to `HoleKind`), ending at `}`, `,` or a lead word of the enclosing repetition;
+  - `$name` inside a template fills a name hole;
+  - the next item's chance of starting with `{` crosses class and group edges (no struct literal there);
+  - each repetition keeps its span (`RUN_SPAN`), so a `switch` arm's diagnostics point at the arm;
+  - holes of one repetition stay aligned (`NONE` for a hole a repetition left out); a repetition nested inside a repetition is a sequence of sequences;
+  - `=>` may be a word in a class arm.
+- **Rules.**
+  - `for` (block or statement body, `then`, and the pattern-binder refusal) and `break`/`continue`: `for.pilot`.
+  - `guard` (`some`, `let`, plain, and NULL002 without `else`): `guard.pilot`.
+  - `try` with `CatchClause`/`CatchBody` classes, and `try expr`: `try_catch.pilot`. `catch` keeps receptor 19 for the infix `expr catch e => ..`.
+  - `switch` with `ArmGuard`, `ArmBody` and `SwitchArm` classes: `switch.pilot`.
+  - Their `bind_receptor` lines are deleted (`in` keeps receptor 10 for membership). So are the dead `break()`/`continue()` comptime rules in `core.pilot`.
+  - `is_stmt_receptor_start` asks whether a word has rules.
+- **Not done: `true`/`false`/`none` stay receptors 1/2.** Pattern parsing (`is_rec(1)`/`is_rec(2)`) and every bootstrap file before `forms.pilot` use them.
+- **Bugs fixed on the way.**
+  - A rule that matched dropped every diagnostic its holes reported. A syntax error inside a `while` body vanished (`errors/err_rule_block_error`).
+  - `TemplateNode::from_arena` dropped a `while` loop's condition. The checker reported QUOTE003 for the `$hole` a rule's expansion inside a quote left unattached. `selfhost/check/quote_value.pilot` now checks only code in the program. Known bug `parser.rule_template_while` is closed (`receptors/rule_template_while`), and the query rule's `loop`/`break` workaround is a `while` again.
+  - `for x, i in xs` silently dropped `i`; it is now SYN010 (`errors/err_for_two_binders`).
+- **Diagnostics that changed.**
+  - `err_catch_typed` points at the type (9:39), not at the `:` (9:37).
+  - `err_switch_case_list_empty` is now SYN010 ``switch` expects code for `$more_patterns`, found `:``` at the `:`. It was PAT001 from the seed VM.
+  - "Expected a switch arm" is now SYN010 "`switch` cannot read .. here".
+  - A `try { .. } catch ..` written as an expression is now a `TryStmt`. It used to be the block with an infix `catch`. No program writes it.
+- **Tests added:** `receptors/core_form_rules`, `receptors/rule_template_while` (moved from `known_bugs`), `receptors/err_syntax_class_fallback_not_last`, `errors/err_core_form_unknown`, `errors/err_for_two_binders`, `errors/err_rule_block_error`, `errors/err_guard_no_else`.
+- **Owner approval still needed: `crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs`** (see §10).
+  - Now 4 of its tests fail. `test_51_1` uses the deleted call-shaped rules.
+  - `test_51_2`, `test_51_3` and `test_51_4` require the code marker `nameof(` in `switch.pilot` and `guard.pilot`. Their `bind_receptor(nameof(..))` lines are gone, because the words are spelled in rule heads.
+  - Adding a `nameof(` only to satisfy the marker would be a fake, so it is not done. Proposed change: drop those two markers. The 15-line floor of `test_51_3` is met again (`guard.pilot` 23, `switch.pilot` 36).
 ---
 
 ## `PROP-003` through `PROP-006` — Subsequent Contraction Waves (Summary)

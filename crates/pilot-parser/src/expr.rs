@@ -212,7 +212,6 @@ impl<'a> Parser<'a> {
                 if let Some((rk, pl)) = self.receptor() { match rk {
                         1 => { self.advance(); return self.arena.alloc_node(NodeKind::BoolLit, 0, sp, pl as u32, 0); }
                         2 => { self.advance(); return self.arena.alloc_node(NodeKind::NoneLit, 0, sp, 0, 0); }
-                        9 => return self.parse_for(), 14 => return self.parse_switch(), 18 => { self.advance(); return self.parse_expr_bp(CLAUSE_BP); }
                         contracts::CONTRACT_RECEPTOR if pl == contracts::OLD_SUB && self.in_ensures => return self.parse_old(),
                         // `some x` binds its operand like the prefix `!`.
                         31 if pl == 2 => {

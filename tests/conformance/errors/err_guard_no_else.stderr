@@ -1,0 +1,2 @@
+error[NULL002]: 'guard' statement requires an 'else' block with early exit
+err_guard_no_else.pilot:6:16

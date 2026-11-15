@@ -1,0 +1,10 @@
+// SYN010: `form(CoreForm::X, ..)` names a node the seed can build;
+// `Loop` is not one of them (stdlib/core/syntax/forms.pilot lists them).
+syntax {
+    // The template starts at line 5, column 25.
+    spin $body:Block => quote { form(CoreForm::Loop, $body) };
+}
+
+fn main() {
+    print(1);
+}

@@ -1,4 +1,5 @@
-// A comma in a `case` list must be followed by another pattern (PAT001).
+// A comma in a `case` list must be followed by another pattern (SYN010;
+// the `:` at line 5, column 17 is where one is missing).
 fn main() {
     switch 2 {
         case 1, : print("one");

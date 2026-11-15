@@ -305,10 +305,6 @@ fn known_bug(id: str, component: str, summary: str, expected: str, actual: str, 
 /// Every known bug, ordered by id.
 pub fn bug_registry() -> List<KnownBug> {
     let entries: List<KnownBug> = [
-        known_bug("parser.rule_template_while", "crates/pilot-parser/src/template.rs (a `while` inside a rule's quote)",
-            "a `while` loop inside a `syntax` rule's `quote { .. }` loses its condition: QUOTE003 is reported for a `$hole` in it, and the expanded loop has no exit (LOOP005)",
-            "the loop keeps its condition; prints 0, 1, 2", "error[QUOTE003]: `$n` splices into a quote, and is not inside one",
-            "tests/conformance/known_bugs/rule_template_while.pilot", "PROP-009"),
         known_bug("check.collecting_for_in_block", "generator detection (selfhost/check/generators.pilot and the engines that follow it)",
             "a collecting `for` (`yield`) that is the value of a block or of an `if .. else` branch makes the enclosing function a generator instead of a list; `main` then never runs, so the program prints nothing and exits 0",
             "the block's value is the list; prints 0, [10, 20, 30], [2, 3, 4]", "prints nothing and exits 0 on all three engines",

@@ -123,6 +123,7 @@ pub fn airlock_lang_hooks() -> List<str> => [
     "bind_lang_protocol",
     "register_grammar", "grammar_entry",
     "register_machine_ops", "register_hole_kinds",
+    "register_core_forms",
 ];
 
 /// Hooks `bridge_lang.pilot` still carries but that are **not** frozen: each is

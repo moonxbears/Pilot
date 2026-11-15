@@ -288,8 +288,6 @@ comptime {
     bind_receptor("attribute_construct", 6, 0);
     bind_receptor(nameof(extern),   7,  0);
     bind_receptor("lib",      8,  0);
-    bind_receptor(nameof(break),    13, 0);
-    bind_receptor(nameof(continue), 13, 1);
     bind_receptor(nameof(get),      23, 0);
     bind_receptor(nameof(set),      24, 0);
     bind_receptor(nameof(op),       25, 0);
@@ -304,11 +302,9 @@ comptime {
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Genesis;
 
 // =========================================================================
-// STEP 4: PAIRED CFG KEYWORDS (`break`, `continue`, `op`) & SSA/REFLECTION HOOKS
+// STEP 4: THE `op` DECLARATION WORD & SSA/REFLECTION HOOKS
 // =========================================================================
 pub syntax {
-    break()           => cfg_jump_loop_exit();
-    continue()        => cfg_jump_loop_head();
     op(sig, body)     => decl_operator_fn(sig, body);
 }
 

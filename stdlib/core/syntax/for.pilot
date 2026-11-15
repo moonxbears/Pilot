@@ -9,12 +9,28 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.For;
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 
+
+// `for x in xs { .. }` (or one statement as the body), with an optional
+// `then` value for a loop that ends without `break`. `break` and `continue`
+// take no value, one, or several (`continue a..b, c..d;` pushes ranges).
+pub syntax {
+    for $it:Iteration $body:Block $( then $fallback:Expr )?
+        => quote { form(CoreForm::For, $x, $src, $body, $fallback) };
+    for $it:Iteration $body:Stmt $( then $fallback:Expr )?
+        => quote { form(CoreForm::For, $x, $src, $body, $fallback) };
+    // A binder that takes the element apart is not built yet.
+    for $p:Pattern in $src:Expr $body:Block
+        => quote { form(CoreForm::Reject, "a pattern in `for` (`for (a, b) in ..`) is not built yet; bind one name", $p) };
+    break $v:Expr $( , $vs:Expr )* => quote { form(CoreForm::Break, $v, $vs) };
+    break => quote { form(CoreForm::Break) };
+    continue $v:Expr $( , $vs:Expr )* => quote { form(CoreForm::Continue, $v, $vs) };
+    continue => quote { form(CoreForm::Continue) };
+}
+
 comptime {
-    bind_receptor(nameof(for),      9,  0);
+    // `x in xs` between two expressions is membership (the word that heads
+    // a `for` loop's iterable).
     bind_receptor(nameof(in),       10, 0);
-    bind_receptor(nameof(then),     11, 0);
-    bind_receptor(nameof(break),    13, 0);
-    bind_receptor(nameof(continue), 13, 1);
     // The protocol a `for` loop calls, for compilers that lower `for`
     // directly: `get_enumerator()` once, then `move_next()` and `current`;
     // leaving the loop calls `close()` on an enumerator whose type has it.

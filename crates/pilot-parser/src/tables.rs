@@ -48,6 +48,7 @@ pub(crate) const HOOK_GRAMMAR_ENTRY: &str = "grammar_entry";
 pub(crate) const HOOK_REGISTER_GRAMMAR: &str = "register_grammar";
 pub(crate) const HOOK_REGISTER_MACHINE_OPS: &str = "register_machine_ops";
 pub(crate) const HOOK_REGISTER_HOLE_KINDS: &str = "register_hole_kinds";
+pub(crate) const HOOK_REGISTER_CORE_FORMS: &str = "register_core_forms";
 
 /// Parse shapes by position in the shape enum (PROP-008 §4; closed in the
 /// seed, append-only under B+).
@@ -88,6 +89,9 @@ pub struct ParserTables { pub(crate) modifiers: HashMap<String, ModAct>, pub(cra
     /// The enum whose variants are the hole kinds of a `syntax` rule's
     /// sequence head (PROP-009 step 1a).
     pub(crate) hole_kinds: String,
+    /// The enum whose variants are the nodes a rule template builds with
+    /// `form(..)`, and the word that builder is spelled with (PROP-009 step 2).
+    pub(crate) core_forms: (String, String),
     /// `syntax` rules with a sequence head, by trigger word, in the order
     /// written (`rule_arms::SeqRule`).
     pub(crate) seq_rules: HashMap<String, Vec<crate::rule_arms::SeqRule>>,
@@ -324,6 +328,11 @@ impl ParserTables {
         self.adt_variants.get(&self.hole_kinds)?.iter().position(|v| v == variant).map(|i| i as u8)
     }
 
+    /// The position of `variant` in the enum `register_core_forms` named.
+    pub(crate) fn core_form(&self, variant: &str) -> Option<u8> {
+        self.adt_variants.get(&self.core_forms.0)?.iter().position(|v| v == variant).map(|i| i as u8)
+    }
+
     pub(crate) fn apply_hook(&mut self, hook: &str, vals: &[Option<CVal>]) {
         let s_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Str(s) => Some(s.clone()), _ => None }).unwrap_or_default();
         let i_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Int(v) => Some(*v), _ => None });
@@ -398,6 +407,7 @@ impl ParserTables {
             HOOK_REGISTER_GRAMMAR => self.register_grammar(&s_arg(0), &s_arg(1), &s_arg(2)),
             HOOK_REGISTER_MACHINE_OPS => self.machine_ops = s_arg(0),
             HOOK_REGISTER_HOLE_KINDS => self.hole_kinds = s_arg(0),
+            HOOK_REGISTER_CORE_FORMS => self.core_forms = (s_arg(0), s_arg(1)),
             HOOK_GRAMMAR_ENTRY => {
                 // An empty symbol is the declaration's own name: `[Infix(..)]`
                 // on `op +` declares `+`.
@@ -486,6 +496,7 @@ pub(crate) const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/syntax/holes.pilot",
     // Clauses shared by rules: syntax classes (PROP-009 step 1c).
     "stdlib/core/syntax/clauses.pilot",
+    "stdlib/core/syntax/forms.pilot",
     "stdlib/core/syntax/visibility.pilot",
     "stdlib/core/syntax/lifecycle.pilot",
     "stdlib/core/syntax/properties.pilot",

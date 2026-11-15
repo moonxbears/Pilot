@@ -98,15 +98,6 @@ impl Parser<'_> {
         }
     }
 
-    /// `catch e: T`: the type would not be checked, so it is refused.
-    pub(crate) fn catch_type_loudly(&mut self) {
-        if self.at(TokenKind::Colon) {
-            let start = self.span().start;
-            self.advance();
-            let _ = self.parse_type();
-            self.report_loud(start, "a typed `catch e: T` is not checked yet; write `catch e`".into());
-        }
-    }
 
     /// `where` clauses after a type's header: read past and reported, since
     /// nothing checks them.
@@ -155,12 +146,6 @@ impl Parser<'_> {
         self.arena.alloc_node(pilot_ast::NodeKind::BinaryExpr, op, span, range.0, step.0)
     }
 
-    /// `for (a, b) in ..`: the pattern is read past and reported.
-    pub(crate) fn for_pattern_loudly(&mut self) {
-        let start = self.span().start;
-        let _ = self.parse_pattern();
-        self.report_loud(start, "a pattern in `for` (`for (a, b) in ..`) is not built yet; bind one name".into());
-    }
 
     /// `name?: T` on a field: `?` belongs to the type (`name: T?`).
     pub(crate) fn field_question_loudly(&mut self) {

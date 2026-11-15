@@ -1,0 +1,11 @@
+// An arm that starts with a hole reading any code fits every use, so it is
+// taken only when no other arm does: it must be the class's last arm. Here
+// it comes first, and SYN011 is reported where the class is declared.
+syntax Pick {
+    $v:Expr;
+    first $w:Expr;
+}
+
+fn main() {
+    print(1);
+}

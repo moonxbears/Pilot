@@ -8,8 +8,30 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.TryCatch;
 
 use Pilot.Core.Genesis.*;
 
+// The handler of a `catch` clause: a block, or `=> value`. A typed
+// `catch e: T` would catch only failures of type T; nothing checks the type
+// yet, so it is refused rather than catching every failure.
+pub syntax CatchBody {
+    $handler:Block;
+    => $handler:Expr;
+    : $typed:Type $handler:Block;
+}
+
+// `catch e { .. }` binds the failure to `e`; `catch { .. }` does not.
+pub syntax CatchClause {
+    catch $( $err:Ident )? $h:CatchBody;
+}
+
+pub syntax {
+    try $body:Block $( $c:CatchClause )*
+        => quote { form(CoreForm::Try, $body,
+                        form(CoreForm::Catch, $err, $handler),
+                        form(CoreForm::Reject, "a typed `catch e: T` is not checked yet; write `catch e`", $typed)) };
+    try $e:Expr => quote { form(CoreForm::Try, $e) };
+}
+
 comptime {
-    bind_receptor(nameof(try),   18, 0);
+    // `expr catch e => fallback` after an expression.
     bind_receptor(nameof(catch), 19, 0);
     bind_receptor("!",     34, 1);
     // Postfix `x?` on a record asks `ITryOperator.is_success`; on success the

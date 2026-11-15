@@ -1,0 +1,1 @@
+error[SYN011]: arms 1 and 2 of the syntax class `Pick` start alike, so a use cannot tell them apart

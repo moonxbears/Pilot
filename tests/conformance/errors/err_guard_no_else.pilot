@@ -1,0 +1,8 @@
+// NULL002: a `guard` leaves its block through its `else`; without one it has
+// no way out.
+fn main() {
+    let x: i64? = 3;
+    // The guarded code `y` is at line 6, column 16.
+    guard some y = x;
+    print(1);
+}

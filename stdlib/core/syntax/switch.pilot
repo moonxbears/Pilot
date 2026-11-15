@@ -7,8 +7,30 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Switch;
 
 use Pilot.Core.Genesis.*;
 
-comptime {
-    bind_receptor(nameof(switch),  14, 0);
-    bind_receptor(nameof(case),    15, 0);
-    bind_receptor(nameof(default), 16, 0);
+// `case p if c:` or `case p where c:`: the arm is taken only when `c` holds.
+pub syntax ArmGuard {
+    if $guard:Expr;
+    where $guard:Expr;
+}
+
+// After `:` an arm's statements run to the next arm; after `=>` it is one
+// statement; a block stands by itself.
+pub syntax ArmBody {
+    : $body:Stmts;
+    => $body:Stmt;
+    $body:Block;
+}
+
+// `case a, b:` matches when any of its patterns does (`case a | b:`);
+// `default` and `_` match any value; `case` may be left out.
+pub syntax SwitchArm {
+    case $pattern:Pattern $( , $more_patterns:Pattern )* $( $g:ArmGuard )? $b:ArmBody;
+    default $( $g:ArmGuard )? $b:ArmBody;
+    _ $( $g:ArmGuard )? $b:ArmBody;
+    $pattern:Pattern $( , $more_patterns:Pattern )* $( $g:ArmGuard )? $b:ArmBody;
+}
+
+pub syntax {
+    switch $scrutinee:Expr { $( $arm:SwitchArm $( , )? $( ; )? )* }
+        => quote { form(CoreForm::Switch, $scrutinee, form(CoreForm::Arm, $guard, $body, $pattern, $more_patterns)) };
 }

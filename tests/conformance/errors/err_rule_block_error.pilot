@@ -1,0 +1,8 @@
+// SYN001: an error inside the block of a rule's word (`while`) is reported,
+// as it is inside an `if` block. A rule that matched used to drop what its
+// holes reported, so this program ran.
+fn main() {
+    var i = 0;
+    // `foo` is at line 7, column 19.
+    while i < 1 { foo bar; i = i + 1; }
+}

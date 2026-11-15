@@ -224,6 +224,15 @@ pub fn enclosing_quote(p: Program, n: i64) -> i64 {
     return -1;
 }
 
+/// Whether node `n` is part of the program: a `syntax` rule's expansion
+/// copies the code its holes read, and the code read stays in the tree
+/// unattached.
+fn in_program(p: Program, n: i64) -> bool {
+    var cur = n;
+    while p.parents[cur] >= 0 { cur = p.parents[cur]; }
+    return cur != n && kind(p.s, cur) == nk_program();
+}
+
 /// Whether quote node `q` is a quote value, not a `syntax` rule's template
 /// (which the parser expands where the rule is used; flags 1).
 pub fn is_quote_value(s: Snap, q: i64) -> bool => kind(s, q) == nk_quote() && flags(s, q) == 0;
@@ -260,7 +269,7 @@ pub fn check_quotes(inf: Infer, sink: DiagSink) {
                 sink_error(sink, n, "DECL001", f"undefined name `{name}`");
             }
         }
-        if in_user_file(s, n) && kind(s, n) == nk_ident() && flags(s, n) == 1 && p.parents[n] >= 0 && enclosing_quote(p, n) < 0 {
+        if in_user_file(s, n) && kind(s, n) == nk_ident() && flags(s, n) == 1 && in_program(p, n) && enclosing_quote(p, n) < 0 {
             sink_error(sink, n, "QUOTE003", f"`${node_name(s, n)}` splices into a quote, and is not inside one");
         }
         n = n + 1;
