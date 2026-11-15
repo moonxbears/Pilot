@@ -1,1 +1,1 @@
-warning[INLINE001]: '[Inline]' is not implemented yet; calls to this declaration are not inlined
+warning[INLINE001]: '[Inline]' is not honoured by the seed engine yet; PilIR and `--emit c` inline calls to this declaration, the seed still calls it

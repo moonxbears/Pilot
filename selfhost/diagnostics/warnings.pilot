@@ -184,8 +184,8 @@ pub let WARNINGS = [
     },
     WarningDef {
         code: "INLINE001",
-        title: "Inline Hint Not Implemented",
-        description: "Declaration is marked '[Inline]', but no engine inlines calls yet; every call to it is a real call",
+        title: "Inline Hint Not Honoured on the Seed",
+        description: "Declaration is marked '[Inline]'; PilIR and --emit c inline its calls, but the seed engine still makes a real call",
         category: "Completeness",
         reference: "proposals.md PROP-007 / PROP-002a Amendment A1",
     },

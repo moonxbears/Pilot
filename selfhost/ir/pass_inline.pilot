@@ -1,0 +1,230 @@
+// ==============================================================================
+// FILE: selfhost/ir/pass_inline.pilot
+// PROP-007 step 2: inlining on PilIR.
+// ==============================================================================
+// A `call_direct` of a function marked `[Inline]` (a hint) or `[EngineOp]`
+// (forced: an engine op's one owner method, PROP-002a Amendment A1) is
+// replaced by a copy of the callee's blocks:
+//   - the block holding the call is cut at the call; what followed it moves
+//     to a new continuation block, whose one parameter is the call's own
+//     result value, so nothing after the call is renamed;
+//   - the callee's entry block takes the arguments (as its parameters are
+//     replaced by them, or, when something jumps back to the entry, as
+//     block arguments of the jump into it);
+//   - each `return` of the copy jumps to the continuation with the returned
+//     value (`undef` when the callee returns nothing and the call's result
+//     is still named).
+// Instruction order, `defer` exits, contracts and drops are the callee's own
+// instructions, copied unchanged, so they run exactly as the call ran them.
+// Each copied instruction keeps the callee's source offset.
+//
+// A function is never inlined into itself, nor when it reaches itself again
+// through calls of inline functions (that copy would never end). For a
+// forced function that is an error, INLINE002 (`inline_issues`), since the
+// owner's one caller must not pay for a call. A function value (`call_indirect`)
+// is not inlined: that needs devirtualisation, which is not built.
+//
+// The pass runs after type checking and the GATE021 source checks (the
+// source still shows the single caller) and on lowered IR, whose drops are
+// already explicit (selfhost/ir/lower_drop.pilot).
+pub lvl(0) pkg Pilot.SelfHost.Ir.PassInline;
+
+use selfhost.check.program.*;
+use selfhost.ir.model.*;
+use selfhost.ir.verify.*;
+use selfhost.ir.passes.*;
+
+/// The attribute that asks for a declaration's calls to be inlined.
+pub pure fn inline_attr() -> str => "Inline";
+/// The attribute of an engine op's owner method, whose calls are always inlined.
+pub pure fn engine_op_attr() -> str => "EngineOp";
+
+/// The inline mode of declaration `decl` (set on its `IrFunction` when it
+/// is lowered).
+pub fn decl_inline_mode(p: Program, decl: i64) -> u8 {
+    if prog_attr_args(p, decl, engine_op_attr()) != none { return ir_inline_forced(); }
+    if prog_attr_args(p, decl, inline_attr()) != none { return ir_inline_hint(); }
+    return ir_inline_none();
+}
+
+pub struct InlinePass : IPilIrPass {
+    pub fn name() -> str => "inline";
+    pub fn run(f: IrFunction, m: IrModule) -> bool => inline_calls(f, m);
+}
+
+/// The functions `g`'s body calls directly that are themselves inline.
+fn inline_callees(m: IrModule, g: IrFunction) -> List<u32> {
+    var out: List<u32> = [];
+    for b in g.blocks {
+        for inst in b.insts {
+            if inst.opcode == op_call_direct() && inst.subop < m.functions.len && m.functions[inst.subop].inline != ir_inline_none() {
+                out.push(inst.subop);
+            }
+        }
+    }
+    return out;
+}
+
+/// Whether function `g` reaches itself again through calls of inline
+/// functions (inlining it would never end).
+pub fn inline_recursive(m: IrModule, g: u32) -> bool {
+    var seen: List<bool> = [];
+    for _f in m.functions { seen.push(false); }
+    var work: List<u32> = inline_callees(m, m.functions[g]);
+    while work.len() > 0 {
+        let h = work.pop();
+        if h == g { return true; }
+        if seen[h] { continue; }
+        seen[h] = true;
+        for c in inline_callees(m, m.functions[h]) { work.push(c); }
+    }
+    return false;
+}
+
+/// The forced-inline functions of `m` that cannot be inlined (INLINE002).
+pub fn inline_issues(m: IrModule) -> List<IrIssue> {
+    var out: List<IrIssue> = [];
+    var i: u32 = 0;
+    while i < m.functions.len {
+        let g = m.functions[i];
+        if g.inline == ir_inline_forced() && inline_recursive(m, i) {
+            out.push(IrIssue { code: "INLINE002", function: g.name, message: "an `[EngineOp]` owner method must be inlined, but it calls itself again through inline calls" });
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// Whether the call `inst` is one to inline. A function calling itself is
+/// never inlined: if it is inline, `inline_recursive` holds for it.
+fn should_inline(m: IrModule, inst: IrInst) -> bool {
+    if inst.opcode != op_call_direct() || inst.subop >= m.functions.len { return false; }
+    let g = m.functions[inst.subop];
+    if g.inline == ir_inline_none() || g.blocks.len == 0 { return false; }
+    return !inline_recursive(m, inst.subop);
+}
+
+/// Inlines every call in `f` that should be; true when it inlined one.
+pub fn inline_calls(f: IrFunction, m: IrModule) -> bool {
+    var changed = false;
+    var b: u32 = 0;
+    while b < f.blocks.len {
+        var i = 0;
+        while i < f.blocks[b].insts.len {
+            let inst = f.blocks[b].insts[i];
+            if should_inline(m, inst) {
+                inline_one(f, m.functions[inst.subop], b, i);
+                changed = true;
+                // The rest of block `b` moved to the continuation, which is
+                // scanned when the loop reaches it.
+                i = f.blocks[b].insts.len;
+            } else {
+                i = i + 1;
+            }
+        }
+        b = b + 1;
+    }
+    return changed;
+}
+
+/// Adds `inst` with operands `args` to block `b` of `f`, keeping its source
+/// offset `span`.
+fn put(f: IrFunction, b: u32, result: u32, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, span: i64) {
+    let offset = f.operand_pool.len;
+    for a in args { f.operand_pool.push(a); }
+    f.spans.push(span);
+    f.blocks[b].insts.push(ir_inst_new(result, op, sub, phy, offset, args.len, f.spans.len - 1));
+}
+
+/// Whether some block of `g` jumps to its entry block.
+fn entry_has_preds(g: IrFunction) -> bool {
+    for blk in g.blocks {
+        for inst in blk.insts {
+            if opcode_is_terminator(inst.opcode) {
+                for s in ir_successors(g, inst) { if s == 0 { return true; } }
+            }
+        }
+    }
+    return false;
+}
+
+/// Replaces the call at position `at` of block `b` of `f` by a copy of `g`.
+fn inline_one(f: IrFunction, g: IrFunction, b: u32, at: i64) {
+    let call = f.blocks[b].insts[at];
+    let call_args = ir_args(f, call);
+    let call_span = f.spans[call.span_id];
+    // The continuation: everything after the call, entered with its result.
+    let cont = ir_add_block(f);
+    if call.result != ir_no_value() { f.blocks[cont].params.push(call.result); }
+    var j = at + 1;
+    while j < f.blocks[b].insts.len {
+        f.blocks[cont].insts.push(f.blocks[b].insts[j]);
+        j = j + 1;
+    }
+    var head: List<IrInst> = [];
+    j = 0;
+    while j < at {
+        head.push(f.blocks[b].insts[j]);
+        j = j + 1;
+    }
+    f.blocks[b].insts = head;
+    // Callee block -> its copy; callee value -> the caller's value.
+    var block_map: List<u32> = [];
+    for _gb in g.blocks { block_map.push(ir_add_block(f)); }
+    var value_map: List<u32> = [];
+    for phy in g.value_physics { value_map.push(ir_new_value(f, phy)); }
+    let pass_args = entry_has_preds(g);
+    if pass_args {
+        for v in g.blocks[0].params { f.blocks[block_map[0]].params.push(value_map[v]); }
+    } else {
+        var p = 0;
+        while p < g.blocks[0].params.len && p < call_args.len() {
+            value_map[g.blocks[0].params[p]] = call_args[p];
+            p = p + 1;
+        }
+    }
+    var gb: u32 = 0;
+    while gb < g.blocks.len {
+        let src = g.blocks[gb];
+        let dst = block_map[gb];
+        if gb > 0 {
+            for v in src.params { f.blocks[dst].params.push(value_map[v]); }
+        }
+        for inst in src.insts {
+            let span = g.spans[inst.span_id];
+            var a = ir_args(g, inst);
+            for pos in value_positions(g, inst) { a[pos] = value_map[a[pos]]; }
+            if inst.opcode == op_return() {
+                var out: List<u32> = [cont];
+                if call.result != ir_no_value() {
+                    if a.len() > 0 {
+                        out.push(a[0]);
+                    } else {
+                        let u = ir_new_value(f, g.ret_physics);
+                        put(f, dst, u, op_undef(), 0, g.ret_physics, [], span);
+                        out.push(u);
+                    }
+                }
+                put(f, dst, ir_no_value(), op_jump(), 0, inst.physics, out, span);
+                continue;
+            }
+            if inst.opcode == op_jump() {
+                a[0] = block_map[a[0]];
+            } else if inst.opcode == op_cond_br() {
+                a[1] = block_map[a[1]];
+                a[3 + a[2]] = block_map[a[3 + a[2]]];
+            } else if inst.opcode == op_switch_table() {
+                var t = 1;
+                while t < a.len() { a[t] = block_map[a[t]]; t = t + 1; }
+            }
+            let result = if inst.result != ir_no_value() { value_map[inst.result] } else { ir_no_value() };
+            put(f, dst, result, inst.opcode, inst.subop, inst.physics, a, span);
+        }
+        gb = gb + 1;
+    }
+    // Into the copy of the entry block.
+    let entry_args: List<u32> = if pass_args { call_args } else { [] };
+    var jump_args: List<u32> = [block_map[0]];
+    for v in entry_args { jump_args.push(v); }
+    put(f, b, ir_no_value(), op_jump(), 0, call.physics, jump_args, call_span);
+}

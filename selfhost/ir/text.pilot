@@ -12,7 +12,7 @@
 //   intrinsic <index> <engine operation>
 //   global <index> "<name>" <layout> [ready]
 //   record <layout> <field layout>..        (a struct layout's fields, in order)
-//   fn <index> "<name>" [once] -> <return layout> {
+//   fn <index> "<name>" [once] [inline|inline_forced] -> <return layout> {
 //     b<id>(v<n>:<layout>, ..):
 //       [v<n> =] <opcode>[.<subop>] <operands> :<layout> !<source offset>
 //   }
@@ -137,7 +137,7 @@ pub fn print_ir_module(m: IrModule) -> str {
     i = 0;
     while i < m.functions.len {
         let f = m.functions[i];
-        lines.push(f"fn {i} " + quote_text(f.name) + (if f.once { " once" } else { "" }) + f" -> {f.ret_physics.layout_id}" + " {");
+        lines.push(f"fn {i} " + quote_text(f.name) + (if f.once { " once" } else { "" }) + (if f.inline != ir_inline_none() { " " + ir_inline_word(f.inline) } else { "" }) + f" -> {f.ret_physics.layout_id}" + " {");
         for b in f.blocks {
             var params: List<str> = [];
             for v in b.params { params.push(value_ref(v) + f":{f.value_physics[v].layout_id}"); }
@@ -379,11 +379,15 @@ fn set_value_physics(f: IrFunction, v: u32, phy: IrTypePhysics) {
 }
 
 fn parse_function(r: Reader, w: List<str>) {
-    let once = w.len() == 7 && w[3] == "once";
-    let at = if once { 4 } else { 3 };
-    if w.len() != at + 3 || w[at] != "->" || w[at + 2] != "{" { let _ = fail(r, "expected `fn <index> \"<name>\" [once] -> <layout> {`"); return; }
+    var at = 3;
+    let once = w.len() > at && w[at] == "once";
+    if once { at = at + 1; }
+    let mode = if w.len() > at { ir_inline_of_word(w[at]) } else { 255 };
+    if mode != 255 { at = at + 1; }
+    if w.len() != at + 3 || w[at] != "->" || w[at + 2] != "{" { let _ = fail(r, "expected `fn <index> \"<name>\" [once] [inline|inline_forced] -> <layout> {`"); return; }
     let f = ir_function_new(unquote(w[2]), layout_physics(r, number(r, w[at + 1], "")));
     f.once = once;
+    if mode != 255 { f.inline = mode; }
     r.m.functions.push(f);
     var b: u32 = 0;
     var has_block = false;

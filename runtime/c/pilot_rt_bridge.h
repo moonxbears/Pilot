@@ -453,9 +453,16 @@ static inline pilot_val pilot_host_op(
     case 38: { /* OsRandom */
         int fd = open("/dev/urandom", O_RDONLY);
         if (fd < 0) return pilot_v_int(pilot_errno_map(errno));
-        ssize_t r = read(fd, (void *)(uintptr_t)a0, (size_t)a1);
+        /* Frozen ABI (PROP-002a §3): returns the number of bytes written. */
+        size_t done = 0;
+        while (done < (size_t)a1) {
+            ssize_t r = read(fd, (uint8_t *)(uintptr_t)a0 + done, (size_t)a1 - done);
+            if (r < 0 && errno == EINTR) continue;
+            if (r <= 0) { int e = errno; close(fd); return pilot_v_int(r < 0 ? pilot_errno_map(e) : -51); }
+            done += (size_t)r;
+        }
         close(fd);
-        return pilot_v_int(r >= 0 ? 0 : pilot_errno_map(errno));
+        return pilot_v_int((int64_t)done);
     }
     case 39: { /* NetSocket */
         int dom = a0 == 2 ? AF_INET6 : AF_INET;

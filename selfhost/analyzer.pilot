@@ -1150,11 +1150,12 @@ pub fn verify_ownership_and_perceus(i: i64, node_count: i64) -> i64 {
     }
     return 0;
 }
-/// INLINE001: `[Inline]` is accepted but no engine inlines yet (`PROP-007`).
-/// Reported so a reader never assumes a call was removed.
+/// INLINE001: `[Inline]` is honoured on PilIR and `--emit c`
+/// (selfhost/ir/pass_inline.pilot) but not yet on the seed (`PROP-007` step 4).
+/// Reported so a reader never assumes a seed call was removed.
 pub fn verify_inline_hint(i: i64) -> i64 {
     if has_attr_named(i, "Inline") {
-        emit_diag(i, 2, "INLINE001: '[Inline]' is not implemented yet; calls to this declaration are not inlined");
+        emit_diag(i, 2, "INLINE001: '[Inline]' is not honoured by the seed engine yet; PilIR and `--emit c` inline calls to this declaration, the seed still calls it");
     }
     return 0;
 }

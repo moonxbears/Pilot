@@ -13,6 +13,11 @@
 // checks `pilot run`: its output, its diagnostics and runtime errors, and
 // its exit code.
 //
+// A case with a `<stem>.ir.inlined` file (one function name per line) is
+// also run as `pilot ir opt <case>`: each named function must be in the
+// optimised module, and no `call_direct` in it may still call it, so every
+// call to it was inlined (selfhost/ir/pass_inline.pilot).
+//
 // A case whose lowering or run stops at a registered `ir.*` seam is counted
 // as stopped at a seam: neither passed nor failed. Every other difference is
 // a failure. The other cases are counted as not eligible.
@@ -71,6 +76,57 @@ fn run_all(programs: List<str>, mode: str) -> List<proc.ProcessOutput> {
     return proc.run_all(jobs);
 }
 
+/// The extension of the list of functions whose calls must be inlined.
+pub pure fn ir_inlined_ext() -> str => ".ir.inlined";
+
+/// The text after `prefix` in `line` up to the next space or `"`.
+fn word_after(line: str, prefix: str) -> str {
+    let at = line.find(prefix, 0);
+    if at < 0 { return ""; }
+    var end = at + prefix.len();
+    while end < line.len() && line.byte_at(end as usize) != 32 && line.byte_at(end as usize) != 34 { end = end + 1; }
+    return line.slice(at + prefix.len(), end);
+}
+
+/// The problems with `opt`, the `pilot ir opt` output of a case, given the
+/// functions `wanted` whose calls must all be inlined.
+pub fn inlined_problems(opt: proc.ProcessOutput, wanted: List<str>) -> List<str> {
+    var problems: List<str> = [];
+    if opt.exit_code != 0 { return [f"`pilot ir opt` failed\n--- stderr ---\n{opt.stderr}"]; }
+    // Each `fn <index> "<name>" ...` line's index and name.
+    var indices: List<str> = [];
+    var all_names: List<str> = [];
+    var called: List<str> = [];
+    for line in test_lines(opt.stdout) {
+        if line.starts_with("fn ") {
+            let q = line.find("\"", 0);
+            let q2 = line.find("\"", q + 1);
+            if q > 0 && q2 > q {
+                indices.push(line.slice(3, q - 1));
+                all_names.push(line.slice(q + 1, q2));
+            }
+        } else {
+            let callee = word_after(line, "call_direct.");
+            if callee != "" { called.push(callee); }
+        }
+    }
+    for name in wanted {
+        var found = false;
+        for n in all_names { if n == name { found = true; } }
+        if !found { problems.push(f"`{name}` is not in the optimised module"); continue; }
+        var hit = false;
+        for c in called {
+            var j = 0;
+            while j < indices.len() {
+                if indices[j] == c && all_names[j] == name { hit = true; }
+                j = j + 1;
+            }
+        }
+        if hit { problems.push(f"a call to `{name}` is not inlined"); }
+    }
+    return problems;
+}
+
 fn stopped_at_seam(out: proc.ProcessOutput) -> bool =>
     out.stderr.find(seam_code(), 0) >= 0 && out.stderr.find(ir_seam_prefix(), 0) >= 0;
 
@@ -102,6 +158,12 @@ pub fn test_ir_command(paths: List<str>, filter: str) -> i64 {
         }
     }
     let runs = run_all(cases, "run-roundtrip");
+    // The cases that name functions whose calls must be inlined.
+    var opt_cases: List<str> = [];
+    for c in cases {
+        if File.exists(test_stem(c) + ir_inlined_ext()) { opt_cases.push(c); }
+    }
+    let opts = run_all(opt_cases, "opt");
     var i = 0;
     while i < cases.len() {
         let out = runs[i];
@@ -112,6 +174,16 @@ pub fn test_ir_command(paths: List<str>, filter: str) -> i64 {
             fail(cases[i], [f"the PilIR text does not round-trip\n--- stderr ---\n{out.stderr}"], tally);
         } else {
             let r = test_check_case(cases[i], out);
+            var k = 0;
+            while k < opt_cases.len() {
+                if opt_cases[k] == cases[i] {
+                    let wanted = test_lines(File.read_text(test_stem(cases[i]) + ir_inlined_ext()));
+                    var named: List<str> = [];
+                    for w in wanted { if w.trim().len() > 0 { named.push(w.trim()); } }
+                    for p in inlined_problems(opts[k], named) { r.problems.push(p); }
+                }
+                k = k + 1;
+            }
             if r.problems.len == 0 {
                 tally.passed = tally.passed + 1;
             } else {

@@ -380,6 +380,7 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/pass_fold.pilot",
         "selfhost/ir/pass_dce.pilot",
         "selfhost/ir/pass_const_eval.pilot",
+        "selfhost/ir/pass_inline.pilot",
         "selfhost/ir/text.pilot",
         "selfhost/ir/fault.pilot",
         "selfhost/ir/interp.pilot",

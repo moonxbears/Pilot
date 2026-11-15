@@ -1,6 +1,7 @@
-// `[Inline]` is accepted, but no engine inlines calls yet (PROP-007), so the
-// checker reports warning[INLINE001] once, at the marked declaration, and the
-// program still runs: twice(21) = 42.
+// `[Inline]` is honoured on PilIR and `--emit c` (selfhost/ir/pass_inline.pilot)
+// but not yet on the seed engine (PROP-007 step 4), so the checker reports
+// warning[INLINE001] once, at the marked declaration, and the program still
+// runs the same on every engine: twice(21) = 21 * 2 = 42.
 [Inline]
 fn twice(x: i64) -> i64 => x * 2;
 

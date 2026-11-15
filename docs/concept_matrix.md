@@ -13,7 +13,7 @@ Per [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §1
 
 | Column | Meaning |
 | :--- | :--- |
-| **ID & Concept** | Canonical concept identifier (`C01`–`C40`) and architectural name. |
+| **ID & Concept** | Canonical concept identifier (`C01`–`C41`) and architectural name. |
 | **Surface / Mechanism** | Symbolic syntax, readable pairing ([`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §2.10), or compiler invariant. |
 | **S / I / C** | Verified behavior on **S**eed (`pilot run`), **I**R (`pilot test --ir`), and emitted **C** (`pilot test --emit c`): `ok` = verified passing, `part` = core subset works with documented limits, `seam` = traps loudly at `SEAM001`, `tool` = CLI/compiler-host capability rather than per-expression codegen. |
 | **Verdict** | `REAL` (end-to-end across engines), `PARTIAL` (working core with tracked gaps/limits), `SEAM` (explicit `SEAM001` boundary), or `MIGRATING` (works today while legacy Rust shims are queued in [`proposals.md`](file:///home/moony/Documents/dev/projects/Pilot/proposals.md)). |
@@ -23,12 +23,12 @@ Per [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §1
 
 ---
 
-## Summary (`40` Tracked Concepts)
+## Summary (`41` Tracked Concepts)
 
 | Verdict | Count | Meaning |
 | :--- | ---: | :--- |
 | `REAL` | `26` | Proven end-to-end across engines (`ok / ok / ok` or verified CLI tool gate) with passing + failing tests. |
-| `PARTIAL` | `9` | Real working implementation with explicit, documented scope limits or open `known_bugs`. |
+| `PARTIAL` | `10` | Real working implementation with explicit, documented scope limits or open `known_bugs`. |
 | `MIGRATING` | `3` | Enforced in part today, with Airlock / Stage-3 cutover queued in [`proposals.md`](file:///home/moony/Documents/dev/projects/Pilot/proposals.md). |
 | `SEAM` | `2` | Intentionally stops at a registered `SEAM001` boundary until scheduled milestone wiring. |
 
@@ -113,10 +113,11 @@ Per [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §1
 
 ---
 
-## 7. Compiler-as-a-Library (`PilotDb`, Lossless CST) & Unified Toolchain (`C38`–`C40`)
+## 7. Compiler-as-a-Library (`PilotDb`, Lossless CST) & Unified Toolchain (`C38`–`C41`)
 
 | ID & Concept | Surface / Mechanism | S | I | C | Verdict | Owning Pilot Modules | Legacy Rust Residual | Verified Conformance, Codes & Notes |
 | :--- | :--- | :-: | :-: | :-: | :--- | :--- | :--- | :--- |
 | **C38. Incremental `PilotDb` & Module Loader** | Red-green content-addressed query memoization, `pkg`/`use` DAG | tool | tool | tool | `MIGRATING` | `selfhost/db/{query_db,persistence}.pilot`, `selfhost/loader/module_graph.pilot`, `stdlib/pilot/db.pilot` | `parse_header` in `modules.rs`/`host.rs` (`PROP-003`) | Multi-unit linking verified across all 3 engines (`modules/modules`, `modules/start_order`, `modules/err_import_cycle`). |
 | **C39. Lossless Green/Red CST, `fmt`, `--fix` & `migrate`** | 100% trivia/comment conservation, Wadler-Lindig formatter, `[Migrate]` codemods | tool | tool | tool | `REAL` | `selfhost/cst/{tree,lexer,parser,autofix}.pilot`, `selfhost/fmt/*`, `selfhost/migrate/migrator.pilot` | `0` (100% pure Pilot) | Executed via `pilot fmt`, `pilot check --fix`, and `pilot migrate` with comment-conservation checks. |
 | **C40. Unified `pilot` CLI, LSP, DAP, `inspect`, `mcp` & `gate`** | Open `CommandRegistry`, JSON-RPC IDE/AI servers, 3-Gate repository verifier | tool | tool | tool | `REAL` | `selfhost/cli/*`, `selfhost/lsp/*`, `selfhost/dap/*`, `selfhost/inspect/*`, `selfhost/mcp/*`, `selfhost/gate/*`, `tools/*` | Thin `.pilc` bootstrap in `crates/pilot-cli/` (`6` files) | Every subcommand routes through `selfhost/cli/main.pilot`; `pilot gate --full` enforces `MOD001`, `ENGINE001`, `SEAM001`, and `keyword_matrix.md`. |
+| **C41. Call Inlining (`[Inline]`, `[EngineOp]`)** | `[Inline]` hint and forced inlining of each engine op's one owner method, after type checking and `GATE021` | part | ok | ok | `PARTIAL` | `selfhost/ir/pass_inline.pilot`, `selfhost/ir/{model,text,passes}.pilot`, `selfhost/cli/test_ir.pilot` (`.ir.inlined`) | Seed lowering is `PROP-007` step 4 (needs approval) | `ir/inline_calls` passes on all 3 engines and its `.ir.inlined` list checks no call remains on PilIR; the seed still makes real calls (`INLINE001`, `warnings/warn_inline_not_implemented`); `INLINE002` stops a recursive forced inline; trace provenance, `pilot inspect` and the PilotDb dependency are `SPEC` in `wiring.pilot`. |

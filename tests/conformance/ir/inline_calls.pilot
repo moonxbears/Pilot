@@ -1,0 +1,52 @@
+// PROP-007 step 2: calls to `[Inline]` functions and to `[EngineOp]` owner
+// methods are inlined on PilIR and `--emit c` (selfhost/ir/pass_inline.pilot),
+// and the program means the same on every engine. `inline_calls.ir.inlined`
+// names the functions no call may remain to after `pilot ir opt`.
+//
+// Expected output, worked by hand:
+//   pick(true, 3, 4)  -> the `if` branch returns a          = 3
+//   pick(false, 3, 4) -> falls through to `return b`        = 4
+//   sum_to(10)        -> loop 1 + 2 + .. + 10 = 10 * 11 / 2  = 55
+//   say(7)            -> a unit function that prints 7      = 7
+//   twice(twice(5))   -> an inline call inside an inline call: (5 * 2) * 2 = 20
+//   RawMem: store 99 as 64 bits at p, load it back signed    = 99
+//     (alloc/store_int/load_int each call their `[EngineOp]` owner, which is
+//     inlined into them)
+use Pilot.Core.HostRaw;
+
+[Inline]
+fn pick(c: bool, a: i64, b: i64) -> i64 {
+    if c { return a; }
+    return b;
+}
+
+[Inline]
+fn sum_to(n: i64) -> i64 {
+    var s = 0;
+    var i = 1;
+    while i <= n {
+        s = s + i;
+        i = i + 1;
+    }
+    return s;
+}
+
+[Inline]
+fn say(x: i64) { print(x); }
+
+[Inline]
+fn twice(x: i64) -> i64 => x * 2;
+
+[Inline]
+fn quad(x: i64) -> i64 => twice(twice(x));
+
+fn main() {
+    print(pick(true, 3, 4));
+    print(pick(false, 3, 4));
+    print(sum_to(10));
+    say(7);
+    print(quad(5));
+    let p = RawMem.alloc(16, 8);
+    let _ = RawMem.store_int(p, 99, 64);
+    print(RawMem.load_int(p, 64, 1));
+}

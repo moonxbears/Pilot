@@ -345,7 +345,22 @@ pub struct IrFunction : IObject {
     /// zero-argument `pure` function): its result may be computed once and
     /// shared (selfhost/ir/pass_const_eval.pilot).
     pub once:          bool;
+    /// How calls to it are inlined (selfhost/ir/pass_inline.pilot):
+    /// `ir_inline_none()`, `ir_inline_hint()` (`[Inline]`) or
+    /// `ir_inline_forced()` (an `[EngineOp]` owner method).
+    pub inline:        u8;
 }
+
+pub pure fn ir_inline_none()   -> u8 => 0;
+pub pure fn ir_inline_hint()   -> u8 => 1;
+pub pure fn ir_inline_forced() -> u8 => 2;
+
+/// The word `pilot ir print` writes after a function's name for inline mode
+/// `mode` (empty for none); `ir_inline_of_word` reads it back.
+pub fn ir_inline_word(mode: u8) -> str => if mode == ir_inline_hint() { "inline" } else if mode == ir_inline_forced() { "inline_forced" } else { "" };
+
+/// The inline mode written as `w`, or 255 when `w` names none.
+pub fn ir_inline_of_word(w: str) -> u8 => if w == "inline" { ir_inline_hint() } else if w == "inline_forced" { ir_inline_forced() } else { 255 };
 
 /// A layout the module's values use, named for printing.
 pub struct IrLayout : IValue {
@@ -427,7 +442,7 @@ pub fn ir_add_record(m: IrModule, rec: IrRecord) {
 }
 
 pub fn ir_function_new(name: str, ret: IrTypePhysics) -> IrFunction {
-    return IrFunction { name: name, ret_physics: ret, blocks: [], operand_pool: [], value_physics: [], spans: [], once: false };
+    return IrFunction { name: name, ret_physics: ret, blocks: [], operand_pool: [], value_physics: [], spans: [], once: false, inline: 0 };
 }
 
 /// Adds an empty block to `f` and returns its id.

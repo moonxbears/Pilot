@@ -812,6 +812,13 @@ pub let ERRORS = [
         reference: "Perceus Drop-Reuse Token Safety / Milestone 6",
     },
     ErrorDef {
+        code: "INLINE002",
+        title: "Forced Inline Impossible",
+        description: "An `[EngineOp]` owner method must be inlined into its caller, but it reaches itself again through inline calls",
+        category: "PilIR",
+        reference: "proposals.md PROP-007 step 2 / PROP-002a Amendment A1",
+    },
+    ErrorDef {
         code: "INSP001",
         title: "Inspection Target Not Found",
         description: "The specified file, cursor position, or symbol path could not be resolved in the workspace",

@@ -451,10 +451,13 @@ pub fn wiring_ledger() -> List<Capability> {
 
         // M13 calling conventions
         cap("M13", "native trampoline (SysV, Win64)", ::Core, "crates/pilot-vm/src/bridge.rs (HostOp::FfiCall = 46) and c_abi.rs; test_m13_3 calls real native functions", ""),
-        cap("PROP-002a", "Model B+ airlock and 51 HostOps", ::Wired, "stdlib/core/{bridge_lang,os_abi}.pilot + crates/pilot-vm/src/bridge.rs; verified by 7 err_bridge_*_seam suites and GATE021 (selfhost/gate/airlock_abi.pilot); runtime/host_ops (was runtime/bridge_os) had a TYPE001 on byte_at, fixed but not yet rerun", ""),
+        cap("PROP-002a", "Model B+ airlock and 51 HostOps", ::Wired, "stdlib/core/{bridge_lang,os_abi}.pilot + crates/pilot-vm/src/bridge.rs; verified by 7 err_bridge_*_seam suites and GATE021 (selfhost/gate/airlock_abi.pilot); runtime/host_ops (was runtime/bridge_os) passes on pilot test, --ir and --emit c (2026-11-15, after runtime/c/pilot_rt_bridge.h OsRandom returned 0 instead of the byte count)", ""),
         cap("PROP-002a A1", "one op, one owner: each HostOp in one [EngineOp] owner method", ::Wired, "stdlib/core/{host_raw,file,env}.pilot owners; GATE021 checks 1-4 in selfhost/gate/airlock_abi.pilot, shown failing on a duplicate op site, a missing [EngineOp] and an unlisted native binding", ""),
         cap("PROP-002a A1", "GATE021 check 5: one implementing *Bundle per engine-backed interface", ::Spec, "not built; lands with MapStorageBundle in PROP-002b", ""),
-        cap("PROP-007", "[Inline] honoured by an engine", ::Spec, "no engine inlines; [Inline] reports INLINE001 (warnings/warn_inline_not_implemented)", ""),
+        cap("PROP-007", "[Inline] and [EngineOp] calls inlined on PilIR and --emit c", ::Wired, "selfhost/ir/pass_inline.pilot (first of default_passes; the call's block is cut, the callee's blocks copied, each return jumps to the continuation); ir/inline_calls passes on pilot test, --ir and --emit c, and its .ir.inlined list fails all 8 names when the pass is unregistered; INLINE002 stops a forced inline that recurses", ""),
+        cap("PROP-007", "[Inline] on the seed engine", ::Spec, "step 4 (crates/pilot-vm/src/lower_call.rs) needs an approved file list; the seed still calls, and INLINE001 says so (warnings/warn_inline_not_implemented)", ""),
+        cap("PROP-007", "inline provenance in traces and the debugger", ::Spec, "copied instructions keep the callee's source offset, but a runtime error inside inlined code is reported in the caller's frame", ""),
+        cap("PROP-007", "inlining shown in pilot inspect and as a PilotDb dependency", ::Spec, "only `pilot ir print` / `pilot ir opt` show it (the `inline` / `inline_forced` function marks and the removed calls)", ""),
         cap("M13", "calling-convention descriptors and registry", ::Core, "test_m13_1, test_m13_2", ""),
         cap("M13", "SysV eightbyte classification", ::Core,
             "stdlib/pilot/abi/sysv_x64.pilot:36; test_m13_1 checks psABI 3.2.3 answers", "abi.aggregate_fields"),

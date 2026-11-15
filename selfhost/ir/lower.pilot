@@ -45,6 +45,7 @@ use selfhost.ir.lower_spread.*;
 use selfhost.ir.lower_tail.*;
 use selfhost.ir.lower_view.*;
 use selfhost.ir.lower_quote.*;
+use selfhost.ir.pass_inline.*;
 use std.text;
 
 /// The state of one lowering run.
@@ -454,6 +455,7 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
     // generator) gives the same value every call.
     f.once = kind(s, decl) == nk_fn() && is_pure_decl(s, decl) && fn_params(s, decl).len() == 0
         && !ty_is_named(lw.inf.p.tt, lw.queue_self[idx]) && lw.queue_body[idx] < 0 && !creator && !resume;
+    f.inline = decl_inline_mode(lw.inf.p, decl);
     lw.ret_type = if annot(s, decl) >= 0 { prog_annot_type(lw.inf.p, annot(s, decl)) } else if lw.queue_body[idx] < 0 && kind(s, decl) != nk_lambda() { inferred_return(lw, decl) } else { ty_unknown() };
     f.ret_physics = if annot(s, decl) >= 0 { physics_of_type_node(lw, annot(s, decl)) } else { layout_of(lw.ls, lw.ret_type) };
     if resume { begin_resume(lw, decl); }

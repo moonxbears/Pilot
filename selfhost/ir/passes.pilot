@@ -16,6 +16,7 @@ use selfhost.ir.verify.*;
 use selfhost.ir.pass_fold.*;
 use selfhost.ir.pass_dce.*;
 use selfhost.ir.pass_const_eval.*;
+use selfhost.ir.pass_inline.*;
 
 /// A PilIR rewrite.
 pub interface IPilIrPass {
@@ -38,11 +39,12 @@ pub fn pass_registry_new() -> PassRegistry => PassRegistry { passes: [], compute
 pub fn pass_register(r: PassRegistry, p: IPilIrPass) { r.passes.push(p); }
 
 /// The passes `pilot ir opt` and `pilot ir run` apply: computing functions
-/// that take nothing, then constant folding (with branch folding), then
-/// dead-code elimination.
+/// that take nothing, then inlining (`[Inline]` and `[EngineOp]`), then
+/// constant folding (with branch folding), then dead-code elimination.
 pub fn default_passes() -> PassRegistry {
     let r = pass_registry_new();
     r.computes_constants = true;
+    pass_register(r, InlinePass {});
     pass_register(r, ConstFoldPass {});
     pass_register(r, DeadCodePass {});
     return r;
@@ -54,6 +56,9 @@ pure fn max_pass_rounds() -> i64 => 64;
 /// Runs the passes of `r` over every function of `m` until none changes
 /// anything; returns the issues that stopped it (empty when it finished).
 pub fn run_passes(m: IrModule, r: PassRegistry) -> List<IrIssue> {
+    // A forced inline that cannot happen stops the build (INLINE002).
+    let not_inlined = inline_issues(m);
+    if not_inlined.len() > 0 { return not_inlined; }
     // Functions that take nothing are computed while compiling first
     // (selfhost/ir/pass_const_eval.pilot); the passes below fold what that
     // leaves constant.
