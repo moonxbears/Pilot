@@ -13,7 +13,7 @@ use Pilot.Core.Interfaces.*;
 // `ir.absent_as_null`): dropping an option drops its payload, the type of
 // `val`, unless `is_null` says it is none (selfhost/check/drops.pilot).
 comptime {
-    __engine("bind_owned_payload", nameof(option), nameof(val), "is_null");
+    bind_owned_payload(nameof(option), nameof(val), "is_null");
 }
 
 [Lang(Cfg.Lang.opt_t), Layout(c_abi)]

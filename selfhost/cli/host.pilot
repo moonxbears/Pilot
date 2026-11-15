@@ -102,6 +102,7 @@ pub fn host_text_tool(path: str, files: List<str>, entry: str) -> i64 =>
 /// the flags of `[Live]`, `builtins/native_calls.pilot` the functions the
 /// engines answer themselves (a quote's names are checked against them).
 pub fn cli_checker_decls() -> List<str> => [
+    "stdlib/core/bridge_lang.pilot",
     "stdlib/core/core.pilot",
     "stdlib/core/operator.pilot",
     "stdlib/core/primitives",

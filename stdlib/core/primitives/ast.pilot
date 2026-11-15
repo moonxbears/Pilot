@@ -39,12 +39,12 @@ use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
 
 comptime {
-    __engine("bind_operator_fn", "quote", nameof(ast_decode));
-    __engine("bind_operator_fn", "quote hole", nameof(ast_fill));
-    __engine("bind_operator_fn", "quote lift", nameof(ast_lift_int));
-    __engine("bind_operator_fn", "quote lift", nameof(ast_lift_float));
-    __engine("bind_operator_fn", "quote lift", nameof(ast_lift_bool));
-    __engine("bind_operator_fn", "quote lift", nameof(ast_lift_str));
+    bind_operator_fn("quote", nameof(ast_decode));
+    bind_operator_fn("quote hole", nameof(ast_fill));
+    bind_operator_fn("quote lift", nameof(ast_lift_int));
+    bind_operator_fn("quote lift", nameof(ast_lift_float));
+    bind_operator_fn("quote lift", nameof(ast_lift_bool));
+    bind_operator_fn("quote lift", nameof(ast_lift_str));
 }
 
 /// A quoted piece of code whose value has type `TReturn`.

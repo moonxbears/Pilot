@@ -6,6 +6,7 @@
 // directly over `tcp_connect`, `tcp_send`, `tcp_recv`, and `tcp_close`.
 // ============================================================================
 
+use Pilot.Core.Env;
 use std.text;
 
 [Layout(c_abi)]
@@ -286,10 +287,10 @@ pub fn http_get(url: str) -> HttpResponse {
         + "Host: " + auth + "\r\n"
         + "Connection: close\r\n\r\n";
 
-    let fd = __engine("tcp_connect", auth);
-    __engine("tcp_send", fd, req);
-    let raw = "" + __engine("tcp_recv", fd, 65536);
-    __engine("tcp_close", fd);
+    let fd = TcpSocket.connect(auth);
+    let _ = TcpSocket.send(fd, req);
+    let raw = TcpSocket.recv(fd, 65536);
+    let _ = TcpSocket.close(fd);
     return http_parse_raw_response(raw);
 }
 
@@ -306,9 +307,9 @@ pub fn http_post(url: str, content_type: str, body: str) -> HttpResponse {
         + "Connection: close\r\n\r\n"
         + body;
 
-    let fd = __engine("tcp_connect", auth);
-    __engine("tcp_send", fd, req);
-    let raw = "" + __engine("tcp_recv", fd, 65536);
-    __engine("tcp_close", fd);
+    let fd = TcpSocket.connect(auth);
+    let _ = TcpSocket.send(fd, req);
+    let raw = TcpSocket.recv(fd, 65536);
+    let _ = TcpSocket.close(fd);
     return http_parse_raw_response(raw);
 }

@@ -76,8 +76,8 @@ pub pure fn range_member<T: IComparable<T>>(x: T, lo: T, hi: T) -> bool => x >= 
 pub pure fn range_member_inclusive<T: IComparable<T>>(x: T, lo: T, hi: T) -> bool => x >= lo && x <= hi;
 
 comptime {
-    __engine("bind_operator_fn", nameof(union),     nameof(seq_union));
-    __engine("bind_operator_fn", nameof(intersect), nameof(seq_intersect));
-    __engine("bind_operator_fn", nameof(except),    nameof(seq_except));
-    __engine("bind_membership", nameof(seq_member), nameof(range_member), nameof(range_member_inclusive));
+    bind_operator_fn(nameof(union),     nameof(seq_union));
+    bind_operator_fn(nameof(intersect), nameof(seq_intersect));
+    bind_operator_fn(nameof(except),    nameof(seq_except));
+    bind_membership(nameof(seq_member), nameof(range_member), nameof(range_member_inclusive));
 }

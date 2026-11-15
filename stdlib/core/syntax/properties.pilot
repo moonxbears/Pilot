@@ -10,13 +10,13 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 
 comptime {
-    __engine("bind_receptor", nameof(get), 23, 0);
-    __engine("bind_receptor", nameof(set), 24, 0);
-    __engine("bind_receptor", nameof(op),  25, 0);
+    bind_receptor(nameof(get), 23, 0);
+    bind_receptor(nameof(set), 24, 0);
+    bind_receptor(nameof(op),  25, 0);
 }
 
 pub syntax {
     get(body) => quote { $body };
     set(body) => quote { $body };
-    op(sig, body) => __engine("decl_operator_fn", sig, body);
+    op(sig, body) => decl_operator_fn(sig, body);
 }

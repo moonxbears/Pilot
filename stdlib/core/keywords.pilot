@@ -934,7 +934,7 @@ pub fn register_keyword_category_entry(
     badge:       str,
     lsp_kind:    i64
 ) -> i64 {
-    return __engine("register_keyword_category", category_id, tm_scope, badge, lsp_kind);
+    return register_keyword_category(category_id, tm_scope, badge, lsp_kind);
 }
 
 pub fn register_keyword_entry(
@@ -942,7 +942,7 @@ pub fn register_keyword_entry(
     word:        str,
     doc:         str
 ) -> i64 {
-    return __engine("register_keyword", category_id, word, doc);
+    return register_keyword(category_id, word, doc);
 }
 
 // =========================================================================

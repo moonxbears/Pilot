@@ -18,109 +18,118 @@ use Pilot.Core.Genesis.*;
 
 comptime {
     // Functions: `name(args)`.
-    __engine("bind_native_fn", nameof(print),   "rt_print");
-    __engine("bind_native_fn", nameof(println), "rt_print");
-    __engine("bind_native_fn", nameof(eprint),  "rt_eprint");
-    __engine("bind_native_fn", nameof(List),    "list_new");
-    __engine("bind_native_fn", nameof(Map),     "map_new");
+    bind_native_fn(nameof(print),   "rt_print");
+    bind_native_fn(nameof(println), "rt_print");
+    bind_native_fn(nameof(eprint),  "rt_eprint");
+    bind_native_fn(nameof(List),    "list_new");
+    bind_native_fn(nameof(Map),     "map_new");
     // `seam("id", "note")`: an intentionally unconnected entry or exit point.
     // It always fails; every call is listed in `selfhost/gate/ledger/seams.pilot`.
-    __engine("bind_native_fn", nameof(seam),    "seam_open");
+    bind_native_fn(nameof(seam),    "seam_open");
     // `fault("CODE: message")`: stops the program with the message as
     // written (stdlib/core/hint.pilot); never returns.
-    __engine("bind_native_fn", nameof(fault),   "rt_fault");
+    bind_native_fn(nameof(fault),   "rt_fault");
     // `from_utf8(bytes)`: the str whose UTF-8 bytes are `bytes` (each 0 to
     // 255), or none when they are not valid UTF-8 (RFC 3629).
-    __engine("bind_native_fn", nameof(from_utf8), "str_from_bytes");
+    bind_native_fn(nameof(from_utf8), "str_from_bytes");
+    // Stage-A generator & marshalling helpers bound for pure-Pilot callers:
+    bind_native_fn(nameof(__gen_resume),             "gen_resume");
+    bind_native_fn(nameof(__gen_done),               "gen_done");
+    bind_native_fn(nameof(__gen_close),              "gen_close");
+    bind_native_fn(nameof(__gen_current),            "gen_current");
+    bind_native_fn(nameof(str_copy_to_ptr),          "str_copy_to_ptr");
+    bind_native_fn(nameof(str_from_ptr),             "str_from_ptr");
+    bind_native_fn(nameof(vm_thread_entry_ptr),      "vm_thread_entry_ptr");
+    bind_native_fn(nameof(vm_callback_dispatch_ptr), "vm_callback_dispatch_ptr");
 
     // Methods on strings, lists and records: `value.name(args)`.
-    __engine("bind_native_method", nameof(len),         "str_len");
-    __engine("bind_native_method", nameof(get),         "map_get");
-    __engine("bind_native_method", nameof(set),         "map_set");
-    __engine("bind_native_method", nameof(has),         "map_has");
-    __engine("bind_native_method", nameof(keys),        "map_keys");
-    __engine("bind_native_method", nameof(remove),      "map_remove");
-    __engine("bind_native_method", nameof(push),        "list_push");
-    __engine("bind_native_method", nameof(pop),         "list_pop");
-    __engine("bind_native_method", nameof(remove_at),   "list_remove_at");
-    __engine("bind_native_method", nameof(trim),        "str_trim");
-    __engine("bind_native_method", nameof(to_str),      "to_str");
-    __engine("bind_native_method", nameof(byte_at),     "str_byte_at");
-    __engine("bind_native_method", nameof(slice),       "str_slice");
-    __engine("bind_native_method", nameof(substring),   "str_slice");
-    __engine("bind_native_method", nameof(find),        "str_find");
-    __engine("bind_native_method", nameof(index_of),    "str_find");
-    __engine("bind_native_method", nameof(replace),     "str_replace");
-    __engine("bind_native_method", nameof(contains),    "str_contains");
-    __engine("bind_native_method", nameof(starts_with), "str_starts_with");
-    __engine("bind_native_method", nameof(ends_with),   "str_ends_with");
-    __engine("bind_native_method", nameof(is_null),     "is_null");
+    bind_native_method(nameof(len),         "str_len");
+    bind_native_method(nameof(get),         "map_get");
+    bind_native_method(nameof(set),         "map_set");
+    bind_native_method(nameof(has),         "map_has");
+    bind_native_method(nameof(keys),        "map_keys");
+    bind_native_method(nameof(remove),      "map_remove");
+    bind_native_method(nameof(push),        "list_push");
+    bind_native_method(nameof(pop),         "list_pop");
+    bind_native_method(nameof(remove_at),   "list_remove_at");
+    bind_native_method(nameof(trim),        "str_trim");
+    bind_native_method(nameof(to_str),      "to_str");
+    bind_native_method(nameof(byte_at),     "str_byte_at");
+    bind_native_method(nameof(slice),       "str_slice");
+    bind_native_method(nameof(substring),   "str_slice");
+    bind_native_method(nameof(find),        "str_find");
+    bind_native_method(nameof(index_of),    "str_find");
+    bind_native_method(nameof(replace),     "str_replace");
+    bind_native_method(nameof(contains),    "str_contains");
+    bind_native_method(nameof(starts_with), "str_starts_with");
+    bind_native_method(nameof(ends_with),   "str_ends_with");
+    bind_native_method(nameof(is_null),     "is_null");
 
     // Properties: `value.name`, when the value has no field of that name.
-    __engine("bind_native_property", nameof(len), "str_len");
+    bind_native_property(nameof(len), "str_len");
 
     // Values: the program environment record.
-    __engine("bind_native_value", nameof(ENV), "get_env");
+    bind_native_value(nameof(ENV), "get_env");
 
     // Compile-time questions about a type argument.
-    __engine("bind_type_query", nameof(sizeof), "byte_size");
+    bind_type_query(nameof(sizeof), "byte_size");
     // Asked but not answered yet (docs/keyword_roadmap.md K4): the seed
     // stops each with SEED001 and PilIR at its lowering seam.
-    __engine("bind_type_query", nameof(alignof),   "byte_align");
-    __engine("bind_type_query", nameof(offsetof),  "field_offset");
-    __engine("bind_type_query", nameof(fields_of), "field_list");
+    bind_type_query(nameof(alignof),   "byte_align");
+    bind_type_query(nameof(offsetof),  "field_offset");
+    bind_type_query(nameof(fields_of), "field_list");
 
     // Members of a type the engine holds by itself, named per type: the
     // seed indexes its own lists directly; the PilIR lowering
     // (selfhost/ir/lower.pilot) reads these to name the engine operation.
-    __engine("bind_native_member", nameof(List), "[]",  "list_get");
-    __engine("bind_native_member", nameof(List), "[]=", "list_set");
-    __engine("bind_native_member", nameof(Map),  "[]",  "map_get");
-    __engine("bind_native_member", nameof(Map),  "[]=", "map_set");
+    bind_native_member(nameof(List), "[]",  "list_get");
+    bind_native_member(nameof(List), "[]=", "list_set");
+    bind_native_member(nameof(Map),  "[]",  "map_get");
+    bind_native_member(nameof(Map),  "[]=", "map_set");
     // The seed holds a slice as its own list; the PilIR lowering indexes it
     // the same way (stand-in `ir.engine_sequence_for`).
-    __engine("bind_native_member", nameof(slice), "[]",  "list_get");
+    bind_native_member(nameof(slice), "[]",  "list_get");
     // The seed holds a `map<K, V>` as its own map, read and written by key.
-    __engine("bind_native_member", nameof(map), "[]",  "map_get");
-    __engine("bind_native_member", nameof(map), "[]=", "map_set");
+    bind_native_member(nameof(map), "[]",  "map_get");
+    bind_native_member(nameof(map), "[]=", "map_set");
     // Membership (`x in y`) and native iteration (`for x in y`) per type.
-    __engine("bind_native_member", nameof(str), "in",      "str_contains");
-    __engine("bind_native_member", nameof(Map), "in",      "map_has");
-    __engine("bind_native_member", nameof(map), "in",      "map_has");
-    __engine("bind_native_member", nameof(Map), "for_seq", "map_keys");
-    __engine("bind_native_member", nameof(Map), "for_len", "str_len");
-    __engine("bind_native_member", nameof(Map), "for_get", "list_get");
-    __engine("bind_native_member", nameof(map), "for_seq", "map_keys");
-    __engine("bind_native_member", nameof(map), "for_len", "str_len");
-    __engine("bind_native_member", nameof(map), "for_get", "list_get");
-    __engine("bind_native_member", nameof(str), "for_len", "str_len");
-    __engine("bind_native_member", nameof(str), "for_get", "str_byte_at");
-    __engine("bind_native_member", nameof(List), "for_len", "str_len");
-    __engine("bind_native_member", nameof(List), "for_get", "list_get");
-    __engine("bind_native_member", nameof(slice), "for_len", "str_len");
-    __engine("bind_native_member", nameof(slice), "for_get", "list_get");
-    __engine("bind_native_member", "unpack_op", "6", "unpack");
-    __engine("bind_native_member", "unpack_op", "7", "unpack_pairs");
-    __engine("bind_native_member", "unpack_op", "8", "flat");
+    bind_native_member(nameof(str), "in",      "str_contains");
+    bind_native_member(nameof(Map), "in",      "map_has");
+    bind_native_member(nameof(map), "in",      "map_has");
+    bind_native_member(nameof(Map), "for_seq", "map_keys");
+    bind_native_member(nameof(Map), "for_len", "str_len");
+    bind_native_member(nameof(Map), "for_get", "list_get");
+    bind_native_member(nameof(map), "for_seq", "map_keys");
+    bind_native_member(nameof(map), "for_len", "str_len");
+    bind_native_member(nameof(map), "for_get", "list_get");
+    bind_native_member(nameof(str), "for_len", "str_len");
+    bind_native_member(nameof(str), "for_get", "str_byte_at");
+    bind_native_member(nameof(List), "for_len", "str_len");
+    bind_native_member(nameof(List), "for_get", "list_get");
+    bind_native_member(nameof(slice), "for_len", "str_len");
+    bind_native_member(nameof(slice), "for_get", "list_get");
+    bind_native_member("unpack_op", "6", "unpack");
+    bind_native_member("unpack_op", "7", "unpack_pairs");
+    bind_native_member("unpack_op", "8", "flat");
     // An operator with no PilIR instruction of its own runs as an engine
     // operation: `a ** b` (an integer power wraps; a float power is `powf`).
-    __engine("bind_operator_intrinsic", "**", "num_pow");
+    bind_operator_intrinsic("**", "num_pow");
     // The test for an absent value (`a ?? b`): the seed holds none as its
     // null (stand-in `ir.absent_as_null`).
-    __engine("bind_absent_test", "is_null");
+    bind_absent_test("is_null");
     // `x[a..b]` (and `x[a..=b]`, one further): the seed slices a string or a
     // list with one engine operation, from `a` up to `b`.
-    __engine("bind_range_index", "str_slice");
+    bind_range_index("str_slice");
     // Slice patterns (`[a, ..rest, z]`): a list's length, its element at an
     // index, and its part between two indices. Record patterns on a value
     // that is no struct (`{ "key": p }`): whether a key is there, and its value.
-    __engine("bind_slice_pattern", "str_len", "list_get", "str_slice");
-    __engine("bind_record_pattern", "map_has", "map_get");
+    bind_slice_pattern("str_len", "list_get", "str_slice");
+    bind_record_pattern("map_has", "map_get");
     // A list literal `[a, b]` is `List()` followed by `push(a)`, `push(b)`.
-    __engine("bind_list_literal", nameof(List), nameof(push));
+    bind_list_literal(nameof(List), nameof(push));
     // Inside a list literal, `*xs` appends xs's elements and `*..xs` its
     // leaves at any depth: the engine's `list_extend(list, xs, deep)`.
-    __engine("bind_list_splat", nameof(List), "list_extend");
+    bind_list_splat(nameof(List), "list_extend");
     // A map literal `["k": v]` (or `{k: v}`) is `Map()` followed by `set(k, v)`.
-    __engine("bind_map_literal", nameof(Map), nameof(set));
+    bind_map_literal(nameof(Map), nameof(set));
 }

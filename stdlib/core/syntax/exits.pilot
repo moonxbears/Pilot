@@ -20,6 +20,6 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Exits;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("bind_receptor", nameof(errdefer), 38, 0);
-    __engine("bind_receptor", nameof(become),   39, 0);
+    bind_receptor(nameof(errdefer), 38, 0);
+    bind_receptor(nameof(become),   39, 0);
 }

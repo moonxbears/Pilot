@@ -10,6 +10,7 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 use Pilot.Core.Memory.*;
 use Pilot.Core.Meta.*;
+use Pilot.Core.File;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -402,7 +403,7 @@ pub pure fn dumps_package_json(version: str, indent: i64) -> str {
 
 /// Writes one generated artifact; true when the file was written.
 pub fn write_artifact(file_path: str, content: str) -> bool {
-    return __engine("fs_write_text", file_path, content) == true;
+    return File.write_text(file_path, content);
 }
 
 let _ide_method = __engine(Cfg.ast.lsp_query_method);

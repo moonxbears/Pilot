@@ -9,11 +9,11 @@ use Pilot.Core.Genesis.*;
 comptime {
     // `noalloc fn f()`: the function takes no heap memory (NOALLOC001,
     // selfhost/check/noalloc.pilot). It is no `async` effect.
-    __engine("register_modifier", nameof(noalloc), "effect_noalloc");
+    register_modifier(nameof(noalloc), "effect_noalloc");
     // Not built yet (docs/keyword_roadmap.md K8): where a declaration or
     // statement starts each stops at the seam `keyword.unbuilt`.
-    __engine("bind_receptor", nameof(priority), 40, 1);
-    __engine("bind_receptor", nameof(jitter),   40, 1);
+    bind_receptor(nameof(priority), 40, 1);
+    bind_receptor(nameof(jitter),   40, 1);
 }
 
 // The block forms below are not built yet (docs/keyword_roadmap.md phases K5

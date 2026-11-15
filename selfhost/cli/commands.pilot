@@ -288,6 +288,8 @@ pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
             paths = paths + "\"" + outs[k].replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
             k = k + 1;
         }
+        files.push("stdlib/core/os_abi.pilot");
+        files.push("stdlib/core/bridge_os.pilot");
         files.push("stdlib/core/file.pilot");
         return host_checked_tool(args[1], files, cli_ir_decls(), f"emit_program_checked_to([{dialects}], [{paths}]);");
     }

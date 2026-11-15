@@ -614,6 +614,36 @@ pub fn prog_engine_bindings(p: Program) -> List<List<str>> {
     return p.engine_memo[0];
 }
 
+fn is_bridge_bind_hook(name: str) -> bool {
+    return name == "bind_operator_fn"
+        || name == "bind_unit_literal"
+        || name == "bind_owned_elements"
+        || name == "bind_owned_payload"
+        || name == "bind_generator"
+        || name == "bind_try_protocol"
+        || name == "bind_lift"
+        || name == "bind_absent"
+        || name == "bind_membership"
+        || name == "bind_native_member"
+        || name == "bind_native_fn"
+        || name == "bind_native_method"
+        || name == "bind_native_property"
+        || name == "bind_native_value"
+        || name == "bind_type_query"
+        || name == "bind_operator_intrinsic"
+        || name == "bind_absent_test"
+        || name == "bind_range_index"
+        || name == "bind_slice_pattern"
+        || name == "bind_record_pattern"
+        || name == "bind_list_literal"
+        || name == "bind_list_splat"
+        || name == "bind_map_literal"
+        || name == "bind_format_spec"
+        || name == "bind_scalar_text"
+        || name == "bind_native_effect"
+        || name == "bind_enumerator";
+}
+
 fn scan_engine_bindings(p: Program) -> List<List<str>> {
     let s = p.s;
     var out: List<List<str>> = [];
@@ -625,16 +655,30 @@ fn scan_engine_bindings(p: Program) -> List<List<str>> {
         var c = lhs(s, n);
         let end = c + rhs(s, n);
         while c < end && s.extra[c] < 0 { c = c + 1; }
-        if c < end && kind(s, s.extra[c]) == ident_kind && node_name(s, s.extra[c]) == token {
-            let ch = children(s, n);
-            if ch.len() >= 3 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == engine_token() && engine_arg_text(p, ch[1]) != "" {
-                var row: List<str> = [];
-                var i = 1;
-                while i < ch.len() {
-                    row.push(engine_arg_text(p, ch[i]));
-                    i = i + 1;
+        if c < end && kind(s, s.extra[c]) == ident_kind {
+            let cname = node_name(s, s.extra[c]);
+            if cname == token {
+                let ch = children(s, n);
+                if ch.len() >= 3 && kind(s, ch[0]) == ident_kind && node_name(s, ch[0]) == token && engine_arg_text(p, ch[1]) != "" {
+                    var row: List<str> = [];
+                    var i = 1;
+                    while i < ch.len() {
+                        row.push(engine_arg_text(p, ch[i]));
+                        i = i + 1;
+                    }
+                    out.push(row);
                 }
-                out.push(row);
+            } else if is_bridge_bind_hook(cname) {
+                let ch = children(s, n);
+                if ch.len() >= 2 && kind(s, ch[0]) == ident_kind && node_name(s, ch[0]) == cname && engine_arg_text(p, ch[1]) != "" {
+                    var row: List<str> = [cname];
+                    var i = 1;
+                    while i < ch.len() {
+                        row.push(engine_arg_text(p, ch[i]));
+                        i = i + 1;
+                    }
+                    out.push(row);
+                }
             }
         }
     }

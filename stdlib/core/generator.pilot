@@ -19,7 +19,7 @@ comptime {
     // A generator function's call builds `generator_of(frame)` around a new
     // engine frame; `yield *xs` over a value that is not a `Generator`
     // walks `each_item(xs)`.
-    __engine("bind_generator", nameof(Generator), nameof(frame), nameof(generator_of), nameof(each_item));
+    bind_generator(nameof(Generator), nameof(frame), nameof(generator_of), nameof(each_item));
 }
 
 /// The frame of a suspended generator body. In PilIR it is the record the
@@ -39,39 +39,39 @@ pub struct Generator<TItem: IAnyValue, TSent: IAnyValue = void> : IObject, IEnum
     /// Runs the body to its next `yield` and gives that item, or `none` once
     /// the body has ended.
     pub fn next() -> TItem? {
-        let item: TItem = __engine("gen_resume", .frame, none);
-        if __engine("gen_done", .frame) { return none; }
+        let item: TItem = __gen_resume(.frame, none);
+        if __gen_done(.frame) { return none; }
         return item;
     }
 
     /// Like `next()`, with the waiting `yield` worth `v`. A generator that
     /// has not started yet has no `yield` waiting, and `v` is dropped.
     pub fn send(v: TSent) -> TItem? {
-        let item: TItem = __engine("gen_resume", .frame, v);
-        if __engine("gen_done", .frame) { return none; }
+        let item: TItem = __gen_resume(.frame, v);
+        if __gen_done(.frame) { return none; }
         return item;
     }
 
     /// Ends the generator, running the `defer`s pending in its frame. A
     /// generator that has ended already is left as it is.
     pub fn close() {
-        __engine("gen_close", .frame);
+        __gen_close(.frame);
     }
 
     /// Whether the body has ended or the generator was closed.
-    pub is_done: bool { get => __engine("gen_done", .frame); }
+    pub is_done: bool { get => __gen_done(.frame); }
 
     /// A generator enumerates itself.
     pub fn get_enumerator() -> Generator<TItem, TSent> => self;
 
     /// Runs the body to its next `yield`; `false` once it has ended.
     pub var fn move_next() -> bool {
-        __engine("gen_resume", .frame, none);
-        return !__engine("gen_done", .frame);
+        __gen_resume(.frame, none);
+        return !__gen_done(.frame);
     }
 
     /// The item the last `yield` handed out.
-    pub current: TItem { get => __engine("gen_current", .frame); }
+    pub current: TItem { get => __gen_current(.frame); }
 }
 
 /// The generator around the new engine frame `frame`.

@@ -9,23 +9,23 @@ use Pilot.Core.Genesis.*;
 comptime {
     // `async fn` is not built yet (docs/keyword_roadmap.md K7): every use
     // stops at the seam `keyword.unbuilt` instead of being ignored.
-    __engine("register_modifier", nameof(async), "keyword_unbuilt");
+    register_modifier(nameof(async), "keyword_unbuilt");
     // Not built yet (docs/keyword_roadmap.md K7): where a declaration or
     // statement starts (receptor 40, place 1) each stops at the seam
     // `keyword.unbuilt`; elsewhere each is an ordinary name. `bounded` waits
     // for decision D9 and `actor` for D6.
-    __engine("bind_receptor", nameof(actor),     40, 1);
-    __engine("bind_receptor", nameof(timeout),   40, 1);
-    __engine("bind_receptor", nameof(bounded),   40, 1);
+    bind_receptor(nameof(actor),     40, 1);
+    bind_receptor(nameof(timeout),   40, 1);
+    bind_receptor(nameof(bounded),   40, 1);
     // `.pchor` choreography words written in a `.pilot` file (K7).
-    __engine("bind_receptor", nameof(blueprint), 40, 1);
-    __engine("bind_receptor", nameof(cue),       40, 1);
-    __engine("bind_receptor", nameof(role),      40, 1);
-    __engine("bind_receptor", nameof(route),     40, 1);
-    __engine("bind_receptor", nameof(select),  33, 7);
+    bind_receptor(nameof(blueprint), 40, 1);
+    bind_receptor(nameof(cue),       40, 1);
+    bind_receptor(nameof(role),      40, 1);
+    bind_receptor(nameof(route),     40, 1);
+    bind_receptor(nameof(select),  33, 7);
 
-    __engine("register_pratt_op", "<-", infix,  5,  right);
-    __engine("register_pratt_op", "<-", prefix, 80, right);
+    register_pratt_op("<-", infix,  5,  right);
+    register_pratt_op("<-", prefix, 80, right);
 }
 
 // None of these is built yet (docs/keyword_roadmap.md phase K7). Each rule

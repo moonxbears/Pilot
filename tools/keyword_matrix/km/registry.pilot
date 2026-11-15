@@ -91,9 +91,17 @@ pub fn read_receptors(text: str) -> List<Receptor> {
     var out: List<Receptor> = [];
     for raw in lines_of(text) {
         let line = raw.trim();
-        let marker = "__engine(Cfg.Hooks.receptor,";
-        if !line.starts_with(marker) { continue; }
-        let args = split_on(line.slice(marker.len(), line.len()), ",");
+        let legacy = "__engine(Cfg.Hooks.receptor,";
+        let hook = "bind_receptor(";
+        var rest = "";
+        if line.starts_with(legacy) {
+            rest = line.slice(legacy.len(), line.len());
+        } else if line.starts_with(hook) {
+            rest = line.slice(hook.len(), line.len());
+        } else {
+            continue;
+        }
+        let args = split_on(rest, ",");
         if args.len() < 3 { continue; }
         let name = args[0].trim();
         var word = "";

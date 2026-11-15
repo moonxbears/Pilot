@@ -524,7 +524,7 @@ let CATEGORY_WORDS = [
 
 pub fn reflect_category_scope(cat_id: i64) -> str {
     // 1. Try dynamic compiler PhysicsRegistry query first:
-    let live = __engine(ReflectEngine.query_sym, cat_id, 1);
+    let live = query_registered_symbols(cat_id, 1);
     if live != none && live != "" {
         return live;
     }
@@ -534,7 +534,7 @@ pub fn reflect_category_scope(cat_id: i64) -> str {
 
 pub fn reflect_category_badge(cat_id: i64) -> str {
     // 1. Try dynamic compiler PhysicsRegistry query first:
-    let live = __engine(ReflectEngine.query_sym, cat_id, 2);
+    let live = query_registered_symbols(cat_id, 2);
     if live != none && live != "" {
         return live;
     }
@@ -544,11 +544,11 @@ pub fn reflect_category_badge(cat_id: i64) -> str {
 
 pub fn reflect_keyword_doc(cat_id: i64, word: str) -> str {
     // 1. Query compiler dynamic registry for exact doc:
-    let live = __engine(ReflectEngine.query_sym, cat_id, 3, word);
+    let live = query_registered_symbols(cat_id, 3, word);
     if live != none && live != "" {
         return live;
     }
-    let any_cat = __engine(ReflectEngine.query_sym, -1, 3, word);
+    let any_cat = query_registered_symbols(-1, 3, word);
     if any_cat != none && any_cat != "" {
         return any_cat;
     }
@@ -557,7 +557,7 @@ pub fn reflect_keyword_doc(cat_id: i64, word: str) -> str {
 
 pub fn reflect_category_words(cat_id: i64) -> str {
     // 1. Try dynamic compiler PhysicsRegistry query first:
-    let live = __engine(ReflectEngine.query_sym, cat_id, 0);
+    let live = query_registered_symbols(cat_id, 0);
     if live != none && live != "" {
         return live;
     }
@@ -982,30 +982,6 @@ pub struct TypeLayout : IValue {
 
     pub pure fn field_offset(type_sym: i64, field_idx: i64) -> usize {
         return __engine("layout_field_offset", type_sym, field_idx) as usize;
-    }
-}
-
-pub struct PrattOperator : IValue {
-    pub op_str:        str;
-    pub binding_power: i32;
-    pub is_right_assoc: bool;
-}
-
-pub struct GrammarRegistry {
-    pub static fn bind_receptor(name: str, receptor_id: i64, sub_id: i64) -> i64 {
-        return __engine("bind_receptor", name, receptor_id, sub_id);
-    }
-
-    pub static fn register_modifier(mod_name: str, target: str) -> i64 {
-        return __engine("register_modifier", mod_name, target);
-    }
-
-    pub static fn register_pratt_op(op_str: str, bp: i64) -> i64 {
-        return __engine("register_pratt_op", op_str, bp);
-    }
-
-    pub static fn register_module_keyword(kw: str, category: str) -> i64 {
-        return __engine("register_module_kw", kw, category);
     }
 }
 

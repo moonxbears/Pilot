@@ -129,7 +129,7 @@ pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDiction
 // an assignment replaces (none when the key is new). Reading a value by key,
 // or with `for`, borrows it.
 comptime {
-    __engine("bind_owned_elements", nameof(Map), "str_len", "list_get", "map_values", "map_get");
+    bind_owned_elements(nameof(Map), "str_len", "list_get", "map_values", "map_get");
 }
 
 // Canonical type alias & high-level dynamic dictionary

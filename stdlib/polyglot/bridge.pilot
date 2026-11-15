@@ -58,7 +58,8 @@ pub pure fn bridge_quote_str(s: str) -> str {
 }
 
 pub fn bridge_spawn_eval(bin: str, code: str) -> str {
-    return "" + __engine("host_spawn_eval", bin, code);
+    // host_spawn_eval
+    return Process.spawn_eval(bin, code);
 }
 
 pub fn polyglot_eval_json(lang: str, json_bindings: str, user_expr: str) -> str {

@@ -4,6 +4,8 @@
 // ==============================================================================
 pub pkg std.time;
 
+use Pilot.Core.Bridge.Os;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 [Layout(c_abi)]
@@ -23,4 +25,4 @@ pub pure fn instant_new(nanos: u64) -> Instant => Instant { timestamp_nanos: nan
 
 /// Microseconds on the host's monotonic clock, from an unspecified start:
 /// only the difference between two readings means anything.
-pub fn monotonic_micros() -> i64 => __engine("time_now_us");
+pub fn monotonic_micros() -> i64 => os_clock_now_ns(1) / 1000;

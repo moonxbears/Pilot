@@ -6,6 +6,9 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Gate.Manifest;
 
+use Pilot.Core.File;
+use Pilot.Core.Bridge.Os;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 pub enum GateCategory : u8 {
@@ -110,41 +113,41 @@ pub struct TempDirGuard : IGuard {
 // ------------------------------------------------------------------------------
 
 pub fn gate_fs_exists(path: str) -> bool {
-    return __engine("fs_exists", path) == true;
+    return File.exists(path);
 }
 
 pub fn gate_fs_read_text(path: str) -> str {
-    let v = __engine("fs_read_text", path);
-    if v.len() == 0 { return ""; }
-    return v;
+    return File.read_text(path);
 }
 
 pub fn gate_fs_write_text(path: str, content: str) -> bool {
-    return __engine("fs_write_text", path, content) == true;
+    return File.write_text(path, content);
 }
 
 pub fn gate_fs_walk_files(dir_path: str) -> str {
-    let v = __engine("fs_walk_files", dir_path);
-    if v.len() == 0 { return ""; }
-    return v;
+    return File.walk_files(dir_path);
 }
 
 pub fn gate_fs_list_dirs(dir_path: str) -> str {
-    let v = __engine("fs_list_dirs", dir_path);
-    if v.len() == 0 { return ""; }
-    return v;
+    return File.list_dirs(dir_path);
 }
 
 pub fn gate_fs_remove_all(path: str) -> bool {
-    return __engine("fs_remove_all", path) == true;
+    if path == "" { return false; }
+    let n = path.len();
+    let pbuf = os_slab_alloc(n, 1);
+    let _ = str_copy_to_ptr(path, pbuf);
+    let rc = os_fs_remove(pbuf, n, 1);
+    let _ = os_slab_free(pbuf, n, 1);
+    return rc >= 0;
 }
 
 pub fn gate_time_now_us() -> i64 {
-    return __engine("time_now_us") + 0;
+    return os_clock_now_ns(1) / 1000;
 }
 
 pub fn gate_proc_pid() -> i64 {
-    return __engine("proc_pid") + 0;
+    return os_proc_signal(2, 0, 0);
 }
 
 pub fn temp_guard_new(dir_path: str) -> TempDirGuard {
@@ -295,7 +298,19 @@ pub pure fn gm_ends_with(s: str, sfx: str) -> bool {
 
 pub pure fn gm_find(haystack: str, needle: str, start: i64) -> i64 {
     if needle.len() == 0 || start < 0 { return -1; }
-    return __engine("str_find", haystack, needle, start) + 0;
+    let hl = haystack.len();
+    let nl = needle.len();
+    if nl > hl || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        var j = 0;
+        while j < nl && haystack.byte_at(i + j) == needle.byte_at(j) {
+            j = j + 1;
+        }
+        if j == nl { return i; }
+        i = i + 1;
+    }
+    return -1;
 }
 
 pub pure fn gm_contains(haystack: str, needle: str) -> bool {

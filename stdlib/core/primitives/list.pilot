@@ -69,7 +69,7 @@ pub partial struct List<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerato
 // sequence operation), and `list_get` also reads the element an assignment
 // replaces. Reading an element by index, or with `for`, borrows it.
 comptime {
-    __engine("bind_owned_elements", nameof(List), "str_len", "list_get", "", "list_get");
+    bind_owned_elements(nameof(List), "str_len", "list_get", "", "list_get");
 }
 
 /// Walks a `List<T>` front to back, borrowing it.

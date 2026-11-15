@@ -1131,6 +1131,7 @@ pub fn lower_fn_call(lw: Lowerer, callee: i64, pre: List<u32>, arg_nodes: List<i
         if kind(s, a) == nk_call_arg() { return unsupported(lw, n); }
         args.push(engine_arg(lw, lower_expr(lw, a), value_type(lw, a), a));
     }
+    if some v = lower_generator_op(lw, native, args, phy, n) { return v; }
     return emit(lw, op_call_intrinsic(), intrinsic_index(lw, native), phy, args, n);
 }
 

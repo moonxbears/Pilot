@@ -35,8 +35,8 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Reinterpret;
 use Pilot.Core.FloatBits;
 
 comptime {
-    __engine("bind_operator_fn", "as view", nameof(reinterpret_view));
-    __engine("bind_operator_fn", "as view", nameof(reinterpret_list_view));
+    bind_operator_fn("as view", nameof(reinterpret_view));
+    bind_operator_fn("as view", nameof(reinterpret_list_view));
 }
 
 /// How a primitive holds its bits, as its `[Bits]` declares: a float or an
