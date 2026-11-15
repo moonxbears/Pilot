@@ -224,7 +224,7 @@ impl<'a> Parser<'a> {
                         break;
                         }
                 } else { break; } } }
-        self.type_where_loudly();
+        self.where_loudly("a `where` clause on a type declaration is not checked yet");
         let mut has_dtor = false;
         let body = if self.at(TokenKind::LBrace) { let bsp = self.span(); self.advance();
             self.hdr_stack.push(self.active_hdr.take());
@@ -334,8 +334,7 @@ impl<'a> Parser<'a> {
                 clauses.push(self.parse_contract_clause());
                 continue;
             }
-            self.advance();
-            while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::FatArrow) && !self.at(TokenKind::Semicolon) && !self.at_contract_clause() { self.advance(); }
+            self.where_loudly("a `where` clause on a function is not checked yet; write the bound in `<T : I>`");
         }
         let body = if self.eat(TokenKind::FatArrow) { let e = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); e }
         else if self.at(TokenKind::LBrace) { self.parse_fn_body() } else { let _ = self.eat(TokenKind::Semicolon); NodeId::NONE };

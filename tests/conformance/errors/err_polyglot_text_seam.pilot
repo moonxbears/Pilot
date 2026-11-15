@@ -1,0 +1,9 @@
+// SEAM001: the string form of an inline foreign block, `sql("..")`, stops at
+// the seam `polyglot.inline` too (PROP-009 section 17).
+// The seam is reported at the word `sql`, line 7, column 16 (15 characters
+// precede it).
+fn main() {
+    print("before");
+    let rows = sql("select 1");
+    print(rows);
+}

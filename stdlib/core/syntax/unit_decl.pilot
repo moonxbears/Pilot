@@ -16,7 +16,7 @@ use Pilot.Core.Interfaces::*;
 // literal or `{` follows it; elsewhere it is an ordinary name
 // (tests/conformance/types/unbuilt_words_as_names, _2).
 pub syntax {
-    unit $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `unit` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    unit $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `unit` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 // =========================================================================

@@ -1,0 +1,32 @@
+// `Map`'s methods are its owner methods in stdlib/core/primitives/map.pilot
+// (PROP-002b, the Map slice): each public method calls the one `[EngineOp]`
+// method that holds the engine op. `map_declared_property` tests `count`,
+// which only map.pilot declares.
+//
+// Worked by hand:
+//   set a=1, b=2; `m["c"] = 3`; set a=10 (replaces 1)  -> {a: 10, b: 2, c: 3}
+//   m["a"] = 10 (`get` is not tested here: PilIR reads its result as a tagged
+//   option; see the PROP-002b Map slice notes in proposals.md)
+//   has("c") = true; "z" in m = false
+//   remove("b") = true (it was there); again = false; has("b") = false
+//   keys in key order: a, c; the sum over them is 10 + 3 = 13
+//   keys().len() = 2
+fn main() {
+    let m = Map<str, i64>();
+    m.set("a", 1);
+    m.set("b", 2);
+    m["c"] = 3;
+    m.set("a", 10);
+    print(m["a"]);
+    print(m.has("c"));
+    print("z" in m);
+    print(m.remove("b"));
+    print(m.remove("b"));
+    print(m.has("b"));
+    var total = 0;
+    for k in m {
+        total = total + m[k];
+    }
+    print(total);
+    print(m.keys().len());
+}

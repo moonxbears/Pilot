@@ -510,7 +510,7 @@ impl<'a> Parser<'a> {
         let Some((reached, found)) = best else {
             let nx = self.next_non_nl(self.cur() + 1);
             let k = (nx < self.tape.len()).then(|| self.tape.kind(nx))?;
-            if !(crate::is_word_tok(k) || matches!(k, TokenKind::IntLit | TokenKind::StrLit)) {
+            if !((crate::is_word_tok(k) && !self.goes_on(nx)) || matches!(k, TokenKind::IntLit | TokenKind::StrLit)) {
                 return None;
             }
             self.advance();
@@ -825,24 +825,36 @@ impl<'a> Parser<'a> {
 
     /// Whether a `Rest` hole can start at `at`: at a name, a literal, or a
     /// `{` where a block may follow (not after the condition of `if`,
-    /// `while` or `switch`, whose block that `{` opens).
+    /// `while` or `switch`, whose block that `{` opens). A word that goes on
+    /// with the expression before it (an operator word such as `is`, or a
+    /// bound word such as `as`) starts nothing: `c as u32` keeps `c` a name.
     fn rest_starts(&self, at: usize) -> bool {
         let at = self.next_non_nl(at);
         at < self.tape.len()
             && match self.tape.kind(at) {
                 TokenKind::LBrace => !self.no_struct_lit,
-                k => crate::is_word_tok(k)
-                    || matches!(
-                        k,
-                        TokenKind::IntLit
-                            | TokenKind::HexIntLit
-                            | TokenKind::BinIntLit
-                            | TokenKind::OctIntLit
-                            | TokenKind::FloatLit
-                            | TokenKind::StrLit
-                            | TokenKind::TripleStrLit
-                    ),
+                k if crate::is_word_tok(k) => !self.goes_on(at),
+                k => matches!(
+                    k,
+                    TokenKind::IntLit
+                        | TokenKind::HexIntLit
+                        | TokenKind::BinIntLit
+                        | TokenKind::OctIntLit
+                        | TokenKind::FloatLit
+                        | TokenKind::StrLit
+                        | TokenKind::TripleStrLit
+                ),
             }
+    }
+
+    /// Whether the word at `at` goes on with the expression before it: an
+    /// operator word (`is`, `as`, `in`) or a word bound to a receptor that
+    /// follows an expression (`catch`, the same kinds `parse_stmt` lets
+    /// follow a word). A value word (`true`) does not go on.
+    fn goes_on(&self, at: usize) -> bool {
+        let w = self.tape.text(at, self.src);
+        self.tables.infix_ops.contains_key(w)
+            || self.tables.receptors.get(w).is_some_and(|&(rk, _)| matches!(rk, 19 | 29 | 31))
     }
 
     /// A `Rest` hole: the code up to a `;` (not read), a closer it did not

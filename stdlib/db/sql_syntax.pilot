@@ -16,12 +16,12 @@ use Pilot.Core.Operators.Shapes;
 // literal or `{` (for `database`, or `[`) follows it; elsewhere it is an
 // ordinary name (tests/conformance/types/unbuilt_words_as_names, _2).
 pub syntax {
-    database $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `database` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    database [ $r:Rest ] => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `database` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    connect $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `connect` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    insert $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `insert` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    update $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `update` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    delete $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `delete` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    database $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `database` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    database [ $r:Rest ] => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `database` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    connect $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `connect` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    insert $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `insert` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    update $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `update` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    delete $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `delete` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 // A query over a sequence (PROP-009; was crates/pilot-parser/src/query.rs):
@@ -80,8 +80,8 @@ pub syntax {
 // that writes one stops at the same seam; outside a query each is an
 // ordinary name.
 pub syntax {
-    from $it:Iteration $( $f:Filter )* into $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `into` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    from $it:Iteration $( $f:Filter )* values $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `values` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    from $it:Iteration $( $f:Filter )* into $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `into` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    from $it:Iteration $( $f:Filter )* values $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `values` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 // The set operators over sequences (stdlib/db/set_ops.pilot). `intersect`

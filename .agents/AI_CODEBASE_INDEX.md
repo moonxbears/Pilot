@@ -254,8 +254,6 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 ### examples
 - `examples/all_syntax_printed.pilot` (791 L)
 - `examples/all_syntax.pilot` (601 L)
-- `examples/benchmarks/01_burst_vs_vm_benchmark.pilot` (91 L)
-- `examples/benchmarks/01_burst_vs_vm_benchmark.s` (76 L)
 - `examples/crucible_2.pilot` (275 L)
 - `examples/crucible_200.pilot` (222 L)
 - `examples/execution_demo.pilot` (50 L)

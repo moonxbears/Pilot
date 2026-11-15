@@ -66,19 +66,9 @@ pub comptime fn {
     cfg_jump_loop_head() =>
         __engine("cfg_jump_loop_head");
 
-    // 3. Backend SSA & Compile-Time Introspection Hooks
-    emit_ssa_binop(opcode, lhs, rhs) =>
-        __engine("emit_ssa_binop", opcode, lhs, rhs);
-    emit_ssa_unop(opcode, val) =>
-        __engine("emit_ssa_unop", opcode, val);
-    emit_ssa_cast(opcode, val, target_type) =>
-        __engine("emit_ssa_cast", opcode, val, target_type);
-    emit_ssa_load(ptr_val) =>
-        __engine("emit_ssa_load", ptr_val);
-    emit_ssa_store(ptr_val, val) =>
-        __engine("emit_ssa_store", ptr_val, val);
-    emit_ssa_gep(base_ptr, elem_idx) =>
-        __engine("emit_ssa_gep", base_ptr, elem_idx);
+    // 3. Compile-Time Introspection Hooks. The six `emit_ssa_*` hooks were
+    // removed on 2026-11-15 (PROP-009 step 3, option (b)): `__ssa*` are
+    // `syntax` rules over `asm` and nothing called them.
     query_is_comptime_vm() =>
         __engine("query_is_comptime_vm");
     emit_diagnostic_error(msg) =>

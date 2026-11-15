@@ -82,34 +82,34 @@ pub fn cli_levenshtein(s1: str, s2: str) -> i64 {
 
     var i: usize = 0;
     while i < l1 {
-        Map.set_handle(v1, 0, (i + 1) as i64);
+        v1.set(0, (i + 1) as i64);
         let c1 = s1.byte_at(i);
 
         j = 0;
         while j < l2 {
             let c2 = s2.byte_at(j);
             let cost: i64 = if c1 == c2 { 0 } else { 1 };
-            let deletion: i64 = Map.get_handle(v0, j + 1) as i64 + 1;
-            let insertion: i64 = Map.get_handle(v1, j) as i64 + 1;
-            let substitution: i64 = Map.get_handle(v0, j) as i64 + cost;
+            let deletion: i64 = v0.get(j + 1) as i64 + 1;
+            let insertion: i64 = v1.get(j) as i64 + 1;
+            let substitution: i64 = v0.get(j) as i64 + cost;
 
             let m1 = cp_min(deletion, insertion);
             let res = cp_min(m1, substitution);
-            Map.set_handle(v1, j + 1, res);
+            v1.set(j + 1, res);
             j = j + 1;
         }
 
         j = 0;
         while j <= l2 {
-            let val = Map.get_handle(v1, j);
-            Map.set_handle(v0, j, val);
+            let val = v1.get(j);
+            v0.set(j, val);
             j = j + 1;
         }
 
         i = i + 1;
     }
 
-    return Map.get_handle(v0, l2) as i64;
+    return v0.get(l2) as i64;
 }
 
 pub fn cli_suggest_typo(input: str, candidates: i64) -> str {

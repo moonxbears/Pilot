@@ -29,12 +29,12 @@ comptime {
 // literal or `{` (for the first three, or `[`) follows it; elsewhere it
 // is an ordinary name (tests/conformance/types/unbuilt_words_as_names, _2).
 pub syntax {
-    adapter $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `adapter` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    adapter [ $r:Rest ] => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `adapter` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    context $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `context` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    context [ $r:Rest ] => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `context` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    each $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `each` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    each [ $r:Rest ] => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `each` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    state $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `state` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    transition $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `transition` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    adapter $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `adapter` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    adapter [ $r:Rest ] => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `adapter` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    context $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `context` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    context [ $r:Rest ] => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `context` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    each $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `each` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    each [ $r:Rest ] => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `each` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    state $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `state` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    transition $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `transition` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }

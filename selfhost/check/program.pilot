@@ -659,7 +659,11 @@ fn scan_engine_bindings(p: Program) -> List<List<str>> {
             let cname = node_name(s, s.extra[c]);
             if cname == token {
                 let ch = children(s, n);
-                if ch.len() >= 3 && kind(s, ch[0]) == ident_kind && node_name(s, ch[0]) == token && engine_arg_text(p, ch[1]) != "" {
+                // A bind hook's own definition in bridge_lang.pilot passes its
+                // parameters on (`__engine("bind_absent_test", intrinsic_name)`):
+                // that is not a binding, and read as one it would name the
+                // parameter as the op. Bindings call the hook by its name.
+                if ch.len() >= 3 && kind(s, ch[0]) == ident_kind && node_name(s, ch[0]) == token && engine_arg_text(p, ch[1]) != "" && !is_bridge_bind_hook(engine_arg_text(p, ch[1])) {
                     var row: List<str> = [];
                     var i = 1;
                     while i < ch.len() {

@@ -1,0 +1,22 @@
+// std.proc collects a child's output while the child runs, so a child that
+// writes more than a pipe holds still finishes.
+//
+// The child (tests/tool_fixtures/proc/large_output.pilot) writes 2,000 lines
+// of 50 bytes to standard output, then the same to standard error:
+// 2,000 * 50 = 100,000 bytes on each, past a 64 KiB (65,536-byte) pipe.
+// Expected per run: exit 0, 100000 bytes out, 100000 bytes err.
+use std.proc;
+
+fn main() {
+    let exe = proc.current_exe() ?? "pilot";
+    let child = "tests/tool_fixtures/proc/large_output.pilot";
+    // One child, run alone (`run` -> `wait`).
+    let one = proc.run(exe, ["run", child], "");
+    print(f"{one.exit_code} {one.stdout.len()} {one.stderr.len()}");
+    // Three at once (`run_all` -> `first_finished`).
+    var jobs: List<proc.ProcessJob> = [];
+    for i in 0 .. 3 { jobs.push(proc.job(exe, ["run", child], "")); }
+    for out in proc.run_all(jobs) {
+        print(f"{out.exit_code} {out.stdout.len()} {out.stderr.len()}");
+    }
+}

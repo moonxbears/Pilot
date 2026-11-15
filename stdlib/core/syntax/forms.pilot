@@ -30,6 +30,8 @@ pub enum CoreForm : u8 {
                // error at it and nothing is built
     ErrDefer,  // body: a block or one statement, run only on failure
     Become,    // the tail call
+    RejectWord, // message, code: as `Reject`, but the error is at the
+                // rule's words before the code
 }
 
 comptime {

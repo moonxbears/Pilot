@@ -19,6 +19,7 @@ const ARM: u8 = 7;
 const REJECT: u8 = 8;
 const ERR_DEFER: u8 = 9;
 const BECOME: u8 = 10;
+const REJECT_WORD: u8 = 11;
 
 /// `DeferStmt.flags` of an `errdefer`: it runs only when its block is left
 /// by a failure.
@@ -28,7 +29,7 @@ pub const RETURN_TAIL_CALL: u16 = 1;
 
 /// Whether the seed can build form `form`.
 pub(crate) fn has_constructor(form: u8) -> bool {
-    form <= BECOME
+    form <= REJECT_WORD
 }
 
 /// Builds form `form` from `ops` (an absent operand is `NONE`).
@@ -85,10 +86,13 @@ pub(crate) fn build_form(arena: &mut AstArena, form: u8, ops: &[NodeId], span: B
             }
             arena.alloc_match_arm(pat, op(0), body, span)
         }
-        REJECT => {
+        // `RejectWord` reports at the rule's words, from its first word up
+        // to the code, not at the code.
+        REJECT | REJECT_WORD => {
             if op(1).is_some() {
                 let msg = if op(0).is_some() { arena.interner.resolve(SymbolId(arena.node(op(0)).lhs)).to_string() } else { String::new() };
-                let at = arena.span(op(1));
+                let code = arena.span(op(1));
+                let at = if form == REJECT_WORD { ByteSpan::new(span.start, code.start.max(span.start)) } else { code };
                 arena.diagnostics.push((at, msg));
             }
             NodeId::NONE

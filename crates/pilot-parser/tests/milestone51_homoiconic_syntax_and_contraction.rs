@@ -70,8 +70,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
         syntax_rule!("stdlib/core/syntax/for.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/while.pilot", &["syntax", "quote", "loop"]),
         syntax_rule!("stdlib/core/syntax/until.pilot", &["syntax", "quote", "loop"]),
-        syntax_rule!("stdlib/core/syntax/switch.pilot", &["nameof("]),
-        syntax_rule!("stdlib/core/syntax/guard.pilot", &["nameof("]),
+        syntax_rule!("stdlib/core/syntax/switch.pilot", &["form(CoreForm::Switch"]),
+        syntax_rule!("stdlib/core/syntax/guard.pilot", &["form(CoreForm::Guard"]),
         syntax_rule!("stdlib/core/syntax/try_catch.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/expr_sugar.pilot", &["[Prefix("]),
         syntax_rule!("stdlib/core/operators/levels.pilot", &["register_grammar", "nameof("]),
@@ -407,12 +407,12 @@ pub fn test_51_1_randomized_type_construct_precedence_and_executable_homoiconic_
         let src = format!(
             r#"
             pub syntax {{
-                {mac_unless}(cond, body) => quote {{
+                {mac_unless} $cond:Expr $body:Block => quote {{
                     if !($cond) {{
                         $body
                     }}
                 }};
-                {mac_clamp}(val, min_v, max_v) => quote {{
+                {mac_clamp} ( $val:Expr , $min_v:Expr , $max_v:Expr ) => quote {{
                     if ($val) < ($min_v) {{
                         $min_v
                     }} else if ($val) > ($max_v) {{
@@ -634,7 +634,6 @@ pub fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
                 let q = from u in users where u > 0 select u;
             }
             deadline(50) {
-                let sq = sql("SELECT 1");
             }
             return 0;
         }

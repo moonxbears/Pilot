@@ -15,11 +15,11 @@
 | ID | Title | Net Rust `src` Delta | Status |
 | :--- | :--- | ---: | :--- |
 | **`PROP-001`** | Purge Discovered Dead Rust Crates/Modules, Remove Hardcoded String Leaks & Split Packed `pilot-parser/src/lib.rs` (`MOD001`) | `-399` net (`20,812` $\rightarrow$ `20,413` `src` LOC; `-1,439` unpacked) | **`COMPLETED (APPROVED BY OWNER)`** |
-| **`PROP-002a`** | Define the 3-File Airlock Under the B+ Freeze (51 scalar/pointer `HostOp`s), Retire `pilot-rt`, Consolidate Stage-A Natives & Arm `GATE021` | `<= 0` net (`9` $\rightarrow$ `8` crates; `-683` `pilot-rt`) | **`APPROVED; A1 MERGED (d055851) — C2 SPEED BASELINE OPEN`** |
-| **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — ITEMIZE BEFORE APPROVAL (after PROP-007)` |
-| **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4) NEEDS APPROVAL` |
+| **`PROP-002a`** | Define the 3-File Airlock Under the B+ Freeze (51 scalar/pointer `HostOp`s), Retire `pilot-rt`, Consolidate Stage-A Natives & Arm `GATE021` | `<= 0` net (`9` $\rightarrow$ `8` crates; `-683` `pilot-rt`) | **`APPROVED; A1 MERGED (d055851); C2 RESOLVED 2026-11-15 (BASELINE MEASURED; OWNER THRESHOLD 5% SLOWER MAX; CHECKED BY record.pilot --check)`** |
+| **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — MAP SLICE ITEMIZED 2026-11-15 (PILOT ONLY, 0 RUST; RUN BEFORE PROP-007 STEP 4 UNDER OPTION M) — APPROVED 2026-11-15, IN PROGRESS; OTHER TYPES AND BUCKETS B/D STILL TO ITEMIZE` |
+| **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4): OWNER CHOSE OPTION M 2026-11-15 (MEASURE ON PROP-002b's MAP SLICE FIRST; BUILD OPTION F ONLY IF C2 FAILS)` |
 | **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED ITEMIZED LISTS` |
-| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 AND BUILT (§11; +186 RUST, OVER THE −15..−40 ESTIMATE, ACCEPTED BY THE OWNER 2026-11-15; `true`/`false`/`none` NOT MOVED); STEP 2C GROUP 1 (`errdefer`/`become`, §12, about −30 RUST) APPROVED 2026-11-15 AND BUILT; STEP 2C GROUP 2 (UNBUILT KEYWORDS, §13, about −90 RUST) APPROVED 2026-11-15 AND BUILT (−63 RUST); STEP 3 NEEDS A DECISION` |
+| **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 AND BUILT (§11; +186 RUST, OVER THE −15..−40 ESTIMATE, ACCEPTED BY THE OWNER 2026-11-15; `true`/`false`/`none` NOT MOVED); STEP 2C GROUP 1 (`errdefer`/`become`, §12, about −30 RUST) APPROVED 2026-11-15 AND BUILT; STEP 2C GROUP 2 (UNBUILT KEYWORDS, §13, about −90 RUST) APPROVED 2026-11-15 AND BUILT (−63 RUST); STEP 2C GROUP 3 (STRAY `else`, DEAD `select` ARM, §14, about −9 RUST) APPROVED 2026-11-15 AND BUILT WITH AMENDMENT `RejectWord` (−5 RUST); §15 (A FUNCTION'S `where` CLAUSE IS DROPPED SILENTLY) OPTION B APPROVED 2026-11-15 AND BUILT (±0 RUST); STEP 3: OPTION (b) CHOSEN BY OWNER 2026-11-15 (FILE LIST TO ITEMIZE); `milestone51` TEST EDIT APPROVED 2026-11-15 AND MADE; `emit_ssa_*` HOOKS REMOVED (§16); §17 (INLINE FOREIGN BLOCKS) OPTION R APPROVED 2026-11-15 AND BUILT (−8 RUST, NOT −18; `Rest` FIX, TEST DELETION AND `milestone51` LINE APPROVED AS EXTRAS)` |
 | **`PROP-010`** | Purge Dead Rust Found 2026-11-15: the Unused Rust `comptime` Evaluator and Unreferenced Items | `-191` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-011`** | Delete the Unrun Bootstrap Stage List `stdlib/core/bootstrap.pilot` (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-012`** | Delete Test-Only Rust: the AST S-Expression Printer, the Rust Module Header Scanner and `TokenKind::is_keyword` | `-186` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
@@ -165,6 +165,22 @@ pub partial struct File : IObject {
    - Either way, Stage-A `Map`/`List` declare no fields and carry `[StandIn(…, "F6")]` (precedent: `GeneratorFrameHandle`, `stdlib/core/generator.pilot:29`).
    - **Result (2026-11-14): no.** On the seed, `self = __engine("map_new")` in a constructor works: the program printed `7`, as expected. On PilIR (`pilot ir run`) the same program stops at the registered seam `ir.lower_construct` (node kind 102). So for now each data owner in `PROP-002b` keeps one constructor binding, listed in `transitional_native_bindings()`, until that seam is connected.
 2. **C2 — Speed baseline.** `pilot bench` on the seed before and after, gated by a regression threshold the owner sets.
+   - **Owner, 2026-11-15:** "all tests and speeds are now approved". Recorded as the owner accepting the pending test edits and the current seed speed. No `pilot bench` baseline was measured or written down, and no regression threshold was set.
+   - **Baseline measured (2026-11-15).** `pilot bench` only shows the milestone tests' times (toolchain work, not run-time speed), so the baseline is the run-time benchmark suite instead: `benchmarks/native/record.pilot` now also times each program on the seed (`pilot run`, the release build) and writes `benchmarks/native/baseline.tsv`. Command: `target/release/pilot run benchmarks/native/record.pilot` (fastest of 5 wall-clock runs, process start included; working tree after `PROP-009` §17, on top of 2a82f59; Intel Core Ultra 9 275HX, 24 threads, Linux).
+
+     | Benchmark | Seed µs | Native Pilot µs | C µs | Seed ÷ C | Native ÷ C |
+     | :--- | ---: | ---: | ---: | ---: | ---: |
+     | fib | 711,021 | 2,963 | 2,900 | 245.18 | 1.02 |
+     | numeric_loop | 1,825,113 | 38,302 | 37,991 | 48.04 | 1.01 |
+     | string_build | 468,387 | 1,898 | 923 | 507.46 | 2.06 |
+     | map_workload | 499,508 | 75,152 | 44,062 | 11.34 | 1.71 |
+     | records | 1,756,300 | 19,097 | 1,267 | 1386.19 | 15.07 |
+     | string_compare | 1,374,717 | 96,680 | 21,166 | 64.95 | 4.57 |
+     | string_find | 1,144,568 | 3,000 | 1,393 | 821.66 | 2.15 |
+     | string_map | 538,926 | 37,749 | 24,430 | 22.06 | 1.55 |
+
+     About 420 ms of every seed time is start-up (loading and checking the stdlib: an empty `fn main` takes 419,872 µs), so the seed's own work is the seed time minus about 420 ms. Separate runs differed by up to about 3%.
+   - **Regression threshold (owner, 2026-11-15): "5% slower max".** No benchmark's seed time may be more than 5% above its baseline seed time. This is the pass/fail line for the gates that cite C2: Amendment A1's transitional bindings, `PROP-007` step 4 and `PROP-008` step 3. Check it with `target/release/pilot run benchmarks/native/record.pilot -- --check`, which times each program on the seed (fastest of 5), writes nothing, and exits 1 when any is over the limit. On this tree it passed (0.97x–1.00x of the baseline). With fib's baseline lowered to 600,000 µs as a test, it reported fib over the limit and exited 1. Re-record the baseline (`record.pilot` without `--check`) only with the owner's approval, and on the same machine and release build.
 
 **Grammar hook (`PROP-008`).** The operator hooks frozen in `bridge_lang.pilot` are `grammar_entry(...)` (called by the operator attributes in `stdlib/core/operators/`) and `register_grammar(entries)`, with the `ParseShape` and `OpLevel` lists, not `register_pratt_op(sym, fixity, bp, assoc, bin_op)`. Freezing the latter would make integer binding powers and native `BinaryOp` codes permanent. Until `PROP-008` step 1 lands, `register_pratt_op` stays as a **transitional** hook listed in `TRANSITIONAL_NATIVE_BINDINGS`, not in the frozen set.
 
@@ -434,6 +450,35 @@ For each seam, a test checks that the path stops with `SEAM001`. The 488/480/480
   - the exact Rust file list (CREATE / DELETE / MODIFY)
   - an itemized table of every conformance or milestone case allowed to become a `SEAM001`, with its seam ID and `wiring.pilot` downgrade
   - before and after conformance counts
+- **`Map` slice, itemized 2026-11-15 under `PROP-007` option M (owner: "Option M"). APPROVED BY OWNER 2026-11-15 ("Approve Map slice").**
+  - **What exists today (checked on the seed and PilIR, 2026-11-15).**
+    - `Map`'s Pilot declaration (`stdlib/core/primitives/map.pilot`) is a stand-in that no engine runs for a user program. `pilot run` links only the program and what it `use`s; `map.pilot` reaches the type checker (`cli_checker_decls()` in `selfhost/cli/host.pilot`) but not the seed's code. `Map<K, V>()`, `.set`, `.get`, `.has`, `.keys`, `.remove`, `[]`, `[]=`, `in` and `for` all lower to Stage-A natives through `bind_native_*` in `stdlib/core/builtins/native_calls.pilot`.
+    - So a method only `map.pilot` declares does not run. In a probe, `m.clear()` failed on the seed with "no method `clear` for this value", and on PilIR it stopped at the seam `ir.lower_construct` (node kind 207). The `inner: MapBuffer` field is never built on any engine.
+    - `bind_native_method(get|set|has|keys|remove)` binds by method name for every receiver, not just `Map`. A receiver of unknown type relies on it.
+    - The map ops (`map_new`, `map_set`, ...) are Stage-A natives in `transitional_native_bindings()`, not frozen `HostOp`s. `GATE021`'s owner registry (`airlock_host_ops()`) lists only `HostOp`s.
+    - Separately, about 1,900 raw `__engine("map_*")` sites sit in 52 legacy files (`selfhost/vm/compiler.pilot` 196, `selfhost/parser.pilot` 175, `stdlib/crypto/ed25519.pilot` 146, ...). That is bucket B. It is compile-time code that C2 does not measure, and it is **not** in this slice.
+  - **Changes (Pilot only; no Rust file is touched).**
+    1. `stdlib/core/primitives/map.pilot`:
+       - `Map` holds the engine's map handle, marked `[StandIn("map.storage", "a pure-Pilot hash map", "the engine's map is the storage", "F6")]`.
+       - Its owners are `[EngineOp] priv static fn new_internal`, `get_internal`, `set_internal`, `has_internal`, `keys_internal` and `remove_internal`, each a single `__engine("map_*", ..)`.
+       - The public `self()`, `get`, `set`, `has`, `keys`, `remove` and `count` call them. `op []`, `op []=` and `in` call the public methods.
+       - Deleted: `MapBuffer` (the duplicate linear search), the `inner` field, `Map.new_handle`/`set_handle`/`get_handle`/`has_handle`, and `map_new_pure`/`map_set_pure`/`map_get_pure`/`map_has_pure`. `clear` is kept only if it has an engine op to own; otherwise it becomes `seam("map.clear", ..)`.
+    2. `selfhost/cli/spec.pilot`: its 9 `Map.*_handle` calls move to the public methods.
+    3. `selfhost/cli/host.pilot`: `map.pilot` joins the files every run links, so the seed compiles `Map`'s owner methods.
+    4. `stdlib/core/builtins/native_calls.pilot`: delete the `Map` bindings (`bind_native_fn(Map)`, `bind_native_member(Map, "[]" | "[]=" | "in")`). Delete `bind_native_method(get|set|has|keys|remove)` once the suite shows no other receiver needs them; any that still do are listed here first. The lowercase `map` view's bindings stay, since `map` is another type.
+    5. `selfhost/gate/airlock_abi.pilot`:
+       - `GATE021` accepts an `[EngineOp]` owner whose op is a listed Stage-A native, with `Map` in the owner registry.
+       - Each native `Map` owns leaves `transitional_native_bindings()`, except `map_new`, which keeps one constructor binding (C1).
+    6. Records: `wiring.pilot`, `seams.pilot`, `pilot.md`, `concept_matrix.md` and the keyword matrix, if any row moves.
+  - **Acceptance.**
+    - New `tests/conformance/collections/map_owner_methods` (hand-worked output): `set`, `get`, `[]`, `[]=`, `in`, `has`, `remove`, `keys`, `for`, and a method only `map.pilot` declares. It runs on the seed, `--ir` and `--emit c`, and must fail if an owner body is replaced with a constant.
+    - The seed suite goes from 539 passed, 0 failed (14 known bugs reproduced) to 540 passed, 0 failed.
+    - `--ir` and `--emit c` pass on `collections/`, `types/` and `receptors/`.
+    - `pilot gate` passes.
+    - **C2:** `target/release/pilot run benchmarks/native/record.pilot -- --check` passes. Linking `map.pilot` into every run adds start-up time to all 8 benchmarks, not only the map ones, and that is measured too.
+  - **Seams.** No conformance or milestone case is planned to become `SEAM001`. If one does, the work stops, and the case, its seam ID and its `wiring.pilot` downgrade are added here before going on.
+  - **If C2 fails:** stop, record the numbers here, and size `PROP-007` option F to the failing benchmarks. The Pilot changes are kept unmerged until then.
+  - **Rust:** none in this slice, so net 0. Rust shrinks only when a whole `bind_native_*` kind has no bindings left, or when `heap.rs` goes after F6.
 - **Not in scope:** `Reflect`/`PhysicsRegistry` lives in `crates/pilot-analysis` and retires in `PROP-004`. `PROP-004` must name the pure-Pilot successor for layout and symbol reflection (`AGENTS.md` §6, `pilot inspect`), and register a `reflect.type_meta` seam plus a `::Spec` wiring row for anything not built.
 
 ---
@@ -468,6 +513,21 @@ For each seam, a test checks that the path stops with `SEAM001`. The 488/480/480
   4. **Seed lowering (Rust, needs approval):** in `crates/pilot-vm/src/lower_call.rs`, lower a single-expression inline callee in place. The aim is to pay for it by deleting the native-binding dispatch for owned ops (`lower_native.rs`, `lower_members.rs`). The net LOC is measured, not assumed.
      - **Temporary by design:** `PROP-005` deletes every `lower_*.rs` file. This step exists only so the seed passes the C2 speed gate in the meantime. Keep it to the smallest change that does that.
      - `PROP-005` must lower `.pilc` from PilIR **after** the step-2 inlining pass, so inlining survives the cutover without being rewritten.
+     - **Step 4 itemized (2026-11-15). Owner chose option M ("Option M").**
+       - **What it costs not to inline on the seed (measured).** A probe ran `map_workload` (200,000 `set` and 200,000 reads) both directly and through two extra call levels, which is the shape `map[k] = v` takes after `PROP-002b` (`[]=` → `set` → `set_internal`). Fastest of 5 runs each, release seed: direct 501,650–501,934 µs, two levels 524,004–533,402 µs. That is +22–31 ms, or **+4.5–6.3% of the total time**, where C2's line is 5%. Most of the total is the about 420 ms start-up; the loop itself got about 30% slower. A tighter loop (integer keys, no `f"..."`) would lose more than that.
+       - **How the seed would know what to inline.** Today nothing tells it. `[Inline]` calls the hook `set_inline_hint(target_fn, mode)`, which no Rust consumes. `[EngineOp]` (`EngineOpAttr` in `stdlib/core/host_raw.pilot`) has no hook at all; only `GATE021` and `selfhost/ir/pass_inline.pilot` read it. `ingest_decl_attrs` passes a bare declaration name, so a method would need its owner-qualified name (`Map.set`).
+       - **Option F — build step 4 now.**
+         - `crates/pilot-parser/src/tables.rs`: an `inline_fns` table (name → mode) filled by the `set_inline_hint` hook. About +8.
+         - `crates/pilot-parser/src/attr_hooks.rs`: pass a method's owner-qualified name to its attribute hooks. About +5.
+         - `crates/pilot-vm/src/lower_call.rs`: at a call to a function in `inline_fns` whose body is a single expression (`=> expr`) with no contract, `defer` or `where`, bind the parameters (and `self`) to the argument registers and compile the body in place; a depth guard stops recursion. About +45.
+         - Pilot: `EngineOpAttr` gains a comptime hook that calls `set_inline_hint(target, forced)`; each owner's public method gets `[Inline]` where the author wants it.
+         - Net about **+55 to +65 Rust**, with nothing deleted in this step. The native-binding dispatch it was meant to pay for (`lower_native.rs`, `lower_members.rs`) can only be deleted once `PROP-002b` has moved each type's callers to its owner, so that saving comes later and is not measured yet. `PROP-005` deletes `lower_call.rs` in the end.
+         - Not covered: operators that the seed lowers through `lower_members.rs` dispatchers (`m[k]`, `m[k] = v`) unless those dispatchers also go through the new path (more Rust; to be itemized if needed).
+       - **Option M — measure first (recommended; no Rust now).**
+         - Itemize `PROP-002b` for one type first (`Map`, which `map_workload` and `string_map` exercise), move its callers to its owner methods without seed inlining, and run `target/release/pilot run benchmarks/native/record.pilot -- --check`.
+         - If C2 passes, that type needs no step 4, and its native bindings and dispatch are deleted in the same change (net Rust down).
+         - If C2 fails, stop, record the numbers here, and build option F, sized to what the failing benchmarks need.
+         - This reverses `PROP-002b`'s "after `PROP-007`" ordering for that one type, and it is decided by the C2 check, not by the estimate above.
 - **Does not solve** (recorded so nobody expects it):
   - calls through interfaces, stored method values or closures (needs devirtualization; deferred, with a `SPEC` row)
   - the engine op's own dispatch cost
@@ -976,7 +1036,7 @@ Class B words need a template to name an AST node that has no other spelling.
 
 With this design, the grammar of every word lives in Pilot, and the seed keeps only a closed, append-only list of node constructors. Each category's Rust routine is deleted as its rule lands. The itemized list follows once step 1 shows the pattern matcher is enough for `for`, `switch` and `try`.
 
-### 6. Step 3 — retire `bind_receptor` (owner decision needed)
+### 6. Step 3 — retire `bind_receptor` (OWNER CHOSE OPTION (b) 2026-11-15: "prop-009 step 3: choose B"; the Rust file list is itemized separately)
 
 `bind_receptor` and the six `emit_ssa_*` hooks are in the **frozen** B+ list (`airlock_lang_hooks()`, `PROP-002a`). After steps 1–2, nothing calls them.
 
@@ -1152,7 +1212,7 @@ pub syntax {
   - 20,864, which is −60 against `eec5220` (20,924), so step 1c alone is a net deletion.
   - PROP-009 overall is still +66 against the 20,798 baseline: steps 1a/1b added about +126.
   - `paused_max_total_rust_loc()` is 20,408, already exceeded before this step.
-- **Owner approval needed: `crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs`.**
+- **Owner approval needed: `crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs`.** APPROVED BY OWNER 2026-11-15 ("approve milestone51 edit"; the owner also approved all pending test edits and speed baselines: "all tests and speeds are now approved").
   - `test_51_1` writes user rules in the deleted form `name(cond, body) => quote` and uses them bare.
   - `test_51_3` requires every listed syntax module to have at least 15 lines; `guard.pilot` (12) and `switch.pilot` (14) are now shorter.
   - Both fail. Proposed change: write the rules in `test_51_1` as sequence heads (`name $cond:Expr $body:Block`), and drop the 15-line floor in `test_51_3`, or delete the test in favour of the Pilot conformance programs (PROP-004 direction).
@@ -1366,6 +1426,165 @@ Net: about −90 Rust LOC.
 - **The `into`/`values` rules follow the main `from` rule** in `sql_syntax.pilot`. When no rule matches, the first one to read furthest reports, so `errors/err_query_clause` keeps "`from` expects `select`".
 - **Tests.** The 26 `err_*_unbuilt` programs, `err_unit_decl_seam`, `err_query_clause`, `err_lvl_shorthand` and `unbuilt_words_as_names`, `_2` pass unchanged on `pilot test`. New: `receptors/rest_hole` (passing: the word before an operator, `)`, `.`, `,` or a condition's `{` is a name) and `receptors/err_rest_hole_needs_start`. `cargo test -p pilot-parser`: `damaged_source --include-ignored` passes; `milestone51` has the same 4 failures as before this change (§10).
 - **Changes in behaviour, as built.** A construct word followed by a name, a literal or a `{` (outside a condition) stops at the seam in expression position too, e.g. `let y = update x;` or `let s = state { .. };`. Before, a place-1 word did this only at statement start.
+
+### 14. Step 2c, group 3 — the stray `else` and the dead `select` arm (APPROVED BY OWNER 2026-11-15: "Approve §14")
+
+Two small pieces of seed code that the step 2 matcher and the §13 `Rest` hole already cover.
+
+**A. A stray `else` becomes a Pilot rule.**
+- Today `stmt.rs` has a receptor-3 arm. An `else` reached as a statement (no `if` before it) gets the error "`else` must follow the block of an `if` (or a `guard` condition)", and the parser reads past its block or statement.
+- `else` stays bound to receptor 3: the seed `if` parser uses it to find its `else`. Only the misuse arm moves.
+- New rules in `stdlib/core/syntax/guard.pilot`, which is read after `holes.pilot` and `forms.pilot`:
+
+  ```pilot
+  pub syntax {
+      else if $r:Rest => quote { form(CoreForm::Reject, "`else` must follow the block of an `if` (or a `guard` condition)", $r) };
+      else $r:Rest => quote { form(CoreForm::Reject, "`else` must follow the block of an `if` (or a `guard` condition)", $r) };
+  }
+  ```
+
+- The rules only see an `else` nobody else took. `if .. else`, and the `guard .. else` rule, read their own `else` before any statement starts there.
+- **Change in behaviour:** an `else` followed by nothing that starts code (`else;`) is read as a name (DECL001), as a rule word with nothing after it is (§12). Today it is the same SYN001.
+
+**B. The dead `select { .. }` receptor arm.**
+- `stdlib/asyncio/select_syntax.pilot` binds `select` to receptor 33, sub 7, and `expr.rs` has an arm that reads `select { .. }` as a plain block.
+- The arm can no longer run. The rule `select $arms:Block` (which stops at the seam `concurrency.select`) is tried first and always matches `select {`, and `is_stmt_receptor_start` already knows `select` as a rule word.
+- Its one other effect is in a file that declares a function named `select`: rules are skipped there, so the arm would run `select { .. }` as a block. That is the silent fake audit 2.3 removed.
+- Delete the arm and the binding (Rule 3, dead code).
+
+**Rust file list** (`crates/pilot-parser` only):
+
+| File | Change | LOC |
+| :--- | :--- | ---: |
+| `crates/pilot-parser/src/stmt.rs` | delete the receptor-3 arm in `parse_stmt` | about −8 |
+| `crates/pilot-parser/src/expr.rs` | delete the `33 if pl == 7` arm | −1 |
+
+Net: about −9 Rust LOC.
+
+**Pilot files:** `stdlib/core/syntax/guard.pilot` (the two rules); `stdlib/asyncio/select_syntax.pilot` (drop `bind_receptor(nameof(select), 33, 7)`).
+
+**Acceptance.**
+- `errors/err_else_without_if` passes unchanged: the same SYN001 at 7:5.
+- `errors/err_select_seam` and every `if`/`else`, `guard` and `from .. select` program pass unchanged.
+- New: `errors/err_else_if_without_if`, a stray `else if c { .. }`, which gets the same SYN001.
+- Then `pilot test` (all three engines on the affected programs), `pilot gate`, and `cargo test -p pilot-parser` (`damaged_source --include-ignored`).
+- Matrices: the keyword matrix row for `else` becomes "receptor 3 (`if`); `syntax` rule (stray `else`)". The `select` row already reads "`syntax` rules".
+
+**Amendment (APPROVED BY OWNER 2026-11-15: "Add RejectWord form").** `Reject` puts its error at the code operand, so a stray `else { .. }` was reported at the `{` (7:10), not at the word (7:5) that `err_else_without_if` pins. Added to the file list: `crates/pilot-parser/src/forms.rs`, a variant `RejectWord` (ordinal 11, appended to `CoreForm` in `stdlib/core/syntax/forms.pilot`). It reports from the rule's first word up to the code. The §13 unbuilt rules use it too, so their errors point at the word again, as `parse_unbuilt` did before §13.
+
+**As built (2026-11-15).** Rust src 20,577 → 20,572 (−5, not −9): `stmt.rs` −8, `expr.rs` −1, `forms.rs` +4. Pilot: the two `else` rules in `guard.pilot`, `RejectWord` in `forms.pilot`, the `select` binding dropped, and the 28 unbuilt rules switched to `RejectWord`.
+- Tests: `err_else_without_if` (SYN001 at 7:5) and the new `err_else_if_without_if` pass on all three engines, as do `err_select_seam`, the `guard` programs, `else_chains`, the unbuilt tests and the receptors directory. Seed suite 536 passed, 0 failed, 14 known bugs. `control/` on `--ir` and `--emit c` fails `errdefer` and `try_records` as it did before (§12). `pilot gate` passes; `damaged_source --include-ignored` passes; `milestone51` has its same 4 failures (§10).
+- Left stale: the doc comment of `crates/pilot-parser/src/unbuilt.rs` names `CoreForm::Reject`; that file was not in this list. It is fixed with the next change that lists it.
+
+### 15. A function's `where` clause is read and thrown away (found 2026-11-15; OPTION B APPROVED BY OWNER 2026-11-15: "Option B: refuse loudly")
+
+**The bug.** `parse_fn` (`crates/pilot-parser/src/decl.rs`, the `while self.is_rec(28) ..` loop after the return type) reads past a `where ..` clause after a function's signature and keeps nothing. So a bound written there is never checked, while the same bound in the parameter list is:
+
+```pilot
+interface IShout { fn shout(self) -> str; }
+fn twice<T>(x: T) -> T where T: IShout => x;   // runs: `twice(5)` prints 5
+fn twice<T : IShout>(x: T) -> T => x;          // TYPE005: `i64` does not satisfy `T : IShout`
+```
+
+This is the "parse and discard" AGENTS.md section 11 rule 2 forbids. A `where` after a *type's* header is already refused loudly (`loud.rs` `type_where_loudly`). No program in `stdlib/`, `selfhost/`, `tools/` or `tests/` writes a function `where` clause, so either fix breaks nothing.
+
+**Option A — honour it (about +16 Rust).** `where T : IA + IB, U : IC` adds those bounds to the function's type parameters, exactly as `<T : IA + IB>` does. The checker already enforces them (TYPE005). A name that is not one of the function's type parameters is SYN010.
+- `crates/pilot-parser/src/generic_params.rs`: `parse_where_bounds(&mut Vec<GenericParam>, fn_name)` (about +18).
+- `crates/pilot-parser/src/decl.rs`: the skip loop becomes a call (about −2).
+- Tests:
+  - `types/where_bound` (passing; a bound written in `where` admits a type that implements the interface);
+  - `errors/err_where_bound` (TYPE005, as for `<T : I>`);
+  - `errors/err_where_not_type_param` (SYN010).
+
+**Option B — refuse it loudly (about −2 Rust).** `parse_fn` calls the existing `type_where_loudly` reader, with the message "a `where` clause on a function is not checked yet; write the bound in `<T : I>`".
+- `crates/pilot-parser/src/decl.rs` (about −4) and `crates/pilot-parser/src/loud.rs` (one message parameter, about +2).
+- Test: `errors/err_fn_where_unchecked`.
+- `where` on functions waits until a signature-position `syntax` rule can build it in Pilot. That is the same mechanism the contract clauses (`requires`/`ensures`) need.
+
+Either way the keyword matrix row for `where` gets a note, and `wiring.pilot` gets a row.
+
+**As built, option B (2026-11-15).** Rust src stays 20,572: `loud.rs` +1 (`type_where_loudly` became `where_loudly(message)`, which also stops at `=>` and a contract clause), `decl.rs` −1 (the skip loop calls it). The type message is unchanged; the function message is "a `where` clause on a function is not checked yet; write the bound in `<T : I>`".
+- Test: `errors/err_fn_where_unchecked` (SYN001 at 8:24, by hand: 23 characters precede `where`) passes on `pilot test`, `--ir` and `--emit c`. It fails on the old parser, which ran the program.
+- Unchanged: `err_type_where`, the `where` query programs, and the contract programs. On `--ir` and `--emit c`, `contracts/contracts` and `control/errdefer` fail as before.
+- Seed suite 537 passed, 0 failed, 14 known bugs. `pilot gate` passes; `damaged_source --include-ignored` passes; `milestone51` has its same 4 failures.
+- The wiring row is the existing loud-forms row (`err_type_where`'s), extended rather than a new one.
+
+### 16. Step 3 under option (b), and the `milestone51` edit (owner, 2026-11-15: "prop-009 step 3: choose B. all tests and speeds are now approved. approve milestone51 edit")
+
+**Done now (no Rust source changed).**
+- **The six `emit_ssa_*` hooks are removed.** They are deleted from `stdlib/core/bridge_lang.pilot` and from the frozen list `airlock_lang_hooks()` in `selfhost/gate/airlock_abi.pilot` (70 → 64 hooks).
+  - Nothing called them: `__ssa*` are `syntax` rules over `asm` since step 1b.
+  - The seed had no arm for them: no `crates/**` file names them. So option (b) deletes no Rust here.
+  - `pilot gate` passes with the shorter frozen list. Seed suite 537 passed, 0 failed, 14 known bugs; `asm/` passes on `--ir` and `--emit c`.
+- **`milestone51` edited** (`crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs`, a test file).
+  - `test_51_1`'s two user rules are now sequence heads: `name $cond:Expr $body:Block` and `name ( $val:Expr , $min_v:Expr , $max_v:Expr )`.
+  - The `nameof(` markers of `switch.pilot` and `guard.pilot` are replaced by the mechanism those files use now, `form(CoreForm::Switch` and `form(CoreForm::Guard`, rather than dropped, so the check still means something.
+  - All 4 tests pass; `cargo test -p pilot-parser` passes in full for the first time since step 1c.
+
+**Left: `bind_receptor` itself.** It cannot go yet: about 70 `bind_receptor(..)` lines still bind words the seed reads by receptor kind. They are in `core.pilot`, `module_ext.pilot`, `call_quote.pilot`, `polyglot_syntax.pilot`, `contracts_syntax.pilot`, `lifecycle.pilot`, `properties.pilot`, `try_catch.pilot`, `expr_sugar.pilot` and `for.pilot`.
+- The kinds still read by the seed, with their groups:
+  - 1/2: `true`/`false`/`none`;
+  - 3: `else` for `if`;
+  - 4–8: declaration heads;
+  - 10: `in`;
+  - 19: `catch`;
+  - 20–25: `scope`/`enter`/`exit`, accessors, `op`;
+  - 26–28: `type`/`enum`/`where`;
+  - 29: `as`/`view`;
+  - 30: bundle words;
+  - 31: `some`;
+  - 32: polyglot;
+  - 33: contracts, `nameof`;
+  - 34: `!`;
+  - 36: `stringify`;
+  - 37: the call-quote words.
+- When the last group moves, a final list deletes:
+  - `bind_receptor` from `bridge_lang.pilot` and the frozen list;
+  - the receptor table and `receptor()`/`is_rec()` in `crates/pilot-parser` (`tables.rs`, `lib.rs`);
+  - every remaining arm.
+
+  That list is itemized for approval then.
+- `decl_operator_fn`, `cfg_jump_loop_exit` and `cfg_jump_loop_head` are frozen hooks that still have callers, so they stay.
+
+### 17. Step 2c, group 4 — inline foreign blocks (receptor 32) (OPTION R APPROVED BY OWNER 2026-11-15: "Option R: refuse at seam")
+
+**Today.** `stdlib/polyglot/polyglot_syntax.pilot` binds 25 language words to receptor 32 (`c`, `cpp`, `rust`/`rs`, `python`/`py`, `js`/`javascript`, `ts`/`typescript`, `csharp`/`cs`, `lua`, `sql`, `postgres`/`postgresql`, `mysql`, `sqlite`, `wgsl`, `ptx`, `msl`, `java`, `assembly`). The seed reads `word { .. }`, and `word("..")` with a string literal, into a `PolyglotBlock` node:
+- the code: `stmt.rs` `parse_polyglot_inline`, `declared_names.rs` `opens_inline_text`, and an arm each in `expr.rs` and `stmt.rs`;
+- the node then **runs nowhere**:
+  - the seed VM refuses it ("inline foreign-language blocks cannot run on the seed VM", `pilot-vm/src/lower_expr.rs`);
+  - the checker has no case for it;
+  - no conformance program writes one.
+
+`wiring.pilot` M58 has "inline block parsing" at `DRAFT` and execution at `SPEC`.
+
+**Option R — refuse them by rule, at a seam (recommended; about −18 Rust).**
+- Each word becomes Pilot rules in `polyglot_syntax.pilot`: `word $r:Rest` (a block) and `word ( $r:Rest )` (the string form), with a `RejectWord` template carrying `SEAM001: unconnected seam `polyglot.inline`: inline foreign blocks are not built yet (M58)`.
+- The 25 `bind_receptor(.., 32, ..)` lines go.
+- Rust deleted:
+  - `parse_polyglot_inline` (`stmt.rs`, about −8);
+  - `opens_inline_text` (`declared_names.rs`, about −8);
+  - the receptor-32 arm in `expr.rs` (−1) and `stmt.rs` (−1);
+  - `32 |` in `is_stmt_receptor_start` (`stmt.rs`).
+- Fenced blocks (the lexer's `RawDslBlock`) are not touched.
+- The build stops at the word instead of at the seed VM, and on every engine, not just the seed.
+- M58 "inline block parsing" goes to `SEAM` (`polyglot.inline` registered in `seams.pilot`). M58 builds it again later as Pilot rules: a raw-text hole and a `Foreign` core form.
+- Changes in behaviour:
+  - `word(x)` now stops at the seam even when `x` is not a string, when the file does not itself declare a function `word`. Before, that was a call.
+  - Like every rule word, `word name` / `word 5` stop too; both were errors before.
+- Tests:
+  - new `errors/err_polyglot_block_seam` (`py { .. }`);
+  - new `errors/err_polyglot_text_seam` (`sql("..")`);
+  - `types/polyglot_words_as_names` (passing: `c`, `cs`, `ts`, `py` as variables, before `+`, `.`, `)`, and a condition's `{`).
+
+**Option K — keep parsing them, in Pilot (about −6 Rust).**
+- A new hole kind `Text` (the raw text between `{` and `}`; `rule_arms.rs` about +6), and a new core form `Foreign` (language, code, string form; `forms.rs` about +8). The rules are `word $code:Text` and `word ( $s:Expr )`.
+- The same deletions as option R.
+- Nodes and M58's `DRAFT` row stay as they are.
+- It keeps a parse that nothing runs yet.
+
+**Extras approved with option R (owner, 2026-11-15: "Approve both").** (1) Fix the `Rest` hole in `rule_arms.rs` so it never starts at a word that goes on with the expression before it; without it, `c as u32` and `c is i64` (a local named `c`) hit the seam. (2) Delete `errors/err_inline_block_text` (it tested the deleted Rust parse). (3) Drop the `let sq = sql("SELECT 1");` line from `milestone51` `test_51_3`.
+
+**As built, option R (2026-11-15).** Rust src 20,572 → 20,564 (−8, not −18): `stmt.rs` −9 (`parse_polyglot_inline` and the receptor-32 arm; `is_stmt_receptor_start` now checks only kind 33), `expr.rs` −1, `declared_names.rs` −10 (`opens_inline_text`), `rule_arms.rs` +12 (extra 1: `goes_on`, an operator word in `infix_ops` or a receptor of the kinds `parse_stmt` already lets follow a word, 19/29/31; it is applied both where `Rest` starts and in the rule-word fallback; a value word such as `true` does not count, so `errors/err_assert_no_parens` keeps its SYN010). The test file `milestone51` lost one line (extra 3). Pilot: `polyglot_syntax.pilot` drops the 23 receptor-32 bindings and adds `w $r:Rest` and `w ( $r:Rest )` for each word, each a `CoreForm::RejectWord` reporting `SEAM001: unconnected seam \`polyglot.inline\``; `seams.pilot` registers `polyglot.inline` (M58). Tests: new `errors/err_polyglot_block_seam`, `errors/err_polyglot_text_seam`, `types/polyglot_words_as_names`; `receptors/rest_hole` gains a `probe as i64` line (expected `4`); `errors/err_inline_block_text` deleted (extra 2). `wiring.pilot` M58 "inline block parsing" is now `SPEC`, blocked by `polyglot.inline`. Verified: seed suite 539 passed, 0 failed, 14 known bugs; `cargo test -p pilot-parser` and `damaged_source --include-ignored` pass; the keyword matrix `--check` passes.
 
 ---
 

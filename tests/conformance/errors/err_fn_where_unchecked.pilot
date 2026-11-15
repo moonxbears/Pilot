@@ -1,0 +1,12 @@
+// SYN001: a `where` clause after a function's signature states a bound
+// nothing checks yet (PROP-009 section 15). It used to be read and thrown
+// away, so `twice(5)` ran although `i64` has no `shout`; written in
+// `<T : IShout>` the same bound is TYPE005.
+// `where` starts at line 8, column 24 (23 characters precede it).
+interface IShout { fn shout(self) -> str; }
+
+fn twice<T>(x: T) -> T where T: IShout => x;
+
+fn main() {
+    print(twice(5));
+}

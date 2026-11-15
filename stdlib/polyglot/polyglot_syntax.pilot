@@ -9,28 +9,60 @@ use Pilot.Core.Genesis.*;
 comptime {
     bind_receptor(nameof(extern),     7,  0);
     bind_receptor(nameof(lib),        8,  0);
+}
 
-    bind_receptor(nameof(c),          32, 1);
-    bind_receptor(nameof(cpp),        32, 2);
-    bind_receptor(nameof(rust),       32, 3);
-    bind_receptor(nameof(rs),         32, 3);
-    bind_receptor(nameof(python),     32, 4);
-    bind_receptor(nameof(py),         32, 4);
-    bind_receptor(nameof(js),         32, 5);
-    bind_receptor(nameof(javascript), 32, 5);
-    bind_receptor(nameof(ts),         32, 6);
-    bind_receptor(nameof(typescript), 32, 6);
-    bind_receptor(nameof(csharp),     32, 7);
-    bind_receptor(nameof(cs),         32, 7);
-    bind_receptor(nameof(lua),        32, 8);
-    bind_receptor(nameof(sql),        32, 9);
-    bind_receptor(nameof(postgres),   32, 10);
-    bind_receptor(nameof(postgresql), 32, 10);
-    bind_receptor(nameof(mysql),      32, 11);
-    bind_receptor(nameof(sqlite),     32, 12);
-    bind_receptor(nameof(wgsl),       32, 13);
-    bind_receptor(nameof(ptx),        32, 14);
-    bind_receptor(nameof(msl),        32, 15);
-    bind_receptor(nameof(java),       32, 16);
-    bind_receptor(nameof(assembly),   32, 17);
+// Inline foreign-language blocks, `word { .. }` and `word("..")`, are not
+// built yet (M58): no engine runs one, so each stops the build at the seam
+// `polyglot.inline`, at the word, instead of being parsed into a node nothing
+// runs (PROP-009 section 17). A word starts a block only when a name, a
+// literal or `{` follows it, or `(`; elsewhere, and in a file that declares a
+// function of that name, it is an ordinary name
+// (tests/conformance/types/polyglot_words_as_names).
+pub syntax {
+    c $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    c ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    cpp $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    cpp ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    rust $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    rust ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    rs $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    rs ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    python $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    python ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    py $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    py ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    js $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    js ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    javascript $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    javascript ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    ts $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    ts ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    typescript $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    typescript ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    csharp $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    csharp ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    cs $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    cs ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    lua $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    lua ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    sql $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    sql ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    postgres $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    postgres ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    postgresql $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    postgresql ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    mysql $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    mysql ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    sqlite $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    sqlite ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    wgsl $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    wgsl ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    ptx $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    ptx ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    msl $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    msl ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    java $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    java ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    assembly $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
+    assembly ( $r:Rest ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `polyglot.inline`: inline foreign-language blocks are not built yet; no engine runs one (M58)", $r) };
 }

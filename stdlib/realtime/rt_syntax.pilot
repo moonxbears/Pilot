@@ -19,8 +19,8 @@ comptime {
 // literal or `{` follows it; elsewhere it is an ordinary name
 // (tests/conformance/types/unbuilt_words_as_names, _2).
 pub syntax {
-    priority $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `priority` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    jitter $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `jitter` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    priority $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `priority` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    jitter $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `jitter` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 // The block forms below are not built yet (docs/keyword_roadmap.md phases K5

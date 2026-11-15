@@ -52,8 +52,8 @@ comptime {
 // literal or `{` follows it; elsewhere it is an ordinary name
 // (tests/conformance/types/unbuilt_words_as_names, _2).
 pub syntax {
-    module $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `module` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
-    macro $r:Rest => quote { form(CoreForm::Reject, "SEAM001: unconnected seam `keyword.unbuilt`: `macro` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    module $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `module` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
+    macro $r:Rest => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `keyword.unbuilt`: `macro` is registered but not built yet (docs/keyword_roadmap.md lists the phase that builds it)", $r) };
 }
 
 pub pure fn visibility_tier_of(word: str) -> i32 {

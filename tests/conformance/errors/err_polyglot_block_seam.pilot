@@ -1,0 +1,8 @@
+// SEAM001: an inline foreign block stops the build at the seam
+// `polyglot.inline` (PROP-009 section 17): no engine runs one yet (M58),
+// so it never parses and then fails late, or silently, somewhere else.
+// The seam is reported at the word `py`, line 7, column 5.
+fn main() {
+    print("before");
+    py { print("hi") }
+}

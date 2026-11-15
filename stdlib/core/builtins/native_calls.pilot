@@ -44,6 +44,12 @@ comptime {
 
     // Methods on strings, lists and records: `value.name(args)`.
     bind_native_method(nameof(len),         "str_len");
+    // A `Map` receiver of known type calls its owner methods
+    // (stdlib/core/primitives/map.pilot, PROP-002b). These name-wide bindings
+    // remain for receivers the seed cannot type (a field of a struct, a
+    // call's result), until the seed types them or the tools that hold such
+    // receivers (the loader's file list in crates/pilot-cli/src/run.rs) link
+    // map.pilot.
     bind_native_method(nameof(get),         "map_get");
     bind_native_method(nameof(set),         "map_set");
     bind_native_method(nameof(has),         "map_has");
@@ -84,6 +90,9 @@ comptime {
     // (selfhost/ir/lower.pilot) reads these to name the engine operation.
     bind_native_member(nameof(List), "[]",  "list_get");
     bind_native_member(nameof(List), "[]=", "list_set");
+    // `Map`'s `op []` and `op []=` call its owner methods on the seed, but
+    // the PilIR lowering does not lower a type's indexer to its method yet,
+    // so it still names the engine operation from these (PROP-002b).
     bind_native_member(nameof(Map),  "[]",  "map_get");
     bind_native_member(nameof(Map),  "[]=", "map_set");
     // The seed holds a slice as its own list; the PilIR lowering indexes it

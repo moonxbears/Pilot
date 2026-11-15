@@ -1,126 +1,15 @@
 // =========================================================================
 // FILE: stdlib/core/primitives/map.pilot
-// ZERO-COPY KEY-VALUE STRIDED PROJECTION (`map<K, V>`, 0b01 IReference)
+// OWNED DICTIONARY (`Map<K, V>`, 0b10 IObject) AND ITS ENGINE-OP OWNERS
 // =========================================================================
+// Every run links this file (selfhost/cli/host.pilot `cli_run_links`), so it
+// imports only what the seed can compile. The borrowed `map<K, V>` view is in
+// map_view.pilot.
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Map;
 
 use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
-use Pilot.Core.Memory::*;
-use Pilot.Core.Keywords::*;
-
-[KeywordDefAttr(29, "Zero-copy key-value strided column projection map.")]
-[Lang(Cfg.Lang.map_t), Layout(c_abi)]
-pub partial struct map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryView<TKey, TVal> {
-    pub keys: stride<TKey>;
-    pub vals: stride<TVal>;
-    pub count: usize { get => .keys.len; }
-
-    pub pure fn contains_key(key: TKey) -> bool {
-        var idx: usize = 0;
-        loop {
-            if !(idx < .keys.len) { break; }
-            if .keys[idx] == key { return true; }
-            idx = idx + 1;
-        }
-        return false;
-    }
-
-    pub pure fn has(key: TKey) -> bool => .contains_key(key);
-
-    pub pure fn find_index(key: TKey) -> isize {
-        var idx: usize = 0;
-        loop {
-            if !(idx < .keys.len) { break; }
-            if .keys[idx] == key { return idx as isize; }
-            idx = idx + 1;
-        }
-        return -1;
-    }
-
-    pub pure fn get(key: TKey) -> option<TVal> {
-        let idx = .find_index(key);
-        if idx >= 0 {
-            return some .vals[idx as usize];
-        }
-        return none;
-    }
-
-    pub pure op [] (key: TKey) -> TVal {
-        let idx = .find_index(key);
-        assert(idx >= 0, "map: key not found");
-        return .vals[idx as usize];
-    }
-}
-
-// Pure Pilot dynamic key-value dictionary (replaces __engine("map_new"), __engine("map_set"), __engine("map_get"))
-[KeywordDefAttr(29, "Owned dynamic heap map buffer backed by linear key/value vectors.")]
-pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuffer<TKey, TVal> {
-    pub keys: SliceBuffer<TKey>;
-    pub vals: SliceBuffer<TVal>;
-
-    pub self() {
-        .keys = SliceBuffer<TKey>();
-        .vals = SliceBuffer<TVal>();
-    }
-
-    pub count: usize { get => .keys.len; }
-
-    pub pure fn find_index(key: TKey) -> isize {
-        var i: usize = 0;
-        loop {
-            if !(i < .keys.len) { break; }
-            if .keys[i] == key { return i as isize; }
-            i = i + 1;
-        }
-        return -1;
-    }
-
-    pub pure fn has(key: TKey) -> bool => .find_index(key) >= 0;
-    pub pure fn contains_key(key: TKey) -> bool => .find_index(key) >= 0;
-
-    pub pure fn get(key: TKey) -> option<TVal> {
-        let idx = .find_index(key);
-        if idx >= 0 { return some .vals[idx as usize]; }
-        return none;
-    }
-
-    pub fn set(key: TKey, val: TVal) {
-        let idx = .find_index(key);
-        if idx >= 0 {
-            .vals[idx as usize] = val;
-        } else {
-            .keys.add(key);
-            .vals.add(val);
-        }
-    }
-
-    pub fn remove(key: TKey) -> bool {
-        let idx = .find_index(key);
-        if idx >= 0 {
-            .keys.remove_at(idx as usize);
-            .vals.remove_at(idx as usize);
-            return true;
-        }
-        return false;
-    }
-
-    pub fn clear() {
-        .keys.clear();
-        .vals.clear();
-    }
-
-    pub pure op [] (key: TKey) -> TVal {
-        let idx = .find_index(key);
-        assert(idx >= 0, "MapBuffer: key not found");
-        return .vals[idx as usize];
-    }
-
-    pub op []= (key: TKey, val: TVal) {
-        .set(key, val);
-    }
-}
 
 // A map owns its values: dropping a map drops each value in the order of
 // their keys (selfhost/check/drops.pilot). The engine holds a map by itself
@@ -132,33 +21,49 @@ comptime {
     bind_owned_elements(nameof(Map), "str_len", "list_get", "map_values", "map_get");
 }
 
-// Canonical type alias & high-level dynamic dictionary
+/// An owned dictionary of values by key. Each public method calls the one
+/// `[EngineOp]` method that holds its engine op (PROP-002a Amendment A1,
+/// PROP-002b). `Map<K, V>()` is still the engine's `map_new` through a
+/// constructor binding (stdlib/core/builtins/native_calls.pilot): a
+/// constructor that sets `self` to an engine handle does not lower to PilIR
+/// yet (`ir.lower_construct`, PROP-002a C1).
+[StandIn("map.storage", "a pure-Pilot hash map holding its keys and values", "the engine's map holds the entries and a Map value is its handle; the type declares no fields", "F6")]
 pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuffer<TKey, TVal> {
-    pub inner: MapBuffer<TKey, TVal>;
+    [EngineOp]
+    priv static fn get_internal(m: Map<TKey, TVal>, key: TKey) -> option<TVal> => __engine("map_get", m, key);
+    [EngineOp]
+    priv static fn set_internal(m: Map<TKey, TVal>, key: TKey, val: TVal) => __engine("map_set", m, key, val);
+    [EngineOp]
+    priv static fn has_internal(m: Map<TKey, TVal>, key: TKey) -> bool => __engine("map_has", m, key);
+    [EngineOp]
+    priv static fn keys_internal(m: Map<TKey, TVal>) -> List<TKey> => __engine("map_keys", m);
+    [EngineOp]
+    priv static fn remove_internal(m: Map<TKey, TVal>, key: TKey) -> bool => __engine("map_remove", m, key);
 
-    pub self() {
-        .inner = MapBuffer<TKey, TVal>();
+    /// The value at `key`, or none (the engine's null; stand-in
+    /// `ir.absent_as_null`).
+    pub pure fn get(key: TKey) -> option<TVal> => Map.get_internal(self, key);
+    /// Sets the value at `key`, replacing any value there.
+    pub fn set(key: TKey, val: TVal) { Map.set_internal(self, key, val); }
+    /// Whether `key` has a value.
+    pub pure fn has(key: TKey) -> bool => Map.has_internal(self, key);
+    /// The keys, in key order.
+    pub pure fn keys() -> List<TKey> => Map.keys_internal(self);
+    /// Removes `key`; false when it was not there.
+    pub fn remove(key: TKey) -> bool => Map.remove_internal(self, key);
+
+    /// How many keys have a value. The engine keeps no count it hands out,
+    /// so this lists the keys (linear in their number).
+    pub count: usize { get => .keys().len(); }
+    /// Removes every key, one at a time (the engine has no op that empties
+    /// a map).
+    pub fn clear() {
+        for k in .keys() {
+            let _ = .remove(k);
+        }
     }
 
-    pub count: usize { get => .inner.count; }
-    pub pure fn has(key: TKey) -> bool => .inner.has(key);
-    pub pure fn keys() -> List<TKey> => List<TKey>();
     pub fn get_enumerator() -> ListEnumerator<TKey> => .keys().get_enumerator();
-    pub pure fn get(key: TKey) -> option<TVal> => .inner.get(key);
-    pub fn set(key: TKey, val: TVal) { .inner.set(key, val); }
-    pub fn remove(key: TKey) -> bool => .inner.remove(key);
-    pub fn clear() { .inner.clear(); }
-    pub pure op [] (key: TKey) -> TVal => .inner[key];
-    pub op []= (key: TKey, val: TVal) { .inner[key] = val; }
-
-    pub static fn new_handle() -> i64 => __engine("map_new");
-    pub static fn set_handle(m: i64, key: any, val: any) -> i64 => __engine("map_set", m, key, val);
-    pub static fn get_handle(m: i64, key: any) -> any => __engine("map_get", m, key);
-    pub static fn has_handle(m: i64, key: any) -> bool => __engine("map_has", m, key) as bool;
+    pub pure op [] (key: TKey) -> TVal => .get(key) ?? fault("Map: key not found");
+    pub op []= (key: TKey, val: TVal) { .set(key, val); }
 }
-
-// Pure Pilot stand-alone functional map primitives (replaces direct __engine calls)
-pub pure fn map_new_pure() -> i64 => __engine("map_new");
-pub fn map_set_pure(m: i64, k: str, v: any) -> i64 => __engine("map_set", m, k, v);
-pub pure fn map_get_pure(m: i64, k: str) -> any => __engine("map_get", m, k);
-pub fn map_has_pure(m: i64, k: str) -> bool => __engine("map_has", m, k) as bool;

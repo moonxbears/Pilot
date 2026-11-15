@@ -163,10 +163,21 @@ pub fn cli_checker_files() -> List<str> => [
 /// (`selfhost/check/drops.pilot`) says.
 pub fn host_run(path: str, args: List<str>, tail: str) -> RunOutcome => host_run_with(path, args, tail, []);
 
+/// The core files every run links after the program, so the seed compiles
+/// the owner methods they declare (PROP-002b: `Map`'s methods are its owner
+/// methods, not native bindings).
+pub fn cli_run_links() -> List<str> => [
+    "stdlib/core/primitives/map.pilot",
+];
+
 /// `host_run`, with the files `links` names (and those they import) linked
 /// before `tail`, so the tail can use what they declare.
 pub fn host_run_with(path: str, args: List<str>, tail: str, links: List<str>) -> RunOutcome {
-    let raw = __engine("cli_run", path, args, tail, cli_checker_files(), cli_checker_decls(), links);
+    var all = cli_run_links();
+    for l in links {
+        all.push(l);
+    }
+    let raw = __engine("cli_run", path, args, tail, cli_checker_files(), cli_checker_decls(), all);
     return RunOutcome { exit_code: raw[0], diags: host_diags(raw[1]) };
 }
 

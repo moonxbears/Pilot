@@ -93,9 +93,9 @@ impl<'a> Parser<'a> {
             }
         lhs }
     /// Whether the word at the cursor starts a statement: a `syntax` rule's
-    /// word, or a polyglot or contract block.
+    /// word, or a contract block.
     pub(crate) fn is_stmt_receptor_start(&self) -> bool {
-        self.tables.seq_rules.contains_key(self.text()) || self.receptor().is_some_and(|(rk, _)| matches!(rk, 32 | 33))
+        self.tables.seq_rules.contains_key(self.text()) || self.receptor().is_some_and(|(rk, _)| rk == 33)
     }
     pub(crate) fn parse_block(&mut self) -> NodeId { let sp = self.span(); self.expect(TokenKind::LBrace);
         self.hdr_stack.push(self.active_hdr.take()); let mut items = Vec::new();
@@ -127,15 +127,6 @@ impl<'a> Parser<'a> {
             TokenKind::RawDslBlock => { let raw = self.text(); self.advance(); let inner = raw.trim_start_matches('`').trim_end_matches('`'); let (lang, code) = inner.split_once('\n').unwrap_or(("dsl", inner)); self.arena.alloc_polyglot_block(lang.trim(), code.trim(), 0, sp) }
             _ if self.is_word() => { if let Some(n) = self.expand_seq_rule() { return n; }
                  if let Some((rk, _)) = self.receptor() { match rk {
-                        3 => {
-                            // An `else` reached as a statement has no `if` before it.
-                            self.advance();
-                            let msg = "`else` must follow the block of an `if` (or a `guard` condition)";
-                            self.arena.diagnostics.push((sp, msg.into()));
-                            if self.at(TokenKind::LBrace) { let _ = self.parse_block(); } else { let _ = self.parse_stmt(); }
-                            return NodeId::NONE;
-                        }
-                        32 if matches!(self.tape.kind(self.next_non_nl(self.cur() + 1)), TokenKind::LBrace | TokenKind::LParen) => return self.parse_polyglot_inline(),
                         _ => {} } }
                 if self.receptor() == Some(EXCLUDE_RECEPTOR) && self.word_follows() {
                     return self.parse_exclude_decl();
@@ -251,14 +242,6 @@ impl<'a> Parser<'a> {
             } else { fields.push(self.arena.alloc_node(NodeKind::PatBind, 0, fsp, key.0, 0)); }
             if !self.eat(TokenKind::Comma) { self.skip_seps(); if !self.at(TokenKind::RBrace) { break; } } }
         self.expect(TokenKind::RBrace); fields }
-    pub(crate) fn parse_polyglot_inline(&mut self) -> NodeId { let (sp, lang) = (self.span(), self.text().to_string()); self.advance();
-        if self.at(TokenKind::LBrace) {
-            let code = self.inline_block_code();
-            self.arena.alloc_polyglot_block(&lang, code.trim(), 0, ByteSpan::new(sp.start, self.prev_span().end))
-        } else if self.eat(TokenKind::LParen) { let e = self.parse_expr(); self.expect(TokenKind::RParen);
-            let txt = if !e.is_none() && self.arena.node(e).node_kind() == NodeKind::StrLit { self.arena.interner.resolve(SymbolId(self.arena.node(e).lhs)).to_string() } else { String::new() };
-            self.arena.alloc_polyglot_block(&lang, &txt, 1, ByteSpan::new(sp.start, self.prev_span().end))
-        } else { NodeId::NONE } }
 }
 
 /// The `BinaryOp` an assignment token stores: 0 for `=`, the combined

@@ -1,0 +1,8 @@
+// SYN001: an `else if` with no `if` before it is refused, like a stray
+// `else { .. }` (err_else_without_if); it is not read as a name.
+fn main() {
+    let x = 1;
+    print(x);
+    // The stray `else` starts at line 7, column 5.
+    else if x > 0 { print(2); }
+}

@@ -101,14 +101,15 @@ pub fn airlock_c_structs() -> List<List<any>> => [
     ["OsFfiRetRegs", 80, 16, ["gpr", "vec"]],
 ];
 
-/// Frozen Model B+ `bridge_lang.pilot` hooks (70 compile-time hooks).
+/// Frozen Model B+ `bridge_lang.pilot` hooks (64 compile-time hooks; the six
+/// `emit_ssa_*` hooks were unfrozen and removed by the owner, PROP-009 step 3
+/// option (b), 2026-11-15).
 pub fn airlock_lang_hooks() -> List<str> => [
     "register_bracket_attribute", "bind_lang_item", "set_register_layout", "set_memory_layout",
     "set_inline_hint", "register_syntax_keyword", "bind_lattice_kind", "get_lattice_bits",
     "enforce_core_naming_lint", "seal_bootstrap_bridge",
     "register_modifier", "register_parametric_modifier", "register_module_kw", "bind_receiver_ident",
     "bind_receptor", "decl_operator_fn", "cfg_jump_loop_exit", "cfg_jump_loop_head",
-    "emit_ssa_binop", "emit_ssa_unop", "emit_ssa_cast", "emit_ssa_load", "emit_ssa_store", "emit_ssa_gep",
     "query_is_comptime_vm", "emit_diagnostic_error", "type_name_of", "ast_source_lines",
     "parse_ast_fragment", "replace_ast_pattern", "register_attr_weaver",
     "type_sizeof", "type_alignof", "type_offsetof", "type_fields_of", "type_is_copy",
@@ -145,6 +146,49 @@ pub fn airlock_owner_files() -> Map<str, str> {
     m.set("Entropy", "stdlib/core/env.pilot");
     m.set("Ffi", "stdlib/core/env.pilot");
     return m;
+}
+
+/// Owners of Stage-A data ops (PROP-002b): `[native, owner, file]`. Each is a
+/// `priv static fn <m>_internal` marked `[EngineOp]` whose whole body is
+/// `__engine("<native>", ..)`, called only by the type's public method `<m>`.
+/// Unlike a `HostOp`, the op may still appear outside its owner: about 1,900
+/// raw `__engine("map_*")` sites in legacy files wait for PROP-002b bucket B.
+pub fn airlock_native_owners() -> List<List<str>> => [
+    ["map_get",    "Map.get",    "stdlib/core/primitives/map.pilot"],
+    ["map_set",    "Map.set",    "stdlib/core/primitives/map.pilot"],
+    ["map_has",    "Map.has",    "stdlib/core/primitives/map.pilot"],
+    ["map_keys",   "Map.keys",   "stdlib/core/primitives/map.pilot"],
+    ["map_remove", "Map.remove", "stdlib/core/primitives/map.pilot"],
+];
+
+/// Check 6: each Stage-A data op's owner (`airlock_native_owners()`) exists
+/// with the op as its whole body, and only its public method calls it.
+fn ab_check_native_owners(root: str, violations: i64) {
+    for row in airlock_native_owners() {
+        let nat = row[0];
+        let owner = row[1];
+        let file = row[2];
+        let src = gate_fs_read_text(gm_join_path(root, file));
+        let dot = gm_find(owner, ".", 0);
+        let ty = owner.slice(0, dot);
+        let meth = owner.slice(dot + 1, owner.len());
+        let head = gm_find(src, f"[EngineOp]\n    priv static fn {meth}_internal(", 0);
+        let arrow = if head < 0 { -1 } else { gm_find(src, "=>", head) };
+        let semi = if head < 0 { -1 } else { gm_find(src, ";", head) };
+        let body = gm_find(src, f"=> __engine(\"{nat}\", ", head);
+        if head < 0 || arrow < 0 || body != arrow || semi < body {
+            let _ = glist_push(violations, ab_viol(file, owner, f"{owner}_internal must be a `priv static fn` marked [EngineOp] whose whole body is `__engine(\"{nat}\", ...)`"));
+            continue;
+        }
+        let calls = ab_count_calls(src, meth + "_internal");
+        let public = gm_find(src, f"pub fn {meth}(", 0);
+        let public_pure = gm_find(src, f"pub pure fn {meth}(", 0);
+        let ppos = if public >= 0 { public } else { public_pure };
+        let only = gm_find(src, f"{ty}.{meth}_internal(", 0);
+        if calls != 1 || ppos < 0 || only < ppos || gm_find(src, ";", ppos) < only {
+            let _ = glist_push(violations, ab_viol(file, owner, f"{owner}_internal must have exactly one caller, the public method `{meth}`; found {calls}"));
+        }
+    }
 }
 
 /// `TRANSITIONAL_NATIVE_BINDINGS` (Amendment A1): the Stage-A natives that
@@ -329,6 +373,8 @@ pub fn verify_airlock_abi(root: str, violations: i64) {
             let _ = glist_push(violations, ab_viol(files.get(ty), owner, f"{owner}_internal must have exactly one caller, `pub static fn {meth}`; found {calls}"));
         }
     }
+
+    ab_check_native_owners(root, violations);
 
     // Check 4: native bindings only name transitional Stage-A natives.
     let allowed = Map<str, bool>();

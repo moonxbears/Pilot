@@ -1,9 +1,9 @@
-benchmark	pilot_us	c_us	pilot_over_c
-fib	13879	14923	0.93
-numeric_loop	177270	182522	0.97
-string_build	8759	5838	1.50
-map_workload	395852	120906	3.27
-records	26727	3141	8.51
-string_compare	523247	73415	7.13
-string_find	17993	8957	2.01
-string_map	196079	123985	1.58
+benchmark	seed_us	pilot_us	c_us	seed_over_c	pilot_over_c
+fib	711021	2963	2900	245.18	1.02
+numeric_loop	1825113	38302	37991	48.04	1.01
+string_build	468387	1898	923	507.46	2.06
+map_workload	499508	75152	44062	11.34	1.71
+records	1756300	19097	1267	1386.19	15.07
+string_compare	1374717	96680	21166	64.95	4.57
+string_find	1144568	3000	1393	821.66	2.15
+string_map	538926	37749	24430	22.06	1.55

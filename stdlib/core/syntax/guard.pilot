@@ -21,3 +21,11 @@ pub syntax {
     guard $( some )? $( let )? $c:Expr $( = $v:Expr )?
         => quote { form(CoreForm::Reject, "NULL002: 'guard' statement requires an 'else' block with early exit", $c) };
 }
+
+// An `else` that no `if` or `guard` took (they read their own `else`) is
+// refused at the word, not read as a name. `else` stays bound to receptor 3
+// for the seed's `if` (PROP-009 section 14).
+pub syntax {
+    else if $r:Rest => quote { form(CoreForm::RejectWord, "`else` must follow the block of an `if` (or a `guard` condition)", $r) };
+    else $r:Rest => quote { form(CoreForm::RejectWord, "`else` must follow the block of an `if` (or a `guard` condition)", $r) };
+}

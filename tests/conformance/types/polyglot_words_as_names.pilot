@@ -1,0 +1,20 @@
+// The inline foreign-block words (`c`, `cs`, `ts`, `py`, ..) start a block
+// only before a name, a literal or a `{` that is not a condition's block
+// (and `word(..)`); elsewhere each is an ordinary name (PROP-009 section 17).
+// A file that declares a function of that name calls it.
+//
+// Expected, by hand: c = 2 and ts = 3, so c + ts = 5; py(4) = 4 * 2 = 8; the
+// `while` counts n up to c = 2; cs = [2, 3] has 2 elements.
+fn py(x: i64) -> i64 => x * 2;
+
+fn main() {
+    let c = 2;
+    let ts = 3;
+    print(c + ts);
+    print(py(4));
+    var n = 0;
+    while n < c { n = n + 1; }
+    print(n);
+    let cs = [c, ts];
+    print(cs.len());
+}

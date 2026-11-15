@@ -1,30 +1,42 @@
 // ==============================================================================
 // FILE: benchmarks/native/record.pilot
-// Records the F6 native baseline: each benchmark built by `pilot build` and
-// its C reference built by `cc -O2`, timed, in benchmarks/native/baseline.tsv.
+// Records the speed baseline: each benchmark run on the seed (`pilot run`),
+// built by `pilot build`, and its C reference built by `cc -O2`, timed, in
+// benchmarks/native/baseline.tsv. The seed column is the C2 baseline of
+// proposals.md PROP-002a.
 // ==============================================================================
 // Run from the repository root:
-//     pilot run benchmarks/native/record.pilot
-// Each program is run `runs()` times and its fastest wall-clock time kept
+//     target/release/pilot run benchmarks/native/record.pilot
+// The seed column times the `pilot` that runs this file, so run the release
+// build. Each program is run `runs()` times and its fastest wall-clock time kept
 // (process start included). A program whose output is not its `.stdout`
-// stops the recording. The table's columns: benchmark, Pilot microseconds,
-// C microseconds, and Pilot's time as a multiple of C's.
+// stops the recording. The table's columns: benchmark, seed microseconds,
+// native Pilot microseconds, C microseconds, and the seed's and native
+// Pilot's times as multiples of C's.
+//
+//     target/release/pilot run benchmarks/native/record.pilot -- --check
+// times each program on the seed only, writes nothing, and exits 1 when any
+// is more than `slower_max_percent()` slower than its seed time in
+// baseline.tsv (the C2 regression threshold the owner set on 2026-11-15).
 use Pilot.Core.File;
+use std.env;
 use std.proc;
 use std.time;
 
 fn dir() -> str => "benchmarks/native";
 fn out_dir() -> str => "target/bench-native";
 fn runs() -> i64 => 5;
+fn slower_max_percent() -> i64 => 5;
+fn names() -> List<str> => ["fib", "numeric_loop", "string_build", "map_workload", "records", "string_compare", "string_find", "string_map"];
 
-/// The fastest of `runs()` runs of `bin`, in microseconds; -1 when its
-/// output is not `want`.
-fn fastest(bin: str, want: str) -> i64 {
+/// The fastest of `runs()` runs of `bin` with `args`, in microseconds; -1
+/// when its output is not `want`.
+fn fastest(bin: str, args: List<str>, want: str) -> i64 {
     var best = -1;
     var i = 0;
     while i < runs() {
         let t0 = time.monotonic_micros();
-        let out = proc.run(bin, [], "");
+        let out = proc.run(bin, args, "");
         let dt = time.monotonic_micros() - t0;
         if out.stdout != want || out.exit_code != 0 {
             eprint(f"{bin}: wrong output\n{out.stdout}{out.stderr}");
@@ -43,10 +55,57 @@ fn ratio(x: i64, y: i64) -> str {
     return f"{hundredths / 100}." + (if frac < 10 { "0" } else { "" }) + f"{frac}";
 }
 
+/// The decimal number at the start of `s` (its leading digits).
+fn leading_int(s: str) -> i64 {
+    var v = 0;
+    var i: usize = 0;
+    while i < s.len() && s.byte_at(i) >= 48 && s.byte_at(i) <= 57 {
+        v = v * 10 + (s.byte_at(i) as i64 - 48);
+        i = i + 1;
+    }
+    return v;
+}
+
+/// The seed time (second column) of benchmark `b` in `table`; -1 when `b`
+/// has no row.
+fn seed_time(table: str, b: str) -> i64 {
+    let row = "\n" + b + "\t";
+    let at = table.index_of(row);
+    if at < 0 { return -1; }
+    let start = at as usize + row.len();
+    return leading_int(table.slice(start, table.len()));
+}
+
+/// `--check`: each benchmark's seed time against the baseline's.
+fn check(exe: str) -> i64 {
+    let table = File.read_text(f"{dir()}/baseline.tsv");
+    var failed = 0;
+    for b in names() {
+        let base = seed_time(table, b);
+        if base < 0 {
+            eprint(f"{b}: no seed time in baseline.tsv\n");
+            return 1;
+        }
+        let s = fastest(exe, ["run", f"{dir()}/{b}.pilot"], File.read_text(f"{dir()}/{b}.stdout"));
+        if s < 0 { return 1; }
+        let limit = base + base * slower_max_percent() / 100;
+        if s > limit {
+            print(f"{b}: seed {s} us, baseline {base} us, over the {slower_max_percent()}% limit ({limit} us)");
+            failed = failed + 1;
+        } else {
+            print(f"{b}: seed {s} us, baseline {base} us, {ratio(s, base)}x, ok");
+        }
+    }
+    if failed > 0 { return 1; }
+    return 0;
+}
+
 fn main() -> i64 {
     let exe = proc.current_exe() ?? "pilot";
-    var table = "benchmark\tpilot_us\tc_us\tpilot_over_c\n";
-    for b in ["fib", "numeric_loop", "string_build", "map_workload", "records", "string_compare", "string_find", "string_map"] {
+    let args = env.args();
+    if args.len() > 0 && args[args.len() - 1] == "--check" { return check(exe); }
+    var table = "benchmark\tseed_us\tpilot_us\tc_us\tseed_over_c\tpilot_over_c\n";
+    for b in names() {
         let want = File.read_text(f"{dir()}/{b}.stdout");
         let bin = f"{out_dir()}/{b}";
         let built = proc.run(exe, ["build", f"{dir()}/{b}.pilot", "-o", bin], "");
@@ -60,11 +119,12 @@ fn main() -> i64 {
             eprint(f"{b}: cc failed\n{cc.stderr}");
             return 1;
         }
-        let p = fastest(bin, want);
-        let c = fastest(c_bin, want);
-        if p < 0 || c < 0 { return 1; }
-        print(f"{b}: pilot {p} us, C {c} us, {ratio(p, c)}x");
-        table = table + f"{b}\t{p}\t{c}\t{ratio(p, c)}\n";
+        let s = fastest(exe, ["run", f"{dir()}/{b}.pilot"], want);
+        let p = fastest(bin, [], want);
+        let c = fastest(c_bin, [], want);
+        if s < 0 || p < 0 || c < 0 { return 1; }
+        print(f"{b}: seed {s} us, pilot {p} us, C {c} us, seed {ratio(s, c)}x, pilot {ratio(p, c)}x");
+        table = table + f"{b}\t{s}\t{p}\t{c}\t{ratio(s, c)}\t{ratio(p, c)}\n";
     }
     if !File.write_text(f"{dir()}/baseline.tsv", table) {
         eprint("cannot write the baseline");

@@ -29,14 +29,4 @@ impl<'a> Parser<'a> {
         }
         false
     }
-
-    /// Whether the word at the cursor, followed by the `(` at `open`, opens
-    /// an inline foreign block: the parentheses hold a string literal and
-    /// the file declares no function of that name.
-    pub(crate) fn opens_inline_text(&self, open: usize) -> bool {
-        let first = self.next_non_nl(open + 1);
-        first < self.tape.len()
-            && matches!(self.tape.kind(first), TokenKind::StrLit | TokenKind::TripleStrLit)
-            && !self.file_declares_fn(self.text())
-    }
 }

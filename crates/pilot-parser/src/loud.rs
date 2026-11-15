@@ -99,16 +99,17 @@ impl Parser<'_> {
     }
 
 
-    /// `where` clauses after a type's header: read past and reported, since
-    /// nothing checks them.
-    pub(crate) fn type_where_loudly(&mut self) {
+    /// `where` clauses after a type's header or a function's signature: read
+    /// past, up to the body or a contract clause, and reported with
+    /// `message`, since nothing checks them.
+    pub(crate) fn where_loudly(&mut self, message: &str) {
         while self.is_rec(28) {
             let start = self.span().start;
             self.advance();
-            while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::Semicolon) {
+            while !self.at_end() && !matches!(self.peek(), TokenKind::LBrace | TokenKind::Semicolon | TokenKind::FatArrow) && !self.at_contract_clause() {
                 self.advance();
             }
-            self.report_loud(start, "a `where` clause on a type declaration is not checked yet".into());
+            self.report_loud(start, message.into());
         }
     }
 

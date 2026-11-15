@@ -1074,18 +1074,19 @@ static inline pilot_val pilot_map_has(pilot_val o, pilot_val k) {
     pilot_v_map *m = pilot_v_need_map(o, "read", k);
     return pilot_v_bool(pilot_v_map_find(m, k)->state == 1);
 }
-/* The removed value: the map's reference passes to the caller. */
+/* Whether `k` was there (`IDictionary.remove`, as on the seed); the removed
+   key and value are dropped. */
 static inline pilot_val pilot_map_remove(pilot_val o, pilot_val k) {
     pilot_v_map *m = pilot_v_need_map(o, "write", k);
     pilot_v_map_entry *e = pilot_v_map_find(m, k);
-    if (e->state != 1) return PILOT_V_NULL;
+    if (e->state != 1) return pilot_v_bool(0);
     e->state = 2;
     m->count--;
     pilot_v_drop(e->key);
-    pilot_val out = e->val;
+    pilot_v_drop(e->val);
     e->key = PILOT_V_NULL;
     e->val = PILOT_V_NULL;
-    return out;
+    return pilot_v_bool(1);
 }
 static inline pilot_val pilot_list_push(pilot_val l, pilot_val x) {
     pilot_v_list *p = pilot_v_need_list(l, "push onto");

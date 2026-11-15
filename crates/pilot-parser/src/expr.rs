@@ -219,8 +219,6 @@ impl<'a> Parser<'a> {
                             let bp = self.tables.prefix_bp_of_kind(TokenKind::Exclamation).unwrap_or(LEVEL_BASE);
                             return self.parse_expr_bp(bp);
                         }
-                        32 if nx < self.tape.len() && ((matches!(self.tape.kind(nx), TokenKind::LParen) && self.opens_inline_text(nx)) || (!self.no_struct_lit && matches!(self.tape.kind(nx), TokenKind::LBrace))) => return self.parse_polyglot_inline(),
-                        33 if pl == 7 && nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LBrace => { self.advance(); return self.parse_block(); }
                         37 if pl >= 1 && pl <= 6 => {
                             if nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || is_seed_kw(self.tape.kind(nx))) {
                                 let mut p_check = nx;

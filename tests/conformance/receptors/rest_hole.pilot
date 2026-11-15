@@ -6,7 +6,8 @@
 //
 // Expected, by hand: probe = 4, so probe + 1 = 5; twice(4) = 8; the `while`
 // counts n up to probe = 4; [4, 2] gives 4 * 2 = 8; `switch 4` takes
-// `case 4`; size("abc") is 3.
+// `case 4`; size("abc") is 3; probe as i64 is 4 (`as` goes on with the
+// expression, so it starts no `Rest`).
 pub syntax {
     probe $r:Rest => quote { form(CoreForm::Reject, "SYN010: `probe` takes no code here", $r) };
 }
@@ -31,4 +32,5 @@ fn main() {
         default: print("other");
     }
     print(size("abc"));
+    print(probe as i64);
 }

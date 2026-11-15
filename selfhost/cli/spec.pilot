@@ -13,50 +13,50 @@ pub pure fn nameof(sym: str) -> str => sym;
 // Internal dynamic list and map helpers built on core Map primitives
 // ------------------------------------------------------------------------------
 
-pub fn cli_list_new() -> i64 {
-    let m = Map.new_handle();
-    Map.set_handle(m, "count", 0);
+pub fn cli_list_new() -> Map<any, any> {
+    let m = Map<any, any>();
+    m.set("count", 0);
     return m;
 }
 
-pub fn cli_list_len(list: i64) -> usize {
-    return Map.get_handle(list, "count") + 0;
+pub fn cli_list_len(list: Map<any, any>) -> usize {
+    return list.get("count") ?? 0;
 }
 
-pub fn cli_list_push(list: i64, item: any) -> usize {
+pub fn cli_list_push(list: Map<any, any>, item: any) -> usize {
     let idx = cli_list_len(list);
-    Map.set_handle(list, idx, item);
-    Map.set_handle(list, "count", idx + 1);
+    list.set(idx, item);
+    list.set("count", idx + 1);
     return idx + 1;
 }
 
-pub fn cli_list_get(list: i64, idx: usize) -> any {
-    return Map.get_handle(list, idx);
+pub fn cli_list_get(list: Map<any, any>, idx: usize) -> any {
+    return list.get(idx);
 }
 
-pub fn cli_list_get_str(list: i64, idx: usize) -> str {
-    return Map.get_handle(list, idx);
+pub fn cli_list_get_str(list: Map<any, any>, idx: usize) -> str {
+    return list.get(idx);
 }
 
-pub fn cli_map_new() -> i64 {
-    return Map.new_handle();
+pub fn cli_map_new() -> Map<any, any> {
+    return Map<any, any>();
 }
 
-pub fn cli_map_set(m: i64, key: str, val: any) -> i64 {
-    Map.set_handle(m, key, val);
+pub fn cli_map_set(m: Map<any, any>, key: str, val: any) -> Map<any, any> {
+    m.set(key, val);
     return m;
 }
 
-pub fn cli_map_get(m: i64, key: str) -> any {
-    return Map.get_handle(m, key);
+pub fn cli_map_get(m: Map<any, any>, key: str) -> any {
+    return m.get(key);
 }
 
-pub fn cli_map_get_int(m: i64, key: str) -> i64 {
-    return Map.get_handle(m, key) as i64;
+pub fn cli_map_get_int(m: Map<any, any>, key: str) -> i64 {
+    return m.get(key) as i64;
 }
 
-pub fn cli_map_contains(m: i64, key: str) -> bool {
-    return Map.has_handle(m, key);
+pub fn cli_map_contains(m: Map<any, any>, key: str) -> bool {
+    return m.has(key);
 }
 
 // ------------------------------------------------------------------------------
@@ -102,8 +102,8 @@ pub struct CommandSpec : IValue {
     pub category:           str;
     pub summary:            str;
     pub examples:           str;
-    pub flags_handle:       i64;
-    pub positionals_handle: i64;
+    pub flags_handle:       Map<any, any>;
+    pub positionals_handle: Map<any, any>;
 }
 
 // ------------------------------------------------------------------------------

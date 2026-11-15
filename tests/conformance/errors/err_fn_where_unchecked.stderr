@@ -1,0 +1,2 @@
+error[SYN001]: a `where` clause on a function is not checked yet; write the bound in `<T : I>`
+err_fn_where_unchecked.pilot:8:24

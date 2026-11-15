@@ -1,0 +1,11 @@
+// Child program for tests/conformance/runtime/proc_large_output.pilot.
+// Writes 100,000 bytes to standard output, then 100,000 to standard error:
+// 2,000 lines of 49 letters and a newline (50 bytes) on each. Both are well
+// past a 64 KiB pipe buffer, so a parent that waits for the exit before
+// reading, or reads one stream to its end before the other, never finishes.
+fn main() {
+    var line = "";
+    for i in 0 .. 49 { line = line + "a"; }
+    for i in 0 .. 2000 { print(line); }
+    for i in 0 .. 2000 { eprint(line); }
+}

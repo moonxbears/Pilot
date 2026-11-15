@@ -1,0 +1,19 @@
+// `Map.count` and `Map.clear` exist only in stdlib/core/primitives/map.pilot
+// (no engine binding answers them), so they run only because every program
+// is linked with it (PROP-002b, the Map slice). Before that, `m.count` printed
+// `null` and `m.clear()` stopped with "no method `clear`".
+//
+// Worked by hand: three keys set -> count 3; one removed -> 2; clear -> 0,
+// and a cleared map has none of its old keys.
+fn main() {
+    let m = Map<str, i64>();
+    m.set("x", 1);
+    m.set("y", 2);
+    m.set("z", 3);
+    print(m.count);
+    let _ = m.remove("y");
+    print(m.count);
+    m.clear();
+    print(m.count);
+    print(m.has("x"));
+}
