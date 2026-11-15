@@ -36,7 +36,8 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RBracket);
                 lhs = self.arena.alloc_node(NodeKind::IndexExpr, 0, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, idx.0);
                 continue; }
-            if k == TokenKind::Question && min_bp <= 95 {
+            // Postfix `x?`: its power is the one its grammar entry declares.
+            if k == TokenKind::Question && self.tables.postfix_ops.get(self.text()).is_some_and(|&bp| min_bp <= bp) {
                 self.advance();
                 lhs = self.arena.alloc_node(NodeKind::TryPropagateExpr, 0, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, 0);
                 continue;
@@ -57,20 +58,22 @@ impl<'a> Parser<'a> {
                 lhs = self.arena.alloc_node(NodeKind::CascadeExpr, safe, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, step.0);
                 continue; }
             // `expr catch err => fallback`: the fallback is a `CatchClause` binding `err`.
-            if self.is_rec(19) && min_bp <= 6 { let csp = self.span(); self.advance(); let nx = self.next_non_nl(self.cur() + 1);
+            if self.is_rec(19) && min_bp <= CLAUSE_BP { let csp = self.span(); self.advance(); let nx = self.next_non_nl(self.cur() + 1);
                 let psym = if self.is_word() && nx < self.tape.len() && self.tape.kind(nx) == TokenKind::FatArrow { self.intern_cur() } else { SymbolId(0) };
                 let _ = self.eat(TokenKind::FatArrow);
-                let fb = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr_bp(6) };
+                let fb = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr_bp(CLAUSE_BP) };
                 let clause = self.arena.alloc_node(NodeKind::CatchClause, 0, ByteSpan::new(csp.start, self.prev_span().end), psym.0, fb.0);
                 lhs = self.arena.alloc_node(NodeKind::CatchRecoveryExpr, 0, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, clause.0);
                 continue; }
             // `x in xs`: the word that heads a `for` loop's iterable, between
             // two expressions, calls the bound membership function.
-            if self.receptor() == Some((10, 0)) && min_bp <= MEMBERSHIP_BP {
+            // Its power is the one the grammar declares for the word.
+            let membership_bp = self.tables.infix_ops.get(self.text()).filter(|e| e.shape as usize == SHAPE_MEMBERSHIP).map(|e| e.bp);
+            if self.receptor() == Some((10, 0)) && membership_bp.is_some_and(|bp| min_bp <= bp) {
                 if let Some(function) = self.tables.membership().map(str::to_string) {
                     let wsp = self.span();
                     self.advance();
-                    let rhs = self.parse_expr_bp(MEMBERSHIP_BP + 1);
+                    let rhs = self.parse_expr_bp(membership_bp.unwrap_or(LEVEL_BASE).saturating_add(1));
                     let span = ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end);
                     let range_fn = if rhs.is_some() {
                         let rhs_node = *self.arena.node(rhs);
@@ -103,9 +106,14 @@ impl<'a> Parser<'a> {
                 lhs = self.arena.alloc_node(NodeKind::BinaryExpr, op, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, ty.0);
                 continue; }
             if k == TokenKind::DotDot && self.in_cascade_step && self.cascade_step_ahead() { break; }
-            let op_entry = if let Some((31, code)) = self.receptor() {
-                (code != 1 && code != 2).then_some(PrattEntry { bp: if code == 15 { 12 } else if code == 14 { 14 } else { 45 }, right_assoc: false, bin_op: code as u16 })
-            } else { self.tables.infix_ops.get(self.text()).copied() };
+            // Symbols and readable words alike (`&&` and `and`) come from the
+            // grammar; `as` and `in` are read by their own shapes above.
+            let op_entry = self
+                .tables
+                .infix_ops
+                .get(self.text())
+                .copied()
+                .filter(|e| !matches!(e.shape as usize, SHAPE_TYPE_RIGHT | SHAPE_MEMBERSHIP));
             let Some(pe) = op_entry else { break; };
             if pe.bp < min_bp { break; }
             self.advance();
@@ -165,25 +173,52 @@ impl<'a> Parser<'a> {
                 self.arena.alloc_node(NodeKind::MemberExpr, MEMBER_IMPLIED_RECEIVER, ByteSpan::new(sp.start, self.prev_span().end), rcv.0, fld.0) }
             TokenKind::ColonColon => { self.advance(); let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::IdentExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, 0) }
             TokenKind::Minus | TokenKind::Plus | TokenKind::Exclamation | TokenKind::CallQuoteShallow | TokenKind::Tilde | TokenKind::Amper | TokenKind::KwRef | TokenKind::ArrowLeft
-            | TokenKind::Star | TokenKind::DoubleStar | TokenKind::StarDotDot | TokenKind::GreaterDotDot => { let (fl, bp) = match self.peek() {
-                    TokenKind::Amper | TokenKind::KwRef | TokenKind::Plus => (1u16, 80u8), TokenKind::ArrowLeft => (3, 80), TokenKind::Tilde => (4, 80),
-                    TokenKind::Exclamation | TokenKind::CallQuoteShallow => (5, 80), TokenKind::Star => (UNARY_OP_SPLAT, 90), TokenKind::DoubleStar => (UNARY_OP_DOUBLE_SPLAT, 90),
-                    TokenKind::StarDotDot => (UNARY_OP_DEEP_FLATTEN, 90), _ => (0, 80), };
-                    self.advance();
-                    let v = self.parse_expr_bp(bp);
-                self.arena.alloc_node(NodeKind::UnaryExpr, fl, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0) }
+            | TokenKind::Star | TokenKind::DoubleStar | TokenKind::StarDotDot | TokenKind::GreaterDotDot => {
+                let fl = prefix_flag(self.peek());
+                // The power its grammar entry declares; `ref` (a seed word)
+                // binds like the borrow operator `&`.
+                let declared = if self.at(TokenKind::KwRef) {
+                    self.tables.prefix_bp_of_kind(TokenKind::Amper)
+                } else {
+                    self.tables.prefix_ops.get(self.text()).copied()
+                };
+                let bp = match declared {
+                    Some(bp) => bp,
+                    None => {
+                        let msg = format!("SYN001: `{}` is not a declared prefix operator (stdlib/core/operators)", self.text());
+                        self.arena.diagnostics.push((sp, msg));
+                        LEVEL_BASE
+                    }
+                };
+                self.advance();
+                let v = self.parse_expr_bp(bp);
+                self.arena.alloc_node(NodeKind::UnaryExpr, fl, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0)
+            }
             TokenKind::LParen => self.parse_paren_or_lambda(), TokenKind::LBracket => self.parse_bracket_lit(),
             TokenKind::LBrace => if self.looks_like_brace_map() { self.parse_brace_map() } else { self.parse_block() },
             _ if self.is_word() => { let nx = self.next_non_nl(self.cur() + 1);
                 if self.tables.modifiers.get(self.text()) == Some(&ModAct::Mut) && nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || matches!(self.tape.kind(nx), TokenKind::KwRef | TokenKind::Amper)) {
                     self.advance(); return self.parse_prefix(); }
+                // A readable prefix word (`not`): the node of the symbol it
+                // pairs with, at that symbol's power.
+                if let Some(sym) = self.tables.prefix_words.get(self.text()).cloned() {
+                    let bp = self.tables.prefix_ops.get(self.text()).copied().unwrap_or(LEVEL_BASE);
+                    let fl = first_token_kind(&sym).map_or(0, prefix_flag);
+                    self.advance();
+                    let v = self.parse_expr_bp(bp);
+                    return self.arena.alloc_node(NodeKind::UnaryExpr, fl, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0);
+                }
                 if let Some((rk, pl)) = self.receptor() { match rk {
                         1 => { self.advance(); return self.arena.alloc_node(NodeKind::BoolLit, 0, sp, pl as u32, 0); }
                         2 => { self.advance(); return self.arena.alloc_node(NodeKind::NoneLit, 0, sp, 0, 0); }
-                        9 => return self.parse_for(), 14 => return self.parse_switch(), 18 => { self.advance(); return self.parse_expr_bp(6); }
+                        9 => return self.parse_for(), 14 => return self.parse_switch(), 18 => { self.advance(); return self.parse_expr_bp(CLAUSE_BP); }
                         contracts::CONTRACT_RECEPTOR if pl == contracts::OLD_SUB && self.in_ensures => return self.parse_old(),
-                        31 if pl == 1 => { self.advance(); let v = self.parse_expr_bp(16); return self.arena.alloc_node(NodeKind::UnaryExpr, 5, sp, v.0, 0); }
-                        31 if pl == 2 => { self.advance(); return self.parse_expr_bp(80); }
+                        // `some x` binds its operand like the prefix `!`.
+                        31 if pl == 2 => {
+                            self.advance();
+                            let bp = self.tables.prefix_bp_of_kind(TokenKind::Exclamation).unwrap_or(LEVEL_BASE);
+                            return self.parse_expr_bp(bp);
+                        }
                         32 if nx < self.tape.len() && ((matches!(self.tape.kind(nx), TokenKind::LParen) && self.opens_inline_text(nx)) || (!self.no_struct_lit && matches!(self.tape.kind(nx), TokenKind::LBrace))) => return self.parse_polyglot_inline(),
                         33 if pl == 6 => { let p2 = self.next_non_nl(nx + 1);
                             if p2 < self.tape.len() && is_word_tok(self.tape.kind(nx)) && self.tables.receptors.get(self.tape.text(p2, self.src)) == Some(&(10, 0)) {
@@ -362,5 +397,19 @@ impl<'a> Parser<'a> {
         if after >= self.tape.len() { return false; }
         let k = self.tape.kind(after);
         (k == TokenKind::LParen && !chained) || assign_op_of(k).is_some()
+    }
+}
+
+/// The `UnaryExpr` flag of the prefix operator that starts with token `k`.
+pub(crate) fn prefix_flag(k: TokenKind) -> u16 {
+    match k {
+        TokenKind::Amper | TokenKind::KwRef | TokenKind::Plus => 1,
+        TokenKind::ArrowLeft => 3,
+        TokenKind::Tilde => 4,
+        TokenKind::Exclamation | TokenKind::CallQuoteShallow => 5,
+        TokenKind::Star => UNARY_OP_SPLAT,
+        TokenKind::DoubleStar => UNARY_OP_DOUBLE_SPLAT,
+        TokenKind::StarDotDot => UNARY_OP_DEEP_FLATTEN,
+        _ => 0,
     }
 }

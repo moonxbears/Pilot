@@ -819,6 +819,27 @@ pub let ERRORS = [
         reference: "proposals.md PROP-007 step 2 / PROP-002a Amendment A1",
     },
     ErrorDef {
+        code: "GRAM005",
+        title: "Structural Operator Symbol",
+        description: "An operator attribute declares a symbol or readable word that is one of the 13 structural tokens or a seed word",
+        category: "Grammar",
+        reference: "proposals.md PROP-008 §5",
+    },
+    ErrorDef {
+        code: "GRAM006",
+        title: "Operator Shape Arity Mismatch",
+        description: "An operator attribute's shape takes a different number of operands than its `op` declaration or `syntax` rule",
+        category: "Grammar",
+        reference: "proposals.md PROP-008 §5",
+    },
+    ErrorDef {
+        code: "GRAM007",
+        title: "Operator Attribute on a Non-Operator",
+        description: "An operator attribute is on a declaration that is neither an `op` declaration nor a `syntax` rule",
+        category: "Grammar",
+        reference: "proposals.md PROP-008 §5",
+    },
+    ErrorDef {
         code: "INSP001",
         title: "Inspection Target Not Found",
         description: "The specified file, cursor position, or symbol path could not be resolved in the workspace",

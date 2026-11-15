@@ -13,7 +13,7 @@ Per [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §1
 
 | Column | Meaning |
 | :--- | :--- |
-| **ID & Concept** | Canonical concept identifier (`C01`–`C41`) and architectural name. |
+| **ID & Concept** | Canonical concept identifier (`C01`–`C42`) and architectural name. |
 | **Surface / Mechanism** | Symbolic syntax, readable pairing ([`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §2.10), or compiler invariant. |
 | **S / I / C** | Verified behavior on **S**eed (`pilot run`), **I**R (`pilot test --ir`), and emitted **C** (`pilot test --emit c`): `ok` = verified passing, `part` = core subset works with documented limits, `seam` = traps loudly at `SEAM001`, `tool` = CLI/compiler-host capability rather than per-expression codegen. |
 | **Verdict** | `REAL` (end-to-end across engines), `PARTIAL` (working core with tracked gaps/limits), `SEAM` (explicit `SEAM001` boundary), or `MIGRATING` (works today while legacy Rust shims are queued in [`proposals.md`](file:///home/moony/Documents/dev/projects/Pilot/proposals.md)). |
@@ -23,12 +23,12 @@ Per [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §1
 
 ---
 
-## Summary (`41` Tracked Concepts)
+## Summary (`42` Tracked Concepts)
 
 | Verdict | Count | Meaning |
 | :--- | ---: | :--- |
 | `REAL` | `26` | Proven end-to-end across engines (`ok / ok / ok` or verified CLI tool gate) with passing + failing tests. |
-| `PARTIAL` | `10` | Real working implementation with explicit, documented scope limits or open `known_bugs`. |
+| `PARTIAL` | `11` | Real working implementation with explicit, documented scope limits or open `known_bugs`. |
 | `MIGRATING` | `3` | Enforced in part today, with Airlock / Stage-3 cutover queued in [`proposals.md`](file:///home/moony/Documents/dev/projects/Pilot/proposals.md). |
 | `SEAM` | `2` | Intentionally stops at a registered `SEAM001` boundary until scheduled milestone wiring. |
 
@@ -45,7 +45,7 @@ Per [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §1
 
 ---
 
-## 2. Lexical, Symbolic & Dual-Readability Syntax (`C05`–`C13`)
+## 2. Lexical, Symbolic & Dual-Readability Syntax (`C05`–`C13`, `C42`)
 
 | ID & Concept | Surface / Mechanism | S | I | C | Verdict | Owning Pilot Modules | Legacy Rust Residual | Verified Conformance, Codes & Notes |
 | :--- | :--- | :-: | :-: | :-: | :--- | :--- | :--- | :--- |
@@ -58,6 +58,7 @@ Per [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §1
 | **C11. Numeric & Dimensional Suffixes** | Scalar `200u8`, `1.5f32` + SI/unit `250ms`, `100[m]` | ok | ok | ok | `REAL` | `stdlib/std/units.pilot`, `selfhost/check/infer.pilot`, `selfhost/ir/lower_expr.pilot` | `num_suffix.rs`, `lower_unit.rs` (`PROP-003`/`005`) | Range-checked scalar suffixes and `bind_unit_literal` verified across all 3 engines (`types/local_named_unit`). |
 | **C12. Distributive Headers & Trailing Commas** | `pub:`, `pub static pure:`, `let T { a = 1, b = 2, };`, collection trailing `,` | ok | ok | ok | `REAL` | `selfhost/parser.pilot`, `selfhost/cst/parser.pilot` | Stage-A `ScopeHeader` | Verified by `types/field_group_defaults`; `known_bugs/struct_field_scope_label` tracked. |
 | **C13. `#` Preprocessor Directives** | `#if`, `#elif`, `#else`, `#endif`, `#define`, `#region`, `#pragma` | ok | ok | ok | `PARTIAL` | `selfhost/preprocessor.pilot` | `pilot-lexer/src/lexer.rs` | Conditional compilation and `#pragma` handled before lexing (`MOD001` clean). |
+| **C42. Operators Declared by Attribute (Named Levels, Parse Shapes)** | `[Infix(::Add, ::Left)]` on `op +`, `[InfixWord(nameof(and), ::And, ::Left, "&&")]` / `[Prefix]` / `[Postfix]` / `[Shaped]` on `op` decls and `syntax` rules; levels are the order of `OpLevel` | ok | – | – | `PARTIAL` | `stdlib/core/operators/{levels,shapes,logic,flow}.pilot`, `stdlib/core/operator.pilot`, `selfhost/check/grammar_attrs.pilot` | `pilot-parser/src/tables.rs` builds the Pratt table from `grammar_entry` / `register_grammar` (no operator text in Rust); lexer operator tokens remain (`PROP-008` step 2) | `operators/level_boundaries`, `word_pairs`, `range_or_cascade` and `err_gram005`–`007` pass on the seed (2026-11-15); `--ir` and `--emit c` not run. Engines still lower operators natively (`operators.rewrite_template` seam); `selfhost/parser.pilot` stops at `parser.operator_grammar`; user-declared operators and `GRAM001`–`004` are step 2. |
 
 ---
 

@@ -5,6 +5,7 @@
 pub pkg Pilot.Asyncio.Syntax;
 
 use Pilot.Core.Genesis.*;
+use Pilot.Core.Operators.Shapes;
 
 comptime {
     // `async fn` is not built yet (docs/keyword_roadmap.md K7): every use
@@ -23,9 +24,18 @@ comptime {
     bind_receptor(nameof(role),      40, 1);
     bind_receptor(nameof(route),     40, 1);
     bind_receptor(nameof(select),  33, 7);
+}
 
-    register_pratt_op("<-", infix,  5,  right);
-    register_pratt_op("<-", prefix, 80, right);
+// Channel send `ch <- v` and receive `<-ch`: not built yet (K7).
+pub syntax {
+    [Infix(::Assign, ::Right, "<-")]
+    channel_send(ch, v) => quote {
+        seam("concurrency.channel", "sending on and receiving from a channel needs channels between concurrent tasks (M83)")
+    };
+    [Prefix(::Unary, "<-")]
+    channel_receive(ch) => quote {
+        seam("concurrency.channel", "sending on and receiving from a channel needs channels between concurrent tasks (M83)")
+    };
 }
 
 // None of these is built yet (docs/keyword_roadmap.md phase K7). Each rule

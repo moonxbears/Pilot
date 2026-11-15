@@ -27,7 +27,13 @@ impl<'a> Parser<'a> {
             let (sym, mut args) = (self.arena.interner.intern(&nm), Vec::new());
             if self.eat(TokenKind::Less) {
                 while !self.at_end() && !self.at(TokenKind::Greater) && !self.at(TokenKind::ShiftRight) {
-                    args.push(if matches!(self.peek(), TokenKind::IntLit | TokenKind::Minus) { self.parse_expr_bp(30) } else { self.parse_type() });
+                    args.push(if matches!(self.peek(), TokenKind::IntLit | TokenKind::Minus) {
+                        // A number argument stops before `>`, at the power of `|`.
+                        let bp = self.tables.bp_of(pilot_ast::BinaryOp::BitOr, LEVEL_BASE);
+                        self.parse_expr_bp(bp)
+                    } else {
+                        self.parse_type()
+                    });
                     if self.eat(TokenKind::Comma) { if self.at(TokenKind::Greater) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in generic parameters".into())); break; } } else { break; } }
                 if !self.eat(TokenKind::Greater) && self.at(TokenKind::ShiftRight) { let p = self.cur(); self.tape.kinds[p] = TokenKind::Greater; } }
             if let Some(TypeConstructRule::NamedGeneric { params, template, .. }) = self.tables.type_rules.iter().find(|r| matches!(r, TypeConstructRule::NamedGeneric { name, params, .. } if name == &nm && params.len() == args.len())).cloned() {
@@ -55,7 +61,13 @@ impl<'a> Parser<'a> {
                     if let Some(TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(_, has_arg), params, template }) =
                         self.tables.type_rules.iter().find(|r| matches!(r, TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(s, _), .. } if s == &sym)).cloned()
                     { self.advance(); let mut b = vec![(params[0].clone(), lhs)]; if has_arg {
-                            let arg = if self.at(TokenKind::IntLit) { self.parse_expr_bp(40) } else { self.parse_type_bp(31) };
+                            // A number argument may be a range: at the power of `..`.
+                            let arg = if self.at(TokenKind::IntLit) {
+                                let bp = self.tables.bp_of(pilot_ast::BinaryOp::RangeHalfOpen, LEVEL_BASE);
+                                self.parse_expr_bp(bp)
+                            } else {
+                                self.parse_type_bp(31)
+                            };
                             if let Some(p1) = params.get(1) { b.push((p1.clone(), arg)); } }
                         let end = self.prev_span().end;
                         lhs = template.instantiate(&mut self.arena, &b, ByteSpan::new(sp.start, end));

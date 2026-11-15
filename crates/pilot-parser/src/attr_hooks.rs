@@ -23,7 +23,7 @@ pub struct RegLayout {
     pub class: String,
 }
 
-const HOOK_REG_LAYOUT: &str = "set_register_layout";
+pub(crate) const HOOK_REG_LAYOUT: &str = "set_register_layout";
 
 fn cval_scalar(v: &CVal) -> Option<Result<i64, &str>> {
     match v {
@@ -106,9 +106,13 @@ impl ParserTables {
         self.attr_hooks.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), AttrHook { hook, args, defaults });
     }
 
+    /// Runs the hook behind each attribute written on declaration `id`
+    /// (`[Bits(..)]`, `[Infix(..)]`, ..). The hook's first parameter is the
+    /// declaration's name; the attribute's arguments fill the rest.
     pub(crate) fn ingest_decl_attrs(&mut self, arena: &AstArena, id: NodeId) {
         let decl_name = CVal::Str(arena.interner.resolve(SymbolId(arena.node(id).lhs)).to_string());
-        for attr in arena.attrs.iter().filter(|a| a.target == id) {
+        let attrs: Vec<_> = arena.attrs.iter().filter(|a| a.target == id).collect();
+        for attr in attrs {
             let Some(f) = self.attr_hooks.get(arena.interner.resolve(attr.name)).cloned() else { continue };
             let attr_args = arena.children_slice(attr.args_start, attr.args_len as u32);
             let values: Vec<Option<CVal>> = f
@@ -116,15 +120,14 @@ impl ParserTables {
                 .iter()
                 .map(|a| match a {
                     HookArg::Param(0) => Some(decl_name.clone()),
-                    HookArg::Param(i) => attr_args.get(i - 1).and_then(|&x| self.eval_cval(arena, NodeId(x))).or_else(|| f.defaults.get(*i).and_then(Clone::clone)),
+                    HookArg::Param(i) => attr_args
+                        .get(i - 1)
+                        .and_then(|&x| self.eval_cval(arena, NodeId(x)))
+                        .or_else(|| f.defaults.get(*i).and_then(Clone::clone)),
                     HookArg::Const(v) => Some(v.clone()),
                 })
                 .collect();
-            if f.hook == HOOK_REG_LAYOUT {
-                if let [Some(CVal::Str(ty)), Some(CVal::Int(width)), Some(CVal::Str(class))] = values.as_slice() {
-                    self.reg_layouts.insert(ty.clone(), RegLayout { width: *width, class: class.clone() });
-                }
-            }
+            self.apply_hook(&f.hook, &values);
         }
     }
 }

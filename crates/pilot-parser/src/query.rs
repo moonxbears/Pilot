@@ -28,20 +28,20 @@ impl Parser<'_> {
         if self.is_rec(REC_IN) {
             self.advance();
         }
-        let src_e = self.parse_expr_bp(20);
+        let src_e = self.parse_expr_bp(self.clause_operand_bp());
         let mut conds = Vec::new();
         let mut orders: Vec<(NodeId, bool)> = Vec::new();
         while !self.at_end() && self.receptor() != Some((REC_QUERY, SUB_SELECT)) {
             if self.is_rec(REC_WHERE) {
                 self.advance();
-                conds.push(self.parse_expr_bp(20));
+                conds.push(self.parse_expr_bp(self.clause_operand_bp()));
             } else if self.receptor() == Some((REC_QUERY, SUB_ORDER)) {
                 self.advance();
                 if self.receptor() == Some((REC_QUERY, SUB_BY)) {
                     self.advance();
                 }
                 loop {
-                    let key = self.parse_expr_bp(20);
+                    let key = self.parse_expr_bp(self.clause_operand_bp());
                     let desc = if self.receptor() == Some((REC_QUERY, SUB_ASCENDING)) {
                         self.advance();
                         false
@@ -89,7 +89,7 @@ impl Parser<'_> {
             return NodeId::NONE;
         }
         self.advance();
-        let proj = self.parse_expr_bp(15);
+        let proj = self.parse_expr_bp(self.clause_operand_bp());
         let span = ByteSpan::new(sp.start, self.prev_span().end);
         if orders.is_empty() {
             return self.build_query_loop(vsym, src_e, &conds, proj, span);
@@ -238,5 +238,13 @@ impl Parser<'_> {
     fn q_index(&mut self, arr: SymbolId, idx: NodeId, span: ByteSpan) -> NodeId {
         let arr_id = self.q_ident(arr, span);
         self.arena.alloc_node(NodeKind::IndexExpr, 0, span, arr_id.0, idx.0)
+    }
+}
+
+impl<'a> Parser<'a> {
+    /// The power a query clause's operand is parsed at: just above `&&`, so
+    /// `a && b` ends a clause operand and every tighter operator stays in it.
+    fn clause_operand_bp(&self) -> u8 {
+        self.tables.bp_above(BinaryOp::And, crate::LEVEL_BASE)
     }
 }

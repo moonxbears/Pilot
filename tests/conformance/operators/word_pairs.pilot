@@ -1,0 +1,30 @@
+// PROP-008 §8.3: `and`, `or` and `not` are the readable pairs of `&&`, `||`
+// and `!`, declared in the same grammar entry, so each pair binds at one
+// level and the two spellings group alike. A quote prints each operator as
+// it was written, so the pairs differ only in spelling.
+fn main() {
+    let t = true;
+    let u = false;
+    // Or is looser than And: `t or u and u` is `t or (u and u)` = true.
+    print(quote { t or u and u }.source());
+    print(quote { t || u && u }.source());
+    print(t or u and u);
+    print(t || u && u);
+    // And is looser than Equality: `u and t == t` is `u and (t == t)` = false.
+    print(quote { u and t == t }.source());
+    print(quote { u && t == t }.source());
+    // `not` binds at Unary, like `!`: in `u or not t == u` the right operand
+    // of `or` is `(not t) == u`, a binary node whose first child is the
+    // unary `not t`. (false == false) = true, so the whole is true.
+    print(quote { u or not t == u }[1].kind());
+    print(quote { u || !t == u }[1].kind());
+    print(quote { u or not t == u }[1][0].kind());
+    print(u or not t == u);
+    // `and` short-circuits like `&&`: `u and boom()` never calls `boom`.
+    print(u and boom());
+}
+
+fn boom() -> bool {
+    print("boom ran");
+    return true;
+}

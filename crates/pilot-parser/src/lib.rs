@@ -94,29 +94,44 @@ pub(crate) fn bootstrap_sources() -> Vec<(String, String)> {
 /// showing these, so a source that does not parse would otherwise lose its
 /// declarations unseen; `tests/bootstrap_sources.rs` requires none.
 pub fn bootstrap_diagnostics() -> Vec<String> {
-    let mut t = ParserTables::new();
     let mut out = Vec::new();
-    for (rel, src) in bootstrap_sources() {
-        let arena = parse_and_ingest(&src, &mut t);
-        for (span, msg) in &arena.diagnostics {
-            let line = src[..(span.start as usize).min(src.len())].matches('\n').count() + 1;
-            out.push(format!("{rel}:{line}: {msg}"));
-        }
-    }
+    let _ = build_bootstrap_tables(Some(&mut out));
     out
+}
+
+/// The bootstrap tables, built by reading every source until the operator
+/// grammar stops growing (PROP-008 Amendment 008-A). Operators are declared
+/// by attributes in files that load after files that already use them, so
+/// each pass after the first starts from the grammar the previous pass
+/// collected; the last pass's reports go to `diags`.
+fn build_bootstrap_tables(mut diags: Option<&mut Vec<String>>) -> ParserTables {
+    let sources = bootstrap_sources();
+    let mut grammar = ParserTables::new();
+    loop {
+        let mut t = ParserTables::with_grammar(&grammar);
+        let mut out = Vec::new();
+        for (rel, src) in &sources {
+            let arena = parse_and_ingest(src, &mut t);
+            for (span, msg) in &arena.diagnostics {
+                let line = src[..(span.start as usize).min(src.len())].matches('\n').count() + 1;
+                out.push(format!("{rel}:{line}: {msg}"));
+            }
+        }
+        if t.grammar.len() <= grammar.grammar.len() && t.grammar_enums == grammar.grammar_enums {
+            if let Some(d) = diags.as_deref_mut() {
+                *d = out;
+            }
+            return t;
+        }
+        grammar = t;
+    }
 }
 
 static BOOTSTRAP_TABLES: OnceLock<ParserTables> = OnceLock::new();
 
 /// The tables built from the stdlib at the source root (`set_source_root`).
 pub fn bootstrap_tables() -> &'static ParserTables {
-    BOOTSTRAP_TABLES.get_or_init(|| {
-        let mut t = ParserTables::new();
-        for (_, src) in bootstrap_sources() {
-            let _ = parse_and_ingest(&src, &mut t);
-        }
-        t
-    })
+    BOOTSTRAP_TABLES.get_or_init(|| build_bootstrap_tables(None))
 }
 pub fn parse(src: &str) -> AstArena { parse_with_tables(src, bootstrap_tables()) }
 pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena { let mut p = Parser { src, tape: tokenize(src), pos: 0, arena: AstArena::with_capacity((src.len() / 12).max(16)), tables: Cow::Borrowed(tables), active_hdr: None, hdr_stack: Vec::new(), in_quote_type: false, no_struct_lit: false, in_cascade_step: false, ingest: false, folds: Default::default(), in_ensures: false, fn_body_depth: 0, }; p.parse_program(); p.arena }

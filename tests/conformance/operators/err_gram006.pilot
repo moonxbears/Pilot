@@ -1,0 +1,12 @@
+// GRAM006: `[Infix]` declares an operator of two operands, but this `op -`
+// takes only `self` (it is the prefix form), so the shape does not fit.
+struct Money : IValue {
+    pub cents: i64;
+
+    [Infix(::Add, ::Left)]
+    pub pure op - () -> Money => Money { cents: 0 - .cents };
+}
+
+fn main() {
+    print(Money { cents: 5 }.cents);
+}

@@ -1,0 +1,1 @@
+error[GRAM006]: `[Infix]` declares `-` as an operator of two operands, but `op -` takes 1

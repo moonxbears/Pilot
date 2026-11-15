@@ -12,8 +12,60 @@ pub enum TypeConstructRule { Prefix { op: String, param: String, template: Templ
 pub use rule_arms::SyntaxMacroRule;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, NoAlloc, Override, Unbuilt }
+/// An infix operator: its binding power, associativity, native `BinaryOp`
+/// code (until PROP-008 step 3 lowers operators to their owners) and parse
+/// shape (an ordinal of the shape enum, `SHAPE_*`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct PrattEntry { pub bp: u8, pub right_assoc: bool, pub bin_op: u16 }
+pub struct PrattEntry {
+    pub bp: u8,
+    pub right_assoc: bool,
+    pub bin_op: u16,
+    pub shape: u8,
+}
+
+/// One operator declared by a grammar attribute (`grammar_entry`, PROP-008):
+/// its symbol, readable word (or empty), and the variant names of its shape,
+/// level and associativity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GrammarEntry {
+    pub(crate) symbol: String,
+    pub(crate) shape: String,
+    pub(crate) level: String,
+    pub(crate) assoc: String,
+    pub(crate) word: String,
+}
+
+/// The variant names, in declaration order, of the three enums named by
+/// `register_grammar`: levels (loosest first), associativities and shapes.
+/// The seed reads only their positions, never their names.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct GrammarEnums {
+    pub(crate) levels: Vec<String>,
+    pub(crate) assocs: Vec<String>,
+    pub(crate) shapes: Vec<String>,
+}
+
+pub(crate) const HOOK_GRAMMAR_ENTRY: &str = "grammar_entry";
+pub(crate) const HOOK_REGISTER_GRAMMAR: &str = "register_grammar";
+
+/// Parse shapes by position in the shape enum (PROP-008 §4; closed in the
+/// seed, append-only under B+).
+pub(crate) const SHAPE_PREFIX: usize = 1;
+pub(crate) const SHAPE_POSTFIX: usize = 2;
+pub(crate) const SHAPE_TYPE_RIGHT: usize = 3;
+pub(crate) const SHAPE_MEMBERSHIP: usize = 5;
+pub(crate) const SHAPE_CASCADE: usize = 8;
+pub(crate) const SHAPE_ADJACENT_CALL: usize = 9;
+/// Associativities by position in the associativity enum.
+pub(crate) const ASSOC_RIGHT: usize = 1;
+
+/// The binding power of the loosest level; each tighter level adds
+/// `LEVEL_STEP`. Powers below `LEVEL_BASE` belong to statement-like clauses.
+pub(crate) const LEVEL_BASE: u8 = 10;
+pub(crate) const LEVEL_STEP: u8 = 4;
+/// `expr catch e => ..` and `try expr`: looser than every operator except
+/// the loosest level, whose right side may hold them (`x := f() catch ..`).
+pub(crate) const CLAUSE_BP: u8 = LEVEL_BASE + 1;
 #[derive(Clone, Debug)]
 pub(crate) enum CVal { Str(String), Int(i64), Map(HashMap<String, CVal>) }
 #[derive(Clone, Debug, Default)]
@@ -22,6 +74,13 @@ pub struct ParserTables { pub(crate) modifiers: HashMap<String, ModAct>, pub(cra
     /// `field` and `value` inside accessor bodies (`bind_receiver_ident`).
     pub backing_ident: String, pub setter_value_ident: String,
     pub prefix_ops: HashMap<String, u8>, pub infix_ops: HashMap<String, PrattEntry>, pub postfix_ops: HashMap<String, u8>,
+    /// Readable prefix words (`not`) and the symbol each pairs with (`!`).
+    pub(crate) prefix_words: HashMap<String, String>,
+    /// The operators declared by grammar attributes, in declaration order.
+    pub(crate) grammar: Vec<GrammarEntry>,
+    pub(crate) grammar_enums: GrammarEnums,
+    /// The variant names of every enum ingested, by enum name.
+    pub(crate) adt_variants: HashMap<String, Vec<String>>,
     pub type_rules: Vec<TypeConstructRule>, pub syntax_macros: HashMap<String, SyntaxMacroRule>, pub(crate) const_maps: HashMap<String, CVal>,
     /// Attribute functions by name (see `attr_hooks`).
     pub(crate) attr_hooks: HashMap<String, attr_hooks::AttrHook>,
@@ -45,6 +104,91 @@ pub struct ParserTables { pub(crate) modifiers: HashMap<String, ModAct>, pub(cra
     pub(crate) scalar_text: Option<String>, }
 impl ParserTables {
     pub fn new() -> Self { Self::default() }
+
+    /// Empty tables holding only the operator grammar of `t`: the start of
+    /// the bootstrap's next pass, so files read before the operator
+    /// declarations already see every operator.
+    pub(crate) fn with_grammar(t: &ParserTables) -> Self {
+        let mut out = Self { grammar: t.grammar.clone(), grammar_enums: t.grammar_enums.clone(), ..Self::default() };
+        out.rebuild_grammar();
+        out
+    }
+
+    /// `register_grammar(levels, assocs, shapes)`: the enums whose variant
+    /// order places every operator.
+    fn register_grammar(&mut self, levels: &str, assocs: &str, shapes: &str) {
+        let get = |n: &str| self.adt_variants.get(n).cloned().unwrap_or_default();
+        self.grammar_enums = GrammarEnums { levels: get(levels), assocs: get(assocs), shapes: get(shapes) };
+        self.rebuild_grammar();
+    }
+
+    /// The operator maps, rebuilt from the declared entries.
+    fn rebuild_grammar(&mut self) {
+        self.infix_ops.clear();
+        self.prefix_ops.clear();
+        self.postfix_ops.clear();
+        self.prefix_words.clear();
+        for e in self.grammar.clone() {
+            self.apply_grammar_entry(&e);
+        }
+    }
+
+    /// The binding power of level ordinal `level`.
+    pub(crate) fn level_bp(level: usize) -> u8 {
+        LEVEL_BASE.saturating_add(LEVEL_STEP.saturating_mul(level.min(60) as u8))
+    }
+
+    /// Adds `e` to the operator maps. An entry whose level or shape is not a
+    /// variant of the registered enums, or whose symbol is structural syntax
+    /// or a seed word (GRAM005, reported by `selfhost/check/grammar_attrs.pilot`),
+    /// adds nothing.
+    fn apply_grammar_entry(&mut self, e: &GrammarEntry) {
+        let pos = |names: &[String], n: &str| names.iter().position(|x| x == n);
+        let Some(level) = pos(&self.grammar_enums.levels, &e.level) else { return };
+        let Some(shape) = pos(&self.grammar_enums.shapes, &e.shape) else { return };
+        if is_structural_symbol(&e.symbol) || (!e.word.is_empty() && is_structural_symbol(&e.word)) {
+            return;
+        }
+        let bp = Self::level_bp(level);
+        match shape {
+            SHAPE_PREFIX => {
+                self.prefix_ops.insert(e.symbol.clone(), bp);
+                if !e.word.is_empty() {
+                    self.prefix_ops.insert(e.word.clone(), bp);
+                    self.prefix_words.insert(e.word.clone(), e.symbol.clone());
+                }
+            }
+            SHAPE_POSTFIX => {
+                self.postfix_ops.insert(e.symbol.clone(), bp);
+            }
+            SHAPE_CASCADE | SHAPE_ADJACENT_CALL => {}
+            _ => {
+                let right_assoc = pos(&self.grammar_enums.assocs, &e.assoc) == Some(ASSOC_RIGHT);
+                let entry = PrattEntry { bp, right_assoc, bin_op: binop_code(&e.symbol), shape: shape as u8 };
+                self.infix_ops.insert(e.symbol.clone(), entry);
+                if !e.word.is_empty() {
+                    self.infix_ops.insert(e.word.clone(), entry);
+                }
+            }
+        }
+    }
+
+    /// The binding power one above the tightest infix operator whose native
+    /// code is `op`; `fallback` when none is declared.
+    pub(crate) fn bp_above(&self, op: BinaryOp, fallback: u8) -> u8 {
+        self.infix_ops.values().filter(|e| e.bin_op == op as u16).map(|e| e.bp.saturating_add(1)).max().unwrap_or(fallback)
+    }
+
+    /// The binding power of the infix operator whose native code is `op`;
+    /// `fallback` when none is declared.
+    pub(crate) fn bp_of(&self, op: BinaryOp, fallback: u8) -> u8 {
+        self.infix_ops.values().filter(|e| e.bin_op == op as u16).map(|e| e.bp).max().unwrap_or(fallback)
+    }
+
+    /// The binding power of the prefix operator whose symbol lexes as `k`.
+    pub(crate) fn prefix_bp_of_kind(&self, k: TokenKind) -> Option<u8> {
+        self.prefix_ops.iter().filter(|(s, _)| first_token_kind(s) == Some(k)).map(|(_, &bp)| bp).max()
+    }
     pub(crate) fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
         let n = arena.node(id);
         match n.node_kind() { NodeKind::StrLit => Some(CVal::Str(arena.interner.resolve(SymbolId(n.lhs)).to_string())),
@@ -77,14 +221,55 @@ impl ParserTables {
             _ => None,
         }
     }
-    pub(crate) fn ingest_node(&mut self, arena: &AstArena, id: NodeId) { if id.is_none() { return; }
-        let n = *arena.node(id); match n.node_kind() {
-            NodeKind::Program | NodeKind::BlockExpr => for &c in arena.children_slice(n.lhs, n.rhs).to_vec().iter() { self.ingest_node(arena, NodeId(c)); },
+    pub(crate) fn ingest_node(&mut self, arena: &AstArena, id: NodeId) {
+        if id.is_none() {
+            return;
+        }
+        let n = *arena.node(id);
+        match n.node_kind() {
+            NodeKind::Program | NodeKind::BlockExpr => {
+                for &c in arena.children_slice(n.lhs, n.rhs).to_vec().iter() {
+                    self.ingest_node(arena, NodeId(c));
+                }
+            }
             NodeKind::ComptimeExpr | NodeKind::ExprStmt => self.ingest_node(arena, NodeId(n.lhs)),
-            NodeKind::FnDecl => self.ingest_attr_fn(arena, id),
-            NodeKind::StructDecl => self.ingest_decl_attrs(arena, id),
+            // A function, or a `syntax` rule (laid out as one): its attributes
+            // too, so `[InfixWord(..)]` on a rule declares its operator.
+            NodeKind::FnDecl => {
+                self.ingest_attr_fn(arena, id);
+                self.ingest_decl_attrs(arena, id);
+            }
+            // A type, and the attributes on its members: `[Infix(..)]` on an
+            // `op` declares that operator (PROP-008).
+            NodeKind::StructDecl | NodeKind::InterfaceDecl => {
+                self.ingest_decl_attrs(arena, id);
+                let body = NodeId(n.rhs);
+                if body.is_some() && arena.node(body).node_kind() == NodeKind::BlockExpr {
+                    let b = *arena.node(body);
+                    for &m in arena.children_slice(b.lhs, b.rhs).to_vec().iter() {
+                        let mk = arena.node(NodeId(m)).node_kind();
+                        if matches!(mk, NodeKind::OperatorDecl | NodeKind::FnDecl) {
+                            self.ingest_decl_attrs(arena, NodeId(m));
+                        }
+                    }
+                }
+            }
+            // An enum's variant names, in order: `register_grammar` reads the
+            // operator levels, associativities and shapes from them.
+            NodeKind::TypeAdtDecl => {
+                // `lhs` is the name; the variants are `flags` children at `rhs`.
+                let names = arena
+                    .children_slice(n.rhs, n.flags as u32)
+                    .iter()
+                    .map(|&v| arena.interner.resolve(SymbolId(arena.node(NodeId(v)).lhs)).to_string())
+                    .collect();
+                self.adt_variants.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), names);
+                self.ingest_decl_attrs(arena, id);
+            }
             NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
-                if let Some(v) = self.eval_cval(arena, NodeId(n.rhs)) { self.const_maps.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), v); }
+                if let Some(v) = self.eval_cval(arena, NodeId(n.rhs)) {
+                    self.const_maps.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), v);
+                }
             }
             NodeKind::CallExpr => {
                 let ch = arena.children_slice(n.lhs, n.rhs);
@@ -114,67 +299,153 @@ impl ParserTables {
                 } else {
                     return;
                 };
-                let s_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Str(s) => Some(s.clone()), _ => None }).unwrap_or_default();
-                let i_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Int(v) => Some(*v), _ => None });
-                match hook.as_str() {
-                    "register_modifier" => {
-                        let (w, act) = (s_arg(0), if let Some(v) = i_arg(1) { ModAct::Vis(v as u8) } else { match s_arg(1).as_str() {
-                            "merge_type_members" => ModAct::Partial, "storage_static" => ModAct::Static, "effect_pure" => ModAct::Pure,
-                            "binding_mutable" => ModAct::Mut, "binding_const" => ModAct::Const, "perceus_isolated" => ModAct::Iso,
-                            "extension_member" => ModAct::Ext, "effect_noalloc" => ModAct::NoAlloc,
-                            "override_member" => ModAct::Override,
-                            _ => ModAct::Unbuilt,
-                        }});
-                        if !w.is_empty() { self.modifiers.insert(w, act); }
+                self.apply_hook(&hook, &vals);
+            }
+            _ => {}
+        }
+    }
+
+    /// Runs genesis hook `hook` with argument values `vals`, from a
+    /// `comptime` call or from an attribute on a declaration.
+    pub(crate) fn apply_hook(&mut self, hook: &str, vals: &[Option<CVal>]) {
+        let s_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Str(s) => Some(s.clone()), _ => None }).unwrap_or_default();
+        let i_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Int(v) => Some(*v), _ => None });
+        match hook {
+            "register_modifier" => {
+                let act = if let Some(v) = i_arg(1) {
+                    ModAct::Vis(v as u8)
+                } else {
+                    match s_arg(1).as_str() {
+                        "merge_type_members" => ModAct::Partial,
+                        "storage_static" => ModAct::Static,
+                        "effect_pure" => ModAct::Pure,
+                        "binding_mutable" => ModAct::Mut,
+                        "binding_const" => ModAct::Const,
+                        "perceus_isolated" => ModAct::Iso,
+                        "extension_member" => ModAct::Ext,
+                        "effect_noalloc" => ModAct::NoAlloc,
+                        "override_member" => ModAct::Override,
+                        _ => ModAct::Unbuilt,
                     }
-                    "register_parametric_modifier" => { let w = s_arg(0); if !w.is_empty() { self.param_modifiers.insert(w); } }
-                    "register_module_kw" => { let w = s_arg(0); if !w.is_empty() { self.module_kws.insert(w, s_arg(1) == "declare_package_scope"); } }
-                    HOOK_UNIT_LITERAL => self.bind_unit_literal(s_arg(0), s_arg(1)),
-                    HOOK_OPERATOR_FN => self.bind_operator_fn(s_arg(0), s_arg(1)),
-                    HOOK_NATIVE_FN => self.bind_native(NativeKind::Function, s_arg(0), s_arg(1)),
-                    HOOK_NATIVE_METHOD => self.bind_native(NativeKind::Method, s_arg(0), s_arg(1)),
-                    HOOK_NATIVE_PROPERTY => self.bind_native(NativeKind::Property, s_arg(0), s_arg(1)),
-                    HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(0), s_arg(1)),
-                    "bind_native_member" => self.bind_native_member(s_arg(0), s_arg(1), s_arg(2)),
-                    HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(0), s_arg(1)),
-                    HOOK_ENUMERATOR => self.bind_enumerator(s_arg(0), s_arg(1), s_arg(2), s_arg(3)),
-                    HOOK_GENERATOR => self.bind_generator(s_arg(0), s_arg(1), s_arg(2), s_arg(3)),
-                    HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(0), s_arg(1), s_arg(2)),
-                    HOOK_FORMAT_SPEC => self.bind_format_spec(s_arg(0)),
-                    HOOK_MEMBERSHIP => self.bind_membership(s_arg(0), s_arg(1), s_arg(2)),
-                    HOOK_SCALAR_TEXT => self.bind_scalar_text(s_arg(0)),
-                    "bind_receiver_ident" => {
-                        let (w, b, v) = (s_arg(0), s_arg(1), s_arg(2));
-                        if !w.is_empty() { self.receiver_ident = w; }
-                        self.backing_ident = b;
-                        self.setter_value_ident = v;
-                    }
-                    "bind_receptor" => {
-                        let (w, k, p) = (s_arg(0), i_arg(1).unwrap_or(0) as u8, i_arg(2).unwrap_or(0) as u8);
-                        if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); }
-                    }
-                    "register_pratt_op" => {
-                        let (sym, fix, bp, assoc) = (s_arg(0), s_arg(1), i_arg(2).unwrap_or(20) as u8, s_arg(3));
-                        if !sym.is_empty() {
-                            match fix.as_str() {
-                                "prefix" => { self.prefix_ops.insert(sym, bp); }
-                                "postfix" => { self.postfix_ops.insert(sym, bp); }
-                                _ => {
-                                    let code = i_arg(4).filter(|&c| c > 0).map_or_else(|| map_binop_sym(&sym), |c| c as u16);
-                                    self.infix_ops.insert(sym, PrattEntry { bp, right_assoc: assoc == "right", bin_op: code });
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
+                };
+                let w = s_arg(0);
+                if !w.is_empty() {
+                    self.modifiers.insert(w, act);
                 }
             }
-            _ => {} } } }
+            "register_parametric_modifier" => {
+                let w = s_arg(0);
+                if !w.is_empty() {
+                    self.param_modifiers.insert(w);
+                }
+            }
+            "register_module_kw" => {
+                let w = s_arg(0);
+                if !w.is_empty() {
+                    self.module_kws.insert(w, s_arg(1) == "declare_package_scope");
+                }
+            }
+            HOOK_UNIT_LITERAL => self.bind_unit_literal(s_arg(0), s_arg(1)),
+            HOOK_OPERATOR_FN => self.bind_operator_fn(s_arg(0), s_arg(1)),
+            HOOK_NATIVE_FN => self.bind_native(NativeKind::Function, s_arg(0), s_arg(1)),
+            HOOK_NATIVE_METHOD => self.bind_native(NativeKind::Method, s_arg(0), s_arg(1)),
+            HOOK_NATIVE_PROPERTY => self.bind_native(NativeKind::Property, s_arg(0), s_arg(1)),
+            HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(0), s_arg(1)),
+            "bind_native_member" => self.bind_native_member(s_arg(0), s_arg(1), s_arg(2)),
+            HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(0), s_arg(1)),
+            HOOK_ENUMERATOR => self.bind_enumerator(s_arg(0), s_arg(1), s_arg(2), s_arg(3)),
+            HOOK_GENERATOR => self.bind_generator(s_arg(0), s_arg(1), s_arg(2), s_arg(3)),
+            HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(0), s_arg(1), s_arg(2)),
+            HOOK_FORMAT_SPEC => self.bind_format_spec(s_arg(0)),
+            HOOK_MEMBERSHIP => self.bind_membership(s_arg(0), s_arg(1), s_arg(2)),
+            HOOK_SCALAR_TEXT => self.bind_scalar_text(s_arg(0)),
+            attr_hooks::HOOK_REG_LAYOUT => {
+                if let [Some(CVal::Str(ty)), Some(CVal::Int(width)), Some(CVal::Str(class))] = vals {
+                    self.reg_layouts.insert(ty.clone(), RegLayout { width: *width, class: class.clone() });
+                }
+            }
+            "bind_receiver_ident" => {
+                let (w, b, v) = (s_arg(0), s_arg(1), s_arg(2));
+                if !w.is_empty() {
+                    self.receiver_ident = w;
+                }
+                self.backing_ident = b;
+                self.setter_value_ident = v;
+            }
+            "bind_receptor" => {
+                let (w, k, p) = (s_arg(0), i_arg(1).unwrap_or(0) as u8, i_arg(2).unwrap_or(0) as u8);
+                if !w.is_empty() && k > 0 {
+                    self.receptors.insert(w, (k, p));
+                }
+            }
+            HOOK_REGISTER_GRAMMAR => self.register_grammar(&s_arg(0), &s_arg(1), &s_arg(2)),
+            HOOK_GRAMMAR_ENTRY => {
+                // An empty symbol is the declaration's own name: `[Infix(..)]`
+                // on `op +` declares `+`.
+                let (target, symbol) = (s_arg(0), s_arg(1));
+                let e = GrammarEntry {
+                    symbol: if symbol.is_empty() { target } else { symbol },
+                    shape: s_arg(2),
+                    level: s_arg(3),
+                    assoc: s_arg(4),
+                    word: s_arg(5),
+                };
+                if !e.symbol.is_empty() && !self.grammar.contains(&e) {
+                    self.apply_grammar_entry(&e);
+                    self.grammar.push(e);
+                }
+            }
+            _ => {}
+        }
+    }
+}
 /// `MemberExpr.flags` of a prefix-dot member (`.name`), whose receiver the
 /// parser filled in. `0` is `a.b` and `1` is `a?.b`.
 pub const MEMBER_IMPLIED_RECEIVER: u16 = 2;
-/// The binding power of `x in xs`, below `..` (40) and above `&&` (20).
-pub(crate) const MEMBERSHIP_BP: u8 = 25;
+/// The kind of the first token `sym` lexes to.
+pub(crate) fn first_token_kind(sym: &str) -> Option<TokenKind> {
+    let tape = tokenize(sym);
+    (0..tape.len()).map(|i| tape.kind(i)).find(|k| !matches!(k, TokenKind::Newline | TokenKind::Eof))
+}
+
+/// Whether `sym` starts with one of the 13 structural tokens (PROP-008 §2)
+/// or a seed word: no operator may be declared with it (GRAM005).
+pub(crate) fn is_structural_symbol(sym: &str) -> bool {
+    match first_token_kind(sym) {
+        None => true,
+        Some(k) => {
+            is_seed_kw(k)
+                || matches!(
+                    k,
+                    TokenKind::LParen
+                        | TokenKind::RParen
+                        | TokenKind::LBracket
+                        | TokenKind::RBracket
+                        | TokenKind::LBrace
+                        | TokenKind::RBrace
+                        | TokenKind::Comma
+                        | TokenKind::Semicolon
+                        | TokenKind::Colon
+                        | TokenKind::ColonColon
+                        | TokenKind::InfixDot
+                        | TokenKind::PrefixDot
+                        | TokenKind::FatArrow
+                        | TokenKind::Equal
+                )
+        }
+    }
+}
+
+/// The native `BinaryOp` code of infix symbol or word `sym` (0 when it has
+/// none), until PROP-008 step 3 lowers operators to their owner methods.
+/// A word's code is found from `BinaryOp::symbol`, so no word is written here.
+pub(crate) fn binop_code(sym: &str) -> u16 {
+    let c = map_binop_sym(sym);
+    if c != 0 {
+        return c;
+    }
+    (1..=u8::MAX as u16).filter_map(BinaryOp::from_u16).find(|o| o.symbol() == sym).map_or(0, |o| o as u16)
+}
 pub(crate) fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
         "+" => Add, "-" => Sub, "*" => Mul, "/" => Div, "//" => FloorDiv, "%" => Rem, "**" => Pow,
         "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" => And,
@@ -196,6 +467,15 @@ pub(crate) const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/syntax/lifecycle.pilot",
     "stdlib/core/syntax/properties.pilot",
     "stdlib/core/syntax/attribute.pilot",
+    // The operator grammar (PROP-008): the levels, the attributes, then every
+    // operator's declaration. Files before these use operators too; the
+    // bootstrap reads all sources again with the grammar they declare
+    // (`build_bootstrap_tables`).
+    "stdlib/core/operators/levels.pilot",
+    "stdlib/core/operators/shapes.pilot",
+    "stdlib/core/operator.pilot",
+    "stdlib/core/operators/logic.pilot",
+    "stdlib/core/operators/flow.pilot",
     "stdlib/core/syntax/for.pilot",
     "stdlib/core/generator.pilot",
     "stdlib/core/syntax/while.pilot",

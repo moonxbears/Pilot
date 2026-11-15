@@ -1,0 +1,1 @@
+error[GRAM007]: `[Infix]` is on `plus`, which is neither an `op` declaration nor a `syntax` rule, so it cannot define an operator

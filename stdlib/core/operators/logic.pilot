@@ -1,0 +1,24 @@
+// =========================================================================
+// FILE: stdlib/core/operators/logic.pilot
+// SHORT-CIRCUIT LOGIC: `&&`/`and`, `||`/`or`, `!`/`not` (PROP-008)
+// =========================================================================
+// Not methods: a method gets both operands already evaluated, and `&&`/`||`
+// must skip the right side. Each rule's template is what the operator means;
+// the engines still lower the operators natively, and expanding the
+// templates at operator sites is PROP-008 step 3 (ledger row PROP-008).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Logic;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Operators.Shapes;
+
+pub syntax {
+    [InfixWord(nameof(and), ::And, ::Left, "&&")]
+    logic_and(lhs, rhs) => quote { if $lhs { $rhs } else { false } };
+
+    [InfixWord(nameof(or), ::Or, ::Left, "||")]
+    logic_or(lhs, rhs) => quote { if $lhs { true } else { $rhs } };
+
+    [Prefix(::Unary, "!", nameof(not))]
+    logic_not(x) => quote { if $x { false } else { true } };
+}

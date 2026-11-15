@@ -59,8 +59,6 @@ pub comptime fn {
         __engine("bind_receiver_ident", self_sym, field_sym, value_sym);
     bind_receptor(word, category_id, slot_id) =>
         __engine("bind_receptor", word, category_id, slot_id);
-    register_pratt_op(sym, fixity, bp, assoc, bin_op = 0) =>
-        __engine("register_pratt_op", sym, fixity, bp, assoc, bin_op);
     decl_operator_fn(sig, body) =>
         __engine("decl_operator_fn", sig, body);
     cfg_jump_loop_exit() =>
@@ -175,4 +173,14 @@ pub comptime fn {
     // 7. Generic Protocol Extension Hook (keys gated by GATE021 allowlist)
     bind_lang_protocol(protocol_key, slot_key, target_sym) =>
         __engine("bind_lang_protocol", protocol_key, slot_key, target_sym);
+
+    // 8. Operator Grammar (PROP-008; appended under B+, approved with PROP-008 §9)
+    // The enums whose variant order gives the operator levels (loosest
+    // first), associativities and parse shapes; the seed reads positions only.
+    register_grammar(level_enum, assoc_enum, shape_enum) =>
+        __engine("register_grammar", level_enum, assoc_enum, shape_enum);
+    // One operator: `symbol` (empty: `target`'s own name) and its readable
+    // `word` (or empty), read by `shape` at `level` with `assoc`.
+    grammar_entry(target, symbol, shape, level, assoc, word) =>
+        __engine("grammar_entry", target, symbol, shape, level, assoc, word);
 }

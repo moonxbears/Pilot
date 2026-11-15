@@ -1,0 +1,11 @@
+t or (u and u)
+t || (u && u)
+true
+true
+u and (t == t)
+u && (t == t)
+binary
+binary
+unary
+true
+false

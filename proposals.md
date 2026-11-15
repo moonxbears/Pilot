@@ -18,7 +18,7 @@
 | **`PROP-002a`** | Define the 3-File Airlock Under the B+ Freeze (51 scalar/pointer `HostOp`s), Retire `pilot-rt`, Consolidate Stage-A Natives & Arm `GATE021` | `<= 0` net (`9` $\rightarrow$ `8` crates; `-683` `pilot-rt`) | **`APPROVED; A1 MERGED (d055851) — C2 SPEED BASELINE OPEN`** |
 | **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — ITEMIZE BEFORE APPROVAL (after PROP-007)` |
 | **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4) NEEDS APPROVAL` |
-| **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `DRAFT — HOOK SHAPE DECIDED IN A1, BEFORE THE FREEZE` |
+| **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED ITEMIZED LISTS` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -479,7 +479,7 @@ For each seam, a test checks that the path stops with `SEAM001`. The 488/480/480
 
 ## `PROP-008` — Every Operator Declared by an Attribute on Its Interface or `syntax` Rule, and Comptime User-Defined Operators
 
-- **Status:** **`DRAFT — HOOK SHAPE MUST BE DECIDED BEFORE THE B+ FREEZE (fold into Amendment A1)`**. Step 1 is pure Pilot plus one hook. Steps 2 and 3 change Rust and need an itemized file list and owner approval.
+- **Status:** **`DRAFT — OWNER DECISIONS §8.2–8.4 MADE 2026-11-15 (§9); STEP 1 RUST FILE LIST APPROVED 2026-11-15, IN PROGRESS`**. §8.1 was settled in Amendment A1. Step 1 is pure Pilot plus one hook. Steps 2 and 3 change Rust and need an itemized file list and owner approval.
 - **Origin:** owner direction 2026-11-14: "a comptime way for the user to define their own operators to add to Grammar when it builds", then "maybe all operators should be defined this way so hardcoded values don't happen." Recorded for review as P11 in [`conversations.md`](file:///home/moony/Documents/dev/projects/Pilot/conversations.md).
 - **Behaviour change:** none for existing programs. Every current operator keeps its spelling, precedence order, associativity and result on all three engines. Conformance counts must not drop.
 
@@ -728,6 +728,107 @@ pub struct Vec3 : IValue, IDotOperator<f64> {
 2. **The `||` / `&&` precedence today:** `Cfg.Ops` says `||` 15 and `&&` 20; `expr_sugar.pilot` says 12 and 14; `selfhost/parser.pilot` says 5 and 10. The order is the same in all three (`||` looser than `&&`), but their position relative to `??`, `|`, `..` and `->` differs. The owner picks the intended order once, in `OpLevel`.
 3. **Readable word operators** (`and`, `or`, `not`, `is`) are today receptors (`bind_receptor`), not operators. Declare them as readable pairs with `[InfixWord]`/`[Prefix]` (recommended), or keep them as receptors.
 4. **`a..b(c)`:** a range ending in a call, or a cascade step calling `b`? Today's lookahead reads it as a cascade unless `a` is a number literal. Keep that (recommended, since cascades are statements), or require spaces around a range `..`.
+
+### 9. Owner Decisions (2026-11-15) and the Step 1 Rust File List
+
+**Decisions.** §8.1 was settled in Amendment A1: `grammar_entry` and `register_grammar` are frozen, `register_pratt_op` is transitional. The owner chose the following on 2026-11-15:
+- **§8.2, precedence:** the `Cfg.Ops` order in `stdlib/core/core.pilot` becomes the single `OpLevel` list, with `->` / `->>` placed just above `&&`. The `expr_sugar.pilot` numbers, the `sql_syntax`/`select_syntax` numbers, `sh_get_precedence` and the hardcoded word powers in `crates/pilot-parser/src/expr.rs:107` are deleted.
+  - *Errata to the question as asked:* its preview listed `**` looser than the prefix operators. `Cfg.Ops` has it the other way round (prefix 80 < `**` 88, so `-x ** 2` is `-(x ** 2)`). The decision was "the `Cfg.Ops` order", so its numbers govern; the owner should confirm that if the preview was what they meant.
+  - **No behaviour change.** `expr_sugar.pilot` loads after `core.pilot` (`BOOTSTRAP_SOURCES`), so the seed today uses `??` 10 < `||` 12 < `&&` 14 < `->` 20 < `|` 30. The chosen order keeps every one of those relative positions.
+  - `OpLevel` (replacing the §3 sketch, loosest first, each line listing today's `Cfg.Ops` value or the file that sets it):
+
+    | Level | Operators | Today |
+    | :--- | :--- | :--- |
+    | `Assign` | `:=`, `:=:`, infix `<-` | 5 |
+    | `Pipe` | `\|>`, `<\|` | 8 (`expr_sugar`) |
+    | `Coalesce` | `??` | 10 |
+    | `Or` | `\|\|`, `or` | 12 effective (`Cfg.Ops` 15) |
+    | `And` | `&&`, `and` | 14 effective (`Cfg.Ops` 20) |
+    | `Arrow` | `->`, `->>` | 20 (`expr_sugar`) |
+    | `Membership` | `in` | 25 (`MEMBERSHIP_BP`) |
+    | `BitOr` / `BitXor` / `BitAnd` | `\|`, `^`, `&` | 30 / 32 / 35 |
+    | `Range` | `..`, `..<`, `..=`, `>..<`, prefix `>..` | 40 |
+    | `Equality` | `==`, `!=` | 45 |
+    | `Compare` | `<`, `<=`, `>`, `>=`, `<=>` | 50 |
+    | `Shift` | `<<`, `>>` | 55 |
+    | `Add` | `+`, `-`, `+\|`, `-\|`, `+%`, `-%`, `+?`, `-?` | 60 |
+    | `Multiply` | `*`, `/`, `%`, `//`, `%%`, `*\|`, `*%`, `*?` | 70 |
+    | `Cast` | `as`, `is` | 75 |
+    | `Unary` | prefix `-`, `!`, `~`, `not`, prefix `<-` | 80 |
+    | `Lens` | `~>` | 85 |
+    | `Power` | `**` | 88 |
+    | `Splat` | prefix `*`, `**`, `*..` | 90 |
+    | `Postfix` | postfix `?`, `!` | 95 |
+
+    `union`, `intersect` and `except` (`sql_syntax.pilot`, 12 today) are declared by that file at `Or`. `<-` in `select_syntax.pilot` (5 and 80) uses `Assign` and `Unary`.
+- **§8.3, word operators:** `and`, `or`, `not` and `is` are declared as readable pairs (`[InfixWord]` / `[Prefix]`) at their symbol's level, lowering to the same node. Their `bind_receptor` lines in `expr_sugar.pilot` go.
+- **§8.4, `a..b(c)`:** today's lookahead is kept (a cascade step unless `a` is a number literal). Step 1 adds conformance programs for both readings.
+
+**Step 1 Rust file list — APPROVED BY OWNER 2026-11-15.** With the approval the owner set the rule for step 1: every non-structural operator (for example `++`, `||`, `&&`) is defined, with its precedence, by an attribute on a `syntax` rule with a `quote` template or on an `op` declaration. Only the 13 structural tokens `( ) [ ] { } , ; : :: . => =` may be defined however the parser needs. For method-backed operators the attribute sits on the `op` declaration itself (the symbol is the `op`'s own), not on the surrounding interface as §3 sketched. Strictly these files, in `crates/pilot-parser` only; the lexer is untouched until step 2 and `map_binop_sym` stays until step 3.
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-parser/src/tables.rs` | Replace the `register_pratt_op` arm of `ingest_node` with `grammar_entry(target, symbol, shape, level, assoc, word)`: the level is a variant of `OpLevel`, whose ordinal the seed reads from the ingested `enum OpLevel` declaration; the binding power is computed from that ordinal, so no number appears in Pilot. Add `register_grammar` (closes the table). Ingest `InterfaceDecl` and `syntax` declarations, not only `FnDecl`/`StructDecl`. Delete `MEMBERSHIP_BP`. Add the `stdlib/core/operators/*.pilot` files to `BOOTSTRAP_SOURCES` and remove `stdlib/core/operator.pilot`. Keep `register_pratt_op` readable until every caller moves, then delete its arm. |
+| `crates/pilot-parser/src/attr_hooks.rs` | `ingest_decl_attrs` runs any registered attribute hook (`grammar_entry`), not only `set_register_layout`, with the target being the interface, the `syntax` rule, or the arm it sits on. |
+| `crates/pilot-parser/src/expr.rs` | Delete the hardcoded word powers at `:107` (`or` 12, `and` 14, others 45). Word operators, `in` (`::Membership`) and `as`/`is` (`::TypeRight`) take their level and shape from the table. `is_cascade_dotdot` stays as the `::Cascade` rule. |
+| `crates/pilot-parser/src/decl.rs` | Keep the attributes written on an item inside `pub interface { … }` and on an arm inside `pub syntax { … }`, attached to that item or arm, so the ingest above can see them. |
+| `crates/pilot-parser/src/rule_arms.rs` | A `syntax` arm may write `_` for an absent operand (`::OpenRange`: `(lhs, _)`, `(_, rhs)`, `(_, _)`); an arm fits only when its absent positions match. |
+| `crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs` | Update the `expr_sugar.pilot` code markers that move to `stdlib/core/operators/`. |
+
+Every touched file is reformatted to standard `rustfmt` layout in the same change, which unpacks the multi-statement lines still present in `tables.rs`, `expr.rs` and `decl.rs` (see the note below). Net Rust LOC is measured before and after; the step is expected to be near zero, with the real deletions in steps 2 and 3. After the change: `cargo test -p pilot-parser --test damaged_source -- --include-ignored`.
+
+**Pilot files in the same change (no approval needed, listed for completeness):** new `stdlib/core/operators/{levels,shapes,arithmetic,compare,bitwise,logic,range,absent,flow,quoting}.pilot`; delete `stdlib/core/operator.pilot` and `stdlib/core/syntax/call_quote.pilot`; remove `Cfg.Ops` and the 48 `register_pratt_op` calls from `core.pilot`, the numbers from `expr_sugar.pilot`, `stdlib/db/sql_syntax.pilot` and `stdlib/asyncio/select_syntax.pilot`; replace `sh_get_precedence` in `selfhost/parser.pilot` with `grammar_entries()`; add `grammar_entry` / `register_grammar` to `stdlib/core/bridge_lang.pilot` and append them to `airlock_lang_hooks()` in `selfhost/gate/airlock_abi.pilot` (an append under B+, approved through this entry); `GRAM005`–`GRAM007` in `selfhost/diagnostics/errors.pilot`; ledgers, matrices and maps.
+
+**Acceptance (written before the code, per §6 step 1):** one conformance program per adjacent level boundary in the table above, each with its grouping worked by hand in a comment; one program showing `a and b` and `a && b` give the same result and the same grouping; the `a..b(c)` / `0..n(c)` pair; and `err_gram005`/`006`/`007`.
+
+**Amendment 008-A (2026-11-15) — files found missing while building step 1. APPROVED BY OWNER 2026-11-15.**
+
+Found while mapping the seed before writing code:
+
+1. **The bootstrap needs two passes.** The operator attributes sit on `op` declarations, so their files need `op`, `pure`, `enum` and the scope headers, which `core.pilot`, `syntax/module_ext.pilot` and others register first. Those earlier files already use operators: `visibility.pilot` and `module_ext.pilot` bodies use `==` and `||`, and the `while` rule in `core.pilot` has `!` in its template. Read once, in order, they would parse before any operator exists. No ordering of the files fixes this, and re-reading a single file does not either.
+   - **Change:** `bootstrap_tables()` and `bootstrap_diagnostics()` in `crates/pilot-parser/src/lib.rs` read the sources twice. Pass 1 only collects the grammar entries. Pass 2 starts from empty tables holding just that grammar and builds everything else.
+   - **Size:** about 10 lines, plus `ParserTables::with_grammar` in `tables.rs` (already approved).
+   - **Cost:** a second bootstrap read at every process start. Compile speed is ungated (2026-11-10).
+2. **Two hardcoded binding powers outside the approved files.** Both use today's numbers, which stop meaning anything once powers come from level order.
+   - `crates/pilot-parser/src/stmt.rs:30` uses `30` and `:58` uses `40` (integer arguments inside `<…>`).
+   - `crates/pilot-parser/src/query.rs:31,37,44,92` uses `20` and `15` (LINQ clauses).
+   - **Change:** each takes its power from the table, anchored to an operator's native code, the way `pattern_literal_bp` already does (`stmt.rs:229`):
+     - `30` → the power of `|` (`BinaryOp::BitOr`);
+     - `40` → the power of `..`;
+     - `20` / `15` → just above `&&` (`BinaryOp::And`).
+   - Today's grouping is kept exactly. No operator text and no level name appears in Rust.
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-parser/src/lib.rs` | Two-pass bootstrap in `bootstrap_tables()` / `bootstrap_diagnostics()`. |
+| `crates/pilot-parser/src/stmt.rs` | `:30`, `:58`: anchored binding powers instead of `30` / `40`. |
+| `crates/pilot-parser/src/query.rs` | `:31`, `:37`, `:44`, `:92`: anchored binding powers instead of `20` / `15`. |
+
+**Design details fixed while mapping (no extra files):**
+- **Seed binding powers.** The seed computes each power as `10 + 4 × ordinal`. Shapes and associativity are read by **ordinal** from the enums passed to `register_grammar(level_enum, assoc_enum, shape_enum)`, so no variant name appears in Rust. Shape ordinals follow the §4 table order and are append-only under B+.
+- **`grammar_entry(target, symbol, shape, level, assoc, word)`.** An empty `symbol` means the target's own name, so `[Infix(::Add, ::Left)]` on `op +` declares `+`.
+- **Native codes.** A word's native `BinaryOp` code until step 3 is found by matching `BinaryOp::symbol()`, so no English word is added to the parser.
+- **`is` stays at `Equality`.** The §9 table above lists it under `Cast`, but today `is` binds at 45 (`Equality`). This is corrected to keep its grouping.
+- **`not x` changes grouping.** `not` takes the `Unary` level of `!`, per §8.3. Today its operand binds at 16, below `==`, so `not a == b` changes from `not (a == b)` to `(not a) == b`, the same grouping as `!a == b`. No code or test in the repository writes `not` followed by a comparison.
+
+**Discovered while itemizing (rule 3):** `crates/pilot-parser/src/tables.rs` (`ingest_node`, `map_binop_sym`), `expr.rs` (`:100-107`) and `decl.rs` (`parse_attrs`) still pack several statements per line, against `AGENTS.md` §1.1 and the `PROP-001` record that the parser was unpacked. `cargo fmt --check` could not be run to measure it (rustfmt is not installed for the stable toolchain). The reformat above fixes these three files; any other packed file needs its own entry.
+
+**Step 1 as built (2026-11-15) — differences from the plan above, for owner review.**
+- **Net Rust LOC grew by +382, not "near zero".** `crates/**/src` went from 20,416 to 20,798 lines, which is above `paused_max_total_rust_loc()` (20,408; the starting point was already 8 over). The growth is in `tables.rs` (+280: the grammar types, ordinal-based binding powers, `apply_hook` moved from `attr_hooks.rs`, and the structural-symbol and native-code lookups), `lib.rs` (+15, two-pass bootstrap), `expr.rs` (+49), `decl.rs` (+15), `stmt.rs` (+12), `query.rs` (+8) and `attr_hooks.rs` (+3). The deletions are expected in steps 2 and 3. Until then the manifest ceiling needs an owner decision: raise it, or trim step 1 first.
+- **Not reformatted.** `rustfmt` is not installed for the stable toolchain, so the promised whole-file reformat of `tables.rs`, `expr.rs` and `decl.rs` was not done, and `cargo fmt --check` was not run.
+- **Operator files.** `stdlib/core/operator.pilot` was kept, with the attributes on its `op` decls, instead of being split into `arithmetic`/`compare`/`bitwise`/`range`/`absent` files. The new files are `levels`, `shapes`, `logic` and `flow`. `quoting.pilot` and the `call_quote.pilot` deletion were not done, because call-quote is still token-based. The 19 old `stdlib/core/operators/*.pilot` files duplicated `operator.pilot` and were deleted.
+- **Level changes from the §9 table:**
+  - `intersect` stays at `And`, where it bound before (the table said `Or`).
+  - `//` (floor division) is not declared, because it is comment syntax.
+  - Unary `+` is not declared.
+  - Prefix `>..` now binds at `Range`.
+- **Still token-based (not yet declared):** `?.`, `?..`, cascade `..`, the six call-quote forms, `catch`, and the compound assignments. The `_` arms in `rule_arms.rs` are deferred.
+- **`sh_get_precedence` is replaced by a seam, not by `grammar_entries()`.** No runtime hook gives a Pilot program the seed's grammar, so `selfhost/parser.pilot` now stops at `seam("parser.operator_grammar", ..)` on any binary operator, and its numeric table is deleted. Its only caller is the Rust test `milestone61_stage3_fixed_point_and_universal_rename_gate.rs`, whose `test_61_1` (Pratt tree) now fails at that seam. `test_61_3_and_61_4` was already failing before this change (`toolchain source stdlib/core/bridge_os.pilot not found`).
+- **Quote printer limits (found, not fixed):**
+  - `quote { u || not t }.source()` prints `u || t`, dropping `not`.
+  - A quote whose statement starts with `not` gets `SYN001` (`stmt.rs` statement-start check).
+- **`stmt.rs:229`** (`pattern_literal_bp`) still uses its own floor of 36.
+
 
 ---
 

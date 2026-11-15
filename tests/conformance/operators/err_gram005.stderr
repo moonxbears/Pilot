@@ -1,0 +1,1 @@
+error[GRAM005]: `[Infix]` on `semi_join` declares `;`, which is structural syntax or a seed word; an operator cannot be one

@@ -1,0 +1,139 @@
+// ==============================================================================
+// FILE: selfhost/check/grammar_attrs.pilot
+// GRAM005-GRAM007: the operator-declaring attributes (PROP-008 step 1).
+// ==============================================================================
+// `[Infix]`, `[InfixWord]`, `[Prefix]`, `[Postfix]` and `[Shaped]`
+// (stdlib/core/operators/shapes.pilot) each declare one operator. Written
+// on an `op`, the operator is that `op`'s own symbol; written on a `syntax`
+// rule, the attribute names the symbol (or the rule's name is the operator).
+// The checker reports, in the user's files:
+//   GRAM005  the symbol or readable word is structural syntax (the 13 tokens
+//            `( ) [ ] { } , ; : :: . => =`) or a seed word; the seed ignores
+//            such an entry, so the operator would silently not exist;
+//   GRAM006  the declaration's operands do not fit the shape: an infix
+//            operator takes two (an `op` one parameter beside `self`, a rule
+//            two), a prefix or postfix operator one (an `op` none, a rule one);
+//   GRAM007  the attribute is on a declaration that cannot define an
+//            operator: neither an `op` nor a `syntax` rule.
+// GRAM001-GRAM004 (user operators that redefine or conflict) need the
+// table-driven lexer of PROP-008 step 2.
+pub lvl(0) pkg Pilot.SelfHost.Check.GrammarAttrs;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.diag.*;
+use selfhost.check.infer.*;
+
+/// The operator attributes and, for each, the positions (after the target)
+/// of its explicit symbol and readable word (-1: it has none) and whether
+/// its shape is fixed to one operand.
+struct GrammarAttr : IValue {
+    pub name:      str;
+    pub symbol_at: i64;
+    pub word_at:   i64;
+    pub shape_at:  i64;
+    pub unary:     bool;
+}
+
+fn grammar_attrs() -> List<GrammarAttr> => [
+    GrammarAttr { name: "Infix",     symbol_at: 2, word_at: -1, shape_at: -1, unary: false },
+    GrammarAttr { name: "InfixWord", symbol_at: 3, word_at: 0,  shape_at: -1, unary: false },
+    GrammarAttr { name: "Prefix",    symbol_at: 1, word_at: 2,  shape_at: -1, unary: true },
+    GrammarAttr { name: "Postfix",   symbol_at: 0, word_at: -1, shape_at: -1, unary: true },
+    GrammarAttr { name: "Shaped",    symbol_at: 3, word_at: 4,  shape_at: 0,  unary: false },
+];
+
+/// The shapes of `[Shaped]` that take one operand.
+fn unary_shapes() -> List<str> => ["Prefix", "Postfix"];
+
+/// The 13 structural tokens (PROP-008 §2) and the 14 seed words.
+fn structural_tokens() -> List<str> => ["(", ")", "[", "]", "{", "}", ",", ";", ":", "::", ".", "=>", "="];
+fn seed_words() -> List<str> => [
+    "__engine", "struct", "interface", "fn", "let", "ref", "if", "loop",
+    "return", "yield", "defer", "comptime", "quote", "asm",
+];
+
+/// Whether `sym` is, or starts with a delimiter that is always, structural
+/// syntax or a seed word. (`..` and `:=` start with `.` and `:` but lex as
+/// operators of their own, so only an exact match counts for those.)
+pub fn is_structural_symbol(sym: str) -> bool {
+    if sym.len() == 0 { return true; }
+    for t in structural_tokens() { if sym == t { return true; } }
+    for w in seed_words() { if sym == w { return true; } }
+    for t in ["(", ")", "[", "]", "{", "}", ",", ";"] { if sym.starts_with(t) { return true; } }
+    return false;
+}
+
+/// The text of attribute argument `a`: a string, a name (`::Add` is `Add`)
+/// or `nameof(word)`; empty for anything else.
+fn arg_text(s: Snap, a: i64) -> str {
+    let k = kind(s, a);
+    if k == nk_str() || k == nk_ident() { return node_name(s, a); }
+    if k == nk_call() {
+        let ch = children(s, a);
+        if ch.len() == 2 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == "nameof" {
+            return node_name(s, ch[1]);
+        }
+    }
+    return "";
+}
+
+/// Whether `d` is a `syntax` rule: a function whose body is a quote template.
+fn is_syntax_rule(s: Snap, d: i64) -> bool {
+    if kind(s, d) != nk_fn() { return false; }
+    let body = fn_body(s, d);
+    return body >= 0 && kind(s, body) == nk_quote();
+}
+
+fn check_decl(p: Program, sink: DiagSink, d: i64) {
+    let s = p.s;
+    let name = node_name(s, d);
+    for ga in grammar_attrs() {
+        guard some args = prog_attr_nodes(p, d, ga.name) else { continue; }
+        let is_op = kind(s, d) == nk_operator();
+        if !is_op && !is_syntax_rule(s, d) {
+            sink_error(sink, d, "GRAM007", f"`[{ga.name}]` is on `{name}`, which is neither an `op` declaration nor a `syntax` rule, so it cannot define an operator");
+            continue;
+        }
+        let symbol = if ga.symbol_at >= 0 && ga.symbol_at < args.len() { arg_text(s, args[ga.symbol_at]) } else { "" };
+        let sym = if symbol.len() > 0 { symbol } else { name };
+        if is_structural_symbol(sym) {
+            sink_error(sink, d, "GRAM005", f"`[{ga.name}]` on `{name}` declares `{sym}`, which is structural syntax or a seed word; an operator cannot be one");
+        }
+        if ga.word_at >= 0 && ga.word_at < args.len() {
+            let word = arg_text(s, args[ga.word_at]);
+            if word.len() > 0 && is_structural_symbol(word) {
+                sink_error(sink, d, "GRAM005", f"`[{ga.name}]` on `{name}` gives the readable word `{word}`, which is structural syntax or a seed word");
+            }
+        }
+        var unary = ga.unary;
+        if ga.shape_at >= 0 && ga.shape_at < args.len() {
+            let shape = arg_text(s, args[ga.shape_at]);
+            for u in unary_shapes() { if shape == u { unary = true; } }
+        }
+        let operands = if unary { 1 } else { 2 };
+        // An `op` takes its left (or only) operand as `self`.
+        let given = if is_op { fn_params(s, d).len() + 1 } else { fn_params(s, d).len() };
+        if given != operands {
+            let what = if unary { "one operand" } else { "two operands" };
+            let decl = if is_op { f"op {name}" } else { name };
+            sink_error(sink, d, "GRAM006", f"`[{ga.name}]` declares `{sym}` as an operator of {what}, but `{decl}` takes {given}");
+        }
+    }
+}
+
+/// GRAM005-GRAM007 over the user's files.
+pub fn check_grammar_attrs(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    var d = s.user_lo;
+    while d < s.user_hi {
+        if in_user_file(s, d) {
+            let k = kind(s, d);
+            if k == nk_operator() || k == nk_fn() || k == nk_struct() || k == nk_interface() || k == nk_adt() || k == nk_const() {
+                check_decl(p, sink, d);
+            }
+        }
+        d = d + 1;
+    }
+}

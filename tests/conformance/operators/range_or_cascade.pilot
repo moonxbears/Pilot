@@ -1,0 +1,22 @@
+// PROP-008 §8.4 (owner decision 2026-11-15): `a..b(c)` keeps today's
+// lookahead. After a name, `..` followed by a name and a call is a cascade
+// step on the name; after a number literal it is a range whose end is the
+// call.
+fn inc(x: i64) -> i64 => x + 1;
+
+fn main() {
+    // `0..inc(2)` is the range 0 .. 3: 0 + 1 + 2 = 3.
+    var total = 0;
+    for i in 0..inc(2) { total = total + i; }
+    print(total);
+    // `xs..push(4)` is a cascade step on `xs`, which it returns: [1, 2, 3, 4].
+    var xs = [1, 2, 3];
+    xs..push(4);
+    print(xs.len());
+    // A range between names, with spaces: `lo .. hi` = 2 .. 5: 2 + 3 + 4 = 9.
+    let lo = 2;
+    let hi = 5;
+    var s = 0;
+    for j in lo .. hi { s = s + j; }
+    print(s);
+}

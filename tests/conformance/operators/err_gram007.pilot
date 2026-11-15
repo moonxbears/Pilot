@@ -1,0 +1,8 @@
+// GRAM007: an operator attribute on a plain function, which is neither an
+// `op` declaration nor a `syntax` rule, cannot define an operator.
+[Infix(::Add, ::Left)]
+fn plus(a: i64, b: i64) -> i64 => a + b;
+
+fn main() {
+    print(plus(1, 2));
+}

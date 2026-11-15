@@ -1,0 +1,11 @@
+// GRAM005: `;` is one of the 13 structural tokens (PROP-008 §2), so no
+// operator may be declared with it; the seed ignores the entry, and the
+// checker says why instead of leaving the operator silently missing.
+pub syntax {
+    [Infix(::Add, ::Left, ";")]
+    semi_join(lhs, rhs) => quote { [$lhs, $rhs] };
+}
+
+fn main() {
+    print(1);
+}

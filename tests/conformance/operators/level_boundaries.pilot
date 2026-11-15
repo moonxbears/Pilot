@@ -1,0 +1,73 @@
+// PROP-008 step 1: how operators of adjacent levels group. The levels,
+// loosest first, are `OpLevel` in stdlib/core/operators/levels.pilot:
+//   Assign, Pipe, Coalesce, Or, And, Arrow, Membership, BitOr, BitXor, BitAnd,
+//   Range, Equality, Compare, Shift, Add, Multiply, Cast, Unary, Lens, Power,
+//   Splat, Postfix.
+// For each adjacent pair (looser L, tighter T), `x L y T z` must group as
+// `x L (y T z)`. A `quote` shows the grouping without running anything: its
+// `.source()` puts every operand that is itself an operator in parentheses.
+// Where an operator cannot be quoted, a value shows it instead; each
+// derivation is worked by hand in the comment above its line.
+// Not observable yet: Assign/Pipe (`:=` is not lowered, `|>` cannot be
+// quoted) and Power/Splat (no expression uses both).
+fn inc(x: i64) -> i64 => x + 1;
+fn sum3(a: i64, b: i64, c: i64) -> i64 => a + b + c;
+fn trio() -> List<i64>? => [1, 2, 3];
+
+fn splat_try() -> i64? {
+    // Splat/Postfix: `*trio()?` is `*(trio()?)`: 1 + 2 + 3 = 6.
+    return sum3(*trio()?);
+}
+
+fn main() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let t = true;
+    let u = false;
+    let cs = [3];
+    // Pipe/Coalesce: `o ?? 1 |> inc` is `(o ?? 1) |> inc` = inc(5) = 6.
+    let o: i64? = 5;
+    print(o ?? 1 |> inc);
+    // Coalesce/Or: `ob ?? false || true` is `ob ?? (false || true)`; ob holds false.
+    let ob: bool? = false;
+    print(ob ?? false || true);
+    // Or/And.
+    print(quote { t || u && t }.source());
+    // And/Arrow.
+    print(quote { a && b -> c }.source());
+    // Arrow/Membership: `in` becomes the membership call.
+    print(quote { a -> b in cs }.source());
+    // Membership/BitOr: `1 | 2 in [3]` is `(1 | 2) in [3]` = 3 in [3] = true.
+    print(1 | 2 in [3]);
+    // BitOr/BitXor: `1 | 3 ^ 1` is `1 | (3 ^ 1)` = 1 | 2 = 3 (`(1 | 3) ^ 1` is 2).
+    print(1 | 3 ^ 1);
+    // BitXor/BitAnd: `2 ^ 3 & 1` is `2 ^ (3 & 1)` = 2 ^ 1 = 3 (`(2 ^ 3) & 1` is 1).
+    print(2 ^ 3 & 1);
+    // BitAnd/Range.
+    print(quote { a & b .. c }.source());
+    // Range/Equality.
+    print(quote { a .. b == c }.source());
+    // Equality/Compare.
+    print(quote { a == b < c }.source());
+    // Compare/Shift.
+    print(quote { a < b << c }.source());
+    // Shift/Add: `1 << 1 + 1` is `1 << 2` = 4 (`(1 << 1) + 1` is 3).
+    print(1 << 1 + 1);
+    // Add/Multiply: `1 + 2 * 3` is 1 + 6 = 7.
+    print(1 + 2 * 3);
+    // Multiply/Cast.
+    print(quote { a * b as i64 }.source());
+    // Cast/Unary: `-a as i64` is `(-a) as i64`, so its root is the cast, a binary node.
+    print(quote { -a as i64 }.kind());
+    // Unary/Lens.
+    print(quote { -a ~> b }.source());
+    // Lens/Power.
+    print(quote { a ~> b ** c }.source());
+    // Unary/Power (not adjacent: Lens lies between): `-n ** 2` is `-(n ** 2)` = -4.
+    let n = -2;
+    print(-n ** 2);
+    // `is` binds at Equality, not Cast: `a + b is i64` is `(a + b) is i64`.
+    print(quote { a + b is i64 }.source());
+    print(splat_try() ?? 0);
+}

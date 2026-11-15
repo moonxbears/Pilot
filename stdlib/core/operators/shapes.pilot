@@ -1,0 +1,46 @@
+// =========================================================================
+// FILE: stdlib/core/operators/shapes.pilot
+// THE OPERATOR-DECLARING ATTRIBUTES (PROP-008)
+// =========================================================================
+// Each attribute adds one entry to the grammar (`grammar_entry`). Written on
+// an `op` declaration it declares that `op`'s own symbol:
+//     [Infix(::Add, ::Left)] pub pure op + (rhs: TRhs) -> TOut;
+// Written on a `syntax` rule (an operator that is not a method call, such
+// as `&&`, which must not evaluate its right side first) it names the
+// symbol, and a readable word when the operator has one:
+//     [InfixWord(nameof(and), ::And, ::Left, "&&")] logic_and(lhs, rhs) => ..;
+// Only the 13 structural tokens `( ) [ ] { } , ; : :: . => =` and the seed
+// words may never be declared (GRAM005, selfhost/check/grammar_attrs.pilot).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Shapes;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Operators.Levels;
+
+/// `a OP b` at `level`.
+comptime fn Infix(target, level, assoc, symbol = "") =>
+    grammar_entry(target, symbol, ::Binary, level, assoc, "");
+
+/// `a OP b` and its readable spelling `a word b`, one node.
+comptime fn InfixWord(target, word, level, assoc, symbol = "") =>
+    grammar_entry(target, symbol, ::Binary, level, assoc, word);
+
+/// `OP a` (and `word a` when given) at `level`.
+comptime fn Prefix(target, level, symbol = "", word = "") =>
+    grammar_entry(target, symbol, ::Prefix, level, ::Right, word);
+
+/// `a OP`, at the tightest level.
+comptime fn Postfix(target, symbol = "") =>
+    grammar_entry(target, symbol, ::Postfix, ::Postfix, ::Neither, "");
+
+/// Any other parse shape (`::TypeRight`, `::OpenRange`, `::Membership`, `::Safe`).
+comptime fn Shaped(target, shape, level, assoc, symbol = "", word = "") =>
+    grammar_entry(target, symbol, shape, level, assoc, word);
+
+comptime {
+    register_bracket_attribute(nameof(Infix),     Infix);
+    register_bracket_attribute(nameof(InfixWord), InfixWord);
+    register_bracket_attribute(nameof(Prefix),    Prefix);
+    register_bracket_attribute(nameof(Postfix),   Postfix);
+    register_bracket_attribute(nameof(Shaped),    Shaped);
+}

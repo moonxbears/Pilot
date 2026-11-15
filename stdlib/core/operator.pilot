@@ -6,6 +6,9 @@
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Interfaces;
 
 use Pilot.Core.Genesis.*;
+// The operator attributes (`[Infix]`, `[Prefix]`, ..) and their levels:
+// each `op` below declares its own symbol's grammar (PROP-008).
+use Pilot.Core.Operators.Shapes;
 
 pub interface {
     // 1. Universal 0-Byte Root Contract & 2-Bit Hardware Type Lattice Origins
@@ -32,19 +35,26 @@ pub interface {
     // 3. Equality, Ordering & Hashing Contracts
     IEquatable<TSelf: IAnyValue> : IAnyValue {
         pub pure:
+            [Infix(::Equality, ::Neither)]
             op == (rhs: TSelf) -> bool;
+            [Infix(::Equality, ::Neither)]
             op != (rhs: TSelf) -> bool => !(self == rhs);
     }
 
     IComparable<TSelf: IAnyValue> : IEquatable<TSelf> {
         pub pure:
+            [Infix(::Compare, ::Neither)]
             op <  (rhs: TSelf) -> bool;
+            [Infix(::Compare, ::Neither)]
             op <= (rhs: TSelf) -> bool => !(rhs < self);
+            [Infix(::Compare, ::Neither)]
             op >  (rhs: TSelf) -> bool => (rhs < self);
+            [Infix(::Compare, ::Neither)]
             op >= (rhs: TSelf) -> bool => !(self < rhs);
     }
 
     ICompareOperator<TRhs: IAnyValue, TOrder: IAnyValue> : IAnyValue {
+        [Infix(::Compare, ::Neither)]
         pub pure op <=> (rhs: TRhs) -> TOrder;
     }
 
@@ -54,77 +64,105 @@ pub interface {
 
     // 4. Arithmetic, Bitwise & Checked/Saturating/Wrapping ALU Operator Contracts
     IAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Add, ::Left)]
         pub pure op + (rhs: TRhs) -> TOut;
     }
 
     ISubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Add, ::Left)]
         pub pure op - (rhs: TRhs) -> TOut;
     }
 
     IMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Multiply, ::Left)]
         pub pure op * (rhs: TRhs) -> TOut;
     }
 
     IDivOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Multiply, ::Left)]
         pub pure op / (rhs: TRhs) -> TOut;
     }
 
     IRemOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Multiply, ::Left)]
         pub pure op % (rhs: TRhs) -> TOut;
     }
 
     IModOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Multiply, ::Left)]
         pub pure op %% (rhs: TRhs) -> TOut;
     }
 
     ISatAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Add, ::Left)]
         pub pure op +| (rhs: TRhs) -> TOut;
     }
 
     ISatSubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Add, ::Left)]
         pub pure op -| (rhs: TRhs) -> TOut;
     }
 
     ISatMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Multiply, ::Left)]
         pub pure op *| (rhs: TRhs) -> TOut;
     }
 
     IWrapAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Add, ::Left)]
         pub pure op +% (rhs: TRhs) -> TOut;
     }
 
     IWrapSubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Add, ::Left)]
         pub pure op -% (rhs: TRhs) -> TOut;
     }
 
     IWrapMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Multiply, ::Left)]
         pub pure op *% (rhs: TRhs) -> TOut;
     }
 
     ICheckedAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Add, ::Left)]
         pub pure op +? (rhs: TRhs) -> TOut;
     }
 
     ICheckedSubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Add, ::Left)]
         pub pure op -? (rhs: TRhs) -> TOut;
     }
 
     ICheckedMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Multiply, ::Left)]
         pub pure op *? (rhs: TRhs) -> TOut;
     }
 
     INegOperator<TOut: IAnyValue> : IAnyValue {
+        [Prefix(::Unary)]
         pub pure op - () -> TOut;
     }
 
     IBitwiseOperator<TSelf: IAnyValue> : IAnyValue {
         pub pure:
+            [Infix(::BitAnd, ::Left)]
             op &  (rhs: TSelf) -> TSelf;
+            [Infix(::BitOr, ::Left)]
             op |  (rhs: TSelf) -> TSelf;
+            [Infix(::BitXor, ::Left)]
             op ^  (rhs: TSelf) -> TSelf;
+            [Prefix(::Unary)]
             op ~  ()           -> TSelf;
+            [Infix(::Shift, ::Left)]
             op << (bits: u32)  -> TSelf;
+            [Infix(::Shift, ::Left)]
             op >> (bits: u32)  -> TSelf;
+    }
+
+    // `a ** b` groups to the right: `2 ** 3 ** 2` is `2 ** 9`.
+    IPowOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Power, ::Right)]
+        pub pure op ** (rhs: TRhs) -> TOut;
     }
 
     INumber<TSelf: IValue> :
@@ -147,28 +185,35 @@ pub interface {
     }
 
     ISwapOperator<TRhs: IAnyValue> : IAnyValue {
+        [Infix(::Assign, ::Neither)]
         pub op :=: (rhs: var ref<TRhs>);
     }
 
     ILensOperator<TLens: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        [Infix(::Lens, ::Left)]
         pub pure op ~> (lens: TLens) -> TOut;
     }
 
     IOpenRangeOperator<TRhs: IValue, TOut: IValue> : IValue {
+        [Shaped(::OpenRange, ::Range, ::Neither)]
         pub pure op >..< (rhs: TRhs) -> TOut;
     }
 
     IAfterRangeOperator<TOut: IValue> : IValue {
+        [Prefix(::Range)]
         pub pure op >.. () -> TOut;
     }
 
     IRangeOperator<TRhs: IValue, TOut: IValue> : IValue {
         pub pure:
+            [Shaped(::OpenRange, ::Range, ::Neither)]
             op ..< (rhs: TRhs) -> TOut;
+            [Shaped(::OpenRange, ::Range, ::Neither)]
             op ..  (rhs: TRhs) -> TOut;
     }
 
     ISpanOperator<TRhs: IValue, TOut: IValue> : IValue {
+        [Shaped(::OpenRange, ::Range, ::Neither)]
         pub pure op ..= (rhs: TRhs) -> TOut;
     }
 
@@ -182,11 +227,13 @@ pub interface {
     // (`stdlib/core/syntax/try_catch.pilot` binds this protocol).
     ITryOperator<TOk: IAnyValue, TErr: IAnyValue = void> : IAnyValue {
         pub pure fn is_success() -> bool;
+        [Postfix]
         pub pure op ? () -> TOk;
         pub pure fn failure() -> TErr;
     }
 
     ICoalesceOperator<TOut: IAnyValue> : IAnyValue {
+        [Shaped(::Safe, ::Coalesce, ::Right)]
         pub pure op ?? (fallback: TOut) -> TOut;
     }
 

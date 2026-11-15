@@ -1,0 +1,54 @@
+// =========================================================================
+// FILE: stdlib/core/operators/flow.pilot
+// PIPES, PROJECTIONS, BINDING, BORROWING, CASTS & TESTS (PROP-008)
+// =========================================================================
+// Operators that are not method calls, each declared by an attribute on its
+// `syntax` rule. A template that is not written yet stops at the seam
+// `operators.rewrite_template`: the engines lower these operators natively
+// until their templates replace that (PROP-008 "grammar now, templates later").
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Flow;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Operators.Shapes;
+
+pub syntax {
+    [Infix(::Pipe, ::Left, "|>")]
+    pipe_forward(lhs, rhs) => quote { $rhs($lhs) };
+
+    [Infix(::Pipe, ::Right, "<|")]
+    pipe_backward(lhs, rhs) => quote { $lhs($rhs) };
+
+    [Infix(::Arrow, ::Left, "->")]
+    project_to(lhs, rhs) => quote {
+        seam("operators.rewrite_template", "the template of `->` (a DTO projection) is not written; the engines read the operator natively")
+    };
+
+    [Infix(::Arrow, ::Left, "->>")]
+    project_all(lhs, rhs) => quote {
+        seam("operators.rewrite_template", "the template of `->>` (a projection of every element) is not written; the engines read the operator natively")
+    };
+
+    [Shaped(::Assign, ::Assign, ::Right, ":=")]
+    bind_walrus(lhs, rhs) => quote {
+        seam("operators.rewrite_template", "the template of `:=` (bind and yield the value) is not written; the seed does not lower `:=`")
+    };
+
+    [Prefix(::Unary, "&")]
+    borrow_of(x) => quote { ref $x };
+
+    [Shaped(::TypeRight, ::Cast, ::Left, nameof(as))]
+    cast_to(x, t) => quote {
+        seam("operators.rewrite_template", "the template of `as` is not written; the engines lower the cast natively")
+    };
+
+    [Infix(::Equality, ::Left, nameof(is))]
+    type_test(x, t) => quote {
+        seam("operators.rewrite_template", "the template of `is` is not written; the engines lower the type test natively")
+    };
+
+    [Shaped(::Membership, ::Membership, ::Left, nameof(in))]
+    member_test(x, xs) => quote {
+        seam("operators.rewrite_template", "the template of `in` is not written; the parser calls the function bound by bind_membership")
+    };
+}

@@ -8,22 +8,13 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.ExprSugar;
 
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Bridge.Lang;
+use Pilot.Core.Operators.Shapes;
 
+// The operators this file once registered with numbers are declared by
+// attributes (PROP-008): `|>` `<|` `->` `->>` `:=` `is` in
+// stdlib/core/operators/flow.pilot, `&&` `||` and `and` `or` `not` in
+// stdlib/core/operators/logic.pilot, `**` in stdlib/core/operator.pilot.
 comptime {
-    register_pratt_op("|>",  infix,  8,  left,  0);
-    register_pratt_op("<|",  infix,  8,  right, 0);
-    register_pratt_op("||",  infix,  12, left,  0);
-    register_pratt_op("&&",  infix,  14, left,  0);
-    register_pratt_op("**",  infix,  88, right, 0);
-    register_pratt_op("//",  infix,  70, left,  0);
-    register_pratt_op(":=",  infix,  5,  right, 0);
-    register_pratt_op("->",  infix,  20, left,  0);
-    register_pratt_op("->>", infix,  20, left,  0);
-
-    bind_receptor(nameof(and),    31, 14);
-    bind_receptor(nameof(or),     31, 15);
-    bind_receptor(nameof(not),    31, 1);
-    bind_receptor(nameof(is),     31, 25);
     bind_receptor(nameof(some),   31, 2);
     bind_receptor(nameof(nameof), 33, 25);
 
@@ -39,7 +30,10 @@ comptime {
 // -------------------------------------------------------------------------
 
 pub syntax {
+    [Prefix(::Splat, "*")]
     splat(x) => quote { *$x };
+    [Prefix(::Splat, "**")]
     pairs(x) => quote { **$x };
+    [Prefix(::Splat, "*..")]
     flat(x)  => quote { *..$x };
 }

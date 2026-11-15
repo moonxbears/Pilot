@@ -101,7 +101,7 @@ pub fn airlock_c_structs() -> List<List<any>> => [
     ["OsFfiRetRegs", 80, 16, ["gpr", "vec"]],
 ];
 
-/// Frozen Model B+ `bridge_lang.pilot` hooks (66 compile-time hooks).
+/// Frozen Model B+ `bridge_lang.pilot` hooks (68 compile-time hooks).
 pub fn airlock_lang_hooks() -> List<str> => [
     "register_bracket_attribute", "bind_lang_item", "set_register_layout", "set_memory_layout",
     "set_inline_hint", "register_syntax_keyword", "bind_lattice_kind", "get_lattice_bits",
@@ -121,12 +121,13 @@ pub fn airlock_lang_hooks() -> List<str> => [
     "bind_owned_elements", "bind_owned_payload",
     "register_keyword", "register_keyword_category", "query_registered_symbols",
     "bind_lang_protocol",
+    "register_grammar", "grammar_entry",
 ];
 
 /// Hooks `bridge_lang.pilot` still carries but that are **not** frozen: each is
-/// replaced by a later proposal (`register_pratt_op` by `register_grammar`,
-/// PROP-008). Shrink-only.
-pub fn airlock_transitional_hooks() -> List<str> => ["register_pratt_op"];
+/// replaced by a later proposal. Shrink-only; empty since PROP-008 step 1
+/// replaced `register_pratt_op` with `register_grammar` / `grammar_entry`.
+pub fn airlock_transitional_hooks() -> List<str> => [];
 
 /// Where each owner type lives (Amendment A1).
 pub fn airlock_owner_files() -> Map<str, str> {

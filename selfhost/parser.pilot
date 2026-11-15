@@ -8,20 +8,6 @@ pub pkg Pilot.SelfHost.Parser;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-fn sh_get_precedence(op_str: str) -> i64 {
-    if op_str == "||" { return 5; }
-    if op_str == "&&" { return 10; }
-    if op_str == "==" || op_str == "!=" { return 20; }
-    if op_str == "<" || op_str == "<=" || op_str == ">" || op_str == ">=" { return 25; }
-    if op_str == "+" || op_str == "-" { return 30; }
-    if op_str == "*" || op_str == "/" || op_str == "%" { return 40; }
-    return 0;
-}
-
-pub pure fn sh_op_precedence(op_str: str) -> i64 {
-    return sh_get_precedence(op_str);
-}
-
 pub pure fn sh_parser_state_name(state: i64) -> str {
     if state == 1 { return "Parsing"; }
     if state == 2 { return "Done"; }
@@ -393,7 +379,7 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
 
     if (tag == "Op" || tag == "CallQuoteShallow") && (text == "!" || text == "-") {
         __engine("map_set", ctx, "pos", cur + 1);
-        let operand = sh_parse_expr_bp(arena, tape, ctx, 50);
+        let operand = sh_parse_primary(arena, tape, ctx);
         let nid = sh_ast_alloc_node(arena, "UnaryExpr", text);
         sh_ast_add_child(arena, nid, operand);
         return nid;
@@ -448,15 +434,11 @@ fn sh_parse_expr_bp(arena: i64, tape: i64, ctx: i64, min_bp: i64) -> i64 {
                 continue;
             }
 
-            let bp = sh_get_precedence(op_text);
-            if bp < min_bp || bp == 0 { break; }
-
-            __engine("map_set", ctx, "pos", cur + 1);
-            let rhs = sh_parse_expr_bp(arena, tape, ctx, bp + 1);
-            let bin_nid = sh_ast_alloc_node(arena, "BinaryExpr", op_text);
-            sh_ast_add_child(arena, bin_nid, lhs);
-            sh_ast_add_child(arena, bin_nid, rhs);
-            lhs = bin_nid;
+            // Operator precedence is declared by the operator attributes
+            // (`[Infix(..)]` on `op` and `syntax` rules, PROP-008); this
+            // parser does not read them yet, and its own table is deleted.
+            return seam("parser.operator_grammar",
+                f"the self-hosted parser binding `{op_text}`: it must take each operator's level and associativity from the declared grammar (stdlib/core/operators/levels.pilot + the [Infix]/[Prefix] attributes)");
         } else {
             break;
         }

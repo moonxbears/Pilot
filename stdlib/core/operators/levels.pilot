@@ -1,0 +1,65 @@
+// =========================================================================
+// FILE: stdlib/core/operators/levels.pilot
+// OPERATOR BINDING LEVELS, ASSOCIATIVITY & PARSE SHAPES (PROP-008)
+// =========================================================================
+// Every operator is declared once, by an attribute on the declaration that
+// gives it its meaning (stdlib/core/operators/shapes.pilot). The attribute
+// names a level, never a number: binding powers come from the order of the
+// levels below, loosest first. The seed reads only the order of each enum's
+// variants (`register_grammar`), so renaming a variant changes nothing.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Levels;
+
+use Pilot.Core.Genesis.*;
+
+/// Binding levels, loosest first (owner decision 2026-11-15, PROP-008 §9).
+pub enum OpLevel : u8 {
+    Assign,      // `:=` `:=:` infix `<-`
+    Pipe,        // `|>` `<|`
+    Coalesce,    // `??`
+    Or,          // `||` `or` `union` `except`
+    And,         // `&&` `and` `intersect`
+    Arrow,       // `->` `->>`
+    Membership,  // `in`
+    BitOr,       // `|`
+    BitXor,      // `^`
+    BitAnd,      // `&`
+    Range,       // `..` `..<` `..=` `>..<` prefix `>..`
+    Equality,    // `==` `!=` `is`
+    Compare,     // `<` `<=` `>` `>=` `<=>`
+    Shift,       // `<<` `>>`
+    Add,         // `+` `-` and the saturating, wrapping and checked forms
+    Multiply,    // `*` `/` `%` `%%` and their forms
+    Cast,        // `as`
+    Unary,       // prefix `-` `!` `not` `~` `&` `<-`
+    Lens,        // `~>`
+    Power,       // `**`
+    Splat,       // prefix `*` `**` `*..`
+    Postfix,     // postfix `?`
+}
+
+/// How a chain of operators of one level groups.
+pub enum Assoc : u8 {
+    Left,     // `a - b - c` is `(a - b) - c`
+    Right,    // `a ?? b ?? c` is `a ?? (b ?? c)`
+    Neither,  // grouped left by the seed today; a chain is not checked yet
+}
+
+/// How the parser reads an operator (PROP-008 §4). The seed knows each
+/// shape by its position, so a new shape is appended, never inserted.
+pub enum ParseShape : u8 {
+    Binary,        // `a + b`
+    Prefix,        // `-a`, `not a`
+    Postfix,       // `a?`
+    TypeRight,     // `a as T`: the right operand is a type
+    OpenRange,     // `a..b`; the open forms are still read by token
+    Membership,    // `x in xs`: calls the bound membership function
+    Assign,        // `a := b`
+    Safe,          // `a ?? b`
+    Cascade,       // `?..` and the cascade reading of `..` (still read by token)
+    AdjacentCall,  // `f!(..)` and the other call quotes (still read by token)
+}
+
+comptime {
+    register_grammar(nameof(OpLevel), nameof(Assoc), nameof(ParseShape));
+}

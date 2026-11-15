@@ -8,13 +8,12 @@
 // =========================================================================
 comptime {
     let Cfg = {
-        // 1. Private Rust `__engine(...)` Callback Hook Names (30 Hooks)
+        // 1. Private Rust `__engine(...)` Callback Hook Names
         Hooks = {
             bind_attr:    "register_bracket_attribute",
             bind_lang:    "bind_lang_item",
             reg_layout:   "set_register_layout",
             mem_layout:   "set_memory_layout",
-            pratt_op:     "register_pratt_op",
             inline_hint:  "set_inline_hint",
             syntax_kw:    "register_syntax_keyword",
             modifier:     "register_modifier",
@@ -211,7 +210,6 @@ comptime {
             attr_lang:    "Lang",
             attr_bits:    "Bits",
             attr_layout:  "Layout",
-            attr_op:      "Operator",
             attr_inline:  "Inline",
             attr_lattice: "Lattice",
             attr_naming:  "EnforceCoreNaming",
@@ -260,75 +258,8 @@ comptime {
             ring_genesis: 100,
         },
 
-        // 7. Once-in-Genesis Pratt Operator Table Constants
-        Ops = {
-            fix_prefix:  prefix,
-            fix_infix:   infix,
-            fix_postfix: postfix,
-            assoc_left:  left,
-            assoc_right: right,
-            assoc_none:  none,
-
-            prec_coal:   10,
-            prec_or:     15,
-            prec_and:    20,
-            prec_bitor:  30,
-            prec_xor:    32,
-            prec_bitand: 35,
-            prec_range:  40,
-            prec_eq:     45,
-            prec_cmp:    50,
-            prec_shift:  55,
-            prec_add:    60,
-            prec_mul:    70,
-            prec_cast:   75,
-            prec_unary:  80,
-            prec_lens:   85,
-            prec_splat:  90,
-            prec_post:   95,
-            prec_swap:   5,
-
-            sym_coal:    "??",
-            sym_bitor:   "|",
-            sym_xor:     "^",
-            sym_bitand:  "&",
-            sym_range:   "..",
-            sym_range_lt:"..<",
-            sym_span:    "..=",
-            sym_open_rng:">..<",
-            sym_after_rng:">..",
-            sym_eq:      "==",
-            sym_ne:      "!=",
-            sym_lt:      "<",
-            sym_gt:      ">",
-            sym_le:      "<=",
-            sym_ge:      ">=",
-            sym_cmp3:    "<=>",
-            sym_shl:     "<<",
-            sym_shr:     ">>",
-            sym_add:     "+",
-            sym_sub:     "-",
-            sym_sat_add: "+|",
-            sym_sat_sub: "-|",
-            sym_wrap_add:"+%",
-            sym_wrap_sub:"-%",
-            sym_chk_add: "+?",
-            sym_chk_sub: "-?",
-            sym_mul:     "*",
-            sym_div:     "/",
-            sym_rem:     "%",
-            sym_sat_mul: "*|",
-            sym_wrap_mul:"*%",
-            sym_chk_mul: "*?",
-            sym_euc_mod: "%%",
-            sym_lens:    "~>",
-            sym_swap:    ":=:",
-            sym_not:     "!",
-            sym_try:     "?",
-            sym_bitnot:  "~",
-            sym_pairs:   "**",
-            sym_expand:  "*..",
-        },
+        // 7. Operators are declared by attributes on their `op` or `syntax`
+        //    rule, at named levels (stdlib/core/operators/, PROP-008).
     };
 }
 // =========================================================================
@@ -342,9 +273,6 @@ comptime fn Bits(target_type, width, reg_class) =>
 
 comptime fn Layout(target_type, mode) =>
     set_memory_layout(target_type, mode);
-
-comptime fn Operator(target_fn, fixity, prec, assoc) =>
-    register_pratt_op(target_fn, fixity, prec, assoc);
 
 comptime fn Inline(target_fn, mode) =>
     set_inline_hint(target_fn, mode);
@@ -362,7 +290,6 @@ comptime {
     register_bracket_attribute(Cfg.Tokens.attr_lang,    Lang);
     register_bracket_attribute(Cfg.Tokens.attr_bits,    Bits);
     register_bracket_attribute(Cfg.Tokens.attr_layout,  Layout);
-    register_bracket_attribute(Cfg.Tokens.attr_op,      Operator);
     register_bracket_attribute(Cfg.Tokens.attr_inline,  Inline);
     register_bracket_attribute(Cfg.Tokens.attr_lattice, Lattice);
     register_bracket_attribute(Cfg.Tokens.attr_naming,  EnforceCoreNaming);
@@ -380,7 +307,7 @@ comptime {
 // cleanly, crates/pilot-parser/tests/bootstrap_sources.rs).
 
 // =========================================================================
-// STEP 3: REGISTER MODIFIERS, MODULE KEYWORDS, RECEIVER & PRATT PRECEDENCES
+// STEP 3: REGISTER MODIFIERS, MODULE KEYWORDS & RECEIVER
 // =========================================================================
 comptime {
     // 1. Canonical Axis-1 Spatial Visibility Lattice (0..9)
@@ -432,56 +359,8 @@ comptime {
     bind_receptor(nameof(as),       29, 0);
     bind_receptor("view",     29, 1);
 
-    // 4. Register Global Pratt Operator Precedences ONCE for the Entire Language
-    register_pratt_op(Cfg.Ops.sym_coal,   Cfg.Ops.fix_infix,   Cfg.Ops.prec_coal,   Cfg.Ops.assoc_right);
-    register_pratt_op("||",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_or,     Cfg.Ops.assoc_left);
-    // `x as T` binds tighter than `*` and looser than prefix operators.
-    register_pratt_op(nameof(as),         Cfg.Ops.fix_infix,   Cfg.Ops.prec_cast,   Cfg.Ops.assoc_left);
-    register_pratt_op("&&",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_and,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_bitor,  Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitor,  Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_xor,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_xor,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_bitand, Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitand, Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_range,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_range_lt, Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_span,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_eq,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_ne,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_lt,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_gt,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_le,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_ge,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_shl,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_shift,  Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_shr,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_shift,  Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_add,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_sub,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_mul,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_div,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_rem,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-
-    register_pratt_op(Cfg.Ops.sym_not,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
-    register_pratt_op(Cfg.Ops.sym_sub,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
-    register_pratt_op(Cfg.Ops.sym_bitnot, Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
-    register_pratt_op(Cfg.Ops.sym_mul,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
-    register_pratt_op(Cfg.Ops.sym_pairs,  Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
-    register_pratt_op(Cfg.Ops.sym_expand, Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
-
-    register_pratt_op(Cfg.Ops.sym_not,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_try,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_open_rng,Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_after_rng,Cfg.Ops.fix_prefix, Cfg.Ops.prec_range,  Cfg.Ops.assoc_right);
-    register_pratt_op(Cfg.Ops.sym_cmp3,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    register_pratt_op(Cfg.Ops.sym_sat_add, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_sat_sub, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_wrap_add,Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_wrap_sub,Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_chk_add, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_chk_sub, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_sat_mul, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_wrap_mul,Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_chk_mul, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_euc_mod, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_lens,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_lens,   Cfg.Ops.assoc_left);
-    register_pratt_op(Cfg.Ops.sym_swap,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_swap,   Cfg.Ops.assoc_none);
+    // 4. Operators and their precedence are declared by attributes on their
+    //    `op` declarations and `syntax` rules (stdlib/core/operators/, PROP-008).
 }
 
 [EnforceCoreNaming]

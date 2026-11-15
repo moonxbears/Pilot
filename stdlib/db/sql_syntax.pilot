@@ -6,6 +6,7 @@ pub pkg Pilot.Db.Syntax;
 
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Bridge.Lang;
+use Pilot.Core.Operators.Shapes;
 
 comptime {
     // `database` is registered but not built yet (docs/keyword_roadmap.md
@@ -27,10 +28,17 @@ comptime {
     bind_receptor(nameof(by),         33, 11);
     bind_receptor(nameof(from),       33, 6);
     bind_receptor(nameof(select),     33, 7);
+}
 
-    register_pratt_op(nameof(union),     infix, 12, left, 28);
-    register_pratt_op(nameof(intersect), infix, 14, left, 29);
-    register_pratt_op(nameof(except),    infix, 12, left, 30);
+// The set operators over sequences (stdlib/db/set_ops.pilot). `intersect`
+// binds tighter than `union` and `except`, as in SQL.
+pub syntax {
+    [Infix(::Or, ::Left, nameof(union))]
+    seq_union_of(lhs, rhs) => quote { seq_union($lhs, $rhs) };
+    [Infix(::And, ::Left, nameof(intersect))]
+    seq_intersect_of(lhs, rhs) => quote { seq_intersect($lhs, $rhs) };
+    [Infix(::Or, ::Left, nameof(except))]
+    seq_except_of(lhs, rhs) => quote { seq_except($lhs, $rhs) };
 }
 
 // `transaction`, `commit`, `rollback` and `savepoint` are not built yet

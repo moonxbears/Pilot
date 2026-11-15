@@ -8,10 +8,16 @@ impl<'a> Parser<'a> {
         let ingests = self.ingest || self.src.contains("__engine") || self.src.contains("comptime") || self.src.contains('[');
         let mut items = Vec::new();
         while !self.at_end() { self.skip_seps(); if self.at_end() { break; }
-            let mark = self.pos;
+            let (mark, first_new) = (self.pos, items.len());
             self.parse_item(&mut items, false);
             if self.pos == mark { self.advance(); }
-            if let Some(&last) = items.last() { if ingests { self.tables.to_mut().ingest_node(&self.arena, last); } } }
+            // Every item the declaration made: a header block (`pub interface
+            // { .. }`) makes one per inner declaration.
+            if ingests {
+                for &item in &items[first_new..] {
+                    self.tables.to_mut().ingest_node(&self.arena, item);
+                }
+            } }
         if ingests { self.tables.to_mut().finish_ingest(self.src); }
         self.report_stray_characters();
         self.arena.root = self.arena.alloc_list_node(NodeKind::Program, 0, ByteSpan::new(0, self.src.len() as u32), &items);
@@ -524,7 +530,10 @@ impl<'a> Parser<'a> {
                         t.type_rules.push(rule);
                         } }
                 rules.push(body);
-                } else { let kw = self.text().to_string(); self.advance(); let rich = self.rule_head_is_rich();
+                } else {
+                // `[InfixWord(..)] rule(..) => ..`: attributes on one rule.
+                let rule_attrs = if self.at(TokenKind::LBracket) { self.parse_attrs() } else { Vec::new() };
+                let kw = self.text().to_string(); self.advance(); let rich = self.rule_head_is_rich();
                 let (params, arm) = if rich { let h = self.parse_rule_head(); (h.nodes, h.arm) } else { let params = self.parse_param_list();
                     let pnames: Vec<String> = params.iter().map(|&pid| self.arena.interner.resolve(SymbolId(self.arena.node(pid).lhs)).to_string()).collect();
                     let defaults = vec![None; pnames.len()];
@@ -543,13 +552,19 @@ impl<'a> Parser<'a> {
                     }
                 // A rule with arms lives only in the rule table: its template is
                 // no function (`stringify($p)` is no call, and arms share a word).
-                if rich { continue; }
+                if rich {
+                    if !rule_attrs.is_empty() {
+                        self.arena.diagnostics.push((rsp, format!("an attribute on `{kw}`, a rule with arms, is not read yet; write it on a rule with one parameter list")));
+                    }
+                    continue;
+                }
                 let sym = self.arena.interner.intern(&kw);
                 let mut ch = vec![body];
                 ch.extend(params);
                 let (st, ln) = self.arena.alloc_child_slice(&ch);
                 let f = self.arena.alloc_node(NodeKind::FnDecl, ln as u16, ByteSpan::new(rsp.start, self.prev_span().end), sym.0, st);
                 let mut fm = mods.clone();
+                fm.attrs.extend(rule_attrs);
                 fm.flags |= DECL_FLAG_COMPTIME;
                 self.apply_mods(f, &fm, 7);
                 rules.push(f);
