@@ -7,7 +7,7 @@
 use crate::instruction::{Instruction, Opcode};
 use crate::ops;
 use crate::pilc::PilcBinary;
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 use pilot_span::ByteSpan;
 use std::collections::HashMap;
 
@@ -85,11 +85,10 @@ pub struct PilVirtualMachine {
     pub fuel_used: u64,
     pub fuel_exhausted: bool,
     pub fault: Option<VmFault>,
-    /// The arguments after `--` on the command line (`proc_args()`).
+    /// The arguments after `--` on the command line (`EnvCtl` sub-op `2`).
     pub script_args: Vec<String>,
-    /// Child processes started with `proc_spawn`, by handle; `None` once
-    /// waited for.
-    pub children: Vec<Option<crate::host::Child>>,
+    /// Unified host descriptor, process and dynamic-library state (`bridge`).
+    pub bridge: crate::bridge::BridgeState,
     /// Generator frames, by handle (`vm_gen`).
     pub generators: Vec<crate::vm_gen::GenFrame>,
     /// The generator bodies running, innermost last: the call depth each
@@ -124,9 +123,6 @@ const CARRIED_REGS: usize = crate::MAX_CALL_ARGS + 2;
 /// Intrinsic calls with at most this many arguments pass them on the stack.
 const INLINE_ARGS: usize = 16;
 
-/// The names of the generator intrinsics (`vm_gen`) start with this.
-const GEN_PREFIX: &str = "gen_";
-
 impl PilVirtualMachine {
     pub fn new() -> Self {
         Self {
@@ -150,7 +146,7 @@ impl PilVirtualMachine {
             engine_handler: None,
             host_ops: None,
             script_args: Vec::new(),
-            children: Vec::new(),
+            bridge: Default::default(),
             generators: Vec::new(),
             gen_stack: Vec::new(),
             outs: Vec::new(),
@@ -171,6 +167,7 @@ impl PilVirtualMachine {
         self.call_stack.clear();
         self.heap_lists.clear();
         self.globals.clear();
+        self.bridge = Default::default();
         self.generators.clear();
         self.gen_stack.clear();
         self.registers.clear();
@@ -373,7 +370,7 @@ impl PilVirtualMachine {
         let hook = name
             .str_in(&mut name_buf)
             .ok_or_else(|| format!("intrinsic name must be a string, found {}", name.kind_label()))?;
-        if hook.starts_with(GEN_PREFIX) && self.gen_intrinsic(hook, ins, args)? {
+        if self.gen_intrinsic(hook, ins, args)? {
             return Ok(());
         }
         let v = self.intrinsic(hook, args)?;

@@ -191,7 +191,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 
 const SURVIVING_CRATES: &[&str] = &[
     "pilot-analysis", "pilot-ast", "pilot-cli",
-    "pilot-intern", "pilot-lexer", "pilot-parser", "pilot-rt", "pilot-span", "pilot-vm",
+    "pilot-intern", "pilot-lexer", "pilot-parser", "pilot-span", "pilot-vm",
 ];
 
 const RETIRED_PYTHON_GATE_SCRIPTS: &[&str] = &[

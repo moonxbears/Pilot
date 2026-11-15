@@ -572,6 +572,7 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
     //    Pass 1: Runtime-PRNG unpredictable names (`c32_<tag>`, `window_<tag>`, `maybe_<tag>`, `outcome_<tag>`, `interval_<tag>`)
     //            (Defeats any AI that tries to hardcode `"window"` or `"maybe"` in `selfhost/*.pilot`!)
     let bootstrap_rel_paths = [
+        "stdlib/core/bridge_lang.pilot",
         "stdlib/core/core.pilot",
         "stdlib/core/syntax/type_construct.pilot",
         "stdlib/core/syntax/visibility.pilot",

@@ -1,0 +1,6 @@
+// Unbuilt HostOp stops loudly at registered seam `bridge.ffi_callback_alloc` (PROP-002a §6 & §7).
+use Pilot.Core.Bridge.Os;
+
+fn main() {
+    let _ = os_ffi_callback_alloc(0, 0, 0, 0);
+}

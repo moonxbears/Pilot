@@ -46,7 +46,7 @@ use pilot_analysis::{
 use pilot_ast::{CallQuoteKind, NodeKind};
 use pilot_intern::SymbolId;
 use pilot_parser::parse;
-use pilot_rt::PilotVal;
+use pilot_vm::PilotVal;
 use pilot_vm::pilc::{PilcBinary, PILC_V3_MAGIC};
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 

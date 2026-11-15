@@ -57,7 +57,7 @@ use pilot_analysis::{
     eval_file_with_tables, flatten_ast, handle_engine_intrinsic, BootstrapSnapshot, PhysicsRegistry,
 };
 use pilot_parser::parse;
-use pilot_rt::PilotVal;
+use pilot_vm::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
 #[path = "common/anticheat.rs"]

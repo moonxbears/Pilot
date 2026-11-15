@@ -5,31 +5,32 @@
 pub pkg Pilot.Db.Syntax;
 
 use Pilot.Core.Genesis.*;
+use Pilot.Core.Bridge.Lang;
 
 comptime {
     // `database` is registered but not built yet (docs/keyword_roadmap.md
     // K9): receptor 40 stops every use at the seam `keyword.unbuilt`.
-    __engine("bind_receptor", nameof(database), 40, 0);
+    bind_receptor(nameof(database), 40, 0);
     // Not built yet (docs/keyword_roadmap.md K9): statements stop at the
     // seam `keyword.unbuilt` where a statement starts (place 1), and clause
     // words where a query clause stands (place 2); elsewhere each is an
     // ordinary name (`values`, `order`, `update(x)`).
-    __engine("bind_receptor", nameof(connect),    40, 1);
-    __engine("bind_receptor", nameof(insert),     40, 1);
-    __engine("bind_receptor", nameof(update),     40, 1);
-    __engine("bind_receptor", nameof(delete),     40, 1);
-    __engine("bind_receptor", nameof(into),       40, 2);
-    __engine("bind_receptor", nameof(values),     40, 2);
-    __engine("bind_receptor", nameof(order),      33, 8);
-    __engine("bind_receptor", nameof(ascending),  33, 9);
-    __engine("bind_receptor", nameof(descending), 33, 10);
-    __engine("bind_receptor", nameof(by),         33, 11);
-    __engine("bind_receptor", nameof(from),       33, 6);
-    __engine("bind_receptor", nameof(select),     33, 7);
+    bind_receptor(nameof(connect),    40, 1);
+    bind_receptor(nameof(insert),     40, 1);
+    bind_receptor(nameof(update),     40, 1);
+    bind_receptor(nameof(delete),     40, 1);
+    bind_receptor(nameof(into),       40, 2);
+    bind_receptor(nameof(values),     40, 2);
+    bind_receptor(nameof(order),      33, 8);
+    bind_receptor(nameof(ascending),  33, 9);
+    bind_receptor(nameof(descending), 33, 10);
+    bind_receptor(nameof(by),         33, 11);
+    bind_receptor(nameof(from),       33, 6);
+    bind_receptor(nameof(select),     33, 7);
 
-    __engine("register_pratt_op", nameof(union),     infix, 12, left);
-    __engine("register_pratt_op", nameof(intersect), infix, 14, left);
-    __engine("register_pratt_op", nameof(except),    infix, 12, left);
+    register_pratt_op(nameof(union),     infix, 12, left, 28);
+    register_pratt_op(nameof(intersect), infix, 14, left, 29);
+    register_pratt_op(nameof(except),    infix, 12, left, 30);
 }
 
 // `transaction`, `commit`, `rollback` and `savepoint` are not built yet

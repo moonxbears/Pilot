@@ -8,7 +8,7 @@ use std::process::Command;
 use pilot_analysis::{ComptimeEngine, PhysicsRegistry};
 use pilot_ast::AstArena;
 use pilot_parser::{parse, parse_unit};
-use pilot_rt::PilotVal;
+use pilot_vm::PilotVal;
 use pilot_span::FileId;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 

@@ -7,7 +7,6 @@ members = [
     "crates/pilot-lexer",
     "crates/pilot-parser",
     "crates/pilot-analysis",
-    "crates/pilot-rt",
     "crates/pilot-vm",
     "crates/pilot-cli",
 ]

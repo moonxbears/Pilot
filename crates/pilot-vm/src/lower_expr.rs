@@ -5,7 +5,7 @@ use crate::lower_native::native;
 use crate::{BytecodeCompiler, CMap};
 use pilot_parser::NativeKind;
 use pilot_ast::{AstArena, BinaryOp, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 pub(crate) const OP_RANGE_INCLUSIVE: u16 = BinaryOp::RangeInclusive as u16;
 pub(crate) const OP_RANGE_HALF_OPEN: u16 = BinaryOp::RangeHalfOpen as u16;

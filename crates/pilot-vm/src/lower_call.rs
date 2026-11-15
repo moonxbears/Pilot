@@ -5,7 +5,7 @@ use crate::lower_native::native;
 use crate::BytecodeCompiler;
 use pilot_parser::NativeKind;
 use pilot_ast::{AstArena, AstNode, CallQuoteKind, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// Where a call-quote mode stops until its carrier values exist.
 const QUOTED_CALL_SEAM: &str = "SEAM001: unconnected seam `vm.call_quote`: \

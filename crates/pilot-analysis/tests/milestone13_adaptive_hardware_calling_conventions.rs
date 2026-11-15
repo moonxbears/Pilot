@@ -352,49 +352,35 @@ fn test_m13_3_dynamic_frame_trampoline_native_invocation() {
     );
 
     unsafe {
+        use pilot_vm::bridge::{os_ffi_call, OsFfiAbiDesc, OsFfiRetRegs};
+        let mut ret = OsFfiRetRegs::default();
         // Test A: 10 scalar arguments (testing stack spilling + 16-byte stack alignment)
-        let gprs_a = [1u64, 2, 3, 4, 5, 6, 0, 0];
+        let gprs_a = [1u64, 2, 3, 4, 5, 6];
         let stack_args = [7u64, 8, 9, 10]; // g, h, i, j on stack
-        let mut ret = [0u64; 4];
-        pilot_rt::pilot_rt_invoke_abi_frame(
-            add10 as *const (),
-            gprs_a.as_ptr(),
-            std::ptr::null(),
-            stack_args.as_ptr() as *const u8,
-            32,
-            ret.as_mut_ptr(),
+        let desc_a = OsFfiAbiDesc { arch_kind: 0, gpr_count: 6, vec_count: 0, stack_bytes: 32, variadic_fixed_args: 0xFFFF, flags: 0, sret_ptr: 0, _reserved: 0 };
+        assert_eq!(
+            os_ffi_call(add10 as *const () as usize as i64, &desc_a as *const _ as i64, gprs_a.as_ptr() as i64, 0, stack_args.as_ptr() as i64, &mut ret as *mut _ as i64),
+            Ok(0)
         );
-        assert_eq!(ret[0], 55, "add10 must return sum 1..10 = 55");
+        assert_eq!(ret.gpr[0], 55, "add10 must return sum 1..10 = 55");
 
         // Test B: 16-byte struct return in RAX:RDX
-        let gprs_b = [100u64, 200, 0, 0, 0, 0, 0, 0];
-        pilot_rt::pilot_rt_invoke_abi_frame(
-            make_pair as *const (),
-            gprs_b.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            ret.as_mut_ptr(),
+        let gprs_b = [100u64, 200];
+        let desc_b = OsFfiAbiDesc { arch_kind: 0, gpr_count: 2, vec_count: 0, stack_bytes: 0, variadic_fixed_args: 0xFFFF, flags: 0, sret_ptr: 0, _reserved: 0 };
+        assert_eq!(
+            os_ffi_call(make_pair as *const () as usize as i64, &desc_b as *const _ as i64, gprs_b.as_ptr() as i64, 0, 0, &mut ret as *mut _ as i64),
+            Ok(0)
         );
-        assert_eq!(ret[0], 100, "Pair16.a must be 100");
-        assert_eq!(ret[1], 200, "Pair16.b must be 200");
+        assert_eq!(ret.gpr[0], 100, "Pair16.a must be 100");
+        assert_eq!(ret.gpr[1], 200, "Pair16.b must be 200");
 
         // Test C: 32-byte sret struct return via RDI hidden pointer
         let mut big = BigStruct32 { a: 0, b: 0, c: 0, d: 0 };
-        let gprs_c = [
-            &mut big as *mut BigStruct32 as u64, // RDI = sret pointer
-            10, // RSI = arg a
-            20, // RDX = arg b
-            30, // RCX = arg c
-            0, 0, 0, 0,
-        ];
-        pilot_rt::pilot_rt_invoke_abi_frame(
-            sum_and_fill as *const (),
-            gprs_c.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            ret.as_mut_ptr(),
+        let gprs_c = [10u64, 20, 30];
+        let desc_c = OsFfiAbiDesc { arch_kind: 0, gpr_count: 3, vec_count: 0, stack_bytes: 0, variadic_fixed_args: 0xFFFF, flags: 1, sret_ptr: &mut big as *mut BigStruct32 as u64, _reserved: 0 };
+        assert_eq!(
+            os_ffi_call(sum_and_fill as *const () as usize as i64, &desc_c as *const _ as i64, gprs_c.as_ptr() as i64, 0, 0, &mut ret as *mut _ as i64),
+            Ok(0)
         );
         assert_eq!(big.a, 10);
         assert_eq!(big.b, 20);
@@ -408,27 +394,18 @@ fn test_m13_3_dynamic_frame_trampoline_native_invocation() {
         let mut buf = [0u8; 64];
         let fmt = b"Val: %d, Float: %.1f\0";
         let float_val: f64 = 3.5;
-        let xmm_vals = [float_val, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let gprs_d = [
-            buf.as_mut_ptr() as u64, // RDI = buf
-            64,                      // RSI = size
-            fmt.as_ptr() as u64,     // RDX = format
-            42,                      // RCX = int val
-            0, 0,
-            1,                       // RAX = 1 (1 vector register used: xmm0)
-            0,
-        ];
-        pilot_rt::pilot_rt_invoke_abi_frame(
-            snprintf as *const (),
-            gprs_d.as_ptr(),
-            xmm_vals.as_ptr(),
-            std::ptr::null(),
-            0,
-            ret.as_mut_ptr(),
+        let mut xmm0 = [0u8; 16];
+        xmm0[..8].copy_from_slice(&float_val.to_le_bytes());
+        let xmm_vals = [xmm0];
+        let gprs_d = [buf.as_mut_ptr() as u64, 64, fmt.as_ptr() as u64, 42];
+        let desc_d = OsFfiAbiDesc { arch_kind: 0, gpr_count: 4, vec_count: 1, stack_bytes: 0, variadic_fixed_args: 3, flags: 0, sret_ptr: 0, _reserved: 0 };
+        assert_eq!(
+            os_ffi_call(snprintf as *const () as usize as i64, &desc_d as *const _ as i64, gprs_d.as_ptr() as i64, xmm_vals.as_ptr() as i64, 0, &mut ret as *mut _ as i64),
+            Ok(0)
         );
         let s = std::ffi::CStr::from_ptr(buf.as_ptr() as *const i8).to_str().unwrap();
         assert_eq!(s, "Val: 42, Float: 3.5");
-        assert_eq!(ret[0] as i32, 19);
+        assert_eq!(ret.gpr[0] as i32, 19);
     }
 
     guard.finish();
@@ -441,12 +418,18 @@ fn test_m13_4_pilvm_frame_homoiconic_call_and_diagnostics() {
         &ANTICHEAT_SPEC,
     );
 
-    // Verify DynamicLibraryHandle and dynamic resolution from libc
-    let libc_res = pilot_rt::DynamicLibraryHandle::open("libc.so.6")
-        .or_else(|_| pilot_rt::DynamicLibraryHandle::open("libc.so"));
-    if let Ok(libc) = libc_res {
-        if let Ok(puts_sym) = libc.resolve_symbol("puts") {
-            assert!(!puts_sym.is_null());
+    // Verify DlOpen/DlSym dynamic resolution from libc via `pilot_vm::bridge`
+    unsafe {
+        let mut bstate = pilot_vm::bridge::BridgeState::default();
+        let mut lib = pilot_vm::bridge::os_dl_open(&mut bstate, "libc.so.6".as_ptr() as i64, 9, 0);
+        if lib < 0 {
+            lib = pilot_vm::bridge::os_dl_open(&mut bstate, "libc.so".as_ptr() as i64, 7, 0);
+        }
+        if lib >= 0 {
+            let mut puts_sym = 0u64;
+            let rc = pilot_vm::bridge::os_dl_sym(&bstate, lib, "puts".as_ptr() as i64, 4, &mut puts_sym as *mut u64 as i64);
+            assert_eq!(rc, 0);
+            assert_ne!(puts_sym, 0);
         }
     }
 

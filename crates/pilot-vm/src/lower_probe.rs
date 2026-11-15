@@ -22,7 +22,7 @@
 use crate::lower_drop::{Deferred, NodeKey};
 use crate::{BytecodeCompiler, Opcode};
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 use std::collections::HashMap;
 use std::rc::Rc;
 

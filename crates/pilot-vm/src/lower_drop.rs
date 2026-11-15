@@ -25,7 +25,7 @@ use crate::instruction::Opcode;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId};
 use std::collections::HashMap;
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 use std::rc::Rc;
 
 /// What a row of the drop plan says, numbered as `DropAction` in

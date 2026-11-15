@@ -73,7 +73,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
         syntax_rule!("stdlib/core/syntax/switch.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/guard.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/try_catch.pilot", &["nameof("]),
-        syntax_rule!("stdlib/core/syntax/expr_sugar.pilot", &["__engine"]),
+        syntax_rule!("stdlib/core/syntax/expr_sugar.pilot", &["register_pratt_op"]),
         syntax_rule!("stdlib/core/syntax/unit_decl.pilot", &["unit"]),
         syntax_rule!("stdlib/db/sql_syntax.pilot", &["nameof("]),
         syntax_rule!("stdlib/polyglot/polyglot_syntax.pilot", &["nameof("]),
@@ -700,11 +700,13 @@ pub fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
             if trimmed.starts_with("//") {
                 continue;
             }
-            if trimmed.contains("\"bind_receptor\"") || trimmed.contains("\"register_pratt_op\"") {
+            if trimmed.contains("bind_receptor") || trimmed.contains("register_pratt_op") {
                 if let Some(after) = trimmed
                     .split("\"bind_receptor\",")
                     .nth(1)
                     .or_else(|| trimmed.split("\"register_pratt_op\",").nth(1))
+                    .or_else(|| trimmed.split("bind_receptor(").nth(1))
+                    .or_else(|| trimmed.split("register_pratt_op(").nth(1))
                 {
                     let arg = after.trim_start();
                     if let Some(rest) = arg.strip_prefix('"') {

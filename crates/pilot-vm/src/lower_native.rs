@@ -7,10 +7,10 @@
 //! an intrinsic by name, and the receptor `nameof` quotes its argument.
 
 use crate::instruction::Opcode;
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_parser::NativeKind;
-use pilot_rt::PilotVal;
 
 /// The question a `TypeQuery` binding asks: the type's size in bytes.
 const QUERY_BYTE_SIZE: &str = "byte_size";
@@ -33,8 +33,6 @@ impl BytecodeCompiler {
         if let Some(query) = native(NativeKind::TypeQuery, name) {
             return Some(self.compile_type_query(arena, name, query, args));
         }
-        let hook = native(NativeKind::Function, name)?;
-        // `f((a, b))` and `f(a, b)` pass the same arguments.
         let spread: Vec<NodeId> = match args {
             [only] if arena.node(*only).node_kind() == NodeKind::TupleExpr => {
                 let tn = arena.node(*only);
@@ -42,8 +40,26 @@ impl BytecodeCompiler {
             }
             _ => args.to_vec(),
         };
-        let regs = self.compile_args(arena, &spread);
-        Some(self.emit_intrinsic(hook, &regs))
+        if let Some(hook) = native(NativeKind::Function, name) {
+            let regs = self.compile_args(arena, &spread);
+            return Some(self.emit_intrinsic(hook, &regs));
+        }
+        let (hook, defs, call_args) = pilot_parser::bootstrap_tables().call_hook(name)?;
+        let hook_owned = hook.to_string();
+        let passed = self.compile_args(arena, &spread);
+        let mapped: Vec<u8> = call_args
+            .into_iter()
+            .map(|ca| match ca {
+                Ok(p) => passed.get(p).copied().unwrap_or_else(|| match defs.get(p).and_then(|d| *d) {
+                    Some(Ok(n)) => self.emit_const(PilotVal::from_int(n)),
+                    Some(Err(s)) => self.emit_const(PilotVal::from_str(s)),
+                    None => self.emit_null(),
+                }),
+                Err(Ok(n)) => self.emit_const(PilotVal::from_int(n)),
+                Err(Err(s)) => self.emit_const(PilotVal::from_str(s)),
+            })
+            .collect();
+        Some(self.emit_intrinsic(&hook_owned, &mapped))
     }
 
     /// `__engine("intrinsic", args..)`.

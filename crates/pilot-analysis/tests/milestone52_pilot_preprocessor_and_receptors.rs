@@ -54,7 +54,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pilot_analysis::{eval_file_with_tables, BootstrapSnapshot};
 use pilot_parser::parse;
-use pilot_rt::PilotVal;
+use pilot_vm::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
 #[path = "common/anticheat.rs"]

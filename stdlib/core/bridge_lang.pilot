@@ -1,0 +1,178 @@
+// =========================================================================
+// FILE: stdlib/core/bridge_lang.pilot
+// FROZEN COMPILE-TIME GENESIS AIRLOCK (PROP-002a §1–§2, Freeze Model B+)
+// =========================================================================
+// Strictly 1 of 2 Pilot files allowed to utter `__engine` (ENGINE001 / GATE021).
+// Contains ONLY compile-time genesis, grammar, protocol, and type-query hooks.
+// Zero runtime functions live here. Frozen forever under Model B+: existing
+// hook names and parameter signatures may never be deleted, reordered, or
+// re-typed; append-only additions require an owner-approved `proposals.md`
+// entry and matching `selfhost/gate/airlock_abi.pilot` snapshot update.
+// =========================================================================
+
+// Minimal 14-seed-token bootstrap for this file's own package header:
+comptime fn EnforceCoreNaming(target_pkg) =>
+    __engine("enforce_core_naming_lint", target_pkg);
+
+comptime {
+    __engine("register_modifier", "pub", 7);
+    __engine("register_parametric_modifier", "lvl", "set_clearance_ring");
+    __engine("register_module_kw", "pkg", "declare_package_scope");
+    __engine("register_module_kw", "use", "import_symbol_path");
+    __engine("register_bracket_attribute", "EnforceCoreNaming", EnforceCoreNaming);
+}
+
+[EnforceCoreNaming]
+pub lvl(100) pkg Pilot.Core.Bridge.Lang;
+
+pub comptime fn {
+    // 1. Attribute, Layout & Lattice Genesis Hooks
+    register_bracket_attribute(attr_name, handler_fn) =>
+        __engine("register_bracket_attribute", attr_name, handler_fn);
+    bind_lang_item(target_decl, item_name) =>
+        __engine("bind_lang_item", target_decl, item_name);
+    set_register_layout(target_type, width, reg_class) =>
+        __engine("set_register_layout", target_type, width, reg_class);
+    set_memory_layout(target_type, mode) =>
+        __engine("set_memory_layout", target_type, mode);
+    set_inline_hint(target_fn, mode) =>
+        __engine("set_inline_hint", target_fn, mode);
+    register_syntax_keyword(kw_token, transformer_fn) =>
+        __engine("register_syntax_keyword", kw_token, transformer_fn);
+    bind_lattice_kind(target_iface, mask) =>
+        __engine("bind_lattice_kind", target_iface, mask);
+    get_lattice_bits(target_type) =>
+        __engine("get_lattice_bits", target_type);
+    enforce_core_naming_lint(target_pkg) =>
+        __engine("enforce_core_naming_lint", target_pkg);
+    seal_bootstrap_bridge() =>
+        __engine("seal_bootstrap_bridge");
+
+    // 2. Grammar, Modifier, Operator & CFG Registration Hooks
+    register_modifier(word, action) =>
+        __engine("register_modifier", word, action);
+    register_parametric_modifier(word, action) =>
+        __engine("register_parametric_modifier", word, action);
+    register_module_kw(word, action) =>
+        __engine("register_module_kw", word, action);
+    bind_receiver_ident(self_sym, field_sym, value_sym) =>
+        __engine("bind_receiver_ident", self_sym, field_sym, value_sym);
+    bind_receptor(word, category_id, slot_id) =>
+        __engine("bind_receptor", word, category_id, slot_id);
+    register_pratt_op(sym, fixity, bp, assoc, bin_op = 0) =>
+        __engine("register_pratt_op", sym, fixity, bp, assoc, bin_op);
+    decl_operator_fn(sig, body) =>
+        __engine("decl_operator_fn", sig, body);
+    cfg_jump_loop_exit() =>
+        __engine("cfg_jump_loop_exit");
+    cfg_jump_loop_head() =>
+        __engine("cfg_jump_loop_head");
+
+    // 3. Backend SSA & Compile-Time Introspection Hooks
+    emit_ssa_binop(opcode, lhs, rhs) =>
+        __engine("emit_ssa_binop", opcode, lhs, rhs);
+    emit_ssa_unop(opcode, val) =>
+        __engine("emit_ssa_unop", opcode, val);
+    emit_ssa_cast(opcode, val, target_type) =>
+        __engine("emit_ssa_cast", opcode, val, target_type);
+    emit_ssa_load(ptr_val) =>
+        __engine("emit_ssa_load", ptr_val);
+    emit_ssa_store(ptr_val, val) =>
+        __engine("emit_ssa_store", ptr_val, val);
+    emit_ssa_gep(base_ptr, elem_idx) =>
+        __engine("emit_ssa_gep", base_ptr, elem_idx);
+    query_is_comptime_vm() =>
+        __engine("query_is_comptime_vm");
+    emit_diagnostic_error(msg) =>
+        __engine("emit_diagnostic_error", msg);
+    type_name_of(target_type) =>
+        __engine("type_name_of", target_type);
+    ast_source_lines(target_fn, part_kind) =>
+        __engine("ast_source_lines", target_fn, part_kind);
+    parse_ast_fragment(source_str) =>
+        __engine("parse_ast_fragment", source_str);
+    replace_ast_pattern(root, pat, rep) =>
+        __engine("replace_ast_pattern", root, pat, rep);
+    register_attr_weaver(iface_decl, fn_ref) =>
+        __engine("register_attr_weaver", iface_decl, fn_ref);
+
+    // 4. Compile-Time Type Queries (sizeof answers today; alignof/offsetof/fields_of/is_copy stop at SEED001)
+    type_sizeof(target_type) =>
+        __engine("type_sizeof", target_type);
+    type_alignof(target_type) =>
+        __engine("type_alignof", target_type);
+    type_offsetof(target_type, field_sym) =>
+        __engine("type_offsetof", target_type, field_sym);
+    type_fields_of(target_type) =>
+        __engine("type_fields_of", target_type);
+    type_is_copy(target_type) =>
+        __engine("type_is_copy", target_type);
+
+    // 5. Native Intrinsic, Pattern, Ownership & Protocol Bindings
+    bind_native_fn(pilot_sym, intrinsic_name) =>
+        __engine("bind_native_fn", pilot_sym, intrinsic_name);
+    bind_native_method(pilot_sym, intrinsic_name) =>
+        __engine("bind_native_method", pilot_sym, intrinsic_name);
+    bind_native_property(pilot_sym, intrinsic_name) =>
+        __engine("bind_native_property", pilot_sym, intrinsic_name);
+    bind_native_value(pilot_sym, intrinsic_name) =>
+        __engine("bind_native_value", pilot_sym, intrinsic_name);
+    bind_native_member(type_sym, member_key, intrinsic_name) =>
+        __engine("bind_native_member", type_sym, member_key, intrinsic_name);
+    bind_native_effect(pilot_sym, effect_name) =>
+        __engine("bind_native_effect", pilot_sym, effect_name);
+    bind_type_query(pilot_sym, query_key) =>
+        __engine("bind_type_query", pilot_sym, query_key);
+    bind_operator_fn(op_sym, fn_sym) =>
+        __engine("bind_operator_fn", op_sym, fn_sym);
+    bind_operator_intrinsic(op_sym, intrinsic_name) =>
+        __engine("bind_operator_intrinsic", op_sym, intrinsic_name);
+    bind_unit_literal(convert_fn, classify_fn = "") =>
+        __engine("bind_unit_literal", convert_fn, classify_fn);
+    bind_enumerator(get_enum_fn, move_next_fn, current_prop, close_fn = "") =>
+        __engine("bind_enumerator", get_enum_fn, move_next_fn, current_prop, close_fn);
+    bind_generator(gen_type, frame_field, construct_fn, each_item_fn) =>
+        __engine("bind_generator", gen_type, frame_field, construct_fn, each_item_fn);
+    bind_try_protocol(is_success_fn, unwrap_op, failure_fn = "") =>
+        __engine("bind_try_protocol", is_success_fn, unwrap_op, failure_fn);
+    bind_lift(ctor_sym) =>
+        __engine("bind_lift", ctor_sym);
+    bind_absent(ctor_sym) =>
+        __engine("bind_absent", ctor_sym);
+    bind_absent_test(intrinsic_name) =>
+        __engine("bind_absent_test", intrinsic_name);
+    bind_format_spec(format_fn) =>
+        __engine("bind_format_spec", format_fn);
+    bind_membership(seq_fn, range_fn = "", range_inc_fn = "") =>
+        __engine("bind_membership", seq_fn, range_fn, range_inc_fn);
+    bind_scalar_text(type_sym) =>
+        __engine("bind_scalar_text", type_sym);
+    bind_range_index(intrinsic_name) =>
+        __engine("bind_range_index", intrinsic_name);
+    bind_list_literal(list_type, push_method) =>
+        __engine("bind_list_literal", list_type, push_method);
+    bind_list_splat(list_type, extend_intrinsic) =>
+        __engine("bind_list_splat", list_type, extend_intrinsic);
+    bind_map_literal(map_type, set_method) =>
+        __engine("bind_map_literal", map_type, set_method);
+    bind_slice_pattern(len_op, get_op, slice_op) =>
+        __engine("bind_slice_pattern", len_op, get_op, slice_op);
+    bind_record_pattern(has_op, get_op) =>
+        __engine("bind_record_pattern", has_op, get_op);
+    bind_owned_elements(type_sym, len_op, get_op, seq_op, val_op) =>
+        __engine("bind_owned_elements", type_sym, len_op, get_op, seq_op, val_op);
+    bind_owned_payload(type_sym, field_sym, absent_op) =>
+        __engine("bind_owned_payload", type_sym, field_sym, absent_op);
+
+    // 6. Keyword Taxonomy & Symbol Registry Queries
+    register_keyword(category_id, word, doc) =>
+        __engine("register_keyword", category_id, word, doc);
+    register_keyword_category(category_id, tm_scope, badge, lsp_kind) =>
+        __engine("register_keyword_category", category_id, tm_scope, badge, lsp_kind);
+    query_registered_symbols(category_id, mode = 0, target = "") =>
+        __engine("query_registered_symbols", category_id, mode, target);
+
+    // 7. Generic Protocol Extension Hook (keys gated by GATE021 allowlist)
+    bind_lang_protocol(protocol_key, slot_key, target_sym) =>
+        __engine("bind_lang_protocol", protocol_key, slot_key, target_sym);
+}

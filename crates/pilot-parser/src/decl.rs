@@ -5,13 +5,14 @@ use crate::*;
 impl<'a> Parser<'a> {
     pub(crate) fn parse_program(&mut self) {
         // Whether the items feed the tables; the whole text is searched once, not once per item.
-        let ingests = self.ingest || self.src.contains("__engine");
+        let ingests = self.ingest || self.src.contains("__engine") || self.src.contains("comptime") || self.src.contains('[');
         let mut items = Vec::new();
         while !self.at_end() { self.skip_seps(); if self.at_end() { break; }
             let mark = self.pos;
             self.parse_item(&mut items, false);
             if self.pos == mark { self.advance(); }
             if let Some(&last) = items.last() { if ingests { self.tables.to_mut().ingest_node(&self.arena, last); } } }
+        if ingests { self.tables.to_mut().finish_ingest(self.src); }
         self.report_stray_characters();
         self.arena.root = self.arena.alloc_list_node(NodeKind::Program, 0, ByteSpan::new(0, self.src.len() as u32), &items);
         }

@@ -15,5 +15,4 @@ pilot-ast = { path = "../pilot-ast" }
 pilot-lexer = { path = "../pilot-lexer" }
 pilot-parser = { path = "../pilot-parser" }
 pilot-analysis = { path = "../pilot-analysis" }
-pilot-rt = { path = "../pilot-rt" }
 pilot-vm = { path = "../pilot-vm" }

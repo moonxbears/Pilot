@@ -19,7 +19,7 @@ use pilot_ast::BinaryOp;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_parser::EnumeratorProtocol;
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// How a loop reaches its elements.
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 //! The seed VM's collector: frees the lists, records, closure environments
 //! and run-time strings no live value can reach.
 //!
-//! Values are tagged handles (`pilot_rt::PilotVal`) copied freely, with no
+//! Values are tagged handles (`crate::value::PilotVal`) copied freely, with no
 //! count of who holds them, so the VM finds what is live by tracing. The
 //! roots are every value the program can still read:
 //!
@@ -29,7 +29,7 @@
 //! and faults instead of silently reading whatever reused the slot.
 
 use crate::vm::PilVirtualMachine;
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 use std::collections::HashSet;
 
 /// Allocations (lists, records, closures) between collections, at least.

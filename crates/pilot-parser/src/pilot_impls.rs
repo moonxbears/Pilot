@@ -8,31 +8,17 @@
 //!
 //! ```text
 //! comptime {
-//!     // `250ms`: `convert(raw)` is the value in the base unit, `classify(raw)`
-//!     // the unit family (`0` for an unknown unit).
-//!     __engine("bind_unit_literal", nameof(convert), nameof(classify));
-//!     // `a union b` calls `seq_union(a, b)`.
-//!     __engine("bind_operator_fn", nameof(union), nameof(seq_union));
-//!     // `print(..)`, `xs.push(x)`, `s.len`, `ENV` run engine intrinsics.
-//!     __engine("bind_native_fn", nameof(print), "rt_print");
-//!     __engine("bind_native_method", nameof(push), "list_push");
-//!     __engine("bind_native_property", nameof(len), "str_len");
-//!     __engine("bind_native_value", nameof(ENV), "get_env");
-//!     // `sizeof(T)` is answered from `T`'s register layout.
-//!     __engine("bind_type_query", nameof(sizeof), "byte_size");
-//!     // `for x in e` over a value that is not a list or range calls
-//!     // `e.get_enumerator()`, then `move_next()` and `current` on the result;
-//!     // a loop left early calls `close()` on an enumerator that has one.
-//!     __engine("bind_enumerator", nameof(get_enumerator), nameof(move_next), nameof(current), nameof(close));
-//!     // Calling a function whose body yields builds a `Generator` record
-//!     // with `generator_of(frame)`, the engine frame in field `frame`;
-//!     // `yield *xs` over a value that is not one walks `each_item(xs)`.
-//!     __engine("bind_generator", nameof(Generator), nameof(frame), nameof(generator_of), nameof(each_item));
-//!     // `x?` on a record unwraps it through its `op ?` when `x.is_success()`;
-//!     // `catch e` binds a failed record's `failure()`.
-//!     __engine("bind_try_protocol", nameof(is_success), "?", nameof(failure));
-//!     // `f"{x:#_###}"` calls `format_by_pattern(x, "#_###")`.
-//!     __engine("bind_format_spec", nameof(format_by_pattern));
+//!     bind_unit_literal(nameof(convert), nameof(classify));
+//!     bind_operator_fn(nameof(union), nameof(seq_union));
+//!     bind_native_fn(nameof(print), "rt_print");
+//!     bind_native_method(nameof(push), "list_push");
+//!     bind_native_property(nameof(len), "str_len");
+//!     bind_native_value(nameof(ENV), "get_env");
+//!     bind_type_query(nameof(sizeof), "byte_size");
+//!     bind_enumerator(nameof(get_enumerator), nameof(move_next), nameof(current), nameof(close));
+//!     bind_generator(nameof(Generator), nameof(frame), nameof(generator_of), nameof(each_item));
+//!     bind_try_protocol(nameof(is_success), "?", nameof(failure));
+//!     bind_format_spec(nameof(format_by_pattern));
 //! }
 //! ```
 

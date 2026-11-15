@@ -11,7 +11,7 @@
 use crate::instruction::Opcode;
 use crate::ops;
 use crate::vm::PilVirtualMachine;
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// The binary operators by the opcode that runs each.
 const BINARY: [Opcode; 18] = [

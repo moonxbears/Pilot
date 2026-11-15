@@ -8,7 +8,7 @@
 use crate::instruction::Opcode;
 use crate::{BytecodeCompiler, LoopCtx};
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 impl BytecodeCompiler {
     pub(crate) fn compile_match(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {

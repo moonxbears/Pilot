@@ -42,7 +42,7 @@ use pilot_analysis::{
     BootstrapSnapshot, PhysicsRegistry,
 };
 use pilot_parser::parse;
-use pilot_rt::PilotVal;
+use pilot_vm::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
 #[path = "common/anticheat.rs"]

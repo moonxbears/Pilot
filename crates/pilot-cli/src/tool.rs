@@ -10,8 +10,7 @@
 use crate::link::LinkedSource;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
-use pilot_rt::PilotVal;
-use pilot_vm::{BytecodeCompiler, HostOpHandler, PilVirtualMachine};
+use pilot_vm::{BytecodeCompiler, HostOpHandler, PilVirtualMachine, PilotVal};
 use std::fs;
 use std::path::{Path, PathBuf};
 

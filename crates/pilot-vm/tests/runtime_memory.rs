@@ -14,8 +14,7 @@
 //!
 //! Expected values are worked out by hand in each test.
 
-use pilot_rt::PilotVal;
-use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use pilot_vm::{BytecodeCompiler, PilVirtualMachine, PilotVal};
 
 /// Compiles and runs `src`, returning the VM (still holding the result's
 /// strings) and the value of the program's last expression.
@@ -117,13 +116,26 @@ fn loading_a_program_starts_with_an_empty_record_heap() {
 /// before.
 #[test]
 fn a_module_header_is_read_again_after_its_file_changes() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let loader_src: String = [
+        "stdlib/core/os_abi.pilot",
+        "stdlib/core/bridge_os.pilot",
+        "stdlib/core/builtins/native_calls.pilot",
+        "stdlib/core/file.pilot",
+        "selfhost/diagnostics/model.pilot",
+        "selfhost/loader/module_graph.pilot",
+    ]
+    .iter()
+    .map(|p| std::fs::read_to_string(root.join(p)).expect("read loader source"))
+    .collect::<Vec<_>>()
+    .join("\n");
     let path = std::env::temp_dir().join(format!("pilot_vm_header_{}.pilot", std::process::id()));
     let path_text = path.to_string_lossy().replace('\\', "/");
     let count = |vm_src: &str| -> i64 {
         let (_vm, out) = run(vm_src);
         out.as_int().expect("an integer")
     };
-    let program = format!("__engine(\"str_len\", __engine(\"unit_header\", \"{path_text}\"));\n");
+    let program = format!("{loader_src}\nlet h = UnitHeader.read(\"{path_text}\", 0);\n(if h.package.len > 0 {{ 1 }} else {{ 0 }}) + h.imports.len;\n");
     std::fs::write(&path, "pkg Probe.Header;\nuse std.col;\n\nfn f() {}\n").expect("write");
     assert_eq!(count(&program), 2);
     std::fs::write(&path, "pkg Probe.Header;\nuse std.col;\nuse std.text;\n\nfn f() {}\n").expect("write");

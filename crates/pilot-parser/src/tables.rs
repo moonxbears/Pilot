@@ -86,43 +86,89 @@ impl ParserTables {
             NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
                 if let Some(v) = self.eval_cval(arena, NodeId(n.rhs)) { self.const_maps.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), v); }
             }
-            NodeKind::CallExpr => { let ch = arena.children_slice(n.lhs, n.rhs);
-                if ch.len() < 2 || NodeId(ch[0]).is_none() || arena.node(NodeId(ch[0])).node_kind() != NodeKind::IdentExpr || arena.interner.resolve(SymbolId(arena.node(NodeId(ch[0])).lhs)) != "__engine" { return; }
-                let s_arg = |i: usize| ch.get(i).and_then(|&x| match self.eval_cval(arena, NodeId(x))? { CVal::Str(s) => Some(s), _ => None }).unwrap_or_default();
-                let i_arg = |i: usize| ch.get(i).and_then(|&x| match self.eval_cval(arena, NodeId(x))? { CVal::Int(v) => Some(v), _ => None });
-                match s_arg(1).as_str() { "register_modifier" => {
-                        let (w, act) = (s_arg(2), if let Some(v) = i_arg(3) { ModAct::Vis(v as u8) } else { match s_arg(3).as_str() {
-                                "merge_type_members" => ModAct::Partial, "storage_static" => ModAct::Static, "effect_pure" => ModAct::Pure,
-                                "binding_mutable" => ModAct::Mut, "binding_const" => ModAct::Const, "perceus_isolated" => ModAct::Iso,
-                                "extension_member" => ModAct::Ext, "effect_noalloc" => ModAct::NoAlloc,
-                                "override_member" => ModAct::Override,
-                                // An action the parser does not know is not built either.
-                                _ => ModAct::Unbuilt, }
-                        }); if !w.is_empty() { self.modifiers.insert(w, act); } }
-                    "register_parametric_modifier" => { let w = s_arg(2); if !w.is_empty() { self.param_modifiers.insert(w); } }
-                    "register_module_kw" => { let w = s_arg(2); if !w.is_empty() { self.module_kws.insert(w, s_arg(3) == "declare_package_scope"); } }
-                    HOOK_UNIT_LITERAL => self.bind_unit_literal(s_arg(2), s_arg(3)),
-                    HOOK_OPERATOR_FN => self.bind_operator_fn(s_arg(2), s_arg(3)),
-                    HOOK_NATIVE_FN => self.bind_native(NativeKind::Function, s_arg(2), s_arg(3)),
-                    HOOK_NATIVE_METHOD => self.bind_native(NativeKind::Method, s_arg(2), s_arg(3)),
-                    HOOK_NATIVE_PROPERTY => self.bind_native(NativeKind::Property, s_arg(2), s_arg(3)),
-                    HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(2), s_arg(3)),
-                    "bind_native_member" => self.bind_native_member(s_arg(2), s_arg(3), s_arg(4)),
-                    HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(2), s_arg(3)),
-                    HOOK_ENUMERATOR => self.bind_enumerator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
-                    HOOK_GENERATOR => self.bind_generator(s_arg(2), s_arg(3), s_arg(4), s_arg(5)),
-                    HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(2), s_arg(3), s_arg(4)),
-                    HOOK_FORMAT_SPEC => self.bind_format_spec(s_arg(2)),
-                    HOOK_MEMBERSHIP => self.bind_membership(s_arg(2), s_arg(3), s_arg(4)), HOOK_SCALAR_TEXT => self.bind_scalar_text(s_arg(2)),
-                    "bind_receiver_ident" => { let (w, b, v) = (s_arg(2), s_arg(3), s_arg(4)); if !w.is_empty() { self.receiver_ident = w; }
-                        self.backing_ident = b; self.setter_value_ident = v; }
-                    "bind_receptor" => { let (w, k, p) = (s_arg(2), i_arg(3).unwrap_or(0) as u8, i_arg(4).unwrap_or(0) as u8); if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); } }
-                    "register_pratt_op" => { let (sym, fix, bp, assoc) = (s_arg(2), s_arg(3), i_arg(4).unwrap_or(20) as u8, s_arg(5));
-                        if !sym.is_empty() { match fix.as_str() { "prefix" => { self.prefix_ops.insert(sym, bp); }
+            NodeKind::CallExpr => {
+                let ch = arena.children_slice(n.lhs, n.rhs);
+                if ch.is_empty() || NodeId(ch[0]).is_none() || arena.node(NodeId(ch[0])).node_kind() != NodeKind::IdentExpr {
+                    return;
+                }
+                let callee = arena.interner.resolve(SymbolId(arena.node(NodeId(ch[0])).lhs));
+                let (hook, vals): (String, Vec<Option<CVal>>) = if callee == "__engine" {
+                    if ch.len() < 2 {
+                        return;
+                    }
+                    let Some(CVal::Str(h)) = self.eval_cval(arena, NodeId(ch[1])) else { return };
+                    (h, ch[2..].iter().map(|&x| self.eval_cval(arena, NodeId(x))).collect())
+                } else if let Some(f) = self.attr_hooks.get(callee).cloned() {
+                    let v = f
+                        .args
+                        .iter()
+                        .map(|a| match a {
+                            attr_hooks::HookArg::Param(p) => ch
+                                .get(p + 1)
+                                .and_then(|&x| self.eval_cval(arena, NodeId(x)))
+                                .or_else(|| f.defaults.get(*p).and_then(Clone::clone)),
+                            attr_hooks::HookArg::Const(c) => Some(c.clone()),
+                        })
+                        .collect();
+                    (f.hook, v)
+                } else {
+                    return;
+                };
+                let s_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Str(s) => Some(s.clone()), _ => None }).unwrap_or_default();
+                let i_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Int(v) => Some(*v), _ => None });
+                match hook.as_str() {
+                    "register_modifier" => {
+                        let (w, act) = (s_arg(0), if let Some(v) = i_arg(1) { ModAct::Vis(v as u8) } else { match s_arg(1).as_str() {
+                            "merge_type_members" => ModAct::Partial, "storage_static" => ModAct::Static, "effect_pure" => ModAct::Pure,
+                            "binding_mutable" => ModAct::Mut, "binding_const" => ModAct::Const, "perceus_isolated" => ModAct::Iso,
+                            "extension_member" => ModAct::Ext, "effect_noalloc" => ModAct::NoAlloc,
+                            "override_member" => ModAct::Override,
+                            _ => ModAct::Unbuilt,
+                        }});
+                        if !w.is_empty() { self.modifiers.insert(w, act); }
+                    }
+                    "register_parametric_modifier" => { let w = s_arg(0); if !w.is_empty() { self.param_modifiers.insert(w); } }
+                    "register_module_kw" => { let w = s_arg(0); if !w.is_empty() { self.module_kws.insert(w, s_arg(1) == "declare_package_scope"); } }
+                    HOOK_UNIT_LITERAL => self.bind_unit_literal(s_arg(0), s_arg(1)),
+                    HOOK_OPERATOR_FN => self.bind_operator_fn(s_arg(0), s_arg(1)),
+                    HOOK_NATIVE_FN => self.bind_native(NativeKind::Function, s_arg(0), s_arg(1)),
+                    HOOK_NATIVE_METHOD => self.bind_native(NativeKind::Method, s_arg(0), s_arg(1)),
+                    HOOK_NATIVE_PROPERTY => self.bind_native(NativeKind::Property, s_arg(0), s_arg(1)),
+                    HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(0), s_arg(1)),
+                    "bind_native_member" => self.bind_native_member(s_arg(0), s_arg(1), s_arg(2)),
+                    HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(0), s_arg(1)),
+                    HOOK_ENUMERATOR => self.bind_enumerator(s_arg(0), s_arg(1), s_arg(2), s_arg(3)),
+                    HOOK_GENERATOR => self.bind_generator(s_arg(0), s_arg(1), s_arg(2), s_arg(3)),
+                    HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(0), s_arg(1), s_arg(2)),
+                    HOOK_FORMAT_SPEC => self.bind_format_spec(s_arg(0)),
+                    HOOK_MEMBERSHIP => self.bind_membership(s_arg(0), s_arg(1), s_arg(2)),
+                    HOOK_SCALAR_TEXT => self.bind_scalar_text(s_arg(0)),
+                    "bind_receiver_ident" => {
+                        let (w, b, v) = (s_arg(0), s_arg(1), s_arg(2));
+                        if !w.is_empty() { self.receiver_ident = w; }
+                        self.backing_ident = b;
+                        self.setter_value_ident = v;
+                    }
+                    "bind_receptor" => {
+                        let (w, k, p) = (s_arg(0), i_arg(1).unwrap_or(0) as u8, i_arg(2).unwrap_or(0) as u8);
+                        if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); }
+                    }
+                    "register_pratt_op" => {
+                        let (sym, fix, bp, assoc) = (s_arg(0), s_arg(1), i_arg(2).unwrap_or(20) as u8, s_arg(3));
+                        if !sym.is_empty() {
+                            match fix.as_str() {
+                                "prefix" => { self.prefix_ops.insert(sym, bp); }
                                 "postfix" => { self.postfix_ops.insert(sym, bp); }
-                                _ => { let code = map_binop_sym(&sym); self.infix_ops.insert(sym, PrattEntry { bp, right_assoc: assoc == "right", bin_op: code }); }
-                            } } }
-                    _ => {} } }
+                                _ => {
+                                    let code = i_arg(4).filter(|&c| c > 0).map_or_else(|| map_binop_sym(&sym), |c| c as u16);
+                                    self.infix_ops.insert(sym, PrattEntry { bp, right_assoc: assoc == "right", bin_op: code });
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
             _ => {} } } }
 /// `MemberExpr.flags` of a prefix-dot member (`.name`), whose receiver the
 /// parser filled in. `0` is `a.b` and `1` is `a?.b`.
@@ -131,11 +177,10 @@ pub const MEMBER_IMPLIED_RECEIVER: u16 = 2;
 pub(crate) const MEMBERSHIP_BP: u8 = 25;
 pub(crate) fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
         "+" => Add, "-" => Sub, "*" => Mul, "/" => Div, "//" => FloorDiv, "%" => Rem, "**" => Pow,
-        "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" | "and" => And,
-        "||" | "or" => Or, "&" => BitAnd, "|" => BitOr, "^" => BitXor, "<<" => Shl, ">>" => Shr,
+        "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" => And,
+        "||" => Or, "&" => BitAnd, "|" => BitOr, "^" => BitXor, "<<" => Shl, ">>" => Shr,
         "|>" => Pipe, "<|" => PipeBackward, "??" => Coalesce, "..=" => RangeInclusive,
-        ".." | "..<" => RangeHalfOpen, "is" => Is, ":=" => Walrus, "<-" => Send, "union" => Union,
-        "intersect" => Intersect, "except" => Except, "<=>" => Spaceship, "+|" => SatAdd,
+        ".." | "..<" => RangeHalfOpen, ":=" => Walrus, "<-" => Send, "<=>" => Spaceship, "+|" => SatAdd,
         "-|" => SatSub, "*|" => SatMul, "+%" => WrapAdd, "-%" => WrapSub, "*%" => WrapMul,
         "+?" => CheckedAdd, "-?" => CheckedSub, "*?" => CheckedMul, "%%" => EucMod, "~>" => Lens,
         ">..<" => OpenRange, ">.." => AfterRange, ":=:" => Swap, _ => return 0, }) as u16 }
@@ -143,6 +188,8 @@ pub(crate) fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
 /// declarations fill the bootstrap tables, relative to the source root, in
 /// ingest order. Every `stdlib/core/primitives/*.pilot` file follows them.
 pub(crate) const BOOTSTRAP_SOURCES: &[&str] = &[
+    "stdlib/core/bridge_lang.pilot",
+    "stdlib/core/bridge_os.pilot",
     "stdlib/core/core.pilot",
     "stdlib/core/syntax/type_construct.pilot",
     "stdlib/core/syntax/module_ext.pilot",

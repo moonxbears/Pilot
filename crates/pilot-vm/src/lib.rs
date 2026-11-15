@@ -5,6 +5,7 @@
 //! diagnostic in `PilcBinary::diagnostics` and compiles to a `Trap`, so a
 //! construct the seed cannot run is reported instead of silently dropped.
 
+pub mod bridge;
 mod checked;
 pub mod collect;
 pub mod codes;
@@ -37,7 +38,9 @@ mod lower_variant;
 mod lower_yield;
 mod ops;
 pub mod pilc;
+mod stage_a_natives;
 pub mod strings;
+pub mod value;
 pub mod vm;
 mod vm_gen;
 
@@ -45,6 +48,7 @@ pub use instruction::{Instruction, Opcode};
 pub use pilc::{CompileDiagnostic, PilcBinary, PILC_V3_MAGIC, PILC_V3_VERSION};
 pub use host::HostValue;
 pub use collect::{KeyMap, Record};
+pub use value::PilotVal;
 pub use vm::{EngineIntrinsicHandler, HostOpHandler, PilVirtualMachine, VmFault, VmHook};
 
 pub mod compiler {
@@ -53,7 +57,6 @@ pub mod compiler {
 
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
-use pilot_rt::PilotVal;
 use pilot_span::ByteSpan;
 use std::collections::HashMap;
 

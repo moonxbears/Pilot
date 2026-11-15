@@ -11,7 +11,7 @@
 use crate::instruction::{Instruction, Opcode};
 use crate::{BytecodeCompiler, CaptureCtx};
 use pilot_ast::{AstArena, NodeId};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// Closure calls pass the environment in the register after the arguments.
 const MAX_CLOSURE_ARGS: usize = crate::MAX_CALL_ARGS - 1;

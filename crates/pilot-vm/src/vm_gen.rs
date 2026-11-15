@@ -1,60 +1,35 @@
 //! Generator frames (F5b): suspended function bodies the VM resumes.
-//!
-//! A frame holds the registers of a generator body and where it resumes.
-//! `gen_new` makes one from the registers of the call that created the
-//! generator; its 32-bit operand is the body's address. `gen_resume(id, v)`
-//! enters the frame like a call: the resumer's registers are saved, the
-//! frame's are loaded, and the `yield` waiting in it receives `v`.
-//! `gen_yield(item)` saves the frame and returns `item` to the resumer, as
-//! `Ret` would. When the body returns, the frame is done and the resumer
-//! gets `null`. `gen_close(id)` resumes a suspended frame with its closing
-//! flag set, so the body runs its pending `defer`s and returns
-//! (`lower_yield`); a frame that never started just ends. No OS threads are
-//! involved.
-//!
-//! A frame resumed while it runs (from inside itself) stops the program
-//! with GEN003.
 
 use crate::instruction::Instruction;
+use crate::value::PilotVal;
 use crate::vm::PilVirtualMachine;
-use pilot_rt::PilotVal;
 
-/// The fault of resuming a generator from inside itself.
 const RESUMED_WHILE_RUNNING: &str = "GEN003: a generator cannot be resumed while it runs";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GenState {
-    /// Created; the body has not run.
     Fresh,
-    /// Stopped at a `yield`.
     Suspended,
-    /// Running, between a resume and its next `yield` or return.
     Running,
-    /// The body returned, or the generator was closed.
     Done,
 }
 
-/// One generator body: its registers and where it goes on.
 #[derive(Clone, Debug)]
 pub struct GenFrame {
     pub(crate) state: GenState,
     resume_pc: usize,
     regs: Vec<PilotVal>,
-    /// The register the waiting `yield` gives the sent value in.
     sent_dst: Option<u8>,
-    /// Resumed to be closed: the body leaves at its `yield`.
     closing: bool,
-    /// The item the last `yield` handed out.
     current: PilotVal,
 }
 
 impl PilVirtualMachine {
-    /// Runs generator intrinsic `hook` for instruction `ins` with `args`.
-    /// `Ok(false)` when `hook` is not one of the generator intrinsics.
-    pub(crate) fn gen_intrinsic(&mut self, hook: &str, ins: Instruction, args: &[PilotVal]) -> Result<bool, String> {
+    /// Executes generator operation `code` (`0..=6` mapped by `stage_a_natives`).
+    pub(crate) fn exec_gen_op(&mut self, code: u8, ins: Instruction, args: &[PilotVal]) -> Result<(), String> {
         let dst = ins.dst() as usize;
-        match hook {
-            "gen_new" => {
+        match code {
+            0 => {
                 let act = self.active_registers();
                 self.generators.push(GenFrame {
                     state: GenState::Fresh,
@@ -66,26 +41,25 @@ impl PilVirtualMachine {
                 });
                 self.set(dst, PilotVal::from_int(self.generators.len() as i64 - 1));
             }
-            "gen_resume" => {
+            1 => {
                 let id = self.frame_id(args.first())?;
                 let sent = args.get(1).copied().unwrap_or(PilotVal::NULL);
                 self.resume(id, sent, ins.dst())?;
             }
-            "gen_close" => {
+            2 => {
                 let id = self.frame_id(args.first())?;
                 match self.generators[id].state {
                     GenState::Fresh => self.finish(id),
                     GenState::Suspended => {
                         self.generators[id].closing = true;
-                        self.resume(id, PilotVal::NULL, ins.dst())?;
-                        return Ok(true);
+                        return self.resume(id, PilotVal::NULL, ins.dst());
                     }
                     GenState::Running => return Err(RESUMED_WHILE_RUNNING.to_string()),
                     GenState::Done => {}
                 }
                 self.set(dst, PilotVal::NULL);
             }
-            "gen_yield" => {
+            3 => {
                 let Some(&(depth, id)) = self.gen_stack.last() else {
                     return Err("`yield` outside a running generator".to_string());
                 };
@@ -103,26 +77,22 @@ impl PilVirtualMachine {
                 frame.current = item;
                 self.leave_frame(item);
             }
-            "gen_done" => {
+            4 => {
                 let id = self.frame_id(args.first())?;
                 self.set(dst, PilotVal::from_bool(self.generators[id].state == GenState::Done));
             }
-            "gen_current" => {
+            5 => {
                 let id = self.frame_id(args.first())?;
                 self.set(dst, self.generators[id].current);
             }
-            "gen_closing" => {
+            _ => {
                 let closing = self.gen_stack.last().is_some_and(|&(_, id)| self.generators[id].closing);
                 self.set(dst, PilotVal::from_bool(closing));
             }
-            _ => return Ok(false),
         }
-        Ok(true)
+        Ok(())
     }
 
-    /// Called by `Ret`: when the returning frame is a generator body, the
-    /// generator is done and its resumer gets `null`. Returns the value the
-    /// resumer gets.
     pub(crate) fn gen_return(&mut self, value: PilotVal) -> PilotVal {
         match self.gen_stack.last() {
             Some(&(depth, id)) if depth == self.call_stack.len() => {
@@ -149,8 +119,6 @@ impl PilVirtualMachine {
         frame.sent_dst = None;
     }
 
-    /// Enters frame `id`, its waiting `yield` receiving `sent`; what it
-    /// yields or returns lands in the resumer's register `dst`.
     fn resume(&mut self, id: usize, sent: PilotVal, dst: u8) -> Result<(), String> {
         match self.generators[id].state {
             GenState::Done => {
@@ -178,14 +146,10 @@ impl PilVirtualMachine {
         Ok(())
     }
 
-    /// Every value a generator frame holds.
     pub(crate) fn generator_values(&self) -> impl Iterator<Item = &PilotVal> {
-        self.generators
-            .iter()
-            .flat_map(|g| g.regs.iter().chain(std::iter::once(&g.current)))
+        self.generators.iter().flat_map(|g| g.regs.iter().chain(std::iter::once(&g.current)))
     }
 
-    /// The number of registers up to the last one holding a value.
     pub(crate) fn active_registers(&self) -> usize {
         self.frame()[..self.reg_top()].iter().rposition(|r| !r.is_null()).map_or(0, |i| i + 1)
     }

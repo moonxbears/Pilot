@@ -28,7 +28,7 @@ use crate::instruction::Opcode;
 use crate::lower_program::{LazyDecl, LazyKind};
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 use std::collections::{HashSet, VecDeque};
 
 /// Receptor sub-slots of the `*Bundle` collision modifiers (category 30,

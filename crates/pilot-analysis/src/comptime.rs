@@ -3,9 +3,8 @@
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
 use pilot_parser::ParserTables;
-use pilot_rt::PilotVal;
 use pilot_span::ByteSpan;
-use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use pilot_vm::{BytecodeCompiler, PilVirtualMachine, PilotVal};
 use crate::types::{LayoutId, LayoutTable};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -95,7 +94,7 @@ impl ComptimeEngine {
         if let Some(v) = ret.as_int() { Ok(ComptimeValue::Int(v)) }
         else if let Some(v) = ret.as_float() { Ok(ComptimeValue::Float(v)) }
         else if let Some(v) = ret.as_bool() { Ok(ComptimeValue::Bool(v)) }
-        else if ret.is_sso_str() || ret.tag() == 9 { Ok(ComptimeValue::StringVal(ret.to_string_repr())) }
+        else if ret.is_str() { Ok(ComptimeValue::StringVal(ret.to_string_repr())) }
         else { Ok(ComptimeValue::Void) }
     }
 }
@@ -152,6 +151,9 @@ impl BootstrapSnapshot {
             let mut parts = result_str.split('|');
             let _stage_count: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let stage_paths: Vec<&str> = parts.collect();
+            if let Ok(b_src) = std::fs::read_to_string(ws_root.join("stdlib/core/bridge_lang.pilot")) {
+                let _ = bootstrap_core_file(&b_src, &mut tables, &mut vm);
+            }
             for (idx, rel_path) in stage_paths.iter().enumerate() {
                 let src = std::fs::read_to_string(ws_root.join(rel_path)).or_else(|_| std::fs::read_to_string(rel_path))
                     .unwrap_or_else(|e| panic!("Bootstrap stage {} ('{}') unreadable: {}", idx, rel_path, e));

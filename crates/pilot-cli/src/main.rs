@@ -8,6 +8,8 @@ mod tool;
 
 /// The sources of the self-hosted CLI, linked in this order.
 pub(crate) const CLI: &[&str] = &[
+    "stdlib/core/os_abi.pilot",
+    "stdlib/core/bridge_os.pilot",
     "stdlib/core/file.pilot",
     "stdlib/core/env.pilot",
     "stdlib/core/primitives/map.pilot",

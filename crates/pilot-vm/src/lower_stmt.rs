@@ -3,7 +3,7 @@
 use crate::{BytecodeCompiler, LoopCtx};
 use crate::instruction::Opcode;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 
 /// The register class `[Bits]` descriptors give unsigned integers.

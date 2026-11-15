@@ -12,11 +12,10 @@ use crate::check;
 use crate::link::LinkedSource;
 use crate::tool;
 use pilot_analysis::PhysicsRegistry;
-use pilot_rt::PilotVal;
 use pilot_span::ByteSpan;
 use pilot_vm::lower_drop::{DropAction, DropItem, DropPlan};
 use pilot_vm::lower_probe::ProbePlan;
-use pilot_vm::{codes, BytecodeCompiler, HostValue, PilVirtualMachine, PilcBinary};
+use pilot_vm::{codes, BytecodeCompiler, HostValue, PilVirtualMachine, PilcBinary, PilotVal};
 use std::fs;
 
 pub const EXIT_FAILURE: i32 = 1;
@@ -81,6 +80,8 @@ fn exit_code_of(v: PilotVal) -> i32 {
 
 /// The Pilot sources of the module loader (`mg_link_plan`).
 const LOADER: &[&str] = &[
+    "stdlib/core/os_abi.pilot",
+    "stdlib/core/bridge_os.pilot",
     "stdlib/core/file.pilot",
     "selfhost/diagnostics/model.pilot",
     "selfhost/loader/module_graph.pilot",

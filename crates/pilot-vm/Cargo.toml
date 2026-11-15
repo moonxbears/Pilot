@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-pilot-rt = { path = "../pilot-rt" }
 pilot-ast = { path = "../pilot-ast" }
 pilot-intern = { path = "../pilot-intern" }
 pilot-span = { path = "../pilot-span" }

@@ -14,7 +14,7 @@
 use crate::BytecodeCompiler;
 use crate::instruction::Opcode;
 use pilot_ast::{AstArena, NodeId, NodeKind, PARAM_FLAG_MUT};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 
 /// A call whose arguments do not fit its callee: the diagnostic code and message.

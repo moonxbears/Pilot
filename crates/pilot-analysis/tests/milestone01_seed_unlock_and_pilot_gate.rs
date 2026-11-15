@@ -99,6 +99,11 @@ fn workspace_root() -> PathBuf {
 
 fn load_gate_bundle(root: &Path) -> String {
     let deps = [
+        "stdlib/core/os_abi.pilot",
+        "stdlib/core/bridge_os.pilot",
+        "stdlib/core/builtins/native_calls.pilot",
+        "stdlib/core/file.pilot",
+        "stdlib/core/env.pilot",
         "stdlib/crypto/hash.pilot",
         "stdlib/std/proc.pilot",
         "stdlib/std/text.pilot",
@@ -106,6 +111,7 @@ fn load_gate_bundle(root: &Path) -> String {
         "selfhost/ast.pilot",
         "selfhost/parser.pilot",
         "selfhost/pilotc.pilot",
+        "selfhost/gate/airlock_abi.pilot",
         "selfhost/gate/manifest.pilot",
         "selfhost/gate/seed_audit.pilot",
         "selfhost/gate/rename_litmus.pilot",
@@ -196,7 +202,7 @@ pub fn test_m1_1_dynamic_vocabulary_harvester_and_fast_gate001_slice_injection()
          let t_start = gate_time_now_us();\n\
          let v_inj = verify_rust_source_name_blind(\"crates/pilot-analysis/src/infer.rs\", \"{inj_esc}\", sreg, vocab);\n\
          let dt_us = gate_time_now_us() - t_start;\n\
-         let v_clean = verify_rust_source_name_blind(\"crates/pilot-rt/src/clean_probe.rs\", \"{clean_esc}\", sreg, vocab);\n\
+         let v_clean = verify_rust_source_name_blind(\"crates/pilot-vm/src/clean_probe.rs\", \"{clean_esc}\", sreg, vocab);\n\
          let v_bad = verify_rust_source_name_blind(\"crates/pilot-codegen/src/lib.rs\", \"{bad_esc}\", sreg, vocab);\n\
          let v0 = glist_get(v_inj, 0);\n\
          let b0 = glist_get(v_bad, 0);\n\

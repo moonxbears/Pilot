@@ -17,7 +17,7 @@
 use crate::instruction::Opcode;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// What the compiler knows about a declared struct.
 #[derive(Clone, Default)]

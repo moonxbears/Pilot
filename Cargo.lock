@@ -10,7 +10,6 @@ dependencies = [
  "pilot-intern",
  "pilot-lexer",
  "pilot-parser",
- "pilot-rt",
  "pilot-span",
  "pilot-vm",
 ]
@@ -32,7 +31,6 @@ dependencies = [
  "pilot-intern",
  "pilot-lexer",
  "pilot-parser",
- "pilot-rt",
  "pilot-span",
  "pilot-vm",
 ]
@@ -63,13 +61,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilot-rt"
-version = "0.1.0"
-dependencies = [
- "pilot-intern",
-]
-
-[[package]]
 name = "pilot-span"
 version = "1.1.51"
 
@@ -80,6 +71,5 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-parser",
- "pilot-rt",
  "pilot-span",
 ]

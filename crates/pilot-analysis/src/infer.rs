@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
-use pilot_rt::PilotVal;
+use pilot_vm::PilotVal;
 use pilot_vm::pilc::PilcBinary;
 use crate::types::{CapabilityBits, HwScalarHeader, LayoutId, LayoutTable, PhysicsGeometry};
 

@@ -1,0 +1,178 @@
+// =========================================================================
+// FILE: stdlib/core/bridge_os.pilot
+// FROZEN RUNTIME OS & MEMORY AIRLOCK (PROP-002a §1 & §3, Freeze Model B+)
+// =========================================================================
+// Strictly 1 of 2 Pilot files allowed to utter `__engine` (ENGINE001 / GATE021).
+// Maps the 51 scalar/pointer `HostOp` IDs (`0..=50`, `HOST_OP_COUNT = 51`)
+// 1:1 to `crates/pilot-vm/src/bridge.rs`. Every argument and return value is
+// an `i64` or `f64` scalar or raw memory address.
+//
+// Frozen forever under Model B+: existing `HostOp` IDs, function names,
+// parameter lists, return conventions, and sub-codes may never be deleted,
+// renumbered, or given a new meaning. Append-only additions (`ID >= 51`)
+// require an owner-approved `proposals.md` entry and `airlock_abi.pilot` update.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(100) pkg Pilot.Core.Bridge.Os;
+
+// 0..=10: Raw Memory Slabs, Copy/Cmp & Unaligned Scalar Loads/Stores
+pub fn os_slab_alloc(size: i64, align: i64) -> i64 =>
+    __engine("host_op", 0, size, align);
+
+pub fn os_slab_realloc(ptr: i64, old_sz: i64, new_sz: i64, align: i64) -> i64 =>
+    __engine("host_op", 1, ptr, old_sz, new_sz, align);
+
+pub fn os_slab_free(ptr: i64, size: i64, align: i64) -> i64 =>
+    __engine("host_op", 2, ptr, size, align);
+
+pub fn os_mem_map(op: i64, addr_or_fd: i64, len: i64, prot: i64, offset: i64, out_ptr: i64) -> i64 =>
+    __engine("host_op", 3, op, addr_or_fd, len, prot, offset, out_ptr);
+
+pub fn os_mem_copy(dst: i64, src: i64, len: i64) -> i64 =>
+    __engine("host_op", 4, dst, src, len);
+
+pub fn os_mem_set(dst: i64, byte: i64, len: i64) -> i64 =>
+    __engine("host_op", 5, dst, byte, len);
+
+pub fn os_mem_cmp(a: i64, b: i64, len: i64) -> i64 =>
+    __engine("host_op", 6, a, b, len);
+
+pub fn os_load_int(ptr: i64, bits: i64, signed: i64) -> i64 =>
+    __engine("host_op", 7, ptr, bits, signed);
+
+pub fn os_store_int(ptr: i64, val: i64, bits: i64) -> i64 =>
+    __engine("host_op", 8, ptr, val, bits);
+
+pub fn os_load_float(ptr: i64, bits: i64) -> f64 =>
+    __engine("host_op", 9, ptr, bits);
+
+pub fn os_store_float(ptr: i64, val: f64, bits: i64) -> i64 =>
+    __engine("host_op", 10, ptr, val, bits);
+
+// 11..=15: Atomics, OS Threads & Futex
+pub fn os_atomic_int(op: i64, ptr: i64, expected: i64, desired: i64, order: i64) -> i64 =>
+    __engine("host_op", 11, op, ptr, expected, desired, order);
+
+pub fn os_thread_spawn(c_entry_fn_ptr: i64, env_ptr: i64, stack_bytes: i64) -> i64 =>
+    __engine("host_op", 12, c_entry_fn_ptr, env_ptr, stack_bytes);
+
+pub fn os_thread_join(handle: i64, out_ret_ptr: i64) -> i64 =>
+    __engine("host_op", 13, handle, out_ret_ptr);
+
+pub fn os_thread_ctl(op: i64, arg: i64) -> i64 =>
+    __engine("host_op", 14, op, arg);
+
+pub fn os_futex(op: i64, u32_ptr: i64, expected: i64, timeout_ns: i64) -> i64 =>
+    __engine("host_op", 15, op, u32_ptr, expected, timeout_ns);
+
+// 16..=25: Descriptors, Positional I/O, Pipes, Poll & Raw Handle Interop
+pub fn os_fd_open(path_ptr: i64, path_len: i64, flags: i64, mode: i64) -> i64 =>
+    __engine("host_op", 16, path_ptr, path_len, flags, mode);
+
+pub fn os_fd_close(fd: i64) -> i64 =>
+    __engine("host_op", 17, fd);
+
+pub fn os_fd_read(fd: i64, dst: i64, cap: i64) -> i64 =>
+    __engine("host_op", 18, fd, dst, cap);
+
+pub fn os_fd_write(fd: i64, src: i64, len: i64) -> i64 =>
+    __engine("host_op", 19, fd, src, len);
+
+pub fn os_fd_pread(fd: i64, dst: i64, cap: i64, offset: i64) -> i64 =>
+    __engine("host_op", 20, fd, dst, cap, offset);
+
+pub fn os_fd_pwrite(fd: i64, src: i64, len: i64, offset: i64) -> i64 =>
+    __engine("host_op", 21, fd, src, len, offset);
+
+pub fn os_fd_seek_sync(op: i64, fd: i64, arg: i64) -> i64 =>
+    __engine("host_op", 22, op, fd, arg);
+
+pub fn os_fd_pipe_dup(op: i64, a0: i64, a1: i64) -> i64 =>
+    __engine("host_op", 23, op, a0, a1);
+
+pub fn os_io_poll(pollfds_ptr: i64, nfds: i64, timeout_ms: i64) -> i64 =>
+    __engine("host_op", 24, pollfds_ptr, nfds, timeout_ms);
+
+pub fn os_fd_raw_ctl(op: i64, fd_or_raw: i64, kind_flags: i64, out_raw_ptr: i64) -> i64 =>
+    __engine("host_op", 25, op, fd_or_raw, kind_flags, out_raw_ptr);
+
+// 26..=31: Filesystem Metadata, Directories & Paths
+pub fn os_fs_stat(follow: i64, path_ptr: i64, path_len: i64, out_stat_ptr: i64) -> i64 =>
+    __engine("host_op", 26, follow, path_ptr, path_len, out_stat_ptr);
+
+pub fn os_fs_read_dir(path_ptr: i64, path_len: i64, dst: i64, cap: i64, out_len_ptr: i64) -> i64 =>
+    __engine("host_op", 27, path_ptr, path_len, dst, cap, out_len_ptr);
+
+pub fn os_fs_mkdir(path_ptr: i64, path_len: i64, parents: i64, mode: i64) -> i64 =>
+    __engine("host_op", 28, path_ptr, path_len, parents, mode);
+
+pub fn os_fs_remove(path_ptr: i64, path_len: i64, recursive: i64) -> i64 =>
+    __engine("host_op", 29, path_ptr, path_len, recursive);
+
+pub fn os_fs_rename_link(op: i64, src_ptr: i64, src_len: i64, dst_ptr: i64, dst_len: i64, out_len_ptr: i64) -> i64 =>
+    __engine("host_op", 30, op, src_ptr, src_len, dst_ptr, dst_len, out_len_ptr);
+
+pub fn os_fs_path_ctl(op: i64, path_ptr: i64, path_len: i64, out: i64, cap: i64, out_len_ptr: i64) -> i64 =>
+    __engine("host_op", 31, op, path_ptr, path_len, out, cap, out_len_ptr);
+
+// 32..=35: Child Processes, Signals & Process Environment
+pub fn os_proc_spawn(spec_ptr: i64, out_pid_ptr: i64) -> i64 =>
+    __engine("host_op", 32, spec_ptr, out_pid_ptr);
+
+pub fn os_proc_wait(handle: i64, nonblocking: i64, out_code_ptr: i64) -> i64 =>
+    __engine("host_op", 33, handle, nonblocking, out_code_ptr);
+
+pub fn os_proc_signal(op: i64, handle_or_pid: i64, sig: i64) -> i64 =>
+    __engine("host_op", 34, op, handle_or_pid, sig);
+
+pub fn os_env_ctl(op: i64, key_ptr: i64, key_len: i64, buf: i64, cap: i64, out_len_ptr: i64) -> i64 =>
+    __engine("host_op", 35, op, key_ptr, key_len, buf, cap, out_len_ptr);
+
+// 36..=38: Clocks, Sleep & OS CSPRNG
+pub fn os_clock_now_ns(clock_id: i64) -> i64 =>
+    __engine("host_op", 36, clock_id);
+
+pub fn os_sleep_ns(ns: i64) -> i64 =>
+    __engine("host_op", 37, ns);
+
+pub fn os_random_bytes(dst: i64, len: i64) -> i64 =>
+    __engine("host_op", 38, dst, len);
+
+// 39..=42: Sockets & Name Resolution
+pub fn os_net_socket(domain: i64, sock_type: i64, proto: i64, flags: i64) -> i64 =>
+    __engine("host_op", 39, domain, sock_type, proto, flags);
+
+pub fn os_net_connect_bind(op: i64, fd: i64, addr_ptr: i64, arg: i64) -> i64 =>
+    __engine("host_op", 40, op, fd, addr_ptr, arg);
+
+pub fn os_net_io(op: i64, fd: i64, buf: i64, len: i64, flags: i64, addr_ptr: i64) -> i64 =>
+    __engine("host_op", 41, op, fd, buf, len, flags, addr_ptr);
+
+pub fn os_net_resolve(host_ptr: i64, host_len: i64, port: i64, dst: i64, cap: i64, out_len_ptr: i64) -> i64 =>
+    __engine("host_op", 42, host_ptr, host_len, port, dst, cap, out_len_ptr);
+
+// 43..=48: Dynamic Libraries, Raw Register FFI & Callback Trampolines
+pub fn os_dl_open(path_ptr: i64, path_len: i64, flags: i64) -> i64 =>
+    __engine("host_op", 43, path_ptr, path_len, flags);
+
+pub fn os_dl_sym(lib: i64, sym_ptr: i64, sym_len: i64, out_fn_ptr: i64) -> i64 =>
+    __engine("host_op", 44, lib, sym_ptr, sym_len, out_fn_ptr);
+
+pub fn os_dl_close(lib: i64) -> i64 =>
+    __engine("host_op", 45, lib);
+
+pub fn os_ffi_call(fn_ptr: i64, abi_desc_ptr: i64, gpr_ptr: i64, vec_ptr: i64, stack_ptr: i64, ret_ptr: i64) -> i64 =>
+    __engine("host_op", 46, fn_ptr, abi_desc_ptr, gpr_ptr, vec_ptr, stack_ptr, ret_ptr);
+
+pub fn os_ffi_callback_alloc(c_dispatch_fn_ptr: i64, env_ptr: i64, abi_desc_ptr: i64, out_fn_ptr: i64) -> i64 =>
+    __engine("host_op", 47, c_dispatch_fn_ptr, env_ptr, abi_desc_ptr, out_fn_ptr);
+
+pub fn os_ffi_callback_free(slot: i64) -> i64 =>
+    __engine("host_op", 48, slot);
+
+// 49..=50: Terminal Fault & Seam Traps
+pub fn os_trap_fault(msg_ptr: i64, msg_len: i64) -> i64 =>
+    __engine("host_op", 49, msg_ptr, msg_len);
+
+pub fn os_trap_seam(id_ptr: i64, id_len: i64, note_ptr: i64, note_len: i64) -> i64 =>
+    __engine("host_op", 50, id_ptr, id_len, note_ptr, note_len);

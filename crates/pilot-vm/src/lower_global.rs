@@ -14,7 +14,7 @@
 use crate::instruction::{Instruction, Opcode};
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// One `comptime` block or expression, compiled out of line.
 pub(crate) struct ComptimeRun {

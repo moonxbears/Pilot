@@ -20,7 +20,7 @@ use crate::lower_native::native;
 use crate::BytecodeCompiler;
 use pilot_parser::NativeKind;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 impl BytecodeCompiler {
     /// Whether `owner` declares `method`; `Some(is_static)` when it does.

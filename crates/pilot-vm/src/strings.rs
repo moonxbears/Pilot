@@ -1,6 +1,6 @@
 //! Strings the VM makes while a program runs.
 //!
-//! A string value is a tagged pointer (`pilot_rt::PilotVal`), copied freely,
+//! A string value is a tagged pointer (`crate::value::PilotVal`), copied freely,
 //! with no count of who holds it. Constants and strings made outside the VM
 //! are interned for the life of the process. Strings the VM makes at run time
 //! (concatenation, slices, file text, process output) are owned here instead,
@@ -13,7 +13,7 @@
 //! of the process, so a result the host reads after that stays valid.
 
 use crate::vm::PilVirtualMachine;
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 use std::collections::HashSet;
 
 /// The run-time strings of one VM, by the address of their bytes.

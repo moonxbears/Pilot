@@ -6,7 +6,7 @@
 //! heap to render list and record operands.
 
 use crate::instruction::Opcode;
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 use std::cmp::Ordering;
 
 pub type OpResult = Result<PilotVal, String>;

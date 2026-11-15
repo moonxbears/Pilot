@@ -13,7 +13,7 @@
 use crate::instruction::Opcode;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// `PatRecord.flags` when the first child names the type.
 const RECORD_PATTERN_TYPED: u16 = 1;

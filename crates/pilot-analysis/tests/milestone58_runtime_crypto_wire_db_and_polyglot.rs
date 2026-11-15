@@ -105,7 +105,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pilot_analysis::{AnalysisPipeline, handle_engine_intrinsic, PhysicsRegistry};
 use pilot_parser::parse;
-use pilot_rt::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
 #[path = "common/anticheat.rs"]
@@ -630,21 +629,25 @@ pub fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
-    // 1. OS CSPRNG syscall & DynamicLibraryHandle in purified `pilot-rt`
+    // 1. OS CSPRNG syscall & DlOpen/DlSym in `pilot_vm::bridge`
     let mut e1 = [0u8; 32];
     let mut e2 = [0u8; 32];
-    let n1 = unsafe { pilot_rt::pilot_rt_os_getrandom(e1.as_mut_ptr(), e1.len()) };
-    let n2 = unsafe { pilot_rt::pilot_rt_os_getrandom(e2.as_mut_ptr(), e2.len()) };
+    let n1 = unsafe { pilot_vm::bridge::os_random_bytes(e1.as_mut_ptr(), e1.len()) };
+    let n2 = unsafe { pilot_vm::bridge::os_random_bytes(e2.as_mut_ptr(), e2.len()) };
     assert_eq!(n1, 32);
     assert_eq!(n2, 32);
     assert_ne!(e1, [0u8; 32], "CSPRNG returned all-zero buffer");
     assert_ne!(e1, e2, "Two consecutive 256-bit OS CSPRNG draws collided");
 
-    if let Ok(libc_handle) = pilot_rt::DynamicLibraryHandle::open("libc.so.6") {
-        let sym = libc_handle
-            .resolve_symbol("strlen")
-            .expect("dlsym('strlen') must succeed on libc.so.6");
-        assert!(!sym.is_null());
+    unsafe {
+        let mut bstate = pilot_vm::bridge::BridgeState::default();
+        let lib = pilot_vm::bridge::os_dl_open(&mut bstate, "libc.so.6".as_ptr() as i64, 9, 0);
+        if lib >= 0 {
+            let mut sym = 0u64;
+            let rc = pilot_vm::bridge::os_dl_sym(&bstate, lib, "strlen".as_ptr() as i64, 6, &mut sym as *mut u64 as i64);
+            assert_eq!(rc, 0, "dlsym('strlen') must succeed on libc.so.6");
+            assert_ne!(sym, 0);
+        }
     }
 
     // 2. Mount randomized AST + PhysicsRegistry and generate C11 FFI header in Pilot
@@ -996,8 +999,12 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     let v_upd = rng.ascii_payload(12);
     let v_new = rng.ascii_payload(11);
 
+    let os_abi_src = std::fs::read_to_string(root.join("stdlib/core/os_abi.pilot")).unwrap();
+    let bridge_os_src = std::fs::read_to_string(root.join("stdlib/core/bridge_os.pilot")).unwrap();
+    let native_calls_src = std::fs::read_to_string(root.join("stdlib/core/builtins/native_calls.pilot")).unwrap();
+    let env_src = std::fs::read_to_string(root.join("stdlib/core/env.pilot")).unwrap();
     let script = format!(
-        "{text_src}\n{reactive_src}\n{effects_src}\n{http_src}\n\
+        "{os_abi_src}\n{bridge_os_src}\n{native_calls_src}\n{env_src}\n{text_src}\n{reactive_src}\n{effects_src}\n{http_src}\n\
          let g = rx_graph_new();\n\
          let src = rx_source(g, {s0});\n\
          let left = rx_derived(g, src, 0, 1, {k1});\n\
@@ -1052,69 +1059,6 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     );
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     let mut vm = PilVirtualMachine::new();
-    let sockets: Arc<Mutex<Vec<Option<std::net::TcpStream>>>> = Arc::new(Mutex::new(Vec::new()));
-    let sock_ref = Arc::clone(&sockets);
-    vm.engine_handler = Some(Box::new(move |hook, args| match hook {
-        "tcp_connect" => {
-            let addr = args.first().map(|v| v.to_string_repr()).unwrap_or_default();
-            match std::net::TcpStream::connect(&addr) {
-                Ok(s) => {
-                    let mut tbl = sock_ref.lock().unwrap();
-                    let fd = tbl.len() as i64;
-                    tbl.push(Some(s));
-                    Ok(PilotVal::from_int(fd))
-                }
-                Err(_) => Ok(PilotVal::from_int(-1)),
-            }
-        }
-        "tcp_send" => {
-            let fd = args.first().and_then(|v| v.as_int()).unwrap_or(-1);
-            let data = args.get(1).map(|v| v.to_string_repr()).unwrap_or_default();
-            let mut tbl = sock_ref.lock().unwrap();
-            if fd >= 0 && (fd as usize) < tbl.len() {
-                if let Some(ref mut stream) = tbl[fd as usize] {
-                    stream.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
-                    let _ = stream.flush();
-                    return Ok(PilotVal::from_int(data.len() as i64));
-                }
-            }
-            Ok(PilotVal::from_int(-1))
-        }
-        "tcp_recv" => {
-            let fd = args.first().and_then(|v| v.as_int()).unwrap_or(-1);
-            let max_len = args.get(1).and_then(|v| v.as_int()).unwrap_or(65536).max(1) as usize;
-            let mut tbl = sock_ref.lock().unwrap();
-            if fd >= 0 && (fd as usize) < tbl.len() {
-                if let Some(ref mut stream) = tbl[fd as usize] {
-                    let mut buf = vec![0u8; max_len.min(65536)];
-                    let mut out = Vec::new();
-                    loop {
-                        match stream.read(&mut buf) {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                out.extend_from_slice(&buf[..n]);
-                                if out.len() >= max_len {
-                                    break;
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    return Ok(PilotVal::from_str(&String::from_utf8_lossy(&out)));
-                }
-            }
-            Ok(PilotVal::from_str(""))
-        }
-        "tcp_close" => {
-            let fd = args.first().and_then(|v| v.as_int()).unwrap_or(-1);
-            let mut tbl = sock_ref.lock().unwrap();
-            if fd >= 0 && (fd as usize) < tbl.len() {
-                tbl[fd as usize] = None;
-            }
-            Ok(PilotVal::from_int(0))
-        }
-        _ => Err(format!("Unhandled hook: {}", hook)),
-    }));
     vm.load_binary(bin);
     let out = vm.run().to_string_repr();
     server_thread.join().expect("HTTP loopback server thread panicked");
@@ -1174,8 +1118,12 @@ pub fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
     );
     let bindings_json = format!("{{\"x\":{},\"y\":{}}}", v_a, v_b);
 
+    let os_abi_src = std::fs::read_to_string(root.join("stdlib/core/os_abi.pilot")).unwrap();
+    let bridge_os_src = std::fs::read_to_string(root.join("stdlib/core/bridge_os.pilot")).unwrap();
+    let native_calls_src = std::fs::read_to_string(root.join("stdlib/core/builtins/native_calls.pilot")).unwrap();
+    let env_src = std::fs::read_to_string(root.join("stdlib/core/env.pilot")).unwrap();
     let script = format!(
-        "{text_src}\n{shm_src}\n{marshal_src}\n{bridge_src}\n\
+        "{os_abi_src}\n{bridge_os_src}\n{native_calls_src}\n{env_src}\n{text_src}\n{shm_src}\n{marshal_src}\n{bridge_src}\n\
          let buf = create_shm_owned_buffer(8192, 128, 16);\n\
          let v_ok = project_shm_borrowed_view(buf, 4, 8, 8);\n\
          let v_oob = project_shm_borrowed_view(buf, 12, 8, 8);\n\
@@ -1203,20 +1151,6 @@ pub fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
     assert!(arena.diagnostics.is_empty(), "polyglot parse diagnostics: {:?}", arena.diagnostics);
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     let mut vm = PilVirtualMachine::new();
-    vm.engine_handler = Some(Box::new(|hook, args| match hook {
-        "host_spawn_eval" => {
-            let runtime_bin = args.first().map(|v| v.to_string_repr()).unwrap_or_default();
-            let code = args.get(1).map(|v| v.to_string_repr()).unwrap_or_default();
-            let flag = if runtime_bin.contains("node") { "-e" } else { "-c" };
-            let out = Command::new(&runtime_bin)
-                .arg(flag)
-                .arg(&code)
-                .output()
-                .map_err(|e| e.to_string())?;
-            Ok(PilotVal::from_str(String::from_utf8_lossy(&out.stdout).trim()))
-        }
-        _ => Err(format!("Unhandled hook: {}", hook)),
-    }));
     vm.load_binary(bin);
     let res = vm.run().to_string_repr();
     let cols: Vec<&str> = res.split('|').collect();
@@ -1421,39 +1355,30 @@ pub fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
         "crates/pilot-polyglot must be completely deleted from disk in Milestone 58.5"
     );
     assert!(
-        !root.join("crates/pilot-rt/src/crypto.rs").exists(),
-        "crates/pilot-rt/src/crypto.rs must be completely deleted from disk in Milestone 58.5"
+        !root.join("crates/pilot-rt").exists(),
+        "Retired crates/pilot-rt must remain completely deleted from disk"
     );
 
     let cargo_toml = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
     assert!(
-        !cargo_toml.contains("pilot-polyglot"),
-        "Workspace Cargo.toml must not reference retired pilot-polyglot"
+        !cargo_toml.contains("pilot-polyglot") && !cargo_toml.contains("pilot-rt"),
+        "Workspace Cargo.toml must not reference retired pilot-polyglot or pilot-rt"
     );
 
-    let mut rt_lines = 0usize;
-    for entry in std::fs::read_dir(root.join("crates/pilot-rt/src")).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            let content = std::fs::read_to_string(&path).unwrap();
-            rt_lines += content.lines().count();
-            let non_comment_code: String = content
-                .lines()
-                .map(|l| l.split("//").next().unwrap_or(""))
-                .collect::<Vec<_>>()
-                .join("\n");
-            for banned in ["blake3", "ed25519", "SliceBuffer", "EffectPlan", "HTTP/1.1"] {
-                assert!(
-                    !non_comment_code.contains(banned),
-                    "crates/pilot-rt/src/{} contains banned legacy symbol '{}'",
-                    path.file_name().unwrap().to_string_lossy(),
-                    banned
-                );
-            }
-        }
+    let bridge_content = std::fs::read_to_string(root.join("crates/pilot-vm/src/bridge.rs")).unwrap();
+    let non_comment_code: String = bridge_content
+        .lines()
+        .map(|l| l.split("//").next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for banned in ["blake3", "ed25519", "SliceBuffer", "EffectPlan", "HTTP/1.1"] {
+        assert!(
+            !non_comment_code.contains(banned),
+            "crates/pilot-vm/src/bridge.rs contains banned legacy symbol '{}'",
+            banned
+        );
     }
-    let rt_cap = anticheat::seed_rust_crate_loc_cap(&root, 700);
-    assert!(rt_lines <= rt_cap, "crates/pilot-rt/src total LOC ({}) must be <= {}", rt_lines, rt_cap);
+    assert!(bridge_content.lines().count() <= 1500);
 
     assert!(!root.join("crates/pilot-ffi").exists(), "Retired crates/pilot-ffi must remain deleted");
     assert!(!root.join("crates/pilot-arena").exists(), "Retired crates/pilot-arena must remain deleted");

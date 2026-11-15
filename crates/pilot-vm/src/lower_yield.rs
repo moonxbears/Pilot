@@ -26,7 +26,7 @@
 use crate::instruction::{Instruction, Opcode};
 use crate::{BytecodeCompiler, YieldOwner};
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// The fault a `yield` that belongs to nothing gives.
 const ORPHAN_YIELD: &str = "`yield` outside a generator function or a collecting `for`";
