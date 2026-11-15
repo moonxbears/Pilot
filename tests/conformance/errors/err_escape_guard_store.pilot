@@ -1,0 +1,14 @@
+// A scoped guard cannot be stored in a collection (ESCAPE003): it stays
+// bound to the block that made it.
+struct Lock : IGuard {
+    pub id: i64;
+    ~self() {
+        print("unlock");
+    }
+}
+
+fn main() {
+    let g = Lock { id: 1 };
+    let all = [g];
+    print(all.len());
+}

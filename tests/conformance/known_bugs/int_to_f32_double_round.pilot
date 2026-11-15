@@ -1,0 +1,12 @@
+// KNOWN BUG seed.int_to_f32_double_round: `v as f32` for an integer is the
+// f32 nearest to v. For v = 2^60 + 2^36 + 1 = 1152921573326323713 the f32
+// step is 2^37 and v lies just above the halfway point 2^60 + 2^36, so the
+// nearest f32 is 2^60 + 2^37 = 1152921642045800448 (printed with its
+// shortest digits, 1152921642045800400). The seed converts to an f64 first,
+// which lands exactly on the halfway point (the +1 is lost), and then
+// rounds that tie to even, 2^60 = 1152921504606846976 (1152921504606847000).
+// PilIR's interpreter does the same.
+fn main() {
+    let v: i64 = 1152921573326323713;
+    print(v as f32);
+}

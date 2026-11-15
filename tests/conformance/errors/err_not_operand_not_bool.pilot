@@ -1,0 +1,6 @@
+// `!` is logical not and needs a `bool`; bitwise not is `~`. An `i64`
+// operand is TYPE001 at build time.
+fn main() {
+    let n = 5;
+    print(!n);
+}

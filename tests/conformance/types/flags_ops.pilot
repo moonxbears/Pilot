@@ -1,0 +1,29 @@
+// `|`, `&` and `^` between the values of a `[Flags]` enum, and between
+// `FlagSet`s (stdlib/core/flags.pilot).
+use Pilot.Core.Flags;
+
+[Flags]
+enum Perm : u32 {
+    Read = 1,
+    Write = 2,
+    Exec = 4,
+}
+
+fn main() {
+    // 1 | 2 = 3; 3 & 2 = 2; 3 ^ 1 = 2; 3 & 4 = 0.
+    let rw = Perm::Read | Perm::Write;
+    print(rw);
+    print(rw & Perm::Write);
+    print(rw ^ Perm::Read);
+    print((rw & Perm::Exec) == 0);
+    let a: FlagSet<Perm> = flag_set(Perm::Read).with(Perm::Write);
+    let b: FlagSet<Perm> = flag_set(Perm::Write).with(Perm::Exec);
+    // {1, 2} | {2, 4} = 7; & = 2; ^ = 1 + 4 = 5.
+    let u: FlagSet<Perm> = a | b;
+    print(u.bits);
+    let i: FlagSet<Perm> = a & b;
+    print(i.bits);
+    let d: FlagSet<Perm> = a ^ b;
+    print(d.bits);
+    print(d.has(Perm::Exec));
+}

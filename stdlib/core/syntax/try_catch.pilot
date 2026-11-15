@@ -9,12 +9,19 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.TryCatch;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("bind_receptor", nameof(try),   18, 0);
-    __engine("bind_receptor", nameof(catch), 19, 0);
-    __engine("bind_receptor", "!",     34, 1);
+    bind_receptor(nameof(try),   18, 0);
+    bind_receptor(nameof(catch), 19, 0);
+    bind_receptor("!",     34, 1);
     // Postfix `x?` on a record asks `ITryOperator.is_success`; on success the
-    // value is its `op ?`, otherwise `x` itself leaves as the failure.
-    __engine("bind_try_protocol", nameof(is_success), "?");
+    // value is its `op ?`, otherwise `x` itself leaves as the failure. A
+    // `catch e` clause binds `e` to the failed record's `failure()`.
+    bind_try_protocol(nameof(is_success), "?", nameof(failure));
+    // Lifting: a plain value where a failure-capable type is expected is
+    // wrapped by that type's static `some` or `ok`; `none` there is its
+    // static `none`. Read by the PilIR lowerer (selfhost/ir/lower_try.pilot).
+    bind_lift("some");
+    bind_lift("ok");
+    bind_absent("none");
 }
 
 pub syntax {

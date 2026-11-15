@@ -1,0 +1,46 @@
+// Two structs with equal fields compare equal (`==` / `!=`) on every
+// engine. A struct that declares `op ==` runs it for both `==` and `!=`
+// (unless it also declares `op !=`).
+struct Vec2 {
+    pub x: i64;
+    pub y: i64;
+}
+
+struct Boxed {
+    pub inner: Vec2;
+    pub label: str;
+}
+
+struct Tag {
+    pub id: i64;
+    pub note: str;
+    pub op == (other: Tag) -> bool => self.id == other.id;
+}
+
+fn main() {
+    let a = Vec2 { x: 4, y: 5 };
+    let b = Vec2 { x: 4, y: 5 };
+    let c = Vec2 { x: 4, y: 9 };
+    print(a == b);
+    print(a != b);
+    print(a == c);
+    print(a != c);
+
+    let b1 = Boxed { inner: a, label: "ok" };
+    let b2 = Boxed { inner: Vec2 { x: 4, y: 5 }, label: "ok" };
+    let b3 = Boxed { inner: c, label: "ok" };
+    print(b1 == b2);
+    print(b1 == b3);
+
+    let t1 = Tag { id: 7, note: "one" };
+    let t2 = Tag { id: 7, note: "two" };
+    let t3 = Tag { id: 8, note: "one" };
+    print(t1 == t2);
+    print(t1 != t2);
+    print(t1 == t3);
+    print(t1 != t3);
+
+    let opt: Tag? = none;
+    print(opt == none);
+    print(opt != none);
+}

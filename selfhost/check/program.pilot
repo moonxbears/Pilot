@@ -27,12 +27,39 @@ pub fn literal_slot(lit_kind: i64) -> str {
     return "";
 }
 
+/// The slot of the type whose values are Unicode scalar values (characters).
+pub pure fn scalar_slot() -> str => "char_t";
+
+/// The code point of `text` when it holds exactly one Unicode scalar value
+/// in UTF-8 (RFC 3629), or -1.
+pub fn scalar_code(text: str) -> i64 {
+    let n = text.len();
+    if n == 0 || n > 4 { return -1; }
+    let b0: i64 = text.byte_at(0);
+    if b0 < 128 { return if n == 1 { b0 } else { -1 }; }
+    var need = 0;
+    var code = 0;
+    if b0 >= 192 && b0 < 224 { need = 2; code = b0 - 192; }
+    else if b0 >= 224 && b0 < 240 { need = 3; code = b0 - 224; }
+    else if b0 >= 240 && b0 < 248 { need = 4; code = b0 - 240; }
+    if need == 0 || n != need { return -1; }
+    var i = 1;
+    while i < n {
+        let b: i64 = text.byte_at(i);
+        if b < 128 || b >= 192 { return -1; }
+        code = code * 64 + (b - 128);
+        i = i + 1;
+    }
+    return code;
+}
+
 /// The slot of the bottom type, which a call that never returns has.
 pub pure fn never_slot() -> str => "never_t";
 
 /// Register classes (`Cfg.Reg` keys) whose types hold integers and floats.
 pub fn is_integer_class(class: str) -> bool => class == "gpr_s" || class == "gpr_u";
 pub fn is_float_class(class: str) -> bool => class == "simd_f";
+pub fn is_signed_class(class: str) -> bool => class == "gpr_s";
 /// The `Cfg.Reg` width key of a type that holds no value.
 pub pure fn zero_width() -> str => "b0";
 
@@ -82,6 +109,9 @@ pub struct Program {
     pub attrs: NodeLists;
     /// Owner node -> generic parameter symbols.
     pub tparams: NodeLists;
+    /// Owner node -> the default type node of each generic parameter, in
+    /// the same order (-1 for a parameter without one).
+    pub tparam_defaults: NodeLists;
     /// Slot key -> declaration.
     pub slots: Map<str, i64>;
     /// Type name -> `[Bits]` register class and width keys. A type's
@@ -98,6 +128,20 @@ pub struct Program {
     pub built: List<any>;
     /// Receptor slot -> the name its table gives it (`prog_slot_name`).
     pub slot_names: Map<str, str>;
+    /// Node lists computed once on demand (selfhost/check/generators.pilot).
+    pub gen_memo: Map<str, List<i64>>;
+    /// The engine bindings (`prog_engine_bindings`), once computed: empty
+    /// before, one list after.
+    pub engine_memo: List<List<List<str>>>;
+    /// The top-level bindings by name (selfhost/check/effects.pilot), once
+    /// computed: empty before, one map after.
+    pub globals_memo: List<Map<str, i64>>;
+    /// Map literal node -> index into `entry_maps`, for the map literals
+    /// `map_entry` has looked into.
+    pub entry_index: Map<str, i64>;
+    /// Entry name -> value node of a map literal (the first entry of each
+    /// name), built on first lookup.
+    pub entry_maps: List<Map<str, i64>>;
 }
 
 fn key(n: i64) -> str => f"{n}";
@@ -132,7 +176,8 @@ fn index_members(p: Program, owner_name: str, decl: i64, into: NodeLists) {
         let k = kind(s, m);
         if k == nk_param() || k == nk_fn() || k == nk_operator() || k == nk_indexer()
             || ((k == nk_let() || k == nk_var()) && annot(s, m) >= 0) {
-            nl_add(into, owner_name + "." + node_name(s, m), m);
+            let mname = if k == nk_indexer() { "[]" } else { node_name(s, m) };
+            nl_add(into, owner_name + "." + mname, m);
         } else if k == nk_expr_stmt() {
             let u = lhs(s, m);
             if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 {
@@ -144,9 +189,7 @@ fn index_members(p: Program, owner_name: str, decl: i64, into: NodeLists) {
 
 /// Indexes the declarations of the snapshot.
 pub fn prog_new(s: Snap) -> Program {
-    var memo: List<i64> = [];
-    var i = 0;
-    while i < s.count { memo.push(-1); i = i + 1; }
+    let memo = filled(s.count, -1);
     let p = Program {
         s: s,
         tt: tt_new(),
@@ -160,6 +203,7 @@ pub fn prog_new(s: Snap) -> Program {
         bases: nl_new(),
         attrs: nl_new(),
         tparams: nl_new(),
+        tparam_defaults: nl_new(),
         slots: Map<str, i64>(),
         bits_class: Map<str, str>(),
         bits_width: Map<str, str>(),
@@ -168,6 +212,11 @@ pub fn prog_new(s: Snap) -> Program {
         built_index: Map<str, i64>(),
         built: [],
         slot_names: Map<str, str>(),
+        gen_memo: Map<str, List<i64>>(),
+        engine_memo: [],
+        globals_memo: [],
+        entry_index: Map<str, i64>(),
+        entry_maps: [],
     };
     var r = 0;
     while r < s.attrs.len() {
@@ -175,9 +224,12 @@ pub fn prog_new(s: Snap) -> Program {
         nl_add(p.attrs, key(row[0]), r);
         r = r + 1;
     }
-    for tp in s.type_params { nl_add(p.tparams, key(tp[0]), tp[1]); }
-    i = 0;
-    while i < s.count {
+    for tp in s.type_params {
+        nl_add(p.tparams, key(tp[0]), tp[1]);
+        nl_add(p.tparam_defaults, key(tp[0]), if tp.len() > 2 { tp[2] } else { -1 });
+    }
+    // Every node indexed here is a declaration (`Snap.decl_nodes`).
+    for i in s.decl_nodes {
         let k = kind(s, i);
         if is_type_decl_kind(k) {
             let name = node_name(s, i);
@@ -209,7 +261,6 @@ pub fn prog_new(s: Snap) -> Program {
                 }
             }
         }
-        i = i + 1;
     }
     for b in s.bases {
         let owner = b[0];
@@ -232,6 +283,18 @@ pub fn prog_tparam_names(p: Program, owner: i64) -> List<str> {
     return out;
 }
 
+/// The default type nodes of the generic parameters of the type named
+/// `name` (-1 for a parameter without one), from the declaration that
+/// lists them.
+pub fn prog_tparam_defaults(p: Program, name: str) -> List<i64> {
+    for d in nl_get(p.type_decls, name) {
+        let defaults = nl_get(p.tparam_defaults, key(d));
+        if defaults.len() > 0 { return defaults; }
+    }
+    let empty: List<i64> = [];
+    return empty;
+}
+
 /// The type of the declaration bound to `slot`, with no type arguments,
 /// or the unknown type when no declaration takes that slot.
 pub fn prog_slot_type(p: Program, slot: str) -> i64 {
@@ -246,6 +309,20 @@ pub fn prog_class(p: Program, t: i64) -> str {
     if !ty_is_named(p.tt, t) { return ""; }
     let d = node_name(p.s, ty_decl(p.tt, t));
     return if p.bits_class.has(d) { p.bits_class.get(d) } else { "" };
+}
+
+/// The register class values of type `t` travel in: its `[Bits]` class, or
+/// for an enum declared over a primitive (`enum E : u8`) that primitive's.
+pub fn prog_value_class(p: Program, t: i64) -> str {
+    let c = prog_class(p, t);
+    if c != "" || !ty_is_named(p.tt, t) { return c; }
+    let d = ty_decl(p.tt, t);
+    if d < 0 || kind(p.s, d) != nk_adt() { return ""; }
+    for b in nl_get(p.bases, node_name(p.s, d)) {
+        let bc = prog_class(p, prog_annot_type(p, b));
+        if bc != "" { return bc; }
+    }
+    return "";
 }
 
 /// Whether a type holds no value (`void`, `never`).
@@ -263,7 +340,7 @@ pub fn prog_is_never(p: Program, t: i64) -> bool {
 
 /// The generic parameter `name` visible at node `at`, as a type, or the
 /// unknown type when no enclosing declaration introduces it.
-fn visible_tparam(p: Program, at: i64, name: str) -> i64 {
+pub fn visible_tparam(p: Program, at: i64, name: str) -> i64 {
     var cur = at;
     var depth = 0;
     while cur >= 0 && depth < 200 {
@@ -280,7 +357,8 @@ fn visible_tparam(p: Program, at: i64, name: str) -> i64 {
 /// parameter in scope.
 pub fn prog_type_name_known(p: Program, n: i64) -> bool {
     let name = node_name(p.s, n);
-    return prog_type_decl(p, name) >= 0 || visible_tparam(p, n, name) > 0;
+    return prog_type_decl(p, name) >= 0 || visible_tparam(p, n, name) > 0
+        || name == prog_slot_name(p, fn_slot());
 }
 
 /// The name the `Cfg.Lang`-style table of receptor slots gives `slot`
@@ -302,7 +380,7 @@ fn find_slot_name(p: Program, slot: str) -> str {
         if sym_text(s, row[1]) == "Lang" && args.len() > 0 && kind(s, args[0]) == nk_member() {
             let table = const_node(p, lhs(s, args[0]), 0);
             if table >= 0 && kind(s, table) == nk_map() {
-                let v = map_entry(s, table, slot);
+                let v = map_entry(p, table, slot);
                 return if v >= 0 && kind(s, v) == nk_str() { str_value(s, v) } else { "" };
             }
         }
@@ -311,10 +389,36 @@ fn find_slot_name(p: Program, slot: str) -> str {
     return "";
 }
 
+/// The receptor slot of the two-member union type (`A | B`).
+pub pure fn union_slot() -> str => "union_t";
 /// The receptor slot of function values.
 pub pure fn fn_slot() -> str => "fn_t";
 /// The receptor slot of the list a collection literal builds.
 pub pure fn list_slot() -> str => "list_t";
+
+/// Whether type declaration `d` is `type Name = Target;` (or generic
+/// `type Name<T> = Target;`): it has no variants and its right side is the
+/// target type.
+pub fn is_type_alias(p: Program, d: i64) -> bool =>
+    kind(p.s, d) == nk_adt() && flags(p.s, d) == 0 && rhs(p.s, d) >= 0;
+
+/// Whether type declaration `d` is `type Name = Target;` with no generic
+/// parameters: it has no variants and its right side is the target type.
+pub fn is_plain_alias(p: Program, d: i64) -> bool {
+    if !is_type_alias(p, d) { return false; }
+    return nl_get(p.tparams, key(d)).len() == 0;
+}
+
+/// Whether `t` is the character type (the `char_t` slot).
+pub fn is_scalar_type(p: Program, t: i64) -> bool {
+    let ct = prog_slot_type(p, scalar_slot());
+    return ty_is_named(p.tt, t) && ty_is_named(p.tt, ct) && ty_decl(p.tt, t) == ty_decl(p.tt, ct);
+}
+
+/// Whether node `e` is a string literal that holds exactly one Unicode
+/// scalar value: where a character is expected, it is that character.
+pub fn is_scalar_literal(p: Program, e: i64) -> bool =>
+    e >= 0 && kind(p.s, e) == nk_str() && scalar_code(node_name(p.s, e)) >= 0;
 
 /// The type a type node denotes.
 pub fn prog_annot_type(p: Program, n: i64) -> i64 {
@@ -329,10 +433,50 @@ pub fn prog_annot_type(p: Program, n: i64) -> i64 {
         } else {
             let d = prog_type_decl(p, name);
             var args: List<i64> = [];
-            if d >= 0 || name == prog_slot_name(p, fn_slot()) {
-                for a in children(p.s, n) { args.push(prog_annot_type(p, a)); }
-            }
+            let is_fn = d < 0 && name == prog_slot_name(p, fn_slot());
             if d >= 0 {
+                for a in children(p.s, n) { args.push(prog_annot_type(p, a)); }
+                // Parameters left out take their defaults (`Generator<i64>`
+                // is `Generator<i64, void>`).
+                if args.len() > 0 {
+                    let defaults = prog_tparam_defaults(p, name);
+                    while args.len() < defaults.len() && defaults[args.len()] >= 0 {
+                        args.push(prog_annot_type(p, defaults[args.len()]));
+                    }
+                }
+            } else if is_fn {
+                // `(A, B) => R` gives the parameters as one tuple type
+                // (`()` for none); each of its items is a parameter.
+                let ch = children(p.s, n);
+                var i = 0;
+                while i < ch.len() {
+                    if i + 1 < ch.len() && kind(p.s, ch[i]) == nk_type_tuple() {
+                        for item in children(p.s, ch[i]) { args.push(prog_annot_type(p, item)); }
+                    } else {
+                        args.push(prog_annot_type(p, ch[i]));
+                    }
+                    i = i + 1;
+                }
+            }
+            if d >= 0 && is_type_alias(p, d) {
+                // `type Meters = i64;` or `type Pair<T> = (T, T);` is another
+                // name for its target. The memo is set first so a cyclic
+                // alias ends as unknown.
+                p.annot_memo[n] = ty_unknown();
+                let tp_names = prog_tparam_names(p, d);
+                if tp_names.len() > 0 {
+                    if args.len() > 0 {
+                        let target = prog_annot_type(p, rhs(p.s, d));
+                        t = ty_subst(p.tt, target, tp_names, args);
+                    }
+                } else {
+                    t = prog_annot_type(p, rhs(p.s, d));
+                }
+            } else if d >= 0 && args.len() >= 2 && name == prog_slot_name(p, union_slot()) {
+                // `union<A, B>` (`A | B`) is the union of its members: a
+                // value of either fits it.
+                t = ty_union(p.tt, args);
+            } else if d >= 0 {
                 t = ty_named(p.tt, d, name, args);
             } else if name == prog_slot_name(p, fn_slot()) {
                 t = ty_func(p.tt, name, args);
@@ -374,15 +518,30 @@ pub fn prog_attr_nodes(p: Program, n: i64, name: str) -> List<i64>? {
     return none;
 }
 
+/// Every node of kind `k`, in node order (`nodes_of`, built once with the
+/// snapshot). The list is shared: a caller must not change it.
+pub fn prog_nodes_of_kind(p: Program, k: i64) -> List<i64> => nodes_of(p.s, k);
+
 /// The value of entry `name` in map literal `m`, or -1.
-fn map_entry(s: Snap, m: i64, name: str) -> i64 {
-    let ch = children(s, m);
-    var i = 0;
-    while i + 1 < ch.len() {
-        if node_name(s, ch[i]) == name { return ch[i + 1]; }
-        i = i + 2;
+fn map_entry(p: Program, m: i64, name: str) -> i64 {
+    let at = key(m);
+    if !p.entry_index.has(at) {
+        // The constant tables are large map literals read many times: their
+        // entries are indexed by name once, the first entry of a name kept.
+        let s = p.s;
+        let entries = Map<str, i64>();
+        let ch = children(s, m);
+        var i = 0;
+        while i + 1 < ch.len() {
+            let entry = node_name(s, ch[i]);
+            if !entries.has(entry) { entries.set(entry, ch[i + 1]); }
+            i = i + 2;
+        }
+        p.entry_index.set(at, p.entry_maps.len());
+        p.entry_maps.push(entries);
     }
-    return -1;
+    let entries = p.entry_maps[p.entry_index.get(at)];
+    return if entries.has(name) { entries.get(name) } else { -1 };
 }
 
 /// The node a constant expression stands for: a literal is itself; a member
@@ -399,9 +558,29 @@ fn const_node(p: Program, e: i64, depth: i64) -> i64 {
     if k == nk_member() {
         let base = const_node(p, lhs(s, e), depth + 1);
         if base < 0 || kind(s, base) != nk_map() { return -1; }
-        return map_entry(s, base, sym_text(s, rhs(s, e)));
+        return map_entry(p, base, sym_text(s, rhs(s, e)));
     }
     return e;
+}
+
+/// The name a constant expression stands for (`Cfg.Reg.gpr_s` ->
+/// `gpr_signed`), or "".
+pub fn prog_const_name(p: Program, e: i64) -> str {
+    let n = const_node(p, e, 0);
+    return if n >= 0 && kind(p.s, n) == nk_ident() { node_name(p.s, n) } else { "" };
+}
+
+/// A constant expression as text: a string's contents, a name, or an
+/// integer's digits (`Cfg.Hooks.receptor` -> `bind_receptor`); "" when it is
+/// none of these.
+pub fn prog_const_text(p: Program, e: i64) -> str {
+    let n = const_node(p, e, 0);
+    if n < 0 { return ""; }
+    let k = kind(p.s, n);
+    if k == nk_str() { return str_value(p.s, n); }
+    if k == nk_ident() { return node_name(p.s, n); }
+    if k == nk_int() { return f"{lit_value(p.s, n)}"; }
+    return "";
 }
 
 /// The integer a constant expression evaluates to, or none.
@@ -410,3 +589,99 @@ pub fn prog_const(p: Program, e: i64) -> i64? {
     if n >= 0 && kind(p.s, n) == nk_int() { return lit_value(p.s, n); }
     return none;
 }
+/// The seed token for engine calls.
+pub pure fn engine_token() -> str => "__engine";
+
+/// The text of a binding argument: `nameof(f)` is `f`, a string its value,
+/// a name itself.
+fn engine_arg_text(p: Program, n: i64) -> str {
+    let s = p.s;
+    let k = kind(s, n);
+    if k == nk_call() {
+        let ch = children(s, n);
+        return if ch.len() == 2 { engine_arg_text(p, ch[1]) } else { "" };
+    }
+    if k == nk_str() || k == nk_ident() { return node_name(s, n); }
+    // `Cfg.Hooks.receptor`, `33`: what the constant tables make of it.
+    return prog_const_text(p, n);
+}
+
+/// Every `__engine("<hook>", args..)` call of the linked program whose hook
+/// is a string: `[hook, args..]` as text. The program is walked once; the
+/// list is shared, so a caller must not change it.
+pub fn prog_engine_bindings(p: Program) -> List<List<str>> {
+    if p.engine_memo.len() == 0 { p.engine_memo.push(scan_engine_bindings(p)); }
+    return p.engine_memo[0];
+}
+
+fn is_bridge_bind_hook(name: str) -> bool {
+    return name == "bind_operator_fn"
+        || name == "bind_unit_literal"
+        || name == "bind_owned_elements"
+        || name == "bind_owned_payload"
+        || name == "bind_generator"
+        || name == "bind_try_protocol"
+        || name == "bind_lift"
+        || name == "bind_absent"
+        || name == "bind_membership"
+        || name == "bind_native_member"
+        || name == "bind_native_fn"
+        || name == "bind_native_method"
+        || name == "bind_native_property"
+        || name == "bind_native_value"
+        || name == "bind_type_query"
+        || name == "bind_operator_intrinsic"
+        || name == "bind_absent_test"
+        || name == "bind_range_index"
+        || name == "bind_slice_pattern"
+        || name == "bind_record_pattern"
+        || name == "bind_list_literal"
+        || name == "bind_list_splat"
+        || name == "bind_map_literal"
+        || name == "bind_format_spec"
+        || name == "bind_scalar_text"
+        || name == "bind_native_effect"
+        || name == "bind_enumerator";
+}
+
+fn scan_engine_bindings(p: Program) -> List<List<str>> {
+    let s = p.s;
+    var out: List<List<str>> = [];
+    let ident_kind = nk_ident();
+    let token = engine_token();
+    for n in nodes_of(s, nk_call()) {
+        // Most calls are not engine calls: their callee (the first present
+        // child) is looked at before their children are listed.
+        var c = lhs(s, n);
+        let end = c + rhs(s, n);
+        while c < end && s.extra[c] < 0 { c = c + 1; }
+        if c < end && kind(s, s.extra[c]) == ident_kind {
+            let cname = node_name(s, s.extra[c]);
+            if cname == token {
+                let ch = children(s, n);
+                if ch.len() >= 3 && kind(s, ch[0]) == ident_kind && node_name(s, ch[0]) == token && engine_arg_text(p, ch[1]) != "" {
+                    var row: List<str> = [];
+                    var i = 1;
+                    while i < ch.len() {
+                        row.push(engine_arg_text(p, ch[i]));
+                        i = i + 1;
+                    }
+                    out.push(row);
+                }
+            } else if is_bridge_bind_hook(cname) {
+                let ch = children(s, n);
+                if ch.len() >= 2 && kind(s, ch[0]) == ident_kind && node_name(s, ch[0]) == cname && engine_arg_text(p, ch[1]) != "" {
+                    var row: List<str> = [cname];
+                    var i = 1;
+                    while i < ch.len() {
+                        row.push(engine_arg_text(p, ch[i]));
+                        i = i + 1;
+                    }
+                    out.push(row);
+                }
+            }
+        }
+    }
+    return out;
+}
+

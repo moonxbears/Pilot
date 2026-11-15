@@ -1,0 +1,16 @@
+// A bare `ok(..)` / `err(..)` takes its type from the spot it is in, so its
+// argument must fit that type's payload (TYPE001) and its argument count
+// must match (CALL001).
+fn show(r: result<i64, str>) -> str => if r.is_ok { "ok" } else { r.err_val };
+
+fn half(n: i64) -> result<i64, str> {
+    if n % 2 == 1 { return err(1); }
+    return ok("half");
+}
+
+fn main() {
+    let a: result<i64, str> = ok(1, 2);
+    print(show(err(true)));
+    print(show(a));
+    print(show(half(2)));
+}

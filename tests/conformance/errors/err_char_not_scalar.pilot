@@ -1,0 +1,7 @@
+// A char holds a Unicode scalar value: 0xD800 is a surrogate, not a scalar
+// value, so casting it to a char stops the program.
+fn main() {
+    let n: i64 = 55296;
+    let c: char = n as char;
+    print(c);
+}

@@ -1,0 +1,2 @@
+error[ESCAPE003]: guard `held` is bound in `take` and is released when it ends; return the expression that makes the guard instead
+err_escape_guard_return.pilot:16:12

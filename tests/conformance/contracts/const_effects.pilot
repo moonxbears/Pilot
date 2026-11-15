@@ -1,0 +1,34 @@
+// Compile-time evaluation never changes what a program does. A function
+// with an effect (printing) runs on every call, even when it takes no
+// arguments; a function that never finishes is not run while compiling, so
+// the program still builds and runs (it never calls it).
+//
+// Expected output, worked by hand: `noisy()` prints "noisy" each of its two
+// calls, then their sum 2; the loop never runs (no arguments are given), so
+// "done" follows; `steady()` is 41 + 1 = 42.
+use std.env;
+
+fn noisy() -> i64 {
+    print("noisy");
+    return 1;
+}
+
+fn forever() -> i64 {
+    var i = 0;
+    while i >= 0 {
+        i = i + 1;
+        if i > 1000 { i = 0; }
+    }
+    return i;
+}
+
+fn steady() -> i64 => 41 + 1;
+
+fn main() {
+    print(noisy() + noisy());
+    if env.args().len() > 100 {
+        print(forever());
+    }
+    print("done");
+    print(steady());
+}

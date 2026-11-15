@@ -1,0 +1,8 @@
+// A constant never changes: calling a method that changes a list or map on
+// a constant is CONST001. Copy it into a variable first and change that.
+const PRIMES = [2, 3, 5];
+
+fn main() {
+    print(PRIMES.len());
+    PRIMES.push(7);
+}

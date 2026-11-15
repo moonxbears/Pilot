@@ -1,5 +1,0 @@
-// KNOWN BUG seed.hex_literal_u64: a hex literal above i64::MAX evaluates to 0.
-fn main() {
-    let x: u64 = 0xFFFFFFFFFFFFFFFF;
-    print(x);
-}

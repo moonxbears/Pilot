@@ -1,0 +1,21 @@
+// ALIAS001: the same place lent to a `var ref` parameter and passed to
+// another parameter of the same call.
+struct Pair {
+    pub left: List<i64>;
+    pub right: List<i64>;
+}
+
+fn move_all(var ref into: List<i64>, var ref from: List<i64>) {
+    while from.len() > 0 { into.push(from.pop()); }
+}
+
+fn refill(var ref p: Pair, var ref xs: List<i64>) {
+    while xs.len() > 0 { p.right.push(xs.pop()); }
+}
+
+fn main() {
+    var a = [1, 2];
+    move_all(a, a);
+    var p = Pair { left: [1], right: [2] };
+    refill(p, p.left);
+}

@@ -1,0 +1,27 @@
+// RFC 8259 section 7: `\u` escapes name UTF-16 code units; a parsed string
+// holds their Unicode scalars as UTF-8. Expected lengths are UTF-8 byte
+// counts (RFC 3629): U+00E9 is C3 A9, U+20AC is E2 82 AC, U+1F600 (the
+// surrogate pair D83D DE00) is F0 9F 98 80. `\b` and `\f` are bytes 8 and
+// 12. A lone surrogate is not a scalar; it becomes U+FFFD (EF BF BD), as a
+// WHATWG UTF-8 decoder does.
+use std.polyglot.transport.json;
+
+fn main() {
+    print((json_parse("\"caf\\u0065\"")?).str_val);
+    let cafe = (json_parse("\"caf\\u00e9\"")?).str_val;
+    print(cafe);
+    print(cafe.len());
+    let euro = (json_parse("\"\\u20ac\"")?).str_val;
+    print(euro);
+    print(euro.len());
+    let grin = (json_parse("\"\\ud83d\\ude00\"")?).str_val;
+    print(grin);
+    print(grin.len());
+    let ctl = (json_parse("\"a\\bb\\fc\"")?).str_val;
+    print(ctl.len());
+    print(ctl.byte_at(1));
+    print(ctl.byte_at(3));
+    let lone = (json_parse("\"x\\ud800y\"")?).str_val;
+    print(lone.len());
+    print(lone.byte_at(1));
+}

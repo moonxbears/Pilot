@@ -12,12 +12,40 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Prelude;
 use Pilot.Core.Option;
 use Pilot.Core.Result;
 
+// `f"{n:#_###}"`: the function an f-string hole's format pattern calls.
+use Pilot.Core.Format;
+
 // `List<T>`: the members written in Pilot over the engine's list
 // (`contains`, `add`, `clear`, `count`, enumeration).
 use Pilot.Core.Primitives.List;
 
+// `Generator<TItem, TSent>`: what calling a function that yields returns.
+use Pilot.Core.Generator;
+
 // `Pending<T>` / `pending(..)` and `[StandIn(..)]`: gaps kept in data.
 use Pilot.Core.Pending;
 
+// `assume(cond)` and `unreachable()`: facts the programmer states.
+use Pilot.Core.Hint;
+
+// `assert(cond)` / `assert(cond, note)`: conditions that must hold.
+use Pilot.Core.Assert;
+
+// `with arena a { .. }`: arena scopes.
+use Pilot.Core.Arena;
+
+// What native calls do besides giving their result (`pure`, `noalloc`).
+use Pilot.Core.NativeEffects;
+
+// `[Debug]`'s trace lines (`debug_trace_line`), which a traced function calls.
+use Pilot.Core.Debug;
+
+// `[Coverage]`'s counters and report, which a covered function calls.
+use Pilot.Core.Coverage;
+
 // `a union b`, `a intersect b` and `a except b` on sequences.
 use Pilot.Db.SetOps;
+
+use Pilot.Core.Reinterpret;
+
+use Pilot.Core.Primitives.Ast;

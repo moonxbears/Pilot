@@ -1,0 +1,2 @@
+error[ESCAPE002]: `Win` returned here borrows `b`, which is dropped when `leak` returns
+err_escape_view_return.pilot:19:12

@@ -21,7 +21,10 @@ use pilot_ast::{AstArena, NodeId, NodeKind};
 
 impl BytecodeCompiler {
     /// Postfix `expr?`.
+    /// A failure that leaves the function first drops the owned values the
+    /// drop plan lists for it.
     pub(crate) fn compile_try_propagate(&mut self, arena: &AstArena, inner: u32) -> u8 {
+        let exit_drops = std::mem::take(&mut self.pending_exit_drops);
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r = self.compile_node(arena, NodeId(inner));
@@ -34,6 +37,7 @@ impl BytecodeCompiler {
         if let Some(j) = failed {
             self.patch_to_here(j);
         }
+        self.emit_drops(arena, &exit_drops);
         self.emit_failure_exit(arena, dst);
         self.patch_to_here(done);
         self.release_to(mark);
@@ -43,15 +47,16 @@ impl BytecodeCompiler {
     /// Leaves with the failure in `r_fail`: to the innermost `try`'s catch
     /// clause, or out of the function.
     fn emit_failure_exit(&mut self, arena: &AstArena, r_fail: u8) {
+        let failure = crate::lower_defer::DeferExit::Failure;
         let Some(depth) = self.tries.last().map(|t| t.defer_depth) else {
-            self.emit_defers_above(arena, 0);
+            self.emit_defers_on(arena, 0, failure);
             self.emit(Opcode::Move, 0, r_fail, 0);
             self.emit(Opcode::Ret, 0, 0, 0);
             return;
         };
         let fail_reg = self.tries.last().map_or(0, |t| t.fail_reg);
         self.emit(Opcode::Move, fail_reg, r_fail, 0);
-        self.emit_defers_above(arena, depth);
+        self.emit_defers_on(arena, depth, failure);
         let jump = self.emit_jump(0);
         if let Some(t) = self.tries.last_mut() {
             t.fail_jumps.push(jump);
@@ -95,9 +100,24 @@ impl BytecodeCompiler {
         self.tries.pop().map(|t| t.fail_jumps).unwrap_or_default()
     }
 
-    /// Compiles a `catch` clause's body with its name bound to `fail_reg`.
+    /// Compiles a `catch` clause's body with its name bound to the failure in
+    /// `fail_reg`: a failed record's error (the try protocol's `failure`), or
+    /// the failure itself when it is not a record.
     fn compile_catch_clause(&mut self, arena: &AstArena, clause: NodeId, fail_reg: u8) -> u8 {
         let cn = *arena.node(clause);
+        let failure = pilot_parser::bootstrap_tables()
+            .try_protocol()
+            .map(|p| p.failure.clone())
+            .filter(|f| !f.is_empty() && self.method_owners.contains_key(f));
+        if let (true, Some(f)) = (cn.lhs != 0, failure) {
+            let mark = self.next_reg;
+            let r_type = self.emit_intrinsic("record_type", &[fail_reg]);
+            let plain = self.emit_branch(Opcode::JumpIfNull, r_type, 0);
+            let r_e = self.emit_method_call(arena, fail_reg, "", &f, &[]);
+            self.emit(Opcode::Move, fail_reg, r_e, 0);
+            self.patch_to_here(plain);
+            self.release_to(mark);
+        }
         let outer_slots = self.var_slots.clone();
         if cn.lhs != 0 {
             self.var_slots.insert(Self::name(arena, cn.lhs).to_string(), fail_reg);

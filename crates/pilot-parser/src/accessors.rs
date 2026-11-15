@@ -31,9 +31,16 @@ impl Parser<'_> {
             if self.at(TokenKind::RBrace) || self.at_end() {
                 break;
             }
-            let _ = self.parse_mods(true);
+            let mods_span = self.span();
+            if self.parse_mods(true).is_non_empty() {
+                let msg = "a modifier on one accessor (`priv set`) is not built yet; it applies to the whole property";
+                self.arena.diagnostics.push((mods_span, msg.into()));
+            }
             let is_getter = self.is_rec(GETTER_RECEPTOR);
             if !is_getter && !self.is_rec(SETTER_RECEPTOR) {
+                let found = self.text().to_string();
+                let msg = format!("an accessor block holds `get` and `set` clauses, found `{found}`");
+                self.arena.diagnostics.push((self.span(), msg));
                 self.advance();
                 continue;
             }

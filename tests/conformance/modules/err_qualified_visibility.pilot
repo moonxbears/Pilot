@@ -1,0 +1,7 @@
+use lib.vault as v;
+
+fn main() {
+    println(f"{v.secret()}");
+    println(f"{v.hidden()}");
+    println(f"{v.shared()}");
+}

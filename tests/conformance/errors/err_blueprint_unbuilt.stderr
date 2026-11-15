@@ -1,0 +1,2 @@
+error[SEAM001]: unconnected seam `keyword.unbuilt`
+`blueprint` is registered but not built yet

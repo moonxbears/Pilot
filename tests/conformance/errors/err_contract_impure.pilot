@@ -1,0 +1,14 @@
+// A contract clause is a fact about the values, so it must not change
+// anything or call a function that might (DBC002).
+var calls = 0;
+
+fn note() -> bool {
+    calls = calls + 1;
+    return true;
+}
+
+fn twice(x: i64) -> i64 requires(note()) => x * 2;
+
+fn main() {
+    print(twice(3));
+}

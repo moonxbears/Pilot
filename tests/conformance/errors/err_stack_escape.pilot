@@ -1,0 +1,23 @@
+// STACK001: a `[Stack]` value lives in its function's frame, so it cannot
+// be returned, moved into another binding, or captured by a closure.
+fn make() -> List<i64> {
+    [Stack] let buf = [1, 2];
+    return buf;
+}
+
+fn keep() -> usize {
+    [Stack] let buf = [3];
+    let other = buf;
+    return other.len();
+}
+
+fn later() -> () => usize {
+    [Stack] let buf = [4];
+    return () => buf.len();
+}
+
+fn main() {
+    print(make().len());
+    print(keep());
+    print(later()());
+}

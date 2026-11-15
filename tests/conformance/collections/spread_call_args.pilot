@@ -1,0 +1,29 @@
+// `f(*xs)` spreads a sequence over the parameters the other arguments
+// leave, one item each; `splat(xs)` is the readable spelling.
+//
+// Expected output, worked by hand:
+//   sum3(*[1, 2, 3]) = 6; label("s", *(4, 5)) = "s:9".
+//   sum3(1, *[2, 3]) = 1 + 2 + 3 = 6; sum3(splat(t)) = 6.
+//   the spread value is read once: next() is called one time, so calls = 1.
+var calls = 0;
+
+fn next() -> List<i64> {
+    calls = calls + 1;
+    return [10, 20, 30];
+}
+
+fn sum3(a: i64, b: i64, c: i64) -> i64 => a + b + c;
+
+fn label(tag: str, a: i64, b: i64) -> str => f"{tag}:{a + b}";
+
+fn main() {
+    let t: List<i64> = [1, 2, 3];
+    print(sum3(*t));
+    let ab = (4, 5);
+    print(label("s", *ab));
+    let rest: List<i64> = [2, 3];
+    print(sum3(1, *rest));
+    print(sum3(splat(t)));
+    print(sum3(*next()));
+    print(calls);
+}

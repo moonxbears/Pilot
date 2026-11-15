@@ -1,0 +1,6 @@
+// `$a` splices into a quote; outside one it is an error (QUOTE003), not a
+// plain read of `a`.
+fn main() {
+    let a = 4;
+    print($a);
+}

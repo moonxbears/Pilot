@@ -1,0 +1,2 @@
+error[SYN001]: SyntaxError: f-string hole `{,x}` does not start with an expression
+err_fstring_empty_hole_after_comma.pilot:4:11

@@ -1,0 +1,13 @@
+// A `push` onto a list held by a top-level `let` must stay in the list: the
+// binding names one list, so its length after one push is 1. The seed reads
+// the global's initializer `[]` afresh at each use and prints 0; PilIR's
+// interpreter and the emitted C print 1. A `Map` global keeps its entries.
+let stack: List<i64> = [];
+let m = Map<str, i64>();
+
+fn main() {
+    stack.push(3);
+    print(stack.len());
+    m.set("a", 1);
+    print(m.len());
+}

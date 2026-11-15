@@ -1,0 +1,8 @@
+error[ALIAS001]: `a` is also lent to `var ref` parameter `into` of `move_all`; a `var ref` argument must be the only way the call reaches its value
+err_alias_var_ref.pilot:18:17
+error[ALIAS001]: `a` is also lent to `var ref` parameter `from` of `move_all`; a `var ref` argument must be the only way the call reaches its value
+err_alias_var_ref.pilot:18:14
+error[ALIAS001]: `p.left` is also lent to `var ref` parameter `p` of `refill`; a `var ref` argument must be the only way the call reaches its value
+err_alias_var_ref.pilot:20:15
+error[ALIAS001]: `p` is also lent to `var ref` parameter `xs` of `refill`; a `var ref` argument must be the only way the call reaches its value
+err_alias_var_ref.pilot:20:12

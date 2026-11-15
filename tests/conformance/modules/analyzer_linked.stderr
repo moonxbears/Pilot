@@ -1,0 +1,4 @@
+warning[UNIMP003]: Struct 'Polite' does not implement required interface method 'farewell' of interface 'IGreeter'
+analyzer_linked.pilot:7:1
+error[TYPE006]: `Polite` does not provide what its interfaces require: `farewell` (IGreeter)
+analyzer_linked.pilot:7:1

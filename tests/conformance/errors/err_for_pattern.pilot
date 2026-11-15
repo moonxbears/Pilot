@@ -1,0 +1,9 @@
+// SYN001: `for (a, b) in ps` would take each element apart; the pattern is
+// not built, and used to vanish (then `a` was an undefined name).
+fn main() {
+    let ps: List<List<i64>> = [[1, 2], [3, 4]];
+    // `(a, b)` starts at line 6, column 9.
+    for (a, b) in ps {
+        print(a + b);
+    }
+}

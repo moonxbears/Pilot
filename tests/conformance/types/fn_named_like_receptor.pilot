@@ -1,0 +1,27 @@
+// A function the file declares keeps its name even when the standard
+// library binds that word to syntax: `c`, `js` and `sql` open inline foreign
+// blocks, and `pairs` / `flat` are the readable unpacking words. Declared
+// here, they are plain functions, and calls reach them.
+//
+// Expected output, worked by hand:
+//   c() = 3; js(4) = 4 + 1 = 5; sql(2, 5) = 2 * 5 = 10.
+//   pairs(6) = [6, 6]; flat([1, 2, 3]) = 3 (its length).
+fn c() -> i64 => 3;
+
+fn js(n: i64) -> i64 => n + 1;
+
+fn sql(a: i64, b: i64) -> i64 {
+    return a * b;
+}
+
+fn pairs(n: i64) -> List<i64> => [n, n];
+
+fn flat(xs: List<i64>) -> i64 => xs.len();
+
+fn main() {
+    print(c());
+    print(js(4));
+    print(sql(2, 5));
+    print(pairs(6));
+    print(flat([1, 2, 3]));
+}

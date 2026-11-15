@@ -1,0 +1,75 @@
+// ==============================================================================
+// FILE: selfhost/check/attr_text.pilot
+// Reading attribute arguments and statements from source text.
+// ==============================================================================
+// The seed parser keeps an attribute's argument values but not the names
+// written before them (`[Debug(changed_only: true)]` keeps `true`). The name
+// is still in the source, right before the value; these helpers read it
+// there, and give a statement's text and line as a trace shows them. The
+// type checker (selfhost/check/probes.pilot) and the CLI's compile-time runs
+// (selfhost/cli/comptime_tool.pilot) both use them.
+pub lvl(0) pkg Pilot.SelfHost.Check.AttrText;
+
+fn is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
+
+fn is_word_byte(b: i64) -> bool =>
+    (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+
+/// The name written before the attribute argument that starts at byte `at`
+/// of `text` (`changed_only` in `changed_only: true`), or "" for an argument
+/// given by position.
+pub fn attr_label_before(text: str, at: i64) -> str {
+    var i = at;
+    while i > 0 && is_space(text.byte_at(i - 1)) { i = i - 1; }
+    // `name: value`, but not the `::` of a `::Variant` value.
+    if i == 0 || text.byte_at(i - 1) != 58 { return ""; }
+    if i >= 2 && text.byte_at(i - 2) == 58 { return ""; }
+    i = i - 1;
+    while i > 0 && is_space(text.byte_at(i - 1)) { i = i - 1; }
+    let end = i;
+    while i > 0 && is_word_byte(text.byte_at(i - 1)) { i = i - 1; }
+    return text.slice(i, end);
+}
+
+/// Where the word written right before byte `at` of `text` starts (the
+/// `var` of `var x = 1`, whose node starts at its name), or `at` when white
+/// space and a word do not come right before it.
+pub fn attr_word_start_before(text: str, at: i64) -> i64 {
+    var i = at;
+    while i > 0 && is_space(text.byte_at(i - 1)) { i = i - 1; }
+    let end = i;
+    while i > 0 && is_word_byte(text.byte_at(i - 1)) { i = i - 1; }
+    return if i < end && end < at { i } else { at };
+}
+
+/// `text` on one line: each run of white space made one space, without
+/// white space at either end or a final `;`.
+pub fn attr_one_line(text: str) -> str {
+    var out = "";
+    var gap = false;
+    var i = 0;
+    while i < text.len() {
+        let b = text.byte_at(i);
+        if is_space(b) {
+            gap = out.len() > 0;
+        } else {
+            if gap { out = out + " "; }
+            gap = false;
+            out = out + text.slice(i, i + 1);
+        }
+        i = i + 1;
+    }
+    if out.ends_with(";") { out = out.slice(0, out.len() - 1); }
+    return out;
+}
+
+/// The line (from 1) of byte `at` of `text`.
+pub fn attr_line_at(text: str, at: i64) -> i64 {
+    var line = 1;
+    var i = 0;
+    while i < at && i < text.len() {
+        if text.byte_at(i) == 10 { line = line + 1; }
+        i = i + 1;
+    }
+    return line;
+}

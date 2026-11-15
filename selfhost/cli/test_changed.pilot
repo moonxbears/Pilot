@@ -1,0 +1,467 @@
+// ==============================================================================
+// FILE: selfhost/cli/test_changed.pilot
+// `pilot test --changed [--since <rev>]`: run only the cases a change reaches.
+// ==============================================================================
+// The changed files are what `git diff --name-only <rev>` lists (the working
+// tree against `<rev>`, `HEAD` by default; `A..B` compares two commits) and,
+// when comparing with the working tree, the untracked files git does not
+// ignore. Each changed file reaches cases as follows, the first rule that
+// applies winning:
+//
+// * a source of the tool the mode runs (the type checker for every mode, the
+//   lowerer for `--ir`, the emitter for `--emit <lang>`), or of the CLI itself,
+//   reaches every case: the tool behaves differently for all of them;
+// * a path in `change_rules()` reaches every case of the modes its rule
+//   names, or none (the gate's ledgers, documentation, a seed crate's own
+//   `tests/`, which `cargo test` runs);
+// * an expectation file of a case (`<name>.stdout`, `.stderr`, `.exit`,
+//   `.args`, `.stdin`) reaches that case;
+// * a `.pilot` file that no longer declares the package it declared (the
+//   `pkg` line was removed or renamed, or the file was deleted) reaches every
+//   case whose loader looks for packages there, whatever the case links
+//   now: under `tests/` the cases of the directories above the file,
+//   anywhere else every case;
+// * a `.pilot` file reaches every case that links it, as the loader resolves
+//   the case's `use` declarations (selfhost/loader/link_lines.pilot);
+// * a deleted expectation file under `tests/` whose program is not a case
+//   any more reaches none;
+// * a `.pilot` file under `tests/` that no case links reaches none;
+// * anything else (a stdlib file no case links, an engine file the rules do
+//   not name) may reach anything, so it reaches every case.
+//
+// A case that does not link (its loader reports a problem) is always run.
+// `--changed` runs from the toolchain root, the directory holding `stdlib/`.
+pub lvl(0) pkg Pilot.SelfHost.Cli.TestChanged;
+
+use Pilot.Core.File;
+use std.proc;
+use std.text;
+use Pilot.SelfHost.Cli.Host;
+use Pilot.SelfHost.Cli.TestCmd;
+
+/// Which engine the cases run on.
+pub enum TestEngine : u8 {
+    Seed,
+    Ir,
+    Emit,
+}
+
+/// The modes of `pilot test` a changed path reaches.
+pub enum ChangeReach : u8 {
+    /// Every case in every mode.
+    Everything,
+    /// Every case of `--ir` and of every `--emit`.
+    LoweredModes,
+    /// Every case of `--emit <lang>` (any language when the rule names none).
+    EmitModes,
+    /// No case: it is checked elsewhere or is not code.
+    Nothing,
+}
+
+/// A path prefix and the modes a change under it reaches.
+pub struct ChangeRule : IValue {
+    pub prefix: str;
+    pub reach: ChangeReach;
+    /// For `EmitModes`: the language, or "" for every language.
+    pub lang: str;
+}
+
+fn rule(prefix: str, reach: ChangeReach, lang: str) -> ChangeRule => ChangeRule { prefix: prefix, reach: reach, lang: lang };
+
+/// The rules for paths that are not a case's own files, longest prefix
+/// winning. Emitter dialects `selfhost/transpile/emit_<lang>.pilot` reach
+/// `--emit <lang>` only (`dialect_lang`).
+pub fn change_rules() -> List<ChangeRule> => [
+    rule("crates/", ChangeReach::Everything, ""),
+    rule("Cargo.toml", ChangeReach::Everything, ""),
+    rule("Cargo.lock", ChangeReach::Everything, ""),
+    rule(".cargo/", ChangeReach::Everything, ""),
+    rule("selfhost/cli/", ChangeReach::Everything, ""),
+    rule("selfhost/loader/", ChangeReach::Everything, ""),
+    rule("selfhost/diagnostics/", ChangeReach::Everything, ""),
+    rule("selfhost/check/", ChangeReach::Everything, ""),
+    rule("selfhost/ir/", ChangeReach::LoweredModes, ""),
+    rule("selfhost/transpile/", ChangeReach::EmitModes, ""),
+    rule("runtime/c/", ChangeReach::EmitModes, "c"),
+    rule("selfhost/gate/", ChangeReach::Nothing, ""),
+    // No tool of `pilot test` links a file of it (a file a tool list names is
+    // a tool source, which is checked before these rules); the milestone
+    // tests under `crates/` run it.
+    rule("selfhost/perceus/", ChangeReach::Nothing, ""),
+    rule("benchmarks/", ChangeReach::Nothing, ""),
+    rule("docs/", ChangeReach::Nothing, ""),
+];
+
+/// The file extensions of documentation, which no case runs.
+fn is_document(path: str) -> bool => path.ends_with(".md") || path.ends_with(".txt");
+
+/// Whether `path` is a test of a seed crate (`crates/<crate>/tests/..`). It
+/// is run by `cargo test`, and no conformance case goes through it.
+fn is_crate_test(path: str) -> bool => path.starts_with("crates/") && path.contains("/tests/");
+
+/// The language of emitter dialect `path` (`selfhost/transpile/emit_<lang>.pilot`), or none.
+fn dialect_lang(path: str) -> str? {
+    let head = "selfhost/transpile/emit_";
+    if !path.starts_with(head) || !path.ends_with(".pilot") { return none; }
+    return path.slice(head.len(), path.len() - 6);
+}
+
+/// Whether a change that reaches `reach` (for `lang`) reaches the cases of
+/// engine `engine` emitting `mode_lang`.
+fn reaches(reach: ChangeReach, lang: str, engine: TestEngine, mode_lang: str) -> bool {
+    if reach == ChangeReach::Everything { return true; }
+    if reach == ChangeReach::LoweredModes { return engine != TestEngine::Seed; }
+    if reach == ChangeReach::EmitModes { return engine == TestEngine::Emit && (lang == "" || lang == mode_lang); }
+    return false;
+}
+
+/// The rule with the longest prefix of `path`, or none.
+fn rule_for(path: str) -> ChangeRule? {
+    var best = -1;
+    var best_len = 0;
+    let rules = change_rules();
+    var i = 0;
+    while i < rules.len() {
+        let p = rules[i].prefix;
+        if path.starts_with(p) && p.len() > best_len {
+            best = i;
+            best_len = p.len();
+        }
+        i = i + 1;
+    }
+    if best < 0 { return none; }
+    return rules[best];
+}
+
+/// The expectation-file extensions of a case.
+fn expectation_exts() -> List<str> => [".stdout", ".stderr", ".exit", ".args", ".stdin"];
+
+/// Whether `path` has an expectation-file extension.
+fn is_expectation(path: str) -> bool {
+    for ext in expectation_exts() {
+        if path.ends_with(ext) { return true; }
+    }
+    return false;
+}
+
+/// What `git` reports changed: the files, or why it could not say.
+pub struct GitChanges : IObject {
+    pub files: List<str>;
+    pub problem: str?;
+}
+
+/// The files `git` reports changed against `since`. Untracked files count
+/// when comparing with the working tree. (The CLI links no `res`.)
+pub fn changed_files(since: str) -> GitChanges {
+    let out = GitChanges { files: [], problem: none };
+    let diff = proc.run("git", ["diff", "--name-only", since], "");
+    if diff.exit_code != 0 {
+        out.problem = f"`git diff --name-only {since}` failed: {diff.stderr.trim()}";
+        return out;
+    }
+    for line in test_lines(diff.stdout) {
+        if line.len() > 0 { out.files.push(line); }
+    }
+    if since.find("..", 0) < 0 {
+        let extra = proc.run("git", ["ls-files", "--others", "--exclude-standard"], "");
+        if extra.exit_code != 0 {
+            out.problem = f"`git ls-files --others` failed: {extra.stderr.trim()}";
+            return out;
+        }
+        for line in test_lines(extra.stdout) {
+            if line.len() > 0 { out.files.push(line); }
+        }
+    }
+    return out;
+}
+
+/// What each case links, by case: `programs[i]` links `links[i]` (none when
+/// it does not link).
+struct LinkTable : IObject {
+    programs: List<str>;
+    links: List<List<str>?>;
+}
+
+/// The tool that answers which files a program links.
+fn link_tool_files() -> List<str> => [
+    "stdlib/core/bridge_lang.pilot",
+    "stdlib/core/os_abi.pilot",
+    "stdlib/core/host_raw.pilot",
+    "stdlib/core/builtins/native_calls.pilot",
+    "stdlib/core/file.pilot",
+    "stdlib/std/text.pilot",
+    "selfhost/diagnostics/model.pilot",
+    "selfhost/loader/module_graph.pilot",
+    "selfhost/loader/link_lines.pilot",
+];
+
+/// Asks the loader what each of `programs` links, resolving packages from
+/// the working directory.
+fn link_table(programs: List<str>) -> LinkTable {
+    let table = LinkTable { programs: [], links: [] };
+    if programs.len() == 0 { return table; }
+    let entries = text.join_text(programs, "|");
+    let answer = host_tool(link_tool_files(), f"mg_link_lines(\"{entries}\", \".\");");
+    for line in test_lines(answer) {
+        let fields = text.split_text(line, "\t");
+        if fields.len() == 0 || fields[0].len() == 0 { continue; }
+        table.programs.push(fields[0]);
+        if fields.len() == 2 && fields[1] == "!" {
+            table.links.push(none);
+        } else {
+            var files: List<str> = [];
+            var k = 1;
+            while k < fields.len() {
+                files.push(fields[k]);
+                k = k + 1;
+            }
+            table.links.push(files);
+        }
+    }
+    return table;
+}
+
+/// Where the earlier text of changed files is written for the loader to read.
+fn earlier_dir() -> str => "target/test-changed";
+
+/// The revision the changes are measured from: the left side of `A..B`, or
+/// `since` itself.
+fn earlier_rev(since: str) -> str {
+    let dots = since.find("..", 0);
+    return if dots < 0 { since } else { since.slice(0, dots) };
+}
+
+/// The package each of `files` declares, as the loader reads it ("" for
+/// none, or for a file that is not there).
+fn packages_of(files: List<str>) -> List<str> {
+    var out: List<str> = [];
+    if files.len() == 0 { return out; }
+    let entries = text.join_text(files, "|");
+    let answer = host_tool(link_tool_files(), f"mg_package_lines(\"{entries}\");");
+    let lines = test_lines(answer);
+    for i in 0 .. files.len() {
+        var pkg = "";
+        if i < lines.len() {
+            let tab = lines[i].find("\t", 0);
+            if tab >= 0 { pkg = lines[i].slice(tab + 1, lines[i].len()); }
+        }
+        out.push(pkg);
+    }
+    return out;
+}
+
+/// The files among `changed` (`.pilot` files) that declared a package at
+/// `rev` and do not declare that package now.
+fn repackaged(changed: List<str>, rev: str) -> List<str> {
+    var sources: List<str> = [];
+    var earlier: List<str> = [];
+    for f in changed {
+        if !f.ends_with(".pilot") { continue; }
+        let old = proc.run("git", ["show", f"{rev}:{f}"], "");
+        let copy = f"{earlier_dir()}/{sources.len()}.pilot";
+        // A file that was not there declared nothing.
+        let _ = File.write_text(copy, if old.exit_code == 0 { old.stdout } else { "" });
+        sources.push(f);
+        earlier.push(copy);
+    }
+    let now = packages_of(sources);
+    let before = packages_of(earlier);
+    var out: List<str> = [];
+    for i in 0 .. sources.len() {
+        // A file that declared no package was linked only as an entry; what
+        // it declares now reaches the cases that link it now.
+        if before[i] != "" && now[i] != before[i] { out.push(sources[i]); }
+    }
+    return out;
+}
+
+/// The directory of `path`, with its final `/` ("" at the top).
+fn dir_prefix(path: str) -> str {
+    var at = path.len();
+    while at > 0 && path.slice(at - 1, at) != "/" { at = at - 1; }
+    return path.slice(0, at);
+}
+
+/// Which of `programs` the changes reach.
+pub struct ChangeSelection : IObject {
+    /// Every case is reached, because of `why`.
+    pub everything: bool;
+    pub why: str;
+    pub picked: List<str>;
+}
+
+/// The cases among `programs` that `changed` reaches when they run on
+/// `engine` (emitting `mode_lang`), where `tool_sources` are the sources of
+/// the tools that mode runs.
+pub fn select_cases(changed: List<str>, programs: List<str>, engine: TestEngine, mode_lang: str, tool_sources: List<str>, moved: List<str>) -> ChangeSelection {
+    let sel = ChangeSelection { everything: false, why: "", picked: [] };
+    // The CLI's own sources, as the loader resolves them, when the CLI is in
+    // this tree.
+    var asked: List<str> = [];
+    for p in programs { asked.push(p); }
+    let cli = cli_entry();
+    if File.exists(cli) { asked.push(cli); }
+    let table = link_table(asked);
+    var cli_sources: List<str> = [];
+    let at = index_of(table.programs, cli);
+    if at >= 0 {
+        if some files = table.links[at] { cli_sources = files; }
+    }
+    var wanted: List<bool> = [];
+    for p in programs { wanted.push(false); }
+    // A case that does not link is always run.
+    var i = 0;
+    while i < table.programs.len() {
+        let k = index_of(programs, table.programs[i]);
+        if k >= 0 && table.links[i] == none { wanted[k] = true; }
+        i = i + 1;
+    }
+    // A file whose package changed: every case that searches its directory.
+    for f in moved {
+        if !f.starts_with("tests/") {
+            sel.everything = true;
+            sel.why = f"the package `{f}` declares changed";
+            return sel;
+        }
+        for k in 0 .. programs.len() {
+            if f.starts_with(dir_prefix(programs[k])) { wanted[k] = true; }
+        }
+    }
+    for f in changed {
+        if is_document(f) || is_crate_test(f) { continue; }
+        if is_source_of(f, tool_sources) || is_source_of(f, cli_sources) {
+            sel.everything = true;
+            sel.why = f"`{f}` is a source of the tools this mode runs";
+            return sel;
+        }
+        if some lang = dialect_lang(f) {
+            if reaches(ChangeReach::EmitModes, lang, engine, mode_lang) {
+                sel.everything = true;
+                sel.why = f"`{f}` is the {lang} emitter";
+                return sel;
+            }
+            continue;
+        }
+        if some r = rule_for(f) {
+            if reaches(r.reach, r.lang, engine, mode_lang) {
+                sel.everything = true;
+                sel.why = f"`{f}` is under `{r.prefix}`, which reaches every case of this mode";
+                return sel;
+            }
+            continue;
+        }
+        var reached = false;
+        // An expectation file of a case.
+        for ext in expectation_exts() {
+            if f.ends_with(ext) {
+                let k = index_of(programs, f.slice(0, f.len() - ext.len()) + ".pilot");
+                if k >= 0 {
+                    wanted[k] = true;
+                    reached = true;
+                }
+            }
+        }
+        if reached { continue; }
+        // A deleted expectation file of a program that is not a candidate:
+        // only `pilot test` reads expectation files, each for its own
+        // program, and removing one cannot make a folder a case folder.
+        if is_expectation(f) && f.starts_with("tests/") && !File.exists(f) { continue; }
+        if f.ends_with(".pilot") {
+            i = 0;
+            while i < table.programs.len() {
+                let k = index_of(programs, table.programs[i]);
+                if some files = table.links[i] {
+                    if k >= 0 && index_of(files, f) >= 0 {
+                        wanted[k] = true;
+                        reached = true;
+                    }
+                }
+                i = i + 1;
+            }
+            if reached || f.starts_with("tests/") { continue; }
+        }
+        sel.everything = true;
+        sel.why = f"no rule says what `{f}` reaches";
+        return sel;
+    }
+    i = 0;
+    while i < programs.len() {
+        if wanted[i] { sel.picked.push(programs[i]); }
+        i = i + 1;
+    }
+    return sel;
+}
+
+/// The file the CLI's sources are linked from.
+fn cli_entry() -> str => "selfhost/cli/commands.pilot";
+
+/// Whether `path` is one of `sources`: a file named there, or a file under a
+/// directory named there.
+fn is_source_of(path: str, sources: List<str>) -> bool {
+    for s in sources {
+        if path == s { return true; }
+        if !s.ends_with(".pilot") && path.starts_with(s + "/") { return true; }
+    }
+    return false;
+}
+
+/// The position of `x` in `xs`, or -1.
+fn index_of(xs: List<str>, x: str) -> i64 {
+    var i = 0;
+    while i < xs.len() {
+        if xs[i] == x { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+/// The cases (programs with a `.stdout`) and unit-test files of `roots`, and
+/// on the seed the known-bug programs of each directory root.
+pub fn candidate_programs(roots: List<str>, engine: TestEngine) -> List<str> {
+    var out: List<str> = [];
+    for root in roots {
+        if root.ends_with(".pilot") {
+            out.push(root);
+            continue;
+        }
+        for p in test_programs_in(root) { out.push(p); }
+        if engine == TestEngine::Seed {
+            let bugs = (if root.ends_with("/") { root } else { root + "/" }) + test_known_bugs_dir();
+            for p in test_programs_in(bugs) { out.push(p); }
+        }
+    }
+    return out;
+}
+
+/// The outcome of choosing cases for `--changed`.
+pub struct ChangedPlan : IObject {
+    /// 0: run `paths`; 1: nothing to run; 2: an error (already reported).
+    pub action: i64;
+    pub paths: List<str>;
+}
+
+/// Chooses what `pilot test --changed` runs: the roots themselves when a
+/// change reaches every case, the cases it reaches otherwise. Prints why.
+pub fn plan_changed(since: str, roots: List<str>, engine: TestEngine, mode_lang: str, tool_sources: List<str>) -> ChangedPlan {
+    let given = if roots.len() == 0 { [test_default_dir()] } else { roots };
+    if !File.exists("stdlib/core") {
+        eprint("error: `pilot test --changed` runs from the toolchain root (the directory holding `stdlib/`)");
+        return ChangedPlan { action: 2, paths: [] };
+    }
+    let git = changed_files(since);
+    if some problem = git.problem {
+        eprint(f"error: {problem}");
+        return ChangedPlan { action: 2, paths: [] };
+    }
+    let changed = git.files;
+    let programs = candidate_programs(given, engine);
+    let sel = select_cases(changed, programs, engine, mode_lang, tool_sources, repackaged(changed, earlier_rev(since)));
+    if sel.everything {
+        print(f"CHANGED {changed.len()} files since {since}: {sel.why}; running every case");
+        return ChangedPlan { action: 0, paths: given };
+    }
+    print(f"CHANGED {changed.len()} files since {since}: {sel.picked.len()} of {programs.len()} cases reached");
+    for c in sel.picked { print(f"  {c}"); }
+    if sel.picked.len() == 0 { return ChangedPlan { action: 1, paths: [] }; }
+    return ChangedPlan { action: 0, paths: sel.picked };
+}

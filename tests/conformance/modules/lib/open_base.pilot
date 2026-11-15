@@ -1,0 +1,13 @@
+pkg lib.open_base;
+
+open interface IOpenGreeter {
+    pub pure fn greet() -> str => "base";
+}
+
+pub interface IClosedGreeter {
+    pub pure fn closed_greet() -> str => "closed";
+}
+
+open struct OpenBundle {
+    pub pure fn tag() -> i64 => 10;
+}

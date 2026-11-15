@@ -10,7 +10,7 @@
 use crate::BytecodeCompiler;
 use crate::PilVirtualMachine;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 

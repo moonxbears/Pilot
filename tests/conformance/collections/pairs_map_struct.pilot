@@ -1,0 +1,41 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+struct Bag : ISplatOperator<List<i64>>, IFlattenOperator<i64> {
+    items: List<i64>,
+    nested: List<List<i64>>,
+    pub pure fn unpack() -> List<i64> => self.items;
+    pub pure fn flat() -> slice<i64> => self.nested[0];
+}
+
+struct Config : IPairsOperator<Map<str, i64>> {
+    port: i64,
+    pub pure fn unpack_pairs() -> Map<str, i64> => ["port": self.port];
+}
+
+fn sum2(a: i64, b: i64) -> i64 => a + b;
+
+fn main() {
+    let base: Map<str, i64> = ["b": 2, "c": 3];
+    let m1: Map<str, i64> = ["a": 1, **base];
+    let m2: Map<str, i64> = [pairs(base), "z": 9];
+    let m3: Map<str, i64> = [**base];
+    println(f"{m1[\"a\"]} {m1[\"b\"]} {m1[\"c\"]}");
+    println(f"{m2[\"b\"]} {m2[\"z\"]} {m3[\"c\"]}");
+
+    let pt = Point { x: 10, y: 20 };
+    let m4: Map<str, i64> = { a: 5, **pt };
+    println(f"{m4[\"a\"]} {m4[\"x\"]} {m4[\"y\"]}");
+
+    let bag = Bag { items: [7, 8], nested: [[1, 2], [3]] };
+    let xs = [0, *bag, 9];
+    let ys = [*..bag, 4];
+    println(f"{xs.len()} {xs[1]} {xs[2]} {ys.len()} {ys[0]} {ys[1]}");
+    println(f"{sum2(*bag)}");
+
+    let cfg = Config { port: 8080 };
+    let m5: Map<str, i64> = ["host": 1, **cfg];
+    println(f"{m5[\"host\"]} {m5[\"port\"]}");
+}

@@ -1,0 +1,1 @@
+error[COMP003]: coalesce Field Type/Lattice/Mutability Mismatch for field 'id' (size 8 vs 1, lattice 0 vs 0)

@@ -1,0 +1,9 @@
+inner4 2
+drop inner4
+drop outer4
+after
+drop inner3
+caught with outer3
+drop outer3
+after
+end

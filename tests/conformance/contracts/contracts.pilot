@@ -1,0 +1,50 @@
+// Design by contract: `requires(cond)` is checked when the function is
+// entered, `ensures(r => cond)` when it returns, with `r` the value it
+// returns, and `old(e)` is `e`'s value at entry. A function that can fail
+// checks `ensures` only when it succeeds, with `r` the success value.
+//
+// Expected output, worked by hand:
+//   safe_div(7, 2) = 3 (3 * 2 = 6 <= 7 holds).
+//   clamp(15, 0, 10) = 10; clamp(-3, 0, 10) = 0; clamp(4, 0, 10) = 4.
+//   add(5): total 0 -> 5, returns 5 = old(total) + 5; add(2): 5 -> 7.
+//   digit(55) = 55 - 48 = 7; digit(65) fails (ensures is not checked) and
+//   the caller's fallback is -1.
+struct Fault : IValue {
+    pub code: i64;
+}
+
+var total = 0;
+
+fn safe_div(a: i64, b: i64) -> i64 requires(b != 0) ensures(r => r * b <= a) => a / b;
+
+fn clamp(x: i64, lo: i64, hi: i64) -> i64
+    requires(lo <= hi)
+    ensures(r => r >= lo && r <= hi)
+{
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    return x;
+}
+
+fn add(n: i64) -> i64 requires(n > 0) ensures(r => r == old(total) + n && total == r) {
+    total = total + n;
+    return total;
+}
+
+fn digit(c: i64) -> i64 ! Fault ensures(r => r >= 0 && r <= 9) {
+    if c < 48 || c > 57 { return res<i64, Fault>.err(Fault { code: c }); }
+    return c - 48;
+}
+
+fn main() {
+    print(safe_div(7, 2));
+    print(clamp(15, 0, 10));
+    print(clamp(-3, 0, 10));
+    print(clamp(4, 0, 10));
+    print(add(5));
+    print(add(2));
+    let d = digit(55) catch e => -1;
+    print(d);
+    let bad = digit(65) catch e => -1;
+    print(bad);
+}

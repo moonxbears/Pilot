@@ -1,17 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/pilot-arena",
     "crates/pilot-span",
     "crates/pilot-intern",
     "crates/pilot-ast",
     "crates/pilot-lexer",
     "crates/pilot-parser",
     "crates/pilot-analysis",
-    "crates/pilot-rt",
     "crates/pilot-vm",
-    "crates/pilot-codegen",
-    "crates/pilot-ffi",
     "crates/pilot-cli",
 ]
 

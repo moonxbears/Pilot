@@ -1,0 +1,12 @@
+// F6 benchmark: a tight integer loop.
+// i * i % 7 repeats 0, 1, 4, 2, 2, 4, 1 (sum 14) every 7 values of i, so
+// 49,000,000 values give 7,000,000 * 14 = 98,000,000.
+fn main() {
+    var total: i64 = 0;
+    var i: i64 = 0;
+    while i < 49000000 {
+        total = total + (i * i) % 7;
+        i = i + 1;
+    }
+    print(total);
+}

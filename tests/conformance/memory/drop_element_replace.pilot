@@ -1,0 +1,27 @@
+// F7: assigning an element of a list that owns its elements drops the
+// element it replaces, once the new value is made and before it is stored.
+// That holds through a `ref` parameter too: the list is the caller's, but
+// its old element is still thrown away.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn swap_first(ref rs: List<Res>, n: str) {
+    rs[0] = Res { name: n };
+}
+
+fn main() {
+    var rs: List<Res> = [Res { name: "a" }, Res { name: "b" }];
+    rs[0] = Res { name: "c" };
+    print("replaced");
+    print(rs[0].name);
+    swap_first(rs, "e");
+    print(rs[0].name);
+    rs[1] = Res { name: "d" };
+    print(rs.len());
+    print("end");
+}

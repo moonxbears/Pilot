@@ -1,0 +1,539 @@
+//! F7: dropping owned values where the drop plan says.
+//!
+//! The plan comes from the self-hosted checker (`selfhost/check/drops.pilot`),
+//! which knows the program's types; the seed only carries it out. Each entry
+//! names a statement or expression by its span and node kind:
+//!
+//! - `before` / `after`: drop the named locals before or after it runs;
+//! - `exit`: a `return`, `break` or `continue` drops them before it leaves
+//!   (after a returned value is computed);
+//! - `on_else`: an `if` without `else` drops them on its false path;
+//! - `replace`: an assignment drops the value its target held, after the
+//!   new value is made and before it is stored;
+//! - `flag` / `moved`: a binding moved on only some paths gets a drop flag,
+//!   set before the node runs (its declaration, or the body for a
+//!   parameter) and again by each assignment, and cleared after the node
+//!   where a move of it completes; its drops run only while it is set;
+//! - `guard`: a `let` binds a scoped guard, released when its block ends,
+//!   with the block's deferred statements (last in, first out);
+//! - `seams`: the node stops at a seam when it runs.
+//!
+//! Dropping a value calls its type's destructor, then drops the fields the
+//! type's glue lists, in order. Types are named only as the plan names them.
+
+use crate::instruction::Opcode;
+use crate::BytecodeCompiler;
+use pilot_ast::{AstArena, NodeId};
+use std::collections::HashMap;
+use crate::value::PilotVal;
+use std::rc::Rc;
+
+/// What a row of the drop plan says, numbered as `DropAction` in
+/// `selfhost/check/drops.pilot` numbers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropAction {
+    Glue = 0,
+    Before = 1,
+    After = 2,
+    Exit = 3,
+    Else = 4,
+    Guard = 5,
+    Seam = 6,
+    Copy = 7,
+    CopyGlue = 8,
+    Replace = 9,
+    Flag = 10,
+    Moved = 11,
+    Discard = 12,
+    ReplaceElement = 13,
+    /// The node is a method-call receiver of the named type.
+    ReceiverType = 14,
+    /// The node is arithmetic whose result has the named numeric type.
+    NumericType = 15,
+    /// The node is `x is T`: the kind of value `T` holds, and `T`'s name.
+    TypeTest = 16,
+    /// The node is `xs as view T`: the function that builds the view, and
+    /// the integers it takes after `xs`, separated by spaces.
+    ViewCast = 17,
+    /// The node is `quote { .. }`: the function that decodes its tree, and
+    /// the tree's wire.
+    QuoteBuild = 18,
+    /// The node is a hole `$x` of a quote: the function that fills it, and
+    /// the one that makes its value a literal tree first, or "".
+    QuoteHole = 19,
+}
+
+impl DropAction {
+    pub fn from_code(code: i64) -> Option<Self> {
+        [
+            Self::Glue,
+            Self::Before,
+            Self::After,
+            Self::Exit,
+            Self::Else,
+            Self::Guard,
+            Self::Seam,
+            Self::Copy,
+            Self::CopyGlue,
+            Self::Replace,
+            Self::Flag,
+            Self::Moved,
+            Self::Discard,
+            Self::ReplaceElement,
+            Self::ReceiverType,
+            Self::NumericType,
+            Self::TypeTest,
+            Self::ViewCast,
+            Self::QuoteBuild,
+            Self::QuoteHole,
+        ]
+            .into_iter()
+            .find(|a| *a as i64 == code)
+    }
+}
+
+/// A node of the program, by its span and kind.
+pub type NodeKey = (u32, u32, u16);
+
+/// A local to drop, and the type its glue is listed under.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DropItem {
+    pub binding: String,
+    pub ty: String,
+}
+
+/// How to drop a value of one type: the type whose destructor runs (none
+/// when it has none), then each field to drop with the field's type, then,
+/// for a collection that owns its elements, each element, and for an
+/// optional, its payload when there is one.
+#[derive(Clone, Debug, Default)]
+pub struct DropGlue {
+    pub destructor_owner: Option<String>,
+    pub fields: Vec<(String, String)>,
+    pub elements: Option<DropElements>,
+    /// For a value the engine holds as its payload itself or as none: the
+    /// payload's type as the glue lists it, and the operation testing for
+    /// none.
+    pub payload: Option<(String, String)>,
+}
+
+/// The elements a collection owns: their type as the glue lists it, and the
+/// engine operations that give the collection's length and its element at a
+/// position, after its sequence operation when it has one (all named by the
+/// plan).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DropElements {
+    pub ty: String,
+    pub len_op: String,
+    pub get_op: String,
+    /// The operation that first turns the collection into a list of its
+    /// elements (a map's values), when it is not walked as it is.
+    pub seq_op: Option<String>,
+}
+
+/// Where the program's owned values are dropped.
+#[derive(Clone, Debug, Default)]
+pub struct DropPlan {
+    pub before: HashMap<NodeKey, Vec<DropItem>>,
+    pub after: HashMap<NodeKey, Vec<DropItem>>,
+    pub exit: HashMap<NodeKey, Vec<DropItem>>,
+    pub on_else: HashMap<NodeKey, Vec<DropItem>>,
+    pub replace: HashMap<NodeKey, Vec<DropItem>>,
+    pub flag: HashMap<NodeKey, Vec<DropItem>>,
+    pub moved: HashMap<NodeKey, Vec<DropItem>>,
+    pub guard: HashMap<NodeKey, Vec<DropItem>>,
+    /// Seam id and note.
+    pub seams: HashMap<NodeKey, Vec<(String, String)>>,
+    pub glue: HashMap<String, DropGlue>,
+    /// Nodes whose value is copied, with the value type it is copied as.
+    pub copies: HashMap<NodeKey, String>,
+    /// Expression statements that throw away the owned value they make,
+    /// with the type it is dropped as.
+    pub discards: HashMap<NodeKey, String>,
+    /// Element assignments (`rs[i] = v`) that drop the element they
+    /// replace, with the collection's type as the glue lists it.
+    /// The operation that reads the element (none for a new key) comes
+    /// first, then the collection's type.
+    pub element_replace: HashMap<NodeKey, (String, String)>,
+    /// The value-type fields a copy of each value type copies too.
+    pub copy_glue: HashMap<String, Vec<(String, String)>>,
+    /// Method-call receivers, with the type the checker inferred for each
+    /// (selfhost/check/receivers.pilot). Dispatch reads one only where the
+    /// seed does not know the receiver's type itself.
+    pub receivers: HashMap<NodeKey, String>,
+    /// Arithmetic nodes whose result is narrower than the engine's own
+    /// numbers, with the type the checker inferred for each
+    /// (selfhost/check/numeric.pilot).
+    pub numeric: HashMap<NodeKey, String>,
+    /// `x is T` nodes, with the kind of value `T` holds and `T`'s name
+    /// (selfhost/check/numeric.pilot plan_type_tests).
+    pub type_tests: HashMap<NodeKey, (String, String)>,
+    /// `xs as view T` nodes, with the function that builds the view and
+    /// the integer arguments that follow `xs`
+    /// (selfhost/check/view_cast.pilot).
+    pub view_casts: HashMap<NodeKey, (String, Vec<i64>)>,
+    /// `quote { .. }` nodes, with the function that decodes the tree and
+    /// its wire (selfhost/check/quote_value.pilot).
+    pub quote_builds: HashMap<NodeKey, (String, String)>,
+    /// The holes of quotes, with the function that fills each and the one
+    /// that lifts its value first ("" for none).
+    pub quote_holes: HashMap<NodeKey, (String, String)>,
+}
+
+impl DropPlan {
+    pub fn is_empty(&self) -> bool {
+        self.before.is_empty()
+            && self.after.is_empty()
+            && self.exit.is_empty()
+            && self.on_else.is_empty()
+            && self.replace.is_empty()
+            && self.flag.is_empty()
+            && self.guard.is_empty()
+            && self.seams.is_empty()
+            && self.copies.is_empty()
+            && self.discards.is_empty()
+            && self.element_replace.is_empty()
+            && self.receivers.is_empty()
+            && self.numeric.is_empty()
+            && self.type_tests.is_empty()
+            && self.view_casts.is_empty()
+            && self.quote_builds.is_empty()
+            && self.quote_holes.is_empty()
+    }
+}
+
+/// What a block runs when it is left.
+#[derive(Clone, Debug)]
+pub(crate) enum Deferred {
+    /// A `defer` statement.
+    Stmt(NodeId),
+    /// An `errdefer` statement: run only when the block is left by a failure.
+    OnFailure(NodeId),
+    /// Releasing a scoped guard.
+    Drop(DropItem),
+    /// A probe the checker planned to run on the block's way out
+    /// (`lower_probe`).
+    Probe(crate::lower_probe::Probe),
+}
+
+/// The seams a drop plan may stop a node at, each with the start of the
+/// message it stops with; the plan's note about the node follows it.
+const PLAN_SEAMS: &[(&str, &str)] = &[
+    ("own.capture", "SEAM001: unconnected seam `own.capture`"),
+    ("own.collection_drop", "SEAM001: unconnected seam `own.collection_drop`"),
+];
+
+/// Glue nesting deeper than this is a planner error: a type that holds
+/// itself does so through an `opt`, a map or another generic, which the plan
+/// stops at `own.collection_drop`, or through a list, whose elements are
+/// dropped by a loop.
+const MAX_GLUE_DEPTH: usize = 32;
+
+fn key_of(arena: &AstArena, id: NodeId) -> NodeKey {
+    let span = arena.span(id);
+    (span.start, span.end, arena.node(id).kind)
+}
+
+impl BytecodeCompiler {
+    /// The type the checker inferred for method-call receiver `id`, if any.
+    pub(crate) fn planned_receiver(&self, arena: &AstArena, id: NodeId) -> Option<String> {
+        self.drop_plan.as_ref()?.receivers.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The numeric type the checker inferred for arithmetic node `id`, when
+    /// it is narrower than the engine's own numbers.
+    pub(crate) fn planned_numeric(&self, arena: &AstArena, id: NodeId) -> Option<String> {
+        self.drop_plan.as_ref()?.numeric.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The kind and type name the checker gives the `x is T` node `id`.
+    pub(crate) fn planned_type_test(&self, arena: &AstArena, id: NodeId) -> Option<(String, String)> {
+        self.drop_plan.as_ref()?.type_tests.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The function and integer arguments the checker planned for the
+    /// `xs as view T` node `id`.
+    pub(crate) fn planned_view_cast(&self, arena: &AstArena, id: NodeId) -> Option<(String, Vec<i64>)> {
+        self.drop_plan.as_ref()?.view_casts.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The decode function and wire the checker planned for quote `id`.
+    pub(crate) fn planned_quote(&self, arena: &AstArena, id: NodeId) -> Option<(String, String)> {
+        self.drop_plan.as_ref()?.quote_builds.get(&key_of(arena, id)).cloned()
+    }
+
+    /// The holes the checker planned inside quote `id`, in source order:
+    /// each hole node with its fill function and lift function ("" for
+    /// none). Every node a quote holds lies inside its span and was parsed
+    /// before it.
+    pub(crate) fn planned_quote_holes(&self, arena: &AstArena, id: NodeId) -> Vec<(NodeId, String, String)> {
+        let Some(plan) = self.drop_plan.as_ref() else { return Vec::new() };
+        if plan.quote_holes.is_empty() {
+            return Vec::new();
+        }
+        let span = arena.span(id);
+        let mut out: Vec<(NodeId, String, String)> = Vec::new();
+        for i in 0..id.0 {
+            let h = NodeId(i);
+            let s = arena.span(h);
+            if s.start < span.start || s.end > span.end {
+                continue;
+            }
+            if let Some((fill, lift)) = plan.quote_holes.get(&key_of(arena, h)) {
+                out.push((h, fill.clone(), lift.clone()));
+            }
+        }
+        out.sort_by_key(|(h, _, _)| arena.span(*h).start);
+        out
+    }
+
+    pub(crate) fn set_drop_plan(&mut self, plan: DropPlan) {
+        if !plan.is_empty() {
+            self.drop_plan = Some(Rc::new(plan));
+        }
+    }
+
+    fn plan_items(&self, id: NodeKey, pick: fn(&DropPlan) -> &HashMap<NodeKey, Vec<DropItem>>) -> Vec<DropItem> {
+        self.drop_plan
+            .as_ref()
+            .and_then(|p| pick(p).get(&id).cloned())
+            .unwrap_or_default()
+    }
+
+    /// Runs before node `id` is compiled: its seams, then its `before`
+    /// drops. A `return`, `break` or `continue` keeps its `exit` drops for
+    /// its own lowering.
+    pub(crate) fn drops_before(&mut self, arena: &AstArena, id: NodeId) {
+        if self.drop_plan.is_none() || id.is_none() {
+            return;
+        }
+        let key = key_of(arena, id);
+        let seams = self
+            .drop_plan
+            .as_ref()
+            .and_then(|p| p.seams.get(&key).cloned())
+            .unwrap_or_default();
+        if let Some((seam, note)) = seams.first() {
+            let message = match PLAN_SEAMS.iter().find(|(id, _)| id == seam) {
+                Some((_, head)) => format!("{head}: {note}"),
+                None => format!("internal error: the drop plan names `{seam}`, which is not a drop seam"),
+            };
+            self.emit_trap(message);
+        }
+        for item in self.plan_items(key, |p| &p.flag) {
+            let reg = match self.drop_flags.get(&item.binding) {
+                Some(&r) => r,
+                None => {
+                    let r = self.alloc_local_reg();
+                    self.drop_flags.insert(item.binding.clone(), r);
+                    r
+                }
+            };
+            self.set_drop_flag(reg, true);
+        }
+        let before = self.plan_items(key, |p| &p.before);
+        self.emit_drops(arena, &before);
+        let exit = self.plan_items(key, |p| &p.exit);
+        if !exit.is_empty() {
+            self.pending_exit_drops = exit;
+        }
+        let replace = self.plan_items(key, |p| &p.replace);
+        if !replace.is_empty() {
+            self.pending_replace = replace;
+        }
+    }
+
+    /// Takes the `replace` drops of the assignment about to be lowered; the
+    /// assignment emits them once its new value is made.
+    pub(crate) fn take_replace_drops(&mut self) -> Vec<DropItem> {
+        std::mem::take(&mut self.pending_replace)
+    }
+
+    /// Runs after node `id` is compiled: its `after` drops, and the guards
+    /// it binds join its block's deferred releases.
+    pub(crate) fn drops_after(&mut self, arena: &AstArena, id: NodeId) {
+        if self.drop_plan.is_none() || id.is_none() {
+            return;
+        }
+        let key = key_of(arena, id);
+        let after = self.plan_items(key, |p| &p.after);
+        self.emit_drops(arena, &after);
+        for item in self.plan_items(key, |p| &p.moved) {
+            if let Some(&reg) = self.drop_flags.get(&item.binding) {
+                self.set_drop_flag(reg, false);
+            }
+        }
+        for g in self.plan_items(key, |p| &p.guard) {
+            if let Some(scope) = self.defers.last_mut() {
+                scope.push(Deferred::Drop(g));
+            }
+        }
+    }
+
+    /// The value of node `id`, in register `r`, or its copy when the plan
+    /// copies it.
+    pub(crate) fn copy_if_planned(&mut self, arena: &AstArena, id: NodeId, r: u8) -> u8 {
+        let Some(ty) = self.drop_plan.as_ref().and_then(|p| p.copies.get(&key_of(arena, id)).cloned()) else {
+            return r;
+        };
+        self.emit_copy_value(r, &ty, 0)
+    }
+
+    /// When assignment `id` replaces an element its collection owns, drops
+    /// the element at `r_key` of the collection in `r_obj`, if there is one.
+    pub(crate) fn drop_replaced_element(&mut self, arena: &AstArena, id: NodeId, r_obj: u8, r_key: u8) {
+        let Some((lookup, ty)) = self.drop_plan.as_ref().and_then(|p| p.element_replace.get(&key_of(arena, id)).cloned())
+        else {
+            return;
+        };
+        let Some(el) = self.drop_plan.as_ref().and_then(|p| p.glue.get(&ty)).and_then(|g| g.elements.clone()) else {
+            return;
+        };
+        let mark = self.next_reg;
+        let r_old = self.emit_intrinsic(&lookup, &[r_obj, r_key]);
+        let absent = self.emit_branch(Opcode::JumpIfNull, r_old, 0);
+        self.emit_drop_value(r_old, &el.ty, 0);
+        self.patch_to_here(absent);
+        self.release_to(mark);
+    }
+
+    /// Drops the value in register `r` when node `id` is a statement that
+    /// throws it away.
+    pub(crate) fn drop_if_discarded(&mut self, arena: &AstArena, id: NodeId, r: u8) {
+        let Some(ty) = self.drop_plan.as_ref().and_then(|p| p.discards.get(&key_of(arena, id)).cloned()) else {
+            return;
+        };
+        self.emit_drop_value(r, &ty, 0);
+    }
+
+    /// A copy of the value in register `r`, of value type `ty`, in a new
+    /// register.
+    fn emit_copy_value(&mut self, r: u8, ty: &str, depth: usize) -> u8 {
+        // Every value type the plan copies has copy glue (even with no
+        // fields); a copy of any other type is a constant's, made deeply
+        // (selfhost/check/consts.pilot).
+        if self.drop_plan.as_ref().is_some_and(|p| !p.copy_glue.contains_key(ty)) {
+            return self.emit_intrinsic("value_clone", &[r]);
+        }
+        let copy = self.emit_intrinsic("record_copy", &[r]);
+        if depth > MAX_GLUE_DEPTH {
+            self.emit_trap(format!(
+                "internal error: the copy glue of `{ty}` nests more than {MAX_GLUE_DEPTH} levels of fields"
+            ));
+            return copy;
+        }
+        let fields = self.drop_plan.as_ref().and_then(|p| p.copy_glue.get(ty).cloned()).unwrap_or_default();
+        for (field, field_ty) in fields {
+            let mark = self.next_reg;
+            let rf = self.emit_member_read(copy, Some(ty), &field);
+            let rc = self.emit_copy_value(rf, &field_ty, depth + 1);
+            let rk = self.emit_const(crate::PilotVal::from_str(&field));
+            self.emit_intrinsic("map_set", &[copy, rk, rc]);
+            self.release_to(mark);
+        }
+        copy
+    }
+
+    /// The `on_else` drops of `if` node `id`.
+    pub(crate) fn else_drops(&self, arena: &AstArena, id: NodeId) -> Vec<DropItem> {
+        if self.drop_plan.is_none() {
+            return Vec::new();
+        }
+        self.plan_items(key_of(arena, id), |p| &p.on_else)
+    }
+
+    /// Emits the drops a `return`, `break` or `continue` makes as it leaves.
+    pub(crate) fn emit_exit_drops(&mut self, arena: &AstArena) {
+        let items = std::mem::take(&mut self.pending_exit_drops);
+        self.emit_drops(arena, &items);
+    }
+
+    /// Sets the drop flag in register `reg`.
+    fn set_drop_flag(&mut self, reg: u8, on: bool) {
+        let mark = self.next_reg;
+        let v = self.emit_const(crate::PilotVal::from_bool(on));
+        self.emit(crate::instruction::Opcode::Move, reg, v, 0);
+        self.release_to(mark);
+    }
+
+    /// Sets the drop flag of `binding` again, when it has one: an assignment
+    /// has stored a new value in it.
+    pub(crate) fn rearm_drop_flag(&mut self, binding: &str) {
+        if let Some(&reg) = self.drop_flags.get(binding) {
+            self.set_drop_flag(reg, true);
+        }
+    }
+
+    /// Drops each item's binding; a flagged binding only while its flag is
+    /// set.
+    pub(crate) fn emit_drops(&mut self, arena: &AstArena, items: &[DropItem]) {
+        for item in items {
+            let Some(&r) = self.var_slots.get(&item.binding) else {
+                continue;
+            };
+            let _ = arena;
+            let flag = self.drop_flags.get(&item.binding).copied();
+            let skip = flag.map(|f| self.emit_branch(Opcode::JumpIfFalse, f, 0));
+            self.emit_drop_value(r, &item.ty, 0);
+            if let Some(j) = skip {
+                self.patch_to_here(j);
+            }
+        }
+    }
+
+    /// Drops the value in register `r`, of the type the glue lists as `ty`.
+    fn emit_drop_value(&mut self, r: u8, ty: &str, depth: usize) {
+        let Some(glue) = self.drop_plan.as_ref().and_then(|p| p.glue.get(ty).cloned()) else {
+            return;
+        };
+        if depth > MAX_GLUE_DEPTH {
+            self.emit_trap(format!(
+                "internal error: the drop glue of `{ty}` nests more than {MAX_GLUE_DEPTH} levels of fields"
+            ));
+            return;
+        }
+        let mark = self.next_reg;
+        if let Some(owner) = &glue.destructor_owner {
+            let dtor = Self::destructor_name(owner);
+            self.emit_user_call(dtor.clone(), dtor, &[r]);
+        }
+        for (field, field_ty) in &glue.fields {
+            let rf = self.emit_member_read(r, Some(ty), field);
+            self.emit_drop_value(rf, field_ty, depth + 1);
+        }
+        if let Some(el) = &glue.elements {
+            self.emit_drop_elements(r, el, depth);
+        }
+        if let Some((payload_ty, absent_op)) = &glue.payload {
+            let r_none = self.emit_intrinsic(absent_op, &[r]);
+            let skip = self.emit_branch(Opcode::JumpIfTrue, r_none, 0);
+            self.emit_drop_value(r, payload_ty, depth + 1);
+            self.patch_to_here(skip);
+        }
+        self.release_to(mark);
+    }
+
+    /// Drops each element of the collection in register `r`, front to back.
+    fn emit_drop_elements(&mut self, r: u8, el: &DropElements, depth: usize) {
+        let r = match &el.seq_op {
+            Some(op) => self.emit_intrinsic(op, &[r]),
+            None => r,
+        };
+        let r_idx = self.alloc_reg();
+        let r_zero = self.emit_const(PilotVal::from_int(0));
+        self.emit(Opcode::Move, r_idx, r_zero, 0);
+        let r_len = self.emit_intrinsic(&el.len_op, &[r]);
+        let start = self.here();
+        let r_more = self.alloc_reg();
+        self.emit(Opcode::CmpLt, r_more, r_idx, r_len);
+        let exit = self.emit_branch(Opcode::JumpIfFalse, r_more, 0);
+        let mark = self.next_reg;
+        let r_item = self.emit_intrinsic(&el.get_op, &[r, r_idx]);
+        self.emit_drop_value(r_item, &el.ty, depth + 1);
+        self.release_to(mark);
+        let r_one = self.emit_const(PilotVal::from_int(1));
+        self.emit(Opcode::Add, r_idx, r_idx, r_one);
+        self.emit_jump(start);
+        self.patch_to_here(exit);
+    }
+}

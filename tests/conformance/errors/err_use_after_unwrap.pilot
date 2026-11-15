@@ -1,0 +1,21 @@
+// F7: unwrapping an optional (`if some y = c`) moves its payload out, so the
+// optional cannot be used afterwards (OWN001).
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn find(n: str) -> Res? => Res { name: n };
+
+fn look(ref _o: Res?) -> str => "looked";
+
+fn main() {
+    let c = find("c");
+    if some y = c {
+        print(y.name);
+    }
+    print(look(c));
+}

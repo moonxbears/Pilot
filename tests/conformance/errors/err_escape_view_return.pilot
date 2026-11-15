@@ -1,0 +1,24 @@
+// A view (lattice 0b01) cannot outlive what it borrows (ESCAPE002): `leak`
+// returns a window into `b`, a local that is dropped when `leak` returns.
+struct Buf : IObject {
+    pub data: List<i64>;
+    ~self() {
+        print("free buf");
+    }
+}
+
+struct Win : IReference {
+    pub start: i64;
+    pub len: i64;
+}
+
+fn window_of(ref b: Buf) -> Win => Win { start: 0, len: b.data.len() };
+
+fn leak() -> Win {
+    let b = Buf { data: [1, 2, 3] };
+    return window_of(b);
+}
+
+fn main() {
+    print(leak().len);
+}

@@ -1,0 +1,224 @@
+// =========================================================================
+// FILE: stdlib/core/reinterpret.pilot
+// `xs as view T`: THE ELEMENTS OF A SLICE OR LIST READ AS ANOTHER PRIMITIVE
+// =========================================================================
+// `xs as view T` reads the bytes of `xs` as elements of `T`, without
+// copying: `[-1, 7] as view u32` reads 4294967295 and 7, and a change to
+// the memory under `xs` shows in the view.
+//
+// - Same width: element `i` is the bits of `xs[i]`.
+// - Narrower `T` (`i32` as `u8`): each element of `xs` gives
+//   `width(E) / width(T)` elements, its lowest bits first (little-endian).
+// - Wider `T` (`u8` as `u32`): `width(T) / width(E)` elements of `xs` make
+//   one, the first in the lowest bits; elements left over at the end are
+//   not part of the view (as Rust's `chunks_exact` leaves its remainder).
+//
+// A view over a `List` can be written: `v[i] = x` stores the bits of `x`
+// back into the elements of the list that hold them. A view over a slice
+// is read-only, as the slice is.
+//
+// The checker (selfhost/check/view_cast.pilot) picks the bound function
+// whose first parameter takes the source (a `List`, else a slice), types the
+// expression as its lens over `E` (the element type of `xs`) and `T`, checks
+// that both are integers of 8, 16, 32 or 64 bits or floats of 32 or 64 (not
+// `char`: not every 32-bit pattern is one), and gives the engines the
+// register shape of each side.
+//
+// The engines keep no byte memory yet, so a view reads its source elements
+// and converts the bits with arithmetic, little-endian on every target
+// (stand-in `reinterpret.element_bits`). Records, alignment and the views of
+// packed storage are M38.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Reinterpret;
+
+use Pilot.Core.FloatBits;
+
+comptime {
+    bind_operator_fn("as view", nameof(reinterpret_view));
+    bind_operator_fn("as view", nameof(reinterpret_list_view));
+}
+
+/// How a primitive holds its bits, as its `[Bits]` declares: a float or an
+/// integer (signed or not), and its width.
+[Layout(c_abi)]
+pub struct RegisterShape : IValue {
+    pub float: bool;
+    pub signed: bool;
+    pub width: i64;
+}
+
+/// The low `width` bits set.
+pub fn low_mask(width: i64) -> u64 {
+    let ones: u64 = 18446744073709551615;
+    if width >= 64 { return ones; }
+    let one: u64 = 1;
+    return (one << (width as u64)) - one;
+}
+
+/// The bits of `v`, a primitive of shape `from`, as an unsigned integer
+/// whose low `from.width` bits are the encoding.
+pub fn bits_of<T: IValue>(v: T, from: RegisterShape) -> u64 {
+    if from.float {
+        if from.width == 64 { return float_bits(v as f64, binary64()); }
+        return float_bits(v as f64, binary32());
+    }
+    let all: u64 = v as u64;
+    return all & low_mask(from.width);
+}
+
+/// The primitive of shape `to` whose encoding is the low `to.width` bits of
+/// `bits`.
+pub fn from_bits<U: IValue>(bits: u64, to: RegisterShape) -> U {
+    if to.float {
+        if to.width == 64 { return float_from_bits(bits, binary64()); }
+        return float_from_bits(bits, binary32()) as f32;
+    }
+    if to.signed {
+        if to.width == 8 { return bits as i8; }
+        if to.width == 16 { return bits as i16; }
+        if to.width == 32 { return bits as i32; }
+        return bits as i64;
+    }
+    if to.width == 8 { return bits as u8; }
+    if to.width == 16 { return bits as u16; }
+    if to.width == 32 { return bits as u32; }
+    return bits;
+}
+
+/// How many elements a view of shape `to` has over `count` elements of
+/// shape `from`.
+pub fn view_len(count: usize, from: RegisterShape, to: RegisterShape) -> usize {
+    if from.width >= to.width { return count * ((from.width / to.width) as usize); }
+    return count / ((to.width / from.width) as usize);
+}
+
+/// Element `i` of the view of shape `to` over `src` (elements of shape
+/// `from`).
+pub fn view_read<TSrc: IValue, TDst: IValue>(src: slice<TSrc>, from: RegisterShape, to: RegisterShape, i: usize) -> TDst {
+    if from.width >= to.width {
+        let per = (from.width / to.width) as usize;
+        let shift = (to.width as u64) * ((i % per) as u64);
+        return from_bits<TDst>((bits_of(src[i / per], from) >> shift) & low_mask(to.width), to);
+    }
+    let per = (to.width / from.width) as usize;
+    var bits: u64 = 0;
+    var m: usize = 0;
+    while m < per {
+        bits = bits | (bits_of(src[i * per + m], from) << ((from.width as u64) * (m as u64)));
+        m = m + 1;
+    }
+    return from_bits<TDst>(bits, to);
+}
+
+/// `xs as view TDst` over a slice of `TSrc`.
+[StandIn("reinterpret.element_bits", "a view that reads the source's own memory as elements of the target type (M38)", "each read takes the source elements and converts their bits with arithmetic, little-endian on every target; floats go through the exact-arithmetic encoding of stand-in convert.nan_bits", "M38")]
+pub struct ReinterpretLens<TSrc: IValue, TDst: IValue> : IReference {
+    pub src: slice<TSrc>;
+    pub from: RegisterShape;
+    pub to: RegisterShape;
+
+    pub len: usize {
+        get => view_len(.src.len, .from, .to);
+    }
+
+    pub self[i: usize] -> TDst {
+        get => view_read<TSrc, TDst>(.src, .from, .to, i);
+    }
+
+    pub fn get_enumerator() -> ReinterpretCursor<TSrc, TDst> =>
+        ReinterpretCursor<TSrc, TDst> { lens: self, next: 0 };
+}
+
+/// `xs as view TDst` over a list of `TSrc`: reads as `ReinterpretLens`
+/// does, and a write stores the bits back into the list.
+[StandIn("reinterpret.element_bits", "a view that reads and writes the source's own memory as elements of the target type (M38)", "each access converts the bits of the source elements with arithmetic, little-endian on every target; a write rewrites the whole source elements it touches", "M38")]
+pub struct ReinterpretListLens<TSrc: IValue, TDst: IValue> : IReference {
+    pub src: List<TSrc>;
+    pub from: RegisterShape;
+    pub to: RegisterShape;
+
+    pub len: usize {
+        get => view_len(.src.len, .from, .to);
+    }
+
+    pub self[i: usize] -> TDst {
+        get => view_read<TSrc, TDst>(.src, .from, .to, i);
+        set => {
+            let vbits = bits_of(value, .to);
+            if .from.width >= .to.width {
+                let per = (.from.width / .to.width) as usize;
+                let shift = (.to.width as u64) * ((i % per) as u64);
+                let kept = bits_of(.src[i / per], .from) & (low_mask(.from.width) ^ (low_mask(.to.width) << shift));
+                .src[i / per] = from_bits<TSrc>(kept | (vbits << shift), .from);
+            } else {
+                let per = (.to.width / .from.width) as usize;
+                var m: usize = 0;
+                while m < per {
+                    .src[i * per + m] = from_bits<TSrc>((vbits >> ((.from.width as u64) * (m as u64))) & low_mask(.from.width), .from);
+                    m = m + 1;
+                }
+            }
+        }
+    }
+
+    pub fn get_enumerator() -> ReinterpretCursor<TSrc, TDst> =>
+        ReinterpretCursor<TSrc, TDst> {
+            lens: ReinterpretLens<TSrc, TDst> { src: .src, from: .from, to: .to },
+            next: 0,
+        };
+}
+
+/// A walk over a view, one element per `move_next`.
+pub struct ReinterpretCursor<TSrc: IValue, TDst: IValue> : IReference {
+    pub lens: ReinterpretLens<TSrc, TDst>;
+    pub var next: usize;
+
+    pub current: TDst {
+        get => .lens[.next - 1];
+    }
+
+    pub fn move_next() -> bool {
+        if .next >= .lens.len { return false; }
+        .next = .next + 1;
+        return true;
+    }
+}
+
+/// The register shape the engines pass as three integers: 1 for a float,
+/// 1 for a signed integer (else 0), and the width in bits.
+fn shape(float: i64, signed: i64, width: i64) -> RegisterShape =>
+    RegisterShape { float: float != 0, signed: signed != 0, width: width };
+
+/// A function `as view` is bound to, for a slice source: the engines pass
+/// the source and the register shapes the checker found for its elements
+/// and for the target (selfhost/check/view_cast.pilot).
+pub fn reinterpret_view<TSrc: IValue, TDst: IValue>(
+    src: slice<TSrc>,
+    from_float: i64,
+    from_signed: i64,
+    from_width: i64,
+    to_float: i64,
+    to_signed: i64,
+    to_width: i64
+) -> ReinterpretLens<TSrc, TDst> => ReinterpretLens<TSrc, TDst> {
+    src: src,
+    from: shape(from_float, from_signed, from_width),
+    to: shape(to_float, to_signed, to_width),
+};
+
+/// The function `as view` is bound to for a list source, as
+/// `reinterpret_view`; its view can be written.
+pub fn reinterpret_list_view<TSrc: IValue, TDst: IValue>(
+    src: List<TSrc>,
+    from_float: i64,
+    from_signed: i64,
+    from_width: i64,
+    to_float: i64,
+    to_signed: i64,
+    to_width: i64
+) -> ReinterpretListLens<TSrc, TDst> => ReinterpretListLens<TSrc, TDst> {
+    src: src,
+    from: shape(from_float, from_signed, from_width),
+    to: shape(to_float, to_signed, to_width),
+};

@@ -303,9 +303,7 @@
         { "name": "keyword.operator.comparison.pilot", "match": "\\b(op_eq|op_ne|op_lt|op_le|op_gt|op_ge|op_cmp3)\\b" },
         { "name": "keyword.operator.range.pilot keyword.operator.lens.pilot", "match": "\\b(op_swap|op_lens|op_range|op_span|op_step|op_open_range|op_after_range)\\b" },
         { "name": "keyword.operator.try.pilot keyword.operator.null-coalescing.pilot", "match": "\\b(op_try|op_coalesce)\\b" },
-        { "name": "keyword.operator.splat.pilot", "match": "\\b(op_splat|op_pairs|op_expand)\\b" },
-        { "name": "keyword.control.syntax.pilot", "match": "\\b(type_construct|unquote|splice|macro)\\b" },
-        { "name": "meta.function.call.quoted.pilot", "match": "\\b(call_quote_shallow|call_quote_deep|call_quote_abi|call_quote_signal|call_quote_dual|call_quote_plan)\\b" }
+        { "name": "keyword.control.syntax.pilot", "match": "\\b(type_construct|unquote|splice|macro)\\b" }
       ]
     },
     "modifiers": {

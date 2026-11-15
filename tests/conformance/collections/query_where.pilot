@@ -1,0 +1,15 @@
+// `where cond` in a `from .. select` query keeps the elements for which
+// `cond` holds; several `where` clauses must all hold.
+//
+// Expected output, worked by hand:
+//   xs = [3, 8, 1, 9, 4].
+//   where x > 3: [8, 9, 4].
+//   where x > 2 where x < 9: [3, 8, 4].
+//   where false for all (x > 100): [] (length 0).
+fn main() {
+    let xs: List<i64> = [3, 8, 1, 9, 4];
+    print(from x in xs where x > 3 select x);
+    print(from x in xs where x > 2 where x < 9 select x);
+    let none_kept = from x in xs where x > 100 select x;
+    print(none_kept.len());
+}

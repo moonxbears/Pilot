@@ -1,0 +1,10 @@
+// SYN001: `catch e: T` would catch only failures of type T; nothing checks
+// the type, which used to be dropped, so every failure was caught.
+fn risky() -> i64 ! str {
+    return fail("boom");
+}
+
+fn main() {
+    // `: i64` starts at line 9, column 37.
+    try { print(risky()?); } catch e: i64 { print(e); }
+}

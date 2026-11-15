@@ -1,0 +1,11 @@
+// Aliased module imports (`use <module> as <alias>;`) lower module-qualified
+// calls (`t.join_text(..)`, `sh.square(..)`) on every engine.
+use std.text as t;
+use lib.shapes as sh;
+
+fn main() {
+    let joined = t.join_text(["alpha", "beta", "gamma"], "-");
+    print(joined);
+    let sq = sh.square(9);
+    print(sq.area());
+}

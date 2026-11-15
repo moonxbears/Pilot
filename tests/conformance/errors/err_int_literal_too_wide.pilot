@@ -1,0 +1,8 @@
+// The engine's integers are 64 bits wide. A literal that needs more bits
+// (here 2^127 - 1, the largest i128) has no value the engine can hold, so
+// the program stops at the seam `convert.wide_scalar` instead of running
+// with some other number in its place.
+fn main() {
+    let a: i128 = 170141183460469231731687303715884105727;
+    print(a);
+}

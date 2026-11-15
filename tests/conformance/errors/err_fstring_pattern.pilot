@@ -1,0 +1,6 @@
+// A hole's text after `:` that is not a pattern of `# 0 , _ .` is not a
+// format pattern, so the hole is not a single expression (SYN001).
+fn main() {
+    let n = 5;
+    print(f"{n:#x#}");
+}

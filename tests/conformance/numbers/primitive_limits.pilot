@@ -1,0 +1,59 @@
+// The characteristic constants of the primitives (stdlib/core/limits.pilot):
+// static members of each type, so they add nothing to a value's size.
+// Expected values are Rust's `core` constants of the same names
+// (`i8::MIN` = -128, `u64::MAX` = 2^64 - 1, `f64::EPSILON` = 2^-52,
+// `f64::MIN_POSITIVE` = 2^-1022, `f32::MAX` = (2 - 2^-23) * 2^127,
+// `f32::MANTISSA_DIGITS` = 24, `char::MAX` = U+10FFFF, ..); floats print
+// their shortest round-trip digits (Python's repr gives the same digits).
+use Pilot.Core.Limits;
+use Pilot.Core.Convert;
+
+fn main() {
+    print(f"i8 {i8.min()} {i8.max()} {i8.bits()}");
+    print(f"i16 {i16.min()} {i16.max()} {i16.bits()}");
+    print(f"i32 {i32.min()} {i32.max()} {i32.bits()}");
+    print(f"i64 {i64.min()} {i64.max()} {i64.bits()}");
+    print(f"isize {isize.min()} {isize.max()} {isize.bits()}");
+    print(f"u8 {u8.min()} {u8.max()} {u8.bits()}");
+    print(f"u16 {u16.min()} {u16.max()} {u16.bits()}");
+    print(f"u32 {u32.min()} {u32.max()} {u32.bits()}");
+    print(f"u64 {u64.min()} {u64.max()} {u64.bits()}");
+    print(f"usize {usize.min()} {usize.max()} {usize.bits()}");
+
+    print(f"f64 {f64.bits()} {f64.radix()} {f64.mantissa_digits()} {f64.digits()}");
+    print(f64.epsilon());
+    print(f64.max());
+    print(f64.min());
+    print(f64.min_positive());
+    print(f64.min_subnormal());
+    print(f"f64 exp {f64.min_exp()} {f64.max_exp()} {f64.min_10_exp()} {f64.max_10_exp()}");
+    print(f"{f64.infinity()} {f64.neg_infinity()} {f64.nan()}");
+    // 1 + epsilon is the next value after 1; half of it rounds back to 1.
+    print(1.0 + f64.epsilon() > 1.0);
+    print(1.0 + f64.epsilon() / 2.0 > 1.0);
+    // The smallest subnormal halved rounds to zero (a tie, to even).
+    print(f64.min_subnormal() / 2.0 > 0.0);
+
+    print(f"f32 {f32.bits()} {f32.radix()} {f32.mantissa_digits()} {f32.digits()}");
+    print(f32.epsilon());
+    print(f32.max());
+    print(f32.min());
+    print(f32.min_positive());
+    print(f32.min_subnormal());
+    print(f"f32 exp {f32.min_exp()} {f32.max_exp()} {f32.min_10_exp()} {f32.max_10_exp()}");
+
+    let cmax: char = char.max();
+    let cmin: char = char.min();
+    let crep: char = char.replacement();
+    // Type names stay out of f-string holes: the rename litmus (GATE008)
+    // renames identifiers in code, not inside string literals.
+    let char_bits = char.bits();
+    print(f"char {cmin.to_u32() catch e => 1} {cmax.to_u32() catch e => 0} {crep.to_u32() catch e => 0} {char_bits}");
+    print(f"bool {bool.bits()}");
+
+    // The limits agree with the checked conversions.
+    let top: i64 = 127;
+    print(top.to_i8() catch e => 0);
+    let past: i64 = 128;
+    print(past.to_i8().is_err);
+}

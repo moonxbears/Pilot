@@ -1,0 +1,2 @@
+error[SYN001]: SyntaxError: unterminated string literal
+err_string_unterminated.pilot:4:11

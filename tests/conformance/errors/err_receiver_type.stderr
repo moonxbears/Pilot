@@ -1,0 +1,4 @@
+error[TYPE001]: expected `i64`, found `str`
+err_receiver_type.pilot:7:28
+error[TYPE001]: expected `i64`, found `str`
+err_receiver_type.pilot:8:26

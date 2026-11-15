@@ -1,0 +1,157 @@
+// The evidence the keyword matrix counts for each keyword: conformance
+// programs that use it or are named for it, the diagnostics its failing
+// programs expect, wiring ledger rows and known bugs that quote it.
+pkg km.evidence;
+
+use Pilot.Core.File;
+use km.text;
+
+pub enum ProgramKind : u8 {
+    Passing,
+    Failing,
+    KnownBug,
+}
+
+/// One conformance program: a `.pilot` file with expected output beside it.
+pub struct Program {
+    /// Its path under the conformance folder, without `.pilot`.
+    pub name: str;
+    pub base: str;
+    pub kind: ProgramKind;
+    /// The identifiers of its code, comments and string contents removed.
+    pub words: Map<str, bool>;
+    /// The code of the first `error[CODE]` its `.stderr` expects, or empty.
+    pub code: str;
+}
+
+/// One wiring ledger row: `cap("M1", "title", ::Level, ..)`.
+pub struct LedgerRow {
+    pub title: str;
+    pub level: str;
+}
+
+/// One known bug: `known_bug("id", "component", "summary", ..)`.
+pub struct Bug {
+    pub id: str;
+    pub summary: str;
+}
+
+/// The conformance programs under `dir` (`<root>/tests/conformance`).
+pub fn read_programs(dir: str) -> List<Program> {
+    var out: List<Program> = [];
+    for path in sorted_lines(File.walk_files(dir)) {
+        if !path.ends_with(".pilot") { continue; }
+        let stem = path.slice(0, (path.len() - 6) as usize);
+        let stderr = stem + ".stderr";
+        if !File.exists(stem + ".stdout") && !File.exists(stem + ".exit") && !File.exists(stderr) { continue; }
+        let name = stem.slice((dir.len() + 1) as usize, stem.len());
+        let pieces = split_on(name, "/");
+        let base = pieces[pieces.len() - 1];
+        var kind = ProgramKind::Passing;
+        if name.starts_with("known_bugs/") {
+            kind = ProgramKind::KnownBug;
+        } else if base.starts_with("err_") {
+            kind = ProgramKind::Failing;
+        }
+        var code = "";
+        if kind == ProgramKind::Failing && File.exists(stderr) {
+            code = first_error_code(File.read_text(stderr));
+        }
+        out.push(Program { name: name, base: base, kind: kind, words: code_words(File.read_text(path)), code: code });
+    }
+    return out;
+}
+
+fn first_error_code(text: str) -> str {
+    let at = text.find("error[", 0);
+    if at < 0 { return ""; }
+    let from = (at as usize) + 6;
+    let close = text.find("]", from);
+    if close < 0 { return ""; }
+    return text.slice(from, close as usize);
+}
+
+/// The identifiers of `text`'s code: comments removed, string literals
+/// emptied.
+fn code_words(text: str) -> Map<str, bool> {
+    var out: Map<str, bool> = [:];
+    for line in code_lines(text) {
+        let n = line.len();
+        var i: usize = 0;
+        while i < n {
+            let b = line.byte_at(i);
+            if b == 34 {
+                i = i + 1;
+                while i < n && line.byte_at(i) != 34 {
+                    if line.byte_at(i) == 92 { i = i + 1; }
+                    i = i + 1;
+                }
+                i = i + 1;
+                continue;
+            }
+            if !is_ident_byte(b) || (b >= 48 && b <= 57) {
+                i = i + 1;
+                continue;
+            }
+            let start = i;
+            while i < n && is_ident_byte(line.byte_at(i)) {
+                i = i + 1;
+            }
+            out.set(line.slice(start, i), true);
+        }
+    }
+    return out;
+}
+
+pub fn read_ledger(text: str) -> List<LedgerRow> {
+    var out: List<LedgerRow> = [];
+    let marker = "cap(\"";
+    var at = text.find(marker, 0);
+    while at >= 0 {
+        let from = at as usize;
+        let level_at = text.find("::", from);
+        if level_at < 0 { break; }
+        let lits = string_literals(text.slice(from, level_at as usize));
+        var end = (level_at as usize) + 2;
+        while end < text.len() && is_ident_byte(text.byte_at(end)) {
+            end = end + 1;
+        }
+        if lits.len() >= 2 {
+            out.push(LedgerRow { title: lits[1], level: text.slice((level_at as usize) + 2, end) });
+        }
+        at = text.find(marker, end);
+    }
+    return out;
+}
+
+pub fn read_bugs(text: str) -> List<Bug> {
+    var out: List<Bug> = [];
+    let marker = "known_bug(\"";
+    var at = text.find(marker, 0);
+    while at >= 0 {
+        let from = at as usize;
+        let next = text.find(marker, from + 1);
+        let stop = if next >= 0 { next as usize } else { text.len() };
+        let lits = string_literals(text.slice(from, stop));
+        if lits.len() >= 3 {
+            out.push(Bug { id: lits[0], summary: lits[2] });
+        }
+        at = next;
+    }
+    return out;
+}
+
+/// Whether `text` quotes `word` in backticks (`` `x in xs` `` quotes `in`).
+pub fn quotes(text: str, word: str) -> bool {
+    for span in backtick_spans(text) {
+        if has_word(span, word) { return true; }
+    }
+    return false;
+}
+
+/// Whether a program named `base` is named for `word`.
+/// File names are written small, so letter case is not compared: `Flags`
+/// is named by `flags_ops`.
+pub fn named_for(base: str, word: str) -> bool {
+    return has_part(lower(base), lower(word));
+}

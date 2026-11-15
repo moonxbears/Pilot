@@ -11,6 +11,7 @@ use Pilot.Core.Keywords::*;
 
 [KeywordDefAttr(20, "128-bit signed two's-complement integer.")]
 [Lang(Cfg.Lang.i128_t), Bits(Cfg.Reg.b128, Cfg.Reg.gpr_s)]
+[StandIn("prim.wide_scalar_64", "a 128-bit integer value", "held in the engine's 64-bit integer: a value or result outside 64 bits wraps, and a literal outside 64 bits stops at convert.wide_scalar", "F6")]
 pub partial struct i128 : INumber<i128>, IBitwiseOperator<i128>, INegOperator<i128> {
     pub pure:
         op +   (rhs: i128) -> i128  => __ssa(Cfg.Ssa.add,      self, rhs);

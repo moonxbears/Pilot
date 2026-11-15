@@ -1,0 +1,27 @@
+// A property with a `get` clause computes its value on each read; `field`
+// inside the clause is the property's own storage.
+//
+// Expected output, worked by hand:
+//   Box { inner: 3 }: doubled = 3 * 2 = 6; label of 3 is "small" (< 10).
+//   inner = 12: doubled = 24, label "big".
+//   stored, with `get => field + 1` over storage 5: reads 6.
+struct Box {
+    pub inner: i64;
+    pub doubled: i64 { get => .inner * 2; }
+    pub label: str { get => if .inner < 10 { "small" } else { "big" }; }
+}
+
+struct Counter {
+    pub stored: i64 = 5 { get => field + 1; }
+}
+
+fn main() {
+    var b = Box { inner: 3 };
+    print(b.doubled);
+    print(b.label);
+    b.inner = 12;
+    print(b.doubled);
+    print(b.label);
+    let c = Counter();
+    print(c.stored);
+}

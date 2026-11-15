@@ -46,7 +46,7 @@ use pilot_analysis::{
 use pilot_ast::{CallQuoteKind, NodeKind};
 use pilot_intern::SymbolId;
 use pilot_parser::parse;
-use pilot_rt::PilotVal;
+use pilot_vm::PilotVal;
 use pilot_vm::pilc::{PilcBinary, PILC_V3_MAGIC};
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
@@ -744,7 +744,7 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
     let meta_src = std::fs::read_to_string(root.join("stdlib/core/meta.pilot"))
         .expect("read stdlib/core/meta.pilot");
     let meta_attr_decls = {
-        let start = meta_src.find("pub struct InheritPolicy").expect("InheritPolicy in meta.pilot");
+        let start = meta_src.find("// 1. THE 7-PILLAR").expect("section 1 in meta.pilot");
         let end = meta_src
             .find("// 3. PILOT-HOSTED")
             .and_then(|i| meta_src[..i].rfind("// ====="))
@@ -910,7 +910,7 @@ pub fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2
         .expect("read selfhost/analyzer.pilot");
     let analyzer_defs = analyzer_raw
         .trim_end()
-        .strip_suffix("analyze_unit(0);")
+        .strip_suffix("analyze_program();")
         .unwrap_or(&analyzer_raw);
 
     let empty_arena = parse("");

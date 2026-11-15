@@ -1,0 +1,7 @@
+// A constant never changes, down to its elements: assigning an element of
+// a constant, or of a list inside one, is CONST001.
+const GRID = [[1, 2], [3, 4]];
+
+fn main() {
+    GRID[0][1] = 9;
+}

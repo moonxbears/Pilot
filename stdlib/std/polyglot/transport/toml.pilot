@@ -6,6 +6,8 @@
 
 pub pkg std.polyglot.transport.toml;
 
+use std.text;
+
 // ------------------------------------------------------------------------------
 // 1. TOML Value Kinds
 // ------------------------------------------------------------------------------
@@ -138,29 +140,27 @@ pub struct TomlValue : IObject {
             return if self.bool_val { "true" } else { "false" };
         }
         if self.kind == TomlKind::Array {
-            var out = "[";
+            var items: List<str> = [];
             var i: usize = 0;
             let n = self.array_val.len();
             while i < n {
-                if i > 0 { out = out + ", "; }
                 let item: TomlValue = self.array_val[i];
-                out = out + item.emit();
+                items.push(item.emit());
                 i = i + 1;
             }
-            out = out + "]";
-            return out;
+            return "[" + join_text(items, ", ") + "]";
         }
         if self.kind == TomlKind::Table {
-            var out = "";
+            var lines: List<str> = [];
             var i: usize = 0;
             let n = self.table_val.len();
             while i < n {
                 let kv = self.table_val[i];
                 let v: TomlValue = kv.val;
-                out = out + kv.key + " = " + v.emit() + "\n";
+                lines.push(kv.key + " = " + v.emit() + "\n");
                 i = i + 1;
             }
-            return out;
+            return join_text(lines, "");
         }
         return "";
     }
@@ -275,11 +275,11 @@ pub fn toml_parse(src: str) -> TomlValue {
         }
         if pos >= n { break; }
 
-        var line = "";
+        let line_start = pos;
         while pos < n && src.byte_at(pos) != 10 && src.byte_at(pos) != 13 {
-            line = line + src.slice(pos, pos + 1);
             pos = pos + 1;
         }
+        let line = src.slice(line_start, pos);
         while pos < n && (src.byte_at(pos) == 10 || src.byte_at(pos) == 13) {
             pos = pos + 1;
         }

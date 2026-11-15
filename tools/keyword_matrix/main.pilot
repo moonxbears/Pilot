@@ -1,0 +1,351 @@
+// ==============================================================================
+// FILE: tools/keyword_matrix/main.pilot
+// Regenerates the computed columns and the summary of docs/keyword_matrix.md,
+// the status of every registered keyword (AGENTS.md section 11, rule 8).
+// ==============================================================================
+// Usage, from the repository root:
+//
+//   pilot run tools/keyword_matrix/main.pilot              rewrite the matrix
+//   pilot run tools/keyword_matrix/main.pilot -- --check   exit 1 when stale
+//   pilot run tools/keyword_matrix/main.pilot -- --root <dir>
+//
+// The hand columns (Bound by, S, I, C, Verdict, Complexity, Notes) are read
+// from the file and kept; a keyword new to the registry gets a row marked
+// NOT AUDITED. The other columns come from the registry
+// (stdlib/core/keywords.pilot), the receptor bindings (stdlib/core/core.pilot),
+// tests/conformance, the ledgers in selfhost/gate/ledger, and the Rust
+// (crates/*/src) and Pilot (stdlib, selfhost) code. The file's own text
+// explains each column; km/measure.pilot explains the Pilot / Rust measure.
+use std.env;
+use Pilot.Core.File;
+use km.text;
+use km.registry;
+use km.keys;
+use km.evidence;
+use km.corpus;
+use km.measure;
+use km.matrix;
+
+fn main() -> i64 {
+    var root = ".";
+    var check = false;
+    let args = env.args();
+    var a = 0;
+    while a < args.len() {
+        let arg = args[a];
+        if arg == "--check" {
+            check = true;
+        } else if arg == "--root" && a + 1 < args.len() {
+            root = args[a + 1];
+            a = a + 1;
+        } else {
+            print(f"keyword_matrix: unknown argument `{arg}`; use --check or --root <dir>");
+            return 2;
+        }
+        a = a + 1;
+    }
+    let out_path = join(root, "docs/keyword_matrix.md");
+    if !File.exists(out_path) {
+        print(f"keyword_matrix: {out_path} does not exist");
+        return 2;
+    }
+    let old = File.read_text(out_path);
+    let generated = generate(root, old);
+    let text = splice_generated(old, generated);
+    if text.len() == 0 {
+        print(f"keyword_matrix: {out_path} has no generated part; it needs the two keyword_matrix marker lines");
+        return 2;
+    }
+    if check {
+        if text == old {
+            print(f"keyword_matrix: {out_path} is up to date");
+            return 0;
+        }
+        print(f"keyword_matrix: {out_path} is stale; run `pilot run tools/keyword_matrix/main.pilot` and commit the result");
+        return 1;
+    }
+    if !File.write_text(out_path, text) {
+        print(f"keyword_matrix: could not write {out_path}");
+        return 2;
+    }
+    print(f"keyword_matrix: wrote {out_path}");
+    return 0;
+}
+
+fn join(root: str, rel: str) -> str {
+    if root == "." { return rel; }
+    return root + "/" + rel;
+}
+
+/// The files under `dir` ending in `ext` whose path holds `within`.
+fn files_under(dir: str, ext: str, within: str) -> List<str> {
+    var out: List<str> = [];
+    if !File.exists(dir) { return out; }
+    for p in sorted_lines(File.walk_files(dir)) {
+        if p.ends_with(ext) && p.contains(within) && !p.ends_with("stdlib/core/keywords.pilot") { out.push(p); }
+    }
+    return out;
+}
+
+/// The generated part of the matrix: summary and tables.
+fn generate(root: str, old: str) -> str {
+    let registry_text = File.read_text(join(root, "stdlib/core/keywords.pilot"));
+    let categories = read_categories(registry_text);
+    var entries: List<RegistryEntry> = [];
+    for e in read_entries(registry_text) {
+        if in_scope(e.category) { entries.push(e); }
+    }
+    let receptors = read_receptors(File.read_text(join(root, "stdlib/core/core.pilot")));
+    let hand = read_hand_rows(old);
+    let programs = read_programs(join(root, "tests/conformance"));
+    let ledger = read_ledger(File.read_text(join(root, "selfhost/gate/ledger/wiring.pilot")));
+    let bugs = read_bugs(File.read_text(join(root, "selfhost/gate/ledger/seams.pilot")));
+
+    var rust_files = files_under(join(root, "crates"), ".rs", "/src/");
+    var pilot_files = files_under(join(root, "stdlib"), ".pilot", "");
+    for p in files_under(join(root, "selfhost"), ".pilot", "") { pilot_files.push(p); }
+    var rust = build_corpus(rust_files);
+    var pilot = build_corpus(pilot_files);
+    let table = search_key_table();
+
+    // Pilot and Rust sizes by keyword, measured once per word.
+    var sizes: Map<str, List<i64>> = [:];
+    var measured: List<str> = [];
+    var stamp = 0;
+    for e in entries {
+        if sizes.has(e.word) { continue; }
+        measured.push(e.word);
+        let h = hand[e.word] ?? unaudited();
+        stamp = stamp + 1;
+        if h.bound == "none" {
+            sizes.set(e.word, [0, 0]);
+            continue;
+        }
+        let rs = rust_search(e.word, table, receptors);
+        let ps = pilot_search(e.word, table);
+        sizes.set(e.word, [measure(pilot, ps, stamp), measure(rust, rs, stamp)]);
+    }
+
+    var verdicts: Map<str, i64> = [:];
+    var verdict_order: List<str> = [];
+    var complexity: List<i64> = [0, 0, 0, 0, 0, 0];
+    var gaps_none = 0;
+    var tables = "## Keywords by registry category\n";
+    for cat in categories {
+        if !in_scope(cat.id) { continue; }
+        var rows = "";
+        for e in entries {
+            if e.category != cat.id { continue; }
+            let h = hand[e.word] ?? unaudited();
+            let cells = row_cells(e, h, programs, ledger, bugs, sizes[e.word] ?? [0, 0]);
+            rows = rows + table_row(cells) + "\n";
+            if !verdicts.has(h.verdict) {
+                verdicts.set(h.verdict, 0);
+                verdict_order.push(h.verdict);
+            }
+            verdicts.set(h.verdict, verdicts[h.verdict] + 1);
+            let score = leading_int(h.complexity);
+            if score >= 1 && score <= 5 { complexity[score] = complexity[score] + 1; }
+            if cells[15] == "none" { gaps_none = gaps_none + 1; }
+        }
+        if rows.len() > 0 {
+            tables = tables + f"\n### {cat.id}. {cat.badge}\n\n" + table_header() + "\n" + rows;
+        }
+    }
+    return summary_text(verdicts, verdict_order, complexity, gaps_none, measured, sizes) + "\n" + tables;
+}
+
+fn rust_search(word: str, ref table: Map<str, SearchKeys>, ref receptors: List<Receptor>) -> Search {
+    var keys: List<str> = [];
+    var parts: List<str> = [];
+    if table.has(word) {
+        let k = table[word];
+        keys = words_of(k.rust);
+        parts = words_of(k.parts);
+    }
+    for r in receptors {
+        if r.word != word { continue; }
+        keys.push(f"({r.kind}, {r.sub})");
+        keys.push(f"({r.kind},{r.sub})");
+        var shared = false;
+        for other in receptors {
+            if other.kind == r.kind && other.word != word { shared = true; }
+        }
+        if !shared { keys.push(f"is_rec({r.kind})"); }
+    }
+    return Search { keys: keys, parts: parts, rule_word: "" };
+}
+
+fn pilot_search(word: str, ref table: Map<str, SearchKeys>) -> Search {
+    var keys: List<str> = [];
+    var parts: List<str> = [];
+    if table.has(word) {
+        let k = table[word];
+        keys = words_of(k.pilot);
+        parts = words_of(k.parts);
+    }
+    keys.push(f"nameof({word})");
+    return Search { keys: keys, parts: parts, rule_word: word };
+}
+
+/// The cells of one keyword's row, in `column_names()` order.
+fn row_cells(ref e: RegistryEntry, ref h: HandRow, ref programs: List<Program>, ref ledger: List<LedgerRow>,
+             ref bugs: List<Bug>, ref size: List<i64>) -> List<str> {
+    let word = e.word;
+    var passing = 0;
+    var failing = 0;
+    var named: List<str> = [];
+    var named_pass = false;
+    var named_fail = false;
+    var codes: List<str> = [];
+    for p in programs {
+        if p.kind == ProgramKind::KnownBug { continue; }
+        if p.words.has(word) {
+            if p.kind == ProgramKind::Passing { passing = passing + 1; } else { failing = failing + 1; }
+        }
+        if named_for(p.base, word) {
+            named.push(p.name);
+            if p.kind == ProgramKind::Failing {
+                named_fail = true;
+                if p.code.len() > 0 && !contains_str(codes, p.code) { codes.push(p.code); }
+            } else {
+                named_pass = true;
+            }
+        }
+    }
+    var levels: List<str> = [];
+    for row in ledger {
+        if quotes(row.title, word) && !contains_str(levels, row.level) { levels.push(row.level); }
+    }
+    var bug_ids: List<str> = [];
+    for b in bugs {
+        if quotes(b.summary, word) { bug_ids.push("`" + b.id + "`"); }
+    }
+    var gaps: List<str> = [];
+    if h.bound == "none" || h.bound == "?" { gaps.push("binding"); }
+    if !named_pass { gaps.push("named passing program"); }
+    if !named_fail { gaps.push("named failing program"); }
+    if levels.len() == 0 { gaps.push("ledger row"); }
+    let engines = [h.s, h.i, h.c];
+    if contains_str(engines, "–") {
+        gaps.push("per-engine run");
+    } else if h.bound != "none" && !(all_are(engines, "ok") || all_are(engines, "err")) {
+        gaps.push("an engine");
+    }
+    if bug_ids.len() > 0 { gaps.push("known bug open"); }
+    let pair = if e.symbol.len() > 0 { "`" + e.symbol + "`" } else { "—" };
+    return [
+        "`" + word + "`", cell(clip(e.doc, 90)), h.bound, pair, h.s, h.i, h.c,
+        f"{passing} / {failing}", named_cell(named), joined(sort_strs(codes)),
+        joined(sort_strs(levels)), joined(bug_ids), h.verdict, h.complexity, ratio_cell(size),
+        if gaps.len() > 0 { join_list(gaps, ", ") } else { "none" }, h.notes,
+    ];
+}
+
+fn named_cell(ref names: List<str>) -> str {
+    if names.len() == 0 { return "—"; }
+    let sorted = sort_short_first(names);
+    var out = "";
+    var i = 0;
+    while i < sorted.len() && i < 3 {
+        if i > 0 { out = out + ", "; }
+        out = out + "`" + sorted[i] + "`";
+        i = i + 1;
+    }
+    if sorted.len() > 3 { out = out + f" +{sorted.len() - 3}"; }
+    return out;
+}
+
+fn ratio_cell(ref size: List<i64>) -> str {
+    let p = size[0];
+    let r = size[1];
+    if p + r == 0 { return "—"; }
+    let share = percent(p, p + r);
+    return f"{share}% / {100 - share}% ({short_count(p)} / {short_count(r)})";
+}
+
+fn joined(ref items: List<str>) -> str {
+    if items.len() == 0 { return "—"; }
+    return join_list(items, ", ");
+}
+
+fn join_list(ref items: List<str>, sep: str) -> str {
+    var out = "";
+    var i = 0;
+    while i < items.len() {
+        if i > 0 { out = out + sep; }
+        out = out + items[i];
+        i = i + 1;
+    }
+    return out;
+}
+
+fn contains_str(ref items: List<str>, s: str) -> bool {
+    for x in items {
+        if x == s { return true; }
+    }
+    return false;
+}
+
+fn all_are(ref items: List<str>, s: str) -> bool {
+    for x in items {
+        if x != s { return false; }
+    }
+    return true;
+}
+
+[Workaround("check.field_name_private_fn", "named `summary_text`, not `summary`, which km.evidence.Bug has as a field")]
+fn summary_text(ref verdicts: Map<str, i64>, ref order: List<str>, ref complexity: List<i64>, gaps_none: i64,
+           ref measured: List<str>, ref sizes: Map<str, List<i64>>) -> str {
+    // Verdicts by count, most first; ties by name.
+    var names: List<str> = sort_strs(order);
+    var ranked: List<str> = [];
+    for name in names {
+        ranked.push(name);
+        var at = ranked.len() - 1;
+        while at > 0 && verdicts[ranked[at - 1]] < verdicts[name] {
+            ranked[at] = ranked[at - 1];
+            at = at - 1;
+        }
+        ranked[at] = name;
+    }
+    var total = 0;
+    var out = "## Summary\n\n| Verdict | Keywords |\n|---|---|\n";
+    for name in ranked {
+        let n = verdicts[name];
+        out = out + f"| {name} | {n} |\n";
+        total = total + n;
+    }
+    out = out + f"| **Total** | **{total}** |\n\nRows with no evidence gap: {gaps_none}.\n\n| Complexity | Keywords |\n|---|---|\n";
+    var score = 1;
+    while score <= 5 {
+        let n = complexity[score];
+        out = out + f"| {score} | {n} |\n";
+        score = score + 1;
+    }
+    var shares: List<i64> = [];
+    for entry in measured {
+        let s = sizes[entry];
+        if s[0] + s[1] > 0 { shares = insert_sorted(shares, percent(s[0], s[0] + s[1])); }
+    }
+    if shares.len() > 0 {
+        let n = shares.len();
+        let mid = if n % 2 == 1 { shares[n / 2] } else { (shares[n / 2 - 1] + shares[n / 2] + 1) / 2 };
+        let low = shares[0];
+        let high = shares[n - 1];
+        out = out + f"\nPilot share of the code that implements a keyword ({n} keywords with code found): median {mid}%, lowest {low}%, highest {high}%.\n";
+    }
+    return out;
+}
+
+fn insert_sorted(xs: List<i64>, v: i64) -> List<i64> {
+    var out = xs;
+    out.push(v);
+    var at = out.len() - 1;
+    while at > 0 && out[at - 1] > v {
+        out[at] = out[at - 1];
+        at = at - 1;
+    }
+    out[at] = v;
+    return out;
+}

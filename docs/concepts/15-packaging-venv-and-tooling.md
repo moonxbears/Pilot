@@ -106,7 +106,7 @@ Compiled Pilot code and external C/C++ applications link against native artifact
 | `pilot <file> [args...]` | Shorthand execution of `.pilot` source or `.pilc` precompiled binary. |
 | `pilot compile <file.pilot> [-o out.pilc]` | Precompiles a `.pilot` source file into optimized `.pilc` v3 bytecode. |
 | `pilot compile --stdlib` | Precompiles all 40 standard library modules into `stdlib/.pilc-cache/`. |
-| `pilot build <file> [options]` | Compiles Pilot source to native AOT binary, LLVM IR, C, WASM, or GPU. |
+| `pilot build <file> [-o out] [--target native\|c] [--release]` | Compiles Pilot source through PilIR and C11 to a native executable with the host `cc` (the C is kept as `<out>.c`; runtime: [`runtime/c/pilot_rt.h`](../../runtime/c/pilot_rt.h)); `--target c` writes only the C. LLVM, WASM, GPU and assembly targets are not built yet (seam `build.target`). |
 | `pilot check <file>` | Zero-allocation syntax and semantic analysis. |
 | `pilot fmt <file>` | Formats source files according to style invariants. |
 | `pilot test [filter] [--diff]` | Discovers and executes unit, integration, and differential semantic test suites. |

@@ -1,0 +1,7 @@
+// A cascade step acts on the constant itself: `XS..push(3)` changes it,
+// which is CONST001.
+const XS = [1, 2];
+
+fn main() {
+    XS..push(3);
+}

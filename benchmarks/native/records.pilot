@@ -1,0 +1,40 @@
+// F6 benchmark: struct values in a list, read field by field and rebuilt
+// each step. 1,000 bodies move by their velocity for 2,000 steps and turn
+// back at the walls 0 and 10,000; the program prints the sum of their
+// positions and of their velocities. The expected output
+// (records.stdout) is what the C reference, records.c, prints.
+struct Body {
+    pub pos: i64;
+    pub vel: i64;
+}
+
+fn main() {
+    var bodies: List<Body> = [];
+    var i = 0;
+    while i < 1000 {
+        bodies.push(Body { pos: i * 10, vel: i % 7 - 3 });
+        i = i + 1;
+    }
+    var step = 0;
+    while step < 2000 {
+        var j = 0;
+        while j < 1000 {
+            let b = bodies[j];
+            let p = b.pos + b.vel;
+            let v = if p < 0 || p > 10000 { 0 - b.vel } else { b.vel };
+            bodies[j] = Body { pos: p, vel: v };
+            j = j + 1;
+        }
+        step = step + 1;
+    }
+    var pos = 0;
+    var vel = 0;
+    i = 0;
+    while i < 1000 {
+        pos = pos + bodies[i].pos;
+        vel = vel + bodies[i].vel;
+        i = i + 1;
+    }
+    print(pos);
+    print(vel);
+}

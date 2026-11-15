@@ -99,12 +99,19 @@ fn workspace_root() -> PathBuf {
 
 fn load_gate_bundle(root: &Path) -> String {
     let deps = [
+        "stdlib/core/os_abi.pilot",
+        "stdlib/core/host_raw.pilot",
+        "stdlib/core/builtins/native_calls.pilot",
+        "stdlib/core/file.pilot",
+        "stdlib/core/env.pilot",
         "stdlib/crypto/hash.pilot",
         "stdlib/std/proc.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/lexer.pilot",
         "selfhost/ast.pilot",
         "selfhost/parser.pilot",
         "selfhost/pilotc.pilot",
+        "selfhost/gate/airlock_abi.pilot",
         "selfhost/gate/manifest.pilot",
         "selfhost/gate/seed_audit.pilot",
         "selfhost/gate/rename_litmus.pilot",
@@ -112,6 +119,7 @@ fn load_gate_bundle(root: &Path) -> String {
         "selfhost/gate/ledger/seams.pilot",
         "selfhost/gate/ledger/wiring.pilot",
         "selfhost/gate/seam_gate.pilot",
+        "selfhost/gate/keyword_gate.pilot",
         "selfhost/gate/runner.pilot",
     ];
     let mut combined = String::with_capacity(96 * 1024);
@@ -194,7 +202,7 @@ pub fn test_m1_1_dynamic_vocabulary_harvester_and_fast_gate001_slice_injection()
          let t_start = gate_time_now_us();\n\
          let v_inj = verify_rust_source_name_blind(\"crates/pilot-analysis/src/infer.rs\", \"{inj_esc}\", sreg, vocab);\n\
          let dt_us = gate_time_now_us() - t_start;\n\
-         let v_clean = verify_rust_source_name_blind(\"crates/pilot-rt/src/clean_probe.rs\", \"{clean_esc}\", sreg, vocab);\n\
+         let v_clean = verify_rust_source_name_blind(\"crates/pilot-vm/src/clean_probe.rs\", \"{clean_esc}\", sreg, vocab);\n\
          let v_bad = verify_rust_source_name_blind(\"crates/pilot-codegen/src/lib.rs\", \"{bad_esc}\", sreg, vocab);\n\
          let v0 = glist_get(v_inj, 0);\n\
          let b0 = glist_get(v_bad, 0);\n\
@@ -296,6 +304,7 @@ pub fn test_m1_2_rust_tamper_unlock_comment_freedom_and_retired_scripts_purged()
         std::os::unix::fs::symlink(root.join("stdlib"), tmp_ws.join("stdlib")).unwrap();
         std::os::unix::fs::symlink(root.join("selfhost"), tmp_ws.join("selfhost")).unwrap();
         std::os::unix::fs::symlink(root.join("tests"), tmp_ws.join("tests")).unwrap();
+        std::os::unix::fs::symlink(root.join("docs"), tmp_ws.join("docs")).unwrap();
         for ent in std::fs::read_dir(root.join("crates")).unwrap().flatten() {
             let cname = ent.file_name();
             if cname.to_string_lossy() != "pilot-cli" {
@@ -408,7 +417,7 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     let parity = gate_entry("bootstrap_parity");
     assert!(
         out.status.success()
-            && res.contains("\"gate_count\":5")
+            && res.contains("\"gate_count\":6")
             && res.contains("\"at_seams\":1")
             && res.contains("\"total_violations\":0")
             && litmus.contains("\"passed\":true,\"at_seam\":\"\""),
@@ -429,11 +438,15 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
         .and_then(|t| t.split(|c: char| !c.is_ascii_digit()).next())
         .and_then(|n| n.parse().ok())
         .unwrap_or(0);
-    let conformance_programs = std::fs::read_dir(root.join("tests/conformance"))
+    // The programs live in case folders, one per area, under the corpus root.
+    let is_case = |p: &std::path::PathBuf| p.extension().is_some_and(|x| x == "pilot") && p.with_extension("stdout").exists();
+    let conformance_programs: usize = std::fs::read_dir(root.join("tests/conformance"))
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "pilot") && p.with_extension("stdout").exists())
-        .count();
+        .filter(|p| p.is_dir() && p.file_name().is_some_and(|n| n != "known_bugs"))
+        .map(|dir| std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok().map(|e| e.path())).filter(is_case).count())
+        .sum();
+    assert!(conformance_programs > 0, "no conformance programs found under tests/conformance/<area>/");
     assert!(
         scanned >= 2 * conformance_programs,
         "the sandbox must hold every conformance program in both passes ({scanned} < 2 x {conformance_programs})"
@@ -452,9 +465,10 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     //    `fn f(a: utf8, ` (14 bytes), so `b` moves to column 15.
     let moved = eval_gate_script(
         &bundle,
-        "let rmap = __engine(\"map_new\");\n\
-         __engine(\"map_set\", rmap, \"str\", \"utf8\");\n\
-         __engine(\"map_set\", rmap, \"res\", \"outcome\");\n\
+        "let pairs = glist_new();\n\
+         let _ = glist_push(pairs, rl_make_pair(\"str\", \"utf8\"));\n\
+         let _ = glist_push(pairs, rl_make_pair(\"res\", \"outcome\"));\n\
+         let rmap = rl_pairs_to_map(pairs);\n\
          rl_rename_stderr(\"error[X]: `res<str>` here\\np.pilot:2:14\\n\", \"// head\\nfn f(a: str, b: res) {\\n}\\n\", rmap);",
     );
     assert_eq!(moved, "error[X]: `outcome<utf8>` here\np.pilot:2:15\n");
@@ -515,7 +529,7 @@ pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status() {
     let fast_json = String::from_utf8(fast_out.stdout).unwrap();
     assert!(
         fast_json.contains("\"passed\":true")
-            && fast_json.contains("\"gate_count\":3")
+            && fast_json.contains("\"gate_count\":4")
             && fast_json.contains("\"at_seams\":0")
             && fast_json.contains("\"total_violations\":0"),
         "Unexpected fast gate JSON: {}",

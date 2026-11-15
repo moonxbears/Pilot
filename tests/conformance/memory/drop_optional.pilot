@@ -1,0 +1,46 @@
+// F7: an optional of a value that needs dropping drops its payload when it
+// holds one, and nothing when it is none. Unwrapping it (`if some x = o`,
+// `guard some x = o`, `o ?? d`) moves the payload out: the unwrapped binding
+// owns it and drops it after its last use in its branch (or, after a guard,
+// in the rest of the block); the optional itself drops nothing more.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn make(n: str) -> Res => Res { name: n };
+
+fn find(n: str, ok: bool) -> Res? {
+    if ok {
+        return make(n);
+    }
+    return none;
+}
+
+// Only looks at the optional; the caller keeps it.
+fn look(ref _o: Res?) -> str => "looked";
+
+fn main() {
+    let a: Res? = make("a");
+    print(look(a));
+    let b: Res? = none;
+    print(look(b));
+    if some x = find("x", true) {
+        print(f"got {x.name}");
+    }
+    let c = find("c", true);
+    if some y = c {
+        print(f"got {y.name}");
+    }
+    let d = find("d", false);
+    let e = d ?? make("fallback");
+    print(e.name);
+    guard some held = find("g", true) else {
+        return;
+    }
+    print(held.name);
+    print("end");
+}

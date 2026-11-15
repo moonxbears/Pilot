@@ -1,0 +1,24 @@
+// KNOWN BUG seed.struct_ok_unwrapped: a function declared `P ! str` that
+// returns a record `P { .. }` returns a success holding it, so
+// `make(4)?` is that record and `use_it(4)` is 4 + 1 = 5; `make(-1)` fails
+// and `catch` gives 0. The seed returns the bare record, which `?` then
+// mistakes for a result ("no method `is_success`"). PilIR's interpreter
+// prints 5 and 0.
+struct P : IValue {
+    pub a: i64;
+}
+
+fn make(n: i64) -> P ! str {
+    if n < 0 { return res<P, str>.err("negative"); }
+    return P { a: n };
+}
+
+fn use_it(n: i64) -> i64 ! str {
+    let p = make(n)?;
+    return p.a + 1;
+}
+
+fn main() {
+    print(use_it(4) catch e => 0);
+    print(use_it(-1) catch e => 0);
+}

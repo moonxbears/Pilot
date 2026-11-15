@@ -1,0 +1,2 @@
+error[SYN001]: a parameter that gathers the rest of the arguments (`*args`, `**kwargs`) is not built yet
+err_rest_param.pilot:4:10

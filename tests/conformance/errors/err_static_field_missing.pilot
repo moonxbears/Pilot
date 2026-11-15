@@ -1,0 +1,7 @@
+struct Counter {
+    static var count: i64 = 0;
+}
+
+fn main() {
+    print(Counter.missing);
+}

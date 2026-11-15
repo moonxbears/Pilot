@@ -8,12 +8,14 @@
 //! Exit codes: the integer returned by `main` (0 when it returns nothing);
 //! `1` for runtime faults.
 
+use crate::check;
 use crate::link::LinkedSource;
 use crate::tool;
 use pilot_analysis::PhysicsRegistry;
-use pilot_rt::PilotVal;
 use pilot_span::ByteSpan;
-use pilot_vm::{codes, BytecodeCompiler, HostValue, PilVirtualMachine, PilcBinary};
+use pilot_vm::lower_drop::{DropAction, DropItem, DropPlan};
+use pilot_vm::lower_probe::ProbePlan;
+use pilot_vm::{codes, BytecodeCompiler, HostValue, PilVirtualMachine, PilcBinary, PilotVal};
 use std::fs;
 
 pub const EXIT_FAILURE: i32 = 1;
@@ -78,6 +80,8 @@ fn exit_code_of(v: PilotVal) -> i32 {
 
 /// The Pilot sources of the module loader (`mg_link_plan`).
 const LOADER: &[&str] = &[
+    "stdlib/core/os_abi.pilot",
+    "stdlib/core/host_raw.pilot",
     "stdlib/core/file.pilot",
     "selfhost/diagnostics/model.pilot",
     "selfhost/loader/module_graph.pilot",
@@ -126,6 +130,95 @@ pub(crate) fn link_plan(path: &str) -> Result<Vec<String>, Vec<Diag>> {
 /// source text linked after the program as its entry unit: it runs instead of
 /// the program's `main` (the test runner calls one function this way).
 pub fn compile(path: &str, tail: Option<&str>) -> Result<Program, Vec<Diag>> {
+    compile_planned(path, tail, None)
+}
+
+/// The seed's drop plan from the checker's, its nodes moved into the
+/// offsets of `source`.
+fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropPlan {
+    let bases: std::collections::HashMap<&str, u32> = source.units().map(|(p, _, b)| (p, b)).collect();
+    let mut out = DropPlan::default();
+    for (ty, glue) in &plan.glue {
+        out.glue.insert(ty.clone(), glue.clone());
+    }
+    for (ty, fields) in &plan.copy_glue {
+        out.copy_glue.insert(ty.clone(), fields.clone());
+    }
+    for r in &plan.rows {
+        let Some(&base) = bases.get(r.file.as_str()) else { continue };
+        let key = (base + r.start, base + r.end, r.kind);
+        let item = || DropItem { binding: r.a.clone(), ty: r.b.clone() };
+        match r.action {
+            DropAction::Before => out.before.entry(key).or_default().push(item()),
+            DropAction::After => out.after.entry(key).or_default().push(item()),
+            DropAction::Exit => out.exit.entry(key).or_default().push(item()),
+            DropAction::Else => out.on_else.entry(key).or_default().push(item()),
+            DropAction::Replace => out.replace.entry(key).or_default().push(item()),
+            DropAction::Flag => out.flag.entry(key).or_default().push(item()),
+            DropAction::Moved => out.moved.entry(key).or_default().push(item()),
+            DropAction::Guard => out.guard.entry(key).or_default().push(item()),
+            DropAction::Seam => out.seams.entry(key).or_default().push((r.a.clone(), r.b.clone())),
+            DropAction::Copy => {
+                out.copies.insert(key, r.a.clone());
+            }
+            DropAction::Discard => {
+                out.discards.insert(key, r.b.clone());
+            }
+            DropAction::ReplaceElement => {
+                out.element_replace.insert(key, (r.a.clone(), r.b.clone()));
+            }
+            DropAction::ReceiverType => {
+                out.receivers.insert(key, r.a.clone());
+            }
+            DropAction::NumericType => {
+                out.numeric.insert(key, r.a.clone());
+            }
+            DropAction::TypeTest => {
+                out.type_tests.insert(key, (r.a.clone(), r.b.clone()));
+            }
+            DropAction::ViewCast => {
+                let args = r.b.split_whitespace().filter_map(|w| w.parse().ok()).collect();
+                out.view_casts.insert(key, (r.a.clone(), args));
+            }
+            DropAction::QuoteBuild => {
+                out.quote_builds.insert(key, (r.a.clone(), r.b.clone()));
+            }
+            DropAction::QuoteHole => {
+                out.quote_holes.insert(key, (r.a.clone(), r.b.clone()));
+            }
+            DropAction::Glue | DropAction::CopyGlue => {}
+        }
+    }
+    out
+}
+
+/// The seed's probe plan from the checker's probes, their statements moved
+/// into the offsets of `source`.
+fn seed_probe_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> ProbePlan {
+    let bases: std::collections::HashMap<&str, u32> = source.units().map(|(p, _, b)| (p, b)).collect();
+    let mut out = ProbePlan::default();
+    for p in &plan.probes {
+        let Some(&base) = bases.get(p.file.as_str()) else { continue };
+        out.at.entry((base + p.start, base + p.end, p.kind)).or_default().push(p.probe.clone());
+    }
+    out
+}
+
+/// `compile`, dropping owned values where the checker's `plan` says (F7).
+pub fn compile_planned(path: &str, tail: Option<&str>, plan: Option<&check::CheckedDropPlan>) -> Result<Program, Vec<Diag>> {
+    compile_entry(path, tail, &[], plan)
+}
+
+/// `compile_planned`, with the files `tail_links` link (toolchain sources,
+/// each with the files it imports, as the loader orders them) linked before
+/// the tail (before the program's own file when there is no tail), unless
+/// the program links them already: the tail may use what they declare.
+pub fn compile_entry(
+    path: &str,
+    tail: Option<&str>,
+    tail_links: &[String],
+    plan: Option<&check::CheckedDropPlan>,
+) -> Result<Program, Vec<Diag>> {
     if path.ends_with(".pilc") {
         return fs::read(path)
             .map_err(|e| e.to_string())
@@ -144,8 +237,33 @@ pub fn compile(path: &str, tail: Option<&str>) -> Result<Program, Vec<Diag>> {
             Err(e) => return Err(vec![Diag::whole_file(&p, UNREADABLE, format!("cannot read file: {e}"))]),
         }
     }
-    if let Some(t) = tail {
-        files.push(("<entry>".to_string(), t.to_string()));
+    let canonical = |p: &str| fs::canonicalize(p).map_or_else(|_| p.to_string(), |c| c.to_string_lossy().into_owned());
+    let mut seen: std::collections::HashSet<String> = files.iter().map(|(p, _)| canonical(p)).collect();
+    let mut extras = Vec::new();
+    for extra in tail_links {
+        // A toolchain source, found under the toolchain's root.
+        let rooted = std::path::Path::new(&tool::toolchain_root()).join(extra);
+        for p in link_plan(&rooted.to_string_lossy().replace('\\', "/"))? {
+            if !seen.insert(canonical(&p)) {
+                continue;
+            }
+            match fs::read_to_string(&p) {
+                Ok(src) => extras.push((p, src)),
+                Err(e) => return Err(vec![Diag::whole_file(&p, UNREADABLE, format!("cannot read file: {e}"))]),
+            }
+        }
+    }
+    match tail {
+        Some(t) => {
+            files.extend(extras);
+            files.push(("<entry>".to_string(), t.to_string()));
+        }
+        // The program's own file stays last: the entry unit is the last one.
+        None => {
+            let entry = files.pop();
+            files.extend(extras);
+            files.extend(entry);
+        }
     }
     let source = LinkedSource::parse(files);
     let locate = |span: ByteSpan, code: &str, message: &str| {
@@ -163,12 +281,17 @@ pub fn compile(path: &str, tail: Option<&str>) -> Result<Program, Vec<Diag>> {
         .arena
         .diagnostics
         .iter()
-        .map(|(span, msg)| locate(*span, codes::SYNTAX, msg))
+        .map(|(span, msg)| {
+            let (code, text) = leading_code(msg).unwrap_or((codes::SYNTAX, msg));
+            locate(*span, code, text)
+        })
         .collect();
     if !parse_diags.is_empty() {
         return Err(parse_diags);
     }
-    let bin = BytecodeCompiler::compile_linked(&source.arena);
+    let drops = plan.map(|p| seed_drop_plan(&source, p)).unwrap_or_default();
+    let probes = plan.map(|p| seed_probe_plan(&source, p)).unwrap_or_default();
+    let bin = BytecodeCompiler::compile_linked_with_plans(&source.arena, drops, probes);
     if !bin.diagnostics.is_empty() {
         return Err(bin
             .diagnostics
@@ -180,6 +303,16 @@ pub fn compile(path: &str, tail: Option<&str>) -> Result<Program, Vec<Diag>> {
         source: Some(source),
         bin,
     })
+}
+
+/// A parser message that names its own code (`CTIME007: ..`): the code and
+/// the text after it.
+fn leading_code(msg: &str) -> Option<(&str, &str)> {
+    let (code, text) = msg.split_once(": ")?;
+    let letters = code.bytes().take_while(u8::is_ascii_uppercase).count();
+    let digits = code.len() - letters;
+    let shaped = letters >= 2 && digits == 3 && code[letters..].bytes().all(|b| b.is_ascii_digit());
+    shaped.then_some((code, text))
 }
 
 /// Runs a compiled program with the script arguments `args`. Runtime faults
@@ -247,28 +380,48 @@ pub fn declared_functions(path: &str) -> Option<HostValue> {
     Some(HostValue::List(out))
 }
 
-/// The self-hosted analyzer's diagnostics for the file at `path`, read on
-/// its own (`selfhost/analyzer.pilot`, run by `pilot_analysis`). A fault
-/// inside the analyzer is reported as an error, never dropped.
+/// The self-hosted analyzer's diagnostics for the program at `path`
+/// (`selfhost/analyzer.pilot`, run by `pilot_analysis`). The analyzer reads
+/// the whole linked program, so a declaration in an imported file is seen
+/// where it is used; only diagnostics inside the user's own files (not the
+/// toolchain's `stdlib/`) are kept. A program that does not link is read on
+/// its own: `pilot check` reports why it does not link. A fault inside the
+/// analyzer is reported as an error, never dropped.
 pub fn analyze(path: &str) -> Vec<Diag> {
-    let Ok(src) = fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    let result = pilot_analysis::AnalysisPipeline::analyze_source(&src);
+    let paths = link_plan(path).unwrap_or_else(|_| vec![path.to_string()]);
+    let mut sources = Vec::with_capacity(paths.len());
+    let mut user = Vec::new();
+    for p in paths {
+        let Ok(src) = fs::read_to_string(&p) else {
+            return Vec::new();
+        };
+        if !crate::check::in_stdlib(&p) {
+            user.push(p.clone());
+        }
+        sources.push((p, src));
+    }
+    let linked = LinkedSource::parse(sources);
+    let result = pilot_analysis::AnalysisPipeline::analyze(&linked.arena, linked.arena.root);
     let mut out: Vec<Diag> = result
         .diagnostics
         .iter()
-        .map(|d| Diag {
-            code: d.code.clone(),
-            message: d
-                .message
-                .strip_prefix(&format!("{}: ", d.code))
-                .unwrap_or(&d.message)
-                .to_string(),
-            file: path.to_string(),
-            start: d.span.start,
-            end: d.span.end,
-            severity: d.severity.as_lsp_code(),
+        .filter_map(|d| {
+            let (file, start, end) = linked.resolve(d.span);
+            if !user.contains(&file) {
+                return None;
+            }
+            Some(Diag {
+                code: d.code.clone(),
+                message: d
+                    .message
+                    .strip_prefix(&format!("{}: ", d.code))
+                    .unwrap_or(&d.message)
+                    .to_string(),
+                file,
+                start,
+                end,
+                severity: d.severity.as_lsp_code(),
+            })
         })
         .collect();
     if let Some(e) = &result.physics.analyzer_error {

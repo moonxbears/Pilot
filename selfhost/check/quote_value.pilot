@@ -1,0 +1,300 @@
+// ==============================================================================
+// FILE: selfhost/check/quote_value.pilot
+// `quote { e }` as a value: its tree, its holes, what it may hold, and the
+// calls the engines make to build it.
+// ==============================================================================
+// A quote is checked where it is written, like any code there, and never
+// run: its type is `ast<T>` for `T` the type of `e` (infer.pilot
+// `quote_type`), and a hole `$x` is a `U` inside it when `x` is an `ast<U>`,
+// else a value of `x`'s own type made into its literal (`hole_type`).
+//
+// The engines build the value with the functions the program binds
+// (stdlib/core/primitives/ast.pilot): `quote` decodes the tree this module
+// writes (`quote_wire`), each hole in source order is then filled with
+// `quote hole`, after making a literal tree of a plain value with the
+// `quote lift` function whose parameter takes its type.
+//
+// Wire: each node in preorder as `kind/length/text/children;`, the length
+// that of the text in bytes. The text of a literal, a name or an operator
+// is its source text, so the tree keeps what was written (`0x10`, `"a\n"`).
+//
+// QUOTE001: a construct a quote cannot hold yet (it is never dropped), or a
+// program with no function bound to `quote`. QUOTE002: a hole whose value
+// is neither an `ast` nor a type some `quote lift` takes. QUOTE003: `$x`
+// outside a quote.
+//
+// The seed reads the calls from the run plan: a `QuoteBuild` row per quote
+// `[action, span, kind, decode function, wire]` and a `QuoteHole` row per
+// hole `[action, span, kind, fill function, lift function or ""]`. PilIR
+// asks this module itself (selfhost/ir/lower_quote.pilot).
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Check.QuoteValue;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.infer.*;
+use selfhost.check.drops.*;
+use selfhost.check.diag.*;
+
+/// What a quote may hold, for QUOTE001.
+pub pure fn quote_holds() -> str =>
+    "literals, names, operators, calls, members, indexing, lists, tuples, blocks, `let`/`var`, `if`, `return` and assignments";
+
+/// The source text between offsets `a` and `b` of the file node `n` is in,
+/// without spaces or the parentheses around operands: the operator written
+/// between two operands.
+fn text_between(s: Snap, n: i64, a: i64, b: i64) -> str {
+    let full = node_text(s, n);
+    let base = span_start(s, n);
+    if a < base || b < a || b - base > full.len() as i64 { return ""; }
+    let raw = full.slice(a - base, b - base);
+    var out = "";
+    var i: usize = 0;
+    while i < raw.len() {
+        let c = raw.byte_at(i);
+        if c != 32 && c != 9 && c != 10 && c != 13 && c != 40 && c != 41 { out = out + raw.slice(i, i + 1); }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// One node of the wire.
+fn piece(word: str, text: str, count: i64) -> str => f"{word}/{text.len()}/{text}/{count};";
+
+/// Writes node `n` and its subtree to `out`, listing its holes in `holes`
+/// in source order; a node a quote cannot hold goes to `bad` instead.
+fn wire_node(s: Snap, n: i64, out: List<str>, holes: List<i64>, bad: List<i64>) {
+    let k = kind(s, n);
+    var word = "";
+    var text = "";
+    var kids: List<i64> = [];
+    if k == nk_ident() && flags(s, n) == 1 {
+        holes.push(n);
+        out.push(piece("hole", node_name(s, n), 0));
+        return;
+    }
+    if k == nk_expr_stmt() && is_tail(s, n) {
+        wire_node(s, lhs(s, n), out, holes, bad);
+        return;
+    }
+    if k == nk_int() || k == nk_float() || k == nk_bool() || k == nk_none() {
+        word = if k == nk_int() { "int" } else if k == nk_float() { "float" } else if k == nk_bool() { "bool" } else { "none" };
+        text = node_text(s, n);
+    } else if k == nk_str() {
+        let t = node_text(s, n);
+        if t.len() < 2 || t.byte_at(0) != 34 || t.starts_with("\"\"\"") {
+            bad.push(n);
+            return;
+        }
+        word = "str";
+        text = t.slice(1, t.len() - 1);
+    } else if k == nk_ident() {
+        word = "name";
+        text = node_name(s, n);
+    } else if k == nk_type_named() {
+        word = "type";
+        text = node_text(s, n);
+    } else if k == nk_binary() && flags(s, n) != op_pipe() && flags(s, n) != op_pipe_backward() {
+        word = "binary";
+        text = text_between(s, n, span_end(s, lhs(s, n)), span_start(s, rhs(s, n)));
+        kids = [lhs(s, n), rhs(s, n)];
+    } else if k == nk_unary() && flags(s, n) != unary_some() && flags(s, n) != unary_splat()
+        && flags(s, n) != unary_double_splat() && flags(s, n) != unary_deep_flatten() {
+        word = "unary";
+        text = text_between(s, n, span_start(s, n), span_start(s, lhs(s, n)));
+        kids = [lhs(s, n)];
+    } else if k == nk_call() && flags(s, n) == 0 {
+        word = "call";
+        kids = children(s, n);
+    } else if k == nk_member() && lhs(s, n) >= 0 {
+        word = "member";
+        text = sym_text(s, rhs(s, n));
+        kids = [lhs(s, n)];
+    } else if k == nk_index() {
+        word = "index";
+        kids = [lhs(s, n), rhs(s, n)];
+    } else if k == nk_list() || k == nk_tuple() || k == nk_block() {
+        word = if k == nk_list() { "list" } else if k == nk_tuple() { "tuple" } else { "block" };
+        kids = children(s, n);
+    } else if k == nk_expr_stmt() && lhs(s, n) >= 0 {
+        word = "stmt";
+        kids = [lhs(s, n)];
+    } else if k == nk_let() || k == nk_var() {
+        word = if k == nk_let() { "let" } else { "var" };
+        text = if annot(s, n) >= 0 { node_name(s, n) + ": " + node_text(s, annot(s, n)) } else { node_name(s, n) };
+        if rhs(s, n) >= 0 { kids = [rhs(s, n)]; }
+    } else if k == nk_if() {
+        word = "if";
+        kids = children(s, n);
+    } else if k == nk_return() {
+        word = "return";
+        if lhs(s, n) >= 0 { kids = [lhs(s, n)]; }
+    } else if k == nk_assign() {
+        word = "assign";
+        text = text_between(s, n, span_end(s, lhs(s, n)), span_start(s, rhs(s, n)));
+        kids = [lhs(s, n), rhs(s, n)];
+    } else {
+        bad.push(n);
+        return;
+    }
+    for c in kids {
+        if c < 0 || kind(s, c) == nk_call_arg() {
+            bad.push(if c < 0 { n } else { c });
+            return;
+        }
+    }
+    out.push(piece(word, text, kids.len()));
+    for c in kids { wire_node(s, c, out, holes, bad); }
+}
+
+/// The wire of quote `q`; its holes go to `holes`, a node it cannot hold
+/// to `bad`.
+pub fn quote_wire(s: Snap, q: i64, holes: List<i64>, bad: List<i64>) -> str {
+    var out: List<str> = [];
+    let root = quoted_root(s, q);
+    if root < 0 {
+        bad.push(q);
+        return "";
+    }
+    wire_node(s, root, out, holes, bad);
+    var text = "";
+    for x in out { text = text + x; }
+    return text;
+}
+
+/// The function that makes the literal tree of a value of type `t`, or -1.
+pub fn lift_fn(p: Program, t: i64) -> i64 {
+    if !ty_is_named(p.tt, t) { return -1; }
+    for f in bound_fns(p, quote_lift_symbol()) {
+        let params = fn_params(p.s, f);
+        if params.len() > 0 {
+            let pt = prog_annot_type(p, rhs(p.s, params[0]));
+            if ty_is_named(p.tt, pt) && ty_decl(p.tt, pt) == ty_decl(p.tt, t) { return f; }
+        }
+    }
+    return -1;
+}
+
+/// The type of the value hole `h` splices (the type of `x` in `$x`).
+fn hole_value_type(inf: Infer, h: i64) -> i64 {
+    let b = inf.r.ref_of[h];
+    return if b >= 0 { binding_type(inf, b) } else { ty_unknown() };
+}
+
+/// The function that fills hole `h`, and the one that makes its value a
+/// literal tree first (-1 when the value is a tree), or an empty list when
+/// it cannot be spliced.
+pub fn hole_fns(inf: Infer, h: i64) -> List<i64> {
+    let p = inf.p;
+    var out: List<i64> = [];
+    let fills = bound_fns(p, quote_hole_symbol());
+    if fills.len() == 0 { return out; }
+    let t = hole_value_type(inf, h);
+    let lift = if is_quote_type(p, t) { -1 } else { lift_fn(p, t) };
+    if lift < 0 && !is_quote_type(p, t) { return out; }
+    out.push(fills[0]);
+    out.push(lift);
+    return out;
+}
+
+/// `hole_fns` as the names the run plan carries ("" for no lift).
+pub fn hole_calls(inf: Infer, h: i64) -> List<str> {
+    var out: List<str> = [];
+    for f in hole_fns(inf, h) { out.push(if f < 0 { "" } else { node_name(inf.p.s, f) }); }
+    return out;
+}
+
+/// Whether the program binds `name` to an engine function
+/// (`bind_native_fn`, stdlib/core/builtins/native_calls.pilot).
+fn is_native_name(p: Program, name: str) -> bool {
+    for row in prog_engine_bindings(p) {
+        if row.len() >= 2 && row[1] == name && row[0] == "bind_native_fn" { return true; }
+    }
+    return false;
+}
+
+/// The innermost quote around node `n`, or -1.
+fn enclosing_quote(p: Program, n: i64) -> i64 {
+    var cur = p.parents[n];
+    while cur >= 0 {
+        if kind(p.s, cur) == nk_quote() { return cur; }
+        cur = p.parents[cur];
+    }
+    return -1;
+}
+
+/// Whether quote node `q` is a quote value, not a `syntax` rule's template
+/// (which the parser expands where the rule is used; flags 1).
+pub fn is_quote_value(s: Snap, q: i64) -> bool => kind(s, q) == nk_quote() && flags(s, q) == 0;
+
+/// QUOTE001-003 for the quotes and holes of the user's files.
+pub fn check_quotes(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    var n = s.user_lo;
+    while n < s.user_hi {
+        if in_user_file(s, n) && is_quote_value(s, n) {
+            var holes: List<i64> = [];
+            var bad: List<i64> = [];
+            quote_wire(s, n, holes, bad);
+            if quote_fn(p) < 0 {
+                sink_error(sink, n, "QUOTE001", "no function is bound to `quote`, so a quote cannot be a value");
+            } else if bad.len() > 0 {
+                sink_error(sink, bad[0], "QUOTE001", f"a quote cannot hold this construct yet; it holds {quote_holds()}");
+            }
+            for h in holes {
+                let t = hole_value_type(inf, h);
+                if !ty_is_unknown(p.tt, t) && hole_calls(inf, h).len() == 0 {
+                    sink_error(sink, h, "QUOTE002", f"cannot splice `{ty_display(p.tt, t)}` into a quote: a hole takes an `ast`, an integer, a float, a bool or a string");
+                }
+            }
+        }
+        // The engines never compile a quote's code, so the names it uses
+        // are checked here: a binding in scope, a function, a constant or
+        // a type.
+        if in_user_file(s, n) && kind(s, n) == nk_ident() && flags(s, n) == 0 && inf.r.ref_of[n] < 0 && enclosing_quote(p, n) >= 0
+            && is_quote_value(s, enclosing_quote(p, n)) {
+            let name = node_name(s, n);
+            if nl_get(p.fns, name).len() == 0 && global_const(inf, n) < 0 && prog_type_decl(p, name) < 0 && !is_native_name(p, name) {
+                sink_error(sink, n, "DECL001", f"undefined name `{name}`");
+            }
+        }
+        if in_user_file(s, n) && kind(s, n) == nk_ident() && flags(s, n) == 1 && p.parents[n] >= 0 && enclosing_quote(p, n) < 0 {
+            sink_error(sink, n, "QUOTE003", f"`${node_name(s, n)}` splices into a quote, and is not inside one");
+        }
+        n = n + 1;
+    }
+}
+
+/// A `QuoteBuild` row for each quote of the files the program links that
+/// can be built, and a `QuoteHole` row for each of its holes.
+pub fn plan_quotes(inf: Infer, rows: List<List<any>>) {
+    let p = inf.p;
+    let s = p.s;
+    let decode = quote_fn(p);
+    if decode < 0 { return; }
+    for q in prog_nodes_of_kind(p, nk_quote()) {
+        if in_linked_file(s, q) && is_quote_value(s, q) {
+            var holes: List<i64> = [];
+            var bad: List<i64> = [];
+            let wire = quote_wire(s, q, holes, bad);
+            var ok = bad.len() == 0;
+            var calls: List<List<str>> = [];
+            for h in holes {
+                let c = hole_calls(inf, h);
+                if c.len() == 0 { ok = false; }
+                calls.push(c);
+            }
+            if ok {
+                rows.push([DropAction::QuoteBuild as i64, span_start(s, q), span_end(s, q), kind(s, q), node_name(s, decode), wire]);
+                var i = 0;
+                while i < holes.len() {
+                    let h = holes[i];
+                    rows.push([DropAction::QuoteHole as i64, span_start(s, h), span_end(s, h), kind(s, h), calls[i][0], calls[i][1]]);
+                    i = i + 1;
+                }
+            }
+        }
+    }
+}

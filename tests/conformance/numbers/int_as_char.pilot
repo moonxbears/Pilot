@@ -1,0 +1,11 @@
+// `as char` turns a byte into the character it codes: 72 is 'H'. So
+// std.enc.hex_encode, which builds its digits that way, gives the bytes of
+// "Hi!\n" (0x48 0x69 0x21 0x0a) as 4869210a.
+
+use std.enc;
+
+fn main() {
+    let b: u8 = 72;
+    print("" + (b as char));
+    print(enc.hex_encode("Hi!\n"));
+}

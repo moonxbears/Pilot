@@ -1,0 +1,1 @@
+error[SEED001]: inline foreign-language blocks cannot run on the seed VM

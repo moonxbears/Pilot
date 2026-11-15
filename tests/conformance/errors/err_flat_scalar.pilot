@@ -1,0 +1,7 @@
+// TYPE001: `*..xs` adds the leaves of a sequence at any depth; a `bool`
+// has no leaves. It used to fail only when the program ran.
+fn main() {
+    let b = true;
+    // `*..b` starts at line 6, column 15.
+    print([0, *..b]);
+}

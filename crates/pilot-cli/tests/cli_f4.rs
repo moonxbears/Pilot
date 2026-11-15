@@ -35,14 +35,14 @@ fn well_typed_programs_get_no_diagnostic() {
     // Generics with constraints, optional and fallible values with `?`, `??`,
     // `if some` and `catch`, closures, exhaustive enum switches, numeric
     // literals of several widths, lifting into `T?` and `T ! E`.
-    assert_clean("tests/conformance/types_clean.pilot");
+    assert_clean("tests/conformance/types/types_clean.pilot");
     // Calls through local closures are uses of the local (the old analyzer
     // reported `f` as unused here).
-    assert_clean("tests/conformance/closures.pilot");
+    assert_clean("tests/conformance/control/closures.pilot");
     // Switches written as a function's value, over enums and tuples.
-    assert_clean("tests/conformance/switch.pilot");
+    assert_clean("tests/conformance/control/switch.pilot");
     // A program of several files: nothing is reported in the imported stdlib.
-    assert_clean("tests/conformance/modules.pilot");
+    assert_clean("tests/conformance/modules/modules.pilot");
 }
 
 #[test]
@@ -160,10 +160,10 @@ fn scale(x: i64) -> i64 {
     ];
     assert_eq!(got, want);
 
-    // tests/conformance/shadowing.pilot: the three inner `let x` hide the
+    // tests/conformance/control/shadowing.pilot: the three inner `let x` hide the
     // outer `x`; `let y = y + 1;` re-declares in the same block, which is not
     // shadowing. Every binding is read.
-    let out = check("tests/conformance/shadowing.pilot");
+    let out = check("tests/conformance/control/shadowing.pilot");
     let stderr = String::from_utf8_lossy(&out.stderr);
     let shadows: Vec<&str> = stderr
         .lines()
@@ -174,9 +174,9 @@ fn scale(x: i64) -> i64 {
     assert_eq!(
         shadows,
         [
-            "--> tests/conformance/shadowing.pilot:7:9",
-            "--> tests/conformance/shadowing.pilot:13:9",
-            "--> tests/conformance/shadowing.pilot:19:9",
+            "--> tests/conformance/control/shadowing.pilot:7:9",
+            "--> tests/conformance/control/shadowing.pilot:13:9",
+            "--> tests/conformance/control/shadowing.pilot:19:9",
         ]
     );
     assert!(!stderr.contains("UNUSED"), "{stderr}");
@@ -185,7 +185,7 @@ fn scale(x: i64) -> i64 {
 /// Method tables built from spliced facets (selfhost/check/methods.pilot):
 /// a clash settled by `without` or `with .. as`, and struct methods that
 /// override facet methods, are accepted, and a spliced method has its
-/// facet's type. tests/conformance/spliced_methods.pilot runs the same
+/// facet's type. tests/conformance/types/spliced_methods.pilot runs the same
 /// tables.
 #[test]
 fn spliced_facets_settled_by_modifiers_type_check() {
@@ -228,7 +228,7 @@ fn read(s: Speaker, a: Announcer) -> str {
 /// borrows, and a new value makes a moved binding usable again.
 #[test]
 fn moves_are_followed_through_control_flow() {
-    assert_clean("tests/conformance/moves_clean.pilot");
+    assert_clean("tests/conformance/memory/moves_clean.pilot");
     let src = "\
 struct Ticket : IObject { pub id: i64; }
 fn consume(t: Ticket) -> i64 => t.id;
@@ -267,7 +267,7 @@ fn stdlib_collections_provide_their_roles() {
     assert_clean("stdlib/core/primitives/list.pilot");
     assert_clean("stdlib/std/col.pilot");
     assert_clean("stdlib/core/stream.pilot");
-    assert_clean("tests/conformance/roles_clean.pilot");
+    assert_clean("tests/conformance/contracts/roles_clean.pilot");
 }
 
 /// A role gives a type its lattice: a struct that names `IBuffer` is owned

@@ -1,0 +1,9 @@
+// `[Inline]` is accepted, but no engine inlines calls yet (PROP-007), so the
+// checker reports warning[INLINE001] once, at the marked declaration, and the
+// program still runs: twice(21) = 42.
+[Inline]
+fn twice(x: i64) -> i64 => x * 2;
+
+fn main() {
+    print(twice(21));
+}

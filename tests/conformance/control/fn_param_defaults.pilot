@@ -1,0 +1,50 @@
+// A parameter's default fills an argument the call leaves out; an argument
+// that is given wins. Worked by hand:
+//   add(3)                 -> 3 + 4 = 7
+//   add(3, 10)             -> 3 + 10 = 13
+//   greet("Ann")           -> "hello" + ", " + "Ann" + "!" = "hello, Ann!"
+//   greet("Bo", "hi")      -> "hi, Bo!"
+//   greet("Cy", end: "?")  -> "hello, Cy?" (the default before the named one fills)
+//   scale(2)               -> 2 * -3 = -6
+//   flag()                 -> the default true, so 1
+//   c.bumped() with n = 5  -> 5 + 1 = 6
+//   c.bumped(10)           -> 5 + 10 = 15
+//   half()                 -> 0.5
+//   make().bumped() with n = 5 -> 6 (receiver from a call)
+//   c.bumped() for c in [Counter { n: 7 }] -> 8 (receiver from a loop)
+fn add(a: i64, b: i64 = 4) -> i64 => a + b;
+
+fn greet(name: str, word: str = "hello", end: str = "!") -> str => word + ", " + name + end;
+
+fn scale(x: i64, by: i64 = -3) -> i64 => x * by;
+
+fn flag(on: bool = true) -> i64 {
+    if on { return 1; }
+    return 0;
+}
+
+fn half(v: f64 = 0.5) -> f64 => v;
+
+struct Counter {
+    pub n: i64;
+    pub fn bumped(by: i64 = 1) -> i64 => .n + by;
+}
+
+fn main() {
+    print(add(3));
+    print(add(3, 10));
+    print(greet("Ann"));
+    print(greet("Bo", "hi"));
+    print(greet("Cy", end: "?"));
+    print(scale(2));
+    print(flag());
+    let c = Counter { n: 5 };
+    print(c.bumped());
+    print(c.bumped(10));
+    print(half());
+    print(make().bumped());
+    let cs = [Counter { n: 7 }];
+    for each_c in cs { print(each_c.bumped()); }
+}
+
+fn make() -> Counter => Counter { n: 5 };

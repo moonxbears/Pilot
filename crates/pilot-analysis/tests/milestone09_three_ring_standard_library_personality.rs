@@ -48,6 +48,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 fn eval_ring(script: &str) -> String {
     eval_files(
         &[
+            "stdlib/std/text.pilot",
             "selfhost/diagnostics/model.pilot",
             "selfhost/diagnostics/renderer.pilot",
             "selfhost/cst/autofix.pilot",

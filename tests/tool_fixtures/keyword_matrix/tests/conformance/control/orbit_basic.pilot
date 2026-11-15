@@ -1,0 +1,4 @@
+// orbit repeats its body; drift is only named in this comment.
+fn main() {
+    orbit 3 { print("lap"); }
+}

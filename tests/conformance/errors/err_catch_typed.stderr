@@ -1,0 +1,2 @@
+error[SYN001]: a typed `catch e: T` is not checked yet; write `catch e`
+err_catch_typed.pilot:9:37

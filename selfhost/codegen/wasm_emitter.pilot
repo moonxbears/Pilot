@@ -5,6 +5,8 @@
 // WASM v1 modules (`\0asm\x01\x00\x00\x00`), WAT text, and JS/TS host bindings.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct WasmBundleArtifact : IValue {
     pub module_name: str;
@@ -230,13 +232,13 @@ pub fn wm_emit_stmt_hex(st: i64, nid: i64) -> str {
 
     if k == 18 {
         let cc = __engine("ast_child_count", nid);
-        var out = "";
+        var out: List<str> = [];
         var ci = 0;
         while ci < cc {
-            out = out + wm_emit_stmt_hex(st, __engine("ast_child_at", nid, ci));
+            out.push(wm_emit_stmt_hex(st, __engine("ast_child_at", nid, ci)));
             ci = ci + 1;
         }
-        return out;
+        return text.join_text(out, "");
     }
 
     if k == 4 {
@@ -356,10 +358,10 @@ pub fn emit_arena_wasm_hex() -> str {
         return header + wm_section_hex(5, "010001");
     }
 
-    var type_entries = "";
-    var func_entries = "";
-    var export_entries = "";
-    var code_entries = "";
+    var type_entries: List<str> = [];
+    var func_entries: List<str> = [];
+    var export_entries: List<str> = [];
+    var code_entries: List<str> = [];
 
     var fi = 0;
     while fi < fcnt {
@@ -397,9 +399,9 @@ pub fn emit_arena_wasm_hex() -> str {
         }
 
         let rtypes_hex = if is_void { "00" } else { "017e" };
-        type_entries = type_entries + "60" + wm_uleb_hex(pcnt) + ptypes_hex + rtypes_hex;
-        func_entries = func_entries + wm_uleb_hex(fi);
-        export_entries = export_entries + wm_str_vec_hex(fname) + "00" + wm_uleb_hex(fi);
+        type_entries.push("60" + wm_uleb_hex(pcnt) + ptypes_hex + rtypes_hex);
+        func_entries.push(wm_uleb_hex(fi));
+        export_entries.push(wm_str_vec_hex(fname) + "00" + wm_uleb_hex(fi));
 
         let body_nid = __engine("ast_child_at", fn_nid, 0);
         __engine("map_set", st, "lcnt", 0);
@@ -415,18 +417,18 @@ pub fn emit_arena_wasm_hex() -> str {
         let insns_hex = wm_emit_stmt_hex(st, body_nid);
         let tail_hex = if is_void { "0b" } else { "42000b" };
         let fn_body_hex = locals_hex + insns_hex + tail_hex;
-        code_entries = code_entries + wm_uleb_hex(fn_body_hex.len() / 2) + fn_body_hex;
+        code_entries.push(wm_uleb_hex(fn_body_hex.len() / 2) + fn_body_hex);
 
         fi = fi + 1;
     }
 
-    export_entries = export_entries + wm_str_vec_hex("memory") + "0200";
+    export_entries.push(wm_str_vec_hex("memory") + "0200");
 
-    let sec1 = wm_section_hex(1, wm_uleb_hex(fcnt) + type_entries);
-    let sec3 = wm_section_hex(3, wm_uleb_hex(fcnt) + func_entries);
+    let sec1 = wm_section_hex(1, wm_uleb_hex(fcnt) + text.join_text(type_entries, ""));
+    let sec3 = wm_section_hex(3, wm_uleb_hex(fcnt) + text.join_text(func_entries, ""));
     let sec5 = wm_section_hex(5, "010001");
-    let sec7 = wm_section_hex(7, wm_uleb_hex(fcnt + 1) + export_entries);
-    let sec10 = wm_section_hex(10, wm_uleb_hex(fcnt) + code_entries);
+    let sec7 = wm_section_hex(7, wm_uleb_hex(fcnt + 1) + text.join_text(export_entries, ""));
+    let sec10 = wm_section_hex(10, wm_uleb_hex(fcnt) + text.join_text(code_entries, ""));
 
     return header + sec1 + sec3 + sec5 + sec7 + sec10;
 }
@@ -435,7 +437,7 @@ pub fn emit_arena_wasm_hex() -> str {
 pub fn emit_arena_wat() -> str {
     let meta = wm_collect_arena_fns();
     let fcnt = (__engine("map_get", meta, "fcnt") ?? 0);
-    var funcs = "";
+    var funcs: List<str> = [];
     var fi = 0;
     while fi < fcnt {
         let fn_nid = (__engine("map_get", meta, "fnid_" + fi) ?? 0);
@@ -454,24 +456,23 @@ pub fn emit_arena_wat() -> str {
         }
         let res_wat = if is_void { "" } else { " (result i64)" };
         let body_wat = if is_void { "nop" } else { "i64.const 0" };
-        funcs = funcs + "  (func $" + fname + " (export \"" + fname + "\")" + params_wat + res_wat + "\n    " + body_wat + "\n  )\n";
+        funcs.push("  (func $" + fname + " (export \"" + fname + "\")" + params_wat + res_wat + "\n    " + body_wat + "\n  )\n");
         fi = fi + 1;
     }
-    return "(module\n  (memory (export \"memory\") 1)\n" + funcs + ")\n";
+    return "(module\n  (memory (export \"memory\") 1)\n" + text.join_text(funcs, "") + ")\n";
 }
 
 // Emits ES2023 `.mjs` WebAssembly loader bindings for `RawAstArena`.
 pub fn emit_arena_wasm_mjs() -> str {
     let meta = wm_collect_arena_fns();
     let fcnt = (__engine("map_get", meta, "fcnt") ?? 0);
-    var names = "";
+    var names: List<str> = [];
     var fi = 0;
     while fi < fcnt {
-        if fi > 0 { names = names + ", "; }
-        names = names + "\"" + __engine("map_get", meta, "fname_" + fi) + "\"";
+        names.push("\"" + __engine("map_get", meta, "fname_" + fi) + "\"");
         fi = fi + 1;
     }
-    return "export const exportedFunctions = [" + names + "];\n"
+    return "export const exportedFunctions = [" + text.join_text(names, ", ") + "];\n"
         + emit_wasm_mjs_bindings("arena");
 }
 
@@ -479,7 +480,7 @@ pub fn emit_arena_wasm_mjs() -> str {
 pub fn emit_arena_wasm_dts() -> str {
     let meta = wm_collect_arena_fns();
     let fcnt = (__engine("map_get", meta, "fcnt") ?? 0);
-    var members = "  readonly memory: WebAssembly.Memory;\n";
+    var members: List<str> = ["  readonly memory: WebAssembly.Memory;\n"];
     var fi = 0;
     while fi < fcnt {
         let fn_nid = (__engine("map_get", meta, "fnid_" + fi) ?? 0);
@@ -498,10 +499,10 @@ pub fn emit_arena_wasm_dts() -> str {
             pi = pi + 1;
         }
         let rts = if is_void { "void" } else { "bigint" };
-        members = members + "  " + fname + "(" + psig + "): " + rts + ";\n";
+        members.push("  " + fname + "(" + psig + "): " + rts + ";\n");
         fi = fi + 1;
     }
-    return "export interface PilotModule {\n" + members + "}\n"
+    return "export interface PilotModule {\n" + text.join_text(members, "") + "}\n"
         + "export function loadPilotModule(wasmBytes: BufferSource): Promise<PilotModule>;\n";
 }
 
@@ -515,45 +516,45 @@ pub pure fn wasm_target_is_wasip2(target: str) -> bool {
 
 // Emits WASM Component Model WAT representation (`(component ...)`).
 pub fn emit_component_wat_module(pkg_name: str, world_name: str, exports: List<str>) -> str {
-    var out = "(component\n";
-    out = out + "  ;; Component: " + pkg_name + "\n";
-    out = out + "  ;; World: " + world_name + "\n";
-    out = out + "  (core module $m\n";
-    out = out + "    (memory (export \"memory\") 1)\n";
+    var out: List<str> = ["(component\n"];
+    out.push("  ;; Component: " + pkg_name + "\n");
+    out.push("  ;; World: " + world_name + "\n");
+    out.push("  (core module $m\n");
+    out.push("    (memory (export \"memory\") 1)\n");
     var i = 0;
     while i < exports.len() {
         let fn_name = exports.get(i);
-        out = out + "    (func (export \"" + fn_name + "\") (result i64) (i64.const 0))\n";
+        out.push("    (func (export \"" + fn_name + "\") (result i64) (i64.const 0))\n");
         i = i + 1;
     }
-    out = out + "  )\n";
-    out = out + "  (core instance $inst (instantiate $m))\n";
+    out.push("  )\n");
+    out.push("  (core instance $inst (instantiate $m))\n");
     var j = 0;
     while j < exports.len() {
         let fn_name = exports.get(j);
-        out = out + "  (func (export \"" + fn_name + "\") (result s64)\n";
-        out = out + "    (canon lift (core func $inst \"" + fn_name + "\"))\n";
-        out = out + "  )\n";
+        out.push("  (func (export \"" + fn_name + "\") (result s64)\n");
+        out.push("    (canon lift (core func $inst \"" + fn_name + "\"))\n");
+        out.push("  )\n");
         j = j + 1;
     }
-    out = out + ")\n";
-    return out;
+    out.push(")\n");
+    return text.join_text(out, "");
 }
 
 // Emits canonical `.wit` interface definition from exported function names.
 pub fn emit_wit_interface(pkg_namespace: str, pkg_name: str, iface_name: str, funcs: List<str>) -> str {
-    var out = "package " + pkg_namespace + ":" + pkg_name + "@0.1.0;\n\n";
-    out = out + "interface " + iface_name + " {\n";
+    var out: List<str> = ["package " + pkg_namespace + ":" + pkg_name + "@0.1.0;\n\n"];
+    out.push("interface " + iface_name + " {\n");
     var i = 0;
     while i < funcs.len() {
         let fname = funcs.get(i);
-        out = out + "    " + fname + ": func() -> s64;\n";
+        out.push("    " + fname + ": func() -> s64;\n");
         i = i + 1;
     }
-    out = out + "}\n\n";
-    out = out + "world " + pkg_name + "-world {\n";
-    out = out + "    export " + iface_name + ";\n";
-    out = out + "}\n";
-    return out;
+    out.push("}\n\n");
+    out.push("world " + pkg_name + "-world {\n");
+    out.push("    export " + iface_name + ";\n");
+    out.push("}\n");
+    return text.join_text(out, "");
 }
 

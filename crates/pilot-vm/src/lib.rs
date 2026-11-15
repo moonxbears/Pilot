@@ -5,6 +5,9 @@
 //! diagnostic in `PilcBinary::diagnostics` and compiles to a `Trap`, so a
 //! construct the seed cannot run is reported instead of silently dropped.
 
+pub mod bridge;
+mod checked;
+pub mod collect;
 pub mod codes;
 mod heap;
 pub mod instruction;
@@ -14,7 +17,9 @@ mod lower_call;
 mod lower_cascade;
 mod lower_closure;
 mod lower_defer;
+mod lower_contract;
 mod lower_destructure;
+pub mod lower_drop;
 mod lower_dispatch;
 mod lower_expr;
 mod lower_for;
@@ -22,6 +27,7 @@ mod lower_global;
 mod lower_members;
 mod lower_native;
 mod lower_pipe;
+pub mod lower_probe;
 mod lower_program;
 mod lower_stmt;
 mod lower_struct;
@@ -29,13 +35,20 @@ mod lower_switch;
 mod lower_try;
 mod lower_unit;
 mod lower_variant;
+mod lower_yield;
 mod ops;
 pub mod pilc;
+mod stage_a_natives;
+pub mod strings;
+pub mod value;
 pub mod vm;
+mod vm_gen;
 
 pub use instruction::{Instruction, Opcode};
 pub use pilc::{CompileDiagnostic, PilcBinary, PILC_V3_MAGIC, PILC_V3_VERSION};
 pub use host::HostValue;
+pub use collect::{KeyMap, Record};
+pub use value::PilotVal;
 pub use vm::{EngineIntrinsicHandler, HostOpHandler, PilVirtualMachine, VmFault, VmHook};
 
 pub mod compiler {
@@ -44,7 +57,6 @@ pub mod compiler {
 
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
-use pilot_rt::PilotVal;
 use pilot_span::ByteSpan;
 use std::collections::HashMap;
 
@@ -61,14 +73,14 @@ const FIRST_LOCAL_REG: u8 = 17;
 /// Last register available to locals.
 const LAST_LOCAL_REG: u8 = 127;
 /// First scratch register; scratch registers cycle through `128..=255`.
-const FIRST_TEMP_REG: u8 = 128;
+pub(crate) const FIRST_TEMP_REG: u8 = 128;
 /// Name of the hidden receiver parameter of methods and constructors; the
 /// body sees it as `self` (the name without the leading underscore).
 const RECEIVER: &str = "_self";
 /// The seed token that calls an engine intrinsic by name.
 const ENGINE_TOKEN: &str = "__engine";
 /// Arguments travel in `r1..=r16`.
-const MAX_CALL_ARGS: usize = 16;
+pub(crate) const MAX_CALL_ARGS: usize = 16;
 
 /// Loop bookkeeping: where `continue` jumps and which `break`s to patch.
 struct LoopCtx {
@@ -79,6 +91,20 @@ struct LoopCtx {
     /// Number of `defer` scopes open when the loop or switch began; leaving
     /// it runs the deferred statements of the scopes above.
     defer_depth: usize,
+    /// The local holding the enumerator of a `for` that walks one; leaving
+    /// the loop early closes it (`lower_yield`).
+    release: Option<u8>,
+    /// The local holding the value of a `for .. then` expression, which a
+    /// `break value` inside the loop sets.
+    result: Option<u8>,
+}
+
+/// Who a `yield` hands its value to (`lower_yield`).
+#[derive(Clone, Copy)]
+enum YieldOwner {
+    /// A `for` in value position, collecting into the list in this local.
+    /// Its `bool` records that some `yield` did.
+    Collect(u8, bool),
 }
 
 /// A lambda being compiled: what its enclosing scope can see, which of those
@@ -104,7 +130,8 @@ struct TryCtx {
 /// Per-function compiler state, saved and restored around nested functions.
 struct FnState {
     captures: Vec<CaptureCtx>,
-    defers: Vec<Vec<NodeId>>,
+    drop_flags: HashMap<String, u8>,
+    defers: Vec<Vec<lower_drop::Deferred>>,
     var_slots: HashMap<String, u8>,
     var_types: HashMap<String, String>,
     cur_ret_type: Option<String>,
@@ -115,6 +142,12 @@ struct FnState {
     loops: Vec<LoopCtx>,
     tries: Vec<TryCtx>,
     block_scopes: Vec<BlockScope>,
+    yield_owners: Vec<YieldOwner>,
+    gen_body: Option<ByteSpan>,
+    /// The contract clauses of the function being compiled (`lower_contract`).
+    contract: lower_contract::ContractCtx,
+    /// `(parameter position, slot)` of each `var ref` parameter (`lower_args`).
+    ret_outs: Vec<(u8, u8)>,
 }
 
 /// The bindings visible where a block starts. A `let` in the block that
@@ -125,9 +158,31 @@ struct BlockScope {
     types: HashMap<String, String>,
 }
 
+/// What a call to a function declared without a body stops with. The type
+/// checker reports the same seam before the program runs
+/// (`selfhost/check/clearance.pilot`); this trap is the run-time backstop.
+fn bodiless_call_message(name: &str) -> String {
+    format!(
+        "SEAM001: unconnected seam `abi.extern_call`: `{name}` is declared without a body (`extern`); \
+         calling it needs native calls through pilot.abi frame plans"
+    )
+}
+
 #[derive(Default)]
 pub struct BytecodeCompiler {
     pub instructions: Vec<Instruction>,
+    /// Where owned values are dropped (F7), when the CLI gave a plan.
+    drop_plan: Option<std::rc::Rc<lower_drop::DropPlan>>,
+    /// The `exit` drops of the `return` / `break` / `continue` being lowered.
+    pending_exit_drops: Vec<lower_drop::DropItem>,
+    /// The `replace` drops of the assignment being lowered: the value its
+    /// target held, dropped once the new value is made.
+    pending_replace: Vec<lower_drop::DropItem>,
+    /// Binding -> the register holding its drop flag, for a binding moved
+    /// on only some paths: its drops run only while the flag is set.
+    drop_flags: HashMap<String, u8>,
+    /// Calls made around statements (`lower_probe`), when the CLI gave a plan.
+    probe_plan: Option<std::rc::Rc<lower_probe::ProbePlan>>,
     pub constants: Vec<PilotVal>,
     pub pc_spans: Vec<ByteSpan>,
     pub reg_symbols: Vec<(u8, u32, u32)>,
@@ -136,13 +191,15 @@ pub struct BytecodeCompiler {
     var_types: HashMap<String, String>,
     block_scopes: Vec<BlockScope>,
     fn_ret_types: HashMap<String, String>,
-    fn_entries: HashMap<String, (u16, Vec<String>)>,
+    fn_entries: HashMap<String, (u32, Vec<String>)>,
     /// The declaration whose parameters each callee takes (`f`, `Owner.m`,
     /// `Owner.self`), for binding named arguments.
     param_decls: HashMap<String, NodeId>,
     call_patches: Vec<(usize, String, String, ByteSpan)>,
     const_maps: HashMap<String, CMap>,
     loops: Vec<LoopCtx>,
+    /// The value local of the `for .. then` loop about to open its body.
+    next_loop_result: Option<u8>,
     tries: Vec<TryCtx>,
     cur_span: ByteSpan,
     /// Declared return type of the function being compiled.
@@ -167,7 +224,22 @@ pub struct BytecodeCompiler {
     /// Enclosing lambdas, innermost last. Empty inside named functions.
     captures: Vec<CaptureCtx>,
     /// Deferred statements of each open block, innermost last.
-    defers: Vec<Vec<NodeId>>,
+    defers: Vec<Vec<lower_drop::Deferred>>,
+    /// The collecting `for`s around the code being compiled, innermost last;
+    /// a `yield` outside all of them makes the function a generator.
+    yield_owners: Vec<YieldOwner>,
+    /// Where the function being compiled first yields, when it does: it is
+    /// a generator.
+    gen_body: Option<ByteSpan>,
+    /// The contract clauses of the function being compiled (`lower_contract`).
+    contract: lower_contract::ContractCtx,
+    /// `(parameter position, slot)` of each parameter of the function being
+    /// compiled that lends the caller's storage for changing (`var ref n`):
+    /// each `Ret` hands their final values back (`lower_args`).
+    ret_outs: Vec<(u8, u8)>,
+    /// The `for` about to be compiled as a block item (statement position),
+    /// which collects nothing.
+    stmt_for: Option<NodeId>,
     /// Declared structs: fields with defaults, and whether `self(..)` exists.
     structs: HashMap<String, lower_struct::StructInfo>,
     /// Arity of every top-level function, so a function can be used as a
@@ -176,12 +248,25 @@ pub struct BytecodeCompiler {
     /// `LoadConst` instructions that must load a function's entry point once
     /// it is known.
     entry_patches: Vec<(usize, String, ByteSpan)>,
+    /// The last position handed out as a jump or entry target (`here`):
+    /// code at or before it may be reached from elsewhere.
+    label: std::cell::Cell<u32>,
+    /// Top-level functions declared without a body (`extern`): a call to one
+    /// stops at the seam `abi.extern_call` instead of being undeclared.
+    bodiless_fns: std::collections::HashSet<String>,
     /// Functions and methods of imported units, compiled on first use.
     lazy_decls: HashMap<String, lower_program::LazyDecl>,
+    /// `Owner.method` of a method a splice gives -> the names the splice's
+    /// fields have in `Owner` (`*Bundle with { count as hits }`).
+    splice_fields: HashMap<String, std::rc::Rc<HashMap<String, String>>>,
+    /// The renames of the spliced method being compiled, if any.
+    cur_splice_fields: Option<std::rc::Rc<HashMap<String, String>>>,
     /// Names a unit hides with `without`, and that unit.
     excluded: HashMap<String, Option<pilot_span::FileId>>,
     /// The unit of the node being compiled, in a linked program.
     cur_unit: Option<pilot_span::FileId>,
+    /// The unit whose top-level function a bare name reaches, by name.
+    fn_homes: HashMap<String, Option<pilot_span::FileId>>,
     /// Struct and interface declarations of every unit, by name.
     type_decls: HashMap<String, Vec<NodeId>>,
     /// Accessor block of each property, by its field node.
@@ -197,6 +282,10 @@ pub struct BytecodeCompiler {
     getters: HashMap<String, Vec<String>>,
     /// The structs with a setter for each property name.
     setters: HashMap<String, Vec<String>>,
+    /// Structs that declare an indexer getter (`self[i]`).
+    index_getters: std::collections::HashSet<String>,
+    /// Structs that declare an indexer setter (`self[i] { set => .. }`).
+    index_setters: std::collections::HashSet<String>,
     /// The property whose accessor is being compiled: the backing name
     /// reads and writes its storage on the record.
     backing: Option<String>,
@@ -220,7 +309,24 @@ impl BytecodeCompiler {
     /// Compiles a program linked from the units of `arena` (see
     /// `pilot_parser::parse_unit`), in link order with the entry unit last.
     pub fn compile_linked(arena: &AstArena) -> PilcBinary {
+        Self::compile_linked_with_drops(arena, lower_drop::DropPlan::default())
+    }
+
+    /// `compile_linked`, dropping owned values where `plan` says (F7).
+    pub fn compile_linked_with_drops(arena: &AstArena, plan: lower_drop::DropPlan) -> PilcBinary {
+        Self::compile_linked_with_plans(arena, plan, lower_probe::ProbePlan::default())
+    }
+
+    /// `compile_linked_with_drops`, also making the calls `probes` plans
+    /// around statements.
+    pub fn compile_linked_with_plans(
+        arena: &AstArena,
+        plan: lower_drop::DropPlan,
+        probes: lower_probe::ProbePlan,
+    ) -> PilcBinary {
         let mut c = Self::new();
+        c.set_drop_plan(plan);
+        c.set_probe_plan(probes);
         let units = Self::unit_items(arena);
         let last = c.compile_units(arena, &units);
         let root = arena.units.last().map_or(NodeId::NONE, |u| u.root);
@@ -239,7 +345,7 @@ impl BytecodeCompiler {
             }
         }
         c.resolve_calls();
-        if c.instructions.len() > u16::MAX as usize {
+        if c.instructions.len() > u32::MAX as usize {
             let span = arena.span(root);
             c.diagnostics.push(CompileDiagnostic {
                 span,
@@ -247,7 +353,7 @@ impl BytecodeCompiler {
                 message: format!(
                     "program needs {} instructions; PilVM jump targets address at most {}",
                     c.instructions.len(),
-                    u16::MAX
+                    u32::MAX
                 ),
             });
         }
@@ -291,6 +397,11 @@ impl BytecodeCompiler {
                     let c = self.add_constant(PilotVal::from_int(e as i64));
                     self.instructions[idx] = Instruction::encode_wide(Opcode::LoadConst, dst, c);
                 }
+                None if self.bodiless_fns.contains(&name) => {
+                    let message = bodiless_call_message(&name);
+                    let c = self.add_constant(PilotVal::from_str(&message));
+                    self.instructions[idx] = Instruction::encode_wide(Opcode::Trap, 0, c);
+                }
                 None => {
                     let message = format!("no function named `{name}`");
                     let c = self.add_constant(PilotVal::from_str(&message));
@@ -312,7 +423,19 @@ impl BytecodeCompiler {
                 .or_else(|| self.fn_entries.get(&bare))
                 .map(|&(e, _)| e);
             match entry {
-                Some(e) => self.instructions[idx] = Instruction::encode_wide(Opcode::Call, dst, e),
+                Some(e) => {
+                    // A `become` call keeps its tail-call opcode.
+                    let op = match self.instructions[idx].opcode() {
+                        Opcode::TailCall => Opcode::TailCall,
+                        _ => Opcode::Call,
+                    };
+                    self.instructions[idx] = Instruction::encode_wide(op, dst, e)
+                }
+                None if self.bodiless_fns.contains(&full) || self.bodiless_fns.contains(&bare) => {
+                    let message = bodiless_call_message(&full);
+                    let c = self.add_constant(PilotVal::from_str(&message));
+                    self.instructions[idx] = Instruction::encode_wide(Opcode::Trap, 0, c);
+                }
                 None => {
                     let message = format!("no function named `{full}`");
                     let c = self.add_constant(PilotVal::from_str(&message));
@@ -335,7 +458,7 @@ impl BytecodeCompiler {
         let r = self.next_local_reg;
         if r > LAST_LOCAL_REG {
             self.error(codes::SEED, format!(
-                "function needs more than {} local variables",
+                "function needs more than {} local variables in scope at once",
                 LAST_LOCAL_REG - FIRST_LOCAL_REG + 1
             ));
             return LAST_LOCAL_REG;
@@ -365,7 +488,7 @@ impl BytecodeCompiler {
         r
     }
 
-    fn add_constant(&mut self, val: PilotVal) -> u16 {
+    fn add_constant(&mut self, val: PilotVal) -> u32 {
         let i = self
             .constants
             .iter()
@@ -374,10 +497,16 @@ impl BytecodeCompiler {
                 self.constants.push(val);
                 self.constants.len() - 1
             });
-        i as u16
+        i as u32
     }
 
     fn emit(&mut self, op: Opcode, dst: u8, src1: u8, src2: u8) -> usize {
+        if op == Opcode::Ret {
+            for i in 0..self.ret_outs.len() {
+                let (pos, slot) = self.ret_outs[i];
+                self.push_ins(Instruction::encode(Opcode::SetOut, pos, slot, 0));
+            }
+        }
         self.push_ins(Instruction::encode(op, dst, src1, src2))
     }
 
@@ -387,25 +516,42 @@ impl BytecodeCompiler {
         self.instructions.len() - 1
     }
 
-    fn here(&self) -> u16 {
-        self.instructions.len() as u16
+    fn here(&self) -> u32 {
+        let pc = self.instructions.len() as u32;
+        self.label.set(pc);
+        pc
     }
 
-    fn emit_jump(&mut self, target: u16) -> usize {
+    fn emit_jump(&mut self, target: u32) -> usize {
         self.push_ins(Instruction::encode_wide(Opcode::Jump, 0, target))
     }
 
-    fn emit_branch(&mut self, op: Opcode, cond: u8, target: u16) -> usize {
+    fn emit_branch(&mut self, op: Opcode, cond: u8, target: u32) -> usize {
         self.push_ins(Instruction::encode_branch(op, cond, target))
     }
 
     /// Points the jump or branch at `idx` to `target`.
-    fn patch_jump(&mut self, idx: usize, target: u16) {
+    fn patch_jump(&mut self, idx: usize, target: u32) {
         let ins = self.instructions[idx];
-        self.instructions[idx] = match ins.opcode() {
-            Opcode::Jump => Instruction::encode_wide(Opcode::Jump, 0, target),
-            op => Instruction::encode_branch(op, ins.src1(), target),
-        };
+        self.instructions[idx] = Instruction((ins.0 & 0xFFFF_FFFF) | ((target as u64) << 32));
+    }
+
+    /// A branch taken when the value in `cond` is false. When a comparison
+    /// just computed `cond` and nothing reads it after the branch (`cond`
+    /// was allocated after `mark`), the two are one instruction.
+    fn emit_branch_unless(&mut self, cond: u8, mark: u8) -> usize {
+        if let Some(&cmp) = self.instructions.last() {
+            let at = self.instructions.len() - 1;
+            let op = cmp.opcode();
+            let compares =
+                matches!(op, Opcode::CmpEq | Opcode::CmpNe | Opcode::CmpLt | Opcode::CmpLe | Opcode::CmpGt | Opcode::CmpGe);
+            let dead = cmp.dst() == cond && cond >= mark.max(FIRST_TEMP_REG);
+            if compares && dead && cmp.src2() != instruction::CONST_REG && self.label.get() as usize <= at {
+                self.instructions[at] = Instruction::encode(Opcode::JumpUnless, op as u8, cmp.src1(), cmp.src2());
+                return at;
+            }
+        }
+        self.emit_branch(Opcode::JumpIfFalse, cond, 0)
     }
 
     /// Points the jump or branch at `idx` to the current end of code.
@@ -455,17 +601,150 @@ impl BytecodeCompiler {
     fn emit_intrinsic(&mut self, hook: &str, args: &[u8]) -> u8 {
         let d = self.alloc_reg();
         let mark = self.next_reg;
-        let r = self.emit_const(PilotVal::from_str(hook));
-        self.stage_args(args);
-        self.emit(Opcode::EngineIntrinsic, d, r, args.len() as u8);
+        let c = self.add_constant(PilotVal::from_str(hook));
+        self.emit_named_intrinsic(d, c, args);
         self.next_reg = mark;
         d
+    }
+
+    /// The constant the last instruction loaded into `r`, when `r` was
+    /// allocated after `mark` and no jump lands on or after that load.
+    fn loaded_constant(&self, r: u8, mark: u8) -> Option<PilotVal> {
+        let at = self.instructions.len().checked_sub(1)?;
+        let k = self.instructions[at];
+        let fresh = k.opcode() == Opcode::LoadConst && k.dst() == r && r >= mark;
+        if !fresh || self.label.get() as usize > at || self.entry_patches.iter().any(|p| p.0 == at) {
+            return None;
+        }
+        self.constants.get(k.wide() as usize).copied()
+    }
+
+    /// `map_get` of the value in `r_obj` and the key just loaded into
+    /// `r_key`, which nothing else reads: the call takes the key from the
+    /// constants instead.
+    fn emit_keyed_read(&mut self, r_obj: u8, r_key: u8) -> u8 {
+        let name = self.add_constant(PilotVal::from_str("map_get"));
+        let at = self.instructions.len().wrapping_sub(1);
+        let key = self.instructions.last().copied().filter(|k| {
+            k.opcode() == Opcode::LoadConst && k.dst() == r_key && self.label.get() as usize <= at
+        });
+        match key.map(|k| k.wide()).filter(|&k| k <= u16::MAX as u32 && name <= u16::MAX as u32) {
+            Some(k) if !self.entry_patches.iter().any(|p| p.0 == at) => {
+                self.instructions.pop();
+                self.pc_spans.pop();
+                let d = self.alloc_reg();
+                let ins = Instruction::encode(Opcode::IntrinsicKey, d, r_obj, 0);
+                self.push_ins(Instruction(ins.0 | ((((k << 16) | name) as u64) << 32)));
+                d
+            }
+            _ => self.emit_intrinsic("map_get", &[r_obj, r_key]),
+        }
+    }
+
+    /// Calls the intrinsic named by constant `c` on `args`, into `d`. Up to
+    /// two arguments are read where they are; more are staged in `r1..`.
+    fn emit_named_intrinsic(&mut self, d: u8, c: u32, args: &[u8]) {
+        let ins = if args.len() <= 2 && c <= instruction::ARGS_NAME_MASK {
+            let (a, b) = (args.first().copied().unwrap_or(0), args.get(1).copied().unwrap_or(0));
+            let ext = ((args.len() as u32) << instruction::ARGS_COUNT_SHIFT) | c;
+            Instruction(Instruction::encode(Opcode::IntrinsicArgs, d, a, b).0 | ((ext as u64) << 32))
+        } else {
+            self.stage_args(args);
+            let ins = Instruction::encode(Opcode::EngineIntrinsic, d, instruction::CONST_REG, args.len() as u8);
+            Instruction(ins.0 | ((c as u64) << 32))
+        };
+        self.push_ins(ins);
     }
 
     /// Releases every scratch register allocated after `mark`. Callers
     /// allocate their result register before taking the mark.
     fn release_to(&mut self, mark: u8) {
+        self.drop_dead_tail(mark);
         self.next_reg = mark;
+    }
+
+    /// Returns `r` from the function being lowered. The return clears the
+    /// frame, so the locals cleared just before it (`release_block_locals`)
+    /// need no clearing of their own, and `r` is returned from where it is.
+    fn emit_fn_return(&mut self, r: u8) {
+        let reachable = |c: &Self, at: usize| c.label.get() as usize > at || c.entry_patches.iter().any(|p| p.0 == at);
+        let null = PilotVal::NULL;
+        let is_null_load = |c: &Self, ins: Instruction| {
+            ins.opcode() == Opcode::LoadConst && c.constants.get(ins.wide() as usize) == Some(&null)
+        };
+        let clears_local = |ins: Instruction| {
+            let (from, n) = (ins.dst(), ins.src1());
+            ins.opcode() == Opcode::Clear && from >= FIRST_LOCAL_REG && from as usize + n as usize <= FIRST_TEMP_REG as usize
+                && !(from..from.saturating_add(n)).contains(&r)
+        };
+        let mut value = None;
+        if let Some(&last) = self.instructions.last() {
+            let at = self.instructions.len() - 1;
+            if r >= FIRST_TEMP_REG && last.dst() == r && is_null_load(self, last) && !reachable(self, at) {
+                value = self.instructions.pop().zip(self.pc_spans.pop());
+            }
+        }
+        while let Some(&last) = self.instructions.last() {
+            let at = self.instructions.len() - 1;
+            let local = (FIRST_LOCAL_REG..FIRST_TEMP_REG).contains(&last.dst()) && last.dst() != r;
+            if !(local && is_null_load(self, last) || clears_local(last)) || reachable(self, at) {
+                break;
+            }
+            self.instructions.pop();
+            self.pc_spans.pop();
+        }
+        if let Some((ins, span)) = value {
+            self.instructions.push(ins);
+            self.pc_spans.push(span);
+        }
+        self.emit_ret_of(r);
+    }
+
+    /// Returns the value in `r`; a constant loaded into `r` just before is
+    /// returned from the constants (no register is read after a return).
+    fn emit_ret_of(&mut self, r: u8) {
+        if self.loaded_constant(r, 0).is_some() {
+            let k = self.instructions.pop().map_or(0, |k| k.wide());
+            self.pc_spans.pop();
+            let ret = Instruction::encode(Opcode::Ret, 0, instruction::CONST_REG, 0);
+            // The out-slots are written before the return, as `emit` does.
+            for i in 0..self.ret_outs.len() {
+                let (pos, slot) = self.ret_outs[i];
+                self.push_ins(Instruction::encode(Opcode::SetOut, pos, slot, 0));
+            }
+            self.push_ins(Instruction(ret.0 | ((k as u64) << 32)));
+        } else {
+            self.emit(Opcode::Ret, 0, r, 0);
+        }
+    }
+
+    /// A value left in a register `release_to` gives back is never read.
+    /// While the last instruction only fills such a register and no jump
+    /// lands on or after it, it is dropped; a copy out of one into a kept
+    /// register is folded into the instruction that computed the value.
+    fn drop_dead_tail(&mut self, mark: u8) {
+        let released = |r: u8| r >= mark.max(FIRST_TEMP_REG);
+        while let Some(&last) = self.instructions.last() {
+            let at = self.instructions.len() - 1;
+            if self.label.get() as usize > at {
+                return;
+            }
+            let pure = matches!(last.opcode(), Opcode::LoadConst | Opcode::Move);
+            if pure && released(last.dst()) && !self.entry_patches.iter().any(|p| p.0 == at) {
+                self.instructions.pop();
+                self.pc_spans.pop();
+                continue;
+            }
+            if last.opcode() == Opcode::Move && released(last.src1()) && at > 0 && self.label.get() as usize <= at - 1 {
+                let prev = self.instructions[at - 1];
+                if prev.dst() == last.src1() && prev.opcode().writes_dst() {
+                    self.instructions[at - 1] = prev.with_dst(last.dst());
+                    self.instructions.pop();
+                    self.pc_spans.pop();
+                }
+            }
+            return;
+        }
     }
 
     /// Emits a trap that stops the program with `message` when reached.
@@ -490,6 +769,7 @@ impl BytecodeCompiler {
     fn save_fn_state(&mut self) -> FnState {
         FnState {
             captures: std::mem::take(&mut self.captures),
+            drop_flags: std::mem::take(&mut self.drop_flags),
             defers: std::mem::take(&mut self.defers),
             var_slots: std::mem::take(&mut self.var_slots),
             var_types: std::mem::take(&mut self.var_types),
@@ -501,11 +781,16 @@ impl BytecodeCompiler {
             loops: std::mem::take(&mut self.loops),
             tries: std::mem::take(&mut self.tries),
             block_scopes: std::mem::take(&mut self.block_scopes),
+            yield_owners: std::mem::take(&mut self.yield_owners),
+            gen_body: std::mem::take(&mut self.gen_body),
+            contract: std::mem::take(&mut self.contract),
+            ret_outs: std::mem::take(&mut self.ret_outs),
         }
     }
 
     fn restore_fn_state(&mut self, s: FnState) {
         self.captures = s.captures;
+        self.drop_flags = s.drop_flags;
         self.defers = s.defers;
         self.var_slots = s.var_slots;
         self.var_types = s.var_types;
@@ -517,6 +802,10 @@ impl BytecodeCompiler {
         self.loops = s.loops;
         self.tries = s.tries;
         self.block_scopes = s.block_scopes;
+        self.yield_owners = s.yield_owners;
+        self.gen_body = s.gen_body;
+        self.contract = s.contract;
+        self.ret_outs = s.ret_outs;
     }
 
     /// Compiles `id` with `hint` as the expected type.
@@ -528,7 +817,7 @@ impl BytecodeCompiler {
     }
 
     /// Named type of an annotation node, if it is a plain name.
-    fn annot_name(arena: &AstArena, id: NodeId) -> Option<String> {
+    pub(crate) fn annot_name(arena: &AstArena, id: NodeId) -> Option<String> {
         let tid = arena.type_annot(id)?;
         let tn = arena.node(tid);
         matches!(tn.node_kind(), NodeKind::TypeNamed | NodeKind::IdentExpr)
@@ -537,14 +826,19 @@ impl BytecodeCompiler {
 
     fn reset_fn_state(&mut self) {
         self.var_slots.clear();
+        self.drop_flags.clear();
         self.var_types.clear();
         self.cur_ret_type = None;
+        self.contract = Default::default();
         self.cur_owner = None;
         self.backing = None;
         self.loops.clear();
         self.tries.clear();
         self.block_scopes.clear();
         self.defers.clear();
+        self.yield_owners.clear();
+        self.gen_body = None;
+        self.ret_outs.clear();
         self.next_local_reg = FIRST_LOCAL_REG;
         self.next_reg = FIRST_TEMP_REG;
     }
@@ -679,6 +973,16 @@ impl BytecodeCompiler {
     }
 
     /// Records an enum declaration's variants as compile-time integers.
+    /// The integer an integer literal, or a negated one, denotes.
+    fn const_int(arena: &AstArena, id: NodeId) -> Option<i64> {
+        let n = arena.node(id);
+        match n.node_kind() {
+            NodeKind::IntLit => arena.i64_pool.get(n.lhs as usize).copied(),
+            NodeKind::UnaryExpr if n.flags == 0 => Self::const_int(arena, NodeId(n.lhs)).map(i64::wrapping_neg),
+            _ => None,
+        }
+    }
+
     fn register_enum(&mut self, arena: &AstArena, id: NodeId) {
         let cn = arena.node(id);
         if cn.flags == 0 {
@@ -691,15 +995,21 @@ impl BytecodeCompiler {
             self.register_variant_payload(arena, &e_nm, NodeId(vid));
             let vn = arena.node(NodeId(vid));
             let v_nm = Self::name(arena, vn.lhs).to_string();
-            let mut val = next;
-            if vn.flags > 0 {
-                let last = arena.extra_children[(vn.rhs as usize) + (vn.flags as usize) - 1];
-                let lcn = arena.node(NodeId(last));
-                if lcn.node_kind() == NodeKind::IntLit {
-                    val = arena.i64_pool.get(lcn.lhs as usize).copied().unwrap_or(next);
+            // `Low = 5` gives the variant its value; the next variant
+            // without one counts on from it.
+            let value = arena.field_default(NodeId(vid));
+            let val = if value.is_none() {
+                next
+            } else {
+                match Self::const_int(arena, value) {
+                    Some(v) => v,
+                    None => {
+                        self.error(codes::SEED, format!("the value of `{e_nm}.{v_nm}` must be an integer literal"));
+                        next
+                    }
                 }
-            }
-            next = val + 1;
+            };
+            next = val.wrapping_add(1);
             map.insert(v_nm, CMap::Val(PilotVal::from_int(val)));
         }
         self.const_maps.insert(e_nm, CMap::Map(map));

@@ -1,0 +1,7 @@
+// The part of a list is a list, not an element: binding it to an i64 is
+// TYPE001.
+fn main() {
+    let xs: List<i64> = [1, 2, 3];
+    let n: i64 = xs[0..2];
+    print(n);
+}

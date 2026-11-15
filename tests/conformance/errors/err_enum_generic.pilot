@@ -1,0 +1,11 @@
+// SYN001: generic parameters on an `enum` are not built; they used to be
+// dropped without a word.
+// `<T>` starts at line 4, column 9.
+enum Box<T> {
+    Full,
+    Empty,
+}
+
+fn main() {
+    print(Box::Full == Box::Empty);
+}

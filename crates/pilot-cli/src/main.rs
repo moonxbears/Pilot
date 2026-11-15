@@ -7,7 +7,9 @@ mod run;
 mod tool;
 
 /// The sources of the self-hosted CLI, linked in this order.
-const CLI: &[&str] = &[
+pub(crate) const CLI: &[&str] = &[
+    "stdlib/core/os_abi.pilot",
+    "stdlib/core/host_raw.pilot",
     "stdlib/core/file.pilot",
     "stdlib/core/env.pilot",
     "stdlib/core/primitives/map.pilot",
@@ -21,6 +23,11 @@ const CLI: &[&str] = &[
     "selfhost/cli/host.pilot",
     "selfhost/cli/report.pilot",
     "selfhost/cli/test_cmd.pilot",
+    "selfhost/cli/test_ir.pilot",
+    "selfhost/cli/test_emit.pilot",
+    "selfhost/cli/test_changed.pilot",
+    "selfhost/cli/comptime_attrs.pilot",
+    "selfhost/cli/native_build.pilot",
     "selfhost/cli/bench_cmd.pilot",
     "selfhost/cli/commands.pilot",
     "selfhost/cli/main.pilot",

@@ -1,0 +1,23 @@
+// Fixture keyword registry: three categories in the matrix, one (20) outside it.
+[KeywordCategoryDefAttr(0, "keyword.control.seed.pilot", "Seed", 1)]
+[KeywordCategoryDefAttr(1, "keyword.control.flow.pilot", "Flow", 3)]
+[KeywordCategoryDefAttr(20, "storage.type.pilot", "Types", 1)]
+[KeywordCategoryDefAttr(35, "keyword.other.domain.pilot", "Domain", 1)]
+
+    [KeywordDefAttr(0, "Binds a satellite to its host.", "~>")]
+    tether {}
+
+    [KeywordDefAttr(1, "Repeats a block around a centre | with a pipe.")]
+    orbit {}
+
+    [KeywordDefAttr(1, "Moves a value slowly.")]
+    drift {}
+
+    [KeywordDefAttr(1, "Waits without doing anything for as long as the block around it says, then lets the next statement run.")]
+    lull {}
+
+    [KeywordDefAttr(20, "A primitive type, outside the matrix.")]
+    quark {}
+
+    [KeywordDefAttr(35, "Attaches a dimension to a number literal.")]
+    unit {}

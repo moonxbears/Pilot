@@ -1,0 +1,34 @@
+// F7: a `?` inside `try` that fails jumps to `catch`, leaving the try block:
+// an owned value declared in that block is dropped on the jump. A value
+// declared outside the block is still live in `catch`, and is dropped after
+// its last use there.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn half(n: i64) -> i64? {
+    if n % 2 == 0 { return n / 2; }
+    return none;
+}
+
+fn attempt(n: i64) {
+    let outer = Res { name: f"outer{n}" };
+    try {
+        let inner = Res { name: f"inner{n}" };
+        let h = half(n)?;
+        print(f"{inner.name} {h}");
+    } catch e {
+        print(f"caught with {outer.name}");
+    }
+    print("after");
+}
+
+fn main() {
+    attempt(4);
+    attempt(3);
+    print("end");
+}

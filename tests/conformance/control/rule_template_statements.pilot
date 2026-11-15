@@ -1,0 +1,25 @@
+// A rule template may assign and defer. Hand-worked: `twice(3)` sets total
+// to 3 + 3 and prints 6; `noisy(4)` prints 4, then "left" when its block
+// ends, then main prints "after". Until 2026-11-13 the assignment and the
+// `defer` were turned into `none`, so this printed 0, 4, after.
+syntax {
+    twice(x) => quote {
+        {
+            var total = 0;
+            total = $x + $x;
+            print(total);
+        }
+    };
+    noisy(x) => quote {
+        {
+            defer print("left");
+            print($x);
+        }
+    };
+}
+
+fn main() {
+    twice(3);
+    noisy(4);
+    print("after");
+}

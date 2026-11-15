@@ -1,0 +1,28 @@
+// `f"{value:pattern}"` number patterns (stdlib/core/format.pilot). Expected
+// output worked by hand from the pattern rules:
+//   `0` digit always shown, `#` digit shown when significant, `,` or `_`
+//   groups the integer digits by the count of placeholders after it, `.`
+//   starts the fraction; rounding is half away from zero; at least one
+//   integer digit; no minus sign on a value that rounds to zero.
+fn main() {
+    let n = 1234567;
+    print(f"{n:#_###}");            // groups of 3 with `_`
+    print(f"{n:#,###}");            // groups of 3 with `,`
+    print(f"{n:#,##}");             // groups of 2: 1,23,45,67
+    print(f"{-9876543210:#_###}");  // negative, exact integer
+    print(f"{9223372036854775807:#,###}"); // largest i64, exact
+    print(f"{5:000}");              // padded to 3 digits
+    print(f"{3.14159:0.00}");       // 314.159 -> 314 hundredths
+    print(f"{2.5:#.##}");           // optional places drop trailing zeros
+    print(f"{2.0:#.##}");           // no fraction digit left: no point
+    print(f"{0.5:#.##}");           // at least one integer digit
+    print(f"{0.125:0.00}");         // 12.5 hundredths rounds away: 0.13
+    print(f"{-0.125:0.00}");        // -0.13
+    print(f"{-0.001:0.00}");        // rounds to zero: no sign
+    print(f"{0.999:0.00}");         // 99.9 hundredths -> 100 -> carries
+    print(f"{-1234.5:#,##0.00}");
+    print(f"{1999999.995:#_###.0#}"); // binary value 1999999.99500000011.. -> 2000000.00
+    print(f"{2.675:0.00}");         // binary value 2.67499999999999982.. -> 2.67
+    let pi = 3.14159;
+    print(f"pi={pi:0.0000}, n={n:#,###}, raw={n}");
+}

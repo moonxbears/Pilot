@@ -1,0 +1,33 @@
+// Static delegation `Bundle.method(var ref self, ..)` reaches a splice's own
+// method: one the struct hides with `without`, one it renames with
+// `with .. as`, and one it overrides with a method of its own.
+struct LoudFacet {
+    pub fn speak() -> str => "LOUD";
+    pub fn volume(boost: i64) -> i64 => 9 + boost;
+}
+
+struct QuietFacet {
+    pub fn speak() -> str => "quiet";
+}
+
+struct Speaker {
+    *LoudFacet without { speak } with { volume as loud_volume };
+    *QuietFacet;
+    pub name: str;
+    pub fn both() -> str => LoudFacet.speak(var ref self) + "/" + QuietFacet.speak(var ref self);
+    pub fn louder(by: i64) -> i64 => LoudFacet.volume(var ref self, by) * 2;
+}
+
+struct Announcer {
+    *QuietFacet;
+    pub fn speak() -> str => "announce, then " + QuietFacet.speak(var ref self);
+}
+
+fn main() {
+    let s = Speaker { name: "a" };
+    print(s.speak());
+    print(s.both());
+    print(s.loud_volume(1));
+    print(s.louder(3));
+    print(Announcer {}.speak());
+}

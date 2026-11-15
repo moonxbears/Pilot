@@ -73,7 +73,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
         syntax_rule!("stdlib/core/syntax/switch.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/guard.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/try_catch.pilot", &["nameof("]),
-        syntax_rule!("stdlib/core/syntax/expr_sugar.pilot", &["__engine"]),
+        syntax_rule!("stdlib/core/syntax/expr_sugar.pilot", &["register_pratt_op"]),
         syntax_rule!("stdlib/core/syntax/unit_decl.pilot", &["unit"]),
         syntax_rule!("stdlib/db/sql_syntax.pilot", &["nameof("]),
         syntax_rule!("stdlib/polyglot/polyglot_syntax.pilot", &["nameof("]),
@@ -618,17 +618,11 @@ pub fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
     let root = workspace_root();
 
     let domain_src = r#"
-        database AppDb {
-            pub users: i64;
-        }
-        adapter LegacyUser -> ModernUser {
-            pub id: i64;
-        }
         extern "C" fn c_puts(s: *u8) -> i32;
 
         fn domain_demo(users: i64[]) -> i64
-            requires len(users) >= 0
-            ensures true
+            requires(len(users) >= 0)
+            ensures(true)
         {
             transaction {
                 commit;
@@ -648,6 +642,21 @@ pub fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
         "Domain syntax diagnostics: {:?}",
         arena.diagnostics
     );
+
+    // `database` and `adapter` are registered but not built: each stops at
+    // the `keyword.unbuilt` seam instead of parsing as a struct
+    // (docs/keyword_roadmap.md K0).
+    for unbuilt in [
+        "database AppDb { pub users: i64; }",
+        "adapter LegacyUser -> ModernUser { pub id: i64; }",
+    ] {
+        let a = parse(unbuilt);
+        assert!(
+            a.diagnostics.iter().any(|(_, m)| m.contains("SEAM001") && m.contains("keyword.unbuilt")),
+            "`{unbuilt}` must stop at the keyword.unbuilt seam: {:?}",
+            a.diagnostics
+        );
+    }
 
     let syntax_modules = [
         "stdlib/core/syntax/type_construct.pilot",
@@ -691,11 +700,13 @@ pub fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
             if trimmed.starts_with("//") {
                 continue;
             }
-            if trimmed.contains("\"bind_receptor\"") || trimmed.contains("\"register_pratt_op\"") {
+            if trimmed.contains("bind_receptor") || trimmed.contains("register_pratt_op") {
                 if let Some(after) = trimmed
                     .split("\"bind_receptor\",")
                     .nth(1)
                     .or_else(|| trimmed.split("\"register_pratt_op\",").nth(1))
+                    .or_else(|| trimmed.split("bind_receptor(").nth(1))
+                    .or_else(|| trimmed.split("register_pratt_op(").nth(1))
                 {
                     let arg = after.trim_start();
                     if let Some(rest) = arg.strip_prefix('"') {

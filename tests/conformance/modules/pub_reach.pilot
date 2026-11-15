@@ -1,0 +1,16 @@
+// A `pub` item of another package is usable here: the function, the struct,
+// its `pub` field and its `pub` methods (tests/conformance/modules/lib/vault.pilot).
+//
+// Expected output, worked by hand:
+//   total() = secret 1 + hidden 10 + shared 100 + plain 1000 = 1111 (the
+//   private helpers are used inside their own package).
+//   safe(3).label is "safe"; peek() = code 3 * 2 = 6; rank() = level 3 + 1 = 4.
+use lib.vault;
+
+fn main() {
+    print(total());
+    let s = safe(3);
+    print(s.label);
+    print(s.peek());
+    print(s.rank());
+}

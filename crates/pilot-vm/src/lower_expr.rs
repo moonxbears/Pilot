@@ -5,7 +5,7 @@ use crate::lower_native::native;
 use crate::{BytecodeCompiler, CMap};
 use pilot_parser::NativeKind;
 use pilot_ast::{AstArena, BinaryOp, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 pub(crate) const OP_RANGE_INCLUSIVE: u16 = BinaryOp::RangeInclusive as u16;
 pub(crate) const OP_RANGE_HALF_OPEN: u16 = BinaryOp::RangeHalfOpen as u16;
@@ -53,7 +53,13 @@ impl BytecodeCompiler {
         let (parent_span, parent_unit) = (self.cur_span, self.cur_unit);
         self.cur_span = arena.span(node_id);
         self.cur_unit = arena.unit_of(node_id).map(|u| u.file);
+        self.drops_before(arena, node_id);
+        let captured = self.probes_before(arena, node_id);
         let r = self.compile_node_kind(arena, node_id);
+        let r = self.copy_if_planned(arena, node_id, r);
+        self.drop_if_discarded(arena, node_id, r);
+        self.probes_after(arena, node_id, &captured);
+        self.drops_after(arena, node_id);
         self.cur_span = parent_span;
         self.cur_unit = parent_unit;
         r
@@ -78,8 +84,9 @@ impl BytecodeCompiler {
             NodeKind::MemberExpr => self.compile_member(arena, node_id),
             NodeKind::IndexExpr => self.compile_index(arena, node.lhs, node.rhs),
             NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => self.compile_let(arena, node_id),
-            NodeKind::AssignStmt => self.compile_assign(arena, node.lhs, node.rhs),
-            NodeKind::BinaryExpr => self.compile_binary(arena, node.flags, node.lhs, node.rhs),
+            NodeKind::AssignStmt => self.compile_assign(arena, node_id, node.lhs, node.rhs),
+            NodeKind::BinaryExpr => self.compile_arithmetic(arena, node_id, node.flags, node.lhs, node.rhs),
+            NodeKind::UnaryExpr if node.flags == pilot_ast::UNARY_OP_OLD => self.compile_old(node_id),
             NodeKind::UnaryExpr => self.compile_unary(arena, node.flags, node.lhs),
             NodeKind::IfExpr => self.compile_if(arena, node_id),
             NodeKind::MatchExpr => self.compile_match(arena, node_id),
@@ -88,14 +95,18 @@ impl BytecodeCompiler {
             NodeKind::TryPropagateExpr => self.compile_try_propagate(arena, node.lhs),
             NodeKind::WhileStmt => self.compile_while(arena, node.lhs, node.rhs),
             NodeKind::ForExpr => self.compile_for(arena, node_id),
-            NodeKind::BreakStmt => self.compile_break(arena, NodeId(node.lhs).is_some()),
+            NodeKind::BreakStmt => self.compile_break(arena, NodeId(node.lhs)),
             NodeKind::ContinueStmt => self.compile_continue(arena, NodeId(node.lhs).is_some()),
-            NodeKind::DeferStmt => self.compile_defer(node.lhs),
+            NodeKind::DeferStmt => self.compile_defer(node.lhs, node.flags),
             NodeKind::TryStmt => self.compile_try_stmt(arena, node_id),
             NodeKind::CascadeExpr => self.compile_cascade(arena, node_id),
             NodeKind::ComptimeExpr => self.compile_comptime(arena, node_id),
+            NodeKind::QuoteExpr => self.compile_quote(arena, node_id),
             NodeKind::CatchRecoveryExpr => self.compile_catch_recovery(arena, node.lhs, node.rhs),
+            NodeKind::ReturnStmt if node.flags == pilot_parser::RETURN_TAIL_CALL => self.compile_become(arena, node.lhs),
             NodeKind::ReturnStmt => self.compile_return(arena, node.lhs),
+            NodeKind::YieldStmt => self.compile_yield(arena, node_id),
+            NodeKind::ExprStmt if node.flags != 0 => self.compile_contract_clause(arena, node.flags, node.lhs),
             NodeKind::ExprStmt => self.compile_node(arena, NodeId(node.lhs)),
             NodeKind::MapExpr => self.compile_map_literal(arena, node.lhs, node.rhs),
             NodeKind::ListExpr => self.compile_list_literal(arena, node.lhs, node.rhs),
@@ -167,12 +178,20 @@ impl BytecodeCompiler {
 
     fn compile_member(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
         let node = *arena.node(node_id);
+        let lhs_node = *arena.node(NodeId(node.lhs));
+        if matches!(lhs_node.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) {
+            let owner = Self::name(arena, lhs_node.lhs);
+            let field = Self::name(arena, node.rhs);
+            if !self.var_slots.contains_key(owner) && self.has_static_field(owner, field) {
+                return self.emit_global_get(&format!("{owner}.{field}"));
+            }
+        }
         match self.resolve_cmap(arena, node_id) {
             Some(CMap::Val(v)) => return self.emit_const(v),
             Some(cm) => return self.materialize_cmap(&cm),
             None => {}
         }
-        let field = Self::name(arena, node.rhs).to_string();
+        let field = self.stored_field(arena, NodeId(node.lhs), Self::name(arena, node.rhs));
         // A property of a compile-time collection that is not one of its keys.
         if let (Some(container), Some(hook)) = (
             self.resolve_cmap(arena, NodeId(node.lhs)),
@@ -185,6 +204,19 @@ impl BytecodeCompiler {
             self.emit(Opcode::Move, dst, r, 0);
             self.release_to(mark);
             return dst;
+        }
+        // A compile-time collection (an enum's variants, a `comptime` map)
+        // has only its keys: reading another name is an error, not none.
+        if let Some(CMap::Map(_)) = self.resolve_cmap(arena, NodeId(node.lhs)) {
+            let lhs = arena.node(NodeId(node.lhs));
+            let message = match lhs.node_kind() {
+                NodeKind::IdentExpr => {
+                    let owner = Self::name(arena, lhs.lhs);
+                    format!("`{owner}` has no member `{field}`")
+                }
+                _ => format!("this compile-time value has no member `{field}`"),
+            };
+            return self.error(crate::codes::NO_MEMBER, message);
         }
         let ty = self.static_type(arena, NodeId(node.lhs));
         let dst = self.alloc_reg();
@@ -218,10 +250,20 @@ impl BytecodeCompiler {
     fn compile_index_value(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
         let idx = arena.node(NodeId(rhs));
         if idx.node_kind() == NodeKind::BinaryExpr && matches!(idx.flags, OP_RANGE_INCLUSIVE | OP_RANGE_HALF_OPEN) {
+            // A bound left out is the start (0) or the end (the length).
             let r_obj = self.compile_node(arena, NodeId(lhs));
-            let r_a = self.compile_node(arena, NodeId(idx.lhs));
-            let mut r_b = self.compile_node(arena, NodeId(idx.rhs));
-            if idx.flags == OP_RANGE_INCLUSIVE {
+            let r_a = if NodeId(idx.lhs).is_some() {
+                self.compile_node(arena, NodeId(idx.lhs))
+            } else {
+                self.emit_const(PilotVal::from_int(0))
+            };
+            let open_end = NodeId(idx.rhs).is_none();
+            let mut r_b = if open_end {
+                self.emit_intrinsic("str_len", &[r_obj])
+            } else {
+                self.compile_node(arena, NodeId(idx.rhs))
+            };
+            if idx.flags == OP_RANGE_INCLUSIVE && !open_end {
                 let r_one = self.emit_const(PilotVal::from_int(1));
                 let r_end = self.alloc_reg();
                 self.emit(Opcode::Add, r_end, r_b, r_one);
@@ -235,12 +277,68 @@ impl BytecodeCompiler {
         self.emit_index_read(r_obj, ty.as_deref(), r_key)
     }
 
-    fn compile_binary(&mut self, arena: &AstArena, flags: u16, lhs: u32, rhs: u32) -> u8 {
+    /// A binary expression. When the checker's plan names a numeric type
+    /// for it that is narrower than the engine's own numbers (an `i8` ..
+    /// `u32`, an `f32`), the result is wrapped or rounded to that type's
+    /// register, and a shift count is taken modulo its width.
+    fn compile_arithmetic(&mut self, arena: &AstArena, id: NodeId, flags: u16, lhs: u32, rhs: u32) -> u8 {
+        // `x is T`: the checker's plan says what kind of value `T` holds.
+        if flags == BinaryOp::Is as u16 {
+            // The checker rejects an `is` whose right side is no type
+            // (TYPE002); without its plan the test cannot run.
+            let Some((kind, name)) = self.planned_type_test(arena, id) else {
+                return self.emit_trap("`is` needs a type the checker knows on its right".to_string());
+            };
+            let mark = self.next_reg;
+            let r_v = self.compile_node(arena, NodeId(lhs));
+            let r_kind = self.emit_const(PilotVal::from_str(&kind));
+            let r_name = self.emit_const(PilotVal::from_str(&name));
+            let dst = self.emit_intrinsic("is_kind", &[r_v, r_kind, r_name]);
+            if dst >= mark {
+                self.emit(Opcode::Move, mark, dst, 0);
+            }
+            self.release_to(mark + 1);
+            return mark;
+        }
+        // `xs as view T`: the checker's plan names the function that builds
+        // the view and the integers it takes after `xs`.
+        if flags == BinaryOp::AsView as u16 {
+            // The checker refuses a view it cannot plan (TYPE003).
+            let Some((function, ints)) = self.planned_view_cast(arena, id) else {
+                return self.emit_trap("`as view` needs a view the checker planned".to_string());
+            };
+            let mark = self.next_reg;
+            let mut args = vec![self.compile_node(arena, NodeId(lhs))];
+            for v in ints {
+                args.push(self.emit_const(PilotVal::from_int(v)));
+            }
+            let r = self.emit_user_call(function.clone(), function, &args);
+            self.emit(Opcode::Move, mark, r, 0);
+            self.release_to(mark + 1);
+            return mark;
+        }
+        let planned = self.planned_numeric(arena, id);
+        let narrow = planned
+            .as_deref()
+            .and_then(|t| pilot_parser::bootstrap_tables().reg_layout(t).cloned())
+            .filter(crate::lower_stmt::is_narrow_register);
+        let scalar = planned.as_deref().is_some_and(Self::is_scalar_text);
+        let Some(layout) = narrow else {
+            return self.compile_binary(arena, flags, lhs, rhs, None);
+        };
+        let r = self.compile_binary(arena, flags, lhs, rhs, Some(layout.width));
+        let r = self.emit_wrap(r, &layout);
+        // Arithmetic on a character gives a character.
+        if scalar { self.emit_scalar(r) } else { r }
+    }
+
+    /// `shift_width`: the register width a shift count is reduced to.
+    fn compile_binary(&mut self, arena: &AstArena, flags: u16, lhs: u32, rhs: u32, shift_width: Option<i64>) -> u8 {
         let Some(op) = BinaryOp::from_u16(flags) else {
             return self.error(crate::codes::SYNTAX, "unknown binary operator".to_string());
         };
         // `As` keeps its target type outside the operand slots.
-        if NodeId(lhs).is_none() || (NodeId(rhs).is_none() && !matches!(op, BinaryOp::As | BinaryOp::AsView)) {
+        if NodeId(lhs).is_none() || (NodeId(rhs).is_none() && op != BinaryOp::As) {
             return self.error(
                 crate::codes::SYNTAX,
                 format!("operator `{}` is missing an operand", op.symbol()),
@@ -251,10 +349,19 @@ impl BytecodeCompiler {
             BinaryOp::Coalesce => return self.compile_coalesce(arena, lhs, rhs),
             BinaryOp::Pipe => return self.compile_pipe(arena, NodeId(lhs), NodeId(rhs)),
             BinaryOp::PipeBackward => return self.compile_pipe(arena, NodeId(rhs), NodeId(lhs)),
-            BinaryOp::As | BinaryOp::AsView => {
-                let r = self.compile_node(arena, NodeId(lhs));
+            BinaryOp::As => {
+                let mut r = self.compile_node(arena, NodeId(lhs));
                 let ty = NodeId(rhs);
-                let layout = (op == BinaryOp::As && ty.is_some())
+                let to_scalar = ty.is_some() && Self::is_scalar_text(Self::name(arena, arena.node(ty).lhs));
+                // A one-character literal is cast as the character it holds;
+                // a cast to the character type gives a character.
+                if to_scalar || arena.node(NodeId(lhs)).node_kind() == NodeKind::StrLit {
+                    r = self.emit_scalar(r);
+                }
+                if to_scalar {
+                    return r;
+                }
+                let layout = ty.is_some()
                     .then(|| pilot_parser::bootstrap_tables().reg_layout(Self::name(arena, arena.node(ty).lhs)))
                     .flatten()
                     .cloned();
@@ -265,14 +372,21 @@ impl BytecodeCompiler {
             }
             _ => {}
         }
+        // A struct that declares an operator (`op ==`, `op +`, ..) runs its own.
+        // Comparisons with `none` (null on the seed) keep the seed's null comparison.
+        if let Some(r) = self.compile_declared_operator(arena, op, NodeId(lhs), NodeId(rhs)) {
+            return r;
+        }
         let Some(opcode) = direct_opcode(op) else {
+            // A range outside a `for` head or an index is a value: the
+            // function Pilot binds to the operator builds it.
+            if let Some(r) = self.compile_operator_fn(op.symbol(), arena, NodeId(lhs), NodeId(rhs)) {
+                return r;
+            }
             if matches!(op, BinaryOp::RangeInclusive | BinaryOp::RangeHalfOpen) {
                 return self.error(crate::codes::SEED, 
                     "range values are only lowered as `for` iterables and slice indices by the seed".to_string(),
                 );
-            }
-            if let Some(r) = self.compile_operator_fn(op.symbol(), arena, NodeId(lhs), NodeId(rhs)) {
-                return r;
             }
             return self.error(
                 crate::codes::SEED,
@@ -287,11 +401,89 @@ impl BytecodeCompiler {
         };
         let dst = self.alloc_reg();
         let mark = self.next_reg;
-        let r_l = self.compile_with_hint(arena, NodeId(lhs), hint_l);
-        let r_r = self.compile_with_hint(arena, NodeId(rhs), hint_r);
-        self.emit(opcode, dst, r_l, r_r);
+        let mut r_l = self.compile_with_hint(arena, NodeId(lhs), hint_l);
+        let mut r_r = self.compile_with_hint(arena, NodeId(rhs), hint_r);
+        // A character compared with a one-character literal: the literal is
+        // that character.
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge) {
+            let is_lit = |n: u32| arena.node(NodeId(n)).node_kind() == NodeKind::StrLit;
+            let scalar_side = |c: &Self, n: u32| c.static_type(arena, NodeId(n)).as_deref().is_some_and(Self::is_scalar_text);
+            if is_lit(rhs) && scalar_side(self, lhs) {
+                r_r = self.emit_scalar(r_r);
+            } else if is_lit(lhs) && scalar_side(self, rhs) {
+                r_l = self.emit_scalar(r_l);
+            }
+        }
+        if let (Some(width), true, Some(and)) =
+            (shift_width, matches!(op, BinaryOp::Shl | BinaryOp::Shr), direct_opcode(BinaryOp::BitAnd))
+        {
+            let r_mask = self.emit_const(PilotVal::from_int(width - 1));
+            let r_count = self.alloc_reg();
+            self.emit(and, r_count, r_r, r_mask);
+            r_r = r_count;
+        }
+        // A right operand just loaded from the constants is read from there.
+        if self.loaded_constant(r_r, mark).is_some() && r_l != r_r {
+            let k = self.instructions.pop().map_or(0, |k| k.wide());
+            self.pc_spans.pop();
+            let ins = crate::Instruction::encode(opcode, dst, r_l, crate::instruction::CONST_REG);
+            self.push_ins(crate::Instruction(ins.0 | ((k as u64) << 32)));
+        } else {
+            self.emit(opcode, dst, r_l, r_r);
+        }
         self.release_to(mark);
         dst
+    }
+
+    /// `a op b` where `a`'s struct declares `op` (`pub op | (other: T) -> T`,
+    /// `pub op == (other: T) -> bool`, ..): a call of that operator on `a`
+    /// with `b`, or `None` when the left operand's type is not known to be
+    /// such a struct. For `!=` when only `op ==` is declared, calls `!(a == b)`.
+    fn compile_declared_operator(&mut self, arena: &AstArena, op: BinaryOp, lhs: NodeId, rhs: NodeId) -> Option<u8> {
+        let is_eq_ne = matches!(op, BinaryOp::Eq | BinaryOp::Ne);
+        if is_eq_ne
+            && (arena.node(lhs).node_kind() == NodeKind::NoneLit || arena.node(rhs).node_kind() == NodeKind::NoneLit)
+        {
+            return None;
+        }
+        let ty = self.static_type(arena, lhs)?;
+        if !self.structs.contains_key(&ty) {
+            return None;
+        }
+        let sym = op.symbol();
+        let (call_sym, negate) = if self.declares(&ty, sym) == Some(false) {
+            (sym, false)
+        } else if op == BinaryOp::Ne && self.declares(&ty, "==") == Some(false) {
+            ("==", true)
+        } else {
+            return None;
+        };
+        let dst = self.alloc_reg();
+        let mark = self.next_reg;
+        let r_l = self.compile_node(arena, lhs);
+        if is_eq_ne {
+            let r_r = self.compile_node(arena, rhs);
+            let l_null = self.emit_branch(Opcode::JumpIfNull, r_l, 0);
+            let r_null = self.emit_branch(Opcode::JumpIfNull, r_r, 0);
+            let full = format!("{ty}.{call_sym}");
+            let r = self.emit_user_call(full, call_sym.to_string(), &[r_l, r_r]);
+            if negate {
+                self.emit(Opcode::Not, dst, r, 0);
+            } else {
+                self.emit(Opcode::Move, dst, r, 0);
+            }
+            let done = self.emit_jump(0);
+            self.patch_to_here(l_null);
+            self.patch_to_here(r_null);
+            let cmp = if op == BinaryOp::Eq { Opcode::CmpEq } else { Opcode::CmpNe };
+            self.emit(cmp, dst, r_l, r_r);
+            self.patch_to_here(done);
+        } else {
+            let r = self.emit_method_call(arena, r_l, &ty, call_sym, &[rhs]);
+            self.emit(Opcode::Move, dst, r, 0);
+        }
+        self.release_to(mark);
+        Some(dst)
     }
 
     /// Declared type of a variable or call result, when statically known.
@@ -372,29 +564,59 @@ impl BytecodeCompiler {
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_op = self.compile_node(arena, NodeId(operand));
-        self.emit(opcode, dst, r_op, 0);
+        // An operand just loaded from the constants is folded: `-1` loads -1.
+        if let Some(v) = self.loaded_constant(r_op, mark).and_then(|v| crate::ops::unary(opcode, v).ok()) {
+            self.instructions.pop();
+            self.pc_spans.pop();
+            let c = self.add_constant(v);
+            self.push_ins(crate::Instruction::encode_wide(Opcode::LoadConst, dst, c));
+        } else {
+            self.emit(opcode, dst, r_op, 0);
+        }
         self.release_to(mark);
         dst
+    }
+
+    pub(crate) fn compile_unpack_operand(&mut self, arena: &AstArena, id: NodeId, op_flag: u16) -> u8 {
+        let r = self.compile_node(arena, id);
+        let tables = pilot_parser::bootstrap_tables();
+        let method = tables.native_member("unpack_op", &op_flag.to_string()).map(str::to_string);
+        if let (Some(ty), Some(method)) = (self.static_type(arena, id), method) {
+            if self.declares(&ty, &method).is_some() {
+                return self.emit_method_call(arena, r, &ty, &method, &[]);
+            }
+        }
+        r
     }
 
     pub(crate) fn compile_map_literal(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
         let children: Vec<u32> = arena.children_slice(lhs, rhs).to_vec();
         let r_map = self.emit_intrinsic("map_new", &[]);
         let mark = self.next_reg;
-        for pair in children.chunks(2) {
-            if pair.len() != 2 {
+        let mut i = 0;
+        while i < children.len() {
+            let cn = *arena.node(NodeId(children[i]));
+            if cn.node_kind() == NodeKind::UnaryExpr && cn.flags == pilot_ast::UNARY_OP_DOUBLE_SPLAT {
+                let r_src = self.compile_unpack_operand(arena, NodeId(cn.lhs), cn.flags);
+                self.emit_intrinsic("map_extend", &[r_map, r_src]);
+                self.release_to(mark);
+                i += 1;
+                continue;
+            }
+            if i + 1 >= children.len() {
                 return self.error(
                     crate::codes::SYNTAX,
                     "map literal entry without a value".to_string(),
                 );
             }
-            let r_k = match Self::map_key(arena, NodeId(pair[0])) {
+            let r_k = match Self::map_key(arena, NodeId(children[i])) {
                 Some(k) => self.emit_const(PilotVal::from_str(&k)),
-                None => self.compile_node(arena, NodeId(pair[0])),
+                None => self.compile_node(arena, NodeId(children[i])),
             };
-            let r_v = self.compile_node(arena, NodeId(pair[1]));
+            let r_v = self.compile_node(arena, NodeId(children[i + 1]));
             self.emit_intrinsic("map_set", &[r_map, r_k, r_v]);
             self.release_to(mark);
+            i += 2;
         }
         r_map
     }
@@ -409,8 +631,9 @@ impl BytecodeCompiler {
             match unpack {
                 // `*xs` adds xs's elements; `*..xs` adds its leaves at any depth.
                 Some(f @ (pilot_ast::UNARY_OP_SPLAT | pilot_ast::UNARY_OP_DEEP_FLATTEN)) => {
-                    let r_v = self.compile_node(arena, NodeId(cn.lhs));
-                    let r_deep = self.emit_const(PilotVal::from_bool(f == pilot_ast::UNARY_OP_DEEP_FLATTEN));
+                    let deep = f == pilot_ast::UNARY_OP_DEEP_FLATTEN;
+                    let r_v = self.compile_unpack_operand(arena, NodeId(cn.lhs), f);
+                    let r_deep = self.emit_const(PilotVal::from_bool(deep));
                     self.emit_intrinsic("list_extend", &[r_list, r_v, r_deep]);
                 }
                 Some(pilot_ast::UNARY_OP_DOUBLE_SPLAT) => {
@@ -427,5 +650,27 @@ impl BytecodeCompiler {
             self.release_to(mark);
         }
         r_list
+    }
+
+    /// `quote { .. }`: the tree the checker planned, built by the functions
+    /// the program binds; the quoted code itself never runs.
+    fn compile_quote(&mut self, arena: &AstArena, id: NodeId) -> u8 {
+        // The checker refuses a quote it cannot plan (QUOTE001, QUOTE002).
+        let Some((decode, wire)) = self.planned_quote(arena, id) else {
+            return self.emit_trap("a quote the checker could not build (QUOTE001, QUOTE002)".to_string());
+        };
+        let mark = self.next_reg;
+        let text = self.emit_const(PilotVal::from_str(&wire));
+        let mut acc = self.emit_user_call(decode.clone(), decode, &[text]);
+        for (hole, fill, lift) in self.planned_quote_holes(arena, id) {
+            let mut v = self.compile_node(arena, hole);
+            if !lift.is_empty() {
+                v = self.emit_user_call(lift.clone(), lift, &[v]);
+            }
+            acc = self.emit_user_call(fill.clone(), fill, &[acc, v]);
+        }
+        self.emit(Opcode::Move, mark, acc, 0);
+        self.release_to(mark + 1);
+        mark
     }
 }

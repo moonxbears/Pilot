@@ -1,0 +1,30 @@
+// Unbuilt keywords stay ordinary names wherever no construct of theirs can
+// start: as fields, parameters, locals, function names and call targets.
+// Expected (worked by hand):
+//   order: [3, 1, 2], values sum 3 + 1 + 2 = 6;
+//   update(6) = 6 + 1 = 7; state.priority = 4; timeout = 7 * 4 = 28;
+//   delete("shop") = "shop!"; insert(28, 2) = 30.
+struct Task {
+    state: i64;
+    priority: i64;
+}
+
+fn update(module: i64) -> i64 => module + 1;
+
+fn delete(role: str) -> str => role + "!";
+
+fn insert(values: i64, into: i64) -> i64 => values + into;
+
+fn main() {
+    let values = [3, 1, 2];
+    var order = 0;
+    for v in values { order = order + v; }
+    print(order);
+    let state = Task { state: update(order), priority: 4 };
+    let timeout = state.state * state.priority;
+    print(state.state);
+    print(state.priority);
+    print(timeout);
+    print(delete("shop"));
+    print(insert(timeout, 2));
+}

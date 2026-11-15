@@ -1,0 +1,2 @@
+error[FLOW006]: `errdefer` never runs in `tidy`: its return type cannot carry a failure
+err_errdefer_infallible.pilot:5:5

@@ -1,0 +1,49 @@
+// Native benchmark: string equality and ordering, short and long.
+// key(i) is "id" then i % 100 in two digits (4 bytes); long(i) puts a
+// 28-byte path in front ("pilot/module/path/component_", 30 bytes). For
+// each of 1,000 strings and each step d in 1..=100, the string d places on
+// (mod 1,000) holds (a + d) % 100 for a = i % 100: equal only at d = 100,
+// and greater for 99 - a of the steps. Per round: 1,000 equal, and
+// 10 * (99 + 98 + ... + 0) = 49,500 less-than; 50 rounds give 50,000 and
+// 2,475,000 for both lengths.
+
+fn key(i: i64) -> str {
+    let a = i % 100;
+    return if a < 10 { f"id0{a}" } else { f"id{a}" };
+}
+
+fn main() {
+    var short: List<str> = [];
+    var long: List<str> = [];
+    var i = 0;
+    while i < 1000 {
+        short.push(key(i));
+        long.push("pilot/module/path/component_" + key(i));
+        i = i + 1;
+    }
+    var eq_s = 0;
+    var lt_s = 0;
+    var eq_l = 0;
+    var lt_l = 0;
+    var r = 0;
+    while r < 50 {
+        i = 0;
+        while i < 1000 {
+            var d = 1;
+            while d <= 100 {
+                let j = (i + d) % 1000;
+                if short[i] == short[j] { eq_s = eq_s + 1; }
+                if short[i] < short[j] { lt_s = lt_s + 1; }
+                if long[i] == long[j] { eq_l = eq_l + 1; }
+                if long[i] < long[j] { lt_l = lt_l + 1; }
+                d = d + 1;
+            }
+            i = i + 1;
+        }
+        r = r + 1;
+    }
+    print(eq_s);
+    print(lt_s);
+    print(eq_l);
+    print(lt_l);
+}

@@ -1,0 +1,6 @@
+pkg gate.ledger.seams;
+
+pub fn bug_registry() -> List<KnownBug> => [
+    known_bug("seed.drift_overshoot", "fixture", "`drift` past the end of an `orbit` moves one step too far",
+        "stops at the end", "one step past the end", "tests/conformance/known_bugs/drift_overshoot.pilot", "F4"),
+];

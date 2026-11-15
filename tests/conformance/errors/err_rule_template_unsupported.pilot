@@ -1,0 +1,15 @@
+// A rule template holding a construct templates cannot carry yet (here a
+// closure) is reported where the rule is written. Until 2026-11-13 it was
+// turned into `none` without a word.
+syntax {
+    twice(x) => quote {
+        {
+            let add = (n: i64) => n + $x;
+            print(add($x));
+        }
+    };
+}
+
+fn main() {
+    twice(3);
+}

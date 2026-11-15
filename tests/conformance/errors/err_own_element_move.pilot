@@ -1,0 +1,19 @@
+// F7: a list owns its elements, so one cannot be moved out of it by index:
+// passing `rs[0]` to a parameter that takes ownership is OWN004. Take it out
+// with `pop` or `remove_at` instead.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn consume(r: Res) {
+    print(f"consume {r.name}");
+}
+
+fn main() {
+    let rs: List<Res> = [Res { name: "a" }];
+    consume(rs[0]);
+}

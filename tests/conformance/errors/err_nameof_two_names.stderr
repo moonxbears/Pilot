@@ -1,0 +1,2 @@
+error[CALL001]: `nameof` expects one argument
+err_nameof_two_names.pilot:5:11

@@ -1,0 +1,24 @@
+// A `syntax` rule written in a user file expands where it is called. A rule
+// whose template is an expression (`quote { ($x) + ($x) }`) has that
+// expression's value; a rule whose template ends in a statement runs it.
+//
+// Expected output, worked by hand:
+//   twice(n) + 1 with n = 2: (2) + (2) + 1 = 5.
+//   twice(n * 3): (2 * 3) + (2 * 3) = 12.
+//   clamp_low(-4, 0): -4 < 0, so 0; clamp_low(9, 0): 9.
+//   show(twice(5)): prints "value 10".
+syntax {
+    twice(x) => quote { ($x) + ($x) };
+    clamp_low(v, lo) => quote { if $v < $lo { $lo } else { $v } };
+    show(e) => quote { print(f"value {$e}"); };
+}
+
+fn main() {
+    let n = 2;
+    print(twice(n) + 1);
+    print(twice(n * 3));
+    let a = clamp_low(-4, 0);
+    print(a);
+    print(clamp_low(9, 0));
+    show(twice(5));
+}

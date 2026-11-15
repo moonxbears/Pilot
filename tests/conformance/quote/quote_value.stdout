@@ -1,0 +1,15 @@
+1 + 2
+binary
++
+2
+1
+int
+bump(1)
+call
+block
+2
+{ let x = 10; x * 2 }
+if n > 3 { "big" } else { "small" }
+[xs[0], -n]
+xs.len()
+member

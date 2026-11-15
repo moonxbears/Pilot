@@ -146,10 +146,6 @@ pub struct {
             }
     }
 
-    // 13. Tier-1 64KB Lexical Bump Region Guard (`ArenaScope`) — `0b11` `IGuard`
-    [Layout(c_abi)]
-    ArenaScope : IGuard {
-        pub region_view: slice<u8>;
-        ~self() {}
-    }
+    // 13. The arena scope guard (`ArenaScope`, `0b11` `IGuard`) lives in
+    // stdlib/core/arena.pilot beside `arena()`, which every program links.
 }

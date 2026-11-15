@@ -9,9 +9,12 @@
 //! | operation | arguments | result |
 //! | --- | --- | --- |
 //! | `cli_check` | path | diagnostics (`run::Diag::to_host`) |
-//! | `cli_run` | path, args, tail | `[exit_code, diagnostics]`; not run when there are diagnostics |
+//! | `cli_run` | path, args, tail, checker files, declaration files, tail links | `[exit_code, diagnostics]`; not run when there are diagnostics; the files `tail links` names are linked before the tail |
 //! | `cli_analyze` | path | the self-hosted analyzer's diagnostics for the file |
-//! | `cli_typecheck` | path, checker files, declaration files | the type checker's diagnostics in the program's own files (`check.rs`) |
+//! | `cli_typecheck` | path, checker files, declaration files, entry call | `[diagnostics, rest]`: the type checker's diagnostics in the program's own files, and what else the entry gave (`check.rs`); a run plan it made is kept for the `cli_run` that follows |
+//! | `cli_program_tool` | path, tool files, declaration files, entry call | the tool's exit code; the tool reads the program's snapshot (`check::run_on_program`) |
+//! | `cli_program_eval` | path, tool files, declaration files, entry call | the value the entry call returns (`check::eval_on_program`), or `none` when the program does not link |
+//! | `cli_text_tool` | path, tool files, entry call | the tool's exit code; the tool reads the file's text through `tool_input_text` (`tool::run_on_text`) |
 //! | `cli_functions` | path | `[name, [attributes]]` per top-level function, or `none` |
 //! | `cli_tool` | files, entry call | the tool's result as text |
 //! | `cli_tool_on` | files, entry call, input path | the same, its AST queries seeing the input file |
@@ -19,10 +22,26 @@
 use crate::check;
 use crate::run::{self, Diag, EXIT_FAILURE};
 use crate::tool;
-use pilot_vm::{HostOpHandler, HostValue};
+use pilot_vm::{codes, HostOpHandler, HostValue};
 
 fn diags(list: &[Diag]) -> HostValue {
     HostValue::List(list.iter().map(Diag::to_host).collect())
+}
+
+/// Reports the analyzer's and the checker's diagnostics of a program a tool
+/// is checking, through the CLI's own `report_pending_diags()`, and gives the
+/// number of errors. With nothing to report the CLI is not run.
+fn report_pending(analyzed: &[Diag], checked: &[Diag]) -> i64 {
+    if analyzed.is_empty() && checked.is_empty() {
+        return 0;
+    }
+    let pending = HostValue::List(vec![diags(analyzed), diags(checked)]);
+    let mut cli = cli_host_ops();
+    let ops: HostOpHandler = Box::new(move |op, args| match op {
+        "cli_pending_diags" => Some(Ok(pending.clone())),
+        _ => cli(op, args),
+    });
+    i64::from(tool::eval_cli(crate::CLI, "report_pending_diags();", ops))
 }
 
 /// The CLI's host operations.
@@ -36,14 +55,32 @@ pub fn cli_host_ops() -> HostOpHandler {
                 .unwrap_or_default()
         };
         let result = match op {
-            "cli_check" => match run::compile(&text(0), None) {
-                Ok(_) => HostValue::List(Vec::new()),
-                Err(d) => diags(&d),
-            },
+            "cli_check" => {
+                // A seed limit the checker's run plan lifts (a method-call
+                // receiver whose type only the checker knows) is compiled
+                // again with that plan, given the checker's sources (1) and
+                // declarations (2), as `cli_run` compiles it.
+                let checker = texts(1);
+                let compiled = run::compile(&text(0), None).or_else(|d| {
+                    if checker.is_empty() || !d.iter().any(|x| x.code == codes::SEED) {
+                        return Err(d);
+                    }
+                    let plan = check::drop_plan(&text(0), &checker, &texts(2));
+                    run::compile_planned(&text(0), None, Some(&plan))
+                });
+                match compiled {
+                    Ok(_) => HostValue::List(Vec::new()),
+                    Err(d) => diags(&d),
+                }
+            }
             "cli_run" => {
                 let tail = text(2);
                 let tail = (!tail.is_empty()).then_some(tail.as_str());
-                match run::compile(&text(0), tail) {
+                // With the checker's sources (3) and declarations (4), owned
+                // values are dropped where its drop plan says (F7).
+                let checker = texts(3);
+                let plan = (!checker.is_empty()).then(|| check::drop_plan(&text(0), &checker, &texts(4)));
+                match run::compile_entry(&text(0), tail, &texts(5), plan.as_ref()) {
                     Ok(program) => {
                         let code = run::execute(program, texts(1));
                         HostValue::List(vec![HostValue::Int(i64::from(code)), HostValue::List(Vec::new())])
@@ -52,7 +89,20 @@ pub fn cli_host_ops() -> HostOpHandler {
                 }
             }
             "cli_analyze" => diags(&run::analyze(&text(0))),
-            "cli_typecheck" => diags(&check::check(&text(0), &texts(1), &texts(2))),
+            "cli_typecheck" => {
+                let (found, rest) = check::check(&text(0), &texts(1), &texts(2), &text(3));
+                HostValue::List(vec![diags(&found), rest])
+            }
+            "cli_program_tool" => {
+                HostValue::Int(i64::from(check::run_on_program(&text(0), &texts(1), &texts(2), &text(3))))
+            }
+            "cli_checked_tool" => {
+                let path = text(0);
+                let report = move |checked: Vec<Diag>| report_pending(&run::analyze(&path), &checked);
+                HostValue::Int(i64::from(check::run_checked_on_program(&text(0), &texts(1), &texts(2), &text(3), report)))
+            }
+            "cli_program_eval" => check::eval_on_program(&text(0), &texts(1), &texts(2), &text(3)),
+            "cli_text_tool" => HostValue::Int(i64::from(tool::run_on_text(&text(0), &texts(1), &text(2)))),
             "cli_functions" => run::declared_functions(&text(0)).unwrap_or(HostValue::Null),
             "cli_tool" | "cli_tool_on" => {
                 let files = texts(0);

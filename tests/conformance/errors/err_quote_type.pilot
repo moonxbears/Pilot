@@ -1,0 +1,5 @@
+// `quote { 1 + 2 }` is an `ast<i64>`, not an `ast<str>` (TYPE001).
+fn main() {
+    let q: ast<str> = quote { 1 + 2 };
+    print(q.source());
+}

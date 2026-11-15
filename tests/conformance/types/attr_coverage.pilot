@@ -1,0 +1,55 @@
+// `[Coverage]` on the package covers every function in it; `main` opts out.
+// The report goes to stderr (the default `to:`) when `main` returns, one line
+// per function in source order, then the package's total.
+//
+// A statement is any statement in a block of the function, nested ones
+// included; `ops` counts the statements a call ran, with those of covered
+// functions it calls. The measured growth compares the calls with the
+// smallest and largest input n: of n^0..n^3, the one whose prediction
+// (ops_small * (n_large / n_small)^k) is the smallest factor off ops_large.
+// Worked by hand:
+//   total([1, 2, 3]):  var t, for, 3 x (t = t + x), return  = 6 ops
+//   total([1..6]):     1 + 1 + 6 + 1                         = 9 ops
+//     n 3 -> 6, n 6 -> 9: off by n^0 1.5, n^1 1.33, n^2 2.67 -> O(n) measured;
+//     one loop -> O(n) by code.
+//   grid(3):   var c, var i, while, 3 x (var j, while, i = ..), 9 x (c = .., j = ..), return
+//               = 3 + 9 + 18 + 1 = 31 ops
+//   grid(10):  3 + 30 + 200 + 1 = 234 ops
+//     off by n^1 2.26, n^2 1.47, n^3 4.9 -> O(n^2) measured;
+//     two nested loops -> O(n^2) by code.
+//   sign(5):    the `if` and `return 1` run, `return -1` (line 44) never:
+//               2/3 statements (66%), one call, one input size -> not measured.
+//   package: 15/16 statements (93%) in 3 function(s), 5 calls.
+[Coverage(::Calls | ::Intrinsics)]
+pub pkg Demo.Cover;
+
+fn total(xs: List<i64>) -> i64 {
+    var t = 0;
+    for x in xs { t = t + x; }
+    return t;
+}
+
+fn grid(n: i64) -> i64 {
+    var c = 0;
+    var i = 0;
+    while i < n {
+        var j = 0;
+        while j < n { c = c + 1; j = j + 1; }
+        i = i + 1;
+    }
+    return c;
+}
+
+fn sign(x: i64) -> i64 {
+    if x < 0 { return -1; }
+    return 1;
+}
+
+[NoInherit]
+fn main() {
+    print(total([1, 2, 3]));
+    print(total([1, 2, 3, 4, 5, 6]));
+    print(grid(3));
+    print(grid(10));
+    print(sign(5));
+}

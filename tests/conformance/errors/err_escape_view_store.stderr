@@ -1,0 +1,2 @@
+error[ESCAPE002]: `Win` stored here borrows `b`, which is dropped when `reset` returns
+err_escape_view_store.pilot:23:12

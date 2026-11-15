@@ -1,0 +1,15 @@
+use then
+drop then
+then done
+after if
+drop else
+not used
+after if
+loop t0
+drop t0
+loop t1
+drop t1
+see outer
+see outer
+drop outer
+loops done

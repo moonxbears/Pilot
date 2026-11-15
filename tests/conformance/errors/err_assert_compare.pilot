@@ -1,0 +1,9 @@
+// A failed comparison assertion names the expression and both sides, each
+// side evaluated once. xs has 3 items, so `xs.len == 4` fails with
+// left 3 and right 2 + 2 = 4. Nothing after it runs.
+fn main() {
+    let xs = [1, 2, 3];
+    print("before");
+    assert(xs.len == 2 + 2);
+    print("never printed");
+}

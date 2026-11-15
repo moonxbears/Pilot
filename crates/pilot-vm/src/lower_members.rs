@@ -28,7 +28,7 @@ use crate::instruction::Opcode;
 use crate::lower_program::{LazyDecl, LazyKind};
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 use std::collections::{HashSet, VecDeque};
 
 /// Receptor sub-slots of the `*Bundle` collision modifiers (category 30,
@@ -76,6 +76,7 @@ impl BytecodeCompiler {
             .collect();
         for &m in &members {
             self.register_property(arena, owner, m);
+            self.register_indexer(arena, owner, m);
         }
         // Tier 2: spliced facets and bundles.
         for &m in &members {
@@ -106,11 +107,13 @@ impl BytecodeCompiler {
                     _ => {}
                 }
             }
+            let renames = std::rc::Rc::new(aliases.clone());
             for source in self.decls_of(arena, &bundle, NodeKind::StructDecl) {
                 for fm in Self::type_members(arena, NodeId(arena.node(source).rhs)) {
                     if !Self::is_method_decl(arena, fm) {
                         if !dropped.contains(Self::name(arena, arena.node(fm).lhs)) {
                             self.register_property(arena, owner, fm);
+                            self.register_indexer(arena, owner, fm);
                         }
                         continue;
                     }
@@ -121,6 +124,9 @@ impl BytecodeCompiler {
                     let exposed = aliases.get(&name).cloned().unwrap_or(name);
                     if taken.insert(exposed.clone()) {
                         self.add_inherited(arena, owner, &exposed, fm);
+                        if !aliases.is_empty() {
+                            self.splice_fields.insert(format!("{owner}.{exposed}"), renames.clone());
+                        }
                     }
                 }
             }
@@ -141,6 +147,7 @@ impl BytecodeCompiler {
                     for fm in Self::type_members(arena, NodeId(arena.node(source).rhs)) {
                         if !Self::is_method_decl(arena, fm) {
                             self.register_property(arena, owner, fm);
+                            self.register_indexer(arena, owner, fm);
                             continue;
                         }
                         if !Self::has_body(arena, fm) {
@@ -157,8 +164,25 @@ impl BytecodeCompiler {
         }
     }
 
+    /// The name member `field` of `obj` goes by: inside a method a splice
+    /// gives its host, a member of the receiver that the host renamed
+    /// (`with { count as hits }`) is read, written and called under the new
+    /// name.
+    pub(crate) fn stored_field(&self, arena: &AstArena, obj: NodeId, field: &str) -> String {
+        if let Some(renames) = &self.cur_splice_fields {
+            let on = arena.node(obj);
+            let name = if on.node_kind() == NodeKind::IdentExpr { Self::name(arena, on.lhs) } else { "" };
+            if name == crate::RECEIVER || name == &crate::RECEIVER[1..] {
+                if let Some(new) = renames.get(field) {
+                    return new.clone();
+                }
+            }
+        }
+        field.to_string()
+    }
+
     /// The declarations named `name` of node kind `kind`.
-    fn decls_of(&self, arena: &AstArena, name: &str, kind: NodeKind) -> Vec<NodeId> {
+    pub(crate) fn decls_of(&self, arena: &AstArena, name: &str, kind: NodeKind) -> Vec<NodeId> {
         let all = self.type_decls.get(name).map(Vec::as_slice).unwrap_or_default();
         all.iter().copied().filter(|&d| arena.node(d).node_kind() == kind).collect()
     }
@@ -233,16 +257,95 @@ impl BytecodeCompiler {
         }
     }
 
+    /// Registers an indexer declaration (`self[i: T] -> R`) as `Owner.[]`
+    /// and `Owner.[]=`, when it has a getter or setter body.
+    fn register_indexer(&mut self, arena: &AstArena, owner: &str, m: NodeId) {
+        if arena.node(m).node_kind() != NodeKind::IndexerDecl {
+            return;
+        }
+        let mn = *arena.node(m);
+        let ch: Vec<NodeId> = arena.children_slice(mn.lhs, mn.rhs).iter().map(|&c| NodeId(c)).collect();
+        let Some(&body_or_block) = ch.first() else {
+            return;
+        };
+        if body_or_block.is_none() {
+            return;
+        }
+        let idx_params: Vec<NodeId> = ch[1..].to_vec();
+        let mut add_owner = |op: &str, decl: LazyDecl, is_set: bool| {
+            let key = format!("{owner}.{op}");
+            if !self.lazy_decls.contains_key(&key) && !self.fn_entries.contains_key(&key) {
+                let owners = self.method_owners.entry(op.to_string()).or_default();
+                if !owners.iter().any(|(o, _)| o == owner) {
+                    owners.push((owner.to_string(), false));
+                }
+                self.lazy_decls.insert(key, decl);
+                if is_set {
+                    self.index_setters.insert(owner.to_string());
+                } else {
+                    self.index_getters.insert(owner.to_string());
+                }
+            }
+        };
+        if let Some(&block) = self.accessor_blocks.get(&m.0) {
+            let bn = *arena.node(block);
+            let bodies: Vec<NodeId> = arena.children_slice(bn.lhs, bn.rhs).iter().map(|&b| NodeId(b)).collect();
+            let (getters, setters) = bodies.split_at((bn.flags as usize).min(bodies.len()));
+            if let Some(&body) = getters.first() {
+                add_owner(
+                    pilot_parser::INDEX_GET_OP,
+                    LazyDecl {
+                        node: body,
+                        owner: Some(owner.to_string()),
+                        kind: LazyKind::IndexerGetter { params: idx_params.clone() },
+                        inherited: true,
+                    },
+                    false,
+                );
+            }
+            if let Some(&body) = setters.first() {
+                add_owner(
+                    pilot_parser::INDEX_SET_OP,
+                    LazyDecl {
+                        node: body,
+                        owner: Some(owner.to_string()),
+                        kind: LazyKind::IndexerSetter { params: idx_params, bodies: setters.to_vec() },
+                        inherited: true,
+                    },
+                    true,
+                );
+            }
+        } else {
+            add_owner(
+                pilot_parser::INDEX_GET_OP,
+                LazyDecl {
+                    node: body_or_block,
+                    owner: Some(owner.to_string()),
+                    kind: LazyKind::IndexerGetter { params: idx_params },
+                    inherited: true,
+                },
+                false,
+            );
+        }
+    }
+
     /// Lowers a property accessor of `owner` as the function `key`: its
     /// first parameter is the record, a setter's second is the new value.
     pub(crate) fn compile_accessor(&mut self, arena: &AstArena, key: &str, body: NodeId, owner: &str, kind: &LazyKind) {
-        let (field, setters) = match kind {
-            LazyKind::Getter { field } => (field.clone(), None),
-            LazyKind::Setter { field, bodies } => (field.clone(), Some(bodies.clone())),
-            LazyKind::Method { .. } => return,
+        let (field, idx_params, setters) = match kind {
+            LazyKind::Getter { field } => (field.clone(), Vec::new(), None),
+            LazyKind::Setter { field, bodies } => (field.clone(), Vec::new(), Some(bodies.clone())),
+            LazyKind::IndexerGetter { params } => (pilot_parser::INDEX_GET_OP.to_string(), params.clone(), None),
+            LazyKind::IndexerSetter { params, bodies } => {
+                (pilot_parser::INDEX_SET_OP.to_string(), params.clone(), Some(bodies.clone()))
+            }
+            LazyKind::Method { .. } | LazyKind::Destructor => return,
         };
         let receiver = crate::RECEIVER;
         let mut params = vec![receiver.to_string()];
+        for &p in &idx_params {
+            params.push(Self::name(arena, arena.node(p).lhs).to_string());
+        }
         if setters.is_some() {
             // The value travels in a hidden slot; each setter names it.
             params.push("#value".to_string());
@@ -258,9 +361,14 @@ impl BytecodeCompiler {
             self.emit(Opcode::Move, slot, (i + 1) as u8, 0);
             self.var_slots.insert(p.clone(), slot);
         }
+        for &p in &idx_params {
+            if let Some(t) = Self::annot_name(arena, p) {
+                self.var_types.insert(Self::name(arena, arena.node(p).lhs).to_string(), t);
+            }
+        }
         let self_slot = self.var_slots[receiver];
         self.var_slots.insert(receiver[1..].to_string(), self_slot);
-        self.backing = Some(field.clone());
+        self.backing = idx_params.is_empty().then(|| field.clone());
         let r = match setters {
             None => self.compile_node(arena, body),
             Some(bodies) => self.compile_setters(arena, owner, &field, &bodies),
@@ -412,6 +520,26 @@ impl BytecodeCompiler {
     /// path inline and a record goes to the member's dispatcher, which
     /// `emit_dispatchers` builds once the program is linked.
     fn emit_member_access(&mut self, kind: Switch, ty: Option<&str>, regs: &[u8]) -> u8 {
+        if let (Switch::Set(f), Some(t)) = (&kind, ty) {
+            let has = |m: &std::collections::HashMap<String, Vec<String>>| m.get(f).is_some_and(|o| o.iter().any(|o| o == t));
+            if has(&self.getters) && !has(&self.setters) {
+                return self.error(
+                    crate::codes::GET_ONLY_ASSIGN,
+                    format!("`{f}` of `{t}` has a getter and no setter, so it cannot be assigned"),
+                );
+            }
+        }
+        if let (Switch::IndexSet, Some(t)) = (&kind, ty) {
+            if self.index_getters.contains(t)
+                && !self.index_setters.contains(t)
+                && !self.method_owners.get(pilot_parser::INDEX_SET_OP).is_some_and(|v| v.iter().any(|(o, _)| o == t))
+            {
+                return self.error(
+                    crate::codes::GET_ONLY_ASSIGN,
+                    format!("indexer of `{t}` has a getter and no setter, so it cannot be assigned"),
+                );
+            }
+        }
         let owners = self.switch_owners(&kind);
         if owners.is_empty() {
             return self.emit_plain(&kind, regs);

@@ -1,0 +1,6 @@
+// F1: outside an operator declaration `op` is an ordinary name.
+fn main() {
+    var op = 1;
+    op = op + 2;
+    print(op);
+}

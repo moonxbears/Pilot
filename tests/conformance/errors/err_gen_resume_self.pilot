@@ -1,0 +1,14 @@
+// F5b: a generator resuming itself while it runs is GEN003, at run time.
+var slot: List<Generator<i64>> = [];
+
+fn selfish() -> Generator<i64> {
+    yield 1;
+    let again = slot[0].next();
+    yield 2;
+}
+
+fn main() {
+    slot.push(selfish());
+    print(slot[0].next() ?? -1);
+    print(slot[0].next() ?? -1);
+}

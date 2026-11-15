@@ -5,6 +5,8 @@
 // into WGSL compute shaders and SPIR-V compute modules (with real SSA ops).
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct GpuShaderArtifact : IValue {
     pub format_name: str;
@@ -151,13 +153,13 @@ pub fn gs_wgsl_stmt(nid: i64, st: i64, indent: str) -> str {
     let k = __engine("ast_node_kind", nid);
     if k == 18 {
         let cc = __engine("ast_child_count", nid);
-        var out = "";
+        var out: List<str> = [];
         var ci = 0;
         while ci < cc {
-            out = out + gs_wgsl_stmt(__engine("ast_child_at", nid, ci), st, indent);
+            out.push(gs_wgsl_stmt(__engine("ast_child_at", nid, ci), st, indent));
             ci = ci + 1;
         }
-        return out;
+        return text.join_text(out, "");
     }
     if k == 4 {
         let vname = __engine("sym_str", __engine("ast_node_sym", nid));

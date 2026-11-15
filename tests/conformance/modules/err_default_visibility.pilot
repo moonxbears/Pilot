@@ -1,0 +1,9 @@
+// A function or field written without a visibility word is private to its
+// package: using one from another package is MOD003 / VIS001.
+use lib.vault;
+
+fn main() {
+    print(plain());
+    let s = safe(3);
+    print(s.level);
+}

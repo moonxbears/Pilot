@@ -1,0 +1,7 @@
+// `as view` makes no `char`: not every 32-bit pattern is a Unicode scalar
+// value (0xD800 is a surrogate), so the checker refuses the view (TYPE003).
+fn main() {
+    let xs: u32[] = [65, 55296];
+    let cs = xs as view char;
+    print(cs[0]);
+}

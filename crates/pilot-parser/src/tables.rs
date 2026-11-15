@@ -1,0 +1,268 @@
+//! Bootstrap receptor, modifier, operator, and `type_construct` tables (`pilot-parser`).
+
+use crate::*;
+
+#[derive(Clone, Debug)]
+pub enum TypePostfixKind { BracketEmpty, BracketDotDot, BracketColon, BracketArgs(usize), Sym(String, bool) }
+#[derive(Clone, Debug)]
+pub enum TypeConstructRule { Prefix { op: String, param: String, template: TemplateNode },
+    Postfix { kind: TypePostfixKind, params: Vec<String>, template: TemplateNode },
+    Infix { op: String, bp: u8, right_assoc: bool, lhs_param: String, rhs_param: String, template: TemplateNode },
+    NamedGeneric { name: String, params: Vec<String>, template: TemplateNode }, }
+pub use rule_arms::SyntaxMacroRule;
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, NoAlloc, Override, Unbuilt }
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct PrattEntry { pub bp: u8, pub right_assoc: bool, pub bin_op: u16 }
+#[derive(Clone, Debug)]
+pub(crate) enum CVal { Str(String), Int(i64), Map(HashMap<String, CVal>) }
+#[derive(Clone, Debug, Default)]
+pub struct ParserTables { pub(crate) modifiers: HashMap<String, ModAct>, pub(crate) param_modifiers: HashSet<String>, pub(crate) module_kws: HashMap<String, bool>,
+    pub receptors: HashMap<String, (u8, u8)>, pub receiver_ident: String,
+    /// `field` and `value` inside accessor bodies (`bind_receiver_ident`).
+    pub backing_ident: String, pub setter_value_ident: String,
+    pub prefix_ops: HashMap<String, u8>, pub infix_ops: HashMap<String, PrattEntry>, pub postfix_ops: HashMap<String, u8>,
+    pub type_rules: Vec<TypeConstructRule>, pub syntax_macros: HashMap<String, SyntaxMacroRule>, pub(crate) const_maps: HashMap<String, CVal>,
+    /// Attribute functions by name (see `attr_hooks`).
+    pub(crate) attr_hooks: HashMap<String, attr_hooks::AttrHook>,
+    /// Register layouts declared with `[Bits(..)]`, by type name.
+    pub(crate) reg_layouts: HashMap<String, RegLayout>,
+    /// The Pilot functions that value dimensional literals (see `pilot_impls`).
+    pub(crate) unit_literal: Option<UnitLiteralHook>,
+    /// The Pilot function each infix operator calls, by symbol (see `pilot_impls`).
+    pub(crate) operator_fns: HashMap<String, OperatorFn>,
+    /// Names bound to engine intrinsics, by kind (see `pilot_impls`).
+    pub(crate) natives: HashMap<(NativeKind, String), String>,
+    pub(crate) enumerator: Option<EnumeratorProtocol>,
+    pub(crate) generator: Option<GeneratorProtocol>,
+    pub(crate) try_protocol: Option<TryProtocol>,
+    /// The Pilot function an f-string hole's `:pattern` calls (see `fstring`).
+    pub(crate) format_spec: Option<String>,
+    /// The function `x in xs` calls, as `f(x, xs)`, when one is bound.
+    pub(crate) membership: Option<String>,
+    pub(crate) membership_range: (Option<String>, Option<String>),
+    pub(crate) native_members: HashMap<(String, String), String>,
+    pub(crate) scalar_text: Option<String>, }
+impl ParserTables {
+    pub fn new() -> Self { Self::default() }
+    pub(crate) fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
+        let n = arena.node(id);
+        match n.node_kind() { NodeKind::StrLit => Some(CVal::Str(arena.interner.resolve(SymbolId(n.lhs)).to_string())),
+            NodeKind::IntLit => Some(CVal::Int(arena.i64_pool.get(n.lhs as usize).copied().unwrap_or(0))),
+            NodeKind::IdentExpr => { let s = arena.interner.resolve(SymbolId(n.lhs)); self.const_maps.get(s).cloned().or_else(|| Some(CVal::Str(s.to_string()))) }
+            // A member of a named constant is looked up in place: copying the
+            // maps on the way made ingesting a file quadratic in its size.
+            NodeKind::MemberExpr => match self.cval_ref(arena, id) {
+                Some(v) => Some(v.clone()),
+                None => if let Some(CVal::Map(m)) = self.eval_cval(arena, NodeId(n.lhs)) { m.get(arena.interner.resolve(SymbolId(n.rhs))).cloned() } else { None },
+            },
+            NodeKind::CallExpr => { let ch = arena.children_slice(n.lhs, n.rhs); ch.get(1).and_then(|&x| self.eval_cval(arena, NodeId(x))) },
+            NodeKind::MapExpr => { let (ch, mut m, mut i) = (arena.children_slice(n.lhs, n.rhs), HashMap::new(), 0);
+                while i + 1 < ch.len() { let kn = arena.node(NodeId(ch[i])); if matches!(kn.node_kind(), NodeKind::IdentExpr | NodeKind::StrLit) {
+                        if let Some(v) = self.eval_cval(arena, NodeId(ch[i + 1])) { m.insert(arena.interner.resolve(SymbolId(kn.lhs)).to_string(), v); }
+                    }
+                    i += 2; }
+                Some(CVal::Map(m)) }
+            _ => None, } }
+    /// The constant a chain of names (`a.b.c`) refers to, found without
+    /// copying the maps on the way. `None` sends `eval_cval` the long way.
+    pub(crate) fn cval_ref(&self, arena: &AstArena, id: NodeId) -> Option<&CVal> {
+        let n = arena.node(id);
+        match n.node_kind() {
+            NodeKind::IdentExpr => self.const_maps.get(arena.interner.resolve(SymbolId(n.lhs))),
+            NodeKind::MemberExpr => match self.cval_ref(arena, NodeId(n.lhs))? {
+                CVal::Map(m) => m.get(arena.interner.resolve(SymbolId(n.rhs))),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    pub(crate) fn ingest_node(&mut self, arena: &AstArena, id: NodeId) { if id.is_none() { return; }
+        let n = *arena.node(id); match n.node_kind() {
+            NodeKind::Program | NodeKind::BlockExpr => for &c in arena.children_slice(n.lhs, n.rhs).to_vec().iter() { self.ingest_node(arena, NodeId(c)); },
+            NodeKind::ComptimeExpr | NodeKind::ExprStmt => self.ingest_node(arena, NodeId(n.lhs)),
+            NodeKind::FnDecl => self.ingest_attr_fn(arena, id),
+            NodeKind::StructDecl => self.ingest_decl_attrs(arena, id),
+            NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
+                if let Some(v) = self.eval_cval(arena, NodeId(n.rhs)) { self.const_maps.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), v); }
+            }
+            NodeKind::CallExpr => {
+                let ch = arena.children_slice(n.lhs, n.rhs);
+                if ch.is_empty() || NodeId(ch[0]).is_none() || arena.node(NodeId(ch[0])).node_kind() != NodeKind::IdentExpr {
+                    return;
+                }
+                let callee = arena.interner.resolve(SymbolId(arena.node(NodeId(ch[0])).lhs));
+                let (hook, vals): (String, Vec<Option<CVal>>) = if callee == "__engine" {
+                    if ch.len() < 2 {
+                        return;
+                    }
+                    let Some(CVal::Str(h)) = self.eval_cval(arena, NodeId(ch[1])) else { return };
+                    (h, ch[2..].iter().map(|&x| self.eval_cval(arena, NodeId(x))).collect())
+                } else if let Some(f) = self.attr_hooks.get(callee).cloned() {
+                    let v = f
+                        .args
+                        .iter()
+                        .map(|a| match a {
+                            attr_hooks::HookArg::Param(p) => ch
+                                .get(p + 1)
+                                .and_then(|&x| self.eval_cval(arena, NodeId(x)))
+                                .or_else(|| f.defaults.get(*p).and_then(Clone::clone)),
+                            attr_hooks::HookArg::Const(c) => Some(c.clone()),
+                        })
+                        .collect();
+                    (f.hook, v)
+                } else {
+                    return;
+                };
+                let s_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Str(s) => Some(s.clone()), _ => None }).unwrap_or_default();
+                let i_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Int(v) => Some(*v), _ => None });
+                match hook.as_str() {
+                    "register_modifier" => {
+                        let (w, act) = (s_arg(0), if let Some(v) = i_arg(1) { ModAct::Vis(v as u8) } else { match s_arg(1).as_str() {
+                            "merge_type_members" => ModAct::Partial, "storage_static" => ModAct::Static, "effect_pure" => ModAct::Pure,
+                            "binding_mutable" => ModAct::Mut, "binding_const" => ModAct::Const, "perceus_isolated" => ModAct::Iso,
+                            "extension_member" => ModAct::Ext, "effect_noalloc" => ModAct::NoAlloc,
+                            "override_member" => ModAct::Override,
+                            _ => ModAct::Unbuilt,
+                        }});
+                        if !w.is_empty() { self.modifiers.insert(w, act); }
+                    }
+                    "register_parametric_modifier" => { let w = s_arg(0); if !w.is_empty() { self.param_modifiers.insert(w); } }
+                    "register_module_kw" => { let w = s_arg(0); if !w.is_empty() { self.module_kws.insert(w, s_arg(1) == "declare_package_scope"); } }
+                    HOOK_UNIT_LITERAL => self.bind_unit_literal(s_arg(0), s_arg(1)),
+                    HOOK_OPERATOR_FN => self.bind_operator_fn(s_arg(0), s_arg(1)),
+                    HOOK_NATIVE_FN => self.bind_native(NativeKind::Function, s_arg(0), s_arg(1)),
+                    HOOK_NATIVE_METHOD => self.bind_native(NativeKind::Method, s_arg(0), s_arg(1)),
+                    HOOK_NATIVE_PROPERTY => self.bind_native(NativeKind::Property, s_arg(0), s_arg(1)),
+                    HOOK_NATIVE_VALUE => self.bind_native(NativeKind::Value, s_arg(0), s_arg(1)),
+                    "bind_native_member" => self.bind_native_member(s_arg(0), s_arg(1), s_arg(2)),
+                    HOOK_TYPE_QUERY => self.bind_native(NativeKind::TypeQuery, s_arg(0), s_arg(1)),
+                    HOOK_ENUMERATOR => self.bind_enumerator(s_arg(0), s_arg(1), s_arg(2), s_arg(3)),
+                    HOOK_GENERATOR => self.bind_generator(s_arg(0), s_arg(1), s_arg(2), s_arg(3)),
+                    HOOK_TRY_PROTOCOL => self.bind_try_protocol(s_arg(0), s_arg(1), s_arg(2)),
+                    HOOK_FORMAT_SPEC => self.bind_format_spec(s_arg(0)),
+                    HOOK_MEMBERSHIP => self.bind_membership(s_arg(0), s_arg(1), s_arg(2)),
+                    HOOK_SCALAR_TEXT => self.bind_scalar_text(s_arg(0)),
+                    "bind_receiver_ident" => {
+                        let (w, b, v) = (s_arg(0), s_arg(1), s_arg(2));
+                        if !w.is_empty() { self.receiver_ident = w; }
+                        self.backing_ident = b;
+                        self.setter_value_ident = v;
+                    }
+                    "bind_receptor" => {
+                        let (w, k, p) = (s_arg(0), i_arg(1).unwrap_or(0) as u8, i_arg(2).unwrap_or(0) as u8);
+                        if !w.is_empty() && k > 0 { self.receptors.insert(w, (k, p)); }
+                    }
+                    "register_pratt_op" => {
+                        let (sym, fix, bp, assoc) = (s_arg(0), s_arg(1), i_arg(2).unwrap_or(20) as u8, s_arg(3));
+                        if !sym.is_empty() {
+                            match fix.as_str() {
+                                "prefix" => { self.prefix_ops.insert(sym, bp); }
+                                "postfix" => { self.postfix_ops.insert(sym, bp); }
+                                _ => {
+                                    let code = i_arg(4).filter(|&c| c > 0).map_or_else(|| map_binop_sym(&sym), |c| c as u16);
+                                    self.infix_ops.insert(sym, PrattEntry { bp, right_assoc: assoc == "right", bin_op: code });
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {} } } }
+/// `MemberExpr.flags` of a prefix-dot member (`.name`), whose receiver the
+/// parser filled in. `0` is `a.b` and `1` is `a?.b`.
+pub const MEMBER_IMPLIED_RECEIVER: u16 = 2;
+/// The binding power of `x in xs`, below `..` (40) and above `&&` (20).
+pub(crate) const MEMBERSHIP_BP: u8 = 25;
+pub(crate) fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
+        "+" => Add, "-" => Sub, "*" => Mul, "/" => Div, "//" => FloorDiv, "%" => Rem, "**" => Pow,
+        "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" => And,
+        "||" => Or, "&" => BitAnd, "|" => BitOr, "^" => BitXor, "<<" => Shl, ">>" => Shr,
+        "|>" => Pipe, "<|" => PipeBackward, "??" => Coalesce, "..=" => RangeInclusive,
+        ".." | "..<" => RangeHalfOpen, ":=" => Walrus, "<-" => Send, "<=>" => Spaceship, "+|" => SatAdd,
+        "-|" => SatSub, "*|" => SatMul, "+%" => WrapAdd, "-%" => WrapSub, "*%" => WrapMul,
+        "+?" => CheckedAdd, "-?" => CheckedSub, "*?" => CheckedMul, "%%" => EucMod, "~>" => Lens,
+        ">..<" => OpenRange, ">.." => AfterRange, ":=:" => Swap, _ => return 0, }) as u16 }
+/// The stdlib files whose `syntax`, keyword, native-binding and protocol
+/// declarations fill the bootstrap tables, relative to the source root, in
+/// ingest order. Every `stdlib/core/primitives/*.pilot` file follows them.
+pub(crate) const BOOTSTRAP_SOURCES: &[&str] = &[
+    "stdlib/core/bridge_lang.pilot",
+    "stdlib/core/core.pilot",
+    "stdlib/core/syntax/type_construct.pilot",
+    "stdlib/core/syntax/module_ext.pilot",
+    "stdlib/core/syntax/visibility.pilot",
+    "stdlib/core/syntax/lifecycle.pilot",
+    "stdlib/core/syntax/properties.pilot",
+    "stdlib/core/syntax/attribute.pilot",
+    "stdlib/core/syntax/for.pilot",
+    "stdlib/core/generator.pilot",
+    "stdlib/core/syntax/while.pilot",
+    "stdlib/core/syntax/until.pilot",
+    "stdlib/core/syntax/switch.pilot",
+    "stdlib/core/syntax/guard.pilot",
+    "stdlib/core/syntax/exits.pilot",
+    "stdlib/core/syntax/try_catch.pilot",
+    "stdlib/core/syntax/expr_sugar.pilot",
+    "stdlib/core/syntax/fstring.pilot",
+    "stdlib/core/format.pilot",
+    "stdlib/core/syntax/call_quote.pilot",
+    "stdlib/core/assert.pilot",
+    "stdlib/core/syntax/unit_decl.pilot",
+    "stdlib/core/builtins/native_calls.pilot",
+    "stdlib/db/sql_syntax.pilot",
+    "stdlib/db/set_ops.pilot",
+    "stdlib/polyglot/polyglot_syntax.pilot",
+    "stdlib/realtime/rt_syntax.pilot",
+    "stdlib/asyncio/select_syntax.pilot",
+    "stdlib/contracts/contracts_syntax.pilot",
+];
+
+/// Where the primitive declarations live, relative to the source root.
+pub(crate) const PRIMITIVES_DIR: &str = "stdlib/core/primitives";
+
+pub(crate) static SOURCE_ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+/// Sets the directory holding the `stdlib/` the bootstrap tables are read
+/// from. The toolchain calls it once, before anything is parsed, with the
+/// root it runs with; later calls have no effect. Without it the tables come
+/// from the workspace this crate was built in.
+pub(crate) fn match_postfix(a: &TypePostfixKind, b: &TypePostfixKind) -> bool { matches!((a, b), (TypePostfixKind::BracketEmpty, TypePostfixKind::BracketEmpty)
+        | (TypePostfixKind::BracketDotDot, TypePostfixKind::BracketDotDot)
+        | (TypePostfixKind::BracketColon, TypePostfixKind::BracketColon))
+        || matches!((a, b), (TypePostfixKind::BracketArgs(x), TypePostfixKind::BracketArgs(y)) if x == y) }
+pub(crate) fn same_type_trigger(a: &TypeConstructRule, b: &TypeConstructRule) -> bool { match (a, b) {
+        (TypeConstructRule::NamedGeneric { name: x, .. }, TypeConstructRule::NamedGeneric { name: y, .. }) | (TypeConstructRule::Prefix { op: x, .. }, TypeConstructRule::Prefix { op: y, .. }) | (TypeConstructRule::Infix { op: x, .. }, TypeConstructRule::Infix { op: y, .. }) => x == y,
+        (TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(x), .. }, TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(y), .. }) => x == y,
+        (TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(x, _), .. }, TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(y, _), .. }) => x == y,
+        (TypeConstructRule::Postfix { kind: x, .. }, TypeConstructRule::Postfix { kind: y, .. }) => core::mem::discriminant(x) == core::mem::discriminant(y),
+        _ => false, } }
+pub(crate) fn compile_type_rule(pat: &[(TokenKind, String)], template: TemplateNode) -> Option<TypeConstructRule> { if pat.is_empty() { return None; }
+    if pat.len() >= 4 && is_word_tok(pat[0].0) && pat[1].0 == TokenKind::Less && pat.last().map(|x| x.0) == Some(TokenKind::Greater) {
+        let (name, mut params) = (pat[0].1.clone(), Vec::new());
+        for (tk, s) in &pat[2..pat.len() - 1] { if is_word_tok(*tk) { params.push(s.clone()); } }
+        return Some(TypeConstructRule::NamedGeneric { name, params, template }); }
+    if pat.len() == 2 && matches!(pat[0].0, TokenKind::Star | TokenKind::At) {
+        return Some(TypeConstructRule::Prefix { op: pat[0].1.clone(), param: pat[1].1.clone(), template });
+        }
+    if pat.len() >= 3 && pat[1].0 == TokenKind::LBracket { let t = pat[0].1.clone();
+        if pat[2].0 == TokenKind::RBracket { return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::BracketEmpty, params: vec![t], template }); }
+        if pat[2].0 == TokenKind::DotDot { return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::BracketDotDot, params: vec![t], template }); }
+        if pat[2].0 == TokenKind::Colon { return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::BracketColon, params: vec![t], template }); }
+        let mut ps = vec![t];
+        for (tk, s) in &pat[2..] { if is_word_tok(*tk) { ps.push(s.clone()); } }
+        return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(ps.len() - 1), params: ps, template });
+        }
+    if pat.len() == 2 && matches!(pat[1].0, TokenKind::Question | TokenKind::Caret) {
+        return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(pat[1].1.clone(), false), params: vec![pat[0].1.clone()], template });
+        }
+    if pat.len() == 3 && pat[1].0 == TokenKind::At {
+        return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::Sym("@".into(), true), params: vec![pat[0].1.clone(), pat[2].1.clone()], template });
+        }
+    let clean: Vec<&(TokenKind, String)> = pat.iter().filter(|(k, _)| !matches!(k, TokenKind::LParen | TokenKind::RParen)).collect();
+    if clean.len() == 3 { let (bp, ra) = match clean[1].0 { TokenKind::Amper => (20, false), TokenKind::Vbar => (15, false),
+            TokenKind::FatArrow | TokenKind::Arrow => (10, true), TokenKind::Exclamation => (5, false), _ => return None, };
+        return Some(TypeConstructRule::Infix { op: clean[1].1.clone(), bp, right_assoc: ra, lhs_param: clean[0].1.clone(), rhs_param: clean[2].1.clone(), template });
+    }
+    None }

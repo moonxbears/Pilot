@@ -1,0 +1,35 @@
+// F5b: `yield *xs` yields every item of any enumerable in order. When `xs`
+// is a generator, values sent to the outer generator go on to it.
+fn letters() -> Generator<str> {
+    yield "a";
+    yield "b";
+}
+
+fn mixed() -> Generator<str> {
+    yield *["x", "y"];
+    yield *letters();
+    yield "z";
+}
+
+fn doubler() -> Generator<i64, i64> {
+    var v = yield 0;
+    loop {
+        v = yield v * 2;
+    }
+}
+
+fn wrapped() -> Generator<i64, i64> {
+    yield 100;
+    yield *doubler();
+}
+
+fn main() {
+    for s in mixed() {
+        print(s);
+    }
+    let g = wrapped();
+    print(g.next() ?? -1);
+    print(g.next() ?? -1);
+    print(g.send(4) ?? -1);
+    print(g.send(21) ?? -1);
+}

@@ -1,0 +1,41 @@
+// F7: drops on branches and in loops. A value used on one branch of an
+// `if` is dropped after its last use there, and at the start of a branch
+// that does not use it. A value bound inside a loop body is dropped in each
+// iteration; one bound before a loop and used in it lives until the loop
+// ends.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn pick(flag: bool) {
+    let r = Res { name: if flag { "then" } else { "else" } };
+    if flag {
+        print(f"use {r.name}");
+        print("then done");
+    } else {
+        print("not used");
+    }
+    print("after if");
+}
+
+fn main() {
+    pick(true);
+    pick(false);
+    var i = 0;
+    while i < 2 {
+        let t = Res { name: f"t{i}" };
+        print(f"loop {t.name}");
+        i = i + 1;
+    }
+    let outer = Res { name: "outer" };
+    var j = 0;
+    while j < 2 {
+        print(f"see {outer.name}");
+        j = j + 1;
+    }
+    print("loops done");
+}

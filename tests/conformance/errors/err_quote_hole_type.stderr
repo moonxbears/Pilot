@@ -1,0 +1,2 @@
+error[QUOTE002]: cannot splice `List<i64>` into a quote: a hole takes an `ast`, an integer, a float, a bool or a string
+err_quote_hole_type.pilot:5:21

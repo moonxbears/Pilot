@@ -5,6 +5,8 @@
 // `ORDER BY ASC/DESC`), `UPDATE`, and `DELETE` in pure Pilot.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct SqlQueryPlan : IValue {
     pub table_name: str;
@@ -480,25 +482,21 @@ pub fn sql_exec_select(db: i64, q_str: str) -> str {
     }
 
     // Format projected rows
-    var out = "";
+    var rows: List<str> = [];
     var ri = 0;
     while ri < cand_cnt {
         let rm = (__engine("map_get", cand_list, ri) ?? 0);
-        if ri > 0 {
-            out = out + "\n";
-        }
+        var cells: List<str> = [];
         var pi = 0;
         while pi < nproj {
             let pcol = "" + __engine("map_get", proj_cols, pi);
-            if pi > 0 {
-                out = out + "|";
-            }
-            out = out + __engine("map_get", rm, pcol);
+            cells.push("" + __engine("map_get", rm, pcol));
             pi = pi + 1;
         }
+        rows.push(join_text(cells, "|"));
         ri = ri + 1;
     }
-    return out;
+    return join_text(rows, "\n");
 }
 
 pub fn sql_exec(db: i64, sql: str) -> str {

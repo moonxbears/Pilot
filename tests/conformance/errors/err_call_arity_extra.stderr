@@ -1,0 +1,2 @@
+error[CALL001]: `twice` takes 1 argument(s), given 3
+err_call_arity_extra.pilot:6:11

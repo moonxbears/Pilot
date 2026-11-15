@@ -1,0 +1,2 @@
+error[CALL001]: `add` takes 1 to 2 argument(s), given 0
+err_call_arity_default.pilot:6:11

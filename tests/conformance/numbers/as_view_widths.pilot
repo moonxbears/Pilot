@@ -1,0 +1,56 @@
+// `xs as view T` between widths, little-endian (stdlib/core/reinterpret.pilot):
+// a narrower `T` gives each element's lowest bits first; a wider `T` joins
+// elements, the first in the lowest bits, and drops the elements left over.
+// A view over a `List` can be written: the bits go back into the list.
+// Expected values are Python's `struct` module, little-endian:
+//   struct.pack('<2i', -2, 258) is the bytes 254 255 255 255 2 1 0 0
+//   struct.unpack('<I', bytes([1, 2, 3, 4])) is 67305985; the fifth byte is
+//   left over, so the u32 view of 5 bytes has 1 element
+//   struct.unpack('<4H', struct.pack('<d', 1.0)) is 0 0 0 16368
+//   struct.unpack('<2i', struct.pack('<q', -1)) is -1 -1
+//   struct.unpack('<Q', struct.pack('<2f', 1.0, -1.5)) is 13817043657838034944
+//   struct.unpack('<i', struct.pack('<2h', 1, -1)) is -65535
+// Writes: 0xFFFFFFFF into a u32 view of four u8 zeros sets each to 255;
+// 255 into byte 1 of the u32 0 gives 0xFF00 = 65280; u32 0xFFFFFFFF into
+// an i32 list stores -1.
+fn main() {
+    let xs: i32[] = [-2, 258];
+    let bs = xs as view u8;
+    print(bs.len);
+    for b in bs { print(b); }
+
+    let ys: u8[] = [1, 2, 3, 4, 5];
+    let ws = ys as view u32;
+    print(ws.len);
+    print(ws[0]);
+
+    let fs: f64[] = [1.0];
+    let lanes = fs as view u16;
+    print(lanes.len);
+    for h in lanes { print(h); }
+
+    let wide: i64[] = [-1];
+    let halves = wide as view i32;
+    print(halves[0]);
+    print(halves[1]);
+
+    let pair: f32[] = [f32(1.0), f32(-1.5)];
+    print((pair as view u64)[0]);
+    let shorts: i16[] = [1, -1];
+    print((shorts as view i32)[0]);
+
+    var bytes: List<u8> = [0, 0, 0, 0];
+    var whole = bytes as view u32;
+    whole[0] = 4294967295;
+    for b in bytes { print(b); }
+
+    var word: List<u32> = [0];
+    var parts = word as view u8;
+    parts[1] = 255;
+    print(word[0]);
+
+    var ints: List<i32> = [5];
+    var same = ints as view u32;
+    same[0] = 4294967295;
+    print(ints[0]);
+}

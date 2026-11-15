@@ -1,0 +1,4 @@
+error[MOD003]: `plain` is private to its package and cannot be used here
+err_default_visibility.pilot:6:11
+error[VIS001]: Member 'level' is private to its package and cannot be used from external scope
+err_default_visibility.pilot:8:11

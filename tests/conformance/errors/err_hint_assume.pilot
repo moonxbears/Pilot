@@ -1,0 +1,11 @@
+// HINT001: an assumed condition is false. The reference run checks the
+// fact instead of building on it.
+fn half(n: i64) -> i64 {
+    assume(n % 2 == 0);
+    return n / 2;
+}
+
+fn main() {
+    print(half(8));
+    print(half(7));
+}

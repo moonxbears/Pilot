@@ -1,0 +1,6 @@
+// Same package (`pkg lib.vault`), different file: can reach `pkg` item `shared()`.
+pkg lib.vault;
+
+use lib.vault;
+
+pub fn peer_shared() -> i64 => shared();

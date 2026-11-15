@@ -303,11 +303,9 @@ fn test_m11_4_pilot_ffi_mock_deletion_and_adapter_diagnostics() {
         &ANTICHEAT_SPEC,
     );
 
-    // Verify complete deletion of fake mocks from crates/pilot-ffi/src/lib.rs
+    // Verify complete deletion of legacy `crates/pilot-ffi` crate
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-    let ffi_src = fs::read_to_string(root.join("crates/pilot-ffi/src/lib.rs")).unwrap();
-    assert!(!ffi_src.contains("pilot_transpile_sample"), "pilot_transpile_sample mock must be permanently deleted!");
-    assert!(!ffi_src.contains("pilot_polyglot_execute"), "pilot_polyglot_execute mock must be permanently deleted!");
+    assert!(!root.join("crates/pilot-ffi").exists(), "Retired crates/pilot-ffi must remain deleted!");
 
     // ADP001..ADP004, each from the shape of a real signature.
     let script = r#"

@@ -1,0 +1,150 @@
+// ==============================================================================
+// FILE: selfhost/ir/main.pilot
+// F5: entry point of `pilot ir` (crates/pilot-cli/src/check.rs run_on_program).
+// ==============================================================================
+// `ir_main` reads the linked program, lets the type checker resolve and type
+// it, and lowers it to PilIR; `ir_text_main` parses PilIR text (a `.pir`
+// file). Either way the module is verified, then, by `mode`:
+//   verify     stops there;
+//   print      prints the module's text;
+//   opt        runs the default passes (selfhost/ir/passes.pilot) and
+//              prints the optimised module's text;
+//   run        runs the default passes, then runs the module on the IR
+//              interpreter; the exit code is the program's;
+//   run-unopt  runs it on the IR interpreter without the passes;
+//   roundtrip  prints it, parses that text, prints the parsed module, and
+//              fails unless the two texts are the same byte for byte (for a
+//              `.pir` file, the file's own text is the first).
+// A module the verifier rejects is not printed or run: its issues are
+// reported and the exit code is 1. Text that does not parse is reported
+// (IR009) with exit code 1.
+pub lvl(0) pkg Pilot.SelfHost.Ir.Main;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use selfhost.ir.model.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.verify.*;
+use selfhost.ir.text.*;
+use selfhost.ir.interp.*;
+use selfhost.ir.fault.*;
+use selfhost.ir.passes.*;
+
+fn lowered(s: Snap) -> IrModule => lowered_program(s, false);
+
+/// The program in snapshot `s` lowered to PilIR; with `every_function`,
+/// every concrete top-level function of the user's files is lowered too.
+pub fn lowered_program(s: Snap, every_function: bool) -> IrModule {
+    let p = prog_new(s);
+    let r = resolve_program(p, sink_new(s));
+    return lower_program_rooted(infer_new(p, r), every_function);
+}
+
+/// The linked files of the program, to place its runtime errors.
+fn source_map(s: Snap) -> IrSourceMap {
+    let map = ir_source_map_empty();
+    for f in s.files {
+        let row: List<any> = f;
+        map.paths.push(row[0]);
+        map.bases.push(row[2]);
+        map.texts.push(row[3]);
+    }
+    return map;
+}
+
+/// The text of the file the host runs this tool on (`tool::run_on_text`).
+fn input_text() -> str => __engine("tool_input_text");
+
+/// `pilot ir <mode> <program>.pilot [-- args..]`; a run gives the program
+/// `args` as its script arguments.
+pub fn ir_main(mode: str, args: List<str>) -> i64 {
+    let s = snap_load();
+    let m = lowered(s);
+    return finish(m, mode, none, source_map(s), args);
+}
+
+/// `ir_main` for a program not checked yet: checks it (`checked_program`)
+/// and, when it has no error, lowers what the checker inferred.
+pub fn ir_main_checked(mode: str, args: List<str>) -> i64 {
+    let s = snap_load();
+    if some inf = checked_program(s) {
+        return finish(lower_program_rooted(inf, false), mode, none, source_map(s), args);
+    }
+    return 1;
+}
+
+/// `pilot ir <mode> <file>.pir`.
+pub fn ir_text_main(mode: str) -> i64 {
+    let text = input_text();
+    try {
+        let m = parse_ir_module(text)?;
+        return finish(m, mode, text, ir_source_map_empty(), []);
+    } catch e {
+        eprint(f"error: {e.message}");
+        return 1;
+    }
+    return 1;
+}
+
+/// The line `run-roundtrip` adds to stderr when the module does not
+/// round-trip, after the reason.
+pub pure fn roundtrip_failed() -> str => "error: the PilIR text does not round-trip; the program was not run";
+
+/// Whether the text of `m` (`given`, or `m` printed), parsed and printed
+/// again, is the same text; the reason goes to stderr when it is not.
+fn round_trips(m: IrModule, given: str?) -> bool {
+    let first = given ?? print_ir_module(m);
+    try {
+        let second = print_ir_module(parse_ir_module(first)?);
+        if second != first {
+            eprint("error: printing the parsed module gives different text");
+            return false;
+        }
+    } catch e {
+        eprint(f"error: {e.message}");
+        return false;
+    }
+    return true;
+}
+
+/// Verifies `m` and does what `mode` asks; a run places its runtime errors
+/// in `sources`. `given` is the text `m` was read from, if any; a roundtrip
+/// of a lowered module prints it first (only that mode needs the text).
+fn finish(m: IrModule, mode: str, given: str?, sources: IrSourceMap, args: List<str>) -> i64 {
+    let issues = verify_ir_module(m);
+    if issues.len() > 0 {
+        for i in issues { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
+        return 1;
+    }
+    if mode == "verify" { return 0; }
+    if mode == "print" {
+        // The text ends in a newline; `print` writes that one.
+        let text = print_ir_module(m);
+        print(text.slice(0, text.len() - 1));
+        return 0;
+    }
+    if mode == "roundtrip" { return if round_trips(m, given) { 0 } else { 1 }; }
+    // `run-roundtrip` is `roundtrip` and then `run` in one process, for
+    // `pilot test --ir`: a module that does not round-trip is not run.
+    if mode == "run-roundtrip" && !round_trips(m, given) {
+        eprint(roundtrip_failed());
+        return 1;
+    }
+    if mode == "run-unopt" { return ir_run(m, sources, args); }
+    if mode == "opt" || mode == "run" || mode == "run-roundtrip" {
+        let failed = run_passes(m, default_passes());
+        if failed.len() > 0 {
+            for i in failed { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
+            return 1;
+        }
+        if mode != "opt" { return ir_run(m, sources, args); }
+        let text = print_ir_module(m);
+        print(text.slice(0, text.len() - 1));
+        return 0;
+    }
+    eprint(f"error: unknown `pilot ir` mode `{mode}` (verify, print, opt, run, run-unopt, roundtrip, run-roundtrip)");
+    return 2;
+}

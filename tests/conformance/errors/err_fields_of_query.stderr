@@ -1,0 +1,2 @@
+error[SEED001]
+`fields_of` asks `field_list`, which the seed cannot answer

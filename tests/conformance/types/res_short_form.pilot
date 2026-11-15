@@ -1,0 +1,12 @@
+// F4: `res<T, E>` is the readable pair of `result<T, E>`, so a static call
+// on it in expression position reaches `result`; `catch e` binds the error.
+fn halve(n: i64) -> i64 ! str {
+    if n % 2 != 0 {
+        return res<i64, str>.err("odd");
+    }
+    return n / 2;
+}
+
+fn main() {
+    print(halve(3) catch e => e);
+}

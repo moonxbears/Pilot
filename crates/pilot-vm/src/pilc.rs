@@ -1,11 +1,12 @@
 //! `.pilc` v3 Zero-Copy Binary Container & Name-Blind `VmHook` Debug Table.
 
-use pilot_rt::PilotVal;
+use crate::value::{PilotVal, TAG_HEAP_STR};
 use pilot_span::ByteSpan;
 use crate::instruction::Instruction;
 
 pub const PILC_V3_MAGIC: &[u8; 4] = b"PIL3";
-pub const PILC_V3_VERSION: u32 = 4;
+/// Version 5: 64-bit instruction words with a 32-bit operand.
+pub const PILC_V3_VERSION: u32 = 5;
 
 /// A construct the compiler could not lower, with the span it came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,7 +39,7 @@ impl PilcBinary {
         buf.extend_from_slice(&(self.constants.len() as u32).to_le_bytes());
         for c in &self.constants {
             buf.extend_from_slice(&c.tag_meta.to_le_bytes());
-            if c.tag() == pilot_rt::TAG_HEAP_STR {
+            if c.tag() == TAG_HEAP_STR {
                 let off = str_data.len() as u64;
                 c.with_str(|s| { str_data.extend_from_slice(&(s.len() as u32).to_le_bytes()); str_data.extend_from_slice(s.as_bytes()); });
                 buf.extend_from_slice(&off.to_le_bytes());
@@ -66,17 +67,21 @@ impl PilcBinary {
         let (heap_str_data, mut constants) = (&bytes[offset..offset + heap_len], Vec::with_capacity(const_count));
         offset += heap_len;
         for (tag_meta, payload) in raw_consts {
-            if (tag_meta & 0xFF) as u8 == pilot_rt::TAG_HEAP_STR {
+            if (tag_meta & 0xFF) as u8 == TAG_HEAP_STR {
                 let str_off = payload as usize;
                 let s_len = if str_off + 4 <= heap_str_data.len() { u32::from_le_bytes(heap_str_data[str_off..str_off + 4].try_into().unwrap()) as usize } else { usize::MAX };
                 constants.push(if str_off.saturating_add(4).saturating_add(s_len) <= heap_str_data.len() { PilotVal::from_str(core::str::from_utf8(&heap_str_data[str_off + 4..str_off + 4 + s_len]).unwrap_or("")) } else { PilotVal::NULL });
-            } else { constants.push(PilotVal { tag_meta, payload }); }
+            } else {
+                let v = PilotVal { tag_meta, payload };
+                if !v.is_well_formed() { return Err("Malformed string constant".into()); }
+                constants.push(v);
+            }
         }
         if offset + 4 > bytes.len() { return Err("Truncated code header".into()); }
         let ins_count = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
         offset += 4;
-        if offset + ins_count * 4 > bytes.len() { return Err("Truncated code".into()); }
-        let instructions = (0..ins_count).map(|i| { let o = offset + i * 4; Instruction(u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap())) }).collect();
+        if offset + ins_count * 8 > bytes.len() { return Err("Truncated code".into()); }
+        let instructions = (0..ins_count).map(|i| { let o = offset + i * 8; Instruction(u64::from_le_bytes(bytes[o..o + 8].try_into().unwrap())) }).collect();
         Ok(Self::new(constants, instructions))
     }
 }

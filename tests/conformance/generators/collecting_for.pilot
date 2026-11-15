@@ -1,0 +1,28 @@
+// F5b: a `for` in value position collects what its body yields; a `for` in
+// statement position inside a function makes that function a generator.
+fn tens(n: i64) -> i64[] {
+    return for i in 0..n { yield i * 10; };
+}
+
+fn evens_then_odds(xs: i64[]) {
+    let evens = for x in xs { if x % 2 == 0 { yield x; } };
+    for e in evens {
+        yield e;
+    }
+    for x in xs {
+        if x % 2 != 0 { yield x; }
+    }
+}
+
+fn main() {
+    let squares = for i in 1..=4 { yield i * i; };
+    print(squares);
+    print(squares == [1, 4, 9, 16]);
+    print(tens(3));
+    let picked = for x in [3, 4, 7, 8, 10] { if x % 2 == 0 { yield x; } };
+    print(picked.len());
+    print(for c in ["p", "q"] { yield c + c; });
+    for v in evens_then_odds([5, 2, 9, 4]) {
+        print(v);
+    }
+}

@@ -1,0 +1,8 @@
+// An alias is checked as its target: `Meters` is `i64`, so a `str` bound
+// to it is TYPE001, reported with the target's name.
+type Meters = i64;
+
+fn main() {
+    let m: Meters = "nine";
+    print(m);
+}

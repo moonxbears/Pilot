@@ -1,0 +1,11 @@
+// The package of known_bugs/field_name_private_fn.pilot: a record whose
+// field shares its name with a private function of the importing file.
+pkg lib.field_notes;
+
+pub struct Note {
+    pub summary: str;
+}
+
+pub fn make_note(s: str) -> Note {
+    return Note { summary: s };
+}

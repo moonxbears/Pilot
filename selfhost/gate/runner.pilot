@@ -16,6 +16,7 @@ use selfhost.gate.seed_audit.*;
 use selfhost.gate.rename_litmus.*;
 use selfhost.gate.bootstrap_parity.*;
 use selfhost.gate.seam_gate.*;
+use selfhost.gate.keyword_gate.*;
 
 fn gr_reg_gate(reg: i64, ids: i64, gid: str, cat: GateCategory, fast_def: bool) -> usize {
     let entry = __engine("map_new");
@@ -32,6 +33,7 @@ pub fn build_gate_registry() -> i64 {
     let _ = gr_reg_gate(reg, ids, "adaptability", GateCategoryId.Adaptability, true);
     let _ = gr_reg_gate(reg, ids, "hygiene", GateCategoryId.Hygiene, true);
     let _ = gr_reg_gate(reg, ids, "seams", GateCategoryId.Hygiene, true);
+    let _ = gr_reg_gate(reg, ids, "keywords", GateCategoryId.Hygiene, true);
     let _ = gr_reg_gate(reg, ids, "rename_litmus", GateCategoryId.Adaptability, false);
     let _ = gr_reg_gate(reg, ids, "bootstrap_parity", GateCategoryId.BootstrapParity, false);
     __engine("map_set", reg, "__ids__", ids);
@@ -44,7 +46,7 @@ pub fn gate_help_banner() -> str {
            "Options:\n" +
            "  --full             Run all gates including Dual-Pass Rename Litmus & Stage-3 Parity\n" +
            "                     (a gate whose check needs unconnected code reports [SEAM]; exit 0 unless a gate fails)\n" +
-           "  --only <id>        Run a single registered gate (adaptability|hygiene|seams|rename_litmus|bootstrap_parity)\n" +
+           "  --only <id>        Run a single registered gate (adaptability|hygiene|seams|keywords|rename_litmus|bootstrap_parity)\n" +
            "  --litmus           Include Dual-Pass Universal Rename Litmus gate\n" +
            "  --seed <u64>       Deterministic seed for Pass-1 Rename Litmus & Bootstrap Parity\n" +
            "  --json             Emit machine-readable JSON gate report\n" +
@@ -186,6 +188,9 @@ pub fn run_gate_by_id(workspace_root: str, gate_id: str, opts: ref<GateRunOption
     }
     if gate_id == "seams" {
         return execute_seam_gate(workspace_root, opts);
+    }
+    if gate_id == "keywords" {
+        return execute_keyword_gate(workspace_root, opts);
     }
     if gate_id == "rename_litmus" {
         return execute_dual_pass_rename_gate(workspace_root, opts);

@@ -1,0 +1,10 @@
+// A `comptime if` condition that calls a function is known while compiling,
+// but calls are not evaluated there yet: the build stops at the seam
+// `comptime_if.condition` instead of guessing a branch.
+fn limit() -> i64 => 4;
+
+fn main() {
+    comptime if limit() > 2 {
+        print("big");
+    }
+}

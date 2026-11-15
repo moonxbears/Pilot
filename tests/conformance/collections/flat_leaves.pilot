@@ -1,0 +1,17 @@
+// `*..xs` and its readable form `flat(xs)` add the leaves of `xs` at any
+// depth to a list literal; an empty inner list adds nothing.
+//
+// Expected output, worked by hand:
+//   [[1, [2, [3]]], [], [4]] has leaves 1, 2, 3, 4 in order -> [1, 2, 3, 4].
+//   [0, flat(t), 9] with t = [[5], [6, [7]]] -> [0, 5, 6, 7, 9].
+//   flat of an already flat [8, 9] -> [8, 9]; its length is 2.
+fn main() {
+    let deep = [[1, [2, [3]]], [], [4]];
+    print([*..deep]);
+    let t = [[5], [6, [7]]];
+    print([0, flat(t), 9]);
+    let plain = [8, 9];
+    let same = [*..plain];
+    print(same);
+    print(same.len());
+}

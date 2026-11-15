@@ -1,0 +1,59 @@
+// `errdefer` runs only when its scope is left by a failure: a `?` that
+// propagates, or a `return` of a failed value. Falling off the end, a
+// successful `return`, `break` and `continue` skip it. It runs in last-in,
+// first-out order together with `defer`.
+//
+// Expected output, worked by hand from the rules above:
+//   open(1) succeeds: "acquire 1", then "defer 1" only.
+//   open(-1) fails at `check(n)?`: "acquire -1", then (LIFO) "defer -1",
+//   then "errdefer -1".
+//   close_early(0) returns a failed value: "errdefer early", then the
+//   caller prints the failure.
+//   loop_body: the errdefer inside a loop body block is skipped on
+//   `continue` and on falling off the end; it returns i = 3 successfully.
+struct Fault : IValue {
+    pub code: i64;
+}
+
+fn check(n: i64) -> i64 ! Fault {
+    if n < 0 { return res<i64, Fault>.err(Fault { code: n }); }
+    return n;
+}
+
+fn open(n: i64) -> i64 ! Fault {
+    print(f"acquire {n}");
+    errdefer print(f"errdefer {n}");
+    defer print(f"defer {n}");
+    let v = check(n)?;
+    return v * 10;
+}
+
+fn close_early(n: i64) -> i64 ! Fault {
+    errdefer { print("errdefer early"); }
+    if n == 0 { return res<i64, Fault>.err(Fault { code: 7 }); }
+    return n;
+}
+
+fn loop_body() -> i64 ! Fault {
+    var i = 0;
+    while i < 3 {
+        i = i + 1;
+        errdefer print("never");
+        if i == 2 { continue; }
+        print(f"iteration {i}");
+    }
+    return i;
+}
+
+fn main() {
+    let a = open(1) catch e => -1;
+    print(a);
+    let b = open(-1) catch e => -1;
+    print(b);
+    let c = close_early(0) catch e => -2;
+    print(c);
+    let d = close_early(5) catch e => -2;
+    print(d);
+    let e = loop_body() catch e => -3;
+    print(e);
+}

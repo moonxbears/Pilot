@@ -1,0 +1,1 @@
+error[SYN001]: the template of `twice` holds a node of kind `LambdaExpr`, which a rule template cannot carry yet

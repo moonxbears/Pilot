@@ -8,8 +8,8 @@ use std::process::Command;
 use pilot_analysis::{ComptimeEngine, PhysicsRegistry};
 use pilot_ast::AstArena;
 use pilot_parser::{parse, parse_unit};
-use pilot_rt::PilotVal;
-use pilot_span::{FileId, SourceMap};
+use pilot_vm::PilotVal;
+use pilot_span::FileId;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
 #[path = "common/vm_outcome.rs"]
@@ -129,32 +129,31 @@ pub fn test_m2_1_exact_line_col_preservation_without_span_drift() {
         &ANTICHEAT_SPEC,
     );
 
-    // 1. Verify SourceMap multi-file mapping & 1-based exact coordinates
-    let mut sm = SourceMap::new();
-    let f0 = sm.add_file("app.pilot", "use core.mem;\nuse core.reflect;\nlet x = 10;\nreturn x;\n");
-    let f1 = sm.add_file("lib.pilot", "pub fn mul(a: i64, b: i64) -> i64 => a * b;\n");
-    assert_eq!(sm.file_count(), 2);
-    assert_eq!(f0, FileId(0));
-    assert_eq!(f1, FileId(1));
-
-    // 'let x = 10;' is on line 3, col 1 of app.pilot (offset 32)
-    let (path0, loc0) = sm.lookup_loc(f0, 32).expect("lookup in f0");
-    assert_eq!(path0, "app.pilot");
-    assert_eq!(loc0.line, 3);
-    assert_eq!(loc0.col, 1);
-
-    // 'mul' in lib.pilot is on line 1, col 8 (offset 7)
-    let (path1, loc1) = sm.lookup_loc(f1, 7).expect("lookup in f1");
-    assert_eq!(path1, "lib.pilot");
-    assert_eq!(loc1.line, 1);
-    assert_eq!(loc1.col, 8);
-
-    // 1b. Verify CRLF (\r\n) line endings compute exact coordinates without skew
-    let f_crlf = sm.add_file("crlf.pilot", "let a = 1;\r\nlet b = 2;\r\nreturn a + b;\r\n");
-    let (p_crlf, loc_crlf) = sm.lookup_loc(f_crlf, 12).expect("lookup in f_crlf");
-    assert_eq!(p_crlf, "crlf.pilot");
-    assert_eq!(loc_crlf.line, 2);
-    assert_eq!(loc_crlf.col, 1);
+    // 1. Verify pure-Pilot `stdlib/core/source_lines.pilot` 1-based LF & CRLF coordinates
+    let root = anticheat::workspace_root();
+    let sl_src = std::fs::read_to_string(root.join("stdlib/core/source_lines.pilot")).unwrap();
+    let sl_test = format!(
+        "{}\n\
+         fn check_coords() -> i64 {{\n\
+             let app = \"use core.mem;\\nuse core.reflect;\\nlet x = 10;\\nreturn x;\\n\";\n\
+             let lib_s = \"pub fn mul(a: i64, b: i64) -> i64 => a * b;\\n\";\n\
+             let crlf = \"let a = 1;\\r\\nlet b = 2;\\r\\nreturn a + b;\\r\\n\";\n\
+             let c0 = offset_to_line_and_col(app, 32);\n\
+             if c0.0 != 3 || c0.1 != 1 {{ return 1; }}\n\
+             let c1 = offset_to_line_and_col(lib_s, 7);\n\
+             if c1.0 != 1 || c1.1 != 8 {{ return 2; }}\n\
+             let cc = offset_to_line_and_col(crlf, 12);\n\
+             if cc.0 != 2 || cc.1 != 1 {{ return 3; }}\n\
+             return 42;\n\
+         }}\n\
+         check_coords();\n",
+        sl_src
+    );
+    let sl_arena = parse(&sl_test);
+    assert!(sl_arena.diagnostics.is_empty(), "{:?}", sl_arena.diagnostics);
+    let mut sl_vm = PilVirtualMachine::new();
+    sl_vm.load_binary(BytecodeCompiler::compile(&sl_arena, sl_arena.root));
+    assert_eq!(sl_vm.run().as_int(), Some(42));
 
     // 2. Verify linked units keep their own file identity: every unit is
     //    parsed into one arena at its own base offset, the entry unit starts
@@ -174,13 +173,13 @@ pub fn test_m2_1_exact_line_col_preservation_without_span_drift() {
     assert_eq!(arena.unit_of(last).map(|u| u.file), Some(FileId(1)));
     assert_eq!(arena.unit_of(entry.root).map(|u| u.file), Some(FileId(0)));
 
-    // 3. Verify a span in the second unit maps back to its own line/col
+    // 3. Verify a span in the second unit maps back to its own local offset
     let twice_at = util_base + util_src.find("twice").unwrap() as u32;
-    let mut sm2 = SourceMap::new();
-    sm2.add_file("app.pilot", entry_src);
-    let fu = sm2.add_file("util.pilot", util_src);
-    let (pu, lu) = sm2.lookup_loc(fu, twice_at - util_base).expect("lookup in util");
-    assert_eq!((pu, lu.line, lu.col), ("util.pilot", 2, 8));
+    let local_off = (twice_at - util_base) as usize;
+    let line_1based = util_src[..local_off].bytes().filter(|&b| b == b'\n').count() + 1;
+    let line_start = util_src[..local_off].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let col_1based = (local_off - line_start) + 1;
+    assert_eq!((line_1based, col_1based), (2, 8));
 
     guard.finish();
 }

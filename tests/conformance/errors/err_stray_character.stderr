@@ -1,0 +1,2 @@
+error[SYN001]: SyntaxError: unexpected character `└`
+err_stray_character.pilot:4:17

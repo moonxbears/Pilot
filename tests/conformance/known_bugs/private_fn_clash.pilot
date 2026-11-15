@@ -1,9 +1,0 @@
-// Two packages each declare a private `helper`. Each package's own calls
-// must reach its own function; the linker keeps only the first.
-use lib.private_one;
-use lib.private_two;
-
-fn main() {
-    print(from_one());
-    print(from_two());
-}

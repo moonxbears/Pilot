@@ -1,0 +1,34 @@
+// F7: an owned value (its type has `~self()`, lattice 0b10) is dropped, and
+// its destructor run, right after the statement where it is last used. A
+// value moved into a call belongs to the callee, which drops it after its
+// own last use; a value returned is moved out and not dropped by the
+// function returning it.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn consume(r: Res) {
+    print(f"consume {r.name}");
+    print("consumed");
+}
+
+fn make(name: str) -> Res {
+    let r = Res { name: name };
+    print(f"made {r.name}");
+    return r;
+}
+
+fn main() {
+    let a = Res { name: "a" };
+    let b = Res { name: "b" };
+    print(a.name);
+    print("after a");
+    consume(b);
+    let c = make("c");
+    print(f"got {c.name}");
+    print("end");
+}

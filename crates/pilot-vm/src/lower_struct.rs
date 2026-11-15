@@ -17,7 +17,7 @@
 use crate::instruction::Opcode;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// What the compiler knows about a declared struct.
 #[derive(Clone, Default)]
@@ -26,6 +26,12 @@ pub(crate) struct StructInfo {
     pub(crate) fields: Vec<(String, NodeId)>,
     /// The `self(..)` declaration, if the struct has one.
     pub(crate) ctor: Option<NodeId>,
+    /// The declared type of each field written with a plain type name.
+    pub(crate) field_types: std::collections::HashMap<String, String>,
+    /// Static fields in declaration order, with their default initializer or `NONE`.
+    pub(crate) static_fields: Vec<(String, NodeId)>,
+    /// The declared type of each static field written with a plain type name.
+    pub(crate) static_field_types: std::collections::HashMap<String, String>,
 }
 
 impl BytecodeCompiler {
@@ -106,15 +112,29 @@ impl BytecodeCompiler {
         let mut info = self.structs.remove(Self::name(arena, dn.lhs)).unwrap_or_default();
         for m in Self::type_members(arena, NodeId(dn.rhs)) {
             let mn = arena.node(m);
+            let is_field = matches!(mn.node_kind(), NodeKind::ParamDecl | NodeKind::VarStmt | NodeKind::LetStmt);
+            let is_static = arena.decl_flags.get(m.0 as usize).copied().unwrap_or(0) & pilot_ast::DECL_FLAG_STATIC != 0;
+            if let Some(t) = Self::annot_name(arena, m).filter(|_| is_field) {
+                let fname = Self::name(arena, mn.lhs).to_string();
+                if is_static {
+                    info.static_field_types.insert(fname, t);
+                } else {
+                    info.field_types.insert(fname, t);
+                }
+            }
             match mn.node_kind() {
-                // A property whose accessors have bodies is computed, not stored.
-                NodeKind::ParamDecl if self.is_computed_property(arena, m) => {}
-                NodeKind::ParamDecl => info
-                    .fields
-                    .push((Self::name(arena, mn.lhs).to_string(), arena.field_default(m))),
+                // A property whose accessors have bodies is computed, not
+                // stored, unless it has a default: then its storage (`field`)
+                // starts at that value.
+                NodeKind::ParamDecl if self.is_computed_property(arena, m) && arena.field_default(m).is_none() => {}
+                NodeKind::ParamDecl => {
+                    let entry = (Self::name(arena, mn.lhs).to_string(), arena.field_default(m));
+                    if is_static { info.static_fields.push(entry); } else { info.fields.push(entry); }
+                }
                 // `var x: T = v;` and `let x: T;` in a struct body are fields too.
                 NodeKind::VarStmt | NodeKind::LetStmt => {
-                    info.fields.push((Self::name(arena, mn.lhs).to_string(), NodeId(mn.rhs)))
+                    let entry = (Self::name(arena, mn.lhs).to_string(), NodeId(mn.rhs));
+                    if is_static { info.static_fields.push(entry); } else { info.fields.push(entry); }
                 }
                 NodeKind::ConstructorDecl => {
                     info.ctor = Some(m);
@@ -127,6 +147,36 @@ impl BytecodeCompiler {
     }
 
     /// Fields of struct `name` in declaration order, with their defaults.
+    /// The declared type of field `field` of struct `owner`.
+    pub(crate) fn field_type(&self, owner: &str, field: &str) -> Option<String> {
+        self.structs.get(owner)?.field_types.get(field).cloned()
+    }
+
+    pub(crate) fn has_static_field(&self, owner: &str, field: &str) -> bool {
+        self.structs.get(owner).is_some_and(|s| s.static_fields.iter().any(|(f, _)| f == field))
+    }
+
+    pub(crate) fn static_field_type(&self, owner: &str, field: &str) -> Option<String> {
+        self.structs.get(owner)?.static_field_types.get(field).cloned()
+    }
+
+    pub(crate) fn compile_struct_static_fields(&mut self, arena: &AstArena, decl: NodeId) -> u8 {
+        let dn = *arena.node(decl);
+        let owner = Self::name(arena, dn.lhs).to_string();
+        let fields = self.structs.get(&owner).map(|s| s.static_fields.clone()).unwrap_or_default();
+        for (fname, default_id) in fields {
+            let mark = self.next_reg;
+            let r_v = if default_id.is_some() {
+                self.compile_node(arena, default_id)
+            } else {
+                self.emit_null()
+            };
+            self.emit_global_set(&format!("{owner}.{fname}"), r_v);
+            self.release_to(mark);
+        }
+        self.emit_null()
+    }
+
     pub(crate) fn struct_fields(&self, name: &str) -> Vec<(String, NodeId)> {
         self.structs.get(name).map(|s| s.fields.clone()).unwrap_or_default()
     }
@@ -176,6 +226,18 @@ impl BytecodeCompiler {
             .chunks(2)
             .filter_map(|pair| Self::map_key(arena, NodeId(pair[0])))
             .collect();
+        // A field whose type converts the values it holds stores the converted value.
+        for field in &given {
+            let ty = self.field_type(name, field);
+            let mark = self.next_reg;
+            let r_k = self.emit_const(PilotVal::from_str(field));
+            let r_v = self.emit_intrinsic("map_get", &[r_obj, r_k]);
+            let r_c = self.convert_for_binding(r_v, ty.as_deref());
+            if r_c != r_v {
+                self.emit_intrinsic("map_set", &[r_obj, r_k, r_c]);
+            }
+            self.release_to(mark);
+        }
         self.emit_field_defaults(arena, name, &given, r_obj);
         r_obj
     }

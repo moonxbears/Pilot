@@ -1,0 +1,11 @@
+// `errdefer` runs only when a failure leaves its block; a function whose
+// return type cannot carry a failure never fails, so it would never run
+// (FLOW006).
+fn tidy(n: i64) -> i64 {
+    errdefer print("never");
+    return n + 1;
+}
+
+fn main() {
+    print(tidy(1));
+}

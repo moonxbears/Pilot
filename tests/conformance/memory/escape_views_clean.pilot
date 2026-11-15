@@ -1,0 +1,48 @@
+// Views and guards used within what they borrow from: no escape.
+//   - a view of a `ref` parameter, or a view parameter, may be returned;
+//   - a method may return a view of `self`;
+//   - returning the expression that makes a guard hands it to the caller;
+//   - an owner a view borrows from lives until the view's last use, so
+//     `free buf` is printed only after the window's last read.
+struct Buf : IObject {
+    pub data: List<i64>;
+    ~self() {
+        print("free buf");
+    }
+
+    fn head(n: i64) -> Win => Win { start: 0, len: n };
+}
+
+struct Win : IReference {
+    pub start: i64;
+    pub len: i64;
+}
+
+struct Lock : IGuard {
+    pub id: i64;
+    ~self() {
+        print(f"unlock {.id}");
+    }
+}
+
+fn window_of(ref b: Buf) -> Win => Win { start: 0, len: b.data.len() };
+
+fn shrink(w: Win) -> Win => Win { start: w.start, len: w.len - 1 };
+
+fn lock(id: i64) -> Lock => Lock { id: id };
+
+fn main() {
+    let b = Buf { data: [1, 2, 3] };
+    let w = window_of(b);
+    print("made window");
+    let s = shrink(w);
+    print(s.len);
+    let h = b.head(2);
+    print(h.len);
+    {
+        let g = lock(7);
+        print(g.id);
+    }
+    print(w.len);
+    print("end");
+}

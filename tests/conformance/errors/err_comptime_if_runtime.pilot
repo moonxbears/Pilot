@@ -1,0 +1,12 @@
+// A `comptime if` condition must be known while compiling; a parameter is
+// only known when the program runs (CTIME007).
+fn pick(n: i64) -> i64 {
+    comptime if n > 0 {
+        return 1;
+    }
+    return 0;
+}
+
+fn main() {
+    print(pick(2));
+}

@@ -1,0 +1,10 @@
+// `context Name { .. }` is not built yet (docs/keyword_roadmap.md K6). It
+// used to be read as a struct named `Clock`; now the build stops at the seam
+// `keyword.unbuilt`, so nothing runs and nothing is printed.
+context Clock {
+    pub now: i64;
+}
+
+fn main() {
+    print("ran");
+}

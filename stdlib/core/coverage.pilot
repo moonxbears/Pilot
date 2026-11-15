@@ -1,0 +1,384 @@
+// =========================================================================
+// FILE: stdlib/core/coverage.pilot
+// `[Coverage]`: what a program's functions did while it ran.
+// =========================================================================
+// `[Coverage(modes, to: outputs)]` (`CoverageAttr` in stdlib/core/meta.pilot)
+// on a function, or on a package, struct, interface or ext block (it is
+// inherited, stdlib/core/attr_flow.pilot), measures each function it covers
+// while the program runs and reports when `main` returns:
+//
+//   [coverage] <function>: statements <ran>/<all> (<pct>%)[, missed lines ..]
+//              [, calls <n>]                                   ::Calls
+//              [, ops <statements run> (<per call>/call), time <µs> us]  ::Speed
+//              [, O(..) by code, O(..) measured]               ::Intrinsics
+//
+// then, for each package, struct, interface or ext block that carries the
+// attribute, a total over the functions it covers:
+//
+//   [coverage] struct Fib: statements 3/3 (100%) in 1 function(s)[, calls ..][, ops .., time .. us]
+//
+// Bare `[Coverage]` has every mode. `to:` is `::Stdout`, `::Stderr` (the
+// default) and/or `::File` (`<source stem>.coverage.txt` beside the source,
+// written by `pilot run`), joined with `|`.
+//
+//   - statements: every statement in a block of the function (nested ones
+//     too); an expression body counts as one. `missed lines` are the lines
+//     of those that never ran.
+//   - ops: statements run in the function's own body. The time of a call
+//     counts once for the outermost call of a recursion.
+//   - by code: the deepest nesting of loops in the function, as O(n^depth);
+//     a function that calls itself is `recursive`.
+//   - measured: statements run per call, with those of the covered
+//     functions it calls, against the input size n of the call: its first
+//     integer (the value), string (the length) or list (the elements)
+//     parameter. Of the calls with the smallest and the largest n, the
+//     growth n^0..n^3 that predicts the larger from the smaller with the
+//     smallest factor off.
+//
+// The type checker plans the calls into this file
+// (selfhost/check/coverage.pilot); the backends make them (probes,
+// crates/pilot-vm/src/lower_probe.rs and selfhost/ir/lower_probe.pilot).
+// Time comes from the clock the plan reads; PilIR and C have no clock yet.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Coverage;
+
+/// What `[Coverage]` measures, joined with `|`.
+pub enum CoverageMode : u32 {
+    Speed = 1,
+    Calls = 2,
+    Intrinsics = 4,
+}
+
+/// Where `[Coverage]` reports, joined with `|`.
+pub enum CoverageOut : u32 {
+    Stdout = 1,
+    Stderr = 2,
+    File = 4,
+}
+
+// Everything is kept by text key in maps: `<unit>|<field>`.
+[Workaround("seed.global_list_push", "lists of units, groups and frames are kept as numbered map entries")]
+let coverage_ints = Map<str, i64>();
+let coverage_texts = Map<str, str>();
+
+fn cov_get(k: str) -> i64 => if coverage_ints.has(k) { coverage_ints.get(k) } else { 0 };
+fn cov_add(k: str, d: i64) { coverage_ints.set(k, cov_get(k) + d); }
+fn cov_text(k: str) -> str => if coverage_texts.has(k) { coverage_texts.get(k) } else { "" };
+
+/// `text` read as a whole number (an optional `-`, then digits); 0 when
+/// it is not one.
+fn cov_int(text: str) -> i64 {
+    var i = 0;
+    var negative = false;
+    if text.len() > 0 && text.byte_at(0) == 45 {
+        negative = true;
+        i = 1;
+    }
+    var v = 0;
+    while i < text.len() {
+        let b = text.byte_at(i);
+        if b < 48 || b > 57 { return 0; }
+        v = v * 10 + (b - 48);
+        i = i + 1;
+    }
+    return if negative { 0 - v } else { v };
+}
+
+/// The comma-separated parts of `text`.
+fn cov_split(text: str) -> List<str> {
+    var out: List<str> = [];
+    if text == "" { return out; }
+    var start = 0;
+    var i = 0;
+    while i < text.len() {
+        if text.byte_at(i) == 44 {
+            out.push(text.slice(start, i));
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    out.push(text.slice(start, text.len()));
+    return out;
+}
+
+/// The number of elements of a list from its text (`[1, 2, 3]` is 3):
+/// commas at the outermost level of brackets, outside quotes.
+[StandIn("coverage.list_size", "the list's length", "counted in the list's text: an element whose text holds an unbalanced bracket or quote miscounts", "M21")]
+fn cov_list_size(text: str) -> i64 {
+    if text.len() <= 2 { return 0; }
+    var depth = 0;
+    var quoted = false;
+    var count = 1;
+    var i = 0;
+    while i < text.len() {
+        let b = text.byte_at(i);
+        if b == 34 { quoted = !quoted; }
+        if !quoted {
+            if b == 91 || b == 123 || b == 40 { depth = depth + 1; }
+            if b == 93 || b == 125 || b == 41 { depth = depth - 1; }
+            if b == 44 && depth == 1 { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
+/// The input size of a call from the text of its size parameter, read as
+/// `kind`: "i" an integer, "s" a string, "l" a list, "" none.
+fn cov_size(text: str, kind: str) -> i64 {
+    if kind == "i" { return cov_int(text); }
+    if kind == "s" { return text.len(); }
+    if kind == "l" { return cov_list_size(text); }
+    return -1;
+}
+
+/// Registers group `g` (a package, struct, interface or ext block that
+/// carries `[Coverage]`), shown as `label`.
+pub fn coverage_group(g: str, label: str, modes: str, outs: str) {
+    let n = cov_get("groups");
+    coverage_texts.set(f"group#{n}", g);
+    coverage_texts.set(g + "|label", label);
+    coverage_ints.set(g + "|modes", cov_int(modes));
+    coverage_ints.set(g + "|outs", cov_int(outs));
+    cov_add("groups", 1);
+}
+
+/// Registers covered function `u`, shown as `name`: the groups it counts in,
+/// the line of each of its statements, its modes and outputs, and its
+/// big-O by code.
+pub fn coverage_unit(u: str, name: str, groups: str, lines: str, modes: str, outs: str, by_code: str) {
+    let n = cov_get("units");
+    coverage_texts.set(f"unit#{n}", u);
+    coverage_texts.set(u + "|name", name);
+    coverage_texts.set(u + "|groups", groups);
+    coverage_texts.set(u + "|lines", lines);
+    coverage_texts.set(u + "|code", by_code);
+    coverage_ints.set(u + "|modes", cov_int(modes));
+    coverage_ints.set(u + "|outs", cov_int(outs));
+    cov_add("units", 1);
+}
+
+fn cov_enter(u: str, size: str, kind: str, now: i64) {
+    cov_add(u + "|calls", 1);
+    let depth = cov_get(u + "|depth");
+    if depth == 0 { coverage_ints.set(u + "|t0", now); }
+    coverage_ints.set(u + "|depth", depth + 1);
+    // The frame: the ops count and the input size at entry.
+    let f = cov_get("frames");
+    coverage_ints.set(f"frame#{f}|ops", cov_get("ops"));
+    coverage_ints.set(f"frame#{f}|n", cov_size(size, kind));
+    cov_add("frames", 1);
+}
+
+fn cov_exit(u: str, now: i64) {
+    let depth = cov_get(u + "|depth") - 1;
+    coverage_ints.set(u + "|depth", depth);
+    if depth == 0 { cov_add(u + "|time", now - cov_get(u + "|t0")); }
+    cov_add("frames", -1);
+    let f = cov_get("frames");
+    let n = cov_get(f"frame#{f}|n");
+    let ops = cov_get("ops") - cov_get(f"frame#{f}|ops");
+    if n < 0 { return; }
+    // The calls with the smallest and the largest input size.
+    if !coverage_ints.has(u + "|lo_n") || n < cov_get(u + "|lo_n") {
+        coverage_ints.set(u + "|lo_n", n);
+        coverage_ints.set(u + "|lo_ops", ops);
+    }
+    if !coverage_ints.has(u + "|hi_n") || n > cov_get(u + "|hi_n") {
+        coverage_ints.set(u + "|hi_n", n);
+        coverage_ints.set(u + "|hi_ops", ops);
+    }
+}
+
+/// A call of `u` begins; `size` is the text of its size parameter.
+pub fn coverage_enter(u: str, size: str, kind: str) { cov_enter(u, size, kind, 0); }
+/// `coverage_enter`, at `now` microseconds.
+pub fn coverage_enter_timed(u: str, size: str, kind: str, now: i64) { cov_enter(u, size, kind, now); }
+/// A call of `u` ends.
+pub fn coverage_exit(u: str) { cov_exit(u, 0); }
+/// `coverage_exit`, at `now` microseconds.
+pub fn coverage_exit_timed(u: str, now: i64) { cov_exit(u, now); }
+
+/// Statement `i` of `u` is about to run.
+pub fn coverage_line(u: str, i: str) {
+    cov_add(u + "|hit#" + i, 1);
+    cov_add(u + "|ops", 1);
+    cov_add("ops", 1);
+}
+
+fn has_mode(modes: i64, m: CoverageMode) -> bool => (modes & (m as i64)) != 0;
+
+/// `O(1)`, `O(n)`, `O(n^k)`.
+fn cov_order(k: i64) -> str {
+    if k == 0 { return "O(1)"; }
+    if k == 1 { return "O(n)"; }
+    return f"O(n^{k})";
+}
+
+/// How far `a` is from `b`, as a factor of at least 1.
+fn cov_off(a: f64, b: f64) -> f64 {
+    if a <= 0.0 || b <= 0.0 { return 1000000000.0; }
+    let r = a / b;
+    return if r < 1.0 { 1.0 / r } else { r };
+}
+
+/// The measured growth of `u`.
+fn cov_measured(u: str) -> str {
+    if !coverage_ints.has(u + "|lo_n") { return "not measured (no input size)"; }
+    let lo = cov_get(u + "|lo_n");
+    let hi = cov_get(u + "|hi_n");
+    if lo == hi || lo <= 0 { return "not measured (one input size)"; }
+    let small = cov_get(u + "|lo_ops") as f64;
+    let large = cov_get(u + "|hi_ops") as f64;
+    let step = (hi as f64) / (lo as f64);
+    var best = 0;
+    var best_off = cov_off(large, small);
+    var grow = 1.0;
+    var k = 1;
+    while k <= 3 {
+        grow = grow * step;
+        let off = cov_off(large, small * grow);
+        if off < best_off {
+            best = k;
+            best_off = off;
+        }
+        k = k + 1;
+    }
+    return cov_order(best) + " measured";
+}
+
+/// The distinct lines of `u`'s statements that never ran, in order.
+fn cov_missed(u: str) -> List<i64> {
+    let lines = cov_split(cov_text(u + "|lines"));
+    var missed: List<i64> = [];
+    var i = 0;
+    while i < lines.len() {
+        if cov_get(u + f"|hit#{i}") == 0 {
+            let line = cov_int(lines[i]);
+            var seen = false;
+            for m in missed {
+                if m == line { seen = true; }
+            }
+            if !seen { missed.push(line); }
+        }
+        i = i + 1;
+    }
+    // In order (a few lines: insertion sort).
+    var sorted: List<i64> = [];
+    for m in missed {
+        var at = 0;
+        while at < sorted.len() && sorted[at] < m { at = at + 1; }
+        var next: List<i64> = [];
+        var j = 0;
+        while j < sorted.len() {
+            if j == at { next.push(m); }
+            next.push(sorted[j]);
+            j = j + 1;
+        }
+        if at == sorted.len() { next.push(m); }
+        sorted = next;
+    }
+    return sorted;
+}
+
+fn cov_ran(u: str) -> i64 {
+    let all = cov_split(cov_text(u + "|lines")).len();
+    var ran = 0;
+    var i = 0;
+    while i < all {
+        if cov_get(u + f"|hit#{i}") > 0 { ran = ran + 1; }
+        i = i + 1;
+    }
+    return ran;
+}
+
+fn cov_statements(ran: i64, all: i64) -> str {
+    let pct = if all == 0 { 100 } else { ran * 100 / all };
+    return f"statements {ran}/{all} ({pct}%)";
+}
+
+/// Sends `line` where `outs` says.
+fn cov_emit(line: str, outs: i64) {
+    if (outs & (CoverageOut::Stdout as i64)) != 0 { print(line); }
+    if (outs & (CoverageOut::Stderr as i64)) != 0 { eprint(line); }
+    if (outs & (CoverageOut::File as i64)) != 0 { coverage_texts.set("file", cov_text("file") + line + "\n"); }
+}
+
+/// The report line of unit `u`.
+fn cov_unit_line(u: str) -> str {
+    let modes = cov_get(u + "|modes");
+    let all = cov_split(cov_text(u + "|lines")).len();
+    var line = "[coverage] " + cov_text(u + "|name") + ": " + cov_statements(cov_ran(u), all);
+    let missed = cov_missed(u);
+    if missed.len() > 0 {
+        var shown = "";
+        for m in missed {
+            if shown != "" { shown = shown + ", "; }
+            shown = shown + f"{m}";
+        }
+        line = line + ", missed lines " + shown;
+    }
+    let calls = cov_get(u + "|calls");
+    if has_mode(modes, ::Calls) { line = line + f", calls {calls}"; }
+    if has_mode(modes, ::Speed) {
+        let ops = cov_get(u + "|ops");
+        let per = if calls > 0 { ops / calls } else { 0 };
+        let time = cov_get(u + "|time");
+        line = line + f", ops {ops} ({per}/call), time {time} us";
+    }
+    if has_mode(modes, ::Intrinsics) {
+        line = line + ", " + cov_text(u + "|code") + " by code, " + cov_measured(u);
+    }
+    return line;
+}
+
+/// The report line of group `g`.
+fn cov_group_line(g: str) -> str {
+    let modes = cov_get(g + "|modes");
+    var ran = 0;
+    var all = 0;
+    var fns = 0;
+    var calls = 0;
+    var ops = 0;
+    var time = 0;
+    var i = 0;
+    while i < cov_get("units") {
+        let u = cov_text(f"unit#{i}");
+        var member = false;
+        for x in cov_split(cov_text(u + "|groups")) {
+            if x == g { member = true; }
+        }
+        if member {
+            fns = fns + 1;
+            ran = ran + cov_ran(u);
+            all = all + cov_split(cov_text(u + "|lines")).len();
+            calls = calls + cov_get(u + "|calls");
+            ops = ops + cov_get(u + "|ops");
+            time = time + cov_get(u + "|time");
+        }
+        i = i + 1;
+    }
+    var line = "[coverage] " + cov_text(g + "|label") + ": " + cov_statements(ran, all) + f" in {fns} function(s)";
+    if has_mode(modes, ::Calls) { line = line + f", calls {calls}"; }
+    if has_mode(modes, ::Speed) { line = line + f", ops {ops}, time {time} us"; }
+    return line;
+}
+
+/// Reports every unit, then every group, where each one's outputs say.
+pub fn coverage_report() {
+    var i = 0;
+    while i < cov_get("units") {
+        let u = cov_text(f"unit#{i}");
+        cov_emit(cov_unit_line(u), cov_get(u + "|outs"));
+        i = i + 1;
+    }
+    i = 0;
+    while i < cov_get("groups") {
+        let g = cov_text(f"group#{i}");
+        cov_emit(cov_group_line(g), cov_get(g + "|outs"));
+        i = i + 1;
+    }
+}
+
+/// What the report sends to `::File`.
+pub fn coverage_file_text() -> str => cov_text("file");

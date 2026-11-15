@@ -12,6 +12,8 @@ pub const SEED: &str = "SEED001";
 pub const UNDECLARED: &str = "DECL001";
 /// An assignment to a variable a lambda captured by value.
 pub const CAPTURED_ASSIGN: &str = "DECL004";
+/// An assignment to a property that has a getter and no setter.
+pub const GET_ONLY_ASSIGN: &str = "DECL004";
 /// `break` outside a loop or switch.
 pub const BREAK_OUTSIDE_LOOP: &str = "FLOW003";
 /// `continue` outside a loop.
@@ -30,3 +32,5 @@ pub const ARG_COUNT: &str = "CALL001";
 pub const NAMED_ARG: &str = "CALL003";
 /// A dimensional literal whose unit no unit family declares.
 pub const UNKNOWN_UNIT: &str = "DIM002";
+/// A `yield` that belongs to no generator function and no collecting `for`.
+pub const GEN_ORPHAN_YIELD: &str = "GEN001";

@@ -1,0 +1,2 @@
+error[CONST001]: `XS` is a constant and cannot be changed; copy it into a variable first (`var copy = XS;`)
+err_const_ref_param.pilot:10:10

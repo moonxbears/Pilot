@@ -1,0 +1,84 @@
+// Checked integer -> integer conversions (stdlib/core/convert): the value
+// when the target holds it, else `::Overflow` above the target's maximum and
+// `::Underflow` below its minimum, never a wrapped value. Expected results
+// follow Rust's `TryFrom` between integer types: the bounds are
+// i8 -128..127, i16 -32768..32767, i32 -2147483648..2147483647,
+// u8 0..255, u16 0..65535, u32 0..4294967295, i64/isize -2^63..2^63-1,
+// u64/usize 0..2^64-1.
+use Pilot.Core.Convert;
+use lib.convert_show;
+
+fn main() {
+    let a: i64 = 255;
+    show("i64 255 -> u8", a.to_u8());
+    let b: i64 = 256;
+    show("i64 256 -> u8", b.to_u8());
+    let c: i64 = -1;
+    show("i64 -1 -> u8", c.to_u8());
+    show("i64 -1 -> u64", c.to_u64());
+    show("i64 -1 -> i8", c.to_i8());
+    let d: i64 = -129;
+    show("i64 -129 -> i8", d.to_i8());
+    let e: i64 = -128;
+    show("i64 -128 -> i8", e.to_i8());
+    let f: i64 = 127;
+    show("i64 127 -> i8", f.to_i8());
+    let g: i64 = 128;
+    show("i64 128 -> i8", g.to_i8());
+    let h: i64 = 32768;
+    show("i64 32768 -> i16", h.to_i16());
+    let h2: i64 = -32768;
+    show("i64 -32768 -> i16", h2.to_i16());
+    let k: i64 = 65536;
+    show("i64 65536 -> u16", k.to_u16());
+    let m: i64 = 2147483648;
+    show("i64 2147483648 -> i32", m.to_i32());
+    let n: i64 = -2147483648;
+    show("i64 -2147483648 -> i32", n.to_i32());
+    let o: i64 = -2147483649;
+    show("i64 -2147483649 -> i32", o.to_i32());
+    let p: i64 = 4294967295;
+    show("i64 4294967295 -> u32", p.to_u32());
+    let q: i64 = 4294967296;
+    show("i64 4294967296 -> u32", q.to_u32());
+    let max: i64 = 9223372036854775807;
+    show("i64 max -> u64", max.to_u64());
+    show("i64 max -> isize", max.to_isize());
+    show("i64 max -> usize", max.to_usize());
+    let min: i64 = -9223372036854775808;
+    show("i64 min -> i64", min.to_i64());
+    show("i64 min -> isize", min.to_isize());
+    show("i64 min -> usize", min.to_usize());
+    let umax: u64 = 18446744073709551615;
+    show("u64 max -> i64", umax.to_i64());
+    show("u64 max -> u64", umax.to_u64());
+    show("u64 max -> usize", umax.to_usize());
+    let top: u64 = 9223372036854775807;
+    show("u64 2^63-1 -> i64", top.to_i64());
+    let over: u64 = 9223372036854775808;
+    show("u64 2^63 -> i64", over.to_i64());
+    let r: u8 = 200;
+    show("u8 200 -> i8", r.to_i8());
+    show("u8 200 -> i64", r.to_i64());
+    let s: u8 = 127;
+    show("u8 127 -> i8", s.to_i8());
+    let t: i8 = -5;
+    show("i8 -5 -> u16", t.to_u16());
+    show("i8 -5 -> i32", t.to_i32());
+    let u: u16 = 65535;
+    show("u16 65535 -> u8", u.to_u8());
+    show("u16 65535 -> i16", u.to_i16());
+    show("u16 65535 -> i32", u.to_i32());
+    let v: i32 = -1;
+    show("i32 -1 -> u32", v.to_u32());
+    let w: u32 = 4294967295;
+    show("u32 4294967295 -> i32", w.to_i32());
+    show("u32 4294967295 -> i64", w.to_i64());
+    let x: isize = -7;
+    show("isize -7 -> usize", x.to_usize());
+    let y: usize = 7;
+    show("usize 7 -> isize", y.to_isize());
+    let z: i16 = -300;
+    show("i16 -300 -> i8", z.to_i8());
+    show("i16 -300 -> u8", z.to_u8());
+}

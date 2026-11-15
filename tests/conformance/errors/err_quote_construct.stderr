@@ -1,0 +1,2 @@
+error[QUOTE001]: a quote cannot hold this construct yet; it holds literals, names, operators, calls, members, indexing, lists, tuples, blocks, `let`/`var`, `if`, `return` and assignments
+err_quote_construct.pilot:5:21

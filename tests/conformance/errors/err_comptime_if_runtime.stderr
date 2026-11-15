@@ -1,0 +1,2 @@
+error[CTIME007]: the condition of `comptime if` is not known while compiling
+err_comptime_if_runtime.pilot:4:17

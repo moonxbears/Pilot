@@ -1,0 +1,50 @@
+// ==============================================================================
+// FILE: selfhost/loader/link_lines.pilot
+// The files each of several programs links, as text for the CLI.
+// ==============================================================================
+// `pilot test --changed` (selfhost/cli/test_changed.pilot) runs this as a
+// self-hosted tool: the loader resolves every program's `use` declarations
+// exactly as it does when the program is run (`mg_link_plan`).
+pub lvl(0) pkg Pilot.SelfHost.Loader.LinkLines;
+
+use std.text;
+use Pilot.SelfHost.Loader.ModuleGraph;
+
+/// The separator between the entries `mg_link_lines` is given.
+pub pure fn link_lines_separator() -> str => "|";
+
+/// For each program in `entries` (paths separated by
+/// `link_lines_separator()`), one line: the program, then each file it links,
+/// separated by tabs, in link order. A program that does not link (a missing
+/// package, a file it cannot read) gives its path and then `!`.
+pub fn mg_link_lines(entries: str, toolchain_root: str) -> str {
+    var lines: List<str> = [];
+    // One index of `pkg` declarations per root for all the entries.
+    let root_index: Map<str, List<str>> = [:];
+    for entry in text.split_text(entries, link_lines_separator()) {
+        if entry.len() == 0 { continue; }
+        let g = mg_build_graph_sharing(entry, toolchain_root, root_index);
+        var fields: List<str> = [entry];
+        if g.diagnostics.len() > 0 {
+            fields.push("!");
+        } else {
+            for id in g.topo_order { fields.push(g.units[id.raw].file_path); }
+        }
+        lines.push(text.join_text(fields, "\t"));
+    }
+    return text.join_text(lines, "\n");
+}
+
+/// For each file in `entries` (paths separated by `link_lines_separator()`),
+/// one line: the file, a tab, and the package it declares; nothing after
+/// the tab when it declares none or cannot be read.
+pub fn mg_package_lines(entries: str) -> str {
+    var lines: List<str> = [];
+    for entry in text.split_text(entries, link_lines_separator()) {
+        if entry.len() == 0 { continue; }
+        var pkg = "";
+        if some h = UnitHeader.read(mg_normalize_path(entry)) { pkg = h.package_name(); }
+        lines.push(entry + "\t" + pkg);
+    }
+    return text.join_text(lines, "\n");
+}

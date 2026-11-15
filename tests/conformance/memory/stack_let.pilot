@@ -1,0 +1,20 @@
+// `[Stack] let` asks for a value to live in the function's own frame. It
+// behaves the same as any other value while it stays there: read, changed
+// in place, lent to a `ref` or `var ref` parameter.
+fn total(ref xs: List<i64>) -> i64 {
+    var t = 0;
+    for x in xs { t = t + x; }
+    return t;
+}
+
+fn add_one(var ref xs: List<i64>) { xs.push(1); }
+
+fn main() {
+    [Stack] let buf = [4, 5, 6];
+    // 4 + 5 + 6 = 15.
+    print(total(buf));
+    add_one(buf);
+    // [4, 5, 6, 1]: 4 items, 16 in all.
+    print(buf.len());
+    print(total(buf));
+}

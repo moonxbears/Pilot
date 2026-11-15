@@ -1,0 +1,21 @@
+// Checked conversions called on literals, unannotated bindings and other
+// calls' results: each receiver has the type the checker infers (an integer
+// literal is an i64, a suffixed one its suffix's type, text a str).
+// "42" parses to 42; 200u8 is above i8's 127 (::Overflow); -1 is below
+// u8's 0 (::Underflow); 300 truncated from 300.7 is above u8's 255.
+use Pilot.Core.Convert;
+use lib.convert_show;
+
+fn main() {
+    show("\"42\".to_i64()", "42".to_i64());
+    show("200u8.to_i8()", 200u8.to_i8());
+    show("(-1).to_u8()", (-1).to_u8());
+    let text = "-17";
+    show("text.to_i32()", text.to_i32());
+    let x = 300.7;
+    show("x.to_u8()", x.to_u8());
+    let n = 65;
+    show("n.to_u16()", n.to_u16());
+    let b = n.to_u8() catch e => 0u8;
+    show("b.to_i8()", b.to_i8());
+}

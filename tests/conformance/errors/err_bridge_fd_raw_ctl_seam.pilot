@@ -1,0 +1,6 @@
+// Unbuilt HostOp stops loudly at registered seam `bridge.fd_raw_ctl` (PROP-002a §6 & §7).
+use Pilot.Core.HostRaw;
+
+fn main() {
+    let _ = Fd.raw_ctl(0, 0, 1, 0);
+}

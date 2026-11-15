@@ -31,9 +31,9 @@ pub partial struct {
         pub static pure fn create(
             name:          str,
             args_repr:     str,
-            weight:        i32 = 0,
-            is_binding:    bool = false,
-            bind_sym_name: str = ""
+            weight:        i32,
+            is_binding:    bool,
+            bind_sym_name: str
         ) -> AttributeEntry => AttributeEntry {
             name:          name,
             args_repr:     args_repr,

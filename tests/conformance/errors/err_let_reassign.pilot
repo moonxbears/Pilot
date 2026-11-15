@@ -1,0 +1,8 @@
+// Assigning to a `let` declared in the same function is refused (DECL004),
+// even though a `some` binding of the same name elsewhere is not
+// (control/if_some_foreign_let).
+fn main() {
+    let x = 1;
+    x = 2;
+    print(x);
+}

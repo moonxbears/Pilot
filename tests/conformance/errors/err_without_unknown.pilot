@@ -1,0 +1,13 @@
+// COMP009: `without { nope }` leaves out a member bundle `Talk` does not
+// have; nothing would be left out.
+struct Talk {
+    pub fn speak() -> str => "hi";
+}
+
+struct Bot {
+    *Talk without { nope };
+}
+
+fn main() {
+    print(Bot {}.speak());
+}

@@ -1,0 +1,14 @@
+// F5: a loop, a direct call, a `var` updated in place and a short-circuit
+// `&&` joined through a block parameter. 10+11+12+13+14 = 60 > 50.
+fn add(a: i64, b: i64) -> i64 => a + b;
+
+fn main() {
+    var i = 0;
+    var total = 0;
+    while i < 5 {
+        total = total + add(i, 10);
+        i = i + 1;
+    }
+    print(total);
+    if total > 50 && i == 5 { print("big"); } else { print("small"); }
+}

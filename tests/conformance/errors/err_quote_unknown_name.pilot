@@ -1,0 +1,6 @@
+// A quote is checked where it is written: a name it uses must be in scope
+// there (DECL001), as `ast<T>` is typed by its code.
+fn main() {
+    let q = quote { nosuch + 1 };
+    print(q.source());
+}

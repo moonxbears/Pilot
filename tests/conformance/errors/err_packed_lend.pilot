@@ -1,0 +1,16 @@
+// LAYOUT002: a field of a `[Layout(packed)]` struct may sit at an address
+// its type does not allow, so it cannot be lent to a `var ref` parameter.
+[Layout(packed)]
+struct Header {
+    pub tag: u8;
+    pub size: u32;
+}
+
+fn grow(var ref n: u32) { n = n + 1; }
+
+fn main() {
+    var h = Header { tag: 7, size: 40 };
+    // `h.size` starts at line 14, column 10.
+    grow(h.size);
+    print(h.size);
+}

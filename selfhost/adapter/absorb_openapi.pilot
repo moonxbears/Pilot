@@ -6,6 +6,7 @@
 
 pub lvl(0) pkg Pilot.SelfHost.Adapter.AbsorbOpenApi;
 
+use std.text;
 
 // ------------------------------------------------------------------------------
 // 1. OpenAPI Property & Schema AST
@@ -486,8 +487,8 @@ pub fn openapi_parse_spec(src: str) -> OpenApiDoc {
 // ------------------------------------------------------------------------------
 
 pub fn openapi_synthesize_client_interface(doc: OpenApiDoc) -> str {
-    var out = "// Client Interface synthesized for " + doc.title + " v" + doc.version + "\n";
-    out = out + "pub interface IApiClient {\n";
+    var out: List<str> = ["// Client Interface synthesized for " + doc.title + " v" + doc.version + "\n"];
+    out.push("pub interface IApiClient {\n");
 
     var i = 0;
     while i < doc.operations.len() {
@@ -507,10 +508,10 @@ pub fn openapi_synthesize_client_interface(doc: OpenApiDoc) -> str {
         if op.response_schema.len() > 0 {
             ret_ty = op.response_schema;
         }
-        out = out + "    fn " + op.operation_id + "(" + param_sig + ") -> " + ret_ty + ";\n";
+        out.push("    fn " + op.operation_id + "(" + param_sig + ") -> " + ret_ty + ";\n");
         i = i + 1;
     }
 
-    out = out + "}\n";
-    return out;
+    out.push("}\n");
+    return text.join_text(out, "");
 }

@@ -1,0 +1,9 @@
+// `become` must be followed by a call: there is no frame to hand over to
+// anything else (TAIL001).
+fn next(n: i64) -> i64 {
+    become n + 1;
+}
+
+fn main() {
+    print(next(1));
+}

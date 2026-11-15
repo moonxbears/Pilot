@@ -1,0 +1,2 @@
+error[GEN001]: `yield` outside a generator function or a collecting `for`
+err_gen_orphan_yield.pilot:4:1

@@ -1,0 +1,52 @@
+// =========================================================================
+// FILE: stdlib/core/debug.pilot
+// `[Debug]`: tracing the bindings and assignments of a function.
+// =========================================================================
+// `[Debug(level, changed_only)]` (`DebugAttr` in stdlib/core/meta.pilot) on
+// a function writes one line to standard error for every `let`, `var` and
+// assignment statement in its body, right after the statement runs:
+//
+//   ::Medium   [debug] x = 3
+//   ::Debug    [debug] x = 3 (was 1)                    (the default level)
+//   ::Verbose  [debug] f:12: x = x + 2 => x = 3 (was 1)
+//
+// `f:12` is the function and the statement's line; `x = x + 2` is the
+// statement as written, its runs of white space made one space and without
+// its `;`. `(was ..)` is the value the target held before the statement; a
+// `let` or `var` has none. With `changed_only: true` an assignment that left
+// the value as it was writes nothing. A value is shown as `f"{value}"` shows
+// it.
+//
+// The type checker plans the trace (selfhost/check/probes.pilot): around each
+// traced statement it asks the backend to capture the target's text before
+// the statement, then to call `debug_trace_line` after it. The seed
+// (crates/pilot-vm/src/lower_probe.rs) and PilIR (selfhost/ir/lower_probe.pilot)
+// carry out that plan; neither knows it is a trace.
+//
+// Only assignments whose target can be read again without running code are
+// traced: a variable, a field of one (`p.x`, `a.b.c`), or an element at a
+// variable or literal index (`xs[i]`, `xs[0]`). The statement of any other
+// target (`f().x = 1`) is not traced.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Debug;
+
+/// How much a `[Debug]` trace line shows.
+pub enum DebugLevel : u8 {
+    /// The target and its new value.
+    Medium,
+    /// The target, its new value and the value before.
+    Debug,
+    /// The function, line and statement, then what `::Debug` shows.
+    Verbose,
+}
+
+/// Writes the trace line of one statement: `head` (the function, line and
+/// statement at `::Verbose`, else empty), then `target = now`, then
+/// `(was before)` when `show_before`. When `compare` is set and `now` is
+/// `before`, the value did not change and nothing is written.
+pub fn debug_trace_line(head: str, target: str, now: str, before: str, compare: bool, show_before: bool) {
+    if compare && now == before { return; }
+    var line = "[debug] " + head + target + " = " + now;
+    if show_before { line = line + " (was " + before + ")"; }
+    eprint(line);
+}

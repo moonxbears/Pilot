@@ -1,0 +1,24 @@
+// =========================================================================
+// FILE: stdlib/core/live.pilot
+// When a `[Live]` function runs.
+// =========================================================================
+// `[Live(3, 4, when: ::Compile | ::Run)]` (`LiveAttr` in
+// stdlib/core/meta.pilot) runs the function with those arguments at each
+// moment its flags name; flags combine with `|`. Without `when:` it runs on
+// `::Compile`. The type checker reads the flags (selfhost/check/probes.pilot)
+// and the CLI runs the calls (selfhost/cli/comptime_attrs.pilot).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Live;
+
+/// The moments a `[Live]` function runs, combinable with `|`.
+pub enum LiveWhen : u32 {
+    /// When the editor saves the file (the language server's
+    /// `textDocument/didSave`).
+    OnSave = 1,
+    /// When the program is started with `pilot debug`.
+    Debug = 2,
+    /// When the program is checked or built (`pilot check`, `pilot build`).
+    Compile = 4,
+    /// When the program is run (`pilot run`), before `main`.
+    Run = 8,
+}

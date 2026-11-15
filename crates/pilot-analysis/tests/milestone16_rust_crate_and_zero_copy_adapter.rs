@@ -386,6 +386,7 @@ fn test_m16_4_panic_boundary_catch_unwind_and_diagnostics() {
     let deps = &[
         "selfhost/diagnostics/model.pilot",
         "selfhost/adapter/rust_sig.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/adapter/rust_bridge.pilot",
         "stdlib/std/polyglot/rust.pilot",
     ];

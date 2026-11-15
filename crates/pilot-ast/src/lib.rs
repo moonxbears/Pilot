@@ -30,6 +30,9 @@ pub enum NodeKind {
     IndexExpr = 210, CascadeExpr = 211, PipeExpr = 212, TryPropagateExpr = 213, CatchRecoveryExpr = 214,
     CoalesceExpr = 215, LambdaExpr = 216, TupleExpr = 217, ListExpr = 218, MapExpr = 219,
     RangeExpr = 220, ComptimeExpr = 221, PolyglotBlock = 222,
+    /// `quote { .. }` / `quote expr`: `lhs` is the quoted code; `flags` is 1
+    /// for a `syntax` rule's template, 0 for a quote value.
+    QuoteExpr = 223,
     IdentExpr = 300, IntLit = 301, FloatLit = 302, BoolLit = 303, StrLit = 304,
     NoneLit = 305, KeywordLit = 306, UnitLit = 307,
     TypeNamed = 400, TypeTuple = 409,
@@ -56,7 +59,7 @@ impl NodeKind {
             211 => Self::CascadeExpr, 212 => Self::PipeExpr, 213 => Self::TryPropagateExpr,
             214 => Self::CatchRecoveryExpr, 215 => Self::CoalesceExpr, 216 => Self::LambdaExpr,
             217 => Self::TupleExpr, 218 => Self::ListExpr, 219 => Self::MapExpr, 220 => Self::RangeExpr,
-            221 => Self::ComptimeExpr, 222 => Self::PolyglotBlock, 300 => Self::IdentExpr,
+            221 => Self::ComptimeExpr, 222 => Self::PolyglotBlock, 223 => Self::QuoteExpr, 300 => Self::IdentExpr,
             301 => Self::IntLit, 302 => Self::FloatLit, 303 => Self::BoolLit, 304 => Self::StrLit,
             305 => Self::NoneLit, 306 => Self::KeywordLit, 307 => Self::UnitLit, 400 => Self::TypeNamed,
             409 => Self::TypeTuple, 500 => Self::PatWildcard, 501 => Self::PatBind, 502 => Self::PatLiteral,
@@ -85,7 +88,7 @@ impl NodeKind {
             Self::TryPropagateExpr => "TryPropagateExpr", Self::CatchRecoveryExpr => "CatchRecoveryExpr",
             Self::CoalesceExpr => "CoalesceExpr", Self::LambdaExpr => "LambdaExpr", Self::TupleExpr => "TupleExpr",
             Self::ListExpr => "ListExpr", Self::MapExpr => "MapExpr", Self::RangeExpr => "RangeExpr",
-            Self::ComptimeExpr => "ComptimeExpr", Self::PolyglotBlock => "PolyglotBlock",
+            Self::ComptimeExpr => "ComptimeExpr", Self::PolyglotBlock => "PolyglotBlock", Self::QuoteExpr => "QuoteExpr",
             Self::IdentExpr => "IdentExpr", Self::IntLit => "IntLit", Self::FloatLit => "FloatLit",
             Self::BoolLit => "BoolLit", Self::StrLit => "StrLit", Self::NoneLit => "NoneLit",
             Self::KeywordLit => "KeywordLit", Self::UnitLit => "UnitLit", Self::TypeNamed => "TypeNamed",
@@ -137,9 +140,11 @@ pub enum BinaryOp {
     As = 32, AsView = 33, Spaceship = 34, SatAdd = 35, SatSub = 36, SatMul = 37,
     WrapAdd = 38, WrapSub = 39, WrapMul = 40, CheckedAdd = 41, CheckedSub = 42,
     CheckedMul = 43, EucMod = 44, Lens = 45, OpenRange = 46, AfterRange = 47, Swap = 48,
+    /// `a..b : step`: the lhs is the range, the rhs the step.
+    Step = 49,
 }
 
-const BINARY_OPS: [BinaryOp; 48] = [
+const BINARY_OPS: [BinaryOp; 49] = [
     BinaryOp::Add, BinaryOp::Sub, BinaryOp::Mul, BinaryOp::Div, BinaryOp::FloorDiv, BinaryOp::Rem,
     BinaryOp::Pow, BinaryOp::Eq, BinaryOp::Ne, BinaryOp::Lt, BinaryOp::Le, BinaryOp::Gt, BinaryOp::Ge,
     BinaryOp::And, BinaryOp::Or, BinaryOp::BitAnd, BinaryOp::BitOr, BinaryOp::BitXor, BinaryOp::Shl,
@@ -149,7 +154,7 @@ const BINARY_OPS: [BinaryOp; 48] = [
     BinaryOp::Spaceship, BinaryOp::SatAdd, BinaryOp::SatSub, BinaryOp::SatMul, BinaryOp::WrapAdd,
     BinaryOp::WrapSub, BinaryOp::WrapMul, BinaryOp::CheckedAdd, BinaryOp::CheckedSub,
     BinaryOp::CheckedMul, BinaryOp::EucMod, BinaryOp::Lens, BinaryOp::OpenRange,
-    BinaryOp::AfterRange, BinaryOp::Swap,
+    BinaryOp::AfterRange, BinaryOp::Swap, BinaryOp::Step,
 ];
 
 impl BinaryOp {
@@ -173,7 +178,7 @@ impl BinaryOp {
             Self::SatSub => "-|", Self::SatMul => "*|", Self::WrapAdd => "+%",
             Self::WrapSub => "-%", Self::WrapMul => "*%", Self::CheckedAdd => "+?",
             Self::CheckedSub => "-?", Self::CheckedMul => "*?", Self::EucMod => "%%",
-            Self::Lens => "~>", Self::OpenRange => ">..<", Self::AfterRange => ">..", Self::Swap => ":=:",
+            Self::Lens => "~>", Self::OpenRange => ">..<", Self::AfterRange => ">..", Self::Swap => ":=:", Self::Step => ":",
         }
     }
 }
@@ -184,6 +189,9 @@ pub const UNARY_OP_DEEP_FLATTEN: u16 = 8;
 /// `some x = v` / `some v` as a condition: true when the value is present,
 /// binding it to `x`. The operand is `AssignStmt(x, v)` or the value itself.
 pub const UNARY_OP_SOME: u16 = 9;
+/// `old(e)` inside an `ensures` clause: `e`'s value when the function was
+/// entered (crates/pilot-parser/src/contracts.rs).
+pub const UNARY_OP_OLD: u16 = 10;
 
 pub const DECL_VIS_MASK: u16 = 0x000F;
 pub const DECL_FLAG_PARTIAL: u16 = 16;
@@ -193,6 +201,25 @@ pub const DECL_FLAG_MUT: u16 = 128;
 pub const DECL_FLAG_COMPTIME: u16 = 256;
 pub const DECL_FLAG_PKG: u16 = 512;
 pub const DECL_FLAG_DTOR: u16 = 1024;
+/// The declaration's visibility was written (`priv`, `pub:`, ..), not defaulted.
+pub const DECL_FLAG_VIS_WRITTEN: u16 = 2048;
+/// The declaration is written with the modifier registered for action
+/// `effect_noalloc` (`noalloc fn`): calling it takes no heap memory.
+pub const DECL_FLAG_NOALLOC: u16 = 4096;
+pub const DECL_FLAG_OVERRIDE: u16 = 8192;
+
+/// `ParamDecl.flags`: the parameter is written with any modifier (`ref`,
+/// `comptime`, or a word registered `binding_mutable` / `perceus_isolated`),
+/// so it lends the caller's value instead of taking a copy or a move.
+pub const PARAM_FLAG_LENT: u16 = 1;
+/// The parameter is written with the seed word `ref`.
+pub const PARAM_FLAG_REF: u16 = 2;
+/// The parameter is written with a word registered `binding_mutable`.
+pub const PARAM_FLAG_MUT: u16 = 4;
+/// The parameter is written with a word registered `perceus_isolated`.
+pub const PARAM_FLAG_ISO: u16 = 8;
+/// The parameter is written `comptime`.
+pub const PARAM_FLAG_COMPTIME: u16 = 16;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct AstAttribute {
@@ -236,6 +263,9 @@ pub struct AstArena {
     /// Constraints on generic parameters: `(owner, parameter, bound type)`,
     /// one row per bound (`<T : IA + IB>` gives two).
     pub type_param_bounds: Vec<(NodeId, SymbolId, NodeId)>,
+    /// Defaults of generic parameters (`<TSent = void>`): `(owner,
+    /// parameter, default type)`.
+    pub type_param_defaults: Vec<(NodeId, SymbolId, NodeId)>,
     /// Collision modifiers of `*Bundle` splices, one row per listed member:
     /// `(splice UnaryExpr, modifier receptor sub-slot, member, alias)`. The
     /// sub-slot is the one the modifier keyword is bound to (category 30);
@@ -253,7 +283,8 @@ pub struct AstArena {
     pub for_clauses: Vec<(NodeId, NodeId)>,
     /// `case p if cond:` guards; `MatchArm.flags` holds the index + 1.
     pub arm_guards: Vec<NodeId>,
-    /// `field: T = default` initializers, keyed by the field's `ParamDecl`.
+    /// `field: T = default` initializers and literal parameter defaults
+    /// (`fn f(x: i64 = 4)`), keyed by the field's or parameter's `ParamDecl`.
     pub field_defaults: Vec<(NodeId, NodeId)>,
     pub diagnostics: Vec<(ByteSpan, String)>,
     pub i64_pool: Vec<i64>,
@@ -287,7 +318,7 @@ impl AstArena {
             nodes: Vec::with_capacity(expected), spans: Vec::with_capacity(expected),
             decl_flags: Vec::with_capacity(expected), type_annots: Vec::with_capacity(expected),
             extra_children: Vec::with_capacity(expected),
-            attrs: Vec::new(), base_types: Vec::new(), type_params: Vec::new(), type_param_bounds: Vec::new(), splice_mods: Vec::new(), property_accessors: Vec::new(),
+            attrs: Vec::new(), base_types: Vec::new(), type_params: Vec::new(), type_param_bounds: Vec::new(), type_param_defaults: Vec::new(), splice_mods: Vec::new(), property_accessors: Vec::new(),
             property_setters: Vec::new(),
             for_clauses: Vec::new(), arm_guards: Vec::new(), field_defaults: Vec::new(), diagnostics: Vec::new(),
             i64_pool: Vec::with_capacity(expected / 4), f64_pool: Vec::with_capacity(expected / 8),

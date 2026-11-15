@@ -1,0 +1,7 @@
+// SYN001: a declaration has one visibility; `pub priv` names two, and the
+// second used to win silently.
+pub priv fn shown() -> i64 => 1;
+
+fn main() {
+    print(shown());
+}

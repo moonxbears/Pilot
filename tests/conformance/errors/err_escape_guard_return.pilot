@@ -1,0 +1,21 @@
+// A scoped guard (lattice 0b11) stays bound to the block that binds it
+// (ESCAPE003): `held` is released when `take` ends, so it cannot be returned.
+// Returning the expression that makes a guard hands it to the caller instead
+// (`lock` below is fine).
+struct Lock : IGuard {
+    pub id: i64;
+    ~self() {
+        print("unlock");
+    }
+}
+
+fn lock(id: i64) -> Lock => Lock { id: id };
+
+fn take(id: i64) -> Lock {
+    let held = lock(id);
+    return held;
+}
+
+fn main() {
+    print(take(3).id);
+}

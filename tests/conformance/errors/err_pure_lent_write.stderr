@@ -1,0 +1,4 @@
+error[PURE001]: `pure` function `fill` changes `xs`, which the caller lent
+err_pure_lent_write.pilot:4:5
+error[PURE001]: `pure` function `fill` writes through `xs`, which the caller lent
+err_pure_lent_write.pilot:5:5

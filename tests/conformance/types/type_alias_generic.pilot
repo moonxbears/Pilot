@@ -1,0 +1,32 @@
+// Generic type aliases: `type Pair<T> = (T, T);` and `type BoxList<T> = List<T>;`
+// substitute their type parameters in annotations, parameters, returns, and fields.
+type Pair<T> = (T, T);
+type BoxList<T> = List<T>;
+type Swapped<A, B> = (B, A);
+
+struct Holder<T> : IValue {
+    pub pair: Pair<T>;
+}
+
+fn first<T>(p: Pair<T>) -> T => p.0;
+
+fn swap_pair<A, B>(p: Swapped<A, B>) -> (A, B) => (p.1, p.0);
+
+fn main() {
+    let p: Pair<i64> = (10, 20);
+    print(p.0);
+    print(p.1);
+    print(first(p));
+
+    let names: BoxList<str> = ["ada", "grace"];
+    print(names.len());
+    print(names[1]);
+
+    let s: Swapped<i64, str> = ("hi", 42);
+    let r = swap_pair(s);
+    print(r.0);
+    print(r.1);
+
+    let h = Holder<i64> { pair: (3, 4) };
+    print(h.pair.0 + h.pair.1);
+}

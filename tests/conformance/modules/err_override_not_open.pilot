@@ -1,0 +1,10 @@
+use lib.open_base;
+
+struct Rogue : IClosedGreeter {
+    pub override pure fn closed_greet() -> str => "hijack";
+}
+
+fn main() {
+    let r = Rogue {};
+    println(f"{r.closed_greet()}");
+}

@@ -1,0 +1,9 @@
+// A string side of a failed comparison is shown quoted, with `"`, `\` and
+// a line break escaped, so an empty string and a space differ.
+// Hand-worked: a is the empty string, b is one space.
+fn main() {
+    let a = "";
+    let b = "say \"hi\"\nback\\slash";
+    print("start");
+    assert(a == " ", b);
+}

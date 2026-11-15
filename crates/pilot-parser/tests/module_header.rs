@@ -23,3 +23,13 @@ fn selected_names_stay_in_one_declaration() {
     let paths: Vec<&str> = decls.iter().map(|d| d.path.as_str()).collect();
     assert_eq!(paths, vec!["Demo.Shapes.{Circle,Square}", "std.col"]);
 }
+
+#[test]
+fn header_is_read_without_parsing_the_items_after_it() {
+    // The body after the header is not Pilot at all; the header must still
+    // be read, so a file that cannot be parsed never hides its imports from
+    // the package index, and never stops a run that indexes it.
+    let src = "pkg Demo.Broken;\nuse std.col;\nfn main() { switch 1 { case , : ) ] } \"caf\u{e9}\n";
+    let got: Vec<(bool, String)> = parse_header(src).into_iter().map(|d| (d.is_package, d.path)).collect();
+    assert_eq!(got, vec![(true, "Demo.Broken".to_string()), (false, "std.col".to_string())]);
+}

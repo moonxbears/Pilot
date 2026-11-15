@@ -117,9 +117,9 @@ pub partial struct {
 
 // Receptors and compile-time registrations (using unquoted `nameof(...)`)
 comptime {
-    __engine("bind_receptor", nameof(raw), 36, 1);
-    __engine("bind_receptor", nameof(splice), 36, 2);
-    __engine("bind_receptor", nameof(splat), 36, 3);
+    bind_receptor(nameof(raw), 36, 1);
+    bind_receptor(nameof(splice), 36, 2);
+    bind_receptor(nameof(splat), 36, 3);
 }
 
 // Canonical Homoiconic Syntax Macros

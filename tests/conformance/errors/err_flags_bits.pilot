@@ -1,0 +1,29 @@
+// FLAGS001: a `[Flags]` enum over `u8` has 8 bits, so 9 single-bit
+// variants do not fit (Bit8 = 256 is bit 8, past them).
+// FLAGS002: a `[Flags]` variant must be 0 or a single bit (3 is two bits;
+// an unwritten value counts on from the one before: 4 + 1 = 5).
+[Flags]
+enum Wide : u8 {
+    Bit0 = 1,
+    Bit1 = 2,
+    Bit2 = 4,
+    Bit3 = 8,
+    Bit4 = 16,
+    Bit5 = 32,
+    Bit6 = 64,
+    Bit7 = 128,
+    Bit8 = 256,
+}
+
+[Flags]
+enum Mode : u32 {
+    Read = 1,
+    Both = 3,
+    Exec = 4,
+    Next,
+}
+
+fn main() {
+    print(Wide::Bit0 as u8);
+    print(Mode::Read as u32);
+}

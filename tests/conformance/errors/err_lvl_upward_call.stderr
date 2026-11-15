@@ -1,0 +1,2 @@
+error[SEAM001]: unconnected seam `lvl.clearance`
+`low` (level 0) uses `top_secret` (level 9)

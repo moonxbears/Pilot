@@ -1,0 +1,2 @@
+error[SEAM001]: unconnected seam `contracts.invariant`
+invariant_seam.pilot:5:5

@@ -14,6 +14,7 @@ pub lvl(0) pkg Pilot.SelfHost.Check.Snapshot;
 
 // --- Node kinds ------------------------------------------------------------
 pub pure fn nk_program() -> i64 => 0;
+pub pure fn nk_import_decl() -> i64 => 1;
 pub pure fn nk_fn() -> i64 => 3;
 pub pure fn nk_param() -> i64 => 4;
 pub pure fn nk_adt() -> i64 => 5;
@@ -62,12 +63,14 @@ pub pure fn nk_list() -> i64 => 218;
 pub pure fn nk_map() -> i64 => 219;
 pub pure fn nk_range() -> i64 => 220;
 pub pure fn nk_comptime() -> i64 => 221;
+pub pure fn nk_quote() -> i64 => 223;
 pub pure fn nk_ident() -> i64 => 300;
 pub pure fn nk_int() -> i64 => 301;
 pub pure fn nk_float() -> i64 => 302;
 pub pure fn nk_bool() -> i64 => 303;
 pub pure fn nk_str() -> i64 => 304;
 pub pure fn nk_none() -> i64 => 305;
+pub pure fn nk_unit_lit() -> i64 => 307;
 pub pure fn nk_type_named() -> i64 => 400;
 pub pure fn nk_type_tuple() -> i64 => 409;
 pub pure fn nk_pat_wildcard() -> i64 => 500;
@@ -90,16 +93,27 @@ pub pure fn splice_without() -> i64 => 2;
 // --- Binary and unary operators --------------------------------------------
 pub pure fn op_eq() -> i64 => 8;
 pub pure fn op_or() -> i64 => 15;
+pub pure fn snap_op_bit_or() -> i64 => 17;
 pub pure fn op_ge() -> i64 => 13;
 pub pure fn op_and() -> i64 => 14;
 pub pure fn op_coalesce() -> i64 => 22;
 pub pure fn op_range_inclusive() -> i64 => 23;
 pub pure fn op_range() -> i64 => 24;
+/// `a..b : step` (`BinaryOp::Step`): lhs the range, rhs the step.
+pub pure fn op_step() -> i64 => 49;
 pub pure fn op_is() -> i64 => 25;
 pub pure fn op_as() -> i64 => 32;
 pub pure fn op_as_view() -> i64 => 33;
+/// `BinaryExpr` flags of `x |> f(..)` and `f(..) <| x` (`BinaryOp::Pipe`,
+/// `BinaryOp::PipeBackward` in crates/pilot-ast).
+pub pure fn op_pipe() -> i64 => 21;
+pub pure fn op_pipe_backward() -> i64 => 31;
+/// `UnaryExpr` flags of logical not (`!x`).
+pub pure fn unary_not() -> i64 => 5;
 pub pure fn unary_some() -> i64 => 9;
 pub pure fn unary_splat() -> i64 => 6;
+pub pure fn unary_double_splat() -> i64 => 7;
+pub pure fn unary_deep_flatten() -> i64 => 8;
 /// `MemberExpr` flags of `.name`, whose receiver is implied
 /// (`MEMBER_IMPLIED_RECEIVER` in crates/pilot-parser/src/lib.rs).
 pub pure fn member_implied() -> i64 => 2;
@@ -123,18 +137,121 @@ pub struct Snap {
     /// member a `*Bundle` collision modifier lists.
     pub splice_mods: List<List<i64>>;
     /// The member names of the enumeration protocol `for` uses: the call
-    /// that gives the enumerator, the step, and the current element.
+    /// that gives the enumerator, the step, the current element, and the
+    /// method that closes an enumerator a loop leaves early ("" for none).
     pub enumeration: List<str>;
-    /// `[field node, number of accessor bodies]` per field written with an
-    /// accessor block; `{ get; }` has none.
+    /// The generator protocol (`bind_generator`): the generator type, its
+    /// frame field, its constructor and the function `yield *xs` walks a
+    /// non-generator with; empty when none is bound.
+    pub generator: List<str>;
+    /// `[field node, number of accessor bodies, accessor block]` per field
+    /// written with an accessor block; `{ get; }` has none. The block lists
+    /// the getter bodies first, their count in its `flags`.
     pub properties: List<List<i64>>;
+    /// The word that names a method's receiver (`bind_receiver_ident`), or
+    /// "" when the syntax binds none.
+    pub receiver: str;
+    /// The word that names a property's backing storage inside its accessors
+    /// (`field`), or "".
+    pub backing: str;
+    /// Node -> its declaration modifiers packed by `decl_bits`, or -1 for a
+    /// node that is no declaration.
+    pub modifiers: List<i64>;
+    /// Field or parameter node -> the node of its default value (`retries: i64 = 3`, an
+    /// enum variant's `= 5`), or -1.
+    pub field_defaults: List<i64>;
+    /// Switch arm node -> its guard (`case x if x < 0`), or -1.
+    pub arm_guards: List<i64>;
+    /// The word that names the value a setter is given (`value`) when the
+    /// setter names no parameter, or "".
+    pub setter_value: str;
+    /// `[setter body, parameter node or -1, guard node or -1]` per setter
+    /// (`set(v: T) if cond => ..`).
+    pub setters: List<List<i64>>;
+    /// Node kind -> where its children are (`child_shapes`).
+    pub shapes: List<ChildShape>;
     pub count: i64;
+    /// The nodes of the user's own files all lie in `user_lo .. user_hi`
+    /// (`scan_nodes`); a walk that keeps only those nodes need not leave it.
+    pub user_lo: i64;
+    pub user_hi: i64;
+    /// Node kind -> the nodes of that kind, in node order (`nodes_of`): a
+    /// pass that wants a few kinds of node reads their lists instead of
+    /// walking every node. The lists are shared; a caller must not change them.
+    pub by_kind: List<List<i64>>;
+    /// The declaration nodes (those `modifiers` covers), in node order.
+    pub decl_nodes: List<i64>;
 }
+
+/// A list of `n` copies of `v`, built by doubling (each step one engine
+/// copy) instead of `n` single pushes.
+pub fn filled(n: i64, v: i64) -> List<i64> {
+    var out: List<i64> = [];
+    if n <= 0 { return out; }
+    out.push(v);
+    while out.len() * 2 <= n { out = [*out, *out]; }
+    if out.len() < n { out = [*out, *filled(n - out.len(), v)]; }
+    return out;
+}
+
+/// One walk over the node rows: the node range of the user's files and the
+/// nodes of each kind, as `[[lo, hi], by_kind]`.
+fn scan_nodes(nodes: List<i64>, files: List<List<any>>) -> List<any> {
+    var user: List<bool> = [];
+    for row in files { user.push(row[1]); }
+    let units = user.len();
+    let count = nodes.len() / snap_columns();
+    var by_kind: List<List<i64>> = [];
+    var lo = -1;
+    var hi = 0;
+    var n = 0;
+    var at = 0;
+    while n < count {
+        let k = nodes[at];
+        if k >= 0 {
+            while by_kind.len() <= k { by_kind.push([]); }
+            by_kind[k].push(n);
+        }
+        let u = nodes[at + 8];
+        if u >= 0 && u < units && user[u] {
+            if lo < 0 { lo = n; }
+            hi = n + 1;
+        }
+        n = n + 1;
+        at = at + 9;
+    }
+    let range: List<i64> = if lo < 0 { [0, 0] } else { [lo, hi] };
+    return [range, by_kind];
+}
+
+/// Every node of kind `k`, in node order (`Snap.by_kind`).
+pub fn nodes_of(s: Snap, k: i64) -> List<i64> {
+    if k >= 0 && k < s.by_kind.len() { return s.by_kind[k]; }
+    return [];
+}
+
+/// `[node, value]` rows as a node -> value list (-1 where no row names it).
+fn node_map(rows: List<List<i64>>, count: i64) -> List<i64> {
+    let out = filled(count, -1);
+    for row in rows { out[row[0]] = row[1]; }
+    return out;
+}
+
+/// The default value of field `n`, or -1.
+pub fn field_default(s: Snap, n: i64) -> i64 => s.field_defaults[n];
+
+/// The guard of switch arm `arm`, or -1.
+pub fn arm_guard(s: Snap, arm: i64) -> i64 => s.arm_guards[arm];
 
 /// Reads the snapshot the host serves.
 pub fn snap_load() -> Snap {
     let raw = __engine("chk_snapshot");
     let nodes: List<i64> = raw[0];
+    let scan = scan_nodes(nodes, raw[6]);
+    let range: List<i64> = scan[0];
+    var decl_nodes: List<i64> = [];
+    let decl_rows: List<List<i64>> = raw[13];
+    for row in decl_rows { decl_nodes.push(row[0]); }
     return Snap {
         nodes: nodes,
         extra: raw[1],
@@ -148,9 +265,83 @@ pub fn snap_load() -> Snap {
         splice_mods: raw[9],
         enumeration: raw[10],
         properties: raw[11],
+        receiver: snap_word(raw[12], 0),
+        backing: snap_word(raw[12], 1),
+        modifiers: decl_bits(raw[13], nodes.len() / snap_columns()),
+        field_defaults: node_map(raw[14], nodes.len() / snap_columns()),
+        arm_guards: node_map(raw[15], nodes.len() / snap_columns()),
+        setter_value: snap_word(raw[12], 2),
+        setters: raw[16],
+        generator: raw[17],
+        shapes: child_shapes(),
         count: nodes.len() / snap_columns(),
+        user_lo: range[0],
+        user_hi: range[1],
+        by_kind: scan[1],
+        decl_nodes: decl_nodes,
     };
 }
+
+/// The declaration rows the host serves (`[node, is partial, is static,
+/// visibility tier or -1, is package declaration, is pure, is noalloc]`) as
+/// one entry per node: bit 0 partial, bit 1 static, bit 2 package
+/// declaration, bit 3 pure, bit 4 noalloc, the tier plus one from bit 5 (0
+/// when no visibility is written).
+fn decl_bits(rows: List<List<i64>>, count: i64) -> List<i64> {
+    let out = filled(count, -1);
+    for row in rows {
+        let pure_bit = if row.len() > 5 { row[5] * 8 } else { 0 };
+        let noalloc_bit = if row.len() > 6 { row[6] * 16 } else { 0 };
+        let override_bit = if row.len() > 7 { row[7] * 1024 } else { 0 };
+        out[row[0]] = row[1] + row[2] * 2 + row[4] * 4 + pure_bit + noalloc_bit + override_bit + (row[3] + 1) * 32;
+    }
+    return out;
+}
+
+fn decl_bit(s: Snap, n: i64, bit: i64) -> bool {
+    let m = s.modifiers[n];
+    return m >= 0 && (m / bit) % 2 == 1;
+}
+
+/// Whether declaration `n` is written `partial`.
+pub fn is_partial_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 1);
+
+/// Whether declaration `n` is written `static`.
+pub fn is_static_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 2);
+
+/// Whether declaration `n` is written `pure`.
+pub fn is_pure_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 8);
+
+/// Whether declaration `n` is written with the modifier registered for
+/// action `effect_noalloc` (`noalloc fn`).
+pub fn is_noalloc_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 16);
+
+/// Whether declaration `n` is written `override`.
+pub fn is_override_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 1024);
+
+/// `ParamDecl` flag bits (crates/pilot-ast `PARAM_FLAG_*`): written with
+/// a word registered `binding_mutable` (`var`), or `perceus_isolated` (`iso`).
+pub pure fn param_flag_mutable() -> i64 => 4;
+pub pure fn param_flag_isolated() -> i64 => 8;
+
+/// Whether parameter `prm` carries flag bit `bit`.
+pub fn param_flag(s: Snap, prm: i64, bit: i64) -> bool => kind(s, prm) == nk_param() && (flags(s, prm) / bit) % 2 == 1;
+
+/// Whether node `n` is a `pkg Name;` package declaration.
+pub fn is_package_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 4);
+
+/// Whether node `n` is a declaration (or a `let` / `var` binding).
+pub fn is_declaration(s: Snap, n: i64) -> bool => s.modifiers[n] >= 0;
+
+/// The visibility tier declaration `n` was written with, or -1 when none
+/// is written or `n` is no declaration.
+pub fn decl_tier(s: Snap, n: i64) -> i64 {
+    let m = s.modifiers[n];
+    return if m < 0 { -1 } else { (m % 1024) / 32 - 1 };
+}
+
+/// Word `i` of a list of words the host serves, or "".
+fn snap_word(words: List<str>, i: i64) -> str => if i < words.len() { words[i] } else { "" };
 
 pub fn kind(s: Snap, n: i64) -> i64 => s.nodes[n * 9];
 pub fn lhs(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 1];
@@ -177,6 +368,15 @@ pub fn in_user_file(s: Snap, n: i64) -> bool {
     if u < 0 || u >= s.files.len() { return false; }
     let row: List<any> = s.files[u];
     return row[1];
+}
+
+/// Whether node `n` is in a file the program links (not a declaration file
+/// the checker reads beside it).
+pub fn in_linked_file(s: Snap, n: i64) -> bool {
+    let u = unit_of(s, n);
+    if u < 0 || u >= s.files.len() { return false; }
+    let row: List<any> = s.files[u];
+    return row[4];
 }
 
 /// The source text node `n` spans.
@@ -216,35 +416,93 @@ fn push_present(out: List<i64>, n: i64) {
     if n >= 0 { out.push(n); }
 }
 
+/// Where a node kind keeps its children.
+pub enum ChildShape : u8 {
+    /// No children.
+    Leaf,
+    /// `rhs` of them from extra slot `lhs`.
+    ExtraAtLhs,
+    /// `flags` of them from extra slot `rhs`.
+    ExtraAtRhs,
+    /// An `enum`: its variants from extra slot `rhs`, or the one `rhs`.
+    Adt,
+    /// The `lhs` node.
+    Lhs,
+    /// The `rhs` node.
+    Rhs,
+    /// The `lhs` node, then the `rhs` node.
+    LhsRhs,
+    /// A closure: its parameters from extra slot `lhs`, then its body `rhs`.
+    Lambda,
+    /// A `for` loop: its pattern, its sequence `rhs`, then its body.
+    For,
+    /// An `if`: its condition `lhs`, then its branches.
+    If,
+}
+
+fn set_shape(out: List<ChildShape>, kinds: List<i64>, shape: ChildShape) {
+    for k in kinds { out[k] = shape; }
+}
+
+/// Node kind -> where its children are, built once per snapshot so that
+/// `children` looks a kind up instead of comparing it with every kind.
+fn child_shapes() -> List<ChildShape> {
+    var out: List<ChildShape> = [];
+    var i = 0;
+    while i <= nk_pat_range() { out.push(ChildShape::Leaf); i = i + 1; }
+    set_shape(out, [nk_program(), nk_block(), nk_call(), nk_tuple(), nk_list(), nk_map(),
+        nk_match(), nk_try(), nk_ctor(), nk_indexer(), nk_type_tuple(), nk_pat_tuple(),
+        nk_pat_slice(), nk_pat_record(),], ChildShape::ExtraAtLhs);
+    set_shape(out, [nk_fn(), nk_operator(), nk_variant(), nk_pat_variant(), nk_type_named(),],
+        ChildShape::ExtraAtRhs);
+    set_shape(out, [nk_adt(),], ChildShape::Adt);
+    set_shape(out, [nk_struct(), nk_interface(), nk_extend(), nk_call_arg(), nk_let(), nk_var(),
+        nk_const(), nk_catch(), nk_param(),], ChildShape::Rhs);
+    set_shape(out, [nk_lambda(),], ChildShape::Lambda);
+    set_shape(out, [nk_for(),], ChildShape::For);
+    set_shape(out, [nk_if(),], ChildShape::If);
+    set_shape(out, [nk_binary(), nk_assign(), nk_while(), nk_index(), nk_cascade(), nk_pipe(),
+        nk_catch_recovery(), nk_coalesce(), nk_range(), nk_guard(), nk_arm(), nk_scope(),
+        nk_pat_or(), nk_pat_range(),], ChildShape::LhsRhs);
+    set_shape(out, [nk_member(), nk_unary(), nk_return(), nk_yield(), nk_defer(), nk_break(),
+        nk_continue(), nk_expr_stmt(), nk_try_propagate(), nk_dtor(), nk_comptime(), nk_quote(),
+        nk_pat_literal(),], ChildShape::Lhs);
+    return out;
+}
+
 /// The children of node `n`, in source order.
 pub fn children(s: Snap, n: i64) -> List<i64> {
     let k = kind(s, n);
     var out: List<i64> = [];
-    if k == nk_program() || k == nk_block() || k == nk_call() || k == nk_tuple()
-        || k == nk_list() || k == nk_map() || k == nk_match() || k == nk_try()
-        || k == nk_ctor() || k == nk_indexer() || k == nk_type_tuple()
-        || k == nk_pat_tuple() || k == nk_pat_slice() {
-        return extra_slice(s, lhs(s, n), rhs(s, n));
+    if k < 0 || k >= s.shapes.len() { return out; }
+    let shape = s.shapes[k];
+    if shape == ChildShape::Leaf { return out; }
+    if shape == ChildShape::ExtraAtLhs { return extra_slice(s, lhs(s, n), rhs(s, n)); }
+    if shape == ChildShape::ExtraAtRhs { return extra_slice(s, rhs(s, n), flags(s, n)); }
+    if shape == ChildShape::Rhs {
+        push_present(out, rhs(s, n));
+        return out;
     }
-    if k == nk_fn() || k == nk_operator() || k == nk_variant() || k == nk_pat_variant()
-        || k == nk_type_named() {
-        return extra_slice(s, rhs(s, n), flags(s, n));
+    if shape == ChildShape::Lhs {
+        push_present(out, lhs(s, n));
+        return out;
     }
-    if k == nk_adt() {
+    if shape == ChildShape::LhsRhs {
+        push_present(out, lhs(s, n));
+        push_present(out, rhs(s, n));
+        return out;
+    }
+    if shape == ChildShape::Adt {
         if flags(s, n) > 0 { return extra_slice(s, rhs(s, n), flags(s, n)); }
         push_present(out, rhs(s, n));
         return out;
     }
-    if k == nk_struct() || k == nk_interface() || k == nk_extend() {
-        push_present(out, rhs(s, n));
-        return out;
-    }
-    if k == nk_lambda() {
+    if shape == ChildShape::Lambda {
         out = extra_slice(s, lhs(s, n), flags(s, n));
         push_present(out, rhs(s, n));
         return out;
     }
-    if k == nk_for() {
+    if shape == ChildShape::For {
         let clause = flags(s, n) - 1;
         if clause >= 0 && clause < s.for_clauses.len() {
             let c: List<i64> = s.for_clauses[clause];
@@ -256,71 +514,106 @@ pub fn children(s: Snap, n: i64) -> List<i64> {
         }
         return out;
     }
-    if k == nk_if() {
-        push_present(out, lhs(s, n));
-        if flags(s, n) >= 2 {
-            for c in extra_slice(s, rhs(s, n), flags(s, n)) { out.push(c); }
-        } else {
-            push_present(out, rhs(s, n));
-        }
-        return out;
-    }
-    if k == nk_binary() || k == nk_assign() || k == nk_while() || k == nk_index()
-        || k == nk_cascade() || k == nk_pipe() || k == nk_catch_recovery()
-        || k == nk_coalesce() || k == nk_range() || k == nk_guard() || k == nk_arm()
-        || k == nk_scope() || k == nk_pat_or() || k == nk_pat_range() {
-        push_present(out, lhs(s, n));
+    // `ChildShape::If`
+    push_present(out, lhs(s, n));
+    if flags(s, n) >= 2 {
+        for c in extra_slice(s, rhs(s, n), flags(s, n)) { out.push(c); }
+    } else {
         push_present(out, rhs(s, n));
-        return out;
-    }
-    if k == nk_call_arg() || k == nk_let() || k == nk_var() || k == nk_const()
-        || k == nk_catch() {
-        push_present(out, rhs(s, n));
-        return out;
-    }
-    if k == nk_member() || k == nk_unary() || k == nk_return() || k == nk_yield()
-        || k == nk_defer() || k == nk_break() || k == nk_continue() || k == nk_expr_stmt()
-        || k == nk_try_propagate() || k == nk_dtor() || k == nk_comptime()
-        || k == nk_pat_literal() {
-        push_present(out, lhs(s, n));
-        return out;
-    }
-    if k == nk_param() {
-        push_present(out, rhs(s, n));
-        return out;
     }
     return out;
 }
 
-/// The parent of every node (-1 for roots and unreachable nodes).
+/// The parent of every node (-1 for roots and unreachable nodes). Each
+/// node's children are visited as `children` lists them, without building
+/// the list.
 pub fn parents_of(s: Snap) -> List<i64> {
-    var out: List<i64> = [];
+    let count = s.count;
+    let out = filled(count, -1);
+    let nodes = s.nodes;
+    var codes: List<i64> = [];
+    for sh in s.shapes { codes.push(sh as i64); }
+    let leaf = ChildShape::Leaf as i64;
+    let at_lhs = ChildShape::ExtraAtLhs as i64;
+    let at_rhs = ChildShape::ExtraAtRhs as i64;
+    let adt = ChildShape::Adt as i64;
+    let only_lhs = ChildShape::Lhs as i64;
+    let only_rhs = ChildShape::Rhs as i64;
+    let both = ChildShape::LhsRhs as i64;
+    let lambda = ChildShape::Lambda as i64;
+    let for_shape = ChildShape::For as i64;
     var i = 0;
-    while i < s.count { out.push(-1); i = i + 1; }
-    i = 0;
-    while i < s.count {
-        for c in children(s, i) {
-            if c < s.count && out[c] < 0 { out[c] = i; }
+    var row = 0;
+    while i < count {
+        let k = nodes[row];
+        let code = if k >= 0 && k < codes.len() { codes[k] } else { leaf };
+        if code != leaf {
+            let l = nodes[row + 1];
+            let r = nodes[row + 2];
+            let f = nodes[row + 3];
+            if code == at_lhs { adopt_extra(s, out, i, l, r); }
+            else if code == at_rhs { adopt_extra(s, out, i, r, f); }
+            else if code == only_rhs { adopt(out, r, i, count); }
+            else if code == only_lhs { adopt(out, l, i, count); }
+            else if code == both { adopt(out, l, i, count); adopt(out, r, i, count); }
+            else if code == adt {
+                if f > 0 { adopt_extra(s, out, i, r, f); } else { adopt(out, r, i, count); }
+            } else if code == lambda {
+                adopt_extra(s, out, i, l, f);
+                adopt(out, r, i, count);
+            } else if code == for_shape {
+                let clause = f - 1;
+                if clause >= 0 && clause < s.for_clauses.len() {
+                    let c: List<i64> = s.for_clauses[clause];
+                    adopt(out, c[0], i, count);
+                    adopt(out, r, i, count);
+                    adopt(out, c[1], i, count);
+                } else {
+                    adopt(out, r, i, count);
+                }
+            } else {
+                // `ChildShape::If`
+                adopt(out, l, i, count);
+                if f >= 2 { adopt_extra(s, out, i, r, f); } else { adopt(out, r, i, count); }
+            }
         }
         // A type annotation sits in a side table; its parent is the node it
         // annotates, so generic parameters resolve from it.
-        let a = annot(s, i);
-        if a >= 0 && a < s.count && out[a] < 0 { out[a] = i; }
+        adopt(out, nodes[row + 6], i, count);
         i = i + 1;
+        row = row + 9;
     }
     // Base types and generic bounds sit in side tables too; their parent is
     // the declaration, so its generic parameters resolve from them.
-    for row in s.bases {
-        if row[1] >= 0 && row[1] < s.count && out[row[1]] < 0 { out[row[1]] = row[0]; }
-    }
-    for row in s.bounds {
-        if row[2] >= 0 && row[2] < s.count && out[row[2]] < 0 { out[row[2]] = row[0]; }
-    }
+    for b in s.bases { adopt(out, b[1], b[0], count); }
+    for b in s.bounds { adopt(out, b[2], b[0], count); }
     return out;
 }
 
-/// The body of a function-like node (`fn`, `op`), or -1.
+/// Makes `parent` the parent of node `c` when `c` is a node without one.
+fn adopt(out: List<i64>, c: i64, parent: i64, count: i64) {
+    if c >= 0 && c < count && out[c] < 0 { out[c] = parent; }
+}
+
+/// `adopt` for each of the `len` extra children from slot `start`.
+fn adopt_extra(s: Snap, out: List<i64>, parent: i64, start: i64, len: i64) {
+    let count = s.count;
+    let extra = s.extra;
+    var j = start;
+    let end = start + len;
+    while j < end {
+        let c = extra[j];
+        if c >= 0 && c < count && out[c] < 0 { out[c] = parent; }
+        j = j + 1;
+    }
+}
+
+/// The body of a function-like node (`fn`, `op`, `indexer`), or -1.
 pub fn fn_body(s: Snap, n: i64) -> i64 {
+    if kind(s, n) == nk_indexer() {
+        let ch = children(s, n);
+        return if ch.len() > 0 { ch[0] } else { -1 };
+    }
     if flags(s, n) == 0 { return -1; }
     return s.extra[rhs(s, n)];
 }
@@ -338,9 +631,18 @@ pub fn fn_params(s: Snap, n: i64) -> List<i64> {
     return out;
 }
 
-/// The members of a `struct`, `interface` or `ext` declaration.
+/// The members of a `struct`, `interface` or `ext` declaration, those of a
+/// distributive group (`pub { a: i64; b: i64; }`) included.
 pub fn type_members(s: Snap, n: i64) -> List<i64> {
     let body = rhs(s, n);
-    if body < 0 || kind(s, body) != nk_block() { return []; }
-    return children(s, body);
+    var out: List<i64> = [];
+    if body < 0 || kind(s, body) != nk_block() { return out; }
+    group_members(s, body, out);
+    return out;
+}
+
+fn group_members(s: Snap, block: i64, out: List<i64>) {
+    for m in children(s, block) {
+        if kind(s, m) == nk_block() { group_members(s, m, out); } else { out.push(m); }
+    }
 }

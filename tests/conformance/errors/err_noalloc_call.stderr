@@ -1,0 +1,4 @@
+error[NOALLOC001]: `noalloc` function `twice` calls `helper`, which is not `noalloc`
+err_noalloc_call.pilot:5:36
+error[NOALLOC001]: `noalloc` function `twice` calls `helper`, which is not `noalloc`
+err_noalloc_call.pilot:5:43

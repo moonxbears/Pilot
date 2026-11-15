@@ -1,0 +1,20 @@
+// A bound left out of an index range is the start or the end of the value:
+// `x[..b]` starts at 0, `x[a..]` runs to the end, `x[..]` is all of it.
+//
+// Expected output, worked by hand:
+//   xs = [1, 2, 3, 4, 5].
+//   xs[..2] = [1, 2]; xs[3..] = [4, 5]; xs[..] = [1, 2, 3, 4, 5];
+//   xs[..=1] = [1, 2]; xs[5..] is empty (0 items).
+//   "hello"[1..] = "ello"; "hello"[..3] = "hel".
+fn main() {
+    let xs: List<i64> = [1, 2, 3, 4, 5];
+    print(xs[..2]);
+    print(xs[3..]);
+    print(xs[..]);
+    print(xs[..=1]);
+    let tail = xs[5..];
+    print(tail.len());
+    let word = "hello";
+    print(word[1..]);
+    print(word[..3]);
+}

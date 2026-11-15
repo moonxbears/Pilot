@@ -1,0 +1,14 @@
+tab[	] quote["]
+\d+\.\w*
+3
+C:\temp\new
+one
+two "quoted" 	
+raw
+\n kept
+n=42 {braces}	!
+n=42 \t {braces}
+42\n
+42
+\w
+1000271

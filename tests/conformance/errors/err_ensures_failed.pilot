@@ -1,0 +1,12 @@
+// An `ensures` clause that does not hold for the value a function returns
+// stops the program (DBC007). `magnitude` forgets to negate.
+fn magnitude(x: i64) -> i64 ensures(r => r >= 0) {
+    if x < 0 { return x; }
+    return x;
+}
+
+fn main() {
+    print(magnitude(4));
+    print(magnitude(-4));
+    print("never printed");
+}

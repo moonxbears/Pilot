@@ -1,0 +1,2 @@
+error[TAIL003]: `become` calls `label`, which returns `bool`, but `step` returns `i64`
+err_become_type.pilot:6:5

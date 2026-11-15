@@ -1,0 +1,8 @@
+// `async fn` is not built yet (docs/keyword_roadmap.md K7). The modifier used
+// to be read and ignored, so the function ran as an ordinary one; now the
+// build stops at the seam `keyword.unbuilt`.
+async fn answer() -> i64 => 42;
+
+fn main() {
+    print(answer());
+}

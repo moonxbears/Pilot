@@ -7,10 +7,10 @@
 //! an intrinsic by name, and the receptor `nameof` quotes its argument.
 
 use crate::instruction::Opcode;
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_parser::NativeKind;
-use pilot_rt::PilotVal;
 
 /// The question a `TypeQuery` binding asks: the type's size in bytes.
 const QUERY_BYTE_SIZE: &str = "byte_size";
@@ -33,8 +33,6 @@ impl BytecodeCompiler {
         if let Some(query) = native(NativeKind::TypeQuery, name) {
             return Some(self.compile_type_query(arena, name, query, args));
         }
-        let hook = native(NativeKind::Function, name)?;
-        // `f((a, b))` and `f(a, b)` pass the same arguments.
         let spread: Vec<NodeId> = match args {
             [only] if arena.node(*only).node_kind() == NodeKind::TupleExpr => {
                 let tn = arena.node(*only);
@@ -42,8 +40,26 @@ impl BytecodeCompiler {
             }
             _ => args.to_vec(),
         };
-        let regs = self.compile_args(arena, &spread);
-        Some(self.emit_intrinsic(hook, &regs))
+        if let Some(hook) = native(NativeKind::Function, name) {
+            let regs = self.compile_args(arena, &spread);
+            return Some(self.emit_intrinsic(hook, &regs));
+        }
+        let (hook, defs, call_args) = pilot_parser::bootstrap_tables().call_hook(name)?;
+        let hook_owned = hook.to_string();
+        let passed = self.compile_args(arena, &spread);
+        let mapped: Vec<u8> = call_args
+            .into_iter()
+            .map(|ca| match ca {
+                Ok(p) => passed.get(p).copied().unwrap_or_else(|| match defs.get(p).and_then(|d| *d) {
+                    Some(Ok(n)) => self.emit_const(PilotVal::from_int(n)),
+                    Some(Err(s)) => self.emit_const(PilotVal::from_str(s)),
+                    None => self.emit_null(),
+                }),
+                Err(Ok(n)) => self.emit_const(PilotVal::from_int(n)),
+                Err(Err(s)) => self.emit_const(PilotVal::from_str(s)),
+            })
+            .collect();
+        Some(self.emit_intrinsic(&hook_owned, &mapped))
     }
 
     /// `__engine("intrinsic", args..)`.
@@ -54,6 +70,23 @@ impl BytecodeCompiler {
                 format!("{} expects an intrinsic name", crate::ENGINE_TOKEN),
             );
         };
+        // A name known while compiling is a constant: the call reads it
+        // from there.
+        let hn = arena.node(hook);
+        let known = match hn.node_kind() {
+            NodeKind::StrLit => Some(PilotVal::from_str(Self::name(arena, hn.lhs))),
+            _ => match self.resolve_cmap(arena, hook) {
+                Some(crate::CMap::Val(v)) if v.is_str() => Some(v),
+                _ => None,
+            },
+        };
+        if let Some(name) = known {
+            let c = self.add_constant(name);
+            let regs = self.compile_args(arena, rest);
+            let dst = self.alloc_reg();
+            self.emit_named_intrinsic(dst, c, &regs);
+            return dst;
+        }
         let r_hook = self.compile_node(arena, hook);
         let regs = self.compile_args(arena, rest);
         self.stage_args(&regs);
@@ -64,9 +97,10 @@ impl BytecodeCompiler {
 
     /// `nameof(x)`: the name `x` as a string.
     fn compile_symbol_quote(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> u8 {
-        let Some(&arg) = args.first() else {
+        let [arg] = args else {
             return self.error(crate::codes::ARG_COUNT, format!("`{name}` expects one argument"));
         };
+        let arg = *arg;
         let an = arena.node(arg);
         match an.node_kind() {
             NodeKind::IdentExpr | NodeKind::TypeNamed | NodeKind::StrLit => {
@@ -90,15 +124,42 @@ impl BytecodeCompiler {
                 format!("`{name}` asks `{query}`, which the seed cannot answer"),
             );
         }
-        match pilot_parser::bootstrap_tables().reg_layout(&ty) {
-            Some(layout) => self.emit_const(PilotVal::from_int((layout.width + 7) / 8)),
+        match self.type_extent(&ty, 0) {
+            Some((size, _align)) => self.emit_const(PilotVal::from_int(size)),
             None => self.error(
                 crate::codes::SEED,
                 format!(
-                    "`{name}({ty})`: the seed knows only the register layouts of primitive types; struct layouts come with the type checker (F4)"
+                    "`{name}({ty})`: layout is not known for `{ty}`"
                 ),
             ),
         }
+    }
+
+    fn type_extent(&self, ty: &str, depth: usize) -> Option<(i64, i64)> {
+        if let Some(layout) = pilot_parser::bootstrap_tables().reg_layout(ty) {
+            let size = ((layout.width + 7) / 8) as i64;
+            let mut align = 1_i64;
+            while align < size {
+                align *= 2;
+            }
+            return Some((size, align));
+        }
+        if depth > 8 {
+            return None;
+        }
+        let info = self.structs.get(ty)?;
+        let mut offset = 0_i64;
+        let mut max_align = 1_i64;
+        for (fname, _) in &info.fields {
+            let ftype = info.field_types.get(fname)?;
+            let (fsize, falign) = self.type_extent(ftype, depth + 1)?;
+            let align = falign.max(1);
+            offset = ((offset + align - 1) / align) * align;
+            offset += fsize;
+            max_align = max_align.max(align);
+        }
+        let total_size = ((offset + max_align - 1) / max_align) * max_align;
+        Some((total_size, max_align))
     }
 
     /// `name` on its own, when it is a native value.
@@ -119,7 +180,7 @@ impl BytecodeCompiler {
                 let r_hook = self.emit_const(PilotVal::from_str(hook));
                 self.emit_intrinsic("field_or_native", &[r_obj, r_key, r_hook])
             }
-            None => self.emit_intrinsic("map_get", &[r_obj, r_key]),
+            None => self.emit_keyed_read(r_obj, r_key),
         }
     }
 }

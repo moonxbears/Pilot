@@ -1,0 +1,8 @@
+error[TYPE001]: argument 1 of `result<i64, str>.err`: expected `str`, found `i64`
+err_target_constructors.pilot:7:32
+error[TYPE001]: argument 1 of `result<i64, str>.ok`: expected `i64`, found `str`
+err_target_constructors.pilot:8:15
+error[CALL001]: `result<i64, str>.ok` takes 1 argument(s), found 2
+err_target_constructors.pilot:12:31
+error[TYPE001]: argument 1 of `result<i64, str>.err`: expected `str`, found `bool`
+err_target_constructors.pilot:13:20

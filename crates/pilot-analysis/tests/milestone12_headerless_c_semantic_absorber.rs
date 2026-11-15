@@ -208,6 +208,7 @@ fn test_m12_1_c_preprocessor_includes_macros_and_integer_eval() {
 
     let deps = &[
         "stdlib/core/file.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/adapter/c_pp.pilot",
     ];
     let res = eval_m12(deps, script);
@@ -348,6 +349,7 @@ fn test_m12_2_c11_declarative_parser_structs_unions_bitfields_and_enums() {
     let deps = &[
         "selfhost/diagnostics/model.pilot",
         "stdlib/core/file.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/adapter/c_pp.pilot",
         "selfhost/adapter/c_parser.pilot",
     ];
@@ -464,6 +466,7 @@ fn test_m12_4_ffi_bindgen_multi_param_and_anti_cheat_audit() {
     "#;
 
     let deps = &[
+        "stdlib/std/text.pilot",
         "selfhost/ffi_bindgen.pilot",
     ];
     let res = eval_m12(deps, script);

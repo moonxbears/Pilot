@@ -1,0 +1,7 @@
+// The condition of `assert` must be a `bool`. An integer is a type error
+// at build time, not a surprise at run time. Nothing runs.
+fn main() {
+    let n = 5;
+    print("never");
+    assert(n);
+}

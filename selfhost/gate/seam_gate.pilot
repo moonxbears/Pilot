@@ -53,7 +53,7 @@ fn sg_workaround_marker() -> str => nameof(Workaround) + "(\"";
 fn sg_known_bugs_dir() -> str => "tests/conformance/known_bugs";
 
 /// How a gap appears in the source.
-[Workaround("seed.shared_variant_name", "the pending-value form is `Pending`, not `Value`, which SeamKind also has")]
+[Workaround("seed.variant_compare_untyped", "the pending-value form is `Pending`, not `Value`, which SeamKind also has")]
 enum SiteForm : u8 {
     /// `seam("id", ..)`, or a SEAM001 message raised by the seed.
     Call,
@@ -97,6 +97,9 @@ fn sg_scan_source(src: str, rel: str, sites: List<SeamSite>) {
     sg_scan_marker(src, rel, sg_value_marker(), ::Pending, sites);
     sg_scan_marker(src, rel, sg_stand_in_marker(), ::StandIn, sites);
     sg_scan_marker(src, rel, sg_workaround_marker(), ::Workaround, sites);
+    // A checker or emitter may report a seam as a SEAM001 message it writes
+    // out (selfhost/check/clearance.pilot), as the seed does.
+    sg_scan_seed_source(src, rel, sites);
 }
 
 /// Appends every use of `marker` in `src` as a site of `form`. A use inside a
@@ -125,9 +128,21 @@ fn sg_scan_marker(src: str, rel: str, marker: str, form: SiteForm, sites: List<S
     }
 }
 
-/// Appends every seam a seed Rust file (`rel`) raises by writing out its
-/// SEAM001 message. A message whose id is a format placeholder is the generic
-/// handler for Pilot seams, not a seam of its own.
+/// Whether `id` is a whole seam id (letters, digits, `_` and `.`).
+fn sg_is_seam_id(id: str) -> bool {
+    if id.len() == 0 { return false; }
+    var i = 0;
+    while i < id.len() {
+        if !sg_is_ident_byte(id.byte_at(i)) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Appends every seam a file (`rel`) raises by writing out its SEAM001
+/// message. A message whose id is not written out (a format placeholder, or
+/// a string built around a variable) is a generic handler for other seams,
+/// not a seam of its own.
 fn sg_scan_seed_source(src: str, rel: str, sites: List<SeamSite>) {
     let marker = sg_seed_marker();
     var at = src.find(marker, 0);
@@ -136,7 +151,7 @@ fn sg_scan_seed_source(src: str, rel: str, sites: List<SeamSite>) {
         let id_end = src.find("`", id_start);
         if id_end > id_start {
             let id = src.slice(id_start, id_end);
-            if id.find("{", 0) < 0 {
+            if sg_is_seam_id(id) {
                 let line_start = sg_line_start(src, at);
                 sites.push(SeamSite {
                     id: id,
@@ -196,13 +211,21 @@ fn sg_form_code(form: SiteForm) -> i64 {
     return 0;
 }
 
-/// Whether `token` names a milestone (`F6`, `M17`) rather than a seam.
+/// Whether `token` names a milestone rather than a seam: `F`, `M` or `P`,
+/// digits, and at most one trailing lowercase letter for a milestone added
+/// between two numbered ones (`F6`, `M17`, `P20`, `F5b`).
 fn sg_is_milestone_id(token: str) -> bool {
     if token.len() < 2 { return false; }
     let head = token.byte_at(0);
-    if head != 70 && head != 77 { return false; }
+    // ASCII `F`, `M`, `P`.
+    if head != 70 && head != 77 && head != 80 { return false; }
+    var end = token.len();
+    let last = token.byte_at(end - 1);
+    // ASCII `a`..`z`.
+    if last >= 97 && last <= 122 { end = end - 1; }
+    if end < 2 { return false; }
     var i = 1;
-    while i < token.len() {
+    while i < end {
         let b = token.byte_at(i);
         if b < 48 || b > 57 { return false; }
         i = i + 1;

@@ -4,6 +4,131 @@
 // ==============================================================================
 pub pkg std.proc;
 
+use Pilot.Core.File;
+use Pilot.Core.HostRaw;
+use Pilot.Core.Env;
+use std.text;
+
+fn proc_str_buf(s: str) -> i64 {
+    let n = s.len();
+    let cap = if n > 0 { n } else { 1 };
+    let buf = RawMem.alloc(cap, 1);
+    if n > 0 { let _ = str_copy_to_ptr(s, buf, n); }
+    return buf;
+}
+
+fn proc_read_all_fd(fd: i64) -> str {
+    if fd < 0 { return ""; }
+    var cap = 8192;
+    var len = 0;
+    var buf = RawMem.alloc(cap, 1);
+    while true {
+        if cap - len < 2048 {
+            let next_cap = cap * 2;
+            buf = RawMem.realloc(buf, cap, next_cap, 1);
+            cap = next_cap;
+        }
+        let r = Fd.read(fd, buf + len, cap - len);
+        if r <= 0 { break; }
+        len = len + r;
+    }
+    let out = if len > 0 { str_from_ptr(buf, len) } else { "" };
+    let _ = RawMem.free(buf, cap, 1);
+    return out;
+}
+
+fn proc_make_pipe(var ref rfd: i64, var ref wfd: i64) -> bool {
+    let p = RawMem.alloc(16, 8);
+    let rc = Fd.pipe_dup(0, p, 0);
+    if rc < 0 {
+        let _ = RawMem.free(p, 16, 8);
+        return false;
+    }
+    rfd = RawMem.load_int(p, 64, 1);
+    wfd = RawMem.load_int(p + 8, 64, 1);
+    let _ = RawMem.free(p, 16, 8);
+    return true;
+}
+
+fn proc_spawn_impl(dir: str, program: str, args: List<str>, input: str) -> ProcessHandle {
+    var in_r = -1;
+    var in_w = -1;
+    var out_r = -1;
+    var out_w = -1;
+    var err_r = -1;
+    var err_w = -1;
+    if !proc_make_pipe(in_r, in_w) || !proc_make_pipe(out_r, out_w) || !proc_make_pipe(err_r, err_w) {
+        fault(f"proc_spawn: pipe failed for {program}");
+    }
+
+    let pbuf = proc_str_buf(program);
+    let dbuf = if dir != "" { proc_str_buf(dir) } else { 0 };
+    let argc = args.len();
+    let argv_cap = if argc > 0 { argc * 16 } else { 16 };
+    let argv_buf = RawMem.alloc(argv_cap, 8);
+    var arg_ptrs: List<i64> = [];
+    var i = 0;
+    while i < argc {
+        let a = args[i];
+        let ab = proc_str_buf(a);
+        arg_ptrs.push(ab);
+        let _ = RawMem.store_int(argv_buf + i * 16, ab, 64);
+        let _ = RawMem.store_int(argv_buf + i * 16 + 8, a.len(), 64);
+        i = i + 1;
+    }
+
+    let spec = RawMem.alloc(96, 8);
+    let _ = RawMem.fill(spec, 0, 96);
+    let _ = RawMem.store_int(spec + 0, pbuf, 64);
+    let _ = RawMem.store_int(spec + 8, program.len(), 64);
+    let _ = RawMem.store_int(spec + 16, if argc > 0 { argv_buf } else { 0 }, 64);
+    let _ = RawMem.store_int(spec + 24, argc, 64);
+    let _ = RawMem.store_int(spec + 48, dbuf, 64);
+    let _ = RawMem.store_int(spec + 56, dir.len(), 64);
+    let _ = RawMem.store_int(spec + 64, in_r, 64);
+    let _ = RawMem.store_int(spec + 72, out_w, 64);
+    let _ = RawMem.store_int(spec + 80, err_w, 64);
+
+    let pid_ptr = RawMem.alloc(8, 8);
+    let handle = Process.spawn(spec, pid_ptr);
+    let _ = RawMem.free(pid_ptr, 8, 8);
+    let _ = RawMem.free(spec, 96, 8);
+    let _ = RawMem.free(argv_buf, argv_cap, 8);
+    i = 0;
+    while i < argc {
+        let n = args[i].len();
+        let _ = RawMem.free(arg_ptrs[i], if n > 0 { n } else { 1 }, 1);
+        i = i + 1;
+    }
+    if dbuf != 0 { let _ = RawMem.free(dbuf, dir.len(), 1); }
+    let _ = RawMem.free(pbuf, if program.len() > 0 { program.len() } else { 1 }, 1);
+
+    let _ = Fd.close(in_r);
+    let _ = Fd.close(out_w);
+    let _ = Fd.close(err_w);
+
+    if handle < 0 {
+        let _ = Fd.close(in_w);
+        let _ = Fd.close(out_r);
+        let _ = Fd.close(err_r);
+        fault(f"proc_spawn failed for {program}: {handle}");
+    }
+
+    if input.len() > 0 {
+        let ibuf = proc_str_buf(input);
+        var off = 0;
+        while off < input.len() {
+            let w = Fd.write(in_w, ibuf + off, input.len() - off);
+            if w <= 0 { break; }
+            off = off + w;
+        }
+        let _ = RawMem.free(ibuf, input.len(), 1);
+    }
+    let _ = Fd.close(in_w);
+
+    return ProcessHandle { id: handle, stdout_fd: out_r, stderr_fd: err_r, exited: false, exit_code: 0 };
+}
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 [Layout(c_abi)]
@@ -28,25 +153,41 @@ pub struct ProcessOutput : IValue {
 /// waits for it. A program that cannot be started stops the caller with an
 /// intrinsic failure.
 pub fn run(program: str, args: List<str>, input: str) -> ProcessOutput {
-    let out = __engine("proc_run", program, args, input);
-    return ProcessOutput { exit_code: out[0], stdout: out[1], stderr: out[2] };
+    let h = spawn(program, args, input);
+    return h.wait();
 }
 
 /// Runs `program` like `run`, with `dir` as its working directory.
 pub fn run_in(dir: str, program: str, args: List<str>, input: str) -> ProcessOutput {
-    let out = __engine("proc_run", program, args, input, dir);
-    return ProcessOutput { exit_code: out[0], stdout: out[1], stderr: out[2] };
+    let h = spawn_in(dir, program, args, input);
+    return h.wait();
 }
 
 /// A child process started with `spawn`, running until `wait` collects it.
 pub struct ProcessHandle : IObject {
-    pub id: i64;
+    pub id:        i64;
+    pub stdout_fd: i64;
+    pub stderr_fd: i64;
+    pub exited:    bool;
+    pub exit_code: i64;
 
     /// Waits for the process to finish and returns what it left. Each
     /// handle is waited for once.
     pub fn wait() -> ProcessOutput {
-        let out = __engine("proc_wait", .id);
-        return ProcessOutput { exit_code: out[0], stdout: out[1], stderr: out[2] };
+        let stdout_s = proc_read_all_fd(.stdout_fd);
+        let stderr_s = proc_read_all_fd(.stderr_fd);
+        if .stdout_fd >= 0 { let _ = Fd.close(.stdout_fd); }
+        if .stderr_fd >= 0 { let _ = Fd.close(.stderr_fd); }
+        var code = .exit_code;
+        if .exited != true {
+            let code_ptr = RawMem.alloc(8, 8);
+            let rc = Process.wait(.id, 0, code_ptr);
+            code = if rc >= 0 { RawMem.load_int(code_ptr, 64, 1) } else { -1 };
+            let _ = RawMem.free(code_ptr, 8, 8);
+            .exited = true;
+            .exit_code = code;
+        }
+        return ProcessOutput { exit_code: code, stdout: stdout_s, stderr: stderr_s };
     }
 }
 
@@ -54,11 +195,154 @@ pub struct ProcessHandle : IObject {
 /// returns at once; several can run at the same time. A program that cannot
 /// be started stops the caller with an intrinsic failure.
 pub fn spawn(program: str, args: List<str>, input: str) -> ProcessHandle {
-    return ProcessHandle { id: __engine("proc_spawn", program, args, input) };
+    return proc_spawn_impl("", program, args, input);
+}
+
+/// Starts `program` like `spawn`, with `dir` as its working directory.
+pub fn spawn_in(dir: str, program: str, args: List<str>, input: str) -> ProcessHandle {
+    return proc_spawn_impl(dir, program, args, input);
+}
+
+/// One process to start: the program, its arguments and its standard input.
+pub struct ProcessJob : IObject {
+    pub program: str;
+    pub args:    List<str>;
+    pub input:   str;
+}
+
+/// The job that runs `program` with `args` and `input`.
+pub fn job(program: str, args: List<str>, input: str) -> ProcessJob => ProcessJob { program: program, args: args, input: input };
+
+/// Starts the job `start` like `spawn`.
+pub fn spawn_job(ref start: ProcessJob) -> ProcessHandle => spawn(start.program, start.args, start.input);
+
+/// Waits until one of `running` has finished and returns its position in
+/// `running`; that handle's `wait` then returns at once.
+pub fn first_finished(ref running: List<ProcessHandle>) -> i64 {
+    let code_ptr = RawMem.alloc(8, 8);
+    var k = 0;
+    while true {
+        k = 0;
+        while k < running.len() {
+            if running[k].exited {
+                let _ = RawMem.free(code_ptr, 8, 8);
+                return k;
+            }
+            let rc = Process.wait(running[k].id, 1, code_ptr);
+            if rc != 0 {
+                running[k].exited = true;
+                running[k].exit_code = if rc > 0 { RawMem.load_int(code_ptr, 64, 1) } else { -1 };
+                let _ = RawMem.free(code_ptr, 8, 8);
+                return k;
+            }
+            k = k + 1;
+        }
+        let _ = Clock.sleep_ns(1000000);
+    }
+    let _ = RawMem.free(code_ptr, 8, 8);
+    return 0;
+}
+
+/// Memory to keep free for each job started since the last one finished:
+/// a new job can grow to about this much (bytes) before its share shows in
+/// the memory the OS reports as available.
+pub fn job_memory_reserve() -> i64 => 2 * 1024 * 1024 * 1024;
+
+/// Whether another job may start now, with `running` jobs running, `fresh`
+/// of them started since the last one finished: always when none is running,
+/// else when the machine has a CPU and, if the OS reports its available
+/// memory, `job_memory_reserve()` for the new job and each fresh one.
+fn may_start(running: i64, fresh: i64, cpus: i64) -> bool {
+    if running == 0 { return true; }
+    if running >= cpus { return false; }
+    guard some free = memory_available() else { return true; };
+    return free >= job_memory_reserve() * (fresh + 1);
+}
+
+/// Runs every job in `jobs`, at most as many at once as the machine has
+/// CPUs, starting the next as soon as any one finishes, so one slow job never
+/// holds the others back. A job starts only while the machine has memory
+/// for it (`may_start`), so jobs that each need a lot of memory are not
+/// stacked until the machine runs out; one job always runs. Returns what
+/// each left, in the order of `jobs`.
+pub fn run_all(ref jobs: List<ProcessJob>) -> List<ProcessOutput> {
+    let cpus = if cpu_count() > 1 { cpu_count() } else { 1 };
+    var running: List<ProcessHandle> = [];
+    var slots: List<i64> = [];
+    var started = 0;
+    var fresh = 0;
+    // What each finished job left, and which job it was.
+    var done: List<ProcessOutput> = [];
+    var done_slots: List<i64> = [];
+    while started < jobs.len() || running.len() > 0 {
+        while started < jobs.len() && may_start(running.len() as i64, fresh, cpus) {
+            running.push(spawn_job(jobs[started]));
+            slots.push(started);
+            started = started + 1;
+            fresh = fresh + 1;
+        }
+        let k = first_finished(running);
+        done.push(running[k].wait());
+        done_slots.push(slots[k]);
+        running.remove_at(k);
+        slots.remove_at(k);
+        fresh = 0;
+    }
+    var out: List<ProcessOutput> = [];
+    for i in 0 .. jobs.len() {
+        var j = 0;
+        while done_slots[j] != i { j = j + 1; }
+        out.push(done[j]);
+    }
+    return out;
+}
+
+/// The memory (bytes) the OS can give new processes without swapping, or
+/// `none` when it does not say.
+[StandIn("proc.memory_available", "each OS's own report of available memory (Linux /proc/meminfo, macOS host_statistics64, Windows GlobalMemoryStatusEx)", "only Linux's /proc/meminfo is read; on other OSes it is none, and run_all is limited by the CPU count alone", "F6")]
+pub fn memory_available() -> i64? {
+    let path = "/proc/meminfo";
+    if !File.exists(path) { return none; }
+    let info = File.read_text(path);
+    let key = "MemAvailable:";
+    let at = info.find(key, 0);
+    if at < 0 { return none; }
+    var end = info.find("\n", at);
+    if end < 0 { end = info.len() as i64; }
+    var field = info.slice((at + key.len() as i64) as usize, end as usize).trim();
+    if !field.ends_with(" kB") { return none; }
+    field = field.slice(0, field.len() - 3).trim();
+    guard some kb = text.parse_i64(field) else { return none; };
+    return kb * 1024;
 }
 
 /// How many processes the machine runs at once (its logical CPUs).
-pub fn cpu_count() -> i64 => __engine("proc_cpus");
+pub fn cpu_count() -> i64 {
+    let n = Thread.ctl(2, 0);
+    return if n >= 1 { n } else { 1 };
+}
 
 /// The path of the running executable, or `none` when the OS does not say.
-pub fn current_exe() -> str? => __engine("proc_exe");
+pub fn current_exe() -> str? {
+    let out_len_ptr = RawMem.alloc(8, 8);
+    var cap = 1024;
+    var buf = RawMem.alloc(cap, 1);
+    var rc = Env.ctl(3, 0, 0, buf, cap, out_len_ptr);
+    if rc == -44 {
+        let need = RawMem.load_int(out_len_ptr, 64, 0);
+        if need > cap {
+            buf = RawMem.realloc(buf, cap, need, 1);
+            cap = need;
+            rc = Env.ctl(3, 0, 0, buf, cap, out_len_ptr);
+        }
+    }
+    let n = RawMem.load_int(out_len_ptr, 64, 0);
+    let _ = RawMem.free(out_len_ptr, 8, 8);
+    if rc < 0 || n <= 0 {
+        let _ = RawMem.free(buf, cap, 1);
+        return none;
+    }
+    let out = str_from_ptr(buf, n);
+    let _ = RawMem.free(buf, cap, 1);
+    return out;
+}

@@ -222,16 +222,17 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
 
     // A command that parses but has no handler stops at its seam instead of
     // exiting 0 having done nothing.
-    let (_, err_build, code_build) = pilot_cli("build --target=wasm -o output.wasm");
+    // (`build` has had a handler since F6; `fmt` has none yet.)
+    let (_, err_build, code_build) = pilot_cli("fmt --write src.pilot");
     assert!(
         err_build.contains("SEAM001: unconnected seam `cli.command_handler`") && code_build == 70,
-        "build has no handler and must stop at the cli.command_handler seam, got {code_build}: {err_build}"
+        "fmt has no handler and must stop at the cli.command_handler seam, got {code_build}: {err_build}"
     );
 
     // 3. Verify -- passthrough forwards tokens verbatim to the script without
     //    parsing them as flags. `script_args.pilot` prints the argument count,
     //    then each argument in brackets.
-    let (out_run, err_run, code_run) = pilot_cli("run tests/conformance/script_args.pilot -- --target=native --release");
+    let (out_run, err_run, code_run) = pilot_cli("run tests/conformance/runtime/script_args.pilot -- --target=native --release");
     assert_eq!(
         (out_run.as_str(), code_run),
         ("2\n[--target=native]\n[--release]\n", 0),

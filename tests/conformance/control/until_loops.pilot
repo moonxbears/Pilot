@@ -1,0 +1,23 @@
+// `until(cond, { body })` (stdlib/core/syntax/until.pilot) runs the body
+// until `cond` holds, testing `cond` before each pass.
+//
+// Expected output, worked by hand:
+//   i from 0, stop once i >= 3: prints 0, 1, 2, then "done".
+//   a condition already true runs the body 0 times: ran stays 0.
+//   doubling from 1 until over 50: 1, 2, 4, 8, 16, 32, 64 -> 64.
+fn main() {
+    var i = 0;
+    until(i >= 3, {
+        print(i);
+        i = i + 1;
+    });
+    print("done");
+
+    var ran = 0;
+    until(true, { ran = ran + 1; });
+    print(ran);
+
+    var x = 1;
+    until(x > 50, { x = x * 2; });
+    print(x);
+}

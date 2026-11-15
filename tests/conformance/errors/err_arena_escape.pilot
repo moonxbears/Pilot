@@ -1,0 +1,12 @@
+// An arena scope is a guard (lattice 0b11): it ends with its `with` block,
+// so returning it from inside the block is ESCAPE003.
+fn leak() -> ArenaScope {
+    with arena a {
+        return a;
+    }
+    return arena();
+}
+
+fn main() {
+    print(leak().region_view.len());
+}

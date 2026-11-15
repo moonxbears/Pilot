@@ -1,0 +1,7 @@
+// SYN001: a default must be a literal for now; `a` is a parameter, which a
+// call site that fills the default cannot see. `= a` is at line 3, column 23.
+fn add(a: i64, b: i64 = a) -> i64 => a + b;
+
+fn main() {
+    print(add(3));
+}

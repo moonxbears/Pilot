@@ -146,5 +146,5 @@ pub fn unit_family_of_literal(raw_lit: str) -> i64 => split_numeric_and_unit_suf
 
 // Dimensional literals (`250ms`, `64KB`) take their value from these two functions.
 comptime {
-    __engine("bind_unit_literal", nameof(convert_unit_literal_to_base), nameof(unit_family_of_literal));
+    bind_unit_literal(nameof(convert_unit_literal_to_base), nameof(unit_family_of_literal));
 }

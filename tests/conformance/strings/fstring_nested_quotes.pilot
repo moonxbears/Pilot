@@ -1,0 +1,10 @@
+fn main() {
+    let my_special_key: Map<str, str> = ["mykey": "target"];
+    let mydict: Map<str, str> = ["target": "found_it"];
+    println(f"step 1: {mydict[f"{my_special_key["mykey"]}"]}");
+
+    let s = "{";
+    println(f"brace: {if s == "{" { 1 } else { 2 }}");
+    println(f"legacy: {mydict[\"target\"]}");
+    println(f"nested_text: {f"inner={my_special_key["mykey"]}"}");
+}

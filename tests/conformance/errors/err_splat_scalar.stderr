@@ -1,0 +1,2 @@
+error[TYPE001]: `*` unpacks a sequence, found `i64`
+err_splat_scalar.pilot:6:15

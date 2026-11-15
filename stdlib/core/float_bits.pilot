@@ -1,0 +1,145 @@
+// =========================================================================
+// FILE: stdlib/core/float_bits.pilot
+// IEEE 754 ENCODINGS: the bits of a float, and the float some bits encode
+// =========================================================================
+// `float_bits(x, fmt)` gives the encoding of `x` (sign, biased exponent,
+// fraction) and `float_from_bits(bits, fmt)` the value an encoding holds,
+// for the formats `binary64()` and `binary32()`. The bit views
+// (`stdlib/core/convert/view.pilot`) and `as view` (`stdlib/core/
+// reinterpret.pilot`) read floats through them.
+//
+// The engine has no register bitcast, so the encodings are computed with
+// exact arithmetic (scaling by powers of two never rounds). That arithmetic
+// cannot see a NaN's sign or payload: see the stand-in below.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.FloatBits;
+
+/// The layout of an IEEE 754 binary format.
+[Layout(c_abi)]
+pub struct FloatFormat : IValue {
+    /// Bits of the fraction field (52 or 23).
+    pub fraction_bits: u32;
+    /// Bits of the exponent field (11 or 8).
+    pub exponent_bits: u32;
+    /// Exponent bias (1023 or 127).
+    pub bias: i64;
+    /// The all-ones exponent field (0x7FF or 0xFF).
+    pub max_field: u64;
+    /// The encoding of the quiet NaN read for every NaN.
+    pub quiet_nan: u64;
+}
+
+pub fn binary64() -> FloatFormat => FloatFormat {
+    fraction_bits: 52,
+    exponent_bits: 11,
+    bias: 1023,
+    max_field: 0x7FF,
+    quiet_nan: 0x7FF8000000000000,
+};
+
+pub fn binary32() -> FloatFormat => FloatFormat {
+    fraction_bits: 23,
+    exponent_bits: 8,
+    bias: 127,
+    max_field: 0xFF,
+    quiet_nan: 0x7FC00000,
+};
+
+/// 2^k for 0 <= k <= 1023, exactly.
+fn two_to(k: i64) -> f64 {
+    var p = 1.0;
+    var base = 2.0;
+    var n = k;
+    while n > 0 {
+        if n % 2 == 1 { p = p * base; }
+        base = base * base;
+        n = n / 2;
+    }
+    return p;
+}
+
+/// The encoding of `x` in format `fmt`; `x` must already be a value of that
+/// format (an f32 is held in an f64 exactly).
+[StandIn("convert.nan_bits", "the NaN's own sign and payload bits, read from the register", "every NaN reads as the format's quiet NaN (0x7FF8000000000000, 0x7FC00000), and a NaN made from bits keeps neither sign nor payload: exact arithmetic cannot see them", "F6")]
+pub fn float_bits(x: f64, fmt: FloatFormat) -> u64 {
+    let one: u64 = 1;
+    let sign_bit = one << (fmt.fraction_bits + fmt.exponent_bits);
+    if x != x { return fmt.quiet_nan; }
+    var v = x;
+    var sign: u64 = 0;
+    if v < 0.0 || (v == 0.0 && 1.0 / v < 0.0) {
+        sign = sign_bit;
+        v = -v;
+    }
+    if v == 0.0 { return sign; }
+    let exp_shift = fmt.fraction_bits;
+    if v == 1.0 / 0.0 { return sign | (fmt.max_field << exp_shift); }
+    // Scale `v` into [1, 2) by powers of two, never below the smallest
+    // normal exponent (`1 - bias`): what stays below 1 there is subnormal.
+    var e: i64 = 0;
+    var k: i64 = 512;
+    while k >= 1 {
+        let p = two_to(k);
+        if v >= p {
+            v = v / p;
+            e = e + k;
+        }
+        k = k / 2;
+    }
+    let min_e = 1 - fmt.bias;
+    k = 512;
+    while k >= 1 {
+        if v < 1.0 && e - k >= min_e && v * two_to(k) < 2.0 {
+            v = v * two_to(k);
+            e = e - k;
+        }
+        k = k / 2;
+    }
+    let unit = two_to(fmt.fraction_bits as i64);
+    if v < 1.0 {
+        // Subnormal: the field is zero and the fraction is v * 2^fraction_bits.
+        return sign | ((v * unit) as u64);
+    }
+    let field = (e + fmt.bias) as u64;
+    let fraction = ((v - 1.0) * unit) as u64;
+    return sign | (field << exp_shift) | fraction;
+}
+
+/// The value encoded by `bits` in format `fmt`.
+[StandIn("convert.nan_bits", "the NaN's own sign and payload bits, read from the register", "every NaN reads as the format's quiet NaN (0x7FF8000000000000, 0x7FC00000), and a NaN made from bits keeps neither sign nor payload: exact arithmetic cannot see them", "F6")]
+pub fn float_from_bits(bits: u64, fmt: FloatFormat) -> f64 {
+    let one: u64 = 1;
+    let negative = ((bits >> (fmt.fraction_bits + fmt.exponent_bits)) & one) == one;
+    let field = (bits >> fmt.fraction_bits) & fmt.max_field;
+    let fraction = bits & ((one << fmt.fraction_bits) - one);
+    var v = 0.0;
+    if field == fmt.max_field {
+        let inf = 1.0 / 0.0;
+        if fraction != 0 { return inf - inf; }
+        v = inf;
+    } else {
+        // value = significand * 2^(field - bias - fraction_bits), applied in
+        // steps of one sign so every intermediate stays exact.
+        var significand = fraction;
+        var shift = 1 - fmt.bias - (fmt.fraction_bits as i64);
+        if field != 0 {
+            significand = fraction | (one << fmt.fraction_bits);
+            shift = (field as i64) - fmt.bias - (fmt.fraction_bits as i64);
+        }
+        v = significand as f64;
+        if shift > 0 {
+            v = v * two_to(shift);
+        } else {
+            var left = -shift;
+            while left > 0 {
+                let step = if left > 1000 { 1000 } else { left };
+                v = v / two_to(step);
+                left = left - step;
+            }
+        }
+    }
+    if negative { return -v; }
+    return v;
+}
+

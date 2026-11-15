@@ -1,0 +1,11 @@
+// A constant passed to a `var ref` parameter the function changes would be
+// changed through it: CONST001 at the argument.
+const XS = [1, 2];
+
+fn grow(var ref xs: List<i64>) {
+    xs.push(3);
+}
+
+fn main() {
+    grow(XS);
+}

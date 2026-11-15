@@ -1,0 +1,2 @@
+error[COMP008]: `OtherFacet.speak(..)` delegates to a splice, but `Speaker` does not splice `OtherFacet`
+err_delegation_unspliced.pilot:12:30

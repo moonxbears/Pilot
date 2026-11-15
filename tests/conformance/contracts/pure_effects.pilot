@@ -1,0 +1,27 @@
+// A `pure` function computes its result and does nothing else (PURE001
+// reports what it must not do). Building and changing its own locals,
+// calling other pure functions and reading globals are all allowed.
+let SCALE = 3;
+
+pure fn square(n: i64) -> i64 => n * n;
+
+pure fn sum_squares(xs: List<i64>) -> i64 {
+    var total = 0;
+    for x in xs { total = total + square(x); }
+    return total;
+}
+
+pure fn scaled(xs: List<i64>) -> List<i64> {
+    var out: List<i64> = [];
+    for x in xs { out.push(x * SCALE); }
+    return out;
+}
+
+fn main() {
+    let xs = [1, 2, 3];
+    // 1 + 4 + 9 = 14.
+    print(sum_squares(xs));
+    // [3, 6, 9]: 3 + 6 + 9 = 18.
+    let ys = scaled([1, 2, 3]);
+    print(ys[0] + ys[1] + ys[2]);
+}

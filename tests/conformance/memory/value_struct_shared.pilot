@@ -1,0 +1,12 @@
+// A struct that is `IValue` (lattice 0b00) is copied when it is bound:
+// changing the copy leaves the original as it was, so this prints 1.
+struct Point : IValue {
+    x: i64;
+}
+
+fn main() {
+    let a = Point { x: 1 };
+    var b = a;
+    b.x = 2;
+    print(a.x);
+}

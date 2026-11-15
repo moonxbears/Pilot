@@ -5,6 +5,8 @@
 // ==============================================================================
 pub pkg pilot.diag;
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct Span : IValue {
     pub file_id: u32;
@@ -83,16 +85,16 @@ pub fn render_json(diag: Diagnostic) -> str {
 }
 
 pub fn render_sarif(diags: List<Diagnostic>) -> str {
-    var out = "{\"version\":\"2.1.0\",\"runs\":[{\"results\":[";
+    var out: List<str> = ["{\"version\":\"2.1.0\",\"runs\":[{\"results\":["];
     var i = 0;
     while i < diags.len {
         let d = diags[i];
-        out = out + "{\"ruleId\":\"" + d.code + "\",\"message\":{\"text\":\"" + d.message + "\"}}";
+        out.push("{\"ruleId\":\"" + d.code + "\",\"message\":{\"text\":\"" + d.message + "\"}}");
         if i + 1 < diags.len {
-            out = out + ",";
+            out.push(",");
         }
         i = i + 1;
     }
-    out = out + "]}]}";
-    return out;
+    out.push("]}]}");
+    return join_text(out, "");
 }

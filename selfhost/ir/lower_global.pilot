@@ -1,0 +1,474 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_global.pilot
+// F5: lowering of globals, top-level statements and `comptime` to PilIR.
+// ==============================================================================
+// A top-level `let`, `var` or `const` is a module global (`IrModule.globals`):
+// every function reads and writes it through `global_addr` with `load` and
+// `store`. The program starts in function 0, `<start>`, which runs what the
+// seed runs before `main`, in the seed's order (crates/pilot-vm
+// lower_program.rs):
+//   1. every `comptime` block and expression of the user's files, in source
+//      order, each lifted to a function of its own; an expression's value
+//      is kept in a hidden global and read wherever the expression appears;
+//   2. the globals of the files the program imports from outside the user's
+//      files that the program reads;
+//   3. the top-level statements and global bindings of the user's files, the
+//      file declaring `main` last;
+//   4. `main`, whose value is the program's.
+// Step 2 and the `comptime` calls of step 1 are emitted last, into the
+// entry block, once lowering every reachable function has found them all.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerGlobal;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.ir.model.*;
+use selfhost.ir.layouts.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_members.*;
+use selfhost.ir.lower_destructure.*;
+
+/// Whether `d` is a top-level `let`, `var` or `const`.
+pub fn is_global_decl(lw: Lowerer, d: i64) -> bool {
+    let s = lw.inf.p.s;
+    if d < 0 { return false; }
+    let k = kind(s, d);
+    if k != nk_let() && k != nk_var() && k != nk_const() { return false; }
+    let parent = lw.inf.p.parents[d];
+    return parent >= 0 && kind(s, parent) == nk_program();
+}
+
+/// Whether binding `d` is `let <pattern> = ..` (the parser's `LET_PATTERN`
+/// flag, crates/pilot-vm lower_destructure.rs), which binds no name of its own.
+pub fn is_pattern_let(s: Snap, d: i64) -> bool => flags(s, d) == 1;
+
+/// Name -> top-level bindings of that name in the files the program links
+/// (each name a top-level pattern binds counts, its name pattern standing
+/// for the binding).
+pub fn global_names(p: Program) -> Map<str, List<i64>> {
+    let s = p.s;
+    let out = Map<str, List<i64>>();
+    for i in prog_nodes_of_kind(p, nk_program()) {
+        if in_linked_file(s, i) {
+            for c in children(s, i) {
+                let k = kind(s, c);
+                if (k == nk_let() || k == nk_var() || k == nk_const()) && !is_pattern_let(s, c) {
+                    let name = node_name(s, c);
+                    if !out.has(name) { out.set(name, []); }
+                    out.get(name).push(c);
+                }
+                if (k == nk_let() || k == nk_var() || k == nk_const()) && is_pattern_let(s, c) {
+                    // Each name a top-level pattern binds is a global.
+                    for b in pattern_binds(s, lhs(s, c)) {
+                        let name = node_name(s, b);
+                        if !out.has(name) { out.set(name, []); }
+                        out.get(name).push(b);
+                    }
+                }
+            }
+        }
+    }
+    return out;
+}
+
+/// The name patterns pattern `pat` binds, in source order.
+pub fn pattern_binds(s: Snap, pat: i64) -> List<i64> {
+    var out: List<i64> = [];
+    if pat < 0 { return out; }
+    if kind(s, pat) == nk_pat_bind() {
+        out.push(pat);
+        return out;
+    }
+    if kind(s, pat) == nk_call_arg() { return pattern_binds(s, rhs(s, pat)); }
+    for c in children(s, pat) {
+        for b in pattern_binds(s, c) { out.push(b); }
+    }
+    return out;
+}
+
+/// The global identifier `n` names, or -1: the binding the resolver found
+/// for it when that is a global, else the top-level binding of that name
+/// (the only one, or the one in the identifier's own file).
+pub fn find_global(lw: Lowerer, n: i64) -> i64 {
+    let s = lw.inf.p.s;
+    let b = binding_index(lw, n);
+    if b >= 0 {
+        let site = lw.inf.r.site[b];
+        return if is_global_decl(lw, site) { site } else { -1 };
+    }
+    let name = node_name(s, n);
+    if !lw.global_named.has(name) { return -1; }
+    let found = lw.global_named.get(name);
+    if found.len() == 1 { return found[0]; }
+    for d in found {
+        if unit_of(s, d) == unit_of(s, n) { return d; }
+    }
+    return -1;
+}
+
+fn decl_init_expr(s: Snap, d: i64) -> i64 {
+    return if kind(s, d) == nk_param() { field_default(s, d) } else { rhs(s, d) };
+}
+
+/// The type global `d` holds: its annotation's, else its binding's, else
+/// its value's.
+pub fn global_type(lw: Lowerer, d: i64) -> i64 {
+    if kind(lw.inf.p.s, d) == nk_pat_bind() { return ty_unknown(); }
+    if kind(lw.inf.p.s, d) == nk_param() {
+        let ft = field_type_node(lw.inf.p.s, d);
+        if ft >= 0 {
+            let a = prog_annot_type(lw.inf.p, ft);
+            if !ty_is_unknown(lw.inf.p.tt, a) { return a; }
+        }
+    }
+    if annot(lw.inf.p.s, d) >= 0 {
+        let a = prog_annot_type(lw.inf.p, annot(lw.inf.p.s, d));
+        if !ty_is_unknown(lw.inf.p.tt, a) { return a; }
+    }
+    if lw.binding_of.has(key(d)) {
+        let t = binding_type(lw.inf, lw.binding_of.get(key(d)));
+        if !ty_is_unknown(lw.inf.p.tt, t) { return t; }
+    }
+    let v = decl_init_expr(lw.inf.p.s, d);
+    return if v >= 0 { value_type(lw, v) } else { ty_unknown() };
+}
+
+/// The module global for `d` (a global binding, or a `comptime` expression
+/// whose value is kept), added on first use.
+pub fn global_index(lw: Lowerer, d: i64, t: i64, name: str) -> i64 {
+    if lw.global_of.has(key(d)) { return lw.global_of.get(key(d)); }
+    let g = lw.m.globals.len();
+    lw.m.globals.push(IrGlobal { name: name, physics: layout_of(lw.ls, t), ready: false });
+    lw.global_of.set(key(d), g);
+    lw.global_decls.push(d);
+    return g;
+}
+
+fn global_of_decl(lw: Lowerer, d: i64) -> i64 => global_index(lw, d, global_type(lw, d), node_name(lw.inf.p.s, d));
+
+/// The address of global `g`.
+fn global_addr(lw: Lowerer, g: i64, n: i64) -> u32 => emit(lw, op_global_addr(), g, lw.m.globals[g].physics, [], n);
+
+/// The value of global binding `d`, read at `n`.
+pub fn lower_global_read(lw: Lowerer, d: i64, n: i64) -> u32 {
+    let g = global_of_decl(lw, d);
+    return emit(lw, op_load(), 0, lw.m.globals[g].physics, [global_addr(lw, g, n)], n);
+}
+
+/// Stores `v` into global binding `d`.
+pub fn lower_global_write(lw: Lowerer, d: i64, v: u32, n: i64) {
+    let g = global_of_decl(lw, d);
+    emit_void(lw, op_store(), 0, [global_addr(lw, g, n), coerce(lw, v, lw.m.globals[g].physics, n)], n);
+}
+
+/// The value global binding `d` is declared with, computed where `<start>`
+/// stands: a `const`'s by a call of its initializer function.
+fn global_value(lw: Lowerer, d: i64) -> u32 {
+    let s = lw.inf.p.s;
+    if kind(s, d) != nk_const() { return lower_hinted(lw, decl_init_expr(s, d), global_type(lw, d)); }
+    let fi = const_init_index(lw, d);
+    let g = global_of_decl(lw, d);
+    return emit(lw, op_call_direct(), fi, lw.m.globals[g].physics, [], d);
+}
+
+// ------------------------------------------------------------------------------
+// const
+// ------------------------------------------------------------------------------
+
+/// The function that computes `const` declaration `d`'s value, queued on
+/// first use. It takes nothing and gives the same value every time
+/// (`once`), so selfhost/ir/pass_const_eval.pilot may compute it while
+/// compiling.
+pub fn const_init_index(lw: Lowerer, d: i64) -> i64 {
+    let k = f"const:{d}";
+    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
+    let idx = lw.queue.len();
+    lw.fn_index.set(k, idx);
+    lw.queue.push(d);
+    lw.queue_self.push(ty_unknown());
+    lw.queue_body.push(-1);
+    lw.queue_args.push([]);
+    let f = ir_function_new(f"const@{node_name(lw.inf.p.s, d)}", lw.m.globals[global_of_decl(lw, d)].physics);
+    f.once = true;
+    lw.m.functions.push(f);
+    return idx;
+}
+
+/// The body of `const` declaration `d`'s initializer function: it returns
+/// the declared value.
+pub fn lower_const_init(lw: Lowerer, d: i64, f: IrFunction) {
+    let s = lw.inf.p.s;
+    lw.cur = ir_add_block(f);
+    let g = global_of_decl(lw, d);
+    f.ret_physics = lw.m.globals[g].physics;
+    f.once = true;
+    let v = lower_hinted(lw, rhs(s, d), global_type(lw, d));
+    if ir_is_terminated(f, lw.cur) { return; }
+    let _ = ir_emit(f, lw.cur, op_return(), 0, f.ret_physics, [coerce(lw, v, f.ret_physics, rhs(s, d))], false, span_start(s, rhs(s, d)));
+}
+
+// ------------------------------------------------------------------------------
+// comptime
+// ------------------------------------------------------------------------------
+
+/// The function that runs `comptime` node `n`, queued on first use.
+pub fn comptime_index(lw: Lowerer, n: i64) -> i64 {
+    let k = f"comptime:{n}";
+    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
+    let idx = lw.queue.len();
+    lw.fn_index.set(k, idx);
+    lw.queue.push(n);
+    lw.queue_self.push(ty_unknown());
+    lw.queue_body.push(-1);
+    lw.queue_args.push([]);
+    lw.m.functions.push(ir_function_new(f"comptime@{span_start(lw.inf.p.s, n)}", layout_unknown(lw.ls)));
+    lw.comptime_nodes.push(n);
+    return idx;
+}
+
+/// Whether `comptime` node `n` is an expression whose value is kept.
+pub fn is_comptime_value(s: Snap, n: i64) -> bool => flags(s, n) == 1;
+
+/// The body of the function that runs `comptime` node `n`: it returns the
+/// expression's value, or nothing for a block.
+[StandIn("ir.comptime_at_start", "comptime code runs while the program is compiled and its values are constants in the output", "the code is lowered to functions that <start> calls before anything else, as the seed runs it", "M30")]
+pub fn lower_comptime_run(lw: Lowerer, n: i64, f: IrFunction) {
+    let s = lw.inf.p.s;
+    lw.cur = ir_add_block(f);
+    let body = lhs(s, n);
+    let keeps = is_comptime_value(s, n);
+    f.ret_physics = if keeps { physics_of(lw, body) } else { layout_unknown(lw.ls) };
+    let v = lower_expr(lw, body);
+    if ir_is_terminated(f, lw.cur) { return; }
+    let args: List<u32> = if keeps { [coerce(lw, v, f.ret_physics, body)] } else { [] };
+    let _ = ir_emit(f, lw.cur, op_return(), 0, f.ret_physics, args, false, span_start(s, body));
+}
+
+/// `comptime { .. }` or `comptime expr` where it appears: the run is
+/// scheduled for the start; an expression reads the value it left.
+pub fn lower_comptime(lw: Lowerer, n: i64) -> u32 {
+    let _ = comptime_index(lw, n);
+    if !is_comptime_value(lw.inf.p.s, n) { return unit_value(lw, n); }
+    let g = global_index(lw, n, type_of(lw.inf, lhs(lw.inf.p.s, n)), f"comptime@{span_start(lw.inf.p.s, n)}");
+    return emit(lw, op_load(), 0, lw.m.globals[g].physics, [global_addr(lw, g, n)], n);
+}
+
+/// Schedules every `comptime` node of the user's files that no other
+/// `comptime` contains, as the seed compiles them all.
+fn schedule_comptime(lw: Lowerer) {
+    let s = lw.inf.p.s;
+    for i in prog_nodes_of_kind(lw.inf.p, nk_comptime()) {
+        if in_user_file(s, i) && !inside_comptime(lw, i) { let _ = comptime_index(lw, i); }
+    }
+}
+
+fn inside_comptime(lw: Lowerer, n: i64) -> bool {
+    var cur = lw.inf.p.parents[n];
+    while cur >= 0 {
+        if kind(lw.inf.p.s, cur) == nk_comptime() { return true; }
+        cur = lw.inf.p.parents[cur];
+    }
+    return false;
+}
+
+// ------------------------------------------------------------------------------
+// The start function
+// ------------------------------------------------------------------------------
+
+/// The top-level nodes of the user's files, the file declaring `main` last.
+fn user_programs(lw: Lowerer, main: i64) -> List<i64> {
+    let s = lw.inf.p.s;
+    var first: List<i64> = [];
+    var last: List<i64> = [];
+    for i in prog_nodes_of_kind(lw.inf.p, nk_program()) {
+        if in_user_file(s, i) {
+            if main >= 0 && unit_of(s, i) == unit_of(s, main) { last.push(i); } else { first.push(i); }
+        }
+    }
+    for x in last { first.push(x); }
+    return first;
+}
+
+/// The functions the user's files declare at top level whose types are all
+/// written: no type parameters, every parameter annotated. The others are
+/// lowered per call, for the types they are called with.
+pub fn user_functions(lw: Lowerer) -> List<i64> {
+    let p = lw.inf.p;
+    let s = p.s;
+    var out: List<i64> = [];
+    for prog in user_programs(lw, -1) {
+        for c in children(s, prog) {
+            // A declaration without a body (an `extern`) has nothing to lower.
+            if kind(s, c) != nk_fn() || nl_get(p.tparams, key(c)).len() > 0 || fn_body(s, c) < 0 { continue; }
+            var typed = true;
+            for param in decl_params(s, c) {
+                if rhs(s, param) < 0 { typed = false; }
+            }
+            if typed { out.push(c); }
+        }
+    }
+    return out;
+}
+
+/// Whether top-level item `c` runs when the program starts.
+fn runs_at_start(s: Snap, c: i64) -> bool {
+    let k = kind(s, c);
+    if k == nk_let() || k == nk_var() || k == nk_const() { return true; }
+    // A group of declarations only, such as a `syntax { .. }` block of rules
+    // the parser has already expanded, does not run either.
+    if k == nk_block() && declarations_only(s, c) { return false; }
+    // Declarations (kinds below 100) and `comptime` (run by step 1) do not.
+    return k >= 100 && k != nk_comptime();
+}
+
+/// Whether every item of block `c` is a declaration (kinds below 100).
+fn declarations_only(s: Snap, c: i64) -> bool {
+    for item in children(s, c) {
+        if kind(s, item) >= 100 { return false; }
+    }
+    return true;
+}
+
+/// Lowers function 0, `<start>`; `main` is the program's `main` or -1.
+/// Its entry block is filled by `extend_start` and `close_start`.
+pub fn lower_start(lw: Lowerer, main: i64) {
+    let s = lw.inf.p.s;
+    let f = lw.m.functions[0];
+    begin_function(lw, f);
+    lw.start_cur = ir_add_block(f);
+    lw.start_body = ir_add_block(f);
+    switch_to(lw, lw.start_body);
+    schedule_comptime(lw);
+    // Each file runs its `comptime` code (a block `extend_start` fills) and
+    // then its top-level statements, imported files first, so a file's
+    // globals are set before the files that import it run.
+    for prog in user_programs(lw, main) {
+        if ir_is_terminated(f, lw.cur) { break; }
+        let runs = ir_add_block(f);
+        let body = ir_add_block(f);
+        jump_to(lw, runs, [], 0);
+        lw.start_units.push(unit_of(s, prog));
+        lw.start_run_blocks.push(runs);
+        lw.start_unit_bodies.push(body);
+        switch_to(lw, body);
+        for c in children(s, prog) {
+            if !runs_at_start(s, c) || ir_is_terminated(f, lw.cur) { continue; }
+            let k = kind(s, c);
+            if k == nk_let() || k == nk_var() || k == nk_const() {
+                if is_pattern_let(s, c) {
+                    let _ = lower_pattern_let(lw, c);
+                    continue;
+                }
+                if rhs(s, c) >= 0 { lower_global_write(lw, c, global_value(lw, c), c); }
+            } else {
+                let _ = lower_expr(lw, c);
+            }
+        }
+    }
+    if ir_is_terminated(f, lw.cur) { return; }
+    if main < 0 {
+        f.ret_physics = layout_unknown(lw.ls);
+        let _ = ir_emit(f, lw.cur, op_return(), 0, f.ret_physics, [], false, 0);
+        return;
+    }
+    let ret = physics_of_type_node(lw, annot(s, main));
+    f.ret_physics = ret;
+    // The seed does not list this call in a runtime error's trace.
+    let v = ir_emit(f, lw.cur, op_call_direct(), function_index(lw, main, ty_unknown()), ret, [], true, ir_no_span());
+    let args: List<u32> = if annot(s, main) >= 0 { [v] } else { [] };
+    let _ = ir_emit(f, lw.cur, op_return(), 0, ret, args, false, span_start(s, main));
+}
+
+/// Adds to `<start>` what lowering has found since the last call: the
+/// `comptime` runs not yet called, in source order, to the block of runs of
+/// the file each belongs to; the globals of files outside the user's that
+/// the program reads to the entry block, which runs before every file. True
+/// when it added anything; lowering what it added may queue more functions.
+pub fn extend_start(lw: Lowerer) -> bool {
+    let s = lw.inf.p.s;
+    let f = lw.m.functions[0];
+    begin_function(lw, f);
+    lw.cur = lw.start_cur;
+    var changed = false;
+    var runs: List<i64> = [];
+    for n in lw.comptime_nodes {
+        if !lw.comptime_called.has(key(n)) { runs.push(n); }
+    }
+    sort_by_start(s, runs);
+    for n in runs {
+        lw.comptime_called.set(key(n), true);
+        changed = true;
+        let k = start_unit_index(lw, unit_of(s, n));
+        if k >= 0 { lw.cur = lw.start_run_blocks[k]; }
+        let fi = comptime_index(lw, n);
+        let ret = lw.m.functions[fi].ret_physics;
+        let v = emit(lw, op_call_direct(), fi, ret, [], n);
+        if is_comptime_value(s, n) {
+            let g = global_index(lw, n, type_of(lw.inf, lhs(s, n)), f"comptime@{span_start(s, n)}");
+            emit_void(lw, op_store(), 0, [global_addr(lw, g, n), coerce(lw, v, lw.m.globals[g].physics, n)], n);
+        }
+        if k >= 0 {
+            lw.start_run_blocks[k] = lw.cur;
+        } else {
+            lw.start_cur = lw.cur;
+        }
+        lw.cur = lw.start_cur;
+    }
+    while lw.globals_done < lw.global_decls.len() {
+        let d = lw.global_decls[lw.globals_done];
+        lw.globals_done = lw.globals_done + 1;
+        if kind(s, d) == nk_comptime() || (in_user_file(s, d) && !is_static_decl(s, d)) || decl_init_expr(s, d) < 0 { continue; }
+        if kind(s, d) == nk_pat_bind() {
+            // A name an imported file's top-level pattern binds.
+            let _ = unsupported(lw, d);
+            continue;
+        }
+        changed = true;
+        lower_global_write(lw, d, global_value(lw, d), d);
+    }
+    lw.start_cur = lw.cur;
+    return changed;
+}
+
+/// Ends `<start>`'s entry block with the jump to the top-level statements,
+/// and each file's block of `comptime` runs with the jump to its statements.
+pub fn close_start(lw: Lowerer) {
+    begin_function(lw, lw.m.functions[0]);
+    lw.cur = lw.start_cur;
+    jump_to(lw, lw.start_body, [], 0);
+    var k = 0;
+    while k < lw.start_run_blocks.len() {
+        lw.cur = lw.start_run_blocks[k];
+        jump_to(lw, lw.start_unit_bodies[k], [], 0);
+        k = k + 1;
+    }
+}
+
+/// Which of `<start>`'s files unit `u` is (an index into `start_units`): the
+/// first file when `u` is none of them, -1 when there are none.
+fn start_unit_index(lw: Lowerer, u: i64) -> i64 {
+    var k = 0;
+    while k < lw.start_units.len() {
+        if lw.start_units[k] == u { return k; }
+        k = k + 1;
+    }
+    return if lw.start_units.len() > 0 { 0 } else { -1 };
+}
+
+/// Sorts nodes by where they start in the source.
+fn sort_by_start(s: Snap, xs: List<i64>) {
+    var i = 1;
+    while i < xs.len() {
+        var j = i;
+        while j > 0 && span_start(s, xs[j - 1]) > span_start(s, xs[j]) {
+            let t = xs[j];
+            xs[j] = xs[j - 1];
+            xs[j - 1] = t;
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+}
+

@@ -1,0 +1,10 @@
+// TYPE001: a `while` condition is a `bool`; an integer is not taken as
+// "non-zero" (that would be C's rule, not Pilot's).
+fn main() {
+    var n = 3;
+    // The condition `n` starts at line 6, column 11.
+    while n {
+        n = n - 1;
+    }
+    print(n);
+}

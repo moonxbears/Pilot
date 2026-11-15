@@ -1,0 +1,2 @@
+error[LAYOUT002]: `h.size` is a field of packed `Header` and may not be aligned; copy it into a local before lending it to `n`
+err_packed_lend.pilot:14:10

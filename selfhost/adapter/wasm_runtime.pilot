@@ -192,15 +192,21 @@ pub fn wasm_memory_validate_utf8(mem: WasmMemory, offset: i64, len: i64) -> Wasm
     return wasm_ok_int(len);
 }
 
-/// Reads a string of `len` bytes at `offset`. The bytes are checked as UTF-8
-/// here; turning them into a `str` needs a bytes-to-string intrinsic the seed
-/// does not have yet.
+/// Reads a string of `len` bytes at `offset`, checked as UTF-8 (WASM004 on
+/// a bad byte or a range outside memory).
 pub fn wasm_memory_load_str(mem: WasmMemory, offset: i64, len: i64) -> WasmResult {
     let valid = wasm_memory_validate_utf8(mem, offset, len);
     if valid.is_err() {
         return valid;
     }
-    return seam("wasm.load_str", "a str built from validated linear-memory bytes");
+    var bytes: List<i64> = [];
+    var i = 0;
+    while i < len {
+        bytes.push(mem.bytes[offset + i]);
+        i = i + 1;
+    }
+    if some s = from_utf8(bytes) { return wasm_ok_str(s); }
+    return wasm_err("WASM004: Invalid UTF-8 at offset " + offset.to_str());
 }
 
 // ------------------------------------------------------------------------------

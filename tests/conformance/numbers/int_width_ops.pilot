@@ -1,0 +1,63 @@
+// Arithmetic on an integer narrower than 64 bits gives a value of its own
+// type: results wrap in two's complement to the type's width, and a shift
+// count is taken modulo the width.
+//
+// Expected output, worked by hand:
+//   i8:  127 + 1 = 128 - 256 = -128;  -128 - 1 = -129 + 256 = 127;
+//        100 * 2 = 200 - 256 = -56;   -128 >> 1 = -64.
+//   u8:  200 + 100 = 300 - 256 = 44;  0 - 1 = 255;  16 * 16 = 256 -> 0;
+//        1 << 9: 9 mod 8 = 1, so 2.
+//   i16: 32767 + 1 = -32768.          u16: 300 * 300 = 90000 - 65536 = 24464.
+//   i32: -2147483648 - 1 = 2147483647; 65536 * 65536 = 2^32 -> 0.
+//   u32: 4294967295 + 1 = 0;          0 - 1 = 4294967295.
+//   a literal on the left takes the other side's type: 1 + 255 (u8) = 0.
+//   through a function: add_u8(250, 10) = 260 - 256 = 4.
+//   assignment back to a narrow variable: 250 + 10 = 4, then 4 * 100 = 400 - 256 = 144.
+//   i64 and u64 keep 64 bits: 2147483647 + 1 = 2147483648.
+fn add_u8(a: u8, b: u8) -> u8 => a + b;
+
+fn main() {
+    let a: i8 = 127;
+    print(a + 1);
+    let b: i8 = -128;
+    print(b - 1);
+    let c: i8 = 100;
+    print(c * 2);
+    print(b >> 1);
+
+    let d: u8 = 200;
+    print(d + 100);
+    let z: u8 = 0;
+    print(z - 1);
+    let e: u8 = 16;
+    print(e * 16);
+    let one: u8 = 1;
+    print(one << 9);
+
+    let f: i16 = 32767;
+    print(f + 1);
+    let g: u16 = 300;
+    print(g * 300);
+
+    let h: i32 = -2147483648;
+    print(h - 1);
+    let i: i32 = 65536;
+    print(i * 65536);
+
+    let j: u32 = 4294967295;
+    print(j + 1);
+    let k: u32 = 0;
+    print(k - 1);
+
+    let top: u8 = 255;
+    print(1 + top);
+    print(add_u8(250, 10));
+    var acc: u8 = 250;
+    acc = acc + 10;
+    print(acc);
+    acc = acc * 100;
+    print(acc);
+
+    let wide: i64 = 2147483647;
+    print(wide + 1);
+}

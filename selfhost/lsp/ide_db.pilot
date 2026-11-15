@@ -5,6 +5,7 @@
 // =========================================================================
 pub pkg Pilot.SelfHost.Lsp.IdeDb;
 
+use std.text;
 use Pilot.SelfHost.Db.Revision::*;
 use Pilot.SelfHost.Db.Engine::*;
 use Pilot.SelfHost.Db.Queries::*;
@@ -27,7 +28,7 @@ fn is_ident_byte(b: i64) -> bool {
 pub fn extract_item_tree_signature(source: str) -> str {
     let n = source.len();
     let fn_kw = nameof(fn);
-    var sig = "";
+    var sig: List<str> = [];
     var fn_body_depth = 0;
     var pending_fn_body = false;
     var paren_depth = 0;
@@ -70,7 +71,7 @@ pub fn extract_item_tree_signature(source: str) -> str {
                 }
             }
             if fn_body_depth == 0 {
-                sig = sig + source.slice(lit_start, i);
+                sig.push(source.slice(lit_start, i));
             }
         } else if fn_body_depth > 0 {
             if b == 123 {
@@ -78,7 +79,7 @@ pub fn extract_item_tree_signature(source: str) -> str {
             } else if b == 125 {
                 fn_body_depth = fn_body_depth - 1;
                 if fn_body_depth == 0 {
-                    sig = sig + "{}";
+                    sig.push("{}");
                 }
             }
             i = i + 1;
@@ -94,7 +95,7 @@ pub fn extract_item_tree_signature(source: str) -> str {
                     pending_fn_body = true;
                     paren_depth = 0;
                 }
-                sig = sig + word;
+                sig.push(word);
             } else {
                 if b == 40 {
                     paren_depth = paren_depth + 1;
@@ -107,22 +108,22 @@ pub fn extract_item_tree_signature(source: str) -> str {
                     if b == 59 {
                         // Interface or extern fn prototype ending in ';'
                         pending_fn_body = false;
-                        sig = sig + ";";
+                        sig.push(";");
                     } else if b == 123 {
                         // Opening '{' of executable fn body
                         pending_fn_body = false;
                         fn_body_depth = 1;
                     } else {
-                        sig = sig + source.slice(i, i + 1);
+                        sig.push(source.slice(i, i + 1));
                     }
                 } else {
-                    sig = sig + source.slice(i, i + 1);
+                    sig.push(source.slice(i, i + 1));
                 }
                 i = i + 1;
             }
         }
     }
-    return sig;
+    return text.join_text(sig, "");
 }
 
 pub fn apply_doc_span_edit(doc: str, start_byte: i64, end_byte: i64, replacement: str) -> str {

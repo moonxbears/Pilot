@@ -6,6 +6,8 @@
 
 pub pkg std.polyglot.transport.yaml;
 
+use std.text;
+
 // ------------------------------------------------------------------------------
 // 1. YAML Node Kinds
 // ------------------------------------------------------------------------------
@@ -123,25 +125,25 @@ pub struct YamlNode : IObject {
             return self.scalar_val;
         }
         if self.kind == YamlKind::Sequence {
-            var out = "";
+            var lines: List<str> = [];
             var i: usize = 0;
             let n = self.sequence_val.len();
             while i < n {
-                out = out + "- " + self.sequence_val[i].emit() + "\n";
+                lines.push("- " + self.sequence_val[i].emit() + "\n");
                 i = i + 1;
             }
-            return out;
+            return join_text(lines, "");
         }
         if self.kind == YamlKind::Mapping {
-            var out = "";
+            var lines: List<str> = [];
             var i: usize = 0;
             let n = self.mapping_val.len();
             while i < n {
                 let p = self.mapping_val[i];
-                out = out + p.key + ": " + p.val.emit() + "\n";
+                lines.push(p.key + ": " + p.val.emit() + "\n");
                 i = i + 1;
             }
-            return out;
+            return join_text(lines, "");
         }
         return "";
     }

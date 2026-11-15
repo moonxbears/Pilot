@@ -252,6 +252,7 @@ comptime {
             kw_self:      "self",
             kw_field:     "field",
             kw_value:     "value",
+            kw_nameof:    "nameof",
 
             ring_public:  0,
             ring_simd:    80,
@@ -334,161 +335,165 @@ comptime {
 // STEP 1: DEFINE & BIND CORE `[...]` BRACKET ATTRIBUTES
 // =========================================================================
 comptime fn Lang(target_decl, item_name) =>
-    __engine(Cfg.Hooks.bind_lang, target_decl, item_name);
+    bind_lang_item(target_decl, item_name);
 
 comptime fn Bits(target_type, width, reg_class) =>
-    __engine(Cfg.Hooks.reg_layout, target_type, width, reg_class);
+    set_register_layout(target_type, width, reg_class);
 
 comptime fn Layout(target_type, mode) =>
-    __engine(Cfg.Hooks.mem_layout, target_type, mode);
+    set_memory_layout(target_type, mode);
 
 comptime fn Operator(target_fn, fixity, prec, assoc) =>
-    __engine(Cfg.Hooks.pratt_op, target_fn, fixity, prec, assoc);
+    register_pratt_op(target_fn, fixity, prec, assoc);
 
 comptime fn Inline(target_fn, mode) =>
-    __engine(Cfg.Hooks.inline_hint, target_fn, mode);
+    set_inline_hint(target_fn, mode);
 
 comptime fn Lattice(target_iface, mask) =>
-    __engine(Cfg.Hooks.lattice_bind, target_iface, mask);
+    bind_lattice_kind(target_iface, mask);
 
 comptime fn EnforceCoreNaming(target_pkg) =>
-    __engine(Cfg.Hooks.core_naming, target_pkg);
+    enforce_core_naming_lint(target_pkg);
 
 comptime fn SyntaxMacro(transformer_fn, kw_token) =>
-    __engine(Cfg.Hooks.syntax_kw, kw_token, transformer_fn);
+    register_syntax_keyword(kw_token, transformer_fn);
 
 comptime {
-    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_lang,    Lang);
-    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_bits,    Bits);
-    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_layout,  Layout);
-    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_op,      Operator);
-    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_inline,  Inline);
-    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_lattice, Lattice);
-    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_naming,  EnforceCoreNaming);
-    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_syntax,  SyntaxMacro);
+    register_bracket_attribute(Cfg.Tokens.attr_lang,    Lang);
+    register_bracket_attribute(Cfg.Tokens.attr_bits,    Bits);
+    register_bracket_attribute(Cfg.Tokens.attr_layout,  Layout);
+    register_bracket_attribute(Cfg.Tokens.attr_op,      Operator);
+    register_bracket_attribute(Cfg.Tokens.attr_inline,  Inline);
+    register_bracket_attribute(Cfg.Tokens.attr_lattice, Lattice);
+    register_bracket_attribute(Cfg.Tokens.attr_naming,  EnforceCoreNaming);
+    register_bracket_attribute(Cfg.Tokens.attr_syntax,  SyntaxMacro);
 }
 
 // =========================================================================
-// STEP 2: SELF-BOOTSTRAP THE `syntax` KEYWORD
+// STEP 2: THE `syntax` KEYWORD
 // =========================================================================
-[SyntaxMacro(Cfg.Tokens.kw_syntax)]
-comptime fn __bootstrap_syntax(kw_name, params, body) => quote {
-    [SyntaxMacro($kw_name)]
-    comptime fn __syntax_rule($params) { $body }
-}
+// `syntax` rules are read by the seed parser (parse_syntax_decl in
+// crates/pilot-parser/src/lib.rs). Defining `syntax` here through
+// `[SyntaxMacro]` is not built: the declaration that tried it spliced
+// `$params` into a parameter list, which does not parse, so it never took
+// effect; it was deleted on 2026-11-13 (the bootstrap sources must parse
+// cleanly, crates/pilot-parser/tests/bootstrap_sources.rs).
 
 // =========================================================================
 // STEP 3: REGISTER MODIFIERS, MODULE KEYWORDS, RECEIVER & PRATT PRECEDENCES
 // =========================================================================
 comptime {
     // 1. Canonical Axis-1 Spatial Visibility Lattice (0..9)
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_priv,    0);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_file,    1);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_prot,    3);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_pkg,     4);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_int,     6);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_pub,     7);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_open,    8);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_export,  9);
+    register_modifier(Cfg.Tokens.vis_priv,    0);
+    register_modifier(Cfg.Tokens.vis_file,    1);
+    register_modifier(Cfg.Tokens.vis_prot,    3);
+    register_modifier(Cfg.Tokens.vis_pkg,     4);
+    register_modifier(Cfg.Tokens.vis_int,     6);
+    register_modifier(Cfg.Tokens.vis_pub,     7);
+    register_modifier(Cfg.Tokens.vis_open,    8);
+    register_modifier(Cfg.Tokens.vis_export,  9);
 
     // 2. Semantic Declaration & Mutability Modifiers (`var` replaces `mut`)
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_pure,    Cfg.Tokens.act_pure);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_static,  Cfg.Tokens.act_static);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_const,   Cfg.Tokens.act_const);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_var,     Cfg.Tokens.act_var);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_iso,     Cfg.Tokens.act_iso);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_partial, Cfg.Tokens.act_partial);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_ext,     Cfg.Tokens.act_ext);
+    register_modifier(Cfg.Tokens.mod_pure,    Cfg.Tokens.act_pure);
+    register_modifier(Cfg.Tokens.mod_static,  Cfg.Tokens.act_static);
+    register_modifier(Cfg.Tokens.mod_const,   Cfg.Tokens.act_const);
+    register_modifier(Cfg.Tokens.mod_var,     Cfg.Tokens.act_var);
+    register_modifier(Cfg.Tokens.mod_iso,     Cfg.Tokens.act_iso);
+    register_modifier(Cfg.Tokens.mod_partial, Cfg.Tokens.act_partial);
+    register_modifier(Cfg.Tokens.mod_ext,     Cfg.Tokens.act_ext);
 
     // 3. Clearance Ring (`lvl`), Package (`pkg`), Import (`use`), Receptors & Implicit `self`
-    __engine(Cfg.Hooks.param_mod,   Cfg.Tokens.kw_lvl,  Cfg.Tokens.act_ring);
-    __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_pkg,  Cfg.Tokens.act_pkg);
-    __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_use,  Cfg.Tokens.act_use);
-    __engine(Cfg.Hooks.receiver_id, Cfg.Tokens.kw_self, Cfg.Tokens.kw_field, Cfg.Tokens.kw_value);
-    __engine(Cfg.Hooks.receptor, Cfg.Tokens.kw_nameof, 33, 25);
-    __engine(Cfg.Hooks.receptor, nameof(true),  1, 1);
-    __engine(Cfg.Hooks.receptor, nameof(false), 1, 0);
-    __engine(Cfg.Hooks.receptor, nameof(none),  2, 0);
-    __engine(Cfg.Hooks.receptor, nameof(else),  3, 0);
-    __engine(Cfg.Hooks.receptor, Cfg.Tokens.kw_syntax, 4, 0);
-    __engine(Cfg.Hooks.receptor, "type_construct",      5, 0);
-    __engine(Cfg.Hooks.receptor, "attribute_construct", 6, 0);
-    __engine(Cfg.Hooks.receptor, nameof(extern),   7,  0);
-    __engine(Cfg.Hooks.receptor, "lib",      8,  0);
-    __engine(Cfg.Hooks.receptor, nameof(break),    13, 0);
-    __engine(Cfg.Hooks.receptor, nameof(continue), 13, 1);
-    __engine(Cfg.Hooks.receptor, nameof(get),      23, 0);
-    __engine(Cfg.Hooks.receptor, nameof(set),      24, 0);
-    __engine(Cfg.Hooks.receptor, nameof(op),       25, 0);
-    __engine(Cfg.Hooks.receptor, nameof(as),       29, 0);
-    __engine(Cfg.Hooks.receptor, "view",     29, 1);
+    register_parametric_modifier(Cfg.Tokens.kw_lvl,  Cfg.Tokens.act_ring);
+    register_module_kw(Cfg.Tokens.kw_pkg,  Cfg.Tokens.act_pkg);
+    register_module_kw(Cfg.Tokens.kw_use,  Cfg.Tokens.act_use);
+    bind_receiver_ident(Cfg.Tokens.kw_self, Cfg.Tokens.kw_field, Cfg.Tokens.kw_value);
+    bind_receptor(Cfg.Tokens.kw_nameof, 33, 25);
+    bind_receptor(nameof(true),  1, 1);
+    bind_receptor(nameof(false), 1, 0);
+    bind_receptor(nameof(none),  2, 0);
+    bind_receptor(nameof(else),  3, 0);
+    bind_receptor(Cfg.Tokens.kw_syntax, 4, 0);
+    // `macro` is not built yet (docs/keyword_roadmap.md K4; `syntax` rules
+    // are the macros that work): where a declaration starts it stops at the
+    // seam `keyword.unbuilt` (receptor 40, place 1).
+    bind_receptor(nameof(macro), 40, 1);
+    // `stringify($p)` in a `syntax` rule's template: the source text of the
+    // argument bound to `p` (crates/pilot-parser/src/rule_arms.rs).
+    bind_receptor(nameof(stringify), 36, 4);
+    bind_receptor("type_construct",      5, 0);
+    bind_receptor("attribute_construct", 6, 0);
+    bind_receptor(nameof(extern),   7,  0);
+    bind_receptor("lib",      8,  0);
+    bind_receptor(nameof(break),    13, 0);
+    bind_receptor(nameof(continue), 13, 1);
+    bind_receptor(nameof(get),      23, 0);
+    bind_receptor(nameof(set),      24, 0);
+    bind_receptor(nameof(op),       25, 0);
+    bind_receptor(nameof(as),       29, 0);
+    bind_receptor("view",     29, 1);
 
     // 4. Register Global Pratt Operator Precedences ONCE for the Entire Language
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_coal,   Cfg.Ops.fix_infix,   Cfg.Ops.prec_coal,   Cfg.Ops.assoc_right);
-    __engine(Cfg.Hooks.pratt_op, "||",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_or,     Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_coal,   Cfg.Ops.fix_infix,   Cfg.Ops.prec_coal,   Cfg.Ops.assoc_right);
+    register_pratt_op("||",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_or,     Cfg.Ops.assoc_left);
     // `x as T` binds tighter than `*` and looser than prefix operators.
-    __engine(Cfg.Hooks.pratt_op, nameof(as),         Cfg.Ops.fix_infix,   Cfg.Ops.prec_cast,   Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, "&&",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_and,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitor,  Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitor,  Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_xor,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_xor,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitand, Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitand, Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_range,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_range_lt, Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_span,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_eq,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_ne,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_lt,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_gt,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_le,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_ge,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_shl,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_shift,  Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_shr,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_shift,  Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_add,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sub,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_mul,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_div,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_rem,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    register_pratt_op(nameof(as),         Cfg.Ops.fix_infix,   Cfg.Ops.prec_cast,   Cfg.Ops.assoc_left);
+    register_pratt_op("&&",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_and,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_bitor,  Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitor,  Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_xor,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_xor,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_bitand, Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitand, Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_range,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_range_lt, Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_span,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_eq,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_ne,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_lt,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_gt,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_le,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_ge,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_shl,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_shift,  Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_shr,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_shift,  Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_add,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_sub,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_mul,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_div,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_rem,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
 
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_not,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sub,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitnot, Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_mul,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_pairs,  Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_expand, Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
+    register_pratt_op(Cfg.Ops.sym_not,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
+    register_pratt_op(Cfg.Ops.sym_sub,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
+    register_pratt_op(Cfg.Ops.sym_bitnot, Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
+    register_pratt_op(Cfg.Ops.sym_mul,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
+    register_pratt_op(Cfg.Ops.sym_pairs,  Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
+    register_pratt_op(Cfg.Ops.sym_expand, Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
 
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_not,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_try,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_open_rng,Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_after_rng,Cfg.Ops.fix_prefix, Cfg.Ops.prec_range,  Cfg.Ops.assoc_right);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_cmp3,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sat_add, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sat_sub, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_wrap_add,Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_wrap_sub,Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_chk_add, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_chk_sub, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sat_mul, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_wrap_mul,Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_chk_mul, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_euc_mod, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_lens,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_lens,   Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_swap,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_swap,   Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_not,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_try,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_open_rng,Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_after_rng,Cfg.Ops.fix_prefix, Cfg.Ops.prec_range,  Cfg.Ops.assoc_right);
+    register_pratt_op(Cfg.Ops.sym_cmp3,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    register_pratt_op(Cfg.Ops.sym_sat_add, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_sat_sub, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_wrap_add,Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_wrap_sub,Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_chk_add, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_chk_sub, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_sat_mul, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_wrap_mul,Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_chk_mul, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_euc_mod, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_lens,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_lens,   Cfg.Ops.assoc_left);
+    register_pratt_op(Cfg.Ops.sym_swap,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_swap,   Cfg.Ops.assoc_none);
 }
 
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Genesis;
 
-extern "rust" lib "libphysics" {
-    pub fn __engine(hook_name: str, ...) -> any;
-}
-
 // =========================================================================
 // STEP 4: PAIRED CFG KEYWORDS (`break`, `continue`, `op`) & SSA/REFLECTION HOOKS
 // =========================================================================
 pub syntax {
-    break()           => __engine(Cfg.Hooks.jmp_exit);
-    continue()        => __engine(Cfg.Hooks.jmp_head);
-    op(sig, body)     => __engine(Cfg.Hooks.decl_op, sig, body);
+    break()           => cfg_jump_loop_exit();
+    continue()        => cfg_jump_loop_head();
+    op(sig, body)     => decl_operator_fn(sig, body);
     while(cond, body) => quote { loop { if !($cond) { break; } $body } };
 }
 
@@ -498,31 +503,30 @@ pub syntax type_construct {
 
 // Ring 80 (`lvl(80)`): Restricted to `Pilot.Core` SIMD/Primitive Implementations
 pub lvl(Cfg.Tokens.ring_simd) comptime fn {
-    __ssa(opcode, lhs, rhs)       => __engine(Cfg.Hooks.ssa_binop, opcode, lhs, rhs);
-    __ssa_unary(opcode, val)      => __engine(Cfg.Hooks.ssa_unop, opcode, val);
-    __ssa_cast(opcode, val, T)    => __engine(Cfg.Hooks.ssa_cast, opcode, val, T);
-    __ssa_load(ptr_val)           => __engine(Cfg.Hooks.ssa_load, ptr_val);
-    __ssa_store(ptr_val, val)     => __engine(Cfg.Hooks.ssa_store, ptr_val, val);
-    __ssa_gep(base_ptr, elem_idx) => __engine(Cfg.Hooks.ssa_gep, base_ptr, elem_idx);
+    __ssa(opcode, lhs, rhs)       => emit_ssa_binop(opcode, lhs, rhs);
+    __ssa_unary(opcode, val)      => emit_ssa_unop(opcode, val);
+    __ssa_cast(opcode, val, T)    => emit_ssa_cast(opcode, val, T);
+    __ssa_load(ptr_val)           => emit_ssa_load(ptr_val);
+    __ssa_store(ptr_val, val)     => emit_ssa_store(ptr_val, val);
+    __ssa_gep(base_ptr, elem_idx) => emit_ssa_gep(base_ptr, elem_idx);
 }
 
 // Ring 0 (`lvl(0)`): Public Compile-Time Reflection & Introspection Intrinsics
 pub lvl(Cfg.Tokens.ring_public) comptime fn {
     nameof(sym)                   => sym;
-    __is_comptime()               => __engine(Cfg.Hooks.is_comptime);
-    sizeof(T)                     => __engine(Cfg.Hooks.t_sizeof, T);
-    alignof(T)                    => __engine(Cfg.Hooks.t_alignof, T);
-    offsetof(T, field_sym)        => __engine(Cfg.Hooks.t_offsetof, T, field_sym);
-    fields_of(T)                  => __engine(Cfg.Hooks.t_fields, T);
-    compile_error(msg)            => __engine(Cfg.Hooks.diag_err, msg);
-    lattice_bits_of(T)            => __engine(Cfg.Hooks.lattice_get, T);
-    type_name_of(T)                   => __engine(Cfg.Hooks.t_name, T);
-    __ast_lines(target_fn, part_kind) => __engine(Cfg.Hooks.ast_lines, target_fn, part_kind);
-    __parse_ast(source_str)           => __engine(Cfg.Hooks.ast_parse, source_str);
-    __replace_ast(root, pat, rep)     => __engine(Cfg.Hooks.ast_replace, root, pat, rep);
-    __bind_weaver(iface_decl, fn_ref) => __engine(Cfg.Hooks.attr_weave, iface_decl, fn_ref);
+    __is_comptime()               => query_is_comptime_vm();
+    sizeof(T)                     => type_sizeof(T);
+    alignof(T)                    => type_alignof(T);
+    offsetof(T, field_sym)        => type_offsetof(T, field_sym);
+    fields_of(T)                  => type_fields_of(T);
+    compile_error(msg)            => emit_diagnostic_error(msg);
+    lattice_bits_of(T)            => get_lattice_bits(T);
+    __ast_lines(target_fn, part_kind) => ast_source_lines(target_fn, part_kind);
+    __parse_ast(source_str)           => parse_ast_fragment(source_str);
+    __replace_ast(root, pat, rep)     => replace_ast_pattern(root, pat, rep);
+    __bind_weaver(iface_decl, fn_ref) => register_attr_weaver(iface_decl, fn_ref);
     // Categories: 0 = seed_keywords, 1 = syntax_macros, 2 = modifiers, 3 = lang_primitives, 4 = operators, 5 = interfaces, 6 = attributes
-    __registered_symbols(category_id) => __engine(Cfg.Hooks.sym_registry, category_id);
+    __registered_symbols(category_id) => query_registered_symbols(category_id);
 }
 
 // =========================================================================
@@ -567,5 +571,5 @@ pub partial struct {
 // No file loaded after `stdlib/core/core.pilot` may invoke `__engine(...)`!
 // =========================================================================
 comptime {
-    __engine(Cfg.Hooks.seal_bridge);
+    seal_bootstrap_bridge();
 }

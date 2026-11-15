@@ -1,0 +1,96 @@
+2..5 [abc]
+true
+4..7 [abc]
+true
+6..8 [66]
+true
+2..5 [bca]
+true
+3..6 [xyz]
+true
+4..9 [color]
+true
+0..3 [aaa]
+true
+0..2 [aa]
+true
+3..6 [aaa]
+true
+5..20 [bob@example.com] 5:bob 9:example
+true
+0..4 [abcd] 0:a 1:bcd 4:
+true
+0..8 [   hello] 3:hello
+true
+6..11 [world]
+true
+7..10 [cat]
+true
+7..10 [cat]
+true
+1..7 [ababab]
+true
+0..0 []
+true
+0..4 [aaab]
+true
+1..5 [1.25]
+true
+1..5 []a-]]
+true
+0..0 []
+true
+5..11 [$12.50]
+true
+none
+4..10 [héllo]
+true
+3..5 [é]
+true
+0..1 [y] -
+true
+3..5 [cd]
+true
+0..3 [a b]
+true
+2..4 [, ]
+true
+0..5 [abcbd]
+true
+0..1 [b] - 0:b
+true
+2..4 [3F]
+true
+1..3 [	
+]
+true
+1..4 [Aé]
+true
+1..2 [1] 3..5 [22] 6..9 [333]
+0..0 [] 1..3 [aa] 3..3 [] 4..5 [a] 5..5 []
+0..0 [] 0..1 [a] 1..1 [] 1..2 [a] 2..2 []
+0..2 [a1] 3..5 [b2] 6..8 [c3]
+0..0 [] 2..2 [] 3..3 [] 5..5 []
+0..0 [] 1..1 [] 3..3 [] 4..4 []
+a#b#c#
+-a-b--d-
+site at bob web at amy
+f[oo|oo] b[oo|oo]
+b\n\n\
+a b c
+bonona
+a<b
+>c
+2026 11
+error REGEX001 at 0
+error REGEX002 at 2
+error REGEX003 at 0
+error REGEX003 at 2
+error REGEX004 at 0
+error REGEX005 at 3
+error REGEX005 at 0
+error REGEX006 at 1
+error REGEX006 at 2
+error REGEX003 at 2
+error REGEX008 at 1
+error REGEX008 at 3

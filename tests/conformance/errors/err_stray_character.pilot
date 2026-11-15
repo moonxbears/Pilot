@@ -1,0 +1,6 @@
+// A character no lexer rule takes is an error (SYN001), not skipped: before
+// this, `"x" └ "y"` ran as if the `└` were not there.
+fn main() {
+    let c = "x" └ "y";
+    print(c);
+}

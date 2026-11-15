@@ -293,6 +293,8 @@ fn test_m29_4_deterministic_env_and_transitive_privilege_escalation_ctime006() {
             let r2 = prng2.next_u64();
             if r1 != r2 { return 2; }
             if r1 != 13307452440480268 { return 20; }
+            let want2: u64 = 17339054203798593560;
+            if prng1.next_u64() != want2 { return 21; }
 
             // 3. Insertion-ordered deterministic map
             var m = det_map_new();

@@ -1,0 +1,9 @@
+before
+drop b1
+a1
+drop a1
+drop b2
+x
+drop x
+drop y
+end

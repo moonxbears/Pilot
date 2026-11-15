@@ -1,0 +1,12 @@
+// SYN001: a destructor runs when a value is dropped, with nothing to pass
+// it; its parameters used to be dropped (then `x` was undefined).
+struct Res : IObject {
+    pub a: i64;
+    // `(x: i64)` starts at line 6, column 10.
+    ~self(x: i64) { print(x); }
+}
+
+fn main() {
+    let r = Res { a: 1 };
+    print(r.a);
+}

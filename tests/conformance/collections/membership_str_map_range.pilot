@@ -1,0 +1,35 @@
+// Membership `x in y` over strings, maps, and half-open / inclusive ranges.
+
+fn main() {
+    let s = "hello world";
+    print("ell" in s);
+    print("world" in s);
+    print("xyz" in s);
+    print("" in s);
+    print("a" in "");
+
+    let m = Map<str, i64>();
+    m.set("one", 1);
+    m.set("two", 2);
+    print("one" in m);
+    print("two" in m);
+    print("three" in m);
+
+    let empty = Map<str, i64>();
+    print("one" in empty);
+
+    print(0 in 0..5);
+    print(4 in 0..5);
+    print(5 in 0..5);
+    print(-1 in 0..5);
+    print(5 in 5..5);
+
+    print(0 in 0..=5);
+    print(5 in 0..=5);
+    print(6 in 0..=5);
+    print(5 in 5..=5);
+
+    print(1 + 2 in 0..5);
+    print(2 in 0..5 && 5 in 0..=5);
+    print(!(10 in 0..5));
+}

@@ -1,0 +1,9 @@
+// The block form `noalloc({ .. })` is not built yet (`noalloc fn` is, see
+// contracts/noalloc_fns.pilot): it stops at the seam `realtime.noalloc_block`
+// before its body runs. Expected: "before" is printed; "inside" and "after" are not, because
+// a seam stops the program where it is reached (AGENTS.md section 1).
+fn main() {
+    print("before");
+    noalloc({ print("inside"); });
+    print("after");
+}

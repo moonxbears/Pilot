@@ -58,6 +58,27 @@ struct Walk {
     frames: List<i64>;
     owners: List<i64>;
     sink: DiagSink;
+    /// Setter body node -> the index of its `[body, parameter, guard]` row
+    /// in `Snap.setters`, for a setter that names its parameter
+    /// (`set(v: T) if cond => ..`); -1 otherwise.
+    setter_of: List<i64>;
+    /// Node kind -> whether `walk` treats it otherwise than walking its
+    /// children (`special_kinds`).
+    special: List<bool>;
+}
+
+/// Node kind -> whether `walk` has a case of its own for it; every other
+/// kind only has its children walked.
+fn special_kinds(s: Snap) -> List<bool> {
+    var out: List<bool> = [];
+    var i = 0;
+    while i < s.shapes.len() { out.push(false); i = i + 1; }
+    for k in [nk_fn(), nk_operator(), nk_ctor(), nk_indexer(), nk_lambda(), nk_block(), nk_let(),
+        nk_var(), nk_const(), nk_for(), nk_if(), nk_guard(), nk_catch(), nk_match(), nk_ident(),
+        nk_member(), nk_call(), nk_param(), nk_type_named(), nk_pat_wildcard(), nk_pat_bind(),] {
+        out[k] = true;
+    }
+    return out;
 }
 
 fn push_frame(w: Walk) { w.frames.push(w.stack.len()); }
@@ -119,6 +140,11 @@ fn bind_pattern(w: Walk, pat: i64, scrutinee: i64) {
         declare(w, pat, node_name(s, pat), BindKind::Pattern, -1, -1);
         return;
     }
+    // A record pattern's `key: pattern` entry binds through its pattern.
+    if kind(s, pat) == nk_call_arg() {
+        bind_pattern(w, rhs(s, pat), scrutinee);
+        return;
+    }
     for c in children(s, pat) { bind_pattern(w, c, scrutinee); }
 }
 
@@ -156,8 +182,46 @@ fn walk(w: Walk, n: i64) {
     if n < 0 { return; }
     let s = w.p.s;
     let k = kind(s, n);
+    if w.setter_of[n] < 0 {
+        // The most common nodes first: a name, a member access, and the
+        // other leaves (literals, patterns), which bind and use nothing.
+        if k == nk_ident() {
+            let pos = lookup_position(w, node_name(s, n));
+            if pos >= 0 {
+                let b = w.stack[pos];
+                w.r.uses[b] = w.r.uses[b] + 1;
+                w.r.ref_of[n] = b;
+            }
+            return;
+        }
+        if k == nk_member() {
+            walk(w, lhs(s, n));
+            return;
+        }
+        if k >= 0 && k < s.shapes.len() {
+            if s.shapes[k] == ChildShape::Leaf { return; }
+            if !w.special[k] {
+                walk_all(w, children(s, n));
+                return;
+            }
+        }
+    }
     if k == nk_fn() || k == nk_operator() {
         walk_function(w, n, fn_params(s, n), fn_body(s, n));
+        return;
+    }
+    if w.setter_of[n] >= 0 {
+        // A setter's parameter is bound in its guard and its body.
+        let index = w.setter_of[n];
+        let row: List<i64> = s.setters[index];
+        push_frame(w);
+        declare(w, row[1], node_name(s, row[1]), BindKind::Param, -1, rhs(s, row[1]));
+        walk(w, row[2]);
+        // The body itself, walked as any other node once its row is set aside.
+        w.setter_of[n] = -1;
+        walk(w, n);
+        w.setter_of[n] = index;
+        pop_frame(w);
         return;
     }
     if k == nk_ctor() || k == nk_indexer() {
@@ -185,7 +249,9 @@ fn walk(w: Walk, n: i64) {
     if k == nk_let() || k == nk_var() || k == nk_const() {
         walk(w, rhs(s, n));
         if w.owners.len() > 0 {
-            declare(w, n, node_name(s, n), BindKind::Local, rhs(s, n), annot(s, n));
+            // `let <pattern> = v` (`LET_PATTERN`) binds each name the pattern does.
+            if flags(s, n) == 1 { bind_pattern(w, lhs(s, n), rhs(s, n)); }
+            else { declare(w, n, node_name(s, n), BindKind::Local, rhs(s, n), annot(s, n)); }
         }
         return;
     }
@@ -252,6 +318,7 @@ fn walk(w: Walk, n: i64) {
             let arm = ch[i];
             push_frame(w);
             bind_pattern(w, lhs(s, arm), ch[0]);
+            if arm_guard(s, arm) >= 0 { walk(w, arm_guard(s, arm)); }
             walk(w, rhs(s, arm));
             pop_frame(w);
             i = i + 1;
@@ -286,18 +353,24 @@ fn walk(w: Walk, n: i64) {
 /// Resolves every function body of the program and reports unused and
 /// shadowing bindings in the user's files.
 pub fn resolve_program(p: Program, sink: DiagSink) -> Resolution {
-    var refs: List<i64> = [];
-    var i = 0;
-    while i < p.s.count { refs.push(-1); i = i + 1; }
     let r = Resolution {
         site: [], name: [], bind_kind: [], source: [], annot: [], owner: [], uses: [],
-        ref_of: refs,
+        ref_of: filled(p.s.count, -1),
     };
-    let w = Walk { p: p, r: r, stack: [], frames: [], owners: [], sink: sink };
-    i = 0;
-    while i < p.s.count {
-        if kind(p.s, i) == nk_program() { walk_all(w, children(p.s, i)); }
+    let setter_of = filled(p.s.count, -1);
+    var i = 0;
+    while i < p.s.setters.len() {
+        let row: List<i64> = p.s.setters[i];
+        if row[1] >= 0 { setter_of[row[0]] = i; }
         i = i + 1;
+    }
+    let w = Walk { p: p, r: r, stack: [], frames: [], owners: [], sink: sink, setter_of: setter_of,
+        special: special_kinds(p.s) };
+    for root in nodes_of(p.s, nk_program()) { walk_all(w, children(p.s, root)); }
+    // Accessor bodies hang off the property table, not the tree: a setter
+    // that names its parameter is resolved with it bound.
+    for row in p.s.setters {
+        if row[1] >= 0 { walk(w, row[0]); }
     }
     var b = 0;
     while b < r.site.len() {

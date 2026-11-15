@@ -1,0 +1,53 @@
+// F7: a postfix `?` that leaves the function drops the owned values still
+// live there, after the failure is known. A value the `?` operand itself
+// moves belongs to the callee, which drops it.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn half(n: i64) -> i64? {
+    if n % 2 == 0 { return n / 2; }
+    return none;
+}
+
+fn consume_opt(r: Res) -> i64? {
+    print(f"consume {r.name}");
+    return none;
+}
+
+fn run(n: i64) -> i64? {
+    let r = Res { name: f"r{n}" };
+    let h = half(n)?;
+    print(f"{r.name} half {h}");
+    return h;
+}
+
+fn twice(n: i64) -> i64? {
+    let a = Res { name: "a" };
+    var total = 0;
+    var i = 0;
+    while i < 2 {
+        total = total + half(n + i)?;
+        i = i + 1;
+    }
+    print(a.name);
+    return total;
+}
+
+fn handoff() -> i64? {
+    let r = Res { name: "h" };
+    let v = consume_opt(r)?;
+    return v;
+}
+
+fn main() {
+    print(run(4) ?? -1);
+    print(run(3) ?? -1);
+    print(twice(2) ?? -1);
+    print(handoff() ?? -1);
+    print("end");
+}

@@ -1,0 +1,8 @@
+// A spread sequence must hold exactly the items the parameters need:
+// `sum3` takes three, the list holds two, so the call stops the program.
+fn sum3(a: i64, b: i64, c: i64) -> i64 => a + b + c;
+
+fn main() {
+    let two: List<i64> = [1, 2];
+    print(sum3(*two));
+}

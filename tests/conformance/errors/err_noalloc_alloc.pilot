@@ -1,0 +1,21 @@
+// NOALLOC001: a `noalloc` function must not take heap memory: no list
+// literal, no new string, no growing a list, no generator (its frame is
+// built on the heap when it is called).
+noalloc fn first_two(xs: List<i64>) -> List<i64> {
+    let out = [xs[0], xs[1]];
+    return out;
+}
+
+noalloc fn label(n: i64) -> str => f"n = {n}";
+
+noalloc fn grow(var ref xs: List<i64>) { xs.push(1); }
+
+noalloc fn counter() { yield 1; }
+
+fn main() {
+    print(first_two([1, 2, 3]).len());
+    print(label(4));
+    var xs = [0];
+    grow(xs);
+    for v in counter() { print(v); }
+}

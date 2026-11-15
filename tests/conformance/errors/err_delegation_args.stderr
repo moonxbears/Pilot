@@ -1,0 +1,4 @@
+error[CALL001]: `VolumeFacet.volume` takes the receiver and 1 argument(s), found 2
+err_delegation_args.pilot:9:30
+error[TYPE001]: argument 1 of `VolumeFacet.volume`: expected `i64`, found `str`
+err_delegation_args.pilot:10:63

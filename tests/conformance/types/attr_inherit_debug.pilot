@@ -1,0 +1,33 @@
+// An attribute on the package reaches every function and method in the file
+// (stdlib/core/attr_flow.pilot, `IInheritedAttribute`):
+//   - `Counter.bump` (a method) and `twice` (an `ext` function) are traced
+//     at the package's `::Medium`;
+//   - `loud`'s own `[Debug(::Debug)]` overrides the package's (the default
+//     policy, `::Override`), so its assignment shows `(was ..)`;
+//   - `[NoInherit(Debug)]` and `[NoInherit]` keep `quiet` and `main` out.
+// Hand-worked: bump: next = 4 + 1 = 5; loud: r = 1, then r = 2 (was 1);
+// twice: w = 3 * 2 = 6; plain: p = 7, then p = 8 (no `was` at ::Medium).
+[Debug(::Medium)]
+pub pkg Demo.InheritDebug;
+
+struct Counter {
+    pub n: i64;
+    fn bump() -> i64 { var next = self.n + 1; return next; }
+}
+
+[NoInherit(Debug)]
+fn quiet() -> i64 { var q = 1; return q; }
+
+[Debug(::Debug)]
+fn loud() -> i64 { var r = 1; r = r + 1; return r; }
+
+ext i64 {
+    fn twice() -> i64 { var w = self * 2; return w; }
+}
+
+fn plain() -> i64 { var p = 7; p = 8; return p; }
+
+[NoInherit]
+fn main() {
+    print(f"{Counter { n: 4 }.bump()} {quiet()} {loud()} {3.twice()} {plain()}");
+}

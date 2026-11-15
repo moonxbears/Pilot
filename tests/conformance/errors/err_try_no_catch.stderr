@@ -1,0 +1,2 @@
+error[SYN001]: `try` needs a `catch` clause
+err_try_no_catch.pilot:9:5

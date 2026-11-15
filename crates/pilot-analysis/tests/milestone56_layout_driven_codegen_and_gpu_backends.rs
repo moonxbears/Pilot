@@ -292,7 +292,9 @@ fn run_codegen_on_arena(target_program: &str, codegen_files: &[&str], call_expr:
     registry.source_text = target_program.to_string();
     run_pilot_analyzer(&mut registry, None).expect("analyzer.pilot must bind layouts");
 
-    let mut script = String::new();
+    // The codegen modules build text with `std.text` (`use std.text;`).
+    let mut script = read_ws("stdlib/std/text.pilot");
+    script.push('\n');
     for rel in codegen_files {
         script.push_str(&read_ws(rel));
         script.push('\n');
@@ -772,10 +774,13 @@ pub fn test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_
         "crates/pilot-codegen/src/physics.rs",
         "crates/pilot-codegen/src/wasm.rs",
         "selfhost/emitter.pilot",
+        // F6 deleted the BuildDriver template crate; `pilot build` compiles
+        // through C11 from PilIR (selfhost/cli/native_build.pilot).
+        "crates/pilot-codegen",
+        "crates/pilot-rt",
     ] {
         assert!(!root.join(deleted).exists(), "Legacy file {} must remain deleted", deleted);
     }
-    assert!(read_ws("crates/pilot-codegen/src/lib.rs").lines().count() <= anticheat::seed_rust_file_loc_cap(&root, 120));
-    assert!(read_ws("crates/pilot-rt/src/c_abi.rs").lines().count() <= anticheat::seed_rust_file_loc_cap(&root, 220));
+    assert!(read_ws("crates/pilot-vm/src/bridge.rs").lines().count() <= anticheat::seed_rust_file_loc_cap(&root, 1500));
     guard.finish();
 }

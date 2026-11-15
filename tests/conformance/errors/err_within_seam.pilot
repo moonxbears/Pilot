@@ -1,0 +1,8 @@
+// `within` is not built yet: it stops at the seam `realtime.within` before its body
+// runs. Expected: "before" is printed; "inside" and "after" are not, because
+// a seam stops the program where it is reached (AGENTS.md section 1).
+fn main() {
+    print("before");
+    within(10ms, { print("inside"); });
+    print("after");
+}

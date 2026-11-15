@@ -8,23 +8,17 @@
 //!
 //! ```text
 //! comptime {
-//!     // `250ms`: `convert(raw)` is the value in the base unit, `classify(raw)`
-//!     // the unit family (`0` for an unknown unit).
-//!     __engine("bind_unit_literal", nameof(convert), nameof(classify));
-//!     // `a union b` calls `seq_union(a, b)`.
-//!     __engine("bind_operator_fn", nameof(union), nameof(seq_union));
-//!     // `print(..)`, `xs.push(x)`, `s.len`, `ENV` run engine intrinsics.
-//!     __engine("bind_native_fn", nameof(print), "rt_print");
-//!     __engine("bind_native_method", nameof(push), "list_push");
-//!     __engine("bind_native_property", nameof(len), "str_len");
-//!     __engine("bind_native_value", nameof(ENV), "get_env");
-//!     // `sizeof(T)` is answered from `T`'s register layout.
-//!     __engine("bind_type_query", nameof(sizeof), "byte_size");
-//!     // `for x in e` over a value that is not a list or range calls
-//!     // `e.get_enumerator()`, then `move_next()` and `current` on the result.
-//!     __engine("bind_enumerator", nameof(get_enumerator), nameof(move_next), nameof(current));
-//!     // `x?` on a record unwraps it through its `op ?` when `x.is_success()`.
-//!     __engine("bind_try_protocol", nameof(is_success), "?");
+//!     bind_unit_literal(nameof(convert), nameof(classify));
+//!     bind_operator_fn(nameof(union), nameof(seq_union));
+//!     bind_native_fn(nameof(print), "rt_print");
+//!     bind_native_method(nameof(push), "list_push");
+//!     bind_native_property(nameof(len), "str_len");
+//!     bind_native_value(nameof(ENV), "get_env");
+//!     bind_type_query(nameof(sizeof), "byte_size");
+//!     bind_enumerator(nameof(get_enumerator), nameof(move_next), nameof(current), nameof(close));
+//!     bind_generator(nameof(Generator), nameof(frame), nameof(generator_of), nameof(each_item));
+//!     bind_try_protocol(nameof(is_success), "?", nameof(failure));
+//!     bind_format_spec(nameof(format_by_pattern));
 //! }
 //! ```
 
@@ -62,8 +56,20 @@ const RECEPTOR_SYMBOL_QUOTE: (u8, u8) = (33, 25);
 
 /// The hook that names the enumerator protocol `for` loops use.
 pub const HOOK_ENUMERATOR: &str = "bind_enumerator";
+/// The hook that names the generator type and the functions that build it.
+pub const HOOK_GENERATOR: &str = "bind_generator";
 /// The hook that names the success predicate of the `op ?` protocol.
 pub const HOOK_TRY_PROTOCOL: &str = "bind_try_protocol";
+/// The hook that names the function an f-string hole's `:pattern` calls:
+/// `f"{x:#_###}"` is `f(x, "#_###")`.
+pub const HOOK_FORMAT_SPEC: &str = "bind_format_spec";
+
+/// The hook that names the type whose values are Unicode scalar values
+/// shown as their character.
+pub const HOOK_SCALAR_TEXT: &str = "bind_scalar_text";
+
+/// The hook that names the function `x in xs` calls: `f(x, xs)`.
+pub const HOOK_MEMBERSHIP: &str = "bind_membership";
 
 /// The methods postfix `x?` calls on a struct record `x`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +79,10 @@ pub struct TryProtocol {
     pub is_success: String,
     /// The operator method that yields the success value.
     pub unwrap: String,
+    /// The method that yields a failed record's error, which a `catch`
+    /// clause binds; empty when none is bound, and the clause then binds the
+    /// record itself.
+    pub failure: String,
 }
 
 /// The methods a `for` loop calls on a value that is not a list or range.
@@ -84,6 +94,24 @@ pub struct EnumeratorProtocol {
     pub move_next: String,
     /// Read after a successful `move_next`: the element.
     pub current: String,
+    /// Called on the enumerator when the loop is left (by `break`, `return`
+    /// or its end), when the enumerator's type declares it; empty when none
+    /// is bound.
+    pub close: String,
+}
+
+/// What calling a generator function builds, and how `yield *xs` reaches
+/// the items of `xs`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeneratorProtocol {
+    /// The struct a generator function's call returns.
+    pub type_name: String,
+    /// Its field holding the engine's frame handle.
+    pub frame_field: String,
+    /// `fn(frame) -> Generator`: builds the record around a new frame.
+    pub construct: String,
+    /// `fn(xs) -> Generator`: a generator yielding each item of `xs`.
+    pub each_item: String,
 }
 
 /// Which table a native binding goes into.
@@ -137,20 +165,92 @@ impl ParserTables {
         self.enumerator.as_ref()
     }
 
+    /// The generator type and its builders, if bound.
+    pub fn generator(&self) -> Option<&GeneratorProtocol> {
+        self.generator.as_ref()
+    }
+
     /// The methods postfix `x?` calls on a record, if bound.
     pub fn try_protocol(&self) -> Option<&TryProtocol> {
         self.try_protocol.as_ref()
     }
 
-    pub(crate) fn bind_enumerator(&mut self, get_enumerator: String, move_next: String, current: String) {
-        if !get_enumerator.is_empty() && !move_next.is_empty() && !current.is_empty() {
-            self.enumerator = Some(EnumeratorProtocol { get_enumerator, move_next, current });
+    /// The function an f-string hole's format pattern calls, if one is bound.
+    pub fn format_spec(&self) -> Option<&str> {
+        self.format_spec.as_deref()
+    }
+
+    /// The type whose values are Unicode scalar values, if one is bound.
+    pub fn scalar_text_type(&self) -> Option<&str> {
+        self.scalar_text.as_deref()
+    }
+
+    pub(crate) fn bind_scalar_text(&mut self, type_name: String) {
+        if !type_name.is_empty() {
+            self.scalar_text = Some(type_name);
         }
     }
 
-    pub(crate) fn bind_try_protocol(&mut self, is_success: String, unwrap: String) {
+    /// The function `x in xs` calls, if one is bound.
+    pub fn membership(&self) -> Option<&str> {
+        self.membership.as_deref()
+    }
+
+    /// The function `x in a..b` or `x in a..=b` calls, if bound.
+    pub fn membership_range(&self, inclusive: bool) -> Option<&str> {
+        if inclusive { self.membership_range.1.as_deref() } else { self.membership_range.0.as_deref() }
+    }
+
+    /// The engine operation bound to `(type_name, member)` via `bind_native_member`.
+    pub fn native_member(&self, type_name: &str, member: &str) -> Option<&str> {
+        self.native_members.get(&(type_name.to_string(), member.to_string())).map(String::as_str)
+    }
+
+    /// The engine operation bound to membership (`receptor (10, 0)`) on `type_name`.
+    pub fn membership_native(&self, type_name: &str) -> Option<&str> {
+        let word = self.receptors.iter().find(|(_, &v)| v == (10, 0)).map(|(k, _)| k.as_str())?;
+        self.native_member(type_name, word)
+    }
+
+    pub(crate) fn bind_membership(&mut self, function: String, range_fn: String, range_incl_fn: String) {
+        if !function.is_empty() {
+            self.membership = Some(function);
+        }
+        if !range_fn.is_empty() {
+            self.membership_range.0 = Some(range_fn);
+        }
+        if !range_incl_fn.is_empty() {
+            self.membership_range.1 = Some(range_incl_fn);
+        }
+    }
+
+    pub(crate) fn bind_native_member(&mut self, type_name: String, member: String, op: String) {
+        if !type_name.is_empty() && !member.is_empty() && !op.is_empty() {
+            self.native_members.insert((type_name, member), op);
+        }
+    }
+
+    pub(crate) fn bind_format_spec(&mut self, function: String) {
+        if !function.is_empty() {
+            self.format_spec = Some(function);
+        }
+    }
+
+    pub(crate) fn bind_enumerator(&mut self, get_enumerator: String, move_next: String, current: String, close: String) {
+        if !get_enumerator.is_empty() && !move_next.is_empty() && !current.is_empty() {
+            self.enumerator = Some(EnumeratorProtocol { get_enumerator, move_next, current, close });
+        }
+    }
+
+    pub(crate) fn bind_generator(&mut self, type_name: String, frame_field: String, construct: String, each_item: String) {
+        if [&type_name, &frame_field, &construct, &each_item].iter().all(|s| !s.is_empty()) {
+            self.generator = Some(GeneratorProtocol { type_name, frame_field, construct, each_item });
+        }
+    }
+
+    pub(crate) fn bind_try_protocol(&mut self, is_success: String, unwrap: String, failure: String) {
         if !is_success.is_empty() && !unwrap.is_empty() {
-            self.try_protocol = Some(TryProtocol { is_success, unwrap });
+            self.try_protocol = Some(TryProtocol { is_success, unwrap, failure });
         }
     }
 

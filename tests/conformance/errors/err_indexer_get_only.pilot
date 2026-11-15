@@ -1,0 +1,12 @@
+// DECL004: an indexer with a `get` clause (or `=> expr`) and no `set` clause is read-only.
+struct ReadOnly {
+    pub cells: List<i64>;
+    pub self[i: i64] -> i64 {
+        get => self.cells[i];
+    }
+}
+
+fn main() {
+    var r = ReadOnly { cells: [1, 2] };
+    r[0] = 9;
+}

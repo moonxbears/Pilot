@@ -5,6 +5,8 @@
 // multi-byte big-endian binary wire framing & decoding in pure Pilot.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct PostgresWirePacket : IValue {
     pub msg_tag_byte: i64;
@@ -46,13 +48,13 @@ pub pure fn pg_hex_u32_be(v: i64) -> str {
 
 pub pure fn pg_str_to_hex(s: str) -> str {
     let n = s.len();
-    var out = "";
+    var out: List<str> = [];
     var i = 0;
     while i < n {
-        out = out + pg_hex_u8(s.byte_at(i));
+        out.push(pg_hex_u8(s.byte_at(i)));
         i = i + 1;
     }
-    return out;
+    return join_text(out, "");
 }
 
 pub pure fn pg_unhex_nib(b: i64) -> i64 {
@@ -96,14 +98,14 @@ pub pure fn pg_ascii_char(b: i64) -> str {
 }
 
 pub pure fn pg_decode_bytes_to_str(hex_s: str, start_byte: i64, byte_len: i64) -> str {
-    var out = "";
+    var out: List<str> = [];
     var i = 0;
     while i < byte_len {
         let b = pg_read_u8(hex_s, start_byte + i);
-        out = out + pg_ascii_char(b);
+        out.push(pg_ascii_char(b));
         i = i + 1;
     }
-    return out;
+    return join_text(out, "");
 }
 
 pub fn pg_encode_startup_hex(user: str, database: str) -> str {
@@ -185,7 +187,7 @@ pub fn pg_decode_data_row_pipe(frame_hex: str) -> str {
     }
     let ncols = pg_read_u16_be(frame_hex, 5);
     var pos = 7;
-    var out = "";
+    var out: List<str> = [];
     var c_idx = 0;
     while c_idx < ncols {
         let clen = pg_read_u32_be(frame_hex, pos);
@@ -193,10 +195,10 @@ pub fn pg_decode_data_row_pipe(frame_hex: str) -> str {
         let cval = pg_decode_bytes_to_str(frame_hex, pos, clen);
         pos = pos + clen;
         if c_idx > 0 {
-            out = out + "|";
+            out.push("|");
         }
-        out = out + cval;
+        out.push(cval);
         c_idx = c_idx + 1;
     }
-    return out;
+    return join_text(out, "");
 }

@@ -1,0 +1,5 @@
+vault: total=1111 peer_shared=100 peek=20 rank=11 ext_badge=12
+leaf: compute=129 ext_prot=5 local_vis=6
+pairs: init=0 a=1 b=99 custom=77 tail=8
+struct_pairs: a=10 b=20 c=30
+splat_flat: len=6 sum3=60 last=99

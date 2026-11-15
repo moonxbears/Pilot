@@ -60,9 +60,25 @@ pub struct BuiltType {
     pub own_methods: List<BundleMethodDef>;
     /// The type's own field members, by name -> `found` index.
     pub field_decls: Map<str, i64>;
+    /// The types it splices, in order.
+    pub spliced: List<str>;
+    /// `Bundle.method` -> `found` index: every method of every splice, the
+    /// ones `without` hides and `with .. as` renames included, for static
+    /// delegation `Bundle.method(var ref self, ..)`.
+    pub delegates: Map<str, i64>;
+    /// `[bundle name, splice node]` per splice written in a `partial`
+    /// declaration, where a finding about that splice is reported.
+    pub partial_splices: List<List<any>>;
+    /// `Bundle.member` -> the name a splice's `with { member as name }`
+    /// gives that member in this type, for the splices it writes and the
+    /// ones those splice in turn; `alias_keys` lists the keys.
+    pub aliases: Map<str, str>;
+    pub alias_keys: List<str>;
 }
 
 fn is_method_kind(k: i64) -> bool => k == nk_fn() || k == nk_operator() || k == nk_indexer();
+
+fn member_name(s: Snap, m: i64) -> str => if kind(s, m) == nk_indexer() { "[]" } else { node_name(s, m) };
 
 fn is_field(s: Snap, m: i64) -> bool {
     let k = kind(s, m);
@@ -162,7 +178,10 @@ fn directive_for(s: Snap, u: i64, bundle: str) -> BundleSpliceDirective {
         let alias: str = r[2];
         if sub == splice_coalesce() { d.coalesce_fields.push(member); }
         if sub == splice_without() { d.without_items.push(member); }
-        if sub == splice_with() && alias.len() > 0 { d.with_aliases[member] = alias; }
+        if sub == splice_with() && alias.len() > 0 {
+            d.with_aliases[member] = alias;
+            d.with_names.push(member);
+        }
     }
     return d;
 }
@@ -172,26 +191,63 @@ fn listed(items: List<str>, name: str) -> bool {
     return false;
 }
 
-/// Bytes a value of type `t` takes: its `[Bits]` width, or its layout plan's
-/// size; 0 when not known (a generic parameter, an interface, an enum).
-[StandIn("check.field_size", "the byte size of every field type", "fields of a generic parameter, interface or enum type count 0 bytes", "F5")]
-fn byte_size(p: Program, t: i64, depth: i64) -> usize {
-    if !ty_is_named(p.tt, t) { return 0; }
+/// The bytes a value of a type takes and the byte boundary it is placed on.
+pub struct TypeExtent : IValue {
+    pub size: usize;
+    pub align: usize;
+}
+
+/// The extent of type `t`, or `none` when the checker does not know it (a
+/// generic parameter, an interface, an enum, or a struct with such a field).
+/// A `[Bits(width, ..)]` type takes `ceil(width / 8)` bytes and is aligned to
+/// that size rounded up to a power of two (the natural alignment C gives a
+/// scalar on the 64-bit targets: a 1-bit `bool` takes 1 byte, a 128-bit
+/// integer 16). A struct takes its layout plan's size and alignment.
+pub fn type_extent(p: Program, t: i64, depth: i64) -> TypeExtent? {
+    if !ty_is_named(p.tt, t) { return none; }
     let d = ty_decl(p.tt, t);
     let name = node_name(p.s, d);
     for decl in nl_get(p.type_decls, name) {
         if some args = prog_attr_nodes(p, decl, "Bits") {
             if args.len() > 0 {
-                if some bits = prog_const(p, args[0]) { return (bits / 8) as usize; }
+                if some bits = prog_const(p, args[0]) {
+                    let size = ((bits + 7) / 8) as usize;
+                    var align: usize = 1;
+                    while align < size { align = align * 2; }
+                    return TypeExtent { size: size, align: align };
+                }
             }
         }
     }
-    if kind(p.s, d) != nk_struct() || depth > 8 { return 0; }
-    return build_type(p, name, depth + 1).plan.total_size;
+    if kind(p.s, d) != nk_struct() || depth > 8 { return none; }
+    let bt = build_type(p, name, depth + 1);
+    for f in bt.own_fields {
+        if f.byte_align == 0 { return none; }
+    }
+    return TypeExtent { size: bt.plan.total_size, align: bt.plan.alignment };
+}
+
+/// Bytes a value of type `t` takes as a field; 0 when not known.
+[StandIn("check.field_size", "the byte size of every field type", "fields of a generic parameter, interface or enum type count 0 bytes", "F5")]
+fn byte_size(p: Program, t: i64, depth: i64) -> usize {
+    guard some e = type_extent(p, t, depth) else { return 0; }
+    return e.size;
+}
+
+/// The byte boundary a field of type `t` is placed on; 0 when not known.
+fn byte_align(p: Program, t: i64, depth: i64) -> usize {
+    guard some e = type_extent(p, t, depth) else { return 0; }
+    return e.align;
 }
 
 /// The lattice bits of type `t` (0 when it is not derived).
 pub fn lattice_of(p: Program, t: i64) -> i64 {
+    if ty_is_union(p.tt, t) {
+        // A union holds any one of its members: the bits of all of them.
+        var bits = 0;
+        for m in ty_args(p.tt, t) { bits = bits | lattice_of(p, m); }
+        return bits;
+    }
     if !ty_is_named(p.tt, t) { return 0; }
     return build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).lattice;
 }
@@ -254,6 +310,11 @@ fn empty_built(p: Program, name: str) -> BuiltType {
         own_fields: [],
         own_methods: [],
         field_decls: Map<str, i64>(),
+        spliced: [],
+        delegates: Map<str, i64>(),
+        partial_splices: [],
+        aliases: Map<str, str>(),
+        alias_keys: [],
     };
 }
 
@@ -272,6 +333,8 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
     var catalog: Map<str, BundleDef> = [:];
     var has_dtor = false;
     var splices: List<i64> = [];
+    // Whether each splice is written in a `partial` declaration.
+    var splice_in_partial: List<bool> = [];
 
     // Tier 1: the type's own members.
     for d in nl_get(p.type_decls, name) {
@@ -279,8 +342,12 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
             let k = kind(s, m);
             let member = Member { decl: m, names: bt.tparams, values: args };
             if k == nk_dtor() { has_dtor = true; }
+            if k == nk_scope() {
+                // Parsed, but nothing runs its clauses: stop, not skip.
+                let _ = seam("lifecycle.scope_self", f"`{name}` declares a `scope` block, whose enter and exit clauses are not run yet: which block enters a value of the type is not decided");
+            }
             if is_method_kind(k) {
-                let mname = node_name(s, m);
+                let mname = member_name(s, m);
                 if kind(s, d) == nk_interface() && fn_body(s, m) < 0 {
                     if !bt.requires.has(mname) {
                         bt.requires.set(mname, add_found(bt, member));
@@ -294,36 +361,65 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
                 }
             } else if is_field(s, m) {
                 let fname = node_name(s, m);
-                let ft = prog_annot_type(p, field_type_node(s, m));
-                let fdef = BundleFieldDef {
-                    name: fname,
-                    type_name: node_text(s, field_type_node(s, m)),
-                    layout_id: 0,
-                    byte_size: byte_size(p, ft, depth),
-                    lattice_bits: field_lattice(p, m, ft) as u8,
-                    is_mutable: kind(s, m) == nk_var(),
-                };
-                primary.push(fdef);
-                bt.own_fields.push(fdef);
-                bt.field_decls.set(fname, add_found(bt, member));
+                if is_static_decl(s, m) {
+                    let fidx = add_found(bt, member);
+                    bt.field_decls.set(fname, fidx);
+                    bt.fields.set(fname, fidx);
+                } else {
+                    let ft = prog_annot_type(p, field_type_node(s, m));
+                    let fdef = BundleFieldDef {
+                        name: fname,
+                        type_name: node_text(s, field_type_node(s, m)),
+                        layout_id: 0,
+                        byte_size: byte_size(p, ft, depth),
+                        byte_align: byte_align(p, ft, depth),
+                        lattice_bits: field_lattice(p, m, ft) as u8,
+                        is_mutable: kind(s, m) == nk_var(),
+                    };
+                    primary.push(fdef);
+                    bt.own_fields.push(fdef);
+                    bt.field_decls.set(fname, add_found(bt, member));
+                }
             } else if k == nk_expr_stmt() {
                 let u = lhs(s, m);
-                if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 { splices.push(u); }
+                if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 {
+                    splices.push(u);
+                    splice_in_partial.push(is_partial_decl(s, d));
+                }
             }
         }
     }
 
     // Tier 2: members of the spliced bundles and facets.
-    for u in splices {
+    var si = 0;
+    while si < splices.len() {
+        let u = splices[si];
+        let in_partial = splice_in_partial[si];
+        si = si + 1;
         let st = prog_annot_type(p, lhs(s, u));
         if !ty_is_named(p.tt, st) { bt.complete = false; continue; }
         let bname = node_name(s, ty_decl(p.tt, st));
         let sub = build_type(p, bname, depth + 1);
         if !sub.complete { bt.complete = false; }
-        let dir = directive_for(s, u, bname);
+        var dir = directive_for(s, u, bname);
+        dir.from_partial = in_partial;
+        if in_partial { bt.partial_splices.push([bname, u]); }
+        bt.spliced.push(bname);
+        for old_name in dir.with_names { note_alias(bt, bname + "." + old_name, dir.with_aliases[old_name]); }
+        for k in sub.alias_keys {
+            let inner = sub.aliases.get(k);
+            note_alias(bt, k, if dir.with_aliases.has(inner) { dir.with_aliases[inner] } else { inner });
+        }
         for mname in sub.names {
             if some m = winner(sub, mname) {
+                let key = bname + "." + mname;
+                if !bt.delegates.has(key) { bt.delegates.set(key, add_found(bt, compose(p, sub, m, st))); }
                 let exposed = if dir.with_aliases.has(mname) { dir.with_aliases[mname] } else { mname };
+                if exposed != mname {
+                    // Delegation names the member by its own name, not its alias.
+                    var mt = bt.table;
+                    register_method(var mt, entry_for(p, mname, MemberTier::Tier2SplicedBundleFacet, bname, m.decl), true);
+                }
                 register(p, bt, exposed, MemberTier::Tier2SplicedBundleFacet, bname, compose(p, sub, m, st),
                     listed(dir.without_items, mname));
             }
@@ -379,7 +475,7 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
     for d in nl_get(p.ext_decls, name) {
         for m in type_members(s, d) {
             if is_method_kind(kind(s, m)) {
-                register(p, bt, node_name(s, m), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
+                register(p, bt, member_name(s, m), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
                     Member { decl: m, names: bt.tparams, values: args }, false);
             }
         }
@@ -428,6 +524,58 @@ pub fn prog_member(p: Program, t: i64, member: str) -> Member? {
     return none;
 }
 
+fn note_alias(bt: BuiltType, key: str, name: str) {
+    if !bt.aliases.has(key) { bt.alias_keys.push(key); }
+    bt.aliases.set(key, name);
+}
+
+/// The name member `member` of the splice `bundle` has in type `t`: the
+/// alias `t` gives it (`*Bundle with { member as alias }`), else `member`.
+pub fn prog_spliced_name(p: Program, t: i64, bundle: str, member: str) -> str {
+    if !ty_is_named(p.tt, t) { return member; }
+    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
+    let key = bundle + "." + member;
+    return if bt.aliases.has(key) { bt.aliases.get(key) } else { member };
+}
+
+/// The method declaration that `type_name.method_name` overrides from a spliced
+/// bundle/facet or a base interface, or -1 if none exists.
+pub fn prog_overridden_member(p: Program, type_name: str, method_name: str) -> i64 {
+    let s = p.s;
+    let bt = build_type(p, type_name, 0);
+    for bname in bt.spliced {
+        let sub = build_type(p, bname, 0);
+        if some m = winner(sub, method_name) { return m.decl; }
+    }
+    for b in nl_get(p.bases, type_name) {
+        let it = prog_annot_type(p, b);
+        if !ty_is_named(p.tt, it) { continue; }
+        let iname = node_name(s, ty_decl(p.tt, it));
+        let sub = build_type(p, iname, 0);
+        if some m = winner(sub, method_name) { return m.decl; }
+    }
+    return -1;
+}
+
+/// Whether type `t` splices the type named `bundle`.
+pub fn prog_splices(p: Program, t: i64, bundle: str) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    return listed(build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).spliced, bundle);
+}
+
+/// The method `Bundle.method(receiver, ..)` delegates to when the receiver's
+/// type `t` splices `bundle`: that splice's own `method`, even when `t` hides
+/// it with `without` or renames it with `with .. as`. None when `t` does not
+/// splice `bundle` or the splice has no such method.
+pub fn prog_delegate(p: Program, t: i64, bundle: str, method: str) -> Member? {
+    if !ty_is_named(p.tt, t) { return none; }
+    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
+    guard some _e = resolve_static_delegation(bt.table, bundle, method) else { return none; };
+    let key = bundle + "." + method;
+    if !bt.delegates.has(key) { return none; }
+    return instantiate(p, bt, bt.found[bt.delegates.get(key)], t);
+}
+
 /// Whether type `name` has `member` itself: a field or property it exposes,
 /// or a method its table resolves (its own, a splice's, an interface
 /// default or an extension). None while its table is incomplete.
@@ -436,6 +584,22 @@ pub fn type_provides(p: Program, name: str, member: str) -> bool? {
     if !bt.complete { return none; }
     if bt.fields.has(member) { return true; }
     if some _m = winner(bt, member) { return true; }
+    return false;
+}
+
+/// Whether `t` splices a bundle that declares `name`, and `t` itself hides
+/// or renames `name` (`without { name }` or `with { name as ... }`) without
+/// providing a replacement of that name.
+pub fn prog_has_hidden_splice_member(p: Program, t: i64, name: str) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
+    if bt.spliced.len() == 0 { return false; }
+    if some _m = prog_member(p, t, name) { return false; }
+    for bundle in bt.spliced {
+        if some has = type_provides(p, bundle, name) {
+            if has { return true; }
+        }
+    }
     return false;
 }
 
@@ -463,13 +627,24 @@ fn finding_text(msg: str) -> str {
     return if colon > 0 { msg.slice(colon + 2, msg.len()) } else { msg };
 }
 
+/// Where a layout finding is reported: the `partial` splice it quotes
+/// (`'Bundle'`), else the type's declaration `decl`.
+fn finding_site(bt: BuiltType, msg: str, decl: i64) -> i64 {
+    for row in bt.partial_splices {
+        let bname: str = row[0];
+        if msg.find("'" + bname + "'", 0) >= 0 { return row[1]; }
+    }
+    return decl;
+}
+
 /// Reports the method-table and layout findings of every type declared in
 /// a user file, on its first declaration there.
 pub fn check_type_tables(p: Program, sink: DiagSink) {
     let s = p.s;
     var done = Map<str, i64>();
     var i = 0;
-    while i < s.count {
+    i = s.user_lo;
+    while i < s.user_hi {
         let k = kind(s, i);
         if (k == nk_struct() || k == nk_interface()) && in_user_file(s, i) {
             let name = node_name(s, i);
@@ -477,7 +652,7 @@ pub fn check_type_tables(p: Program, sink: DiagSink) {
                 done.set(name, i);
                 let bt = build_type(p, name, 0);
                 for msg in bt.table.diagnostics { sink_error(sink, i, finding_code(msg), finding_text(msg)); }
-                for msg in bt.plan.diagnostics { sink_error(sink, i, finding_code(msg), finding_text(msg)); }
+                for msg in bt.plan.diagnostics { sink_error(sink, finding_site(bt, msg, i), finding_code(msg), finding_text(msg)); }
             }
         }
         i = i + 1;

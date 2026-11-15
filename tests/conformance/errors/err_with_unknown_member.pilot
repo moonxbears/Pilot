@@ -1,0 +1,14 @@
+// COMP009: `with { speek as say }` renames a member bundle `Talk` does not
+// have (it has `speak`); the misspelling used to be ignored, leaving
+// `speak` spliced under its own name.
+struct Talk {
+    pub fn speak() -> str => "hi";
+}
+
+struct Bot {
+    *Talk with { speek as say };
+}
+
+fn main() {
+    print(Bot {}.speak());
+}

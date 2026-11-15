@@ -1,0 +1,15 @@
+// A struct's `scope self { enter: .. exit: .. }` block is parsed, but
+// nothing runs its clauses yet: the program stops at the seam
+// `lifecycle.scope_self` instead of running with the clauses ignored.
+struct Lock : IObject {
+    pub held: i64;
+    scope self {
+        enter: { print("enter"); }
+        exit: { print("exit"); }
+    }
+}
+
+fn main() {
+    let l = Lock { held: 1 };
+    print(l.held);
+}

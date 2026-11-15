@@ -1,0 +1,24 @@
+// A method returning `self.field` (or a value computed from it) where its
+// declared return type is `T?` gives `some(value)`: the receiver `self` has
+// the type whose body holds the method. Expected output by hand.
+struct Window {
+    pub text: str;
+    pub n: i64;
+
+    pub fn count(self) -> i64? {
+        return self.n;
+    }
+
+    pub fn piece(ref self, a: usize, b: usize) -> str? {
+        if a > b { return none; }
+        return self.text.slice(a, b);
+    }
+}
+
+fn main() {
+    let w = Window { text: "abcdef", n: 4 };
+    if some k = w.count() { print(k); }
+    if some p = w.piece(1, 3) { print(p); }
+    if some p = w.piece(3, 1) { print(p); } else { print("none"); }
+    print(w.piece(0, 6) ?? "-");
+}

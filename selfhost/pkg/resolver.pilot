@@ -68,7 +68,7 @@ pub fn get_default_candidates(dep_name: str) -> str {
     return "0.1.0, 0.2.0, 1.0.0, 1.1.0, 1.2.0";
 }
 
-pub fn resolve_package_dependencies(manifest_json: str, custom_candidates_map: str = "") -> i64 {
+pub fn resolve_package_dependencies(manifest_json: str, custom_candidates_map: str) -> i64 {
     let mf = parse_manifest_json(manifest_json);
     let res = __engine("map_new");
 

@@ -1,0 +1,13 @@
+// `adapter A -> B { .. }` is not built yet (docs/keyword_roadmap.md K6). It
+// used to be read as a struct named `A`; now the build stops at the seam
+// `keyword.unbuilt`, so nothing runs and nothing is printed.
+struct Celsius { pub c: i64; }
+struct Kelvin { pub k: i64; }
+
+adapter Celsius -> Kelvin {
+    pub k: i64;
+}
+
+fn main() {
+    print("ran");
+}

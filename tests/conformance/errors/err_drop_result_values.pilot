@@ -1,0 +1,19 @@
+// F7: a result holding a value that needs dropping must drop it. Lists, maps
+// and optionals do (drop_list_elements, drop_map_values, drop_optional);
+// until results, tuples and other generics do too, binding one stops at the
+// `own.collection_drop` seam.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn open_res(n: str) -> Res ! str => Res { name: n };
+
+fn main() {
+    print("before");
+    let r = open_res("r");
+    print(r.is_ok);
+}

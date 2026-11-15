@@ -5,6 +5,8 @@
 // ==============================================================================
 pub pkg pilot.fmt;
 
+use std.text;
+
 pub enum FmtStyle : u8 {
     ::Compact = 0,
     ::Readable = 1,
@@ -16,7 +18,7 @@ pub pure fn fmt_style_readable() -> u8 => 1;
 pub pure fn fmt_style_preserve() -> u8 => 2;
 
 pub fn str_replace(src: str, target: str, replacement: str) -> str {
-    var out = "";
+    var out: List<str> = [];
     var p: usize = 0;
     let n = src.len();
     let m = target.len();
@@ -24,13 +26,13 @@ pub fn str_replace(src: str, target: str, replacement: str) -> str {
     while p < n {
         let idx = src.find(target, p);
         if idx < 0 {
-            out = out + src.slice(p, n);
+            out.push(src.slice(p, n));
             break;
         }
-        out = out + src.slice(p, idx as usize) + replacement;
+        out.push(src.slice(p, idx as usize) + replacement);
         p = (idx as usize) + m;
     }
-    return out;
+    return join_text(out, "");
 }
 
 /// Rewrites `src` into `style`, swapping every compact/readable pairing

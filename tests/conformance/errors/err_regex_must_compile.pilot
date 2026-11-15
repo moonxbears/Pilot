@@ -1,0 +1,9 @@
+// must_compile stops the program on an invalid pattern, naming its error:
+// "(ab" is missing a ) (REGEX001 at offset 0, as Python's re reports).
+use std.text.regex;
+
+const BAD = comptime must_compile("(ab");
+
+fn main() {
+    print(BAD.is_match("ab"));
+}

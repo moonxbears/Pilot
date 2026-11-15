@@ -1,0 +1,11 @@
+// A conversion to a 128-bit integer stops at the seam `convert.wide_scalar`:
+// the engine's values are 64 bits wide, so it fails with SEAM001 instead of
+// returning a truncated value. Nothing after it runs.
+use Pilot.Core.Convert;
+
+fn main() {
+    print("start");
+    let v: i64 = 5;
+    print(v.to_i128() catch e => 0);
+    print("unreachable");
+}

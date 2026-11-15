@@ -1,0 +1,2 @@
+error[SYN001]: a default parameter value must be a literal for now (`= 4`, `= -1`, `= "x"`, `= true`)
+err_param_default_not_literal.pilot:3:23

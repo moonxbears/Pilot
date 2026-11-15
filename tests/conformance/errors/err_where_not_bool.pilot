@@ -1,0 +1,7 @@
+// TYPE001: a `where` clause keeps the elements its condition holds for;
+// the condition is a `bool`, not an integer.
+fn main() {
+    let xs: List<i64> = [1, 2];
+    // `x + 1` starts at line 6, column 30.
+    print(from x in xs where x + 1 select x);
+}

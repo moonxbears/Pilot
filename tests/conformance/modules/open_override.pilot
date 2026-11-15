@@ -1,0 +1,18 @@
+use lib.open_base;
+
+interface ILocalBase {
+    pub pure fn local_tag() -> i64 => 5;
+}
+
+struct Friendly : IOpenGreeter, ILocalBase {
+    *OpenBundle;
+
+    pub override pure fn greet() -> str => "friendly";
+    pub override pure fn tag() -> i64 => 42;
+    pub override pure fn local_tag() -> i64 => 99;
+}
+
+fn main() {
+    let f = Friendly {};
+    println(f"{f.greet()} {f.tag()} {f.local_tag()}");
+}

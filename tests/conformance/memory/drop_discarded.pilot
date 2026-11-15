@@ -1,0 +1,33 @@
+// F7: an owned value a statement makes and throws away is dropped as soon as
+// the statement ends: a call's result, a struct literal, an element taken
+// out of a list with `pop`. A method that hands back the receiver itself
+// (`push` returns the list) makes nothing new, so nothing is dropped.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+
+    pub fn renamed(suffix: str) -> Res => Res { name: self.name + suffix };
+}
+
+fn make(n: str) -> Res => Res { name: n };
+
+fn main() {
+    make("t");
+    print("after call");
+    Res { name: "lit" };
+    print("after literal");
+    var rs: List<Res> = [Res { name: "a" }, Res { name: "b" }];
+    rs.push(Res { name: "c" });
+    print(rs.len());
+    rs.pop();
+    print("after pop");
+    let keep = make("k");
+    keep.renamed("2");
+    print("after renamed");
+    print(keep.name);
+    print(rs.len());
+    print("end");
+}

@@ -21,8 +21,9 @@
 // expectation files hold the correct output, so each must still fail; one
 // that passes means its bug is fixed and its entry must be retired.
 //
-// Only the top-level `.pilot` files of a directory are programs: packages they
-// import live in subdirectories.
+// The programs of a directory are its top-level `.pilot` files and those of
+// its case folders (subfolders that hold `.stdout` files, one per area of the
+// language); packages the cases import live in subfolders without any.
 pub lvl(0) pkg Pilot.SelfHost.Cli.TestCmd;
 
 use Pilot.Core.File;
@@ -79,16 +80,49 @@ pub fn test_base_name(path: str) -> str {
     return path.slice(at, path.len());
 }
 
-/// The top-level `.pilot` files directly inside `dir`, sorted.
+/// `path` below `prefix` (which ends with `/`), or "" when it is not below it.
+fn test_below(path: str, prefix: str) -> str {
+    let at = path.find(prefix, 0);
+    if at < 0 { return ""; }
+    return path.slice(at + prefix.len(), path.len());
+}
+
+fn test_listed(names: List<str>, name: str) -> bool {
+    for n in names {
+        if n == name { return true; }
+    }
+    return false;
+}
+
+/// The programs of `dir`: its own top-level `.pilot` files, and those of
+/// each case folder directly inside it. A case folder is a subfolder that
+/// holds an expectation file (`.stdout`) of its own, such as
+/// `tests/conformance/errors/`; a folder of packages the cases import
+/// (`lib/`) holds none, and `known_bugs/` is run apart.
 pub fn test_programs_in(dir: str) -> List<str> {
     var out: List<str> = [];
     let prefix = if dir.ends_with("/") { dir } else { dir + "/" };
-    for f in test_lines(File.walk_files(dir)) {
+    let files = test_lines(File.walk_files(dir));
+    var case_dirs: List<str> = [];
+    for f in files {
+        if !f.ends_with(".stdout") { continue; }
+        let rest = test_below(f, prefix);
+        let slash = rest.find("/", 0);
+        if slash > 0 && rest.find("/", slash + 1) < 0 {
+            let sub = rest.slice(0, slash);
+            if sub != test_known_bugs_dir() && !test_listed(case_dirs, sub) { case_dirs.push(sub); }
+        }
+    }
+    for f in files {
         if !f.ends_with(".pilot") { continue; }
-        let at = f.find(prefix, 0);
-        if at < 0 { continue; }
-        let rest = f.slice(at + prefix.len(), f.len());
-        if rest.find("/", 0) < 0 { out.push(f); }
+        let rest = test_below(f, prefix);
+        if rest == "" { continue; }
+        let slash = rest.find("/", 0);
+        if slash < 0 {
+            out.push(f);
+        } else if rest.find("/", slash + 1) < 0 && test_listed(case_dirs, rest.slice(0, slash)) {
+            out.push(f);
+        }
     }
     return out;
 }
@@ -98,9 +132,9 @@ fn read_optional(path: str) -> str? {
     return none;
 }
 
-/// Starts the conformance case `program` in its own process, as
+/// The process that runs conformance case `program`:
 /// `pilot run <program> -- <args>` with its `.stdin` as input.
-pub fn test_start_case(program: str) -> proc.ProcessHandle {
+pub fn test_case_job(program: str) -> proc.ProcessJob {
     let stem = test_stem(program);
     var argv: List<str> = ["run", program, "--"];
     let arg_text = read_optional(stem + ".args");
@@ -109,7 +143,7 @@ pub fn test_start_case(program: str) -> proc.ProcessHandle {
     }
     let input = read_optional(stem + ".stdin") ?? "";
     let exe = proc.current_exe() ?? "pilot";
-    return proc.spawn(exe, argv, input);
+    return proc.job(exe, argv, input);
 }
 
 /// Every way the result `out` of conformance case `program` differs from
@@ -143,28 +177,16 @@ pub fn test_check_case(program: str, out: proc.ProcessOutput) -> TestResult {
 
 /// Runs the conformance case `program` in its own process and lists every
 /// way its result differs from its expectation files.
-pub fn test_run_case(program: str) -> TestResult => test_check_case(program, test_start_case(program).wait());
+pub fn test_run_case(program: str) -> TestResult => test_check_case(program, proc.spawn_job(test_case_job(program)).wait());
 
-/// Runs the conformance cases `programs`, as many at once as the machine has
-/// CPUs, and returns their results in the order of `programs`.
+/// Runs the conformance cases `programs` (`proc.run_all`) and returns their
+/// results in the order of `programs`.
 pub fn test_run_cases(programs: List<str>) -> List<TestResult> {
-    let window = if proc.cpu_count() > 1 { proc.cpu_count() } else { 1 };
-    var running: List<proc.ProcessHandle> = [];
-    var started = 0;
-    while started < programs.len() && started < window {
-        running.push(test_start_case(programs[started]));
-        started = started + 1;
-    }
+    var jobs: List<proc.ProcessJob> = [];
+    for program in programs { jobs.push(test_case_job(program)); }
+    let outs = proc.run_all(jobs);
     var results: List<TestResult> = [];
-    var i = 0;
-    while i < programs.len() {
-        results.push(test_check_case(programs[i], running[i].wait()));
-        if started < programs.len() {
-            running.push(test_start_case(programs[started]));
-            started = started + 1;
-        }
-        i = i + 1;
-    }
+    for i in 0 .. programs.len() { results.push(test_check_case(programs[i], outs[i])); }
     return results;
 }
 
@@ -251,6 +273,11 @@ pub fn test_known_bugs(dir: str, filter: str, var ref tally: TestTally) {
     for program in test_programs_in(dir) {
         if program.find(filter, 0) >= 0 { programs.push(program); }
     }
+    test_known_bug_programs(programs, tally);
+}
+
+/// Runs the known-bug programs `programs`; each must still fail.
+pub fn test_known_bug_programs(programs: List<str>, var ref tally: TestTally) {
     for r in test_run_cases(programs) {
         if r.problems.len == 0 {
             tally.bugs_fixed = tally.bugs_fixed + 1;
@@ -272,7 +299,12 @@ pub fn test_command(paths: List<str>, filter: str) -> i64 {
                 eprint(f"error: no such file `{root}`");
                 return 2;
             }
-            test_program(root, filter, tally);
+            // A program of a `known_bugs/` directory must still fail.
+            if root.find("/" + test_known_bugs_dir() + "/", 0) >= 0 {
+                test_known_bug_programs([root], tally);
+            } else {
+                test_program(root, filter, tally);
+            }
             continue;
         }
         let programs = test_programs_in(root);

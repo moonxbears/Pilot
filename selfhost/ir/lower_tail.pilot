@@ -1,0 +1,221 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_tail.pilot
+// `become f(args);` in PilIR: a tail call becomes a jump.
+// ==============================================================================
+// A `become` hands the caller's frame to the callee, so a chain of any
+// length runs in constant stack. PilIR has no tail-call instruction, and
+// JavaScript and Python have none to emit it to, so the call is removed
+// here, where every engine gets it:
+//
+//   1. `lower_become` lowers the call and ends the block with a `return`
+//      whose sub-opcode is `tail_return_mark()`.
+//   2. Once every function is lowered, `merge_tail_calls` copies into each
+//      function with such a return the blocks of every function its tail
+//      calls can reach (itself included, when a chain comes back to it) and
+//      replaces each marked call and return with a `jump` to the copied
+//      entry block, the call's arguments becoming that block's parameters.
+//
+// After the merge no marked return is left: the interpreter, the passes and
+// the emitters see ordinary blocks and jumps. A function's own blocks keep
+// their ids; the copies follow them.
+pub lvl(0) pkg Pilot.SelfHost.Ir.LowerTail;
+
+use selfhost.check.snapshot.*;
+use selfhost.ir.model.*;
+use selfhost.ir.verify.*;
+use selfhost.ir.lower.*;
+use selfhost.ir.lower_drop.*;
+
+/// The sub-opcode of the `return` that follows a `become` call.
+pub pure fn tail_return_mark() -> u16 => 1;
+
+/// Lowers `become f(args);` (a `ReturnStmt` with flags 1). The checker has
+/// refused it under a `defer` or an `ensures` (TAIL002) and with another
+/// return type (TAIL003).
+pub fn lower_become(lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    if lw.outs.len() > 0 || lw.gen_frame != ir_no_value() {
+        return seam("ir.lower_construct", "`become` in a function that hands parameters back, or in a generator, is not lowered to PilIR yet");
+    }
+    let _ = lower_hinted(lw, lhs(s, n), lw.ret_type);
+    plan_exit(lw, n);
+    let insts = lw.f.blocks[lw.cur].insts;
+    if insts.len == 0 || insts[insts.len - 1].opcode != op_call_direct() {
+        return seam("ir.lower_construct", "`become` is lowered to PilIR only when a direct call is the last thing the function does: this one calls through a value, or has a value to convert or release after the call");
+    }
+    emit_void(lw, op_return(), tail_return_mark(), [], n);
+    return ir_no_value();
+}
+
+/// A block that ends in a `become`: instructions `0 .. cut` stay, then
+/// `callee` takes over with `args`.
+struct TailSite : IObject {
+    pub cut: i64;
+    pub callee: i64;
+    pub args: List<u32>;
+    pub span: i64;
+}
+
+/// A function as lowering left it: how many blocks and values it had, and
+/// the site of each block (block id -> index into `sites`, or -1).
+struct TailShape : IObject {
+    pub blocks: i64;
+    pub values: i64;
+    pub sites: List<TailSite>;
+    pub site_at: List<i64>;
+}
+
+/// One function receiving the copies its tail calls reach.
+struct TailMerge : IObject {
+    pub m: IrModule;
+    pub shapes: List<TailShape>;
+    pub host: IrFunction;
+    /// The functions copied into `host`, with the block and value id each
+    /// copy starts at.
+    pub copied: List<i64>;
+    pub block_base: List<u32>;
+    pub value_base: List<u32>;
+}
+
+fn shape_of(f: IrFunction) -> TailShape {
+    let sh = TailShape { blocks: f.blocks.len, values: f.value_physics.len, sites: [], site_at: [] };
+    for b in f.blocks {
+        let n = b.insts.len;
+        var at = -1;
+        if n >= 2 && b.insts[n - 1].opcode == op_return() && b.insts[n - 1].subop == tail_return_mark() {
+            let call = b.insts[n - 2];
+            at = sh.sites.len();
+            sh.sites.push(TailSite { cut: n - 2, callee: call.subop, args: ir_args(f, call), span: f.spans[call.span_id] });
+        }
+        sh.site_at.push(at);
+    }
+    return sh;
+}
+
+fn push_inst(f: IrFunction, b: IrBlock, result: u32, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, span: i64) {
+    let offset = f.operand_pool.len;
+    for a in args { f.operand_pool.push(a); }
+    f.spans.push(span);
+    b.insts.push(ir_inst_new(result, op, sub, phy, offset, args.len, f.spans.len - 1));
+}
+
+/// The entry block of function `g`'s copy in the host, reserving the copy's
+/// blocks and values the first time `g` is asked for.
+fn copy_entry(mg: TailMerge, g: i64) -> u32 {
+    var i = 0;
+    while i < mg.copied.len() {
+        if mg.copied[i] == g { return mg.block_base[i]; }
+        i = i + 1;
+    }
+    let sh = mg.shapes[g];
+    let src = mg.m.functions[g];
+    let base: u32 = mg.host.blocks.len;
+    mg.copied.push(g);
+    mg.block_base.push(base);
+    mg.value_base.push(mg.host.value_physics.len);
+    var b = 0;
+    while b < sh.blocks {
+        let _ = ir_add_block(mg.host);
+        b = b + 1;
+    }
+    var v = 0;
+    while v < sh.values {
+        let _ = ir_new_value(mg.host, src.value_physics[v]);
+        v = v + 1;
+    }
+    return base;
+}
+
+/// `jump target, args..`, each argument moved by `value_base`.
+fn push_tail_jump(mg: TailMerge, to: IrBlock, site: TailSite, value_base: u32) {
+    var args: List<u32> = [copy_entry(mg, site.callee)];
+    for a in site.args { args.push(a + value_base); }
+    push_inst(mg.host, to, ir_no_value(), op_jump(), 0, ir_physics_unit(), args, site.span);
+}
+
+/// Fills the blocks reserved for copy `at` from the function it copies.
+fn fill_copy(mg: TailMerge, at: i64) {
+    let g = mg.copied[at];
+    let src = mg.m.functions[g];
+    let sh = mg.shapes[g];
+    let bb = mg.block_base[at];
+    let vb = mg.value_base[at];
+    var b = 0;
+    while b < sh.blocks {
+        let from = src.blocks[b];
+        let to = mg.host.blocks[bb + b];
+        for p in from.params { to.params.push(p + vb); }
+        let site = sh.site_at[b];
+        let n = if site >= 0 { sh.sites[site].cut } else { from.insts.len };
+        var i = 0;
+        while i < n {
+            let inst = from.insts[i];
+            let a = ir_args(src, inst);
+            var out: List<u32> = [];
+            for x in a { out.push(x); }
+            for pos in value_positions(src, inst) {
+                if a[pos] != ir_no_value() { out[pos] = a[pos] + vb; }
+            }
+            if inst.opcode == op_jump() {
+                out[0] = a[0] + bb;
+            } else if inst.opcode == op_cond_br() {
+                out[1] = a[1] + bb;
+                out[3 + a[2]] = a[3 + a[2]] + bb;
+            } else if inst.opcode == op_switch_table() {
+                var k = 1;
+                while k < a.len() {
+                    out[k] = a[k] + bb;
+                    k = k + 1;
+                }
+            }
+            let r = if inst.result == ir_no_value() { ir_no_value() } else { inst.result + vb };
+            push_inst(mg.host, to, r, inst.opcode, inst.subop, inst.physics, out, src.spans[inst.span_id]);
+            i = i + 1;
+        }
+        if site >= 0 { push_tail_jump(mg, to, sh.sites[site], vb); }
+        b = b + 1;
+    }
+}
+
+fn merge_into(m: IrModule, shapes: List<TailShape>, hi: i64) {
+    let mg = TailMerge { m: m, shapes: shapes, host: m.functions[hi], copied: [], block_base: [], value_base: [] };
+    let sh = shapes[hi];
+    var b = 0;
+    while b < sh.blocks {
+        let site = sh.site_at[b];
+        if site >= 0 {
+            let block = mg.host.blocks[b];
+            var kept: List<IrInst> = [];
+            var i = 0;
+            while i < sh.sites[site].cut {
+                kept.push(block.insts[i]);
+                i = i + 1;
+            }
+            block.insts = kept;
+            push_tail_jump(mg, block, sh.sites[site], 0);
+        }
+        b = b + 1;
+    }
+    var at = 0;
+    while at < mg.copied.len() {
+        fill_copy(mg, at);
+        at = at + 1;
+    }
+}
+
+/// Replaces every `become` in `m` with a jump (see the file header).
+pub fn merge_tail_calls(m: IrModule) {
+    var shapes: List<TailShape> = [];
+    var any = false;
+    for f in m.functions {
+        let sh = shape_of(f);
+        if sh.sites.len() > 0 { any = true; }
+        shapes.push(sh);
+    }
+    if !any { return; }
+    var hi = 0;
+    while hi < shapes.len() {
+        if shapes[hi].sites.len() > 0 { merge_into(m, shapes, hi); }
+        hi = hi + 1;
+    }
+}

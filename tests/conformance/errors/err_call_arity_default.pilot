@@ -1,0 +1,7 @@
+// CALL001: `add` needs `a` (no default) and may take `b`, so it takes 1 to 2
+// arguments; none are given. The call is at line 6, column 11.
+fn add(a: i64, b: i64 = 4) -> i64 => a + b;
+
+fn main() {
+    print(add());
+}

@@ -1,0 +1,2 @@
+error[SYN001]: `~self()` takes no parameters
+err_dtor_params.pilot:6:10

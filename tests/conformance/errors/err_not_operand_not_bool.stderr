@@ -1,0 +1,1 @@
+error[TYPE001]: the operand of `!` must be `bool`, found `i64`

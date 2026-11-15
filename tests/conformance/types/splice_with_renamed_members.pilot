@@ -1,0 +1,37 @@
+// A bundle's methods run on the host under the host's names: after
+// `*CountBundle with { count as hits, bump as inc }` they read and write
+// `hits`, and their own call of `.bump()` reaches `inc`. A host that renames
+// nothing keeps the bundle's names.
+//
+// Expected output, worked by hand:
+//   g.hits is 2; g.inc() is 2 + 1 = 3; g.current() is 2.
+//   g.add(5) makes hits 7; g.twice() is bump (7 + 1 = 8) + count (7) = 15.
+//   p.count is 10; p.add(1) makes it 11; p.bump() is 12; p.twice() is
+//   12 + 11 = 23.
+struct CountBundle {
+    pub count: i64;
+    pub fn bump() -> i64 => .count + 1;
+    pub fn current() -> i64 => .count;
+    pub fn add(n: i64) { .count = .count + n; }
+    pub fn twice() -> i64 => .bump() + self.count;
+}
+struct Gauge {
+    *CountBundle with { count as hits, bump as inc };
+    pub name: str;
+}
+struct Plain {
+    *CountBundle;
+}
+fn main() {
+    var g = Gauge { hits: 2, name: "g" };
+    print(g.hits);
+    print(g.inc());
+    print(g.current());
+    g.add(5);
+    print(g.hits);
+    print(g.twice());
+    var p = Plain { count: 10 };
+    p.add(1);
+    print(p.bump());
+    print(p.twice());
+}

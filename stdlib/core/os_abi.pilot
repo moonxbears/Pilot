@@ -1,0 +1,200 @@
+// =========================================================================
+// FILE: stdlib/core/os_abi.pilot
+// PORTABLE OS ABI CONSTANTS & C-ABI STRUCT LAYOUTS (PROP-002a §3)
+// =========================================================================
+// Defines the portable `PilotErr` error codes (`1..=51`), `arch_kind` IDs
+// (`0..=6`), multiplexed sub-code constants, and the 7 `[Layout(c_abi)]`
+// memory-mapped structs shared by the `[EngineOp]` owners and `bridge.rs`.
+// Field byte offsets and numeric codes are frozen through `airlock_abi.pilot`
+// and checked by `GATE021` + compile-time assertions in `bridge.rs`.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(100) pkg Pilot.Core.OsAbi;
+
+// -------------------------------------------------------------------------
+// 1. Portable `PilotErr` Codes (`1..=51`; returned as `-(code)` on failure)
+// -------------------------------------------------------------------------
+pub enum PilotErr : i64 {
+    Perm         = 1,
+    Acces        = 2,
+    Noent        = 3,
+    Exist        = 4,
+    Intr         = 5,
+    Io           = 6,
+    Again        = 7,
+    Inprogress   = 8,
+    Already      = 9,
+    Nomem        = 10,
+    Badf         = 11,
+    Inval        = 12,
+    Isdir        = 13,
+    Notdir       = 14,
+    Notempty     = 15,
+    Busy         = 16,
+    Exdev        = 17,
+    Nospc        = 18,
+    Rofs         = 19,
+    Dquot        = 20,
+    Mfile        = 21,
+    Nfile        = 22,
+    Nametoolong  = 23,
+    Loop         = 24,
+    Fbig         = 25,
+    Spipe        = 26,
+    Pipe         = 27,
+    Srch         = 28,
+    Child        = 29,
+    Timedout     = 30,
+    Connrefused  = 31,
+    Connreset    = 32,
+    Connaborted  = 33,
+    Notconn      = 34,
+    Isconn       = 35,
+    Addrinuse    = 36,
+    Addrnotavail = 37,
+    Netunreach   = 38,
+    Hostunreach  = 39,
+    Msgsize      = 40,
+    Afnosupport  = 41,
+    Notsup       = 42,
+    Nosys        = 43,
+    Range        = 44,
+    AiNoname     = 45,
+    AiAgain      = 46,
+    AiFail       = 47,
+    Deadlk       = 48,
+    Ilseq        = 49,
+    Canceled     = 50,
+    Other        = 51,
+}
+
+pub pure:
+    fn err_noent()  -> i64 => 3;
+    fn err_again()  -> i64 => 7;
+    fn err_badf()   -> i64 => 11;
+    fn err_inval()  -> i64 => 12;
+    fn err_exdev()  -> i64 => 17;
+    fn err_notsup() -> i64 => 42;
+    fn err_nosys()  -> i64 => 43;
+    fn err_range()  -> i64 => 44;
+    fn err_other()  -> i64 => 51;
+
+// -------------------------------------------------------------------------
+// 2. `arch_kind` Constants (`0..=6`)
+// -------------------------------------------------------------------------
+pub enum OsArchKind : u32 {
+    HostDefault   = 0,
+    X86_64SysV    = 1,
+    X86_64Win64   = 2,
+    AArch64Aapcs  = 3,
+    AArch64Darwin = 4,
+    Riscv64Lp64d  = 5,
+    Wasm32C       = 6,
+}
+
+// -------------------------------------------------------------------------
+// 3. Open / Poll / Stat / Sub-Code Constants
+// -------------------------------------------------------------------------
+pub pure:
+    fn fd_open_read()     -> i64 => 1;
+    fn fd_open_write()    -> i64 => 2;
+    fn fd_open_creat()    -> i64 => 4;
+    fn fd_open_trunc()    -> i64 => 8;
+    fn fd_open_append()   -> i64 => 16;
+    fn fd_open_excl()     -> i64 => 32;
+    fn fd_open_nonblock() -> i64 => 64;
+
+    fn poll_in()   -> u32 => 1;
+    fn poll_out()  -> u32 => 2;
+    fn poll_err()  -> u32 => 4;
+    fn poll_hup()  -> u32 => 8;
+    fn poll_nval() -> u32 => 16;
+
+    fn stat_kind_other()   -> u64 => 0;
+    fn stat_kind_file()    -> u64 => 1;
+    fn stat_kind_dir()     -> u64 => 2;
+    fn stat_kind_symlink() -> u64 => 3;
+    fn stat_kind_fifo()    -> u64 => 4;
+    fn stat_kind_sock()    -> u64 => 5;
+    fn stat_kind_dev()     -> u64 => 6;
+
+// -------------------------------------------------------------------------
+// 4. Frozen C-ABI Struct Layouts (`[Layout(c_abi)]`)
+// -------------------------------------------------------------------------
+
+/// Size 16, Align 8: `ptr (0)`, `len (8)`.
+[Layout(c_abi)]
+pub struct OsSlice : IValue {
+    pub ptr: u64;
+    pub len: u64;
+}
+
+/// Size 16, Align 8: `fd (0)`, `events (8)`, `revents (12)`.
+[Layout(c_abi)]
+pub struct OsPollFd : IValue {
+    pub fd:      i64;
+    pub events:  u32;
+    pub revents: u32;
+}
+
+/// Size 72, Align 8: `kind (0)` .. `nlink (64)`.
+[Layout(c_abi)]
+pub struct OsStat : IValue {
+    pub kind:     u64;
+    pub size:     u64;
+    pub mode:     u64;
+    pub mtime_ns: i64;
+    pub atime_ns: i64;
+    pub ctime_ns: i64;
+    pub dev:      u64;
+    pub ino:      u64;
+    pub nlink:    u64;
+}
+
+/// Size 96, Align 8: `prog_ptr (0)` .. `env_mode (88)`.
+[Layout(c_abi)]
+pub struct OsProcSpec : IValue {
+    pub prog_ptr:  u64;
+    pub prog_len:  u64;
+    pub argv_ptr:  u64;
+    pub argc:      u64;
+    pub envp_ptr:  u64;
+    pub envc:      u64;
+    pub cwd_ptr:   u64;
+    pub cwd_len:   u64;
+    pub stdin_fd:  i64;
+    pub stdout_fd: i64;
+    pub stderr_fd: i64;
+    pub env_mode:  u64;
+}
+
+/// Size 144, Align 8: `family (0)`, `port (4)`, `addr_len (6)`, `addr_bytes (8)`, `flowinfo (136)`, `scope_id (140)`.
+[Layout(c_abi), Align(8)]
+pub struct OsSockAddr : IValue {
+    pub family:     u32;
+    pub port:       u16;
+    pub addr_len:   u16;
+    pub addr_bytes: array<u8, 128>;
+    pub flowinfo:   u32;
+    pub scope_id:   u32;
+}
+
+/// Size 32, Align 8: `arch_kind (0)` .. `_reserved (24)`.
+[Layout(c_abi)]
+pub struct OsFfiAbiDesc : IValue {
+    pub arch_kind:           u32;
+    pub gpr_count:           u16;
+    pub vec_count:           u16;
+    pub stack_bytes:         u32;
+    pub variadic_fixed_args: u16;
+    pub flags:               u16;
+    pub sret_ptr:            u64;
+    pub _reserved:           u64;
+}
+
+/// Size 80, Align 16: `gpr (0)`, `vec (16)`.
+[Layout(c_abi), Align(16)]
+pub struct OsFfiRetRegs : IValue {
+    pub gpr: array<u64, 2>;
+    pub vec: array<array<u8, 16>, 4>;
+}

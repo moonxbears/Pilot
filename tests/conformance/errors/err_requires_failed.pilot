@@ -1,0 +1,9 @@
+// A `requires` clause that does not hold when the function is entered stops
+// the program (DBC006) before the body runs.
+fn safe_div(a: i64, b: i64) -> i64 requires(b != 0) => a / b;
+
+fn main() {
+    print(safe_div(6, 3));
+    print(safe_div(1, 0));
+    print("never printed");
+}

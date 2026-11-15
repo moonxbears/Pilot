@@ -1,0 +1,2 @@
+error[PAT001]: `case` without a pattern
+err_switch_case_list_empty.pilot:4:14

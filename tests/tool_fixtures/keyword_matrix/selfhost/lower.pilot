@@ -1,0 +1,12 @@
+// Lowering helpers of the fixture.
+orbit(body) => quote { loop { $body } };
+
+fn lower_drift(n: i64) -> i64 => n + 1;
+
+fn check_names(k: str) -> bool {
+    return k == nameof(orbit) || k == nameof(drift);
+}
+
+fn unit_literal_value(v: i64) -> i64 {
+    return v * 1000;
+}

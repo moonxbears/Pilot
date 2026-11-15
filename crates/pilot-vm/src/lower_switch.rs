@@ -8,7 +8,7 @@
 use crate::instruction::Opcode;
 use crate::{BytecodeCompiler, LoopCtx};
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 impl BytecodeCompiler {
     pub(crate) fn compile_match(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
@@ -32,6 +32,8 @@ impl BytecodeCompiler {
             break_jumps: Vec::new(),
             is_switch: true,
             defer_depth: self.defers.len(),
+            release: None,
+            result: None,
         });
         let mut end_jumps = Vec::new();
         for &arm in arms {
@@ -199,7 +201,7 @@ impl BytecodeCompiler {
     fn emit_test(&mut self, op: Opcode, r_a: u8, r_b: u8, fails: &mut Vec<usize>) {
         let r_c = self.alloc_reg();
         self.emit(op, r_c, r_a, r_b);
-        fails.push(self.emit_branch(Opcode::JumpIfFalse, r_c, 0));
+        fails.push(self.emit_branch_unless(r_c, r_c));
     }
 
     /// `Enum.Variant` names its enum; a bare or `::` variant is resolved

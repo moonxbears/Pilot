@@ -1,0 +1,192 @@
+// ==============================================================================
+// FILE: selfhost/check/access.pilot
+// Visibility across the linked program (MOD003, VIS001).
+// ==============================================================================
+// A declaration's visibility tier (`priv`, `file`, `pkg`, `pub`, ..; one
+// written without a word takes `default_visibility_tier()`, its package) sets how
+// far it reaches (`visibility_reach` in stdlib/core/syntax/visibility.pilot):
+// its own scope, its file, its package (the `pkg Name;` its file declares),
+// or the whole program. A top-level function or type used beyond its reach
+// is MOD003; a member read or called beyond its reach is VIS001. The scope
+// of a member is the body of the type that declares it (any of its partial
+// declarations or `ext` blocks); the scope of a top-level item is its file.
+pub lvl(0) pkg Pilot.SelfHost.Check.Access;
+
+use selfhost.check.snapshot.*;
+use selfhost.check.types.*;
+use selfhost.check.program.*;
+use selfhost.check.methods.*;
+use selfhost.check.resolve.*;
+use selfhost.check.infer.*;
+use selfhost.check.diag.*;
+use Pilot.Core.Syntax.Visibility;
+
+/// The package each unit declares, by unit index ("" for none).
+fn unit_packages(p: Program) -> List<str> {
+    let s = p.s;
+    var out: List<str> = [];
+    for _f in s.files { out.push(""); }
+    // A package declaration is an import declaration written `pkg`.
+    for n in prog_nodes_of_kind(p, nk_import_decl()) {
+        if is_package_decl(s, n) {
+            let u = unit_of(s, n);
+            if u >= 0 && u < out.len() { out[u] = node_name(s, n); }
+        }
+    }
+    return out;
+}
+
+/// The enclosing type or `ext` node that holds `n`, or -1 outside any.
+fn owner_node(p: Program, n: i64) -> i64 {
+    var cur = p.parents[n];
+    while cur >= 0 {
+        let k = kind(p.s, cur);
+        if k == nk_struct() || k == nk_interface() || k == nk_extend() { return cur; }
+        cur = p.parents[cur];
+    }
+    return -1;
+}
+
+/// The name of the type whose body holds `n`, or "" outside any.
+fn owner_name(p: Program, n: i64) -> str {
+    let on = owner_node(p, n);
+    return if on >= 0 { node_name(p.s, on) } else { "" };
+}
+
+/// Whether `sub` derives from or implements `base` (directly or transitively).
+fn is_derived_from(p: Program, sub: str, base: str, depth: i64) -> bool {
+    if sub.len() == 0 || depth > 32 { return false; }
+    for b in nl_get(p.bases, sub) {
+        let bt = prog_annot_type(p, b);
+        if !ty_is_named(p.tt, bt) { continue; }
+        let bname = node_name(p.s, ty_decl(p.tt, bt));
+        if bname == base || is_derived_from(p, bname, base, depth + 1) { return true; }
+    }
+    return false;
+}
+
+/// Whether `from` lies in the same package as `decl`: the same file, or
+/// two files declaring the same package.
+fn same_package(s: Snap, pkgs: List<str>, decl: i64, from: i64) -> bool {
+    let a = unit_of(s, decl);
+    let b = unit_of(s, from);
+    if a == b { return true; }
+    if a < 0 || b < 0 || a >= pkgs.len() || b >= pkgs.len() { return false; }
+    return pkgs[a].len() > 0 && pkgs[a] == pkgs[b];
+}
+
+/// The tier declaration `decl` has: the one written, else the default.
+fn tier_of(s: Snap, decl: i64) -> i64 {
+    let t = decl_tier(s, decl);
+    return if t >= 0 { t } else { default_visibility_tier() };
+}
+
+/// Whether declaration `decl` can be used at `from`.
+fn reaches(p: Program, pkgs: List<str>, decl: i64, from: i64) -> bool {
+    let s = p.s;
+    if !is_declaration(s, decl) { return true; }
+    let tier = tier_of(s, decl);
+    let reach = visibility_reach(tier);
+    if reach == ::Program { return true; }
+    if reach == ::Package { return same_package(s, pkgs, decl, from); }
+    if reach == ::File { return unit_of(s, decl) == unit_of(s, from); }
+    let d_on = owner_node(p, decl);
+    if d_on < 0 { return unit_of(s, decl) == unit_of(s, from); }
+    let owner = node_name(s, d_on);
+    if reach == ::Protected {
+        let from_owner = owner_name(p, from);
+        if from_owner.len() == 0 { return false; }
+        return from_owner == owner || is_derived_from(p, from_owner, owner, 0);
+    }
+    if kind(s, d_on) == nk_extend() { return owner_node(p, from) == d_on; }
+    let f_on = owner_node(p, from);
+    return f_on >= 0 && kind(s, f_on) != nk_extend() && node_name(s, f_on) == owner;
+}
+
+/// The word for how far a declaration of tier `tier` reaches.
+fn reach_word(tier: i64) -> str {
+    let reach = visibility_reach(tier);
+    if reach == ::Scope { return "private"; }
+    if reach == ::Protected { return "protected"; }
+    if reach == ::File { return "private to its file"; }
+    return "private to its package";
+}
+
+/// The top-level functions and types a name names.
+fn top_level(p: Program, name: str) -> List<i64> {
+    var out: List<i64> = [];
+    for f in nl_get(p.fns, name) { out.push(f); }
+    for d in nl_get(p.type_decls, name) { out.push(d); }
+    return out;
+}
+
+fn check_override_decl(p: Program, pkgs: List<str>, sink: DiagSink, n: i64) {
+    let s = p.s;
+    let on = owner_node(p, n);
+    if on < 0 || (kind(s, on) != nk_struct() && kind(s, on) != nk_interface()) {
+        sink_error(sink, n, "METH001",
+            f"`{node_name(s, n)}` is marked `override`, which only applies to methods of a struct or interface");
+        return;
+    }
+    let tname = node_name(s, on);
+    let mname = member_name(s, n);
+    let base_decl = prog_overridden_member(p, tname, mname);
+    if base_decl < 0 {
+        sink_error(sink, n, "METH001",
+            f"`{tname}.{mname}` is marked `override`, but no base interface or spliced bundle provides `{mname}`");
+        return;
+    }
+    if !same_package(s, pkgs, base_decl, n) {
+        let open_tier = visibility_tier_of(nameof(open));
+        let base_on = owner_node(p, base_decl);
+        let is_open = tier_of(s, base_decl) >= open_tier || (base_on >= 0 && tier_of(s, base_on) >= open_tier);
+        if !is_open {
+            sink_error(sink, n, "VIS001",
+                f"`{tname}.{mname}` cannot override `{mname}` from another package because it is not `open`");
+        }
+    }
+}
+
+pub fn check_access(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    let pkgs = unit_packages(p);
+    var n = 0;
+    n = s.user_lo;
+    while n < s.user_hi {
+        let k = kind(s, n);
+        if is_override_decl(s, n) && in_user_file(s, n) {
+            check_override_decl(p, pkgs, sink, n);
+        }
+        if (k == nk_ident() || k == nk_member()) && in_user_file(s, n) {
+            if k == nk_ident() && inf.r.ref_of[n] < 0 && node_name(s, n) != s.receiver {
+                let decls = top_level(p, node_name(s, n));
+                var any = false;
+                for d in decls { if reaches(p, pkgs, d, n) { any = true; } }
+                if decls.len() > 0 && !any {
+                    sink_error(sink, n, "MOD003",
+                        f"`{node_name(s, n)}` is {reach_word(tier_of(s, decls[0]))} and cannot be used here");
+                }
+            }
+            if k == nk_member() {
+                let recv = lhs(s, n);
+                var rt = type_of(inf, recv);
+                if ty_is_unknown(p.tt, rt) { rt = type_receiver(inf, recv); }
+                let name = sym_text(s, rhs(s, n));
+                if some m = prog_member(p, rt, name) {
+                    if !reaches(p, pkgs, m.decl, n) {
+                        sink_error(sink, n, "VIS001",
+                            f"Member '{name}' is {reach_word(tier_of(s, m.decl))} and cannot be used from external scope");
+                    }
+                } else {
+                    let mf = module_fn(inf, n);
+                    if mf >= 0 && !reaches(p, pkgs, mf, n) {
+                        sink_error(sink, n, "MOD003",
+                            f"`{name}` is {reach_word(tier_of(s, mf))} and cannot be used here");
+                    }
+                }
+            }
+        }
+        n = n + 1;
+    }
+}

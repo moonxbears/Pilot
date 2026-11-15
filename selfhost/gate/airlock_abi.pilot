@@ -1,0 +1,388 @@
+// ==============================================================================
+// FILE: selfhost/gate/airlock_abi.pilot
+// Model B+ Frozen Airlock ABI Snapshot & Drift Verifier (`GATE021`, PROP-002a)
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Gate.AirlockAbi;
+
+use Pilot.SelfHost.Gate.Manifest;
+
+/// Frozen Model B+ `HostOp` table (51 ops: `0..=50`): `[id, HostOp name, owner]`.
+/// The ID and name are frozen forever. The owner (`Type.method`, Amendment A1)
+/// is checked, not frozen: each op has at most one owner, and moving it needs
+/// an owner-approved `proposals.md` entry. `""` means no caller yet, so no owner.
+pub fn airlock_host_ops() -> List<List<any>> => [
+    [0,  "SlabAlloc",        "RawMem.alloc"],
+    [1,  "SlabRealloc",      "RawMem.realloc"],
+    [2,  "SlabFree",         "RawMem.free"],
+    [3,  "MemMap",           "RawMem.map_pages"],
+    [4,  "MemCopy",          "RawMem.copy"],
+    [5,  "MemSet",           "RawMem.fill"],
+    [6,  "MemCmp",           "RawMem.compare"],
+    [7,  "LoadInt",          "RawMem.load_int"],
+    [8,  "StoreInt",         "RawMem.store_int"],
+    [9,  "LoadFloat",        "RawMem.load_float"],
+    [10, "StoreFloat",       "RawMem.store_float"],
+    [11, "AtomicInt",        "RawMem.atomic_int"],
+    [12, "ThreadSpawn",      "Thread.spawn"],
+    [13, "ThreadJoin",       "Thread.join"],
+    [14, "ThreadCtl",        "Thread.ctl"],
+    [15, "Futex",            "Thread.futex"],
+    [16, "FdOpen",           "Fd.open_path"],
+    [17, "FdClose",          "Fd.close"],
+    [18, "FdRead",           "Fd.read"],
+    [19, "FdWrite",          "Fd.write"],
+    [20, "FdPread",          "Fd.pread"],
+    [21, "FdPwrite",         ""],
+    [22, "FdSeekSync",       "Fd.seek_sync"],
+    [23, "FdPipeDup",        "Fd.pipe_dup"],
+    [24, "IoPoll",           "Fd.poll"],
+    [25, "FdRawCtl",         "Fd.raw_ctl"],
+    [26, "FsStat",           "File.stat"],
+    [27, "FsReadDir",        "File.read_dir"],
+    [28, "FsMkdir",          "File.mkdir"],
+    [29, "FsRemove",         "File.remove"],
+    [30, "FsRenameLink",     "File.rename_link"],
+    [31, "FsPathCtl",        ""],
+    [32, "ProcSpawn",        "Process.spawn"],
+    [33, "ProcWait",         "Process.wait"],
+    [34, "ProcSignal",       "Process.send_signal"],
+    [35, "EnvCtl",           "Env.ctl"],
+    [36, "ClockNowNs",       "Clock.now_ns"],
+    [37, "SleepNs",          "Clock.sleep_ns"],
+    [38, "OsRandom",         "Entropy.fill"],
+    [39, "NetSocket",        "TcpSocket.socket"],
+    [40, "NetConnectBind",   "TcpSocket.connect_bind"],
+    [41, "NetIo",            "TcpSocket.io"],
+    [42, "NetResolve",       "TcpSocket.resolve"],
+    [43, "DlOpen",           ""],
+    [44, "DlSym",            ""],
+    [45, "DlClose",          ""],
+    [46, "FfiCall",          "Ffi.call_raw"],
+    [47, "FfiCallbackAlloc", "Ffi.callback_alloc"],
+    [48, "FfiCallbackFree",  "Ffi.callback_free"],
+    [49, "TrapFault",        ""],
+    [50, "TrapSeam",         ""],
+];
+
+/// Frozen Model B+ `PilotErr` table (51 codes: `1..=51`).
+pub fn airlock_pilot_errs() -> List<List<any>> => [
+    [1, "Perm"], [2, "Acces"], [3, "Noent"], [4, "Exist"], [5, "Intr"],
+    [6, "Io"], [7, "Again"], [8, "Inprogress"], [9, "Already"], [10, "Nomem"],
+    [11, "Badf"], [12, "Inval"], [13, "Isdir"], [14, "Notdir"], [15, "Notempty"],
+    [16, "Busy"], [17, "Exdev"], [18, "Nospc"], [19, "Rofs"], [20, "Dquot"],
+    [21, "Mfile"], [22, "Nfile"], [23, "Nametoolong"], [24, "Loop"], [25, "Fbig"],
+    [26, "Spipe"], [27, "Pipe"], [28, "Srch"], [29, "Child"], [30, "Timedout"],
+    [31, "Connrefused"], [32, "Connreset"], [33, "Connaborted"], [34, "Notconn"], [35, "Isconn"],
+    [36, "Addrinuse"], [37, "Addrnotavail"], [38, "Netunreach"], [39, "Hostunreach"], [40, "Msgsize"],
+    [41, "Afnosupport"], [42, "Notsup"], [43, "Nosys"], [44, "Range"], [45, "AiNoname"],
+    [46, "AiAgain"], [47, "AiFail"], [48, "Deadlk"], [49, "Ilseq"], [50, "Canceled"],
+    [51, "Other"],
+];
+
+/// Frozen Model B+ `OsArchKind` IDs (`0..=6`).
+pub fn airlock_arch_kinds() -> List<List<any>> => [
+    [0, "HostDefault"],
+    [1, "X86_64SysV"],
+    [2, "X86_64Win64"],
+    [3, "AArch64Aapcs"],
+    [4, "AArch64Darwin"],
+    [5, "Riscv64Lp64d"],
+    [6, "Wasm32C"],
+];
+
+/// Frozen Model B+ `[Layout(c_abi)]` structs: `[name, size, align, field_markers]`.
+pub fn airlock_c_structs() -> List<List<any>> => [
+    ["OsSlice",      16, 8,  ["ptr", "len"]],
+    ["OsPollFd",     16, 8,  ["fd", "events", "revents"]],
+    ["OsStat",       72, 8,  ["kind", "size", "mode", "mtime_ns", "atime_ns", "ctime_ns", "dev", "ino", "nlink"]],
+    ["OsProcSpec",   96, 8,  ["prog_ptr", "prog_len", "argv_ptr", "argc", "envp_ptr", "envc", "cwd_ptr", "cwd_len", "stdin_fd", "stdout_fd", "stderr_fd", "env_mode"]],
+    ["OsSockAddr",   144, 8, ["family", "port", "addr_len", "addr_bytes", "flowinfo", "scope_id"]],
+    ["OsFfiAbiDesc", 32, 8,  ["arch_kind", "gpr_count", "vec_count", "stack_bytes", "variadic_fixed_args", "flags", "sret_ptr", "_reserved"]],
+    ["OsFfiRetRegs", 80, 16, ["gpr", "vec"]],
+];
+
+/// Frozen Model B+ `bridge_lang.pilot` hooks (66 compile-time hooks).
+pub fn airlock_lang_hooks() -> List<str> => [
+    "register_bracket_attribute", "bind_lang_item", "set_register_layout", "set_memory_layout",
+    "set_inline_hint", "register_syntax_keyword", "bind_lattice_kind", "get_lattice_bits",
+    "enforce_core_naming_lint", "seal_bootstrap_bridge",
+    "register_modifier", "register_parametric_modifier", "register_module_kw", "bind_receiver_ident",
+    "bind_receptor", "decl_operator_fn", "cfg_jump_loop_exit", "cfg_jump_loop_head",
+    "emit_ssa_binop", "emit_ssa_unop", "emit_ssa_cast", "emit_ssa_load", "emit_ssa_store", "emit_ssa_gep",
+    "query_is_comptime_vm", "emit_diagnostic_error", "type_name_of", "ast_source_lines",
+    "parse_ast_fragment", "replace_ast_pattern", "register_attr_weaver",
+    "type_sizeof", "type_alignof", "type_offsetof", "type_fields_of", "type_is_copy",
+    "bind_native_fn", "bind_native_method", "bind_native_property", "bind_native_value",
+    "bind_native_member", "bind_native_effect", "bind_type_query", "bind_operator_fn",
+    "bind_operator_intrinsic", "bind_unit_literal", "bind_enumerator", "bind_generator",
+    "bind_try_protocol", "bind_lift", "bind_absent", "bind_absent_test", "bind_format_spec",
+    "bind_membership", "bind_scalar_text", "bind_range_index", "bind_list_literal",
+    "bind_list_splat", "bind_map_literal", "bind_slice_pattern", "bind_record_pattern",
+    "bind_owned_elements", "bind_owned_payload",
+    "register_keyword", "register_keyword_category", "query_registered_symbols",
+    "bind_lang_protocol",
+];
+
+/// Hooks `bridge_lang.pilot` still carries but that are **not** frozen: each is
+/// replaced by a later proposal (`register_pratt_op` by `register_grammar`,
+/// PROP-008). Shrink-only.
+pub fn airlock_transitional_hooks() -> List<str> => ["register_pratt_op"];
+
+/// Where each owner type lives (Amendment A1).
+pub fn airlock_owner_files() -> Map<str, str> {
+    let m = Map<str, str>();
+    m.set("RawMem", "stdlib/core/host_raw.pilot");
+    m.set("Fd", "stdlib/core/host_raw.pilot");
+    m.set("File", "stdlib/core/file.pilot");
+    m.set("Env", "stdlib/core/env.pilot");
+    m.set("Process", "stdlib/core/env.pilot");
+    m.set("TcpSocket", "stdlib/core/env.pilot");
+    m.set("Thread", "stdlib/core/env.pilot");
+    m.set("Clock", "stdlib/core/env.pilot");
+    m.set("Entropy", "stdlib/core/env.pilot");
+    m.set("Ffi", "stdlib/core/env.pilot");
+    return m;
+}
+
+/// `TRANSITIONAL_NATIVE_BINDINGS` (Amendment A1): the Stage-A natives that
+/// `bind_native_*` may still name until their owner methods exist and are as
+/// fast on the seed (PROP-002b, after PROP-007). Shrink-only: a binding to a
+/// native not listed here fails, and an entry no binding uses must be deleted.
+pub fn transitional_native_bindings() -> List<str> => [
+    "rt_print", "rt_eprint", "rt_fault", "seam_open", "list_new", "map_new",
+    "str_from_bytes", "gen_resume", "gen_done", "gen_close", "gen_current",
+    "str_copy_to_ptr", "str_from_ptr", "vm_thread_entry_ptr", "vm_callback_dispatch_ptr",
+    "str_len", "map_get", "map_set", "map_has", "map_keys", "map_remove",
+    "list_push", "list_pop", "list_remove_at", "str_trim", "to_str", "str_byte_at",
+    "str_slice", "str_find", "str_replace", "str_contains", "str_starts_with",
+    "str_ends_with", "is_null", "get_env", "list_get", "list_set",
+    "unpack", "unpack_pairs", "flat",
+];
+
+fn ab_viol(file: str, snippet: str, msg: str) -> GateViolation {
+    return GateViolation {
+        code: "GATE021",
+        file_path: file,
+        line: 1,
+        column: 1,
+        offending_snippet: snippet,
+        message: msg,
+        remediation: "Keep the frozen Model B+ ABI and one op, one owner (proposals.md PROP-002a Amendment A1)",
+        severity: GateSeverityId.Blocker,
+    };
+}
+
+fn ab_rel(root: str, full: str) -> str {
+    let pfx = if root.ends_with("/") { root } else { root + "/" };
+    if full.starts_with(pfx) { return full.slice(pfx.len(), full.len()); }
+    if full.starts_with("./") { return full.slice(2, full.len()); }
+    return full;
+}
+
+/// The text of the line holding byte `at` up to `at`.
+fn ab_line_prefix(src: str, at: i64) -> str {
+    var b = at;
+    while b > 0 && src.byte_at(b - 1) != 10 { b = b - 1; }
+    return src.slice(b, at);
+}
+
+/// The decimal number starting at byte `at`, or -1.
+fn ab_int_at(src: str, at: i64) -> i64 {
+    var i = at;
+    var v = 0;
+    var any = false;
+    while i < src.len() && src.byte_at(i) >= 48 && src.byte_at(i) <= 57 {
+        v = v * 10 + (src.byte_at(i) - 48);
+        any = true;
+        i = i + 1;
+    }
+    return if any { v } else { -1 };
+}
+
+/// Checks one runtime op site: it must be the whole body of a `priv static fn
+/// <m>_internal(...)` marked `[EngineOp]` in the owner's file (checks 1 and 2).
+fn ab_check_site(src: str, at: i64, rel: str, id: i64, owner: str, files: Map<str, str>, violations: i64) {
+    if owner == "" {
+        let _ = glist_push(violations, ab_viol(rel, f"host_op {id}", f"HostOp {id} has no registered owner; register one in airlock_abi.pilot (proposals.md entry) before calling it"));
+        return;
+    }
+    let dot = gm_find(owner, ".", 0);
+    let ty = owner.slice(0, dot);
+    let meth = owner.slice(dot + 1, owner.len());
+    let want_file = if files.has(ty) { files.get(ty) } else { "" };
+    if rel != want_file {
+        let _ = glist_push(violations, ab_viol(rel, f"host_op {id}", f"HostOp {id} is owned by {owner} in {want_file}; it may not appear here"));
+        return;
+    }
+    let head = f"[EngineOp]\n    priv static fn {meth}_internal(";
+    let st = gm_find(src, f"pub struct {ty} : ", 0);
+    let body_end = if st < 0 { -1 } else { gm_find(src, "\n}", st) };
+    let hpos = if st < 0 { -1 } else { gm_find(src, head, st) };
+    if hpos < 0 || hpos > at || body_end < at {
+        let _ = glist_push(violations, ab_viol(rel, owner, f"{owner}_internal is missing, or is not a `priv static fn` marked [EngineOp]"));
+        return;
+    }
+    let arrow = gm_find(src, "=>", hpos);
+    var k = arrow + 2;
+    while k < at && (src.byte_at(k) == 32 || src.byte_at(k) == 10) { k = k + 1; }
+    if arrow < 0 || k != at {
+        let _ = glist_push(violations, ab_viol(rel, owner, f"{owner}_internal must have `__engine(\"host_op\", {id}, ...)` as its whole body"));
+    }
+    let semi = gm_find(src, ";", at);
+    let next_fn = gm_find(src, "fn ", hpos + head.len());
+    if semi < 0 || (next_fn >= 0 && next_fn < semi) {
+        let _ = glist_push(violations, ab_viol(rel, owner, f"{owner}_internal must end at its `__engine(...)` call"));
+    }
+}
+
+/// The body of `struct <ty>` in `src` (from its header to the next top-level
+/// declaration), so owners in one file with the same method name stay apart.
+fn ab_struct_body(src: str, ty: str) -> str {
+    let st = gm_find(src, f"pub struct {ty} : ", 0);
+    if st < 0 { return ""; }
+    let nx = gm_find(src, "\n}", st);
+    return if nx < 0 { src.slice(st, src.len()) } else { src.slice(st, nx + 2) };
+}
+
+/// Counts `.<name>(` call sites in `src`.
+fn ab_count_calls(src: str, name: str) -> i64 {
+    let needle = "." + name + "(";
+    var n = 0;
+    var at = gm_find(src, needle, 0);
+    while at >= 0 {
+        n = n + 1;
+        at = gm_find(src, needle, at + needle.len());
+    }
+    return n;
+}
+
+/// Verifies the frozen Model B+ ABI (`bridge.rs`, `os_abi.pilot`,
+/// `bridge_lang.pilot`) and one op, one owner (Amendment A1) across the tree.
+pub fn verify_airlock_abi(root: str, violations: i64) {
+    let os_abi = gate_fs_read_text(gm_join_path(root, "stdlib/core/os_abi.pilot"));
+    let bridge_lang = gate_fs_read_text(gm_join_path(root, "stdlib/core/bridge_lang.pilot"));
+    let bridge_rs = gate_fs_read_text(gm_join_path(root, "crates/pilot-vm/src/bridge.rs"));
+    if os_abi == "" || bridge_lang == "" || bridge_rs == "" {
+        let _ = glist_push(violations, ab_viol("stdlib/core/bridge_lang.pilot", "missing airlock file", "One or more Model B+ airlock files are missing"));
+        return;
+    }
+    let files = airlock_owner_files();
+    let owners = Map<i64, str>();
+    for row in airlock_host_ops() {
+        let id: i64 = row[0];
+        let rs_name: str = row[1];
+        let owner: str = row[2];
+        owners.set(id, owner);
+        if !gm_contains(bridge_rs, f"{rs_name} = {id},") {
+            let _ = glist_push(violations, ab_viol("crates/pilot-vm/src/bridge.rs", rs_name, f"Frozen HostOp::{rs_name} = {id} missing or renumbered in bridge.rs"));
+        }
+    }
+
+    // Checks 1-3: every runtime op site, across every Pilot source tree.
+    let seen = Map<i64, i64>();
+    let needle = "__engine(\"host_op\", ";
+    for subdir in ["stdlib", "selfhost", "tools", "tests", "examples"] {
+        let walked = gm_split_lines(gate_fs_walk_files(gm_join_path(root, subdir)));
+        var wi = 0;
+        while wi < glist_len(walked) {
+            let full: str = glist_get(walked, wi);
+            wi = wi + 1;
+            if !full.ends_with(".pilot") { continue; }
+            let src = gate_fs_read_text(full);
+            if !src.contains("host_op") { continue; }
+            let rel = ab_rel(root, full);
+            if rel == "selfhost/gate/airlock_abi.pilot" { continue; }
+            var at = gm_find(src, needle, 0);
+            while at >= 0 {
+                if !gm_contains(ab_line_prefix(src, at), "//") {
+                    let id = ab_int_at(src, at + needle.len());
+                    let owner = if owners.has(id) { owners.get(id) } else { "" };
+                    seen.set(id, if seen.has(id) { seen.get(id) + 1 } else { 1 });
+                    ab_check_site(src, at, rel, id, owner, files, violations);
+                }
+                at = gm_find(src, needle, at + needle.len());
+            }
+        }
+    }
+    for row in airlock_host_ops() {
+        let id: i64 = row[0];
+        let owner: str = row[2];
+        if owner == "" { continue; }
+        let n = if seen.has(id) { seen.get(id) } else { 0 };
+        if n != 1 {
+            let _ = glist_push(violations, ab_viol("selfhost/gate/airlock_abi.pilot", owner, f"HostOp {id} must appear exactly once, in {owner}_internal; found {n}"));
+            continue;
+        }
+        // Check 3: the owner method has exactly one caller, its public method.
+        let dot = gm_find(owner, ".", 0);
+        let ty = owner.slice(0, dot);
+        let meth = owner.slice(dot + 1, owner.len());
+        let osrc = ab_struct_body(gate_fs_read_text(gm_join_path(root, files.get(ty))), ty);
+        let calls = ab_count_calls(osrc, meth + "_internal");
+        let public = f"pub static fn {meth}(";
+        let ppos = gm_find(osrc, public, 0);
+        let only = gm_find(osrc, f"{ty}.{meth}_internal(", 0);
+        if calls != 1 || ppos < 0 || only < ppos || gm_find(osrc, ";", ppos) < only {
+            let _ = glist_push(violations, ab_viol(files.get(ty), owner, f"{owner}_internal must have exactly one caller, `pub static fn {meth}`; found {calls}"));
+        }
+    }
+
+    // Check 4: native bindings only name transitional Stage-A natives.
+    let allowed = Map<str, bool>();
+    for nat in transitional_native_bindings() { allowed.set(nat, true); }
+    let natives = gm_split_lines(gate_fs_read_text(gm_join_path(root, "stdlib/core/builtins/native_calls.pilot")));
+    let used = Map<str, bool>();
+    var li = 0;
+    while li < glist_len(natives) {
+        let line: str = glist_get(natives, li);
+        li = li + 1;
+        let t = line.trim();
+        if !t.starts_with("bind_native_") { continue; }
+        let q2 = gm_find(t, "\");", 0);
+        if q2 < 0 { continue; }
+        var q1 = q2 - 1;
+        while q1 > 0 && t.byte_at(q1) != 34 { q1 = q1 - 1; }
+        let nat = t.slice(q1 + 1, q2);
+        used.set(nat, true);
+        if !allowed.has(nat) {
+            let _ = glist_push(violations, ab_viol("stdlib/core/builtins/native_calls.pilot", nat, f"Native binding to {nat} is not in transitional_native_bindings(); give the op an owner method instead"));
+        }
+    }
+    for nat in transitional_native_bindings() {
+        if !used.has(nat) {
+            let _ = glist_push(violations, ab_viol("selfhost/gate/airlock_abi.pilot", nat, f"transitional_native_bindings() lists {nat}, which no binding uses; delete the entry (the table only shrinks)"));
+        }
+    }
+
+    for row in airlock_pilot_errs() {
+        let code: i64 = row[0];
+        let ename: str = row[1];
+        if !gm_contains(os_abi, ename) || !gm_contains(os_abi, f" {code},") {
+            let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", ename, f"Frozen PilotErr::{ename} = {code} missing in os_abi.pilot"));
+        }
+    }
+    for row in airlock_arch_kinds() {
+        let code: i64 = row[0];
+        let aname: str = row[1];
+        if !gm_contains(os_abi, f"{aname}") || !gm_contains(os_abi, f" {code},") {
+            let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", aname, f"Frozen OsArchKind::{aname} = {code} missing in os_abi.pilot"));
+        }
+    }
+    for row in airlock_c_structs() {
+        let sname: str = row[0];
+        let fields: List<str> = row[3];
+        if !gm_contains(os_abi, f"pub struct {sname} : IValue") {
+            let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", sname, f"Frozen C-ABI struct {sname} missing in os_abi.pilot"));
+        }
+        for f in fields {
+            if !gm_contains(os_abi, f"pub {f}:") {
+                let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", f, f"Frozen C-ABI field {sname}.{f} missing in os_abi.pilot"));
+            }
+        }
+    }
+    for h in airlock_lang_hooks() {
+        if !gm_contains(bridge_lang, f"{h}(") || !gm_contains(bridge_lang, f"__engine(\"{h}\"") {
+            let _ = glist_push(violations, ab_viol("stdlib/core/bridge_lang.pilot", h, f"Frozen bridge_lang hook {h} missing or altered in bridge_lang.pilot"));
+        }
+    }
+}

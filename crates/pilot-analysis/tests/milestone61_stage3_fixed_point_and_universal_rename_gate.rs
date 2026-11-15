@@ -572,6 +572,7 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
     //    Pass 1: Runtime-PRNG unpredictable names (`c32_<tag>`, `window_<tag>`, `maybe_<tag>`, `outcome_<tag>`, `interval_<tag>`)
     //            (Defeats any AI that tries to hardcode `"window"` or `"maybe"` in `selfhost/*.pilot`!)
     let bootstrap_rel_paths = [
+        "stdlib/core/bridge_lang.pilot",
         "stdlib/core/core.pilot",
         "stdlib/core/syntax/type_construct.pilot",
         "stdlib/core/syntax/visibility.pilot",
@@ -595,6 +596,8 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
         "stdlib/contracts/contracts_syntax.pilot",
     ];
 
+    // The codegen modules build text with `std.text` (`use std.text;`).
+    let std_text = std::fs::read_to_string(root.join("stdlib/std/text.pilot")).unwrap();
     let c_phys = std::fs::read_to_string(root.join("selfhost/codegen/physics.pilot")).unwrap();
     let c_types = std::fs::read_to_string(root.join("selfhost/codegen/c_types.pilot")).unwrap();
     let c_hdr = std::fs::read_to_string(root.join("selfhost/codegen/c_header.pilot")).unwrap();
@@ -716,7 +719,7 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
 
         // (B) Backends 2, 3, 4, 5: C11, LLVM IR, WASM, and WGSL GPU emitted from mounted renamed AST!
         let cg_driver = format!(
-            "{c_phys}\n{c_types}\n{c_hdr}\n{c_emit}\n{llvm_emit}\n{wasm_emit}\n{gpu_c}\n{gpu_sh}\n{gpu_ll}\n\
+            "{std_text}\n{c_phys}\n{c_types}\n{c_hdr}\n{c_emit}\n{llvm_emit}\n{wasm_emit}\n{gpu_c}\n{gpu_sh}\n{gpu_ll}\n\
              let c11 = emit_arena_c11();\n\
              let ll = emit_arena_llvm_ir();\n\
              let wasm_h = emit_arena_wasm_hex();\n\

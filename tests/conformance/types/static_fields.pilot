@@ -1,0 +1,34 @@
+// `static` fields on a struct: type-level storage, read/write, compound assignment, and `sizeof`.
+
+struct Counter {
+    id: i64;
+    static var count: i64 = 0;
+    static let step: i64 = 3;
+    static limit: i64 = 10;
+
+    static fn inc() {
+        Counter.count = Counter.count + Counter.step;
+    }
+
+    fn bump(n: i64) {
+        Counter.count += n;
+    }
+}
+
+fn main() {
+    print(sizeof(Counter));
+    print(Counter.count);
+    print(Counter.step);
+    print(Counter.limit);
+
+    Counter.inc();
+    print(Counter.count);
+
+    let c = Counter { id: 42 };
+    print(c.id);
+    c.bump(5);
+    print(Counter.count);
+
+    Counter.count = 99;
+    print(Counter.count);
+}

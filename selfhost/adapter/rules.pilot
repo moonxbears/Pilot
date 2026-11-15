@@ -23,16 +23,9 @@ pub pure fn naming_style_snake_case()  -> u8 => 1;
 pub pure fn naming_style_pascal_case() -> u8 => 2;
 pub pure fn naming_style_camel_case()  -> u8 => 3;
 
-/// The style code `adapter_case_norm` takes for a `NamingStyle` variant.
-/// Compared by variant, not cast, so the code never depends on how the
-/// engine numbers enum variants.
-[Workaround("seed.enum_explicit_values", "maps each variant to its code by comparison instead of casting the enum")]
-pub fn naming_style_code(style: NamingStyle) -> u8 {
-    if style == NamingStyle::SnakeCase { return naming_style_snake_case(); }
-    if style == NamingStyle::PascalCase { return naming_style_pascal_case(); }
-    if style == NamingStyle::CamelCase { return naming_style_camel_case(); }
-    return naming_style_preserve();
-}
+/// The style code `adapter_case_norm` takes for a `NamingStyle` variant:
+/// the variant's declared value.
+pub fn naming_style_code(style: NamingStyle) -> u8 => style as u8;
 
 pub enum ErrorLiftPolicy : u8 {
     ::None              = 0,

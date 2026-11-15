@@ -1,0 +1,7 @@
+// `$x` splices an `ast` or an integer, float, bool or string; a list is
+// none of them (QUOTE002).
+fn main() {
+    let xs = [1, 2];
+    let q = quote { $xs };
+    print(q.source());
+}

@@ -6,7 +6,7 @@ pub pkg Pilot.SelfHost.Pkg.Venv;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-fn venv_find(haystack: str, needle: str, start: i64) -> i64 {
+pure fn venv_find(haystack: str, needle: str, start: i64) -> i64 {
     let hl = haystack.len();
     let nl = needle.len();
     if nl == 0 || start < 0 || start + nl > hl { return -1; }

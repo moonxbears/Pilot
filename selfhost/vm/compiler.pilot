@@ -61,13 +61,20 @@ pub pure fn op_call_closure() -> i64 { return 36; }
 pub pure fn op_invalid() -> i64 { return 255; }
 pub pure fn op_engine_intrinsic() -> i64 { return 34; }
 
-// Encodes a 32-bit PilVM v3 instruction word `[opcode:8 | dst:8 | src1:8 | src2:8]`.
+// Encodes the low word of a PilVM instruction `[opcode:8 | dst:8 | src1:8 | src2:8]`;
+// the high 32 bits hold the wide operand (`encode_pilvm_wide`).
 pub pure fn encode_pilvm_instruction(op: i64, dst: i64, src1: i64, src2: i64) -> i64 {
     let o = (op & 255) << 24;
     let d = (dst & 255) << 16;
     let s1 = (src1 & 255) << 8;
     let s2 = src2 & 255;
     return o | d | s1 | s2;
+}
+
+// Encodes an instruction whose 32-bit operand `ext` (a jump target, call
+// entry or constant index) lives in the high word.
+pub pure fn encode_pilvm_wide(op: i64, dst: i64, src1: i64, ext: i64) -> i64 {
+    return encode_pilvm_instruction(op, dst, src1, 0) | ((ext & 4294967295) << 32);
 }
 
 pub pure fn decode_pilvm_opcode(word: i64) -> i64 {
@@ -86,19 +93,15 @@ pub pure fn decode_pilvm_src2(word: i64) -> i64 {
     return word & 255;
 }
 
-// Encodes an unconditional jump instruction targeting `target_pc` (`0..65535`).
+// Encodes an unconditional jump instruction targeting `target_pc`.
 pub pure fn encode_jump_to_pc(target_pc: i64) -> i64 {
-    let hi = (target_pc >> 8) & 255;
-    let lo = target_pc & 255;
-    return encode_pilvm_instruction(op_jump(), 0, hi, lo);
+    return encode_pilvm_wide(op_jump(), 0, 0, target_pc);
 }
 
 // Patches a `JumpIfFalse` instruction word with `target_pc` while preserving `r_cond` (`src1`).
 pub pure fn patch_jump_if_false(orig_word: i64, target_pc: i64) -> i64 {
     let r_cond = decode_pilvm_src1(orig_word);
-    let hi = (target_pc >> 8) & 255;
-    let lo = target_pc & 255;
-    return encode_pilvm_instruction(op_jump_if_false(), hi, r_cond, lo);
+    return encode_pilvm_wide(op_jump_if_false(), 0, r_cond, target_pc);
 }
 
 // Maps AST binary operator flag (`1..20`) to its PilVM v3 opcode.
@@ -226,9 +229,15 @@ pub fn vmc_record_debug_reg(st: i64, slot: i64, sym_id: i64, name: str) -> i64 {
     return idx;
 }
 
-pub fn vmc_emit(st: i64, op: i64, dst: i64, src1: i64, src2: i64) -> i64 {
+pub fn vmc_emit(st: i64, op: i64, dst: i64, src1: i64, src2: i64) -> i64 =>
+    vmc_emit_word(st, encode_pilvm_instruction(op, dst, src1, src2));
+
+// Emits an instruction whose 32-bit operand `ext` lives in the high word.
+pub fn vmc_emit_wide(st: i64, op: i64, dst: i64, ext: i64) -> i64 =>
+    vmc_emit_word(st, encode_pilvm_wide(op, dst, 0, ext));
+
+fn vmc_emit_word(st: i64, word: i64) -> i64 {
     let pc = (__engine("map_get", st, "icount") ?? 0);
-    let word = encode_pilvm_instruction(op, dst, src1, src2);
     let s0 = (__engine("map_get", st, "cur_s0") ?? 0);
     let s1 = (__engine("map_get", st, "cur_s1") ?? 0);
     __engine("map_set", st, "ins_" + pc, word);
@@ -268,9 +277,7 @@ pub fn vmc_add_str_const(st: i64, sval: str) -> i64 {
 
 pub fn vmc_emit_load_const(st: i64, cidx: i64) -> i64 {
     let dst = vmc_alloc_temp(st);
-    let hi = (cidx >> 8) & 255;
-    let lo = cidx & 255;
-    vmc_emit(st, op_load_const(), dst, hi, lo);
+    vmc_emit_wide(st, op_load_const(), dst, cidx);
     return dst;
 }
 
@@ -400,7 +407,7 @@ pub fn vmc_compile_call(st: i64, nid: i64) -> i64 {
         let dst = vmc_alloc_temp(st);
         if known_ep > 0 {
             let ep = known_ep - 1;
-            vmc_emit(st, op_call(), dst, (ep >> 8) & 255, ep & 255);
+            vmc_emit_wide(st, op_call(), dst, ep);
         } else {
             let call_pc = vmc_emit(st, op_call(), dst, 0, 0);
             let pcnt = (__engine("map_get", st, "patch_cnt") ?? 0);
@@ -441,7 +448,7 @@ pub fn vmc_compile_loop(st: i64, nid: i64, orig: i64) -> i64 {
 
         let bcnt = (__engine("map_get", st, "lbrk_cnt_" + depth) ?? 0);
         __engine("map_set", st, "loop_depth", depth - 1);
-        vmc_emit(st, op_jump(), 0, (start_pc >> 8) & 255, start_pc & 255);
+        vmc_emit_wide(st, op_jump(), 0, start_pc);
 
         let end_pc = (__engine("map_get", st, "icount") ?? 0);
         let orig_jf = (__engine("map_get", st, "ins_" + jf_pc) ?? 0);
@@ -499,7 +506,7 @@ pub fn vmc_compile_loop(st: i64, nid: i64, orig: i64) -> i64 {
             __engine("map_set", st, "loop_depth", depth - 1);
             let r_one = vmc_emit_load_const(st, vmc_add_scalar_const(st, 3, 1));
             vmc_emit(st, op_add(), slot, slot, r_one);
-            vmc_emit(st, op_jump(), 0, (start_pc >> 8) & 255, start_pc & 255);
+            vmc_emit_wide(st, op_jump(), 0, start_pc);
 
             let end_pc = (__engine("map_get", st, "icount") ?? 0);
             let orig_jf = (__engine("map_get", st, "ins_" + jf_pc) ?? 0);
@@ -749,7 +756,7 @@ pub fn vmc_compile_node(st: i64, nid: i64) -> i64 {
                 }
             }
             let spc = (__engine("map_get", st, "lstart_" + depth) ?? 0);
-            vmc_emit(st, op_jump(), 0, (spc >> 8) & 255, spc & 255);
+            vmc_emit_wide(st, op_jump(), 0, spc);
         }
         return 0;
     }
@@ -1072,7 +1079,7 @@ pub fn vmc_compile_arena() -> i64 {
 
     if last_reg == 0 && zero_arg_entry >= 0 {
         let dst = vmc_alloc_temp(st);
-        vmc_emit(st, op_call(), dst, (zero_arg_entry >> 8) & 255, zero_arg_entry & 255);
+        vmc_emit_wide(st, op_call(), dst, zero_arg_entry);
         last_reg = dst;
     }
 
@@ -1095,7 +1102,7 @@ pub fn vmc_compile_arena() -> i64 {
         let ep_plus = (__engine("map_get", fns_map, pfn) ?? 0);
         if ep_plus > 0 {
             let ep = ep_plus - 1;
-            __engine("map_set", st, "ins_" + ppc, encode_pilvm_instruction(op_call(), cdst, (ep >> 8) & 255, ep & 255));
+            __engine("map_set", st, "ins_" + ppc, encode_pilvm_wide(op_call(), cdst, 0, ep));
         } else {
             __engine("map_set", st, "ins_" + ppc, encode_pilvm_instruction(op_nop(), cdst, 0, 0));
         }

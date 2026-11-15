@@ -1,0 +1,68 @@
+// Parsing text with the checked conversions (stdlib/core/convert).
+// Integers follow Rust's `str::parse` (`from_str`): an optional sign (only
+// `+` for unsigned targets, so `-0` is not a u8), then decimal digits and
+// nothing else; leading zeros are allowed. A value out of range is
+// ::Overflow / ::Underflow, reported at the first digit that leaves the
+// range (so `999x` is an i8 overflow, as in Rust); anything else is
+// ::InvalidFormat. `bool` is exactly `true` or `false`; `char` is exactly
+// one Unicode scalar value (A = 65, é = 233, € = 8364, 😀 = 128512).
+// Floats follow Rust's float grammar; `1e400` is beyond the f64 range
+// (max about 1.8e308), so it is ::Overflow here where Rust gives inf, and
+// `1e-400` is below half the smallest subnormal, so it rounds to zero.
+use Pilot.Core.Convert;
+use lib.convert_show;
+
+fn code_of(text: str) -> u32 ! ConvertError {
+    let c: char = text.to_char()?;
+    return c.to_u32()?;
+}
+
+fn main() {
+    let texts: List<str> = ["0", "+42", "-42", "0255", "-0", "127", "128", "-128", "-129", "999x",
+        "", "-", "+", "12a", " 12", "1_000"];
+    for t in texts {
+        let s: str = t;
+        show(f"\"{s}\" -> i8", s.to_i8());
+    }
+    let i64s: List<str> = ["9223372036854775807", "9223372036854775808", "-9223372036854775808", "-9223372036854775809"];
+    for t in i64s {
+        let s: str = t;
+        show(f"\"{s}\" -> i64", s.to_i64());
+    }
+    let unsigned: List<str> = ["+7", "0255", "255", "256", "-0", "-1", "18446744073709551615"];
+    for t in unsigned {
+        let s: str = t;
+        show(f"\"{s}\" -> u8", s.to_u8());
+    }
+    let ul: str = "18446744073709551615";
+    show("\"18446744073709551615\" -> u64", ul.to_u64());
+    let uo: str = "18446744073709551616";
+    show("\"18446744073709551616\" -> u64", uo.to_u64());
+    let i32s: str = "-2147483648";
+    show("\"-2147483648\" -> i32", i32s.to_i32());
+    let u16s: str = "65536";
+    show("\"65536\" -> u16", u16s.to_u16());
+
+    let bools: List<str> = ["true", "false", "True", "1", ""];
+    for t in bools {
+        let s: str = t;
+        show(f"\"{s}\" -> bool", s.to_bool());
+    }
+
+    let chars: List<str> = ["A", "é", "€", "😀", "", "ab"];
+    for t in chars {
+        show(f"\"{t}\" -> char code", code_of(t));
+    }
+
+    let floats: List<str> = ["1", "-1.5", ".5", "2.", "6.02e23", "1e-7", "+3.25E2", "0.1", "1e22", "1e+5",
+        "-0.0", "1e400", "-1e400", "1e-400", "inf", "-Infinity", "NaN", "", ".", "e5", "1e", "1.2.3", "0x10", "-"];
+    for t in floats {
+        let s: str = t;
+        show(f"\"{s}\" -> f64", s.to_f64());
+    }
+    let f32s: List<str> = ["0.1", "1.5", "1e10", "1e39", "-1e39", "abc"];
+    for t in f32s {
+        let s: str = t;
+        show(f"\"{s}\" -> f32", s.to_f32());
+    }
+}

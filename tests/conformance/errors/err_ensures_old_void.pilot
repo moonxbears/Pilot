@@ -1,0 +1,12 @@
+// A void function whose `ensures` clause with `old(e)` does not hold stops
+// with DBC007 when it falls off the end of its body: `n` grows by 2, the
+// clause asks for 1.
+fn bump(var ref n: i64) ensures(n == old(n) + 1) {
+    n = n + 2;
+}
+
+fn main() {
+    var a = 5;
+    bump(a);
+    print(a);
+}

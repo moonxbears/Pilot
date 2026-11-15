@@ -1,0 +1,8 @@
+// A step of 0 would never reach the end of `a..b`, so the loop stops the
+// program before its first pass; "before" is printed, nothing after.
+fn main() {
+    print("before");
+    let step = 0;
+    for i in 0..3 : step { print(i); }
+    print("after");
+}

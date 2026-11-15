@@ -1,0 +1,2 @@
+error[SYN001]: an optional field is written `name: T?`, not `name?: T`
+err_field_question.pilot:5:13

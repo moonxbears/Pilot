@@ -1,0 +1,2 @@
+error[QUOTE003]: `$a` splices into a quote, and is not inside one
+err_quote_hole_outside.pilot:5:11

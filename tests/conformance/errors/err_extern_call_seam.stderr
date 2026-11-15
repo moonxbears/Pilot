@@ -1,0 +1,2 @@
+error[SEAM001]: unconnected seam `abi.extern_call`
+`labs` is declared without a body

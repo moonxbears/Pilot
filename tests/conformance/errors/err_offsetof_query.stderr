@@ -1,0 +1,2 @@
+error[SEED001]
+`offsetof` asks `field_offset`, which the seed cannot answer

@@ -1,0 +1,34 @@
+// A `var ref` parameter is the only way a call reaches its argument
+// (ALIAS001), and an `iso` parameter takes a moved, unaliased owner
+// (ISO001). Distinct places, and owners handed over for good, are fine.
+struct Pair {
+    pub left: List<i64>;
+    pub right: List<i64>;
+}
+
+fn move_all(var ref into: List<i64>, var ref from: List<i64>) {
+    while from.len() > 0 { into.push(from.pop()); }
+}
+
+fn total(iso xs: List<i64>) -> i64 {
+    var t = 0;
+    for x in xs { t = t + x; }
+    return t;
+}
+
+fn main() {
+    var a = [1, 2];
+    var b = [3, 4, 5];
+    move_all(a, b);
+    // a = [1, 2, 5, 4, 3], b = [].
+    print(a.len());
+    print(b.len());
+    var p = Pair { left: [1], right: [2, 3] };
+    // Two different fields of one value do not overlap.
+    move_all(p.left, p.right);
+    print(p.left.len());
+    // 1 + 2 + 5 + 4 + 3 = 15; `a` is not used again.
+    print(total(a));
+    // A fresh list is an unaliased owner: 7 + 8 = 15.
+    print(total([7, 8]));
+}

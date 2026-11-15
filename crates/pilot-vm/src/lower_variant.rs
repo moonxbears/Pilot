@@ -11,7 +11,7 @@
 use crate::instruction::Opcode;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 impl BytecodeCompiler {
     /// Records the payload fields of variant `variant` of enum `owner`.

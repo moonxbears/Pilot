@@ -1,0 +1,7 @@
+// CALL001: an argument with no parameter to take it is refused too.
+fn twice(n: i64) -> i64 => n * 2;
+
+fn main() {
+    // The call starts at line 6, column 11.
+    print(twice(1, 2, 3));
+}

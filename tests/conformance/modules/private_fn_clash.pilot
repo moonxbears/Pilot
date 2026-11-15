@@ -1,0 +1,9 @@
+// F4: two packages each declare a private `helper`; each package's own
+// calls reach its own function.
+use lib.private_one;
+use lib.private_two;
+
+fn main() {
+    print(from_one());
+    print(from_two());
+}

@@ -1,0 +1,125 @@
+// ==============================================================================
+// FILE: selfhost/cli/test_ir.pilot
+// `pilot test --ir`: the conformance corpus on the PilIR interpreter (F5).
+// ==============================================================================
+// Every conformance case is eligible except one whose expected stderr is a
+// seed limit (SEED001): that expectation describes what the seed cannot run,
+// which the PilIR interpreter is not bound by. Each case is run as
+// `pilot ir run-roundtrip <case> -- <args>` (its `.stdin` as input), one
+// process that does what `pilot ir roundtrip` and then `pilot ir run` do.
+// The module must round-trip: printed, parsed and printed again, it is the
+// same text (a program the compiler rejects has no module). The run is then
+// checked against the case's expectation files exactly as `pilot test`
+// checks `pilot run`: its output, its diagnostics and runtime errors, and
+// its exit code.
+//
+// A case whose lowering or run stops at a registered `ir.*` seam is counted
+// as stopped at a seam: neither passed nor failed. Every other difference is
+// a failure. The other cases are counted as not eligible.
+pub lvl(0) pkg Pilot.SelfHost.Cli.TestIr;
+
+use Pilot.Core.File;
+use std.proc;
+use std.text;
+use Pilot.SelfHost.Cli.TestCmd;
+use Pilot.SelfHost.Cli.Report;
+
+/// The seam prefix of the PilIR lowering and interpreter.
+pub pure fn ir_seam_prefix() -> str => "`ir.";
+/// The line `pilot ir run-roundtrip` writes when a module does not
+/// round-trip (`roundtrip_failed()` in selfhost/ir/main.pilot; the CLI does
+/// not link the lowerer).
+pub pure fn roundtrip_failed_line() -> str => "error: the PilIR text does not round-trip; the program was not run";
+/// The diagnostic code of an unconnected seam.
+pub pure fn seam_code() -> str => "SEAM001";
+
+/// The totals of a `pilot test --ir` run.
+pub struct IrTally : IObject {
+    pub passed:       i64;
+    pub failed:       i64;
+    pub at_seam:      i64;
+    pub not_eligible: i64;
+}
+
+fn read_optional(path: str) -> str? {
+    if File.exists(path) { return File.read_text(path); }
+    return none;
+}
+
+/// Whether conformance case `program` is one `pilot ir run` must answer.
+pub fn ir_eligible(program: str) -> bool {
+    let stem = test_stem(program);
+    let expected_stderr = read_optional(stem + ".stderr") ?? "";
+    return expected_stderr.find(seed_limit_code(), 0) < 0;
+}
+
+fn job(program: str, mode: str) -> proc.ProcessJob {
+    let input = read_optional(test_stem(program) + ".stdin") ?? "";
+    let exe = proc.current_exe() ?? "pilot";
+    var argv: List<str> = ["ir", mode, program, "--"];
+    let arg_text = read_optional(test_stem(program) + ".args");
+    if arg_text != none {
+        for a in test_lines(arg_text) { argv.push(a); }
+    }
+    return proc.job(exe, argv, input);
+}
+
+/// Runs `mode` on each of `programs` (`proc.run_all`).
+fn run_all(programs: List<str>, mode: str) -> List<proc.ProcessOutput> {
+    var jobs: List<proc.ProcessJob> = [];
+    for program in programs { jobs.push(job(program, mode)); }
+    return proc.run_all(jobs);
+}
+
+fn stopped_at_seam(out: proc.ProcessOutput) -> bool =>
+    out.stderr.find(seam_code(), 0) >= 0 && out.stderr.find(ir_seam_prefix(), 0) >= 0;
+
+/// The seam a run stopped at, as its message line.
+fn seam_line(out: proc.ProcessOutput) -> str {
+    for line in test_lines(out.stderr) {
+        if line.find(seam_code(), 0) >= 0 { return line; }
+    }
+    return "";
+}
+
+fn fail(program: str, problems: List<str>, var ref tally: IrTally) {
+    tally.failed = tally.failed + 1;
+    print(f"FAIL {program}");
+    for p in problems { print("  " + p); }
+}
+
+/// `pilot test --ir [paths...] [--filter text]`: exit 0 when no eligible case
+/// fails, 1 otherwise.
+pub fn test_ir_command(paths: List<str>, filter: str) -> i64 {
+    var tally = IrTally { passed: 0, failed: 0, at_seam: 0, not_eligible: 0 };
+    let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
+    var cases: List<str> = [];
+    for root in roots {
+        let programs = if root.ends_with(".pilot") { [root] } else { test_programs_in(root) };
+        for program in programs {
+            if program.find(filter, 0) < 0 || !File.exists(test_stem(program) + ".stdout") { continue; }
+            if ir_eligible(program) { cases.push(program); } else { tally.not_eligible = tally.not_eligible + 1; }
+        }
+    }
+    let runs = run_all(cases, "run-roundtrip");
+    var i = 0;
+    while i < cases.len() {
+        let out = runs[i];
+        if stopped_at_seam(out) {
+            tally.at_seam = tally.at_seam + 1;
+            print(f"SEAM {cases[i]}: {seam_line(out)}");
+        } else if out.stderr.find(roundtrip_failed_line(), 0) >= 0 {
+            fail(cases[i], [f"the PilIR text does not round-trip\n--- stderr ---\n{out.stderr}"], tally);
+        } else {
+            let r = test_check_case(cases[i], out);
+            if r.problems.len == 0 {
+                tally.passed = tally.passed + 1;
+            } else {
+                fail(cases[i], r.problems, tally);
+            }
+        }
+        i = i + 1;
+    }
+    print(f"RESULT (ir): {tally.passed} passed, {tally.failed} failed, {tally.at_seam} stopped at a seam, {tally.not_eligible} not eligible");
+    return if tally.failed == 0 { 0 } else { 1 };
+}

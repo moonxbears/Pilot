@@ -70,12 +70,12 @@ pub partial struct {
 // -------------------------------------------------------------------------
 
 comptime {
-    __engine("bind_receptor", nameof(call),   37, 1);
-    __engine("bind_receptor", nameof(splice), 37, 2);
-    __engine("bind_receptor", nameof(frame),  37, 3);
-    __engine("bind_receptor", nameof(sig),    37, 4);
-    __engine("bind_receptor", nameof(grad),   37, 5);
-    __engine("bind_receptor", nameof(plan),   37, 6);
+    bind_receptor(nameof(call),   37, 1);
+    bind_receptor(nameof(splice), 37, 2);
+    bind_receptor(nameof(frame),  37, 3);
+    bind_receptor(nameof(sig),    37, 4);
+    bind_receptor(nameof(grad),   37, 5);
+    bind_receptor(nameof(plan),   37, 6);
 }
 
 pub syntax {

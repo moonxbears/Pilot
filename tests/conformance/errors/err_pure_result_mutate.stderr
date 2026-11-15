@@ -1,0 +1,2 @@
+error[CONST001]: the value `table()` gives is a constant and cannot be changed; copy it into a variable first (`var copy = table();`)
+err_pure_result_mutate.pilot:6:5

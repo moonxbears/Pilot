@@ -1,0 +1,412 @@
+// ==============================================================================
+// FILE: selfhost/cli/test_emit.pilot
+// `pilot test --emit <lang>`: the conformance corpus through `pilot emit`,
+// built and run with the host's own toolchain for that language.
+// ==============================================================================
+// Every case `pilot test --ir` finds eligible is eligible here. Each case is
+// emitted with `pilot emit <lang> <case>`:
+//   - a case the compiler rejects is checked against its expectation files
+//     exactly as `pilot test` checks `pilot run` (the same diagnostics, the
+//     same exit code);
+//   - a case whose emission stops at a registered `emit.*` or `ir.*` seam is
+//     counted as stopped at a seam: neither passed nor failed;
+//   - any other case is written to `target/test-emit/<lang>/`, built when the
+//     language is compiled, and run with its `.args` and `.stdin`. Its stdout
+//     and exit code must be the expected ones, and its stderr must hold each
+//     expected stderr line, a runtime error from `runtime error:` on. An
+//     emitted program carries no source positions, so the position lines of
+//     a runtime error's trace are not checked. A program the host compiler
+//     rejects is a failure.
+// A tool the language needs that the host does not have stops the command.
+//
+// `--live-allocations` (C only) compiles each case with PILOT_LIVE_COUNT,
+// so its binary reports the heap objects still allocated when it ends
+// normally; a case that reports any fails.
+pub lvl(0) pkg Pilot.SelfHost.Cli.TestEmit;
+
+use Pilot.Core.File;
+use std.proc;
+use std.text;
+use Pilot.SelfHost.Cli.TestCmd;
+use Pilot.SelfHost.Cli.TestIr;
+
+/// How the host builds and runs a program in one language: `compile` (empty
+/// for an interpreted language) and `run` are argument lists in which
+/// `{src}` is the emitted file, `{bin}` the built program and `{rt}` the
+/// directory of the C runtime header (`c_runtime_dir()`).
+pub struct EmitRunner : IObject {
+    pub lang:    str;
+    pub ext:     str;
+    pub compile: List<str>;
+    pub run:     List<str>;
+}
+
+fn runner(lang: str, ext: str, compile: List<str>, run: List<str>) -> EmitRunner =>
+    EmitRunner { lang: lang, ext: ext, compile: compile, run: run };
+
+/// How each `pilot emit` target is built and run.
+pub fn emit_runners() -> List<EmitRunner> => [
+    runner("python", "py", [], ["python3", "{src}"]),
+    runner("js", "js", [], ["node", "{src}"]),
+    runner("lua", "lua", [], ["lua", "{src}"]),
+    runner("c", "c", ["cc", "-std=c11", "-w", "-I", "{rt}", "{src}", "-o", "{bin}", "-lm"], ["{bin}"]),
+    runner("cpp", "cpp", ["c++", "-std=c++17", "-w", "-I", "{rt}", "{src}", "-o", "{bin}"], ["{bin}"]),
+    runner("rust", "rs", ["rustc", "-A", "warnings", "-o", "{bin}", "{src}"], ["{bin}"]),
+    runner("csharp", "cs", ["mcs", "-nowarn:162,168,219,429", "-out:{bin}", "{src}"], ["mono", "{bin}"]),
+];
+
+/// The runner of target `lang`.
+pub fn emit_runner(lang: str) -> EmitRunner? {
+    for r in emit_runners() {
+        if r.lang == lang { return r; }
+    }
+    return none;
+}
+
+/// The totals of a `pilot test --emit` run.
+struct EmitTally : IObject {
+    pub passed:       i64;
+    pub failed:       i64;
+    pub at_seam:      i64;
+    pub not_eligible: i64;
+}
+
+fn read_or_empty(path: str) -> str => if File.exists(path) { File.read_text(path) } else { "" };
+
+/// The C compiler option that makes a binary count its heap objects
+/// (runtime/c/pilot_rt.h).
+pub fn live_count_define() -> str => "-DPILOT_LIVE_COUNT";
+
+/// The prefix of the line a counting binary ends with.
+fn live_prefix() -> str => "live allocations: ";
+
+/// The objects a counting binary reported still allocated, or none when it
+/// reported nothing (it stopped early).
+fn live_count(stderr: str) -> str? {
+    for line in test_lines(stderr) {
+        if line.starts_with(live_prefix()) { return line.slice(live_prefix().len(), line.len()).trim(); }
+    }
+    return none;
+}
+
+/// `template` with `{src}` and `{bin}` filled in.
+fn filled(template: List<str>, src: str, bin: str) -> List<str> {
+    var out: List<str> = [];
+    for t in template {
+        out.push(t.replace("{src}", src).replace("{bin}", bin).replace("{rt}", c_runtime_dir()));
+    }
+    return out;
+}
+
+/// The directory holding the native backend's runtime header
+/// (`runtime/c/pilot_rt.h`): under the working directory or one of its
+/// parents, or above the running toolchain.
+pub fn c_runtime_dir() -> str {
+    let rel = "runtime/c";
+    for up in ["", "../", "../../"] {
+        if File.exists(up + rel + "/pilot_rt.h") { return up + rel; }
+    }
+    var dir = proc.current_exe() ?? "";
+    var cut = dir.len() - 1;
+    while cut > 0 {
+        if dir.byte_at(cut) == 47 {
+            dir = dir.slice(0, cut);
+            if File.exists(dir + "/" + rel + "/pilot_rt.h") { return dir + "/" + rel; }
+        }
+        cut = cut - 1;
+    }
+    return rel;
+}
+
+fn job_of(argv: List<str>, input: str) -> proc.ProcessJob {
+    var rest: List<str> = [];
+    var i = 1;
+    while i < argv.len() {
+        rest.push(argv[i]);
+        i = i + 1;
+    }
+    return proc.job(argv[0], rest, input);
+}
+
+fn stopped_at_seam(out: proc.ProcessOutput) -> bool =>
+    out.stderr.find(seam_code(), 0) >= 0 && (out.stderr.find("`emit.", 0) >= 0 || out.stderr.find(ir_seam_prefix(), 0) >= 0);
+
+fn seam_line(out: proc.ProcessOutput) -> str {
+    for line in test_lines(out.stderr) {
+        if line.find(seam_code(), 0) >= 0 { return line; }
+    }
+    return "";
+}
+
+/// Every way the run `out` of the emitted case `program` differs from its
+/// expectation files; `emitted` is what `pilot emit` printed on stderr.
+fn check_emitted(program: str, emitted: str, out: proc.ProcessOutput) -> List<str> {
+    let stem = test_stem(program);
+    var problems: List<str> = [];
+    let expected_stdout = File.read_text(stem + ".stdout");
+    let expected_exit = text_exit(stem);
+    if out.stdout != expected_stdout {
+        problems.push(f"stdout differs\n--- expected ---\n{expected_stdout}--- actual ---\n{out.stdout}--- stderr ---\n{out.stderr}");
+    }
+    if out.exit_code != expected_exit {
+        problems.push(f"exit code {out.exit_code}, expected {expected_exit}\n--- stderr ---\n{out.stderr}");
+    }
+    let stderr = emitted + out.stderr;
+    for line in test_lines(read_or_empty(stem + ".stderr")) {
+        var want = line.trim();
+        let at = want.find("runtime error: ", 0);
+        if at >= 0 {
+            want = want.slice(at, want.len());
+        } else if want.find(".pilot:", 0) >= 0 {
+            // A source position of a runtime error's trace.
+            continue;
+        }
+        if want.len() > 0 && stderr.find(want, 0) < 0 {
+            problems.push(f"stderr lacks `{want}`\n--- stderr ---\n{stderr}");
+        }
+    }
+    return problems;
+}
+
+/// The exit code case `stem` expects.
+fn text_exit(stem: str) -> i64 {
+    let t = read_or_empty(stem + ".exit").trim();
+    if t == "" { return 0; }
+    var n = 0;
+    var neg = false;
+    var i = 0;
+    while i < t.len() {
+        let c = t.byte_at(i);
+        if c == 45 && i == 0 { neg = true; } else { n = n * 10 + (c - 48); }
+        i = i + 1;
+    }
+    return if neg { 0 - n } else { n };
+}
+
+fn fail(program: str, problems: List<str>, var ref tally: EmitTally) {
+    tally.failed = tally.failed + 1;
+    print(f"FAIL {program}");
+    for p in problems { print("  " + p); }
+}
+
+/// What `pilot emit` made of one case for one language: the process output
+/// to judge it by, and the file holding the program when it was emitted
+/// ("" when it was not).
+struct Emitted : IObject {
+    pub out: proc.ProcessOutput;
+    pub src: str;
+}
+
+/// The files a several-language `pilot emit` reported writing: the last
+/// word of each `emitted <language> <file>` line of its stdout.
+fn written_files(stdout: str) -> List<str> {
+    var out: List<str> = [];
+    for line in test_lines(stdout) {
+        if line.starts_with("emitted ") {
+            let rest = line.slice(8, line.len());
+            let sp = rest.find(" ", 0);
+            if sp >= 0 { out.push(rest.slice(sp + 1, rest.len())); }
+        }
+    }
+    return out;
+}
+
+fn has_line(stdout: str, want: str) -> bool {
+    for line in test_lines(stdout) {
+        if line == want { return true; }
+    }
+    return false;
+}
+
+/// Each case of `cases` emitted in each language of `rs`: `[language][case]`.
+/// One language is one `pilot emit <lang>` per case. Several are one
+/// `pilot emit <lang>,<lang>..` per case, which checks and lowers the case
+/// once:
+///   - a run that ends well wrote each language's program to the file it
+///     names in an `emitted` line;
+///   - a run that stops before its `checked` line was rejected by the
+///     compiler, which is the answer for every language;
+///   - any other run stopped in one language's emitter (a seam): that case
+///     is emitted again, once per language.
+fn emit_cases(exe: str, rs: List<EmitRunner>, cases: List<str>, dir_of: List<str>) -> List<List<Emitted>> {
+    var all: List<List<Emitted>> = [];
+    if rs.len() == 1 {
+        var emits: List<proc.ProcessJob> = [];
+        for c in cases { emits.push(proc.job(exe, ["emit", rs[0].lang, c], "")); }
+        var row: List<Emitted> = [];
+        for out in proc.run_all(emits) { row.push(Emitted { out: out, src: "" }); }
+        all.push(row);
+        return all;
+    }
+    var langs = "";
+    for r in rs { langs = if langs == "" { r.lang } else { langs + "," + r.lang }; }
+    var emits: List<proc.ProcessJob> = [];
+    for c in cases {
+        var files = "";
+        var k = 0;
+        while k < rs.len() {
+            let f = f"{dir_of[k]}/{test_base_name(test_stem(c))}.{rs[k].ext}";
+            files = if k == 0 { f } else { files + "," + f };
+            k = k + 1;
+        }
+        emits.push(proc.job(exe, ["emit", langs, c, "-o", files], ""));
+    }
+    let outs = proc.run_all(emits);
+    // [language, case] pairs to emit on their own.
+    var alone_lang: List<i64> = [];
+    var alone_case: List<i64> = [];
+    var alone: List<proc.ProcessJob> = [];
+    for r in rs { all.push([]); }
+    var i = 0;
+    while i < cases.len() {
+        let out = outs[i];
+        let wrote = written_files(out.stdout);
+        let checked = has_line(out.stdout, "checked");
+        var k = 0;
+        while k < rs.len() {
+            let f = f"{dir_of[k]}/{test_base_name(test_stem(cases[i]))}.{rs[k].ext}";
+            if out.exit_code == 0 && k < wrote.len() && wrote[k] == f {
+                all[k].push(Emitted { out: ProcessOutput { exit_code: 0, stdout: "", stderr: out.stderr }, src: f });
+            } else if out.exit_code != 0 && !checked {
+                all[k].push(Emitted { out: out, src: "" });
+            } else {
+                all[k].push(Emitted { out: out, src: "" });
+                alone_lang.push(k);
+                alone_case.push(i);
+                alone.push(proc.job(exe, ["emit", rs[k].lang, cases[i]], ""));
+            }
+            k = k + 1;
+        }
+        i = i + 1;
+    }
+    let redone = proc.run_all(alone);
+    var a = 0;
+    while a < redone.len() {
+        all[alone_lang[a]][alone_case[a]] = Emitted { out: redone[a], src: "" };
+        a = a + 1;
+    }
+    return all;
+}
+
+/// `pilot test --emit <lang>[,<lang>..] [paths...] [--filter text] [--live-allocations]`: exit 0 when no
+/// eligible case fails, 1 when one does, 2 when a language is not a target.
+pub fn test_emit_command(langs: str, paths: List<str>, filter: str, live: bool) -> i64 {
+    var rs: List<EmitRunner> = [];
+    var has_c = false;
+    for lang in text.split_text(langs, ",") {
+        guard some r = emit_runner(lang) else {
+            eprint(f"error: `pilot emit` has no target `{lang}`");
+            return 2;
+        };
+        if lang == "c" { has_c = true; }
+        rs.push(r);
+    }
+    if live && !has_c {
+        eprint("error: `--live-allocations` counts the heap objects of C binaries: use it with `--emit c`");
+        return 2;
+    }
+    var not_eligible = 0;
+    let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
+    var cases: List<str> = [];
+    for root in roots {
+        let programs = if root.ends_with(".pilot") { [root] } else { test_programs_in(root) };
+        for program in programs {
+            if program.find(filter, 0) < 0 || !File.exists(test_stem(program) + ".stdout") { continue; }
+            if ir_eligible(program) { cases.push(program); } else { not_eligible = not_eligible + 1; }
+        }
+    }
+    let exe = proc.current_exe() ?? "pilot";
+    var dirs: List<str> = [];
+    for r in rs { dirs.push(f"target/test-emit/{r.lang}"); }
+    let emitted = emit_cases(exe, rs, cases, dirs);
+    var failed = 0;
+    var k = 0;
+    while k < rs.len() {
+        let tally = EmitTally { passed: 0, failed: 0, at_seam: 0, not_eligible: not_eligible };
+        run_emitted(rs[k], cases, emitted[k], dirs[k], live && rs[k].lang == "c", tally);
+        print(f"RESULT (emit {rs[k].lang}): {tally.passed} passed, {tally.failed} failed, {tally.at_seam} stopped at a seam, {tally.not_eligible} not eligible");
+        failed = failed + tally.failed;
+        k = k + 1;
+    }
+    return if failed == 0 { 0 } else { 1 };
+}
+
+/// Builds, runs and judges `cases` as emitted for the language of `r`.
+fn run_emitted(r: EmitRunner, cases: List<str>, emitted: List<Emitted>, dir: str, live: bool, var ref tally: EmitTally) {
+    var compile: List<str> = [];
+    for a in r.compile {
+        compile.push(a);
+        if live && a == "-std=c11" { compile.push(live_count_define()); }
+    }
+
+    // Cases that emitted, with their files.
+    var built: List<str> = [];
+    var built_stderr: List<str> = [];
+    var srcs: List<str> = [];
+    var bins: List<str> = [];
+    var i = 0;
+    while i < cases.len() {
+        let out = emitted[i].out;
+        if stopped_at_seam(out) {
+            tally.at_seam = tally.at_seam + 1;
+            print(f"SEAM {cases[i]}: {seam_line(out)}");
+        } else if out.exit_code != 0 {
+            let res = test_check_case(cases[i], out);
+            if res.problems.len == 0 { tally.passed = tally.passed + 1; } else { fail(cases[i], res.problems, tally); }
+        } else {
+            let base = test_base_name(test_stem(cases[i]));
+            let src = f"{dir}/{base}.{r.ext}";
+            if emitted[i].src == "" && !File.write_text(src, out.stdout) {
+                fail(cases[i], [f"cannot write `{src}`"], tally);
+            } else {
+                built.push(cases[i]);
+                built_stderr.push(out.stderr);
+                srcs.push(src);
+                bins.push(f"{dir}/{base}.bin");
+            }
+        }
+        i = i + 1;
+    }
+
+    // Build, when the language is compiled.
+    var runnable: List<i64> = [];
+    if r.compile.len() == 0 {
+        i = 0;
+        while i < built.len() { runnable.push(i); i = i + 1; }
+    } else {
+        var builds: List<proc.ProcessJob> = [];
+        for k in 0 .. built.len() { builds.push(job_of(filled(compile, srcs[k], bins[k]), "")); }
+        let outs = proc.run_all(builds);
+        i = 0;
+        while i < built.len() {
+            if outs[i].exit_code == 0 {
+                runnable.push(i);
+            } else {
+                fail(built[i], [f"the host compiler rejected `{srcs[i]}`\n{outs[i].stdout}{outs[i].stderr}"], tally);
+            }
+            i = i + 1;
+        }
+    }
+
+    // Run.
+    var runs: List<proc.ProcessJob> = [];
+    for k in runnable {
+        let stem = test_stem(built[k]);
+        var argv = filled(r.run, srcs[k], bins[k]);
+        for a in test_lines(read_or_empty(stem + ".args")) { argv.push(a); }
+        runs.push(job_of(argv, read_or_empty(stem + ".stdin")));
+    }
+    let outs = proc.run_all(runs);
+    i = 0;
+    while i < runnable.len() {
+        let k = runnable[i];
+        var problems = check_emitted(built[k], built_stderr[k], outs[i]);
+        if live {
+            if some n = live_count(outs[i].stderr) {
+                if n != "0" { problems.push(f"{n} heap objects still allocated at the end"); }
+            }
+        }
+        if problems.len() == 0 { tally.passed = tally.passed + 1; } else { fail(built[k], problems, tally); }
+        i = i + 1;
+    }
+}

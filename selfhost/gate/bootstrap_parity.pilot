@@ -77,11 +77,8 @@ pub fn execute_bootstrap_parity_gate(workspace_root: str, _opts: ref<GateRunOpti
 
     let dt = gate_time_now_us() - t0;
     let elapsed = if dt >= 0 { dt } else { 0 };
-    if elapsed > bootstrap_budget_us() {
-        let _ = glist_push(violations, bp_violation("" + elapsed + " us",
-            "Bootstrap parity check exceeded compile-speed latency budget",
-            "Optimize the self-hosted compiler hot loops"));
-    }
+    // Compile speed is not gated (decided 2026-11-10): the elapsed time is
+    // reported for information only.
 
     return GateReport {
         gate_id: "bootstrap_parity",

@@ -1,0 +1,18 @@
+// F1: a closure stored in a field is called through the field:
+// `(self.f)(x)`, `(.f)(x)` and `d.f(x)` all call the function `f` holds.
+struct Doubler {
+    f: fn<i64, i64>;
+
+    fn run(self, x: i64) -> i64 {
+        return (self.f)(x);
+    }
+
+    fn run_short(x: i64) -> i64 => (.f)(x);
+}
+
+fn main() {
+    let d = Doubler { f: (x) => x * 2 };
+    print(d.run(5));
+    print(d.run_short(6));
+    print(d.f(7));
+}

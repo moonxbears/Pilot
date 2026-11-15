@@ -1,0 +1,7 @@
+// The condition of `if` must be a `bool` too: an integer is a type error
+// at build time (until 2026-11-13 it failed only at run time).
+fn main() {
+    let n = 5;
+    print("never");
+    if n { print("yes"); }
+}

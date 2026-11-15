@@ -7,8 +7,8 @@
 use pilot_span::ByteSpan;
 use crate::keywords::lookup_keyword;
 use crate::simd::{
-    scan_ident_run, scan_quoted_string_end, scan_to_block_comment_end,
-    scan_to_newline, scan_triple_string_end, scan_whitespace_run,
+    scan_ident_run, scan_interpolated_string_end, scan_quoted_string_end,
+    scan_to_block_comment_end, scan_to_newline, scan_triple_string_end, scan_whitespace_run,
 };
 use crate::token::{TokenFlags, TokenKind, TokenTape};
 
@@ -81,6 +81,16 @@ impl<'a> Lexer<'a> {
                 let end = scan_to_block_comment_end(self.bytes, start + 2);
                 self.pos = end;
                 self.emit(TokenKind::BlockComment, TokenFlags::NONE, start, end, false);
+                continue;
+            }
+
+            // Raw interpolated strings (`rf"..."`, `fr"..."`, any case)
+            let is_r = |b: u8| b == b'r' || b == b'R';
+            let is_f = |b: u8| b == b'f' || b == b'F';
+            if ((is_r(b0) && is_f(b1)) || (is_f(b0) && is_r(b1))) && (b2 == b'"' || b2 == b'\'') {
+                let mut extra = TokenFlags::IS_RAW_STRING;
+                extra.insert(TokenFlags::IS_INTERPOLATED);
+                self.scan_string_literal(start, start + 2, b2, extra);
                 continue;
             }
 
@@ -218,12 +228,22 @@ impl<'a> Lexer<'a> {
     }
 
     fn scan_string_literal(&mut self, token_start: usize, quote_pos: usize, quote: u8, extra_flags: TokenFlags) {
+        let is_interp = extra_flags.contains(TokenFlags::IS_INTERPOLATED);
+        let is_raw = extra_flags.contains(TokenFlags::IS_RAW_STRING);
         if self.peek_at(quote_pos + 1) == quote && self.peek_at(quote_pos + 2) == quote {
-            let end = scan_triple_string_end(self.bytes, quote_pos + 3, quote);
+            let end = if is_interp {
+                scan_interpolated_string_end(self.bytes, quote_pos + 3, quote, is_raw, true)
+            } else {
+                scan_triple_string_end(self.bytes, quote_pos + 3, quote)
+            };
             self.pos = end;
             self.emit(TokenKind::TripleStrLit, extra_flags, token_start, end, true);
         } else {
-            let close_idx = scan_quoted_string_end(self.bytes, quote_pos + 1, quote);
+            let close_idx = if is_interp {
+                scan_interpolated_string_end(self.bytes, quote_pos + 1, quote, is_raw, false)
+            } else {
+                scan_quoted_string_end(self.bytes, quote_pos + 1, quote)
+            };
             let end = if close_idx < self.bytes.len() && self.bytes[close_idx] == quote {
                 close_idx + 1
             } else {
@@ -281,11 +301,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        // Name-blind dimensional unit suffix check (`250ms`, `2.4GHz`, `64KB`, `100mol`, etc.):
-        // Any adjacent non-seed alphabetic identifier run marks `TokenFlags::IS_DIMENSIONAL`.
+        // Name-blind suffix check: a unit (`250ms`, `2.4GHz`, `64KB`) or a type
+        // name (`200u8`, `0xFFu8`). Any adjacent non-seed alphabetic identifier
+        // run marks `TokenFlags::IS_DIMENSIONAL`; the parser tells them apart.
         let mut flags = TokenFlags::NONE;
-        if (kind == TokenKind::IntLit || kind == TokenKind::FloatLit)
-            && cur < self.bytes.len()
+        if cur < self.bytes.len()
             && self.bytes[cur].is_ascii_alphabetic()
         {
             let unit_len = scan_ident_run(self.bytes, cur);
@@ -377,7 +397,12 @@ impl<'a> Lexer<'a> {
             (b'>', b'>', _) => (TokenKind::ShiftRight, 2, false),
             (b'>', b'=', _) => (TokenKind::GreaterEqual, 2, false),
             (b'>', _, _) => (TokenKind::Greater, 1, false),
-            _ => (TokenKind::ErrorToken, 1, false),
+            // A character no rule takes is one error token, all its bytes,
+            // so a token never ends inside a multi-byte character.
+            _ => {
+                let width = self.source.get(start..).and_then(|rest| rest.chars().next()).map_or(1, char::len_utf8);
+                (TokenKind::ErrorToken, width, false)
+            }
         };
         self.pos = start + len;
         self.emit(kind, TokenFlags::NONE, start, self.pos, can_infix_dot);

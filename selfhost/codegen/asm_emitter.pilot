@@ -4,6 +4,8 @@
 // Emits System V AMD64 x86_64 & AVX2/SSE assembly strictly from layout physics.
 // ============================================================================
 
+use std.text;
+
 [Layout(c_abi)]
 pub struct AsmModuleArtifact : IValue {
     pub module_name: str;
@@ -380,7 +382,7 @@ pub fn emit_arena_x86_64_asm() -> str {
     let prog = cg_target_prog_nid();
     let st = __engine("map_new");
     __engine("map_set", st, "lid", 0);
-    var out = "\t.text\n";
+    var out: List<str> = ["\t.text\n"];
 
     if prog >= 0 {
         let cc = __engine("ast_child_count", prog);
@@ -392,7 +394,7 @@ pub fn emit_arena_x86_64_asm() -> str {
                 let fname = __engine("sym_str", __engine("ast_node_sym", item));
                 let rdesc = cg_resolve_type_physics(cg_fn_return_type_name(item));
                 if rdesc.reg_class == 5 {
-                    out = out + as_emit_simd_fn(item, rdesc);
+                    out.push(as_emit_simd_fn(item, rdesc));
                 } else {
                     fn_seq = fn_seq + 1;
                     let fst = __engine("map_new");
@@ -455,12 +457,12 @@ pub fn emit_arena_x86_64_asm() -> str {
                     as_emit_insn(fst, "retq");
 
                     __engine("map_set", st, "lid", (__engine("map_get", fst, "lid") ?? 0));
-                    out = out + "\t.globl\t" + fname + "\n" + fname + ":\n" + __engine("map_get", fst, "code") + "\n";
+                    out.push("\t.globl\t" + fname + "\n" + fname + ":\n" + __engine("map_get", fst, "code") + "\n");
                 }
             }
             ci = ci + 1;
         }
     }
 
-    return out + "\t.section\t.note.GNU-stack,\"\",@progbits\n";
+    return text.join_text(out, "") + "\t.section\t.note.GNU-stack,\"\",@progbits\n";
 }

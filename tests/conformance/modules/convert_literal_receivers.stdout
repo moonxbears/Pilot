@@ -1,0 +1,7 @@
+"42".to_i64(): ok 42
+200u8.to_i8(): err Overflow
+(-1).to_u8(): err Underflow
+text.to_i32(): ok -17
+x.to_u8(): err Overflow
+n.to_u16(): ok 65
+b.to_i8(): ok 65

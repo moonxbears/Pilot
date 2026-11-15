@@ -1,0 +1,2 @@
+error[COMP001]: Stateful *Bundle 'CountBundle' spliced into layout-sealed 'partial struct'; only 0-field *Facet may be spliced in partial extensions
+err_partial_bundle.pilot:25:5

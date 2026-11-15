@@ -5,7 +5,7 @@ use crate::lower_native::native;
 use crate::BytecodeCompiler;
 use pilot_parser::NativeKind;
 use pilot_ast::{AstArena, AstNode, CallQuoteKind, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// Where a call-quote mode stops until its carrier values exist.
 const QUOTED_CALL_SEAM: &str = "SEAM001: unconnected seam `vm.call_quote`: \
@@ -55,7 +55,10 @@ impl BytecodeCompiler {
                 Err((code, message)) => self.error(code, message),
             };
         }
-        self.compile_call_positional(arena, ids)
+        match self.fill_defaults(arena, ids) {
+            Ok(filled) => self.compile_call_positional(arena, &filled),
+            Err((code, message)) => self.error(code, message),
+        }
     }
 
     /// Calls `ids[0]` with `ids[1..]`, which are positional except for a
@@ -81,6 +84,10 @@ impl BytecodeCompiler {
     }
 
     /// Emits a call to `full`, falling back to `bare` when `full` is unknown.
+    /// A `full` that is declared but not compiled yet (an imported function
+    /// or method compiles on first use, or a dispatcher built after the
+    /// program) is called through a patch, never through a `bare` function
+    /// that happens to be compiled already.
     pub(crate) fn emit_user_call(&mut self, full: String, bare: String, args: &[u8]) -> u8 {
         self.check_exported(&full);
         if let Some((owner, _)) = full.rsplit_once('.') {
@@ -88,11 +95,12 @@ impl BytecodeCompiler {
         }
         self.stage_args(args);
         let dst = self.alloc_reg();
-        let entry = self
-            .fn_entries
-            .get(&full)
-            .or_else(|| self.fn_entries.get(&bare))
-            .map(|&(e, _)| e);
+        let pending = self.lazy_decls.contains_key(&full) || self.dispatchers.contains_key(&full);
+        let entry = match self.fn_entries.get(&full) {
+            Some(&(e, _)) => Some(e),
+            None if pending => None,
+            None => self.fn_entries.get(&bare).map(|&(e, _)| e),
+        };
         match entry {
             Some(e) => {
                 self.push_ins(Instruction::encode_wide(Opcode::Call, dst, e));
@@ -125,6 +133,26 @@ impl BytecodeCompiler {
     }
 
     fn compile_named_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> u8 {
+        if args.len() == 2 && pilot_parser::bootstrap_tables().membership() == Some(name) {
+            if let Some(t) = self.static_type(arena, args[1]) {
+                if let Some(op) = pilot_parser::bootstrap_tables().membership_native(&t) {
+                    let r_lhs = self.compile_node(arena, args[0]);
+                    let r_rhs = self.compile_node(arena, args[1]);
+                    return self.emit_intrinsic(op, &[r_rhs, r_lhs]);
+                }
+            } else {
+                let r_lhs = self.compile_node(arena, args[0]);
+                let r_rhs = self.compile_node(arena, args[1]);
+                let r_hit = self.emit_intrinsic("native_in_check", &[r_rhs, r_lhs]);
+                let j_fallback = self.emit_branch(Opcode::JumpIfNull, r_hit, 0);
+                let j_done = self.emit_jump(0);
+                self.patch_to_here(j_fallback);
+                let r_seq = self.emit_user_call(name.to_string(), name.to_string(), &[r_lhs, r_rhs]);
+                self.emit(Opcode::Move, r_hit, r_seq, 0);
+                self.patch_to_here(j_done);
+                return r_hit;
+            }
+        }
         // A name the program declares wins over a native function. The seed
         // token and receptors such as `nameof` are syntax and always win.
         let syntax =
@@ -169,6 +197,13 @@ impl BytecodeCompiler {
             if let Some(full) = self.payload_variant(name, hint.as_deref()) {
                 return self.compile_variant_ctor(arena, &full, args);
             }
+            // A bare call names a static method of the type expected here:
+            // `return ok(x);` in a function returning `result<..>` is
+            // `result<..>.ok(x)`.
+            if let Some(owner) = hint.filter(|h| self.declares(h, name) == Some(true)) {
+                let regs = self.compile_args(arena, args);
+                return self.emit_user_call(format!("{owner}.{name}"), name.to_string(), &regs);
+            }
         }
         if args.len() == 1 && !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
             if let Some(layout) = pilot_parser::bootstrap_tables().reg_layout(name).cloned() {
@@ -181,14 +216,17 @@ impl BytecodeCompiler {
                 return r;
             }
         }
-        let regs = self.compile_args(arena, args);
-        self.emit_user_call(name.to_string(), name.to_string(), &regs)
+        let regs = self.compile_args_for(arena, name, args);
+        let key = self.unit_fn_key(name);
+        let r = self.emit_user_call(key.clone(), key.clone(), &regs);
+        self.emit_out_writebacks(arena, &key, args);
+        r
     }
 
     fn compile_method_call(&mut self, arena: &AstArena, callee_id: NodeId, args: &[NodeId]) -> u8 {
         let callee = *arena.node(callee_id);
         let ln = *arena.node(NodeId(callee.lhs));
-        let r_nm = Self::name(arena, callee.rhs).to_string();
+        let r_nm = self.stored_field(arena, NodeId(callee.lhs), Self::name(arena, callee.rhs));
         let lhs_is_name = matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed);
         let raw_l = if lhs_is_name { Self::name(arena, ln.lhs).to_string() } else { String::new() };
         // A local or module-level binding is a value, not a type name.
@@ -204,18 +242,61 @@ impl BytecodeCompiler {
         let known = self.fn_entries.contains_key(&full) || (!is_var && self.declares(&l_nm, &r_nm).is_some());
         let receiver_is_value = is_var || (!lhs_is_name && !known);
         if receiver_is_value || (!known && native(NativeKind::Method, &r_nm).is_some()) {
+            // A receiver whose type the seed does not know (a literal, an
+            // unannotated binding, another call's result) takes the type the
+            // checker inferred for it, when the run plan has one and several
+            // non-struct types declare the method, so the seed cannot choose.
+            let untyped = if is_var { !self.var_types.contains_key(&raw_l) } else { !lhs_is_name };
+            let owner = if untyped && self.non_struct_owners(&r_nm) > 1 {
+                self.planned_receiver(arena, NodeId(callee.lhs)).unwrap_or_else(|| l_nm.clone())
+            } else {
+                l_nm.clone()
+            };
             let r_recv = self.compile_node(arena, NodeId(callee.lhs));
-            return self.emit_method_call(arena, r_recv, &l_nm, &r_nm, args);
+            return self.emit_method_call(arena, r_recv, &owner, &r_nm, args);
         }
         if !known && self.variant_payloads.contains_key(&full) {
             return self.compile_variant_ctor(arena, &full, args);
         }
-        let regs = self.compile_args(arena, args);
-        self.emit_user_call(full, r_nm, &regs)
+        let regs = self.compile_args_for(arena, &full, args);
+        let r = self.emit_user_call(full.clone(), r_nm, &regs);
+        self.emit_out_writebacks(arena, &full, args);
+        r
     }
 
     /// Converts the value in `r` to a primitive's register layout: `T(x)` and
     /// `x as T` for a type `T` declared with `[Bits(..)]`.
+    /// Whether `ty` is the type whose values are characters
+    /// (`bind_scalar_text`).
+    pub(crate) fn is_scalar_text(ty: &str) -> bool {
+        pilot_parser::bootstrap_tables().scalar_text_type() == Some(ty)
+    }
+
+    /// `r` as a character (`ops::scalar_from`).
+    pub(crate) fn emit_scalar(&mut self, r: u8) -> u8 {
+        let mark = self.next_reg;
+        let dst = self.emit_intrinsic("scalar_from", &[r]);
+        if dst >= mark {
+            self.emit(Opcode::Move, mark, dst, 0);
+        }
+        self.release_to(mark + 1);
+        mark
+    }
+
+    /// `r` as the result of arithmetic in `layout`'s register: wrapped or
+    /// rounded when it is a number (`ops::wrap`), itself otherwise.
+    pub(crate) fn emit_wrap(&mut self, r: u8, layout: &pilot_parser::RegLayout) -> u8 {
+        let mark = self.next_reg;
+        let r_class = self.emit_const(PilotVal::from_str(&layout.class));
+        let r_width = self.emit_const(PilotVal::from_int(layout.width));
+        let dst = self.emit_intrinsic("num_wrap", &[r, r_class, r_width]);
+        if dst >= mark {
+            self.emit(Opcode::Move, mark, dst, 0);
+        }
+        self.release_to(mark + 1);
+        mark
+    }
+
     pub(crate) fn emit_conversion(&mut self, r: u8, layout: &pilot_parser::RegLayout) -> u8 {
         let mark = self.next_reg;
         let r_class = self.emit_const(PilotVal::from_str(&layout.class));

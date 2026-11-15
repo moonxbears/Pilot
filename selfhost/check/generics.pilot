@@ -129,16 +129,34 @@ fn check_type_node(inf: Infer, b: Bounds, sink: DiagSink, t: i64) {
     let s = p.s;
     let name = node_name(s, t);
     if !name_is_written(s, t) || name.find(".", 0) >= 0 { return; }
-    let ty = prog_annot_type(p, t);
-    if !ty_is_named(p.tt, ty) { return; }
+    if visible_tparam(p, t, name) > 0 { return; }
+    let d = prog_type_decl(p, name);
+    if d < 0 { return; }
     let wanted = tparam_count(p, name);
+    var required = 0;
+    for td in prog_tparam_defaults(p, name) { if td < 0 { required = required + 1; } }
+    if prog_tparam_defaults(p, name).len() == 0 { required = wanted; }
     let given = children(s, t).len();
-    if given != wanted {
+    if given < required || given > wanted {
         sink_error(sink, t, "TYPE004",
             f"`{name}` takes {wanted} type argument(s), found {given}");
         return;
     }
-    if wanted > 0 { check_args(p, b, sink, generic_decl(p, name), ty_args(p.tt, ty), t, name); }
+    if wanted > 0 {
+        var arg_tys: List<i64> = [];
+        if is_type_alias(p, d) {
+            for a in children(s, t) { arg_tys.push(prog_annot_type(p, a)); }
+            let defaults = prog_tparam_defaults(p, name);
+            while arg_tys.len() < defaults.len() && defaults[arg_tys.len()] >= 0 {
+                arg_tys.push(prog_annot_type(p, defaults[arg_tys.len()]));
+            }
+        } else {
+            let ty = prog_annot_type(p, t);
+            if !ty_is_named(p.tt, ty) { return; }
+            arg_tys = ty_args(p.tt, ty);
+        }
+        check_args(p, b, sink, generic_decl(p, name), arg_tys, t, name);
+    }
 }
 
 /// Runs TYPE004 and TYPE005 over the user's files.
@@ -148,7 +166,8 @@ pub fn check_generics(inf: Infer, sink: DiagSink) {
     let b = bounds_new(s);
     var roots: List<i64> = [];
     var i = 0;
-    while i < s.count {
+    i = s.user_lo;
+    while i < s.user_hi {
         if in_user_file(s, i) {
             let k = kind(s, i);
             if annot(s, i) >= 0 { roots.push(annot(s, i)); }

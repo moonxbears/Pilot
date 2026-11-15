@@ -11,7 +11,7 @@
 use crate::instruction::{Instruction, Opcode};
 use crate::{BytecodeCompiler, CaptureCtx};
 use pilot_ast::{AstArena, NodeId};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// Closure calls pass the environment in the register after the arguments.
 const MAX_CLOSURE_ARGS: usize = crate::MAX_CALL_ARGS - 1;
@@ -35,6 +35,8 @@ impl BytecodeCompiler {
         let dst = self.alloc_reg();
         let skip = self.emit_jump(0);
         let entry = self.here();
+        // Becomes a jump to the generator stub when the body yields.
+        self.emit(Opcode::Nop, 0, 0, 0);
 
         let outer_slots = self.var_slots.clone();
         let saved = self.save_fn_state();
@@ -57,6 +59,9 @@ impl BytecodeCompiler {
         let r_body = self.compile_node(arena, NodeId(node.rhs));
         self.emit(Opcode::Move, 0, r_body, 0);
         self.emit(Opcode::Ret, 0, 0, 0);
+        if self.gen_body.is_some() {
+            self.emit_generator_stub(entry as usize);
+        }
         let captured = self.captures.pop().map(|c| c.names).unwrap_or_default();
         self.restore_fn_state(saved);
         self.patch_to_here(skip);

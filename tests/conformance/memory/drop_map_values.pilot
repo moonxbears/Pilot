@@ -1,0 +1,23 @@
+// F7: a map owns its values. Dropping the map drops each value in the order
+// of their keys (the order a map is shown in); assigning a key that holds a
+// value drops the old one, and assigning a new key drops nothing. Reading a
+// value by key borrows it.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn main() {
+    print("before");
+    var m: Map<str, Res> = Map<str, Res>();
+    m["b"] = Res { name: "b1" };
+    m["a"] = Res { name: "a1" };
+    m["b"] = Res { name: "b2" };
+    print(m["a"].name);
+    let lit: Map<str, Res> = ["y": Res { name: "y" }, "x": Res { name: "x" }];
+    print(lit["x"].name);
+    print("end");
+}

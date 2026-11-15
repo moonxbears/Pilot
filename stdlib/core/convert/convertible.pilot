@@ -1,0 +1,87 @@
+// =========================================================================
+// FILE: stdlib/core/convert/convertible.pilot
+// CHECKED PRIMITIVE CONVERSIONS: THE ERROR AND THE CONTRACTS
+// =========================================================================
+// `x.to_u8()`, `x.to_f64()`, `s.to_i64()` .. convert a primitive value to
+// another primitive and return `T ! ConvertError`: the value when the target
+// can hold it, the reason when it cannot. Nothing is truncated or wrapped;
+// use `x as T` for the wrapping register cast, and `x.as_u64()` ..
+// (`view.pilot`) to read the same bits as another type.
+//
+// One interface per target type, not one interface for every target:
+//   * the method names differ per target (`to_u8`, `to_f64`), so a single
+//     generic `IConvertible<T>` could not name them;
+//   * a type adopts only the conversions that make sense for it (`bool`
+//     has no `to_char`, `char` has no `to_f64`), the way `IAddOperator<T>`
+//     and the other operator contracts are split one per operation;
+//   * generic code asks for exactly what it calls (`<T : IToU8>`).
+// `IConvertible` gathers the numeric and `bool` targets for a type that
+// converts to all of them.
+//
+// Text from a value is the engine's `x.to_str()`, which cannot fail and so
+// returns a plain `str`; it is not declared again here.
+//
+// The conversions themselves are in `convert.pilot`.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Convert;
+
+/// Why a conversion gave no value.
+pub enum ConvertErrorKind : u8 {
+    /// The value is greater than the target's largest value (`+inf` too).
+    Overflow,
+    /// The value is less than the target's smallest value (`-inf` too, and
+    /// any negative value converted to an unsigned type).
+    Underflow,
+    /// The value is outside a domain that is not a numeric interval: an
+    /// integer that is not a Unicode scalar value (a surrogate, or above
+    /// `0x10FFFF`), or an integer other than 0 and 1 converted to `bool`.
+    OutOfRange,
+    /// Text that is not a value of the target type: empty, a stray sign,
+    /// a character that is not a digit, or more than one `char`.
+    InvalidFormat,
+    /// A value the target has no counterpart for: NaN converted to an integer.
+    NotRepresentable,
+}
+
+/// A failed conversion.
+[Layout(c_abi)]
+pub struct ConvertError : IValue {
+    pub kind: ConvertErrorKind;
+
+    /// The kind, in words.
+    pub fn message() -> str {
+        let k = .kind;
+        if k == ConvertErrorKind::Overflow { return "value is above the target type's maximum"; }
+        if k == ConvertErrorKind::Underflow { return "value is below the target type's minimum"; }
+        if k == ConvertErrorKind::OutOfRange { return "value is outside the target type's domain"; }
+        if k == ConvertErrorKind::InvalidFormat { return "text is not a value of the target type"; }
+        return "value has no counterpart in the target type";
+    }
+}
+
+pub interface IToI8    { fn to_i8()    -> i8    ! ConvertError; }
+pub interface IToI16   { fn to_i16()   -> i16   ! ConvertError; }
+pub interface IToI32   { fn to_i32()   -> i32   ! ConvertError; }
+pub interface IToI64   { fn to_i64()   -> i64   ! ConvertError; }
+pub interface IToIsize { fn to_isize() -> isize ! ConvertError; }
+pub interface IToU8    { fn to_u8()    -> u8    ! ConvertError; }
+pub interface IToU16   { fn to_u16()   -> u16   ! ConvertError; }
+pub interface IToU32   { fn to_u32()   -> u32   ! ConvertError; }
+pub interface IToU64   { fn to_u64()   -> u64   ! ConvertError; }
+pub interface IToUsize { fn to_usize() -> usize ! ConvertError; }
+pub interface IToF32   { fn to_f32()   -> f32   ! ConvertError; }
+pub interface IToF64   { fn to_f64()   -> f64   ! ConvertError; }
+pub interface IToBool  { fn to_bool()  -> bool  ! ConvertError; }
+pub interface IToChar  { fn to_char()  -> char  ! ConvertError; }
+
+/// The 128-bit and half/quad-precision targets. Their conversions stop at
+/// the seam `convert.wide_scalar`: the engine's values are 64 bits wide.
+pub interface IToI128  { fn to_i128()  -> i128  ! ConvertError; }
+pub interface IToU128  { fn to_u128()  -> u128  ! ConvertError; }
+pub interface IToF16   { fn to_f16()   -> f16   ! ConvertError; }
+pub interface IToF128  { fn to_f128()  -> f128  ! ConvertError; }
+
+/// Every numeric and `bool` target.
+pub interface IConvertible : IToI8, IToI16, IToI32, IToI64, IToIsize, IToU8, IToU16, IToU32, IToU64, IToUsize, IToF32, IToF64, IToBool {
+}

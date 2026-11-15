@@ -1,0 +1,6 @@
+[debug] next = 5
+[debug] r = 1
+[debug] r = 2 (was 1)
+[debug] w = 6
+[debug] p = 7
+[debug] p = 8

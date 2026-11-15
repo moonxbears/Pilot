@@ -1,0 +1,14 @@
+// Reading a constant through a `ref` parameter, or with a cascade step that
+// only reads, is allowed and leaves it as it was.
+//
+// Expected output, worked by hand: XS has 2 items; `XS..len()` gives XS
+// itself, printed as [1, 2]; XS still has 2 items.
+const XS = [1, 2];
+
+fn count(ref xs: List<i64>) -> i64 => xs.len() as i64;
+
+fn main() {
+    print(count(XS));
+    print(XS..len());
+    print(XS.len());
+}

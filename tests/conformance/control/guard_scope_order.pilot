@@ -1,0 +1,26 @@
+// F7: a scoped guard (`: IGuard`, lattice 0b11) is released when the block
+// that declares it ends, whatever its last use: the last declared first.
+struct Lease : IGuard {
+    pub name: str;
+
+    ~self() {
+        print(f"release {self.name}");
+    }
+}
+
+fn work(inner: bool) {
+    let a = Lease { name: "a" };
+    let b = Lease { name: "b" };
+    print(f"working {a.name} {b.name}");
+    if inner {
+        let c = Lease { name: "c" };
+        print(f"inner {c.name}");
+        print("inner done");
+    }
+    print("leaving");
+}
+
+fn main() {
+    work(true);
+    print("after");
+}

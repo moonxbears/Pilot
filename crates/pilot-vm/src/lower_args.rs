@@ -12,8 +12,9 @@
 //! that has none is a compile error.
 
 use crate::BytecodeCompiler;
-use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::instruction::Opcode;
+use pilot_ast::{AstArena, NodeId, NodeKind, PARAM_FLAG_MUT};
+use crate::value::PilotVal;
 
 
 /// A call whose arguments do not fit its callee: the diagnostic code and message.
@@ -26,9 +27,9 @@ impl BytecodeCompiler {
         self.param_decls.entry(key).or_insert(decl);
     }
 
-    /// Parameter names of a function or constructor declaration, without the
-    /// receiver.
-    fn decl_param_names(arena: &AstArena, decl: NodeId) -> Vec<String> {
+    /// Parameter declarations of a function or constructor declaration,
+    /// without the receiver.
+    fn decl_params(arena: &AstArena, decl: NodeId) -> Vec<NodeId> {
         let dn = arena.node(decl);
         let children = match dn.node_kind() {
             NodeKind::FnDecl => arena.children_slice(dn.rhs, dn.flags as u32),
@@ -39,9 +40,131 @@ impl BytecodeCompiler {
         children
             .iter()
             .skip(1)
-            .map(|&p| Self::name(arena, arena.node(NodeId(p)).lhs).to_string())
-            .filter(|p| p != receiver && p != &receiver[1..])
+            .map(|&p| NodeId(p))
+            .filter(|&p| {
+                let name = Self::name(arena, arena.node(p).lhs);
+                name != receiver && name != &receiver[1..]
+            })
             .collect()
+    }
+
+    /// Whether parameter declaration `p` lends the caller's storage for
+    /// changing: written with a word registered `binding_mutable` (`var ref n`).
+    fn lends_for_change(arena: &AstArena, p: NodeId) -> bool {
+        arena.node(p).flags & PARAM_FLAG_MUT != 0
+    }
+
+    /// Records the slots of the `var ref` parameters of `decl`, whose
+    /// parameters are bound: each `Ret` then hands their final values back
+    /// to the caller (`SetOut`).
+    pub(crate) fn bind_ret_outs(&mut self, arena: &AstArena, decl: NodeId) {
+        self.ret_outs.clear();
+        for (i, p) in Self::decl_params(arena, decl).into_iter().enumerate() {
+            if !Self::lends_for_change(arena, p) {
+                continue;
+            }
+            let name = Self::name(arena, arena.node(p).lhs);
+            if let Some(&slot) = self.var_slots.get(name) {
+                self.ret_outs.push((i as u8, slot));
+            }
+        }
+    }
+
+    /// After a call to `key`, writes the final value of each `var ref`
+    /// parameter back to the variable passed for it (`GetOut`). An argument
+    /// that is not a variable (a field, an element) shares the caller's
+    /// value already when it is a heap value, and has no storage to write
+    /// to when it is a temporary.
+    pub(crate) fn emit_out_writebacks(&mut self, arena: &AstArena, key: &str, args: &[NodeId]) {
+        let Some(&decl) = self.param_decls.get(key) else { return };
+        for (i, p) in Self::decl_params(arena, decl).into_iter().enumerate() {
+            if !Self::lends_for_change(arena, p) {
+                continue;
+            }
+            let Some(&a) = args.get(i) else { continue };
+            let an = arena.node(a);
+            if an.node_kind() != NodeKind::IdentExpr {
+                continue;
+            }
+            let name = Self::name(arena, an.lhs).to_string();
+            if let Some(&slot) = self.var_slots.get(&name) {
+                self.emit(Opcode::GetOut, slot, i as u8, 0);
+            } else if self.globals.contains(&name) && !self.is_captured_name(&name) {
+                let mark = self.next_reg;
+                let r = self.alloc_reg();
+                self.emit(Opcode::GetOut, r, i as u8, 0);
+                self.emit_global_set(&name, r);
+                self.release_to(mark);
+            }
+        }
+    }
+
+    /// Parameter names of a function or constructor declaration, without the
+    /// receiver.
+    fn decl_param_names(arena: &AstArena, decl: NodeId) -> Vec<String> {
+        Self::decl_params(arena, decl)
+            .into_iter()
+            .map(|p| Self::name(arena, arena.node(p).lhs).to_string())
+            .collect()
+    }
+
+    /// Compiles positional `args` of a call to `key` (`f` or `Owner.m`), each
+    /// with its parameter's declared type as the expected type, so a bare
+    /// `ok(x)` or `::Variant` argument resolves against it.
+    pub(crate) fn compile_args_for(&mut self, arena: &AstArena, key: &str, args: &[NodeId]) -> Vec<u8> {
+        let hints: Vec<Option<String>> = match self.param_decls.get(key) {
+            Some(&decl) => Self::decl_params(arena, decl)
+                .into_iter()
+                .map(|p| Self::annot_name(arena, p))
+                .collect(),
+            None => Vec::new(),
+        };
+        // `f(a, *xs)`: the one spread argument fills the parameters the
+        // others leave, one item each.
+        let is_spread = |a: NodeId| {
+            let n = arena.node(a);
+            n.node_kind() == NodeKind::UnaryExpr && n.flags == pilot_ast::UNARY_OP_SPLAT
+        };
+        let spreads = args.iter().filter(|&&a| is_spread(a)).count();
+        let known = self.param_decls.contains_key(key);
+        let take = (hints.len() + spreads).saturating_sub(args.len());
+        let mut regs = Vec::new();
+        for &a in args {
+            if is_spread(a) && spreads == 1 && known {
+                let r_seq = self.compile_unpack_operand(arena, NodeId(arena.node(a).lhs), arena.node(a).flags);
+                self.emit_spread(r_seq, take, key, &mut regs);
+                continue;
+            }
+            let hint = hints.get(regs.len()).cloned().flatten();
+            regs.push(self.compile_with_hint(arena, a, hint));
+        }
+        regs
+    }
+
+    /// The `take` items of the sequence in `r_seq`, each in a register of
+    /// its own appended to `regs`; the program stops when the sequence
+    /// holds another number of items.
+    fn emit_spread(&mut self, r_seq: u8, take: usize, callee: &str, regs: &mut Vec<u8>) {
+        let mark = self.next_reg;
+        let r_len = self.emit_intrinsic("list_len", &[r_seq]);
+        let r_want = self.emit_const(PilotVal::from_int(take as i64));
+        let r_ok = self.alloc_reg();
+        self.emit(Opcode::CmpEq, r_ok, r_len, r_want);
+        let ok = self.emit_branch(Opcode::JumpIfTrue, r_ok, 0);
+        self.emit_trap(format!(
+            "CALL001: `{callee}` takes {take} argument(s) from the sequence spread with `*`, which holds another number"
+        ));
+        self.patch_to_here(ok);
+        self.release_to(mark);
+        for k in 0..take {
+            let r_item = self.alloc_reg();
+            let inner = self.next_reg;
+            let r_k = self.emit_const(PilotVal::from_int(k as i64));
+            let r_v = self.emit_intrinsic("map_get", &[r_seq, r_k]);
+            self.emit(Opcode::Move, r_item, r_v, 0);
+            self.release_to(inner);
+            regs.push(r_item);
+        }
     }
 
     /// Whether any of `args` is named.
@@ -149,9 +272,11 @@ impl BytecodeCompiler {
         let params = Self::decl_param_names(arena, *decl);
         let slots = Self::bind_args(arena, &callee_name, &params, &ids[1..])?;
         let mut out = vec![callee];
-        for (p, slot) in params.iter().zip(slots) {
+        let decl_params = Self::decl_params(arena, *decl);
+        for ((p, slot), pd) in params.iter().zip(slots).zip(decl_params) {
             match slot {
                 Some(a) => out.push(a),
+                None if arena.field_default(pd).is_some() => out.push(arena.field_default(pd)),
                 None => {
                     return Err((
                         crate::codes::ARG_COUNT,
@@ -161,6 +286,76 @@ impl BytecodeCompiler {
             }
         }
         Ok(out)
+    }
+
+    /// The call `ids` (callee, then positional arguments) with the defaults
+    /// of the parameters it leaves out at the end appended, when the callee's
+    /// parameters are known. A call with a spread argument is left as it is.
+    /// A method call whose receiver's type is unknown, to a method that some
+    /// type declares with a default the call would need, is an error.
+    pub(crate) fn fill_defaults(&self, arena: &AstArena, ids: &[NodeId]) -> Result<Vec<NodeId>, ArgError> {
+        let spread = ids[1..].iter().any(|&a| {
+            let n = arena.node(a);
+            n.node_kind() == NodeKind::UnaryExpr && n.flags == pilot_ast::UNARY_OP_SPLAT
+        });
+        if spread {
+            return Ok(ids.to_vec());
+        }
+        let given = ids.len() - 1;
+        let decl = self
+            .named_call_key(arena, ids[0])
+            .and_then(|k| self.param_decls.get(&k).copied())
+            .or_else(|| self.planned_call_decl(arena, ids[0]));
+        let Some(decl) = decl else {
+            return self.unknown_callee_defaults(arena, ids[0], given).map(|()| ids.to_vec());
+        };
+        let mut out = ids.to_vec();
+        for &p in Self::decl_params(arena, decl).iter().skip(given) {
+            let value = arena.field_default(p);
+            if value.is_none() {
+                break;
+            }
+            out.push(value);
+        }
+        Ok(out)
+    }
+
+    /// The declaration a method call reaches through the receiver type the
+    /// checker inferred (the run plan), when the seed does not know it.
+    fn planned_call_decl(&self, arena: &AstArena, callee: NodeId) -> Option<NodeId> {
+        let cn = arena.node(callee);
+        if cn.node_kind() != NodeKind::MemberExpr {
+            return None;
+        }
+        let owner = self.planned_receiver(arena, NodeId(cn.lhs))?;
+        let key = format!("{owner}.{}", Self::name(arena, cn.rhs));
+        self.param_decls.get(&key).copied()
+    }
+
+    /// An error when `callee` is a method call the seed cannot place and a
+    /// type declares that method with a default the `given` arguments
+    /// would leave to it.
+    fn unknown_callee_defaults(&self, arena: &AstArena, callee: NodeId, given: usize) -> Result<(), ArgError> {
+        let cn = arena.node(callee);
+        if cn.node_kind() != NodeKind::MemberExpr {
+            return Ok(());
+        }
+        let method = Self::name(arena, cn.rhs);
+        let owners = self.method_owners.get(method).map(Vec::as_slice).unwrap_or(&[]);
+        let needs_default = owners.iter().any(|(owner, _)| {
+            self.param_decls.get(&format!("{owner}.{method}")).is_some_and(|&d| {
+                Self::decl_params(arena, d)
+                    .get(given)
+                    .is_some_and(|&p| arena.field_default(p).is_some())
+            })
+        });
+        if !needs_default {
+            return Ok(());
+        }
+        Err((
+            crate::codes::SEED,
+            format!("the seed cannot tell which `{method}` this call reaches, so it cannot fill its default arguments; pass every argument"),
+        ))
     }
 
     /// `Name(args)` for a struct without a constructor: sets each field from
@@ -192,6 +387,8 @@ impl BytecodeCompiler {
             let Some(a) = *slot else { continue };
             let m = self.next_reg;
             let r_v = self.compile_node(arena, a);
+            let ty = self.field_type(name, field);
+            let r_v = self.convert_for_binding(r_v, ty.as_deref());
             let r_k = self.emit_const(PilotVal::from_str(field));
             self.emit_intrinsic("map_set", &[r_obj, r_k, r_v]);
             self.release_to(m);

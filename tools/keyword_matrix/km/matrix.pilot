@@ -1,0 +1,112 @@
+// Reads the hand-kept columns of docs/keyword_matrix.md and writes the
+// generated part of the file (summary and tables) from them and from what
+// the tool computes.
+//
+// The generated part lies between two marker lines; everything outside it
+// is kept as written. The hand columns are Bound by, S, I, C, Verdict,
+// Complexity and Notes: edit them in the file, then run the tool to refresh
+// the rest.
+pkg km.matrix;
+
+use km.text;
+
+pub fn begin_marker() -> str => "<!-- keyword_matrix: generated part. Edit the hand columns (Bound by, S, I, C, Verdict, Complexity, Notes) in place, then run tools/keyword_matrix. -->";
+pub fn end_marker() -> str => "<!-- keyword_matrix: end of generated part -->";
+
+/// The columns, in order.
+pub fn column_names() -> List<str> => [
+    "Keyword", "Registry says", "Bound by", "Pair", "S", "I", "C", "Uses pass / fail", "Named tests", "Codes",
+    "Ledger", "Known bugs", "Verdict", "Complexity", "Pilot / Rust", "Evidence gaps", "Notes",
+];
+
+/// The hand-kept columns of one keyword.
+pub struct HandRow {
+    pub bound: str;
+    pub s: str;
+    pub i: str;
+    pub c: str;
+    pub verdict: str;
+    pub complexity: str;
+    pub notes: str;
+}
+
+/// A keyword with no row yet.
+pub fn unaudited() -> HandRow {
+    return HandRow { bound: "?", s: "?", i: "?", c: "?", verdict: "NOT AUDITED", complexity: "?", notes: "Not checked yet." };
+}
+
+/// The cells of one table row (`| a | b \| c |` gives `a`, `b \| c`).
+pub fn cells_of(line: str) -> List<str> {
+    var t = line.trim();
+    if t.starts_with("| ") { t = t.slice(2, t.len()); }
+    if t.ends_with(" |") { t = t.slice(0, t.len() - 2); }
+    return split_on(t, " | ");
+}
+
+/// The hand columns of every keyword row in `text`, by keyword (the first
+/// row of a keyword listed twice wins).
+pub fn read_hand_rows(text: str) -> Map<str, HandRow> {
+    var out: Map<str, HandRow> = [:];
+    var header: List<str> = [];
+    for line in lines_of(text) {
+        if !line.starts_with("| ") { continue; }
+        let cells = cells_of(line);
+        if cells.len() > 0 && cells[0] == "Keyword" {
+            header = cells;
+            continue;
+        }
+        if header.len() == 0 || cells.len() != header.len() || !cells[0].starts_with("`") { continue; }
+        let word = cells[0].slice(1, (cells[0].len() - 1) as usize);
+        if out.has(word) { continue; }
+        out.set(word, HandRow {
+            bound: column(header, cells, "Bound by"), s: column(header, cells, "S"),
+            i: column(header, cells, "I"), c: column(header, cells, "C"),
+            verdict: column(header, cells, "Verdict"), complexity: column(header, cells, "Complexity"),
+            notes: column(header, cells, "Notes"),
+        });
+    }
+    return out;
+}
+
+fn column(ref header: List<str>, ref cells: List<str>, name: str) -> str {
+    var i = 0;
+    while i < header.len() {
+        if header[i] == name {
+            let v = cells[i];
+            return v;
+        }
+        i = i + 1;
+    }
+    return "?";
+}
+
+/// `text` with its generated part replaced by `generated`; empty when the
+/// markers are missing.
+pub fn splice_generated(text: str, generated: str) -> str {
+    let begin = text.find(begin_marker(), 0);
+    let end = text.find(end_marker(), 0);
+    if begin < 0 || end < begin { return ""; }
+    let head = text.slice(0, (begin as usize) + begin_marker().len());
+    let tail = text.slice(end as usize, text.len());
+    return head + "\n\n" + generated + "\n" + tail;
+}
+
+/// The table header for a category.
+pub fn table_header() -> str {
+    var names = "|";
+    var rule = "|";
+    for name in column_names() {
+        names = names + " " + name + " |";
+        rule = rule + "---|";
+    }
+    return names + "\n" + rule;
+}
+
+/// One table row from its cells.
+pub fn table_row(ref cells: List<str>) -> str {
+    var out = "|";
+    for c in cells {
+        out = out + " " + c + " |";
+    }
+    return out;
+}

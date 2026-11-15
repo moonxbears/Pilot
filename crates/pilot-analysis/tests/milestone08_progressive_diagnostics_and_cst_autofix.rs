@@ -87,6 +87,7 @@ fn eval_diag(script: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
     let deps = [
         "stdlib/core/file.pilot",
+        "stdlib/std/text.pilot",
         "selfhost/diagnostics/model.pilot",
         "selfhost/diagnostics/renderer.pilot",
         "selfhost/cst/autofix.pilot",

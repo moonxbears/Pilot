@@ -39,3 +39,18 @@ pub fn report_at_least(diags: List<HostDiag>, severity: u8) -> List<HostDiag> {
     }
     return out;
 }
+
+/// The code the seed compiler gives a construct it cannot run yet
+/// (`crates/pilot-vm/src/codes.rs`, catalog category `Seed`): a limit of the
+/// seed, not an error in the program.
+pub pure fn seed_limit_code() -> str => "SEED001";
+
+/// The diagnostics of `diags` that are not seed limits. A tool that never
+/// runs the program on the seed (`pilot ir`) is not stopped by them.
+pub fn without_seed_limits(diags: List<HostDiag>) -> List<HostDiag> {
+    var out: List<HostDiag> = [];
+    for d in diags {
+        if d.code != seed_limit_code() { out.push(d); }
+    }
+    return out;
+}

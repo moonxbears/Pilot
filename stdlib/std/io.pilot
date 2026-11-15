@@ -4,14 +4,64 @@
 // ==============================================================================
 pub pkg std.io;
 
+use Pilot.Core.HostRaw;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 /// The next line of standard input without its line ending, or `none` once
 /// the input has ended.
-pub fn read_line() -> str? => __engine("stdin_read_line");
+pub fn read_line() -> str? {
+    var cap = 256;
+    var len = 0;
+    var buf = RawMem.alloc(cap, 1);
+    let ch = RawMem.alloc(1, 1);
+    var got_any = false;
+    while true {
+        let r = Fd.read(0, ch, 1);
+        if r <= 0 { break; }
+        got_any = true;
+        let b = RawMem.load_int(ch, 8, 0);
+        if b == 10 { break; }
+        if len >= cap {
+            let next_cap = cap * 2;
+            buf = RawMem.realloc(buf, cap, next_cap, 1);
+            cap = next_cap;
+        }
+        let _ = RawMem.store_int(buf + len, b, 8);
+        len = len + 1;
+    }
+    let _ = RawMem.free(ch, 1, 1);
+    if !got_any && len == 0 {
+        let _ = RawMem.free(buf, cap, 1);
+        return none;
+    }
+    if len > 0 && RawMem.load_int(buf + len - 1, 8, 0) == 13 {
+        len = len - 1;
+    }
+    let out = if len > 0 { str_from_ptr(buf, len) } else { "" };
+    let _ = RawMem.free(buf, cap, 1);
+    return out;
+}
 
 /// The rest of standard input (empty once it has ended).
-pub fn read_all() -> str => __engine("stdin_read_all");
+pub fn read_all() -> str {
+    var cap = 8192;
+    var len = 0;
+    var buf = RawMem.alloc(cap, 1);
+    while true {
+        if cap - len < 2048 {
+            let next_cap = cap * 2;
+            buf = RawMem.realloc(buf, cap, next_cap, 1);
+            cap = next_cap;
+        }
+        let r = Fd.read(0, buf + len, cap - len);
+        if r <= 0 { break; }
+        len = len + r;
+    }
+    let out = if len > 0 { str_from_ptr(buf, len) } else { "" };
+    let _ = RawMem.free(buf, cap, 1);
+    return out;
+}
 
 pub interface IReader {
     fn read(var ref self, buf: var slice<u8>) -> usize;

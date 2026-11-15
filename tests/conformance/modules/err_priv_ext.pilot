@@ -1,0 +1,10 @@
+use lib.vault;
+
+ext Safe {
+    pub fn steal_code() -> i64 => self.code;
+}
+
+fn main() {
+    let s = safe(5);
+    println(f"{s.steal_code()}");
+}

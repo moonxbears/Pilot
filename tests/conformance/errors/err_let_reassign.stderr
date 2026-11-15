@@ -1,0 +1,2 @@
+error[DECL004]: Cannot reassign to immutable 'let' binding 'x'; declare with 'var' to permit mutation
+err_let_reassign.pilot:6:5

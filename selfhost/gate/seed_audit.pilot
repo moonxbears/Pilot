@@ -5,6 +5,9 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Gate.SeedAudit;
 
+use std.text;
+use Pilot.SelfHost.Gate.AirlockAbi;
+
 pub pure fn sa_is_upper(b: i64) -> bool {
     return b >= 65 && b <= 90;
 }
@@ -314,9 +317,6 @@ fn sa_is_bridge_exemption(rs_path: str, cur_line: str) -> bool {
     if gm_ends_with(rs_path, "pilot-ast/src/lib.rs") && gm_contains(cur_line, "Self::") {
         return true;
     }
-    if gm_ends_with(rs_path, "pilot-parser/src/lib.rs") && gm_contains(cur_line, "=> Union") {
-        return true;
-    }
     if gm_ends_with(rs_path, "pilot-cli/src/main.rs") && (gm_contains(cur_line, "cmd_from(") || gm_contains(cur_line, "cmd_map(")) {
         return true;
     }
@@ -392,7 +392,7 @@ pub pure fn verify_rust_source_name_blind(
     var col = 1;
     var line_start = 0;
     var in_cfg_test = false;
-    var code_only = "";
+    var code_parts: List<str> = [];
 
     while pos < len {
         if pos == line_start {
@@ -424,7 +424,7 @@ pub pure fn verify_rust_source_name_blind(
             col = col + 1;
         } else if b == 47 && pos + 1 < len && rs_source.byte_at(pos + 1) == 47 {
             // Strip `//` line comment using chunked slice
-            if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+            if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
             while pos < len && rs_source.byte_at(pos) != 10 {
                 pos = pos + 1;
                 col = col + 1;
@@ -432,7 +432,7 @@ pub pure fn verify_rust_source_name_blind(
             chunk_start = pos;
         } else if b == 47 && pos + 1 < len && rs_source.byte_at(pos + 1) == 42 {
             // Strip `/* ... */` nested block comment using chunked slice
-            if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+            if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
             var depth = 1;
             pos = pos + 2;
             col = col + 2;
@@ -447,7 +447,7 @@ pub pure fn verify_rust_source_name_blind(
                     pos = pos + 2;
                     col = col + 2;
                 } else if cb == 10 {
-                    code_only = code_only + "\n";
+                    code_parts.push("\n");
                     pos = pos + 1;
                     line = line + 1;
                     col = 1;
@@ -461,12 +461,12 @@ pub pure fn verify_rust_source_name_blind(
         } else if b == 39 {
             // Distinguish Rust char literal `'x'` / `'\x'` from lifetime `'a`
             if pos + 2 < len && rs_source.byte_at(pos + 1) != 92 && rs_source.byte_at(pos + 2) == 39 {
-                if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+                if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
                 pos = pos + 3;
                 col = col + 3;
                 chunk_start = pos;
             } else if pos + 3 < len && rs_source.byte_at(pos + 1) == 92 && rs_source.byte_at(pos + 3) == 39 {
-                if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+                if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
                 pos = pos + 4;
                 col = col + 4;
                 chunk_start = pos;
@@ -483,7 +483,7 @@ pub pure fn verify_rust_source_name_blind(
                 k = k + 1;
             }
             if k < len && rs_source.byte_at(k) == 34 {
-                if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+                if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
                 let lit_ln = line;
                 let lit_col = col;
                 let cur_ln_str = sa_line_at(rs_source, line_start);
@@ -506,7 +506,7 @@ pub pure fn verify_rust_source_name_blind(
                         }
                     }
                     if rb == 10 {
-                        code_only = code_only + "\n";
+                        code_parts.push("\n");
                         line = line + 1;
                         col = 1;
                         line_start = pos + 1;
@@ -542,7 +542,7 @@ pub pure fn verify_rust_source_name_blind(
             }
         } else if b == 34 {
             // Standard double-quoted string literal `"..."`
-            if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+            if pos > chunk_start { code_parts.push(rs_source.slice(chunk_start, pos) + " "); }
             let lit_ln = line;
             let lit_col = col;
             let cur_ln_str = sa_line_at(rs_source, line_start);
@@ -563,7 +563,7 @@ pub pure fn verify_rust_source_name_blind(
                     col = col + 1;
                     break;
                 } else if sb == 10 {
-                    code_only = code_only + "\n";
+                    code_parts.push("\n");
                     pos = pos + 1;
                     line = line + 1;
                     col = 1;
@@ -618,8 +618,9 @@ pub pure fn verify_rust_source_name_blind(
         }
     }
     if len > chunk_start {
-        code_only = code_only + rs_source.slice(chunk_start, len);
+        code_parts.push(rs_source.slice(chunk_start, len));
     }
+    let code_only = text.join_text(code_parts, "");
 
     // Stub macro checks on comment-stripped Rust code
     let stubs = glist_new();
@@ -912,6 +913,10 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunO
     scanned = scanned + sa_audit_pilot_tree(root, "selfhost", file_caps, violations);
     scanned = scanned + sa_audit_pilot_tree(root, "stdlib", file_caps, violations);
 
+    // 6. GATE021: Model B+ Airlock ABI, lexer-aware `__engine` ratchet & Rust native-string ban
+    verify_airlock_abi(root, violations);
+    scanned = scanned + sa_audit_airlock_boundary(root, violations);
+
     let dt = gate_time_now_us() - t0;
     return GateReport {
         gate_id: "hygiene",
@@ -921,4 +926,161 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunO
         items_scanned: scanned,
         violations: violations,
     };
+}
+
+fn sa_count_engine_calls(src: str) -> i64 {
+    let n = src.len();
+    var count = 0;
+    var i = 0;
+    while i < n {
+        let b = src.byte_at(i);
+        if b == 47 && i + 1 < n {
+            let b2 = src.byte_at(i + 1);
+            if b2 == 47 {
+                i = i + 2;
+                while i < n && src.byte_at(i) != 10 { i = i + 1; }
+                continue;
+            }
+            if b2 == 42 {
+                i = i + 2;
+                while i + 1 < n && !(src.byte_at(i) == 42 && src.byte_at(i + 1) == 47) { i = i + 1; }
+                i = if i + 1 < n { i + 2 } else { n };
+                continue;
+            }
+        }
+        if b == 34 || b == 39 {
+            let q = b;
+            i = i + 1;
+            while i < n {
+                if src.byte_at(i) == 92 { i = i + 2; continue; }
+                if src.byte_at(i) == q { i = i + 1; break; }
+                i = i + 1;
+            }
+            continue;
+        }
+        if sa_is_id_char(b) {
+            let st = i;
+            i = i + 1;
+            while i < n && sa_is_id_char(src.byte_at(i)) { i = i + 1; }
+            if src.slice(st, i) == "__engine" {
+                var k = i;
+                while k < n && (src.byte_at(k) == 32 || src.byte_at(k) == 9 || src.byte_at(k) == 10 || src.byte_at(k) == 13) {
+                    k = k + 1;
+                }
+                if k < n && src.byte_at(k) == 40 {
+                    count = count + 1;
+                }
+            }
+            continue;
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
+fn sa_count_host_op_sites(src: str) -> i64 {
+    let needle = "__engine(\"host_op\", ";
+    var n = 0;
+    var at = gm_find(src, needle, 0);
+    while at >= 0 {
+        n = n + 1;
+        at = gm_find(src, needle, at + needle.len());
+    }
+    return n;
+}
+
+fn sa_strip_rs_comments(src: str) -> str {
+    let cfg_pos = gm_find(src, "#" + "[cfg(test)]", 0);
+    let lim = if cfg_pos >= 0 { cfg_pos } else { src.len() };
+    var out = "";
+    var i = 0;
+    while i < lim {
+        let b = src.byte_at(i);
+        if b == 47 && i + 1 < lim {
+            let b2 = src.byte_at(i + 1);
+            if b2 == 47 {
+                i = i + 2;
+                while i < lim && src.byte_at(i) != 10 { i = i + 1; }
+                continue;
+            }
+            if b2 == 42 {
+                i = i + 2;
+                while i + 1 < lim && !(src.byte_at(i) == 42 && src.byte_at(i + 1) == 47) { i = i + 1; }
+                i = if i + 1 < lim { i + 2 } else { lim };
+                continue;
+            }
+        }
+        out = out + src.slice(i, i + 1);
+        i = i + 1;
+    }
+    return out;
+}
+
+fn sa_audit_airlock_boundary(root: str, violations: i64) -> i64 {
+    var scanned = 0;
+    let ratchet = legacy_engine_ratchet();
+    for subdir in ["stdlib", "selfhost", "tools"] {
+        let walked = gm_split_lines(gate_fs_walk_files(gm_join_path(root, subdir)));
+        var wi = 0;
+        while wi < glist_len(walked) {
+            let full = glist_get(walked, wi);
+            if gm_ends_with(full, ".pilot") {
+                scanned = scanned + 1;
+                let rel = sa_strip_rel_prefix(root, full);
+                if rel != "stdlib/core/bridge_lang.pilot" {
+                    // Runtime `host_op` sites are checked by owner instead
+                    // (verify_airlock_abi, Amendment A1), so they do not count here.
+                    let src = gate_fs_read_text(full);
+                    let hits = sa_count_engine_calls(src) - sa_count_host_op_sites(src);
+                    if hits > 0 {
+                        let cap = if ratchet.has(rel) { ratchet.get(rel) } else { 0 };
+                        if hits > cap {
+                            let _ = glist_push(violations, sa_make_violation(
+                                "GATE021", rel, 1, 1, f"__engine calls: {hits} > {cap}",
+                                "Disallowed __engine(...) outside bridge_lang.pilot and the [EngineOp] owner methods",
+                                "Call the owner method of the op (proposals.md PROP-002a Amendment A1)"
+                            ));
+                        }
+                    }
+                }
+            }
+            wi = wi + 1;
+        }
+    }
+
+    let vm_nats = stage_a_vm_natives();
+    let host_nats = stage_a_host_natives();
+    let rs_walk = gm_split_lines(gate_fs_walk_files(gm_join_path(root, "crates")));
+    var ri = 0;
+    while ri < glist_len(rs_walk) {
+        let fp = glist_get(rs_walk, ri);
+        if gm_ends_with(fp, ".rs") && gm_contains(fp, "/src/") {
+            let rel = sa_strip_rel_prefix(root, fp);
+            if !gm_ends_with(rel, "stage_a_natives.rs") && !gm_ends_with(rel, "infer.rs") {
+                let code = sa_strip_rs_comments(gate_fs_read_text(fp));
+                if !gm_contains(rel, "pilot-vm/src/lower_") && !gm_ends_with(rel, "pilot-vm/src/lib.rs") && !gm_ends_with(rel, "pilot-vm/src/heap.rs") {
+                    for nat in vm_nats {
+                        if gm_contains(code, "\"" + nat + "\"") {
+                            let _ = glist_push(violations, sa_make_violation(
+                                "GATE021", rel, 1, 1, "\"" + nat + "\"",
+                                "Rust source outside stage_a_natives.rs/infer.rs matches a Stage-A native name",
+                                "Keep Stage-A native dispatch closed in stage_a_natives.rs"
+                            ));
+                        }
+                    }
+                }
+                for nat in host_nats {
+                    if gm_contains(code, "\"" + nat + "\"") {
+                        let _ = glist_push(violations, sa_make_violation(
+                            "GATE021", rel, 1, 1, "\"" + nat + "\"",
+                            "Rust source outside stage_a_natives.rs/infer.rs matches host_op",
+                            "Keep host_op dispatch closed in stage_a_natives.rs and bridge.rs"
+                        ));
+                    }
+                }
+            }
+        }
+        ri = ri + 1;
+    }
+    return scanned;
 }

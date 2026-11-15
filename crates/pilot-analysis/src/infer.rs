@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
-use pilot_rt::PilotVal;
+use pilot_vm::PilotVal;
 use pilot_vm::pilc::PilcBinary;
 use crate::types::{CapabilityBits, HwScalarHeader, LayoutId, LayoutTable, PhysicsGeometry};
 
@@ -15,6 +15,8 @@ pub struct RawAstNode {
     pub first_child: u32, pub child_count: u16, pub first_attr_arg: u32, pub attr_arg_count: u16,
     pub first_attr: u32, pub attr_count: u16, pub first_base: u32, pub base_count: u16,
     pub raw_bits: u64, pub literal_kind: u8, pub span_start: u32, pub span_end: u32,
+    /// The compilation unit (file) the node was parsed from; 0 for a single file.
+    pub unit: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -38,6 +40,8 @@ pub struct PhysicsRegistry {
     /// Set when the self-hosted analyzer faulted; its results are then incomplete.
     pub analyzer_error: Option<String>,
     pub categories: Vec<CategoryRecord>, pub registered_symbols: Vec<(i64, String, String)>,
+    /// The field layouts of the aggregate being built (`layout_aggregate_*`).
+    pub pending_fields: Vec<LayoutId>,
 }
 
 impl PhysicsRegistry {
@@ -47,7 +51,7 @@ impl PhysicsRegistry {
             arena, layouts: LayoutTable::new(), node_layouts: vec![None; count], node_targets: vec![None; count],
             symbol_strings, diagnostics: Vec::new(), source_text: String::new(),
             lsp_method: String::new(), lsp_offset: 0, lsp_result: String::new(), analyzer_error: None,
-            categories: Vec::new(), registered_symbols: Vec::new(),
+            categories: Vec::new(), registered_symbols: Vec::new(), pending_fields: Vec::new(),
         };
         reg.index_arena_symbols(0);
         reg
@@ -229,7 +233,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                 NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl | NodeKind::CatchClause => push_ch(node.rhs),
                 NodeKind::MemberExpr | NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::YieldStmt | NodeKind::DeferStmt | NodeKind::BreakStmt | NodeKind::ContinueStmt
                 | NodeKind::ExprStmt | NodeKind::TryPropagateExpr | NodeKind::DestructorDecl | NodeKind::DynamicMemberDecl
-                | NodeKind::ComptimeExpr | NodeKind::PatLiteral => push_ch(node.lhs),
+                | NodeKind::ComptimeExpr | NodeKind::QuoteExpr | NodeKind::PatLiteral => push_ch(node.lhs),
                 _ => {}
             }
         }
@@ -237,6 +241,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
             node_id: idx_u32, parent_id: u32::MAX, kind_tag, orig_kind: node.kind, node_flags: node.flags, decl_flags,
             sym_id, first_child, child_count, first_attr_arg, attr_arg_count, first_attr, attr_count,
             first_base, base_count, raw_bits, literal_kind: lit_kind, span_start: span.start, span_end: span.end,
+            unit: arena.unit_of(NodeId(idx_u32)).map_or(0, |u| u.file.0),
         });
     }
 
@@ -248,11 +253,24 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
 }
 
 pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, args: &[PilotVal]) -> Result<PilotVal, String> {
+    engine_intrinsic(registry, op_code, args).unwrap_or(Ok(PilotVal::NULL))
+}
+
+/// `handle_engine_intrinsic`, or `None` when `op_code` is not an intrinsic
+/// the registry answers (the caller's next handler may know it).
+pub fn engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, args: &[PilotVal]) -> Option<Result<PilotVal, String>> {
+    let mut known = true;
+    let out = engine_intrinsic_in(registry, op_code, args, &mut known);
+    known.then_some(out)
+}
+
+fn engine_intrinsic_in(registry: &mut PhysicsRegistry, op_code: &str, args: &[PilotVal], known: &mut bool) -> Result<PilotVal, String> {
     let arg_i = |i: usize| args.get(i).and_then(|v| v.as_int()).unwrap_or(0);
     let arg_s = |i: usize| args.get(i).and_then(|v| v.with_str(|s| s.to_string())).unwrap_or_default();
     let nid = arg_i(0) as usize;
     match op_code {
         "ast_node_count" => Ok(PilotVal::from_int(registry.arena.nodes.len() as i64)),
+        "ast_node_unit" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.unit) as i64)),
         "ast_node_kind" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(255, |n| n.kind_tag) as i64)),
         "ast_orig_kind" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(65535, |n| n.orig_kind) as i64)),
         "ast_node_flags" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.node_flags) as i64)),
@@ -282,8 +300,19 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
         }
         "layout_scalar" => Ok(PilotVal::from_int(registry.layouts.register_scalar(arg_i(0) as u16, arg_i(1).max(1) as u16, arg_i(2) as u8).0 as i64)),
         "layout_ptr" => Ok(PilotVal::from_int(registry.layouts.register_pointer(LayoutId(arg_i(0) as u32), CapabilityBits(arg_i(1) as u8), arg_i(2) as u8).0 as i64)),
-        "layout_aggregate" => {
-            let fields: Vec<LayoutId> = args.iter().filter_map(|a| a.as_int().map(|v| LayoutId(v as u32))).collect();
+        // An aggregate is built one field per call (a call takes at most 16
+        // arguments): `begin`, then `field(layout)` per field, then `end`,
+        // which registers it and gives its layout.
+        "layout_aggregate_begin" => {
+            registry.pending_fields.clear();
+            Ok(PilotVal::from_int(0))
+        }
+        "layout_aggregate_field" => {
+            registry.pending_fields.push(LayoutId(arg_i(0) as u32));
+            Ok(PilotVal::from_int(registry.pending_fields.len() as i64))
+        }
+        "layout_aggregate_end" => {
+            let fields = std::mem::take(&mut registry.pending_fields);
             Ok(PilotVal::from_int(registry.layouts.register_aggregate(&fields, false, false).0 as i64))
         }
         "layout_union" => {
@@ -382,7 +411,10 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
         "lsp_query_method" => Ok(PilotVal::from_str(&registry.lsp_method)),
         "lsp_query_offset" => Ok(PilotVal::from_int(registry.lsp_offset as i64)),
         "lsp_set_result" => { registry.lsp_result = arg_s(0); Ok(PilotVal::NULL) }
-        _ => Ok(PilotVal::NULL),
+        _ => {
+            *known = false;
+            Ok(PilotVal::NULL)
+        }
     }
 }
 

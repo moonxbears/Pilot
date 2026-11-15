@@ -1,0 +1,78 @@
+// String equality, ordering, search and hashing at the lengths where a
+// string representation changes how it works: an empty string, the 4-byte
+// prefix, 12 bytes held in the value, the 8/16/32/64-byte comparison steps
+// and the 128-byte loop, each one byte either side.
+//
+// Expected output, worked by hand:
+// 1. `s` and `s2` are `L` a's built separately; `t` is `L - 1` a's then a
+//    `b`. Each line is `L true false true false L-1`: s equals s2, not t;
+//    "a" sorts before "b"; the `b` is at byte L - 1.
+// 2. `t` is `L` x's with the x at byte `k` replaced by a `y`. Each line is
+//    `L k true false k`.
+// 3. Searches: 300 e's then "expression" finds it at 300; 499 a's then "b"
+//    finds "aaab" at 496; "zzzz" is not in it (-1); "é" is not in an
+//    ASCII text (-1); "naïve café" has "café" at byte 7 (n a ï=2 bytes v e
+//    space); "abcabc" from byte 1 has "abc" at 3; "" is found where the
+//    search starts (5).
+// 4. Ordering: "b" < "ab" is false, "ab" < "abc" true, "abc" < "ab" false,
+//    "é" (0xC3 0xA9) < "z" (0x7A) false.
+// 5. A map of 200 keys sharing a 21-byte prefix: the values 0..199 sum to
+//    19900; a key one byte longer than every key is absent.
+
+fn repeat(piece: str, n: i64) -> str {
+    var out = "";
+    var i = 0;
+    while i < n {
+        out = out + piece;
+        i = i + 1;
+    }
+    return out;
+}
+
+fn main() {
+    let lens = [1, 2, 3, 4, 5, 8, 11, 12, 13, 16, 17, 20, 21, 24, 25, 31, 32, 33, 63, 64, 65, 127, 128, 129, 200];
+    let b = "b";
+    let y = "y";
+    print(repeat("a", 0) == "");
+    for n in lens {
+        let s = repeat("a", n);
+        let s2 = repeat("a", n - 1) + "a";
+        let t = repeat("a", n - 1) + b;
+        let at = t.find(b, 0);
+        print(f"{n} {s == s2} {s == t} {s < t} {t < s} {at}");
+    }
+    for n in [13, 40, 100] {
+        let s = repeat("x", n);
+        for k in [0, 3, 4, 11, 12, n - 1] {
+            let t = repeat("x", k) + y + repeat("x", n - k - 1);
+            let at = t.find(y, 0);
+            print(f"{n} {k} {s < t} {s == t} {at}");
+        }
+    }
+    print((repeat("e", 300) + "expression").find("expression", 0));
+    let hay = repeat("a", 499) + "b";
+    print(hay.find("aaab", 0));
+    print(hay.find("zzzz", 0));
+    print("plain ascii text".find("é", 0));
+    print("naïve café".find("café", 0));
+    print("abcabc".find("abc", 1));
+    print("abcabc".find("", 5));
+    print("b" < "ab");
+    print("ab" < "abc");
+    print("abc" < "ab");
+    print("é" < "z");
+    let m = Map<str, i64>();
+    var i = 0;
+    while i < 200 {
+        m.set(f"shared_prefix_shared_{i}", i);
+        i = i + 1;
+    }
+    var sum = 0;
+    i = 0;
+    while i < 200 {
+        sum = sum + m.get(f"shared_prefix_shared_{i}");
+        i = i + 1;
+    }
+    print(sum);
+    print(m.has("shared_prefix_shared_1999"));
+}

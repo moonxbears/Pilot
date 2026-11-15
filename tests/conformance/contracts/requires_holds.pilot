@@ -1,0 +1,6 @@
+// A `requires` clause that holds: the function runs on (seed, PilIR and C).
+fn half(n: i64) -> i64 requires(n % 2 == 0) => n / 2;
+
+fn main() {
+    print(half(8));
+}

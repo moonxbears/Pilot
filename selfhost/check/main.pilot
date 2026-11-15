@@ -16,18 +16,137 @@ use selfhost.check.diag.*;
 use selfhost.check.generics.*;
 use selfhost.check.methods.*;
 use selfhost.check.own.*;
+use selfhost.check.borrows.*;
 use selfhost.check.contracts.*;
+use selfhost.check.access.*;
+use selfhost.check.drops.*;
+use selfhost.check.copies.*;
+use selfhost.check.consts.*;
+use selfhost.check.receivers.*;
+use selfhost.check.numeric.*;
+use selfhost.check.type_tests.*;
+use selfhost.check.view_cast.*;
+use selfhost.check.quote_value.*;
+use selfhost.check.exits.*;
+use selfhost.check.probes.*;
+use selfhost.check.attr_inherit.*;
+use selfhost.check.attr_chain.*;
+use selfhost.check.coverage.*;
+use selfhost.check.purity.*;
+use selfhost.check.contract_clauses.*;
+use selfhost.check.noalloc.*;
+use selfhost.check.aliasing.*;
+use selfhost.check.layout_attrs.*;
+use selfhost.check.stack.*;
+use selfhost.check.clearance.*;
 
 pub fn check_program() -> List<List<any>> {
     let s = snap_load();
     let sink = sink_new(s);
     let p = prog_new(s);
-    let r = resolve_program(p, sink);
-    let inf = infer_new(p, r);
+    let inf = infer_new(p, resolve_program(p, sink));
+    check_all(inf, sink);
+    return sink.rows;
+}
+
+/// `check_program` and `run_plan` in one pass over the program, sharing its
+/// resolution and inference: `[diagnostic rows, run plan]`. `pilot run`
+/// checks a program and then runs it, so it needs both.
+pub fn check_and_plan() -> List<any> {
+    let s = snap_load();
+    let sink = sink_new(s);
+    let p = prog_new(s);
+    let inf = infer_new(p, resolve_program(p, sink));
+    check_all(inf, sink);
+    return [sink.rows, plan_of(s, inf)];
+}
+
+/// The program of snapshot `s`, resolved, inferred and checked, for a tool
+/// that goes on to use it (`pilot ir`, `pilot emit`): the checker's work is
+/// done once, not once to check and again to lower. The host is handed the
+/// diagnostics and reports them as `pilot check` does; it answers with the
+/// number of errors, and a program with any gives none here.
+pub fn checked_program(s: Snap) -> Infer? {
+    let sink = sink_new(s);
+    let p = prog_new(s);
+    let inf = infer_new(p, resolve_program(p, sink));
+    check_all(inf, sink);
+    if report_to_host(sink.rows) > 0 { return none; }
+    return inf;
+}
+
+/// Hands the checker's diagnostic rows to the host (`chk_report` in
+/// crates/pilot-cli/src/check.rs); gives the number of errors it reported.
+fn report_to_host(rows: List<List<any>>) -> i64 => __engine("chk_report", rows);
+
+/// Applies every rule of the checker to the inferred program.
+pub fn check_all(inf: Infer, sink: DiagSink) {
+    let p = inf.p;
     check_rules(inf, sink);
     check_generics(inf, sink);
     check_ownership(inf, sink);
+    check_consts(inf, sink);
+    check_exits(inf, sink);
+    check_escapes(inf, sink);
     check_type_tables(p, sink);
     check_contracts(p, sink);
-    return sink.rows;
+    check_access(inf, sink);
+    check_clearance(inf, sink);
+    check_comptime_attrs(p, sink);
+    check_attr_inherit(p, sink);
+    check_attr_chains(p, sink);
+    check_coverage(p, sink);
+    check_purity(inf, sink);
+    check_contract_clauses(inf, sink);
+    check_noalloc(inf, sink);
+    check_aliasing(inf, sink);
+    check_layout_attrs(inf, sink);
+    check_stack(inf, sink);
+    check_type_tests(inf, sink);
+    check_view_casts(inf, sink);
+    check_quotes(inf, sink);
+}
+
+/// Where each owned value of the program is dropped (selfhost/check/drops.pilot),
+/// as rows for crates/pilot-cli/src/check.rs `drop_plan`.
+pub fn drop_plan() -> List<List<any>> {
+    let s = snap_load();
+    let p = prog_new(s);
+    let r = resolve_program(p, sink_new(s));
+    let inf = infer_new(p, r);
+    let pl = drop_planner(inf);
+    plan_copies(pl);
+    return pl.rows;
+}
+
+/// Everything the seed carries out around the program's nodes, as rows for
+/// crates/pilot-cli/src/check.rs `run_plan`: the drop plan (`drop_plan`),
+/// then the probes of `[Debug]` functions (selfhost/check/probes.pilot),
+/// each `[span start, span end, node kind, capture, call, args]`.
+pub fn run_plan() -> List<any> {
+    let s = snap_load();
+    let p = prog_new(s);
+    return plan_of(s, infer_new(p, resolve_program(p, sink_new(s))));
+}
+
+/// The run plan (`run_plan`) of the inferred program.
+pub fn plan_of(s: Snap, inf: Infer) -> List<any> {
+    let p = inf.p;
+    let pl = drop_planner(inf);
+    plan_copies(pl);
+    plan_receivers(inf, pl.rows);
+    plan_numeric(inf, pl.rows);
+    plan_type_tests(inf, pl.rows);
+    plan_view_casts(inf, pl.rows);
+    plan_quotes(inf, pl.rows);
+    var probes: List<List<any>> = [];
+    for row in probe_plan(p) {
+        let n: i64 = row[0];
+        probes.push([span_start(s, n), span_end(s, n), kind(s, n), row[1], row[2], row[3], ProbeAt::After as i64]);
+    }
+    for row in coverage_plan(p) {
+        let n: i64 = row[0];
+        probes.push([span_start(s, n), span_end(s, n), kind(s, n), row[1], row[2], row[3], row[4]]);
+    }
+    return [pl.rows, probes];
 }

@@ -1,6 +1,7 @@
 //! `for` loops.
 //!
-//! `for i in a..b` and `for i in a..=b` count. `for x in xs` walks a list (or
+//! `for i in a..b` and `for i in a..=b` count, by one or by the step of
+//! `a..b : step` (a step of 0 or less stops the program). `for x in xs` walks a list (or
 //! anything `list_len`/`map_get` index) by position. Any other value goes
 //! through the enumerator protocol that `stdlib/core/syntax/for.pilot` binds:
 //! the loop calls its enumerator method once, then the step method before
@@ -14,10 +15,11 @@
 
 use crate::instruction::Opcode;
 use crate::lower_expr::{OP_RANGE_HALF_OPEN, OP_RANGE_INCLUSIVE};
+use pilot_ast::BinaryOp;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_parser::EnumeratorProtocol;
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
 /// How a loop reaches its elements.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -35,21 +37,33 @@ impl BytecodeCompiler {
         let clause = (node.flags as usize)
             .checked_sub(1)
             .and_then(|i| arena.for_clauses.get(i).copied());
+        let collects = self.for_collects(node_id);
         let Some((iter_id, then_id)) = clause else {
             return self.error(crate::codes::SYNTAX, "malformed `for` expression".to_string());
         };
-        if then_id.is_some() {
-            let msg = "`for ... then` expressions are not lowered by the seed yet";
-            return self.error(crate::codes::SEED, msg.to_string());
-        }
-        let iter_n = *arena.node(iter_id);
+        // A `for .. then` gives one value, not the list of what it yields.
+        let collects = collects && then_id.is_none();
+        let (iter_n, step_id) = Self::range_and_step(arena, iter_id);
         let is_range = iter_n.node_kind() == NodeKind::BinaryExpr
             && matches!(iter_n.flags, OP_RANGE_INCLUSIVE | OP_RANGE_HALF_OPEN);
         let proto = pilot_parser::bootstrap_tables().enumerator().cloned();
         let static_type = if is_range { None } else { self.static_type(arena, iter_id) };
+        let native_for_ops = static_type.as_deref().and_then(|t| {
+            let tables = pilot_parser::bootstrap_tables();
+            let get = tables.native_member(t, "for_get")?;
+            let len = tables.native_member(t, "for_len")?;
+            Some((
+                tables.native_member(t, "for_seq").map(str::to_string),
+                len.to_string(),
+                get.to_string(),
+            ))
+        });
         let walk = match &proto {
             _ if is_range => Walk::Range,
-            Some(p) if self.method_owners.contains_key(&p.get_enumerator) => match &static_type {
+            _ if native_for_ops.is_some() => Walk::Index,
+            Some(p) if self.method_owners.contains_key(&p.get_enumerator)
+                && self.method_owners.contains_key(&p.move_next) =>
+            match &static_type {
                 Some(t) if self.declares(t, &p.get_enumerator).is_some() => Walk::Enumerate,
                 Some(t) if self.structs.contains_key(t) => Walk::Enumerate,
                 Some(_) => Walk::Index,
@@ -67,25 +81,46 @@ impl BytecodeCompiler {
         let r_end = self.alloc_local_reg();
         let r_seq = self.alloc_local_reg();
         let r_enum = self.alloc_local_reg();
+        let r_step = step_id.map(|_| self.alloc_local_reg());
+        if collects {
+            let r_list = self.alloc_local_reg();
+            self.begin_collect(r_list);
+        }
+        // `for .. then fallback`: the loop's value is what a `break value`
+        // gives, or the `then` clause when the loop runs to its end.
+        let r_result = then_id.is_some().then(|| self.alloc_local_reg());
+        if let Some(r) = r_result {
+            let r_null = self.emit_null();
+            self.emit(Opcode::Move, r, r_null, 0);
+        }
 
         let mark = self.next_reg;
         if is_range {
             let r_s = self.compile_node(arena, NodeId(iter_n.lhs));
             self.emit(Opcode::Move, r_idx, r_s, 0);
+            self.release_to(mark);
             let r_e = self.compile_node(arena, NodeId(iter_n.rhs));
             self.emit(Opcode::Move, r_end, r_e, 0);
+            self.release_to(mark);
+            if let (Some(step), Some(r_step)) = (step_id, r_step) {
+                let r_v = self.compile_node(arena, step);
+                self.emit(Opcode::Move, r_step, r_v, 0);
+                self.emit_step_check(r_step);
+            }
         } else {
             let r_it = self.compile_node(arena, iter_id);
             self.emit(Opcode::Move, r_seq, r_it, 0);
         }
-        self.next_reg = mark;
+        self.release_to(mark);
         // `r_enum` is `none` while indexing, the enumerator while enumerating.
         let r_null = self.emit_null();
         self.emit(Opcode::Move, r_enum, r_null, 0);
+        self.release_to(mark);
         if !is_range {
             // The step at the loop's end counts in every mode.
             let r_zero = self.emit_const(PilotVal::from_int(0));
             self.emit(Opcode::Move, r_idx, r_zero, 0);
+            self.release_to(mark);
         }
         let to_index = match walk {
             Walk::Either => {
@@ -104,8 +139,19 @@ impl BytecodeCompiler {
             self.patch_to_here(j);
         }
         if matches!(walk, Walk::Index | Walk::Either) {
-            let r_len = self.emit_intrinsic("list_len", &[r_seq]);
+            if let Some((Some(to_seq), _, _)) = &native_for_ops {
+                let r_converted = self.emit_intrinsic(to_seq, &[r_seq]);
+                self.emit(Opcode::Move, r_seq, r_converted, 0);
+                self.release_to(mark);
+            } else if walk == Walk::Either {
+                let r_converted = self.emit_intrinsic("for_seq", &[r_seq]);
+                self.emit(Opcode::Move, r_seq, r_converted, 0);
+                self.release_to(mark);
+            }
+            let len_op = native_for_ops.as_ref().map(|(_, l, _)| l.as_str()).unwrap_or("str_len");
+            let r_len = self.emit_intrinsic(len_op, &[r_seq]);
             self.emit(Opcode::Move, r_end, r_len, 0);
+            self.release_to(mark);
         }
         if let Some(j) = skip_index {
             self.patch_to_here(j);
@@ -129,29 +175,77 @@ impl BytecodeCompiler {
             let inclusive = is_range && iter_n.flags == OP_RANGE_INCLUSIVE;
             let cmp = if inclusive { Opcode::CmpLe } else { Opcode::CmpLt };
             self.emit(cmp, r_cond, r_idx, r_end);
-            exits.push(self.emit_branch(Opcode::JumpIfFalse, r_cond, 0));
+            exits.push(self.emit_branch_unless(r_cond, r_cond));
             if is_range {
                 self.emit(Opcode::Move, slot, r_idx, 0);
             } else {
-                let r_item = self.emit_intrinsic("map_get", &[r_seq, r_idx]);
+                let get_op = native_for_ops.as_ref().map(|(_, _, g)| g.as_str()).unwrap_or("list_get");
+                let r_item = self.emit_intrinsic(get_op, &[r_seq, r_idx]);
                 self.emit(Opcode::Move, slot, r_item, 0);
+                self.release_to(mark);
             }
         }
         if let Some(j) = to_body {
             self.patch_to_here(j);
         }
         self.next_reg = mark;
-        let ctx = self.loop_body(arena, NodeId(node.rhs));
+        let enumerates = matches!(walk, Walk::Enumerate | Walk::Either);
+        let release = enumerates.then_some(r_enum);
+        self.next_loop_result = r_result;
+        let ctx = self.loop_body_releasing(arena, NodeId(node.rhs), release);
         for j in ctx.continue_jumps {
             self.patch_to_here(j);
         }
-        let r_one = self.emit_const(PilotVal::from_int(1));
-        self.emit(Opcode::Add, r_idx, r_idx, r_one);
+        let r_by = match r_step {
+            Some(r) => r,
+            None => self.emit_const(PilotVal::from_int(1)),
+        };
+        self.emit(Opcode::Add, r_idx, r_idx, r_by);
         self.emit_jump(start);
-        for j in exits.into_iter().chain(ctx.break_jumps) {
+        for j in exits {
             self.patch_to_here(j);
         }
-        self.emit_null()
+        if let Some(r) = r_result {
+            let then_mark = self.next_reg;
+            let r_then = self.compile_node(arena, then_id);
+            self.emit(Opcode::Move, r, r_then, 0);
+            self.release_to(then_mark);
+        }
+        for j in ctx.break_jumps {
+            self.patch_to_here(j);
+        }
+        // An enumerator that has one is closed however the loop ends.
+        if enumerates {
+            self.emit_release(r_enum);
+        }
+        if collects {
+            return self.end_collect();
+        }
+        match r_result {
+            Some(r) => r,
+            None => self.emit_null(),
+        }
+    }
+
+    /// The range node of a `for` iterable and the step of `a..b : step`, if
+    /// it has one.
+    fn range_and_step(arena: &AstArena, iter_id: NodeId) -> (pilot_ast::AstNode, Option<NodeId>) {
+        let n = *arena.node(iter_id);
+        if n.node_kind() == NodeKind::BinaryExpr && n.flags == BinaryOp::Step as u16 {
+            return (*arena.node(NodeId(n.lhs)), Some(NodeId(n.rhs)));
+        }
+        (n, None)
+    }
+
+    /// Stops the program when the step in `r_step` is 0 or less: the loop
+    /// would never reach its end.
+    fn emit_step_check(&mut self, r_step: u8) {
+        let r_zero = self.emit_const(PilotVal::from_int(0));
+        let r_ok = self.alloc_reg();
+        self.emit(Opcode::CmpLt, r_ok, r_zero, r_step);
+        let skip = self.emit_branch(Opcode::JumpIfTrue, r_ok, 0);
+        self.emit_trap("the step of `a..b : step` must be greater than 0".to_string());
+        self.patch_to_here(skip);
     }
 
     /// `if !e.move_next() { exit } x = e.current;` for the enumerator in

@@ -182,6 +182,13 @@ pub let WARNINGS = [
         category: "Completeness",
         reference: "Pilot Selfhost Completeness Tracker",
     },
+    WarningDef {
+        code: "INLINE001",
+        title: "Inline Hint Not Implemented",
+        description: "Declaration is marked '[Inline]', but no engine inlines calls yet; every call to it is a real call",
+        category: "Completeness",
+        reference: "proposals.md PROP-007 / PROP-002a Amendment A1",
+    },
 
     // -------------------------------------------------------------------------
     // 6. Code Modernization & Idiomatic Simplifications (CODE001 - CODE006)

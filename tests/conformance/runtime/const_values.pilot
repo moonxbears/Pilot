@@ -1,0 +1,92 @@
+// Constants and zero-argument pure functions. A `const` is known data: it is
+// computed once (at compile time when it can be) and never changes. Using a
+// constant list or map by value (binding it, passing it to a plain
+// parameter, returning or storing it) gives a copy of its own, so changing
+// that copy never changes the constant. A zero-argument `pure fn` follows
+// the same rule: its result is the same every call.
+//
+// Expected output, worked by hand:
+//   LIMIT 1000; SCALE 1000 * 3 + 7 = 3007; LABEL "pilot/v3007";
+//   HALF 6.5 / 2.0 = 3.25; BIG 3007 > 3000 = true; PRIMES[2] = 5;
+//   PRIMES has 5 items summing to 2 + 3 + 5 + 7 + 11 = 28; INDEX["b"] = 2;
+//   width() = 3 * 7 = 21; title() = "t" + "able" = "table";
+//   1000 rounds of table()[1] + width() = 1000 * (20 + 21) = 41000;
+//   a copy of PRIMES with 13 pushed has 6 items, PRIMES still 5;
+//   a copy of table() with 40 pushed is [10, 20, 30, 40], table() is
+//   unchanged; a copy of GRID whose first row gets a 9 is
+//   [[1, 2, 9], [3, 4]] and GRID is unchanged (the copy is deep); a copy of
+//   INDEX with "c" set has "c", INDEX does not; a function that pops from
+//   its parameter changes its own copy (5 - 2 pops = 3 items, printed + 1 = 4) and PRIMES keeps 5.
+const LIMIT = 1000;
+const SCALE = LIMIT * 3 + 7;
+const NAME = "pilot";
+const LABEL = NAME + "/v" + f"{SCALE}";
+const HALF = 6.5 / 2.0;
+const BIG = SCALE > 3000;
+const PRIMES = [2, 3, 5, 7, 11];
+const GRID = [[1, 2], [3, 4]];
+const INDEX = make_index();
+
+fn make_index() -> Map<str, i64> {
+    let m = Map<str, i64>();
+    m.set("a", 1);
+    m.set("b", 2);
+    return m;
+}
+
+pure fn width() -> i64 => 3 * 7;
+pure fn table() -> List<i64> => [10, 20, 30];
+pure fn title() -> str => "t" + "able";
+
+fn total(xs: List<i64>) -> i64 {
+    var s = 0;
+    for x in xs {
+        s = s + x;
+    }
+    return s;
+}
+
+fn shrink(xs: List<i64>) -> i64 {
+    xs.pop();
+    xs.pop();
+    return xs.len() as i64;
+}
+
+fn main() {
+    print(LIMIT);
+    print(SCALE);
+    print(LABEL);
+    print(HALF);
+    print(BIG);
+    print(PRIMES[2]);
+    print(PRIMES.len());
+    print(total(PRIMES));
+    print(INDEX.get("b"));
+    print(width());
+    print(title());
+    var sum = 0;
+    var i = 0;
+    while i < 1000 {
+        sum = sum + table()[1] + width();
+        i = i + 1;
+    }
+    print(sum);
+    var mine = PRIMES;
+    mine.push(13);
+    print(mine.len());
+    print(PRIMES.len());
+    var t = table();
+    t.push(40);
+    print(t);
+    print(table());
+    var g = GRID;
+    g[0].push(9);
+    print(g);
+    print(GRID);
+    var idx = INDEX;
+    idx.set("c", 3);
+    print(idx.has("c"));
+    print(INDEX.has("c"));
+    print(shrink(PRIMES) + 1);
+    print(PRIMES.len());
+}

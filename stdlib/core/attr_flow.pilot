@@ -1,0 +1,140 @@
+// =========================================================================
+// FILE: stdlib/core/attr_flow.pilot
+// Running the attributes of a function in sequence.
+// =========================================================================
+// The step attributes of a function form one chain: `[Live]`, `[Generate]`
+// and every attribute whose `...Attr` struct implements `IStepAttribute`.
+// They run in order of `weight` (highest first); equal weights run in the
+// order they are written. Each step says what happens to the steps after it:
+//
+//   ::Continue   the next step runs
+//   ::SkipNext   the next step does not run
+//   ::Stop       no later step runs
+//
+// A step whose `always()` is true runs anyway: after a `::Stop`, and when a
+// `::SkipNext` names it (the skip is used up on it all the same). `[Live]`
+// and `[Generate]` always answer `::Continue` and are not `always`.
+//
+// A step runs while the program is compiled: on `pilot check` and
+// `pilot build` (with the `::Compile` calls of `[Live]`) and on `pilot run`
+// before `main` (with the `::Run` ones). A `[Live]` that does not run at that
+// moment still holds its place, so a `::SkipNext` before it is used up on it.
+// `[Debug]` is not a step: it traces while the program runs, whatever the
+// chain decided. An attribute whose struct implements `IRuntimeStepAttribute`
+// decides on every call instead; its steps are not woven into the function
+// yet, so the chain stops at the `attr.runtime_step` seam when it meets one.
+// A user attribute:
+//
+//   use Pilot.Core.AttrFlow;
+//
+//   struct OnlyOnceAttr : IStepAttribute {
+//       pub name: str;
+//       pub weight: i32 = 10;
+//       pub fn step(fn_name: str) -> AttrFlow { .. }
+//   }
+//
+//   [OnlyOnce("a")] [Generate("a.txt")] fn a() -> str => ..;
+//
+// `[OnlyOnce("a")]` builds `OnlyOnceAttr { name: "a" }`: arguments without a
+// label fill the fields in order, `name: value` fills that field, and a
+// field left out takes its default (selfhost/check/attr_chain.pilot checks
+// this). The sequencing below is what selfhost/cli/comptime_attrs.pilot runs.
+//
+// Inheriting: an attribute written on a `pkg` declaration, a `struct` or
+// `interface`, or an `ext` block reaches every function and method inside
+// it when it is inherited: its struct implements `IInheritedAttribute`
+// (`[Debug]` and `[Generate(ext: ..)]` among the built-ins; a `[Generate]`
+// inherited from a package writes a file for each function that takes
+// nothing and returns `str`). Attributes on a header section (`[A] pub:`)
+// are the functions' own already. Inherited attributes come before a
+// function's own in the written order, the outermost first. When an
+// attribute of the same name is written closer (on the function, or on a
+// struct inside the package), the inherited one's `policy()` decides:
+//
+//   ::Override   the closer one replaces it (the default)
+//   ::Append     both apply, each its own step
+//   ::Coalesce   one attribute: the closer one's arguments fill over the
+//                inherited one's fields, in the inherited one's place
+//
+// `[NoInherit]` on a function, struct, interface or ext block drops every
+// attribute inherited from outside it; `[NoInherit(Debug, Flow)]` drops
+// those named. An attribute that cannot reach the functions it is written
+// over is an error (ATTR005, selfhost/check/attr_inherit.pilot).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.AttrFlow;
+
+
+/// What a step says about the steps after it.
+pub enum AttrFlow : u8 {
+    Continue,
+    SkipNext,
+    Stop,
+}
+
+/// What an inherited attribute does when one of the same name is written
+/// closer to the function.
+pub enum InheritPolicy : u8 {
+    Override,
+    Append,
+    Coalesce,
+}
+
+/// An attribute that reaches the functions inside the declaration it is
+/// written on. Like `IStepAttribute` it does not extend `IAttribute`
+/// (an `IValue`): an attribute may hold a view such as a `str`.
+pub interface IInheritedAttribute {
+    /// What a closer attribute of the same name does to this one.
+    pub pure fn policy() -> InheritPolicy => ::Override;
+}
+
+/// An attribute that takes part in its function's chain of steps.
+pub interface IStepAttribute {
+    /// Runs the step for the function named `fn_name`.
+    pub fn step(fn_name: str) -> AttrFlow;
+    /// Whether the step runs even when the steps before it said not to.
+    pub pure fn always() -> bool => false;
+}
+
+/// An attribute that decides on every call of its function, before the body
+/// runs. Not woven yet: see `attr_runtime_steps`.
+pub interface IRuntimeStepAttribute {
+    /// Runs the step for a call of the function named `fn_name`.
+    pub fn on_call(fn_name: str) -> AttrFlow;
+    /// Whether the step runs even when the steps before it said not to.
+    pub pure fn always() -> bool => false;
+}
+
+/// Where the chain hands the run-time steps of function `fn_name` over to
+/// its body.
+pub fn attr_runtime_steps(fn_name: str) {
+    seam("attr.runtime_step", "weaving `IRuntimeStepAttribute` steps into each call of the function (seed, PilIR and C), so `on_call` decides per call");
+}
+
+/// Where a chain of steps stands.
+pub struct AttrChain : IValue {
+    /// A step said `::Stop`.
+    pub stopped: bool;
+    /// The step before said `::SkipNext`.
+    pub skipping: bool;
+    /// The step being entered runs.
+    pub go: bool;
+
+    /// The chain on entering a step that is `always` or not; `go` says
+    /// whether it runs.
+    pub fn enter(always: bool) -> AttrChain {
+        let runs = always || (!self.stopped && !self.skipping);
+        return AttrChain { stopped: .stopped, skipping: false, go: runs };
+    }
+
+    /// The chain after the step that was entered said `flow`.
+    pub fn after(flow: AttrFlow) -> AttrChain {
+        switch flow {
+            case ::Stop: return AttrChain { stopped: true, skipping: false, go: false };
+            case ::SkipNext: return AttrChain { stopped: .stopped, skipping: true, go: false };
+            default: return AttrChain { stopped: .stopped, skipping: false, go: false };
+        }
+    }
+}
+
+/// A chain before its first step.
+pub fn attr_chain_start() -> AttrChain => AttrChain { stopped: false, skipping: false, go: false };

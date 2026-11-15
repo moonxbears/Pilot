@@ -1,0 +1,25 @@
+// `for i in a..b : step` starts at a and adds step while the value is below b
+// (`..`) or at most b (`..=`). Worked by hand:
+//   0..10 : 3   -> 0, 3, 6, 9          (12 is not below 10)
+//   0..=9 : 3   -> 0, 3, 6, 9          (9 is at most 9)
+//   1..10 : 4   -> 1, 5, 9             (13 is not below 10)
+//   -6..0 : 2   -> -6, -4, -2          (0 is not below 0)
+//   5..5 : 2    -> nothing             (5 is not below 5)
+//   0..=20 : s with s = 5 -> 0+5+10+15+20 = 50
+//   0..n : k + 1 with n = 7, k = 2 -> 0, 3, 6; sum 9
+fn main() {
+    for i in 0..10 : 3 { print(i); }
+    for i in 0..=9 : 3 { print(i); }
+    for i in 1..10 : 4 { print(i); }
+    for i in -6..0 : 2 { print(i); }
+    for i in 5..5 : 2 { print(i); }
+    let s = 5;
+    var total = 0;
+    for i in 0..=20 : s { total = total + i; }
+    print(total);
+    let n = 7;
+    let k = 2;
+    var sum = 0;
+    for i in 0..n : k + 1 { sum = sum + i; }
+    print(sum);
+}

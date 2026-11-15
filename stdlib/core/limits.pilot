@@ -1,0 +1,214 @@
+// =========================================================================
+// FILE: stdlib/core/limits.pilot
+// THE CHARACTERISTIC CONSTANTS OF THE PRIMITIVES: `u8.max()`, `f64.epsilon()`
+// =========================================================================
+// Each constant is a static member of its type: it belongs to the type, not
+// to its values, so it adds nothing to a value's size, and its body is a
+// literal the compiler folds. They are static functions because the seed
+// has no `static const` members yet (a `Type.NAME` member is reported as an
+// undefined name); `T.max()` reads the same on every backend.
+//
+// Values are those of Rust's `core` constants of the same names (`i8::MIN`,
+// `f64::EPSILON`, `f64::MIN_POSITIVE`, `char::MAX`, ..), for the widths the
+// types' `[Bits]` descriptors declare (`isize` and `usize` are 64 bits).
+//
+//   every integer  min, max, bits
+//   f32, f64       bits, radix, mantissa_digits, digits, epsilon,
+//                  min, max, min_positive (smallest normal), min_subnormal,
+//                  min_exp, max_exp, min_10_exp, max_10_exp,
+//                  infinity, neg_infinity, nan
+//   char           min, max (0x10FFFF), replacement (U+FFFD), bits
+//   bool           bits
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Limits;
+
+ext i8 {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> i8 => -128;
+        /// The largest value.
+        fn max() -> i8 => 127;
+        /// Width in bits.
+        fn bits() -> u32 => 8;
+}
+
+ext i16 {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> i16 => -32768;
+        /// The largest value.
+        fn max() -> i16 => 32767;
+        /// Width in bits.
+        fn bits() -> u32 => 16;
+}
+
+ext i32 {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> i32 => -2147483648;
+        /// The largest value.
+        fn max() -> i32 => 2147483647;
+        /// Width in bits.
+        fn bits() -> u32 => 32;
+}
+
+ext i64 {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> i64 => -9223372036854775808;
+        /// The largest value.
+        fn max() -> i64 => 9223372036854775807;
+        /// Width in bits.
+        fn bits() -> u32 => 64;
+}
+
+ext isize {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> isize => -9223372036854775808;
+        /// The largest value.
+        fn max() -> isize => 9223372036854775807;
+        /// Width in bits.
+        fn bits() -> u32 => 64;
+}
+
+ext u8 {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> u8 => 0;
+        /// The largest value.
+        fn max() -> u8 => 255;
+        /// Width in bits.
+        fn bits() -> u32 => 8;
+}
+
+ext u16 {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> u16 => 0;
+        /// The largest value.
+        fn max() -> u16 => 65535;
+        /// Width in bits.
+        fn bits() -> u32 => 16;
+}
+
+ext u32 {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> u32 => 0;
+        /// The largest value.
+        fn max() -> u32 => 4294967295;
+        /// Width in bits.
+        fn bits() -> u32 => 32;
+}
+
+ext u64 {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> u64 => 0;
+        /// The largest value.
+        fn max() -> u64 => 18446744073709551615;
+        /// Width in bits.
+        fn bits() -> u32 => 64;
+}
+
+ext usize {
+    pub static pure:
+        /// The smallest value.
+        fn min() -> usize => 0;
+        /// The largest value.
+        fn max() -> usize => 18446744073709551615;
+        /// Width in bits.
+        fn bits() -> u32 => 64;
+}
+
+ext f32 {
+    pub static pure:
+        /// Width in bits.
+        fn bits() -> u32 => 32;
+        /// The base of the exponent.
+        fn radix() -> u32 => 2;
+        /// Significant binary digits, the implicit leading bit included.
+        fn mantissa_digits() -> u32 => 24;
+        /// Decimal digits that survive a round trip through this type.
+        fn digits() -> u32 => 6;
+        /// The gap between 1.0 and the next larger value.
+        fn epsilon() -> f32 => 1.1920928955078125e-7;
+        /// The most negative finite value.
+        fn min() -> f32 => -3.4028234663852886e38;
+        /// The largest finite value.
+        fn max() -> f32 => 3.4028234663852886e38;
+        /// The smallest positive normal value.
+        fn min_positive() -> f32 => 1.1754943508222875e-38;
+        /// The smallest positive subnormal value.
+        fn min_subnormal() -> f32 => 1.401298464324817e-45;
+        /// One more than the smallest normal binary exponent (C's FLT_MIN_EXP).
+        fn min_exp() -> i32 => -125;
+        /// One more than the largest binary exponent (C's FLT_MAX_EXP).
+        fn max_exp() -> i32 => 128;
+        /// The smallest n with 10^n a normal value.
+        fn min_10_exp() -> i32 => -37;
+        /// The largest n with 10^n a finite value.
+        fn max_10_exp() -> i32 => 38;
+        /// Positive infinity.
+        fn infinity() -> f32 => 1.0 / 0.0;
+        /// Negative infinity.
+        fn neg_infinity() -> f32 => -1.0 / 0.0;
+        /// A quiet NaN.
+        fn nan() -> f32 => 0.0 / 0.0;
+}
+
+ext f64 {
+    pub static pure:
+        /// Width in bits.
+        fn bits() -> u32 => 64;
+        /// The base of the exponent.
+        fn radix() -> u32 => 2;
+        /// Significant binary digits, the implicit leading bit included.
+        fn mantissa_digits() -> u32 => 53;
+        /// Decimal digits that survive a round trip through this type.
+        fn digits() -> u32 => 15;
+        /// The gap between 1.0 and the next larger value.
+        fn epsilon() -> f64 => 2.220446049250313e-16;
+        /// The most negative finite value.
+        fn min() -> f64 => -1.7976931348623157e308;
+        /// The largest finite value.
+        fn max() -> f64 => 1.7976931348623157e308;
+        /// The smallest positive normal value.
+        fn min_positive() -> f64 => 2.2250738585072014e-308;
+        /// The smallest positive subnormal value.
+        fn min_subnormal() -> f64 => 5e-324;
+        /// One more than the smallest normal binary exponent (C's FLT_MIN_EXP).
+        fn min_exp() -> i32 => -1021;
+        /// One more than the largest binary exponent (C's FLT_MAX_EXP).
+        fn max_exp() -> i32 => 1024;
+        /// The smallest n with 10^n a normal value.
+        fn min_10_exp() -> i32 => -307;
+        /// The largest n with 10^n a finite value.
+        fn max_10_exp() -> i32 => 308;
+        /// Positive infinity.
+        fn infinity() -> f64 => 1.0 / 0.0;
+        /// Negative infinity.
+        fn neg_infinity() -> f64 => -1.0 / 0.0;
+        /// A quiet NaN.
+        fn nan() -> f64 => 0.0 / 0.0;
+}
+
+ext char {
+    pub static pure:
+        /// The smallest Unicode scalar value, U+0000.
+        fn min() -> char => 0 as char;
+        /// The largest Unicode scalar value, U+10FFFF.
+        fn max() -> char => 0x10FFFF as char;
+        /// U+FFFD REPLACEMENT CHARACTER, used in place of undecodable text.
+        fn replacement() -> char => 0xFFFD as char;
+        /// Width in bits.
+        fn bits() -> u32 => 32;
+}
+
+ext bool {
+    pub static pure:
+        /// Width in bits.
+        fn bits() -> u32 => 1;
+}

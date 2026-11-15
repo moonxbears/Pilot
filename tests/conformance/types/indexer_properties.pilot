@@ -1,0 +1,35 @@
+// Indexer properties (`self[i: T] -> R`) run their `get` and `set` clauses
+// on every engine, including expression-bodied read-only indexers, explicit
+// setter parameters, and guarded setters.
+struct Grid {
+    pub cells: List<i64>;
+    pub self[i: i64] -> i64 {
+        get => self.cells[i];
+        set if value < 0 => { self.cells[i] = 0; }
+        set(v: i64) => { self.cells[i] = v * 2; }
+    }
+}
+
+struct ReadOnlyGrid {
+    pub cells: List<i64>;
+    pub self[i: i64] -> i64 => self.cells[i] + 100;
+}
+
+fn main() {
+    var g = Grid { cells: [10, 20, 30] };
+    print(g[1]);
+    g[1] = 7;
+    print(g[1]);
+    g[0] = -5;
+    print(g[0]);
+
+    let ro = ReadOnlyGrid { cells: [4, 5] };
+    print(ro[0]);
+    print(ro[1]);
+
+    let grids: List<Grid> = [g];
+    for item in grids {
+        item[2] = 9;
+        print(item[2]);
+    }
+}

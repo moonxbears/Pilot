@@ -1,0 +1,6 @@
+// Unbuilt HostOp stops loudly at registered seam `bridge.thread_spawn` (PROP-002a §6 & §7).
+use Pilot.Core.Env;
+
+fn main() {
+    let _ = Thread.spawn(0, 0, 0);
+}

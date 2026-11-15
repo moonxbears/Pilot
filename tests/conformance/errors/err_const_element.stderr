@@ -1,0 +1,2 @@
+error[CONST001]: `GRID` is a constant and cannot be changed; copy it into a variable first (`var copy = GRID;`)
+err_const_element.pilot:6:5

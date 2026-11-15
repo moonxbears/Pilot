@@ -1,0 +1,2 @@
+error[SYN001]: a `where` clause on a type declaration is not checked yet
+err_type_where.pilot:4:16

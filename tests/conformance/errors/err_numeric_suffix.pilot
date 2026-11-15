@@ -1,0 +1,9 @@
+// A type suffix must hold its literal: 300 does not fit u8 (0..255), 128 does
+// not fit i8 (-128..127, so -128 is written `(-128) as i8`), a fraction cannot
+// become an integer type, and a hex literal takes no unit. All are SYN001.
+fn main() {
+    print(300u8);
+    print(128i8);
+    print(1.5u8);
+    print(0xFFms);
+}

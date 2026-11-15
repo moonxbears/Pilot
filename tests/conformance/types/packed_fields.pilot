@@ -1,0 +1,28 @@
+// `[Layout(packed)]` places a struct's fields with no padding. The program
+// reads, writes and copies its fields as usual; a field copied into a local
+// may be lent to a `ref` parameter.
+//
+// Expected output, worked by hand:
+//   Header { tag: 7, size: 40 }: tag 7, size 40.
+//   size = size + 2 -> 42; tag = 9.
+//   twice(size) of a local copy: 42 * 2 = 84; the field stays 42.
+[Layout(packed)]
+struct Header {
+    pub tag: u8;
+    pub size: u32;
+}
+
+fn twice(ref n: u32) -> u32 => n * 2;
+
+fn main() {
+    var h = Header { tag: 7, size: 40 };
+    print(h.tag);
+    print(h.size);
+    h.size = h.size + 2;
+    h.tag = 9;
+    print(h.size);
+    print(h.tag);
+    let local = h.size;
+    print(twice(local));
+    print(h.size);
+}

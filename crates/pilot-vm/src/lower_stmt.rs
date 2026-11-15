@@ -3,8 +3,20 @@
 use crate::{BytecodeCompiler, LoopCtx};
 use crate::instruction::Opcode;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use pilot_rt::PilotVal;
+use crate::value::PilotVal;
 
+
+/// The register class `[Bits]` descriptors give unsigned integers.
+const UNSIGNED_REGISTER: &str = "gpr_unsigned";
+const SIGNED_REGISTER: &str = "gpr_signed";
+const FLOAT_REGISTER: &str = "simd_float";
+
+/// Whether a register is narrower than the engine's own numbers: an integer
+/// register of 2 to 63 bits, or a 32-bit float register.
+pub(crate) fn is_narrow_register(l: &pilot_parser::RegLayout) -> bool {
+    let is_int = l.class == UNSIGNED_REGISTER || l.class == SIGNED_REGISTER;
+    (is_int && l.width > 1 && l.width < 64) || (l.class == FLOAT_REGISTER && l.width == 32)
+}
 impl BytecodeCompiler {
     /// Lowers a `{ ... }` block. Scratch registers used by one statement are
     /// released before the next; the block's value is its last statement's.
@@ -15,12 +27,16 @@ impl BytecodeCompiler {
             types: self.var_types.clone(),
         });
         self.defers.push(Vec::new());
+        let local_mark = self.next_local_reg;
+        let flags_before = self.drop_flags.len();
         let mut last = 0;
         for (i, &c) in children.iter().enumerate() {
             let mark = self.next_reg;
+            // A `for` that is a block item collects nothing (`lower_yield`).
+            self.stmt_for = Self::item_for(arena, NodeId(c));
             last = self.compile_node(arena, NodeId(c));
             if i + 1 < children.len() {
-                self.next_reg = mark;
+                self.release_to(mark);
             }
         }
         let value = match children.last() {
@@ -32,6 +48,32 @@ impl BytecodeCompiler {
             self.var_slots = scope.slots;
             self.var_types = scope.types;
         }
+        self.release_block_locals(local_mark, flags_before, r)
+    }
+
+    /// Gives the registers of a block's locals back once the block ends, so
+    /// a function's limit counts the locals live at once rather than every
+    /// `let` it contains. A drop flag (F7) lives as long as its function, so
+    /// a block that allocated one keeps its registers. Returns where the
+    /// block's value is: moved to a scratch register when it sat in one of
+    /// the registers given back.
+    fn release_block_locals(&mut self, local_mark: u8, flags_before: usize, r: u8) -> u8 {
+        if self.next_local_reg == local_mark || self.drop_flags.len() != flags_before {
+            return r;
+        }
+        let r = if r >= local_mark && r < crate::FIRST_TEMP_REG {
+            let keep = self.alloc_reg();
+            self.emit(Opcode::Move, keep, r, 0);
+            keep
+        } else {
+            r
+        };
+        // The locals' scope has ended: their registers stop holding the
+        // values, so the collector frees what only they reached even while
+        // the function goes on (`collect`).
+        let count = self.next_local_reg - local_mark;
+        self.push_ins(crate::Instruction::encode(Opcode::Clear, local_mark, count, 0));
+        self.next_local_reg = local_mark;
         r
     }
 
@@ -41,7 +83,7 @@ impl BytecodeCompiler {
         arena: &AstArena,
         fn_id: NodeId,
         owner: Option<&str>,
-        entry: &mut Option<u16>,
+        entry: &mut Option<u32>,
     ) {
         self.compile_fn_decl_as(arena, fn_id, owner, None, entry);
     }
@@ -54,7 +96,7 @@ impl BytecodeCompiler {
         fn_id: NodeId,
         owner: Option<&str>,
         alias: Option<&str>,
-        entry: &mut Option<u16>,
+        entry: &mut Option<u32>,
     ) {
         let cn = *arena.node(fn_id);
         let fn_name = alias.unwrap_or(Self::name(arena, cn.lhs)).to_string();
@@ -67,6 +109,9 @@ impl BytecodeCompiler {
         // answers it (a native-bound method) or an implementing type gives
         // the body. Compiling it would shadow the native method with a stub.
         if body_node.is_none() {
+            if owner.is_none() {
+                self.bodiless_fns.insert(fn_name);
+            }
             return;
         }
         let receiver = crate::RECEIVER;
@@ -86,9 +131,12 @@ impl BytecodeCompiler {
             params.insert(0, receiver.to_string());
         }
         let pc = self.here();
+        // Becomes a jump to the generator stub when the body yields.
+        self.emit(Opcode::Nop, 0, 0, 0);
         if params.is_empty() && fn_name == "main" && owner.is_none() {
             *entry = Some(pc);
         }
+        let entry_key = owner.map_or_else(|| fn_name.clone(), |p| format!("{p}.{fn_name}"));
         // A method is reached through its type (`Owner.name`), never by its
         // bare name, which belongs to free functions.
         match owner {
@@ -115,6 +163,7 @@ impl BytecodeCompiler {
             self.fn_ret_types.entry(key).or_insert(ret_name.clone());
         }
         self.reset_fn_state();
+        self.contract.fn_name = Self::name(arena, cn.lhs).to_string();
         self.cur_owner = owner.map(str::to_string);
         self.cur_ret_type = (!ret_name.is_empty()).then(|| ret_name.clone());
         if fn_len > 1 {
@@ -139,14 +188,35 @@ impl BytecodeCompiler {
                 self.var_slots.insert(receiver.to_string(), s);
             }
         }
+        self.bind_ret_outs(arena, fn_id);
+        // Arguments are converted once all are in their slots: a conversion
+        // stages its own arguments in the argument registers.
+        for p in &params {
+            let (Some(&slot), ty) = (self.var_slots.get(p), self.var_types.get(p).cloned()) else { continue };
+            let mark = self.next_reg;
+            let r = self.convert_for_binding(slot, ty.as_deref());
+            if r != slot {
+                self.emit(Opcode::Move, slot, r, 0);
+            }
+            self.release_to(mark);
+        }
+        self.reserve_old_slots(arena, body_node);
         let b = self.compile_node(arena, body_node);
         // A block-bodied function without a declared return type returns
         // nothing when it falls off the end; `=> expr` bodies return `expr`.
         let returns_value = arena.type_annot(fn_id).is_some()
             || arena.node(body_node).node_kind() != NodeKind::BlockExpr;
-        let r = if returns_value { b } else { self.emit_const(PilotVal::NULL) };
-        self.emit(Opcode::Move, 0, r, 0);
-        self.emit(Opcode::Ret, 0, 0, 0);
+        let ret = self.cur_ret_type.clone();
+        let r = if returns_value { self.convert_for_binding(b, ret.as_deref()) } else { self.emit_const(PilotVal::NULL) };
+        self.emit_ensures(arena, r);
+        self.emit_fn_return(r);
+        if self.gen_body.is_some() {
+            self.emit_generator_stub(pc as usize);
+        } else if let Some(e) = self.fn_entries.get_mut(&entry_key).filter(|e| e.0 == pc) {
+            // Not a generator: the entry's placeholder stays a `Nop`, and
+            // calls from here on start after it.
+            e.0 = pc + 1;
+        }
     }
 
     /// Whether a block item supplies the block's value: an expression or a
@@ -158,8 +228,30 @@ impl BytecodeCompiler {
         )
     }
 
+    /// The function name of `owner`'s destructor, `Owner.~self`.
+    pub(crate) fn destructor_name(owner: &str) -> String {
+        format!("{owner}.~{}", &crate::RECEIVER[1..])
+    }
+
+    /// Lowers destructor `m` of `owner` as a function of its receiver. An
+    /// empty `~self() {}` still has a destructor to call.
+    pub(crate) fn compile_destructor(&mut self, arena: &AstArena, owner: &str, m: NodeId) {
+        let receiver = crate::RECEIVER;
+        let pc = self.here();
+        self.fn_entries.insert(Self::destructor_name(owner), (pc, vec![receiver.to_string()]));
+        self.reset_fn_state();
+        let s = self.alloc_local_reg();
+        self.emit(Opcode::Move, s, 1, 0);
+        self.var_slots.insert(receiver.to_string(), s);
+        self.var_slots.insert(receiver[1..].to_string(), s);
+        let body = arena.node(m).lhs;
+        let b = if body == 0 { self.emit_null() } else { self.compile_node(arena, NodeId(body)) };
+        self.emit(Opcode::Move, 0, b, 0);
+        self.emit(Opcode::Ret, 0, 0, 0);
+    }
+
     /// Lowers the methods of a `struct` or `extend` body.
-    pub(crate) fn compile_type_members(&mut self, arena: &AstArena, id: NodeId, entry: &mut Option<u16>) {
+    pub(crate) fn compile_type_members(&mut self, arena: &AstArena, id: NodeId, entry: &mut Option<u32>) {
         let cn = *arena.node(id);
         if cn.rhs == 0 || cn.rhs == u32::MAX {
             return;
@@ -171,21 +263,7 @@ impl BytecodeCompiler {
                 NodeKind::FnDecl | NodeKind::OperatorDecl => {
                     self.compile_fn_decl(arena, m, Some(&owner), entry)
                 }
-                NodeKind::DestructorDecl if mn.lhs != 0 => {
-                    let receiver = crate::RECEIVER;
-                    let dtor = format!("~{}", &receiver[1..]);
-                    let pc = self.here();
-                    self.fn_entries
-                        .insert(format!("{owner}.{dtor}"), (pc, vec![receiver.to_string()]));
-                    self.reset_fn_state();
-                    let s = self.alloc_local_reg();
-                    self.emit(Opcode::Move, s, 1, 0);
-                    self.var_slots.insert(receiver.to_string(), s);
-                    self.var_slots.insert(receiver[1..].to_string(), s);
-                    let b = self.compile_node(arena, NodeId(mn.lhs));
-                    self.emit(Opcode::Move, 0, b, 0);
-                    self.emit(Opcode::Ret, 0, 0, 0);
-                }
+                NodeKind::DestructorDecl => self.compile_destructor(arena, &owner, m),
                 _ => {}
             }
         }
@@ -227,11 +305,15 @@ impl BytecodeCompiler {
                 .then(|| Self::name(arena, an.lhs).to_string())
         });
         let kept = if shadows { None } else { self.var_types.get(&name).cloned() };
-        let ty = annotated
-            .or(kept)
+        // The value is converted to a type the binding declares; a type
+        // guessed from the call that makes the value only picks methods.
+        let declared = annotated.or(kept);
+        let ty = declared
+            .clone()
             .or_else(|| rhs.is_some().then(|| self.infer_call_type(arena, rhs)).flatten());
         let mark = self.next_reg;
         let r_val = if rhs.is_some() { self.compile_with_hint(arena, rhs, ty.clone()) } else { self.emit_null() };
+        let r_val = self.convert_for_binding(r_val, declared.as_deref());
         match ty {
             Some(t) => {
                 self.var_types.insert(name.clone(), t);
@@ -254,6 +336,27 @@ impl BytecodeCompiler {
         slot
     }
 
+    /// The value in `r` as a binding of type `ty` holds it. A primitive laid
+    /// out in an unsigned integer register of 64 bits or more holds values the
+    /// signed integer tag cannot, so the value is converted to that layout;
+    /// every other binding keeps the value as it is.
+    pub(crate) fn convert_for_binding(&mut self, r: u8, ty: Option<&str>) -> u8 {
+        // A binding of the character type holds a character: a
+        // one-character literal or a code point bound to it becomes one.
+        if ty.is_some_and(Self::is_scalar_text) {
+            return self.emit_scalar(r);
+        }
+        let layout = ty.and_then(|t| pilot_parser::bootstrap_tables().reg_layout(t).cloned());
+        match layout {
+            Some(l) if l.class == UNSIGNED_REGISTER && l.width >= 64 => self.emit_conversion(r, &l),
+            // A binding narrower than the engine's own numbers holds only
+            // values of its width: `let b: u8 = a + 1` wraps, an `f32`
+            // binding holds the nearest f32.
+            Some(l) if is_narrow_register(&l) => self.emit_wrap(r, &l),
+            _ => r,
+        }
+    }
+
     /// Static receiver type of `let x = Type.make(...)` / `let x = make(...)`,
     /// used to pick `Type.method` for later `x.method()` calls.
     fn infer_call_type(&self, arena: &AstArena, rhs: NodeId) -> Option<String> {
@@ -273,14 +376,17 @@ impl BytecodeCompiler {
             (format!("{l_real}.{}", Self::name(arena, cn.rhs)), td)
         } else {
             let nm = ident_of(NodeId(arena.extra_children[rn.lhs as usize]))?;
-            (nm.to_string(), nm)
+            // A bare call names a type only when it constructs a struct; a
+            // function without a declared return type gives no type.
+            (nm.to_string(), if self.structs.contains_key(nm) { nm } else { "" })
         };
         let ty = self.fn_ret_types.get(&fc).map(|s| s.as_str()).unwrap_or(type_name);
         (!ty.is_empty()).then(|| ty.to_string())
     }
 
-    pub(crate) fn compile_assign(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
+    pub(crate) fn compile_assign(&mut self, arena: &AstArena, id: NodeId, lhs: u32, rhs: u32) -> u8 {
         let lhs_n = *arena.node(NodeId(lhs));
+        let replace = self.take_replace_drops();
         let rhs_r = self.compile_node(arena, NodeId(rhs));
         match lhs_n.node_kind() {
             NodeKind::IdentExpr => {
@@ -288,9 +394,13 @@ impl BytecodeCompiler {
                 if let Some(r) = self.compile_backing_write(&name, rhs_r) {
                     return r;
                 }
+                let ty = self.var_types.get(&name).cloned();
+                let rhs_r = self.convert_for_binding(rhs_r, ty.as_deref());
                 match self.var_slots.get(&name) {
                     Some(&slot) => {
+                        self.emit_drops(arena, &replace);
                         self.emit(Opcode::Move, slot, rhs_r, 0);
+                        self.rearm_drop_flag(&name);
                         slot
                     }
                     None if self.is_captured_name(&name) => self.error(
@@ -308,15 +418,29 @@ impl BytecodeCompiler {
                 }
             }
             NodeKind::MemberExpr => {
+                let inner = *arena.node(NodeId(lhs_n.lhs));
+                let field_raw = Self::name(arena, lhs_n.rhs);
+                if matches!(inner.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) {
+                    let owner = Self::name(arena, inner.lhs);
+                    if !self.var_slots.contains_key(owner) && self.has_static_field(owner, field_raw) {
+                        let fty = self.static_field_type(owner, field_raw);
+                        let rhs_r = self.convert_for_binding(rhs_r, fty.as_deref());
+                        self.emit_global_set(&format!("{owner}.{field_raw}"), rhs_r);
+                        return rhs_r;
+                    }
+                }
                 let ty = self.static_type(arena, NodeId(lhs_n.lhs));
                 let r_obj = self.compile_node(arena, NodeId(lhs_n.lhs));
-                let field = Self::name(arena, lhs_n.rhs).to_string();
+                let field = self.stored_field(arena, NodeId(lhs_n.lhs), field_raw);
+                let field_ty = ty.as_deref().and_then(|t| self.field_type(t, &field));
+                let rhs_r = self.convert_for_binding(rhs_r, field_ty.as_deref());
                 self.emit_member_write(r_obj, ty.as_deref(), &field, rhs_r)
             }
             NodeKind::IndexExpr => {
                 let ty = self.static_type(arena, NodeId(lhs_n.lhs));
                 let r_obj = self.compile_node(arena, NodeId(lhs_n.lhs));
                 let r_key = self.compile_node(arena, NodeId(lhs_n.rhs));
+                self.drop_replaced_element(arena, id, r_obj, r_key);
                 self.emit_index_write(r_obj, ty.as_deref(), r_key, rhs_r)
             }
             other => self.error(crate::codes::SYNTAX, format!("cannot assign to {other:?}")),
@@ -330,7 +454,7 @@ impl BytecodeCompiler {
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_cond = self.compile_node(arena, NodeId(node.lhs));
-        let jf = self.emit_branch(Opcode::JumpIfFalse, r_cond, 0);
+        let jf = self.emit_branch_unless(r_cond, mark);
         self.release_to(mark);
         let (then_n, else_n) = if node.flags == 2 {
             let ch = arena.children_slice(node.rhs, 2);
@@ -343,6 +467,10 @@ impl BytecodeCompiler {
         self.release_to(mark);
         let j_end = self.emit_jump(0);
         self.patch_to_here(jf);
+        if else_n.is_none() {
+            let drops = self.else_drops(arena, node_id);
+            self.emit_drops(arena, &drops);
+        }
         let e_reg = self.compile_node(arena, else_n);
         self.emit(Opcode::Move, dst, e_reg, 0);
         self.release_to(mark);
@@ -354,20 +482,30 @@ impl BytecodeCompiler {
 
     /// Runs `body` inside a loop context; returns the context's jump lists.
     pub(crate) fn loop_body(&mut self, arena: &AstArena, body: NodeId) -> LoopCtx {
+        self.loop_body_releasing(arena, body, None)
+    }
+
+    /// `loop_body` for a loop whose enumerator, in local `release`, is closed
+    /// when the loop is left.
+    pub(crate) fn loop_body_releasing(&mut self, arena: &AstArena, body: NodeId, release: Option<u8>) -> LoopCtx {
         self.loops.push(LoopCtx {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
             is_switch: false,
             defer_depth: self.defers.len(),
+            release,
+            result: self.next_loop_result.take(),
         });
         let mark = self.next_reg;
         self.compile_node(arena, body);
-        self.next_reg = mark;
+        self.release_to(mark);
         self.loops.pop().unwrap_or(LoopCtx {
             continue_jumps: Vec::new(),
             break_jumps: Vec::new(),
             is_switch: false,
             defer_depth: self.defers.len(),
+            release,
+            result: None,
         })
     }
 
@@ -375,7 +513,7 @@ impl BytecodeCompiler {
         let start = self.here();
         let mark = self.next_reg;
         let r_cond = self.compile_node(arena, NodeId(cond));
-        let jf = self.emit_branch(Opcode::JumpIfFalse, r_cond, 0);
+        let jf = self.emit_branch_unless(r_cond, mark);
         self.release_to(mark);
         let ctx = self.loop_body(arena, NodeId(body));
         for j in ctx.continue_jumps {
@@ -389,12 +527,35 @@ impl BytecodeCompiler {
         self.emit_null()
     }
 
-    pub(crate) fn compile_break(&mut self, arena: &AstArena, has_value: bool) -> u8 {
-        if has_value {
+    /// `break value;`: the value of the innermost `for .. then` loop, which
+    /// is left at once (its `then` clause does not run).
+    fn compile_break_value(&mut self, arena: &AstArena, value: NodeId) -> u8 {
+        let Some(at) = self.loops.iter().rposition(|l| !l.is_switch) else {
+            return self.error(
+                crate::codes::BREAK_OUTSIDE_LOOP,
+                "`break` outside of a loop or switch".to_string(),
+            );
+        };
+        let (Some(r_result), depth) = (self.loops[at].result, self.loops[at].defer_depth) else {
             return self.error(
                 crate::codes::SEED,
-                "`break` with a value is not lowered by the seed yet".to_string(),
+                "`break` with a value needs a `for .. then` loop to give the value to".to_string(),
             );
+        };
+        let mark = self.next_reg;
+        let r = self.compile_node(arena, value);
+        self.emit(Opcode::Move, r_result, r, 0);
+        self.release_to(mark);
+        self.emit_exit_drops(arena);
+        self.emit_defers_above(arena, depth);
+        let j = self.emit_jump(0);
+        self.loops[at].break_jumps.push(j);
+        0
+    }
+
+    pub(crate) fn compile_break(&mut self, arena: &AstArena, value: NodeId) -> u8 {
+        if value.is_some() {
+            return self.compile_break_value(arena, value);
         }
         let Some(depth) = self.loops.last().map(|l| l.defer_depth) else {
             return self.error(
@@ -402,6 +563,7 @@ impl BytecodeCompiler {
                 "`break` outside of a loop or switch".to_string(),
             );
         };
+        self.emit_exit_drops(arena);
         self.emit_defers_above(arena, depth);
         let j = self.emit_jump(0);
         if let Some(l) = self.loops.last_mut() {
@@ -423,6 +585,7 @@ impl BytecodeCompiler {
                 "`continue` outside of a loop".to_string(),
             );
         };
+        self.emit_exit_drops(arena);
         self.emit_defers_above(arena, depth);
         let j = self.emit_jump(0);
         if let Some(l) = self.loops.iter_mut().rev().find(|l| !l.is_switch) {
@@ -434,16 +597,32 @@ impl BytecodeCompiler {
     pub(crate) fn compile_return(&mut self, arena: &AstArena, value: u32) -> u8 {
         let r_ret = if NodeId(value).is_some() {
             let hint = self.cur_ret_type.clone();
-            self.compile_with_hint(arena, NodeId(value), hint)
+            let r = self.compile_with_hint(arena, NodeId(value), hint.clone());
+            self.convert_for_binding(r, hint.as_deref())
         } else {
             self.emit_null()
         };
         // The value is computed before deferred statements run.
         let keep = self.alloc_reg();
+        let keep_at = self.instructions.len();
         self.emit(Opcode::Move, keep, r_ret, 0);
-        self.emit_defers_above(arena, 0);
-        self.emit(Opcode::Move, 0, keep, 0);
-        self.emit(Opcode::Ret, 0, 0, 0);
+        self.emit_ensures(arena, keep);
+        self.emit_exit_drops(arena);
+        self.emit_loop_releases(0);
+        let exit = if NodeId(value).is_some() {
+            crate::lower_defer::DeferExit::Returning(keep)
+        } else {
+            crate::lower_defer::DeferExit::Normal
+        };
+        self.emit_defers_on(arena, 0, exit);
+        // Nothing ran after the value was kept: it is returned from where it is.
+        if self.instructions.len() == keep_at + 1 && self.label.get() as usize <= keep_at {
+            self.instructions.pop();
+            self.pc_spans.pop();
+            self.emit_ret_of(r_ret);
+        } else {
+            self.emit_ret_of(keep);
+        }
         0
     }
 }

@@ -1,0 +1,17 @@
+// F4: a bare call to a static method of the type expected at that spot.
+// `ok(x)` where a `result<i64, str>` is expected is `result<i64, str>.ok(x)`:
+// in a return, a typed `let`, and an argument, with `T ! E` or the long form.
+fn half(n: i64) -> i64 ! str {
+    if n % 2 == 1 { return err(f"{n} is odd"); }
+    return ok(n / 2);
+}
+
+fn show(r: result<i64, str>) -> str => if r.is_ok { f"ok {r.ok_val}" } else { f"err {r.err_val}" };
+
+fn main() {
+    let a: result<i64, str> = ok(3);
+    print(show(a));
+    print(show(half(8)));
+    print(show(half(3)));
+    print(show(err("given")));
+}

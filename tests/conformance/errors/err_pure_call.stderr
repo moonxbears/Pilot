@@ -1,0 +1,4 @@
+error[PURE001]: `pure` function `twice` calls `noisy`, which is not `pure`
+err_pure_call.pilot:7:33
+error[PURE001]: `pure` function `twice` calls `noisy`, which is not `pure`
+err_pure_call.pilot:7:44

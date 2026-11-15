@@ -1,0 +1,82 @@
+// =========================================================================
+// FILE: stdlib/core/convert/view.pilot
+// SAME-WIDTH BIT VIEWS: `x.as_u32()`, `bits.as_f64()`
+// =========================================================================
+// `x.as_<prim>()` reads the bits of `x` as a value of another primitive of
+// the same width, without changing them. It cannot fail: every bit pattern
+// is a value of the target (Rust's `i32 as u32`, `f64::to_bits`,
+// `f64::from_bits`; C#'s `BitConverter.DoubleToInt64Bits`).
+//
+//   i8 <-> u8, i16 <-> u16, i32 <-> u32, i64 <-> u64, isize <-> usize
+//                          two's complement: `(-1 as i32).as_u32()` is
+//                          4294967295, and back.
+//   f32 -> u32 / i32, f64 -> u64 / i64
+//                          the IEEE 754 encoding: sign, biased exponent,
+//                          fraction.
+//   u32 / i32 -> f32, u64 / i64 -> f64
+//                          the float those bits encode.
+//
+// `x.to_<prim>()` (`convert.pilot`) converts the value instead, and
+// `x as T` converts it with wrapping.
+//
+// The float encodings come from `stdlib/core/float_bits.pilot`, which
+// computes them with exact arithmetic (stand-in `convert.nan_bits`).
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Convert;
+
+use Pilot.Core.FloatBits;
+
+pub interface IAsI8    { fn as_i8()    -> i8; }
+pub interface IAsI16   { fn as_i16()   -> i16; }
+pub interface IAsI32   { fn as_i32()   -> i32; }
+pub interface IAsI64   { fn as_i64()   -> i64; }
+pub interface IAsIsize { fn as_isize() -> isize; }
+pub interface IAsU8    { fn as_u8()    -> u8; }
+pub interface IAsU16   { fn as_u16()   -> u16; }
+pub interface IAsU32   { fn as_u32()   -> u32; }
+pub interface IAsU64   { fn as_u64()   -> u64; }
+pub interface IAsUsize { fn as_usize() -> usize; }
+pub interface IAsF32   { fn as_f32()   -> f32; }
+pub interface IAsF64   { fn as_f64()   -> f64; }
+
+// =========================================================================
+// The primitives adopt the views.
+// =========================================================================
+
+ext i8    { pub fn as_u8()    -> u8    => self as u8; }
+ext u8    { pub fn as_i8()    -> i8    => self as i8; }
+ext i16   { pub fn as_u16()   -> u16   => self as u16; }
+ext u16   { pub fn as_i16()   -> i16   => self as i16; }
+ext isize { pub fn as_usize() -> usize => self as usize; }
+ext usize { pub fn as_isize() -> isize => self as isize; }
+
+ext i32 {
+    pub fn as_u32() -> u32 => self as u32;
+    pub fn as_f32() -> f32 => float_from_bits((self as u32) as u64, binary32()) as f32;
+}
+
+ext u32 {
+    pub fn as_i32() -> i32 => self as i32;
+    pub fn as_f32() -> f32 => float_from_bits(self as u64, binary32()) as f32;
+}
+
+ext i64 {
+    pub fn as_u64() -> u64 => self as u64;
+    pub fn as_f64() -> f64 => float_from_bits(self as u64, binary64());
+}
+
+ext u64 {
+    pub fn as_i64() -> i64 => self as i64;
+    pub fn as_f64() -> f64 => float_from_bits(self, binary64());
+}
+
+ext f32 {
+    pub fn as_u32() -> u32 => float_bits(self as f64, binary32()) as u32;
+    pub fn as_i32() -> i32 => float_bits(self as f64, binary32()) as i32;
+}
+
+ext f64 {
+    pub fn as_u64() -> u64 => float_bits(self, binary64());
+    pub fn as_i64() -> i64 => float_bits(self, binary64()) as i64;
+}

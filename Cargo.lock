@@ -6,25 +6,18 @@ version = 4
 name = "pilot-analysis"
 version = "0.1.0"
 dependencies = [
- "pilot-arena",
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
  "pilot-parser",
- "pilot-rt",
  "pilot-span",
  "pilot-vm",
 ]
 
 [[package]]
-name = "pilot-arena"
-version = "1.1.51"
-
-[[package]]
 name = "pilot-ast"
 version = "1.1.51"
 dependencies = [
- "pilot-arena",
  "pilot-intern",
  "pilot-span",
 ]
@@ -35,39 +28,9 @@ version = "1.1.51"
 dependencies = [
  "pilot-analysis",
  "pilot-ast",
- "pilot-codegen",
  "pilot-intern",
  "pilot-lexer",
  "pilot-parser",
- "pilot-rt",
- "pilot-span",
- "pilot-vm",
-]
-
-[[package]]
-name = "pilot-codegen"
-version = "0.1.0"
-dependencies = [
- "pilot-analysis",
- "pilot-ast",
- "pilot-intern",
- "pilot-parser",
- "pilot-rt",
- "pilot-span",
-]
-
-[[package]]
-name = "pilot-ffi"
-version = "1.1.51"
-dependencies = [
- "pilot-analysis",
- "pilot-arena",
- "pilot-ast",
- "pilot-codegen",
- "pilot-intern",
- "pilot-lexer",
- "pilot-parser",
- "pilot-rt",
  "pilot-span",
  "pilot-vm",
 ]
@@ -91,19 +54,10 @@ dependencies = [
 name = "pilot-parser"
 version = "1.1.51"
 dependencies = [
- "pilot-arena",
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
  "pilot-span",
-]
-
-[[package]]
-name = "pilot-rt"
-version = "0.1.0"
-dependencies = [
- "pilot-arena",
- "pilot-intern",
 ]
 
 [[package]]
@@ -114,10 +68,8 @@ version = "1.1.51"
 name = "pilot-vm"
 version = "0.1.0"
 dependencies = [
- "pilot-arena",
  "pilot-ast",
  "pilot-intern",
  "pilot-parser",
- "pilot-rt",
  "pilot-span",
 ]

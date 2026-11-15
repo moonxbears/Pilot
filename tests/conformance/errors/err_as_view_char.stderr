@@ -1,0 +1,2 @@
+error[TYPE003]: cannot view `slice<u32>` as `char`: `char` is not a primitive `as view` reads or makes (integers of 8, 16, 32 or 64 bits, floats of 32 or 64)
+err_as_view_char.pilot:5:14

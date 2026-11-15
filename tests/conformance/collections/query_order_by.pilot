@@ -1,0 +1,35 @@
+// `order [by] key [ascending | descending]` sorts query results over in-memory
+// sequences on every engine, and `order` / `ascending` / `descending` remain
+// ordinary variable names outside a query.
+struct Entry {
+    pub name: str;
+    pub score: i64;
+}
+
+fn main() {
+    let xs: List<i64> = [4, 1, 3, 2, 5];
+    print(from x in xs order by x select x);
+    print(from x in xs order by x ascending select x);
+    print(from x in xs order by x descending select x);
+    print(from x in xs where x > 1 order x descending select x * 10);
+
+    let empty: List<i64> = [];
+    print(from x in empty order by x ascending select x);
+
+    let entries: List<Entry> = [
+        Entry { name: "ada", score: 10 },
+        Entry { name: "bob", score: 20 },
+        Entry { name: "cal", score: 20 },
+        Entry { name: "dan", score: 5 },
+    ];
+    let ranked = from e in entries
+        where e.score >= 10
+        order by e.score descending, e.name ascending
+        select e.name;
+    print(ranked);
+
+    let order = 1;
+    let ascending = 2;
+    let descending = 3;
+    print(order + ascending + descending);
+}

@@ -1,0 +1,13 @@
+acquire 1
+defer 1
+10
+acquire -1
+defer -1
+errdefer -1
+-1
+errdefer early
+-2
+5
+iteration 1
+iteration 3
+3

@@ -1,0 +1,2 @@
+error[CONST001]: `PRIMES` is a constant and cannot be changed; copy it into a variable first (`var copy = PRIMES;`)
+err_const_mutate.pilot:7:5

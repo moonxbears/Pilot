@@ -1,0 +1,37 @@
+// F7: assigning an owned `var` a new value drops the value it held, once the
+// new one is made. A var whose value was moved away has nothing to drop when
+// it is assigned again; assigning it in a loop drops the previous
+// iteration's value each time. The last value is dropped after its last use.
+struct Res {
+    pub name: str;
+
+    ~self() {
+        print(f"drop {self.name}");
+    }
+}
+
+fn make(name: str) -> Res {
+    print(f"make {name}");
+    return Res { name: name };
+}
+
+fn consume(r: Res) {
+    print(f"consume {r.name}");
+}
+
+fn main() {
+    var r = make("a");
+    print(r.name);
+    r = make("b");
+    print(r.name);
+    consume(r);
+    r = make("c");
+    print(r.name);
+    var i = 0;
+    while i < 2 {
+        r = make(f"d{i}");
+        i = i + 1;
+    }
+    print(r.name);
+    print("end");
+}

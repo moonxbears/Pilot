@@ -1,0 +1,38 @@
+// F5b: a lambda whose body yields is a generator too. It keeps its
+// parameters and captured values in its frame, and inside a method it
+// carries the receiver.
+struct Counter {
+    pub step: i64;
+
+    pub fn multiples(count: i64) -> Generator<i64> {
+        let walk = (n: i64) => {
+            var i = 1;
+            while i <= n {
+                yield i * .step;
+                i = i + 1;
+            }
+        };
+        return walk(count);
+    }
+}
+
+fn main() {
+    let base = 10;
+    let from_base = (n: i64) => {
+        var i = 0;
+        while i < n {
+            yield base + i;
+            i = i + 1;
+        }
+    };
+    for x in from_base(3) {
+        print(x);
+    }
+    let g = from_base(1);
+    print(g.next() ?? -1);
+    print(g.next() ?? -1);
+    let c = Counter { step: 5 };
+    for m in c.multiples(3) {
+        print(m);
+    }
+}

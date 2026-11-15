@@ -1,0 +1,19 @@
+// A `struct` is a value type: binding one to a second variable copies it,
+// so writing the copy leaves the original as it was.
+//
+// Expected output, worked by hand: h.a stays 4 after c.a = 1; k.a stays 4
+// after d.a = 2.
+struct P {
+    pub a: i64;
+}
+
+fn main() {
+    var h = P { a: 4 };
+    var c = h;
+    c.a = 1;
+    print(h.a);
+    let k = P { a: 4 };
+    var d = k;
+    d.a = 2;
+    print(k.a);
+}

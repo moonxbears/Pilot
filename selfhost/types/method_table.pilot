@@ -64,13 +64,10 @@ pub fn register_method(
     entry: MethodTableEntry,
     is_without: bool
 ) {
-    if is_without {
-        return;
-    }
-
     let m_name = entry.method_name;
 
-    // Record under static delegation dictionary (e.g., SpatialBundle.translate)
+    // Record under static delegation dictionary (e.g., SpatialBundle.translate).
+    // A member hidden by `without` stays reachable this way.
     if entry.origin_type_name.len() > 0 {
         var static_list: List<MethodTableEntry> = [];
         if mt.static_methods.has(entry.origin_type_name) {
@@ -78,6 +75,10 @@ pub fn register_method(
         }
         static_list.push(entry);
         mt.static_methods[entry.origin_type_name] = static_list;
+    }
+
+    if is_without {
+        return;
     }
 
     if !mt.methods.has(m_name) {
@@ -154,11 +155,13 @@ pub fn register_method(
 // 3. Static Delegation Lookup (BundleName.method)
 // ------------------------------------------------------------------------------
 
+/// The member `BundleName.method` names, or none when the table records no
+/// such member of that bundle.
 pub fn resolve_static_delegation(
     ref mt: MethodTable,
     bundle_name: str,
     method_name: str
-) -> MethodTableEntry {
+) -> MethodTableEntry? {
     if mt.static_methods.has(bundle_name) {
         let list = mt.static_methods[bundle_name];
         var i = 0;
@@ -169,17 +172,5 @@ pub fn resolve_static_delegation(
             i = i + 1;
         }
     }
-    // Return empty fallback
-    return MethodTableEntry {
-        method_name:        "",
-        tier:               MemberTier::Tier1ExplicitStruct,
-        origin_type_name:   "",
-        return_type:        "",
-        params:             "",
-        is_mut:             false,
-        is_static:          false,
-        field_remap_bundle: "",
-        clearance_lvl:      0,
-        visibility:         0,
-    };
+    return none;
 }

@@ -122,6 +122,16 @@ pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDiction
     }
 }
 
+// A map owns its values: dropping a map drops each value in the order of
+// their keys (selfhost/check/drops.pilot). The engine holds a map by itself
+// (stdlib/core/builtins/native_calls.pilot), so `map_values` lists its
+// values for `str_len` and `list_get` to walk, and `map_get` reads the value
+// an assignment replaces (none when the key is new). Reading a value by key,
+// or with `for`, borrows it.
+comptime {
+    bind_owned_elements(nameof(Map), "str_len", "list_get", "map_values", "map_get");
+}
+
 // Canonical type alias & high-level dynamic dictionary
 pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuffer<TKey, TVal> {
     pub inner: MapBuffer<TKey, TVal>;
@@ -132,6 +142,8 @@ pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuf
 
     pub count: usize { get => .inner.count; }
     pub pure fn has(key: TKey) -> bool => .inner.has(key);
+    pub pure fn keys() -> List<TKey> => List<TKey>();
+    pub fn get_enumerator() -> ListEnumerator<TKey> => .keys().get_enumerator();
     pub pure fn get(key: TKey) -> option<TVal> => .inner.get(key);
     pub fn set(key: TKey, val: TVal) { .inner.set(key, val); }
     pub fn remove(key: TKey) -> bool => .inner.remove(key);
