@@ -3,7 +3,7 @@
 // Milestone 12.3: Headerless C11/C23 Semantic Absorber - Cross-Platform Sysroot
 // Cross-platform include-path & library discovery: Linux, macOS, Win32, pkg-config
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.CSysroot;
+pub lvl(0) pkg selfhost.adapter;
 
 use Pilot.Core.File.File;
 
@@ -195,7 +195,7 @@ pub fn parse_pkg_config_file(pc_content: str) -> PkgConfigResult {
 
 pub fn resolve_c_header_path(
     header_name: str,
-    extra_includes: List<str>,
+    ref extra_includes: List<str>,
     sysroot: ref<SysrootDiscovery>
 ) -> opt<str> {
     // 1. Check extra user-provided include directories

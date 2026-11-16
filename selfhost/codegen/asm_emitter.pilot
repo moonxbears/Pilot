@@ -4,6 +4,8 @@
 // Emits System V AMD64 x86_64 & AVX2/SSE assembly strictly from layout physics.
 // ============================================================================
 
+pub pkg selfhost.codegen;
+
 use std.text;
 
 [Layout(c_abi)]

@@ -5,6 +5,8 @@
 // and compound literals from `PhysicsRegistry` with zero hardcoded type names.
 // ============================================================================
 
+pub pkg selfhost.codegen;
+
 use std.text;
 
 [Layout(c_abi)]

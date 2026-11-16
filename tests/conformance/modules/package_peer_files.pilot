@@ -1,0 +1,15 @@
+// PROP-005 5A: the files of one package load together and see each other
+// without importing, and a file importing its own package is not a cycle.
+// This file declares `Conformance.Split`; lib/split_peer.pilot declares the
+// same package and nothing imports it. Both files of `lib.ledger`
+// (lib/ledger_a.pilot, lib/ledger_b.pilot) import their own package.
+// Expected (hand-worked): half(42) = 42 / 2 = 21 (from the peer file);
+// total() = unit() + count() = 1 + (unit() + 1) = 1 + 2 = 3.
+pkg Conformance.Split;
+
+use lib.ledger;
+
+fn main() {
+    print(half(42));
+    print(total());
+}

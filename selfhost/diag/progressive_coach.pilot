@@ -11,7 +11,7 @@
 //   PERF003: Highlights hot AoS loop eligible for .pchor SoA<T> speedup
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Diag.Coach;
+pub lvl(0) pkg selfhost.diag;
 
 use pilot.profile.*;
 
@@ -142,7 +142,7 @@ pub pure fn align_up_sz(val: usize, align: usize) -> usize {
 
 pub fn analyze_struct_padding(
     struct_name: str,
-    fields: List<FieldLayoutInfo>
+    ref fields: List<FieldLayoutInfo>
 ) -> str {
     // 1. Calculate current size with natural padding in declared order
     var cur_off: usize = 0;

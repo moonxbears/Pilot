@@ -16,34 +16,26 @@
 //   - the binding captured by a closure, which may outlive the call.
 // Lending it to a `ref`/`var ref` parameter, reading its fields and calling
 // its methods keep it where it is.
-pub lvl(0) pkg Pilot.SelfHost.Check.Stack;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.check.own.*;
-use selfhost.check.borrows.*;
 
 /// The attribute that asks for frame placement.
 pub pure fn stack_attr() -> str => "Stack";
 
 /// Whether `let`/`var` node `n` is written `[Stack]`.
-pub fn is_stack_binding(p: Program, n: i64) -> bool {
+pub fn is_stack_binding(ref p: Program, n: i64) -> bool {
     if some _ = prog_attr_nodes(p, n, stack_attr()) { return true; }
     return false;
 }
 
-fn has(xs: List<i64>, b: i64) -> bool {
+fn has(ref xs: List<i64>, b: i64) -> bool {
     for x in xs { if x == b { return true; } }
     return false;
 }
 
 /// Whether node `n` lies inside a closure that sits inside function-like
 /// node `owner`.
-fn in_closure(p: Program, n: i64, owner: i64) -> bool {
+fn in_closure(ref p: Program, n: i64, owner: i64) -> bool {
     var at = p.parents[n];
     while at >= 0 && at != owner {
         if kind(p.s, at) == nk_lambda() { return true; }
@@ -54,7 +46,7 @@ fn in_closure(p: Program, n: i64, owner: i64) -> bool {
 
 /// Whether place `target` (assigned to) outlives function-like `owner`: it
 /// is not rooted in one of the function's own bindings.
-fn outlives_fn(inf: Infer, target: i64, owner: i64) -> bool {
+fn outlives_fn(ref inf: Infer, target: i64, owner: i64) -> bool {
     let s = inf.p.s;
     var cur = target;
     while cur >= 0 && (kind(s, cur) == nk_member() || kind(s, cur) == nk_index()) { cur = lhs(s, cur); }
@@ -66,12 +58,12 @@ fn outlives_fn(inf: Infer, target: i64, owner: i64) -> bool {
     return inf.r.bind_kind[b] == BindKind::Param && kind(s, site) == nk_param() && flags(s, site) != 0;
 }
 
-fn report(sink: DiagSink, n: i64, name: str, how: str) {
+fn report(var ref sink: DiagSink, n: i64, name: str, how: str) {
     sink_error(sink, n, "STACK001", f"`[Stack]` value `{name}` lives in its function's frame and {how}");
 }
 
 /// STACK001 for binding `b` (declared `[Stack]` in `owner`).
-fn check_binding(f: Flow, bw: Borrows, b: i64, owner: i64) {
+fn check_binding(var ref f: Flow, ref bw: Borrows, b: i64, owner: i64) {
     let inf = f.inf;
     let p = inf.p;
     let s = p.s;
@@ -97,7 +89,7 @@ fn check_binding(f: Flow, bw: Borrows, b: i64, owner: i64) {
 }
 
 /// STACK001 over the `[Stack]` bindings of the user's files.
-pub fn check_stack(inf: Infer, sink: DiagSink) {
+pub fn check_stack(var ref inf: Infer, ref sink: DiagSink) {
     let r = inf.r;
     let p = inf.p;
     let s = p.s;

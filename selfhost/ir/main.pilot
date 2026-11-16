@@ -18,33 +18,22 @@
 // A module the verifier rejects is not printed or run: its issues are
 // reported and the exit code is 1. Text that does not parse is reported
 // (IR009) with exit code 1.
-pub lvl(0) pkg Pilot.SelfHost.Ir.Main;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.ir.model.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.verify.*;
-use selfhost.ir.text.*;
-use selfhost.ir.interp.*;
-use selfhost.ir.fault.*;
-use selfhost.ir.passes.*;
+use selfhost.check.*;
 
-fn lowered(s: Snap) -> IrModule => lowered_program(s, false);
+fn lowered(ref s: Snap) -> IrModule => lowered_program(s, false);
 
 /// The program in snapshot `s` lowered to PilIR; with `every_function`,
 /// every concrete top-level function of the user's files is lowered too.
-pub fn lowered_program(s: Snap, every_function: bool) -> IrModule {
+pub fn lowered_program(ref s: Snap, every_function: bool) -> IrModule {
     let p = prog_new(s);
     let r = resolve_program(p, sink_new(s));
     return lower_program_rooted(infer_new(p, r), every_function);
 }
 
 /// The linked files of the program, to place its runtime errors.
-fn source_map(s: Snap) -> IrSourceMap {
+fn source_map(ref s: Snap) -> IrSourceMap {
     let map = ir_source_map_empty();
     for f in s.files {
         let row: List<any> = f;
@@ -95,7 +84,7 @@ pub pure fn roundtrip_failed() -> str => "error: the PilIR text does not round-t
 
 /// Whether the text of `m` (`given`, or `m` printed), parsed and printed
 /// again, is the same text; the reason goes to stderr when it is not.
-fn round_trips(m: IrModule, given: str?) -> bool {
+fn round_trips(ref m: IrModule, given: str?) -> bool {
     let first = given ?? print_ir_module(m);
     try {
         let second = print_ir_module(parse_ir_module(first)?);
@@ -113,7 +102,7 @@ fn round_trips(m: IrModule, given: str?) -> bool {
 /// Verifies `m` and does what `mode` asks; a run places its runtime errors
 /// in `sources`. `given` is the text `m` was read from, if any; a roundtrip
 /// of a lowered module prints it first (only that mode needs the text).
-fn finish(m: IrModule, mode: str, given: str?, sources: IrSourceMap, args: List<str>) -> i64 {
+fn finish(m: IrModule, mode: str, given: str?, ref sources: IrSourceMap, args: List<str>) -> i64 {
     let issues = verify_ir_module(m);
     if issues.len() > 0 {
         for i in issues { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }

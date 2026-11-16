@@ -39,6 +39,10 @@ fn main() {
     pilot_parser::set_source_root(std::path::Path::new(&tool::toolchain_root()));
     let args: Vec<String> = std::env::args().skip(1).collect();
     let line = run::pilot_str(&args.join("\x1f"));
-    let code = tool::eval_cli(CLI, &format!("run_cli_entry(\"{line}\");"), host::cli_host_ops());
+    let code = tool::eval_cli(
+        CLI,
+        &format!("run_cli_entry(\"{line}\");"),
+        host::cli_host_ops(),
+    );
     std::process::exit(code);
 }

@@ -28,14 +28,8 @@
 // hole `[action, span, kind, fill function, lift function or ""]`. PilIR
 // asks this module itself (selfhost/ir/lower_quote.pilot).
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Check.QuoteValue;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.check.drops.*;
-use selfhost.check.diag.*;
 
 /// What a quote may hold, for QUOTE001.
 pub pure fn quote_holds() -> str =>
@@ -44,7 +38,7 @@ pub pure fn quote_holds() -> str =>
 /// The source text between offsets `a` and `b` of the file node `n` is in,
 /// without spaces or the parentheses around operands: the operator written
 /// between two operands.
-fn text_between(s: Snap, n: i64, a: i64, b: i64) -> str {
+fn text_between(ref s: Snap, n: i64, a: i64, b: i64) -> str {
     let full = node_text(s, n);
     let base = span_start(s, n);
     if a < base || b < a || b - base > full.len() as i64 { return ""; }
@@ -64,7 +58,7 @@ fn piece(word: str, text: str, count: i64) -> str => f"{word}/{text.len()}/{text
 
 /// Writes node `n` and its subtree to `out`, listing its holes in `holes`
 /// in source order; a node a quote cannot hold goes to `bad` instead.
-fn wire_node(s: Snap, n: i64, out: List<str>, holes: List<i64>, bad: List<i64>) {
+fn wire_node(ref s: Snap, n: i64, var ref out: List<str>, var ref holes: List<i64>, var ref bad: List<i64>) {
     let k = kind(s, n);
     var word = "";
     var text = "";
@@ -150,7 +144,7 @@ fn wire_node(s: Snap, n: i64, out: List<str>, holes: List<i64>, bad: List<i64>) 
 
 /// The wire of quote `q`; its holes go to `holes`, a node it cannot hold
 /// to `bad`.
-pub fn quote_wire(s: Snap, q: i64, holes: List<i64>, bad: List<i64>) -> str {
+pub fn quote_wire(ref s: Snap, q: i64, var ref holes: List<i64>, var ref bad: List<i64>) -> str {
     var out: List<str> = [];
     let root = quoted_root(s, q);
     if root < 0 {
@@ -164,7 +158,7 @@ pub fn quote_wire(s: Snap, q: i64, holes: List<i64>, bad: List<i64>) -> str {
 }
 
 /// The function that makes the literal tree of a value of type `t`, or -1.
-pub fn lift_fn(p: Program, t: i64) -> i64 {
+pub fn lift_fn(var ref p: Program, t: i64) -> i64 {
     if !ty_is_named(p.tt, t) { return -1; }
     for f in bound_fns(p, quote_lift_symbol()) {
         let params = fn_params(p.s, f);
@@ -177,7 +171,7 @@ pub fn lift_fn(p: Program, t: i64) -> i64 {
 }
 
 /// The type of the value hole `h` splices (the type of `x` in `$x`).
-fn hole_value_type(inf: Infer, h: i64) -> i64 {
+fn hole_value_type(var ref inf: Infer, h: i64) -> i64 {
     let b = inf.r.ref_of[h];
     return if b >= 0 { binding_type(inf, b) } else { ty_unknown() };
 }
@@ -185,7 +179,7 @@ fn hole_value_type(inf: Infer, h: i64) -> i64 {
 /// The function that fills hole `h`, and the one that makes its value a
 /// literal tree first (-1 when the value is a tree), or an empty list when
 /// it cannot be spliced.
-pub fn hole_fns(inf: Infer, h: i64) -> List<i64> {
+pub fn hole_fns(var ref inf: Infer, h: i64) -> List<i64> {
     let p = inf.p;
     var out: List<i64> = [];
     let fills = bound_fns(p, quote_hole_symbol());
@@ -199,7 +193,7 @@ pub fn hole_fns(inf: Infer, h: i64) -> List<i64> {
 }
 
 /// `hole_fns` as the names the run plan carries ("" for no lift).
-pub fn hole_calls(inf: Infer, h: i64) -> List<str> {
+pub fn hole_calls(var ref inf: Infer, h: i64) -> List<str> {
     var out: List<str> = [];
     for f in hole_fns(inf, h) { out.push(if f < 0 { "" } else { node_name(inf.p.s, f) }); }
     return out;
@@ -207,7 +201,7 @@ pub fn hole_calls(inf: Infer, h: i64) -> List<str> {
 
 /// Whether the program binds `name` to an engine function
 /// (`bind_native_fn`, stdlib/core/builtins/native_calls.pilot).
-fn is_native_name(p: Program, name: str) -> bool {
+fn is_native_name(var ref p: Program, name: str) -> bool {
     for row in prog_engine_bindings(p) {
         if row.len() >= 2 && row[1] == name && row[0] == "bind_native_fn" { return true; }
     }
@@ -215,7 +209,7 @@ fn is_native_name(p: Program, name: str) -> bool {
 }
 
 /// The innermost quote around node `n`, or -1.
-pub fn enclosing_quote(p: Program, n: i64) -> i64 {
+pub fn enclosing_quote(ref p: Program, n: i64) -> i64 {
     var cur = p.parents[n];
     while cur >= 0 {
         if kind(p.s, cur) == nk_quote() { return cur; }
@@ -227,7 +221,7 @@ pub fn enclosing_quote(p: Program, n: i64) -> i64 {
 /// Whether node `n` is part of the program: a `syntax` rule's expansion
 /// copies the code its holes read, and the code read stays in the tree
 /// unattached.
-fn in_program(p: Program, n: i64) -> bool {
+fn in_program(ref p: Program, n: i64) -> bool {
     var cur = n;
     while p.parents[cur] >= 0 { cur = p.parents[cur]; }
     return cur != n && kind(p.s, cur) == nk_program();
@@ -235,10 +229,10 @@ fn in_program(p: Program, n: i64) -> bool {
 
 /// Whether quote node `q` is a quote value, not a `syntax` rule's template
 /// (which the parser expands where the rule is used; flags 1).
-pub fn is_quote_value(s: Snap, q: i64) -> bool => kind(s, q) == nk_quote() && flags(s, q) == 0;
+pub fn is_quote_value(ref s: Snap, q: i64) -> bool => kind(s, q) == nk_quote() && flags(s, q) == 0;
 
 /// QUOTE001-003 for the quotes and holes of the user's files.
-pub fn check_quotes(inf: Infer, sink: DiagSink) {
+pub fn check_quotes(var ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     var n = s.user_lo;
@@ -278,7 +272,7 @@ pub fn check_quotes(inf: Infer, sink: DiagSink) {
 
 /// A `QuoteBuild` row for each quote of the files the program links that
 /// can be built, and a `QuoteHole` row for each of its holes.
-pub fn plan_quotes(inf: Infer, rows: List<List<any>>) {
+pub fn plan_quotes(var ref inf: Infer, var ref rows: List<List<any>>) {
     let p = inf.p;
     let s = p.s;
     let decode = quote_fn(p);

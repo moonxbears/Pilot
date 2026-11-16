@@ -5,6 +5,8 @@
 // into WGSL compute shaders and SPIR-V compute modules (with real SSA ops).
 // ============================================================================
 
+pub pkg selfhost.codegen;
+
 use std.text;
 
 [Layout(c_abi)]

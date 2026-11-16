@@ -52,7 +52,11 @@ impl<'a> AntiCheatGuard<'a> {
         let root = workspace_root();
         // Pre-flight architectural gate & crate-tree integrity check before running test code.
         verify_live_pilot_gate_and_crate_tree(&root, test_name, spec.milestone_id);
-        let timer = test_metrics::TestTimer::start(&test_metrics::metrics_dir(&root), spec.milestone_id, test_name);
+        let timer = test_metrics::TestTimer::start(
+            &test_metrics::metrics_dir(&root),
+            spec.milestone_id,
+            test_name,
+        );
         Self {
             test_name,
             spec,
@@ -72,7 +76,9 @@ impl<'a> AntiCheatGuard<'a> {
         if let Some(timer) = self.timer.take() {
             let history = timer.record(took);
             let percent = test_metrics::regression_percent(&self.root);
-            if let Some(warning) = test_metrics::regression_warning(self.test_name, &history, percent) {
+            if let Some(warning) =
+                test_metrics::regression_warning(self.test_name, &history, percent)
+            {
                 eprintln!("warning: {warning}");
             }
         }
@@ -116,8 +122,8 @@ const SHA256_K: [u32; 64] = [
 
 pub fn sha256_hex(data: &[u8]) -> String {
     let mut h: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
     let bit_len = (data.len() as u64) * 8;
     let mut padded = Vec::with_capacity(((data.len() + 9 + 63) / 64) * 64);
@@ -190,13 +196,22 @@ pub fn sha256_hex(data: &[u8]) -> String {
 // ==============================================================================
 
 const SURVIVING_CRATES: &[&str] = &[
-    "pilot-analysis", "pilot-ast", "pilot-cli",
-    "pilot-intern", "pilot-lexer", "pilot-parser", "pilot-span", "pilot-vm",
+    "pilot-analysis",
+    "pilot-ast",
+    "pilot-cli",
+    "pilot-intern",
+    "pilot-lexer",
+    "pilot-parser",
+    "pilot-span",
+    "pilot-vm",
 ];
 
 const RETIRED_PYTHON_GATE_SCRIPTS: &[&str] = &[
-    "scripts/gate1_check.py", "scripts/gate2_check.py", "scripts/gate3_check.py",
-    "scripts/gate4_selfhost_contraction.py", "scripts/convert_dunders.py",
+    "scripts/gate1_check.py",
+    "scripts/gate2_check.py",
+    "scripts/gate3_check.py",
+    "scripts/gate4_selfhost_contraction.py",
+    "scripts/convert_dunders.py",
 ];
 
 const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
@@ -247,27 +262,82 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
 
 const GLOBAL_BANNED_LEAK_SUBSTRINGS: &[&str] = &[
     // Known cryptographic digest / RFC 8032 test-vector outputs (never valid in real algorithmic code)
-    "e3b0c44298fc1c14", "ba7816bf8f01cfea", "cf83e1357eefb8bd", "af1349b9f5f9a1a6",
-    "d75a980182b10ab7", "e5564300c360ac72", "3d4017c3e843895a", "92a009a9f0d4cab8",
+    "e3b0c44298fc1c14",
+    "ba7816bf8f01cfea",
+    "cf83e1357eefb8bd",
+    "af1349b9f5f9a1a6",
+    "d75a980182b10ab7",
+    "e5564300c360ac72",
+    "3d4017c3e843895a",
+    "92a009a9f0d4cab8",
     "72bad3de6140207b",
     // Test-harness magic delimiters
-    "@@SEP@@", "@@H@@", "@@LIT@@", "@@WASM@@", "@@SQL@@", "@@ED@@", "@@DBG@@", "@@TR@@",
-    "@@OPT@@", "@@DIFF@@", "@@WIRE@@", "@@SPLIT@@", "@@LSP@@", "@@DAP@@", "@@PKG@@",
-    "@@PERF@@", "@@CLI@@", "@@FE@@", "@@BS@@", "<<<SEP>>>", "<<<DBG>>>", "<<<W>>>",
-    "<<<T>>>", "===HDR===", "===SEL===",
+    "@@SEP@@",
+    "@@H@@",
+    "@@LIT@@",
+    "@@WASM@@",
+    "@@SQL@@",
+    "@@ED@@",
+    "@@DBG@@",
+    "@@TR@@",
+    "@@OPT@@",
+    "@@DIFF@@",
+    "@@WIRE@@",
+    "@@SPLIT@@",
+    "@@LSP@@",
+    "@@DAP@@",
+    "@@PKG@@",
+    "@@PERF@@",
+    "@@CLI@@",
+    "@@FE@@",
+    "@@BS@@",
+    "<<<SEP>>>",
+    "<<<DBG>>>",
+    "<<<W>>>",
+    "<<<T>>>",
+    "===HDR===",
+    "===SEL===",
     // Test-only adversarial decoy & probe identifiers
-    "dsp_audio_synth", "litmus_compute", "litmus_shader", "PacketFrame_", "pilot_ffi_step_",
-    "dead_branch_unreachable", "bench_target_", "WholeNum", "TruthBit", "Utf8Run",
+    "dsp_audio_synth",
+    "litmus_compute",
+    "litmus_shader",
+    "PacketFrame_",
+    "pilot_ffi_step_",
+    "dead_branch_unreachable",
+    "bench_target_",
+    "WholeNum",
+    "TruthBit",
+    "Utf8Run",
 ];
 
 const BANNED_STUB_MARKERS: &[&str] = &[
-    "TODO", "FIXME", "UNIMPLEMENTED", "PLACEHOLDER",
-    "HACK_BYPASS", "MOCK_IMPL", "todo!(", "unimplemented!(",
+    "TODO",
+    "FIXME",
+    "UNIMPLEMENTED",
+    "PLACEHOLDER",
+    "HACK_BYPASS",
+    "MOCK_IMPL",
+    "todo!(",
+    "unimplemented!(",
 ];
 
 const BANNED_NAME_BLIND_TYPE_STRINGS: &[&str] = &[
-    "i64", "u8", "f64", "char", "bool", "usize", "slice", "stride", "option", "result",
-    "range", "SliceBuffer", "RangeWindow", "Dual", "Signal", "EffectPlan",
+    "i64",
+    "u8",
+    "f64",
+    "char",
+    "bool",
+    "usize",
+    "slice",
+    "stride",
+    "option",
+    "result",
+    "range",
+    "SliceBuffer",
+    "RangeWindow",
+    "Dual",
+    "Signal",
+    "EffectPlan",
 ];
 
 const DELETED_LEGACY_PILOT_FILES: &[&str] = &[
@@ -296,7 +366,10 @@ fn run_all_ten_anticheat_passes(root: &Path, test_name: &str, spec: &MilestoneAu
     static SPEC_CACHE: OnceLock<Mutex<HashSet<(u32, &'static str)>>> = OnceLock::new();
     let cache = SPEC_CACHE.get_or_init(|| Mutex::new(HashSet::new()));
     let key = (spec.milestone_id, spec.test_file_rel);
-    let already_done = cache.lock().unwrap_or_else(|e| e.into_inner()).contains(&key);
+    let already_done = cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(&key);
     if !already_done {
         for rule in spec.files {
             audit_single_pilot_file(root, test_name, spec.milestone_id, rule);
@@ -349,19 +422,31 @@ fn verify_no_smuggled_foreign_or_binary_artifacts(root: &Path, test_name: &str, 
     let banned_exts: HashSet<&str> = [
         "py", "pyc", "js", "mjs", "cjs", "ts", "sh", "bash", "so", "dylib", "dll", "a", "o",
         "wasm", "exe", "c", "h", "cpp", "rs", "db", "sqlite", "sqlite3", "sql", "svg",
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
 
     for top in ["stdlib", "selfhost"] {
         let mut stack = vec![root.join(top)];
         while let Some(dir) = stack.pop() {
-            if !dir.exists() { continue; }
+            if !dir.exists() {
+                continue;
+            }
             for entry in std::fs::read_dir(&dir).unwrap() {
                 let p = entry.unwrap().path();
                 if p.is_dir() {
                     stack.push(p);
                 } else {
-                    let rel = p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
-                    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                    let rel = p
+                        .strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    let ext = p
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
                     assert!(
                         !banned_exts.contains(ext.as_str()),
                         "ANTI-CHEAT [PASS 2: SMUGGLED_ARTIFACT] [M{}::{}]: Illegal foreign script/binary '{}' found in {}/!",
@@ -451,7 +536,9 @@ fn verify_governance_docs_integrity(root: &Path, test_name: &str, milestone_id: 
         assert!(
             meta.len() > 256,
             "ANTI-CHEAT [PASS 3B: EMPTY_GOVERNANCE_DOC] [M{}::{}]: '{}' is unexpectedly empty!",
-            milestone_id, test_name, doc
+            milestone_id,
+            test_name,
+            doc
         );
     }
 }
@@ -537,7 +624,12 @@ fn is_ident_continue(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-fn scan_pilot_source(rel_path: &str, raw: &str, milestone_id: u32, test_name: &str) -> ScannedPilotFile {
+fn scan_pilot_source(
+    rel_path: &str,
+    raw: &str,
+    milestone_id: u32,
+    test_name: &str,
+) -> ScannedPilotFile {
     let bytes = raw.as_bytes();
     let n = bytes.len();
     let mut i = 0usize;
@@ -548,8 +640,17 @@ fn scan_pilot_source(rel_path: &str, raw: &str, milestone_id: u32, test_name: &s
     let mut string_literals = Vec::new();
 
     let valid_preproc: HashSet<&str> = [
-        "define", "undef", "if", "elif", "else", "endif", "region", "endregion", "error",
-        "warning", "pragma",
+        "define",
+        "undef",
+        "if",
+        "elif",
+        "else",
+        "endif",
+        "region",
+        "endregion",
+        "error",
+        "warning",
+        "pragma",
     ]
     .into_iter()
     .collect();
@@ -773,7 +874,9 @@ fn scan_pilot_source(rel_path: &str, raw: &str, milestone_id: u32, test_name: &s
         if b.is_ascii_digit() {
             let s = i;
             i += 1;
-            while i < n && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'.') {
+            while i < n
+                && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'.')
+            {
                 if bytes[i] == b'.' && i + 1 < n && bytes[i + 1] == b'.' {
                     break;
                 }
@@ -863,7 +966,8 @@ fn extract_functions(tokens: &[PilotTok]) -> HashMap<String, Vec<ExtractedFn>> {
                 {
                     if matches!(prev.text.as_str(), "pub" | "export" | "open") {
                         saw_mod_vis = Some(true);
-                    } else if matches!(prev.text.as_str(), "priv" | "prot" | "pkg" | "file" | "int") {
+                    } else if matches!(prev.text.as_str(), "priv" | "prot" | "pkg" | "file" | "int")
+                    {
                         saw_mod_vis = Some(false);
                     }
                     back -= 1;
@@ -941,7 +1045,8 @@ fn extract_functions(tokens: &[PilotTok]) -> HashMap<String, Vec<ExtractedFn>> {
                 {
                     if matches!(prev.text.as_str(), "pub" | "export" | "open") {
                         label_vis = Some(true);
-                    } else if matches!(prev.text.as_str(), "priv" | "prot" | "pkg" | "file" | "int") {
+                    } else if matches!(prev.text.as_str(), "priv" | "prot" | "pkg" | "file" | "int")
+                    {
                         label_vis = Some(false);
                     }
                     back -= 1;
@@ -1099,9 +1204,15 @@ fn extract_functions(tokens: &[PilotTok]) -> HashMap<String, Vec<ExtractedFn>> {
                                         let mut bd = 0usize;
                                         while b_cur < len {
                                             if tokens[b_cur].kind == TokKind::Punct {
-                                                if matches!(tokens[b_cur].text.as_str(), "{" | "(" | "[") {
+                                                if matches!(
+                                                    tokens[b_cur].text.as_str(),
+                                                    "{" | "(" | "["
+                                                ) {
                                                     bd += 1;
-                                                } else if matches!(tokens[b_cur].text.as_str(), "}" | ")" | "]") {
+                                                } else if matches!(
+                                                    tokens[b_cur].text.as_str(),
+                                                    "}" | ")" | "]"
+                                                ) {
                                                     bd = bd.saturating_sub(1);
                                                 } else if tokens[b_cur].text == ";" && bd == 0 {
                                                     break;
@@ -1239,11 +1350,18 @@ fn is_trivial_constant_stub(body: &[PilotTok]) -> bool {
     };
     match stripped.as_slice() {
         [] => true,
-        [only] => matches!(
-            only.kind,
-            TokKind::Number | TokKind::StrLit | TokKind::CharLit
-        ) || (only.kind == TokKind::Ident && matches!(only.text.as_str(), "true" | "false" | "none")),
-        [sign, num] if sign.kind == TokKind::Punct && sign.text == "-" && num.kind == TokKind::Number => true,
+        [only] => {
+            matches!(
+                only.kind,
+                TokKind::Number | TokKind::StrLit | TokKind::CharLit
+            ) || (only.kind == TokKind::Ident
+                && matches!(only.text.as_str(), "true" | "false" | "none"))
+        }
+        [sign, num]
+            if sign.kind == TokKind::Punct && sign.text == "-" && num.kind == TokKind::Number =>
+        {
+            true
+        }
         _ => false,
     }
 }
@@ -1261,7 +1379,11 @@ fn audit_single_pilot_file(root: &Path, test_name: &str, milestone_id: u32, rule
     assert!(
         (1..=rule.max_lines).contains(&line_cnt),
         "ANTI-CHEAT [PASS 5: LINE_CAP_VIOLATION] [M{}::{}]: '{}' has {} lines (allowed 1..={})!",
-        milestone_id, test_name, rule.path, line_cnt, rule.max_lines
+        milestone_id,
+        test_name,
+        rule.path,
+        line_cnt,
+        rule.max_lines
     );
 
     // Pass 6a: Stub/TODO/Placeholder marker ban

@@ -15,9 +15,9 @@
 //! other members.
 
 use crate::instruction::Opcode;
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 
 /// What the compiler knows about a declared struct.
 #[derive(Clone, Default)]
@@ -60,7 +60,10 @@ impl BytecodeCompiler {
     /// Whether type member `m` is a method: a `fn`, or an `op` named by its
     /// operator.
     pub(crate) fn is_method_decl(arena: &AstArena, m: NodeId) -> bool {
-        matches!(arena.node(m).node_kind(), NodeKind::FnDecl | NodeKind::OperatorDecl)
+        matches!(
+            arena.node(m).node_kind(),
+            NodeKind::FnDecl | NodeKind::OperatorDecl
+        )
     }
 
     /// Whether a function-like declaration has a body. One without states a
@@ -87,8 +90,9 @@ impl BytecodeCompiler {
             if !Self::is_method_decl(arena, m) || !Self::has_body(arena, m) {
                 continue;
             }
-            let is_static =
-                arena.decl_flags.get(m.0 as usize).copied().unwrap_or(0) & pilot_ast::DECL_FLAG_STATIC != 0;
+            let is_static = arena.decl_flags.get(m.0 as usize).copied().unwrap_or(0)
+                & pilot_ast::DECL_FLAG_STATIC
+                != 0;
             let owners = self
                 .method_owners
                 .entry(Self::name(arena, arena.node(m).lhs).to_string())
@@ -109,11 +113,19 @@ impl BytecodeCompiler {
         }
         self.register_inherited(arena, decl, &owner);
         // A `partial struct` adds to the parts declared before it.
-        let mut info = self.structs.remove(Self::name(arena, dn.lhs)).unwrap_or_default();
+        let mut info = self
+            .structs
+            .remove(Self::name(arena, dn.lhs))
+            .unwrap_or_default();
         for m in Self::type_members(arena, NodeId(dn.rhs)) {
             let mn = arena.node(m);
-            let is_field = matches!(mn.node_kind(), NodeKind::ParamDecl | NodeKind::VarStmt | NodeKind::LetStmt);
-            let is_static = arena.decl_flags.get(m.0 as usize).copied().unwrap_or(0) & pilot_ast::DECL_FLAG_STATIC != 0;
+            let is_field = matches!(
+                mn.node_kind(),
+                NodeKind::ParamDecl | NodeKind::VarStmt | NodeKind::LetStmt
+            );
+            let is_static = arena.decl_flags.get(m.0 as usize).copied().unwrap_or(0)
+                & pilot_ast::DECL_FLAG_STATIC
+                != 0;
             if let Some(t) = Self::annot_name(arena, m).filter(|_| is_field) {
                 let fname = Self::name(arena, mn.lhs).to_string();
                 if is_static {
@@ -126,15 +138,27 @@ impl BytecodeCompiler {
                 // A property whose accessors have bodies is computed, not
                 // stored, unless it has a default: then its storage (`field`)
                 // starts at that value.
-                NodeKind::ParamDecl if self.is_computed_property(arena, m) && arena.field_default(m).is_none() => {}
+                NodeKind::ParamDecl
+                    if self.is_computed_property(arena, m) && arena.field_default(m).is_none() => {}
                 NodeKind::ParamDecl => {
-                    let entry = (Self::name(arena, mn.lhs).to_string(), arena.field_default(m));
-                    if is_static { info.static_fields.push(entry); } else { info.fields.push(entry); }
+                    let entry = (
+                        Self::name(arena, mn.lhs).to_string(),
+                        arena.field_default(m),
+                    );
+                    if is_static {
+                        info.static_fields.push(entry);
+                    } else {
+                        info.fields.push(entry);
+                    }
                 }
                 // `var x: T = v;` and `let x: T;` in a struct body are fields too.
                 NodeKind::VarStmt | NodeKind::LetStmt => {
                     let entry = (Self::name(arena, mn.lhs).to_string(), NodeId(mn.rhs));
-                    if is_static { info.static_fields.push(entry); } else { info.fields.push(entry); }
+                    if is_static {
+                        info.static_fields.push(entry);
+                    } else {
+                        info.fields.push(entry);
+                    }
                 }
                 NodeKind::ConstructorDecl => {
                     info.ctor = Some(m);
@@ -153,17 +177,27 @@ impl BytecodeCompiler {
     }
 
     pub(crate) fn has_static_field(&self, owner: &str, field: &str) -> bool {
-        self.structs.get(owner).is_some_and(|s| s.static_fields.iter().any(|(f, _)| f == field))
+        self.structs
+            .get(owner)
+            .is_some_and(|s| s.static_fields.iter().any(|(f, _)| f == field))
     }
 
     pub(crate) fn static_field_type(&self, owner: &str, field: &str) -> Option<String> {
-        self.structs.get(owner)?.static_field_types.get(field).cloned()
+        self.structs
+            .get(owner)?
+            .static_field_types
+            .get(field)
+            .cloned()
     }
 
     pub(crate) fn compile_struct_static_fields(&mut self, arena: &AstArena, decl: NodeId) -> u8 {
         let dn = *arena.node(decl);
         let owner = Self::name(arena, dn.lhs).to_string();
-        let fields = self.structs.get(&owner).map(|s| s.static_fields.clone()).unwrap_or_default();
+        let fields = self
+            .structs
+            .get(&owner)
+            .map(|s| s.static_fields.clone())
+            .unwrap_or_default();
         for (fname, default_id) in fields {
             let mark = self.next_reg;
             let r_v = if default_id.is_some() {
@@ -178,7 +212,10 @@ impl BytecodeCompiler {
     }
 
     pub(crate) fn struct_fields(&self, name: &str) -> Vec<(String, NodeId)> {
-        self.structs.get(name).map(|s| s.fields.clone()).unwrap_or_default()
+        self.structs
+            .get(name)
+            .map(|s| s.fields.clone())
+            .unwrap_or_default()
     }
 
     /// A new empty record of struct `name`.
@@ -199,7 +236,13 @@ impl BytecodeCompiler {
     }
 
     /// Sets each defaulted field of `name` that is not in `given` on `r_obj`.
-    pub(crate) fn emit_field_defaults(&mut self, arena: &AstArena, name: &str, given: &[String], r_obj: u8) {
+    pub(crate) fn emit_field_defaults(
+        &mut self,
+        arena: &AstArena,
+        name: &str,
+        given: &[String],
+        r_obj: u8,
+    ) {
         let Some(info) = self.structs.get(name).cloned() else {
             return;
         };
@@ -216,7 +259,12 @@ impl BytecodeCompiler {
     }
 
     /// `Name { field: value, .. }`.
-    pub(crate) fn compile_struct_literal(&mut self, arena: &AstArena, name: &str, literal: NodeId) -> u8 {
+    pub(crate) fn compile_struct_literal(
+        &mut self,
+        arena: &AstArena,
+        name: &str,
+        literal: NodeId,
+    ) -> u8 {
         self.check_exported(name);
         let ln = *arena.node(literal);
         let r_obj = self.compile_map_literal(arena, ln.lhs, ln.rhs);
@@ -243,7 +291,12 @@ impl BytecodeCompiler {
     }
 
     /// `Name(args)` for a declared struct; `None` when `name` is not one.
-    pub(crate) fn compile_ctor_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> Option<u8> {
+    pub(crate) fn compile_ctor_call(
+        &mut self,
+        arena: &AstArena,
+        name: &str,
+        args: &[NodeId],
+    ) -> Option<u8> {
         let ctor = self.structs.get(name)?.ctor;
         self.check_exported(name);
         let Some(ctor) = ctor else {
@@ -279,7 +332,11 @@ impl BytecodeCompiler {
         };
         let receiver = crate::RECEIVER;
         let mut names = vec![receiver.to_string()];
-        names.extend(params.iter().map(|&p| Self::name(arena, arena.node(NodeId(p)).lhs).to_string()));
+        names.extend(
+            params
+                .iter()
+                .map(|&p| Self::name(arena, arena.node(NodeId(p)).lhs).to_string()),
+        );
         let pc = self.here();
         self.fn_entries
             .insert(format!("{owner}.{}", &receiver[1..]), (pc, names.clone()));

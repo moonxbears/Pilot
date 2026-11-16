@@ -11,31 +11,16 @@
 // (stdlib/core/builtins/native_calls.pilot), as on the seed: a binding of
 // that member on that type (`bind_native_member`), else of that method or
 // property name. A member with neither stops at `ir.lower_construct`.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerMembers;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.methods.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_variant.*;
-use selfhost.ir.lower_closure.*;
-use selfhost.ir.lower_union.*;
-use selfhost.ir.lower_global.*;
-use selfhost.ir.lower_unit.*;
-use selfhost.ir.lower_outs.*;
-use selfhost.ir.lower_setter.*;
+use selfhost.check.*;
 
 /// Whether a value of physics `p` lives in a register.
 pub fn in_register(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.reg_class < reg_class_aggregate();
 
 /// `v` as a value of physics `to`: a `cast` when both live in registers of
 /// different layouts (an `i64` literal bound to a `u64`), else `v` itself.
-pub fn coerce(lw: Lowerer, v: u32, to: IrTypePhysics, n: i64) -> u32 {
+pub fn coerce(var ref lw: Lowerer, v: u32, to: IrTypePhysics, n: i64) -> u32 {
     if v == ir_no_value() || v >= lw.f.value_physics.len { return v; }
     let from = lw.f.value_physics[v];
     if from.layout_id == to.layout_id || !in_register(from) || !in_register(to) { return v; }
@@ -45,7 +30,7 @@ pub fn coerce(lw: Lowerer, v: u32, to: IrTypePhysics, n: i64) -> u32 {
 }
 
 /// The `struct`, `interface` or `ext` declaration whose body holds `decl`, or -1.
-pub fn owner_type_decl(lw: Lowerer, decl: i64) -> i64 {
+pub fn owner_type_decl(ref lw: Lowerer, decl: i64) -> i64 {
     let p = lw.inf.p;
     var cur = p.parents[decl];
     while cur >= 0 {
@@ -58,7 +43,7 @@ pub fn owner_type_decl(lw: Lowerer, decl: i64) -> i64 {
 }
 
 /// The type a method's receiver has: its owner over unknown generic arguments.
-pub fn owner_type(lw: Lowerer, owner: i64) -> i64 {
+pub fn owner_type(ref lw: Lowerer, owner: i64) -> i64 {
     let p = lw.inf.p;
     let name = node_name(p.s, owner);
     let d = prog_type_decl(p, name);
@@ -68,21 +53,21 @@ pub fn owner_type(lw: Lowerer, owner: i64) -> i64 {
     return ty_named(p.tt, d, name, args);
 }
 
-pub fn is_receiver_word(lw: Lowerer, n: i64) -> bool {
+pub fn is_receiver_word(ref lw: Lowerer, n: i64) -> bool {
     let s = lw.inf.p.s;
     return lw.self_value != ir_no_value() && s.receiver.len() > 0 && node_name(s, n) == s.receiver;
 }
 
 /// The physical fields of type `t`, in layout order (empty when `t` is not
 /// a named type).
-pub fn fields_of(lw: Lowerer, t: i64) -> List<PhysicalFieldSlot> {
+pub fn fields_of(ref lw: Lowerer, t: i64) -> List<PhysicalFieldSlot> {
     let p = lw.inf.p;
     if !ty_is_named(p.tt, t) { return []; }
     return build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).plan.physical_fields;
 }
 
 /// Whether field declaration `decl` has accessors (`{ get => ..; set => ..; }`).
-pub fn has_accessors(s: Snap, decl: i64) -> bool {
+pub fn has_accessors(ref s: Snap, decl: i64) -> bool {
     for row in s.properties {
         if row[0] == decl { return true; }
     }
@@ -91,14 +76,14 @@ pub fn has_accessors(s: Snap, decl: i64) -> bool {
 
 /// Whether `name` is a property of `t` with storage of its own the program
 /// builds.
-pub fn is_stored_property(lw: Lowerer, t: i64, name: str) -> bool {
+pub fn is_stored_property(var ref lw: Lowerer, t: i64, name: str) -> bool {
     guard some m = prog_member(lw.inf.p, t, name) else { return false; }
     return has_accessors(lw.inf.p.s, m.decl) && runs_in_program(lw, m.decl) && storage_slot(lw, t, name) >= 0;
 }
 
 /// The slot of stored field `name` of type `t`, or -1 (also for a property
 /// with accessors, which is read and written through them).
-pub fn field_slot(lw: Lowerer, t: i64, name: str) -> i64 {
+pub fn field_slot(var ref lw: Lowerer, t: i64, name: str) -> i64 {
     guard some m = prog_member(lw.inf.p, t, name) else { return -1; }
     // A field of a declaration the program does not link (the stdlib's own
     // layout of a type the engine holds) has no storage yet.
@@ -107,7 +92,7 @@ pub fn field_slot(lw: Lowerer, t: i64, name: str) -> i64 {
 }
 
 /// The position of field `name` among the physical fields of `t`, or -1.
-pub fn storage_slot(lw: Lowerer, t: i64, name: str) -> i64 {
+pub fn storage_slot(ref lw: Lowerer, t: i64, name: str) -> i64 {
     var i = 0;
     for f in fields_of(lw, t) {
         if f.canonical_name == name { return i; }
@@ -117,14 +102,14 @@ pub fn storage_slot(lw: Lowerer, t: i64, name: str) -> i64 {
 }
 
 /// The physics of field `name` of type `t`.
-pub fn field_physics(lw: Lowerer, t: i64, name: str) -> IrTypePhysics {
+pub fn field_physics(var ref lw: Lowerer, t: i64, name: str) -> IrTypePhysics {
     if some m = prog_member(lw.inf.p, t, name) { return layout_of(lw.ls, prog_member_type(lw.inf.p, m)); }
     return layout_unknown(lw.ls);
 }
 
 /// Records in the module that layout `phy` (of struct type `t`) holds its
 /// physical fields with their layouts, so a backend can lay it out.
-pub fn note_record(lw: Lowerer, t: i64, phy: IrTypePhysics) {
+pub fn note_record(var ref lw: Lowerer, t: i64, phy: IrTypePhysics) {
     let p = lw.inf.p;
     if phy.layout_id == 0 || !ty_is_named(p.tt, t) || kind(p.s, ty_decl(p.tt, t)) != nk_struct() { return; }
     if some _known = ir_record_of(lw.ls.m, phy.layout_id) { return; }
@@ -139,7 +124,7 @@ pub fn note_record(lw: Lowerer, t: i64, phy: IrTypePhysics) {
 
 /// The value of an omitted field: its default, else zero (as the seed
 /// zero-fills it) for a register, else `undef`.
-pub fn field_default_value(lw: Lowerer, t: i64, name: str, n: i64) -> u32 {
+pub fn field_default_value(var ref lw: Lowerer, t: i64, name: str, n: i64) -> u32 {
     let phy = field_physics(lw, t, name);
     if some m = prog_member(lw.inf.p, t, name) {
         let ds = lw.inf.p.s;
@@ -153,7 +138,7 @@ pub fn field_default_value(lw: Lowerer, t: i64, name: str, n: i64) -> u32 {
 }
 
 /// `Type { a: x, b: y }`: the fields in layout order, omitted ones defaulted.
-pub fn lower_struct_literal(lw: Lowerer, n: i64, map: i64) -> u32 {
+pub fn lower_struct_literal(var ref lw: Lowerer, n: i64, map: i64) -> u32 {
     let s = lw.inf.p.s;
     let t = type_of(lw.inf, n);
     if !ty_is_named(lw.inf.p.tt, t) { return unsupported(lw, n); }
@@ -183,7 +168,7 @@ pub fn lower_struct_literal(lw: Lowerer, n: i64, map: i64) -> u32 {
     return emit(lw, op_construct_aggregate(), 0, phy, args, n);
 }
 
-pub fn is_implied(lw: Lowerer, n: i64) -> bool {
+pub fn is_implied(ref lw: Lowerer, n: i64) -> bool {
     let s = lw.inf.p.s;
     return flags(s, n) == member_implied() || lhs(s, n) < 0 || (kind(s, lhs(s, n)) == nk_ident() && is_receiver_word(lw, lhs(s, n)));
 }
@@ -191,7 +176,7 @@ pub fn is_implied(lw: Lowerer, n: i64) -> bool {
 /// The member that `n` (`recv.name`) names. Inside a method a splice gives
 /// its host, a member of the receiver that the host renamed (`*Bundle with
 /// { count as hits }`) is named by its new name.
-pub fn member_word(lw: Lowerer, n: i64) -> str {
+pub fn member_word(ref lw: Lowerer, n: i64) -> str {
     let p = lw.inf.p;
     let s = p.s;
     let name = sym_text(s, rhs(s, n));
@@ -203,10 +188,10 @@ pub fn member_word(lw: Lowerer, n: i64) -> str {
 }
 
 /// The receiver of member expression `n`: the method's own for `.name`.
-pub fn member_receiver(lw: Lowerer, n: i64) -> u32 =>
+pub fn member_receiver(var ref lw: Lowerer, n: i64) -> u32 =>
     if is_implied(lw, n) { lw.self_value } else { lower_expr(lw, lhs(lw.inf.p.s, n)) };
 
-pub fn member_receiver_type(lw: Lowerer, n: i64) -> i64 =>
+pub fn member_receiver_type(var ref lw: Lowerer, n: i64) -> i64 =>
     if is_implied(lw, n) { lw.self_type } else { value_type(lw, lhs(lw.inf.p.s, n)) };
 
 /// `x.field`: an `extract_field` of a stored field.
@@ -225,7 +210,7 @@ fn tuple_position(name: str) -> i64 {
     return value;
 }
 
-pub fn lower_member(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_member(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     if is_implied(lw, n) && lw.self_value == ir_no_value() { return unsupported(lw, n); }
     let recv = lhs(s, n);
@@ -259,11 +244,11 @@ pub fn lower_member(lw: Lowerer, n: i64) -> u32 {
 }
 
 /// The name of named type `t`, or "".
-pub fn type_name_of(lw: Lowerer, t: i64) -> str => if ty_is_named(lw.inf.p.tt, t) { lw.inf.p.tt.name[t] } else { "" };
+pub fn type_name_of(ref lw: Lowerer, t: i64) -> str => if ty_is_named(lw.inf.p.tt, t) { lw.inf.p.tt.name[t] } else { "" };
 
 /// Whether member `name` of type `t` runs as Pilot code: a method with a body
 /// in a file the program links.
-pub fn runs_as_code(lw: Lowerer, t: i64, name: str) -> bool {
+pub fn runs_as_code(var ref lw: Lowerer, t: i64, name: str) -> bool {
     let s = lw.inf.p.s;
     guard some m = prog_member(lw.inf.p, t, name) else { return false; }
     return fn_body(s, m.decl) >= 0 && runs_in_program(lw, m.decl);
@@ -271,13 +256,13 @@ pub fn runs_as_code(lw: Lowerer, t: i64, name: str) -> bool {
 
 /// The engine operation that answers member `name` of type `t`: its binding
 /// on that type, else the binding of the name in `hook`'s table; or "".
-pub fn native_for(lw: Lowerer, t: i64, name: str, hook: str) -> str {
+pub fn native_for(ref lw: Lowerer, t: i64, name: str, hook: str) -> str {
     let on_type = bound(lw, native_member_hook(), [type_name_of(lw, t), name]);
     return if on_type != "" { on_type } else { bound(lw, hook, [name]) };
 }
 
 /// The getter body of property declaration `decl`, or -1.
-fn getter_of(s: Snap, decl: i64) -> i64 {
+fn getter_of(ref s: Snap, decl: i64) -> i64 {
     for row in s.properties {
         if row[0] == decl && row.len() > 2 {
             let block = row[2];
@@ -290,7 +275,7 @@ fn getter_of(s: Snap, decl: i64) -> i64 {
 
 /// `recv.name` where `recv` has type `t`: a stored field, a getter, or the
 /// engine property a binding names.
-pub fn property_read(lw: Lowerer, recv: u32, t: i64, name: str, n: i64) -> u32 {
+pub fn property_read(var ref lw: Lowerer, recv: u32, t: i64, name: str, n: i64) -> u32 {
     let p = lw.inf.p;
     let slot = field_slot(lw, t, name);
     if slot >= 0 { return emit(lw, op_extract_field(), slot, field_physics(lw, t, name), [recv], n); }
@@ -321,12 +306,12 @@ pub fn property_read(lw: Lowerer, recv: u32, t: i64, name: str, n: i64) -> u32 {
 
 /// Inside an accessor, the backing-storage word names the property's own
 /// stored value.
-pub fn is_backing_word(lw: Lowerer, n: i64) -> bool {
+pub fn is_backing_word(ref lw: Lowerer, n: i64) -> bool {
     let s = lw.inf.p.s;
     return lw.cur_field >= 0 && s.backing.len() > 0 && node_name(s, n) == s.backing && lw.self_value != ir_no_value();
 }
 
-pub fn lower_backing_read(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_backing_read(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let name = node_name(s, lw.cur_field);
     let slot = storage_slot(lw, lw.self_type, name);
@@ -337,7 +322,7 @@ pub fn lower_backing_read(lw: Lowerer, n: i64) -> u32 {
 /// Calls member `name` on `recv` (of type `t`) with the arguments `arg_nodes`:
 /// its body when the program links one, else the engine operation bound to
 /// it. The result has physics `phy`.
-pub fn member_call(lw: Lowerer, recv: u32, t: i64, name: str, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
+pub fn member_call(var ref lw: Lowerer, recv: u32, t: i64, name: str, ref arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
     let p = lw.inf.p;
     let s = p.s;
     if ty_is_union(p.tt, t) { return union_member_call(lw, recv, t, name, arg_nodes, phy, n); }
@@ -369,7 +354,7 @@ pub fn member_call(lw: Lowerer, recv: u32, t: i64, name: str, arg_nodes: List<i6
 }
 
 /// Whether member `m` is a method with a body the program runs.
-fn runs_as_method(lw: Lowerer, m: Member) -> bool {
+fn runs_as_method(ref lw: Lowerer, ref m: Member) -> bool {
     let s = lw.inf.p.s;
     let mk = kind(s, m.decl);
     return (mk == nk_fn() || mk == nk_operator() || (mk == nk_indexer() && !has_accessors(s, m.decl)))
@@ -377,7 +362,7 @@ fn runs_as_method(lw: Lowerer, m: Member) -> bool {
 }
 
 /// Calls method `m` on `recv`, a value of type `t`, with `arg_nodes`.
-pub fn call_method(lw: Lowerer, recv: u32, t: i64, m: Member, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
+pub fn call_method(var ref lw: Lowerer, recv: u32, t: i64, ref m: Member, ref arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
     let s = lw.inf.p.s;
     var args: List<u32> = [recv];
     let params = method_params(s, m.decl);
@@ -395,7 +380,7 @@ pub fn call_method(lw: Lowerer, recv: u32, t: i64, m: Member, arg_nodes: List<i6
 /// `Bundle.method(var ref self, args..)`: the method of the splice `Bundle`
 /// itself, run on the host value, whatever the host hides, renames or
 /// overrides; none when the call is no such delegation.
-fn lower_delegation(lw: Lowerer, n: i64) -> u32? {
+fn lower_delegation(var ref lw: Lowerer, n: i64) -> u32? {
     let p = lw.inf.p;
     let s = p.s;
     let ch = children(s, n);
@@ -410,7 +395,7 @@ fn lower_delegation(lw: Lowerer, n: i64) -> u32? {
 }
 
 /// The type `get_enumerator()` of type `t` returns, or the unknown type.
-pub fn enumerator_type(lw: Lowerer, t: i64) -> i64 {
+pub fn enumerator_type(var ref lw: Lowerer, t: i64) -> i64 {
     let s = lw.inf.p.s;
     if some m = prog_member(lw.inf.p, t, s.enumeration[0]) { return prog_member_type(lw.inf.p, m); }
     return ty_unknown();
@@ -418,7 +403,7 @@ pub fn enumerator_type(lw: Lowerer, t: i64) -> i64 {
 
 /// The type of expression `n`; a member with an implied receiver (`.items`)
 /// is typed from the receiver of the method being lowered.
-pub fn value_type(lw: Lowerer, n: i64) -> i64 {
+pub fn value_type(var ref lw: Lowerer, n: i64) -> i64 {
     let s = lw.inf.p.s;
     if kind(s, n) == nk_member() && is_implied(lw, n) && lw.self_value != ir_no_value() {
         if some m = prog_member(lw.inf.p, lw.self_type, member_word(lw, n)) {
@@ -430,7 +415,10 @@ pub fn value_type(lw: Lowerer, n: i64) -> i64 {
     if kind(s, n) == nk_list() {
         // Items of different types: a list of their union.
         let u = mixed_item_type(lw, n);
-        if !ty_is_unknown(lw.inf.p.tt, u) && ty_is_named(lw.inf.p.tt, t) { return ty_named(lw.inf.p.tt, ty_decl(lw.inf.p.tt, t), lw.inf.p.tt.name[t], [u]); }
+        if !ty_is_unknown(lw.inf.p.tt, u) && ty_is_named(lw.inf.p.tt, t) {
+            let name = lw.inf.p.tt.name[t];
+            return ty_named(lw.inf.p.tt, ty_decl(lw.inf.p.tt, t), name, [u]);
+        }
     }
     if ty_is_unknown(lw.inf.p.tt, t) && kind(s, n) == nk_call() {
         let callee = children(s, n)[0];
@@ -494,7 +482,7 @@ pub fn value_type(lw: Lowerer, n: i64) -> i64 {
 
 /// The type of piped value `n`: the checker's, or for `x |> .m(..)` the
 /// return type of `m` on `x`'s type.
-fn piped_type(lw: Lowerer, n: i64) -> i64 {
+fn piped_type(var ref lw: Lowerer, n: i64) -> i64 {
     let s = lw.inf.p.s;
     let t = type_of(lw.inf, n);
     if !ty_is_unknown(lw.inf.p.tt, t) || kind(s, n) != nk_binary() || flags(s, n) != op_pipe() { return t; }
@@ -508,7 +496,7 @@ fn piped_type(lw: Lowerer, n: i64) -> i64 {
 
 /// The type a map literal builds (`bind_map_literal`), over unknown
 /// arguments; the unknown type when the program binds none.
-pub fn map_literal_type(lw: Lowerer) -> i64 {
+pub fn map_literal_type(ref lw: Lowerer) -> i64 {
     for row in lw.bindings {
         if row.len() == 3 && row[0] == map_literal_hook() {
             let d = prog_type_decl(lw.inf.p, row[1]);
@@ -519,7 +507,7 @@ pub fn map_literal_type(lw: Lowerer) -> i64 {
 }
 
 /// `x[i]`: the type's `op []`.
-pub fn lower_index(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_index(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     if some text = bracket_unit_text(lw, n) { return lower_unit_text(lw, text, n); }
     let idx = rhs(s, n);
@@ -556,7 +544,7 @@ pub pure fn range_index_hook() -> str => "bind_range_index";
 pub pure fn op_index_set() -> str => "[]=";
 
 /// `x[i] = v` (and `x[i] op= v`): the type's `op []=`.
-pub fn lower_index_assign(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_index_assign(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let target = lhs(s, n);
     if flags(s, n) != 0 { return unsupported(lw, n); }
@@ -567,14 +555,14 @@ pub fn lower_index_assign(lw: Lowerer, n: i64) -> u32 {
 
 /// `[a, b]`: the literal's type built and appended to as `bind_list_literal`
 /// names (`List()`, then `push(a)`, `push(b)`).
-pub fn unpack_method_type(lw: Lowerer, t: i64, method: str) -> i64 {
+pub fn unpack_method_type(var ref lw: Lowerer, t: i64, method: str) -> i64 {
     if some m = prog_member(lw.inf.p, t, method) {
         return prog_member_type(lw.inf.p, m);
     }
     return t;
 }
 
-pub fn lower_unpack_operand(lw: Lowerer, operand: i64, method: str) -> u32 {
+pub fn lower_unpack_operand(var ref lw: Lowerer, operand: i64, method: str) -> u32 {
     let t = value_type(lw, operand);
     let v = lower_expr(lw, operand);
     if some m = prog_member(lw.inf.p, t, method) {
@@ -584,7 +572,7 @@ pub fn lower_unpack_operand(lw: Lowerer, operand: i64, method: str) -> u32 {
     return v;
 }
 
-pub fn lower_list_literal(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_list_literal(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let t = value_type(lw, n);
     let name = type_name_of(lw, t);
@@ -619,7 +607,7 @@ pub fn lower_list_literal(lw: Lowerer, n: i64) -> u32 {
 }
 
 /// Whether list item `item` is `*xs` or `*..xs`.
-fn is_spread(s: Snap, item: i64) -> bool {
+fn is_spread(ref s: Snap, item: i64) -> bool {
     if kind(s, item) != nk_unary() { return false; }
     let f = flags(s, item);
     return f == unary_splat() || f == unary_deep_flatten();
@@ -628,7 +616,7 @@ fn is_spread(s: Snap, item: i64) -> bool {
 /// `["k": v]` and `{name: v}`: the engine-built map the core binds for map
 /// literals, filled with its bound `set`. A bare name before `:` is its own
 /// text as the key.
-fn lower_map_spread_item(lw: Lowerer, map: u32, set: str, item: i64) -> bool {
+fn lower_map_spread_item(var ref lw: Lowerer, map: u32, set: str, item: i64) -> bool {
     let s = lw.inf.p.s;
     let operand = lhs(s, item);
     if operand < 0 { return false; }
@@ -677,7 +665,7 @@ fn lower_map_spread_item(lw: Lowerer, map: u32, set: str, item: i64) -> bool {
     return true;
 }
 
-pub fn lower_map_literal(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_map_literal(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     var map_type = "";
     var set_name = "";
@@ -716,7 +704,7 @@ pub fn lower_map_literal(lw: Lowerer, n: i64) -> u32 {
 }
 
 /// `x.field = v` (and `x.field op= v`): an `insert_field` into the record.
-pub fn lower_field_assign(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_field_assign(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let target = lhs(s, n);
     if is_implied(lw, target) && lw.self_value == ir_no_value() { return unsupported(lw, n); }
@@ -762,7 +750,7 @@ pub fn lower_field_assign(lw: Lowerer, n: i64) -> u32 {
 }
 
 /// `x.m(args)` (the receiver first) and `Type.m(args)` (a static method).
-pub fn lower_method_call(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_method_call(var ref lw: Lowerer, n: i64) -> u32 {
     let p = lw.inf.p;
     let s = p.s;
     let ch = children(s, n);
@@ -812,14 +800,14 @@ pub fn lower_method_call(lw: Lowerer, n: i64) -> u32 {
 
 /// The parameters of a function or constructor declaration.
 /// The explicit receiver parameter of method `decl` (`fn f(self, ..)`), or -1.
-pub fn receiver_param(s: Snap, decl: i64) -> i64 {
+pub fn receiver_param(ref s: Snap, decl: i64) -> i64 {
     let ps = decl_params(s, decl);
     if ps.len() > 0 && s.receiver.len() > 0 && node_name(s, ps[0]) == s.receiver { return ps[0]; }
     return -1;
 }
 
 /// The parameters of method `decl` after its explicit receiver, if any.
-pub fn method_params(s: Snap, decl: i64) -> List<i64> {
+pub fn method_params(ref s: Snap, decl: i64) -> List<i64> {
     let ps = decl_params(s, decl);
     if receiver_param(s, decl) < 0 { return ps; }
     var out: List<i64> = [];
@@ -831,7 +819,7 @@ pub fn method_params(s: Snap, decl: i64) -> List<i64> {
     return out;
 }
 
-pub fn decl_params(s: Snap, decl: i64) -> List<i64> {
+pub fn decl_params(ref s: Snap, decl: i64) -> List<i64> {
     // A destructor takes only its receiver.
     if kind(s, decl) == nk_dtor() { return []; }
     if kind(s, decl) != nk_ctor() && kind(s, decl) != nk_indexer() { return fn_params(s, decl); }
@@ -846,7 +834,7 @@ pub fn decl_params(s: Snap, decl: i64) -> List<i64> {
 }
 
 /// The body of a function, constructor or indexer declaration, or -1.
-pub fn decl_body(s: Snap, decl: i64) -> i64 {
+pub fn decl_body(ref s: Snap, decl: i64) -> i64 {
     if kind(s, decl) == nk_dtor() { return lhs(s, decl); }
     if kind(s, decl) != nk_ctor() && kind(s, decl) != nk_indexer() { return fn_body(s, decl); }
     let ch = children(s, decl);
@@ -854,7 +842,7 @@ pub fn decl_body(s: Snap, decl: i64) -> i64 {
 }
 
 /// The constructor of type `t` that takes `count` arguments, or -1.
-pub fn constructor_of(lw: Lowerer, t: i64, count: i64) -> i64 {
+pub fn constructor_of(ref lw: Lowerer, t: i64, count: i64) -> i64 {
     let p = lw.inf.p;
     for d in nl_get(p.type_decls, p.tt.name[t]) {
         for m in type_members(p.s, d) {
@@ -865,7 +853,7 @@ pub fn constructor_of(lw: Lowerer, t: i64, count: i64) -> i64 {
 }
 
 /// Whether the program links a constructor of type `t`.
-pub fn links_constructor(lw: Lowerer, t: i64) -> bool {
+pub fn links_constructor(ref lw: Lowerer, t: i64) -> bool {
     let p = lw.inf.p;
     if !ty_is_named(p.tt, t) { return false; }
     for d in nl_get(p.type_decls, p.tt.name[t]) {
@@ -879,7 +867,7 @@ pub fn links_constructor(lw: Lowerer, t: i64) -> bool {
 /// `Type(args)`: a record of the field defaults, then the constructor that
 /// takes the arguments run on it; with no constructor, the arguments fill
 /// the fields in order.
-pub fn lower_construction(lw: Lowerer, n: i64, t: i64) -> u32 {
+pub fn lower_construction(var ref lw: Lowerer, n: i64, t: i64) -> u32 {
     let s = lw.inf.p.s;
     let ch = children(s, n);
     var arg_nodes: List<i64> = [];
@@ -942,7 +930,7 @@ pub fn lower_construction(lw: Lowerer, n: i64, t: i64) -> u32 {
 /// `recv..step`: the step (`..name(args)` or `..name = value`) applied to
 /// the receiver, whose value the cascade is. `recv?..step` skips the step
 /// when the receiver is none (crates/pilot-vm lower_cascade.rs).
-pub fn lower_cascade(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_cascade(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let t = value_type(lw, lhs(s, n));
     let recv = lower_expr(lw, lhs(s, n));

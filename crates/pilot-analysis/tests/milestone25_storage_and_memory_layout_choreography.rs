@@ -3,29 +3,27 @@
 //! .pchor Storage & Memory Layout Choreography (AoS <-> SoA, AoSoA & Hot/Cold Split)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 25,
-    test_file_rel: "crates/pilot-analysis/tests/milestone25_storage_and_memory_layout_choreography.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone25_storage_and_memory_layout_choreography.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
             path: "stdlib/core/soa.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "align_up_bytes",
-                "storage_strategy_name",
-            ],
+            required_pub_fns: &["align_up_bytes", "storage_strategy_name"],
             required_code_markers: &[
                 "StorageStrategy",
                 "RowProxyRef",
@@ -41,10 +39,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/chor/storage_plan.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "compute_storage_plan",
-                "align_up",
-            ],
+            required_pub_fns: &["compute_storage_plan", "align_up"],
             required_code_markers: &[
                 "FieldLeafDesc",
                 "ColumnPhysicalLayout",
@@ -81,12 +76,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m25(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -113,10 +112,7 @@ fn test_m25_1_multicolumn_layout_and_simd_alignment() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "stdlib/core/soa.pilot",
-        "selfhost/chor/storage_plan.pilot",
-    ];
+    let deps = ["stdlib/core/soa.pilot", "selfhost/chor/storage_plan.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -162,7 +158,11 @@ fn test_m25_1_multicolumn_layout_and_simd_alignment() {
     "#;
 
     let res = eval_m25(&deps, script);
-    assert_eq!(res, "42", "Failed multi-column physical layout test: {}", res);
+    assert_eq!(
+        res, "42",
+        "Failed multi-column physical layout test: {}",
+        res
+    );
 
     // A SoaTable lays out its planes, but has no column memory to push rows into yet.
     let table = eval_m25(
@@ -343,10 +343,7 @@ fn test_m25_4_column_selective_perceus_drop_masks() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "stdlib/core/soa.pilot",
-        "selfhost/chor/storage_plan.pilot",
-    ];
+    let deps = ["stdlib/core/soa.pilot", "selfhost/chor/storage_plan.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {

@@ -3,11 +3,10 @@
 // Milestone 3.2: Zero-Copy POSIX/GNU Argument Parser & Typo Recommender
 // Implements --flag=val, -f, -- passthrough, and Damerau-Levenshtein suggestions
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Cli.Parser;
+pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.Primitives.Map::*;
 use Pilot.Core.Env::*;
-use Pilot.SelfHost.Cli.Spec::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -1,10 +1,10 @@
 // ==============================================================================
 // selfhost/adapter/wit_parser.pilot
 // Ring 3 / Self-Host Compiler: WebAssembly Component Model & WIT Universal Parser
-// Package: Pilot.SelfHost.Adapter.WitParser (Milestone 19)
+// Package: selfhost.adapter (Milestone 19)
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Adapter.WitParser;
+pub lvl(0) pkg selfhost.adapter;
 
 // ------------------------------------------------------------------------------
 // 1. Diagnostic Codes (WASM001 .. WASM005)
@@ -407,7 +407,7 @@ pub fn wit_parse_signature(var ref f: WitFunction, sig: str) {
 }
 
 /// Whether `name` is a type declared in `iface`.
-fn wit_iface_declares(iface: WitInterface, name: str) -> bool {
+fn wit_iface_declares(ref iface: WitInterface, name: str) -> bool {
     for r in iface.records { if r.name == name { return true; } }
     for e in iface.enums { if e.name == name { return true; } }
     for fl in iface.flags_list { if fl.name == name { return true; } }
@@ -416,14 +416,14 @@ fn wit_iface_declares(iface: WitInterface, name: str) -> bool {
     return false;
 }
 
-fn wit_resolve_ref(iface: WitInterface, ty: WitTypeRef) -> WitTypeRef {
+fn wit_resolve_ref(ref iface: WitInterface, ty: WitTypeRef) -> WitTypeRef {
     if ty.kind == WitTypeKind::Primitive && wit_iface_declares(iface, ty.name) {
         return wit_type_named(ty.name);
     }
     return ty;
 }
 
-fn wit_resolve_params(iface: WitInterface, params: List<WitParam>) -> List<WitParam> {
+fn wit_resolve_params(ref iface: WitInterface, ref params: List<WitParam>) -> List<WitParam> {
     var out: List<WitParam> = [];
     for p in params {
         out.push(WitParam { name: p.name, type_ref: wit_resolve_ref(iface, p.type_ref) });
@@ -771,6 +771,6 @@ pub fn wit_parse(src: str) -> WitPackage {
 
 /// Decodes a component's `component-type` custom section, which holds the
 /// component's type in the binary component encoding (not WIT text).
-pub fn wit_decode_custom_section(name: str, payload: List<i64>) -> WitPackage {
+pub fn wit_decode_custom_section(name: str, ref payload: List<i64>) -> WitPackage {
     return seam("wit.decode_custom_section", "a decoder for the binary component-type encoding");
 }

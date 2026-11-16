@@ -18,7 +18,7 @@ pub enum TokenKind {
 
     // 1. Identifiers, Keywords & Literals
     Ident = 20,
-    KeywordLit = 21,    // :ok, :http/ok
+    KeywordLit = 21, // :ok, :http/ok
     IntLit = 22,
     HexIntLit = 23,
     BinIntLit = 24,
@@ -29,63 +29,63 @@ pub enum TokenKind {
     RawDslBlock = 29,
 
     // 2. The Strict 14 Hardware Seed Keywords
-    KwEngine = 40,      // __engine
-    KwStruct = 41,      // struct
-    KwInterface = 42,   // interface
-    KwFn = 43,          // fn
-    KwLet = 44,         // let
-    KwRef = 45,         // ref
-    KwIf = 46,          // if
-    KwLoop = 47,        // loop
-    KwReturn = 48,      // return
-    KwYield = 49,       // yield
-    KwDefer = 50,       // defer
-    KwComptime = 51,    // comptime
-    KwQuote = 52,       // quote
-    KwAsm = 53,         // asm
+    KwEngine = 40,    // __engine
+    KwStruct = 41,    // struct
+    KwInterface = 42, // interface
+    KwFn = 43,        // fn
+    KwLet = 44,       // let
+    KwRef = 45,       // ref
+    KwIf = 46,        // if
+    KwLoop = 47,      // loop
+    KwReturn = 48,    // return
+    KwYield = 49,     // yield
+    KwDefer = 50,     // defer
+    KwComptime = 51,  // comptime
+    KwQuote = 52,     // quote
+    KwAsm = 53,       // asm
 
     // 3. Delimiters & Punctuation
-    LParen = 250,       // (
-    RParen = 251,       // )
-    LBracket = 252,     // [
-    RBracket = 253,     // ]
-    LBrace = 254,       // {
-    RBrace = 255,       // }
-    Colon = 256,        // :
-    DoubleColon = 257,  // ::
-    Semicolon = 258,    // ;
-    Comma = 259,        // ,
-    InfixDot = 260,     // . (immediately after expr)
-    PrefixDot = 261,    // . (after whitespace/delimiter -> self.field)
-    At = 262,           // @
-    Dollar = 263,       // $
-    Question = 264,     // ?
-    Exclamation = 265,  // ! (when not followed by '(')
-    Tilde = 266,        // ~
+    LParen = 250,      // (
+    RParen = 251,      // )
+    LBracket = 252,    // [
+    RBracket = 253,    // ]
+    LBrace = 254,      // {
+    RBrace = 255,      // }
+    Colon = 256,       // :
+    DoubleColon = 257, // ::
+    Semicolon = 258,   // ;
+    Comma = 259,       // ,
+    InfixDot = 260,    // . (immediately after expr)
+    PrefixDot = 261,   // . (after whitespace/delimiter -> self.field)
+    At = 262,          // @
+    Dollar = 263,      // $
+    Question = 264,    // ?
+    Exclamation = 265, // ! (when not followed by '(')
+    Tilde = 266,       // ~
 
     // 4. Arithmetic, Bitwise & Relational Operators
-    Plus = 270,             // +
-    Minus = 271,            // -
-    Star = 272,             // *
-    Slash = 273,            // /
-    Percent = 274,          // %
-    DoubleStar = 275,       // **
-    StarDotDot = 276,       // *..
-    DoubleSlash = 277,      // //
-    Amper = 278,            // &
-    Vbar = 279,             // |
-    Caret = 280,            // ^
-    ShiftLeft = 281,        // <<
-    ShiftRight = 282,       // >>
-    Equal = 283,            // =
-    EqEqual = 284,          // ==
-    NotEqual = 285,         // !=
-    Less = 286,             // <
-    Greater = 287,          // >
-    LessEqual = 288,        // <=
-    GreaterEqual = 289,     // >=
-    Walrus = 290,           // :=
-    ArrowLeft = 291,        // <-
+    Plus = 270,         // +
+    Minus = 271,        // -
+    Star = 272,         // *
+    Slash = 273,        // /
+    Percent = 274,      // %
+    DoubleStar = 275,   // **
+    StarDotDot = 276,   // *..
+    DoubleSlash = 277,  // //
+    Amper = 278,        // &
+    Vbar = 279,         // |
+    Caret = 280,        // ^
+    ShiftLeft = 281,    // <<
+    ShiftRight = 282,   // >>
+    Equal = 283,        // =
+    EqEqual = 284,      // ==
+    NotEqual = 285,     // !=
+    Less = 286,         // <
+    Greater = 287,      // >
+    LessEqual = 288,    // <=
+    GreaterEqual = 289, // >=
+    Walrus = 290,       // :=
+    ArrowLeft = 291,    // <-
 
     // 5. Compound Assignment Operators
     PlusEqual = 300,        // +=
@@ -103,20 +103,20 @@ pub enum TokenKind {
     CoalesceEqual = 312,    // ??=
 
     // 6. Pipes, Navigation, Ranges & Lenses
-    PipeForward = 320,      // |>
-    PipeBackward = 321,     // <|
-    SafeCascade = 322,      // ?..
-    SafeNav = 323,          // ?.
-    Coalesce = 324,         // ??
-    Arrow = 325,            // ->
-    FatArrow = 326,         // =>
-    JsonGetText = 327,      // ->>
-    JsonContains = 328,     // @>
-    JsonContained = 329,    // <@
-    DotDot = 330,           // ..
-    DotDotEqual = 331,      // ..=
-    DotDotLess = 332,       // ..<
-    Ellipsis = 333,         // ...
+    PipeForward = 320,   // |>
+    PipeBackward = 321,  // <|
+    SafeCascade = 322,   // ?..
+    SafeNav = 323,       // ?.
+    Coalesce = 324,      // ??
+    Arrow = 325,         // ->
+    FatArrow = 326,      // =>
+    JsonGetText = 327,   // ->>
+    JsonContains = 328,  // @>
+    JsonContained = 329, // <@
+    DotDot = 330,        // ..
+    DotDotEqual = 331,   // ..=
+    DotDotLess = 332,    // ..<
+    Ellipsis = 333,      // ...
 
     // 7. Homoiconic Call-Quoting Projections (when immediately followed by '(')
     CallQuoteShallow = 340, // fn!(
@@ -127,23 +127,23 @@ pub enum TokenKind {
     CallQuoteEffect = 345,  // fn!?(
 
     // 8. Symbolic Logical, Comparison & Overflow Operators
-    DoubleAmper = 350,      // &&
-    DoublePipe = 351,       // ||
-    Spaceship = 352,        // <=>
-    PlusPipe = 353,         // +|
-    MinusPipe = 354,        // -|
-    StarPipe = 355,         // *|
-    PlusPercent = 356,      // +%
-    MinusPercent = 357,     // -%
-    StarPercent = 358,      // *%
-    PlusQuestion = 359,     // +?
-    MinusQuestion = 360,    // -?
-    StarQuestion = 361,     // *?
-    DoublePercent = 362,    // %%
-    TildeGreater = 363,     // ~>
-    GreaterDotDotLess = 364,// >..<
-    GreaterDotDot = 365,    // >..
-    SwapEqual = 366,        // :=:
+    DoubleAmper = 350,       // &&
+    DoublePipe = 351,        // ||
+    Spaceship = 352,         // <=>
+    PlusPipe = 353,          // +|
+    MinusPipe = 354,         // -|
+    StarPipe = 355,          // *|
+    PlusPercent = 356,       // +%
+    MinusPercent = 357,      // -%
+    StarPercent = 358,       // *%
+    PlusQuestion = 359,      // +?
+    MinusQuestion = 360,     // -?
+    StarQuestion = 361,      // *?
+    DoublePercent = 362,     // %%
+    TildeGreater = 363,      // ~>
+    GreaterDotDotLess = 364, // >..<
+    GreaterDotDot = 365,     // >..
+    SwapEqual = 366,         // :=:
 }
 
 #[allow(non_upper_case_globals)]
@@ -208,16 +208,39 @@ impl TokenTape {
     #[inline(always)]
     pub fn matching_bracket(&self, idx: usize) -> Option<u32> {
         let target = self.bracket_links.get(idx).copied()?;
-        if target == u32::MAX { None } else { Some(target) }
+        if target == u32::MAX {
+            None
+        } else {
+            Some(target)
+        }
     }
 
-    #[inline(always)] pub fn len(&self) -> usize { self.kinds.len() }
-    #[inline(always)] pub fn is_empty(&self) -> bool { self.kinds.is_empty() }
-    #[inline(always)] pub fn kind(&self, idx: usize) -> TokenKind { self.kinds[idx] }
-    #[inline(always)] pub fn flag(&self, idx: usize) -> TokenFlags { self.flags[idx] }
-    #[inline(always)] pub fn span(&self, idx: usize) -> ByteSpan { self.spans[idx] }
-    #[inline(always)] pub fn slice_str<'a>(&self, idx: usize, source: &'a str) -> &'a str { self.text(idx, source) }
-    #[inline(always)] pub fn text<'a>(&self, idx: usize, src: &'a str) -> &'a str {
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.kinds.len()
+    }
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.kinds.is_empty()
+    }
+    #[inline(always)]
+    pub fn kind(&self, idx: usize) -> TokenKind {
+        self.kinds[idx]
+    }
+    #[inline(always)]
+    pub fn flag(&self, idx: usize) -> TokenFlags {
+        self.flags[idx]
+    }
+    #[inline(always)]
+    pub fn span(&self, idx: usize) -> ByteSpan {
+        self.spans[idx]
+    }
+    #[inline(always)]
+    pub fn slice_str<'a>(&self, idx: usize, source: &'a str) -> &'a str {
+        self.text(idx, source)
+    }
+    #[inline(always)]
+    pub fn text<'a>(&self, idx: usize, src: &'a str) -> &'a str {
         let sp = self.spans[idx];
         &src[sp.start as usize..(sp.end as usize).min(src.len())]
     }

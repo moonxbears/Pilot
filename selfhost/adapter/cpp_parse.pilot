@@ -3,13 +3,9 @@
 // Milestone 15.3: Native C++ Class, RAII, Vtable & Exception Boundary Adapter
 // Pure-Pilot C++ Header Parser: namespaces, classes, virtuals, std::string_view
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.CppParse;
+pub lvl(0) pkg selfhost.adapter;
 
-use Pilot.Diagnostics.Model.Diagnostic;
-use Pilot.Diagnostics.Model.SourceSpan;
-use Pilot.Diagnostics.Model.diagnostic_new;
-use Pilot.SelfHost.Adapter.CppAbi.*;
-use Pilot.SelfHost.Adapter.CppMangle.*;
+use selfhost.diagnostics.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

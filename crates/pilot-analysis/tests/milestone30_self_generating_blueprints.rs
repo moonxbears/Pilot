@@ -3,15 +3,15 @@
 //! Self-Generating Service, CLI & Persistence Blueprints ([Cli], [Service], [Entity])
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 30,
@@ -30,12 +30,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "cli_parse_argv",
                 "cli_parsed_get",
             ],
-            required_code_markers: &[
-                "CliArgDef",
-                "CliAppDef",
-                "CliParsedResult",
-                "GEN005",
-            ],
+            required_code_markers: &["CliArgDef", "CliAppDef", "CliParsedResult", "GEN005"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -94,12 +89,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m30(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -126,9 +125,7 @@ fn test_m30_1_cli_argv_parsing_subcommands_and_collision_gen005() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "stdlib/std/cli/weaver.pilot",
-    ];
+    let deps = ["stdlib/std/cli/weaver.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -191,7 +188,10 @@ fn test_m30_1_cli_argv_parsing_subcommands_and_collision_gen005() {
     let res = eval_m30(&deps, script);
     assert_eq!(res, "42", "Failed CLI weaver test: {}", res);
 
-    let weave = eval_m30(&deps, "pub fn main() -> i64 { let app = cli_weave_struct(\"OrderCli\"); return 1; }");
+    let weave = eval_m30(
+        &deps,
+        "pub fn main() -> i64 { let app = cli_weave_struct(\"OrderCli\"); return 1; }",
+    );
     assert!(
         weave.starts_with("FAULT: SEAM001: unconnected seam `cli.weave_struct`"),
         "[Cli] weaving must stop at its seam: {}",
@@ -210,9 +210,7 @@ fn test_m30_2_service_openapi_generation_and_contract_validation_gen001_gen002()
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "stdlib/std/http/service_weaver.pilot",
-    ];
+    let deps = ["stdlib/std/http/service_weaver.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -268,9 +266,7 @@ fn test_m30_3_entity_crud_optimistic_locking_and_ddl_diff_gen003_gen006() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "stdlib/std/db/entity_weaver.pilot",
-    ];
+    let deps = ["stdlib/std/db/entity_weaver.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -344,7 +340,10 @@ fn test_m30_3_entity_crud_optimistic_locking_and_ddl_diff_gen003_gen006() {
     let res = eval_m30(&deps, script);
     assert_eq!(res, "42", "Failed Entity weaver test: {}", res);
 
-    let weave = eval_m30(&deps, "pub fn main() -> i64 { let s = entity_weave_struct(\"Order\"); return 1; }");
+    let weave = eval_m30(
+        &deps,
+        "pub fn main() -> i64 { let s = entity_weave_struct(\"Order\"); return 1; }",
+    );
     assert!(
         weave.starts_with("FAULT: SEAM001: unconnected seam `db.weave_entity`"),
         "[Entity] weaving must stop at its seam: {}",
@@ -440,7 +439,10 @@ fn test_m30_4_full_stack_microservice_cli_and_persistence_integration() {
         dispatched
     );
 
-    let weave = eval_m30(&deps, "pub fn main() -> i64 { let s = service_weave_struct(\"OrdersService\"); return 1; }");
+    let weave = eval_m30(
+        &deps,
+        "pub fn main() -> i64 { let s = service_weave_struct(\"OrdersService\"); return 1; }",
+    );
     assert!(
         weave.starts_with("FAULT: SEAM001: unconnected seam `http.weave_service`"),
         "[Service] weaving must stop at its seam: {}",

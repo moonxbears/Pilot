@@ -3,15 +3,15 @@
 //! First-Class Typed SSA Mid-Level IR (PilIR)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 6,
@@ -48,12 +48,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "block_dominates",
                 "verify_ssa_dominance",
             ],
-            required_code_markers: &[
-                "IR001",
-                "IR002",
-                "IR003",
-                "block_dominates",
-            ],
+            required_code_markers: &["IR001", "IR002", "IR003", "block_dominates"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -107,7 +102,11 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_ir(script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let deps = [
         "stdlib/core/pending.pilot",
         "selfhost/ir/model.pilot",
@@ -117,8 +116,8 @@ fn eval_ir(script: &str) -> String {
     let mut combined = String::new();
     for rel in &deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -140,7 +139,10 @@ fn eval_ir(script: &str) -> String {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m6_1_ssa_dominance_and_block_parameter_lowering() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m6_1_ssa_dominance_and_block_parameter_lowering", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m6_1_ssa_dominance_and_block_parameter_lowering",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         // 1. Build a 4-block dominator tree:
@@ -180,13 +182,28 @@ pub fn test_m6_1_ssa_dominance_and_block_parameter_lowering() {
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 8, "Expected 8 parts, got: {}", res);
     assert_eq!(parts[0], "OK", "Valid dominance failed");
-    assert_eq!(parts[1], "IR001_OK", "Invalid dominance should trigger IR001");
-    assert_eq!(parts[2], "IR001_INTRA_OK", "Use-before-def should trigger IR001");
+    assert_eq!(
+        parts[1], "IR001_OK",
+        "Invalid dominance should trigger IR001"
+    );
+    assert_eq!(
+        parts[2], "IR001_INTRA_OK",
+        "Use-before-def should trigger IR001"
+    );
     assert_eq!(parts[3], "OK", "Valid terminator check failed");
-    assert_eq!(parts[4], "IR003_MISSING_OK", "Missing terminator should trigger IR003");
-    assert_eq!(parts[5], "IR003_DEAD_OK", "Dead instructions after terminator should trigger IR003");
+    assert_eq!(
+        parts[4], "IR003_MISSING_OK",
+        "Missing terminator should trigger IR003"
+    );
+    assert_eq!(
+        parts[5], "IR003_DEAD_OK",
+        "Dead instructions after terminator should trigger IR003"
+    );
     assert_eq!(parts[6], "OK", "Branch arity match failed");
-    assert_eq!(parts[7], "IR002_OK", "Branch arity mismatch should trigger IR002");
+    assert_eq!(
+        parts[7], "IR002_OK",
+        "Branch arity mismatch should trigger IR002"
+    );
 
     guard.finish();
 }
@@ -196,7 +213,10 @@ pub fn test_m6_1_ssa_dominance_and_block_parameter_lowering() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m6_2_ir_printer_and_parser_round_trip() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m6_2_ir_printer_and_parser_round_trip", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m6_2_ir_printer_and_parser_round_trip",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         let phy_i64 = ir_physics_i64();
@@ -233,14 +253,22 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
     assert_eq!(parts[0], "1", "Expected 1 block");
     assert_eq!(parts[1], "3", "Expected 3 instructions");
     assert_eq!(parts[2], "2", "A jump naming block1 is not a block header");
-    assert_eq!(parts[3], "3", "Expected 3 instructions in the two-block function");
+    assert_eq!(
+        parts[3], "3",
+        "Expected 3 instructions in the two-block function"
+    );
 
     // The real PilIR text (selfhost/ir/text.pilot): printing a lowered
     // program, parsing that text and printing it again gives the same bytes
     // (`pilot ir roundtrip` fails otherwise), for hand-written IR and for
     // programs lowered from source. F5 deleted the text-template lowering
     // (selfhost/ir/lower_ast.pilot) this test used to call.
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
     let bin = root.join("target/debug/pilot");
     if !bin.exists() {
         let st = std::process::Command::new("cargo")
@@ -250,13 +278,23 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
             .expect("cargo build -p pilot-cli");
         assert!(st.success(), "Failed building pilot-cli binary");
     }
-    for file in ["tests/ir/loop_params.pir", "tests/conformance/control/closures.pilot", "tests/conformance/control/guard_try.pilot", "tests/conformance/control/defer.pilot"] {
+    for file in [
+        "tests/ir/loop_params.pir",
+        "tests/conformance/control/closures.pilot",
+        "tests/conformance/control/guard_try.pilot",
+        "tests/conformance/control/defer.pilot",
+    ] {
         let out = std::process::Command::new(&bin)
             .args(["ir", "roundtrip", file])
             .current_dir(&root)
             .output()
             .expect("run pilot ir roundtrip");
-        assert_eq!(out.status.code(), Some(0), "{file}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{file}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     guard.finish();
@@ -271,9 +309,17 @@ pub fn test_m6_2_ir_printer_and_parser_round_trip() {
 // crates/pilot-cli/tests/cli_f5.rs.
 #[test]
 pub fn test_m6_3_constant_folding_and_dead_code_elimination() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m6_3_constant_folding_and_dead_code_elimination", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m6_3_constant_folding_and_dead_code_elimination",
+        &ANTICHEAT_SPEC,
+    );
 
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
     let bin = root.join("target/debug/pilot");
     if !bin.exists() {
         let st = std::process::Command::new("cargo")
@@ -284,8 +330,18 @@ pub fn test_m6_3_constant_folding_and_dead_code_elimination() {
         assert!(st.success(), "Failed building pilot-cli binary");
     }
     let run = |args: &[&str]| {
-        let out = std::process::Command::new(&bin).args(args).current_dir(&root).output().expect("run pilot");
-        assert_eq!(out.status.code(), Some(0), "pilot {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+        let out = std::process::Command::new(&bin)
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .expect("run pilot");
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "pilot {:?}: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
 
@@ -295,14 +351,26 @@ pub fn test_m6_3_constant_folding_and_dead_code_elimination() {
     // the loop, which depends on its parameters, is left alone.
     let opt = run(&["ir", "opt", "tests/ir/loop_params.pir"]);
     assert!(opt.contains("int 4 42\n"), "42 is pooled: {opt}");
-    assert!(opt.contains("v2 = const_bits #4 :1 !0\n"), "6 * 7 folds: {opt}");
+    assert!(
+        opt.contains("v2 = const_bits #4 :1 !0\n"),
+        "6 * 7 folds: {opt}"
+    );
     assert!(!opt.contains(" mul "), "no multiplication is left: {opt}");
-    assert!(!opt.contains("v1 = "), "the unused constant 7 is removed: {opt}");
-    assert!(opt.contains("v10 = add v5, v9 :1 !0\n"), "the loop step stays: {opt}");
+    assert!(
+        !opt.contains("v1 = "),
+        "the unused constant 7 is removed: {opt}"
+    );
+    assert!(
+        opt.contains("v10 = add v5, v9 :1 !0\n"),
+        "the loop step stays: {opt}"
+    );
 
     // The optimised and unoptimised modules print the same.
     assert_eq!(run(&["ir", "run", "tests/ir/loop_params.pir"]), "42\n15\n");
-    assert_eq!(run(&["ir", "run-unopt", "tests/ir/loop_params.pir"]), "42\n15\n");
+    assert_eq!(
+        run(&["ir", "run-unopt", "tests/ir/loop_params.pir"]),
+        "42\n15\n"
+    );
 
     guard.finish();
 }
@@ -312,7 +380,10 @@ pub fn test_m6_3_constant_folding_and_dead_code_elimination() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m6_4_name_blind_physics_and_multiplatform_target_invariance() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m6_4_name_blind_physics_and_multiplatform_target_invariance", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m6_4_name_blind_physics_and_multiplatform_target_invariance",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         // 1. Name-Blind Type Physics & 2-Bit Lattice:
@@ -355,10 +426,19 @@ pub fn test_m6_4_name_blind_physics_and_multiplatform_target_invariance() {
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 11, "Expected 11 parts, got: {}", res);
     assert_eq!(parts[0], "OK", "IValue return should be OK");
-    assert_eq!(parts[1], "IR004_REF_OK", "IReference return escape should trigger IR004");
-    assert_eq!(parts[2], "IR004_GUARD_OK", "IGuard return escape should trigger IR004");
+    assert_eq!(
+        parts[1], "IR004_REF_OK",
+        "IReference return escape should trigger IR004"
+    );
+    assert_eq!(
+        parts[2], "IR004_GUARD_OK",
+        "IGuard return escape should trigger IR004"
+    );
     assert_eq!(parts[3], "OK", "Pure op in noalloc should be OK");
-    assert_eq!(parts[4], "IR006_OK", "Heap allocation in noalloc should trigger IR006");
+    assert_eq!(
+        parts[4], "IR006_OK",
+        "Heap allocation in noalloc should trigger IR006"
+    );
     assert_eq!(parts[5], "4", "Win64 max GPR args should be 4");
     assert_eq!(parts[6], "32", "Win64 shadow bytes should be 32");
     assert_eq!(parts[7], "6", "SysV AMD64 max GPR args should be 6");

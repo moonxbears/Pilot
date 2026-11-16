@@ -3,15 +3,15 @@
 //! Native Rust Crate & Zero-Copy Slice/Result/Trait Adapter (`use rust`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 16,
@@ -88,12 +88,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m16(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -200,7 +204,10 @@ fn test_m16_1_rust_signature_parser_and_cargo_metadata() {
         "selfhost/adapter/rust_sig.pilot",
     ];
     let res = eval_m16(deps, script);
-    assert_eq!(res, "42", "Rust signature parser and Cargo manifest reader must extract items accurately");
+    assert_eq!(
+        res, "42",
+        "Rust signature parser and Cargo manifest reader must extract items accurately"
+    );
 
     guard.finish();
 }
@@ -262,7 +269,10 @@ fn test_m16_2_zero_copy_slices_and_niche_opt() {
         "selfhost/adapter/rust_sig.pilot",
     ];
     let res = eval_m16(deps, script);
-    assert_eq!(res, "42", "Zero-copy slice classification and 2-word layout invariants must hold");
+    assert_eq!(
+        res, "42",
+        "Zero-copy slice classification and 2-word layout invariants must hold"
+    );
 
     guard.finish();
 }
@@ -310,18 +320,31 @@ fn test_m16_3_rust_vec_string_cross_allocator_raii_and_dyn_trait() {
         }
     "##;
 
-    let deps = &[
-        "stdlib/std/polyglot/rust.pilot",
-    ];
+    let deps = &["stdlib/std/polyglot/rust.pilot"];
     let res = eval_m16(deps, script);
-    assert_eq!(res, "42", "RustVec, RustString and DynTraitFatPtr must maintain exact cross-allocator safety");
+    assert_eq!(
+        res, "42",
+        "RustVec, RustString and DynTraitFatPtr must maintain exact cross-allocator safety"
+    );
 
     // Freeing, viewing and calling need PilVM native calls and memory views.
     let cases = [
-        ("var v = rust_vec_from_raw_parts(4096, 64, 32, 8192); v.~self();", "rust.call_dealloc"),
-        ("var v = rust_vec_from_raw_parts(4096, 64, 32, 8192); let s = v.as_slice();", "rust.vec_view"),
-        ("var t = rust_string_from_raw_parts(8192, 128, 48, 16384); let s = t.as_str();", "rust.string_view"),
-        ("let r = rust_call_bridge(4096, [3, 4]);", "rust.call_bridge"),
+        (
+            "var v = rust_vec_from_raw_parts(4096, 64, 32, 8192); v.~self();",
+            "rust.call_dealloc",
+        ),
+        (
+            "var v = rust_vec_from_raw_parts(4096, 64, 32, 8192); let s = v.as_slice();",
+            "rust.vec_view",
+        ),
+        (
+            "var t = rust_string_from_raw_parts(8192, 128, 48, 16384); let s = t.as_str();",
+            "rust.string_view",
+        ),
+        (
+            "let r = rust_call_bridge(4096, [3, 4]);",
+            "rust.call_bridge",
+        ),
     ];
     for (body, seam_id) in cases {
         let script = format!("pub fn main() -> i64 {{ {body} return 42; }}");
@@ -391,7 +414,10 @@ fn test_m16_4_panic_boundary_catch_unwind_and_diagnostics() {
         "stdlib/std/polyglot/rust.pilot",
     ];
     let res = eval_m16(deps, script);
-    assert_eq!(res, "42", "RST diagnostics, RST003 lifetime tying and cache keys must pass");
+    assert_eq!(
+        res, "42",
+        "RST diagnostics, RST003 lifetime tying and cache keys must pass"
+    );
 
     bridge_crate_compiles_and_catches_panics(deps);
 
@@ -444,7 +470,10 @@ fn bridge_crate_compiles_and_catches_panics(deps: &[&str]) {
     "#
     );
     let bridge = eval_m16(&gen_deps, &script);
-    assert!(bridge.contains("bridge_sample_crate_add"), "bridge generation failed: {bridge}");
+    assert!(
+        bridge.contains("bridge_sample_crate_add"),
+        "bridge generation failed: {bridge}"
+    );
 
     let caller = r#"
 mod sample_crate {
@@ -491,7 +520,9 @@ fn main() {
         "generated bridge must compile with rustc:\n{}",
         String::from_utf8_lossy(&rustc.stderr)
     );
-    let run = std::process::Command::new(&exe).output().expect("run bridge_check");
+    let run = std::process::Command::new(&exe)
+        .output()
+        .expect("run bridge_check");
     let stdout = String::from_utf8_lossy(&run.stdout).to_string();
     let _ = fs::remove_dir_all(&dir);
     assert_eq!(

@@ -3,19 +3,20 @@
 //! Shared Incremental Compiler Query Database (PilotDb)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 5,
-    test_file_rel: "crates/pilot-analysis/tests/milestone05_shared_incremental_compiler_query_database.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone05_shared_incremental_compiler_query_database.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
@@ -84,10 +85,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "db_serialize_cache",
                 "db_deserialize_cache",
             ],
-            required_code_markers: &[
-                "PDB1",
-                "db_canonicalize_uri",
-            ],
+            required_code_markers: &["PDB1", "db_canonicalize_uri"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -102,10 +100,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "lsp_db_new",
                 "lsp_db_update_document",
             ],
-            required_code_markers: &[
-                "extract_item_tree_signature",
-                "lsp_db_new",
-            ],
+            required_code_markers: &["extract_item_tree_signature", "lsp_db_new"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -127,8 +122,8 @@ fn eval_db(script: &str) -> String {
     let mut combined = String::new();
     for rel in &deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -155,7 +150,8 @@ fn eval_db(script: &str) -> String {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m5_1_early_cutoff_counter_proof() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m5_1_early_cutoff_counter_proof", &ANTICHEAT_SPEC);
+    let guard =
+        anticheat::AntiCheatGuard::arm("test_m5_1_early_cutoff_counter_proof", &ANTICHEAT_SPEC);
 
     let script = r#"
         let db = pilotdb_new();
@@ -187,9 +183,21 @@ pub fn test_m5_1_early_cutoff_counter_proof() {
     let res = eval_db(script);
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 3, "Expected exec|hits|sig_exec, got: {}", res);
-    assert_eq!(parts[0], "0", "Early cutoff failed: no ImportScope may re-execute after a body-only edit, got: {}", res);
-    assert_eq!(parts[1], "24", "Expected 24 re-verified ImportScope memos (M1..M24), got: {}", res);
-    assert_eq!(parts[2], "1", "Only M0's ItemSignature may re-execute, got: {}", res);
+    assert_eq!(
+        parts[0], "0",
+        "Early cutoff failed: no ImportScope may re-execute after a body-only edit, got: {}",
+        res
+    );
+    assert_eq!(
+        parts[1], "24",
+        "Expected 24 re-verified ImportScope memos (M1..M24), got: {}",
+        res
+    );
+    assert_eq!(
+        parts[2], "1",
+        "Only M0's ItemSignature may re-execute, got: {}",
+        res
+    );
 
     guard.finish();
 }
@@ -202,7 +210,10 @@ pub fn test_m5_1_early_cutoff_counter_proof() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m5_2_signature_change_propagation_proof() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m5_2_signature_change_propagation_proof", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m5_2_signature_change_propagation_proof",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         let db = pilotdb_new();
@@ -224,12 +235,31 @@ pub fn test_m5_2_signature_change_propagation_proof() {
 
     let res = eval_db(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts.len(), 4, "Expected exec_scope|exec_sig|before|after, got: {}", res);
-    assert_eq!(parts[0], "1", "Only M1's ImportScope may re-execute, got: {}", res);
-    assert_eq!(parts[1], "1", "Only M0's ItemSignature may re-execute, got: {}", res);
+    assert_eq!(
+        parts.len(),
+        4,
+        "Expected exec_scope|exec_sig|before|after, got: {}",
+        res
+    );
+    assert_eq!(
+        parts[0], "1",
+        "Only M1's ImportScope may re-execute, got: {}",
+        res
+    );
+    assert_eq!(
+        parts[1], "1",
+        "Only M0's ItemSignature may re-execute, got: {}",
+        res
+    );
     // The scope of M1 is M0's body-free signature, before and after the edit.
-    assert_eq!(parts[2], "pub fn compute_0(x: i64) -> i64 {}\n", "M1 scope before the edit");
-    assert_eq!(parts[3], "pub fn compute_0(x: i64) -> opt<str> {}\n", "M1 scope after the edit");
+    assert_eq!(
+        parts[2], "pub fn compute_0(x: i64) -> i64 {}\n",
+        "M1 scope before the edit"
+    );
+    assert_eq!(
+        parts[3], "pub fn compute_0(x: i64) -> opt<str> {}\n",
+        "M1 scope after the edit"
+    );
 
     guard.finish();
 }
@@ -241,7 +271,10 @@ pub fn test_m5_2_signature_change_propagation_proof() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m5_3_identical_cold_vs_incremental_oracle() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m5_3_identical_cold_vs_incremental_oracle", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m5_3_identical_cold_vs_incremental_oracle",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         let inc_db = pilotdb_new();
@@ -273,7 +306,11 @@ pub fn test_m5_3_identical_cold_vs_incremental_oracle() {
     "#;
 
     let res = eval_db(script);
-    assert_eq!(res, "SCOPE_IDENTICAL|LEX_IDENTICAL|EDIT_SEEN", "Incremental query output did not match cold database oracle: {}", res);
+    assert_eq!(
+        res, "SCOPE_IDENTICAL|LEX_IDENTICAL|EDIT_SEEN",
+        "Incremental query output did not match cold database oracle: {}",
+        res
+    );
 
     check_lex_tokens_and_unconnected_stage_seams();
 
@@ -286,7 +323,10 @@ pub fn test_m5_3_identical_cold_vs_incremental_oracle() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m5_4_multiplatform_uri_normalization_and_persistent_cache_io() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m5_4_multiplatform_uri_normalization_and_persistent_cache_io", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m5_4_multiplatform_uri_normalization_and_persistent_cache_io",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         // 1. Multiplatform URI normalization tests
@@ -315,12 +355,27 @@ pub fn test_m5_4_multiplatform_uri_normalization_and_persistent_cache_io() {
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 7, "Expected 7 result tokens, got: {}", res);
 
-    assert_eq!(parts[0], "c:/Users/dev/project/src/main.pilot", "URI 1 normalization mismatch");
-    assert_eq!(parts[1], "c:/Users/dev/project/src/main.pilot", "URI 2 Windows backslash mismatch");
-    assert_eq!(parts[2], "/home/user/project/src/main.pilot", "URI 3 POSIX file:/// mismatch");
-    assert_eq!(parts[3], "server/share/project/src/main.pilot", "URI 4 UNC file:// mismatch");
+    assert_eq!(
+        parts[0], "c:/Users/dev/project/src/main.pilot",
+        "URI 1 normalization mismatch"
+    );
+    assert_eq!(
+        parts[1], "c:/Users/dev/project/src/main.pilot",
+        "URI 2 Windows backslash mismatch"
+    );
+    assert_eq!(
+        parts[2], "/home/user/project/src/main.pilot",
+        "URI 3 POSIX file:/// mismatch"
+    );
+    assert_eq!(
+        parts[3], "server/share/project/src/main.pilot",
+        "URI 4 UNC file:// mismatch"
+    );
     assert_eq!(parts[4], "LOAD_OK", "Cache deserialization failed");
-    assert_eq!(parts[5], "REJECTED_MISMATCH", "Version mismatch should reject cache");
+    assert_eq!(
+        parts[5], "REJECTED_MISMATCH",
+        "Version mismatch should reject cache"
+    );
     assert_eq!(parts[6], "SRC_OK", "Loaded source text empty");
 
     guard.finish();
@@ -339,14 +394,23 @@ fn check_lex_tokens_and_unconnected_stage_seams() {
         "#
     );
     let lexed = eval_db(&script);
-    assert!(!lexed.starts_with("FAULT"), "LexTokens must run, got: {lexed}");
+    assert!(
+        !lexed.starts_with("FAULT"),
+        "LexTokens must run, got: {lexed}"
+    );
     let mut texts = Vec::new();
     for line in lexed.lines() {
-        let (_, text) = line.split_once(' ').unwrap_or_else(|| panic!("token line `{line}` has no text"));
+        let (_, text) = line
+            .split_once(' ')
+            .unwrap_or_else(|| panic!("token line `{line}` has no text"));
         texts.push(text);
     }
     let expected: String = src.chars().filter(|c| !c.is_whitespace()).collect();
-    assert_eq!(texts.concat(), expected, "token texts must spell the source: {lexed}");
+    assert_eq!(
+        texts.concat(),
+        expected,
+        "token texts must spell the source: {lexed}"
+    );
 
     for (query, seam_id) in [
         ("query_lossless_cst", "db.lossless_cst"),
@@ -363,6 +427,9 @@ fn check_lex_tokens_and_unconnected_stage_seams() {
         );
         let out = eval_db(&script);
         let want = format!("FAULT: SEAM001: unconnected seam `{seam_id}`");
-        assert!(out.starts_with(&want), "{query} must stop at {seam_id}, got: {out}");
+        assert!(
+            out.starts_with(&want),
+            "{query} must stop at {seam_id}, got: {out}"
+        );
     }
 }

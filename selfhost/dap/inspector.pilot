@@ -3,7 +3,7 @@
 // Milestone 59.3: Name-Blind Register & PhysicsRegistry Variable Inspector
 // Reads register slots and layout field offsets without hardcoded type names.
 // =========================================================================
-pub pkg Pilot.SelfHost.Dap.Inspector;
+pub pkg selfhost.dap;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

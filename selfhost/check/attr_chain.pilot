@@ -19,14 +19,8 @@
 // the outer. Checked here (ATTR003): a user step is on a function or method,
 // no argument is left over or names a field the struct lacks or fills one
 // twice, every field without a default is filled, and a weight is an integer.
-pub lvl(0) pkg Pilot.SelfHost.Check.AttrChain;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.diag.*;
-use selfhost.check.attr_text.*;
-use selfhost.check.attr_inherit.*;
-use selfhost.check.probes.*;
 
 /// What kind of step an attribute is.
 pub enum StepKind : u8 {
@@ -54,13 +48,13 @@ pub struct ChainStep {
 }
 
 /// The struct that declares user step attribute `[name]` (either kind), or -1.
-pub fn step_attr_decl(p: Program, name: str) -> i64 {
+pub fn step_attr_decl(ref p: Program, name: str) -> i64 {
     let d = attr_decl_with(p, name, step_interface());
     return if d >= 0 { d } else { attr_decl_with(p, name, runtime_step_interface()) };
 }
 
 /// The kind of step attribute `[name]` is.
-pub fn step_kind(p: Program, name: str) -> StepKind {
+pub fn step_kind(ref p: Program, name: str) -> StepKind {
     if name == live_attr() { return ::Live; }
     if name == generate_attr() { return ::Generate; }
     if attr_decl_with(p, name, step_interface()) >= 0 { return ::User; }
@@ -71,7 +65,7 @@ pub fn step_kind(p: Program, name: str) -> StepKind {
 pub fn is_user_step(k: StepKind) -> bool => k == StepKind::User || k == StepKind::Runtime;
 
 /// The stored fields of struct `d`, in declaration order.
-fn struct_fields(s: Snap, d: i64) -> List<i64> {
+fn struct_fields(ref s: Snap, d: i64) -> List<i64> {
     var out: List<i64> = [];
     for m in type_members(s, d) {
         let k = kind(s, m);
@@ -81,7 +75,7 @@ fn struct_fields(s: Snap, d: i64) -> List<i64> {
 }
 
 /// The `weight:` argument among `args`, or -1.
-fn weight_arg(s: Snap, args: List<i64>) -> i64 {
+fn weight_arg(ref s: Snap, ref args: List<i64>) -> i64 {
     for a in args {
         if attr_arg_label(s, a) == weight_label() { return a; }
     }
@@ -89,7 +83,7 @@ fn weight_arg(s: Snap, args: List<i64>) -> i64 {
 }
 
 /// `args` without the `weight:` argument.
-pub fn without_weight(s: Snap, args: List<i64>) -> List<i64> {
+pub fn without_weight(ref s: Snap, ref args: List<i64>) -> List<i64> {
     let w = weight_arg(s, args);
     var out: List<i64> = [];
     for a in args {
@@ -122,7 +116,7 @@ fn int_text(text: str) -> i64? {
 }
 
 /// The integer node `e` writes, or none.
-fn int_node(s: Snap, e: i64) -> i64? {
+fn int_node(ref s: Snap, e: i64) -> i64? {
     if e < 0 { return none; }
     if kind(s, e) == nk_int() { return lit_value(s, e); }
     return int_text(attr_one_line(node_text(s, e)).replace(" ", ""));
@@ -130,7 +124,7 @@ fn int_node(s: Snap, e: i64) -> i64? {
 
 /// The weight of step `[name]` of kind `k` with argument lists `layers`
 /// (the closest `weight:` counts); reports a weight that is not an integer.
-fn step_weight(p: Program, sink: DiagSink, k: StepKind, name: str, layers: List<List<i64>>) -> i64 {
+fn step_weight(ref p: Program, var ref sink: DiagSink, k: StepKind, name: str, ref layers: List<List<i64>>) -> i64 {
     let s = p.s;
     var w = -1;
     for args in layers {
@@ -161,7 +155,7 @@ fn step_weight(p: Program, sink: DiagSink, k: StepKind, name: str, layers: List<
 
 /// The steps of function `f`, in the order they run; reports bad weights.
 /// `pkgs` is `package_decls(p)`.
-pub fn chain_steps(p: Program, sink: DiagSink, pkgs: Map<str, i64>, f: i64) -> List<ChainStep> {
+pub fn chain_steps(ref p: Program, var ref sink: DiagSink, ref pkgs: Map<str, i64>, f: i64) -> List<ChainStep> {
     var steps: List<ChainStep> = [];
     for e in effective_attrs(p, pkgs, f) {
         let k = step_kind(p, e.name);
@@ -195,7 +189,7 @@ pub fn chain_steps(p: Program, sink: DiagSink, pkgs: Map<str, i64>, f: i64) -> L
 /// (outermost first) as a struct literal (`NameAttr { a: 1, b: "x" }`), or
 /// none after reporting why it cannot be built. A closer list fills over the
 /// fields an outer one gave.
-pub fn step_value(p: Program, sink: DiagSink, name: str, layers: List<List<i64>>, site: i64) -> str? {
+pub fn step_value(ref p: Program, var ref sink: DiagSink, name: str, ref layers: List<List<i64>>, site: i64) -> str? {
     let s = p.s;
     let fields = struct_fields(s, step_attr_decl(p, name));
     let given = Map<str, str>();
@@ -254,7 +248,7 @@ pub fn step_value(p: Program, sink: DiagSink, name: str, layers: List<List<i64>>
 
 /// Reports every misused user step attribute and step weight, over every
 /// function and method in the user's files.
-pub fn check_attr_chains(p: Program, sink: DiagSink) {
+pub fn check_attr_chains(ref p: Program, var ref sink: DiagSink) {
     let s = p.s;
     let pkgs = package_decls(p);
     var f = 0;

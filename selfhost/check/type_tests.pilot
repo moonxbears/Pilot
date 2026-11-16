@@ -13,24 +13,18 @@
 // PilIR needs no rows: a union value carries which member it is
 // (selfhost/ir/lower_union.pilot lower_is).
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Check.TypeTests;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.check.drops.*;
-use selfhost.check.diag.*;
 
 /// Whether `t` is the type at receptor slot `slot`.
-fn is_slot_type(p: Program, t: i64, slot: str) -> bool {
+fn is_slot_type(var ref p: Program, t: i64, slot: str) -> bool {
     let st = prog_slot_type(p, slot);
     return ty_is_named(p.tt, t) && ty_is_named(p.tt, st) && ty_decl(p.tt, t) == ty_decl(p.tt, st);
 }
 
 /// The kind of value type `t` holds on the seed, or "" when it has none
 /// the seed can test for.
-pub fn value_kind(p: Program, t: i64) -> str {
+pub fn value_kind(var ref p: Program, t: i64) -> str {
     if !ty_is_named(p.tt, t) { return ""; }
     if is_scalar_type(p, t) { return "character"; }
     if is_slot_type(p, t, literal_slot(nk_bool())) { return "truth"; }
@@ -43,7 +37,7 @@ pub fn value_kind(p: Program, t: i64) -> str {
 }
 
 /// TYPE002: the right side of `x is T` must name a type.
-pub fn check_type_tests(inf: Infer, sink: DiagSink) {
+pub fn check_type_tests(var ref inf: Infer, var ref sink: DiagSink) {
     let s = inf.p.s;
     var n = 0;
     n = s.user_lo;
@@ -59,7 +53,7 @@ pub fn check_type_tests(inf: Infer, sink: DiagSink) {
 
 /// Adds a `TypeTest` row to `rows` for each `x is T` of the files the
 /// program links whose `T` names a type with a kind.
-pub fn plan_type_tests(inf: Infer, rows: List<List<any>>) {
+pub fn plan_type_tests(var ref inf: Infer, var ref rows: List<List<any>>) {
     let p = inf.p;
     let s = p.s;
     // Only a file the program links is run: the declaration files the

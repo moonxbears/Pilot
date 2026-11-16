@@ -2,7 +2,7 @@
 // FILE: selfhost/perf/wcet.pilot
 // Milestone 60.2: Static WCET & [HardRealtime] Loop Bound Verifier
 // =========================================================================
-pub pkg Pilot.SelfHost.Perf.Wcet;
+pub pkg selfhost.perf;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

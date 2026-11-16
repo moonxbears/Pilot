@@ -3,7 +3,7 @@
 // Pilot-First Mutable AST Arena, Perceus Slot Recycling (`drop_reuse`),
 // Lexical Hygiene & Homoiconic `quote` / `$splice` / `$*splat` / `~unquote` Engine
 // ==============================================================================
-pub pkg Pilot.SelfHost.Ast;
+pub pkg selfhost;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -12,28 +12,24 @@
 //   - a failing `?`: the scopes opened inside the innermost `try` region,
 //     before control reaches its catch, or every scope when it returns.
 // A deferred statement is lowered once per exit it runs on.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerDefer;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.ir.model.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_drop.*;
-use selfhost.ir.lower_probe.*;
+use selfhost.check.*;
 
 /// The number of open scopes.
-pub fn scope_depth(lw: Lowerer) -> i64 => lw.defers.len();
+pub fn scope_depth(ref lw: Lowerer) -> i64 => lw.defers.len();
 
-pub fn open_scope(lw: Lowerer) { lw.defers.push([]); }
+pub fn open_scope(var ref lw: Lowerer) { lw.defers.push([]); }
 
 /// Runs the innermost scope's deferred statements, unless control already
 /// left the block, and closes the scope.
-pub fn close_scope(lw: Lowerer) {
+pub fn close_scope(var ref lw: Lowerer) {
     if !ir_is_terminated(lw.f, lw.cur) { run_scope(lw, lw.defers.len() - 1); }
     let _ = lw.defers.pop();
 }
 
 /// Emits the deferred statements of scope `i`, last deferred first.
-fn run_scope(lw: Lowerer, i: i64) {
+fn run_scope(var ref lw: Lowerer, i: i64) {
     let stmts = lw.defers[i];
     var k = stmts.len() - 1;
     while k >= 0 && !ir_is_terminated(lw.f, lw.cur) {
@@ -51,7 +47,7 @@ fn run_scope(lw: Lowerer, i: i64) {
 
 /// Emits the deferred statements of every scope at depth `depth` or deeper,
 /// innermost first: what leaving them runs.
-pub fn run_defers_to(lw: Lowerer, depth: i64) {
+pub fn run_defers_to(var ref lw: Lowerer, depth: i64) {
     var i = lw.defers.len() - 1;
     while i >= depth {
         run_scope(lw, i);
@@ -62,11 +58,11 @@ pub fn run_defers_to(lw: Lowerer, depth: i64) {
 /// Whether registered statement `stmt` is an `errdefer` (the `defer` node
 /// itself, flags 1): it runs only on a failure's way out, a failing `?` or
 /// the return of a failed value (stdlib/core/syntax/exits.pilot).
-fn is_errdefer(lw: Lowerer, stmt: i64) -> bool =>
+fn is_errdefer(ref lw: Lowerer, stmt: i64) -> bool =>
     kind(lw.inf.p.s, stmt) == nk_defer() && flags(lw.inf.p.s, stmt) == 1;
 
 /// Whether an open scope holds an `errdefer`.
-pub fn has_errdefer(lw: Lowerer) -> bool {
+pub fn has_errdefer(ref lw: Lowerer) -> bool {
     for scope in lw.defers {
         for stmt in scope {
             if stmt >= 0 && is_errdefer(lw, stmt) { return true; }
@@ -77,7 +73,7 @@ pub fn has_errdefer(lw: Lowerer) -> bool {
 
 /// `defer stmt;`: registers `stmt` with the innermost scope. An `errdefer`
 /// is registered as its own node, so the exits can tell it apart.
-pub fn lower_defer(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_defer(var ref lw: Lowerer, n: i64) -> u32 {
     if lw.defers.len() == 0 { return unsupported(lw, n); }
     let stmt = if flags(lw.inf.p.s, n) == 1 { n } else { lhs(lw.inf.p.s, n) };
     lw.defers[lw.defers.len() - 1].push(stmt);

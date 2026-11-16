@@ -3,10 +3,9 @@
 // Milestone 1: Pure-Pilot Name-Blind Seed Scanner, Dynamic Core Vocabulary
 // Harvester, [EnforceCoreNaming] & RING001 Verifier, and LOC Ratchet Auditor.
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Gate.SeedAudit;
+pub lvl(0) pkg selfhost.gate;
 
 use std.text;
-use Pilot.SelfHost.Gate.AirlockAbi;
 
 pub pure fn sa_is_upper(b: i64) -> bool {
     return b >= 65 && b <= 90;

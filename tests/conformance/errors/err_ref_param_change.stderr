@@ -1,0 +1,5 @@
+error[DECL004]: `t` is a `ref` parameter, a read-only borrow, and cannot be changed through it; declare it `var ref` to change it
+err_ref_param_change.pilot:13:5
+err_ref_param_change.pilot:14:5
+error[DECL004]: `xs` is a `ref` parameter, a read-only borrow, and cannot be changed through it; declare it `var ref` to change it
+err_ref_param_change.pilot:22:10

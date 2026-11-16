@@ -31,26 +31,17 @@
 // line of what it is written on when it has none. A step is told a
 // method's name as `Type.method`. The type checker
 // has checked the attributes already: a misused one never reaches this tool.
-pub lvl(0) pkg Pilot.SelfHost.Cli.ComptimeTool;
+pub lvl(0) pkg selfhost.cli;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.diag.*;
-use selfhost.check.attr_text.*;
-use selfhost.check.attr_inherit.*;
-use selfhost.check.probes.*;
-use selfhost.check.attr_chain.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.main.*;
+use selfhost.check.*;
 
 /// `[path, base offset, text]` of the file node `n` is in.
-fn file_row(s: Snap, n: i64) -> List<any> {
+fn file_row(ref s: Snap, n: i64) -> List<any> {
     let row: List<any> = s.files[unit_of(s, n)];
     return [row[0], row[2], row[3]];
 }
 
-fn row_of(p: Program, sink: DiagSink, pkgs: Map<str, i64>, f: i64, st: ChainStep, runs: bool) -> List<str>? {
+fn row_of(ref p: Program, var ref sink: DiagSink, ref pkgs: Map<str, i64>, f: i64, ref st: ChainStep, runs: bool) -> List<str>? {
     let s = p.s;
     let file = file_row(s, st.site);
     let path: str = file[0];
@@ -88,7 +79,7 @@ fn row_of(p: Program, sink: DiagSink, pkgs: Map<str, i64>, f: i64, st: ChainStep
 
 /// Whether `f` is a function or method of the user's files the chain runs
 /// for: not one written inside another function.
-fn chain_fn(p: Program, f: i64) -> bool {
+fn chain_fn(ref p: Program, f: i64) -> bool {
     let s = p.s;
     if kind(s, f) != nk_fn() || !in_user_file(s, f) { return false; }
     var cur = p.parents[f];
@@ -128,7 +119,7 @@ pub fn check_with_steps(phase: str, plan: bool) -> List<any> {
 }
 
 /// `comptime_runs` over the program `p`.
-fn steps_of(p: Program, phase: str) -> List<List<str>> {
+fn steps_of(var ref p: Program, phase: str) -> List<List<str>> {
     let s = p.s;
     var out: List<List<str>> = [];
     let now = live_flag(p, phase);

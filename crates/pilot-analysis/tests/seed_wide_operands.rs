@@ -37,7 +37,11 @@ fn generated_script(parts: usize, per_part: usize, distinct: bool) -> String {
 fn compile(src: &str) -> PilcBinary {
     let arena = parse(src);
     let binary = BytecodeCompiler::compile(&arena, arena.root);
-    assert!(binary.diagnostics.is_empty(), "compile errors: {:?}", binary.diagnostics);
+    assert!(
+        binary.diagnostics.is_empty(),
+        "compile errors: {:?}",
+        binary.diagnostics
+    );
     binary
 }
 
@@ -51,7 +55,11 @@ fn run(binary: PilcBinary) -> String {
 fn jumps_and_calls_past_sixty_five_thousand_instructions() {
     // 4 parts x 18,000 statements, each adding 2: total 144,000.
     let binary = compile(&generated_script(4, 18_000, false));
-    assert!(binary.instructions.len() > 65_535, "only {} instructions", binary.instructions.len());
+    assert!(
+        binary.instructions.len() > 65_535,
+        "only {} instructions",
+        binary.instructions.len()
+    );
     // total + 3 * 10^12 + 7 * 10^13
     assert_eq!(run(binary), "73000000144000");
 }
@@ -60,7 +68,11 @@ fn jumps_and_calls_past_sixty_five_thousand_instructions() {
 fn constant_indices_past_sixty_five_thousand() {
     // 2 parts x 33,000 statements adding 1..=66,000: 66,000 * 66,001 / 2.
     let binary = compile(&generated_script(2, 33_000, true));
-    assert!(binary.constants.len() > 65_535, "only {} constants", binary.constants.len());
+    assert!(
+        binary.constants.len() > 65_535,
+        "only {} constants",
+        binary.constants.len()
+    );
     assert_eq!(run(binary), "73002178033000");
 }
 
@@ -70,6 +82,10 @@ fn wide_programs_survive_the_pilc_round_trip() {
     let bytes = binary.serialize();
     let back = PilcBinary::load_from_bytes(&bytes).expect("version 5 image loads");
     assert_eq!(back.instructions.len(), binary.instructions.len());
-    assert!(back.instructions.iter().zip(&binary.instructions).all(|(a, b)| a == b));
+    assert!(back
+        .instructions
+        .iter()
+        .zip(&binary.instructions)
+        .all(|(a, b)| a == b));
     assert_eq!(run(back), "73000000072000");
 }

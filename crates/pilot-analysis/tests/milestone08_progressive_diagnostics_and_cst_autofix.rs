@@ -3,19 +3,20 @@
 //! Progressive Diagnostics & Lossless CST Auto-Fix (`pilot check --fix`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 8,
-    test_file_rel: "crates/pilot-analysis/tests/milestone08_progressive_diagnostics_and_cst_autofix.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone08_progressive_diagnostics_and_cst_autofix.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
@@ -84,7 +85,11 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_diag(script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let deps = [
         "stdlib/core/file.pilot",
         "stdlib/std/text.pilot",
@@ -95,8 +100,8 @@ fn eval_diag(script: &str) -> String {
     let mut combined = String::new();
     for rel in &deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -168,9 +173,18 @@ pub fn test_m8_1_transactional_cst_autofix_six_defects_and_comment_conservation(
     assert_eq!(parts[0], "4", "Expected 4 lexical diagnostics");
     assert_eq!(parts[1], "4", "Expected 4 fixes applied");
     assert_eq!(parts[2], "OK", "Autofix should report OK");
-    assert_eq!(parts[3], "CONSERVED", "All 12 comments must be preserved verbatim");
-    assert_eq!(parts[4], "CRLF", "CRLF line endings must be preserved verbatim");
-    assert_eq!(parts[5], "FIX001", "Adversarial comment loss must abort with FIX001");
+    assert_eq!(
+        parts[3], "CONSERVED",
+        "All 12 comments must be preserved verbatim"
+    );
+    assert_eq!(
+        parts[4], "CRLF",
+        "CRLF line endings must be preserved verbatim"
+    );
+    assert_eq!(
+        parts[5], "FIX001",
+        "Adversarial comment loss must abort with FIX001"
+    );
     // Hand-applied edits: `.5` -> `0.5`, `42` -> `42;`, `mut` -> `var`, `match` -> `switch`.
     assert_eq!(
         parts[6],
@@ -191,7 +205,10 @@ pub fn test_m8_1_transactional_cst_autofix_six_defects_and_comment_conservation(
     std::fs::create_dir_all(&dir).unwrap();
     let target = dir.join("app.pilot");
     let target_s = target.to_string_lossy().replace('\\', "/");
-    let atomic = eval_diag(&format!(r#"write_file_atomic("{}", "let x = 1;\n");"#, target_s));
+    let atomic = eval_diag(&format!(
+        r#"write_file_atomic("{}", "let x = 1;\n");"#,
+        target_s
+    ));
     let tmp_written = std::fs::read_to_string(dir.join("app.pilot.tmp")).ok();
     let target_exists = target.exists();
     let _ = std::fs::remove_dir_all(&dir);
@@ -200,8 +217,15 @@ pub fn test_m8_1_transactional_cst_autofix_six_defects_and_comment_conservation(
         "atomic write must stop at its rename seam, got: {}",
         atomic
     );
-    assert_eq!(tmp_written.as_deref(), Some("let x = 1;\n"), "the .tmp file holds the new source");
-    assert!(!target_exists, "the target is not written before the rename exists");
+    assert_eq!(
+        tmp_written.as_deref(),
+        Some("let x = 1;\n"),
+        "the .tmp file holds the new source"
+    );
+    assert!(
+        !target_exists,
+        "the target is not written before the rename exists"
+    );
 
     guard.finish();
 }
@@ -233,7 +257,10 @@ pub fn test_m8_2_progressive_explain_tutorial_and_tier1_guidance() {
 
     let res = eval_diag(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts[0], "ALL_SECTIONS_PRESENT", "Explain output must include all required tutorial sections");
+    assert_eq!(
+        parts[0], "ALL_SECTIONS_PRESENT",
+        "Explain output must include all required tutorial sections"
+    );
     assert_eq!(parts[1], "true", "DECL004 explain must reference DECL004");
     assert_eq!(parts[2], "true", "SYN001 explain must reference SYN001");
     assert_eq!(parts[3], "true", "FIX001 explain must reference FIX001");
@@ -274,10 +301,22 @@ pub fn test_m8_3_unicode_east_asian_display_width_and_caret_alignment() {
 
     let res = eval_diag(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts[0], "2:1", "Greek 'Δ' is 2 bytes and 1 display width column");
-    assert_eq!(parts[1], "3:2", "CJK '中' is 3 bytes and 2 display width columns");
-    assert_eq!(parts[2], "4:2", "Emoji '🚀' is 4 bytes and 2 display width columns");
-    assert_eq!(parts[3], "HAS_CARET", "Rendered diagnostic must position caret under token");
+    assert_eq!(
+        parts[0], "2:1",
+        "Greek 'Δ' is 2 bytes and 1 display width column"
+    );
+    assert_eq!(
+        parts[1], "3:2",
+        "CJK '中' is 3 bytes and 2 display width columns"
+    );
+    assert_eq!(
+        parts[2], "4:2",
+        "Emoji '🚀' is 4 bytes and 2 display width columns"
+    );
+    assert_eq!(
+        parts[3], "HAS_CARET",
+        "Rendered diagnostic must position caret under token"
+    );
 
     guard.finish();
 }
@@ -324,9 +363,18 @@ pub fn test_m8_4_sarif_json_emitter_and_unified_diff_preview() {
 
     let res = eval_diag(script);
     let parts: Vec<&str> = res.split('|').collect();
-    assert_eq!(parts[0], "SARIF_OK", "SARIF report must comply with 2.1.0 schema");
-    assert_eq!(parts[1], "true", "Single JSON diagnostic must contain code TYPE001");
-    assert_eq!(parts[2], "DIFF_OK", "Unified diff preview must contain unified diff headers and changes");
+    assert_eq!(
+        parts[0], "SARIF_OK",
+        "SARIF report must comply with 2.1.0 schema"
+    );
+    assert_eq!(
+        parts[1], "true",
+        "Single JSON diagnostic must contain code TYPE001"
+    );
+    assert_eq!(
+        parts[2], "DIFF_OK",
+        "Unified diff preview must contain unified diff headers and changes"
+    );
 
     guard.finish();
 }

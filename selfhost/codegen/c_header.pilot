@@ -5,6 +5,8 @@
 // with a clean, layout-driven C-ABI header declaration generator in Pilot.
 // ============================================================================
 
+pub pkg selfhost.codegen;
+
 pub pure fn emit_c11_runtime_header() -> str {
     let hdr = "/* Pilot Language Native C-ABI Runtime Header (C11) */\n"
         + "#ifndef PILOT_RUNTIME_H\n"

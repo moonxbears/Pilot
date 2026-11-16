@@ -20,11 +20,9 @@
 //
 // The lines come in source order. A function that stops with a run-time error
 // fails the command, as does a file that cannot be written.
-pub lvl(0) pkg Pilot.SelfHost.Cli.ComptimeAttrs;
+pub lvl(0) pkg selfhost.cli;
 
 use std.text;
-use Pilot.SelfHost.Cli.Host;
-use Pilot.SelfHost.Cli.Report;
 
 /// The moments a command runs `[Live]` calls at: `LiveWhen` flag names.
 pub pure fn live_phase_compile() -> str => "Compile";
@@ -58,7 +56,7 @@ fn dir_of(path: str) -> str {
 /// The entry that runs the steps `records` describes (`comptime_runs` in
 /// selfhost/cli/comptime_tool.pilot), each function's through its own
 /// `AttrChain` (stdlib/core/attr_flow.pilot).
-fn comptime_entry(records: List<List<str>>) -> str {
+fn comptime_entry(ref records: List<List<str>>) -> str {
     var out: List<str> = [];
     var group = "";
     var i = 0;

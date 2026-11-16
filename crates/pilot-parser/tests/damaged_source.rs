@@ -10,9 +10,9 @@
 //! `PILOT_FUZZ_SEED` shifts them, so a run with another seed damages other
 //! places. AGENTS.md section 11 asks for this test after any parser change.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 thread_local! {
@@ -23,11 +23,16 @@ thread_local! {
 const INSERTS: [&str; 6] = [",", "{", "(", "\"", "[", "f\"{"];
 
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("workspace root")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("workspace root")
 }
 
 fn pilot_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
     paths.sort();
     for path in paths {
@@ -40,12 +45,18 @@ fn pilot_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn env_number(name: &str, default: usize) -> usize {
-    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 /// The damaged texts of `src` at byte `at` (a character boundary).
 fn damaged(src: &str, at: usize) -> Vec<String> {
-    let mut out = vec![src[..at].to_string(), format!("{} , ) ] }} ; :", &src[..at])];
+    let mut out = vec![
+        src[..at].to_string(),
+        format!("{} , ) ] }} ; :", &src[..at]),
+    ];
     for ins in INSERTS {
         let mut text = src.to_string();
         text.insert_str(at, ins);
@@ -59,10 +70,22 @@ type Crashes = BTreeMap<String, (usize, String)>;
 
 /// Parses `path` damaged at each of its points; returns the number of
 /// parses and records every crash in `crashes`.
-fn damage_file(root: &Path, path: &Path, points: usize, seed: usize, crashes: &mut Crashes) -> usize {
+fn damage_file(
+    root: &Path,
+    path: &Path,
+    points: usize,
+    seed: usize,
+    crashes: &mut Crashes,
+) -> usize {
     let mut runs = 0usize;
-    let Ok(src) = std::fs::read_to_string(path) else { return 0 };
-    let name = path.strip_prefix(root).unwrap_or(path).display().to_string();
+    let Ok(src) = std::fs::read_to_string(path) else {
+        return 0;
+    };
+    let name = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string();
     for k in 0..points {
         let mut at = (src.len() * k / points + seed * 7919) % (src.len() + 1);
         while !src.is_char_boundary(at) {
@@ -82,9 +105,14 @@ fn damage_file(root: &Path, path: &Path, points: usize, seed: usize, crashes: &m
                 let site = PANIC_SITE.with(|s| s.borrow().clone());
                 let key = format!("{site}: {}", message.chars().take(80).collect::<String>());
                 let lo = at.saturating_sub(60);
-                let lo = (0..=lo).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
+                let lo = (0..=lo)
+                    .rev()
+                    .find(|&i| text.is_char_boundary(i))
+                    .unwrap_or(0);
                 let hi = (at + 40).min(text.len());
-                let hi = (hi..=text.len()).find(|&i| text.is_char_boundary(i)).unwrap_or(text.len());
+                let hi = (hi..=text.len())
+                    .find(|&i| text.is_char_boundary(i))
+                    .unwrap_or(text.len());
                 let example = format!("{name} at byte {at}: {:?}", &text[lo..hi]);
                 let entry = crashes.entry(key).or_insert((0, example.clone()));
                 entry.0 += 1;
@@ -105,17 +133,27 @@ fn the_parser_reports_damaged_source_instead_of_crashing() {
     for dir in ["tests/conformance", "stdlib", "selfhost"] {
         pilot_files(&root.join(dir), &mut files);
     }
-    assert!(files.len() > 100, "found only {} .pilot files under {}", files.len(), root.display());
+    assert!(
+        files.len() > 100,
+        "found only {} .pilot files under {}",
+        files.len(),
+        root.display()
+    );
     let points = env_number("PILOT_FUZZ_POINTS", 16).max(1);
     let seed = env_number("PILOT_FUZZ_SEED", 0);
 
     std::panic::set_hook(Box::new(|info| {
-        let site = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
+        let site = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_default();
         PANIC_SITE.with(|s| *s.borrow_mut() = site);
     }));
     // The files are shared out over the machine's cores; each worker keeps
     // its own crash table and they are merged below.
-    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).min(files.len());
+    let workers = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(files.len());
     let next = AtomicUsize::new(0);
     let tables: Vec<(Crashes, usize)> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
@@ -124,14 +162,19 @@ fn the_parser_reports_damaged_source_instead_of_crashing() {
                     let mut crashes = Crashes::new();
                     let mut runs = 0usize;
                     loop {
-                        let Some(path) = files.get(next.fetch_add(1, Ordering::Relaxed)) else { break };
+                        let Some(path) = files.get(next.fetch_add(1, Ordering::Relaxed)) else {
+                            break;
+                        };
                         runs += damage_file(&root, path, points, seed, &mut crashes);
                     }
                     (crashes, runs)
                 })
             })
             .collect();
-        handles.into_iter().map(|h| h.join().expect("worker thread")).collect()
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("worker thread"))
+            .collect()
     });
     // Panic site -> (count, smallest damaged input that hit it).
     let mut crashes = Crashes::new();
@@ -147,6 +190,14 @@ fn the_parser_reports_damaged_source_instead_of_crashing() {
         }
     }
     let _ = std::panic::take_hook();
-    let report: Vec<String> = crashes.iter().map(|(site, (n, ex))| format!("{n} x {site}\n    {ex}")).collect();
-    assert!(crashes.is_empty(), "the parser crashed in {} of {runs} damaged inputs:\n{}", crashes.values().map(|c| c.0).sum::<usize>(), report.join("\n"));
+    let report: Vec<String> = crashes
+        .iter()
+        .map(|(site, (n, ex))| format!("{n} x {site}\n    {ex}"))
+        .collect();
+    assert!(
+        crashes.is_empty(),
+        "the parser crashed in {} of {runs} damaged inputs:\n{}",
+        crashes.values().map(|c| c.0).sum::<usize>(),
+        report.join("\n")
+    );
 }

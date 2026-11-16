@@ -3,11 +3,10 @@
 // Milestone 5.2: Shared Incremental Compiler Query Database Engine (PilotDb)
 // Salsa-Style Red-Green Memoization, Durability Watermarks & Early Cutoff
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Db.Engine;
+pub lvl(0) pkg selfhost.db;
 
 use std.text;
-use Pilot.SelfHost.Db.Revision::*;
-use Pilot.SelfHost.Lexer::*;
+use selfhost.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

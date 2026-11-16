@@ -84,7 +84,11 @@ impl PilVirtualMachine {
         }
     }
 
-    pub(crate) fn host_op(&mut self, op: &str, args: &[PilotVal]) -> Option<Result<PilotVal, String>> {
+    pub(crate) fn host_op(
+        &mut self,
+        op: &str,
+        args: &[PilotVal],
+    ) -> Option<Result<PilotVal, String>> {
         let mut ops = self.host_ops.take()?;
         let host_args: Vec<HostValue> = args.iter().map(|&a| self.to_host(a)).collect();
         let out = ops(op, &host_args);

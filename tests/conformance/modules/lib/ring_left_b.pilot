@@ -1,0 +1,6 @@
+// The other file of `lib.ring_left`: imports the program that imports it.
+pkg lib.ring_left;
+
+use Conformance.Ring;
+
+pub fn right() -> i64 => 2;

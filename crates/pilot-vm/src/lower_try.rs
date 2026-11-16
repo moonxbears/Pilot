@@ -120,7 +120,8 @@ impl BytecodeCompiler {
         }
         let outer_slots = self.var_slots.clone();
         if cn.lhs != 0 {
-            self.var_slots.insert(Self::name(arena, cn.lhs).to_string(), fail_reg);
+            self.var_slots
+                .insert(Self::name(arena, cn.lhs).to_string(), fail_reg);
         }
         let r = self.compile_node(arena, NodeId(cn.rhs));
         self.var_slots = outer_slots;
@@ -136,16 +137,17 @@ impl BytecodeCompiler {
         };
         let clause = match clauses {
             [one] => NodeId(*one),
-            [] => return self.error(
-                crate::codes::SYNTAX,
-                "`try` needs a `catch` clause".to_string(),
-            ),
-            _ => {
-                return self.error(crate::codes::SEED, 
-                    "a `try` takes one `catch` clause; the seed cannot tell failure types apart yet"
-                        .to_string(),
+            [] => {
+                return self.error(
+                    crate::codes::SYNTAX,
+                    "`try` needs a `catch` clause".to_string(),
                 )
             }
+            _ => return self.error(
+                crate::codes::SEED,
+                "a `try` takes one `catch` clause; the seed cannot tell failure types apart yet"
+                    .to_string(),
+            ),
         };
         let mark = self.next_reg;
         let fail_reg = self.open_try();
@@ -163,7 +165,12 @@ impl BytecodeCompiler {
     }
 
     /// `expr catch err => fallback`.
-    pub(crate) fn compile_catch_recovery(&mut self, arena: &AstArena, expr: u32, clause: u32) -> u8 {
+    pub(crate) fn compile_catch_recovery(
+        &mut self,
+        arena: &AstArena,
+        expr: u32,
+        clause: u32,
+    ) -> u8 {
         let clause = NodeId(clause);
         if clause.is_none() || arena.node(clause).node_kind() != NodeKind::CatchClause {
             return self.error(crate::codes::SYNTAX, "`catch` needs a fallback".to_string());

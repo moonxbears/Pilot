@@ -6,6 +6,8 @@
 // register-to-symbol debug manifests in pure Pilot.
 // ============================================================================
 
+pub pkg selfhost.vm;
+
 use std.text;
 
 [Layout(c_abi)]

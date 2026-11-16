@@ -18,8 +18,26 @@ fn native_bindings_are_ingested_from_pilot() {
 #[test]
 fn enumerator_and_try_protocols_are_bound_from_pilot() {
     let t = pilot_parser::bootstrap_tables();
-    let e = t.enumerator().expect("for.pilot binds the enumerator protocol");
-    assert_eq!((e.get_enumerator.as_str(), e.move_next.as_str(), e.current.as_str()), ("get_enumerator", "move_next", "current"));
-    let tp = t.try_protocol().expect("try_catch.pilot binds the try protocol");
-    assert_eq!((tp.is_success.as_str(), tp.unwrap.as_str(), tp.failure.as_str()), ("is_success", "?", "failure"));
+    let e = t
+        .enumerator()
+        .expect("for.pilot binds the enumerator protocol");
+    assert_eq!(
+        (
+            e.get_enumerator.as_str(),
+            e.move_next.as_str(),
+            e.current.as_str()
+        ),
+        ("get_enumerator", "move_next", "current")
+    );
+    let tp = t
+        .try_protocol()
+        .expect("try_catch.pilot binds the try protocol");
+    assert_eq!(
+        (
+            tp.is_success.as_str(),
+            tp.unwrap.as_str(),
+            tp.failure.as_str()
+        ),
+        ("is_success", "?", "failure")
+    );
 }

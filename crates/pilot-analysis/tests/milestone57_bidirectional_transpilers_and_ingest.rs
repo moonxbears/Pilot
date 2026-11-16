@@ -49,7 +49,8 @@ const TRANSPILE_BANNED_CHEATS: &[&str] = &[
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 57,
-    test_file_rel: "crates/pilot-analysis/tests/milestone57_bidirectional_transpilers_and_ingest.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone57_bidirectional_transpilers_and_ingest.rs",
     expected_test_count: 2,
     files: &[
         anticheat::FileAuditRule {
@@ -233,7 +234,16 @@ fn escape_pilot_str(s: &str) -> String {
 /// succeeded.
 fn pilot_emit(lang: &str, program: &Path) -> String {
     let out = Command::new("cargo")
-        .args(["run", "-q", "-p", "pilot-cli", "--", "emit", lang, program.to_str().unwrap()])
+        .args([
+            "run",
+            "-q",
+            "-p",
+            "pilot-cli",
+            "--",
+            "emit",
+            lang,
+            program.to_str().unwrap(),
+        ])
         .current_dir(ws_root())
         .output()
         .expect("run pilot emit");
@@ -246,14 +256,21 @@ fn pilot_emit(lang: &str, program: &Path) -> String {
     );
     let code = String::from_utf8_lossy(&out.stdout).to_string();
     for banned in TRANSPILE_BANNED_CHEATS {
-        assert!(!code.contains(banned), "emitted {} contains banned benchmark cheat `{}`", lang, banned);
+        assert!(
+            !code.contains(banned),
+            "emitted {} contains banned benchmark cheat `{}`",
+            lang,
+            banned
+        );
     }
     code
 }
 
 /// Runs a host compiler or program, which must succeed; its stdout.
 fn run_ok(trial: usize, what: &str, cmd: &mut Command, code: &str) -> String {
-    let out = cmd.output().unwrap_or_else(|e| panic!("Trial {}: cannot start {}: {}", trial, what, e));
+    let out = cmd
+        .output()
+        .unwrap_or_else(|e| panic!("Trial {}: cannot start {}: {}", trial, what, e));
     assert!(
         out.status.success(),
         "Trial {}: {} rejected the emitted code:\n{}{}\nCode:\n{}",
@@ -275,9 +292,30 @@ fn integer(trial: usize, what: &str, stdout: &str) -> i64 {
 }
 
 /// Compiles with `compiler args.. src -o bin`, runs `bin`; its integer.
-fn compile_and_run(trial: usize, what: &str, compiler: &str, args: &[&str], src: &Path, bin: &Path, code: &str) -> i64 {
-    run_ok(trial, what, Command::new(compiler).args(args).arg(src).arg("-o").arg(bin), code);
-    integer(trial, what, &run_ok(trial, what, &mut Command::new(bin), code))
+fn compile_and_run(
+    trial: usize,
+    what: &str,
+    compiler: &str,
+    args: &[&str],
+    src: &Path,
+    bin: &Path,
+    code: &str,
+) -> i64 {
+    run_ok(
+        trial,
+        what,
+        Command::new(compiler)
+            .args(args)
+            .arg(src)
+            .arg("-o")
+            .arg(bin),
+        code,
+    );
+    integer(
+        trial,
+        what,
+        &run_ok(trial, what, &mut Command::new(bin), code),
+    )
 }
 
 #[test]
@@ -287,26 +325,30 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
         &ANTICHEAT_SPEC,
     );
     let mut rng = Rng::new(0x5701);
-    let tmp = std::env::temp_dir().join(format!("pilot_m57_{}_{}", std::process::id(), rng.next_u64()));
+    let tmp = std::env::temp_dir().join(format!(
+        "pilot_m57_{}_{}",
+        std::process::id(),
+        rng.next_u64()
+    ));
     std::fs::create_dir_all(&tmp).unwrap();
 
     // The trials are drawn in order from one generator, then each one runs
     // on its own thread: a trial is seven `pilot emit` runs and four host
     // compilers, one after another.
     std::thread::scope(|scope| {
-    for trial in 0..4 {
-        let ty_int = rng.ident("num64");
-        let st_box = rng.pascal("BoxPair");
-        let fn_helper = rng.ident("scale_delta");
-        let fn_entry = rng.ident("run_sim");
-        let k_mul = rng.range(2, 7);
-        let k_add = rng.range(5, 31);
-        let k_sub = rng.range(1, 13);
-        let arg_a = rng.range(6, 20);
-        let arg_b = rng.range(5, 14);
+        for trial in 0..4 {
+            let ty_int = rng.ident("num64");
+            let st_box = rng.pascal("BoxPair");
+            let fn_helper = rng.ident("scale_delta");
+            let fn_entry = rng.ident("run_sim");
+            let k_mul = rng.range(2, 7);
+            let k_add = rng.range(5, 31);
+            let k_sub = rng.range(1, 13);
+            let arg_a = rng.range(6, 20);
+            let arg_b = rng.range(5, 14);
 
-        let pilot_prog = format!(
-            "[Bits(Cfg.Reg.b64, Cfg.Reg.gpr_s)]\npub struct {ty_int} {{}}\n\
+            let pilot_prog = format!(
+                "[Bits(Cfg.Reg.b64, Cfg.Reg.gpr_s)]\npub struct {ty_int} {{}}\n\
              pub struct {st_box} {{\n\
                  pub u: {ty_int};\n\
                  pub v: {ty_int};\n\
@@ -327,19 +369,19 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
                  }}\n\
                  return acc;\n\
              }}\n"
-        );
+            );
 
-        let mut expected = (arg_a * k_mul) - arg_b + k_add;
-        for i in 0..arg_b {
-            if i % 2 == 0 {
-                expected += i * k_mul;
-            } else {
-                expected -= k_sub;
+            let mut expected = (arg_a * k_mul) - arg_b + k_add;
+            for i in 0..arg_b {
+                if i % 2 == 0 {
+                    expected += i * k_mul;
+                } else {
+                    expected -= k_sub;
+                }
             }
-        }
 
-        let tmp = &tmp;
-        scope.spawn(move || {
+            let tmp = &tmp;
+            scope.spawn(move || {
         let src = tmp.join(format!("t_{}.pilot", trial));
         std::fs::write(&src, &pilot_prog).unwrap();
         let emitted = |lang: &str| pilot_emit(lang, &src);
@@ -426,7 +468,7 @@ pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host
             lua_code
         );
         });
-    }
+        }
     });
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -440,7 +482,11 @@ pub fn test_57_3_and_57_4_six_language_foreign_ingesters_vm_execution_spdx_and_c
         &ANTICHEAT_SPEC,
     );
     let mut rng = Rng::new(0x5703);
-    let ingest_mod = format!("{}\n{}", read_ws("stdlib/std/text.pilot"), read_ws("selfhost/transpile/ingest.pilot"));
+    let ingest_mod = format!(
+        "{}\n{}",
+        read_ws("stdlib/std/text.pilot"),
+        read_ws("selfhost/transpile/ingest.pilot")
+    );
     let license_mod = read_ws("stdlib/pkg/licensing.pilot");
 
     // 1. Compound & atomic SPDX license verification
@@ -635,7 +681,10 @@ pub fn test_57_3_and_57_4_six_language_foreign_ingesters_vm_execution_spdx_and_c
             }
 
             // Parse and execute the ingested Pilot code on PilVirtualMachine!
-            let exec_src = format!("{}\nlet __r = {}({}, {});\n__r;\n", pilot_out, fn_name, arg_a, arg_b);
+            let exec_src = format!(
+                "{}\nlet __r = {}({}, {});\n__r;\n",
+                pilot_out, fn_name, arg_a, arg_b
+            );
             let exec_arena = parse(&exec_src);
             assert!(
                 exec_arena.diagnostics.is_empty(),

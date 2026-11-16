@@ -17,11 +17,10 @@
 // so a flag never fails anything.
 //
 // Exit codes: 0 the table was printed (flags are warnings), 2 bad usage.
-pub lvl(0) pkg Pilot.SelfHost.Cli.BenchCmd;
+pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.File;
 use std.text;
-use Pilot.SelfHost.Cli.TestCmd;
 
 /// How much slower than its fastest time, in percent, a test's latest time
 /// may be before it is flagged. The milestone tests read this value too.
@@ -64,7 +63,7 @@ pub fn bench_parse_history(history: str) -> List<i64> {
 }
 
 /// The summary of a test's runs, or `none` when it has none.
-pub fn bench_summarize(milestone: i64, test: str, runs: List<i64>) -> TestTimes? {
+pub fn bench_summarize(milestone: i64, test: str, ref runs: List<i64>) -> TestTimes? {
     if runs.len == 0 { return none; }
     var total = 0;
     var fastest = runs[0];
@@ -144,7 +143,7 @@ pub fn bench_status(t: TestTimes) -> str {
 }
 
 /// The table `pilot bench` prints for `rows`.
-pub fn bench_table(rows: List<TestTimes>) -> str {
+pub fn bench_table(ref rows: List<TestTimes>) -> str {
     var name_w = 4;
     for t in rows { if t.test.len() > name_w { name_w = t.test.len(); } }
     let head = text.pad_right("MILESTONE", 10) + text.pad_right("TEST", name_w + 2)
@@ -163,7 +162,7 @@ pub fn bench_table(rows: List<TestTimes>) -> str {
 }
 
 /// `pilot bench [dir] [--filter text]`
-pub fn bench_command(paths: List<str>, filter: str) -> i64 {
+pub fn bench_command(ref paths: List<str>, filter: str) -> i64 {
     if paths.len > 1 {
         eprint("error: `pilot bench` takes at most one directory");
         return 2;

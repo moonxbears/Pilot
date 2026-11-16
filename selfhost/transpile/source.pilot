@@ -23,16 +23,10 @@
 // variable of the module. A slot or global address used any other way, an
 // opcode the dialect cannot spell, or a value whose physics the language
 // has no type for stops at a seam naming the language and what is missing.
-pub lvl(0) pkg Pilot.SelfHost.Transpile.Source;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.check.snapshot.*;
-use selfhost.ir.model.*;
-use selfhost.ir.pass_perceus.*;
-use selfhost.ir.verify.*;
-use selfhost.ir.passes.*;
-use selfhost.ir.interp.*;
-use selfhost.ir.main.*;
-use selfhost.transpile.static_data.*;
+use selfhost.check.*;
+use selfhost.ir.*;
 use std.text;
 use Pilot.Core.File;
 
@@ -227,7 +221,7 @@ pub pure fn emit_wrote_word() -> str => "emitted";
 /// own (emitting changes the module to suit the dialect). Prints
 /// `emit_checked_line()` after the check, then `emitted <language> <file>`
 /// per file written.
-pub fn emit_program_checked_to(ds: List<ISourceDialect>, outs: List<str>) -> i64 {
+pub fn emit_program_checked_to(ref ds: List<ISourceDialect>, ref outs: List<str>) -> i64 {
     guard some inf = checked_program(snap_load()) else { return 1; };
     print(emit_checked_line());
     var k = 0;
@@ -308,7 +302,7 @@ pub pure fn helper_prefix() -> str => "pilot_";
 pub pure fn text_scalar_op() -> str => "scalar_from";
 
 /// The layouts of the values `text_scalar_op()` gives in `m`.
-fn text_scalar_layouts(m: IrModule) -> List<i64> {
+fn text_scalar_layouts(ref m: IrModule) -> List<i64> {
     var out: List<i64> = [];
     for f in m.functions {
         for b in f.blocks {
@@ -405,7 +399,7 @@ pub fn emit_module(m: IrModule, d: ISourceDialect) -> str {
 }
 
 /// Whether any function calls through a function value.
-fn calls_values(m: IrModule) -> bool {
+fn calls_values(ref m: IrModule) -> bool {
     for f in m.functions {
         for b in f.blocks {
             for inst in b.insts {
@@ -418,7 +412,7 @@ fn calls_values(m: IrModule) -> bool {
 
 /// Whether running the start function does anything: anything but jumps
 /// and a bare return.
-fn starts_anything(f: IrFunction) -> bool {
+fn starts_anything(ref f: IrFunction) -> bool {
     for b in f.blocks {
         for inst in b.insts {
             if inst.opcode != op_jump() && inst.opcode != op_return() { return true; }
@@ -458,7 +452,7 @@ fn looks_generated(name: str) -> bool {
 /// Each function's name in the target: its PilIR name as an identifier,
 /// moved aside (`_` appended) when it is reserved or looks like a local,
 /// then numbered when two would be the same. Function 0 is the start.
-fn function_names(m: IrModule, d: ISourceDialect) -> List<str> {
+fn function_names(ref m: IrModule, d: ISourceDialect) -> List<str> {
     let reserved = Map<str, bool>();
     for r in d.reserved() { reserved.set(r, true); }
     reserved.set(state_name(), true);
@@ -476,7 +470,7 @@ fn function_names(m: IrModule, d: ISourceDialect) -> List<str> {
     return out;
 }
 
-fn param_names(f: IrFunction) -> List<str> {
+fn param_names(ref f: IrFunction) -> List<str> {
     var out: List<str> = [];
     if f.blocks.len() > 0 {
         for v in f.blocks[0].params { out.push(f"v{v}"); }
@@ -484,7 +478,7 @@ fn param_names(f: IrFunction) -> List<str> {
     return out;
 }
 
-fn param_phys(f: IrFunction) -> List<IrTypePhysics> {
+fn param_phys(ref f: IrFunction) -> List<IrTypePhysics> {
     var out: List<IrTypePhysics> = [];
     if f.blocks.len() > 0 {
         for v in f.blocks[0].params { out.push(f.value_physics[v]); }
@@ -492,7 +486,7 @@ fn param_phys(f: IrFunction) -> List<IrTypePhysics> {
     return out;
 }
 
-fn line(sf: SourceFn, text: str) {
+fn line(var ref sf: SourceFn, text: str) {
     if text == "" { return; }
     var pad = "";
     var i = 0;
@@ -503,16 +497,16 @@ fn line(sf: SourceFn, text: str) {
     sf.u.out.push(pad + text);
 }
 
-fn lines(sf: SourceFn, texts: List<str>) {
+fn lines(var ref sf: SourceFn, ref texts: List<str>) {
     for t in texts { line(sf, t); }
 }
 
 /// Whether a value of physics `p` is written in the target: in a typed
 /// language only values of a known layout are; a dynamic one writes all.
-fn carries(sf: SourceFn, p: IrTypePhysics) -> bool => !sf.u.d.typed() || p.layout_id != 0;
+fn carries(ref sf: SourceFn, p: IrTypePhysics) -> bool => !sf.u.d.typed() || p.layout_id != 0;
 
 /// Stops at the representation seam unless the language has a type for `p`.
-fn require_type(sf: SourceFn, p: IrTypePhysics, what: str) {
+fn require_type(ref sf: SourceFn, p: IrTypePhysics, what: str) {
     if sf.u.d.type_name(p) == none {
         let _ = seam("emit.representation", f"the {sf.u.d.language()} emitter has no type for {what} ({reg_class_name(p.reg_class)}, {p.bit_width} bits, layout {p.layout_id})");
     }
@@ -579,7 +573,7 @@ fn known_non_scalar(p: IrTypePhysics) -> bool => p.layout_id != 0 && !is_scalar(
 
 /// Gives scalar value `v` of `f` the physics of a source `src` that is not a
 /// scalar (dynamic when `src` is unknown); whether it changed.
-fn widen_to(f: IrFunction, v: u32, src: IrTypePhysics) -> bool {
+fn widen_to(var ref f: IrFunction, v: u32, src: IrTypePhysics) -> bool {
     if is_scalar(src) || !is_scalar(f.value_physics[v]) { return false; }
     f.value_physics[v] = if known_non_scalar(src) { src } else { dynamic_physics() };
     return true;
@@ -591,7 +585,7 @@ fn widen_to(f: IrFunction, v: u32, src: IrTypePhysics) -> bool {
 /// operations' results are dynamic. The checker can type a join of a number and a string
 /// as the number (`x catch e => e`), which the seed, holding every value
 /// dynamically, runs.
-fn widen_mixed_kinds(m: IrModule) {
+fn widen_mixed_kinds(ref m: IrModule) {
     var changed = true;
     while changed {
         changed = false;
@@ -607,7 +601,7 @@ fn widen_mixed_kinds(m: IrModule) {
 }
 
 /// One instruction's part of `widen_mixed_kinds`.
-fn widen_inst(m: IrModule, f: IrFunction, slots: List<i64>, inst: IrInst) -> bool {
+fn widen_inst(ref m: IrModule, var ref f: IrFunction, ref slots: List<i64>, inst: IrInst) -> bool {
     let a = ir_args(f, inst);
     let op = inst.opcode;
     var changed = false;
@@ -667,7 +661,7 @@ fn widen_inst(m: IrModule, f: IrFunction, slots: List<i64>, inst: IrInst) -> boo
 /// Value id -> the sub-operation of the instruction defining it when that
 /// instruction is an `opcode`, else -1: one walk of `f`, so a lookup per
 /// instruction does not walk it again.
-fn defined_by(f: IrFunction, opcode: u16) -> List<i64> {
+fn defined_by(ref f: IrFunction, opcode: u16) -> List<i64> {
     var out: List<i64> = [];
     for _p in f.value_physics { out.push(-1); }
     for b in f.blocks {
@@ -681,7 +675,7 @@ fn defined_by(f: IrFunction, opcode: u16) -> List<i64> {
 /// Gives an arithmetic result the checker left untyped the physics of its
 /// left operand, or of its right one: the seed's operators keep their
 /// operands' kind, and an integer meeting a float gives a float.
-fn type_untyped_results(f: IrFunction) {
+fn type_untyped_results(var ref f: IrFunction) {
     for b in f.blocks {
         for inst in b.insts {
             let op = inst.opcode;
@@ -699,7 +693,7 @@ fn type_untyped_results(f: IrFunction) {
 
 /// Fills in which values are written inline (constants) or name a cell
 /// (slots, globals); returns the globals the function writes.
-fn classify_values(sf: SourceFn) -> List<str> {
+fn classify_values(var ref sf: SourceFn) -> List<str> {
     let f = sf.f;
     let d = sf.u.d;
     let m = sf.u.m;
@@ -748,7 +742,7 @@ struct LocalDecls : IObject {
     pub phys: List<IrTypePhysics>;
 }
 
-fn local_declarations(sf: SourceFn) -> LocalDecls {
+fn local_declarations(ref sf: SourceFn) -> LocalDecls {
     let f = sf.f;
     let out = LocalDecls { names: [], phys: [] };
     var bi = 0;
@@ -777,11 +771,11 @@ fn local_declarations(sf: SourceFn) -> LocalDecls {
     return out;
 }
 
-fn unit_text(sf: SourceFn) -> str => sf.u.d.unit_value() ?? "";
+fn unit_text(ref sf: SourceFn) -> str => sf.u.d.unit_value() ?? "";
 
 /// Integer constant `v` of physics `p`: a boolean when it is one bit wide,
 /// unsigned digits when the register is unsigned.
-fn int_text(sf: SourceFn, v: i64, p: IrTypePhysics) -> str {
+fn int_text(ref sf: SourceFn, v: i64, p: IrTypePhysics) -> str {
     let d = sf.u.d;
     if p.bit_width == 1 { return d.bool_lit(v != 0); }
     let digits = if p.reg_class == reg_class_gpr_unsigned() && v < 0 { f"{v as u64}" } else { f"{v}" };
@@ -792,7 +786,7 @@ fn int_text(sf: SourceFn, v: i64, p: IrTypePhysics) -> str {
 }
 
 /// Static item `it` of a static list (selfhost/transpile/static_data.pilot).
-fn static_item_text(u: SourceUnit, it: StaticItem) -> str {
+fn static_item_text(ref u: SourceUnit, it: StaticItem) -> str {
     let d = u.d;
     if it.list >= 0 { return d.static_list_value(f"pilot_k{it.list}"); }
     let p = it.physics;
@@ -829,7 +823,7 @@ fn float_digits(x: f64) -> str {
 
 /// Float constant `x` in decimal, as the seed shows it, with a `.` so every
 /// language reads a float.
-fn float_text(sf: SourceFn, x: f64, p: IrTypePhysics) -> str {
+fn float_text(ref sf: SourceFn, x: f64, p: IrTypePhysics) -> str {
     let d = sf.u.d;
     guard some t = d.float_lit(float_digits(x), p) else {
         return seam("emit.representation", f"the {d.language()} emitter has no float literal of {p.bit_width} bits");
@@ -838,7 +832,7 @@ fn float_text(sf: SourceFn, x: f64, p: IrTypePhysics) -> str {
 }
 
 /// What is written where value `v` is used.
-fn use_of(sf: SourceFn, v: u32) -> str {
+fn use_of(ref sf: SourceFn, v: u32) -> str {
     if sf.cell[v] != "" {
         return seam("emit.instruction", f"the {sf.u.d.language()} emitter gives a slot or global address no value (`v{v}` in `{sf.f.name}`)");
     }
@@ -856,7 +850,7 @@ fn use_of(sf: SourceFn, v: u32) -> str {
 /// Value `v` where a value of physics `to` is wanted.
 /// The physics of the fields of record layout `layout`, when the module
 /// describes it and the language has a type for every field; else none.
-fn record_fields(u: SourceUnit, layout: u32) -> List<IrTypePhysics>? {
+fn record_fields(ref u: SourceUnit, layout: u32) -> List<IrTypePhysics>? {
     guard some rec = ir_record_of(u.m, layout) else { return none; };
     var fs: List<IrTypePhysics> = [];
     for fl in rec.fields {
@@ -869,7 +863,7 @@ fn record_fields(u: SourceUnit, layout: u32) -> List<IrTypePhysics>? {
 
 /// The record layout value `v` holds: its own, else the one the IR gave
 /// it before widening (0 when neither is a record).
-fn record_layout(sf: SourceFn, v: u32) -> u32 {
+fn record_layout(ref sf: SourceFn, v: u32) -> u32 {
     let own = sf.f.value_physics[v].layout_id;
     if some _r = ir_record_of(sf.u.m, own) { return own; }
     if v < sf.declared.len() {
@@ -879,17 +873,17 @@ fn record_layout(sf: SourceFn, v: u32) -> u32 {
     return 0;
 }
 
-fn as_physics(sf: SourceFn, v: u32, to: IrTypePhysics) -> str =>
+fn as_physics(ref sf: SourceFn, v: u32, to: IrTypePhysics) -> str =>
     sf.u.d.represent(use_of(sf, v), sf.f.value_physics[v], to);
 
 /// The physics of the cell `cell` names: a global's, or the slot's.
-fn cell_physics(sf: SourceFn, slot: u32, cell: str) -> IrTypePhysics {
+fn cell_physics(ref sf: SourceFn, slot: u32, cell: str) -> IrTypePhysics {
     let g = global_of(sf, cell);
     return if g < 0 { sf.f.value_physics[slot] } else { sf.u.m.globals[g].physics };
 }
 
 /// The index of the module global named `cell`, or -1 for a stack slot.
-fn global_of(sf: SourceFn, cell: str) -> i64 {
+fn global_of(ref sf: SourceFn, cell: str) -> i64 {
     var g = 0;
     while g < sf.u.global_names.len() {
         if sf.u.global_names[g] == cell { return g; }
@@ -903,14 +897,14 @@ fn global_of(sf: SourceFn, cell: str) -> i64 {
 fn kind_label(p: IrTypePhysics) -> str =>
     if is_bool(p) { "boolean" } else if is_float(p) { "float" } else if is_int(p) { "integer" } else { "value" };
 
-fn cell_of(sf: SourceFn, v: u32) -> str {
+fn cell_of(ref sf: SourceFn, v: u32) -> str {
     if sf.cell[v] == "" {
         return seam("emit.instruction", f"the {sf.u.d.language()} emitter reads and writes only slots and globals (`v{v}` in `{sf.f.name}`)");
     }
     return sf.cell[v];
 }
 
-fn unsupported(sf: SourceFn, what: str) -> str =>
+fn unsupported(ref sf: SourceFn, what: str) -> str =>
     seam("emit.instruction", f"the {sf.u.d.language()} emitter has no spelling for {what} (in `{sf.f.name}`)");
 
 /// The Pilot spelling of each binary operator name `binary` is given, for
@@ -941,7 +935,7 @@ fn binary_ops() -> Map<str, str> {
 
 /// Writes `expr` as the result of `inst`, or as a statement when the
 /// result carries nothing.
-fn define(sf: SourceFn, inst: IrInst, expr: str) {
+fn define(var ref sf: SourceFn, inst: IrInst, expr: str) {
     let d = sf.u.d;
     if inst.result != ir_no_value() && carries(sf, sf.f.value_physics[inst.result]) {
         line(sf, d.assign(f"v{inst.result}", expr));
@@ -951,7 +945,7 @@ fn define(sf: SourceFn, inst: IrInst, expr: str) {
 }
 
 /// The physics of `inst`'s result, or dynamic when it has none.
-fn result_physics(sf: SourceFn, inst: IrInst) -> IrTypePhysics =>
+fn result_physics(ref sf: SourceFn, inst: IrInst) -> IrTypePhysics =>
     if inst.result == ir_no_value() { dynamic_physics() } else { sf.f.value_physics[inst.result] };
 
 /// Whether `p` is a number or a boolean.
@@ -959,21 +953,21 @@ fn is_scalar(p: IrTypePhysics) -> bool => is_int(p) || is_float(p) || is_bool(p)
 
 /// Value `v` as an operand of a number operation of physics `p`: a number
 /// or boolean of another layout is converted to `p` first.
-fn widened(sf: SourceFn, v: i64, p: IrTypePhysics) -> str {
+fn widened(ref sf: SourceFn, v: i64, p: IrTypePhysics) -> str {
     let pv = sf.f.value_physics[v];
     if !converts(pv, p) { return use_of(sf, v); }
     return sf.u.d.cast(use_of(sf, v), pv, p) ?? unsupported(sf, "a number conversion");
 }
 
 /// Value `v` as an operand of a comparison in physics `p`.
-fn compared(sf: SourceFn, v: i64, p: IrTypePhysics) -> str =>
+fn compared(ref sf: SourceFn, v: i64, p: IrTypePhysics) -> str =>
     if converts(sf.f.value_physics[v], p) { widened(sf, v, p) } else { as_physics(sf, v, p) };
 
 fn converts(pv: IrTypePhysics, p: IrTypePhysics) -> bool =>
     (is_int(p) || is_float(p)) && is_scalar(pv) && pv.layout_id != 0 && pv.layout_id != p.layout_id;
 
 /// The physics value `v` has once `widened` to an operation of physics `p`.
-fn operand_physics(f: IrFunction, v: i64, p: IrTypePhysics) -> IrTypePhysics {
+fn operand_physics(ref f: IrFunction, v: i64, p: IrTypePhysics) -> IrTypePhysics {
     let pv = f.value_physics[v];
     return if converts(pv, p) { p } else { pv };
 }
@@ -986,14 +980,14 @@ fn comparison_physics(pa: IrTypePhysics, pb: IrTypePhysics) -> IrTypePhysics {
     return if pb.bit_width > pa.bit_width { pb } else { pa };
 }
 
-fn emit_block_body(sf: SourceFn, b: IrBlock) {
+fn emit_block_body(var ref sf: SourceFn, ref b: IrBlock) {
     let ops = binary_ops();
     for inst in b.insts {
         emit_inst(sf, inst, ops);
     }
 }
 
-fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
+fn emit_inst(var ref sf: SourceFn, inst: IrInst, ref ops: Map<str, str>) {
     let d = sf.u.d;
     let f = sf.f;
     let m = sf.u.m;
@@ -1236,7 +1230,7 @@ fn emit_inst(sf: SourceFn, inst: IrInst, ops: Map<str, str>) {
     let _ = unsupported(sf, f"`{opcode_name(op)}`");
 }
 
-fn slice_args(a: List<u32>, from: i64, count: i64) -> List<u32> {
+fn slice_args(ref a: List<u32>, from: i64, count: i64) -> List<u32> {
     var out: List<u32> = [];
     var i = 0;
     while i < count {
@@ -1247,7 +1241,7 @@ fn slice_args(a: List<u32>, from: i64, count: i64) -> List<u32> {
 }
 
 /// Passes `vals` to block `target`'s parameters and goes there.
-fn go_to(sf: SourceFn, target: u32, vals: List<u32>) {
+fn go_to(var ref sf: SourceFn, target: u32, ref vals: List<u32>) {
     let d = sf.u.d;
     let f = sf.f;
     let params = f.blocks[target].params;
@@ -1322,7 +1316,7 @@ pub fn is_float(p: IrTypePhysics) -> bool => p.layout_id != 0 && p.reg_class == 
 
 /// `items` separated by `, `.
 /// Leading empty items add nothing.
-pub fn joined(items: List<str>) -> str {
+pub fn joined(ref items: List<str>) -> str {
     var from = 0;
     while from < items.len() && items[from].len() == 0 { from = from + 1; }
     var rest: List<str> = [];

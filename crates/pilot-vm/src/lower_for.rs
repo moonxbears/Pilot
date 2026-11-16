@@ -15,11 +15,11 @@
 
 use crate::instruction::Opcode;
 use crate::lower_expr::{OP_RANGE_HALF_OPEN, OP_RANGE_INCLUSIVE};
-use pilot_ast::BinaryOp;
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
+use pilot_ast::BinaryOp;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_parser::EnumeratorProtocol;
-use crate::value::PilotVal;
 
 /// How a loop reaches its elements.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -39,7 +39,10 @@ impl BytecodeCompiler {
             .and_then(|i| arena.for_clauses.get(i).copied());
         let collects = self.for_collects(node_id);
         let Some((iter_id, then_id)) = clause else {
-            return self.error(crate::codes::SYNTAX, "malformed `for` expression".to_string());
+            return self.error(
+                crate::codes::SYNTAX,
+                "malformed `for` expression".to_string(),
+            );
         };
         // A `for .. then` gives one value, not the list of what it yields.
         let collects = collects && then_id.is_none();
@@ -47,7 +50,11 @@ impl BytecodeCompiler {
         let is_range = iter_n.node_kind() == NodeKind::BinaryExpr
             && matches!(iter_n.flags, OP_RANGE_INCLUSIVE | OP_RANGE_HALF_OPEN);
         let proto = pilot_parser::bootstrap_tables().enumerator().cloned();
-        let static_type = if is_range { None } else { self.static_type(arena, iter_id) };
+        let static_type = if is_range {
+            None
+        } else {
+            self.static_type(arena, iter_id)
+        };
         let native_for_ops = static_type.as_deref().and_then(|t| {
             let tables = pilot_parser::bootstrap_tables();
             let get = tables.native_member(t, "for_get")?;
@@ -61,14 +68,17 @@ impl BytecodeCompiler {
         let walk = match &proto {
             _ if is_range => Walk::Range,
             _ if native_for_ops.is_some() => Walk::Index,
-            Some(p) if self.method_owners.contains_key(&p.get_enumerator)
-                && self.method_owners.contains_key(&p.move_next) =>
-            match &static_type {
-                Some(t) if self.declares(t, &p.get_enumerator).is_some() => Walk::Enumerate,
-                Some(t) if self.structs.contains_key(t) => Walk::Enumerate,
-                Some(_) => Walk::Index,
-                None => Walk::Either,
-            },
+            Some(p)
+                if self.method_owners.contains_key(&p.get_enumerator)
+                    && self.method_owners.contains_key(&p.move_next) =>
+            {
+                match &static_type {
+                    Some(t) if self.declares(t, &p.get_enumerator).is_some() => Walk::Enumerate,
+                    Some(t) if self.structs.contains_key(t) => Walk::Enumerate,
+                    Some(_) => Walk::Index,
+                    None => Walk::Either,
+                }
+            }
             _ => Walk::Index,
         };
 
@@ -148,7 +158,10 @@ impl BytecodeCompiler {
                 self.emit(Opcode::Move, r_seq, r_converted, 0);
                 self.release_to(mark);
             }
-            let len_op = native_for_ops.as_ref().map(|(_, l, _)| l.as_str()).unwrap_or("str_len");
+            let len_op = native_for_ops
+                .as_ref()
+                .map(|(_, l, _)| l.as_str())
+                .unwrap_or("str_len");
             let r_len = self.emit_intrinsic(len_op, &[r_seq]);
             self.emit(Opcode::Move, r_end, r_len, 0);
             self.release_to(mark);
@@ -173,13 +186,20 @@ impl BytecodeCompiler {
         if walk != Walk::Enumerate {
             let r_cond = self.alloc_reg();
             let inclusive = is_range && iter_n.flags == OP_RANGE_INCLUSIVE;
-            let cmp = if inclusive { Opcode::CmpLe } else { Opcode::CmpLt };
+            let cmp = if inclusive {
+                Opcode::CmpLe
+            } else {
+                Opcode::CmpLt
+            };
             self.emit(cmp, r_cond, r_idx, r_end);
             exits.push(self.emit_branch_unless(r_cond, r_cond));
             if is_range {
                 self.emit(Opcode::Move, slot, r_idx, 0);
             } else {
-                let get_op = native_for_ops.as_ref().map(|(_, _, g)| g.as_str()).unwrap_or("list_get");
+                let get_op = native_for_ops
+                    .as_ref()
+                    .map(|(_, _, g)| g.as_str())
+                    .unwrap_or("list_get");
                 let r_item = self.emit_intrinsic(get_op, &[r_seq, r_idx]);
                 self.emit(Opcode::Move, slot, r_item, 0);
                 self.release_to(mark);

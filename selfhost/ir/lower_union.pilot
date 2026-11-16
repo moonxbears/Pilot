@@ -11,19 +11,12 @@
 // then the member value. A method call on a union switches on the tag and
 // calls the member type's own method in each arm; the arms join with the
 // result, itself wrapped when the members' methods return different types.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerUnion;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_members.*;
+use selfhost.check.*;
 
 /// The `return` nodes of the body at `n`, not those of lambdas inside it.
-fn collect_returns(s: Snap, n: i64, out: List<i64>) {
+fn collect_returns(ref s: Snap, n: i64, var ref out: List<i64>) {
     if n < 0 { return; }
     let k = kind(s, n);
     if k == nk_lambda() || k == nk_fn() { return; }
@@ -35,7 +28,7 @@ fn collect_returns(s: Snap, n: i64, out: List<i64>) {
 /// the `=> expr` body's type, or the union of the types its `return`
 /// statements give. Unknown when one of them is unknown or none returns a
 /// value.
-pub fn inferred_return(lw: Lowerer, decl: i64) -> i64 {
+pub fn inferred_return(var ref lw: Lowerer, decl: i64) -> i64 {
     let s = lw.inf.p.s;
     let body = decl_body(s, decl);
     if body < 0 || annot(s, decl) >= 0 { return ty_unknown(); }
@@ -51,7 +44,7 @@ pub fn inferred_return(lw: Lowerer, decl: i64) -> i64 {
 }
 
 /// Whether type `t` is a union or has one among its type arguments.
-pub fn holds_union(tt: TypeTable, t: i64) -> bool {
+pub fn holds_union(ref tt: TypeTable, t: i64) -> bool {
     if t <= 0 { return false; }
     if ty_is_union(tt, t) { return true; }
     for a in ty_args(tt, t) {
@@ -63,7 +56,7 @@ pub fn holds_union(tt: TypeTable, t: i64) -> bool {
 /// The union of the item types of list literal `n` when they are different
 /// structs the program declares; unknown otherwise. Lists of the engine's
 /// own values (`[1, [2, 3]]`) and lists with spread items stay as they are.
-pub fn mixed_item_type(lw: Lowerer, n: i64) -> i64 {
+pub fn mixed_item_type(var ref lw: Lowerer, n: i64) -> i64 {
     let s = lw.inf.p.s;
     let tt = lw.inf.p.tt;
     var types: List<i64> = [];
@@ -85,7 +78,7 @@ pub fn mixed_item_type(lw: Lowerer, n: i64) -> i64 {
 /// `x is T`: for a union value, whether it holds its member `T` (the tag
 /// says which); for any other value, whether its type is `T`, which the
 /// checker already knows.
-pub fn lower_is(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_is(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let tt = lw.inf.p.tt;
     let vt = value_type(lw, lhs(s, n));
@@ -108,7 +101,7 @@ pub fn lower_is(lw: Lowerer, n: i64) -> u32 {
     return emit(lw, op_cmp(), 0, bool_phy, [held, want], n);
 }
 
-pub fn as_member_of(lw: Lowerer, v: u32, from: i64, to: i64, n: i64) -> u32 {
+pub fn as_member_of(var ref lw: Lowerer, v: u32, from: i64, to: i64, n: i64) -> u32 {
     let tt = lw.inf.p.tt;
     if !ty_is_union(tt, to) || from == to { return v; }
     let members = ty_args(tt, to);
@@ -123,14 +116,14 @@ pub fn as_member_of(lw: Lowerer, v: u32, from: i64, to: i64, n: i64) -> u32 {
 /// Argument `v` (of type `t`) of an engine operation: the member value of a
 /// union, which the engine takes as the value it is.
 [StandIn("ir.engine_union_arg", "an engine operation is called with typed arguments, a union passed as its tagged record", "the engine takes any value, so a union's member value is passed in place of the record", "F6")]
-pub fn engine_arg(lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {
+pub fn engine_arg(var ref lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {
     if !ty_is_union(lw.inf.p.tt, t) { return v; }
     return emit(lw, op_extract_field(), 1, layout_unknown(lw.ls), [v], n);
 }
 
 /// What method `name` returns on a value of union `u`: the union of what each
 /// member's method returns; unknown when `u` is no union or a member lacks it.
-pub fn union_method_return(lw: Lowerer, u: i64, name: str) -> i64 {
+pub fn union_method_return(ref lw: Lowerer, u: i64, name: str) -> i64 {
     let p = lw.inf.p;
     if !ty_is_union(p.tt, u) { return ty_unknown(); }
     var rets: List<i64> = [];
@@ -143,7 +136,7 @@ pub fn union_method_return(lw: Lowerer, u: i64, name: str) -> i64 {
 
 /// `recv.name(args)` where `recv` is a value of union `u`: one arm per
 /// member, chosen by the tag.
-pub fn union_member_call(lw: Lowerer, recv: u32, u: i64, name: str, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
+pub fn union_member_call(var ref lw: Lowerer, recv: u32, u: i64, name: str, ref arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
     let p = lw.inf.p;
     let members = ty_args(p.tt, u);
     var rets: List<i64> = [];

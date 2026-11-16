@@ -3,10 +3,8 @@
 // Milestone 60.7: Advanced Pilot Package Dependency & Version Resolver
 // Conforms to the Strict Universal Name-Blind Boundary.
 // =========================================================================
-pub pkg Pilot.SelfHost.Pkg.Resolver;
+pub pkg selfhost.pkg;
 
-use Pilot.SelfHost.Pkg.Version.*;
-use Pilot.SelfHost.Pkg.Manifest.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -1,0 +1,36 @@
+// PROP-005 5B.1: `pilot check --fix` makes a parameter that only borrows its
+// value `ref`, or `var ref` when the function changes it, and leaves one
+// whose function moves the value (selfhost/check/fix_borrows.pilot).
+//
+// The fixture (tests/tool_fixtures/check_fix/borrows.pilot) is copied to
+// target/check_fix/borrows.pilot and fixed there. Expected, worked by hand:
+//   - `count(b)` only reads b: `ref`, at line 9, column 10 (`fn count(` is
+//     9 characters);
+//   - `add_page(b, n)` pushes to b.pages: `var ref`, line 11, column 13;
+//   - `keep(b) => b` returns b, a move: left as it is, and reported where
+//     it moves (`kept:`, line 15, column 29);
+//   - `report(b)` passes b to `count`, whose parameter is now `ref`: `ref`,
+//     line 17, column 11;
+//   - `tag(ref b)` pushes through a read-only `ref`: made `var ref`, shown
+//     at its name, line 19, column 12 (`fn tag(ref ` is 11 characters);
+//   - `depth_a` and `depth_b` pass b to each other and move it nowhere:
+//     both `ref`, lines 24 and 29, column 12;
+//   - 5 new borrows and 1 widened `ref` in 1 file, 1 kept move; exit 0;
+//   - a second `--fix` finds nothing to change and the same kept move;
+//   - the fixed program checks and runs: pages [7, 0] (2), 2 + 10 (12),
+//     depth_a(b, 2) reaches depth_a(b, 0), which counts (2), then "t".
+use std.proc;
+
+fn main() {
+    let exe = proc.current_exe() ?? "pilot";
+    let copy = "target/check_fix/borrows.pilot";
+    let _ = File.write_text(copy, File.read_text("tests/tool_fixtures/check_fix/borrows.pilot"));
+    let fix = proc.run(exe, ["check", "--fix", copy], "");
+    print(fix.stdout);
+    print(fix.exit_code);
+    let again = proc.run(exe, ["check", "--fix", copy], "");
+    print(again.stdout);
+    let ran = proc.run(exe, ["run", copy], "");
+    print(ran.stdout);
+    print(ran.exit_code);
+}

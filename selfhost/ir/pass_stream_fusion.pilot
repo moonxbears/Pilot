@@ -5,7 +5,7 @@
 // Eliminates intermediate buffer allocations and opt<T> tag packing via SROA.
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Ir.StreamFusion;
+pub lvl(0) pkg selfhost.ir;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -66,7 +66,7 @@ pub fn stream_pipeline_spec_new(src_name: str, src_len: usize, term: StreamTermi
 // 2. Deforestation & Fused Loop Optimizer
 // ------------------------------------------------------------------------------
 
-pub fn fuse_stream_pipeline(spec: StreamPipelineSpec) -> FusedLoopPlan {
+pub fn fuse_stream_pipeline(ref spec: StreamPipelineSpec) -> FusedLoopPlan {
     let n_stages = spec.stages.len();
     // Each element-producing stage would otherwise materialize an
     // intermediate buffer; fusing the chain into one loop removes it.
@@ -96,6 +96,6 @@ pub fn fuse_stream_pipeline(spec: StreamPipelineSpec) -> FusedLoopPlan {
 
 /// Replaces the combinator chain in the caller's PilIR with the single fused
 /// loop the plan describes. The typed SSA IR it rewrites does not exist yet.
-pub fn rewrite_fused_pipeline(spec: StreamPipelineSpec, plan: FusedLoopPlan) -> i64 {
+pub fn rewrite_fused_pipeline(ref spec: StreamPipelineSpec, plan: FusedLoopPlan) -> i64 {
     return seam("fusion.rewrite_ir", "typed PilIR function builder arrives in F5");
 }

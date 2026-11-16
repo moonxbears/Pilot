@@ -12,9 +12,9 @@
 //! since those do not exist until the program runs.
 
 use crate::instruction::{Instruction, Opcode};
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 
 /// One `comptime` block or expression, compiled out of line.
 pub(crate) struct ComptimeRun {
@@ -46,7 +46,10 @@ impl BytecodeCompiler {
     /// Whether `decl`, a top-level item, declares a global.
     pub(crate) fn is_global_decl(&self, arena: &AstArena, decl: NodeId) -> bool {
         let n = arena.node(decl);
-        if !matches!(n.node_kind(), NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl) {
+        if !matches!(
+            n.node_kind(),
+            NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl
+        ) {
             return false;
         }
         Self::is_destructuring_let(arena, decl) || self.globals.contains(Self::name(arena, n.lhs))
@@ -102,7 +105,10 @@ impl BytecodeCompiler {
         let result = (n.flags == 1).then(|| format!("comptime#{entry}"));
         // `arena.units` is in link order and by first node, so the unit a
         // node belongs to is the last one starting at or before it.
-        let unit = arena.units.partition_point(|u| u.first_node <= id.0).saturating_sub(1);
+        let unit = arena
+            .units
+            .partition_point(|u| u.first_node <= id.0)
+            .saturating_sub(1);
         self.comptime_runs.push(ComptimeRun {
             unit,
             pos: arena.span(id).start,
@@ -120,13 +126,18 @@ impl BytecodeCompiler {
     /// its top-level statements and the address the block returns to. A unit
     /// without runs gets a no-op instead of its jump. When the program falls
     /// off its end (no `main`), a jump past the blocks ends it.
-    pub(crate) fn place_comptime_runs(&mut self, unit_starts: &[(usize, u32)], falls_through: bool) {
+    pub(crate) fn place_comptime_runs(
+        &mut self,
+        unit_starts: &[(usize, u32)],
+        falls_through: bool,
+    ) {
         let mut runs = std::mem::take(&mut self.comptime_runs);
         runs.sort_by_key(|r| r.pos);
         let last_unit = unit_starts.len().saturating_sub(1);
         let over = (falls_through && !runs.is_empty()).then(|| self.emit_jump(0));
         for (k, &(to_runs, back)) in unit_starts.iter().enumerate() {
-            let mine: Vec<&ComptimeRun> = runs.iter().filter(|r| r.unit.min(last_unit) == k).collect();
+            let mine: Vec<&ComptimeRun> =
+                runs.iter().filter(|r| r.unit.min(last_unit) == k).collect();
             if mine.is_empty() {
                 self.instructions[to_runs] = Instruction::encode(Opcode::Nop, 0, 0, 0);
                 continue;

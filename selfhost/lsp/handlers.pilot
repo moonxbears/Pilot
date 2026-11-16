@@ -3,12 +3,10 @@
 // Milestone 59.1: Pilot-Native LSP Reflection, Hover, Completion,
 // Definition, References & Rename Handlers.
 // =========================================================================
-pub pkg Pilot.SelfHost.Lsp.Handlers;
+pub pkg selfhost.lsp;
 
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
-use Pilot.Core.Memory.*;
-use Pilot.Core.Meta.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

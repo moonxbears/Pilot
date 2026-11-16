@@ -28,7 +28,7 @@
 //     is working code with a temporary representation. Registered in
 //     `stand_in_registry()`, and named in the `blocked_by` of every wiring
 //     ledger row it affects; those rows stay at DRAFT or below until it goes.
-pub pkg Pilot.SelfHost.Gate.Ledger.Seams;
+pub pkg selfhost.gate.ledger;
 
 /// Which side of the missing piece a seam stands on.
 pub enum SeamKind : u8 {
@@ -72,7 +72,6 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("build.target", ::Entry, "an LLVM, WASM, GPU or assembly backend behind `pilot build --target` (C11 is the only one)", "M56"),
         seam_entry("chor.cue_lattice", ::Entry, "cue payload lattice class from the resolved TypeDef (type checker)", "F4"),
         seam_entry("chor.emit_dispatchers", ::Exit, "PilIR function builder: one dispatcher per lowered .pchor route", "F5"),
-        seam_entry("cli.check_fix", ::Entry, "analyzer diagnostics that carry CST fixes, applied losslessly by `pilot check --fix`", "F4"),
         seam_entry("cli.command_handler", ::Entry, "handlers in `cli_handlers()` for compile, fmt, repl, pkg, deps, tree, venv, lsp, debug, perf, from, map, ide-sync", "F6"),
         seam_entry("cli.weave_struct", ::Entry, "[Cli]/[Arg] weaving of a struct into a CliAppDef (struct reflection + attribute weaver)", "F4"),
         seam_entry("coach.loop_clones", ::Entry, "PilIR loop bodies and clone calls scanned for PERF001", "F5"),

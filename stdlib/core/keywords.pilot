@@ -187,7 +187,7 @@ pub partial struct {
     [KeywordDefAttr(0, "Declares an immutable variable binding.")]
     let {}
 
-    [KeywordDefAttr(0, "Passes a value by reference; a plain parameter already borrows (`in`), `var ref` lends for changing.")]
+    [KeywordDefAttr(0, "Passes a value by reference: a `ref` parameter borrows it read-only, a `var ref` one may change it; a plain parameter moves an owned value.")]
     ref {}
 
     [KeywordDefAttr(0, "Conditional branching construct.")]

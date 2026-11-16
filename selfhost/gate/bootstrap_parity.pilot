@@ -10,7 +10,7 @@
 // While that seam is registered this gate reports that it stops there
 // (`at_seam`), never a pass.
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Gate.BootstrapParity;
+pub lvl(0) pkg selfhost.gate;
 
 /// The seam the stage build stops at; the id of the `seam(..)` call in
 /// `pilotc_bootstrap_stage_c11` (`selfhost/pilotc.pilot`).

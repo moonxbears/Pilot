@@ -10,7 +10,7 @@
 //   SYN005: Unbound Pattern Metavariable in quote Body
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Syntax.PatternDsl;
+pub lvl(0) pkg selfhost.syntax;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

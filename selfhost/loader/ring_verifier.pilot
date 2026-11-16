@@ -4,9 +4,9 @@
 // Enforces RING001 (Upward Dependency), RING002 (Freestanding Core),
 // RING003 (Retired Python-Clone Migration), and RING004 (Stale Cache Artifacts).
 // ==============================================================================
-pub lvl(0) pkg Pilot.Loader.RingVerifier;
+pub lvl(0) pkg selfhost.loader;
 
-use Pilot.Diagnostics.Model::*;
+use selfhost.diagnostics.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -44,7 +44,8 @@ pub fn parse_pkg_ring(pkg_name: str) -> u8 {
        str_starts_with(pkg_name, "stdlib.") || pkg_name == "stdlib" {
         return ring_std();
     }
-    if str_starts_with(pkg_name, "Pilot.SelfHost.") || str_starts_with(pkg_name, "SelfHost.") {
+    if str_starts_with(pkg_name, "selfhost.") || pkg_name == "selfhost" ||
+       str_starts_with(pkg_name, "Pilot.SelfHost.") || str_starts_with(pkg_name, "SelfHost.") {
         return ring_selfhost();
     }
     if str_starts_with(pkg_name, "pilot.") || pkg_name == "pilot" ||
@@ -90,7 +91,7 @@ pub fn verify_ring_dependency(importer_pkg: str, imported_pkg: str) -> RingCheck
     if r_from == ring_std() && r_to == ring_selfhost() {
         return ring_check_err(
             "RING001",
-            "Illegal ring dependency: Ring 2 (std.*) cannot import compiler internals (Pilot.SelfHost.*)"
+            "Illegal ring dependency: Ring 2 (std.*) cannot import compiler internals (selfhost.*)"
         );
     }
 

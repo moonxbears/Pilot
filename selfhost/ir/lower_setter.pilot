@@ -13,18 +13,12 @@
 // Inside a setter the parameter, or the setter-value word (`value`) when it
 // names none, is the value, and the backing word (`field`) is the record's
 // own storage for the property.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerSetter;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_members.*;
+use selfhost.check.*;
 
 /// The accessor block of property `field`, or -1.
-fn accessor_block(s: Snap, field: i64) -> i64 {
+fn accessor_block(ref s: Snap, field: i64) -> i64 {
     for row in s.properties {
         if row[0] == field && row.len() > 2 { return row[2]; }
     }
@@ -32,7 +26,7 @@ fn accessor_block(s: Snap, field: i64) -> i64 {
 }
 
 /// The setter bodies of property `field`, in declaration order.
-pub fn setter_bodies(s: Snap, field: i64) -> List<i64> {
+pub fn setter_bodies(ref s: Snap, field: i64) -> List<i64> {
     let block = accessor_block(s, field);
     if block < 0 { return []; }
     let bodies = children(s, block);
@@ -46,7 +40,7 @@ pub fn setter_bodies(s: Snap, field: i64) -> List<i64> {
 }
 
 /// `[body, parameter or -1, guard or -1]` of setter `body`.
-fn setter_row(s: Snap, body: i64) -> List<i64> {
+fn setter_row(ref s: Snap, body: i64) -> List<i64> {
     for row in s.setters {
         if row[0] == body { return row; }
     }
@@ -54,7 +48,7 @@ fn setter_row(s: Snap, body: i64) -> List<i64> {
 }
 
 /// The function that assigns property `field` of a `t` a value of type `vt`.
-fn setter_index(lw: Lowerer, field: i64, t: i64, vt: i64) -> i64 {
+fn setter_index(var ref lw: Lowerer, field: i64, t: i64, vt: i64) -> i64 {
     let s = lw.inf.p.s;
     let k = f"{field}:=@{t}:{ty_display(lw.inf.p.tt, vt)}";
     if lw.fn_index.has(k) { return lw.fn_index.get(k); }
@@ -70,14 +64,14 @@ fn setter_index(lw: Lowerer, field: i64, t: i64, vt: i64) -> i64 {
 }
 
 /// Whether queued function `idx` is a property's setter function.
-pub fn is_setter_fn(lw: Lowerer, idx: i64) -> bool {
+pub fn is_setter_fn(ref lw: Lowerer, idx: i64) -> bool {
     let body = lw.queue_body[idx];
     return body >= 0 && body == accessor_block(lw.inf.p.s, lw.queue[idx]);
 }
 
 /// `recv.name = value` where property `name` of `t` has setters: none when
 /// it has none the program runs.
-pub fn lower_property_write(lw: Lowerer, recv: u32, t: i64, name: str, value: i64, n: i64) -> u32? {
+pub fn lower_property_write(var ref lw: Lowerer, recv: u32, t: i64, name: str, value: i64, n: i64) -> u32? {
     let p = lw.inf.p;
     guard some m = prog_member(p, t, name) else { return none; };
     if setter_bodies(p.s, m.decl).len() == 0 || !runs_in_program(lw, m.decl) { return none; }
@@ -89,7 +83,7 @@ pub fn lower_property_write(lw: Lowerer, recv: u32, t: i64, name: str, value: i6
 
 /// `recv[i] = value` where indexer `decl` of `t` has setters: none when
 /// it has none the program runs.
-pub fn lower_indexer_write(lw: Lowerer, recv: u32, t: i64, decl: i64, arg_nodes: List<i64>, n: i64) -> u32? {
+pub fn lower_indexer_write(var ref lw: Lowerer, recv: u32, t: i64, decl: i64, ref arg_nodes: List<i64>, n: i64) -> u32? {
     let p = lw.inf.p;
     let s = p.s;
     if setter_bodies(s, decl).len() == 0 || !runs_in_program(lw, decl) || arg_nodes.len() < 2 { return none; }
@@ -111,7 +105,7 @@ pub fn lower_indexer_write(lw: Lowerer, recv: u32, t: i64, decl: i64, arg_nodes:
 
 /// `recv[i]` where indexer `decl` of `t` has a getter block: none when it
 /// has no getter the program runs.
-pub fn lower_indexer_read(lw: Lowerer, recv: u32, t: i64, decl: i64, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32? {
+pub fn lower_indexer_read(var ref lw: Lowerer, recv: u32, t: i64, decl: i64, ref arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32? {
     let p = lw.inf.p;
     let s = p.s;
     let block = accessor_block(s, decl);
@@ -134,7 +128,7 @@ pub fn lower_indexer_read(lw: Lowerer, recv: u32, t: i64, decl: i64, arg_nodes: 
 }
 
 /// The body of setter function `idx`, whose receiver is bound already.
-pub fn lower_setters(lw: Lowerer, idx: i64) {
+pub fn lower_setters(var ref lw: Lowerer, idx: i64) {
     let s = lw.inf.p.s;
     let field = lw.queue[idx];
     let vt = lw.queue_args[idx][0];
@@ -199,13 +193,13 @@ pub fn lower_setters(lw: Lowerer, idx: i64) {
 }
 
 /// Inside a setter, the setter-value word names the assigned value.
-pub fn is_setter_word(lw: Lowerer, n: i64) -> bool {
+pub fn is_setter_word(ref lw: Lowerer, n: i64) -> bool {
     let s = lw.inf.p.s;
     return lw.setter_arg != ir_no_value() && s.setter_value.len() > 0 && node_name(s, n) == s.setter_value;
 }
 
 /// `field = v` inside an accessor: the record's own storage for the property.
-pub fn lower_backing_write(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_backing_write(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let name = node_name(s, lw.cur_field);
     let slot = storage_slot(lw, lw.self_type, name);

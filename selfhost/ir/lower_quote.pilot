@@ -9,20 +9,13 @@
 // from its run plan. A quote the checker refused (QUOTE001, QUOTE002) stops
 // the program when it is reached.
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerQuote;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.check.quote_value.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
+use selfhost.check.*;
 
 /// `quote { e }`: `fill(..fill(decode(wire), h1).., hn)`, each `hi` the
 /// value of hole `i` or `lift(value)`.
-pub fn lower_quote(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_quote(var ref lw: Lowerer, n: i64) -> u32 {
     let p = lw.inf.p;
     var holes: List<i64> = [];
     var bad: List<i64> = [];

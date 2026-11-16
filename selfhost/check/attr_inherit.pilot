@@ -19,12 +19,8 @@
 // `[Name]` whose `NameAttr` struct implements `IStepAttribute`,
 // `IRuntimeStepAttribute` or `IInheritedAttribute`. Others (`[Layout]`,
 // `[EnforceCoreNaming]`, ..) are left to whatever reads them.
-pub lvl(0) pkg Pilot.SelfHost.Check.AttrInherit;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.diag.*;
-use selfhost.check.attr_text.*;
 
 /// The built-in function attributes, as written in `[Name(..)]`.
 pub pure fn debug_attr() -> str => "Debug";
@@ -69,7 +65,7 @@ pub struct EffAttr {
 fn key_of(n: i64) -> str => f"{n}";
 
 /// `[base offset, text]` of the file node `n` is in.
-pub fn file_of(s: Snap, n: i64) -> List<any> {
+pub fn file_of(ref s: Snap, n: i64) -> List<any> {
     let u = unit_of(s, n);
     if u < 0 || u >= s.files.len() { return [0, ""]; }
     let row: List<any> = s.files[u];
@@ -77,7 +73,7 @@ pub fn file_of(s: Snap, n: i64) -> List<any> {
 }
 
 /// The name written before attribute argument `a`, or "".
-pub fn attr_arg_label(s: Snap, a: i64) -> str {
+pub fn attr_arg_label(ref s: Snap, a: i64) -> str {
     let f = file_of(s, a);
     let base: i64 = f[0];
     let text: str = f[1];
@@ -85,10 +81,10 @@ pub fn attr_arg_label(s: Snap, a: i64) -> str {
 }
 
 /// Where a diagnostic about an attribute with arguments `args` on `n` points.
-pub fn attr_site(args: List<i64>, n: i64) -> i64 => if args.len() > 0 { args[0] } else { n };
+pub fn attr_site(ref args: List<i64>, n: i64) -> i64 => if args.len() > 0 { args[0] } else { n };
 
 /// Whether the type named `name` is `target` or reaches it through its bases.
-fn reaches_named(p: Program, name: str, target: str, depth: i64) -> bool {
+fn reaches_named(ref p: Program, name: str, target: str, depth: i64) -> bool {
     if name == target { return true; }
     if depth > 16 { return false; }
     for b in nl_get(p.bases, name) {
@@ -99,7 +95,7 @@ fn reaches_named(p: Program, name: str, target: str, depth: i64) -> bool {
 
 /// The struct that declares attribute `[name]` when it implements interface
 /// `iface`, or -1.
-pub fn attr_decl_with(p: Program, name: str, iface: str) -> i64 {
+pub fn attr_decl_with(ref p: Program, name: str, iface: str) -> i64 {
     let type_name = name + attr_struct_suffix();
     let d = prog_type_decl(p, type_name);
     if d < 0 || kind(p.s, d) != nk_struct() { return -1; }
@@ -107,17 +103,17 @@ pub fn attr_decl_with(p: Program, name: str, iface: str) -> i64 {
 }
 
 /// Whether node `n` is a declaration whose attributes its functions inherit.
-pub fn is_container(s: Snap, n: i64) -> bool {
+pub fn is_container(ref s: Snap, n: i64) -> bool {
     let k = kind(s, n);
     if k == nk_struct() || k == nk_interface() || k == nk_extend() { return true; }
     return k == nk_import_decl() && is_package_decl(s, n);
 }
 
 /// Whether node `n` is a function an attribute applies to directly.
-pub fn is_attr_fn(s: Snap, n: i64) -> bool => kind(s, n) == nk_fn() || kind(s, n) == nk_operator();
+pub fn is_attr_fn(ref s: Snap, n: i64) -> bool => kind(s, n) == nk_fn() || kind(s, n) == nk_operator();
 
 /// The `pkg` declaration of each file that carries attributes, by unit.
-pub fn package_decls(p: Program) -> Map<str, i64> {
+pub fn package_decls(ref p: Program) -> Map<str, i64> {
     let out = Map<str, i64>();
     for row in p.s.attrs {
         let t: i64 = row[0];
@@ -130,7 +126,7 @@ pub fn package_decls(p: Program) -> Map<str, i64> {
 
 /// The containers node `n` is written in, outermost first: its file's
 /// package, then the structs, interfaces and ext blocks around it.
-pub fn containers_of(p: Program, pkgs: Map<str, i64>, n: i64) -> List<i64> {
+pub fn containers_of(ref p: Program, ref pkgs: Map<str, i64>, n: i64) -> List<i64> {
     var inner: List<i64> = [];
     var cur = p.parents[n];
     while cur >= 0 {
@@ -149,21 +145,21 @@ pub fn containers_of(p: Program, pkgs: Map<str, i64>, n: i64) -> List<i64> {
 }
 
 /// The attribute rows on node `n`, as written.
-fn rows_on(p: Program, n: i64) -> List<i64> => nl_get(p.attrs, key_of(n));
+fn rows_on(ref p: Program, n: i64) -> List<i64> => nl_get(p.attrs, key_of(n));
 
-fn row_name(p: Program, r: i64) -> str {
+fn row_name(ref p: Program, r: i64) -> str {
     let row: List<any> = p.s.attrs[r];
     return sym_text(p.s, row[1]);
 }
 
-fn row_args(p: Program, r: i64) -> List<i64> {
+fn row_args(ref p: Program, r: i64) -> List<i64> {
     let row: List<any> = p.s.attrs[r];
     let args: List<i64> = row[2];
     return args;
 }
 
 /// Whether `[name(args)]` is a function attribute the checker knows.
-pub fn known_fn_attr(p: Program, name: str) -> bool {
+pub fn known_fn_attr(ref p: Program, name: str) -> bool {
     if name == debug_attr() || name == live_attr() || name == generate_attr() || name == no_inherit_attr()
         || name == coverage_attr() { return true; }
     return attr_decl_with(p, name, step_interface()) >= 0
@@ -172,7 +168,7 @@ pub fn known_fn_attr(p: Program, name: str) -> bool {
 }
 
 /// Whether `[name(args)]` written on a container reaches its functions.
-pub fn inheritable(p: Program, name: str, args: List<i64>) -> bool {
+pub fn inheritable(ref p: Program, name: str, ref args: List<i64>) -> bool {
     if name == debug_attr() || name == coverage_attr() { return true; }
     if name == generate_attr() {
         for a in args {
@@ -186,7 +182,7 @@ pub fn inheritable(p: Program, name: str, args: List<i64>) -> bool {
 
 /// The variant `policy()` of `[name]`'s struct returns, or "" when it keeps
 /// the interface's default.
-fn written_policy(p: Program, name: str) -> str {
+fn written_policy(ref p: Program, name: str) -> str {
     let s = p.s;
     let d = attr_decl_with(p, name, inherited_interface());
     if d < 0 { return ""; }
@@ -206,7 +202,7 @@ fn written_policy(p: Program, name: str) -> str {
 }
 
 /// What an inherited `[name]` does to one written closer.
-pub fn inherit_rule(p: Program, name: str) -> InheritRule {
+pub fn inherit_rule(ref p: Program, name: str) -> InheritRule {
     let written = written_policy(p, name);
     if written == "" { return ::Override; }
     let d = prog_type_decl(p, inherit_policy_type());
@@ -227,7 +223,7 @@ pub fn inherit_rule(p: Program, name: str) -> InheritRule {
 
 /// The names `[NoInherit(..)]` on node `n` drops: none when it carries no
 /// `[NoInherit]`, an empty list for a bare `[NoInherit]` (it drops all).
-fn no_inherit_names(p: Program, n: i64) -> List<str>? {
+fn no_inherit_names(ref p: Program, n: i64) -> List<str>? {
     var found = false;
     var names: List<str> = [];
     for r in rows_on(p, n) {
@@ -242,7 +238,7 @@ fn no_inherit_names(p: Program, n: i64) -> List<str>? {
     return if found { names } else { none };
 }
 
-fn listed(names: List<str>, name: str) -> bool {
+fn listed(ref names: List<str>, name: str) -> bool {
     for n in names {
         if n == name { return true; }
     }
@@ -250,7 +246,7 @@ fn listed(names: List<str>, name: str) -> bool {
 }
 
 /// `list` without what `[NoInherit]` on node `n` drops.
-fn drop_inherited(p: Program, n: i64, list: List<EffAttr>) -> List<EffAttr> {
+fn drop_inherited(ref p: Program, n: i64, list: List<EffAttr>) -> List<EffAttr> {
     let names = no_inherit_names(p, n);
     if names == none { return list; }
     let drop: List<str> = names;
@@ -263,7 +259,7 @@ fn drop_inherited(p: Program, n: i64, list: List<EffAttr>) -> List<EffAttr> {
 }
 
 /// `list` with `a` added, under the policy of what it meets.
-fn merge(p: Program, list: List<EffAttr>, a: EffAttr) -> List<EffAttr> {
+fn merge(ref p: Program, ref list: List<EffAttr>, a: EffAttr) -> List<EffAttr> {
     var met = -1;
     var i = 0;
     while i < list.len() {
@@ -302,7 +298,7 @@ fn merge(p: Program, list: List<EffAttr>, a: EffAttr) -> List<EffAttr> {
 
 /// What the containers around node `n` give it, before `n`'s own
 /// `[NoInherit]` and attributes.
-fn inherited_attrs(p: Program, pkgs: Map<str, i64>, n: i64) -> List<EffAttr> {
+fn inherited_attrs(ref p: Program, ref pkgs: Map<str, i64>, n: i64) -> List<EffAttr> {
     var list: List<EffAttr> = [];
     var depth = 0;
     for c in containers_of(p, pkgs, n) {
@@ -321,7 +317,7 @@ fn inherited_attrs(p: Program, pkgs: Map<str, i64>, n: i64) -> List<EffAttr> {
 
 /// The attributes that apply to function `f`: inherited ones first, then
 /// its own, as written (`[NoInherit]` itself left out).
-pub fn effective_attrs(p: Program, pkgs: Map<str, i64>, f: i64) -> List<EffAttr> {
+pub fn effective_attrs(ref p: Program, ref pkgs: Map<str, i64>, f: i64) -> List<EffAttr> {
     var list = drop_inherited(p, f, inherited_attrs(p, pkgs, f));
     let depth = containers_of(p, pkgs, f).len();
     for r in rows_on(p, f) {
@@ -336,7 +332,7 @@ pub fn effective_attrs(p: Program, pkgs: Map<str, i64>, f: i64) -> List<EffAttr>
 
 /// The name function `f` is shown by: `Type.method` inside a struct,
 /// interface or ext block.
-pub fn fn_shown_name(p: Program, pkgs: Map<str, i64>, f: i64) -> str {
+pub fn fn_shown_name(ref p: Program, ref pkgs: Map<str, i64>, f: i64) -> str {
     let s = p.s;
     let around = containers_of(p, pkgs, f);
     var i = around.len() - 1;
@@ -349,7 +345,7 @@ pub fn fn_shown_name(p: Program, pkgs: Map<str, i64>, f: i64) -> str {
 }
 
 /// What the functions inside container `c` are, for a message.
-fn reach_text(s: Snap, c: i64) -> str {
+fn reach_text(ref s: Snap, c: i64) -> str {
     let k = kind(s, c);
     if k == nk_struct() { return "the methods of a struct"; }
     if k == nk_interface() { return "the methods of an interface"; }
@@ -357,7 +353,7 @@ fn reach_text(s: Snap, c: i64) -> str {
     return "the functions of a package";
 }
 
-fn container_text(s: Snap, c: i64) -> str {
+fn container_text(ref s: Snap, c: i64) -> str {
     let k = kind(s, c);
     if k == nk_struct() { return "a struct"; }
     if k == nk_interface() { return "an interface"; }
@@ -366,7 +362,7 @@ fn container_text(s: Snap, c: i64) -> str {
 }
 
 /// Reports every function attribute that cannot apply where it is written.
-pub fn check_attr_inherit(p: Program, sink: DiagSink) {
+pub fn check_attr_inherit(ref p: Program, var ref sink: DiagSink) {
     let s = p.s;
     let pkgs = package_decls(p);
     for row in s.attrs {

@@ -3,13 +3,10 @@
 // Milestone 59.2: Incremental Document Store & Signature-Hash Early Cutoff
 // Replaces crates/pilot-db and crates/pilot-incremental in Pure Pilot.
 // =========================================================================
-pub pkg Pilot.SelfHost.Lsp.IdeDb;
+pub pkg selfhost.lsp;
 
 use std.text;
-use Pilot.SelfHost.Db.Revision::*;
-use Pilot.SelfHost.Db.Engine::*;
-use Pilot.SelfHost.Db.Queries::*;
-use Pilot.SelfHost.Db.CacheIo::*;
+use selfhost.db.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

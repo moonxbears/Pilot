@@ -26,9 +26,9 @@
 
 use crate::instruction::Opcode;
 use crate::lower_program::{LazyDecl, LazyKind};
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 use std::collections::{HashSet, VecDeque};
 
 /// Receptor sub-slots of the `*Bundle` collision modifiers (category 30,
@@ -49,7 +49,10 @@ impl BytecodeCompiler {
         for items in units {
             for &id in items {
                 let n = arena.node(id);
-                if matches!(n.node_kind(), NodeKind::StructDecl | NodeKind::InterfaceDecl) {
+                if matches!(
+                    n.node_kind(),
+                    NodeKind::StructDecl | NodeKind::InterfaceDecl
+                ) {
                     let name = Self::name(arena, n.lhs).to_string();
                     self.type_decls.entry(name).or_default().push(id);
                 }
@@ -86,7 +89,10 @@ impl BytecodeCompiler {
             }
             let u = NodeId(n.lhs);
             let un = arena.node(u);
-            if un.node_kind() != NodeKind::UnaryExpr || un.flags != pilot_ast::UNARY_OP_SPLAT || NodeId(un.lhs).is_none() {
+            if un.node_kind() != NodeKind::UnaryExpr
+                || un.flags != pilot_ast::UNARY_OP_SPLAT
+                || NodeId(un.lhs).is_none()
+            {
                 continue;
             }
             let bundle = Self::name(arena, arena.node(NodeId(un.lhs)).lhs).to_string();
@@ -125,7 +131,8 @@ impl BytecodeCompiler {
                     if taken.insert(exposed.clone()) {
                         self.add_inherited(arena, owner, &exposed, fm);
                         if !aliases.is_empty() {
-                            self.splice_fields.insert(format!("{owner}.{exposed}"), renames.clone());
+                            self.splice_fields
+                                .insert(format!("{owner}.{exposed}"), renames.clone());
                         }
                     }
                 }
@@ -171,7 +178,11 @@ impl BytecodeCompiler {
     pub(crate) fn stored_field(&self, arena: &AstArena, obj: NodeId, field: &str) -> String {
         if let Some(renames) = &self.cur_splice_fields {
             let on = arena.node(obj);
-            let name = if on.node_kind() == NodeKind::IdentExpr { Self::name(arena, on.lhs) } else { "" };
+            let name = if on.node_kind() == NodeKind::IdentExpr {
+                Self::name(arena, on.lhs)
+            } else {
+                ""
+            };
             if name == crate::RECEIVER || name == &crate::RECEIVER[1..] {
                 if let Some(new) = renames.get(field) {
                     return new.clone();
@@ -183,8 +194,15 @@ impl BytecodeCompiler {
 
     /// The declarations named `name` of node kind `kind`.
     pub(crate) fn decls_of(&self, arena: &AstArena, name: &str, kind: NodeKind) -> Vec<NodeId> {
-        let all = self.type_decls.get(name).map(Vec::as_slice).unwrap_or_default();
-        all.iter().copied().filter(|&d| arena.node(d).node_kind() == kind).collect()
+        let all = self
+            .type_decls
+            .get(name)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        all.iter()
+            .copied()
+            .filter(|&d| arena.node(d).node_kind() == kind)
+            .collect()
     }
 
     /// Gives `owner` the method `node` under the name `exposed`.
@@ -193,14 +211,16 @@ impl BytecodeCompiler {
         if self.lazy_decls.contains_key(&key) || self.fn_entries.contains_key(&key) {
             return;
         }
-        let is_static =
-            arena.decl_flags.get(node.0 as usize).copied().unwrap_or(0) & pilot_ast::DECL_FLAG_STATIC != 0;
+        let is_static = arena.decl_flags.get(node.0 as usize).copied().unwrap_or(0)
+            & pilot_ast::DECL_FLAG_STATIC
+            != 0;
         let owners = self.method_owners.entry(exposed.to_string()).or_default();
         if !owners.iter().any(|(o, _)| o == owner) {
             owners.push((owner.to_string(), is_static));
         }
         self.register_params(key.clone(), node);
-        let alias = (Self::name(arena, arena.node(node).lhs) != exposed).then(|| exposed.to_string());
+        let alias =
+            (Self::name(arena, arena.node(node).lhs) != exposed).then(|| exposed.to_string());
         let decl = LazyDecl {
             node,
             owner: Some(owner.to_string()),
@@ -212,7 +232,9 @@ impl BytecodeCompiler {
 
     /// Whether field `m` is a property whose accessors have bodies.
     pub(crate) fn is_computed_property(&self, arena: &AstArena, m: NodeId) -> bool {
-        self.accessor_blocks.get(&m.0).is_some_and(|&b| arena.node(b).rhs > 0)
+        self.accessor_blocks
+            .get(&m.0)
+            .is_some_and(|&b| arena.node(b).rhs > 0)
     }
 
     /// Registers the accessors of member `m` of a type, as accessors of
@@ -226,7 +248,11 @@ impl BytecodeCompiler {
             return;
         };
         let bn = *arena.node(block);
-        let bodies: Vec<NodeId> = arena.children_slice(bn.lhs, bn.rhs).iter().map(|&b| NodeId(b)).collect();
+        let bodies: Vec<NodeId> = arena
+            .children_slice(bn.lhs, bn.rhs)
+            .iter()
+            .map(|&b| NodeId(b))
+            .collect();
         let (getters, setters) = bodies.split_at((bn.flags as usize).min(bodies.len()));
         let field = Self::name(arena, arena.node(m).lhs).to_string();
         if let Some(&body) = getters.first() {
@@ -236,10 +262,13 @@ impl BytecodeCompiler {
                 let decl = LazyDecl {
                     node: body,
                     owner: Some(owner.to_string()),
-                    kind: LazyKind::Getter { field: field.clone() },
+                    kind: LazyKind::Getter {
+                        field: field.clone(),
+                    },
                     inherited: true,
                 };
-                self.lazy_decls.insert(accessor_key(owner, &field, false), decl);
+                self.lazy_decls
+                    .insert(accessor_key(owner, &field, false), decl);
             }
         }
         if let Some(&body) = setters.first() {
@@ -249,10 +278,14 @@ impl BytecodeCompiler {
                 let decl = LazyDecl {
                     node: body,
                     owner: Some(owner.to_string()),
-                    kind: LazyKind::Setter { field: field.clone(), bodies: setters.to_vec() },
+                    kind: LazyKind::Setter {
+                        field: field.clone(),
+                        bodies: setters.to_vec(),
+                    },
                     inherited: true,
                 };
-                self.lazy_decls.insert(accessor_key(owner, &field, true), decl);
+                self.lazy_decls
+                    .insert(accessor_key(owner, &field, true), decl);
             }
         }
     }
@@ -264,7 +297,11 @@ impl BytecodeCompiler {
             return;
         }
         let mn = *arena.node(m);
-        let ch: Vec<NodeId> = arena.children_slice(mn.lhs, mn.rhs).iter().map(|&c| NodeId(c)).collect();
+        let ch: Vec<NodeId> = arena
+            .children_slice(mn.lhs, mn.rhs)
+            .iter()
+            .map(|&c| NodeId(c))
+            .collect();
         let Some(&body_or_block) = ch.first() else {
             return;
         };
@@ -289,7 +326,11 @@ impl BytecodeCompiler {
         };
         if let Some(&block) = self.accessor_blocks.get(&m.0) {
             let bn = *arena.node(block);
-            let bodies: Vec<NodeId> = arena.children_slice(bn.lhs, bn.rhs).iter().map(|&b| NodeId(b)).collect();
+            let bodies: Vec<NodeId> = arena
+                .children_slice(bn.lhs, bn.rhs)
+                .iter()
+                .map(|&b| NodeId(b))
+                .collect();
             let (getters, setters) = bodies.split_at((bn.flags as usize).min(bodies.len()));
             if let Some(&body) = getters.first() {
                 add_owner(
@@ -297,7 +338,9 @@ impl BytecodeCompiler {
                     LazyDecl {
                         node: body,
                         owner: Some(owner.to_string()),
-                        kind: LazyKind::IndexerGetter { params: idx_params.clone() },
+                        kind: LazyKind::IndexerGetter {
+                            params: idx_params.clone(),
+                        },
                         inherited: true,
                     },
                     false,
@@ -309,7 +352,10 @@ impl BytecodeCompiler {
                     LazyDecl {
                         node: body,
                         owner: Some(owner.to_string()),
-                        kind: LazyKind::IndexerSetter { params: idx_params, bodies: setters.to_vec() },
+                        kind: LazyKind::IndexerSetter {
+                            params: idx_params,
+                            bodies: setters.to_vec(),
+                        },
                         inherited: true,
                     },
                     true,
@@ -331,14 +377,25 @@ impl BytecodeCompiler {
 
     /// Lowers a property accessor of `owner` as the function `key`: its
     /// first parameter is the record, a setter's second is the new value.
-    pub(crate) fn compile_accessor(&mut self, arena: &AstArena, key: &str, body: NodeId, owner: &str, kind: &LazyKind) {
+    pub(crate) fn compile_accessor(
+        &mut self,
+        arena: &AstArena,
+        key: &str,
+        body: NodeId,
+        owner: &str,
+        kind: &LazyKind,
+    ) {
         let (field, idx_params, setters) = match kind {
             LazyKind::Getter { field } => (field.clone(), Vec::new(), None),
             LazyKind::Setter { field, bodies } => (field.clone(), Vec::new(), Some(bodies.clone())),
-            LazyKind::IndexerGetter { params } => (pilot_parser::INDEX_GET_OP.to_string(), params.clone(), None),
-            LazyKind::IndexerSetter { params, bodies } => {
-                (pilot_parser::INDEX_SET_OP.to_string(), params.clone(), Some(bodies.clone()))
+            LazyKind::IndexerGetter { params } => {
+                (pilot_parser::INDEX_GET_OP.to_string(), params.clone(), None)
             }
+            LazyKind::IndexerSetter { params, bodies } => (
+                pilot_parser::INDEX_SET_OP.to_string(),
+                params.clone(),
+                Some(bodies.clone()),
+            ),
             LazyKind::Method { .. } | LazyKind::Destructor => return,
         };
         let receiver = crate::RECEIVER;
@@ -351,11 +408,14 @@ impl BytecodeCompiler {
             params.push("#value".to_string());
         }
         let pc = self.here();
-        self.fn_entries.insert(key.to_string(), (pc, params.clone()));
+        self.fn_entries
+            .insert(key.to_string(), (pc, params.clone()));
         self.reset_fn_state();
         self.cur_owner = Some(owner.to_string());
-        self.var_types.insert(receiver.to_string(), owner.to_string());
-        self.var_types.insert(receiver[1..].to_string(), owner.to_string());
+        self.var_types
+            .insert(receiver.to_string(), owner.to_string());
+        self.var_types
+            .insert(receiver[1..].to_string(), owner.to_string());
         for (i, p) in params.iter().enumerate() {
             let slot = self.alloc_local_reg();
             self.emit(Opcode::Move, slot, (i + 1) as u8, 0);
@@ -363,7 +423,8 @@ impl BytecodeCompiler {
         }
         for &p in &idx_params {
             if let Some(t) = Self::annot_name(arena, p) {
-                self.var_types.insert(Self::name(arena, arena.node(p).lhs).to_string(), t);
+                self.var_types
+                    .insert(Self::name(arena, arena.node(p).lhs).to_string(), t);
             }
         }
         let self_slot = self.var_slots[receiver];
@@ -382,12 +443,22 @@ impl BytecodeCompiler {
     /// first whose parameter type takes the value (checked only when there
     /// are several setters) and whose guard holds runs. When none does, the
     /// program stops with an error naming the property.
-    fn compile_setters(&mut self, arena: &AstArena, owner: &str, field: &str, bodies: &[NodeId]) -> u8 {
+    fn compile_setters(
+        &mut self,
+        arena: &AstArena,
+        owner: &str,
+        field: &str,
+        bodies: &[NodeId],
+    ) -> u8 {
         let value_slot = self.var_slots["#value"];
         let value_ident = pilot_parser::bootstrap_tables().setter_value_ident.clone();
         let outer = self.var_slots.clone();
         for &body in bodies {
-            let (param, guard) = self.setter_rows.get(&body.0).copied().unwrap_or((NodeId::NONE, NodeId::NONE));
+            let (param, guard) = self
+                .setter_rows
+                .get(&body.0)
+                .copied()
+                .unwrap_or((NodeId::NONE, NodeId::NONE));
             let name = if param.is_some() {
                 Self::name(arena, arena.node(param).lhs).to_string()
             } else {
@@ -433,7 +504,11 @@ impl BytecodeCompiler {
             let r_width = self.emit_const(PilotVal::from_int(layout.width));
             return self.emit_intrinsic("num_fits", &[r_val, r_class, r_width]);
         }
-        if self.structs.get(ty).is_some_and(|s| !s.fields.is_empty() || s.ctor.is_some()) {
+        if self
+            .structs
+            .get(ty)
+            .is_some_and(|s| !s.fields.is_empty() || s.ctor.is_some())
+        {
             let r_type = self.emit_intrinsic("record_type", &[r_val]);
             let r_name = self.emit_const(PilotVal::from_str(ty));
             let r_is = self.alloc_reg();
@@ -521,7 +596,9 @@ impl BytecodeCompiler {
     /// `emit_dispatchers` builds once the program is linked.
     fn emit_member_access(&mut self, kind: Switch, ty: Option<&str>, regs: &[u8]) -> u8 {
         if let (Switch::Set(f), Some(t)) = (&kind, ty) {
-            let has = |m: &std::collections::HashMap<String, Vec<String>>| m.get(f).is_some_and(|o| o.iter().any(|o| o == t));
+            let has = |m: &std::collections::HashMap<String, Vec<String>>| {
+                m.get(f).is_some_and(|o| o.iter().any(|o| o == t))
+            };
             if has(&self.getters) && !has(&self.setters) {
                 return self.error(
                     crate::codes::GET_ONLY_ASSIGN,
@@ -532,11 +609,16 @@ impl BytecodeCompiler {
         if let (Switch::IndexSet, Some(t)) = (&kind, ty) {
             if self.index_getters.contains(t)
                 && !self.index_setters.contains(t)
-                && !self.method_owners.get(pilot_parser::INDEX_SET_OP).is_some_and(|v| v.iter().any(|(o, _)| o == t))
+                && !self
+                    .method_owners
+                    .get(pilot_parser::INDEX_SET_OP)
+                    .is_some_and(|v| v.iter().any(|(o, _)| o == t))
             {
                 return self.error(
                     crate::codes::GET_ONLY_ASSIGN,
-                    format!("indexer of `{t}` has a getter and no setter, so it cannot be assigned"),
+                    format!(
+                        "indexer of `{t}` has a getter and no setter, so it cannot be assigned"
+                    ),
                 );
             }
         }
@@ -556,7 +638,9 @@ impl BytecodeCompiler {
         let r_type = self.emit_intrinsic("record_type", &regs[..1]);
         let to_plain = self.emit_branch(Opcode::JumpIfNull, r_type, 0);
         let name = kind.dispatcher();
-        self.dispatchers.entry(name.clone()).or_insert((kind.clone(), None));
+        self.dispatchers
+            .entry(name.clone())
+            .or_insert((kind.clone(), None));
         let r = self.emit_user_call(name.clone(), name, regs);
         self.emit(Opcode::Move, dst, r, 0);
         let to_end = self.emit_jump(0);
@@ -578,8 +662,11 @@ impl BytecodeCompiler {
         let names: Vec<String> = self.dispatchers.keys().cloned().collect();
         for name in names {
             let (kind, done) = self.dispatchers[&name].clone();
-            let owners: Vec<String> =
-                self.switch_owners(&kind).into_iter().filter(|o| self.constructed.contains(o)).collect();
+            let owners: Vec<String> = self
+                .switch_owners(&kind)
+                .into_iter()
+                .filter(|o| self.constructed.contains(o))
+                .collect();
             if done.as_ref() == Some(&owners) {
                 continue;
             }
@@ -596,7 +683,8 @@ impl BytecodeCompiler {
         self.reset_fn_state();
         let params: Vec<String> = (0..kind.arity()).map(|i| format!("#{i}")).collect();
         let pc = self.here();
-        self.fn_entries.insert(name.to_string(), (pc, params.clone()));
+        self.fn_entries
+            .insert(name.to_string(), (pc, params.clone()));
         let regs: Vec<u8> = (0..params.len())
             .map(|i| {
                 let slot = self.alloc_local_reg();
@@ -633,7 +721,13 @@ impl BytecodeCompiler {
 
     /// Writes `r_val` to member `field` of the value in `r_obj`: through the
     /// setter of a property, else as a field.
-    pub(crate) fn emit_member_write(&mut self, r_obj: u8, ty: Option<&str>, field: &str, r_val: u8) -> u8 {
+    pub(crate) fn emit_member_write(
+        &mut self,
+        r_obj: u8,
+        ty: Option<&str>,
+        field: &str,
+        r_val: u8,
+    ) -> u8 {
         self.emit_member_access(Switch::Set(field.to_string()), ty, &[r_obj, r_val]);
         r_val
     }
@@ -644,7 +738,13 @@ impl BytecodeCompiler {
     }
 
     /// `x[i] = v`.
-    pub(crate) fn emit_index_write(&mut self, r_obj: u8, ty: Option<&str>, r_key: u8, r_val: u8) -> u8 {
+    pub(crate) fn emit_index_write(
+        &mut self,
+        r_obj: u8,
+        ty: Option<&str>,
+        r_key: u8,
+        r_val: u8,
+    ) -> u8 {
         self.emit_member_access(Switch::IndexSet, ty, &[r_obj, r_key, r_val]);
         r_val
     }

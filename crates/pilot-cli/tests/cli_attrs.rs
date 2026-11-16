@@ -128,9 +128,18 @@ fn debug_traces_fields_on_the_seed() {
 
 #[test]
 fn debug_traces_on_pilir_and_c() {
-    for mode in [&["test", "--ir", DEBUG_CASE][..], &["test", "--emit", "c", DEBUG_CASE][..]] {
+    for mode in [
+        &["test", "--ir", DEBUG_CASE][..],
+        &["test", "--emit", "c", DEBUG_CASE][..],
+    ] {
         let out = pilot(mode);
-        assert_eq!(out.status.code(), Some(0), "{mode:?}\n{}{}", text(&out.stdout), text(&out.stderr));
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{mode:?}\n{}{}",
+            text(&out.stdout),
+            text(&out.stderr)
+        );
     }
 }
 
@@ -150,8 +159,14 @@ fn debug_rejects_bad_arguments() {
     let out = pilot(&["run", "tests/conformance/errors/err_attr_debug_level.pilot"]);
     let err = text(&out.stderr);
     assert_eq!(out.status.code(), Some(1));
-    assert!(err.contains("error[ATTR003]: `Loud` is not a level of `[Debug]`"), "{err}");
-    assert!(err.contains("error[ATTR003]: `[Debug]` has no argument `every`"), "{err}");
+    assert!(
+        err.contains("error[ATTR003]: `Loud` is not a level of `[Debug]`"),
+        "{err}"
+    );
+    assert!(
+        err.contains("error[ATTR003]: `[Debug]` has no argument `every`"),
+        "{err}"
+    );
     assert!(text(&out.stdout).is_empty());
 }
 
@@ -213,21 +228,36 @@ fn live_runs_on_build_not_on_run() {
 #[test]
 fn live_fault_fails_the_check() {
     let dir = scratch("live_fault");
-    let p = program(&dir, "fault.pilot", "[Live(1, 0)]\nfn div(a: i64, b: i64) -> i64 => a / b;\n\nfn main() {}\n");
+    let p = program(
+        &dir,
+        "fault.pilot",
+        "[Live(1, 0)]\nfn div(a: i64, b: i64) -> i64 => a / b;\n\nfn main() {}\n",
+    );
     let out = pilot(&["check", &p]);
     assert_eq!(out.status.code(), Some(1));
-    assert!(text(&out.stderr).contains("runtime error"), "{}", text(&out.stderr));
+    assert!(
+        text(&out.stderr).contains("runtime error"),
+        "{}",
+        text(&out.stderr)
+    );
     assert!(!text(&out.stdout).contains("check passed"));
 }
 
 #[test]
 fn live_argument_count_is_checked() {
     let dir = scratch("live_arity");
-    let p = program(&dir, "arity.pilot", "[Live(1)]\nfn add(a: i64, b: i64) -> i64 => a + b;\n\nfn main() {}\n");
+    let p = program(
+        &dir,
+        "arity.pilot",
+        "[Live(1)]\nfn add(a: i64, b: i64) -> i64 => a + b;\n\nfn main() {}\n",
+    );
     let out = pilot(&["check", &p]);
     assert_eq!(out.status.code(), Some(1));
     let err = text(&out.stderr);
-    assert!(err.contains("error[ATTR003]: `[Live]` gives `add` 1 argument(s); it takes 2"), "{err}");
+    assert!(
+        err.contains("error[ATTR003]: `[Live]` gives `add` 1 argument(s); it takes 2"),
+        "{err}"
+    );
 }
 
 const GEN_SRC: &str = "\
@@ -280,11 +310,17 @@ fn generate_writes_files_on_build_not_on_run() {
     let p = program(&dir, "gen.pilot", GEN_SRC);
     let ran = pilot(&["run", &p]);
     assert_eq!(text(&ran.stdout), "ran\n");
-    assert!(!dir.join("config.json").exists(), "`pilot run` must not generate");
+    assert!(
+        !dir.join("config.json").exists(),
+        "`pilot run` must not generate"
+    );
     let exe = dir.join("gen");
     let built = pilot(&["build", &p, "-o", exe.to_str().expect("utf-8 path")]);
     assert_eq!(built.status.code(), Some(0), "{}", text(&built.stderr));
-    assert_eq!(std::fs::read_to_string(dir.join("config.json")).expect("config.json written"), "{\"debug\": true}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.json")).expect("config.json written"),
+        "{\"debug\": true}"
+    );
 }
 
 #[test]
@@ -300,8 +336,14 @@ fn generate_needs_a_text_function_and_a_target() {
     let out = pilot(&["check", &p]);
     assert_eq!(out.status.code(), Some(1));
     let err = text(&out.stderr);
-    assert!(err.contains("error[ATTR004]: `[Generate]` function `takes` must take no parameters"), "{err}");
-    assert!(err.contains("error[ATTR004]: `[Generate]` function `number` must return `str`"), "{err}");
+    assert!(
+        err.contains("error[ATTR004]: `[Generate]` function `takes` must take no parameters"),
+        "{err}"
+    );
+    assert!(
+        err.contains("error[ATTR004]: `[Generate]` function `number` must return `str`"),
+        "{err}"
+    );
     assert!(err.contains("error[ATTR003]: `[Generate]` needs the file to write: `[Generate(\"name.ext\")]` or `[Generate(ext: \"ext\")]`"), "{err}");
     assert!(!dir.join("a.txt").exists() && !dir.join("b.txt").exists());
 }
@@ -349,10 +391,18 @@ fn live_run_fault_stops_the_run() {
     );
     let ran = pilot(&["run", &p]);
     assert_eq!(ran.status.code(), Some(1));
-    assert!(text(&ran.stderr).contains("runtime error"), "{}", text(&ran.stderr));
+    assert!(
+        text(&ran.stderr).contains("runtime error"),
+        "{}",
+        text(&ran.stderr)
+    );
     assert!(!text(&ran.stdout).contains("main"));
     let checked = pilot(&["check", &p]);
-    assert_eq!(checked.status.code(), Some(0), "a `::Run` call does not run on check");
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "a `::Run` call does not run on check"
+    );
 }
 
 #[test]
@@ -362,14 +412,21 @@ fn live_debug_and_on_save_wait_for_their_commands() {
     let debugged = pilot(&["debug", &p]);
     assert_eq!(debugged.status.code(), Some(70));
     let err = text(&debugged.stderr);
-    assert!(err.contains("SEAM001: unconnected seam `cli.command_handler`: `pilot debug`"), "{err}");
+    assert!(
+        err.contains("SEAM001: unconnected seam `cli.command_handler`: `pilot debug`"),
+        "{err}"
+    );
     assert!(!text(&debugged.stdout).contains("add(2, 2)"));
 }
 
 #[test]
 fn live_when_takes_only_flags() {
     let dir = scratch("live_bad_when");
-    let p = program(&dir, "bad.pilot", "[Live(1, when: ::Later)]\nfn one(a: i64) -> i64 => a;\n\nfn main() {}\n");
+    let p = program(
+        &dir,
+        "bad.pilot",
+        "[Live(1, when: ::Later)]\nfn one(a: i64) -> i64 => a;\n\nfn main() {}\n",
+    );
     let out = pilot(&["check", &p]);
     assert_eq!(out.status.code(), Some(1));
     let err = text(&out.stderr);
@@ -466,7 +523,10 @@ fn attr_chain_runs_steps_in_order() {
              check passed: 1 file(s), no errors\n"
         )
     );
-    assert!(!dir.join("b.txt").exists(), "a `::Stop` before `[Generate]` keeps it from writing");
+    assert!(
+        !dir.join("b.txt").exists(),
+        "a `::Stop` before `[Generate]` keeps it from writing"
+    );
     // On `pilot run` the steps run again before `main`; the `::Compile`
     // `[Live]`s keep their places without running.
     let ran = pilot(&["run", &p]);
@@ -528,7 +588,10 @@ fn attr_chain_checks_user_steps() {
 #[test]
 fn attr_runtime_steps_stop_at_their_seam() {
     let dir = scratch("attr_runtime");
-    let p = program(&dir, "rt.pilot", "use Pilot.Core.AttrFlow;
+    let p = program(
+        &dir,
+        "rt.pilot",
+        "use Pilot.Core.AttrFlow;
 
 struct OncePerCallAttr : IRuntimeStepAttribute {
     pub weight: i32 = 0;
@@ -539,11 +602,15 @@ struct OncePerCallAttr : IRuntimeStepAttribute {
 fn f() -> i64 => 1;
 
 fn main() { print(f()); }
-");
+",
+    );
     let ran = pilot(&["run", &p]);
     assert_eq!(ran.status.code(), Some(1));
     let err = text(&ran.stderr);
-    assert!(err.contains("SEAM001: unconnected seam `attr.runtime_step`"), "{err}");
+    assert!(
+        err.contains("SEAM001: unconnected seam `attr.runtime_step`"),
+        "{err}"
+    );
     assert!(!text(&ran.stdout).contains('1'), "`main` must not run");
 }
 
@@ -661,8 +728,15 @@ fn generate_on_a_package_writes_each_text_function() {
         text(&checked.stdout),
         format!("{p}:1: generated {d}/hello.txt\ncheck passed: 1 file(s), no errors\n")
     );
-    assert_eq!(std::fs::read_to_string(dir.join("hello.txt")).expect("hello.txt written"), "hi");
-    assert!(!dir.join("number.txt").exists() && !dir.join("takes.txt").exists() && !dir.join("main.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("hello.txt")).expect("hello.txt written"),
+        "hi"
+    );
+    assert!(
+        !dir.join("number.txt").exists()
+            && !dir.join("takes.txt").exists()
+            && !dir.join("main.txt").exists()
+    );
 }
 
 const INHERIT_BAD_SRC: &str = "[Live(1)]

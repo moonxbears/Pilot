@@ -5,7 +5,7 @@
 // TransportSpec, and ArchPolicyRule.
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Chor.Ast;
+pub lvl(0) pkg selfhost.chor;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

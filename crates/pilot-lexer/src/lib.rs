@@ -24,7 +24,12 @@ mod tests {
     fn test_14_seed_tokens_vs_identifiers() {
         let code = "__engine struct interface fn let ref if loop return yield defer comptime quote asm var switch for async select";
         let tape = tokenize(code);
-        let kinds: Vec<TokenKind> = tape.kinds.iter().copied().filter(|&k| k != TokenKind::Eof).collect();
+        let kinds: Vec<TokenKind> = tape
+            .kinds
+            .iter()
+            .copied()
+            .filter(|&k| k != TokenKind::Eof)
+            .collect();
         assert_eq!(
             kinds,
             vec![

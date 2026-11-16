@@ -47,11 +47,20 @@ fn report_pending(analyzed: &[Diag], checked: &[Diag]) -> i64 {
 /// The CLI's host operations.
 pub fn cli_host_ops() -> HostOpHandler {
     Box::new(|op, args| {
-        let text = |i: usize| args.get(i).and_then(HostValue::as_str).unwrap_or("").to_string();
+        let text = |i: usize| {
+            args.get(i)
+                .and_then(HostValue::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
         let texts = |i: usize| -> Vec<String> {
             args.get(i)
                 .and_then(HostValue::as_list)
-                .map(|l| l.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .map(|l| {
+                    l.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default()
         };
         let result = match op {
@@ -79,13 +88,19 @@ pub fn cli_host_ops() -> HostOpHandler {
                 // With the checker's sources (3) and declarations (4), owned
                 // values are dropped where its drop plan says (F7).
                 let checker = texts(3);
-                let plan = (!checker.is_empty()).then(|| check::drop_plan(&text(0), &checker, &texts(4)));
+                let plan =
+                    (!checker.is_empty()).then(|| check::drop_plan(&text(0), &checker, &texts(4)));
                 match run::compile_entry(&text(0), tail, &texts(5), plan.as_ref()) {
                     Ok(program) => {
                         let code = run::execute(program, texts(1));
-                        HostValue::List(vec![HostValue::Int(i64::from(code)), HostValue::List(Vec::new())])
+                        HostValue::List(vec![
+                            HostValue::Int(i64::from(code)),
+                            HostValue::List(Vec::new()),
+                        ])
                     }
-                    Err(d) => HostValue::List(vec![HostValue::Int(i64::from(EXIT_FAILURE)), diags(&d)]),
+                    Err(d) => {
+                        HostValue::List(vec![HostValue::Int(i64::from(EXIT_FAILURE)), diags(&d)])
+                    }
                 }
             }
             "cli_analyze" => diags(&run::analyze(&text(0))),
@@ -93,16 +108,28 @@ pub fn cli_host_ops() -> HostOpHandler {
                 let (found, rest) = check::check(&text(0), &texts(1), &texts(2), &text(3));
                 HostValue::List(vec![diags(&found), rest])
             }
-            "cli_program_tool" => {
-                HostValue::Int(i64::from(check::run_on_program(&text(0), &texts(1), &texts(2), &text(3))))
-            }
+            "cli_program_tool" => HostValue::Int(i64::from(check::run_on_program(
+                &text(0),
+                &texts(1),
+                &texts(2),
+                &text(3),
+            ))),
             "cli_checked_tool" => {
                 let path = text(0);
-                let report = move |checked: Vec<Diag>| report_pending(&run::analyze(&path), &checked);
-                HostValue::Int(i64::from(check::run_checked_on_program(&text(0), &texts(1), &texts(2), &text(3), report)))
+                let report =
+                    move |checked: Vec<Diag>| report_pending(&run::analyze(&path), &checked);
+                HostValue::Int(i64::from(check::run_checked_on_program(
+                    &text(0),
+                    &texts(1),
+                    &texts(2),
+                    &text(3),
+                    report,
+                )))
             }
             "cli_program_eval" => check::eval_on_program(&text(0), &texts(1), &texts(2), &text(3)),
-            "cli_text_tool" => HostValue::Int(i64::from(tool::run_on_text(&text(0), &texts(1), &text(2)))),
+            "cli_text_tool" => {
+                HostValue::Int(i64::from(tool::run_on_text(&text(0), &texts(1), &text(2))))
+            }
             "cli_functions" => run::declared_functions(&text(0)).unwrap_or(HostValue::Null),
             "cli_tool" | "cli_tool_on" => {
                 let files = texts(0);

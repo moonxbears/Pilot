@@ -4,7 +4,7 @@
 // Genuinely parses `syntax name(params...) => quote { ... $hole ... $*seq ... ~expr }`
 // into `MutableAstArena` templates and instantiates them via AST splicing & hygiene.
 // ==============================================================================
-pub pkg Pilot.SelfHost.Parser;
+pub pkg selfhost;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

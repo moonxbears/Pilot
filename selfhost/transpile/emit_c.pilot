@@ -3,9 +3,7 @@
 // `pilot emit c`: PilIR as C11, by the C-family dialect
 // (selfhost/transpile/c_family.pilot).
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitC;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.transpile.source.*;
-use selfhost.transpile.c_family.*;
 
 pub fn c_dialect() -> ISourceDialect => CFamilyDialect { cpp: false, text_scalars: [] };

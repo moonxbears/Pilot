@@ -17,12 +17,8 @@
 //            operator: neither an `op` nor a `syntax` rule.
 // GRAM001-GRAM004 (user operators that redefine or conflict) need the
 // table-driven lexer of PROP-008 step 2.
-pub lvl(0) pkg Pilot.SelfHost.Check.GrammarAttrs;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.diag.*;
-use selfhost.check.infer.*;
 
 /// The operator attributes and, for each, the positions (after the target)
 /// of its explicit symbol and readable word (-1: it has none) and whether
@@ -66,7 +62,7 @@ pub fn is_structural_symbol(sym: str) -> bool {
 
 /// The text of attribute argument `a`: a string, a name (`::Add` is `Add`)
 /// or `nameof(word)`; empty for anything else.
-fn arg_text(s: Snap, a: i64) -> str {
+fn arg_text(ref s: Snap, a: i64) -> str {
     let k = kind(s, a);
     if k == nk_str() || k == nk_ident() { return node_name(s, a); }
     if k == nk_call() {
@@ -79,13 +75,13 @@ fn arg_text(s: Snap, a: i64) -> str {
 }
 
 /// Whether `d` is a `syntax` rule: a function whose body is a quote template.
-fn is_syntax_rule(s: Snap, d: i64) -> bool {
+fn is_syntax_rule(ref s: Snap, d: i64) -> bool {
     if kind(s, d) != nk_fn() { return false; }
     let body = fn_body(s, d);
     return body >= 0 && kind(s, body) == nk_quote();
 }
 
-fn check_decl(p: Program, sink: DiagSink, d: i64) {
+fn check_decl(ref p: Program, var ref sink: DiagSink, d: i64) {
     let s = p.s;
     let name = node_name(s, d);
     for ga in grammar_attrs() {
@@ -123,7 +119,7 @@ fn check_decl(p: Program, sink: DiagSink, d: i64) {
 }
 
 /// GRAM005-GRAM007 over the user's files.
-pub fn check_grammar_attrs(inf: Infer, sink: DiagSink) {
+pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     var d = s.user_lo;

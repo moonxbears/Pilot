@@ -75,7 +75,8 @@ pub struct Program {
 
 /// Converts `main`'s return value into an exit code.
 fn exit_code_of(v: PilotVal) -> i32 {
-    v.as_int().map_or(0, |i| i.clamp(i32::MIN as i64, i32::MAX as i64) as i32)
+    v.as_int()
+        .map_or(0, |i| i.clamp(i32::MIN as i64, i32::MAX as i64) as i32)
 }
 
 /// The Pilot sources of the module loader (`mg_link_plan`).
@@ -93,7 +94,8 @@ pub fn pilot_str(s: &str) -> String {
 }
 
 fn val_str(vm: &PilVirtualMachine, v: PilotVal) -> String {
-    v.with_str(|s| s.to_string()).unwrap_or_else(|| vm.display(v))
+    v.with_str(|s| s.to_string())
+        .unwrap_or_else(|| vm.display(v))
 }
 
 /// The files of the program whose entry is `path`, in link order, as the
@@ -106,12 +108,25 @@ pub(crate) fn link_plan(path: &str) -> Result<Vec<String>, Vec<Diag>> {
 /// before the program's own file, in the same loader pass.
 fn link_plan_with(path: &str, extras: &[String]) -> Result<Vec<String>, Vec<Diag>> {
     let root = tool::toolchain_root();
-    let list: String = extras.iter().map(|e| format!("\"{}\",", pilot_str(e))).collect();
-    let call = format!("mg_link_plan_with(\"{}\", \"{}\", [{list}]);", pilot_str(path), pilot_str(&root));
+    let list: String = extras
+        .iter()
+        .map(|e| format!("\"{}\",", pilot_str(e)))
+        .collect();
+    let call = format!(
+        "mg_link_plan_with(\"{}\", \"{}\", [{list}]);",
+        pilot_str(path),
+        pilot_str(&root)
+    );
     let (vm, plan) = tool::eval_value(LOADER, &call);
     let parts = vm.list_items(plan).unwrap_or_default();
-    let paths = parts.first().and_then(|&p| vm.list_items(p)).unwrap_or_default();
-    let diags = parts.get(1).and_then(|&d| vm.list_items(d)).unwrap_or_default();
+    let paths = parts
+        .first()
+        .and_then(|&p| vm.list_items(p))
+        .unwrap_or_default();
+    let diags = parts
+        .get(1)
+        .and_then(|&d| vm.list_items(d))
+        .unwrap_or_default();
     if diags.is_empty() {
         return Ok(paths.into_iter().map(|p| val_str(&vm, p)).collect());
     }
@@ -143,7 +158,8 @@ pub fn compile(path: &str, tail: Option<&str>) -> Result<Program, Vec<Diag>> {
 /// The seed's drop plan from the checker's, its nodes moved into the
 /// offsets of `source`.
 fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropPlan {
-    let bases: std::collections::HashMap<&str, u32> = source.units().map(|(p, _, b)| (p, b)).collect();
+    let bases: std::collections::HashMap<&str, u32> =
+        source.units().map(|(p, _, b)| (p, b)).collect();
     let mut out = DropPlan::default();
     for (ty, glue) in &plan.glue {
         out.glue.insert(ty.clone(), glue.clone());
@@ -152,9 +168,14 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
         out.copy_glue.insert(ty.clone(), fields.clone());
     }
     for r in &plan.rows {
-        let Some(&base) = bases.get(r.file.as_str()) else { continue };
+        let Some(&base) = bases.get(r.file.as_str()) else {
+            continue;
+        };
         let key = (base + r.start, base + r.end, r.kind);
-        let item = || DropItem { binding: r.a.clone(), ty: r.b.clone() };
+        let item = || DropItem {
+            binding: r.a.clone(),
+            ty: r.b.clone(),
+        };
         match r.action {
             DropAction::Before => out.before.entry(key).or_default().push(item()),
             DropAction::After => out.after.entry(key).or_default().push(item()),
@@ -164,7 +185,11 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
             DropAction::Flag => out.flag.entry(key).or_default().push(item()),
             DropAction::Moved => out.moved.entry(key).or_default().push(item()),
             DropAction::Guard => out.guard.entry(key).or_default().push(item()),
-            DropAction::Seam => out.seams.entry(key).or_default().push((r.a.clone(), r.b.clone())),
+            DropAction::Seam => out
+                .seams
+                .entry(key)
+                .or_default()
+                .push((r.a.clone(), r.b.clone())),
             DropAction::Copy => {
                 out.copies.insert(key, r.a.clone());
             }
@@ -184,7 +209,10 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
                 out.type_tests.insert(key, (r.a.clone(), r.b.clone()));
             }
             DropAction::ViewCast => {
-                let args = r.b.split_whitespace().filter_map(|w| w.parse().ok()).collect();
+                let args =
+                    r.b.split_whitespace()
+                        .filter_map(|w| w.parse().ok())
+                        .collect();
                 out.view_casts.insert(key, (r.a.clone(), args));
             }
             DropAction::QuoteBuild => {
@@ -202,17 +230,27 @@ fn seed_drop_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> DropP
 /// The seed's probe plan from the checker's probes, their statements moved
 /// into the offsets of `source`.
 fn seed_probe_plan(source: &LinkedSource, plan: &check::CheckedDropPlan) -> ProbePlan {
-    let bases: std::collections::HashMap<&str, u32> = source.units().map(|(p, _, b)| (p, b)).collect();
+    let bases: std::collections::HashMap<&str, u32> =
+        source.units().map(|(p, _, b)| (p, b)).collect();
     let mut out = ProbePlan::default();
     for p in &plan.probes {
-        let Some(&base) = bases.get(p.file.as_str()) else { continue };
-        out.at.entry((base + p.start, base + p.end, p.kind)).or_default().push(p.probe.clone());
+        let Some(&base) = bases.get(p.file.as_str()) else {
+            continue;
+        };
+        out.at
+            .entry((base + p.start, base + p.end, p.kind))
+            .or_default()
+            .push(p.probe.clone());
     }
     out
 }
 
 /// `compile`, dropping owned values where the checker's `plan` says (F7).
-pub fn compile_planned(path: &str, tail: Option<&str>, plan: Option<&check::CheckedDropPlan>) -> Result<Program, Vec<Diag>> {
+pub fn compile_planned(
+    path: &str,
+    tail: Option<&str>,
+    plan: Option<&check::CheckedDropPlan>,
+) -> Result<Program, Vec<Diag>> {
     compile_entry(path, tail, &[], plan)
 }
 
@@ -234,21 +272,36 @@ pub fn compile_entry(
             .map_err(|e| vec![Diag::whole_file(path, codes::SYNTAX, e)]);
     }
     if let Err(e) = fs::metadata(path) {
-        return Err(vec![Diag::whole_file(path, UNREADABLE, format!("cannot read file: {e}"))]);
+        return Err(vec![Diag::whole_file(
+            path,
+            UNREADABLE,
+            format!("cannot read file: {e}"),
+        )]);
     }
     // Toolchain sources, found under the toolchain's root; one loader pass
     // orders them before the program's own file, which stays last.
     let root = tool::toolchain_root();
     let extras: Vec<String> = tail_links
         .iter()
-        .map(|e| std::path::Path::new(&root).join(e).to_string_lossy().replace('\\', "/"))
+        .map(|e| {
+            std::path::Path::new(&root)
+                .join(e)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
         .collect();
     let paths = link_plan_with(path, &extras)?;
     let mut files = Vec::with_capacity(paths.len() + 1);
     for p in paths {
         match fs::read_to_string(&p) {
             Ok(src) => files.push((p, src)),
-            Err(e) => return Err(vec![Diag::whole_file(&p, UNREADABLE, format!("cannot read file: {e}"))]),
+            Err(e) => {
+                return Err(vec![Diag::whole_file(
+                    &p,
+                    UNREADABLE,
+                    format!("cannot read file: {e}"),
+                )])
+            }
         }
     }
     if let Some(t) = tail {
@@ -279,7 +332,9 @@ pub fn compile_entry(
         return Err(parse_diags);
     }
     let drops = plan.map(|p| seed_drop_plan(&source, p)).unwrap_or_default();
-    let probes = plan.map(|p| seed_probe_plan(&source, p)).unwrap_or_default();
+    let probes = plan
+        .map(|p| seed_probe_plan(&source, p))
+        .unwrap_or_default();
     let bin = BytecodeCompiler::compile_linked_with_plans(&source.arena, drops, probes);
     if !bin.diagnostics.is_empty() {
         return Err(bin
@@ -331,7 +386,10 @@ pub fn execute(program: Program, args: Vec<String>) -> i32 {
     // Consecutive calls from one place (recursion) print once.
     let mut i = 0;
     while i < fault.trace.len() {
-        let run = fault.trace[i..].iter().take_while(|&&s| s == fault.trace[i]).count();
+        let run = fault.trace[i..]
+            .iter()
+            .take_while(|&&s| s == fault.trace[i])
+            .count();
         match run {
             1 => eprintln!("  called from {}", locate(fault.trace[i])),
             n => eprintln!("  called from {} ({n} times)", locate(fault.trace[i])),
@@ -357,14 +415,20 @@ pub fn declared_functions(path: &str) -> Option<HostValue> {
         if n.node_kind() != pilot_ast::NodeKind::FnDecl {
             continue;
         }
-        let name = arena.interner.resolve(pilot_intern::SymbolId(n.lhs)).to_string();
+        let name = arena
+            .interner
+            .resolve(pilot_intern::SymbolId(n.lhs))
+            .to_string();
         let attrs = arena
             .attrs
             .iter()
             .filter(|a| a.target.0 == c)
             .map(|a| HostValue::Str(arena.interner.resolve(a.name).to_string()))
             .collect();
-        out.push(HostValue::List(vec![HostValue::Str(name), HostValue::List(attrs)]));
+        out.push(HostValue::List(vec![
+            HostValue::Str(name),
+            HostValue::List(attrs),
+        ]));
     }
     Some(HostValue::List(out))
 }
@@ -414,7 +478,11 @@ pub fn analyze(path: &str) -> Vec<Diag> {
         })
         .collect();
     if let Some(e) = &result.physics.analyzer_error {
-        out.push(Diag::whole_file(path, ANALYZER_FAULT, format!("the analyzer stopped: {e}")));
+        out.push(Diag::whole_file(
+            path,
+            ANALYZER_FAULT,
+            format!("the analyzer stopped: {e}"),
+        ));
     }
     out
 }

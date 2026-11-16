@@ -10,10 +10,9 @@
 // floats `double` / `float`. Strings appear only as literals passed to
 // `print`; records stop at the representation seam. `print` shows values as
 // the seed does.
-pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitCsharp;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.ir.model.*;
-use selfhost.transpile.source.*;
+use selfhost.ir.*;
 
 pub struct CsharpDialect : ISourceDialect {
     pub fn language() -> str => "C#";

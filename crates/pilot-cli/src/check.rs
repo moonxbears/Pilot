@@ -36,8 +36,8 @@ use crate::link::LinkedSource;
 use crate::run::{self, Diag};
 use crate::tool;
 use pilot_ast::{
-    AstArena, NodeId, NodeKind, DECL_FLAG_NOALLOC, DECL_FLAG_OVERRIDE, DECL_FLAG_PARTIAL, DECL_FLAG_PKG, DECL_FLAG_PURE,
-    DECL_FLAG_STATIC, DECL_FLAG_VIS_WRITTEN, DECL_VIS_MASK,
+    AstArena, NodeId, NodeKind, DECL_FLAG_NOALLOC, DECL_FLAG_OVERRIDE, DECL_FLAG_PARTIAL,
+    DECL_FLAG_PKG, DECL_FLAG_PURE, DECL_FLAG_STATIC, DECL_FLAG_VIS_WRITTEN, DECL_VIS_MASK,
 };
 use pilot_span::ByteSpan;
 use pilot_vm::HostValue;
@@ -194,7 +194,12 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
         .splice_mods
         .iter()
         .map(|(splice, sub, member, alias)| {
-            ints([i64::from(splice.0), i64::from(*sub), i64::from(member.0), i64::from(alias.0)])
+            ints([
+                i64::from(splice.0),
+                i64::from(*sub),
+                i64::from(member.0),
+                i64::from(alias.0),
+            ])
         })
         .collect();
     let accessors = arena
@@ -256,7 +261,13 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
     let setters = arena
         .property_setters
         .iter()
-        .map(|(body, param, guard)| ints(vec![i64::from(body.0), reference(param.0), reference(guard.0)]))
+        .map(|(body, param, guard)| {
+            ints(vec![
+                i64::from(body.0),
+                reference(param.0),
+                reference(guard.0),
+            ])
+        })
         .collect();
     let tables = pilot_parser::bootstrap_tables();
     // `[type, frame field, constructor, each-item function]`, or empty.
@@ -269,10 +280,14 @@ fn snapshot(linked: &LinkedSource, files: &[(String, bool)], program_files: usiz
                 .collect()
         })
         .unwrap_or_default();
-    let receiver_words = [&tables.receiver_ident, &tables.backing_ident, &tables.setter_value_ident]
-        .into_iter()
-        .map(|w| HostValue::Str(w.clone()))
-        .collect();
+    let receiver_words = [
+        &tables.receiver_ident,
+        &tables.backing_ident,
+        &tables.setter_value_ident,
+    ]
+    .into_iter()
+    .map(|w| HostValue::Str(w.clone()))
+    .collect();
     HostValue::List(vec![
         ints(nodes),
         ints(extra),
@@ -335,7 +350,12 @@ pub(crate) fn in_stdlib(path: &str) -> bool {
 /// the diagnostics in the user's files and the third part. A program that
 /// does not link gives neither: `cli_check` reports why it does not. A run
 /// plan is kept for `drop_plan`, for a caller that runs the program next.
-pub fn check(path: &str, checker_files: &[String], decls: &[String], entry: &str) -> (Vec<Diag>, HostValue) {
+pub fn check(
+    path: &str,
+    checker_files: &[String],
+    decls: &[String],
+    entry: &str,
+) -> (Vec<Diag>, HostValue) {
     let Some((linked, files, snap)) = program_snapshot(path, decls) else {
         return (Vec::new(), HostValue::Null);
     };
@@ -352,7 +372,10 @@ pub fn check(path: &str, checker_files: &[String], decls: &[String], entry: &str
         let made = decode_plan(&linked, &plan);
         KEPT_PLAN.with(|k| *k.borrow_mut() = Some((plan_key(path, checker_files, decls), made)));
     }
-    (user_diags(&linked, &files, &out), parts.next().unwrap_or(HostValue::Null))
+    (
+        user_diags(&linked, &files, &out),
+        parts.next().unwrap_or(HostValue::Null),
+    )
 }
 
 /// The checker's diagnostic rows `out` (`[code, message, start, end,
@@ -435,7 +458,9 @@ fn planned_probe(linked: &LinkedSource, row: &HostValue) -> Option<PlannedProbe>
         let code = pair.first()?.as_int()?;
         let text = pair.get(1).and_then(HostValue::as_str).unwrap_or("");
         let flag = matches!(pair.get(1), Some(HostValue::Bool(true)));
-        args.push(pilot_vm::lower_probe::ProbeArg::from_code(code, text, flag)?);
+        args.push(pilot_vm::lower_probe::ProbeArg::from_code(
+            code, text, flag,
+        )?);
     }
     let (file, start, end) = linked.resolve(ByteSpan::new(n(0) as u32, n(1) as u32));
     Some(PlannedProbe {
@@ -469,7 +494,12 @@ fn plan_key(path: &str, checker_files: &[String], decls: &[String]) -> String {
 /// is used instead of computing it again.
 pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> CheckedDropPlan {
     let key = plan_key(path, checker_files, decls);
-    if let Some(kept) = KEPT_PLAN.with(|k| k.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, p)| p.clone())) {
+    if let Some(kept) = KEPT_PLAN.with(|k| {
+        k.borrow()
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, p)| p.clone())
+    }) {
         return kept;
     }
     let Some((linked, _, snap)) = program_snapshot(path, decls) else {
@@ -480,7 +510,10 @@ pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> Chec
         _ => None,
     });
     let tool_paths: Vec<&str> = checker_files.iter().map(String::as_str).collect();
-    decode_plan(&linked, &tool::eval_to_host(&tool_paths, "run_plan();", ops))
+    decode_plan(
+        &linked,
+        &tool::eval_to_host(&tool_paths, "run_plan();", ops),
+    )
 }
 
 /// The checker's run plan `out` (`run_plan()`), its nodes placed in the
@@ -488,22 +521,45 @@ pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> Chec
 fn decode_plan(linked: &LinkedSource, out: &HostValue) -> CheckedDropPlan {
     let parts = out.as_list().unwrap_or_default();
     let mut plan = CheckedDropPlan::default();
-    for r in parts.get(1).and_then(HostValue::as_list).unwrap_or_default() {
+    for r in parts
+        .get(1)
+        .and_then(HostValue::as_list)
+        .unwrap_or_default()
+    {
         plan.probes.extend(planned_probe(linked, r));
     }
-    for r in parts.first().and_then(HostValue::as_list).unwrap_or_default() {
+    for r in parts
+        .first()
+        .and_then(HostValue::as_list)
+        .unwrap_or_default()
+    {
         let Some(f) = r.as_list() else { continue };
-        let s = |i: usize| f.get(i).and_then(HostValue::as_str).unwrap_or("").to_string();
+        let s = |i: usize| {
+            f.get(i)
+                .and_then(HostValue::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
         let n = |i: usize| f.get(i).and_then(HostValue::as_int).unwrap_or(0);
-        let Some(action) = pilot_vm::lower_drop::DropAction::from_code(n(0)) else { continue };
+        let Some(action) = pilot_vm::lower_drop::DropAction::from_code(n(0)) else {
+            continue;
+        };
         use pilot_vm::lower_drop::DropAction;
         if matches!(action, DropAction::Glue | DropAction::CopyGlue) {
             let raw: Vec<String> = f
                 .get(3)
                 .and_then(HostValue::as_list)
-                .map(|l| l.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .map(|l| {
+                    l.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default();
-            let fields = raw.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].clone(), c[1].clone())).collect();
+            let fields = raw
+                .chunks(2)
+                .filter(|c| c.len() == 2)
+                .map(|c| (c[0].clone(), c[1].clone()))
+                .collect();
             if action == DropAction::Glue {
                 let elements = (!s(4).is_empty()).then(|| pilot_vm::lower_drop::DropElements {
                     ty: s(4),
@@ -574,7 +630,9 @@ pub fn run_checked_on_program(
         "chk_snapshot" => Some(Ok(snap.clone())),
         "chk_report" => {
             let rows = args.first().cloned().unwrap_or(HostValue::Null);
-            Some(Ok(HostValue::Int(report(user_diags(&linked, &files, &rows)))))
+            Some(Ok(HostValue::Int(report(user_diags(
+                &linked, &files, &rows,
+            )))))
         }
         _ => None,
     });
@@ -586,7 +644,12 @@ pub fn run_checked_on_program(
 /// the program at `path` served as `chk_snapshot`, like `run_on_program`;
 /// gives the value `entry` returns. A program that does not link gives
 /// `HostValue::Null`.
-pub fn eval_on_program(path: &str, tool_files: &[String], decls: &[String], entry: &str) -> HostValue {
+pub fn eval_on_program(
+    path: &str,
+    tool_files: &[String],
+    decls: &[String],
+    entry: &str,
+) -> HostValue {
     let Some((_, _, snap)) = program_snapshot(path, decls) else {
         return HostValue::Null;
     };
@@ -600,14 +663,19 @@ pub fn eval_on_program(path: &str, tool_files: &[String], decls: &[String], entr
 
 /// The program at `path` linked with the declaration files `decls`: its
 /// linked source, its files (`[path, is the user's]`) and its snapshot.
-fn program_snapshot(path: &str, decls: &[String]) -> Option<(LinkedSource, Vec<(String, bool)>, HostValue)> {
+fn program_snapshot(
+    path: &str,
+    decls: &[String],
+) -> Option<(LinkedSource, Vec<(String, bool)>, HostValue)> {
     let Ok(mut paths) = run::link_plan(path) else {
         return None;
     };
     let program_files = paths.len();
     // The same file can be spelled two ways (`stdlib/..`, `./stdlib/..`);
     // a declaration file the program already links is not linked again.
-    let canonical = |p: &str| fs::canonicalize(p).map_or_else(|_| p.to_string(), |c| c.to_string_lossy().into_owned());
+    let canonical = |p: &str| {
+        fs::canonicalize(p).map_or_else(|_| p.to_string(), |c| c.to_string_lossy().into_owned())
+    };
     let mut seen: std::collections::HashSet<String> = paths.iter().map(|p| canonical(p)).collect();
     for p in decl_files(decls) {
         if seen.insert(canonical(&p)) {

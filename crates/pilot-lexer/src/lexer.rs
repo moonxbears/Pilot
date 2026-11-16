@@ -4,13 +4,13 @@
 //! raw atomic literals (with name-blind `TokenFlags::IS_DIMENSIONAL` and `IS_INTERPOLATED`),
 //! two-way dot (`InfixDot` vs `PrefixDot`), and 6 homoiconic call-quote projections.
 
-use pilot_span::ByteSpan;
 use crate::keywords::lookup_keyword;
 use crate::simd::{
     scan_ident_run, scan_interpolated_string_end, scan_quoted_string_end,
     scan_to_block_comment_end, scan_to_newline, scan_triple_string_end, scan_whitespace_run,
 };
 use crate::token::{TokenFlags, TokenKind, TokenTape};
+use pilot_span::ByteSpan;
 
 pub struct Lexer<'a> {
     source: &'a str,
@@ -65,7 +65,11 @@ impl<'a> Lexer<'a> {
 
             // Comments & Stage-0 Preprocessor Directive Lines (`//`, `/* ... */`, `#...`)
             if b0 == b'#' {
-                let kind = if start == 0 && b1 == b'!' { TokenKind::Shebang } else { TokenKind::Comment };
+                let kind = if start == 0 && b1 == b'!' {
+                    TokenKind::Shebang
+                } else {
+                    TokenKind::Comment
+                };
                 let end = scan_to_newline(self.bytes, start + 1);
                 self.pos = end;
                 self.emit(kind, TokenFlags::NONE, start, end, false);
@@ -124,13 +128,25 @@ impl<'a> Lexer<'a> {
             if b0 == b':' {
                 if b1 == b':' {
                     self.pos += 2;
-                    self.emit(TokenKind::DoubleColon, TokenFlags::NONE, start, self.pos, false);
+                    self.emit(
+                        TokenKind::DoubleColon,
+                        TokenFlags::NONE,
+                        start,
+                        self.pos,
+                        false,
+                    );
                     continue;
                 }
                 if b1 == b'=' {
                     if b2 == b':' {
                         self.pos += 3;
-                        self.emit(TokenKind::SwapEqual, TokenFlags::NONE, start, self.pos, false);
+                        self.emit(
+                            TokenKind::SwapEqual,
+                            TokenFlags::NONE,
+                            start,
+                            self.pos,
+                            false,
+                        );
                     } else {
                         self.pos += 2;
                         self.emit(TokenKind::Walrus, TokenFlags::NONE, start, self.pos, false);
@@ -170,12 +186,24 @@ impl<'a> Lexer<'a> {
             if b0 == b'!' {
                 if b1 == b'=' {
                     self.pos += 2;
-                    self.emit(TokenKind::NotEqual, TokenFlags::NONE, start, self.pos, false);
+                    self.emit(
+                        TokenKind::NotEqual,
+                        TokenFlags::NONE,
+                        start,
+                        self.pos,
+                        false,
+                    );
                     continue;
                 }
                 if b1 == b'(' {
                     self.pos += 1;
-                    self.emit(TokenKind::CallQuoteShallow, TokenFlags::FOLLOWED_BY_LPAREN, start, self.pos, false);
+                    self.emit(
+                        TokenKind::CallQuoteShallow,
+                        TokenFlags::FOLLOWED_BY_LPAREN,
+                        start,
+                        self.pos,
+                        false,
+                    );
                     continue;
                 }
                 let cq = match (b1, b2) {
@@ -192,7 +220,13 @@ impl<'a> Lexer<'a> {
                     continue;
                 }
                 self.pos += 1;
-                self.emit(TokenKind::Exclamation, TokenFlags::NONE, start, self.pos, true);
+                self.emit(
+                    TokenKind::Exclamation,
+                    TokenFlags::NONE,
+                    start,
+                    self.pos,
+                    true,
+                );
                 continue;
             }
 
@@ -210,7 +244,10 @@ impl<'a> Lexer<'a> {
                     continue;
                 }
                 self.pos += 1;
-                let dot_kind = if !self.preceded_by_ws && !self.preceded_by_nl && self.last_token_can_precede_infix_dot {
+                let dot_kind = if !self.preceded_by_ws
+                    && !self.preceded_by_nl
+                    && self.last_token_can_precede_infix_dot
+                {
                     TokenKind::InfixDot
                 } else {
                     TokenKind::PrefixDot
@@ -227,7 +264,13 @@ impl<'a> Lexer<'a> {
         self.tape
     }
 
-    fn scan_string_literal(&mut self, token_start: usize, quote_pos: usize, quote: u8, extra_flags: TokenFlags) {
+    fn scan_string_literal(
+        &mut self,
+        token_start: usize,
+        quote_pos: usize,
+        quote: u8,
+        extra_flags: TokenFlags,
+    ) {
         let is_interp = extra_flags.contains(TokenFlags::IS_INTERPOLATED);
         let is_raw = extra_flags.contains(TokenFlags::IS_RAW_STRING);
         if self.peek_at(quote_pos + 1) == quote && self.peek_at(quote_pos + 2) == quote {
@@ -263,38 +306,60 @@ impl<'a> Lexer<'a> {
         if b0 == b'0' && (b1 == b'x' || b1 == b'X') {
             kind = TokenKind::HexIntLit;
             cur += 2;
-            while cur < self.bytes.len() && (self.bytes[cur].is_ascii_hexdigit() || self.bytes[cur] == b'_') {
+            while cur < self.bytes.len()
+                && (self.bytes[cur].is_ascii_hexdigit() || self.bytes[cur] == b'_')
+            {
                 cur += 1;
             }
         } else if b0 == b'0' && (b1 == b'b' || b1 == b'B') {
             kind = TokenKind::BinIntLit;
             cur += 2;
-            while cur < self.bytes.len() && (self.bytes[cur] == b'0' || self.bytes[cur] == b'1' || self.bytes[cur] == b'_') {
+            while cur < self.bytes.len()
+                && (self.bytes[cur] == b'0' || self.bytes[cur] == b'1' || self.bytes[cur] == b'_')
+            {
                 cur += 1;
             }
         } else if b0 == b'0' && (b1 == b'o' || b1 == b'O') {
             kind = TokenKind::OctIntLit;
             cur += 2;
-            while cur < self.bytes.len() && ((self.bytes[cur] >= b'0' && self.bytes[cur] <= b'7') || self.bytes[cur] == b'_') {
+            while cur < self.bytes.len()
+                && ((self.bytes[cur] >= b'0' && self.bytes[cur] <= b'7') || self.bytes[cur] == b'_')
+            {
                 cur += 1;
             }
         } else {
-            while cur < self.bytes.len() && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_') {
+            while cur < self.bytes.len()
+                && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_')
+            {
                 cur += 1;
             }
-            if cur + 1 < self.bytes.len() && self.bytes[cur] == b'.' && self.bytes[cur + 1].is_ascii_digit() {
+            if cur + 1 < self.bytes.len()
+                && self.bytes[cur] == b'.'
+                && self.bytes[cur + 1].is_ascii_digit()
+            {
                 kind = TokenKind::FloatLit;
                 cur += 1;
-                while cur < self.bytes.len() && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_') {
+                while cur < self.bytes.len()
+                    && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_')
+                {
                     cur += 1;
                 }
             }
             if cur < self.bytes.len() && (self.bytes[cur] == b'e' || self.bytes[cur] == b'E') {
                 let next_e = self.peek_at(cur + 1);
-                if next_e.is_ascii_digit() || ((next_e == b'+' || next_e == b'-') && self.peek_at(cur + 2).is_ascii_digit()) {
+                if next_e.is_ascii_digit()
+                    || ((next_e == b'+' || next_e == b'-')
+                        && self.peek_at(cur + 2).is_ascii_digit())
+                {
                     kind = TokenKind::FloatLit;
-                    cur += if next_e == b'+' || next_e == b'-' { 2 } else { 1 };
-                    while cur < self.bytes.len() && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_') {
+                    cur += if next_e == b'+' || next_e == b'-' {
+                        2
+                    } else {
+                        1
+                    };
+                    while cur < self.bytes.len()
+                        && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_')
+                    {
                         cur += 1;
                     }
                 }
@@ -305,9 +370,7 @@ impl<'a> Lexer<'a> {
         // name (`200u8`, `0xFFu8`). Any adjacent non-seed alphabetic identifier
         // run marks `TokenFlags::IS_DIMENSIONAL`; the parser tells them apart.
         let mut flags = TokenFlags::NONE;
-        if cur < self.bytes.len()
-            && self.bytes[cur].is_ascii_alphabetic()
-        {
+        if cur < self.bytes.len() && self.bytes[cur].is_ascii_alphabetic() {
             let unit_len = scan_ident_run(self.bytes, cur);
             if unit_len > 0 && lookup_keyword(&self.source[cur..cur + unit_len]).is_none() {
                 cur += unit_len;
@@ -400,7 +463,11 @@ impl<'a> Lexer<'a> {
             // A character no rule takes is one error token, all its bytes,
             // so a token never ends inside a multi-byte character.
             _ => {
-                let width = self.source.get(start..).and_then(|rest| rest.chars().next()).map_or(1, char::len_utf8);
+                let width = self
+                    .source
+                    .get(start..)
+                    .and_then(|rest| rest.chars().next())
+                    .map_or(1, char::len_utf8);
                 (TokenKind::ErrorToken, width, false)
             }
         };
@@ -410,24 +477,47 @@ impl<'a> Lexer<'a> {
 
     #[inline(always)]
     fn peek_at(&self, idx: usize) -> u8 {
-        if idx < self.bytes.len() { self.bytes[idx] } else { 0 }
+        if idx < self.bytes.len() {
+            self.bytes[idx]
+        } else {
+            0
+        }
     }
 
     #[inline]
-    fn emit(&mut self, kind: TokenKind, mut flags: TokenFlags, start: usize, end: usize, can_precede_infix_dot: bool) {
-        if self.preceded_by_ws { flags.insert(TokenFlags::PRECEDED_BY_WS); }
-        if self.preceded_by_nl { flags.insert(TokenFlags::PRECEDED_BY_NEWLINE); }
-        if self.peek_at(end) == b'(' { flags.insert(TokenFlags::FOLLOWED_BY_LPAREN); }
-        let idx = self.tape.push(kind, flags, ByteSpan::new(start as u32, end as u32));
+    fn emit(
+        &mut self,
+        kind: TokenKind,
+        mut flags: TokenFlags,
+        start: usize,
+        end: usize,
+        can_precede_infix_dot: bool,
+    ) {
+        if self.preceded_by_ws {
+            flags.insert(TokenFlags::PRECEDED_BY_WS);
+        }
+        if self.preceded_by_nl {
+            flags.insert(TokenFlags::PRECEDED_BY_NEWLINE);
+        }
+        if self.peek_at(end) == b'(' {
+            flags.insert(TokenFlags::FOLLOWED_BY_LPAREN);
+        }
+        let idx = self
+            .tape
+            .push(kind, flags, ByteSpan::new(start as u32, end as u32));
         match kind {
-            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => self.open_brackets.push((kind, idx)),
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => {
+                self.open_brackets.push((kind, idx))
+            }
             TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
                 let expected = match kind {
                     TokenKind::RParen => TokenKind::LParen,
                     TokenKind::RBracket => TokenKind::LBracket,
                     _ => TokenKind::LBrace,
                 };
-                if let Some(&(_, open_idx)) = self.open_brackets.last().filter(|&&(k, _)| k == expected) {
+                if let Some(&(_, open_idx)) =
+                    self.open_brackets.last().filter(|&&(k, _)| k == expected)
+                {
                     self.open_brackets.pop();
                     self.tape.bracket_links[open_idx as usize] = idx;
                     self.tape.bracket_links[idx as usize] = open_idx;
@@ -435,7 +525,10 @@ impl<'a> Lexer<'a> {
             }
             _ => {}
         }
-        if !matches!(kind, TokenKind::Comment | TokenKind::BlockComment | TokenKind::Newline | TokenKind::Shebang) {
+        if !matches!(
+            kind,
+            TokenKind::Comment | TokenKind::BlockComment | TokenKind::Newline | TokenKind::Shebang
+        ) {
             self.last_token_can_precede_infix_dot = can_precede_infix_dot;
             self.preceded_by_ws = false;
             self.preceded_by_nl = false;

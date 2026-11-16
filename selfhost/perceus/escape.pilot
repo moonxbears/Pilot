@@ -5,6 +5,8 @@
 // (`Bit 0 != 0` => borrows memory: `0b01` Reference View or `0b11` Scoped Guard).
 // ============================================================================
 
+pub pkg selfhost.perceus;
+
 pub enum EscapeState : u8 {
     ::Stack  = 0,
     ::Region = 1,

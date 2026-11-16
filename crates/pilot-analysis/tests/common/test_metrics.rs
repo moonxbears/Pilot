@@ -18,7 +18,8 @@ pub fn metrics_dir(workspace_root: &Path) -> PathBuf {
 
 /// The history file of one test.
 pub fn history_file(dir: &Path, milestone: u32, test: &str) -> PathBuf {
-    dir.join(format!("M{milestone}")).join(format!("{test}.tsv"))
+    dir.join(format!("M{milestone}"))
+        .join(format!("{test}.tsv"))
 }
 
 /// Times one run of a test. Dropping it without `record` erases the test's

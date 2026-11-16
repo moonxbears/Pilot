@@ -14,46 +14,14 @@
 //
 // A construct this lowering does not handle yet stops at the seam
 // `ir.lower_construct`, naming the node kind.
-pub lvl(0) pkg Pilot.SelfHost.Ir.Lower;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.methods.*;
-use selfhost.check.asm.*;
-use selfhost.check.generators.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower_members.*;
-use selfhost.ir.lower_switch.*;
-use selfhost.ir.lower_try.*;
-use selfhost.ir.lower_variant.*;
-use selfhost.ir.lower_defer.*;
-use selfhost.ir.lower_closure.*;
-use selfhost.ir.lower_union.*;
-use selfhost.ir.lower_global.*;
-use selfhost.ir.lower_unit.*;
-use selfhost.ir.lower_setter.*;
-use selfhost.ir.lower_destructure.*;
-use selfhost.ir.lower_generator.*;
-use selfhost.check.drops.*;
-use selfhost.ir.lower_drop.*;
-use selfhost.ir.lower_probe.*;
-use selfhost.ir.lower_outs.*;
-use selfhost.ir.lower_contract.*;
-use selfhost.ir.lower_spread.*;
-use selfhost.ir.lower_tail.*;
-use selfhost.ir.lower_view.*;
-use selfhost.ir.lower_quote.*;
-use selfhost.ir.pass_inline.*;
-use selfhost.ir.lower_asm.*;
+use selfhost.check.*;
 use std.text;
 
 /// The state of one lowering run.
 pub struct Lowerer : IObject {
-    pub inf: Infer;
+    pub ref inf: Infer;
     pub ls: IrLayouts;
     pub m: IrModule;
     /// Declaration node -> function index.
@@ -205,7 +173,7 @@ pub struct Lowerer : IObject {
 }
 
 /// Lowers `n` expecting type `t` (for target-typed variants).
-pub fn lower_hinted(lw: Lowerer, n: i64, t: i64) -> u32 {
+pub fn lower_hinted(var ref lw: Lowerer, n: i64, t: i64) -> u32 {
     let outer = lw.hint;
     lw.hint = t;
     let v = lower_expr(lw, n);
@@ -218,7 +186,7 @@ pub fn key(n: i64) -> str => f"{n}";
 
 /// The last argument of the binding `hook(keys.., value)` whose leading
 /// arguments are `keys`, or "".
-pub fn bound(lw: Lowerer, hook: str, keys: List<str>) -> str {
+pub fn bound(ref lw: Lowerer, hook: str, ref keys: List<str>) -> str {
     let k = bound_key(hook, keys);
     if lw.bound_index.has(k) { return lw.bound_index.get(k); }
     return "";
@@ -226,7 +194,7 @@ pub fn bound(lw: Lowerer, hook: str, keys: List<str>) -> str {
 
 /// One key per hook and leading arguments: each part with its length in
 /// front, so no two lists of parts give the same key.
-fn bound_key(hook: str, keys: List<str>) -> str {
+fn bound_key(hook: str, ref keys: List<str>) -> str {
     var parts: List<str> = [f"{hook.len()}:{hook}"];
     for k in keys { parts.push(f"{k.len()}:{k}"); }
     return text.join_text(parts, "");
@@ -234,7 +202,7 @@ fn bound_key(hook: str, keys: List<str>) -> str {
 
 /// `bound`'s index of `rows`: the first row of each hook and leading
 /// arguments wins, as a walk of the rows in order would find it.
-fn bound_rows_index(rows: List<List<str>>) -> Map<str, str> {
+fn bound_rows_index(ref rows: List<List<str>>) -> Map<str, str> {
     let index = Map<str, str>();
     for row in rows {
         if row.len() < 2 { continue; }
@@ -251,7 +219,7 @@ fn bound_rows_index(rows: List<List<str>>) -> Map<str, str> {
 }
 
 /// The first argument of the first `bind_membership` row, or "".
-fn find_membership_fn(rows: List<List<str>>) -> str {
+fn find_membership_fn(ref rows: List<List<str>>) -> str {
     for row in rows {
         if row.len() >= 2 && row[0] == "bind_membership" { return row[1]; }
     }
@@ -280,12 +248,12 @@ pub pure fn symbol_quote_slot() -> str => "25";
 pub pure fn byte_size_query() -> str => "byte_size";
 
 /// Lowers the program the checker analysed, starting at its `main`.
-pub fn lower_program(inf: Infer) -> IrModule => lower_program_rooted(inf, false);
+pub fn lower_program(var ref inf: Infer) -> IrModule => lower_program_rooted(inf, false);
 
 /// Lowers the program; with `every_function`, also every concrete function
 /// the user's files declare at top level, whether or not anything calls it
 /// (a library emitted to another language, selfhost/transpile/source.pilot).
-pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
+pub fn lower_program_rooted(var ref inf: Infer, every_function: bool) -> IrModule {
     let p = inf.p;
     let m = ir_module_new();
     let binding_of = Map<str, i64>();
@@ -340,7 +308,7 @@ pub fn lower_program_rooted(inf: Infer, every_function: bool) -> IrModule {
 }
 
 /// Starts lowering into function `f`: no locals, loops, scopes or receiver.
-pub fn begin_function(lw: Lowerer, f: IrFunction) {
+pub fn begin_function(var ref lw: Lowerer, f: IrFunction) {
     lw.f = f;
     lw.values = Map<str, i64>();
     lw.slots = Map<str, i64>();
@@ -375,12 +343,12 @@ pub fn begin_function(lw: Lowerer, f: IrFunction) {
 
 /// The index of the function declared by `decl` for receiver type `self_t`
 /// (the unknown type for a free function), queuing it for lowering.
-pub fn function_index(lw: Lowerer, decl: i64, self_t: i64) -> i64 => specialized_index(lw, decl, self_t, []);
+pub fn function_index(var ref lw: Lowerer, decl: i64, self_t: i64) -> i64 => specialized_index(lw, decl, self_t, []);
 
 /// The index of the function declared by `decl` for receiver type `self_t`
 /// with its unannotated parameters specialized to `arg_types` (empty, or
 /// one type per parameter, unknown where the parameter has its own).
-pub fn specialized_index(lw: Lowerer, decl: i64, self_t: i64, arg_types: List<i64>) -> i64 {
+pub fn specialized_index(var ref lw: Lowerer, decl: i64, self_t: i64, arg_types: List<i64>) -> i64 {
     let s = lw.inf.p.s;
     var spec = "";
     var shown = "";
@@ -411,7 +379,7 @@ pub fn specialized_index(lw: Lowerer, decl: i64, self_t: i64, arg_types: List<i6
 
 /// The index of the function that runs accessor `body` of field `field` for
 /// receiver type `self_t`, queuing it for lowering.
-pub fn accessor_index(lw: Lowerer, field: i64, body: i64, self_t: i64) -> i64 {
+pub fn accessor_index(var ref lw: Lowerer, field: i64, body: i64, self_t: i64) -> i64 {
     let s = lw.inf.p.s;
     let k = f"{field}:{body}@{self_t}";
     if lw.fn_index.has(k) { return lw.fn_index.get(k); }
@@ -426,14 +394,14 @@ pub fn accessor_index(lw: Lowerer, field: i64, body: i64, self_t: i64) -> i64 {
     return idx;
 }
 
-pub fn physics_of_type_node(lw: Lowerer, t: i64) -> IrTypePhysics {
+pub fn physics_of_type_node(var ref lw: Lowerer, t: i64) -> IrTypePhysics {
     if t < 0 { return layout_unknown(lw.ls); }
     return layout_of(lw.ls, prog_annot_type(lw.inf.p, t));
 }
 
-pub fn physics_of(lw: Lowerer, n: i64) -> IrTypePhysics => layout_of(lw.ls, type_of(lw.inf, n));
+pub fn physics_of(var ref lw: Lowerer, n: i64) -> IrTypePhysics => layout_of(lw.ls, type_of(lw.inf, n));
 
-pub fn lower_function(lw: Lowerer, idx: i64) {
+pub fn lower_function(var ref lw: Lowerer, idx: i64) {
     if lw.lowered.has(key(idx)) { return; }
     lw.lowered.set(key(idx), true);
     let s = lw.inf.p.s;
@@ -527,29 +495,29 @@ pub fn lower_function(lw: Lowerer, idx: i64) {
 // Emission helpers
 // ------------------------------------------------------------------------------
 
-pub fn emit(lw: Lowerer, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, n: i64) -> u32 =>
+pub fn emit(var ref lw: Lowerer, op: u16, sub: u16, phy: IrTypePhysics, ref args: List<u32>, n: i64) -> u32 =>
     ir_emit(lw.f, lw.cur, op, sub, phy, args, true, span_start(lw.inf.p.s, n));
 
-pub fn emit_void(lw: Lowerer, op: u16, sub: u16, args: List<u32>, n: i64) {
+pub fn emit_void(var ref lw: Lowerer, op: u16, sub: u16, ref args: List<u32>, n: i64) {
     let _ = ir_emit(lw.f, lw.cur, op, sub, layout_unknown(lw.ls), args, false, span_start(lw.inf.p.s, n));
 }
 
 /// Ends the current block with `unreachable` carrying the runtime error
 /// `message`, the one the seed's trap at that place reports.
-pub fn emit_trap(lw: Lowerer, message: str, n: i64) {
+pub fn emit_trap(var ref lw: Lowerer, message: str, n: i64) {
     let text = emit(lw, op_const_bytes(), 0, layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_str()))), [pool_str(lw, message)], n);
     emit_void(lw, op_unreachable(), 0, [text], n);
 }
 
 /// The value of a construct that has none.
-pub fn unit_value(lw: Lowerer, n: i64) -> u32 => emit(lw, op_undef(), 0, physics_of(lw, n), [], n);
+pub fn unit_value(var ref lw: Lowerer, n: i64) -> u32 => emit(lw, op_undef(), 0, physics_of(lw, n), [], n);
 
 /// Continues in `b`.
-pub fn switch_to(lw: Lowerer, b: u32) { lw.cur = b; }
+pub fn switch_to(var ref lw: Lowerer, b: u32) { lw.cur = b; }
 
 /// Jumps from the current block to `target` with `args`, unless the current
 /// block already ended.
-pub fn jump_to(lw: Lowerer, target: u32, args: List<u32>, n: i64) {
+pub fn jump_to(var ref lw: Lowerer, target: u32, ref args: List<u32>, n: i64) {
     if ir_is_terminated(lw.f, lw.cur) { return; }
     var ops: List<u32> = [target];
     for a in args { ops.push(a); }
@@ -558,11 +526,11 @@ pub fn jump_to(lw: Lowerer, target: u32, args: List<u32>, n: i64) {
 
 /// After a terminator, code that follows has no predecessor; it is lowered
 /// into a fresh block so every block still ends in one terminator.
-pub fn ensure_open(lw: Lowerer) {
+pub fn ensure_open(var ref lw: Lowerer) {
     if ir_is_terminated(lw.f, lw.cur) { lw.cur = ir_add_block(lw.f); }
 }
 
-pub fn pool_int(lw: Lowerer, v: i64) -> u32 {
+pub fn pool_int(var ref lw: Lowerer, v: i64) -> u32 {
     let k = f"{v}";
     if lw.int_pool.has(k) { return lw.int_pool.get(k); }
     lw.m.ints.push(v);
@@ -571,7 +539,7 @@ pub fn pool_int(lw: Lowerer, v: i64) -> u32 {
 }
 
 /// The pool index of the float whose binary64 bits are `bits`.
-pub fn pool_float(lw: Lowerer, bits: i64) -> u32 {
+pub fn pool_float(var ref lw: Lowerer, bits: i64) -> u32 {
     var i = 0;
     while i < lw.m.floats.len {
         if lw.m.floats[i] == bits { return i; }
@@ -581,14 +549,14 @@ pub fn pool_float(lw: Lowerer, bits: i64) -> u32 {
     return lw.m.floats.len - 1;
 }
 
-pub fn pool_str(lw: Lowerer, v: str) -> u32 {
+pub fn pool_str(var ref lw: Lowerer, v: str) -> u32 {
     if lw.str_pool.has(v) { return lw.str_pool.get(v); }
     lw.m.strings.push(v);
     lw.str_pool.set(v, lw.m.strings.len - 1);
     return lw.m.strings.len - 1;
 }
 
-pub fn intrinsic_index(lw: Lowerer, hook: str) -> u32 {
+pub fn intrinsic_index(var ref lw: Lowerer, hook: str) -> u32 {
     var i = 0;
     while i < lw.m.intrinsics.len {
         if lw.m.intrinsics[i] == hook { return i; }
@@ -598,7 +566,7 @@ pub fn intrinsic_index(lw: Lowerer, hook: str) -> u32 {
     return lw.m.intrinsics.len - 1;
 }
 
-pub fn unsupported(lw: Lowerer, n: i64) -> u32 {
+pub fn unsupported(ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     return seam("ir.lower_construct", f"node kind {kind(s, n)} (`{node_text(s, n)}`) is not lowered to PilIR yet");
 }
@@ -609,7 +577,7 @@ pub fn unsupported(lw: Lowerer, n: i64) -> u32 {
 
 /// Lowers `n` and returns its value (an `undef` of its type when it has none),
 /// with the drops and copies the plan puts around it.
-pub fn lower_expr(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_expr(var ref lw: Lowerer, n: i64) -> u32 {
     if !planned(lw, n) && !probed(lw, n) { return lower_node(lw, n); }
     ensure_open(lw);
     plan_before(lw, n);
@@ -619,7 +587,7 @@ pub fn lower_expr(lw: Lowerer, n: i64) -> u32 {
     return plan_after(lw, n, v);
 }
 
-fn lower_node(lw: Lowerer, n: i64) -> u32 {
+fn lower_node(var ref lw: Lowerer, n: i64) -> u32 {
     ensure_open(lw);
     let s = lw.inf.p.s;
     let k = kind(s, n);
@@ -670,7 +638,7 @@ fn lower_node(lw: Lowerer, n: i64) -> u32 {
     return unsupported(lw, n);
 }
 
-pub fn lower_block(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_block(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let items = children(s, n);
     open_scope(lw);
@@ -692,9 +660,9 @@ pub fn lower_block(lw: Lowerer, n: i64) -> u32 {
     return if last == ir_no_value() { unit_value(lw, n) } else { last };
 }
 
-pub fn binding_index(lw: Lowerer, ident: i64) -> i64 => lw.inf.r.ref_of[ident];
+pub fn binding_index(ref lw: Lowerer, ident: i64) -> i64 => lw.inf.r.ref_of[ident];
 
-pub fn lower_ident(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_ident(var ref lw: Lowerer, n: i64) -> u32 {
     let b = binding_index(lw, n);
     if b < 0 && is_receiver_word(lw, n) { return lw.self_value; }
     if b < 0 && is_backing_word(lw, n) { return lower_backing_read(lw, n); }
@@ -717,7 +685,7 @@ pub fn lower_ident(lw: Lowerer, n: i64) -> u32 {
     return unsupported(lw, n);
 }
 
-pub fn lower_binding(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_binding(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let value_node = rhs(s, n);
     if is_pattern_let(s, n) { return lower_pattern_let(lw, n); }
@@ -746,7 +714,7 @@ pub fn lower_binding(lw: Lowerer, n: i64) -> u32 {
     return v;
 }
 
-pub fn lower_assign(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_assign(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let target = lhs(s, n);
     if kind(s, target) == nk_member() { return lower_field_assign(lw, n); }
@@ -817,7 +785,7 @@ pub fn binary_op_symbols() -> List<str> => [
 ];
 
 /// `x |> f` / `f <| x` is `f(x)`; `x |> f(y)` is `f(x, y)`.
-pub fn lower_pipe(lw: Lowerer, n: i64, value: i64, target: i64) -> u32 {
+pub fn lower_pipe(var ref lw: Lowerer, n: i64, value: i64, target: i64) -> u32 {
     let s = lw.inf.p.s;
     let v = lower_expr(lw, value);
     if kind(s, target) == nk_call() {
@@ -838,7 +806,7 @@ pub fn lower_pipe(lw: Lowerer, n: i64, value: i64, target: i64) -> u32 {
     return lower_fn_call(lw, target, [v], [], physics_of(lw, n), n);
 }
 
-pub fn lower_binary(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_binary(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let op = flags(s, n);
     if op == op_and() || op == op_or() { return lower_short_circuit(lw, n, op == op_and()); }
@@ -892,7 +860,7 @@ pub fn lower_binary(lw: Lowerer, n: i64) -> u32 {
 }
 
 /// `a && b` / `a || b`: `b` runs only when `a` does not decide the result.
-pub fn lower_short_circuit(lw: Lowerer, n: i64, is_and: bool) -> u32 {
+pub fn lower_short_circuit(var ref lw: Lowerer, n: i64, is_and: bool) -> u32 {
     let s = lw.inf.p.s;
     let a = lower_expr(lw, lhs(s, n));
     let rhs_block = ir_add_block(lw.f);
@@ -907,7 +875,7 @@ pub fn lower_short_circuit(lw: Lowerer, n: i64, is_and: bool) -> u32 {
     return result;
 }
 
-pub fn lower_unary(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_unary(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let op = flags(s, n);
     // UnaryExpr flags (crates/pilot-vm lower_expr.rs): 0 neg, 1 identity,
@@ -948,7 +916,7 @@ pub pure fn scalar_op() -> str => "scalar_from";
 
 /// The one-character literal `n` as a value of the character type `t`: its
 /// code point, made a character.
-fn scalar_const(lw: Lowerer, n: i64, t: i64) -> u32 {
+fn scalar_const(var ref lw: Lowerer, n: i64, t: i64) -> u32 {
     let phy = layout_of(lw.ls, t);
     let code = emit(lw, op_const_bits(), 0, phy, [pool_int(lw, scalar_code(node_name(lw.inf.p.s, n)))], n);
     return emit(lw, op_call_intrinsic(), intrinsic_index(lw, scalar_op()), phy, [code], n);
@@ -957,7 +925,7 @@ fn scalar_const(lw: Lowerer, n: i64, t: i64) -> u32 {
 /// `x as T` and `T(x)`: `x` converted to `T`'s register layout. A cast to
 /// the character type gives a character, and a one-character literal is
 /// cast as the character it holds.
-pub fn lower_cast(lw: Lowerer, n: i64, value: i64) -> u32 {
+pub fn lower_cast(var ref lw: Lowerer, n: i64, value: i64) -> u32 {
     let p = lw.inf.p;
     let to = physics_of(lw, n);
     let to_scalar = is_scalar_type(p, type_of(lw.inf, n));
@@ -975,7 +943,7 @@ pub fn lower_cast(lw: Lowerer, n: i64, value: i64) -> u32 {
 
 /// `sizeof(T)`: the size the checker's layout of `T` gives, as a constant.
 /// A type whose layout the checker does not know stops at the lowering seam.
-fn lower_type_query(lw: Lowerer, n: i64, query: str, arg: i64) -> u32 {
+fn lower_type_query(var ref lw: Lowerer, n: i64, query: str, arg: i64) -> u32 {
     let t = type_receiver(lw.inf, arg);
     if query != byte_size_query() || !ty_is_named(lw.inf.p.tt, t) { return unsupported(lw, n); }
     guard some e = type_extent(lw.inf.p, t, 0) else { return unsupported(lw, n); }
@@ -987,7 +955,7 @@ fn lower_type_query(lw: Lowerer, n: i64, query: str, arg: i64) -> u32 {
 pub fn call_quote_seam() -> str =>
     "SEAM001: unconnected seam `vm.call_quote`: call-quote modes build their carrier values once the type checker exists (F4)";
 
-pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_call(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let ch = children(s, n);
     // A call-quote mode (`f!(..)`, `sig f(..)`, ..) is recorded in the call's
@@ -1055,7 +1023,7 @@ pub fn lower_call(lw: Lowerer, n: i64) -> u32 {
 /// The top-level function a callee name means: the only one of that name,
 /// or, when several units declare one, the one in the caller's own unit;
 /// -1 when none or it cannot be told.
-pub fn resolve_fn(lw: Lowerer, callee: i64) -> i64 {
+pub fn resolve_fn(ref lw: Lowerer, callee: i64) -> i64 {
     let s = lw.inf.p.s;
     if kind(s, callee) != nk_ident() || binding_index(lw, callee) >= 0 { return -1; }
     let fns = nl_get(lw.inf.p.fns, node_name(s, callee));
@@ -1074,7 +1042,7 @@ pub fn resolve_fn(lw: Lowerer, callee: i64) -> i64 {
 /// `given` which are passed already: positional arguments in order, named
 /// ones (`b: 1`) by name, the rest from the parameter's default. None when
 /// an argument names no parameter or a parameter gets no value.
-pub fn arrange_args(lw: Lowerer, params: List<i64>, given: i64, arg_nodes: List<i64>) -> List<i64>? {
+pub fn arrange_args(ref lw: Lowerer, ref params: List<i64>, given: i64, ref arg_nodes: List<i64>) -> List<i64>? {
     let s = lw.inf.p.s;
     var slots: List<i64> = [];
     for _p in params { slots.push(-1); }
@@ -1113,7 +1081,7 @@ pub fn arrange_args(lw: Lowerer, params: List<i64>, given: i64, arg_nodes: List<
 /// Calls the function `callee` names with the values `pre` first, then the
 /// arguments `arg_nodes`: a top-level function, or the engine operation a
 /// native binding names.
-pub fn lower_fn_call(lw: Lowerer, callee: i64, pre: List<u32>, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
+pub fn lower_fn_call(var ref lw: Lowerer, callee: i64, ref pre: List<u32>, ref arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let decl = resolve_fn(lw, callee);
     if decl >= 0 { return call_decl(lw, decl, pre, arg_nodes, phy, n); }
@@ -1145,7 +1113,7 @@ pub fn lower_fn_call(lw: Lowerer, callee: i64, pre: List<u32>, arg_nodes: List<i
 
 /// Calls top-level function `decl` with `pre` then `arg_nodes` arranged to
 /// its parameters.
-pub fn call_decl(lw: Lowerer, decl: i64, pre: List<u32>, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
+pub fn call_decl(var ref lw: Lowerer, decl: i64, ref pre: List<u32>, ref arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let params = fn_params(s, decl);
     if pre.len() > params.len() { return unsupported(lw, n); }
@@ -1186,7 +1154,7 @@ pub fn call_decl(lw: Lowerer, decl: i64, pre: List<u32>, arg_nodes: List<i64>, p
     return call_with_outs(lw, decl, params, fi, args, pre.len(), nodes, if ret.layout_id != 0 { ret } else { phy }, n);
 }
 
-pub fn lower_if(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_if(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let ch = children(s, n);
     if ch.len() > 3 { return unsupported(lw, n); }
@@ -1218,7 +1186,7 @@ pub fn lower_if(lw: Lowerer, n: i64) -> u32 {
     return result;
 }
 
-pub fn lower_while(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_while(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let head = ir_add_block(lw.f);
     let body = ir_add_block(lw.f);
@@ -1244,7 +1212,7 @@ pub fn lower_while(lw: Lowerer, n: i64) -> u32 {
 
 /// A `for` in value position whose body yields is the list of what it
 /// yields (selfhost/ir/lower_generator.pilot); any other is the loop.
-pub fn lower_for(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_for(var ref lw: Lowerer, n: i64) -> u32 {
     guard some list = begin_collecting(lw, n) else { return lower_for_loop(lw, n); }
     let _ = lower_for_loop(lw, n);
     return list;
@@ -1255,7 +1223,7 @@ pub fn lower_for(lw: Lowerer, n: i64) -> u32 {
 /// (`get_enumerator()`, then `move_next()` and `current`), and closes the
 /// enumerator when the loop is left (`close_loop_enumerator`). `continue`
 /// goes to the step.
-fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
+fn lower_for_loop(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let clause = flags(s, n) - 1;
     if clause < 0 || clause >= s.for_clauses.len() || !lw.binding_of.has(key(n)) { return unsupported(lw, n); }
@@ -1346,7 +1314,7 @@ fn lower_for_loop(lw: Lowerer, n: i64) -> u32 {
 
 /// The step of `a..b : step`, after a check that stops the program when it
 /// is 0 or less: the loop would never reach its end.
-fn lower_step_check(lw: Lowerer, by: u32, phy: IrTypePhysics, n: i64) -> u32 {
+fn lower_step_check(var ref lw: Lowerer, by: u32, phy: IrTypePhysics, n: i64) -> u32 {
     let ok = ir_add_block(lw.f);
     let bad = ir_add_block(lw.f);
     let zero = emit(lw, op_const_bits(), 0, phy, [pool_int(lw, 0)], n);
@@ -1364,7 +1332,7 @@ fn lower_step_check(lw: Lowerer, by: u32, phy: IrTypePhysics, n: i64) -> u32 {
 /// Ends a `for` whose loop leaves for `exit` when it runs out: without a
 /// `then` clause it has no value. With one, the clause's value is stored
 /// and the loop's value, set there or by a `break value`, is read in `done`.
-fn finish_for(lw: Lowerer, n: i64, exit: u32, done: u32, then_clause: i64, result_slot: u32) -> u32 {
+fn finish_for(var ref lw: Lowerer, n: i64, exit: u32, done: u32, then_clause: i64, result_slot: u32) -> u32 {
     switch_to(lw, exit);
     if then_clause < 0 { return unit_value(lw, n); }
     let phy = physics_of(lw, n);
@@ -1378,7 +1346,7 @@ fn finish_for(lw: Lowerer, n: i64, exit: u32, done: u32, then_clause: i64, resul
 /// `xs[0] .. xs[len - 1]`, read with the engine operations bound to the
 /// type's `[]` and to `len`.
 [StandIn("ir.engine_sequence_for", "slice<T> is { ptr<T>, usize } enumerated by its SliceEnumerator", "the value is the engine's own list, as in the seed, and is indexed by engine operations", "F6")]
-fn lower_for_indexed(lw: Lowerer, n: i64, iterable: i64, it_t: i64, var_key: str, elem_phy: IrTypePhysics, head: u32, body: u32, step: u32, exit: u32, done: u32, then_clause: i64, result_slot: u32) -> u32 {
+fn lower_for_indexed(var ref lw: Lowerer, n: i64, iterable: i64, it_t: i64, var_key: str, elem_phy: IrTypePhysics, head: u32, body: u32, step: u32, exit: u32, done: u32, then_clause: i64, result_slot: u32) -> u32 {
     let s = lw.inf.p.s;
     let it_name = type_name_of(lw, it_t);
     let seq_hook = bound(lw, native_member_hook(), [it_name, "for_seq"]);
@@ -1414,7 +1382,7 @@ fn lower_for_indexed(lw: Lowerer, n: i64, iterable: i64, it_t: i64, var_key: str
 
 /// The body of a loop whose `continue` goes to `step` and `break` to `exit`;
 /// it falls through to `step`.
-fn lower_loop_body(lw: Lowerer, body: i64, step: u32, exit: u32, n: i64) {
+fn lower_loop_body(var ref lw: Lowerer, body: i64, step: u32, exit: u32, n: i64) {
     lw.loop_heads.push(step);
     lw.loop_exits.push(exit);
     lw.head_depths.push(scope_depth(lw));
@@ -1427,7 +1395,7 @@ fn lower_loop_body(lw: Lowerer, body: i64, step: u32, exit: u32, n: i64) {
     jump_to(lw, step, [], n);
 }
 
-pub fn lower_loop_exit(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_loop_exit(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     // `break` leaves the innermost loop or switch; `continue` goes to the
     // innermost loop's next round.
@@ -1445,7 +1413,7 @@ pub fn lower_loop_exit(lw: Lowerer, n: i64) -> u32 {
 
 /// `break value;`: the value of the innermost `for .. then` loop, which is
 /// left at once.
-fn lower_break_value(lw: Lowerer, n: i64) -> u32 {
+fn lower_break_value(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     var at = lw.loop_exits.len - 1;
     while at >= 0 && !lw.result_slots.has(key(lw.loop_exits[at])) { at = at - 1; }
@@ -1459,7 +1427,7 @@ fn lower_break_value(lw: Lowerer, n: i64) -> u32 {
     return ir_no_value();
 }
 
-pub fn lower_return(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_return(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     // `become` (flags 1) is a tail call (selfhost/ir/lower_tail.pilot).
     if flags(s, n) == 1 { return lower_become(lw, n); }

@@ -10,8 +10,8 @@
 
 use crate::instruction::Opcode;
 use crate::ops;
-use crate::vm::PilVirtualMachine;
 use crate::value::PilotVal;
+use crate::vm::PilVirtualMachine;
 
 /// The binary operators by the opcode that runs each.
 const BINARY: [Opcode; 18] = [
@@ -40,17 +40,28 @@ const CONDITION: &str = "if";
 
 impl PilVirtualMachine {
     /// A binary operator on two values, as the run loop executes it.
-    pub(crate) fn binary_op(&mut self, op: Opcode, r1: PilotVal, r2: PilotVal) -> Result<PilotVal, String> {
+    pub(crate) fn binary_op(
+        &mut self,
+        op: Opcode,
+        r1: PilotVal,
+        r2: PilotVal,
+    ) -> Result<PilotVal, String> {
         match op {
             Opcode::Add if r1.is_str() || r2.is_str() => {
                 let mut s = self.display(r1);
                 s.push_str(&self.display(r2));
                 Ok(self.new_str(&s))
             }
-            Opcode::Add | Opcode::Sub | Opcode::Mul | Opcode::Div | Opcode::Rem | Opcode::Pow | Opcode::FloorDiv => {
-                ops::arith(op, r1, r2)
+            Opcode::Add
+            | Opcode::Sub
+            | Opcode::Mul
+            | Opcode::Div
+            | Opcode::Rem
+            | Opcode::Pow
+            | Opcode::FloorDiv => ops::arith(op, r1, r2),
+            Opcode::BitAnd | Opcode::BitOr | Opcode::Xor | Opcode::Shl | Opcode::Shr => {
+                ops::bitwise(op, r1, r2)
             }
-            Opcode::BitAnd | Opcode::BitOr | Opcode::Xor | Opcode::Shl | Opcode::Shr => ops::bitwise(op, r1, r2),
             Opcode::CmpEq => Ok(PilotVal::from_bool(self.values_equal(r1, r2))),
             Opcode::CmpNe => Ok(PilotVal::from_bool(!self.values_equal(r1, r2))),
             _ => ops::compare(op, r1, r2),
@@ -63,8 +74,13 @@ impl PilVirtualMachine {
             .first()
             .and_then(|v| v.with_str(str::to_string))
             .ok_or("`op_checked` expects an operation name")?;
-        let list = args.get(1).copied().ok_or("`op_checked` expects an argument list")?;
-        let values = self.list_items(list).ok_or("`op_checked` expects an argument list")?;
+        let list = args
+            .get(1)
+            .copied()
+            .ok_or("`op_checked` expects an argument list")?;
+        let values = self
+            .list_items(list)
+            .ok_or("`op_checked` expects an argument list")?;
         let outcome = if name == CONDITION {
             let v = values.first().copied().unwrap_or(PilotVal::NULL);
             ops::truth(v).map(PilotVal::from_bool)

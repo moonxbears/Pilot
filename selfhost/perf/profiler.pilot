@@ -2,7 +2,7 @@
 // FILE: selfhost/perf/profiler.pilot
 // Milestone 60.2: PilVM Call-Stack Profiler & SVG Flamegraph / Chrome Trace Emitter
 // =========================================================================
-pub pkg Pilot.SelfHost.Perf.Profiler;
+pub pkg selfhost.perf;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

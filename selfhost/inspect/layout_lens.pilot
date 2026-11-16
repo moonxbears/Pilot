@@ -4,9 +4,9 @@
 // Visual ASCII/Box Byte-Offset Diagrams, 64B Cache Line Crossings, Padding Holes,
 // Niche Bit Patterns, 2-Bit Lattice Derivation Tree
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Inspect.LayoutLens;
+pub lvl(0) pkg selfhost.inspect;
 
-use Pilot.SelfHost.Ir.Model::*;
+use selfhost.ir.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -72,7 +72,7 @@ pub fn render_field_box(f: FieldProbeEntry) -> str {
 
 // Total padding bytes (inner holes plus tail) when fields with the given
 // sizes and alignments are laid out in list order under C ABI rules.
-pub fn layout_padding_bytes(sizes: List<usize>, aligns: List<usize>) -> usize {
+pub fn layout_padding_bytes(ref sizes: List<usize>, ref aligns: List<usize>) -> usize {
     var offset: usize = 0;
     var padding: usize = 0;
     var max_align: usize = 1;
@@ -90,7 +90,7 @@ pub fn layout_padding_bytes(sizes: List<usize>, aligns: List<usize>) -> usize {
 
 // Bytes saved by reordering fields by descending alignment (stable), the
 // packing a C compiler would give the reordered struct.
-pub fn calculate_optimal_packing_savings(sizes: List<usize>, aligns: List<usize>) -> usize {
+pub fn calculate_optimal_packing_savings(ref sizes: List<usize>, ref aligns: List<usize>) -> usize {
     let declared = layout_padding_bytes(sizes, aligns);
     var sorted_sizes: List<usize> = [];
     var sorted_aligns: List<usize> = [];

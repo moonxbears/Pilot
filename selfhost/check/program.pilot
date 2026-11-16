@@ -12,10 +12,8 @@
 //     plan (selfhost/check/methods.pilot).
 //   - A constant written as a member chain (`Cfg.Lattice.object`) is read
 //     from the map literal its root names (`prog_const`).
-pub lvl(0) pkg Pilot.SelfHost.Check.Program;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
 
 /// Receptor slot each literal kind takes when nothing else fixes its type.
 /// The slot keys are the `Cfg.Lang` keys of stdlib/core/core.pilot.
@@ -71,7 +69,7 @@ pub struct NodeLists {
 
 pub fn nl_new() -> NodeLists => NodeLists { index: Map<str, i64>(), lists: [] };
 
-pub fn nl_add(m: NodeLists, key: str, v: i64) {
+pub fn nl_add(var ref m: NodeLists, key: str, v: i64) {
     if !m.index.has(key) {
         let fresh: List<i64> = [];
         m.index.set(key, m.lists.len());
@@ -81,13 +79,13 @@ pub fn nl_add(m: NodeLists, key: str, v: i64) {
     l.push(v);
 }
 
-pub fn nl_get(m: NodeLists, key: str) -> List<i64> {
+pub fn nl_get(ref m: NodeLists, key: str) -> List<i64> {
     if !m.index.has(key) { return []; }
     return m.lists[m.index.get(key)];
 }
 
 pub struct Program {
-    pub s: Snap;
+    pub ref s: Snap;
     pub tt: TypeTable;
     pub parents: List<i64>;
     /// Type name -> declarations (`struct`, `enum`, `interface`; partial
@@ -147,7 +145,7 @@ pub struct Program {
 fn key(n: i64) -> str => f"{n}";
 
 /// The last name in an attribute argument (`Cfg.Lang.i64_t` -> `i64_t`).
-fn attr_arg_key(s: Snap, a: i64) -> str {
+fn attr_arg_key(ref s: Snap, a: i64) -> str {
     let k = kind(s, a);
     if k == nk_member() { return sym_text(s, rhs(s, a)); }
     if k == nk_ident() || k == nk_str() || k == nk_type_named() { return node_name(s, a); }
@@ -155,7 +153,7 @@ fn attr_arg_key(s: Snap, a: i64) -> str {
 }
 
 /// The argument keys of the attribute named `name` on node `n`, or none.
-pub fn prog_attr_args(p: Program, n: i64, name: str) -> List<str>? {
+pub fn prog_attr_args(ref p: Program, n: i64, name: str) -> List<str>? {
     for row_index in nl_get(p.attrs, key(n)) {
         let row: List<any> = p.s.attrs[row_index];
         if sym_text(p.s, row[1]) == name {
@@ -170,14 +168,14 @@ pub fn prog_attr_args(p: Program, n: i64, name: str) -> List<str>? {
 
 fn is_type_decl_kind(k: i64) -> bool => k == nk_struct() || k == nk_interface() || k == nk_adt();
 
-fn index_members(p: Program, owner_name: str, decl: i64, into: NodeLists) {
+fn index_members(var ref p: Program, owner_name: str, decl: i64) {
     let s = p.s;
     for m in type_members(s, decl) {
         let k = kind(s, m);
         if k == nk_param() || k == nk_fn() || k == nk_operator() || k == nk_indexer()
             || ((k == nk_let() || k == nk_var()) && annot(s, m) >= 0) {
             let mname = if k == nk_indexer() { "[]" } else { node_name(s, m) };
-            nl_add(into, owner_name + "." + mname, m);
+            nl_add(p.members, owner_name + "." + mname, m);
         } else if k == nk_expr_stmt() {
             let u = lhs(s, m);
             if u >= 0 && kind(s, u) == nk_unary() && flags(s, u) == unary_splat() && lhs(s, u) >= 0 {
@@ -188,7 +186,7 @@ fn index_members(p: Program, owner_name: str, decl: i64, into: NodeLists) {
 }
 
 /// Indexes the declarations of the snapshot.
-pub fn prog_new(s: Snap) -> Program {
+pub fn prog_new(ref s: Snap) -> Program {
     let memo = filled(s.count, -1);
     let p = Program {
         s: s,
@@ -234,7 +232,7 @@ pub fn prog_new(s: Snap) -> Program {
         if is_type_decl_kind(k) {
             let name = node_name(s, i);
             nl_add(p.type_decls, name, i);
-            if k != nk_adt() { index_members(p, name, i, p.members); }
+            if k != nk_adt() { index_members(p, name, i); }
             if some slot = prog_attr_args(p, i, "Lang") {
                 if slot.len() > 0 && !p.slots.has(slot[0]) { p.slots.set(slot[0], i); }
             }
@@ -270,14 +268,14 @@ pub fn prog_new(s: Snap) -> Program {
 }
 
 /// The canonical declaration of type name `name`, or -1.
-pub fn prog_type_decl(p: Program, name: str) -> i64 {
+pub fn prog_type_decl(ref p: Program, name: str) -> i64 {
     let decls = nl_get(p.type_decls, name);
     if decls.len() == 0 { return -1; }
     return decls[0];
 }
 
 /// The generic parameter names of declaration `owner`.
-pub fn prog_tparam_names(p: Program, owner: i64) -> List<str> {
+pub fn prog_tparam_names(ref p: Program, owner: i64) -> List<str> {
     var out: List<str> = [];
     for sym in nl_get(p.tparams, key(owner)) { out.push(sym_text(p.s, sym)); }
     return out;
@@ -286,7 +284,7 @@ pub fn prog_tparam_names(p: Program, owner: i64) -> List<str> {
 /// The default type nodes of the generic parameters of the type named
 /// `name` (-1 for a parameter without one), from the declaration that
 /// lists them.
-pub fn prog_tparam_defaults(p: Program, name: str) -> List<i64> {
+pub fn prog_tparam_defaults(ref p: Program, name: str) -> List<i64> {
     for d in nl_get(p.type_decls, name) {
         let defaults = nl_get(p.tparam_defaults, key(d));
         if defaults.len() > 0 { return defaults; }
@@ -297,7 +295,7 @@ pub fn prog_tparam_defaults(p: Program, name: str) -> List<i64> {
 
 /// The type of the declaration bound to `slot`, with no type arguments,
 /// or the unknown type when no declaration takes that slot.
-pub fn prog_slot_type(p: Program, slot: str) -> i64 {
+pub fn prog_slot_type(var ref p: Program, slot: str) -> i64 {
     if !p.slots.has(slot) { return ty_unknown(); }
     let name = node_name(p.s, p.slots.get(slot));
     let no_args: List<i64> = [];
@@ -305,7 +303,7 @@ pub fn prog_slot_type(p: Program, slot: str) -> i64 {
 }
 
 /// The `[Bits]` register class of a type, or "".
-pub fn prog_class(p: Program, t: i64) -> str {
+pub fn prog_class(ref p: Program, t: i64) -> str {
     if !ty_is_named(p.tt, t) { return ""; }
     let d = node_name(p.s, ty_decl(p.tt, t));
     return if p.bits_class.has(d) { p.bits_class.get(d) } else { "" };
@@ -313,7 +311,7 @@ pub fn prog_class(p: Program, t: i64) -> str {
 
 /// The register class values of type `t` travel in: its `[Bits]` class, or
 /// for an enum declared over a primitive (`enum E : u8`) that primitive's.
-pub fn prog_value_class(p: Program, t: i64) -> str {
+pub fn prog_value_class(var ref p: Program, t: i64) -> str {
     let c = prog_class(p, t);
     if c != "" || !ty_is_named(p.tt, t) { return c; }
     let d = ty_decl(p.tt, t);
@@ -326,21 +324,21 @@ pub fn prog_value_class(p: Program, t: i64) -> str {
 }
 
 /// Whether a type holds no value (`void`, `never`).
-pub fn prog_is_zero_width(p: Program, t: i64) -> bool {
+pub fn prog_is_zero_width(ref p: Program, t: i64) -> bool {
     if !ty_is_named(p.tt, t) { return false; }
     let d = node_name(p.s, ty_decl(p.tt, t));
     return p.bits_width.has(d) && p.bits_width.get(d) == zero_width();
 }
 
 /// Whether `t` is the bottom type.
-pub fn prog_is_never(p: Program, t: i64) -> bool {
+pub fn prog_is_never(ref p: Program, t: i64) -> bool {
     return t > 0 && ty_is_named(p.tt, t) && p.slots.has(never_slot())
         && node_name(p.s, ty_decl(p.tt, t)) == node_name(p.s, p.slots.get(never_slot()));
 }
 
 /// The generic parameter `name` visible at node `at`, as a type, or the
 /// unknown type when no enclosing declaration introduces it.
-pub fn visible_tparam(p: Program, at: i64, name: str) -> i64 {
+pub fn visible_tparam(var ref p: Program, at: i64, name: str) -> i64 {
     var cur = at;
     var depth = 0;
     while cur >= 0 && depth < 200 {
@@ -355,7 +353,7 @@ pub fn visible_tparam(p: Program, at: i64, name: str) -> i64 {
 
 /// Whether type node `n` names something: a type declaration or a generic
 /// parameter in scope.
-pub fn prog_type_name_known(p: Program, n: i64) -> bool {
+pub fn prog_type_name_known(var ref p: Program, n: i64) -> bool {
     let name = node_name(p.s, n);
     return prog_type_decl(p, name) >= 0 || visible_tparam(p, n, name) > 0
         || name == prog_slot_name(p, fn_slot());
@@ -364,14 +362,14 @@ pub fn prog_type_name_known(p: Program, n: i64) -> bool {
 /// The name the `Cfg.Lang`-style table of receptor slots gives `slot`
 /// (`fn_t` -> the function type's name), found through the `[Lang(..)]`
 /// arguments that index that table; "" when there is none.
-pub fn prog_slot_name(p: Program, slot: str) -> str {
+pub fn prog_slot_name(var ref p: Program, slot: str) -> str {
     if p.slot_names.has(slot) { return p.slot_names.get(slot); }
     let name = find_slot_name(p, slot);
     p.slot_names.set(slot, name);
     return name;
 }
 
-fn find_slot_name(p: Program, slot: str) -> str {
+fn find_slot_name(var ref p: Program, slot: str) -> str {
     let s = p.s;
     var r = 0;
     while r < s.attrs.len() {
@@ -399,29 +397,29 @@ pub pure fn list_slot() -> str => "list_t";
 /// Whether type declaration `d` is `type Name = Target;` (or generic
 /// `type Name<T> = Target;`): it has no variants and its right side is the
 /// target type.
-pub fn is_type_alias(p: Program, d: i64) -> bool =>
+pub fn is_type_alias(ref p: Program, d: i64) -> bool =>
     kind(p.s, d) == nk_adt() && flags(p.s, d) == 0 && rhs(p.s, d) >= 0;
 
 /// Whether type declaration `d` is `type Name = Target;` with no generic
 /// parameters: it has no variants and its right side is the target type.
-pub fn is_plain_alias(p: Program, d: i64) -> bool {
+pub fn is_plain_alias(ref p: Program, d: i64) -> bool {
     if !is_type_alias(p, d) { return false; }
     return nl_get(p.tparams, key(d)).len() == 0;
 }
 
 /// Whether `t` is the character type (the `char_t` slot).
-pub fn is_scalar_type(p: Program, t: i64) -> bool {
+pub fn is_scalar_type(var ref p: Program, t: i64) -> bool {
     let ct = prog_slot_type(p, scalar_slot());
     return ty_is_named(p.tt, t) && ty_is_named(p.tt, ct) && ty_decl(p.tt, t) == ty_decl(p.tt, ct);
 }
 
 /// Whether node `e` is a string literal that holds exactly one Unicode
 /// scalar value: where a character is expected, it is that character.
-pub fn is_scalar_literal(p: Program, e: i64) -> bool =>
+pub fn is_scalar_literal(ref p: Program, e: i64) -> bool =>
     e >= 0 && kind(p.s, e) == nk_str() && scalar_code(node_name(p.s, e)) >= 0;
 
 /// The type a type node denotes.
-pub fn prog_annot_type(p: Program, n: i64) -> i64 {
+pub fn prog_annot_type(var ref p: Program, n: i64) -> i64 {
     if n < 0 { return ty_unknown(); }
     if p.annot_memo[n] >= 0 { return p.annot_memo[n]; }
     var t = ty_unknown();
@@ -497,7 +495,7 @@ pub struct Member {
 
 /// The declared type of a member: a field's annotation, or the return type
 /// of a method or operator; with the type's arguments substituted.
-pub fn prog_member_type(p: Program, m: Member) -> i64 {
+pub fn prog_member_type(var ref p: Program, ref m: Member) -> i64 {
     let n = m.decl;
     let k = kind(p.s, n);
     var t = ty_unknown();
@@ -507,7 +505,7 @@ pub fn prog_member_type(p: Program, m: Member) -> i64 {
 }
 
 /// The argument nodes of the attribute named `name` on node `n`, or none.
-pub fn prog_attr_nodes(p: Program, n: i64, name: str) -> List<i64>? {
+pub fn prog_attr_nodes(ref p: Program, n: i64, name: str) -> List<i64>? {
     for row_index in nl_get(p.attrs, key(n)) {
         let row: List<any> = p.s.attrs[row_index];
         if sym_text(p.s, row[1]) == name {
@@ -520,10 +518,10 @@ pub fn prog_attr_nodes(p: Program, n: i64, name: str) -> List<i64>? {
 
 /// Every node of kind `k`, in node order (`nodes_of`, built once with the
 /// snapshot). The list is shared: a caller must not change it.
-pub fn prog_nodes_of_kind(p: Program, k: i64) -> List<i64> => nodes_of(p.s, k);
+pub fn prog_nodes_of_kind(ref p: Program, k: i64) -> List<i64> => nodes_of(p.s, k);
 
 /// The value of entry `name` in map literal `m`, or -1.
-fn map_entry(p: Program, m: i64, name: str) -> i64 {
+fn map_entry(var ref p: Program, m: i64, name: str) -> i64 {
     let at = key(m);
     if !p.entry_index.has(at) {
         // The constant tables are large map literals read many times: their
@@ -547,7 +545,7 @@ fn map_entry(p: Program, m: i64, name: str) -> i64 {
 /// The node a constant expression stands for: a literal is itself; a member
 /// chain `Root.a.b` is entry `b` of entry `a` of the map literal bound to
 /// `Root`. -1 when it cannot be followed.
-fn const_node(p: Program, e: i64, depth: i64) -> i64 {
+fn const_node(var ref p: Program, e: i64, depth: i64) -> i64 {
     let s = p.s;
     if e < 0 || depth > 16 { return -1; }
     let k = kind(s, e);
@@ -565,7 +563,7 @@ fn const_node(p: Program, e: i64, depth: i64) -> i64 {
 
 /// The name a constant expression stands for (`Cfg.Reg.gpr_s` ->
 /// `gpr_signed`), or "".
-pub fn prog_const_name(p: Program, e: i64) -> str {
+pub fn prog_const_name(var ref p: Program, e: i64) -> str {
     let n = const_node(p, e, 0);
     return if n >= 0 && kind(p.s, n) == nk_ident() { node_name(p.s, n) } else { "" };
 }
@@ -573,7 +571,7 @@ pub fn prog_const_name(p: Program, e: i64) -> str {
 /// A constant expression as text: a string's contents, a name, or an
 /// integer's digits (`Cfg.Hooks.receptor` -> `bind_receptor`); "" when it is
 /// none of these.
-pub fn prog_const_text(p: Program, e: i64) -> str {
+pub fn prog_const_text(var ref p: Program, e: i64) -> str {
     let n = const_node(p, e, 0);
     if n < 0 { return ""; }
     let k = kind(p.s, n);
@@ -584,7 +582,7 @@ pub fn prog_const_text(p: Program, e: i64) -> str {
 }
 
 /// The integer a constant expression evaluates to, or none.
-pub fn prog_const(p: Program, e: i64) -> i64? {
+pub fn prog_const(var ref p: Program, e: i64) -> i64? {
     let n = const_node(p, e, 0);
     if n >= 0 && kind(p.s, n) == nk_int() { return lit_value(p.s, n); }
     return none;
@@ -594,7 +592,7 @@ pub pure fn engine_token() -> str => "__engine";
 
 /// The text of a binding argument: `nameof(f)` is `f`, a string its value,
 /// a name itself.
-fn engine_arg_text(p: Program, n: i64) -> str {
+fn engine_arg_text(var ref p: Program, n: i64) -> str {
     let s = p.s;
     let k = kind(s, n);
     if k == nk_call() {
@@ -609,7 +607,7 @@ fn engine_arg_text(p: Program, n: i64) -> str {
 /// Every `__engine("<hook>", args..)` call of the linked program whose hook
 /// is a string: `[hook, args..]` as text. The program is walked once; the
 /// list is shared, so a caller must not change it.
-pub fn prog_engine_bindings(p: Program) -> List<List<str>> {
+pub fn prog_engine_bindings(var ref p: Program) -> List<List<str>> {
     if p.engine_memo.len() == 0 { p.engine_memo.push(scan_engine_bindings(p)); }
     return p.engine_memo[0];
 }
@@ -644,7 +642,7 @@ fn is_bridge_bind_hook(name: str) -> bool {
         || name == "bind_enumerator";
 }
 
-fn scan_engine_bindings(p: Program) -> List<List<str>> {
+fn scan_engine_bindings(var ref p: Program) -> List<List<str>> {
     let s = p.s;
     var out: List<List<str>> = [];
     let ident_kind = nk_ident();

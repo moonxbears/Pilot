@@ -5,6 +5,8 @@
 // WASM v1 modules (`\0asm\x01\x00\x00\x00`), WAT text, and JS/TS host bindings.
 // ============================================================================
 
+pub pkg selfhost.codegen;
+
 use std.text;
 
 [Layout(c_abi)]
@@ -515,7 +517,7 @@ pub pure fn wasm_target_is_wasip2(target: str) -> bool {
 }
 
 // Emits WASM Component Model WAT representation (`(component ...)`).
-pub fn emit_component_wat_module(pkg_name: str, world_name: str, exports: List<str>) -> str {
+pub fn emit_component_wat_module(pkg_name: str, world_name: str, ref exports: List<str>) -> str {
     var out: List<str> = ["(component\n"];
     out.push("  ;; Component: " + pkg_name + "\n");
     out.push("  ;; World: " + world_name + "\n");
@@ -542,7 +544,7 @@ pub fn emit_component_wat_module(pkg_name: str, world_name: str, exports: List<s
 }
 
 // Emits canonical `.wit` interface definition from exported function names.
-pub fn emit_wit_interface(pkg_namespace: str, pkg_name: str, iface_name: str, funcs: List<str>) -> str {
+pub fn emit_wit_interface(pkg_namespace: str, pkg_name: str, iface_name: str, ref funcs: List<str>) -> str {
     var out: List<str> = ["package " + pkg_namespace + ":" + pkg_name + "@0.1.0;\n\n"];
     out.push("interface " + iface_name + " {\n");
     var i = 0;

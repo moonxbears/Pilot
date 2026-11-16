@@ -20,7 +20,11 @@ use pilot_vm::{BytecodeCompiler, PilVirtualMachine, PilotVal};
 /// strings) and the value of the program's last expression.
 fn run(src: &str) -> (PilVirtualMachine, PilotVal) {
     let arena = pilot_parser::parse(src);
-    assert!(arena.diagnostics.is_empty(), "program must parse: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "program must parse: {:?}",
+        arena.diagnostics
+    );
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     let msgs: Vec<&str> = bin.diagnostics.iter().map(|d| d.message.as_str()).collect();
     assert!(msgs.is_empty(), "program must compile: {msgs:?}");
@@ -34,7 +38,8 @@ fn run(src: &str) -> (PilVirtualMachine, PilotVal) {
 }
 
 fn text(v: PilotVal) -> String {
-    v.with_str(str::to_string).unwrap_or_else(|| panic!("not a string: {v}"))
+    v.with_str(str::to_string)
+        .unwrap_or_else(|| panic!("not a string: {v}"))
 }
 
 /// Appending one byte 20,000 times makes strings of every length from 15 to
@@ -43,15 +48,16 @@ fn text(v: PilotVal) -> String {
 /// reachable, so the VM must hold far less than that.
 #[test]
 fn building_a_string_keeps_only_what_is_reachable() {
-    let (vm, out) = run(
-        "var out = \"\";\n\
+    let (vm, out) = run("var out = \"\";\n\
          var i = 0;\n\
          while i < 20000 { out = out + \"x\"; i = i + 1; }\n\
-         out;\n",
-    );
+         out;\n");
     assert_eq!(text(out).len(), 20_000);
     let held = vm.strings.bytes();
-    assert!(held < 16 << 20, "the VM still holds {held} bytes of strings");
+    assert!(
+        held < 16 << 20,
+        "the VM still holds {held} bytes of strings"
+    );
 }
 
 /// About 25 MB of garbage (strings of 2 to 10,000 bytes, step 2: 25,005,000
@@ -59,8 +65,7 @@ fn building_a_string_keeps_only_what_is_reachable() {
 /// a caller's saved registers; all of them read back unchanged.
 #[test]
 fn reachable_strings_survive_collection() {
-    let (_vm, out) = run(
-        "fn churn() -> i64 {\n\
+    let (_vm, out) = run("fn churn() -> i64 {\n\
              var g = \"\";\n\
              var j = 0;\n\
              while j < 5000 { g = g + \"yy\"; j = j + 1; }\n\
@@ -80,8 +85,7 @@ fn reachable_strings_survive_collection() {
          var all = \"\";\n\
          var k = 0;\n\
          while k < 300 { all = all + __engine(\"list_get\", xs, k) + \",\"; k = k + 1; }\n\
-         all + __engine(\"map_get\", m, \"k\") + \"|\" + held;\n",
-    );
+         all + __engine(\"map_get\", m, \"k\") + \"|\" + held;\n");
     let mut expected = String::new();
     for i in 0..300 {
         expected.push_str(&format!("long-string-number-{i},"));
@@ -103,7 +107,10 @@ fn loading_a_program_starts_with_an_empty_record_heap() {
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(BytecodeCompiler::compile(&first, first.root));
     let kept = vm.run();
-    assert!(vm.heap_maps.len() > 50, "the first program builds 50 records");
+    assert!(
+        vm.heap_maps.len() > 50,
+        "the first program builds 50 records"
+    );
     let second = pilot_parser::parse("1 + 1;\n");
     vm.load_binary(BytecodeCompiler::compile(&second, second.root));
     assert_eq!(vm.heap_maps.len(), 1, "only the environment record is left");
@@ -145,7 +152,11 @@ fn a_module_header_is_read_again_after_its_file_changes() {
     );
     std::fs::write(&path, "pkg Probe.Header;\nuse std.col;\n\nfn f() {}\n").expect("write");
     assert_eq!(count(&program), 2);
-    std::fs::write(&path, "pkg Probe.Header;\nuse std.col;\nuse std.text;\n\nfn f() {}\n").expect("write");
+    std::fs::write(
+        &path,
+        "pkg Probe.Header;\nuse std.col;\nuse std.text;\n\nfn f() {}\n",
+    )
+    .expect("write");
     assert_eq!(count(&program), 3);
     let _ = std::fs::remove_file(&path);
 }
@@ -155,8 +166,7 @@ fn a_module_header_is_read_again_after_its_file_changes() {
 /// the VM must end with far fewer slots than that.
 #[test]
 fn records_and_lists_out_of_scope_are_freed() {
-    let (vm, out) = run(
-        "fn make(i: i64) -> i64 {\n\
+    let (vm, out) = run("fn make(i: i64) -> i64 {\n\
              let m = __engine(\"map_new\");\n\
              __engine(\"map_set\", m, \"items\", [i, i + 1, i + 2]);\n\
              let xs = __engine(\"map_get\", m, \"items\");\n\
@@ -165,12 +175,14 @@ fn records_and_lists_out_of_scope_are_freed() {
          var total = 0;\n\
          var i = 0;\n\
          while i < 200000 { total = total + make(i); i = i + 1; }\n\
-         total;\n",
-    );
+         total;\n");
     // The sum of i + 2 for i below 200,000: 199,999 * 200,000 / 2 + 400,000.
     assert_eq!(out.as_int(), Some(20_000_300_000));
     let slots = vm.heap_lists.len() + vm.heap_maps.len();
-    assert!(slots < 150_000, "the VM still has {slots} list and record slots");
+    assert!(
+        slots < 150_000,
+        "the VM still has {slots} list and record slots"
+    );
     assert!(vm.heap.collections() > 0);
 }
 
@@ -197,7 +209,10 @@ fn a_block_local_is_freed_after_its_block_ends() {
     );
     assert_eq!(out.as_int(), Some(100_000));
     let longest = vm.heap_lists.iter().map(Vec::len).max().unwrap_or(0);
-    assert!(longest < 100_000, "a list of {longest} elements is still held");
+    assert!(
+        longest < 100_000,
+        "a list of {longest} elements is still held"
+    );
 }
 
 /// Lists reachable only through a record (filled in a call whose registers
@@ -237,6 +252,8 @@ fn reading_a_freed_list_is_an_internal_error() {
     let mut vm = PilVirtualMachine::new();
     let orphan = vm.new_list(vec![PilotVal::from_int(1)]);
     vm.collect();
-    let err = vm.intrinsic("list_len", &[orphan]).expect_err("the slot was freed");
+    let err = vm
+        .intrinsic("list_len", &[orphan])
+        .expect_err("the slot was freed");
     assert!(err.contains("freed"), "error: {err}");
 }

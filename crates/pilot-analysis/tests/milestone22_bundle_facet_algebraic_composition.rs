@@ -3,15 +3,15 @@
 //! Complete *Bundle & *Facet Algebraic Composition Engine
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 22,
@@ -75,12 +75,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m22(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -161,7 +165,10 @@ fn test_m22_1_arbitrary_n_field_flattener_and_cycle_detection() {
 
     let deps = &["selfhost/types/bundle_splice.pilot"];
     let res = eval_m22(deps, script);
-    assert_eq!(res, "42", "Must flatten arbitrary 24 fields and detect cyclic bundle dependencies");
+    assert_eq!(
+        res, "42",
+        "Must flatten arbitrary 24 fields and detect cyclic bundle dependencies"
+    );
 
     guard.finish();
 }
@@ -171,10 +178,8 @@ fn test_m22_1_arbitrary_n_field_flattener_and_cycle_detection() {
 // -----------------------------------------------------------------------------
 #[test]
 fn test_m22_2_horizontal_collision_algebra() {
-    let guard = anticheat::AntiCheatGuard::arm(
-        "test_m22_2_horizontal_collision_algebra",
-        &ANTICHEAT_SPEC,
-    );
+    let guard =
+        anticheat::AntiCheatGuard::arm("test_m22_2_horizontal_collision_algebra", &ANTICHEAT_SPEC);
 
     let script = r#"
         pub fn main() -> i64 {
@@ -257,7 +262,10 @@ fn test_m22_2_horizontal_collision_algebra() {
 
     let deps = &["selfhost/types/bundle_splice.pilot"];
     let res = eval_m22(deps, script);
-    assert_eq!(res, "42", "Must resolve coalesce/with/without algebra and catch COMP004 & COMP006");
+    assert_eq!(
+        res, "42",
+        "Must resolve coalesce/with/without algebra and catch COMP004 & COMP006"
+    );
 
     guard.finish();
 }
@@ -333,7 +341,10 @@ fn test_m22_3_sealed_partial_struct_and_lattice_law() {
 
     let deps = &["selfhost/types/bundle_splice.pilot"];
     let res = eval_m22(deps, script);
-    assert_eq!(res, "42", "Must enforce COMP001 on partial struct and COMP005 on 2-bit lattice violation");
+    assert_eq!(
+        res, "42",
+        "Must enforce COMP001 on partial struct and COMP005 on 2-bit lattice violation"
+    );
 
     guard.finish();
 }
@@ -432,7 +443,10 @@ fn test_m22_4_four_tier_method_table_and_static_delegation() {
 
     let deps = &["selfhost/types/method_table.pilot"];
     let res = eval_m22(deps, script);
-    assert_eq!(res, "42", "Must resolve 4-tier precedence and support static bundle delegation");
+    assert_eq!(
+        res, "42",
+        "Must resolve 4-tier precedence and support static bundle delegation"
+    );
 
     guard.finish();
 }

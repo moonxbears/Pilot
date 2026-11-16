@@ -3,7 +3,7 @@
 // Milestone 3.4: Declarative CommandRegistry Router & Single-Source CLI Entry
 // Replaces hardcoded numeric dispatch in Pure Pilot (CLI001 - CLI006)
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Cli.Main;
+pub lvl(0) pkg selfhost.cli;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

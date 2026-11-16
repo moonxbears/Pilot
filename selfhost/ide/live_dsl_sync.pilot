@@ -5,7 +5,7 @@
 // hover signatures, and formatter rules directly from active scoped syntax.
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Ide.LiveDslSync;
+pub lvl(0) pkg selfhost.ide;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

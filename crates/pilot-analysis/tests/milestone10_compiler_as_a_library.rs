@@ -4,15 +4,15 @@
 //! `pilot.ir`, `pilot.fmt`, `pilot.db`, `pilot.vm`, `pilot.diag`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 10,
@@ -32,7 +32,13 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "stdlib/pilot/cst.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &["parse_lossless", "cst_editor_new", "cst_tree_root", "cst_editor_replace_span", "cst_editor_finish"],
+            required_pub_fns: &[
+                "parse_lossless",
+                "cst_editor_new",
+                "cst_tree_root",
+                "cst_editor_replace_span",
+                "cst_editor_finish",
+            ],
             required_code_markers: &["CstTree", "CstNodeView", "CstEditor"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
@@ -41,7 +47,14 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "stdlib/pilot/ast.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &["ast_module_new", "quote_builder_new", "ast_module_gensym", "ast_module_can_splice", "quote_builder_splice", "quote_builder_build"],
+            required_pub_fns: &[
+                "ast_module_new",
+                "quote_builder_new",
+                "ast_module_gensym",
+                "ast_module_can_splice",
+                "quote_builder_splice",
+                "quote_builder_build",
+            ],
             required_code_markers: &["AstModule", "AstNodeView", "QuoteBuilder"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
@@ -59,7 +72,12 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "stdlib/pilot/ir.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &["ir_module_new", "ir_pass_pipeline_new", "ir_pass_pipeline_add_pass", "ir_pass_pipeline_run"],
+            required_pub_fns: &[
+                "ir_module_new",
+                "ir_pass_pipeline_new",
+                "ir_pass_pipeline_add_pass",
+                "ir_pass_pipeline_run",
+            ],
             required_code_markers: &["IrModule", "IrPassPipeline"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
@@ -77,7 +95,12 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "stdlib/pilot/db.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &["compiler_session_new_in_memory", "compiler_session_open_workspace", "compiler_session_set_file", "compiler_session_get_file"],
+            required_pub_fns: &[
+                "compiler_session_new_in_memory",
+                "compiler_session_open_workspace",
+                "compiler_session_set_file",
+                "compiler_session_get_file",
+            ],
             required_code_markers: &["CompilerSession"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
@@ -86,8 +109,18 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "stdlib/pilot/vm.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &["vm_sandbox_new", "vm_config_default", "vm_sandbox_consume_fuel", "vm_sandbox_check_capability"],
-            required_code_markers: &["VmSandbox", "VmConfig", "vm_trap_fuel_exhausted", "vm_trap_capability_denied"],
+            required_pub_fns: &[
+                "vm_sandbox_new",
+                "vm_config_default",
+                "vm_sandbox_consume_fuel",
+                "vm_sandbox_check_capability",
+            ],
+            required_code_markers: &[
+                "VmSandbox",
+                "VmConfig",
+                "vm_trap_fuel_exhausted",
+                "vm_trap_capability_denied",
+            ],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -95,7 +128,13 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "stdlib/pilot/diag.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &["diagnostic_new", "render_ansi", "render_json", "render_sarif", "diagnostic_is_error"],
+            required_pub_fns: &[
+                "diagnostic_new",
+                "render_ansi",
+                "render_json",
+                "render_sarif",
+                "diagnostic_is_error",
+            ],
             required_code_markers: &["Diagnostic", "FixSuggestion", "Span", "TextEdit"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
@@ -105,12 +144,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m10(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -169,13 +212,19 @@ pub fn test_m10_1_streaming_tokenizer_and_cst_lossless_roundtrip() {
         ("" + (if tok_ok { "TOKENS_OK" } else { "TOKENS_FAIL" }) + "|" + (if edit_ok { "CST_EDIT_OK" } else { "EDIT_FAIL" }));
     "#;
 
-    let res = eval_m10(&["stdlib/pilot/lex.pilot", "stdlib/pilot/cst.pilot"], script);
+    let res = eval_m10(
+        &["stdlib/pilot/lex.pilot", "stdlib/pilot/cst.pilot"],
+        script,
+    );
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 2, "Expected 2 parts, got: {}", res);
     assert_eq!(parts[0], "TOKENS_OK");
     assert_eq!(parts[1], "CST_EDIT_OK");
 
-    let parsed = eval_m10(&["stdlib/pilot/cst.pilot"], r#"parse_lossless("fn compute() => 123;");"#);
+    let parsed = eval_m10(
+        &["stdlib/pilot/cst.pilot"],
+        r#"parse_lossless("fn compute() => 123;");"#,
+    );
     assert!(
         parsed.starts_with("FAULT: SEAM001: unconnected seam `pilot_cst.parse_lossless`"),
         "parse_lossless must stop at its seam, got: {}",
@@ -264,7 +313,15 @@ pub fn test_m10_3_type_reflection_lattice_classes_and_ir_pipeline() {
         ("" + (if lattice_ok { "LATTICE_OK" } else { "LATTICE_FAIL" }) + "|" + (if ir_ok { "IR_OK" } else { "IR_FAIL" }) + "|" + (if fmt_ok { "FMT_OK" } else { "FMT_FAIL" }));
     "#;
 
-    let res = eval_m10(&["stdlib/std/text.pilot", "stdlib/pilot/types.pilot", "stdlib/pilot/ir.pilot", "stdlib/pilot/fmt.pilot"], script);
+    let res = eval_m10(
+        &[
+            "stdlib/std/text.pilot",
+            "stdlib/pilot/types.pilot",
+            "stdlib/pilot/ir.pilot",
+            "stdlib/pilot/fmt.pilot",
+        ],
+        script,
+    );
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 3, "Expected 3 parts, got: {}", res);
     assert_eq!(parts[0], "LATTICE_OK");
@@ -280,7 +337,10 @@ pub fn test_m10_3_type_reflection_lattice_classes_and_ir_pipeline() {
         "ir_pass_pipeline_run must stop at its seam, got: {}",
         ran
     );
-    let formatted = eval_m10(&["stdlib/std/text.pilot", "stdlib/pilot/fmt.pilot"], r#"format_str("let t = f!^(a);", fmt_style_readable());"#);
+    let formatted = eval_m10(
+        &["stdlib/std/text.pilot", "stdlib/pilot/fmt.pilot"],
+        r#"format_str("let t = f!^(a);", fmt_style_readable());"#,
+    );
     assert!(
         formatted.starts_with("FAULT: SEAM001: unconnected seam `pilot_fmt.format_str`"),
         "format_str must stop at its seam, got: {}",
@@ -335,7 +395,15 @@ pub fn test_m10_4_in_memory_compiler_session_and_vm_sandbox_capabilities() {
         ("" + (if sess_ok { "SESSION_OK" } else { "SESSION_FAIL" }) + "|" + (if vm_cap_denied_ok { "VM_CAP_DENIED_OK" } else { "VM_CAP_FAIL" }) + "|" + (if vm_fuel_trap_ok { "VM_FUEL_TRAP_OK" } else { "VM_FUEL_FAIL" }) + "|" + (if json_ok && diag_is_err { "DIAG_OK" } else { "DIAG_FAIL" }));
     "#;
 
-    let res = eval_m10(&["stdlib/std/text.pilot", "stdlib/pilot/db.pilot", "stdlib/pilot/vm.pilot", "stdlib/pilot/diag.pilot"], script);
+    let res = eval_m10(
+        &[
+            "stdlib/std/text.pilot",
+            "stdlib/pilot/db.pilot",
+            "stdlib/pilot/vm.pilot",
+            "stdlib/pilot/diag.pilot",
+        ],
+        script,
+    );
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 4, "Expected 4 parts, got: {}", res);
     assert_eq!(parts[0], "SESSION_OK");
@@ -344,8 +412,14 @@ pub fn test_m10_4_in_memory_compiler_session_and_vm_sandbox_capabilities() {
     assert_eq!(parts[3], "DIAG_OK");
 
     let session_seams = [
-        (r#"var s = compiler_session_new_in_memory(); compiler_session_set_file(var ref s, "a.pilot", "fn a() => 1;"); compiler_session_check_all(s);"#, "pilot_db.check_all"),
-        (r#"compiler_session_open_workspace(".");"#, "pilot_db.open_workspace"),
+        (
+            r#"var s = compiler_session_new_in_memory(); compiler_session_set_file(var ref s, "a.pilot", "fn a() => 1;"); compiler_session_check_all(s);"#,
+            "pilot_db.check_all",
+        ),
+        (
+            r#"compiler_session_open_workspace(".");"#,
+            "pilot_db.open_workspace",
+        ),
     ];
     for (call, id) in session_seams {
         let out = eval_m10(&["stdlib/pilot/db.pilot"], call);

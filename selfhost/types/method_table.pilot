@@ -9,7 +9,7 @@
 // Tier 5: Scoped Extension (ext / use ext)
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Types.MethodTable;
+pub lvl(0) pkg selfhost.types;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

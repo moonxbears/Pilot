@@ -27,12 +27,9 @@
 // The pass runs after type checking and the GATE021 source checks (the
 // source still shows the single caller) and on lowered IR, whose drops are
 // already explicit (selfhost/ir/lower_drop.pilot).
-pub lvl(0) pkg Pilot.SelfHost.Ir.PassInline;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.program.*;
-use selfhost.ir.model.*;
-use selfhost.ir.verify.*;
-use selfhost.ir.passes.*;
+use selfhost.check.*;
 
 /// The attribute that asks for a declaration's calls to be inlined.
 pub pure fn inline_attr() -> str => "Inline";
@@ -41,7 +38,7 @@ pub pure fn engine_op_attr() -> str => "EngineOp";
 
 /// The inline mode of declaration `decl` (set on its `IrFunction` when it
 /// is lowered).
-pub fn decl_inline_mode(p: Program, decl: i64) -> u8 {
+pub fn decl_inline_mode(ref p: Program, decl: i64) -> u8 {
     if prog_attr_args(p, decl, engine_op_attr()) != none { return ir_inline_forced(); }
     if prog_attr_args(p, decl, inline_attr()) != none { return ir_inline_hint(); }
     return ir_inline_none();
@@ -53,7 +50,7 @@ pub struct InlinePass : IPilIrPass {
 }
 
 /// The functions `g`'s body calls directly that are themselves inline.
-fn inline_callees(m: IrModule, g: IrFunction) -> List<u32> {
+fn inline_callees(ref m: IrModule, ref g: IrFunction) -> List<u32> {
     var out: List<u32> = [];
     for b in g.blocks {
         for inst in b.insts {
@@ -67,7 +64,7 @@ fn inline_callees(m: IrModule, g: IrFunction) -> List<u32> {
 
 /// Whether function `g` reaches itself again through calls of inline
 /// functions (inlining it would never end).
-pub fn inline_recursive(m: IrModule, g: u32) -> bool {
+pub fn inline_recursive(ref m: IrModule, g: u32) -> bool {
     var seen: List<bool> = [];
     for _f in m.functions { seen.push(false); }
     var work: List<u32> = inline_callees(m, m.functions[g]);
@@ -82,7 +79,7 @@ pub fn inline_recursive(m: IrModule, g: u32) -> bool {
 }
 
 /// The forced-inline functions of `m` that cannot be inlined (INLINE002).
-pub fn inline_issues(m: IrModule) -> List<IrIssue> {
+pub fn inline_issues(ref m: IrModule) -> List<IrIssue> {
     var out: List<IrIssue> = [];
     var i: u32 = 0;
     while i < m.functions.len {
@@ -97,7 +94,7 @@ pub fn inline_issues(m: IrModule) -> List<IrIssue> {
 
 /// Whether the call `inst` is one to inline. A function calling itself is
 /// never inlined: if it is inline, `inline_recursive` holds for it.
-fn should_inline(m: IrModule, inst: IrInst) -> bool {
+fn should_inline(ref m: IrModule, inst: IrInst) -> bool {
     if inst.opcode != op_call_direct() || inst.subop >= m.functions.len { return false; }
     let g = m.functions[inst.subop];
     if g.inline == ir_inline_none() || g.blocks.len == 0 { return false; }
@@ -105,7 +102,7 @@ fn should_inline(m: IrModule, inst: IrInst) -> bool {
 }
 
 /// Inlines every call in `f` that should be; true when it inlined one.
-pub fn inline_calls(f: IrFunction, m: IrModule) -> bool {
+pub fn inline_calls(var ref f: IrFunction, ref m: IrModule) -> bool {
     var changed = false;
     var b: u32 = 0;
     while b < f.blocks.len {
@@ -129,7 +126,7 @@ pub fn inline_calls(f: IrFunction, m: IrModule) -> bool {
 
 /// Adds `inst` with operands `args` to block `b` of `f`, keeping its source
 /// offset `span`.
-fn put(f: IrFunction, b: u32, result: u32, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, span: i64) {
+fn put(var ref f: IrFunction, b: u32, result: u32, op: u16, sub: u16, phy: IrTypePhysics, ref args: List<u32>, span: i64) {
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
     f.spans.push(span);
@@ -137,7 +134,7 @@ fn put(f: IrFunction, b: u32, result: u32, op: u16, sub: u16, phy: IrTypePhysics
 }
 
 /// Whether some block of `g` jumps to its entry block.
-fn entry_has_preds(g: IrFunction) -> bool {
+fn entry_has_preds(ref g: IrFunction) -> bool {
     for blk in g.blocks {
         for inst in blk.insts {
             if opcode_is_terminator(inst.opcode) {
@@ -149,7 +146,7 @@ fn entry_has_preds(g: IrFunction) -> bool {
 }
 
 /// Replaces the call at position `at` of block `b` of `f` by a copy of `g`.
-fn inline_one(f: IrFunction, g: IrFunction, b: u32, at: i64) {
+fn inline_one(var ref f: IrFunction, ref g: IrFunction, b: u32, at: i64) {
     let call = f.blocks[b].insts[at];
     let call_args = ir_args(f, call);
     let call_span = f.spans[call.span_id];

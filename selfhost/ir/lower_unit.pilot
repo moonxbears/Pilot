@@ -10,14 +10,9 @@
 // run time each time the literal is evaluated (stand-in
 // `ir.unit_literal_call`, until IR constants are valued while compiling).
 // The checker has already refused a unit no family declares.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerUnit;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_global.*;
+use selfhost.check.*;
 
 /// The binding word that names the functions valuing dimensional literals.
 pub pure fn unit_literal_hook() -> str => "bind_unit_literal";
@@ -25,7 +20,7 @@ pub pure fn unit_literal_hook() -> str => "bind_unit_literal";
 /// Whether node `n` is code the program runs: in a file it links, or in the
 /// file of the function that values its dimensional literals (which the seed
 /// runs while compiling it).
-pub fn runs_in_program(lw: Lowerer, n: i64) -> bool {
+pub fn runs_in_program(ref lw: Lowerer, n: i64) -> bool {
     let s = lw.inf.p.s;
     if in_linked_file(s, n) { return true; }
     let f = unit_converter(lw);
@@ -33,7 +28,7 @@ pub fn runs_in_program(lw: Lowerer, n: i64) -> bool {
 }
 
 /// The function the program binds to value dimensional literals, or -1.
-fn unit_converter(lw: Lowerer) -> i64 {
+fn unit_converter(ref lw: Lowerer) -> i64 {
     for row in lw.bindings {
         if row.len() < 2 || row[0] != unit_literal_hook() { continue; }
         let fns = nl_get(lw.inf.p.fns, row[1]);
@@ -44,7 +39,7 @@ fn unit_converter(lw: Lowerer) -> i64 {
 
 /// The literal spelled `text` (`250ms`): its value in the base unit.
 [StandIn("ir.unit_literal_call", "a dimensional literal is a constant in the output, valued while the program is compiled", "the IR calls the bound converter on the literal's text each time the literal is evaluated", "M30")]
-pub fn lower_unit_text(lw: Lowerer, text: str, n: i64) -> u32 {
+pub fn lower_unit_text(var ref lw: Lowerer, text: str, n: i64) -> u32 {
     let f = unit_converter(lw);
     if f < 0 { return unsupported(lw, n); }
     let raw = emit(lw, op_const_bytes(), 0, layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_str()))), [pool_str(lw, text)], n);
@@ -52,11 +47,11 @@ pub fn lower_unit_text(lw: Lowerer, text: str, n: i64) -> u32 {
 }
 
 /// `250ms`: a dimensional literal node.
-pub fn lower_unit_literal(lw: Lowerer, n: i64) -> u32 => lower_unit_text(lw, sym_text(lw.inf.p.s, lhs(lw.inf.p.s, n)), n);
+pub fn lower_unit_literal(var ref lw: Lowerer, n: i64) -> u32 => lower_unit_text(lw, sym_text(lw.inf.p.s, lhs(lw.inf.p.s, n)), n);
 
 /// `3[ms]`: a number indexed by a name that is no binding or global is the
 /// literal `3ms`; none otherwise.
-pub fn bracket_unit_text(lw: Lowerer, n: i64) -> str? {
+pub fn bracket_unit_text(ref lw: Lowerer, n: i64) -> str? {
     let s = lw.inf.p.s;
     let num = lhs(s, n);
     let unit = rhs(s, n);

@@ -1,0 +1,31 @@
+// PROP-005 5B.1 (owner decision D1, 2026-11-15): a plain `ref` parameter is
+// a read-only borrow, so changing the value through it is DECL004, the same
+// as rebinding it (err_assign_readonly_ref_param): assigning a field of it,
+// calling a method that changes it, or passing it on to a `var ref`
+// parameter that changes it. `var ref` is the way to change it
+// (memory/var_ref_change).
+struct Tally {
+    pub items: List<i64>;
+    pub n: i64;
+}
+
+fn add(ref t: Tally, v: i64) {
+    t.items.push(v);
+    t.n = t.n + 1;
+}
+
+fn grow(var ref xs: List<i64>) {
+    xs.push(1);
+}
+
+fn relay(ref xs: List<i64>) {
+    grow(xs);
+}
+
+fn main() {
+    var t = Tally { items: [], n: 0 };
+    add(t, 2);
+    var xs: List<i64> = [];
+    relay(xs);
+    print(t.n);
+}

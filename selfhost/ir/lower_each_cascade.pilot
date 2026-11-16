@@ -6,7 +6,7 @@
 //   3. Structural DTO projections `->` and `->>` (FUSE003)
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Ir.EachCascade;
+pub lvl(0) pkg selfhost.ir;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -110,7 +110,7 @@ pub fn lower_cascade(
     root_expr: str,
     is_null_safe: bool,
     receiver_is_opt: bool,
-    actions: List<str>,
+    ref actions: List<str>,
     var ref diags: List<str>
 ) -> CascadeLowering {
     if is_null_safe && !receiver_is_opt {
@@ -130,9 +130,9 @@ pub fn lower_cascade(
 
 pub fn lower_dto_projection(
     source_type: str,
-    source_fields: List<str>,
+    ref source_fields: List<str>,
     target_type: str,
-    target_fields: List<str>,
+    ref target_fields: List<str>,
     is_collection: bool,
     var ref diags: List<str>
 ) -> DtoProjectionLowering {

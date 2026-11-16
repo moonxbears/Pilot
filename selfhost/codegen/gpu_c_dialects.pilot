@@ -5,6 +5,8 @@
 // and AST body expressions into CUDA, ROCm/HIP, OpenCL C, and OpenMP Offload.
 // ============================================================================
 
+pub pkg selfhost.codegen;
+
 use std.text;
 
 [Layout(c_abi)]

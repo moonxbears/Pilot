@@ -2,10 +2,10 @@
 
 use crate::instruction::{Instruction, Opcode};
 use crate::lower_native::native;
-use crate::BytecodeCompiler;
-use pilot_parser::NativeKind;
-use pilot_ast::{AstArena, AstNode, CallQuoteKind, NodeId, NodeKind};
 use crate::value::PilotVal;
+use crate::BytecodeCompiler;
+use pilot_ast::{AstArena, AstNode, CallQuoteKind, NodeId, NodeKind};
+use pilot_parser::NativeKind;
 
 /// Where a call-quote mode stops until its carrier values exist.
 const QUOTED_CALL_SEAM: &str = "SEAM001: unconnected seam `vm.call_quote`: \
@@ -50,7 +50,9 @@ impl BytecodeCompiler {
     pub(crate) fn compile_call_ids(&mut self, arena: &AstArena, ids: &[NodeId]) -> u8 {
         if Self::has_named_args(arena, &ids[1..]) {
             return match self.order_named_args(arena, ids) {
-                Ok(ordered) if Self::has_named_args(arena, &ordered[1..]) => self.compile_call_positional(arena, &ordered),
+                Ok(ordered) if Self::has_named_args(arena, &ordered[1..]) => {
+                    self.compile_call_positional(arena, &ordered)
+                }
                 Ok(ordered) => self.compile_call_ids(arena, &ordered),
                 Err((code, message)) => self.error(code, message),
             };
@@ -122,7 +124,10 @@ impl BytecodeCompiler {
         lhs: NodeId,
         rhs: NodeId,
     ) -> Option<u8> {
-        let function = pilot_parser::bootstrap_tables().operator_fn(symbol)?.function.clone();
+        let function = pilot_parser::bootstrap_tables()
+            .operator_fn(symbol)?
+            .function
+            .clone();
         let mark = self.next_reg;
         let r_l = self.compile_node(arena, lhs);
         let r_r = self.compile_node(arena, rhs);
@@ -147,7 +152,8 @@ impl BytecodeCompiler {
                 let j_fallback = self.emit_branch(Opcode::JumpIfNull, r_hit, 0);
                 let j_done = self.emit_jump(0);
                 self.patch_to_here(j_fallback);
-                let r_seq = self.emit_user_call(name.to_string(), name.to_string(), &[r_lhs, r_rhs]);
+                let r_seq =
+                    self.emit_user_call(name.to_string(), name.to_string(), &[r_lhs, r_rhs]);
                 self.emit(Opcode::Move, r_hit, r_seq, 0);
                 self.patch_to_here(j_done);
                 return r_hit;
@@ -160,7 +166,10 @@ impl BytecodeCompiler {
         // A struct with no stored fields and no constructor (a `[Lang]` type
         // the engine lays out, like the list) is built by the engine's
         // function of that name when there is one.
-        let builds_records = self.structs.get(name).is_some_and(|s| !s.fields.is_empty() || s.ctor.is_some());
+        let builds_records = self
+            .structs
+            .get(name)
+            .is_some_and(|s| !s.fields.is_empty() || s.ctor.is_some());
         let declared = self.fn_entries.contains_key(name)
             || self.known_fns.contains_key(name)
             || self.lazy_decls.contains_key(name)
@@ -179,7 +188,12 @@ impl BytecodeCompiler {
             return self.compile_struct_literal(arena, name, args[0]);
         }
         // Calling a variable or captured variable calls the function value it holds.
-        if let Some(r_callee) = self.var_slots.get(name).copied().or_else(|| self.capture_read(name)) {
+        if let Some(r_callee) = self
+            .var_slots
+            .get(name)
+            .copied()
+            .or_else(|| self.capture_read(name))
+        {
             let regs = self.compile_args(arena, args);
             return self.emit_closure_call(r_callee, &regs);
         }
@@ -187,7 +201,10 @@ impl BytecodeCompiler {
             return r;
         }
         // So does calling a module-level binding (`let f = (x) => ..;`).
-        if self.globals.contains(name) && !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
+        if self.globals.contains(name)
+            && !self.fn_entries.contains_key(name)
+            && !self.known_fns.contains_key(name)
+        {
             let r_callee = self.emit_global_get(name);
             let regs = self.compile_args(arena, args);
             return self.emit_closure_call(r_callee, &regs);
@@ -205,7 +222,10 @@ impl BytecodeCompiler {
                 return self.emit_user_call(format!("{owner}.{name}"), name.to_string(), &regs);
             }
         }
-        if args.len() == 1 && !self.fn_entries.contains_key(name) && !self.known_fns.contains_key(name) {
+        if args.len() == 1
+            && !self.fn_entries.contains_key(name)
+            && !self.known_fns.contains_key(name)
+        {
             if let Some(layout) = pilot_parser::bootstrap_tables().reg_layout(name).cloned() {
                 let r = self.compile_node(arena, args[0]);
                 return self.emit_conversion(r, &layout);
@@ -228,27 +248,41 @@ impl BytecodeCompiler {
         let ln = *arena.node(NodeId(callee.lhs));
         let r_nm = self.stored_field(arena, NodeId(callee.lhs), Self::name(arena, callee.rhs));
         let lhs_is_name = matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed);
-        let raw_l = if lhs_is_name { Self::name(arena, ln.lhs).to_string() } else { String::new() };
+        let raw_l = if lhs_is_name {
+            Self::name(arena, ln.lhs).to_string()
+        } else {
+            String::new()
+        };
         // A local or module-level binding is a value, not a type name.
-        let is_var = lhs_is_name && (self.var_slots.contains_key(&raw_l) || self.globals.contains(&raw_l));
+        let is_var =
+            lhs_is_name && (self.var_slots.contains_key(&raw_l) || self.globals.contains(&raw_l));
         let l_nm = if is_var {
-            self.var_types.get(&raw_l).cloned().unwrap_or_else(|| raw_l.clone())
+            self.var_types
+                .get(&raw_l)
+                .cloned()
+                .unwrap_or_else(|| raw_l.clone())
         } else {
             raw_l.clone()
         };
         let full = format!("{l_nm}.{r_nm}");
         // `Type.method` names a method the type declares, compiled or not yet
         // (a method of an imported unit is compiled when first called).
-        let known = self.fn_entries.contains_key(&full) || (!is_var && self.declares(&l_nm, &r_nm).is_some());
+        let known = self.fn_entries.contains_key(&full)
+            || (!is_var && self.declares(&l_nm, &r_nm).is_some());
         let receiver_is_value = is_var || (!lhs_is_name && !known);
         if receiver_is_value || (!known && native(NativeKind::Method, &r_nm).is_some()) {
             // A receiver whose type the seed does not know (a literal, an
             // unannotated binding, another call's result) takes the type the
             // checker inferred for it, when the run plan has one and several
             // non-struct types declare the method, so the seed cannot choose.
-            let untyped = if is_var { !self.var_types.contains_key(&raw_l) } else { !lhs_is_name };
+            let untyped = if is_var {
+                !self.var_types.contains_key(&raw_l)
+            } else {
+                !lhs_is_name
+            };
             let owner = if untyped && self.non_struct_owners(&r_nm) > 1 {
-                self.planned_receiver(arena, NodeId(callee.lhs)).unwrap_or_else(|| l_nm.clone())
+                self.planned_receiver(arena, NodeId(callee.lhs))
+                    .unwrap_or_else(|| l_nm.clone())
             } else {
                 l_nm.clone()
             };

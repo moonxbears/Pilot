@@ -3,19 +3,20 @@
 //! First-Class Declarative CLI Command Registry & Minimal Pure-Pilot Launcher
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 3,
-    test_file_rel: "crates/pilot-analysis/tests/milestone03_declarative_cli_registry_and_comptime_parity.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone03_declarative_cli_registry_and_comptime_parity.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
@@ -49,17 +50,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/cli/parser.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "cli_tokenize",
-                "cli_suggest_typo",
-                "cli_parse_args",
-            ],
-            required_code_markers: &[
-                "CLI001",
-                "CLI002",
-                "CLI003",
-                "CLI004",
-            ],
+            required_pub_fns: &["cli_tokenize", "cli_suggest_typo", "cli_parse_args"],
+            required_code_markers: &["CLI001", "CLI002", "CLI003", "CLI004"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -73,12 +65,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "emit_shell_completions",
                 "export_cli_json_schema",
             ],
-            required_code_markers: &[
-                "_pilot_completions",
-                "bash",
-                "zsh",
-                "fish",
-            ],
+            required_code_markers: &["_pilot_completions", "bash", "zsh", "fish"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -91,9 +78,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "resolve_cli_subcommand",
                 "run_cli_entry",
             ],
-            required_code_markers: &[
-                "default_command_registry",
-            ],
+            required_code_markers: &["default_command_registry"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -137,7 +122,9 @@ fn eval_cli_script(tail: &str) -> String {
     ];
     let mut b = String::new();
     for d in deps {
-        b.push_str(&fs::read_to_string(root.join(d)).unwrap_or_else(|e| panic!("Failed to read {d}: {e}")));
+        b.push_str(
+            &fs::read_to_string(root.join(d)).unwrap_or_else(|e| panic!("Failed to read {d}: {e}")),
+        );
         b.push('\n');
     }
     let src = format!("{b}\n{tail}");
@@ -145,7 +132,9 @@ fn eval_cli_script(tail: &str) -> String {
     let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
     let (mut vm, mut phy) = (PilVirtualMachine::new(), PhysicsRegistry::new(flat, syms));
     let reg_ptr = &mut phy as *mut PhysicsRegistry;
-    vm.engine_handler = Some(Box::new(move |op, a| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)));
+    vm.engine_handler = Some(Box::new(move |op, a| {
+        pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
+    }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     vm_outcome::outcome(&mut vm)
 }
@@ -214,11 +203,17 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
 
     // 1. Verify --flag=val syntax correctly binds value
     let out_eq = eval_parsed("build --target=wasm -o output.wasm");
-    assert_eq!(out_eq, "build|wasm|output.wasm|false", "--target=wasm and -o must bind, got: {out_eq}");
+    assert_eq!(
+        out_eq, "build|wasm|output.wasm|false",
+        "--target=wasm and -o must bind, got: {out_eq}"
+    );
 
     // 2. Verify short flag syntax -t wasm and -r
     let out_short = eval_parsed("build -t wasm -r");
-    assert_eq!(out_short, "build|wasm||true", "short flags -t wasm -r must bind, got: {out_short}");
+    assert_eq!(
+        out_short, "build|wasm||true",
+        "short flags -t wasm -r must bind, got: {out_short}"
+    );
 
     // A command that parses but has no handler stops at its seam instead of
     // exiting 0 having done nothing.
@@ -232,7 +227,8 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
     // 3. Verify -- passthrough forwards tokens verbatim to the script without
     //    parsing them as flags. `script_args.pilot` prints the argument count,
     //    then each argument in brackets.
-    let (out_run, err_run, code_run) = pilot_cli("run tests/conformance/runtime/script_args.pilot -- --target=native --release");
+    let (out_run, err_run, code_run) =
+        pilot_cli("run tests/conformance/runtime/script_args.pilot -- --target=native --release");
     assert_eq!(
         (out_run.as_str(), code_run),
         ("2\n[--target=native]\n[--release]\n", 0),
@@ -244,9 +240,18 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
     //    (What --full runs as a whole is checked by test_m1_4.)
     let (out_gate, err_gate, code_gate) = pilot_cli("gate --full --json --only bootstrap_parity");
     assert_eq!(code_gate, 0, "gate --full --json --only failed: {err_gate}");
-    assert!(out_gate.trim_start().starts_with('{'), "--json must print JSON, got: {out_gate}");
-    assert!(out_gate.contains("\"gate_count\":1"), "--only must run one gate, got: {out_gate}");
-    assert!(out_gate.contains("\"id\":\"bootstrap_parity\""), "--only must name the gate, got: {out_gate}");
+    assert!(
+        out_gate.trim_start().starts_with('{'),
+        "--json must print JSON, got: {out_gate}"
+    );
+    assert!(
+        out_gate.contains("\"gate_count\":1"),
+        "--only must run one gate, got: {out_gate}"
+    );
+    assert!(
+        out_gate.contains("\"id\":\"bootstrap_parity\""),
+        "--only must name the gate, got: {out_gate}"
+    );
 
     // 5. Verify backward-compatible resolve_cli_subcommand API
     let root = anticheat::workspace_root();
@@ -269,10 +274,15 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
     let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
     let (mut vm, mut phy) = (PilVirtualMachine::new(), PhysicsRegistry::new(flat, syms));
     let reg_ptr = &mut phy as *mut PhysicsRegistry;
-    vm.engine_handler = Some(Box::new(move |op, a| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)));
+    vm.engine_handler = Some(Box::new(move |op, a| {
+        pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
+    }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     let id_val = vm.run().as_int().unwrap_or(0);
-    assert!(id_val > 0, "resolve_cli_subcommand(\"build\") must return positive index, got: {id_val}");
+    assert!(
+        id_val > 0,
+        "resolve_cli_subcommand(\"build\") must return positive index, got: {id_val}"
+    );
 
     guard.finish();
 }
@@ -315,7 +325,9 @@ pub fn test_m3_3_dynamic_shell_completions_and_schema_json() {
     let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
     let (mut vm, mut phy) = (PilVirtualMachine::new(), PhysicsRegistry::new(flat, syms));
     let reg_ptr = &mut phy as *mut PhysicsRegistry;
-    vm.engine_handler = Some(Box::new(move |op, a| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)));
+    vm.engine_handler = Some(Box::new(move |op, a| {
+        pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, a)
+    }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     let bash_output = vm_outcome::outcome(&mut vm);
 
@@ -334,9 +346,18 @@ pub fn test_m3_3_dynamic_shell_completions_and_schema_json() {
         out_schema.contains("\"$schema\": \"http://json-schema.org/draft-07/schema#\""),
         "Schema must have draft-07 URI, got: {out_schema}"
     );
-    assert!(out_schema.contains("\"title\": \"PilotCLI\""), "Schema must have title PilotCLI");
-    assert!(out_schema.contains("\"name\": \"build\""), "Schema must declare 'build' command");
-    assert!(out_schema.contains("\"name\": \"target\""), "Schema must declare 'target' flag");
+    assert!(
+        out_schema.contains("\"title\": \"PilotCLI\""),
+        "Schema must have title PilotCLI"
+    );
+    assert!(
+        out_schema.contains("\"name\": \"build\""),
+        "Schema must declare 'build' command"
+    );
+    assert!(
+        out_schema.contains("\"name\": \"target\""),
+        "Schema must declare 'target' flag"
+    );
 
     guard.finish();
 }
@@ -364,10 +385,26 @@ pub fn test_m3_4_zero_stdout_scraping_and_cli_shrink_ceiling() {
 
     // 2. Verify zero subcommand string names in crates/pilot-cli/src/main.rs
     let banned_subcommands = [
-        "\"run\"", "\"build\"", "\"compile\"", "\"check\"", "\"fmt\"",
-        "\"test\"", "\"gate\"", "\"pkg\"", "\"deps\"", "\"tree\"",
-        "\"venv\"", "\"repl\"", "\"debug\"", "\"lsp\"", "\"perf\"",
-        "\"emit\"", "\"from\"", "\"map\"", "\"ide-sync\"", "\"completions\"",
+        "\"run\"",
+        "\"build\"",
+        "\"compile\"",
+        "\"check\"",
+        "\"fmt\"",
+        "\"test\"",
+        "\"gate\"",
+        "\"pkg\"",
+        "\"deps\"",
+        "\"tree\"",
+        "\"venv\"",
+        "\"repl\"",
+        "\"debug\"",
+        "\"lsp\"",
+        "\"perf\"",
+        "\"emit\"",
+        "\"from\"",
+        "\"map\"",
+        "\"ide-sync\"",
+        "\"completions\"",
     ];
     for subcmd in banned_subcommands {
         assert!(

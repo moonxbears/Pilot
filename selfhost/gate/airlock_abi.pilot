@@ -2,9 +2,8 @@
 // FILE: selfhost/gate/airlock_abi.pilot
 // Model B+ Frozen Airlock ABI Snapshot & Drift Verifier (`GATE021`, PROP-002a)
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Gate.AirlockAbi;
+pub lvl(0) pkg selfhost.gate;
 
-use Pilot.SelfHost.Gate.Manifest;
 
 /// Frozen Model B+ `HostOp` table (51 ops: `0..=50`): `[id, HostOp name, owner]`.
 /// The ID and name are frozen forever. The owner (`Type.method`, Amendment A1)

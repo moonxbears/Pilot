@@ -1,0 +1,4 @@
+// One file of `lib.ring_left` (modules/err_package_cycle.pilot).
+pkg lib.ring_left;
+
+pub fn left() -> i64 => 1;

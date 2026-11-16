@@ -53,7 +53,10 @@ pub(crate) enum LazyKind {
     IndexerGetter { params: Vec<NodeId> },
     /// The setters of an indexer (`self[i] { set => .. }`), with its index
     /// parameter nodes and setter bodies in declaration order.
-    IndexerSetter { params: Vec<NodeId>, bodies: Vec<NodeId> },
+    IndexerSetter {
+        params: Vec<NodeId>,
+        bodies: Vec<NodeId>,
+    },
     /// The type's `~self()`, called when one of its values is dropped.
     Destructor,
 }
@@ -61,7 +64,11 @@ pub(crate) enum LazyKind {
 impl BytecodeCompiler {
     /// A single-file program.
     pub(crate) fn compile_program(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
-        let items: Vec<NodeId> = arena.children_slice(lhs, rhs).iter().map(|&c| NodeId(c)).collect();
+        let items: Vec<NodeId> = arena
+            .children_slice(lhs, rhs)
+            .iter()
+            .map(|&c| NodeId(c))
+            .collect();
         self.compile_units(arena, &[items])
     }
 
@@ -72,7 +79,11 @@ impl BytecodeCompiler {
             .iter()
             .map(|u| {
                 let root = arena.node(u.root);
-                arena.children_slice(root.lhs, root.rhs).iter().map(|&c| NodeId(c)).collect()
+                arena
+                    .children_slice(root.lhs, root.rhs)
+                    .iter()
+                    .map(|&c| NodeId(c))
+                    .collect()
             })
             .collect()
     }
@@ -99,7 +110,9 @@ impl BytecodeCompiler {
         for &id in entry_items {
             match arena.node(id).node_kind() {
                 NodeKind::FnDecl => self.compile_fn_decl(arena, id, None, &mut entry),
-                NodeKind::StructDecl | NodeKind::ExtendDecl => self.compile_type_members(arena, id, &mut entry),
+                NodeKind::StructDecl | NodeKind::ExtendDecl => {
+                    self.compile_type_members(arena, id, &mut entry)
+                }
                 _ => {}
             }
         }
@@ -216,16 +229,30 @@ impl BytecodeCompiler {
             match cn.node_kind() {
                 NodeKind::FnDecl => {
                     let name = Self::name(arena, cn.lhs).to_string();
-                    let decl = LazyDecl { node: id, owner: None, kind: LazyKind::Method { alias: None }, inherited: false };
+                    let decl = LazyDecl {
+                        node: id,
+                        owner: None,
+                        kind: LazyKind::Method { alias: None },
+                        inherited: false,
+                    };
                     self.lazy_decls.entry(name.clone()).or_insert(decl);
                     // The unit's own copy, for calls from inside the unit.
                     if let Some(u) = arena.unit_of(id).map(|u| u.file) {
                         let key = Self::unit_fn_name(&name, u);
-                        let kind = LazyKind::Method { alias: Some(key.clone()) };
-                        self.lazy_decls.entry(key).or_insert(LazyDecl { node: id, owner: None, kind, inherited: false });
+                        let kind = LazyKind::Method {
+                            alias: Some(key.clone()),
+                        };
+                        self.lazy_decls.entry(key).or_insert(LazyDecl {
+                            node: id,
+                            owner: None,
+                            kind,
+                            inherited: false,
+                        });
                     }
                 }
-                NodeKind::StructDecl | NodeKind::ExtendDecl if cn.rhs != 0 && cn.rhs != u32::MAX => {
+                NodeKind::StructDecl | NodeKind::ExtendDecl
+                    if cn.rhs != 0 && cn.rhs != u32::MAX =>
+                {
                     let owner = Self::name(arena, cn.lhs).to_string();
                     for m in Self::type_members(arena, NodeId(cn.rhs)) {
                         if arena.node(m).node_kind() == NodeKind::DestructorDecl {
@@ -235,7 +262,9 @@ impl BytecodeCompiler {
                                 kind: LazyKind::Destructor,
                                 inherited: false,
                             };
-                            self.lazy_decls.entry(Self::destructor_name(&owner)).or_insert(decl);
+                            self.lazy_decls
+                                .entry(Self::destructor_name(&owner))
+                                .or_insert(decl);
                             continue;
                         }
                         if !Self::is_method_decl(arena, m) {
@@ -271,7 +300,11 @@ impl BytecodeCompiler {
         match self.fn_homes.get(name) {
             Some(&home) if home != Some(u) => {
                 let key = Self::unit_fn_name(name, u);
-                if self.lazy_decls.contains_key(&key) { key } else { name.to_string() }
+                if self.lazy_decls.contains_key(&key) {
+                    key
+                } else {
+                    name.to_string()
+                }
             }
             _ => name.to_string(),
         }
@@ -292,7 +325,10 @@ impl BytecodeCompiler {
         let mut no_entry = None;
         match (&decl.kind, decl.owner.as_deref()) {
             (LazyKind::Method { alias }, owner) => {
-                let outer = std::mem::replace(&mut self.cur_splice_fields, self.splice_fields.get(name).cloned());
+                let outer = std::mem::replace(
+                    &mut self.cur_splice_fields,
+                    self.splice_fields.get(name).cloned(),
+                );
                 self.compile_fn_decl_as(arena, decl.node, owner, alias.as_deref(), &mut no_entry);
                 self.cur_splice_fields = outer;
             }

@@ -8,20 +8,13 @@
 // its run plan. A view the
 // checker cannot plan (refused with TYPE003) stops at the lowering seam.
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerView;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.check.view_cast.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
+use selfhost.check.*;
 
 /// `xs as view T`: `f(xs, from_float, from_signed, from_width, to_float,
 /// to_signed, to_width)` for `f` the bound function.
-pub fn lower_view_cast(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_view_cast(var ref lw: Lowerer, n: i64) -> u32 {
     let p = lw.inf.p;
     var why: List<str> = [];
     let ints = view_shapes(lw.inf, n, why);

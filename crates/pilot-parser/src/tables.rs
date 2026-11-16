@@ -3,14 +3,53 @@
 use crate::*;
 
 #[derive(Clone, Debug)]
-pub enum TypePostfixKind { BracketEmpty, BracketDotDot, BracketColon, BracketArgs(usize), Sym(String, bool) }
+pub enum TypePostfixKind {
+    BracketEmpty,
+    BracketDotDot,
+    BracketColon,
+    BracketArgs(usize),
+    Sym(String, bool),
+}
 #[derive(Clone, Debug)]
-pub enum TypeConstructRule { Prefix { op: String, param: String, template: TemplateNode },
-    Postfix { kind: TypePostfixKind, params: Vec<String>, template: TemplateNode },
-    Infix { op: String, bp: u8, right_assoc: bool, lhs_param: String, rhs_param: String, template: TemplateNode },
-    NamedGeneric { name: String, params: Vec<String>, template: TemplateNode }, }
+pub enum TypeConstructRule {
+    Prefix {
+        op: String,
+        param: String,
+        template: TemplateNode,
+    },
+    Postfix {
+        kind: TypePostfixKind,
+        params: Vec<String>,
+        template: TemplateNode,
+    },
+    Infix {
+        op: String,
+        bp: u8,
+        right_assoc: bool,
+        lhs_param: String,
+        rhs_param: String,
+        template: TemplateNode,
+    },
+    NamedGeneric {
+        name: String,
+        params: Vec<String>,
+        template: TemplateNode,
+    },
+}
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ModAct { Vis(u8), Partial, Static, Pure, Mut, Const, Iso, Ext, NoAlloc, Override, Unbuilt }
+pub(crate) enum ModAct {
+    Vis(u8),
+    Partial,
+    Static,
+    Pure,
+    Mut,
+    Const,
+    Iso,
+    Ext,
+    NoAlloc,
+    Override,
+    Unbuilt,
+}
 /// An infix operator: its binding power, associativity, native `BinaryOp`
 /// code (until PROP-008 step 3 lowers operators to their owners) and parse
 /// shape (an ordinal of the shape enum, `SHAPE_*`).
@@ -69,13 +108,24 @@ pub(crate) const LEVEL_STEP: u8 = 4;
 /// the loosest level, whose right side may hold them (`x := f() catch ..`).
 pub(crate) const CLAUSE_BP: u8 = LEVEL_BASE + 1;
 #[derive(Clone, Debug)]
-pub(crate) enum CVal { Str(String), Int(i64), Map(HashMap<String, CVal>) }
+pub(crate) enum CVal {
+    Str(String),
+    Int(i64),
+    Map(HashMap<String, CVal>),
+}
 #[derive(Clone, Debug, Default)]
-pub struct ParserTables { pub(crate) modifiers: HashMap<String, ModAct>, pub(crate) param_modifiers: HashSet<String>, pub(crate) module_kws: HashMap<String, bool>,
-    pub receptors: HashMap<String, (u8, u8)>, pub receiver_ident: String,
+pub struct ParserTables {
+    pub(crate) modifiers: HashMap<String, ModAct>,
+    pub(crate) param_modifiers: HashSet<String>,
+    pub(crate) module_kws: HashMap<String, bool>,
+    pub receptors: HashMap<String, (u8, u8)>,
+    pub receiver_ident: String,
     /// `field` and `value` inside accessor bodies (`bind_receiver_ident`).
-    pub backing_ident: String, pub setter_value_ident: String,
-    pub prefix_ops: HashMap<String, u8>, pub infix_ops: HashMap<String, PrattEntry>, pub postfix_ops: HashMap<String, u8>,
+    pub backing_ident: String,
+    pub setter_value_ident: String,
+    pub prefix_ops: HashMap<String, u8>,
+    pub infix_ops: HashMap<String, PrattEntry>,
+    pub postfix_ops: HashMap<String, u8>,
     /// Readable prefix words (`not`) and the symbol each pairs with (`!`).
     pub(crate) prefix_words: HashMap<String, String>,
     /// The operators declared by grammar attributes, in declaration order.
@@ -97,7 +147,8 @@ pub struct ParserTables { pub(crate) modifiers: HashMap<String, ModAct>, pub(cra
     pub(crate) seq_rules: HashMap<String, Vec<crate::rule_arms::SeqRule>>,
     /// Syntax classes (`syntax Name { head; .. }`): each class's arms.
     pub(crate) syntax_classes: HashMap<String, Vec<Vec<crate::rule_arms::HeadItem>>>,
-    pub type_rules: Vec<TypeConstructRule>, pub(crate) const_maps: HashMap<String, CVal>,
+    pub type_rules: Vec<TypeConstructRule>,
+    pub(crate) const_maps: HashMap<String, CVal>,
     /// Attribute functions by name (see `attr_hooks`).
     pub(crate) attr_hooks: HashMap<String, attr_hooks::AttrHook>,
     /// Register layouts declared with `[Bits(..)]`, by type name.
@@ -117,15 +168,22 @@ pub struct ParserTables { pub(crate) modifiers: HashMap<String, ModAct>, pub(cra
     pub(crate) membership: Option<String>,
     pub(crate) membership_range: (Option<String>, Option<String>),
     pub(crate) native_members: HashMap<(String, String), String>,
-    pub(crate) scalar_text: Option<String>, }
+    pub(crate) scalar_text: Option<String>,
+}
 impl ParserTables {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Empty tables holding only the operator grammar of `t`: the start of
     /// the bootstrap's next pass, so files read before the operator
     /// declarations already see every operator.
     pub(crate) fn with_grammar(t: &ParserTables) -> Self {
-        let mut out = Self { grammar: t.grammar.clone(), grammar_enums: t.grammar_enums.clone(), ..Self::default() };
+        let mut out = Self {
+            grammar: t.grammar.clone(),
+            grammar_enums: t.grammar_enums.clone(),
+            ..Self::default()
+        };
         out.rebuild_grammar();
         out
     }
@@ -134,7 +192,11 @@ impl ParserTables {
     /// order places every operator.
     fn register_grammar(&mut self, levels: &str, assocs: &str, shapes: &str) {
         let get = |n: &str| self.adt_variants.get(n).cloned().unwrap_or_default();
-        self.grammar_enums = GrammarEnums { levels: get(levels), assocs: get(assocs), shapes: get(shapes) };
+        self.grammar_enums = GrammarEnums {
+            levels: get(levels),
+            assocs: get(assocs),
+            shapes: get(shapes),
+        };
         self.rebuild_grammar();
     }
 
@@ -160,9 +222,14 @@ impl ParserTables {
     /// adds nothing.
     fn apply_grammar_entry(&mut self, e: &GrammarEntry) {
         let pos = |names: &[String], n: &str| names.iter().position(|x| x == n);
-        let Some(level) = pos(&self.grammar_enums.levels, &e.level) else { return };
-        let Some(shape) = pos(&self.grammar_enums.shapes, &e.shape) else { return };
-        if is_structural_symbol(&e.symbol) || (!e.word.is_empty() && is_structural_symbol(&e.word)) {
+        let Some(level) = pos(&self.grammar_enums.levels, &e.level) else {
+            return;
+        };
+        let Some(shape) = pos(&self.grammar_enums.shapes, &e.shape) else {
+            return;
+        };
+        if is_structural_symbol(&e.symbol) || (!e.word.is_empty() && is_structural_symbol(&e.word))
+        {
             return;
         }
         let bp = Self::level_bp(level);
@@ -180,7 +247,12 @@ impl ParserTables {
             SHAPE_CASCADE | SHAPE_ADJACENT_CALL => {}
             _ => {
                 let right_assoc = pos(&self.grammar_enums.assocs, &e.assoc) == Some(ASSOC_RIGHT);
-                let entry = PrattEntry { bp, right_assoc, bin_op: binop_code(&e.symbol), shape: shape as u8 };
+                let entry = PrattEntry {
+                    bp,
+                    right_assoc,
+                    bin_op: binop_code(&e.symbol),
+                    shape: shape as u8,
+                };
                 self.infix_ops.insert(e.symbol.clone(), entry);
                 if !e.word.is_empty() {
                     self.infix_ops.insert(e.word.clone(), entry);
@@ -192,32 +264,73 @@ impl ParserTables {
     /// The binding power of the infix operator whose native code is `op`;
     /// `fallback` when none is declared.
     pub(crate) fn bp_of(&self, op: BinaryOp, fallback: u8) -> u8 {
-        self.infix_ops.values().filter(|e| e.bin_op == op as u16).map(|e| e.bp).max().unwrap_or(fallback)
+        self.infix_ops
+            .values()
+            .filter(|e| e.bin_op == op as u16)
+            .map(|e| e.bp)
+            .max()
+            .unwrap_or(fallback)
     }
 
     /// The binding power of the prefix operator whose symbol lexes as `k`.
     pub(crate) fn prefix_bp_of_kind(&self, k: TokenKind) -> Option<u8> {
-        self.prefix_ops.iter().filter(|(s, _)| first_token_kind(s) == Some(k)).map(|(_, &bp)| bp).max()
+        self.prefix_ops
+            .iter()
+            .filter(|(s, _)| first_token_kind(s) == Some(k))
+            .map(|(_, &bp)| bp)
+            .max()
     }
-    pub(crate) fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> { if id.is_none() { return None; }
+    pub(crate) fn eval_cval(&self, arena: &AstArena, id: NodeId) -> Option<CVal> {
+        if id.is_none() {
+            return None;
+        }
         let n = arena.node(id);
-        match n.node_kind() { NodeKind::StrLit => Some(CVal::Str(arena.interner.resolve(SymbolId(n.lhs)).to_string())),
-            NodeKind::IntLit => Some(CVal::Int(arena.i64_pool.get(n.lhs as usize).copied().unwrap_or(0))),
-            NodeKind::IdentExpr => { let s = arena.interner.resolve(SymbolId(n.lhs)); self.const_maps.get(s).cloned().or_else(|| Some(CVal::Str(s.to_string()))) }
+        match n.node_kind() {
+            NodeKind::StrLit => Some(CVal::Str(
+                arena.interner.resolve(SymbolId(n.lhs)).to_string(),
+            )),
+            NodeKind::IntLit => Some(CVal::Int(
+                arena.i64_pool.get(n.lhs as usize).copied().unwrap_or(0),
+            )),
+            NodeKind::IdentExpr => {
+                let s = arena.interner.resolve(SymbolId(n.lhs));
+                self.const_maps
+                    .get(s)
+                    .cloned()
+                    .or_else(|| Some(CVal::Str(s.to_string())))
+            }
             // A member of a named constant is looked up in place: copying the
             // maps on the way made ingesting a file quadratic in its size.
             NodeKind::MemberExpr => match self.cval_ref(arena, id) {
                 Some(v) => Some(v.clone()),
-                None => if let Some(CVal::Map(m)) = self.eval_cval(arena, NodeId(n.lhs)) { m.get(arena.interner.resolve(SymbolId(n.rhs))).cloned() } else { None },
-            },
-            NodeKind::CallExpr => { let ch = arena.children_slice(n.lhs, n.rhs); ch.get(1).and_then(|&x| self.eval_cval(arena, NodeId(x))) },
-            NodeKind::MapExpr => { let (ch, mut m, mut i) = (arena.children_slice(n.lhs, n.rhs), HashMap::new(), 0);
-                while i + 1 < ch.len() { let kn = arena.node(NodeId(ch[i])); if matches!(kn.node_kind(), NodeKind::IdentExpr | NodeKind::StrLit) {
-                        if let Some(v) = self.eval_cval(arena, NodeId(ch[i + 1])) { m.insert(arena.interner.resolve(SymbolId(kn.lhs)).to_string(), v); }
+                None => {
+                    if let Some(CVal::Map(m)) = self.eval_cval(arena, NodeId(n.lhs)) {
+                        m.get(arena.interner.resolve(SymbolId(n.rhs))).cloned()
+                    } else {
+                        None
                     }
-                    i += 2; }
-                Some(CVal::Map(m)) }
-            _ => None, } }
+                }
+            },
+            NodeKind::CallExpr => {
+                let ch = arena.children_slice(n.lhs, n.rhs);
+                ch.get(1).and_then(|&x| self.eval_cval(arena, NodeId(x)))
+            }
+            NodeKind::MapExpr => {
+                let (ch, mut m, mut i) = (arena.children_slice(n.lhs, n.rhs), HashMap::new(), 0);
+                while i + 1 < ch.len() {
+                    let kn = arena.node(NodeId(ch[i]));
+                    if matches!(kn.node_kind(), NodeKind::IdentExpr | NodeKind::StrLit) {
+                        if let Some(v) = self.eval_cval(arena, NodeId(ch[i + 1])) {
+                            m.insert(arena.interner.resolve(SymbolId(kn.lhs)).to_string(), v);
+                        }
+                    }
+                    i += 2;
+                }
+                Some(CVal::Map(m))
+            }
+            _ => None,
+        }
+    }
     /// The constant a chain of names (`a.b.c`) refers to, found without
     /// copying the maps on the way. `None` sends `eval_cval` the long way.
     pub(crate) fn cval_ref(&self, arena: &AstArena, id: NodeId) -> Option<&CVal> {
@@ -271,28 +384,48 @@ impl ParserTables {
                 let names = arena
                     .children_slice(n.rhs, n.flags as u32)
                     .iter()
-                    .map(|&v| arena.interner.resolve(SymbolId(arena.node(NodeId(v)).lhs)).to_string())
+                    .map(|&v| {
+                        arena
+                            .interner
+                            .resolve(SymbolId(arena.node(NodeId(v)).lhs))
+                            .to_string()
+                    })
                     .collect();
-                self.adt_variants.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), names);
+                self.adt_variants
+                    .insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), names);
                 self.ingest_decl_attrs(arena, id);
             }
             NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
                 if let Some(v) = self.eval_cval(arena, NodeId(n.rhs)) {
-                    self.const_maps.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), v);
+                    self.const_maps
+                        .insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), v);
                 }
             }
             NodeKind::CallExpr => {
                 let ch = arena.children_slice(n.lhs, n.rhs);
-                if ch.is_empty() || NodeId(ch[0]).is_none() || arena.node(NodeId(ch[0])).node_kind() != NodeKind::IdentExpr {
+                if ch.is_empty()
+                    || NodeId(ch[0]).is_none()
+                    || arena.node(NodeId(ch[0])).node_kind() != NodeKind::IdentExpr
+                {
                     return;
                 }
-                let callee = arena.interner.resolve(SymbolId(arena.node(NodeId(ch[0])).lhs));
+                let callee = arena
+                    .interner
+                    .resolve(SymbolId(arena.node(NodeId(ch[0])).lhs));
                 let (hook, vals): (String, Vec<Option<CVal>>) = if callee == "__engine" {
                     if ch.len() < 2 {
                         return;
                     }
-                    let Some(CVal::Str(h)) = self.eval_cval(arena, NodeId(ch[1])) else { return };
-                    (h, ch[2..].iter().map(|&x| self.eval_cval(arena, NodeId(x))).collect())
+                    let Some(CVal::Str(h)) = self.eval_cval(arena, NodeId(ch[1])) else {
+                        return;
+                    };
+                    (
+                        h,
+                        ch[2..]
+                            .iter()
+                            .map(|&x| self.eval_cval(arena, NodeId(x)))
+                            .collect(),
+                    )
                 } else if let Some(f) = self.attr_hooks.get(callee).cloned() {
                     let v = f
                         .args
@@ -320,22 +453,45 @@ impl ParserTables {
     /// The position of `variant` in the enum `register_machine_ops` named:
     /// the machine operation an `asm(..)` names.
     pub fn machine_op(&self, variant: &str) -> Option<usize> {
-        self.adt_variants.get(&self.machine_ops)?.iter().position(|v| v == variant)
+        self.adt_variants
+            .get(&self.machine_ops)?
+            .iter()
+            .position(|v| v == variant)
     }
 
     /// The position of `variant` in the enum `register_hole_kinds` named.
     pub(crate) fn hole_kind(&self, variant: &str) -> Option<u8> {
-        self.adt_variants.get(&self.hole_kinds)?.iter().position(|v| v == variant).map(|i| i as u8)
+        self.adt_variants
+            .get(&self.hole_kinds)?
+            .iter()
+            .position(|v| v == variant)
+            .map(|i| i as u8)
     }
 
     /// The position of `variant` in the enum `register_core_forms` named.
     pub(crate) fn core_form(&self, variant: &str) -> Option<u8> {
-        self.adt_variants.get(&self.core_forms.0)?.iter().position(|v| v == variant).map(|i| i as u8)
+        self.adt_variants
+            .get(&self.core_forms.0)?
+            .iter()
+            .position(|v| v == variant)
+            .map(|i| i as u8)
     }
 
     pub(crate) fn apply_hook(&mut self, hook: &str, vals: &[Option<CVal>]) {
-        let s_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Str(s) => Some(s.clone()), _ => None }).unwrap_or_default();
-        let i_arg = |i: usize| vals.get(i).and_then(|x| match x.as_ref()? { CVal::Int(v) => Some(*v), _ => None });
+        let s_arg = |i: usize| {
+            vals.get(i)
+                .and_then(|x| match x.as_ref()? {
+                    CVal::Str(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        };
+        let i_arg = |i: usize| {
+            vals.get(i).and_then(|x| match x.as_ref()? {
+                CVal::Int(v) => Some(*v),
+                _ => None,
+            })
+        };
         match hook {
             "register_modifier" => {
                 let act = if let Some(v) = i_arg(1) {
@@ -368,7 +524,8 @@ impl ParserTables {
             "register_module_kw" => {
                 let w = s_arg(0);
                 if !w.is_empty() {
-                    self.module_kws.insert(w, s_arg(1) == "declare_package_scope");
+                    self.module_kws
+                        .insert(w, s_arg(1) == "declare_package_scope");
                 }
             }
             HOOK_UNIT_LITERAL => self.bind_unit_literal(s_arg(0), s_arg(1)),
@@ -386,8 +543,15 @@ impl ParserTables {
             HOOK_MEMBERSHIP => self.bind_membership(s_arg(0), s_arg(1), s_arg(2)),
             HOOK_SCALAR_TEXT => self.bind_scalar_text(s_arg(0)),
             attr_hooks::HOOK_REG_LAYOUT => {
-                if let [Some(CVal::Str(ty)), Some(CVal::Int(width)), Some(CVal::Str(class))] = vals {
-                    self.reg_layouts.insert(ty.clone(), RegLayout { width: *width, class: class.clone() });
+                if let [Some(CVal::Str(ty)), Some(CVal::Int(width)), Some(CVal::Str(class))] = vals
+                {
+                    self.reg_layouts.insert(
+                        ty.clone(),
+                        RegLayout {
+                            width: *width,
+                            class: class.clone(),
+                        },
+                    );
                 }
             }
             "bind_receiver_ident" => {
@@ -399,7 +563,11 @@ impl ParserTables {
                 self.setter_value_ident = v;
             }
             "bind_receptor" => {
-                let (w, k, p) = (s_arg(0), i_arg(1).unwrap_or(0) as u8, i_arg(2).unwrap_or(0) as u8);
+                let (w, k, p) = (
+                    s_arg(0),
+                    i_arg(1).unwrap_or(0) as u8,
+                    i_arg(2).unwrap_or(0) as u8,
+                );
                 if !w.is_empty() && k > 0 {
                     self.receptors.insert(w, (k, p));
                 }
@@ -434,7 +602,9 @@ pub const MEMBER_IMPLIED_RECEIVER: u16 = 2;
 /// The kind of the first token `sym` lexes to.
 pub(crate) fn first_token_kind(sym: &str) -> Option<TokenKind> {
     let tape = tokenize(sym);
-    (0..tape.len()).map(|i| tape.kind(i)).find(|k| !matches!(k, TokenKind::Newline | TokenKind::Eof))
+    (0..tape.len())
+        .map(|i| tape.kind(i))
+        .find(|k| !matches!(k, TokenKind::Newline | TokenKind::Eof))
 }
 
 /// Whether `sym` starts with one of the 13 structural tokens (PROP-008 §2)
@@ -473,17 +643,59 @@ pub(crate) fn binop_code(sym: &str) -> u16 {
     if c != 0 {
         return c;
     }
-    (1..=u8::MAX as u16).filter_map(BinaryOp::from_u16).find(|o| o.symbol() == sym).map_or(0, |o| o as u16)
+    (1..=u8::MAX as u16)
+        .filter_map(BinaryOp::from_u16)
+        .find(|o| o.symbol() == sym)
+        .map_or(0, |o| o as u16)
 }
-pub(crate) fn map_binop_sym(sym: &str) -> u16 { use BinaryOp::*; (match sym {
-        "+" => Add, "-" => Sub, "*" => Mul, "/" => Div, "//" => FloorDiv, "%" => Rem, "**" => Pow,
-        "==" => Eq, "!=" => Ne, "<" => Lt, "<=" => Le, ">" => Gt, ">=" => Ge, "&&" => And,
-        "||" => Or, "&" => BitAnd, "|" => BitOr, "^" => BitXor, "<<" => Shl, ">>" => Shr,
-        "|>" => Pipe, "<|" => PipeBackward, "??" => Coalesce, "..=" => RangeInclusive,
-        ".." | "..<" => RangeHalfOpen, ":=" => Walrus, "<-" => Send, "<=>" => Spaceship, "+|" => SatAdd,
-        "-|" => SatSub, "*|" => SatMul, "+%" => WrapAdd, "-%" => WrapSub, "*%" => WrapMul,
-        "+?" => CheckedAdd, "-?" => CheckedSub, "*?" => CheckedMul, "%%" => EucMod, "~>" => Lens,
-        ">..<" => OpenRange, ">.." => AfterRange, ":=:" => Swap, _ => return 0, }) as u16 }
+pub(crate) fn map_binop_sym(sym: &str) -> u16 {
+    use BinaryOp::*;
+    (match sym {
+        "+" => Add,
+        "-" => Sub,
+        "*" => Mul,
+        "/" => Div,
+        "//" => FloorDiv,
+        "%" => Rem,
+        "**" => Pow,
+        "==" => Eq,
+        "!=" => Ne,
+        "<" => Lt,
+        "<=" => Le,
+        ">" => Gt,
+        ">=" => Ge,
+        "&&" => And,
+        "||" => Or,
+        "&" => BitAnd,
+        "|" => BitOr,
+        "^" => BitXor,
+        "<<" => Shl,
+        ">>" => Shr,
+        "|>" => Pipe,
+        "<|" => PipeBackward,
+        "??" => Coalesce,
+        "..=" => RangeInclusive,
+        ".." | "..<" => RangeHalfOpen,
+        ":=" => Walrus,
+        "<-" => Send,
+        "<=>" => Spaceship,
+        "+|" => SatAdd,
+        "-|" => SatSub,
+        "*|" => SatMul,
+        "+%" => WrapAdd,
+        "-%" => WrapSub,
+        "*%" => WrapMul,
+        "+?" => CheckedAdd,
+        "-?" => CheckedSub,
+        "*?" => CheckedMul,
+        "%%" => EucMod,
+        "~>" => Lens,
+        ">..<" => OpenRange,
+        ">.." => AfterRange,
+        ":=:" => Swap,
+        _ => return 0,
+    }) as u16
+}
 /// The stdlib files whose `syntax`, keyword, native-binding and protocol
 /// declarations fill the bootstrap tables, relative to the source root, in
 /// ingest order. Every `stdlib/core/primitives/*.pilot` file follows them.
@@ -543,41 +755,154 @@ pub(crate) static SOURCE_ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
 /// from. The toolchain calls it once, before anything is parsed, with the
 /// root it runs with; later calls have no effect. Without it the tables come
 /// from the workspace this crate was built in.
-pub(crate) fn match_postfix(a: &TypePostfixKind, b: &TypePostfixKind) -> bool { matches!((a, b), (TypePostfixKind::BracketEmpty, TypePostfixKind::BracketEmpty)
-        | (TypePostfixKind::BracketDotDot, TypePostfixKind::BracketDotDot)
-        | (TypePostfixKind::BracketColon, TypePostfixKind::BracketColon))
-        || matches!((a, b), (TypePostfixKind::BracketArgs(x), TypePostfixKind::BracketArgs(y)) if x == y) }
-pub(crate) fn same_type_trigger(a: &TypeConstructRule, b: &TypeConstructRule) -> bool { match (a, b) {
-        (TypeConstructRule::NamedGeneric { name: x, .. }, TypeConstructRule::NamedGeneric { name: y, .. }) | (TypeConstructRule::Prefix { op: x, .. }, TypeConstructRule::Prefix { op: y, .. }) | (TypeConstructRule::Infix { op: x, .. }, TypeConstructRule::Infix { op: y, .. }) => x == y,
-        (TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(x), .. }, TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(y), .. }) => x == y,
-        (TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(x, _), .. }, TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(y, _), .. }) => x == y,
-        (TypeConstructRule::Postfix { kind: x, .. }, TypeConstructRule::Postfix { kind: y, .. }) => core::mem::discriminant(x) == core::mem::discriminant(y),
-        _ => false, } }
-pub(crate) fn compile_type_rule(pat: &[(TokenKind, String)], template: TemplateNode) -> Option<TypeConstructRule> { if pat.is_empty() { return None; }
-    if pat.len() >= 4 && is_word_tok(pat[0].0) && pat[1].0 == TokenKind::Less && pat.last().map(|x| x.0) == Some(TokenKind::Greater) {
-        let (name, mut params) = (pat[0].1.clone(), Vec::new());
-        for (tk, s) in &pat[2..pat.len() - 1] { if is_word_tok(*tk) { params.push(s.clone()); } }
-        return Some(TypeConstructRule::NamedGeneric { name, params, template }); }
-    if pat.len() == 2 && matches!(pat[0].0, TokenKind::Star | TokenKind::At) {
-        return Some(TypeConstructRule::Prefix { op: pat[0].1.clone(), param: pat[1].1.clone(), template });
+pub(crate) fn match_postfix(a: &TypePostfixKind, b: &TypePostfixKind) -> bool {
+    matches!(
+        (a, b),
+        (TypePostfixKind::BracketEmpty, TypePostfixKind::BracketEmpty)
+            | (
+                TypePostfixKind::BracketDotDot,
+                TypePostfixKind::BracketDotDot
+            )
+            | (TypePostfixKind::BracketColon, TypePostfixKind::BracketColon)
+    ) || matches!((a, b), (TypePostfixKind::BracketArgs(x), TypePostfixKind::BracketArgs(y)) if x == y)
+}
+pub(crate) fn same_type_trigger(a: &TypeConstructRule, b: &TypeConstructRule) -> bool {
+    match (a, b) {
+        (
+            TypeConstructRule::NamedGeneric { name: x, .. },
+            TypeConstructRule::NamedGeneric { name: y, .. },
+        )
+        | (TypeConstructRule::Prefix { op: x, .. }, TypeConstructRule::Prefix { op: y, .. })
+        | (TypeConstructRule::Infix { op: x, .. }, TypeConstructRule::Infix { op: y, .. }) => {
+            x == y
         }
-    if pat.len() >= 3 && pat[1].0 == TokenKind::LBracket { let t = pat[0].1.clone();
-        if pat[2].0 == TokenKind::RBracket { return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::BracketEmpty, params: vec![t], template }); }
-        if pat[2].0 == TokenKind::DotDot { return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::BracketDotDot, params: vec![t], template }); }
-        if pat[2].0 == TokenKind::Colon { return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::BracketColon, params: vec![t], template }); }
-        let mut ps = vec![t];
-        for (tk, s) in &pat[2..] { if is_word_tok(*tk) { ps.push(s.clone()); } }
-        return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(ps.len() - 1), params: ps, template });
-        }
-    if pat.len() == 2 && matches!(pat[1].0, TokenKind::Question | TokenKind::Caret) {
-        return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(pat[1].1.clone(), false), params: vec![pat[0].1.clone()], template });
-        }
-    if pat.len() == 3 && pat[1].0 == TokenKind::At {
-        return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::Sym("@".into(), true), params: vec![pat[0].1.clone(), pat[2].1.clone()], template });
-        }
-    let clean: Vec<&(TokenKind, String)> = pat.iter().filter(|(k, _)| !matches!(k, TokenKind::LParen | TokenKind::RParen)).collect();
-    if clean.len() == 3 { let (bp, ra) = match clean[1].0 { TokenKind::Amper => (20, false), TokenKind::Vbar => (15, false),
-            TokenKind::FatArrow | TokenKind::Arrow => (10, true), TokenKind::Exclamation => (5, false), _ => return None, };
-        return Some(TypeConstructRule::Infix { op: clean[1].1.clone(), bp, right_assoc: ra, lhs_param: clean[0].1.clone(), rhs_param: clean[2].1.clone(), template });
+        (
+            TypeConstructRule::Postfix {
+                kind: TypePostfixKind::BracketArgs(x),
+                ..
+            },
+            TypeConstructRule::Postfix {
+                kind: TypePostfixKind::BracketArgs(y),
+                ..
+            },
+        ) => x == y,
+        (
+            TypeConstructRule::Postfix {
+                kind: TypePostfixKind::Sym(x, _),
+                ..
+            },
+            TypeConstructRule::Postfix {
+                kind: TypePostfixKind::Sym(y, _),
+                ..
+            },
+        ) => x == y,
+        (
+            TypeConstructRule::Postfix { kind: x, .. },
+            TypeConstructRule::Postfix { kind: y, .. },
+        ) => core::mem::discriminant(x) == core::mem::discriminant(y),
+        _ => false,
     }
-    None }
+}
+pub(crate) fn compile_type_rule(
+    pat: &[(TokenKind, String)],
+    template: TemplateNode,
+) -> Option<TypeConstructRule> {
+    if pat.is_empty() {
+        return None;
+    }
+    if pat.len() >= 4
+        && is_word_tok(pat[0].0)
+        && pat[1].0 == TokenKind::Less
+        && pat.last().map(|x| x.0) == Some(TokenKind::Greater)
+    {
+        let (name, mut params) = (pat[0].1.clone(), Vec::new());
+        for (tk, s) in &pat[2..pat.len() - 1] {
+            if is_word_tok(*tk) {
+                params.push(s.clone());
+            }
+        }
+        return Some(TypeConstructRule::NamedGeneric {
+            name,
+            params,
+            template,
+        });
+    }
+    if pat.len() == 2 && matches!(pat[0].0, TokenKind::Star | TokenKind::At) {
+        return Some(TypeConstructRule::Prefix {
+            op: pat[0].1.clone(),
+            param: pat[1].1.clone(),
+            template,
+        });
+    }
+    if pat.len() >= 3 && pat[1].0 == TokenKind::LBracket {
+        let t = pat[0].1.clone();
+        if pat[2].0 == TokenKind::RBracket {
+            return Some(TypeConstructRule::Postfix {
+                kind: TypePostfixKind::BracketEmpty,
+                params: vec![t],
+                template,
+            });
+        }
+        if pat[2].0 == TokenKind::DotDot {
+            return Some(TypeConstructRule::Postfix {
+                kind: TypePostfixKind::BracketDotDot,
+                params: vec![t],
+                template,
+            });
+        }
+        if pat[2].0 == TokenKind::Colon {
+            return Some(TypeConstructRule::Postfix {
+                kind: TypePostfixKind::BracketColon,
+                params: vec![t],
+                template,
+            });
+        }
+        let mut ps = vec![t];
+        for (tk, s) in &pat[2..] {
+            if is_word_tok(*tk) {
+                ps.push(s.clone());
+            }
+        }
+        return Some(TypeConstructRule::Postfix {
+            kind: TypePostfixKind::BracketArgs(ps.len() - 1),
+            params: ps,
+            template,
+        });
+    }
+    if pat.len() == 2 && matches!(pat[1].0, TokenKind::Question | TokenKind::Caret) {
+        return Some(TypeConstructRule::Postfix {
+            kind: TypePostfixKind::Sym(pat[1].1.clone(), false),
+            params: vec![pat[0].1.clone()],
+            template,
+        });
+    }
+    if pat.len() == 3 && pat[1].0 == TokenKind::At {
+        return Some(TypeConstructRule::Postfix {
+            kind: TypePostfixKind::Sym("@".into(), true),
+            params: vec![pat[0].1.clone(), pat[2].1.clone()],
+            template,
+        });
+    }
+    let clean: Vec<&(TokenKind, String)> = pat
+        .iter()
+        .filter(|(k, _)| !matches!(k, TokenKind::LParen | TokenKind::RParen))
+        .collect();
+    if clean.len() == 3 {
+        let (bp, ra) = match clean[1].0 {
+            TokenKind::Amper => (20, false),
+            TokenKind::Vbar => (15, false),
+            TokenKind::FatArrow | TokenKind::Arrow => (10, true),
+            TokenKind::Exclamation => (5, false),
+            _ => return None,
+        };
+        return Some(TypeConstructRule::Infix {
+            op: clean[1].1.clone(),
+            bp,
+            right_assoc: ra,
+            lhs_param: clean[0].1.clone(),
+            rhs_param: clean[2].1.clone(),
+            template,
+        });
+    }
+    None
+}

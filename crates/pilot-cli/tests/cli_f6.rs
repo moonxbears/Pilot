@@ -12,9 +12,9 @@
 //!   the values worked out by hand in each program's header, as its C
 //!   reference does, and `benchmarks/native/baseline.tsv` records the times.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::io::Write;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -56,7 +56,12 @@ fn run_binary(bin: &Path, args: &[&str], input: &str) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn built binary");
-    child.stdin.take().expect("stdin").write_all(input.as_bytes()).expect("write stdin");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(input.as_bytes())
+        .expect("write stdin");
     child.wait_with_output().expect("wait for built binary")
 }
 
@@ -83,15 +88,29 @@ fn expected(stem: &str) -> String {
 fn pilot_build_writes_a_binary_with_the_seed_output() {
     let dir = scratch("build");
     // Each case as its folder and name under `tests/conformance/`.
-    each_at_once(&["control/closures", "collections/collections", "generators/generator_local", "types/structs_methods"], |case| {
-        let stem = format!("tests/conformance/{case}");
-        let bin = dir.join(case.replace('/', "_"));
-        let out = build(&format!("{stem}.pilot"), &bin);
-        assert_eq!(out.status.code(), Some(0), "{case}: {}{}", text(&out.stdout), text(&out.stderr));
-        let ran = run_binary(&bin, &[], "");
-        assert_eq!(ran.status.code(), Some(0), "{case}: {}", text(&ran.stderr));
-        assert_eq!(text(&ran.stdout), expected(&stem), "{case}");
-    });
+    each_at_once(
+        &[
+            "control/closures",
+            "collections/collections",
+            "generators/generator_local",
+            "types/structs_methods",
+        ],
+        |case| {
+            let stem = format!("tests/conformance/{case}");
+            let bin = dir.join(case.replace('/', "_"));
+            let out = build(&format!("{stem}.pilot"), &bin);
+            assert_eq!(
+                out.status.code(),
+                Some(0),
+                "{case}: {}{}",
+                text(&out.stdout),
+                text(&out.stderr)
+            );
+            let ran = run_binary(&bin, &[], "");
+            assert_eq!(ran.status.code(), Some(0), "{case}: {}", text(&ran.stderr));
+            assert_eq!(text(&ran.stdout), expected(&stem), "{case}");
+        },
+    );
 }
 
 #[test]
@@ -129,57 +148,97 @@ fn a_runtime_error_stops_the_binary_with_its_message() {
     let ran = run_binary(&bin, &[], "");
     assert_eq!(text(&ran.stdout), "3\n");
     assert_eq!(ran.status.code(), Some(1));
-    assert!(text(&ran.stderr).contains("runtime error: integer division by zero"), "{}", text(&ran.stderr));
+    assert!(
+        text(&ran.stderr).contains("runtime error: integer division by zero"),
+        "{}",
+        text(&ran.stderr)
+    );
 }
 
 #[test]
 fn a_rejected_program_is_reported_as_diagnostics_and_writes_no_binary() {
     let dir = scratch("reject");
     let src = dir.join("bad.pilot");
-    std::fs::write(&src, "fn main() {\n    let x: i64 = \"text\";\n    print(x);\n}\n").expect("write program");
+    std::fs::write(
+        &src,
+        "fn main() {\n    let x: i64 = \"text\";\n    print(x);\n}\n",
+    )
+    .expect("write program");
     let bin = dir.join("bad");
     let out = pilot(&["build", src.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
     let stderr = text(&out.stderr);
-    assert!(stderr.contains("error[") && stderr.contains("bad.pilot"), "{stderr}");
+    assert!(
+        stderr.contains("error[") && stderr.contains("bad.pilot"),
+        "{stderr}"
+    );
     assert!(!bin.exists(), "a rejected program left a binary");
 }
 
 #[test]
 fn bad_usage_exits_2() {
     assert_eq!(pilot(&["build"]).status.code(), Some(2));
-    assert_eq!(pilot(&["build", "tests/conformance/no_such_case.pilot", "-o", "x"]).status.code(), Some(2));
+    assert_eq!(
+        pilot(&["build", "tests/conformance/no_such_case.pilot", "-o", "x"])
+            .status
+            .code(),
+        Some(2)
+    );
 }
 
 #[test]
 fn the_benchmarks_build_natively_and_match_their_c_references() {
     let dir = scratch("bench");
-    each_at_once(&["fib", "numeric_loop", "string_build", "map_workload", "string_compare", "string_find", "string_map"], |b| {
-        let stem = format!("benchmarks/native/{b}");
-        let want = expected(&stem);
+    each_at_once(
+        &[
+            "fib",
+            "numeric_loop",
+            "string_build",
+            "map_workload",
+            "string_compare",
+            "string_find",
+            "string_map",
+        ],
+        |b| {
+            let stem = format!("benchmarks/native/{b}");
+            let want = expected(&stem);
 
-        let bin = dir.join(b);
-        let out = build(&format!("{stem}.pilot"), &bin);
-        assert_eq!(out.status.code(), Some(0), "{b}: {}", text(&out.stderr));
-        assert_eq!(text(&run_binary(&bin, &[], "").stdout), want, "{b} (Pilot)");
+            let bin = dir.join(b);
+            let out = build(&format!("{stem}.pilot"), &bin);
+            assert_eq!(out.status.code(), Some(0), "{b}: {}", text(&out.stderr));
+            assert_eq!(text(&run_binary(&bin, &[], "").stdout), want, "{b} (Pilot)");
 
-        let c_bin = dir.join(format!("{b}_c"));
-        let cc = Command::new("cc")
-            .args(["-O2", "-std=c11", "-D_POSIX_C_SOURCE=200809L"])
-            .arg(root().join(format!("{stem}.c")))
-            .arg("-o")
-            .arg(&c_bin)
-            .output()
-            .expect("run cc");
-        assert!(cc.status.success(), "{b}: {}", text(&cc.stderr));
-        assert_eq!(text(&run_binary(&c_bin, &[], "").stdout), want, "{b} (C)");
-    });
+            let c_bin = dir.join(format!("{b}_c"));
+            let cc = Command::new("cc")
+                .args(["-O2", "-std=c11", "-D_POSIX_C_SOURCE=200809L"])
+                .arg(root().join(format!("{stem}.c")))
+                .arg("-o")
+                .arg(&c_bin)
+                .output()
+                .expect("run cc");
+            assert!(cc.status.success(), "{b}: {}", text(&cc.stderr));
+            assert_eq!(text(&run_binary(&c_bin, &[], "").stdout), want, "{b} (C)");
+        },
+    );
     // The recorded baseline: a header, then one row per benchmark with six
     // fields: benchmark, seed µs, native Pilot µs, C µs, seed/C, Pilot/C.
-    let baseline = std::fs::read_to_string(root().join("benchmarks/native/baseline.tsv")).expect("baseline");
+    let baseline =
+        std::fs::read_to_string(root().join("benchmarks/native/baseline.tsv")).expect("baseline");
     let rows: Vec<&str> = baseline.lines().skip(1).collect();
-    for b in ["fib", "numeric_loop", "string_build", "map_workload", "records", "string_compare", "string_find", "string_map"] {
-        let row = rows.iter().find(|r| r.split('\t').next() == Some(b)).unwrap_or_else(|| panic!("no row for {b}"));
+    for b in [
+        "fib",
+        "numeric_loop",
+        "string_build",
+        "map_workload",
+        "records",
+        "string_compare",
+        "string_find",
+        "string_map",
+    ] {
+        let row = rows
+            .iter()
+            .find(|r| r.split('\t').next() == Some(b))
+            .unwrap_or_else(|| panic!("no row for {b}"));
         assert_eq!(row.split('\t').count(), 6, "{row}");
     }
 }
@@ -191,18 +250,39 @@ fn the_benchmarks_build_natively_and_match_their_c_references() {
 fn struct_values_are_c_structs_of_their_field_types() {
     let dir = scratch("records");
     let c = dir.join("records_native.c");
-    let out = pilot(&["build", "tests/conformance/types/records_native.pilot", "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
+    let out = pilot(&[
+        "build",
+        "tests/conformance/types/records_native.pilot",
+        "--target",
+        "c",
+        "-o",
+        c.to_str().expect("utf-8 path"),
+    ]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let src = std::fs::read_to_string(&c).expect("emitted C");
-    let structs: Vec<&str> = src.lines().filter(|l| l.starts_with("typedef struct ")).collect();
+    let structs: Vec<&str> = src
+        .lines()
+        .filter(|l| l.starts_with("typedef struct "))
+        .collect();
     // `Point { x: i64, y: i64 }` and `Label { name: str, at: Point, weight: f64, shown: bool }`.
-    assert!(structs.iter().any(|l| l.contains("int64_t f0; int64_t f1; }")), "{structs:?}");
-    assert!(structs.iter().any(|l| l.contains("double f2; bool f3; }")), "{structs:?}");
+    assert!(
+        structs
+            .iter()
+            .any(|l| l.contains("int64_t f0; int64_t f1; }")),
+        "{structs:?}"
+    );
+    assert!(
+        structs.iter().any(|l| l.contains("double f2; bool f3; }")),
+        "{structs:?}"
+    );
 
     let bin = dir.join("records_native");
     let out = build("tests/conformance/types/records_native.pilot", &bin);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
-    assert_eq!(text(&run_binary(&bin, &[], "").stdout), expected("tests/conformance/types/records_native"));
+    assert_eq!(
+        text(&run_binary(&bin, &[], "").stdout),
+        expected("tests/conformance/types/records_native")
+    );
 }
 
 /// The records benchmark (struct values in a list) builds natively and
@@ -215,7 +295,11 @@ fn the_records_benchmark_matches_its_c_reference() {
     let bin = dir.join("records");
     let out = build(&format!("{stem}.pilot"), &bin);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
-    assert_eq!(text(&run_binary(&bin, &[], "").stdout), want, "records (Pilot)");
+    assert_eq!(
+        text(&run_binary(&bin, &[], "").stdout),
+        want,
+        "records (Pilot)"
+    );
     let c_bin = dir.join("records_c");
     let cc = Command::new("cc")
         .args(["-O2", "-std=c11"])
@@ -225,7 +309,11 @@ fn the_records_benchmark_matches_its_c_reference() {
         .output()
         .expect("run cc");
     assert!(cc.status.success(), "{}", text(&cc.stderr));
-    assert_eq!(text(&run_binary(&c_bin, &[], "").stdout), want, "records (C)");
+    assert_eq!(
+        text(&run_binary(&c_bin, &[], "").stdout),
+        want,
+        "records (C)"
+    );
 }
 
 /// A string's length is 64 bits: one longer than the length a value holds
@@ -247,7 +335,14 @@ fn strings_past_the_short_length_limit_keep_their_length() {
     each_at_once(&stems, |stem| {
         let name = stem.rsplit('/').next().expect("file name");
         let c = dir.join(format!("{name}.c"));
-        let out = pilot(&["build", &format!("{stem}.pilot"), "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
+        let out = pilot(&[
+            "build",
+            &format!("{stem}.pilot"),
+            "--target",
+            "c",
+            "-o",
+            c.to_str().expect("utf-8 path"),
+        ]);
         assert_eq!(out.status.code(), Some(0), "{stem}: {}", text(&out.stderr));
         let bin = dir.join(name);
         let cc = Command::new("cc")
@@ -260,7 +355,11 @@ fn strings_past_the_short_length_limit_keep_their_length() {
             .output()
             .expect("run cc");
         assert!(cc.status.success(), "{stem}: {}", text(&cc.stderr));
-        assert_eq!(text(&run_binary(&bin, &[], "").stdout), expected(stem), "{stem}");
+        assert_eq!(
+            text(&run_binary(&bin, &[], "").stdout),
+            expected(stem),
+            "{stem}"
+        );
     });
 }
 
@@ -271,11 +370,27 @@ fn strings_past_the_short_length_limit_keep_their_length() {
 fn a_struct_read_from_a_list_uses_its_typed_fields() {
     let dir = scratch("typed_reads");
     let c = dir.join("records.c");
-    let out = pilot(&["build", "benchmarks/native/records.pilot", "--target", "c", "-o", c.to_str().expect("utf-8 path")]);
+    let out = pilot(&[
+        "build",
+        "benchmarks/native/records.pilot",
+        "--target",
+        "c",
+        "-o",
+        c.to_str().expect("utf-8 path"),
+    ]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let src = std::fs::read_to_string(&c).expect("emitted C");
     // The function bodies, without the per-layout helpers declared first.
-    let bodies: Vec<&str> = src.lines().filter(|l| !l.starts_with("static ") && !l.starts_with("typedef ")).collect();
-    assert!(bodies.iter().all(|l| !l.contains("pilot_v_field(")), "dynamic field reads remain");
-    assert!(bodies.iter().filter(|l| l.contains("pilot_get")).count() >= 4, "no typed field reads");
+    let bodies: Vec<&str> = src
+        .lines()
+        .filter(|l| !l.starts_with("static ") && !l.starts_with("typedef "))
+        .collect();
+    assert!(
+        bodies.iter().all(|l| !l.contains("pilot_v_field(")),
+        "dynamic field reads remain"
+    );
+    assert!(
+        bodies.iter().filter(|l| l.contains("pilot_get")).count() >= 4,
+        "no typed field reads"
+    );
 }

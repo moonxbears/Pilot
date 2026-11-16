@@ -5,7 +5,7 @@
 // Reference Inspiration: C# (Roslyn/IDE), Python (Ruff/Flake8), and Rust (clippy/rustc).
 // Minimal forward-facing code: structured purely as an extensible diagnostic list.
 // =============================================================================
-pub pkg Pilot.Diagnostics.Warnings;
+pub pkg selfhost.diagnostics;
 
 pub struct WarningDef : IValue {
     pub code: str;

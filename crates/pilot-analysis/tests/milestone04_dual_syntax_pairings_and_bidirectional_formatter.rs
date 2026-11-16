@@ -3,16 +3,18 @@
 //! Dual Readable/Symbolic Syntax Pairings & Bidirectional Formatter
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
-use pilot_ast::{CallQuoteKind, NodeId, NodeKind, UNARY_OP_DEEP_FLATTEN, UNARY_OP_DOUBLE_SPLAT, UNARY_OP_SPLAT};
+use pilot_ast::{
+    CallQuoteKind, NodeId, NodeKind, UNARY_OP_DEEP_FLATTEN, UNARY_OP_DOUBLE_SPLAT, UNARY_OP_SPLAT,
+};
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 4,
@@ -134,15 +136,12 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 
 fn eval_fmt(script: &str) -> String {
     let root = anticheat::workspace_root();
-    let deps = [
-        "stdlib/core/primitives/map.pilot",
-        "selfhost/fmt/fmt.pilot",
-    ];
+    let deps = ["stdlib/core/primitives/map.pilot", "selfhost/fmt/fmt.pilot"];
     let mut combined = String::new();
     for rel in &deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -162,7 +161,11 @@ fn eval_fmt(script: &str) -> String {
 /// Runs `src` on the VM alone and returns its outcome.
 fn eval_program(src: &str) -> String {
     let arena = parse(src);
-    assert!(arena.diagnostics.is_empty(), "parse diagnostics: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "parse diagnostics: {:?}",
+        arena.diagnostics
+    );
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     vm_outcome::outcome(&mut vm)
@@ -173,7 +176,10 @@ fn eval_program(src: &str) -> String {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m4_1_identifier_non_collision_and_prefix_projection() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m4_1_identifier_non_collision_and_prefix_projection", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m4_1_identifier_non_collision_and_prefix_projection",
+        &ANTICHEAT_SPEC,
+    );
 
     // Program defining identifiers named after projection keywords, alongside prefix calls
     let src = r#"
@@ -194,7 +200,11 @@ pub fn test_m4_1_identifier_non_collision_and_prefix_projection() {
     "#;
 
     let arena = parse(src);
-    assert!(arena.diagnostics.is_empty(), "Expected 0 diagnostics, got: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "Expected 0 diagnostics, got: {:?}",
+        arena.diagnostics
+    );
 
     // Verify s1 is CallExpr with ReactiveSignal (kind 4)
     let s1_call = (0..arena.nodes.len())
@@ -203,7 +213,10 @@ pub fn test_m4_1_identifier_non_collision_and_prefix_projection() {
             let n = arena.node(id);
             n.node_kind() == NodeKind::CallExpr && n.flags == CallQuoteKind::ReactiveSignal as u16
         });
-    assert!(s1_call.is_some(), "Expected CallExpr with ReactiveSignal flags for `sig compute(opt)`");
+    assert!(
+        s1_call.is_some(),
+        "Expected CallExpr with ReactiveSignal flags for `sig compute(opt)`"
+    );
 
     // Verify s2 is CallExpr with ShallowQuote (kind 1)
     let s2_call = (0..arena.nodes.len())
@@ -212,7 +225,10 @@ pub fn test_m4_1_identifier_non_collision_and_prefix_projection() {
             let n = arena.node(id);
             n.node_kind() == NodeKind::CallExpr && n.flags == CallQuoteKind::ShallowQuote as u16
         });
-    assert!(s2_call.is_some(), "Expected CallExpr with ShallowQuote flags for `call compute(call)`");
+    assert!(
+        s2_call.is_some(),
+        "Expected CallExpr with ShallowQuote flags for `call compute(call)`"
+    );
 
     // Verify s3 is CallExpr with SymbolicAdjoint (kind 5)
     let s3_call = (0..arena.nodes.len())
@@ -221,7 +237,10 @@ pub fn test_m4_1_identifier_non_collision_and_prefix_projection() {
             let n = arena.node(id);
             n.node_kind() == NodeKind::CallExpr && n.flags == CallQuoteKind::SymbolicAdjoint as u16
         });
-    assert!(s3_call.is_some(), "Expected CallExpr with SymbolicAdjoint flags for `grad compute(sig)`");
+    assert!(
+        s3_call.is_some(),
+        "Expected CallExpr with SymbolicAdjoint flags for `grad compute(sig)`"
+    );
 
     // Verify s4 is CallExpr with EffectDryRun (kind 6)
     let s4_call = (0..arena.nodes.len())
@@ -230,7 +249,10 @@ pub fn test_m4_1_identifier_non_collision_and_prefix_projection() {
             let n = arena.node(id);
             n.node_kind() == NodeKind::CallExpr && n.flags == CallQuoteKind::EffectDryRun as u16
         });
-    assert!(s4_call.is_some(), "Expected CallExpr with EffectDryRun flags for `plan compute(grad)`");
+    assert!(
+        s4_call.is_some(),
+        "Expected CallExpr with EffectDryRun flags for `plan compute(grad)`"
+    );
 
     guard.finish();
 }
@@ -240,7 +262,10 @@ pub fn test_m4_1_identifier_non_collision_and_prefix_projection() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m4_2_dual_syntax_equivalence_and_identical_codegen() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m4_2_dual_syntax_equivalence_and_identical_codegen", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m4_2_dual_syntax_equivalence_and_identical_codegen",
+        &ANTICHEAT_SPEC,
+    );
 
     // Compact symbolic syntax
     let compact_src = r#"
@@ -277,8 +302,16 @@ pub fn test_m4_2_dual_syntax_equivalence_and_identical_codegen() {
     let arena_compact = parse(compact_src);
     let arena_readable = parse(readable_src);
 
-    assert!(arena_compact.diagnostics.is_empty(), "Compact diag: {:?}", arena_compact.diagnostics);
-    assert!(arena_readable.diagnostics.is_empty(), "Readable diag: {:?}", arena_readable.diagnostics);
+    assert!(
+        arena_compact.diagnostics.is_empty(),
+        "Compact diag: {:?}",
+        arena_compact.diagnostics
+    );
+    assert!(
+        arena_readable.diagnostics.is_empty(),
+        "Readable diag: {:?}",
+        arena_readable.diagnostics
+    );
 
     // Verify all 6 call quote flags match exactly
     let kinds = [
@@ -290,23 +323,63 @@ pub fn test_m4_2_dual_syntax_equivalence_and_identical_codegen() {
         CallQuoteKind::EffectDryRun as u16,
     ];
     for &k in &kinds {
-        let count_compact = arena_compact.nodes.iter().filter(|n| n.node_kind() == NodeKind::CallExpr && n.flags == k).count();
-        let count_readable = arena_readable.nodes.iter().filter(|n| n.node_kind() == NodeKind::CallExpr && n.flags == k).count();
-        assert_eq!(count_compact, 1, "Expected 1 CallExpr with flag {} in compact", k);
-        assert_eq!(count_readable, 1, "Expected 1 CallExpr with flag {} in readable", k);
+        let count_compact = arena_compact
+            .nodes
+            .iter()
+            .filter(|n| n.node_kind() == NodeKind::CallExpr && n.flags == k)
+            .count();
+        let count_readable = arena_readable
+            .nodes
+            .iter()
+            .filter(|n| n.node_kind() == NodeKind::CallExpr && n.flags == k)
+            .count();
+        assert_eq!(
+            count_compact, 1,
+            "Expected 1 CallExpr with flag {} in compact",
+            k
+        );
+        assert_eq!(
+            count_readable, 1,
+            "Expected 1 CallExpr with flag {} in readable",
+            k
+        );
     }
 
     // Verify unpack operators match exactly
-    let un_splat_c = arena_compact.nodes.iter().filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_SPLAT).count();
-    let un_splat_r = arena_readable.nodes.iter().filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_SPLAT).count();
+    let un_splat_c = arena_compact
+        .nodes
+        .iter()
+        .filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_SPLAT)
+        .count();
+    let un_splat_r = arena_readable
+        .nodes
+        .iter()
+        .filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_SPLAT)
+        .count();
     assert_eq!(un_splat_c, un_splat_r, "Splat unary expr mismatch");
 
-    let un_pairs_c = arena_compact.nodes.iter().filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_DOUBLE_SPLAT).count();
-    let un_pairs_r = arena_readable.nodes.iter().filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_DOUBLE_SPLAT).count();
+    let un_pairs_c = arena_compact
+        .nodes
+        .iter()
+        .filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_DOUBLE_SPLAT)
+        .count();
+    let un_pairs_r = arena_readable
+        .nodes
+        .iter()
+        .filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_DOUBLE_SPLAT)
+        .count();
     assert_eq!(un_pairs_c, un_pairs_r, "Pairs unary expr mismatch");
 
-    let un_flat_c = arena_compact.nodes.iter().filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_DEEP_FLATTEN).count();
-    let un_flat_r = arena_readable.nodes.iter().filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_DEEP_FLATTEN).count();
+    let un_flat_c = arena_compact
+        .nodes
+        .iter()
+        .filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_DEEP_FLATTEN)
+        .count();
+    let un_flat_r = arena_readable
+        .nodes
+        .iter()
+        .filter(|n| n.node_kind() == NodeKind::UnaryExpr && n.flags == UNARY_OP_DEEP_FLATTEN)
+        .count();
     assert_eq!(un_flat_c, un_flat_r, "Flat unary expr mismatch");
 
     // A plain call runs; every call-quote mode, in either spelling, stops at
@@ -314,12 +387,23 @@ pub fn test_m4_2_dual_syntax_equivalence_and_identical_codegen() {
     let plain = eval_program("fn compute(x: i64) -> i64 => x + 1;\nreturn compute(41);\n");
     assert_eq!(plain, "42", "a plain call must run, got: {plain}");
     let forms = [
-        "compute!(41)", "compute!!(41)", "compute!&(41)", "compute!^(41)", "compute!@(41)", "compute!?(41)",
-        "call compute(41)", "splice compute(41)", "frame compute(41)", "sig compute(41)", "grad compute(41)",
+        "compute!(41)",
+        "compute!!(41)",
+        "compute!&(41)",
+        "compute!^(41)",
+        "compute!@(41)",
+        "compute!?(41)",
+        "call compute(41)",
+        "splice compute(41)",
+        "frame compute(41)",
+        "sig compute(41)",
+        "grad compute(41)",
         "plan compute(41)",
     ];
     for form in forms {
-        let out = eval_program(&format!("fn compute(x: i64) -> i64 => x + 1;\nreturn {form};\n"));
+        let out = eval_program(&format!(
+            "fn compute(x: i64) -> i64 => x + 1;\nreturn {form};\n"
+        ));
         assert!(
             out.starts_with("FAULT: SEAM001: unconnected seam `vm.call_quote`"),
             "`{form}` must stop at the vm.call_quote seam, got: {out}"
@@ -334,7 +418,8 @@ pub fn test_m4_2_dual_syntax_equivalence_and_identical_codegen() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m4_3_bidirectional_formatter_styles() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m4_3_bidirectional_formatter_styles", &ANTICHEAT_SPEC);
+    let guard =
+        anticheat::AntiCheatGuard::arm("test_m4_3_bidirectional_formatter_styles", &ANTICHEAT_SPEC);
 
     // 1. Verify --style=readable rewrites compact syntax to readable syntax
     let script_readable = r#"
@@ -342,9 +427,21 @@ pub fn test_m4_3_bidirectional_formatter_styles() {
         format_pilot_with_style(code, 100, "readable");
     "#;
     let res_readable = eval_fmt(script_readable);
-    assert!(res_readable.contains("opt<i64>"), "Expected opt<i64>, got: {}", res_readable);
-    assert!(res_readable.contains("sig compute(x)"), "Expected sig compute(x), got: {}", res_readable);
-    assert!(res_readable.contains("flat(items)"), "Expected flat(items), got: {}", res_readable);
+    assert!(
+        res_readable.contains("opt<i64>"),
+        "Expected opt<i64>, got: {}",
+        res_readable
+    );
+    assert!(
+        res_readable.contains("sig compute(x)"),
+        "Expected sig compute(x), got: {}",
+        res_readable
+    );
+    assert!(
+        res_readable.contains("flat(items)"),
+        "Expected flat(items), got: {}",
+        res_readable
+    );
 
     // 2. Verify --style=compact rewrites readable syntax to compact syntax
     let script_compact = r#"
@@ -352,9 +449,21 @@ pub fn test_m4_3_bidirectional_formatter_styles() {
         format_pilot_with_style(code, 100, "compact");
     "#;
     let res_compact = eval_fmt(script_compact);
-    assert!(res_compact.contains("i64?"), "Expected i64?, got: {}", res_compact);
-    assert!(res_compact.contains("compute!^(x)"), "Expected compute!^(x), got: {}", res_compact);
-    assert!(res_compact.contains("*..items"), "Expected *..items, got: {}", res_compact);
+    assert!(
+        res_compact.contains("i64?"),
+        "Expected i64?, got: {}",
+        res_compact
+    );
+    assert!(
+        res_compact.contains("compute!^(x)"),
+        "Expected compute!^(x), got: {}",
+        res_compact
+    );
+    assert!(
+        res_compact.contains("*..items"),
+        "Expected *..items, got: {}",
+        res_compact
+    );
 
     // 3. Verify --style=preserve keeps the author's choice untouched
     let script_preserve = r#"
@@ -362,10 +471,26 @@ pub fn test_m4_3_bidirectional_formatter_styles() {
         format_pilot_with_style(code, 100, "preserve");
     "#;
     let res_preserve = eval_fmt(script_preserve);
-    assert!(res_preserve.contains("opt<i64>"), "Expected opt<i64> preserved in: {}", res_preserve);
-    assert!(res_preserve.contains("str?"), "Expected str? preserved in: {}", res_preserve);
-    assert!(res_preserve.contains("sig f(a)"), "Expected sig f(a) preserved in: {}", res_preserve);
-    assert!(res_preserve.contains("g!^(b)"), "Expected g!^(b) preserved in: {}", res_preserve);
+    assert!(
+        res_preserve.contains("opt<i64>"),
+        "Expected opt<i64> preserved in: {}",
+        res_preserve
+    );
+    assert!(
+        res_preserve.contains("str?"),
+        "Expected str? preserved in: {}",
+        res_preserve
+    );
+    assert!(
+        res_preserve.contains("sig f(a)"),
+        "Expected sig f(a) preserved in: {}",
+        res_preserve
+    );
+    assert!(
+        res_preserve.contains("g!^(b)"),
+        "Expected g!^(b) preserved in: {}",
+        res_preserve
+    );
 
     guard.finish();
 }
@@ -375,7 +500,10 @@ pub fn test_m4_3_bidirectional_formatter_styles() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m4_4_universal_rename_litmus_and_ide_reflection() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m4_4_universal_rename_litmus_and_ide_reflection", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m4_4_universal_rename_litmus_and_ide_reflection",
+        &ANTICHEAT_SPEC,
+    );
 
     // 1. Verify dynamic keyword reflection from keywords.pilot via vscode_gen
     let root = anticheat::workspace_root();
@@ -386,8 +514,8 @@ pub fn test_m4_4_universal_rename_litmus_and_ide_reflection() {
     let mut combined = String::new();
     for rel in &deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -410,7 +538,11 @@ pub fn test_m4_4_universal_rename_litmus_and_ide_reflection() {
     }));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     let reflected = vm_outcome::outcome(&mut vm);
-    assert!(reflected.contains("!^|!?|!|*|OK"), "Reflected symbols mismatch: {}", reflected);
+    assert!(
+        reflected.contains("!^|!?|!|*|OK"),
+        "Reflected symbols mismatch: {}",
+        reflected
+    );
 
     guard.finish();
 }

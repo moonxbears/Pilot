@@ -3,7 +3,7 @@
 // Milestone 59.2: Persistent PilVM LSP Server & Content-Length Framing
 // Replaces crates/pilot-lsp and crates/pilot-lsp-macros in Pure Pilot.
 // =========================================================================
-pub pkg Pilot.SelfHost.Lsp.Server;
+pub pkg selfhost.lsp;
 
 use std.text;
 

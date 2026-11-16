@@ -17,10 +17,10 @@
 
 use crate::instruction::Opcode;
 use crate::lower_native::native;
-use crate::BytecodeCompiler;
-use pilot_parser::NativeKind;
-use pilot_ast::{AstArena, NodeId, NodeKind};
 use crate::value::PilotVal;
+use crate::BytecodeCompiler;
+use pilot_ast::{AstArena, NodeId, NodeKind};
+use pilot_parser::NativeKind;
 
 impl BytecodeCompiler {
     /// Whether `owner` declares `method`; `Some(is_static)` when it does.
@@ -35,9 +35,11 @@ impl BytecodeCompiler {
     /// How many types other than structs (primitives, through `ext`
     /// blocks) declare instance method `method`.
     pub(crate) fn non_struct_owners(&self, method: &str) -> usize {
-        self.method_owners
-            .get(method)
-            .map_or(0, |v| v.iter().filter(|(o, st)| !st && !self.structs.contains_key(o)).count())
+        self.method_owners.get(method).map_or(0, |v| {
+            v.iter()
+                .filter(|(o, st)| !st && !self.structs.contains_key(o))
+                .count()
+        })
     }
 
     /// Whether `owner` is an interface that declares `method`, itself or
@@ -50,9 +52,9 @@ impl BytecodeCompiler {
                 continue;
             }
             let body = NodeId(arena.node(d).rhs);
-            let declared = Self::type_members(arena, body)
-                .into_iter()
-                .any(|m| Self::is_method_decl(arena, m) && Self::name(arena, arena.node(m).lhs) == method);
+            let declared = Self::type_members(arena, body).into_iter().any(|m| {
+                Self::is_method_decl(arena, m) && Self::name(arena, arena.node(m).lhs) == method
+            });
             if declared {
                 return true;
             }
@@ -79,8 +81,14 @@ impl BytecodeCompiler {
         let full = format!("{owner}.{method}");
         // `recv.f(x)` / `(recv.f)(x)` where `f` is a field of the receiver's
         // struct and not one of its methods calls the function the field holds.
-        let is_field = self.structs.get(owner).is_some_and(|s| s.fields.iter().any(|(f, _)| f == method));
-        if is_field && self.declares(owner, method).is_none() && !self.fn_entries.contains_key(&full) {
+        let is_field = self
+            .structs
+            .get(owner)
+            .is_some_and(|s| s.fields.iter().any(|(f, _)| f == method));
+        if is_field
+            && self.declares(owner, method).is_none()
+            && !self.fn_entries.contains_key(&full)
+        {
             let r_fn = self.emit_member_read(r_recv, Some(owner), method);
             let regs = self.compile_args(arena, args);
             return self.emit_closure_call(r_fn, &regs);
@@ -96,7 +104,12 @@ impl BytecodeCompiler {
         let instance_owners: Vec<String> = self
             .method_owners
             .get(method)
-            .map(|v| v.iter().filter(|(_, st)| !st).map(|(o, _)| o.clone()).collect())
+            .map(|v| {
+                v.iter()
+                    .filter(|(_, st)| !st)
+                    .map(|(o, _)| o.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         if instance_owners.is_empty() {
             if let Some(hook) = native(NativeKind::Method, method) {
@@ -109,8 +122,9 @@ impl BytecodeCompiler {
             self.emit_out_writebacks(arena, &full, args);
             return r;
         }
-        let (mut records, others): (Vec<String>, Vec<String>) =
-            instance_owners.into_iter().partition(|o| self.structs.contains_key(o));
+        let (mut records, others): (Vec<String>, Vec<String>) = instance_owners
+            .into_iter()
+            .partition(|o| self.structs.contains_key(o));
         if others.len() > 1 {
             return self.error(
                 crate::codes::SEED,
@@ -171,7 +185,12 @@ impl BytecodeCompiler {
     /// A bare call `method(args)` inside a method of a type that declares
     /// `method` calls it on `self` (or, for a static method, on the type).
     /// `None` when the name is not such a method.
-    pub(crate) fn compile_implicit_self_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> Option<u8> {
+    pub(crate) fn compile_implicit_self_call(
+        &mut self,
+        arena: &AstArena,
+        name: &str,
+        args: &[NodeId],
+    ) -> Option<u8> {
         let owner = self.cur_owner.clone()?;
         let is_static = self.declares(&owner, name)?;
         let full = format!("{owner}.{name}");

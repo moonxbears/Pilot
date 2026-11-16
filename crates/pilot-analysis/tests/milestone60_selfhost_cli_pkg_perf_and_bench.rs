@@ -77,9 +77,9 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pilot_analysis::{AnalysisPipeline, handle_engine_intrinsic, PhysicsRegistry};
-use pilot_intern::SymbolId;
+use pilot_analysis::{handle_engine_intrinsic, AnalysisPipeline, PhysicsRegistry};
 use pilot_ast::NodeKind;
+use pilot_intern::SymbolId;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
@@ -242,7 +242,11 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     required_group_pub_fns: &[("parse_cli_build_args", CLI_BUILD_GROUP)],
 };
 
-fn eval_with_mounted_physics(driver_src: &str, target_src: &str, physics: &PhysicsRegistry) -> String {
+fn eval_with_mounted_physics(
+    driver_src: &str,
+    target_src: &str,
+    physics: &PhysicsRegistry,
+) -> String {
     let drv_arena = parse(driver_src);
     assert!(
         drv_arena.diagnostics.is_empty(),
@@ -330,7 +334,12 @@ fn python_sha256_hex(payload: &str) -> String {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.as_mut().unwrap().write_all(payload.as_bytes()).unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
     String::from_utf8(child.wait_with_output().unwrap().stdout)
         .unwrap()
         .trim()
@@ -358,11 +367,20 @@ pub fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_v
         ("archive.pilot", &archive_src),
         ("interop.pilot", &interop_src),
     ] {
-        assert!(s.lines().count() <= 1500, "selfhost/pkg/{} exceeds 1,500 LOC", nm);
+        assert!(
+            s.lines().count() <= 1500,
+            "selfhost/pkg/{} exceeds 1,500 LOC",
+            nm
+        );
     }
 
     let pkg_name = rng.ident("nav_core_", 6);
-    let pkg_ver = format!("{}.{}.{}", rng.range_i64(1, 9), rng.range_i64(0, 20), rng.range_i64(0, 50));
+    let pkg_ver = format!(
+        "{}.{}.{}",
+        rng.range_i64(1, 9),
+        rng.range_i64(0, 20),
+        rng.range_i64(0, 50)
+    );
     let dep_a = rng.ident("linalg_", 5);
     let dep_a_ver = format!("^{}.{}", rng.range_i64(1, 4), rng.range_i64(0, 9));
     let dep_b = rng.ident("telemetry_", 5);
@@ -373,8 +391,14 @@ pub fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_v
         pkg_name, pkg_ver, dep_a, dep_a_ver, dep_b, dep_b_ver
     );
 
-    let file1_content = format!("pub fn f1() -> i64 {{ return {}; }}\n// pipe|colon:test\n", rng.range_i64(10, 999));
-    let file2_content = format!("pub struct Data {{ pub v: i64; }}\n// {}\n", rng.ident("blob_", 20));
+    let file1_content = format!(
+        "pub fn f1() -> i64 {{ return {}; }}\n// pipe|colon:test\n",
+        rng.range_i64(10, 999)
+    );
+    let file2_content = format!(
+        "pub struct Data {{ pub v: i64; }}\n// {}\n",
+        rng.ident("blob_", 20)
+    );
     let file3_content = format!("{{\"cfg\":\"{}\"}}", rng.ident("val_", 10));
 
     let script = format!(
@@ -423,7 +447,11 @@ pub fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_v
     );
 
     let arena = parse(&script);
-    assert!(arena.diagnostics.is_empty(), "pkg suite parse diagnostics: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "pkg suite parse diagnostics: {:?}",
+        arena.diagnostics
+    );
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     let out = vm.run().to_string_repr();
@@ -431,8 +459,14 @@ pub fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_v
     assert_eq!(cols.len(), 8, "Unexpected pkg output: {}", out);
 
     assert_eq!(cols[0], "MF_OK", "pilot.json manifest parser failed");
-    assert_eq!(cols[1], "AR_OK", "Multi-file .pilpkg pack/extract lossless round-trip failed");
-    assert_eq!(cols[2], "LOCK_OK", "Lockfile SHA-256 integrity verification / tamper detection failed");
+    assert_eq!(
+        cols[1], "AR_OK",
+        "Multi-file .pilpkg pack/extract lossless round-trip failed"
+    );
+    assert_eq!(
+        cols[2], "LOCK_OK",
+        "Lockfile SHA-256 integrity verification / tamper detection failed"
+    );
 
     let expected_sha = python_sha256_hex(cols[3]);
     assert!(
@@ -443,9 +477,16 @@ pub fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_v
     );
 
     // Scaffolded `main.pilot` must parse cleanly as canonical Pilot (`pub fn main`, zero `def `)
-    assert!(!cols[5].contains("def "), "Scaffolded main.pilot used forbidden legacy `def`");
+    assert!(
+        !cols[5].contains("def "),
+        "Scaffolded main.pilot used forbidden legacy `def`"
+    );
     let main_arena = parse(cols[5]);
-    assert!(main_arena.diagnostics.is_empty(), "Scaffolded main.pilot failed parse: {:?}", main_arena.diagnostics);
+    assert!(
+        main_arena.diagnostics.is_empty(),
+        "Scaffolded main.pilot failed parse: {:?}",
+        main_arena.diagnostics
+    );
     assert_eq!(cols[6], pkg_ver, "pilotvenv.cfg version round-trip failed");
     assert_eq!(
         cols[7],
@@ -553,7 +594,11 @@ pub fn test_60_2_live_vmhook_flamegraph_svg_ast_wcet_and_real_constant_folding_o
         trace_esc = escape_pilot_str(&folded_trace),
     );
     let prof_arena = parse(&prof_script);
-    assert!(prof_arena.diagnostics.is_empty(), "profiler/bench diagnostics: {:?}", prof_arena.diagnostics);
+    assert!(
+        prof_arena.diagnostics.is_empty(),
+        "profiler/bench diagnostics: {:?}",
+        prof_arena.diagnostics
+    );
     let mut prof_vm = PilVirtualMachine::new();
     prof_vm.load_binary(BytecodeCompiler::compile(&prof_arena, prof_arena.root));
     let prof_out = prof_vm.run().to_string_repr();
@@ -603,7 +648,11 @@ print("OK")
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    py.stdin.as_mut().unwrap().write_all(check_json.as_bytes()).unwrap();
+    py.stdin
+        .as_mut()
+        .unwrap()
+        .write_all(check_json.as_bytes())
+        .unwrap();
     let py_res = py.wait_with_output().unwrap();
     assert!(
         py_res.status.success(),
@@ -656,7 +705,10 @@ print("OK")
     let unopt_arena = parse(&unopt_pilot);
     assert!(unopt_arena.diagnostics.is_empty());
     let unopt_analysis = AnalysisPipeline::analyze(&unopt_arena, unopt_arena.root);
-    let opt_driver = format!("{}\nlet __opt = optimize_mounted_pilot_source();\n__opt;\n", opt_src);
+    let opt_driver = format!(
+        "{}\nlet __opt = optimize_mounted_pilot_source();\n__opt;\n",
+        opt_src
+    );
     let opt_pilot = eval_with_mounted_physics(&opt_driver, &unopt_pilot, &unopt_analysis.physics);
 
     assert!(
@@ -674,7 +726,11 @@ print("OK")
     // Execute optimized source on PilVirtualMachine and verify exact semantic equivalence!
     let exec_opt = format!("{}\nlet __v = {}({});\n__v;\n", opt_pilot, opt_fn, x_arg);
     let exec_arena = parse(&exec_opt);
-    assert!(exec_arena.diagnostics.is_empty(), "Optimized Pilot source must parse cleanly: {:?}", exec_arena.diagnostics);
+    assert!(
+        exec_arena.diagnostics.is_empty(),
+        "Optimized Pilot source must parse cleanly: {:?}",
+        exec_arena.diagnostics
+    );
     let mut exec_vm = PilVirtualMachine::new();
     exec_vm.load_binary(BytecodeCompiler::compile(&exec_arena, exec_arena.root));
     assert_eq!(exec_vm.run().as_int(), Some(x_arg + expected_const));
@@ -693,8 +749,16 @@ pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_c
     // 1. Verify retired crates & files are completely deleted
     let cargo_toml = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
     for retired in ["pilot-pkg", "pilot-perf", "pilot-bench"] {
-        assert!(!root.join("crates").join(retired).exists(), "crates/{} must be deleted", retired);
-        assert!(!cargo_toml.contains(retired), "Cargo.toml must not reference {}", retired);
+        assert!(
+            !root.join("crates").join(retired).exists(),
+            "crates/{} must be deleted",
+            retired
+        );
+        assert!(
+            !cargo_toml.contains(retired),
+            "Cargo.toml must not reference {}",
+            retired
+        );
     }
     assert!(!root.join("crates/pilot-cli/src/commands.rs").exists());
 
@@ -707,7 +771,12 @@ pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_c
         }
     }
     let cli_cap = anticheat::seed_rust_crate_loc_cap(&root, 100);
-    assert!(cli_loc <= cli_cap, "crates/pilot-cli/src total LOC ({}) must be <= {}", cli_loc, cli_cap);
+    assert!(
+        cli_loc <= cli_cap,
+        "crates/pilot-cli/src total LOC ({}) must be <= {}",
+        cli_loc,
+        cli_cap
+    );
 
     let pilotc_src = std::fs::read_to_string(root.join("selfhost/pilotc.pilot")).unwrap();
     assert!(!pilotc_src.contains("system(") && !pilotc_src.contains("pilot build"));
@@ -771,8 +840,7 @@ pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_c
     assert_eq!(cols.len(), 5, "Unexpected CLI suite output: {}", out);
 
     assert_eq!(
-        cols[0],
-        "build|app/guidance.pilot|wasm|1|out/guidance.wasm",
+        cols[0], "build|app/guidance.pilot|wasm|1|out/guidance.wasm",
         "CLI build argv parser mismatch"
     );
     assert!(
@@ -786,8 +854,7 @@ pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_c
         cols[2]
     );
     assert_eq!(
-        cols[3],
-        "PASS,MISMATCH:c,MISMATCH:llvm,MISMATCH:wasm",
+        cols[3], "PASS,MISMATCH:c,MISMATCH:llvm,MISMATCH:wasm",
         "Differential backend verifier failed to pinpoint diverging backend"
     );
     assert!(

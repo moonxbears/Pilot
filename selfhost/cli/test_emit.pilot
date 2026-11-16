@@ -22,13 +22,11 @@
 // `--live-allocations` (C only) compiles each case with PILOT_LIVE_COUNT,
 // so its binary reports the heap objects still allocated when it ends
 // normally; a case that reports any fails.
-pub lvl(0) pkg Pilot.SelfHost.Cli.TestEmit;
+pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.File;
 use std.proc;
 use std.text;
-use Pilot.SelfHost.Cli.TestCmd;
-use Pilot.SelfHost.Cli.TestIr;
 
 /// How the host builds and runs a program in one language: `compile` (empty
 /// for an interpreted language) and `run` are argument lists in which
@@ -90,7 +88,7 @@ fn live_count(stderr: str) -> str? {
 }
 
 /// `template` with `{src}` and `{bin}` filled in.
-fn filled(template: List<str>, src: str, bin: str) -> List<str> {
+fn filled(ref template: List<str>, src: str, bin: str) -> List<str> {
     var out: List<str> = [];
     for t in template {
         out.push(t.replace("{src}", src).replace("{bin}", bin).replace("{rt}", c_runtime_dir()));
@@ -118,7 +116,7 @@ pub fn c_runtime_dir() -> str {
     return rel;
 }
 
-fn job_of(argv: List<str>, input: str) -> proc.ProcessJob {
+fn job_of(ref argv: List<str>, input: str) -> proc.ProcessJob {
     var rest: List<str> = [];
     var i = 1;
     while i < argv.len() {
@@ -183,7 +181,7 @@ fn text_exit(stem: str) -> i64 {
     return if neg { 0 - n } else { n };
 }
 
-fn fail(program: str, problems: List<str>, var ref tally: EmitTally) {
+fn fail(program: str, ref problems: List<str>, var ref tally: EmitTally) {
     tally.failed = tally.failed + 1;
     print(f"FAIL {program}");
     for p in problems { print("  " + p); }
@@ -228,7 +226,7 @@ fn has_line(stdout: str, want: str) -> bool {
 ///     compiler, which is the answer for every language;
 ///   - any other run stopped in one language's emitter (a seam): that case
 ///     is emitted again, once per language.
-fn emit_cases(exe: str, rs: List<EmitRunner>, cases: List<str>, dir_of: List<str>) -> List<List<Emitted>> {
+fn emit_cases(exe: str, ref rs: List<EmitRunner>, ref cases: List<str>, ref dir_of: List<str>) -> List<List<Emitted>> {
     var all: List<List<Emitted>> = [];
     if rs.len() == 1 {
         var emits: List<proc.ProcessJob> = [];
@@ -290,7 +288,7 @@ fn emit_cases(exe: str, rs: List<EmitRunner>, cases: List<str>, dir_of: List<str
 
 /// `pilot test --emit <lang>[,<lang>..] [paths...] [--filter text] [--live-allocations]`: exit 0 when no
 /// eligible case fails, 1 when one does, 2 when a language is not a target.
-pub fn test_emit_command(langs: str, paths: List<str>, filter: str, live: bool) -> i64 {
+pub fn test_emit_command(langs: str, ref paths: List<str>, filter: str, live: bool) -> i64 {
     var rs: List<EmitRunner> = [];
     var has_c = false;
     for lang in text.split_text(langs, ",") {
@@ -332,7 +330,7 @@ pub fn test_emit_command(langs: str, paths: List<str>, filter: str, live: bool) 
 }
 
 /// Builds, runs and judges `cases` as emitted for the language of `r`.
-fn run_emitted(r: EmitRunner, cases: List<str>, emitted: List<Emitted>, dir: str, live: bool, var ref tally: EmitTally) {
+fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitted>, dir: str, live: bool, var ref tally: EmitTally) {
     var compile: List<str> = [];
     for a in r.compile {
         compile.push(a);

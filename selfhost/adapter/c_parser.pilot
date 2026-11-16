@@ -3,11 +3,10 @@
 // Milestone 12.2: Headerless C11/C23 Semantic Absorber - C Declarative Parser
 // Pure-Pilot C11/C23 parser: typedef, struct, union, bitfields, enum, fn decls
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.CParser;
+pub lvl(0) pkg selfhost.adapter;
 
-use Pilot.Diagnostics.Model;
+use selfhost.diagnostics.*;
 use Pilot.Core.File.File;
-use Pilot.SelfHost.Adapter.CPp;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

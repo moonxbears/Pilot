@@ -132,18 +132,111 @@ pub fn test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary() {
     }
 
     let non_seed_words = [
-        "var", "const", "switch", "case", "default", "for", "in", "while", "until", "then",
-        "break", "continue", "guard", "try", "catch", "pub", "priv", "prot", "pkg", "int",
-        "file", "open", "export", "lvl", "pure", "static", "iso", "partial", "ext", "get",
-        "set", "self", "field", "value", "scope", "enter", "exit", "requires", "ensures",
-        "old", "context", "adapter", "each", "coalesce", "with", "without", "as", "async",
-        "await", "spawn", "atomic", "sync", "isolate", "select", "timeout", "bounded",
-        "noalloc", "region", "deadline", "within", "periodic", "priority", "jitter",
-        "database", "transaction", "commit", "rollback", "savepoint", "connect", "from",
-        "where", "order", "ascending", "descending", "insert", "into", "values", "update",
-        "delete", "extern", "module", "lib", "syntax", "unit", "use", "op", "def", "mut",
-        "match", "class", "record", "elif", "lambda", "i64", "u8", "f64", "str", "bool",
-        "usize", "slice", "option", "result", "range", "SliceBuffer", "RangeWindow",
+        "var",
+        "const",
+        "switch",
+        "case",
+        "default",
+        "for",
+        "in",
+        "while",
+        "until",
+        "then",
+        "break",
+        "continue",
+        "guard",
+        "try",
+        "catch",
+        "pub",
+        "priv",
+        "prot",
+        "pkg",
+        "int",
+        "file",
+        "open",
+        "export",
+        "lvl",
+        "pure",
+        "static",
+        "iso",
+        "partial",
+        "ext",
+        "get",
+        "set",
+        "self",
+        "field",
+        "value",
+        "scope",
+        "enter",
+        "exit",
+        "requires",
+        "ensures",
+        "old",
+        "context",
+        "adapter",
+        "each",
+        "coalesce",
+        "with",
+        "without",
+        "as",
+        "async",
+        "await",
+        "spawn",
+        "atomic",
+        "sync",
+        "isolate",
+        "select",
+        "timeout",
+        "bounded",
+        "noalloc",
+        "region",
+        "deadline",
+        "within",
+        "periodic",
+        "priority",
+        "jitter",
+        "database",
+        "transaction",
+        "commit",
+        "rollback",
+        "savepoint",
+        "connect",
+        "from",
+        "where",
+        "order",
+        "ascending",
+        "descending",
+        "insert",
+        "into",
+        "values",
+        "update",
+        "delete",
+        "extern",
+        "module",
+        "lib",
+        "syntax",
+        "unit",
+        "use",
+        "op",
+        "def",
+        "mut",
+        "match",
+        "class",
+        "record",
+        "elif",
+        "lambda",
+        "i64",
+        "u8",
+        "f64",
+        "str",
+        "bool",
+        "usize",
+        "slice",
+        "option",
+        "result",
+        "range",
+        "SliceBuffer",
+        "RangeWindow",
     ];
     for word in non_seed_words {
         let tape = tokenize(word);
@@ -266,10 +359,9 @@ pub fn test_52_2_two_way_dot_call_quotes_and_nested_bracket_matching() {
             match tape.kind(i) {
                 TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => {
                     open_count += 1;
-                    let close_idx = tape
-                        .matching_bracket(i)
-                        .unwrap_or_else(|| panic!("Missing matching close bracket at {} in `{}`", i, src))
-                        as usize;
+                    let close_idx = tape.matching_bracket(i).unwrap_or_else(|| {
+                        panic!("Missing matching close bracket at {} in `{}`", i, src)
+                    }) as usize;
                     assert!(close_idx > i);
                     assert_eq!(
                         tape.matching_bracket(close_idx),
@@ -327,7 +419,10 @@ pub fn test_52_3_name_blind_unit_suffixes_fstrings_and_keywords_randomized() {
                 (TokenKind::FloatLit, format!("3.25{}", u2)),
             ]
         );
-        assert_eq!(interp_tokens, vec![(TokenKind::StrLit, "f\"v={a}\"".to_string())]);
+        assert_eq!(
+            interp_tokens,
+            vec![(TokenKind::StrLit, "f\"v={a}\"".to_string())]
+        );
         assert_eq!(kw_lits, vec![format!(":{}/{}", ns, kw)]);
     }
     guard.finish();
@@ -342,7 +437,9 @@ pub fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
     let workspace_root = ws_root();
 
     assert!(
-        !workspace_root.join("crates/pilot-lexer/src/preproc.rs").exists(),
+        !workspace_root
+            .join("crates/pilot-lexer/src/preproc.rs")
+            .exists(),
         "Legacy crates/pilot-lexer/src/preproc.rs must be deleted"
     );
 
@@ -366,11 +463,15 @@ pub fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
         total_lexer_loc
     );
 
-    let kw_rs = std::fs::read_to_string(workspace_root.join("crates/pilot-lexer/src/keywords.rs")).unwrap();
+    let kw_rs =
+        std::fs::read_to_string(workspace_root.join("crates/pilot-lexer/src/keywords.rs")).unwrap();
     assert!(!kw_rs.contains("RwLock") && !kw_rs.contains("DYNAMIC_KEYWORDS"));
 
-    let lexer_rs = std::fs::read_to_string(workspace_root.join("crates/pilot-lexer/src/lexer.rs")).unwrap();
-    for forbidden_unit in ["\"ns\"", "\"us\"", "\"ms\"", "\"GHz\"", "\"KB\"", "\"MB\"", "\"TB\""] {
+    let lexer_rs =
+        std::fs::read_to_string(workspace_root.join("crates/pilot-lexer/src/lexer.rs")).unwrap();
+    for forbidden_unit in [
+        "\"ns\"", "\"us\"", "\"ms\"", "\"GHz\"", "\"KB\"", "\"MB\"", "\"TB\"",
+    ] {
         assert!(
             !lexer_rs.contains(forbidden_unit),
             "crates/pilot-lexer/src/lexer.rs must not hardcode unit suffix {}",
@@ -378,7 +479,8 @@ pub fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
         );
     }
 
-    let token_rs = std::fs::read_to_string(workspace_root.join("crates/pilot-lexer/src/token.rs")).unwrap();
+    let token_rs =
+        std::fs::read_to_string(workspace_root.join("crates/pilot-lexer/src/token.rs")).unwrap();
     let is_id = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
     let has_whole_ident = |haystack: &str, needle: &str| -> bool {
         let hb = haystack.as_bytes();
@@ -390,8 +492,18 @@ pub fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
         })
     };
     for forbidden_variant in [
-        "KwDef", "KwMut", "KwMatch", "KwClass", "KwRecord", "KwElif", "KwLambda",
-        "DurationLit", "FrequencyLit", "MemoryLit", "VirtualLBrace", "VirtualRBrace",
+        "KwDef",
+        "KwMut",
+        "KwMatch",
+        "KwClass",
+        "KwRecord",
+        "KwElif",
+        "KwLambda",
+        "DurationLit",
+        "FrequencyLit",
+        "MemoryLit",
+        "VirtualLBrace",
+        "VirtualRBrace",
     ] {
         assert!(
             !has_whole_ident(&token_rs, forbidden_variant),
@@ -400,7 +512,8 @@ pub fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
         );
     }
 
-    let intern_rs = std::fs::read_to_string(workspace_root.join("crates/pilot-intern/src/lib.rs")).unwrap();
+    let intern_rs =
+        std::fs::read_to_string(workspace_root.join("crates/pilot-intern/src/lib.rs")).unwrap();
     let intern_loc = intern_rs.lines().count();
     let intern_cap = anticheat::seed_rust_file_loc_cap(&workspace_root, 165);
     assert!(
@@ -412,7 +525,8 @@ pub fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
     assert!(!intern_rs.contains("KeywordId") && !intern_rs.contains("intern_keyword"));
     assert!(!intern_rs.contains("SliceBuffer") && !intern_rs.contains("RangeWindow"));
 
-    let preproc_pilot = std::fs::read_to_string(workspace_root.join("selfhost/preprocessor.pilot")).unwrap();
+    let preproc_pilot =
+        std::fs::read_to_string(workspace_root.join("selfhost/preprocessor.pilot")).unwrap();
     let preproc_loc = preproc_pilot.lines().count();
     assert!(
         (1..=1500).contains(&preproc_loc),

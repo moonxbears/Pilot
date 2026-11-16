@@ -13,21 +13,19 @@
 // to the nearest function or lambda around it, which is then a generator. A
 // `yield` with neither (a script's top level, a `comptime` block) belongs to
 // nothing: GEN001.
-pub lvl(0) pkg Pilot.SelfHost.Check.Generators;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
 
 /// Whether the `for` at `f` is in value position.
 /// The `then` clause of `for` node `f`, or -1.
-pub fn for_then(s: Snap, f: i64) -> i64 {
+pub fn for_then(ref s: Snap, f: i64) -> i64 {
     let c = flags(s, f) - 1;
     if c < 0 || c >= s.for_clauses.len() { return -1; }
     let clause: List<i64> = s.for_clauses[c];
     return clause[1];
 }
 
-pub fn for_collects(p: Program, f: i64) -> bool {
+pub fn for_collects(ref p: Program, f: i64) -> bool {
     // A `for .. then` gives one value, not the list of what it yields.
     if for_then(p.s, f) >= 0 { return false; }
     return value_used(p, f, 0);
@@ -35,7 +33,7 @@ pub fn for_collects(p: Program, f: i64) -> bool {
 
 /// Whether item `item` of block `b` is the block's value: its last item,
 /// a `for` or `if` itself or an expression written without a closing `;`.
-fn is_block_value(s: Snap, b: i64, item: i64) -> bool {
+fn is_block_value(ref s: Snap, b: i64, item: i64) -> bool {
     let ch = children(s, b);
     if ch.len() == 0 || ch[ch.len() - 1] != item { return false; }
     if kind(s, item) != nk_expr_stmt() { return true; }
@@ -45,7 +43,7 @@ fn is_block_value(s: Snap, b: i64, item: i64) -> bool {
 /// Whether the value of block `b` is used: `b` is the initializer of a
 /// `let` or `var`, an argument, a returned or assigned value, the value of
 /// an enclosing value block, or a branch of an `if` whose value is used.
-fn block_in_value(p: Program, b: i64, depth: i64) -> bool {
+fn block_in_value(ref p: Program, b: i64, depth: i64) -> bool {
     let par = p.parents[b];
     if par < 0 || depth > 64 { return false; }
     let k = kind(p.s, par);
@@ -62,7 +60,7 @@ fn block_in_value(p: Program, b: i64, depth: i64) -> bool {
 /// item of a block it is used only as that block's value; as an item of the
 /// program never; anywhere else (an initializer, an argument, a returned
 /// value, an `=> expr` body) it is.
-fn value_used(p: Program, e: i64, depth: i64) -> bool {
+fn value_used(ref p: Program, e: i64, depth: i64) -> bool {
     var item = e;
     var par = p.parents[e];
     if par >= 0 && kind(p.s, par) == nk_expr_stmt() {
@@ -79,7 +77,7 @@ fn value_used(p: Program, e: i64, depth: i64) -> bool {
 /// The collecting `for`, function or lambda `yield` node `y` belongs to;
 /// -1 for none, -2 when `y` is not part of the program (a node a syntax
 /// rule copied, whose copy is what the program holds).
-pub fn yield_owner(p: Program, y: i64) -> i64 {
+pub fn yield_owner(ref p: Program, y: i64) -> i64 {
     var child = y;
     var cur = p.parents[y];
     while cur >= 0 {
@@ -95,7 +93,7 @@ pub fn yield_owner(p: Program, y: i64) -> i64 {
 
 /// The `yield` nodes that belong to `owner` (a function, lambda or
 /// collecting `for`), in source order.
-pub fn owned_yields(p: Program, owner: i64) -> List<i64> {
+pub fn owned_yields(ref p: Program, owner: i64) -> List<i64> {
     var out: List<i64> = [];
     for y in all_yields(p) {
         if yield_owner(p, y) == owner { out.push(y); }
@@ -104,12 +102,12 @@ pub fn owned_yields(p: Program, owner: i64) -> List<i64> {
 }
 
 /// Every `yield` node of the program.
-pub fn all_yields(p: Program) -> List<i64> {
+pub fn all_yields(ref p: Program) -> List<i64> {
     return prog_nodes_of_kind(p, nk_yield());
 }
 
 /// Whether function or lambda `f` is a generator: some `yield` belongs to it.
-pub fn is_generator(p: Program, f: i64) -> bool {
+pub fn is_generator(ref p: Program, f: i64) -> bool {
     if f < 0 { return false; }
     let k = kind(p.s, f);
     if k != nk_fn() && k != nk_lambda() && k != nk_operator() { return false; }
@@ -117,13 +115,13 @@ pub fn is_generator(p: Program, f: i64) -> bool {
 }
 
 /// Whether `yield` node `y` is a delegation, `yield *xs`.
-pub fn is_delegation(p: Program, y: i64) -> bool {
+pub fn is_delegation(ref p: Program, y: i64) -> bool {
     let v = lhs(p.s, y);
     return v >= 0 && kind(p.s, v) == nk_unary() && flags(p.s, v) == unary_splat();
 }
 
 /// The declaration of the generator type, or -1 when none is bound.
-pub fn generator_decl(p: Program) -> i64 {
+pub fn generator_decl(ref p: Program) -> i64 {
     if p.s.generator.len() == 0 { return -1; }
     return prog_type_decl(p, p.s.generator[0]);
 }

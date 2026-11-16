@@ -2,7 +2,7 @@
 // FILE: selfhost/pkg/archive.pilot
 // Milestone 60.1: .pilpkg Deterministic Package Archive Header & Entry Codec
 // =========================================================================
-pub pkg Pilot.SelfHost.Pkg.Archive;
+pub pkg selfhost.pkg;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

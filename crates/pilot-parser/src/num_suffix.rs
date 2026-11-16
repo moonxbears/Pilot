@@ -31,7 +31,12 @@ impl<'a> Parser<'a> {
         let layout = self
             .tables
             .reg_layout(suffix)
-            .filter(|l| matches!(l.class.as_str(), SIGNED_CLASS | UNSIGNED_CLASS | FLOAT_CLASS))
+            .filter(|l| {
+                matches!(
+                    l.class.as_str(),
+                    SIGNED_CLASS | UNSIGNED_CLASS | FLOAT_CLASS
+                )
+            })
             .cloned();
         let decimal = matches!(kind, TokenKind::IntLit | TokenKind::FloatLit);
         let Some(layout) = layout else {
@@ -55,24 +60,45 @@ impl<'a> Parser<'a> {
             (LitValue::Int(v), class) => {
                 let signed = class == SIGNED_CLASS;
                 let bits = layout.width.clamp(1, 128) as u32;
-                let max = if signed { max_for(bits - 1) } else { max_for(bits) };
+                let max = if signed {
+                    max_for(bits - 1)
+                } else {
+                    max_for(bits)
+                };
                 if v > max {
-                    let hint = if signed { format!("; write a negative value as `(-{v}) as {suffix}`") } else { String::new() };
+                    let hint = if signed {
+                        format!("; write a negative value as `(-{v}) as {suffix}`")
+                    } else {
+                        String::new()
+                    };
                     return self.number_error(sp, format!("`{text}`: {v} does not fit `{suffix}` ({}-bit {}, at most {max}){hint}", layout.width, if signed { "signed" } else { "unsigned" }));
                 }
                 if v > u64::MAX as u128 {
-                    return self.number_error(sp, format!("`{text}`: integer literals wider than 64 bits are not supported yet"));
+                    return self.number_error(
+                        sp,
+                        format!(
+                            "`{text}`: integer literals wider than 64 bits are not supported yet"
+                        ),
+                    );
                 }
                 self.arena.alloc_int(v as u64 as i64, sp)
             }
         };
         let sym = self.arena.interner.intern(suffix);
         let ty = self.arena.alloc_type_named(sym, &[], sp);
-        self.arena.alloc_node(NodeKind::BinaryExpr, BinaryOp::As as u16, sp, number.0, ty.0)
+        self.arena.alloc_node(
+            NodeKind::BinaryExpr,
+            BinaryOp::As as u16,
+            sp,
+            number.0,
+            ty.0,
+        )
     }
 
     fn number_error(&mut self, sp: ByteSpan, message: String) -> NodeId {
-        self.arena.diagnostics.push((sp, format!("SyntaxError: {message}")));
+        self.arena
+            .diagnostics
+            .push((sp, format!("SyntaxError: {message}")));
         self.arena.alloc_int(0, sp)
     }
 }
@@ -106,7 +132,8 @@ fn suffix_start(b: &[u8], kind: TokenKind) -> usize {
             }
             if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
                 let next = b.get(i + 1).copied().unwrap_or(0);
-                let signed = (next == b'+' || next == b'-') && b.get(i + 2).is_some_and(|c| c.is_ascii_digit());
+                let signed = (next == b'+' || next == b'-')
+                    && b.get(i + 2).is_some_and(|c| c.is_ascii_digit());
                 if next.is_ascii_digit() || signed {
                     i = run(i + if signed { 2 } else { 1 }, &digit);
                 }
@@ -126,7 +153,9 @@ fn literal_value(digits: &str, kind: TokenKind) -> Option<LitValue> {
         _ => 10,
     };
     if radix != 10 {
-        return u128::from_str_radix(&clean[2..], radix).ok().map(LitValue::Int);
+        return u128::from_str_radix(&clean[2..], radix)
+            .ok()
+            .map(LitValue::Int);
     }
     if clean.bytes().all(|c| c.is_ascii_digit()) {
         return clean.parse::<u128>().ok().map(LitValue::Int);

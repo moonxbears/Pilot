@@ -7,7 +7,7 @@
 // topological attribute scheduler.
 // ==============================================================================
 
-pub pkg Pilot.SelfHost.AttrWeaver;
+pub pkg selfhost;
 
 extern fn __engine(operation: string, ...args: i64) -> i64;
 

@@ -9,13 +9,18 @@
 //! position; `case Circle:` matches the variant whatever its values.
 
 use crate::instruction::Opcode;
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 
 impl BytecodeCompiler {
     /// Records the payload fields of variant `variant` of enum `owner`.
-    pub(crate) fn register_variant_payload(&mut self, arena: &AstArena, owner: &str, variant: NodeId) {
+    pub(crate) fn register_variant_payload(
+        &mut self,
+        arena: &AstArena,
+        owner: &str,
+        variant: NodeId,
+    ) {
         let vn = *arena.node(variant);
         let fields: Vec<String> = arena
             .children_slice(vn.rhs, vn.flags as u32)
@@ -47,13 +52,21 @@ impl BytecodeCompiler {
             }
         }
         let suffix = format!(".{variant}");
-        let mut found = self.variant_payloads.keys().filter(|k| k.ends_with(&suffix));
+        let mut found = self
+            .variant_payloads
+            .keys()
+            .filter(|k| k.ends_with(&suffix));
         let first = found.next()?;
         found.next().is_none().then(|| first.clone())
     }
 
     /// Builds the variant `full` from `args`.
-    pub(crate) fn compile_variant_ctor(&mut self, arena: &AstArena, full: &str, args: &[NodeId]) -> u8 {
+    pub(crate) fn compile_variant_ctor(
+        &mut self,
+        arena: &AstArena,
+        full: &str,
+        args: &[NodeId],
+    ) -> u8 {
         let fields = self.variant_payloads.get(full).cloned().unwrap_or_default();
         if fields.len() != args.len() {
             return self.error(

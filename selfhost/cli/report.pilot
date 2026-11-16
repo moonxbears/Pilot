@@ -4,12 +4,10 @@
 // ==============================================================================
 // Every diagnostic the seed reports for a program is rendered by the shared
 // renderer (`selfhost/diagnostics/renderer.pilot`) and written to stderr.
-pub lvl(0) pkg Pilot.SelfHost.Cli.Report;
+pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.File;
-use Pilot.Diagnostics.Model;
-use Pilot.Diagnostics.Renderer;
-use Pilot.SelfHost.Cli.Host;
+use selfhost.diagnostics.*;
 
 /// The diagnostic `d` in the renderer's model. A span that covers nothing
 /// (the loader points at where a declaration starts) is shown as one column.
@@ -19,7 +17,7 @@ pub fn report_diagnostic(d: HostDiag) -> Diagnostic {
 }
 
 /// Renders `diags` to stderr and returns how many are errors.
-pub fn report_diagnostics(diags: List<HostDiag>) -> i64 {
+pub fn report_diagnostics(ref diags: List<HostDiag>) -> i64 {
     var errors = 0;
     for d in diags {
         let src = if File.exists(d.file) { File.read_text(d.file) } else { "" };
@@ -32,7 +30,7 @@ pub fn report_diagnostics(diags: List<HostDiag>) -> i64 {
 /// The diagnostics of `diags` at least as severe as `severity` (errors are
 /// the most severe). `pilot run` shows errors and warnings, not the
 /// analyzer's info and hint notes.
-pub fn report_at_least(diags: List<HostDiag>, severity: u8) -> List<HostDiag> {
+pub fn report_at_least(ref diags: List<HostDiag>, severity: u8) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in diags {
         if d.severity <= severity { out.push(d); }
@@ -47,7 +45,7 @@ pub pure fn seed_limit_code() -> str => "SEED001";
 
 /// The diagnostics of `diags` that are not seed limits. A tool that never
 /// runs the program on the seed (`pilot ir`) is not stopped by them.
-pub fn without_seed_limits(diags: List<HostDiag>) -> List<HostDiag> {
+pub fn without_seed_limits(ref diags: List<HostDiag>) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in diags {
         if d.code != seed_limit_code() { out.push(d); }

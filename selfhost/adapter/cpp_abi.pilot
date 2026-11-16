@@ -3,11 +3,9 @@
 // Milestone 15.2: Native C++ Class, RAII, Vtable & Exception Boundary Adapter
 // C++ Class Layout Engine, Tail-Padding Reuse, Vtable Slots & Invisible-Ref ABI
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.CppAbi;
+pub lvl(0) pkg selfhost.adapter;
 
 use Pilot.Core.Reflect.TargetDescriptor;
-use Pilot.SelfHost.Adapter.CppMangle.CppType;
-use Pilot.SelfHost.Adapter.CppMangle.CppTypeKind;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -378,7 +376,7 @@ pub pure fn compute_cpp_class_layout(
 // ------------------------------------------------------------------------------
 
 pub pure fn resolve_cpp_method_overload(
-    methods: slice<CppMethodDecl>,
+    ref methods: slice<CppMethodDecl>,
     name: str,
     arg_types: slice<str>
 ) -> CppOverloadResult {

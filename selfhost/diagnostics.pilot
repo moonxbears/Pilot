@@ -5,7 +5,7 @@
 // (`crates/pilot-analysis/src/diagnostics.rs`).
 // ==============================================================================
 
-pub pkg Pilot.SelfHost.Diagnostics;
+pub pkg selfhost;
 
 extern fn __engine(operation: string, ...args: i64) -> i64;
 

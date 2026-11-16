@@ -8,7 +8,7 @@
 // there, and give a statement's text and line as a trace shows them. The
 // type checker (selfhost/check/probes.pilot) and the CLI's compile-time runs
 // (selfhost/cli/comptime_tool.pilot) both use them.
-pub lvl(0) pkg Pilot.SelfHost.Check.AttrText;
+pub lvl(0) pkg selfhost.check;
 
 fn is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
 

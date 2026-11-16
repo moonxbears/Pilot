@@ -12,8 +12,8 @@
 //! reaches. Strings still owned when the VM is dropped are kept for the life
 //! of the process, so a result the host reads after that stays valid.
 
-use crate::vm::PilVirtualMachine;
 use crate::value::PilotVal;
+use crate::vm::PilVirtualMachine;
 use std::collections::HashSet;
 
 /// The run-time strings of one VM, by the address of their bytes.

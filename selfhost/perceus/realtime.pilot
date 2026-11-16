@@ -8,6 +8,8 @@
 
 // Verifies that an allocation with `escape_state` (`0 = Stack`, `1 = Region`, `2 = Global`)
 // inside a `[HardRealtime]` or `noalloc` context does not allocate on the global heap (`PILOT104`).
+pub pkg selfhost.perceus;
+
 pub fn verify_noalloc_escape(escape_state: i64, in_realtime_or_noalloc: bool) -> str {
     if in_realtime_or_noalloc && escape_state == 2 {
         return "PILOT104";

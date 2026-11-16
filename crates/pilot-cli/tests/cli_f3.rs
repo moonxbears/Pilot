@@ -32,18 +32,33 @@ fn text(out: &Output) -> (String, String, i32) {
 
 #[test]
 fn check_reports_coded_diagnostics_without_running() {
-    let (stdout, stderr, code) = text(&pilot(&["check", "tests/conformance/errors/err_undefined_name.pilot"]));
+    let (stdout, stderr, code) = text(&pilot(&[
+        "check",
+        "tests/conformance/errors/err_undefined_name.pilot",
+    ]));
     assert_eq!(code, 1, "{stderr}");
     assert_eq!(stdout, "", "check must not run the program");
-    assert!(stderr.contains("error[DECL001]: undefined name `missing_value`"), "{stderr}");
-    assert!(stderr.contains("--> tests/conformance/errors/err_undefined_name.pilot:4:11"), "{stderr}");
-    assert!(stderr.contains("print(missing_value);"), "the source line is shown: {stderr}");
+    assert!(
+        stderr.contains("error[DECL001]: undefined name `missing_value`"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("--> tests/conformance/errors/err_undefined_name.pilot:4:11"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("print(missing_value);"),
+        "the source line is shown: {stderr}"
+    );
 }
 
 #[test]
 fn check_passes_a_valid_program_without_running_it() {
     // `stdin_lines.pilot` prints as soon as it runs; check prints only its summary.
-    let (stdout, stderr, code) = text(&pilot(&["check", "tests/conformance/runtime/stdin_lines.pilot"]));
+    let (stdout, stderr, code) = text(&pilot(&[
+        "check",
+        "tests/conformance/runtime/stdin_lines.pilot",
+    ]));
     assert_eq!(
         (code, stdout.as_str(), stderr.as_str()),
         (0, "check passed: 1 file(s), no errors\n", "")
@@ -65,9 +80,15 @@ fn check_reports_every_file() {
 
 #[test]
 fn check_and_run_reject_missing_files_and_usage() {
-    let (_, stderr, code) = text(&pilot(&["check", "tests/conformance/no_such_program.pilot"]));
+    let (_, stderr, code) = text(&pilot(&[
+        "check",
+        "tests/conformance/no_such_program.pilot",
+    ]));
     assert_eq!(code, 1);
-    assert!(stderr.contains("error[MOD001]: cannot read file"), "{stderr}");
+    assert!(
+        stderr.contains("error[MOD001]: cannot read file"),
+        "{stderr}"
+    );
     assert_eq!(text(&pilot(&["check"])).2, 2);
     assert_eq!(text(&pilot(&["run"])).2, 2);
 }
@@ -101,16 +122,52 @@ fn every_listed_command_works_or_says_it_is_not_implemented() {
     assert!(commands.len() >= 20, "schema lists {commands:?}");
     // Commands with a handler, each invoked so it has its job to do.
     let working: &[(&str, &[&str])] = &[
-        ("run", &["run", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot"]),
-        ("check", &["check", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot"]),
+        (
+            "run",
+            &[
+                "run",
+                "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot",
+            ],
+        ),
+        (
+            "check",
+            &[
+                "check",
+                "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot",
+            ],
+        ),
         ("test", &["test", "tests/pilot_test_fixtures/passing"]),
         ("gate", &["gate", "--only", "hygiene"]),
         ("bench", &["bench", "--filter", "no_such_test"]),
-        ("emit", &["emit", "python", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot"]),
-        ("ir", &["ir", "print", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot"]),
+        (
+            "emit",
+            &[
+                "emit",
+                "python",
+                "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot",
+            ],
+        ),
+        (
+            "ir",
+            &[
+                "ir",
+                "print",
+                "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot",
+            ],
+        ),
         ("completions", &["completions", "bash"]),
         // F6: the C it writes goes to standard output here.
-        ("build", &["build", "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot", "--target", "c", "-o", "/dev/stdout"]),
+        (
+            "build",
+            &[
+                "build",
+                "tests/pilot_test_fixtures/fixed_bug/still_fine.pilot",
+                "--target",
+                "c",
+                "-o",
+                "/dev/stdout",
+            ],
+        ),
     ];
     // Each command runs on its own thread; none depends on another. A failed
     // assertion fails the test once every command has finished.
@@ -123,7 +180,10 @@ fn every_listed_command_works_or_says_it_is_not_implemented() {
                 };
                 let (stdout, stderr, code) = text(&out);
                 if working.iter().any(|(n, _)| n == name) {
-                    assert_eq!(code, 0, "`pilot {name}` has a handler and must succeed\n{stdout}{stderr}");
+                    assert_eq!(
+                        code, 0,
+                        "`pilot {name}` has a handler and must succeed\n{stdout}{stderr}"
+                    );
                     assert!(!stdout.is_empty(), "`pilot {name}` printed nothing");
                 } else {
                     assert_ne!(code, 0, "`pilot {name}` has no handler and must fail");
@@ -139,13 +199,6 @@ fn every_listed_command_works_or_says_it_is_not_implemented() {
 }
 
 #[test]
-fn check_fix_stops_at_its_seam() {
-    let (_, stderr, code) = text(&pilot(&["check", "--fix", "tests/conformance/runtime/stdin_lines.pilot"]));
-    assert_ne!(code, 0);
-    assert!(stderr.contains("SEAM001: unconnected seam `cli.check_fix`"), "{stderr}");
-}
-
-#[test]
 fn version_and_help_print() {
     let (stdout, _, code) = text(&pilot(&["version"]));
     assert_eq!(code, 0);
@@ -155,7 +208,8 @@ fn version_and_help_print() {
     assert!(stdout.contains("Usage: pilot <command>"), "{stdout}");
 }
 
-const SUMMARY_CLEAN: &str = "RESULT: 1 passed, 0 failed, 0 known bugs reproduced, 0 known bugs fixed";
+const SUMMARY_CLEAN: &str =
+    "RESULT: 1 passed, 0 failed, 0 known bugs reproduced, 0 known bugs fixed";
 
 #[test]
 fn test_runner_passes_args_and_stdin() {
@@ -179,7 +233,10 @@ fn test_runner_reports_each_kind_of_failure() {
         format!("FAIL {dir}/no_expectation.pilot"),
         "RESULT: 0 passed, 4 failed, 0 known bugs reproduced, 0 known bugs fixed".to_string(),
     ] {
-        assert!(stdout.contains(&expected), "missing `{expected}` in:\n{stdout}");
+        assert!(
+            stdout.contains(&expected),
+            "missing `{expected}` in:\n{stdout}"
+        );
     }
 }
 
@@ -187,11 +244,19 @@ fn test_runner_reports_each_kind_of_failure() {
 fn test_runner_runs_marked_functions_only() {
     let (stdout, _, code) = text(&pilot(&["test", "tests/pilot_test_fixtures/units.pilot"]));
     assert_eq!(code, 1, "{stdout}");
-    assert!(stdout.contains("FAIL tests/pilot_test_fixtures/units.pilot::breaks"), "{stdout}");
+    assert!(
+        stdout.contains("FAIL tests/pilot_test_fixtures/units.pilot::breaks"),
+        "{stdout}"
+    );
     assert!(!stdout.contains("helper_is_not_a_test"), "{stdout}");
     assert!(stdout.contains("RESULT: 1 passed, 1 failed,"), "{stdout}");
 
-    let (stdout, _, code) = text(&pilot(&["test", "tests/pilot_test_fixtures/units.pilot", "--filter", "adds"]));
+    let (stdout, _, code) = text(&pilot(&[
+        "test",
+        "tests/pilot_test_fixtures/units.pilot",
+        "--filter",
+        "adds",
+    ]));
     assert_eq!(code, 0, "{stdout}");
     assert!(stdout.contains(SUMMARY_CLEAN), "{stdout}");
 }
@@ -200,11 +265,17 @@ fn test_runner_runs_marked_functions_only() {
 fn test_runner_flags_a_fixed_known_bug() {
     let (stdout, _, code) = text(&pilot(&["test", "tests/pilot_test_fixtures/fixed_bug"]));
     assert_eq!(code, 1, "{stdout}");
-    assert!(stdout.contains("FIXED tests/pilot_test_fixtures/fixed_bug/known_bugs/now_works.pilot"), "{stdout}");
+    assert!(
+        stdout.contains("FIXED tests/pilot_test_fixtures/fixed_bug/known_bugs/now_works.pilot"),
+        "{stdout}"
+    );
     assert!(stdout.contains("1 known bugs fixed"), "{stdout}");
 }
 
 #[test]
 fn test_runner_rejects_missing_paths() {
-    assert_eq!(text(&pilot(&["test", "tests/pilot_test_fixtures/nowhere.pilot"])).2, 2);
+    assert_eq!(
+        text(&pilot(&["test", "tests/pilot_test_fixtures/nowhere.pilot"])).2,
+        2
+    );
 }

@@ -1,0 +1,4 @@
+// The other file of package `Conformance.Split` (modules/package_peer_files.pilot).
+pkg Conformance.Split;
+
+pub fn half(n: i64) -> i64 => n / 2;

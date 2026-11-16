@@ -3,9 +3,8 @@
 // Milestone 6.1: First-Class Typed SSA Mid-Level IR Textual Printer & Parser
 // Canonical Deterministic Serialization & Round-Trip Parsing
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Ir.Printer;
+pub lvl(0) pkg selfhost.ir;
 
-use Pilot.SelfHost.Ir.Model::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

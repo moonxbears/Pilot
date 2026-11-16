@@ -3,12 +3,10 @@
 // Milestone 5.2: Incremental Compiler Database Cache Persistence & URI Canonicalization
 // Atomic .pilc-cache/pilotdb.v1 I/O & Cross-Platform Virtual Path Canonicalization
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Db.CacheIo;
+pub lvl(0) pkg selfhost.db;
 
 use std.text;
 use Pilot.Core.File::*;
-use Pilot.SelfHost.Db.Revision::*;
-use Pilot.SelfHost.Db.Engine::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

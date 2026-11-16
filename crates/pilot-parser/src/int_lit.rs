@@ -23,7 +23,11 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_int_lit(&mut self, sp: ByteSpan, radix: u32) -> NodeId {
         let text = self.text().to_string();
         let clean = text.replace('_', "");
-        let digits = if radix == 10 { clean.as_str() } else { clean.get(2..).unwrap_or("") };
+        let digits = if radix == 10 {
+            clean.as_str()
+        } else {
+            clean.get(2..).unwrap_or("")
+        };
         let value = i64::from_str_radix(digits, radix)
             .or_else(|_| u64::from_str_radix(digits, radix).map(|u| u as i64));
         self.advance();

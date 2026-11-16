@@ -28,7 +28,12 @@ fn pilot_stdout(args: &[&str]) -> String {
         .output()
         .expect("spawn pilot binary");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert_eq!(out.status.code(), Some(0), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     stdout
 }
 
@@ -70,7 +75,11 @@ fn constants_with_scalar_values_are_not_called() {
         "width",
         "title",
     ] {
-        assert_eq!(calls_of(&ir, function_index(&ir, name)), 0, "`{name}` is still called");
+        assert_eq!(
+            calls_of(&ir, function_index(&ir, name)),
+            0,
+            "`{name}` is still called"
+        );
     }
 }
 
@@ -78,7 +87,11 @@ fn constants_with_scalar_values_are_not_called() {
 fn constant_lists_and_maps_are_built_once_at_the_start() {
     let ir = pilot_stdout(&["ir", "opt", "tests/conformance/runtime/const_values.pilot"]);
     for name in ["PRIMES", "GRID", "INDEX", "once@table"] {
-        assert!(global_line(&ir, name).ends_with(" ready"), "{}", global_line(&ir, name));
+        assert!(
+            global_line(&ir, name).ends_with(" ready"),
+            "{}",
+            global_line(&ir, name)
+        );
     }
     // Each initializer, and `table`, is called once: where `<start>` builds it.
     for name in ["const@PRIMES", "const@GRID", "const@INDEX", "table"] {
@@ -90,7 +103,11 @@ fn constant_lists_and_maps_are_built_once_at_the_start() {
 
 #[test]
 fn functions_with_effects_or_no_end_are_still_called() {
-    let ir = pilot_stdout(&["ir", "opt", "tests/conformance/contracts/const_effects.pilot"]);
+    let ir = pilot_stdout(&[
+        "ir",
+        "opt",
+        "tests/conformance/contracts/const_effects.pilot",
+    ]);
     assert_eq!(calls_of(&ir, function_index(&ir, "noisy")), 2);
     assert_eq!(calls_of(&ir, function_index(&ir, "forever")), 1);
     assert_eq!(calls_of(&ir, function_index(&ir, "steady")), 0);
@@ -99,7 +116,9 @@ fn functions_with_effects_or_no_end_are_still_called() {
 /// The body of the emitted C function `name`.
 fn c_function<'a>(c: &'a str, name: &str) -> &'a str {
     let open = format!(" {name}(void) {{");
-    let at = c.find(&open).unwrap_or_else(|| panic!("no C function `{name}` in\n{c}"));
+    let at = c
+        .find(&open)
+        .unwrap_or_else(|| panic!("no C function `{name}` in\n{c}"));
     let rest = &c[at..];
     &rest[..rest.find("\n}").unwrap_or(rest.len())]
 }
@@ -120,11 +139,18 @@ fn constant_lists_of_numbers_are_static_data_in_c() {
     }
     // GRID's outer list holds its two rows, and the globals PRIMES, GRID and
     // table's result each hold one list.
-    assert_eq!(c.matches("{ .tag = PILOT_V_LIST, .as.l = &pilot_k").count(), 2 + 3, "{c}");
+    assert_eq!(
+        c.matches("{ .tag = PILOT_V_LIST, .as.l = &pilot_k").count(),
+        2 + 3,
+        "{c}"
+    );
     // The start no longer builds them; INDEX, a map, is still built there.
     let start = c_function(&c, "pilot_start");
     for name in ["const_PRIMES()", "const_GRID()", "table()"] {
-        assert!(!start.contains(name), "the start still calls {name}:\n{start}");
+        assert!(
+            !start.contains(name),
+            "the start still calls {name}:\n{start}"
+        );
     }
     assert!(start.contains("const_INDEX()"), "{start}");
 }

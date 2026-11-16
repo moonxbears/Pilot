@@ -9,23 +9,15 @@
 // may not have (selfhost/check/purity.pilot) reported: DBC002 in the clause,
 // DBC003 inside `old(..)`, whose operand is evaluated when the function is
 // entered.
-pub lvl(0) pkg Pilot.SelfHost.Check.ContractClauses;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.check.own.*;
-use selfhost.check.consts.*;
-use selfhost.check.effects.*;
-use selfhost.check.purity.*;
 
 /// `UnaryExpr.flags` of `old(e)` (UNARY_OP_OLD in crates/pilot-ast).
 fn old_flag() -> i64 => 10;
 
 /// The contract clauses of function `f`: the leading statements of its body
 /// that carry contract flags.
-pub fn contract_clauses(s: Snap, f: i64) -> List<i64> {
+pub fn contract_clauses(ref s: Snap, f: i64) -> List<i64> {
     var out: List<i64> = [];
     let body = fn_body(s, f);
     if body < 0 || kind(s, body) != nk_block() { return out; }
@@ -36,7 +28,7 @@ pub fn contract_clauses(s: Snap, f: i64) -> List<i64> {
     return out;
 }
 
-fn report_clause(ps: PurityScan, sink: DiagSink, name: str, n: i64, in_old: bool) {
+fn report_clause(ref ps: PurityScan, var ref sink: DiagSink, name: str, n: i64, in_old: bool) {
     let s = ps.e.inf.p.s;
     let why = impure_effect(ps, n);
     if why != "" {
@@ -51,7 +43,7 @@ fn report_clause(ps: PurityScan, sink: DiagSink, name: str, n: i64, in_old: bool
 }
 
 /// Reports DBC002 and DBC003 in the user's files.
-pub fn check_contract_clauses(inf: Infer, sink: DiagSink) {
+pub fn check_contract_clauses(var ref inf: Infer, var ref sink: DiagSink) {
     let s = inf.p.s;
     let f = flow_new(inf, sink);
     let ps = PurityScan { e: effects_new(f), cs: const_scan(f), methods: Map<str, str>() };

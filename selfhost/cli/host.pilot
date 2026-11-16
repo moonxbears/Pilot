@@ -4,9 +4,9 @@
 // ==============================================================================
 // The CLI is Pilot; compiling and running a program is still done by the seed.
 // These wrappers are the only place the CLI reaches it.
-pub lvl(0) pkg Pilot.SelfHost.Cli.Host;
+pub lvl(0) pkg selfhost.cli;
 
-use Pilot.Diagnostics.Model;
+use selfhost.diagnostics.*;
 
 /// A diagnostic the seed reported for a program: catalog code, message, and
 /// the byte span in `file` it points at.
@@ -33,7 +33,7 @@ pub struct DeclaredFn : IValue {
     pub attrs: List<str>;
 }
 
-fn host_diags(raw: List<any>) -> List<HostDiag> {
+fn host_diags(ref raw: List<any>) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in raw {
         out.push(HostDiag { code: d[0], message: d[1], file: d[2], start: d[3], end: d[4], severity: d[5] });
@@ -59,7 +59,7 @@ pub struct CheckedProgram {
 /// plan or none, anything else]` (`check_with_steps` in
 /// selfhost/cli/comptime_tool.pilot). A run plan is kept for the `host_run`
 /// that follows.
-pub fn host_typecheck(path: str, checker: List<str>, decls: List<str>, entry: str) -> CheckedProgram {
+pub fn host_typecheck(path: str, ref checker: List<str>, ref decls: List<str>, entry: str) -> CheckedProgram {
     let raw: List<any> = __engine("cli_typecheck", path, checker, decls, entry);
     return CheckedProgram { diags: host_diags(raw[0]), rest: raw[1] };
 }
@@ -67,14 +67,14 @@ pub fn host_typecheck(path: str, checker: List<str>, decls: List<str>, entry: st
 /// Runs the tool made of `files`, calling `entry`, over the program at
 /// `path` linked with `decls`; the tool reads the program the way the type
 /// checker does. Its result is the tool's exit code.
-pub fn host_program_tool(path: str, files: List<str>, decls: List<str>, entry: str) -> i64 =>
+pub fn host_program_tool(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> i64 =>
     __engine("cli_program_tool", path, files, decls, entry);
 
 /// `host_program_tool` for a tool that checks the program itself
 /// (`checked_program` in selfhost/check/main.pilot): the host reports the
 /// analyzer's and the checker's diagnostics through `report_pending_diags`
 /// before the tool goes on.
-pub fn host_checked_tool(path: str, files: List<str>, decls: List<str>, entry: str) -> i64 =>
+pub fn host_checked_tool(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> i64 =>
     __engine("cli_checked_tool", path, files, decls, entry);
 
 /// The diagnostics a checking tool is waiting on (`host_checked_tool`): the
@@ -87,12 +87,12 @@ pub fn host_pending_diags() -> List<List<HostDiag>> {
 /// Runs the tool made of `files`, calling `entry`, over the program at
 /// `path` linked with `decls`, as `host_program_tool` does; gives the value
 /// `entry` returns, or `none` when the program does not link.
-pub fn host_program_eval(path: str, files: List<str>, decls: List<str>, entry: str) -> any =>
+pub fn host_program_eval(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> any =>
     __engine("cli_program_eval", path, files, decls, entry);
 
 /// Runs the tool made of `files`, calling `entry`, on the text of the file
 /// at `path`. Its result is the tool's exit code.
-pub fn host_text_tool(path: str, files: List<str>, entry: str) -> i64 =>
+pub fn host_text_tool(path: str, ref files: List<str>, entry: str) -> i64 =>
     __engine("cli_text_tool", path, files, entry);
 
 /// The declarations every program is checked against, linked after the
@@ -161,7 +161,7 @@ pub fn cli_checker_files() -> List<str> => [
 /// `tail` is linked after the program as its entry and runs instead of `main`.
 /// Owned values are dropped where the type checker's drop plan
 /// (`selfhost/check/drops.pilot`) says.
-pub fn host_run(path: str, args: List<str>, tail: str) -> RunOutcome => host_run_with(path, args, tail, []);
+pub fn host_run(path: str, ref args: List<str>, tail: str) -> RunOutcome => host_run_with(path, args, tail, []);
 
 /// The core files every run links after the program, so the seed compiles
 /// the owner methods they declare (PROP-002b: `Map`'s methods are its owner
@@ -172,7 +172,7 @@ pub fn cli_run_links() -> List<str> => [
 
 /// `host_run`, with the files `links` names (and those they import) linked
 /// before `tail`, so the tail can use what they declare.
-pub fn host_run_with(path: str, args: List<str>, tail: str, links: List<str>) -> RunOutcome {
+pub fn host_run_with(path: str, ref args: List<str>, tail: str, ref links: List<str>) -> RunOutcome {
     var all = cli_run_links();
     for l in links {
         all.push(l);
@@ -193,7 +193,7 @@ pub fn host_functions(path: str) -> List<DeclaredFn>? {
 }
 
 /// Runs the self-hosted tool made of `files`, calling `entry`; its result as text.
-pub fn host_tool(files: List<str>, entry: str) -> str => __engine("cli_tool", files, entry);
+pub fn host_tool(ref files: List<str>, entry: str) -> str => __engine("cli_tool", files, entry);
 
 /// Like `host_tool`, with the tool's AST queries answering about `input`.
-pub fn host_tool_on(files: List<str>, entry: str, input: str) -> str => __engine("cli_tool_on", files, entry, input);
+pub fn host_tool_on(ref files: List<str>, entry: str, input: str) -> str => __engine("cli_tool_on", files, entry, input);

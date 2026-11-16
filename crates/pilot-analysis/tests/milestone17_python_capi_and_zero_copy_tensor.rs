@@ -3,15 +3,15 @@
 //! In-Process Python C-API Adapter & Zero-Copy Tensor Views (`use py`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 17,
@@ -96,12 +96,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m17(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -217,7 +221,10 @@ fn test_m17_1_py_stub_parser_and_inspect_signatures() {
         "stdlib/std/polyglot/py_capi.pilot",
     ];
     let res = eval_m17(deps, script);
-    assert_eq!(res, "42", "Python stub parser and inspect signatures must pass");
+    assert_eq!(
+        res, "42",
+        "Python stub parser and inspect signatures must pass"
+    );
 
     guard.finish();
 }
@@ -327,7 +334,10 @@ fn test_m17_3_vectorcall_fast_path_and_gil_guards() {
         ("py_obj_dec_ref(var obj)", "py.dec_ref"),
         ("py_buffer_release(var lease)", "py.buffer_release"),
         ("py_import_module(\"math\")", "py.import_module"),
-        ("py_vectorcall_fast(ref obj, args.slice(0, 1), kw.slice(0, 0))", "py.vectorcall"),
+        (
+            "py_vectorcall_fast(ref obj, args.slice(0, 1), kw.slice(0, 0))",
+            "py.vectorcall",
+        ),
         ("py_err_fetch()", "py.err_fetch"),
         ("py_str_from_obj(ref obj)", "py.str_from_obj"),
         ("py_int_from_obj(ref obj)", "py.int_from_obj"),

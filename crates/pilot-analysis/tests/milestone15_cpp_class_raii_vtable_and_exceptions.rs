@@ -3,19 +3,20 @@
 //! Native C++ Class, RAII, Vtable & Exception Boundary Adapter (`use cpp`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 15,
-    test_file_rel: "crates/pilot-analysis/tests/milestone15_cpp_class_raii_vtable_and_exceptions.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone15_cpp_class_raii_vtable_and_exceptions.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
@@ -92,11 +93,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "cpp_exception_type",
                 "cpp_call_catching",
             ],
-            required_code_markers: &[
-                "CppException",
-                "CppStringView",
-                "CppSpan",
-            ],
+            required_code_markers: &["CppException", "CppStringView", "CppSpan"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -105,12 +102,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m15(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -180,11 +181,12 @@ fn test_m15_1_itanium_and_msvc_name_mangling_and_demangling() {
         }
     "#;
 
-    let deps = &[
-        "selfhost/adapter/cpp_mangle.pilot",
-    ];
+    let deps = &["selfhost/adapter/cpp_mangle.pilot"];
     let res = eval_m15(deps, script);
-    assert_eq!(res, "42", "Itanium & MSVC x64 manglers and demanglers must correctly encode/decode names");
+    assert_eq!(
+        res, "42",
+        "Itanium & MSVC x64 manglers and demanglers must correctly encode/decode names"
+    );
 
     guard.finish();
 }
@@ -272,7 +274,10 @@ fn test_m15_2_cpp_class_layout_vtable_and_invisible_ref_abi() {
         "selfhost/adapter/cpp_abi.pilot",
     ];
     let res = eval_m15(deps, script);
-    assert_eq!(res, "42", "C++ class layout, vtable slot assignment, and invisible-ref passing must be exact");
+    assert_eq!(
+        res, "42",
+        "C++ class layout, vtable slot assignment, and invisible-ref passing must be exact"
+    );
 
     guard.finish();
 }
@@ -421,13 +426,22 @@ fn test_m15_4_cpp_diagnostics_and_safe_exception_boundary() {
         "stdlib/std/polyglot/cpp.pilot",
     ];
     let res = eval_m15(deps, script);
-    assert_eq!(res, "42", "C++ diagnostic checks and exception values must function correctly");
+    assert_eq!(
+        res, "42",
+        "C++ diagnostic checks and exception values must function correctly"
+    );
 
     // Calling into C++ and viewing Pilot strings as std::string_view need
     // native calls and raw memory views.
     let cases = [
-        ("let r = cpp_call_catching(4096, [1, 2]);", "cpp.catch_boundary"),
-        ("let sv = CppStringView::from_str(\"hello cpp\");", "cpp.string_view_from_str"),
+        (
+            "let r = cpp_call_catching(4096, [1, 2]);",
+            "cpp.catch_boundary",
+        ),
+        (
+            "let sv = CppStringView::from_str(\"hello cpp\");",
+            "cpp.string_view_from_str",
+        ),
     ];
     for (body, seam_id) in cases {
         let script = format!("pub fn main() -> i64 {{ {body} return 42; }}");

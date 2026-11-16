@@ -2,7 +2,7 @@
 // FILE: selfhost/cli/deps_cmd.pilot
 // Milestone 60.5: Dependency Visualizer & Tree Generator (Pure Pilot)
 // =========================================================================
-pub pkg Pilot.SelfHost.Cli.DepsCmd;
+pub pkg selfhost.cli;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

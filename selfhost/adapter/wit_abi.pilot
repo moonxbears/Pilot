@@ -1,12 +1,11 @@
 // ==============================================================================
 // selfhost/adapter/wit_abi.pilot
 // Ring 3 / Self-Host Compiler: WebAssembly Canonical ABI & Resource Lifter/Lowerer
-// Package: Pilot.SelfHost.Adapter.WitAbi (Milestone 19)
+// Package: selfhost.adapter (Milestone 19)
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Adapter.WitAbi;
+pub lvl(0) pkg selfhost.adapter;
 
-use Pilot.SelfHost.Adapter.WitParser;
 
 // ------------------------------------------------------------------------------
 // 1. Canonical ABI Constants & Limits
@@ -167,7 +166,7 @@ pub fn cabi_flatten_type(ty: WitTypeRef) -> List<str> {
     return out;
 }
 
-pub fn cabi_flatten_params(params: List<WitParam>) -> List<str> {
+pub fn cabi_flatten_params(ref params: List<WitParam>) -> List<str> {
     var flat: List<str> = [];
     var i = 0;
     while i < params.len() {
@@ -204,7 +203,7 @@ pub struct CabiLoweredSignature : IValue {
     pub orig_result_count: i64,
 }
 
-pub fn cabi_lower_signature(fn_sig: WitFunction) -> CabiLoweredSignature {
+pub fn cabi_lower_signature(ref fn_sig: WitFunction) -> CabiLoweredSignature {
     let flat_p = cabi_flatten_params(fn_sig.params);
     let flat_r = cabi_flatten_params(fn_sig.results);
 
@@ -369,7 +368,7 @@ pub fn wasm_resource_drop(var ref table: WasmResourceTable, id: i64) -> WasmResu
     return wasm_err("WASM002: Resource handle " + id.to_str() + " not found in handle table");
 }
 
-pub fn wasm_resource_active_borrow_count(table: WasmResourceTable) -> i64 {
+pub fn wasm_resource_active_borrow_count(ref table: WasmResourceTable) -> i64 {
     var total: i64 = 0;
     var i = 0;
     while i < table.entries.len() {
@@ -382,7 +381,7 @@ pub fn wasm_resource_active_borrow_count(table: WasmResourceTable) -> i64 {
     return total;
 }
 
-pub fn wasm_resource_live_count(table: WasmResourceTable) -> i64 {
+pub fn wasm_resource_live_count(ref table: WasmResourceTable) -> i64 {
     var total: i64 = 0;
     var i = 0;
     while i < table.entries.len() {

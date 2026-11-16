@@ -11,22 +11,13 @@
 // stops at the seam). A named function used as a value is the record of its
 // index alone. `call_indirect f, args..` calls the function the record names
 // with `args` followed by the record's captured values.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerClosure;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_members.*;
-use selfhost.ir.lower_global.*;
+use selfhost.check.*;
 
 /// The bindings of the function being lowered that the subtree at `n`
 /// reads, added to `out` once each, in order of first use.
-fn collect_captures(lw: Lowerer, n: i64, out: List<i64>) {
+fn collect_captures(ref lw: Lowerer, n: i64, var ref out: List<i64>) {
     let s = lw.inf.p.s;
     if n < 0 { return; }
     if kind(s, n) == nk_ident() {
@@ -41,7 +32,7 @@ fn collect_captures(lw: Lowerer, n: i64, out: List<i64>) {
 }
 
 /// The current value of binding `b` of the function being lowered.
-fn binding_value(lw: Lowerer, b: i64, n: i64) -> u32 {
+fn binding_value(var ref lw: Lowerer, b: i64, n: i64) -> u32 {
     if lw.values.has(key(b)) { return lw.values.get(key(b)); }
     let phy = layout_of(lw.ls, binding_type(lw.inf, b));
     return emit(lw, op_load(), 0, phy, [lw.slots.get(key(b))], n);
@@ -49,7 +40,7 @@ fn binding_value(lw: Lowerer, b: i64, n: i64) -> u32 {
 
 /// The record of function `fi` with `captured` values.
 [StandIn("ir.closure_record", "a function value is a code pointer and an environment pointer held in registers (fn<A, R> has a raw_ptr layout)", "the IR builds a record of the function's index and the captured values, which call_indirect reads; coerce never converts it", "F6")]
-fn function_record(lw: Lowerer, fi: i64, captured: List<u32>, n: i64) -> u32 {
+fn function_record(var ref lw: Lowerer, fi: i64, ref captured: List<u32>, n: i64) -> u32 {
     let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
     var parts: List<u32> = [emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, fi)], n)];
     for v in captured { parts.push(v); }
@@ -57,7 +48,7 @@ fn function_record(lw: Lowerer, fi: i64, captured: List<u32>, n: i64) -> u32 {
 }
 
 /// `(x) => body`: lifts the body and builds the function value.
-pub fn lower_lambda(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_lambda(var ref lw: Lowerer, n: i64) -> u32 {
     var caps: List<i64> = [];
     collect_captures(lw, rhs(lw.inf.p.s, n), caps);
     lw.lambda_captures.set(key(n), caps);
@@ -73,7 +64,7 @@ pub fn lower_lambda(lw: Lowerer, n: i64) -> u32 {
 
 /// Sets up the parameters of lifted lambda `decl` in function `f`: its own,
 /// then its captures, then the receiver it carries.
-pub fn lambda_params(lw: Lowerer, decl: i64, f: IrFunction) {
+pub fn lambda_params(var ref lw: Lowerer, decl: i64, var ref f: IrFunction) {
     let s = lw.inf.p.s;
     let ch = children(s, decl);
     var i = 0;
@@ -94,14 +85,14 @@ pub fn lambda_params(lw: Lowerer, decl: i64, f: IrFunction) {
 }
 
 /// A named function used as a value; `none` when `n` names none.
-pub fn lower_function_value(lw: Lowerer, n: i64) -> u32? {
+pub fn lower_function_value(var ref lw: Lowerer, n: i64) -> u32? {
     let decl = resolve_fn(lw, n);
     if decl < 0 { return none; }
     return function_record(lw, function_index(lw, decl, ty_unknown()), [], n);
 }
 
 /// Calls function value `fv` with `pre` then the values of `arg_nodes`.
-pub fn call_value(lw: Lowerer, fv: u32, pre: List<u32>, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
+pub fn call_value(var ref lw: Lowerer, fv: u32, ref pre: List<u32>, ref arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32 {
     let s = lw.inf.p.s;
     var args: List<u32> = [fv];
     for v in pre { args.push(v); }
@@ -114,14 +105,14 @@ pub fn call_value(lw: Lowerer, fv: u32, pre: List<u32>, arg_nodes: List<i64>, ph
 
 /// Whether callee `c` is a value to call through rather than a function or
 /// engine operation named by the call.
-pub fn is_value_callee(lw: Lowerer, c: i64) -> bool {
+pub fn is_value_callee(ref lw: Lowerer, c: i64) -> bool {
     let k = kind(lw.inf.p.s, c);
     if k == nk_ident() { return binding_index(lw, c) >= 0 || find_global(lw, c) >= 0; }
     return k != nk_member();
 }
 
 /// Whether member `name` of type `t` is a stored field holding a function.
-pub fn is_function_field(lw: Lowerer, t: i64, name: str) -> bool {
+pub fn is_function_field(ref lw: Lowerer, t: i64, name: str) -> bool {
     let p = lw.inf.p;
     guard some m = prog_member(p, t, name) else { return false; }
     let k = kind(p.s, m.decl);

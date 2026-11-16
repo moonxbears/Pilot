@@ -6,9 +6,9 @@
 //! cascade's value is then `none`.
 
 use crate::instruction::Opcode;
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 
 impl BytecodeCompiler {
     pub(crate) fn compile_cascade(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
@@ -19,7 +19,9 @@ impl BytecodeCompiler {
         self.emit(Opcode::Move, dst, r, 0);
         self.release_to(mark);
         let skip = (node.flags != 0).then(|| self.emit_branch(Opcode::JumpIfNull, dst, 0));
-        let owner = self.static_type(arena, NodeId(node.lhs)).unwrap_or_default();
+        let owner = self
+            .static_type(arena, NodeId(node.lhs))
+            .unwrap_or_default();
         self.compile_cascade_step(arena, NodeId(node.rhs), dst, &owner);
         self.release_to(mark);
         if let Some(j) = skip {
@@ -30,7 +32,10 @@ impl BytecodeCompiler {
 
     fn compile_cascade_step(&mut self, arena: &AstArena, step: NodeId, r_recv: u8, owner: &str) {
         if step.is_none() {
-            self.error(crate::codes::SYNTAX, "a cascade `..` needs a step".to_string());
+            self.error(
+                crate::codes::SYNTAX,
+                "a cascade `..` needs a step".to_string(),
+            );
             return;
         }
         self.cur_span = arena.span(step);

@@ -31,13 +31,11 @@
 //
 // A case that does not link (its loader reports a problem) is always run.
 // `--changed` runs from the toolchain root, the directory holding `stdlib/`.
-pub lvl(0) pkg Pilot.SelfHost.Cli.TestChanged;
+pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.File;
 use std.proc;
 use std.text;
-use Pilot.SelfHost.Cli.Host;
-use Pilot.SelfHost.Cli.TestCmd;
 
 /// Which engine the cases run on.
 pub enum TestEngine : u8 {
@@ -197,7 +195,7 @@ fn link_tool_files() -> List<str> => [
 
 /// Asks the loader what each of `programs` links, resolving packages from
 /// the working directory.
-fn link_table(programs: List<str>) -> LinkTable {
+fn link_table(ref programs: List<str>) -> LinkTable {
     let table = LinkTable { programs: [], links: [] };
     if programs.len() == 0 { return table; }
     let entries = text.join_text(programs, "|");
@@ -233,7 +231,7 @@ fn earlier_rev(since: str) -> str {
 
 /// The package each of `files` declares, as the loader reads it ("" for
 /// none, or for a file that is not there).
-fn packages_of(files: List<str>) -> List<str> {
+fn packages_of(ref files: List<str>) -> List<str> {
     var out: List<str> = [];
     if files.len() == 0 { return out; }
     let entries = text.join_text(files, "|");
@@ -252,7 +250,7 @@ fn packages_of(files: List<str>) -> List<str> {
 
 /// The files among `changed` (`.pilot` files) that declared a package at
 /// `rev` and do not declare that package now.
-fn repackaged(changed: List<str>, rev: str) -> List<str> {
+fn repackaged(ref changed: List<str>, rev: str) -> List<str> {
     var sources: List<str> = [];
     var earlier: List<str> = [];
     for f in changed {
@@ -293,7 +291,7 @@ pub struct ChangeSelection : IObject {
 /// The cases among `programs` that `changed` reaches when they run on
 /// `engine` (emitting `mode_lang`), where `tool_sources` are the sources of
 /// the tools that mode runs.
-pub fn select_cases(changed: List<str>, programs: List<str>, engine: TestEngine, mode_lang: str, tool_sources: List<str>, moved: List<str>) -> ChangeSelection {
+pub fn select_cases(ref changed: List<str>, ref programs: List<str>, engine: TestEngine, mode_lang: str, ref tool_sources: List<str>, ref moved: List<str>) -> ChangeSelection {
     let sel = ChangeSelection { everything: false, why: "", picked: [] };
     // The CLI's own sources, as the loader resolves them, when the CLI is in
     // this tree.
@@ -397,7 +395,7 @@ fn cli_entry() -> str => "selfhost/cli/commands.pilot";
 
 /// Whether `path` is one of `sources`: a file named there, or a file under a
 /// directory named there.
-fn is_source_of(path: str, sources: List<str>) -> bool {
+fn is_source_of(path: str, ref sources: List<str>) -> bool {
     for s in sources {
         if path == s { return true; }
         if !s.ends_with(".pilot") && path.starts_with(s + "/") { return true; }
@@ -406,7 +404,7 @@ fn is_source_of(path: str, sources: List<str>) -> bool {
 }
 
 /// The position of `x` in `xs`, or -1.
-fn index_of(xs: List<str>, x: str) -> i64 {
+fn index_of(ref xs: List<str>, x: str) -> i64 {
     var i = 0;
     while i < xs.len() {
         if xs[i] == x { return i; }
@@ -417,7 +415,7 @@ fn index_of(xs: List<str>, x: str) -> i64 {
 
 /// The cases (programs with a `.stdout`) and unit-test files of `roots`, and
 /// on the seed the known-bug programs of each directory root.
-pub fn candidate_programs(roots: List<str>, engine: TestEngine) -> List<str> {
+pub fn candidate_programs(ref roots: List<str>, engine: TestEngine) -> List<str> {
     var out: List<str> = [];
     for root in roots {
         if root.ends_with(".pilot") {
@@ -442,7 +440,7 @@ pub struct ChangedPlan : IObject {
 
 /// Chooses what `pilot test --changed` runs: the roots themselves when a
 /// change reaches every case, the cases it reaches otherwise. Prints why.
-pub fn plan_changed(since: str, roots: List<str>, engine: TestEngine, mode_lang: str, tool_sources: List<str>) -> ChangedPlan {
+pub fn plan_changed(since: str, ref roots: List<str>, engine: TestEngine, mode_lang: str, ref tool_sources: List<str>) -> ChangedPlan {
     let given = if roots.len() == 0 { [test_default_dir()] } else { roots };
     if !File.exists("stdlib/core") {
         eprint("error: `pilot test --changed` runs from the toolchain root (the directory holding `stdlib/`)");

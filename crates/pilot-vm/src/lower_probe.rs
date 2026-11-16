@@ -20,9 +20,9 @@
 //! probe is for; the function to call and its arguments come from the plan.
 
 use crate::lower_drop::{Deferred, NodeKey};
+use crate::value::PilotVal;
 use crate::{BytecodeCompiler, Opcode};
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -129,7 +129,8 @@ impl BytecodeCompiler {
                 }
                 ProbeAt::After => {}
             }
-            captured.push((p.capture && p.at == ProbeAt::After).then(|| self.target_text(arena, id)));
+            captured
+                .push((p.capture && p.at == ProbeAt::After).then(|| self.target_text(arena, id)));
         }
         captured
     }
@@ -152,7 +153,13 @@ impl BytecodeCompiler {
     /// The call of probe `p` at node `id` (`NodeId::NONE`-like for a
     /// deferred probe, which reads no target); `captured` is the register
     /// `probes_before` read the target's text into.
-    pub(crate) fn emit_probe_call(&mut self, arena: &AstArena, id: NodeId, p: &Probe, captured: Option<u8>) {
+    pub(crate) fn emit_probe_call(
+        &mut self,
+        arena: &AstArena,
+        id: NodeId,
+        p: &Probe,
+        captured: Option<u8>,
+    ) {
         let mut regs = Vec::with_capacity(p.args.len());
         for a in &p.args {
             let r = match a {

@@ -3,10 +3,9 @@
 // Milestone 16.2: Native Rust Crate Adapter - Bridge Synthesizer & Lifetime Verifier
 // Direct 0 ns FFI bindings, catch_unwind panic safety, DynTraitFatPtr, RST003
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.RustBridge;
+pub lvl(0) pkg selfhost.adapter;
 
-use Pilot.Diagnostics.Model;
-use Pilot.SelfHost.Adapter.RustSig;
+use selfhost.diagnostics.*;
 use std.text;
 
 pub pure fn nameof(sym: str) -> str => sym;

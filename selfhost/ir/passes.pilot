@@ -9,14 +9,8 @@
 // after every pass that changed something, so a pass that breaks the IR is
 // named at once. A function still changing after `max_pass_rounds()` rounds
 // stops the run with IR007. Adding a pass is one `pass_register` call.
-pub lvl(0) pkg Pilot.SelfHost.Ir.Passes;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.ir.model.*;
-use selfhost.ir.verify.*;
-use selfhost.ir.pass_fold.*;
-use selfhost.ir.pass_dce.*;
-use selfhost.ir.pass_const_eval.*;
-use selfhost.ir.pass_inline.*;
 
 /// A PilIR rewrite.
 pub interface IPilIrPass {
@@ -36,7 +30,7 @@ pub struct PassRegistry : IObject {
 
 pub fn pass_registry_new() -> PassRegistry => PassRegistry { passes: [], computes_constants: false };
 
-pub fn pass_register(r: PassRegistry, p: IPilIrPass) { r.passes.push(p); }
+pub fn pass_register(var ref r: PassRegistry, p: IPilIrPass) { r.passes.push(p); }
 
 /// The passes `pilot ir opt` and `pilot ir run` apply: computing functions
 /// that take nothing, then inlining (`[Inline]` and `[EngineOp]`), then
@@ -55,7 +49,7 @@ pure fn max_pass_rounds() -> i64 => 64;
 
 /// Runs the passes of `r` over every function of `m` until none changes
 /// anything; returns the issues that stopped it (empty when it finished).
-pub fn run_passes(m: IrModule, r: PassRegistry) -> List<IrIssue> {
+pub fn run_passes(m: IrModule, ref r: PassRegistry) -> List<IrIssue> {
     // A forced inline that cannot happen stops the build (INLINE002).
     let not_inlined = inline_issues(m);
     if not_inlined.len() > 0 { return not_inlined; }

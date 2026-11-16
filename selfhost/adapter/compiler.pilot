@@ -4,11 +4,10 @@
 // Applies an `AdapterBlueprint` to real foreign signatures and plans the
 // 0-allocation thunk of every adapted method as a sequence of PilIR opcodes.
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.Compiler;
+pub lvl(0) pkg selfhost.adapter;
 
-use Pilot.SelfHost.Adapter.Rules;
-use Pilot.SelfHost.Ir.Model;
-use Pilot.Diagnostics.Model;
+use selfhost.ir.*;
+use selfhost.diagnostics.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -320,7 +319,7 @@ fn check_callbacks(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, rep
 
 pub fn verify_and_compile_blueprint(
     blueprint: ref<AdapterBlueprint>,
-    sigs: List<AdapterFnSig>
+    ref sigs: List<AdapterFnSig>
 ) -> AdapterCompilationReport {
     var report = adapter_compilation_report_new(blueprint.target_type);
 

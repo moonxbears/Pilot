@@ -3,7 +3,7 @@
 // Milestone 3.1: Declarative CLI Command Registry & Specification Protocol
 // Replaces static numeric dispatch and hardcoded CLI strings (CLI001 - CLI006)
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Cli.Spec;
+pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.Primitives.Map::*;
 
@@ -19,22 +19,22 @@ pub fn cli_list_new() -> Map<any, any> {
     return m;
 }
 
-pub fn cli_list_len(list: Map<any, any>) -> usize {
+pub fn cli_list_len(ref list: Map<any, any>) -> usize {
     return list.get("count") ?? 0;
 }
 
-pub fn cli_list_push(list: Map<any, any>, item: any) -> usize {
+pub fn cli_list_push(ref list: Map<any, any>, item: any) -> usize {
     let idx = cli_list_len(list);
     list.set(idx, item);
     list.set("count", idx + 1);
     return idx + 1;
 }
 
-pub fn cli_list_get(list: Map<any, any>, idx: usize) -> any {
+pub fn cli_list_get(ref list: Map<any, any>, idx: usize) -> any {
     return list.get(idx);
 }
 
-pub fn cli_list_get_str(list: Map<any, any>, idx: usize) -> str {
+pub fn cli_list_get_str(ref list: Map<any, any>, idx: usize) -> str {
     return list.get(idx);
 }
 
@@ -47,15 +47,15 @@ pub fn cli_map_set(m: Map<any, any>, key: str, val: any) -> Map<any, any> {
     return m;
 }
 
-pub fn cli_map_get(m: Map<any, any>, key: str) -> any {
+pub fn cli_map_get(ref m: Map<any, any>, key: str) -> any {
     return m.get(key);
 }
 
-pub fn cli_map_get_int(m: Map<any, any>, key: str) -> i64 {
+pub fn cli_map_get_int(ref m: Map<any, any>, key: str) -> i64 {
     return m.get(key) as i64;
 }
 
-pub fn cli_map_contains(m: Map<any, any>, key: str) -> bool {
+pub fn cli_map_contains(ref m: Map<any, any>, key: str) -> bool {
     return m.has(key);
 }
 

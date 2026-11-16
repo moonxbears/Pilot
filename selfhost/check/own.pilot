@@ -29,19 +29,12 @@
 // walking them with `for`, borrows it: `let x = rs[i]` and `for x in rs`
 // make `x` a borrower of `rs` (selfhost/check/borrows.pilot), never dropped
 // itself. Moving the element, or a binding borrowing it, is OWN004.
-pub lvl(0) pkg Pilot.SelfHost.Check.Own;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.methods.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
 
 pub struct Flow {
-    pub inf: Infer;
-    pub sink: DiagSink;
+    pub ref inf: Infer;
+    pub ref sink: DiagSink;
     /// Binding -> whether its type is owned, once asked.
     pub owned: Map<i64, bool>;
     /// Assignment to a local -> whether, on some walk, the local may have
@@ -51,13 +44,17 @@ pub struct Flow {
     pub engine: List<List<str>>;
     /// Binding -> whether it borrows an owned element, once asked.
     pub element: Map<i64, bool>;
+    /// Parameter -> the `param_flag_*` bits to read it with in place of the
+    /// written ones: what `pilot check --fix` proposes (fix_borrows.pilot).
+    pub assumed: Map<i64, i64>;
 }
 
 /// A flow over the program `inf` describes, reporting to `sink`.
-pub fn flow_new(inf: Infer, sink: DiagSink) -> Flow {
+pub fn flow_new(var ref inf: Infer, ref sink: DiagSink) -> Flow {
     return Flow {
         inf: inf, sink: sink, owned: Map<i64, bool>(), moved_at: Map<str, bool>(),
         engine: prog_engine_bindings(inf.p), element: Map<i64, bool>(),
+        assumed: Map<i64, i64>(),
     };
 }
 
@@ -68,7 +65,7 @@ pub pure fn owned_elements_hook() -> str => "bind_owned_elements";
 
 /// The type of the elements a collection of type `t` owns: what its `[]`
 /// gives (a map's values), else what iterating it gives.
-pub fn owned_element_type(p: Program, t: i64) -> i64 {
+pub fn owned_element_type(var ref p: Program, t: i64) -> i64 {
     if some m = prog_member(p, t, op_index()) { return prog_member_type(p, m); }
     return element_type(p, t);
 }
@@ -79,7 +76,7 @@ pub fn owned_element_type(p: Program, t: i64) -> i64 {
 /// its elements (a map's values) that `length` and `element at` walk by
 /// position; `lookup` reads the element an index or key names, or none when
 /// a key is absent. Else empty.
-pub fn owned_elements(f: Flow, t: i64) -> List<str> {
+pub fn owned_elements(ref f: Flow, t: i64) -> List<str> {
     let p = f.inf.p;
     if !ty_is_named(p.tt, t) || !prog_is_owned(p, owned_element_type(p, t)) { return []; }
     let name = p.tt.name[t];
@@ -96,7 +93,7 @@ pub pure fn owned_payload_hook() -> str => "bind_owned_payload";
 
 /// The payload type of `t` when the engine holds a value of `t` as its
 /// payload or none and the payload is owned; else the unknown type.
-pub fn owned_payload(f: Flow, t: i64) -> i64 {
+pub fn owned_payload(ref f: Flow, t: i64) -> i64 {
     let p = f.inf.p;
     if !ty_is_named(p.tt, t) { return ty_unknown(); }
     let name = p.tt.name[t];
@@ -115,7 +112,7 @@ pub fn owned_payload(f: Flow, t: i64) -> i64 {
 /// holds itself (an optional kept as its payload or none, a collection): it
 /// is not a record of its declared fields, so it is never copied field by
 /// field.
-pub fn engine_holds(engine: List<List<str>>, name: str) -> bool {
+pub fn engine_holds(ref engine: List<List<str>>, name: str) -> bool {
     for row in engine {
         if row.len() >= 2 && row[1] == name && (row[0] == owned_payload_hook() || row[0] == owned_elements_hook()) { return true; }
     }
@@ -124,7 +121,7 @@ pub fn engine_holds(engine: List<List<str>>, name: str) -> bool {
 
 /// The engine operation that tests a value of `t` for none, when `t` has
 /// an owned payload (`owned_payload`); else "".
-pub fn payload_absent_op(f: Flow, t: i64) -> str {
+pub fn payload_absent_op(ref f: Flow, t: i64) -> str {
     let p = f.inf.p;
     if !ty_is_named(p.tt, t) { return ""; }
     let name = p.tt.name[t];
@@ -137,9 +134,9 @@ pub fn payload_absent_op(f: Flow, t: i64) -> str {
 /// Whether values of `t` are owned: its lattice says so, or it holds a
 /// value that is (an optional's payload, a result's value or error, any
 /// generic argument).
-pub fn owns(f: Flow, t: i64) -> bool => owns_at(f.inf.p, t, 0);
+pub fn owns(var ref f: Flow, t: i64) -> bool => owns_at(f.inf.p, t, 0);
 
-fn owns_at(p: Program, t: i64, depth: i64) -> bool {
+fn owns_at(var ref p: Program, t: i64, depth: i64) -> bool {
     if prog_is_owned(p, t) { return true; }
     if depth > 8 || !ty_is_named(p.tt, t) { return false; }
     for a in ty_args(p.tt, t) {
@@ -149,7 +146,7 @@ fn owns_at(p: Program, t: i64, depth: i64) -> bool {
 }
 
 /// Whether `n` reads an element that a collection owns (`rs[i]`).
-pub fn is_owned_element(f: Flow, n: i64) -> bool {
+pub fn is_owned_element(var ref f: Flow, n: i64) -> bool {
     let s = f.inf.p.s;
     return n >= 0 && kind(s, n) == nk_index() && owned_elements(f, type_of(f.inf, lhs(s, n))).len() > 0;
 }
@@ -157,7 +154,7 @@ pub fn is_owned_element(f: Flow, n: i64) -> bool {
 /// Whether binding `b` borrows an element a collection owns: `let x = rs[i]`
 /// or the variable of `for x in rs`. It is never dropped itself and cannot
 /// be moved out (OWN004).
-pub fn borrows_element(f: Flow, b: i64) -> bool {
+pub fn borrows_element(var ref f: Flow, b: i64) -> bool {
     if !f.element.has(b) {
         let r = f.inf.r;
         let s = f.inf.p.s;
@@ -172,7 +169,7 @@ pub fn borrows_element(f: Flow, b: i64) -> bool {
 
 /// OWN004: an element a collection owns, or a binding borrowing one, used
 /// where it would be moved.
-fn check_element_move(f: Flow, n: i64, what: str) {
+fn check_element_move(var ref f: Flow, n: i64, what: str) {
     let p = f.inf.p;
     let up = p.parents[n];
     // `let x = rs[i]` borrows the element.
@@ -182,28 +179,28 @@ fn check_element_move(f: Flow, n: i64, what: str) {
     }
 }
 
-fn has(xs: List<i64>, b: i64) -> bool {
+fn has(ref xs: List<i64>, b: i64) -> bool {
     for x in xs { if x == b { return true; } }
     return false;
 }
 
-fn copy(xs: List<i64>) -> List<i64> {
+fn copy(ref xs: List<i64>) -> List<i64> {
     var out: List<i64> = [];
     for x in xs { out.push(x); }
     return out;
 }
 
-fn add(xs: List<i64>, b: i64) { if !has(xs, b) { xs.push(b); } }
+fn add(var ref xs: List<i64>, b: i64) { if !has(xs, b) { xs.push(b); } }
 
-fn union_into(into: List<i64>, other: List<i64>) { for x in other { add(into, x); } }
+fn union_into(var ref into: List<i64>, ref other: List<i64>) { for x in other { add(into, x); } }
 
-fn drop_binding(xs: List<i64>, b: i64) -> List<i64> {
+fn drop_binding(ref xs: List<i64>, b: i64) -> List<i64> {
     var out: List<i64> = [];
     for x in xs { if x != b { out.push(x); } }
     return out;
 }
 
-pub fn is_owned_binding(f: Flow, b: i64) -> bool {
+pub fn is_owned_binding(var ref f: Flow, b: i64) -> bool {
     if !f.owned.has(b) {
         let r = f.inf.r;
         var t = ty_unknown();
@@ -217,7 +214,7 @@ pub fn is_owned_binding(f: Flow, b: i64) -> bool {
 
 /// The declaration a call resolves to (a function, or a method of the
 /// receiver's type), or -1.
-pub fn call_target(f: Flow, call: i64) -> i64 {
+pub fn call_target(ref f: Flow, call: i64) -> i64 {
     let inf = f.inf;
     let s = inf.p.s;
     let fnode = called_fn(inf, call);
@@ -233,7 +230,7 @@ pub fn call_target(f: Flow, call: i64) -> i64 {
 }
 
 /// Whether the identifier `n` is used by value where it stands.
-pub fn is_move_position(f: Flow, n: i64) -> bool {
+pub fn is_move_position(var ref f: Flow, n: i64) -> bool {
     let p = f.inf.p;
     let s = p.s;
     let up = p.parents[n];
@@ -249,6 +246,9 @@ pub fn is_move_position(f: Flow, n: i64) -> bool {
     }
     if (k == nk_let() || k == nk_var() || k == nk_const() || k == nk_assign()) { return rhs(s, up) == n; }
     if k == nk_return() { return lhs(s, up) == n; }
+    // `fn f(..) -> T => n` returns it: a move when `T` owns; returning it
+    // as a view (`-> slice<T> => self.items[0]`) only lends it.
+    if k == nk_fn() { return fn_body(s, up) == n && owns(f, fn_return_type(f.inf, up)); }
     // Unwrapping an optional or a result (`o?`, `o ?? d`) takes its payload.
     if k == nk_try_propagate() || k == nk_coalesce() { return true; }
     if k == nk_list() { return true; }
@@ -270,7 +270,7 @@ pub fn is_move_position(f: Flow, n: i64) -> bool {
         let target = call_target(f, call);
         if target < 0 { return false; }
         for prm in fn_params(s, target) {
-            if kind(s, prm) == nk_param() && node_name(s, prm) == node_name(s, up) { return plain_param(s, prm); }
+            if kind(s, prm) == nk_param() && node_name(s, prm) == node_name(s, up) { return by_value(f, prm); }
         }
         return false;
     }
@@ -281,7 +281,7 @@ pub fn is_move_position(f: Flow, n: i64) -> bool {
         let params = fn_params(s, target);
         var i = 1;
         while i < ch.len() {
-            if ch[i] == n { return i - 1 < params.len() && plain_param(s, params[i - 1]); }
+            if ch[i] == n { return i - 1 < params.len() && by_value(f, params[i - 1]); }
             i = i + 1;
         }
     }
@@ -289,7 +289,7 @@ pub fn is_move_position(f: Flow, n: i64) -> bool {
 }
 
 /// Whether `field` of type `t` is declared `ref` (it borrows what it holds).
-fn is_ref_field(f: Flow, t: i64, field: str) -> bool {
+fn is_ref_field(var ref f: Flow, t: i64, field: str) -> bool {
     if some m = prog_member(f.inf.p, t, field) {
         let s = f.inf.p.s;
         return kind(s, m.decl) == nk_param() && flags(s, m.decl) != 0;
@@ -298,10 +298,31 @@ fn is_ref_field(f: Flow, t: i64, field: str) -> bool {
 }
 
 /// A parameter written without `ref`, `var`, `iso` or `comptime`.
-pub fn plain_param(s: Snap, prm: i64) -> bool => kind(s, prm) == nk_param() && flags(s, prm) == 0;
+pub fn plain_param(ref s: Snap, prm: i64) -> bool => kind(s, prm) == nk_param() && flags(s, prm) == 0;
+
+/// The `param_flag_*` bits of parameter `prm`: the written ones, or those
+/// `f.assumed` gives it.
+pub fn flow_param_flags(ref f: Flow, prm: i64) -> i64 {
+    if f.assumed.has(prm) { return f.assumed.get(prm); }
+    return flags(f.inf.p.s, prm);
+}
+
+/// Whether parameter `prm` takes its argument by value (it is plain), as
+/// written or as `f.assumed` gives it.
+pub fn by_value(ref f: Flow, prm: i64) -> bool => kind(f.inf.p.s, prm) == nk_param() && flow_param_flags(f, prm) == 0;
+
+/// Whether parameter `prm` may change the value it is given: a `var ref`,
+/// `var` or `iso` parameter. A plain `ref` parameter is a read-only borrow
+/// (DECL004, consts.pilot check_consts).
+pub fn may_change_param(ref f: Flow, prm: i64) -> bool {
+    if kind(f.inf.p.s, prm) != nk_param() { return false; }
+    let fl = flow_param_flags(f, prm);
+    if fl == 0 { return false; }
+    return (fl / param_flag_mutable()) % 2 == 1 || (fl / param_flag_isolated()) % 2 == 1 || (fl / param_flag_ref()) % 2 == 0;
+}
 
 /// Bindings declared inside node `n`, which are fresh each time it runs.
-fn outside_of(f: Flow, xs: List<i64>, n: i64) -> List<i64> {
+fn outside_of(ref f: Flow, ref xs: List<i64>, n: i64) -> List<i64> {
     let s = f.inf.p.s;
     var out: List<i64> = [];
     for b in xs {
@@ -320,7 +341,7 @@ pub struct FlowState {
 
 fn flow_state(moved: List<i64>, falls: bool) -> FlowState => FlowState { moved: moved, falls_through: falls };
 
-fn walk_seq(f: Flow, nodes: List<i64>, moved: List<i64>) -> FlowState {
+fn walk_seq(ref f: Flow, ref nodes: List<i64>, moved: List<i64>) -> FlowState {
     var cur = moved;
     for c in nodes {
         let st = walk(f, c, cur);
@@ -331,7 +352,7 @@ fn walk_seq(f: Flow, nodes: List<i64>, moved: List<i64>) -> FlowState {
 }
 
 /// Joins branch results: the moves of every branch that falls through.
-fn join(branches: List<FlowState>) -> FlowState {
+fn join(ref branches: List<FlowState>) -> FlowState {
     var moved: List<i64> = [];
     var falls = false;
     for b in branches {
@@ -343,7 +364,7 @@ fn join(branches: List<FlowState>) -> FlowState {
     return flow_state(moved, falls);
 }
 
-fn walk_loop(f: Flow, n: i64, head: List<i64>, body: List<i64>, moved: List<i64>) -> FlowState {
+fn walk_loop(ref f: Flow, n: i64, ref head: List<i64>, ref body: List<i64>, moved: List<i64>) -> FlowState {
     let entry = walk_seq(f, head, moved).moved;
     let first = walk_seq(f, body, copy(entry));
     var again = copy(entry);
@@ -354,7 +375,7 @@ fn walk_loop(f: Flow, n: i64, head: List<i64>, body: List<i64>, moved: List<i64>
     return flow_state(out, true);
 }
 
-fn walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
+fn walk(var ref f: Flow, n: i64, moved: List<i64>) -> FlowState {
     let inf = f.inf;
     let s = inf.p.s;
     if n < 0 { return flow_state(moved, true); }
@@ -442,7 +463,7 @@ fn walk(f: Flow, n: i64, moved: List<i64>) -> FlowState {
 
 /// Walks every function body in the user's files: reports OWN001 to the
 /// flow's sink and fills its `moved_at`.
-pub fn walk_bodies(f: Flow) {
+pub fn walk_bodies(ref f: Flow) {
     let s = f.inf.p.s;
     var i = 0;
     i = s.user_lo;
@@ -460,4 +481,4 @@ pub fn walk_bodies(f: Flow) {
 }
 
 /// Runs OWN001 over every function body in the user's files.
-pub fn check_ownership(inf: Infer, sink: DiagSink) { walk_bodies(flow_new(inf, sink)); }
+pub fn check_ownership(var ref inf: Infer, ref sink: DiagSink) { walk_bodies(flow_new(inf, sink)); }

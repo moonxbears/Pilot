@@ -5,7 +5,7 @@
 // nested struct flattening, bit-packed bool/enum planes, and Perceus drop masks.
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Chor.StoragePlan;
+pub lvl(0) pkg selfhost.chor;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -123,7 +123,7 @@ pub struct StoragePlan : IObject {
 /// (`pos` + `x` -> `pos.x`). Applied recursively, this turns
 /// `Particle.pos.{x,y,z}` into three columns. The inner leaves come from the
 /// field type's resolved layout.
-pub fn flatten_nested_fields(prefix: str, inner: List<FieldLeafDesc>) -> List<FieldLeafDesc> {
+pub fn flatten_nested_fields(prefix: str, ref inner: List<FieldLeafDesc>) -> List<FieldLeafDesc> {
     var leaves: List<FieldLeafDesc> = [];
     var i = 0;
     while i < inner.len() {
@@ -151,7 +151,7 @@ pub fn compute_storage_plan(
     struct_name: str,
     strategy: StorageStrategy,
     capacity: usize,
-    fields: List<FieldLeafDesc>,
+    ref fields: List<FieldLeafDesc>,
     tile_w: usize,
     align_b: usize
 ) -> StoragePlan {

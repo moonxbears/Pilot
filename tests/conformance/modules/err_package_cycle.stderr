@@ -1,0 +1,2 @@
+error[MOD002]: import cycle: Conformance.Ring -> lib.ring_left -> Conformance.Ring
+lib/ring_left_b.pilot:4:1

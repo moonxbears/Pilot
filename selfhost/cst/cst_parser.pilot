@@ -5,6 +5,8 @@
 // MissingIdent, MissingRParen, and MissingRBrace recovery markers.
 // ============================================================================
 
+pub pkg selfhost.cst;
+
 pub enum CstDefect : u16 {
     ::None          = 0,
     ::MissingIdent  = 1,

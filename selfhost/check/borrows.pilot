@@ -36,19 +36,11 @@
 //
 // The drop plan (selfhost/check/drops.pilot) asks `borrowers_of`: a value
 // is not dropped while a binding that borrows from it is still used.
-pub lvl(0) pkg Pilot.SelfHost.Check.Borrows;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.methods.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.check.own.*;
 
 pub struct Borrows : IObject {
-    pub flow: Flow;
+    pub ref flow: Flow;
     /// Binding -> 1 while its roots are being computed, 2 once they are;
     /// no entry before.
     pub state: Map<i64, i64>;
@@ -61,7 +53,7 @@ pub struct Borrows : IObject {
 
 /// The type of binding `b`: its annotation, else its initializer's type (an
 /// unwrapped binding's: the owned payload), else its parameter annotation.
-pub fn flow_binding_type(f: Flow, b: i64) -> i64 {
+pub fn flow_binding_type(var ref f: Flow, b: i64) -> i64 {
     let r = f.inf.r;
     if r.annot[b] >= 0 { return prog_annot_type(f.inf.p, r.annot[b]); }
     if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Local { return type_of(f.inf, r.source[b]); }
@@ -77,7 +69,7 @@ pub fn flow_binding_type(f: Flow, b: i64) -> i64 {
 /// Whether `t` declares itself a scoped guard (an `IGuard`, lattice 0b11).
 /// The bits a borrowed field adds to an owned type do not make it one: its
 /// release at scope end is what the guard contract promises.
-pub fn declares_guard(p: Program, t: i64) -> bool {
+pub fn declares_guard(var ref p: Program, t: i64) -> bool {
     if !ty_is_named(p.tt, t) { return false; }
     let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
     return bt.declares_lattice && (bt.declared & 3) == 3;
@@ -86,12 +78,12 @@ pub fn declares_guard(p: Program, t: i64) -> bool {
 /// Whether values of type `t` borrow: a view (lattice 0b01) or a declared
 /// guard. An owned type with a borrowed field (0b11 by its fields alone) owns
 /// what it holds and does not.
-pub fn borrows_type(p: Program, t: i64) -> bool => lattice_of(p, t) == 1 || declares_guard(p, t);
+pub fn borrows_type(var ref p: Program, t: i64) -> bool => lattice_of(p, t) == 1 || declares_guard(p, t);
 
-fn guard_type(p: Program, t: i64) -> bool => declares_guard(p, t);
+fn guard_type(var ref p: Program, t: i64) -> bool => declares_guard(p, t);
 
 /// The borrow analysis of the program `f` reads.
-pub fn borrows_new(f: Flow) -> Borrows {
+pub fn borrows_new(ref f: Flow) -> Borrows {
     var assigned = Map<i64, List<i64>>();
     let pairs = binding_assignments(f.inf);
     var i = 0;
@@ -107,7 +99,7 @@ pub fn borrows_new(f: Flow) -> Borrows {
 /// `binding, right-hand side` pairs laid end to end. The program is walked
 /// once (`Program.gen_memo`); the list is shared, so a caller must not
 /// change it.
-fn binding_assignments(inf: Infer) -> List<i64> {
+fn binding_assignments(ref inf: Infer) -> List<i64> {
     let p = inf.p;
     let memo = "binding_assignments";
     if !p.gen_memo.has(memo) {
@@ -126,7 +118,7 @@ fn binding_assignments(inf: Infer) -> List<i64> {
     return p.gen_memo.get(memo);
 }
 
-fn add_all(into: List<i64>, xs: List<i64>) {
+fn add_all(var ref into: List<i64>, ref xs: List<i64>) {
     for x in xs {
         var seen = false;
         for y in into { if y == x { seen = true; } }
@@ -135,7 +127,7 @@ fn add_all(into: List<i64>, xs: List<i64>) {
 }
 
 /// The roots of binding `b`.
-pub fn binding_roots(bw: Borrows, b: i64) -> List<i64> {
+pub fn binding_roots(ref bw: Borrows, b: i64) -> List<i64> {
     let state = if bw.state.has(b) { bw.state.get(b) } else { 0 };
     if state == 2 { return bw.roots.get(b); }
     // A binding met again while its roots are being computed (`x = f(x)`)
@@ -169,7 +161,7 @@ pub fn binding_roots(bw: Borrows, b: i64) -> List<i64> {
 
 /// What the value of place `n` (an identifier, field or element) borrows
 /// when it is lent: the place's own storage, or what it borrows.
-fn place_roots(bw: Borrows, n: i64) -> List<i64> {
+fn place_roots(ref bw: Borrows, n: i64) -> List<i64> {
     let s = bw.flow.inf.p.s;
     let k = kind(s, n);
     if k == nk_ident() {
@@ -181,7 +173,7 @@ fn place_roots(bw: Borrows, n: i64) -> List<i64> {
 }
 
 /// What the value of expression `n` borrows from.
-pub fn expr_roots(bw: Borrows, n: i64) -> List<i64> {
+pub fn expr_roots(ref bw: Borrows, n: i64) -> List<i64> {
     if n < 0 { return []; }
     let inf = bw.flow.inf;
     let p = inf.p;
@@ -230,7 +222,7 @@ pub fn expr_roots(bw: Borrows, n: i64) -> List<i64> {
 }
 
 /// The function-like node `n` sits in, or -1.
-fn enclosing_fn(p: Program, n: i64) -> i64 {
+fn enclosing_fn(ref p: Program, n: i64) -> i64 {
     let s = p.s;
     var at = p.parents[n];
     while at >= 0 {
@@ -243,7 +235,7 @@ fn enclosing_fn(p: Program, n: i64) -> i64 {
 
 /// The roots among `roots` that are locals or by-value parameters of the
 /// function-like node `owner`: storage that goes when it returns.
-fn dying(bw: Borrows, roots: List<i64>, owner: i64) -> List<i64> {
+fn dying(ref bw: Borrows, ref roots: List<i64>, owner: i64) -> List<i64> {
     let f = bw.flow;
     let r = f.inf.r;
     let s = f.inf.p.s;
@@ -260,11 +252,11 @@ fn dying(bw: Borrows, roots: List<i64>, owner: i64) -> List<i64> {
 }
 
 /// The name of the function-like node `fnode`, for messages.
-fn fn_label(s: Snap, fnode: i64) -> str => if kind(s, fnode) == nk_lambda() { "the closure" } else { node_name(s, fnode) };
+fn fn_label(ref s: Snap, fnode: i64) -> str => if kind(s, fnode) == nk_lambda() { "the closure" } else { node_name(s, fnode) };
 
 /// Reports value `e` of type `t` leaving its function (`how`: "returned" or
 /// "stored") while it borrows from one of the function's locals.
-fn check_leaving(bw: Borrows, e: i64, t: i64, how: str) {
+fn check_leaving(ref bw: Borrows, e: i64, t: i64, how: str) {
     let f = bw.flow;
     let p = f.inf.p;
     let s = p.s;
@@ -277,7 +269,7 @@ fn check_leaving(bw: Borrows, e: i64, t: i64, how: str) {
 }
 
 /// Whether the place `target` (assigned to) outlives the function `owner`.
-fn outlives(bw: Borrows, target: i64, owner: i64) -> bool {
+fn outlives(ref bw: Borrows, target: i64, owner: i64) -> bool {
     let s = bw.flow.inf.p.s;
     let k = kind(s, target);
     if k == nk_ident() {
@@ -293,18 +285,18 @@ fn outlives(bw: Borrows, target: i64, owner: i64) -> bool {
     return true;
 }
 
-fn guard_stored(bw: Borrows, n: i64, t: i64) {
+fn guard_stored(var ref bw: Borrows, n: i64, t: i64) {
     let p = bw.flow.inf.p;
     sink_error(bw.flow.sink, n, "ESCAPE003", f"a `{ty_display(p.tt, t)}` guard cannot be stored here: a guard stays bound to the block that made it");
 }
 
 /// Whether function `target` is declared `[Cue]`.
-fn has_cue(p: Program, target: i64) -> bool {
+fn has_cue(ref p: Program, target: i64) -> bool {
     if some _args = prog_attr_nodes(p, target, "Cue") { return true; }
     return false;
 }
 
-fn check_node(bw: Borrows, n: i64) {
+fn check_node(var ref bw: Borrows, n: i64) {
     let f = bw.flow;
     let inf = f.inf;
     let p = inf.p;
@@ -367,7 +359,7 @@ fn check_node(bw: Borrows, n: i64) {
 }
 
 /// Runs ESCAPE001-ESCAPE003 over the user's files.
-pub fn check_escapes(inf: Infer, sink: DiagSink) {
+pub fn check_escapes(var ref inf: Infer, ref sink: DiagSink) {
     let s = inf.p.s;
     let bw = borrows_new(flow_new(inf, sink));
     var n = 0;
@@ -380,7 +372,7 @@ pub fn check_escapes(inf: Infer, sink: DiagSink) {
 
 /// The bindings that borrow from binding `b` (a local or parameter of the
 /// same function), directly or through other views.
-pub fn borrowers_of(bw: Borrows, b: i64) -> List<i64> {
+pub fn borrowers_of(var ref bw: Borrows, b: i64) -> List<i64> {
     let r = bw.flow.inf.r;
     var out: List<i64> = [];
     var v = 0;

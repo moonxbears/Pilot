@@ -3,34 +3,28 @@
 //! 4-Tier Progressive Learning Profiles & Friendly Compiler Guidance
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 28,
-    test_file_rel: "crates/pilot-analysis/tests/milestone28_progressive_learning_profiles_and_coach.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone28_progressive_learning_profiles_and_coach.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
             path: "stdlib/pilot/profile.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "learning_tier_name",
-                "profile_for_tier",
-            ],
-            required_code_markers: &[
-                "LearningTier",
-                "ClearanceRing",
-                "ProfileDescriptor",
-            ],
+            required_pub_fns: &["learning_tier_name", "profile_for_tier"],
+            required_code_markers: &["LearningTier", "ClearanceRing", "ProfileDescriptor"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -38,10 +32,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/diag/progressive_coach.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "adapt_escape001",
-                "analyze_struct_padding",
-            ],
+            required_pub_fns: &["adapt_escape001", "analyze_struct_padding"],
             required_code_markers: &[
                 "COACH001",
                 "COACH002",
@@ -57,15 +48,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/types/clearance_flow.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "clearance_solver_new",
-                "check_clearance_access",
-            ],
-            required_code_markers: &[
-                "LVL001",
-                "ClearanceFrame",
-                "ClearanceSolver",
-            ],
+            required_pub_fns: &["clearance_solver_new", "check_clearance_access"],
+            required_code_markers: &["LVL001", "ClearanceFrame", "ClearanceSolver"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -74,12 +58,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m28(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -142,7 +130,11 @@ fn test_m28_1_progressive_diagnostic_adaptation_across_tiers() {
     "#;
 
     let res = eval_m28(&deps, script);
-    assert_eq!(res, "42", "Failed progressive diagnostic adaptation test: {}", res);
+    assert_eq!(
+        res, "42",
+        "Failed progressive diagnostic adaptation test: {}",
+        res
+    );
     guard.finish();
 }
 
@@ -277,9 +269,7 @@ fn test_m28_4_flow_sensitive_clearance_ring_solver() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/types/clearance_flow.pilot",
-    ];
+    let deps = ["selfhost/types/clearance_flow.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -327,6 +317,10 @@ fn test_m28_4_flow_sensitive_clearance_ring_solver() {
     "#;
 
     let res = eval_m28(&deps, script);
-    assert_eq!(res, "42", "Failed flow-sensitive clearance solver test: {}", res);
+    assert_eq!(
+        res, "42",
+        "Failed flow-sensitive clearance solver test: {}",
+        res
+    );
     guard.finish();
 }

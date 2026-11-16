@@ -14,9 +14,9 @@
 // selfhost/check/consts.pilot) and copies it where it is used by value.
 // Anything else (text, a map, a record, a loop, a call) is still built at
 // the start.
-pub lvl(0) pkg Pilot.SelfHost.Transpile.StaticData;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.ir.model.*;
+use selfhost.ir.*;
 
 /// One item of a static list: a constant (`list < 0`; `opcode` is
 /// `const_bits` or `const_float` and `pool` its entry in the module's
@@ -42,7 +42,7 @@ pub struct StaticGlobals : IObject {
 }
 
 /// No global laid out as static data.
-pub fn no_static_globals(m: IrModule) -> StaticGlobals {
+pub fn no_static_globals(ref m: IrModule) -> StaticGlobals {
     var root: List<i64> = [];
     for _g in m.globals { root.push(-1); }
     return StaticGlobals { lists: [], root: root };
@@ -50,7 +50,7 @@ pub fn no_static_globals(m: IrModule) -> StaticGlobals {
 
 /// Every `ready` global of `m` whose value `<start>` builds with a call of a
 /// straight-line list initializer (see the file comment).
-pub fn find_static_globals(m: IrModule) -> StaticGlobals {
+pub fn find_static_globals(ref m: IrModule) -> StaticGlobals {
     let sg = no_static_globals(m);
     let start = m.functions[0];
     let entry = start.blocks[0];
@@ -70,7 +70,7 @@ pub fn find_static_globals(m: IrModule) -> StaticGlobals {
 
 /// Removes from `<start>` the build of every global laid out as static
 /// data: its address, the initializer's call and the store.
-pub fn drop_static_builds(m: IrModule, sg: StaticGlobals) {
+pub fn drop_static_builds(ref m: IrModule, ref sg: StaticGlobals) {
     let start = m.functions[0];
     let entry = start.blocks[0];
     let addrs = global_addrs(start);
@@ -95,7 +95,7 @@ pub fn drop_static_builds(m: IrModule, sg: StaticGlobals) {
 }
 
 /// The static lists in an order where each comes after the lists it holds.
-pub fn static_order(sg: StaticGlobals) -> List<i64> {
+pub fn static_order(ref sg: StaticGlobals) -> List<i64> {
     var placed: List<bool> = [];
     for _l in sg.lists { placed.push(false); }
     var order: List<i64> = [];
@@ -105,7 +105,7 @@ pub fn static_order(sg: StaticGlobals) -> List<i64> {
     return order;
 }
 
-fn place(sg: StaticGlobals, li: i64, placed: List<bool>, order: List<i64>) {
+fn place(ref sg: StaticGlobals, li: i64, var ref placed: List<bool>, var ref order: List<i64>) {
     if placed[li] { return; }
     placed[li] = true;
     for it in sg.lists[li].items {
@@ -115,7 +115,7 @@ fn place(sg: StaticGlobals, li: i64, placed: List<bool>, order: List<i64>) {
 }
 
 /// Value id -> the global whose address it is, -1 for other values.
-fn global_addrs(f: IrFunction) -> List<i64> {
+fn global_addrs(ref f: IrFunction) -> List<i64> {
     var out: List<i64> = [];
     for _p in f.value_physics { out.push(-1); }
     for inst in f.blocks[0].insts {
@@ -126,7 +126,7 @@ fn global_addrs(f: IrFunction) -> List<i64> {
 
 /// Value id -> the function a call with no arguments gives it from, -1 for
 /// other values.
-fn direct_calls(f: IrFunction) -> List<i64> {
+fn direct_calls(ref f: IrFunction) -> List<i64> {
     var out: List<i64> = [];
     for _p in f.value_physics { out.push(-1); }
     for inst in f.blocks[0].insts {
@@ -141,7 +141,7 @@ fn is_scalar_item(p: IrTypePhysics) -> bool =>
 
 /// The static list function `fi` gives, its lists added to `sg`; -1 (and
 /// `sg` unchanged) when its body is not a straight-line list initializer.
-fn list_image(m: IrModule, fi: i64, sg: StaticGlobals) -> i64 {
+fn list_image(ref m: IrModule, fi: i64, var ref sg: StaticGlobals) -> i64 {
     let f = m.functions[fi];
     if !f.once || f.blocks.len() != 1 || f.blocks[0].params.len() != 0 { return -1; }
     // Value id -> a constant item, or the local list it is (-1: neither).

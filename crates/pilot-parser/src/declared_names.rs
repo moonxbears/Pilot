@@ -18,9 +18,14 @@ impl<'a> Parser<'a> {
         while p < self.tape.len() {
             if self.tape.kind(p) == TokenKind::KwFn {
                 let n = self.next_non_nl(p + 1);
-                if n < self.tape.len() && is_word_tok(self.tape.kind(n)) && self.tape.text(n, self.src) == word {
+                if n < self.tape.len()
+                    && is_word_tok(self.tape.kind(n))
+                    && self.tape.text(n, self.src) == word
+                {
                     let after = self.next_non_nl(n + 1);
-                    if after < self.tape.len() && matches!(self.tape.kind(after), TokenKind::LParen | TokenKind::Less) {
+                    if after < self.tape.len()
+                        && matches!(self.tape.kind(after), TokenKind::LParen | TokenKind::Less)
+                    {
                         return true;
                     }
                 }

@@ -7,7 +7,7 @@
 // Enforces: COMP001, COMP002, COMP003, COMP004, COMP005, COMP006.
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Types.BundleSplice;
+pub lvl(0) pkg selfhost.types;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -86,7 +86,7 @@ pub fn bundle_def_new(name: str, is_facet: bool) -> BundleDef {
 
 /// The member names a splice directive's `coalesce`, `with` and `without`
 /// clauses name, in that order.
-fn directive_names(dir: BundleSpliceDirective) -> List<str> {
+fn directive_names(ref dir: BundleSpliceDirective) -> List<str> {
     var out: List<str> = [];
     for name in dir.coalesce_fields { out.push(name); }
     for name in dir.with_names { out.push(name); }
@@ -95,7 +95,7 @@ fn directive_names(dir: BundleSpliceDirective) -> List<str> {
 }
 
 /// Whether `name` is a field or method of bundle `bdef`.
-fn bundle_has_member(bdef: BundleDef, name: str) -> bool {
+fn bundle_has_member(ref bdef: BundleDef, name: str) -> bool {
     for f in bdef.fields { if f.name == name { return true; } }
     for m in bdef.methods { if m.name == name { return true; } }
     return false;
@@ -160,7 +160,7 @@ pub fn struct_layout_plan_undeclared(name: str, is_partial: bool) -> StructLayou
 // 3. Helper Functions & List Utilities
 // ------------------------------------------------------------------------------
 
-pure fn str_list_contains(items: List<str>, target: str) -> bool {
+pure fn str_list_contains(ref items: List<str>, target: str) -> bool {
     let n = items.len();
     var i = 0;
     while i < n {
@@ -183,7 +183,7 @@ pure fn align_up(offset: usize, align: usize) -> usize {
 
 fn check_bundle_cycles_rec(
     current: str,
-    all_bundles: Map<str, BundleDef>,
+    ref all_bundles: Map<str, BundleDef>,
     visiting: var ref<List<str>>,
     visited: var ref<Map<str, bool>>,
     diags: var ref<List<str>>
@@ -216,7 +216,7 @@ fn check_bundle_cycles_rec(
     return false;
 }
 
-pub fn check_bundle_cycles(bundles: Map<str, BundleDef>, start: str, diags: var ref<List<str>>) -> bool {
+pub fn check_bundle_cycles(ref bundles: Map<str, BundleDef>, start: str, diags: var ref<List<str>>) -> bool {
     var visiting: List<str> = [];
     var visited: Map<str, bool> = [:];
     return check_bundle_cycles_rec(start, bundles, var visiting, var visited, var diags);
@@ -228,9 +228,9 @@ pub fn check_bundle_cycles(bundles: Map<str, BundleDef>, start: str, diags: var 
 
 pub fn compute_struct_layout(
     var ref plan: StructLayoutPlan,
-    primary_fields: List<BundleFieldDef>,
-    directives: List<BundleSpliceDirective>,
-    bundle_catalog: Map<str, BundleDef>
+    ref primary_fields: List<BundleFieldDef>,
+    ref directives: List<BundleSpliceDirective>,
+    ref bundle_catalog: Map<str, BundleDef>
 ) {
     // 1. Add Tier-1 Explicit Primary Struct Fields
     var cur_offset: usize = 0;

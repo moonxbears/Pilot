@@ -20,9 +20,8 @@
 // Operands: `#k` names constant pool entry k, `v<n>` a value, and a branch
 // target is `b<id>(<args>)`. A `cond_br` is `v<cond>, b<then>(..), b<else>(..)`.
 // Malformed text is reported as `IR009` with the line it is on.
-pub lvl(0) pkg Pilot.SelfHost.Ir.Text;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.ir.model.*;
 use std.text.*;
 
 // ------------------------------------------------------------------------------
@@ -57,7 +56,7 @@ fn quote_text(s: str) -> str {
 
 fn value_ref(v: u32) -> str => f"v{v}";
 
-fn value_list(f: IrFunction, vs: List<u32>, from: i64, count: i64) -> str {
+fn value_list(ref f: IrFunction, ref vs: List<u32>, from: i64, count: i64) -> str {
     var out: List<str> = [];
     var i = 0;
     while i < count {
@@ -68,7 +67,7 @@ fn value_list(f: IrFunction, vs: List<u32>, from: i64, count: i64) -> str {
 }
 
 /// The operands of `inst`, as the module documentation spells them.
-fn operands_text(f: IrFunction, inst: IrInst) -> str {
+fn operands_text(ref f: IrFunction, inst: IrInst) -> str {
     let a = ir_args(f, inst);
     let op = inst.opcode;
     if op == op_const_bits() || op == op_const_float() || op == op_const_bytes() { return f"#{a[0]}"; }
@@ -90,7 +89,7 @@ fn operands_text(f: IrFunction, inst: IrInst) -> str {
     return value_list(f, a, 0, a.len());
 }
 
-fn inst_text(f: IrFunction, inst: IrInst) -> str {
+fn inst_text(ref f: IrFunction, inst: IrInst) -> str {
     var out = "    ";
     if inst.result != ir_no_value() { out = out + value_ref(inst.result) + " = "; }
     out = out + opcode_name(inst.opcode);
@@ -102,7 +101,7 @@ fn inst_text(f: IrFunction, inst: IrInst) -> str {
 
 /// The text of module `m`, one line per entry, ending in a newline. The
 /// lines are joined once at the end (`join_text`).
-pub fn print_ir_module(m: IrModule) -> str {
+pub fn print_ir_module(ref m: IrModule) -> str {
     var lines: List<str> = ["pilir 1"];
     var i = 0;
     while i < m.layouts.len {
@@ -238,19 +237,19 @@ fn unquote(w: str) -> str {
     return join_text(parts, "");
 }
 
-fn fail(r: Reader, message: str) -> i64 {
+fn fail(var ref r: Reader, message: str) -> i64 {
     if r.error == "" { r.error = f"IR009: line {r.at + 1}: {message}"; }
     return 0;
 }
 
 /// The integer word `w` spells after its one-byte prefix `prefix` ("" for none).
-fn number(r: Reader, w: str, prefix: str) -> i64 {
+fn number(var ref r: Reader, w: str, prefix: str) -> i64 {
     if !w.starts_with(prefix) { return fail(r, f"expected `{prefix}<number>`, found `{w}`"); }
     if some v = parse_i64(w.slice(prefix.len(), w.len())) { return v; }
     return fail(r, f"`{w}` is not a number");
 }
 
-fn layout_physics(r: Reader, id: i64) -> IrTypePhysics {
+fn layout_physics(var ref r: Reader, id: i64) -> IrTypePhysics {
     if id < 0 || id >= r.m.layouts.len {
         let _ = fail(r, f"layout {id} is not declared");
         return ir_physics_new(0, 0, 0, 0, 0);
@@ -258,7 +257,7 @@ fn layout_physics(r: Reader, id: i64) -> IrTypePhysics {
     return r.m.layouts[id].physics;
 }
 
-fn reg_class_from(r: Reader, name: str) -> u8 {
+fn reg_class_from(var ref r: Reader, name: str) -> u8 {
     var c: u8 = 0;
     while c <= reg_class_noreturn() {
         if reg_class_name(c) == name { return c; }
@@ -267,7 +266,7 @@ fn reg_class_from(r: Reader, name: str) -> u8 {
     return fail(r, f"unknown register class `{name}`");
 }
 
-fn parse_header(r: Reader, w: List<str>) {
+fn parse_header(var ref r: Reader, ref w: List<str>) {
     let tag = w[0];
     if tag == "layout" && (w.len() == 7 || (w.len() == 8 && w[7] == "packed")) {
         let id = number(r, w[1], "");
@@ -312,7 +311,7 @@ fn parse_header(r: Reader, w: List<str>) {
 
 /// Parses `b<id>(v.., ..)` starting at word `at`; returns the operands
 /// `[id, args..]` and the index of the word after `)`.
-fn parse_target(r: Reader, w: List<str>, at: i64, out: List<u32>, with_count: bool) -> i64 {
+fn parse_target(var ref r: Reader, ref w: List<str>, at: i64, var ref out: List<u32>, with_count: bool) -> i64 {
     out.push(number(r, w[at], "b"));
     var i = at + 2;
     var args: List<u32> = [];
@@ -326,7 +325,7 @@ fn parse_target(r: Reader, w: List<str>, at: i64, out: List<u32>, with_count: bo
 }
 
 /// Parses one instruction line into block `b` of `f`.
-fn parse_inst(r: Reader, f: IrFunction, b: u32, w: List<str>) {
+fn parse_inst(var ref r: Reader, var ref f: IrFunction, b: u32, ref w: List<str>) {
     var i = 0;
     var result = ir_no_value();
     if w.len() > 1 && w[1] == "=" {
@@ -373,12 +372,12 @@ fn parse_inst(r: Reader, f: IrFunction, b: u32, w: List<str>) {
     });
 }
 
-fn set_value_physics(f: IrFunction, v: u32, phy: IrTypePhysics) {
+fn set_value_physics(var ref f: IrFunction, v: u32, phy: IrTypePhysics) {
     while f.value_physics.len <= v { f.value_physics.push(ir_physics_new(0, 0, 0, 0, 0)); }
     f.value_physics[v] = phy;
 }
 
-fn parse_function(r: Reader, w: List<str>) {
+fn parse_function(var ref r: Reader, ref w: List<str>) {
     var at = 3;
     let once = w.len() > at && w[at] == "once";
     if once { at = at + 1; }

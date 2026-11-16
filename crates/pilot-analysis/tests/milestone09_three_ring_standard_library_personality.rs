@@ -3,45 +3,44 @@
 //! Three-Ring Standard Library Personality (`core`, `std`, `pilot`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 9,
-    test_file_rel: "crates/pilot-analysis/tests/milestone09_three_ring_standard_library_personality.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone09_three_ring_standard_library_personality.rs",
     expected_test_count: 4,
-    files: &[
-        anticheat::FileAuditRule {
-            path: "selfhost/loader/ring_verifier.pilot",
-            max_lines: 1500,
-            name_blind: true,
-            required_pub_fns: &[
-                "ring_name",
-                "parse_pkg_ring",
-                "verify_ring_dependency",
-                "verify_freestanding_source",
-                "check_legacy_import_migration",
-                "scan_and_migrate_ring_imports",
-                "verify_no_stale_stdlib_cache",
-            ],
-            required_code_markers: &[
-                "RingCheckResult",
-                "verify_ring_dependency",
-                "verify_freestanding_source",
-                "check_legacy_import_migration",
-                "scan_and_migrate_ring_imports",
-            ],
-            forbidden_code_markers: &[],
-            forbidden_string_substrings: &[],
-        },
-    ],
+    files: &[anticheat::FileAuditRule {
+        path: "selfhost/loader/ring_verifier.pilot",
+        max_lines: 1500,
+        name_blind: true,
+        required_pub_fns: &[
+            "ring_name",
+            "parse_pkg_ring",
+            "verify_ring_dependency",
+            "verify_freestanding_source",
+            "check_legacy_import_migration",
+            "scan_and_migrate_ring_imports",
+            "verify_no_stale_stdlib_cache",
+        ],
+        required_code_markers: &[
+            "RingCheckResult",
+            "verify_ring_dependency",
+            "verify_freestanding_source",
+            "check_legacy_import_migration",
+            "scan_and_migrate_ring_imports",
+        ],
+        forbidden_code_markers: &[],
+        forbidden_string_substrings: &[],
+    }],
     required_group_pub_fns: &[],
 };
 
@@ -59,12 +58,16 @@ fn eval_ring(script: &str) -> String {
 }
 
 fn eval_files(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -118,11 +121,26 @@ pub fn test_m9_1_three_ring_hierarchy_and_illegal_upward_dependency_rejection() 
     let res = eval_ring(script);
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 5, "Expected 5 parts, got: {}", res);
-    assert_eq!(parts[0], "1:2:3:4:0", "Ring classifier must map core=1, std=2, pilot=3, selfhost=4, user=0");
-    assert_eq!(parts[1], "UP1_REJECTED", "core -> std must be rejected with RING001");
-    assert_eq!(parts[2], "UP2_REJECTED", "core -> pilot must be rejected with RING001");
-    assert_eq!(parts[3], "SH_REJECTED", "std -> SelfHost must be rejected with RING001");
-    assert_eq!(parts[4], "LEGAL_OK", "Legal downward dependencies must pass");
+    assert_eq!(
+        parts[0], "1:2:3:4:0",
+        "Ring classifier must map core=1, std=2, pilot=3, selfhost=4, user=0"
+    );
+    assert_eq!(
+        parts[1], "UP1_REJECTED",
+        "core -> std must be rejected with RING001"
+    );
+    assert_eq!(
+        parts[2], "UP2_REJECTED",
+        "core -> pilot must be rejected with RING001"
+    );
+    assert_eq!(
+        parts[3], "SH_REJECTED",
+        "std -> SelfHost must be rejected with RING001"
+    );
+    assert_eq!(
+        parts[4], "LEGAL_OK",
+        "Legal downward dependencies must pass"
+    );
 
     guard.finish();
 }
@@ -155,10 +173,22 @@ pub fn test_m9_2_freestanding_core_boundary_and_host_intrinsic_exclusion() {
     let res = eval_ring(script);
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 4, "Expected 4 parts, got: {}", res);
-    assert_eq!(parts[0], "RING002", "Importing std in core must trigger RING002");
-    assert_eq!(parts[1], "RING002", "Calling fs_open in core must trigger RING002");
-    assert_eq!(parts[2], "RING002", "Calling tcp_connect in core must trigger RING002");
-    assert_eq!(parts[3], "FREESTANDING_OK", "Freestanding core module must pass");
+    assert_eq!(
+        parts[0], "RING002",
+        "Importing std in core must trigger RING002"
+    );
+    assert_eq!(
+        parts[1], "RING002",
+        "Calling fs_open in core must trigger RING002"
+    );
+    assert_eq!(
+        parts[2], "RING002",
+        "Calling tcp_connect in core must trigger RING002"
+    );
+    assert_eq!(
+        parts[3], "FREESTANDING_OK",
+        "Freestanding core module must pass"
+    );
 
     guard.finish();
 }
@@ -210,10 +240,19 @@ pub fn test_m9_3_retired_python_clone_import_detection_and_lossless_autofix() {
     let res = eval_ring(script);
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 4, "Expected 4 parts, got: {}", res);
-    assert_eq!(parts[0], "7", "Expected 7 retired Python-clone imports detected");
+    assert_eq!(
+        parts[0], "7",
+        "Expected 7 retired Python-clone imports detected"
+    );
     assert_eq!(parts[1], "7", "Expected 7 lossless fixes applied");
-    assert_eq!(parts[2], "ALL_MIGRATED", "All legacy imports must be migrated to canonical std.*");
-    assert_eq!(parts[3], "COMMENTS_PRESERVED", "Comments must be preserved verbatim");
+    assert_eq!(
+        parts[2], "ALL_MIGRATED",
+        "All legacy imports must be migrated to canonical std.*"
+    );
+    assert_eq!(
+        parts[3], "COMMENTS_PRESERVED",
+        "Comments must be preserved verbatim"
+    );
 
     guard.finish();
 }
@@ -255,14 +294,32 @@ pub fn test_m9_4_canonical_std_packages_and_stale_cache_rejection() {
     let res = eval_ring(script);
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 2, "Expected 2 parts, got: {}", res);
-    assert_eq!(parts[0], "RING004_OK", "Committed .pilc in stdlib/ must be rejected with RING004");
-    assert_eq!(parts[1], "MATCHERS_OK", "Canonical Python-clone matchers must resolve accurately");
+    assert_eq!(
+        parts[0], "RING004_OK",
+        "Committed .pilc in stdlib/ must be rejected with RING004"
+    );
+    assert_eq!(
+        parts[1], "MATCHERS_OK",
+        "Canonical Python-clone matchers must resolve accurately"
+    );
 
     // std.* entry points that need the host stop at their seams.
     let seams = [
-        ("stdlib/std/fs.pilot", r#"file_handle_open("data.bin", "r");"#, "fs.open"),
-        ("stdlib/std/sync.pilot", "var m = mutex_new<i64>(); mutex_guard_new(var ref m);", "sync.mutex_lock"),
-        ("stdlib/std/task.pilot", "task_handle_new<i64>();", "task.spawn"),
+        (
+            "stdlib/std/fs.pilot",
+            r#"file_handle_open("data.bin", "r");"#,
+            "fs.open",
+        ),
+        (
+            "stdlib/std/sync.pilot",
+            "var m = mutex_new<i64>(); mutex_guard_new(var ref m);",
+            "sync.mutex_lock",
+        ),
+        (
+            "stdlib/std/task.pilot",
+            "task_handle_new<i64>();",
+            "task.spawn",
+        ),
         ("stdlib/std/os.pilot", "host_system_info();", "os.host_info"),
     ];
     for (file, call, id) in seams {

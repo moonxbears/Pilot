@@ -4,13 +4,9 @@
 // Supports: init, add, rm, resolve, install, update, audit, why, tree
 // Conforming to the Strict Name-Blind Boundary.
 // =========================================================================
-pub pkg Pilot.SelfHost.Cli.PkgCmd;
+pub pkg selfhost.cli;
 
-use Pilot.SelfHost.Pkg.Version.*;
-use Pilot.SelfHost.Pkg.Manifest.*;
-use Pilot.SelfHost.Pkg.Resolver.*;
-use Pilot.SelfHost.Pkg.Exclusions.*;
-use Pilot.SelfHost.Cli.DepsCmd.*;
+use selfhost.pkg.*;
 use Pilot.Core.File::*;
 
 // File.write_text maps directly to fs_write_text without __engine scraping.

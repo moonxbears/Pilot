@@ -3,15 +3,15 @@
 //! In-Process JS/TypeScript Adapter (`use js` / `use ts` via Node-API & Embedded QuickJS)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 18,
@@ -77,12 +77,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m18(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -185,7 +189,10 @@ fn test_m18_1_typescript_dts_parser_and_inspect_signatures() {
         "stdlib/std/polyglot/js_napi.pilot",
     ];
     let res = eval_m18(deps, script);
-    assert_eq!(res, "42", "TypeScript .d.ts parser and inspect signatures must pass");
+    assert_eq!(
+        res, "42",
+        "TypeScript .d.ts parser and inspect signatures must pass"
+    );
 
     guard.finish();
 }
@@ -313,13 +320,25 @@ fn test_m18_4_handle_scopes_promises_and_napi_synthesizer() {
     // Every other Node-API entry point stops at its own seam.
     let calls: &[(&str, &str)] = &[
         ("js_err_fetch()", "js.err_fetch"),
-        ("napi_close_handle_scope(var scope)", "js.close_handle_scope"),
+        (
+            "napi_close_handle_scope(var scope)",
+            "js.close_handle_scope",
+        ),
         ("js_ref_new(0x1000, 0x2000)", "js.ref_new"),
         ("js_ref_inc(ref r)", "js.ref_inc"),
         ("js_ref_dec(var r)", "js.ref_dec"),
-        ("napi_release_typedarray(var lease)", "js.typedarray_release"),
-        ("napi_get_value_bigint_int64(0x1000, ref v)", "js.bigint_read"),
-        ("napi_call_function(0x1000, 0x3000, args.slice(0, 1))", "js.call_function"),
+        (
+            "napi_release_typedarray(var lease)",
+            "js.typedarray_release",
+        ),
+        (
+            "napi_get_value_bigint_int64(0x1000, ref v)",
+            "js.bigint_read",
+        ),
+        (
+            "napi_call_function(0x1000, 0x3000, args.slice(0, 1))",
+            "js.call_function",
+        ),
         ("js_promise_new(0x1000)", "js.promise_new"),
         ("js_promise_resolve(var prom, 0x4000)", "js.promise_resolve"),
         ("js_promise_reject(var prom, 0x4000)", "js.promise_reject"),

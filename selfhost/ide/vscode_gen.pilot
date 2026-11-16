@@ -4,12 +4,10 @@
 // Generates language-configuration.json, snippets/pilot.json,
 // syntaxes/pilot.tmLanguage.json, and package.json via direct JSON serialization.
 // =========================================================================
-pub pkg Pilot.SelfHost.Ide.VscodeGen;
+pub pkg selfhost.ide;
 
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
-use Pilot.Core.Memory.*;
-use Pilot.Core.Meta.*;
 use Pilot.Core.File;
 
 pub pure fn nameof(sym: str) -> str => sym;

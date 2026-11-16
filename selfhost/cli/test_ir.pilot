@@ -21,13 +21,11 @@
 // A case whose lowering or run stops at a registered `ir.*` seam is counted
 // as stopped at a seam: neither passed nor failed. Every other difference is
 // a failure. The other cases are counted as not eligible.
-pub lvl(0) pkg Pilot.SelfHost.Cli.TestIr;
+pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.File;
 use std.proc;
 use std.text;
-use Pilot.SelfHost.Cli.TestCmd;
-use Pilot.SelfHost.Cli.Report;
 
 /// The seam prefix of the PilIR lowering and interpreter.
 pub pure fn ir_seam_prefix() -> str => "`ir.";
@@ -70,7 +68,7 @@ fn job(program: str, mode: str) -> proc.ProcessJob {
 }
 
 /// Runs `mode` on each of `programs` (`proc.run_all`).
-fn run_all(programs: List<str>, mode: str) -> List<proc.ProcessOutput> {
+fn run_all(ref programs: List<str>, mode: str) -> List<proc.ProcessOutput> {
     var jobs: List<proc.ProcessJob> = [];
     for program in programs { jobs.push(job(program, mode)); }
     return proc.run_all(jobs);
@@ -90,7 +88,7 @@ fn word_after(line: str, prefix: str) -> str {
 
 /// The problems with `optimized`, the `pilot ir opt` output of a case, given the
 /// functions `wanted` whose calls must all be inlined.
-pub fn inlined_problems(optimized: proc.ProcessOutput, wanted: List<str>) -> List<str> {
+pub fn inlined_problems(optimized: proc.ProcessOutput, ref wanted: List<str>) -> List<str> {
     var problems: List<str> = [];
     if optimized.exit_code != 0 { return [f"`pilot ir opt` failed\n--- stderr ---\n{optimized.stderr}"]; }
     // Each `fn <index> "<name>" ...` line's index and name.
@@ -138,7 +136,7 @@ fn seam_line(out: proc.ProcessOutput) -> str {
     return "";
 }
 
-fn fail(program: str, problems: List<str>, var ref tally: IrTally) {
+fn fail(program: str, ref problems: List<str>, var ref tally: IrTally) {
     tally.failed = tally.failed + 1;
     print(f"FAIL {program}");
     for p in problems { print("  " + p); }
@@ -146,7 +144,7 @@ fn fail(program: str, problems: List<str>, var ref tally: IrTally) {
 
 /// `pilot test --ir [paths...] [--filter text]`: exit 0 when no eligible case
 /// fails, 1 otherwise.
-pub fn test_ir_command(paths: List<str>, filter: str) -> i64 {
+pub fn test_ir_command(ref paths: List<str>, filter: str) -> i64 {
     var tally = IrTally { passed: 0, failed: 0, at_seam: 0, not_eligible: 0 };
     let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
     var cases: List<str> = [];

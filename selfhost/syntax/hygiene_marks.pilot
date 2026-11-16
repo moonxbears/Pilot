@@ -8,7 +8,7 @@
 //   SYN006: Hygiene Violation Audit Hint When Inspecting Captures
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Syntax.Hygiene;
+pub lvl(0) pkg selfhost.syntax;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

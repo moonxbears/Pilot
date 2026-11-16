@@ -18,47 +18,35 @@
 //   - a binding moved on only some paths has a drop flag in a stack slot:
 //     set where it is bound and by each assignment, cleared after the node
 //     where a move of it completes; its drops branch on it.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerDrop;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.check.own.*;
-use selfhost.check.drops.*;
-use selfhost.check.copies.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_members.*;
-use selfhost.ir.lower_switch.*;
-use selfhost.ir.lower_try.*;
+use selfhost.check.*;
 
 /// Glue nesting deeper than this is a planner error (a type that holds
 /// itself does so through an `opt` or a collection, a seam in the plan).
 fn max_glue_depth() -> i64 => 32;
 
 /// The drop and copy plan of the program `inf` describes.
-pub fn plan_program(inf: Infer) -> DropPlanner {
+pub fn plan_program(var ref inf: Infer) -> DropPlanner {
     let pl = drop_planner(inf);
     plan_copies(pl);
     return pl;
 }
 
 /// Whether the plan names node `n`.
-pub fn planned(lw: Lowerer, n: i64) -> bool => lw.plan.at.has(key(n));
+pub fn planned(ref lw: Lowerer, n: i64) -> bool => lw.plan.at.has(key(n));
 
-fn rows_at(lw: Lowerer, n: i64) -> List<List<any>> =>
+fn rows_at(ref lw: Lowerer, n: i64) -> List<List<any>> =>
     if lw.plan.at.has(key(n)) { lw.plan.at.get(key(n)) } else { [] };
 
-fn is(r: List<any>, a: DropAction) -> bool {
+fn is(ref r: List<any>, a: DropAction) -> bool {
     let code: i64 = r[0];
     return code == a as i64;
 }
 
 /// Before node `n` is lowered: its seam, its drop flags, then its `Before`
 /// drops.
-pub fn plan_before(lw: Lowerer, n: i64) {
+pub fn plan_before(var ref lw: Lowerer, n: i64) {
     for r in rows_at(lw, n) {
         if is(r, ::Seam) {
             let id: str = r[3];
@@ -80,7 +68,7 @@ pub fn plan_before(lw: Lowerer, n: i64) {
 }
 
 /// Stores `on` in the drop flag of binding `b`, when it has one.
-fn set_flag(lw: Lowerer, b: i64, on: bool, n: i64) {
+fn set_flag(var ref lw: Lowerer, b: i64, on: bool, n: i64) {
     if !lw.drop_flags.has(key(b)) || ir_is_terminated(lw.f, lw.cur) { return; }
     let slot = lw.drop_flags.get(key(b));
     let v = emit(lw, op_const_bits(), 0, bool_physics(lw), [pool_int(lw, if on { 1 } else { 0 })], n);
@@ -89,12 +77,12 @@ fn set_flag(lw: Lowerer, b: i64, on: bool, n: i64) {
 
 /// After an assignment stores a new value in binding `b`: its drop flag,
 /// when it has one, is set again.
-pub fn rearm_flag(lw: Lowerer, b: i64, n: i64) { set_flag(lw, b, true, n); }
+pub fn rearm_flag(var ref lw: Lowerer, b: i64, n: i64) { set_flag(lw, b, true, n); }
 
 /// After node `n` is lowered to `v`: its `After` drops, and the guards it
 /// binds join the innermost scope's releases. Gives the value of `n`: a
 /// copy of `v` when the plan copies it.
-pub fn plan_after(lw: Lowerer, n: i64, v: u32) -> u32 {
+pub fn plan_after(var ref lw: Lowerer, n: i64, v: u32) -> u32 {
     var out = v;
     for r in rows_at(lw, n) {
         if is(r, ::Copy) && v != ir_no_value() && !ir_is_terminated(lw.f, lw.cur) {
@@ -122,17 +110,17 @@ pub fn plan_after(lw: Lowerer, n: i64, v: u32) -> u32 {
 
 /// The drops a `return`, `break` or `continue` (node `n`) makes as it
 /// leaves, after a returned value is computed.
-pub fn plan_exit(lw: Lowerer, n: i64) { drop_rows(lw, n, ::Exit); }
+pub fn plan_exit(ref lw: Lowerer, n: i64) { drop_rows(lw, n, ::Exit); }
 
 /// The drop an assignment (node `n`) makes of the value its target held,
 /// after the new value is made and before it is stored.
-pub fn plan_replace(lw: Lowerer, n: i64) { drop_rows(lw, n, ::Replace); }
+pub fn plan_replace(ref lw: Lowerer, n: i64) { drop_rows(lw, n, ::Replace); }
 
 /// The drops on the false path of `if` node `n` without `else`.
-pub fn plan_else(lw: Lowerer, n: i64) { drop_rows(lw, n, ::Else); }
+pub fn plan_else(ref lw: Lowerer, n: i64) { drop_rows(lw, n, ::Else); }
 
 /// Whether deferred entry `n` is a guard's release, and if so emits it.
-pub fn run_release(lw: Lowerer, n: i64) -> bool {
+pub fn run_release(ref lw: Lowerer, n: i64) -> bool {
     if !lw.releases.has(key(n)) { return false; }
     let r = lw.releases.get(key(n));
     let b: i64 = r[1];
@@ -141,7 +129,7 @@ pub fn run_release(lw: Lowerer, n: i64) -> bool {
     return true;
 }
 
-fn drop_rows(lw: Lowerer, n: i64, a: DropAction) {
+fn drop_rows(ref lw: Lowerer, n: i64, a: DropAction) {
     for r in rows_at(lw, n) {
         if is(r, a) {
             let b: i64 = r[1];
@@ -152,7 +140,7 @@ fn drop_rows(lw: Lowerer, n: i64, a: DropAction) {
 }
 
 /// Drops the value binding `b` holds, of type `t`.
-fn drop_binding(lw: Lowerer, b: i64, t: i64, n: i64) {
+fn drop_binding(var ref lw: Lowerer, b: i64, t: i64, n: i64) {
     if ir_is_terminated(lw.f, lw.cur) { return; }
     let k = key(b);
     var v = ir_no_value();
@@ -176,7 +164,7 @@ fn drop_binding(lw: Lowerer, b: i64, t: i64, n: i64) {
 }
 
 /// The destructor of struct type `t` with a body to run, or -1.
-fn destructor_of(lw: Lowerer, t: i64) -> i64 {
+fn destructor_of(ref lw: Lowerer, t: i64) -> i64 {
     let p = lw.inf.p;
     let d = struct_decl(p, t);
     if d < 0 { return -1; }
@@ -188,7 +176,7 @@ fn destructor_of(lw: Lowerer, t: i64) -> i64 {
 
 /// Drops `v`, a value of type `t`: its destructor, then its fields that
 /// need dropping.
-fn drop_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) {
+fn drop_value(var ref lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) {
     if depth > max_glue_depth() {
         emit_trap(lw, f"internal error: the drop glue of `{ty_display(lw.inf.p.tt, t)}` nests more than {max_glue_depth()} levels of fields", n);
         ensure_open(lw);
@@ -234,7 +222,7 @@ fn drop_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) {
 /// element at a position, walking what its sequence operation gives when it
 /// has one (selfhost/check/own.pilot `owned_elements`).
 [StandIn("ir.engine_sequence_for", "slice<T> is { ptr<T>, usize } enumerated by its SliceEnumerator", "the value is the engine's own list, as in the seed, and is indexed by engine operations", "F6")]
-fn drop_elements(lw: Lowerer, whole: u32, et: i64, ops: List<str>, n: i64, depth: i64) {
+fn drop_elements(var ref lw: Lowerer, whole: u32, et: i64, ref ops: List<str>, n: i64, depth: i64) {
     let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
     let seq_op: str = ops[2];
     let list_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, list_slot()));
@@ -265,7 +253,7 @@ fn drop_elements(lw: Lowerer, whole: u32, et: i64, ops: List<str>, n: i64, depth
 /// holding its fields, the value-type ones copied too. A value of any other
 /// type is copied only when it is a constant's (selfhost/check/consts.pilot):
 /// deeply, by the engine operation `value_clone`.
-fn copy_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) -> u32 {
+fn copy_value(var ref lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) -> u32 {
     if depth == 0 && !declares_value(lw.inf.p, lw.bindings, t) {
         return emit(lw, op_call_intrinsic(), intrinsic_index(lw, "value_clone"), lw.f.value_physics[v], [v], n);
     }
@@ -294,7 +282,7 @@ fn copy_value(lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) -> u32 {
 
 /// Whether assignment `n` replaces an element its collection owns, so the
 /// old element is dropped (a `ReplaceElement` row).
-pub fn replaces_element(lw: Lowerer, n: i64) -> bool {
+pub fn replaces_element(ref lw: Lowerer, n: i64) -> bool {
     for r in rows_at(lw, n) { if is(r, ::ReplaceElement) { return true; } }
     return false;
 }
@@ -303,7 +291,7 @@ pub fn replaces_element(lw: Lowerer, n: i64) -> bool {
 /// the new value, then the old element dropped if there was one (a map's new
 /// key has none), then the store through the engine operation bound to the
 /// type's `[]=`.
-pub fn lower_element_replace(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_element_replace(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let target = lhs(s, n);
     let t = value_type(lw, lhs(s, target));

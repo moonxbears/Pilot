@@ -7,20 +7,20 @@
 
 pub mod bridge;
 mod checked;
-pub mod collect;
 pub mod codes;
+pub mod collect;
 mod heap;
-pub mod instruction;
 pub mod host;
+pub mod instruction;
 mod lower_args;
 mod lower_call;
 mod lower_cascade;
 mod lower_closure;
-mod lower_defer;
 mod lower_contract;
+mod lower_defer;
 mod lower_destructure;
-pub mod lower_drop;
 mod lower_dispatch;
+pub mod lower_drop;
 mod lower_expr;
 mod lower_for;
 mod lower_global;
@@ -44,10 +44,10 @@ pub mod value;
 pub mod vm;
 mod vm_gen;
 
+pub use collect::{KeyMap, Record};
+pub use host::HostValue;
 pub use instruction::{Instruction, Opcode};
 pub use pilc::{CompileDiagnostic, PilcBinary, PILC_V3_MAGIC, PILC_V3_VERSION};
-pub use host::HostValue;
-pub use collect::{KeyMap, Record};
 pub use value::PilotVal;
 pub use vm::{EngineIntrinsicHandler, HostOpHandler, PilVirtualMachine, VmFault, VmHook};
 
@@ -306,7 +306,11 @@ impl BytecodeCompiler {
 
     pub fn compile(arena: &AstArena, root: NodeId) -> PilcBinary {
         let mut c = Self::new();
-        let last = if root.is_some() { c.compile_node(arena, root) } else { 0 };
+        let last = if root.is_some() {
+            c.compile_node(arena, root)
+        } else {
+            0
+        };
         c.finish(arena, root, last)
     }
 
@@ -461,10 +465,13 @@ impl BytecodeCompiler {
     fn alloc_local_reg(&mut self) -> u8 {
         let r = self.next_local_reg;
         if r > LAST_LOCAL_REG {
-            self.error(codes::SEED, format!(
-                "function needs more than {} local variables in scope at once",
-                LAST_LOCAL_REG - FIRST_LOCAL_REG + 1
-            ));
+            self.error(
+                codes::SEED,
+                format!(
+                    "function needs more than {} local variables in scope at once",
+                    LAST_LOCAL_REG - FIRST_LOCAL_REG + 1
+                ),
+            );
             return LAST_LOCAL_REG;
         }
         self.next_local_reg += 1;
@@ -547,11 +554,23 @@ impl BytecodeCompiler {
         if let Some(&cmp) = self.instructions.last() {
             let at = self.instructions.len() - 1;
             let op = cmp.opcode();
-            let compares =
-                matches!(op, Opcode::CmpEq | Opcode::CmpNe | Opcode::CmpLt | Opcode::CmpLe | Opcode::CmpGt | Opcode::CmpGe);
+            let compares = matches!(
+                op,
+                Opcode::CmpEq
+                    | Opcode::CmpNe
+                    | Opcode::CmpLt
+                    | Opcode::CmpLe
+                    | Opcode::CmpGt
+                    | Opcode::CmpGe
+            );
             let dead = cmp.dst() == cond && cond >= mark.max(FIRST_TEMP_REG);
-            if compares && dead && cmp.src2() != instruction::CONST_REG && self.label.get() as usize <= at {
-                self.instructions[at] = Instruction::encode(Opcode::JumpUnless, op as u8, cmp.src1(), cmp.src2());
+            if compares
+                && dead
+                && cmp.src2() != instruction::CONST_REG
+                && self.label.get() as usize <= at
+            {
+                self.instructions[at] =
+                    Instruction::encode(Opcode::JumpUnless, op as u8, cmp.src1(), cmp.src2());
                 return at;
             }
         }
@@ -577,10 +596,13 @@ impl BytecodeCompiler {
     /// Copies argument registers into `r1..rN` without clobbering sources.
     fn stage_args(&mut self, args: &[u8]) {
         if args.len() > MAX_CALL_ARGS {
-            self.error(codes::SEED, format!(
-                "calls take at most {MAX_CALL_ARGS} arguments, found {}",
-                args.len()
-            ));
+            self.error(
+                codes::SEED,
+                format!(
+                    "calls take at most {MAX_CALL_ARGS} arguments, found {}",
+                    args.len()
+                ),
+            );
             return;
         }
         let safe: Vec<u8> = args
@@ -617,7 +639,8 @@ impl BytecodeCompiler {
         let at = self.instructions.len().checked_sub(1)?;
         let k = self.instructions[at];
         let fresh = k.opcode() == Opcode::LoadConst && k.dst() == r && r >= mark;
-        if !fresh || self.label.get() as usize > at || self.entry_patches.iter().any(|p| p.0 == at) {
+        if !fresh || self.label.get() as usize > at || self.entry_patches.iter().any(|p| p.0 == at)
+        {
             return None;
         }
         self.constants.get(k.wide() as usize).copied()
@@ -632,7 +655,10 @@ impl BytecodeCompiler {
         let key = self.instructions.last().copied().filter(|k| {
             k.opcode() == Opcode::LoadConst && k.dst() == r_key && self.label.get() as usize <= at
         });
-        match key.map(|k| k.wide()).filter(|&k| k <= u16::MAX as u32 && name <= u16::MAX as u32) {
+        match key
+            .map(|k| k.wide())
+            .filter(|&k| k <= u16::MAX as u32 && name <= u16::MAX as u32)
+        {
             Some(k) if !self.entry_patches.iter().any(|p| p.0 == at) => {
                 self.instructions.pop();
                 self.pc_spans.pop();
@@ -649,12 +675,22 @@ impl BytecodeCompiler {
     /// two arguments are read where they are; more are staged in `r1..`.
     fn emit_named_intrinsic(&mut self, d: u8, c: u32, args: &[u8]) {
         let ins = if args.len() <= 2 && c <= instruction::ARGS_NAME_MASK {
-            let (a, b) = (args.first().copied().unwrap_or(0), args.get(1).copied().unwrap_or(0));
+            let (a, b) = (
+                args.first().copied().unwrap_or(0),
+                args.get(1).copied().unwrap_or(0),
+            );
             let ext = ((args.len() as u32) << instruction::ARGS_COUNT_SHIFT) | c;
-            Instruction(Instruction::encode(Opcode::IntrinsicArgs, d, a, b).0 | ((ext as u64) << 32))
+            Instruction(
+                Instruction::encode(Opcode::IntrinsicArgs, d, a, b).0 | ((ext as u64) << 32),
+            )
         } else {
             self.stage_args(args);
-            let ins = Instruction::encode(Opcode::EngineIntrinsic, d, instruction::CONST_REG, args.len() as u8);
+            let ins = Instruction::encode(
+                Opcode::EngineIntrinsic,
+                d,
+                instruction::CONST_REG,
+                args.len() as u8,
+            );
             Instruction(ins.0 | ((c as u64) << 32))
         };
         self.push_ins(ins);
@@ -671,20 +707,28 @@ impl BytecodeCompiler {
     /// frame, so the locals cleared just before it (`release_block_locals`)
     /// need no clearing of their own, and `r` is returned from where it is.
     fn emit_fn_return(&mut self, r: u8) {
-        let reachable = |c: &Self, at: usize| c.label.get() as usize > at || c.entry_patches.iter().any(|p| p.0 == at);
+        let reachable = |c: &Self, at: usize| {
+            c.label.get() as usize > at || c.entry_patches.iter().any(|p| p.0 == at)
+        };
         let null = PilotVal::NULL;
         let is_null_load = |c: &Self, ins: Instruction| {
             ins.opcode() == Opcode::LoadConst && c.constants.get(ins.wide() as usize) == Some(&null)
         };
         let clears_local = |ins: Instruction| {
             let (from, n) = (ins.dst(), ins.src1());
-            ins.opcode() == Opcode::Clear && from >= FIRST_LOCAL_REG && from as usize + n as usize <= FIRST_TEMP_REG as usize
+            ins.opcode() == Opcode::Clear
+                && from >= FIRST_LOCAL_REG
+                && from as usize + n as usize <= FIRST_TEMP_REG as usize
                 && !(from..from.saturating_add(n)).contains(&r)
         };
         let mut value = None;
         if let Some(&last) = self.instructions.last() {
             let at = self.instructions.len() - 1;
-            if r >= FIRST_TEMP_REG && last.dst() == r && is_null_load(self, last) && !reachable(self, at) {
+            if r >= FIRST_TEMP_REG
+                && last.dst() == r
+                && is_null_load(self, last)
+                && !reachable(self, at)
+            {
                 value = self.instructions.pop().zip(self.pc_spans.pop());
             }
         }
@@ -739,7 +783,11 @@ impl BytecodeCompiler {
                 self.pc_spans.pop();
                 continue;
             }
-            if last.opcode() == Opcode::Move && released(last.src1()) && at > 0 && self.label.get() as usize <= at - 1 {
+            if last.opcode() == Opcode::Move
+                && released(last.src1())
+                && at > 0
+                && self.label.get() as usize <= at - 1
+            {
                 let prev = self.instructions[at - 1];
                 if prev.dst() == last.src1() && prev.opcode().writes_dst() {
                     self.instructions[at - 1] = prev.with_dst(last.dst());
@@ -982,7 +1030,9 @@ impl BytecodeCompiler {
         let n = arena.node(id);
         match n.node_kind() {
             NodeKind::IntLit => arena.i64_pool.get(n.lhs as usize).copied(),
-            NodeKind::UnaryExpr if n.flags == 0 => Self::const_int(arena, NodeId(n.lhs)).map(i64::wrapping_neg),
+            NodeKind::UnaryExpr if n.flags == 0 => {
+                Self::const_int(arena, NodeId(n.lhs)).map(i64::wrapping_neg)
+            }
             _ => None,
         }
     }
@@ -1008,7 +1058,10 @@ impl BytecodeCompiler {
                 match Self::const_int(arena, value) {
                     Some(v) => v,
                     None => {
-                        self.error(codes::SEED, format!("the value of `{e_nm}.{v_nm}` must be an integer literal"));
+                        self.error(
+                            codes::SEED,
+                            format!("the value of `{e_nm}.{v_nm}` must be an integer literal"),
+                        );
                         next
                     }
                 }
@@ -1019,4 +1072,3 @@ impl BytecodeCompiler {
         self.const_maps.insert(e_nm, CMap::Map(map));
     }
 }
-

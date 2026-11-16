@@ -5,6 +5,8 @@
 // `LibraryImport` / `dlopen` bindings from `LayoutTable` physics descriptors.
 // ============================================================================
 
+pub pkg selfhost;
+
 use std.text;
 
 pub struct FfiBindingBundle {

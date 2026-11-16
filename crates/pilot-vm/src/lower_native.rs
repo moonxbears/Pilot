@@ -21,16 +21,56 @@ const ASM_TOKEN: &str = "asm";
 /// operation (unsigned division, comparison and shift, conversions,
 /// saturating and Euclidean forms, three-way compares, memory access).
 const MACHINE_OPS: &[Option<Opcode>] = &[
-    Some(Opcode::Add), Some(Opcode::Sub), Some(Opcode::Mul), Some(Opcode::Div), None,
-    Some(Opcode::Rem), None, Some(Opcode::Add), Some(Opcode::Sub), Some(Opcode::Mul),
-    Some(Opcode::Div), Some(Opcode::BitAnd), Some(Opcode::BitOr), Some(Opcode::Xor), Some(Opcode::Shl),
-    None, Some(Opcode::Shr), Some(Opcode::CmpEq), Some(Opcode::CmpNe), None,
-    None, None, None, Some(Opcode::CmpLt), Some(Opcode::CmpLe),
-    Some(Opcode::CmpGt), Some(Opcode::CmpGe), Some(Opcode::CmpLt), Some(Opcode::CmpLe), Some(Opcode::CmpEq),
-    Some(Opcode::Neg), Some(Opcode::Neg), Some(Opcode::Not), Some(Opcode::BitNot), None,
-    None, None, None, None, None,
-    None, None, None, None, None,
-    None, None, None, Some(Opcode::Add), Some(Opcode::Sub),
+    Some(Opcode::Add),
+    Some(Opcode::Sub),
+    Some(Opcode::Mul),
+    Some(Opcode::Div),
+    None,
+    Some(Opcode::Rem),
+    None,
+    Some(Opcode::Add),
+    Some(Opcode::Sub),
+    Some(Opcode::Mul),
+    Some(Opcode::Div),
+    Some(Opcode::BitAnd),
+    Some(Opcode::BitOr),
+    Some(Opcode::Xor),
+    Some(Opcode::Shl),
+    None,
+    Some(Opcode::Shr),
+    Some(Opcode::CmpEq),
+    Some(Opcode::CmpNe),
+    None,
+    None,
+    None,
+    None,
+    Some(Opcode::CmpLt),
+    Some(Opcode::CmpLe),
+    Some(Opcode::CmpGt),
+    Some(Opcode::CmpGe),
+    Some(Opcode::CmpLt),
+    Some(Opcode::CmpLe),
+    Some(Opcode::CmpEq),
+    Some(Opcode::Neg),
+    Some(Opcode::Neg),
+    Some(Opcode::Not),
+    Some(Opcode::BitNot),
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    Some(Opcode::Add),
+    Some(Opcode::Sub),
     Some(Opcode::Mul),
 ];
 
@@ -45,7 +85,12 @@ pub(crate) fn native(kind: NativeKind, name: &str) -> Option<&'static str> {
 impl BytecodeCompiler {
     /// `name(args)` when `name` is native, quoting or the seed token
     /// `__engine`; `None` otherwise.
-    pub(crate) fn compile_native_call(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> Option<u8> {
+    pub(crate) fn compile_native_call(
+        &mut self,
+        arena: &AstArena,
+        name: &str,
+        args: &[NodeId],
+    ) -> Option<u8> {
         if name == crate::ENGINE_TOKEN {
             return Some(self.compile_engine_call(arena, args));
         }
@@ -61,7 +106,11 @@ impl BytecodeCompiler {
         let spread: Vec<NodeId> = match args {
             [only] if arena.node(*only).node_kind() == NodeKind::TupleExpr => {
                 let tn = arena.node(*only);
-                arena.children_slice(tn.lhs, tn.rhs).iter().map(|&c| NodeId(c)).collect()
+                arena
+                    .children_slice(tn.lhs, tn.rhs)
+                    .iter()
+                    .map(|&c| NodeId(c))
+                    .collect()
             }
             _ => args.to_vec(),
         };
@@ -72,18 +121,21 @@ impl BytecodeCompiler {
         let (hook, defs, call_args) = pilot_parser::bootstrap_tables().call_hook(name)?;
         let hook_owned = hook.to_string();
         let passed = self.compile_args(arena, &spread);
-        let mapped: Vec<u8> = call_args
-            .into_iter()
-            .map(|ca| match ca {
-                Ok(p) => passed.get(p).copied().unwrap_or_else(|| match defs.get(p).and_then(|d| *d) {
-                    Some(Ok(n)) => self.emit_const(PilotVal::from_int(n)),
-                    Some(Err(s)) => self.emit_const(PilotVal::from_str(s)),
-                    None => self.emit_null(),
-                }),
-                Err(Ok(n)) => self.emit_const(PilotVal::from_int(n)),
-                Err(Err(s)) => self.emit_const(PilotVal::from_str(s)),
-            })
-            .collect();
+        let mapped: Vec<u8> =
+            call_args
+                .into_iter()
+                .map(|ca| match ca {
+                    Ok(p) => passed.get(p).copied().unwrap_or_else(|| {
+                        match defs.get(p).and_then(|d| *d) {
+                            Some(Ok(n)) => self.emit_const(PilotVal::from_int(n)),
+                            Some(Err(s)) => self.emit_const(PilotVal::from_str(s)),
+                            None => self.emit_null(),
+                        }
+                    }),
+                    Err(Ok(n)) => self.emit_const(PilotVal::from_int(n)),
+                    Err(Err(s)) => self.emit_const(PilotVal::from_str(s)),
+                })
+                .collect();
         Some(self.emit_intrinsic(&hook_owned, &mapped))
     }
 
@@ -111,7 +163,11 @@ impl BytecodeCompiler {
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_a = args.get(1).map_or(0, |&a| self.compile_node(arena, a));
-        let r_b = if unary { 0 } else { args.get(2).map_or(0, |&b| self.compile_node(arena, b)) };
+        let r_b = if unary {
+            0
+        } else {
+            args.get(2).map_or(0, |&b| self.compile_node(arena, b))
+        };
         self.emit(opcode, dst, r_a, r_b);
         self.release_to(mark);
         dst
@@ -152,7 +208,10 @@ impl BytecodeCompiler {
     /// `nameof(x)`: the name `x` as a string.
     fn compile_symbol_quote(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> u8 {
         let [arg] = args else {
-            return self.error(crate::codes::ARG_COUNT, format!("`{name}` expects one argument"));
+            return self.error(
+                crate::codes::ARG_COUNT,
+                format!("`{name}` expects one argument"),
+            );
         };
         let arg = *arg;
         let an = arena.node(arg);
@@ -165,12 +224,22 @@ impl BytecodeCompiler {
     }
 
     /// `sizeof(T)` and other compile-time questions about a type.
-    fn compile_type_query(&mut self, arena: &AstArena, name: &str, query: &str, args: &[NodeId]) -> u8 {
-        let ty = args.first().map(|&a| arena.node(a)).filter(|n| {
-            matches!(n.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed)
-        });
+    fn compile_type_query(
+        &mut self,
+        arena: &AstArena,
+        name: &str,
+        query: &str,
+        args: &[NodeId],
+    ) -> u8 {
+        let ty = args
+            .first()
+            .map(|&a| arena.node(a))
+            .filter(|n| matches!(n.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed));
         let Some(ty) = ty.map(|n| Self::name(arena, n.lhs).to_string()) else {
-            return self.error(crate::codes::SYNTAX, format!("`{name}` expects a type name"));
+            return self.error(
+                crate::codes::SYNTAX,
+                format!("`{name}` expects a type name"),
+            );
         };
         if query != QUERY_BYTE_SIZE {
             return self.error(
@@ -182,9 +251,7 @@ impl BytecodeCompiler {
             Some((size, _align)) => self.emit_const(PilotVal::from_int(size)),
             None => self.error(
                 crate::codes::SEED,
-                format!(
-                    "`{name}({ty})`: layout is not known for `{ty}`"
-                ),
+                format!("`{name}({ty})`: layout is not known for `{ty}`"),
             ),
         }
     }

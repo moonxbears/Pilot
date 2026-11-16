@@ -1,0 +1,6 @@
+// The other file of `lib.ledger`; calls `unit()` from lib/ledger_a.pilot.
+pkg lib.ledger;
+
+use lib.ledger;
+
+pkg fn count() -> i64 => unit() + 1;

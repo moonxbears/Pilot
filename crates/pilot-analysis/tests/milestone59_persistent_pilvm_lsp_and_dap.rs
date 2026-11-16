@@ -70,7 +70,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pilot_analysis::{
-    AnalysisPipeline, flatten_ast, handle_engine_intrinsic, LayoutId, PhysicsGeometry,
+    flatten_ast, handle_engine_intrinsic, AnalysisPipeline, LayoutId, PhysicsGeometry,
     PhysicsRegistry,
 };
 use pilot_intern::SymbolId;
@@ -258,13 +258,21 @@ fn escape_pilot_str(s: &str) -> String {
 
 fn assert_valid_json_via_python(json_text: &str, context: &str) {
     let mut child = Command::new("python3")
-        .args(["-c", "import json, sys; obj = json.loads(sys.stdin.read()); assert obj is not None"])
+        .args([
+            "-c",
+            "import json, sys; obj = json.loads(sys.stdin.read()); assert obj is not None",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("python3 required for strict JSON validation");
-    child.stdin.as_mut().unwrap().write_all(json_text.as_bytes()).unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(json_text.as_bytes())
+        .unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(
         out.status.success(),
@@ -294,7 +302,11 @@ fn parse_content_length_frames(stream: &str) -> Vec<String> {
         let mut len_opt = None;
         for line in hdr.split("\r\n") {
             if let Some(rest) = line.strip_prefix("Content-Length:") {
-                len_opt = Some(rest.trim().parse::<usize>().expect("Invalid Content-Length integer"));
+                len_opt = Some(
+                    rest.trim()
+                        .parse::<usize>()
+                        .expect("Invalid Content-Length integer"),
+                );
             }
         }
         let body_len = len_opt.expect("Missing Content-Length header");
@@ -329,7 +341,11 @@ fn open_lsp_session(target_doc: &str, handlers_src: &str) -> LspSession {
         arena.diagnostics
     );
     let analysis = AnalysisPipeline::analyze(&arena, arena.root).physics;
-    LspSession { arena, analysis, combined }
+    LspSession {
+        arena,
+        analysis,
+        combined,
+    }
 }
 
 fn run_lsp_handler_query(session: &LspSession, method: &str, offset: usize) -> String {
@@ -386,7 +402,8 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
         String::from_utf8_lossy(&gate_out.stderr)
     );
 
-    let vscode_gen_src = std::fs::read_to_string(root.join("selfhost/ide/vscode_gen.pilot")).unwrap();
+    let vscode_gen_src =
+        std::fs::read_to_string(root.join("selfhost/ide/vscode_gen.pilot")).unwrap();
     let handlers_src = std::fs::read_to_string(root.join("selfhost/lsp/handlers.pilot")).unwrap();
     assert!(vscode_gen_src.lines().count() <= 1000);
     assert!(handlers_src.lines().count() <= 1000);
@@ -407,7 +424,11 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
     );
 
     let gen_arena = parse(&gen_script);
-    assert!(gen_arena.diagnostics.is_empty(), "vscode_gen diagnostics: {:?}", gen_arena.diagnostics);
+    assert!(
+        gen_arena.diagnostics.is_empty(),
+        "vscode_gen diagnostics: {:?}",
+        gen_arena.diagnostics
+    );
     let (flat, syms) = flatten_ast(&gen_arena, gen_arena.root);
     let mut reg = PhysicsRegistry::new(flat, syms);
     let reg_ptr = &mut reg as *mut PhysicsRegistry;
@@ -418,13 +439,18 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
     vm.engine_handler = Some(Box::new(move |name, args| {
         if name == "fs_read_text" {
             trap_clone.store(true, Ordering::SeqCst);
-            return Err("FORBIDDEN: fs_read_text pass-through is banned in vscode_gen.pilot".into());
+            return Err(
+                "FORBIDDEN: fs_read_text pass-through is banned in vscode_gen.pilot".into(),
+            );
         }
         let r = unsafe { &mut *reg_ptr };
         handle_engine_intrinsic(r, name, args)
     }));
     vm.load_binary(BytecodeCompiler::compile(&gen_arena, gen_arena.root));
-    let gen_out = vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr();
+    let gen_out = vm
+        .run_checked()
+        .unwrap_or_else(|f| panic!("VM fault: {f}"))
+        .to_string_repr();
     assert!(
         !fs_read_trapped.load(Ordering::SeqCst),
         "vscode_gen.pilot attempted forbidden fs_read_text pass-through!"
@@ -487,7 +513,10 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
     );
 
     // 2b. Dot-completion on `sensor.` inside `main_fn`
-    let dot_off = target_doc.find(&format!("let c = sensor.{}", pub_field)).unwrap() + "let c = sensor.".len();
+    let dot_off = target_doc
+        .find(&format!("let c = sensor.{}", pub_field))
+        .unwrap()
+        + "let c = sensor.".len();
     let comp_res = run_lsp_handler_query(&lsp, "textDocument/completion", dot_off);
     assert!(
         comp_res.contains(&pub_field) && comp_res.contains(&pub_method),
@@ -537,9 +566,15 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
     // 2e. prepareRename & rename guard on seed keywords vs user symbol
     let seed_fn_off = target_doc.find("fn ").unwrap() + 1;
     let prep_seed = run_lsp_handler_query(&lsp, "textDocument/prepareRename", seed_fn_off);
-    assert_eq!(prep_seed, "null", "prepareRename must reject seed keyword 'fn'");
+    assert_eq!(
+        prep_seed, "null",
+        "prepareRename must reject seed keyword 'fn'"
+    );
     let ren_seed = run_lsp_handler_query(&lsp, "textDocument/rename:struct", call_pos);
-    assert_eq!(ren_seed, "null", "rename must reject renaming to seed keyword 'struct'");
+    assert_eq!(
+        ren_seed, "null",
+        "rename must reject renaming to seed keyword 'struct'"
+    );
     let prep_user = run_lsp_handler_query(&lsp, "textDocument/prepareRename", call_pos);
     assert!(
         prep_user.contains(&helper_fn) && prep_user != "null",
@@ -597,7 +632,10 @@ pub fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_
          pub fn {fn_nm}(x: i64) -> i64 {{\n    let tag = \"{{brace}}\";\n    return x + {k1};\n}}\n"
     );
     // Pair 1: Edit strictly inside `fn` body -> MUST cutoff (`1`)
-    let body_edit = base_mod.replace(&format!("return x + {};", k1), &format!("return (x * {}) - 3;", k2));
+    let body_edit = base_mod.replace(
+        &format!("return x + {};", k1),
+        &format!("return (x * {}) - 3;", k2),
+    );
     // Pair 2: Unbalanced `}` inside string literal in `fn` body -> MUST cutoff (`1`)
     let str_brace_edit = base_mod.replace("\"{brace}\"", "\"}}}still_in_string{{{\"");
     // Pair 3: `fn` return type edit -> MUST NOT cutoff (`0`)
@@ -607,13 +645,22 @@ pub fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_
     // Pair 5: `struct` field visibility edit INSIDE `{ ... }` -> MUST NOT cutoff (`0`)
     let struct_vis_edit = base_mod.replace("pub gain: i64;", "priv gain: i64;");
     // Pair 6: `interface` method signature edit INSIDE `{ ... }` -> MUST NOT cutoff (`0`)
-    let iface_sig_edit = base_mod.replace("fn run(v: i64) -> i64;", "fn run(v: i64, scale: i64) -> i64;");
+    let iface_sig_edit = base_mod.replace(
+        "fn run(v: i64) -> i64;",
+        "fn run(v: i64, scale: i64) -> i64;",
+    );
 
     // 3. Multi-message `Content-Length` persistent LSP stream (`initialize` -> `didOpen` -> `didChange` -> `hover` -> `shutdown`)
     let live_fn_v1 = format!("orbit_v1_{}", rng.ident_suffix(5));
     let live_fn_v2 = format!("orbit_v2_{}", rng.ident_suffix(5));
-    let doc_v1 = format!("pub fn {}(mass: i64) -> i64 {{ return mass * 2; }}", live_fn_v1);
-    let doc_v2 = format!("pub fn {}(mass: i64, dt: i64) -> i64 {{ return mass * dt; }}", live_fn_v2);
+    let doc_v1 = format!(
+        "pub fn {}(mass: i64) -> i64 {{ return mass * 2; }}",
+        live_fn_v1
+    );
+    let doc_v2 = format!(
+        "pub fn {}(mass: i64, dt: i64) -> i64 {{ return mass * dt; }}",
+        live_fn_v2
+    );
     let hover_byte = 8; // inside `orbit_v2_<rand>`
 
     let frame = |j: &str| format!("Content-Length: {}\r\n\r\n{}", j.len(), j);
@@ -659,14 +706,24 @@ pub fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_
     );
 
     let arena = parse(&script);
-    assert!(arena.diagnostics.is_empty(), "ide_db/server parse diagnostics: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "ide_db/server parse diagnostics: {:?}",
+        arena.diagnostics
+    );
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-    let out = vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr();
+    let out = vm
+        .run_checked()
+        .unwrap_or_else(|f| panic!("VM fault: {f}"))
+        .to_string_repr();
     let segs: Vec<&str> = out.split("@@LSP@@").collect();
     assert_eq!(segs.len(), 3, "Unexpected ide_db/lsp output: {}", out);
 
-    assert_eq!(segs[0], ref_doc, "8-step incremental span edit diverged from reference document");
+    assert_eq!(
+        segs[0], ref_doc,
+        "8-step incremental span edit diverged from reference document"
+    );
     assert_eq!(
         segs[1], "1,1,0,0,0,0",
         "Early-cutoff matrix failed (expected 1,1,0,0,0,0 for [fn_body, str_brace, fn_ret, struct_field, struct_vis, iface_sig], got {})",
@@ -674,13 +731,20 @@ pub fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_
     );
 
     let frames = parse_content_length_frames(segs[2]);
-    assert_eq!(frames.len(), 3, "Expected 3 JSON-RPC responses (id 1, 2, 3), got {:?}", frames);
+    assert_eq!(
+        frames.len(),
+        3,
+        "Expected 3 JSON-RPC responses (id 1, 2, 3), got {:?}",
+        frames
+    );
     for (idx, f) in frames.iter().enumerate() {
         assert_valid_json_via_python(f, &format!("LSP response frame {}", idx));
     }
     assert!(frames[0].contains("\"hoverProvider\":true"));
     assert!(
-        frames[1].contains(&live_fn_v2) && !frames[1].contains(&live_fn_v1) && !frames[1].contains("resident_pilvm_lsp"),
+        frames[1].contains(&live_fn_v2)
+            && !frames[1].contains(&live_fn_v1)
+            && !frames[1].contains("resident_pilvm_lsp"),
         "LSP hover response did not reflect live didChange symbol '{}':\n{}",
         live_fn_v2,
         frames[1]
@@ -731,7 +795,11 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
         ("repl_eval.pilot", &repl_eval),
         ("cli_dbg.pilot", &cli_dbg),
     ] {
-        assert!(src.lines().count() <= 1500, "selfhost/dap/{} exceeds 1,500 LOC", name);
+        assert!(
+            src.lines().count() <= 1500,
+            "selfhost/dap/{} exceeds 1,500 LOC",
+            name
+        );
         for banned in ["Apples", "production_cluster_db", "7fff2000"] {
             assert!(
                 !src.contains(banned),
@@ -774,10 +842,16 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
     debuggee.push_str("    let final_sum = first_call + second_call;\n");
     debuggee.push_str("    return final_sum;\n");
     debuggee.push_str("}\n");
-    debuggee.push_str(&format!("let __dbg_res = {entry_nm}({seed_x});\n__dbg_res;\n"));
+    debuggee.push_str(&format!(
+        "let __dbg_res = {entry_nm}({seed_x});\n__dbg_res;\n"
+    ));
 
     let dbg_arena = parse(&debuggee);
-    assert!(dbg_arena.diagnostics.is_empty(), "debuggee parse diagnostics: {:?}", dbg_arena.diagnostics);
+    assert!(
+        dbg_arena.diagnostics.is_empty(),
+        "debuggee parse diagnostics: {:?}",
+        dbg_arena.diagnostics
+    );
     let dbg_src = debuggee.clone();
     let dbg_bin = BytecodeCompiler::compile(&dbg_arena, dbg_arena.root);
     let pc_spans = dbg_bin.pc_spans.clone();
@@ -792,7 +866,8 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
         }
     }
 
-    let trace: Arc<std::sync::Mutex<Vec<(i64, i64, i64)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let trace: Arc<std::sync::Mutex<Vec<(i64, i64, i64)>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
     let trace_ref = Arc::clone(&trace);
     let mut cur_depth = 0i64;
     let mut target_vm = PilVirtualMachine::new();
@@ -802,7 +877,11 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
             .filter(|s| s.start > 0 || s.end > 0)
             .map(|s| {
                 let end = (s.start as usize).min(dbg_src.len());
-                dbg_src.as_bytes()[..end].iter().filter(|&&b| b == b'\n').count() as i64 + 1
+                dbg_src.as_bytes()[..end]
+                    .iter()
+                    .filter(|&&b| b == b'\n')
+                    .count() as i64
+                    + 1
             })
             .unwrap_or(0);
         let lx_val = local_x_reg
@@ -824,7 +903,10 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
     target_vm.load_binary(dbg_bin);
     let expected_first = (seed_x + 4) * mul_k + add_c;
     let expected_second = expected_first * mul_k + add_c;
-    assert_eq!(target_vm.run().as_int(), Some(expected_first + expected_second));
+    assert_eq!(
+        target_vm.run().as_int(),
+        Some(expected_first + expected_second)
+    );
 
     let recorded = trace.lock().unwrap().clone();
     assert!(!recorded.is_empty(), "VmHook recorded zero spans");
@@ -910,7 +992,11 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
     );
 
     let dap_arena = parse(&dap_driver);
-    assert!(dap_arena.diagnostics.is_empty(), "DAP driver diagnostics: {:?}", dap_arena.diagnostics);
+    assert!(
+        dap_arena.diagnostics.is_empty(),
+        "DAP driver diagnostics: {:?}",
+        dap_arena.diagnostics
+    );
     let mut phys = struct_analysis.physics;
     let phys_ptr = &mut phys as *mut PhysicsRegistry;
     let mut dap_vm = PilVirtualMachine::new();
@@ -919,7 +1005,10 @@ pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_cr
         handle_engine_intrinsic(r, name, args)
     }));
     dap_vm.load_binary(BytecodeCompiler::compile(&dap_arena, dap_arena.root));
-    let dap_out = dap_vm.run_checked().unwrap_or_else(|f| panic!("VM fault: {f}")).to_string_repr();
+    let dap_out = dap_vm
+        .run_checked()
+        .unwrap_or_else(|f| panic!("VM fault: {f}"))
+        .to_string_repr();
     let cols: Vec<&str> = dap_out.split("@@DAP@@").collect();
     assert_eq!(cols.len(), 6, "Unexpected DAP output: {}", dap_out);
 

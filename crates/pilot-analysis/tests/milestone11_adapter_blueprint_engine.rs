@@ -3,15 +3,15 @@
 //! First-Class `adapter` Blueprint Engine & Zero-Cost Idiom Lifter
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 11,
@@ -85,12 +85,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m11(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -148,7 +152,10 @@ fn test_m11_1_adapter_rule_registry_and_prefix_case_transformations() {
     "#;
 
     let res = eval_m11(&["selfhost/adapter/rules.pilot"], script);
-    assert_eq!(res, "42", "Adapter rule registry & string transforms must execute correctly");
+    assert_eq!(
+        res, "42",
+        "Adapter rule registry & string transforms must execute correctly"
+    );
 
     guard.finish();
 }
@@ -235,7 +242,10 @@ fn test_m11_2_zero_allocation_pilir_thunk_lowering() {
         "selfhost/adapter/compiler.pilot",
     ];
     let res = eval_m11(deps, script);
-    assert_eq!(res, "42", "12-function C API adaptation must plan the PilIR thunks of spec 11.4 with 0 diagnostics");
+    assert_eq!(
+        res, "42",
+        "12-function C API adaptation must plan the PilIR thunks of spec 11.4 with 0 diagnostics"
+    );
 
     // Installing the planned thunks needs the PilIR function model (F5).
     let install = r#"
@@ -288,7 +298,10 @@ fn test_m11_3_user_facing_adapt_attributes_and_error_facets() {
     "#;
 
     let res = eval_m11(&["stdlib/std/polyglot/adapter.pilot"], script);
-    assert_eq!(res, "42", "std.polyglot.adapter error types and attribute constructors must operate accurately");
+    assert_eq!(
+        res, "42",
+        "std.polyglot.adapter error types and attribute constructors must operate accurately"
+    );
 
     guard.finish();
 }
@@ -304,8 +317,15 @@ fn test_m11_4_pilot_ffi_mock_deletion_and_adapter_diagnostics() {
     );
 
     // Verify complete deletion of legacy `crates/pilot-ffi` crate
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-    assert!(!root.join("crates/pilot-ffi").exists(), "Retired crates/pilot-ffi must remain deleted!");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    assert!(
+        !root.join("crates/pilot-ffi").exists(),
+        "Retired crates/pilot-ffi must remain deleted!"
+    );
 
     // ADP001..ADP004, each from the shape of a real signature.
     let script = r#"
@@ -358,8 +378,10 @@ fn test_m11_4_pilot_ffi_mock_deletion_and_adapter_diagnostics() {
         "selfhost/adapter/compiler.pilot",
     ];
     let res = eval_m11(deps, script);
-    assert_eq!(res, "42", "Adapter must emit ADP001..ADP004 from the signatures it is given");
+    assert_eq!(
+        res, "42",
+        "Adapter must emit ADP001..ADP004 from the signatures it is given"
+    );
 
     guard.finish();
 }
-

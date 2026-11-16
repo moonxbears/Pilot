@@ -21,14 +21,9 @@
 // A built member keeps its declaration and the generic arguments that apply
 // to its signature, written in terms of the type's own generic parameters;
 // a lookup on `T<args>` substitutes `args` for them.
-pub lvl(0) pkg Pilot.SelfHost.Check.Methods;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.diag.*;
-use selfhost.types.method_table.*;
-use selfhost.types.bundle_splice.*;
+use selfhost.types.*;
 
 /// Everything built for one type name.
 pub struct BuiltType {
@@ -78,30 +73,30 @@ pub struct BuiltType {
 
 fn is_method_kind(k: i64) -> bool => k == nk_fn() || k == nk_operator() || k == nk_indexer();
 
-fn member_name(s: Snap, m: i64) -> str => if kind(s, m) == nk_indexer() { "[]" } else { node_name(s, m) };
+fn member_name(ref s: Snap, m: i64) -> str => if kind(s, m) == nk_indexer() { "[]" } else { node_name(s, m) };
 
-fn is_field(s: Snap, m: i64) -> bool {
+fn is_field(ref s: Snap, m: i64) -> bool {
     let k = kind(s, m);
     return k == nk_param() || ((k == nk_let() || k == nk_var()) && annot(s, m) >= 0);
 }
 
-fn field_type_node(s: Snap, m: i64) -> i64 => if kind(s, m) == nk_param() { rhs(s, m) } else { annot(s, m) };
+fn field_type_node(ref s: Snap, m: i64) -> i64 => if kind(s, m) == nk_param() { rhs(s, m) } else { annot(s, m) };
 
 /// The generic arguments that stand for a type's own parameters.
-fn own_args(p: Program, decl: i64, names: List<str>) -> List<i64> {
+fn own_args(var ref p: Program, decl: i64, ref names: List<str>) -> List<i64> {
     var out: List<i64> = [];
     for n in names { out.push(ty_param(p.tt, decl, n)); }
     return out;
 }
 
-fn generic_decl(p: Program, name: str) -> i64 {
+fn generic_decl(ref p: Program, name: str) -> i64 {
     for d in nl_get(p.type_decls, name) {
         if prog_tparam_names(p, d).len() > 0 { return d; }
     }
     return prog_type_decl(p, name);
 }
 
-fn entry_for(p: Program, name: str, tier: MemberTier, origin: str, m: i64) -> MethodTableEntry {
+fn entry_for(ref p: Program, name: str, tier: MemberTier, origin: str, m: i64) -> MethodTableEntry {
     let s = p.s;
     var params = "";
     for prm in fn_params(s, m) {
@@ -123,13 +118,13 @@ fn entry_for(p: Program, name: str, tier: MemberTier, origin: str, m: i64) -> Me
     };
 }
 
-fn add_found(bt: BuiltType, m: Member) -> i64 {
+fn add_found(var ref bt: BuiltType, m: Member) -> i64 {
     bt.found.push(m);
     return bt.found.len() - 1;
 }
 
 /// Registers member `m` under `name` at `tier`, with origin `origin`.
-fn register(p: Program, bt: BuiltType, name: str, tier: MemberTier, origin: str, m: Member, excluded: bool) {
+fn register(ref p: Program, var ref bt: BuiltType, name: str, tier: MemberTier, origin: str, m: Member, excluded: bool) {
     var mt = bt.table;
     register_method(var mt, entry_for(p, name, tier, origin, m.decl), excluded);
     if excluded { return; }
@@ -142,14 +137,14 @@ fn register(p: Program, bt: BuiltType, name: str, tier: MemberTier, origin: str,
 
 /// The member a type `sub` built for `name`, with its generic arguments
 /// rewritten from `sub`'s parameters to the arguments `st` gives them.
-fn compose(p: Program, sub: BuiltType, m: Member, st: i64) -> Member {
+fn compose(var ref p: Program, ref sub: BuiltType, ref m: Member, st: i64) -> Member {
     var values: List<i64> = [];
     for v in m.values { values.push(ty_subst(p.tt, v, sub.tparams, ty_args(p.tt, st))); }
     return Member { decl: m.decl, names: m.names, values: values };
 }
 
 /// The winning member of `sub` for `name`, or none.
-fn winner(sub: BuiltType, name: str) -> Member? {
+fn winner(ref sub: BuiltType, name: str) -> Member? {
     if !sub.table.methods.has(name) { return none; }
     let e: MethodTableEntry = sub.table.methods[name];
     let key = name + "@" + e.origin_type_name;
@@ -159,7 +154,7 @@ fn winner(sub: BuiltType, name: str) -> Member? {
 
 /// The splice modifiers listed for splice node `u`: `[sub-slot, member,
 /// alias]` rows.
-fn splice_rows(s: Snap, u: i64) -> List<List<any>> {
+fn splice_rows(ref s: Snap, u: i64) -> List<List<any>> {
     var out: List<List<any>> = [];
     for row in s.splice_mods {
         if row[0] == u {
@@ -170,7 +165,7 @@ fn splice_rows(s: Snap, u: i64) -> List<List<any>> {
     return out;
 }
 
-fn directive_for(s: Snap, u: i64, bundle: str) -> BundleSpliceDirective {
+fn directive_for(ref s: Snap, u: i64, bundle: str) -> BundleSpliceDirective {
     var d = bundle_splice_directive_new(bundle);
     for r in splice_rows(s, u) {
         let sub: i64 = r[0];
@@ -186,7 +181,7 @@ fn directive_for(s: Snap, u: i64, bundle: str) -> BundleSpliceDirective {
     return d;
 }
 
-fn listed(items: List<str>, name: str) -> bool {
+fn listed(ref items: List<str>, name: str) -> bool {
     for i in items { if i == name { return true; } }
     return false;
 }
@@ -203,7 +198,7 @@ pub struct TypeExtent : IValue {
 /// that size rounded up to a power of two (the natural alignment C gives a
 /// scalar on the 64-bit targets: a 1-bit `bool` takes 1 byte, a 128-bit
 /// integer 16). A struct takes its layout plan's size and alignment.
-pub fn type_extent(p: Program, t: i64, depth: i64) -> TypeExtent? {
+pub fn type_extent(var ref p: Program, t: i64, depth: i64) -> TypeExtent? {
     if !ty_is_named(p.tt, t) { return none; }
     let d = ty_decl(p.tt, t);
     let name = node_name(p.s, d);
@@ -229,19 +224,19 @@ pub fn type_extent(p: Program, t: i64, depth: i64) -> TypeExtent? {
 
 /// Bytes a value of type `t` takes as a field; 0 when not known.
 [StandIn("check.field_size", "the byte size of every field type", "fields of a generic parameter, interface or enum type count 0 bytes", "F5")]
-fn byte_size(p: Program, t: i64, depth: i64) -> usize {
+fn byte_size(var ref p: Program, t: i64, depth: i64) -> usize {
     guard some e = type_extent(p, t, depth) else { return 0; }
     return e.size;
 }
 
 /// The byte boundary a field of type `t` is placed on; 0 when not known.
-fn byte_align(p: Program, t: i64, depth: i64) -> usize {
+fn byte_align(var ref p: Program, t: i64, depth: i64) -> usize {
     guard some e = type_extent(p, t, depth) else { return 0; }
     return e.align;
 }
 
 /// The lattice bits of type `t` (0 when it is not derived).
-pub fn lattice_of(p: Program, t: i64) -> i64 {
+pub fn lattice_of(var ref p: Program, t: i64) -> i64 {
     if ty_is_union(p.tt, t) {
         // A union holds any one of its members: the bits of all of them.
         var bits = 0;
@@ -255,7 +250,7 @@ pub fn lattice_of(p: Program, t: i64) -> i64 {
 /// The lattice bits a field adds to its struct: a `ref` field borrows what it
 /// holds (the bits of the reference root, `Cfg.Lang.ref_t`), any other field
 /// adds the bits of its type.
-fn field_lattice(p: Program, m: i64, t: i64) -> i64 {
+fn field_lattice(var ref p: Program, m: i64, t: i64) -> i64 {
     if kind(p.s, m) == nk_param() && flags(p.s, m) != 0 {
         let bits = lattice_attr(p, prog_slot_name(p, "ref_t"));
         if bits >= 0 { return bits; }
@@ -264,7 +259,7 @@ fn field_lattice(p: Program, m: i64, t: i64) -> i64 {
 }
 
 /// The bits the `[Lattice(..)]` attribute of interface `name` declares, or -1.
-fn lattice_attr(p: Program, name: str) -> i64 {
+fn lattice_attr(var ref p: Program, name: str) -> i64 {
     for d in nl_get(p.type_decls, name) {
         if some args = prog_attr_nodes(p, d, "Lattice") {
             if args.len() > 0 {
@@ -277,7 +272,7 @@ fn lattice_attr(p: Program, name: str) -> i64 {
 
 /// Accessed fields of a bundle method: members read through the receiver
 /// (`.x`, or a name no local binds, such as the receiver itself).
-fn accessed_fields(s: Snap, n: i64, out: List<str>, depth: i64) {
+fn accessed_fields(ref s: Snap, n: i64, var ref out: List<str>, depth: i64) {
     if n < 0 || depth > 64 { return; }
     if kind(s, n) == nk_member() {
         let recv = lhs(s, n);
@@ -288,7 +283,7 @@ fn accessed_fields(s: Snap, n: i64, out: List<str>, depth: i64) {
     for c in children(s, n) { accessed_fields(s, c, out, depth + 1); }
 }
 
-fn empty_built(p: Program, name: str) -> BuiltType {
+fn empty_built(ref p: Program, name: str) -> BuiltType {
     let decl = generic_decl(p, name);
     let tparams = if decl >= 0 { prog_tparam_names(p, decl) } else { [] };
     return BuiltType {
@@ -319,7 +314,7 @@ fn empty_built(p: Program, name: str) -> BuiltType {
 }
 
 /// The built type of `name`, building it on first use.
-pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
+pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
     if p.built_index.has(name) { return p.built[p.built_index.get(name)]; }
     let bt = empty_built(p, name);
     // Registered before its parts are built, so a cycle ends here.
@@ -506,7 +501,7 @@ pub fn build_type(p: Program, name: str, depth: i64) -> BuiltType {
 // Lookups used by inference and the rules
 // ------------------------------------------------------------------------------
 
-fn instantiate(p: Program, bt: BuiltType, m: Member, t: i64) -> Member {
+fn instantiate(var ref p: Program, ref bt: BuiltType, ref m: Member, t: i64) -> Member {
     var values: List<i64> = [];
     for v in m.values { values.push(ty_subst(p.tt, v, bt.tparams, ty_args(p.tt, t))); }
     return Member { decl: m.decl, names: m.names, values: values };
@@ -515,7 +510,7 @@ fn instantiate(p: Program, bt: BuiltType, m: Member, t: i64) -> Member {
 /// The member `member` of type `t`: a field it exposes, the winner of its
 /// method table, or a member an interface it implements requires. None when
 /// `t` is not a named type or has no such member.
-pub fn prog_member(p: Program, t: i64, member: str) -> Member? {
+pub fn prog_member(var ref p: Program, t: i64, member: str) -> Member? {
     if !ty_is_named(p.tt, t) { return none; }
     let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
     if bt.fields.has(member) { return instantiate(p, bt, bt.found[bt.fields.get(member)], t); }
@@ -524,14 +519,14 @@ pub fn prog_member(p: Program, t: i64, member: str) -> Member? {
     return none;
 }
 
-fn note_alias(bt: BuiltType, key: str, name: str) {
+fn note_alias(var ref bt: BuiltType, key: str, name: str) {
     if !bt.aliases.has(key) { bt.alias_keys.push(key); }
     bt.aliases.set(key, name);
 }
 
 /// The name member `member` of the splice `bundle` has in type `t`: the
 /// alias `t` gives it (`*Bundle with { member as alias }`), else `member`.
-pub fn prog_spliced_name(p: Program, t: i64, bundle: str, member: str) -> str {
+pub fn prog_spliced_name(var ref p: Program, t: i64, bundle: str, member: str) -> str {
     if !ty_is_named(p.tt, t) { return member; }
     let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
     let key = bundle + "." + member;
@@ -540,7 +535,7 @@ pub fn prog_spliced_name(p: Program, t: i64, bundle: str, member: str) -> str {
 
 /// The method declaration that `type_name.method_name` overrides from a spliced
 /// bundle/facet or a base interface, or -1 if none exists.
-pub fn prog_overridden_member(p: Program, type_name: str, method_name: str) -> i64 {
+pub fn prog_overridden_member(var ref p: Program, type_name: str, method_name: str) -> i64 {
     let s = p.s;
     let bt = build_type(p, type_name, 0);
     for bname in bt.spliced {
@@ -558,7 +553,7 @@ pub fn prog_overridden_member(p: Program, type_name: str, method_name: str) -> i
 }
 
 /// Whether type `t` splices the type named `bundle`.
-pub fn prog_splices(p: Program, t: i64, bundle: str) -> bool {
+pub fn prog_splices(var ref p: Program, t: i64, bundle: str) -> bool {
     if !ty_is_named(p.tt, t) { return false; }
     return listed(build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).spliced, bundle);
 }
@@ -567,7 +562,7 @@ pub fn prog_splices(p: Program, t: i64, bundle: str) -> bool {
 /// type `t` splices `bundle`: that splice's own `method`, even when `t` hides
 /// it with `without` or renames it with `with .. as`. None when `t` does not
 /// splice `bundle` or the splice has no such method.
-pub fn prog_delegate(p: Program, t: i64, bundle: str, method: str) -> Member? {
+pub fn prog_delegate(var ref p: Program, t: i64, bundle: str, method: str) -> Member? {
     if !ty_is_named(p.tt, t) { return none; }
     let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
     guard some _e = resolve_static_delegation(bt.table, bundle, method) else { return none; };
@@ -579,7 +574,7 @@ pub fn prog_delegate(p: Program, t: i64, bundle: str, method: str) -> Member? {
 /// Whether type `name` has `member` itself: a field or property it exposes,
 /// or a method its table resolves (its own, a splice's, an interface
 /// default or an extension). None while its table is incomplete.
-pub fn type_provides(p: Program, name: str, member: str) -> bool? {
+pub fn type_provides(var ref p: Program, name: str, member: str) -> bool? {
     let bt = build_type(p, name, 0);
     if !bt.complete { return none; }
     if bt.fields.has(member) { return true; }
@@ -590,7 +585,7 @@ pub fn type_provides(p: Program, name: str, member: str) -> bool? {
 /// Whether `t` splices a bundle that declares `name`, and `t` itself hides
 /// or renames `name` (`without { name }` or `with { name as ... }`) without
 /// providing a replacement of that name.
-pub fn prog_has_hidden_splice_member(p: Program, t: i64, name: str) -> bool {
+pub fn prog_has_hidden_splice_member(var ref p: Program, t: i64, name: str) -> bool {
     if !ty_is_named(p.tt, t) { return false; }
     let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
     if bt.spliced.len() == 0 { return false; }
@@ -606,14 +601,14 @@ pub fn prog_has_hidden_splice_member(p: Program, t: i64, name: str) -> bool {
 /// Whether the member lookup on `t` is complete: every splice and base of
 /// the type and its parts resolved to a declaration. When it is not, a
 /// missing member may still exist and must not be reported.
-pub fn prog_members_complete(p: Program, t: i64) -> bool {
+pub fn prog_members_complete(var ref p: Program, t: i64) -> bool {
     if !ty_is_named(p.tt, t) { return false; }
     return build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0).complete;
 }
 
 /// Whether values of `t` are owned (lattice bit 1): moving one ends the
 /// source binding's use.
-pub fn prog_is_owned(p: Program, t: i64) -> bool => (lattice_of(p, t) & 2) != 0;
+pub fn prog_is_owned(var ref p: Program, t: i64) -> bool => (lattice_of(p, t) & 2) != 0;
 
 /// The code of a library finding (`COMP004: ...` -> `COMP004`).
 fn finding_code(msg: str) -> str {
@@ -629,7 +624,7 @@ fn finding_text(msg: str) -> str {
 
 /// Where a layout finding is reported: the `partial` splice it quotes
 /// (`'Bundle'`), else the type's declaration `decl`.
-fn finding_site(bt: BuiltType, msg: str, decl: i64) -> i64 {
+fn finding_site(ref bt: BuiltType, msg: str, decl: i64) -> i64 {
     for row in bt.partial_splices {
         let bname: str = row[0];
         if msg.find("'" + bname + "'", 0) >= 0 { return row[1]; }
@@ -639,7 +634,7 @@ fn finding_site(bt: BuiltType, msg: str, decl: i64) -> i64 {
 
 /// Reports the method-table and layout findings of every type declared in
 /// a user file, on its first declaration there.
-pub fn check_type_tables(p: Program, sink: DiagSink) {
+pub fn check_type_tables(var ref p: Program, var ref sink: DiagSink) {
     let s = p.s;
     var done = Map<str, i64>();
     var i = 0;

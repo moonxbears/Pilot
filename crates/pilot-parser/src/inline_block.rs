@@ -15,14 +15,18 @@ impl<'a> Parser<'a> {
     pub(crate) fn inline_block_code(&mut self) -> &'a str {
         let open = self.span();
         let Some(close) = self.tape.matching_bracket(self.cur()) else {
-            self.arena.diagnostics.push((open, "SyntaxError: this `{` is never closed".into()));
+            self.arena
+                .diagnostics
+                .push((open, "SyntaxError: this `{` is never closed".into()));
             let src = self.src;
             self.pos = self.tape.len();
             return src.get(open.end as usize..).unwrap_or("");
         };
         let close = close as usize;
         let src = self.src;
-        let code = src.get(open.end as usize..self.tape.span(close).start as usize).unwrap_or("");
+        let code = src
+            .get(open.end as usize..self.tape.span(close).start as usize)
+            .unwrap_or("");
         self.pos = close + 1;
         code
     }
@@ -40,11 +44,16 @@ impl<'a> Parser<'a> {
                 continue;
             }
             let sp = self.tape.span(i);
-            if foreign.iter().any(|f| f.start <= sp.start && sp.end <= f.end) {
+            if foreign
+                .iter()
+                .any(|f| f.start <= sp.start && sp.end <= f.end)
+            {
                 continue;
             }
             let ch = self.tape.text(i, self.src);
-            self.arena.diagnostics.push((sp, format!("SyntaxError: unexpected character `{ch}`")));
+            self.arena
+                .diagnostics
+                .push((sp, format!("SyntaxError: unexpected character `{ch}`")));
         }
     }
 }

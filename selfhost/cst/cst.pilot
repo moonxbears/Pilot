@@ -4,6 +4,8 @@
 // Immutable width-relative GreenNodes & ephemeral parent-linked SyntaxNodes
 // ============================================================================
 
+pub pkg selfhost.cst;
+
 [Layout(c_abi)]
 pub struct GreenToken : IValue {
     pub kind: i64;

@@ -22,10 +22,10 @@
 //! type's glue lists, in order. Types are named only as the plan names them.
 
 use crate::instruction::Opcode;
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId};
 use std::collections::HashMap;
-use crate::value::PilotVal;
 use std::rc::Rc;
 
 /// What a row of the drop plan says, numbered as `DropAction` in
@@ -87,8 +87,8 @@ impl DropAction {
             Self::QuoteBuild,
             Self::QuoteHole,
         ]
-            .into_iter()
-            .find(|a| *a as i64 == code)
+        .into_iter()
+        .find(|a| *a as i64 == code)
     }
 }
 
@@ -220,7 +220,10 @@ pub(crate) enum Deferred {
 /// message it stops with; the plan's note about the node follows it.
 const PLAN_SEAMS: &[(&str, &str)] = &[
     ("own.capture", "SEAM001: unconnected seam `own.capture`"),
-    ("own.collection_drop", "SEAM001: unconnected seam `own.collection_drop`"),
+    (
+        "own.collection_drop",
+        "SEAM001: unconnected seam `own.collection_drop`",
+    ),
 ];
 
 /// Glue nesting deeper than this is a planner error: a type that holds
@@ -237,37 +240,71 @@ fn key_of(arena: &AstArena, id: NodeId) -> NodeKey {
 impl BytecodeCompiler {
     /// The type the checker inferred for method-call receiver `id`, if any.
     pub(crate) fn planned_receiver(&self, arena: &AstArena, id: NodeId) -> Option<String> {
-        self.drop_plan.as_ref()?.receivers.get(&key_of(arena, id)).cloned()
+        self.drop_plan
+            .as_ref()?
+            .receivers
+            .get(&key_of(arena, id))
+            .cloned()
     }
 
     /// The numeric type the checker inferred for arithmetic node `id`, when
     /// it is narrower than the engine's own numbers.
     pub(crate) fn planned_numeric(&self, arena: &AstArena, id: NodeId) -> Option<String> {
-        self.drop_plan.as_ref()?.numeric.get(&key_of(arena, id)).cloned()
+        self.drop_plan
+            .as_ref()?
+            .numeric
+            .get(&key_of(arena, id))
+            .cloned()
     }
 
     /// The kind and type name the checker gives the `x is T` node `id`.
-    pub(crate) fn planned_type_test(&self, arena: &AstArena, id: NodeId) -> Option<(String, String)> {
-        self.drop_plan.as_ref()?.type_tests.get(&key_of(arena, id)).cloned()
+    pub(crate) fn planned_type_test(
+        &self,
+        arena: &AstArena,
+        id: NodeId,
+    ) -> Option<(String, String)> {
+        self.drop_plan
+            .as_ref()?
+            .type_tests
+            .get(&key_of(arena, id))
+            .cloned()
     }
 
     /// The function and integer arguments the checker planned for the
     /// `xs as view T` node `id`.
-    pub(crate) fn planned_view_cast(&self, arena: &AstArena, id: NodeId) -> Option<(String, Vec<i64>)> {
-        self.drop_plan.as_ref()?.view_casts.get(&key_of(arena, id)).cloned()
+    pub(crate) fn planned_view_cast(
+        &self,
+        arena: &AstArena,
+        id: NodeId,
+    ) -> Option<(String, Vec<i64>)> {
+        self.drop_plan
+            .as_ref()?
+            .view_casts
+            .get(&key_of(arena, id))
+            .cloned()
     }
 
     /// The decode function and wire the checker planned for quote `id`.
     pub(crate) fn planned_quote(&self, arena: &AstArena, id: NodeId) -> Option<(String, String)> {
-        self.drop_plan.as_ref()?.quote_builds.get(&key_of(arena, id)).cloned()
+        self.drop_plan
+            .as_ref()?
+            .quote_builds
+            .get(&key_of(arena, id))
+            .cloned()
     }
 
     /// The holes the checker planned inside quote `id`, in source order:
     /// each hole node with its fill function and lift function ("" for
     /// none). Every node a quote holds lies inside its span and was parsed
     /// before it.
-    pub(crate) fn planned_quote_holes(&self, arena: &AstArena, id: NodeId) -> Vec<(NodeId, String, String)> {
-        let Some(plan) = self.drop_plan.as_ref() else { return Vec::new() };
+    pub(crate) fn planned_quote_holes(
+        &self,
+        arena: &AstArena,
+        id: NodeId,
+    ) -> Vec<(NodeId, String, String)> {
+        let Some(plan) = self.drop_plan.as_ref() else {
+            return Vec::new();
+        };
         if plan.quote_holes.is_empty() {
             return Vec::new();
         }
@@ -293,7 +330,11 @@ impl BytecodeCompiler {
         }
     }
 
-    fn plan_items(&self, id: NodeKey, pick: fn(&DropPlan) -> &HashMap<NodeKey, Vec<DropItem>>) -> Vec<DropItem> {
+    fn plan_items(
+        &self,
+        id: NodeKey,
+        pick: fn(&DropPlan) -> &HashMap<NodeKey, Vec<DropItem>>,
+    ) -> Vec<DropItem> {
         self.drop_plan
             .as_ref()
             .and_then(|p| pick(p).get(&id).cloned())
@@ -316,7 +357,9 @@ impl BytecodeCompiler {
         if let Some((seam, note)) = seams.first() {
             let message = match PLAN_SEAMS.iter().find(|(id, _)| id == seam) {
                 Some((_, head)) => format!("{head}: {note}"),
-                None => format!("internal error: the drop plan names `{seam}`, which is not a drop seam"),
+                None => format!(
+                    "internal error: the drop plan names `{seam}`, which is not a drop seam"
+                ),
             };
             self.emit_trap(message);
         }
@@ -373,7 +416,11 @@ impl BytecodeCompiler {
     /// The value of node `id`, in register `r`, or its copy when the plan
     /// copies it.
     pub(crate) fn copy_if_planned(&mut self, arena: &AstArena, id: NodeId, r: u8) -> u8 {
-        let Some(ty) = self.drop_plan.as_ref().and_then(|p| p.copies.get(&key_of(arena, id)).cloned()) else {
+        let Some(ty) = self
+            .drop_plan
+            .as_ref()
+            .and_then(|p| p.copies.get(&key_of(arena, id)).cloned())
+        else {
             return r;
         };
         self.emit_copy_value(r, &ty, 0)
@@ -381,12 +428,26 @@ impl BytecodeCompiler {
 
     /// When assignment `id` replaces an element its collection owns, drops
     /// the element at `r_key` of the collection in `r_obj`, if there is one.
-    pub(crate) fn drop_replaced_element(&mut self, arena: &AstArena, id: NodeId, r_obj: u8, r_key: u8) {
-        let Some((lookup, ty)) = self.drop_plan.as_ref().and_then(|p| p.element_replace.get(&key_of(arena, id)).cloned())
+    pub(crate) fn drop_replaced_element(
+        &mut self,
+        arena: &AstArena,
+        id: NodeId,
+        r_obj: u8,
+        r_key: u8,
+    ) {
+        let Some((lookup, ty)) = self
+            .drop_plan
+            .as_ref()
+            .and_then(|p| p.element_replace.get(&key_of(arena, id)).cloned())
         else {
             return;
         };
-        let Some(el) = self.drop_plan.as_ref().and_then(|p| p.glue.get(&ty)).and_then(|g| g.elements.clone()) else {
+        let Some(el) = self
+            .drop_plan
+            .as_ref()
+            .and_then(|p| p.glue.get(&ty))
+            .and_then(|g| g.elements.clone())
+        else {
             return;
         };
         let mark = self.next_reg;
@@ -400,7 +461,11 @@ impl BytecodeCompiler {
     /// Drops the value in register `r` when node `id` is a statement that
     /// throws it away.
     pub(crate) fn drop_if_discarded(&mut self, arena: &AstArena, id: NodeId, r: u8) {
-        let Some(ty) = self.drop_plan.as_ref().and_then(|p| p.discards.get(&key_of(arena, id)).cloned()) else {
+        let Some(ty) = self
+            .drop_plan
+            .as_ref()
+            .and_then(|p| p.discards.get(&key_of(arena, id)).cloned())
+        else {
             return;
         };
         self.emit_drop_value(r, &ty, 0);
@@ -412,7 +477,11 @@ impl BytecodeCompiler {
         // Every value type the plan copies has copy glue (even with no
         // fields); a copy of any other type is a constant's, made deeply
         // (selfhost/check/consts.pilot).
-        if self.drop_plan.as_ref().is_some_and(|p| !p.copy_glue.contains_key(ty)) {
+        if self
+            .drop_plan
+            .as_ref()
+            .is_some_and(|p| !p.copy_glue.contains_key(ty))
+        {
             return self.emit_intrinsic("value_clone", &[r]);
         }
         let copy = self.emit_intrinsic("record_copy", &[r]);
@@ -422,7 +491,11 @@ impl BytecodeCompiler {
             ));
             return copy;
         }
-        let fields = self.drop_plan.as_ref().and_then(|p| p.copy_glue.get(ty).cloned()).unwrap_or_default();
+        let fields = self
+            .drop_plan
+            .as_ref()
+            .and_then(|p| p.copy_glue.get(ty).cloned())
+            .unwrap_or_default();
         for (field, field_ty) in fields {
             let mark = self.next_reg;
             let rf = self.emit_member_read(copy, Some(ty), &field);
@@ -483,7 +556,11 @@ impl BytecodeCompiler {
 
     /// Drops the value in register `r`, of the type the glue lists as `ty`.
     fn emit_drop_value(&mut self, r: u8, ty: &str, depth: usize) {
-        let Some(glue) = self.drop_plan.as_ref().and_then(|p| p.glue.get(ty).cloned()) else {
+        let Some(glue) = self
+            .drop_plan
+            .as_ref()
+            .and_then(|p| p.glue.get(ty).cloned())
+        else {
             return;
         };
         if depth > MAX_GLUE_DEPTH {

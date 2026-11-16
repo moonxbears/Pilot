@@ -2,7 +2,7 @@
 // FILE: selfhost/perf/optimizer.pilot
 // Milestone 60.2: Real AST Constant-Folding & Dead Code Elimination Optimizer
 // =========================================================================
-pub pkg Pilot.SelfHost.Perf.Optimizer;
+pub pkg selfhost.perf;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -3,10 +3,9 @@
 // Milestone 8.3: Transactional Lossless CST Auto-Fix & Comment-Preserving Rewriter
 // Reverse byte-order disjointness solver, comment conservation proof, and diffs
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Cst.Autofix;
+pub lvl(0) pkg selfhost.cst;
 
-use Pilot.Diagnostics.Model::*;
-use Pilot.Diagnostics.Renderer::*;
+use selfhost.diagnostics.*;
 use Pilot.Core.File::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
@@ -115,7 +114,7 @@ pub fn verify_comment_conservation(old_src: str, new_src: str) -> bool {
 // ------------------------------------------------------------------------------
 // Multi-Edit Disjointness Solver & Reverse Byte-Order Applicator
 // ------------------------------------------------------------------------------
-pub fn apply_file_fixes_lossless(old_src: str, fixes: List<FixSuggestion>, max_passes: usize) -> FixApplicationResult {
+pub fn apply_file_fixes_lossless(old_src: str, ref fixes: List<FixSuggestion>, max_passes: usize) -> FixApplicationResult {
     let limit_passes = if max_passes > 0 { max_passes; } else { 3; };
     var cur_src = old_src;
     var total_applied: usize = 0;

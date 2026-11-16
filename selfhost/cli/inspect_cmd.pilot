@@ -3,9 +3,9 @@
 // Milestone 7.1: Zero-Black-Box Inspection CLI Command Handler
 // Registers `pilot inspect` with --weave, --layout, --methods, --perceus, --ir
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Cli.InspectCmd;
+pub lvl(0) pkg selfhost.cli;
 
-use Pilot.SelfHost.Inspect.Selector::*;
+use selfhost.inspect.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

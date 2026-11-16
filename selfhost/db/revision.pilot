@@ -3,7 +3,7 @@
 // Milestone 5.2: Incremental Compiler Database Revision Physics & Query Keys
 // Monotonic RevisionId, Durability Tiers, 128-bit Fingerprints & Query Keys
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Db.Revision;
+pub lvl(0) pkg selfhost.db;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

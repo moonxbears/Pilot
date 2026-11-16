@@ -3,15 +3,15 @@
 //! Headerless C11/C23 Semantic Absorber (`use c "header.h"`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 12,
@@ -103,12 +103,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m12(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -323,7 +327,11 @@ fn test_m12_2_c11_declarative_parser_structs_unions_bitfields_and_enums() {
     // layout follows C (int[4] = 16 bytes; LP64 long = 8 bytes).
     let dir = std::env::temp_dir().join(format!("pilot_m12_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("inner.h"), "#define N 4\ntypedef struct In { int a[N]; int b; } In;\n").unwrap();
+    fs::write(
+        dir.join("inner.h"),
+        "#define N 4\ntypedef struct In { int a[N]; int b; } In;\n",
+    )
+    .unwrap();
     fs::write(
         dir.join("outer.h"),
         "#include \"inner.h\"\n#if defined(__LP64__)\ntypedef struct W { long v; } W;\n#else\ntypedef struct W { char v; } W;\n#endif\n",
@@ -355,7 +363,10 @@ fn test_m12_2_c11_declarative_parser_structs_unions_bitfields_and_enums() {
     ];
     let res = eval_m12(deps, &file_script);
     let _ = fs::remove_dir_all(&dir);
-    assert_eq!(res, "42", "absorbing a header from disk must follow its #include and the target's #if branches");
+    assert_eq!(
+        res, "42",
+        "absorbing a header from disk must follow its #include and the target's #if branches"
+    );
 
     guard.finish();
 }
@@ -423,10 +434,7 @@ fn test_m12_3_cross_platform_sysroot_and_pkg_config_discovery() {
         }
     "#;
 
-    let deps = &[
-        "stdlib/core/file.pilot",
-        "selfhost/adapter/c_sysroot.pilot",
-    ];
+    let deps = &["stdlib/core/file.pilot", "selfhost/adapter/c_sysroot.pilot"];
     let res = eval_m12(deps, script);
     assert_eq!(res, "42", "Sysroot discovery and pure-Pilot pkg-config parser must handle platform paths and variable expansion");
 
@@ -465,10 +473,7 @@ fn test_m12_4_ffi_bindgen_multi_param_and_anti_cheat_audit() {
         }
     "#;
 
-    let deps = &[
-        "stdlib/std/text.pilot",
-        "selfhost/ffi_bindgen.pilot",
-    ];
+    let deps = &["stdlib/std/text.pilot", "selfhost/ffi_bindgen.pilot"];
     let res = eval_m12(deps, script);
     assert_eq!(res, "42", "FFI bindgen must support both single-param and multi-param generation with typed prototypes");
 

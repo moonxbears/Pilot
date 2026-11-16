@@ -26,17 +26,11 @@
 // (selfhost/ir/lower_view.pilot). The expression's type is `view_type`
 // (selfhost/check/infer.pilot).
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Check.ViewCast;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.check.drops.*;
-use selfhost.check.diag.*;
 
 /// The bits a value of primitive `t` holds, from its `[Bits]`, or -1.
-fn bits_width(p: Program, t: i64) -> i64 {
+fn bits_width(var ref p: Program, t: i64) -> i64 {
     if !ty_is_named(p.tt, t) { return -1; }
     for decl in nl_get(p.type_decls, node_name(p.s, ty_decl(p.tt, t))) {
         if some args = prog_attr_nodes(p, decl, "Bits") {
@@ -50,7 +44,7 @@ fn bits_width(p: Program, t: i64) -> i64 {
 
 /// The register shape of `t` as `[float, signed, width]`, or empty when an
 /// `as view` cannot read or make a `t`.
-pub fn view_shape(p: Program, t: i64) -> List<i64> {
+pub fn view_shape(var ref p: Program, t: i64) -> List<i64> {
     var out: List<i64> = [];
     if is_scalar_type(p, t) { return out; }
     let class = prog_class(p, t);
@@ -69,7 +63,7 @@ pub fn view_shape(p: Program, t: i64) -> List<i64> {
 
 /// The six integers of `as view` node `n` (the shape of the element type,
 /// then of the target), or empty with `why` saying what is wrong.
-pub fn view_shapes(inf: Infer, n: i64, why: List<str>) -> List<i64> {
+pub fn view_shapes(var ref inf: Infer, n: i64, var ref why: List<str>) -> List<i64> {
     let p = inf.p;
     let s = p.s;
     var out: List<i64> = [];
@@ -97,7 +91,7 @@ pub fn view_shapes(inf: Infer, n: i64, why: List<str>) -> List<i64> {
 }
 
 /// TYPE003 for each `as view` of the user's files that cannot be built.
-pub fn check_view_casts(inf: Infer, sink: DiagSink) {
+pub fn check_view_casts(var ref inf: Infer, var ref sink: DiagSink) {
     let s = inf.p.s;
     var n = s.user_lo;
     while n < s.user_hi {
@@ -115,7 +109,7 @@ pub fn check_view_casts(inf: Infer, sink: DiagSink) {
 
 /// Adds a `ViewCast` row to `rows` for each `as view` of the files the
 /// program links that can be built.
-pub fn plan_view_casts(inf: Infer, rows: List<List<any>>) {
+pub fn plan_view_casts(var ref inf: Infer, var ref rows: List<List<any>>) {
     let p = inf.p;
     let s = p.s;
     for n in prog_nodes_of_kind(p, nk_binary()) {
@@ -133,7 +127,7 @@ pub fn plan_view_casts(inf: Infer, rows: List<List<any>>) {
 }
 
 /// `parts` separated by single spaces.
-fn text_join(parts: List<str>) -> str {
+fn text_join(ref parts: List<str>) -> str {
     var out = "";
     for x in parts { out = if out == "" { x } else { out + " " + x }; }
     return out;

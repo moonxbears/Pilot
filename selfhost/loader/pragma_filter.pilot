@@ -3,7 +3,7 @@
 // Milestone 2.2: Pure-Pilot Pragma Interval Solver & Diagnostic Suppressor
 // Replaces pipeline.rs:27-49 (#pragma warning/no_hardcode disable|restore)
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Loader.PragmaFilter;
+pub lvl(0) pkg selfhost.loader;
 
 [Layout(c_abi)]
 pub struct PragmaInterval : IValue {

@@ -24,9 +24,9 @@
 //! each value sent in on to it.
 
 use crate::instruction::{Instruction, Opcode};
+use crate::value::PilotVal;
 use crate::{BytecodeCompiler, YieldOwner};
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 
 /// The fault a `yield` that belongs to nothing gives.
 const ORPHAN_YIELD: &str = "`yield` outside a generator function or a collecting `for`";
@@ -38,7 +38,9 @@ impl BytecodeCompiler {
         let n = arena.node(item);
         match n.node_kind() {
             NodeKind::ForExpr => Some(item),
-            NodeKind::ExprStmt if arena.node(NodeId(n.lhs)).node_kind() == NodeKind::ForExpr => Some(NodeId(n.lhs)),
+            NodeKind::ExprStmt if arena.node(NodeId(n.lhs)).node_kind() == NodeKind::ForExpr => {
+                Some(NodeId(n.lhs))
+            }
             _ => None,
         }
     }
@@ -118,7 +120,8 @@ impl BytecodeCompiler {
         self.emit(Opcode::CmpEq, r_is, r_type, r_name);
         self.emit(Opcode::Move, r_gen, r_src, 0);
         let is_gen = self.emit_branch(Opcode::JumpIfTrue, r_is, 0);
-        let r_wrapped = self.emit_user_call(proto.each_item.clone(), proto.each_item.clone(), &[r_src]);
+        let r_wrapped =
+            self.emit_user_call(proto.each_item.clone(), proto.each_item.clone(), &[r_src]);
         self.emit(Opcode::Move, r_gen, r_wrapped, 0);
         self.patch_to_here(is_gen);
         let r_f = self.emit_member_read(r_gen, Some(&proto.type_name), &proto.frame_field);
@@ -163,7 +166,13 @@ impl BytecodeCompiler {
     /// Closes the enumerators of the loops from `from` (an index into the
     /// open loops) inward, innermost first.
     pub(crate) fn emit_loop_releases(&mut self, from: usize) {
-        let held: Vec<u8> = self.loops.iter().skip(from).rev().filter_map(|l| l.release).collect();
+        let held: Vec<u8> = self
+            .loops
+            .iter()
+            .skip(from)
+            .rev()
+            .filter_map(|l| l.release)
+            .collect();
         for r_enum in held {
             self.emit_release(r_enum);
         }
@@ -182,7 +191,12 @@ impl BytecodeCompiler {
         let mut owners: Vec<String> = self
             .method_owners
             .get(&close)
-            .map(|v| v.iter().filter(|(_, is_static)| !is_static).map(|(o, _)| o.clone()).collect())
+            .map(|v| {
+                v.iter()
+                    .filter(|(_, is_static)| !is_static)
+                    .map(|(o, _)| o.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         owners.retain(|o| self.structs.contains_key(o));
         if owners.is_empty() {

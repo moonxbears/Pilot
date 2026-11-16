@@ -37,9 +37,13 @@ fn seed_cap(root: &Path, pre_pause_cap: usize, paused_budget_fn: &str) -> usize 
     match manifest_pure_fn_value(&manifest, "seed_contraction_paused").as_str() {
         "true" => manifest_pure_fn_value(&manifest, paused_budget_fn)
             .parse()
-            .unwrap_or_else(|e| panic!("SEED POLICY: {paused_budget_fn}() is not a usize literal: {e}")),
+            .unwrap_or_else(|e| {
+                panic!("SEED POLICY: {paused_budget_fn}() is not a usize literal: {e}")
+            }),
         "false" => pre_pause_cap,
-        other => panic!("SEED POLICY: seed_contraction_paused() must be `true` or `false`, found `{other}`"),
+        other => panic!(
+            "SEED POLICY: seed_contraction_paused() must be `true` or `false`, found `{other}`"
+        ),
     }
 }
 
@@ -50,10 +54,16 @@ fn manifest_pure_fn_value(src: &str, fn_name: &str) -> String {
     let line = src
         .lines()
         .find(|l| l.trim_start().starts_with(&decl))
-        .unwrap_or_else(|| panic!("SEED POLICY: `{decl} ... => <literal>;` not found in {MANIFEST_REL}"));
+        .unwrap_or_else(|| {
+            panic!("SEED POLICY: `{decl} ... => <literal>;` not found in {MANIFEST_REL}")
+        });
     let body = line
         .split_once("=>")
-        .unwrap_or_else(|| panic!("SEED POLICY: `{fn_name}` in {MANIFEST_REL} must be an expression-bodied `=>` fn"))
+        .unwrap_or_else(|| {
+            panic!(
+                "SEED POLICY: `{fn_name}` in {MANIFEST_REL} must be an expression-bodied `=>` fn"
+            )
+        })
         .1;
     body.trim().trim_end_matches(';').trim().to_string()
 }

@@ -10,7 +10,7 @@
 //   CTIME006: Untrusted Dependency Requested Unapproved comptime Capability
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Comptime.Guardian;
+pub lvl(0) pkg selfhost.comptime;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

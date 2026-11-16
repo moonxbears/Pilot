@@ -22,22 +22,13 @@
 //   - unaliased: not passed again in the same call, and no binding that
 //     borrows from it is used after the call;
 //   - not used afterwards (until it is assigned a new value).
-pub lvl(0) pkg Pilot.SelfHost.Check.Aliasing;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.check.own.*;
-use selfhost.check.borrows.*;
-use selfhost.check.effects.*;
 
 /// The components of place `n`: its root (`b<binding>` or `g<name>`), then
 /// `.field` and `[index]` steps (`[*]` for an index that is not an integer
 /// literal). Empty when `n` is no place.
-pub fn place_path(e: Effects, n: i64) -> List<str> {
+pub fn place_path(ref e: Effects, n: i64) -> List<str> {
     let s = e.inf.p.s;
     if n < 0 { return []; }
     let k = kind(s, n);
@@ -61,7 +52,7 @@ pub fn place_path(e: Effects, n: i64) -> List<str> {
 }
 
 /// Whether two places may share storage: one is the other or lies inside it.
-pub fn paths_overlap(a: List<str>, b: List<str>) -> bool {
+pub fn paths_overlap(ref a: List<str>, ref b: List<str>) -> bool {
     if a.len() == 0 || b.len() == 0 { return false; }
     let n = if a.len() < b.len() { a.len() } else { b.len() };
     var i = 0;
@@ -74,9 +65,20 @@ pub fn paths_overlap(a: List<str>, b: List<str>) -> bool {
     return true;
 }
 
+/// Whether argument `arg` reaches parameter `prm` as a copy made before the
+/// call runs: a by-value parameter of a type that neither borrows nor owns
+/// (lattice 0b00), so the callee cannot reach the caller's place through it.
+fn copied_in(var ref e: Effects, arg: i64, prm: i64) -> bool {
+    if prm < 0 || !by_value(e.flow, prm) { return false; }
+    let inf = e.inf;
+    let p = inf.p;
+    let t = type_of(inf, arg);
+    return ty_is_named(p.tt, t) && lattice_of(p, t) == 0;
+}
+
 /// ALIAS001 on `call`: an argument lent to an exclusive parameter that
 /// another argument, or the receiver, also reaches.
-fn check_alias(e: Effects, call: i64, target: i64) {
+fn check_alias(var ref e: Effects, call: i64, target: i64) {
     let s = e.inf.p.s;
     let args = call_args(s, call, target);
     let ch = children(s, call);
@@ -87,7 +89,7 @@ fn check_alias(e: Effects, call: i64, target: i64) {
         let mine = place_path(e, a[0]);
         if mine.len() == 0 { continue; }
         var others: List<i64> = [];
-        for b in args { if b[0] != a[0] { others.push(b[0]); } }
+        for b in args { if b[0] != a[0] && !copied_in(e, b[0], b[1]) { others.push(b[0]); } }
         if receiver >= 0 { others.push(receiver); }
         for o in others {
             if paths_overlap(mine, place_path(e, o)) {
@@ -99,7 +101,7 @@ fn check_alias(e: Effects, call: i64, target: i64) {
 }
 
 /// The function-like node `n` sits in, or -1.
-fn owner_fn(p: Program, n: i64) -> i64 {
+fn owner_fn(ref p: Program, n: i64) -> i64 {
     var at = p.parents[n];
     while at >= 0 {
         let k = kind(p.s, at);
@@ -111,7 +113,7 @@ fn owner_fn(p: Program, n: i64) -> i64 {
 
 /// The first use of binding `b` that starts after `after` in function-like
 /// node `owner`, or -1.
-fn next_use(e: Effects, owner: i64, b: i64, after: i64) -> i64 {
+fn next_use(ref e: Effects, owner: i64, b: i64, after: i64) -> i64 {
     let s = e.inf.p.s;
     var best = -1;
     for n in body_nodes(s, owner) {
@@ -122,14 +124,14 @@ fn next_use(e: Effects, owner: i64, b: i64, after: i64) -> i64 {
 }
 
 /// Whether identifier `n` is the target of an assignment (`x = ..`).
-fn assigned_here(p: Program, n: i64) -> bool {
+fn assigned_here(ref p: Program, n: i64) -> bool {
     let up = p.parents[n];
     return up >= 0 && kind(p.s, up) == nk_assign() && lhs(p.s, up) == n;
 }
 
 /// Why argument `arg` cannot be passed to `iso` parameter `prm` of `call`,
 /// or "".
-fn iso_problem(e: Effects, bw: Borrows, call: i64, arg: i64, args: List<List<i64>>) -> str {
+fn iso_problem(var ref e: Effects, var ref bw: Borrows, call: i64, arg: i64, ref args: List<List<i64>>) -> str {
     let inf = e.inf;
     let p = inf.p;
     let s = p.s;
@@ -160,7 +162,7 @@ fn iso_problem(e: Effects, bw: Borrows, call: i64, arg: i64, args: List<List<i64
 }
 
 /// ISO001 on `call`: each argument of an `iso` parameter.
-fn check_iso(e: Effects, bw: Borrows, call: i64, target: i64) {
+fn check_iso(var ref e: Effects, var ref bw: Borrows, call: i64, target: i64) {
     let s = e.inf.p.s;
     let args = call_args(s, call, target);
     for a in args {
@@ -175,7 +177,7 @@ fn check_iso(e: Effects, bw: Borrows, call: i64, target: i64) {
 }
 
 /// ALIAS001 and ISO001 over the calls of the user's files.
-pub fn check_aliasing(inf: Infer, sink: DiagSink) {
+pub fn check_aliasing(var ref inf: Infer, ref sink: DiagSink) {
     let s = inf.p.s;
     let f = flow_new(inf, sink);
     let e = effects_new(f);

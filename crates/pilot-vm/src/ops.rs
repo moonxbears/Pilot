@@ -332,7 +332,9 @@ fn scalar_of(code: Option<u64>, shown: String) -> Result<PilotVal, String> {
 pub fn wrap(v: PilotVal, class: &str, width: i64) -> Result<PilotVal, String> {
     let is_int_class = matches!(class, "gpr_signed" | "gpr_unsigned");
     match num(v) {
-        Some(Num::Int(_)) | Some(Num::UInt(_)) if is_int_class && width > 1 => convert(v, class, width),
+        Some(Num::Int(_)) | Some(Num::UInt(_)) if is_int_class && width > 1 => {
+            convert(v, class, width)
+        }
         Some(Num::Float(_)) if class == "simd_float" => convert(v, class, width),
         _ => Ok(v),
     }
@@ -342,9 +344,8 @@ pub fn convert(v: PilotVal, class: &str, width: i64) -> Result<PilotVal, String>
     let is_int_class = matches!(class, "gpr_signed" | "gpr_unsigned");
     // A heap handle (record, list, function) in a pointer-width integer
     // register is still that handle: Pilot code types handles as integers.
-    let is_handle = v.as_map_handle().is_some()
-        || v.as_list_handle().is_some()
-        || v.as_fn_handle().is_some();
+    let is_handle =
+        v.as_map_handle().is_some() || v.as_list_handle().is_some() || v.as_fn_handle().is_some();
     if is_handle && is_int_class && width >= 64 {
         return Ok(v);
     }
@@ -362,23 +363,40 @@ pub fn convert(v: PilotVal, class: &str, width: i64) -> Result<PilotVal, String>
     match class {
         "simd_float" => {
             let f = as_f64(&n);
-            Ok(PilotVal::from_float(if width == 32 { f as f32 as f64 } else { f }))
+            Ok(PilotVal::from_float(if width == 32 {
+                f as f32 as f64
+            } else {
+                f
+            }))
         }
         _ if is_int_class => {
             let unsigned = class == "gpr_unsigned";
             let i = match n {
                 Num::Int(i) => i,
                 Num::UInt(u) => u as i64,
-                Num::Float(f) if unsigned && f.is_finite() && f.trunc() >= 0.0 && f.trunc() < u64::MAX as f64 => {
+                Num::Float(f)
+                    if unsigned
+                        && f.is_finite()
+                        && f.trunc() >= 0.0
+                        && f.trunc() < u64::MAX as f64 =>
+                {
                     f.trunc() as u64 as i64
                 }
-                Num::Float(f) if f.is_finite() && f.trunc() >= i64::MIN as f64 && f.trunc() < i64::MAX as f64 => {
+                Num::Float(f)
+                    if f.is_finite()
+                        && f.trunc() >= i64::MIN as f64
+                        && f.trunc() < i64::MAX as f64 =>
+                {
                     f.trunc() as i64
                 }
                 Num::Float(f) => return Err(format!("{f} does not fit an integer")),
             };
             if width >= 64 {
-                return Ok(if unsigned { PilotVal::from_uint(i as u64) } else { PilotVal::from_int(i) });
+                return Ok(if unsigned {
+                    PilotVal::from_uint(i as u64)
+                } else {
+                    PilotVal::from_int(i)
+                });
             }
             let shift = 64 - width as u32;
             let wrapped = if class == "gpr_signed" {

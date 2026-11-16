@@ -11,9 +11,9 @@
 //!   through a pattern; a value the pattern does not match is a runtime error.
 
 use crate::instruction::Opcode;
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 
 /// `PatRecord.flags` when the first child names the type.
 const RECORD_PATTERN_TYPED: u16 = 1;
@@ -115,9 +115,7 @@ impl BytecodeCompiler {
         for &f in fields {
             let fnode = *arena.node(NodeId(f));
             let (key, sub) = match fnode.node_kind() {
-                NodeKind::CallArg => {
-                    (Self::name(arena, fnode.lhs).to_string(), NodeId(fnode.rhs))
-                }
+                NodeKind::CallArg => (Self::name(arena, fnode.lhs).to_string(), NodeId(fnode.rhs)),
                 _ => (Self::name(arena, fnode.lhs).to_string(), NodeId(f)),
             };
             let r_k = self.emit_const(PilotVal::from_str(&key));
@@ -166,7 +164,11 @@ impl BytecodeCompiler {
         let r = self.emit_intrinsic("list_len", &[r_subject]);
         self.emit(Opcode::Move, r_len, r, 0);
         let r_n = self.emit_const(PilotVal::from_int(fixed as i64));
-        let op = if rests.is_empty() { Opcode::CmpEq } else { Opcode::CmpGe };
+        let op = if rests.is_empty() {
+            Opcode::CmpEq
+        } else {
+            Opcode::CmpGe
+        };
         self.emit_pattern_test(op, r_len, r_n, fails);
         let rest_at = rests.first().copied();
         for (i, &e) in elems.iter().enumerate() {

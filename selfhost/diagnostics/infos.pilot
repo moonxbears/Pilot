@@ -5,7 +5,7 @@
 // Reference Inspiration: C# (Roslyn CA rules), Python (Ruff / NumPy hints), and Rust (clippy / LLVM perf).
 // Minimal forward-facing code: structured purely as an extensible diagnostic list.
 // =============================================================================
-pub pkg Pilot.Diagnostics.Infos;
+pub pkg selfhost.diagnostics;
 
 pub struct InfoDef : IValue {
     pub code: str;

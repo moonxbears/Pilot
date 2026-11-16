@@ -9,14 +9,9 @@
 // instruction for (conversions, saturating and Euclidean forms, three-way
 // compares, memory access), it stops at the seam `asm.machine_op`, as the
 // seed does.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerAsm;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.asm.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
+use selfhost.check.*;
 
 /// The register class an operation needs of its operands.
 enum AsmOperands : u8 { Signed, Unsigned, Float, Integer, Any }
@@ -61,14 +56,14 @@ fn has_class(needs: AsmOperands, rc: u8) -> bool {
 }
 
 /// The runtime stop where PilIR has no instruction for the operation.
-fn asm_seam(lw: Lowerer, name: str, why: str, n: i64) -> u32 {
+fn asm_seam(var ref lw: Lowerer, name: str, why: str, n: i64) -> u32 {
     emit_trap(lw, f"SEAM001: unconnected seam `asm.machine_op`: PilIR has no instruction for `{name}`{why}", n);
     switch_to(lw, ir_add_block(lw.f));
     return unit_value(lw, n);
 }
 
 /// `asm(op, operands..)` (ASM001/ASM002 have been checked).
-pub fn lower_asm(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_asm(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let ch = children(s, n);
     guard some o = asm_op_of(s, n) else { return unsupported(lw, n); };

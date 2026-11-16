@@ -48,7 +48,10 @@ impl BytecodeCompiler {
                 scope.push(item);
                 self.emit_null()
             }
-            None => self.error(crate::codes::SYNTAX, "`defer` must be inside a block".to_string()),
+            None => self.error(
+                crate::codes::SYNTAX,
+                "`defer` must be inside a block".to_string(),
+            ),
         }
     }
 
@@ -147,11 +150,18 @@ impl BytecodeCompiler {
     /// `become call;`: the call, made a tail call.
     pub(crate) fn compile_become(&mut self, arena: &AstArena, call: u32) -> u8 {
         if self.gen_body.is_some() {
-            return self.error(crate::codes::SEED, "`become` cannot leave a generator".to_string());
+            return self.error(
+                crate::codes::SEED,
+                "`become` cannot leave a generator".to_string(),
+            );
         }
         // Not a call, or deferred statements still to run: the checker reports
         // it (TAIL001, TAIL002); lowered as the plain `return` it reads as.
-        let deferred = self.defers.iter().flatten().any(|d| matches!(d, Deferred::Stmt(_) | Deferred::OnFailure(_)))
+        let deferred = self
+            .defers
+            .iter()
+            .flatten()
+            .any(|d| matches!(d, Deferred::Stmt(_) | Deferred::OnFailure(_)))
             || !self.contract.ensures.is_empty();
         if deferred || arena.node(NodeId(call)).node_kind() != pilot_ast::NodeKind::CallExpr {
             return self.compile_return(arena, call);
@@ -164,7 +174,8 @@ impl BytecodeCompiler {
             .rev()
             .find(|&i| self.instructions[i].opcode() != Opcode::Move)
             .filter(|&i| self.instructions[i].opcode() == Opcode::Call);
-        let pending = !self.pending_exit_drops.is_empty() || self.loops.iter().any(|l| l.release.is_some());
+        let pending =
+            !self.pending_exit_drops.is_empty() || self.loops.iter().any(|l| l.release.is_some());
         let Some(i) = call_at.filter(|_| !pending) else {
             return self.error(
                 crate::codes::SEED,
@@ -173,7 +184,8 @@ impl BytecodeCompiler {
             );
         };
         let ins = self.instructions[i];
-        self.instructions[i] = crate::Instruction::encode_wide(Opcode::TailCall, ins.dst(), ins.wide());
+        self.instructions[i] =
+            crate::Instruction::encode_wide(Opcode::TailCall, ins.dst(), ins.wide());
         r
     }
 }

@@ -8,20 +8,10 @@
 // (`selfhost/cli/main.pilot`).
 //
 // Exit codes: 0 success, 1 the program or check failed, 2 bad usage.
-pub lvl(0) pkg Pilot.SelfHost.Cli.Commands;
+pub lvl(0) pkg selfhost.cli;
 
 use std.text;
-use Pilot.Diagnostics.Model;
-use Pilot.SelfHost.Cli.Spec;
-use Pilot.SelfHost.Cli.Help;
-use Pilot.SelfHost.Cli.Host;
-use Pilot.SelfHost.Cli.Report;
-use Pilot.SelfHost.Cli.TestCmd;
-use Pilot.SelfHost.Cli.TestIr;
-use Pilot.SelfHost.Cli.TestEmit;
-use Pilot.SelfHost.Cli.TestChanged;
-use Pilot.SelfHost.Cli.BenchCmd;
-use Pilot.SelfHost.Cli.ComptimeAttrs;
+use selfhost.diagnostics.*;
 
 /// Exit code for a command used wrongly.
 pub pure fn cli_exit_usage() -> i64 => 2;
@@ -79,7 +69,7 @@ pub fn report_pending_diags() -> i64 {
 }
 
 /// The analyzer's diagnostics and the type checker's, in source order.
-fn in_source_order(analyzed: List<HostDiag>, checked: List<HostDiag>) -> List<HostDiag> {
+fn in_source_order(ref analyzed: List<HostDiag>, ref checked: List<HostDiag>) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in analyzed { out.push(d); }
     for d in checked {
@@ -95,7 +85,7 @@ fn in_source_order(analyzed: List<HostDiag>, checked: List<HostDiag>) -> List<Ho
 }
 
 /// The positional arguments as a list.
-pub fn cli_positionals(p: ParsedArgs) -> List<str> {
+pub fn cli_positionals(ref p: ParsedArgs) -> List<str> {
     var out: List<str> = [];
     var i: usize = 0;
     while i < cli_list_len(p.positionals) {
@@ -111,25 +101,25 @@ fn usage_error(message: str) -> i64 {
 }
 
 /// `pilot help`
-pub fn cmd_help(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_help(ref p: ParsedArgs, reg: CommandRegistry) -> i64 {
     print(render_global_help(reg));
     return 0;
 }
 
 /// `pilot version`
-pub fn cmd_version(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_version(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     print(cli_version_text());
     return 0;
 }
 
 /// `pilot --schema-json`
-pub fn cmd_schema_json(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_schema_json(ref p: ParsedArgs, reg: CommandRegistry) -> i64 {
     print(export_cli_json_schema(reg));
     return 0;
 }
 
 /// `pilot completions [shell]`
-pub fn cmd_completions(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_completions(ref p: ParsedArgs, reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     let shell = if args.len > 0 { args[0] } else { "bash" };
     print(emit_shell_completions(reg, shell));
@@ -140,7 +130,7 @@ pub fn cmd_completions(p: ParsedArgs, reg: CommandRegistry) -> i64 {
 /// analyzer over it, reports their errors and warnings, and refuses to run
 /// it if any is an error; else runs its `[Live]` calls marked `::Run`, then
 /// the program, and exits with its exit code.
-pub fn cmd_run(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_run(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     if args.len == 0 { return usage_error("`pilot run` needs a program file"); }
     var script_args: List<str> = [];
@@ -173,12 +163,10 @@ pub pure fn coverage_file_link() -> str => "stdlib/core/coverage_file.pilot";
 /// `[Live]` and `[Generate]` functions of each file that has none
 /// (selfhost/cli/comptime_attrs.pilot); exits 1 when there is one or a run
 /// fails.
-pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
-    if parsed_has_flag(p, "fix") {
-        return seam("cli.check_fix", "`pilot check --fix` needs analyzer diagnostics with CST fixes (F4)");
-    }
+pub fn cmd_check(p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     let files = cli_positionals(p);
     if files.len == 0 { return usage_error("`pilot check` needs at least one file"); }
+    if parsed_has_flag(p, "fix") { return check_fix(files); }
     var errors = 0;
     for f in files {
         let compiled = host_check(f);
@@ -202,8 +190,23 @@ pub fn cmd_check(p: ParsedArgs, reg: CommandRegistry) -> i64 {
     return 0;
 }
 
+/// `pilot check --fix <files...>`: the fixes the checker can make itself,
+/// written into the program's own files. Today one kind: parameters that
+/// only borrow their value become `ref` or `var ref`
+/// (selfhost/check/fix_borrows.pilot). Other diagnostics are not fixed yet.
+fn check_fix(ref files: List<str>) -> i64 {
+    // The checker, then the file owners the fix writes through.
+    var tool = cli_checker_files();
+    for f in ["stdlib/core/os_abi.pilot", "stdlib/core/host_raw.pilot", "stdlib/core/file.pilot", "selfhost/check/fix_borrows.pilot"] { tool.push(f); }
+    var failed = 0;
+    for f in files {
+        if host_program_tool(f, tool, cli_checker_decls(), "fix_borrows_main();") != 0 { failed = failed + 1; }
+    }
+    return if failed > 0 { 1 } else { 0 };
+}
+
 /// `pilot test [paths...] [--filter text] [--ir | --emit <lang> [--live-allocations]]`
-pub fn cmd_test(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_test(p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     var paths = cli_positionals(p);
     let lang = parsed_get_str(p, "emit", "");
     if parsed_has_flag(p, "changed") {
@@ -235,12 +238,12 @@ pub fn cmd_test(p: ParsedArgs, reg: CommandRegistry) -> i64 {
 fn cli_seed_tool_files() -> List<str> => cli_checker_files();
 
 /// `pilot bench [dir] [--filter text]`: the milestone tests' run times.
-pub fn cmd_bench(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_bench(p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     return bench_command(cli_positionals(p), parsed_get_str(p, "filter", ""));
 }
 
 /// `pilot gate [...]`: runs the architectural gates.
-pub fn cmd_gate(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_gate(p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     var gate_args = "";
     for a in cli_positionals(p) { gate_args = gate_args + a + " "; }
     if parsed_has_flag(p, "full") { gate_args = gate_args + "--full "; }
@@ -264,7 +267,7 @@ pub fn cmd_gate(p: ParsedArgs, reg: CommandRegistry) -> i64 {
 /// language `lang` by its dialect (selfhost/transpile/emit_<lang>.pilot,
 /// whose `<lang>_dialect()` gives it). A program the compiler rejects is
 /// reported as `pilot run` reports it.
-pub fn cmd_emit(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_emit(p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     if args.len < 2 { return usage_error("`pilot emit` needs a target language and a file"); }
     let lang = args[0];
@@ -321,7 +324,7 @@ pub fn cli_emit_files(lang: str) -> List<str> {
 
 /// `pilot build <file> [-o out] [--live-allocations]`: a native executable through C11
 /// (selfhost/cli/native_build.pilot).
-pub fn cmd_build(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_build(p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     if args.len == 0 { return usage_error("`pilot build` needs a program file"); }
     if !File.exists(args[0]) { return usage_error(f"no such file `{args[0]}`"); }
@@ -405,7 +408,7 @@ pub pure fn ir_text_ext() -> str => ".pir";
 
 /// `pilot ir <verify|print|run|roundtrip> <file>`: lowers a program to PilIR,
 /// or reads PilIR text from a `.pir` file (F5).
-pub fn cmd_ir(p: ParsedArgs, reg: CommandRegistry) -> i64 {
+pub fn cmd_ir(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     if args.len < 2 { return usage_error("`pilot ir` needs a mode (verify, print, opt, run, run-unopt, roundtrip, run-roundtrip) and a file"); }
     if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }

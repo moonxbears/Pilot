@@ -3,7 +3,7 @@
 // Milestone 3.3: Aligned ANSI --help, Shell Completions & JSON Schema Exporter
 // Generates bash/zsh/fish/pwsh completions and dynamic JSON tool schema
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Cli.Help;
+pub lvl(0) pkg selfhost.cli;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -151,7 +151,9 @@ impl ParserTables {
     /// The engine intrinsic (or, for `TypeQuery`, the question) bound to
     /// `name` in table `kind`.
     pub fn native(&self, kind: NativeKind, name: &str) -> Option<&str> {
-        self.natives.get(&(kind, name.to_string())).map(String::as_str)
+        self.natives
+            .get(&(kind, name.to_string()))
+            .map(String::as_str)
     }
 
     /// Whether `name` is bound as the symbol-quoting receptor (`nameof`),
@@ -198,21 +200,36 @@ impl ParserTables {
 
     /// The function `x in a..b` or `x in a..=b` calls, if bound.
     pub fn membership_range(&self, inclusive: bool) -> Option<&str> {
-        if inclusive { self.membership_range.1.as_deref() } else { self.membership_range.0.as_deref() }
+        if inclusive {
+            self.membership_range.1.as_deref()
+        } else {
+            self.membership_range.0.as_deref()
+        }
     }
 
     /// The engine operation bound to `(type_name, member)` via `bind_native_member`.
     pub fn native_member(&self, type_name: &str, member: &str) -> Option<&str> {
-        self.native_members.get(&(type_name.to_string(), member.to_string())).map(String::as_str)
+        self.native_members
+            .get(&(type_name.to_string(), member.to_string()))
+            .map(String::as_str)
     }
 
     /// The engine operation bound to membership (`receptor (10, 0)`) on `type_name`.
     pub fn membership_native(&self, type_name: &str) -> Option<&str> {
-        let word = self.receptors.iter().find(|(_, &v)| v == (10, 0)).map(|(k, _)| k.as_str())?;
+        let word = self
+            .receptors
+            .iter()
+            .find(|(_, &v)| v == (10, 0))
+            .map(|(k, _)| k.as_str())?;
         self.native_member(type_name, word)
     }
 
-    pub(crate) fn bind_membership(&mut self, function: String, range_fn: String, range_incl_fn: String) {
+    pub(crate) fn bind_membership(
+        &mut self,
+        function: String,
+        range_fn: String,
+        range_incl_fn: String,
+    ) {
         if !function.is_empty() {
             self.membership = Some(function);
         }
@@ -236,21 +253,55 @@ impl ParserTables {
         }
     }
 
-    pub(crate) fn bind_enumerator(&mut self, get_enumerator: String, move_next: String, current: String, close: String) {
+    pub(crate) fn bind_enumerator(
+        &mut self,
+        get_enumerator: String,
+        move_next: String,
+        current: String,
+        close: String,
+    ) {
         if !get_enumerator.is_empty() && !move_next.is_empty() && !current.is_empty() {
-            self.enumerator = Some(EnumeratorProtocol { get_enumerator, move_next, current, close });
+            self.enumerator = Some(EnumeratorProtocol {
+                get_enumerator,
+                move_next,
+                current,
+                close,
+            });
         }
     }
 
-    pub(crate) fn bind_generator(&mut self, type_name: String, frame_field: String, construct: String, each_item: String) {
-        if [&type_name, &frame_field, &construct, &each_item].iter().all(|s| !s.is_empty()) {
-            self.generator = Some(GeneratorProtocol { type_name, frame_field, construct, each_item });
+    pub(crate) fn bind_generator(
+        &mut self,
+        type_name: String,
+        frame_field: String,
+        construct: String,
+        each_item: String,
+    ) {
+        if [&type_name, &frame_field, &construct, &each_item]
+            .iter()
+            .all(|s| !s.is_empty())
+        {
+            self.generator = Some(GeneratorProtocol {
+                type_name,
+                frame_field,
+                construct,
+                each_item,
+            });
         }
     }
 
-    pub(crate) fn bind_try_protocol(&mut self, is_success: String, unwrap: String, failure: String) {
+    pub(crate) fn bind_try_protocol(
+        &mut self,
+        is_success: String,
+        unwrap: String,
+        failure: String,
+    ) {
         if !is_success.is_empty() && !unwrap.is_empty() {
-            self.try_protocol = Some(TryProtocol { is_success, unwrap, failure });
+            self.try_protocol = Some(TryProtocol {
+                is_success,
+                unwrap,
+                failure,
+            });
         }
     }
 

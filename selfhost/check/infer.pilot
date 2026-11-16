@@ -14,19 +14,12 @@
 // used as a value takes the type its branches agree on; a list literal is a
 // list (the `list_t` slot) of the type its items agree on. Whatever is not
 // derived yet is the unknown type, which every rule accepts.
-pub lvl(0) pkg Pilot.SelfHost.Check.Infer;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.methods.*;
-use selfhost.check.resolve.*;
-use selfhost.check.generators.*;
-use selfhost.check.asm.*;
 
 pub struct Infer {
-    pub p: Program;
-    pub r: Resolution;
+    pub ref p: Program;
+    pub ref r: Resolution;
     /// Node -> its type; -1 not computed yet, -2 being computed.
     pub memo: List<i64>;
     /// Name -> the top-level `const` declarations of that name in the files
@@ -34,7 +27,7 @@ pub struct Infer {
     pub consts: Map<str, List<i64>>;
 }
 
-pub fn infer_new(p: Program, r: Resolution) -> Infer {
+pub fn infer_new(ref p: Program, ref r: Resolution) -> Infer {
     let consts = Map<str, List<i64>>();
     for root in nodes_of(p.s, nk_program()) {
         if in_linked_file(p.s, root) {
@@ -52,7 +45,7 @@ pub fn infer_new(p: Program, r: Resolution) -> Infer {
 
 /// The top-level `const` identifier `n` names when no local binding covers
 /// it (the only one of that name, or the one in `n`'s file), or -1.
-pub fn global_const(inf: Infer, n: i64) -> i64 {
+pub fn global_const(ref inf: Infer, n: i64) -> i64 {
     let s = inf.p.s;
     if inf.r.ref_of[n] >= 0 { return -1; }
     let name = node_name(s, n);
@@ -70,17 +63,17 @@ pub pure fn op_unwrap() -> str => "?";
 pub pure fn op_index() -> str => "[]";
 
 /// The value `t` holds once unwrapped by its `op ?`, or unknown.
-pub fn unwrap_type(p: Program, t: i64) -> i64 {
+pub fn unwrap_type(var ref p: Program, t: i64) -> i64 {
     if some m = prog_member(p, t, op_unwrap()) { return prog_member_type(p, m); }
     return ty_unknown();
 }
 
 /// Whether `t` can be unwrapped (it declares `op ?`).
-pub fn is_unwrappable(p: Program, t: i64) -> bool => prog_member(p, t, op_unwrap()) != none;
+pub fn is_unwrappable(var ref p: Program, t: i64) -> bool => prog_member(p, t, op_unwrap()) != none;
 
 /// The function a call's callee names, when it names exactly one top-level
 /// function and no local binding; -1 otherwise.
-pub fn called_fn(inf: Infer, call: i64) -> i64 {
+pub fn called_fn(ref inf: Infer, call: i64) -> i64 {
     let s = inf.p.s;
     let ch = children(s, call);
     if ch.len() == 0 { return -1; }
@@ -92,7 +85,7 @@ pub fn called_fn(inf: Infer, call: i64) -> i64 {
 
 /// The type a type-name identifier denotes when used as a value receiver
 /// (`Shade::Dim`, `result<..>.err(..)`), with its generic arguments unknown.
-pub fn type_receiver(inf: Infer, n: i64) -> i64 {
+pub fn type_receiver(var ref inf: Infer, n: i64) -> i64 {
     let s = inf.p.s;
     let k = kind(s, n);
     if (k != nk_ident() && k != nk_type_named()) || inf.r.ref_of[n] >= 0 { return ty_unknown(); }
@@ -107,7 +100,7 @@ pub fn type_receiver(inf: Infer, n: i64) -> i64 {
 /// The type of the receiver word at node `n`: the struct, interface or
 /// extended type whose body holds `n`, over its own generic parameters. The
 /// unknown type outside any such body.
-fn receiver_type(inf: Infer, n: i64) -> i64 {
+fn receiver_type(ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     var cur = p.parents[n];
@@ -128,14 +121,14 @@ fn receiver_type(inf: Infer, n: i64) -> i64 {
 
 /// The type two branches agree on: the other when one is unknown or never
 /// returns, the type when both are the same, else the unknown type.
-pub fn agree(p: Program, a: i64, b: i64) -> i64 {
+pub fn agree(ref p: Program, a: i64, b: i64) -> i64 {
     if ty_is_unknown(p.tt, a) || prog_is_never(p, a) { return b; }
     if ty_is_unknown(p.tt, b) || prog_is_never(p, b) || a == b { return a; }
     return ty_unknown();
 }
 
 /// The element type values of type `t` yield when iterated.
-pub fn element_type(p: Program, t: i64) -> i64 {
+pub fn element_type(var ref p: Program, t: i64) -> i64 {
     let proto = p.s.enumeration;
     if proto.len() >= 3 {
         if some g = prog_member(p, t, proto[0]) {
@@ -147,7 +140,7 @@ pub fn element_type(p: Program, t: i64) -> i64 {
 }
 
 /// The element type of the iterable expression `e`.
-fn iterated_type(inf: Infer, e: i64) -> i64 {
+fn iterated_type(var ref inf: Infer, e: i64) -> i64 {
     let s = inf.p.s;
     if e < 0 { return ty_unknown(); }
     let k = kind(s, e);
@@ -159,7 +152,7 @@ fn iterated_type(inf: Infer, e: i64) -> i64 {
 }
 
 /// The value a block ends with: its last item when written without a `;`.
-pub fn block_value(inf: Infer, b: i64) -> i64 {
+pub fn block_value(var ref inf: Infer, b: i64) -> i64 {
     let s = inf.p.s;
     if b < 0 { return ty_unknown(); }
     if kind(s, b) != nk_block() { return type_of(inf, b); }
@@ -172,7 +165,7 @@ pub fn block_value(inf: Infer, b: i64) -> i64 {
     return ty_unknown();
 }
 
-fn lambda_type(inf: Infer, n: i64) -> i64 {
+fn lambda_type(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     let ch = children(s, n);
@@ -188,7 +181,7 @@ fn lambda_type(inf: Infer, n: i64) -> i64 {
     return ty_func(p.tt, prog_slot_name(p, fn_slot()), args);
 }
 
-fn list_type(inf: Infer, n: i64) -> i64 {
+fn list_type(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     var elem = ty_unknown();
     var first = true;
@@ -199,10 +192,11 @@ fn list_type(inf: Infer, n: i64) -> i64 {
     }
     let lt = prog_slot_type(p, list_slot());
     if !ty_is_named(p.tt, lt) { return ty_unknown(); }
-    return ty_named(p.tt, ty_decl(p.tt, lt), p.tt.name[lt], [elem]);
+    let name = p.tt.name[lt];
+    return ty_named(p.tt, ty_decl(p.tt, lt), name, [elem]);
 }
 
-pub fn binding_type(inf: Infer, b: i64) -> i64 {
+pub fn binding_type(var ref inf: Infer, b: i64) -> i64 {
     let r = inf.r;
     if r.annot[b] >= 0 { return prog_annot_type(inf.p, r.annot[b]); }
     if r.bind_kind[b] == BindKind::Local && r.source[b] >= 0 { return type_of(inf, r.source[b]); }
@@ -220,7 +214,7 @@ pub fn binding_type(inf: Infer, b: i64) -> i64 {
 /// to a call: the matching parameter of the function type the callee
 /// declares for that argument (`(c) => ..` given as `f: (Captures) => str`
 /// makes `c` a `Captures`); unknown otherwise.
-fn lambda_param_type(inf: Infer, lam: i64, prm: i64) -> i64 {
+fn lambda_param_type(var ref inf: Infer, lam: i64, prm: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     let lch = children(s, lam);
@@ -266,7 +260,7 @@ fn lambda_param_type(inf: Infer, lam: i64, prm: i64) -> i64 {
 /// Binds the generic parameters of function `f` from the argument types of
 /// call `call`: a parameter declared as a bare generic parameter takes the
 /// argument's type.
-pub fn call_generic_args(inf: Infer, f: i64, call: i64) -> List<i64> {
+pub fn call_generic_args(var ref inf: Infer, f: i64, call: i64) -> List<i64> {
     let s = inf.p.s;
     let names = prog_tparam_names(inf.p, f);
     var values: List<i64> = [];
@@ -291,7 +285,7 @@ pub fn call_generic_args(inf: Infer, f: i64, call: i64) -> List<i64> {
 }
 
 /// The type of `asm(op, operands..)`: what its machine operation gives.
-fn asm_type(inf: Infer, n: i64) -> i64 {
+fn asm_type(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let ch = children(p.s, n);
     guard some o = asm_op_of(p.s, n) else { return ty_unknown(); };
@@ -301,7 +295,7 @@ fn asm_type(inf: Infer, n: i64) -> i64 {
     return ty_unknown();
 }
 
-fn call_type(inf: Infer, n: i64) -> i64 {
+fn call_type(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     let ch = children(s, n);
@@ -345,7 +339,7 @@ fn call_type(inf: Infer, n: i64) -> i64 {
 }
 
 /// The module path imported as `alias` in the unit containing `at`, or "".
-fn aliased_module(p: Program, at: i64, alias: str) -> str {
+fn aliased_module(ref p: Program, at: i64, alias: str) -> str {
     let s = p.s;
     let u = unit_of(s, at);
     for imp in prog_nodes_of_kind(p, nk_import_decl()) {
@@ -357,7 +351,7 @@ fn aliased_module(p: Program, at: i64, alias: str) -> str {
 }
 
 /// Whether unit `u` declares `pkg <pkg_name>`.
-fn unit_declares_pkg(p: Program, u: i64, pkg_name: str) -> bool {
+fn unit_declares_pkg(ref p: Program, u: i64, pkg_name: str) -> bool {
     let s = p.s;
     for imp in prog_nodes_of_kind(p, nk_import_decl()) {
         if is_package_decl(s, imp) && unit_of(s, imp) == u && node_name(s, imp) == pkg_name {
@@ -371,7 +365,7 @@ fn unit_declares_pkg(p: Program, u: i64, pkg_name: str) -> bool {
 /// `t.join_text` after `use std.text as t;`) names: `X` is no binding or
 /// type, and a linked file matching `X` (or its aliased module) declares one
 /// function of that name; -1 otherwise.
-pub fn module_fn(inf: Infer, callee: i64) -> i64 {
+pub fn module_fn(var ref inf: Infer, callee: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     if kind(s, callee) != nk_member() { return -1; }
@@ -398,7 +392,7 @@ pub fn module_fn(inf: Infer, callee: i64) -> i64 {
     return found;
 }
 
-fn member_type(inf: Infer, n: i64) -> i64 {
+fn member_type(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     let recv = lhs(s, n);
@@ -431,7 +425,7 @@ pub pure fn view_symbol() -> str => "as view";
 /// The function `as view` node `n` calls, or -1: of the functions the
 /// program binds `as view` to, the one whose first parameter takes the
 /// type of `xs` (a `List`), else the first bound.
-pub fn view_fn(inf: Infer, n: i64) -> i64 {
+pub fn view_fn(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     let src = type_of(inf, lhs(s, n));
@@ -454,7 +448,7 @@ pub fn view_fn(inf: Infer, n: i64) -> i64 {
 
 /// The type of `xs as view T`: the chosen function's return type over the
 /// element type of `xs` and `T`, or the unknown type.
-pub fn view_type(inf: Infer, n: i64) -> i64 {
+pub fn view_type(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     let f = view_fn(inf, n);
@@ -463,7 +457,8 @@ pub fn view_type(inf: Infer, n: i64) -> i64 {
     if !ty_is_named(p.tt, ret) { return ty_unknown(); }
     let elem = element_type(p, type_of(inf, lhs(s, n)));
     let target = prog_annot_type(p, rhs(s, n));
-    return ty_named(p.tt, ty_decl(p.tt, ret), p.tt.name[ret], [elem, target]);
+    let name = p.tt.name[ret];
+    return ty_named(p.tt, ty_decl(p.tt, ret), name, [elem, target]);
 }
 
 /// The binding keys of `quote` values (stdlib/core/primitives/ast.pilot):
@@ -474,7 +469,7 @@ pub pure fn quote_hole_symbol() -> str => "quote hole";
 pub pure fn quote_lift_symbol() -> str => "quote lift";
 
 /// The functions the program binds `key` to, in binding order.
-pub fn bound_fns(p: Program, key: str) -> List<i64> {
+pub fn bound_fns(var ref p: Program, key: str) -> List<i64> {
     var out: List<i64> = [];
     for row in prog_engine_bindings(p) {
         if row.len() >= 3 && row[0] == "bind_operator_fn" && row[1] == key {
@@ -486,13 +481,13 @@ pub fn bound_fns(p: Program, key: str) -> List<i64> {
 }
 
 /// The function that builds a quote's tree, or -1.
-pub fn quote_fn(p: Program) -> i64 {
+pub fn quote_fn(var ref p: Program) -> i64 {
     let fns = bound_fns(p, quote_symbol());
     return if fns.len() > 0 { fns[0] } else { -1 };
 }
 
 /// Whether `t` is the type of a quote's value (`ast<T>`).
-pub fn is_quote_type(p: Program, t: i64) -> bool {
+pub fn is_quote_type(var ref p: Program, t: i64) -> bool {
     let f = quote_fn(p);
     if f < 0 || annot(p.s, f) < 0 || !ty_is_named(p.tt, t) { return false; }
     let ret = prog_annot_type(p, annot(p.s, f));
@@ -501,14 +496,14 @@ pub fn is_quote_type(p: Program, t: i64) -> bool {
 
 /// Whether `n` is the value a block ends with: an expression written
 /// without a `;`, or an `if` that ends the block.
-pub fn is_tail(s: Snap, n: i64) -> bool {
+pub fn is_tail(ref s: Snap, n: i64) -> bool {
     if kind(s, n) == nk_if() { return true; }
     return kind(s, n) == nk_expr_stmt() && lhs(s, n) >= 0 && span_end(s, n) == span_end(s, lhs(s, n));
 }
 
 /// The code quote `q` holds: its block's only value when the block has no
 /// statement, else the block (or the expression after `quote`).
-pub fn quoted_root(s: Snap, q: i64) -> i64 {
+pub fn quoted_root(ref s: Snap, q: i64) -> i64 {
     let b = lhs(s, q);
     if b < 0 || kind(s, b) != nk_block() { return b; }
     let ch = children(s, b);
@@ -520,25 +515,26 @@ pub fn quoted_root(s: Snap, q: i64) -> i64 {
 
 /// The type of `quote { e }`: the quote function's return type over the
 /// type of `e`.
-pub fn quote_type(inf: Infer, n: i64) -> i64 {
+pub fn quote_type(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let f = quote_fn(p);
     if f < 0 || annot(p.s, f) < 0 { return ty_unknown(); }
     let ret = prog_annot_type(p, annot(p.s, f));
     if !ty_is_named(p.tt, ret) { return ty_unknown(); }
-    return ty_named(p.tt, ty_decl(p.tt, ret), p.tt.name[ret], [type_of(inf, quoted_root(p.s, n))]);
+    let name = p.tt.name[ret];
+    return ty_named(p.tt, ty_decl(p.tt, ret), name, [type_of(inf, quoted_root(p.s, n))]);
 }
 
 /// The type hole `$x` has inside its template: `T` when `x` is an
 /// `ast<T>`, else the type of `x` (a value made into its literal).
-pub fn hole_type(inf: Infer, bt: i64) -> i64 {
+pub fn hole_type(ref inf: Infer, bt: i64) -> i64 {
     let p = inf.p;
     if !is_quote_type(p, bt) { return bt; }
     let args = ty_args(p.tt, bt);
     return if args.len() > 0 { args[0] } else { ty_unknown() };
 }
 
-fn binary_type(inf: Infer, n: i64) -> i64 {
+fn binary_type(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     let op = flags(s, n);
@@ -570,7 +566,7 @@ fn binary_type(inf: Infer, n: i64) -> i64 {
     return ty_unknown();
 }
 
-fn compute(inf: Infer, n: i64) -> i64 {
+fn compute(var ref inf: Infer, n: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     let k = kind(s, n);
@@ -648,7 +644,7 @@ fn compute(inf: Infer, n: i64) -> i64 {
 
 /// The return type of function `f`: its annotation, or for a generator
 /// written without one, the generator type over the items it yields.
-pub fn fn_return_type(inf: Infer, f: i64) -> i64 {
+pub fn fn_return_type(var ref inf: Infer, f: i64) -> i64 {
     let p = inf.p;
     if annot(p.s, f) >= 0 { return prog_annot_type(p, annot(p.s, f)); }
     if is_generator(p, f) { return generator_type(inf, yielded_type(inf, f)); }
@@ -657,7 +653,7 @@ pub fn fn_return_type(inf: Infer, f: i64) -> i64 {
 
 /// The generator type over items of type `item`, its other parameters at
 /// their defaults; the unknown type when no generator type is bound.
-pub fn generator_type(inf: Infer, item: i64) -> i64 {
+pub fn generator_type(ref inf: Infer, item: i64) -> i64 {
     let p = inf.p;
     let d = generator_decl(p);
     if d < 0 { return ty_unknown(); }
@@ -672,7 +668,7 @@ pub fn generator_type(inf: Infer, item: i64) -> i64 {
 
 /// The type the `yield`s belonging to `owner` agree on: each `yield e`
 /// gives `e`, each `yield *xs` an element of `xs`.
-pub fn yielded_type(inf: Infer, owner: i64) -> i64 {
+pub fn yielded_type(var ref inf: Infer, owner: i64) -> i64 {
     let p = inf.p;
     var t = ty_unknown();
     var first = true;
@@ -687,7 +683,7 @@ pub fn yielded_type(inf: Infer, owner: i64) -> i64 {
 
 /// The value of `yield` node `y`: what a `send` passes in, the generator
 /// type's second argument; unknown inside a collecting `for`.
-fn sent_type(inf: Infer, y: i64) -> i64 {
+fn sent_type(var ref inf: Infer, y: i64) -> i64 {
     let p = inf.p;
     let owner = yield_owner(p, y);
     if owner < 0 || kind(p.s, owner) == nk_for() || is_delegation(p, y) { return ty_unknown(); }
@@ -698,15 +694,16 @@ fn sent_type(inf: Infer, y: i64) -> i64 {
 }
 
 /// A collecting `for`: a list (the `list_t` slot) of what it yields.
-fn collected_type(inf: Infer, f: i64) -> i64 {
+fn collected_type(var ref inf: Infer, f: i64) -> i64 {
     let p = inf.p;
     let lt = prog_slot_type(p, list_slot());
     if !ty_is_named(p.tt, lt) { return ty_unknown(); }
-    return ty_named(p.tt, ty_decl(p.tt, lt), p.tt.name[lt], [yielded_type(inf, f)]);
+    let name = p.tt.name[lt];
+    return ty_named(p.tt, ty_decl(p.tt, lt), name, [yielded_type(inf, f)]);
 }
 
 /// The type of expression `n` (the unknown type when not derived).
-pub fn type_of(inf: Infer, n: i64) -> i64 {
+pub fn type_of(var ref inf: Infer, n: i64) -> i64 {
     if n < 0 { return ty_unknown(); }
     let m = inf.memo[n];
     if m >= 0 { return m; }

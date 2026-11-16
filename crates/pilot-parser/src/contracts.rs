@@ -31,7 +31,10 @@ pub const CONTRACT_ENSURES: u16 = 2;
 impl<'a> Parser<'a> {
     /// At `requires` or `ensures`.
     pub(crate) fn at_contract_clause(&self) -> bool {
-        matches!(self.receptor(), Some((CONTRACT_RECEPTOR, REQUIRES_SUB | ENSURES_SUB)))
+        matches!(
+            self.receptor(),
+            Some((CONTRACT_RECEPTOR, REQUIRES_SUB | ENSURES_SUB))
+        )
     }
 
     /// One `requires(..)` / `ensures(..)` clause, as its body statement.
@@ -43,17 +46,27 @@ impl<'a> Parser<'a> {
         let cond = if is_ensures {
             self.in_ensures = true;
             let nx = self.next_non_nl(self.cur() + 1);
-            let named = self.is_word() && nx < self.tape.len() && self.tape.kind(nx) == TokenKind::FatArrow;
-            let q = if named { self.parse_result_lambda() } else { self.parse_expr() };
+            let named =
+                self.is_word() && nx < self.tape.len() && self.tape.kind(nx) == TokenKind::FatArrow;
+            let q = if named {
+                self.parse_result_lambda()
+            } else {
+                self.parse_expr()
+            };
             self.in_ensures = false;
             q
         } else {
             self.parse_expr()
         };
         self.expect(TokenKind::RParen);
-        let flags = if is_ensures { CONTRACT_ENSURES } else { CONTRACT_REQUIRES };
+        let flags = if is_ensures {
+            CONTRACT_ENSURES
+        } else {
+            CONTRACT_REQUIRES
+        };
         let span = ByteSpan::new(sp.start, self.prev_span().end);
-        self.arena.alloc_node(NodeKind::ExprStmt, flags, span, cond.0, 0)
+        self.arena
+            .alloc_node(NodeKind::ExprStmt, flags, span, cond.0, 0)
     }
 
     /// `r => q` inside `ensures(..)`: the lambda `(r) => q`.
@@ -65,7 +78,8 @@ impl<'a> Parser<'a> {
         let body = self.parse_expr();
         let (st, ln) = self.arena.alloc_child_slice(&[param]);
         let span = ByteSpan::new(sp.start, self.prev_span().end);
-        self.arena.alloc_node(NodeKind::LambdaExpr, ln as u16, span, st, body.0)
+        self.arena
+            .alloc_node(NodeKind::LambdaExpr, ln as u16, span, st, body.0)
     }
 
     /// `old(e)` inside `ensures`, at `old`.
@@ -76,7 +90,8 @@ impl<'a> Parser<'a> {
         let e = self.parse_expr();
         self.expect(TokenKind::RParen);
         let span = ByteSpan::new(sp.start, self.prev_span().end);
-        self.arena.alloc_node(NodeKind::UnaryExpr, UNARY_OP_OLD, span, e.0, 0)
+        self.arena
+            .alloc_node(NodeKind::UnaryExpr, UNARY_OP_OLD, span, e.0, 0)
     }
 
     /// Puts `clauses` in front of `body`: the body becomes
@@ -88,7 +103,11 @@ impl<'a> Parser<'a> {
         }
         let span = self.arena.span(body);
         let mut items = clauses.to_vec();
-        items.push(self.arena.alloc_node(NodeKind::ExprStmt, 0, span, body.0, 0));
-        self.arena.alloc_list_node(NodeKind::BlockExpr, 0, span, &items)
+        items.push(
+            self.arena
+                .alloc_node(NodeKind::ExprStmt, 0, span, body.0, 0),
+        );
+        self.arena
+            .alloc_list_node(NodeKind::BlockExpr, 0, span, &items)
     }
 }

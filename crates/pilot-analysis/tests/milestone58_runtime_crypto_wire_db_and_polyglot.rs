@@ -103,7 +103,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pilot_analysis::{AnalysisPipeline, handle_engine_intrinsic, PhysicsRegistry};
+use pilot_analysis::{handle_engine_intrinsic, AnalysisPipeline, PhysicsRegistry};
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
@@ -128,14 +128,13 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "stdlib/crypto/hash.pilot",
             max_lines: 1500,
             name_blind: false,
-            required_pub_fns: &[
-                "sha256_hex",
-                "sha512_hex",
-                "blake3_hex",
-                "hmac_sha256_hex",
-            ],
+            required_pub_fns: &["sha256_hex", "sha512_hex", "blake3_hex", "hmac_sha256_hex"],
             required_code_markers: &[],
-            forbidden_code_markers: &["14695981039346656037", "0xcbf29ce484222325", "host_spawn_eval"],
+            forbidden_code_markers: &[
+                "14695981039346656037",
+                "0xcbf29ce484222325",
+                "host_spawn_eval",
+            ],
             forbidden_string_substrings: &[
                 "sha256_computed",
                 "blake3_computed",
@@ -358,8 +357,7 @@ fn escape_pilot_str(s: &str) -> String {
 // Pure-Rust Official BLAKE3 Reference Oracle (Single-Chunk & Multi-Chunk Tree)
 // ============================================================================
 const B3_IV: [u32; 8] = [
-    0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
-    0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
+    0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
 ];
 const B3_PERM: [usize; 16] = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8];
 
@@ -374,7 +372,13 @@ fn b3_g(s: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize, mx: u32, my: 
     s[b] = (s[b] ^ s[c]).rotate_right(7);
 }
 
-fn b3_compress(cv: &[u32; 8], block: &[u8; 64], counter: u64, block_len: u32, flags: u32) -> [u32; 16] {
+fn b3_compress(
+    cv: &[u32; 8],
+    block: &[u8; 64],
+    counter: u64,
+    block_len: u32,
+    flags: u32,
+) -> [u32; 16] {
     let mut m = [0u32; 16];
     for i in 0..16 {
         m[i] = u32::from_le_bytes([
@@ -385,9 +389,22 @@ fn b3_compress(cv: &[u32; 8], block: &[u8; 64], counter: u64, block_len: u32, fl
         ]);
     }
     let mut s = [
-        cv[0], cv[1], cv[2], cv[3], cv[4], cv[5], cv[6], cv[7],
-        B3_IV[0], B3_IV[1], B3_IV[2], B3_IV[3],
-        counter as u32, (counter >> 32) as u32, block_len, flags,
+        cv[0],
+        cv[1],
+        cv[2],
+        cv[3],
+        cv[4],
+        cv[5],
+        cv[6],
+        cv[7],
+        B3_IV[0],
+        B3_IV[1],
+        B3_IV[2],
+        B3_IV[3],
+        counter as u32,
+        (counter >> 32) as u32,
+        block_len,
+        flags,
     ];
     for r in 0..7 {
         b3_g(&mut s, 0, 4, 8, 12, m[0], m[1]);
@@ -428,11 +445,19 @@ fn b3_parent_block(left: &[u32; 8], right: &[u32; 8]) -> [u8; 64] {
 
 fn b3_chunk_final_node(chunk: &[u8], counter: u64) -> ([u32; 8], [u8; 64], u64, u32, u32) {
     let mut cv = B3_IV;
-    let nblocks = if chunk.is_empty() { 1 } else { (chunk.len() + 63) / 64 };
+    let nblocks = if chunk.is_empty() {
+        1
+    } else {
+        (chunk.len() + 63) / 64
+    };
     for b in 0..nblocks {
         let start = b * 64;
         let end = ((b + 1) * 64).min(chunk.len());
-        let sub = if start < chunk.len() { &chunk[start..end] } else { &[] };
+        let sub = if start < chunk.len() {
+            &chunk[start..end]
+        } else {
+            &[]
+        };
         let mut blk = [0u8; 64];
         blk[..sub.len()].copy_from_slice(sub);
         let flags = (if b == 0 { 1 } else { 0 }) | (if b + 1 == nblocks { 2 } else { 0 });
@@ -445,7 +470,11 @@ fn b3_chunk_final_node(chunk: &[u8], counter: u64) -> ([u32; 8], [u8; 64], u64, 
 }
 
 fn blake3_oracle_hex(data: &[u8]) -> String {
-    let total_chunks = if data.is_empty() { 1 } else { (data.len() + 1023) / 1024 };
+    let total_chunks = if data.is_empty() {
+        1
+    } else {
+        (data.len() + 1023) / 1024
+    };
     let words_to_hex = |words: &[u32; 8]| -> String {
         let mut out = String::with_capacity(64);
         for w in words {
@@ -516,9 +545,18 @@ elif algo == "hmac_sha256":
         .stderr(Stdio::piped())
         .spawn()
         .expect("python3 must be installed for crypto reference verification");
-    child.stdin.as_mut().unwrap().write_all(payload.as_bytes()).unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
     let out = child.wait_with_output().unwrap();
-    assert!(out.status.success(), "python3 hash oracle failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "python3 hash oracle failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
@@ -545,9 +583,18 @@ process.stdout.write(pk + "|" + sig);
         .stderr(Stdio::piped())
         .spawn()
         .expect("node must be installed for Ed25519 reference verification");
-    child.stdin.as_mut().unwrap().write_all(payload.as_bytes()).unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
     let out = child.wait_with_output().unwrap();
-    assert!(out.status.success(), "node ed25519 sign oracle failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "node ed25519 sign oracle failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let s = String::from_utf8(out.stdout).unwrap();
     let (pk, sig) = s.split_once('|').unwrap();
     (pk.to_string(), sig.to_string())
@@ -565,7 +612,10 @@ const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), pk])
 const pubKey = crypto.createPublicKey({ key: spki, format: "der", type: "spki" });
 process.stdout.write(crypto.verify(null, msg, pubKey, sig) ? "1" : "0");
 "#;
-    let payload = format!("{{\"pk\":\"{}\",\"msg\":\"{}\",\"sig\":\"{}\"}}", pk32_hex, msg_hex, sig64_hex);
+    let payload = format!(
+        "{{\"pk\":\"{}\",\"msg\":\"{}\",\"sig\":\"{}\"}}",
+        pk32_hex, msg_hex, sig64_hex
+    );
     let mut child = Command::new("node")
         .arg("-e")
         .arg(js)
@@ -574,7 +624,12 @@ process.stdout.write(crypto.verify(null, msg, pubKey, sig) ? "1" : "0");
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.as_mut().unwrap().write_all(payload.as_bytes()).unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
     let out = child.wait_with_output().unwrap();
     out.status.success() && String::from_utf8_lossy(&out.stdout).trim() == "1"
 }
@@ -583,10 +638,9 @@ process.stdout.write(crypto.verify(null, msg, pubKey, sig) ? "1" : "0");
 /// where `L = 2^252 + 27742317777372353535851937790883648493`.
 fn add_ed25519_order_l_to_sig_s(sig64_hex: &str) -> String {
     const ORDER_L_LE: [u8; 32] = [
-        0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
-        0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+        0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde,
+        0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x10,
     ];
     let r_hex = &sig64_hex[0..64];
     let s_hex = &sig64_hex[64..128];
@@ -644,7 +698,13 @@ pub fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
         let lib = pilot_vm::bridge::os_dl_open(&mut bstate, "libc.so.6".as_ptr() as i64, 9, 0);
         if lib >= 0 {
             let mut sym = 0u64;
-            let rc = pilot_vm::bridge::os_dl_sym(&bstate, lib, "strlen".as_ptr() as i64, 6, &mut sym as *mut u64 as i64);
+            let rc = pilot_vm::bridge::os_dl_sym(
+                &bstate,
+                lib,
+                "strlen".as_ptr() as i64,
+                6,
+                &mut sym as *mut u64 as i64,
+            );
             assert_eq!(rc, 0, "dlsym('strlen') must succeed on libc.so.6");
             assert_ne!(sym, 0);
         }
@@ -693,7 +753,11 @@ pub fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
     );
 
     let drv_arena = parse(&driver);
-    assert!(drv_arena.diagnostics.is_empty(), "ffi_bindgen parse diagnostics: {:?}", drv_arena.diagnostics);
+    assert!(
+        drv_arena.diagnostics.is_empty(),
+        "ffi_bindgen parse diagnostics: {:?}",
+        drv_arena.diagnostics
+    );
     let mut reg = analysis.physics.clone();
     reg.source_text = target_pilot.clone();
     let reg_ptr = &mut reg as *mut PhysicsRegistry;
@@ -713,20 +777,36 @@ pub fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
         proto
     );
     assert!(
-        hdr.contains(&struct_name) && hdr.contains(&field_a) && hdr.contains(&field_b) && hdr.contains(&fn_name),
+        hdr.contains(&struct_name)
+            && hdr.contains(&field_a)
+            && hdr.contains(&field_b)
+            && hdr.contains(&fn_name),
         "Generated C11 FFI header must declare mounted struct fields and pub fn:\n{}",
         hdr
     );
 
     // Syntax-check generated header with `clang -x c -std=c11 -Wall -Werror -fsyntax-only`
     let mut clang = Command::new("clang")
-        .args(["-x", "c", "-std=c11", "-Wall", "-Werror", "-fsyntax-only", "-"])
+        .args([
+            "-x",
+            "c",
+            "-std=c11",
+            "-Wall",
+            "-Werror",
+            "-fsyntax-only",
+            "-",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("clang must be installed");
-    clang.stdin.as_mut().unwrap().write_all(hdr.as_bytes()).unwrap();
+    clang
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(hdr.as_bytes())
+        .unwrap();
     let clang_out = clang.wait_with_output().unwrap();
     assert!(
         clang_out.status.success(),
@@ -751,7 +831,9 @@ pub fn test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles() {
 
     // Boundary lengths covering empty, short, SHA-256 55/56/64B block splits,
     // SHA-512 111/112/128B block splits, and BLAKE3 64/65/1024/1025/2050B 1-, 2-, and 3-chunk Merkle trees!
-    let lengths = [0usize, 1, 3, 55, 56, 63, 64, 65, 111, 112, 127, 128, 129, 1024, 1025, 2050];
+    let lengths = [
+        0usize, 1, 3, 55, 56, 63, 64, 65, 111, 112, 127, 128, 129, 1024, 1025, 2050,
+    ];
     let msgs: Vec<String> = lengths.iter().map(|&n| rng.ascii_payload(n)).collect();
     let short_key = rng.ascii_payload(24); // <= 64B HMAC key
     let long_key = rng.ascii_payload(91); // > 64B HMAC key (forces SHA-256 key compression!)
@@ -783,13 +865,22 @@ pub fn test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles() {
 
     let script = format!("{}\n{}", hash_src, calls);
     let arena = parse(&script);
-    assert!(arena.diagnostics.is_empty(), "hash.pilot parse diagnostics: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "hash.pilot parse diagnostics: {:?}",
+        arena.diagnostics
+    );
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(bin);
     let out = vm.run().to_string_repr();
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), msgs.len(), "Expected {} digest rows from hash.pilot", msgs.len());
+    assert_eq!(
+        lines.len(),
+        msgs.len(),
+        "Expected {} digest rows from hash.pilot",
+        msgs.len()
+    );
 
     for (idx, m) in msgs.iter().enumerate() {
         let parts: Vec<&str> = lines[idx].split('|').collect();
@@ -800,11 +891,36 @@ pub fn test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles() {
         let exp_hms = python_hash_oracle("hmac_sha256", Some(&short_key), m);
         let exp_hml = python_hash_oracle("hmac_sha256", Some(&long_key), m);
 
-        assert_eq!(parts[0], exp_s256, "SHA-256 mismatch at byte length {}", m.len());
-        assert_eq!(parts[1], exp_s512, "SHA-512 mismatch at byte length {}", m.len());
-        assert_eq!(parts[2], exp_b3, "BLAKE3 mismatch at byte length {}", m.len());
-        assert_eq!(parts[3], exp_hms, "HMAC-SHA256 (short key) mismatch at byte length {}", m.len());
-        assert_eq!(parts[4], exp_hml, "HMAC-SHA256 (long >64B key) mismatch at byte length {}", m.len());
+        assert_eq!(
+            parts[0],
+            exp_s256,
+            "SHA-256 mismatch at byte length {}",
+            m.len()
+        );
+        assert_eq!(
+            parts[1],
+            exp_s512,
+            "SHA-512 mismatch at byte length {}",
+            m.len()
+        );
+        assert_eq!(
+            parts[2],
+            exp_b3,
+            "BLAKE3 mismatch at byte length {}",
+            m.len()
+        );
+        assert_eq!(
+            parts[3],
+            exp_hms,
+            "HMAC-SHA256 (short key) mismatch at byte length {}",
+            m.len()
+        );
+        assert_eq!(
+            parts[4],
+            exp_hml,
+            "HMAC-SHA256 (long >64B key) mismatch at byte length {}",
+            m.len()
+        );
     }
     guard.finish();
 }
@@ -874,7 +990,11 @@ pub fn test_58_2b_ed25519_rfc8032_bidirectional_node_oracle_and_malleability_rej
     );
 
     let arena = parse(&script);
-    assert!(arena.diagnostics.is_empty(), "ed25519.pilot parse diagnostics: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "ed25519.pilot parse diagnostics: {:?}",
+        arena.diagnostics
+    );
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(bin);
@@ -885,8 +1005,14 @@ pub fn test_58_2b_ed25519_rfc8032_bidirectional_node_oracle_and_malleability_rej
     assert_eq!(cols[1], tv1_sig, "RFC 8032 TV1 signature mismatch");
     assert_eq!(cols[2], tv2_pk, "RFC 8032 TV2 public key mismatch");
     assert_eq!(cols[3], tv2_sig, "RFC 8032 TV2 signature mismatch");
-    assert_eq!(cols[4], exp_pk_a, "Random Seed A Ed25519 public key mismatch vs Node OpenSSL");
-    assert_eq!(cols[5], exp_sig_a, "Random Seed A Ed25519 signature mismatch vs Node OpenSSL");
+    assert_eq!(
+        cols[4], exp_pk_a,
+        "Random Seed A Ed25519 public key mismatch vs Node OpenSSL"
+    );
+    assert_eq!(
+        cols[5], exp_sig_a,
+        "Random Seed A Ed25519 signature mismatch vs Node OpenSSL"
+    );
     assert!(
         node_ed25519_verify_oracle(cols[4], &rand_msg_a, cols[5]),
         "Node OpenSSL rejected Pilot's Ed25519 signature"
@@ -916,7 +1042,8 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     assert!(http_src.lines().count() <= 1500);
 
     // 1. Real OS loopback TCP HTTP/1.1 server serving BOTH chunked GET and Content-Length POST
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback TcpListener::bind must succeed");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("loopback TcpListener::bind must succeed");
     let port = listener.local_addr().unwrap().port();
     let get_path = format!("/v1/telemetry/{:x}", rng.next_u64() & 0xFFFF_FFFF);
     let post_path = format!("/v1/ingest/{:x}", rng.next_u64() & 0xFFFF_FFFF);
@@ -924,7 +1051,11 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     let chunk_2 = rng.ascii_payload(31);
     let expected_get_body = format!("{}{}", chunk_1, chunk_2);
     let expected_trace_hdr = format!("trace-{:012x}", rng.next_u64() & 0xFFFF_FFFF_FFFF);
-    let post_req_body = format!("{{\"seq\":{},\"tag\":\"{}\"}}", rng.range_i64(100, 9999), rng.ascii_payload(12));
+    let post_req_body = format!(
+        "{{\"seq\":{},\"tag\":\"{}\"}}",
+        rng.range_i64(100, 9999),
+        rng.ascii_payload(12)
+    );
     let post_resp_body = format!("{{\"accepted\":true,\"bytes\":{}}}", post_req_body.len());
 
     let captured_requests: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -936,7 +1067,9 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
 
     let server_thread = std::thread::spawn(move || {
         for req_idx in 0..2 {
-            let (mut stream, _) = listener.accept().expect("expected HTTP/1.1 TCP client connection");
+            let (mut stream, _) = listener
+                .accept()
+                .expect("expected HTTP/1.1 TCP client connection");
             let mut buf = [0u8; 8192];
             let mut raw = Vec::new();
             loop {
@@ -1001,7 +1134,8 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
 
     let os_abi_src = std::fs::read_to_string(root.join("stdlib/core/os_abi.pilot")).unwrap();
     let host_raw_src = std::fs::read_to_string(root.join("stdlib/core/host_raw.pilot")).unwrap();
-    let native_calls_src = std::fs::read_to_string(root.join("stdlib/core/builtins/native_calls.pilot")).unwrap();
+    let native_calls_src =
+        std::fs::read_to_string(root.join("stdlib/core/builtins/native_calls.pilot")).unwrap();
     let env_src = std::fs::read_to_string(root.join("stdlib/core/env.pilot")).unwrap();
     let script = format!(
         "{os_abi_src}\n{host_raw_src}\n{native_calls_src}\n{env_src}\n{text_src}\n{reactive_src}\n{effects_src}\n{http_src}\n\
@@ -1061,21 +1195,40 @@ pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() 
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(bin);
     let out = vm.run().to_string_repr();
-    server_thread.join().expect("HTTP loopback server thread panicked");
+    server_thread
+        .join()
+        .expect("HTTP loopback server thread panicked");
 
     let parts: Vec<&str> = out.splitn(5, '|').collect();
     assert_eq!(parts.len(), 5, "Unexpected output: {}", out);
-    assert_eq!(parts[0], "RX_OK", "Diamond reactive glitch-free / idempotence test failed");
-    assert_eq!(parts[1], "EF_OK", "CoW EffectPlan rollback/commit isolation failed");
-    assert_eq!(parts[2], expected_trace_hdr, "Case-insensitive HTTP header lookup failed");
-    assert_eq!(parts[3], expected_get_body, "HTTP/1.1 chunked body decoding failed");
-    assert_eq!(parts[4], post_resp_body, "HTTP/1.1 POST response body mismatch");
+    assert_eq!(
+        parts[0], "RX_OK",
+        "Diamond reactive glitch-free / idempotence test failed"
+    );
+    assert_eq!(
+        parts[1], "EF_OK",
+        "CoW EffectPlan rollback/commit isolation failed"
+    );
+    assert_eq!(
+        parts[2], expected_trace_hdr,
+        "Case-insensitive HTTP header lookup failed"
+    );
+    assert_eq!(
+        parts[3], expected_get_body,
+        "HTTP/1.1 chunked body decoding failed"
+    );
+    assert_eq!(
+        parts[4], post_resp_body,
+        "HTTP/1.1 POST response body mismatch"
+    );
 
     let reqs = captured_requests.lock().unwrap();
     assert_eq!(reqs.len(), 2);
     assert!(
         reqs[0].starts_with(&format!("GET {} HTTP/1.1\r\n", get_path))
-            && reqs[0].to_ascii_lowercase().contains(&format!("host: 127.0.0.1:{}\r\n", port)),
+            && reqs[0]
+                .to_ascii_lowercase()
+                .contains(&format!("host: 127.0.0.1:{}\r\n", port)),
         "Invalid HTTP/1.1 GET wire request:\n{}",
         reqs[0]
     );
@@ -1120,7 +1273,8 @@ pub fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
 
     let os_abi_src = std::fs::read_to_string(root.join("stdlib/core/os_abi.pilot")).unwrap();
     let host_raw_src = std::fs::read_to_string(root.join("stdlib/core/host_raw.pilot")).unwrap();
-    let native_calls_src = std::fs::read_to_string(root.join("stdlib/core/builtins/native_calls.pilot")).unwrap();
+    let native_calls_src =
+        std::fs::read_to_string(root.join("stdlib/core/builtins/native_calls.pilot")).unwrap();
     let env_src = std::fs::read_to_string(root.join("stdlib/core/env.pilot")).unwrap();
     let script = format!(
         "{os_abi_src}\n{host_raw_src}\n{native_calls_src}\n{env_src}\n{text_src}\n{shm_src}\n{marshal_src}\n{bridge_src}\n\
@@ -1148,7 +1302,11 @@ pub fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
     );
 
     let arena = parse(&script);
-    assert!(arena.diagnostics.is_empty(), "polyglot parse diagnostics: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "polyglot parse diagnostics: {:?}",
+        arena.diagnostics
+    );
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(bin);
@@ -1249,7 +1407,11 @@ print(json.dumps(select_outputs))
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    py.stdin.as_mut().unwrap().write_all(stmts_json.as_bytes()).unwrap();
+    py.stdin
+        .as_mut()
+        .unwrap()
+        .write_all(stmts_json.as_bytes())
+        .unwrap();
     let py_out = py.wait_with_output().unwrap();
     assert!(py_out.status.success());
 
@@ -1262,12 +1424,22 @@ print(json.dumps(select_outputs))
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
-        p2.stdin.as_mut().unwrap().write_all(&py_out.stdout).unwrap();
-        String::from_utf8(p2.wait_with_output().unwrap().stdout).unwrap().trim().to_string()
+        p2.stdin
+            .as_mut()
+            .unwrap()
+            .write_all(&py_out.stdout)
+            .unwrap();
+        String::from_utf8(p2.wait_with_output().unwrap().stdout)
+            .unwrap()
+            .trim()
+            .to_string()
     };
 
     // Binary wire protocol payloads > 260 bytes so multi-byte BE u32 and 3-byte LE lengths are tested!
-    let long_sql = format!("SELECT payload FROM audit_log WHERE token = '{}';", rng.ascii_payload(275));
+    let long_sql = format!(
+        "SELECT payload FROM audit_log WHERE token = '{}';",
+        rng.ascii_payload(275)
+    );
     let pg_user = format!("pilot_{}", rng.ascii_payload(7));
     let pg_db = format!("warehouse_{}", rng.ascii_payload(7));
     let dr_c0 = rng.ascii_payload(18);
@@ -1293,7 +1465,8 @@ print(json.dumps(select_outputs))
     exp_my_q.extend_from_slice(long_sql.as_bytes());
     let exp_my_q_hex: String = exp_my_q.iter().map(|b| format!("{:02x}", b)).collect();
 
-    let mut pilot_sql_block = String::from("let db = sql_db_new();\nvar sel_joined = \"\";\nvar first_sel = true;\n");
+    let mut pilot_sql_block =
+        String::from("let db = sql_db_new();\nvar sel_joined = \"\";\nvar first_sel = true;\n");
     for (idx, s) in statements.iter().enumerate() {
         let esc = escape_pilot_str(s);
         if s.starts_with("SELECT") {
@@ -1325,7 +1498,11 @@ print(json.dumps(select_outputs))
     );
 
     let arena = parse(&script);
-    assert!(arena.diagnostics.is_empty(), "db/wire parse diagnostics: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "db/wire parse diagnostics: {:?}",
+        arena.diagnostics
+    );
     let bin = BytecodeCompiler::compile(&arena, arena.root);
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(bin);
@@ -1333,13 +1510,37 @@ print(json.dumps(select_outputs))
     let segs: Vec<&str> = out.split("@@WIRE@@").collect();
     assert_eq!(segs.len(), 7, "Unexpected wire/SQL output: {}", out);
 
-    assert_eq!(segs[0], py_sel_lines, "Embedded SQL relational engine output diverged from sqlite3!");
-    assert_eq!(segs[1], format!("{}|{}", pg_user, pg_db), "PostgreSQL v3 StartupMessage decode mismatch");
-    assert_eq!(segs[2], exp_pg_q_hex, "PostgreSQL v3 Simple Query >256B binary frame mismatch");
-    assert_eq!(segs[3], long_sql, "PostgreSQL v3 Simple Query decode mismatch");
-    assert_eq!(segs[4], format!("{}|{}", dr_c0, dr_c1), "PostgreSQL v3 DataRow >256B decode mismatch");
-    assert_eq!(segs[5], exp_my_q_hex, "MySQL COM_QUERY 3-byte LE binary frame mismatch");
-    assert_eq!(segs[6], format!("{}|{}", my_seq, long_sql), "MySQL COM_QUERY decode mismatch");
+    assert_eq!(
+        segs[0], py_sel_lines,
+        "Embedded SQL relational engine output diverged from sqlite3!"
+    );
+    assert_eq!(
+        segs[1],
+        format!("{}|{}", pg_user, pg_db),
+        "PostgreSQL v3 StartupMessage decode mismatch"
+    );
+    assert_eq!(
+        segs[2], exp_pg_q_hex,
+        "PostgreSQL v3 Simple Query >256B binary frame mismatch"
+    );
+    assert_eq!(
+        segs[3], long_sql,
+        "PostgreSQL v3 Simple Query decode mismatch"
+    );
+    assert_eq!(
+        segs[4],
+        format!("{}|{}", dr_c0, dr_c1),
+        "PostgreSQL v3 DataRow >256B decode mismatch"
+    );
+    assert_eq!(
+        segs[5], exp_my_q_hex,
+        "MySQL COM_QUERY 3-byte LE binary frame mismatch"
+    );
+    assert_eq!(
+        segs[6],
+        format!("{}|{}", my_seq, long_sql),
+        "MySQL COM_QUERY decode mismatch"
+    );
     guard.finish();
 }
 
@@ -1365,7 +1566,8 @@ pub fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
         "Workspace Cargo.toml must not reference retired pilot-polyglot or pilot-rt"
     );
 
-    let bridge_content = std::fs::read_to_string(root.join("crates/pilot-vm/src/bridge.rs")).unwrap();
+    let bridge_content =
+        std::fs::read_to_string(root.join("crates/pilot-vm/src/bridge.rs")).unwrap();
     let non_comment_code: String = bridge_content
         .lines()
         .map(|l| l.split("//").next().unwrap_or(""))
@@ -1380,7 +1582,13 @@ pub fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
     }
     assert!(bridge_content.lines().count() <= 1500);
 
-    assert!(!root.join("crates/pilot-ffi").exists(), "Retired crates/pilot-ffi must remain deleted");
-    assert!(!root.join("crates/pilot-arena").exists(), "Retired crates/pilot-arena must remain deleted");
+    assert!(
+        !root.join("crates/pilot-ffi").exists(),
+        "Retired crates/pilot-ffi must remain deleted"
+    );
+    assert!(
+        !root.join("crates/pilot-arena").exists(),
+        "Retired crates/pilot-arena must remain deleted"
+    );
     guard.finish();
 }

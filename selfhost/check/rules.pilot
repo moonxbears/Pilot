@@ -34,27 +34,18 @@
 // Each rule reports only when every type it compares is derived. The unknown
 // type, generic parameters and interfaces are accepted everywhere, so what
 // the checker cannot see yet is never reported as an error.
-pub lvl(0) pkg Pilot.SelfHost.Check.Rules;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.methods.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.check.generators.*;
-use selfhost.check.quote_value.*;
 
 /// The expression with any unary minus taken off.
-fn strip_negation(s: Snap, e: i64) -> i64 {
+fn strip_negation(ref s: Snap, e: i64) -> i64 {
     var cur = e;
     while cur >= 0 && kind(s, cur) == nk_unary() && flags(s, cur) == 0 { cur = lhs(s, cur); }
     return cur;
 }
 
 /// Whether a literal expression fits a type of the given register class.
-fn literal_fits(s: Snap, e: i64, class: str) -> bool {
+fn literal_fits(ref s: Snap, e: i64, class: str) -> bool {
     let core = strip_negation(s, e);
     if core < 0 { return false; }
     let k = kind(s, core);
@@ -64,14 +55,14 @@ fn literal_fits(s: Snap, e: i64, class: str) -> bool {
 }
 
 /// Whether `t` is the list a collection literal builds (the `list_t` slot).
-fn is_literal_list(p: Program, t: i64) -> bool {
+fn is_literal_list(var ref p: Program, t: i64) -> bool {
     let lt = prog_slot_type(p, list_slot());
     return ty_is_named(p.tt, t) && ty_is_named(p.tt, lt) && ty_decl(p.tt, t) == ty_decl(p.tt, lt);
 }
 
 /// Whether a value of type `src` (the expression `e`, or -1) fits where a
 /// `dst` is expected.
-pub fn assignable(inf: Infer, src: i64, dst: i64, e: i64) -> bool {
+pub fn assignable(var ref inf: Infer, src: i64, dst: i64, e: i64) -> bool {
     let p = inf.p;
     let tt = p.tt;
     // Collection literals are target-typed: the items of `[a, b]` must fit
@@ -138,7 +129,7 @@ pub fn assignable(inf: Infer, src: i64, dst: i64, e: i64) -> bool {
 /// number of parameters, each of `dst`'s parameters fits the matching one of
 /// `src` (what the caller passes must suit what the closure was written to
 /// take), and `src`'s result fits `dst`'s.
-fn func_assignable(inf: Infer, src: i64, dst: i64) -> bool {
+fn func_assignable(var ref inf: Infer, src: i64, dst: i64) -> bool {
     let tt = inf.p.tt;
     let sa = ty_args(tt, src);
     let da = ty_args(tt, dst);
@@ -155,16 +146,16 @@ fn func_assignable(inf: Infer, src: i64, dst: i64) -> bool {
 pub pure fn op_coalesce_sym() -> str => "??";
 
 /// Whether `t` is derived and cannot hold `none`.
-fn rejects_none(p: Program, t: i64) -> bool =>
+fn rejects_none(var ref p: Program, t: i64) -> bool =>
     ty_is_named(p.tt, t) && !ty_is_open(p.tt, t) && prog_member(p, t, op_coalesce_sym()) == none;
 
-fn is_none_literal(s: Snap, e: i64) -> bool => e >= 0 && kind(s, e) == nk_none();
+fn is_none_literal(ref s: Snap, e: i64) -> bool => e >= 0 && kind(s, e) == nk_none();
 
-fn mismatch(inf: Infer, src: i64, dst: i64) -> str =>
+fn mismatch(ref inf: Infer, src: i64, dst: i64) -> str =>
     f"expected `{ty_display(inf.p.tt, dst)}`, found `{ty_display(inf.p.tt, src)}`";
 
 /// The function-like node enclosing `n` (`fn`, `op` or closure), or -1.
-fn enclosing_function(p: Program, n: i64) -> i64 {
+fn enclosing_function(ref p: Program, n: i64) -> i64 {
     var cur = p.parents[n];
     while cur >= 0 {
         let k = kind(p.s, cur);
@@ -180,7 +171,7 @@ fn enclosing_function(p: Program, n: i64) -> i64 {
 /// pass as many arguments as the method takes (CALL001), each fitting its
 /// parameter over `dst`'s generic arguments (TYPE001). Returns whether `v`
 /// is such a call.
-fn check_target_call(inf: Infer, sink: DiagSink, v: i64, dst: i64) -> bool {
+fn check_target_call(var ref inf: Infer, var ref sink: DiagSink, v: i64, dst: i64) -> bool {
     let p = inf.p;
     let s = p.s;
     if v < 0 || kind(s, v) != nk_call() || !ty_is_named(p.tt, dst) { return false; }
@@ -214,7 +205,7 @@ fn check_target_call(inf: Infer, sink: DiagSink, v: i64, dst: i64) -> bool {
     return true;
 }
 
-fn check_binding_value(inf: Infer, sink: DiagSink, n: i64) {
+fn check_binding_value(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let s = inf.p.s;
     let a = annot(s, n);
     let v = rhs(s, n);
@@ -232,7 +223,7 @@ fn check_binding_value(inf: Infer, sink: DiagSink, n: i64) {
     if !assignable(inf, src, dst, v) { sink_error(sink, v, "TYPE001", mismatch(inf, src, dst)); }
 }
 
-fn check_return(inf: Infer, sink: DiagSink, n: i64) {
+fn check_return(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let v = lhs(s, n);
@@ -264,7 +255,7 @@ fn check_return(inf: Infer, sink: DiagSink, n: i64) {
 /// the sequence is known), a call on the right of `|>` (which supplies the
 /// first argument) and the receiver parameter of a method are left to the
 /// rules that know them.
-fn check_call_count(p: Program, sink: DiagSink, n: i64, f: i64, params: List<i64>) {
+fn check_call_count(ref p: Program, var ref sink: DiagSink, n: i64, f: i64, ref params: List<i64>) {
     let s = p.s;
     let ch = children(s, n);
     var i = 1;
@@ -300,7 +291,7 @@ fn check_call_count(p: Program, sink: DiagSink, n: i64, f: i64, params: List<i64
 }
 
 /// A parameter's default must be a value of the parameter's type.
-fn check_param_default(inf: Infer, sink: DiagSink, prm: i64) {
+fn check_param_default(var ref inf: Infer, var ref sink: DiagSink, prm: i64) {
     let p = inf.p;
     let s = p.s;
     let value = field_default(s, prm);
@@ -314,7 +305,7 @@ fn check_param_default(inf: Infer, sink: DiagSink, prm: i64) {
     }
 }
 
-fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
+fn check_call_args(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let f = called_fn(inf, n);
@@ -373,7 +364,7 @@ fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
 /// argument.
 /// If `expr` is an identifier inside the `then` branch of `if expr is T`,
 /// returns `T`; otherwise `ty_unknown()`.
-fn narrowed_is_type(inf: Infer, at: i64, expr: i64) -> i64 {
+fn narrowed_is_type(ref inf: Infer, at: i64, expr: i64) -> i64 {
     let p = inf.p;
     let s = p.s;
     if kind(s, expr) != nk_ident() { return ty_unknown(); }
@@ -404,7 +395,7 @@ fn narrowed_is_type(inf: Infer, at: i64, expr: i64) -> i64 {
 
 /// Whether `name` is declared as an extension method (`ext Type { fn name.. }`
 /// or `ext fn Type.name(..)`) on some type in the program.
-fn is_declared_ext_method(p: Program, name: str) -> bool {
+fn is_declared_ext_method(ref p: Program, name: str) -> bool {
     let s = p.s;
     for ex in nodes_of(s, nk_extend()) {
         for m in type_members(s, ex) {
@@ -421,7 +412,7 @@ fn is_declared_ext_method(p: Program, name: str) -> bool {
     return false;
 }
 
-fn check_method_args(inf: Infer, sink: DiagSink, n: i64) {
+fn check_method_args(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let ch = children(s, n);
@@ -463,7 +454,7 @@ fn check_method_args(inf: Infer, sink: DiagSink, n: i64) {
     }
 }
 
-fn check_closure_call(inf: Infer, sink: DiagSink, n: i64) {
+fn check_closure_call(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let ch = children(s, n);
@@ -499,7 +490,7 @@ fn check_closure_call(inf: Infer, sink: DiagSink, n: i64) {
 /// one argument more than `method` takes, it is COMP008. A `static` method,
 /// or a call with as many arguments as `method` takes, is a static call, not
 /// a delegation.
-fn check_delegation(inf: Infer, sink: DiagSink, n: i64) {
+fn check_delegation(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let ch = children(s, n);
@@ -545,13 +536,13 @@ fn check_delegation(inf: Infer, sink: DiagSink, n: i64) {
 }
 
 /// Every type node reachable from `t`, the node included.
-pub fn type_nodes(s: Snap, t: i64, out: List<i64>) {
+pub fn type_nodes(ref s: Snap, t: i64, var ref out: List<i64>) {
     if t < 0 || kind(s, t) != nk_type_named() { return; }
     out.push(t);
     for a in children(s, t) { type_nodes(s, a, out); }
 }
 
-fn check_type_names(inf: Infer, sink: DiagSink) {
+fn check_type_names(ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     var roots: List<i64> = [];
@@ -578,7 +569,7 @@ fn check_type_names(inf: Infer, sink: DiagSink) {
     }
 }
 
-fn check_cast(inf: Infer, sink: DiagSink, n: i64) {
+fn check_cast(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let src = type_of(inf, lhs(s, n));
@@ -594,14 +585,14 @@ fn check_cast(inf: Infer, sink: DiagSink, n: i64) {
 }
 
 /// Whether a `while` loop's condition is the literal `true`.
-fn loops_forever(s: Snap, n: i64) -> bool {
+fn loops_forever(ref s: Snap, n: i64) -> bool {
     let c = lhs(s, n);
     return c >= 0 && kind(s, c) == nk_bool() && lit_value(s, c) != 0;
 }
 
 /// Whether a `break` inside `n` leaves the loop `n` (not a nested loop,
 /// switch or function).
-fn has_own_break(s: Snap, n: i64, top: bool) -> bool {
+fn has_own_break(ref s: Snap, n: i64, top: bool) -> bool {
     let k = kind(s, n);
     if k == nk_break() { return true; }
     if !top && (k == nk_while() || k == nk_for() || k == nk_match() || k == nk_fn() || k == nk_lambda()) {
@@ -616,7 +607,7 @@ fn has_own_break(s: Snap, n: i64, top: bool) -> bool {
 /// Whether node `n`, the last item of a block, gives the block a value: an
 /// expression written without a `;` after it. An `if` gives one only when
 /// it has an `else` and both branches end in a value or leave.
-fn is_tail_value(inf: Infer, n: i64) -> bool {
+fn is_tail_value(var ref inf: Infer, n: i64) -> bool {
     let s = inf.p.s;
     let k = kind(s, n);
     if k == nk_expr_stmt() {
@@ -634,7 +625,7 @@ fn is_tail_value(inf: Infer, n: i64) -> bool {
 
 /// Whether control cannot leave `n` normally: every path returns, or ends
 /// in a call that never returns, or loops forever.
-fn terminates(inf: Infer, n: i64) -> bool {
+fn terminates(var ref inf: Infer, n: i64) -> bool {
     let p = inf.p;
     let s = p.s;
     if n < 0 { return false; }
@@ -667,7 +658,7 @@ fn terminates(inf: Infer, n: i64) -> bool {
     return false;
 }
 
-fn check_missing_return(inf: Infer, sink: DiagSink, n: i64) {
+fn check_missing_return(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let body = fn_body(s, n);
@@ -685,7 +676,7 @@ fn check_missing_return(inf: Infer, sink: DiagSink, n: i64) {
 /// A `yield`: it must belong to a generator or a collecting `for` (GEN001),
 /// and in a generator whose type is written, its item must fit that type's
 /// item type (TYPE001).
-fn check_yield(inf: Infer, sink: DiagSink, y: i64) {
+fn check_yield(var ref inf: Infer, var ref sink: DiagSink, y: i64) {
     let p = inf.p;
     let s = p.s;
     let owner = yield_owner(p, y);
@@ -705,13 +696,13 @@ fn check_yield(inf: Infer, sink: DiagSink, y: i64) {
 }
 
 /// Whether a switch arm's pattern matches anything.
-fn is_catch_all(s: Snap, pat: i64) -> bool {
+fn is_catch_all(ref s: Snap, pat: i64) -> bool {
     if pat < 0 { return false; }
     let k = kind(s, pat);
     return k == nk_pat_wildcard() || k == nk_pat_bind();
 }
 
-fn covered_variants(s: Snap, pat: i64, out: List<str>) {
+fn covered_variants(ref s: Snap, pat: i64, var ref out: List<str>) {
     if pat < 0 { return; }
     let k = kind(s, pat);
     if k == nk_pat_variant() { out.push(sym_text(s, lhs(s, pat))); }
@@ -723,7 +714,7 @@ fn covered_variants(s: Snap, pat: i64, out: List<str>) {
 
 /// The variants of the enum a switch inspects that no arm handles; empty
 /// when the scrutinee is not an enum or an arm matches anything.
-fn missing_variants(inf: Infer, n: i64) -> List<str> {
+fn missing_variants(var ref inf: Infer, n: i64) -> List<str> {
     let p = inf.p;
     let s = p.s;
     var out: List<str> = [];
@@ -750,7 +741,7 @@ fn missing_variants(inf: Infer, n: i64) -> List<str> {
     return out;
 }
 
-fn check_switch(inf: Infer, sink: DiagSink, n: i64) {
+fn check_switch(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let missing = missing_variants(inf, n);
     if missing.len() == 0 { return; }
     let p = inf.p;
@@ -765,7 +756,7 @@ fn check_switch(inf: Infer, sink: DiagSink, n: i64) {
     sink_error(sink, n, "FLOW005", f"switch on `{ty_display(p.tt, t)}` does not handle {names}");
 }
 
-fn check_optional_access(inf: Infer, sink: DiagSink, n: i64, member: str, is_index: bool) {
+fn check_optional_access(var ref inf: Infer, var ref sink: DiagSink, n: i64, member: str, is_index: bool) {
     let p = inf.p;
     let t = type_of(inf, lhs(p.s, n));
     if !ty_is_named(p.tt, t) || !prog_members_complete(p, t) || !is_unwrappable(p, t) { return; }
@@ -783,7 +774,7 @@ fn check_optional_access(inf: Infer, sink: DiagSink, n: i64, member: str, is_ind
 }
 
 /// The enclosing lambda of `u` that does not enclose `site`, or -1.
-fn capturing_lambda(p: Program, u: i64, site: i64) -> i64 {
+fn capturing_lambda(ref p: Program, u: i64, site: i64) -> i64 {
     var cur = p.parents[u];
     var depth = 0;
     while cur >= 0 && depth < 128 {
@@ -805,7 +796,7 @@ fn capturing_lambda(p: Program, u: i64, site: i64) -> i64 {
     return -1;
 }
 
-fn check_assign(inf: Infer, sink: DiagSink, n: i64) {
+fn check_assign(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let target = lhs(s, n);
@@ -852,7 +843,7 @@ fn check_assign(inf: Infer, sink: DiagSink, n: i64) {
 }
 
 /// A call whose fallible result is dropped as a statement.
-fn check_dropped_result(inf: Infer, sink: DiagSink, n: i64) {
+fn check_dropped_result(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let e = lhs(p.s, n);
     if e < 0 || kind(p.s, e) != nk_call() { return; }
@@ -871,7 +862,7 @@ fn condition_operand(s: Snapshot, c: i64) -> i64 {
 }
 
 /// Whether `!` node `n` is the whole condition of an `if` or `while`.
-fn is_condition_not(p: Program, n: i64) -> bool {
+fn is_condition_not(ref p: Program, n: i64) -> bool {
     let par = p.parents[n];
     if par < 0 { return false; }
     let k = kind(p.s, par);
@@ -882,7 +873,7 @@ fn is_condition_not(p: Program, n: i64) -> bool {
 /// A condition (of `if`, `while`, a side of `&&` or `||`, or the operand of
 /// `!`, which `assert` expands to) is a `bool`: the type of the `bool` literal slot. A condition
 /// of another known type is TYPE001 at build time, not a run-time error.
-fn check_condition(inf: Infer, sink: DiagSink, c: i64, what: str) {
+fn check_condition(var ref inf: Infer, var ref sink: DiagSink, c: i64, what: str) {
     if c < 0 { return; }
     let p = inf.p;
     let t = type_of(inf, c);
@@ -895,7 +886,7 @@ fn check_condition(inf: Infer, sink: DiagSink, c: i64, what: str) {
 /// `*x` and `*..x` unpack a sequence. An operand whose type is a register
 /// value (it has a `[Bits]` class: an integer, float, bool or char) holds no
 /// elements: TYPE001 at build time, not a run-time error.
-fn check_unpack(inf: Infer, sink: DiagSink, n: i64) {
+fn check_unpack(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let operand = lhs(p.s, n);
     if operand < 0 { return; }
@@ -916,7 +907,7 @@ fn check_unpack(inf: Infer, sink: DiagSink, n: i64) {
 /// block (`print(5);`) is not a construct of the language: SYN001, never
 /// silently dropped. A `*Bundle` splice (with its `with`/`without`/
 /// `coalesce` modifiers) is a member, not a statement.
-fn check_type_body_item(inf: Infer, sink: DiagSink, n: i64) {
+fn check_type_body_item(ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let e = lhs(p.s, n);
     if e >= 0 && kind(p.s, e) == nk_unary() && flags(p.s, e) == unary_splat() { return; }
@@ -933,7 +924,7 @@ fn check_type_body_item(inf: Infer, sink: DiagSink, n: i64) {
     }
 }
 
-pub fn check_rules(inf: Infer, sink: DiagSink) {
+pub fn check_rules(var ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     check_type_names(inf, sink);

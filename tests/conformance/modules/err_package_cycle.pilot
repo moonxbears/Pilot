@@ -1,0 +1,10 @@
+// PROP-005 5A: a cycle between packages is still MOD002 when the packages
+// have several files. `lib.ring_left` has two files; lib/ring_left_b.pilot
+// imports this package back. The cycle is named by package, each once.
+pkg Conformance.Ring;
+
+use lib.ring_left;
+
+fn main() {
+    print(left());
+}

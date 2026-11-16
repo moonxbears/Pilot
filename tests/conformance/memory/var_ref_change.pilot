@@ -1,0 +1,40 @@
+// PROP-005 5B.1: a `var ref` parameter may change the value it borrows, and
+// the caller sees the change; a plain `ref` parameter only reads it.
+// Expected (hand-worked): add(t, 2) then add(t, 3) leave items [2, 3] and
+// n = 2; total(t) = 2 + 3 = 5; grow(xs) twice through relay leaves xs with
+// 2 items.
+struct Tally {
+    pub items: List<i64>;
+    pub n: i64;
+}
+
+fn add(var ref t: Tally, v: i64) {
+    t.items.push(v);
+    t.n = t.n + 1;
+}
+
+fn total(ref t: Tally) -> i64 {
+    var sum = 0;
+    for x in t.items { sum = sum + x; }
+    return sum;
+}
+
+fn grow(var ref xs: List<i64>) {
+    xs.push(1);
+}
+
+fn relay(var ref xs: List<i64>) {
+    grow(xs);
+}
+
+fn main() {
+    var t = Tally { items: [], n: 0 };
+    add(t, 2);
+    add(t, 3);
+    print(t.n);
+    print(total(t));
+    var xs: List<i64> = [];
+    relay(xs);
+    relay(xs);
+    print(xs.len());
+}

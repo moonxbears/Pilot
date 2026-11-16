@@ -37,9 +37,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pilot_analysis::{
-    flatten_ast, handle_engine_intrinsic, run_pilot_analyzer, PhysicsRegistry,
-};
+use pilot_analysis::{flatten_ast, handle_engine_intrinsic, run_pilot_analyzer, PhysicsRegistry};
 use pilot_parser::parse;
 use pilot_vm::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
@@ -218,7 +216,11 @@ fn run_perceus_on_program(target_program: &str, tail_expr: &str) -> (PilotVal, V
     if let Some(fault) = &vm.fault {
         panic!("perceus pass faulted: {fault}");
     }
-    let diags = registry.diagnostics.into_iter().map(|d| d.message).collect();
+    let diags = registry
+        .diagnostics
+        .into_iter()
+        .map(|d| d.message)
+        .collect();
     (val, diags)
 }
 
@@ -265,7 +267,18 @@ pub fn test_54_1_real_ast_lattice_from_attributes_destructors_and_fields() {
 
         // Each struct's lattice as one base-4 digit, first struct lowest.
         let mut terms = Vec::new();
-        for (i, name) in [&val_st, &view_st, &obj_st, &lock_st, &held_st, &lens_st, &attr_guard_st].iter().enumerate() {
+        for (i, name) in [
+            &val_st,
+            &view_st,
+            &obj_st,
+            &lock_st,
+            &held_st,
+            &lens_st,
+            &attr_guard_st,
+        ]
+        .iter()
+        .enumerate()
+        {
             terms.push(format!(
                 "{} * lat_deduce_type_lattice(__engine(\"sym_lookup\", {}), __engine(\"ast_node_count\", 0), __engine(\"map_new\"), 0)",
                 4i64.pow(i as u32),
@@ -279,13 +292,25 @@ pub fn test_54_1_real_ast_lattice_from_attributes_destructors_and_fields() {
         // ~self() 0b01 | 0b10 = 0b11; a value holding an owned field 0b10;
         // a value holding a view 0b01; [Lattice(3)] on the interface 0b11.
         let expected = [0i64, 1, 2, 3, 2, 1, 3];
-        let want: i64 = expected.iter().enumerate().map(|(i, l)| l * 4i64.pow(i as u32)).sum();
+        let want: i64 = expected
+            .iter()
+            .enumerate()
+            .map(|(i, l)| l * 4i64.pow(i as u32))
+            .sum();
         assert_eq!(
             res.to_string_repr(),
             want.to_string(),
             "Trial {}: lattices (base 4, first struct lowest) of {:?}",
             trial,
-            [&val_st, &view_st, &obj_st, &lock_st, &held_st, &lens_st, &attr_guard_st]
+            [
+                &val_st,
+                &view_st,
+                &obj_st,
+                &lock_st,
+                &held_st,
+                &lens_st,
+                &attr_guard_st
+            ]
         );
     }
     guard.finish();
@@ -481,7 +506,10 @@ pub fn test_54_2_and_54_3_real_ast_escape_realtime_cue_verifiers_and_dsp_decoy_t
 
     // Deliverable 54.3: Verify crates/pilot-perceus is completely deleted from disk & Cargo.toml
     let root = ws_root();
-    assert!(!root.join("crates/pilot-perceus").exists(), "crates/pilot-perceus must be deleted");
+    assert!(
+        !root.join("crates/pilot-perceus").exists(),
+        "crates/pilot-perceus must be deleted"
+    );
     assert!(!read_ws("Cargo.toml").contains("pilot-perceus"));
     guard.finish();
 }

@@ -3,7 +3,7 @@
 // Milestone 15.1: Native C++ Class, RAII, Vtable & Exception Boundary Adapter
 // Bidirectional Itanium C++ ABI & MSVC x64 Name Mangler and Demangler
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.CppMangle;
+pub lvl(0) pkg selfhost.adapter;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -236,7 +236,7 @@ pub pure fn mangle_itanium(
     fn_name: str,
     is_const_method: bool,
     is_ctor_dtor: u8,
-    param_types: slice<CppType>
+    ref param_types: slice<CppType>
 ) -> str {
     var out = "_Z";
     let is_nested = ns_path.len() > 0 || is_const_method;
@@ -332,7 +332,7 @@ pub pure fn mangle_msvc_x64(
     fn_name: str,
     access: u8,
     is_virtual: bool,
-    param_types: slice<CppType>,
+    ref param_types: slice<CppType>,
     ret_type: ref<CppType>
 ) -> str {
     var out = "?";

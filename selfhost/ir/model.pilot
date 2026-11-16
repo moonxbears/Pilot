@@ -3,7 +3,7 @@
 // Milestone 6.1: First-Class Typed SSA Mid-Level IR (PilIR) Data Model
 // Name-Blind Type Physics, Block Parameters, 34 Orthogonal Opcodes, Target Descriptors
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Ir.Model;
+pub lvl(0) pkg selfhost.ir;
 
 use Pilot.Core.Reflect;
 use Pilot.Core.Pending;
@@ -425,7 +425,7 @@ pub fn ir_module_new() -> IrModule {
 }
 
 /// The fields of record layout `layout`, or none when it is not a record.
-pub fn ir_record_of(m: IrModule, layout: u32) -> IrRecord? {
+pub fn ir_record_of(ref m: IrModule, layout: u32) -> IrRecord? {
     let at = layout as i64;
     if at >= m.record_slot.len() { return none; }
     let slot = m.record_slot[at];
@@ -434,7 +434,7 @@ pub fn ir_record_of(m: IrModule, layout: u32) -> IrRecord? {
 }
 
 /// Adds record `rec` to `m`; a layout's first record is the one `ir_record_of` finds.
-pub fn ir_add_record(m: IrModule, rec: IrRecord) {
+pub fn ir_add_record(var ref m: IrModule, rec: IrRecord) {
     m.records.push(rec);
     let at = rec.layout as i64;
     while m.record_slot.len() <= at { m.record_slot.push(0); }
@@ -446,20 +446,20 @@ pub fn ir_function_new(name: str, ret: IrTypePhysics) -> IrFunction {
 }
 
 /// Adds an empty block to `f` and returns its id.
-pub fn ir_add_block(f: IrFunction) -> u32 {
+pub fn ir_add_block(var ref f: IrFunction) -> u32 {
     let id = f.blocks.len;
     f.blocks.push(IrBlock { id: id, params: [], insts: [], preds: [], idom: ir_no_value() });
     return id;
 }
 
 /// A new value of physics `phy` in `f`.
-pub fn ir_new_value(f: IrFunction, phy: IrTypePhysics) -> u32 {
+pub fn ir_new_value(var ref f: IrFunction, phy: IrTypePhysics) -> u32 {
     f.value_physics.push(phy);
     return f.value_physics.len - 1;
 }
 
 /// Adds a parameter of physics `phy` to block `b` of `f`.
-pub fn ir_add_param(f: IrFunction, b: u32, phy: IrTypePhysics) -> u32 {
+pub fn ir_add_param(var ref f: IrFunction, b: u32, phy: IrTypePhysics) -> u32 {
     let v = ir_new_value(f, phy);
     f.blocks[b].params.push(v);
     return v;
@@ -467,7 +467,7 @@ pub fn ir_add_param(f: IrFunction, b: u32, phy: IrTypePhysics) -> u32 {
 
 /// Appends an instruction to block `b`; returns its result (a new value of
 /// physics `phy`, or `ir_no_value()` when `produces` is false).
-pub fn ir_emit(f: IrFunction, b: u32, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, produces: bool, span: i64) -> u32 {
+pub fn ir_emit(var ref f: IrFunction, b: u32, op: u16, sub: u16, phy: IrTypePhysics, ref args: List<u32>, produces: bool, span: i64) -> u32 {
     let result = if produces { ir_new_value(f, phy) } else { ir_no_value() };
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
@@ -492,7 +492,7 @@ pub pure fn ir_inst_new(result: u32, op: u16, sub: u16, phy: IrTypePhysics, args
 }
 
 /// The operands of `inst`.
-pub fn ir_args(f: IrFunction, inst: IrInst) -> List<u32> {
+pub fn ir_args(ref f: IrFunction, inst: IrInst) -> List<u32> {
     var out: List<u32> = [];
     var i: u32 = 0;
     while i < inst.args_len {
@@ -503,7 +503,7 @@ pub fn ir_args(f: IrFunction, inst: IrInst) -> List<u32> {
 }
 
 /// Whether block `b` ends in a terminator.
-pub fn ir_is_terminated(f: IrFunction, b: u32) -> bool {
+pub fn ir_is_terminated(ref f: IrFunction, b: u32) -> bool {
     let insts = f.blocks[b].insts;
     return insts.len > 0 && opcode_is_terminator(insts[insts.len - 1].opcode);
 }
@@ -513,7 +513,7 @@ pub fn ir_is_terminated(f: IrFunction, b: u32) -> bool {
 /// `switch_table` is `[index, default, target 0, target 1, ..]`, going to
 /// target `index`, or to `default` when there is none, none of them taking
 /// arguments.
-pub fn ir_successors(f: IrFunction, inst: IrInst) -> List<u32> {
+pub fn ir_successors(ref f: IrFunction, inst: IrInst) -> List<u32> {
     var out: List<u32> = [];
     let a = ir_args(f, inst);
     if inst.opcode == op_jump() {

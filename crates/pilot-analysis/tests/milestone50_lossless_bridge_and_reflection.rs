@@ -34,15 +34,14 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pilot_analysis::{
-    analyze_physics, flatten_ast, handle_engine_intrinsic,
-    load_or_compile_analyzer_pilc, AnalysisPipeline, CapabilityBits, LayoutId,
-    PhysicsGeometry, PhysicsRegistry,
+    analyze_physics, flatten_ast, handle_engine_intrinsic, load_or_compile_analyzer_pilc,
+    AnalysisPipeline, CapabilityBits, LayoutId, PhysicsGeometry, PhysicsRegistry,
 };
 use pilot_ast::{CallQuoteKind, NodeKind};
 use pilot_intern::SymbolId;
 use pilot_parser::parse;
-use pilot_vm::PilotVal;
 use pilot_vm::pilc::{PilcBinary, PILC_V3_MAGIC};
+use pilot_vm::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
 #[path = "common/anticheat.rs"]
@@ -101,7 +100,11 @@ impl Rng {
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0x9E37_79B9_7F4A_7C15);
         let seed = nanos ^ ((std::process::id() as u64).rotate_left(17)) ^ salt;
-        Self(if seed == 0 { 0xCAFE_BABE_DEAD_BEEF } else { seed })
+        Self(if seed == 0 {
+            0xCAFE_BABE_DEAD_BEEF
+        } else {
+            seed
+        })
     }
 
     fn next_u64(&mut self) -> u64 {
@@ -254,7 +257,11 @@ pub fn test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts(
         .unwrap()
         .as_int()
         .unwrap();
-        assert_ne!(dflags_scalar & 16, 0, "partial bit must survive flatten_ast");
+        assert_ne!(
+            dflags_scalar & 16,
+            0,
+            "partial bit must survive flatten_ast"
+        );
 
         let body_idx = arena
             .nodes
@@ -437,11 +444,10 @@ pub fn test_50_2_open_keyword_reflection_and_randomized_user_categories() {
         .join("stdlib/core/keywords.pilot")
         .to_string_lossy()
         .to_string();
-    let mounted =
-        handle_engine_intrinsic(&mut reg, "mount_unit", &[PilotVal::from_str(&kw_path)])
-            .unwrap()
-            .as_int()
-            .unwrap();
+    let mounted = handle_engine_intrinsic(&mut reg, "mount_unit", &[PilotVal::from_str(&kw_path)])
+        .unwrap()
+        .as_int()
+        .unwrap();
     assert!(mounted > 50);
 
     // Verify core categories 0..=14 are dynamically reflected
@@ -711,7 +717,9 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
     let meta_src = std::fs::read_to_string(root.join("stdlib/core/meta.pilot"))
         .expect("read stdlib/core/meta.pilot");
     let meta_attr_decls = {
-        let start = meta_src.find("// 1. THE 7-PILLAR").expect("section 1 in meta.pilot");
+        let start = meta_src
+            .find("// 1. THE 7-PILLAR")
+            .expect("section 1 in meta.pilot");
         let end = meta_src
             .find("// 3. PILOT-HOSTED")
             .and_then(|i| meta_src[..i].rfind("// ====="))
@@ -724,11 +732,7 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
         let mut attrs: Vec<(String, i64, usize)> = Vec::new();
         let mut attr_syntax_items = Vec::new();
         for idx in 0..attr_cnt {
-            let nm = format!(
-                "Stage{}{}",
-                idx,
-                rng.alpha_tag(4).to_ascii_uppercase()
-            );
+            let nm = format!("Stage{}{}", idx, rng.alpha_tag(4).to_ascii_uppercase());
             // Include occasional duplicate weights to test stable tie-breaking!
             let weight = if idx == 3 && !attrs.is_empty() {
                 attrs[0].1
@@ -753,10 +757,14 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
         // An ECS rule attribute with a random name: only its declaration's
         // `IEcsRule` base can classify it.
         let custom_rule = format!("Sched{}{}", trial, rng.alpha_tag(5).to_ascii_uppercase());
-        ecs_decls.push_str(&format!("[{custom_rule}(7)]\npub struct EcsCustom{trial} {{}}\n"));
+        ecs_decls.push_str(&format!(
+            "[{custom_rule}(7)]\npub struct EcsCustom{trial} {{}}\n"
+        ));
         // The same attribute name with no declaration has no pillar.
         let undeclared = format!("Loose{}{}", trial, rng.alpha_tag(5).to_ascii_uppercase());
-        ecs_decls.push_str(&format!("[{undeclared}(3)]\npub struct EcsLoose{trial} {{}}\n"));
+        ecs_decls.push_str(&format!(
+            "[{undeclared}(3)]\npub struct EcsLoose{trial} {{}}\n"
+        ));
 
         let w_src = format!(
             r#"
@@ -823,7 +831,11 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
         )
         .as_int()
         .unwrap_or(-1);
-        assert_eq!(got_ecs, ecs_sys_cnt as i64 + 1, "[Rule] sites plus the declared custom IEcsRule attribute");
+        assert_eq!(
+            got_ecs,
+            ecs_sys_cnt as i64 + 1,
+            "[Rule] sites plus the declared custom IEcsRule attribute"
+        );
         let got_loose = run_vm_with_registry(
             &format!(
                 "{}\nclassify_attr_pillar(\"{undeclared}\", __engine(\"ast_node_count\"));\n",
@@ -833,13 +845,22 @@ pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_s
         )
         .as_int()
         .unwrap_or(-99);
-        assert_eq!(got_loose, -1, "an attribute with no declaration has no pillar");
+        assert_eq!(
+            got_loose, -1,
+            "an attribute with no declaration has no pillar"
+        );
         assert!(
-            w_reg.diagnostics.iter().any(|d| d.message.contains("ATTR001")),
+            w_reg
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("ATTR001")),
             "Must emit ATTR001 for reactive attribute on interface"
         );
         assert!(
-            w_reg.diagnostics.iter().any(|d| d.message.contains("ATTR002")),
+            w_reg
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("ATTR002")),
             "Must emit ATTR002 for interceptor attribute on field"
         );
     }
@@ -921,7 +942,10 @@ pub fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2
         let elem_lid = field_lids[0];
         let soa64 = LayoutId(
             run_vm_with_registry(
-                &format!("{}\ncompute_soa_projection({}, 64);\n", analyzer_defs, elem_lid.0),
+                &format!(
+                    "{}\ncompute_soa_projection({}, 64);\n",
+                    analyzer_defs, elem_lid.0
+                ),
                 &mut reg,
             )
             .as_int()
@@ -929,7 +953,10 @@ pub fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2
         );
         let soa32 = LayoutId(
             run_vm_with_registry(
-                &format!("{}\ncompute_soa_projection({}, 32);\n", analyzer_defs, elem_lid.0),
+                &format!(
+                    "{}\ncompute_soa_projection({}, 32);\n",
+                    analyzer_defs, elem_lid.0
+                ),
                 &mut reg,
             )
             .as_int()
@@ -945,7 +972,11 @@ pub fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2
     for (from_c, to_c, expected) in [
         (CapabilityBits::VALUE, CapabilityBits::BORROW_REF, true),
         (CapabilityBits::OWNED_OBJ, CapabilityBits::BORROW_REF, true),
-        (CapabilityBits::OWNED_OBJ, CapabilityBits::SCOPED_GUARD, true),
+        (
+            CapabilityBits::OWNED_OBJ,
+            CapabilityBits::SCOPED_GUARD,
+            true,
+        ),
         (CapabilityBits::BORROW_REF, CapabilityBits::OWNED_OBJ, false),
         (CapabilityBits::VALUE, CapabilityBits::OWNED_OBJ, false),
     ] {

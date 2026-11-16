@@ -5,10 +5,9 @@
 // `pilot test --changed` (selfhost/cli/test_changed.pilot) runs this as a
 // self-hosted tool: the loader resolves every program's `use` declarations
 // exactly as it does when the program is run (`mg_link_plan`).
-pub lvl(0) pkg Pilot.SelfHost.Loader.LinkLines;
+pub lvl(0) pkg selfhost.loader;
 
 use std.text;
-use Pilot.SelfHost.Loader.ModuleGraph;
 
 /// The separator between the entries `mg_link_lines` is given.
 pub pure fn link_lines_separator() -> str => "|";

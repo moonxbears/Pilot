@@ -12,7 +12,7 @@
 // with no change to the seed. Every program whose result changes is a
 // `GATE008` violation.
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Gate.RenameLitmus;
+pub lvl(0) pkg selfhost.gate;
 
 use std.text;
 
@@ -209,8 +209,10 @@ fn rl_conformance_dir() -> str => "tests/conformance";
 /// The trees copied into the sandbox, renamed: the stdlib the programs and
 /// the seed's tables come from, the toolchain's own Pilot sources, the
 /// conformance corpus, and the programs corpus cases start as child
-/// processes (`runtime/proc_large_output` runs `tests/tool_fixtures/proc`).
-fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir(), "tests/tool_fixtures/proc"];
+/// processes or read (`runtime/proc_large_output` runs
+/// `tests/tool_fixtures/proc`; `runtime/check_fix_borrows` fixes a copy of
+/// `tests/tool_fixtures/check_fix`).
+fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir(), "tests/tool_fixtures/proc", "tests/tool_fixtures/check_fix"];
 
 /// What `pilot test` printed and returned in the sandbox.
 pub struct LitmusRun : IValue {
@@ -414,7 +416,7 @@ fn rl_build_sandbox(root: str, rename_pairs: i64, violations: i64) -> LitmusSand
 }
 
 /// Removes the sandbox; one that is still there is a violation.
-fn rl_remove_sandbox(sb: LitmusSandbox, violations: i64) {
+fn rl_remove_sandbox(ref sb: LitmusSandbox, violations: i64) {
     let _ = temp_guard_cleanup(sb.guard);
     if gate_fs_exists(sb.dir) {
         let _ = glist_push(violations, rl_violation(sb.dir, sb.dir,

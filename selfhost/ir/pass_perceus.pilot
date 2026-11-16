@@ -28,15 +28,13 @@
 //
 // The pass runs once, after the representation of every value is final; it
 // is not one of the fixpoint passes of selfhost/ir/passes.pilot.
-pub lvl(0) pkg Pilot.SelfHost.Ir.PassPerceus;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.ir.model.*;
-use selfhost.ir.verify.*;
 
 /// How the pass sees one function: which values it counts and whether each
 /// is owned, their liveness, and the code to add.
 struct RcFunction : IObject {
-    pub f: IrFunction;
+    pub ref f: IrFunction;
     /// Value id -> 0 not counted, 1 owned, 2 borrowed.
     pub kind: List<i64>;
     /// Value id -> its index among the counted values, or -1.
@@ -63,7 +61,7 @@ fn rc_owned() -> i64 => 1;
 fn rc_borrowed() -> i64 => 2;
 
 /// Adds the reference counts to every function of `m`.
-pub fn insert_reference_counts(m: IrModule, counted: (IrTypePhysics) => bool) {
+pub fn insert_reference_counts(var ref m: IrModule, counted: (IrTypePhysics) => bool) {
     var fi = 0;
     while fi < m.functions.len() {
         rc_function(m, m.functions[fi], fi == 0, counted);
@@ -72,15 +70,15 @@ pub fn insert_reference_counts(m: IrModule, counted: (IrTypePhysics) => bool) {
 }
 
 /// An instruction appended to nothing yet: its operands go to `f`'s pool.
-fn rc_inst(f: IrFunction, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, result: u32, span: u32) -> IrInst {
+fn rc_inst(var ref f: IrFunction, op: u16, sub: u16, phy: IrTypePhysics, ref args: List<u32>, result: u32, span: u32) -> IrInst {
     let offset = f.operand_pool.len();
     for a in args { f.operand_pool.push(a); }
     return ir_inst_new(result, op, sub, phy, offset, args.len(), span);
 }
 
-fn rc_op(rc: RcFunction, op: u16, v: u32, span: u32) -> IrInst => rc_inst(rc.f, op, 0, ir_physics_unit(), [v], ir_no_value(), span);
+fn rc_op(var ref rc: RcFunction, op: u16, v: u32, span: u32) -> IrInst => rc_inst(rc.f, op, 0, ir_physics_unit(), [v], ir_no_value(), span);
 
-fn rc_function(m: IrModule, f: IrFunction, start: bool, counted: (IrTypePhysics) => bool) {
+fn rc_function(ref m: IrModule, var ref f: IrFunction, start: bool, counted: (IrTypePhysics) => bool) {
     if f.blocks.len() == 0 { return; }
     let rc = RcFunction { f: f, kind: [], index: [], counted: [], live_in: [], mark: [], edges_in: [], slots: [], globals: [], entry_code: [] };
     for _v in f.value_physics {
@@ -138,7 +136,7 @@ fn rc_function(m: IrModule, f: IrFunction, start: bool, counted: (IrTypePhysics)
     ir_compute_preds(f);
 }
 
-fn rc_track(rc: RcFunction, v: u32, k: i64) {
+fn rc_track(var ref rc: RcFunction, v: u32, k: i64) {
     rc.kind[v] = k;
     rc.index[v] = rc.counted.len();
     rc.counted.push(v);
@@ -146,7 +144,7 @@ fn rc_track(rc: RcFunction, v: u32, k: i64) {
 
 /// Whether counted value `v` is live into block `b` (a binary search of its
 /// ascending set).
-fn rc_live_in(rc: RcFunction, b: i64, v: u32) -> bool {
+fn rc_live_in(ref rc: RcFunction, b: i64, v: u32) -> bool {
     let set = rc.live_in[b];
     let want = rc.index[v];
     var lo = 0;
@@ -159,7 +157,7 @@ fn rc_live_in(rc: RcFunction, b: i64, v: u32) -> bool {
 }
 
 /// Marks counted index `i` in `rc.mark`, noting it in `touched` once.
-fn rc_mark(rc: RcFunction, touched: List<i64>, i: i64) {
+fn rc_mark(var ref rc: RcFunction, var ref touched: List<i64>, i: i64) {
     if !rc.mark[i] {
         rc.mark[i] = true;
         touched.push(i);
@@ -167,7 +165,7 @@ fn rc_mark(rc: RcFunction, touched: List<i64>, i: i64) {
 }
 
 /// The indices in `touched` still marked, ascending; clears every mark.
-fn rc_take(rc: RcFunction, touched: List<i64>) -> List<i64> {
+fn rc_take(var ref rc: RcFunction, ref touched: List<i64>) -> List<i64> {
     var out: List<i64> = [];
     for i in touched {
         if rc.mark[i] {
@@ -208,7 +206,7 @@ fn rc_ascending(xs: List<i64>) -> List<i64> {
 }
 
 /// The counted values an instruction uses, each as often as it is used.
-fn rc_uses(rc: RcFunction, inst: IrInst) -> List<u32> {
+fn rc_uses(ref rc: RcFunction, inst: IrInst) -> List<u32> {
     let a = ir_args(rc.f, inst);
     var out: List<u32> = [];
     for pos in value_positions(rc.f, inst) {
@@ -221,7 +219,7 @@ fn rc_uses(rc: RcFunction, inst: IrInst) -> List<u32> {
 /// Fills `live_in`: the counted values each block needs from before it.
 /// Sets do not shrink from one round to the next, so a set that keeps its
 /// size is unchanged.
-fn rc_liveness(rc: RcFunction) {
+fn rc_liveness(var ref rc: RcFunction) {
     let f = rc.f;
     for _b in f.blocks { rc.live_in.push([]); }
     for _i in rc.counted { rc.mark.push(false); }
@@ -255,7 +253,7 @@ fn rc_liveness(rc: RcFunction) {
 
 /// Marks the counted values live out of block `b` (those its successors
 /// need) in `rc.mark` and returns their indices; the caller clears them.
-fn rc_live_out(rc: RcFunction, b: i64) -> List<i64> {
+fn rc_live_out(var ref rc: RcFunction, b: i64) -> List<i64> {
     var touched: List<i64> = [];
     for s in block_successors(rc.f, b) {
         if s >= rc.live_in.len() { continue; }
@@ -265,7 +263,7 @@ fn rc_live_out(rc: RcFunction, b: i64) -> List<i64> {
 }
 
 /// Block `b`'s instructions with their reference counts.
-fn rc_block(rc: RcFunction, b: u32) -> List<IrInst> {
+fn rc_block(var ref rc: RcFunction, b: u32) -> List<IrInst> {
     let f = rc.f;
     let insts = f.blocks[b].insts;
     // `rc.mark` holds the values live after the instruction being looked at;
@@ -330,7 +328,7 @@ fn rc_block(rc: RcFunction, b: u32) -> List<IrInst> {
 /// order; the values marked in `rc.mark` (live out of `b`, their indices in
 /// `touched`) become the values live before it. Code for an edge that cannot go before `t` goes to its
 /// successor's start or to a new block.
-fn rc_terminator(rc: RcFunction, b: u32, t: IrInst, touched: List<i64>) -> List<IrInst> {
+fn rc_terminator(var ref rc: RcFunction, b: u32, t: IrInst, touched: List<i64>) -> List<IrInst> {
     let f = rc.f;
     let a = ir_args(f, t);
     let op = t.opcode;
@@ -422,7 +420,7 @@ fn rc_terminator(rc: RcFunction, b: u32, t: IrInst, touched: List<i64>) -> List<
 
 /// The code on the edge to block `s` passing `args`, for the values `held`
 /// at the branch.
-fn rc_edge(rc: RcFunction, held: List<u32>, s: u32, args: List<u32>, span: u32) -> List<IrInst> {
+fn rc_edge(var ref rc: RcFunction, ref held: List<u32>, s: u32, ref args: List<u32>, span: u32) -> List<IrInst> {
     var code: List<IrInst> = [];
     for v in held {
         var uses = 0;
@@ -449,7 +447,7 @@ fn rc_edge(rc: RcFunction, held: List<u32>, s: u32, args: List<u32>, span: u32) 
     return code;
 }
 
-fn rc_slice(a: List<u32>, from: i64, count: i64) -> List<u32> {
+fn rc_slice(ref a: List<u32>, from: i64, count: i64) -> List<u32> {
     var out: List<u32> = [];
     var i = 0;
     while i < count {
@@ -460,7 +458,7 @@ fn rc_slice(a: List<u32>, from: i64, count: i64) -> List<u32> {
 }
 
 /// Branch `t` going to `targets` with `args` instead.
-fn rc_retarget(rc: RcFunction, t: IrInst, targets: List<u32>, args: List<List<u32>>) -> IrInst {
+fn rc_retarget(var ref rc: RcFunction, t: IrInst, ref targets: List<u32>, ref args: List<List<u32>>) -> IrInst {
     let a = ir_args(rc.f, t);
     var out: List<u32> = [];
     if t.opcode == op_cond_br() {

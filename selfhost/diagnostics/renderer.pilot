@@ -3,10 +3,9 @@
 // Milestone 8.2: Rich Visual Diagnostic Snippet Renderer & SARIF 2.1.0 Emitter
 // Unicode/East-Asian display-width alignment, gutter snippets, and --explain
 // ==============================================================================
-pub lvl(0) pkg Pilot.Diagnostics.Renderer;
+pub lvl(0) pkg selfhost.diagnostics;
 
 use std.text;
-use Pilot.Diagnostics.Model::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -160,7 +159,7 @@ pub fn find_line_col_at(src: str, byte_offset: usize) -> LineColInfo {
 // ------------------------------------------------------------------------------
 // Multi-Line Gutter Snippet Human Renderer
 // ------------------------------------------------------------------------------
-pub fn render_diagnostic_human(diag: Diagnostic, src: str, file_path: str, use_color: bool) -> str {
+pub fn render_diagnostic_human(ref diag: Diagnostic, src: str, file_path: str, use_color: bool) -> str {
     var out = "";
     let sev_str = diag_severity_name(diag.severity);
 
@@ -419,7 +418,7 @@ pub fn escape_json_str(s: str) -> str {
     return text.join_text(out, "");
 }
 
-pub fn render_diagnostic_json(diag: Diagnostic, file_path: str, src: str) -> str {
+pub fn render_diagnostic_json(ref diag: Diagnostic, file_path: str, src: str) -> str {
     var out = "{";
     out = out + "\"code\":\"" + diag.code + "\",";
     out = out + "\"severity\":\"" + diag_severity_name(diag.severity) + "\",";
@@ -435,7 +434,7 @@ pub fn render_diagnostic_json(diag: Diagnostic, file_path: str, src: str) -> str
     return out;
 }
 
-pub fn render_sarif_report(diags: List<Diagnostic>, file_path: str, src: str) -> str {
+pub fn render_sarif_report(ref diags: List<Diagnostic>, file_path: str, src: str) -> str {
     var out = "{\n";
     out = out + "  \"$schema\": \"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\n";
     out = out + "  \"version\": \"2.1.0\",\n";

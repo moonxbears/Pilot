@@ -4,6 +4,8 @@
 // 8-Backend GPU Kernel Dispatcher (`emit_arena_gpu_kernel`).
 // ============================================================================
 
+pub pkg selfhost.codegen;
+
 [Layout(c_abi)]
 pub struct GpuLlvmIrArtifact : IValue {
     pub target_triple: str;

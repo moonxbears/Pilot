@@ -27,7 +27,10 @@ fn assert_clean(path: &str) {
     let out = check(path);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(0), "{path}: {stderr}");
-    assert_eq!(stderr, "", "{path}: a well-typed program gets no diagnostic");
+    assert_eq!(
+        stderr, "",
+        "{path}: a well-typed program gets no diagnostic"
+    );
 }
 
 #[test]
@@ -58,7 +61,9 @@ fn a_program_that_does_not_link_is_not_type_checked() {
 /// else is linked with it) and returns the `(code, line:col)` of every
 /// diagnostic `pilot check` reports for it.
 fn reported(name: &str, src: &str) -> Vec<(String, String)> {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli_f4").join(name);
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("cli_f4")
+        .join(name);
     fs::create_dir_all(&dir).expect("create program directory");
     let file = dir.join("program.pilot");
     fs::write(&file, src).expect("write program");

@@ -10,7 +10,7 @@
 // (`selfhost/gate/ledger/seams.pilot`), and the bootstrap parity gate reports
 // that it stops at `bootstrap.stage_compile`.
 // ==============================================================================
-pub pkg Pilot.SelfHost.Pilotc;
+pub pkg selfhost;
 
 /// Which compiler produced an artifact: the Rust seed (stage 1), the compiler
 /// stage 1 built from `selfhost/` (stage 2), or the one stage 2 built from the

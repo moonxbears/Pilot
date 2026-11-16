@@ -3,15 +3,15 @@
 //! WebAssembly Component Model & WIT Universal Adapter (`use wasm`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 19,
@@ -126,12 +126,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m19(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -340,7 +344,10 @@ fn test_m19_2_canonical_abi_flattening_and_spill_rules() {
         "stdlib/std/polyglot/wasm.pilot",
     ];
     let res = eval_m19(deps, script);
-    assert_eq!(res, "42", "Canonical ABI flattening, spills & out-pointers must pass");
+    assert_eq!(
+        res, "42",
+        "Canonical ABI flattening, spills & out-pointers must pass"
+    );
 
     // Lifting WASM bytecode into PilIR needs a decoded function body.
     let lift_script = r##"
@@ -476,7 +483,10 @@ fn test_m19_3_sandboxed_wasm_runtime_bounds_and_fuel_traps() {
         }
     "##;
     let res = eval_m19(deps, load_script);
-    assert_eq!(res, "h\u{e9}llo|\u{e9}", "Loading a string must give back the stored UTF-8 text");
+    assert_eq!(
+        res, "h\u{e9}llo|\u{e9}",
+        "Loading a string must give back the stored UTF-8 text"
+    );
 
     guard.finish();
 }
@@ -554,7 +564,10 @@ fn test_m19_4_component_resource_table_and_lease_lifecycle() {
         "stdlib/std/polyglot/wasm.pilot",
     ];
     let res = eval_m19(deps, script);
-    assert_eq!(res, "42", "Component resource table and lease lifecycle must pass");
+    assert_eq!(
+        res, "42",
+        "Component resource table and lease lifecycle must pass"
+    );
 
     // Dropping an owned handle runs the component's [resource-drop] export.
     let drop_script = r##"

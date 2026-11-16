@@ -75,7 +75,11 @@ fn rename(t: TemplateNode, own: &[String]) -> TemplateNode {
         T::Ident(s) => T::Ident(hide(s)),
         T::Splice(s) => T::Splice(hide(s)),
         T::Let(s, m, v) => T::Let(hide(s), m, v.map(|x| Box::new(rename(*x, own)))),
-        T::For(s, i, b) => T::For(hide(s), Box::new(rename(*i, own)), Box::new(rename(*b, own))),
+        T::For(s, i, b) => T::For(
+            hide(s),
+            Box::new(rename(*i, own)),
+            Box::new(rename(*b, own)),
+        ),
         other => rebuild(other, &mut |c| rename(c, own)),
     }
 }
@@ -96,9 +100,13 @@ fn walk(t: &TemplateNode, f: &mut dyn FnMut(&TemplateNode)) {
     use TemplateNode as T;
     f(t);
     match t {
-        T::TypeNamed(_, v) | T::TypeTuple(v) | T::Block(v) | T::Call(_, v) | T::Tuple(v) | T::List(v) | T::Form(_, v) => {
-            v.iter().for_each(|x| walk(x, f))
-        }
+        T::TypeNamed(_, v)
+        | T::TypeTuple(v)
+        | T::Block(v)
+        | T::Call(_, v)
+        | T::Tuple(v)
+        | T::List(v)
+        | T::Form(_, v) => v.iter().for_each(|x| walk(x, f)),
         T::If(c, a, b) => {
             walk(c, f);
             walk(a, f);
@@ -123,7 +131,9 @@ fn walk(t: &TemplateNode, f: &mut dyn FnMut(&TemplateNode)) {
 /// `t` with `f` applied to each node directly under it.
 fn rebuild(t: TemplateNode, f: &mut dyn FnMut(TemplateNode) -> TemplateNode) -> TemplateNode {
     use TemplateNode as T;
-    let all = |v: Vec<TemplateNode>, f: &mut dyn FnMut(TemplateNode) -> TemplateNode| v.into_iter().map(f).collect::<Vec<_>>();
+    let all = |v: Vec<TemplateNode>, f: &mut dyn FnMut(TemplateNode) -> TemplateNode| {
+        v.into_iter().map(f).collect::<Vec<_>>()
+    };
     match t {
         T::Call(k, v) => T::Call(k, all(v, f)),
         T::Form(k, v) => T::Form(k, all(v, f)),
@@ -219,7 +229,11 @@ fn run_spans(name: &str) -> String {
 
 /// When `t` uses a hole bound to a sequence (a repeated hole), the bindings
 /// for each repetition of `t`, in order: each such hole bound to its element.
-pub(crate) fn repetitions(t: &TemplateNode, bindings: &[(String, NodeId)], arena: &AstArena) -> Option<Vec<Vec<(String, NodeId)>>> {
+pub(crate) fn repetitions(
+    t: &TemplateNode,
+    bindings: &[(String, NodeId)],
+    arena: &AstArena,
+) -> Option<Vec<Vec<(String, NodeId)>>> {
     let mut seqs: Vec<String> = Vec::new();
     walk(t, &mut |n| {
         if let TemplateNode::Splice(s) = n {
@@ -232,24 +246,54 @@ pub(crate) fn repetitions(t: &TemplateNode, bindings: &[(String, NodeId)], arena
     // of them out holds `NONE` for it. A template that repeats over one hole
     // only skips those.
     let children = |name: &str| -> Vec<u32> {
-        let id = bindings.iter().find(|(k, _)| k == name).map_or(NodeId::NONE, |b| b.1);
-        id.is_some().then(|| { let n = arena.node(id); arena.children_slice(n.lhs, n.rhs).to_vec() }).unwrap_or_default()
+        let id = bindings
+            .iter()
+            .find(|(k, _)| k == name)
+            .map_or(NodeId::NONE, |b| b.1);
+        id.is_some()
+            .then(|| {
+                let n = arena.node(id);
+                arena.children_slice(n.lhs, n.rhs).to_vec()
+            })
+            .unwrap_or_default()
     };
     let elems: Vec<Vec<u32>> = seqs.iter().map(|s| children(s)).collect();
     let spans = children(&run_spans(seqs.first()?));
     let keep: Vec<usize> = if seqs.len() == 1 {
-        (0..elems[0].len()).filter(|&i| NodeId(elems[0][i]).is_some()).collect()
+        (0..elems[0].len())
+            .filter(|&i| NodeId(elems[0][i]).is_some())
+            .collect()
     } else {
         (0..elems.iter().map(Vec::len).min()?).collect()
     };
     // A hole repeated inside a repetition is a sequence in each repetition.
-    let nested: Vec<(String, NodeId)> = seqs.iter().filter(|s| bindings.iter().any(|(k, _)| *k == seq_binding(&seq_binding(s)))).map(|s| (seq_binding(s), NodeId::NONE)).collect();
-    let rest = bindings.iter().filter(|(k, _)| !seqs.iter().any(|s| *k == seq_binding(s))).cloned();
+    let nested: Vec<(String, NodeId)> = seqs
+        .iter()
+        .filter(|s| {
+            bindings
+                .iter()
+                .any(|(k, _)| *k == seq_binding(&seq_binding(s)))
+        })
+        .map(|s| (seq_binding(s), NodeId::NONE))
+        .collect();
+    let rest = bindings
+        .iter()
+        .filter(|(k, _)| !seqs.iter().any(|s| *k == seq_binding(s)))
+        .cloned();
     let rest: Vec<(String, NodeId)> = nested.into_iter().chain(rest).collect();
-    Some(keep.into_iter().map(|i| {
-        let span = spans.get(i).map(|&c| (RUN_SPAN.to_string(), NodeId(c)));
-        seqs.iter().zip(&elems).map(|(s, e)| (s.clone(), NodeId(e[i]))).chain(span).chain(rest.iter().cloned()).collect()
-    }).collect())
+    Some(
+        keep.into_iter()
+            .map(|i| {
+                let span = spans.get(i).map(|&c| (RUN_SPAN.to_string(), NodeId(c)));
+                seqs.iter()
+                    .zip(&elems)
+                    .map(|(s, e)| (s.clone(), NodeId(e[i])))
+                    .chain(span)
+                    .chain(rest.iter().cloned())
+                    .collect()
+            })
+            .collect(),
+    )
 }
 
 impl<'a> Parser<'a> {
@@ -267,13 +311,24 @@ impl<'a> Parser<'a> {
     /// The items of a sequence head, up to `=>` (up to `;` when `arm_end`,
     /// or the `)` closing a group). `defaults` collects the defaults of the
     /// holes of an optional group.
-    pub(crate) fn parse_seq_head(&mut self, end: Option<usize>, arm_end: bool, mut defaults: Option<&mut Vec<(String, TemplateNode)>>) -> Vec<HeadItem> {
+    pub(crate) fn parse_seq_head(
+        &mut self,
+        end: Option<usize>,
+        arm_end: bool,
+        mut defaults: Option<&mut Vec<(String, TemplateNode)>>,
+    ) -> Vec<HeadItem> {
         let mut items = Vec::new();
         // Repeated groups with no separator and no leading word: each must
         // be followed by a word, which ends it.
         let mut until_word: Vec<(usize, ByteSpan)> = Vec::new();
         // A class arm ends at `;` (and may spell `=>`); a rule's head at `=>`.
-        let stop = |p: &Self| if arm_end { p.at(TokenKind::Semicolon) || p.at(TokenKind::RBrace) } else { p.at(TokenKind::FatArrow) };
+        let stop = |p: &Self| {
+            if arm_end {
+                p.at(TokenKind::Semicolon) || p.at(TokenKind::RBrace)
+            } else {
+                p.at(TokenKind::FatArrow)
+            }
+        };
         while !self.at_end() && end.map_or(!stop(self), |e| self.cur() < e) {
             let sp = self.span();
             if !self.eat(TokenKind::Dollar) {
@@ -282,14 +337,24 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.at(TokenKind::LParen) {
-                let close = self.tape.matching_bracket(self.cur()).map_or(self.tape.len(), |c| c as usize);
+                let close = self
+                    .tape
+                    .matching_bracket(self.cur())
+                    .map_or(self.tape.len(), |c| c as usize);
                 self.advance();
                 let mut defs = Vec::new();
                 let inner = self.parse_seq_head(Some(close), false, Some(&mut defs));
                 self.expect(TokenKind::RParen);
                 if self.text() == "?" {
                     self.advance();
-                    if !matches!(inner.first(), Some(HeadItem::Word(_) | HeadItem::Hole(_, HOLE_IDENT | HOLE_BLOCK) | HeadItem::Class(_))) {
+                    if !matches!(
+                        inner.first(),
+                        Some(
+                            HeadItem::Word(_)
+                                | HeadItem::Hole(_, HOLE_IDENT | HOLE_BLOCK)
+                                | HeadItem::Class(_)
+                        )
+                    ) {
                         self.seq_head_error(sp, "an optional group `$( .. )?` starts with a word, a name or block hole, or a syntax class");
                     }
                     items.push(HeadItem::Optional(inner, defs));
@@ -307,7 +372,10 @@ impl<'a> Parser<'a> {
                     until_word.push((items.len(), sp));
                 }
                 if !defs.is_empty() {
-                    self.seq_head_error(sp, "only a hole of an optional group `$( .. )?` has a default");
+                    self.seq_head_error(
+                        sp,
+                        "only a hole of an optional group `$( .. )?` has a default",
+                    );
                 }
                 items.push(HeadItem::Repeated(inner, sep));
                 continue;
@@ -330,7 +398,10 @@ impl<'a> Parser<'a> {
         }
         for (i, sp) in until_word {
             if !matches!(items.get(i + 1), Some(HeadItem::Word(_))) {
-                self.seq_head_error(sp, "a repeated group with no separator starts with a word or is followed by one");
+                self.seq_head_error(
+                    sp,
+                    "a repeated group with no separator starts with a word or is followed by one",
+                );
             }
         }
         items
@@ -345,14 +416,24 @@ impl<'a> Parser<'a> {
     fn word_led(&self, items: &[HeadItem]) -> bool {
         match items.first() {
             Some(HeadItem::Word(_)) => true,
-            Some(HeadItem::Class(c)) => self.tables.syntax_classes.get(c).is_some_and(|arms| arms.iter().all(|a| self.word_led(a))),
+            Some(HeadItem::Class(c)) => self
+                .tables
+                .syntax_classes
+                .get(c)
+                .is_some_and(|arms| arms.iter().all(|a| self.word_led(a))),
             _ => false,
         }
     }
 
     /// Records a sequence rule for `word`. Two holes of one name reachable
     /// from it are SYN011.
-    pub(crate) fn add_seq_rule(&mut self, word: &str, items: Vec<HeadItem>, template: TemplateNode, body: ByteSpan) {
+    pub(crate) fn add_seq_rule(
+        &mut self,
+        word: &str,
+        items: Vec<HeadItem>,
+        template: TemplateNode,
+        body: ByteSpan,
+    ) {
         if let Some(kind) = first_unsupported(&template) {
             self.arena.diagnostics.push((
                 body,
@@ -361,17 +442,31 @@ impl<'a> Parser<'a> {
         }
         let mut names = Vec::new();
         self.hole_names(&items, &mut names);
-        if let Some(d) = names.iter().enumerate().find(|(i, n)| names[..*i].contains(n)) {
-            self.arena.diagnostics.push((body, format!("SYN011: the rule `{word}` binds `{}` twice", d.1)));
+        if let Some(d) = names
+            .iter()
+            .enumerate()
+            .find(|(i, n)| names[..*i].contains(n))
+        {
+            self.arena.diagnostics.push((
+                body,
+                format!("SYN011: the rule `{word}` binds `{}` twice", d.1),
+            ));
         }
         // A template that is one `form(..)` builds that node itself, not a
         // block around it (a `guard`'s binding outlives the statement).
         let template = match self.with_forms(template, body) {
-            TemplateNode::Block(v) if v.len() == 1 && matches!(v[0], TemplateNode::Form(..)) => v.into_iter().next().unwrap_or(TemplateNode::NoneLit),
+            TemplateNode::Block(v) if v.len() == 1 && matches!(v[0], TemplateNode::Form(..)) => {
+                v.into_iter().next().unwrap_or(TemplateNode::NoneLit)
+            }
             t => t,
         };
         let template = hygienic(self.with_source_text(template), &names);
-        self.tables.to_mut().seq_rules.entry(word.to_string()).or_default().push(SeqRule { items, template });
+        self.tables
+            .to_mut()
+            .seq_rules
+            .entry(word.to_string())
+            .or_default()
+            .push(SeqRule { items, template });
     }
 
     /// `t` with each `form(Forms::X, ..)` (the builder word and enum
@@ -380,10 +475,20 @@ impl<'a> Parser<'a> {
         if let TemplateNode::Call(_, v) = &t {
             if let [TemplateNode::Ident(b), TemplateNode::Member(e, variant), ..] = v.as_slice() {
                 let (forms_enum, builder) = self.tables.core_forms.clone();
-                if !builder.is_empty() && *b == builder && matches!(e.as_ref(), TemplateNode::Ident(n) if *n == forms_enum) {
+                if !builder.is_empty()
+                    && *b == builder
+                    && matches!(e.as_ref(), TemplateNode::Ident(n) if *n == forms_enum)
+                {
                     let variant = variant.clone();
-                    let ops: Vec<TemplateNode> = v[2..].iter().map(|o| self.with_forms(o.clone(), body)).collect();
-                    return match self.tables.core_form(&variant).filter(|&f| crate::forms::has_constructor(f)) {
+                    let ops: Vec<TemplateNode> = v[2..]
+                        .iter()
+                        .map(|o| self.with_forms(o.clone(), body))
+                        .collect();
+                    return match self
+                        .tables
+                        .core_form(&variant)
+                        .filter(|&f| crate::forms::has_constructor(f))
+                    {
                         Some(f) => TemplateNode::Form(f, ops),
                         None => {
                             let msg = format!("SYN010: `{variant}` is not a node the seed can build (a variant of `{forms_enum}`)");
@@ -405,17 +510,30 @@ impl<'a> Parser<'a> {
     pub(crate) fn add_syntax_class(&mut self, name: &str, arms: Vec<Vec<HeadItem>>, sp: ByteSpan) {
         for (j, b) in arms.iter().enumerate() {
             let fallback = j + 1 == arms.len() && self.leads(b).is_none();
-            if let Some(i) = arms[..j].iter().position(|a| !fallback && !self.leads_differ(a, b)) {
+            if let Some(i) = arms[..j]
+                .iter()
+                .position(|a| !fallback && !self.leads_differ(a, b))
+            {
                 let msg = format!("SYN011: arms {} and {} of the syntax class `{name}` start alike, so a use cannot tell them apart", i + 1, j + 1);
                 self.arena.diagnostics.push((sp, msg));
             }
             let mut names = Vec::new();
             self.hole_names(b, &mut names);
-            if let Some(d) = names.iter().enumerate().find(|(i, n)| names[..*i].contains(n)) {
-                self.arena.diagnostics.push((sp, format!("SYN011: the syntax class `{name}` binds `{}` twice", d.1)));
+            if let Some(d) = names
+                .iter()
+                .enumerate()
+                .find(|(i, n)| names[..*i].contains(n))
+            {
+                self.arena.diagnostics.push((
+                    sp,
+                    format!("SYN011: the syntax class `{name}` binds `{}` twice", d.1),
+                ));
             }
         }
-        self.tables.to_mut().syntax_classes.insert(name.to_string(), arms);
+        self.tables
+            .to_mut()
+            .syntax_classes
+            .insert(name.to_string(), arms);
     }
 
     /// The tokens a use of `items` can start with, when they are known.
@@ -448,7 +566,13 @@ impl<'a> Parser<'a> {
         match items.first() {
             Some(HeadItem::Word(w)) => out.push(w.clone()),
             Some(HeadItem::Class(c)) => {
-                for a in self.tables.syntax_classes.get(c).map(Vec::as_slice).unwrap_or_default() {
+                for a in self
+                    .tables
+                    .syntax_classes
+                    .get(c)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default()
+                {
                     self.lead_words(a, out);
                 }
             }
@@ -463,9 +587,11 @@ impl<'a> Parser<'a> {
             None => follow,
             Some(HeadItem::Hole(_, HOLE_BLOCK)) => true,
             Some(HeadItem::Word(w)) => w == "{",
-            Some(HeadItem::Class(c)) => {
-                self.tables.syntax_classes.get(c).is_some_and(|arms| arms.iter().any(|a| self.block_follows(a, 0, false)))
-            }
+            Some(HeadItem::Class(c)) => self
+                .tables
+                .syntax_classes
+                .get(c)
+                .is_some_and(|arms| arms.iter().any(|a| self.block_follows(a, 0, false))),
             Some(HeadItem::Optional(inner, _) | HeadItem::Repeated(inner, _)) => {
                 self.block_follows(inner, 0, false) || self.block_follows(items, i + 1, follow)
             }
@@ -487,7 +613,10 @@ impl<'a> Parser<'a> {
         let word = self.text().to_string();
         let mut best: Option<(usize, Vec<(ByteSpan, String)>)> = None;
         let after = self.cur() + 1;
-        let fitting: Vec<&SeqRule> = rules.iter().filter(|r| self.quick_fit(&r.items, after)).collect();
+        let fitting: Vec<&SeqRule> = rules
+            .iter()
+            .filter(|r| self.quick_fit(&r.items, after))
+            .collect();
         for rule in fitting {
             self.advance();
             let (mut bindings, mut words) = (Vec::new(), 0usize);
@@ -510,7 +639,9 @@ impl<'a> Parser<'a> {
         let Some((reached, found)) = best else {
             let nx = self.next_non_nl(self.cur() + 1);
             let k = (nx < self.tape.len()).then(|| self.tape.kind(nx))?;
-            if !((crate::is_word_tok(k) && !self.goes_on(nx)) || matches!(k, TokenKind::IntLit | TokenKind::StrLit)) {
+            if !((crate::is_word_tok(k) && !self.goes_on(nx))
+                || matches!(k, TokenKind::IntLit | TokenKind::StrLit))
+            {
                 return None;
             }
             self.advance();
@@ -526,7 +657,9 @@ impl<'a> Parser<'a> {
     fn name_at(&self, at: usize) -> bool {
         at < self.tape.len()
             && (crate::is_word_tok(self.tape.kind(at))
-                || (self.tape.kind(at) == TokenKind::Dollar && at + 1 < self.tape.len() && crate::is_word_tok(self.tape.kind(at + 1))))
+                || (self.tape.kind(at) == TokenKind::Dollar
+                    && at + 1 < self.tape.len()
+                    && crate::is_word_tok(self.tape.kind(at + 1))))
     }
 
     /// Whether `items` fit the tokens from `at`, as far as words, names and
@@ -534,14 +667,24 @@ impl<'a> Parser<'a> {
     fn quick_fit(&self, items: &[HeadItem], mut at: usize) -> bool {
         for item in items {
             at = self.next_non_nl(at);
-            let here = (at < self.tape.len()).then(|| (self.tape.kind(at), self.tape.text(at, self.src)));
+            let here =
+                (at < self.tape.len()).then(|| (self.tape.kind(at), self.tape.text(at, self.src)));
             match item {
                 HeadItem::Word(w) if here.is_some_and(|(_, t)| t == w) => at += 1,
                 HeadItem::Hole(_, HOLE_IDENT) if self.name_at(at) => {
-                    at += if self.tape.kind(at) == TokenKind::Dollar { 2 } else { 1 };
+                    at += if self.tape.kind(at) == TokenKind::Dollar {
+                        2
+                    } else {
+                        1
+                    };
                 }
-                HeadItem::Hole(_, HOLE_BLOCK) if here.is_some_and(|(k, _)| k == TokenKind::LBrace) => {
-                    at = self.tape.matching_bracket(at).map_or(self.tape.len(), |c| c as usize + 1);
+                HeadItem::Hole(_, HOLE_BLOCK)
+                    if here.is_some_and(|(k, _)| k == TokenKind::LBrace) =>
+                {
+                    at = self
+                        .tape
+                        .matching_bracket(at)
+                        .map_or(self.tape.len(), |c| c as usize + 1);
                 }
                 HeadItem::Optional(inner, _) => {
                     if self.quick_fit(&inner[..1], at) {
@@ -551,9 +694,14 @@ impl<'a> Parser<'a> {
                 HeadItem::Hole(_, HOLE_REST) if self.rest_starts(at) => return true,
                 HeadItem::Class(c) => {
                     let arms = self.tables.syntax_classes.get(c);
-                    return arms.is_some_and(|arms| arms.iter().any(|a| self.quick_fit(&a[..a.len().min(1)], at)));
+                    return arms.is_some_and(|arms| {
+                        arms.iter()
+                            .any(|a| self.quick_fit(&a[..a.len().min(1)], at))
+                    });
                 }
-                HeadItem::Word(_) | HeadItem::Hole(_, HOLE_IDENT | HOLE_BLOCK | HOLE_REST) => return false,
+                HeadItem::Word(_) | HeadItem::Hole(_, HOLE_IDENT | HOLE_BLOCK | HOLE_REST) => {
+                    return false
+                }
                 _ => return true,
             }
         }
@@ -565,7 +713,15 @@ impl<'a> Parser<'a> {
     /// the first token that does not fit. `follow` tells whether the code
     /// after `items` may start with a block; `stops` are the words that end
     /// a `Stmts` hole (those that start the next repetition around it).
-    fn match_items(&mut self, word: &str, items: &[HeadItem], out: &mut Vec<(String, NodeId)>, words: &mut usize, follow: bool, stops: &[String]) -> bool {
+    fn match_items(
+        &mut self,
+        word: &str,
+        items: &[HeadItem],
+        out: &mut Vec<(String, NodeId)>,
+        words: &mut usize,
+        follow: bool,
+        stops: &[String],
+    ) -> bool {
         for (i, item) in items.iter().enumerate() {
             let next_block = self.block_follows(items, i + 1, follow);
             match item {
@@ -575,7 +731,10 @@ impl<'a> Parser<'a> {
                 }
                 HeadItem::Word(w) => {
                     let (sp, found) = (self.span(), self.text().to_string());
-                    self.arena.diagnostics.push((sp, format!("SYN010: `{word}` expects `{w}` here, found `{found}`")));
+                    self.arena.diagnostics.push((
+                        sp,
+                        format!("SYN010: `{word}` expects `{w}` here, found `{found}`"),
+                    ));
                     return false;
                 }
                 HeadItem::Hole(name, kind) => {
@@ -584,23 +743,39 @@ impl<'a> Parser<'a> {
                     let node = self.parse_hole(word, name, *kind, next_block, bp, stops);
                     if node.is_none() {
                         if !matches!(*kind, HOLE_BLOCK | HOLE_IDENT) {
-                            self.arena.diagnostics.push((sp, format!("SYN010: `{word}` expects code for `${name}`, found `{found}`")));
+                            self.arena.diagnostics.push((
+                                sp,
+                                format!(
+                                    "SYN010: `{word}` expects code for `${name}`, found `{found}`"
+                                ),
+                            ));
                         }
                         return false;
                     }
                     let text = self.source_text(node);
                     let sym = self.arena.interner.intern(&text);
-                    let text_node = self.arena.alloc_node(NodeKind::StrLit, 0, self.prev_span(), sym.0, 0);
+                    let text_node =
+                        self.arena
+                            .alloc_node(NodeKind::StrLit, 0, self.prev_span(), sym.0, 0);
                     out.push((name.clone(), node));
                     out.push((text_binding(name), text_node));
                 }
                 // The arm the next token starts; the holes of the others are
                 // bound absent.
                 HeadItem::Class(c) => {
-                    let arms = self.tables.syntax_classes.get(c).cloned().unwrap_or_default();
+                    let arms = self
+                        .tables
+                        .syntax_classes
+                        .get(c)
+                        .cloned()
+                        .unwrap_or_default();
                     let at = self.cur();
-                    let Some(k) = arms.iter().position(|a| self.quick_fit(&a[..a.len().min(1)], at)) else {
-                        let msg = format!("SYN010: `{word}` expects {c} here, found `{}`", self.text());
+                    let Some(k) = arms
+                        .iter()
+                        .position(|a| self.quick_fit(&a[..a.len().min(1)], at))
+                    else {
+                        let msg =
+                            format!("SYN010: `{word}` expects {c} here, found `{}`", self.text());
                         self.arena.diagnostics.push((self.span(), msg));
                         return false;
                     };
@@ -626,7 +801,13 @@ impl<'a> Parser<'a> {
                         None => self.quick_fit(&inner[..1], self.cur()),
                     };
                     if let Some(w) = &flag_word {
-                        let flag = self.arena.alloc_node(NodeKind::BoolLit, 0, self.span(), written as u32, 0);
+                        let flag = self.arena.alloc_node(
+                            NodeKind::BoolLit,
+                            0,
+                            self.span(),
+                            written as u32,
+                            0,
+                        );
                         out.push((w.clone(), flag));
                     }
                     if written {
@@ -656,17 +837,30 @@ impl<'a> Parser<'a> {
                     let inner_block = self.block_follows(inner, 0, false) || next_block;
                     let mut runs: Vec<Vec<(String, NodeId)>> = Vec::new();
                     while !self.at_end() {
-                        if until.as_ref().is_some_and(|u| self.text() == u) || (led && !self.quick_fit(&inner[..1], self.cur())) {
+                        if until.as_ref().is_some_and(|u| self.text() == u)
+                            || (led && !self.quick_fit(&inner[..1], self.cur()))
+                        {
                             break;
                         }
                         let (m, run_start, mut one) = (self.pos, self.span().start, Vec::new());
-                        if !self.match_items(word, inner, &mut one, words, inner_block, &inner_stops) {
+                        if !self.match_items(
+                            word,
+                            inner,
+                            &mut one,
+                            words,
+                            inner_block,
+                            &inner_stops,
+                        ) {
                             return false;
                         }
                         let run = ByteSpan::new(run_start, self.prev_span().end.max(run_start));
-                        one.push((RUN_SPAN.to_string(), self.arena.alloc_node(NodeKind::NoneLit, 0, run, 0, 0)));
+                        one.push((
+                            RUN_SPAN.to_string(),
+                            self.arena.alloc_node(NodeKind::NoneLit, 0, run, 0, 0),
+                        ));
                         if self.pos == m {
-                            let msg = format!("SYN010: `{word}` cannot read `{}` here", self.text());
+                            let msg =
+                                format!("SYN010: `{word}` cannot read `{}` here", self.text());
                             self.arena.diagnostics.push((self.span(), msg));
                             return false;
                         }
@@ -690,7 +884,12 @@ impl<'a> Parser<'a> {
     /// Binds each hole name of `inner` to the sequence of what the runs
     /// bound it to, `NONE` where a run left it out. A name `out` already
     /// binds is skipped.
-    fn bind_runs(&mut self, inner: &[HeadItem], runs: &[Vec<(String, NodeId)>], out: &mut Vec<(String, NodeId)>) {
+    fn bind_runs(
+        &mut self,
+        inner: &[HeadItem],
+        runs: &[Vec<(String, NodeId)>],
+        out: &mut Vec<(String, NodeId)>,
+    ) {
         let mut names = Vec::new();
         self.hole_names(inner, &mut names);
         let span = self.prev_span();
@@ -698,17 +897,34 @@ impl<'a> Parser<'a> {
             if out.iter().any(|(k, _)| *k == n) {
                 continue;
             }
-            let ids: Vec<NodeId> = runs.iter().map(|r| r.iter().find(|(k, _)| *k == n).map_or(NodeId::NONE, |(_, id)| *id)).collect();
-            let seq = self.arena.alloc_list_node(NodeKind::TupleExpr, 0, span, &ids);
-            let at: Vec<NodeId> = runs.iter().filter_map(|r| r.iter().find(|(k, _)| k == RUN_SPAN).map(|(_, id)| *id)).collect();
-            let spans = self.arena.alloc_list_node(NodeKind::TupleExpr, 0, span, &at);
+            let ids: Vec<NodeId> = runs
+                .iter()
+                .map(|r| {
+                    r.iter()
+                        .find(|(k, _)| *k == n)
+                        .map_or(NodeId::NONE, |(_, id)| *id)
+                })
+                .collect();
+            let seq = self
+                .arena
+                .alloc_list_node(NodeKind::TupleExpr, 0, span, &ids);
+            let at: Vec<NodeId> = runs
+                .iter()
+                .filter_map(|r| r.iter().find(|(k, _)| k == RUN_SPAN).map(|(_, id)| *id))
+                .collect();
+            let spans = self
+                .arena
+                .alloc_list_node(NodeKind::TupleExpr, 0, span, &at);
             out.push((run_spans(&n), spans));
             // A name repeated inside each run is a sequence of sequences.
             let mut marks = vec![seq_binding(&n)];
             for r in runs {
                 for (k, _) in r {
                     let deeper = seq_binding(k);
-                    if k.starts_with('\u{2}') && k.trim_start_matches('\u{2}') == n && !marks.contains(&deeper) {
+                    if k.starts_with('\u{2}')
+                        && k.trim_start_matches('\u{2}') == n
+                        && !marks.contains(&deeper)
+                    {
                         marks.push(deeper);
                     }
                 }
@@ -732,7 +948,9 @@ impl<'a> Parser<'a> {
                 HeadItem::Optional(inner, _) => {
                     if let Some(HeadItem::Word(w)) = inner.first() {
                         if !out.iter().any(|(k, _)| k == w) {
-                            let flag = self.arena.alloc_node(NodeKind::BoolLit, 0, self.span(), 0, 0);
+                            let flag =
+                                self.arena
+                                    .alloc_node(NodeKind::BoolLit, 0, self.span(), 0, 0);
                             out.push((w.clone(), flag));
                         }
                     }
@@ -740,7 +958,13 @@ impl<'a> Parser<'a> {
                 }
                 HeadItem::Repeated(inner, _) => self.bind_runs(inner, &[], out),
                 HeadItem::Class(c) => {
-                    for arm in self.tables.syntax_classes.get(c).cloned().unwrap_or_default() {
+                    for arm in self
+                        .tables
+                        .syntax_classes
+                        .get(c)
+                        .cloned()
+                        .unwrap_or_default()
+                    {
                         self.bind_absent(&arm, out);
                     }
                 }
@@ -762,10 +986,20 @@ impl<'a> Parser<'a> {
             return Some(e.bp + 1);
         }
         let expr_before = i >= 2 && matches!(items.get(i - 2), Some(HeadItem::Hole(_, HOLE_EXPR)));
-        infix(i.checked_sub(1).and_then(|p| items.get(p))).filter(|_| expr_before).map(|e| e.bp + u8::from(!e.right_assoc))
+        infix(i.checked_sub(1).and_then(|p| items.get(p)))
+            .filter(|_| expr_before)
+            .map(|e| e.bp + u8::from(!e.right_assoc))
     }
 
-    fn parse_hole(&mut self, word: &str, name: &str, kind: u8, before_block: bool, bp: Option<u8>, stops: &[String]) -> NodeId {
+    fn parse_hole(
+        &mut self,
+        word: &str,
+        name: &str,
+        kind: u8,
+        before_block: bool,
+        bp: Option<u8>,
+        stops: &[String],
+    ) -> NodeId {
         match kind {
             HOLE_BLOCK if self.at(TokenKind::LBrace) => self.parse_block(),
             // `$name` inside a template: the name a hole of the rule holds.
@@ -774,7 +1008,8 @@ impl<'a> Parser<'a> {
                 let in_template = self.eat(TokenKind::Dollar);
                 let sym = self.intern_cur();
                 let span = ByteSpan::new(sp.start, self.prev_span().end);
-                self.arena.alloc_node(NodeKind::IdentExpr, u16::from(in_template), span, sym.0, 0)
+                self.arena
+                    .alloc_node(NodeKind::IdentExpr, u16::from(in_template), span, sym.0, 0)
             }
             HOLE_PATTERN => self.parse_pattern(),
             HOLE_TYPE => self.parse_type(),
@@ -789,8 +1024,15 @@ impl<'a> Parser<'a> {
                 e
             }
             HOLE_BLOCK | HOLE_IDENT => {
-                let what = if kind == HOLE_BLOCK { "a block `{ .. }`" } else { "a name" };
-                let msg = format!("SYN010: `{word}` expects {what} for `${name}`, found `{}`", self.text());
+                let what = if kind == HOLE_BLOCK {
+                    "a block `{ .. }`"
+                } else {
+                    "a name"
+                };
+                let msg = format!(
+                    "SYN010: `{word}` expects {what} for `${name}`, found `{}`",
+                    self.text()
+                );
                 self.arena.diagnostics.push((self.span(), msg));
                 NodeId::NONE
             }
@@ -806,7 +1048,11 @@ impl<'a> Parser<'a> {
     fn parse_stmts_hole(&mut self, stops: &[String]) -> NodeId {
         let sp = self.span();
         let mut stmts = Vec::new();
-        while !self.at_end() && !self.at(TokenKind::RBrace) && !self.at(TokenKind::Comma) && !stops.iter().any(|s| self.text() == s) {
+        while !self.at_end()
+            && !self.at(TokenKind::RBrace)
+            && !self.at(TokenKind::Comma)
+            && !stops.iter().any(|s| self.text() == s)
+        {
             let m = self.pos;
             let s = self.parse_stmt();
             if s.is_some() {
@@ -817,9 +1063,16 @@ impl<'a> Parser<'a> {
             }
         }
         match stmts.as_slice() {
-            [one] if self.arena.node(*one).node_kind() == NodeKind::ExprStmt => NodeId(self.arena.node(*one).lhs),
+            [one] if self.arena.node(*one).node_kind() == NodeKind::ExprStmt => {
+                NodeId(self.arena.node(*one).lhs)
+            }
             [one] => *one,
-            _ => self.arena.alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.start)), &stmts),
+            _ => self.arena.alloc_list_node(
+                NodeKind::BlockExpr,
+                0,
+                ByteSpan::new(sp.start, self.prev_span().end.max(sp.start)),
+                &stmts,
+            ),
         }
     }
 
@@ -854,7 +1107,11 @@ impl<'a> Parser<'a> {
     fn goes_on(&self, at: usize) -> bool {
         let w = self.tape.text(at, self.src);
         self.tables.infix_ops.contains_key(w)
-            || self.tables.receptors.get(w).is_some_and(|&(rk, _)| matches!(rk, 19 | 29 | 31))
+            || self
+                .tables
+                .receptors
+                .get(w)
+                .is_some_and(|&(rk, _)| matches!(rk, 19 | 29 | 31))
     }
 
     /// A `Rest` hole: the code up to a `;` (not read), a closer it did not
@@ -898,7 +1155,13 @@ impl<'a> Parser<'a> {
                 HeadItem::Repeated(inner, _) => self.hole_names(inner, out),
                 HeadItem::Class(c) => {
                     let mut seen: Vec<String> = Vec::new();
-                    for arm in self.tables.syntax_classes.get(c).map(Vec::as_slice).unwrap_or_default() {
+                    for arm in self
+                        .tables
+                        .syntax_classes
+                        .get(c)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default()
+                    {
                         let mut a = Vec::new();
                         self.hole_names(arm, &mut a);
                         for n in a {

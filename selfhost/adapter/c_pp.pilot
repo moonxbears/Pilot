@@ -4,7 +4,7 @@
 // Pure-Pilot C preprocessor: #include, #pragma once, #define, #if/#elif, macros
 // Follows imp_type.md Rule 12: Encapsulated types (Map, List, File), zero raw __engine
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.CPp;
+pub lvl(0) pkg selfhost.adapter;
 
 use Pilot.Core.File.File;
 use std.text;
@@ -194,7 +194,7 @@ pub fn cpp_error_msg(ref env: CppEnv) -> str => env.error_msg;
 // 3. Expression Evaluator for #if and #elif (64-bit Integer Math)
 // ------------------------------------------------------------------------------
 
-pub fn cpp_eval_primary(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_primary(expr: str, var ref env: CppEnv) -> i64 {
     let n = expr.len();
     var cur = cpp_skip_space(expr, env.eval_pos);
     if cur >= n { env.eval_pos = cur; return 0; }
@@ -342,7 +342,7 @@ pub fn cpp_eval_primary(expr: str, ref env: CppEnv) -> i64 {
     return 0;
 }
 
-pub fn cpp_eval_mul(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_mul(expr: str, var ref env: CppEnv) -> i64 {
     var lhs = cpp_eval_primary(expr, env);
     let n = expr.len();
     var cur = env.eval_pos;
@@ -376,7 +376,7 @@ pub fn cpp_eval_mul(expr: str, ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_add(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_add(expr: str, var ref env: CppEnv) -> i64 {
     var lhs = cpp_eval_mul(expr, env);
     let n = expr.len();
     var cur = env.eval_pos;
@@ -404,7 +404,7 @@ pub fn cpp_eval_add(expr: str, ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_shift(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_shift(expr: str, var ref env: CppEnv) -> i64 {
     var lhs = cpp_eval_add(expr, env);
     let n = expr.len();
     var cur = env.eval_pos;
@@ -433,7 +433,7 @@ pub fn cpp_eval_shift(expr: str, ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_relational(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_relational(expr: str, var ref env: CppEnv) -> i64 {
     var lhs = cpp_eval_shift(expr, env);
     let n = expr.len();
     var cur = env.eval_pos;
@@ -477,7 +477,7 @@ pub fn cpp_eval_relational(expr: str, ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_equality(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_equality(expr: str, var ref env: CppEnv) -> i64 {
     var lhs = cpp_eval_relational(expr, env);
     let n = expr.len();
     var cur = env.eval_pos;
@@ -506,7 +506,7 @@ pub fn cpp_eval_equality(expr: str, ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_bitwise_and(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_bitwise_and(expr: str, var ref env: CppEnv) -> i64 {
     var lhs = cpp_eval_equality(expr, env);
     let n = expr.len();
     var cur = env.eval_pos;
@@ -528,7 +528,7 @@ pub fn cpp_eval_bitwise_and(expr: str, ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_bitwise_or(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_bitwise_or(expr: str, var ref env: CppEnv) -> i64 {
     var lhs = cpp_eval_bitwise_and(expr, env);
     let n = expr.len();
     var cur = env.eval_pos;
@@ -550,7 +550,7 @@ pub fn cpp_eval_bitwise_or(expr: str, ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_logical_and(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_logical_and(expr: str, var ref env: CppEnv) -> i64 {
     var lhs = cpp_eval_bitwise_or(expr, env);
     let n = expr.len();
     var cur = env.eval_pos;
@@ -571,7 +571,7 @@ pub fn cpp_eval_logical_and(expr: str, ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_logical_or(expr: str, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_logical_or(expr: str, var ref env: CppEnv) -> i64 {
     var lhs = cpp_eval_logical_and(expr, env);
     let n = expr.len();
     var cur = env.eval_pos;
@@ -592,14 +592,14 @@ pub fn cpp_eval_logical_or(expr: str, ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_expr(expr: str, var ref cur: usize, ref env: CppEnv) -> i64 {
+pub fn cpp_eval_expr(expr: str, var ref cur: usize, var ref env: CppEnv) -> i64 {
     env.eval_pos = cur;
     let res = cpp_eval_logical_or(expr, env);
     cur = env.eval_pos;
     return res;
 }
 
-pub fn cpp_evaluate_condition(cond_str: str, ref env: CppEnv) -> bool {
+pub fn cpp_evaluate_condition(cond_str: str, var ref env: CppEnv) -> bool {
     var pos: usize = 0;
     let res = cpp_eval_expr(cond_str, var pos, env);
     return res != 0;
@@ -609,7 +609,7 @@ pub fn cpp_evaluate_condition(cond_str: str, ref env: CppEnv) -> bool {
 // 4. Macro Expansion Engine (Object-like, Token Pasting, Arguments)
 // ------------------------------------------------------------------------------
 
-pub fn cpp_expand_fn_macro(ref m: CppMacro, args: List<str>) -> str {
+pub fn cpp_expand_fn_macro(ref m: CppMacro, ref args: List<str>) -> str {
     let body = m.val;
     let blen = body.len();
     var out = "";

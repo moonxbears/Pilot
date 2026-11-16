@@ -3,9 +3,7 @@
 // `pilot emit cpp`: PilIR as C++17, by the C-family dialect
 // (selfhost/transpile/c_family.pilot), whose C11 is also C++17.
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitCpp;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.transpile.source.*;
-use selfhost.transpile.c_family.*;
 
 pub fn cpp_dialect() -> ISourceDialect => CFamilyDialect { cpp: true, text_scalars: [] };

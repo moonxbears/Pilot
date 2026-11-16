@@ -12,6 +12,8 @@
 // ============================================================================
 
 // Finds `StructDecl` (`kind_tag == 1`) with matching `sym_id` (`-1` if not found).
+pub pkg selfhost.perceus;
+
 pub fn lat_find_struct_decl(type_sym: i64, node_count: i64) -> i64 {
     if type_sym <= 0 {
         return -1;

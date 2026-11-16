@@ -7,6 +7,8 @@
 // for Pilot seed keywords.
 // ============================================================================
 
+pub pkg selfhost.transpile;
+
 use std.text;
 
 [Layout(c_abi)]

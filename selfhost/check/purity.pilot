@@ -17,18 +17,11 @@
 // list); changing a receiver the caller lent, or a global, is reported.
 // A call through a closure value is not followed; `__engine` operations
 // stay with the library code that wraps them.
-pub lvl(0) pkg Pilot.SelfHost.Check.Purity;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.check.own.*;
-use selfhost.check.consts.*;
-use selfhost.check.effects.*;
 
 /// The name a function declaration is reported by.
-fn decl_label(s: Snap, d: i64) -> str => node_name(s, d);
+fn decl_label(ref s: Snap, d: i64) -> str => node_name(s, d);
 
 /// What finding effects keeps.
 pub struct PurityScan : IObject {
@@ -41,7 +34,7 @@ pub struct PurityScan : IObject {
 
 /// The first effect method `m` has besides changing its own receiver, or
 /// "". A method reached again through itself adds nothing on that path.
-fn method_effect(ps: PurityScan, m: i64) -> str {
+fn method_effect(ref ps: PurityScan, m: i64) -> str {
     let k = f"{m}";
     if ps.methods.has(k) {
         let known = ps.methods.get(k);
@@ -58,7 +51,7 @@ fn method_effect(ps: PurityScan, m: i64) -> str {
 }
 
 /// The effect node `n` has, as the rest of a PURE001 message, or "".
-pub fn impure_effect(ps: PurityScan, n: i64) -> str {
+pub fn impure_effect(ref ps: PurityScan, n: i64) -> str {
     let e = ps.e;
     let inf = e.inf;
     let s = inf.p.s;
@@ -99,7 +92,7 @@ pub fn impure_effect(ps: PurityScan, n: i64) -> str {
 
 /// PURE001 on each effect in the body of each `pure` function of the
 /// user's files.
-pub fn check_purity(inf: Infer, sink: DiagSink) {
+pub fn check_purity(var ref inf: Infer, var ref sink: DiagSink) {
     let s = inf.p.s;
     let f = flow_new(inf, sink);
     let ps = PurityScan { e: effects_new(f), cs: const_scan(f), methods: Map<str, str>() };

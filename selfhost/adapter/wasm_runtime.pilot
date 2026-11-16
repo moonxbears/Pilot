@@ -1,13 +1,11 @@
 // ==============================================================================
 // selfhost/adapter/wasm_runtime.pilot
 // Ring 3 / Self-Host Compiler: Capability-Sandboxed In-Process WASM 2.0 Runtime
-// Package: Pilot.SelfHost.Adapter.WasmRuntime (Milestone 19)
+// Package: selfhost.adapter (Milestone 19)
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Adapter.WasmRuntime;
+pub lvl(0) pkg selfhost.adapter;
 
-use Pilot.SelfHost.Adapter.WitParser;
-use Pilot.SelfHost.Adapter.WitAbi;
 
 // ------------------------------------------------------------------------------
 // 1. WASM Binary Magic & Constants
@@ -48,7 +46,7 @@ pub fn wasm_memory_new(initial_pages: i64, max_pages: i64) -> WasmMemory {
     };
 }
 
-pub fn wasm_memory_byte_len(mem: WasmMemory) -> i64 {
+pub fn wasm_memory_byte_len(ref mem: WasmMemory) -> i64 {
     return mem.pages * wasm_page_size();
 }
 
@@ -65,7 +63,7 @@ pub fn wasm_memory_grow(var ref mem: WasmMemory, delta_pages: i64) -> WasmResult
     return wasm_ok_int(prev_pages);
 }
 
-pub fn wasm_memory_check_bounds(mem: WasmMemory, offset: i64, size: i64) -> WasmResult {
+pub fn wasm_memory_check_bounds(ref mem: WasmMemory, offset: i64, size: i64) -> WasmResult {
     if offset < 0 || size < 0 {
         return wasm_err("WASM003: Negative linear memory offset or size");
     }
@@ -89,7 +87,7 @@ pub fn wasm_memory_store_byte(var ref mem: WasmMemory, offset: i64, val: i64) ->
     return wasm_ok_int(1);
 }
 
-pub fn wasm_memory_load_byte(mem: WasmMemory, offset: i64) -> WasmResult {
+pub fn wasm_memory_load_byte(ref mem: WasmMemory, offset: i64) -> WasmResult {
     let chk = wasm_memory_check_bounds(mem, offset, 1);
     if chk.is_err() {
         return chk;
@@ -115,7 +113,7 @@ pub fn wasm_memory_store_i32(var ref mem: WasmMemory, offset: i64, val: i64) -> 
     return r3;
 }
 
-pub fn wasm_memory_load_i32(mem: WasmMemory, offset: i64) -> WasmResult {
+pub fn wasm_memory_load_i32(ref mem: WasmMemory, offset: i64) -> WasmResult {
     let b0 = wasm_memory_load_byte(mem, offset + 0);
     if b0.is_err() { return b0; }
     let b1 = wasm_memory_load_byte(mem, offset + 1);
@@ -159,7 +157,7 @@ pure fn wasm_utf8_seq_len(b: i64) -> i64 {
 
 /// Checks that `len` bytes at `offset` are well-formed UTF-8 (RFC 3629:
 /// no overlong forms, no surrogates, nothing above U+10FFFF). WASM004 if not.
-pub fn wasm_memory_validate_utf8(mem: WasmMemory, offset: i64, len: i64) -> WasmResult {
+pub fn wasm_memory_validate_utf8(ref mem: WasmMemory, offset: i64, len: i64) -> WasmResult {
     let chk = wasm_memory_check_bounds(mem, offset, len);
     if chk.is_err() {
         return chk;
@@ -194,7 +192,7 @@ pub fn wasm_memory_validate_utf8(mem: WasmMemory, offset: i64, len: i64) -> Wasm
 
 /// Reads a string of `len` bytes at `offset`, checked as UTF-8 (WASM004 on
 /// a bad byte or a range outside memory).
-pub fn wasm_memory_load_str(mem: WasmMemory, offset: i64, len: i64) -> WasmResult {
+pub fn wasm_memory_load_str(ref mem: WasmMemory, offset: i64, len: i64) -> WasmResult {
     let valid = wasm_memory_validate_utf8(mem, offset, len);
     if valid.is_err() {
         return valid;
@@ -303,7 +301,7 @@ pub fn wasm_instance_add_export(var ref inst: WasmInstance, name: str, params: i
     inst.exports.push(exp);
 }
 
-pub fn wasm_instance_find_export_idx(inst: WasmInstance, name: str) -> i64 {
+pub fn wasm_instance_find_export_idx(ref inst: WasmInstance, name: str) -> i64 {
     var i = 0;
     while i < inst.exports.len() {
         let e = inst.exports.get(i);
@@ -333,7 +331,7 @@ pub fn wasm_validate_header(magic: i64, version: i64) -> WasmResult {
 // 6. Sandboxed WASM Interpreter Execution Core
 // ------------------------------------------------------------------------------
 
-pub fn wasm_invoke(var ref inst: WasmInstance, export_name: str, args: List<i64>) -> WasmResult {
+pub fn wasm_invoke(var ref inst: WasmInstance, export_name: str, ref args: List<i64>) -> WasmResult {
     let exp_idx = wasm_instance_find_export_idx(inst, export_name);
     if exp_idx < 0 {
         return wasm_err("WASM002: Export '" + export_name + "' not found in module '" + inst.module_name + "'");
@@ -354,6 +352,6 @@ pub fn wasm_invoke(var ref inst: WasmInstance, export_name: str, args: List<i64>
 // 7. PilIR AOT Lifter Bridge
 // ------------------------------------------------------------------------------
 
-pub fn wasm_lift_to_pilir_bridge(func_name: str, params: List<str>, return_ty: str) -> str {
+pub fn wasm_lift_to_pilir_bridge(func_name: str, ref params: List<str>, return_ty: str) -> str {
     return seam("wasm.lift_pilir", "lifting a decoded WASM function body into PilIR");
 }

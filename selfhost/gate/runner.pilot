@@ -4,19 +4,10 @@
 // Open-registry dispatcher supporting fast default checks, `--full`, `--only`,
 // `--litmus`, `--seed`, `--json`, and `--ratchet-update` (`0`/`1`/`2` exit codes).
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Gate.Runner;
+pub lvl(0) pkg selfhost.gate;
 
-use stdlib.crypto.hash.*;
-use selfhost.lexer.*;
-use selfhost.ast.*;
-use selfhost.parser.*;
-use selfhost.pilotc.*;
-use selfhost.gate.manifest.*;
-use selfhost.gate.seed_audit.*;
-use selfhost.gate.rename_litmus.*;
-use selfhost.gate.bootstrap_parity.*;
-use selfhost.gate.seam_gate.*;
-use selfhost.gate.keyword_gate.*;
+use std.crypto.hash;
+use selfhost.*;
 
 fn gr_reg_gate(reg: i64, ids: i64, gid: str, cat: GateCategory, fast_def: bool) -> usize {
     let entry = __engine("map_new");
@@ -282,12 +273,12 @@ pub fn apply_ratchet_update(workspace_root: str) -> str {
 }
 
 /// Whether `rep` stops at a seam that is still registered.
-fn gr_at_registered_seam(rep: GateReport) -> bool {
+fn gr_at_registered_seam(ref rep: GateReport) -> bool {
     return rep.at_seam.len() > 0 && gate_seam_open(rep.at_seam);
 }
 
 /// Whether `rep` blocks: it neither passed nor stops at a registered seam.
-fn gr_blocks(rep: GateReport) -> bool {
+fn gr_blocks(ref rep: GateReport) -> bool {
     return rep.passed == false && !gr_at_registered_seam(rep);
 }
 

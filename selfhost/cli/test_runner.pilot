@@ -3,7 +3,7 @@
 // Milestone 60.3: Self-Hosted Test Runner & JSON Telemetry Emitter
 // Replaces cmd_test in crates/pilot-cli/src/commands.rs.
 // =========================================================================
-pub pkg Pilot.SelfHost.Cli.TestRunner;
+pub pkg selfhost.cli;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

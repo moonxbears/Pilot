@@ -13,33 +13,28 @@
 //     computes for it, aligned to its `[Align(N)]` and packed when written
 //     `[Layout(packed)]` (selfhost/check/layout_attrs.pilot);
 //   - a value the checker could not type gets the layout of the unknown type.
-pub lvl(0) pkg Pilot.SelfHost.Ir.Layouts;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.methods.*;
-use selfhost.check.layout_attrs.*;
-use selfhost.ir.model.*;
+use selfhost.check.*;
 
 /// The layouts of one module, with the index that keeps them unique.
 pub struct IrLayouts : IObject {
-    pub p: Program;
-    pub m: IrModule;
+    pub ref p: Program;
+    pub ref m: IrModule;
     /// Printed type -> layout id.
     pub index: Map<str, i64>;
 }
 
-pub fn layouts_new(p: Program, m: IrModule) -> IrLayouts {
+pub fn layouts_new(ref p: Program, ref m: IrModule) -> IrLayouts {
     let ls = IrLayouts { p: p, m: m, index: Map<str, i64>() };
     // Layout 0 is the type the checker could not determine.
     let _ = layout_add(ls, "?", ir_physics_new(0, reg_class_aggregate(), 0, 0, lattice_value()));
     return ls;
 }
 
-fn layout_add(ls: IrLayouts, name: str, phy: IrTypePhysics) -> IrTypePhysics => layout_add_packed(ls, name, phy, false);
+fn layout_add(var ref ls: IrLayouts, name: str, phy: IrTypePhysics) -> IrTypePhysics => layout_add_packed(ls, name, phy, false);
 
-fn layout_add_packed(ls: IrLayouts, name: str, phy: IrTypePhysics, packed: bool) -> IrTypePhysics {
+fn layout_add_packed(var ref ls: IrLayouts, name: str, phy: IrTypePhysics, packed: bool) -> IrTypePhysics {
     let id = ls.m.layouts.len;
     let placed = ir_physics_new(id, phy.reg_class, phy.bit_width, phy.align_pow2, phy.lattice_bits);
     ls.m.layouts.push(IrLayout { name: name, physics: placed, packed: packed });
@@ -69,7 +64,7 @@ fn align_pow2_of(width: i64) -> u8 {
 }
 
 /// The physics of checked type `t`.
-pub fn layout_of(ls: IrLayouts, t: i64) -> IrTypePhysics {
+pub fn layout_of(var ref ls: IrLayouts, t: i64) -> IrTypePhysics {
     let p = ls.p;
     if ty_is_unknown(p.tt, t) || ty_is_param(p.tt, t) { return ls.m.layouts[0].physics; }
     let name = ty_display(p.tt, t);
@@ -110,7 +105,7 @@ pub fn layout_of(ls: IrLayouts, t: i64) -> IrTypePhysics {
 }
 
 /// Whether declaration `d` is an enum whose variants carry no values.
-pub fn is_tag_enum(s: Snap, d: i64) -> bool {
+pub fn is_tag_enum(ref s: Snap, d: i64) -> bool {
     if d < 0 || kind(s, d) != nk_adt() || flags(s, d) == 0 { return false; }
     for v in children(s, d) {
         if kind(s, v) != nk_variant() || flags(s, v) != 0 { return false; }
@@ -120,7 +115,7 @@ pub fn is_tag_enum(s: Snap, d: i64) -> bool {
 
 /// The tag of variant `name` of payload-free enum type `t`: its written
 /// value (`Low = 5`), else one more than the variant before it, from 0.
-pub fn variant_tag(p: Program, t: i64, name: str) -> i64? {
+pub fn variant_tag(var ref p: Program, t: i64, name: str) -> i64? {
     if !ty_is_named(p.tt, t) || !is_tag_enum(p.s, ty_decl(p.tt, t)) { return none; }
     var next = 0;
     for v in children(p.s, ty_decl(p.tt, t)) {
@@ -137,4 +132,4 @@ pub fn variant_tag(p: Program, t: i64, name: str) -> i64? {
 }
 
 /// The physics of the unknown type.
-pub fn layout_unknown(ls: IrLayouts) -> IrTypePhysics => ls.m.layouts[0].physics;
+pub fn layout_unknown(ref ls: IrLayouts) -> IrTypePhysics => ls.m.layouts[0].physics;

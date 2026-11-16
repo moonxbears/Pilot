@@ -393,7 +393,10 @@ pub fn test_52_1_all_eight_preproc_diagnostics_and_pragma_suppression() {
     // PREPROC005: `#error` active vs suppressed inside nested inactive `#if`
     assert!(check_diag("#if true\n#error boom\n#endif\n", "").contains("PREPROC005"));
     assert_eq!(
-        check_diag("#if false\n#if true\n#error must_not_fire_inside_inactive_outer\n#endif\n#endif\n", ""),
+        check_diag(
+            "#if false\n#if true\n#error must_not_fire_inside_inactive_outer\n#endif\n#endif\n",
+            ""
+        ),
         "",
         "Nested `#if true` inside inactive `#if false` must NOT trigger `#error` (`PREPROC005`)"
     );
@@ -484,13 +487,19 @@ pub fn test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords() {
 
         let simple = format!(":{}/{}", seg1, name);
         assert_eq!(
-            eval_pilot_expr(&kw_src, &format!("keyword_namespace({})", escape_pilot_str(&simple)))
-                .to_string_repr(),
+            eval_pilot_expr(
+                &kw_src,
+                &format!("keyword_namespace({})", escape_pilot_str(&simple))
+            )
+            .to_string_repr(),
             seg1
         );
         assert_eq!(
-            eval_pilot_expr(&kw_src, &format!("keyword_name({})", escape_pilot_str(&simple)))
-                .to_string_repr(),
+            eval_pilot_expr(
+                &kw_src,
+                &format!("keyword_name({})", escape_pilot_str(&simple))
+            )
+            .to_string_repr(),
             name
         );
 
@@ -515,13 +524,19 @@ pub fn test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords() {
 
         let bare = format!(":{}", name);
         assert_eq!(
-            eval_pilot_expr(&kw_src, &format!("keyword_namespace({})", escape_pilot_str(&bare)))
-                .to_string_repr(),
+            eval_pilot_expr(
+                &kw_src,
+                &format!("keyword_namespace({})", escape_pilot_str(&bare))
+            )
+            .to_string_repr(),
             ""
         );
         assert_eq!(
-            eval_pilot_expr(&kw_src, &format!("keyword_name({})", escape_pilot_str(&bare)))
-                .to_string_repr(),
+            eval_pilot_expr(
+                &kw_src,
+                &format!("keyword_name({})", escape_pilot_str(&bare))
+            )
+            .to_string_repr(),
             name
         );
     }

@@ -22,10 +22,9 @@
 //
 // Blocks are labels and branches are `goto`s, so the C compiler sees the
 // program's own control flow.
-pub lvl(0) pkg Pilot.SelfHost.Transpile.CFamily;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.ir.model.*;
-use selfhost.transpile.source.*;
+use selfhost.ir.*;
 use Pilot.Core.ByteRank::*;
 use std.text;
 

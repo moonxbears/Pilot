@@ -6,6 +6,8 @@
 // and mounted `PhysicsRegistry` (`RawAstArena` + `LayoutTable`) queries.
 // ============================================================================
 
+pub pkg selfhost.codegen;
+
 [Layout(c_abi)]
 pub struct LayoutDescriptor : IValue {
     pub layout_id: i64;

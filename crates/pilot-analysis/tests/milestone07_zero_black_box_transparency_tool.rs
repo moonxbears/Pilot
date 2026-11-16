@@ -3,15 +3,15 @@
 //! Zero-Black-Box Transparency Tool (`pilot inspect`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 7,
@@ -22,11 +22,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/inspect/selector.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "target_kind_name",
-                "parse_int",
-                "parse_inspect_selector",
-            ],
+            required_pub_fns: &["target_kind_name", "parse_int", "parse_inspect_selector"],
             required_code_markers: &[
                 "TargetQuery",
                 "target_kind_whole_file",
@@ -45,11 +41,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "render_field_box",
                 "calculate_optimal_packing_savings",
             ],
-            required_code_markers: &[
-                "FieldProbeEntry",
-                "cache_line_bytes",
-                "render_field_box",
-            ],
+            required_code_markers: &["FieldProbeEntry", "cache_line_bytes", "render_field_box"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -57,11 +49,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/inspect/method_lens.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "tier_name",
-                "resolve_winning_tier",
-                "render_method_trace",
-            ],
+            required_pub_fns: &["tier_name", "resolve_winning_tier", "render_method_trace"],
             required_code_markers: &[
                 "MethodCandidateTrace",
                 "resolve_winning_tier",
@@ -74,13 +62,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/inspect/perceus_lens.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "format_perceus_marker",
-            ],
-            required_code_markers: &[
-                "PerceusEventNote",
-                "format_perceus_marker",
-            ],
+            required_pub_fns: &["format_perceus_marker"],
+            required_code_markers: &["PerceusEventNote", "format_perceus_marker"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -88,14 +71,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/inspect/weave_lens.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "format_woven_statement",
-                "expand_property_accessor",
-            ],
-            required_code_markers: &[
-                "format_woven_statement",
-                "expand_property_accessor",
-            ],
+            required_pub_fns: &["format_woven_statement", "expand_property_accessor"],
+            required_code_markers: &["format_woven_statement", "expand_property_accessor"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -103,14 +80,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/cli/inspect_cmd.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "inspect_cmd_help",
-                "inspect_run",
-            ],
-            required_code_markers: &[
-                "inspect_cmd_help",
-                "inspect_run",
-            ],
+            required_pub_fns: &["inspect_cmd_help", "inspect_run"],
+            required_code_markers: &["inspect_cmd_help", "inspect_run"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -119,7 +90,11 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_inspect(script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let deps = [
         "selfhost/ir/model.pilot",
         "selfhost/inspect/selector.pilot",
@@ -132,8 +107,8 @@ fn eval_inspect(script: &str) -> String {
     let mut combined = String::new();
     for rel in &deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -155,7 +130,10 @@ fn eval_inspect(script: &str) -> String {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m7_1_selector_resolution_and_target_query_parsing() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m7_1_selector_resolution_and_target_query_parsing", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m7_1_selector_resolution_and_target_query_parsing",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         let q_file = parse_inspect_selector("src/app.pilot");
@@ -175,10 +153,16 @@ pub fn test_m7_1_selector_resolution_and_target_query_parsing() {
     let parts: Vec<&str> = res.split('|').collect();
     assert_eq!(parts.len(), 5, "Expected 5 parts, got: {}", res);
     assert_eq!(parts[0], "WholeFile", "WholeFile kind mismatch");
-    assert_eq!(parts[1], "LineColCursor:42:10", "LineColCursor parse mismatch");
+    assert_eq!(
+        parts[1], "LineColCursor:42:10",
+        "LineColCursor parse mismatch"
+    );
     assert_eq!(parts[2], "LineRange:40-55", "LineRange parse mismatch");
     assert_eq!(parts[3], "SymbolPath", "SymbolPath kind mismatch");
-    assert_eq!(parts[4], "MonomorphizedType", "MonomorphizedType kind mismatch");
+    assert_eq!(
+        parts[4], "MonomorphizedType",
+        "MonomorphizedType kind mismatch"
+    );
 
     guard.finish();
 }
@@ -188,7 +172,10 @@ pub fn test_m7_1_selector_resolution_and_target_query_parsing() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m7_2_layout_lens_byte_offsets_cache_line_and_optimal_packing() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m7_2_layout_lens_byte_offsets_cache_line_and_optimal_packing", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m7_2_layout_lens_byte_offsets_cache_line_and_optimal_packing",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         // 1. Padding calculation
@@ -228,11 +215,20 @@ pub fn test_m7_2_layout_lens_byte_offsets_cache_line_and_optimal_packing() {
     assert_eq!(parts.len(), 7, "Expected 7 parts, got: {}", res);
     assert_eq!(parts[0], "7", "Padding to align 1 to 8 should be 7");
     assert_eq!(parts[1], "0", "Padding to align 8 to 8 should be 0");
-    assert_eq!(parts[2], "SAFE", "Offset 16 size 32 should not cross cache line");
-    assert_eq!(parts[3], "CROSS", "Offset 48 size 32 should cross cache line");
+    assert_eq!(
+        parts[2], "SAFE",
+        "Offset 16 size 32 should not cross cache line"
+    );
+    assert_eq!(
+        parts[3], "CROSS",
+        "Offset 48 size 32 should cross cache line"
+    );
     assert_eq!(parts[4], "BOX_OK", "Field box rendering failed");
     assert_eq!(parts[5], "14", "Declared order pads 7 + 7 bytes");
-    assert_eq!(parts[6], "8", "Reordering by alignment saves 32 - 24 = 8 bytes");
+    assert_eq!(
+        parts[6], "8",
+        "Reordering by alignment saves 32 - 24 = 8 bytes"
+    );
 
     guard.finish();
 }
@@ -242,7 +238,10 @@ pub fn test_m7_2_layout_lens_byte_offsets_cache_line_and_optimal_packing() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m7_3_method_lens_4_tier_resolution_and_collision_modifiers() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m7_3_method_lens_4_tier_resolution_and_collision_modifiers", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m7_3_method_lens_4_tier_resolution_and_collision_modifiers",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         // 1. Tier precedence: Tier 1 beats Tier 2, Tier 2 beats Tier 3, Tier 3 beats Tier 4
@@ -274,7 +273,10 @@ pub fn test_m7_3_method_lens_4_tier_resolution_and_collision_modifiers() {
     assert_eq!(parts[2], "3", "Tier 3 should beat Tier 4");
     assert_eq!(parts[3], "4", "Tier 4 should beat Tier 5");
     assert_eq!(parts[4], "WIN1_OK", "Winning method trace format failed");
-    assert_eq!(parts[5], "COALESCE_OK", "Coalesce modifier provenance failed");
+    assert_eq!(
+        parts[5], "COALESCE_OK",
+        "Coalesce modifier provenance failed"
+    );
     assert_eq!(parts[6], "SHADOW_OK", "Shadowed method trace format failed");
 
     guard.finish();
@@ -285,7 +287,10 @@ pub fn test_m7_3_method_lens_4_tier_resolution_and_collision_modifiers() {
 // -----------------------------------------------------------------------------
 #[test]
 pub fn test_m7_4_perceus_lens_inline_markers_and_weave_lens_expand() {
-    let guard = anticheat::AntiCheatGuard::arm("test_m7_4_perceus_lens_inline_markers_and_weave_lens_expand", &ANTICHEAT_SPEC);
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_m7_4_perceus_lens_inline_markers_and_weave_lens_expand",
+        &ANTICHEAT_SPEC,
+    );
 
     let script = r#"
         // 1. Perceus inline markers

@@ -4,9 +4,8 @@
 // Dominance Verification (IR001), Block Arity (IR002), Terminators (IR003),
 // 2-Bit Lattice Borrow Escape (IR004), Perceus Safety (IR005), Noalloc (IR006)
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Ir.Verifier;
+pub lvl(0) pkg selfhost.ir;
 
-use Pilot.SelfHost.Ir.Model::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -20,7 +20,9 @@ impl<'a> Parser<'a> {
         if !self.at(TokenKind::LParen) {
             return false;
         }
-        let Some(close) = self.tape.matching_bracket(self.cur()) else { return false };
+        let Some(close) = self.tape.matching_bracket(self.cur()) else {
+            return false;
+        };
         let after = self.next_non_nl(close as usize + 1);
         if after >= self.tape.len() || self.tape.kind(after) != TokenKind::FatArrow {
             return false;

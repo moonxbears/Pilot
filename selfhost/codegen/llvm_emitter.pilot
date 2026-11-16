@@ -5,6 +5,8 @@
 // and emits SSA modules, `alloca` stack slots, branches, loops, and calls.
 // ============================================================================
 
+pub pkg selfhost.codegen;
+
 use std.text;
 
 [Layout(c_abi)]

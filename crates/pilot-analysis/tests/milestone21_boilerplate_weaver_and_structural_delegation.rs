@@ -3,19 +3,20 @@
 //! Standard `[...]` Boilerplate Weaver Suite & Structural Delegation
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 21,
-    test_file_rel: "crates/pilot-analysis/tests/milestone21_boilerplate_weaver_and_structural_delegation.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone21_boilerplate_weaver_and_structural_delegation.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
@@ -142,12 +143,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m21(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -527,7 +532,13 @@ fn run_delegation_and_registry_tests() -> i64 {
 run_delegation_and_registry_tests();
 "#;
 
-    let res = eval_m21(&["selfhost/types/delegation.pilot", "selfhost/attr_weaver.pilot"], script);
+    let res = eval_m21(
+        &[
+            "selfhost/types/delegation.pilot",
+            "selfhost/attr_weaver.pilot",
+        ],
+        script,
+    );
     assert_eq!(res, "400", "test_m21_4 failed with exit code: {}", res);
 
     // 5. Built-in attribute bodies in stdlib/core/meta.pilot: [OnChange]
@@ -541,7 +552,10 @@ run_delegation_and_registry_tests();
          a.on_changed(7, 9);\n\
          return seen.get(0) + \",\" + seen.get(1);\n",
     );
-    assert_eq!(on_change, "307,709", "[OnChange] must call its callback with (old, new)");
+    assert_eq!(
+        on_change, "307,709",
+        "[OnChange] must call its callback with (old, new)"
+    );
     let formula_rule = eval_m21(
         &["stdlib/core/meta.pilot"],
         "struct Unit { atk: i64, mult: i64, hp: i64 }\n\
@@ -555,7 +569,10 @@ run_delegation_and_registry_tests();
          if r.matches(strong) { r.apply(strong); applied = applied + 1; }\n\
          return f.evaluate(weak) + \",\" + f.evaluate(strong) + \",\" + applied + \",\" + hits.get(0);\n",
     );
-    assert_eq!(formula_rule, "42,15,1,4", "[Formula] evaluates its expression; [Rule] applies only where it matches");
+    assert_eq!(
+        formula_rule, "42,15,1,4",
+        "[Formula] evaluates its expression; [Rule] applies only where it matches"
+    );
     let enter = eval_m21(
         &["stdlib/core/meta.pilot"],
         "let t = TraceSpanAttr { name: \"step\", weight: 50 };\nreturn t.on_enter(\"step\");\n",

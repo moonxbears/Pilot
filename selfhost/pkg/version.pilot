@@ -3,7 +3,7 @@
 // Milestone 60.7: Semantic Versioning (SemVer 2.0) & Range Constraint Matcher
 // Pure Pilot Implementation conforming to the Strict Name-Blind Contract.
 // =========================================================================
-pub pkg Pilot.SelfHost.Pkg.Version;
+pub pkg selfhost.pkg;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

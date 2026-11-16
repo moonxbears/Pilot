@@ -8,10 +8,9 @@
 // toward zero, as `BigInt`'s do and the seed's do. Floats are numbers
 // (`Math.fround` keeps a 32-bit float). Records are arrays. `print` shows
 // values as the seed does.
-pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitJs;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.ir.model.*;
-use selfhost.transpile.source.*;
+use selfhost.ir.*;
 
 pub struct JsDialect : ISourceDialect {
     pub fn language() -> str => "JavaScript";

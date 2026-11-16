@@ -2,7 +2,7 @@
 // FILE: selfhost/pkg/interop.pilot
 // Milestone 60.1: Cross-Ecosystem Package Spec Resolver (cargo:, pip:, npm:)
 // =========================================================================
-pub pkg Pilot.SelfHost.Pkg.Interop;
+pub pkg selfhost.pkg;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

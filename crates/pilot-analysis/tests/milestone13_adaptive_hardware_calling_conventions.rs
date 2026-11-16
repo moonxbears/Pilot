@@ -3,19 +3,20 @@
 //! Adaptive Hardware Calling-Convention Descriptors & Dynamic Frame Trampoline (`frame` / `!&`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 13,
-    test_file_rel: "crates/pilot-analysis/tests/milestone13_adaptive_hardware_calling_conventions.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone13_adaptive_hardware_calling_conventions.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
@@ -48,10 +49,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             max_lines: 1500,
             name_blind: true,
             required_pub_fns: &[],
-            required_code_markers: &[
-                "SysVConvClassifier",
-                "sysv_x64",
-            ],
+            required_code_markers: &["SysVConvClassifier", "sysv_x64"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -60,10 +58,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             max_lines: 1500,
             name_blind: true,
             required_pub_fns: &[],
-            required_code_markers: &[
-                "Win64ConvClassifier",
-                "win64",
-            ],
+            required_code_markers: &["Win64ConvClassifier", "win64"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -72,10 +67,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             max_lines: 1500,
             name_blind: true,
             required_pub_fns: &[],
-            required_code_markers: &[
-                "Aapcs64ConvClassifier",
-                "aapcs64",
-            ],
+            required_code_markers: &["Aapcs64ConvClassifier", "aapcs64"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -98,12 +90,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m13(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -122,8 +118,16 @@ fn eval_m13(deps: &[&str], script: &str) -> String {
 
 // Target test functions for native dynamic frame invocation
 extern "C" fn add10(
-    a: i64, b: i64, c: i64, d: i64, e: i64,
-    f: i64, g: i64, h: i64, i: i64, j: i64
+    a: i64,
+    b: i64,
+    c: i64,
+    d: i64,
+    e: i64,
+    f: i64,
+    g: i64,
+    h: i64,
+    i: i64,
+    j: i64,
 ) -> i64 {
     a + b + c + d + e + f + g + h + i + j
 }
@@ -149,7 +153,12 @@ struct BigStruct32 {
 }
 
 extern "C" fn sum_and_fill(a: u64, b: u64, c: u64) -> BigStruct32 {
-    BigStruct32 { a, b, c, d: a + b + c }
+    BigStruct32 {
+        a,
+        b,
+        c,
+        d: a + b + c,
+    }
 }
 
 #[test]
@@ -238,7 +247,10 @@ fn test_m13_1_calling_convention_descriptors_and_sysv_x64_eightbyte_classificati
         }
     "#;
     let res = eval_m13(deps, eightbytes);
-    assert_eq!(res, "100", "SysV eightbyte classes must follow the psABI merge rules");
+    assert_eq!(
+        res, "100",
+        "SysV eightbyte classes must follow the psABI merge rules"
+    );
 
     // A 16-byte aggregate return needs its members; TypeLayout has none yet.
     let small_agg = r#"
@@ -357,29 +369,82 @@ fn test_m13_3_dynamic_frame_trampoline_native_invocation() {
         // Test A: 10 scalar arguments (testing stack spilling + 16-byte stack alignment)
         let gprs_a = [1u64, 2, 3, 4, 5, 6];
         let stack_args = [7u64, 8, 9, 10]; // g, h, i, j on stack
-        let desc_a = OsFfiAbiDesc { arch_kind: 0, gpr_count: 6, vec_count: 0, stack_bytes: 32, variadic_fixed_args: 0xFFFF, flags: 0, sret_ptr: 0, _reserved: 0 };
+        let desc_a = OsFfiAbiDesc {
+            arch_kind: 0,
+            gpr_count: 6,
+            vec_count: 0,
+            stack_bytes: 32,
+            variadic_fixed_args: 0xFFFF,
+            flags: 0,
+            sret_ptr: 0,
+            _reserved: 0,
+        };
         assert_eq!(
-            os_ffi_call(add10 as *const () as usize as i64, &desc_a as *const _ as i64, gprs_a.as_ptr() as i64, 0, stack_args.as_ptr() as i64, &mut ret as *mut _ as i64),
+            os_ffi_call(
+                add10 as *const () as usize as i64,
+                &desc_a as *const _ as i64,
+                gprs_a.as_ptr() as i64,
+                0,
+                stack_args.as_ptr() as i64,
+                &mut ret as *mut _ as i64
+            ),
             Ok(0)
         );
         assert_eq!(ret.gpr[0], 55, "add10 must return sum 1..10 = 55");
 
         // Test B: 16-byte struct return in RAX:RDX
         let gprs_b = [100u64, 200];
-        let desc_b = OsFfiAbiDesc { arch_kind: 0, gpr_count: 2, vec_count: 0, stack_bytes: 0, variadic_fixed_args: 0xFFFF, flags: 0, sret_ptr: 0, _reserved: 0 };
+        let desc_b = OsFfiAbiDesc {
+            arch_kind: 0,
+            gpr_count: 2,
+            vec_count: 0,
+            stack_bytes: 0,
+            variadic_fixed_args: 0xFFFF,
+            flags: 0,
+            sret_ptr: 0,
+            _reserved: 0,
+        };
         assert_eq!(
-            os_ffi_call(make_pair as *const () as usize as i64, &desc_b as *const _ as i64, gprs_b.as_ptr() as i64, 0, 0, &mut ret as *mut _ as i64),
+            os_ffi_call(
+                make_pair as *const () as usize as i64,
+                &desc_b as *const _ as i64,
+                gprs_b.as_ptr() as i64,
+                0,
+                0,
+                &mut ret as *mut _ as i64
+            ),
             Ok(0)
         );
         assert_eq!(ret.gpr[0], 100, "Pair16.a must be 100");
         assert_eq!(ret.gpr[1], 200, "Pair16.b must be 200");
 
         // Test C: 32-byte sret struct return via RDI hidden pointer
-        let mut big = BigStruct32 { a: 0, b: 0, c: 0, d: 0 };
+        let mut big = BigStruct32 {
+            a: 0,
+            b: 0,
+            c: 0,
+            d: 0,
+        };
         let gprs_c = [10u64, 20, 30];
-        let desc_c = OsFfiAbiDesc { arch_kind: 0, gpr_count: 3, vec_count: 0, stack_bytes: 0, variadic_fixed_args: 0xFFFF, flags: 1, sret_ptr: &mut big as *mut BigStruct32 as u64, _reserved: 0 };
+        let desc_c = OsFfiAbiDesc {
+            arch_kind: 0,
+            gpr_count: 3,
+            vec_count: 0,
+            stack_bytes: 0,
+            variadic_fixed_args: 0xFFFF,
+            flags: 1,
+            sret_ptr: &mut big as *mut BigStruct32 as u64,
+            _reserved: 0,
+        };
         assert_eq!(
-            os_ffi_call(sum_and_fill as *const () as usize as i64, &desc_c as *const _ as i64, gprs_c.as_ptr() as i64, 0, 0, &mut ret as *mut _ as i64),
+            os_ffi_call(
+                sum_and_fill as *const () as usize as i64,
+                &desc_c as *const _ as i64,
+                gprs_c.as_ptr() as i64,
+                0,
+                0,
+                &mut ret as *mut _ as i64
+            ),
             Ok(0)
         );
         assert_eq!(big.a, 10);
@@ -398,12 +463,30 @@ fn test_m13_3_dynamic_frame_trampoline_native_invocation() {
         xmm0[..8].copy_from_slice(&float_val.to_le_bytes());
         let xmm_vals = [xmm0];
         let gprs_d = [buf.as_mut_ptr() as u64, 64, fmt.as_ptr() as u64, 42];
-        let desc_d = OsFfiAbiDesc { arch_kind: 0, gpr_count: 4, vec_count: 1, stack_bytes: 0, variadic_fixed_args: 3, flags: 0, sret_ptr: 0, _reserved: 0 };
+        let desc_d = OsFfiAbiDesc {
+            arch_kind: 0,
+            gpr_count: 4,
+            vec_count: 1,
+            stack_bytes: 0,
+            variadic_fixed_args: 3,
+            flags: 0,
+            sret_ptr: 0,
+            _reserved: 0,
+        };
         assert_eq!(
-            os_ffi_call(snprintf as *const () as usize as i64, &desc_d as *const _ as i64, gprs_d.as_ptr() as i64, xmm_vals.as_ptr() as i64, 0, &mut ret as *mut _ as i64),
+            os_ffi_call(
+                snprintf as *const () as usize as i64,
+                &desc_d as *const _ as i64,
+                gprs_d.as_ptr() as i64,
+                xmm_vals.as_ptr() as i64,
+                0,
+                &mut ret as *mut _ as i64
+            ),
             Ok(0)
         );
-        let s = std::ffi::CStr::from_ptr(buf.as_ptr() as *const i8).to_str().unwrap();
+        let s = std::ffi::CStr::from_ptr(buf.as_ptr() as *const i8)
+            .to_str()
+            .unwrap();
         assert_eq!(s, "Val: 42, Float: 3.5");
         assert_eq!(ret.gpr[0] as i32, 19);
     }
@@ -427,7 +510,13 @@ fn test_m13_4_pilvm_frame_homoiconic_call_and_diagnostics() {
         }
         if lib >= 0 {
             let mut puts_sym = 0u64;
-            let rc = pilot_vm::bridge::os_dl_sym(&bstate, lib, "puts".as_ptr() as i64, 4, &mut puts_sym as *mut u64 as i64);
+            let rc = pilot_vm::bridge::os_dl_sym(
+                &bstate,
+                lib,
+                "puts".as_ptr() as i64,
+                4,
+                &mut puts_sym as *mut u64 as i64,
+            );
             assert_eq!(rc, 0);
             assert_ne!(puts_sym, 0);
         }

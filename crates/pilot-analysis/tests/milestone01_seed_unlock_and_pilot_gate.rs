@@ -10,10 +10,10 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 1,
@@ -34,7 +34,15 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "gate_seam_open",
                 "gate_at_seam_report",
             ],
-            required_code_markers: &["SeedTokenRegistry", "CrateCeilingRule", "GateViolation", "GateReport", "IGateCheck", "TempDirGuard", "at_seam"],
+            required_code_markers: &[
+                "SeedTokenRegistry",
+                "CrateCeilingRule",
+                "GateViolation",
+                "GateReport",
+                "IGateCheck",
+                "TempDirGuard",
+                "at_seam",
+            ],
             forbidden_code_markers: &["return 14;"],
             forbidden_string_substrings: &[],
         },
@@ -48,7 +56,9 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "execute_adaptability_gate",
                 "execute_hygiene_and_ratchet_gate",
             ],
-            required_code_markers: &["GATE001", "GATE002", "GATE003", "GATE004", "GATE005", "GATE006", "GATE007"],
+            required_code_markers: &[
+                "GATE001", "GATE002", "GATE003", "GATE004", "GATE005", "GATE006", "GATE007",
+            ],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -61,7 +71,13 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "execute_universal_rename_litmus",
                 "execute_dual_pass_rename_gate",
             ],
-            required_code_markers: &["GATE008", "temp_guard_new", "temp_guard_cleanup", "rl_run_corpus", "run_in"],
+            required_code_markers: &[
+                "GATE008",
+                "temp_guard_new",
+                "temp_guard_cleanup",
+                "rl_run_corpus",
+                "run_in",
+            ],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -70,7 +86,12 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             max_lines: 1500,
             name_blind: true,
             required_pub_fns: &["execute_bootstrap_parity_gate"],
-            required_code_markers: &["GATE009", "sha256_hex", "pilotc_bootstrap_stage_c11", "gate_seam_open"],
+            required_code_markers: &[
+                "GATE009",
+                "sha256_hex",
+                "pilotc_bootstrap_stage_c11",
+                "gate_seam_open",
+            ],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -184,7 +205,8 @@ pub fn test_m1_1_dynamic_vocabulary_harvester_and_fast_gate001_slice_injection()
     let root_esc = escape_pilot_str(root.to_str().unwrap());
 
     // Pre-compile the gate VM once with a deliberate `"slice"` injection into a copy of `infer.rs`
-    let real_infer = std::fs::read_to_string(root.join("crates/pilot-analysis/src/infer.rs")).unwrap();
+    let real_infer =
+        std::fs::read_to_string(root.join("crates/pilot-analysis/src/infer.rs")).unwrap();
     let mut lines: Vec<&str> = real_infer.lines().collect();
     let inject_line_1based = 12usize;
     let injected_stmt = "    let _forbidden_probe = \"slice\";";
@@ -222,7 +244,10 @@ pub fn test_m1_1_dynamic_vocabulary_harvester_and_fast_gate001_slice_injection()
 
     let parts: Vec<&str> = out.split('|').collect();
     assert_eq!(parts.len(), 6, "Unexpected audit output: {}", out);
-    assert_eq!(parts[0], "14", "SeedTokenRegistry must dynamically count 14 hardware seed tokens");
+    assert_eq!(
+        parts[0], "14",
+        "SeedTokenRegistry must dynamically count 14 hardware seed tokens"
+    );
 
     let scan_us: u64 = parts[1].parse().expect("scan elapsed_us");
     assert!(
@@ -230,10 +255,17 @@ pub fn test_m1_1_dynamic_vocabulary_harvester_and_fast_gate001_slice_injection()
         "verify_rust_source_name_blind on infer.rs took {} us (must be < 200,000 us / 200 ms)",
         scan_us
     );
-    assert_eq!(parts[2], "1", "Expected 1 GATE001 violation on injected infer.rs, got {}", out);
+    assert_eq!(
+        parts[2], "1",
+        "Expected 1 GATE001 violation on injected infer.rs, got {}",
+        out
+    );
     assert_eq!(
         parts[3],
-        format!("GATE001:{}:{}:slice", inject_line_1based, expected_col_1based),
+        format!(
+            "GATE001:{}:{}:slice",
+            inject_line_1based, expected_col_1based
+        ),
         "Expected exact line:col GATE001 detection for injected \"slice\""
     );
     assert_eq!(
@@ -283,9 +315,12 @@ pub fn test_m1_2_rust_tamper_unlock_comment_freedom_and_retired_scripts_purged()
     }
 
     // 2. Confirm static FROZEN_FILE_HASHES lock is gone from `anticheat.rs`
-    let anticheat_src = std::fs::read_to_string(root.join("crates/pilot-analysis/tests/common/anticheat.rs")).unwrap();
+    let anticheat_src =
+        std::fs::read_to_string(root.join("crates/pilot-analysis/tests/common/anticheat.rs"))
+            .unwrap();
     assert!(
-        !anticheat_src.contains("FROZEN_FILE_HASHES") && !anticheat_src.contains("ILLEGAL_RUST_OR_GATE_MODIFICATION"),
+        !anticheat_src.contains("FROZEN_FILE_HASHES")
+            && !anticheat_src.contains("ILLEGAL_RUST_OR_GATE_MODIFICATION"),
         "Frozen SHA-256 Rust tamper lock must be retired in anticheat.rs"
     );
 
@@ -315,7 +350,10 @@ pub fn test_m1_2_rust_tamper_unlock_comment_freedom_and_retired_scripts_purged()
     let orig_cli = std::fs::read_to_string(root.join("crates/pilot-cli/src/main.rs")).unwrap();
     let mutated_cli = format!("// M1 dynamic comment-freedom probe\n{}", orig_cli);
     let cli_cap = anticheat::seed_rust_file_loc_cap(&root, 100);
-    assert!(mutated_cli.lines().count() <= cli_cap, "Mutated main.rs must stay <= {cli_cap} LOC");
+    assert!(
+        mutated_cli.lines().count() <= cli_cap,
+        "Mutated main.rs must stay <= {cli_cap} LOC"
+    );
     std::fs::write(tmp_ws.join("crates/pilot-cli/src/main.rs"), &mutated_cli).unwrap();
 
     let bundle = load_gate_bundle(&root);
@@ -325,7 +363,11 @@ pub fn test_m1_2_rust_tamper_unlock_comment_freedom_and_retired_scripts_purged()
         &format!("run_pilot_gate_cli(\"{tmp_esc}\", \"--json\");"),
     );
     let (exit_code, json_body) = res.split_once('\n').expect("exit_code + json");
-    assert_eq!(exit_code, "0", "Comment edit in main.rs must pass pilot gate! Got: {}", json_body);
+    assert_eq!(
+        exit_code, "0",
+        "Comment edit in main.rs must pass pilot gate! Got: {}",
+        json_body
+    );
     assert!(json_body.contains("\"passed\":true") && json_body.contains("\"total_violations\":0"));
 
     guard.finish();
@@ -388,7 +430,9 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     let parts: Vec<&str> = first.split(' ').collect();
     assert_eq!(parts.len(), 2, "seeded rename output: {first}");
     assert!(
-        parts[0].starts_with("window_") && parts[1].starts_with("c32_") && parts[0].len() == "window_".len() + 6,
+        parts[0].starts_with("window_")
+            && parts[1].starts_with("c32_")
+            && parts[0].len() == "window_".len() + 6,
         "seeded rename output: {first}"
     );
 
@@ -410,7 +454,9 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     let out = child.wait_with_output().expect("wait for pilot gate");
     let res = String::from_utf8_lossy(&out.stdout).to_string();
     let gate_entry = |id: &str| -> String {
-        let at = res.find(&format!("{{\"id\":\"{id}\"")).unwrap_or_else(|| panic!("no `{id}` gate in: {res}"));
+        let at = res
+            .find(&format!("{{\"id\":\"{id}\""))
+            .unwrap_or_else(|| panic!("no `{id}` gate in: {res}"));
         res[at..].split('}').next().unwrap_or("").to_string()
     };
     let litmus = gate_entry("rename_litmus");
@@ -430,7 +476,10 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
         "bootstrap parity must stop at its seam: {parity}"
     );
     for id in ["adaptability", "hygiene", "seams"] {
-        assert!(gate_entry(id).contains("\"passed\":true"), "gate `{id}` must pass: {res}");
+        assert!(
+            gate_entry(id).contains("\"passed\":true"),
+            "gate `{id}` must pass: {res}"
+        );
     }
     let scanned: usize = litmus
         .split("\"items_scanned\":")
@@ -439,14 +488,25 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
         .and_then(|n| n.parse().ok())
         .unwrap_or(0);
     // The programs live in case folders, one per area, under the corpus root.
-    let is_case = |p: &std::path::PathBuf| p.extension().is_some_and(|x| x == "pilot") && p.with_extension("stdout").exists();
+    let is_case = |p: &std::path::PathBuf| {
+        p.extension().is_some_and(|x| x == "pilot") && p.with_extension("stdout").exists()
+    };
     let conformance_programs: usize = std::fs::read_dir(root.join("tests/conformance"))
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.is_dir() && p.file_name().is_some_and(|n| n != "known_bugs"))
-        .map(|dir| std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok().map(|e| e.path())).filter(is_case).count())
+        .map(|dir| {
+            std::fs::read_dir(dir)
+                .unwrap()
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(is_case)
+                .count()
+        })
         .sum();
-    assert!(conformance_programs > 0, "no conformance programs found under tests/conformance/<area>/");
+    assert!(
+        conformance_programs > 0,
+        "no conformance programs found under tests/conformance/<area>/"
+    );
     assert!(
         scanned >= 2 * conformance_programs,
         "the sandbox must hold every conformance program in both passes ({scanned} < 2 x {conformance_programs})"
@@ -455,7 +515,10 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
         .unwrap()
         .filter_map(|e| e.ok())
         .any(|e| e.file_name().to_string_lossy().starts_with(&sandbox_prefix));
-    assert!(!leaked, "rename litmus leaked its sandbox /tmp/{sandbox_prefix}*");
+    assert!(
+        !leaked,
+        "rename litmus leaked its sandbox /tmp/{sandbox_prefix}*"
+    );
 
     // 4. Expectation files follow the rename. Words are renamed; a location
     //    keeps its line and its column moves by what the rename changed in
@@ -488,7 +551,11 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
     assert_eq!(judged, "1 tests/conformance/a.pilot 1 0");
 
     // 6. TempDirGuard deterministic cleanup on a dedicated probe arena
-    let probe_dir = format!("/tmp/pilot_litmus_guard_probe_{}_{}", std::process::id(), seed);
+    let probe_dir = format!(
+        "/tmp/pilot_litmus_guard_probe_{}_{}",
+        std::process::id(),
+        seed
+    );
     let probe_esc = escape_pilot_str(&probe_dir);
     let guard_probe = eval_gate_script(
         &bundle,
@@ -501,8 +568,15 @@ pub fn test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup() 
              \"\" + existed + \"|\" + gone;"
         ),
     );
-    assert_eq!(guard_probe, "true|true", "TempDirGuard failed deterministic cleanup");
-    assert!(!Path::new(&probe_dir).exists(), "TempDirGuard leaked {}", probe_dir);
+    assert_eq!(
+        guard_probe, "true|true",
+        "TempDirGuard failed deterministic cleanup"
+    );
+    assert!(
+        !Path::new(&probe_dir).exists(),
+        "TempDirGuard leaked {}",
+        probe_dir
+    );
     guard.finish();
 }
 
@@ -545,12 +619,21 @@ pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status() {
         .output()
         .expect("run pilot gate --full --only bootstrap_parity");
     let full_txt = String::from_utf8(full_out.stdout).unwrap();
-    assert!(full_out.status.success(), "pilot gate --full failed:\n{}", full_txt);
+    assert!(
+        full_out.status.success(),
+        "pilot gate --full failed:\n{}",
+        full_txt
+    );
     for line in [
         "[SEAM] bootstrap_parity (BootstrapParity) stops at seam `bootstrap.stage_compile`",
         "RESULT: 0 GATE(S) PASSED, 1 AT SEAMS (0 violations)",
     ] {
-        assert!(full_txt.contains(line), "Expected `{}` in --full output:\n{}", line, full_txt);
+        assert!(
+            full_txt.contains(line),
+            "Expected `{}` in --full output:\n{}",
+            line,
+            full_txt
+        );
     }
     assert!(!full_txt.contains("[FAIL]"), "--full output:\n{}", full_txt);
 
@@ -569,7 +652,10 @@ pub fn test_m1_4_cli_pilot_gate_full_json_exit_codes_and_seam_status() {
     // 4. The stage build stops at its seam, and a gate claiming a seam that
     //    is not registered fails.
     let bundle = load_gate_bundle(&root);
-    let stage = eval_gate_script(&bundle, "pilotc_bootstrap_stage_c11(::Stage2, \"fn f() {}\");");
+    let stage = eval_gate_script(
+        &bundle,
+        "pilotc_bootstrap_stage_c11(::Stage2, \"fn f() {}\");",
+    );
     assert!(
         stage.starts_with("FAULT: SEAM001: unconnected seam `bootstrap.stage_compile`"),
         "stage build must stop at its seam: {stage}"

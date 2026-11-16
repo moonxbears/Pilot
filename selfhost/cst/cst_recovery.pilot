@@ -6,6 +6,8 @@
 // categories without any 128-symbol ceiling.
 // ============================================================================
 
+pub pkg selfhost.cst;
+
 pub pure fn min_i64(a: i64, b: i64) -> i64 {
     if a < b { return a; }
     return b;

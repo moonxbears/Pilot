@@ -1,0 +1,9 @@
+// One file of `lib.ledger` (modules/package_peer_files.pilot); calls
+// `count()` from lib/ledger_b.pilot.
+pkg lib.ledger;
+
+use lib.ledger;
+
+pub fn total() -> i64 => unit() + count();
+
+pkg fn unit() -> i64 => 1;

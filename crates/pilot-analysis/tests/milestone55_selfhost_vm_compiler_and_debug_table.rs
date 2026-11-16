@@ -52,11 +52,15 @@ use pilot_vm::{BytecodeCompiler, Opcode, PilVirtualMachine, PILC_V3_MAGIC, PILC_
 #[path = "common/anticheat.rs"]
 mod anticheat;
 
-const VM_GROUP: &[&str] = &["selfhost/vm/compiler.pilot", "selfhost/vm/pilc_writer.pilot"];
+const VM_GROUP: &[&str] = &[
+    "selfhost/vm/compiler.pilot",
+    "selfhost/vm/pilc_writer.pilot",
+];
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 55,
-    test_file_rel: "crates/pilot-analysis/tests/milestone55_selfhost_vm_compiler_and_debug_table.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone55_selfhost_vm_compiler_and_debug_table.rs",
     expected_test_count: 3,
     files: &[
         anticheat::FileAuditRule {
@@ -147,7 +151,11 @@ fn decode_hex(hex: &str) -> Vec<u8> {
             b'0'..=b'9' => b - b'0',
             b'a'..=b'f' => b - b'a' + 10,
             b'A'..=b'F' => b - b'A' + 10,
-            _ => panic!("Invalid hex character `{}` in `{}`", b as char, &trimmed[..trimmed.len().min(80)]),
+            _ => panic!(
+                "Invalid hex character `{}` in `{}`",
+                b as char,
+                &trimmed[..trimmed.len().min(80)]
+            ),
         }
     };
     let mut i = 0;
@@ -173,7 +181,11 @@ fn selfhost_compile_program(target_program: &str) -> (PilcBinary, String) {
     registry.source_text = target_program.to_string();
 
     let vm_compiler = read_ws("selfhost/vm/compiler.pilot");
-    let pilc_writer = format!("{}\n{}", read_ws("stdlib/std/text.pilot"), read_ws("selfhost/vm/pilc_writer.pilot"));
+    let pilc_writer = format!(
+        "{}\n{}",
+        read_ws("stdlib/std/text.pilot"),
+        read_ws("selfhost/vm/pilc_writer.pilot")
+    );
 
     let driver = format!(
         "{}\n{}\n\
@@ -206,7 +218,11 @@ fn selfhost_compile_program(target_program: &str) -> (PilcBinary, String) {
     );
 
     let raw_bytes = decode_hex(parts[0]);
-    assert_eq!(&raw_bytes[0..4], PILC_V3_MAGIC, ".pilc header must start with PIL3");
+    assert_eq!(
+        &raw_bytes[0..4],
+        PILC_V3_MAGIC,
+        ".pilc header must start with PIL3"
+    );
     assert_eq!(
         u32::from_le_bytes(raw_bytes[4..8].try_into().unwrap()),
         PILC_V3_VERSION
@@ -217,7 +233,8 @@ fn selfhost_compile_program(target_program: &str) -> (PilcBinary, String) {
 }
 
 #[test]
-pub fn test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_and_loop_programs() {
+pub fn test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_and_loop_programs(
+) {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_and_loop_programs",
         &ANTICHEAT_SPEC,
@@ -429,6 +446,9 @@ pub fn test_55_3_and_55_4_debug_tables_opcode_purification_and_line_caps() {
     let binary = BytecodeCompiler::compile(&arena, arena.root);
     assert_eq!(binary.instructions.len(), binary.pc_spans.len());
     assert!(!binary.reg_symbols.is_empty());
-    assert!(binary.instructions.iter().any(|ins| ins.opcode() == Opcode::EngineIntrinsic));
+    assert!(binary
+        .instructions
+        .iter()
+        .any(|ins| ins.opcode() == Opcode::EngineIntrinsic));
     guard.finish();
 }

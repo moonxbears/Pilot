@@ -22,7 +22,10 @@ impl BytecodeCompiler {
         let (callee, args): (NodeId, Vec<NodeId>) = match tn.node_kind() {
             NodeKind::CallExpr if tn.rhs > 0 => {
                 let ids = arena.children_slice(tn.lhs, tn.rhs);
-                (NodeId(ids[0]), ids[1..].iter().map(|&c| NodeId(c)).collect())
+                (
+                    NodeId(ids[0]),
+                    ids[1..].iter().map(|&c| NodeId(c)).collect(),
+                )
             }
             _ => (target, Vec::new()),
         };

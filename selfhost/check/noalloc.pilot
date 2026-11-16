@@ -18,26 +18,17 @@
 //     heap.
 // A method declared without a body is answered by the engine and judged by
 // its native effects alone.
-pub lvl(0) pkg Pilot.SelfHost.Check.NoAlloc;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.methods.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.check.own.*;
-use selfhost.check.generators.*;
-use selfhost.check.effects.*;
 
 /// Whether `t` is the type string literals take.
-fn is_text(p: Program, t: i64) -> bool {
+fn is_text(var ref p: Program, t: i64) -> bool {
     let text = prog_slot_type(p, literal_slot(nk_str()));
     return t > 0 && ty_is_named(p.tt, t) && ty_is_named(p.tt, text) && ty_decl(p.tt, t) == ty_decl(p.tt, text);
 }
 
 /// What node `n` allocates, as the rest of a NOALLOC001 message, or "".
-fn allocation(e: Effects, n: i64) -> str {
+fn allocation(var ref e: Effects, n: i64) -> str {
     let inf = e.inf;
     let p = inf.p;
     let s = p.s;
@@ -75,7 +66,7 @@ fn allocation(e: Effects, n: i64) -> str {
 
 /// NOALLOC001 on each allocation in the body of each `noalloc` function of
 /// the user's files.
-pub fn check_noalloc(inf: Infer, sink: DiagSink) {
+pub fn check_noalloc(var ref inf: Infer, var ref sink: DiagSink) {
     let s = inf.p.s;
     let e = effects_new(flow_new(inf, sink));
     var d = 0;

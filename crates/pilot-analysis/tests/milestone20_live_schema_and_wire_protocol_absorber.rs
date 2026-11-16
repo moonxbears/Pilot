@@ -3,19 +3,20 @@
 //! Live Schema & Wire Protocol Absorber (`use sql`, `use openapi`, `use proto`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 20,
-    test_file_rel: "crates/pilot-analysis/tests/milestone20_live_schema_and_wire_protocol_absorber.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone20_live_schema_and_wire_protocol_absorber.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
@@ -93,12 +94,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m20(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -324,7 +329,10 @@ fn test_m20_2_openapi_schema_dag_allof_and_client_interfaces() {
         "selfhost/adapter/absorb_openapi.pilot",
     ];
     let res = eval_m20(deps, script);
-    assert_eq!(res, "42", "OpenAPI schema DAG and client interface synthesis must succeed");
+    assert_eq!(
+        res, "42",
+        "OpenAPI schema DAG and client interface synthesis must succeed"
+    );
 
     guard.finish();
 }
@@ -516,7 +524,10 @@ fn test_m20_4_protobuf_reserved_tags_and_dual_view_synthesis() {
         "selfhost/adapter/absorb_proto.pilot",
     ];
     let res = eval_m20(deps, script);
-    assert_eq!(res, "42", "Protobuf reserved tags and dual views synthesis must succeed");
+    assert_eq!(
+        res, "42",
+        "Protobuf reserved tags and dual views synthesis must succeed"
+    );
 
     guard.finish();
 }

@@ -51,11 +51,16 @@ fn program(dir: &Path, file: &str, src: &str) -> String {
 /// `line` with its `time <digits> us` replaced by `time T us`, after
 /// checking the digits are there.
 fn untimed(line: &str) -> String {
-    let Some(at) = line.find("time ") else { return line.to_string() };
+    let Some(at) = line.find("time ") else {
+        return line.to_string();
+    };
     let rest = &line[at + 5..];
     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     assert!(!digits.is_empty(), "no time in `{line}`");
-    assert!(rest[digits.len()..].starts_with(" us"), "no unit in `{line}`");
+    assert!(
+        rest[digits.len()..].starts_with(" us"),
+        "no unit in `{line}`"
+    );
     format!("{}time T{}", &line[..at], &rest[digits.len()..])
 }
 
@@ -96,7 +101,8 @@ fn coverage_on_a_struct_measures_its_methods() {
             "[coverage] struct Fib: statements 3/3 (100%) in 1 function(s), calls 15, ops 30, time T us",
         ]
     );
-    let file = std::fs::read_to_string(dir.join("fib.coverage.txt")).expect("fib.coverage.txt written");
+    let file =
+        std::fs::read_to_string(dir.join("fib.coverage.txt")).expect("fib.coverage.txt written");
     let filed: Vec<String> = file.lines().map(untimed).collect();
     assert_eq!(filed, lines[1..]);
     assert!(text(&out.stderr).is_empty(), "{}", text(&out.stderr));

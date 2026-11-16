@@ -23,15 +23,8 @@
 //     line goes to `::File`.
 // An expression body counts as one statement; its calls come before and
 // after it.
-pub lvl(0) pkg Pilot.SelfHost.Check.Coverage;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.diag.*;
-use selfhost.check.attr_text.*;
-use selfhost.check.attr_inherit.*;
-use selfhost.check.probes.*;
 
 /// The flags enums of stdlib/core/coverage.pilot, the arguments that take
 /// them, and the outputs flag used when `to:` is not written.
@@ -65,7 +58,7 @@ pub struct CoverageSettings : IValue {
     pub outs: i64;
 }
 
-fn all_flags(known: List<List<any>>) -> i64 {
+fn all_flags(ref known: List<List<any>>) -> i64 {
     var m = 0;
     for f in known {
         let v: i64 = f[1];
@@ -76,7 +69,7 @@ fn all_flags(known: List<List<any>>) -> i64 {
 
 /// The settings of a `[Coverage]` with arguments `args`; none after
 /// reporting a wrong one to `sink`.
-pub fn coverage_settings(p: Program, sink: DiagSink, args: List<i64>) -> CoverageSettings? {
+pub fn coverage_settings(ref p: Program, var ref sink: DiagSink, ref args: List<i64>) -> CoverageSettings? {
     let s = p.s;
     let modes_known = enum_flags(p, coverage_mode_type());
     let outs_known = enum_flags(p, coverage_out_type());
@@ -105,7 +98,7 @@ pub fn coverage_settings(p: Program, sink: DiagSink, args: List<i64>) -> Coverag
 }
 
 /// Reports every wrong `[Coverage]` argument in the user's files.
-pub fn check_coverage(p: Program, sink: DiagSink) {
+pub fn check_coverage(ref p: Program, var ref sink: DiagSink) {
     for row in p.s.attrs {
         let t: i64 = row[0];
         if t >= 0 && in_user_file(p.s, t) && sym_text(p.s, row[1]) == coverage_attr() {
@@ -123,7 +116,7 @@ fn text_row(n: i64, call: str, args: List<any>, at: ProbeAt) -> List<any> => [n,
 
 /// The statements of function `f` in source order: every node directly in a
 /// block whose nearest function is `f`.
-fn fn_statements(p: Program, f: i64) -> List<i64> {
+fn fn_statements(ref p: Program, f: i64) -> List<i64> {
     let s = p.s;
     var found: List<i64> = [];
     var n = 0;
@@ -152,18 +145,18 @@ fn fn_statements(p: Program, f: i64) -> List<i64> {
     return out;
 }
 
-fn line_of_node(s: Snap, n: i64) -> i64 {
+fn line_of_node(ref s: Snap, n: i64) -> i64 {
     let f = file_of(s, n);
     let base: i64 = f[0];
     let text: str = f[1];
     return attr_line_at(text, span_start(s, n) - base);
 }
 
-fn is_loop(s: Snap, n: i64) -> bool => kind(s, n) == nk_for() || kind(s, n) == nk_while();
+fn is_loop(ref s: Snap, n: i64) -> bool => kind(s, n) == nk_for() || kind(s, n) == nk_while();
 
 /// The big-O of `f` by its code: the deepest nesting of loops, or
 /// `recursive` when it calls itself.
-fn by_code(p: Program, f: i64) -> str {
+fn by_code(ref p: Program, f: i64) -> str {
     let s = p.s;
     let name = node_name(s, f);
     var deepest = 0;
@@ -196,7 +189,7 @@ fn by_code(p: Program, f: i64) -> str {
 
 /// The parameter whose size a call's input size is, and how to read it:
 /// `[param node, "i" | "s" | "l"]`, or none.
-fn size_param(p: Program, f: i64) -> List<any>? {
+fn size_param(var ref p: Program, f: i64) -> List<any>? {
     let s = p.s;
     let text = prog_slot_type(p, literal_slot(nk_str()));
     let list = prog_slot_type(p, list_slot());
@@ -214,7 +207,7 @@ fn size_param(p: Program, f: i64) -> List<any>? {
 
 /// The settings `[Coverage]` gives function `f`, or none when it does not
 /// apply to it.
-fn fn_settings(p: Program, pkgs: Map<str, i64>, quiet: DiagSink, f: i64) -> CoverageSettings? {
+fn fn_settings(ref p: Program, ref pkgs: Map<str, i64>, var ref quiet: DiagSink, f: i64) -> CoverageSettings? {
     var found: CoverageSettings? = none;
     for e in effective_attrs(p, pkgs, f) {
         if e.name == coverage_attr() { found = coverage_settings(p, quiet, e.layers[e.layers.len() - 1]); }
@@ -223,7 +216,7 @@ fn fn_settings(p: Program, pkgs: Map<str, i64>, quiet: DiagSink, f: i64) -> Cove
 }
 
 /// The settings of the `[Coverage]` written on container `c`, or none.
-fn own_settings(p: Program, quiet: DiagSink, c: i64) -> CoverageSettings? {
+fn own_settings(ref p: Program, var ref quiet: DiagSink, c: i64) -> CoverageSettings? {
     var found: CoverageSettings? = none;
     for row_index in nl_get(p.attrs, f"{c}") {
         let row: List<any> = p.s.attrs[row_index];
@@ -235,7 +228,7 @@ fn own_settings(p: Program, quiet: DiagSink, c: i64) -> CoverageSettings? {
     return found;
 }
 
-fn group_label(s: Snap, c: i64) -> str {
+fn group_label(ref s: Snap, c: i64) -> str {
     let k = kind(s, c);
     if k == nk_struct() { return "struct " + node_name(s, c); }
     if k == nk_interface() { return "interface " + node_name(s, c); }
@@ -245,7 +238,7 @@ fn group_label(s: Snap, c: i64) -> str {
 
 /// Where the calls on entry to `f` go, and whether its way out is
 /// deferred: `[node, deferred]`; none for a function without a body.
-fn entry_of(s: Snap, f: i64) -> List<any>? {
+fn entry_of(ref s: Snap, f: i64) -> List<any>? {
     let body = fn_body(s, f);
     if body < 0 { return none; }
     if kind(s, body) == nk_block() {
@@ -258,7 +251,7 @@ fn entry_of(s: Snap, f: i64) -> List<any>? {
 fn flag_text(v: i64) -> List<any> => text_arg(f"{v}");
 
 /// The probe rows that measure the covered functions of the program.
-pub fn coverage_plan(p: Program) -> List<List<any>> {
+pub fn coverage_plan(var ref p: Program) -> List<List<any>> {
     let s = p.s;
     var out: List<List<any>> = [];
     let pkgs = package_decls(p);
@@ -385,7 +378,7 @@ pub fn coverage_plan(p: Program) -> List<List<any>> {
 }
 
 /// The path of the file node `n` is in.
-fn file_row_path(s: Snap, n: i64) -> str {
+fn file_row_path(ref s: Snap, n: i64) -> str {
     let row: List<any> = s.files[unit_of(s, n)];
     let path: str = row[0];
     return path;

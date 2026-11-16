@@ -7,7 +7,7 @@
 //   LVL001: Insufficient clearance ring level
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Types.ClearanceFlow;
+pub lvl(0) pkg selfhost.types;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

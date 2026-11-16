@@ -21,13 +21,19 @@ impl<'a> Parser<'a> {
         let s = raw_text.trim_start_matches(|c: char| c.is_ascii_alphabetic());
         let (inner, closed) = literal_body(s);
         if !closed {
-            self.arena.diagnostics.push((sp, "SyntaxError: unterminated string literal".into()));
+            self.arena
+                .diagnostics
+                .push((sp, "SyntaxError: unterminated string literal".into()));
         }
         self.advance();
         if is_f {
             return self.lower_fstring(inner, sp, is_raw);
         }
-        let text = if is_raw { inner.to_string() } else { unescape_str(inner) };
+        let text = if is_raw {
+            inner.to_string()
+        } else {
+            unescape_str(inner)
+        };
         let sym = self.arena.interner.intern(&text);
         self.arena.alloc_node(NodeKind::StrLit, 0, sp, sym.0, 0)
     }
@@ -35,7 +41,11 @@ impl<'a> Parser<'a> {
     /// A string literal node holding the segment `lit`, escapes processed
     /// unless `is_raw`.
     fn fstring_segment(&mut self, lit: &str, sp: ByteSpan, is_raw: bool) -> NodeId {
-        let text = if is_raw { lit.to_string() } else { unescape_str(lit) };
+        let text = if is_raw {
+            lit.to_string()
+        } else {
+            unescape_str(lit)
+        };
         let sym = self.arena.interner.intern(&text);
         self.arena.alloc_node(NodeKind::StrLit, 0, sp, sym.0, 0)
     }
@@ -57,7 +67,10 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if c == b'}' {
-                self.arena.diagnostics.push((sp, "SyntaxError: unmatched `}` in f-string; write `}}` for a literal brace".into()));
+                self.arena.diagnostics.push((
+                    sp,
+                    "SyntaxError: unmatched `}` in f-string; write `}}` for a literal brace".into(),
+                ));
                 i += 1;
                 continue;
             }
@@ -68,7 +81,9 @@ impl<'a> Parser<'a> {
                 continue;
             }
             let Some(end) = fstring_hole_end(bytes, i + 1) else {
-                self.arena.diagnostics.push((sp, "SyntaxError: unterminated `{` in f-string".into()));
+                self.arena
+                    .diagnostics
+                    .push((sp, "SyntaxError: unterminated `{` in f-string".into()));
                 break;
             };
             if !lit.is_empty() {
@@ -94,10 +109,18 @@ impl<'a> Parser<'a> {
         } else {
             let empty = self.arena.interner.intern("");
             let e = self.arena.alloc_node(NodeKind::StrLit, 0, sp, empty.0, 0);
-            self.arena.alloc_node(NodeKind::BinaryExpr, BinaryOp::Add as u16, sp, e.0, parts[0].0)
+            self.arena.alloc_node(
+                NodeKind::BinaryExpr,
+                BinaryOp::Add as u16,
+                sp,
+                e.0,
+                parts[0].0,
+            )
         };
         for &p in &parts[1..] {
-            acc = self.arena.alloc_node(NodeKind::BinaryExpr, BinaryOp::Add as u16, sp, acc.0, p.0);
+            acc = self
+                .arena
+                .alloc_node(NodeKind::BinaryExpr, BinaryOp::Add as u16, sp, acc.0, p.0);
         }
         acc
     }
@@ -112,7 +135,8 @@ impl<'a> Parser<'a> {
         let callee = self.arena.alloc_node(NodeKind::IdentExpr, 0, sp, fsym.0, 0);
         let psym = self.arena.interner.intern(pattern);
         let pat = self.arena.alloc_node(NodeKind::StrLit, 0, sp, psym.0, 0);
-        self.arena.alloc_list_node(NodeKind::CallExpr, 0, sp, &[callee, value, pat])
+        self.arena
+            .alloc_list_node(NodeKind::CallExpr, 0, sp, &[callee, value, pat])
     }
 
     /// Parses one `{expr}` hole of an f-string with a temporary token tape.
@@ -124,7 +148,11 @@ impl<'a> Parser<'a> {
         let saved_tape = std::mem::replace(&mut self.tape, tokenize(hole));
         let saved_src = std::mem::replace(&mut self.src, hole);
         let saved_pos = std::mem::replace(&mut self.pos, 0);
-        let e = if self.at_end() { NodeId::NONE } else { self.parse_expr() };
+        let e = if self.at_end() {
+            NodeId::NONE
+        } else {
+            self.parse_expr()
+        };
         let trailing = !self.at_end();
         self.tape = saved_tape;
         self.src = saved_src;
@@ -185,7 +213,9 @@ fn split_format_pattern(hole: &str) -> (&str, Option<&str>) {
     let Some(at) = colon else { return (hole, None) };
     let pattern = hole[at + 1..].trim();
     let is_pattern = !pattern.is_empty()
-        && pattern.bytes().all(|c| matches!(c, b'#' | b'0' | b',' | b'_' | b'.'))
+        && pattern
+            .bytes()
+            .all(|c| matches!(c, b'#' | b'0' | b',' | b'_' | b'.'))
         && pattern.bytes().any(|c| c == b'#' || c == b'0');
     if is_pattern {
         (&hole[..at], Some(pattern))
@@ -224,26 +254,46 @@ fn unescape_hole_quotes(hole: &str) -> &str {
 }
 
 fn is_fstring_prefix(b: &[u8], quote_pos: usize) -> bool {
-    if quote_pos == 0 { return false; }
+    if quote_pos == 0 {
+        return false;
+    }
     let b1 = b[quote_pos - 1].to_ascii_lowercase();
-    let bound1 = quote_pos == 1 || !(b[quote_pos - 2].is_ascii_alphanumeric() || b[quote_pos - 2] == b'_');
-    if bound1 { return b1 == b'f'; }
+    let bound1 =
+        quote_pos == 1 || !(b[quote_pos - 2].is_ascii_alphanumeric() || b[quote_pos - 2] == b'_');
+    if bound1 {
+        return b1 == b'f';
+    }
     let b2 = b[quote_pos - 2].to_ascii_lowercase();
-    let bound2 = quote_pos == 2 || !(b[quote_pos - 3].is_ascii_alphanumeric() || b[quote_pos - 3] == b'_');
+    let bound2 =
+        quote_pos == 2 || !(b[quote_pos - 3].is_ascii_alphanumeric() || b[quote_pos - 3] == b'_');
     bound2 && ((b2 == b'r' && b1 == b'f') || (b2 == b'f' && b1 == b'r'))
 }
 
 fn skip_nested_fstring(b: &[u8], mut j: usize, quote: u8) -> usize {
     while j < b.len() {
         let c = b[j];
-        if c == b'\\' { j += 2; continue; }
-        if c == quote { return j; }
+        if c == b'\\' {
+            j += 2;
+            continue;
+        }
+        if c == quote {
+            return j;
+        }
         if c == b'{' {
-            if b.get(j + 1) == Some(&b'{') { j += 2; continue; }
-            if let Some(end) = fstring_hole_end(b, j + 1) { j = end + 1; continue; }
+            if b.get(j + 1) == Some(&b'{') {
+                j += 2;
+                continue;
+            }
+            if let Some(end) = fstring_hole_end(b, j + 1) {
+                j = end + 1;
+                continue;
+            }
             return b.len();
         }
-        if c == b'}' && b.get(j + 1) == Some(&b'}') { j += 2; continue; }
+        if c == b'}' && b.get(j + 1) == Some(&b'}') {
+            j += 2;
+            continue;
+        }
         j += 1;
     }
     b.len()

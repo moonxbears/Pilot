@@ -60,23 +60,44 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     test_file_rel: "crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs",
     expected_test_count: 4,
     files: &[
-        syntax_rule!("stdlib/core/syntax/type_construct.pilot", &["syntax", "type_construct", "quote"]),
-        syntax_rule!("stdlib/core/syntax/visibility.pilot", &["register_modifier", "nameof("]),
+        syntax_rule!(
+            "stdlib/core/syntax/type_construct.pilot",
+            &["syntax", "type_construct", "quote"]
+        ),
+        syntax_rule!(
+            "stdlib/core/syntax/visibility.pilot",
+            &["register_modifier", "nameof("]
+        ),
         syntax_rule!("stdlib/core/syntax/scope_header.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/attribute.pilot", &["quote"]),
         syntax_rule!("stdlib/core/syntax/lifecycle.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/properties.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/module_ext.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/for.pilot", &["nameof("]),
-        syntax_rule!("stdlib/core/syntax/while.pilot", &["syntax", "quote", "loop"]),
-        syntax_rule!("stdlib/core/syntax/until.pilot", &["syntax", "quote", "loop"]),
-        syntax_rule!("stdlib/core/syntax/switch.pilot", &["form(CoreForm::Switch"]),
+        syntax_rule!(
+            "stdlib/core/syntax/while.pilot",
+            &["syntax", "quote", "loop"]
+        ),
+        syntax_rule!(
+            "stdlib/core/syntax/until.pilot",
+            &["syntax", "quote", "loop"]
+        ),
+        syntax_rule!(
+            "stdlib/core/syntax/switch.pilot",
+            &["form(CoreForm::Switch"]
+        ),
         syntax_rule!("stdlib/core/syntax/guard.pilot", &["form(CoreForm::Guard"]),
         syntax_rule!("stdlib/core/syntax/try_catch.pilot", &["nameof("]),
         syntax_rule!("stdlib/core/syntax/expr_sugar.pilot", &["[Prefix("]),
-        syntax_rule!("stdlib/core/operators/levels.pilot", &["register_grammar", "nameof("]),
+        syntax_rule!(
+            "stdlib/core/operators/levels.pilot",
+            &["register_grammar", "nameof("]
+        ),
         syntax_rule!("stdlib/core/operators/shapes.pilot", &["grammar_entry"]),
-        syntax_rule!("stdlib/core/operators/logic.pilot", &["[InfixWord(", "nameof("]),
+        syntax_rule!(
+            "stdlib/core/operators/logic.pilot",
+            &["[InfixWord(", "nameof("]
+        ),
         syntax_rule!("stdlib/core/syntax/unit_decl.pilot", &["unit"]),
         syntax_rule!("stdlib/db/sql_syntax.pilot", &["nameof("]),
         syntax_rule!("stdlib/polyglot/polyglot_syntax.pilot", &["nameof("]),
@@ -654,7 +675,9 @@ pub fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
     ] {
         let a = parse(unbuilt);
         assert!(
-            a.diagnostics.iter().any(|(_, m)| m.contains("SEAM001") && m.contains("keyword.unbuilt")),
+            a.diagnostics
+                .iter()
+                .any(|(_, m)| m.contains("SEAM001") && m.contains("keyword.unbuilt")),
             "`{unbuilt}` must stop at the keyword.unbuilt seam: {:?}",
             a.diagnostics
         );
@@ -743,8 +766,7 @@ pub fn test_51_4_rust_parser_and_ast_contraction_and_name_blind_purity() {
     let root = workspace_root();
     assert_eq!(std::mem::size_of::<AstNode>(), 16);
 
-    let parser_rs =
-        std::fs::read_to_string(root.join("crates/pilot-parser/src/lib.rs")).unwrap();
+    let parser_rs = std::fs::read_to_string(root.join("crates/pilot-parser/src/lib.rs")).unwrap();
     let parser_loc = parser_rs.lines().count();
     let parser_cap = anticheat::seed_rust_file_loc_cap(&root, 1100);
     assert!(

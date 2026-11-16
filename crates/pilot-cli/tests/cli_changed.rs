@@ -31,12 +31,21 @@ fn pilot_in(dir: &Path, args: &[&str]) -> (String, String, i32) {
 
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
-        .args(["-c", "user.name=pilot-test", "-c", "user.email=pilot-test@example.invalid"])
+        .args([
+            "-c",
+            "user.name=pilot-test",
+            "-c",
+            "user.email=pilot-test@example.invalid",
+        ])
         .args(args)
         .current_dir(dir)
         .output()
         .expect("spawn git");
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 fn copy_dir(from: &Path, to: &Path) {
@@ -60,9 +69,17 @@ fn scratch_repo(name: &str) -> PathBuf {
     copy_dir(&root().join("stdlib"), &dir.join("stdlib"));
     let cases = dir.join("tests/conformance");
     fs::create_dir_all(&cases).expect("create cases");
-    fs::write(cases.join("uses_csv.pilot"), "use std.csv;\n\nfn main() {\n    print(\"csv\");\n}\n").unwrap();
+    fs::write(
+        cases.join("uses_csv.pilot"),
+        "use std.csv;\n\nfn main() {\n    print(\"csv\");\n}\n",
+    )
+    .unwrap();
     fs::write(cases.join("uses_csv.stdout"), "csv\n").unwrap();
-    fs::write(cases.join("plain.pilot"), "fn main() {\n    print(\"plain\");\n}\n").unwrap();
+    fs::write(
+        cases.join("plain.pilot"),
+        "fn main() {\n    print(\"plain\");\n}\n",
+    )
+    .unwrap();
     fs::write(cases.join("plain.stdout"), "plain\n").unwrap();
     git(&dir, &["init", "-q"]);
     git(&dir, &["add", "-A"]);
@@ -71,7 +88,10 @@ fn scratch_repo(name: &str) -> PathBuf {
 }
 
 fn result_line(stdout: &str) -> &str {
-    stdout.lines().find(|l| l.starts_with("RESULT")).unwrap_or_else(|| panic!("no result line: {stdout}"))
+    stdout
+        .lines()
+        .find(|l| l.starts_with("RESULT"))
+        .unwrap_or_else(|| panic!("no result line: {stdout}"))
 }
 
 /// The cases listed under the `CHANGED` line.
@@ -93,9 +113,19 @@ fn a_stdlib_change_runs_only_the_cases_that_link_it() {
     fs::write(&csv, src).unwrap();
     let (stdout, stderr, code) = pilot_in(&dir, &["test", "--changed"]);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    assert!(stdout.contains("CHANGED 1 files since HEAD: 1 of 2 cases reached"), "{stdout}");
-    assert_eq!(picked(&stdout), ["tests/conformance/uses_csv.pilot"], "{stdout}");
-    assert_eq!(result_line(&stdout), "RESULT: 1 passed, 0 failed, 0 known bugs reproduced, 0 known bugs fixed");
+    assert!(
+        stdout.contains("CHANGED 1 files since HEAD: 1 of 2 cases reached"),
+        "{stdout}"
+    );
+    assert_eq!(
+        picked(&stdout),
+        ["tests/conformance/uses_csv.pilot"],
+        "{stdout}"
+    );
+    assert_eq!(
+        result_line(&stdout),
+        "RESULT: 1 passed, 0 failed, 0 known bugs reproduced, 0 known bugs fixed"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -106,8 +136,15 @@ fn a_changed_expectation_file_runs_its_case_and_judges_it() {
     fs::write(dir.join("tests/conformance/plain.stdout"), "not plain\n").unwrap();
     let (stdout, stderr, code) = pilot_in(&dir, &["test", "--changed"]);
     assert_eq!(code, 1, "{stdout}{stderr}");
-    assert_eq!(picked(&stdout), ["tests/conformance/plain.pilot"], "{stdout}");
-    assert!(result_line(&stdout).starts_with("RESULT: 0 passed, 1 failed"), "{stdout}");
+    assert_eq!(
+        picked(&stdout),
+        ["tests/conformance/plain.pilot"],
+        "{stdout}"
+    );
+    assert!(
+        result_line(&stdout).starts_with("RESULT: 0 passed, 1 failed"),
+        "{stdout}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -115,12 +152,23 @@ fn a_changed_expectation_file_runs_its_case_and_judges_it() {
 fn an_untracked_case_is_run() {
     let dir = scratch_repo("untracked");
     let cases = dir.join("tests/conformance");
-    fs::write(cases.join("fresh.pilot"), "fn main() {\n    print(1 + 2);\n}\n").unwrap();
+    fs::write(
+        cases.join("fresh.pilot"),
+        "fn main() {\n    print(1 + 2);\n}\n",
+    )
+    .unwrap();
     fs::write(cases.join("fresh.stdout"), "3\n").unwrap();
     let (stdout, stderr, code) = pilot_in(&dir, &["test", "--changed"]);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    assert_eq!(picked(&stdout), ["tests/conformance/fresh.pilot"], "{stdout}");
-    assert!(result_line(&stdout).starts_with("RESULT: 1 passed, 0 failed"), "{stdout}");
+    assert_eq!(
+        picked(&stdout),
+        ["tests/conformance/fresh.pilot"],
+        "{stdout}"
+    );
+    assert!(
+        result_line(&stdout).starts_with("RESULT: 1 passed, 0 failed"),
+        "{stdout}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -138,8 +186,14 @@ fn a_crate_test_reaches_no_case_but_a_crate_source_reaches_all() {
     fs::write(dir.join("crates/some/src/lib.rs"), "// engine\n").unwrap();
     let (stdout, stderr, code) = pilot_in(&dir, &["test", "--changed"]);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    assert!(stdout.contains("is under `crates/`, which reaches every case of this mode"), "{stdout}");
-    assert_eq!(result_line(&stdout), "RESULT: 2 passed, 0 failed, 0 known bugs reproduced, 0 known bugs fixed");
+    assert!(
+        stdout.contains("is under `crates/`, which reaches every case of this mode"),
+        "{stdout}"
+    );
+    assert_eq!(
+        result_line(&stdout),
+        "RESULT: 2 passed, 0 failed, 0 known bugs reproduced, 0 known bugs fixed"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -158,7 +212,10 @@ fn a_revision_git_does_not_know_is_an_error() {
     let dir = scratch_repo("badrev");
     let (_, stderr, code) = pilot_in(&dir, &["test", "--changed", "--since", "no-such-revision"]);
     assert_eq!(code, 2, "{stderr}");
-    assert!(stderr.contains("error: `git diff --name-only no-such-revision` failed"), "{stderr}");
+    assert!(
+        stderr.contains("error: `git diff --name-only no-such-revision` failed"),
+        "{stderr}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -176,12 +233,21 @@ fn changed_runs_from_the_toolchain_root_only() {
 
 #[test]
 fn a_documentation_commit_runs_only_the_cases_that_never_link() {
-    let (stdout, stderr, code) = pilot_in(&root(), &["test", "--changed", "--since", "fcd1a7a~1..fcd1a7a"]);
+    let (stdout, stderr, code) = pilot_in(
+        &root(),
+        &["test", "--changed", "--since", "fcd1a7a~1..fcd1a7a"],
+    );
     assert_eq!(code, 0, "{stdout}{stderr}");
-    assert!(stdout.starts_with("CHANGED 1 files since fcd1a7a~1..fcd1a7a: 2 of "), "{stdout}");
+    assert!(
+        stdout.starts_with("CHANGED 1 files since fcd1a7a~1..fcd1a7a: 2 of "),
+        "{stdout}"
+    );
     assert_eq!(
         picked(&stdout),
-        ["tests/conformance/errors/err_import_missing.pilot", "tests/conformance/modules/err_import_cycle.pilot"],
+        [
+            "tests/conformance/errors/err_import_missing.pilot",
+            "tests/conformance/modules/err_import_cycle.pilot"
+        ],
         "{stdout}"
     );
 }
@@ -193,7 +259,18 @@ fn a_lowerer_change_reaches_every_ir_case_but_no_seed_case() {
     assert_eq!(code, 0, "{stdout}");
     assert_eq!(picked(&stdout).len(), 2, "{stdout}");
     // `--filter` keeps the run itself short; the choice is printed first.
-    let (stdout, stderr, code) = pilot_in(&root(), &["test", "--ir", "--changed", "--since", since, "--filter", "no case has this name"]);
+    let (stdout, stderr, code) = pilot_in(
+        &root(),
+        &[
+            "test",
+            "--ir",
+            "--changed",
+            "--since",
+            since,
+            "--filter",
+            "no case has this name",
+        ],
+    );
     assert_eq!(code, 0, "{stdout}{stderr}");
     assert!(
         stdout.starts_with(&format!(

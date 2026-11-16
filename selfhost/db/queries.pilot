@@ -4,10 +4,8 @@
 // SourceText -> LexTokens -> LosslessCst -> ItemSignature -> ExpandedAst
 //   -> ImportScope -> DefTypesAndLattice -> FileDiagnostics
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Db.Queries;
+pub lvl(0) pkg selfhost.db;
 
-use Pilot.SelfHost.Db.Revision::*;
-use Pilot.SelfHost.Db.Engine::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

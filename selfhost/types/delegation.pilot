@@ -7,7 +7,7 @@
 // Enforces WEAVE005 (Target Missing Interface) & WEAVE006 (Wildcard Ambiguity).
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Types.Delegation;
+pub lvl(0) pkg selfhost.types;
 
 [Layout(c_abi)]
 pub struct DelegationSpec : IValue {
@@ -36,7 +36,7 @@ pub struct DelegationThunk : IValue {
     pub provenance_tier: u8; // Tier 2 = Spliced / Delegated
 }
 
-pure fn list_contains(items: List<str>, query: str) -> bool {
+pure fn list_contains(ref items: List<str>, query: str) -> bool {
     let n = items.len();
     var i = 0;
     while i < n {
@@ -49,7 +49,7 @@ pure fn list_contains(items: List<str>, query: str) -> bool {
 }
 
 // Validates whether the target field methods fulfill all methods required by the interface contract (WEAVE005)
-pub fn validate_interface_compliance(field_methods: List<str>, iface_methods: List<str>, iface_name: str) -> str {
+pub fn validate_interface_compliance(ref field_methods: List<str>, ref iface_methods: List<str>, iface_name: str) -> str {
     let n = iface_methods.len();
     var i = 0;
     while i < n {
@@ -63,7 +63,7 @@ pub fn validate_interface_compliance(field_methods: List<str>, iface_methods: Li
 }
 
 // Validates whether wildcard delegation (*) across two fields leads to ambiguous collisions (WEAVE006)
-pub fn validate_wildcard_ambiguity(field1: str, methods1: List<str>, field2: str, methods2: List<str>) -> str {
+pub fn validate_wildcard_ambiguity(field1: str, ref methods1: List<str>, field2: str, ref methods2: List<str>) -> str {
     let n1 = methods1.len();
     var i = 0;
     while i < n1 {
@@ -79,9 +79,9 @@ pub fn validate_wildcard_ambiguity(field1: str, methods1: List<str>, field2: str
 // Synthesizes Tier-2 delegation thunks for interface methods not overridden at Tier-1 and not excluded
 pub fn synthesize_delegation_thunks(
     target_field: str,
-    contract_methods: List<MethodContract>,
-    owner_tier1_methods: List<str>,
-    excluded_methods: List<str>,
+    ref contract_methods: List<MethodContract>,
+    ref owner_tier1_methods: List<str>,
+    ref excluded_methods: List<str>
 ) -> List<DelegationThunk> {
     var thunks: List<DelegationThunk> = [];
     let n = contract_methods.len();

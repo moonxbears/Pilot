@@ -6,10 +6,9 @@
 // operation that can leave it; `/` and `%` on integers truncate toward zero
 // as the seed's do. Floats are binary64 only. Records are lists. `print`
 // shows values as the seed does (`true`, `1` for 1.0, no exponent).
-pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitPython;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.ir.model.*;
-use selfhost.transpile.source.*;
+use selfhost.ir.*;
 
 pub struct PythonDialect : ISourceDialect {
     pub fn language() -> str => "Python";

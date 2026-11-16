@@ -94,7 +94,10 @@ fn copy_dir(from: &Path, to: &Path) {
 
 /// A fresh copy of the fixture, so the tool can rewrite its matrix.
 fn fixture_copy(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("pilot_keyword_matrix_{name}_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "pilot_keyword_matrix_{name}_{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     copy_dir(&fixture(), &dir);
     dir
@@ -111,7 +114,8 @@ fn the_matrix_is_regenerated_from_the_repository() {
     let (stdout, stderr, code) = text(&tool(&["--root", &arg]));
     assert_eq!(code, 0, "{stdout}{stderr}");
     assert!(stdout.contains("keyword_matrix: wrote"), "{stdout}");
-    let expected = fs::read_to_string(fixture().join("expected_keyword_matrix.md")).expect("expected matrix");
+    let expected =
+        fs::read_to_string(fixture().join("expected_keyword_matrix.md")).expect("expected matrix");
     assert_eq!(matrix(&dir), expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -154,7 +158,8 @@ fn a_matrix_without_markers_is_refused() {
 
 #[test]
 fn a_missing_matrix_and_an_unknown_argument_are_refused() {
-    let dir = std::env::temp_dir().join(format!("pilot_keyword_matrix_empty_{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("pilot_keyword_matrix_empty_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("create empty root");
     let arg = dir.to_string_lossy().into_owned();

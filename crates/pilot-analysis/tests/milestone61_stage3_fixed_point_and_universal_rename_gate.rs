@@ -69,7 +69,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pilot_analysis::{
-    AnalysisPipeline, flatten_ast, handle_engine_intrinsic, LayoutId, PhysicsGeometry,
+    flatten_ast, handle_engine_intrinsic, AnalysisPipeline, LayoutId, PhysicsGeometry,
     PhysicsRegistry,
 };
 use pilot_ast::{AstArena, NodeId, NodeKind};
@@ -84,7 +84,8 @@ const SH_AST_GROUP: &[&str] = &["selfhost/ast.pilot", "selfhost/parser.pilot"];
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 61,
-    test_file_rel: "crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs",
     expected_test_count: 3,
     files: &[
         anticheat::FileAuditRule {
@@ -124,10 +125,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/pilotc.pilot",
             max_lines: 1500,
             name_blind: false,
-            required_pub_fns: &[
-                "pilotc_compile_source_to_c11",
-                "pilotc_bootstrap_stage_c11",
-            ],
+            required_pub_fns: &["pilotc_compile_source_to_c11", "pilotc_bootstrap_stage_c11"],
             required_code_markers: &[],
             forbidden_code_markers: &["system(", "host_spawn_eval"],
             forbidden_string_substrings: &["pilot build", "PILOTC_BINARY["],
@@ -142,7 +140,11 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     ],
 };
 
-fn eval_with_mounted_physics(driver_src: &str, target_src: &str, physics: &PhysicsRegistry) -> String {
+fn eval_with_mounted_physics(
+    driver_src: &str,
+    target_src: &str,
+    physics: &PhysicsRegistry,
+) -> String {
     let drv_arena = parse(driver_src);
     assert!(
         drv_arena.diagnostics.is_empty(),
@@ -226,7 +228,8 @@ fn escape_pilot_str(s: &str) -> String {
 fn compile_and_run_c11_i64(c_src: &str, call_expr_c: &str, tag: &str) -> i64 {
     static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = std::env::temp_dir().join(format!("pilot_m61_{}_{}_{}", std::process::id(), seq, tag));
+    let tmp =
+        std::env::temp_dir().join(format!("pilot_m61_{}_{}_{}", std::process::id(), seq, tag));
     let c_path = tmp.with_extension("c");
     let bin_path = tmp.with_extension("bin");
     let full_c = format!(
@@ -235,7 +238,13 @@ fn compile_and_run_c11_i64(c_src: &str, call_expr_c: &str, tag: &str) -> i64 {
     );
     std::fs::write(&c_path, &full_c).unwrap();
     let comp = Command::new("clang")
-        .args(["-std=c11", "-O2", c_path.to_str().unwrap(), "-o", bin_path.to_str().unwrap()])
+        .args([
+            "-std=c11",
+            "-O2",
+            c_path.to_str().unwrap(),
+            "-o",
+            bin_path.to_str().unwrap(),
+        ])
         .output()
         .expect("clang must be installed");
     assert!(
@@ -315,7 +324,11 @@ pub fn test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_sp
         ("ast.pilot", &ast_src),
         ("parser.pilot", &parser_src),
     ] {
-        assert!(s.lines().count() <= 1500, "selfhost/{} exceeds 1,500 LOC", nm);
+        assert!(
+            s.lines().count() <= 1500,
+            "selfhost/{} exceeds 1,500 LOC",
+            nm
+        );
         assert!(
             !s.contains("expanded syntax "),
             "selfhost/{} must perform real AST splicing, not fake 'expanded syntax' comments!",
@@ -412,15 +425,27 @@ pub fn test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_sp
     );
 
     let arena = parse(&script);
-    assert!(arena.diagnostics.is_empty(), "selfhost frontend parse diagnostics: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "selfhost frontend parse diagnostics: {:?}",
+        arena.diagnostics
+    );
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     let out = vm.run().to_string_repr();
     let cols: Vec<&str> = out.split("@@FE@@").collect();
-    assert_eq!(cols.len(), 5, "Unexpected selfhost frontend output: {}", out);
+    assert_eq!(
+        cols.len(),
+        5,
+        "Unexpected selfhost frontend output: {}",
+        out
+    );
 
     assert_eq!(cols[0], "16", "Self-hosted AST node must be 16 bytes");
-    assert_eq!(cols[1], "BR_OK", "O(1) bidirectional bracket matching corrupted by comments/strings");
+    assert_eq!(
+        cols[1], "BR_OK",
+        "O(1) bidirectional bracket matching corrupted by comments/strings"
+    );
     for req in [
         "struct:SeedKw",
         &format!("{}:Ident", user_id),
@@ -472,7 +497,11 @@ pub fn test_61_2_pilotc_c11_and_stage_build_stop_at_seams() {
     let run = |call: &str| {
         let script = format!("{pilotc_src}\n{call}\n");
         let arena = parse(&script);
-        assert!(arena.diagnostics.is_empty(), "pilotc parse diagnostics: {:?}", arena.diagnostics);
+        assert!(
+            arena.diagnostics.is_empty(),
+            "pilotc parse diagnostics: {:?}",
+            arena.diagnostics
+        );
         let mut vm = PilVirtualMachine::new();
         vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
         let value = vm.run();
@@ -532,9 +561,21 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
 
     // 2. Scan all surviving Rust `crates/*/src/**/*.rs` for zero hardcoded Pilot scalar/composite type strings
     let banned_rust_type_literals = [
-        "\"i64\"", "\"u8\"", "\"f64\"", "\"char\"", "\"bool\"", "\"usize\"",
-        "\"stride\"", "\"option\"", "\"result\"", "\"range\"",
-        "\"SliceBuffer\"", "\"RangeWindow\"", "\"Dual\"", "\"Signal\"", "\"EffectPlan\"",
+        "\"i64\"",
+        "\"u8\"",
+        "\"f64\"",
+        "\"char\"",
+        "\"bool\"",
+        "\"usize\"",
+        "\"stride\"",
+        "\"option\"",
+        "\"result\"",
+        "\"range\"",
+        "\"SliceBuffer\"",
+        "\"RangeWindow\"",
+        "\"Dual\"",
+        "\"Signal\"",
+        "\"EffectPlan\"",
     ];
     let mut total_src_loc = 0usize;
     for crate_entry in std::fs::read_dir(root.join("crates")).unwrap() {
@@ -551,7 +592,11 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
                 } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
                     let txt = std::fs::read_to_string(&p).unwrap();
                     total_src_loc += txt.lines().count();
-                    assert!(!txt.contains("allow(dead_code)"), "#[allow(dead_code)] banned in {:?}", p);
+                    assert!(
+                        !txt.contains("allow(dead_code)"),
+                        "#[allow(dead_code)] banned in {:?}",
+                        p
+                    );
                     for lit in banned_rust_type_literals {
                         assert!(
                             !txt.contains(lit),
@@ -565,7 +610,12 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
         }
     }
     let total_cap = anticheat::seed_rust_crate_loc_cap(&root, 5900);
-    assert!(total_src_loc <= total_cap, "Total Rust src LOC ({}) exceeds {}", total_src_loc, total_cap);
+    assert!(
+        total_src_loc <= total_cap,
+        "Total Rust src LOC ({}) exceeds {}",
+        total_src_loc,
+        total_cap
+    );
 
     // 3. Dual-Pass Universal Rename Litmus Test:
     //    Pass 0: Canonical AGENTS.md litmus names (`c32`, `window`, `maybe`, `outcome`, `interval`)
@@ -601,9 +651,12 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
     let c_types = std::fs::read_to_string(root.join("selfhost/codegen/c_types.pilot")).unwrap();
     let c_hdr = std::fs::read_to_string(root.join("selfhost/codegen/c_header.pilot")).unwrap();
     let c_emit = std::fs::read_to_string(root.join("selfhost/codegen/c_emitter.pilot")).unwrap();
-    let llvm_emit = std::fs::read_to_string(root.join("selfhost/codegen/llvm_emitter.pilot")).unwrap();
-    let wasm_emit = std::fs::read_to_string(root.join("selfhost/codegen/wasm_emitter.pilot")).unwrap();
-    let gpu_c = std::fs::read_to_string(root.join("selfhost/codegen/gpu_c_dialects.pilot")).unwrap();
+    let llvm_emit =
+        std::fs::read_to_string(root.join("selfhost/codegen/llvm_emitter.pilot")).unwrap();
+    let wasm_emit =
+        std::fs::read_to_string(root.join("selfhost/codegen/wasm_emitter.pilot")).unwrap();
+    let gpu_c =
+        std::fs::read_to_string(root.join("selfhost/codegen/gpu_c_dialects.pilot")).unwrap();
     let gpu_sh = std::fs::read_to_string(root.join("selfhost/codegen/gpu_shaders.pilot")).unwrap();
     let gpu_ll = std::fs::read_to_string(root.join("selfhost/codegen/gpu_llvm.pilot")).unwrap();
     let lsp_handlers = std::fs::read_to_string(root.join("selfhost/lsp/handlers.pilot")).unwrap();
@@ -706,7 +759,11 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
         let _ = renamed_core;
 
         let k_arena = parse_with_tables(&kernel_src, &renamed_tables);
-        assert!(k_arena.diagnostics.is_empty(), "Kernel parse failed: {:?}", k_arena.diagnostics);
+        assert!(
+            k_arena.diagnostics.is_empty(),
+            "Kernel parse failed: {:?}",
+            k_arena.diagnostics
+        );
         let k_analysis = AnalysisPipeline::analyze(&k_arena, k_arena.root);
 
         // (A) Backend 1: PilVirtualMachine execution
@@ -714,7 +771,12 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
         let vm_arena = parse_with_tables(&vm_src, &renamed_tables);
         let mut pil_vm = PilVirtualMachine::new();
         pil_vm.load_binary(BytecodeCompiler::compile(&vm_arena, vm_arena.root));
-        assert_eq!(pil_vm.run().as_int(), Some(expected_val), "PilVM failed under rename pass {}", pass_idx);
+        assert_eq!(
+            pil_vm.run().as_int(),
+            Some(expected_val),
+            "PilVM failed under rename pass {}",
+            pass_idx
+        );
 
         // (B) Backends 2, 3, 4, 5: C11, LLVM IR, WASM, and WGSL GPU emitted from mounted renamed AST!
         let cg_driver = format!(
@@ -732,17 +794,39 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
 
         // Execute C11 via `clang`
         assert_eq!(
-            compile_and_run_c11_i64(cg_cols[0], &format!("{}({})", fn_kern, arg_x), &format!("lit_c_{}", pass_idx)),
+            compile_and_run_c11_i64(
+                cg_cols[0],
+                &format!("{}({})", fn_kern, arg_x),
+                &format!("lit_c_{}", pass_idx)
+            ),
             expected_val,
             "C11 execution failed under rename pass {}",
             pass_idx
         );
 
         // Execute LLVM IR via `clang -x ir`
-        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let tmp_ll = std::env::temp_dir().join(format!("pilot_m61_ll_{}_{}_{}.ll", std::process::id(), nonce, pass_idx));
-        let tmp_drv = std::env::temp_dir().join(format!("pilot_m61_ll_{}_{}_{}.c", std::process::id(), nonce, pass_idx));
-        let tmp_bin = std::env::temp_dir().join(format!("pilot_m61_ll_{}_{}_{}.bin", std::process::id(), nonce, pass_idx));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmp_ll = std::env::temp_dir().join(format!(
+            "pilot_m61_ll_{}_{}_{}.ll",
+            std::process::id(),
+            nonce,
+            pass_idx
+        ));
+        let tmp_drv = std::env::temp_dir().join(format!(
+            "pilot_m61_ll_{}_{}_{}.c",
+            std::process::id(),
+            nonce,
+            pass_idx
+        ));
+        let tmp_bin = std::env::temp_dir().join(format!(
+            "pilot_m61_ll_{}_{}_{}.bin",
+            std::process::id(),
+            nonce,
+            pass_idx
+        ));
         std::fs::write(&tmp_ll, cg_cols[1]).unwrap();
         std::fs::write(
             &tmp_drv,
@@ -762,13 +846,21 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
             ])
             .output()
             .unwrap();
-        assert!(ll_comp.status.success(), "clang LLVM IR compile failed:\n{}", String::from_utf8_lossy(&ll_comp.stderr));
+        assert!(
+            ll_comp.status.success(),
+            "clang LLVM IR compile failed:\n{}",
+            String::from_utf8_lossy(&ll_comp.stderr)
+        );
         let ll_run = Command::new(&tmp_bin).output().unwrap();
         let _ = std::fs::remove_file(&tmp_ll);
         let _ = std::fs::remove_file(&tmp_drv);
         let _ = std::fs::remove_file(&tmp_bin);
         assert_eq!(
-            String::from_utf8(ll_run.stdout).unwrap().trim().parse::<i64>().unwrap(),
+            String::from_utf8(ll_run.stdout)
+                .unwrap()
+                .trim()
+                .parse::<i64>()
+                .unwrap(),
             expected_val,
             "LLVM IR execution failed under rename pass {}",
             pass_idx
@@ -784,10 +876,21 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
             fn_kern,
             arg_x
         );
-        let nw_out = Command::new("node").args(["-e", &node_wasm]).output().unwrap();
-        assert!(nw_out.status.success(), "WASM execution failed:\n{}", String::from_utf8_lossy(&nw_out.stderr));
+        let nw_out = Command::new("node")
+            .args(["-e", &node_wasm])
+            .output()
+            .unwrap();
+        assert!(
+            nw_out.status.success(),
+            "WASM execution failed:\n{}",
+            String::from_utf8_lossy(&nw_out.stderr)
+        );
         assert_eq!(
-            String::from_utf8(nw_out.stdout).unwrap().trim().parse::<i64>().unwrap(),
+            String::from_utf8(nw_out.stdout)
+                .unwrap()
+                .trim()
+                .parse::<i64>()
+                .unwrap(),
             expected_val,
             "WASM result mismatch under rename pass {}",
             pass_idx
@@ -811,7 +914,9 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
         lsp_reg.lsp_offset = (kernel_src.find(&fn_kern).unwrap() + 2) as u32;
         let lsp_ptr = &mut lsp_reg as *mut PhysicsRegistry;
         let mut lsp_vm = PilVirtualMachine::new();
-        lsp_vm.engine_handler = Some(Box::new(move |n, a| handle_engine_intrinsic(unsafe { &mut *lsp_ptr }, n, a)));
+        lsp_vm.engine_handler = Some(Box::new(move |n, a| {
+            handle_engine_intrinsic(unsafe { &mut *lsp_ptr }, n, a)
+        }));
         lsp_vm.load_binary(BytecodeCompiler::compile(&lsp_arena, lsp_arena.root));
         let _ = lsp_vm.run();
         assert!(
@@ -830,14 +935,19 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
                 )
             })
             .expect("Expected 2-field renamed interval layout");
-        let dap_drv = format!("{}\nlet __d = inspect_struct_fields_json({});\n__d;\n", dap_inspector, rng_lid);
+        let dap_drv = format!(
+            "{}\nlet __d = inspect_struct_fields_json({});\n__d;\n",
+            dap_inspector, rng_lid
+        );
         let dap_arena = parse(&dap_drv);
         let (flat, syms) = flatten_ast(&dap_arena, dap_arena.root);
         let mut dap_reg = PhysicsRegistry::new(flat, syms);
         dap_reg.layouts = k_analysis.physics.layouts.clone();
         let dap_ptr = &mut dap_reg as *mut PhysicsRegistry;
         let mut dap_vm = PilVirtualMachine::new();
-        dap_vm.engine_handler = Some(Box::new(move |n, a| handle_engine_intrinsic(unsafe { &mut *dap_ptr }, n, a)));
+        dap_vm.engine_handler = Some(Box::new(move |n, a| {
+            handle_engine_intrinsic(unsafe { &mut *dap_ptr }, n, a)
+        }));
         dap_vm.load_binary(BytecodeCompiler::compile(&dap_arena, dap_arena.root));
         let dap_json = dap_vm.run().to_string_repr();
         assert!(

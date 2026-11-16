@@ -39,14 +39,18 @@ impl Parser<'_> {
             let is_getter = self.is_rec(GETTER_RECEPTOR);
             if !is_getter && !self.is_rec(SETTER_RECEPTOR) {
                 let found = self.text().to_string();
-                let msg = format!("an accessor block holds `get` and `set` clauses, found `{found}`");
+                let msg =
+                    format!("an accessor block holds `get` and `set` clauses, found `{found}`");
                 self.arena.diagnostics.push((self.span(), msg));
                 self.advance();
                 continue;
             }
             self.advance();
             let param = if self.at(TokenKind::LParen) {
-                self.parse_param_list().first().copied().unwrap_or(NodeId::NONE)
+                self.parse_param_list()
+                    .first()
+                    .copied()
+                    .unwrap_or(NodeId::NONE)
             } else {
                 NodeId::NONE
             };
@@ -84,6 +88,7 @@ impl Parser<'_> {
         let span = ByteSpan::new(block_span.start, self.prev_span().end);
         let count = getters.len() as u16;
         getters.extend(setters);
-        self.arena.alloc_list_node(NodeKind::BlockExpr, count, span, &getters)
+        self.arena
+            .alloc_list_node(NodeKind::BlockExpr, count, span, &getters)
     }
 }

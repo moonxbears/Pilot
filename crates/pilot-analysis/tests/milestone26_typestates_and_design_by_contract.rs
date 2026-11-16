@@ -3,15 +3,15 @@
 //! Compile-Time Typestates (state) & Design-by-Contract (requires / ensures / old)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 26,
@@ -68,12 +68,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m26(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -100,9 +104,7 @@ fn test_m26_1_zero_byte_typestate_algebra_and_transitions() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/types/typestate.pilot",
-    ];
+    let deps = ["selfhost/types/typestate.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -165,9 +167,7 @@ fn test_m26_2_branch_merge_ambiguity_and_terminal_drop_obligations() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/types/typestate.pilot",
-    ];
+    let deps = ["selfhost/types/typestate.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -207,7 +207,11 @@ fn test_m26_2_branch_merge_ambiguity_and_terminal_drop_obligations() {
     "#;
 
     let res = eval_m26(&deps, script);
-    assert_eq!(res, "42", "Failed branch merge & drop obligation test: {}", res);
+    assert_eq!(
+        res, "42",
+        "Failed branch merge & drop obligation test: {}",
+        res
+    );
     guard.finish();
 }
 
@@ -221,9 +225,7 @@ fn test_m26_3_design_by_contract_hoisted_old_snapshots_and_purity() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/ir/pass_contracts.pilot",
-    ];
+    let deps = ["selfhost/ir/pass_contracts.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -261,7 +263,11 @@ fn test_m26_3_design_by_contract_hoisted_old_snapshots_and_purity() {
     "#;
 
     let res = eval_m26(&deps, script);
-    assert_eq!(res, "42", "Failed DBC old() snapshot & purity test: {}", res);
+    assert_eq!(
+        res, "42",
+        "Failed DBC old() snapshot & purity test: {}",
+        res
+    );
 
     // A plan that passes its checks is handed to PilIR, which does not exist yet.
     let weave_script = r#"
@@ -292,9 +298,7 @@ fn test_m26_4_comptime_precondition_refinement_and_invariant() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/ir/pass_contracts.pilot",
-    ];
+    let deps = ["selfhost/ir/pass_contracts.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -321,7 +325,11 @@ fn test_m26_4_comptime_precondition_refinement_and_invariant() {
     "#;
 
     let res = eval_m26(&deps, script);
-    assert_eq!(res, "42", "Failed comptime precondition & refinement test: {}", res);
+    assert_eq!(
+        res, "42",
+        "Failed comptime precondition & refinement test: {}",
+        res
+    );
 
     // Proving `requires(amt > 0)` false for `deposit(-5)` needs a comptime evaluator.
     let prove_script = r#"

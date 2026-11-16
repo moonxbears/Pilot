@@ -36,7 +36,10 @@ fn the_corpus_runs_on_the_ir_interpreter_or_stops_at_a_seam() {
     let out = pilot(&["test", "--ir"]);
     let stdout = text(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}{}", text(&out.stderr));
-    let result = stdout.lines().find(|l| l.starts_with("RESULT (ir):")).expect("a result line");
+    let result = stdout
+        .lines()
+        .find(|l| l.starts_with("RESULT (ir):"))
+        .expect("a result line");
     assert!(result.contains(" 0 failed"), "{result}");
     // Every case that did not pass names the seam it stopped at.
     for line in stdout.lines().filter(|l| l.starts_with("SEAM ")) {
@@ -50,13 +53,21 @@ fn a_lowered_program_runs_with_the_seed_output() {
     let out = pilot(&["ir", "run", "tests/conformance/ir/ir_loop_call_join.pilot"]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert_eq!(text(&out.stdout), "60\nbig\n");
-    let trip = pilot(&["ir", "roundtrip", "tests/conformance/ir/ir_loop_call_join.pilot"]);
+    let trip = pilot(&[
+        "ir",
+        "roundtrip",
+        "tests/conformance/ir/ir_loop_call_join.pilot",
+    ]);
     assert_eq!(trip.status.code(), Some(0), "{}", text(&trip.stderr));
 }
 
 #[test]
 fn printed_ir_is_text_the_parser_reads_back() {
-    let printed = pilot(&["ir", "print", "tests/conformance/types/structs_methods.pilot"]);
+    let printed = pilot(&[
+        "ir",
+        "print",
+        "tests/conformance/types/structs_methods.pilot",
+    ]);
     assert_eq!(printed.status.code(), Some(0), "{}", text(&printed.stderr));
     let dir = std::env::temp_dir().join(format!("pilot_f5_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
@@ -98,11 +109,25 @@ fn run_roundtrip_runs_only_a_module_that_round_trips() {
     std::fs::write(&file, format!("{input}\n")).expect("write IR");
     let path = file.to_string_lossy().into_owned();
     let run = pilot(&["ir", "run", &path]);
-    assert_eq!(text(&run.stdout), "42\n15\n", "it still runs: {}", text(&run.stderr));
+    assert_eq!(
+        text(&run.stdout),
+        "42\n15\n",
+        "it still runs: {}",
+        text(&run.stderr)
+    );
     let out = pilot(&["ir", "run-roundtrip", &path]);
     assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
-    assert_eq!(text(&out.stdout), "", "a module that does not round-trip is not run");
-    assert!(text(&out.stderr).contains("error: the PilIR text does not round-trip; the program was not run"), "{}", text(&out.stderr));
+    assert_eq!(
+        text(&out.stdout),
+        "",
+        "a module that does not round-trip is not run"
+    );
+    assert!(
+        text(&out.stderr)
+            .contains("error: the PilIR text does not round-trip; the program was not run"),
+        "{}",
+        text(&out.stderr)
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -122,7 +147,10 @@ fn assert_rejected(file: &str, code: &str, detail: &str) {
     let stderr = text(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{file}: {stderr}");
     assert!(stderr.contains(code), "{file}: expected {code}: {stderr}");
-    assert!(stderr.contains(detail), "{file}: expected `{detail}`: {stderr}");
+    assert!(
+        stderr.contains(detail),
+        "{file}: expected `{detail}`: {stderr}"
+    );
 }
 
 #[test]
@@ -141,7 +169,10 @@ fn an_unlowered_construct_stops_at_its_seam() {
     let out = pilot(&["ir", "run", "tests/ir/unlowered_continue_range.pilot"]);
     let stderr = text(&out.stderr);
     assert_ne!(out.status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains("SEAM001") && stderr.contains("ir.lower_construct"), "{stderr}");
+    assert!(
+        stderr.contains("SEAM001") && stderr.contains("ir.lower_construct"),
+        "{stderr}"
+    );
     assert_eq!(text(&out.stdout), "");
 }
 
@@ -151,7 +182,8 @@ fn struct_sizes_follow_the_c_abi() {
     // written in C: tests/ir/c_abi_layout.c.
     let out = pilot(&["ir", "run", "tests/ir/c_abi_layout.pilot"]);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
-    let expected = std::fs::read_to_string(root().join("tests/ir/c_abi_layout.stdout")).expect("expected sizes");
+    let expected = std::fs::read_to_string(root().join("tests/ir/c_abi_layout.stdout"))
+        .expect("expected sizes");
     assert_eq!(text(&out.stdout), expected);
 }
 

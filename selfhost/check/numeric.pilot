@@ -16,20 +16,15 @@
 // PilIR needs no rows: each instruction carries its result's register, and
 // the interpreter narrows to it (selfhost/ir/interp.pilot run_arith).
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Check.Numeric;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.check.drops.*;
 
 /// `BinaryOp` codes (crates/pilot-ast): arithmetic is 1..7 (`+` .. `**`),
 /// bitwise and shifts are 16..20 (`&` .. `>>`).
 fn is_arithmetic_op(op: i64) -> bool => (op >= 1 && op <= 7) || (op >= 16 && op <= 20);
 
 /// The `[Bits]` width key of named type `t`, or "".
-fn width_key(p: Program, t: i64) -> str {
+fn width_key(ref p: Program, t: i64) -> str {
     if !ty_is_named(p.tt, t) { return ""; }
     let d = node_name(p.s, ty_decl(p.tt, t));
     return if p.bits_width.has(d) { p.bits_width.get(d) } else { "" };
@@ -37,7 +32,7 @@ fn width_key(p: Program, t: i64) -> str {
 
 /// Whether `t` is an integer or float type of another width than the type
 /// a literal of its kind takes (the engine's own width).
-fn is_other_width(p: Program, t: i64, int_width: str, float_width: str) -> bool {
+fn is_other_width(ref p: Program, t: i64, int_width: str, float_width: str) -> bool {
     let class = prog_class(p, t);
     let w = width_key(p, t);
     if w == "" { return false; }
@@ -49,7 +44,7 @@ fn is_other_width(p: Program, t: i64, int_width: str, float_width: str) -> bool 
 /// Adds a `NumericType` row to `rows` for each arithmetic expression of the
 /// files the program links whose result is narrower or wider than the engine's
 /// numbers.
-pub fn plan_numeric(inf: Infer, rows: List<List<any>>) {
+pub fn plan_numeric(var ref inf: Infer, var ref rows: List<List<any>>) {
     let p = inf.p;
     let s = p.s;
     let int_width = width_key(p, prog_slot_type(p, literal_slot(nk_int())));

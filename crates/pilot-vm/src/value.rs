@@ -29,38 +29,136 @@ const _: () = assert!(core::mem::size_of::<PilotVal>() == 16);
 const _: () = assert!(core::mem::align_of::<PilotVal>() == 8);
 
 impl PilotVal {
-    pub const NULL: Self = Self { tag_meta: TAG_NULL as u64, payload: 0 };
-    pub const TRUE: Self = Self { tag_meta: TAG_BOOL as u64, payload: 1 };
-    pub const FALSE: Self = Self { tag_meta: TAG_BOOL as u64, payload: 0 };
+    pub const NULL: Self = Self {
+        tag_meta: TAG_NULL as u64,
+        payload: 0,
+    };
+    pub const TRUE: Self = Self {
+        tag_meta: TAG_BOOL as u64,
+        payload: 1,
+    };
+    pub const FALSE: Self = Self {
+        tag_meta: TAG_BOOL as u64,
+        payload: 0,
+    };
 
-    pub const fn tag(self) -> u8 { (self.tag_meta & 0xFF) as u8 }
-    pub const fn is_null(self) -> bool { self.tag() == TAG_NULL }
-    pub const fn is_bool(self) -> bool { self.tag() == TAG_BOOL }
-    pub const fn is_int(self) -> bool { matches!(self.tag(), TAG_INT | TAG_UINT) }
-    pub const fn is_uint(self) -> bool { self.tag() == TAG_UINT }
-    pub const fn is_float(self) -> bool { self.tag() == TAG_FLOAT }
-    pub const fn is_str(self) -> bool { matches!(self.tag(), TAG_SSO_STR | TAG_HEAP_STR) }
-    pub const fn is_list(self) -> bool { self.tag() == TAG_LIST }
-    pub const fn is_map(self) -> bool { self.tag() == TAG_MAP }
-    pub const fn is_fn(self) -> bool { self.tag() == TAG_FN }
+    pub const fn tag(self) -> u8 {
+        (self.tag_meta & 0xFF) as u8
+    }
+    pub const fn is_null(self) -> bool {
+        self.tag() == TAG_NULL
+    }
+    pub const fn is_bool(self) -> bool {
+        self.tag() == TAG_BOOL
+    }
+    pub const fn is_int(self) -> bool {
+        matches!(self.tag(), TAG_INT | TAG_UINT)
+    }
+    pub const fn is_uint(self) -> bool {
+        self.tag() == TAG_UINT
+    }
+    pub const fn is_float(self) -> bool {
+        self.tag() == TAG_FLOAT
+    }
+    pub const fn is_str(self) -> bool {
+        matches!(self.tag(), TAG_SSO_STR | TAG_HEAP_STR)
+    }
+    pub const fn is_list(self) -> bool {
+        self.tag() == TAG_LIST
+    }
+    pub const fn is_map(self) -> bool {
+        self.tag() == TAG_MAP
+    }
+    pub const fn is_fn(self) -> bool {
+        self.tag() == TAG_FN
+    }
 
-    pub const fn from_fn_handle(slot: usize) -> Self { Self { tag_meta: TAG_FN as u64, payload: slot as u64 } }
-    pub const fn as_fn_handle(self) -> Option<usize> { if self.is_fn() { Some(self.payload as usize) } else { None } }
-    pub const fn from_list_handle(slot: usize) -> Self { Self { tag_meta: TAG_LIST as u64, payload: slot as u64 } }
-    pub const fn from_map_handle(slot: usize) -> Self { Self { tag_meta: TAG_MAP as u64, payload: slot as u64 } }
-    pub const fn as_list_handle(self) -> Option<usize> { if self.is_list() { Some(self.payload as usize) } else { None } }
-    pub const fn as_map_handle(self) -> Option<usize> { if self.is_map() { Some(self.payload as usize) } else { None } }
+    pub const fn from_fn_handle(slot: usize) -> Self {
+        Self {
+            tag_meta: TAG_FN as u64,
+            payload: slot as u64,
+        }
+    }
+    pub const fn as_fn_handle(self) -> Option<usize> {
+        if self.is_fn() {
+            Some(self.payload as usize)
+        } else {
+            None
+        }
+    }
+    pub const fn from_list_handle(slot: usize) -> Self {
+        Self {
+            tag_meta: TAG_LIST as u64,
+            payload: slot as u64,
+        }
+    }
+    pub const fn from_map_handle(slot: usize) -> Self {
+        Self {
+            tag_meta: TAG_MAP as u64,
+            payload: slot as u64,
+        }
+    }
+    pub const fn as_list_handle(self) -> Option<usize> {
+        if self.is_list() {
+            Some(self.payload as usize)
+        } else {
+            None
+        }
+    }
+    pub const fn as_map_handle(self) -> Option<usize> {
+        if self.is_map() {
+            Some(self.payload as usize)
+        } else {
+            None
+        }
+    }
 
-    pub const fn from_bool(val: bool) -> Self { if val { Self::TRUE } else { Self::FALSE } }
-    pub const fn from_int(val: i64) -> Self { Self { tag_meta: TAG_INT as u64, payload: val as u64 } }
-    pub const fn from_uint(val: u64) -> Self { Self { tag_meta: TAG_UINT as u64, payload: val } }
-    pub fn from_float(val: f64) -> Self { Self { tag_meta: TAG_FLOAT as u64, payload: val.to_bits() } }
-    pub const fn from_char(val: char) -> Self { Self { tag_meta: TAG_CHAR as u64, payload: val as u64 } }
+    pub const fn from_bool(val: bool) -> Self {
+        if val {
+            Self::TRUE
+        } else {
+            Self::FALSE
+        }
+    }
+    pub const fn from_int(val: i64) -> Self {
+        Self {
+            tag_meta: TAG_INT as u64,
+            payload: val as u64,
+        }
+    }
+    pub const fn from_uint(val: u64) -> Self {
+        Self {
+            tag_meta: TAG_UINT as u64,
+            payload: val,
+        }
+    }
+    pub fn from_float(val: f64) -> Self {
+        Self {
+            tag_meta: TAG_FLOAT as u64,
+            payload: val.to_bits(),
+        }
+    }
+    pub const fn from_char(val: char) -> Self {
+        Self {
+            tag_meta: TAG_CHAR as u64,
+            payload: val as u64,
+        }
+    }
 
-    pub fn as_int(self) -> Option<i64> { self.is_int().then_some(self.payload as i64) }
-    pub fn as_float(self) -> Option<f64> { self.is_float().then(|| f64::from_bits(self.payload)) }
-    pub fn as_char(self) -> Option<char> { (self.tag() == TAG_CHAR).then(|| char::from_u32(self.payload as u32)).flatten() }
-    pub fn as_bool(self) -> Option<bool> { self.is_bool().then_some(self.payload != 0) }
+    pub fn as_int(self) -> Option<i64> {
+        self.is_int().then_some(self.payload as i64)
+    }
+    pub fn as_float(self) -> Option<f64> {
+        self.is_float().then(|| f64::from_bits(self.payload))
+    }
+    pub fn as_char(self) -> Option<char> {
+        (self.tag() == TAG_CHAR)
+            .then(|| char::from_u32(self.payload as u32))
+            .flatten()
+    }
+    pub fn as_bool(self) -> Option<bool> {
+        self.is_bool().then_some(self.payload != 0)
+    }
 
     pub const fn kind_label(self) -> &'static str {
         match self.tag() {
@@ -96,7 +194,10 @@ impl PilotVal {
         if let Some(sso) = Self::from_str_sso(s) {
             return sso;
         }
-        let mut guard = STRING_INTERNER.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap();
+        let mut guard = STRING_INTERNER
+            .get_or_init(|| Mutex::new(HashSet::new()))
+            .lock()
+            .unwrap();
         let ptr = match guard.get(s) {
             Some(&existing) => existing.as_ptr(),
             None => {
@@ -130,19 +231,26 @@ impl PilotVal {
             }
             TAG_HEAP_STR => {
                 let (ptr, len) = self.heap_parts()?;
-                Some(unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr, len)) })
+                Some(unsafe {
+                    core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr, len))
+                })
             }
             _ => None,
         }
     }
 
     pub unsafe fn from_heap_parts(ptr: *const u8, len: usize) -> Self {
-        Self { tag_meta: (TAG_HEAP_STR as u64) | ((len as u64) << 8), payload: ptr as usize as u64 }
+        Self {
+            tag_meta: (TAG_HEAP_STR as u64) | ((len as u64) << 8),
+            payload: ptr as usize as u64,
+        }
     }
 
     pub fn heap_parts(&self) -> Option<(*const u8, usize)> {
-        (self.tag() == TAG_HEAP_STR && self.payload != 0)
-            .then_some((self.payload as usize as *const u8, ((self.tag_meta >> 8) & 0xFFFF_FFFF) as usize))
+        (self.tag() == TAG_HEAP_STR && self.payload != 0).then_some((
+            self.payload as usize as *const u8,
+            ((self.tag_meta >> 8) & 0xFFFF_FFFF) as usize,
+        ))
     }
 
     pub fn with_str<R>(&self, f: impl FnOnce(&str) -> R) -> Option<R> {
@@ -157,7 +265,9 @@ impl PilotVal {
             TAG_INT => (self.payload as i64).to_string(),
             TAG_UINT => self.payload.to_string(),
             TAG_FLOAT => f64::from_bits(self.payload).to_string(),
-            TAG_CHAR => char::from_u32(self.payload as u32).unwrap_or(char::REPLACEMENT_CHARACTER).to_string(),
+            TAG_CHAR => char::from_u32(self.payload as u32)
+                .unwrap_or(char::REPLACEMENT_CHARACTER)
+                .to_string(),
             TAG_SSO_STR | TAG_HEAP_STR => self.with_str(str::to_string).unwrap_or_default(),
             TAG_LIST => format!("<list #{}>", self.payload),
             TAG_MAP => format!("<record #{}>", self.payload),
@@ -168,9 +278,13 @@ impl PilotVal {
 }
 
 impl fmt::Debug for PilotVal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.to_string_repr()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_string_repr())
+    }
 }
 
 impl fmt::Display for PilotVal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.to_string_repr()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_string_repr())
+    }
 }

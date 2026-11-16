@@ -3,7 +3,7 @@
 // Milestone 8.1: Rich Diagnostic Model, Spans, Text Edits, and Fix Suggestions
 // Core schemas for compiler diagnostics, multi-span labels, and CST autofix
 // ==============================================================================
-pub lvl(0) pkg Pilot.Diagnostics.Model;
+pub lvl(0) pkg selfhost.diagnostics;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

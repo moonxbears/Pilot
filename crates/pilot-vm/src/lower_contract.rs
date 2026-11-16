@@ -35,13 +35,20 @@ pub(crate) struct ContractCtx {
 
 impl BytecodeCompiler {
     /// A contract clause statement (`ExprStmt` with contract flags).
-    pub(crate) fn compile_contract_clause(&mut self, arena: &AstArena, flags: u16, clause: u32) -> u8 {
+    pub(crate) fn compile_contract_clause(
+        &mut self,
+        arena: &AstArena,
+        flags: u16,
+        clause: u32,
+    ) -> u8 {
         if flags == pilot_parser::CONTRACT_REQUIRES {
             let mark = self.next_reg;
             let r = self.compile_node(arena, NodeId(clause));
             let ok = self.emit_branch(Opcode::JumpIfTrue, r, 0);
             let name = self.contract.fn_name.clone();
-            self.emit_trap(format!("DBC006: a `requires` clause of `{name}` does not hold"));
+            self.emit_trap(format!(
+                "DBC006: a `requires` clause of `{name}` does not hold"
+            ));
             self.patch_to_here(ok);
             self.release_to(mark);
         } else {
@@ -141,7 +148,9 @@ impl BytecodeCompiler {
                 self.compile_node(arena, clause)
             };
             let ok = self.emit_branch(Opcode::JumpIfTrue, r_cond, 0);
-            self.emit_trap(format!("DBC007: an `ensures` clause of `{name}` does not hold"));
+            self.emit_trap(format!(
+                "DBC007: an `ensures` clause of `{name}` does not hold"
+            ));
             self.patch_to_here(ok);
             self.release_to(inner);
         }

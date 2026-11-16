@@ -16,18 +16,12 @@
 // one that is only read, or changed through its methods or fields (a heap
 // value the caller shares), keeps the plain convention. A function that
 // takes part cannot be used as a function value yet (ir.lower_construct).
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerOuts;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_global.*;
+use selfhost.check.*;
 
 /// Whether binding `b` is assigned as a whole somewhere under node `n`.
-fn assigns_binding(lw: Lowerer, n: i64, b: i64) -> bool {
+fn assigns_binding(ref lw: Lowerer, n: i64, b: i64) -> bool {
     let s = lw.inf.p.s;
     if kind(s, n) == nk_assign() {
         let target = lhs(s, n);
@@ -41,7 +35,7 @@ fn assigns_binding(lw: Lowerer, n: i64, b: i64) -> bool {
 
 /// The positions in `params` (the parameters of `decl` as its calls
 /// arrange them) of the `var ref` parameters its body assigns.
-pub fn out_positions(lw: Lowerer, decl: i64, params: List<i64>) -> List<i64> {
+pub fn out_positions(ref lw: Lowerer, decl: i64, ref params: List<i64>) -> List<i64> {
     let s = lw.inf.p.s;
     var out: List<i64> = [];
     let body = fn_body(s, decl);
@@ -60,7 +54,7 @@ pub fn out_positions(lw: Lowerer, decl: i64, params: List<i64>) -> List<i64> {
 /// In the function being lowered, whose parameters `params` are bound:
 /// moves each assigned `var ref` parameter into a stack slot of its own and
 /// records it, so every return hands its final value back.
-pub fn bind_out_params(lw: Lowerer, decl: i64, params: List<i64>) {
+pub fn bind_out_params(var ref lw: Lowerer, decl: i64, ref params: List<i64>) {
     lw.outs = [];
     lw.out_phys = [];
     for i in out_positions(lw, decl, params) {
@@ -80,7 +74,7 @@ pub fn bind_out_params(lw: Lowerer, decl: i64, params: List<i64>) {
 /// The arguments of a `return` with `args` (the result, or none): the same
 /// unless the function hands parameters back, else one record of the result
 /// then each parameter's final value.
-pub fn out_return_args(lw: Lowerer, args: List<u32>, n: i64) -> List<u32> {
+pub fn out_return_args(var ref lw: Lowerer, args: List<u32>, n: i64) -> List<u32> {
     if lw.outs.len() == 0 { return args; }
     let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
     var vals: List<u32> = [];
@@ -95,7 +89,7 @@ pub fn out_return_args(lw: Lowerer, args: List<u32>, n: i64) -> List<u32> {
 
 /// Once the function's body is lowered: a function that hands parameters
 /// back returns their record.
-pub fn finish_out_params(lw: Lowerer) {
+pub fn finish_out_params(var ref lw: Lowerer) {
     if lw.outs.len() > 0 { lw.f.ret_physics = layout_unknown(lw.ls); }
 }
 
@@ -103,7 +97,7 @@ pub fn finish_out_params(lw: Lowerer) {
 /// given before the arranged argument nodes `nodes`, whose result has
 /// physics `ret`: the result, after the final values of the `var ref`
 /// parameters `decl` assigns are stored into the variables passed for them.
-pub fn call_with_outs(lw: Lowerer, decl: i64, params: List<i64>, fi: u16, args: List<u32>, pre: i64, nodes: List<i64>, ret: IrTypePhysics, n: i64) -> u32 {
+pub fn call_with_outs(var ref lw: Lowerer, decl: i64, ref params: List<i64>, fi: u16, ref args: List<u32>, pre: i64, ref nodes: List<i64>, ret: IrTypePhysics, n: i64) -> u32 {
     let outs = out_positions(lw, decl, params);
     if outs.len() == 0 { return emit(lw, op_call_direct(), fi, ret, args, n); }
     let rec = emit(lw, op_call_direct(), fi, layout_unknown(lw.ls), args, n);
@@ -121,7 +115,7 @@ pub fn call_with_outs(lw: Lowerer, decl: i64, params: List<i64>, fi: u16, args: 
 
 /// Stores `v` into the variable `arg` names: a `var` (its stack slot) or a
 /// module global. Any other argument has no storage of the caller's.
-fn write_back(lw: Lowerer, arg: i64, v: u32, n: i64) {
+fn write_back(var ref lw: Lowerer, arg: i64, v: u32, n: i64) {
     let s = lw.inf.p.s;
     if kind(s, arg) != nk_ident() { return; }
     let g = find_global(lw, arg);

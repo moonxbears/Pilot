@@ -6,6 +6,8 @@
 // `PhysicsRegistry` (`RawAstArena`) in pure Pilot.
 // ============================================================================
 
+pub pkg selfhost.vm;
+
 [Layout(c_abi)]
 pub struct EncodedInstruction : IValue {
     pub word: i64;

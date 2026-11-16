@@ -6,6 +6,8 @@
 // (`PILOT104`–`PILOT105`) in pure Pilot over `PhysicsRegistry`.
 // ============================================================================
 
+pub pkg selfhost.perceus;
+
 [Layout(c_abi)]
 pub struct PerceusReport : IValue {
     pub region_allocs: i64;

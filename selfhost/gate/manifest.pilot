@@ -4,7 +4,7 @@
 // Declarative registries for seed tokens, LOC ratchets, retired artifacts,
 // and 2-bit lattice gate report structures (zero magic counts).
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Gate.Manifest;
+pub lvl(0) pkg selfhost.gate;
 
 use Pilot.Core.File;
 use Pilot.Core.HostRaw;
@@ -158,7 +158,7 @@ pub fn temp_guard_new(dir_path: str) -> TempDirGuard {
     };
 }
 
-pub fn temp_guard_cleanup(guard: TempDirGuard) -> bool {
+pub fn temp_guard_cleanup(ref guard: TempDirGuard) -> bool {
     if guard.active == true && guard.dir_path.len() > 4 {
         if gate_fs_exists(guard.dir_path) {
             let _ = gate_fs_remove_all(guard.dir_path);
@@ -664,13 +664,16 @@ pub pure fn max_total_rust_loc() -> usize => 5900;
 //   - every wave touching `crates/` must hold flat or lower
 //     `paused_max_total_rust_loc()` (`20,408` after PROP-002a; raised to
 //     `21,000` by the owner on 2026-11-15, after PROP-009 step 2 and
-//     PROP-010/012 brought the seed to 20,640);
+//     PROP-010/012 brought the seed to 20,640; raised to `27,800` by the
+//     owner on 2026-11-15 (PROP-016), when `cargo fmt` unpacked the seed's
+//     long lines and its count went from 20,547 to 27,724 with no code
+//     added: the ceiling counts formatted lines from then on);
 //   - each Rust source file must obey the `<= 1,500` LOC law (MOD001);
 //   - retired crates (`pilot-rt`, `pilot-codegen`, etc.) must stay absent.
 // To resume full per-crate contraction, set `seed_contraction_paused()` to
 // `false` at Stage-3 cutover and run `pilot gate --ratchet-update`.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 21000;
+pub pure fn paused_max_total_rust_loc() -> usize => 27800;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
 

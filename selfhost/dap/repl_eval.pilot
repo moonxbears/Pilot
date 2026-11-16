@@ -3,7 +3,7 @@
 // Milestone 59.3: On-the-Fly Debug Console REPL Expression Evaluator
 // Evaluates watch expressions against active PilVM register environment map.
 // =========================================================================
-pub pkg Pilot.SelfHost.Dap.ReplEval;
+pub pkg selfhost.dap;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

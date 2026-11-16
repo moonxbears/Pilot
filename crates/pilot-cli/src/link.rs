@@ -28,17 +28,23 @@ impl LinkedSource {
             table.push((path, src, base));
             base = next;
         }
-        Self { arena, files: table }
+        Self {
+            arena,
+            files: table,
+        }
     }
 
     /// Path, source text and base offset of each unit, in link order.
     pub fn units(&self) -> impl Iterator<Item = (&str, &str, u32)> {
-        self.files.iter().map(|(p, s, b)| (p.as_str(), s.as_str(), *b))
+        self.files
+            .iter()
+            .map(|(p, s, b)| (p.as_str(), s.as_str(), *b))
     }
 
     /// The file a span lies in and the span's byte offsets within it.
     pub fn resolve(&self, span: ByteSpan) -> (String, u32, u32) {
-        let Some((path, src, base)) = self.files.iter().rev().find(|(_, _, b)| *b <= span.start) else {
+        let Some((path, src, base)) = self.files.iter().rev().find(|(_, _, b)| *b <= span.start)
+        else {
             return ("<unknown>".to_string(), 0, 0);
         };
         let len = src.len() as u32;
@@ -56,7 +62,10 @@ impl LinkedSource {
         let off = ((at - base) as usize).min(src.len());
         let upto = &src[..off];
         let line = upto.matches('\n').count() + 1;
-        let col = upto.rfind('\n').map_or(upto.len(), |nl| upto.len() - nl - 1) + 1;
+        let col = upto
+            .rfind('\n')
+            .map_or(upto.len(), |nl| upto.len() - nl - 1)
+            + 1;
         format!("{path}:{line}:{col}")
     }
 }

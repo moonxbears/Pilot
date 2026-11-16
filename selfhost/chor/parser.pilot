@@ -4,9 +4,8 @@
 // Parses blueprint, storage, role, cue, route, and law declarations.
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Chor.Parser;
+pub lvl(0) pkg selfhost.chor;
 
-use Pilot.SelfHost.Chor.Ast.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

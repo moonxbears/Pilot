@@ -3,7 +3,7 @@
 // Milestone 11.1: First-Class `adapter` Blueprint Engine & Transformation Rules
 // Open table-driven AdapterRuleRegistry and IAdapterTransform protocol
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.Rules;
+pub lvl(0) pkg selfhost.adapter;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -143,7 +143,7 @@ pub fn adapter_blueprint_new(source_ns: str, target_type: str) -> AdapterBluepri
 // 4. Transform Protocols & Core Rule Transformations
 // ------------------------------------------------------------------------------
 
-pub fn adapter_strip_prefix(name: str, prefixes: List<str>) -> str {
+pub fn adapter_strip_prefix(name: str, ref prefixes: List<str>) -> str {
     var out = name;
     let n = prefixes.len();
     var i: usize = 0;

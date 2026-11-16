@@ -4,6 +4,8 @@
 // region/endregion, error, warning, pragma warning) & PREPROC001-PREPROC008
 // ============================================================================
 
+pub pkg selfhost;
+
 [Layout(c_abi)]
 pub struct PreprocDiagnostic : IValue {
     pub line: i64;

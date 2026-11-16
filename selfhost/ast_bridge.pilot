@@ -4,7 +4,7 @@
 // Kept separate from `selfhost/{ast,parser}.pilot` so the Stage-3 frontend stays
 // 100% standalone when `PhysicsRegistry` hooks are unmounted.
 // ==============================================================================
-pub pkg Pilot.SelfHost.AstBridge;
+pub pkg selfhost;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -26,9 +26,10 @@
 | **`PROP-013`** | Link a Run's Extra Toolchain Files in the Loader's One Pass (`run.rs` `compile_entry`) | `-11` | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-013") AND BUILT; C2 PASSES` |
 | **`PROP-014`** | Update the Benchmark Baseline Test for the Seed Column `PROP-002a` C2 Added (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-014") AND BUILT` |
 | **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed | `+23` as built (`+34`, `-11`) | `APPROVED, BUILT` |
-| **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C STOPPED, NEEDS OWNER CHOICE; 3D–3F DRAFT` |
+| **`PROP-016`** | Format All Rust With `rustfmt` and Count the Seed's True Size (154 files; split `pilot-parser/src/decl.rs`) | `+7,163` `src` lines of formatting, `0` code | `PROPOSED 2026-11-15; D1 (ceiling) AND D2 (re-measure estimates) OPEN` |
+| **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
-| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
+| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC (measured 2026-11-15) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 APPROVED AND BUILT (PILOT ONLY), 5B.2–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
 | **`PROP-006`** | Precompiled `toolchain.pilc` Stage-3 Cutover — Delete `pilot-{lexer,parser,ast,span,intern}` | `~ -5,950` LOC | `PLANNED (WAVE 6 -> ~1,800 LOC FLOOR)` |
 
 ---
@@ -1863,9 +1864,70 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 
 ---
 
+## `PROP-016` — Format All Rust With `rustfmt` and Count the Seed's True Size
+
+**Status: PROPOSED 2026-11-15, awaiting the owner's approval.** Found 2026-11-15, when `cargo fmt --check` first ran on this machine (rustfmt was not installed until then).
+
+**Why.**
+- `cargo fmt --check` fails on 154 of the workspace's Rust files. AGENTS.md requires surviving Rust to pass it and forbids packing statements onto long lines to keep the line count down (§1.1).
+- Formatting changes no behaviour, but it shows the seed's real size:
+
+  | Measured on a scratch copy, 2026-11-15 | Before | After `cargo fmt` |
+  | :--- | ---: | ---: |
+  | `crates/*/src/**/*.rs` (what GATE003 counts) | 20,547 | 27,710 (+7,163) |
+  | all workspace `.rs` (with tests) | 48,645 | 58,761 (+10,116) |
+  | `src` files over 1,500 lines (MOD001) | 0 | 1 (`pilot-parser/src/decl.rs`, 1,653) |
+
+- So formatting by itself would fail the gate twice: the total goes over `paused_max_total_rust_loc()` (21,000), and `decl.rs` goes over the per-file cap.
+- rustfmt cannot format one spot. `crates/pilot-vm/src/lower_expr.rs` lines 387 and 555 end with a space after `return self.error(crate::codes::SEED,`, and rustfmt stops with `left behind trailing whitespace`.
+
+**Change (Rust: formatting only, plus one split).**
+1. Delete the trailing space on `crates/pilot-vm/src/lower_expr.rs` lines 387 and 555.
+2. Run `cargo fmt` on the workspace. This rewrites exactly the 154 files listed below and nothing else.
+3. Split `crates/pilot-parser/src/decl.rs` (1,653 lines once formatted) at function boundaries, moving code unchanged:
+   - new `crates/pilot-parser/src/decl_syntax.rs`: `parse_syntax_decl`, `parse_syntax_class`, `rule_body_is_quote` (about 200 lines);
+   - new `crates/pilot-parser/src/decl_bind.rs`: `parse_bindings`, `parse_binding_init` (about 150 lines);
+   - `crates/pilot-parser/src/lib.rs` gains the two `mod` lines.
+   - `decl.rs` keeps about 1,300 lines.
+4. Add `rustfmt.toml`? **No.** Default settings, so `cargo fmt --check` means what AGENTS.md says.
+
+**Pilot side (no approval needed, listed for completeness).**
+- `selfhost/gate/manifest.pilot` `paused_max_total_rust_loc()`: raise to the formatted count, rounded up (proposed `27,800`), with a comment that the raise is formatting only, not growth. **This is an owner decision (D1 below).**
+- `rust.md` line counts refreshed.
+- `wiring.pilot`/`concept_matrix.md` rows that quote the seed's line count are updated to the formatted figure.
+
+**Owner decisions.**
+- **D1, the ceiling.**
+  - (a) Raise `paused_max_total_rust_loc()` to `27,800`, so that it measures formatted lines from now on.
+  - (b) Keep `21,000`, and fail the gate until enough Rust is deleted (`PROP-005` alone is about −7,950 unformatted, so roughly −10,000 formatted).
+  - **Recommendation: (a).** The 21,000 was set on packed lines, so it never measured what it was meant to. (b) blocks every other change behind PROP-005.
+- **D2, earlier estimates.** Proposal estimates (PROP-005's −7,950, PROP-006's ~−5,950, the `~1,800` LOC floor) were measured on packed lines. Re-measure them after formatting? **Recommendation:** yes, as part of this change.
+
+**Acceptance.**
+- `cargo fmt --check` exits 0.
+- `cargo build` and `cargo test` give the same results as before (apart from the pre-existing `cli_f5 an_unlowered_construct_stops_at_its_seam` failure).
+- `pilot test` on all three engines gives the same results as before.
+- `pilot gate` and `pilot gate --full` pass with the new ceiling.
+- No `src` file is over 1,500 lines.
+- `git diff --stat` touches only the 154 listed files, plus `decl_syntax.rs`, `decl_bind.rs`, `manifest.pilot`, `rust.md` and the ledger rows.
+
+**Exact Rust files to modify (154, all by `cargo fmt`; `lower_expr.rs` and `decl.rs`/`lib.rs` also by hand as above).**
+  - **`pilot-analysis`** (53: 5 `src`, 48 tests and other): `src/diagnostics.rs`, `src/infer.rs`, `src/lib.rs`, `src/pipeline.rs`, `src/types.rs`, `tests/common/anticheat.rs`, `tests/common/seed_policy.rs`, `tests/common/test_metrics.rs`, `tests/milestone01_seed_unlock_and_pilot_gate.rs`, `tests/milestone02_module_graph_and_comptime_parity.rs`, `tests/milestone03_declarative_cli_registry_and_comptime_parity.rs`, `tests/milestone04_dual_syntax_pairings_and_bidirectional_formatter.rs`, `tests/milestone05_shared_incremental_compiler_query_database.rs`, `tests/milestone06_first_class_typed_ssa_mid_level_ir.rs`, `tests/milestone07_zero_black_box_transparency_tool.rs`, `tests/milestone08_progressive_diagnostics_and_cst_autofix.rs`, `tests/milestone09_three_ring_standard_library_personality.rs`, `tests/milestone10_compiler_as_a_library.rs`, `tests/milestone11_adapter_blueprint_engine.rs`, `tests/milestone12_headerless_c_semantic_absorber.rs`, `tests/milestone13_adaptive_hardware_calling_conventions.rs`, `tests/milestone14_perceus_foreign_resource_and_scope_guards.rs`, `tests/milestone15_cpp_class_raii_vtable_and_exceptions.rs`, `tests/milestone16_rust_crate_and_zero_copy_adapter.rs`, `tests/milestone17_python_capi_and_zero_copy_tensor.rs`, `tests/milestone18_javascript_napi_and_typescript_dts.rs`, `tests/milestone19_wasm_component_model_and_wit.rs`, `tests/milestone20_live_schema_and_wire_protocol_absorber.rs`, `tests/milestone21_boilerplate_weaver_and_structural_delegation.rs`, `tests/milestone22_bundle_facet_algebraic_composition.rs`, `tests/milestone23_pipeline_fusion_each_and_cascade.rs`, `tests/milestone24_pchor_sublanguage_choreographer.rs`, `tests/milestone25_storage_and_memory_layout_choreography.rs`, `tests/milestone26_typestates_and_design_by_contract.rs`, `tests/milestone27_scoped_user_sublanguages_and_hygiene.rs`, `tests/milestone28_progressive_learning_profiles_and_coach.rs`, `tests/milestone29_capability_sandboxed_comptime_execution.rs`, `tests/milestone30_self_generating_blueprints.rs`, `tests/milestone50_lossless_bridge_and_reflection.rs`, `tests/milestone52_pilot_preprocessor_and_receptors.rs`, `tests/milestone53_cst_recovery_and_formatter.rs`, `tests/milestone54_perceus_ownership_and_escape.rs`, `tests/milestone55_selfhost_vm_compiler_and_debug_table.rs`, `tests/milestone56_layout_driven_codegen_and_gpu_backends.rs`, `tests/milestone57_bidirectional_transpilers_and_ingest.rs`, `tests/milestone58_runtime_crypto_wire_db_and_polyglot.rs`, `tests/milestone59_persistent_pilvm_lsp_and_dap.rs`, `tests/milestone60_selfhost_cli_pkg_perf_and_bench.rs`, `tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs`, `tests/phase1_ironclad_killswitch.rs`, `tests/phase1_rename_torture_gate.rs`, `tests/polyglot_transport_and_generative_embedding.rs`, `tests/seed_wide_operands.rs`.
+  - **`pilot-ast`** (1: 1 `src`, 0 tests and other): `src/lib.rs`.
+  - **`pilot-cli`** (19: 6 `src`, 13 tests and other): `src/check.rs`, `src/host.rs`, `src/link.rs`, `src/main.rs`, `src/run.rs`, `src/tool.rs`, `tests/cli_attrs.rs`, `tests/cli_bench.rs`, `tests/cli_changed.rs`, `tests/cli_consts.rs`, `tests/cli_coverage.rs`, `tests/cli_emit.rs`, `tests/cli_f3.rs`, `tests/cli_f4.rs`, `tests/cli_f5.rs`, `tests/cli_f6.rs`, `tests/cli_f7.rs`, `tests/cli_keyword_matrix.rs`, `tests/../../pilot-analysis/tests/common/test_metrics.rs`.
+  - **`pilot-lexer`** (8: 4 `src`, 4 tests and other): `src/lexer.rs`, `src/lib.rs`, `src/simd.rs`, `src/token.rs`, `tests/milestone52_seed_lexer_and_preprocessor.rs`, `tests/../../pilot-analysis/tests/common/anticheat.rs`, `tests/../../pilot-analysis/tests/common/seed_policy.rs`, `tests/../../pilot-analysis/tests/common/test_metrics.rs`.
+  - **`pilot-parser`** (33: 25 `src`, 8 tests and other): `src/accessors.rs`, `src/attr_hooks.rs`, `src/comptime_if.rs`, `src/contracts.rs`, `src/declared_names.rs`, `src/decl.rs`, `src/expr.rs`, `src/forms.rs`, `src/fstring.rs`, `src/generic_receiver.rs`, `src/inline_block.rs`, `src/int_lit.rs`, `src/lib.rs`, `src/loud.rs`, `src/modules.rs`, `src/num_suffix.rs`, `src/open_range.rs`, `src/param_mods.rs`, `src/pilot_impls.rs`, `src/ret_type.rs`, `src/rule_arms.rs`, `src/stmt.rs`, `src/tables.rs`, `src/template.rs`, `src/tuple_member.rs`, `tests/bootstrap_sources.rs`, `tests/damaged_source.rs`, `tests/milestone51_homoiconic_syntax_and_contraction.rs`, `tests/native_calls.rs`, `tests/../../pilot-analysis/tests/common/anticheat.rs`, `tests/../../pilot-analysis/tests/common/seed_policy.rs`, `tests/../../pilot-analysis/tests/common/test_metrics.rs`, `tests/register_layouts.rs`.
+  - **`pilot-vm`** (40: 38 `src`, 2 tests and other): `src/bridge.rs`, `src/checked.rs`, `src/collect.rs`, `src/heap.rs`, `src/host.rs`, `src/instruction.rs`, `src/lib.rs`, `src/lower_args.rs`, `src/lower_call.rs`, `src/lower_cascade.rs`, `src/lower_closure.rs`, `src/lower_contract.rs`, `src/lower_defer.rs`, `src/lower_destructure.rs`, `src/lower_dispatch.rs`, `src/lower_drop.rs`, `src/lower_expr.rs`, `src/lower_for.rs`, `src/lower_global.rs`, `src/lower_members.rs`, `src/lower_native.rs`, `src/lower_pipe.rs`, `src/lower_probe.rs`, `src/lower_program.rs`, `src/lower_stmt.rs`, `src/lower_struct.rs`, `src/lower_switch.rs`, `src/lower_try.rs`, `src/lower_unit.rs`, `src/lower_variant.rs`, `src/lower_yield.rs`, `src/ops.rs`, `src/pilc.rs`, `src/stage_a_natives.rs`, `src/strings.rs`, `src/value.rs`, `src/vm_gen.rs`, `src/vm.rs`, `tests/linked_interface_dispatch.rs`, `tests/runtime_memory.rs`.
+
+**Exact Rust files to create (2):** `crates/pilot-parser/src/decl_syntax.rs`, `crates/pilot-parser/src/decl_bind.rs`.
+
+**Rust files to delete:** none.
+
+---
+
 ## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
 
-**Status: itemized 2026-11-15. Slices 3A, 3B and 3C APPROVED by the owner 2026-11-15 ("Approve 3A–3C"). 3A and 3B BUILT 2026-11-15; 3C STOPPED before building (larger than itemized; options below); 3D–3F still drafts.** Owner asked to start PROP-003 ("lets do prop-003"). Each slice is approved and built on its own.
+**Status: itemized 2026-11-15. Slices 3A, 3B and 3C APPROVED by the owner 2026-11-15 ("Approve 3A–3C"). 3A and 3B BUILT 2026-11-15; 3C DEFERRED TO `PROP-005` BY THE OWNER 2026-11-15 (larger than itemized; see below); 3D–3F still drafts.** Owner asked to start PROP-003 ("lets do prop-003"). Each slice is approved and built on its own.
 
 ### What the survey found (2026-11-15)
 
@@ -1953,7 +2015,9 @@ Replacing `op_checked` needs three things the itemization did not count:
 
 The pinned messages are few (about 12 `.stderr` files carry seed runtime messages). But items 1–3 are several hundred Pilot lines with fidelity risk for every unpinned failure, for −70 Rust.
 
-**Options for the owner:**
+**Owner decision 2026-11-15: option (b), defer 3C to `PROP-005`** ("Defer 3C to PROP-005"). `checked.rs`, the `op_checked` arm and `fault.pilot`'s `__engine("op_checked", ..)` stay until then.
+
+**Options that were offered:**
 - **(a) Build it as above**: layout-based kind checks, a by-name table for the 40 operations, a 51-entry host-op table. Several hundred Pilot lines; −70 Rust.
 - **(b) Defer 3C to `PROP-005`.** When PilIR becomes the `.pilc` path, the interpreter no longer runs on the seed's values, and `op_checked` can go with the seed lowering.
 - **(c) Narrow it**: move only the binary-operator and condition pre-checks to Pilot (the IR interpreter's operator faults) and keep `op_checked` for engine operations. Deletes little Rust (`BINARY`, `CONDITION`, about −30) but no `__engine` site.
@@ -1965,10 +2029,180 @@ The pinned messages are few (about 12 `.stderr` files carry seed runtime message
 
 ---
 
+## `PROP-005` — PilIR Becomes the Bytecode Path: Replace the Rust `BytecodeCompiler` With `selfhost/vm/ir_to_pilc.pilot`
+
+**Status: itemized 2026-11-15 (owner: "develop 005 then"). Phase 5A APPROVED by the owner 2026-11-15 ("Approve 5A") and BUILT (Pilot only, no Rust touched). 5B–5F not approved.** The phases below are built and approved one at a time.
+
+### Scope (what is deleted at the end)
+- `crates/pilot-vm/src/lower_*.rs` (24 files), `vm_gen.rs`, `codes.rs`, and `BytecodeCompiler` in `crates/pilot-vm/src/lib.rs` (lines 60–1015). Measured 2026-11-15: 6,999 lines in the 26 files plus about 955 in `lib.rs`, so about −7,950 (the summary below says −7,833).
+- `vm_gen.rs` is VM runtime, not compiler code: generator frames are reached through the `gen_intrinsic` arm in `stage_a_natives.rs:21-33`. It goes together with that arm, because PilIR lowers generators to state machines (`selfhost/ir/lower_generator.pilot`) and emitted code never calls `gen_*`.
+- `codes.rs` is also used by the CLI (`run.rs` reads `codes::SYNTAX`). Its constants need a new home before it is deleted.
+- Inherited from `PROP-003` slice 3C: `crates/pilot-vm/src/checked.rs`, the `op_checked` arm, and `selfhost/ir/fault.pilot:96` `__engine("op_checked", ..)`.
+- Inherited from `PROP-003`'s blocked list: the domain helpers in `heap.rs` (about 103 lines) and `ops::fits`/`num_fits`.
+- The temporary `PROP-007` seed inlining in `lower_call.rs`.
+
+### The bootstrap problem this wave has to solve (owner decision needed before phase 5D)
+Today every `pilot` invocation compiles the toolchain itself, meaning the `CLI` list in `crates/pilot-cli/src/main.rs` and the `link_tool` lists, with the Rust `BytecodeCompiler`. Once that compiler is deleted, something else has to turn the toolchain into bytecode, and the only Pilot path (snapshot → `selfhost/check` → `selfhost/ir` → `ir_to_pilc`) is itself toolchain code. There are two ways out:
+- **(T1) Checked-in `toolchain.pilc`, produced by the Pilot path, pulled forward from `PROP-006`.** The last Rust-compiled toolchain runs the Pilot path once to write `toolchain.pilc`. That file then rebuilds itself until stage 2 equals stage 3 (Gate 2), and the VM boots it directly. The Rust parser stays (the checker still reads `chk_snapshot`) until `PROP-006`.
+- **(T2) Keep the Rust compiler for the toolchain only; route user programs through PilIR.** This deletes nothing until T1 lands anyway, so it is only a staging step.
+- **Recommendation: T1.** It is the only way to reach the deletion. `PROP-006` then shrinks to deleting the Rust lexer, parser and AST once the Pilot parser feeds the checker.
+
+### Findings 2026-11-15 (scratch copy, nothing kept)
+Can the Pilot pipeline read the toolchain at all? `pilot check selfhost/ir/main.pilot` was run on a scratch copy:
+1. **Package names do not resolve.** Toolchain files declare `pkg Pilot.SelfHost.X.Y` but import `use selfhost.x.y`. 24 of the 228 selfhost files declare no package. The loader's search roots (`mg_default_search_roots`: the entry directory and `<toolchain>/stdlib`) do not include `selfhost/`. Result: 12 MOD001.
+2. **One package per file gives genuine cycles.** With path-named packages per file there are 78 MOD002 cross-file cycles, e.g. `lower` ↔ `lower_members` ↔ `lower_variant`.
+3. **One package per directory gives no cycles between directories.** The directory-level import graph has 0 strongly connected components larger than 1. The loader, however, treats every file as a graph node, and it reports a package's files using each other, or a file importing its own package, as cycles (8,952 MOD002). Sibling files are also not loaded unless something imports them.
+4. With a two-part scratch loader change, the toolchain gets through the loader: load a package's sibling files with any of its files, and treat same-package edges as non-edges in the topological visit (about 12 lines in `selfhost/loader/module_graph.pilot`). Two more scratch fixes were needed: drop self-imports, and remove one trailing comma in a parameter list (`selfhost/types/delegation.pilot:84`, SYN001; that file is reachable only from a wiring row).
+5. **Next blocker: spec-only stdlib core files.** The toolchain's `use Pilot.Core.*` imports pull in core files such as `stdlib/core/mem.pilot` (`let RawStorageBundle<T> = { .. }` bundle literals, SEED001 `ParamDecl` not lowered). They are pulled through `task`, `meta`, `primitives/{stride,pairs,expand,str,map_view}` and `pilot/abi/aapcs64`. The CLI today links a hand-picked list that avoids them.
+6. **Not yet measured:** the checker's type errors on the toolchain (behind 5), and whether PilIR lowers all of it. The toolchain also uses `any`, which nothing declares; it has never been checked as user code, so the checker plans no `is` rows for it.
+
+### Phases
+- **5A — The toolchain loads through the Pilot loader (Pilot only, no Rust).**
+  - Packages become one per directory, `selfhost.<dir>`, declared in every selfhost file.
+  - Imports are rewritten to `use selfhost.<dir>.*;` and self-imports are dropped.
+  - `mg_default_search_roots` adds the toolchain root, so `selfhost.*` resolves.
+  - The loader loads a package's files together and does not count same-package edges as cycles. A cycle between packages stays MOD002.
+  - Each toolchain file states the stdlib core imports it really uses, in place of the flat link list.
+  - The spec-only core files the toolchain reaches are dealt with, not left in the import graph: given seams, cut from the imports, or made to compile.
+  - Done when `pilot check selfhost/cli/main.pilot` gets past the loader with 0 MOD001/MOD002, plus new conformance tests under `tests/conformance/modules/`: a package whose files use each other runs; a real cycle between packages is still `err_*` MOD002.
+  - The Rust `CLI` list is untouched in 5A.
+  - **As built 2026-11-15:**
+    - **Package names.** All 228 selfhost files declare `selfhost.<dir>`; the top-level files are `selfhost`. 204 old names were replaced (`Pilot.SelfHost.*`, `Pilot.Diagnostics`, `Pilot.Loader`) and 24 declarations were added. Imports are collapsed to `use selfhost.<dir>.*;`, with self-imports dropped. `stdlib/pilot/chor.pilot` follows the rename. `selfhost/loader/ring_verifier.pilot` classifies `selfhost.*` as the SelfHost ring.
+    - **Loader** (`selfhost/loader/module_graph.pilot`, 562 → 635 lines):
+      - `selfhost` is the third search root.
+      - Roots are indexed lazily, in order, only as far as a lookup needs. A package under an earlier root hides one with the same name under a later root.
+      - A package is every file declaring it under one root: those files load together and are visited before the file that pulled them in, so the entry stays last. A file importing its own package makes no edge.
+      - MOD002 names a cycle by package, each package once.
+      - Without the lazy indexing, `pilot run` of a one-line program went from 0.39 s to 0.50 s; with it, it stays at 0.40 s.
+    - **Fixes found on the way:**
+      - A trailing comma in a parameter list (`selfhost/types/delegation.pilot:84`).
+      - Dead imports of the spec-only `Pilot.Core.Memory`/`Pilot.Core.Meta` in `stdlib/core/reflect.pilot`, `selfhost/lsp/handlers.pilot` and `selfhost/ide/vscode_gen.pilot`; they used none of their names. This kept `mem.pilot`, `builtins.pilot` and `type_construct.pilot` (SEED001) out of the toolchain's graph.
+      - `stdlib/crypto/hash.pilot` declared no package, so the gate's `use stdlib.crypto.hash.*` never resolved. It now declares `std.crypto.hash`.
+    - **Tests:** `tests/conformance/modules/package_peer_files` (fails on the previous loader with a self-import MOD002) and `err_package_cycle`.
+    - **Result:** `pilot check` from one entry in each of the 21 selfhost directories (`selfhost/cli/main.pilot` plus 20) reports 0 MOD001/MOD002/SYN/SEED.
+    - **The 5B baseline:** `selfhost/cli/main.pilot` gives about 7,500 checker errors: OWN001 6,240, TYPE001 640, TYPE002 219, ENGINE001 171, OWN004 108, MOD003 68, COMP005 51, PURE001 43, and smaller counts. `selfhost/vm/compiler.pilot` calls a function that no longer exists (`vmc_add_int_const`, DECL001).
+- **5B — The toolchain type-checks as user code (Pilot only).**
+  - Declare `any` (or replace its uses) so `is` tests get planned rows.
+  - Fix every checker error the toolchain shows, or file it as a `known_bugs` entry with its true output.
+  - Done when `pilot check` on each toolchain entry (`selfhost/cli/main.pilot` plus the `link_tool` entries) reports 0 errors.
+- **5B itemized 2026-11-15 (owner: "Itemize 5B"). Not approved.**
+  - **Baseline.** `pilot check` was run from the 21 directory entries and the results deduplicated by location: about 13,160 diagnostics, 12,097 of them errors in files the real commands link.
+    - A file counts as "live" when it is named in a link list: `crates/pilot-cli/src`, `selfhost/cli`, `selfhost/loader` or `selfhost/gate`. That is 155 of the 228 selfhost files, plus the stdlib files they link.
+    - The other 73 files are not linked by any command. 70 of them are used only by `crates/pilot-analysis/tests/milestone*.rs`, which is `PROP-004`'s retirement list; they have 825 errors. The other three are `cli/deps_cmd.pilot`, `pkg/version.pilot` (both reached only through imports) and `diagnostics/errors.pilot` (read by `crates/pilot-vm/src/codes.rs`).
+  - **Live errors by class:**
+
+    | Class | Count | Cause |
+    |---|---|---|
+    | OWN001 | 6,583 | Shared context handles passed into plain parameters, which move them: `lw` 1,975, `s` 1,833, `p` 767, `f` 270, `inf` 171, `sink` 127, ... |
+    | ENGINE001 | 2,366 | Raw `__engine` calls in 50 legacy files |
+    | SEAM001 | 1,043 | The same raw `__engine` sites, read as calls to a function with no body |
+    | TYPE001 | 1,155 | Mostly `i64` passed where `usize` is expected: `str.slice` 594, `str.byte_at` 521 |
+    | MOD003 | 268 | 145 are `__engine` again; 53 are a checker bug: a loop variable `op` (`selfhost/ir/interp.pilot:784`) resolves to another package's private `op` instead of shadowing it; the rest are items that now cross a directory package without `pub` |
+    | TYPE002 | 238 | `any` 199 (declared nowhere); `ref` 89 (parameters written `x: ref<T>`; the tested form is `ref x: T`, `memory/moves_clean`) |
+    | METH001 | 151 | All in `analyzer.pilot` |
+    | OWN004 | 129 | |
+    | PURE001 | 75 | `cli/spec.pilot` and `gate/seed_audit.pilot` |
+    | COMP005 | 48 | `: IValue` structs with fields that borrow |
+    | ESCAPE002 | 19 | |
+    | NULL005/006 | 17 | |
+    | Other | 5 | TYPE003, FLOW005, DECL001, DECL004 |
+
+  - **Owner decisions needed before the slices they gate:**
+    - **D1 (gates 5B.1): may a plain `ref` parameter change what it borrows?**
+      - Today the checker allows `c.items.push(v)` and `c.n = ..` through a `ref` parameter. Only rebinding the parameter is DECL004, whose message calls `ref` "a read-only borrow". The toolchain changes `lw`, `sink`, `out` and others through their parameters.
+      - (a) `ref` may change fields; the toolchain uses `ref` everywhere.
+      - (b) `ref` is read-only; changing needs `var ref`. A new checker rule enforces this, and parameters that change are marked `var ref`. On the seed, `var ref` adds a write-back on return.
+      - **Recommendation: (b).** It matches the DECL004 wording and the `var ref` keyword's own description.
+    - **D2 (gates 5B.2): the index type of `str`.**
+      - (a) `str.slice`/`byte_at` take `i64`, matching the toolchain and what `len()` gives in practice.
+      - (b) The 1,115 call sites cast.
+      - (c) The checker accepts `i64` for `usize`.
+      - **Recommendation: (a).** (c) would hide real sign errors.
+    - **D3 (gates 5B.3): `any`.** It is used 202 times in 34 live files: `List<any>` 145, `Map<any, any>` 15, bare `any` 31.
+      - (a) Declare `any` as a `[Lang]` top type, with `is` tests, a keyword-matrix row and a passing and an `err_*` program.
+      - (b) Replace each use with a concrete type or a record. The `List<any>` lists handed back to the Rust host (for example `mg_link_plan`) become typed records the host reads by field.
+      - **Recommendation: (b)** for the toolchain, plus a separate proposal if users need a top type.
+    - **D4 (gates 5B.4): the legacy files that call `__engine` directly and are still linked.**
+      - `analyzer.pilot` (393 calls; linked by `crates/pilot-cli/src/run.rs` on every `pilot run` for the `host_analyze` diagnostics).
+      - The gate's `lexer`/`ast`/`parser`/`pilotc` (64 + 101 + 178 + ...; the gate links them for `bootstrap_parity`, which stops at a seam anyway).
+      - `cli/host.pilot` 12, `gate/*` about 80, `ir/fault.pilot` 2 (`op_checked`, which stays until 5F), `check/snapshot.pilot` 1 (`chk_snapshot`, which needs an owner method).
+      - For each file, either rewrite it onto owner types (`Map`/`List`/`File` methods and typed structs; this is `PROP-003` bucket B), or delete it when its work is duplicated. The first thing to check is whether `analyzer.pilot`'s diagnostics are already produced by `selfhost/check`.
+      - Removing a file from the Rust link list (`run.rs`) is a Rust edit and needs its own proposal.
+    - **D5: the 70 harness-only files.** Either wait for `PROP-004` to delete them along with their Rust harnesses, or leave them outside 5B's done condition. **Recommendation:** leave them out of 5B and itemize `PROP-004` next.
+  - **Slices** (each approved and built on its own; after each one, `pilot test` on all three engines, `pilot gate --full`, and the error count from every live entry):
+    - **5B.1 Parameter borrowing (about 6,750: OWN001, OWN004, ESCAPE002, DECL004).**
+      - A Pilot codemod run over the live files: every owned-type parameter its function never moves becomes `ref` (or `var ref` if it changes, under D1 (b)).
+      - Parameters the function does move are listed and fixed by hand.
+      - Under D1 (b), first add the checker rule for changes through a `ref` parameter, with a passing and an `err_*` program.
+      - **5B.1 as built (approved 2026-11-15, Pilot only):**
+        - **The rule.** `selfhost/check/consts.pilot` reports DECL004 for a change made through a plain `ref` parameter (`readonly_ref_param`). `own.pilot` reads parameter words through `flow_param_flags`/`by_value`/`may_change_param`, and an expression body (`=> b`) moves its value when the return type owns. `aliasing.pilot` no longer counts a `0b00` value passed by value as a second way into a `var ref` argument (`copied_in`): it is copied before the call. Tests: `errors/err_ref_param_change`, `memory/var_ref_change`, `memory/var_ref_copied_arg` (all three engines); `memory/drop_element_replace` now uses `var ref`.
+        - **The codemod.** `pilot check --fix` runs `selfhost/check/fix_borrows.pilot`. Every plain owned parameter of a free function in the user's files starts as `ref`; those that still move their value go back to by value, in rounds until none does. This makes functions that call each other in a cycle borrow together. Then `var` is added where the value changes, including on parameters already written `ref`. Only the word is inserted. `kept:` lines show where each by-value parameter really moves. Test: `runtime/check_fix_borrows` (fixture `tests/tool_fixtures/check_fix/borrows.pilot`).
+        - **Applied** from `selfhost/cli/main.pilot` and from one file in each selfhost package, until a run changed nothing. Shared context fields (`Walk.p`, `Flow.inf`, `Lowerer.inf`, `IrFrame.m` and others) were made `ref` fields by hand. `ty_subst`, `index_members` and five `ty_named` callers read a name out before lending the type table (ALIAS001).
+        - **Result** (`pilot check selfhost/cli/main.pilot`): OWN001 6,240 → 266, OWN004 108 → 31, ESCAPE002 19 → 15, DECL004 0, ALIAS001 3.
+        - **Left:**
+          - The 266 OWN001 are locals moved and then used again (`p.built.push(bt)` then `bt.decl`, `methods.pilot:322`), not parameters. Each needs the code reordered, or a clone.
+          - The 3 ALIAS001 lend a container and one of its elements to the same call (`check/stack.pilot:104`, `ir/lower_global.pilot:429`, `ir/pass_perceus.pilot:67`).
+          - The MOD003 local-shadowing bug also hits `words` in `fix_borrows.pilot` (5B.5).
+          - `stdlib/core` `file_walk_rec(ref out)` pushes through a `ref` parameter. That breaks D1, but it is not reported because stdlib files are not user files.
+          - Returning a `ref` parameter by value is not reported as an escape.
+        - **Rust deletion (approved by the owner 2026-11-15, done):** `crates/pilot-cli/tests/cli_f3.rs` `check_fix_stops_at_its_seam` is deleted. It expected the retired `cli.check_fix` seam, and it ran `pilot check --fix` on `tests/conformance/runtime/stdin_lines.pilot`, which could have rewritten that file. `runtime/check_fix_borrows` replaces it. Only that one test function was touched. `cargo test -p pilot-cli --test cli_f3`: 12 passed. `cargo fmt --check` was not run because rustfmt is not installed.
+    - **5B.2 Index types (about 1,155 TYPE001).** D2 (a), then fix the remaining width and option mismatches (`emit` u16/u32, `Map.set` keys, `binding_type` options) by hand.
+    - **5B.3 `any` and `ref<T>` (238 TYPE002).**
+      - `x: ref<T>` becomes `ref x: T` (102 sites, mechanical).
+      - `any` per D3.
+    - **5B.4 Raw `__engine` in live files (about 3,550 diagnostics on the same sites).**
+      - Per D4, file by file, smallest first.
+      - `__engine` calls that must stay (owner ops) move to `[EngineOp]` owners.
+      - The legacy ratchet in the manifest goes down with each file.
+    - **5B.5 Checker bugs found on the toolchain.**
+      - The loop-variable shadowing bug (MOD003 on `op`), and any others: each gets a `known_bugs` repro first, then a fix in `selfhost/check`.
+      - Then the visibility fixes (`pub` on items used across directory packages).
+    - **5B.6 The rest.** METH001 (analyzer, per D4), PURE001, COMP005 (declare each struct's real lattice), NULL005/006, TYPE003, FLOW005.
+  - **Owner decisions 2026-11-15:** D1 (b), `ref` is read-only and changes need `var ref`. D2 (a), `str` takes `i64` indexes. D3 (b), replace `any` with real types. D5: exclude the harness-only files and do `PROP-004` next. D4 is still open, per file. The slices themselves are not yet approved.
+  - **Done when** `pilot check` reports 0 errors from every live entry. A new `pilot gate --full` rule, `toolchain_check`, keeps it at 0. Warnings (UNUSED004 217 and others) are listed, not gated.
+- **5C — PilIR lowers and runs the whole toolchain (Pilot only).**
+  - `pilot ir --mode run` on the toolchain entries: every `ir.lower_construct` seam it hits is closed in `selfhost/ir/`.
+  - Done when `pilot test` driven by the IR-interpreted CLI gives the same results as the seed-run CLI. Slow is acceptable here.
+- **5D — `selfhost/vm/ir_to_pilc.pilot` (Pilot only).**
+  - Emits `.pilc` from optimised PilIR, after the `PROP-007` inline pass. Estimated 1,400–1,800 lines, so it is split across files: encoding, register allocation, op lowering, aggregates, closures, driver.
+  - **Mapping (survey 2026-11-15):**
+    - Arithmetic, `cmp`, `cast`, constants, `call_direct`, `return`, `jump`/`cond_br`, `unreachable` and `call_intrinsic` map 1:1 onto VM opcodes and intrinsics, so error messages stay identical to the PilIR interpreter's.
+    - `switch_table` becomes a `CmpEq` chain. Block parameters become parallel moves.
+    - `stack_slot`/`load`/`store` become registers. Globals become `global_get`/`global_set`.
+    - Narrow integer ops add `num_wrap`.
+    - Perceus ops are not emitted (only the C emitter runs Perceus).
+    - The never-emitted ops (`simd_lane_op`, `arena_alloc`, `make_view` and the like) stop at a seam.
+  - **Hard parts:**
+    - (1) `call_indirect`: function records are untagged aggregates with layout "?". The proposed fix is a small IR change that tags them in `lower_closure`/`lower_generator`. They then map to `closure_new` + `CallClosure` through per-function trampolines.
+    - (2) `extract_field`/`insert_field` on layout "?" needs a run-time `record_type` dispatch helper.
+    - (3) Register pressure: about 238 usable registers, args in r1..r16. Linear-scan allocation with spilling; never allocate r0..r17.
+    - (4) Source positions: every VM instruction carries its IR instruction's span. The `Call`/`EngineIntrinsic`/`Trap` is the last instruction with that span, so traces match the seed's byte for byte.
+  - **Rust needed in 5D (a separate itemized proposal):** `.pilc` v5 stores no spans (`crates/pilot-vm/src/pilc.rs:35-86`), so a loaded `.pilc` reports `<program>`. Either add a v6 debug section, or hand the spans to the VM in memory.
+  - **Reuse:**
+    - `selfhost/vm/compiler.pilot` (1,125 lines) compiles from the Rust AST through `PhysicsRegistry`, which retires in `PROP-004`. Its input side is dead and its opcode list stops at 36. Keep only the encode/decode and patch helpers (about 150 lines), delete the rest when 5D lands, and port the `milestone55` checks to Pilot.
+    - `pilc_writer.pilot` (227 lines) has the current byte layout, but keeps its state in a seed map through `__engine("map_get")` and lacks the UINT and CHAR tags. Keep the encoders and replace the state model.
+  - **Build order inside 5D:** each step is compared against `pilot ir run` on `tests/conformance`.
+    1. scalars, calls and spans;
+    2. control flow and globals;
+    3. register allocation;
+    4. aggregates;
+    5. closures;
+    6. generators;
+    7. try/defer/drop sweeps.
+  - New CLI path: `pilot run --via-ir` runs a user program from PilIR bytecode on the existing VM.
+  - Done when the conformance suite passes on `--via-ir` with the same results as the seed, and C2 (`pilot bench`) holds at seed speed or better.
+- **5E — Bootstrap (needs the T1/T2 decision, and Rust).**
+  - Proposal to be itemized with its exact file list: the VM boots a checked-in `toolchain.pilc`, and Gate 2 checks stage 2 equals stage 3.
+- **5F — Deletion (Rust).**
+  - The scope list above, plus `paused_max_total_rust_loc()` ratcheted down by the measured amount, `must_be_absent` entries in `selfhost/gate/manifest.pilot`, and updates to `rust.md`, `pilot.md` and the matrices.
+  - Depends on `PROP-002b` for native-binding dispatch now done in `lower_native.rs`/`lower_members.rs`, or on 5D emitting owner calls directly. To be settled in 5D.
+
+---
+
 ## `PROP-003` through `PROP-006` — Subsequent Contraction Waves (Summary)
 
 Each wave below will be expanded into an itemized, closed-file-list proposal before requesting owner approval:
 1. **`PROP-003` (Wave 3):** Migrate remaining domain string/collection/cast helpers, `checked.rs`, `parse_header`, and parser semantic passes (`query.rs`, `comptime_if.rs`, `fstring.rs`, `pilot_impls.rs`, `attr_hooks.rs`, `num_suffix.rs`, `loud.rs`, `contracts.rs`, `with_scope.rs`) into `stdlib/` and `selfhost/`, and finish moving every remaining raw `__engine` call onto its owner (`PROP-002a` Amendment A1: one op, one owner; there is no `bridge_os.pilot` and no 2-file ceiling). Moving `attr_hooks.rs` must keep the one-call `comptime fn` expansion at bare-name call sites that A1's genesis-hook owners rely on (`attr_hooks.rs:55`), proven by a conformance program before the Rust file is deleted.
 2. **`PROP-004` (Wave 4):** Delete `crates/pilot-analysis` (`6` `src` files, `821` LOC) after migrating remaining `crates/pilot-analysis/tests/milestone*.rs` checks into `.pilot` conformance suites.
-3. **`PROP-005` (Wave 5):** Implement `selfhost/vm/ir_to_pilc.pilot` (`PilIR` $\rightarrow$ `.pilc`) and delete all `24` `crates/pilot-vm/src/lower_*.rs` files, `vm_gen.rs`, `codes.rs`, and `BytecodeCompiler` in `crates/pilot-vm/src/lib.rs:60-1015` (`-7,833` Rust `src` LOC). It lowers from PilIR after the `PROP-007` inlining pass, so the temporary seed inlining in `lower_call.rs` can go with the rest.
+3. **`PROP-005` (Wave 5):** (Also takes `PROP-003` slice 3C: delete `crates/pilot-vm/src/checked.rs` and the `op_checked` engine operation once the PilIR interpreter no longer runs on the seed's values; owner, 2026-11-15.) Implement `selfhost/vm/ir_to_pilc.pilot` (`PilIR` $\rightarrow$ `.pilc`) and delete all `24` `crates/pilot-vm/src/lower_*.rs` files, `vm_gen.rs`, `codes.rs`, and `BytecodeCompiler` in `crates/pilot-vm/src/lib.rs:60-1015` (`-7,833` Rust `src` LOC). It lowers from PilIR after the `PROP-007` inlining pass, so the temporary seed inlining in `lower_call.rs` can go with the rest.
 4. **`PROP-006` (Wave 6):** Ship precompiled `toolchain.pilc` booted directly by `PilVirtualMachine` and delete `crates/pilot-{lexer,parser,ast,span,intern}` + `crates/pilot-cli/src/{link,check}.rs` (`~ -5,950` Rust `src` LOC), reaching the **`~1,800` LOC irreducible VM + `bridge.rs` seed floor**.

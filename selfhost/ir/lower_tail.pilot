@@ -18,13 +18,9 @@
 // After the merge no marked return is left: the interpreter, the passes and
 // the emitters see ordinary blocks and jumps. A function's own blocks keep
 // their ids; the copies follow them.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerTail;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.ir.model.*;
-use selfhost.ir.verify.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_drop.*;
+use selfhost.check.*;
 
 /// The sub-opcode of the `return` that follows a `become` call.
 pub pure fn tail_return_mark() -> u16 => 1;
@@ -32,7 +28,7 @@ pub pure fn tail_return_mark() -> u16 => 1;
 /// Lowers `become f(args);` (a `ReturnStmt` with flags 1). The checker has
 /// refused it under a `defer` or an `ensures` (TAIL002) and with another
 /// return type (TAIL003).
-pub fn lower_become(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_become(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     if lw.outs.len() > 0 || lw.gen_frame != ir_no_value() {
         return seam("ir.lower_construct", "`become` in a function that hands parameters back, or in a generator, is not lowered to PilIR yet");
@@ -67,8 +63,8 @@ struct TailShape : IObject {
 
 /// One function receiving the copies its tail calls reach.
 struct TailMerge : IObject {
-    pub m: IrModule;
-    pub shapes: List<TailShape>;
+    pub ref m: IrModule;
+    pub ref shapes: List<TailShape>;
     pub host: IrFunction;
     /// The functions copied into `host`, with the block and value id each
     /// copy starts at.
@@ -77,7 +73,7 @@ struct TailMerge : IObject {
     pub value_base: List<u32>;
 }
 
-fn shape_of(f: IrFunction) -> TailShape {
+fn shape_of(ref f: IrFunction) -> TailShape {
     let sh = TailShape { blocks: f.blocks.len, values: f.value_physics.len, sites: [], site_at: [] };
     for b in f.blocks {
         let n = b.insts.len;
@@ -92,7 +88,7 @@ fn shape_of(f: IrFunction) -> TailShape {
     return sh;
 }
 
-fn push_inst(f: IrFunction, b: IrBlock, result: u32, op: u16, sub: u16, phy: IrTypePhysics, args: List<u32>, span: i64) {
+fn push_inst(var ref f: IrFunction, var ref b: IrBlock, result: u32, op: u16, sub: u16, phy: IrTypePhysics, ref args: List<u32>, span: i64) {
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
     f.spans.push(span);
@@ -101,7 +97,7 @@ fn push_inst(f: IrFunction, b: IrBlock, result: u32, op: u16, sub: u16, phy: IrT
 
 /// The entry block of function `g`'s copy in the host, reserving the copy's
 /// blocks and values the first time `g` is asked for.
-fn copy_entry(mg: TailMerge, g: i64) -> u32 {
+fn copy_entry(var ref mg: TailMerge, g: i64) -> u32 {
     var i = 0;
     while i < mg.copied.len() {
         if mg.copied[i] == g { return mg.block_base[i]; }
@@ -127,14 +123,14 @@ fn copy_entry(mg: TailMerge, g: i64) -> u32 {
 }
 
 /// `jump target, args..`, each argument moved by `value_base`.
-fn push_tail_jump(mg: TailMerge, to: IrBlock, site: TailSite, value_base: u32) {
+fn push_tail_jump(var ref mg: TailMerge, var ref to: IrBlock, ref site: TailSite, value_base: u32) {
     var args: List<u32> = [copy_entry(mg, site.callee)];
     for a in site.args { args.push(a + value_base); }
     push_inst(mg.host, to, ir_no_value(), op_jump(), 0, ir_physics_unit(), args, site.span);
 }
 
 /// Fills the blocks reserved for copy `at` from the function it copies.
-fn fill_copy(mg: TailMerge, at: i64) {
+fn fill_copy(var ref mg: TailMerge, at: i64) {
     let g = mg.copied[at];
     let src = mg.m.functions[g];
     let sh = mg.shapes[g];
@@ -177,7 +173,7 @@ fn fill_copy(mg: TailMerge, at: i64) {
     }
 }
 
-fn merge_into(m: IrModule, shapes: List<TailShape>, hi: i64) {
+fn merge_into(ref m: IrModule, ref shapes: List<TailShape>, hi: i64) {
     let mg = TailMerge { m: m, shapes: shapes, host: m.functions[hi], copied: [], block_base: [], value_base: [] };
     let sh = shapes[hi];
     var b = 0;
@@ -204,7 +200,7 @@ fn merge_into(m: IrModule, shapes: List<TailShape>, hi: i64) {
 }
 
 /// Replaces every `become` in `m` with a jump (see the file header).
-pub fn merge_tail_calls(m: IrModule) {
+pub fn merge_tail_calls(ref m: IrModule) {
     var shapes: List<TailShape> = [];
     var any = false;
     for f in m.functions {

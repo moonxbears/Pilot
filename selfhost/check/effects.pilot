@@ -12,13 +12,8 @@
 //     the value it is called on);
 //   - modifiers are the flags the parser records for the action each word
 //     is registered with (`register_modifier`), never their spelling.
-pub lvl(0) pkg Pilot.SelfHost.Check.Effects;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.own.*;
 
 /// The native effects a check asks about.
 pub pure fn effect_io() -> str => "io";
@@ -28,14 +23,14 @@ pub pure fn effect_mutates() -> str => "mutates";
 /// The engine bindings the checks read, indexed once.
 pub struct Effects : IObject {
     pub inf: Infer;
-    pub flow: Flow;
+    pub ref flow: Flow;
     /// `name@effect` -> 1 for every `bind_native_effect` row.
     pub native_effects: Map<str, i64>;
     /// Names of the top-level `let`/`var` bindings of the linked files.
     pub globals: Map<str, i64>;
 }
 
-pub fn effects_new(f: Flow) -> Effects {
+pub fn effects_new(ref f: Flow) -> Effects {
     let inf = f.inf;
     let s = inf.p.s;
     let e = Effects {
@@ -56,7 +51,7 @@ pub fn effects_new(f: Flow) -> Effects {
 
 /// Every top-level `let` / `var` of the linked program that has a value, by
 /// name. Computed once for a program (`Program.globals_memo`) and shared.
-fn linked_globals(p: Program) -> Map<str, i64> {
+fn linked_globals(ref p: Program) -> Map<str, i64> {
     let s = p.s;
     let out = Map<str, i64>();
     for i in prog_nodes_of_kind(p, nk_program()) {
@@ -72,19 +67,19 @@ fn linked_globals(p: Program) -> Map<str, i64> {
 
 /// Whether declaration `n` is written with the modifier registered for
 /// action "effect_noalloc" (`noalloc fn`); the parser records it.
-pub fn is_noalloc_fn(s: Snap, n: i64) -> bool => is_noalloc_decl(s, n);
+pub fn is_noalloc_fn(ref s: Snap, n: i64) -> bool => is_noalloc_decl(s, n);
 
 /// Whether parameter `prm` lends its argument for changing (`var ref xs`,
 /// `var xs`): the caller's value is changed in place, and nothing else may
 /// reach it during the call.
-pub fn is_exclusive_param(e: Effects, prm: i64) -> bool => param_flag(e.inf.p.s, prm, param_flag_mutable());
+pub fn is_exclusive_param(ref e: Effects, prm: i64) -> bool => param_flag(e.inf.p.s, prm, param_flag_mutable());
 
 /// Whether parameter `prm` takes its argument isolated (`iso xs`).
-pub fn is_iso_param(e: Effects, prm: i64) -> bool => param_flag(e.inf.p.s, prm, param_flag_isolated());
+pub fn is_iso_param(ref e: Effects, prm: i64) -> bool => param_flag(e.inf.p.s, prm, param_flag_isolated());
 
 /// The nodes of the body of function-like node `fnode`, closures inside it
 /// included and nested function declarations left out.
-pub fn body_nodes(s: Snap, fnode: i64) -> List<i64> {
+pub fn body_nodes(ref s: Snap, fnode: i64) -> List<i64> {
     var out: List<i64> = [];
     let k = kind(s, fnode);
     let body = if k == nk_lambda() { rhs(s, fnode) } else { fn_body(s, fnode) };
@@ -92,7 +87,7 @@ pub fn body_nodes(s: Snap, fnode: i64) -> List<i64> {
     return out;
 }
 
-fn collect_body(s: Snap, n: i64, out: List<i64>) {
+fn collect_body(ref s: Snap, n: i64, var ref out: List<i64>) {
     let k = kind(s, n);
     if k == nk_fn() || k == nk_operator() || k == nk_struct() || k == nk_interface() || k == nk_extend() { return; }
     out.push(n);
@@ -103,7 +98,7 @@ fn collect_body(s: Snap, n: i64, out: List<i64>) {
 
 /// The name of the function call `call` makes when no declaration answers
 /// it (`print(..)`, answered by the engine), or "".
-pub fn native_fn_called(e: Effects, call: i64) -> str {
+pub fn native_fn_called(ref e: Effects, call: i64) -> str {
     let inf = e.inf;
     let s = inf.p.s;
     let ch = children(s, call);
@@ -115,7 +110,7 @@ pub fn native_fn_called(e: Effects, call: i64) -> str {
 /// The name of the method call `call` makes (`xs.push(..)`), or "". The
 /// engine answers it when no declaration does, or when the declaration has
 /// no body.
-pub fn native_method_called(e: Effects, call: i64) -> str {
+pub fn native_method_called(ref e: Effects, call: i64) -> str {
     let s = e.inf.p.s;
     let ch = children(s, call);
     if ch.len() == 0 || kind(s, ch[0]) != nk_member() { return ""; }
@@ -126,24 +121,24 @@ pub fn native_method_called(e: Effects, call: i64) -> str {
 
 /// Whether native `name` is bound with effect `effect` (a call with no
 /// declaration the checker can read).
-pub fn native_has_effect(e: Effects, name: str, effect: str) -> bool => name != "" && e.native_effects.has(name + "@" + effect);
+pub fn native_has_effect(ref e: Effects, name: str, effect: str) -> bool => name != "" && e.native_effects.has(name + "@" + effect);
 
 /// The identifier a place (`x`, `x.a`, `x[i].b`) is rooted in, or -1.
-pub fn place_root(s: Snap, n: i64) -> i64 {
+pub fn place_root(ref s: Snap, n: i64) -> i64 {
     var cur = n;
     while cur >= 0 && (kind(s, cur) == nk_member() || kind(s, cur) == nk_index()) { cur = lhs(s, cur); }
     return if cur >= 0 && kind(s, cur) == nk_ident() { cur } else { -1 };
 }
 
 /// Whether identifier `n` names a top-level `let`/`var` of the program.
-pub fn names_global(e: Effects, n: i64) -> bool {
+pub fn names_global(ref e: Effects, n: i64) -> bool {
     if n < 0 || e.inf.r.ref_of[n] >= 0 { return false; }
     return e.globals.has(node_name(e.inf.p.s, n));
 }
 
 /// The parameter declaration identifier `n` names when that parameter
 /// lends the caller's value (written `ref`, `var` or `iso`), or -1.
-pub fn lent_param(e: Effects, n: i64) -> i64 {
+pub fn lent_param(ref e: Effects, n: i64) -> i64 {
     if n < 0 { return -1; }
     let r = e.inf.r;
     let b = r.ref_of[n];
@@ -154,7 +149,7 @@ pub fn lent_param(e: Effects, n: i64) -> i64 {
 }
 
 /// The method call whose receiver is the place `n` (`n.push(..)`), or -1.
-pub fn receiver_call_of(e: Effects, n: i64) -> i64 {
+pub fn receiver_call_of(ref e: Effects, n: i64) -> i64 {
     let p = e.inf.p;
     let s = p.s;
     let up = p.parents[n];
@@ -166,7 +161,7 @@ pub fn receiver_call_of(e: Effects, n: i64) -> i64 {
 
 /// The argument expression of each argument of `call`, with the parameter
 /// of `target` it is passed for (-1 when none matches): `[arg, param]`.
-pub fn call_args(s: Snap, call: i64, target: i64) -> List<List<i64>> {
+pub fn call_args(ref s: Snap, call: i64, target: i64) -> List<List<i64>> {
     var out: List<List<i64>> = [];
     let params = if target >= 0 { fn_params(s, target) } else { [] };
     let ch = children(s, call);
@@ -188,7 +183,7 @@ pub fn call_args(s: Snap, call: i64, target: i64) -> List<List<i64>> {
 }
 
 /// The name a call's callee is written with, for messages.
-pub fn callee_label(s: Snap, call: i64) -> str {
+pub fn callee_label(ref s: Snap, call: i64) -> str {
     let ch = children(s, call);
     if ch.len() == 0 { return "this call"; }
     let c = ch[0];

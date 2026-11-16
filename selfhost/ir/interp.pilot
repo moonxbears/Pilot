@@ -16,10 +16,8 @@
 // with none stops at the seam `ir.interp_hook`. Operators, branch
 // conditions, engine operations and global reads that fail stop the program
 // with the seed's runtime error (selfhost/ir/fault.pilot).
-pub lvl(0) pkg Pilot.SelfHost.Ir.Interp;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.ir.model.*;
-use selfhost.ir.fault.*;
 
 /// One instruction prepared for running: what a run needs of it, looked up
 /// once, when its block first runs.
@@ -66,7 +64,7 @@ pub struct IrCode : IObject {
 
 /// One activation of a function.
 pub struct IrFrame : IObject {
-    pub m: IrModule;
+    pub ref m: IrModule;
     pub f: IrFunction;
     /// Value id -> its value.
     pub vals: List<any>;
@@ -74,9 +72,9 @@ pub struct IrFrame : IObject {
     pub cells: List<any>;
     /// The module's globals, shared by every frame; a `global_addr` value
     /// is `-1 - g`, so it never collides with a stack slot index.
-    pub globals: List<any>;
+    pub ref globals: List<any>;
     /// Whether each global's declaration has run (stored it), shared.
-    pub assigned: List<bool>;
+    pub ref assigned: List<bool>;
     /// Where control goes after a terminator: the block, or -1 to return.
     pub next: i64;
     /// Arguments for the next block's parameters.
@@ -137,7 +135,7 @@ pub fn eval_engine_ops() -> Map<str, bool> {
 /// instructions. Gives `[true, value, steps]`, or `[false, why, steps]`
 /// when it stopped: a runtime error, an effect, or the budget running out.
 /// `steps` is how many instructions it ran.
-pub fn ir_eval(m: IrModule, fi: i64, globals: List<any>, assigned: List<bool>, fuel: i64) -> List<any> {
+pub fn ir_eval(ref m: IrModule, fi: i64, ref globals: List<any>, ref assigned: List<bool>, fuel: i64) -> List<any> {
     let top = IrFrame { m: m, f: m.functions[fi], vals: [], cells: [], globals: globals, assigned: assigned, next: 0, next_args: [], ret: none, handlers: interp_handlers(), preparers: interp_preparers(), constants: interp_constants(), code: no_code(m), engine_ops: interp_engine_ops(), fault: ir_fault_new(), args: [], budget: IrBudget { left: fuel, depth: 0, eval: true, allowed: eval_engine_ops() } };
     let out = interp_call(top, fi, []);
     let steps = if top.budget.left < 0 { fuel } else { fuel - top.budget.left };
@@ -154,7 +152,7 @@ pub pure fn program_args_op() -> str => "proc_args";
 /// IR) and returns the exit code `pilot run` would: on a runtime error, 1
 /// after reporting it with the places in `sources`. `args` are the program's
 /// script arguments.
-pub fn ir_run(m: IrModule, sources: IrSourceMap, args: List<str>) -> i64 {
+pub fn ir_run(ref m: IrModule, ref sources: IrSourceMap, args: List<str>) -> i64 {
     var globals: List<any> = [];
     var assigned: List<bool> = [];
     for g in m.globals {
@@ -172,14 +170,14 @@ pub fn ir_run(m: IrModule, sources: IrSourceMap, args: List<str>) -> i64 {
 }
 
 /// A code table for `m` with no function prepared yet.
-fn no_code(m: IrModule) -> List<any> {
+fn no_code(ref m: IrModule) -> List<any> {
     var out: List<any> = [];
     for f in m.functions { out.push(none); }
     return out;
 }
 
 /// Calls function `fi` with `args` from frame `caller`.
-fn interp_call(caller: IrFrame, fi: i64, args: List<any>) -> any {
+fn interp_call(var ref caller: IrFrame, fi: i64, args: List<any>) -> any {
     let budget = caller.budget;
     if !budget.eval { return interp_body(caller, fi, args); }
     if budget.depth >= max_eval_depth() {
@@ -193,10 +191,10 @@ fn interp_call(caller: IrFrame, fi: i64, args: List<any>) -> any {
 }
 
 /// The handler or preparer of `opcode` in `table`, or none.
-fn table_entry(table: List<any>, opcode: u16) -> any => if opcode < table.len { table[opcode] } else { none };
+fn table_entry(ref table: List<any>, opcode: u16) -> any => if opcode < table.len { table[opcode] } else { none };
 
 /// The operands of `inst`, as `ir_args` gives them.
-fn operands(f: IrFunction, inst: IrInst) -> List<i64> {
+fn operands(ref f: IrFunction, inst: IrInst) -> List<i64> {
     var out: List<i64> = [];
     for a in ir_args(f, inst) { out.push(a as i64); }
     return out;
@@ -207,7 +205,7 @@ fn operands(f: IrFunction, inst: IrInst) -> List<i64> {
 /// `interp_constants()`, is the same on every run of that instruction, so
 /// it is placed in the values every call starts from and the instruction is
 /// left out of its block's steps.
-fn prepared(fr: IrFrame, fi: i64) -> IrCode {
+fn prepared(var ref fr: IrFrame, fi: i64) -> IrCode {
     let have = fr.code[fi];
     if have != none { return have; }
     let m = fr.m;
@@ -250,7 +248,7 @@ fn prepared(fr: IrFrame, fi: i64) -> IrCode {
 }
 
 /// Block `b` of the function of `fr` prepared for running.
-fn prepare_block(fr: IrFrame, code: IrCode, b: IrBlock) -> IrSteps {
+fn prepare_block(ref fr: IrFrame, ref code: IrCode, ref b: IrBlock) -> IrSteps {
     let f = fr.f;
     let no_value = ir_no_value();
     let spare = code.placed.len() as i64;
@@ -269,7 +267,7 @@ fn prepare_block(fr: IrFrame, code: IrCode, b: IrBlock) -> IrSteps {
     return IrSteps { params: params, arity: params.len() as i64, steps: steps, count: steps.len() as i64, cost: b.insts.len };
 }
 
-fn interp_body(caller: IrFrame, fi: i64, args: List<any>) -> any {
+fn interp_body(var ref caller: IrFrame, fi: i64, args: List<any>) -> any {
     let m = caller.m;
     let f = m.functions[fi];
     let code = prepared(caller, fi);
@@ -328,7 +326,7 @@ fn interp_body(caller: IrFrame, fi: i64, args: List<any>) -> any {
 
 /// Engine operation `name` on `args` as the seed runs it; on failure the
 /// program stops with the seed's message.
-fn checked(fr: IrFrame, name: str, args: List<any>) -> any {
+fn checked(var ref fr: IrFrame, name: str, ref args: List<any>) -> any {
     let r = op_checked(name, args);
     if r[0] == true { return r[1]; }
     raise_fault(fr.fault, r[1]);
@@ -336,7 +334,7 @@ fn checked(fr: IrFrame, name: str, args: List<any>) -> any {
 }
 
 /// The values of `ids` in `vals`.
-fn values_of(vals: List<any>, ids: List<i64>) -> List<any> {
+fn values_of(ref vals: List<any>, ref ids: List<i64>) -> List<any> {
     var out: List<any> = [];
     for a in ids { out.push(vals[a]); }
     return out;
@@ -349,7 +347,7 @@ fn bits_value(phy: IrTypePhysics, v: i64) -> any {
     return v;
 }
 
-fn bits_constant(m: IrModule, f: IrFunction, inst: IrInst) -> any => bits_value(inst.physics, m.ints[ir_args(f, inst)[0]]);
+fn bits_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any => bits_value(inst.physics, m.ints[ir_args(f, inst)[0]]);
 
 /// The binary64 value whose bits are `bits`: sign, 11-bit exponent and
 /// 52-bit fraction (IEEE 754-2019 section 3.4). Scaling by powers of two is
@@ -376,13 +374,13 @@ pub fn f64_from_bits(bits: i64) -> f64 {
     return if neg { -mant } else { mant };
 }
 
-fn float_constant(m: IrModule, f: IrFunction, inst: IrInst) -> any => f64_from_bits(m.floats[ir_args(f, inst)[0]]);
+fn float_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any => f64_from_bits(m.floats[ir_args(f, inst)[0]]);
 
-fn bytes_constant(m: IrModule, f: IrFunction, inst: IrInst) -> any => m.strings[ir_args(f, inst)[0]];
+fn bytes_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any => m.strings[ir_args(f, inst)[0]];
 
-fn undef_constant(m: IrModule, f: IrFunction, inst: IrInst) -> any => none;
+fn undef_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any => none;
 
-fn global_addr_constant(m: IrModule, f: IrFunction, inst: IrInst) -> any => -1 - inst.subop;
+fn global_addr_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any => -1 - inst.subop;
 
 /// Opcode -> the value its instruction gives, for the opcodes whose
 /// instruction gives the same value on every run.
@@ -403,16 +401,16 @@ pub fn interp_constants() -> List<any> {
 
 /// A constant whose value is not placed (its result is defined more than
 /// once, or it has none): the step holds its value.
-fn prepare_constant(fr: IrFrame, st: IrStep) {
+fn prepare_constant(ref fr: IrFrame, var ref st: IrStep) {
     let value_of = fr.constants[st.inst.opcode];
     st.k = value_of(fr.m, fr.f, st.inst);
 }
 
-fn run_constant(fr: IrFrame, st: IrStep) { fr.vals[st.result] = st.k; }
+fn run_constant(var ref fr: IrFrame, ref st: IrStep) { fr.vals[st.result] = st.k; }
 
 /// A binary operator (`st.sym`) on the instruction's two operands, as the
 /// seed's.
-fn run_binary(fr: IrFrame, st: IrStep) {
+fn run_binary(var ref fr: IrFrame, ref st: IrStep) {
     let a = st.a;
     let vals = fr.vals;
     let r = op_checked(st.sym, [vals[a[0]], vals[a[1]]]);
@@ -450,7 +448,7 @@ fn arith_symbols() -> Map<i64, str> {
 /// An arithmetic operator. The engine computes integers in 64 bits and
 /// floats as f64, so a result in a narrower register is wrapped or rounded
 /// to it (`run_narrow`); any other is the seed's operator (`run_binary`).
-fn prepare_arith(fr: IrFrame, st: IrStep) {
+fn prepare_arith(ref fr: IrFrame, var ref st: IrStep) {
     let op = st.inst.opcode;
     st.sym = arith_symbols().get(op as i64);
     let phy = st.inst.physics;
@@ -465,7 +463,7 @@ fn prepare_arith(fr: IrFrame, st: IrStep) {
 /// An arithmetic operator whose result is in a narrow register: wrapped or
 /// rounded to it, and a shift count in a narrow integer register is taken
 /// modulo the register's width.
-fn run_narrow(fr: IrFrame, st: IrStep) {
+fn run_narrow(var ref fr: IrFrame, ref st: IrStep) {
     let a = st.a;
     let vals = fr.vals;
     let k: List<any> = st.k;
@@ -481,15 +479,15 @@ fn run_narrow(fr: IrFrame, st: IrStep) {
 /// The operator of each comparison predicate (`CmpPred` 0..5).
 fn cmp_symbols() -> List<str> => ["==", "!=", "<", "<=", ">", ">="];
 
-fn prepare_cmp(fr: IrFrame, st: IrStep) { st.sym = cmp_symbols()[st.inst.subop]; }
+fn prepare_cmp(ref fr: IrFrame, var ref st: IrStep) { st.sym = cmp_symbols()[st.inst.subop]; }
 
-fn run_stack_slot(fr: IrFrame, st: IrStep) {
+fn run_stack_slot(var ref fr: IrFrame, ref st: IrStep) {
     let cells = fr.cells;
     cells.push(none);
     fr.vals[st.result] = cells.len - 1;
 }
 
-fn run_load(fr: IrFrame, st: IrStep) {
+fn run_load(var ref fr: IrFrame, ref st: IrStep) {
     let vals = fr.vals;
     let addr = vals[st.a[0]];
     if addr >= 0 {
@@ -504,7 +502,7 @@ fn run_load(fr: IrFrame, st: IrStep) {
     vals[st.result] = fr.globals[g];
 }
 
-fn run_store(fr: IrFrame, st: IrStep) {
+fn run_store(var ref fr: IrFrame, ref st: IrStep) {
     let a = st.a;
     let vals = fr.vals;
     let addr = vals[a[0]];
@@ -520,14 +518,14 @@ fn run_store(fr: IrFrame, st: IrStep) {
     fr.assigned[-1 - addr] = true;
 }
 
-fn run_call_direct(fr: IrFrame, st: IrStep) {
+fn run_call_direct(var ref fr: IrFrame, ref st: IrStep) {
     let vals = fr.vals;
     vals[st.result] = interp_call(fr, st.inst.subop, values_of(vals, st.a));
 }
 
 /// `call_indirect f, args..`: the function record `f` names, called with
 /// `args` then the record's captured values (selfhost/ir/lower_closure.pilot).
-fn run_call_indirect(fr: IrFrame, st: IrStep) {
+fn run_call_indirect(var ref fr: IrFrame, ref st: IrStep) {
     if fr.budget.eval {
         raise_fault(fr.fault, "a function value is called");
         return;
@@ -546,7 +544,7 @@ fn run_call_indirect(fr: IrFrame, st: IrStep) {
 /// decided once (an evaluation while compiling runs only what it may; the
 /// program's arguments are the interpreter's own; one with no entry in
 /// `interp_engine_ops()` stops at its seam).
-fn prepare_intrinsic(fr: IrFrame, st: IrStep) {
+fn prepare_intrinsic(ref fr: IrFrame, var ref st: IrStep) {
     let name = fr.m.intrinsics[st.inst.subop];
     st.sym = name;
     if fr.budget.eval && !fr.budget.allowed.has(name) {
@@ -562,21 +560,21 @@ fn prepare_intrinsic(fr: IrFrame, st: IrStep) {
     }
 }
 
-fn run_intrinsic_refused(fr: IrFrame, st: IrStep) {
+fn run_intrinsic_refused(var ref fr: IrFrame, ref st: IrStep) {
     raise_fault(fr.fault, f"the engine operation `{st.sym}` is not run while compiling");
 }
 
-fn run_program_args(fr: IrFrame, st: IrStep) {
+fn run_program_args(var ref fr: IrFrame, ref st: IrStep) {
     var copy: List<any> = [];
     for a in fr.args { copy.push(a); }
     fr.vals[st.result] = copy;
 }
 
-fn run_intrinsic_seam(fr: IrFrame, st: IrStep) {
+fn run_intrinsic_seam(var ref fr: IrFrame, ref st: IrStep) {
     fr.vals[st.result] = seam("ir.interp_hook", f"the IR interpreter does not run the engine operation `{st.sym}`");
 }
 
-fn run_host_op(fr: IrFrame, st: IrStep) {
+fn run_host_op(var ref fr: IrFrame, ref st: IrStep) {
     let vals = fr.vals;
     let args = values_of(vals, st.a);
     if args.len() >= 7 && args[0] == 35 && args[1] == 2 {
@@ -616,7 +614,7 @@ fn run_host_op(fr: IrFrame, st: IrStep) {
     }
 }
 
-fn run_call_intrinsic(fr: IrFrame, st: IrStep) {
+fn run_call_intrinsic(var ref fr: IrFrame, ref st: IrStep) {
     let vals = fr.vals;
     let r = op_checked(st.sym, values_of(vals, st.a));
     if r[0] == true {
@@ -633,7 +631,7 @@ fn run_call_intrinsic(fr: IrFrame, st: IrStep) {
 /// `{ name: value, .. }` wherever it goes; any other aggregate (a tuple, a
 /// closure) is a list of its values.
 [StandIn("ir.aggregate_by_reference", "a 0b00 value is copied when it is bound or passed (memcpy)", "the IR interpreter shares one record between every copy, as the seed does", "F5")]
-fn run_construct_aggregate(fr: IrFrame, st: IrStep) {
+fn run_construct_aggregate(var ref fr: IrFrame, ref st: IrStep) {
     let vals = values_of(fr.vals, st.a);
     let layout = st.inst.physics.layout_id;
     if some rec = ir_record_of(fr.m, layout) {
@@ -652,7 +650,7 @@ fn run_construct_aggregate(fr: IrFrame, st: IrStep) {
 }
 
 /// The name of field `slot` of `v` when `v` is a struct record, else "".
-fn field_name(fr: IrFrame, v: any, slot: i64) -> str {
+fn field_name(var ref fr: IrFrame, v: any, slot: i64) -> str {
     let layout = checked(fr, "record_type", [v]) ?? -1;
     if layout < 0 { return ""; }
     if some rec = ir_record_of(fr.m, layout as u32) {
@@ -661,7 +659,7 @@ fn field_name(fr: IrFrame, v: any, slot: i64) -> str {
     return "";
 }
 
-fn run_extract_field(fr: IrFrame, st: IrStep) {
+fn run_extract_field(var ref fr: IrFrame, ref st: IrStep) {
     let v = fr.vals[st.a[0]];
     let slot = st.inst.subop;
     let name = field_name(fr, v, slot as i64);
@@ -674,7 +672,7 @@ fn run_extract_field(fr: IrFrame, st: IrStep) {
     fr.vals[st.result] = rec[slot];
 }
 
-fn run_insert_field(fr: IrFrame, st: IrStep) {
+fn run_insert_field(var ref fr: IrFrame, ref st: IrStep) {
     let a = st.a;
     let v = fr.vals[a[0]];
     let slot = st.inst.subop;
@@ -688,7 +686,7 @@ fn run_insert_field(fr: IrFrame, st: IrStep) {
     rec[slot] = fr.vals[a[1]];
 }
 
-fn prepare_cast(fr: IrFrame, st: IrStep) {
+fn prepare_cast(ref fr: IrFrame, var ref st: IrStep) {
     let phy = st.inst.physics;
     st.sym = reg_class_name(phy.reg_class);
     st.k = phy.bit_width;
@@ -697,14 +695,14 @@ fn prepare_cast(fr: IrFrame, st: IrStep) {
 /// `cast`: the value converted to the result's register physics, as the
 /// seed converts `T(x)`: floats truncate toward zero, integers wrap to the
 /// width, a 1-bit value is a boolean, a 32-bit float rounds to binary32.
-fn run_cast(fr: IrFrame, st: IrStep) {
+fn run_cast(var ref fr: IrFrame, ref st: IrStep) {
     let vals = fr.vals;
     vals[st.result] = checked(fr, "num_convert", [vals[st.a[0]], st.sym, st.k]);
 }
 
 /// The value ids `count` operands from `from` name, or none when there are
 /// none (a branch that passes nothing).
-fn passed_ids(a: List<i64>, from: i64, count: i64) -> any {
+fn passed_ids(ref a: List<i64>, from: i64, count: i64) -> any {
     if count == 0 { return none; }
     var out: List<i64> = [];
     var i = 0;
@@ -716,9 +714,9 @@ fn passed_ids(a: List<i64>, from: i64, count: i64) -> any {
 }
 
 /// `jump target, args..`: `st.k` is the ids of `args`.
-fn prepare_jump(fr: IrFrame, st: IrStep) { st.k = passed_ids(st.a, 1, st.a.len() - 1); }
+fn prepare_jump(ref fr: IrFrame, var ref st: IrStep) { st.k = passed_ids(st.a, 1, st.a.len() - 1); }
 
-fn run_jump(fr: IrFrame, st: IrStep) {
+fn run_jump(var ref fr: IrFrame, ref st: IrStep) {
     fr.next = st.a[0];
     let ids = st.k;
     if ids != none { fr.next_args = values_of(fr.vals, ids); }
@@ -726,13 +724,13 @@ fn run_jump(fr: IrFrame, st: IrStep) {
 
 /// `cond_br c, then, n, args.., else, n, args..`: `st.k` is
 /// `[then, ids of its args, else, ids of its args]`.
-fn prepare_cond_br(fr: IrFrame, st: IrStep) {
+fn prepare_cond_br(ref fr: IrFrame, var ref st: IrStep) {
     let a = st.a;
     let other = 3 + a[2];
     st.k = [a[1], passed_ids(a, 3, a[2]), a[other], passed_ids(a, other + 2, a[other + 1])];
 }
 
-fn run_cond_br(fr: IrFrame, st: IrStep) {
+fn run_cond_br(var ref fr: IrFrame, ref st: IrStep) {
     let vals = fr.vals;
     let c = vals[st.a[0]];
     var taken = c == true;
@@ -750,19 +748,19 @@ fn run_cond_br(fr: IrFrame, st: IrStep) {
 
 /// `switch_table index, default, targets..`: goes to target `index`, or to
 /// the default when there is none.
-fn run_switch_table(fr: IrFrame, st: IrStep) {
+fn run_switch_table(var ref fr: IrFrame, ref st: IrStep) {
     let a = st.a;
     let i = fr.vals[a[0]];
     fr.next = if i >= 0 && i + 2 < a.len() { a[2 + i] } else { a[1] };
 }
 
 /// `unreachable [message]`: stops the program with `message`.
-fn run_unreachable(fr: IrFrame, st: IrStep) {
+fn run_unreachable(var ref fr: IrFrame, ref st: IrStep) {
     let a = st.a;
     raise_fault(fr.fault, if a.len() > 0 { fr.vals[a[0]] } else { "entered code the program cannot reach" });
 }
 
-fn run_return(fr: IrFrame, st: IrStep) {
+fn run_return(var ref fr: IrFrame, ref st: IrStep) {
     let a = st.a;
     fr.ret = if a.len() > 0 { fr.vals[a[0]] } else { none };
     fr.next = -1;

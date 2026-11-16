@@ -1,12 +1,11 @@
 // ==============================================================================
 // selfhost/adapter/absorb_proto.pilot
 // Ring 3 / Self-Host Compiler: Protocol Buffers v2/v3 Absorber & Wire Codec (`use proto`)
-// Package: Pilot.SelfHost.Adapter.AbsorbProto (Milestone 20)
+// Package: selfhost.adapter (Milestone 20)
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Adapter.AbsorbProto;
+pub lvl(0) pkg selfhost.adapter;
 
-use Pilot.SelfHost.Adapter.AbsorbSql;
 use std.text;
 
 // ------------------------------------------------------------------------------
@@ -78,7 +77,7 @@ pub struct ProtoVarintResult : IValue {
     pub err_message: str,
 }
 
-pub fn proto_decode_varint(bytes: List<i64>, offset: i64) -> ProtoVarintResult {
+pub fn proto_decode_varint(ref bytes: List<i64>, offset: i64) -> ProtoVarintResult {
     var result: i64 = 0;
     var shift: i64 = 0;
     var count: i64 = 0;
@@ -127,7 +126,7 @@ fn proto_span_err(msg: str) -> ProtoFieldSpan {
 }
 
 /// Little-endian fixed-width integer of `width` bytes at `at`.
-fn proto_read_fixed(bytes: List<i64>, at: i64, width: i64) -> i64 {
+fn proto_read_fixed(ref bytes: List<i64>, at: i64, width: i64) -> i64 {
     var v: i64 = 0;
     var k = width - 1;
     while k >= 0 {
@@ -140,7 +139,7 @@ fn proto_read_fixed(bytes: List<i64>, at: i64, width: i64) -> i64 {
 /// Finds field `field_number` in the encoded message `bytes`. Every record is
 /// walked so a malformed packet is caught; for a field that appears more than
 /// once the last occurrence wins, as the protobuf spec says for scalars.
-pub fn proto_wire_find_field(bytes: List<i64>, field_number: i64) -> ProtoFieldSpan {
+pub fn proto_wire_find_field(ref bytes: List<i64>, field_number: i64) -> ProtoFieldSpan {
     var hit = proto_span_err("");
     let n = bytes.len() as i64;
     var pos: i64 = 0;
@@ -212,7 +211,7 @@ pub fn proto_message_new(name: str) -> ProtoMessageDef {
     };
 }
 
-pub fn proto_message_find_field(msg: ProtoMessageDef, name: str) -> i64 {
+pub fn proto_message_find_field(ref msg: ProtoMessageDef, name: str) -> i64 {
     var i = 0;
     while i < msg.fields.len() {
         let f = msg.fields.get(i);
@@ -350,7 +349,7 @@ pub struct ProtoValidationResult : IValue {
     pub err_message: str,
 }
 
-pub fn proto_validate_reserved_tags(msg: ProtoMessageDef) -> ProtoValidationResult {
+pub fn proto_validate_reserved_tags(ref msg: ProtoMessageDef) -> ProtoValidationResult {
     var i = 0;
     while i < msg.fields.len() {
         let f = msg.fields.get(i);
@@ -374,7 +373,7 @@ pub fn proto_validate_reserved_tags(msg: ProtoMessageDef) -> ProtoValidationResu
 // ------------------------------------------------------------------------------
 
 /// Whether `type_name` (possibly package-qualified) names a message in `doc`.
-fn proto_doc_has_message(doc: ProtoDoc, type_name: str) -> bool {
+fn proto_doc_has_message(ref doc: ProtoDoc, type_name: str) -> bool {
     var short = type_name;
     var i = type_name.len();
     while i > 0 {
@@ -394,7 +393,7 @@ fn proto_doc_has_message(doc: ProtoDoc, type_name: str) -> bool {
 /// fixed64/sfixed64/double use 1, fixed32/sfixed32/float use 5, strings,
 /// bytes and messages are length-delimited (2), and every other scalar and
 /// every enum is a varint (0).
-pub fn proto_field_wire_type(doc: ProtoDoc, f: ProtoFieldDef) -> i64 {
+pub fn proto_field_wire_type(ref doc: ProtoDoc, f: ProtoFieldDef) -> i64 {
     let t = f.field_type;
     if t == "fixed64" || t == "sfixed64" || t == "double" { return 1; }
     if t == "fixed32" || t == "sfixed32" || t == "float" { return 5; }
@@ -404,7 +403,7 @@ pub fn proto_field_wire_type(doc: ProtoDoc, f: ProtoFieldDef) -> i64 {
 }
 
 [StandIn("proto.packet_bytes", "borrowed slice<u8> wire view (0b01)", "generated views hold an owned List<i64>, one byte per element", "F7")]
-pub fn proto_synthesize_dual_views(doc: ProtoDoc, msg: ProtoMessageDef) -> str {
+pub fn proto_synthesize_dual_views(ref doc: ProtoDoc, ref msg: ProtoMessageDef) -> str {
     var out: List<str> = ["// ------------------------------------------------------------------\n"];
     out.push("// 0b10 Owned Mutable Builder\n");
     out.push("pub struct " + msg.name + " : IObject {\n");

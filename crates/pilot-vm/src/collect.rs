@@ -28,8 +28,8 @@
 //! never reuses a slot, so a value the roots miss is read from a dead slot
 //! and faults instead of silently reading whatever reused the slot.
 
-use crate::vm::PilVirtualMachine;
 use crate::value::PilotVal;
+use crate::vm::PilVirtualMachine;
 use std::collections::HashSet;
 
 /// Allocations (lists, records, closures) between collections, at least.
@@ -117,7 +117,10 @@ pub struct HeapState {
 
 impl HeapState {
     pub fn new() -> Self {
-        Self { verify: std::env::var_os(VERIFY_ENV).is_some(), ..Self::default() }
+        Self {
+            verify: std::env::var_os(VERIFY_ENV).is_some(),
+            ..Self::default()
+        }
     }
 
     /// Collections run so far.
@@ -128,7 +131,10 @@ impl HeapState {
     /// Forgets every slot: the VM's heap has just been emptied.
     pub(crate) fn reset(&mut self) {
         let verify = self.verify;
-        *self = Self { verify, ..Self::default() };
+        *self = Self {
+            verify,
+            ..Self::default()
+        };
     }
 }
 
@@ -211,7 +217,9 @@ impl PilVirtualMachine {
         work.extend(self.globals.values().copied());
         work.extend(self.generator_values().copied());
         work.extend((0..self.heap.pinned_lists.min(lists)).map(PilotVal::from_list_handle));
-        work.extend((0..self.heap.pinned_maps.min(maps).max(maps.min(1))).map(PilotVal::from_map_handle));
+        work.extend(
+            (0..self.heap.pinned_maps.min(maps).max(maps.min(1))).map(PilotVal::from_map_handle),
+        );
         while let Some(v) = work.pop() {
             if let Some((ptr, _)) = v.heap_parts() {
                 strings.insert(ptr as usize);

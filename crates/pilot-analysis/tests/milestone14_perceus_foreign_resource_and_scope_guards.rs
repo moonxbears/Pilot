@@ -3,29 +3,27 @@
 //! Perceus Foreign Resource & Scope Guard Synchronization (`0b10` & `0b11`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 14,
-    test_file_rel: "crates/pilot-analysis/tests/milestone14_perceus_foreign_resource_and_scope_guards.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone14_perceus_foreign_resource_and_scope_guards.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
             path: "stdlib/std/polyglot/lifetime.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "current_thread_id",
-                "invoke_foreign_destructor",
-            ],
+            required_pub_fns: &["current_thread_id", "invoke_foreign_destructor"],
             required_code_markers: &[
                 "ForeignHandle",
                 "ForeignGuard",
@@ -41,10 +39,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             max_lines: 1500,
             name_blind: true,
             required_pub_fns: &[],
-            required_code_markers: &[
-                "ShmBuffer",
-                "ShmView",
-            ],
+            required_code_markers: &["ShmBuffer", "ShmView"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -57,10 +52,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "esc_fn_is_retained",
                 "emit_foreign_drop_op",
             ],
-            required_code_markers: &[
-                "ESCAPE004",
-                "verify_retained_escape",
-            ],
+            required_code_markers: &["ESCAPE004", "verify_retained_escape"],
             forbidden_code_markers: &["@hard_realtime"],
             forbidden_string_substrings: &["dsp", "@hard_realtime"],
         },
@@ -68,12 +60,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/perceus/lattice.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "lat_deduce_type_lattice",
-            ],
-            required_code_markers: &[
-                "lat_deduce_type_lattice",
-            ],
+            required_pub_fns: &["lat_deduce_type_lattice"],
+            required_code_markers: &["lat_deduce_type_lattice"],
             forbidden_code_markers: &["@hard_realtime"],
             forbidden_string_substrings: &["dsp", "@hard_realtime"],
         },
@@ -82,12 +70,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m14(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -153,7 +145,11 @@ fn test_m14_1_zero_leak_stress_test_foreign_handle_atomic_counter() {
 
     let deps = &["stdlib/std/polyglot/lifetime.pilot"];
     let res = eval_m14(deps, script);
-    assert_eq!(res, "42", "ForeignHandle ownership logic failed, got: {}", res);
+    assert_eq!(
+        res, "42",
+        "ForeignHandle ownership logic failed, got: {}",
+        res
+    );
 
     // Dropping an armed handle must call its native destructor.
     let drop_armed = r#"
@@ -203,7 +199,11 @@ fn test_m14_2_thread_affine_drop_queue_and_drain() {
 
     let deps = &["stdlib/std/polyglot/lifetime.pilot"];
     let res = eval_m14(deps, script);
-    assert_eq!(res, "100", "Thread-affine drop queue test failed, got: {}", res);
+    assert_eq!(
+        res, "100",
+        "Thread-affine drop queue test failed, got: {}",
+        res
+    );
 
     // Each remaining path stops at the seam it needs.
     let cases = [
@@ -235,9 +235,17 @@ fn test_m14_2_thread_affine_drop_queue_and_drain() {
 /// reports for the parsed `program`, after selfhost/analyzer.pilot has bound
 /// its layouts.
 fn perceus_diags(program: &str) -> Vec<String> {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let target = parse(program);
-    assert!(target.diagnostics.is_empty(), "parse errors: {:?}", target.diagnostics);
+    assert!(
+        target.diagnostics.is_empty(),
+        "parse errors: {:?}",
+        target.diagnostics
+    );
     let (flat, syms) = pilot_analysis::flatten_ast(&target, target.root);
     let mut phy = PhysicsRegistry::new(flat, syms);
     phy.source_text = program.to_string();
@@ -288,13 +296,20 @@ fn test_m14_3_escape004_on_parsed_programs_and_foreign_drop_seam() {
     let diags = perceus_diags(&format!(
         "{prelude}pub fn hand_off(ref w: Window) -> Word {{\n    return submit(w);\n}}\n"
     ));
-    assert_eq!(diags.iter().filter(|d| d.starts_with("ESCAPE004")).count(), 1, "{diags:?}");
+    assert_eq!(
+        diags.iter().filter(|d| d.starts_with("ESCAPE004")).count(),
+        1,
+        "{diags:?}"
+    );
 
     // The same view moved in as `iso`: no ESCAPE004.
     let diags = perceus_diags(&format!(
         "{prelude}pub fn hand_off(iso w: Window) -> Word {{\n    return submit(w);\n}}\n"
     ));
-    assert!(!diags.iter().any(|d| d.starts_with("ESCAPE004")), "{diags:?}");
+    assert!(
+        !diags.iter().any(|d| d.starts_with("ESCAPE004")),
+        "{diags:?}"
+    );
 
     // A plain value: no ESCAPE004.
     let diags = perceus_diags(&format!(
@@ -407,7 +422,11 @@ fn test_m14_4_pinned_slice_and_foreign_guard_and_shm_buffer() {
         "stdlib/std/polyglot/shm.pilot",
     ];
     let res = eval_m14(deps, script);
-    assert_eq!(res, "300", "ForeignGuard, BorrowCallbackScope and ShmView test failed, got: {}", res);
+    assert_eq!(
+        res, "300",
+        "ForeignGuard, BorrowCallbackScope and ShmView test failed, got: {}",
+        res
+    );
 
     let cases = [
         ("let p: PinnedSlice<i64> = PinnedSlice.allocate(16, 8);", "mem.pinned_alloc"),

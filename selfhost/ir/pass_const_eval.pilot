@@ -20,10 +20,8 @@
 // the function as it is, so this never changes what a program does; at most
 // `eval_total_fuel()` steps are spent on one module. Functions are tried in
 // rounds, so a `const` read by another is known first.
-pub lvl(0) pkg Pilot.SelfHost.Ir.PassConstEval;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.ir.model.*;
-use selfhost.ir.interp.*;
 
 /// The most instructions one function may run while compiling.
 pub pure fn eval_fuel() -> i64 => 100000;
@@ -33,7 +31,7 @@ pub pure fn eval_total_fuel() -> i64 => 1000000;
 
 /// What the pass keeps while it works on a module.
 struct ConstEval : IObject {
-    m: IrModule;
+    ref m: IrModule;
     /// Global -> its value as computed, and whether it is known.
     globals: List<any>;
     assigned: List<bool>;
@@ -53,7 +51,7 @@ struct ConstEval : IObject {
 }
 
 /// Computes what can be computed in `m`; true when it changed anything.
-pub fn const_eval_module(m: IrModule) -> bool {
+pub fn const_eval_module(ref m: IrModule) -> bool {
     if m.functions.len == 0 { return false; }
     var globals: List<any> = [];
     var assigned: List<bool> = [];
@@ -90,7 +88,7 @@ pub fn const_eval_module(m: IrModule) -> bool {
 
 /// The operands of `inst` that are values (a constant's pool index, a
 /// branch's targets and argument counts are not).
-fn value_operands(f: IrFunction, inst: IrInst) -> List<u32> {
+fn value_operands(ref f: IrFunction, inst: IrInst) -> List<u32> {
     let a = ir_args(f, inst);
     let op = inst.opcode;
     var out: List<u32> = [];
@@ -118,7 +116,7 @@ fn value_operands(f: IrFunction, inst: IrInst) -> List<u32> {
 /// was not computed here copies a value nobody else holds: each such call
 /// still builds its own. The call then takes the copy's place (the copy
 /// must come right after the call and be its only use).
-fn keep_fresh_results(ce: ConstEval) -> bool {
+fn keep_fresh_results(ref ce: ConstEval) -> bool {
     let m = ce.m;
     var changed = false;
     for f in m.functions {
@@ -159,11 +157,11 @@ fn keep_fresh_results(ce: ConstEval) -> bool {
     return changed;
 }
 
-fn takes_nothing(f: IrFunction) -> bool => f.blocks.len > 0 && f.blocks[0].params.len == 0;
+fn takes_nothing(ref f: IrFunction) -> bool => f.blocks.len > 0 && f.blocks[0].params.len == 0;
 
 /// The instruction defining each value of `f` (value id -> position as
 /// `[block, index]`), for values defined by instructions.
-fn definitions(f: IrFunction) -> Map<str, List<i64>> {
+fn definitions(ref f: IrFunction) -> Map<str, List<i64>> {
     let out = Map<str, List<i64>>();
     var b = 0;
     while b < f.blocks.len {
@@ -179,7 +177,7 @@ fn definitions(f: IrFunction) -> Map<str, List<i64>> {
 }
 
 /// The instruction defining value `v` of `f`, or none.
-fn def_of(f: IrFunction, defs: Map<str, List<i64>>, v: u32) -> IrInst? {
+fn def_of(ref f: IrFunction, ref defs: Map<str, List<i64>>, v: u32) -> IrInst? {
     let k = f"{v}";
     if !defs.has(k) { return none; }
     let at = defs.get(k);
@@ -188,7 +186,7 @@ fn def_of(f: IrFunction, defs: Map<str, List<i64>>, v: u32) -> IrInst? {
 
 /// Finds each `const` initializer's global: the only store to that global
 /// in the module is in `<start>` and stores the initializer's result.
-fn find_inits(ce: ConstEval) {
+fn find_inits(var ref ce: ConstEval) {
     let m = ce.m;
     var stores: List<i64> = [];
     for g in m.globals { stores.push(0); }
@@ -224,7 +222,7 @@ fn find_inits(ce: ConstEval) {
 /// Whether function `fi` could run while compiling: it calls no function
 /// value and no engine operation outside `eval_engine_ops()`, and neither
 /// does any function it calls.
-fn is_runnable(ce: ConstEval, fi: i64) -> bool {
+fn is_runnable(var ref ce: ConstEval, fi: i64) -> bool {
     let state = ce.runnable[fi];
     if state == 1 || state == 3 { return true; }
     if state == 2 { return false; }
@@ -246,7 +244,7 @@ fn is_runnable(ce: ConstEval, fi: i64) -> bool {
 
 /// Runs function `fi` while compiling and puts what it gave in place of its
 /// calls; true when it did.
-fn try_function(ce: ConstEval, fi: i64) -> bool {
+fn try_function(var ref ce: ConstEval, fi: i64) -> bool {
     let m = ce.m;
     let f = m.functions[fi];
     let fuel = if ce.fuel < eval_fuel() { ce.fuel } else { eval_fuel() };
@@ -296,7 +294,7 @@ fn is_scalar_physics(p: IrTypePhysics) -> bool =>
 
 /// A constant standing for `value` as the result of `f`: `[opcode, pool
 /// index]`, or none when the value has no constant of that physics.
-fn constant_of(m: IrModule, f: IrFunction, value: any) -> List<i64>? {
+fn constant_of(var ref m: IrModule, ref f: IrFunction, value: any) -> List<i64>? {
     let p = f.ret_physics;
     if p.layout_id == 0 || value == none { return none; }
     let rc = p.reg_class;
@@ -321,7 +319,7 @@ fn constant_of(m: IrModule, f: IrFunction, value: any) -> List<i64>? {
     return none;
 }
 
-fn writes_text_of(f: IrFunction, p: IrTypePhysics) -> bool {
+fn writes_text_of(ref f: IrFunction, p: IrTypePhysics) -> bool {
     for b in f.blocks {
         for inst in b.insts {
             if inst.opcode == op_const_bytes() && inst.physics.layout_id == p.layout_id { return true; }
@@ -330,7 +328,7 @@ fn writes_text_of(f: IrFunction, p: IrTypePhysics) -> bool {
     return false;
 }
 
-fn int_pool(m: IrModule, v: i64) -> i64 {
+fn int_pool(var ref m: IrModule, v: i64) -> i64 {
     var i = 0;
     while i < m.ints.len {
         if m.ints[i] == v { return i; }
@@ -340,7 +338,7 @@ fn int_pool(m: IrModule, v: i64) -> i64 {
     return m.ints.len - 1;
 }
 
-fn float_pool(m: IrModule, bits: i64) -> i64 {
+fn float_pool(var ref m: IrModule, bits: i64) -> i64 {
     var i = 0;
     while i < m.floats.len {
         if m.floats[i] == bits { return i; }
@@ -350,7 +348,7 @@ fn float_pool(m: IrModule, bits: i64) -> i64 {
     return m.floats.len - 1;
 }
 
-fn str_pool(m: IrModule, v: str) -> i64 {
+fn str_pool(var ref m: IrModule, v: str) -> i64 {
     var i = 0;
     while i < m.strings.len {
         if m.strings[i] == v { return i; }
@@ -399,7 +397,7 @@ pub fn f64_bits(x: f64) -> i64? {
 // ------------------------------------------------------------------------------
 
 /// Every call of `fi` (with no arguments) becomes constant `k`.
-fn replace_calls(m: IrModule, fi: i64, k: List<i64>) {
+fn replace_calls(ref m: IrModule, fi: i64, ref k: List<i64>) {
     for f in m.functions {
         for b in f.blocks {
             var i = 0;
@@ -414,14 +412,14 @@ fn replace_calls(m: IrModule, fi: i64, k: List<i64>) {
     }
 }
 
-fn constant_inst(f: IrFunction, result: u32, phy: IrTypePhysics, k: List<i64>, span: u32) -> IrInst {
+fn constant_inst(var ref f: IrFunction, result: u32, phy: IrTypePhysics, ref k: List<i64>, span: u32) -> IrInst {
     let offset = f.operand_pool.len;
     f.operand_pool.push(k[1] as u32);
     return ir_inst_new(result, k[0] as u16, 0, phy, offset, 1, span);
 }
 
 /// Every read of global `g` (a `load` of its address) becomes constant `k`.
-fn replace_loads(m: IrModule, g: i64, k: List<i64>) {
+fn replace_loads(ref m: IrModule, g: i64, ref k: List<i64>) {
     for f in m.functions {
         let defs = definitions(f);
         for b in f.blocks {
@@ -443,7 +441,7 @@ fn replace_loads(m: IrModule, g: i64, k: List<i64>) {
 
 /// Removes the stores to global `g`, which nothing reads any more (its reads
 /// are constants now); dead-code elimination removes what they stored.
-fn drop_stores(m: IrModule, g: i64) {
+fn drop_stores(ref m: IrModule, g: i64) {
     for f in m.functions {
         let defs = definitions(f);
         for b in f.blocks {
@@ -469,7 +467,7 @@ fn same_physics(a: IrTypePhysics, b: IrTypePhysics) -> bool =>
 /// Builds function `fi`'s value into global `g` first thing in `<start>`,
 /// after the values built there before it (which it may read).
 [StandIn("ir.const_static_data", "a constant that owns memory is laid out as static data in the output, built while compiling", "only a list of numbers, booleans and such lists is laid out as static data, and only in C (selfhost/transpile/static_data.pilot); a map, a record, a list holding text, and every constant in the other emitters and pilot ir run is built once, first thing in <start>, into a global marked ready", "F8")]
-fn hoist(ce: ConstEval, fi: i64, g: i64) {
+fn hoist(var ref ce: ConstEval, fi: i64, g: i64) {
     let start = ce.m.functions[0];
     let f = ce.m.functions[fi];
     let entry = start.blocks[0];
@@ -503,7 +501,7 @@ fn hoist(ce: ConstEval, fi: i64, g: i64) {
 
 /// Every call of `fi` (with no arguments) other than the one building global
 /// `g` reads `g` instead.
-fn replace_calls_with_load(m: IrModule, fi: i64, g: i64) {
+fn replace_calls_with_load(ref m: IrModule, fi: i64, g: i64) {
     var fx = 0;
     for f in m.functions {
         for b in f.blocks {
@@ -532,7 +530,7 @@ fn replace_calls_with_load(m: IrModule, fi: i64, g: i64) {
 
 /// Whether instruction `i` of block `b` of `<start>` is the call `hoist`
 /// added to build global `g` (followed by its store into `g`).
-fn is_build_of(f: IrFunction, b: IrBlock, i: i64, g: i64) -> bool {
+fn is_build_of(ref f: IrFunction, ref b: IrBlock, i: i64, g: i64) -> bool {
     if i == 0 || i + 1 >= b.insts.len { return false; }
     let before = b.insts[i - 1];
     let after = b.insts[i + 1];

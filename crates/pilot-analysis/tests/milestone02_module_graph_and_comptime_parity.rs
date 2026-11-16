@@ -8,14 +8,14 @@ use std::process::Command;
 use pilot_analysis::PhysicsRegistry;
 use pilot_ast::AstArena;
 use pilot_parser::{parse, parse_unit};
-use pilot_vm::PilotVal;
 use pilot_span::FileId;
+use pilot_vm::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 2,
@@ -47,10 +47,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/loader/pragma_filter.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "pragma_solve_intervals",
-                "pragma_is_suppressed",
-            ],
+            required_pub_fns: &["pragma_solve_intervals", "pragma_is_suppressed"],
             required_code_markers: &["PragmaInterval"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
@@ -59,13 +56,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "stdlib/core/reflect.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "env",
-            ],
-            required_code_markers: &[
-                "TargetDescriptor",
-                "CompileEnvView",
-            ],
+            required_pub_fns: &["env"],
+            required_code_markers: &["TargetDescriptor", "CompileEnvView"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -95,7 +87,11 @@ fn run_loader_val(tail: &str) -> (PilVirtualMachine, PilotVal) {
         arena = parse_unit(arena, src, FileId(i as u32), base);
         base += src.len() as u32 + 1;
     }
-    assert!(arena.diagnostics.is_empty(), "loader must parse: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "loader must parse: {:?}",
+        arena.diagnostics
+    );
     let bin = BytecodeCompiler::compile_linked(&arena);
     let errs: Vec<_> = bin.diagnostics.iter().map(|d| d.message.clone()).collect();
     assert!(errs.is_empty(), "loader must compile: {errs:?}");
@@ -150,7 +146,11 @@ pub fn test_m2_1_exact_line_col_preservation_without_span_drift() {
         sl_src
     );
     let sl_arena = parse(&sl_test);
-    assert!(sl_arena.diagnostics.is_empty(), "{:?}", sl_arena.diagnostics);
+    assert!(
+        sl_arena.diagnostics.is_empty(),
+        "{:?}",
+        sl_arena.diagnostics
+    );
     let mut sl_vm = PilVirtualMachine::new();
     sl_vm.load_binary(BytecodeCompiler::compile(&sl_arena, sl_arena.root));
     assert_eq!(sl_vm.run().as_int(), Some(42));
@@ -163,12 +163,28 @@ pub fn test_m2_1_exact_line_col_preservation_without_span_drift() {
     let util_base = entry_src.len() as u32 + 1;
     let arena = parse_unit(AstArena::new(), entry_src, FileId(0), 0);
     let arena = parse_unit(arena, util_src, FileId(1), util_base);
-    assert_eq!(arena.units.len(), 2, "Each linked file must be its own unit");
-    assert!(arena.diagnostics.is_empty(), "Both units must parse: {:?}", arena.diagnostics);
+    assert_eq!(
+        arena.units.len(),
+        2,
+        "Each linked file must be its own unit"
+    );
+    assert!(
+        arena.diagnostics.is_empty(),
+        "Both units must parse: {:?}",
+        arena.diagnostics
+    );
     let entry = &arena.units[0];
     let util = &arena.units[1];
-    assert_eq!(arena.span(entry.root).start, 0, "Entry unit span MUST start at 0");
-    assert_eq!(arena.span(util.root).start, util_base, "Second unit MUST start at its own base");
+    assert_eq!(
+        arena.span(entry.root).start,
+        0,
+        "Entry unit span MUST start at 0"
+    );
+    assert_eq!(
+        arena.span(util.root).start,
+        util_base,
+        "Second unit MUST start at its own base"
+    );
     let last = pilot_ast::NodeId(arena.nodes.len() as u32 - 1);
     assert_eq!(arena.unit_of(last).map(|u| u.file), Some(FileId(1)));
     assert_eq!(arena.unit_of(entry.root).map(|u| u.file), Some(FileId(0)));
@@ -176,8 +192,15 @@ pub fn test_m2_1_exact_line_col_preservation_without_span_drift() {
     // 3. Verify a span in the second unit maps back to its own local offset
     let twice_at = util_base + util_src.find("twice").unwrap() as u32;
     let local_off = (twice_at - util_base) as usize;
-    let line_1based = util_src[..local_off].bytes().filter(|&b| b == b'\n').count() + 1;
-    let line_start = util_src[..local_off].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_1based = util_src[..local_off]
+        .bytes()
+        .filter(|&b| b == b'\n')
+        .count()
+        + 1;
+    let line_start = util_src[..local_off]
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
     let col_1based = (local_off - line_start) + 1;
     assert_eq!((line_1based, col_1based), (2, 8));
 
@@ -193,10 +216,12 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
 
     // `env()` in stdlib/core/reflect.pilot stops at a seam when no ENV.target
     // record exists, and a pending target field stops at its seam when read.
-    let reflect_src = std::fs::read_to_string(anticheat::workspace_root().join("stdlib/core/reflect.pilot"))
-        .expect("read reflect.pilot");
-    let pending_src = std::fs::read_to_string(anticheat::workspace_root().join("stdlib/core/pending.pilot"))
-        .expect("read pending.pilot");
+    let reflect_src =
+        std::fs::read_to_string(anticheat::workspace_root().join("stdlib/core/reflect.pilot"))
+            .expect("read reflect.pilot");
+    let pending_src =
+        std::fs::read_to_string(anticheat::workspace_root().join("stdlib/core/pending.pilot"))
+            .expect("read pending.pilot");
     let env_section = format!(
         "{pending_src}\n{}",
         &reflect_src[reflect_src
@@ -206,7 +231,11 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
     );
     let env_arch_src = format!("{env_section}\nlet e = env();\nreturn e.target.arch + \"|\" + e.target.pointer_bytes + \"|\" + e.is_comptime;\n");
     let env_arch_arena = parse(&env_arch_src);
-    assert!(env_arch_arena.diagnostics.is_empty(), "env() section must parse: {:?}", env_arch_arena.diagnostics);
+    assert!(
+        env_arch_arena.diagnostics.is_empty(),
+        "env() section must parse: {:?}",
+        env_arch_arena.diagnostics
+    );
     let read_src = format!("{env_section}\nlet t = TargetDescriptor {{ arch: \"\", os: \"\", pointer_bytes: 0, endian: \"\", backend: \"\", simd_width_bits: pending(\"reflect.target_simd_width\", \"x\"), cache_line_bytes: pending(\"reflect.target_cache_line\", \"x\"), opt_level: pending(\"reflect.target_opt_level\", \"x\") }};\nreturn t.simd_width_bits.get();\n");
     let read_arena = parse(&read_src);
     let mut read_vm = PilVirtualMachine::new();
@@ -218,7 +247,10 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
     );
 
     let mut vm = PilVirtualMachine::new();
-    vm.load_binary(BytecodeCompiler::compile(&env_arch_arena, env_arch_arena.root));
+    vm.load_binary(BytecodeCompiler::compile(
+        &env_arch_arena,
+        env_arch_arena.root,
+    ));
     let run_out = vm_outcome::outcome(&mut vm);
     assert!(
         run_out.starts_with("FAULT: SEAM001: unconnected seam `reflect.target_descriptor`"),
@@ -238,7 +270,10 @@ pub fn test_m2_2_comptime_and_runtime_env_reflection_parity() {
         let mut vm = PilVirtualMachine::new();
         vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
         let out = vm_outcome::outcome(&mut vm);
-        assert!(out.contains(&format!("SEAM001: unconnected seam `{seam_id}`")), "{call} must stop at {seam_id}, got: {out}");
+        assert!(
+            out.contains(&format!("SEAM001: unconnected seam `{seam_id}`")),
+            "{call} must stop at {seam_id}, got: {out}"
+        );
     }
 
     guard.finish();
@@ -254,7 +289,8 @@ pub fn test_m2_3_pure_pilot_module_graph_and_pragma_suppression() {
     let root = anticheat::workspace_root();
 
     // 1. Test Pure-Pilot Pragma Interval Solver
-    let pragma_src = std::fs::read_to_string(root.join("selfhost/loader/pragma_filter.pilot")).expect("read pragma_filter.pilot");
+    let pragma_src = std::fs::read_to_string(root.join("selfhost/loader/pragma_filter.pilot"))
+        .expect("read pragma_filter.pilot");
     let test_tail = r#"
         let test_src = "let x = 1;\n#pragma warning disable TYPE001\nlet y = 2;\n#pragma warning restore TYPE001\nlet z = 3;\n";
         let intervals = pragma_solve_intervals(test_src);
@@ -269,7 +305,11 @@ pub fn test_m2_3_pure_pilot_module_graph_and_pragma_suppression() {
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     let res = vm.run().as_int();
-    assert_eq!(res, Some(100), "Pragma interval solver must correctly suppress disabled ranges");
+    assert_eq!(
+        res,
+        Some(100),
+        "Pragma interval solver must correctly suppress disabled ranges"
+    );
 
     // 2. Test the Pure-Pilot module graph on a real project: imports resolve
     //    by convention and through the package index, and the link order puts
@@ -278,13 +318,20 @@ pub fn test_m2_3_pure_pilot_module_graph_and_pragma_suppression() {
     let _ = std::fs::remove_dir_all(&proj);
     std::fs::create_dir_all(proj.join("lib")).expect("create project");
     let write = |rel: &str, text: &str| std::fs::write(proj.join(rel), text).expect("write unit");
-    write("app.pilot", "pub lvl(2) pkg Pilot.App.Main;\nuse util;\nuse Pilot.App.Shapes;\n");
-    write("util.pilot", "pkg util;\npub fn twice(x: i64) -> i64 => x * 2;\n");
+    write(
+        "app.pilot",
+        "pub lvl(2) pkg Pilot.App.Main;\nuse util;\nuse Pilot.App.Shapes;\n",
+    );
+    write(
+        "util.pilot",
+        "pkg util;\npub fn twice(x: i64) -> i64 => x * 2;\n",
+    );
     write("lib/geometry.pilot", "pkg Pilot.App.Shapes;\nuse util;\n");
     let proj_dir = proj.to_str().unwrap().replace('\\', "/");
     let root_dir = root.to_str().unwrap().replace('\\', "/");
-    let order = |entry: &str| format!(
-        r#"
+    let order = |entry: &str| {
+        format!(
+            r#"
         fn check() -> i64 {{
             let plan = mg_link_plan("{entry}", "{root_dir}");
             let paths = plan[0];
@@ -309,9 +356,14 @@ pub fn test_m2_3_pure_pilot_module_graph_and_pragma_suppression() {
         }}
         check();
         "#
-    );
+        )
+    };
     let plan_src = order(&format!("{proj_dir}/app.pilot"));
-    assert_eq!(run_loader(&plan_src), Some(200), "Module graph must link the prelude, dependencies, then the entry");
+    assert_eq!(
+        run_loader(&plan_src),
+        Some(200),
+        "Module graph must link the prelude, dependencies, then the entry"
+    );
 
     // 3. Test Pure-Pilot Module Graph Path Normalization (Windows backslashes & relative prefixes)
     let mg_norm_tail = r#"
@@ -326,16 +378,28 @@ pub fn test_m2_3_pure_pilot_module_graph_and_pragma_suppression() {
         }
         check();
     "#;
-    assert_eq!(run_loader(mg_norm_tail), Some(300), "Module graph path normalization must convert Windows paths and normalize drive letters");
+    assert_eq!(
+        run_loader(mg_norm_tail),
+        Some(300),
+        "Module graph path normalization must convert Windows paths and normalize drive letters"
+    );
 
     // 4. Test a Windows-style entry path links the same files, and an import
     //    cycle and a missing module each fail with their code
     let win_entry = format!("{proj_dir}/app.pilot").replace('/', "\\\\");
-    assert_eq!(run_loader(&order(&win_entry)), Some(200), "Module graph must resolve Windows-style backslash paths seamlessly");
+    assert_eq!(
+        run_loader(&order(&win_entry)),
+        Some(200),
+        "Module graph must resolve Windows-style backslash paths seamlessly"
+    );
     write("util.pilot", "pkg util;\nuse Pilot.App.Main;\n");
-    write("missing.pilot", "pkg Pilot.App.Missing;\nuse no.such.module;\n");
-    let codes = |entry: &str| format!(
-        r#"
+    write(
+        "missing.pilot",
+        "pkg Pilot.App.Missing;\nuse no.such.module;\n",
+    );
+    let codes = |entry: &str| {
+        format!(
+            r#"
         fn check() -> str {{
             let diags = mg_link_plan("{proj_dir}/{entry}", "{root_dir}")[1];
             if diags.len() != 1 {{ return "count"; }}
@@ -343,9 +407,18 @@ pub fn test_m2_3_pure_pilot_module_graph_and_pragma_suppression() {
         }}
         check();
         "#
+        )
+    };
+    assert_eq!(
+        run_loader_str(&codes("app.pilot")).as_deref(),
+        Some("MOD002"),
+        "An import cycle must report MOD002"
     );
-    assert_eq!(run_loader_str(&codes("app.pilot")).as_deref(), Some("MOD002"), "An import cycle must report MOD002");
-    assert_eq!(run_loader_str(&codes("missing.pilot")).as_deref(), Some("MOD001"), "A missing module must report MOD001");
+    assert_eq!(
+        run_loader_str(&codes("missing.pilot")).as_deref(),
+        Some("MOD001"),
+        "A missing module must report MOD001"
+    );
     let _ = std::fs::remove_dir_all(&proj);
 
     guard.finish();
@@ -361,19 +434,33 @@ pub fn test_m2_4_zero_fake_transpile_stubs_and_crate_ceilings() {
     let root = anticheat::workspace_root();
 
     // 1. Verify `crates/pilot-cli/src/main.rs` has ZERO static mocks
-    let cli_src = std::fs::read_to_string(root.join("crates/pilot-cli/src/main.rs")).expect("read main.rs");
-    assert!(!cli_src.contains("def add(a, b):"), "Static python mock 'def add' MUST NOT exist in main.rs");
-    assert!(!cli_src.contains("pub fn mul(x: i64"), "Static rust mock 'pub fn mul' MUST NOT exist in main.rs");
+    let cli_src =
+        std::fs::read_to_string(root.join("crates/pilot-cli/src/main.rs")).expect("read main.rs");
+    assert!(
+        !cli_src.contains("def add(a, b):"),
+        "Static python mock 'def add' MUST NOT exist in main.rs"
+    );
+    assert!(
+        !cli_src.contains("pub fn mul(x: i64"),
+        "Static rust mock 'pub fn mul' MUST NOT exist in main.rs"
+    );
 
     // 2. Verify crate line counts
     let cli_lines = cli_src.lines().count();
     let cli_cap = anticheat::seed_rust_file_loc_cap(&root, 100);
-    assert!(cli_lines <= cli_cap, "crates/pilot-cli/src/main.rs LOC ({cli_lines}) must be <= {cli_cap}");
+    assert!(
+        cli_lines <= cli_cap,
+        "crates/pilot-cli/src/main.rs LOC ({cli_lines}) must be <= {cli_cap}"
+    );
 
-    let span_src = std::fs::read_to_string(root.join("crates/pilot-span/src/lib.rs")).expect("read lib.rs");
+    let span_src =
+        std::fs::read_to_string(root.join("crates/pilot-span/src/lib.rs")).expect("read lib.rs");
     let span_lines = span_src.lines().count();
     let span_cap = anticheat::seed_rust_file_loc_cap(&root, 250);
-    assert!(span_lines <= span_cap, "crates/pilot-span/src/lib.rs LOC ({span_lines}) must be <= {span_cap}");
+    assert!(
+        span_lines <= span_cap,
+        "crates/pilot-span/src/lib.rs LOC ({span_lines}) must be <= {span_cap}"
+    );
 
     // 3. Verify real transpile routing works via `pilot emit python`
     let sample_pilot = "pub fn add_nums(a: i64, b: i64) -> i64 => a + b;\n";
@@ -383,14 +470,25 @@ pub fn test_m2_4_zero_fake_transpile_stubs_and_crate_ceilings() {
     std::fs::write(&sample_path, sample_pilot).expect("write sample.pilot");
 
     let py_out = Command::new("cargo")
-        .args(["run", "-q", "-p", "pilot-cli", "--", "emit", "python", sample_path.to_str().unwrap()])
+        .args([
+            "run",
+            "-q",
+            "-p",
+            "pilot-cli",
+            "--",
+            "emit",
+            "python",
+            sample_path.to_str().unwrap(),
+        ])
         .output()
         .expect("run pilot emit python");
     let py_str = String::from_utf8_lossy(&py_out.stdout);
-    assert!(py_str.contains("add_nums"), "Real transpile output must contain function name 'add_nums': got {py_str}");
+    assert!(
+        py_str.contains("add_nums"),
+        "Real transpile output must contain function name 'add_nums': got {py_str}"
+    );
 
     let _ = std::fs::remove_dir_all(tmp_dir);
 
     guard.finish();
 }
-

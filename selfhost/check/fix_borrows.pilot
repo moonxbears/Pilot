@@ -1,0 +1,287 @@
+// ==============================================================================
+// FILE: selfhost/check/fix_borrows.pilot
+// `pilot check --fix`: parameters that only borrow what they are given.
+// ==============================================================================
+// An owned value passed for a plain parameter is moved (own.pilot), so a
+// caller that goes on using it gets OWN001. A parameter whose function never
+// moves it (never binds, returns, stores or passes it on by value) only
+// borrows it: this writes it `ref`, or `var ref` when the function changes
+// it (consts.pilot use_changes; a plain `ref` is a read-only borrow, PROP-005
+// decision D1).
+//
+// Deciding one parameter can decide others: a parameter passed on to one
+// that is `ref` is not moved there. So every candidate is first assumed
+// `ref` (through `Flow.assumed`, read by the same move and change rules the
+// checker uses) and those that still move are put back, in rounds until none
+// is; then `var` is added to those that change their value, in rounds too. Only free functions of the user's files
+// with a body are changed (a method's signature may be fixed by an
+// interface). The source text gets `ref ` or `var ref ` inserted before each
+// parameter's name and nothing else, so comments and layout stay as they are.
+// Each parameter left by value is reported where its value is really moved
+// (`kept:` lines), not where it is only handed to another kept parameter.
+pub lvl(0) pkg selfhost.check;
+
+/// A plain parameter of an owned type that `pilot check --fix` looks at: its
+/// node, its binding and the identifiers that use it.
+pub struct BorrowCandidate {
+    pub prm: i64;
+    pub b: i64;
+    pub uses: List<i64>;
+    /// Already written `ref`: only `var` may be added.
+    pub declared: bool;
+}
+
+/// Whether `fnode` is a function declared at the top level of a file.
+fn is_free_fn(ref p: Program, fnode: i64) -> bool {
+    let s = p.s;
+    if fnode < 0 || kind(s, fnode) != nk_fn() || fn_body(s, fnode) < 0 { return false; }
+    var up = p.parents[fnode];
+    while up >= 0 && kind(s, up) == nk_block() { up = p.parents[up]; }
+    return up >= 0 && kind(s, up) == nk_program();
+}
+
+/// The parameters `pilot check --fix` may change, with their uses.
+pub fn borrow_candidates(var ref f: Flow) -> List<BorrowCandidate> {
+    let inf = f.inf;
+    let p = inf.p;
+    let s = p.s;
+    let r = inf.r;
+    var out: List<BorrowCandidate> = [];
+    let at = Map<i64, i64>();
+    var b = 0;
+    while b < r.site.len() {
+        let prm = r.site[b];
+        if r.bind_kind[b] == BindKind::Param && prm >= 0 && kind(s, prm) == nk_param()
+            && in_user_file(s, prm) && r.name[b] != s.receiver && is_free_fn(p, p.parents[prm]) {
+            let declared = param_flag(s, prm, param_flag_ref()) && !param_flag(s, prm, param_flag_mutable())
+                && !param_flag(s, prm, param_flag_isolated());
+            if declared || (flags(s, prm) == 0 && is_owned_binding(f, b)) {
+                at.set(b, out.len());
+                out.push(BorrowCandidate { prm: prm, b: b, uses: [], declared: declared });
+            }
+        }
+        b = b + 1;
+    }
+    var n = s.user_lo;
+    while n < s.user_hi {
+        if kind(s, n) == nk_ident() {
+            let rb = r.ref_of[n];
+            if rb >= 0 && at.has(rb) { out[at.get(rb)].uses.push(n); }
+        }
+        n = n + 1;
+    }
+    return out;
+}
+
+/// Whether some use of candidate `c` moves it.
+fn moves_somewhere(var ref f: Flow, ref c: BorrowCandidate) -> bool {
+    for n in c.uses {
+        if is_move_position(f, n) { return true; }
+    }
+    return false;
+}
+
+/// Whether some use of candidate `c` changes the value it borrows.
+fn changes_somewhere(var ref cs: ConstScan, ref c: BorrowCandidate) -> bool {
+    for n in c.uses {
+        if use_changes(cs, n) { return true; }
+    }
+    return false;
+}
+
+/// Fills `f.assumed` with `ref` or `var ref` for every candidate that never
+/// moves its value; gives how many it changed.
+pub fn plan_borrows(var ref f: Flow, ref cands: List<BorrowCandidate>) -> i64 {
+    // Every candidate starts as a borrow and is put back by value while some
+    // use still moves it: functions that call each other in a cycle (a
+    // recursive descent) borrow together, which proposing one at a time
+    // never reaches.
+    var count = 0;
+    for c in cands {
+        f.assumed.set(c.prm, param_flag_ref());
+        if !c.declared { count = count + 1; }
+    }
+    var removed = true;
+    while removed {
+        removed = false;
+        for c in cands {
+            if !c.declared && f.assumed.has(c.prm) && moves_somewhere(f, c) {
+                f.assumed.remove(c.prm);
+                count = count - 1;
+                removed = true;
+            }
+        }
+    }
+    var added = true;
+    while added {
+        added = false;
+        // A fresh scan: what a call changes depends on what was decided.
+        for c in cands {
+            if f.assumed.has(c.prm) && f.assumed.get(c.prm) == param_flag_ref() && changes_somewhere(const_scan(f), c) {
+                f.assumed.set(c.prm, param_flag_ref() + param_flag_mutable());
+                added = true;
+            }
+        }
+    }
+    return count;
+}
+
+/// The parameter of a candidate that the move at `n` hands the value to, or
+/// -1: a move into another kept parameter is not where the value is kept.
+fn moved_into(ref f: Flow, n: i64, ref kept: Map<i64, bool>) -> i64 {
+    let p = f.inf.p;
+    let s = p.s;
+    let up = p.parents[n];
+    if up < 0 { return -1; }
+    var call = -1;
+    var prm = -1;
+    if kind(s, up) == nk_call() {
+        call = up;
+        let target = call_target(f, call);
+        if target < 0 { return -1; }
+        let params = fn_params(s, target);
+        let ch = children(s, call);
+        var i = 1;
+        while i < ch.len() {
+            if ch[i] == n && i - 1 < params.len() { prm = params[i - 1]; }
+            i = i + 1;
+        }
+    } else if kind(s, up) == nk_call_arg() {
+        call = p.parents[up];
+        if call < 0 || kind(s, call) != nk_call() { return -1; }
+        let target = call_target(f, call);
+        if target < 0 { return -1; }
+        for q in fn_params(s, target) {
+            if node_name(s, q) == node_name(s, up) { prm = q; }
+        }
+    }
+    return if prm >= 0 && kept.has(prm) { prm } else { -1 };
+}
+
+/// `path:line:col` of node `n`.
+fn where_of(ref s: Snap, n: i64) -> str {
+    let row: List<any> = s.files[unit_of(s, n)];
+    let path: str = row[0];
+    let base: i64 = row[2];
+    let text: str = row[3];
+    return f"{path}:{line_col(text, span_start(s, n) - base)}";
+}
+
+/// Reports where each kept parameter's value is really moved: its moves
+/// that do not just hand it to another kept parameter. Gives how many.
+pub fn report_kept(var ref f: Flow, ref cands: List<BorrowCandidate>) -> i64 {
+    let s = f.inf.p.s;
+    let kept = Map<i64, bool>();
+    for c in cands {
+        if !c.declared && !f.assumed.has(c.prm) { kept.set(c.prm, true); }
+    }
+    var count = 0;
+    for c in cands {
+        if c.declared || f.assumed.has(c.prm) { continue; }
+        for n in c.uses {
+            if is_move_position(f, n) && moved_into(f, n, kept) < 0 {
+                print(f"kept: {where_of(s, n)}: `{node_name(s, c.prm)}` is moved here");
+                count = count + 1;
+            }
+        }
+    }
+    return count;
+}
+
+/// The 1-based line and column of byte `at` of `text`.
+fn line_col(text: str, at: i64) -> str {
+    var line = 1;
+    var col = 1;
+    var i = 0;
+    while i < at && i < text.len() {
+        if text.byte_at(i) == 10 {
+            line = line + 1;
+            col = 1;
+        } else {
+            col = col + 1;
+        }
+        i = i + 1;
+    }
+    return f"{line}:{col}";
+}
+
+/// Writes the planned parameter words into the user's files and reports
+/// each change; gives how many files it wrote.
+pub fn apply_borrows(ref f: Flow, ref cands: List<BorrowCandidate>) -> i64 {
+    let s = f.inf.p.s;
+    var written = 0;
+    var u = 0;
+    while u < s.files.len() {
+        let row: List<any> = s.files[u];
+        let user: bool = row[1];
+        if user {
+            let path: str = row[0];
+            let base: i64 = row[2];
+            let text: str = row[3];
+            // The changes in this file, last first, so earlier offsets hold.
+            var at: List<i64> = [];
+            var words: List<str> = [];
+            for c in cands {
+                if unit_of(s, c.prm) != u || !f.assumed.has(c.prm) { continue; }
+                let name = node_name(s, c.prm);
+                let to_var = f.assumed.get(c.prm) != param_flag_ref();
+                if c.declared && !to_var { continue; }
+                // A plain parameter's span starts at its name, a declared
+                // `ref` one's at its `ref `, which gets `var ` before it.
+                let off = span_start(s, c.prm) - base;
+                let at_name = if c.declared { off + 4 } else { off };
+                if text.slice(at_name, at_name + name.len()) != name { continue; }
+                if c.declared && text.slice(off, at_name) != "ref " { continue; }
+                let word = if c.declared { "var " } else if to_var { "var ref " } else { "ref " };
+                var k = at.len();
+                at.push(off);
+                words.push(word);
+                while k > 0 && at[k - 1] < off {
+                    at[k] = at[k - 1];
+                    words[k] = words[k - 1];
+                    at[k - 1] = off;
+                    words[k - 1] = word;
+                    k = k - 1;
+                }
+                let shown = if c.declared { "var ref" } else { word.slice(0, word.len() - 1) };
+                print(f"{path}:{line_col(text, at_name)}: `{name}` -> `{shown}`");
+            }
+            if at.len() > 0 {
+                var out = text;
+                var i = 0;
+                while i < at.len() {
+                    out = out.slice(0, at[i]) + words[i] + out.slice(at[i], out.len());
+                    i = i + 1;
+                }
+                if !File.write_text(path, out) {
+                    eprint(f"error: cannot write `{path}`");
+                    return -1;
+                }
+                written = written + 1;
+            }
+        }
+        u = u + 1;
+    }
+    return written;
+}
+
+/// The entry of `pilot check --fix` (selfhost/cli/commands.pilot cmd_check):
+/// makes every parameter that only borrows its value `ref` or `var ref`.
+pub fn fix_borrows_main() -> i64 {
+    let s = snap_load();
+    let sink = sink_new(s);
+    let p = prog_new(s);
+    let inf = infer_new(p, resolve_program(p, sink));
+    let f = flow_new(inf, sink);
+    let cands = borrow_candidates(f);
+    let count = plan_borrows(f, cands);
+    let files = apply_borrows(f, cands);
+    if files < 0 { return 1; }
+    var widened = 0;
+    for c in cands {
+        if c.declared && f.assumed.get(c.prm) != param_flag_ref() { widened = widened + 1; }
+    }
+    let moves = report_kept(f, cands);
+    print(f"check --fix: {count} parameter(s) made borrows and {widened} `ref` made `var ref` in {files} file(s); {moves} move(s) keep the others by value");
+    return 0;
+}

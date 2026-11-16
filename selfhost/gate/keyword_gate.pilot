@@ -13,9 +13,8 @@
 //   GATE022  a keyword row whose verdict is below rung 1 (not SEAM, PARTIAL
 //            or REAL): it claims a behaviour nothing gives
 //   GATE023  the matrix has no keyword rows, or lacks the columns read here
-pub lvl(0) pkg Pilot.SelfHost.Gate.KeywordGate;
+pub lvl(0) pkg selfhost.gate;
 
-use selfhost.gate.manifest.*;
 
 fn kg_matrix_file() -> str => "docs/keyword_matrix.md";
 

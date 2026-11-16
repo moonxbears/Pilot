@@ -10,9 +10,8 @@
 // the interpreter runs each operator, branch condition and engine operation
 // through the engine operation `op_checked`, which gives the failure back as
 // a value instead of stopping (crates/pilot-vm checked.rs).
-pub lvl(0) pkg Pilot.SelfHost.Ir.Fault;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.ir.model.*;
 
 /// The runtime error of the program being run, shared by every frame.
 pub struct IrFault : IObject {
@@ -26,7 +25,7 @@ pub struct IrFault : IObject {
 pub fn ir_fault_new() -> IrFault => IrFault { active: false, message: "", spans: [] };
 
 /// Stops the program with `message`, unless it has stopped already.
-pub fn raise_fault(fault: IrFault, message: str) {
+pub fn raise_fault(var ref fault: IrFault, message: str) {
     if fault.active { return; }
     fault.active = true;
     fault.message = message;
@@ -45,7 +44,7 @@ pub fn ir_source_map_empty() -> IrSourceMap => IrSourceMap { paths: [], bases: [
 
 /// `<path>:<line>:<col>` of offset `at` (1-based, columns in bytes), as the
 /// seed's `LinkedSource::locate`; `<program>` when no file holds it.
-pub fn ir_locate(map: IrSourceMap, at: i64) -> str {
+pub fn ir_locate(ref map: IrSourceMap, at: i64) -> str {
     // The file starting last at or before `at`.
     var f = -1;
     var i = 0;
@@ -73,7 +72,7 @@ pub fn ir_locate(map: IrSourceMap, at: i64) -> str {
 }
 
 /// Prints the fault as the seed does.
-pub fn report_fault(fault: IrFault, map: IrSourceMap) {
+pub fn report_fault(ref fault: IrFault, ref map: IrSourceMap) {
     eprint(f"{ir_locate(map, if fault.spans.len() > 0 { fault.spans[0] } else { ir_no_span() })}: runtime error: {fault.message}");
     var calls: List<i64> = [];
     var i = 1;
@@ -93,8 +92,8 @@ pub fn report_fault(fault: IrFault, map: IrSourceMap) {
 
 /// Runs operator, condition test or engine operation `name` on `args`:
 /// `[true, value]`, or `[false, message]` with the seed's failure message.
-pub fn op_checked(name: str, args: List<any>) -> List<any> => __engine("op_checked", name, args);
+pub fn op_checked(name: str, ref args: List<any>) -> List<any> => __engine("op_checked", name, args);
 
 /// A copy of list `v` (and of any list or record in it) that shares nothing
 /// with it.
-pub fn fresh_copy(v: List<any>) -> List<any> => __engine("value_clone", v);
+pub fn fresh_copy(ref v: List<any>) -> List<any> => __engine("value_clone", v);

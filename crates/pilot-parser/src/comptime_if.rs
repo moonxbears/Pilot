@@ -16,8 +16,8 @@
 use crate::Parser;
 use pilot_ast::{BinaryOp, NodeId, NodeKind};
 use pilot_intern::SymbolId;
-use pilot_span::ByteSpan;
 use pilot_lexer::TokenKind;
+use pilot_span::ByteSpan;
 use std::collections::{HashMap, HashSet};
 
 /// The `else` receptor slot (`stdlib/core/syntax/*.pilot`).
@@ -120,7 +120,8 @@ impl<'a> Parser<'a> {
         }
         chosen.unwrap_or_else(|| {
             let end = self.prev_span().end;
-            self.arena.alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(sp.start, end), &[])
+            self.arena
+                .alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(sp.start, end), &[])
         })
     }
 
@@ -131,7 +132,10 @@ impl<'a> Parser<'a> {
         match self.fold(cond) {
             Ok(Folded::Bool(b)) => b,
             Ok(_) => {
-                self.arena.diagnostics.push((span, "CTIME007: the condition of `comptime if` must be a `bool`".into()));
+                self.arena.diagnostics.push((
+                    span,
+                    "CTIME007: the condition of `comptime if` must be a `bool`".into(),
+                ));
                 false
             }
             Err(NoFold::Runtime) => {
@@ -166,20 +170,34 @@ impl<'a> Parser<'a> {
         let n = *self.arena.node(id);
         match n.node_kind() {
             NodeKind::BoolLit => Ok(Folded::Bool(n.lhs != 0)),
-            NodeKind::IntLit => Ok(Folded::Int(self.arena.i64_pool.get(n.lhs as usize).copied().unwrap_or(0))),
-            NodeKind::StrLit => Ok(Folded::Text(self.arena.interner.resolve(SymbolId(n.lhs)).to_string())),
+            NodeKind::IntLit => Ok(Folded::Int(
+                self.arena
+                    .i64_pool
+                    .get(n.lhs as usize)
+                    .copied()
+                    .unwrap_or(0),
+            )),
+            NodeKind::StrLit => Ok(Folded::Text(
+                self.arena.interner.resolve(SymbolId(n.lhs)).to_string(),
+            )),
             NodeKind::IdentExpr => {
                 let name = self.arena.interner.resolve(SymbolId(n.lhs));
                 if self.folds.runtime.contains(name) {
                     return Err(NoFold::Runtime);
                 }
-                self.folds.consts.get(name).cloned().ok_or(NoFold::Unconnected)
+                self.folds
+                    .consts
+                    .get(name)
+                    .cloned()
+                    .ok_or(NoFold::Unconnected)
             }
             NodeKind::UnaryExpr => {
                 let v = self.fold(NodeId(n.lhs))?;
                 match (n.flags, v) {
                     (UNARY_NOT, Folded::Bool(b)) => Ok(Folded::Bool(!b)),
-                    (UNARY_NEG, Folded::Int(i)) => i.checked_neg().map(Folded::Int).ok_or(NoFold::Unconnected),
+                    (UNARY_NEG, Folded::Int(i)) => {
+                        i.checked_neg().map(Folded::Int).ok_or(NoFold::Unconnected)
+                    }
                     (UNARY_IDENTITY, v) => Ok(v),
                     _ => Err(NoFold::Unconnected),
                 }

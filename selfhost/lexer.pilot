@@ -2,7 +2,7 @@
 // FILE: selfhost/lexer.pilot
 // Milestone 61.1: Standalone Self-Hosted TokenTape Scanner & 14-Token Seed Lexer
 // ==============================================================================
-pub pkg Pilot.SelfHost.Lexer;
+pub pkg selfhost;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

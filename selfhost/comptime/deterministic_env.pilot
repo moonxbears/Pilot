@@ -5,7 +5,7 @@
 // 0-epoch clock, content-seeded deterministic PRNG, and path normalization.
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Comptime.DetEnv;
+pub lvl(0) pkg selfhost.comptime;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

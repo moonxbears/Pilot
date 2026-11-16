@@ -3,6 +3,8 @@
 // Milestone 53.1: Sub-Millisecond Incremental CST Splicer & Island Reuse
 // ============================================================================
 
+pub pkg selfhost.cst;
+
 [Layout(c_abi)]
 pub struct IncrementalTextEdit : IValue {
     pub start: i64;

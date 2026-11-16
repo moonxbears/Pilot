@@ -11,9 +11,8 @@
 //   CHOR007: Concurrent Write Race on Shared Storage
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Chor.Verifier;
+pub lvl(0) pkg selfhost.chor;
 
-use Pilot.SelfHost.Chor.Ast.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -53,7 +52,7 @@ pub pure fn format_chor007(role1: str, role2: str, storage: str) -> str {
 // 2. Graph & Package Helpers
 // ------------------------------------------------------------------------------
 
-pure fn chor_list_has(items: List<str>, item: str) -> bool {
+pure fn chor_list_has(ref items: List<str>, item: str) -> bool {
     var i = 0;
     while i < items.len() {
         if items[i] == item { return true; }

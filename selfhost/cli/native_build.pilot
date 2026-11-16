@@ -20,12 +20,10 @@
 //
 // Exit codes: 0 built, 1 the program or the C compiler rejected it,
 // 2 bad usage.
-pub lvl(0) pkg Pilot.SelfHost.Cli.NativeBuild;
+pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.File;
 use std.proc;
-use Pilot.SelfHost.Cli.TestEmit;
-use Pilot.SelfHost.Cli.ComptimeAttrs;
 
 /// The executable `pilot build` writes for `program` when no `-o` is given:
 /// its file name without `.pilot`, in the working directory.

@@ -150,9 +150,34 @@ impl Opcode {
         use Opcode::*;
         matches!(
             self,
-            Add | Sub | Mul | Div | Rem | Pow | FloorDiv | BitAnd | BitOr | Xor | Shl | Shr | CmpEq | CmpNe | CmpLt
-                | CmpLe | CmpGt | CmpGe | Neg | Not | BitNot | LoadConst | Move | Call | CallClosure | EngineIntrinsic
-                | GetOut | IntrinsicArgs | IntrinsicKey
+            Add | Sub
+                | Mul
+                | Div
+                | Rem
+                | Pow
+                | FloorDiv
+                | BitAnd
+                | BitOr
+                | Xor
+                | Shl
+                | Shr
+                | CmpEq
+                | CmpNe
+                | CmpLt
+                | CmpLe
+                | CmpGt
+                | CmpGe
+                | Neg
+                | Not
+                | BitNot
+                | LoadConst
+                | Move
+                | Call
+                | CallClosure
+                | EngineIntrinsic
+                | GetOut
+                | IntrinsicArgs
+                | IntrinsicKey
         )
     }
 
@@ -169,7 +194,9 @@ pub struct Instruction(pub u64);
 impl Instruction {
     #[inline]
     pub const fn encode(op: Opcode, r_dst: u8, r_src1: u8, r_src2: u8) -> Self {
-        Self(((op as u64) << 24) | ((r_dst as u64) << 16) | ((r_src1 as u64) << 8) | (r_src2 as u64))
+        Self(
+            ((op as u64) << 24) | ((r_dst as u64) << 16) | ((r_src1 as u64) << 8) | (r_src2 as u64),
+        )
     }
 
     /// Encodes an instruction whose 32-bit operand lives in `ext`.
@@ -222,6 +249,13 @@ impl Instruction {
 
 impl core::fmt::Debug for Instruction {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:?} r{}, r{}, r{}", self.opcode(), self.dst(), self.src1(), self.src2())
+        write!(
+            f,
+            "{:?} r{}, r{}, r{}",
+            self.opcode(),
+            self.dst(),
+            self.src1(),
+            self.src2()
+        )
     }
 }

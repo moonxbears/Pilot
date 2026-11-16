@@ -21,10 +21,10 @@
 // Diagnostics: MOD001 for a `use` that names no package, MOD002 for an import
 // cycle. Each points at the `use` declaration that closes it.
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Loader.ModuleGraph;
+pub lvl(0) pkg selfhost.loader;
 
 use Pilot.Core.File;
-use Pilot.Diagnostics.Model;
+use selfhost.diagnostics.*;
 
 /// One `pkg` or `use` declaration at the head of a file.
 [Layout(c_abi)]
@@ -235,9 +235,10 @@ pub struct ModuleGraph : IObject {
     pub units: List<ModuleNode>;
     /// Unit index by normalized file path.
     pub by_path: Map<str, i64>;
-    /// Files declaring each package, once the index is built.
+    /// Files declaring each package, from the roots indexed so far.
     pub pkg_files: Map<str, List<str>>;
-    pub indexed: bool;
+    /// How many of `roots` (in order) `pkg_files` covers.
+    pub indexed: i64;
     /// The `pkg` declarations found under each root so far, as package and
     /// file by turns; shared by the graphs one tool run builds.
     pub root_index: Map<str, List<str>>;
@@ -320,9 +321,14 @@ pub pure fn mg_lines(text: str) -> List<str> {
 }
 
 /// Where packages are looked for: the entry file's directory, then the
-/// standard library of the toolchain at `toolchain_root`.
+/// standard library of the toolchain at `toolchain_root`, then its
+/// self-hosted compiler (`selfhost.*`, one package per directory).
 pub fn mg_default_search_roots(entry_dir: str, toolchain_root: str) -> List<str> {
-    return [mg_normalize_path(entry_dir), mg_normalize_path(toolchain_root + "/stdlib")];
+    return [
+        mg_normalize_path(entry_dir),
+        mg_normalize_path(toolchain_root + "/stdlib"),
+        mg_normalize_path(toolchain_root + "/selfhost"),
+    ];
 }
 
 // ------------------------------------------------------------------------------
@@ -356,36 +362,68 @@ pub fn mg_conventional_paths(root: str, pkg: str) -> List<str> {
     ];
 }
 
-/// Indexes the `pkg` declaration of every source file under the roots.
-pub fn mg_build_index(g: ModuleGraph) {
-    g.indexed = true;
+/// The `pkg` declarations of the source files under `root`, as package and
+/// file by turns; read once per tool run.
+pub fn mg_root_pairs(ref g: ModuleGraph, root: str) -> List<str> {
+    if !g.root_index.has(root) {
+        var found: List<str> = [];
+        for file in mg_lines(File.walk_files(root)) {
+            if !file.ends_with(".pilot") { continue; }
+            let path = mg_normalize_path(file);
+            guard some h = UnitHeader.read(path) else { continue; };
+            let pkg = h.package_name();
+            if pkg == "" { continue; }
+            found.push(pkg);
+            found.push(path);
+        }
+        g.root_index.set(root, found);
+    }
+    return g.root_index.get(root);
+}
+
+/// The search root `path` lies under (the longest one containing it), or
+/// `""` when none does. `.` contains every relative path.
+pub fn mg_root_of(ref g: ModuleGraph, path: str) -> str {
+    var best = "";
     for root in g.roots {
-        if !g.root_index.has(root) {
-            var found: List<str> = [];
-            for file in mg_lines(File.walk_files(root)) {
-                if !file.ends_with(".pilot") { continue; }
-                let path = mg_normalize_path(file);
-                guard some h = UnitHeader.read(path) else { continue; };
-                let pkg = h.package_name();
-                if pkg == "" { continue; }
-                found.push(pkg);
-                found.push(path);
-            }
-            g.root_index.set(root, found);
-        }
-        let pairs = g.root_index.get(root);
-        var i = 0;
-        while i < pairs.len() {
-            if !g.pkg_files.has(pairs[i]) { g.pkg_files.set(pairs[i], []); }
-            g.pkg_files.get(pairs[i]).push(pairs[i + 1]);
-            i = i + 2;
-        }
+        let inside = (root == "." && !path.starts_with("/")) || path.starts_with(root + "/");
+        if inside && root.len() > best.len() { best = root; }
+    }
+    return best;
+}
+
+/// Every file under `root` declaring package `pkg`. A package's files all
+/// live under one root.
+pub fn mg_package_members(ref g: ModuleGraph, root: str, pkg: str) -> List<str> {
+    var out: List<str> = [];
+    if root == "" { return out; }
+    let pairs = mg_root_pairs(g, root);
+    var i = 0;
+    while i < pairs.len() {
+        if pairs[i] == pkg { out.push(pairs[i + 1]); }
+        i = i + 2;
+    }
+    return out;
+}
+
+/// Adds the `pkg` declarations under the next root not yet indexed.
+pub fn mg_index_next_root(var ref g: ModuleGraph) {
+    let pairs = mg_root_pairs(g, g.roots[g.indexed]);
+    g.indexed = g.indexed + 1;
+    var i = 0;
+    while i < pairs.len() {
+        if !g.pkg_files.has(pairs[i]) { g.pkg_files.set(pairs[i], []); }
+        g.pkg_files.get(pairs[i]).push(pairs[i + 1]);
+        i = i + 2;
     }
 }
 
-/// The files declaring package `pkg`; empty when none does.
-pub fn mg_package_files(g: ModuleGraph, pkg: str) -> List<str> {
-    if !g.indexed {
+/// The files declaring package `pkg`; empty when none does. Roots are
+/// indexed in order only as far as needed, so a package under an earlier
+/// root hides one of the same name under a later root.
+pub fn mg_package_files(var ref g: ModuleGraph, pkg: str) -> List<str> {
+    if g.pkg_files.has(pkg) { return g.pkg_files.get(pkg); }
+    if g.indexed == 0 {
         for root in g.roots {
             for path in mg_conventional_paths(root, pkg) {
                 if !File.exists(path) { continue; }
@@ -393,26 +431,37 @@ pub fn mg_package_files(g: ModuleGraph, pkg: str) -> List<str> {
                 if h.package_name() == pkg { return [mg_normalize_path(path)]; }
             }
         }
-        mg_build_index(g);
     }
-    if g.pkg_files.has(pkg) { return g.pkg_files.get(pkg); }
+    while g.indexed < g.roots.len() {
+        mg_index_next_root(g);
+        if g.pkg_files.has(pkg) { return g.pkg_files.get(pkg); }
+    }
     return [];
 }
 
-/// The files a `use` path imports: the package it names, or the package
-/// whose item it names. Empty when it names neither.
-pub fn mg_resolve_import_path(g: ModuleGraph, spec: str) -> List<str> {
+/// The package a `use` path imports: the package it names, or the package
+/// whose item it names. `""` when it names neither.
+pub fn mg_resolve_import_package(var ref g: ModuleGraph, spec: str) -> str {
     let pkg = mg_import_package(spec);
-    let files = mg_package_files(g, pkg);
-    if files.len() > 0 { return files; }
+    if mg_package_files(g, pkg).len() > 0 { return pkg; }
     var i = pkg.len();
     while i > 0 {
         if pkg.byte_at(i - 1) == 46 {
-            return mg_package_files(g, pkg.slice(0, i - 1));
+            let parent = pkg.slice(0, i - 1);
+            if mg_package_files(g, parent).len() > 0 { return parent; }
+            return "";
         }
         i = i - 1;
     }
-    return [];
+    return "";
+}
+
+/// The files a `use` path imports: those of `mg_resolve_import_package`.
+/// Empty when it names no package.
+pub fn mg_resolve_import_path(var ref g: ModuleGraph, spec: str) -> List<str> {
+    let pkg = mg_resolve_import_package(g, spec);
+    if pkg == "" { return []; }
+    return mg_package_files(g, pkg);
 }
 
 // ------------------------------------------------------------------------------
@@ -430,27 +479,36 @@ pub fn mg_extract_package_info(path: str, id: u32, h: UnitHeader) -> ModuleNode 
     };
 }
 
-fn mg_report(g: ModuleGraph, code: str, message: str, path: str, offset: u32) {
+fn mg_report(var ref g: ModuleGraph, code: str, message: str, path: str, offset: u32) {
     g.diagnostics.push(ModuleDiagnostic { code: code, message: message, file_path: path, offset: offset });
 }
 
 /// The unit for `path`, adding it (and the units it imports) when new.
 /// `-1` when the file cannot be read.
-fn mg_unit_for(g: ModuleGraph, path: str) -> i64 {
+fn mg_unit_for(var ref g: ModuleGraph, path: str) -> i64 {
     if g.by_path.has(path) { return g.by_path.get(path); }
     guard some h = UnitHeader.read(path) else { return -1; };
     let id = g.units.len();
     let node = mg_extract_package_info(path, id, h);
     g.units.push(node);
     g.by_path.set(path, id);
+    // A package is all the files declaring it: they load together and see
+    // each other without importing, so no edge joins them.
+    let own = h.package_name();
+    if own != "" {
+        for f in mg_package_members(g, mg_root_of(g, path), own) {
+            if f != path { mg_unit_for(g, f); }
+        }
+    }
     for d in h.decls {
         if d.is_package || mg_import_package(d.path) == mg_genesis_package() { continue; }
-        let files = mg_resolve_import_path(g, d.path);
-        if files.len() == 0 {
+        let pkg = mg_resolve_import_package(g, d.path);
+        if pkg == "" {
             mg_report(g, "MOD001", f"no package `{mg_import_package(d.path)}` for `use {d.path}`", path, d.offset);
             continue;
         }
-        for f in files {
+        if pkg == own { continue; }
+        for f in mg_package_files(g, pkg) {
             if f == path { continue; }
             let dep = mg_unit_for(g, f);
             if dep >= 0 {
@@ -462,9 +520,10 @@ fn mg_unit_for(g: ModuleGraph, path: str) -> i64 {
     return id;
 }
 
-/// Depth-first visit: appends `u` after everything it imports. `state` is
-/// 0 for unvisited, 1 while `u`'s imports are being visited, 2 when done.
-fn mg_visit(g: ModuleGraph, u: i64, state: List<i64>, stack: List<i64>) {
+/// Depth-first visit: appends `u` after everything it imports and after the
+/// other files of its package (so the entry file stays last). `state` is 0
+/// for unvisited, 1 while `u`'s imports are being visited, 2 when done.
+fn mg_visit(var ref g: ModuleGraph, u: i64, var ref state: List<i64>, var ref stack: List<i64>) {
     state[u] = 1;
     stack.push(u);
     let node = g.units[u];
@@ -472,12 +531,18 @@ fn mg_visit(g: ModuleGraph, u: i64, state: List<i64>, stack: List<i64>) {
     while i < node.deps.len() {
         let d = node.deps[i];
         if state[d] == 1 {
+            // Named by package: files of one package on the path count once.
             var cycle = "";
+            var last = "";
             var k = 0;
             var on = false;
             while k < stack.len() {
                 if stack[k] == d { on = true; }
-                if on { cycle = cycle + g.units[stack[k]].pkg_name + " -> "; }
+                let name = g.units[stack[k]].pkg_name;
+                if on && name != last {
+                    cycle = cycle + name + " -> ";
+                    last = name;
+                }
                 k = k + 1;
             }
             cycle = cycle + g.units[d].pkg_name;
@@ -486,6 +551,14 @@ fn mg_visit(g: ModuleGraph, u: i64, state: List<i64>, stack: List<i64>) {
             mg_visit(g, d, state, stack);
         }
         i = i + 1;
+    }
+    if node.pkg_name != "" {
+        for f in mg_package_members(g, mg_root_of(g, node.file_path), node.pkg_name) {
+            if g.by_path.has(f) {
+                let sib = g.by_path.get(f);
+                if state[sib] == 0 { mg_visit(g, sib, state, stack); }
+            }
+        }
     }
     let _ = stack.pop();
     state[u] = 2;
@@ -500,13 +573,13 @@ pub fn mg_build_graph(entry_file: str, toolchain_root: str) -> ModuleGraph => mg
 /// The files under the roots must not change between the graphs sharing it.
 /// The files `extras` names are entry points too, linked (with what they
 /// import) after the prelude and before the program (PROP-013).
-pub fn mg_build_graph_sharing(entry_file: str, toolchain_root: str, root_index: Map<str, List<str>>, extras: List<str>) -> ModuleGraph {
+pub fn mg_build_graph_sharing(entry_file: str, toolchain_root: str, root_index: Map<str, List<str>>, ref extras: List<str>) -> ModuleGraph {
     let entry = mg_normalize_path(entry_file);
     let g = ModuleGraph {
         units: [],
         by_path: [:],
         pkg_files: [:],
-        indexed: false,
+        indexed: 0,
         root_index: root_index,
         roots: mg_default_search_roots(mg_dir_of(entry), toolchain_root),
         topo_order: [],
@@ -548,7 +621,7 @@ pub fn mg_link_plan(entry_file: str, toolchain_root: str) -> List<any> => mg_lin
 /// `mg_link_plan`, with the files `extras` names (and what they import)
 /// linked after the prelude and before the program, in the same pass; a
 /// file the program links already is linked once.
-pub fn mg_link_plan_with(entry_file: str, toolchain_root: str, extras: List<str>) -> List<any> {
+pub fn mg_link_plan_with(entry_file: str, toolchain_root: str, ref extras: List<str>) -> List<any> {
     let g = mg_build_graph_sharing(entry_file, toolchain_root, [:], extras);
     var paths: List<str> = [];
     for id in g.topo_order {

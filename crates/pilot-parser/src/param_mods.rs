@@ -23,6 +23,11 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokenKind::RParen);
-        PendingAttr { name, args, is_mut: false, bind_sym: Default::default() }
+        PendingAttr {
+            name,
+            args,
+            is_mut: false,
+            bind_sym: Default::default(),
+        }
     }
 }

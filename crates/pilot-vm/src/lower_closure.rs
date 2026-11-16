@@ -9,9 +9,9 @@
 //! compile error rather than a write the enclosing scope would never see.
 
 use crate::instruction::{Instruction, Opcode};
+use crate::value::PilotVal;
 use crate::{BytecodeCompiler, CaptureCtx};
 use pilot_ast::{AstArena, NodeId};
-use crate::value::PilotVal;
 
 /// Closure calls pass the environment in the register after the arguments.
 const MAX_CLOSURE_ARGS: usize = crate::MAX_CALL_ARGS - 1;
@@ -80,12 +80,9 @@ impl BytecodeCompiler {
         for name in &captured {
             let r = match self.var_slots.get(name).copied() {
                 Some(r) => r,
-                None => self
-                    .capture_read(name)
-                    .unwrap_or_else(|| self.error(
-                        crate::codes::UNDECLARED,
-                        format!("undefined name `{name}`"),
-                    )),
+                None => self.capture_read(name).unwrap_or_else(|| {
+                    self.error(crate::codes::UNDECLARED, format!("undefined name `{name}`"))
+                }),
             };
             regs.push(r);
         }
@@ -146,7 +143,8 @@ impl BytecodeCompiler {
         }
         let r_entry = self.alloc_reg();
         let idx = self.push_ins(Instruction::encode_wide(Opcode::LoadConst, r_entry, 0));
-        self.entry_patches.push((idx, name.to_string(), self.cur_span));
+        self.entry_patches
+            .push((idx, name.to_string(), self.cur_span));
         let r_arity = self.emit_const(PilotVal::from_int(arity as i64));
         Some(self.emit_intrinsic("closure_new", &[r_entry, r_arity]))
     }

@@ -8,10 +8,9 @@
 // `f32`, and `print` uses Rust's own formatting, which is the seed's.
 // Strings appear only as literals passed to `print`; module variables and
 // records stop at the representation seam.
-pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitRust;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.ir.model.*;
-use selfhost.transpile.source.*;
+use selfhost.ir.*;
 
 pub struct RustDialect : ISourceDialect {
     pub fn language() -> str => "Rust";

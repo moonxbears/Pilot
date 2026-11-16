@@ -14,11 +14,8 @@
 // is not a float (a float may not fit an integer), a field read stays unless
 // its record's layout is known, and a load stays unless it reads a stack
 // slot (a global may be read before its declaration has run).
-pub lvl(0) pkg Pilot.SelfHost.Ir.PassDce;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.ir.model.*;
-use selfhost.ir.verify.*;
-use selfhost.ir.passes.*;
 
 pub struct DeadCodePass : IPilIrPass {
     pub fn name() -> str => "dce";
@@ -35,13 +32,13 @@ fn removable_opcodes() -> List<u16> => [
 ];
 
 /// Whether `v` is a number or boolean in a register.
-fn numeric(f: IrFunction, v: u32) -> bool {
+fn numeric(ref f: IrFunction, v: u32) -> bool {
     let p = f.value_physics[v];
     return p.layout_id != 0 && p.reg_class < reg_class_aggregate() && p.reg_class != reg_class_raw_ptr();
 }
 
 /// Whether running `inst` cannot fail, by what its operands are.
-fn cannot_fail(f: IrFunction, inst: IrInst, producers: List<i64>) -> bool {
+fn cannot_fail(ref f: IrFunction, inst: IrInst, ref producers: List<i64>) -> bool {
     let op = inst.opcode;
     let a = ir_args(f, inst);
     if op == op_cmp() && inst.subop <= 1 { return true; }
@@ -58,7 +55,7 @@ fn cannot_fail(f: IrFunction, inst: IrInst, producers: List<i64>) -> bool {
 }
 
 /// Removes `f`'s dead blocks and instructions; true when anything changed.
-pub fn eliminate_dead_code(f: IrFunction) -> bool {
+pub fn eliminate_dead_code(var ref f: IrFunction) -> bool {
     let order = ir_compute_dominators(f);
     var reachable: List<bool> = [];
     for _b in f.blocks { reachable.push(false); }

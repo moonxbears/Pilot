@@ -3,7 +3,7 @@
 // 100% Pilot-Hosted Multi-Pass Analyzer Executed in PilVirtualMachine
 // Driven by __engine(...) host bridge into PhysicsRegistry
 // ==============================================================================
-pub pkg Pilot.SelfHost.Analyzer;
+pub pkg selfhost;
 extern fn __engine(operation: string, ...args: i64) -> i64;
 let Cfg = {
     ast = {

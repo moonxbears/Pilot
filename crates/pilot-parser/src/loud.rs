@@ -98,7 +98,6 @@ impl Parser<'_> {
         }
     }
 
-
     /// `where` clauses after a type's header or a function's signature: read
     /// past, up to the body or a contract clause, and reported with
     /// `message`, since nothing checks them.
@@ -106,7 +105,13 @@ impl Parser<'_> {
         while self.is_rec(28) {
             let start = self.span().start;
             self.advance();
-            while !self.at_end() && !matches!(self.peek(), TokenKind::LBrace | TokenKind::Semicolon | TokenKind::FatArrow) && !self.at_contract_clause() {
+            while !self.at_end()
+                && !matches!(
+                    self.peek(),
+                    TokenKind::LBrace | TokenKind::Semicolon | TokenKind::FatArrow
+                )
+                && !self.at_contract_clause()
+            {
                 self.advance();
             }
             self.report_loud(start, message.into());
@@ -130,7 +135,10 @@ impl Parser<'_> {
                 break;
             }
             let _ = self.parse_expr();
-            self.report_loud(start, "an index takes one value; indexing by several (`x[a, b]`) is not built yet".into());
+            self.report_loud(
+                start,
+                "an index takes one value; indexing by several (`x[a, b]`) is not built yet".into(),
+            );
         }
     }
 
@@ -144,16 +152,19 @@ impl Parser<'_> {
         let step = self.parse_expr_bp(bp);
         let span = ByteSpan::new(self.arena.span(range).start, self.prev_span().end);
         let op = pilot_ast::BinaryOp::Step as u16;
-        self.arena.alloc_node(pilot_ast::NodeKind::BinaryExpr, op, span, range.0, step.0)
+        self.arena
+            .alloc_node(pilot_ast::NodeKind::BinaryExpr, op, span, range.0, step.0)
     }
-
 
     /// `name?: T` on a field: `?` belongs to the type (`name: T?`).
     pub(crate) fn field_question_loudly(&mut self) {
         if self.at(TokenKind::Question) {
             let start = self.span().start;
             self.advance();
-            self.report_loud(start, "an optional field is written `name: T?`, not `name?: T`".into());
+            self.report_loud(
+                start,
+                "an optional field is written `name: T?`, not `name?: T`".into(),
+            );
         }
     }
 }

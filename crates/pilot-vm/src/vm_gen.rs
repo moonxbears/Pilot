@@ -26,7 +26,12 @@ pub struct GenFrame {
 
 impl PilVirtualMachine {
     /// Executes generator operation `code` (`0..=6` mapped by `stage_a_natives`).
-    pub(crate) fn exec_gen_op(&mut self, code: u8, ins: Instruction, args: &[PilotVal]) -> Result<(), String> {
+    pub(crate) fn exec_gen_op(
+        &mut self,
+        code: u8,
+        ins: Instruction,
+        args: &[PilotVal],
+    ) -> Result<(), String> {
         let dst = ins.dst() as usize;
         match code {
             0 => {
@@ -79,14 +84,20 @@ impl PilVirtualMachine {
             }
             4 => {
                 let id = self.frame_id(args.first())?;
-                self.set(dst, PilotVal::from_bool(self.generators[id].state == GenState::Done));
+                self.set(
+                    dst,
+                    PilotVal::from_bool(self.generators[id].state == GenState::Done),
+                );
             }
             5 => {
                 let id = self.frame_id(args.first())?;
                 self.set(dst, self.generators[id].current);
             }
             _ => {
-                let closing = self.gen_stack.last().is_some_and(|&(_, id)| self.generators[id].closing);
+                let closing = self
+                    .gen_stack
+                    .last()
+                    .is_some_and(|&(_, id)| self.generators[id].closing);
                 self.set(dst, PilotVal::from_bool(closing));
             }
         }
@@ -147,10 +158,15 @@ impl PilVirtualMachine {
     }
 
     pub(crate) fn generator_values(&self) -> impl Iterator<Item = &PilotVal> {
-        self.generators.iter().flat_map(|g| g.regs.iter().chain(std::iter::once(&g.current)))
+        self.generators
+            .iter()
+            .flat_map(|g| g.regs.iter().chain(std::iter::once(&g.current)))
     }
 
     pub(crate) fn active_registers(&self) -> usize {
-        self.frame()[..self.reg_top()].iter().rposition(|r| !r.is_null()).map_or(0, |i| i + 1)
+        self.frame()[..self.reg_top()]
+            .iter()
+            .rposition(|r| !r.is_null())
+            .map_or(0, |i| i + 1)
     }
 }

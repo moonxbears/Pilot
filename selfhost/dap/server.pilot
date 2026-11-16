@@ -3,7 +3,7 @@
 // Milestone 59.3: VmHook-Stepped Debug Adapter Protocol (DAP) Server
 // Replaces crates/pilot-dap/src/dap.rs in Pure Pilot.
 // =========================================================================
-pub pkg Pilot.SelfHost.Dap.Server;
+pub pkg selfhost.dap;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

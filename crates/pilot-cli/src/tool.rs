@@ -20,7 +20,11 @@ pub const EXIT_INTERNAL: i32 = 70;
 /// Directories searched for toolchain sources: the working directory and its
 /// parents, then the directories above the running executable.
 fn search_roots() -> Vec<PathBuf> {
-    let mut roots = vec![PathBuf::from("."), PathBuf::from(".."), PathBuf::from("../..")];
+    let mut roots = vec![
+        PathBuf::from("."),
+        PathBuf::from(".."),
+        PathBuf::from("../.."),
+    ];
     if let Ok(exe) = std::env::current_exe() {
         roots.extend(exe.ancestors().skip(1).map(Path::to_path_buf));
     }
@@ -67,13 +71,21 @@ enum Registry {
 impl Registry {
     fn own(arena: pilot_ast::AstArena) -> Self {
         let probe = PhysicsRegistry::new(Default::default(), Default::default());
-        Registry::Own { arena, probe, built: None }
+        Registry::Own {
+            arena,
+            probe,
+            built: None,
+        }
     }
 
     fn call(&mut self, op: &str, args: &[PilotVal]) -> Result<PilotVal, String> {
         match self {
             Registry::Given(phy) => pilot_analysis::handle_engine_intrinsic(phy, op, args),
-            Registry::Own { arena, probe, built } => {
+            Registry::Own {
+                arena,
+                probe,
+                built,
+            } => {
                 if built.is_none() {
                     if pilot_analysis::engine_intrinsic(probe, op, args).is_none() {
                         return Ok(PilotVal::NULL);
@@ -91,7 +103,11 @@ impl Registry {
 /// Compiles and runs a tool, returning the VM and the entry call's value.
 /// `phy`, when given, is the registry the tool's `__engine` calls operate
 /// on; without it they see the tool's own AST.
-fn run_tool(mut src: LinkedSource, phy: Option<PhysicsRegistry>, host_ops: Option<HostOpHandler>) -> (PilVirtualMachine, PilotVal) {
+fn run_tool(
+    mut src: LinkedSource,
+    phy: Option<PhysicsRegistry>,
+    host_ops: Option<HostOpHandler>,
+) -> (PilVirtualMachine, PilotVal) {
     let mut failed = false;
     for (span, msg) in &src.arena.diagnostics {
         eprintln!("{}: internal error: {msg}", src.locate(*span));
@@ -115,7 +131,9 @@ fn run_tool(mut src: LinkedSource, phy: Option<PhysicsRegistry>, host_ops: Optio
     vm.load_binary(bin);
     let out = vm.run();
     if let Some(fault) = vm.fault.take() {
-        let at = fault.span.map_or_else(|| "<tool>".to_string(), |s| src.locate(s));
+        let at = fault
+            .span
+            .map_or_else(|| "<tool>".to_string(), |s| src.locate(s));
         eprintln!("{at}: internal error: {}", fault.message);
         for call in &fault.trace {
             eprintln!("  called from {}", src.locate(*call));
@@ -137,7 +155,10 @@ pub fn toolchain_root() -> String {
     search_roots()
         .into_iter()
         .find(|r| r.join("stdlib").is_dir())
-        .map_or_else(|| ".".to_string(), |r| r.to_string_lossy().replace('\\', "/"))
+        .map_or_else(
+            || ".".to_string(),
+            |r| r.to_string_lossy().replace('\\', "/"),
+        )
 }
 
 /// Runs a tool and returns the VM holding its result, and the result.
@@ -149,7 +170,8 @@ pub fn eval_value(paths: &[&str], tail: &str) -> (PilVirtualMachine, PilotVal) {
 /// process exit code.
 pub fn eval_cli(paths: &[&str], tail: &str, ops: HostOpHandler) -> i32 {
     let (_, out) = run_tool(link_tool(paths, tail), None, Some(ops));
-    out.as_int().map_or(EXIT_INTERNAL, |c| c.clamp(0, 255) as i32)
+    out.as_int()
+        .map_or(EXIT_INTERNAL, |c| c.clamp(0, 255) as i32)
 }
 
 /// Runs the tool made of `tool_files`, calling `entry`, with the text of the

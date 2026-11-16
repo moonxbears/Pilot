@@ -3,7 +3,7 @@
 // Milestone 60.3: Multi-Backend Differential Semantic Verifier
 // Compares PilVM v3, Native C, LLVM IR, and WASM execution results.
 // =========================================================================
-pub pkg Pilot.SelfHost.Cli.DiffTest;
+pub pkg selfhost.cli;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -2,7 +2,7 @@
 // FILE: selfhost/pkg/manifest.pilot
 // Milestone 60.1: Pilot Package Manifest (pilot.json) & Lockfile Generator
 // =========================================================================
-pub pkg Pilot.SelfHost.Pkg.Manifest;
+pub pkg selfhost.pkg;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -547,7 +547,7 @@ pub pure fn comptime_policy_grants(policy: ComptimeAllowPolicy, name: str) -> bo
 pub fn validate_dependency_comptime_needs(
     root_policy: ComptimeAllowPolicy,
     dep_name: str,
-    needs: List<str>
+    ref needs: List<str>
 ) -> str {
     var i = 0;
     while i < needs.len() {

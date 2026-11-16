@@ -1,10 +1,10 @@
 // ==============================================================================
 // selfhost/adapter/absorb_openapi.pilot
 // Ring 3 / Self-Host Compiler: OpenAPI 3.0/3.1 Schema & Route Absorber (`use openapi`)
-// Package: Pilot.SelfHost.Adapter.AbsorbOpenApi (Milestone 20)
+// Package: selfhost.adapter (Milestone 20)
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Adapter.AbsorbOpenApi;
+pub lvl(0) pkg selfhost.adapter;
 
 use std.text;
 
@@ -40,7 +40,7 @@ pub fn openapi_schema_new(name: str, stype: str) -> OpenApiSchema {
     };
 }
 
-pub fn openapi_schema_find_prop(s: OpenApiSchema, prop_name: str) -> i64 {
+pub fn openapi_schema_find_prop(ref s: OpenApiSchema, prop_name: str) -> i64 {
     var i = 0;
     while i < s.properties.len() {
         let p = s.properties.get(i);
@@ -84,7 +84,7 @@ pub fn openapi_doc_new(title: str, version: str) -> OpenApiDoc {
     };
 }
 
-pub fn openapi_doc_find_schema(doc: OpenApiDoc, name: str) -> i64 {
+pub fn openapi_doc_find_schema(ref doc: OpenApiDoc, name: str) -> i64 {
     var i = 0;
     while i < doc.schemas.len() {
         let s = doc.schemas.get(i);
@@ -114,13 +114,13 @@ pub fn openapi_resolve_ref(ref_str: str) -> str {
 }
 
 /// Index of `name` in `doc.schemas`' names, or -1.
-fn oa_schema_index(doc: OpenApiDoc, name: str) -> i64 {
+fn oa_schema_index(ref doc: OpenApiDoc, name: str) -> i64 {
     return openapi_doc_find_schema(doc, name);
 }
 
 /// The schemas `s` refers to by value: property `$ref`s, `allOf` splices and
 /// `oneOf` variants.
-fn oa_schema_edges(s: OpenApiSchema) -> List<str> {
+fn oa_schema_edges(ref s: OpenApiSchema) -> List<str> {
     var out: List<str> = [];
     for p in s.properties {
         if p.ref_target.len() > 0 { out.push(p.ref_target); }
@@ -131,7 +131,7 @@ fn oa_schema_edges(s: OpenApiSchema) -> List<str> {
 }
 
 /// Whether schema `start` can reach itself through `$ref` edges.
-fn oa_reaches_self(doc: OpenApiDoc, start: i64) -> bool {
+fn oa_reaches_self(ref doc: OpenApiDoc, start: i64) -> bool {
     var seen: List<i64> = [];
     var stack: List<str> = oa_schema_edges(doc.schemas.get(start as usize));
     while stack.len() > 0 {
@@ -486,7 +486,7 @@ pub fn openapi_parse_spec(src: str) -> OpenApiDoc {
 // 6. Synthesis of Pilot Client & Server Interfaces
 // ------------------------------------------------------------------------------
 
-pub fn openapi_synthesize_client_interface(doc: OpenApiDoc) -> str {
+pub fn openapi_synthesize_client_interface(ref doc: OpenApiDoc) -> str {
     var out: List<str> = ["// Client Interface synthesized for " + doc.title + " v" + doc.version + "\n"];
     out.push("pub interface IApiClient {\n");
 

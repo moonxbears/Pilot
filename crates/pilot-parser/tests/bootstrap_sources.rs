@@ -7,5 +7,9 @@
 #[test]
 fn the_bootstrap_sources_parse_without_diagnostics() {
     let found = pilot_parser::bootstrap_diagnostics();
-    assert!(found.is_empty(), "bootstrap sources reported:\n{}", found.join("\n"));
+    assert!(
+        found.is_empty(),
+        "bootstrap sources reported:\n{}",
+        found.join("\n")
+    );
 }

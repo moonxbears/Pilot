@@ -38,9 +38,20 @@ impl ParserTables {
         self.reg_layouts.get(name)
     }
 
-    pub fn call_hook(&self, name: &str) -> Option<(&str, Vec<Option<Result<i64, &str>>>, Vec<Result<usize, Result<i64, &str>>>)> {
+    pub fn call_hook(
+        &self,
+        name: &str,
+    ) -> Option<(
+        &str,
+        Vec<Option<Result<i64, &str>>>,
+        Vec<Result<usize, Result<i64, &str>>>,
+    )> {
         let h = self.attr_hooks.get(name)?;
-        let defs = h.defaults.iter().map(|d| d.as_ref().and_then(cval_scalar)).collect();
+        let defs = h
+            .defaults
+            .iter()
+            .map(|d| d.as_ref().and_then(cval_scalar))
+            .collect();
         let args = h
             .args
             .iter()
@@ -55,7 +66,11 @@ impl ParserTables {
     pub(crate) fn ingest_attr_fn(&mut self, arena: &AstArena, id: NodeId) {
         let n = *arena.node(id);
         let flags = arena.decl_flags.get(id.0 as usize).copied().unwrap_or(0);
-        let Some((&body_raw, param_ids)) = arena.children_slice(n.rhs, n.flags as u32).split_first() else { return };
+        let Some((&body_raw, param_ids)) =
+            arena.children_slice(n.rhs, n.flags as u32).split_first()
+        else {
+            return;
+        };
         let mut body = NodeId(body_raw);
         while body.is_some() && arena.node(body).node_kind() == NodeKind::ExprStmt {
             body = NodeId(arena.node(body).lhs);
@@ -65,7 +80,9 @@ impl ParserTables {
         }
         let bn = *arena.node(body);
         let call = arena.children_slice(bn.lhs, bn.rhs);
-        let Some(&callee_id) = call.first() else { return };
+        let Some(&callee_id) = call.first() else {
+            return;
+        };
         let cn = arena.node(NodeId(callee_id));
         if cn.node_kind() != NodeKind::IdentExpr {
             return;
@@ -74,20 +91,39 @@ impl ParserTables {
         if callee != "__engine" && (flags & DECL_FLAG_COMPTIME) == 0 {
             return;
         }
-        let params: Vec<&str> = param_ids.iter().map(|&p| arena.interner.resolve(SymbolId(arena.node(NodeId(p)).lhs))).collect();
+        let params: Vec<&str> = param_ids
+            .iter()
+            .map(|&p| arena.interner.resolve(SymbolId(arena.node(NodeId(p)).lhs)))
+            .collect();
         let defaults: Vec<Option<CVal>> = param_ids
             .iter()
-            .map(|&p| arena.field_default(NodeId(p)).is_some().then(|| self.eval_cval(arena, arena.field_default(NodeId(p)))).flatten())
+            .map(|&p| {
+                arena
+                    .field_default(NodeId(p))
+                    .is_some()
+                    .then(|| self.eval_cval(arena, arena.field_default(NodeId(p))))
+                    .flatten()
+            })
             .collect();
         let map_arg = |a: u32| -> HookArg {
             let an = arena.node(NodeId(a));
             (an.node_kind() == NodeKind::IdentExpr)
-                .then(|| params.iter().position(|&nm| nm == arena.interner.resolve(SymbolId(an.lhs))))
+                .then(|| {
+                    params
+                        .iter()
+                        .position(|&nm| nm == arena.interner.resolve(SymbolId(an.lhs)))
+                })
                 .flatten()
-                .map_or_else(|| HookArg::Const(self.eval_cval(arena, NodeId(a)).unwrap_or(CVal::Int(0))), HookArg::Param)
+                .map_or_else(
+                    || HookArg::Const(self.eval_cval(arena, NodeId(a)).unwrap_or(CVal::Int(0))),
+                    HookArg::Param,
+                )
         };
         let (hook, args) = if callee == "__engine" {
-            let Some(CVal::Str(h)) = call.get(1).and_then(|&a| self.eval_cval(arena, NodeId(a))) else { return };
+            let Some(CVal::Str(h)) = call.get(1).and_then(|&a| self.eval_cval(arena, NodeId(a)))
+            else {
+                return;
+            };
             (h, call[2..].iter().map(|&a| map_arg(a)).collect())
         } else if let Some(base) = self.attr_hooks.get(callee).cloned() {
             let passed: Vec<HookArg> = call[1..].iter().map(|&a| map_arg(a)).collect();
@@ -95,7 +131,14 @@ impl ParserTables {
                 .args
                 .into_iter()
                 .map(|ba| match ba {
-                    HookArg::Param(i) => passed.get(i).cloned().unwrap_or_else(|| HookArg::Const(base.defaults.get(i).and_then(Clone::clone).unwrap_or(CVal::Int(0)))),
+                    HookArg::Param(i) => passed.get(i).cloned().unwrap_or_else(|| {
+                        HookArg::Const(
+                            base.defaults
+                                .get(i)
+                                .and_then(Clone::clone)
+                                .unwrap_or(CVal::Int(0)),
+                        )
+                    }),
                     HookArg::Const(v) => HookArg::Const(v),
                 })
                 .collect();
@@ -103,17 +146,35 @@ impl ParserTables {
         } else {
             return;
         };
-        self.attr_hooks.insert(arena.interner.resolve(SymbolId(n.lhs)).to_string(), AttrHook { hook, args, defaults });
+        self.attr_hooks.insert(
+            arena.interner.resolve(SymbolId(n.lhs)).to_string(),
+            AttrHook {
+                hook,
+                args,
+                defaults,
+            },
+        );
     }
 
     /// Runs the hook behind each attribute written on declaration `id`
     /// (`[Bits(..)]`, `[Infix(..)]`, ..). The hook's first parameter is the
     /// declaration's name; the attribute's arguments fill the rest.
     pub(crate) fn ingest_decl_attrs(&mut self, arena: &AstArena, id: NodeId) {
-        let decl_name = CVal::Str(arena.interner.resolve(SymbolId(arena.node(id).lhs)).to_string());
+        let decl_name = CVal::Str(
+            arena
+                .interner
+                .resolve(SymbolId(arena.node(id).lhs))
+                .to_string(),
+        );
         let attrs: Vec<_> = arena.attrs.iter().filter(|a| a.target == id).collect();
         for attr in attrs {
-            let Some(f) = self.attr_hooks.get(arena.interner.resolve(attr.name)).cloned() else { continue };
+            let Some(f) = self
+                .attr_hooks
+                .get(arena.interner.resolve(attr.name))
+                .cloned()
+            else {
+                continue;
+            };
             let attr_args = arena.children_slice(attr.args_start, attr.args_len as u32);
             let values: Vec<Option<CVal>> = f
                 .args

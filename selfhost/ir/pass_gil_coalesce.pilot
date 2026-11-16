@@ -3,9 +3,8 @@
 // Milestone 17.3: PilIR GIL Scope Coalescing & Pure Compute Optimization Pass
 // Merges adjacent PyGilGuard scopes and inserts PyAllowThreadsGuard around loops
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Ir.GilCoalesce;
+pub lvl(0) pkg selfhost.ir;
 
-use Pilot.SelfHost.Ir.Model::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

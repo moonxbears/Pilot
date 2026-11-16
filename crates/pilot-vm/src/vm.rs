@@ -16,8 +16,9 @@ pub type EngineIntrinsicHandler = Box<dyn FnMut(&str, &[PilotVal]) -> Result<Pil
 
 /// Host operations the embedding program provides (`crate::host::HostValue`).
 /// Returns `None` for an operation the host does not provide.
-pub type HostOpHandler =
-    Box<dyn FnMut(&str, &[crate::host::HostValue]) -> Option<Result<crate::host::HostValue, String>>>;
+pub type HostOpHandler = Box<
+    dyn FnMut(&str, &[crate::host::HostValue]) -> Option<Result<crate::host::HostValue, String>>,
+>;
 
 /// A runtime failure: what went wrong and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -205,7 +206,13 @@ impl PilVirtualMachine {
             .filter_map(|&(ret, ..)| self.span_at(ret.saturating_sub(1)));
         let depth = calls.clone().count();
         let trace = calls.take(MAX_TRACE).collect();
-        self.fault = Some(VmFault { message, pc, span, trace, depth });
+        self.fault = Some(VmFault {
+            message,
+            pc,
+            span,
+            trace,
+            depth,
+        });
     }
 
     fn span_at(&self, pc: usize) -> Option<ByteSpan> {
@@ -249,7 +256,11 @@ impl PilVirtualMachine {
     #[inline]
     pub(crate) fn reg_top(&self) -> usize {
         let [low, scratch] = self.reg_tops;
-        if scratch > SCRATCH_BASE { scratch } else { low }
+        if scratch > SCRATCH_BASE {
+            scratch
+        } else {
+            low
+        }
     }
 
     /// Records that the registers below `top` may hold a value.
@@ -278,7 +289,8 @@ impl PilVirtualMachine {
         }
         let carried = tops[0].min(CARRIED_REGS);
         self.registers.copy_within(caller..caller + carried, callee);
-        self.call_stack.push((self.pc, caller, [tops[0] as u16, tops[1] as u16], dst));
+        self.call_stack
+            .push((self.pc, caller, [tops[0] as u16, tops[1] as u16], dst));
         self.base = callee;
         self.reg_tops = [carried, SCRATCH_BASE];
         self.pc = entry;
@@ -314,16 +326,23 @@ impl PilVirtualMachine {
         if depth == 0 {
             return false;
         }
-        let list = |v: PilotVal| v.as_list_handle().and_then(|slot| self.heap_lists.get(slot));
+        let list = |v: PilotVal| {
+            v.as_list_handle()
+                .and_then(|slot| self.heap_lists.get(slot))
+        };
         if let (Some(x), Some(y)) = (list(a), list(b)) {
             return x.len() == y.len()
-                && x.iter().zip(y).all(|(&p, &q)| self.values_equal_depth(p, q, depth - 1));
+                && x.iter()
+                    .zip(y)
+                    .all(|(&p, &q)| self.values_equal_depth(p, q, depth - 1));
         }
         let map = |v: PilotVal| v.as_map_handle().and_then(|slot| self.heap_maps.get(slot));
         if let (Some(x), Some(y)) = (map(a), map(b)) {
             return x.len() == y.len()
-                && x.iter()
-                    .all(|(k, &v)| y.get(k).is_some_and(|&w| self.values_equal_depth(v, w, depth - 1)));
+                && x.iter().all(|(k, &v)| {
+                    y.get(k)
+                        .is_some_and(|&w| self.values_equal_depth(v, w, depth - 1))
+                });
         }
         ops::equals(a, b)
     }
@@ -335,7 +354,11 @@ impl PilVirtualMachine {
             .filter(|&slot| !self.list_is_dead(slot))
             .and_then(|slot| self.heap_lists.get(slot))
             .ok_or_else(|| format!("{} is not callable", f.kind_label()))?;
-        let field = |i: usize| env.get(i).and_then(|v| v.as_int()).and_then(|n| usize::try_from(n).ok());
+        let field = |i: usize| {
+            env.get(i)
+                .and_then(|v| v.as_int())
+                .and_then(|n| usize::try_from(n).ok())
+        };
         match (field(0), field(1)) {
             (Some(entry), Some(arity)) => Ok((entry, arity)),
             _ => Err("malformed function value".to_string()),
@@ -343,25 +366,41 @@ impl PilVirtualMachine {
     }
 
     fn constant(&self, i: u32) -> Result<PilotVal, String> {
-        self.constants.get(i as usize).copied().ok_or_else(|| format!("constant #{i} out of range"))
+        self.constants
+            .get(i as usize)
+            .copied()
+            .ok_or_else(|| format!("constant #{i} out of range"))
     }
 
     /// Runs intrinsic `name` on `args` for the instruction `ins` and puts
     /// the result in its destination register.
-    fn call_intrinsic(&mut self, ins: Instruction, name: PilotVal, args: &[PilotVal]) -> Result<(), String> {
+    fn call_intrinsic(
+        &mut self,
+        ins: Instruction,
+        name: PilotVal,
+        args: &[PilotVal],
+    ) -> Result<(), String> {
         let dst = ins.dst() as usize;
         // A read is found by comparing the name's two words; it allocates
         // nothing.
-        if let Some(i) = self.reads.iter().position(|r| *r == name).filter(|_| args.len() == 2) {
+        if let Some(i) = self
+            .reads
+            .iter()
+            .position(|r| *r == name)
+            .filter(|_| args.len() == 2)
+        {
             let v = self.get(args[0], args[1], crate::heap::READS[i])?;
             self.set(dst, v);
             self.collect_if_due();
             return Ok(());
         }
         let mut name_buf = [0u8; 14];
-        let hook = name
-            .str_in(&mut name_buf)
-            .ok_or_else(|| format!("intrinsic name must be a string, found {}", name.kind_label()))?;
+        let hook = name.str_in(&mut name_buf).ok_or_else(|| {
+            format!(
+                "intrinsic name must be a string, found {}",
+                name.kind_label()
+            )
+        })?;
         if self.gen_intrinsic(hook, ins, args)? {
             return Ok(());
         }
@@ -384,7 +423,13 @@ impl PilVirtualMachine {
             let ins = self.instructions[self.pc];
             if let Some(ref mut hook) = self.hook {
                 let frame = &self.registers[self.base..self.base + FRAME_REGS];
-                hook(self.pc, ins, frame.try_into().map_err(|_| "register window out of range")?);
+                hook(
+                    self.pc,
+                    ins,
+                    frame
+                        .try_into()
+                        .map_err(|_| "register window out of range")?,
+                );
             }
             self.pc += 1;
             let (dst, src1, src2) = (ins.dst() as usize, ins.src1() as usize, ins.src2() as usize);

@@ -2,7 +2,7 @@
 // FILE: selfhost/pkg/venv.pilot
 // Milestone 60.1: Isolated Virtual Environment Manager (pilotvenv.cfg)
 // =========================================================================
-pub pkg Pilot.SelfHost.Pkg.Venv;
+pub pkg selfhost.pkg;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

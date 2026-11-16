@@ -9,10 +9,8 @@
 // folding never changes what a program does. `cmp` of two integer
 // constants becomes a 1-bit constant. A `cond_br` on a 1-bit constant
 // becomes a `jump` to the side it takes.
-pub lvl(0) pkg Pilot.SelfHost.Ir.PassFold;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.ir.model.*;
-use selfhost.ir.passes.*;
 
 pub struct ConstFoldPass : IPilIrPass {
     pub fn name() -> str => "const_fold";
@@ -81,7 +79,7 @@ fn compare(pred: u16, a: i64, b: i64) -> bool {
 }
 
 /// The pool entry of integer `v`, adding it when it is new.
-fn pool_index(m: IrModule, v: i64) -> u32 {
+fn pool_index(var ref m: IrModule, v: i64) -> u32 {
     var i = 0;
     while i < m.ints.len {
         if m.ints[i] == v { return i; }
@@ -92,14 +90,14 @@ fn pool_index(m: IrModule, v: i64) -> u32 {
 }
 
 /// `inst` with opcode `op` and operands `args`, its result and span kept.
-fn rewrite(f: IrFunction, inst: IrInst, op: u16, args: List<u32>) -> IrInst {
+fn rewrite(var ref f: IrFunction, inst: IrInst, op: u16, ref args: List<u32>) -> IrInst {
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
     return ir_inst_new(inst.result, op, 0, inst.physics, offset, args.len(), inst.span_id);
 }
 
 /// Folds what can be folded in `f`; true when anything changed.
-pub fn fold_function(f: IrFunction, m: IrModule) -> bool {
+pub fn fold_function(var ref f: IrFunction, var ref m: IrModule) -> bool {
     // Value id -> its constant, for `const_bits` results of integer or
     // 1-bit layouts.
     var known = Map<str, i64>();

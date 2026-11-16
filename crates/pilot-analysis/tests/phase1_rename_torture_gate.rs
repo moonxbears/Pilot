@@ -63,8 +63,12 @@ fn test_type_rename_torture_gate_wholenum_truthbit_utf8run() {
             if node.node_kind() == NodeKind::StructDecl {
                 let name = arena.interner.resolve(SymbolId(node.lhs));
                 if name == target_name {
-                    return reg.node_layouts[idx]
-                        .unwrap_or_else(|| panic!("StructDecl '{}' must have a bound LayoutId from analyzer.pilot", target_name));
+                    return reg.node_layouts[idx].unwrap_or_else(|| {
+                        panic!(
+                            "StructDecl '{}' must have a bound LayoutId from analyzer.pilot",
+                            target_name
+                        )
+                    });
                 }
             }
         }
@@ -76,13 +80,33 @@ fn test_type_rename_torture_gate_wholenum_truthbit_utf8run() {
     let utf8_run_id = find_struct_lid("Utf8Run", &registry);
     let record_id = find_struct_lid("RecordContainer", &registry);
 
-    let utf8_layout = registry.layouts.get(utf8_run_id).expect("Utf8Run layout must exist").clone();
-    assert_eq!(utf8_layout.byte_size, 16, "Utf8Run size must be 16 bytes (ptr + len)");
-    assert_eq!(utf8_layout.byte_align, 8, "Utf8Run alignment must be 8 bytes");
+    let utf8_layout = registry
+        .layouts
+        .get(utf8_run_id)
+        .expect("Utf8Run layout must exist")
+        .clone();
+    assert_eq!(
+        utf8_layout.byte_size, 16,
+        "Utf8Run size must be 16 bytes (ptr + len)"
+    );
+    assert_eq!(
+        utf8_layout.byte_align, 8,
+        "Utf8Run alignment must be 8 bytes"
+    );
 
-    let record_layout = registry.layouts.get(record_id).expect("RecordContainer layout must exist").clone();
-    assert_eq!(record_layout.byte_size, 32, "RecordContainer size with padding must be 32 bytes");
-    assert_eq!(record_layout.byte_align, 8, "RecordContainer alignment must be 8 bytes");
+    let record_layout = registry
+        .layouts
+        .get(record_id)
+        .expect("RecordContainer layout must exist")
+        .clone();
+    assert_eq!(
+        record_layout.byte_size, 32,
+        "RecordContainer size with padding must be 32 bytes"
+    );
+    assert_eq!(
+        record_layout.byte_align, 8,
+        "RecordContainer alignment must be 8 bytes"
+    );
 
     match &record_layout.geometry {
         PhysicsGeometry::Aggregate { fields, .. } => {
@@ -97,35 +121,86 @@ fn test_type_rename_torture_gate_wholenum_truthbit_utf8run() {
     }
 
     // Verify Pilot-hosted capability transitions, field projections & target-width SOA projections
-    let eval_pilot_expr = |reg: &mut pilot_analysis::PhysicsRegistry, call_expr: &str| -> pilot_vm::PilotVal {
-        let base_src = ANALYZER_PILOT_SRC.trim_end().strip_suffix("analyze_program();").unwrap_or(ANALYZER_PILOT_SRC);
-        let script = format!("{}\n{};\n", base_src, call_expr);
-        let p = pilot_parser::parse(&script);
-        let bin = BytecodeCompiler::compile(&p, p.root);
-        let mut pvm = PilVirtualMachine::new();
-        pvm.load_binary(bin);
-        let reg_ptr = reg as *mut pilot_analysis::PhysicsRegistry;
-        pvm.engine_handler = Some(Box::new(move |op, args| handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)));
-        pvm.run()
-    };
+    let eval_pilot_expr =
+        |reg: &mut pilot_analysis::PhysicsRegistry, call_expr: &str| -> pilot_vm::PilotVal {
+            let base_src = ANALYZER_PILOT_SRC
+                .trim_end()
+                .strip_suffix("analyze_program();")
+                .unwrap_or(ANALYZER_PILOT_SRC);
+            let script = format!("{}\n{};\n", base_src, call_expr);
+            let p = pilot_parser::parse(&script);
+            let bin = BytecodeCompiler::compile(&p, p.root);
+            let mut pvm = PilVirtualMachine::new();
+            pvm.load_binary(bin);
+            let reg_ptr = reg as *mut pilot_analysis::PhysicsRegistry;
+            pvm.engine_handler = Some(Box::new(move |op, args| {
+                handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)
+            }));
+            pvm.run()
+        };
 
-    assert_eq!(eval_pilot_expr(&mut registry, &format!("compute_field_projection_offset({}, 2)", record_id.0)).as_int(), Some(16));
     assert_eq!(
-        eval_pilot_expr(&mut registry, &format!("verify_capability_transition({}, {})", CapabilityBits::VALUE.raw(), CapabilityBits::BORROW_REF.raw())).as_bool(),
+        eval_pilot_expr(
+            &mut registry,
+            &format!("compute_field_projection_offset({}, 2)", record_id.0)
+        )
+        .as_int(),
+        Some(16)
+    );
+    assert_eq!(
+        eval_pilot_expr(
+            &mut registry,
+            &format!(
+                "verify_capability_transition({}, {})",
+                CapabilityBits::VALUE.raw(),
+                CapabilityBits::BORROW_REF.raw()
+            )
+        )
+        .as_bool(),
         Some(true)
     );
     assert_eq!(
-        eval_pilot_expr(&mut registry, &format!("verify_capability_transition({}, {})", CapabilityBits::OWNED_OBJ.raw(), CapabilityBits::SCOPED_GUARD.raw())).as_bool(),
+        eval_pilot_expr(
+            &mut registry,
+            &format!(
+                "verify_capability_transition({}, {})",
+                CapabilityBits::OWNED_OBJ.raw(),
+                CapabilityBits::SCOPED_GUARD.raw()
+            )
+        )
+        .as_bool(),
         Some(true)
     );
     assert_eq!(
-        eval_pilot_expr(&mut registry, &format!("verify_capability_transition({}, {})", CapabilityBits::BORROW_REF.raw(), CapabilityBits::OWNED_OBJ.raw())).as_bool(),
+        eval_pilot_expr(
+            &mut registry,
+            &format!(
+                "verify_capability_transition({}, {})",
+                CapabilityBits::BORROW_REF.raw(),
+                CapabilityBits::OWNED_OBJ.raw()
+            )
+        )
+        .as_bool(),
         Some(false)
     );
 
     // 64-bit target SOA column slice -> 16 bytes, align 8; 32-bit target SOA column slice -> 8 bytes, align 4
-    let soa64_lid = LayoutId(eval_pilot_expr(&mut registry, &format!("compute_soa_projection({}, 64)", whole_num_id.0)).as_int().unwrap() as u32);
-    let soa32_lid = LayoutId(eval_pilot_expr(&mut registry, &format!("compute_soa_projection({}, 32)", whole_num_id.0)).as_int().unwrap() as u32);
+    let soa64_lid = LayoutId(
+        eval_pilot_expr(
+            &mut registry,
+            &format!("compute_soa_projection({}, 64)", whole_num_id.0),
+        )
+        .as_int()
+        .unwrap() as u32,
+    );
+    let soa32_lid = LayoutId(
+        eval_pilot_expr(
+            &mut registry,
+            &format!("compute_soa_projection({}, 32)", whole_num_id.0),
+        )
+        .as_int()
+        .unwrap() as u32,
+    );
     assert_eq!(registry.layouts.get(soa64_lid).unwrap().byte_size, 16);
     assert_eq!(registry.layouts.get(soa64_lid).unwrap().byte_align, 8);
     assert_eq!(registry.layouts.get(soa32_lid).unwrap().byte_size, 8);

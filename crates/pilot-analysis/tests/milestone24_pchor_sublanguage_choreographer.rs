@@ -3,15 +3,15 @@
 //! .pchor Sublanguage Choreographer Compiler (`blueprint`, `role`, `cue`, `route`)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 24,
@@ -22,10 +22,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/chor/ast.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "blueprint_def_new",
-                "role_contract_new",
-            ],
+            required_pub_fns: &["blueprint_def_new", "role_contract_new"],
             required_code_markers: &[
                 "TransportKind",
                 "BackpressurePolicy",
@@ -44,17 +41,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/chor/parser.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "parse_pchor_source",
-            ],
-            required_code_markers: &[
-                "blueprint",
-                "storage",
-                "role",
-                "cue",
-                "route",
-                "law",
-            ],
+            required_pub_fns: &["parse_pchor_source"],
+            required_code_markers: &["blueprint", "storage", "role", "cue", "route", "law"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -62,17 +50,9 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/chor/verifier.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "verify_blueprint_topology",
-            ],
+            required_pub_fns: &["verify_blueprint_topology"],
             required_code_markers: &[
-                "CHOR001",
-                "CHOR002",
-                "CHOR003",
-                "CHOR004",
-                "CHOR005",
-                "CHOR006",
-                "CHOR007",
+                "CHOR001", "CHOR002", "CHOR003", "CHOR004", "CHOR005", "CHOR006", "CHOR007",
             ],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
@@ -81,13 +61,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/chor/lower.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "lower_topology",
-            ],
-            required_code_markers: &[
-                "LoweredRoutePlan",
-                "LoweredTopologyPlan",
-            ],
+            required_pub_fns: &["lower_topology"],
+            required_code_markers: &["LoweredRoutePlan", "LoweredTopologyPlan"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -96,12 +71,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m24(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -123,10 +102,7 @@ fn eval_m24(deps: &[&str], script: &str) -> String {
 // -----------------------------------------------------------------------------
 #[test]
 fn test_m24_1_pchor_parsing_and_ast() {
-    let guard = anticheat::AntiCheatGuard::arm(
-        "test_m24_1_pchor_parsing_and_ast",
-        &ANTICHEAT_SPEC,
-    );
+    let guard = anticheat::AntiCheatGuard::arm("test_m24_1_pchor_parsing_and_ast", &ANTICHEAT_SPEC);
 
     let script = r#"
         pub fn main() -> i64 {
@@ -176,12 +152,12 @@ fn test_m24_1_pchor_parsing_and_ast() {
         }
     "#;
 
-    let deps = &[
-        "selfhost/chor/ast.pilot",
-        "selfhost/chor/parser.pilot",
-    ];
+    let deps = &["selfhost/chor/ast.pilot", "selfhost/chor/parser.pilot"];
     let res = eval_m24(deps, script);
-    assert_eq!(res, "42", ".pchor parser must accurately construct BlueprintDef graph");
+    assert_eq!(
+        res, "42",
+        ".pchor parser must accurately construct BlueprintDef graph"
+    );
 
     guard.finish();
 }
@@ -191,10 +167,8 @@ fn test_m24_1_pchor_parsing_and_ast() {
 // -----------------------------------------------------------------------------
 #[test]
 fn test_m24_2_two_bit_cue_boundary_law() {
-    let guard = anticheat::AntiCheatGuard::arm(
-        "test_m24_2_two_bit_cue_boundary_law",
-        &ANTICHEAT_SPEC,
-    );
+    let guard =
+        anticheat::AntiCheatGuard::arm("test_m24_2_two_bit_cue_boundary_law", &ANTICHEAT_SPEC);
 
     let script = r#"
         pub fn main() -> i64 {
@@ -460,7 +434,10 @@ fn test_m24_4_laws_lowering_and_mermaid_export() {
         "stdlib/pilot/chor.pilot",
     ];
     let res = eval_m24(deps, script);
-    assert_eq!(res, "42", "Must enforce laws (CHOR006), compile lowered route plans, and export Mermaid diagrams");
+    assert_eq!(
+        res, "42",
+        "Must enforce laws (CHOR006), compile lowered route plans, and export Mermaid diagrams"
+    );
 
     // Emitting the dispatchers into PilIR stops at its seam until the typed PilIR exists.
     let emit = eval_m24(

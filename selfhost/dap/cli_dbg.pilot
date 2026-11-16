@@ -3,7 +3,7 @@
 // Milestone 59.3: Interactive CLI Debugger Command Parser & Controller
 // Supports break (b), step (s), next (n), finish (out), continue (c), print (p), and bt.
 // =========================================================================
-pub pkg Pilot.SelfHost.Dap.CliDbg;
+pub pkg selfhost.dap;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

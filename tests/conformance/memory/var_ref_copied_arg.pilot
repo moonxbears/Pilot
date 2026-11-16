@@ -1,0 +1,28 @@
+// PROP-005 5B.1: a field of a value type (lattice 0b00, here i64) passed by
+// value next to the `var ref` that holds it is copied before the call runs,
+// so the callee cannot reach the caller's place through it: no ALIAS001
+// (selfhost/check/aliasing.pilot copied_in). The same field lent to a second
+// `var ref` is still ALIAS001 (errors/err_alias_var_ref).
+//
+// Worked by hand: c starts { n: 3, xs: [] }.
+//   bump(c, c.n)  pushes the copy 3, then sets n = 3 + 1 = 4;
+//   bump(c, c.n)  pushes 4, sets n = 5;
+//   xs = [3, 4], n = 5: prints 2, 5, 7 (3 + 4).
+struct Counter {
+    pub n: i64;
+    pub xs: List<i64>;
+}
+
+fn bump(var ref c: Counter, was: i64) {
+    c.xs.push(was);
+    c.n = was + 1;
+}
+
+fn main() {
+    var c = Counter { n: 3, xs: [] };
+    bump(c, c.n);
+    bump(c, c.n);
+    print(c.xs.len());
+    print(c.n);
+    print(c.xs[0] + c.xs[1]);
+}

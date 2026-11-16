@@ -25,9 +25,17 @@ impl<'a> Parser<'a> {
         let start = self.arena.span(lhs).start;
         let end = self.span().end;
         self.advance();
-        let (a, b) = (self.arena.interner.intern(first), self.arena.interner.intern(second));
+        let (a, b) = (
+            self.arena.interner.intern(first),
+            self.arena.interner.intern(second),
+        );
         let span = ByteSpan::new(start, end);
-        let outer = self.arena.alloc_node(NodeKind::MemberExpr, 0, span, lhs.0, a.0);
-        Some(self.arena.alloc_node(NodeKind::MemberExpr, 0, span, outer.0, b.0))
+        let outer = self
+            .arena
+            .alloc_node(NodeKind::MemberExpr, 0, span, lhs.0, a.0);
+        Some(
+            self.arena
+                .alloc_node(NodeKind::MemberExpr, 0, span, outer.0, b.0),
+        )
     }
 }

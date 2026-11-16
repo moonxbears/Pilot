@@ -10,23 +10,11 @@
 // matches, the switch has no value (`undef`), as on the seed, where it is
 // none. `break` in an arm leaves the switch; `continue` goes to the loop
 // around it.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerSwitch;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_destructure.*;
-use selfhost.ir.lower_members.*;
-use selfhost.ir.lower_try.*;
-use selfhost.ir.lower_variant.*;
-use selfhost.ir.lower_defer.*;
+use selfhost.check.*;
 
-pub fn lower_switch(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_switch(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let ch = children(s, n);
     if ch.len() == 0 { return unsupported(lw, n); }
@@ -70,7 +58,7 @@ pub fn lower_switch(lw: Lowerer, n: i64) -> u32 {
 
 /// The value an arm passes to the join block: its body's value, or `undef`
 /// for a body that has none.
-fn arm_value(lw: Lowerer, v: u32, phy: IrTypePhysics, n: i64) -> u32 {
+fn arm_value(var ref lw: Lowerer, v: u32, phy: IrTypePhysics, n: i64) -> u32 {
     if ir_is_terminated(lw.f, lw.cur) { return v; }
     if v == ir_no_value() { return emit(lw, op_undef(), 0, phy, [], n); }
     return coerce(lw, v, phy, n);
@@ -79,7 +67,7 @@ fn arm_value(lw: Lowerer, v: u32, phy: IrTypePhysics, n: i64) -> u32 {
 /// Emits the test of `pat` against `v` (of type `t`): on a mismatch control
 /// goes to `fail`; on a match it continues in the current block with the
 /// pattern's names bound. False when the pattern is not lowered yet.
-pub fn match_pattern(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
+pub fn match_pattern(var ref lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
     let s = lw.inf.p.s;
     if pat < 0 { return false; }
     let k = kind(s, pat);
@@ -135,13 +123,13 @@ pub fn match_pattern(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
 }
 
 /// Continues in a fresh block when `cond` holds, else goes to `fail`.
-fn test(lw: Lowerer, cond: u32, fail: u32, n: i64) {
+fn test(var ref lw: Lowerer, cond: u32, fail: u32, n: i64) {
     let pass = ir_add_block(lw.f);
     emit_void(lw, op_cond_br(), 0, [cond, pass, 0, fail, 0], n);
     switch_to(lw, pass);
 }
 
-pub fn bool_physics(lw: Lowerer) -> IrTypePhysics => layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
+pub fn bool_physics(var ref lw: Lowerer) -> IrTypePhysics => layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
 
 /// `Color.Blue` -> `Blue`.
 fn last_segment(name: str) -> str {
@@ -156,7 +144,7 @@ fn last_segment(name: str) -> str {
 
 /// `(a, b)`: a record of the elements. The checker gives tuples no type yet,
 /// so its physics is the unknown layout.
-pub fn lower_tuple(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_tuple(var ref lw: Lowerer, n: i64) -> u32 {
     var vals: List<u32> = [];
     for c in children(lw.inf.p.s, n) { vals.push(lower_expr(lw, c)); }
     return emit(lw, op_construct_aggregate(), 0, physics_of(lw, n), vals, n);
@@ -168,13 +156,13 @@ pub pure fn absent_test_hook() -> str => "bind_absent_test";
 /// `none`: the expected type's bound empty value; with no type expected,
 /// the absent value.
 [StandIn("ir.absent_as_null", "opt<T> is a tagged or niche-packed value whose tag says none or some", "where no type is expected, none is the engine's null (`undef` in the IR) and a `?`, `??` or `some` test on a value of unknown type treats null as absent, as on the seed", "F6")]
-pub fn lower_none(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_none(var ref lw: Lowerer, n: i64) -> u32 {
     if some v = absent_of(lw, lw.hint, n) { return v; }
     return emit(lw, op_undef(), 0, physics_of(lw, n), [], n);
 }
 
 /// `a ?? b`: `a` unless it is none; `b` runs only when it is.
-pub fn lower_coalesce(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_coalesce(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     if some v = lower_protocol_coalesce(lw, n) { return v; }
     let hook = bound(lw, absent_test_hook(), []);

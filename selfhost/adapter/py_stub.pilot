@@ -3,9 +3,9 @@
 // Milestone 17.1: Python .pyi Stub & Inspect Signature Parser
 // Name-Blind Type Physics, Optional Unions (X | None), Vectorcall Wrappers
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.PyStub;
+pub lvl(0) pkg selfhost.adapter;
 
-use Pilot.Diagnostics.Model;
+use selfhost.diagnostics.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -22,11 +22,9 @@
 //   GATE019  a `[Workaround]` naming a bug that is not in the bug registry
 //   GATE020  a known bug whose repro program is missing, or a program directly
 //            in `tests/conformance/known_bugs/` that no bug names as its repro
-pub lvl(0) pkg Pilot.SelfHost.Gate.SeamGate;
+pub lvl(0) pkg selfhost.gate;
 
-use selfhost.gate.manifest.*;
-use selfhost.gate.ledger.seams.*;
-use selfhost.gate.ledger.wiring.*;
+use selfhost.gate.ledger.*;
 
 /// The trees whose `.pilot` sources may hold seams.
 fn sg_roots() -> List<str> => ["stdlib", "selfhost"];

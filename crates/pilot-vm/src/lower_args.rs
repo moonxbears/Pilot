@@ -11,11 +11,10 @@
 //! or by name. A field left out takes its default, and leaving out a field
 //! that has none is a compile error.
 
-use crate::BytecodeCompiler;
 use crate::instruction::Opcode;
-use pilot_ast::{AstArena, NodeId, NodeKind, PARAM_FLAG_MUT};
 use crate::value::PilotVal;
-
+use crate::BytecodeCompiler;
+use pilot_ast::{AstArena, NodeId, NodeKind, PARAM_FLAG_MUT};
 
 /// A call whose arguments do not fit its callee: the diagnostic code and message.
 type ArgError = (&'static str, String);
@@ -76,7 +75,9 @@ impl BytecodeCompiler {
     /// value already when it is a heap value, and has no storage to write
     /// to when it is a temporary.
     pub(crate) fn emit_out_writebacks(&mut self, arena: &AstArena, key: &str, args: &[NodeId]) {
-        let Some(&decl) = self.param_decls.get(key) else { return };
+        let Some(&decl) = self.param_decls.get(key) else {
+            return;
+        };
         for (i, p) in Self::decl_params(arena, decl).into_iter().enumerate() {
             if !Self::lends_for_change(arena, p) {
                 continue;
@@ -111,7 +112,12 @@ impl BytecodeCompiler {
     /// Compiles positional `args` of a call to `key` (`f` or `Owner.m`), each
     /// with its parameter's declared type as the expected type, so a bare
     /// `ok(x)` or `::Variant` argument resolves against it.
-    pub(crate) fn compile_args_for(&mut self, arena: &AstArena, key: &str, args: &[NodeId]) -> Vec<u8> {
+    pub(crate) fn compile_args_for(
+        &mut self,
+        arena: &AstArena,
+        key: &str,
+        args: &[NodeId],
+    ) -> Vec<u8> {
         let hints: Vec<Option<String>> = match self.param_decls.get(key) {
             Some(&decl) => Self::decl_params(arena, decl)
                 .into_iter()
@@ -131,7 +137,11 @@ impl BytecodeCompiler {
         let mut regs = Vec::new();
         for &a in args {
             if is_spread(a) && spreads == 1 && known {
-                let r_seq = self.compile_unpack_operand(arena, NodeId(arena.node(a).lhs), arena.node(a).flags);
+                let r_seq = self.compile_unpack_operand(
+                    arena,
+                    NodeId(arena.node(a).lhs),
+                    arena.node(a).flags,
+                );
                 self.emit_spread(r_seq, take, key, &mut regs);
                 continue;
             }
@@ -169,7 +179,8 @@ impl BytecodeCompiler {
 
     /// Whether any of `args` is named.
     pub(crate) fn has_named_args(arena: &AstArena, args: &[NodeId]) -> bool {
-        args.iter().any(|&a| arena.node(a).node_kind() == NodeKind::CallArg)
+        args.iter()
+            .any(|&a| arena.node(a).node_kind() == NodeKind::CallArg)
     }
 
     /// Matches `args` to `params`: the argument each parameter receives, or
@@ -212,7 +223,10 @@ impl BytecodeCompiler {
             if next >= params.len() {
                 return Err((
                     crate::codes::ARG_COUNT,
-                    format!("`{callee}` takes {} argument(s), but more were given", params.len()),
+                    format!(
+                        "`{callee}` takes {} argument(s), but more were given",
+                        params.len()
+                    ),
                 ));
             }
             slots[next] = Some(a);
@@ -236,7 +250,10 @@ impl BytecodeCompiler {
                 let ln = arena.node(NodeId(cn.lhs));
                 let owner = if matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) {
                     let raw = Self::name(arena, ln.lhs);
-                    self.var_types.get(raw).cloned().unwrap_or_else(|| raw.to_string())
+                    self.var_types
+                        .get(raw)
+                        .cloned()
+                        .unwrap_or_else(|| raw.to_string())
                 } else {
                     self.static_type(arena, NodeId(cn.lhs))?
                 };
@@ -249,7 +266,11 @@ impl BytecodeCompiler {
     /// Puts the named arguments of the call `ids` (callee, then arguments)
     /// in parameter order. A struct without a constructor keeps its
     /// arguments, which memberwise construction binds to fields.
-    pub(crate) fn order_named_args(&self, arena: &AstArena, ids: &[NodeId]) -> Result<Vec<NodeId>, ArgError> {
+    pub(crate) fn order_named_args(
+        &self,
+        arena: &AstArena,
+        ids: &[NodeId],
+    ) -> Result<Vec<NodeId>, ArgError> {
         let callee = ids[0];
         let cn = arena.node(callee);
         if matches!(cn.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) {
@@ -293,7 +314,11 @@ impl BytecodeCompiler {
     /// parameters are known. A call with a spread argument is left as it is.
     /// A method call whose receiver's type is unknown, to a method that some
     /// type declares with a default the call would need, is an error.
-    pub(crate) fn fill_defaults(&self, arena: &AstArena, ids: &[NodeId]) -> Result<Vec<NodeId>, ArgError> {
+    pub(crate) fn fill_defaults(
+        &self,
+        arena: &AstArena,
+        ids: &[NodeId],
+    ) -> Result<Vec<NodeId>, ArgError> {
         let spread = ids[1..].iter().any(|&a| {
             let n = arena.node(a);
             n.node_kind() == NodeKind::UnaryExpr && n.flags == pilot_ast::UNARY_OP_SPLAT
@@ -307,7 +332,9 @@ impl BytecodeCompiler {
             .and_then(|k| self.param_decls.get(&k).copied())
             .or_else(|| self.planned_call_decl(arena, ids[0]));
         let Some(decl) = decl else {
-            return self.unknown_callee_defaults(arena, ids[0], given).map(|()| ids.to_vec());
+            return self
+                .unknown_callee_defaults(arena, ids[0], given)
+                .map(|()| ids.to_vec());
         };
         let mut out = ids.to_vec();
         for &p in Self::decl_params(arena, decl).iter().skip(given) {
@@ -335,19 +362,30 @@ impl BytecodeCompiler {
     /// An error when `callee` is a method call the seed cannot place and a
     /// type declares that method with a default the `given` arguments
     /// would leave to it.
-    fn unknown_callee_defaults(&self, arena: &AstArena, callee: NodeId, given: usize) -> Result<(), ArgError> {
+    fn unknown_callee_defaults(
+        &self,
+        arena: &AstArena,
+        callee: NodeId,
+        given: usize,
+    ) -> Result<(), ArgError> {
         let cn = arena.node(callee);
         if cn.node_kind() != NodeKind::MemberExpr {
             return Ok(());
         }
         let method = Self::name(arena, cn.rhs);
-        let owners = self.method_owners.get(method).map(Vec::as_slice).unwrap_or(&[]);
+        let owners = self
+            .method_owners
+            .get(method)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let needs_default = owners.iter().any(|(owner, _)| {
-            self.param_decls.get(&format!("{owner}.{method}")).is_some_and(|&d| {
-                Self::decl_params(arena, d)
-                    .get(given)
-                    .is_some_and(|&p| arena.field_default(p).is_some())
-            })
+            self.param_decls
+                .get(&format!("{owner}.{method}"))
+                .is_some_and(|&d| {
+                    Self::decl_params(arena, d)
+                        .get(given)
+                        .is_some_and(|&p| arena.field_default(p).is_some())
+                })
         });
         if !needs_default {
             return Ok(());
@@ -360,14 +398,24 @@ impl BytecodeCompiler {
 
     /// `Name(args)` for a struct without a constructor: sets each field from
     /// the argument bound to it and the rest from their defaults.
-    pub(crate) fn compile_memberwise(&mut self, arena: &AstArena, name: &str, args: &[NodeId]) -> u8 {
+    pub(crate) fn compile_memberwise(
+        &mut self,
+        arena: &AstArena,
+        name: &str,
+        args: &[NodeId],
+    ) -> u8 {
         let fields = self.struct_fields(name);
         let names: Vec<String> = fields.iter().map(|(f, _)| f.clone()).collect();
         let slots = match Self::bind_args(arena, name, &names, args) {
             Ok(s) => s,
             Err((code, message)) => return self.error(code, message),
         };
-        if let Some((f, _)) = fields.iter().zip(&slots).find(|((_, d), s)| s.is_none() && d.is_none()).map(|(f, _)| f) {
+        if let Some((f, _)) = fields
+            .iter()
+            .zip(&slots)
+            .find(|((_, d), s)| s.is_none() && d.is_none())
+            .map(|(f, _)| f)
+        {
             return self.error(
                 crate::codes::MISSING_FIELD,
                 format!("`{name}(..)` is missing field `{f}`, which has no default"),

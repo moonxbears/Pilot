@@ -9,7 +9,7 @@
 //   STATE005: Aliased Mutable Reference Cannot Undergo Typestate Transition
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Types.Typestate;
+pub lvl(0) pkg selfhost.types;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -8,10 +8,9 @@
 // stop at the representation seam. Records are tables (field i at i + 1).
 // Functions are global, so one may call another declared after it. `print`
 // shows values as the seed does.
-pub lvl(0) pkg Pilot.SelfHost.Transpile.EmitLua;
+pub lvl(0) pkg selfhost.transpile;
 
-use selfhost.ir.model.*;
-use selfhost.transpile.source.*;
+use selfhost.ir.*;
 
 pub struct LuaDialect : ISourceDialect {
     pub fn language() -> str => "Lua";

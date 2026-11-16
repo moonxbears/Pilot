@@ -3,19 +3,20 @@
 //! Scoped User Sublanguage Builder (`syntax` + Hygiene + Declarative IDE Sync)
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 27,
-    test_file_rel: "crates/pilot-analysis/tests/milestone27_scoped_user_sublanguages_and_hygiene.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone27_scoped_user_sublanguages_and_hygiene.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
@@ -45,10 +46,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/syntax/hygiene_marks.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "hygienic_env_new",
-                "resolve_identifier",
-            ],
+            required_pub_fns: &["hygienic_env_new", "resolve_identifier"],
             required_code_markers: &[
                 "SYN006",
                 "SyntaxScopeSet",
@@ -83,12 +81,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m27(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -115,9 +117,7 @@ fn test_m27_1_pattern_dsl_compilation_and_diagnostics() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/syntax/pattern_dsl.pilot",
-    ];
+    let deps = ["selfhost/syntax/pattern_dsl.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -177,9 +177,7 @@ fn test_m27_2_flatt_scopes_as_sets_hygienic_renaming() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/syntax/hygiene_marks.pilot",
-    ];
+    let deps = ["selfhost/syntax/hygiene_marks.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -234,9 +232,7 @@ fn test_m27_3_scoped_dsl_lexical_isolation_and_live_lsp_sync() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/ide/live_dsl_sync.pilot",
-    ];
+    let deps = ["selfhost/ide/live_dsl_sync.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -294,17 +290,23 @@ fn test_m27_4_zero_hardcoded_keywords_in_analyzer_and_cst_recovery() {
         &ANTICHEAT_SPEC,
     );
 
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     // 1. Audit selfhost/analyzer.pilot: build_dynamic_keyword_set must NOT contain giant static string
-    let analyzer_src = fs::read_to_string(root.join("selfhost/analyzer.pilot"))
-        .expect("read analyzer.pilot");
+    let analyzer_src =
+        fs::read_to_string(root.join("selfhost/analyzer.pilot")).expect("read analyzer.pilot");
     assert!(
         !analyzer_src.contains("else|while|until|for|in|then|break|continue"),
         "selfhost/analyzer.pilot still contains hardcoded non-seed keyword string!"
     );
     assert!(
-        analyzer_src.contains("|__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm|"),
+        analyzer_src.contains(
+            "|__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm|"
+        ),
         "selfhost/analyzer.pilot must preserve the 14 seed tokens"
     );
 
@@ -316,7 +318,9 @@ fn test_m27_4_zero_hardcoded_keywords_in_analyzer_and_cst_recovery() {
         "selfhost/cst/cst_recovery.pilot still contains hardcoded non-seed keyword string!"
     );
     assert!(
-        cst_src.contains("__engine,struct,interface,fn,let,ref,if,loop,return,yield,defer,comptime,quote,asm"),
+        cst_src.contains(
+            "__engine,struct,interface,fn,let,ref,if,loop,return,yield,defer,comptime,quote,asm"
+        ),
         "selfhost/cst/cst_recovery.pilot must preserve the 14 seed tokens"
     );
 

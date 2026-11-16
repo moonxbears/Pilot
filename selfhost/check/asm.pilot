@@ -9,11 +9,8 @@
 //   ASM001  the first argument does not name a machine operation;
 //   ASM002  the operation is given the wrong number of operands.
 // A conversion (`ZExt`, `SIToFP`, ..) takes the value and the target type.
-pub lvl(0) pkg Pilot.SelfHost.Check.Asm;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.diag.*;
 
 /// The seed token that runs one machine operation.
 pub pure fn asm_token() -> str => "asm";
@@ -54,14 +51,14 @@ pub fn asm_ops() -> List<AsmOp> {
 }
 
 /// Whether call `n` is `asm(..)`.
-pub fn is_asm_call(s: Snap, n: i64) -> bool {
+pub fn is_asm_call(ref s: Snap, n: i64) -> bool {
     if kind(s, n) != nk_call() { return false; }
     let ch = children(s, n);
     return ch.len() > 0 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == asm_token();
 }
 
 /// The operation node `a` names: `MachineOp::Add` or `::Add`; empty otherwise.
-pub fn asm_op_name(s: Snap, a: i64) -> str {
+pub fn asm_op_name(ref s: Snap, a: i64) -> str {
     let k = kind(s, a);
     if k == nk_member() { return sym_text(s, rhs(s, a)); }
     if k == nk_ident() { return node_name(s, a); }
@@ -69,7 +66,7 @@ pub fn asm_op_name(s: Snap, a: i64) -> str {
 }
 
 /// The operation `asm` call `n` names.
-pub fn asm_op_of(s: Snap, n: i64) -> AsmOp? {
+pub fn asm_op_of(ref s: Snap, n: i64) -> AsmOp? {
     let ch = children(s, n);
     if ch.len() < 2 { return none; }
     let name = asm_op_name(s, ch[1]);
@@ -78,7 +75,7 @@ pub fn asm_op_of(s: Snap, n: i64) -> AsmOp? {
 }
 
 /// ASM001-ASM002 over the user's files.
-pub fn check_asm_calls(p: Program, sink: DiagSink) {
+pub fn check_asm_calls(ref p: Program, var ref sink: DiagSink) {
     let s = p.s;
     for n in nodes_of(s, nk_call()) {
         if !in_user_file(s, n) || !is_asm_call(s, n) { continue; }

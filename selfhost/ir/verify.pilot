@@ -12,9 +12,8 @@
 //          dominates the use (a block parameter is defined at the top of its
 //          block; an instruction's result after the instruction).
 // Blocks no path from the entry reaches are not checked for dominance.
-pub lvl(0) pkg Pilot.SelfHost.Ir.Verify;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.ir.model.*;
 
 /// Where each block sits in a depth-first walk of the dominator tree: block
 /// `a` dominates block `b` exactly when `a` is entered before `b` and left
@@ -33,7 +32,7 @@ pub struct IrIssue : IValue {
 }
 
 /// Blocks in reverse postorder from the entry; unreachable blocks are left out.
-fn reverse_postorder(f: IrFunction) -> List<u32> {
+fn reverse_postorder(ref f: IrFunction) -> List<u32> {
     var seen: List<bool> = [];
     for b in f.blocks { seen.push(false); }
     var post: List<u32> = [];
@@ -69,14 +68,14 @@ fn reverse_postorder(f: IrFunction) -> List<u32> {
 }
 
 /// The successors of block `b`: those of its last instruction.
-pub fn block_successors(f: IrFunction, b: u32) -> List<u32> {
+pub fn block_successors(ref f: IrFunction, b: u32) -> List<u32> {
     let insts = f.blocks[b].insts;
     if insts.len == 0 { return []; }
     return ir_successors(f, insts[insts.len - 1]);
 }
 
 /// Fills `preds` of every block of `f`.
-pub fn ir_compute_preds(f: IrFunction) {
+pub fn ir_compute_preds(var ref f: IrFunction) {
     for b in f.blocks { b.preds = []; }
     for b in f.blocks {
         for s in block_successors(f, b.id) {
@@ -87,7 +86,7 @@ pub fn ir_compute_preds(f: IrFunction) {
 
 /// Fills `idom` of every block of `f` reachable from the entry; returns the
 /// reverse postorder it used.
-pub fn ir_compute_dominators(f: IrFunction) -> List<u32> {
+pub fn ir_compute_dominators(var ref f: IrFunction) -> List<u32> {
     ir_compute_preds(f);
     let order = reverse_postorder(f);
     var rank: List<i64> = [];
@@ -122,7 +121,7 @@ pub fn ir_compute_dominators(f: IrFunction) -> List<u32> {
     return order;
 }
 
-fn intersect(f: IrFunction, rank: List<i64>, a: u32, b: u32) -> u32 {
+fn intersect(ref f: IrFunction, ref rank: List<i64>, a: u32, b: u32) -> u32 {
     var x = a;
     var y = b;
     while x != y {
@@ -133,7 +132,7 @@ fn intersect(f: IrFunction, rank: List<i64>, a: u32, b: u32) -> u32 {
 }
 
 /// Whether block `a` dominates block `b` (both reachable).
-pub fn ir_dominates(f: IrFunction, a: u32, b: u32) -> bool {
+pub fn ir_dominates(ref f: IrFunction, a: u32, b: u32) -> bool {
     var x = b;
     while true {
         if x == a { return true; }
@@ -145,7 +144,7 @@ pub fn ir_dominates(f: IrFunction, a: u32, b: u32) -> bool {
 
 /// The intervals of `f`'s dominator tree; `order` is what
 /// `ir_compute_dominators` returned (the reachable blocks, entry first).
-pub fn ir_dom_intervals(f: IrFunction, order: List<u32>) -> DomIntervals {
+pub fn ir_dom_intervals(ref f: IrFunction, ref order: List<u32>) -> DomIntervals {
     var kids: List<List<u32>> = [];
     var enter: List<i64> = [];
     var leave: List<i64> = [];
@@ -187,7 +186,7 @@ pub fn dom_holds(d: DomIntervals, a: u32, b: u32) -> bool => d.opened[a] <= d.op
 
 /// The operand positions of `inst` that hold values (the others name blocks,
 /// counts or pool entries).
-pub fn value_positions(f: IrFunction, inst: IrInst) -> List<i64> {
+pub fn value_positions(ref f: IrFunction, inst: IrInst) -> List<i64> {
     let a = ir_args(f, inst);
     var out: List<i64> = [];
     let op = inst.opcode;
@@ -215,12 +214,12 @@ pub fn value_positions(f: IrFunction, inst: IrInst) -> List<i64> {
     return out;
 }
 
-fn issue(out: List<IrIssue>, code: str, f: IrFunction, message: str) {
+fn issue(var ref out: List<IrIssue>, code: str, ref f: IrFunction, message: str) {
     out.push(IrIssue { code: code, function: f.name, message: message });
 }
 
 /// Checks a branch to `target` with `count` arguments.
-fn check_target(out: List<IrIssue>, f: IrFunction, from: u32, target: u32, count: i64) {
+fn check_target(var ref out: List<IrIssue>, ref f: IrFunction, from: u32, target: u32, count: i64) {
     if target >= f.blocks.len {
         issue(out, "IR002", f, f"b{from} branches to b{target}, which does not exist");
     } else if f.blocks[target].params.len != count {
@@ -229,7 +228,7 @@ fn check_target(out: List<IrIssue>, f: IrFunction, from: u32, target: u32, count
 }
 
 /// The issues in function `f`.
-pub fn verify_ir_function(f: IrFunction) -> List<IrIssue> {
+pub fn verify_ir_function(var ref f: IrFunction) -> List<IrIssue> {
     var out: List<IrIssue> = [];
     let order = ir_compute_dominators(f);
     let dom = ir_dom_intervals(f, order);
@@ -299,7 +298,7 @@ pub fn verify_ir_function(f: IrFunction) -> List<IrIssue> {
 }
 
 /// The issues in every function of `m`.
-pub fn verify_ir_module(m: IrModule) -> List<IrIssue> {
+pub fn verify_ir_module(ref m: IrModule) -> List<IrIssue> {
     var out: List<IrIssue> = [];
     for f in m.functions {
         for i in verify_ir_function(f) { out.push(i); }

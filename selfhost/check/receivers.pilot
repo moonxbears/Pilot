@@ -12,16 +12,12 @@
 // files whose receiver has a named type, `[action, span start, span end,
 // node kind, type name, ""]` for the receiver node.
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Check.Receivers;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.infer.*;
-use selfhost.check.drops.*;
 
 /// Adds a `ReceiverType` row to `rows` for each method call of the user's
 /// files whose receiver's type is named.
-pub fn plan_receivers(inf: Infer, rows: List<List<any>>) {
+pub fn plan_receivers(var ref inf: Infer, var ref rows: List<List<any>>) {
     let p = inf.p;
     let s = p.s;
     var n = 0;

@@ -10,7 +10,7 @@
 //
 // The numbers below are the parser's AST layout (`NodeKind` and `BinaryOp`
 // in crates/pilot-ast/src/lib.rs). They name node shapes, not Pilot types.
-pub lvl(0) pkg Pilot.SelfHost.Check.Snapshot;
+pub lvl(0) pkg selfhost.check;
 
 // --- Node kinds ------------------------------------------------------------
 pub pure fn nk_program() -> i64 => 0;
@@ -196,7 +196,7 @@ pub fn filled(n: i64, v: i64) -> List<i64> {
 
 /// One walk over the node rows: the node range of the user's files and the
 /// nodes of each kind, as `[[lo, hi], by_kind]`.
-fn scan_nodes(nodes: List<i64>, files: List<List<any>>) -> List<any> {
+fn scan_nodes(ref nodes: List<i64>, ref files: List<List<any>>) -> List<any> {
     var user: List<bool> = [];
     for row in files { user.push(row[1]); }
     let units = user.len();
@@ -225,23 +225,23 @@ fn scan_nodes(nodes: List<i64>, files: List<List<any>>) -> List<any> {
 }
 
 /// Every node of kind `k`, in node order (`Snap.by_kind`).
-pub fn nodes_of(s: Snap, k: i64) -> List<i64> {
+pub fn nodes_of(ref s: Snap, k: i64) -> List<i64> {
     if k >= 0 && k < s.by_kind.len() { return s.by_kind[k]; }
     return [];
 }
 
 /// `[node, value]` rows as a node -> value list (-1 where no row names it).
-fn node_map(rows: List<List<i64>>, count: i64) -> List<i64> {
+fn node_map(ref rows: List<List<i64>>, count: i64) -> List<i64> {
     let out = filled(count, -1);
     for row in rows { out[row[0]] = row[1]; }
     return out;
 }
 
 /// The default value of field `n`, or -1.
-pub fn field_default(s: Snap, n: i64) -> i64 => s.field_defaults[n];
+pub fn field_default(ref s: Snap, n: i64) -> i64 => s.field_defaults[n];
 
 /// The guard of switch arm `arm`, or -1.
-pub fn arm_guard(s: Snap, arm: i64) -> i64 => s.arm_guards[arm];
+pub fn arm_guard(ref s: Snap, arm: i64) -> i64 => s.arm_guards[arm];
 
 /// Reads the snapshot the host serves.
 pub fn snap_load() -> Snap {
@@ -287,7 +287,7 @@ pub fn snap_load() -> Snap {
 /// one entry per node: bit 0 partial, bit 1 static, bit 2 package
 /// declaration, bit 3 pure, bit 4 noalloc, the tier plus one from bit 5 (0
 /// when no visibility is written).
-fn decl_bits(rows: List<List<i64>>, count: i64) -> List<i64> {
+fn decl_bits(ref rows: List<List<i64>>, count: i64) -> List<i64> {
     let out = filled(count, -1);
     for row in rows {
         let pure_bit = if row.len() > 5 { row[5] * 8 } else { 0 };
@@ -298,26 +298,26 @@ fn decl_bits(rows: List<List<i64>>, count: i64) -> List<i64> {
     return out;
 }
 
-fn decl_bit(s: Snap, n: i64, bit: i64) -> bool {
+fn decl_bit(ref s: Snap, n: i64, bit: i64) -> bool {
     let m = s.modifiers[n];
     return m >= 0 && (m / bit) % 2 == 1;
 }
 
 /// Whether declaration `n` is written `partial`.
-pub fn is_partial_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 1);
+pub fn is_partial_decl(ref s: Snap, n: i64) -> bool => decl_bit(s, n, 1);
 
 /// Whether declaration `n` is written `static`.
-pub fn is_static_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 2);
+pub fn is_static_decl(ref s: Snap, n: i64) -> bool => decl_bit(s, n, 2);
 
 /// Whether declaration `n` is written `pure`.
-pub fn is_pure_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 8);
+pub fn is_pure_decl(ref s: Snap, n: i64) -> bool => decl_bit(s, n, 8);
 
 /// Whether declaration `n` is written with the modifier registered for
 /// action `effect_noalloc` (`noalloc fn`).
-pub fn is_noalloc_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 16);
+pub fn is_noalloc_decl(ref s: Snap, n: i64) -> bool => decl_bit(s, n, 16);
 
 /// Whether declaration `n` is written `override`.
-pub fn is_override_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 1024);
+pub fn is_override_decl(ref s: Snap, n: i64) -> bool => decl_bit(s, n, 1024);
 
 /// `ParamDecl` flag bits (crates/pilot-ast `PARAM_FLAG_*`): written `ref`
 /// (a borrow), with a word registered `binding_mutable` (`var`), or
@@ -327,45 +327,45 @@ pub pure fn param_flag_mutable() -> i64 => 4;
 pub pure fn param_flag_isolated() -> i64 => 8;
 
 /// Whether parameter `prm` carries flag bit `bit`.
-pub fn param_flag(s: Snap, prm: i64, bit: i64) -> bool => kind(s, prm) == nk_param() && (flags(s, prm) / bit) % 2 == 1;
+pub fn param_flag(ref s: Snap, prm: i64, bit: i64) -> bool => kind(s, prm) == nk_param() && (flags(s, prm) / bit) % 2 == 1;
 
 /// Whether node `n` is a `pkg Name;` package declaration.
-pub fn is_package_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 4);
+pub fn is_package_decl(ref s: Snap, n: i64) -> bool => decl_bit(s, n, 4);
 
 /// Whether node `n` is a declaration (or a `let` / `var` binding).
-pub fn is_declaration(s: Snap, n: i64) -> bool => s.modifiers[n] >= 0;
+pub fn is_declaration(ref s: Snap, n: i64) -> bool => s.modifiers[n] >= 0;
 
 /// The visibility tier declaration `n` was written with, or -1 when none
 /// is written or `n` is no declaration.
-pub fn decl_tier(s: Snap, n: i64) -> i64 {
+pub fn decl_tier(ref s: Snap, n: i64) -> i64 {
     let m = s.modifiers[n];
     return if m < 0 { -1 } else { (m % 1024) / 32 - 1 };
 }
 
 /// Word `i` of a list of words the host serves, or "".
-fn snap_word(words: List<str>, i: i64) -> str => if i < words.len() { words[i] } else { "" };
+fn snap_word(ref words: List<str>, i: i64) -> str => if i < words.len() { words[i] } else { "" };
 
-pub fn kind(s: Snap, n: i64) -> i64 => s.nodes[n * 9];
-pub fn lhs(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 1];
-pub fn rhs(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 2];
-pub fn flags(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 3];
-pub fn span_start(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 4];
-pub fn span_end(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 5];
-pub fn annot(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 6];
-pub fn lit_value(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 7];
-pub fn unit_of(s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 8];
+pub fn kind(ref s: Snap, n: i64) -> i64 => s.nodes[n * 9];
+pub fn lhs(ref s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 1];
+pub fn rhs(ref s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 2];
+pub fn flags(ref s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 3];
+pub fn span_start(ref s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 4];
+pub fn span_end(ref s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 5];
+pub fn annot(ref s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 6];
+pub fn lit_value(ref s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 7];
+pub fn unit_of(ref s: Snap, n: i64) -> i64 => s.nodes[n * 9 + 8];
 
 /// The text of symbol `sym`, or "" for an absent symbol.
-pub fn sym_text(s: Snap, sym: i64) -> str {
+pub fn sym_text(ref s: Snap, sym: i64) -> str {
     if sym < 0 || sym >= s.syms.len() { return ""; }
     return s.syms[sym];
 }
 
 /// The name a declaration, binding or identifier node carries.
-pub fn node_name(s: Snap, n: i64) -> str => sym_text(s, lhs(s, n));
+pub fn node_name(ref s: Snap, n: i64) -> str => sym_text(s, lhs(s, n));
 
 /// Whether node `n` lies in one of the user's own files.
-pub fn in_user_file(s: Snap, n: i64) -> bool {
+pub fn in_user_file(ref s: Snap, n: i64) -> bool {
     let u = unit_of(s, n);
     if u < 0 || u >= s.files.len() { return false; }
     let row: List<any> = s.files[u];
@@ -374,7 +374,7 @@ pub fn in_user_file(s: Snap, n: i64) -> bool {
 
 /// Whether node `n` is in a file the program links (not a declaration file
 /// the checker reads beside it).
-pub fn in_linked_file(s: Snap, n: i64) -> bool {
+pub fn in_linked_file(ref s: Snap, n: i64) -> bool {
     let u = unit_of(s, n);
     if u < 0 || u >= s.files.len() { return false; }
     let row: List<any> = s.files[u];
@@ -382,7 +382,7 @@ pub fn in_linked_file(s: Snap, n: i64) -> bool {
 }
 
 /// The source text node `n` spans.
-pub fn node_text(s: Snap, n: i64) -> str {
+pub fn node_text(ref s: Snap, n: i64) -> str {
     let u = unit_of(s, n);
     if u < 0 || u >= s.files.len() { return ""; }
     let row: List<any> = s.files[u];
@@ -393,7 +393,7 @@ pub fn node_text(s: Snap, n: i64) -> str {
 
 /// The text of a string literal without its quotes (escapes are kept as
 /// written; the tables the checker reads hold plain names).
-pub fn str_value(s: Snap, n: i64) -> str {
+pub fn str_value(ref s: Snap, n: i64) -> str {
     let t = node_text(s, n);
     return if t.len() >= 2 { t.slice(1, t.len() - 1) } else { "" };
 }
@@ -401,9 +401,9 @@ pub fn str_value(s: Snap, n: i64) -> str {
 /// Whether the name node `n` carries is written in the source where the
 /// node starts. A name a `syntax` rule produced (`(A) => R` becomes
 /// `fn<A, R>`) is not.
-pub fn name_is_written(s: Snap, n: i64) -> bool => node_text(s, n).starts_with(node_name(s, n));
+pub fn name_is_written(ref s: Snap, n: i64) -> bool => node_text(s, n).starts_with(node_name(s, n));
 
-fn extra_slice(s: Snap, start: i64, len: i64) -> List<i64> {
+fn extra_slice(ref s: Snap, start: i64, len: i64) -> List<i64> {
     var out: List<i64> = [];
     var i = 0;
     while i < len {
@@ -414,7 +414,7 @@ fn extra_slice(s: Snap, start: i64, len: i64) -> List<i64> {
     return out;
 }
 
-fn push_present(out: List<i64>, n: i64) {
+fn push_present(var ref out: List<i64>, n: i64) {
     if n >= 0 { out.push(n); }
 }
 
@@ -442,7 +442,7 @@ pub enum ChildShape : u8 {
     If,
 }
 
-fn set_shape(out: List<ChildShape>, kinds: List<i64>, shape: ChildShape) {
+fn set_shape(var ref out: List<ChildShape>, ref kinds: List<i64>, shape: ChildShape) {
     for k in kinds { out[k] = shape; }
 }
 
@@ -473,7 +473,7 @@ fn child_shapes() -> List<ChildShape> {
 }
 
 /// The children of node `n`, in source order.
-pub fn children(s: Snap, n: i64) -> List<i64> {
+pub fn children(ref s: Snap, n: i64) -> List<i64> {
     let k = kind(s, n);
     var out: List<i64> = [];
     if k < 0 || k >= s.shapes.len() { return out; }
@@ -529,7 +529,7 @@ pub fn children(s: Snap, n: i64) -> List<i64> {
 /// The parent of every node (-1 for roots and unreachable nodes). Each
 /// node's children are visited as `children` lists them, without building
 /// the list.
-pub fn parents_of(s: Snap) -> List<i64> {
+pub fn parents_of(ref s: Snap) -> List<i64> {
     let count = s.count;
     let out = filled(count, -1);
     let nodes = s.nodes;
@@ -593,12 +593,12 @@ pub fn parents_of(s: Snap) -> List<i64> {
 }
 
 /// Makes `parent` the parent of node `c` when `c` is a node without one.
-fn adopt(out: List<i64>, c: i64, parent: i64, count: i64) {
+fn adopt(var ref out: List<i64>, c: i64, parent: i64, count: i64) {
     if c >= 0 && c < count && out[c] < 0 { out[c] = parent; }
 }
 
 /// `adopt` for each of the `len` extra children from slot `start`.
-fn adopt_extra(s: Snap, out: List<i64>, parent: i64, start: i64, len: i64) {
+fn adopt_extra(ref s: Snap, var ref out: List<i64>, parent: i64, start: i64, len: i64) {
     let count = s.count;
     let extra = s.extra;
     var j = start;
@@ -611,7 +611,7 @@ fn adopt_extra(s: Snap, out: List<i64>, parent: i64, start: i64, len: i64) {
 }
 
 /// The body of a function-like node (`fn`, `op`, `indexer`), or -1.
-pub fn fn_body(s: Snap, n: i64) -> i64 {
+pub fn fn_body(ref s: Snap, n: i64) -> i64 {
     if kind(s, n) == nk_indexer() {
         let ch = children(s, n);
         return if ch.len() > 0 { ch[0] } else { -1 };
@@ -621,7 +621,7 @@ pub fn fn_body(s: Snap, n: i64) -> i64 {
 }
 
 /// The parameters of a function-like node.
-pub fn fn_params(s: Snap, n: i64) -> List<i64> {
+pub fn fn_params(ref s: Snap, n: i64) -> List<i64> {
     var out: List<i64> = [];
     let len = flags(s, n);
     var i = 1;
@@ -635,7 +635,7 @@ pub fn fn_params(s: Snap, n: i64) -> List<i64> {
 
 /// The members of a `struct`, `interface` or `ext` declaration, those of a
 /// distributive group (`pub { a: i64; b: i64; }`) included.
-pub fn type_members(s: Snap, n: i64) -> List<i64> {
+pub fn type_members(ref s: Snap, n: i64) -> List<i64> {
     let body = rhs(s, n);
     var out: List<i64> = [];
     if body < 0 || kind(s, body) != nk_block() { return out; }
@@ -643,7 +643,7 @@ pub fn type_members(s: Snap, n: i64) -> List<i64> {
     return out;
 }
 
-fn group_members(s: Snap, block: i64, out: List<i64>) {
+fn group_members(ref s: Snap, block: i64, var ref out: List<i64>) {
     for m in children(s, block) {
         if kind(s, m) == nk_block() { group_members(s, m, out); } else { out.push(m); }
     }

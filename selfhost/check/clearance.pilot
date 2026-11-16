@@ -20,14 +20,8 @@
 //   is undecided (D11), so package levels are not read here: a function
 //   without its own `lvl` counts as 0, which can stop a use the package rule
 //   will allow, never let through one it forbids.
-pub lvl(0) pkg Pilot.SelfHost.Check.Clearance;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.check.probes.*;
 
 /// The seam a use of a function declared without a body stops at.
 fn extern_seam() -> str => "unconnected seam `abi.extern_call`";
@@ -37,7 +31,7 @@ fn clearance_seam() -> str => "unconnected seam `lvl.clearance`";
 
 /// The level written on declaration `n`: `[level]`, `[]` when none is
 /// written, or `[-1]` when the level is not an integer literal.
-fn written_level(p: Program, n: i64) -> List<i64> {
+fn written_level(ref p: Program, n: i64) -> List<i64> {
     for args in attr_uses(p, n, nameof(lvl)) {
         if args.len() == 1 && kind(p.s, args[0]) == nk_int() { return [lit_value(p.s, args[0])]; }
         return [-1];
@@ -46,13 +40,13 @@ fn written_level(p: Program, n: i64) -> List<i64> {
 }
 
 /// The level of function `n`: the one written on it, else 0.
-fn level_of(p: Program, n: i64) -> i64 {
+fn level_of(ref p: Program, n: i64) -> i64 {
     let w = written_level(p, n);
     return if w.len() == 1 { w[0] } else { 0 };
 }
 
 /// The top-level function whose body holds `n`, or -1.
-fn enclosing_fn(p: Program, n: i64) -> i64 {
+fn enclosing_fn(ref p: Program, n: i64) -> i64 {
     var cur = p.parents[n];
     while cur >= 0 {
         if kind(p.s, cur) == nk_fn() { return cur; }
@@ -64,7 +58,7 @@ fn enclosing_fn(p: Program, n: i64) -> i64 {
 /// The words for a level in a message.
 fn level_text(level: i64) -> str => if level < 0 { "a level that is not an integer" } else { f"level {level}" };
 
-pub fn check_clearance(inf: Infer, sink: DiagSink) {
+pub fn check_clearance(ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     var n = 0;

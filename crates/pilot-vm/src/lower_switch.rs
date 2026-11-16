@@ -6,9 +6,9 @@
 //! inside an arm leaves the `switch`; `continue` reaches the enclosing loop.
 
 use crate::instruction::Opcode;
+use crate::value::PilotVal;
 use crate::{BytecodeCompiler, LoopCtx};
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 
 impl BytecodeCompiler {
     pub(crate) fn compile_match(&mut self, arena: &AstArena, node_id: NodeId) -> u8 {
@@ -62,7 +62,10 @@ impl BytecodeCompiler {
             self.var_slots = outer_slots;
         }
         let ctx = self.loops.pop();
-        for j in end_jumps.into_iter().chain(ctx.into_iter().flat_map(|c| c.break_jumps)) {
+        for j in end_jumps
+            .into_iter()
+            .chain(ctx.into_iter().flat_map(|c| c.break_jumps))
+        {
             self.patch_to_here(j);
         }
         dst
@@ -98,7 +101,10 @@ impl BytecodeCompiler {
         fails: &mut Vec<usize>,
     ) {
         if pat.is_none() {
-            self.error(crate::codes::PATTERN, "`case` without a pattern".to_string());
+            self.error(
+                crate::codes::PATTERN,
+                "`case` without a pattern".to_string(),
+            );
             return;
         }
         let pn = *arena.node(pat);
@@ -115,7 +121,8 @@ impl BytecodeCompiler {
                 }
                 let slot = self.alloc_local_reg();
                 self.emit(Opcode::Move, slot, r_subject, 0);
-                self.var_slots.insert(Self::name(arena, pn.lhs).to_string(), slot);
+                self.var_slots
+                    .insert(Self::name(arena, pn.lhs).to_string(), slot);
             }
             NodeKind::PatLiteral => {
                 let r_v = self.compile_with_hint(arena, NodeId(pn.lhs), subject_type.clone());
@@ -143,7 +150,10 @@ impl BytecodeCompiler {
                     return;
                 }
                 let Some(v) = self.resolve_variant(&name, subject_type) else {
-                    self.error(crate::codes::NO_MEMBER, format!("no enum variant named `{name}`"));
+                    self.error(
+                        crate::codes::NO_MEMBER,
+                        format!("no enum variant named `{name}`"),
+                    );
                     return;
                 };
                 let r_v = self.emit_const(v);
@@ -153,12 +163,22 @@ impl BytecodeCompiler {
                 let r_lo = self.compile_pattern_bound(arena, NodeId(pn.lhs), subject_type);
                 self.emit_test(Opcode::CmpGe, r_subject, r_lo, fails);
                 let r_hi = self.compile_pattern_bound(arena, NodeId(pn.rhs), subject_type);
-                let upper = if pn.flags == 1 { Opcode::CmpLe } else { Opcode::CmpLt };
+                let upper = if pn.flags == 1 {
+                    Opcode::CmpLe
+                } else {
+                    Opcode::CmpLt
+                };
                 self.emit_test(upper, r_subject, r_hi, fails);
             }
             NodeKind::PatOr => {
                 let mut left_fails = Vec::new();
-                self.compile_pattern(arena, NodeId(pn.lhs), r_subject, subject_type, &mut left_fails);
+                self.compile_pattern(
+                    arena,
+                    NodeId(pn.lhs),
+                    r_subject,
+                    subject_type,
+                    &mut left_fails,
+                );
                 let matched = self.emit_jump(0);
                 for f in left_fails {
                     self.patch_to_here(f);
@@ -182,7 +202,10 @@ impl BytecodeCompiler {
             other => {
                 self.error(
                     crate::codes::SEED,
-                    format!("`{}` patterns are not lowered by the seed yet", other.name()),
+                    format!(
+                        "`{}` patterns are not lowered by the seed yet",
+                        other.name()
+                    ),
                 );
             }
         }
@@ -194,7 +217,10 @@ impl BytecodeCompiler {
         if id.is_some() && arena.node(id).node_kind() == NodeKind::PatLiteral {
             return self.compile_with_hint(arena, NodeId(arena.node(id).lhs), hint.clone());
         }
-        self.error(crate::codes::PATTERN, "range pattern bounds must be literals".to_string())
+        self.error(
+            crate::codes::PATTERN,
+            "range pattern bounds must be literals".to_string(),
+        )
     }
 
     /// Emits `r_tmp = r_a <op> r_b` and a branch to the next arm when false.
@@ -259,25 +285,31 @@ impl BytecodeCompiler {
         let mark = self.next_reg;
         let cond = NodeId(node.lhs);
         let is_some = node.flags & 1 != 0;
-        let pass = if is_some && cond.is_some() && arena.node(cond).node_kind() == NodeKind::AssignStmt {
-            let cn = *arena.node(cond);
-            let target = arena.node(NodeId(cn.lhs));
-            if target.node_kind() != NodeKind::IdentExpr {
-                return self.error(
-                    crate::codes::PATTERN,
-                    "`guard some` must bind a plain name".to_string(),
-                );
-            }
-            let r_v = self.compile_node(arena, NodeId(cn.rhs));
-            let slot = self.alloc_local_reg();
-            self.emit(Opcode::Move, slot, r_v, 0);
-            self.var_slots.insert(Self::name(arena, target.lhs).to_string(), slot);
-            self.emit_branch(Opcode::JumpIfNotNull, slot, 0)
-        } else {
-            let r_c = self.compile_node(arena, cond);
-            let op = if is_some { Opcode::JumpIfNotNull } else { Opcode::JumpIfTrue };
-            self.emit_branch(op, r_c, 0)
-        };
+        let pass =
+            if is_some && cond.is_some() && arena.node(cond).node_kind() == NodeKind::AssignStmt {
+                let cn = *arena.node(cond);
+                let target = arena.node(NodeId(cn.lhs));
+                if target.node_kind() != NodeKind::IdentExpr {
+                    return self.error(
+                        crate::codes::PATTERN,
+                        "`guard some` must bind a plain name".to_string(),
+                    );
+                }
+                let r_v = self.compile_node(arena, NodeId(cn.rhs));
+                let slot = self.alloc_local_reg();
+                self.emit(Opcode::Move, slot, r_v, 0);
+                self.var_slots
+                    .insert(Self::name(arena, target.lhs).to_string(), slot);
+                self.emit_branch(Opcode::JumpIfNotNull, slot, 0)
+            } else {
+                let r_c = self.compile_node(arena, cond);
+                let op = if is_some {
+                    Opcode::JumpIfNotNull
+                } else {
+                    Opcode::JumpIfTrue
+                };
+                self.emit_branch(op, r_c, 0)
+            };
         self.release_to(mark);
         self.compile_node(arena, NodeId(node.rhs));
         self.release_to(mark);

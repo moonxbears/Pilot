@@ -1,7 +1,8 @@
 // F7: assigning an element of a list that owns its elements drops the
 // element it replaces, once the new value is made and before it is stored.
-// That holds through a `ref` parameter too: the list is the caller's, but
-// its old element is still thrown away.
+// That holds through a `var ref` parameter too: the list is the caller's,
+// but its old element is still thrown away. (A plain `ref` parameter is a
+// read-only borrow and cannot change it: errors/err_ref_param_change.)
 struct Res {
     pub name: str;
 
@@ -10,7 +11,7 @@ struct Res {
     }
 }
 
-fn swap_first(ref rs: List<Res>, n: str) {
+fn swap_first(var ref rs: List<Res>, n: str) {
     rs[0] = Res { name: n };
 }
 

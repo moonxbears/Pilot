@@ -6,9 +6,9 @@
 // Statically enforces CHOR008: Raw Pointer Escape Guard.
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Ir.SoaRewrite;
+pub lvl(0) pkg selfhost.ir;
 
-use Pilot.SelfHost.Chor.StoragePlan.*;
+use selfhost.chor.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

@@ -1,0 +1,42 @@
+// The program runtime/check_fix_borrows copies and runs `pilot check --fix`
+// on. Before the fix, `add_page(b, 7)` moves `b` and the uses after it are
+// OWN001, and `tag` changes `b` through a read-only `ref` (DECL004).
+struct Book : IObject {
+    pub pages: List<i64>;
+    pub title: str;
+}
+
+fn count(b: Book) -> i64 => b.pages.len() as i64;
+
+fn add_page(b: Book, n: i64) {
+    b.pages.push(n);
+}
+
+fn keep(b: Book) -> Book => b;
+
+fn report(b: Book) -> i64 => count(b) + 10;
+
+fn tag(ref b: Book) {
+    b.pages.push(0);
+}
+
+// Each passes `b` to the other: neither moves it, so both borrow.
+fn depth_a(b: Book, n: i64) -> i64 {
+    if n == 0 { return count(b); }
+    return depth_b(b, n - 1);
+}
+
+fn depth_b(b: Book, n: i64) -> i64 {
+    return depth_a(b, n);
+}
+
+fn main() {
+    var b = Book { pages: [], title: "t" };
+    add_page(b, 7);
+    tag(b);
+    print(count(b));
+    print(report(b));
+    print(depth_a(b, 2));
+    let k = keep(b);
+    print(k.title);
+}

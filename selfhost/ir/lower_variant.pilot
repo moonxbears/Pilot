@@ -15,18 +15,9 @@
 // matches each field against its sub-pattern by position; `case Circle:`
 // tests the tag only. `shape.r` reads a field that sits at the same place in
 // every variant declaring it.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerVariant;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_members.*;
-use selfhost.ir.lower_switch.*;
+use selfhost.check.*;
 
 /// A variant of a payload enum: the enum's type, the variant declaration and
 /// its tag.
@@ -38,7 +29,7 @@ pub struct VariantRef : IValue {
 
 /// Whether declaration `d` is an enum with at least one variant that carries
 /// values.
-pub fn is_payload_enum(s: Snap, d: i64) -> bool {
+pub fn is_payload_enum(ref s: Snap, d: i64) -> bool {
     if d < 0 || kind(s, d) != nk_adt() || flags(s, d) == 0 { return false; }
     for v in children(s, d) {
         if kind(s, v) == nk_variant() && flags(s, v) != 0 { return true; }
@@ -47,7 +38,7 @@ pub fn is_payload_enum(s: Snap, d: i64) -> bool {
 }
 
 /// The declared fields of variant declaration `v`.
-fn variant_fields(s: Snap, v: i64) -> List<i64> {
+fn variant_fields(ref s: Snap, v: i64) -> List<i64> {
     var out: List<i64> = [];
     for f in children(s, v) {
         if kind(s, f) == nk_param() { out.push(f); }
@@ -56,7 +47,7 @@ fn variant_fields(s: Snap, v: i64) -> List<i64> {
 }
 
 /// The variant `name` of the payload enum declared by `d`, as type `t`.
-fn variant_in(s: Snap, d: i64, t: i64, name: str) -> VariantRef? {
+fn variant_in(ref s: Snap, d: i64, t: i64, name: str) -> VariantRef? {
     if !is_payload_enum(s, d) { return none; }
     var tag = 0;
     for v in children(s, d) {
@@ -68,14 +59,14 @@ fn variant_in(s: Snap, d: i64, t: i64, name: str) -> VariantRef? {
 }
 
 /// The enum type declared by `d`, over unknown generic arguments.
-fn enum_type(lw: Lowerer, d: i64) -> i64 {
+fn enum_type(var ref lw: Lowerer, d: i64) -> i64 {
     var args: List<i64> = [];
     for _t in prog_tparam_names(lw.inf.p, d) { args.push(ty_unknown()); }
     return ty_named(lw.inf.p.tt, d, node_name(lw.inf.p.s, d), args);
 }
 
 /// The variant `name` of payload enum type `t`, or `none`.
-pub fn payload_variant(lw: Lowerer, t: i64, name: str) -> VariantRef? {
+pub fn payload_variant(ref lw: Lowerer, t: i64, name: str) -> VariantRef? {
     if !ty_is_named(lw.inf.p.tt, t) { return none; }
     return variant_in(lw.inf.p.s, ty_decl(lw.inf.p.tt, t), t, name);
 }
@@ -96,7 +87,7 @@ fn split_last(name: str) -> List<str> {
 /// The payload variant a written name means: `Enum.Variant`, or a bare
 /// `Variant` of the expected type `hint`, else of the one payload enum that
 /// declares it.
-pub fn named_variant(lw: Lowerer, name: str, hint: i64) -> VariantRef? {
+pub fn named_variant(var ref lw: Lowerer, name: str, hint: i64) -> VariantRef? {
     let s = lw.inf.p.s;
     let parts = split_last(name);
     if parts[0] != "" {
@@ -114,11 +105,11 @@ pub fn named_variant(lw: Lowerer, name: str, hint: i64) -> VariantRef? {
 }
 
 /// Every enum declaration of the program, in node order.
-pub fn adt_nodes(p: Program) -> List<i64> => prog_nodes_of_kind(p, nk_adt());
+pub fn adt_nodes(ref p: Program) -> List<i64> => prog_nodes_of_kind(p, nk_adt());
 
 /// The payload variant callee `c` names (`Shape.Circle`, `Shape::Circle`,
 /// `::Circle` or `Circle`), or `none`.
-fn callee_variant(lw: Lowerer, c: i64) -> VariantRef? {
+fn callee_variant(var ref lw: Lowerer, c: i64) -> VariantRef? {
     let s = lw.inf.p.s;
     let k = kind(s, c);
     if k == nk_member() {
@@ -133,7 +124,7 @@ fn callee_variant(lw: Lowerer, c: i64) -> VariantRef? {
 }
 
 /// The record of variant `v` holding `fields`.
-fn build(lw: Lowerer, v: VariantRef, fields: List<u32>, n: i64) -> u32 {
+fn build(var ref lw: Lowerer, v: VariantRef, ref fields: List<u32>, n: i64) -> u32 {
     let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
     var parts: List<u32> = [emit(lw, op_const_bits(), 0, int_phy, [pool_int(lw, v.tag)], n)];
     for f in fields { parts.push(f); }
@@ -141,7 +132,7 @@ fn build(lw: Lowerer, v: VariantRef, fields: List<u32>, n: i64) -> u32 {
 }
 
 /// `Shape.Circle(2.0)` and its other spellings; `none` for any other call.
-pub fn lower_variant_call(lw: Lowerer, n: i64) -> u32? {
+pub fn lower_variant_call(var ref lw: Lowerer, n: i64) -> u32? {
     let s = lw.inf.p.s;
     let ch = children(s, n);
     guard some v = callee_variant(lw, ch[0]) else { return none; }
@@ -160,7 +151,7 @@ pub fn lower_variant_call(lw: Lowerer, n: i64) -> u32? {
 
 /// `Shape.Empty` / `::Empty` / `Empty` naming a variant of a payload enum
 /// that carries no values; `none` for anything else.
-pub fn lower_variant_name(lw: Lowerer, n: i64) -> u32? {
+pub fn lower_variant_name(var ref lw: Lowerer, n: i64) -> u32? {
     let s = lw.inf.p.s;
     let found = if kind(s, n) == nk_member() { callee_variant(lw, n) } else if kind(s, n) == nk_ident() && binding_index(lw, n) < 0 { named_variant(lw, node_name(s, n), lw.hint) } else { none };
     guard some v = found else { return none; }
@@ -170,7 +161,7 @@ pub fn lower_variant_name(lw: Lowerer, n: i64) -> u32? {
 
 /// The type a value-producing node has: the checker's, or for a variant
 /// built in place, its enum.
-pub fn variant_value_type(lw: Lowerer, n: i64) -> i64 {
+pub fn variant_value_type(var ref lw: Lowerer, n: i64) -> i64 {
     let t = value_type(lw, n);
     if !ty_is_unknown(lw.inf.p.tt, t) || kind(lw.inf.p.s, n) != nk_call() { return t; }
     if some v = callee_variant(lw, children(lw.inf.p.s, n)[0]) { return v.t; }
@@ -180,7 +171,7 @@ pub fn variant_value_type(lw: Lowerer, n: i64) -> i64 {
 /// `x.name` where `x` is a value of payload enum type `t`: the field at the
 /// one place every variant declaring `name` keeps it; `none` when `t` is no
 /// payload enum or `name` is no field of it.
-pub fn lower_variant_field(lw: Lowerer, recv: u32, t: i64, name: str, n: i64) -> u32? {
+pub fn lower_variant_field(var ref lw: Lowerer, recv: u32, t: i64, name: str, n: i64) -> u32? {
     let s = lw.inf.p.s;
     if !ty_is_named(lw.inf.p.tt, t) || !is_payload_enum(s, ty_decl(lw.inf.p.tt, t)) { return none; }
     var place = -1;
@@ -205,7 +196,7 @@ pub fn lower_variant_field(lw: Lowerer, recv: u32, t: i64, name: str, n: i64) ->
 /// The test of variant pattern `pat` against `v` of payload enum type `t`:
 /// the tag, then each field against its sub-pattern. `none` when `t` is no
 /// payload enum.
-pub fn variant_pattern(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool? {
+pub fn variant_pattern(var ref lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool? {
     let s = lw.inf.p.s;
     if !ty_is_named(lw.inf.p.tt, t) || !is_payload_enum(s, ty_decl(lw.inf.p.tt, t)) { return none; }
     guard some vr = named_variant(lw, node_name(s, pat), t) else { return false; }

@@ -1,0 +1,19 @@
+target/check_fix/borrows.pilot:9:10: `b` -> `ref`
+target/check_fix/borrows.pilot:11:13: `b` -> `var ref`
+target/check_fix/borrows.pilot:17:11: `b` -> `ref`
+target/check_fix/borrows.pilot:19:12: `b` -> `var ref`
+target/check_fix/borrows.pilot:24:12: `b` -> `ref`
+target/check_fix/borrows.pilot:29:12: `b` -> `ref`
+kept: target/check_fix/borrows.pilot:15:29: `b` is moved here
+check --fix: 5 parameter(s) made borrows and 1 `ref` made `var ref` in 1 file(s); 1 move(s) keep the others by value
+
+0
+kept: target/check_fix/borrows.pilot:15:29: `b` is moved here
+check --fix: 0 parameter(s) made borrows and 0 `ref` made `var ref` in 0 file(s); 1 move(s) keep the others by value
+
+2
+12
+2
+t
+
+0

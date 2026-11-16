@@ -2,7 +2,7 @@
 // FILE: selfhost/bench/bench.pilot
 // Milestone 60.2: Self-Hosted Hardware Throughput & Zero-GC Benchmark Suite
 // =========================================================================
-pub pkg Pilot.SelfHost.Bench;
+pub pkg selfhost.bench;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

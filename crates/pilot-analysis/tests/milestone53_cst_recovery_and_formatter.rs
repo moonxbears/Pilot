@@ -53,9 +53,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pilot_analysis::{
-    flatten_ast, handle_engine_intrinsic, PhysicsRegistry,
-};
+use pilot_analysis::{flatten_ast, handle_engine_intrinsic, PhysicsRegistry};
 use pilot_parser::parse;
 use pilot_vm::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
@@ -209,7 +207,11 @@ fn escape_pilot_str(s: &str) -> String {
     out
 }
 
-fn run_with_registry(modules: &[&str], tail_src: &str, reg_setup: impl FnOnce(&mut PhysicsRegistry)) -> PilotVal {
+fn run_with_registry(
+    modules: &[&str],
+    tail_src: &str,
+    reg_setup: impl FnOnce(&mut PhysicsRegistry),
+) -> PilotVal {
     let mut combined = String::new();
     for m in modules {
         combined.push_str(m);
@@ -265,9 +267,18 @@ pub fn test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse() {
         let old_lit = rng.range(100, 999);
         let new_lit = rng.range(10000, 99999);
 
-        let d0 = format!("// Header comment {}\npub struct {} {{ pub x: i64; /* inlinetrivia */ }}\n", trial, st_name);
-        let d1 = format!("pub interface {} {{ fn step(v: i64) -> i64; }}\n", iface_name);
-        let d2 = format!("pub fn {}(a: i64) -> i64 {{\n    let k = {};\n    return a + k;\n}}\n", fn_edit, old_lit);
+        let d0 = format!(
+            "// Header comment {}\npub struct {} {{ pub x: i64; /* inlinetrivia */ }}\n",
+            trial, st_name
+        );
+        let d1 = format!(
+            "pub interface {} {{ fn step(v: i64) -> i64; }}\n",
+            iface_name
+        );
+        let d2 = format!(
+            "pub fn {}(a: i64) -> i64 {{\n    let k = {};\n    return a + k;\n}}\n",
+            fn_edit, old_lit
+        );
         let d3 = format!("pub fn {}(b: i64) -> i64 {{ return b * 3; }}\n", fn_after);
         let d4 = format!("let {} = 77;   // trailing trivia\n", let_var);
 
@@ -343,7 +354,8 @@ pub fn test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse() {
         // Fix variable name typo `ok_ lossless` -> `ok_lossless` cleanly:
         let driver = driver.replace("ok_ lossless", "ok_lossless");
 
-        let out = run_with_registry(&[&cst_src, &par_src, &inc_src], &driver, |_| {}).to_string_repr();
+        let out =
+            run_with_registry(&[&cst_src, &par_src, &inc_src], &driver, |_| {}).to_string_repr();
         assert_eq!(
             out, "true|true|true|true|true",
             "Trial {} failed CST hierarchy / lossless trivia / GreenNode handle reuse check (got `{}`)",
@@ -428,7 +440,12 @@ pub fn test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_mar
             let _ = handle_engine_intrinsic(
                 reg,
                 "mount_unit",
-                &[PilotVal::from_str(ws_root().join("stdlib/core/keywords.pilot").to_str().unwrap())],
+                &[PilotVal::from_str(
+                    ws_root()
+                        .join("stdlib/core/keywords.pilot")
+                        .to_str()
+                        .unwrap(),
+                )],
             );
             let _ = handle_engine_intrinsic(
                 reg,
@@ -521,7 +538,11 @@ pub fn test_53_3_and_53_4_wadler_lindig_width_formatter_semantic_parity_and_crat
         );
 
         let res = run_with_registry(&[&fmt_src], &driver, |_| {}).to_string_repr();
-        assert_ne!(res, "IDEMPOTENCY_FAIL", "Trial {}: Formatter was not idempotent!", trial);
+        assert_ne!(
+            res, "IDEMPOTENCY_FAIL",
+            "Trial {}: Formatter was not idempotent!",
+            trial
+        );
         let parts: Vec<&str> = res.split("<<<SEP>>>").collect();
         assert_eq!(parts.len(), 3);
         let (fmt_default, fmt_wide, fmt_narrow) = (parts[0], parts[1], parts[2]);
@@ -563,7 +584,10 @@ pub fn test_53_3_and_53_4_wadler_lindig_width_formatter_semantic_parity_and_crat
         // 3. Both `fmt_default` and `fmt_narrow` MUST parse with 0 errors AND evaluate on PilVM
         //    to the exact same runtime integer as `messy`!
         let eval_prog = |code: &str| -> i64 {
-            let run_src = format!("{}\nlet __v = {}({}, {});\n__v;\n", code, fn_name, arg_x, arg_y);
+            let run_src = format!(
+                "{}\nlet __v = {}({}, {});\n__v;\n",
+                code, fn_name, arg_x, arg_y
+            );
             let arena = parse(&run_src);
             assert!(
                 arena.diagnostics.is_empty(),
@@ -584,8 +608,14 @@ pub fn test_53_3_and_53_4_wadler_lindig_width_formatter_semantic_parity_and_crat
 
     // Deliverable 53.4: Legacy `pilot-syntax` and `pilot-fmt` completely purged
     let root = ws_root();
-    assert!(!root.join("crates/pilot-syntax").exists(), "crates/pilot-syntax must be deleted");
-    assert!(!root.join("crates/pilot-fmt").exists(), "crates/pilot-fmt must be deleted");
+    assert!(
+        !root.join("crates/pilot-syntax").exists(),
+        "crates/pilot-syntax must be deleted"
+    );
+    assert!(
+        !root.join("crates/pilot-fmt").exists(),
+        "crates/pilot-fmt must be deleted"
+    );
     let cargo_toml = read_ws("Cargo.toml");
     assert!(!cargo_toml.contains("pilot-syntax") && !cargo_toml.contains("pilot-fmt"));
     guard.finish();

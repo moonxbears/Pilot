@@ -3,7 +3,7 @@
 // Milestone 60.8: Package & Post-Definition Exclusions Engine ('without')
 // Conforms to the Strict Universal Name-Blind Boundary.
 // =========================================================================
-pub pkg Pilot.SelfHost.Pkg.Exclusions;
+pub pkg selfhost.pkg;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

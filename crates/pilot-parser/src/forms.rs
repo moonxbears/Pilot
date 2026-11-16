@@ -35,7 +35,13 @@ pub(crate) fn has_constructor(form: u8) -> bool {
 /// Builds form `form` from `ops` (an absent operand is `NONE`).
 pub(crate) fn build_form(arena: &mut AstArena, form: u8, ops: &[NodeId], span: ByteSpan) -> NodeId {
     let op = |i: usize| ops.get(i).copied().unwrap_or(NodeId::NONE);
-    let present = |from: usize| ops.iter().skip(from).copied().filter(|id| id.is_some()).collect::<Vec<_>>();
+    let present = |from: usize| {
+        ops.iter()
+            .skip(from)
+            .copied()
+            .filter(|id| id.is_some())
+            .collect::<Vec<_>>()
+    };
     match form {
         FOR => {
             let sym = binder(arena, op(0));
@@ -48,7 +54,11 @@ pub(crate) fn build_form(arena: &mut AstArena, form: u8, ops: &[NodeId], span: B
                 [one] => *one,
                 _ => arena.alloc_list_node(NodeKind::TupleExpr, 0, span, &vals),
             };
-            let kind = if form == BREAK { NodeKind::BreakStmt } else { NodeKind::ContinueStmt };
+            let kind = if form == BREAK {
+                NodeKind::BreakStmt
+            } else {
+                NodeKind::ContinueStmt
+            };
             arena.alloc_node(kind, 0, span, v.0, 0)
         }
         // `guard some x = v else { .. }`: flags 1, and a binding keeps its
@@ -63,7 +73,11 @@ pub(crate) fn build_form(arena: &mut AstArena, form: u8, ops: &[NodeId], span: B
         }
         TRY => arena.alloc_list_node(NodeKind::TryStmt, 0, span, &present(0)),
         CATCH => {
-            let sym = if op(0).is_some() { arena.node(op(0)).lhs } else { 0 };
+            let sym = if op(0).is_some() {
+                arena.node(op(0)).lhs
+            } else {
+                0
+            };
             arena.alloc_node(NodeKind::CatchClause, 0, span, sym, op(1).0)
         }
         SWITCH => {
@@ -75,7 +89,11 @@ pub(crate) fn build_form(arena: &mut AstArena, form: u8, ops: &[NodeId], span: B
         ARM => {
             let mut pat = NodeId::NONE;
             for p in present(2) {
-                pat = if pat.is_none() { p } else { arena.alloc_node(NodeKind::PatOr, 0, arena.span(pat), pat.0, p.0) };
+                pat = if pat.is_none() {
+                    p
+                } else {
+                    arena.alloc_node(NodeKind::PatOr, 0, arena.span(pat), pat.0, p.0)
+                };
             }
             if pat.is_none() {
                 pat = arena.alloc_node(NodeKind::PatWildcard, 0, span, 0, 0);
@@ -90,9 +108,20 @@ pub(crate) fn build_form(arena: &mut AstArena, form: u8, ops: &[NodeId], span: B
         // to the code, not at the code.
         REJECT | REJECT_WORD => {
             if op(1).is_some() {
-                let msg = if op(0).is_some() { arena.interner.resolve(SymbolId(arena.node(op(0)).lhs)).to_string() } else { String::new() };
+                let msg = if op(0).is_some() {
+                    arena
+                        .interner
+                        .resolve(SymbolId(arena.node(op(0)).lhs))
+                        .to_string()
+                } else {
+                    String::new()
+                };
                 let code = arena.span(op(1));
-                let at = if form == REJECT_WORD { ByteSpan::new(span.start, code.start.max(span.start)) } else { code };
+                let at = if form == REJECT_WORD {
+                    ByteSpan::new(span.start, code.start.max(span.start))
+                } else {
+                    code
+                };
                 arena.diagnostics.push((at, msg));
             }
             NodeId::NONE

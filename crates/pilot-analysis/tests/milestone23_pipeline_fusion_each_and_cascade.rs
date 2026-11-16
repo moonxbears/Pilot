@@ -3,15 +3,15 @@
 //! Zero-Allocation Pipeline Fusion, `each` Vectorization & Cascade Polish
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 23,
@@ -22,11 +22,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "stdlib/core/stream.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "stream_sum",
-                "stream_count",
-                "stream_collect",
-            ],
+            required_pub_fns: &["stream_sum", "stream_count", "stream_collect"],
             required_code_markers: &[
                 "SizeHint",
                 "StreamOpt",
@@ -84,12 +80,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m23(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -165,7 +165,10 @@ fn test_m23_1_zero_allocation_pull_stream_combinators() {
 
     let deps = &["stdlib/core/stream.pilot"];
     let res = eval_m23(deps, script);
-    assert_eq!(res, "42", "Pull-cursor stream combinators must accurately evaluate sequences without allocation");
+    assert_eq!(
+        res, "42",
+        "Pull-cursor stream combinators must accurately evaluate sequences without allocation"
+    );
 
     guard.finish();
 }
@@ -212,7 +215,10 @@ fn test_m23_2_stream_fusion_pass_and_loop_equivalence() {
 
     let deps = &["selfhost/ir/pass_stream_fusion.pilot"];
     let res = eval_m23(deps, script);
-    assert_eq!(res, "42", "Stream fusion pass must eliminate intermediate allocations");
+    assert_eq!(
+        res, "42",
+        "Stream fusion pass must eliminate intermediate allocations"
+    );
 
     // Rewriting the IR stops at its seam until the typed PilIR exists.
     let rewrite = eval_m23(
@@ -333,7 +339,10 @@ fn test_m23_4_cascades_side_effects_and_dto_projections() {
 
     let deps = &["selfhost/ir/lower_each_cascade.pilot"];
     let res = eval_m23(deps, script);
-    assert_eq!(res, "42", "Cascades must guard optional receivers, and DTO projection must catch FUSE003/FUSE004");
+    assert_eq!(
+        res, "42",
+        "Cascades must guard optional receivers, and DTO projection must catch FUSE003/FUSE004"
+    );
 
     // Emitting the cascade into PilIR stops at its seam until the typed PilIR exists.
     let emit = eval_m23(

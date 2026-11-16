@@ -3,29 +3,27 @@
 //! Capability-Sandboxed & Deterministic comptime Execution
 //! ============================================================================
 
-use std::fs;
 use pilot_analysis::PhysicsRegistry;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
+use std::fs;
 
-#[path = "common/vm_outcome.rs"]
-mod vm_outcome;
 #[path = "common/anticheat.rs"]
 mod anticheat;
+#[path = "common/vm_outcome.rs"]
+mod vm_outcome;
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 29,
-    test_file_rel: "crates/pilot-analysis/tests/milestone29_capability_sandboxed_comptime_execution.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone29_capability_sandboxed_comptime_execution.rs",
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
             path: "selfhost/comptime/guardian.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "comptime_guardian_new",
-                "guardian_check_dependency_grant",
-            ],
+            required_pub_fns: &["comptime_guardian_new", "guardian_check_dependency_grant"],
             required_code_markers: &[
                 "CTIME001",
                 "CTIME002",
@@ -43,15 +41,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             path: "selfhost/comptime/deterministic_env.pilot",
             max_lines: 1500,
             name_blind: true,
-            required_pub_fns: &[
-                "clock_now_virtual",
-                "normalize_virtual_path",
-            ],
-            required_code_markers: &[
-                "DetPrng",
-                "DetMapEntry",
-                "DetMap",
-            ],
+            required_pub_fns: &["clock_now_virtual", "normalize_virtual_path"],
+            required_code_markers: &["DetPrng", "DetMapEntry", "DetMap"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -64,10 +55,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "parse_comptime_allow_policy",
                 "validate_dependency_comptime_needs",
             ],
-            required_code_markers: &[
-                "ComptimeAllowPolicy",
-                "CTIME006",
-            ],
+            required_code_markers: &["ComptimeAllowPolicy", "CTIME006"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -76,12 +64,16 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 };
 
 fn eval_m29(deps: &[&str], script: &str) -> String {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut combined = String::new();
     for rel in deps {
         let p = root.join(rel);
-        let src = fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
+        let src =
+            fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {:?}", p.display(), e));
         combined.push_str(&src);
         combined.push('\n');
     }
@@ -108,9 +100,7 @@ fn test_m29_1_unauthorized_fs_and_path_traversal_blocked_ctime001() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/comptime/guardian.pilot",
-    ];
+    let deps = ["selfhost/comptime/guardian.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -180,9 +170,7 @@ fn test_m29_2_network_subprocess_and_clock_guards_ctime002_003() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/comptime/guardian.pilot",
-    ];
+    let deps = ["selfhost/comptime/guardian.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -224,9 +212,7 @@ fn test_m29_3_fuel_exhaustion_infinite_loop_trap_ctime004() {
         &ANTICHEAT_SPEC,
     );
 
-    let deps = [
-        "selfhost/comptime/guardian.pilot",
-    ];
+    let deps = ["selfhost/comptime/guardian.pilot"];
 
     let script = r#"
         pub fn main() -> i64 {
@@ -257,8 +243,14 @@ fn test_m29_3_fuel_exhaustion_infinite_loop_trap_ctime004() {
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     vm.fuel_limit = Some(500); // 500 fuel limit
     let _ = vm.run();
-    assert!(vm.fuel_exhausted, "PilVirtualMachine must trap on infinite loop when fuel is exhausted");
-    assert!(vm.fuel_used > 500, "PilVirtualMachine must record used fuel");
+    assert!(
+        vm.fuel_exhausted,
+        "PilVirtualMachine must trap on infinite loop when fuel is exhausted"
+    );
+    assert!(
+        vm.fuel_used > 500,
+        "PilVirtualMachine must record used fuel"
+    );
 
     guard.finish();
 }
@@ -337,7 +329,11 @@ fn test_m29_4_deterministic_env_and_transitive_privilege_escalation_ctime006() {
     "#;
 
     let res = eval_m29(&deps, script);
-    assert_eq!(res, "42", "Failed deterministic env and CTIME006 test: {}", res);
+    assert_eq!(
+        res, "42",
+        "Failed deterministic env and CTIME006 test: {}",
+        res
+    );
 
     // Running comptime under a policy needs the seed VM to honour it.
     let run_script = r#"

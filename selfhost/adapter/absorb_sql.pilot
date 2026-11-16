@@ -1,10 +1,10 @@
 // ==============================================================================
 // selfhost/adapter/absorb_sql.pilot
 // Ring 3 / Self-Host Compiler: Live Schema & Wire Protocol DDL Absorber (`use sql`)
-// Package: Pilot.SelfHost.Adapter.AbsorbSql (Milestone 20)
+// Package: selfhost.adapter (Milestone 20)
 // ==============================================================================
 
-pub lvl(0) pkg Pilot.SelfHost.Adapter.AbsorbSql;
+pub lvl(0) pkg selfhost.adapter;
 
 // ------------------------------------------------------------------------------
 // 1. Diagnostics (SCH001 .. SCH005)
@@ -66,7 +66,7 @@ pub fn sql_table_new(name: str) -> SqlTableDef {
     };
 }
 
-pub fn sql_table_find_col(tbl: SqlTableDef, col_name: str) -> i64 {
+pub fn sql_table_find_col(ref tbl: SqlTableDef, col_name: str) -> i64 {
     var i = 0;
     while i < tbl.columns.len() {
         let c = tbl.columns.get(i);
@@ -91,7 +91,7 @@ pub fn sql_catalog_new() -> SqlCatalog {
     };
 }
 
-pub fn sql_catalog_find_table(cat: SqlCatalog, name: str) -> i64 {
+pub fn sql_catalog_find_table(ref cat: SqlCatalog, name: str) -> i64 {
     var i = 0;
     while i < cat.tables.len() {
         let t = cat.tables.get(i);
@@ -520,7 +520,7 @@ pub fn sql_rewrite_placeholders(raw_sql: str, dialect: SqlDialect) -> str {
 
 /// SCH002 when the query names a table or a compared column the catalog does
 /// not have; "" when it checks out.
-pub fn sql_check_query(cat: SqlCatalog, q: SqlQueryDef) -> str {
+pub fn sql_check_query(ref cat: SqlCatalog, q: SqlQueryDef) -> str {
     if q.target_tbl.len() == 0 { return ""; }
     let t_idx = sql_catalog_find_table(cat, q.target_tbl);
     if t_idx < 0 {
@@ -537,7 +537,7 @@ pub fn sql_check_query(cat: SqlCatalog, q: SqlQueryDef) -> str {
 }
 
 /// `pub fn Name(params) -> Ret`, each parameter typed by its column's SQL type.
-pub fn sql_synthesize_query_signature(cat: SqlCatalog, q: SqlQueryDef) -> str {
+pub fn sql_synthesize_query_signature(ref cat: SqlCatalog, q: SqlQueryDef) -> str {
     let t_idx = sql_catalog_find_table(cat, q.target_tbl);
     var param_sig = "";
     var i: usize = 0;
@@ -563,7 +563,7 @@ fn sql_synthesize_query_body(q: SqlQueryDef, dialect: SqlDialect) -> str {
     return seam("sql.query_body", "driver execution and typed row decoding for a synthesized query wrapper");
 }
 
-pub fn sql_synthesize_query_wrapper(cat: SqlCatalog, q: SqlQueryDef, dialect: SqlDialect) -> str {
+pub fn sql_synthesize_query_wrapper(ref cat: SqlCatalog, q: SqlQueryDef, dialect: SqlDialect) -> str {
     let diag = sql_check_query(cat, q);
     if diag.len() > 0 {
         return diag;

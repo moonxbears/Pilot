@@ -15,19 +15,9 @@
 //   match stops the program. At top level each bound name is a global.
 // The engine operations a slice pattern needs are the ones the program binds
 // (`bind_slice_pattern`: length, element, middle part).
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerDestructure;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_members.*;
-use selfhost.ir.lower_switch.*;
-use selfhost.ir.lower_global.*;
-use selfhost.ir.lower_unit.*;
+use selfhost.check.*;
 
 /// The binding words naming the engine operations of slice patterns
 /// (length, element, middle part) and of record patterns on maps (has key,
@@ -41,19 +31,19 @@ pub pure fn pattern_rest() -> i64 => 2;
 pub pure fn record_pattern_typed() -> i64 => 1;
 
 /// The arguments of the first binding `hook(..)`, or none.
-fn binding_args(lw: Lowerer, hook: str) -> List<str>? {
+fn binding_args(ref lw: Lowerer, hook: str) -> List<str>? {
     for row in lw.bindings {
         if row.len() > 1 && row[0] == hook { return row.slice(1, row.len()); }
     }
     return none;
 }
 
-fn int_physics(lw: Lowerer) -> IrTypePhysics => layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
+fn int_physics(var ref lw: Lowerer) -> IrTypePhysics => layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
 
-fn int_const(lw: Lowerer, v: i64, n: i64) -> u32 => emit(lw, op_const_bits(), 0, int_physics(lw), [pool_int(lw, v)], n);
+fn int_const(var ref lw: Lowerer, v: i64, n: i64) -> u32 => emit(lw, op_const_bits(), 0, int_physics(lw), [pool_int(lw, v)], n);
 
 /// Continues in a fresh block when `cond` holds, else goes to `fail`.
-fn pass_if(lw: Lowerer, cond: u32, fail: u32, n: i64) {
+fn pass_if(var ref lw: Lowerer, cond: u32, fail: u32, n: i64) {
     let pass = ir_add_block(lw.f);
     emit_void(lw, op_cond_br(), 0, [cond, pass, 0, fail, 0], n);
     switch_to(lw, pass);
@@ -61,7 +51,7 @@ fn pass_if(lw: Lowerer, cond: u32, fail: u32, n: i64) {
 
 /// Tests `v` (of type `t`) against slice pattern `pat`. False when it is
 /// not lowered.
-pub fn match_slice(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
+pub fn match_slice(var ref lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
     let s = lw.inf.p.s;
     guard some ops = binding_args(lw, slice_pattern_hook()) else { return false; };
     if ops.len() != 3 { return false; }
@@ -104,7 +94,7 @@ pub fn match_slice(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
 
 /// Tests `v` (of type `t`) against record pattern `pat`. False when it is
 /// not lowered.
-pub fn match_record(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
+pub fn match_record(var ref lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
     let p = lw.inf.p;
     let s = p.s;
     let ch = children(s, pat);
@@ -141,7 +131,7 @@ pub fn match_record(lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) -> bool {
 
 /// Binds the name pattern `pat` introduces to `v` of type `t`: a local, or
 /// the global of a top-level destructuring `let`.
-pub fn bind_name(lw: Lowerer, pat: i64, v: u32, t: i64) -> bool {
+pub fn bind_name(var ref lw: Lowerer, pat: i64, v: u32, t: i64) -> bool {
     if lw.binding_of.has(key(pat)) {
         let b = lw.binding_of.get(key(pat));
         lw.values.set(key(b), v);
@@ -155,7 +145,7 @@ pub fn bind_name(lw: Lowerer, pat: i64, v: u32, t: i64) -> bool {
 
 /// Whether name pattern `pat` lies in a top-level destructuring `let`
 /// (`global_names` counts it as a global binding).
-fn is_global_pattern_name(lw: Lowerer, pat: i64) -> bool {
+fn is_global_pattern_name(ref lw: Lowerer, pat: i64) -> bool {
     let name = node_name(lw.inf.p.s, pat);
     if !lw.global_named.has(name) { return false; }
     for d in lw.global_named.get(name) {
@@ -166,7 +156,7 @@ fn is_global_pattern_name(lw: Lowerer, pat: i64) -> bool {
 
 /// `let <pattern> = value;`: a value the pattern does not match stops the
 /// program.
-pub fn lower_pattern_let(lw: Lowerer, n: i64) -> u32 {
+pub fn lower_pattern_let(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     if rhs(s, n) < 0 || kind(s, n) != nk_let() { return unsupported(lw, n); }
     let t = value_type(lw, rhs(s, n));

@@ -7,10 +7,10 @@
 //! the value in the unit family's base unit, as a constant. A literal whose
 //! unit the module does not know is a compile error.
 
+use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use crate::PilVirtualMachine;
 use pilot_ast::{AstArena, NodeId, NodeKind};
-use crate::value::PilotVal;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -35,7 +35,12 @@ impl BytecodeCompiler {
     /// The literal `number[unit]` stands for, written as `numberunit`. A number
     /// cannot be indexed, so a number literal indexed by a name that is not a
     /// variable is always a unit.
-    pub(crate) fn bracket_unit_text(&self, arena: &AstArena, num: NodeId, unit: NodeId) -> Option<String> {
+    pub(crate) fn bracket_unit_text(
+        &self,
+        arena: &AstArena,
+        num: NodeId,
+        unit: NodeId,
+    ) -> Option<String> {
         let (n, u) = (arena.node(num), arena.node(unit));
         if u.node_kind() != NodeKind::IdentExpr {
             return None;

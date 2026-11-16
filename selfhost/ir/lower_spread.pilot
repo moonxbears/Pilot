@@ -8,28 +8,19 @@
 // exactly that many items: with another number the program stops with the
 // seed's CALL001 (crates/pilot-vm/src/lower_args.rs emit_spread). Any other
 // value (a tuple) is an aggregate, read field by field.
-pub lvl(0) pkg Pilot.SelfHost.Ir.LowerSpread;
+pub lvl(0) pkg selfhost.ir;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.infer.*;
-use selfhost.ir.model.*;
-use selfhost.ir.layouts.*;
-use selfhost.ir.lower.*;
-use selfhost.ir.lower_members.*;
-use selfhost.ir.lower_union.*;
-use selfhost.ir.lower_outs.*;
+use selfhost.check.*;
 
 /// `UnaryExpr` flags of `*x` (crates/pilot-ast UNARY_OP_SPLAT).
 pub pure fn unary_spread() -> i64 => 6;
 
-fn is_spread_arg(s: Snap, a: i64) -> bool => kind(s, a) == nk_unary() && flags(s, a) == unary_spread();
+fn is_spread_arg(ref s: Snap, a: i64) -> bool => kind(s, a) == nk_unary() && flags(s, a) == unary_spread();
 
 /// The call of `decl` with `arg_nodes` when exactly one of them is a spread;
 /// none when there is no spread to lower here (no spread, several, or a
 /// named argument beside it).
-pub fn lower_spread_call(lw: Lowerer, decl: i64, pre: List<u32>, arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32? {
+pub fn lower_spread_call(var ref lw: Lowerer, decl: i64, ref pre: List<u32>, ref arg_nodes: List<i64>, phy: IrTypePhysics, n: i64) -> u32? {
     let s = lw.inf.p.s;
     var spreads = 0;
     for a in arg_nodes {

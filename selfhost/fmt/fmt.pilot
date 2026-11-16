@@ -5,6 +5,8 @@
 // `;` statement terminators, operator spacing, and width-aware `( ... )` groups.
 // ============================================================================
 
+pub pkg selfhost.fmt;
+
 use pilot.fmt;
 
 // Canonical FmtStyle enum is imported from pilot.fmt (::Preserve, ::Readable, ::Compact)

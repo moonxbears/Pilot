@@ -69,17 +69,8 @@
 //    payload type, absent op]  (the element four "" without elements, the
 //    sequence op "" when the collection is walked as is; the payload two ""
 //    without a payload)
-pub lvl(0) pkg Pilot.SelfHost.Check.Drops;
+pub lvl(0) pkg selfhost.check;
 
-use selfhost.check.snapshot.*;
-use selfhost.check.types.*;
-use selfhost.check.program.*;
-use selfhost.check.methods.*;
-use selfhost.check.resolve.*;
-use selfhost.check.infer.*;
-use selfhost.check.diag.*;
-use selfhost.check.own.*;
-use selfhost.check.borrows.*;
 
 /// What a row of the drop plan says. The seed reads the numbers
 /// (crates/pilot-vm/src/lower_drop.rs `DropAction`), so they are fixed.
@@ -169,7 +160,7 @@ pub struct DropPlanner : IObject {
     pub flagged: bool;
 }
 
-pub fn row(pl: DropPlanner, action: DropAction, n: i64, a: str, b: str) {
+pub fn row(var ref pl: DropPlanner, action: DropAction, n: i64, a: str, b: str) {
     let s = pl.flow.inf.p.s;
     pl.rows.push([action as i64, span_start(s, n), span_end(s, n), kind(s, n), a, b]);
     let k = f"{n}";
@@ -178,7 +169,7 @@ pub fn row(pl: DropPlanner, action: DropAction, n: i64, a: str, b: str) {
 }
 
 /// The struct declaration of named type `t`, or -1.
-pub fn struct_decl(p: Program, t: i64) -> i64 {
+pub fn struct_decl(ref p: Program, t: i64) -> i64 {
     if !ty_is_named(p.tt, t) { return -1; }
     let d = ty_decl(p.tt, t);
     return if d >= 0 && kind(p.s, d) == nk_struct() { d } else { -1 };
@@ -186,7 +177,7 @@ pub fn struct_decl(p: Program, t: i64) -> i64 {
 
 /// Whether struct `d` declares a destructor with something in it: running
 /// an empty `~self() {}` does nothing, so it needs no drop.
-fn has_dtor(p: Program, d: i64) -> bool {
+fn has_dtor(ref p: Program, d: i64) -> bool {
     for m in type_members(p.s, d) {
         if kind(p.s, m) == nk_dtor() {
             let body = lhs(p.s, m);
@@ -197,7 +188,7 @@ fn has_dtor(p: Program, d: i64) -> bool {
 }
 
 /// Field name and type of each stored field of struct type `t`.
-pub fn stored_fields(p: Program, t: i64) -> List<List<any>> {
+pub fn stored_fields(var ref p: Program, t: i64) -> List<List<any>> {
     var out: List<List<any>> = [];
     let d = struct_decl(p, t);
     if d < 0 { return out; }
@@ -214,7 +205,7 @@ pub fn stored_fields(p: Program, t: i64) -> List<List<any>> {
 /// payload: `owned_payload`), 2 when it holds values that do some other way
 /// (a result, a tuple, another generic, or a type that holds itself through
 /// its elements), else 0.
-pub fn needs_drop(pl: DropPlanner, t: i64, depth: i64) -> i64 {
+pub fn needs_drop(var ref pl: DropPlanner, t: i64, depth: i64) -> i64 {
     let p = pl.flow.inf.p;
     if !owns(pl.flow, t) || depth > 16 { return 0; }
     let key = ty_display(p.tt, t);
@@ -263,7 +254,7 @@ pub fn needs_drop(pl: DropPlanner, t: i64, depth: i64) -> i64 {
 }
 
 /// Writes the glue rows of `t` and of the field and element types it drops.
-fn glue(pl: DropPlanner, t: i64) {
+fn glue(var ref pl: DropPlanner, t: i64) {
     let p = pl.flow.inf.p;
     let key = ty_display(p.tt, t);
     if pl.glued.has(key) { return; }
@@ -307,7 +298,7 @@ fn glue(pl: DropPlanner, t: i64) {
 
 // --- Walking the tree --------------------------------------------------------
 
-fn uses(pl: DropPlanner, n: i64, b: i64) -> bool {
+fn uses(ref pl: DropPlanner, n: i64, b: i64) -> bool {
     if n < 0 { return false; }
     let s = pl.flow.inf.p.s;
     if kind(s, n) == nk_ident() {
@@ -320,7 +311,7 @@ fn uses(pl: DropPlanner, n: i64, b: i64) -> bool {
 }
 
 /// The identifiers naming `b` inside `n`.
-fn refs(pl: DropPlanner, n: i64, b: i64, out: List<i64>) {
+fn refs(ref pl: DropPlanner, n: i64, b: i64, var ref out: List<i64>) {
     if n < 0 { return; }
     let s = pl.flow.inf.p.s;
     if kind(s, n) == nk_ident() && pl.flow.inf.r.ref_of[n] == b { out.push(n); }
@@ -328,12 +319,12 @@ fn refs(pl: DropPlanner, n: i64, b: i64, out: List<i64>) {
 }
 
 /// Whether `inner` lies inside node `outer` (or is it).
-fn nested_in(s: Snap, inner: i64, outer: i64) -> bool =>
+fn nested_in(ref s: Snap, inner: i64, outer: i64) -> bool =>
     span_start(s, inner) >= span_start(s, outer) && span_end(s, inner) <= span_end(s, outer);
 
 /// The first node of `kinds` on the path from `n` up to (not including)
 /// `stop`, or -1.
-fn ancestor_of_kind(pl: DropPlanner, n: i64, stop: i64, kinds: List<i64>) -> i64 {
+fn ancestor_of_kind(ref pl: DropPlanner, n: i64, stop: i64, ref kinds: List<i64>) -> i64 {
     let p = pl.flow.inf.p;
     var at = p.parents[n];
     while at >= 0 && at != stop {
@@ -344,11 +335,11 @@ fn ancestor_of_kind(pl: DropPlanner, n: i64, stop: i64, kinds: List<i64>) -> i64
 }
 
 /// The loop a `break` / `continue` leaves.
-fn loop_of(pl: DropPlanner, n: i64) -> i64 => ancestor_of_kind(pl, n, -1, [nk_while(), nk_for()]);
+fn loop_of(ref pl: DropPlanner, n: i64) -> i64 => ancestor_of_kind(pl, n, -1, [nk_while(), nk_for()]);
 
 /// Writes `exit` rows for the jumps in `n` that leave the scope of `b`
 /// (declared at `site`) while it is live.
-fn exits(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
+fn exits(var ref pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
     if n < 0 { return; }
     let s = pl.flow.inf.p.s;
     let k = kind(s, n);
@@ -371,7 +362,7 @@ fn exits(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
 
 /// The `try` block that a failed `?` (node `n`) jumps out of, inside the
 /// same function, or -1 when it leaves the function.
-fn try_region(pl: DropPlanner, n: i64) -> i64 {
+fn try_region(ref pl: DropPlanner, n: i64) -> i64 {
     let p = pl.flow.inf.p;
     let s = p.s;
     var at = p.parents[n];
@@ -388,7 +379,7 @@ fn try_region(pl: DropPlanner, n: i64) -> i64 {
 }
 
 /// The statement of a block that `n` lies in.
-fn statement_of(pl: DropPlanner, n: i64) -> i64 {
+fn statement_of(ref pl: DropPlanner, n: i64) -> i64 {
     let p = pl.flow.inf.p;
     var at = n;
     while p.parents[at] >= 0 && kind(p.s, p.parents[at]) != nk_block() { at = p.parents[at]; }
@@ -401,7 +392,7 @@ fn statement_of(pl: DropPlanner, n: i64) -> i64 {
 /// it drops `b` unless its operand moved it; jumping to a `catch` that `b`
 /// is still in scope for keeps it (the statement holding the `try` drops
 /// it). In a statement that also moves `b`, the drop depends on `b`'s flag.
-fn try_exit(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
+fn try_exit(var ref pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
     let s = pl.flow.inf.p.s;
     let name = pl.flow.inf.r.name[b];
     let region = try_region(pl, n);
@@ -415,7 +406,7 @@ fn try_exit(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
 
 /// Whether `n` moves `b`: some identifier naming it stands where it is
 /// used by value.
-fn moves(pl: DropPlanner, n: i64, b: i64) -> bool {
+fn moves(var ref pl: DropPlanner, n: i64, b: i64) -> bool {
     var ids: List<i64> = [];
     refs(pl, n, b, ids);
     for i in ids { if is_move_position(pl.flow, i) { return true; } }
@@ -423,7 +414,7 @@ fn moves(pl: DropPlanner, n: i64, b: i64) -> bool {
 }
 
 /// A move of `b` in statement `n` that only some paths through `n` take.
-fn conditional_move(pl: DropPlanner, n: i64, b: i64) -> bool {
+fn conditional_move(var ref pl: DropPlanner, n: i64, b: i64) -> bool {
     var ids: List<i64> = [];
     refs(pl, n, b, ids);
     for i in ids {
@@ -437,7 +428,7 @@ fn conditional_move(pl: DropPlanner, n: i64, b: i64) -> bool {
 fn is_loop(k: i64) -> bool => k == nk_while() || k == nk_for();
 
 /// Places the drop of `b`, live on entry to `n` and dead after it.
-fn place(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
+fn place(var ref pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
     let s = pl.flow.inf.p.s;
     let name = pl.flow.inf.r.name[b];
     let k = kind(s, n);
@@ -484,7 +475,7 @@ fn place(pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
 
 /// Places the drop of `b` among `stmts[from..]` of block `blk`. With
 /// `at_entry`, a block that never uses `b` drops it as it starts.
-fn place_seq(pl: DropPlanner, blk: i64, stmts: List<i64>, from: i64, b: i64, site: i64, key: str, at_entry: bool) -> bool {
+fn place_seq(var ref pl: DropPlanner, blk: i64, ref stmts: List<i64>, from: i64, b: i64, site: i64, key: str, at_entry: bool) -> bool {
     var last = -1;
     var i = from;
     while i < stmts.len() {
@@ -505,7 +496,7 @@ fn place_seq(pl: DropPlanner, blk: i64, stmts: List<i64>, from: i64, b: i64, sit
 }
 
 /// The statement of block `blk` that `n` lies in, as its index, or -1.
-fn index_in(s: Snap, stmts: List<i64>, n: i64) -> i64 {
+fn index_in(ref s: Snap, ref stmts: List<i64>, n: i64) -> i64 {
     var i = 0;
     while i < stmts.len() {
         if nested_in(s, n, stmts[i]) { return i; }
@@ -516,7 +507,7 @@ fn index_in(s: Snap, stmts: List<i64>, n: i64) -> i64 {
 
 /// Whether `b` is moved by `st` on every path through it: a move standing
 /// outside any branch, short-circuit, loop or closure inside `st`.
-fn moves_always(pl: DropPlanner, st: i64, b: i64) -> bool {
+fn moves_always(var ref pl: DropPlanner, st: i64, b: i64) -> bool {
     let s = pl.flow.inf.p.s;
     let k = kind(s, st);
     let branching: List<i64> = [nk_if(), nk_match(), nk_coalesce(), nk_binary(), nk_while(), nk_for(), nk_lambda()];
@@ -532,7 +523,7 @@ fn moves_always(pl: DropPlanner, st: i64, b: i64) -> bool {
 /// Whether `b`, which may have been moved before assignment `n`, was moved
 /// on every path: by `n`'s own right-hand side, or by an earlier statement
 /// of the same block with no assignment to `b` after it.
-fn moved_before(pl: DropPlanner, n: i64, b: i64) -> bool {
+fn moved_before(var ref pl: DropPlanner, n: i64, b: i64) -> bool {
     let p = pl.flow.inf.p;
     let s = p.s;
     if moves_always(pl, rhs(s, n), b) { return true; }
@@ -550,7 +541,7 @@ fn moved_before(pl: DropPlanner, n: i64, b: i64) -> bool {
 }
 
 /// Whether `n` assigns `b` a new value somewhere inside it.
-fn assigns(pl: DropPlanner, n: i64, b: i64) -> bool {
+fn assigns(ref pl: DropPlanner, n: i64, b: i64) -> bool {
     let p = pl.flow.inf.p;
     var ids: List<i64> = [];
     refs(pl, n, b, ids);
@@ -564,7 +555,7 @@ fn assigns(pl: DropPlanner, n: i64, b: i64) -> bool {
 /// Writes a `Replace` row on each assignment to `b` that may find it holding
 /// a value (flagging `b` when it was moved on only some paths before), and
 /// a seam row on every closure that captures it; true when there is a seam.
-fn unsupported_uses(pl: DropPlanner, body: i64, b: i64, key: str) -> bool {
+fn unsupported_uses(var ref pl: DropPlanner, body: i64, b: i64, key: str) -> bool {
     let s = pl.flow.inf.p.s;
     var ids: List<i64> = [];
     refs(pl, body, b, ids);
@@ -592,7 +583,7 @@ fn unsupported_uses(pl: DropPlanner, body: i64, b: i64, key: str) -> bool {
 }
 
 /// Plans the drops of binding `b` in the function whose body is `body`.
-fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
+fn plan_binding(var ref pl: DropPlanner, b: i64, body: i64) {
     let f = pl.flow;
     let p = f.inf.p;
     let s = p.s;
@@ -653,7 +644,7 @@ fn plan_binding(pl: DropPlanner, b: i64, body: i64) {
 /// at identifier `site` lives: `[decl, block, first statement]`, where
 /// `decl` is the `if`'s branch or the guard statement; empty when the shape
 /// is not one of these.
-fn unwrap_scope(pl: DropPlanner, site: i64) -> List<i64> {
+fn unwrap_scope(ref pl: DropPlanner, site: i64) -> List<i64> {
     let p = pl.flow.inf.p;
     let s = p.s;
     let a = p.parents[site];
@@ -679,7 +670,7 @@ fn unwrap_scope(pl: DropPlanner, site: i64) -> List<i64> {
 /// The node where a move of `b` through identifier `i` completes: the call
 /// it is passed to, or the list, tuple or struct literal it is put in; else
 /// the identifier itself (bound, assigned or returned).
-fn move_completes_at(pl: DropPlanner, i: i64) -> i64 {
+fn move_completes_at(ref pl: DropPlanner, i: i64) -> i64 {
     let p = pl.flow.inf.p;
     let s = p.s;
     var up = p.parents[i];
@@ -693,7 +684,7 @@ fn move_completes_at(pl: DropPlanner, i: i64) -> i64 {
 /// The rows a flagged binding `b` needs: its flag at `decl`, cleared where
 /// each move of it completes, and a `Replace` on every assignment (which
 /// sets it again).
-fn flag_rows(pl: DropPlanner, b: i64, decl: i64, body: i64, key: str) {
+fn flag_rows(var ref pl: DropPlanner, b: i64, decl: i64, body: i64, key: str) {
     let p = pl.flow.inf.p;
     let s = p.s;
     let name = pl.flow.inf.r.name[b];
@@ -716,7 +707,7 @@ fn flag_rows(pl: DropPlanner, b: i64, decl: i64, body: i64, key: str) {
 
 /// Whether node `n` already has a row of `action` for the binding being
 /// planned.
-fn has_row(pl: DropPlanner, n: i64, action: DropAction) -> bool {
+fn has_row(ref pl: DropPlanner, n: i64, action: DropAction) -> bool {
     let k = f"{n}";
     if !pl.at.has(k) { return false; }
     for r in pl.at.get(k) {
@@ -729,7 +720,7 @@ fn has_row(pl: DropPlanner, n: i64, action: DropAction) -> bool {
 
 /// A planner over `inf` that has planned the drops of every function body
 /// in the user's files.
-pub fn drop_planner(inf: Infer) -> DropPlanner {
+pub fn drop_planner(var ref inf: Infer) -> DropPlanner {
     let s = inf.p.s;
     let f = flow_new(inf, sink_new(s));
     // The moves before each assignment (moved_at); OWN001 is reported by
@@ -760,11 +751,11 @@ pub fn drop_planner(inf: Infer) -> DropPlanner {
 }
 
 /// Whether `n`, an identifier, names the receiver of the method it is in.
-fn names_receiver(s: Snap, n: i64) -> bool => s.receiver != "" && kind(s, n) == nk_ident() && node_name(s, n) == s.receiver;
+fn names_receiver(ref s: Snap, n: i64) -> bool => s.receiver != "" && kind(s, n) == nk_ident() && node_name(s, n) == s.receiver;
 
 /// Whether some value `body` gives may be the receiver itself: an
 /// expression body that is it, or a `return` of it.
-fn may_give_receiver(s: Snap, body: i64) -> bool {
+fn may_give_receiver(ref s: Snap, body: i64) -> bool {
     if body < 0 { return false; }
     if names_receiver(s, body) { return true; }
     if kind(s, body) == nk_block() {
@@ -775,7 +766,7 @@ fn may_give_receiver(s: Snap, body: i64) -> bool {
     return false;
 }
 
-fn gives_receiver(s: Snap, n: i64) -> bool {
+fn gives_receiver(ref s: Snap, n: i64) -> bool {
     if n < 0 { return false; }
     let k = kind(s, n);
     if k == nk_lambda() || k == nk_fn() { return false; }
@@ -788,7 +779,7 @@ fn gives_receiver(s: Snap, n: i64) -> bool {
 /// struct literal's result, or a method's that is not the receiver handed
 /// back. A method returning its receiver's own type with no body (an engine
 /// method such as `push`) is taken to hand the receiver back.
-fn makes_new_value(pl: DropPlanner, c: i64) -> bool {
+fn makes_new_value(ref pl: DropPlanner, c: i64) -> bool {
     let f = pl.flow;
     let s = f.inf.p.s;
     let ch = children(s, c);
@@ -803,7 +794,7 @@ fn makes_new_value(pl: DropPlanner, c: i64) -> bool {
 
 /// Plans the drop of the element assignment `n` (`rs[i] = v`) replaces in a
 /// collection that owns its elements.
-fn plan_element_replace(pl: DropPlanner, n: i64) {
+fn plan_element_replace(var ref pl: DropPlanner, n: i64) {
     let f = pl.flow;
     let s = f.inf.p.s;
     let target = lhs(s, n);
@@ -825,7 +816,7 @@ fn plan_element_replace(pl: DropPlanner, n: i64) {
 
 /// Plans the drop of the owned value expression statement `n` makes and
 /// throws away (a statement ending in `;`, not a block's value).
-fn plan_discard(pl: DropPlanner, n: i64) {
+fn plan_discard(var ref pl: DropPlanner, n: i64) {
     let f = pl.flow;
     let s = f.inf.p.s;
     let e = lhs(s, n);

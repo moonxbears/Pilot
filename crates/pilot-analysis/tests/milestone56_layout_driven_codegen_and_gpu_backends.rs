@@ -80,7 +80,8 @@ const CODEGEN_BANNED_CHEATS: &[&str] = &[
 
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 56,
-    test_file_rel: "crates/pilot-analysis/tests/milestone56_layout_driven_codegen_and_gpu_backends.rs",
+    test_file_rel:
+        "crates/pilot-analysis/tests/milestone56_layout_driven_codegen_and_gpu_backends.rs",
     expected_test_count: 3,
     files: &[
         anticheat::FileAuditRule {
@@ -336,7 +337,12 @@ pub fn test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang() {
     ] {
         let src = read_ws(rel);
         for banned in ["ExprNode", "TransformFrame", "FlowState"] {
-            assert!(!src.contains(banned), "{} must not contain benchmark cheat {}", rel, banned);
+            assert!(
+                !src.contains(banned),
+                "{} must not contain benchmark cheat {}",
+                rel,
+                banned
+            );
         }
     }
 
@@ -395,7 +401,13 @@ pub fn test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang() {
         std::fs::write(&c_path, &full_c).unwrap();
 
         let compile = Command::new("clang")
-            .args(["-std=c11", "-O2", c_path.to_str().unwrap(), "-o", bin_path.to_str().unwrap()])
+            .args([
+                "-std=c11",
+                "-O2",
+                c_path.to_str().unwrap(),
+                "-o",
+                bin_path.to_str().unwrap(),
+            ])
             .output()
             .expect("invoke clang on emitted C11");
         assert!(
@@ -406,7 +418,9 @@ pub fn test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang() {
             full_c
         );
 
-        let run_out = Command::new(&bin_path).output().expect("execute C11 binary");
+        let run_out = Command::new(&bin_path)
+            .output()
+            .expect("execute C11 binary");
         assert!(run_out.status.success());
         let actual: i64 = String::from_utf8_lossy(&run_out.stdout)
             .trim()
@@ -476,7 +490,10 @@ pub fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node()
         // 1. LLVM IR SSA compiled & executed natively via `clang`!
         let llvm_ir = run_codegen_on_arena(
             &pilot_prog,
-            &["selfhost/codegen/physics.pilot", "selfhost/codegen/llvm_emitter.pilot"],
+            &[
+                "selfhost/codegen/physics.pilot",
+                "selfhost/codegen/llvm_emitter.pilot",
+            ],
             "emit_arena_llvm_ir()",
         );
         let ll_path = tmp.join(format!("t_{}.ll", trial));
@@ -492,7 +509,13 @@ pub fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node()
         )
         .unwrap();
         let ll_comp = Command::new("clang")
-            .args(["-O2", ll_path.to_str().unwrap(), ll_drv.to_str().unwrap(), "-o", ll_bin.to_str().unwrap()])
+            .args([
+                "-O2",
+                ll_path.to_str().unwrap(),
+                ll_drv.to_str().unwrap(),
+                "-o",
+                ll_bin.to_str().unwrap(),
+            ])
             .output()
             .expect("clang compile LLVM IR");
         assert!(
@@ -503,8 +526,15 @@ pub fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node()
             llvm_ir
         );
         let ll_run = Command::new(&ll_bin).output().unwrap();
-        let ll_val: i64 = String::from_utf8_lossy(&ll_run.stdout).trim().parse().unwrap();
-        assert_eq!(ll_val, expected, "Trial {}: LLVM IR execution mismatch!", trial);
+        let ll_val: i64 = String::from_utf8_lossy(&ll_run.stdout)
+            .trim()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            ll_val, expected,
+            "Trial {}: LLVM IR execution mismatch!",
+            trial
+        );
 
         // 2. Raw binary `.wasm` + `.mjs`/`.d.ts` instantiated & executed in `node` V8 WebAssembly!
         let wasm_out = run_codegen_on_arena(
@@ -515,9 +545,21 @@ pub fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node()
         let wparts: Vec<&str> = wasm_out.split("<<<W>>>").collect();
         assert_eq!(wparts.len(), 4);
         let wasm_bytes = decode_hex(wparts[0]);
-        assert_eq!(&wasm_bytes[0..8], b"\0asm\x01\x00\x00\x00", "Invalid WASM magic/version");
-        assert!(wparts[1].contains(&fn_calc), "WAT must export `{}`", fn_calc);
-        assert!(wparts[3].contains(&fn_calc), ".d.ts must declare `{}`", fn_calc);
+        assert_eq!(
+            &wasm_bytes[0..8],
+            b"\0asm\x01\x00\x00\x00",
+            "Invalid WASM magic/version"
+        );
+        assert!(
+            wparts[1].contains(&fn_calc),
+            "WAT must export `{}`",
+            fn_calc
+        );
+        assert!(
+            wparts[3].contains(&fn_calc),
+            ".d.ts must declare `{}`",
+            fn_calc
+        );
 
         let wasm_path = tmp.join(format!("t_{}.wasm", trial));
         std::fs::write(&wasm_path, &wasm_bytes).unwrap();
@@ -543,20 +585,35 @@ pub fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node()
             trial,
             String::from_utf8_lossy(&node_eval.stderr)
         );
-        let wasm_val: i64 = String::from_utf8_lossy(&node_eval.stdout).trim().parse().unwrap();
-        assert_eq!(wasm_val, expected, "Trial {}: WASM binary execution mismatch!", trial);
+        let wasm_val: i64 = String::from_utf8_lossy(&node_eval.stdout)
+            .trim()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            wasm_val, expected,
+            "Trial {}: WASM binary execution mismatch!",
+            trial
+        );
 
         // 3. x86_64 Native Assembly compiled & executed via `clang -x assembler`!
         let asm_text = run_codegen_on_arena(
             &pilot_prog,
-            &["selfhost/codegen/physics.pilot", "selfhost/codegen/asm_emitter.pilot"],
+            &[
+                "selfhost/codegen/physics.pilot",
+                "selfhost/codegen/asm_emitter.pilot",
+            ],
             "emit_arena_x86_64_asm()",
         );
         let s_path = tmp.join(format!("t_{}.s", trial));
         let s_bin = tmp.join(format!("asm_{}.bin", trial));
         std::fs::write(&s_path, &asm_text).unwrap();
         let asm_comp = Command::new("clang")
-            .args([s_path.to_str().unwrap(), ll_drv.to_str().unwrap(), "-o", s_bin.to_str().unwrap()])
+            .args([
+                s_path.to_str().unwrap(),
+                ll_drv.to_str().unwrap(),
+                "-o",
+                s_bin.to_str().unwrap(),
+            ])
             .output()
             .expect("clang assemble x86_64 .s");
         assert!(
@@ -567,15 +624,25 @@ pub fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node()
             asm_text
         );
         let asm_run = Command::new(&s_bin).output().unwrap();
-        let asm_val: i64 = String::from_utf8_lossy(&asm_run.stdout).trim().parse().unwrap();
-        assert_eq!(asm_val, expected, "Trial {}: x86_64 ASM execution mismatch!", trial);
+        let asm_val: i64 = String::from_utf8_lossy(&asm_run.stdout)
+            .trim()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            asm_val, expected,
+            "Trial {}: x86_64 ASM execution mismatch!",
+            trial
+        );
     }
 
     // Also verify SIMD vector lanes (`[Bits(32, 8, 5)]`) emit AVX/SSE vector mnemonics
     let simd_prog = "[Bits(32, 8, 5)]\npub struct f32x8_vec {}\npub fn vec_combine(a: f32x8_vec, b: f32x8_vec) -> f32x8_vec { return a + b; }\n";
     let simd_asm = run_codegen_on_arena(
         simd_prog,
-        &["selfhost/codegen/physics.pilot", "selfhost/codegen/asm_emitter.pilot"],
+        &[
+            "selfhost/codegen/physics.pilot",
+            "selfhost/codegen/asm_emitter.pilot",
+        ],
         "emit_arena_x86_64_asm()",
     );
     assert!(
@@ -680,7 +747,13 @@ pub fn test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_
             let cpp_bin = tmp.join(format!("gpu_{}_{}.bin", backend, trial));
             std::fs::write(&cpp_path, &cpp_harness).unwrap();
             let comp = Command::new("clang++")
-                .args(["-O2", "-Wno-unknown-pragmas", cpp_path.to_str().unwrap(), "-o", cpp_bin.to_str().unwrap()])
+                .args([
+                    "-O2",
+                    "-Wno-unknown-pragmas",
+                    cpp_path.to_str().unwrap(),
+                    "-o",
+                    cpp_bin.to_str().unwrap(),
+                ])
                 .output()
                 .expect("clang++ compile GPU C dialect");
             assert!(
@@ -779,8 +852,15 @@ pub fn test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_
         "crates/pilot-codegen",
         "crates/pilot-rt",
     ] {
-        assert!(!root.join(deleted).exists(), "Legacy file {} must remain deleted", deleted);
+        assert!(
+            !root.join(deleted).exists(),
+            "Legacy file {} must remain deleted",
+            deleted
+        );
     }
-    assert!(read_ws("crates/pilot-vm/src/bridge.rs").lines().count() <= anticheat::seed_rust_file_loc_cap(&root, 1500));
+    assert!(
+        read_ws("crates/pilot-vm/src/bridge.rs").lines().count()
+            <= anticheat::seed_rust_file_loc_cap(&root, 1500)
+    );
     guard.finish();
 }

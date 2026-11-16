@@ -3,7 +3,7 @@
 // Milestone 16.1: Native Rust Crate Adapter - Rust Public Item & Signature Parser
 // Pure-Pilot parser for Rust items: struct, enum, fn, trait, impl, &[T], &str, Vec, Result
 // ==============================================================================
-pub lvl(0) pkg Pilot.SelfHost.Adapter.RustSig;
+pub lvl(0) pkg selfhost.adapter;
 
 pub pure fn nameof(sym: str) -> str => sym;
 

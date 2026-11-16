@@ -3,7 +3,7 @@
 // Milestone 59.3: VmHook Breakpoint & Step State Machine over pc_spans
 // Steps real PilVirtualMachine bytecode without a duplicate AST interpreter.
 // =========================================================================
-pub pkg Pilot.SelfHost.Dap.VmController;
+pub pkg selfhost.dap;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
