@@ -15,6 +15,8 @@
 //     (I -f-> IF accepts the keyword, N -f-> N a name) -> 4 states.
 //     Columns: i, f, the other letters (all to N; a-e, g-h, j-z merge),
 //     every other byte (dead) -> 4 classes.
+//   [0-9] * 3: start, 1, 2, 3 digits taken, only 3 accepting -> 4 states;
+//     digits share a column -> 2 classes.
 use Pilot.Core.Lex.Patterns;
 use pilot.lex.build;
 
@@ -28,9 +30,10 @@ fn summary(decls: List<TokenDecl>) {
 }
 
 fn main() {
-    summary([token("ab", alt([lit("ab"), lit("ac")]))]);
-    summary([token("as", seq([lit("a"), many(lit("a"))]))]);
-    summary([token("as", some_of(lit("a")))]);
-    summary([token("ab", repeat(class("ab"), 1, 3))]);
-    summary([token_over("if", 1, lit("if")), token("name", some_of(range("a", "z")))]);
+    summary([token("ab", lit("ab") | lit("ac"))]);
+    summary([token("as", lit("a") + lit("a").many())]);
+    summary([token("as", lit("a").some())]);
+    summary([token("ab", class("ab").repeat(1, 3))]);
+    summary([token_over("if", 1, lit("if")), token("name", range("a", "z").some())]);
+    summary([token("three", range("0", "9") * 3)]);
 }

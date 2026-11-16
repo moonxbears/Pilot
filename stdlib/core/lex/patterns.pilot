@@ -41,9 +41,29 @@ pub struct PatOp : IValue {
     pub n: i64;
 }
 
-/// A token pattern: a postfix program of `PatOp`s.
+/// A token pattern: a postfix program of `PatOp`s. Patterns combine with
+/// Pilot's own operators: `a + b` is `a` then `b`, `a | b` is either, and
+/// `+` binds tighter than `|`, so `lit("0x") + hex | dec` is
+/// `(lit("0x") + hex) | dec`.
 pub struct Pattern : IObject {
     pub ops: List<PatOp>;
+
+    /// `a + b`: `a`, then `b`.
+    pub op + (rhs: Pattern) -> Pattern => joined(self, rhs, PatKind::Seq);
+    /// `a | b`: `a` or `b`.
+    pub op | (rhs: Pattern) -> Pattern => joined(self, rhs, PatKind::Alt);
+    /// `p * n`: this pattern exactly `n` times.
+    pub op * (count: i64) -> Pattern => repeated(self, count, count);
+
+    /// This pattern or nothing.
+    pub fn opt(ref self) -> Pattern => wrap(self, PatKind::Opt);
+    /// This pattern zero or more times.
+    pub fn many(ref self) -> Pattern => wrap(self, PatKind::Many);
+    /// This pattern one or more times.
+    pub fn some(ref self) -> Pattern => wrap(self, PatKind::AtLeastOne);
+    /// This pattern at least `min` and at most `max` times. Each count costs
+    /// about one state, so keep the bounds small.
+    pub fn repeat(ref self, min: i64, max: i64) -> Pattern => repeated(self, min, max);
 }
 
 /// A declared token: its name, the pattern its text must match, and its
@@ -65,6 +85,14 @@ fn append_ops(var ref out: List<PatOp>, ref p: Pattern) {
     for o in p.ops {
         out.push(o);
     }
+}
+
+fn joined(ref a: Pattern, ref b: Pattern, kind: PatKind) -> Pattern {
+    var ops: List<PatOp> = [];
+    append_ops(ops, a);
+    append_ops(ops, b);
+    ops.push(op(kind, 0, 0, 2));
+    return Pattern { ops: ops };
 }
 
 // -------------------------------------------------------------------------
@@ -146,18 +174,7 @@ fn wrap(ref p: Pattern, kind: PatKind) -> Pattern {
     return Pattern { ops: ops };
 }
 
-/// `p` or nothing.
-pub fn opt(p: Pattern) -> Pattern => wrap(p, PatKind::Opt);
-
-/// `p` zero or more times.
-pub fn many(p: Pattern) -> Pattern => wrap(p, PatKind::Many);
-
-/// `p` one or more times.
-pub fn some_of(p: Pattern) -> Pattern => wrap(p, PatKind::AtLeastOne);
-
-/// `p` at least `min` and at most `max` times (`repeat(hex, 1, 6)`). Each
-/// count costs about one state, so keep the bounds small.
-pub fn repeat(p: Pattern, min: i64, max: i64) -> Pattern {
+fn repeated(ref p: Pattern, min: i64, max: i64) -> Pattern {
     var ops: List<PatOp> = [];
     var count = 0;
     while count < min {

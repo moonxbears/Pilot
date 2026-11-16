@@ -665,13 +665,15 @@ pub pure fn max_total_rust_loc() -> usize => 5900;
 //     PROP-010/012 brought the seed to 20,640; raised to `27,800` by the
 //     owner on 2026-11-15 (PROP-016), when `cargo fmt` unpacked the seed's
 //     long lines and its count went from 20,547 to 27,724 with no code
-//     added: the ceiling counts formatted lines from then on);
+//     added: the ceiling counts formatted lines from then on; raised to
+//     `28,000` by the owner on 2026-11-16 ("raise it to 28,000"), after
+//     PROP-018/020/024/026 brought the seed to 27,807);
 //   - each Rust source file must obey the `<= 1,500` LOC law (MOD001);
 //   - retired crates (`pilot-rt`, `pilot-codegen`, etc.) must stay absent.
 // To resume full per-crate contraction, set `seed_contraction_paused()` to
 // `false` at Stage-3 cutover and run `pilot gate --ratchet-update`.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 27800;
+pub pure fn paused_max_total_rust_loc() -> usize => 28000;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
 

@@ -7,10 +7,10 @@ use Pilot.Core.Lex.Patterns;
 use pilot.lex.build;
 
 fn main() {
-    let bad = build_table([token("as", many(lit("a")))]);
+    let bad = build_table([token("as", lit("a").many())]);
     print(bad.ok());
     for e in bad.errors {
         print(f"{e.code}: {e.message}");
     }
-    print(build_table([token("as", some_of(lit("a")))]).ok());
+    print(build_table([token("as", lit("a").some())]).ok());
 }

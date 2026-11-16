@@ -36,6 +36,8 @@
 | **`PROP-023`** | The Language Section of `toolchain.pilc`: Pilot's Lexical, Grammar and Meaning Tables Precompiled, Read by Number; a Genesis File | design only; deletes the Rust lexer and parser when built | `DRAFT 2026-11-16 — DESIGN, NOT FOR BUILDING YET` |
 | **`PROP-024`** | `//` Always Starts a Comment: Delete the `//=` and `//` Operator Tokens | about `-6` in `crates/pilot-lexer` (`lexer.rs`, `token.rs`); built `-4` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-024") AND BUILT` |
 | **`PROP-025`** | The Parser in Pilot: One Grammar-Table-Driven Pilot Parser Builds the AST the Checker and PilIR Read; the Rust Parser Is Deleted | Pilot work first (no Rust change); at the cutover deletes `crates/pilot-parser` (9,165 lines) and `crates/pilot-ast` (917) under `PROP-006` | `DRAFT 2026-11-16 — DESIGN; AWAITING OWNER APPROVAL` |
+| **`PROP-026`** | Seed: a Struct's Operator Applies to the Result of Another Operator or a Method Call (`a + b + c`), Closing Known Bug `seed.chained_struct_operator` | about `+20` in `crates/pilot-vm/src/lower_expr.rs`; deleted with the rest of the seed bytecode compiler by `PROP-005`; built `+28` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-026") AND BUILT` |
+| **`PROP-027`** | Operators a Type Gains Through `ext` Apply to Literals (`"0" ..= "9"` as a Byte-Range Pattern); a Struct's `op _[_]` Takes a Range Index (`hex[1 ..= 6]`) | small, in `crates/pilot-vm/src/lower_expr.rs`; plus Pilot lowering in `selfhost/ir/` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-027")` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED, IN PROGRESS (`ref<T>`, CLI AND DROP PLAN ROWS DONE; RUST AMENDMENT 5B.3a APPROVED AND BUILT 2026-11-16); 5B.4–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
@@ -2348,6 +2350,7 @@ The gate rebuilds the table and compares it byte for byte (`PROP-023`). Until `P
   - **The builder lives in Ring 3** (`pilot.lex.build`, `stdlib/pilot/lex/`), not `selfhost/lex/`, so programs, tests and tools can import it. That is Ring 3's job (AGENTS.md §3, compiler as a library).
   - **A pattern is a postfix program**, not a tree. That makes self-reference impossible within a pattern. `LEX003` is left to `[Token]` collection, where declarations refer to each other by name.
   - **New code `LEX004`:** a token that matches the empty text.
+  - **Patterns use Pilot's own operators** (owner, 2026-11-16: "is it possible to get as close to pilot syntax use as possible for the lexical definitions?"). `a + b` is sequence, `a | b` is alternation, and `.opt()`, `.many()`, `.some()` and `.repeat(min, max)` are methods. That became possible with `PROP-026`. `seq([..])` and `alt([..])` remain for lists. `p * n` repeats exactly `n` times. `"0" ..= "9"` and `hex[1 ..= 6]` wait on `PROP-027`.
   - **`not_followed_by` is not built yet.** It lands with the modes slice (comments, dots), which needs it.
 - **Stand-in:** `number_tokens()` lists the declarations by hand in place of `[Token]` collection (`lex.token_attribute` in `seams.pilot`). The wiring row stays `DRAFT` until that is replaced.
 - **Not yet:**
@@ -2507,6 +2510,82 @@ Steps 1–3 are Pilot only and need no Rust change. Step 4's Rust deletions are 
 - `pilot test`, `--ir` and `--emit c` pass unchanged with the checker reading the Pilot AST.
 - The `damaged_source` inputs as Pilot conformance programs: diagnostics, never a trap.
 - **Litmus:** respell an operator, add an operator level, and add a `syntax` rule, each a Pilot-only edit, with the program parsing and running on all three engines.
+
+---
+
+## `PROP-026` — Seed: a Struct's Operator Applies to the Result of Another Operator or a Method Call (`a + b + c`)
+
+**Status: APPROVED BY OWNER 2026-11-16 ("Approve PROP-026") AND BUILT 2026-11-16 (§5).** Owner request 2026-11-16 ("Draft the seed fix"), so that token patterns can be written with Pilot's own operators (`digit + (lit("_").opt() + digit).many()`, `PROP-021`) instead of nested function calls.
+
+### 1. What exists today (read and run 2026-11-16)
+
+- **The bug:** known bug `seed.chained_struct_operator` (`tests/conformance/known_bugs/chained_struct_operator.pilot`, expected `(e | f)`, `([a] b)`, `((a b) c)`, worked by hand). On the seed, `a + b + c` and `a.wrap() + b` on a struct that declares `op +` stop with `runtime error: cannot apply + to record and record`. PilIR and the emitted C print the expected output.
+- **The cause:** the seed calls a struct's operator only when it can name the left operand's type (`compile_declared_operator`, `crates/pilot-vm/src/lower_expr.rs:498`, through `static_type` at `:556`). `static_type` knows a variable's declared type, a plain function call's return type and a struct construction. It returns `None` for an operator result (`BinaryExpr`) and for a method call (a `CallExpr` whose callee is a `MemberExpr`). The seed then falls back to the machine `+`, which fails on two records.
+- **The return types are already collected.** `crates/pilot-vm/src/lower_stmt.rs:177-182` records every declared return type in `fn_ret_types`, keyed `Owner.name` for members, operators included (`Pat.+`). Nothing new needs collecting.
+
+### 2. Rust (needs approval). Strictly this file:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-vm/src/lower_expr.rs` | `static_type` gains two arms. (1) `BinaryExpr`: the left operand's static type, when it is a struct that declares the operator's symbol (`declares`), gives `fn_ret_types["{ty}.{symbol}"]`. (2) `CallExpr` whose callee is a `MemberExpr`: the receiver's static type gives `fn_ret_types["{ty}.{method}"]`. Both use only what the seed already has: `BinaryOp::symbol`, `declares` and `fn_ret_types`. No name is hardcoded. |
+
+**Estimate:** about `+20` lines. `lower_expr.rs` goes from 769 to about 790. The seed's total stays under `paused_max_total_rust_loc()` (27,800). The whole seed bytecode compiler, this file included, is deleted by `PROP-005`. The fix is worth it now because the `PROP-021` token files are read by the seed until then.
+
+### 3. Pilot (no approval needed)
+
+- The repro moves from `known_bugs/` to `tests/conformance/operators/chained_struct_operator.pilot` and its known-bug entry is deleted.
+- Once this is built, `stdlib/core/lex/numbers.pilot` is rewritten with `+`, `|` and `.opt()` / `.many()` / `.some()` / `.repeat()` on `Pattern`. `seq` and `alt` stay for lists of parts.
+
+### 4. Acceptance
+
+- `operators/chained_struct_operator` prints `(e | f)`, `([a] b)`, `((a b) c)` on `pilot test`, `--ir` and `--emit c`.
+- Every existing conformance program passes unchanged on all three engines. `cargo test -p pilot-vm` and `cargo fmt --check` pass.
+- **Must not change:** a struct that declares no operator still gets the machine operator, and integers, floats and strings are untouched. That is checked by the existing `operators/*` and `numbers/*` programs.
+
+### 5. As built 2026-11-16
+
+- **Only the approved file changed:** `crates/pilot-vm/src/lower_expr.rs`, 769 → 797 lines (`+30 −2`; estimated `+20`). The draft's claim that the seed stays under the 27,800 ceiling was wrong: the seed came to 27,807 (GATE003). The owner raised `paused_max_total_rust_loc()` to 28,000 on 2026-11-16 ("raise it to 28,000").
+  - The two arms are as drafted.
+  - Building found one more case the draft missed: the left operand can be a call to a function of an *imported* unit, such as `lit("ab") | lit("ac")` in a program that imports `Pilot.Core.Lex.Patterns`. The seed compiles those only when they are first called, so their return type was not recorded yet when `static_type` asked for it. A helper, `declared_ret`, now reads the declared return type from the imported declaration (`lazy_decls`) when it is not compiled yet. It serves plain calls, method calls and operators alike.
+- **Tests:**
+  - The repro is `tests/conformance/operators/chained_struct_operator`, and its known-bug entry is deleted.
+  - The lex patterns now use the operators: `stdlib/core/lex/numbers.pilot` is written with `+`, `|`, `.opt()` and `.many()`, and `Pattern` declares `op +`, `op |`, `.opt()`, `.many()`, `.some()` and `.repeat(min, max)`. The free functions `opt`, `many`, `some_of` and `repeat` are deleted, so there is one way to write each. `seq` and `alt` stay for lists of parts.
+
+---
+
+## `PROP-027` — Operators a Type Gains Through `ext` Apply to Literals (`"0" ..= "9"`); a Struct's `op _[_]` Takes a Range Index (`hex[1 ..= 6]`)
+
+**Status: APPROVED BY OWNER 2026-11-16 ("Approve PROP-027").** Owner question 2026-11-16: "Can we use "A".."B" for range and something for repeat?"
+
+### 1. What exists today (run 2026-11-16)
+
+- **`..` excludes its end and `..=` includes it.** `for i in 0 .. 3` runs 3 times and `0 ..= 3` runs 4. A byte range includes both ends, so the Pilot spelling is `"0" ..= "9"`. `"0" .. "9"` would leave out `9`.
+- **`p * 3` (exactly three times) works today** on all three engines. It is built (`Pattern` declares `op *`, tested in `lex/dfa_minimal`). `.repeat(min, max)` covers a bounded count.
+- **`"0" ..= "9"` does not work yet.** Giving `str` that meaning is an `ext str { op ..= (hi: str) -> Pattern }` in `Pilot.Core.Lex.Patterns`. A probe found two gaps:
+  - The seed: `compile_declared_operator` (`crates/pilot-vm/src/lower_expr.rs:498`) calls a declared operator only for a struct, and `static_type` has no type for a literal. A range operator then falls through to `SEED001` "range values are only lowered as `for` iterables and slice indices by the seed".
+  - PilIR stops at the seam `ir.lower_construct`.
+- **`hex[1 ..= 6]` does not work on any engine.** An index that is a range is always lowered as a string slice (`compile_index_value`, `lower_expr.rs:267-292`, which calls `str_slice` whatever the receiver is). PilIR and the emitted C do the same. This is known bug `seed.struct_range_index` (`tests/conformance/known_bugs/struct_range_index.pilot`, expected `d[1..6]`).
+
+### 2. Design
+
+- **A literal has the type its receptor binds** (`bind_receptor`, the string family). The seed reads that type name from the bootstrap tables, so nothing is hardcoded. `compile_declared_operator` calls an operator for any type that declares it, not only structs: `declares` already knows `ext` owners. That covers `"0" ..= "9"` and any other operator an `ext` gives a literal's type.
+- **An index by a range** on a receiver whose static type declares `op _[_]` calls that operator with the range value. The string slice stays for receivers with no such operator. The range value is built the way `compile_operator_fn` builds any operator value (the function Pilot binds to `..=`). If no function is bound for the operand type, the case stops at a registered seam, never at a wrong slice.
+- **PilIR:** the same two rules in `selfhost/ir/` (Pilot, no approval needed). Closing `ir.lower_construct` for these node kinds is part of the slice.
+
+### 3. Rust (needs approval). Strictly this file:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-vm/src/lower_expr.rs` | `static_type`: a string literal's type from the receptor tables. `compile_declared_operator`: any declaring owner, not only structs. `compile_index_value`: a declared `op _[_]` with a range argument before the string slice. |
+
+**Estimate:** about `+25` lines. The seed stays under the 28,000 ceiling (about 27,830). All of it is deleted with the seed bytecode compiler by `PROP-005`.
+
+### 4. Acceptance
+
+- `lex/byte_range_literal.pilot`: `"0" ..= "9"`, `"a" ..= "f" | "A" ..= "F"` and `hex[1 ..= 6]` give the same tables as the function forms (state and class counts worked by hand), on all three engines.
+- `seed.struct_range_index` passes and moves to `operators/`.
+- Every existing conformance program passes unchanged. In particular, string slicing (`s[1 ..= 3]`) is unchanged.
+- Once it passes, the lex files use `"0" ..= "9"` and `range("0", "9")` is deleted, so there is one spelling.
 
 ---
 

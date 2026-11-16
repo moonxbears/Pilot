@@ -82,6 +82,11 @@ pub struct Lowerer : IObject {
     pub hint: i64;
     /// The declared return type of the function being lowered.
     pub ret_type: i64;
+    /// The values of the function being lowered that are an engine
+    /// operation's raw answer where an `opt<T>` is expected: the plain value,
+    /// or the engine's null for none (selfhost/ir/lower_try.pilot
+    /// `engine_call`, stand-in `ir.absent_as_null`).
+    pub raw_answers: Map<str, bool>;
     /// Whether the exit being lowered is a failure's way out, on which
     /// `errdefer` statements run (selfhost/ir/lower_defer.pilot).
     pub failing: bool;
@@ -270,7 +275,7 @@ pub fn lower_program_rooted(var ref inf: Infer, every_function: bool) -> IrModul
         f: ir_function_new("", ir_physics_new(0, 0, 0, 0, 0)), cur: 0,
         values: Map<str, u32>(), slots: Map<str, u32>(), loop_heads: [], loop_exits: [], head_depths: [], exit_depths: [], defers: [],
         lambda_captures: Map<str, List<i64>>(), lambda_self: Map<str, i64>(),
-        int_pool: Map<str, i64>(), str_pool: Map<str, i64>(), self_value: ir_no_value(), self_type: ty_unknown(), hint: ty_unknown(), ret_type: ty_unknown(),
+        int_pool: Map<str, i64>(), str_pool: Map<str, i64>(), self_value: ir_no_value(), self_type: ty_unknown(), hint: ty_unknown(), ret_type: ty_unknown(), raw_answers: Map<str, bool>(),
         contract_fn: "", ensures: [], olds: Map<str, u32>(), result_slots: Map<str, u32>(), failing: false,
         try_blocks: [], try_binds: [], try_types: [], try_depths: [], known_types: Map<str, i64>(),
         global_named: global_names(p), global_of: Map<str, i64>(), global_decls: [],
@@ -332,6 +337,7 @@ pub fn begin_function(var ref lw: Lowerer, f: IrFunction) {
     lw.self_type = ty_unknown();
     lw.cur_field = -1;
     lw.ret_type = ty_unknown();
+    lw.raw_answers = Map<str, bool>();
     lw.gen_frame = ir_no_value();
     lw.gen_sent = ir_no_value();
     lw.gen_resumes = [];

@@ -16,12 +16,12 @@ use Pilot.Core.Lex.Patterns;
 use Pilot.Core.Lex.Numbers;
 use pilot.lex.build;
 
-fn letter() -> Pattern => alt([range("a", "z"), range("A", "Z"), lit("_")]);
+fn letter() -> Pattern => range("a", "z") | range("A", "Z") | lit("_");
 
 fn main() {
     var decls = number_tokens();
-    decls.push(token("name", seq([letter(), many(alt([letter(), range("0", "9")]))])));
-    decls.push(token("space", some_of(lit(" "))));
+    decls.push(token("name", letter() + (letter() | range("0", "9")).many()));
+    decls.push(token("space", lit(" ").some()));
     let built = build_table(decls);
     print(built.ok());
     let src = "1_000_000 1000_ 1__0 0x_FF 0xFF_FF 2.5e1_0 1..5";

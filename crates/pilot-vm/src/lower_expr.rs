@@ -561,8 +561,24 @@ impl BytecodeCompiler {
         let n = arena.node(id);
         match n.node_kind() {
             NodeKind::IdentExpr => self.var_types.get(Self::name(arena, n.lhs)).cloned(),
+            // A struct's own operator gives its declared return type
+            // (`a + b + c`: the second `+` is the struct's too).
+            NodeKind::BinaryExpr => {
+                let sym = BinaryOp::from_u16(n.flags)?.symbol();
+                let ty = self.static_type(arena, NodeId(n.lhs))?;
+                if !self.structs.contains_key(&ty) || self.declares(&ty, sym) != Some(false) {
+                    return None;
+                }
+                self.declared_ret(arena, &format!("{ty}.{sym}"))
+            }
             NodeKind::CallExpr if n.rhs > 0 => {
                 let callee = arena.node(NodeId(*arena.extra_children.get(n.lhs as usize)?));
+                // A method call gives the method's declared return type.
+                if callee.node_kind() == NodeKind::MemberExpr {
+                    let ty = self.static_type(arena, NodeId(callee.lhs))?;
+                    let method = Self::name(arena, callee.rhs);
+                    return self.declared_ret(arena, &format!("{ty}.{method}"));
+                }
                 if !matches!(
                     callee.node_kind(),
                     NodeKind::IdentExpr | NodeKind::TypeNamed
@@ -570,14 +586,26 @@ impl BytecodeCompiler {
                     return None;
                 }
                 let name = Self::name(arena, callee.lhs);
-                match self.fn_ret_types.get(name) {
-                    Some(t) => Some(t.clone()),
+                match self.declared_ret(arena, name) {
+                    Some(t) => Some(t),
                     None => self.structs.contains_key(name).then(|| name.to_string()),
                 }
             }
             NodeKind::CascadeExpr => self.static_type(arena, NodeId(n.lhs)),
             _ => None,
         }
+    }
+
+    /// The declared return type of `key` (`f`, `Owner.m`, `Owner.+`): as
+    /// recorded when it was compiled, or read from its declaration when it
+    /// belongs to an imported unit and is not compiled yet.
+    fn declared_ret(&self, arena: &AstArena, key: &str) -> Option<String> {
+        if let Some(t) = self.fn_ret_types.get(key) {
+            return Some(t.clone());
+        }
+        let tn = arena.node(arena.type_annot(self.lazy_decls.get(key)?.node)?);
+        matches!(tn.node_kind(), NodeKind::TypeNamed | NodeKind::IdentExpr)
+            .then(|| Self::name(arena, tn.lhs).to_string())
     }
 
     /// `a && b` / `a || b`: the right operand runs only when needed.

@@ -1,0 +1,21 @@
+// A struct that declares `op _[_]` taking a range gets `p[1 ..= 6]` as a
+// call of that operator with the range 1..=6. Every engine instead treats
+// the index as a string slice: the seed calls `str_slice` on the record,
+// PilIR stops the same way, and the emitted C reports `cannot apply slice
+// to record and integer`. Found 2026-11-16 while trying `hex[1 ..= 6]` as
+// bounded repetition for token patterns (PROP-021).
+//
+// Expected, worked by hand: the operator prints its receiver's text and
+// the range's two ends -> "d[1..6]".
+pub struct Pat : IObject {
+    pub text: str;
+
+    pub pure op _[_] (r: span<i64>) -> Pat => Pat { text: f"{.text}[{r.start}..{r.end}]" };
+}
+
+fn p(t: str) -> Pat => Pat { text: t };
+
+fn main() {
+    let d = p("d");
+    print(d[1 ..= 6].text);
+}

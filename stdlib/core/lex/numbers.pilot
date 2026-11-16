@@ -26,7 +26,7 @@ pub enum Radix : u8 {
 /// One digit of `base`.
 pub fn digit(base: Radix) -> Pattern {
     if base == Radix::Hex {
-        return alt([range("0", "9"), range("a", "f"), range("A", "F")]);
+        return range("0", "9") | range("a", "f") | range("A", "F");
     }
     if base == Radix::Bin {
         return class("01");
@@ -39,25 +39,23 @@ pub fn digit(base: Radix) -> Pattern {
 
 /// Digits of `base`, optionally grouped by `_`, which may only stand
 /// between two digits.
-pub fn digits(base: Radix) -> Pattern => seq([digit(base), many(seq([opt(lit("_")), digit(base)]))]);
+pub fn digits(base: Radix) -> Pattern => digit(base) + (lit("_").opt() + digit(base)).many();
 
 /// `e10`, `E-3`, `e+1_0`.
-pub fn exponent() -> Pattern => seq([class("eE"), opt(class("+-")), digits(Radix::Dec)]);
+pub fn exponent() -> Pattern => class("eE") + class("+-").opt() + digits(Radix::Dec);
 
 /// `1_000`, `0xFF_FF`, `0b1010`, `0o17`.
-pub fn integer() -> Pattern => alt([
-    seq([lit("0x"), digits(Radix::Hex)]),
-    seq([lit("0b"), digits(Radix::Bin)]),
-    seq([lit("0o"), digits(Radix::Oct)]),
-    digits(Radix::Dec),
-]);
+pub fn integer() -> Pattern =>
+    lit("0x") + digits(Radix::Hex)
+    | lit("0b") + digits(Radix::Bin)
+    | lit("0o") + digits(Radix::Oct)
+    | digits(Radix::Dec);
 
 /// `2.5`, `2.5e10`, `1e9`. A float has digits on both sides of its `.`, so
 /// `1..5` is `1`, `..`, `5`.
-pub fn float() -> Pattern => alt([
-    seq([digits(Radix::Dec), lit("."), digits(Radix::Dec), opt(exponent())]),
-    seq([digits(Radix::Dec), exponent()]),
-]);
+pub fn float() -> Pattern =>
+    digits(Radix::Dec) + lit(".") + digits(Radix::Dec) + exponent().opt()
+    | digits(Radix::Dec) + exponent();
 
 /// The number tokens, in declaration order.
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]

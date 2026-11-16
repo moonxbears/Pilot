@@ -1,13 +1,11 @@
 // `m.get(k)` gives `opt<V>`: some value when the key is present, none when
-// it is absent. `?? fallback` takes the value or the fallback. On the seed
-// this works; PilIR and the emitted C read the result as a record with a
-// tag field (selfhost/ir/interp.pilot:672 run_extract_field "cannot read `1`
-// from integer"; the C runtime "cannot read a field of integer"), so the
-// program stops at the first `??`. Found 2026-11-16 while probing for the
-// PROP-021 lexer builder. It is a PilIR / C bug, and `known_bugs/` holds
-// only seed bugs (it runs on the seed alone), so this program lives in the
-// corpus and fails loudly on `pilot test --ir` and `--emit c` until the
-// lowering wraps an engine op's opt result (stand-in `ir.absent_as_null`).
+// it is absent. `?? fallback` takes the value or the fallback. `Map.get` is
+// an engine op whose engine answers none with its null; PilIR and the
+// emitted C used to read that answer as the opt record and stop at the
+// first `??` ("cannot read `1` from integer"; found 2026-11-16 while
+// probing for the PROP-021 lexer builder). The lowering now notes the
+// answer as raw and tests it as nullable (selfhost/ir/lower_try.pilot
+// `engine_call`, stand-in `ir.absent_as_null`).
 //
 // Expected, worked by hand:
 //   "a" is present with 4         -> 4
