@@ -1,0 +1,119 @@
+// =========================================================================
+// FILE: stdlib/core/lex/strings.pilot
+// STRING TOKENS (PROP-021 slice 21B)
+// =========================================================================
+// As today's seed lexer reads them:
+//   - a quoted string (`"..."` or `'...'`) ends at its own quote and may
+//     not hold a newline; `\` takes the next byte with it, so `\"` does
+//     not close it;
+//   - a triple-quoted string ends at the first three quotes and may hold
+//     newlines; `\` is an ordinary byte in it;
+//   - prefix `r` / `R` makes a raw string and `b` / `B` a byte string. The
+//     seed reads their text the same way (a raw string's `\"` still does
+//     not close it), so only the family differs.
+// An f-string (`f"..{x}.."`, any quoting, `rf`/`fr` raw) is lexed in
+// modes: its opening enters the f-string's mode, whose tokens are its text,
+// a `{` that enters the hole mode, and its closing quote, which leaves.
+// Inside a hole the ordinary tokens apply, so the expression in it is real
+// tokens, not text read again later. `{{` is text; a lone `}` is text too,
+// as in today's seed lexer.
+// What an escape means is the job of the string's value function, not of
+// this file.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Strings;
+
+use Pilot.Core.Lex.Patterns;
+
+/// The two quote bytes (`"` and `'`) and the escape byte (`\`).
+
+/// A string quoted by byte `q`.
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+fn quoted(q: i64) -> Pattern {
+    let escaped: Pattern = byte(BACKSLASH) + any_byte();
+    return byte(q) + (any_but([q, BACKSLASH, NEWLINE]) | escaped).many() + byte(q);
+}
+
+/// A string quoted by three of byte `q`.
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+fn triple(q: i64) -> Pattern {
+    let other: Pattern = any_but([q]);
+    let three: Pattern = byte(q) * 3;
+    return three + (other | byte(q) + other | byte(q) * 2 + other).many() + three;
+}
+
+/// A string in any of the four quotings.
+pub fn string_body() -> Pattern =>
+    quoted(DOUBLE_QUOTE) | quoted(SINGLE_QUOTE) | triple(DOUBLE_QUOTE) | triple(SINGLE_QUOTE);
+
+/// The name of the mode of an f-string quoted by `q` (three times when
+/// `triple`), raw or not.
+pub fn fstring_mode_name(q: i64, triple: bool, raw: bool) -> str {
+    var name = "fstring";
+    name = name + (if q == DOUBLE_QUOTE { "_double" } else { "_single" });
+    if triple { name = name + "_triple"; }
+    if raw { name = name + "_raw"; }
+    return name;
+}
+
+/// The mode the expression in an f-string's `{ .. }` is lexed in.
+pub const HOLE_MODE: str = "fstring_hole";
+
+fn quotes(q: i64, triple: bool) -> Pattern => if triple { byte(q) * 3 } else { byte(q) };
+
+fn fprefix(raw: bool) -> Pattern => if raw { class("rR") + class("fF") | class("fF") + class("rR") } else { class("fF") };
+
+/// The quotings of an f-string: quote byte, triple, raw.
+fn each_fstring(var ref out: List<TokenDecl>, var ref modes: List<LexMode>) {
+    for q in [DOUBLE_QUOTE, SINGLE_QUOTE] {
+        for triple in [false, true] {
+            for raw in [false, true] {
+                let name = fstring_mode_name(q, triple, raw);
+                out.push(entering(name, token("fstring_open", fprefix(raw) + quotes(q, triple))));
+                modes.push(fstring_mode(q, triple, raw));
+            }
+        }
+    }
+}
+
+/// The tokens that open an f-string, each entering its mode.
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn fstring_openers() -> List<TokenDecl> {
+    var out: List<TokenDecl> = [];
+    var modes: List<LexMode> = [];
+    each_fstring(out, modes);
+    return out;
+}
+
+/// The mode of each f-string quoting.
+pub fn fstring_modes() -> List<LexMode> {
+    var out: List<TokenDecl> = [];
+    var modes: List<LexMode> = [];
+    each_fstring(out, modes);
+    return modes;
+}
+
+/// Inside an f-string quoted by `q`: text (no quote, no `{` but `{{`, and
+/// unless raw an escape; a newline only when triple), the hole's `{`, and
+/// the closing quote. A triple-quoted one also takes one or two quotes as
+/// text; three close it.
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+fn fstring_mode(q: i64, triple: bool, raw: bool) -> LexMode {
+    var stop: List<i64> = [q, byte_of("{")];
+    if !raw { stop.push(BACKSLASH); }
+    if !triple { stop.push(NEWLINE); }
+    var piece: Pattern = any_but(stop) | lit("{{");
+    if !raw { piece = piece | byte(BACKSLASH) + any_byte(); }
+    var tokens: List<TokenDecl> = [token("fstring_text", piece.some())];
+    if triple { tokens.push(token("fstring_quote", byte(q) | byte(q) * 2)); }
+    tokens.push(entering(HOLE_MODE, token("hole_open", lit("{"))));
+    tokens.push(acting(TokenRole::Operand, leaving(token("fstring_close", quotes(q, triple)))));
+    return lex_mode(fstring_mode_name(q, triple, raw), tokens);
+}
+
+/// The string tokens, in declaration order.
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn string_tokens() -> List<TokenDecl> => [
+    acting(TokenRole::Operand, token("string", string_body())),
+    acting(TokenRole::Operand, token("raw_string", class("rR") + string_body())),
+    acting(TokenRole::Operand, token("byte_string", class("bB") + string_body())),
+];

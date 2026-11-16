@@ -1,0 +1,22 @@
+// A struct's operator on a local bound without a type annotation. The
+// seed types a binding only from its annotation, so `a + v(3)` below,
+// where `a` holds a `V` from a method call, falls to the machine `+` and
+// stops with "cannot apply `+` to record and record". PilIR and the
+// emitted C call `V.+`. Found 2026-11-16 while declaring the lexer's
+// trivia and string tokens (PROP-021 slice 21B).
+//
+// Expected, worked by hand: v(1).twice() is V { n: 2 }; adding V { n: 3 }
+// gives n = 5 -> prints 5.
+pub struct V : IObject {
+    pub n: i64;
+    pub op + (rhs: V) -> V => V { n: .n + rhs.n };
+    pub fn twice(ref self) -> V => V { n: .n * 2 };
+}
+
+fn v(n: i64) -> V => V { n: n };
+
+fn main() {
+    let a = v(1).twice();
+    let b = a + v(3);
+    print(b.n);
+}

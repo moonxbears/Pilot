@@ -2185,7 +2185,7 @@ Whether `const` marks a value parameter is not recorded today either way (the pr
 
 ## `PROP-021` — The Lexer Declared in Pilot: Token Patterns Compiled by Pilot Into a State Table the Seed Only Runs
 
-**Status: DRAFT 2026-11-16, rewritten 2026-11-16 at the owner's direction ("yes, lets rewrite prop-021"); the Rust part (§3) awaits owner approval. Slice 21A (Pilot only, no Rust) BUILT 2026-11-16 at the owner's request ("can we start of the first proposal of the lex proposals?"), see §7.** Owner direction: "I would like pilot to have recognition over its own behavior" (about `1_000_000` meaning `1000000`), and "can you define what numbers are in pilot and then compile it to the lex file?". The first draft (per-literal tables the seed reads) is replaced. The lexer is no longer hand-written in either language. Pilot declares every token as a pattern, Pilot compiles the patterns into a state machine, and the seed only runs that machine.
+**Status: DRAFT 2026-11-16, rewritten 2026-11-16 at the owner's direction ("yes, lets rewrite prop-021"); the Rust part (§3) awaits owner approval. Slice 21A (Pilot only, no Rust) BUILT 2026-11-16 at the owner's request ("can we start of the first proposal of the lex proposals?"), see §7. Slice 21B (Pilot only) BUILT 2026-11-16 (owner: "lets focus on prop-021+"), see §8. Slice 21C (Pilot only) BUILT 2026-11-16 (owner: "Start 21C"), see §9.** Owner direction: "I would like pilot to have recognition over its own behavior" (about `1_000_000` meaning `1000000`), and "can you define what numbers are in pilot and then compile it to the lex file?". The first draft (per-literal tables the seed reads) is replaced. The lexer is no longer hand-written in either language. Pilot declares every token as a pattern, Pilot compiles the patterns into a state machine, and the seed only runs that machine.
 
 ### 1. What exists today (read 2026-11-16)
 
@@ -2362,6 +2362,71 @@ The gate rebuilds the table and compares it byte for byte (`PROP-023`). Until `P
   - `pilot inspect lex`: `pilot inspect` itself stops at the seam `cli.command_handler`.
 - **Found while building:** `m.get(k) ?? x` stops on PilIR and the emitted C (the seed is right). `known_bugs/` runs on the seed only, so it cannot hold a PilIR-only bug. The repro is `tests/conformance/collections/map_get_coalesce`, which fails on `--ir` and `--emit c` until it is fixed. The builder uses `has` and indexing instead.
 - **Duplicates to retire when the seed runs the table:** besides `crates/pilot-lexer` and `selfhost/lexer.pilot`, there are hand-written tokenizers in `stdlib/pilot/lex.pilot` (`token_cursor_next`), `selfhost/fmt/fmt.pilot` (`fmt_tokenize`) and `selfhost/cli/repl.pilot` (`repl_tokenize`). All of them should run the one table.
+
+### 8. Slice 21B, as built 2026-11-16 (Pilot only)
+
+**Scope:** every token family that needs neither a mode nor declaration collection, declared to read exactly as today's seed lexer does.
+
+- **Built** (`stdlib/core/lex/`):
+  - `words.pilot`: the 14 seed words and the 13 structural tokens, declared once. It uses nothing else, so the checker links it alone (`cli_checker_files()` in `selfhost/cli/host.pilot`). The private copies in `selfhost/check/grammar_attrs.pilot` (GRAM005) are deleted; it imports this file.
+  - `names.pilot`: `name_start`, `name_pattern` (ASCII letters, `_`, digits after the first byte) and `name_tokens()`. Each seed word is a token over the name pattern with priority 1.
+  - `trivia.pilot`: spaces (space, tab, CR), newline, `//` and `#` lines (not including the newline), and `/* .. */` ending at the first `*/` (no nesting, as today).
+  - `strings.pilot`: quoted strings (`"` and `'`, `\` takes the next byte, no newline), triple-quoted strings (end at the first three quotes), and the `r` and `b` prefixes as families `raw_string` and `byte_string`.
+  - `delimiters.pilot`: one token per structural token.
+  - `lexicon.pilot`: `core_tokens()`, all 38 families declared so far. They build into one table with no `LEX002`.
+  - `patterns.pilot` gains `any_byte()`, `any_but([..])` (the complement of a byte set) and `byte_of(text)`.
+- **Tests** (`tests/conformance/lex/`): `names_and_words`, `trivia`, `strings`, `delimiters` and `lexicon`, with expected output worked by hand. All 11 lex programs pass on `pilot test`, `--ir` and `--emit c`.
+- **Found while building:** a struct's operator on a local bound without a type annotation runs the machine operator on the seed (PilIR and C are right). It is filed as `known_bugs/unannotated_local_operator` (`seed.unannotated_local_operator`, owner `PROP-005`). `trivia.pilot` and `strings.pilot` annotate those locals and are marked `[Workaround]`.
+- **Where the table differs from today's lexer, on purpose:**
+  - A string missing its closing quote, or a block comment missing `*/`, matches no token. Each of its bytes then starts no token, where the seed lexer instead ran to the end of the line or file. That will be `LEX001` once a caller reports it.
+- **Not yet:**
+  - **Operators, the dots, `:name`, f-strings, `#!` and UTF-8 names.** Operators are to be collected from the `op` declarations; the others need modes. That is slice 21C.
+  - **No byte-identical comparison with the seed lexer yet.** Dumping the seed's tokens needs Rust, so it comes with §3.
+  - **`[Token]` collection.** Every `*_tokens()` function is the stand-in `lex.token_attribute`.
+
+### 9. Slice 21C, as built 2026-11-16 (Pilot only)
+
+**Scope:** contexts, modes, the operators the program declares, and `pilot lex` (owner: "Start 21C").
+
+- **Contexts.** A token may be limited to the context it starts in (`TokenWhen`: `Always`, `Spaced` (after a space or at the start), `Glued` (touching the end of an operand), `AtStart`). The builder gives the table one start state per context (`LexContextKind`, an `enum : u8`). Each start reaches only the declarations allowed there, so `LEX002` fires only for tokens that can meet. A token's `TokenRole` (`Plain`, `Operand`, `Space`, `Trivia`) sets the next context. As in today's lexer, the text starts spaced, and comments, `#` lines and the shebang leave the context as it was.
+  - `.` is two families: `infix_dot` (`Glued`, priority 1) and `prefix_dot`. Names, numbers, strings, `)`, `]`, `}` and declared postfix operators (`_?`) end an operand.
+  - `keyword_literal` (`:name`, `:ns/name`) starts only after a space or at the start, so `x:y` stays a `:`.
+  - `shebang` (`#!..`) is `AtStart`; anywhere else `#!` is a `#` line.
+- **Modes** (`stdlib/pilot/lex/modes.pilot`): a lexicon is a list of `LexMode`s, each built into its own table. A token that `enters` a mode pushes it, and one that `leaves` pops it. An `enters` naming no declared mode is `LEX005`.
+- **F-strings:**
+  - The 8 openers (`f`/`F`, `rf`/`fr` in either case, `"` or `'`, single or triple) each enter their own mode. That mode holds text, `{{`, an escape unless raw, and in the triple modes one or two quotes as text.
+  - A `{` enters `fstring_hole`, which lexes the main mode's tokens; there `{` nests and `}` leaves.
+  - **This differs from the seed on purpose:** the seed reads an f-string as one token and rescans its holes. Here the hole's expression is real tokens.
+- **Operators come from the program.** `declared_operator_symbols` and `declared_postfix_symbols` (`selfhost/check/grammar_attrs.pilot`) read every `op` pattern and grammar attribute. `stdlib/core/lex/operators.pilot` makes one token per symbol. Nothing is listed by hand.
+- **Lexicon:** `core_tokens()` has 41 families (it was 38; the new ones are `keyword_literal`, `shebang` and the split dot). `core_tokens_with(operators)` adds operators. `core_modes(operators)` gives the main mode, the 8 f-string modes and the hole mode.
+- **Tables are typed:** each declaration's effect on the lexer is one `TokenAction` (role, mode to enter, whether it leaves), not parallel `i64`/`str`/`bool` lists.
+- **Data is constant and tokens are lazy (imp_type.md Rules 13 and 14):** the named bytes (`TAB`, `NEWLINE`, `CARRIAGE_RETURN`, `DOUBLE_QUOTE`, `SINGLE_QUOTE`, `BACKSLASH`), `SEED_WORDS`, `STRUCTURAL_TOKENS`, `DOT`, `HOLE_MODE`, `LEX_CONTEXT_KINDS` and `LEX_CONTEXT_START` are `const`s, not functions returning a literal. The checker, which links `words.pilot` alone, reads them (the GRAM005 tests pass). `lex_all` and `lex_modal` are generators (`Generator<Lexeme>`), so a token is matched only when the caller asks for it; `pilot lex` links `stdlib/core/generator.pilot` for that. The pattern and `*_tokens()` functions stay functions: they build values with operators, and they are the stand-in for `[Token]` collection, which replaces them.
+- **`pilot lex <file>`** (`selfhost/lex/lex_tool.pilot`, `cmd_lex`):
+  - It prints `family:text` per token, leaving out tokens whose role is `Space`.
+  - A byte that starts no token is `LEX001`, with exit 1. No file, or a file that does not exist, is a usage error with exit 2.
+  - It finds no `LEX001` on `selfhost/cli/commands.pilot` (3,134 tokens), `stdlib/pilot/lex/build.pilot` (4,193) or `stdlib/core/operators/levels.pilot`.
+- **Tests** (`tests/conformance/lex/`):
+  - New: `dots`, `keyword_literal`, `shebang`, `fstrings`, `err_lex005_undeclared_mode` and `cli_lex`, worked by hand.
+  - Updated: `delimiters` (the dot split) and `lexicon` (41).
+  - All 17 lex programs pass on `pilot test`, `--ir` and `--emit c`.
+- **Found while building:**
+  - **Seed tool linking.** Inside `pilot lex`, a call to the public `is_space(ref ModalLexer, Lexeme)` from `pilot.lex.modes` ran the private one-argument `is_space(b: u8)` of `selfhost/check/attr_text.pilot`, with no error. That ignores both visibility and arity. A plain program resolves a similar clash (a local function against a private one of an imported package) correctly, so the bug is in how `cli_program_tool` links a tool's files. The lexer function is named `is_space_lexeme`. No repro is filed yet: it needs a tool whose files clash, and none of the fixed tool file lists can be pointed at a test.
+- **Needs approval (Rust test, one file): `crates/pilot-cli/tests/cli_f3.rs`.** `every_listed_command_works_or_says_it_is_not_implemented` keeps its own list of the commands that have a handler (`working`). `lex` now has one, so the test runs `pilot lex` with no file and expects the "not implemented" seam, but gets the usage error (exit 2). The change is to add `("lex", &["lex", "tests/tool_fixtures/lex/sample.pilot"])` to `working`, and nothing else. Until it is approved, that test fails. Because cargo stops at the first failing test binary, it also hides whether `cli_f4` runs.
+- **Rename litmus (GATE008) caught an f-string hole.** The litmus renamer treats an f-string as one string, so a renamed name inside a hole (`f"{src.slice(..)}"`) is left as it was and the renamed toolchain fails. `modal_lexeme_text` slices outside the f-string, as `lexeme_text` already did. The renamer will read holes as code once it uses the Pilot lexer. `tests/tool_fixtures/lex` is added to the litmus sandbox (`rl_sandbox_trees`).
+- **The C test runner mixed up two tests with the same file name.** `pilot test --emit` wrote every emitted program to `target/test-emit/<lang>/<file name>`. So `lex/fstrings` and `text/fstrings` overwrote each other in a full run, and `lex/fstrings` failed under `--emit c` only when the whole corpus ran. `modules/start_order` and `modules/lib/start_order` had the same latent clash. `selfhost/cli/test_emit.pilot` now names each emitted file after the test's whole path (`emitted_name`, `/` written as `__`).
+- **Spellings the seed lexes as one token that no Pilot declaration provides (20).** `pilot lex` splits each into its pieces:
+  - `$`, `@`, `@>`, `<@`, `?.`, `?..`, `??=`, `...`, `<-` (used only in `stdlib/asyncio/select_syntax.pilot`);
+  - the compound assignments `+=` `-=` `*=` `**=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=`.
+  - Their meaning belongs to `PROP-022`. They are to be declared there, never listed in the lexer by hand.
+- **Not yet:**
+  - The seed still runs `crates/pilot-lexer` (§3).
+  - No byte-identical comparison with the seed lexer.
+  - `[Token]` collection (stand-in `lex.token_attribute`), UTF-8 names, value functions, and `LIT001`/`LIT002`/`LEX003`.
+- **Recorded for speed, not built:**
+  - `next`, `class_of` and `accept` as `u16`/`u8` buffers instead of `List<i64>`.
+  - A 12-byte `[Layout(c_abi)] Lexeme`.
+  - Numbered token handles in place of family-name strings.
+  - The lexer runs at compile time, which is ungated, so these wait for the parser that consumes the stream (`PROP-005`) or for `PROP-021.direct_code`.
 
 ### 6. Decided
 

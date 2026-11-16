@@ -1,0 +1,28 @@
+// Names and the 14 seed words from Pilot.Core.Lex.Names (PROP-021 slice
+// 21B). A seed word is declared over the name pattern with a higher
+// priority, so the exact word is the word and anything longer is a name.
+//
+// Expected, worked by hand (spaces not shown):
+//   fn        both match "fn"; the word has priority 1      -> fn
+//   fnord     longer than "fn", only a name matches it      -> name
+//   _x9       `_` starts a name, digits may continue it     -> name
+//   struct2   longer than "struct"                          -> name
+//   if, __engine, asm                                       -> their words
+//   9a        a name cannot start with a digit: the `9` starts no name
+//             token here (no numbers declared): ?, then name `a`
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Names;
+use pilot.lex.build;
+
+fn main() {
+    var decls = name_tokens();
+    decls.push(token("space", lit(" ").some()));
+    let built = build_table(decls);
+    print(built.ok());
+    let src = "fn fnord _x9 struct2 if __engine asm 9a";
+    for l in lex_all(built.table, src) {
+        if l.decl < 0 || built.table.names[l.decl] != "space" {
+            print(lexeme_text(built.table, src, l));
+        }
+    }
+}

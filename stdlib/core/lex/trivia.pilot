@@ -1,0 +1,49 @@
+// =========================================================================
+// FILE: stdlib/core/lex/trivia.pilot
+// SPACES, NEWLINES AND COMMENTS (PROP-021 slice 21B)
+// =========================================================================
+// As today's seed lexer reads them:
+//   - spaces are runs of space, tab (9) and carriage return (13);
+//   - a newline (10) is a token of its own;
+//   - `//` and `#` (a preprocessor line) run to the end of the line, not
+//     including the newline;
+//   - `/* .. */` ends at the first `*/`; block comments do not nest.
+// `#!` at the very start of the text is the shebang. Spaces and newlines
+// make the next token spaced; comments, `#` lines and the shebang leave the
+// context as it was.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Trivia;
+
+use Pilot.Core.Lex.Patterns;
+
+/// Spaces, tabs and carriage returns.
+pub fn space_pattern() -> Pattern => (lit(" ") | byte(TAB) | byte(CARRIAGE_RETURN)).some();
+
+/// Everything up to the end of the line.
+fn rest_of_line() -> Pattern => any_but([NEWLINE]).many();
+
+/// `// ..` to the end of the line.
+pub fn line_comment() -> Pattern => lit("//") + rest_of_line();
+
+/// `# ..` to the end of the line.
+pub fn directive_line() -> Pattern => lit("#") + rest_of_line();
+
+/// `/* .. */`: any bytes, where `*`s are followed by neither `*` nor `/`,
+/// then `*`s and `/`.
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+pub fn block_comment() -> Pattern {
+    let stars: Pattern = lit("*").some();
+    let body: Pattern = any_but([byte_of("*")]) | stars + any_but([byte_of("*"), byte_of("/")]);
+    return lit("/*") + body.many() + stars + lit("/");
+}
+
+/// The trivia tokens, in declaration order.
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn trivia_tokens() -> List<TokenDecl> => [
+    acting(TokenRole::Space, token("space", space_pattern())),
+    acting(TokenRole::Space, token("newline", byte(NEWLINE))),
+    acting(TokenRole::Trivia, token("line_comment", line_comment())),
+    acting(TokenRole::Trivia, token("directive", directive_line())),
+    acting(TokenRole::Trivia, token("block_comment", block_comment())),
+    starting(TokenWhen::AtStart, acting(TokenRole::Trivia, token_over("shebang", 1, lit("#!") + rest_of_line()))),
+];

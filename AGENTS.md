@@ -137,6 +137,8 @@ Every type originates from `IAnyValue` (`0` runtime header bytes) and is classif
   8. **Memory Boundaries:** Distinguish `0b01` borrowed views (`slice<T>`), `0b10` owned buffers (`List<T>`, `SliceBuffer<T>`), and `0b11` scoped guards (`ArenaScope`).
   9. **Single Source of Truth & Targeted Importing:** Define every type once in its owning module and import explicitly (`use ...;`). Never copy or re-declare types across files.
   10. **Strict Intrinsic Encapsulation (`ENGINE001` Airlock):** Never call `__engine(...)` outside `stdlib/core/bridge_lang.pilot` and the `[EngineOp]` owner methods (one op, one owner (`proposals.md` `PROP-002a` Amendment A1)). Always use strongly typed 2-bit-lattice Pilot types (`Map<K, V>`, `List<T>`, `SliceBuffer<T>`, `ArenaScope`, `std.fs`, `std.proc`, `std.time`).
+  11. **Known Data Is Constant Data:** Values known before the program runs are `const` (with `comptime` when computed), closed sets are `enum`, and preset tables are `const` lists/maps/`array<T, N>` read by index or `ref`. Never a function whose body is a literal; the one exception is a file that must be read with the 14 seed words alone (`genesis.pilot`), which says so in its header.
+  12. **Produce Lazily, Materialize on Demand:** A sequence consumed once, in order, or partly is a `yield` generator (`Generator<T>`); build a `List<T>` only where a consumer needs random access, length, several passes, sorting, or the items past their source.
 
 ---
 

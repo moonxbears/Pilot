@@ -1,0 +1,21 @@
+// =========================================================================
+// FILE: stdlib/core/lex/words.pilot
+// THE SEED WORDS AND THE STRUCTURAL TOKENS (PROP-021 slice 21B)
+// =========================================================================
+// Declared once. The lexer's token declarations (names.pilot,
+// delimiters.pilot) and the checker's GRAM005 (selfhost/check/
+// grammar_attrs.pilot) both read these lists. This file uses nothing else,
+// so the checker can link it alone.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Words;
+
+/// The 14 seed words: the only words the Stage-A seed parser recognizes
+/// (AGENTS.md §1.4). Every other word is a name the stdlib gives meaning.
+pub const SEED_WORDS: List<str> = [
+    "__engine", "struct", "interface", "fn", "let", "ref", "if", "loop",
+    "return", "yield", "defer", "comptime", "quote", "asm",
+];
+
+/// The 13 structural tokens (PROP-008 §2): syntax of their own, never
+/// operators a type declares.
+pub const STRUCTURAL_TOKENS: List<str> = ["(", ")", "[", "]", "{", "}", ",", ";", ":", "::", ".", "=>", "=",];

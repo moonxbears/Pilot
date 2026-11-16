@@ -6,7 +6,7 @@ This guide specifies how to select and implement types in Pilot based on project
 
 ## 1. Core Typing Philosophy
 
-Good typing obeys six foundational laws:
+Good typing obeys eight foundational laws:
 
 1. **Unambiguous Determinism:** If values and lifecycle are known at design time, the definition and type must be immediately obvious. Never leave semantics up to interpretation.
 2. **Appropriate Constraining:** Constrain as tightly as the domain requires, but no tighter. Broad, open-ended types (`any`, bare `str`, bare `i64`) should only represent genuinely open-ended varieties of values.
@@ -14,6 +14,8 @@ Good typing obeys six foundational laws:
 4. **Hardware Lattice Alignment:** Every type must clearly classify into the 2-bit hardware lattice (`0b00` Value, `0b01` Borrowed View, `0b10` Owned Object, `0b11` Scoped Guard).
 5. **Single Source of Truth & Targeted Importing (Import-First Law):** Every type must have exactly one canonical definition in its owning module or package. Types must never be duplicated, re-declared, or shadowed across different files or subsystems. When importing, only import what you need instead of importing an entire library or broad module, unless you genuinely require the entire library or are importing several symbols from that library.
 6. **Intrinsic Encapsulation (Never Use Raw `__engine` Directly):** Raw `__engine(...)` calls are strictly forbidden in application, domain, standard library, and self-host code. Always use the high-level standard and core types that incorporate and encapsulate engine intrinsics (such as `Map<K, V>`, `List<T>`, `SliceBuffer<T>`, `fs.*`, `time.*`). Direct `__engine` calls bypass type safety, leak unmanaged resources, and violate the 2-bit hardware type lattice.
+7. **Known Data Is Constant Data:** Anything known before the program runs is written as data the compiler can see: a `const`, a `comptime` value, an `enum`, or a preset table. It is never a function that returns the same value every call, never a magic number repeated at its uses, and never a table rebuilt at run time (Rules 1, 2 and 13).
+8. **Produce Lazily, Materialize on Demand:** A sequence that is consumed once, in order, or possibly only in part is produced by a `yield` generator (`Generator<T>`), so each item is computed only when it is asked for. Build a `List<T>` only when the consumer needs it whole: random access, a length, several passes, sorting, or keeping the items after their source is gone (Rule 14).
 
 ```mermaid
 flowchart TD
@@ -55,11 +57,14 @@ flowchart TD
 | **Dynamically resizing owned collection** | `List<T>` or `...Buffer` | `var items = List<str>::new();` | `0b10` (`IObject`) |
 | **Resource requiring mandatory LIFO cleanup** | `...Guard` / `...Scope` / `...Lease` | `struct MutexGuard<T> : IGuard { ~self() { release(); } }` | `0b11` (`IGuard`) |
 | **Discrete typestate progression (e.g. state machine)** | `state` algebraic union (`A \| B`) | `type Connection = Disconnected \| Connecting \| Connected` | Linear State |
+| **A single value known before the program runs** | `const` (computed at compile time with `comptime` when it calls a function) | `const NEWLINE: u8 = 10;` / `const AREA = comptime square(4);` | `0b00` (`IValue`) |
+| **Preset data: a fixed list or map of known records** | `const` list / map / `array<T, N>`, read by index or through `ref` | `const PRIMES = [2, 3, 5, 7, 11];` | `0b00` / `0b10` (constant) |
+| **A sequence consumed once, in order, or partly** | `yield` generator (`Generator<T>`) | `fn lines(text: str) -> Generator<str> { ... yield line; ... }` | Generator frame |
 | **Physical quantities with dimensional units** | Dimensional Unit Types | `let timeout = 250[ms]; let buf_size = 64[KB];` | `0b00` (`IValue`) |
 
 ---
 
-## 3. The 12 Invariant Rules of Good Typing
+## 3. The 14 Invariant Rules of Good Typing
 
 ### Rule 1: Closed, Predefined Discrete Sets ($\le 19$) $\rightarrow$ `enum`
 When the universe of discourse consists of a known, finite list of mutually exclusive states, use a strongly-typed `enum` backed by the smallest adequate scalar representation (`u8` or `u16`).
@@ -302,6 +307,65 @@ __engine("map_set", bad_map, "count", 42); // ANTI-PATTERN
 let bad_val = __engine("map_get", bad_map, "count"); // ANTI-PATTERN
 ```
 
+### Rule 13: Known Data $\rightarrow$ `const`, `comptime`, `enum` and Preset Tables
+If a value is known before the program runs, declare it as data. The compiler can then fold it, check it and show it in `pilot inspect`, and the running program never recomputes it.
+- **One known value:** `const NAME: T = value;`. When it takes computing, `const NAME = comptime f(args);` runs `f` once while compiling.
+- **A known, closed set of named values:** an `enum` (Rule 1), never a family of `fn x_kind() -> i64 => 3;` functions or `0`/`1`/`2` integers.
+- **Preset data** (keyword lists, token tables, catalogs, lookup maps): a `const` list, map or `array<T, N>` of records (Rule 2), built once. Read it by index or pass it as `ref`. Using a constant list or map *by value* (binding it, passing it to a plain parameter, returning it) gives a copy (`tests/conformance/runtime/const_values`), so do not move it around by value in hot code.
+- **Do not** write a function whose body is a literal (`pub pure fn newline_byte() -> i64 => 10;`). It hides data behind a call: a reader cannot see it is constant, and an engine that does not inline it pays for a call on every use.
+- **Exception:** a file that must be readable by the 14 seed words alone (`stdlib/core/genesis.pilot`, `PROP-021` §2.6) cannot use `const`, because `const` is not a seed word. Such a file says so in its header. Every other file uses `const`.
+
+```pilot
+// GOOD: data the compiler sees
+const NEWLINE: u8 = 10;
+const DOUBLE_QUOTE: u8 = 34;
+const AREA = comptime square(4);
+const SEED_WORDS = ["__engine", "struct", "interface", "fn", "let", "ref", "if",
+    "loop", "return", "yield", "defer", "comptime", "quote", "asm",];
+
+pub enum LexContextKind : u8 { Other, Spaced, Glued, Start, }
+
+// BAD: constants hidden behind calls, magic integers for a closed set
+pub pure fn newline_byte() -> i64 => 10;
+pub pure fn lex_context_glued() -> i64 => 2;
+```
+
+### Rule 14: Lazy Sequences $\rightarrow$ `yield` Generators; Materialize Only on Demand
+When values are produced one after another and the consumer takes them in order (tokens, lines, tree walks, search hits, rows), produce them with a generator. A function whose body `yield`s in statement position is a generator (`Generator<T>`, see `tests/conformance/generators/`). Its body runs only as far as the consumer asks, through `for x in gen` or `gen.next()`. Nothing is computed ahead, and the whole sequence never needs memory at once.
+- **Use a generator when** the consumer reads each item once, in order; may stop early (the first match, the first error); or feeds the items straight into another stage (lexer to parser, reader to decoder).
+- **Materialize to a `List<T>` only when** the consumer needs random access, `.len()`, more than one pass, sorting or reordering, or must keep the items after their source is gone. Then materialize once, at the consumer that needs it: `for` in value position collects what its body yields (`let xs = for x in gen { yield x; };`).
+- **A generator that reads a borrowed source** (`0b01`) cannot outlive that source, and neither can the items it yields: returning one past the source is `ESCAPE002`. Hand out values (`0b00`: a count, an index, a span) where an item must outlive the source; copy it only where the consumer asks.
+- **Do not** build a whole `List` inside a function only so the caller can loop over it once.
+- **Maturity:** generators are `PARTIAL` (ledger `DRAFT`) in [`docs/keyword_matrix.md`](file:///home/moony/Documents/dev/projects/Pilot/docs/keyword_matrix.md): they run on all three engines, but check the matrix before relying on less common forms.
+
+```pilot
+// GOOD: each line computed when the caller asks for it
+fn lines(text: str) -> Generator<str> {
+    var start = 0;
+    var i = 0;
+    while i < text.len() {
+        if text.byte_at(i) == 10 {
+            yield text.slice(start, i);
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    if start < text.len() { yield text.slice(start, text.len()); }
+}
+
+fn first_long_line(text: str) -> i64? {
+    var n = 0;
+    for l in lines(text) {
+        if l.len() > 80 { return n; }   // stops early: later lines are never computed
+        n = n + 1;
+    }
+    return none;
+}
+
+// BAD: every line built and stored before the first one is looked at
+fn all_lines(text: str) -> List<str> { var out: List<str> = []; /* ... */ return out; }
+```
+
 ---
 
 ## 4. Anti-Patterns to Avoid
@@ -316,6 +380,9 @@ let bad_val = __engine("map_get", bad_map, "count"); // ANTI-PATTERN
 | **Boolean Blindness** | Multiple boolean flags (`is_admin: bool, is_active: bool, is_verified: bool`). | `bitflags UserFlags : u32` or distinct state types. |
 | **Leaky Interpretation** | Leaving data validatable only at execution time deep in downstream callers. | Parse and validate at construction boundary (`res<T, E>`). |
 | **Sentinel Pointers** | Returning `0` / null / `-1` to represent "not found" or "no error". | `opt<T>` (`T?`) or `res<T, E>` (`T ! E`). |
+| **Constant Functions** | A zero-argument function whose body is a literal (`fn newline_byte() -> i64 => 10;`), or a family of them standing for a closed set. | `const NEWLINE: u8 = 10;`, `comptime` for computed values, an `enum` for a closed set. |
+| **Run-Time Rebuilt Presets** | A fixed table or keyword list rebuilt by a function on every call. | A `const` list / map / `array<T, N>`, read by index or `ref`. |
+| **Eager Materialization** | Building a whole `List<T>` that the caller walks once, in order, or abandons after the first match. | A `yield` generator (`Generator<T>`); collect only where a consumer needs the whole list. |
 | **Raw `__engine` Intrinsic Calls** | Invoking `__engine("map_new")`, `__engine("map_set")`, etc. directly in domain or selfhost code instead of using high-level types. | Use strongly-typed encapsulating types like `Map<K, V>`, `List<T>`, or `fs.*`. |
 
 ---
@@ -333,6 +400,13 @@ let bad_val = __engine("map_get", bad_map, "count"); // ANTI-PATTERN
   - If $\le 19$: Use `enum` with `::Variant`.
   - If orthogonal combinations: Use `bitflags`.
   - If $20+$: Use `array<T, N>` / compile-time table registry.
+- [ ] **Is the value known before the program runs?**
+  - One value: `const` (`comptime` when it is computed). Never a function returning a literal.
+  - A closed set of named values: `enum`.
+  - Preset records or lookups: a `const` table, read by index or `ref`.
+- [ ] **Is it a sequence consumed once, in order, or partly?**
+  - Produce it with a `yield` generator (`Generator<T>`).
+  - Materialize a `List<T>` only for random access, length, several passes, sorting, or keeping the items past their source.
 - [ ] **Is it a composite type?**
   - If pure state/fixed layout: Use `struct : IValue` with `[Layout(c_abi)]`.
   - If behavior varies across implementations: Use `interface` + concrete `struct`s.

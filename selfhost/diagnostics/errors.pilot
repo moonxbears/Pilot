@@ -868,6 +868,13 @@ pub let ERRORS = [
         reference: "proposals.md PROP-018 §2",
     },
     ErrorDef {
+        code: "LEX001",
+        title: "No Token Starts Here",
+        description: "No declared token pattern matches at this byte: a byte no token allows, or a token left unfinished (a string without its closing quote, a block comment without `*/`)",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §2.7",
+    },
+    ErrorDef {
         code: "LEX002",
         title: "Tokens Tie on the Same Text",
         description: "Two token declarations of equal priority match exactly the same text; give one of them a higher priority, since declaration order never decides",
@@ -880,6 +887,13 @@ pub let ERRORS = [
         description: "A token pattern matches the empty text, which would let the lexer stand still; a token must take at least one byte",
         category: "Lexer",
         reference: "proposals.md PROP-021 §2.7",
+    },
+    ErrorDef {
+        code: "LEX005",
+        title: "Token Enters an Undeclared Mode",
+        description: "A token declaration enters a lexer mode that no mode of the lexicon declares",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §2.4",
     },
     ErrorDef {
         code: "SYN010",

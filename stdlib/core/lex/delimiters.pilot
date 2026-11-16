@@ -1,0 +1,45 @@
+// =========================================================================
+// FILE: stdlib/core/lex/delimiters.pilot
+// THE 13 STRUCTURAL TOKENS (PROP-021 slice 21B, PROP-008 §2)
+// =========================================================================
+// The tokens that are syntax of their own rather than operators a type
+// declares. Each is one token family, named by its spelling, except `.`:
+// glued to an operand (`a.b`, `f().x`) it is `infix_dot`, otherwise
+// (`.reset()`, `0 .. .count`) `prefix_dot`. A closing `)`, `]` or `}` ends
+// an operand. Inside an f-string hole, `{` enters a nested hole and `}`
+// leaves it, which is how the hole's own closing `}` is found.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Delimiters;
+
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Words;
+
+/// The dot of the structural tokens, and the closers that end an operand.
+pub const DOT: str = ".";
+pub fn closes_operand(t: str) -> bool => t == ")" || t == "]" || t == "}";
+pub fn opens_brace(t: str) -> bool => t == "{";
+pub fn closes_brace(t: str) -> bool => t == "}";
+
+/// One token per structural token (two for the dot), in declaration order;
+/// with `in_hole`, the braces enter and leave the f-string hole mode
+/// `hole_mode`.
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn delimiter_tokens() -> List<TokenDecl> => delimiters_in(false, "");
+
+pub fn delimiters_in(in_hole: bool, hole_mode: str) -> List<TokenDecl> {
+    var out: List<TokenDecl> = [];
+    for t in STRUCTURAL_TOKENS {
+        if t == DOT {
+            out.push(token("prefix_dot", lit(t)));
+            out.push(starting(TokenWhen::Glued, token_over("infix_dot", 1, lit(t))));
+        } else if closes_operand(t) {
+            let d = acting(TokenRole::Operand, token(t, lit(t)));
+            out.push(if in_hole && closes_brace(t) { leaving(d) } else { d });
+        } else if in_hole && opens_brace(t) {
+            out.push(entering(hole_mode, token(t, lit(t))));
+        } else {
+            out.push(token(t, lit(t)));
+        }
+    }
+    return out;
+}

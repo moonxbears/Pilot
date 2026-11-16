@@ -1,0 +1,35 @@
+// Spaces, newlines and comments from Pilot.Core.Lex.Trivia (PROP-021
+// slice 21B), lexed as today's seed lexer does: `//` and `#` run to the
+// end of the line (the newline is its own token), and `/* .. */` ends at
+// the first `*/` (block comments do not nest).
+//
+// Expected, worked by hand, as family and length in bytes:
+//   x                 name 1
+//   " "               space 1
+//   "// a b"          line_comment 6
+//   newline           newline 1
+//   "#d e"            directive 4
+//   newline           newline 1
+//   "/* p * / **/"    block_comment 12 (`* ` and ` /` do not close it;
+//                     `**/` does: any run of `*` then `/`)
+//   y                 name 1
+//   tab, CR, space    space 3
+//   z                 name 1
+//   " "               space 1
+//   "/**/"            block_comment 4
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Names;
+use Pilot.Core.Lex.Trivia;
+use pilot.lex.build;
+
+fn main() {
+    var decls = trivia_tokens();
+    decls.push(token("name", name_pattern()));
+    let built = build_table(decls);
+    print(built.ok());
+    let src = "x // a b\n#d e\n/* p * / **/y\t\r z /**/";
+    for l in lex_all(built.table, src) {
+        let family = if l.decl < 0 { "?" } else { built.table.names[l.decl] };
+        print(f"{family} {l.end - l.start}");
+    }
+}

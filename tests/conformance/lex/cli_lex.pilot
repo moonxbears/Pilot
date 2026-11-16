@@ -1,0 +1,31 @@
+// `pilot lex <file>` (PROP-021 slice 21C): a file's tokens from the token
+// declarations and the operators the program declares, lexed in modes.
+//
+// Fixtures in tests/tool_fixtures/lex/. Expected, worked by hand, one
+// token per line as family:text, spaces and newlines left out:
+//   sample.pilot, `let s = f"n={x.len}";` then `x?.y`:
+//     let s = are a seed word, a name and `=`; the f-string is its opening,
+//     the text `n=`, the hole (`x`, an infix dot touching `x`, `len`, its
+//     closing `}`) and the closing quote; then `;`. On line 2 `?` is a
+//     declared postfix operator, so the `.` touching it is infix. Exit 0.
+//   stray_byte.pilot, `a ` b`: no token starts with a backquote, so LEX001
+//     at byte 2 and exit 1; `a` and `b` still lex.
+//   no file: the usage line, exit 2.
+//   a file that does not exist: `error: no such file` naming it, exit 2.
+use std.proc;
+
+fn main() {
+    let exe = proc.pilot_cli_path();
+    let ok = proc.run(exe, ["lex", "tests/tool_fixtures/lex/sample.pilot"], "");
+    print(ok.stdout);
+    print(ok.exit_code);
+    let bad = proc.run(exe, ["lex", "tests/tool_fixtures/lex/stray_byte.pilot"], "");
+    print(bad.stdout);
+    print(bad.stderr);
+    print(bad.exit_code);
+    let usage = proc.run(exe, ["lex"], "");
+    print(usage.exit_code);
+    let missing = proc.run(exe, ["lex", "tests/tool_fixtures/lex/missing.pilot"], "");
+    print(missing.stderr);
+    print(missing.exit_code);
+}

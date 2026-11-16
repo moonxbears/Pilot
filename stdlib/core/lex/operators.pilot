@@ -1,0 +1,29 @@
+// =========================================================================
+// FILE: stdlib/core/lex/operators.pilot
+// OPERATOR TOKENS (PROP-021 slice 21C)
+// =========================================================================
+// An operator's spelling is declared once, by the `op` declaration or the
+// operator attribute that gives it its meaning (PROP-008/018). This file
+// writes none of them: the toolchain collects the declared symbols
+// (`declared_operator_symbols` in selfhost/check/grammar_attrs.pilot) and
+// passes them here, and each becomes a token family named by its spelling.
+// The longest match decides between overlapping ones (`..=` over `..`).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Operators;
+
+use Pilot.Core.Lex.Patterns;
+
+/// One token per operator symbol in `symbols`, in their order. A symbol in
+/// `postfix` is declared as a postfix operator (`x?`), so it ends an
+/// operand: a `.` right after it is an infix dot.
+pub fn operator_tokens(ref symbols: List<str>, ref postfix: List<str>) -> List<TokenDecl> {
+    var out: List<TokenDecl> = [];
+    for sym in symbols {
+        var after = false;
+        for p in postfix {
+            if p == sym { after = true; }
+        }
+        out.push(if after { acting(TokenRole::Operand, token(sym, lit(sym))) } else { token(sym, lit(sym)) });
+    }
+    return out;
+}

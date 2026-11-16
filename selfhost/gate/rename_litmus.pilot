@@ -211,8 +211,9 @@ fn rl_conformance_dir() -> str => "tests/conformance";
 /// conformance corpus, and the programs corpus cases start as child
 /// processes or read (`runtime/proc_large_output` runs
 /// `tests/tool_fixtures/proc`; `runtime/check_fix_borrows` fixes a copy of
-/// `tests/tool_fixtures/check_fix`).
-fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir(), "tests/tool_fixtures/proc", "tests/tool_fixtures/check_fix"];
+/// `tests/tool_fixtures/check_fix`; `lex/cli_lex` lexes
+/// `tests/tool_fixtures/lex`).
+fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir(), "tests/tool_fixtures/proc", "tests/tool_fixtures/check_fix", "tests/tool_fixtures/lex"];
 
 /// What `pilot test` printed and returned in the sandbox.
 pub struct LitmusRun : IValue {

@@ -36,6 +36,10 @@
 // table-driven lexer of PROP-008 step 2.
 pub lvl(0) pkg selfhost.check;
 
+// The 13 structural tokens and the 14 seed words are declared once, by
+// stdlib/core/lex/words.pilot.
+use Pilot.Core.Lex.Words;
+
 
 /// The operator attributes and, for each, the positions (after the target)
 /// of its explicit symbol and readable word (-1: it has none) and whether
@@ -59,20 +63,13 @@ fn grammar_attrs() -> List<GrammarAttr> => [
 /// The shapes of `[Shaped]` that take one operand.
 fn unary_shapes() -> List<str> => ["Prefix", "Postfix"];
 
-/// The 13 structural tokens (PROP-008 §2) and the 14 seed words.
-fn structural_tokens() -> List<str> => ["(", ")", "[", "]", "{", "}", ",", ";", ":", "::", ".", "=>", "="];
-fn seed_words() -> List<str> => [
-    "__engine", "struct", "interface", "fn", "let", "ref", "if", "loop",
-    "return", "yield", "defer", "comptime", "quote", "asm",
-];
-
 /// Whether `sym` is, or starts with a delimiter that is always, structural
 /// syntax or a seed word. (`..` and `:=` start with `.` and `:` but lex as
 /// operators of their own, so only an exact match counts for those.)
 pub fn is_structural_symbol(sym: str) -> bool {
     if sym.len() == 0 { return true; }
-    for t in structural_tokens() { if sym == t { return true; } }
-    for w in seed_words() { if sym == w { return true; } }
+    for t in STRUCTURAL_TOKENS { if sym == t { return true; } }
+    for w in SEED_WORDS { if sym == w { return true; } }
     for t in ["(", ")", "[", "]", "{", "}", ",", ";"] { if sym.starts_with(t) { return true; } }
     return false;
 }
@@ -321,4 +318,85 @@ pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
         }
         d = d + 1;
     }
+}
+
+/// Every operator symbol the program and its declarations declare, in node
+/// order, each once: the pieces of each `op` symbol between its holes
+/// (`_?_:_` gives `?` and `:`), and the symbol an operator attribute on a
+/// `syntax` rule names. Words (`and`), structural tokens and seed words are
+/// left out: they lex as names or as the structural tokens themselves.
+/// These are the operator tokens of the lexer (PROP-021 slice 21C).
+pub fn declared_operator_symbols(ref p: Program) -> List<str> {
+    let s = p.s;
+    var out: List<str> = [];
+    var seen = Map<str, bool>();
+    var d = 0;
+    while d < s.count {
+        let is_op = kind(s, d) == nk_operator();
+        if is_op {
+            let pat = op_pattern(s, d);
+            var last = 0;
+            var cuts = hole_positions(pat);
+            cuts.push(pat.len());
+            for h in cuts {
+                // The text between two holes may hold several pieces
+                // (`_, ..|>`), separated by spaces.
+                var start = last;
+                var i = last;
+                while i <= h {
+                    if i == h || pat.byte_at(i) == 32 {
+                        add_operator_symbol(out, seen, pat.slice(start, i));
+                        start = i + 1;
+                    }
+                    i = i + 1;
+                }
+                last = h + 1;
+            }
+        }
+        if is_op || is_syntax_rule(s, d) {
+            for ga in grammar_attrs() {
+                guard some args = prog_attr_nodes(p, d, ga.name) else { continue; }
+                if ga.symbol_at >= 0 && ga.symbol_at < args.len() {
+                    add_operator_symbol(out, seen, arg_text(s, args[ga.symbol_at]));
+                }
+            }
+        }
+        d = d + 1;
+    }
+    return out;
+}
+
+fn add_operator_symbol(var ref out: List<str>, var ref seen: Map<str, bool>, piece: str) {
+    let sym = piece.trim();
+    if sym.len() == 0 || seen.has(sym) || is_structural_symbol(sym) { return; }
+    var word = true;
+    var i = 0;
+    while i < sym.len() {
+        if !is_word_byte(sym.byte_at(i) as i64) { word = false; }
+        i = i + 1;
+    }
+    if word { return; }
+    seen.set(sym, true);
+    out.push(sym);
+}
+
+/// The symbols of the postfix operators the program declares: an operator
+/// whose pattern is one hole followed by its symbol (`_?`). After one, an
+/// operand has ended.
+pub fn declared_postfix_symbols(ref p: Program) -> List<str> {
+    let s = p.s;
+    var out: List<str> = [];
+    var seen = Map<str, bool>();
+    var d = 0;
+    while d < s.count {
+        if kind(s, d) == nk_operator() {
+            let pat = op_pattern(s, d);
+            let holes = hole_positions(pat);
+            if holes.len() == 1 && holes[0] == 0 {
+                add_operator_symbol(out, seen, pat.slice(1, pat.len()));
+            }
+        }
+        d = d + 1;
+    }
+    return out;
 }

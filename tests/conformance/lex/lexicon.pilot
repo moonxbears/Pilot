@@ -1,0 +1,28 @@
+// Every token family declared so far that lexes in one table (PROP-021
+// slices 21B and 21C): numbers, names, seed words and keyword literals,
+// trivia and the shebang, strings and the structural delimiters. No two of them tie (no LEX002), and a line of Pilot lexes
+// into the families the parser expects.
+//
+// Expected, worked by hand:
+//   families: 2 numbers + 1 name + 14 seed words + 1 keyword_literal
+//             + 5 trivia + 1 shebang + 3 strings + 14 delimiters (the 13,
+//             with `.` split into prefix_dot and infix_dot) = 41
+//   `fn main() { let x = 0xFF; } // done` (spaces not shown):
+//   fn name ( ) { let name = integer ; } line_comment
+use Pilot.Core.Lex.Lexicon;
+use pilot.lex.build;
+
+fn main() {
+    let built = build_table(core_tokens());
+    print(built.ok());
+    print(built.table.names.len());
+    let src = "fn main() { let x = 0xFF; } // done";
+    var out = "";
+    for l in lex_all(built.table, src) {
+        let family = if l.decl < 0 { "?" } else { built.table.names[l.decl] };
+        if family != "space" {
+            out = out + family + " ";
+        }
+    }
+    print(out);
+}

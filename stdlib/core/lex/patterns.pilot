@@ -13,7 +13,8 @@
 // refer to itself, and the builder reads it with one stack pass.
 //
 // Bootstrap subset: these files use plain decimal numbers and plain strings
-// only, so a byte that needs an escape is named by its value (`byte(34)`).
+// only, so a byte that needs an escape is named by a constant below
+// (`byte(DOUBLE_QUOTE)`).
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Patterns;
 
@@ -74,18 +75,91 @@ ext str {
     pub op ..= (hi: str) -> Pattern => byte_range(self.byte_at(0) as i64, hi.byte_at(0) as i64);
 }
 
+/// Where a token may start, from what came before it (flex's start
+/// conditions). The lexer starts each token in one context: the start of the
+/// text, after a space or newline, glued to an operand (no space, and the
+/// token before ends an operand), or none of these.
+pub enum TokenWhen : u8 {
+    /// Anywhere.
+    Always,
+    /// After a space or newline, or at the start of the text (`:name`).
+    Spaced,
+    /// Right after an operand, with no space between (`a.b`'s `.`).
+    Glued,
+    /// At the very start of the text (`#!`).
+    AtStart,
+}
+
+/// What a token does to the context of the token after it.
+pub enum TokenRole : u8 {
+    /// Ends the context: the next token is neither spaced nor glued.
+    Plain,
+    /// Ends an operand: a token right after it is glued (a name, a
+    /// literal, `)`).
+    Operand,
+    /// A space or newline: the next token is spaced.
+    Space,
+    /// Leaves the context as it was (a comment).
+    Trivia,
+}
+
 /// A declared token: its name, the pattern its text must match, and its
 /// priority, which decides between two tokens that match exactly the same
-/// text (the higher wins; equal priorities are an error, LEX002).
+/// text in the same context (the higher wins; equal priorities are an error,
+/// LEX002). `when` and `role` are its context rules; `enters` names the
+/// mode a lexer switches to after it (`""` for none), and `leaves` returns
+/// to the mode before.
 pub struct TokenDecl : IObject {
     pub name: str;
     pub priority: i64;
     pub pattern: Pattern;
+    pub when: TokenWhen;
+    pub role: TokenRole;
+    pub enters: str;
+    pub leaves: bool;
 }
 
-pub fn token(name: str, pattern: Pattern) -> TokenDecl => TokenDecl { name: name, priority: 0, pattern: pattern };
+pub fn token(name: str, pattern: Pattern) -> TokenDecl => token_over(name, 0, pattern);
 
-pub fn token_over(name: str, priority: i64, pattern: Pattern) -> TokenDecl => TokenDecl { name: name, priority: priority, pattern: pattern };
+pub fn token_over(name: str, priority: i64, pattern: Pattern) -> TokenDecl =>
+    TokenDecl { name: name, priority: priority, pattern: pattern, when: TokenWhen::Always, role: TokenRole::Plain, enters: "", leaves: false };
+
+/// `d`, which may only start in context `w`.
+pub fn starting(w: TokenWhen, d: TokenDecl) -> TokenDecl {
+    var out = d;
+    out.when = w;
+    return out;
+}
+
+/// `d`, with role `r`.
+pub fn acting(r: TokenRole, d: TokenDecl) -> TokenDecl {
+    var out = d;
+    out.role = r;
+    return out;
+}
+
+/// `d`, after which the lexer is in mode `m`.
+pub fn entering(m: str, d: TokenDecl) -> TokenDecl {
+    var out = d;
+    out.enters = m;
+    return out;
+}
+
+/// `d`, after which the lexer returns to the mode it was in before.
+pub fn leaving(d: TokenDecl) -> TokenDecl {
+    var out = d;
+    out.leaves = true;
+    return out;
+}
+
+/// A lexer mode: a name and the tokens that may start in it. The first mode
+/// of a lexicon is where lexing starts.
+pub struct LexMode : IObject {
+    pub name: str;
+    pub tokens: List<TokenDecl>;
+}
+
+pub fn lex_mode(name: str, tokens: List<TokenDecl>) -> LexMode => LexMode { name: name, tokens: tokens };
 
 fn op(kind: PatKind, lo: i64, hi: i64, n: i64) -> PatOp => PatOp { kind: kind, lo: lo, hi: hi, n: n };
 
@@ -114,8 +188,54 @@ pub fn byte_range(lo: i64, hi: i64) -> Pattern {
     return Pattern { ops: ops };
 }
 
+// The bytes the bootstrap subset cannot write in a plain string (or that
+// read better by name), declared once.
+pub const TAB: i64 = 9;
+pub const NEWLINE: i64 = 10;
+pub const CARRIAGE_RETURN: i64 = 13;
+pub const DOUBLE_QUOTE: i64 = 34;
+pub const SINGLE_QUOTE: i64 = 39;
+pub const BACKSLASH: i64 = 92;
+
 /// The one byte with value `b`.
 pub fn byte(b: i64) -> Pattern => byte_range(b, b);
+
+/// The value of the first byte of `text` (`byte_of("*")` is 42).
+pub fn byte_of(text: str) -> i64 => text.byte_at(0) as i64;
+
+/// Any one byte.
+pub fn any_byte() -> Pattern => byte_range(0, 255);
+
+/// Any one byte whose value is not in `bytes`.
+pub fn any_but(bytes: List<i64>) -> Pattern {
+    var ops: List<PatOp> = [];
+    var lo = 0;
+    while lo < 256 {
+        if listed(bytes, lo) {
+            lo = lo + 1;
+        } else {
+            var hi = lo;
+            while hi < 255 && !listed(bytes, hi + 1) {
+                hi = hi + 1;
+            }
+            ops.push(op(PatKind::Bytes, lo, hi, 0));
+            lo = hi + 1;
+        }
+    }
+    if ops.len() != 1 {
+        ops.push(op(PatKind::Alt, 0, 0, ops.len() as i64));
+    }
+    return Pattern { ops: ops };
+}
+
+fn listed(ref bytes: List<i64>, b: i64) -> bool {
+    for x in bytes {
+        if x == b {
+            return true;
+        }
+    }
+    return false;
+}
 
 /// Exactly the bytes of `text`, in order.
 pub fn lit(text: str) -> Pattern {

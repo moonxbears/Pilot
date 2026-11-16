@@ -59,4 +59,7 @@ pub fn float() -> Pattern =>
 
 /// The number tokens, in declaration order.
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
-pub fn number_tokens() -> List<TokenDecl> => [token("integer", integer()), token("float", float())];
+pub fn number_tokens() -> List<TokenDecl> => [
+    acting(TokenRole::Operand, token("integer", integer())),
+    acting(TokenRole::Operand, token("float", float())),
+];

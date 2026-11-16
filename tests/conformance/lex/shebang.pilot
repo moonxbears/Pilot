@@ -1,0 +1,25 @@
+// `#!` at the very start of the text is the shebang, one token to the end
+// of the line (PROP-021 slice 21C). Anywhere else `#!..` is a `#` line,
+// a directive, as in today's seed lexer.
+//
+// Expected, worked by hand (spaces and newlines not shown):
+//   "#!/bin/pilot\nx"   shebang:#!/bin/pilot, then name:x
+//   "x #!y"             name:x, then directive:#!y
+use Pilot.Core.Lex.Lexicon;
+use pilot.lex.build;
+
+fn show(ref t: LexTable, src: str) {
+    for l in lex_all(t, src) {
+        let family = if l.decl < 0 { "?" } else { t.names[l.decl] };
+        if family != "space" && family != "newline" {
+            print(lexeme_text(t, src, l));
+        }
+    }
+}
+
+fn main() {
+    let built = build_table(core_tokens());
+    print(built.ok());
+    show(built.table, "#!/bin/pilot\nx");
+    show(built.table, "x #!y");
+}

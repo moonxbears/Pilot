@@ -1,0 +1,28 @@
+let:let
+name:s
+=:=
+fstring_open:f"
+fstring_text:n=
+hole_open:{
+name:x
+infix_dot:.
+name:len
+}:}
+fstring_close:"
+;:;
+name:x
+?:?
+infix_dot:.
+name:y
+
+0
+name:a
+name:b
+
+LEX001: no token starts at byte 2 of tests/tool_fixtures/lex/stray_byte.pilot
+
+1
+2
+error: no such file `tests/tool_fixtures/lex/missing.pilot`
+
+2

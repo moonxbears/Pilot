@@ -18,6 +18,11 @@
 // when `1.` alone is not a token), and a lexeme of family -1 for a byte that
 // starts no token (LEX001).
 //
+// Context rules (`TokenWhen`) are start conditions: the DFA has one start
+// state per context, reaching only the tokens that may start there, so ties
+// (LEX002) are only ever between tokens that can meet. The runner picks the
+// start state from what came before (`TokenRole`).
+//
 // The table is the whole of what the lexer knows. Nothing here names a
 // character, a word or a symbol.
 pub pkg pilot.lex.build;
@@ -25,15 +30,42 @@ pub pkg pilot.lex.build;
 use Pilot.Core.Lex.Patterns;
 
 /// A built lexer: `next[state * classes + class]` is the next state or -1,
-/// `accept[state]` the declaration index a state accepts or -1.
+/// `accept[state]` the declaration index a state accepts or -1, and
+/// `starts[context]` the start state of each context (`LexContextKind` as a number).
+/// Per declaration: what lexing it does to the lexer (`TokenAction`).
 pub struct LexTable : IObject {
     pub names: List<str>;
     pub class_of: List<i64>;
     pub classes: i64;
     pub states: i64;
-    pub start: i64;
+    pub starts: List<i64>;
     pub next: List<i64>;
     pub accept: List<i64>;
+    pub actions: List<TokenAction>;
+}
+
+/// What a token does to the lexer: the context it leaves (`role`), the
+/// mode it enters (`""` for none) and whether it leaves its mode.
+pub struct TokenAction : IValue {
+    pub role: TokenRole;
+    pub enters: str;
+    pub leaves: bool;
+}
+
+/// The contexts a token can start in: after a token that is neither a
+/// space nor an operand's end (`Other`), after a space (`Spaced`), touching
+/// the end of an operand (`Glued`), at the start of the text (`Start`).
+pub enum LexContextKind : u8 { Other, Spaced, Glued, Start, }
+
+/// Every context, in order; the table has one start state for each.
+pub const LEX_CONTEXT_KINDS: List<LexContextKind> = [LexContextKind::Other, LexContextKind::Spaced, LexContextKind::Glued, LexContextKind::Start,];
+
+/// Whether a token declared with `w` may start in context `ctx`.
+pub fn starts_in(w: TokenWhen, ctx: LexContextKind) -> bool {
+    if w == TokenWhen::Always { return true; }
+    if w == TokenWhen::Spaced { return ctx == LexContextKind::Spaced || ctx == LexContextKind::Start; }
+    if w == TokenWhen::Glued { return ctx == LexContextKind::Glued; }
+    return ctx == LexContextKind::Start;
 }
 
 /// Why a set of declarations is not a lexer.
@@ -43,12 +75,14 @@ pub struct LexBuildError : IValue {
 }
 
 /// One token found in text: the declaration index (-1 for a byte that
-/// starts no token) and its byte span.
+/// starts no token), its byte span, and the mode it was found in (0 for a
+/// one-mode lexer).
 [Layout(c_abi)]
 pub struct Lexeme : IValue {
     pub decl: i64;
     pub start: i64;
     pub end: i64;
+    pub mode: i64;
 }
 
 /// The result of `build_table`: the table, or the errors that stop it.
@@ -225,9 +259,11 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
     var errors: List<LexBuildError> = [];
     var names: List<str> = [];
     var prio: List<i64> = [];
+    var actions: List<TokenAction> = [];
     for d in decls {
         names.push(d.name);
         prio.push(d.priority);
+        actions.push(TokenAction { role: d.role, enters: d.enters, leaves: d.leaves });
     }
 
     // 1. Byte classes: a boundary before every range start and after every
@@ -258,14 +294,22 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
         b = b + 1;
     }
 
-    // 2. The NFA: state 0 reaches every declaration's fragment.
+    // 2. The NFA: one root per context, reaching the fragment of every
+    //    declaration that may start there.
     var n = Nfa { lo: [], hi: [], to: [], accept: [], eps_from: [], eps_to: [] };
-    let root = nfa_state(n);
+    var roots: List<i64> = [];
+    for k in LEX_CONTEXT_KINDS {
+        roots.push(nfa_state(n));
+    }
     var end_out: List<i64> = [0];
     var di = 0;
     for d in decls {
         let s = nfa_fragment(n, d.pattern, end_out);
-        nfa_eps(n, root, s);
+        for k in LEX_CONTEXT_KINDS {
+            if starts_in(d.when, k) {
+                nfa_eps(n, roots[k as i64], s);
+            }
+        }
         n.accept[end_out[0]] = di;
         di = di + 1;
     }
@@ -318,12 +362,19 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
     var index: Map<str, i64> = Map<str, i64>();
     var dnext: List<i64> = [];
     var daccept: List<i64> = [];
-    var seeds: List<i64> = [root];
-    let first = closure(seeds, eps_off, eps_dst, mark, stamp);
-    stamp = stamp + 1;
-    let first_key = join_ints(first);
-    index.set(first_key, 0);
-    members.push(first);
+    var dstarts: List<i64> = [];
+    for r in roots {
+        var seeds: List<i64> = [r];
+        let first = closure(seeds, eps_off, eps_dst, mark, stamp);
+        stamp = stamp + 1;
+        let first_key = join_ints(first);
+        if !index.has(first_key) {
+            index.set(first_key, members.len());
+            members.push(first);
+        }
+        dstarts.push(index[first_key]);
+    }
+    let start_states = members.len();
     var reported: Map<str, i64> = Map<str, i64>();
     var cur = 0;
     while cur < members.len() {
@@ -352,7 +403,8 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
                 }
             }
         }
-        if cur == 0 && best >= 0 {
+        if cur < start_states && best >= 0 && !reported.has(f"empty {best}") {
+            reported.set(f"empty {best}", 1);
             errors.push(build_error("LEX004", f"`{names[best]}` matches the empty text; a token must take at least one byte"));
         }
         daccept.push(best);
@@ -503,14 +555,19 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
         b = b + 1;
     }
 
+    var starts: List<i64> = [];
+    for st in dstarts {
+        starts.push(part[st]);
+    }
     let table = LexTable {
         names: names,
         class_of: class_of,
         classes: classes,
         states: groups,
-        start: part[0],
+        starts: starts,
         next: next,
         accept: gaccept,
+        actions: actions,
     };
     return LexBuild { table: table, errors: errors };
 }
@@ -519,38 +576,76 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
 // Running a table
 // ------------------------------------------------------------------------------
 
-/// The tokens of `src`, longest match first from each position.
-pub fn lex_all(ref t: LexTable, src: str) -> List<Lexeme> {
-    var out: List<Lexeme> = [];
+/// The longest token of `t` starting at `pos` of `src` in context `ctx`,
+/// falling back to the last accepting state; family -1 (one byte) when
+/// none starts there.
+pub fn match_at(ref t: LexTable, src: str, pos: i64, ctx: LexContextKind) -> Lexeme {
     let len = src.len() as i64;
-    var pos = 0;
-    while pos < len {
-        var state = t.start;
-        var i = pos;
-        var last = -1;
-        var last_end = pos;
-        while i < len {
-            let cls = t.class_of[src.byte_at(i) as i64];
-            let nx = t.next[state * t.classes + cls];
-            if nx < 0 {
-                break;
-            }
-            state = nx;
-            i = i + 1;
-            if t.accept[state] >= 0 {
-                last = t.accept[state];
-                last_end = i;
-            }
+    var state = t.starts[ctx as i64];
+    var i = pos;
+    var last = -1;
+    var last_end = pos;
+    while i < len {
+        let cls = t.class_of[src.byte_at(i) as i64];
+        let nx = t.next[state * t.classes + cls];
+        if nx < 0 {
+            break;
         }
-        if last < 0 {
-            out.push(Lexeme { decl: -1, start: pos, end: pos + 1 });
-            pos = pos + 1;
-        } else {
-            out.push(Lexeme { decl: last, start: pos, end: last_end });
-            pos = last_end;
+        state = nx;
+        i = i + 1;
+        if t.accept[state] >= 0 {
+            last = t.accept[state];
+            last_end = i;
         }
     }
-    return out;
+    if last < 0 {
+        return Lexeme { decl: -1, start: pos, end: pos + 1, mode: 0 };
+    }
+    return Lexeme { decl: last, start: pos, end: last_end, mode: 0 };
+}
+
+/// Where the lexer stands between two tokens: whether a space came last
+/// and whether the token before ends an operand. It starts spaced.
+pub struct LexContext : IValue {
+    pub spaced: bool;
+    pub operand: bool;
+}
+
+/// The context before the first token: spaced, after no operand.
+pub const LEX_CONTEXT_START: LexContext = LexContext { spaced: true, operand: false };
+
+/// The context a token at `pos` starts in.
+pub fn context_at(c: LexContext, pos: i64) -> LexContextKind {
+    if pos == 0 { return LexContextKind::Start; }
+    if c.spaced { return LexContextKind::Spaced; }
+    if c.operand { return LexContextKind::Glued; }
+    return LexContextKind::Other;
+}
+
+/// The role of lexeme `l` of `t`; a byte that starts no token is `Plain`.
+pub fn role_of(ref t: LexTable, l: Lexeme) -> TokenRole => if l.decl < 0 { TokenRole::Plain } else { t.actions[l.decl].role };
+
+/// The context after a token of role `role`.
+pub fn context_after(c: LexContext, role: TokenRole) -> LexContext {
+    if role == TokenRole::Space { return LexContext { spaced: true, operand: c.operand }; }
+    if role == TokenRole::Trivia { return c; }
+    return LexContext { spaced: false, operand: role == TokenRole::Operand };
+}
+
+/// The tokens of `src`, longest match first from each position, each
+/// started in the context the tokens before it leave. A generator: each
+/// token is matched only when the caller asks for it, so a caller that
+/// stops early lexes no further (imp_type.md Rule 14).
+pub fn lex_all(ref t: LexTable, src: str) -> Generator<Lexeme> {
+    let len = src.len() as i64;
+    var pos = 0;
+    var c = LEX_CONTEXT_START;
+    while pos < len {
+        let l = match_at(t, src, pos, context_at(c, pos));
+        c = context_after(c, role_of(t, l));
+        pos = l.end;
+        yield l;
+    }
 }
 
 /// `name:text` for a lexeme (`?:text` for a byte that starts no token).

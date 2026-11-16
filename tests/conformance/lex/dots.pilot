@@ -1,0 +1,34 @@
+// `.` is two token families (PROP-021 slice 21C): `infix_dot` right after
+// a token that ends an operand (a name, a literal, `)`, `]`, `}` or a
+// postfix operator such as `?`) with nothing between; `prefix_dot`
+// anywhere else. A space or a newline in between makes it prefix; a
+// comment leaves the context as it was.
+//
+// Expected, worked by hand (spaces and newlines not shown):
+//   a.b         name infix_dot name
+//    .c         after a space: prefix_dot name
+//   x .. y      `..` is longer than `.`: name .. name
+//   (a).b       ( name ) infix_dot name
+//   a. b        the space comes after the dot: name infix_dot name
+//   \n.b        after a newline: prefix_dot name
+//   a/**/.b     the comment keeps `a`'s context: name block_comment
+//               infix_dot name
+//   x?.y        `?` is postfix, so it ends an operand: name ? infix_dot
+//               name
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.build;
+
+fn main() {
+    let built = build_table(core_tokens_with(operator_tokens(["..", "?"], ["?"])));
+    print(built.ok());
+    let src = "a.b .c x .. y (a).b a. b\n.b a/**/.b x?.y";
+    var out = "";
+    for l in lex_all(built.table, src) {
+        let family = if l.decl < 0 { "?" } else { built.table.names[l.decl] };
+        if family != "space" && family != "newline" {
+            out = out + family + " ";
+        }
+    }
+    print(out);
+}

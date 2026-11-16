@@ -1,0 +1,41 @@
+// ==============================================================================
+// FILE: selfhost/lex/lex_tool.pilot
+// `pilot lex <file>`: a file's tokens, from the token declarations alone.
+// ==============================================================================
+// The modal lexer is built from every token family declared in
+// stdlib/core/lex/ and from every operator symbol the program and its
+// declarations declare (PROP-021 slice 21C). One line per token, spaces
+// and newlines (tokens whose role is `Space`) left out: `family:text` (a
+// newline inside the text is shown as `\n`). A byte that starts no token
+// is LEX001, and the exit code is then 1.
+pub lvl(0) pkg selfhost.lex;
+
+use selfhost.check.*;
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.build;
+use pilot.lex.modes;
+
+/// The tokens of the file at `path`, as described above.
+pub fn lex_main(path: str) -> i64 {
+    let s = snap_load();
+    let p = prog_new(s);
+    let modes = core_modes(operator_tokens(declared_operator_symbols(p), declared_postfix_symbols(p)));
+    let built = build_modes(modes);
+    for e in built.errors {
+        eprint(f"{e.code}: {e.message}");
+    }
+    if !built.ok() { return 1; }
+    let src = File.read_text(path);
+    var unmatched = 0;
+    for l in lex_modal(built.lexer, src) {
+        if l.decl < 0 {
+            eprint(f"LEX001: no token starts at byte {l.start} of {path}");
+            unmatched = unmatched + 1;
+        } else if !is_space_lexeme(built.lexer, l) {
+            print(modal_lexeme_text(built.lexer, src, l).replace("\n", "\\n"));
+        }
+    }
+    return if unmatched > 0 { 1 } else { 0 };
+}

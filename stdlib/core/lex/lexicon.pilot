@@ -1,0 +1,58 @@
+// =========================================================================
+// FILE: stdlib/core/lex/lexicon.pilot
+// EVERY TOKEN FAMILY DECLARED SO FAR (PROP-021 slice 21B)
+// =========================================================================
+// The declarations `pilot.lex.build` compiles into one table: numbers,
+// names and seed words, trivia, strings and the structural tokens.
+// Operators, dots, the `:name` literal and f-strings come in later slices.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Lexicon;
+
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Numbers;
+use Pilot.Core.Lex.Names;
+use Pilot.Core.Lex.Trivia;
+use Pilot.Core.Lex.Strings;
+use Pilot.Core.Lex.Delimiters;
+
+/// Every token declared so far that lexes in one table, in declaration
+/// order (no operators: those come from the program's declarations).
+pub fn core_tokens() -> List<TokenDecl> => core_tokens_with([]);
+
+/// `core_tokens()` and `operators` after them.
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn core_tokens_with(operators: List<TokenDecl>) -> List<TokenDecl> {
+    var out: List<TokenDecl> = [];
+    for group in [number_tokens(), name_tokens(), trivia_tokens(), string_tokens(), delimiter_tokens(), operators] {
+        for d in group {
+            out.push(d);
+        }
+    }
+    return out;
+}
+
+/// The whole lexicon with its modes, given the operator tokens: the main
+/// mode (every token, the operators and the f-string openers), one mode per
+/// f-string quoting, and the hole mode (the main mode's tokens, with braces
+/// that enter and leave it).
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn core_modes(operators: List<TokenDecl>) -> List<LexMode> {
+    var modes: List<LexMode> = [lex_mode("main", modal_tokens(operators, false))];
+    for m in fstring_modes() {
+        modes.push(m);
+    }
+    modes.push(lex_mode(HOLE_MODE, modal_tokens(operators, true)));
+    return modes;
+}
+
+/// The tokens of the main mode, or of the hole mode when `in_hole`.
+fn modal_tokens(operators: List<TokenDecl>, in_hole: bool) -> List<TokenDecl> {
+    let braces = if in_hole { delimiters_in(true, HOLE_MODE) } else { delimiters_in(false, "") };
+    var out: List<TokenDecl> = [];
+    for group in [number_tokens(), name_tokens(), trivia_tokens(), string_tokens(), fstring_openers(), operators, braces] {
+        for d in group {
+            out.push(d);
+        }
+    }
+    return out;
+}

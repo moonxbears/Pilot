@@ -1,0 +1,51 @@
+// F-strings are lexed in modes (PROP-021 slice 21C): the opening enters
+// the f-string's mode (text, a `{` that enters the hole mode, the closing
+// quote); in the hole the ordinary tokens apply, and the `}` that closes it
+// leaves. A `{ .. }` or another f-string inside a hole nests on the stack.
+// `{{` is text.
+//
+// Expected, worked by hand, one token per line as family:text (spaces not
+// shown), one source per group:
+//   f"a{x}b"        fstring_open:f"  fstring_text:a  hole_open:{  name:x
+//                   }:}  fstring_text:b  fstring_close:"
+//   f"{m["k"]}"     the `"` inside the hole starts a string, not the
+//                   close: fstring_open hole_open name:m [ string:"k" ]
+//                   } fstring_close
+//   f"{{}}"         `{{` is text, and so is `}`: fstring_open
+//                   fstring_text:{{}} fstring_close
+//   f"{ {1} }"      the inner braces nest: fstring_open hole_open {
+//                   integer:1 } } fstring_close
+//   f"{f'{y}'}"     an f-string in a hole: fstring_open:f" hole_open
+//                   fstring_open:f' hole_open name:y } fstring_close:'
+//                   } fstring_close:"
+//   f"""a"b{x}"""   a lone quote is text in a triple one:
+//                   fstring_open:f""" fstring_text:a fstring_quote:"
+//                   fstring_text:b hole_open name:x } fstring_close:"""
+//   rf"\{x}".n      raw: `\` is text; the close ends an operand, so the
+//                   dot is infix: fstring_open:rf" fstring_text:\
+//                   hole_open name:x } fstring_close infix_dot name:n
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.modes;
+
+fn show(ref m: ModalLexer, src: str) {
+    var out = "";
+    for l in lex_modal(m, src) {
+        if modal_family(m, l) != "space" {
+            out = out + modal_lexeme_text(m, src, l) + " ";
+        }
+    }
+    print(out);
+}
+
+fn main() {
+    let built = build_modes(core_modes(operator_tokens([], [])));
+    print(built.ok());
+    show(built.lexer, "f\"a{x}b\"");
+    show(built.lexer, "f\"{m[\"k\"]}\"");
+    show(built.lexer, "f\"{{}}\"");
+    show(built.lexer, "f\"{ {1} }\"");
+    show(built.lexer, "f\"{f'{y}'}\"");
+    show(built.lexer, "f\"\"\"a\"b{x}\"\"\"");
+    show(built.lexer, "rf\"\\{x}\".n");
+}

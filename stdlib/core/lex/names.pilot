@@ -1,0 +1,35 @@
+// =========================================================================
+// FILE: stdlib/core/lex/names.pilot
+// NAME TOKENS AND THE SEED WORDS (PROP-021 slice 21B)
+// =========================================================================
+// A name is a letter or `_`, then letters, digits and `_`. A seed word is
+// declared over the name pattern with a higher priority, so `fn` is the
+// word and `fnord` a name (the longest match). Names are ASCII here, as in
+// today's seed lexer; UTF-8 letters are a later slice (PROP-021 §2.8).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Names;
+
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Words;
+
+/// A byte that may start a name.
+pub fn name_start() -> Pattern => "a" ..= "z" | "A" ..= "Z" | lit("_");
+
+/// A name: a start byte, then start bytes and digits.
+pub fn name_pattern() -> Pattern => name_start() + (name_start() | "0" ..= "9").many();
+
+/// `:red`, `:ns/kw`: a keyword literal. Only after a space, so `x:y` and
+/// `case 1:` keep their `:`.
+pub fn keyword_literal() -> Pattern => lit(":") + name_pattern() + (lit("/") + name_pattern()).opt();
+
+/// The name token, one token per seed word, and the keyword literal, in
+/// declaration order.
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn name_tokens() -> List<TokenDecl> {
+    var out: List<TokenDecl> = [acting(TokenRole::Operand, token("name", name_pattern()))];
+    for w in SEED_WORDS {
+        out.push(token_over(w, 1, lit(w)));
+    }
+    out.push(starting(TokenWhen::Spaced, acting(TokenRole::Operand, token("keyword_literal", keyword_literal()))));
+    return out;
+}

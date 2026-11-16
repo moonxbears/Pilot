@@ -1,0 +1,2 @@
+let s = f"n={x.len}";
+x?.y

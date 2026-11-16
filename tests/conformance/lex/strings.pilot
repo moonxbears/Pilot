@@ -1,0 +1,33 @@
+// String tokens from Pilot.Core.Lex.Strings (PROP-021 slice 21B), lexed
+// as today's seed lexer does: `\` takes the next byte with it in every
+// string (raw ones too), a quoted string ends at its own quote, and a
+// triple-quoted one at the first three quotes.
+//
+// The source text below is:
+//   "a\"b" 'c' r"d" b"e" """f""g""" '''h'''
+//
+// Expected, worked by hand, as family and length in bytes (spaces not
+// shown):
+//   "a\"b"        `\"` does not close it         string 6
+//   'c'                                          string 3
+//   r"d"          prefix r                       raw_string 4
+//   b"e"          prefix b                       byte_string 4
+//   """f""g"""    `""g` does not close it        string 10
+//   '''h'''                                      string 7
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Strings;
+use pilot.lex.build;
+
+fn main() {
+    var decls = string_tokens();
+    decls.push(token("space", lit(" ").some()));
+    let built = build_table(decls);
+    print(built.ok());
+    let src = "\"a\\\"b\" 'c' r\"d\" b\"e\" \"\"\"f\"\"g\"\"\" '''h'''";
+    for l in lex_all(built.table, src) {
+        let family = if l.decl < 0 { "?" } else { built.table.names[l.decl] };
+        if family != "space" {
+            print(f"{family} {l.end - l.start}");
+        }
+    }
+}

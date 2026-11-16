@@ -1,0 +1,27 @@
+// A keyword literal (`:red`, `:ns/kw`) is a `:` and a name, with an
+// optional `/name`, where a token may start after a space: at the start of
+// the text or after a space or newline (PROP-021 slice 21C). Glued to an
+// operand it is a `:` and a name (`x:y`).
+//
+// Expected, worked by hand (spaces not shown):
+//   :red      at the start: keyword_literal
+//   x:y       `:` touches `x`: name : name
+//   a ? b     name ? name
+//    :c       after a space: keyword_literal
+//    :ns/kw   keyword_literal, one token
+//    ::z      `:` then `:` is no name, so `::` (longest) then name
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.build;
+
+fn main() {
+    let built = build_table(core_tokens_with(operator_tokens(["?"], ["?"])));
+    print(built.ok());
+    let src = ":red x:y a ? b :c :ns/kw ::z";
+    for l in lex_all(built.table, src) {
+        let family = if l.decl < 0 { "?" } else { built.table.names[l.decl] };
+        if family != "space" {
+            print(lexeme_text(built.table, src, l));
+        }
+    }
+}

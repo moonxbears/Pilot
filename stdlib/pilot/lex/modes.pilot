@@ -1,0 +1,103 @@
+// ==============================================================================
+// FILE: stdlib/pilot/lex/modes.pilot
+// Ring 3: lexing with modes (pub pkg pilot.lex.modes;) — PROP-021 slice 21C
+// ==============================================================================
+// A lexicon with modes is a list of `LexMode`s, each built into its own
+// table. A token that `enters` a mode pushes it; a token that `leaves` pops
+// back to the mode before. So an f-string's `{` enters the hole mode, where
+// the ordinary tokens apply, and the `}` that closes the hole leaves it;
+// nesting (a `{ .. }` or another f-string inside a hole) is the stack. The
+// context (`LexContext`) carries across modes.
+pub pkg pilot.lex.modes;
+
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+
+/// A built lexer with modes: one table per mode, and per mode and
+/// declaration the index of the mode it enters (-1 for none).
+pub struct ModalLexer : IObject {
+    pub modes: List<str>;
+    pub tables: List<LexTable>;
+    pub enters: List<List<i64>>;
+}
+
+/// The result of `build_modes`: the lexer, or the errors that stop it.
+pub struct ModalBuild : IObject {
+    pub lexer: ModalLexer;
+    pub errors: List<LexBuildError>;
+
+    pub fn ok(ref self) -> bool => self.errors.len() == 0;
+}
+
+/// Builds every mode of `modes`. A token that enters a mode no entry of
+/// `modes` names is LEX005; each mode's own errors are reported with its
+/// name.
+pub fn build_modes(ref modes: List<LexMode>) -> ModalBuild {
+    var names: List<str> = [];
+    var index = Map<str, i64>();
+    for m in modes {
+        index.set(m.name, names.len() as i64);
+        names.push(m.name);
+    }
+    var errors: List<LexBuildError> = [];
+    var tables: List<LexTable> = [];
+    var enters: List<List<i64>> = [];
+    for m in modes {
+        let built = build_table(m.tokens);
+        for e in built.errors {
+            errors.push(LexBuildError { code: e.code, message: f"in mode `{m.name}`: {e.message}" });
+        }
+        var to: List<i64> = [];
+        for d in m.tokens {
+            if d.enters == "" {
+                to.push(-1);
+            } else if index.has(d.enters) {
+                to.push(index[d.enters]);
+            } else {
+                to.push(-1);
+                errors.push(LexBuildError { code: "LEX005", message: f"in mode `{m.name}`: `{d.name}` enters mode `{d.enters}`, which is not declared" });
+            }
+        }
+        tables.push(built.table);
+        enters.push(to);
+    }
+    return ModalBuild { lexer: ModalLexer { modes: names, tables: tables, enters: enters }, errors: errors };
+}
+
+/// The tokens of `src`, starting in the first mode. A generator, like
+/// `lex_all`: each token is matched when the caller asks for it.
+pub fn lex_modal(ref m: ModalLexer, src: str) -> Generator<Lexeme> {
+    let len = src.len() as i64;
+    var stack: List<i64> = [0];
+    var pos = 0;
+    var c = LEX_CONTEXT_START;
+    while pos < len {
+        let mode = stack[stack.len() - 1];
+        let found = match_at(m.tables[mode], src, pos, context_at(c, pos));
+        let l = Lexeme { decl: found.decl, start: found.start, end: found.end, mode: mode };
+        c = context_after(c, role_of(m.tables[mode], l));
+        if l.decl >= 0 {
+            if m.tables[mode].actions[l.decl].leaves && stack.len() > 1 {
+                let _ = stack.pop();
+            }
+            let to = m.enters[mode][l.decl];
+            if to >= 0 {
+                stack.push(to);
+            }
+        }
+        pos = l.end;
+        yield l;
+    }
+}
+
+/// Whether `l` is a space (a token whose role is `Space`).
+pub fn is_space_lexeme(ref m: ModalLexer, l: Lexeme) -> bool => l.decl >= 0 && m.tables[l.mode].actions[l.decl].role == TokenRole::Space;
+
+/// The family name of `l` (`?` for a byte that starts no token).
+pub fn modal_family(ref m: ModalLexer, l: Lexeme) -> str => if l.decl < 0 { "?" } else { m.tables[l.mode].names[l.decl] };
+
+/// `name:text` for a lexeme (`?:text` for a byte that starts no token).
+pub fn modal_lexeme_text(ref m: ModalLexer, src: str, l: Lexeme) -> str {
+    let text = src.slice(l.start, l.end);
+    return f"{modal_family(m, l)}:{text}";
+}

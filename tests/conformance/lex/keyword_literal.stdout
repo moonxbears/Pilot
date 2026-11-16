@@ -1,0 +1,12 @@
+true
+keyword_literal::red
+name:x
+:::
+name:y
+name:a
+?:?
+name:b
+keyword_literal::c
+keyword_literal::ns/kw
+:::::
+name:z

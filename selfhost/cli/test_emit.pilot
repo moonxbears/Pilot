@@ -10,7 +10,8 @@
 //     same exit code);
 //   - a case whose emission stops at a registered `emit.*` or `ir.*` seam is
 //     counted as stopped at a seam: neither passed nor failed;
-//   - any other case is written to `target/test-emit/<lang>/`, built when the
+//   - any other case is written to `target/test-emit/<lang>/` (named after
+//     its whole path, `emitted_name`), built when the
 //     language is compiled, and run with its `.args` and `.stdin`. Its stdout
 //     and exit code must be the expected ones, and its stderr must hold each
 //     expected stderr line, a runtime error from `runtime error:` on. An
@@ -226,6 +227,11 @@ fn has_line(stdout: str, want: str) -> bool {
 ///     compiler, which is the answer for every language;
 ///   - any other run stopped in one language's emitter (a seam): that case
 ///     is emitted again, once per language.
+/// The file name a case is emitted under: its whole path without the
+/// extension, `/` written as `__`, so two cases with the same file name in
+/// different directories (`lex/fstrings`, `text/fstrings`) never share one.
+fn emitted_name(case: str) -> str => test_stem(case).replace("/", "__");
+
 fn emit_cases(exe: str, ref rs: List<EmitRunner>, ref cases: List<str>, ref dir_of: List<str>) -> List<List<Emitted>> {
     var all: List<List<Emitted>> = [];
     if rs.len() == 1 {
@@ -243,7 +249,7 @@ fn emit_cases(exe: str, ref rs: List<EmitRunner>, ref cases: List<str>, ref dir_
         var files = "";
         var k = 0;
         while k < rs.len() {
-            let f = f"{dir_of[k]}/{test_base_name(test_stem(c))}.{rs[k].ext}";
+            let f = f"{dir_of[k]}/{emitted_name(c)}.{rs[k].ext}";
             files = if k == 0 { f } else { files + "," + f };
             k = k + 1;
         }
@@ -262,7 +268,7 @@ fn emit_cases(exe: str, ref rs: List<EmitRunner>, ref cases: List<str>, ref dir_
         let checked = has_line(out.stdout, "checked");
         var k = 0;
         while k < rs.len() {
-            let f = f"{dir_of[k]}/{test_base_name(test_stem(cases[i]))}.{rs[k].ext}";
+            let f = f"{dir_of[k]}/{emitted_name(cases[i])}.{rs[k].ext}";
             if out.exit_code == 0 && k < wrote.len() && wrote[k] == f {
                 all[k].push(Emitted { out: ProcessOutput { exit_code: 0, stdout: "", stderr: out.stderr }, src: f });
             } else if out.exit_code != 0 && !checked {
@@ -352,7 +358,7 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
             let res = test_check_case(cases[i], out);
             if res.problems.len == 0 { tally.passed = tally.passed + 1; } else { fail(cases[i], res.problems, tally); }
         } else {
-            let base = test_base_name(test_stem(cases[i]));
+            let base = emitted_name(cases[i]);
             let src = f"{dir}/{base}.{r.ext}";
             if emitted[i].src == "" && !File.write_text(src, out.stdout) {
                 fail(cases[i], [f"cannot write `{src}`"], tally);

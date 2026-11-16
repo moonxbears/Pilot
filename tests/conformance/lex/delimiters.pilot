@@ -1,0 +1,30 @@
+// The 13 structural tokens from Pilot.Core.Lex.Delimiters (PROP-021 slice
+// 21B; PROP-008 §2). Each is its own family, named by its spelling, except
+// `.`, which is two (slice 21C): `infix_dot` right after a token that ends
+// an operand (here `)`), with no space between; `prefix_dot` otherwise.
+//
+// Expected, worked by hand (spaces not shown): the 13 in order, with the
+// lone `.` after a space a `prefix_dot`, then
+//   =>=   the longest token first: `=>`, then `=`
+//   :::   `::`, then `:`
+//   ).(   `)` ends an operand and `.` touches it: `infix_dot`, then `(`
+//   .)    after `(`, which ends no operand: `prefix_dot`, then `)`
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Delimiters;
+use pilot.lex.build;
+
+fn main() {
+    var decls = delimiter_tokens();
+    decls.push(token("space", lit(" ").some()));
+    let built = build_table(decls);
+    print(built.ok());
+    let src = "( ) [ ] { } , ; : :: . => = =>= ::: ).(.)";
+    var out = "";
+    for l in lex_all(built.table, src) {
+        let family = if l.decl < 0 { "?" } else { built.table.names[l.decl] };
+        if family != "space" {
+            out = out + family + " ";
+        }
+    }
+    print(out);
+}

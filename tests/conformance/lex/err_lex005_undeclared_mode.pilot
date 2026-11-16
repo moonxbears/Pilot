@@ -1,0 +1,17 @@
+// A token that enters a mode no mode of the lexicon declares is an error
+// (LEX005), reported with the mode the token is in (PROP-021 slice 21C).
+//
+// Expected, worked by hand: mode `main` declares `q`, which enters
+// `quoted`; only `main` exists, so the build fails with one LEX005. `x`
+// enters nothing and is no error.
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.modes;
+
+fn main() {
+    var modes: List<LexMode> = [lex_mode("main", [token("x", lit("x")), entering("quoted", token("q", lit("\"")))])];
+    let built = build_modes(modes);
+    print(built.ok());
+    for e in built.errors {
+        print(f"{e.code}: {e.message}");
+    }
+}
