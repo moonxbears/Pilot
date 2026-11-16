@@ -25,7 +25,7 @@
 | **`PROP-012`** | Delete Test-Only Rust: the AST S-Expression Printer, the Rust Module Header Scanner and `TokenKind::is_keyword` | `-186` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-013`** | Link a Run's Extra Toolchain Files in the Loader's One Pass (`run.rs` `compile_entry`) | `-11` | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-013") AND BUILT; C2 PASSES` |
 | **`PROP-014`** | Update the Benchmark Baseline Test for the Seed Column `PROP-002a` C2 Added (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-014") AND BUILT` |
-| **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, and Delete the Dead `ProbeArg::Engine` | about `+1` (`+3`, `-4`) | `DRAFT — AWAITING OWNER APPROVAL` |
+| **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed | about `+1` (`+3`, `-4`); C about `+15` | `DRAFT — AWAITING OWNER APPROVAL` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -1812,7 +1812,7 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 
 ---
 
-## `PROP-015` — Compile an `=> expr` Function Body Against Its Return Type, and Delete the Dead `ProbeArg::Engine`
+## `PROP-015` — Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed
 
 **Status: DRAFT, awaiting owner approval.** Found 2026-11-15 while clearing the `pilot-cli` test failures that predate this session's work (they fail at `2a82f59` too).
 
@@ -1823,14 +1823,22 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 
 **B. Dead Rust: `ProbeArg::Engine`.** The coverage weaver no longer passes an engine operation as a probe argument: the `::Speed` entry points read the clock themselves (`Clock.now_ns` in `stdlib/core/coverage.pilot`). The old argument named `time_now_us`, an operation that no longer exists, so every `::Speed` run stopped with "cannot apply `-` to null and null". The Pilot side (`ProbeArgKind::Engine`, its branch in `selfhost/ir/lower_probe.pilot`) is deleted. The Rust variant and its two arms have no producer now.
 
+**C. Known bug `check.collecting_for_in_block`, seed half** (added 2026-11-15).
+- A collecting `for` that is a block's value (`let big = { for x in xs { yield x * 10; } };`, or the branches of `let c = if .. { for .. } else { for .. };`) must give the list. The Pilot half is built: `selfhost/check/generators.pilot` `for_collects` counts a block's last `for` as its value when the block's value is used (a `let`/`var` initializer, an argument, a returned or assigned value, a branch of an `if` whose value is used; never a function, lambda or loop body), and `selfhost/ir/lower.pilot` `lower_block` takes that `for` as the block's value. `known_bugs/block_value_collecting_for` passes on `--ir` and `--emit c`.
+- The seed still fails: `compile_block` (`lower_stmt.rs`) sets `stmt_for` on every `for` item, so the last one never collects, its `yield` makes `main` a generator, and nothing runs.
+- Change: `compile_block` leaves `stmt_for` unset for its last item when the block's value is wanted. That needs a `want_value` flag on `BytecodeCompiler` (`lib.rs`), set while `compile_let` (`lower_stmt.rs`) compiles its initializer and while an `if` whose value is wanted compiles its branches (`lower_expr.rs`, `IfExpr`), and cleared for loop and function bodies. Sized when the owner approves the direction; about +15.
+- Acceptance: `known_bugs/block_value_collecting_for` passes on all three engines, moves to `tests/conformance/generators/` with its expected output unchanged, and its `bug_registry()` entry is deleted; `generators/*` and the seed suite are otherwise unchanged.
+
 **Rust file list.**
 
 | File | Change |
 | :--- | :--- |
-| `crates/pilot-vm/src/lower_stmt.rs` | In the function-body compile, an `=> expr` body (not a `BlockExpr`) is compiled with `compile_with_hint(arena, body_node, self.cur_ret_type.clone())`; a block body is unchanged. About +3. |
+| `crates/pilot-vm/src/lower_stmt.rs` | In the function-body compile, an `=> expr` body (not a `BlockExpr`) is compiled with `compile_with_hint(arena, body_node, self.cur_ret_type.clone())`; a block body is unchanged. About +3. Part C: `compile_block` leaves `stmt_for` unset for its last item while `want_value` is set; `compile_let` sets it around its initializer. |
+| `crates/pilot-vm/src/lib.rs` | Part C: the `want_value: bool` field on `BytecodeCompiler`, saved and restored with the other per-function state. |
+| `crates/pilot-vm/src/lower_expr.rs` | Part C: an `IfExpr` passes `want_value` on to its branch blocks. |
 | `crates/pilot-vm/src/lower_probe.rs` | Delete `ProbeArg::Engine(String)` (and its doc line), the `5 => ProbeArg::Engine(..)` arm of `from_code`, and the `ProbeArg::Engine(op) => self.emit_intrinsic(op, &[])` arm. About −4. |
 
-**Net Rust.** About −1 `src` line.
+**Net Rust.** About −1 `src` line for A and B; about +15 more with C.
 
 **Acceptance.**
 - `cargo build`; `cargo test -p pilot-vm` and `-p pilot-cli` give the results of today minus `inherited_steps_follow_their_policy`, which passes.

@@ -152,7 +152,7 @@ fn generate(root: str, old: str) -> str {
             tables = tables + f"\n### {cat.id}. {cat.badge}\n\n" + table_header() + "\n" + rows;
         }
     }
-    return summary_text(verdicts, verdict_order, complexity, gaps_none, measured, sizes) + "\n" + tables;
+    return summary(verdicts, verdict_order, complexity, gaps_none, measured, sizes) + "\n" + tables;
 }
 
 fn rust_search(word: str, ref table: Map<str, SearchKeys>, ref receptors: List<Receptor>) -> Search {
@@ -294,9 +294,8 @@ fn all_are(ref items: List<str>, s: str) -> bool {
     return true;
 }
 
-[Workaround("check.field_name_private_fn", "named `summary_text`, not `summary`, which km.evidence.Bug has as a field")]
-fn summary_text(ref verdicts: Map<str, i64>, ref order: List<str>, ref complexity: List<i64>, gaps_none: i64,
-           ref measured: List<str>, ref sizes: Map<str, List<i64>>) -> str {
+fn summary(ref verdicts: Map<str, i64>, ref order: List<str>, ref complexity: List<i64>, gaps_none: i64,
+       ref measured: List<str>, ref sizes: Map<str, List<i64>>) -> str {
     // Verdicts by count, most first; ties by name.
     var names: List<str> = sort_strs(order);
     var ranked: List<str> = [];

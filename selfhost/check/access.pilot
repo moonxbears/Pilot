@@ -147,6 +147,25 @@ fn check_override_decl(p: Program, pkgs: List<str>, sink: DiagSink, n: i64) {
     }
 }
 
+/// Whether identifier `n` names a field in a struct literal
+/// (`Note { summary: s }`): a field name, not a use of a top-level item.
+fn is_field_key(p: Program, n: i64) -> bool {
+    let s = p.s;
+    let up = p.parents[n];
+    if up < 0 || kind(s, up) != nk_map() { return false; }
+    let call = p.parents[up];
+    if call < 0 || kind(s, call) != nk_call() { return false; }
+    let callee = children(s, call)[0];
+    if kind(s, callee) != nk_ident() || prog_type_decl(p, node_name(s, callee)) < 0 { return false; }
+    let ch = children(s, up);
+    var i = 0;
+    while i + 1 < ch.len() {
+        if ch[i] == n { return true; }
+        i = i + 2;
+    }
+    return false;
+}
+
 pub fn check_access(inf: Infer, sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
@@ -159,7 +178,7 @@ pub fn check_access(inf: Infer, sink: DiagSink) {
             check_override_decl(p, pkgs, sink, n);
         }
         if (k == nk_ident() || k == nk_member()) && in_user_file(s, n) {
-            if k == nk_ident() && inf.r.ref_of[n] < 0 && node_name(s, n) != s.receiver {
+            if k == nk_ident() && inf.r.ref_of[n] < 0 && node_name(s, n) != s.receiver && !is_field_key(p, n) {
                 let decls = top_level(p, node_name(s, n));
                 var any = false;
                 for d in decls { if reaches(p, pkgs, d, n) { any = true; } }

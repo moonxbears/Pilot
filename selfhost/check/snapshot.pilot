@@ -319,8 +319,10 @@ pub fn is_noalloc_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 16);
 /// Whether declaration `n` is written `override`.
 pub fn is_override_decl(s: Snap, n: i64) -> bool => decl_bit(s, n, 1024);
 
-/// `ParamDecl` flag bits (crates/pilot-ast `PARAM_FLAG_*`): written with
-/// a word registered `binding_mutable` (`var`), or `perceus_isolated` (`iso`).
+/// `ParamDecl` flag bits (crates/pilot-ast `PARAM_FLAG_*`): written `ref`
+/// (a borrow), with a word registered `binding_mutable` (`var`), or
+/// `perceus_isolated` (`iso`).
+pub pure fn param_flag_ref() -> i64 => 2;
 pub pure fn param_flag_mutable() -> i64 => 4;
 pub pure fn param_flag_isolated() -> i64 => 8;
 

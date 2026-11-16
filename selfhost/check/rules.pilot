@@ -331,10 +331,24 @@ fn check_call_args(inf: Infer, sink: DiagSink, n: i64) {
         if kind(s, arg) == nk_call_arg() { return; }
         i = i + 1;
     }
+    // A generic parameter takes the type it was bound to (from the first
+    // argument declared as that bare parameter), so every later argument
+    // that uses it must fit that one type. An argument whose own shape does
+    // not fit the parameter's (a `Map` or `str` given for `T[]`, which the
+    // engines dispatch natively, as `in` does) is left alone.
+    let tnames = prog_tparam_names(p, f);
+    let tvalues = if tnames.len() > 0 { call_generic_args(inf, f, n) } else { [] };
     i = 0;
     while i < params.len() {
         let arg = ch[i + 1];
-        let dst = prog_annot_type(p, rhs(s, params[i]));
+        let declared = prog_annot_type(p, rhs(s, params[i]));
+        var dst = declared;
+        if tnames.len() > 0 && ty_is_open(p.tt, declared) {
+            let src = type_of(inf, arg);
+            let same_shape = ty_is_named(p.tt, src) && ty_is_named(p.tt, declared)
+                && (ty_decl(p.tt, src) == ty_decl(p.tt, declared) || is_literal_list(p, src));
+            if ty_is_param(p.tt, declared) || same_shape { dst = ty_subst(p.tt, declared, tnames, tvalues); }
+        }
         if is_none_literal(s, arg) {
             if rejects_none(p, dst) {
                 sink_error(sink, arg, "NULL004",
@@ -797,6 +811,16 @@ fn check_assign(inf: Infer, sink: DiagSink, n: i64) {
     let target = lhs(s, n);
     if target < 0 || kind(s, target) != nk_ident() { return; }
     let b = inf.r.ref_of[target];
+    if b >= 0 && b < inf.r.site.len() && inf.r.bind_kind[b] == BindKind::Param {
+        // A plain `ref` parameter is a read-only borrow; only `var ref`
+        // writes back to the caller.
+        let prm = inf.r.site[b];
+        if param_flag(s, prm, param_flag_ref()) && !param_flag(s, prm, param_flag_mutable()) {
+            sink_error(sink, n, "DECL004",
+                f"Cannot assign to '{inf.r.name[b]}': a 'ref' parameter is a read-only borrow; declare it 'var ref' to write back to the caller");
+            return;
+        }
+    }
     if b >= 0 && b < inf.r.site.len() {
         let site = inf.r.site[b];
         let n_start = span_start(s, n);

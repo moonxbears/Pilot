@@ -207,9 +207,10 @@ pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
 fn rl_conformance_dir() -> str => "tests/conformance";
 
 /// The trees copied into the sandbox, renamed: the stdlib the programs and
-/// the seed's tables come from, the toolchain's own Pilot sources, and the
-/// conformance corpus.
-fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir()];
+/// the seed's tables come from, the toolchain's own Pilot sources, the
+/// conformance corpus, and the programs corpus cases start as child
+/// processes (`runtime/proc_large_output` runs `tests/tool_fixtures/proc`).
+fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir(), "tests/tool_fixtures/proc"];
 
 /// What `pilot test` printed and returned in the sandbox.
 pub struct LitmusRun : IValue {

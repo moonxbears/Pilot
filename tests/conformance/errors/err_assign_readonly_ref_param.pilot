@@ -1,0 +1,18 @@
+// A plain `ref` parameter is a read-only borrow; only `var ref` writes back
+// to the caller (tests/conformance/memory/var_ref_writeback.pilot). Assigning
+// to a plain `ref` parameter is a reassignment of an immutable binding, so the
+// checker rejects it (DECL004) before anything runs. It used to be accepted
+// (known bug check.assign_readonly_ref_param): the seed dropped the write and
+// PilIR stopped at the seam `ir.lower_construct`, which hid a bug in
+// `std/proc` (`proc_make_pipe`) that left child processes writing to the
+// terminal.
+fn set_one(ref a: i64) -> bool {
+    a = 3;
+    return true;
+}
+
+fn main() {
+    var x = -1;
+    print(set_one(x));
+    print(x);
+}

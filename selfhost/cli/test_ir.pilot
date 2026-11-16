@@ -88,16 +88,16 @@ fn word_after(line: str, prefix: str) -> str {
     return line.slice(at + prefix.len(), end);
 }
 
-/// The problems with `opt`, the `pilot ir opt` output of a case, given the
+/// The problems with `optimized`, the `pilot ir opt` output of a case, given the
 /// functions `wanted` whose calls must all be inlined.
-pub fn inlined_problems(opt: proc.ProcessOutput, wanted: List<str>) -> List<str> {
+pub fn inlined_problems(optimized: proc.ProcessOutput, wanted: List<str>) -> List<str> {
     var problems: List<str> = [];
-    if opt.exit_code != 0 { return [f"`pilot ir opt` failed\n--- stderr ---\n{opt.stderr}"]; }
+    if optimized.exit_code != 0 { return [f"`pilot ir opt` failed\n--- stderr ---\n{optimized.stderr}"]; }
     // Each `fn <index> "<name>" ...` line's index and name.
     var indices: List<str> = [];
     var all_names: List<str> = [];
     var called: List<str> = [];
-    for line in test_lines(opt.stdout) {
+    for line in test_lines(optimized.stdout) {
         if line.starts_with("fn ") {
             let q = line.find("\"", 0);
             let q2 = line.find("\"", q + 1);

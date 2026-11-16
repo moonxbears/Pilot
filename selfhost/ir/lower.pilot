@@ -23,6 +23,7 @@ use selfhost.check.resolve.*;
 use selfhost.check.infer.*;
 use selfhost.check.methods.*;
 use selfhost.check.asm.*;
+use selfhost.check.generators.*;
 use selfhost.ir.model.*;
 use selfhost.ir.layouts.*;
 use selfhost.ir.lower_members.*;
@@ -679,7 +680,9 @@ pub fn lower_block(lw: Lowerer, n: i64) -> u32 {
         let item = items[i];
         let v = lower_expr(lw, item);
         let k = kind(s, item);
-        let yields = k == nk_expr_stmt() || k == nk_if() || k == nk_match() || k == nk_block();
+        // A collecting `for` that ends the block is the block's value.
+        let yields = k == nk_expr_stmt() || k == nk_if() || k == nk_match() || k == nk_block()
+            || (k == nk_for() && for_collects(lw.inf.p, item));
         last = if yields { v } else { ir_no_value() };
         i = i + 1;
     }

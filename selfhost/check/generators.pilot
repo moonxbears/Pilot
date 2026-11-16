@@ -4,7 +4,11 @@
 // ==============================================================================
 // A `for` in value position (`let ys = for ..`, an argument, a returned
 // value) collects what its body yields. A `for` that is an item of a block,
-// or of the program, is in statement position and collects nothing. A
+// or of the program, is in statement position and collects nothing, unless
+// it is the block's value (its last item, written without `;`) and the block
+// is itself in value position: the initializer of a `let`, an argument, a
+// returned value, or a branch of an `if` that is in value position. A
+// function, lambda or loop body is never in value position. A
 // `yield` belongs to the nearest collecting `for` whose body it is in, else
 // to the nearest function or lambda around it, which is then a generator. A
 // `yield` with neither (a script's top level, a `comptime` block) belongs to
@@ -26,15 +30,50 @@ pub fn for_then(s: Snap, f: i64) -> i64 {
 pub fn for_collects(p: Program, f: i64) -> bool {
     // A `for .. then` gives one value, not the list of what it yields.
     if for_then(p.s, f) >= 0 { return false; }
-    var item = f;
-    var par = p.parents[f];
+    return value_used(p, f, 0);
+}
+
+/// Whether item `item` of block `b` is the block's value: its last item,
+/// a `for` or `if` itself or an expression written without a closing `;`.
+fn is_block_value(s: Snap, b: i64, item: i64) -> bool {
+    let ch = children(s, b);
+    if ch.len() == 0 || ch[ch.len() - 1] != item { return false; }
+    if kind(s, item) != nk_expr_stmt() { return true; }
+    return lhs(s, item) >= 0 && span_end(s, item) == span_end(s, lhs(s, item));
+}
+
+/// Whether the value of block `b` is used: `b` is the initializer of a
+/// `let` or `var`, an argument, a returned or assigned value, the value of
+/// an enclosing value block, or a branch of an `if` whose value is used.
+fn block_in_value(p: Program, b: i64, depth: i64) -> bool {
+    let par = p.parents[b];
+    if par < 0 || depth > 64 { return false; }
+    let k = kind(p.s, par);
+    if k == nk_let() || k == nk_var() || k == nk_return() || k == nk_assign() || k == nk_call_arg() { return true; }
+    if k == nk_call() { return children(p.s, par)[0] != b; }
+    if k == nk_if() {
+        if lhs(p.s, par) == b { return false; }
+        return value_used(p, par, depth + 1);
+    }
+    return false;
+}
+
+/// Whether the value of expression `e` (a `for` or an `if`) is used. As an
+/// item of a block it is used only as that block's value; as an item of the
+/// program never; anywhere else (an initializer, an argument, a returned
+/// value, an `=> expr` body) it is.
+fn value_used(p: Program, e: i64, depth: i64) -> bool {
+    var item = e;
+    var par = p.parents[e];
     if par >= 0 && kind(p.s, par) == nk_expr_stmt() {
         item = par;
         par = p.parents[par];
     }
-    if par < 0 { return false; }
+    if par < 0 || depth > 64 { return false; }
     let k = kind(p.s, par);
-    return k != nk_block() && k != nk_program();
+    if k == nk_program() { return false; }
+    if k == nk_block() { return is_block_value(p.s, par, item) && block_in_value(p, par, depth + 1); }
+    return true;
 }
 
 /// The collecting `for`, function or lambda `yield` node `y` belongs to;
