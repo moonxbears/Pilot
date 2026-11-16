@@ -53,7 +53,7 @@ pub fn check_type_tests(var ref inf: Infer, var ref sink: DiagSink) {
 
 /// Adds a `TypeTest` row to `rows` for each `x is T` of the files the
 /// program links whose `T` names a type with a kind.
-pub fn plan_type_tests(var ref inf: Infer, var ref rows: List<List<any>>) {
+pub fn plan_type_tests(var ref inf: Infer, var ref rows: List<DropRow>) {
     let p = inf.p;
     let s = p.s;
     // Only a file the program links is run: the declaration files the
@@ -63,7 +63,7 @@ pub fn plan_type_tests(var ref inf: Infer, var ref rows: List<List<any>>) {
             let t = type_receiver(inf, rhs(s, n));
             let k = value_kind(p, t);
             if k != "" {
-                rows.push([DropAction::TypeTest as i64, span_start(s, n), span_end(s, n), kind(s, n), k, node_name(s, ty_decl(p.tt, t))]);
+                rows.push((DropAction::TypeTest as i64, span_start(s, n), span_end(s, n), kind(s, n), k, node_name(s, ty_decl(p.tt, t))));
             }
         }
     }

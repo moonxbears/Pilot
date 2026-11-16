@@ -158,7 +158,7 @@ pub struct Lowerer : IObject {
     /// The drop and copy plan (selfhost/ir/lower_drop.pilot), and the
     /// guard bindings released at scope exit, by their `let` node.
     pub plan: DropPlanner;
-    pub releases: Map<str, List<any>>;
+    pub releases: Map<str, AtRow>;
     /// Binding -> the stack slot of its drop flag, for a binding moved on
     /// only some paths (selfhost/ir/lower_drop.pilot).
     pub drop_flags: Map<str, u32>;
@@ -279,7 +279,7 @@ pub fn lower_program_rooted(var ref inf: Infer, every_function: bool) -> IrModul
         setter_arg: ir_no_value(), setter_arg_type: ty_unknown(),
         gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
         resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, u32>(), outs: [], out_phys: [],
-        loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, List<any>>(), drop_flags: Map<str, u32>(),
+        loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, AtRow>(), drop_flags: Map<str, u32>(),
         probes: probe_rows(p), adt_decls: adt_nodes(p),
     };
     // Function 0 is `<start>` (selfhost/ir/lower_global.pilot).

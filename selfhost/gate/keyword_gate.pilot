@@ -78,7 +78,7 @@ fn kg_at_rung_one(verdict: str) -> bool {
 
 fn kg_unbound(bound: str) -> bool => bound == "" || bound == "—" || bound == "-" || bound == "none";
 
-pub fn execute_keyword_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> GateReport {
+pub fn execute_keyword_gate(workspace_root: str, ref _opts: GateRunOptions) -> GateReport {
     let t0 = gate_time_now_us();
     let root = resolve_workspace_root(workspace_root);
     let violations = glist_new();

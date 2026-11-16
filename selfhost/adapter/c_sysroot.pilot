@@ -194,7 +194,7 @@ pub fn parse_pkg_config_file(pc_content: str) -> PkgConfigResult {
 pub fn resolve_c_header_path(
     header_name: str,
     ref extra_includes: List<str>,
-    sysroot: ref<SysrootDiscovery>
+    ref sysroot: SysrootDiscovery
 ) -> opt<str> {
     // 1. Check extra user-provided include directories
     var i: i64 = 0;

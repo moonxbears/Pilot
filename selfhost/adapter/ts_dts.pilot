@@ -241,7 +241,7 @@ fn ts_parse_param(raw: str) -> TsParamDecl {
     };
 }
 
-pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDecl {
+pub fn ts_parse_dts(source: str, var ref diags: List<Diagnostic>) -> TsModuleDecl {
     var module = ts_module_decl_new("ts_module");
     if source.len() == 0 {
         var d = Diagnostic {
@@ -553,7 +553,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
 // 6. Node-API Wrapper Synthesizer
 // ------------------------------------------------------------------------------
 
-pub fn ts_synthesize_napi_wrapper(module: ref<TsModuleDecl>, fn_name: str) -> str {
+pub fn ts_synthesize_napi_wrapper(ref module: TsModuleDecl, fn_name: str) -> str {
     var out = "// ==============================================================================\n";
     out = out + f"// Pilot In-Process Node-API Wrapper for '{module.module_name}.{fn_name}'\n";
     out = out + "// Zero-copy stack frame argument packing via napi_call_function\n";

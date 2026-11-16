@@ -489,7 +489,8 @@ fn mg_unit_for(var ref g: ModuleGraph, path: str) -> i64 {
     if g.by_path.has(path) { return g.by_path[path]; }
     guard some h = UnitHeader.read(path) else { return -1; };
     let id = g.units.len() as i64;
-    let node = mg_extract_package_info(path, id, h);
+    // A unit index: one per loaded file.
+    let node = mg_extract_package_info(path, id as u32, h);
     g.units.push(node);
     g.by_path.set(path, id);
     // A package is all the files declaring it: they load together and see

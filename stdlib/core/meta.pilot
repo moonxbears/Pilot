@@ -45,7 +45,7 @@ pub interface {
 
     // Pillar 4: Zero-Storage Computed Property Formula Evaluator
     IFormulaAttribute<TOwner: IAnyValue, TOut: IAnyValue> : IAttribute {
-        pub pure fn evaluate(owner: ref<TOwner>) -> TOut;
+        pub pure fn evaluate(ref owner: TOwner) -> TOut;
 
         // Pilot-Hosted AST Weaver for Pillar 4 (`0` backing storage bytes!):
         pub comptime fn weave_getter(owner_expr: ast) -> ast => quote {
@@ -71,8 +71,8 @@ pub interface {
 
     // Pillar 7: Declarative ECS & `.pchor` Archetype Rule Scheduler
     IEcsRule<TEntity: IAnyValue> : IAttribute {
-        pub pure fn matches(entity: ref<TEntity>) -> bool;
-        pub var  fn apply(entity: var ref<TEntity>);
+        pub pure fn matches(ref entity: TEntity) -> bool;
+        pub var  fn apply(var ref entity: TEntity);
 
         pub comptime fn weave_ecs_step(entity_ref: ast) -> ast => quote {
             if self.matches($entity_ref) {
@@ -118,7 +118,7 @@ pub struct {
         pub expr_fn: fn<ref<TOwner>, TOut>;
         pub weight:  i32;
 
-        pub pure fn evaluate(owner: ref<TOwner>) -> TOut => (.expr_fn)(owner);
+        pub pure fn evaluate(ref owner: TOwner) -> TOut => (.expr_fn)(owner);
     }
 
     // Pillar 2 AOP Trace Span Interceptor: `[TraceSpan(name: "step_physics", weight: 50)]`
@@ -145,8 +145,8 @@ pub struct {
         pub then_fn: fn<var ref<TEntity>, void>;
         pub weight:  i32;
 
-        pub pure fn matches(entity: ref<TEntity>) -> bool => (.when_fn)(entity);
-        pub var  fn apply(entity: var ref<TEntity>) {
+        pub pure fn matches(ref entity: TEntity) -> bool => (.when_fn)(entity);
+        pub var  fn apply(var ref entity: TEntity) {
             (.then_fn)(var ref entity);
         }
     }

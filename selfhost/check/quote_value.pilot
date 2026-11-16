@@ -272,7 +272,7 @@ pub fn check_quotes(var ref inf: Infer, var ref sink: DiagSink) {
 
 /// A `QuoteBuild` row for each quote of the files the program links that
 /// can be built, and a `QuoteHole` row for each of its holes.
-pub fn plan_quotes(var ref inf: Infer, var ref rows: List<List<any>>) {
+pub fn plan_quotes(var ref inf: Infer, var ref rows: List<DropRow>) {
     let p = inf.p;
     let s = p.s;
     let decode = quote_fn(p);
@@ -290,11 +290,11 @@ pub fn plan_quotes(var ref inf: Infer, var ref rows: List<List<any>>) {
                 calls.push(c);
             }
             if ok {
-                rows.push([DropAction::QuoteBuild as i64, span_start(s, q), span_end(s, q), kind(s, q), node_name(s, decode), wire]);
+                rows.push((DropAction::QuoteBuild as i64, span_start(s, q), span_end(s, q), kind(s, q), node_name(s, decode), wire));
                 var i = 0;
                 while i < holes.len() {
                     let h = holes[i];
-                    rows.push([DropAction::QuoteHole as i64, span_start(s, h), span_end(s, h), kind(s, h), calls[i][0], calls[i][1]]);
+                    rows.push((DropAction::QuoteHole as i64, span_start(s, h), span_end(s, h), kind(s, h), calls[i][0], calls[i][1]));
                     i = i + 1;
                 }
             }

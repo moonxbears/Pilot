@@ -346,6 +346,10 @@ pub fn bug_registry() -> List<KnownBug> {
             "a function declared `P ! E` that returns a record `P { .. }` returns the bare record, which `?` and `catch` then mistake for a result",
             "the record is the success; prints 5 and 0 (as PilIR does)", "runtime error: no method `is_success` for this value",
             "tests/conformance/known_bugs/struct_ok_unwrapped.pilot", "F5"),
+        known_bug("check.loop_arith_literal", "selfhost/check/infer.pilot `binary_type` inside `while`/`for` bodies",
+            "inside a `while` or `for` body the left operand of an arithmetic operator reads as unknown, so `x + 7` takes the literal's `i64` (even `flag + 7` for a bool `flag`); outside a loop, or inside `loop`, the other operand's type wins",
+            "capacity + 7 is a usize; prints 3", "error[TYPE001]: argument 1 of `want`: expected `usize`, found `i64`",
+            "tests/conformance/known_bugs/loop_arith_literal.pilot", "F4"),
     ];
     return entries;
 }

@@ -97,7 +97,7 @@ pub fn cli_add_subcommand(var ref self: CliAppDef, subcmd: str) {
 // 3. Help Text & Shell Completion Generators
 // ------------------------------------------------------------------------------
 
-pub fn cli_generate_help(app: ref<CliAppDef>) -> str {
+pub fn cli_generate_help(ref app: CliAppDef) -> str {
     var out = app.name + " " + app.version + "\n" + app.description + "\n\nUSAGE:\n  " + app.name + " [OPTIONS]";
     if app.subcommands.len() > 0 {
         out = out + " [SUBCOMMAND]";
@@ -130,7 +130,7 @@ pub struct CliParsedResult : IObject {
     pub error_message:  str;
 }
 
-pub fn cli_parse_argv(app: ref<CliAppDef>, argv: List<str>) -> CliParsedResult {
+pub fn cli_parse_argv(ref app: CliAppDef, argv: List<str>) -> CliParsedResult {
     var res = CliParsedResult {
         is_ok:         true,
         show_help:     false,
@@ -228,7 +228,7 @@ pub fn cli_parse_argv(app: ref<CliAppDef>, argv: List<str>) -> CliParsedResult {
     return res;
 }
 
-pub pure fn cli_parsed_get(res: ref<CliParsedResult>, key: str) -> str {
+pub pure fn cli_parsed_get(ref res: CliParsedResult, key: str) -> str {
     var i = 0;
     while i < res.parsed_keys.len() {
         if res.parsed_keys[i] == key {

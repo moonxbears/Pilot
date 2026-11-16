@@ -468,7 +468,7 @@ pub fn execute_universal_rename_litmus(workspace_root: str, rename_pairs: i64) -
 /// Both passes. The two sandboxes are built first, then both corpus runs
 /// go at once, so the end of one run, when only its slowest programs are
 /// left, overlaps the other instead of leaving the machine idle.
-pub fn execute_dual_pass_rename_gate(workspace_root: str, opts: ref<GateRunOptions>) -> GateReport {
+pub fn execute_dual_pass_rename_gate(workspace_root: str, ref opts: GateRunOptions) -> GateReport {
     let t0 = gate_time_now_us();
     let root = resolve_workspace_root(workspace_root);
     let violations0 = glist_new();

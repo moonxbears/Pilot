@@ -59,7 +59,7 @@ Pilot unifies C#-grade ergonomics (`interface` hierarchies, implicit `field`/`va
 | `T?` | `option<T>` | `0b00*` | Niche-unboxed optional (`ITryOperator`, `ICoalesceOperator`) |
 | `T ! E` | `result<T, E>` | `0b00*` | Values-first must-use outcome (`ITryOperator`) |
 | `(A, B) => R` | `fn<(A, B), R>` | `0b01` | Closure view (`{ ptr<void>, ptr<void> }`) |
-| `a ..< b` | `range<T>` | `0b00` | Half-open `[a, b)` (`IRangeOperator<T>`) |
+| `a ..< b` | `range<T>` | `0b00` | Half-open `[a, b)` (`IRangeUntilOperator<T>`) |
 | `a .. b` / `a ..= b` | `span<T>` | `0b00` | Inclusive `[a, b]` (`ISpanOperator<T>`) |
 | `a .. b : s` | `step<T>` | `0b00` | Stepped progression (`IStepOperator<T>`) |
 | `fn!&(a, b)` | `frame<TSig>` | `0b00` | Zero-marshalling `#[repr(C)]` C-ABI call frame |

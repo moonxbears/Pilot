@@ -549,7 +549,7 @@ pub fn cpp_parse_translation_unit(
 // 6. Diagnostic Checkers
 // ------------------------------------------------------------------------------
 
-pub fn check_abstract_instantiation(cls: ref<CppClassDecl>, var ref diags: List<Diagnostic>) -> bool {
+pub fn check_abstract_instantiation(ref cls: CppClassDecl, var ref diags: List<Diagnostic>) -> bool {
     if cls.is_abstract {
         let msg = "Cannot instantiate abstract C++ class '" + cls.name + "' with pure virtual functions";
         diags.push(diagnostic_new("CPP005", 1, msg, SourceSpan { start: 0, length: 0 }));
@@ -558,7 +558,7 @@ pub fn check_abstract_instantiation(cls: ref<CppClassDecl>, var ref diags: List<
     return true;
 }
 
-pub fn check_deleted_method_call(m: ref<CppMethodDecl>, var ref diags: List<Diagnostic>) -> bool {
+pub fn check_deleted_method_call(ref m: CppMethodDecl, var ref diags: List<Diagnostic>) -> bool {
     if m.is_deleted {
         let msg = "Cannot invoke deleted C++ member '" + m.name + "'";
         diags.push(diagnostic_new("CPP001", 1, msg, SourceSpan { start: 0, length: 0 }));

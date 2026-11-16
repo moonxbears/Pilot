@@ -73,7 +73,7 @@ pub fn insert_reference_counts(var ref m: IrModule, counted: (IrTypePhysics) => 
 fn rc_inst(var ref f: IrFunction, op: u16, sub: u16, phy: IrTypePhysics, ref args: List<u32>, result: u32, span: u32) -> IrInst {
     let offset = f.operand_pool.len();
     for a in args { f.operand_pool.push(a); }
-    return ir_inst_new(result, op, sub, phy, offset, args.len(), span);
+    return ir_inst_new(result, op, sub, phy, ir_operand(offset), ir_operand(args.len()), span);
 }
 
 fn rc_op(var ref rc: RcFunction, op: u16, v: u32, span: u32) -> IrInst => rc_inst(rc.f, op, 0, ir_physics_unit(), [v], ir_no_value(), span);
@@ -466,7 +466,7 @@ fn rc_retarget(var ref rc: RcFunction, t: IrInst, ref targets: List<u32>, ref ar
         var e = 0;
         while e < 2 {
             out.push(targets[e]);
-            out.push(args[e].len());
+            out.push(ir_operand(args[e].len()));
             for v in args[e] { out.push(v); }
             e = e + 1;
         }

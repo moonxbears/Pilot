@@ -132,7 +132,7 @@ pub struct SysVConvClassifier : IValue, ICallingConvClassifier {
 
     pub static pure fn classify(
         params: slice<TypeLayout>,
-        ret: ref<TypeLayout>,
+        ref ret: TypeLayout,
         variadic_fixed_count: opt<usize>
     ) -> AbiFramePlan {
         var param_locs: List<ArgLocation> = [];

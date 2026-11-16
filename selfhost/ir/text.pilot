@@ -332,7 +332,7 @@ fn parse_target(var ref r: Reader, ref w: List<str>, at: i64, var ref out: List<
         if w[i] != "," { args.push(number_u32(r, w[i], "v")); }
         i = i + 1;
     }
-    if with_count { out.push(args.len()); }
+    if with_count { out.push(ir_operand(args.len())); }
     for a in args { out.push(a); }
     return i + 1;
 }

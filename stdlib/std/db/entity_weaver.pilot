@@ -85,7 +85,7 @@ pub fn entity_add_column(var ref self: EntitySchemaDef, col: EntityColumnDef) {
 // 3. Validation Rules (GEN003 & GEN004)
 // ------------------------------------------------------------------------------
 
-pub fn entity_validate_primary_key(schema: ref<EntitySchemaDef>) -> str {
+pub fn entity_validate_primary_key(ref schema: EntitySchemaDef) -> str {
     var i = 0;
     while i < schema.columns.len() {
         if schema.columns[i].is_id {
@@ -97,7 +97,7 @@ pub fn entity_validate_primary_key(schema: ref<EntitySchemaDef>) -> str {
 }
 
 pub fn entity_validate_predicate(
-    schema: ref<EntitySchemaDef>,
+    ref schema: EntitySchemaDef,
     col_name: str,
     val_type: str
 ) -> str {
@@ -126,7 +126,7 @@ pub fn entity_validate_predicate(
 // 4. SQL Generators (CREATE TABLE, SELECT, INSERT, Optimistic UPDATE)
 // ------------------------------------------------------------------------------
 
-pub fn generate_create_table_sql(schema: ref<EntitySchemaDef>) -> str {
+pub fn generate_create_table_sql(ref schema: EntitySchemaDef) -> str {
     var sql = "CREATE TABLE " + schema.table_name + " (";
     var i = 0;
     while i < schema.columns.len() {
@@ -146,7 +146,7 @@ pub fn generate_create_table_sql(schema: ref<EntitySchemaDef>) -> str {
     return sql;
 }
 
-pub fn generate_select_by_id_sql(schema: ref<EntitySchemaDef>) -> str {
+pub fn generate_select_by_id_sql(ref schema: EntitySchemaDef) -> str {
     var sql = "SELECT ";
     var id_col = "id";
     var i = 0;
@@ -165,7 +165,7 @@ pub fn generate_select_by_id_sql(schema: ref<EntitySchemaDef>) -> str {
     return sql;
 }
 
-pub fn generate_insert_sql(schema: ref<EntitySchemaDef>) -> str {
+pub fn generate_insert_sql(ref schema: EntitySchemaDef) -> str {
     var sql = "INSERT INTO " + schema.table_name + " (";
     var values_clause = " VALUES (";
     var i = 0;
@@ -187,7 +187,7 @@ pub fn generate_insert_sql(schema: ref<EntitySchemaDef>) -> str {
 /// non-version column in order. With a `[Version]` column the update also
 /// bumps it and only matches the row version the caller read (last
 /// parameter): zero rows affected means a stale version.
-pub fn generate_update_with_optimistic_lock_sql(schema: ref<EntitySchemaDef>) -> str {
+pub fn generate_update_with_optimistic_lock_sql(ref schema: EntitySchemaDef) -> str {
     var sql = "UPDATE " + schema.table_name + " SET ";
     var id_col = "id";
     var ver_col = "";
@@ -234,8 +234,8 @@ pub struct DdlDiffResult : IObject {
 }
 
 pub fn entity_diff_ddl(
-    cur: ref<EntitySchemaDef>,
-    prev: ref<EntitySchemaDef>
+    ref cur: EntitySchemaDef,
+    ref prev: EntitySchemaDef
 ) -> DdlDiffResult {
     var res = DdlDiffResult {
         is_ok:         true,

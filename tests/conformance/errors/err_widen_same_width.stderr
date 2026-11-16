@@ -1,0 +1,2 @@
+error[TYPE001]: expected `i32`, found `u32`
+err_widen_same_width.pilot:5:18

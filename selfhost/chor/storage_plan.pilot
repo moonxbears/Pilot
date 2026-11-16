@@ -108,7 +108,7 @@ pub struct StoragePlan : IObject {
     pub total_allocation_bytes:  usize;
     pub hot_bytes:               usize;
     pub cold_bytes:              usize;
-    pub perceus_drop_columns:    List<usize>;
+    pub perceus_drop_columns:    List<i64>;
     pub perceus_drop_mask:       u64;
 }
 
@@ -158,7 +158,7 @@ pub fn compute_storage_plan(
     let n_fields = fields.len();
 
     var cols: List<ColumnPhysicalLayout> = [];
-    var drop_cols: List<usize> = [];
+    var drop_cols: List<i64> = [];
     var drop_mask: u64 = 0;
     var total_bytes: usize = 0;
     var hot_sz: usize = 0;
@@ -350,14 +350,14 @@ pub fn compute_storage_plan(
     };
 }
 
-pub pure fn storage_plan_is_column_dropped(plan: ref<StoragePlan>, col_idx: usize) -> bool {
+pub pure fn storage_plan_is_column_dropped(ref plan: StoragePlan, col_idx: usize) -> bool {
     if col_idx < plan.columns.len() {
         return plan.columns[col_idx].needs_perceus_drop;
     }
     return false;
 }
 
-pub pure fn storage_plan_drop_count(plan: ref<StoragePlan>) -> usize {
+pub pure fn storage_plan_drop_count(ref plan: StoragePlan) -> i64 {
     return plan.perceus_drop_columns.len();
 }
 

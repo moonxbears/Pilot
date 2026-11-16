@@ -28,9 +28,10 @@
 | **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed | `+23` as built (`+34`, `-11`) | `APPROVED, BUILT` |
 | **`PROP-016`** | Format All Rust With `rustfmt` and Count the Seed's True Size (147 files; split `pilot-parser/src/decl.rs`) | `+7,177` `src` lines of formatting and file headers, `0` code | `APPROVED BY OWNER 2026-11-15 (D1 (a): CEILING 27,800) AND BUILT` |
 | **`PROP-017`** | Update Three Rust Tests for the Package Loader: New Never-Linking Case and the Moved Inspect Selector (Rust Test Edits Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-017") AND BUILT` |
+| **`PROP-018`** | Operator Fixity From Holes in the Symbol (`op _+_`, `op -_`, `op _?`, `op \|_\|`, `op _[_]`), Optional Where the Parameter Count Decides; the Unpack Operators Become `op *`, `op **`, `op *..` | about `+20` in `crates/pilot-parser` (`decl.rs`, `tables.rs`); deletions follow in `PROP-008` step 2 and `PROP-005` | `APPROVED BY OWNER 2026-11-16 ("Approve as recommended": §6 decisions 1–4 as recommended) — IN PROGRESS` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
-| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY), 5B.3–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
+| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED, IN PROGRESS (`ref<T>`, CLI AND DROP PLAN ROWS DONE; RUST AMENDMENT 5B.3a APPROVED AND BUILT 2026-11-16); 5B.4–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
 | **`PROP-006`** | Precompiled `toolchain.pilc` Stage-3 Cutover — Delete `pilot-{lexer,parser,ast,span,intern}` | `~ -5,950` LOC packed (the five crates are `11,386` formatted, PROP-016) | `PLANNED (WAVE 6 -> ~1,800 LOC FLOOR)` |
 
 ---
@@ -1976,6 +1977,118 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 
 ---
 
+## `PROP-018` — Operator Fixity From Holes in the Symbol, Optional Where the Parameter Count Decides; the Unpack Operators as `op`s
+
+**Status: APPROVED BY OWNER 2026-11-16 ("Approve as recommended"): the §3 Rust files and the four §6 decisions as recommended. IN PROGRESS.** Third wording, after these owner directions on 2026-11-16:
+- the unpack interfaces should declare operators (`*`, `**`, `*..`), not named methods;
+- the fixities are `infix`, `prefix`, `postfix`, `circumfix`, `mixfix` and `matchfix`;
+- fixity comes from **holes in the symbol** (`_` where an operand goes), and the holes are **optional until a specific fixity is needed**.
+
+### 1. Holes give the fixity
+
+An `_` written in an `op`'s symbol marks an operand position. The pattern decides the fixity; no keyword is added.
+
+| Fixity | Pattern | Use site | Example |
+| :--- | :--- | :--- | :--- |
+| `infix` | `_S_` | `a S b` | `op _+_ (rhs: T) -> T` |
+| `prefix` | `S_` | `S a` | `op -_ () -> T`, `op *_ () -> TSeq` |
+| `postfix` | `_S` | `a S` | `op _? () -> TOk` |
+| `circumfix` | `S_E` | `S a E` | `op \|_\| () -> T` (`\|v\|`) |
+| `matchfix` | `S_, ..E` | `S a, b, .. E` | `op <\|_, ..\|> (items: slice<T>) -> Self` |
+| `mixfix` | any other pattern of symbols and holes | | `op _[_] (idx: TIdx) -> TOut`, `op _[_]=_ (idx: TIdx, val: TVal)` |
+
+The receiver fills the first hole, and the parameters fill the rest in order (a `matchfix` list fills its one list hole). So the number of holes is the parameter count plus one, except for `matchfix`, which has one list parameter and no receiver hole.
+
+**Holes are optional.** An `op` written without holes keeps today's meaning, decided by its parameter count:
+- **one parameter:** `infix`, so `op + (rhs)` is `op _+_ (rhs)`;
+- **none:** `prefix`, so `op - ()` is `op -_ ()`, and `op * ()` is the splat operator;
+- **`op []` and `op []=`:** the `mixfix` index forms `_[_]` and `_[_]=_`, as the parser reads them today.
+
+Holes are needed only where the default is wrong: `postfix` (`op _? ()`), `circumfix`, `matchfix` and any other `mixfix`. Anyone may also write them for clarity.
+
+**`_` inside symbols.** A hole is a standalone `_` token. Because `_` lexes as an identifier character, there is no conflict:
+- a word operator that contains an underscore (`not_in`) stays one identifier token and is never a hole;
+- a hole beside a word operator needs a space: `op _ and _`, since `_and_` would lex as one word;
+- `_` on its own can never be an operator symbol. It is already the wildcard pattern. `GRAM005` gains this case.
+
+Checked on the seed 2026-11-16, with no change: a struct declaring `op _+_ (rhs)`, `op -_ ()`, `op _? ()` and `op |_| ()` parses, checks and runs (`parse_op_decl` joins the tokens up to `(`).
+
+### 2. Member names
+
+Today the seed parser names an `op` method by its text (`crates/pilot-parser/src/decl.rs:1000` `parse_op_decl`). The seed (`method_owners`, `{owner}.{name}`) and the Pilot checker and lowerer (`prog_member(p, t, "==")`, `"[]"`) look it up under that name. So `op * (rhs)` (multiply) and `op * ()` (splat) get one entry, and one replaces the other; `**` collides the same way. `-` already collides unnoticed: a struct with `op - ()` and `op - (rhs)` fails on the seed with `runtime error: cannot negate record` at `-a`, and `pilot ir run` stops at `SEAM001 ir.lower_construct` on `a - b`.
+
+The member name becomes the **canonical pattern**:
+- `infix` and the two index forms keep today's bare names (`+`, `==`, `[]`, `[]=`), whether written with holes or without, so no existing lookup changes;
+- every other fixity keeps its holes: `-_`, `*_`, `**_`, `*.._`, `_?`, `|_|`. A no-hole, no-parameter `op S ()` is named `S_`.
+
+The fixity names (`infix` … `matchfix`) are used by diagnostics, `pilot inspect` and the docs. They are not keywords.
+
+### 3. Rust (needs approval). Strictly these files:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-parser/src/decl.rs` | `parse_op_decl` (`:1000`) forms the canonical name from §2: `_S_`, `_[_]` and `_[_]=_` become `S`, `[]` and `[]=`; a pattern without holes and without parameters gets a trailing `_`; other patterns are kept as written. A hole is recognised as a token whose text is exactly `_` (structural, not a word). |
+| `crates/pilot-parser/src/tables.rs` | The grammar ingest of an `op` whose attribute gives no symbol (`:365-379`, `ingest_decl_attrs`) takes the `op`'s name with its holes removed, so `[Prefix(::Splat)]` on `op *_` still declares `*`. |
+
+Expected size: about `+20` lines. `paused_max_total_rust_loc()` holds flat only if the owner accepts that or an offsetting deletion is found in the same change. Nothing in `crates/pilot-vm` changes: once the parser names the methods apart, `method_owners`, the function entries and `compile_unpack_operand` (which already takes the method name from Pilot) work as they are.
+
+### 4. Pilot (no approval needed; listed so the slice is whole)
+
+1. **Unpack interfaces** (`stdlib/core/operator.pilot`). No holes are needed, because no parameters already means `prefix`:
+   ```pilot
+   ISplatOperator<TSeq: IAnyValue> : IAnyValue {
+       [Prefix(::Splat)]
+       pub pure op * () -> TSeq;
+   }
+   IPairsOperator<TPairs: IAnyValue> : IAnyValue {
+       [Prefix(::Splat)]
+       pub pure op ** () -> TPairs;
+   }
+   IFlattenOperator<TLeaf: IAnyValue> : IAnyValue {
+       [Prefix(::Splat)]
+       pub pure op *.. () -> slice<TLeaf>;
+   }
+   ```
+   `stdlib/core/syntax/expr_sugar.pilot` drops its three `[Prefix(::Splat, ..)]` attributes, so each operator is declared once, on its `op`. The readable rewrites `splat(x)`, `pairs(x)` and `flat(x)` stay.
+2. **The one existing `op` whose default is wrong.** `op ? ()` (`ITryOperator` and its implementers) becomes `op _? ()`. No other declaration changes; `op - ()`, `op ~ ()` and `op >.. ()` are `prefix` by default.
+3. **Checker** (`selfhost/check/grammar_attrs.pilot`, codes in `selfhost/diagnostics/errors.pilot`):
+   - `GRAM005` gains: `_` alone as a symbol.
+   - `GRAM008`: a pattern that is no fixity. That covers two holes side by side (`_ _`), a pattern with no symbol, and a list hole outside a matched pair.
+   - `GRAM009`: the hole count disagrees with the parameter count, or the pattern's position disagrees with its grammar attribute (`[Prefix]` on `op _?`).
+   - The program tables (`selfhost/check/program.pilot`) name members the way the seed does (§2).
+   - Every lookup of a no-parameter `op` uses its canonical name: `check_unpack` (`selfhost/check/rules.pilot:897`), `selfhost/ir/lower_members.pilot:593,624`, `selfhost/ir/lower_spread.pilot:50-51`, and the existing lookups of `?`, `-`, `~` and `>..` (inventoried when built).
+4. **Seed bindings.** `stdlib/core/builtins/native_calls.pilot:120-122` bind `"*_"`, `"**_"`, `"*.._"` instead of `"unpack"`, `"unpack_pairs"`, `"flat"`.
+   - Those three are member names, not Rust natives (`crates/pilot-vm/src/stage_a_natives.rs` has no arm for them).
+   - So they leave `transitional_native_bindings()` (`selfhost/gate/airlock_abi.pilot`) and `selfhost/gate/manifest.pilot:687`, which is a shrink.
+   - If `GATE021` would reject the new strings as natives, these bindings move to a non-native form (a Pilot gate change, checked when built).
+5. **Seams for the parts not built yet:**
+   - `circumfix`, `matchfix` and any `mixfix` other than `_[_]` / `_[_]=_` are accepted and checked (`GRAM008`/`GRAM009`), but no use site parses: their parse shapes are an append to `PROP-008` §4 (a Rust change for a later entry). A program that reaches one stops at `seam("grammar.circumfix_shape", ..)`, `seam("grammar.matchfix_shape", ..)` or `seam("grammar.mixfix_shape", ..)`, registered in `seams.pilot`.
+   - Dispatching a user `prefix`/`postfix` `op` other than the unpack three (`-a` on a struct), and lowering a struct's `infix` `op` on PilIR: their own entries.
+6. **Records.** `docs/concept_matrix.md` (a fixity row), `docs/keyword_matrix.md` for the `splat`/`pairs`/`flat` rows, `pilot.md`, `wiring.pilot`, `seams.pilot`.
+
+**Not in this proposal (deletions it makes possible, owned elsewhere):**
+- `prefix_flag`'s three unpack arms and the `StarDotDot`/`DoubleStar` handling: `PROP-008` step 2.
+- `UNARY_OP_SPLAT`/`UNARY_OP_DOUBLE_SPLAT`/`UNARY_OP_DEEP_FLATTEN` and the VM unpack code in `lower_expr.rs`, `lower_args.rs`, `lower_yield.rs` and `lower_members.rs`: `PROP-005`.
+
+### 5. Acceptance (written before the code)
+
+- `collections/pairs_map_struct` and `modules/k2_limits` rewritten to `op *`, `op **` and `op *..`, with the same `.stdout`, on all three engines.
+- New `collections/prefix_op_beside_infix`: a struct with both `op * (rhs)` and `op * ()`, and both `op ** (rhs)` and `op ** ()`. The expected output is worked by hand in its comment: `a * b`, `[*a]` and `splat(a)` each give their own result.
+- New `operators/hole_patterns`: the same type declared once with holes (`op _+_`, `op -_`) and once without (`op +`, `op - ()`) gives the same results.
+- New `errors/err_gram008_hole_pattern` (`op _ _ (rhs)`) and `errors/err_gram009_hole_arity` (`op -_ (rhs: T)`), and a `GRAM005` case for `op _`.
+- New `errors/err_unpack_infix_only`: a type with only `op * (rhs)` used as `*x` gives `TYPE001` at the `*`, not a call of multiply with no argument.
+- `circumfix`, `matchfix` and other `mixfix`: one program each that stops at its registered seam (`SEAM001`).
+- `cargo fmt --check`; `cargo test -p pilot-parser` and `cargo test -p pilot-parser --test damaged_source -- --include-ignored` (parser edit); `cargo test -p pilot-vm`; `cargo test -p pilot-cli`; `pilot test` / `--ir` / `--emit c`; `pilot gate --full`; `pilot run tools/keyword_matrix/main.pilot -- --check`.
+
+### 6. Decisions for the owner
+
+1. **The `matchfix` list hole.** Recommended: `_, ..` inside the pair (`op <|_, ..|>`), read as "one or more operands, comma separated". Alternatives: `_..` (shorter, but `..` touching `_` reads like a range), or a separate list mark.
+2. **`circumfix` versus `matchfix`.** This proposal reads `circumfix` as one operand between two symbols (`|v|`) and `matchfix` as a comma list inside a matched pair. Some languages use the two words as synonyms. Confirm or redefine.
+3. **Canonical names.** Recommended: `infix` and the two index forms keep their bare names, and every other fixity keeps its holes, so no existing lookup changes. The alternative is to keep holes in every name (`_+_`, `_[_]`). That changes every operator lookup in Rust (`crates/pilot-vm/src/lower_expr.rs:516-519` and the `INDEX_GET_OP`/`INDEX_SET_OP` users in `lower_members.rs`) and in Pilot, so it would add `crates/pilot-vm` files to §3.
+4. **Default for no parameters and no holes.** Recommended: `prefix`, so `op - ()` and `op * ()` need no holes and only `?` changes. The alternative, requiring holes on every no-parameter `op`, adds `op -_`, `op ~_` and `op >.._` edits but makes every unary position explicit.
+
+---
+
 ## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
 
 **Status: itemized 2026-11-15. Slices 3A, 3B and 3C APPROVED by the owner 2026-11-15 ("Approve 3A–3C"). 3A and 3B BUILT 2026-11-15; 3C DEFERRED TO `PROP-005` BY THE OWNER 2026-11-15 (larger than itemized; see below); 3D–3F still drafts.** Owner asked to start PROP-003 ("lets do prop-003"). Each slice is approved and built on its own.
@@ -2208,11 +2321,23 @@ Can the Pilot pipeline read the toolchain at all? `pilot check selfhost/ir/main.
         - **Result:** 1,000 → 675 errors; TYPE001 341 → 17, OWN004 18 → 17, nothing else rose. The 17 TYPE001 left are the CLI's `Map` handles declared `i64` (`cli_parse_args`, `cli_tokenize`, `cli_handlers`, `cli_suggest_typo`): the untyped-handle problem of 5B.3.
         - **The rest of the tree.** The other entries (adapters, `chor`, `cst`, loader, `tools/keyword_matrix`, `stdlib/std`) had 177 `as usize` casts inside `slice`/`byte_at` arguments and 690 lines passing `usize` positions. The casts are removed; locals, parameters and returns holding positions became `i64` in 24 files (struct fields declared `usize` were left, except `CppEnv.eval_pos`, a position); `str.index_of` returns `i64` (its two callers in `chor/parser.pilot` passed an `isize` to `slice`); byte sizes passed to `cpp_field_decl_new` stay `usize` with a cast. Checking these packages also showed `opt<str>::some(..)` / `opt<str>::none` in `adapter/c_sysroot.pilot`, which is not Pilot; it is `return cand;` / `return none;` now. After this, no `slice`, `byte_at` or `index_of` call in the tree has a type error.
         - **Width and option pass (2026-11-16, approved "Yes, do them"):** 351 TYPE001 → 52 across `selfhost/ir`, `selfhost/adapter`, `selfhost/loader` and `selfhost/chor`. `selfhost/ir/model.pilot` gained checked narrowings `ir_u16`/`ir_u32` (fault, never truncate, when a value does not fit) and `ir_sub`/`ir_operand` on top; `ir_emit`, `emit`, `emit_void` and `make_inst` take the sub-code as `i64` and narrow it once; pool indexes, span ids and new value ids go through `ir_operand`; `opcode_of` through `ir_u16`. The lowerer's value and slot maps are `Map<str, u32>`. `ir/text.pilot` parses numbers with a range check (`number_u32`/`number_u16`/`number_u8`). Reads of keys just set or tested use `m[k]` (47 sites); byte predicates take `u8` (10 files); `loader/module_graph.pilot` casts unit ids.
-        - **Not done in 5B.2 (needs owner decisions):** 52 TYPE001 remain. 21 are lossless integer widenings (`u8`/`u16`/`u32` → `i64`, `u16` → `u32`) that the checker rejects; 30 come from `List.len()` and list indexes being `usize` where the code counts in `i64` (or the reverse); 1 is an `i64` → `u32` narrowing. Each needs either a rule change (implicit lossless widening; `List` lengths and indexes as `i64` like D2) or an explicit cast per site.
+        - **Collection counts and indexes are `i64` (owner decision 2026-11-16, "Make them i64", then "All collections"):** extends D2 (a) from `str` positions to every collection. `stdlib/core/operator.pilot`: `IReadOnlyCollection.count` and `IReadOnlyDictionary.count` are `i64`, `IReadOnlyList` is `IIndexGet<i64, T>`, `IWritableList` is `IIndexSet<i64, T>`, `IList.remove_at` takes `i64`. `List` (`len`, `count`, `[]`, `[]=`, `remove_at`, its enumerator), `array`, `slice`, `stride`, `str` (`[]`), `SliceBuffer` (`[]`, `[]=`, `remove_at`, which now also refuses a negative index), `ContiguousViewFacet.count`, `Map.count` and `map.count` follow. Stored layout fields stay `usize` (`slice`/`str`/`SliceBuffer` `len`, `cap`; `byte_len`), since they are the `{ ptr, usize }` layout; the getters convert. `u64` was considered and not taken: it brings back casts against `i64` `str` positions and literals, and an empty list's `len() - 1` would wrap. Tests: `collections/count_index_i64` (hand-worked, all three engines), `errors/err_list_index_type`; `collections/map_declared_property` binds `count` to an `i64`. Callers fixed: `chor/storage_plan` drop columns `List<i64>`, `types/typestate` state indexes `i64`, `adapter/cpp_abi` field loop index, IR operand counts through `ir_operand`, `loader/module_graph` unit id.
+        - **Bug found (not fixed, recorded):** inside a `while` or `for` body, the checker reads the left operand of arithmetic as unknown, so `x + 7` takes the literal's `i64` type. Known bug `check.loop_arith_literal` (`tests/conformance/known_bugs/loop_arith_literal.pilot`, true output kept). It accounts for one site left in `chor/storage_plan.pilot`; one in `adapter/cpp_abi.pilot` is the `ref<T>` gap of 5B.3.
+        - **Lossless integer widening is implicit (owner decision 2026-11-16, "Allow implicit widening"):** `selfhost/check/program.pilot` `prog_widens` (name-blind, from `[Bits]` class and width) lets an unsigned integer fit a strictly wider unsigned or signed type and a signed integer a strictly wider signed type, in arguments, `let`/`var` annotations, assignments and returns (`rules.pilot` `assignable`). Never signed into unsigned, never the same width, never `bool` or the character type (found by their literal slots). `view_cast.pilot`'s `[Bits]` width reader moved to `program.pilot` as `prog_bits` (shared). Tests: `numbers/implicit_widening` (hand-worked, sign extension included, all three engines) and `errors/err_widen_signed_to_unsigned`, `err_widen_same_width`, `err_widen_bool`. The engines needed no change: each already extends the value correctly.
+        - **Result:** TYPE001 in `selfhost/ir`, `adapter`, `loader`, `chor` 351 → 2: one in `adapter/cpp_abi.pilot` (a field read through a `ref<T>` parameter, 5B.3) and one in `chor/storage_plan.pilot` (known bug `check.loop_arith_literal`). The CLI's 17 are its `Map` handles (5B.3). No width or option mismatch is left.
         - **Verified (after the width and option pass, 2026-11-16, all runs memory- and task-capped):** `pilot test` 558 passed, `--ir` 548 passed, `--emit c` 540 passed with the 8 earlier failures (`errdefer`, 7 `err_bridge_*`); `pilot gate` 4/4, `pilot gate --full` 5 plus a seam; `cli_f3` 12/12; keyword matrix regenerated and `--check` clean. `pilot check selfhost/cli/main.pilot` unchanged at 675 errors, TYPE001 17.
     - **5B.3 `any` and `ref<T>` (238 TYPE002).**
       - `x: ref<T>` becomes `ref x: T` (102 sites, mechanical).
       - `any` per D3.
+      - **5B.3 progress (approved 2026-11-16, "Approve 5B.3"; Pilot only so far):**
+        - **Re-measured first:** 259 TYPE002 from the live entries (`any` 195, `ref` 63, one stale `Snapshot`), plus the CLI's 17 TYPE001 from `Map` handles declared `i64`.
+        - **`ref<T>` parameters (done):** a codemod rewrote all 150 `name: ref<T>` / `name: var ref<T>` parameters in `selfhost/`, `stdlib/` and `tools/` to `ref name: T` / `var ref name: T` (48 files, including `stdlib/core/operator.pilot` `:=:` and `stdlib/core/meta.pilot`'s `IComputed`/`IRule` methods); `stdlib/std/serde/derive_bin.pilot` now generates the new form. Left: the three `fn<ref<T>, R>` function-type fields in `stdlib/core/meta.pilot`, which no live entry reaches. No `ref` TYPE002 is left in live files.
+        - **CLI argument layer (done):** `selfhost/cli/spec.pilot` holds typed records: `CommandSpec : IObject` with `flags: List<FlagSpec>` and `positionals: List<PositionalSpec>`; `ParsedArgs` with `flag_values: Map<str, List<str>>`, `positionals`/`passthrough_args: List<str>`; `CommandRegistry` with `List<CommandSpec>`, `Map<str, i64>`, `Map<str, str>`; the parse result is a `CliParse` record (`cli_parse_ok`/`cli_parse_error`) instead of a map keyed `"ok"`/`"message"`/...; `cli_handlers()` is a `Map<str, (ParsedArgs, CommandRegistry) => i64>` and all 12 handlers take `(ref p, ref reg)`. A flag's values are read, extended and stored back (`parsed_add_flag`) instead of relying on the seed sharing a list held in a map. Deleted as dead or replaced: the `cli_list_*`/`cli_map_*` helpers, the `ParsedArgs`/`CommandRegistry` methods, `parsed_get_int`, `parsed_get_bool`, `spec_registry_get` (callers index `reg.commands`), `ICliHandler`, `resolve_cli_subcommand`. `pilot check selfhost/cli/main.pilot`: 675 → 443 errors; the CLI's TYPE001 17 → 0. Usage errors print the same messages with exit code 2 (checked by hand: unknown command with suggestion, unknown flag, missing value, bad choice).
+        - **Left in 5B.3: 166 `any` in live files.** 56 are the PilIR interpreter's runtime values (`selfhost/ir/interp.pilot`); about 110 are rows exchanged with the Rust host. Fixed-shape host rows can be typed as tuples with no Rust change (the seed keeps a tuple as a list and reads `.0` by position): diagnostic rows `(str, str, i64, i64, i64)`, attribute rows `(i64, i64, List<i64>)`, file rows `(str, bool, i64, str, bool)`. Two parts need a decision:
+          - **The run plan's drop rows** mix two shapes in one list, which `crates/pilot-cli/src/check.rs` `decode_plan` reads from `parts[0]`: ordinary rows `(action, start, end, kind, a, b)` (ints at 1 and 2) and `Glue`/`CopyGlue` rows `(action, key, owner, [fields], elem, len_op, get_op, seq_op, payload, absent_op)` (strings at 1 and 2). No single type fits both.
+          - **The interpreter's values** need a value type. A recursive payload enum (`enum IrVal { Int(v: i64), Float(v: f64), Text(v: str), Rec(items: List<IrVal>), .. }`) checks and runs on the seed and on PilIR (probe, 2026-11-16).
+        - **Rust amendment 5B.3a (APPROVED AND BUILT 2026-11-16):** in `crates/pilot-cli/src/check.rs` only, `decode_plan` reads `Glue`/`CopyGlue` rows from a third plan part (`parts[2]`) instead of picking them out of `parts[0]`; `selfhost/check/drops.pilot` and `selfhost/check/main.pilot` put glue rows in that list. Each list then has one row type (`DropRow`, `GlueRow` tuples). Expected size: about the same number of Rust lines (the loop moves; no new logic), so `paused_max_total_rust_loc()` holds flat. Verification: `cargo fmt --check`, `cargo test -p pilot-cli`, the three engines, `pilot gate --full`.
+          - **Built:** `decode_plan` walks plan parts 0 and 2 (`crates/pilot-cli/src/check.rs` stays at 697 lines). In Pilot, `selfhost/check/drops.pilot` declares `DropRow`, `GlueRow`, `AtRow` and `FieldRow` tuple aliases; `DropPlanner.rows: List<DropRow>`, `glue: List<GlueRow>`, `at: Map<str, List<AtRow>>` (written by read, push, store back instead of relying on a shared handle); `stored_fields -> List<FieldRow>`; glue and copy-glue rows go to `pl.glue` (copy-glue padded to ten); the five other row writers (receivers, numeric, type tests, view casts, quotes) take `List<DropRow>`; `selfhost/ir/lower_drop.pilot` and `Lowerer.releases` read `AtRow`. `plan_of` returns `[rows, probes, glue]`. Dead `drop_plan()` in `selfhost/check/main.pilot` deleted (Rust evaluates `run_plan();`).
     - **5B.4 Raw `__engine` in live files (about 3,550 diagnostics on the same sites).**
       - Per D4, file by file, smallest first.
       - `__engine` calls that must stay (owner ops) move to `[EngineOp]` owners.

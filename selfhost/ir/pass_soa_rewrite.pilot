@@ -130,7 +130,7 @@ pub struct LoweredFieldAccess : IValue {
 }
 
 pub fn lower_choreographed_field_access(
-    plan: ref<StoragePlan>,
+    ref plan: StoragePlan,
     base_ptr: usize,
     row_idx: usize,
     col_idx: usize

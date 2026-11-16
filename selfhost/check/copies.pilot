@@ -17,8 +17,8 @@
 //
 // Rows, read by crates/pilot-cli/src/check.rs (`drop_plan`):
 //   [Copy, start, end, kind, type]
-//   [CopyGlue, type, "", [field, field type, ..]]  the value-type fields a
-//                                                  copy copies too
+//   [CopyGlue, type, "", [field, field type, ..], "" x6]  plan part 2: the
+//                                   value-type fields a copy copies too
 pub lvl(0) pkg selfhost.check;
 
 
@@ -42,14 +42,14 @@ fn copy_glue(var ref pl: DropPlanner, t: i64) {
     pl.glued.set(mark, true);
     var fields: List<str> = [];
     for fl in stored_fields(p, t) {
-        let ft: i64 = fl[1];
+        let ft = fl.1;
         if declares_value(p, pl.flow.engine, ft) {
-            fields.push(fl[0]);
+            fields.push(fl.0);
             fields.push(ty_display(p.tt, ft));
             copy_glue(pl, ft);
         }
     }
-    pl.rows.push([DropAction::CopyGlue as i64, key, "", fields]);
+    pl.glue.push((DropAction::CopyGlue as i64, key, "", fields, "", "", "", "", "", ""));
 }
 
 fn is_place(k: i64) -> bool => k == nk_ident() || k == nk_member() || k == nk_index();

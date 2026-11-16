@@ -8,56 +8,6 @@ pub lvl(0) pkg selfhost.cli;
 use Pilot.Core.Primitives.Map::*;
 
 // ------------------------------------------------------------------------------
-// Internal dynamic list and map helpers built on core Map primitives
-// ------------------------------------------------------------------------------
-
-pub fn cli_list_new() -> Map<any, any> {
-    let m = Map<any, any>();
-    m.set("count", 0);
-    return m;
-}
-
-pub fn cli_list_len(ref list: Map<any, any>) -> i64 {
-    return list.get("count") ?? 0;
-}
-
-pub fn cli_list_push(ref list: Map<any, any>, item: any) -> i64 {
-    let idx = cli_list_len(list);
-    list.set(idx, item);
-    list.set("count", idx + 1);
-    return idx + 1;
-}
-
-pub fn cli_list_get(ref list: Map<any, any>, idx: i64) -> any {
-    return list.get(idx);
-}
-
-pub fn cli_list_get_str(ref list: Map<any, any>, idx: i64) -> str {
-    return list[idx];
-}
-
-pub fn cli_map_new() -> Map<any, any> {
-    return Map<any, any>();
-}
-
-pub fn cli_map_set(m: Map<any, any>, key: str, val: any) -> Map<any, any> {
-    m.set(key, val);
-    return m;
-}
-
-pub fn cli_map_get(ref m: Map<any, any>, key: str) -> any {
-    return m.get(key);
-}
-
-pub fn cli_map_get_int(ref m: Map<any, any>, key: str) -> i64 {
-    return m.get(key) as i64;
-}
-
-pub fn cli_map_contains(ref m: Map<any, any>, key: str) -> bool {
-    return m.has(key);
-}
-
-// ------------------------------------------------------------------------------
 // 2-Bit Lattice Specifications (0b00 : IValue)
 // ------------------------------------------------------------------------------
 
@@ -93,15 +43,16 @@ pub struct PositionalSpec : IValue {
     pub summary:  str;
 }
 
-[Layout(c_abi)]
-pub struct CommandSpec : IValue {
-    pub name:               str;
-    pub aliases_csv:        str;
-    pub category:           str;
-    pub summary:            str;
-    pub examples:           str;
-    pub flags_handle:       Map<any, any>;
-    pub positionals_handle: Map<any, any>;
+/// A command: its words, its help text, and the flags and positionals it
+/// takes. It owns its lists, so it is an owned record (0b10).
+pub struct CommandSpec : IObject {
+    pub name:        str;
+    pub aliases_csv: str;
+    pub category:    str;
+    pub summary:     str;
+    pub examples:    str;
+    pub flags:       List<FlagSpec>;
+    pub positionals: List<PositionalSpec>;
 }
 
 // ------------------------------------------------------------------------------
@@ -110,146 +61,71 @@ pub struct CommandSpec : IValue {
 
 pub struct ParsedArgs : IObject {
     pub command:          str;
-    pub flag_values:      i64;
-    pub positionals:      i64;
-    pub passthrough_args: i64;
-
-    ~self() {
-    }
-
-    pub pure fn has(flag: str) -> bool {
-        return cli_map_contains(.flag_values, flag);
-    }
-
-    pub pure fn str_or(flag: str, fallback: str) -> str {
-        if cli_map_contains(.flag_values, flag) {
-            let list = cli_map_get(.flag_values, flag) as i64;
-            if cli_list_len(list) > 0 {
-                return cli_list_get_str(list, 0);
-            }
-        }
-        return fallback;
-    }
-
-    pub pure fn int_or(flag: str, fallback: i64) -> i64 {
-        if cli_map_contains(.flag_values, flag) {
-            let list = cli_map_get(.flag_values, flag) as i64;
-            if cli_list_len(list) > 0 {
-                let s = cli_list_get_str(list, 0);
-                let v = s as i64;
-                return v;
-            }
-        }
-        return fallback;
-    }
-
-    pub pure fn bool_val(flag: str) -> bool {
-        if cli_map_contains(.flag_values, flag) {
-            let list = cli_map_get(.flag_values, flag) as i64;
-            if cli_list_len(list) > 0 {
-                let s = cli_list_get_str(list, 0);
-                return s == "true" || s == "1";
-            }
-            return true;
-        }
-        return false;
-    }
+    /// Each flag given, by its long name, with every value given for it.
+    pub flag_values:      Map<str, List<str>>;
+    pub positionals:      List<str>;
+    /// The arguments after `--`, passed to the program as they are.
+    pub passthrough_args: List<str>;
 }
 
-pub pure fn parsed_has_flag(args: ref<ParsedArgs>, flag: str) -> bool {
-    return cli_map_contains(args.flag_values, flag);
-}
+pub fn parsed_args_new() -> ParsedArgs => ParsedArgs {
+    command:          "",
+    flag_values:      Map<str, List<str>>(),
+    positionals:      [],
+    passthrough_args: [],
+};
 
-pub pure fn parsed_get_str(args: ref<ParsedArgs>, flag: str, fallback: str) -> str {
-    if cli_map_contains(args.flag_values, flag) {
-        let list = cli_map_get(args.flag_values, flag) as i64;
-        if cli_list_len(list) > 0 {
-            return cli_list_get_str(list, 0);
-        }
-    }
+/// Whether flag `flag` was given.
+pub pure fn parsed_has_flag(ref args: ParsedArgs, flag: str) -> bool => args.flag_values.has(flag);
+
+/// The first value given for `flag`, or `fallback` when it was not given.
+pub pure fn parsed_get_str(ref args: ParsedArgs, flag: str, fallback: str) -> str {
+    if args.flag_values.has(flag) && args.flag_values[flag].len() > 0 { return args.flag_values[flag][0]; }
     return fallback;
 }
 
-pub pure fn parsed_get_int(args: ref<ParsedArgs>, flag: str, fallback: i64) -> i64 {
-    if cli_map_contains(args.flag_values, flag) {
-        let list = cli_map_get(args.flag_values, flag) as i64;
-        if cli_list_len(list) > 0 {
-            let s = cli_list_get_str(list, 0);
-            return s as i64;
-        }
-    }
-    return fallback;
+/// Adds `value` to the values given for flag `flag`.
+pub fn parsed_add_flag(var ref args: ParsedArgs, flag: str, value: str) {
+    var values: List<str> = args.flag_values.get(flag) ?? [];
+    values.push(value);
+    args.flag_values.set(flag, values);
 }
 
-pub pure fn parsed_get_bool(args: ref<ParsedArgs>, flag: str) -> bool {
-    if cli_map_contains(args.flag_values, flag) {
-        let list = cli_map_get(args.flag_values, flag) as i64;
-        if cli_list_len(list) > 0 {
-            let s = cli_list_get_str(list, 0);
-            return s == "true" || s == "1";
-        }
-        return true;
-    }
-    return false;
+/// The outcome of parsing a command line: the parsed arguments, or the
+/// usage error (`code`, `message`) and the exit code to stop with.
+pub struct CliParse : IObject {
+    pub ok:        bool;
+    pub exit_code: i64;
+    pub code:      str;
+    pub message:   str;
+    pub parsed:    ParsedArgs;
 }
+
+pub fn cli_parse_ok(parsed: ParsedArgs) -> CliParse =>
+    CliParse { ok: true, exit_code: 0, code: "", message: "", parsed: parsed };
+
+pub fn cli_parse_error(code: str, message: str) -> CliParse =>
+    CliParse { ok: false, exit_code: 2, code: code, message: message, parsed: parsed_args_new() };
 
 // ------------------------------------------------------------------------------
 // Command Registry (0b10 : IObject)
 // ------------------------------------------------------------------------------
 
 pub struct CommandRegistry : IObject {
-    pub commands:          i64;
-    pub name_to_index:     i64;
-    pub alias_to_primary:  i64;
-
-    ~self() {
-    }
-
-    pub pure fn count() -> i64 {
-        return cli_list_len(.commands);
-    }
-
-    pub pure fn get(idx: i64) -> CommandSpec {
-        return cli_list_get(.commands, idx);
-    }
-
-    pub pure fn find_by_name(name: str) -> i64 {
-        if cli_map_contains(.name_to_index, name) {
-            return cli_map_get_int(.name_to_index, name);
-        }
-        if cli_map_contains(.alias_to_primary, name) {
-            let primary = cli_map_get(.alias_to_primary, name);
-            if cli_map_contains(.name_to_index, primary) {
-                return cli_map_get_int(.name_to_index, primary);
-            }
-        }
-        return -1;
-    }
+    pub commands:         List<CommandSpec>;
+    pub name_to_index:    Map<str, i64>;
+    pub alias_to_primary: Map<str, str>;
 }
 
-pub pure fn spec_registry_count(reg: ref<CommandRegistry>) -> i64 {
-    return cli_list_len(reg.commands);
-}
+pub pure fn spec_registry_count(ref reg: CommandRegistry) -> i64 => reg.commands.len();
 
-pub pure fn spec_registry_get(reg: ref<CommandRegistry>, idx: i64) -> CommandSpec {
-    return cli_list_get(reg.commands, idx);
-}
-
-pub pure fn spec_registry_find_by_name(reg: ref<CommandRegistry>, name: str) -> i64 {
-    if cli_map_contains(reg.name_to_index, name) {
-        return cli_map_get_int(reg.name_to_index, name);
-    }
-    if cli_map_contains(reg.alias_to_primary, name) {
-        let primary = cli_map_get(reg.alias_to_primary, name);
-        if cli_map_contains(reg.name_to_index, primary) {
-            return cli_map_get_int(reg.name_to_index, primary);
-        }
+/// The index of the command named or aliased `name`, or -1.
+pub pure fn spec_registry_find_by_name(ref reg: CommandRegistry, name: str) -> i64 {
+    if some idx = reg.name_to_index.get(name) { return idx; }
+    if some primary = reg.alias_to_primary.get(name) {
+        if some idx = reg.name_to_index.get(primary) { return idx; }
     }
     return -1;
-}
-
-pub interface ICliHandler : IAnyValue {
-    pub fn handle(args: ref<ParsedArgs>) -> i32;
 }
 
 // ------------------------------------------------------------------------------
@@ -287,31 +163,30 @@ pub fn spec_new_command(name: str, aliases_csv: str, category: str, summary: str
         category: category,
         summary: summary,
         examples: examples,
-        flags_handle: cli_list_new(),
-        positionals_handle: cli_list_new(),
+        flags: [],
+        positionals: [],
     };
 }
 
-pub fn spec_command_add_flag(cmd: ref<CommandSpec>, flag: FlagSpec) {
-    let _ = cli_list_push(cmd.flags_handle, flag);
+pub fn spec_command_add_flag(var ref cmd: CommandSpec, flag: FlagSpec) {
+    cmd.flags.push(flag);
 }
 
-pub fn spec_command_add_positional(cmd: ref<CommandSpec>, pos: PositionalSpec) {
-    let _ = cli_list_push(cmd.positionals_handle, pos);
+pub fn spec_command_add_positional(var ref cmd: CommandSpec, pos: PositionalSpec) {
+    cmd.positionals.push(pos);
 }
 
 pub fn spec_registry_new() -> CommandRegistry {
     return CommandRegistry {
-        commands: cli_list_new(),
-        name_to_index: cli_map_new(),
-        alias_to_primary: cli_map_new(),
+        commands: [],
+        name_to_index: Map<str, i64>(),
+        alias_to_primary: Map<str, str>(),
     };
 }
 
-pub fn spec_registry_register(reg: ref<CommandRegistry>, spec: CommandSpec) -> i64 {
-    let idx = cli_list_len(reg.commands);
-    let _ = cli_list_push(reg.commands, spec);
-    let _ = cli_map_set(reg.name_to_index, spec.name, idx as i64);
+pub fn spec_registry_register(var ref reg: CommandRegistry, spec: CommandSpec) -> i64 {
+    let idx = reg.commands.len();
+    reg.name_to_index.set(spec.name, idx);
 
     // Register aliases if any
     let al = spec.aliases_csv;
@@ -325,11 +200,12 @@ pub fn spec_registry_register(reg: ref<CommandRegistry>, spec: CommandSpec) -> i
             }
             let alias = al.slice(start, end);
             if alias.len() > 0 {
-                let _ = cli_map_set(reg.alias_to_primary, alias, spec.name);
+                reg.alias_to_primary.set(alias, spec.name);
             }
             start = end + 1;
         }
     }
 
+    reg.commands.push(spec);
     return idx;
 }

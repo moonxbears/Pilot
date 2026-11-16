@@ -157,7 +157,7 @@ pub fn py_obj_new(ptr: usize) -> PyObj {
     return PyObj { ptr: ptr };
 }
 
-pub fn py_obj_inc_ref(obj: ref<PyObj>) {
+pub fn py_obj_inc_ref(ref obj: PyObj) {
     seam("py.inc_ref", "Py_IncRef through the loaded libpython3");
 }
 
@@ -169,7 +169,7 @@ pub fn py_obj_dec_ref(var ref obj: PyObj) {
 // 4. Zero-Copy PEP 3118 Buffer Operations
 // ------------------------------------------------------------------------------
 
-pub fn py_buffer_acquire(obj: ref<PyObj>, flags: i32) -> PyBufferLease {
+pub fn py_buffer_acquire(ref obj: PyObj, flags: i32) -> PyBufferLease {
     return seam("py.buffer_acquire", "PyObject_GetBuffer filling a PyBufferRaw from the exporter");
 }
 
@@ -188,7 +188,7 @@ pub fn py_import_module(mod_name: str) -> PyObj {
 /// Calls `callable` with positional `args` followed by keyword values named by
 /// `kwnames`. A null callable is refused here, before anything reaches Python.
 pub fn py_vectorcall_fast(
-    callable: ref<PyObj>,
+    ref callable: PyObj,
     args: slice<usize>,
     kwnames: slice<str>
 ) -> PyVectorcallResult {
@@ -211,15 +211,15 @@ pub fn py_err_fetch() -> PyError {
 // 6. Scalar Conversions
 // ------------------------------------------------------------------------------
 
-pub fn py_str_from_obj(obj: ref<PyObj>) -> str {
+pub fn py_str_from_obj(ref obj: PyObj) -> str {
     return seam("py.str_from_obj", "PyUnicode_AsUTF8AndSize through the loaded libpython3");
 }
 
-pub fn py_int_from_obj(obj: ref<PyObj>) -> i64 {
+pub fn py_int_from_obj(ref obj: PyObj) -> i64 {
     return seam("py.int_from_obj", "PyLong_AsLongLong through the loaded libpython3");
 }
 
-pub fn py_float_from_obj(obj: ref<PyObj>) -> f64 {
+pub fn py_float_from_obj(ref obj: PyObj) -> f64 {
     return seam("py.float_from_obj", "PyFloat_AsDouble through the loaded libpython3");
 }
 

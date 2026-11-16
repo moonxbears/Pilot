@@ -36,21 +36,18 @@ pub fn plan_program(var ref inf: Infer) -> DropPlanner {
 /// Whether the plan names node `n`.
 pub fn planned(ref lw: Lowerer, n: i64) -> bool => lw.plan.at.has(key(n));
 
-fn rows_at(ref lw: Lowerer, n: i64) -> List<List<any>> =>
+fn rows_at(ref lw: Lowerer, n: i64) -> List<AtRow> =>
     if lw.plan.at.has(key(n)) { lw.plan.at.get(key(n)) } else { [] };
 
-fn is(ref r: List<any>, a: DropAction) -> bool {
-    let code: i64 = r[0];
-    return code == a as i64;
-}
+fn is(ref r: AtRow, a: DropAction) -> bool => r.0 == a as i64;
 
 /// Before node `n` is lowered: its seam, its drop flags, then its `Before`
 /// drops.
 pub fn plan_before(var ref lw: Lowerer, n: i64) {
     for r in rows_at(lw, n) {
         if is(r, ::Seam) {
-            let id: str = r[3];
-            let note: str = r[4];
+            let id = r.3;
+            let note = r.4;
             emit_trap(lw, f"SEAM001: unconnected seam `{id}`: {note}", n);
             ensure_open(lw);
             return;
@@ -58,7 +55,7 @@ pub fn plan_before(var ref lw: Lowerer, n: i64) {
     }
     for r in rows_at(lw, n) {
         if is(r, ::Flag) {
-            let b: i64 = r[1];
+            let b = r.1;
             let slot = emit(lw, op_stack_slot(), 0, bool_physics(lw), [], n);
             lw.drop_flags.set(key(b), slot);
             set_flag(lw, b, true, n);
@@ -86,11 +83,11 @@ pub fn plan_after(var ref lw: Lowerer, n: i64, v: u32) -> u32 {
     var out = v;
     for r in rows_at(lw, n) {
         if is(r, ::Copy) && v != ir_no_value() && !ir_is_terminated(lw.f, lw.cur) {
-            let t: i64 = r[2];
+            let t = r.2;
             out = copy_value(lw, v, t, n, 0);
         }
         if is(r, ::Discard) && v != ir_no_value() && !ir_is_terminated(lw.f, lw.cur) {
-            let t: i64 = r[2];
+            let t = r.2;
             drop_value(lw, v, t, n, 0);
         }
         if is(r, ::Guard) && lw.defers.len() > 0 {
@@ -101,7 +98,7 @@ pub fn plan_after(var ref lw: Lowerer, n: i64, v: u32) -> u32 {
     drop_rows(lw, n, ::After);
     for r in rows_at(lw, n) {
         if is(r, ::Moved) {
-            let b: i64 = r[1];
+            let b = r.1;
             set_flag(lw, b, false, n);
         }
     }
@@ -123,8 +120,8 @@ pub fn plan_else(ref lw: Lowerer, n: i64) { drop_rows(lw, n, ::Else); }
 pub fn run_release(ref lw: Lowerer, n: i64) -> bool {
     if !lw.releases.has(key(n)) { return false; }
     let r = lw.releases.get(key(n));
-    let b: i64 = r[1];
-    let t: i64 = r[2];
+    let b = r.1;
+    let t = r.2;
     drop_binding(lw, b, t, n);
     return true;
 }
@@ -132,8 +129,8 @@ pub fn run_release(ref lw: Lowerer, n: i64) -> bool {
 fn drop_rows(ref lw: Lowerer, n: i64, a: DropAction) {
     for r in rows_at(lw, n) {
         if is(r, a) {
-            let b: i64 = r[1];
-            let t: i64 = r[2];
+            let b = r.1;
+            let t = r.2;
             drop_binding(lw, b, t, n);
         }
     }
@@ -204,8 +201,8 @@ fn drop_value(var ref lw: Lowerer, v: u32, t: i64, n: i64, depth: i64) {
         let dtor = destructor_of(lw, t);
         if dtor >= 0 { let _ = emit(lw, op_call_direct(), function_index(lw, dtor, t), layout_unknown(lw.ls), [v], n); }
         for fl in stored_fields(lw.inf.p, t) {
-            let name: str = fl[0];
-            let ft: i64 = fl[1];
+            let name = fl.0;
+            let ft = fl.1;
             if needs_drop(lw.plan, ft, 0) == 1 {
                 drop_value(lw, property_read(lw, v, t, name, n), ft, n, depth + 1);
             }

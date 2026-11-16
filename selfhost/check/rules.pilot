@@ -116,6 +116,8 @@ pub fn assignable(var ref inf: Infer, src: i64, dst: i64, e: i64) -> bool {
         return true;
     }
     if e >= 0 && literal_fits(p.s, e, prog_class(p, dst)) { return true; }
+    // Lossless integer widening (`u8` into `i64`) needs no cast.
+    if prog_widens(p, src, dst) { return true; }
     // A one-character literal where a character is expected is that
     // character.
     if is_scalar_literal(p, e) && is_scalar_type(p, dst) { return true; }

@@ -241,7 +241,7 @@ fn py_parse_param(raw: str) -> PyParamDecl {
     };
 }
 
-pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleStub {
+pub fn py_parse_stub(source: str, var ref diags: List<Diagnostic>) -> PyModuleStub {
     var stub = py_module_stub_new("python_module");
     let n = source.len();
     var pos: i64 = 0;
@@ -450,7 +450,7 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
 // 6. Vectorcall Fast-Path Wrapper Synthesizer
 // ------------------------------------------------------------------------------
 
-pub fn py_synthesize_vectorcall_wrapper(module: ref<PyModuleStub>, fn_name: str) -> str {
+pub fn py_synthesize_vectorcall_wrapper(ref module: PyModuleStub, fn_name: str) -> str {
     var out = "// ==============================================================================\n";
     out = out + f"// Pilot In-Process Python Vectorcall Wrapper for '{module.name}.{fn_name}'\n";
     out = out + "// Zero-copy stack frame argument packing via PyObject_Vectorcall\n";

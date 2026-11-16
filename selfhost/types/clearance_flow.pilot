@@ -62,7 +62,7 @@ pub fn clearance_solver_new(base_level: u32) -> ClearanceSolver {
     };
 }
 
-pub pure fn current_clearance(self: ref<ClearanceSolver>) -> u32 {
+pub pure fn current_clearance(ref self: ClearanceSolver) -> u32 {
     if self.depth == 0 { return self.default_level; }
     return self.frame_levels[self.depth - 1];
 }
@@ -97,7 +97,7 @@ pub var fn exit_elevated_scope(var ref self: ClearanceSolver) {
 // 5. Access Permission Checking
 // ------------------------------------------------------------------------------
 
-pub fn check_clearance_access(self: ref<ClearanceSolver>, required_level: u32, target_name: str) -> str {
+pub fn check_clearance_access(ref self: ClearanceSolver, required_level: u32, target_name: str) -> str {
     let active = current_clearance(self);
     if active < required_level {
         return format_lvl001(target_name, required_level, active);

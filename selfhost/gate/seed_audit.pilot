@@ -173,7 +173,7 @@ fn sa_harvest_distributive_block(
     block_is_partial: bool,
     enforce_naming: bool,
     rel_path: str,
-    seed_reg: ref<SeedTokenRegistry>,
+    ref seed_reg: SeedTokenRegistry,
     vocab: i64,
     violations: i64
 ) -> i64 {
@@ -237,7 +237,7 @@ fn sa_harvest_distributive_block(
 
 pub fn harvest_core_vocabulary_and_audit(
     workspace_root: str,
-    seed_reg: ref<SeedTokenRegistry>,
+    ref seed_reg: SeedTokenRegistry,
     violations: i64
 ) -> Map<str, bool> {
     let vocab = gset_new();
@@ -300,7 +300,7 @@ pub fn harvest_core_vocabulary_and_audit(
     return vocab;
 }
 
-pub fn harvest_core_vocabulary(workspace_root: str, seed_reg: ref<SeedTokenRegistry>) -> Map<str, bool> {
+pub fn harvest_core_vocabulary(workspace_root: str, ref seed_reg: SeedTokenRegistry) -> Map<str, bool> {
     let dummy_viols = glist_new();
     return harvest_core_vocabulary_and_audit(workspace_root, seed_reg, dummy_viols);
 }
@@ -359,8 +359,8 @@ fn sa_check_word_list_in_code(
 pub pure fn verify_rust_source_name_blind(
     rs_path: str,
     rs_source: str,
-    seed_reg: ref<SeedTokenRegistry>,
-    forbidden_pilot_syms: ref<Map<str, bool>>
+    ref seed_reg: SeedTokenRegistry,
+    ref forbidden_pilot_syms: Map<str, bool>
 ) -> List<GateViolation> {
     let violations = glist_new();
     let is_types_rs = gm_ends_with(rs_path, "pilot-analysis/src/types.rs");
@@ -652,7 +652,7 @@ pub pure fn verify_rust_source_name_blind(
 // 3. Gate 1A (`adaptability`) & Gate 1B (`hygiene`) Full Workspace Executors
 // ------------------------------------------------------------------------------
 
-pub fn execute_adaptability_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> GateReport {
+pub fn execute_adaptability_gate(workspace_root: str, ref _opts: GateRunOptions) -> GateReport {
     let t0 = gate_time_now_us();
     let root = resolve_workspace_root(workspace_root);
     let violations = glist_new();
@@ -761,7 +761,7 @@ fn sa_audit_pilot_tree(root: str, subdir: str, file_caps: i64, violations: i64) 
     return checked;
 }
 
-pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> GateReport {
+pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, ref _opts: GateRunOptions) -> GateReport {
     let t0 = gate_time_now_us();
     let root = resolve_workspace_root(workspace_root);
     let violations = glist_new();

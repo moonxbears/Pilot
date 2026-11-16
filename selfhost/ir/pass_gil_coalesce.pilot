@@ -70,7 +70,7 @@ pub pure fn gil_coalesce_report_new(
 // 2. Coalescing Predicates & Block Analysis
 // ------------------------------------------------------------------------------
 
-pub fn can_coalesce_scopes(s1: ref<GilScope>, s2: ref<GilScope>) -> bool {
+pub fn can_coalesce_scopes(ref s1: GilScope, ref s2: GilScope) -> bool {
     // Two GIL scopes can be coalesced if they belong to the same block
     // and the gap between them has no blocking foreign foreign interactions
     if s1.block_id != s2.block_id {

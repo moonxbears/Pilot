@@ -93,7 +93,7 @@ fn pool_index(var ref m: IrModule, v: i64) -> u32 {
 fn rewrite(var ref f: IrFunction, inst: IrInst, op: u16, ref args: List<u32>) -> IrInst {
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
-    return ir_inst_new(inst.result, op, 0, inst.physics, offset, args.len(), inst.span_id);
+    return ir_inst_new(inst.result, op, 0, inst.physics, offset, ir_operand(args.len()), inst.span_id);
 }
 
 /// Folds what can be folded in `f`; true when anything changed.

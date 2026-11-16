@@ -188,7 +188,7 @@ pub var fn pattern_dsl_add_arm(var ref self: SyntaxRuleDef, head: str, pattern: 
 // 4. Pattern Diagnostics & Validation
 // ------------------------------------------------------------------------------
 
-pub fn pattern_dsl_check_diagnostics(rule: ref<SyntaxRuleDef>) -> List<str> {
+pub fn pattern_dsl_check_diagnostics(ref rule: SyntaxRuleDef) -> List<str> {
     var diags: List<str> = [];
     var i = 0;
     while i < rule.arms.len() {
@@ -224,7 +224,7 @@ pub struct PatternMatchResult : IValue {
     pub tokens_consumed:  usize;
 }
 
-pub fn pattern_dsl_match_prefix(rule: ref<SyntaxRuleDef>, token: str) -> PatternMatchResult {
+pub fn pattern_dsl_match_prefix(ref rule: SyntaxRuleDef, token: str) -> PatternMatchResult {
     var i = 0;
     while i < rule.arms.len() {
         let arm = rule.arms[i];

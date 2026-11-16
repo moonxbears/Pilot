@@ -154,7 +154,7 @@ pub fn verify_where_refinement_i64(
 
 /// Whether a `requires` clause is provably false for the constant arguments
 /// of a call site. Needs a compile-time evaluator over the clause's AST.
-pub fn prove_requires_at_call(plan: ref<ContractWeavePlan>, clause_index: usize, ref call_args: List<str>) -> bool {
+pub fn prove_requires_at_call(ref plan: ContractWeavePlan, clause_index: usize, ref call_args: List<str>) -> bool {
     return seam("contracts.prove_requires", "comptime evaluation of requires clauses over constant call arguments arrives in F4");
 }
 

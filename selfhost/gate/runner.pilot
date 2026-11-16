@@ -170,7 +170,7 @@ pub fn parse_gate_cli_args(raw_args: str) -> GateRunOptions {
     };
 }
 
-pub fn run_gate_by_id(workspace_root: str, gate_id: str, opts: ref<GateRunOptions>) -> opt<GateReport> {
+pub fn run_gate_by_id(workspace_root: str, gate_id: str, ref opts: GateRunOptions) -> opt<GateReport> {
     if gate_id == "adaptability" {
         return execute_adaptability_gate(workspace_root, opts);
     }
@@ -192,7 +192,7 @@ pub fn run_gate_by_id(workspace_root: str, gate_id: str, opts: ref<GateRunOption
     return __engine("get_env");
 }
 
-pub fn run_all_gates(workspace_root: str, opts: ref<GateRunOptions>) -> List<GateReport> {
+pub fn run_all_gates(workspace_root: str, ref opts: GateRunOptions) -> List<GateReport> {
     let reports = glist_new();
     let reg = build_gate_registry();
     let ids = __engine("map_get", reg, "__ids__");

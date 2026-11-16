@@ -1,0 +1,8 @@
+// Widening is implicit only when every value survives: a signed value does
+// not fit an unsigned type of any width (-1 has no u64), so it needs a cast
+// (PROP-005 5B.2, 2026-11-16).
+fn main() {
+    let x: i8 = -1;
+    let y: u64 = x;
+    print(y);
+}

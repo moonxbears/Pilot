@@ -64,12 +64,23 @@
 //                                              Replace, Flag, Moved, Discard (""),
 //                                              ReplaceElement (lookup op, collection type)
 //   [Seam, start, end, kind, id, note]
+// and, in plan part 2 (`glue`):
 //   [Glue, type, destructor owner or "", [field, field type, ..],
 //    element type, length op, element op, sequence op,
 //    payload type, absent op]  (the element four "" without elements, the
 //    sequence op "" when the collection is walked as is; the payload two ""
 //    without a payload)
 pub lvl(0) pkg selfhost.check;
+
+/// A drop-plan row naming a node: `[action, start, end, kind, a, b]`.
+pub type DropRow = (i64, i64, i64, i64, str, str);
+/// A glue row: `[Glue or CopyGlue, type, owner, fields, element type,
+/// length op, element op, sequence op, payload type, absent op]`.
+pub type GlueRow = (i64, str, str, List<str>, str, str, str, str, str, str);
+/// A row for a reader in the same program: `[action, binding, type, a, b]`.
+pub type AtRow = (i64, i64, i64, str, str);
+/// A stored field: its name and type.
+pub type FieldRow = (str, i64);
 
 
 /// What a row of the drop plan says. The seed reads the numbers
@@ -134,7 +145,9 @@ pub enum DropAction : u8 {
 /// What planning the drops of one program keeps.
 pub struct DropPlanner : IObject {
     pub flow: Flow;
-    pub rows: List<List<any>>;
+    pub rows: List<DropRow>;
+    /// The glue rows, plan part 2.
+    pub glue: List<GlueRow>;
     /// Type display -> 1 needs dropping, 0 not, 2 a collection of values
     /// that do (not supported yet).
     pub needs: Map<str, i64>;
@@ -146,7 +159,7 @@ pub struct DropPlanner : IObject {
     /// PilIR lowering): `[action, binding, type, a, b]`, with the binding
     /// index and type id being planned (-1 and the unknown type for a copy's
     /// binding).
-    pub at: Map<str, List<List<any>>>;
+    pub at: Map<str, List<AtRow>>;
     /// The binding and type being planned.
     pub cur_binding: i64;
     pub cur_type: i64;
@@ -162,10 +175,11 @@ pub struct DropPlanner : IObject {
 
 pub fn row(var ref pl: DropPlanner, action: DropAction, n: i64, a: str, b: str) {
     let s = pl.flow.inf.p.s;
-    pl.rows.push([action as i64, span_start(s, n), span_end(s, n), kind(s, n), a, b]);
+    pl.rows.push((action as i64, span_start(s, n), span_end(s, n), kind(s, n), a, b));
     let k = f"{n}";
-    if !pl.at.has(k) { pl.at.set(k, []); }
-    pl.at.get(k).push([action as i64, pl.cur_binding, pl.cur_type, a, b]);
+    var here: List<AtRow> = if pl.at.has(k) { pl.at[k] } else { [] };
+    here.push((action as i64, pl.cur_binding, pl.cur_type, a, b));
+    pl.at.set(k, here);
 }
 
 /// The struct declaration of named type `t`, or -1.
@@ -188,13 +202,13 @@ fn has_dtor(ref p: Program, d: i64) -> bool {
 }
 
 /// Field name and type of each stored field of struct type `t`.
-pub fn stored_fields(var ref p: Program, t: i64) -> List<List<any>> {
-    var out: List<List<any>> = [];
+pub fn stored_fields(var ref p: Program, t: i64) -> List<FieldRow> {
+    var out: List<FieldRow> = [];
     let d = struct_decl(p, t);
     if d < 0 { return out; }
     for slot in build_type(p, node_name(p.s, d), 0).plan.physical_fields {
         if some m = prog_member(p, t, slot.canonical_name) {
-            out.push([slot.canonical_name, prog_member_type(p, m)]);
+            out.push((slot.canonical_name, prog_member_type(p, m)));
         }
     }
     return out;
@@ -230,7 +244,7 @@ pub fn needs_drop(var ref pl: DropPlanner, t: i64, depth: i64) -> i64 {
     if d >= 0 {
         if has_dtor(p, d) { verdict = 1; }
         for fl in stored_fields(p, t) {
-            let ft: i64 = fl[1];
+            let ft = fl.1;
             let v = needs_drop(pl, ft, depth + 1);
             if v == 2 { verdict = 2; } else if v == 1 && verdict == 0 { verdict = 1; }
         }
@@ -271,9 +285,9 @@ fn glue(var ref pl: DropPlanner, t: i64) {
     let d = if ops.len() > 0 || payload_key != "" { -1 } else { struct_decl(p, t) };
     var fields: List<str> = [];
     for fl in stored_fields(p, t) {
-        let ft: i64 = fl[1];
+        let ft = fl.1;
         if d >= 0 && needs_drop(pl, ft, 0) == 1 {
-            fields.push(fl[0]);
+            fields.push(fl.0);
             fields.push(ty_display(p.tt, ft));
             glue(pl, ft);
         }
@@ -293,7 +307,7 @@ fn glue(var ref pl: DropPlanner, t: i64) {
             glue(pl, et);
         }
     }
-    pl.rows.push([DropAction::Glue as i64, key, owner, fields, elem_key, len_op, get_op, seq_op, payload_key, absent_op]);
+    pl.glue.push((DropAction::Glue as i64, key, owner, fields, elem_key, len_op, get_op, seq_op, payload_key, absent_op));
 }
 
 // --- Walking the tree --------------------------------------------------------
@@ -727,8 +741,8 @@ pub fn drop_planner(var ref inf: Infer) -> DropPlanner {
     // check_program, not here.
     walk_bodies(f);
     let pl = DropPlanner {
-        flow: f, rows: [], needs: Map<str, i64>(), cyclic: Map<str, bool>(), glued: Map<str, bool>(),
-        at: Map<str, List<List<any>>>(), cur_binding: -1, cur_type: ty_unknown(),
+        flow: f, rows: [], glue: [], needs: Map<str, i64>(), cyclic: Map<str, bool>(), glued: Map<str, bool>(),
+        at: Map<str, List<AtRow>>(), cur_binding: -1, cur_type: ty_unknown(),
         borrows: borrows_new(f), borrowers: [], flagged: false,
     };
     var b = 0;

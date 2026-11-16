@@ -370,7 +370,7 @@ pub pure fn rust_trim(s: str) -> str {
 // 5. Rust Public Item Parser
 // ------------------------------------------------------------------------------
 
-pub fn rust_parse_source(src: str, diags: var ref<List<Diagnostic>>) -> RustModuleDecl {
+pub fn rust_parse_source(src: str, var ref diags: List<Diagnostic>) -> RustModuleDecl {
     var module = rust_module_decl_new("rust_crate");
     if src.len() == 0 {
         var d = Diagnostic {

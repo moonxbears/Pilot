@@ -246,7 +246,7 @@ fn sg_words(text: str) -> List<str> {
 }
 
 /// Checks the registry against the source, and the ledger against both.
-pub fn execute_seam_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> GateReport {
+pub fn execute_seam_gate(workspace_root: str, ref _opts: GateRunOptions) -> GateReport {
     let t0 = gate_time_now_us();
     let root = resolve_workspace_root(workspace_root);
     // The report's violation list uses the gate's list helpers.

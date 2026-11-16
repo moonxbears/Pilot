@@ -29,26 +29,13 @@
 pub lvl(0) pkg selfhost.check;
 
 
-/// The bits a value of primitive `t` holds, from its `[Bits]`, or -1.
-fn bits_width(var ref p: Program, t: i64) -> i64 {
-    if !ty_is_named(p.tt, t) { return -1; }
-    for decl in nl_get(p.type_decls, node_name(p.s, ty_decl(p.tt, t))) {
-        if some args = prog_attr_nodes(p, decl, "Bits") {
-            if args.len() > 0 {
-                if some bits = prog_const(p, args[0]) { return bits; }
-            }
-        }
-    }
-    return -1;
-}
-
 /// The register shape of `t` as `[float, signed, width]`, or empty when an
 /// `as view` cannot read or make a `t`.
 pub fn view_shape(var ref p: Program, t: i64) -> List<i64> {
     var out: List<i64> = [];
     if is_scalar_type(p, t) { return out; }
     let class = prog_class(p, t);
-    let w = bits_width(p, t);
+    let w = prog_bits(p, t);
     if is_float_class(class) && (w == 32 || w == 64) {
         out.push(1);
         out.push(1);
@@ -109,7 +96,7 @@ pub fn check_view_casts(var ref inf: Infer, var ref sink: DiagSink) {
 
 /// Adds a `ViewCast` row to `rows` for each `as view` of the files the
 /// program links that can be built.
-pub fn plan_view_casts(var ref inf: Infer, var ref rows: List<List<any>>) {
+pub fn plan_view_casts(var ref inf: Infer, var ref rows: List<DropRow>) {
     let p = inf.p;
     let s = p.s;
     for n in prog_nodes_of_kind(p, nk_binary()) {
@@ -120,7 +107,7 @@ pub fn plan_view_casts(var ref inf: Infer, var ref rows: List<List<any>>) {
                 let f = node_name(s, view_fn(inf, n));
                 var parts: List<str> = [];
                 for v in shapes { parts.push(f"{v}"); }
-                rows.push([DropAction::ViewCast as i64, span_start(s, n), span_end(s, n), kind(s, n), f, text_join(parts)]);
+                rows.push((DropAction::ViewCast as i64, span_start(s, n), span_end(s, n), kind(s, n), f, text_join(parts)));
             }
         }
     }

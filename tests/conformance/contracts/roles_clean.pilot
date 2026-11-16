@@ -3,13 +3,14 @@
 // cursor over it (ICursor, 0b01) that `for` walks, and a fixed-size inline
 // pair (IInlineList, 0b00). `count` and `current` are stored fields, which
 // meet the `{ get; }` requirements. `s[i]` and `q[i]` run the index
-// operators each type declares.
+// operators each type declares. Counts and indexes are i64, as the roles
+// declare them (PROP-005 5B.2, 2026-11-16).
 struct Stack : IBuffer<i64>, IEnumerable<i64, StackCursor> {
     pub items: List<i64>;
-    pub count: usize;
+    pub count: i64;
 
     pub fn contains(item: i64) -> bool {
-        var i: usize = 0;
+        var i: i64 = 0;
         while i < .count {
             if .items[i] == item { return true; }
             i = i + 1;
@@ -29,14 +30,14 @@ struct Stack : IBuffer<i64>, IEnumerable<i64, StackCursor> {
         }
     }
 
-    pub fn remove_at(index: usize) -> i64 {
+    pub fn remove_at(index: i64) -> i64 {
         .count = .count - 1;
         return .items.remove_at(index);
     }
 
-    pub op [] (index: usize) -> i64 => .items[index];
+    pub op [] (index: i64) -> i64 => .items[index];
 
-    pub op []= (index: usize, item: i64) {
+    pub op []= (index: i64, item: i64) {
         .items[index] = item;
     }
 
@@ -45,7 +46,7 @@ struct Stack : IBuffer<i64>, IEnumerable<i64, StackCursor> {
 
 struct StackCursor : ICursor<i64> {
     pub items: List<i64>;
-    pub next: usize;
+    pub next: i64;
     pub current: i64;
 
     pub fn move_next() -> bool {
@@ -59,13 +60,13 @@ struct StackCursor : ICursor<i64> {
 struct Pair : IInlineList<i64> {
     pub a: i64;
     pub b: i64;
-    pub count: usize;
+    pub count: i64;
 
     pub fn contains(item: i64) -> bool => .a == item || .b == item;
 
-    pub op [] (index: usize) -> i64 => if index == 0 { .a } else { .b };
+    pub op [] (index: i64) -> i64 => if index == 0 { .a } else { .b };
 
-    pub op []= (index: usize, item: i64) {
+    pub op []= (index: i64, item: i64) {
         if index == 0 { .a = item; } else { .b = item; }
     }
 }

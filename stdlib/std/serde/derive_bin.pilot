@@ -100,7 +100,7 @@ pub fn derive_binary_codecs(type_name: str, fields: List<BinFieldMeta>, lattice_
     }
 
     var out = "impl IBinarySerializable for " + type_name + " {\n";
-    out = out + "    pub fn write_binary(self, buf: var ref<List<u8>>) {\n";
+    out = out + "    pub fn write_binary(self, var ref buf: List<u8>) {\n";
 
     if lattice_bits == 0 {
         // 0b00 POD fast path: single bounds-checked memcpy
@@ -125,7 +125,7 @@ pub fn derive_binary_codecs(type_name: str, fields: List<BinFieldMeta>, lattice_
     out = out + "}\n";
 
     out = out + "impl IBinaryDeserializable<" + type_name + "> for " + type_name + " {\n";
-    out = out + "    pub static fn read_binary(bytes: slice<u8>, offset: var ref<usize>) -> res<" + type_name + ", str> {\n";
+    out = out + "    pub static fn read_binary(bytes: slice<u8>, var ref offset: usize) -> res<" + type_name + ", str> {\n";
     // The decoder reads the fields back in the order the encoder wrote them.
     if lattice_bits == 0 {
         out = out + "        return bytes.read_raw_pod<" + type_name + ">(offset);\n";

@@ -1,0 +1,7 @@
+// A bool is not an integer: it does not widen to one (PROP-005 5B.2,
+// 2026-11-16).
+fn main() {
+    let flag = true;
+    let n: i64 = flag;
+    print(n);
+}

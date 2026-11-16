@@ -46,7 +46,7 @@ fn bp_check_fixed_point(compiler_src: str, violations: i64) -> usize {
     return 2;
 }
 
-pub fn execute_bootstrap_parity_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> GateReport {
+pub fn execute_bootstrap_parity_gate(workspace_root: str, ref _opts: GateRunOptions) -> GateReport {
     let t0 = gate_time_now_us();
     let root = resolve_workspace_root(workspace_root);
     let violations = glist_new();

@@ -111,7 +111,7 @@ pub var fn register_dsl_keyword(
 // 3. LSP Query Providers
 // ------------------------------------------------------------------------------
 
-pub fn query_dsl_completions(cat: ref<LiveDslSyncCatalog>, prefix: str) -> List<DslCompletionItem> {
+pub fn query_dsl_completions(ref cat: LiveDslSyncCatalog, prefix: str) -> List<DslCompletionItem> {
     var results: List<DslCompletionItem> = [];
     var i = 0;
     while i < cat.completion_items.len() {
@@ -124,7 +124,7 @@ pub fn query_dsl_completions(cat: ref<LiveDslSyncCatalog>, prefix: str) -> List<
     return results;
 }
 
-pub fn query_dsl_hover(cat: ref<LiveDslSyncCatalog>, word: str) -> DslHoverInfo {
+pub fn query_dsl_hover(ref cat: LiveDslSyncCatalog, word: str) -> DslHoverInfo {
     var i = 0;
     while i < cat.hover_infos.len() {
         let h = cat.hover_infos[i];
@@ -136,7 +136,7 @@ pub fn query_dsl_hover(cat: ref<LiveDslSyncCatalog>, word: str) -> DslHoverInfo 
     return DslHoverInfo::none();
 }
 
-pub pure fn is_dsl_keyword(cat: ref<LiveDslSyncCatalog>, word: str) -> bool {
+pub pure fn is_dsl_keyword(ref cat: LiveDslSyncCatalog, word: str) -> bool {
     var i = 0;
     while i < cat.scoped_keywords.len() {
         if cat.scoped_keywords[i] == word {

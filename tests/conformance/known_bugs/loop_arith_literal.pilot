@@ -1,0 +1,24 @@
+// Inside a `while` or `for` body, arithmetic with an integer literal has the
+// literal's type (`i64`) instead of the other operand's: `capacity + 7` for a
+// `usize` `capacity` is reported as `i64`, so passing it where a `usize` is
+// wanted is rejected (TYPE001). The same sum outside a loop, or inside `loop`,
+// is a `usize`. Found 2026-11-16 (PROP-005 5B.2) in
+// selfhost/chor/storage_plan.pilot `compute_storage_plan`.
+//
+// Worked by hand: capacity 3; the loop runs for i = 0, 1, 2 and adds
+// (3 + 7) / 8 = 1 each time, so total = 3.
+fn want(v: usize) -> usize => v;
+
+fn plane(capacity: usize) -> usize {
+    var total: usize = 0;
+    var i = 0;
+    while i < 3 {
+        total = total + want((capacity + 7) / 8);
+        i = i + 1;
+    }
+    return total;
+}
+
+fn main() {
+    print(plane(3));
+}

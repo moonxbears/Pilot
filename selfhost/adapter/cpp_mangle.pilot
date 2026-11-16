@@ -168,7 +168,7 @@ pub pure fn msvc_operator_code(name: str) -> str {
 // 3. Itanium C++ ABI Mangling (_ZN...E)
 // ------------------------------------------------------------------------------
 
-pub pure fn itanium_mangle_type(ty: ref<CppType>) -> str {
+pub pure fn itanium_mangle_type(ref ty: CppType) -> str {
     var out = "";
     if ty.is_const && ty.kind != CppTypeKind::LValueRef && ty.kind != CppTypeKind::RValueRef {
         out = out + "K";
@@ -297,7 +297,7 @@ pub pure fn mangle_itanium(
 // 4. MSVC x64 Mangling (?name@ns@@...)
 // ------------------------------------------------------------------------------
 
-pub pure fn msvc_mangle_type(ty: ref<CppType>) -> str {
+pub pure fn msvc_mangle_type(ref ty: CppType) -> str {
     if ty.kind == CppTypeKind::Void { return "X"; }
     if ty.kind == CppTypeKind::Bool { return "_N"; }
     if ty.kind == CppTypeKind::Char { return "D"; }
@@ -331,7 +331,7 @@ pub pure fn mangle_msvc_x64(
     access: u8,
     is_virtual: bool,
     ref param_types: slice<CppType>,
-    ret_type: ref<CppType>
+    ref ret_type: CppType
 ) -> str {
     var out = "?";
 

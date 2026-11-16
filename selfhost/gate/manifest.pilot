@@ -95,7 +95,7 @@ pub struct GateRunOptions : IValue {
 pub interface IGateCheck : IAnyValue {
     pub pure fn id() -> str;
     pub pure fn category() -> GateCategory;
-    pub fn execute(workspace_root: str, opts: ref<GateRunOptions>) -> GateReport;
+    pub fn execute(workspace_root: str, ref opts: GateRunOptions) -> GateReport;
 }
 
 [Layout(c_abi)]
@@ -437,15 +437,15 @@ pub fn seed_token_registry_new() -> SeedTokenRegistry {
     };
 }
 
-pub pure fn seed_registry_count(reg: ref<SeedTokenRegistry>) -> usize {
+pub pure fn seed_registry_count(ref reg: SeedTokenRegistry) -> usize {
     return reg.tokens_len + 0;
 }
 
-pub pure fn seed_registry_contains(reg: ref<SeedTokenRegistry>, word: str) -> bool {
+pub pure fn seed_registry_contains(ref reg: SeedTokenRegistry, word: str) -> bool {
     return gset_contains(reg.lookup, word);
 }
 
-pub pure fn seed_registry_at(reg: ref<SeedTokenRegistry>, idx: usize) -> str {
+pub pure fn seed_registry_at(ref reg: SeedTokenRegistry, idx: usize) -> str {
     return glist_get(reg.tokens, idx);
 }
 

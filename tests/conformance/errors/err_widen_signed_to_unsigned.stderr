@@ -1,0 +1,2 @@
+error[TYPE001]: expected `u64`, found `i8`
+err_widen_signed_to_unsigned.pilot:6:18

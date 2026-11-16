@@ -1,0 +1,7 @@
+// A same-width change of signedness is not a widening: u32 4000000000 has
+// no i32, so it needs a cast (PROP-005 5B.2, 2026-11-16).
+fn main() {
+    let x: u32 = 4000000000;
+    let y: i32 = x;
+    print(y);
+}

@@ -183,7 +183,7 @@ fn openapi_operation(r: HttpRouteDef) -> str {
 
 /// An OpenAPI 3.1 document with one path item per distinct path template;
 /// routes sharing a template become operations of the same path item.
-pub fn http_service_generate_openapi(svc: ref<HttpServiceDef>) -> str {
+pub fn http_service_generate_openapi(ref svc: HttpServiceDef) -> str {
     var json = "{ \"openapi\": \"3.1.0\", \"info\": { \"title\": \"" + json_escape(svc.name) + "\", \"version\": \"" + json_escape(svc.version) + "\" }, \"paths\": {";
     var first_path = true;
     var i = 0;
@@ -279,7 +279,7 @@ pub fn route_template_bind(template: str, path: str, var ref names: List<str>, v
 
 /// Finds the route for `method` and `path`. `path_matched` is true when
 /// some route has this path, whatever its method (405 rather than 404).
-pub fn http_service_match_route(svc: ref<HttpServiceDef>, http_method: str, path: str) -> HttpRouteMatch {
+pub fn http_service_match_route(ref svc: HttpServiceDef, http_method: str, path: str) -> HttpRouteMatch {
     var m = HttpRouteMatch { path_matched: false, route_index: -1, param_names: [], param_values: [] };
     var i = 0;
     while i < svc.routes.len() {
@@ -303,7 +303,7 @@ pub fn http_service_match_route(svc: ref<HttpServiceDef>, http_method: str, path
 /// Routes a request: 404 or 405 problem responses when no route takes it,
 /// otherwise the matched route's handler answers.
 pub fn http_service_dispatch(
-    svc: ref<HttpServiceDef>,
+    ref svc: HttpServiceDef,
     http_method: str,
     path: str,
     body: str
@@ -320,7 +320,7 @@ pub fn http_service_dispatch(
 
 /// Calls the handler function a route names, with its bound path parameters
 /// and decoded body, checking the handler's `requires` (422 on violation).
-pub fn http_invoke_handler(svc: ref<HttpServiceDef>, m: HttpRouteMatch, body: str) -> HttpResponse {
+pub fn http_invoke_handler(ref svc: HttpServiceDef, m: HttpRouteMatch, body: str) -> HttpResponse {
     return seam("http.invoke_handler", "calling a [Service] handler by route needs attribute weaving of handler functions (M21, F4)");
 }
 

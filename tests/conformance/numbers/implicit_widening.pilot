@@ -1,0 +1,39 @@
+// Lossless integer widening is implicit (owner decision 2026-11-16): a value
+// of a narrower integer type fits where a wider one is expected when every
+// value of it is a value of the wider type (unsigned into a wider unsigned
+// or a wider signed type, signed into a wider signed type). It applies to
+// arguments, `let`/`var` annotations, assignments and returns.
+//
+// Worked by hand:
+//   u8 255 as i64 is 255; u16 65535 as u32 is 65535; u32 4000000000 as i64
+//   is 4000000000 (above i32's 2147483647); i8 -128 as i64 is -128;
+//   i32 -2000000000 as i64 is -2000000000 (sign kept, not 2294967296)
+//   u8 255 into a u16 is 255; 255 + 100 = 355 fits a u16
+//   g = -2000000000 from an i32; g - 1 = -2000000001
+//   a u8 7 returned as an i64 is 7
+fn wide(v: i64) -> i64 => v;
+fn wide_u32(v: u32) -> u32 => v;
+
+fn seven() -> i64 {
+    let x: u8 = 7;
+    return x;
+}
+
+fn main() {
+    let a: u8 = 255;
+    let b: u16 = 65535;
+    let c: u32 = 4000000000;
+    let d: i8 = -128;
+    let e: i32 = -2000000000;
+    print(wide(a));
+    print(wide_u32(b));
+    print(wide(c));
+    print(wide(d));
+    print(wide(e));
+    let f: u16 = a;
+    print(f + 100);
+    var g: i64 = 0;
+    g = e;
+    print(g - 1);
+    print(seven());
+}

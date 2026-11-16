@@ -44,8 +44,8 @@ pub struct StateSetMask : IValue {
     pub bits: u64;
 
     pub static pure fn empty() -> StateSetMask => StateSetMask { bits: 0 };
-    pub static pure fn from_index(idx: usize) -> StateSetMask {
-        if idx >= 64 { return StateSetMask { bits: 0 }; }
+    pub static pure fn from_index(idx: i64) -> StateSetMask {
+        if idx < 0 || idx >= 64 { return StateSetMask { bits: 0 }; }
         let one: u64 = 1;
         return StateSetMask { bits: one << idx };
     }
@@ -124,7 +124,7 @@ pub fn typestate_decl_new(name: str) -> TypestateDecl {
     };
 }
 
-pub var fn typestate_register_state(var ref self: TypestateDecl, name: str, is_terminal: bool) -> usize {
+pub var fn typestate_register_state(var ref self: TypestateDecl, name: str, is_terminal: bool) -> i64 {
     let idx = self.states.len();
     self.states.push(name);
     if is_terminal {
@@ -146,7 +146,7 @@ pub var fn typestate_register_transition(
     self.transitions.push(transition_sig_new(method, req, ok_next, err_next, is_term, is_fallible));
 }
 
-pub fn typestate_format_mask(decl: ref<TypestateDecl>, mask: StateSetMask) -> str {
+pub fn typestate_format_mask(ref decl: TypestateDecl, mask: StateSetMask) -> str {
     var s = "";
     var i = 0;
     while i < decl.states.len() {
@@ -174,7 +174,7 @@ pub struct TypestateCallResult : IValue {
 }
 
 pub fn typestate_check_call(
-    decl: ref<TypestateDecl>,
+    ref decl: TypestateDecl,
     current_mask: StateSetMask,
     method: str
 ) -> TypestateCallResult {
@@ -232,7 +232,7 @@ pub fn typestate_check_call(
     };
 }
 
-pub fn typestate_check_drop(decl: ref<TypestateDecl>, current_mask: StateSetMask) -> str {
+pub fn typestate_check_drop(ref decl: TypestateDecl, current_mask: StateSetMask) -> str {
     if decl.has_must_reach {
         // If current_mask does not intersect terminal_mask, obligation failed!
         let inter = StateSetMask::intersect(current_mask, decl.terminal_mask);

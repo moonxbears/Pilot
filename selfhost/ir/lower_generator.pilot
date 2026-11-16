@@ -403,7 +403,7 @@ pub fn lower_generator_op(var ref lw: Lowerer, hook: str, ref args: List<u32>, p
 fn make_inst(var ref f: IrFunction, result: u32, op: u16, sub: i64, phy: IrTypePhysics, ref args: List<u32>, span_id: u32) -> IrInst {
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
-    return ir_inst_new(result, op, ir_sub(sub), phy, offset, args.len(), span_id);
+    return ir_inst_new(result, op, ir_sub(sub), phy, offset, ir_operand(args.len()), span_id);
 }
 
 /// The state of moving values of a resume function into its frame.

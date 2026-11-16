@@ -13,8 +13,8 @@ use std.text;
 // ------------------------------------------------------------------------------
 
 pub fn rust_verify_lifetime_bindings(
-    fn_decl: ref<RustFnDecl>,
-    diags: var ref<List<Diagnostic>>
+    ref fn_decl: RustFnDecl,
+    var ref diags: List<Diagnostic>
 ) -> bool {
     let ret_k = fn_decl.ret_kind;
     let returns_borrow = ret_k == RustTypeKind::SliceRef || ret_k == RustTypeKind::SliceMut || ret_k == RustTypeKind::StrRef;
@@ -91,7 +91,7 @@ pub pure fn rust_bridge_cache_key(crate_name: str, src: str) -> str {
 // 3. DynTrait Fat Pointer & Vtable Synthesizer
 // ------------------------------------------------------------------------------
 
-pub fn rust_synthesize_dyn_vtable(trait_decl: ref<RustTraitDecl>) -> str {
+pub fn rust_synthesize_dyn_vtable(ref trait_decl: RustTraitDecl) -> str {
     var out: List<str> = [f"// DynTraitFatPtr vtable layout for trait '{trait_decl.name}'\n"];
     out.push(f"#[repr(C)]\npub struct {trait_decl.name}Vtable {{\n");
     out.push("    pub destructor: unsafe extern \"C\" fn(*mut ()),\n");
@@ -139,14 +139,14 @@ fn bridge_param_supported(kind: RustTypeKind) -> bool {
 }
 
 /// True for the return kinds the bridge passes back across the C ABI.
-fn bridge_return_supported(f: ref<RustFnDecl>) -> bool {
+fn bridge_return_supported(ref f: RustFnDecl) -> bool {
     let k = f.ret_kind;
     return f.return_type == "()" || k == RustTypeKind::Scalar || k == RustTypeKind::Vec
         || k == RustTypeKind::String || k == RustTypeKind::StrRef || k == RustTypeKind::SliceRef;
 }
 
 /// The C-ABI type carrying a return value of `f` back to Pilot.
-fn bridge_return_carrier(f: ref<RustFnDecl>) -> str {
+fn bridge_return_carrier(ref f: RustFnDecl) -> str {
     let k = f.ret_kind;
     if f.return_type == "()" { return "()"; }
     if k == RustTypeKind::Scalar { return f.return_type; }
@@ -159,7 +159,7 @@ fn bridge_return_carrier(f: ref<RustFnDecl>) -> str {
 }
 
 /// Turns `call` (an expression of the Rust return type) into the carrier.
-fn bridge_return_lift(f: ref<RustFnDecl>, call: str) -> str {
+fn bridge_return_lift(ref f: RustFnDecl, call: str) -> str {
     let k = f.ret_kind;
     if f.return_type == "()" { return f"{{ {call}; }}"; }
     if k == RustTypeKind::Scalar { return call; }
@@ -193,7 +193,7 @@ fn bridge_param_arg(p: RustParamDecl) -> str {
     return p.name;
 }
 
-pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) -> str {
+pub fn rust_generate_bridge_crate(ref module: RustModuleDecl, crate_name: str) -> str {
     var out: List<str> = ["// ==============================================================================\n"];
     out.push(f"// Auto-generated Pilot C-ABI bridge crate for '{crate_name}'\n");
     out.push("// Enforces std::panic::catch_unwind safety boundary and zero-copy slices\n");
@@ -332,7 +332,7 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
 /// returned borrow is tied to an input borrow (RST003).
 pub fn absorb_rust_source(
     src: str,
-    diags: var ref<List<Diagnostic>>
+    var ref diags: List<Diagnostic>
 ) -> RustModuleDecl {
     let module = rust_parse_source(src, var diags);
     var i: i64 = 0;
@@ -349,7 +349,7 @@ pub fn absorb_rust_source(
 pub fn absorb_rust_crate(
     crate_spec: str,
     features: slice<str>,
-    diags: var ref<List<Diagnostic>>
+    var ref diags: List<Diagnostic>
 ) -> RustModuleDecl {
     return seam("rust.cargo_resolve",
         "running cargo metadata / cargo build for the crate and its features needs process spawn (F6)");

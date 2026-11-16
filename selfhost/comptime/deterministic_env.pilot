@@ -78,7 +78,7 @@ pub var fn det_map_set(var ref self: DetMap, key: str, val: i64) {
     self.entries.push(DetMapEntry { key: key, val: val });
 }
 
-pub pure fn det_map_get(self: ref<DetMap>, key: str) -> i64 {
+pub pure fn det_map_get(ref self: DetMap, key: str) -> i64 {
     var i = 0;
     while i < self.entries.len() {
         if self.entries[i].key == key {
@@ -89,7 +89,7 @@ pub pure fn det_map_get(self: ref<DetMap>, key: str) -> i64 {
     return 0;
 }
 
-pub pure fn det_map_has(self: ref<DetMap>, key: str) -> bool {
+pub pure fn det_map_has(ref self: DetMap, key: str) -> bool {
     var i = 0;
     while i < self.entries.len() {
         if self.entries[i].key == key {
@@ -100,7 +100,7 @@ pub pure fn det_map_has(self: ref<DetMap>, key: str) -> bool {
     return false;
 }
 
-pub fn det_map_keys_ordered(self: ref<DetMap>) -> List<str> {
+pub fn det_map_keys_ordered(ref self: DetMap) -> List<str> {
     var keys: List<str> = [];
     var i = 0;
     while i < self.entries.len() {

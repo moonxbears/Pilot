@@ -799,15 +799,23 @@ pub fn verify_loop_ergonomics(i: i64, node_count: i64) -> i64 {
         }
     }
     if ok == 108 && __engine(Cfg.ast.ast_child_count, i) > 0 {
+        // A chain that ends anywhere but the program root (original kind 0)
+        // belongs to a node left from an earlier attempt at a syntax rule
+        // (`for` is one): no parent links it, so it is not in the program.
         var cur = __engine(Cfg.ast.ast_parent, i); var enc_for = false; var depth = 0;
+        var orphan = cur == 4294967295;
         while cur != 4294967295 && cur >= 0 && depth < 30 {
             let cur_ok = __engine(Cfg.ast.ast_orig_kind, cur);
             if cur_ok == 204 { enc_for = true; cur = -1; }
             else if cur_ok == 106 || __engine(Cfg.ast.ast_node_kind, cur) == 7 { cur = -1; }
-            else { cur = __engine(Cfg.ast.ast_parent, cur); }
+            else {
+                let up = __engine(Cfg.ast.ast_parent, cur);
+                if up == 4294967295 && cur_ok != 0 { orphan = true; }
+                cur = up;
+            }
             depth = depth + 1;
         }
-        if !enc_for { emit_diag(i, 1, "LOOP005: Dynamic bounds continuation 'continue a..b' is only supported inside a 'for' loop"); return 1; }
+        if !enc_for && !orphan { emit_diag(i, 1, "LOOP005: Dynamic bounds continuation 'continue a..b' is only supported inside a 'for' loop"); return 1; }
     }
     return 0;
 }

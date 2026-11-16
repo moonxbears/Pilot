@@ -33,25 +33,49 @@ pub interface {
     }
 
     // 3. Equality, Ordering & Hashing Contracts
-    IEquatable<TSelf: IAnyValue> : IAnyValue {
-        pub pure:
-            [Infix(::Equality, ::Neither)]
-            op == (rhs: TSelf) -> bool;
-            [Infix(::Equality, ::Neither)]
-            op != (rhs: TSelf) -> bool => !(self == rhs);
+    // Each operator is its own building block; a default body names the
+    // block whose operator it calls (`!=` calls `==`, the other orderings
+    // call `<`).
+    IEqualTo<TSelf: IAnyValue> : IAnyValue {
+        [Infix(::Equality, ::Neither)]
+        pub pure op == (rhs: TSelf) -> bool;
     }
 
-    IComparable<TSelf: IAnyValue> : IEquatable<TSelf> {
-        pub pure:
-            [Infix(::Compare, ::Neither)]
-            op <  (rhs: TSelf) -> bool;
-            [Infix(::Compare, ::Neither)]
-            op <= (rhs: TSelf) -> bool => !(rhs < self);
-            [Infix(::Compare, ::Neither)]
-            op >  (rhs: TSelf) -> bool => (rhs < self);
-            [Infix(::Compare, ::Neither)]
-            op >= (rhs: TSelf) -> bool => !(self < rhs);
+    INotEqualTo<TSelf: IAnyValue> : IEqualTo<TSelf> {
+        [Infix(::Equality, ::Neither)]
+        pub pure op != (rhs: TSelf) -> bool => !(self == rhs);
     }
+
+    IEquatable<TSelf: IAnyValue>
+        : IEqualTo<TSelf>,
+        INotEqualTo<TSelf> {}
+
+    ICompareLessThan<TSelf: IAnyValue> : IAnyValue {
+        [Infix(::Compare, ::Neither)]
+        pub pure op <  (rhs: TSelf) -> bool;
+    }
+
+    ICompareLessOrEqualThan<TSelf: IAnyValue> : ICompareLessThan<TSelf> {
+        [Infix(::Compare, ::Neither)]
+        pub pure op <= (rhs: TSelf) -> bool => !(rhs < self);
+    }
+
+    ICompareGreaterThan<TSelf: IAnyValue> : ICompareLessThan<TSelf> {
+        [Infix(::Compare, ::Neither)]
+        pub pure op >  (rhs: TSelf) -> bool => (rhs < self);
+    }
+
+    ICompareGreaterOrEqualThan<TSelf: IAnyValue> : ICompareLessThan<TSelf> {
+        [Infix(::Compare, ::Neither)]
+        pub pure op >= (rhs: TSelf) -> bool => !(self < rhs);
+    }
+
+    IComparable<TSelf: IAnyValue>
+        : IEquatable<TSelf>,
+        ICompareLessThan<TSelf>,
+        ICompareLessOrEqualThan<TSelf>,
+        ICompareGreaterThan<TSelf>,
+        ICompareGreaterOrEqualThan<TSelf> {}
 
     ICompareOperator<TRhs: IAnyValue, TOrder: IAnyValue> : IAnyValue {
         [Infix(::Compare, ::Neither)]
@@ -143,21 +167,43 @@ pub interface {
         pub pure op - () -> TOut;
     }
 
-    IBitwiseOperator<TSelf: IAnyValue> : IAnyValue {
-        pub pure:
-            [Infix(::BitAnd, ::Left)]
-            op &  (rhs: TSelf) -> TSelf;
-            [Infix(::BitOr, ::Left)]
-            op |  (rhs: TSelf) -> TSelf;
-            [Infix(::BitXor, ::Left)]
-            op ^  (rhs: TSelf) -> TSelf;
-            [Prefix(::Unary)]
-            op ~  ()           -> TSelf;
-            [Infix(::Shift, ::Left)]
-            op << (bits: u32)  -> TSelf;
-            [Infix(::Shift, ::Left)]
-            op >> (bits: u32)  -> TSelf;
+    IBitwiseShiftLeft<TSelf: IAnyValue> : IAnyValue {
+        [Infix(::Shift, ::Left)]
+        pub pure op << (bits: u32)  -> TSelf;
     }
+
+    IBitwiseShiftRight<TSelf: IAnyValue> : IAnyValue {
+        [Infix(::Shift, ::Left)]
+        pub pure op >> (bits: u32)  -> TSelf;
+    }
+
+    IBitwiseAnd<TSelf: IAnyValue> : IAnyValue {
+        [Infix(::BitAnd, ::Left)]
+        pub pure op & (rhs: TSelf)  -> TSelf;
+    }
+
+    IBitwiseOr<TSelf: IAnyValue> : IAnyValue {
+        [Infix(::BitOr, ::Left)]
+        pub pure op | (rhs: TSelf)  -> TSelf;
+    }
+
+    IBitwiseXor<TSelf: IAnyValue> : IAnyValue {
+        [Infix(::BitXor, ::Left)]
+        pub pure op ^ (rhs: TSelf)  -> TSelf;
+    }
+
+    IBitwiseNot<TSelf: IAnyValue> : IAnyValue {
+        [Prefix(::Unary)]
+        pub pure op ~ ()  -> TSelf;
+    }
+
+    IBitwiseOperator<TSelf: IAnyValue>
+        : IBitwiseShiftLeft<TSelf>,
+        IBitwiseShiftRight<TSelf>,
+        IBitwiseAnd<TSelf>,
+        IBitwiseOr<TSelf>,
+        IBitwiseXor<TSelf>,
+        IBitwiseNot<TSelf> {}
 
     // `a ** b` groups to the right: `2 ** 3 ** 2` is `2 ** 9`.
     IPowOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
@@ -186,7 +232,7 @@ pub interface {
 
     ISwapOperator<TRhs: IAnyValue> : IAnyValue {
         [Infix(::Assign, ::Neither)]
-        pub op :=: (rhs: var ref<TRhs>);
+        pub op :=: (var ref rhs: TRhs);
     }
 
     ILensOperator<TLens: IAnyValue, TOut: IAnyValue> : IAnyValue {
@@ -204,13 +250,19 @@ pub interface {
         pub pure op >.. () -> TOut;
     }
 
-    IRangeOperator<TRhs: IValue, TOut: IValue> : IValue {
-        pub pure:
-            [Shaped(::OpenRange, ::Range, ::Neither)]
-            op ..< (rhs: TRhs) -> TOut;
-            [Shaped(::OpenRange, ::Range, ::Neither)]
-            op ..  (rhs: TRhs) -> TOut;
+    IRangeUntilOperator<TRhs: IValue, TOut: IValue> : IValue {
+        [Shaped(::OpenRange, ::Range, ::Neither)]
+        pub pure op ..< (rhs: TRhs) -> TOut;
     }
+
+    IRangeToOperator<TRhs: IValue, TOut: IValue> : IValue {
+        [Shaped(::OpenRange, ::Range, ::Neither)]
+        pub pure op .. (rhs: TRhs) -> TOut;
+    }
+
+    IRangeOperator<TRhs: IValue, TOut: IValue>
+        : IRangeUntilOperator<TRhs, TOut>,
+        IRangeToOperator<TRhs, TOut> {}
 
     ISpanOperator<TRhs: IValue, TOut: IValue> : IValue {
         [Shaped(::OpenRange, ::Range, ::Neither)]
@@ -238,15 +290,16 @@ pub interface {
     }
 
     ISplatOperator<TSeq: IAnyValue> : IAnyValue {
-        pub pure fn unpack() -> TSeq;
+        [Prefix(::Unary)]
+        pub pure op * () -> TSeq;
     }
-
     IPairsOperator<TPairs: IAnyValue> : IAnyValue {
-        pub pure fn unpack_pairs() -> TPairs;
+        [Prefix(::Unary)]
+        pub pure op ** () -> TPairs;
     }
-
     IFlattenOperator<TLeaf: IAnyValue> : IAnyValue {
-        pub pure fn flat() -> slice<TLeaf>;
+        [Prefix(::Unary)]
+        pub pure op *.. () -> slice<TLeaf>;
     }
 
     // 6. Zero-Allocation Value-Type Iteration & Collection Capabilities

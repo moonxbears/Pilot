@@ -17,7 +17,7 @@ pub lvl(0) pkg selfhost.check;
 
 /// Adds a `ReceiverType` row to `rows` for each method call of the user's
 /// files whose receiver's type is named.
-pub fn plan_receivers(var ref inf: Infer, var ref rows: List<List<any>>) {
+pub fn plan_receivers(var ref inf: Infer, var ref rows: List<DropRow>) {
     let p = inf.p;
     let s = p.s;
     var n = 0;
@@ -31,7 +31,7 @@ pub fn plan_receivers(var ref inf: Infer, var ref rows: List<List<any>>) {
                     let t = type_of(inf, recv);
                     if ty_is_named(p.tt, t) {
                         let name = node_name(s, ty_decl(p.tt, t));
-                        rows.push([DropAction::ReceiverType as i64, span_start(s, recv), span_end(s, recv), kind(s, recv), name, ""]);
+                        rows.push((DropAction::ReceiverType as i64, span_start(s, recv), span_end(s, recv), kind(s, recv), name, ""));
                     }
                 }
             }

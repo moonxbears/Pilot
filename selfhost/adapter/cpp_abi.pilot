@@ -205,11 +205,11 @@ pub pure fn align_up_to(val: usize, align: usize) -> usize {
     return val + (align - rem);
 }
 
-pub pure fn is_non_trivial_cpp_type(cls: ref<CppClassDecl>) -> bool {
+pub pure fn is_non_trivial_cpp_type(ref cls: CppClassDecl) -> bool {
     return cls.has_user_dtor || cls.has_user_copy_ctor || cls.has_user_move_ctor;
 }
 
-pub pure fn class_has_virtual_methods(cls: ref<CppClassDecl>) -> bool {
+pub pure fn class_has_virtual_methods(ref cls: CppClassDecl) -> bool {
     var i: usize = 0;
     while i < cls.methods.len() {
         if cls.methods[i].is_virtual { return true; }
@@ -227,7 +227,7 @@ pub pure fn class_has_virtual_methods(cls: ref<CppClassDecl>) -> bool {
 // 5. Vtable Slot Computation (Itanium 2-Slot Destructor Rule)
 // ------------------------------------------------------------------------------
 
-pub pure fn compute_vtable_slots(cls: ref<CppClassDecl>) -> List<CppVtableSlot> {
+pub pure fn compute_vtable_slots(ref cls: CppClassDecl) -> List<CppVtableSlot> {
     var slots: List<CppVtableSlot> = [];
     var next_slot: usize = 0;
 
@@ -288,8 +288,8 @@ pub pure fn compute_vtable_slots(cls: ref<CppClassDecl>) -> List<CppVtableSlot> 
 // ------------------------------------------------------------------------------
 
 pub pure fn compute_cpp_class_layout(
-    cls: ref<CppClassDecl>,
-    target: ref<TargetDescriptor>
+    ref cls: CppClassDecl,
+    ref target: TargetDescriptor
 ) -> CppClassLayout {
     let ptr_size = if target.pointer_bytes > 0 { target.pointer_bytes } else { 8 };
     let has_vptr = class_has_virtual_methods(cls);
@@ -324,7 +324,7 @@ pub pure fn compute_cpp_class_layout(
 
     // Layout member fields
     var field_offsets: List<usize> = [];
-    var f_idx: usize = 0;
+    var f_idx: i64 = 0;
     while f_idx < cls.fields.len() {
         let f = cls.fields[f_idx];
         let f_align = if f.alignment > 0 { f.alignment } else { 1 };

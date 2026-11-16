@@ -302,7 +302,7 @@ pub pure fn c_read_word(src: str, pos: i64) -> str {
 pub fn c_parse_translation_unit(
     src: str,
     header_path: str,
-    diagnostics: var ref<List<Diagnostic>>
+    var ref diagnostics: List<Diagnostic>
 ) -> CTranslationUnit {
     var tu = c_translation_unit_new(header_path);
     let n = src.len();
@@ -753,7 +753,7 @@ pub fn absorb_c_header(
     search_dirs: slice<str>,
     target_os: str,
     target_arch: str,
-    diags: var ref<List<Diagnostic>>
+    var ref diags: List<Diagnostic>
 ) -> CTranslationUnit {
     var env = cpp_env_new(target_os, target_arch);
     let preprocessed = preprocess_c_header(source, header_path, search_dirs, var env);
@@ -765,7 +765,7 @@ pub fn absorb_c_header_file(
     search_dirs: slice<str>,
     target_os: str,
     target_arch: str,
-    diags: var ref<List<Diagnostic>>
+    var ref diags: List<Diagnostic>
 ) -> CTranslationUnit {
     let src = File.read_text(header_path);
     return absorb_c_header(src, header_path, search_dirs, target_os, target_arch, var diags);

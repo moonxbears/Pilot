@@ -99,7 +99,7 @@ pub fn adapted_method_new(raw_sym: str, clean_name: str) -> AdaptedMethod {
     };
 }
 
-fn emit_op(method: var ref<AdaptedMethod>, op: u16, text: str) {
+fn emit_op(var ref method: AdaptedMethod, op: u16, text: str) {
     method.ir_ops.push(op);
     method.ir_thunk = method.ir_thunk + "  " + text + "\n";
 }
@@ -128,7 +128,7 @@ pub fn adapter_compilation_report_new(target: str) -> AdapterCompilationReport {
     };
 }
 
-fn report_error(report: var ref<AdapterCompilationReport>, code: str, message: str) {
+fn report_error(var ref report: AdapterCompilationReport, code: str, message: str) {
     let span = source_span_new(0, 0, 0);
     report.diagnostics.push(diagnostic_new(code, diag_severity_error(), message, span));
 }
@@ -139,7 +139,7 @@ fn report_error(report: var ref<AdapterCompilationReport>, code: str, message: s
 
 /// The slice rule whose pointer slot is `idx` and whose pointer/length pair
 /// fits this signature, or -1.
-fn slice_rule_at(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, idx: usize) -> i64 {
+fn slice_rule_at(ref blueprint: AdapterBlueprint, ref sig: AdapterFnSig, idx: usize) -> i64 {
     let n = sig.param_types.len();
     var r: usize = 0;
     while r < blueprint.slice_rules.len() {
@@ -157,7 +157,7 @@ fn slice_rule_at(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, idx: 
 }
 
 /// True when `idx` is the length slot of a slice rule that applies here.
-fn is_consumed_len(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, idx: usize) -> bool {
+fn is_consumed_len(ref blueprint: AdapterBlueprint, ref sig: AdapterFnSig, idx: usize) -> bool {
     var r: usize = 0;
     while r < blueprint.slice_rules.len() {
         let rule = blueprint.slice_rules[r];
@@ -171,7 +171,7 @@ fn is_consumed_len(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, idx
 }
 
 /// The out-param rule for slot `idx` when that slot is a pointer, or -1.
-fn out_rule_at(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, idx: usize) -> i64 {
+fn out_rule_at(ref blueprint: AdapterBlueprint, ref sig: AdapterFnSig, idx: usize) -> i64 {
     var r: usize = 0;
     while r < blueprint.out_rules.len() {
         let rule = blueprint.out_rules[r];
@@ -189,8 +189,8 @@ fn out_rule_at(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, idx: us
 // ------------------------------------------------------------------------------
 
 pub fn compile_adapter_method_thunk(
-    blueprint: ref<AdapterBlueprint>,
-    sig: ref<AdapterFnSig>
+    ref blueprint: AdapterBlueprint,
+    ref sig: AdapterFnSig
 ) -> AdaptedMethod {
     let raw_symbol = sig.symbol;
     let clean = adapter_strip_prefix(raw_symbol, blueprint.strip_prefixes);
@@ -280,7 +280,7 @@ pub fn compile_adapter_method_thunk(
 // 6. Blueprint Verification & Diagnostics Catalog
 // ------------------------------------------------------------------------------
 
-fn check_slice_rules(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, report: var ref<AdapterCompilationReport>) {
+fn check_slice_rules(ref blueprint: AdapterBlueprint, ref sig: AdapterFnSig, var ref report: AdapterCompilationReport) {
     let n = sig.param_types.len();
     var r: usize = 0;
     while r < blueprint.slice_rules.len() {
@@ -298,7 +298,7 @@ fn check_slice_rules(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, r
     }
 }
 
-fn check_callbacks(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, report: var ref<AdapterCompilationReport>) {
+fn check_callbacks(ref blueprint: AdapterBlueprint, ref sig: AdapterFnSig, var ref report: AdapterCompilationReport) {
     let n = sig.param_types.len();
     var r: usize = 0;
     while r < blueprint.callbacks.len() {
@@ -316,7 +316,7 @@ fn check_callbacks(blueprint: ref<AdapterBlueprint>, sig: ref<AdapterFnSig>, rep
 }
 
 pub fn verify_and_compile_blueprint(
-    blueprint: ref<AdapterBlueprint>,
+    ref blueprint: AdapterBlueprint,
     ref sigs: List<AdapterFnSig>
 ) -> AdapterCompilationReport {
     var report = adapter_compilation_report_new(blueprint.target_type);
@@ -359,7 +359,7 @@ pub fn verify_and_compile_blueprint(
 /// Hands the planned thunks to the PilIR module and the target type's
 /// `MethodTable`. Neither an `IrFunction` model nor a `MethodTable` install
 /// point exists yet, so the adapted methods cannot be called.
-pub fn install_adapter_thunks(report: ref<AdapterCompilationReport>) -> usize {
+pub fn install_adapter_thunks(ref report: AdapterCompilationReport) -> usize {
     return seam("adapter.install_thunks",
         "PilIR IrFunction emission and MethodTable install arrive in F5");
 }

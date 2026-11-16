@@ -182,9 +182,9 @@ pure fn align_up(offset: usize, align: usize) -> usize {
 fn check_bundle_cycles_rec(
     current: str,
     ref all_bundles: Map<str, BundleDef>,
-    visiting: var ref<List<str>>,
-    visited: var ref<Map<str, bool>>,
-    diags: var ref<List<str>>
+    var ref visiting: List<str>,
+    var ref visited: Map<str, bool>,
+    var ref diags: List<str>
 ) -> bool {
     if str_list_contains(visiting, current) {
         let msg = "COMP002: Cyclic *Bundle inclusion detected: " + current;
@@ -214,7 +214,7 @@ fn check_bundle_cycles_rec(
     return false;
 }
 
-pub fn check_bundle_cycles(ref bundles: Map<str, BundleDef>, start: str, diags: var ref<List<str>>) -> bool {
+pub fn check_bundle_cycles(ref bundles: Map<str, BundleDef>, start: str, var ref diags: List<str>) -> bool {
     var visiting: List<str> = [];
     var visited: Map<str, bool> = [:];
     return check_bundle_cycles_rec(start, bundles, var visiting, var visited, var diags);

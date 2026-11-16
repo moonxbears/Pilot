@@ -44,7 +44,7 @@ pub fn lowered_topology_plan_new(name: str) -> LoweredTopologyPlan {
 // 2. Topology Lowering Compiler
 // ------------------------------------------------------------------------------
 
-pub fn lower_topology(bp: ref<BlueprintDef>) -> LoweredTopologyPlan {
+pub fn lower_topology(ref bp: BlueprintDef) -> LoweredTopologyPlan {
     var plan = lowered_topology_plan_new(bp.name);
 
     var i = 0;

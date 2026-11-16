@@ -135,7 +135,7 @@ pub var fn add_binding(var ref self: HygienicEnv, name: str, is_unhygienic: bool
 // 5. Flatt Scopes-As-Sets Resolution Algorithm
 // ------------------------------------------------------------------------------
 
-pub fn resolve_identifier(env: ref<HygienicEnv>, name: str, ref_scopes: SyntaxScopeSet) -> ResolvedBinding {
+pub fn resolve_identifier(ref env: HygienicEnv, name: str, ref_scopes: SyntaxScopeSet) -> ResolvedBinding {
     var best_match_id: usize = 0;
     var best_count: usize = 0;
     var found = false;

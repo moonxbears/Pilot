@@ -62,7 +62,7 @@ pure fn chor_list_has(ref items: List<str>, item: str) -> bool {
 /// Walks `::DirectCall` routes from `role`. A route back to a role still on
 /// the walk's stack closes a synchronous cycle and is reported as CHOR004.
 fn direct_call_dfs(
-    bp: ref<BlueprintDef>,
+    ref bp: BlueprintDef,
     role: str,
     var ref on_stack: List<str>,
     var ref done: List<str>,
@@ -103,7 +103,7 @@ pub fn resolve_cue_payload_lattice(cue: CueContract) -> u8 {
 // 3. Blueprint Topology Verifier
 // ------------------------------------------------------------------------------
 
-pub fn verify_blueprint_topology(bp: ref<BlueprintDef>) -> List<str> {
+pub fn verify_blueprint_topology(ref bp: BlueprintDef) -> List<str> {
     var diags: List<str> = [];
 
     // 1. CHOR001: 2-Bit Cue Boundary Law

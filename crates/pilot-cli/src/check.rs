@@ -516,8 +516,8 @@ pub fn drop_plan(path: &str, checker_files: &[String], decls: &[String]) -> Chec
     )
 }
 
-/// The checker's run plan `out` (`run_plan()`), its nodes placed in the
-/// files of `linked`.
+/// The checker's run plan `out` (`run_plan()`, `[drop rows, probe rows,
+/// glue rows]`), its nodes placed in the files of `linked`.
 fn decode_plan(linked: &LinkedSource, out: &HostValue) -> CheckedDropPlan {
     let parts = out.as_list().unwrap_or_default();
     let mut plan = CheckedDropPlan::default();
@@ -528,10 +528,10 @@ fn decode_plan(linked: &LinkedSource, out: &HostValue) -> CheckedDropPlan {
     {
         plan.probes.extend(planned_probe(linked, r));
     }
-    for r in parts
-        .first()
-        .and_then(HostValue::as_list)
-        .unwrap_or_default()
+    for r in [0, 2]
+        .into_iter()
+        .filter_map(|i| parts.get(i).and_then(HostValue::as_list))
+        .flatten()
     {
         let Some(f) = r.as_list() else { continue };
         let s = |i: usize| {

@@ -77,22 +77,11 @@ pub fn check_all(var ref inf: Infer, var ref sink: DiagSink) {
     check_quotes(inf, sink);
 }
 
-/// Where each owned value of the program is dropped (selfhost/check/drops.pilot),
-/// as rows for crates/pilot-cli/src/check.rs `drop_plan`.
-pub fn drop_plan() -> List<List<any>> {
-    let s = snap_load();
-    let p = prog_new(s);
-    let r = resolve_program(p, sink_new(s));
-    let inf = infer_new(p, r);
-    let pl = drop_planner(inf);
-    plan_copies(pl);
-    return pl.rows;
-}
-
 /// Everything the seed carries out around the program's nodes, as rows for
-/// crates/pilot-cli/src/check.rs `run_plan`: the drop plan (`drop_plan`),
-/// then the probes of `[Debug]` functions (selfhost/check/probes.pilot),
-/// each `[span start, span end, node kind, capture, call, args]`.
+/// crates/pilot-cli/src/check.rs `run_plan`: the drop plan rows
+/// (selfhost/check/drops.pilot), then the probes of `[Debug]` functions and
+/// coverage (selfhost/check/probes.pilot), each `[span start, span end, node
+/// kind, capture, call, args, at]`, then the glue rows.
 pub fn run_plan() -> List<any> {
     let s = snap_load();
     let p = prog_new(s);
@@ -118,5 +107,5 @@ pub fn plan_of(ref s: Snap, var ref inf: Infer) -> List<any> {
         let n: i64 = row[0];
         probes.push([span_start(s, n), span_end(s, n), kind(s, n), row[1], row[2], row[3], row[4]]);
     }
-    return [pl.rows, probes];
+    return [pl.rows, probes, pl.glue];
 }

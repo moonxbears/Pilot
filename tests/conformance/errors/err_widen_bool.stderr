@@ -1,0 +1,2 @@
+error[TYPE001]: expected `i64`, found `bool`
+err_widen_bool.pilot:5:18

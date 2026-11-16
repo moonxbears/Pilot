@@ -12,7 +12,7 @@ use selfhost.chor.*;
 // 1. Mermaid Topology Exporter
 // ------------------------------------------------------------------------------
 
-pub fn export_mermaid_diagram(bp: ref<BlueprintDef>) -> str {
+pub fn export_mermaid_diagram(ref bp: BlueprintDef) -> str {
     var out = "flowchart LR\n";
 
     // 1. Storage subgraphs

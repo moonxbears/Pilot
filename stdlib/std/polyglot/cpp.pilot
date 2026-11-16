@@ -30,8 +30,8 @@ pub struct CppException : IValue {
     }
 }
 
-pub pure fn cpp_exception_what(exc: ref<CppException>) -> str => exc.what;
-pub pure fn cpp_exception_type(exc: ref<CppException>) -> str => exc.type_name;
+pub pure fn cpp_exception_what(ref exc: CppException) -> str => exc.what;
+pub pure fn cpp_exception_type(ref exc: CppException) -> str => exc.type_name;
 
 [Layout(c_abi)]
 pub struct CppCatchResult : IValue {
