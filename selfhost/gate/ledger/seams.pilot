@@ -307,14 +307,6 @@ fn known_bug(id: str, component: str, summary: str, expected: str, actual: str, 
 /// Every known bug, ordered by id.
 pub fn bug_registry() -> List<KnownBug> {
     let entries: List<KnownBug> = [
-        known_bug("seed.expr_body_variant_hint", "crates/pilot-vm/src/lower_stmt.rs (function bodies)",
-            "an `=> expr` function body is compiled without the declared return type as the expected type, so a target-typed variant whose name two enums share (`::Shared`, or `::Coalesce` of InheritPolicy and the operator levels) is DECL001 undefined there; `return ::Shared;` and `let s: Shade = ::Shared;` resolve",
-            "prints 1, 1, 1", "DECL001 at the `=>` body on all three engines; crates/pilot-cli/tests/cli_attrs.rs inherited_steps_follow_their_policy fails on it",
-            "tests/conformance/known_bugs/expr_body_variant_hint.pilot", "PROP-015"),
-        known_bug("check.collecting_for_in_block", "crates/pilot-vm lower_stmt.rs `compile_block` (the seed marks every `for` item of a block as a statement)",
-            "a collecting `for` (`yield`) that is the value of a block or of an `if .. else` branch makes the enclosing function a generator instead of a list on the seed; `main` then never runs, so the program prints nothing and exits 0. PilIR and C follow selfhost/check/generators.pilot `for_collects`, which counts a block's last `for` as its value when the block's value is used, and pass",
-            "the block's value is the list; prints 0, [10, 20, 30], [2, 3, 4]", "prints nothing and exits 0 on the seed; passes on --ir and --emit c",
-            "tests/conformance/known_bugs/block_value_collecting_for.pilot", "PROP-015"),
         known_bug("seed.variant_compare_untyped", "crates/pilot-vm target-typed enum resolution",
             "`::Variant` is undefined when two enums share the variant name and the seed has no type at that spot: a struct literal field (`Cell { slot: ::Value }`) or a comparison with a field of a `for` element",
             "the field's enum picks the variant; prints true", "error[DECL001]: undefined name `Value`",

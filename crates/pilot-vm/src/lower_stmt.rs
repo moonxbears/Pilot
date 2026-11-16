@@ -30,10 +30,14 @@ impl BytecodeCompiler {
         let local_mark = self.next_local_reg;
         let flags_before = self.drop_flags.len();
         let mut last = 0;
+        let wanted = std::mem::take(&mut self.want_value);
         for (i, &c) in children.iter().enumerate() {
             let mark = self.next_reg;
-            // A `for` that is a block item collects nothing (`lower_yield`).
-            self.stmt_for = Self::item_for(arena, NodeId(c));
+            // A `for` that is a block item collects nothing (`lower_yield`),
+            // unless it is the last item of a block whose value is used.
+            let is_value = wanted && i + 1 == children.len();
+            self.stmt_for = if is_value { None } else { Self::item_for(arena, NodeId(c)) };
+            self.want_value = is_value && Self::carries_value(arena, NodeId(c));
             last = self.compile_node(arena, NodeId(c));
             if i + 1 < children.len() {
                 self.release_to(mark);
@@ -41,6 +45,7 @@ impl BytecodeCompiler {
         }
         let value = match children.last() {
             Some(&c) if Self::item_yields_value(arena, NodeId(c)) => last,
+            Some(&c) if wanted && Self::item_for(arena, NodeId(c)).is_some() => last,
             _ => self.emit_const(PilotVal::NULL),
         };
         let r = self.close_defer_scope(arena, value);
@@ -201,7 +206,13 @@ impl BytecodeCompiler {
             self.release_to(mark);
         }
         self.reserve_old_slots(arena, body_node);
-        let b = self.compile_node(arena, body_node);
+        // An `=> expr` body is compiled against the declared return type,
+        // as `return expr;` is (a target-typed `::Variant` needs it).
+        let b = if arena.node(body_node).node_kind() == NodeKind::BlockExpr {
+            self.compile_node(arena, body_node)
+        } else {
+            self.compile_with_hint(arena, body_node, self.cur_ret_type.clone())
+        };
         // A block-bodied function without a declared return type returns
         // nothing when it falls off the end; `=> expr` bodies return `expr`.
         let returns_value = arena.type_annot(fn_id).is_some()
@@ -217,6 +228,14 @@ impl BytecodeCompiler {
             // calls from here on start after it.
             e.0 = pc + 1;
         }
+    }
+
+    /// Whether `n` is a block or `if` (bare or as a statement), which takes
+    /// `want_value` and passes it on to the blocks that give its value.
+    fn carries_value(arena: &AstArena, n: NodeId) -> bool {
+        let node = arena.node(n);
+        let n = if node.node_kind() == NodeKind::ExprStmt { arena.node(NodeId(node.lhs)) } else { node };
+        matches!(n.node_kind(), NodeKind::BlockExpr | NodeKind::IfExpr)
     }
 
     /// Whether a block item supplies the block's value: an expression or a
@@ -312,6 +331,7 @@ impl BytecodeCompiler {
             .clone()
             .or_else(|| rhs.is_some().then(|| self.infer_call_type(arena, rhs)).flatten());
         let mark = self.next_reg;
+        self.want_value = rhs.is_some() && Self::carries_value(arena, rhs);
         let r_val = if rhs.is_some() { self.compile_with_hint(arena, rhs, ty.clone()) } else { self.emit_null() };
         let r_val = self.convert_for_binding(r_val, declared.as_deref());
         match ty {
@@ -451,6 +471,7 @@ impl BytecodeCompiler {
         let node = *arena.node(node_id);
         // A binding the condition makes (`if some x = v`) ends with the `if`.
         let (outer_slots, outer_types) = (self.var_slots.clone(), self.var_types.clone());
+        let wanted = std::mem::take(&mut self.want_value);
         let dst = self.alloc_reg();
         let mark = self.next_reg;
         let r_cond = self.compile_node(arena, NodeId(node.lhs));
@@ -462,6 +483,7 @@ impl BytecodeCompiler {
         } else {
             (NodeId(node.rhs), NodeId::NONE)
         };
+        self.want_value = wanted && Self::carries_value(arena, then_n);
         let t_reg = self.compile_node(arena, then_n);
         self.emit(Opcode::Move, dst, t_reg, 0);
         self.release_to(mark);
@@ -471,6 +493,7 @@ impl BytecodeCompiler {
             let drops = self.else_drops(arena, node_id);
             self.emit_drops(arena, &drops);
         }
+        self.want_value = wanted && else_n.is_some() && Self::carries_value(arena, else_n);
         let e_reg = self.compile_node(arena, else_n);
         self.emit(Opcode::Move, dst, e_reg, 0);
         self.release_to(mark);

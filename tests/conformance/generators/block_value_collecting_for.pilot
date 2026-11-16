@@ -1,6 +1,7 @@
 // A block or an `if .. else` whose value is a collecting `for` (`yield`)
-// must give that list. Today the program prints nothing at all, not even
-// the `print` before it, and exits 0 (found building PROP-009 step 1a).
+// gives that list. It used to make `main` a generator, so the program
+// printed nothing and exited 0 (known bug check.collecting_for_in_block,
+// found building PROP-009 step 1a; fixed in Pilot and by PROP-015 part C).
 //
 // Expected output, worked by hand:
 //   0 is printed first.

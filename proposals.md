@@ -25,7 +25,7 @@
 | **`PROP-012`** | Delete Test-Only Rust: the AST S-Expression Printer, the Rust Module Header Scanner and `TokenKind::is_keyword` | `-186` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-013`** | Link a Run's Extra Toolchain Files in the Loader's One Pass (`run.rs` `compile_entry`) | `-11` | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-013") AND BUILT; C2 PASSES` |
 | **`PROP-014`** | Update the Benchmark Baseline Test for the Seed Column `PROP-002a` C2 Added (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-014") AND BUILT` |
-| **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed | about `+1` (`+3`, `-4`); C about `+15` | `DRAFT — AWAITING OWNER APPROVAL` |
+| **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed | `+23` as built (`+34`, `-11`) | `APPROVED, BUILT` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -1814,7 +1814,7 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 
 ## `PROP-015` — Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed
 
-**Status: DRAFT, awaiting owner approval.** Found 2026-11-15 while clearing the `pilot-cli` test failures that predate this session's work (they fail at `2a82f59` too).
+**Status: APPROVED by the owner 2026-11-15 (parts A, B and C); BUILT 2026-11-15.** Found 2026-11-15 while clearing the `pilot-cli` test failures that predate this session's work (they fail at `2a82f59` too).
 
 **A. Known bug `seed.expr_body_variant_hint`.**
 - An `=> expr` function body is compiled with plain `compile_node`, without the declared return type as the expected type. `return expr;` uses `compile_with_hint(.., cur_ret_type)` (`lower_stmt.rs` `compile_return`), and so does a typed `let`.
@@ -1844,6 +1844,18 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 - `cargo build`; `cargo test -p pilot-vm` and `-p pilot-cli` give the results of today minus `inherited_steps_follow_their_policy`, which passes.
 - `known_bugs/expr_body_variant_hint` is fixed on all three engines: it moves to `tests/conformance/types/` with its expected output unchanged, and its `bug_registry()` entry is deleted.
 - The seed suite, `--ir`, `--emit c` and `pilot gate` are otherwise unchanged; `types/attr_coverage` and `cli_coverage` still pass.
+
+**As built (2026-11-15).** Only the five listed files changed.
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-vm/src/lower_stmt.rs` | A: an `=> expr` body is compiled with `compile_with_hint(.., cur_ret_type)`. C: `compile_block` takes `want_value`, leaves `stmt_for` unset for its last item when the value is wanted, and gives that `for`'s list as the block's value; `compile_let` sets `want_value` before an initializer that is a block or `if`; `compile_if` passes it on to its branches; new `carries_value` (a block or `if`, bare or as a statement). +26 / −3. |
+| `crates/pilot-vm/src/lib.rs` | C: the `want_value: bool` field (the compiler derives `Default`, so no initializer). +4. |
+| `crates/pilot-vm/src/lower_probe.rs` | B: `ProbeArg::Engine` and both arms deleted. −4. |
+| `crates/pilot-vm/src/lower_expr.rs` | Not touched: `compile_if` lives in `lower_stmt.rs`. |
+
+- Net +23 Rust lines (+34, −11), above the +16 estimate: C needed the block-value arm in `compile_block` and a helper. The flag is set only right before compiling a node that is itself a block or `if`, which takes it at entry, so a lambda or loop body never sees it.
+- `types/expr_body_variant_hint` and `generators/block_value_collecting_for` (moved out of `known_bugs`, expected outputs unchanged) pass on all three engines; both `bug_registry()` entries are deleted.
 
 **Not included.**
 - `pilot ir run` reports LOOP005 ("`continue a..b` is only supported inside a `for` loop") for a `continue 5..6;` that is inside a `for` (`tests/ir/unlowered_continue_range.pilot`; `cli_f5` `an_unlowered_construct_stops_at_its_seam` fails on it). The check is in the legacy `selfhost/analyzer.pilot`, which walks `ast_parent` links built by `crates/pilot-analysis/src/infer.rs`; since `for` became a `syntax` rule (PROP-009 step 2) that walk no longer reaches the `for`. `pilot check` and `pilot run` report the right SEED001. Not yet diagnosed far enough to name a fix. The same analyzer warns LOOP005 "Potential infinite loop ... no 'break'" for `while true { guard some x = f() else { break; }; .. }`: it does not see a `break` inside a `guard`'s `else` (also a `syntax`-rule form since PROP-009). `runtime/stdin_lines` is written with `if some .. else` so `cli_f3` `check_passes_a_valid_program_without_running_it` stays clean.

@@ -36,8 +36,6 @@ pub enum ProbeArg {
     Captured,
     /// `"" + value` of the binding of that name in scope.
     BindingText(String),
-    /// The value of the engine operation of that name, called with nothing.
-    Engine(String),
 }
 
 impl ProbeArg {
@@ -50,7 +48,6 @@ impl ProbeArg {
             2 => ProbeArg::TargetText,
             3 => ProbeArg::Captured,
             4 => ProbeArg::BindingText(text.to_string()),
-            5 => ProbeArg::Engine(text.to_string()),
             _ => return None,
         })
     }
@@ -176,7 +173,6 @@ impl BytecodeCompiler {
                     self.emit(Opcode::Add, dst, empty, value);
                     dst
                 }
-                ProbeArg::Engine(op) => self.emit_intrinsic(op, &[]),
             };
             regs.push(r);
         }

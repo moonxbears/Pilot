@@ -1,7 +1,7 @@
-// Known bug seed.expr_body_variant_hint: an `=> expr` function body is not
-// compiled against the declared return type, so a target-typed variant
-// whose name two enums share (`::Shared`) is "undefined" (DECL001) there,
-// while the same variant after `return` or in a typed `let` resolves.
+// An `=> expr` function body is compiled against the declared return type,
+// as `return` and a typed `let` are, so a target-typed variant whose name
+// two enums share (`::Shared`) resolves there. It used to be DECL001
+// "undefined" (known bug seed.expr_body_variant_hint, fixed by PROP-015 A).
 //
 // Expected, by hand: `Shade` is { Light = 0, Shared = 1 }, so each of the
 // three lines prints 1.

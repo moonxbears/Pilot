@@ -240,6 +240,10 @@ pub struct BytecodeCompiler {
     /// The `for` about to be compiled as a block item (statement position),
     /// which collects nothing.
     stmt_for: Option<NodeId>,
+    /// Set just before compiling a block or `if` whose value is used (a
+    /// `let` initializer, or a branch or last item of one); that node takes
+    /// it at once, so a block's last `for` collects (`lower_yield`).
+    want_value: bool,
     /// Declared structs: fields with defaults, and whether `self(..)` exists.
     structs: HashMap<String, lower_struct::StructInfo>,
     /// Arity of every top-level function, so a function can be used as a
