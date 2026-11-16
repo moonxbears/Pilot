@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.fs;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 [Layout(c_abi)]
 pub struct DirEntry : IValue {
     pub path:     str;

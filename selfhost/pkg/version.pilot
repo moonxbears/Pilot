@@ -5,8 +5,6 @@
 // =========================================================================
 pub pkg selfhost.pkg;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 fn v_find(haystack: str, needle: str, start: i64) -> i64 {
     let hl = haystack.len();
     let nl = needle.len();

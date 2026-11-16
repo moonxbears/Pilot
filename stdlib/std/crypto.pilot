@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.crypto;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub pure fn ct_eq(a: str, b: str) -> bool {
     let n = a.len();
     if n != b.len() { return false; }

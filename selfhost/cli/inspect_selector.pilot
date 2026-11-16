@@ -1,11 +1,12 @@
 // ==============================================================================
-// FILE: selfhost/inspect/selector.pilot
+// FILE: selfhost/cli/inspect_selector.pilot
 // Milestone 7.1: Zero-Black-Box Inspection Selector Engine
 // Target Query Resolution: WholeFile, LineColCursor, LineRange, SymbolPath
 // ==============================================================================
-pub lvl(0) pkg selfhost.inspect;
-
-pub pure fn nameof(sym: str) -> str => sym;
+// Only `pilot inspect` reads a selector (inspect_cmd.pilot), so it lives in
+// the CLI's package: importing the inspection lenses' package for it linked
+// every lens, and through layout_lens.pilot all of selfhost/ir, into the CLI.
+pub lvl(0) pkg selfhost.cli;
 
 // ------------------------------------------------------------------------------
 // Inspection Target Kinds
@@ -53,7 +54,7 @@ pub pure fn target_query_new(k: u8, st: u32, ed: u32, col: u32) -> TargetQuery {
     };
 }
 
-// Parses string into integer helper
+// The digits of `s` as a number; other bytes are skipped.
 pub fn parse_int(s: str) -> u32 {
     let n = s.len();
     var v: u32 = 0;

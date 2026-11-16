@@ -6,8 +6,6 @@
 // ==============================================================================
 pub pkg selfhost;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 let BridgeHooks = [
     node_count: "ast_node_count",
     orig_kind: "ast_orig_kind",

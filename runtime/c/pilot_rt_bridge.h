@@ -125,10 +125,10 @@ static inline int64_t pilot_bridge_rm_rf(const char *path) {
 }
 
 static inline pilot_val pilot_str_copy_to_ptr(pilot_val s, pilot_val ptr, pilot_val cap) {
-    size_t n = pilot_v_slen(s);
+    size_t n = pilot_v_len(s);
     size_t c = cap.as.i > 0 ? (size_t)cap.as.i : 0;
     if (n > c) n = c;
-    if (n > 0 && ptr.as.u != 0) memcpy((void *)(uintptr_t)ptr.as.u, pilot_v_sbytes(&s), n);
+    if (n > 0 && ptr.as.u != 0) memcpy((void *)(uintptr_t)ptr.as.u, pilot_v_bytes(&s), n);
     return pilot_v_int((int64_t)n);
 }
 

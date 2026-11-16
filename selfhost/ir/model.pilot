@@ -8,8 +8,6 @@ pub lvl(0) pkg selfhost.ir;
 use Pilot.Core.Reflect;
 use Pilot.Core.Pending;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // Name-Blind IR Register Classes (Derived strictly from [Bits] & [Layout])
 // ------------------------------------------------------------------------------

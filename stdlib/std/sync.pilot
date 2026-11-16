@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.sync;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub struct Mutex<T: IAnyValue> : IObject {
     pub is_locked: bool;
 

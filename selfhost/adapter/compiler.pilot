@@ -9,8 +9,6 @@ pub lvl(0) pkg selfhost.adapter;
 use selfhost.ir.*;
 use selfhost.diagnostics.*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // 1. Foreign Signature Input
 // ------------------------------------------------------------------------------

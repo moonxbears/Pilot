@@ -29,14 +29,16 @@ The subsystems below remain in `crates/` after `PROP-001` purged `pilot-arena`, 
 | Legacy Rust Subsystem | Current LOC | Why It Does **NOT** Need Rust & Exact Pilot Replacement ([`pilot.md`](file:///home/moony/Documents/dev/projects/Pilot/pilot.md)) |
 | :--- | ---: | :--- |
 | *(Retired)* `pilot-rt` & `pilot-codegen` | `0` *(retired in `PROP-002a`)* | Merged into `pilot-vm` (`value.rs`, `bridge.rs`, `c_abi.rs`) and replaced by Pilot `stdlib/core/file.pilot`; enforced `must_be_absent: true` in `GATE003`. |
-| [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis/src/lib.rs) (`infer`, `types`, `pipeline`, `diagnostics`) | `647` | Legacy M28 AST/layout bridge superseded by [`selfhost/check/`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/check/main.pilot) (`10,631`L Pilot) and [`selfhost/ir/layouts.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/layouts.pilot) (`PROP-004`). |
-| Parser Semantic/Desugaring Passes (`comptime_if.rs`, `fstring.rs`, `pilot_impls.rs`, `attr_hooks.rs`, `num_suffix.rs`, `loud.rs`, `contracts.rs`) | `~2,020` | Pure AST/type/constant rewrites (`<= 250`L each) belonging in `stdlib/core/syntax/`, `selfhost/loader/`, `selfhost/check/`, and `selfhost/ir/` (`PROP-003`). |
+| [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis/src/lib.rs) (`infer`, `types`, `pipeline`, `diagnostics`) | `1,591` | Legacy M28 AST/layout bridge superseded by [`selfhost/check/`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/check/main.pilot) (`10,631`L Pilot) and [`selfhost/ir/layouts.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/layouts.pilot) (`PROP-004`). |
+| Parser Semantic/Desugaring Passes (`comptime_if.rs`, `fstring.rs`, `pilot_impls.rs`, `attr_hooks.rs`, `num_suffix.rs`, `loud.rs`, `contracts.rs`) | `1,621` (these 7 files) | Pure AST/type/constant rewrites (`<= 250`L each) belonging in `stdlib/core/syntax/`, `selfhost/loader/`, `selfhost/check/`, and `selfhost/ir/` (`PROP-003`). |
 | Domain Helpers in [`heap.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm/src/heap.rs), [`ops.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm/src/ops.rs) & [`checked.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm/src/checked.rs) | `~670` | String search/trim/replace, deep flatten, map sorting, casts, `proc_first_done`, and `op_checked` belong in `stdlib/core/` and `selfhost/ir/interp_ops.pilot` (`PROP-003`). |
-| Rust `BytecodeCompiler` (`24` `lower_*.rs` files + `lib.rs:60-1015` + `vm_gen.rs` + `codes.rs`) | `7,833` | Duplicates [`selfhost/check/`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/check/main.pilot) + [`selfhost/ir/`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/main.pilot) (`lower_generator.pilot` already lowers `yield`). Replaced by `selfhost/vm/ir_to_pilc.pilot` (`<= 1,500`L, `PROP-005`). |
+| Rust `BytecodeCompiler` (`24` `lower_*.rs` files + `lib.rs:60-1015` + `vm_gen.rs` + `codes.rs`) | `~8,770` | Duplicates [`selfhost/check/`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/check/main.pilot) + [`selfhost/ir/`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/ir/main.pilot) (`lower_generator.pilot` already lowers `yield`). Replaced by `selfhost/vm/ir_to_pilc.pilot` (`<= 1,500`L, `PROP-005`). |
 
 ---
 
 ## 2. Complete Crate & File Implementation Map (`8` Crates, `88` `src` Files, `27,724` LOC, `141` Types, `920` Functions)
+
+> Line counts are of `rustfmt`-formatted source since `PROP-016` (2026-11-15). Before it, statements packed onto long lines made the seed read `20,547` lines; formatted, the same code is `27,724`.
 
 Every Rust `src` file, `struct`/`enum`/`trait`/`type` alias, and `fn` currently on disk is inventoried below so nothing is ever duplicated (`crates/pilot-arena`, `crates/pilot-ffi`, and `crates/pilot-rt/src/{memory,concurrency,net}.rs` were deleted in `PROP-001` and are enforced absent by `pilot gate`):
 
@@ -167,14 +169,14 @@ Every Rust `src` file, `struct`/`enum`/`trait`/`type` alias, and `fn` currently 
 
 ---
 
-## 3. Rust Integration Test Suites Summary (`71` Files, `28,415` LOC — Frozen Against New Additions)
+## 3. Rust Integration Test Suites Summary (`70` Files, `31,051` LOC — Frozen Against New Additions)
 
 Per [`AGENTS.md`](file:///home/moony/Documents/dev/projects/Pilot/AGENTS.md) §9.1.1, **all new language, compiler, and stdlib tests MUST be written in Pilot** (`tests/conformance/<area>/*.pilot` or `std.test`), never as new Rust `milestone*.rs` harnesses:
 
 | Crate Test Directory | Files | LOC | Current Role & Migration Path |
 | :--- | ---: | ---: | :--- |
-| [`crates/pilot-analysis/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis/tests) | `49` | `23,848` | Legacy `milestone01..61.rs` harnesses + `common/{anticheat,seed_policy}.rs`; migrate to `.pilot` conformance suites so `pilot-analysis` & `BytecodeCompiler` can be deleted. |
-| [`crates/pilot-cli/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-cli/tests) | `13` | `2,751` | CLI process-exit, `--ir`, `--emit c`, `keyword_matrix`, and LSP smoke tests; retain ~300L binary-boot smoke test and move subcommand checks to Pilot. |
-| [`crates/pilot-parser/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser/tests) | `5` | `1,035` | `damaged_source.rs` fuzz test, `bootstrap_sources.rs`, `native_calls.rs`, `register_layouts.rs`, `milestone51` (passes again since its owner-approved edit, PROP-009 step 3, 2026-11-15); retires to `selfhost/parser` fuzzing in Wave 6. |
-| [`crates/pilot-lexer/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-lexer/tests) | `1` | `436` | `milestone52_seed_lexer_and_preprocessor.rs`; retires with Stage-A lexer in Wave 6. |
-| [`crates/pilot-vm/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm/tests) | `2` | `314` | `runtime_memory.rs` (GC root/collection stress) and `milestone54_pilvm_register_engine.rs` (VM opcode dispatch tests). |
+| [`crates/pilot-analysis/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis/tests) | `49` | `25,723` | Legacy `milestone01..61.rs` harnesses + `common/{anticheat,seed_policy}.rs`; migrate to `.pilot` conformance suites so `pilot-analysis` & `BytecodeCompiler` can be deleted. |
+| [`crates/pilot-cli/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-cli/tests) | `13` | `3,265` | CLI process-exit, `--ir`, `--emit c`, `keyword_matrix`, and LSP smoke tests; retain ~300L binary-boot smoke test and move subcommand checks to Pilot. |
+| [`crates/pilot-parser/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser/tests) | `5` | `1,151` | `damaged_source.rs` fuzz test, `bootstrap_sources.rs`, `native_calls.rs`, `register_layouts.rs`, `milestone51` (passes again since its owner-approved edit, PROP-009 step 3, 2026-11-15); retires to `selfhost/parser` fuzzing in Wave 6. |
+| [`crates/pilot-lexer/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-lexer/tests) | `1` | `546` | `milestone52_seed_lexer_and_preprocessor.rs`; retires with Stage-A lexer in Wave 6. |
+| [`crates/pilot-vm/tests/`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm/tests) | `2` | `366` | `runtime_memory.rs` (GC root/collection stress) and `milestone54_pilvm_register_engine.rs` (VM opcode dispatch tests). |

@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.path;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub pure fn path_is_sep(b: u8) -> bool => b == 47 || b == 92; // '/' or '\'
 
 pub fn path_join(base: str, part: str) -> str {

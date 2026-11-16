@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.test;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 [Layout(c_abi)]
 pub struct TestCaseSummary : IValue {
     pub name:   str;

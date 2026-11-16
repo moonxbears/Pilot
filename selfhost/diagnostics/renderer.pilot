@@ -7,8 +7,6 @@ pub lvl(0) pkg selfhost.diagnostics;
 
 use std.text;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub pure fn int_to_str(v: usize) -> str => "" + v;
 
 // ------------------------------------------------------------------------------

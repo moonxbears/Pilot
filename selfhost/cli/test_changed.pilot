@@ -248,21 +248,47 @@ fn packages_of(ref files: List<str>) -> List<str> {
     return out;
 }
 
+/// The revision the changes are measured to: the right side of `A..B`
+/// (`A...B` too; `HEAD` when it is empty), or "" for the working tree when
+/// `since` names one revision.
+fn later_rev(since: str) -> str {
+    let dots = since.find("..", 0);
+    if dots < 0 { return ""; }
+    var at = dots + 2;
+    if at < since.len() && since.slice(at, at + 1) == "." { at = at + 1; }
+    let rev = since.slice(at, since.len());
+    return if rev == "" { "HEAD" } else { rev };
+}
+
+/// Writes file `f` as it was at revision `rev` to `copy`, empty when it was
+/// not there, so the loader can read the package it declared.
+fn write_at_rev(f: str, rev: str, copy: str) {
+    let old = proc.run("git", ["show", f"{rev}:{f}"], "");
+    let _ = File.write_text(copy, if old.exit_code == 0 { old.stdout } else { "" });
+}
+
 /// The files among `changed` (`.pilot` files) that declared a package at
-/// `rev` and do not declare that package now.
-fn repackaged(ref changed: List<str>, rev: str) -> List<str> {
+/// `rev` and do not declare that package at `to` (the working tree when
+/// `to` is ""). Comparing with the working tree for a range that ends at an
+/// earlier commit would count every rename made since as a change in it.
+fn repackaged(ref changed: List<str>, rev: str, to: str) -> List<str> {
     var sources: List<str> = [];
     var earlier: List<str> = [];
+    var later: List<str> = [];
     for f in changed {
         if !f.ends_with(".pilot") { continue; }
-        let old = proc.run("git", ["show", f"{rev}:{f}"], "");
-        let copy = f"{earlier_dir()}/{sources.len()}.pilot";
-        // A file that was not there declared nothing.
-        let _ = File.write_text(copy, if old.exit_code == 0 { old.stdout } else { "" });
+        let n = sources.len();
+        let copy = f"{earlier_dir()}/{n}.pilot";
+        write_at_rev(f, rev, copy);
+        if to != "" {
+            let after = f"{earlier_dir()}/{n}_to.pilot";
+            write_at_rev(f, to, after);
+            later.push(after);
+        }
         sources.push(f);
         earlier.push(copy);
     }
-    let now = packages_of(sources);
+    let now = packages_of(if to == "" { sources } else { later });
     let before = packages_of(earlier);
     var out: List<str> = [];
     for i in 0 .. sources.len() {
@@ -453,7 +479,7 @@ pub fn plan_changed(since: str, ref roots: List<str>, engine: TestEngine, mode_l
     }
     let changed = git.files;
     let programs = candidate_programs(given, engine);
-    let sel = select_cases(changed, programs, engine, mode_lang, tool_sources, repackaged(changed, earlier_rev(since)));
+    let sel = select_cases(changed, programs, engine, mode_lang, tool_sources, repackaged(changed, earlier_rev(since), later_rev(since)));
     if sel.everything {
         print(f"CHANGED {changed.len()} files since {since}: {sel.why}; running every case");
         return ChangedPlan { action: 0, paths: given };

@@ -11,8 +11,6 @@ use Pilot.Core.File::*;
 
 // File.write_text maps directly to fs_write_text without __engine scraping.
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 fn p_find(haystack: str, needle: str, start: i64) -> i64 {
     let hl = haystack.len();
     let nl = needle.len();

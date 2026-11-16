@@ -22,7 +22,7 @@
 use std.proc;
 
 fn main() {
-    let exe = proc.current_exe() ?? "pilot";
+    let exe = proc.pilot_cli_path();
     let copy = "target/check_fix/borrows.pilot";
     let _ = File.write_text(copy, File.read_text("tests/tool_fixtures/check_fix/borrows.pilot"));
     let fix = proc.run(exe, ["check", "--fix", copy], "");

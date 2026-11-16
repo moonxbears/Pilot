@@ -5,8 +5,6 @@
 // ==============================================================================
 pub pkg selfhost;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // 16-byte hardware-packed descriptor: kind(2B) + flags(2B) + span_start(4B) + lhs(4B) + rhs(4B)
 pub pure fn sh_sizeof_ast_node() -> i64 {
     let hdr_bytes = 2 + 2;

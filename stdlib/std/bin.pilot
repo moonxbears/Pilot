@@ -5,8 +5,6 @@
 // ==============================================================================
 pub pkg std.bin;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 [Layout(c_abi)]
 pub struct BinaryPacket : IValue {
     pub magic:   u32;

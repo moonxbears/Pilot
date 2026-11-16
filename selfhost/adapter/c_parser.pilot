@@ -8,8 +8,6 @@ pub lvl(0) pkg selfhost.adapter;
 use selfhost.diagnostics.*;
 use Pilot.Core.File.File;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // 1. Diagnostic Codes & Lattice Classifications
 // ------------------------------------------------------------------------------

@@ -6,8 +6,6 @@ pub pkg std.io;
 
 use Pilot.Core.HostRaw;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 /// The next line of standard input without its line ending, or `none` once
 /// the input has ended.
 pub fn read_line() -> str? {

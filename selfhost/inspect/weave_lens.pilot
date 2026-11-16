@@ -5,8 +5,6 @@
 // ==============================================================================
 pub lvl(0) pkg selfhost.inspect;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // Formats an expanded statement annotated with its synthesis origin
 pub fn format_woven_statement(stmt: str, origin_kind: str, origin_name: str, stage_weight: i32) -> str {
     var annot = "  // [Synthesized via " + origin_kind + " '" + origin_name + "'";

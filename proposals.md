@@ -26,11 +26,12 @@
 | **`PROP-013`** | Link a Run's Extra Toolchain Files in the Loader's One Pass (`run.rs` `compile_entry`) | `-11` | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-013") AND BUILT; C2 PASSES` |
 | **`PROP-014`** | Update the Benchmark Baseline Test for the Seed Column `PROP-002a` C2 Added (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-014") AND BUILT` |
 | **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed | `+23` as built (`+34`, `-11`) | `APPROVED, BUILT` |
-| **`PROP-016`** | Format All Rust With `rustfmt` and Count the Seed's True Size (154 files; split `pilot-parser/src/decl.rs`) | `+7,163` `src` lines of formatting, `0` code | `PROPOSED 2026-11-15; D1 (ceiling) AND D2 (re-measure estimates) OPEN` |
+| **`PROP-016`** | Format All Rust With `rustfmt` and Count the Seed's True Size (147 files; split `pilot-parser/src/decl.rs`) | `+7,177` `src` lines of formatting and file headers, `0` code | `APPROVED BY OWNER 2026-11-15 (D1 (a): CEILING 27,800) AND BUILT` |
+| **`PROP-017`** | Update Three Rust Tests for the Package Loader: New Never-Linking Case and the Moved Inspect Selector (Rust Test Edits Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-017") AND BUILT` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
-| **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
-| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC (measured 2026-11-15) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 APPROVED AND BUILT (PILOT ONLY), 5B.2–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
-| **`PROP-006`** | Precompiled `toolchain.pilc` Stage-3 Cutover — Delete `pilot-{lexer,parser,ast,span,intern}` | `~ -5,950` LOC | `PLANNED (WAVE 6 -> ~1,800 LOC FLOOR)` |
+| **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
+| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 APPROVED AND BUILT (PILOT ONLY), 5B.2–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
+| **`PROP-006`** | Precompiled `toolchain.pilc` Stage-3 Cutover — Delete `pilot-{lexer,parser,ast,span,intern}` | `~ -5,950` LOC packed (the five crates are `11,386` formatted, PROP-016) | `PLANNED (WAVE 6 -> ~1,800 LOC FLOOR)` |
 
 ---
 
@@ -1866,7 +1867,33 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 
 ## `PROP-016` — Format All Rust With `rustfmt` and Count the Seed's True Size
 
-**Status: PROPOSED 2026-11-15, awaiting the owner's approval.** Found 2026-11-15, when `cargo fmt --check` first ran on this machine (rustfmt was not installed until then).
+**Status: APPROVED by the owner 2026-11-15 ("Approve, raise ceiling": D1 (a)); BUILT 2026-11-15.** Found 2026-11-15, when `cargo fmt --check` first ran on this machine (rustfmt was not installed until then).
+
+**As built.**
+- The trailing spaces on `lower_expr.rs` lines 387 and 555 were removed, then `cargo fmt` ran. `cargo fmt --check` exits 0.
+- `cargo fmt` changed **147** distinct files, not 154. rustfmt's report names `pilot-analysis/tests/common/{anticheat,seed_policy,test_metrics}.rs` again through `pilot-{cli,lexer,parser}/tests/../../` paths, so 7 entries in the list below are duplicates. `git diff --name-only` equals the de-duplicated list.
+- `decl.rs` is now 1,305 lines. `decl_syntax.rs` (202 lines) holds `parse_syntax_decl`, `parse_syntax_class` and `rule_body_is_quote`; `decl_bind.rs` (158 lines) holds `parse_bindings` and `parse_binding_init`. The code moved unchanged, and `lib.rs` has the two `mod` lines.
+- `crates/*/src` is 27,724 lines across 88 files: 20,547 packed, plus 14 lines of new file headers. `paused_max_total_rust_loc()` is `27,800` (`selfhost/gate/manifest.pilot`).
+- `rust.md` counts are refreshed, with a note that counts are now of formatted source.
+- **D2, re-measured on formatted source:**
+
+  | Estimate | Packed (HEAD) | Formatted |
+  | :--- | ---: | ---: |
+  | `PROP-005`: `pilot-vm` `lower_*.rs` + `vm_gen.rs` + `codes.rs` (26 files) | 6,999 | 7,770 |
+  | `PROP-005`: plus `pilot-vm/src/lib.rs`'s compiler part (lib.rs whole: 1,022 → 1,074) | about −7,950 | about −8,770 |
+  | `PROP-006`: `pilot-{lexer,parser,ast,span,intern}/src` | 7,058 | 11,386 |
+  | `PROP-004`: `pilot-analysis/src` | 647 | 1,591 |
+  | Rust test files (`crates/*/tests`, 70 files) | 28,415 (stated) | 31,051 |
+
+  The `~1,800` LOC floor was an estimate for code not yet written. It was not re-measured, and should be read as packed lines.
+- **Verification (2026-11-15):**
+  - `cargo fmt --check` passes, and `cargo build` gives no warnings.
+  - The three engine suites match the results from before formatting: `pilot test` 554/0; `--ir` fails only `check_fix_borrows` and `proc_large_output`; `--emit c` fails `errdefer`, the 7 `err_bridge_*` tests and the same two.
+  - `pilot gate` passes 4/4, and `damaged_source --include-ignored` passes.
+  - `cargo test --workspace --no-fail-fast` fails 19 tests. To sort them, the same tests were run on a copy of this tree that kept HEAD's unformatted crates:
+    - These fail on both trees, so they predate this change: `milestone02` m2_3, `milestone04` (4), `milestone08` m8_1, `milestone12` m12_2, `milestone16` m16_4, `milestone57` 57_1, `milestone58` (6), `milestone61` 61_1 and 61_3, `cli_f5` `an_unlowered_construct_stops_at_its_seam`. `milestone58` also hangs on both trees: its binary sits idle until it is killed.
+    - `milestone01` m1_1, m1_2 and m1_4 pass when rerun. Their failures came from a run that started before the ceiling was raised, or overlapped with the `--emit c` suite.
+    - `cli_changed` `a_documentation_commit_runs_only_the_cases_that_never_link` and `a_lowerer_change_reaches_every_ir_case_but_no_seed_case` come from PROP-005 5A, not from formatting. The first now reaches 3 never-linking cases instead of 2, because 5A added `modules/err_package_cycle`; its expectation is in Rust. In the second, `selfhost/cli/test_changed.pilot` sees that `wiring.pilot`'s package declaration differs from commit `95f85ad`'s and runs every case. Both are left for a follow-up.
 
 **Why.**
 - `cargo fmt --check` fails on 154 of the workspace's Rust files. AGENTS.md requires surviving Rust to pass it and forbids packing statements onto long lines to keep the line count down (§1.1).
@@ -1922,6 +1949,30 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 **Exact Rust files to create (2):** `crates/pilot-parser/src/decl_syntax.rs`, `crates/pilot-parser/src/decl_bind.rs`.
 
 **Rust files to delete:** none.
+
+---
+
+## `PROP-017` — Update Three Rust Tests for the Package Loader: New Never-Linking Case and the Moved Inspect Selector (Rust Test Edits Only)
+
+**Status: APPROVED by the owner 2026-11-15 ("Approve PROP-017"); BUILT 2026-11-15.** Only the listed lines changed. `cargo test -p pilot-cli --test cli_changed` passes 9/9, `milestone07` passes 4/4, and `cargo fmt --check` passes. Found while fixing the two `cli_changed` failures PROP-016's verification turned up.
+
+**Pilot side, already done (no approval needed).**
+- `selfhost/cli/test_changed.pilot`: for `--since A..B`, `repackaged` compared each file's package at `A` with the working tree, not with `B`. Since PROP-005 5A renamed every selfhost package, any historical range that touched a selfhost file counted as a package change, and `--changed` ran every case. It now compares `A` with `B` (`later_rev`, `write_at_rev`), and uses the working tree only when `--since` names one revision.
+- The seed CLI linked all of `selfhost/ir`, so any lowerer change reached every seed case. Cause: under the package loader, `selfhost/cli/inspect_cmd.pilot`'s `use selfhost.inspect.*` loaded every lens, and `layout_lens.pilot` imports `selfhost.ir.*`. The CLI used one function from that package (`parse_inspect_selector`), and nothing else uses the selector. So `selfhost/inspect/selector.pilot` moved to `selfhost/cli/inspect_selector.pilot` (package `selfhost.cli`), and the import is gone. Its duplicate `nameof` shim was dropped, since `inspect_cmd.pilot` defines the same one in the same package.
+- Results:
+  - `pilot test --changed --since 95f85ad~1..95f85ad` now reaches only the never-linking cases on the seed engine.
+  - Under `--ir` it still runs every case.
+  - `pilot test` is 554 passed, 0 failed.
+
+**Rust test edits requested (no `src` change).**
+1. `crates/pilot-cli/tests/cli_changed.rs`:
+   - The comment at lines 230–232 and `a_documentation_commit_runs_only_the_cases_that_never_link`, lines 242 and 247–250: the never-linking cases are now 3. PROP-005 5A added `tests/conformance/modules/err_package_cycle.pilot`, which stops at MOD002 before linking. `"... 2 of "` becomes `"... 3 of "`, and the expected list gains `"tests/conformance/modules/err_package_cycle.pilot"` after `err_import_cycle`.
+   - `a_lowerer_change_reaches_every_ir_case_but_no_seed_case`, line 260: `picked(&stdout).len()` goes from `2` to `3`, for the same case.
+2. `crates/pilot-analysis/tests/milestone07_zero_black_box_transparency_tool.rs`, lines 22 and 100: `"selfhost/inspect/selector.pilot"` becomes `"selfhost/cli/inspect_selector.pilot"`. Its required functions (`target_kind_name`, `parse_int`, `parse_inspect_selector`) and markers are unchanged. Until this edit, all 4 of its tests fail on the missing file (`milestone07...rs:111`).
+
+**Acceptance.** `cargo test -p pilot-cli --test cli_changed` and `cargo test -p pilot-analysis --test milestone07_zero_black_box_transparency_tool` pass, and `cargo fmt --check` passes.
+
+**Not included.** `pilot inspect` is not registered as a command (`CLI001: Unknown command 'inspect'`). It was not registered before this change either. And 119 selfhost files each define `pub pure fn nameof(sym: str) -> str => sym;`, which nothing calls because `nameof(..)` parses as the language construct. Both are left for follow-ups.
 
 ---
 

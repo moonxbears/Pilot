@@ -8,8 +8,6 @@ pub lvl(0) pkg selfhost.loader;
 
 use selfhost.diagnostics.*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // Ring Constants (0b00 : IValue)
 // 0: User / External Application Code

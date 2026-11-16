@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.csv;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub struct CsvRow : IObject {
     pub columns: List<str>;
 

@@ -7,8 +7,6 @@ pub pkg selfhost.lsp;
 
 use std.text;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pure fn lsp_find_substr(haystack: str, needle: str, start_pos: i64) -> i64 {
     let h_len = haystack.len();
     let n_len = needle.len();

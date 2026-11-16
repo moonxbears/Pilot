@@ -8,8 +8,6 @@ pub pkg selfhost.lsp;
 use std.text;
 use selfhost.db.*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub enum IdeParseState {
     Normal,
     InLineComment,

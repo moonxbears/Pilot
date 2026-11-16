@@ -6,8 +6,6 @@
 // ==============================================================================
 pub pkg selfhost;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub pure fn sh_parser_state_name(state: i64) -> str {
     if state == 1 { return "Parsing"; }
     if state == 2 { return "Done"; }

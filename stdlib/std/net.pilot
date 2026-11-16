@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.net;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 [Layout(c_abi)]
 pub struct SocketAddr : IValue {
     pub ip_str: str;

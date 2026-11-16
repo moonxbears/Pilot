@@ -6,8 +6,6 @@ pub pkg std.enc;
 
 use std.text;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub pure fn hex_digit(v: u8) -> u8 {
     let d = v & 0x0F;
     if d < 10 { return 48 + d; }

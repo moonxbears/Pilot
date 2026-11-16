@@ -8,8 +8,6 @@ pub lvl(0) pkg selfhost.db;
 use std.text;
 use Pilot.Core.File::*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // Multiplatform Virtual URI & Path Canonicalization
 // Converts POSIX paths, Windows backslash paths, and file:// URIs into canonical

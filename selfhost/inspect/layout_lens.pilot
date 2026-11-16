@@ -8,8 +8,6 @@ pub lvl(0) pkg selfhost.inspect;
 
 use selfhost.ir.*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // Field Probe Entry (C-ABI Value Type)
 // ------------------------------------------------------------------------------

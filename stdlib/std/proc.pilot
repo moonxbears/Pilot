@@ -48,7 +48,36 @@ fn proc_make_pipe(var ref rfd: i64, var ref wfd: i64) -> bool {
     return true;
 }
 
-fn proc_spawn_impl(dir: str, program: str, args: List<str>, input: str) -> ProcessHandle {
+/// A block of `{ ptr, len }` slices (OsSlice) over copies of `items`, or 0
+/// when there are none; the copies' buffers go in `bufs`.
+fn proc_slices(ref items: List<str>, var ref bufs: List<i64>) -> i64 {
+    if items.len() == 0 { return 0; }
+    let block = RawMem.alloc(items.len() * 16, 8);
+    var i = 0;
+    while i < items.len() {
+        let b = proc_str_buf(items[i]);
+        bufs.push(b);
+        let _ = RawMem.store_int(block + i * 16, b, 64);
+        let _ = RawMem.store_int(block + i * 16 + 8, items[i].len(), 64);
+        i = i + 1;
+    }
+    return block;
+}
+
+/// Frees what `proc_slices` made for `items`.
+fn proc_slices_free(block: i64, ref items: List<str>, ref bufs: List<i64>) {
+    var i = 0;
+    while i < bufs.len() {
+        let n = items[i].len();
+        let _ = RawMem.free(bufs[i], if n > 0 { n } else { 1 }, 1);
+        i = i + 1;
+    }
+    if block != 0 { let _ = RawMem.free(block, items.len() * 16, 8); }
+}
+
+/// Starts `program`; `env` holds `KEY=value` entries added to the inherited
+/// environment (OsProcSpec env_mode 0).
+fn proc_spawn_impl(dir: str, program: str, args: List<str>, input: str, env: List<str>) -> ProcessHandle {
     var in_r = -1;
     var in_w = -1;
     var out_r = -1;
@@ -61,26 +90,19 @@ fn proc_spawn_impl(dir: str, program: str, args: List<str>, input: str) -> Proce
 
     let pbuf = proc_str_buf(program);
     let dbuf = if dir != "" { proc_str_buf(dir) } else { 0 };
-    let argc = args.len();
-    let argv_cap = if argc > 0 { argc * 16 } else { 16 };
-    let argv_buf = RawMem.alloc(argv_cap, 8);
-    var arg_ptrs: List<i64> = [];
-    var i = 0;
-    while i < argc {
-        let a = args[i];
-        let ab = proc_str_buf(a);
-        arg_ptrs.push(ab);
-        let _ = RawMem.store_int(argv_buf + i * 16, ab, 64);
-        let _ = RawMem.store_int(argv_buf + i * 16 + 8, a.len(), 64);
-        i = i + 1;
-    }
+    var arg_bufs: List<i64> = [];
+    let argv_buf = proc_slices(args, arg_bufs);
+    var env_bufs: List<i64> = [];
+    let envp_buf = proc_slices(env, env_bufs);
 
     let spec = RawMem.alloc(96, 8);
     let _ = RawMem.fill(spec, 0, 96);
     let _ = RawMem.store_int(spec + 0, pbuf, 64);
     let _ = RawMem.store_int(spec + 8, program.len(), 64);
-    let _ = RawMem.store_int(spec + 16, if argc > 0 { argv_buf } else { 0 }, 64);
-    let _ = RawMem.store_int(spec + 24, argc, 64);
+    let _ = RawMem.store_int(spec + 16, argv_buf, 64);
+    let _ = RawMem.store_int(spec + 24, args.len(), 64);
+    let _ = RawMem.store_int(spec + 32, envp_buf, 64);
+    let _ = RawMem.store_int(spec + 40, env.len(), 64);
     let _ = RawMem.store_int(spec + 48, dbuf, 64);
     let _ = RawMem.store_int(spec + 56, dir.len(), 64);
     let _ = RawMem.store_int(spec + 64, in_r, 64);
@@ -91,13 +113,8 @@ fn proc_spawn_impl(dir: str, program: str, args: List<str>, input: str) -> Proce
     let handle = Process.spawn(spec, pid_ptr);
     let _ = RawMem.free(pid_ptr, 8, 8);
     let _ = RawMem.free(spec, 96, 8);
-    let _ = RawMem.free(argv_buf, argv_cap, 8);
-    i = 0;
-    while i < argc {
-        let n = args[i].len();
-        let _ = RawMem.free(arg_ptrs[i], if n > 0 { n } else { 1 }, 1);
-        i = i + 1;
-    }
+    proc_slices_free(argv_buf, args, arg_bufs);
+    proc_slices_free(envp_buf, env, env_bufs);
     if dbuf != 0 { let _ = RawMem.free(dbuf, dir.len(), 1); }
     let _ = RawMem.free(pbuf, if program.len() > 0 { program.len() } else { 1 }, 1);
 
@@ -126,8 +143,6 @@ fn proc_spawn_impl(dir: str, program: str, args: List<str>, input: str) -> Proce
 
     return ProcessHandle { id: handle, stdout_fd: out_r, stderr_fd: err_r, exited: false, exit_code: 0, stdout_text: "", stderr_text: "" };
 }
-
-pub pure fn nameof(sym: str) -> str => sym;
 
 [Layout(c_abi)]
 pub struct ProcessExit : IValue {
@@ -224,26 +239,33 @@ pub struct ProcessHandle : IObject {
 /// returns at once; several can run at the same time. A program that cannot
 /// be started stops the caller with an intrinsic failure.
 pub fn spawn(program: str, args: List<str>, input: str) -> ProcessHandle {
-    return proc_spawn_impl("", program, args, input);
+    return proc_spawn_impl("", program, args, input, []);
 }
 
 /// Starts `program` like `spawn`, with `dir` as its working directory.
 pub fn spawn_in(dir: str, program: str, args: List<str>, input: str) -> ProcessHandle {
-    return proc_spawn_impl(dir, program, args, input);
+    return proc_spawn_impl(dir, program, args, input, []);
 }
 
-/// One process to start: the program, its arguments and its standard input.
+/// One process to start: the program, its arguments, its standard input and
+/// `KEY=value` entries added to the environment it inherits.
 pub struct ProcessJob : IObject {
     pub program: str;
     pub args:    List<str>;
     pub input:   str;
+    pub env:     List<str>;
 }
 
 /// The job that runs `program` with `args` and `input`.
-pub fn job(program: str, args: List<str>, input: str) -> ProcessJob => ProcessJob { program: program, args: args, input: input };
+pub fn job(program: str, args: List<str>, input: str) -> ProcessJob => ProcessJob { program: program, args: args, input: input, env: [] };
 
-/// Starts the job `start` like `spawn`.
-pub fn spawn_job(ref start: ProcessJob) -> ProcessHandle => spawn(start.program, start.args, start.input);
+/// The job that runs `program` like `job`, with `env` (`KEY=value` entries)
+/// added to the environment it inherits.
+pub fn job_env(program: str, args: List<str>, input: str, env: List<str>) -> ProcessJob =>
+    ProcessJob { program: program, args: args, input: input, env: env };
+
+/// Starts the job `start` like `spawn`, with its environment entries.
+pub fn spawn_job(ref start: ProcessJob) -> ProcessHandle => proc_spawn_impl("", start.program, start.args, start.input, start.env);
 
 /// Waits until one of `running` has finished and returns its position in
 /// `running`; that handle's `wait` then returns at once.
@@ -374,7 +396,26 @@ pub fn current_exe() -> str? {
         let _ = RawMem.free(buf, cap, 1);
         return none;
     }
-    let out = str_from_ptr(buf, n);
+    // Typed: `str_from_ptr` is an untyped native, and PilIR returns a value of
+    // unknown type from a `-> str?` function without making it `some`
+    // (stand-in `ir.absent_as_null`, seams.pilot).
+    let out: str = str_from_ptr(buf, n);
     let _ = RawMem.free(buf, cap, 1);
     return out;
+}
+
+/// The environment variable through which a program started by the `pilot`
+/// CLI is told the CLI's path (`pilot test --emit c` sets it).
+pub fn pilot_cli_env() -> str => "PILOT_CLI";
+
+/// The path of the `pilot` CLI, for a program that starts it again (`pilot
+/// test` cases): `PILOT_CLI` when set, else the running executable when that
+/// is the CLI. A program compiled to its own binary and started without
+/// `PILOT_CLI` would start itself without end: that stops at a seam.
+pub fn pilot_cli_path() -> str {
+    let given = Env.get(pilot_cli_env());
+    if given != "" { return given; }
+    let exe = current_exe() ?? "pilot";
+    if exe.ends_with("/pilot") || exe.ends_with("/pilot.exe") || exe == "pilot" { return exe; }
+    return seam("proc.pilot_cli_path", f"started as {exe}, which is not the pilot CLI");
 }

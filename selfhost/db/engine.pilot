@@ -8,8 +8,6 @@ pub lvl(0) pkg selfhost.db;
 use std.text;
 use selfhost.*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // Query Node & Database Internal Storage
 // ------------------------------------------------------------------------------

@@ -116,14 +116,14 @@ pub fn c_runtime_dir() -> str {
     return rel;
 }
 
-fn job_of(ref argv: List<str>, input: str) -> proc.ProcessJob {
+fn job_of(ref argv: List<str>, input: str, env: List<str>) -> proc.ProcessJob {
     var rest: List<str> = [];
     var i = 1;
     while i < argv.len() {
         rest.push(argv[i]);
         i = i + 1;
     }
-    return proc.job(argv[0], rest, input);
+    return proc.job_env(argv[0], rest, input, env);
 }
 
 fn stopped_at_seam(out: proc.ProcessOutput) -> bool =>
@@ -373,7 +373,7 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
         while i < built.len() { runnable.push(i); i = i + 1; }
     } else {
         var builds: List<proc.ProcessJob> = [];
-        for k in 0 .. built.len() { builds.push(job_of(filled(compile, srcs[k], bins[k]), "")); }
+        for k in 0 .. built.len() { builds.push(job_of(filled(compile, srcs[k], bins[k]), "", [])); }
         let outs = proc.run_all(builds);
         i = 0;
         while i < built.len() {
@@ -392,7 +392,8 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
         let stem = test_stem(built[k]);
         var argv = filled(r.run, srcs[k], bins[k]);
         for a in test_lines(read_or_empty(stem + ".args")) { argv.push(a); }
-        runs.push(job_of(argv, read_or_empty(stem + ".stdin")));
+        // A case that starts the CLI again finds it here (proc.pilot_cli_path).
+        runs.push(job_of(argv, read_or_empty(stem + ".stdin"), [f"{proc.pilot_cli_env()}={exe}"]));
     }
     let outs = proc.run_all(runs);
     i = 0;

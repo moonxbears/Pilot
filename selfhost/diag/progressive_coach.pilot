@@ -15,8 +15,6 @@ pub lvl(0) pkg selfhost.diag;
 
 use pilot.profile.*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // 1. Coaching Diagnostic Formatters
 // ------------------------------------------------------------------------------

@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.text;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 /// Text built a piece at a time. The pieces are kept and joined once, when
 /// the text is read (`join_text`), so building n bytes copies each about
 /// log2(pieces) times instead of once per later piece.

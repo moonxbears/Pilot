@@ -5,10 +5,6 @@
 // ==============================================================================
 pub lvl(0) pkg selfhost.cli;
 
-use selfhost.inspect.*;
-
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub fn inspect_cmd_help() -> str {
     var h = "";
     h = h + "Usage: pilot inspect <selector> [options]\n";

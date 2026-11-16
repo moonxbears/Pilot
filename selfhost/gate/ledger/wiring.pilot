@@ -97,7 +97,7 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("F3", "commands dispatched through cli_handlers(); unhandled ones fail at a seam", ::Wired,
             "crates/pilot-cli/tests/cli_f3.rs every_listed_command_works_or_says_it_is_not_implemented", ""),
         cap("F3", "standard input (std.io read_line, read_all) and process spawn (std.proc run, current_exe)", ::Wired,
-            "tests/conformance/runtime/stdin_lines.pilot; tests/pilot_test_fixtures/passing/echo_input.pilot; tests/conformance/runtime/proc_large_output.pilot (run and run_all collect a child's output while it runs, ProcessHandle.drain over Fd.poll, so a child writing 100,000 bytes to each stream finishes: it used to wait forever on a full 64 KiB pipe, which hung pilot test --emit c on quote/quote_splice and timed out errors, modules and numbers). Not done: the case fails on --ir (proc.current_exe()'s option reads as an integer condition) and --emit c (the C runtime has no pilot_v_slen / pilot_v_sbytes for str_copy_to_ptr); std.proc runs only on the seed", ""),
+            "tests/conformance/runtime/stdin_lines.pilot; tests/pilot_test_fixtures/passing/echo_input.pilot; tests/conformance/runtime/proc_large_output.pilot (run and run_all collect a child's output while it runs, ProcessHandle.drain over Fd.poll, so a child writing 100,000 bytes to each stream finishes: it used to wait forever on a full 64 KiB pipe, which hung pilot test --emit c on quote/quote_splice and timed out errors, modules and numbers). Passes on pilot test and --ir (2026-11-15: current_exe types its untyped str_from_ptr result, stand-in ir.absent_as_null; runtime/c/pilot_rt_bridge.h str_copy_to_ptr uses pilot_v_len / pilot_v_bytes). Not done: on --emit c the program is its own binary, so current_exe names it rather than the pilot CLI; the three cases that start the CLI (proc_large_output, check_fix_borrows, inspect_command) stop at `proc.pilot_cli_path` instead of starting themselves without end", "proc.pilot_cli_path"),
         cap("F3", "self-hosted analyzer diagnostics on pilot check and pilot run (errors stop the run, warnings print)", ::Wired,
             "selfhost/cli/commands.pilot cmd_check/cmd_run via host_analyze; tests/conformance/errors/err_div_zero, err_none_to_value, err_none_return, err_duplicate_field, err_case_after_wildcard, warn_unused_local, warn_unreachable", ""),
         cap("F3", "remaining analyzer.pilot rules read the whole linked program", ::Wired,
@@ -379,12 +379,12 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M6", "backends consume IR; delete selfhost/transpile/ir.pilot", ::Core, "selfhost/transpile/ir.pilot deleted; every pilot emit target reads PilIR (selfhost/transpile/source.pilot); the native and PilVM backends do not exist yet", "emit.instruction emit.representation"),
 
         // M7 inspect
-        cap("M7", "selector parsing", ::Core, "milestone07 test_m7_1", ""),
+        cap("M7", "selector parsing", ::Core, "milestone07 test_m7_1 (selfhost/cli/inspect_selector.pilot since 2026-11-15)", ""),
         cap("M7", "layout lens math (padding, reorder savings)", ::Core, "milestone07 test_m7_2 checks C struct layout {u8,u64,u8,u64}=32B vs reordered 24B", ""),
         cap("M7", "layout lens cache-line crossing count", ::Draft,
             "selfhost/inspect/layout_lens.pilot:46 counts lines of a fixed size", "inspect.cache_line"),
         cap("M7", "method/perceus/weave lens renderers", ::Draft, "selfhost/inspect/*.pilot format caller-built records", "inspect.resolve_target"),
-        cap("M7", "pilot inspect", ::Spec, "selfhost/cli/inspect_cmd.pilot:49 stops at its seam after parsing; command not registered", "inspect.resolve_target cli.command_handler F4"),
+        cap("M7", "pilot inspect", ::Spec, "listed 2026-11-15 in selfhost/cli/main.pilot (help, lens flags, completions); with no handler it stops at `cli.command_handler` like the other unbuilt commands (runtime/inspect_command on pilot test). The handler waits on selfhost/cli/inspect_cmd.pilot inspect_run, which stops at `inspect.resolve_target`: nothing resolves a selector against a checked program yet", "inspect.resolve_target cli.command_handler F4"),
 
         // M8 diagnostics
         cap("M8", "human renderer with UTF-8 display width", ::Wired, "milestone08 test_m8_3; renders every pilot run / pilot check diagnostic (crates/pilot-cli/tests/cli_f3.rs)", ""),
@@ -393,7 +393,7 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M8", "lexical autofix (SYN001 SYN002 DECL005 SYN003) and lossless apply", ::Core, "milestone08 test_m8_1 compares the hand-applied fixed source exactly; `pilot check --fix` does not apply these yet, only parameter borrows (PROP-005 5B.1)", "F4"),
         cap("M8", "semantic autofix (DECL004 BORROW001)", ::Spec, "selfhost/cst/autofix.pilot:430", "autofix.semantic_defects F4"),
         cap("M8", "atomic write of fixed files", ::Draft, "selfhost/cst/autofix.pilot:229 writes .tmp then stops (milestone08 test_m8_1)", "autofix.atomic_rename F6"),
-        cap("M8", "pilot check --fix", ::Draft, "PROP-005 5B.1: selfhost/check/fix_borrows.pilot makes each parameter that only borrows its value `ref` (or `var ref` when it changes it, and widens a `ref` that changes to `var ref`), inserting the word before the name and nothing else; runtime/check_fix_borrows passes on pilot test (2026-11-15). Only this one fix exists: the lexical and analyzer fixes (F4) are not applied, and cli_f3 check_fix_stops_at_its_seam, which expected the old seam, is deleted (owner-approved 2026-11-15)", "F4"),
+        cap("M8", "pilot check --fix", ::Draft, "PROP-005 5B.1: selfhost/check/fix_borrows.pilot makes each parameter that only borrows its value `ref` (or `var ref` when it changes it, and widens a `ref` that changes to `var ref`), inserting the word before the name and nothing else; runtime/check_fix_borrows passes on pilot test and --ir (2026-11-15) and stops at `proc.pilot_cli_path` on --emit c. Only this one fix exists: the lexical and analyzer fixes (F4) are not applied, and cli_f3 check_fix_stops_at_its_seam, which expected the old seam, is deleted (owner-approved 2026-11-15)", "F4"),
 
         // M9 three rings
         cap("M9", "std.env args", ::Wired, "tests/conformance/runtime/script_args.pilot", ""),

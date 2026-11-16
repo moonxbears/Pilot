@@ -8,7 +8,7 @@
 use std.proc;
 
 fn main() {
-    let exe = proc.current_exe() ?? "pilot";
+    let exe = proc.pilot_cli_path();
     let child = "tests/tool_fixtures/proc/large_output.pilot";
     // One child, run alone (`run` -> `wait`).
     let one = proc.run(exe, ["run", child], "");

@@ -4,8 +4,6 @@
 // =========================================================================
 pub pkg selfhost.perf;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub enum AstOptimizationPass {
     ConstantFolding,
     DeadBranchElimination,

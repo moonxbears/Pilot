@@ -7,8 +7,6 @@ pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.Primitives.Map::*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // Internal dynamic list and map helpers built on core Map primitives
 // ------------------------------------------------------------------------------

@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.toml;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 [Layout(c_abi)]
 pub struct TomlEntry : IValue {
     pub key: str;

@@ -10,8 +10,6 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 use Pilot.Core.File;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 let Cfg = {
     ast = {
         ast_attr_arg: "ast_attr_arg",

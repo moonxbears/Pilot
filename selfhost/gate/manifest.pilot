@@ -10,8 +10,6 @@ use Pilot.Core.File;
 use Pilot.Core.HostRaw;
 use Pilot.Core.Env;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub enum GateCategory : u8 {
     Adaptability,
     BootstrapParity,

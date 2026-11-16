@@ -5,8 +5,6 @@
 // =========================================================================
 pub pkg selfhost.dap;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub enum ReplTokenType {
     Number,
     Ident,

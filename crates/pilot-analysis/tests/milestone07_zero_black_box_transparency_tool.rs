@@ -19,7 +19,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     expected_test_count: 4,
     files: &[
         anticheat::FileAuditRule {
-            path: "selfhost/inspect/selector.pilot",
+            path: "selfhost/cli/inspect_selector.pilot",
             max_lines: 1500,
             name_blind: true,
             required_pub_fns: &["target_kind_name", "parse_int", "parse_inspect_selector"],
@@ -97,7 +97,7 @@ fn eval_inspect(script: &str) -> String {
         .unwrap();
     let deps = [
         "selfhost/ir/model.pilot",
-        "selfhost/inspect/selector.pilot",
+        "selfhost/cli/inspect_selector.pilot",
         "selfhost/inspect/layout_lens.pilot",
         "selfhost/inspect/method_lens.pilot",
         "selfhost/inspect/perceus_lens.pilot",

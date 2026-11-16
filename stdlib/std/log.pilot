@@ -4,8 +4,6 @@
 // ==============================================================================
 pub pkg std.log;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub pure fn log_level_trace() -> u8 => 0;
 pub pure fn log_level_debug() -> u8 => 1;
 pub pure fn log_level_info()  -> u8 => 2;

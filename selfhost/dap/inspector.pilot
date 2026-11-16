@@ -5,8 +5,6 @@
 // =========================================================================
 pub pkg selfhost.dap;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 pub fn format_register_variable_json(var_name: str, reg_slot: i64, val_str: str, layout_id: i64) -> str {
     let byte_size = if layout_id >= 0 { __engine("layout_metrics", layout_id) } else { 8 };
     return "{\"name\":\"" + var_name + "\",\"value\":\"" + val_str + "\",\"register\":\"r" + reg_slot + "\",\"byteSize\":" + byte_size + "}";

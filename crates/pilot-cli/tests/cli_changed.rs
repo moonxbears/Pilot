@@ -228,8 +228,8 @@ fn changed_runs_from_the_toolchain_root_only() {
 
 // Commits of this repository. fcd1a7a changes only MILESTONES_100.md;
 // 95f85ad changes selfhost/ir/lower.pilot and selfhost/gate/ledger/wiring.pilot.
-// Either way the seed runs only the two cases the loader cannot link
-// (err_import_cycle, err_import_missing), which always run.
+// Either way the seed runs only the three cases the loader cannot link
+// (err_import_cycle, err_import_missing, err_package_cycle), which always run.
 
 #[test]
 fn a_documentation_commit_runs_only_the_cases_that_never_link() {
@@ -239,14 +239,15 @@ fn a_documentation_commit_runs_only_the_cases_that_never_link() {
     );
     assert_eq!(code, 0, "{stdout}{stderr}");
     assert!(
-        stdout.starts_with("CHANGED 1 files since fcd1a7a~1..fcd1a7a: 2 of "),
+        stdout.starts_with("CHANGED 1 files since fcd1a7a~1..fcd1a7a: 3 of "),
         "{stdout}"
     );
     assert_eq!(
         picked(&stdout),
         [
             "tests/conformance/errors/err_import_missing.pilot",
-            "tests/conformance/modules/err_import_cycle.pilot"
+            "tests/conformance/modules/err_import_cycle.pilot",
+            "tests/conformance/modules/err_package_cycle.pilot"
         ],
         "{stdout}"
     );
@@ -257,7 +258,7 @@ fn a_lowerer_change_reaches_every_ir_case_but_no_seed_case() {
     let since = "95f85ad~1..95f85ad";
     let (stdout, _, code) = pilot_in(&root(), &["test", "--changed", "--since", since]);
     assert_eq!(code, 0, "{stdout}");
-    assert_eq!(picked(&stdout).len(), 2, "{stdout}");
+    assert_eq!(picked(&stdout).len(), 3, "{stdout}");
     // `--filter` keeps the run itself short; the choice is printed first.
     let (stdout, stderr, code) = pilot_in(
         &root(),

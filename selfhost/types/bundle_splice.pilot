@@ -9,8 +9,6 @@
 
 pub lvl(0) pkg selfhost.types;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // 1. Splice Modifiers & Field Layout Schemas (0b00 : IValue)
 // ------------------------------------------------------------------------------

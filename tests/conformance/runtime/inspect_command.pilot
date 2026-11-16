@@ -1,0 +1,26 @@
+// `pilot inspect` is listed (selfhost/cli/main.pilot), so it has help, flags
+// and completions, but no handler yet: like every listed command without
+// one, it stops at the `cli.command_handler` seam and says it is not
+// implemented (run_cli_entry). Its handler waits on the seam
+// `inspect.resolve_target` (selfhost/cli/inspect_cmd.pilot inspect_run):
+// nothing resolves a selector against a checked program yet.
+//
+// Expected, from run_cli_entry's contract:
+//   - with or without arguments: SEAM001 (internal error, exit 70) naming
+//     `cli.command_handler` and "`pilot inspect` is not implemented yet";
+//   - never "Unknown command" (CLI001), as before it was listed;
+//   - `--help` prints its usage and the lens flags, exit 0.
+use std.proc;
+
+fn main() {
+    let exe = proc.pilot_cli_path();
+    let full = proc.run(exe, ["inspect", "tests/conformance/runtime/stdin_lines.pilot:1", "--layout"], "");
+    print(full.exit_code);
+    print(full.stderr.find("SEAM001: unconnected seam `cli.command_handler`: `pilot inspect` is not implemented yet", 0) >= 0);
+    let bare = proc.run(exe, ["inspect"], "");
+    print(bare.exit_code);
+    print(bare.stderr.find("CLI001", 0) < 0 && full.stderr.find("CLI001", 0) < 0);
+    let help = proc.run(exe, ["inspect", "--help"], "");
+    print(help.exit_code);
+    print(help.stdout.find("--layout", 0) >= 0 && help.stdout.find("--perceus", 0) >= 0);
+}

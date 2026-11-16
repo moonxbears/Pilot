@@ -8,8 +8,6 @@ pub lvl(0) pkg selfhost.cli;
 use Pilot.Core.Primitives.Map::*;
 use Pilot.Core.Env::*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // String Utilities
 // ------------------------------------------------------------------------------

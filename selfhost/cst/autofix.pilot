@@ -8,8 +8,6 @@ pub lvl(0) pkg selfhost.cst;
 use selfhost.diagnostics.*;
 use Pilot.Core.File::*;
 
-pub pure fn nameof(sym: str) -> str => sym;
-
 // ------------------------------------------------------------------------------
 // Result of Applying CST Fixes
 // ------------------------------------------------------------------------------
