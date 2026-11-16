@@ -1,0 +1,65 @@
+// The value of an integer literal, computed in Pilot from its text
+// (PROP-021 slice 21D): `int_from_text` reads the radix prefix and the
+// digits the number patterns declare, skips the separator, and keeps the
+// magnitude at any size, so whether it fits a type is decided by the type.
+//
+// Expected, worked by hand:
+//   0                      value 0, 0 bits
+//   1_000_000              1000000; 2^19 = 524288 <= 1000000 < 2^20, 20 bits
+//   0xFF_FF                65535 = 2^16 - 1, 16 bits
+//   0b1010                 8 + 2 = 10, 4 bits
+//   0o17                   8 + 7 = 15, 4 bits
+//   18446744073709551615   2^64 - 1: its low 64 bits are all ones, -1 as an
+//                          i64; 64 bits
+//   18446744073709551616   2^64: low 64 bits 0, 65 bits
+//   9223372036854775808    2^63: as an i64 that is -9223372036854775808;
+//                          64 bits
+//   12a                    `a` is no decimal digit: not an integer
+// fits(bits, signed, negated):
+//   255 in 8 unsigned: true; 256: false (2^8 needs 9 bits)
+//   128 in 8 signed: false (at most 127); negated: true (-128 is the least)
+//   129 in 8 signed, negated: false (-129 < -128)
+//   1 in 8 unsigned, negated: false (-1 is below 0); 0 negated: true
+//   2^64 - 1 in 64 unsigned: true; 2^64: false
+//   2^63 in 64 signed: false; negated: true (-2^63 is i64's least)
+// ranges: 8 unsigned 0 ..= 255; 8 signed -128 ..= 127;
+//   64 unsigned 0 ..= 2^64 - 1 = 18446744073709551615;
+//   64 signed -2^63 ..= 2^63 - 1 = -9223372036854775808 ..= 9223372036854775807
+use Pilot.Core.Lex.LiteralValue;
+
+fn show(text: str) {
+    guard some v = int_from_text(text) else {
+        print(f"{text}: not an integer");
+        return;
+    }
+    print(f"{text}: {v.low64()}, {v.bit_length()} bits");
+}
+
+fn fits(text: str, bits: i64, signed: bool, negated: bool) {
+    guard some v = int_from_text(text) else {
+        print(f"{text}: not an integer");
+        return;
+    }
+    print(f"{text} in {bits} signed={signed} negated={negated}: {v.fits(bits, signed, negated)}");
+}
+
+fn main() {
+    for t in ["0", "1_000_000", "0xFF_FF", "0b1010", "0o17", "18446744073709551615", "18446744073709551616", "9223372036854775808", "12a"] {
+        show(t);
+    }
+    fits("255", 8, false, false);
+    fits("256", 8, false, false);
+    fits("128", 8, true, false);
+    fits("128", 8, true, true);
+    fits("129", 8, true, true);
+    fits("1", 8, false, true);
+    fits("0", 8, false, true);
+    fits("18446744073709551615", 64, false, false);
+    fits("18446744073709551616", 64, false, false);
+    fits("9223372036854775808", 64, true, false);
+    fits("9223372036854775808", 64, true, true);
+    print(range_text(8, false));
+    print(range_text(8, true));
+    print(range_text(64, false));
+    print(range_text(64, true));
+}

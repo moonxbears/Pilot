@@ -2185,7 +2185,7 @@ Whether `const` marks a value parameter is not recorded today either way (the pr
 
 ## `PROP-021` — The Lexer Declared in Pilot: Token Patterns Compiled by Pilot Into a State Table the Seed Only Runs
 
-**Status: DRAFT 2026-11-16, rewritten 2026-11-16 at the owner's direction ("yes, lets rewrite prop-021"); the Rust part (§3) awaits owner approval. Slice 21A (Pilot only, no Rust) BUILT 2026-11-16 at the owner's request ("can we start of the first proposal of the lex proposals?"), see §7. Slice 21B (Pilot only) BUILT 2026-11-16 (owner: "lets focus on prop-021+"), see §8. Slice 21C (Pilot only) BUILT 2026-11-16 (owner: "Start 21C"), see §9.** Owner direction: "I would like pilot to have recognition over its own behavior" (about `1_000_000` meaning `1000000`), and "can you define what numbers are in pilot and then compile it to the lex file?". The first draft (per-literal tables the seed reads) is replaced. The lexer is no longer hand-written in either language. Pilot declares every token as a pattern, Pilot compiles the patterns into a state machine, and the seed only runs that machine.
+**Status: DRAFT 2026-11-16, rewritten 2026-11-16 at the owner's direction ("yes, lets rewrite prop-021"); the Rust part (§3) awaits owner approval. Slice 21A (Pilot only, no Rust) BUILT 2026-11-16 at the owner's request ("can we start of the first proposal of the lex proposals?"), see §7. Slice 21B (Pilot only) BUILT 2026-11-16 (owner: "lets focus on prop-021+"), see §8. Slice 21C (Pilot only) BUILT 2026-11-16 (owner: "Start 21C"), see §9. Slice 21D (literal values, Pilot only) BUILT 2026-11-16 (owner: "lets continue with the next part"), see §10. Slice 21E (the token tape, Pilot only) PLANNED 2026-11-16, see §11.** Owner direction: "I would like pilot to have recognition over its own behavior" (about `1_000_000` meaning `1000000`), and "can you define what numbers are in pilot and then compile it to the lex file?". The first draft (per-literal tables the seed reads) is replaced. The lexer is no longer hand-written in either language. Pilot declares every token as a pattern, Pilot compiles the patterns into a state machine, and the seed only runs that machine.
 
 ### 1. What exists today (read 2026-11-16)
 
@@ -2427,6 +2427,150 @@ The gate rebuilds the table and compares it byte for byte (`PROP-023`). Until `P
   - A 12-byte `[Layout(c_abi)] Lexeme`.
   - Numbered token handles in place of family-name strings.
   - The lexer runs at compile time, which is ungated, so these wait for the parser that consumes the stream (`PROP-005`) or for `PROP-021.direct_code`.
+
+### 10. Slice 21D, as built 2026-11-16 (Pilot only)
+
+**Scope:** what an integer literal is worth, and `LIT001`/`LIT002` (owner: "lets continue with the next part", choosing "Literal values").
+
+- **The numbers are data** (`stdlib/core/lex/numbers.pilot`). Each item is a `const`, not a function:
+  - `RADIXES` (radix, prefix, base);
+  - `DIGIT_RANGES` (byte range and value);
+  - `DIGIT_SEPARATOR`.
+  - The digit patterns and `integer()` are built from those consts, and the DFA is unchanged. Respelling the separator or adding a radix is a one-line edit, and the value code reads the same consts.
+- **Values** (`stdlib/core/lex/literal_value.pilot`):
+  - `int_from_text` turns an integer token into an `IntLiteral`: a magnitude of any size, in 16-bit limbs.
+  - Size is never decided there. `fits(bits, signed, negated)` decides it against the landing type's `[Bits]` width and register class.
+  - `range_text` writes a type's range in decimal, for the message.
+- **`LIT001`** (`selfhost/check/literals.pilot`, `check_number_text`): the literal's text is matched against the number table (`Infer.numbers`). The match must take the whole text, or stop where only a scalar type suffix follows. Otherwise it reports the number it read, what follows it, and the rule that `_` stands only between two digits. This covers `1__000`, `1000_`, `0x_FF`, `1_.5` and `1_u8`.
+- **`LIT002`:**
+  - **What is checked:** an integer literal's value, negated under unary `-`, against its destination type.
+  - **Where it is checked:**
+    - in `assignable`, with every `TYPE001` assignable failure going through `report_unfit` (call arguments, binding, return, parameter default, closure, delegation);
+    - in an unannotated `let`/`var`/`const`, against the literal slot type;
+    - in `check_assign`.
+  - **Owner decision 2026-11-16: a hex, binary or octal literal is a value, not a bit pattern** ("Reject: LIT002"), as in Rust, Go and C#. `let s: i64 = 0xFFFFFFFFFFFFFFFF;` is `LIT002`, and the bit pattern is written as a cast (`top() as i64` in `numbers/u64_values`, changed accordingly).
+- **Tests:**
+  - `lex/int_values`.
+  - `numbers/digit_separator_values`.
+  - `numbers/int_range_edges`.
+  - `numbers/err_lit001_{double,trailing,after_prefix,before_dot,before_suffix}`.
+  - `numbers/err_lit002_{let,negative_unsigned,signed,hex_signed,arg,return,assign,default}`.
+  - Every expected value and range is worked by hand in the test's comments.
+  - `text/string_literal_forms` wrote `0x_FF`, which is `LIT001` now. It reads `0xFF`, the same value (255), as §5 said it would.
+  - The numbers (36) and lex (18) directories pass on `pilot test`, `--ir` and `--emit c`.
+- **Found while building:**
+  - **Seed tool linking, second time.** The checker now links the lexer files, so the private `joined`, `op` and `listed` in `patterns.pilot` took over same-named functions in `selfhost/transpile/source.pilot`, `selfhost/check/asm.pilot` and `selfhost/check/methods.pilot` inside the C emitter (`--emit c` stopped with "`map_get` list index must be an integer"). It is the same bug as §9's `is_space`: `check::run_on_program` (`crates/pilot-cli`) links a tool's files by bare name, ignoring visibility and arity. The private helpers are renamed (`pat_op`, `joined_pattern`, `byte_listed`, `wrapped_pattern`). The fix is in Rust and needs a proposal. A plain program resolves the same clash correctly (`modules/private_fn_clash`), so no conformance program can reproduce it.
+  - **Rename litmus, f-string hole again.** The `LIT002` message read a local named `range` inside an f-string hole. The renamer leaves holes alone, so in the renamed toolchain the name was undefined and every program stopped (1,012 `GATE008` violations). The local is now `values`. This keeps happening until the renamer reads holes as code (§9).
+  - **`::Variant` with two enums sharing a name** (`seed.variant_compare_untyped`): `asm.pilot`'s `::Operand` broke once the lexer's `TokenRole::Operand` was linked into the checker. The variants are qualified there, tagged `[Workaround]`.
+- **Not yet:**
+  - **String unescape:** core has no constructor from bytes to `str`, and the seed silently keeps an unknown escape (`\q`). The second is an open decision.
+  - **Float values:** slice 21F, correctly rounded.
+  - **`LIT002` gaps:**
+    - field assignment (`obj.f = 300`);
+    - comparisons;
+    - an `opt` destination (`u8?`), which still reports `TYPE001`.
+    - A suffixed literal (`300u8`) is still range-checked by Rust until §3.
+  - **Cost:** building the number table in `infer_new` adds a table build to every check. It is not measured; §11 makes the table a constant.
+
+### 11. Slice 21E, planned 2026-11-16: the token tape (Pilot only)
+
+**Status: PLAN, not built.** Owner request 2026-11-16: "lets plan for this. having rust as the guideline will help with implementation for building the same thing in pilot", after asking whether the lexer stores its important facts the way `crates/pilot-lexer` does. Correctly rounded floats, planned earlier as 21E, move to **21F**. This slice changes no Rust: `crates/pilot-lexer` is the guide, not something this slice edits.
+
+#### 11.1 The Rust guide, read 2026-11-16
+
+| What | `crates/pilot-lexer` | Pilot today (`stdlib/pilot/lex/build.pilot`) |
+| :--- | :--- | :--- |
+| Token kind | `#[repr(u16)] enum TokenKind`: 2 bytes | `Lexeme.decl: i64`, an index into `LexTable.names`: 8 bytes |
+| Position | `ByteSpan { start: u32, end: u32 }`: 8 bytes, with a `size_of == 8` assertion | `start: i64`, `end: i64`, plus `mode: i64`: 24 bytes |
+| Per-token flags | `TokenFlags(u8)`: 6 bits | none |
+| Matching brackets | `bracket_links: Vec<u32>`, filled while lexing (`emit`, `lexer.rs:486-520`) | none |
+| Storage | `TokenTape`: one `Vec` per field, reserved at `source.len() / 4` tokens | a `yield` stream of whole `Lexeme`s; nothing kept |
+| Byte classes | `const [bool; 256]` tables (`simd.rs`) | `class_of: List<i64>`, rebuilt by `build_table` on every run, including in the checker since 21D |
+
+What a Rust token costs: 2 + 1 + 8 + 4 = **15 bytes**. A Pilot `Lexeme` costs 32.
+
+**What the Rust parser reads (grep 2026-11-16):**
+- `matching_bracket`: about 15 call sites, in `expr.rs`, `decl.rs`, `rule_arms.rs`, `comptime_if.rs`, `inline_block.rs`, `decl_syntax.rs`, `ret_type.rs` and `loud.rs`.
+- `IS_RAW_STRING` and `IS_INTERPOLATED`: read in `fstring.rs`.
+- `IS_DIMENSIONAL`: read in `expr.rs:366`.
+- `PRECEDED_BY_WS`, `PRECEDED_BY_NEWLINE` and `FOLLOWED_BY_LPAREN`: set by the lexer, **never read**.
+- Mismatched brackets: the Rust lexer leaves them unlinked, with no error.
+
+So the guide is followed where the Rust parser depends on it, and not copied where it isn't.
+
+#### 11.2 Design
+
+- **The tape** (`pkg pilot.lex`, replacing `stdlib/pilot/lex.pilot`):
+  - `TokenTape : IObject` keeps one list per field, as Rust does:
+    - `kinds: List<u16>`: the declaration index;
+    - `flags: List<u8>`: the bits of a `FlagSet<TokenFlag>`;
+    - `spans: List<ByteSpan>`: the existing `[Layout(c_abi)] ByteSpan { start: u32, end: u32 }`, kept;
+    - `links: List<u32>`: `NO_LINK = 4294967295` when a token has no partner, as Rust's `u32::MAX`.
+  - It has the accessors Rust has: `len`, `kind`, `flag`, `span`, `text`, `matching(i) -> u32?`. Rust's `Option<u32>` becomes `u32?`, never a sentinel at the API.
+  - The token list is reserved at `source.len() / 4`, as Rust does.
+- **Per-token flags**, `[Flags] enum TokenFlag : u8`, hold only what the tape cannot recompute:
+  - `NewlineBefore`;
+  - `SpaceBefore`, meaning the token starts in the `Spaced` context, which the builder already computes.
+  - "Glued to the next token", which covers Rust's `FOLLOWED_BY_LPAREN`, is recomputed from spans: `spans[i].end == spans[i + 1].start`. It costs nothing to store.
+- **Per-family facts are not stored per token.**
+  - Rust's raw, interpolated and dimensional bits describe what kind of token it is, so in Pilot they are facts about the declaration.
+  - Raw and interpolated are the f-string opener families of 21C. Each opener family's `TokenAction` already says which mode it enters.
+  - A unit (`100[m]`) is a number glued to `[`, which the spans already show.
+  - The table gains one `FamilyInfo` per declaration: role, plus raw and interpolated as `FlagSet` bits. Asking about a token is then `families[kinds[i]]`.
+- **Bracket pairs are declared, not hardcoded.**
+  - `delimiters.pilot` gains `const BRACKET_PAIRS` (`(`/`)`, `[`/`]`, `{`/`}`).
+  - The tape builder keeps a stack, as `emit` does, and links each pair both ways.
+  - The f-string hole's `{` and `}` link the same way.
+  - **Different from Rust on purpose:** a mismatched or unclosed bracket is `LEX006`, reported at the earliest point, instead of being left silently unlinked.
+- **Trivia stays on the tape** (comments, `#` lines and the shebang; Rust keeps comments too), so `pilot.cst`, `fmt` and `--fix` can be lossless. Runs of spaces are not tokens. `NewlineBefore` carries the one fact the parser needs from them.
+- **Width limits fail loudly:**
+  - a source longer than `u32` can hold, or a lexicon with more than 65,535 families, is `LEX007`;
+  - Rust casts without checking (`start as u32`).
+- **Tables become constants** (imp_type.md Rule 13):
+  - the lexicon's `LexTable` (`next`, `class_of`, `accept`, and the new `families`) is computed once, at `comptime`, into `u16`/`u8` lists;
+  - the checker (`Infer.numbers`) and `pilot lex` read that constant instead of rebuilding it each run.
+  - If the seed's `comptime` cannot build a `LexTable`, that is filed in `known_bugs` with a repro. The run-time build then stays as a `[StandIn("lex.table_comptime", ...)]`, never hidden.
+- **Producing tokens:**
+  - `lex_tape(ref lexer: ModalLexer, src: str) -> TokenTape ! LexError` drains `lex_modal`.
+  - The generator stays for the tools that read tokens once (Rule 14). The tape exists because the parser needs random access, `matching`, and to look back (Rule 14's case for building a list).
+
+#### 11.3 Probes first (run before any code; results recorded here)
+
+1. Do `List<u16>`, `List<u8>` and `List<ByteSpan>` keep their element widths on all three engines? The seed VM is expected to hold every value as 64 bits, so the 15-byte saving may show only in emitted C. That gets measured, not assumed.
+2. Can a `comptime` `const` hold a `LexTable` that `build_table(core_tokens())` produced?
+3. Can a test read a struct's size (`size_of`, or `pilot inspect` layout output)? That is the evidence for the 8-byte `ByteSpan`.
+
+#### 11.4 Acceptance (written before the code; expected values worked by hand)
+
+- `lex/tape_basic`: for a short source, each token's family name, span and link, worked out by hand from the byte offsets.
+- `lex/tape_brackets`: nested `( [ { } ] )` link both ways; an f-string hole's braces link; a token with no partner reads `none`.
+- `lex/tape_flags`: `NewlineBefore` and `SpaceBefore` on hand-chosen tokens; "glued" read from spans.
+- `lex/err_lex006_mismatched` (`( ]`) and `lex/err_lex006_unclosed` (`{` at the end of the file).
+- `lex/tape_layout`: the size of `ByteSpan` (8), if probe 3 finds a way to read it.
+- `pilot lex` prints from the tape, and its existing tests pass unchanged.
+- All lex and numbers programs pass on `pilot test`, `--ir` and `--emit c`, and `pilot gate --full` passes, rename litmus included.
+- **Speed report (not a gate):** tokens per second and bytes per token for the tape on the tree, against the yield stream, on the seed VM and in emitted C.
+
+#### 11.5 Files
+
+- **Replaced:** `stdlib/pilot/lex.pilot`. Its hand-written `token_cursor_next`, `TokenKind`, `Token` and the `token_kind_*()` constant functions are deleted; `ByteSpan` is kept. Its `pilot.md` row is rewritten, and wiring row `M10` ("pilot.lex tokenizer") is re-pointed at the tape.
+- **Changed:**
+  - `stdlib/pilot/lex/build.pilot`: `FamilyInfo`, and the `u16`/`u8` table fields.
+  - `stdlib/pilot/lex/modes.pilot`: `lex_tape`.
+  - `stdlib/core/lex/delimiters.pilot`: `BRACKET_PAIRS`.
+  - `selfhost/lex/lex_tool.pilot`.
+  - `selfhost/check/infer.pilot`: the constant table.
+  - `selfhost/diagnostics/errors.pilot`: `LEX006`, `LEX007`.
+- **Not in this slice:** `fmt_tokenize` (`selfhost/fmt/fmt.pilot`) and `repl_tokenize` (`selfhost/cli/repl.pilot`) switch to the tape in a later slice (§8 lists them). The parser that consumes the tape is `PROP-005`.
+
+#### 11.6 Decision for the owner: the Rust shape, or a smaller modern one
+
+- **Rust shape (15 bytes a token)**, as §11.2 describes. Spans and links are stored, so every question about a token is one read.
+- **Compact shape, as the Zig compiler's tokenizer does (6 bytes a token):** store only `kind: u16` and `start: u32`.
+  - A token's end is found by running the table again from `start`, which reads only that token.
+  - Bracket links are found by the parser when it needs them, with its own stack.
+  - Gain: about 2.5 times less memory and cache traffic per token, and less work while lexing.
+  - Cost: `text(i)` and `span(i)` re-run the DFA for one token, and the parser carries its own bracket stack. The re-run reads only that token's bytes, so in practice it is cheap.
 
 ### 6. Decided
 

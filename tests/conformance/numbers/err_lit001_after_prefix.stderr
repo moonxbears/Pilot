@@ -1,0 +1,2 @@
+error[LIT001]: `0x_FF` is not a number: it reads as the number `0` followed by `x_FF`; a `_` may only stand between two digits (`digits` in stdlib/core/lex/numbers.pilot)
+err_lit001_after_prefix.pilot:6:11

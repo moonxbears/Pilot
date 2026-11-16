@@ -1,0 +1,2 @@
+error[LIT002]: `70000` does not fit `u16`, which holds 0 ..= 65535 (16-bit unsigned)
+err_lit002_assign.pilot:6:9

@@ -868,6 +868,20 @@ pub let ERRORS = [
         reference: "proposals.md PROP-018 §2",
     },
     ErrorDef {
+        code: "LIT001",
+        title: "Not a Number",
+        description: "A number literal's text is not one number as the number patterns declare it (stdlib/core/lex/numbers.pilot), plus at most a type suffix: a digit separator that does not stand between two digits (`1__000`, `1000_`, `0x_FF`, `1_.5`, `100_u8`)",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §2.7",
+    },
+    ErrorDef {
+        code: "LIT002",
+        title: "Literal Does Not Fit Its Type",
+        description: "An integer literal's value is outside the range of the type it lands in (its annotation, parameter, return type, assigned variable, else the integer literal type); the range comes from the type's [Bits] width and register class (`300` into `u8`, `-1` into an unsigned type, `128` into `i8`)",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §2.9",
+    },
+    ErrorDef {
         code: "LEX001",
         title: "No Token Starts Here",
         description: "No declared token pattern matches at this byte: a byte no token allows, or a token left unfinished (a string without its closing quote, a block comment without `*/`)",

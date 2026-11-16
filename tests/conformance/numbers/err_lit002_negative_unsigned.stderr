@@ -1,0 +1,2 @@
+error[LIT002]: `-1` does not fit `u8`, which holds 0 ..= 255 (8-bit unsigned)
+err_lit002_negative_unsigned.pilot:4:17

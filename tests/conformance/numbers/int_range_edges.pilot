@@ -1,0 +1,32 @@
+// The edges of each range fit (PROP-021 slice 21D, LIT002 must not fire):
+// a type's least and greatest values, written as literals.
+//
+// Expected, worked by hand:
+//   u8 255 = 2^8 - 1; i8 -128 = -2^7 and 127 = 2^7 - 1; u16 65535 = 2^16 - 1;
+//   i64 -9223372036854775808 = -2^63 and 9223372036854775807 = 2^63 - 1;
+//   u32 0xFFFF_FFFF = 2^32 - 1 = 4294967295;
+//   i16 -0b1000_0000_0000_0000 = -2^15 = -32768;
+//   take(0) is 0; an unannotated 9223372036854775807 is an i64.
+fn take(x: u8) -> u8 => x;
+
+fn main() {
+    let a: u8 = 255;
+    print(a);
+    let b: i8 = -128;
+    print(b);
+    let c: i8 = 127;
+    print(c);
+    let d: u16 = 65535;
+    print(d);
+    let e: i64 = -9223372036854775808;
+    print(e);
+    let f: i64 = 9223372036854775807;
+    print(f);
+    let g: u32 = 0xFFFF_FFFF;
+    print(g);
+    let h: i16 = -0b1000_0000_0000_0000;
+    print(h);
+    print(take(0));
+    let i = 9223372036854775807;
+    print(i);
+}

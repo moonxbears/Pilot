@@ -1,0 +1,2 @@
+error[LIT001]: `1_.5` is not a number: it reads as the number `1` followed by `_.5`; a `_` may only stand between two digits (`digits` in stdlib/core/lex/numbers.pilot)
+err_lit001_before_dot.pilot:6:11

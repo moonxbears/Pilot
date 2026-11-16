@@ -1,0 +1,8 @@
+// A literal passed to a parameter lands in the parameter's type (LIT002,
+// PROP-021 slice 21D). Expected, worked by hand: `u8` holds 0 ..= 255, and
+// 256 = 2^8 needs 9 bits.
+fn take(x: u8) -> u8 => x;
+
+fn main() {
+    print(take(256));
+}

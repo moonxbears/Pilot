@@ -1,0 +1,7 @@
+// A separator before the type suffix (LIT001, PROP-021 slice 21D). The number patterns
+// (stdlib/core/lex/numbers.pilot) allow a `_` only between two digits, so
+// `100_u8` is not one number. Expected, worked by hand: its longest number is
+// `100`, and `_u8` follows it.
+fn main() {
+    print(100_u8);
+}

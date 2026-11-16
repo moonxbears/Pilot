@@ -1,0 +1,2 @@
+error[LIT002]: `0xFFFFFFFFFFFFFFFF` does not fit `i64`, which holds -9223372036854775808 ..= 9223372036854775807 (64-bit signed)
+err_lit002_hex_signed.pilot:7:18

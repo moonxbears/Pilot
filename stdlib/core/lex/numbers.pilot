@@ -4,12 +4,14 @@
 // =========================================================================
 // The digit separator is legal only where `digits` puts it: between two
 // digits. So `1_000_000` is one number, while `1000_`, `1__000` and `0x_FF`
-// are not (their longest number is `1000`, `1` and `0`). Changing the
-// separator is an edit to `digits` alone.
+// are not (their longest number is `1000`, `1` and `0`; the checker reports
+// them as LIT001). The separator, the radixes and the digits are declared
+// once, as data (`DIGIT_SEPARATOR`, `RADIXES`, `DIGIT_RANGES`); the value
+// function reads the same data (`Pilot.Core.Lex.LiteralValue`), so changing
+// the separator is an edit to `DIGIT_SEPARATOR` alone.
 //
-// This file says only what a number looks like. What it is worth, and
-// whether that fits the type it lands in, is the job of the literal's value
-// function (LIT002, a later slice).
+// This file says what a number looks like. What it is worth, and whether
+// that fits the type it lands in (LIT002), is the value function's job.
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Numbers;
 
@@ -23,33 +25,100 @@ pub enum Radix : u8 {
     Oct,
 }
 
-/// One digit of `base`.
-pub fn digit(base: Radix) -> Pattern {
-    if base == Radix::Hex {
-        return "0" ..= "9" | "a" ..= "f" | "A" ..= "F";
-    }
-    if base == Radix::Bin {
-        return class("01");
-    }
-    if base == Radix::Oct {
-        return "0" ..= "7";
-    }
-    return "0" ..= "9";
+/// A radix: the prefix that selects it and the base it counts in.
+pub struct RadixInfo : IValue {
+    pub radix: Radix;
+    pub prefix: str;
+    pub base: i64;
 }
 
-/// Digits of `base`, optionally grouped by `_`, which may only stand
-/// between two digits.
-pub fn digits(base: Radix) -> Pattern => digit(base) + (lit("_").opt() + digit(base)).many();
+/// Every radix, declared once: the integer pattern and the value function
+/// (`Pilot.Core.Lex.LiteralValue`) both read this table.
+pub const RADIXES: List<RadixInfo> = [
+    RadixInfo { radix: Radix::Dec, prefix: "", base: 10 },
+    RadixInfo { radix: Radix::Hex, prefix: "0x", base: 16 },
+    RadixInfo { radix: Radix::Bin, prefix: "0b", base: 2 },
+    RadixInfo { radix: Radix::Oct, prefix: "0o", base: 8 },
+];
+
+/// Bytes `lo ..= hi` are the digits `value`, `value + 1`, ..
+pub struct DigitRange : IValue {
+    pub lo: i64;
+    pub hi: i64;
+    pub value: i64;
+}
+
+/// The digit bytes and their values, declared once: `0`-`9` (48-57) are
+/// 0-9, `a`-`f` (97-102) and `A`-`F` (65-70) are 10-15. A radix takes the
+/// digits whose value is below its base.
+pub const DIGIT_RANGES: List<DigitRange> = [
+    DigitRange { lo: 48, hi: 57, value: 0 },
+    DigitRange { lo: 97, hi: 102, value: 10 },
+    DigitRange { lo: 65, hi: 70, value: 10 },
+];
+
+/// The digit separator: it may stand only between two digits.
+pub const DIGIT_SEPARATOR: str = "_";
+
+/// The base `radix` counts in.
+pub fn base_of(radix: Radix) -> i64 {
+    for r in RADIXES {
+        if r.radix == radix { return r.base; }
+    }
+    return 10;
+}
+
+/// The value of digit byte `b`, or -1 for a byte that is no digit. Whether
+/// it is a digit of a given radix is whether the value is below its base.
+pub fn digit_value(b: i64) -> i64 {
+    for r in DIGIT_RANGES {
+        if b >= r.lo && b <= r.hi { return r.value + b - r.lo; }
+    }
+    return -1;
+}
+
+/// One digit of `radix`: the bytes of `DIGIT_RANGES` whose value is below
+/// its base.
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+pub fn digit(radix: Radix) -> Pattern {
+    let base = base_of(radix);
+    var out: List<Pattern> = [];
+    for r in DIGIT_RANGES {
+        if r.value < base {
+            let top = if r.hi - r.lo + r.value < base { r.hi } else { r.lo + base - 1 - r.value };
+            out.push(byte_range(r.lo, top));
+        }
+    }
+    var p: Pattern = out[0];
+    var i = 1;
+    while i < out.len() {
+        p = p | out[i];
+        i = i + 1;
+    }
+    return p;
+}
+
+/// Digits of `radix`, optionally grouped by the separator, which may only
+/// stand between two digits.
+pub fn digits(radix: Radix) -> Pattern => digit(radix) + (lit(DIGIT_SEPARATOR).opt() + digit(radix)).many();
 
 /// `e10`, `E-3`, `e+1_0`.
 pub fn exponent() -> Pattern => class("eE") + class("+-").opt() + digits(Radix::Dec);
 
-/// `1_000`, `0xFF_FF`, `0b1010`, `0o17`.
-pub fn integer() -> Pattern =>
-    lit("0x") + digits(Radix::Hex)
-    | lit("0b") + digits(Radix::Bin)
-    | lit("0o") + digits(Radix::Oct)
-    | digits(Radix::Dec);
+/// `1_000`, `0xFF_FF`, `0b1010`, `0o17`: each radix of `RADIXES`, after its
+/// prefix.
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+pub fn integer() -> Pattern {
+    var p: Pattern = in_radix(RADIXES[0]);
+    var i = 1;
+    while i < RADIXES.len() {
+        p = p | in_radix(RADIXES[i]);
+        i = i + 1;
+    }
+    return p;
+}
+
+fn in_radix(r: RadixInfo) -> Pattern => if r.prefix == "" { digits(r.radix) } else { lit(r.prefix) + digits(r.radix) };
 
 /// `2.5`, `2.5e10`, `1e9`. A float has digits on both sides of its `.`, so
 /// `1..5` is `1`, `..`, `5`.

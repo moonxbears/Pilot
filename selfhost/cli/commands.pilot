@@ -433,9 +433,9 @@ fn cli_lex_files() -> List<str> {
     var files = cli_checker_files();
     for f in [
         "stdlib/core/os_abi.pilot", "stdlib/core/host_raw.pilot", "stdlib/core/file.pilot", "stdlib/core/generator.pilot",
-        "stdlib/core/lex/patterns.pilot", "stdlib/core/lex/numbers.pilot", "stdlib/core/lex/names.pilot",
+        "stdlib/core/lex/names.pilot",
         "stdlib/core/lex/trivia.pilot", "stdlib/core/lex/strings.pilot", "stdlib/core/lex/delimiters.pilot",
-        "stdlib/core/lex/operators.pilot", "stdlib/core/lex/lexicon.pilot", "stdlib/pilot/lex/build.pilot", "stdlib/pilot/lex/modes.pilot",
+        "stdlib/core/lex/operators.pilot", "stdlib/core/lex/lexicon.pilot", "stdlib/pilot/lex/modes.pilot",
         "selfhost/lex/lex_tool.pilot",
     ] { files.push(f); }
     return files;

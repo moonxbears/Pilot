@@ -1,0 +1,2 @@
+error[LIT002]: argument 1 of `take`: `256` does not fit `u8`, which holds 0 ..= 255 (8-bit unsigned)
+err_lit002_arg.pilot:7:16

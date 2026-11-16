@@ -34,19 +34,20 @@ pub struct AsmOp : IValue {
 fn op(name: str, operands: i64, gives: AsmGives) -> AsmOp => AsmOp { name: name, operands: operands, gives: gives };
 
 /// Every machine operation, in the order of `MachineOp`.
+[Workaround("seed.variant_compare_untyped", "the variants are written `AsmGives::Operand`, since TokenRole (stdlib/core/lex/patterns.pilot, linked into the checker) also has `Operand`")]
 pub fn asm_ops() -> List<AsmOp> {
     var out: List<AsmOp> = [];
     for n in ["Add", "Sub", "Mul", "SDiv", "UDiv", "SRem", "URem", "FAdd", "FSub", "FMul", "FDiv",
-              "And", "Or", "Xor", "Shl", "LShr", "AShr"] { out.push(op(n, 2, ::Operand)); }
-    for n in ["Eq", "Ne", "ULt", "ULe", "UGt", "UGe", "SLt", "SLe", "SGt", "SGe", "FLt", "FLe", "FEq"] { out.push(op(n, 2, ::Truth)); }
-    for n in ["Neg", "FNeg", "Not", "BitNot"] { out.push(op(n, 1, ::Operand)); }
-    for n in ["ZExt", "SExt", "Trunc", "Bitcast", "SIToFP", "UIToFP", "FPToSI", "FPToUI"] { out.push(op(n, 2, ::Target)); }
+              "And", "Or", "Xor", "Shl", "LShr", "AShr"] { out.push(op(n, 2, AsmGives::Operand)); }
+    for n in ["Eq", "Ne", "ULt", "ULe", "UGt", "UGe", "SLt", "SLe", "SGt", "SGe", "FLt", "FLe", "FEq"] { out.push(op(n, 2, AsmGives::Truth)); }
+    for n in ["Neg", "FNeg", "Not", "BitNot"] { out.push(op(n, 1, AsmGives::Operand)); }
+    for n in ["ZExt", "SExt", "Trunc", "Bitcast", "SIToFP", "UIToFP", "FPToSI", "FPToUI"] { out.push(op(n, 2, AsmGives::Target)); }
     for n in ["SAddSat", "UAddSat", "SSubSat", "USubSat", "SMulSat", "UMulSat",
-              "AddWrap", "SubWrap", "MulWrap", "SRemEuc", "URemEuc"] { out.push(op(n, 2, ::Operand)); }
-    for n in ["Cmp3S", "Cmp3U"] { out.push(op(n, 2, ::Unknown)); }
-    out.push(op("Load", 1, ::Unknown));
-    out.push(op("Store", 2, ::Nothing));
-    out.push(op("ElemAddr", 2, ::Operand));
+              "AddWrap", "SubWrap", "MulWrap", "SRemEuc", "URemEuc"] { out.push(op(n, 2, AsmGives::Operand)); }
+    for n in ["Cmp3S", "Cmp3U"] { out.push(op(n, 2, AsmGives::Unknown)); }
+    out.push(op("Load", 1, AsmGives::Unknown));
+    out.push(op("Store", 2, AsmGives::Nothing));
+    out.push(op("ElemAddr", 2, AsmGives::Operand));
     return out;
 }
 

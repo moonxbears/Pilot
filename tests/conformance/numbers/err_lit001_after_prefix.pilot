@@ -1,0 +1,7 @@
+// A separator right after the radix prefix (LIT001, PROP-021 slice 21D). The number patterns
+// (stdlib/core/lex/numbers.pilot) allow a `_` only between two digits, so
+// `0x_FF` is not one number. Expected, worked by hand: its longest number is
+// `0`, and `x_FF` follows it.
+fn main() {
+    print(0x_FF);
+}

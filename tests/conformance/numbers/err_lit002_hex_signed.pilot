@@ -1,0 +1,9 @@
+// A hex literal is a value, not a bit pattern (LIT002, PROP-021 §2.9,
+// owner decision 2026-11-16). Expected, worked by hand: 0xFFFFFFFFFFFFFFFF
+// is 2^64 - 1, and `i64` holds -2^63 ..= 2^63 - 1 =
+// -9223372036854775808 ..= 9223372036854775807, so it does not fit. To get
+// the bit pattern, cast a u64 (numbers/u64_values).
+fn main() {
+    let s: i64 = 0xFFFFFFFFFFFFFFFF;
+    print(s);
+}

@@ -1,0 +1,104 @@
+// ==============================================================================
+// FILE: selfhost/check/literals.pilot
+// Number literals read by the declared number patterns (PROP-021 slice 21D).
+// ==============================================================================
+// LIT001: a number literal's text must be one number as the patterns of
+// stdlib/core/lex/numbers.pilot declare it, then at most a type suffix (a
+// type whose [Bits] register is an integer or float one). Today's seed lexer
+// still reads `1__000`, `1000_` and `0x_FF` as numbers; the checker reads
+// each literal's text with the table built from the declared patterns
+// (`Infer.numbers`) and reports any that are not one.
+//
+// LIT002: an integer literal must fit the type it lands in. The value comes
+// from `int_from_text` (stdlib/core/lex/literal_value.pilot), at any size;
+// the range comes from the type's [Bits] width and register class, so no
+// type name or width is written here. A literal lands where `assignable`
+// checks it (a binding, argument, return, default) or, with no type around
+// it, in the integer literal slot's type.
+// ==============================================================================
+pub lvl(0) pkg selfhost.check;
+
+use Pilot.Core.Lex.Numbers;
+use Pilot.Core.Lex.LiteralValue;
+use pilot.lex.build;
+
+/// The node under any unary minuses of `e`, and how many there are.
+fn under_negation(ref s: Snap, e: i64) -> List<i64> {
+    var cur = e;
+    var count = 0;
+    while cur >= 0 && kind(s, cur) == nk_unary() && flags(s, cur) == 0 {
+        cur = lhs(s, cur);
+        count = count + 1;
+    }
+    return [cur, count];
+}
+
+/// Where the longest number at the start of `text` ends (0 when none
+/// starts there).
+fn number_end(ref inf: Infer, text: str) -> i64 {
+    let l = match_at(inf.numbers, text, 0, LexContextKind::Start);
+    return if l.decl < 0 { 0 } else { l.end };
+}
+
+/// The bit width a type's [Bits] declares, or -1.
+fn type_bits(ref p: Program, t: i64) -> i64 {
+    if !ty_is_named(p.tt, t) { return -1; }
+    for td in nl_get(p.type_decls, p.tt.name[t]) {
+        if some bits = prog_attr_nodes(p, td, "Bits") {
+            if bits.len() >= 1 {
+                if some w = prog_const(p, bits[0]) { return w; }
+            }
+        }
+    }
+    return -1;
+}
+
+/// Why expression `e` cannot land in type `dst` (LIT002), or "" when it
+/// can, when `e` is no integer literal, or when `dst` is no integer type.
+pub fn literal_range_problem(var ref inf: Infer, e: i64, dst: i64) -> str {
+    let p = inf.p;
+    let s = p.s;
+    if e < 0 { return ""; }
+    let under = under_negation(s, e);
+    let core = under[0];
+    if core < 0 || kind(s, core) != nk_int() { return ""; }
+    let class = prog_class(p, dst);
+    if !is_integer_class(class) { return ""; }
+    let bits = type_bits(p, dst);
+    if bits <= 0 { return ""; }
+    let text = node_text(s, core);
+    let end = number_end(inf, text);
+    guard some v = int_from_text(text.slice(0, end)) else { return ""; }
+    let signed = is_signed_class(class);
+    if v.fits(bits, signed, under[1] % 2 == 1) { return ""; }
+    let sign_word = if signed { "signed" } else { "unsigned" };
+    let shown = node_text(s, e);
+    let values = range_text(bits, signed);
+    return f"`{shown}` does not fit `{ty_display(p.tt, dst)}`, which holds {values} ({bits}-bit {sign_word})";
+}
+
+/// Whether `word` names a type a number may be suffixed with: one whose
+/// [Bits] register is an integer or float one.
+fn is_number_suffix(ref p: Program, word: str) -> bool {
+    if !p.bits_class.has(word) { return false; }
+    let class = p.bits_class.get(word);
+    return is_integer_class(class) || is_float_class(class);
+}
+
+/// LIT001 for number literal `n` whose text is not one declared number
+/// (plus a type suffix).
+pub fn check_number_text(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let text = node_text(p.s, n);
+    let end = number_end(inf, text);
+    // A literal the parser made, spelled by no number in the source.
+    if end == 0 || end == text.len() as i64 { return; }
+    let rest = text.slice(end, text.len());
+    if is_number_suffix(p, rest) { return; }
+    let number = text.slice(0, end);
+    var why = f"`{text}` is not a number: it reads as the number `{number}` followed by `{rest}`";
+    if text.contains(DIGIT_SEPARATOR) {
+        why = why + f"; a `{DIGIT_SEPARATOR}` may only stand between two digits (`digits` in stdlib/core/lex/numbers.pilot)";
+    }
+    sink_error(sink, n, "LIT001", why);
+}

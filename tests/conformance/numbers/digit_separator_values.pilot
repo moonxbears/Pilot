@@ -1,0 +1,16 @@
+// Separators between digits are only grouping (PROP-021 §5; LIT001 must
+// not fire on them). Expected, worked by hand:
+//   1_000_000 == 1000000; 0xFFFF_FFFF = 2^32 - 1 = 4294967295;
+//   10_00_000 = 1000000 (any grouping); 1_0.5_0 = 10.50, printed 10.5;
+//   2.5e1_0 = 2.5 * 10^10 = 25000000000 (exact, as an i64); 1_000u32 = 1000;
+//   0xF_Fu8 = 255; 0b1_0 = 2.
+fn main() {
+    print(1_000_000 == 1000000);
+    print(0xFFFF_FFFF);
+    print(10_00_000);
+    print(1_0.5_0);
+    print(2.5e1_0 as i64);
+    print(1_000u32);
+    print(0xF_Fu8);
+    print(0b1_0);
+}

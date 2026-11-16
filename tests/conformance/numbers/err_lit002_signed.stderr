@@ -1,0 +1,2 @@
+error[LIT002]: `128` does not fit `i8`, which holds -128 ..= 127 (8-bit signed)
+err_lit002_signed.pilot:6:17

@@ -17,5 +17,5 @@ two "quoted" \t""");
     print(fR"{n}\n");
     print(Rf"""{n}
 \w""");
-    print(1_000_000 + 0x_FF + 0b1_0000);
+    print(1_000_000 + 0xFF + 0b1_0000);
 }

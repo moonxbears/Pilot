@@ -1,0 +1,24 @@
+0: 0, 0 bits
+1_000_000: 1000000, 20 bits
+0xFF_FF: 65535, 16 bits
+0b1010: 10, 4 bits
+0o17: 15, 4 bits
+18446744073709551615: -1, 64 bits
+18446744073709551616: 0, 65 bits
+9223372036854775808: -9223372036854775808, 64 bits
+12a: not an integer
+255 in 8 signed=false negated=false: true
+256 in 8 signed=false negated=false: false
+128 in 8 signed=true negated=false: false
+128 in 8 signed=true negated=true: true
+129 in 8 signed=true negated=true: false
+1 in 8 signed=false negated=true: false
+0 in 8 signed=false negated=true: true
+18446744073709551615 in 64 signed=false negated=false: true
+18446744073709551616 in 64 signed=false negated=false: false
+9223372036854775808 in 64 signed=true negated=false: false
+9223372036854775808 in 64 signed=true negated=true: true
+0 ..= 255
+-128 ..= 127
+0 ..= 18446744073709551615
+-9223372036854775808 ..= 9223372036854775807

@@ -1,0 +1,8 @@
+// A literal assigned to a variable lands in the variable's type (LIT002,
+// PROP-021 slice 21D). Expected, worked by hand: `u16` holds
+// 0 ..= 2^16 - 1 = 65535, and 70000 > 65535.
+fn main() {
+    var w: u16 = 0;
+    w = 70000;
+    print(w);
+}

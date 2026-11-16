@@ -1,0 +1,2 @@
+error[LIT001]: `1__000` is not a number: it reads as the number `1` followed by `__000`; a `_` may only stand between two digits (`digits` in stdlib/core/lex/numbers.pilot)
+err_lit001_double.pilot:6:11

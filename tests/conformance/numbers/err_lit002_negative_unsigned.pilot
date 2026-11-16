@@ -1,0 +1,6 @@
+// A negative literal never fits an unsigned type (LIT002, PROP-021 slice
+// 21D). Expected, worked by hand: `u8` holds 0 ..= 255, and -1 < 0.
+fn main() {
+    let x: u8 = -1;
+    print(x);
+}

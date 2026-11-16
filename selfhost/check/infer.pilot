@@ -16,6 +16,9 @@
 // derived yet is the unknown type, which every rule accepts.
 pub lvl(0) pkg selfhost.check;
 
+use Pilot.Core.Lex.Numbers;
+use pilot.lex.build;
+
 
 pub struct Infer {
     pub ref p: Program;
@@ -25,6 +28,9 @@ pub struct Infer {
     /// Name -> the top-level `const` declarations of that name in the files
     /// the program links.
     pub consts: Map<str, List<i64>>;
+    /// The table of the declared number tokens, which reads each number
+    /// literal's text (selfhost/check/literals.pilot).
+    pub numbers: LexTable;
 }
 
 pub fn infer_new(ref p: Program, ref r: Resolution) -> Infer {
@@ -40,7 +46,8 @@ pub fn infer_new(ref p: Program, ref r: Resolution) -> Infer {
             }
         }
     }
-    return Infer { p: p, r: r, memo: filled(p.s.count, -1), consts: consts };
+    let numbers = build_table(number_tokens());
+    return Infer { p: p, r: r, memo: filled(p.s.count, -1), consts: consts, numbers: numbers.table };
 }
 
 /// The top-level `const` identifier `n` names when no local binding covers

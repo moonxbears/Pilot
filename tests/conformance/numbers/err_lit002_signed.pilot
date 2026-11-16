@@ -1,0 +1,8 @@
+// A signed type holds one more negative value than positive (LIT002,
+// PROP-021 slice 21D). Expected, worked by hand: `i8` holds
+// -2^7 ..= 2^7 - 1 = -128 ..= 127, so 128 does not fit (while -128 does,
+// numbers/int_range_edges).
+fn main() {
+    let z: i8 = 128;
+    print(z);
+}

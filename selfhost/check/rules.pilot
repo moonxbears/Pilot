@@ -5,6 +5,11 @@
 //   TYPE001  a value whose type does not fit where it goes (a `let`/`var`
 //            annotation, a parameter of the called function, the declared
 //            return type)
+//   LIT002   an integer literal whose value its landing type cannot hold
+//            (where TYPE001 is checked, in an assignment, and in the integer
+//            literal type when nothing types it; selfhost/check/literals.pilot)
+//   LIT001   a number literal whose text is not one declared number
+//            (selfhost/check/literals.pilot)
 //   TYPE002  a type annotation naming no type
 //   TYPE003  a cast between unrelated types
 //   FLOW001  a function with a return type that can end without a value
@@ -65,6 +70,9 @@ fn is_literal_list(var ref p: Program, t: i64) -> bool {
 pub fn assignable(var ref inf: Infer, src: i64, dst: i64, e: i64) -> bool {
     let p = inf.p;
     let tt = p.tt;
+    // An integer literal fits an integer type only when its value does
+    // (LIT002, selfhost/check/literals.pilot).
+    if e >= 0 && literal_range_problem(inf, e, dst) != "" { return false; }
     // Collection literals are target-typed: the items of `[a, b]` must fit
     // the element type of the collection it goes into.
     if e >= 0 && kind(p.s, e) == nk_list() && ty_is_named(tt, dst) {
@@ -161,6 +169,17 @@ fn is_none_literal(ref s: Snap, e: i64) -> bool => e >= 0 && kind(s, e) == nk_no
 fn mismatch(ref inf: Infer, src: i64, dst: i64) -> str =>
     f"expected `{ty_display(inf.p.tt, dst)}`, found `{ty_display(inf.p.tt, src)}`";
 
+/// Reports that `v` does not fit `dst`: LIT002 (after `context`) when `v`
+/// is an integer literal outside `dst`'s range, else TYPE001 `message`.
+fn report_unfit(var ref inf: Infer, var ref sink: DiagSink, v: i64, dst: i64, context: str, message: str) {
+    let problem = literal_range_problem(inf, v, dst);
+    if problem != "" {
+        sink_error(sink, v, "LIT002", context + problem);
+        return;
+    }
+    sink_error(sink, v, "TYPE001", message);
+}
+
 /// The function-like node enclosing `n` (`fn`, `op` or closure), or -1.
 fn enclosing_function(ref p: Program, n: i64) -> i64 {
     var cur = p.parents[n];
@@ -203,7 +222,7 @@ fn check_target_call(var ref inf: Infer, var ref sink: DiagSink, v: i64, dst: i6
             if !check_target_call(inf, sink, arg, want) {
                 let src = type_of(inf, arg);
                 if !assignable(inf, src, want, arg) {
-                    sink_error(sink, arg, "TYPE001", f"argument {i + 1} of `{label}`: " + mismatch(inf, src, want));
+                    report_unfit(inf, sink, arg, want, f"argument {i + 1} of `{label}`: ", f"argument {i + 1} of `{label}`: " + mismatch(inf, src, want));
                 }
             }
         }
@@ -216,6 +235,13 @@ fn check_binding_value(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let s = inf.p.s;
     let a = annot(s, n);
     let v = rhs(s, n);
+    if a < 0 && v >= 0 {
+        // No type around it: the literal lands in the integer literal
+        // slot's type.
+        let problem = literal_range_problem(inf, v, prog_slot_type(inf.p, literal_slot(nk_int())));
+        if problem != "" { sink_error(sink, v, "LIT002", problem); }
+        return;
+    }
     if a < 0 || v < 0 { return; }
     let dst = prog_annot_type(inf.p, a);
     if is_none_literal(s, v) {
@@ -227,7 +253,7 @@ fn check_binding_value(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     }
     if check_target_call(inf, sink, v, dst) { return; }
     let src = type_of(inf, v);
-    if !assignable(inf, src, dst, v) { sink_error(sink, v, "TYPE001", mismatch(inf, src, dst)); }
+    if !assignable(inf, src, dst, v) { report_unfit(inf, sink, v, dst, "", mismatch(inf, src, dst)); }
 }
 
 fn check_return(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
@@ -252,7 +278,7 @@ fn check_return(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     if check_target_call(inf, sink, v, dst) { return; }
     let src = type_of(inf, v);
     if !assignable(inf, src, dst, v) {
-        sink_error(sink, v, "TYPE001",
+        report_unfit(inf, sink, v, dst, f"`{node_name(s, f)}` returns `{ty_display(p.tt, dst)}`: ",
             f"`{node_name(s, f)}` returns `{ty_display(p.tt, dst)}`, found `{ty_display(p.tt, src)}`");
     }
 }
@@ -308,7 +334,7 @@ fn check_param_default(var ref inf: Infer, var ref sink: DiagSink, prm: i64) {
     if ty_is_open(p.tt, dst) { return; }
     let src = type_of(inf, value);
     if !assignable(inf, src, dst, value) {
-        sink_error(sink, value, "TYPE001", f"the default of `{node_name(s, prm)}`: " + mismatch(inf, src, dst));
+        report_unfit(inf, sink, value, dst, f"the default of `{node_name(s, prm)}`: ", f"the default of `{node_name(s, prm)}`: " + mismatch(inf, src, dst));
     }
 }
 
@@ -355,7 +381,7 @@ fn check_call_args(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
         } else if !ty_is_open(p.tt, dst) && !check_target_call(inf, sink, arg, dst) {
             let src = type_of(inf, arg);
             if !assignable(inf, src, dst, arg) {
-                sink_error(sink, arg, "TYPE001",
+                report_unfit(inf, sink, arg, dst, f"argument {i + 1} of `{node_name(s, f)}`: ",
                     f"argument {i + 1} of `{node_name(s, f)}`: " + mismatch(inf, src, dst));
             }
         }
@@ -454,7 +480,7 @@ fn check_method_args(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
         if !ty_is_open(p.tt, want) && !ty_is_unknown(p.tt, want) && !is_none_literal(s, arg) {
             let src = type_of(inf, arg);
             if !assignable(inf, src, want, arg) {
-                sink_error(sink, arg, "TYPE001", f"argument {i + 1} of `{label}`: " + mismatch(inf, src, want));
+                report_unfit(inf, sink, arg, want, f"argument {i + 1} of `{label}`: ", f"argument {i + 1} of `{label}`: " + mismatch(inf, src, want));
             }
         }
         i = i + 1;
@@ -482,7 +508,7 @@ fn check_closure_call(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
         if !ty_is_open(p.tt, dst) && !is_none_literal(s, arg) {
             let src = type_of(inf, arg);
             if !assignable(inf, src, dst, arg) {
-                sink_error(sink, arg, "TYPE001", f"argument {i + 1} of `{name}`: " + mismatch(inf, src, dst));
+                report_unfit(inf, sink, arg, dst, f"argument {i + 1} of `{name}`: ", f"argument {i + 1} of `{name}`: " + mismatch(inf, src, dst));
             }
         }
         i = i + 1;
@@ -535,7 +561,7 @@ fn check_delegation(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
         if !ty_is_open(p.tt, dst) && !is_none_literal(s, arg) {
             let src = type_of(inf, arg);
             if !assignable(inf, src, dst, arg) {
-                sink_error(sink, arg, "TYPE001", f"argument {i + 1} of `{bundle}.{method}`: " + mismatch(inf, src, dst));
+                report_unfit(inf, sink, arg, dst, f"argument {i + 1} of `{bundle}.{method}`: ", f"argument {i + 1} of `{bundle}.{method}`: " + mismatch(inf, src, dst));
             }
         }
         i = i + 1;
@@ -808,6 +834,11 @@ fn check_assign(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let s = p.s;
     let target = lhs(s, n);
     if target < 0 || kind(s, target) != nk_ident() { return; }
+    let value = rhs(s, n);
+    if value >= 0 {
+        let problem = literal_range_problem(inf, value, type_of(inf, target));
+        if problem != "" { sink_error(sink, value, "LIT002", problem); }
+    }
     let b = inf.r.ref_of[target];
     if b >= 0 && b < inf.r.site.len() && inf.r.bind_kind[b] == BindKind::Param {
         // A plain `ref` parameter is a read-only borrow; only `var ref`
@@ -963,6 +994,7 @@ pub fn check_rules(var ref inf: Infer, var ref sink: DiagSink) {
     while i < s.user_hi {
         if in_user_file(s, i) {
             let k = kind(s, i);
+            if k == nk_int() || k == nk_float() { check_number_text(inf, sink, i); }
             if k == nk_let() || k == nk_var() || k == nk_const() { check_binding_value(inf, sink, i); }
             else if k == nk_return() { check_return(inf, sink, i); }
             else if k == nk_yield() { check_yield(inf, sink, i); }

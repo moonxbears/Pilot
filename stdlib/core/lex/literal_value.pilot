@@ -1,0 +1,191 @@
+// =========================================================================
+// FILE: stdlib/core/lex/literal_value.pilot
+// WHAT AN INTEGER LITERAL IS WORTH (PROP-021 slice 21D)
+// =========================================================================
+// The lexer decides a literal's shape (numbers.pilot); this file decides
+// its value, from the same declared data: the radix prefixes (`RADIXES`),
+// the digit values (`DIGIT_RANGES`) and the separator (`DIGIT_SEPARATOR`).
+// The value is kept as a magnitude of any size, so whether it fits is
+// decided by the type it lands in (its [Bits] width), never by this file
+// (PROP-021 §2.9). The checker uses it for LIT002 (selfhost/check/
+// literals.pilot).
+//
+// A magnitude is a little-endian list of 16-bit limbs with no high zero
+// limb (0 is the empty list).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.LiteralValue;
+
+use Pilot.Core.Lex.Numbers;
+
+/// The base of one limb (2^16).
+const LIMB: i64 = 65536;
+
+/// The bits in one limb.
+const LIMB_BITS: i64 = 16;
+
+/// The decimal digits, by value.
+const DECIMAL_DIGITS: List<str> = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9",];
+
+/// An integer literal's value: its magnitude, at any size.
+pub struct IntLiteral : IObject {
+    pub limbs: List<i64>;
+
+    /// The bits needed to write the magnitude (0 for 0).
+    pub fn bit_length(ref self) -> i64 {
+        let n = self.limbs.len() as i64;
+        if n == 0 { return 0; }
+        var top = self.limbs[n - 1];
+        var bits = 0;
+        while top > 0 {
+            bits = bits + 1;
+            top = top >> 1;
+        }
+        return (n - 1) * LIMB_BITS + bits;
+    }
+
+    /// Whether the magnitude is a power of two (one bit set).
+    pub fn is_power_of_two(ref self) -> bool {
+        let n = self.limbs.len() as i64;
+        if n == 0 { return false; }
+        var i = 0;
+        while i < n - 1 {
+            if self.limbs[i] != 0 { return false; }
+            i = i + 1;
+        }
+        let top = self.limbs[n - 1];
+        return (top & (top - 1)) == 0;
+    }
+
+    /// The low 64 bits of the magnitude, as an i64 (two's complement: 2^64 - 1
+    /// is -1).
+    pub fn low64(ref self) -> i64 {
+        let n = self.limbs.len() as i64;
+        var i = if n < 4 { n } else { 4 };
+        var v = 0;
+        while i > 0 {
+            i = i - 1;
+            v = (v << LIMB_BITS) | self.limbs[i];
+        }
+        return v;
+    }
+
+    /// Whether the value (the magnitude, made negative when `negated`) fits
+    /// a `bits`-bit integer, `signed` or not: unsigned holds 0 ..= 2^bits - 1,
+    /// signed -2^(bits-1) ..= 2^(bits-1) - 1.
+    pub fn fits(ref self, bits: i64, signed: bool, negated: bool) -> bool {
+        let len = self.bit_length();
+        if !signed {
+            return if negated { len == 0 } else { len <= bits };
+        }
+        if len <= bits - 1 { return true; }
+        return negated && len == bits && self.is_power_of_two();
+    }
+}
+
+/// `limbs * by + add`, in place.
+fn mul_add(var ref limbs: List<i64>, by: i64, add: i64) {
+    var carry = add;
+    var i = 0;
+    while i < limbs.len() {
+        let v = limbs[i] * by + carry;
+        limbs[i] = v % LIMB;
+        carry = v / LIMB;
+        i = i + 1;
+    }
+    while carry > 0 {
+        limbs.push(carry % LIMB);
+        carry = carry / LIMB;
+    }
+}
+
+/// The value of integer token `text` (one integer as the number patterns
+/// declare it, no suffix), or `none` when it is not one: a byte that is
+/// neither a digit of its radix nor the separator, or no digit at all.
+pub fn int_from_text(text: str) -> IntLiteral? {
+    var info = RADIXES[0];
+    for r in RADIXES {
+        if r.prefix != "" && text.starts_with(r.prefix) { info = r; }
+    }
+    let sep = DIGIT_SEPARATOR.byte_at(0) as i64;
+    var limbs: List<i64> = [];
+    var digits = 0;
+    var i = info.prefix.len() as i64;
+    while i < text.len() as i64 {
+        let b = text.byte_at(i) as i64;
+        if b != sep {
+            let d = digit_value(b);
+            if d < 0 || d >= info.base { return none; }
+            mul_add(limbs, info.base, d);
+            digits = digits + 1;
+        }
+        i = i + 1;
+    }
+    if digits == 0 { return none; }
+    return IntLiteral { limbs: limbs };
+}
+
+/// 2^k as a magnitude.
+fn power_of_two(k: i64) -> List<i64> {
+    var limbs: List<i64> = [];
+    var i = 0;
+    while i < k / LIMB_BITS {
+        limbs.push(0);
+        i = i + 1;
+    }
+    limbs.push(1 << (k % LIMB_BITS));
+    return limbs;
+}
+
+/// `limbs - 1`, in place (`limbs` is not 0).
+fn sub_one(var ref limbs: List<i64>) {
+    var i = 0;
+    while limbs[i] == 0 {
+        limbs[i] = LIMB - 1;
+        i = i + 1;
+    }
+    limbs[i] = limbs[i] - 1;
+    while limbs.len() > 0 && limbs[limbs.len() - 1] == 0 {
+        let _ = limbs.pop();
+    }
+}
+
+/// The magnitude written in decimal.
+fn decimal(limbs: List<i64>) -> str {
+    var rest = limbs;
+    var digits: List<str> = [];
+    while rest.len() > 0 {
+        var rem = 0;
+        var i = rest.len() as i64 - 1;
+        while i >= 0 {
+            let cur = rem * LIMB + rest[i];
+            rest[i] = cur / 10;
+            rem = cur % 10;
+            i = i - 1;
+        }
+        while rest.len() > 0 && rest[rest.len() - 1] == 0 {
+            let _ = rest.pop();
+        }
+        digits.push(DECIMAL_DIGITS[rem]);
+    }
+    if digits.len() == 0 { return "0"; }
+    var out = "";
+    var j = digits.len() as i64 - 1;
+    while j >= 0 {
+        out = out + digits[j];
+        j = j - 1;
+    }
+    return out;
+}
+
+/// The values a `bits`-bit integer holds, as `least ..= greatest`.
+pub fn range_text(bits: i64, signed: bool) -> str {
+    if !signed {
+        var top = power_of_two(bits);
+        sub_one(top);
+        return "0 ..= " + decimal(top);
+    }
+    let least = power_of_two(bits - 1);
+    var top = power_of_two(bits - 1);
+    sub_one(top);
+    return "-" + decimal(least) + " ..= " + decimal(top);
+}

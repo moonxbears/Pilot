@@ -1,0 +1,2 @@
+error[LIT001]: `100_u8` is not a number: it reads as the number `100` followed by `_u8`; a `_` may only stand between two digits (`digits` in stdlib/core/lex/numbers.pilot)
+err_lit001_before_suffix.pilot:6:11

@@ -1,0 +1,7 @@
+// Two separators in a row (LIT001, PROP-021 slice 21D). The number patterns
+// (stdlib/core/lex/numbers.pilot) allow a `_` only between two digits, so
+// `1__000` is not one number. Expected, worked by hand: its longest number is
+// `1`, and `__000` follows it.
+fn main() {
+    print(1__000);
+}

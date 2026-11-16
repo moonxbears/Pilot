@@ -1,0 +1,9 @@
+// A returned literal lands in the return type (LIT002, PROP-021 slice
+// 21D). Expected, worked by hand: `u8` holds 0 ..= 255, and 999 > 255.
+fn small() -> u8 {
+    return 999;
+}
+
+fn main() {
+    print(small());
+}
