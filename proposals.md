@@ -26,7 +26,7 @@
 | **`PROP-013`** | Link a Run's Extra Toolchain Files in the Loader's One Pass (`run.rs` `compile_entry`) | `-11` | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-013") AND BUILT; C2 PASSES` |
 | **`PROP-014`** | Update the Benchmark Baseline Test for the Seed Column `PROP-002a` C2 Added (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-014") AND BUILT` |
 | **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed | `+23` as built (`+34`, `-11`) | `APPROVED, BUILT` |
-| **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
+| **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C STOPPED, NEEDS OWNER CHOICE; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
 | **`PROP-006`** | Precompiled `toolchain.pilc` Stage-3 Cutover — Delete `pilot-{lexer,parser,ast,span,intern}` | `~ -5,950` LOC | `PLANNED (WAVE 6 -> ~1,800 LOC FLOOR)` |
@@ -1860,6 +1860,108 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 **Not included.**
 - `pilot ir run` reports LOOP005 ("`continue a..b` is only supported inside a `for` loop") for a `continue 5..6;` that is inside a `for` (`tests/ir/unlowered_continue_range.pilot`; `cli_f5` `an_unlowered_construct_stops_at_its_seam` fails on it). The check is in the legacy `selfhost/analyzer.pilot`, which walks `ast_parent` links built by `crates/pilot-analysis/src/infer.rs`; since `for` became a `syntax` rule (PROP-009 step 2) that walk no longer reaches the `for`. `pilot check` and `pilot run` report the right SEED001. Not yet diagnosed far enough to name a fix. The same analyzer warns LOOP005 "Potential infinite loop ... no 'break'" for `while true { guard some x = f() else { break; }; .. }`: it does not see a `break` inside a `guard`'s `else` (also a `syntax`-rule form since PROP-009). `runtime/stdin_lines` is written with `if some .. else` so `cli_f3` `check_passes_a_valid_program_without_running_it` stays clean.
 - The checker accepts a `T?` where a `T` is expected (`f() + 1` with `f() -> i64?`). That is its own design question (a new diagnostic code).
+
+---
+
+## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
+
+**Status: itemized 2026-11-15. Slices 3A, 3B and 3C APPROVED by the owner 2026-11-15 ("Approve 3A–3C"). 3A and 3B BUILT 2026-11-15; 3C STOPPED before building (larger than itemized; options below); 3D–3F still drafts.** Owner asked to start PROP-003 ("lets do prop-003"). Each slice is approved and built on its own.
+
+### What the survey found (2026-11-15)
+
+The wave summary planned about −2,850 Rust lines by moving `heap.rs`/`ops.rs`/`checked.rs`, `parse_header` and nine parser files to Pilot. **Most of that cannot leave Rust before `PROP-005`/`PROP-006`.** About −250 to −300 can go now, in the slices below.
+
+- `parse_header` is already gone (`PROP-012`). `query.rs` and `with_scope.rs` are already gone (`PROP-009`).
+- **Irreducible until `PROP-006`** (the Rust Stage-A parser must still read the stdlib and selfhost, and `pilot-parser` cannot call Pilot code because `pilot-vm` depends on it):
+  - `fstring.rs` (330): selfhost's ~923 f-strings are parsed and lowered by it. A `syntax` rule cannot split a string token, and `selfhost/parser.pilot:247` drops interpolation, so there is no Pilot front end to hand it to.
+  - `attr_hooks.rs` (133): `[Infix]`/`[Prefix]`/`[Layout]` and every bare-name genesis call reach the bootstrap tables only through it. It is how the Rust Pratt parser learns the operators it needs to parse the stdlib.
+  - `pilot_impls.rs` (286): the data channel from `bind_*` hooks to the Rust parser's desugarings and to `pilot-vm`. `selfhost/check` and `selfhost/ir` already re-derive the same bindings in Pilot; the Rust copy goes with `PROP-005`/`006`.
+- **Blocked by `PROP-005`** (the names are emitted by `lower_*.rs`, so the Rust arms cannot go while the seed lowering exists): the domain helpers in `heap.rs` (`display`, `value_clone`, `collect_elements`, `contains`, `slice`, `sorted_map_keys`, `char_floor`; about 103 lines), and `ops::fits`/`num_fits` (only `lower_members.rs` emits it, so it dies with that file for free).
+- **Irreducible VM core (stays):** the `ops.rs` ALU (`arith`, `bitwise`, `compare`, `equals`, `unary`, `truth`, about 291 lines) and the `heap.rs` slot primitives (about 165). The casts (`wrap`, `convert`, `scalar_from`, 85) need char-construct, float-truncate and f32-round primitives before they can move.
+- **Needs its own design:** `comptime_if.rs` (245). It folds the condition and skips the untaken branch while parsing; no rule can do that. The alternative (parse both branches, let `selfhost/check` choose and hand the seed a run-plan row) changes semantics (the untaken branch gets parsed) and costs about +30 to +60 Rust of plumbing for about −245. To be a separate proposal, together with closing the seam `comptime_if.condition`.
+
+### Slices
+
+| Slice | What | Rust files | Pilot files | Net Rust | Risk |
+| :--- | :--- | :--- | :--- | ---: | :--- |
+| **3A** | Struct `invariant` becomes a `RejectWord` `syntax` rule | `crates/pilot-parser/src/contracts.rs`, `decl.rs` | `stdlib/contracts/contracts_syntax.pilot` | about −25 | low |
+| **3B** | Delete the dead Pilot f-string desugarer `stdlib/core/syntax/fstring.pilot` (230 Pilot lines) | `crates/pilot-parser/src/tables.rs` (one `BOOTSTRAP_SOURCES` line); tests `crates/pilot-analysis/tests/milestone52_pilot_preprocessor_and_receptors.rs`, `milestone61_stage3_fixed_point_and_universal_rename_gate.rs` | delete the file; `pilot.md` | −1 `src` | low |
+| **3C** | `op_checked` moves to Pilot: new `selfhost/ir/interp_ops.pilot` pre-checks the seed's failures and maps the interpreter's engine-op names to static calls; `binary_op` moves into `vm.rs` (it is dispatch) | `crates/pilot-vm/src/checked.rs` (deleted), `vm.rs`, `stage_a_natives.rs`, `lib.rs` | `selfhost/ir/{interp_ops,fault,interp}.pilot`; `manifest.pilot` ratchet (`fault.pilot` 3 → 2) | about −70 | medium |
+| **3D** | `requires`/`ensures`/`old` become `syntax` rules | `crates/pilot-parser/src/{contracts,decl,forms,rule_arms,loud}.rs`, `lib.rs` | `stdlib/core/syntax/forms.pilot`, `contracts_syntax.pilot`, `selfhost/check/contract_clauses.pilot` | about −55 | medium |
+| **3E** | `fstring.rs` reuses the lexer's hole scanner instead of its own copy | `crates/pilot-parser/src/fstring.rs`, `crates/pilot-lexer/src/simd.rs` | — | about −50 | medium |
+| **3F** | Small trims | `loud.rs`, `num_suffix.rs`, `attr_hooks.rs`, `tables.rs` | `selfhost/check/*` | about −70 | low–medium |
+
+**Slice details.**
+
+- **3A.**
+  - Add to `contracts_syntax.pilot` two rules: `invariant ( $c:Expr )` and `invariant ( )`. Each expands to `form(CoreForm::RejectWord, "<the SEAM001 contracts.invariant message today>", ..)`. Use an `Expr` hole: `Rest` cannot start at a prefix dot (`.balance`).
+  - Delete `bind_receptor(nameof(invariant), 33, 20)`.
+  - Rust deleted: `at_invariant`, `parse_invariant`, `INVARIANT_SUB`, `INVARIANT_UNCONNECTED`, and the check in `decl.rs` `parse_item`.
+  - Acceptance: `contracts/invariant_seam` unchanged (SEAM001 at 5:5, from the word); the seed suite, `--ir`, `--emit c` and `pilot gate` unchanged.
+- **3B.**
+  - The file is never called. It is read on every bootstrap but has no hooks. It also diverges from the real f-string behaviour (no `:pattern`, raw or triple-quoted forms; it lowers holes to text).
+  - Deleting it is required by AGENTS.md (dead Pilot code), but its references are a Rust `src` line and two Rust test files, so it needs this approval.
+  - A Pilot f-string front end for `PROP-006` is written fresh against `selfhost/parser.pilot`, not from this file.
+- **3C.**
+  - `op_checked` today runs any intrinsic by name and returns the seed's own failure messages. The Pilot side checks the failing cases first, with the same messages: division by zero, type errors, NaN comparison, a non-bool condition, an out-of-bounds list index, pop from an empty list, not-a-record.
+  - `num_wrap`/`num_convert` become ordinary Pilot casts.
+  - Acceptance: every `err_*` case on `pilot test --ir` keeps its `.stderr`; `pass_const_eval` folds as before; `cli_f5`, `cli_f7`, `cli_attrs`, `cli_changed` unchanged.
+  - Risk: message parity. If one failure cannot be matched without a new primitive, the slice stops and reports it.
+- **3D.**
+  - Needs three small mechanisms, each append-only:
+    - a signature-position rule hook in `parse_fn` (about +6; also opens a later route for a function's `where`);
+    - `=>` allowed inside a bracketed rule head (about +3);
+    - `CoreForm::Requires`, `Ensures` (optional binder) and `Old`, building today's exact nodes (about +18).
+  - Then `with_contracts` stays (it wraps the body), and the receptor-33 parsing goes.
+  - New checker errors replace what was DECL001: `old(..)` outside `ensures`, and a contract clause that is not a leading statement of a function body.
+  - Acceptance: `contracts/*`, the contract `err_*` cases, `err_fn_where_unchecked` and `milestone51` `test_51_3` unchanged on all three engines. Nothing in `pilot-vm`, `selfhost/check` or `selfhost/ir` changes shape.
+- **3E.**
+  - Delete `is_fstring_prefix` (an exact copy of the lexer's `string_prefix_flags`), `skip_nested_fstring` and `fstring_hole_end`; make the lexer's scanner `pub` and give it the `\"`-in-hole quote mode.
+  - This also fixes a latent bug: the lexer and parser scanners disagree on `\"` inside a hole, so `f"{m[\"}\"]}"` is cut at different `}`s.
+  - A conformance case for that literal is written first, with its expected output worked by hand.
+- **3F.**
+  - Move the non-literal parameter default and the `pub`-on-a-local checks from `loud.rs` to `selfhost/check` (about −30). The checker's spans differ from today's pinned columns, so `err_param_default_not_literal` and `err_pub_local` need an approved `.stderr` column edit, or a snapshot addition.
+  - Move the `num_suffix.rs` range, fraction and over-64-bit checks to the checker, which can spot a suffix cast by its shared span (about −20; positions unchanged).
+  - Merge the three or four copies of the `HookArg` → value mapping in `attr_hooks.rs`/`tables.rs` (about −20).
+
+### As built: 3A and 3B (2026-11-15)
+
+**3A, struct `invariant` (built).**
+- `stdlib/contracts/contracts_syntax.pilot`: two rules, `invariant ( $c:Expr )` and `invariant ( )`, each expanding to `form(CoreForm::RejectWord, "<the old SEAM001 message>", ..)`; `bind_receptor(nameof(invariant), 33, 20)` deleted.
+- Rust deleted: `INVARIANT_SUB`, `INVARIANT_UNCONNECTED`, `at_invariant`, `parse_invariant` (`contracts.rs`, −24) and the check in `decl.rs` `parse_item` (−4). Only the listed files changed.
+- `contracts/invariant_seam` is unchanged on all three engines (SEAM001 at 5:5, reported from the word).
+- **Found while building, and fixed in Pilot.** A file that declares a function named like a rule's word turns that rule off (`expand_seq_rule` `file_declares_fn`), so in such a file `invariant(..)` in a struct body fell through to a statement among the struct's members. The parser keeps such a statement, and nothing ever reported it: `print(5);` inside a struct body was silently ignored on every engine, before this change too.
+  - `selfhost/check/rules.pilot` `check_type_body_item` now reports SYN001 for an expression statement whose owner (through member groups) is a struct, interface or `ext` body. A `*Bundle` splice (a splat statement, with its `with`/`without`/`coalesce` modifiers) is a member and is not reported.
+  - New test `errors/err_type_body_statement` (expected output by hand: SYN001, exit 1), passing on all three engines.
+
+**3B, dead `stdlib/core/syntax/fstring.pilot` (built).**
+- The file (230 Pilot lines) is deleted, with its `BOOTSTRAP_SOURCES` line in `tables.rs` (−1 `src`), its audit rule and the f-string section of `test_52_3` in `milestone52`, its entry in `milestone61`'s file list, and its `pilot.md` row.
+- `milestone52` passes. `milestone61` `test_61_1` and `test_61_3_and_61_4` fail, but they fail the same way at HEAD (`ddfb872`, checked in a separate worktree): the selfhost frontend returns `null`, and a kernel parse lacks the operator declarations. Not caused by this slice.
+
+**Net Rust (3A + 3B):** −29 `src` lines (contracts.rs −24, decl.rs −4, tables.rs −1); Rust tests −83 net.
+
+### 3C stopped before building (2026-11-15): larger than itemized
+
+Replacing `op_checked` needs three things the itemization did not count:
+
+1. **Telling a value's kind without a new `__engine` call.** The interpreter's values are `any`. Its pre-checks must know whether an operand is an integer, a float, a boolean or a string (for "cannot apply `+` to boolean and integer", "integer division by zero", and similar).
+   - The seed compiles `x is T` only from a checker plan row (`lower_expr.rs` `planned_type_test`; with no row it traps), and the toolchain's `any`-typed code gets no rows (`any` is declared nowhere; the toolchain is not checked as user code).
+   - The engine's own kind test, `is_kind`, could be reached only by a new `__engine` call, which AGENTS.md forbids, and `fault.pilot` may only go down on the ratchet.
+   - Possible way round: take each operand's register class from the PilIR instruction's layout (the interpreter has it) instead of from the value. Not tried.
+2. **About 40 engine operations dispatched by name** (`interp_engine_ops()`: `str_*`, `list_*`, `map_*`, `to_str`, `scalar_from`, `value_clone`, `rt_print`, ...). Each needs a static Pilot call with the seed's failure behaviour.
+3. **`host_op` with any of the 51 frozen `HostOp` IDs.** The interpreter passes raw IDs and arguments through. A Pilot replacement needs a 51-entry table onto the `[EngineOp]` owners' public methods, whose signatures and marshalling are not the raw op's (`GATE021` lets only the public methods call the owners).
+
+The pinned messages are few (about 12 `.stderr` files carry seed runtime messages). But items 1–3 are several hundred Pilot lines with fidelity risk for every unpinned failure, for −70 Rust.
+
+**Options for the owner:**
+- **(a) Build it as above**: layout-based kind checks, a by-name table for the 40 operations, a 51-entry host-op table. Several hundred Pilot lines; −70 Rust.
+- **(b) Defer 3C to `PROP-005`.** When PilIR becomes the `.pilc` path, the interpreter no longer runs on the seed's values, and `op_checked` can go with the seed lowering.
+- **(c) Narrow it**: move only the binary-operator and condition pre-checks to Pilot (the IR interpreter's operator faults) and keep `op_checked` for engine operations. Deletes little Rust (`BINARY`, `CONDITION`, about −30) but no `__engine` site.
+
+### Order and total
+
+- Suggested order: **3A, 3B** (smallest, sure), then **3C**, then **3D**, **3E**, **3F**.
+- Total about −270 Rust `src` lines and −230 dead Pilot lines, against the −2,850 the wave summary planned. The rest moves to `PROP-005`/`PROP-006`, or to a separate `comptime if` proposal.
 
 ---
 

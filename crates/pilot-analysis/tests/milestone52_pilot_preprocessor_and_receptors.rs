@@ -35,14 +35,7 @@
 //!      - `pub fn convert_unit_literal_to_base(raw_lit: str) -> i64`
 //!        Parses integer digits (ignoring `_` digit separators) before suffix and
 //!        multiplies by `unit_scale_to_base(suffix)` (e.g., `"250_000us"` -> `250000000`).
-//!   3. `stdlib/core/syntax/fstring.pilot`:
-//!      - `pub fn count_fstring_holes(raw: str) -> i64`
-//!      - `pub fn extract_fstring_hole_expr(raw: str, target_idx: i64) -> str`
-//!      - `pub fn desugar_fstring_to_concat(raw: str) -> str`
-//!        Must handle nested `{ ... }` inside holes, string literals containing `}` inside
-//!        holes, and unescape `{{` -> `{` and `}}` -> `}` in literal text segments so the
-//!        desugared Pilot expression parses and evaluates to the exact interpolated string.
-//!   4. `stdlib/core/keywords.pilot`:
+//!   3. `stdlib/core/keywords.pilot`:
 //!      - `pub fn keyword_namespace(raw: str) -> str`
 //!      - `pub fn keyword_name(raw: str) -> str`
 //!      - `pub fn keyword_split(raw: str) -> KeywordDescriptor`
@@ -94,19 +87,6 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "unit_family_for_suffix",
                 "unit_scale_to_base",
                 "convert_unit_literal_to_base",
-            ],
-            required_code_markers: &[],
-            forbidden_code_markers: &[],
-            forbidden_string_substrings: &[],
-        },
-        anticheat::FileAuditRule {
-            path: "stdlib/core/syntax/fstring.pilot",
-            max_lines: 1500,
-            name_blind: false,
-            required_pub_fns: &[
-                "count_fstring_holes",
-                "extract_fstring_hole_expr",
-                "desugar_fstring_to_concat",
             ],
             required_code_markers: &[],
             forbidden_code_markers: &[],
@@ -445,7 +425,6 @@ pub fn test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords() {
     );
     let mut rng = Rng::new(0x5230);
     let unit_src = read_ws("stdlib/core/syntax/unit_decl.pilot");
-    let fstr_src = read_ws("stdlib/core/syntax/fstring.pilot");
     let kw_src = read_ws("stdlib/core/keywords.pilot");
 
     // 1. Randomized `unit_decl.pilot` conversion trials
@@ -497,68 +476,7 @@ pub fn test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords() {
         );
     }
 
-    // 2. Randomized `fstring.pilot` hole extraction, escaped `{{`/`}}`, string-in-hole `}`, and VM execution!
-    for trial in 0..8 {
-        let v_a = rng.range(10, 999);
-        let v_b = rng.range(10, 999);
-        let tag = rng.ident("TAG");
-        let raw_fstr = format!(
-            "f\"hdr={{{{k}}}}|{tag}:{{alpha + beta * 2}}|{{echo(\"x}}y\")}}!\""
-        );
-
-        let holes = eval_pilot_expr(
-            &fstr_src,
-            &format!("count_fstring_holes({})", escape_pilot_str(&raw_fstr)),
-        )
-        .as_int();
-        assert_eq!(
-            holes,
-            Some(2),
-            "Trial {}: `{}` must have 2 holes (`{{{{k}}}}` is escaped and `\"x}}y\"` is inside string literal)",
-            trial,
-            raw_fstr
-        );
-
-        let hole1 = eval_pilot_expr(
-            &fstr_src,
-            &format!("extract_fstring_hole_expr({}, 1)", escape_pilot_str(&raw_fstr)),
-        )
-        .to_string_repr();
-        assert_eq!(hole1, "echo(\"x}y\")");
-
-        let desugared = eval_pilot_expr(
-            &fstr_src,
-            &format!("desugar_fstring_to_concat({})", escape_pilot_str(&raw_fstr)),
-        )
-        .to_string_repr();
-
-        let exec_script = format!(
-            "fn echo(s: str) -> str {{ return s; }}\n\
-             let alpha = {v_a};\n\
-             let beta = {v_b};\n\
-             let out = {desugared};\n\
-             out;\n"
-        );
-        let arena = parse(&exec_script);
-        assert!(
-            arena.diagnostics.is_empty(),
-            "Trial {}: Desugared f-string failed to parse: `{}` -> {:?}",
-            trial,
-            desugared,
-            arena.diagnostics
-        );
-        let mut vm = PilVirtualMachine::new();
-        vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
-        let runtime_str = vm.run().to_string_repr();
-        let expected_str = format!("hdr={{k}}|{}:{}|x}}y!", tag, v_a + v_b * 2);
-        assert_eq!(
-            runtime_str, expected_str,
-            "Trial {}: Desugared f-string evaluated to wrong string (`{}`)",
-            trial, desugared
-        );
-    }
-
-    // 3. Randomized `:ns/kw` and multi-segment `:org/sub/kw` keyword splitting
+    // 2. Randomized `:ns/kw` and multi-segment `:org/sub/kw` keyword splitting
     for _ in 0..8 {
         let seg1 = rng.ident("ns").to_lowercase();
         let seg2 = rng.ident("sub").to_lowercase();

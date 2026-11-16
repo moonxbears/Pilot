@@ -1,0 +1,15 @@
+// A struct body holds declarations (fields, methods, properties), not
+// statements. `print(5);` written among the members is not a construct of
+// the language, so the checker rejects it (SYN001) instead of dropping it
+// silently, which is what happened before (found building PROP-003 3A: a
+// file that declares `fn invariant` turns the `invariant` rule off, and the
+// struct's `invariant(..)` then fell through to this silent path).
+struct Account {
+    pub balance: i64;
+    print(5);
+}
+
+fn main() {
+    let a = Account { balance: 1 };
+    print(a.balance);
+}

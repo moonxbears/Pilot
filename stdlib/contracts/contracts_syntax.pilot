@@ -17,8 +17,17 @@ pub enum ContractCheckMode : u8 {
 comptime {
     bind_receptor(nameof(requires),  33, 18);
     bind_receptor(nameof(ensures),   33, 19);
-    bind_receptor(nameof(invariant), 33, 20);
     bind_receptor(nameof(old),       33, 24);
+}
+
+// A struct `invariant(cond);` is read, then stops the build at the seam
+// `contracts.invariant` (reported at the word): nothing checks it yet, so
+// it must never look checked (tests/conformance/IDictionaryViewcontracts/invariant_seam).
+// The condition is an `Expr` hole, not `Rest`, so it may start with a
+// prefix dot (`.balance >= 0`). PROP-003 slice 3A.
+pub syntax {
+    invariant ( $c:Expr ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `contracts.invariant`: a struct `invariant` is not checked yet: it needs a check after each construction and at the exit of each method that changes the struct (DBC005)", $c) };
+    invariant ( ) => quote { form(CoreForm::RejectWord, "SEAM001: unconnected seam `contracts.invariant`: a struct `invariant` is not checked yet: it needs a check after each construction and at the exit of each method that changes the struct (DBC005)", 0) };
 }
 
 // `adapter`, `context` and `each` (docs/keyword_roadmap.md K6) and the

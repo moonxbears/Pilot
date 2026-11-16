@@ -21,13 +21,7 @@ use pilot_span::ByteSpan;
 pub(crate) const CONTRACT_RECEPTOR: u8 = 33;
 pub(crate) const REQUIRES_SUB: u8 = 18;
 pub(crate) const ENSURES_SUB: u8 = 19;
-pub(crate) const INVARIANT_SUB: u8 = 20;
 pub(crate) const OLD_SUB: u8 = 24;
-
-/// Struct invariants are parsed and stopped here: nothing checks them yet.
-const INVARIANT_UNCONNECTED: &str = "SEAM001: unconnected seam `contracts.invariant`: \
-    a struct `invariant` is not checked yet: it needs a check after each construction \
-    and at the exit of each method that changes the struct (DBC005)";
 
 /// `ExprStmt.flags` of a `requires` clause.
 pub const CONTRACT_REQUIRES: u16 = 1;
@@ -38,24 +32,6 @@ impl<'a> Parser<'a> {
     /// At `requires` or `ensures`.
     pub(crate) fn at_contract_clause(&self) -> bool {
         matches!(self.receptor(), Some((CONTRACT_RECEPTOR, REQUIRES_SUB | ENSURES_SUB)))
-    }
-
-    /// At `invariant`.
-    pub(crate) fn at_invariant(&self) -> bool {
-        self.receptor() == Some((CONTRACT_RECEPTOR, INVARIANT_SUB))
-    }
-
-    /// `invariant(cond);` in a struct body: parsed, then stopped at its seam,
-    /// so an invariant can never look checked while it is not.
-    pub(crate) fn parse_invariant(&mut self) {
-        let sp = self.span();
-        self.advance();
-        self.expect(TokenKind::LParen);
-        let _ = self.parse_expr();
-        self.expect(TokenKind::RParen);
-        let span = ByteSpan::new(sp.start, self.prev_span().end);
-        self.eat(TokenKind::Semicolon);
-        self.arena.diagnostics.push((span, INVARIANT_UNCONNECTED.into()));
     }
 
     /// One `requires(..)` / `ensures(..)` clause, as its body statement.

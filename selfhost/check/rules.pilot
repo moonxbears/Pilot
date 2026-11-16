@@ -912,6 +912,27 @@ fn check_unpack(inf: Infer, sink: DiagSink, n: i64) {
     }
 }
 
+/// A statement written among the members of a struct, interface or `ext`
+/// block (`print(5);`) is not a construct of the language: SYN001, never
+/// silently dropped. A `*Bundle` splice (with its `with`/`without`/
+/// `coalesce` modifiers) is a member, not a statement.
+fn check_type_body_item(inf: Infer, sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let e = lhs(p.s, n);
+    if e >= 0 && kind(p.s, e) == nk_unary() && flags(p.s, e) == unary_splat() { return; }
+    var owner = p.parents[n];
+    var depth = 0;
+    while owner >= 0 && kind(p.s, owner) == nk_block() && depth < 16 {
+        owner = p.parents[owner];
+        depth = depth + 1;
+    }
+    if owner < 0 { return; }
+    let k = kind(p.s, owner);
+    if k == nk_struct() || k == nk_interface() || k == nk_extend() {
+        sink_error(sink, n, "SYN001", "a statement cannot be a member of a type body; declare a field, method or property");
+    }
+}
+
 pub fn check_rules(inf: Infer, sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
@@ -925,7 +946,7 @@ pub fn check_rules(inf: Infer, sink: DiagSink) {
             else if k == nk_return() { check_return(inf, sink, i); }
             else if k == nk_yield() { check_yield(inf, sink, i); }
             else if k == nk_assign() { check_assign(inf, sink, i); }
-            else if k == nk_expr_stmt() { check_dropped_result(inf, sink, i); }
+            else if k == nk_expr_stmt() { check_dropped_result(inf, sink, i); check_type_body_item(inf, sink, i); }
             else if k == nk_call() {
                 check_call_args(inf, sink, i);
                 check_method_args(inf, sink, i);

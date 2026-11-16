@@ -587,7 +587,6 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
         "stdlib/core/syntax/guard.pilot",
         "stdlib/core/syntax/try_catch.pilot",
         "stdlib/core/syntax/expr_sugar.pilot",
-        "stdlib/core/syntax/fstring.pilot",
         "stdlib/core/syntax/unit_decl.pilot",
         "stdlib/db/sql_syntax.pilot",
         "stdlib/polyglot/polyglot_syntax.pilot",

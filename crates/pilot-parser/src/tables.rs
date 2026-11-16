@@ -521,7 +521,6 @@ pub(crate) const BOOTSTRAP_SOURCES: &[&str] = &[
     "stdlib/core/syntax/exits.pilot",
     "stdlib/core/syntax/try_catch.pilot",
     "stdlib/core/syntax/expr_sugar.pilot",
-    "stdlib/core/syntax/fstring.pilot",
     "stdlib/core/format.pilot",
     "stdlib/core/syntax/call_quote.pilot",
     "stdlib/core/assert.pilot",
