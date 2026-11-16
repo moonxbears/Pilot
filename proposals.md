@@ -16,13 +16,14 @@
 | :--- | :--- | ---: | :--- |
 | **`PROP-001`** | Purge Discovered Dead Rust Crates/Modules, Remove Hardcoded String Leaks & Split Packed `pilot-parser/src/lib.rs` (`MOD001`) | `-399` net (`20,812` $\rightarrow$ `20,413` `src` LOC; `-1,439` unpacked) | **`COMPLETED (APPROVED BY OWNER)`** |
 | **`PROP-002a`** | Define the 3-File Airlock Under the B+ Freeze (51 scalar/pointer `HostOp`s), Retire `pilot-rt`, Consolidate Stage-A Natives & Arm `GATE021` | `<= 0` net (`9` $\rightarrow$ `8` crates; `-683` `pilot-rt`) | **`APPROVED; A1 MERGED (d055851); C2 RESOLVED 2026-11-15 (BASELINE MEASURED; OWNER THRESHOLD 5% SLOWER MAX; CHECKED BY record.pilot --check)`** |
-| **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — MAP SLICE ITEMIZED 2026-11-15 (PILOT ONLY, 0 RUST; RUN BEFORE PROP-007 STEP 4 UNDER OPTION M) — APPROVED 2026-11-15, IN PROGRESS; OTHER TYPES AND BUCKETS B/D STILL TO ITEMIZE` |
+| **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — MAP SLICE ITEMIZED 2026-11-15 (PILOT ONLY, 0 RUST; RUN BEFORE PROP-007 STEP 4 UNDER OPTION M) — APPROVED 2026-11-15, BUILT; C2 PASSES AFTER `PROP-013` (2026-11-15); PilIR STILL USES NATIVE BINDINGS FOR `Map`; OTHER TYPES AND BUCKETS B/D STILL TO ITEMIZE` |
 | **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4): OWNER CHOSE OPTION M 2026-11-15 (MEASURE ON PROP-002b's MAP SLICE FIRST; BUILD OPTION F ONLY IF C2 FAILS)` |
 | **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEPS 2–3 NEED ITEMIZED LISTS` |
 | **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 AND BUILT (§11; +186 RUST, OVER THE −15..−40 ESTIMATE, ACCEPTED BY THE OWNER 2026-11-15; `true`/`false`/`none` NOT MOVED); STEP 2C GROUP 1 (`errdefer`/`become`, §12, about −30 RUST) APPROVED 2026-11-15 AND BUILT; STEP 2C GROUP 2 (UNBUILT KEYWORDS, §13, about −90 RUST) APPROVED 2026-11-15 AND BUILT (−63 RUST); STEP 2C GROUP 3 (STRAY `else`, DEAD `select` ARM, §14, about −9 RUST) APPROVED 2026-11-15 AND BUILT WITH AMENDMENT `RejectWord` (−5 RUST); §15 (A FUNCTION'S `where` CLAUSE IS DROPPED SILENTLY) OPTION B APPROVED 2026-11-15 AND BUILT (±0 RUST); STEP 3: OPTION (b) CHOSEN BY OWNER 2026-11-15 (FILE LIST TO ITEMIZE); `milestone51` TEST EDIT APPROVED 2026-11-15 AND MADE; `emit_ssa_*` HOOKS REMOVED (§16); §17 (INLINE FOREIGN BLOCKS) OPTION R APPROVED 2026-11-15 AND BUILT (−8 RUST, NOT −18; `Rest` FIX, TEST DELETION AND `milestone51` LINE APPROVED AS EXTRAS)` |
 | **`PROP-010`** | Purge Dead Rust Found 2026-11-15: the Unused Rust `comptime` Evaluator and Unreferenced Items | `-191` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-011`** | Delete the Unrun Bootstrap Stage List `stdlib/core/bootstrap.pilot` (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-012`** | Delete Test-Only Rust: the AST S-Expression Printer, the Rust Module Header Scanner and `TokenKind::is_keyword` | `-186` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
+| **`PROP-013`** | Link a Run's Extra Toolchain Files in the Loader's One Pass (`run.rs` `compile_entry`) | `-11` | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-013") AND BUILT; C2 PASSES` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -478,6 +479,37 @@ For each seam, a test checks that the path stops with `SEAM001`. The 488/480/480
     - **C2:** `target/release/pilot run benchmarks/native/record.pilot -- --check` passes. Linking `map.pilot` into every run adds start-up time to all 8 benchmarks, not only the map ones, and that is measured too.
   - **Seams.** No conformance or milestone case is planned to become `SEAM001`. If one does, the work stops, and the case, its seam ID and its `wiring.pilot` downgrade are added here before going on.
   - **If C2 fails:** stop, record the numbers here, and size `PROP-007` option F to the failing benchmarks. The Pilot changes are kept unmerged until then.
+  - **C2 result (2026-11-15): FAILED; stopped.** `record.pilot -- --check` exited 1:
+
+    | Benchmark | Seed µs | Baseline µs | Over |
+    | :--- | ---: | ---: | :--- |
+    | fib | 760,821 | 711,021 | +7.0%, over |
+    | numeric_loop | 1,839,146 | 1,825,113 | +0.8%, ok |
+    | string_build | 505,454 | 468,387 | +7.9%, over |
+    | map_workload | 553,006 | 499,508 | +10.7%, over |
+    | records | 1,863,389 | 1,756,300 | +6.1%, over |
+    | string_compare | 1,420,724 | 1,374,717 | +3.3%, ok |
+    | string_find | 1,173,034 | 1,144,568 | +2.5%, ok |
+    | string_map | 580,088 | 538,926 | +7.6%, over |
+
+    - Cause: start-up, not `Map`'s calls. Linking any file through `cli_run_links()` costs about 27–31 ms per run, because `run.rs` runs the module loader again for it (`PROP-013`). `fib` uses no map and is over.
+    - `PROP-007` option F (faster calls) would not remove that cost, so it was not sized.
+    - Tried and reverted: linking `Map` through the implicit prelude (`stdlib/core/prelude.pilot`, like `List`), which has no start-up cost. PilIR then runs `Map`'s Pilot methods, so `get` returns a real `T?` record, and code that uses `m.get(k)` as a plain value fails on `--ir` and `--emit c` (`collections/containers`, `text/str_kernels`, `types/attr_coverage`, `runtime/__engine_wrappers`, `runtime/const_values`). The checker accepts `T?` where a `T` is expected (`f() + 1` with `f() -> i64?` passes `pilot check`); the seed hides it because its options are plain values. That gap is its own work.
+    - Owner decision (2026-11-15): "Rust proposal, one pass" (`PROP-013`). The `Map` slice resumes when `PROP-013` is built and C2 passes.
+  - **C2 after `PROP-013` (2026-11-15): PASSES** (all 8 benchmarks at 0.89x–0.99x of the baseline; numbers under `PROP-013`, "As built").
+  - **As built (2026-11-15). 0 Rust in this slice.** Seed suite 542 passed, 0 failed, 14 known bugs reproduced (539 before, +3 new programs). `pilot gate` passes. Where it differs from the approved list:
+    - **Kept: the name-wide `bind_native_method(get|set|has|keys|remove)` bindings.** Deleting them failed every test: the module loader (`LOADER` in `run.rs`) and other Pilot tools call these methods on receivers the seed cannot type (a struct field, a call's result), and their file lists do not link `map.pilot`. A comment in `native_calls.pilot` says so.
+    - **Kept: `bind_native_member(Map, "[]" | "[]=")` and `Map`'s `in`, `for_seq`, `for_len`, `for_get` and constructor bindings.** Deleting the indexers turned four `--ir` cases into seams: PilIR does not lower a type's indexer to its method yet. `in` has no membership protocol; the constructor is C1.
+    - **Split: the lowercase `map<K, V>` view moved to `stdlib/core/primitives/map_view.pilot`.** Its Pilot methods ran on engine maps once `map.pilot` was linked (`control/if_some` failed).
+    - **`GATE021`: a new check 6** (`airlock_native_owners()`, `ab_check_native_owners` in `selfhost/gate/airlock_abi.pilot`) rather than a change to `transitional_native_bindings()`, since no binding could leave it (above).
+    - **Fixed on the way:**
+      - `scan_engine_bindings` (`selfhost/check/program.pilot`) took bind-hook rows for engine ops, so PilIR's `??` and `if some` on a declared `T?` called an op named `intrinsic_name`. This also cleared three older IR seams.
+      - The C, JS and Python runtimes' `map_remove` returned the removed value instead of `true`/`false` (C printed `2 null` where the seed printed `true false`).
+    - **Not done:**
+      - On PilIR, `m.get(k)` still goes through the native binding, whose plain value PilIR reads as a tagged `T?`. So `get` is left out of `collections/map_owner_methods` (a comment says why). It cannot be a known bug, because the seed is right.
+      - Making PilIR run `Map`'s own methods (linking `map.pilot` there) breaks code that uses `m.get(k)` as a plain value, which the checker accepts (see "C2 result" above).
+      - `collections/map_declared_property` (`count`, `clear`) stops at the seam `ir.lower_construct` on `--ir` and `--emit c`.
+      - Bucket B (the raw `__engine("map_*")` sites) and the other types (`List`, `str`) are not started.
   - **Rust:** none in this slice, so net 0. Rust shrinks only when a whole `bind_native_*` kind has no bindings left, or when `heap.rs` goes after F6.
 - **Not in scope:** `Reflect`/`PhysicsRegistry` lives in `crates/pilot-analysis` and retires in `PROP-004`. `PROP-004` must name the pure-Pilot successor for layout and symbol reflection (`AGENTS.md` §6, `pilot inspect`), and register a `reflect.type_meta` seam plus a `::Spec` wiring row for anything not built.
 
@@ -1718,6 +1750,43 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
   - `damaged_source --include-ignored` passes.
   - The seed suite passes 533 with 0 failures; `pilot gate` shows only GATE003.
 - **Budget raised by the owner (2026-11-15).** After this proposal the owner raised `paused_max_total_rust_loc()` from 20,408 to 21,000 (`selfhost/gate/manifest.pilot`). At 20,640, `pilot gate` passes all 4 gates.
+
+---
+
+## `PROP-013` — Link a Run's Extra Toolchain Files in the Loader's One Pass
+
+**Status: APPROVED BY OWNER 2026-11-15 ("Approve PROP-013") and built.** The owner chose this route on 2026-11-15 ("Rust proposal, one pass") after the `PROP-002b` `Map` slice failed C2.
+
+**Problem (measured 2026-11-15, release build, best of 11 runs of `fn main() { print(1); }`).**
+- `pilot run` with no extra files linked: 427,503 µs. With `stdlib/core/primitives/map.pilot` in `cli_run_links()`: 458,915 µs. With an empty `pkg` file in its place: 454,137 µs.
+- So the cost (about 27–31 ms per run) does not depend on the file. It comes from `compile_entry` (`crates/pilot-cli/src/run.rs`), which calls `link_plan` once for the program and then once more for each extra file (`tail_links`). Each `link_plan` call compiles and runs the Pilot module loader (`LOADER`, `mg_link_plan`) again, which re-indexes the search roots (`mg_build_index` walks every `.pilot` file under them).
+- That puts five of the eight C2 benchmarks over the owner's 5% limit (see the `PROP-002b` `Map` slice, "C2 result").
+
+**Change.** The loader takes the extra files as more entry points of the same graph, so a run with extra files costs one loader pass, as a run without them does.
+
+| File | Change |
+| :--- | :--- |
+| `selfhost/loader/module_graph.pilot` (Pilot) | New `mg_link_plan_with(entry_file, toolchain_root, extras: List<str>)`: the graph starts from the prelude, then each file in `extras`, then the entry, so each extra and what it imports come before the program, and a file the program already links is linked once (units are keyed by path). `mg_link_plan(entry, root)` becomes `mg_link_plan_with(entry, root, [])`; `mg_build_graph_sharing` gains the `extras` parameter, and its other caller (`link_lines.pilot`) passes `[]`. About +10 lines. |
+| `crates/pilot-cli/src/run.rs` | `link_plan(path)` becomes `link_plan_with(path, &[])`. New `link_plan_with(path, extras)` builds the call `mg_link_plan_with("<path>", "<root>", ["<extra>", ..])`. In `compile_entry`, the extras are joined to the toolchain root as now and passed to one `link_plan_with` call; the second `link_plan` loop, the `seen`/`canonical` de-duplication and the entry re-ordering are deleted (the loader orders and de-duplicates). A `tail`, when given, is still pushed last. |
+
+**Net Rust.** About −11 `src` lines (about −26, +15), in one file. No new Rust names: `mg_link_plan_with` is a loader function name of the same kind as the `mg_link_plan` the file already calls.
+
+**Acceptance.**
+- `cargo build`, `cargo fmt --check`, `cargo test -p pilot-cli`.
+- Start-up: `pilot run` of the one-line program with `map.pilot` in `cli_run_links()` is within 2% of the run without it (427,503 µs measured).
+- **C2:** `target/release/pilot run benchmarks/native/record.pilot -- --check` passes with the `Map` slice in place.
+- The seed suite, `--ir` and `--emit c` give the same results as before this change (seed 542 passed, 0 failed, 14 known bugs reproduced). `pilot gate` passes.
+- Link order: `collections/map_owner_methods` and `collections/map_declared_property` pass on the seed (they need `map.pilot` linked before the program), and `pilot run --coverage` (which links `coverage.pilot` the same way) still reports.
+
+**Not included.** A `.pilot` file at the repository root makes `pilot run` spin at 100% CPU (seen 2026-11-15, not investigated; the loader's root index walks the whole tree). It is a separate finding.
+
+**As built (2026-11-15).** Exactly the files listed, plus `selfhost/loader/link_lines.pilot` (its one call of `mg_build_graph_sharing` passes `[]`; the plan named it). Rust `run.rs` 431 → 420 (−11: +18, −29).
+- **Start-up** (best of 11, `fn main() { print(1); }`, with `map.pilot` linked): 409,007 µs; without the link: 420,389 µs (both measured while `cargo test` ran; the 30 ms second pass is gone).
+- **C2** (`record.pilot -- --check`, exit 0): fib 639,964 (0.90x), numeric_loop 1,751,318 (0.96x), string_build 416,793 (0.89x), map_workload 469,970 (0.94x), records 1,746,513 (0.99x), string_compare 1,286,734 (0.94x), string_find 1,101,946 (0.96x), string_map 495,007 (0.92x). Part of the gain over the baseline is likely run-to-run variance.
+- **Suites:** seed 542 passed, 0 failed, 14 known bugs reproduced. `--ir` and `--emit c` match the run before this change, directory by directory. `pilot gate`: all 4 gates pass.
+- **De-duplication:** a program that writes `use Pilot.Core.Primitives.Map;` itself, with `map.pilot` also linked, runs (`m.clear(); m.count` prints `0`).
+- **`cargo test --release -p pilot-cli --no-fail-fast`:** 7 tests fail, and the same 7 fail with `run.rs` restored to its previous text: `a_built_binary_reads_its_arguments_and_standard_input`, `an_unlowered_construct_stops_at_its_seam`, `bare_coverage_turns_on_every_mode`, `coverage_on_a_struct_measures_its_methods`, `inherited_steps_follow_their_policy` (DECL001 `Coalesce`), `the_benchmarks_build_natively_and_match_their_c_references`, `well_typed_programs_get_no_diagnostic`. Not yet split into HEAD failures and failures from this session's uncommitted work.
+- **Not run:** `cargo fmt --check` (the `rustfmt` component is not installed for the stable toolchain). The new lines are at most 106 columns; `run.rs` already had lines up to 125.
 
 ---
 

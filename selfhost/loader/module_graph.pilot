@@ -493,12 +493,14 @@ fn mg_visit(g: ModuleGraph, u: i64, state: List<i64>, stack: List<i64>) {
 }
 
 /// The module graph of the program whose entry file is `entry_file`.
-pub fn mg_build_graph(entry_file: str, toolchain_root: str) -> ModuleGraph => mg_build_graph_sharing(entry_file, toolchain_root, [:]);
+pub fn mg_build_graph(entry_file: str, toolchain_root: str) -> ModuleGraph => mg_build_graph_sharing(entry_file, toolchain_root, [:], []);
 
 /// `mg_build_graph`, taking the `pkg` declarations of a root already in
 /// `root_index` from there and adding those of each root it has to read.
 /// The files under the roots must not change between the graphs sharing it.
-pub fn mg_build_graph_sharing(entry_file: str, toolchain_root: str, root_index: Map<str, List<str>>) -> ModuleGraph {
+/// The files `extras` names are entry points too, linked (with what they
+/// import) after the prelude and before the program (PROP-013).
+pub fn mg_build_graph_sharing(entry_file: str, toolchain_root: str, root_index: Map<str, List<str>>, extras: List<str>) -> ModuleGraph {
     let entry = mg_normalize_path(entry_file);
     let g = ModuleGraph {
         units: [],
@@ -514,6 +516,15 @@ pub fn mg_build_graph_sharing(entry_file: str, toolchain_root: str, root_index: 
     for f in mg_package_files(g, mg_prelude_package()) {
         let u = mg_unit_for(g, f);
         if u >= 0 { starts.push(u); }
+    }
+    for extra in extras {
+        let path = mg_normalize_path(extra);
+        let u = mg_unit_for(g, path);
+        if u < 0 {
+            mg_report(g, "MOD001", f"cannot read `{path}`", path, 0);
+            return g;
+        }
+        starts.push(u);
     }
     let main_unit = mg_unit_for(g, entry);
     if main_unit < 0 {
@@ -532,8 +543,13 @@ pub fn mg_build_graph_sharing(entry_file: str, toolchain_root: str, root_index: 
 /// What the host needs to link the program: `[paths, diagnostics]`, the
 /// unit files in link order (entry last) and each diagnostic as
 /// `[code, message, path, offset]`.
-pub fn mg_link_plan(entry_file: str, toolchain_root: str) -> List<any> {
-    let g = mg_build_graph(entry_file, toolchain_root);
+pub fn mg_link_plan(entry_file: str, toolchain_root: str) -> List<any> => mg_link_plan_with(entry_file, toolchain_root, []);
+
+/// `mg_link_plan`, with the files `extras` names (and what they import)
+/// linked after the prelude and before the program, in the same pass; a
+/// file the program links already is linked once.
+pub fn mg_link_plan_with(entry_file: str, toolchain_root: str, extras: List<str>) -> List<any> {
+    let g = mg_build_graph_sharing(entry_file, toolchain_root, [:], extras);
     var paths: List<str> = [];
     for id in g.topo_order {
         paths.push(g.units[id.raw].file_path);

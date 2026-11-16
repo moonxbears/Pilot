@@ -99,8 +99,15 @@ fn val_str(vm: &PilVirtualMachine, v: PilotVal) -> String {
 /// The files of the program whose entry is `path`, in link order, as the
 /// loader resolves its `use` declarations.
 pub(crate) fn link_plan(path: &str) -> Result<Vec<String>, Vec<Diag>> {
+    link_plan_with(path, &[])
+}
+
+/// `link_plan`, with the files `extras` names (and what they import) linked
+/// before the program's own file, in the same loader pass.
+fn link_plan_with(path: &str, extras: &[String]) -> Result<Vec<String>, Vec<Diag>> {
     let root = tool::toolchain_root();
-    let call = format!("mg_link_plan(\"{}\", \"{}\");", pilot_str(path), pilot_str(&root));
+    let list: String = extras.iter().map(|e| format!("\"{}\",", pilot_str(e))).collect();
+    let call = format!("mg_link_plan_with(\"{}\", \"{}\", [{list}]);", pilot_str(path), pilot_str(&root));
     let (vm, plan) = tool::eval_value(LOADER, &call);
     let parts = vm.list_items(plan).unwrap_or_default();
     let paths = parts.first().and_then(|&p| vm.list_items(p)).unwrap_or_default();
@@ -229,7 +236,14 @@ pub fn compile_entry(
     if let Err(e) = fs::metadata(path) {
         return Err(vec![Diag::whole_file(path, UNREADABLE, format!("cannot read file: {e}"))]);
     }
-    let paths = link_plan(path)?;
+    // Toolchain sources, found under the toolchain's root; one loader pass
+    // orders them before the program's own file, which stays last.
+    let root = tool::toolchain_root();
+    let extras: Vec<String> = tail_links
+        .iter()
+        .map(|e| std::path::Path::new(&root).join(e).to_string_lossy().replace('\\', "/"))
+        .collect();
+    let paths = link_plan_with(path, &extras)?;
     let mut files = Vec::with_capacity(paths.len() + 1);
     for p in paths {
         match fs::read_to_string(&p) {
@@ -237,33 +251,8 @@ pub fn compile_entry(
             Err(e) => return Err(vec![Diag::whole_file(&p, UNREADABLE, format!("cannot read file: {e}"))]),
         }
     }
-    let canonical = |p: &str| fs::canonicalize(p).map_or_else(|_| p.to_string(), |c| c.to_string_lossy().into_owned());
-    let mut seen: std::collections::HashSet<String> = files.iter().map(|(p, _)| canonical(p)).collect();
-    let mut extras = Vec::new();
-    for extra in tail_links {
-        // A toolchain source, found under the toolchain's root.
-        let rooted = std::path::Path::new(&tool::toolchain_root()).join(extra);
-        for p in link_plan(&rooted.to_string_lossy().replace('\\', "/"))? {
-            if !seen.insert(canonical(&p)) {
-                continue;
-            }
-            match fs::read_to_string(&p) {
-                Ok(src) => extras.push((p, src)),
-                Err(e) => return Err(vec![Diag::whole_file(&p, UNREADABLE, format!("cannot read file: {e}"))]),
-            }
-        }
-    }
-    match tail {
-        Some(t) => {
-            files.extend(extras);
-            files.push(("<entry>".to_string(), t.to_string()));
-        }
-        // The program's own file stays last: the entry unit is the last one.
-        None => {
-            let entry = files.pop();
-            files.extend(extras);
-            files.extend(entry);
-        }
+    if let Some(t) = tail {
+        files.push(("<entry>".to_string(), t.to_string()));
     }
     let source = LinkedSource::parse(files);
     let locate = |span: ByteSpan, code: &str, message: &str| {

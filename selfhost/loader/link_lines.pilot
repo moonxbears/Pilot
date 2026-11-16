@@ -23,7 +23,7 @@ pub fn mg_link_lines(entries: str, toolchain_root: str) -> str {
     let root_index: Map<str, List<str>> = [:];
     for entry in text.split_text(entries, link_lines_separator()) {
         if entry.len() == 0 { continue; }
-        let g = mg_build_graph_sharing(entry, toolchain_root, root_index);
+        let g = mg_build_graph_sharing(entry, toolchain_root, root_index, []);
         var fields: List<str> = [entry];
         if g.diagnostics.len() > 0 {
             fields.push("!");
