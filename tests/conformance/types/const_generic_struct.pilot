@@ -1,0 +1,15 @@
+// A struct may take a `const` generic parameter written after the colon
+// (`N: const usize`), as `array<T, N>` and `grid<T, N, M>` in
+// stdlib/core/primitives do (PROP-020; was known bug
+// parser.const_generic_struct).
+//
+// Expected, worked by hand: g.k = 3; g.at(4) = 3 * 4 = 12   -> "12"
+struct Scaled<N: const usize> : IValue {
+    pub k: i64;
+    pub pure fn at(i: i64) -> i64 => .k * i;
+}
+
+fn main() {
+    let g = Scaled<4> { k: 3 };
+    print(g.at(4));
+}

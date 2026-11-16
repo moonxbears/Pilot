@@ -28,7 +28,13 @@
 | **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, Delete the Dead `ProbeArg::Engine`, and (C) Let a Block's Last `for` Collect on the Seed | `+23` as built (`+34`, `-11`) | `APPROVED, BUILT` |
 | **`PROP-016`** | Format All Rust With `rustfmt` and Count the Seed's True Size (147 files; split `pilot-parser/src/decl.rs`) | `+7,177` `src` lines of formatting and file headers, `0` code | `APPROVED BY OWNER 2026-11-15 (D1 (a): CEILING 27,800) AND BUILT` |
 | **`PROP-017`** | Update Three Rust Tests for the Package Loader: New Never-Linking Case and the Moved Inspect Selector (Rust Test Edits Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-017") AND BUILT` |
-| **`PROP-018`** | Operator Fixity From Holes in the Symbol (`op _+_`, `op -_`, `op _?`, `op \|_\|`, `op _[_]`), Optional Where the Parameter Count Decides; the Unpack Operators Become `op *`, `op **`, `op *..` | about `+20` in `crates/pilot-parser` (`decl.rs`, `tables.rs`); deletions follow in `PROP-008` step 2 and `PROP-005` | `APPROVED BY OWNER 2026-11-16 ("Approve as recommended": §6 decisions 1–4 as recommended) — IN PROGRESS` |
+| **`PROP-018`** | Operator Fixity From Holes in the Symbol (`op _+_`, `op -_`, `op _?`, `op \|_\|`, `op _[_]`), Optional Where the Parameter Count Decides; the Unpack Operators Become `op *`, `op **`, `op *..` | `+54` net in `crates/pilot-parser` (`decl.rs`, `tables.rs`; estimated `+20`); deletions follow in `PROP-008` step 2 and `PROP-005` | `APPROVED BY OWNER 2026-11-16 ("Approve as recommended": §6 decisions 1–4 as recommended) — BUILT 2026-11-16 (§7)` |
+| **`PROP-019`** | Type-Position Operators Declared in Pilot: Their Levels, Associativity and Prefix Symbols Leave Rust; `op` Symbols Take Values Only | about `-25` to `0` in `crates/pilot-parser` (`tables.rs`, `stmt.rs`, `expr.rs`) and `crates/pilot-ast/src/lib.rs` | `DRAFT 2026-11-16 — AWAITING OWNER APPROVAL` |
+| **`PROP-020`** | Read `const` Generic Parameters Written After the Colon (`N: const usize`), Closing Known Bug `parser.const_generic_struct` | `+5` in `crates/pilot-parser/src/generic_params.rs` (estimated `+3`; `rustfmt` wraps the condition) | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-020") AND BUILT` |
+| **`PROP-021`** | The Lexer Declared in Pilot: Token Patterns Compiled by Pilot Into a State Table the Seed Only Runs (numbers, strings, comments, names, operators; `LIT001`/`LIT002`, `LEX001`–`LEX003`; correctly rounded float literals in Pilot) | about `-900` to `-1,000` (`crates/pilot-lexer` from 1,120 to about 200; parser literal handling); one appended `bridge_lang.pilot` hook | `DRAFT 2026-11-16, REWRITTEN 2026-11-16 — AWAITING OWNER APPROVAL` |
+| **`PROP-022`** | Operator Meaning Declared in Pilot: Every Operator Use Lowers to Its Member Call or Its Rule's Template | about `-150` or more in `crates/pilot-parser` and `crates/pilot-ast`; sequenced after `PROP-008` step 2 and `PROP-005` | `DRAFT 2026-11-16 — AWAITING OWNER APPROVAL (DESIGN; FILE LIST FIXED WHEN SEQUENCED)` |
+| **`PROP-023`** | The Language Section of `toolchain.pilc`: Pilot's Lexical, Grammar and Meaning Tables Precompiled, Read by Number; a Genesis File | design only; deletes the Rust lexer and parser when built | `DRAFT 2026-11-16 — DESIGN, NOT FOR BUILDING YET` |
+| **`PROP-024`** | `//` Always Starts a Comment: Delete the `//=` and `//` Operator Tokens | about `-6` in `crates/pilot-lexer` (`lexer.rs`, `token.rs`); built `-4` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-024") AND BUILT` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED, IN PROGRESS (`ref<T>`, CLI AND DROP PLAN ROWS DONE; RUST AMENDMENT 5B.3a APPROVED AND BUILT 2026-11-16); 5B.4–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
@@ -1979,7 +1985,7 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 
 ## `PROP-018` — Operator Fixity From Holes in the Symbol, Optional Where the Parameter Count Decides; the Unpack Operators as `op`s
 
-**Status: APPROVED BY OWNER 2026-11-16 ("Approve as recommended"): the §3 Rust files and the four §6 decisions as recommended. IN PROGRESS.** Third wording, after these owner directions on 2026-11-16:
+**Status: APPROVED BY OWNER 2026-11-16 ("Approve as recommended"): the §3 Rust files and the four §6 decisions as recommended. BUILT 2026-11-16 (§7).** Third wording, after these owner directions on 2026-11-16:
 - the unpack interfaces should declare operators (`*`, `**`, `*..`), not named methods;
 - the fixities are `infix`, `prefix`, `postfix`, `circumfix`, `mixfix` and `matchfix`;
 - fixity comes from **holes in the symbol** (`_` where an operand goes), and the holes are **optional until a specific fixity is needed**.
@@ -2086,6 +2092,355 @@ Expected size: about `+20` lines. `paused_max_total_rust_loc()` holds flat only 
 2. **`circumfix` versus `matchfix`.** This proposal reads `circumfix` as one operand between two symbols (`|v|`) and `matchfix` as a comma list inside a matched pair. Some languages use the two words as synonyms. Confirm or redefine.
 3. **Canonical names.** Recommended: `infix` and the two index forms keep their bare names, and every other fixity keeps its holes, so no existing lookup changes. The alternative is to keep holes in every name (`_+_`, `_[_]`). That changes every operator lookup in Rust (`crates/pilot-vm/src/lower_expr.rs:516-519` and the `INDEX_GET_OP`/`INDEX_SET_OP` users in `lower_members.rs`) and in Pilot, so it would add `crates/pilot-vm` files to §3.
 4. **Default for no parameters and no holes.** Recommended: `prefix`, so `op - ()` and `op * ()` need no holes and only `?` changes. The alternative, requiring holes on every no-parameter `op`, adds `op -_`, `op ~_` and `op >.._` edits but makes every unary position explicit.
+
+### 7. As built (2026-11-16)
+
+- **Rust (only the two approved files):** `crates/pilot-parser/src/decl.rs` (`parse_op_decl` keeps a space between two words of a symbol; `is_word_char`, `hole_positions`, `strip_holes`, `op_member_name`) and `crates/pilot-parser/src/tables.rs` (an attribute on a holed `op` declares the symbol without its holes). **+61 / −7 lines (+54 net), against the `+20` estimated**: the hole scan and member-name rule took more lines than planned. `pilot gate` passes with it, so `paused_max_total_rust_loc()` still holds. Verified 2026-11-16 (capped): `pilot test` 576 passed + 12 known bugs reproduced, `--ir` 566, `--emit c` 558 (the 8 earlier failures only), `pilot gate` 4/4, `pilot gate --full` 5 passed + 1 at seams, keyword matrix current, `cargo fmt --check` clean, `damaged_source` and `pilot-vm` pass.
+- **Pilot:** `stdlib/core/operator.pilot` (`[Prefix(::Splat)] op * ()`, `op ** ()`, `op *.. ()`; `[Postfix] op _? ()`), `result.pilot`, `option.pilot`, `syntax/try_catch.pilot` (`"_?"`), `syntax/expr_sugar.pilot` (the three `[Prefix(::Splat, ..)]` attributes deleted; the rules stay), `builtins/native_calls.pilot` (`unpack_op` binds `*_`, `**_`, `*.._`), `selfhost/check/infer.pilot` (`op_unwrap`, `op_splat`, `op_pairs`, `op_flatten`, `unpacked_element`), `check/rules.pilot` (`check_unpack` also checks structs; `check_prefix_call`), `check/grammar_attrs.pilot` (`Fixity`, `check_holes`: GRAM005 hole-only, GRAM008, GRAM009, the three shape seams), `check/snapshot.pilot` (`unary_neg`, `unary_bit_not`), `ir/lower_members.pilot`, `ir/lower_spread.pilot`, `diagnostics/errors.pilot` (GRAM008, GRAM009), `gate/ledger/seams.pilot`, and `gate/airlock_abi.pilot` + `gate/manifest.pilot` (`unpack`, `unpack_pairs`, `flat` were member names, not natives: deleted from both lists; check 4 skips a binding whose target is a symbol).
+- **Found while building, fixed in Pilot:** `[*x]` typed its item as `x` itself, so `let xs: List<i64> = [*a]` was TYPE001 even for a list `a`; `check_unpack` only looked at `[Bits]` primitives, so `*s` on a struct with only `op * (rhs)` was never reported.
+- **Owner direction 2026-11-16 (changes §2 and §6 decision 3):** "infix should be the default when no _ is present, prefix when no arguments are provided, and everything else needs _". So a holeless `op` is infix with one parameter and prefix with none; indexing has no holeless form any more. Every `op []` / `op []=` in the tree became `op _[_]` / `op _[_]=_` (stdlib/core/operator.pilot, mem.pilot, primitives/{list,slice,stride,grid,ptr,map,map_view,ring,str,array,simd}.pilot, stdlib/std/col.pilot, tests/conformance/types/index_operators, contracts/roles_clean), and GRAM011 reports a holeless `op` with two or more parameters or a structural symbol (`tests/conformance/operators/err_gram011`). Member names are unchanged (`_[_]` is still `[]`), so no Rust changes; the seed's holeless index rule in `op_member_name` is now unreachable from checked code, and is deleted when `decl.rs` is next touched under an approved proposal.
+- **Amendment A1 (needs owner approval; not applied): three Rust test edits, `src` unchanged.** Each test pins a name or form PROP-018 changed:
+  1. `crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs:91` requires `stdlib/core/syntax/expr_sugar.pilot` to contain `[Prefix(`; the unpack operators' `[Prefix(::Splat)]` moved to `stdlib/core/operator.pilot` and the call-form rules that carried it were deleted (the sequence rules stay). Edit: `syntax_rule!("stdlib/core/syntax/expr_sugar.pilot", &["syntax", "quote"])`. Fails 4 tests until applied.
+  2. `crates/pilot-parser/tests/native_calls.rs:41` expects the try protocol's unwrap member to be `"?"`; it is `"_?"` now. Edit: `("is_success", "_?", "failure")`. Fails 1 test.
+  3. `crates/pilot-cli/tests/cli_f4.rs:291-292` (`a_role_gives_its_lattice`) declares `op []` / `op []=` in its fixture, which GRAM011 now reports. Edit: `op _[_]` / `op _[_]=_`. Fails 1 test.
+- **Found, fixed by PROP-020 (2026-11-16): `parser.const_generic_struct` (known bug, `tests/conformance/known_bugs/const_generic_struct`).** The seed does not parse a `const` generic parameter (`N: const usize`). In `stdlib/core/primitives/array.pilot` and `grid.pilot` the members after the header were read as statements all along, and the old `op [] (` was parsed as an expression and dropped without a word; with `op _[_]` the bootstrap reports it, so `crates/pilot-parser/tests/bootstrap_sources.rs` fails until the parser reads `const` parameters. That fix is in `crates/pilot-parser` (struct header generics) and needs its own approved file list; it is not hidden by going back to `op []`.
+- **Not built (seams):** a use of a circumfix, matchfix or non-index mixfix operator (`grammar.circumfix_shape`, `grammar.matchfix_shape`, `grammar.mixfix_shape`, reported at the declaration); `-x` / `~x` on a struct calling its prefix `op -_` / `op ~_`, which the seed never dispatched (it trapped with "cannot negate record"; now `grammar.prefix_op_call` at build time).
+
+---
+
+## `PROP-019` — Type-Position Operators Declared in Pilot; `op` Symbols Take Values Only
+
+**Status: DRAFT 2026-11-16, awaiting owner approval.** Owner direction 2026-11-16 ("lets go with your recommendation"), after asking whether operators can take things other than expressions. The recommendation:
+
+1. An `op` is a member of a type, so every operand is a value and its holes (`_`, PROP-018) stay untyped. Anything taking a type, block, name or pattern is a `syntax` rule with typed holes (`$x:Type`, `$b:Block`, `stdlib/core/syntax/holes.pilot`). Pilot only; no approval needed (see §4).
+2. Type-position operators (`syntax type_construct`) declare their levels the way expression operators do since PROP-008, so no binding power, associativity or operator token is left in Rust. Needs this proposal.
+
+### 1. What is in Rust today (read 2026-11-16)
+
+- `crates/pilot-parser/src/tables.rs:896-901` (`compile_type_rule`): the binding power and associativity of a type infix rule come from its token kind: `&` 20, `|` 15, `=>`/`->` 10 right-associative, `!` 5. Any other infix symbol is dropped (`return None`), so a new type operator cannot be added from Pilot.
+- `crates/pilot-ast/src/lib.rs:328-335` (`TypePrecedence`: `Lowest 0`, `Fallible 5`, `FnArrow 10`, `Union 15`, `Intersection 20`, `PostfixOptional 30`) and its ordering assertion (`:909`).
+- `crates/pilot-ast/src/lib.rs:299-326` `ExprPrecedence` is read only by that same test (`:913`): dead vocabulary, deleted with it (found by `docs/vocabulary_in_rust.md`).
+- `crates/pilot-parser/src/stmt.rs:15` (only `*` and `@` can start a prefix type rule), `:18` and `:121` (`PostfixOptional`), `:167` (`31`); `crates/pilot-parser/src/expr.rs:300` (`30`).
+- The levels are otherwise only written in the header comment of `stdlib/core/syntax/type_construct.pilot`.
+
+### 2. Pilot (no approval needed; listed so the slice is whole)
+
+- `stdlib/core/operators/levels.pilot`: `enum TypeLevel : u8 { Fallible, Arrow, Union, Intersect, Postfix }`, lowest binding first (the order is the precedence; append-only like `OpLevel`).
+- `stdlib/core/syntax/type_construct.pilot`: each rule carries its shape and level, e.g. `[Infix(::Union, ::Left)] (T1 | T2) => ..`, `[Infix(::Arrow, ::Right)] (A -> R) => ..`, `[Prefix(::Postfix)] (*T) => ..`, `[Postfix(::Postfix)] (T?) => ..`. The level argument is read against `TypeLevel` on a `type_construct` rule and `OpLevel` elsewhere.
+- `selfhost/check/grammar_attrs.pilot`: GRAM005-GRAM009 also check `type_construct` rules (a missing attribute is GRAM006's shape check failing loudly, never a silently dropped rule).
+- `selfhost/check/grammar_attrs.pilot`: **GRAM010** (recommendation 1): an `op` symbol that marks a hole with a kind (`op $t:Type ?`, `op _:Block`) is an error that names the `syntax` rule form instead.
+- Acceptance tests first: `tests/conformance/types/type_levels.pilot` (`A | B & C` is `union<A, intersect<B, C>>`; `T? | U`; `A -> B -> C` is right-associative; `T ! E | F` binds `|` first; worked by hand from the declared order), `types/err_type_rule_no_level.pilot`, `operators/err_gram010.pilot`.
+
+### 3. Rust (needs approval). Strictly these files:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-parser/src/tables.rs` | `compile_type_rule` takes the level ordinal and associativity from the rule's `grammar_entry` (the hook PROP-008 already feeds, routed to `type_rules` when its target is a `type_construct` rule) instead of matching token kinds; a second `register_grammar` call names `TypeLevel`, kept in its own `grammar_enums` slot. Power = the same `level_bp` formula. Delete the token match. |
+| `crates/pilot-parser/src/stmt.rs` | A prefix type rule starts at any symbol the table holds (not only `*`/`@`); the postfix power comes from the table's `Postfix` level, not `TypePrecedence`/`31`. |
+| `crates/pilot-parser/src/expr.rs` | `:300` reads the same postfix power instead of `30`. |
+| `crates/pilot-ast/src/lib.rs` | Delete `TypePrecedence`, the dead `ExprPrecedence` and their assertion. |
+
+No new hook: `register_grammar` and `grammar_entry` in `stdlib/core/bridge_lang.pilot` are reused, so the frozen airlock does not change. If the owner prefers a separate hook (`register_type_levels`), it is an append to `bridge_lang.pilot` and `tables.rs` `apply_hook`, and this proposal gains that line.
+
+### 4. Estimate and risk
+
+- Rust: the token match (`~8`), `TypePrecedence` (`~12` with the assertion) and the literals go; routing type entries adds `~10-20`. About `-25` to `0` net; reported as built.
+- Risk: the Stage-A bootstrap reads `type_construct` before or after the grammar entries depending on load order (PROP-008's two-pass bootstrap in `lib.rs`); if the order is wrong, types parse with no levels. The acceptance test fails loudly in that case, and `lib.rs` would have to join §3, which needs a fresh approval rather than a quiet edit.
+- Recommendation 1 (GRAM010) does not depend on this proposal and is built in Pilot (2026-11-16): `selfhost/check/grammar_attrs.pilot` `check_holes`, `selfhost/diagnostics/errors.pilot`, `tests/conformance/operators/err_gram010` (`op _:Type?`; `op $t:Type ?` reports the same).
+
+### 5. Decision for the owner
+
+1. Reuse `register_grammar`/`grammar_entry` (recommended, no airlock change) or add a `register_type_levels` hook (append-only, one more frozen item).
+
+---
+
+## `PROP-020` — Read `const` Generic Parameters Written After the Colon (`N: const usize`)
+
+**Status: APPROVED BY OWNER 2026-11-16 ("Approve PROP-020") AND BUILT 2026-11-16: `generic_params.rs` +5 lines (a comment, the check and `rustfmt`'s line break); `types/const_generic_struct` passes and its known-bug entry is deleted; `bootstrap_sources` passes. Original draft below.** Found while building PROP-018 (known bug `parser.const_generic_struct`, `tests/conformance/known_bugs/const_generic_struct`).
+
+### 1. The bug
+
+`stdlib/core/primitives/array.pilot` (`array<T: IAnyValue, N: const usize>`) and `grid.pilot` (`grid<T, N: const usize, M: const usize>`) write the `const` mark after the parameter's colon. `crates/pilot-parser/src/generic_params.rs:25` only takes `const` *before* the name (`<const N = 4>`), so after `N:` the word `const` reaches `parse_type`:
+
+- in a user file the header is SYN001 ("operator `>` is missing an operand");
+- in the stdlib bootstrap the members after the header were parsed as statements all along. `op [] (` was read as an expression and dropped without a word; since PROP-018's `op _[_]` the bootstrap reports it, and `crates/pilot-parser/tests/bootstrap_sources.rs` fails.
+
+### 2. Rust (needs approval). Strictly this file:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-parser/src/generic_params.rs` | After `eat(TokenKind::Colon)`, skip a word whose modifier action is `ModAct::Const` (the same table lookup line 25 already does, no word written in Rust) before `parse_type`. About `+3` lines. |
+
+Whether `const` marks a value parameter is not recorded today either way (the prefix form drops it too); recording it belongs to the checker's const-generic work, not to this fix.
+
+### 3. Acceptance
+
+- `tests/conformance/known_bugs/const_generic_struct` (prints `12`) moves to `tests/conformance/types/const_generic_struct` and passes on `pilot test`, `--ir`, `--emit c`; its `bug_registry()` entry is deleted.
+- `cargo test -p pilot-parser --test bootstrap_sources` passes; `damaged_source` with `--include-ignored` passes.
+
+---
+
+## `PROP-021` — The Lexer Declared in Pilot: Token Patterns Compiled by Pilot Into a State Table the Seed Only Runs
+
+**Status: DRAFT 2026-11-16, rewritten 2026-11-16 at the owner's direction ("yes, lets rewrite prop-021"); awaiting owner approval.** Owner direction: "I would like pilot to have recognition over its own behavior" (about `1_000_000` meaning `1000000`), and "can you define what numbers are in pilot and then compile it to the lex file?". The first draft (per-literal tables the seed reads) is replaced. The lexer is no longer hand-written in either language. Pilot declares every token as a pattern, Pilot compiles the patterns into a state machine, and the seed only runs that machine.
+
+### 1. What exists today (read 2026-11-16)
+
+- **Two hand-written lexers.**
+  - `crates/pilot-lexer` (`lexer.rs`, `simd.rs`, `keywords.rs`, `token.rs`; 1,120 lines) is the one that runs.
+  - `selfhost/lexer.pilot` (346 lines) is a hand-written Pilot copy. It knows less: its numbers are plain digit runs. It feeds a self-hosted parser that stops at a seam.
+- **Rules written more than once** (`docs/vocabulary_in_rust.md`):
+  - the number grammar three times (`lexer.rs:300-367`, `num_suffix.rs:115-164`, `int_lit.rs:23-41`);
+  - the f-string rules three times (`lexer.rs`, `simd.rs:101-217`, `fstring.rs`);
+  - the seed words twice (`keywords.rs`, `lib.rs` `is_seed_kw`).
+- **Silent acceptance and silent fallback.**
+  - Separator placement is never checked: `1__000`, `1000_` and `0x_FF` are all accepted (run 2026-11-16).
+  - `expr.rs:376` reads a float with `unwrap_or(0.0)`, so an unreadable float silently becomes `0.0`.
+
+### 2. Design
+
+**2.1 Token patterns are Pilot values.** `stdlib/core/lex/patterns.pilot` provides the pattern builders, evaluated at `comptime`:
+- `lit(text)` and `class(chars)`;
+- `range(lo, hi)`;
+- `seq(..)`, `alt(..)`, `opt(p)`, `many(p)` (zero or more), `some_of(p)` (one or more);
+- `not_followed_by(p)`, used sparingly, for rules like "`.` but not `..`";
+- `repeat(p, min, max)`, a bounded count (`\x` and exactly two hex digits, `\u{..}` and one to six), which costs about one state per count;
+- `byte(n)` and `byte_range(lo, hi)`, a byte named by its value, for the bytes the bootstrap subset cannot write in a string (`"` is `byte(34)`, `\` is `byte(92)`).
+
+Patterns compose: a pattern may use any other pattern, so `float` reuses `digits` and a suffixed number is `seq(alt(integer, float), name_run())`. Composing patterns makes **one** token. Several tokens in a row (`100[m]`, `a..b`) are a `syntax` rule, never a pattern. Glue pieces into one token only when they must touch with no space and mean one thing together (`0xFF`, `1.5e3`, `200u8`).
+
+They build a `Pattern` tree (`0b10` owned, `enum PatternKind : u8`). Every token family is a declaration with a `[Token(..)]` attribute naming its family and, where it has a value, the Pilot function that builds the value from the text. For example (the syntax is settled during building, under the constraints of 2.6):
+
+```pilot
+fn digits(base: Radix) -> Pattern =>
+    seq(digit(base), many(seq(opt(lit("_")), digit(base))));
+
+[Token(::Number, nameof(int_from_text))]
+let integer = alt(seq(lit("0x"), digits(::Hex)),
+                  seq(lit("0b"), digits(::Bin)),
+                  seq(lit("0o"), digits(::Oct)),
+                  digits(::Dec));
+
+[Token(::Number, nameof(float_from_text))]
+let float = seq(digits(::Dec), lit("."), digits(::Dec),
+                opt(seq(class("eE"), opt(class("+-")), digits(::Dec))));
+```
+
+Placement rules need no separate check. `_` appears only between two digits because that is the only place the pattern allows it, so `1__000`, `1000_` and `0x_FF` are not numbers. A lone `_` then lexes as a name or the wildcard, as it does today.
+
+**2.2 Every token comes from a declaration.**
+
+| Family | Declared in |
+| :--- | :--- |
+| Numbers and the dimensional suffix | `stdlib/core/lex/numbers.pilot` |
+| Strings: quotes, triple quotes, prefixes, escapes, `f"..{}.."` hole marks | `stdlib/core/lex/strings.pilot` |
+| Comments, whitespace, newlines, shebang | `stdlib/core/lex/trivia.pilot` |
+| Names (start and continue classes) | `stdlib/core/lex/names.pilot` |
+| The 13 structural delimiters | `stdlib/core/lex/delimiters.pilot` |
+| Operator symbols, call-quote forms, the dot rules | collected from every `op` declaration and operator attribute (PROP-008/018), the operator-token half of PROP-008 step 2 |
+| Seed words and registered keywords | collected from `register_keyword` / `bind_receptor` |
+
+**2.3 Pilot compiles the patterns into the lexer.** `selfhost/lex/build.pilot` takes every `[Token]` declaration, builds a nondeterministic automaton, makes it deterministic and minimizes it. It picks the longest match. When two families match exactly the same text, file order never decides: the declarations must say which wins (an explicit `priority:` on `[Token]`; keywords outrank names that way), and a tie with no stated priority is `LEX002`, naming both declarations. A pattern that refers to itself, directly or through other patterns, cannot become a state table and is `LEX003` (nesting is a mode, 2.4). The result is a `LexTable`:
+- states × byte classes → next state;
+- for each accepting state, its token family and the receptor or value function it names;
+- the byte-class map that collapses 256 bytes into the few classes the patterns use.
+
+`pilot inspect lex` prints it, with the pattern that produced each accepting state.
+
+**2.4 A few context rules can't be a plain DFA**, so each is a small named mode in the table, not Rust logic:
+- **f-string holes**: a brace depth stack, pushed and popped by `{`/`}` inside an `f"..."`;
+- **nested block comments**;
+- **infix-dot vs prefix-dot**: whether whitespace or which token kind came before;
+- **the `:name` keyword literal**, only after whitespace.
+
+The patterns declare the modes, and the seed keeps a mode stack. Each of these rules exists only because of a declaration.
+
+**2.5 The seed only runs the table.** The Rust lexer becomes a byte loop:
+1. look up the byte's class, then the next state;
+2. at a dead end, emit the last accepting state's token;
+3. push or pop the mode stack when a token says so.
+
+That is about 80 lines of mechanism with no character, word or symbol in it. `scan_number_or_dimension`, `scan_string_literal`, `scan_operator_or_delimiter`, `keywords.rs`, the simd scanners and the per-kind `TokenKind` spellings are deleted.
+
+The parser's re-derivations go too:
+- `int_lit.rs`, `num_suffix.rs` `suffix_start` and `literal_value`, and `expr.rs:359-379` become calls of the declared value function, through the existing receptor path;
+- the float fallback becomes an error (`LIT002`).
+
+`selfhost/lexer.pilot` is deleted: the self-hosted toolchain runs the same table.
+
+**2.6 Bootstrap.** Two constraints:
+1. The pattern files are read by a lexer before their table exists. So `stdlib/core/lex/*.pilot` uses only what today's Rust lexer already reads the same way: plain decimal numbers, plain `"..."` strings with no escapes, and the 14 seed words plus registered words.
+2. The first `LexTable` is built by today's Rust lexer, reading the pattern files, and written next to `toolchain.pilc`. From then on, each `LexTable` is built by the toolchain that the previous one lexed.
+
+The gate rebuilds the table and compares it byte for byte (`PROP-023`). Until `PROP-023`'s `LANG` section exists, the table ships as its own file, `toolchain.lex`, in a format `selfhost/lex/build.pilot` writes and the seed reads by number.
+
+**2.7 Errors.** Lexing errors are reported in Pilot terms: the longest valid prefix, plus the declaration whose pattern the text failed to finish.
+- `LIT001`: "`1000_` is not a number: `_` must stand between two digits (`stdlib/core/lex/numbers.pilot` `digits`)".
+- `LEX001`: no pattern matches at all, or a byte no pattern allows (a raw control byte inside a string), with the byte offset.
+- `LEX002`: two families tie on the same text with no stated priority (reported when the table is built).
+- `LEX003`: a pattern refers to itself (reported when the table is built).
+- `LIT002`: the text is a well-formed token but its value does not fit the type it lands in (2.9).
+
+**2.8 Bytes, not characters.** The table steps over raw bytes (0–255). The seed knows nothing about Unicode. Non-ASCII names are spelled in `names.pilot` as the valid UTF-8 byte sequences (`utf8_letter()`), so what counts as a letter is declared in Pilot. Each family declares which bytes may start it and continue it; any other byte ends it or is `LEX001`.
+
+**2.9 The lexer decides shape; the type decides range.** A pattern says only that text is number-shaped. It never encodes "at most 255": the bytes `256` look like `255`, and `let x: u8 = 300` has no suffix for the lexer to see. The value function and the type the literal lands in (its suffix, its context, else the default) decide whether the value fits, using that type's `[Bits]` / `[Layout]` width, so "`u8` holds 0–255" is stated once, on `u8`. Length caps on names or strings, if any are wanted, are checks over the token's span, not patterns.
+- **Integers:** a value outside the type's range is `LIT002`.
+- **Floats: overflow is an error, rounding is not.** A value past the type's largest finite value is `LIT002`, never a silent `inf` (`1.0000000000034e50` written out in full does not fit `f32`, whose largest value is about `3.4e38`). A value in range becomes the nearest representable value, as every decimal float does (`0.1` is not exact either). An optional warning-level lint may report a literal with more significant digits than the type keeps.
+- **Correctly rounded, in Pilot.** `float_from_text` converts decimal text to the nearest binary value itself (a fast path plus a big-decimal fallback, or a published algorithm such as Eisel–Lemire). It never hands the text to the host's `strtod` or Rust's `parse`, since then a host library would define what a Pilot literal means. Its expected results come from published conversion test vectors, not from running it.
+
+**2.10 What is standard and what is chosen for ownership, not speed** (owner direction 2026-11-16: "lets make sure we add it to the prop and that we are aware of that distinction"). This proposal makes two choices that have to be kept apart:
+- **Token as a span, value computed afterwards: the standard approach, and efficient.** rustc, clang, Go, Swift and Roslyn all do it. The lexer records a token's family and its start and end offsets, with no copy and no allocation. The value function reads those bytes once at compile time and builds the number directly. A float needs every digit before it can round, so it must work this way anyway. By the time the program runs, a literal is a constant, so none of this costs run time.
+- **The lexer as a generated state table: correct and linear, but not the fastest way to lex.** This is the lex/flex approach. Most fast production compilers use hand-written lexers instead: rustc, clang, Go, V8 and Swift do, as does today's `crates/pilot-lexer` with its SIMD scanners. The fastest *generated* lexers (re2c) emit the DFA as straight-line code rather than a table, which avoids one memory lookup per byte. **The table is chosen because it is the simplest form in which Pilot's patterns are the only definition and the seed holds no vocabulary**: a hand-written lexer in either language writes the rules in its code again. Expect the table runner to lex more slowly than today's SIMD lexer. §5 measures and reports it. It is not gated, since compile speed is ungated (owner, 2026-11-10), and run time is unaffected.
+- **Where the speed comes back: a direct-code emitter, later.** Because the patterns are the source of truth, `selfhost/lex/` can later emit the same minimized DFA as straight-line Pilot (and through it C) instead of a table, as re2c does. Nothing is hand-written again, and the gate's byte-identical check still applies to the generated code. It pays off once the toolchain itself runs native code (`--emit c` builds of the toolchain, or the native toolchain after `M46`); while the seed interprets the toolchain, a table is the better fit. **This is a follow-up step, not part of this proposal's build.** It needs its own approval when it is sequenced, and its acceptance is lexing the tree byte-identically to the table runner and faster than it.
+
+### 3. Rust (needs approval). Strictly these files:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-lexer/src/lexer.rs` | Replace the hand-written scanners with the table runner (byte class → state → token, mode stack). |
+| `crates/pilot-lexer/src/simd.rs`, `keywords.rs` | Delete (the whitespace, identifier, comment, string and f-string scanners and the seed-word match). |
+| `crates/pilot-lexer/src/token.rs` | `TokenKind` keeps only the kinds the parser still matches by kind during the transition. Every other kind becomes a family ordinal from the table. |
+| `crates/pilot-lexer/src/lib.rs` | The lexer's entry takes a `LexTable` (loaded from `toolchain.lex`; the bootstrap lexes with the built-in first-table path until the first table exists). |
+| `crates/pilot-parser/src/int_lit.rs`, `num_suffix.rs`, `expr.rs` | Literal values through the declared value function; `LIT002` instead of `unwrap_or(0.0)`. |
+| `crates/pilot-parser/src/fstring.rs` | Holes come from the table's f-string mode; `unescape_str` uses the declared escapes. |
+| `crates/pilot-parser/src/tables.rs` | Hold the `LexTable`; `apply_hook` takes `register_lex_table`. |
+| `crates/pilot-cli/src/run.rs` | Load `toolchain.lex` at start-up next to `toolchain.pilc`. |
+| `stdlib/core/bridge_lang.pilot` | Append the hook `register_lex_table(table)` (frozen file: append-only under Model B+; `airlock_abi.pilot` gains the row). |
+
+**Estimate:** the Rust lexer shrinks from 1,120 lines to about 200. The parser loses about 100 lines of literal handling. Net about −900 to −1,000 lines. This is the largest seed contraction so far. It will be reported as built, and the ceiling in `selfhost/gate/manifest.pilot` ratchets down with it.
+
+**Ordering:**
+- The operator-symbol half overlaps PROP-008 step 2 (a table-driven lexer for operators). This proposal subsumes it: once the lexer is a table, operator tokens are just more patterns.
+- The parser still matches some `TokenKind`s by kind until PROP-022, so `token.rs` shrinks in two steps.
+
+### 4. Pilot (no approval needed; listed so the slice is whole)
+
+- `stdlib/core/lex/{patterns,numbers,strings,trivia,names,delimiters}.pilot`.
+- `selfhost/lex/build.pilot` (pattern → NFA → DFA → minimized table) and `selfhost/lex/table_writer.pilot`.
+- `stdlib/core/lex/literal_value.pilot` (`int_from_text`, `float_from_text`, string unescape), used by the checker and the self-hosted IR. `float_from_text` is correctly rounded (2.9) and is the largest single piece of Pilot work in this proposal; it may land as its own slice.
+- `LIT001`, `LIT002`, `LEX001`, `LEX002`, `LEX003` in `selfhost/diagnostics/errors.pilot`.
+- `pilot inspect lex`.
+- `selfhost/lexer.pilot` deleted, with its row in `pilot.md`.
+
+### 5. Acceptance (written before the code)
+
+- `tests/conformance/numbers/digit_separators.pilot`: `1_000_000 == 1000000`, `0xFFFF_FFFF`, `10_00_000`, `1_0.5_0`, `2.5e1_0`, with values worked by hand in comments.
+- `numbers/err_digit_separator_{double,trailing,after_prefix,before_dot,before_suffix}.pilot` (`LIT001`), `numbers/err_float_unreadable.pilot`, `numbers/err_int_out_of_range.pilot` (`300` into `u8`), `numbers/err_float_overflow_f32.pilot` (`LIT002`), `lex/err_no_token.pilot` and `lex/err_control_byte_in_string.pilot` (`LEX001`), `lex/err_tie_without_priority.pilot` (`LEX002`), `lex/err_self_referential_pattern.pilot` (`LEX003`).
+- `numbers/float_rounding.pilot`: long and borderline decimal literals (halfway cases, values just under the largest finite value, subnormals) printed as their exact bits, with expected bits taken from published conversion test vectors.
+- `lex/utf8_names.pilot`: non-ASCII names lex as one name; a malformed UTF-8 sequence is `LEX001`. The `0x_FF` in `text/string_literal_forms` becomes `0xFF`.
+- Every existing conformance program passes unchanged on `pilot test`, `--ir` and `--emit c`. Lexing is byte-identical for every file in the tree (compared by a one-off dump: the old lexer's tokens against the table's), apart from the `LIT001` cases.
+- `cargo test -p pilot-parser --test damaged_source -- --include-ignored` passes; the table runner must not panic on any input.
+- **Litmus** (`pilot gate --litmus`), Pilot edits only, with no Rust change. Each builds and runs on all three engines:
+  - change the separator in `numbers.pilot` to `'` (`1'000'000`);
+  - add a `0t` ternary prefix;
+  - respell the line comment.
+- **Performance:** the lexing rate of the table runner on the tree is measured against today's lexer and reported. The owner has said compile speed is not gated (2026-11-10), so this is a report, not a gate. The report states the ratio against today's hand-written SIMD lexer, so the cost of the ownership choice in 2.10 is on record when the direct-code emitter is sequenced.
+
+### 6. Decided
+
+- **`//=` does not exist** (owner 2026-11-16: "leave it meaning nothing unless it was supposed to mean something but that would conflict with the comment"). It was floor-division assignment, from a `//` floor-division operator that can never be written, since `//` starts a comment. The comment pattern in `trivia.pilot` has no exception: `//` and everything after it on the line is a comment. Fixed in today's lexer by `PROP-024`.
+---
+
+## `PROP-022` — Operator Meaning Declared in Pilot: Every Operator Use Lowers to Its Member Call or Its Rule's Template
+
+**Status: DRAFT 2026-11-16, design for owner approval; the exact file list is fixed when it is sequenced (after `PROP-008` step 2 and `PROP-005` phase 5D).** Owner question 2026-11-16 about `op *`, `op :=:`, `op _?` and `op []=`: "I want pilot to understand itself completely without help outside".
+
+### 1. What Rust decides today (read 2026-11-16)
+
+| Operator | Pilot declares | Rust supplies the meaning |
+| :--- | :--- | :--- |
+| `*x`, `**x`, `*..x` | `[Prefix(::Splat)] op * ()` (PROP-018) | `prefix_flag` (`crates/pilot-parser/src/expr.rs:1003`) maps tokens to unary flags 6/7/8; engines call `*_` only through the `unpack_op` binding. |
+| `a :=: b` and the other binary operators | `[Infix(..)] op :=: (rhs)` | `map_binop_sym` / `binop_code` (`crates/pilot-parser/src/tables.rs:646-700`, 42 symbols) map text to `BinaryOp` (49 variants, `crates/pilot-ast/src/lib.rs:339`); engines run the variant natively, not the `op` body. |
+| `x?` | `[Postfix] op _? ()` and `bind_try_protocol` | `expr.rs:151` builds `TryPropagateExpr`; each engine implements the early return. |
+| `a[i]`, `a[i] = v` | `op _[_]`, `op _[_]=_` (PROP-018 owner direction) | parsed at `TokenKind::LBracket` (`expr.rs:118`); `INDEX_GET_OP`/`INDEX_SET_OP` (`crates/pilot-parser/src/accessors.rs:15-16`). |
+
+### 2. The rule
+
+An operator use means exactly one of:
+
+1. **its member call**: `a + b` is `a.(+)(b)`, `-a` is `a.(-_)()`, `a[i] = v` is `a.(_[_]=_)(i, v)`. A primitive's `op` body is its machine op (`asm(MachineOp::Add, ..)` / `__ssa`), so `i64 + i64` is no longer special;
+2. **its rule's template**, when it is more than a call: `x?` is the `try` rule over the declared protocol, `a && b` short-circuits through its `syntax` rule, `a :=: b` swaps through a template over two `ref` operands;
+3. a **core form** (`CoreForm`) or **machine op** (`MachineOp`), the only fixed lists.
+
+The checker resolves which (`selfhost/check/`), `pilot inspect` shows it, and the engines only lower calls, templates, core forms and machine ops. This also closes the `grammar.prefix_op_call` seam (user prefix operators) and the `operators.rewrite_template` seam (PROP-008).
+
+### 3. What goes from Rust (fixed when sequenced)
+
+- `crates/pilot-parser`: `map_binop_sym`, `binop_code`, `prefix_flag`, the `TryPropagateExpr` special case, `INDEX_GET_OP`/`INDEX_SET_OP` and the native index parse, after PROP-008 step 2 makes operator tokens table-driven.
+- `crates/pilot-ast`: `BinaryOp` and the unary flag constants, once no parser or engine reads them.
+- `crates/pilot-vm`: nothing here; its operator lowering goes with the Rust `BytecodeCompiler` in PROP-005.
+
+### 4. Order and acceptance
+
+- Sequenced after PROP-008 step 2 (operator tokens from tables) and PROP-005 phase 5D (bytecode from PilIR), so the change lands in Pilot passes, not in Rust lowering that is about to be deleted.
+- Acceptance: every `tests/conformance/operators/*` program on three engines; a user struct's `-x` runs its `op -_` (`err_prefix_op_call_seam` becomes a passing `prefix_op_call` test); a litmus that renames an operator symbol in `stdlib/core/operator.pilot` and its uses with no Rust change.
+
+---
+
+## `PROP-023` — The Language Section of `toolchain.pilc`: Pilot's Tables Precompiled, Read by Number
+
+**Status: DRAFT 2026-11-16, design only; not for building until PROP-021, PROP-022 and PROP-005 land.** Owner questions 2026-11-16: "how would you suggest pilot define its entire code like literals, meaning, everything" and "what would the non .pilot text look like?". The layered design is written up in `docs/self_description.md`.
+
+### 1. The section
+
+`selfhost/vm/pilc_writer.pilot` writes a `LANG` section into `toolchain.pilc` (`PIL3`), compiled from the `.pilot` declarations, never edited by hand:
+
+```
+section LANG
+  strings    one pool; every name below is an index into it
+  lex        the LexTable: byte classes, DFA states, accepting families, modes (PROP-021)
+  operators  (symbol, fixity, level, assoc, member or rule)                   (PROP-008/018/022)
+  type_ops   (symbol, fixity, type level, assoc, template)                     (PROP-019)
+  rules      (sequence head of words and hole kinds, template AST)             (PROP-009)
+  core_forms the fixed list, by ordinal
+  receptors  (token family, TypeId, from-text function)                        (PROP-021)
+```
+
+`pilot inspect lang` prints it with names filled in.
+
+### 2. Properties
+
+1. **Derived, never edited**: the gate rebuilds the section and compares it byte for byte (as Gate 2 compares Stage 2 with Stage 3); a stale or hand-patched file fails.
+2. **The seed sees only numbers**: ordinals, pool indices and bitmaps; it compares bytes it is handed and holds no language word.
+3. **Meanings are references** to Pilot functions and templates in the `CODE` section.
+4. **Versioned**: a table layout change bumps the `.pilc` version, append-only like the airlock, so an old seed refuses a new file.
+
+### 3. The genesis file and the end state
+
+`stdlib/core/genesis.pilot` is written in the 14 seed words and plain decimal numbers only and holds the token patterns the rest of the bootstrap needs (`PROP-021` §2.6); every other file is read with the tables before it (the multi-pass bootstrap PROP-008 introduced). After the first `toolchain.pilc`, each one is built by the last; `crates/pilot-lexer` and the text-reading half of `crates/pilot-parser` are deleted, and the seed only loads `.pilc`.
+
+---
+
+## `PROP-024` — `//` Always Starts a Comment: Delete the `//=` and `//` Operator Tokens
+
+**Status: APPROVED BY OWNER 2026-11-16 ("Approve PROP-024") AND BUILT 2026-11-16: `lexer.rs` 537 → 535, `token.rs` 247 → 245 (net −4; `rustfmt` realigned the comments of the compound-assignment variants); the repro moved to `tests/conformance/text/comment_double_slash_equal` and its known-bug entry is deleted. Original draft below.** Owner direction 2026-11-16 about `//=`: "I thought it was a comment because of the // if it means nothing then leave it meaning nothing unless it was supposed to mean something but that would conflict with the comment".
+
+### 1. What exists today (read and run 2026-11-16)
+
+- `crates/pilot-lexer/src/lexer.rs:78` starts a line comment at `//` only when the next byte is not `=` (`b2 != b'='`).
+- `lexer.rs:425-426` then makes `//=` the token `DoubleSlashEqual` and `//` the token `DoubleSlash`. The `//` arm can never be reached: every `//` not followed by `=` is already a comment.
+- Neither token means anything. No `op //` is declared, the parser's assignment table has no `//=` entry, and nothing else in `crates/` or the `.pilot` tree names either kind.
+- **Result:** `x //= 2;` silently does nothing (run: `var x = 7; x //= 2; print(x);` prints `7`), and a comment that begins `//=`, such as `//=== heading ===`, is parsed as code and rejected with `SYN001`. That is known bug `lexer.comment_double_slash_equal` (`tests/conformance/known_bugs/comment_double_slash_equal.pilot`, expected `7` then `8`).
+- They come from a `//` floor-division operator described in `docs/lexical-reference.md`, which can never be written because `//` starts a comment.
+
+### 2. Rust (needs approval). Strictly these files:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-lexer/src/lexer.rs` | Drop `&& b2 != b'='` from the line-comment test (line 78). Delete the two arms at lines 425-426. |
+| `crates/pilot-lexer/src/token.rs` | Delete `DoubleSlash = 277` and `DoubleSlashEqual = 306`. Other variants keep their numbers. |
+
+**Estimate:** about `-6` lines. `paused_max_total_rust_loc()` holds or ratchets down.
+
+### 3. Pilot and docs (no approval needed)
+
+- The repro moves from `known_bugs` to `tests/conformance/text/comment_double_slash_equal.pilot` and its known-bug entry is deleted.
+- `docs/lexical-reference.md` loses the `//` floor-division and `//=` rows. `docs/vocabulary_in_rust.md` drops `//=` from its findings.
+
+### 4. Acceptance
+
+- `comment_double_slash_equal` prints `7` then `8` on `pilot test`, `--ir` and `--emit c`.
+- Every existing conformance program passes unchanged, and `cargo test -p pilot-parser --test damaged_source -- --include-ignored` passes.
 
 ---
 

@@ -6,13 +6,13 @@ struct Point {
 struct Bag : ISplatOperator<List<i64>>, IFlattenOperator<i64> {
     items: List<i64>,
     nested: List<List<i64>>,
-    pub pure fn unpack() -> List<i64> => self.items;
-    pub pure fn flat() -> slice<i64> => self.nested[0];
+    pub pure op * () -> List<i64> => self.items;
+    pub pure op *.. () -> slice<i64> => self.nested[0];
 }
 
 struct Config : IPairsOperator<Map<str, i64>> {
     port: i64,
-    pub pure fn unpack_pairs() -> Map<str, i64> => ["port": self.port];
+    pub pure op ** () -> Map<str, i64> => ["port": self.port];
 }
 
 fn sum2(a: i64, b: i64) -> i64 => a + b;

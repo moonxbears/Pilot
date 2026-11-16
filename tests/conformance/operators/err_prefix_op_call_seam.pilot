@@ -1,0 +1,12 @@
+// `-x` on a struct calls its prefix `op -_` (PROP-018), but no engine
+// dispatches a prefix `op` other than unpacking yet: the use stops the build
+// at the seam `grammar.prefix_op_call` instead of trapping at run time.
+struct Money : IValue {
+    pub cents: i64;
+    pub pure op -_ () -> Money => Money { cents: 0 - .cents };
+}
+
+fn main() {
+    let m = Money { cents: 5 };
+    print((-m).cents);
+}

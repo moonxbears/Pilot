@@ -577,11 +577,16 @@ impl ParserTables {
             HOOK_REGISTER_HOLE_KINDS => self.hole_kinds = s_arg(0),
             HOOK_REGISTER_CORE_FORMS => self.core_forms = (s_arg(0), s_arg(1)),
             HOOK_GRAMMAR_ENTRY => {
-                // An empty symbol is the declaration's own name: `[Infix(..)]`
-                // on `op +` declares `+`.
+                // An empty symbol is the declaration's own name without its
+                // holes: `[Infix(..)]` on `op +` declares `+`, `[Prefix(..)]`
+                // on `op *_` declares `*`.
                 let (target, symbol) = (s_arg(0), s_arg(1));
                 let e = GrammarEntry {
-                    symbol: if symbol.is_empty() { target } else { symbol },
+                    symbol: if symbol.is_empty() {
+                        crate::decl::strip_holes(&target)
+                    } else {
+                        symbol
+                    },
                     shape: s_arg(2),
                     level: s_arg(3),
                     assoc: s_arg(4),

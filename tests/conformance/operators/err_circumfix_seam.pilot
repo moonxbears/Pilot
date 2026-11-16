@@ -1,0 +1,11 @@
+// A circumfix operator (`|_|`: one operand between two symbols) is accepted
+// as a declaration, but no use site parses yet: it stops the build at the
+// seam `grammar.circumfix_shape` (PROP-018 §4.5).
+struct Vec2 : IValue {
+    pub x: i64;
+    pub pure op |_| () -> i64 => .x;
+}
+
+fn main() {
+    print(Vec2 { x: 3 }.x);
+}

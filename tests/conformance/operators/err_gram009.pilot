@@ -1,0 +1,10 @@
+// GRAM009: `-_` is a prefix pattern (one hole: the receiver), but this
+// `op` also takes a parameter, so the holes and the parameters disagree.
+struct Money : IValue {
+    pub cents: i64;
+    pub pure op -_ (rhs: Money) -> Money => Money { cents: .cents - rhs.cents };
+}
+
+fn main() {
+    print(Money { cents: 5 }.cents);
+}

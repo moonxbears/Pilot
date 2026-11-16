@@ -117,9 +117,10 @@ comptime {
     bind_native_member(nameof(List), "for_get", "list_get");
     bind_native_member(nameof(slice), "for_len", "str_len");
     bind_native_member(nameof(slice), "for_get", "list_get");
-    bind_native_member("unpack_op", "6", "unpack");
-    bind_native_member("unpack_op", "7", "unpack_pairs");
-    bind_native_member("unpack_op", "8", "flat");
+    // The member each unpack sigil calls: its prefix `op` (PROP-018).
+    bind_native_member("unpack_op", "6", "*_");
+    bind_native_member("unpack_op", "7", "**_");
+    bind_native_member("unpack_op", "8", "*.._");
     // An operator with no PilIR instruction of its own runs as an engine
     // operation: `a ** b` (an integer power wraps; a float power is `powf`).
     bind_operator_intrinsic("**", "num_pow");

@@ -22,9 +22,9 @@ pub partial struct str : IEquatable<str>, IIndexGet<i64, u8>, IEnumerable<u8, Sl
     pub pure:
         fn as_bytes() -> slice<u8> => slice<u8> { data: .data, len: .len };
 
-        op [] (idx: i64) -> u8 => .data[idx as usize];
+        op _[_] (idx: i64) -> u8 => .data[idx as usize];
 
-        op [] (r: range<usize>) -> str => str {
+        op _[_] (r: range<usize>) -> str => str {
             data: .data + r.start,
             len:  r.end - r.start,
         };

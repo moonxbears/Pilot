@@ -1,0 +1,11 @@
+// A matchfix operator (`<|_, ..|>`: a comma list inside a matched pair) is
+// accepted as a declaration, but no use site parses yet: it stops the build
+// at the seam `grammar.matchfix_shape` (PROP-018 §4.5).
+struct Bag : IObject {
+    pub items: List<i64>;
+    pub pure op <|_, ..|> (items: List<i64>) -> Bag => Bag { items: items };
+}
+
+fn main() {
+    print(Bag { items: [1, 2] }.items.len());
+}

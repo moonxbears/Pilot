@@ -1,0 +1,11 @@
+// GRAM010: an `op` is a member of a type, so each operand is a value and
+// each hole a plain `_`. Giving a hole a kind (`_:Type`) belongs to a
+// `syntax` rule (`$t:Type`), not an `op` (PROP-019 recommendation 1).
+struct Money : IValue {
+    pub cents: i64;
+    pub pure op _:Type? () -> Money => Money { cents: .cents };
+}
+
+fn main() {
+    print(Money { cents: 5 }.cents);
+}

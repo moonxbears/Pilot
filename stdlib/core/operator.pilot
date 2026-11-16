@@ -223,11 +223,11 @@ pub interface {
 
     // 5. Indexing, Slicing, Lens, Swap & Unpacking Operator Contracts
     IIndexGet<TIdx: IAnyValue, TOut: IAnyValue> : IAnyValue {
-        pub pure op [] (idx: TIdx) -> TOut;
+        pub pure op _[_] (idx: TIdx) -> TOut;
     }
 
     IIndexSet<TIdx: IAnyValue, TVal: IAnyValue> : IAnyValue {
-        pub op []= (idx: TIdx, val: TVal);
+        pub op _[_]=_ (idx: TIdx, val: TVal);
     }
 
     ISwapOperator<TRhs: IAnyValue> : IAnyValue {
@@ -280,7 +280,7 @@ pub interface {
     ITryOperator<TOk: IAnyValue, TErr: IAnyValue = void> : IAnyValue {
         pub pure fn is_success() -> bool;
         [Postfix]
-        pub pure op ? () -> TOk;
+        pub pure op _? () -> TOk;
         pub pure fn failure() -> TErr;
     }
 
@@ -289,16 +289,19 @@ pub interface {
         pub pure op ?? (fallback: TOut) -> TOut;
     }
 
+    // Unpacking (`*x`, `**x`, `*..x`): prefix operators, since they take no
+    // parameter (PROP-018). `splat(x)`, `pairs(x)` and `flat(x)` are their
+    // readable forms (stdlib/core/syntax/expr_sugar.pilot).
     ISplatOperator<TSeq: IAnyValue> : IAnyValue {
-        [Prefix(::Unary)]
+        [Prefix(::Splat)]
         pub pure op * () -> TSeq;
     }
     IPairsOperator<TPairs: IAnyValue> : IAnyValue {
-        [Prefix(::Unary)]
+        [Prefix(::Splat)]
         pub pure op ** () -> TPairs;
     }
     IFlattenOperator<TLeaf: IAnyValue> : IAnyValue {
-        [Prefix(::Unary)]
+        [Prefix(::Splat)]
         pub pure op *.. () -> slice<TLeaf>;
     }
 

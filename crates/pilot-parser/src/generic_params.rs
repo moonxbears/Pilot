@@ -31,6 +31,11 @@ impl Parser<'_> {
                 self.advance();
             }
             if self.eat(TokenKind::Colon) {
+                // `N: const usize`: the `const` mark may follow the colon.
+                if self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Const)
+                {
+                    self.advance();
+                }
                 let mut bounds = vec![self.parse_type()];
                 while self.eat(TokenKind::Plus) {
                     bounds.push(self.parse_type());

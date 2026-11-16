@@ -1,0 +1,11 @@
+// `x **= y` is `x = x ** y`, as `x += y` is `x = x + y`. The lexer makes a
+// `**=` token, but the seed parser's compound-assignment table
+// (crates/pilot-parser/src/stmt.rs `assign_op_of`) has no entry for it, so
+// the statement does nothing and `x` keeps its value without a word.
+//
+// Expected, worked by hand: x = 2; x **= 3 gives 2 * 2 * 2 = 8   -> "8"
+fn main() {
+    var x = 2;
+    x **= 3;
+    print(x);
+}

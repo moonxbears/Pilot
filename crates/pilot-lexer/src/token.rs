@@ -71,7 +71,6 @@ pub enum TokenKind {
     Percent = 274,      // %
     DoubleStar = 275,   // **
     StarDotDot = 276,   // *..
-    DoubleSlash = 277,  // //
     Amper = 278,        // &
     Vbar = 279,         // |
     Caret = 280,        // ^
@@ -88,19 +87,18 @@ pub enum TokenKind {
     ArrowLeft = 291,    // <-
 
     // 5. Compound Assignment Operators
-    PlusEqual = 300,        // +=
-    MinusEqual = 301,       // -=
-    StarEqual = 302,        // *=
-    SlashEqual = 303,       // /=
-    PercentEqual = 304,     // %=
-    DoubleStarEqual = 305,  // **=
-    DoubleSlashEqual = 306, // //=
-    AmperEqual = 307,       // &=
-    VbarEqual = 308,        // |=
-    CaretEqual = 309,       // ^=
-    ShiftLeftEqual = 310,   // <<=
-    ShiftRightEqual = 311,  // >>=
-    CoalesceEqual = 312,    // ??=
+    PlusEqual = 300,       // +=
+    MinusEqual = 301,      // -=
+    StarEqual = 302,       // *=
+    SlashEqual = 303,      // /=
+    PercentEqual = 304,    // %=
+    DoubleStarEqual = 305, // **=
+    AmperEqual = 307,      // &=
+    VbarEqual = 308,       // |=
+    CaretEqual = 309,      // ^=
+    ShiftLeftEqual = 310,  // <<=
+    ShiftRightEqual = 311, // >>=
+    CoalesceEqual = 312,   // ??=
 
     // 6. Pipes, Navigation, Ranges & Lenses
     PipeForward = 320,   // |>

@@ -110,6 +110,10 @@ pub pure fn op_pipe() -> i64 => 21;
 pub pure fn op_pipe_backward() -> i64 => 31;
 /// `UnaryExpr` flags of logical not (`!x`).
 pub pure fn unary_not() -> i64 => 5;
+/// `UnaryExpr` flags of `-x` and `~x` (`prefix_flag` in
+/// crates/pilot-parser/src/expr.rs).
+pub pure fn unary_neg() -> i64 => 0;
+pub pure fn unary_bit_not() -> i64 => 4;
 pub pure fn unary_some() -> i64 => 9;
 pub pure fn unary_splat() -> i64 => 6;
 pub pure fn unary_double_splat() -> i64 => 7;

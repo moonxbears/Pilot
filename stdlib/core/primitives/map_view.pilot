@@ -50,7 +50,7 @@ pub partial struct map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryVie
         return none;
     }
 
-    pub pure op [] (key: TKey) -> TVal {
+    pub pure op _[_] (key: TKey) -> TVal {
         let idx = .find_index(key);
         assert(idx >= 0, "map: key not found");
         return .vals[idx as usize];

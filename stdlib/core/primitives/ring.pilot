@@ -17,5 +17,5 @@ pub partial struct ring<T: IAnyValue> : IIndexGet<usize, T>, IReference {
     pub head: usize;
 
     pub pure:
-        op [] (idx: usize) -> T => .data[(.head + idx) & .mask];
+        op _[_] (idx: usize) -> T => .data[(.head + idx) & .mask];
 }

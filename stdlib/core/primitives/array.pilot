@@ -24,7 +24,7 @@ pub partial struct array<T: IAnyValue, N: const usize> : IInlineList<T>, IEnumer
             len:  N,
         };
 
-        op [] (idx: i64) -> T => .as_ptr()[idx as usize];
+        op _[_] (idx: i64) -> T => .as_ptr()[idx as usize];
 
         fn contains(item: T) -> bool {
             var idx: usize = 0;
@@ -39,5 +39,5 @@ pub partial struct array<T: IAnyValue, N: const usize> : IInlineList<T>, IEnumer
         fn get_enumerator() -> SliceEnumerator<T> => .as_slice().get_enumerator();
 
     pub var:
-        op []= (idx: i64, val: T) => { .as_ptr()[idx as usize] = val; }
+        op _[_]=_ (idx: i64, val: T) => { .as_ptr()[idx as usize] = val; }
 }

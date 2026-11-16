@@ -1,0 +1,13 @@
+// `*x` calls the prefix `op * ()`. A type that declares only the infix
+// `op * (rhs)` (multiply) has no prefix one, so `*x` is TYPE001 at build
+// time, not a call of multiply with no argument (PROP-018).
+struct Scale : IValue {
+    pub k: i64;
+    pub pure op * (rhs: Scale) -> Scale => Scale { k: .k * rhs.k };
+}
+
+fn main() {
+    let s = Scale { k: 3 };
+    let xs: List<i64> = [*s];
+    print(xs.len());
+}

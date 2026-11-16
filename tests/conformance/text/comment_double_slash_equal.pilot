@@ -1,0 +1,10 @@
+// `//` starts a line comment, whatever follows it (owner decision
+// 2026-11-16, PROP-024: `//=` is not an operator), so a comment that
+// begins `//=` is ignored like any other.
+//
+// Expected, worked by hand: the comment is ignored, so the program prints
+// 7 then 8.
+fn main() {
+    print(7); //=== heading ===
+    print(8);
+}

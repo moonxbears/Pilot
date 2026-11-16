@@ -1,0 +1,11 @@
+// GRAM011: without holes an `op` is infix (one parameter) or prefix (none).
+// Assigning through an index takes two parameters, so it must write its
+// holes: `op _[_]=_ (index, item)`, not `op []= (index, item)`.
+struct Cells : IObject {
+    pub items: List<i64>;
+    pub op []= (index: i64, item: i64) { .items[index] = item; }
+}
+
+fn main() {
+    print(Cells { items: [1] }.items.len());
+}

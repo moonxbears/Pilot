@@ -1,0 +1,32 @@
+// Holes in an `op` symbol give its fixity (PROP-018): `_` marks an operand,
+// so `op _+_` is infix and `op -_` prefix. Without holes the parameter
+// count decides (one: infix; none: prefix), so `Plain` and `Holed` below
+// declare the same operators and give the same results. Each type declares
+// a prefix `-` beside its infix one, and `a - b` still calls the infix one.
+// (Calling the prefix one, `-a`, stops at the seam `grammar.prefix_op_call`:
+// see err_prefix_op_call_seam.)
+//
+// Expected output, worked by hand (a = 7, b = 2 for both types):
+//   a + b = 9;  a - b = 5                              -> "9 5" twice
+struct Plain : IValue {
+    pub v: i64;
+    pub pure op + (rhs: Plain) -> Plain => Plain { v: .v + rhs.v };
+    pub pure op - (rhs: Plain) -> Plain => Plain { v: .v - rhs.v };
+    pub pure op - () -> Plain => Plain { v: 0 - .v };
+}
+
+struct Holed : IValue {
+    pub v: i64;
+    pub pure op _+_ (rhs: Holed) -> Holed => Holed { v: .v + rhs.v };
+    pub pure op _-_ (rhs: Holed) -> Holed => Holed { v: .v - rhs.v };
+    pub pure op -_ () -> Holed => Holed { v: 0 - .v };
+}
+
+fn main() {
+    let a = Plain { v: 7 };
+    let b = Plain { v: 2 };
+    print(f"{(a + b).v} {(a - b).v}");
+    let c = Holed { v: 7 };
+    let d = Holed { v: 2 };
+    print(f"{(c + d).v} {(c - d).v}");
+}

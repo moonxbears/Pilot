@@ -590,7 +590,7 @@ pub fn lower_list_literal(var ref lw: Lowerer, n: i64) -> u32 {
         if is_spread(s, item) {
             let deep = if flags(s, item) == unary_deep_flatten() { 1 } else { 0 };
             let d = emit(lw, op_const_bits(), 0, bool_phy, [pool_int(lw, deep)], item);
-            let method = if deep == 1 { "flat" } else { "unpack" };
+            let method = if deep == 1 { op_flatten() } else { op_splat() };
             let v = lower_unpack_operand(lw, lhs(s, item), method);
             let _ = emit(lw, op_call_intrinsic(), intrinsic_index(lw, extend), phy, [list, v, d], item);
         } else if ty_is_union(lw.inf.p.tt, element_type(lw.inf.p, t)) {
@@ -621,8 +621,8 @@ fn lower_map_spread_item(var ref lw: Lowerer, map: u32, set: str, item: i64) -> 
     let operand = lhs(s, item);
     if operand < 0 { return false; }
     let raw_t = value_type(lw, operand);
-    let src_t = unpack_method_type(lw, raw_t, "unpack_pairs");
-    let src = lower_unpack_operand(lw, operand, "unpack_pairs");
+    let src_t = unpack_method_type(lw, raw_t, op_pairs());
+    let src = lower_unpack_operand(lw, operand, op_pairs());
     let src_name = type_name_of(lw, src_t);
     let keys_hook = bound(lw, native_member_hook(), [src_name, "for_seq"]);
     let len_hook = bound(lw, native_member_hook(), [src_name, "for_len"]);

@@ -17,5 +17,5 @@ pub partial struct grid<T: IAnyValue, N: const usize, M: const usize> : IValue {
 
     pub pure:
         fn as_ptr() -> ptr<T> => __ssa_cast(MachineOp::Bitcast, ref self, ptr<T>);
-        op [] (row: usize) -> ptr<T> => .as_ptr() + (row * M);
+        op _[_] (row: usize) -> ptr<T> => .as_ptr() + (row * M);
 }

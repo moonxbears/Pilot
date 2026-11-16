@@ -30,10 +30,10 @@ pub partial struct List<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerato
     [Mutates]
     pub fn remove_at(index: i64) -> T;
     /// The item at `index`; an index out of range stops the program.
-    pub op [] (index: i64) -> T;
+    pub op _[_] (index: i64) -> T;
     /// Replaces the item at `index`.
     [Mutates]
-    pub op []= (index: i64, item: T);
+    pub op _[_]=_ (index: i64, item: T);
 
     /// The number of items.
     pub count: i64 { get => .len(); }

@@ -202,8 +202,17 @@ pub fn transitional_native_bindings() -> List<str> => [
     "list_push", "list_pop", "list_remove_at", "str_trim", "to_str", "str_byte_at",
     "str_slice", "str_find", "str_replace", "str_contains", "str_starts_with",
     "str_ends_with", "is_null", "get_env", "list_get", "list_set",
-    "unpack", "unpack_pairs", "flat",
 ];
+
+fn ab_is_word(s: str) -> bool {
+    var i = 0;
+    while i < s.len() {
+        let c = s.byte_at(i);
+        if !((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95) { return false; }
+        i = i + 1;
+    }
+    return s.len() > 0;
+}
 
 fn ab_viol(file: str, snippet: str, msg: str) -> GateViolation {
     return GateViolation {
@@ -391,6 +400,9 @@ pub fn verify_airlock_abi(root: str, violations: i64) {
         var q1 = q2 - 1;
         while q1 > 0 && t.byte_at(q1) != 34 { q1 = q1 - 1; }
         let nat = t.slice(q1 + 1, q2);
+        // A native is named by a word; a symbol such as `*_` names the `op`
+        // member a construct calls (PROP-018), not a native.
+        if !ab_is_word(nat) { continue; }
         used.set(nat, true);
         if !allowed.has(nat) {
             let _ = glist_push(violations, ab_viol("stdlib/core/builtins/native_calls.pilot", nat, f"Native binding to {nat} is not in transitional_native_bindings(); give the op an owner method instead"));

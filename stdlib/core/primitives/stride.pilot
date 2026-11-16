@@ -18,7 +18,7 @@ pub partial struct stride<T: IAnyValue> : IView<T>, IEnumerable<T, StrideEnumera
     pub byte_step: isize;
 
     pub pure:
-        op [] (idx: i64) -> T {
+        op _[_] (idx: i64) -> T {
             let base_addr = __ssa_cast(MachineOp::Bitcast, .data, usize);
             let step_off  = (idx as isize) * .byte_step;
             let elem_addr = (base_addr as isize + step_off) as usize;

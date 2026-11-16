@@ -70,6 +70,11 @@ pub fn assignable(var ref inf: Infer, src: i64, dst: i64, e: i64) -> bool {
     if e >= 0 && kind(p.s, e) == nk_list() && ty_is_named(tt, dst) {
         let elem = element_type(p, dst);
         for item in children(p.s, e) {
+            // `*x` among the items fits by the elements it unpacks.
+            if kind(p.s, item) == nk_unary() && flags(p.s, item) == unary_splat() {
+                if !assignable(inf, unpacked_element(p, type_of(inf, lhs(p.s, item))), elem, -1) { return false; }
+                continue;
+            }
             if !assignable(inf, type_of(inf, item), elem, item) { return false; }
         }
         return true;
@@ -894,15 +899,38 @@ fn check_unpack(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     if operand < 0 { return; }
     let t = type_of(inf, operand);
     let fl = flags(p.s, n);
-    let method = if fl == unary_double_splat() { "unpack_pairs" } else if fl == unary_splat() { "unpack" } else { "flat" };
-    if prog_class(p, t) == "" { return; }
+    let method = if fl == unary_double_splat() { op_pairs() } else if fl == unary_splat() { op_splat() } else { op_flatten() };
     if some _ = prog_member(p, t, method) { return; }
+    // A struct unpacks by a sequence only through its prefix `op` (an infix
+    // `op * (rhs)` is multiply, not unpacking); `**` lays out its fields.
+    let d = if ty_is_named(p.tt, t) { ty_decl(p.tt, t) } else { -1 };
+    let proto = p.s.enumeration;
+    let sequence = prog_member(p, t, op_index()) != none || (proto.len() >= 3 && prog_member(p, t, proto[0]) != none);
+    let record = d >= 0 && kind(p.s, d) == nk_struct() && fl != unary_double_splat() && !sequence;
+    if prog_class(p, t) == "" && !record { return; }
     if fl == unary_double_splat() {
         sink_error(sink, n, "TYPE001", f"`**` unpacks key-value pairs, found `{ty_display(p.tt, t)}`");
     } else {
         let form = if fl == unary_splat() { "*" } else { "*.." };
         sink_error(sink, n, "TYPE001", f"`{form}` unpacks a sequence, found `{ty_display(p.tt, t)}`");
     }
+}
+
+/// `-x` or `~x` on a struct calls its prefix `op -_` / `op ~_` (PROP-018);
+/// no engine dispatches a prefix `op` other than unpacking yet, so the use
+/// stops at the seam `grammar.prefix_op_call` instead of trapping at run time.
+fn check_prefix_call(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let operand = lhs(p.s, n);
+    if operand < 0 { return; }
+    let t = type_of(inf, operand);
+    if !ty_is_named(p.tt, t) { return; }
+    let d = ty_decl(p.tt, t);
+    // A primitive (`[Bits]`) negates natively; quoted code is not run.
+    if d < 0 || kind(p.s, d) != nk_struct() || prog_class(p, t) != "" || enclosing_quote(p, n) >= 0 { return; }
+    let sym = if flags(p.s, n) == unary_neg() { "-" } else { "~" };
+    sink_error(sink, n, "SEAM001",
+        f"unconnected seam `grammar.prefix_op_call`: `{sym}x` on `{ty_display(p.tt, t)}` calls its prefix `op {sym}_`, which no engine dispatches yet (proposals.md PROP-018)");
 }
 
 /// A statement written among the members of a struct, interface or `ext`
@@ -971,6 +999,9 @@ pub fn check_rules(var ref inf: Infer, var ref sink: DiagSink) {
             else if k == nk_if() || k == nk_while() { check_condition(inf, sink, condition_operand(s, lhs(s, i)), "condition"); }
             else if k == nk_unary() && (flags(s, i) == unary_splat() || flags(s, i) == unary_double_splat() || flags(s, i) == unary_deep_flatten()) {
                 check_unpack(inf, sink, i);
+            }
+            else if k == nk_unary() && (flags(s, i) == unary_neg() || flags(s, i) == unary_bit_not()) {
+                check_prefix_call(inf, sink, i);
             }
             else if k == nk_unary() && flags(s, i) == unary_not() && !is_condition_not(p, i) {
                 check_condition(inf, sink, lhs(s, i), "the operand of `!`");

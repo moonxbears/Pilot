@@ -38,9 +38,9 @@ pub struct ListBuffer<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerator<
         self.items[index] = item;
     }
 
-    pub op [] (index: usize) -> T => self.items[index];
+    pub op _[_] (index: usize) -> T => self.items[index];
 
-    pub op []= (index: usize, item: T) {
+    pub op _[_]=_ (index: usize, item: T) {
         self.items[index] = item;
     }
 

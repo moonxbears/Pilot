@@ -1,0 +1,11 @@
+// A mixfix operator other than indexing (`_[_]`, `_[_]=_`) is accepted as a
+// declaration, but no use site parses yet: `_ between _ and _` stops the
+// build at the seam `grammar.mixfix_shape` (PROP-018 §4.5).
+struct Span : IValue {
+    pub lo: i64;
+    pub pure op _ between _ and _ (lo: i64, hi: i64) -> bool => .lo >= lo && .lo <= hi;
+}
+
+fn main() {
+    print(Span { lo: 3 }.lo);
+}

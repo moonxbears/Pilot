@@ -17,14 +17,14 @@ pub partial struct slice<T: IAnyValue> : IView<T>, IEnumerable<T, SliceEnumerato
     *ContiguousViewFacet<T>;
 
     pub pure:
-        op [] (idx: i64) -> T => .data[idx as usize];
+        op _[_] (idx: i64) -> T => .data[idx as usize];
 
-        op [] (r: range<usize>) -> slice<T> => slice<T> {
+        op _[_] (r: range<usize>) -> slice<T> => slice<T> {
             data: .data + r.start,
             len:  r.end - r.start,
         };
 
-        op [] (s: span<usize>) -> slice<T> => slice<T> {
+        op _[_] (s: span<usize>) -> slice<T> => slice<T> {
             data: .data + s.start,
             len:  (s.end - s.start) + 1,
         };

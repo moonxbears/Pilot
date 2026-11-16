@@ -1009,8 +1009,14 @@ impl<'a> Parser<'a> {
                 INDEX_GET_OP
             });
         } else {
+            // As written, `_` marking each operand (`_+_`, `-_`, `_?`); a
+            // space keeps two words apart (`_ and _`).
             while !self.at_end() && !self.at(TokenKind::LParen) {
-                op_txt.push_str(self.text());
+                let t = self.text();
+                if op_txt.ends_with(is_word_char) && t.starts_with(is_word_char) {
+                    op_txt.push(' ');
+                }
+                op_txt.push_str(t);
                 self.advance();
             }
         }
@@ -1032,12 +1038,13 @@ impl<'a> Parser<'a> {
             let _ = self.eat(TokenKind::Semicolon);
             NodeId::NONE
         };
-        // Laid out like a function, named by the operator's text: `op ?` is
-        // the method `?` of its type.
+        // Laid out like a function, named by `op_member_name`: `op _?` is
+        // the method `_?` of its type, `op +` the method `+`.
+        let arity = params.len();
         let mut ch = vec![body];
         ch.extend(params);
         let (st, ln) = self.arena.alloc_child_slice(&ch);
-        let name = self.arena.interner.intern(&op_txt);
+        let name = self.arena.interner.intern(&op_member_name(&op_txt, arity));
         let id = self.arena.alloc_node(
             NodeKind::OperatorDecl,
             ln as u16,
@@ -1301,5 +1308,47 @@ impl<'a> Parser<'a> {
             ByteSpan::new(sp.start, self.prev_span().end),
             &fns,
         )
+    }
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// The byte positions of the holes in an `op` symbol: each `_` that is not
+/// part of a word (PROP-018 §1).
+fn hole_positions(text: &str) -> Vec<usize> {
+    let b = text.as_bytes();
+    let word = |i: usize| b.get(i).is_some_and(|&c| is_word_char(c as char));
+    (0..b.len())
+        .filter(|&i| b[i] == b'_' && (i == 0 || !word(i - 1)) && !word(i + 1))
+        .collect()
+}
+
+/// An `op` symbol without its holes: `*_` is `*`, `_ and _` is `and`.
+pub(crate) fn strip_holes(text: &str) -> String {
+    let holes = hole_positions(text);
+    let kept: String = text
+        .char_indices()
+        .filter(|(i, _)| !holes.contains(i))
+        .map(|(_, c)| c)
+        .collect();
+    kept.trim().to_string()
+}
+
+/// The member name of an `op` written as `text` with `params` parameters
+/// (PROP-018 §2): the bare symbol for an infix (`_S_`) or index pattern, or
+/// for no holes and a parameter; `S_` (prefix) for no holes and none; else
+/// the pattern, so `op * ()` and `op * (rhs)` stay apart.
+fn op_member_name(text: &str, params: usize) -> String {
+    let (holes, bare) = (hole_positions(text), strip_holes(text));
+    let infix = holes.len() == 2 && holes[0] == 0 && holes[1] + 1 == text.len();
+    let index = bare == INDEX_GET_OP || bare == INDEX_SET_OP;
+    if holes.is_empty() && params == 0 {
+        format!("{text}_")
+    } else if !holes.is_empty() && (infix || index) && !bare.is_empty() {
+        bare
+    } else {
+        text.to_string()
     }
 }

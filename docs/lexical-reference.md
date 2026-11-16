@@ -355,7 +355,6 @@ Additionally, arbitrary dimensional units can be attached to any expression via 
 | `??=` | `COALESCE_EQUAL` | Assignment | Null-coalescing assignment (`x ??= default_val`). |
 | `:=` | `WALRUS` | Assignment | Walrus assignment operator in expressions and cascades (`obj..let res := compute()`). |
 | `**` | `DOUBLESTAR` | Arithmetic / Unpack | 1. Exponentiation (`2 ** 10` -> `1024.0`).<br>2. Unit exponent (`s**2`).<br>3. Keyword argument / record rest unpacking (`**kwargs`, `{ id, **rest } = rec`). |
-| `//` | `DOUBLESLASH` | Arithmetic | Floor / integer division (`7 // 2` -> `3`). Throws `PilotDivideByZeroException` on `0`. |
 | `==` | `EQEQUAL` | Comparison | Value/structural equality across primitives, strings, lists, tuples, maps, sets, matrices, and objects. Numeric types (`int`/`float`) compare within `1e-9` tolerance. |
 | `!=` or `<>` | `NOTEQUAL` | Comparison | Value inequality (supports both C-style `!=` and SQL-style `<>`). |
 | `<=`, `>=` | `LESSEQUAL`, `GREATEREQUAL` | Comparison | Less-than-or-equal and greater-than-or-equal comparisons; also used in relational patterns (`case <= 0 => ...`). |
@@ -363,7 +362,7 @@ Additionally, arbitrary dimensional units can be attached to any expression via 
 | `->>` | `JSON_GET_TEXT` | Database JSON | Postgres-style JSON extract as text operator. |
 | `@>`, `<@` | `JSON_CONTAINS`, `JSON_CONTAINED` | Database JSON | Postgres-style JSONB containment operators. |
 | `$@` | `DOLLAR AT` | Metaprogramming | Unquote-splicing prefix in macros (`$@list`). |
-| `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `**=`, `&=`, `\|=`, `^=`, `<<=`, `>>=` | `*EQUAL` | Augmented Assignment | Evaluates binary operation on target and right-hand side and assigns back to target. |
+| `+=`, `-=`, `*=`, `/=`, `%=`, `**=`, `&=`, `\|=`, `^=`, `<<=`, `>>=` | `*EQUAL` | Augmented Assignment | Evaluates binary operation on target and right-hand side and assigns back to target. |
 
 ### 10.2 Single-Character Operators & Delimiters
 

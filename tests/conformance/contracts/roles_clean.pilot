@@ -35,9 +35,9 @@ struct Stack : IBuffer<i64>, IEnumerable<i64, StackCursor> {
         return .items.remove_at(index);
     }
 
-    pub op [] (index: i64) -> i64 => .items[index];
+    pub op _[_] (index: i64) -> i64 => .items[index];
 
-    pub op []= (index: i64, item: i64) {
+    pub op _[_]=_ (index: i64, item: i64) {
         .items[index] = item;
     }
 
@@ -64,9 +64,9 @@ struct Pair : IInlineList<i64> {
 
     pub fn contains(item: i64) -> bool => .a == item || .b == item;
 
-    pub op [] (index: i64) -> i64 => if index == 0 { .a } else { .b };
+    pub op _[_] (index: i64) -> i64 => if index == 0 { .a } else { .b };
 
-    pub op []= (index: i64, item: i64) {
+    pub op _[_]=_ (index: i64, item: i64) {
         if index == 0 { .a = item; } else { .b = item; }
     }
 }

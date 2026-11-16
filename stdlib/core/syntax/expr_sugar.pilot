@@ -23,17 +23,12 @@ comptime {
 // -------------------------------------------------------------------------
 // UNPACK & FLATTEN SYNTAX MACROS
 // Lowers readable prefix forms `splat(x)`, `pairs(x)`, `flat(x)` to the exact
-// same receptor AST nodes as prefix unpack sigils `*x`, `**x`, `*..x`.
+// same receptor AST nodes as prefix unpack sigils `*x`, `**x`, `*..x`. The
+// sigils' grammar is declared once, on their `op`s in
+// stdlib/core/operator.pilot (PROP-018).
 // -------------------------------------------------------------------------
 
 pub syntax {
-    [Prefix(::Splat, "*")]
-    splat(x) => quote { *$x };
-    [Prefix(::Splat, "**")]
-    pairs(x) => quote { **$x };
-    [Prefix(::Splat, "*..")]
-    flat(x)  => quote { *..$x };
-
     splat ( $x:Expr ) => quote { *$x };
     pairs ( $x:Expr ) => quote { **$x };
     flat ( $x:Expr )  => quote { *..$x };

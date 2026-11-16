@@ -64,6 +64,6 @@ pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuf
     }
 
     pub fn get_enumerator() -> ListEnumerator<TKey> => .keys().get_enumerator();
-    pub pure op [] (key: TKey) -> TVal => .get(key) ?? fault("Map: key not found");
-    pub op []= (key: TKey, val: TVal) { .set(key, val); }
+    pub pure op _[_] (key: TKey) -> TVal => .get(key) ?? fault("Map: key not found");
+    pub op _[_]=_ (key: TKey, val: TVal) { .set(key, val); }
 }

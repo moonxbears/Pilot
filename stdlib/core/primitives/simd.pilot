@@ -15,7 +15,7 @@ pub partial struct simd<T: IValue, N: const usize> : IValue {
     pub lanes: usize { get => N; }
 
     pub pure:
-        op [] (idx: usize) -> T => (__ssa_cast(MachineOp::Bitcast, ref self, ptr<T>))[idx];
+        op _[_] (idx: usize) -> T => (__ssa_cast(MachineOp::Bitcast, ref self, ptr<T>))[idx];
         op +  (rhs: simd<T, N>) -> simd<T, N> => __ssa(MachineOp::Add, self, rhs);
         op -  (rhs: simd<T, N>) -> simd<T, N> => __ssa(MachineOp::Sub, self, rhs);
         op *  (rhs: simd<T, N>) -> simd<T, N> => __ssa(MachineOp::Mul, self, rhs);

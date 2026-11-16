@@ -1,0 +1,35 @@
+// A type may declare one symbol twice, infix and prefix (PROP-018): `op *
+// (rhs)` multiplies and `op * ()` is the splat `*a`; `op ** (rhs)` is a
+// power and `op ** ()` the pairs unpack `**a`. Each is its own member, so
+// neither replaces the other.
+//
+// Expected output, worked by hand:
+//   a = { x: 2, y: 3 }, b = { x: 4, y: 5 }
+//   a * b    = { 2 * 4, 3 * 5 } = { 8, 15 }        -> "8 15"
+//   [*a]     spreads op * () = [2, 3]              -> "2 2 3" (length, items)
+//   [splat(a)] is the same node as [*a]            -> "2 2 3"
+//   a ** b   = { 2 + 4, 3 + 5 } (this type's own power) = { 6, 8 } -> "6 8"
+//   [**a]    unpacks op ** () = ["x": 2, "y": 3]  -> "2 3"
+struct Pair : IObject, ISplatOperator<List<i64>>, IPairsOperator<Map<str, i64>> {
+    pub x: i64;
+    pub y: i64;
+    pub pure op * (rhs: Pair) -> Pair => Pair { x: .x * rhs.x, y: .y * rhs.y };
+    pub pure op * () -> List<i64> => [.x, .y];
+    pub pure op ** (rhs: Pair) -> Pair => Pair { x: .x + rhs.x, y: .y + rhs.y };
+    pub pure op ** () -> Map<str, i64> => ["x": .x, "y": .y];
+}
+
+fn main() {
+    let a = Pair { x: 2, y: 3 };
+    let b = Pair { x: 4, y: 5 };
+    let m = a * b;
+    print(f"{m.x} {m.y}");
+    let xs: List<i64> = [*a];
+    print(f"{xs.len()} {xs[0]} {xs[1]}");
+    let ys: List<i64> = [splat(a)];
+    print(f"{ys.len()} {ys[0]} {ys[1]}");
+    let p = a ** b;
+    print(f"{p.x} {p.y}");
+    let kv: Map<str, i64> = [**a];
+    print(f"{kv[\"x\"]} {kv[\"y\"]}");
+}

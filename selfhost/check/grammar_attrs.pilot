@@ -15,6 +15,23 @@
 //            two), a prefix or postfix operator one (an `op` none, a rule one);
 //   GRAM007  the attribute is on a declaration that cannot define an
 //            operator: neither an `op` nor a `syntax` rule.
+// and, on every `op` whose symbol marks its operands with `_` holes
+// (PROP-018: `_+_` infix, `-_` prefix, `_?` postfix, `|_|` circumfix,
+// `<|_, ..|>` matchfix, anything else mixfix):
+//   GRAM005  the symbol is only a hole (`op _`);
+//   GRAM008  the holes have no operator symbol between them (`op _ _`);
+//   GRAM009  the holes give another operand count than the `op` takes, or a
+//            fixity the operator attribute on it does not declare;
+//   GRAM010  a hole is given a kind (`op _:Type ?`, `op $t:Type ?`): an
+//            `op` is a member of a type, so its operands are values; an
+//            operator over types, blocks or names is a `syntax` rule with
+//            `$name:Kind` holes (PROP-019 recommendation 1);
+//   GRAM011  an `op` written without holes is infix when it takes one
+//            parameter and prefix when it takes none; anything else
+//            (indexing `_[_]`, `_[_]=_`, two or more parameters) must
+//            write its holes (owner direction 2026-11-16);
+//   SEAM001  circumfix, matchfix and mixfix other than indexing (`_[_]`,
+//            `_[_]=_`) are declared but no use site parses them yet.
 // GRAM001-GRAM004 (user operators that redefine or conflict) need the
 // table-driven lexer of PROP-008 step 2.
 pub lvl(0) pkg selfhost.check;
@@ -81,12 +98,181 @@ fn is_syntax_rule(ref s: Snap, d: i64) -> bool {
     return body >= 0 && kind(s, body) == nk_quote();
 }
 
-fn check_decl(ref p: Program, var ref sink: DiagSink, d: i64) {
+/// The fixity an `op` symbol's holes give it (PROP-018 §1).
+enum Fixity : u8 {
+    Infix,
+    Prefix,
+    Postfix,
+    Circumfix,
+    Matchfix,
+    Mixfix,
+    Index,     // `_[_]` and `_[_]=_`: mixfix, built as indexing
+}
+
+fn fixity_text(f: Fixity) -> str {
+    if f == Fixity::Infix { return "infix"; }
+    if f == Fixity::Prefix { return "prefix"; }
+    if f == Fixity::Postfix { return "postfix"; }
+    if f == Fixity::Circumfix { return "circumfix"; }
+    if f == Fixity::Matchfix { return "matchfix"; }
+    return "mixfix";
+}
+
+/// The fixity each operator attribute declares, for the ones that fix it.
+fn attr_fixity(attr: str) -> Fixity? {
+    if attr == "Infix" || attr == "InfixWord" { return some(Fixity::Infix); }
+    if attr == "Prefix" { return some(Fixity::Prefix); }
+    if attr == "Postfix" { return some(Fixity::Postfix); }
+    return none;
+}
+
+fn is_word_byte(c: i64) -> bool => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
+
+/// The `op` symbol as written, holes included: the text between `op` and
+/// its parameter list.
+fn op_pattern(ref s: Snap, d: i64) -> str {
+    let text = node_text(s, d);
+    var i = 0;
+    while i + 2 <= text.len() {
+        let before = i == 0 || !is_word_byte(text.byte_at(i - 1));
+        let after = i + 2 >= text.len() || !is_word_byte(text.byte_at(i + 2));
+        if before && after && text.slice(i, i + 2) == "op" { break; }
+        i = i + 1;
+    }
+    var j = i + 2;
+    while j < text.len() && text.byte_at(j) != 40 { j = j + 1; }
+    return if j <= text.len() && i + 2 <= j { text.slice(i + 2, j).trim() } else { "" };
+}
+
+/// The byte positions of the holes in `pat`: each `_` not part of a word.
+fn hole_positions(pat: str) -> List<i64> {
+    var out: List<i64> = [];
+    var i = 0;
+    while i < pat.len() {
+        let lone = (i == 0 || !is_word_byte(pat.byte_at(i - 1))) && (i + 1 >= pat.len() || !is_word_byte(pat.byte_at(i + 1)));
+        if pat.byte_at(i) == 95 && lone { out.push(i); }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// `pat` without its holes: `*_` is `*`, `_ and _` is `and`.
+pub fn strip_holes(pat: str) -> str {
+    let holes = hole_positions(pat);
+    var out = "";
+    var last = 0;
+    for h in holes {
+        out = out + pat.slice(last, h);
+        last = h + 1;
+    }
+    return (out + pat.slice(last, pat.len())).trim();
+}
+
+/// Whether only spaces separate two holes (or a hole from the list mark).
+fn only_spaces(pat: str, lo: i64, hi: i64) -> bool {
+    var i = lo;
+    while i < hi { if pat.byte_at(i) != 32 { return false; } i = i + 1; }
+    return true;
+}
+
+/// Whether the hole at `h` is a matchfix list hole: `_, ..`.
+fn is_list_hole(pat: str, h: i64) -> bool {
+    var i = h + 1;
+    while i < pat.len() && pat.byte_at(i) == 32 { i = i + 1; }
+    if i >= pat.len() || pat.byte_at(i) != 44 { return false; }
+    i = i + 1;
+    while i < pat.len() && pat.byte_at(i) == 32 { i = i + 1; }
+    return i + 2 <= pat.len() && pat.slice(i, i + 2) == "..";
+}
+
+fn params_text(n: i64) -> str => if n == 1 { "1 parameter" } else { f"{n} parameters" };
+fn operands_text(n: i64) -> str => if n == 1 { "1 operand" } else { f"{n} operands" };
+
+/// GRAM005, GRAM008, GRAM009 and the shape seams on an `op` whose symbol is
+/// written with holes. `shape_reported`: GRAM006 already said the operand
+/// count is wrong.
+fn check_holes(ref p: Program, var ref sink: DiagSink, d: i64, shape_reported: bool) {
     let s = p.s;
-    let name = node_name(s, d);
+    let pat = op_pattern(s, d);
+    let holes = hole_positions(pat);
+    var kinded = pat.find("$", 0) >= 0;
+    for h in holes {
+        var i = h + 1;
+        while i < pat.len() && pat.byte_at(i) == 32 { i = i + 1; }
+        if i < pat.len() && pat.byte_at(i) == 58 { kinded = true; }
+    }
+    if kinded {
+        sink_error(sink, d, "GRAM010", f"`op {pat}` gives an operand a kind; an `op`'s operands are values, so each is a plain `_`. For an operator over types, blocks or names, write a `syntax` rule with `$name:Kind` holes");
+        return;
+    }
+    if holes.len() == 0 {
+        // Without holes: one parameter is infix, none prefix, nothing else.
+        let params = fn_params(s, d).len();
+        if pat.len() > 0 && (params > 1 || is_structural_symbol(pat)) {
+            sink_error(sink, d, "GRAM011", f"`op {pat}` takes {params_text(params)} and has no holes; without holes an `op` is infix (one parameter) or prefix (none), so write its holes (indexing is `op _[_]`, assigning through an index `op _[_]=_`)");
+        }
+        return;
+    }
+    if pat == "_" {
+        sink_error(sink, d, "GRAM005", f"`op {pat}` is only a hole; `_` marks an operand and cannot be an operator symbol");
+        return;
+    }
+    let bare = strip_holes(pat);
+    var gap = bare.len() == 0;
+    var k = 1;
+    while k < holes.len() { if only_spaces(pat, holes[k - 1] + 1, holes[k]) { gap = true; } k = k + 1; }
+    if gap {
+        sink_error(sink, d, "GRAM008", f"`op {pat}` has no operator symbol between its holes");
+        return;
+    }
+    let n = holes.len();
+    let first = holes[0] == 0;
+    let last = holes[n - 1] == pat.len() - 1;
+    var list = false;
+    for h in holes { if is_list_hole(pat, h) { list = true; } }
+    let fix = if list { Fixity::Matchfix }
+        else if bare == "[]" || bare == "[]=" { Fixity::Index }
+        else if n == 2 && first && last { Fixity::Infix }
+        else if n == 1 && last { Fixity::Prefix }
+        else if n == 1 && first { Fixity::Postfix }
+        else if n == 1 { Fixity::Circumfix }
+        else { Fixity::Mixfix };
+    // An `op` takes its first operand as `self`; a matchfix `op` takes its
+    // list as its one parameter.
+    let params = fn_params(s, d).len();
+    let given = if fix == Fixity::Matchfix { params } else { params + 1 };
+    let wanted = if fix == Fixity::Matchfix { 1 } else { n };
+    if given != wanted && !shape_reported {
+        sink_error(sink, d, "GRAM009", f"`op {pat}` is {fixity_text(fix)}, which takes {operands_text(wanted)}, but it takes {given}");
+    }
+    for ga in grammar_attrs() {
+        guard some declared = attr_fixity(ga.name) else { continue; }
+        if prog_attr_nodes(p, d, ga.name) == none || declared == fix { continue; }
+        sink_error(sink, d, "GRAM009", f"`op {pat}` is {fixity_text(fix)}, but `[{ga.name}]` declares a {fixity_text(declared)} operator");
+    }
+    // Each seam is written out whole so `pilot gate` finds it.
+    let seam = if fix == Fixity::Circumfix { "unconnected seam `grammar.circumfix_shape`" }
+        else if fix == Fixity::Matchfix { "unconnected seam `grammar.matchfix_shape`" }
+        else if fix == Fixity::Mixfix { "unconnected seam `grammar.mixfix_shape`" }
+        else { "" };
+    if seam.len() > 0 {
+        let what = fixity_text(fix);
+        sink_error(sink, d, "SEAM001",
+            f"{seam}: `op {pat}` is a {what} operator; declaring it is checked, but no use site parses {what} operators yet (proposals.md PROP-018 §4.5)");
+    }
+}
+
+/// GRAM005-GRAM007 on `d`; whether it reported GRAM006.
+fn check_decl(ref p: Program, var ref sink: DiagSink, d: i64) -> bool {
+    let s = p.s;
+    let is_op = kind(s, d) == nk_operator();
+    // An `op` is shown, and its symbol taken, as written (`op -`, not the
+    // member `-_`).
+    let pat = if is_op { op_pattern(s, d) } else { "" };
+    let name = if is_op && pat.len() > 0 { strip_holes(pat) } else { node_name(s, d) };
+    var shape_reported = false;
     for ga in grammar_attrs() {
         guard some args = prog_attr_nodes(p, d, ga.name) else { continue; }
-        let is_op = kind(s, d) == nk_operator();
         if !is_op && !is_syntax_rule(s, d) {
             sink_error(sink, d, "GRAM007", f"`[{ga.name}]` is on `{name}`, which is neither an `op` declaration nor a `syntax` rule, so it cannot define an operator");
             continue;
@@ -112,13 +298,15 @@ fn check_decl(ref p: Program, var ref sink: DiagSink, d: i64) {
         let given = if is_op { fn_params(s, d).len() + 1 } else { fn_params(s, d).len() };
         if given != operands {
             let what = if unary { "one operand" } else { "two operands" };
-            let decl = if is_op { f"op {name}" } else { name };
+            let decl = if is_op { f"op {pat}" } else { name };
             sink_error(sink, d, "GRAM006", f"`[{ga.name}]` declares `{sym}` as an operator of {what}, but `{decl}` takes {given}");
+            shape_reported = true;
         }
     }
+    return shape_reported;
 }
 
-/// GRAM005-GRAM007 over the user's files.
+/// GRAM005-GRAM009 and the operator shape seams over the user's files.
 pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
@@ -127,7 +315,8 @@ pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
         if in_user_file(s, d) {
             let k = kind(s, d);
             if k == nk_operator() || k == nk_fn() || k == nk_struct() || k == nk_interface() || k == nk_adt() || k == nk_const() {
-                check_decl(p, sink, d);
+                let shape_reported = check_decl(p, sink, d);
+                if k == nk_operator() { check_holes(p, sink, d, shape_reported); }
             }
         }
         d = d + 1;

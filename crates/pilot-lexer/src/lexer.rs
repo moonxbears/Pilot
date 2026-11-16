@@ -75,7 +75,7 @@ impl<'a> Lexer<'a> {
                 self.emit(kind, TokenFlags::NONE, start, end, false);
                 continue;
             }
-            if b0 == b'/' && b1 == b'/' && b2 != b'=' {
+            if b0 == b'/' && b1 == b'/' {
                 let end = scan_to_newline(self.bytes, start + 2);
                 self.pos = end;
                 self.emit(TokenKind::Comment, TokenFlags::NONE, start, end, false);
@@ -422,8 +422,6 @@ impl<'a> Lexer<'a> {
             (b'*', b'%', _) => (TokenKind::StarPercent, 2, false),
             (b'*', b'?', _) => (TokenKind::StarQuestion, 2, false),
             (b'*', _, _) => (TokenKind::Star, 1, false),
-            (b'/', b'/', b'=') => (TokenKind::DoubleSlashEqual, 3, false),
-            (b'/', b'/', _) => (TokenKind::DoubleSlash, 2, false),
             (b'/', b'=', _) => (TokenKind::SlashEqual, 2, false),
             (b'/', _, _) => (TokenKind::Slash, 1, false),
             (b'%', b'%', _) => (TokenKind::DoublePercent, 2, false),

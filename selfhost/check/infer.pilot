@@ -59,7 +59,11 @@ pub fn global_const(ref inf: Infer, n: i64) -> i64 {
 }
 
 /// The operator symbols whose declarations the checker reads.
-pub pure fn op_unwrap() -> str => "?";
+pub pure fn op_unwrap() -> str => "_?";
+/// The members the unpack sigils call: `*x`, `**x`, `*..x` (PROP-018).
+pub pure fn op_splat() -> str => "*_";
+pub pure fn op_pairs() -> str => "**_";
+pub pure fn op_flatten() -> str => "*.._";
 pub pure fn op_index() -> str => "[]";
 
 /// The value `t` holds once unwrapped by its `op ?`, or unknown.
@@ -139,6 +143,13 @@ pub fn element_type(var ref p: Program, t: i64) -> i64 {
     return ty_unknown();
 }
 
+/// The element type `*x` gives for an `x` of type `t`: of what its prefix
+/// `op * ()` returns, or of `t` itself when it is a sequence.
+pub fn unpacked_element(var ref p: Program, t: i64) -> i64 {
+    if some m = prog_member(p, t, op_splat()) { return element_type(p, prog_member_type(p, m)); }
+    return element_type(p, t);
+}
+
 /// The element type of the iterable expression `e`.
 fn iterated_type(var ref inf: Infer, e: i64) -> i64 {
     let s = inf.p.s;
@@ -186,7 +197,9 @@ fn list_type(var ref inf: Infer, n: i64) -> i64 {
     var elem = ty_unknown();
     var first = true;
     for c in children(p.s, n) {
-        let t = type_of(inf, c);
+        // `*x` among the items gives the elements of what it unpacks.
+        let spread = kind(p.s, c) == nk_unary() && flags(p.s, c) == unary_splat();
+        let t = if spread { unpacked_element(p, type_of(inf, lhs(p.s, c))) } else { type_of(inf, c) };
         elem = if first { t } else { agree(p, elem, t) };
         first = false;
     }

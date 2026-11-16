@@ -38,7 +38,7 @@ pub partial struct result<TOk: IAnyValue, TErr: IAnyValue> : IEquatable<result<T
         // failed result itself when `is_success()` is `false`.
         fn is_success() -> bool => .is_ok;
         fn failure() -> TErr => .err_val;
-        op ? () -> TOk => .ok_val;
+        op _? () -> TOk => .ok_val;
 
         op == (rhs: result<TOk, TErr>) -> bool =>
             if .is_ok != rhs.is_ok {
