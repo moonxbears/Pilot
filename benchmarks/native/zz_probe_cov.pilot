@@ -1,0 +1,6 @@
+use Pilot.Core.Coverage;
+fn main() {
+    coverage_enter("u", "", "");
+    coverage_exit("u");
+    print("ok");
+}

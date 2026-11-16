@@ -159,7 +159,6 @@ fn probe_call(lw: Lowerer, row: List<any>, n: i64, captured: u32) {
         return;
     }
     let bool_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
-    let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
     var values: List<u32> = [];
     for a in args {
         let pair: List<any> = a;
@@ -175,11 +174,6 @@ fn probe_call(lw: Lowerer, row: List<any>, n: i64, captured: u32) {
         } else if code == ProbeArgKind::BindingText as i64 {
             let b: i64 = pair[2];
             values.push(binding_text(lw, b, n));
-        } else if code == ProbeArgKind::Engine as i64 {
-            // Run by the seed; the IR interpreter and the C emitter stop at
-            // their seams for an engine operation they lack.
-            let op: str = pair[1];
-            values.push(emit(lw, op_call_intrinsic(), intrinsic_index(lw, op), int_phy, [], n));
         } else {
             values.push(if captured == ir_no_value() { text_const(lw, "", n) } else { captured });
         }

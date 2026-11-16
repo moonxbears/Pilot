@@ -1,15 +1,19 @@
-// Standard input, read line by line until it ends (F3).
+// Standard input, read line by line until it ends (F3). `read_line` gives
+// `str?`: none once the input has ended.
 use std.io;
 
 fn main() {
     var count = 0;
     var total = 0;
-    var line = io.read_line();
-    while !line.is_null() {
-        count = count + 1;
-        total = total + line.len();
-        print(f"{count}: [{line}]");
-        line = io.read_line();
+    var reading = true;
+    while reading {
+        if some line = io.read_line() {
+            count = count + 1;
+            total = total + line.len();
+            print(f"{count}: [{line}]");
+        } else {
+            reading = false;
+        }
     }
     print(f"{count} lines, {total} bytes");
 }

@@ -24,6 +24,8 @@
 | **`PROP-011`** | Delete the Unrun Bootstrap Stage List `stdlib/core/bootstrap.pilot` (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-012`** | Delete Test-Only Rust: the AST S-Expression Printer, the Rust Module Header Scanner and `TokenKind::is_keyword` | `-186` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-013`** | Link a Run's Extra Toolchain Files in the Loader's One Pass (`run.rs` `compile_entry`) | `-11` | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-013") AND BUILT; C2 PASSES` |
+| **`PROP-014`** | Update the Benchmark Baseline Test for the Seed Column `PROP-002a` C2 Added (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-014") AND BUILT` |
+| **`PROP-015`** | Compile an `=> expr` Function Body Against Its Return Type, and Delete the Dead `ProbeArg::Engine` | about `+1` (`+3`, `-4`) | `DRAFT — AWAITING OWNER APPROVAL` |
 | **`PROP-003`** | Move Domain Helpers (`heap.rs`/`ops.rs`/`checked.rs`), `parse_header` & Parser Semantic Desugarings to Pilot | `~ -2,850` LOC | `PLANNED (WAVE 3)` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`821` `src` LOC) & Migrate Milestone Harnesses to `.pilot` | `-821` LOC | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | `-7,833` LOC | `PLANNED (WAVE 5)` |
@@ -1787,6 +1789,57 @@ Section B's test harnesses don't count toward the `src` LOC that GATE003 measure
 - **De-duplication:** a program that writes `use Pilot.Core.Primitives.Map;` itself, with `map.pilot` also linked, runs (`m.clear(); m.count` prints `0`).
 - **`cargo test --release -p pilot-cli --no-fail-fast`:** 7 tests fail, and the same 7 fail with `run.rs` restored to its previous text: `a_built_binary_reads_its_arguments_and_standard_input`, `an_unlowered_construct_stops_at_its_seam`, `bare_coverage_turns_on_every_mode`, `coverage_on_a_struct_measures_its_methods`, `inherited_steps_follow_their_policy` (DECL001 `Coalesce`), `the_benchmarks_build_natively_and_match_their_c_references`, `well_typed_programs_get_no_diagnostic`. Not yet split into HEAD failures and failures from this session's uncommitted work.
 - **Not run:** `cargo fmt --check` (the `rustfmt` component is not installed for the stable toolchain). The new lines are at most 106 columns; `run.rs` already had lines up to 125.
+
+---
+
+## `PROP-014` — Update the Benchmark Baseline Test for the Seed Column (Rust Test Edit Only)
+
+**Status: APPROVED BY OWNER 2026-11-15 ("Approve PROP-014") and built.**
+
+**Problem (found 2026-11-15).** `PROP-002a` C2 (owner threshold "5% slower max") added the seed's time to `benchmarks/native/baseline.tsv`, which `record.pilot -- --check` needs. Each row went from 4 fields to 6: `benchmark seed_us pilot_us c_us seed_over_c pilot_over_c`. The Rust test `the_benchmarks_build_natively_and_match_their_c_references` (`crates/pilot-cli/tests/cli_f6.rs:181`) still requires exactly 4 fields per row, so it fails since commit `03ee3ab`. It passes at `2a82f59`, the commit before. No `src` file is involved.
+
+**Change.**
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-cli/tests/cli_f6.rs` | In the baseline check, expect 6 fields per row, not 4, and say in the comment which they are (benchmark, seed µs, native Pilot µs, C µs, seed/C, Pilot/C). Add `records` to the list of benchmarks it looks for; the file has a row for it and the list left it out. |
+
+**Net Rust.** `0` `src` lines; the test changes by about 2 lines.
+
+**Acceptance.** `cargo test --release -p pilot-cli --test cli_f6 the_benchmarks_build_natively_and_match_their_c_references` passes, and the rest of `cli_f6` is unchanged (`a_built_binary_reads_its_arguments_and_standard_input` already failed at `2a82f59`).
+
+**As built (2026-11-15).** Exactly the file listed (+2 lines: the comment line and the field count; `records` added to the list). `cargo test --release -p pilot-cli --test cli_f6`: 9 passed, 1 failed; the failure is `a_built_binary_reads_its_arguments_and_standard_input`, as at `2a82f59`.
+
+---
+
+## `PROP-015` — Compile an `=> expr` Function Body Against Its Return Type, and Delete the Dead `ProbeArg::Engine`
+
+**Status: DRAFT, awaiting owner approval.** Found 2026-11-15 while clearing the `pilot-cli` test failures that predate this session's work (they fail at `2a82f59` too).
+
+**A. Known bug `seed.expr_body_variant_hint`.**
+- An `=> expr` function body is compiled with plain `compile_node`, without the declared return type as the expected type. `return expr;` uses `compile_with_hint(.., cur_ret_type)` (`lower_stmt.rs` `compile_return`), and so does a typed `let`.
+- So a target-typed variant whose name two enums share is DECL001 "undefined" in an `=> expr` body only. `fn p() -> InheritPolicy => ::Coalesce;` fails because `Coalesce` is also an operator level (`stdlib/core/operators/levels.pilot`, PROP-008). `crates/pilot-cli/tests/cli_attrs.rs` `inherited_steps_follow_their_policy` fails on it.
+- Repro: `tests/conformance/known_bugs/expr_body_variant_hint.pilot` (prints `1`, `1`, `1` by hand; today DECL001 on all three engines), registered in `bug_registry()`.
+
+**B. Dead Rust: `ProbeArg::Engine`.** The coverage weaver no longer passes an engine operation as a probe argument: the `::Speed` entry points read the clock themselves (`Clock.now_ns` in `stdlib/core/coverage.pilot`). The old argument named `time_now_us`, an operation that no longer exists, so every `::Speed` run stopped with "cannot apply `-` to null and null". The Pilot side (`ProbeArgKind::Engine`, its branch in `selfhost/ir/lower_probe.pilot`) is deleted. The Rust variant and its two arms have no producer now.
+
+**Rust file list.**
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-vm/src/lower_stmt.rs` | In the function-body compile, an `=> expr` body (not a `BlockExpr`) is compiled with `compile_with_hint(arena, body_node, self.cur_ret_type.clone())`; a block body is unchanged. About +3. |
+| `crates/pilot-vm/src/lower_probe.rs` | Delete `ProbeArg::Engine(String)` (and its doc line), the `5 => ProbeArg::Engine(..)` arm of `from_code`, and the `ProbeArg::Engine(op) => self.emit_intrinsic(op, &[])` arm. About −4. |
+
+**Net Rust.** About −1 `src` line.
+
+**Acceptance.**
+- `cargo build`; `cargo test -p pilot-vm` and `-p pilot-cli` give the results of today minus `inherited_steps_follow_their_policy`, which passes.
+- `known_bugs/expr_body_variant_hint` is fixed on all three engines: it moves to `tests/conformance/types/` with its expected output unchanged, and its `bug_registry()` entry is deleted.
+- The seed suite, `--ir`, `--emit c` and `pilot gate` are otherwise unchanged; `types/attr_coverage` and `cli_coverage` still pass.
+
+**Not included.**
+- `pilot ir run` reports LOOP005 ("`continue a..b` is only supported inside a `for` loop") for a `continue 5..6;` that is inside a `for` (`tests/ir/unlowered_continue_range.pilot`; `cli_f5` `an_unlowered_construct_stops_at_its_seam` fails on it). The check is in the legacy `selfhost/analyzer.pilot`, which walks `ast_parent` links built by `crates/pilot-analysis/src/infer.rs`; since `for` became a `syntax` rule (PROP-009 step 2) that walk no longer reaches the `for`. `pilot check` and `pilot run` report the right SEED001. Not yet diagnosed far enough to name a fix. The same analyzer warns LOOP005 "Potential infinite loop ... no 'break'" for `while true { guard some x = f() else { break; }; .. }`: it does not see a `break` inside a `guard`'s `else` (also a `syntax`-rule form since PROP-009). `runtime/stdin_lines` is written with `if some .. else` so `cli_f3` `check_passes_a_valid_program_without_running_it` stays clean.
+- The checker accepts a `T?` where a `T` is expected (`f() + 1` with `f() -> i64?`). That is its own design question (a new diagnostic code).
 
 ---
 

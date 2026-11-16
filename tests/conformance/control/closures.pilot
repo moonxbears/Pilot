@@ -31,9 +31,10 @@ fn main() {
     print(add5(10));
     print(apply(make_adder(100), 1));
 
-    var offset = 1;
+    // A closure reads the captured value (writing `offset` after the
+    // capture is warning DECL004: warnings/warn_captured_var_write).
+    let offset = 1;
     let snap = (x) => x + offset;
-    offset = 50;
     print(snap(1));
 
     let counter = make_counter_from(4);

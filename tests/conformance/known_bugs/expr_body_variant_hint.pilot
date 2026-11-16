@@ -1,0 +1,26 @@
+// Known bug seed.expr_body_variant_hint: an `=> expr` function body is not
+// compiled against the declared return type, so a target-typed variant
+// whose name two enums share (`::Shared`) is "undefined" (DECL001) there,
+// while the same variant after `return` or in a typed `let` resolves.
+//
+// Expected, by hand: `Shade` is { Light = 0, Shared = 1 }, so each of the
+// three lines prints 1.
+enum Tone : u8 {
+    Shared,
+    Loud,
+}
+
+enum Shade : u8 {
+    Light,
+    Shared,
+}
+
+fn by_return() -> Shade { return ::Shared; }
+fn by_arrow() -> Shade => ::Shared;
+
+fn main() {
+    let s: Shade = ::Shared;
+    print(s as i64);
+    print(by_return() as i64);
+    print(by_arrow() as i64);
+}

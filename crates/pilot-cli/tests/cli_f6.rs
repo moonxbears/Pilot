@@ -174,12 +174,13 @@ fn the_benchmarks_build_natively_and_match_their_c_references() {
         assert!(cc.status.success(), "{b}: {}", text(&cc.stderr));
         assert_eq!(text(&run_binary(&c_bin, &[], "").stdout), want, "{b} (C)");
     });
-    // The recorded baseline: a header, then one row per benchmark.
+    // The recorded baseline: a header, then one row per benchmark with six
+    // fields: benchmark, seed µs, native Pilot µs, C µs, seed/C, Pilot/C.
     let baseline = std::fs::read_to_string(root().join("benchmarks/native/baseline.tsv")).expect("baseline");
     let rows: Vec<&str> = baseline.lines().skip(1).collect();
-    for b in ["fib", "numeric_loop", "string_build", "map_workload", "string_compare", "string_find", "string_map"] {
+    for b in ["fib", "numeric_loop", "string_build", "map_workload", "records", "string_compare", "string_find", "string_map"] {
         let row = rows.iter().find(|r| r.split('\t').next() == Some(b)).unwrap_or_else(|| panic!("no row for {b}"));
-        assert_eq!(row.split('\t').count(), 4, "{row}");
+        assert_eq!(row.split('\t').count(), 6, "{row}");
     }
 }
 

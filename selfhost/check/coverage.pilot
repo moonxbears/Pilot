@@ -54,9 +54,6 @@ pub pure fn cov_hook_line() -> str => "coverage_line";
 pub pure fn cov_hook_report() -> str => "coverage_report";
 pub pure fn cov_hook_write_file() -> str => "coverage_write_file";
 
-/// The clock `::Speed` reads: the engine operation behind
-/// `std.time.monotonic_micros` (stdlib/std/time.pilot).
-pub pure fn cov_clock_op() -> str => "time_now_us";
 /// The function the report runs on the way out of.
 pub pure fn cov_entry_fn() -> str => "main";
 /// What the `::File` report is named after its source: `<stem><suffix>`.
@@ -374,10 +371,6 @@ pub fn coverage_plan(p: Program) -> List<List<any>> {
             enter_args.push(text_arg(""));
         }
         var exit_args: List<any> = [text_arg(key)];
-        if timed {
-            enter_args.push([ProbeArgKind::Engine as i64, cov_clock_op()]);
-            exit_args.push([ProbeArgKind::Engine as i64, cov_clock_op()]);
-        }
         out.push(text_row(node, if timed { cov_hook_enter_timed() } else { cov_hook_enter() }, enter_args, ::Before));
         out.push(text_row(node, if timed { cov_hook_exit_timed() } else { cov_hook_exit() }, exit_args, if deferred { ProbeAt::Defer } else { ProbeAt::After }));
         var stmts = fn_statements(p, u);

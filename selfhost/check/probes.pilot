@@ -62,8 +62,6 @@ pub enum ProbeArgKind : u8 {
     /// The text of the binding named by the string given with it (in a
     /// PilIR row, its declaring node follows).
     BindingText,
-    /// The value of the engine operation named by the string given with it.
-    Engine,
 }
 
 /// When a probe calls, relative to its node. The codes are shared with

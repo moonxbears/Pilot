@@ -307,6 +307,10 @@ fn known_bug(id: str, component: str, summary: str, expected: str, actual: str, 
 /// Every known bug, ordered by id.
 pub fn bug_registry() -> List<KnownBug> {
     let entries: List<KnownBug> = [
+        known_bug("seed.expr_body_variant_hint", "crates/pilot-vm/src/lower_stmt.rs (function bodies)",
+            "an `=> expr` function body is compiled without the declared return type as the expected type, so a target-typed variant whose name two enums share (`::Shared`, or `::Coalesce` of InheritPolicy and the operator levels) is DECL001 undefined there; `return ::Shared;` and `let s: Shade = ::Shared;` resolve",
+            "prints 1, 1, 1", "DECL001 at the `=>` body on all three engines; crates/pilot-cli/tests/cli_attrs.rs inherited_steps_follow_their_policy fails on it",
+            "tests/conformance/known_bugs/expr_body_variant_hint.pilot", "PROP-015"),
         known_bug("check.collecting_for_in_block", "generator detection (selfhost/check/generators.pilot and the engines that follow it)",
             "a collecting `for` (`yield`) that is the value of a block or of an `if .. else` branch makes the enclosing function a generator instead of a list; `main` then never runs, so the program prints nothing and exits 0",
             "the block's value is the list; prints 0, [10, 20, 30], [2, 3, 4]", "prints nothing and exits 0 on all three engines",

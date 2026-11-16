@@ -38,9 +38,12 @@
 // The type checker plans the calls into this file
 // (selfhost/check/coverage.pilot); the backends make them (probes,
 // crates/pilot-vm/src/lower_probe.rs and selfhost/ir/lower_probe.pilot).
-// Time comes from the clock the plan reads; PilIR and C have no clock yet.
+// Time comes from the monotonic clock (`Clock.now_ns`), read here by the
+// `_timed` entry points.
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Coverage;
+
+use Pilot.Core.Env;
 
 /// What `[Coverage]` measures, joined with `|`.
 pub enum CoverageMode : u32 {
@@ -192,12 +195,15 @@ fn cov_exit(u: str, now: i64) {
 
 /// A call of `u` begins; `size` is the text of its size parameter.
 pub fn coverage_enter(u: str, size: str, kind: str) { cov_enter(u, size, kind, 0); }
-/// `coverage_enter`, at `now` microseconds.
-pub fn coverage_enter_timed(u: str, size: str, kind: str, now: i64) { cov_enter(u, size, kind, now); }
+/// `coverage_enter`, timed: the monotonic clock in microseconds.
+pub fn coverage_enter_timed(u: str, size: str, kind: str) { cov_enter(u, size, kind, cov_now()); }
 /// A call of `u` ends.
 pub fn coverage_exit(u: str) { cov_exit(u, 0); }
-/// `coverage_exit`, at `now` microseconds.
-pub fn coverage_exit_timed(u: str, now: i64) { cov_exit(u, now); }
+/// `coverage_exit`, timed: the monotonic clock in microseconds.
+pub fn coverage_exit_timed(u: str) { cov_exit(u, cov_now()); }
+
+/// The monotonic clock, in microseconds.
+fn cov_now() -> i64 => Clock.now_ns(1) / 1000;
 
 /// Statement `i` of `u` is about to run.
 pub fn coverage_line(u: str, i: str) {
