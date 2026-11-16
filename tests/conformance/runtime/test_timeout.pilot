@@ -1,17 +1,17 @@
 // `pilot test --timeout S`: a case still running S seconds after it started
-// fails as timed out, and the run goes on without waiting for it.
+// fails as timed out and is killed, and the run goes on without waiting.
 //
 // Fixtures in tests/tool_fixtures/test_timeout/ (D below), in path order:
 //   patient (sleeps 12 s, tag `timeout=40`), quick (prints at once),
-//   sleeper (sleeps 60 s), slow_patient (sleeps 12 s, tag `slow`).
+//   sleeper (spins 60 s), slow_patient (sleeps 12 s, tag `slow`).
 // With `--timeout 10`, worked by hand:
 //   - quick passes;
 //   - patient's own limit is 40 s and slow_patient's 4 * 10 = 40 s, so
 //     both finish their 12 s and pass;
-//   - sleeper is still asleep at 10 s: FAIL, `timed out after 10 s`.
+//   - sleeper is still spinning at 10 s: FAIL, `timed out after 10 s`.
 //   So 3 passed, 1 failed, exit 1, and the run ends well before the
 //   sleeper's 60 s: under 40 s.
-// The same on --ir and --emit c (the sleep is in the program, so it lasts
+// The same on --ir and --emit c (the waits are in the programs, so they last
 // as long on every engine).
 // `--timeout x` is not a number: an error, exit 2.
 use std.proc;

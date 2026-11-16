@@ -12,6 +12,7 @@ use Pilot.Core.Lex.Lexicon;
 use Pilot.Core.Lex.Operators;
 use pilot.lex.build;
 use pilot.lex.modes;
+use pilot.lex.cache;
 use pilot.lex;
 use Pilot.Core.File;
 
@@ -38,7 +39,7 @@ fn differences(ref m: ModalLexer, path: str) -> i64 {
 }
 
 fn main() {
-    let built = build_modes(core_modes(operator_tokens(["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "!", "&", "|", "^", "<<", ">>", "..", "..=", "?", "??", "->",], ["?"])));
+    let built = build_modes_cached(core_modes(operator_tokens(["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "!", "&", "|", "^", "<<", ">>", "..", "..=", "?", "??", "->",], ["?"])), LEX_CACHE_DIR);
     print(differences(built.lexer, "stdlib/core/lex/strings.pilot"));
     print(differences(built.lexer, "tests/conformance/lex/fstrings.pilot"));
 }

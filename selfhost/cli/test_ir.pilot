@@ -211,10 +211,15 @@ pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
     var jobs: List<proc.ProcessJob> = [];
     for c in cases { jobs.push(job(c, "run-roundtrip")); }
     var pool = proc.job_pool_at_most(jobs, sel.jobs);
+    test_set_limits(pool, sel, cases);
     loop {
         guard some f = pool.next() else { break; };
         let i = f.index;
-        if stopped_at_seam(f.out) {
+        if f.timed_out {
+            problems[i] = [test_timed_out(sel, cases[i])];
+            outcomes[i] = 1;
+            if sel.fail_fast { break; }
+        } else if stopped_at_seam(f.out) {
             outcomes[i] = 2;
             seams[i] = seam_line(f.out);
         } else {

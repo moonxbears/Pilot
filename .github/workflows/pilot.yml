@@ -44,6 +44,14 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
     - name: Build the seed
       run: cargo build -p pilot-cli
+    # Built lexers (stdlib/pilot/lex/cache.pilot). Each file is named after
+    # its declarations and the builder's sources, so a stale one is never
+    # read; the key only decides which set of files comes back.
+    - name: Restore built lexers
+      uses: actions/cache@v4
+      with:
+        path: target/cache/lex
+        key: lex-${{ hashFiles('stdlib/core/lex/**', 'stdlib/pilot/lex/**') }}
     - name: Run the shard
       shell: bash
       run: |

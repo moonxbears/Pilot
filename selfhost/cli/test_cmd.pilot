@@ -39,6 +39,11 @@
 // * `--fail-fast` starts no more cases after the first failure;
 //   `STOPPED at the first failure: n not run` counts what it skipped.
 // * `--jobs N` runs at most N cases at once (one per CPU by default).
+// * `--timeout S` fails a case still running S seconds after it started
+//   (`timed out after S s`) and goes on without it; 300 by default, 0 for
+//   none. A `slow` case gets 4 times as long, and a `timeout=N` tag sets a
+//   case's own limit. The child is left running: the seed cannot stop it
+//   yet (seam `bridge.proc_signal`).
 pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.File;
@@ -53,8 +58,14 @@ pub pure fn test_known_bugs_dir() -> str => "known_bugs";
 pub pure fn test_attr() -> str => "Test";
 /// The extension of a case's tag file.
 pub const TAGS_EXT: str = ".tags";
-/// The tag of the cases dealt out first by `--shard`.
+/// The tag of the cases dealt out first by `--shard`, and given
+/// `SLOW_FACTOR` times the time limit.
 pub const SLOW_TAG: str = "slow";
+pub const SLOW_FACTOR: i64 = 4;
+/// The prefix of a tag that sets a case's own time limit (`timeout=900`).
+pub const TIMEOUT_TAG: str = "timeout=";
+/// The time limit of a case, in seconds, when `--timeout` is not given.
+pub const DEFAULT_TIMEOUT: i64 = 300;
 
 /// Which cases a `pilot test` run takes, and how it runs them.
 pub struct TestSelect : IObject {
@@ -73,11 +84,13 @@ pub struct TestSelect : IObject {
     pub list:      bool;
     /// At most this many cases at once (0: one per CPU).
     pub jobs:      i64;
+    /// A case's time limit in seconds (0: none); see `test_limit`.
+    pub timeout:   i64;
 }
 
 /// A selection that takes every case and runs it.
 pub fn test_select_all(filter: str) -> TestSelect =>
-    TestSelect { filter: filter, tags: [], skip_tags: [], shard: 0, shards: 0, fail_fast: false, list: false, jobs: 0 };
+    TestSelect { filter: filter, tags: [], skip_tags: [], shard: 0, shards: 0, fail_fast: false, list: false, jobs: 0, timeout: DEFAULT_TIMEOUT };
 
 /// The words of `text` separated by commas, spaces or newlines.
 pub fn test_words(text: str) -> List<str> {
@@ -108,6 +121,26 @@ fn shares_any(ref a: List<str>, ref b: List<str>) -> bool {
     }
     return false;
 }
+
+/// The time limit of `program` in seconds (0: none): its `timeout=N` tag,
+/// else `sel.timeout`, times `SLOW_FACTOR` when it is tagged `slow`.
+pub fn test_limit(ref sel: TestSelect, program: str) -> i64 {
+    let tags = test_tags(program);
+    for t in tags {
+        if t.starts_with(TIMEOUT_TAG) {
+            if some n = text.parse_i64(t.slice(TIMEOUT_TAG.len(), t.len())) { return n; }
+        }
+    }
+    return if test_listed(tags, SLOW_TAG) { sel.timeout * SLOW_FACTOR } else { sel.timeout };
+}
+
+/// Sets each job of `pool`, the job of `programs[i]`, to its time limit.
+pub fn test_set_limits(var ref pool: proc.JobPool, ref sel: TestSelect, ref programs: List<str>) {
+    for i in 0 .. programs.len() { pool.set_limit(i, test_limit(sel, programs[i])); }
+}
+
+/// The problem of a case stopped at its time limit.
+pub fn test_timed_out(ref sel: TestSelect, program: str) -> str => f"timed out after {test_limit(sel, program)} s";
 
 /// What is wrong with `sel`, or "" when nothing is.
 pub fn test_select_problem(ref sel: TestSelect) -> str {
@@ -322,7 +355,7 @@ pub struct CaseRuns : IObject {
 
 /// Runs the conformance cases `programs` (a `proc.JobPool`), judging each
 /// as it finishes; with `fail_fast`, starts no more after the first failure.
-pub fn test_run_cases(ref programs: List<str>, fail_fast: bool, most: i64) -> CaseRuns {
+pub fn test_run_cases(ref programs: List<str>, ref sel: TestSelect, fail_fast: bool) -> CaseRuns {
     var jobs: List<proc.ProcessJob> = [];
     var results: List<TestResult> = [];
     var ran: List<bool> = [];
@@ -331,11 +364,13 @@ pub fn test_run_cases(ref programs: List<str>, fail_fast: bool, most: i64) -> Ca
         results.push(TestResult { name: program, problems: [] });
         ran.push(false);
     }
-    var pool = proc.job_pool_at_most(jobs, most);
+    var pool = proc.job_pool_at_most(jobs, sel.jobs);
+    test_set_limits(pool, sel, programs);
     var stopped = false;
     loop {
         guard some f = pool.next() else { break; };
-        let r = test_check_case(programs[f.index], f.out);
+        let program = programs[f.index];
+        let r = if f.timed_out { TestResult { name: program, problems: [test_timed_out(sel, program)] } } else { test_check_case(program, f.out) };
         results[f.index] = r;
         ran[f.index] = true;
         if fail_fast && r.problems.len > 0 {
@@ -405,7 +440,7 @@ pub fn test_programs(ref programs: List<str>, ref sel: TestSelect, var ref tally
     for program in programs {
         if is_case(program) { cases.push(program); }
     }
-    let runs = test_run_cases(cases, sel.fail_fast, sel.jobs);
+    let runs = test_run_cases(cases, sel, sel.fail_fast);
     var stopped = runs.stopped;
     var next_case = 0;
     for program in programs {
@@ -426,8 +461,8 @@ pub fn test_programs(ref programs: List<str>, ref sel: TestSelect, var ref tally
 }
 
 /// Runs the known-bug programs `programs`; each must still fail.
-pub fn test_known_bug_programs(ref programs: List<str>, var ref tally: TestTally) {
-    for r in test_run_cases(programs, false, 0).results {
+pub fn test_known_bug_programs(ref programs: List<str>, ref sel: TestSelect, var ref tally: TestTally) {
+    for r in test_run_cases(programs, sel, false).results {
         if r.problems.len == 0 {
             tally.bugs_fixed = tally.bugs_fixed + 1;
             print(f"FIXED {r.name}: the bug it reproduces is gone; move it up into the corpus, delete its `bug_registry()` entry and undo every [Workaround] naming it");
@@ -485,7 +520,7 @@ pub fn test_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
     if stopped {
         tally.not_run = tally.not_run + picked_bugs.len();
     } else if picked_bugs.len() > 0 {
-        test_known_bug_programs(picked_bugs, tally);
+        test_known_bug_programs(picked_bugs, sel, tally);
     }
     test_report_stopped(tally.not_run);
     print(f"RESULT: {tally.passed} passed, {tally.failed} failed, {tally.bugs_reproduced} known bugs reproduced, {tally.bugs_fixed} known bugs fixed");

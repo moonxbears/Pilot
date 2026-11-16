@@ -218,6 +218,13 @@ pub struct ProcessHandle : IObject {
         return .stdout_fd >= 0 || .stderr_fd >= 0;
     }
 
+    /// Stops the process at once (SIGKILL; `TerminateProcess` on Windows).
+    /// It still has to be waited for. Returns 0, or a negative error code.
+    pub fn kill() -> i64 {
+        if .exited == true { return 0; }
+        return Process.send_signal(0, .id, 9);
+    }
+
     /// Waits for the process to finish and returns what it left. Each
     /// handle is waited for once.
     pub fn wait() -> ProcessOutput {
@@ -390,14 +397,16 @@ pub struct JobPool : IObject {
     }
 
     /// Hands back the running job due at `due` as timed out. Its output so
-    /// far is kept and its pipes closed; the child itself is left running,
-    /// because the seed cannot stop it yet (seam `bridge.proc_signal`).
+    /// far is kept; its pipes are closed (a process it started may still
+    /// hold them), and the child is killed and waited for.
     fn time_out(var ref self, due: i64) -> Finished? {
         var k = 0;
         while .due[k] != due { k = k + 1; }
         .running[k].drain(0);
-        if .running[k].stdout_fd >= 0 { Fd.close(.running[k].stdout_fd); }
-        if .running[k].stderr_fd >= 0 { Fd.close(.running[k].stderr_fd); }
+        if .running[k].stdout_fd >= 0 { Fd.close(.running[k].stdout_fd); .running[k].stdout_fd = -1; }
+        if .running[k].stderr_fd >= 0 { Fd.close(.running[k].stderr_fd); .running[k].stderr_fd = -1; }
+        let _ = .running[k].kill();
+        let _ = .running[k].wait();
         let out = ProcessOutput { exit_code: -1, stdout: .running[k].stdout_text, stderr: .running[k].stderr_text };
         let slot = .slots[k];
         .forget(k);
@@ -412,7 +421,7 @@ pub struct JobPool : IObject {
     }
 
     /// Starts no more jobs and waits for those running, dropping what they
-    /// leave: the seed cannot stop a child yet (seam `bridge.proc_signal`).
+    /// leave.
     pub fn finish(var ref self) {
         .started = .jobs.len();
         while .running.len() > 0 {

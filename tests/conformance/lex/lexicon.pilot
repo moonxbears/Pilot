@@ -11,9 +11,10 @@
 //   fn name ( ) { let name = integer ; } line_comment
 use Pilot.Core.Lex.Lexicon;
 use pilot.lex.build;
+use pilot.lex.cache;
 
 fn main() {
-    let built = build_table(core_tokens());
+    let built = build_table_cached(core_tokens(), LEX_CACHE_DIR);
     print(built.ok());
     print(built.table.names.len());
     let src = "fn main() { let x = 0xFF; } // done";

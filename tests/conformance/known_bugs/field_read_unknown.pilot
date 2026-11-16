@@ -1,0 +1,16 @@
+// KNOWN BUG check.field_read_unknown: reading a field a struct does not
+// declare is refused when the program is built, as an unknown enum variant
+// is (METH001, errors/err_enum_unknown_variant). `S` declares only `a`, so
+// `s.b` is an error and nothing prints; the run exits 1 like every check
+// failure. Today `pilot check` passes and the seed reads `s.b` as none,
+// printing "vnull" and "after": the rename litmus met this when
+// `f"v{inst.result}"` kept a field name the renamer had changed elsewhere.
+struct S : IValue {
+    pub a: i64;
+}
+
+fn main() {
+    let s = S { a: 1 };
+    println(f"v{s.b}");
+    println("after");
+}

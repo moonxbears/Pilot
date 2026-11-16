@@ -1,0 +1,354 @@
+// ==============================================================================
+// FILE: stdlib/pilot/lex/cache.pilot
+// Ring 3: built lexers kept on disk (pub pkg pilot.lex.cache;)
+// ==============================================================================
+// Building a lexer (patterns -> NFA -> DFA -> minimized tables, `build_modes`)
+// takes about 2.4 s on the seed and several minutes on the PilIR
+// interpreter, and gives the same tables every time for the same token
+// declarations. `build_modes_cached` keeps what it built in a directory
+// (`target/cache/lex` by convention) and reads it back the next time:
+//   - the key is the declarations themselves, written out as text (each
+//     mode's name, and per token its name, priority, start condition, role,
+//     mode change and pattern ops), plus the hash of the builder's own
+//     sources (`BUILDER_SOURCES`), so a change to any declaration or to the
+//     builder is a different key and a stale lexer is never read. When the
+//     builder's sources are not found from the working directory (a program
+//     run outside the toolchain's tree), nothing is cached;
+//   - the file is named after the key's 64-bit FNV-1a hash
+//     (`core.derive.string_hash`) and holds the whole key, so two keys with
+//     the same hash never share a file's tables;
+//   - a file is written under a name of its own and then renamed into
+//     place (`File.rename`), so a reader never sees half of one, even when
+//     several programs build the same lexer at once;
+//   - a lexer whose build reported errors is not kept, and a file that does
+//     not read back is built again.
+pub pkg pilot.lex.cache;
+
+use Pilot.Core.File;
+use Pilot.Core.Lex.Patterns;
+use core.derive;
+use std.text;
+use pilot.lex.build;
+use pilot.lex.modes;
+
+/// The first line of a cache file; a file with another is built again.
+pub const CACHE_FORMAT: str = "pilot-lex-cache 1";
+/// Where programs of this toolchain keep built lexers.
+pub const LEX_CACHE_DIR: str = "target/cache/lex";
+
+/// The files whose code decides what a built lexer holds.
+const BUILDER_SOURCES: List<str> = ["stdlib/pilot/lex/build.pilot", "stdlib/pilot/lex/modes.pilot", "stdlib/pilot/lex/cache.pilot",];
+
+/// The line of a key that names the builder: the hash of its sources, or ""
+/// when one of them is not found.
+fn builder_line() -> str {
+    var b = text.string_builder_new();
+    for f in BUILDER_SOURCES {
+        if !File.exists(f) { return ""; }
+        b.append(File.read_text(f));
+    }
+    return f"builder {hex64(string_hash(b.to_string()))}\n";
+}
+
+/// The token roles and start conditions in a fixed order, read and written
+/// by position.
+const ROLES: List<TokenRole> = [TokenRole::Plain, TokenRole::Operand, TokenRole::Space, TokenRole::Trivia,];
+const WHENS: List<TokenWhen> = [TokenWhen::Always, TokenWhen::Spaced, TokenWhen::Glued, TokenWhen::AtStart,];
+const PAT_KINDS: List<PatKind> = [PatKind::Bytes, PatKind::Seq, PatKind::Alt, PatKind::Opt, PatKind::Many,];
+
+fn role_index(r: TokenRole) -> i64 {
+    for i in 0 .. ROLES.len() {
+        if ROLES[i] == r { return i; }
+    }
+    return -1;
+}
+
+fn when_index(w: TokenWhen) -> i64 {
+    for i in 0 .. WHENS.len() {
+        if WHENS[i] == w { return i; }
+    }
+    return -1;
+}
+
+fn kind_index(k: PatKind) -> i64 {
+    for i in 0 .. PAT_KINDS.len() {
+        if PAT_KINDS[i] == k { return i; }
+    }
+    return -1;
+}
+
+/// A name written as one word: `=` then the name, so an empty one is `=`.
+fn word(name: str) -> str => "=" + name;
+
+/// Whether `name` can be written as one word (no space or line break).
+fn plain(name: str) -> bool {
+    for i in 0 .. name.len() {
+        let b = name.byte_at(i) as i64;
+        if b == 32 || b == 10 || b == 13 || b == 9 { return false; }
+    }
+    return true;
+}
+
+/// The declarations of `modes` and the builder as text, or "" when a name
+/// cannot be written as one word or the builder's sources are not found
+/// (such a lexer is not kept).
+pub fn modes_key(ref modes: List<LexMode>) -> str {
+    let builder = builder_line();
+    if builder == "" { return ""; }
+    var b = text.string_builder_new();
+    b.append(builder);
+    for m in modes {
+        if !plain(m.name) { return ""; }
+        b.append(f"mode {word(m.name)}\n");
+        for t in m.tokens {
+            if !plain(t.name) || !plain(t.enters) { return ""; }
+            b.append(f"tok {word(t.name)} {t.priority} {when_index(t.when)} {role_index(t.role)} {word(t.enters)} {if t.leaves { 1 } else { 0 }}");
+            for o in t.pattern.ops {
+                b.append(f" {kind_index(o.kind)} {o.lo} {o.hi} {o.n}");
+            }
+            b.append("\n");
+        }
+    }
+    return b.to_string();
+}
+
+/// `h` as 16 lowercase hex digits.
+pub fn hex64(h: u64) -> str {
+    let digits = "0123456789abcdef";
+    var out = "";
+    var v = h;
+    for i in 0 .. 16 {
+        out = digits.slice((v % 16) as i64, (v % 16) as i64 + 1) + out;
+        v = v / 16;
+    }
+    return out;
+}
+
+/// The cache file in `dir` for the declarations `key`.
+pub fn cache_file(dir: str, key: str) -> str => f"{dir}/{hex64(string_hash(key))}.lex";
+
+/// `label`, the count of `xs`, then `xs`, as one line.
+fn ints_line(label: str, ref xs: List<i64>) -> str {
+    var b = text.string_builder_new();
+    b.append(f"{label} {xs.len()}");
+    for x in xs { b.append(f" {x}"); }
+    b.append("\n");
+    return b.to_string();
+}
+
+fn words_line(label: str, ref xs: List<str>) -> str {
+    var b = text.string_builder_new();
+    b.append(f"{label} {xs.len()}");
+    for x in xs { b.append(" " + word(x)); }
+    b.append("\n");
+    return b.to_string();
+}
+
+/// `m`, built from the declarations `key`, as the text of a cache file.
+pub fn lexer_text(ref m: ModalLexer, key: str) -> str {
+    var b = text.string_builder_new();
+    b.append(CACHE_FORMAT + "\n");
+    b.append(f"key {key.len()}\n");
+    b.append(key);
+    b.append(words_line("modes", m.modes));
+    b.append(ints_line("bases", m.bases));
+    b.append(ints_line("mode_of", m.mode_of));
+    for i in 0 .. m.tables.len() {
+        b.append(ints_line("enters", m.enters[i]));
+        let t = m.tables[i];
+        b.append(words_line("names", t.names));
+        b.append(ints_line("class_of", t.class_of));
+        b.append(f"size {t.classes} {t.states}\n");
+        b.append(ints_line("starts", t.starts));
+        b.append(ints_line("next", t.next));
+        b.append(ints_line("accept", t.accept));
+        var acts: List<i64> = [];
+        var goes: List<str> = [];
+        for a in t.actions {
+            acts.push(role_index(a.role));
+            acts.push(if a.leaves { 1 } else { 0 });
+            goes.push(a.enters);
+        }
+        b.append(ints_line("actions", acts));
+        b.append(words_line("enters_mode", goes));
+    }
+    return b.to_string();
+}
+
+/// Reads the words and numbers of a cache file in order. A read past the
+/// end or of the wrong kind marks the reader `bad`.
+struct Reader : IObject {
+    src: str;
+    at: i64;
+    bad: bool;
+
+    fn skip_space(var ref self) {
+        while .at < .src.len() && (.src.byte_at(.at) as i64 == 32 || .src.byte_at(.at) as i64 == 10) { .at = .at + 1; }
+    }
+
+    fn next_word(var ref self) -> str {
+        .skip_space();
+        let from = .at;
+        while .at < .src.len() && .src.byte_at(.at) as i64 != 32 && .src.byte_at(.at) as i64 != 10 { .at = .at + 1; }
+        if .at == from { .bad = true; }
+        return .src.slice(from, .at);
+    }
+
+    fn int(var ref self) -> i64 {
+        .skip_space();
+        var neg = false;
+        if .at < .src.len() && .src.byte_at(.at) as i64 == 45 {
+            neg = true;
+            .at = .at + 1;
+        }
+        let from = .at;
+        var v = 0;
+        while .at < .src.len() {
+            let d = .src.byte_at(.at) as i64 - 48;
+            if d < 0 || d > 9 { break; }
+            v = v * 10 + d;
+            .at = .at + 1;
+        }
+        if .at == from { .bad = true; }
+        return if neg { 0 - v } else { v };
+    }
+
+    /// A name written by `word`.
+    fn name(var ref self) -> str {
+        let w = .next_word();
+        if w.len() == 0 || w.byte_at(0) as i64 != 61 {
+            .bad = true;
+            return "";
+        }
+        return w.slice(1, w.len());
+    }
+
+    fn expect(var ref self, label: str) {
+        if .next_word() != label { .bad = true; }
+    }
+
+    fn ints(var ref self, label: str) -> List<i64> {
+        .expect(label);
+        let n = .int();
+        var out: List<i64> = [];
+        var i = 0;
+        while i < n && !self.bad {
+            out.push(.int());
+            i = i + 1;
+        }
+        return out;
+    }
+
+    fn names(var ref self, label: str) -> List<str> {
+        .expect(label);
+        let n = .int();
+        var out: List<str> = [];
+        var i = 0;
+        while i < n && !self.bad {
+            out.push(.name());
+            i = i + 1;
+        }
+        return out;
+    }
+}
+
+/// The lexer in the cache file text `src`, when it holds one built from
+/// exactly the declarations `key`.
+pub fn read_lexer(src: str, key: str) -> ModalLexer? {
+    let first = CACHE_FORMAT + "\n";
+    if !src.starts_with(first) { return none; }
+    var r = Reader { src: src, at: first.len(), bad: false };
+    r.expect("key");
+    let n = r.int();
+    let from = r.at + 1;
+    if r.bad || from + n > src.len() || src.slice(from, from + n) != key { return none; }
+    r.at = from + n;
+    let modes = r.names("modes");
+    let bases = r.ints("bases");
+    let mode_of = r.ints("mode_of");
+    var tables: List<LexTable> = [];
+    var enters: List<List<i64>> = [];
+    var i = 0;
+    while i < modes.len() && !r.bad {
+        enters.push(r.ints("enters"));
+        let names = r.names("names");
+        let class_of = r.ints("class_of");
+        r.expect("size");
+        let classes = r.int();
+        let states = r.int();
+        let starts = r.ints("starts");
+        let next = r.ints("next");
+        let accept = r.ints("accept");
+        let acts = r.ints("actions");
+        let goes = r.names("enters_mode");
+        var actions: List<TokenAction> = [];
+        var k = 0;
+        while k < goes.len() && 2 * k + 1 < acts.len() {
+            let role = acts[2 * k];
+            if role < 0 || role >= ROLES.len() { return none; }
+            actions.push(TokenAction { role: ROLES[role], enters: goes[k], leaves: acts[2 * k + 1] == 1 });
+            k = k + 1;
+        }
+        if actions.len() != names.len() { return none; }
+        tables.push(LexTable { names: names, class_of: class_of, classes: classes, states: states, starts: starts, next: next, accept: accept, actions: actions });
+        i = i + 1;
+    }
+    if r.bad { return none; }
+    return ModalLexer { modes: modes, tables: tables, enters: enters, bases: bases, mode_of: mode_of };
+}
+
+/// Writes `m`, built from `key`, to `path`: under a name of its own first,
+/// then moved into place, so a reader never sees half a file.
+fn keep(path: str, ref m: ModalLexer, key: str) {
+    let mine = f"{path}.{Process.send_signal(2, 0, 0)}.tmp";
+    if File.write_text(mine, lexer_text(m, key)) {
+        if !File.rename(mine, path) { File.write_text(mine, ""); }
+    }
+}
+
+/// `build_modes(modes)`, read from `dir` when it was built there before
+/// from the same declarations, and kept there when it is built now without
+/// errors. The same lexer either way.
+pub fn build_modes_cached(ref modes: List<LexMode>, dir: str) -> ModalBuild {
+    let key = modes_key(modes);
+    if key == "" { return build_modes(modes); }
+    let path = cache_file(dir, key);
+    if File.exists(path) {
+        if some m = read_lexer(File.read_text(path), key) {
+            return ModalBuild { lexer: m, errors: [] };
+        }
+    }
+    let built = build_modes(modes);
+    if built.ok() { keep(path, built.lexer, key); }
+    return built;
+}
+
+/// The mode name a single table is kept under; `*` starts no declared
+/// mode's name, so its key never meets a lexer's.
+const TABLE_MODE: str = "*table";
+
+/// `build_table(decls)`, read from and kept in `dir` like
+/// `build_modes_cached`: one table, kept as a lexer of one mode.
+pub fn build_table_cached(ref decls: List<TokenDecl>, dir: str) -> LexBuild {
+    var one: List<LexMode> = [lex_mode(TABLE_MODE, decls)];
+    let key = modes_key(one);
+    if key == "" { return build_table(decls); }
+    let path = cache_file(dir, key);
+    if File.exists(path) {
+        if some m = read_lexer(File.read_text(path), key) {
+            return LexBuild { table: m.tables[0], errors: [] };
+        }
+    }
+    let built = build_table(decls);
+    if built.ok() {
+        var entered: List<i64> = [];
+        var owner: List<i64> = [];
+        for d in decls {
+            entered.push(-1);
+            owner.push(0);
+        }
+        let m = ModalLexer { modes: [TABLE_MODE], tables: [built.table], enters: [entered], bases: [0], mode_of: owner };
+        keep(path, m, key);
+    }
+    return built;
+}

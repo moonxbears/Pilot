@@ -2599,6 +2599,7 @@ So the guide is followed where the Rust parser depends on it, and not copied whe
   - LEX007 has no test (it needs a 4 GiB source or 16,384 families);
   - `--live-allocations` does not count `RawMem` blocks, so there is no leak test for `PackedBuffer`. The C runtime (`runtime/c/pilot_rt_bridge.h`) would need to count them;
   - `fmt_tokenize` and `repl_tokenize` still have their own tokenizers.
+- **Built lexers are cached (2026-11-16, owner: "Yes, A1 then A3").** `stdlib/pilot/lex/cache.pilot`: `build_modes_cached` / `build_table_cached` keep a built lexer in `target/cache/lex`, keyed by the declarations and the hash of the builder's sources, the whole key stored in the file. The slow lex cases and `pilot lex` use it. Test: `lex/lex_cache` on all three engines.
 
 ### 6. Decided
 
@@ -2855,6 +2856,39 @@ Steps 1–3 are Pilot only and need no Rust change. Step 4's Rust deletions are 
 - `seed.struct_range_index` passes on all three. It moved to `operators/struct_range_index` (with the `Span` import added) and its `bug_registry` entry is deleted.
 
 ---
+
+## `PROP-028` — Fill the `bridge.proc_signal` Seam's `signal_handle` Sub-Op, So `pilot test --timeout` Can Stop a Hung Case
+
+**Status: APPROVED 2026-11-16 (owner: "Approve PROP-028"); BUILT 2026-11-16.** Owner request 2026-11-16: "Yes, A1 then A3" (A1: a hung case must fail).
+
+**As built 2026-11-16:** `crates/pilot-vm/src/bridge.rs` `34 =>` gained `0 if i_at(2) == 9` (`Child::kill`, `-11` for an unknown handle), net `+4` lines; the seam now names `signal_pid` and signals other than 9. In Pilot: `ProcessHandle.kill()` (`stdlib/std/proc.pilot`), and `JobPool.time_out` closes the pipes, kills and waits. `runtime/proc_job_timeout` gained the spinning job (`spinner: gone`); `test_timeout`'s sleeper spins. Both pass on `pilot test`, `--ir` and `--emit c` (39–40 s each run), and no fixture process is left afterwards.
+
+### 1. What exists today (run 2026-11-16)
+
+- **`pilot test --timeout S` is built in Pilot.** `stdlib/std/proc.pilot` `JobPool` gives each job a limit (`set_limit`), and a job still running past it is handed back as timed out. The runners report it as `FAIL … timed out after S s` and go on. Tests: `tests/conformance/runtime/{proc_job_timeout,test_timeout}` pass on `pilot test`, `--ir` and `--emit c`.
+- **The hung child keeps running.** HostOp 34 `ProcSignal` (frozen sub-ops `0=signal_handle, 1=signal_pid, 2=self_pid, 3=exit`, §3 table) answers only `2` and `3` in the seed VM. Every other sub-op stops at seam `bridge.proc_signal` (`crates/pilot-vm/src/bridge.rs`, the `34 =>` arm). The runner itself runs on the seed VM, so `JobPool` cannot call `Process.send_signal(0, handle, 9)`: the call would trap. The emitted-C runtime already implements it (`runtime/c/pilot_rt_bridge.h`, `case 34`: `kill(a1, a2)`).
+- So a case that loops forever is reported as failed but goes on using a CPU until the machine stops it. For a sleeping case this costs nothing; for a spinning one it costs a core until it ends.
+
+### 2. Design
+
+- **Sub-op `0` (`signal_handle`) with signal 9** kills the child the handle names: `vm.bridge.procs.get_mut(&h)` then `Child::kill()`. That is SIGKILL on Unix and `TerminateProcess` on Windows. The handle stays in the table, so the caller's `Process.wait` reaps it as usual.
+- **Any other signal, and sub-op `1` (`signal_pid`),** stay at the seam: nothing needs them yet, and `std::process` has no portable way to send them.
+- **No ABI change:** the op, its sub-op numbers and its signature are already frozen; this fills one of them (Model B+, append-only meaning unchanged). A handle that does not exist returns `-11` (`-E_BADF`), as op 33 does.
+- **Then, in Pilot (no approval needed):** `JobPool.time_out` calls `Process.send_signal(0, id, 9)` and waits for the child, and the `test_timeout` fixture's sleeper can spin instead of sleep.
+
+### 3. Rust (needs approval). Strictly this file:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-vm/src/bridge.rs` | The `34 =>` arm: `0 if i_at(2) == 9 =>` kill the child named by handle `i_at(1)` (`Child::kill`), `-11` for an unknown handle; the seam message names what is still missing (`signal_pid`, other signals). |
+
+**Estimate:** about `+6` lines. To hold the Rust total flat (`paused_max_total_rust_loc()`), the slice deletes as many lines elsewhere in the seed or records the `+6` against the ceiling with the owner's say.
+
+### 4. Acceptance
+
+- `tests/conformance/runtime/proc_job_timeout.pilot` gains a job that spins (`while true {}` in `sh`) with a 2 s limit: it is timed out, and afterwards `kill -0 <pid>` reports it gone.
+- `runtime/test_timeout`'s sleeper spins, and the run still ends under 40 s.
+- `cargo test -p pilot-vm`, `cargo fmt --check`, and every conformance program on the three engines pass unchanged.
 
 ## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
 

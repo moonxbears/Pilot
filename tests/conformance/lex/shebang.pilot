@@ -7,6 +7,7 @@
 //   "x #!y"             name:x, then directive:#!y
 use Pilot.Core.Lex.Lexicon;
 use pilot.lex.build;
+use pilot.lex.cache;
 
 fn show(ref t: LexTable, src: str) {
     for l in lex_all(t, src) {
@@ -18,7 +19,7 @@ fn show(ref t: LexTable, src: str) {
 }
 
 fn main() {
-    let built = build_table(core_tokens());
+    let built = build_table_cached(core_tokens(), LEX_CACHE_DIR);
     print(built.ok());
     show(built.table, "#!/bin/pilot\nx");
     show(built.table, "x #!y");

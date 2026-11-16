@@ -130,10 +130,85 @@ pure fn rl_literal_end(src: str, closer: str, from: i64) -> i64 {
     return n;
 }
 
+/// An f-string with its holes renamed, and the place just after it.
+struct RlPiece : IValue {
+    pub text: str;
+    pub end: i64;
+}
+
+/// Whether the quote at `at` opens an f-string: an `f` right before it that
+/// is not the end of a longer name.
+pure fn rl_is_fstring(src: str, at: i64) -> bool {
+    if at < 1 || src.byte_at(at - 1) != 102 { return false; }
+    return at == 1 || !sa_is_id_char(src.byte_at(at - 2));
+}
+
+/// The f-string whose quote opens at `open`, with the names in its `{...}`
+/// holes renamed (a hole is Pilot code; `{{` is text), and where it ends.
+pure fn rl_fstring(src: str, open: i64, rmap: i64) -> RlPiece {
+    let n = src.len();
+    let q = src.byte_at(open);
+    var out: List<str> = [];
+    var start = open;
+    var p = open + 1;
+    var closed = false;
+    while p < n && !closed {
+        let b = src.byte_at(p);
+        if b == 92 {
+            p = p + 2;
+        } else if b == q {
+            p = p + 1;
+            closed = true;
+        } else if b == 123 && p + 1 < n && src.byte_at(p + 1) == 123 {
+            p = p + 2;
+        } else if b == 123 {
+            let end = rl_hole_end(src, p + 1, rmap);
+            out.push(src.slice(start, p + 1) + rl_rename_pilot_identifiers(src.slice(p + 1, end), rmap));
+            start = end;
+            p = end;
+        } else {
+            p = p + 1;
+        }
+    }
+    if p > n { p = n; }
+    out.push(src.slice(start, p));
+    return RlPiece { text: text.join_text(out, ""), end: p };
+}
+
+/// Where the f-string hole whose code starts at `from` ends: at its closing
+/// `}`, braces counted and literals (nested f-strings too) skipped; or the
+/// end of `src`.
+pure fn rl_hole_end(src: str, from: i64, rmap: i64) -> i64 {
+    let n = src.len();
+    var depth = 0;
+    var p = from;
+    while p < n {
+        let b = src.byte_at(p);
+        if (b == 34 || b == 39) && rl_is_fstring(src, p) {
+            p = rl_fstring(src, p, rmap).end;
+        } else if b == 34 {
+            p = rl_literal_end(src, "\"", p + 1);
+        } else if b == 39 {
+            p = rl_literal_end(src, "'", p + 1);
+        } else if b == 123 {
+            depth = depth + 1;
+            p = p + 1;
+        } else if b == 125 {
+            if depth == 0 { return p; }
+            depth = depth - 1;
+            p = p + 1;
+        } else {
+            p = p + 1;
+        }
+    }
+    return n;
+}
+
 // Lexer-aware whole-identifier alpha-renamer (preserves comments & string
-// literals). It jumps from one comment, literal or name to be renamed to the
-// next with `gm_find`, so the bytes between them are never read one by one:
-// this runs over the whole stdlib, toolchain and corpus in each pass.
+// literals, but renames inside f-string holes, which are code). It jumps
+// from one comment, literal or name to be renamed to the next with
+// `gm_find`, so the bytes between them are never read one by one: this runs
+// over the whole stdlib, toolchain and corpus in each pass.
 pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
     let n = src.len();
     let key_count = (__engine("map_get", rmap, "#n") ?? 0) + 0;
@@ -181,6 +256,11 @@ pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
         }
         if what == -1 {
             break;
+        } else if (what == -2 || what == -3) && rl_is_fstring(src, first) {
+            let piece = rl_fstring(src, first, rmap);
+            out.push(src.slice(chunk_start, first) + piece.text);
+            pos = piece.end;
+            chunk_start = pos;
         } else if what == -2 {
             pos = rl_literal_end(src, "\"", first + 1);
         } else if what == -3 {
@@ -212,8 +292,10 @@ fn rl_conformance_dir() -> str => "tests/conformance";
 /// processes or read (`runtime/proc_large_output` runs
 /// `tests/tool_fixtures/proc`; `runtime/check_fix_borrows` fixes a copy of
 /// `tests/tool_fixtures/check_fix`; `lex/cli_lex` lexes
-/// `tests/tool_fixtures/lex`).
-fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir(), "tests/tool_fixtures/proc", "tests/tool_fixtures/check_fix", "tests/tool_fixtures/lex"];
+/// `tests/tool_fixtures/lex`; `runtime/test_select` and
+/// `runtime/test_timeout` run `pilot test` over
+/// `tests/tool_fixtures/test_select` and `tests/tool_fixtures/test_timeout`).
+fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir(), "tests/tool_fixtures/proc", "tests/tool_fixtures/check_fix", "tests/tool_fixtures/lex", "tests/tool_fixtures/test_select", "tests/tool_fixtures/test_timeout"];
 
 /// What `pilot test` printed and returned in the sandbox.
 pub struct LitmusRun : IValue {

@@ -19,6 +19,7 @@ use Pilot.Core.Lex.Lexicon;
 use Pilot.Core.Lex.Operators;
 use pilot.lex.build;
 use pilot.lex.modes;
+use pilot.lex.cache;
 use pilot.lex;
 
 fn ctx_name(c: LexContextKind) -> str {
@@ -29,7 +30,7 @@ fn ctx_name(c: LexContextKind) -> str {
 }
 
 fn main() {
-    let built = build_modes(core_modes(operator_tokens([], [])));
+    let built = build_modes_cached(core_modes(operator_tokens([], [])), LEX_CACHE_DIR);
     let src = "fn f(a) {a.b}";
     let tb = build_tape(built.lexer, src);
     print(tb.ok());

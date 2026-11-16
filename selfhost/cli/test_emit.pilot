@@ -333,7 +333,7 @@ pub fn test_emit_command(langs: str, ref paths: List<str>, ref sel: TestSelect, 
     var k = 0;
     while k < rs.len() {
         let tally = EmitTally { passed: 0, failed: 0, at_seam: 0, not_eligible: not_eligible, not_run: 0 };
-        run_emitted(rs[k], cases, emitted[k], dirs[k], live && rs[k].lang == "c", sel.fail_fast, sel.jobs, tally);
+        run_emitted(rs[k], cases, emitted[k], dirs[k], live && rs[k].lang == "c", sel, tally);
         test_report_stopped(tally.not_run);
         print(f"RESULT (emit {rs[k].lang}): {tally.passed} passed, {tally.failed} failed, {tally.at_seam} stopped at a seam, {tally.not_eligible} not eligible");
         failed = failed + tally.failed;
@@ -347,7 +347,8 @@ pub fn test_emit_command(langs: str, ref paths: List<str>, ref sel: TestSelect, 
 /// With `fail_fast`, a failure in one phase (emitting, building, running)
 /// leaves the cases of the later phases unrun (`tally.not_run`), and a
 /// failed run starts no more runs.
-fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitted>, dir: str, live: bool, fail_fast: bool, most: i64, var ref tally: EmitTally) {
+fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitted>, dir: str, live: bool, ref sel: TestSelect, var ref tally: EmitTally) {
+    let fail_fast = sel.fail_fast;
     var compile: List<str> = [];
     for a in r.compile {
         compile.push(a);
@@ -430,12 +431,15 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
         judged.push(false);
         found.push([]);
     }
-    var pool = proc.job_pool_at_most(runs, most);
+    var pool = proc.job_pool_at_most(runs, sel.jobs);
+    var run_cases: List<str> = [];
+    for k in runnable { run_cases.push(built[k]); }
+    test_set_limits(pool, sel, run_cases);
     loop {
         guard some f = pool.next() else { break; };
         let k = runnable[f.index];
-        var problems = check_emitted(built[k], built_stderr[k], f.out);
-        if live {
+        var problems = if f.timed_out { [test_timed_out(sel, built[k])] } else { check_emitted(built[k], built_stderr[k], f.out) };
+        if live && !f.timed_out {
             if some n = live_count(f.out.stderr) {
                 if n != "0" { problems.push(f"{n} heap objects still allocated at the end"); }
             }

@@ -216,6 +216,14 @@ pub fn cmd_test(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
         };
         sel.jobs = n;
     }
+    let limit = parsed_get_str(p, "timeout", "");
+    if limit != "" {
+        guard some n = text.parse_i64(limit) else {
+            eprint(f"error: `--timeout {limit}`: expected a whole number of seconds");
+            return 2;
+        };
+        sel.timeout = n;
+    }
     let shard = parsed_get_str(p, "shard", "");
     if shard != "" && !test_parse_shard(shard, sel) {
         eprint(f"error: `--shard {shard}`: expected K/N, two whole numbers");
@@ -457,6 +465,7 @@ fn cli_lex_files() -> List<str> {
         "stdlib/core/lex/trivia.pilot", "stdlib/core/lex/strings.pilot", "stdlib/core/lex/delimiters.pilot",
         "stdlib/core/lex/operators.pilot", "stdlib/core/lex/lexicon.pilot", "stdlib/pilot/lex/modes.pilot",
         "stdlib/core/packed.pilot", "stdlib/pilot/lex.pilot",
+        "stdlib/core/env.pilot", "stdlib/core/derive.pilot", "stdlib/std/text.pilot", "stdlib/pilot/lex/cache.pilot",
         "selfhost/lex/lex_tool.pilot",
     ] { files.push(f); }
     return files;

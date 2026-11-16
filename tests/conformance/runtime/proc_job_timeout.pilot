@@ -1,10 +1,15 @@
 // A JobPool job given a time limit that is still running when it passes is
-// handed back as timed out (exit -1), without waiting for it.
+// handed back as timed out (exit -1), and the child is stopped (PROP-028).
 //
-// Jobs (sh -c): 0 `printf a` (no limit), 1 `printf b; sleep 30` (limit 2 s).
+// Jobs (sh -c): 0 `printf a` (no limit), 1 `printf b; sleep 30` (limit 2 s),
+// 2 prints its own pid and then `exec`s a busy loop, so the spinning process
+// is the child itself (limit 2 s).
 // Worked by hand: job 0 finishes at once, not timed out, exit 0, out `a`.
 // Job 1 has written `b` and is asleep at 2 s: timed out, exit -1, out `b`.
-// Both are handed back well before job 1's 30 s: under 20 s.
+// Job 2 is still spinning at 2 s: timed out, exit -1. Once it is handed
+// back it has been killed and reaped, so `kill -0 <pid>` fails: "gone" (a
+// child left running, or killed but not reaped, would answer "alive").
+// Everything is handed back well before job 1's 30 s: under 20 s.
 use std.proc;
 
 fn main() {
@@ -12,13 +17,23 @@ fn main() {
     var pool = proc.job_pool([
         proc.job("sh", ["-c", "printf a"], ""),
         proc.job("sh", ["-c", "printf b; sleep 30"], ""),
+        proc.job("sh", ["-c", "printf $$; exec sh -c 'while :; do :; done'"], ""),
     ]);
     pool.set_limit(1, 2);
-    var lines: List<str> = ["", "",];
+    pool.set_limit(2, 2);
+    var lines: List<str> = ["", "", "",];
+    var spinner = "";
     loop {
         guard some f = pool.next() else { break; };
-        lines[f.index] = f"{f.index}: timed out {f.timed_out}, exit {f.out.exit_code}, out `{f.out.stdout}`";
+        if f.index == 2 {
+            spinner = f.out.stdout;
+            lines[2] = f"2: timed out {f.timed_out}, exit {f.out.exit_code}";
+        } else {
+            lines[f.index] = f"{f.index}: timed out {f.timed_out}, exit {f.out.exit_code}, out `{f.out.stdout}`";
+        }
     }
     for l in lines { print(l); }
+    let probe = proc.run("sh", ["-c", "kill -0 " + spinner + " 2>/dev/null && printf alive || printf gone"], "");
+    print(f"spinner: {probe.stdout}");
     print(f"under 20 s: {(Clock.now_ns(1) - t0) / 1000000000 < 20}");
 }

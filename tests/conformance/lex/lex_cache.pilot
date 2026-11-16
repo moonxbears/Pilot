@@ -1,0 +1,77 @@
+// A built lexer is kept on disk and read back (stdlib/pilot/lex/cache.pilot).
+//
+// Expected, worked by hand:
+//   - the key starts with the builder's line (`builder ` and the hash of
+//     its sources): true.
+//   - the file name is the declarations' 64-bit FNV-1a hash in hex. The
+//     published FNV-1a 64 vectors: "" -> cbf29ce484222325 (the offset
+//     basis), "a" -> af63dc4c8601ec8c.
+//   - the cache file is first overwritten with junk, so the first
+//     `build_modes_cached` cannot read it: it builds (ok: true) and puts a
+//     lexer there (the file starts with the format line: true).
+//   - the second call reads that file (read_lexer finds the lexer: true),
+//     and it is the same lexer `build_modes` builds: true.
+//   - the same file read with other declarations is not used: true.
+//   - one more token is other declarations, so another file: true.
+//   - `x"aa"xy` with the read lexer: `x` (the longest match at 0, since
+//     `xy` needs a `y` next), `open` enters `quoted`, `text` takes `aa`,
+//     `close` leaves it, then `xy`.
+use Pilot.Core.File;
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+use pilot.lex.modes;
+use pilot.lex.cache;
+
+const DIR: str = "target/test-lex-cache";
+
+fn small(more: bool) -> List<LexMode> {
+    var main: List<TokenDecl> = [token("x", lit("x")), token("xy", lit("xy")), entering("quoted", token("open", lit("\"")))];
+    if more { main.push(token("z", lit("z"))); }
+    return [lex_mode("main", main), lex_mode("quoted", [token("text", lit("a") + lit("a").many()), leaving(token("close", lit("\"")))])];
+}
+
+fn same_table(ref a: LexTable, ref b: LexTable) -> bool {
+    if a.names != b.names || a.class_of != b.class_of || a.classes != b.classes || a.states != b.states { return false; }
+    if a.starts != b.starts || a.next != b.next || a.accept != b.accept || a.actions.len() != b.actions.len() { return false; }
+    for i in 0 .. a.actions.len() {
+        let x = a.actions[i];
+        let y = b.actions[i];
+        if x.role != y.role || x.enters != y.enters || x.leaves != y.leaves { return false; }
+    }
+    return true;
+}
+
+fn same(ref a: ModalLexer, ref b: ModalLexer) -> bool {
+    if a.modes != b.modes || a.bases != b.bases || a.mode_of != b.mode_of || a.tables.len() != b.tables.len() { return false; }
+    for i in 0 .. a.tables.len() {
+        if a.enters[i] != b.enters[i] || !same_table(a.tables[i], b.tables[i]) { return false; }
+    }
+    return true;
+}
+
+fn main() {
+    print(cache_file("d", ""));
+    print(cache_file("d", "a"));
+
+    let modes = small(false);
+    let key = modes_key(modes);
+    print(key.starts_with("builder "));
+    let path = cache_file(DIR, key);
+    File.write_text(path, "not a lexer");
+    let first = build_modes_cached(modes, DIR);
+    print(first.ok());
+    print(File.read_text(path).starts_with(CACHE_FORMAT));
+
+    let fresh = build_modes(modes);
+    let second = build_modes_cached(modes, DIR);
+    print(read_lexer(File.read_text(path), key) != none);
+    print(same(fresh.lexer, second.lexer));
+    print(read_lexer(File.read_text(path), key + "x") == none);
+    print(cache_file(DIR, modes_key(small(true))) != path);
+
+    var families: List<str> = [];
+    for l in lex_modal(second.lexer, "x\"aa\"xy") { families.push(modal_family(second.lexer, l)); }
+    var line = "";
+    for f in families { line = if line == "" { f } else { line + " " + f }; }
+    print(line);
+}

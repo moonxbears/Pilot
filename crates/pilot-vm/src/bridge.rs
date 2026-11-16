@@ -1083,9 +1083,13 @@ unsafe fn dispatch_op(
         34 => match i_at(0) {
             2 => Ok(std::process::id() as i64),
             3 => std::process::exit(i_at(2) as i32),
+            0 if i_at(2) == 9 => {
+                let child = vm.bridge.procs.get_mut(&i_at(1));
+                io_res(child.ok_or(OpFail::Code(-11))?.kill()).map(|_| 0)
+            }
             _ => seam(
                 "bridge.proc_signal",
-                "signal_handle/signal_pid sub-ops are not yet implemented",
+                "signal_pid and signals other than 9 are not yet implemented",
             ),
         },
         35 => match i_at(0) {

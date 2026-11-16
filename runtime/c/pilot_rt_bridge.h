@@ -253,6 +253,12 @@ static inline pilot_val pilot_host_op(
         if (a0 == 0) {
             int fds[2];
             if (pipe(fds) != 0) return pilot_v_int(pilot_errno_map(errno));
+            /* Close-on-exec, as the seed VM does: a spawned child gets only
+               the ends passed as its stdio, so a parent's other pipes reach
+               end-of-input when the parent closes them, even while a child
+               it started (a timed-out test case) still runs. */
+            if (fcntl(fds[0], F_SETFD, FD_CLOEXEC) != 0 || fcntl(fds[1], F_SETFD, FD_CLOEXEC) != 0)
+                return pilot_v_int(pilot_errno_map(errno));
             int64_t *out = (int64_t *)(uintptr_t)a1;
             out[0] = (int64_t)fds[0];
             out[1] = (int64_t)fds[1];

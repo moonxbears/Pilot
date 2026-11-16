@@ -8,10 +8,11 @@
 use Pilot.Core.Lex.Lexicon;
 use Pilot.Core.Lex.Operators;
 use pilot.lex.modes;
+use pilot.lex.cache;
 use pilot.lex;
 
 fn main() {
-    let built = build_modes(core_modes(operator_tokens([], [])));
+    let built = build_modes_cached(core_modes(operator_tokens([], [])), LEX_CACHE_DIR);
     let m = built.lexer;
     let src = "(a[1]{f\"{x}\"})";
     let tb = build_tape(m, src);

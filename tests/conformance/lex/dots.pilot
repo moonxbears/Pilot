@@ -18,9 +18,10 @@
 use Pilot.Core.Lex.Lexicon;
 use Pilot.Core.Lex.Operators;
 use pilot.lex.build;
+use pilot.lex.cache;
 
 fn main() {
-    let built = build_table(core_tokens_with(operator_tokens(["..", "?"], ["?"])));
+    let built = build_table_cached(core_tokens_with(operator_tokens(["..", "?"], ["?"])), LEX_CACHE_DIR);
     print(built.ok());
     let src = "a.b .c x .. y (a).b a. b\n.b a/**/.b x?.y";
     var out = "";

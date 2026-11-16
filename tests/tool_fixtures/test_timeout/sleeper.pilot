@@ -1,8 +1,8 @@
-// A case that sleeps 60 s, then prints what its .stdout expects; with
-// `--timeout 10` it is reported as timed out long before. It sleeps rather
-// than spins, so a run that cannot stop it (seam `bridge.proc_signal`) leaves
-// no CPU busy.
+// A case that spins for 60 s, then prints what its .stdout expects; with
+// `--timeout 10` it is reported as timed out long before, and killed
+// (PROP-028), so it does not keep a CPU busy for the rest of the minute.
 fn main() {
-    Clock.sleep_ns(60000000000);
+    let end = Clock.now_ns(1) + 60000000000;
+    while Clock.now_ns(1) < end {}
     print("done");
 }

@@ -215,6 +215,18 @@ pub struct File : IValue {
         return ok;
     }
 
+    /// Moves `from` to `to`, replacing `to`, in one step on the host, so a
+    /// reader of `to` never sees half a file. Whether it moved.
+    pub static fn rename(from: str, to: str) -> bool {
+        if from == "" || to == "" { return false; }
+        let a = file_path_buf(from);
+        let b = file_path_buf(to);
+        let rc = File.rename_link(0, a, from.len(), b, to.len(), 0);
+        RawMem.free(a, from.len(), 1);
+        RawMem.free(b, to.len(), 1);
+        return rc >= 0;
+    }
+
     pub static fn list_dirs(path: str) -> str {
         var dirs: List<str> = [];
         var files: List<str> = [];

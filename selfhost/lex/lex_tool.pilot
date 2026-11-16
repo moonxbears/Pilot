@@ -17,6 +17,7 @@ use Pilot.Core.Lex.Lexicon;
 use Pilot.Core.Lex.Operators;
 use pilot.lex.build;
 use pilot.lex.modes;
+use pilot.lex.cache;
 use pilot.lex;
 
 /// The tokens of the file at `path`, as described above.
@@ -24,7 +25,7 @@ pub fn lex_main(path: str) -> i64 {
     let s = snap_load();
     let p = prog_new(s);
     let modes = core_modes(operator_tokens(declared_operator_symbols(p), declared_postfix_symbols(p)));
-    let built = build_modes(modes);
+    let built = build_modes_cached(modes, LEX_CACHE_DIR);
     for e in built.errors {
         eprint(f"{e.code}: {e.message}");
     }
