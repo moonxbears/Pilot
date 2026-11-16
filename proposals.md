@@ -35,6 +35,7 @@
 | **`PROP-022`** | Operator Meaning Declared in Pilot: Every Operator Use Lowers to Its Member Call or Its Rule's Template | about `-150` or more in `crates/pilot-parser` and `crates/pilot-ast`; sequenced after `PROP-008` step 2 and `PROP-005` | `DRAFT 2026-11-16 — AWAITING OWNER APPROVAL (DESIGN; FILE LIST FIXED WHEN SEQUENCED)` |
 | **`PROP-023`** | The Language Section of `toolchain.pilc`: Pilot's Lexical, Grammar and Meaning Tables Precompiled, Read by Number; a Genesis File | design only; deletes the Rust lexer and parser when built | `DRAFT 2026-11-16 — DESIGN, NOT FOR BUILDING YET` |
 | **`PROP-024`** | `//` Always Starts a Comment: Delete the `//=` and `//` Operator Tokens | about `-6` in `crates/pilot-lexer` (`lexer.rs`, `token.rs`); built `-4` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-024") AND BUILT` |
+| **`PROP-025`** | The Parser in Pilot: One Grammar-Table-Driven Pilot Parser Builds the AST the Checker and PilIR Read; the Rust Parser Is Deleted | Pilot work first (no Rust change); at the cutover deletes `crates/pilot-parser` (9,165 lines) and `crates/pilot-ast` (917) under `PROP-006` | `DRAFT 2026-11-16 — DESIGN; AWAITING OWNER APPROVAL` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED, IN PROGRESS (`ref<T>`, CLI AND DROP PLAN ROWS DONE; RUST AMENDMENT 5B.3a APPROVED AND BUILT 2026-11-16); 5B.4–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
@@ -2182,7 +2183,7 @@ Whether `const` marks a value parameter is not recorded today either way (the pr
 
 ## `PROP-021` — The Lexer Declared in Pilot: Token Patterns Compiled by Pilot Into a State Table the Seed Only Runs
 
-**Status: DRAFT 2026-11-16, rewritten 2026-11-16 at the owner's direction ("yes, lets rewrite prop-021"); awaiting owner approval.** Owner direction: "I would like pilot to have recognition over its own behavior" (about `1_000_000` meaning `1000000`), and "can you define what numbers are in pilot and then compile it to the lex file?". The first draft (per-literal tables the seed reads) is replaced. The lexer is no longer hand-written in either language. Pilot declares every token as a pattern, Pilot compiles the patterns into a state machine, and the seed only runs that machine.
+**Status: DRAFT 2026-11-16, rewritten 2026-11-16 at the owner's direction ("yes, lets rewrite prop-021"); the Rust part (§3) awaits owner approval. Slice 21A (Pilot only, no Rust) BUILT 2026-11-16 at the owner's request ("can we start of the first proposal of the lex proposals?"), see §7.** Owner direction: "I would like pilot to have recognition over its own behavior" (about `1_000_000` meaning `1000000`), and "can you define what numbers are in pilot and then compile it to the lex file?". The first draft (per-literal tables the seed reads) is replaced. The lexer is no longer hand-written in either language. Pilot declares every token as a pattern, Pilot compiles the patterns into a state machine, and the seed only runs that machine.
 
 ### 1. What exists today (read 2026-11-16)
 
@@ -2336,6 +2337,29 @@ The gate rebuilds the table and compares it byte for byte (`PROP-023`). Until `P
   - respell the line comment.
 - **Performance:** the lexing rate of the table runner on the tree is measured against today's lexer and reported. The owner has said compile speed is not gated (2026-11-10), so this is a report, not a gate. The report states the ratio against today's hand-written SIMD lexer, so the cost of the ownership choice in 2.10 is on record when the direct-code emitter is sequenced.
 
+### 7. Slice 21A, as built 2026-11-16 (Pilot only)
+
+- **Built:**
+  - `stdlib/core/lex/patterns.pilot` (191 lines): `Pattern` as a postfix program of byte-range ops. Builders: `byte`, `byte_range`, `range`, `lit`, `class`, `seq`, `alt`, `opt`, `many`, `some_of`, `repeat`, plus `token` / `token_over` (with a priority).
+  - `stdlib/core/lex/numbers.pilot` (64 lines): the number tokens, with `_` only between two digits.
+  - `stdlib/pilot/lex/build.pilot` (566 lines): byte classes → Thompson NFA → DFA → Moore minimization → merged byte classes, `LEX002` ties, `LEX004` empty match, and `lex_all`, a table runner in Pilot.
+- **Tests** (`tests/conformance/lex/`): `dfa_minimal` (state and class counts worked by hand), `digit_separators`, `token_priority`, `err_lex002_tie` and `err_lex004_empty`. All pass on `pilot test`, `--ir` and `--emit c`.
+- **Changed from §2 and §4:**
+  - **The builder lives in Ring 3** (`pilot.lex.build`, `stdlib/pilot/lex/`), not `selfhost/lex/`, so programs, tests and tools can import it. That is Ring 3's job (AGENTS.md §3, compiler as a library).
+  - **A pattern is a postfix program**, not a tree. That makes self-reference impossible within a pattern. `LEX003` is left to `[Token]` collection, where declarations refer to each other by name.
+  - **New code `LEX004`:** a token that matches the empty text.
+  - **`not_followed_by` is not built yet.** It lands with the modes slice (comments, dots), which needs it.
+- **Stand-in:** `number_tokens()` lists the declarations by hand in place of `[Token]` collection (`lex.token_attribute` in `seams.pilot`). The wiring row stays `DRAFT` until that is replaced.
+- **Not yet:**
+  - The seed runs no table: `crates/pilot-lexer` is unchanged, and that is the §3 Rust part, awaiting approval.
+  - Strings, comments, names, delimiters and operator symbols are not declared yet.
+  - No modes.
+  - No value functions (`int_from_text`, `float_from_text`).
+  - `LIT001`, `LIT002`, `LEX001` (the runner marks an unmatched byte as family -1, but no caller reports it yet) and `LEX003`.
+  - `pilot inspect lex`: `pilot inspect` itself stops at the seam `cli.command_handler`.
+- **Found while building:** `m.get(k) ?? x` stops on PilIR and the emitted C (the seed is right). `known_bugs/` runs on the seed only, so it cannot hold a PilIR-only bug. The repro is `tests/conformance/collections/map_get_coalesce`, which fails on `--ir` and `--emit c` until it is fixed. The builder uses `has` and indexing instead.
+- **Duplicates to retire when the seed runs the table:** besides `crates/pilot-lexer` and `selfhost/lexer.pilot`, there are hand-written tokenizers in `stdlib/pilot/lex.pilot` (`token_cursor_next`), `selfhost/fmt/fmt.pilot` (`fmt_tokenize`) and `selfhost/cli/repl.pilot` (`repl_tokenize`). All of them should run the one table.
+
 ### 6. Decided
 
 - **`//=` does not exist** (owner 2026-11-16: "leave it meaning nothing unless it was supposed to mean something but that would conflict with the comment"). It was floor-division assignment, from a `//` floor-division operator that can never be written, since `//` starts a comment. The comment pattern in `trivia.pilot` has no exception: `//` and everything after it on the line is a comment. Fixed in today's lexer by `PROP-024`.
@@ -2441,6 +2465,48 @@ section LANG
 
 - `comment_double_slash_equal` prints `7` then `8` on `pilot test`, `--ir` and `--emit c`.
 - Every existing conformance program passes unchanged, and `cargo test -p pilot-parser --test damaged_source -- --include-ignored` passes.
+
+---
+
+## `PROP-025` — The Parser in Pilot: One Grammar-Table-Driven Pilot Parser Builds the AST the Checker and PilIR Read; the Rust Parser Is Deleted
+
+**Status: DRAFT 2026-11-16, design; awaiting owner approval.** Owner direction 2026-11-16: "is structural grammar parsing in pilot, or is that also rust? If not then it should be part of pilot and not rust. The only thing that should exist in rust is the absolute necessary rust engine needs for compilation and memory management".
+
+### 1. What exists today (read 2026-11-16)
+
+- **Every `.pilot` file is parsed by Rust.** `crates/pilot-parser` (9,165 lines) builds the AST, and `crates/pilot-ast` (917 lines) holds it. `crates/pilot-lexer` (1,116 lines) is covered by `PROP-021`.
+- **The Pilot checker reads the Rust parser's arena.** `selfhost/check/snapshot.pilot` takes it whole through the host operation `chk_snapshot` (`crates/pilot-cli/src/check.rs`). The PilIR lowering also starts from that arena.
+- **Pilot has two partial parsers, and neither one is used for real compilation.**
+  - `selfhost/parser.pilot` (1,021 lines) runs on the hand-written `selfhost/lexer.pilot`, keeps its AST in `__engine("map_new")` maps, and stops at the seam `parser.operator_grammar` on the first binary operator.
+  - `selfhost/cst/cst_parser.pilot` (491 lines) builds the lossless tree for `fmt`.
+- **`PROP-006` (Wave 6) already plans to delete** `crates/pilot-{lexer,parser,ast,span,intern}` once `toolchain.pilc` is precompiled. No proposal itemizes the Pilot parser that has to exist before then. This proposal does.
+
+### 2. Design
+
+- **One parser, in Pilot, driven by declared tables.** It reads the token stream from the `PROP-021` table. It takes every operator's level, associativity and fixity from the declared grammar (`OpLevel`, `PROP-018` holes, `PROP-019` type levels), and every `syntax` rule from its declaration. It hardcodes only the mechanisms: a Pratt loop, sequence matching for rules, and the 13 structural delimiters, which are themselves token families. The AST is a flat Pilot arena (`0b10` owned, `List`-backed nodes with spans), not engine maps.
+- **It replaces all three.** The Rust parser goes, `selfhost/parser.pilot` is rewritten in place, and `cst_parser.pilot` becomes a mode of the same parser that keeps trivia, so `fmt` and the compiler can never disagree about the grammar.
+- **The checker and PilIR read the Pilot AST.** `snapshot.pilot`'s `chk_snapshot` and the arena reads in `selfhost/ir/` move onto the Pilot arena. `chk_snapshot` then has no caller, and its Rust side is deleted under `PROP-006`.
+- **Diagnostics** keep their codes and messages. The `damaged_source` corpus becomes a Pilot conformance set: every input must produce diagnostics without a trap.
+
+### 3. Bootstrap: why Rust parsing can go entirely
+
+The seed needs a parser only to read `.pilot` text, and after `PROP-023` / `PROP-006` it never does. It loads `toolchain.pilc`, which already contains this Pilot parser compiled. Only the first `toolchain.pilc` is built with today's Rust parser. From then on each one is built by the previous one, and the gate checks the fixed point (Stage-2 == Stage-3, AGENTS.md §9). After that, Rust keeps only the `.pilc` loader, the dispatch loop, memory slabs and the frozen `HostOp`s, as the owner directed.
+
+### 4. Order
+
+1. `PROP-021` builds the lexer table, which the parser consumes.
+2. The Pilot parser is built on the side and checked against the Rust parser: both ASTs are dumped for every file in the tree and compared by a one-off dump, the same method as `PROP-021` §5. A difference is a bug in one of them, found and fixed, never accepted.
+3. `snapshot.pilot` and `selfhost/ir/` switch to the Pilot AST behind a flag, then by default once all three engines pass.
+4. `PROP-005` (bytecode from PilIR in Pilot) and `PROP-023` (precompiled tables), then the `PROP-006` cutover deletes the Rust parser and AST crates.
+
+Steps 1–3 are Pilot only and need no Rust change. Step 4's Rust deletions are itemized in `PROP-006` when it is expanded.
+
+### 5. Acceptance
+
+- Identical ASTs from both parsers for every `.pilot` file in the tree, compared by a one-off dump.
+- `pilot test`, `--ir` and `--emit c` pass unchanged with the checker reading the Pilot AST.
+- The `damaged_source` inputs as Pilot conformance programs: diagnostics, never a trap.
+- **Litmus:** respell an operator, add an operator level, and add a `syntax` rule, each a Pilot-only edit, with the program parsing and running on all three engines.
 
 ---
 

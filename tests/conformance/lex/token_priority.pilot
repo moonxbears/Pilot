@@ -1,0 +1,26 @@
+// Two tokens that match the same text are settled by their declared
+// priority, never by the order of the declarations (PROP-021 §2.3).
+//
+// Expected, worked by hand: `if` (priority 1) and names [a-z]+ (priority
+// 0) both match "if", so it is the keyword; "iffy" is longer than "if", so
+// the longest match makes it a name; "i" and "f" are names. Declaring the
+// name first changes nothing.
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+
+fn show(decls: List<TokenDecl>) {
+    let built = build_table(decls);
+    let src = "if iffy i f";
+    var out = "";
+    for l in lex_all(built.table, src) {
+        if l.decl >= 0 && built.table.names[l.decl] != "space" {
+            out = out + lexeme_text(built.table, src, l) + " ";
+        }
+    }
+    print(out);
+}
+
+fn main() {
+    show([token_over("if", 1, lit("if")), token("name", some_of(range("a", "z"))), token("space", lit(" "))]);
+    show([token("name", some_of(range("a", "z"))), token_over("if", 1, lit("if")), token("space", lit(" "))]);
+}

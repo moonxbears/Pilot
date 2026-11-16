@@ -1,0 +1,33 @@
+// Number tokens from Pilot.Core.Lex.Numbers, lexed by a table that
+// pilot.lex.build compiles from them (PROP-021 slice 21A). `_` groups
+// digits only between two digits, because that is the only place `digits`
+// allows it; the lexer takes the longest number and goes on from there.
+//
+// Expected, worked by hand from the patterns (spaces not shown):
+//   1_000_000  every `_` sits between digits          -> integer
+//   1000_      `_` has no digit after it: number 1000, then `_` is a name
+//   1__0       one `_` at most before each digit: number 1, name __0
+//   0x_FF      hex digits must start with a digit: number 0, name x_FF
+//   0xFF_FF    -> integer
+//   2.5e1_0    digits . digits, exponent with grouped digits -> float
+//   1..5       a float needs digits after `.`: number 1, `.` and `.`
+//              start no token (?), number 5
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Numbers;
+use pilot.lex.build;
+
+fn letter() -> Pattern => alt([range("a", "z"), range("A", "Z"), lit("_")]);
+
+fn main() {
+    var decls = number_tokens();
+    decls.push(token("name", seq([letter(), many(alt([letter(), range("0", "9")]))])));
+    decls.push(token("space", some_of(lit(" "))));
+    let built = build_table(decls);
+    print(built.ok());
+    let src = "1_000_000 1000_ 1__0 0x_FF 0xFF_FF 2.5e1_0 1..5";
+    for l in lex_all(built.table, src) {
+        if l.decl < 0 || built.table.names[l.decl] != "space" {
+            print(lexeme_text(built.table, src, l));
+        }
+    }
+}

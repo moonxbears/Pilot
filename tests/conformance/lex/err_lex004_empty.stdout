@@ -1,0 +1,3 @@
+false
+LEX004: `as` matches the empty text; a token must take at least one byte
+true

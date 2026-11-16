@@ -1,0 +1,64 @@
+// =========================================================================
+// FILE: stdlib/core/lex/numbers.pilot
+// NUMBER TOKENS: what a number is, declared once (PROP-021 slice 21A)
+// =========================================================================
+// The digit separator is legal only where `digits` puts it: between two
+// digits. So `1_000_000` is one number, while `1000_`, `1__000` and `0x_FF`
+// are not (their longest number is `1000`, `1` and `0`). Changing the
+// separator is an edit to `digits` alone.
+//
+// This file says only what a number looks like. What it is worth, and
+// whether that fits the type it lands in, is the job of the literal's value
+// function (LIT002, a later slice).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Numbers;
+
+use Pilot.Core.Lex.Patterns;
+
+/// The bases a number may be written in.
+pub enum Radix : u8 {
+    Dec,
+    Hex,
+    Bin,
+    Oct,
+}
+
+/// One digit of `base`.
+pub fn digit(base: Radix) -> Pattern {
+    if base == Radix::Hex {
+        return alt([range("0", "9"), range("a", "f"), range("A", "F")]);
+    }
+    if base == Radix::Bin {
+        return class("01");
+    }
+    if base == Radix::Oct {
+        return range("0", "7");
+    }
+    return range("0", "9");
+}
+
+/// Digits of `base`, optionally grouped by `_`, which may only stand
+/// between two digits.
+pub fn digits(base: Radix) -> Pattern => seq([digit(base), many(seq([opt(lit("_")), digit(base)]))]);
+
+/// `e10`, `E-3`, `e+1_0`.
+pub fn exponent() -> Pattern => seq([class("eE"), opt(class("+-")), digits(Radix::Dec)]);
+
+/// `1_000`, `0xFF_FF`, `0b1010`, `0o17`.
+pub fn integer() -> Pattern => alt([
+    seq([lit("0x"), digits(Radix::Hex)]),
+    seq([lit("0b"), digits(Radix::Bin)]),
+    seq([lit("0o"), digits(Radix::Oct)]),
+    digits(Radix::Dec),
+]);
+
+/// `2.5`, `2.5e10`, `1e9`. A float has digits on both sides of its `.`, so
+/// `1..5` is `1`, `..`, `5`.
+pub fn float() -> Pattern => alt([
+    seq([digits(Radix::Dec), lit("."), digits(Radix::Dec), opt(exponent())]),
+    seq([digits(Radix::Dec), exponent()]),
+]);
+
+/// The number tokens, in declaration order.
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn number_tokens() -> List<TokenDecl> => [token("integer", integer()), token("float", float())];

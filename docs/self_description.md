@@ -49,8 +49,9 @@ Something has to be read before any table exists, so the bootstrap runs in stage
 3. `PROP-019`: type-operator levels.
 4. `PROP-021`: the lexer as Pilot token patterns compiled to a state table. This includes operator symbols, which were `PROP-008` step 2. Both hand-written lexers are deleted (`crates/pilot-lexer`'s scanners and `selfhost/lexer.pilot`).
 5. `PROP-005` phase 5D: bytecode from PilIR, so operator lowering leaves `crates/pilot-vm`.
+   - `PROP-025`, in parallel: the parser in Pilot, driven by the declared grammar and reading `PROP-021`'s tokens. The checker and PilIR switch to its AST.
 6. `PROP-022`: operator meaning as member calls and templates.
-7. `PROP-023`: the genesis file and the precompiled `LANG` section. The Rust lexer and parser are deleted.
+7. `PROP-023`: the genesis file and the precompiled `LANG` section. With `PROP-025` done, the Rust lexer, parser and AST crates are deleted (`PROP-006`). What remains in Rust is the `.pilc` loader, the dispatch loop, memory and the frozen `HostOp`s.
 
 8. Later, after `M46`: a direct-code lexer. The same token patterns are emitted as straight-line code instead of a table (`PROP-021` §2.10).
 

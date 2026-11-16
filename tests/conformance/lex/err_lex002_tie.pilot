@@ -1,0 +1,16 @@
+// Two tokens of equal priority that match the same text are an error
+// (LEX002): the builder will not let declaration order decide.
+//
+// Expected, worked by hand: "x" matches both `x` and `xy` at priority 0,
+// so the build fails with one LEX002 naming both; "y" matches only `xy`,
+// which is no conflict.
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+
+fn main() {
+    let built = build_table([token("x", lit("x")), token("xy", class("xy"))]);
+    print(built.ok());
+    for e in built.errors {
+        print(f"{e.code}: {e.message}");
+    }
+}

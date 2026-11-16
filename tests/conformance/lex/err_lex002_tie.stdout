@@ -1,0 +1,2 @@
+false
+LEX002: `x` and `xy` both match the same text with priority 0; give one of them a higher priority

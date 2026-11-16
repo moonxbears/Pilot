@@ -1,0 +1,14 @@
+true
+integer:1_000_000
+integer:1000
+name:_
+integer:1
+name:__0
+integer:0
+name:x_FF
+integer:0xFF_FF
+float:2.5e1_0
+integer:1
+?:.
+?:.
+integer:5

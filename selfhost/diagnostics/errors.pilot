@@ -868,6 +868,20 @@ pub let ERRORS = [
         reference: "proposals.md PROP-018 §2",
     },
     ErrorDef {
+        code: "LEX002",
+        title: "Tokens Tie on the Same Text",
+        description: "Two token declarations of equal priority match exactly the same text; give one of them a higher priority, since declaration order never decides",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §2.3",
+    },
+    ErrorDef {
+        code: "LEX004",
+        title: "Token Matches the Empty Text",
+        description: "A token pattern matches the empty text, which would let the lexer stand still; a token must take at least one byte",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §2.7",
+    },
+    ErrorDef {
         code: "SYN010",
         title: "Malformed Sequence Rule",
         description: "A `syntax` rule with a sequence head is malformed (a hole kind that is not a `HoleKind` variant, a group of the wrong form, or a body that is not a `quote { .. }`), or a use of the rule does not fit its head",

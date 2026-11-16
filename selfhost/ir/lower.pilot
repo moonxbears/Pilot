@@ -1099,7 +1099,10 @@ pub fn lower_fn_call(var ref lw: Lowerer, callee: i64, ref pre: List<u32>, ref a
         }
         let hook = str_value(s, arg_nodes[0]);
         if some v = lower_generator_op(lw, hook, args, phy, n) { return v; }
-        return emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), phy, args, n);
+        // The body of an `[EngineOp]` owner is typed by the owner's return
+        // type, which the lowering expects here.
+        let t = type_of(lw.inf, n);
+        return engine_call(lw, hook, args, phy, if ty_is_unknown(lw.inf.p.tt, t) { lw.hint } else { t }, n);
     }
     let native = if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 { bound(lw, native_fn_hook(), [node_name(s, callee)]) } else { "" };
     if native == "" { return unsupported(lw, n); }
@@ -1110,7 +1113,7 @@ pub fn lower_fn_call(var ref lw: Lowerer, callee: i64, ref pre: List<u32>, ref a
         args.push(engine_arg(lw, lower_expr(lw, a), value_type(lw, a), a));
     }
     if some v = lower_generator_op(lw, native, args, phy, n) { return v; }
-    return emit(lw, op_call_intrinsic(), intrinsic_index(lw, native), phy, args, n);
+    return engine_call(lw, native, args, phy, type_of(lw.inf, n), n);
 }
 
 /// Calls top-level function `decl` with `pre` then `arg_nodes` arranged to

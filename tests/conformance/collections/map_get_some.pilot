@@ -1,0 +1,24 @@
+// `some x = m.get(k)` binds the value when the key is present and fails the
+// test when it is absent; `guard some x = m.get(k) else { .. }` leaves
+// through the else block when it is absent. `Map.get` is an engine op whose
+// engine answers none with its null; the PilIR lowering turns that answer
+// into the opt record (selfhost/ir/lower_try.pilot `engine_result`).
+//
+// Expected, worked by hand:
+//   "a" is present with 4         -> some binds 4             -> 4
+//   "b" is absent                 -> some fails, else arm     -> -1
+//   lookup("a"): guard passes     -> 4 + 1                    -> 5
+//   lookup("b"): guard else       -> returns 0                -> 0
+fn lookup(ref m: Map<str, i64>, k: str) -> i64 {
+    guard some v = m.get(k) else { return 0; }
+    return v + 1;
+}
+
+fn main() {
+    var m: Map<str, i64> = Map<str, i64>();
+    m.set("a", 4);
+    if some x = m.get("a") { print(x); } else { print(-1); }
+    if some y = m.get("b") { print(y); } else { print(-1); }
+    print(lookup(m, "a"));
+    print(lookup(m, "b"));
+}

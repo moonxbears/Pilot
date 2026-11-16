@@ -1,0 +1,566 @@
+// ==============================================================================
+// FILE: stdlib/pilot/lex/build.pilot
+// Ring 3: The lexer builder (pub pkg pilot.lex.build;) — PROP-021 slice 21A
+// ==============================================================================
+// `build_table(decls)` compiles token declarations (Pilot.Core.Lex.Patterns)
+// into the state table a lexer runs:
+//   1. byte classes: the 256 byte values split at every edge of every byte
+//      range in the patterns;
+//   2. a Thompson NFA, one fragment per declaration, read from each
+//      pattern's postfix program with one stack;
+//   3. subset construction to a DFA over the byte classes; a DFA state
+//      accepts the declaration with the highest priority among its NFA
+//      states, and two declarations tied there are LEX002;
+//   4. minimization by partition refinement (Moore);
+//   5. byte classes whose columns are equal are merged.
+// `lex_all` runs a table over text: the longest match from each position,
+// falling back to the last accepting state (so `1..5` is `1`, `.`, `.`, `5`
+// when `1.` alone is not a token), and a lexeme of family -1 for a byte that
+// starts no token (LEX001).
+//
+// The table is the whole of what the lexer knows. Nothing here names a
+// character, a word or a symbol.
+pub pkg pilot.lex.build;
+
+use Pilot.Core.Lex.Patterns;
+
+/// A built lexer: `next[state * classes + class]` is the next state or -1,
+/// `accept[state]` the declaration index a state accepts or -1.
+pub struct LexTable : IObject {
+    pub names: List<str>;
+    pub class_of: List<i64>;
+    pub classes: i64;
+    pub states: i64;
+    pub start: i64;
+    pub next: List<i64>;
+    pub accept: List<i64>;
+}
+
+/// Why a set of declarations is not a lexer.
+pub struct LexBuildError : IValue {
+    pub code: str;
+    pub message: str;
+}
+
+/// One token found in text: the declaration index (-1 for a byte that
+/// starts no token) and its byte span.
+[Layout(c_abi)]
+pub struct Lexeme : IValue {
+    pub decl: i64;
+    pub start: i64;
+    pub end: i64;
+}
+
+/// The result of `build_table`: the table, or the errors that stop it.
+pub struct LexBuild : IObject {
+    pub table: LexTable;
+    pub errors: List<LexBuildError>;
+
+    pub fn ok(ref self) -> bool => self.errors.len() == 0;
+}
+
+// ------------------------------------------------------------------------------
+// The NFA: parallel lists indexed by state
+// ------------------------------------------------------------------------------
+
+struct Nfa : IObject {
+    pub lo: List<i64>;
+    pub hi: List<i64>;
+    pub to: List<i64>;
+    pub accept: List<i64>;
+    pub eps_from: List<i64>;
+    pub eps_to: List<i64>;
+}
+
+fn nfa_state(var ref n: Nfa) -> i64 {
+    n.lo.push(-1);
+    n.hi.push(-1);
+    n.to.push(-1);
+    n.accept.push(-1);
+    return n.lo.len() - 1;
+}
+
+fn nfa_eps(var ref n: Nfa, from: i64, to: i64) {
+    n.eps_from.push(from);
+    n.eps_to.push(to);
+}
+
+/// Builds the fragment of one pattern; returns its start state and sets
+/// `end_out[0]` to its end state.
+fn nfa_fragment(var ref n: Nfa, ref p: Pattern, var ref end_out: List<i64>) -> i64 {
+    var fs: List<i64> = [];
+    var fe: List<i64> = [];
+    for o in p.ops {
+        if o.kind == PatKind::Bytes {
+            let s = nfa_state(n);
+            let e = nfa_state(n);
+            n.lo[s] = o.lo;
+            n.hi[s] = o.hi;
+            n.to[s] = e;
+            fs.push(s);
+            fe.push(e);
+        } else if o.kind == PatKind::Seq {
+            if o.n == 0 {
+                let s = nfa_state(n);
+                fs.push(s);
+                fe.push(s);
+            } else {
+                let base = fs.len() - o.n;
+                var i = base;
+                while i + 1 < fs.len() {
+                    nfa_eps(n, fe[i], fs[i + 1]);
+                    i = i + 1;
+                }
+                let start = fs[base];
+                let end = fe[fe.len() - 1];
+                var k = 0;
+                while k < o.n {
+                    fs.pop();
+                    fe.pop();
+                    k = k + 1;
+                }
+                fs.push(start);
+                fe.push(end);
+            }
+        } else if o.kind == PatKind::Alt {
+            let s = nfa_state(n);
+            let e = nfa_state(n);
+            let base = fs.len() - o.n;
+            var i = base;
+            while i < fs.len() {
+                nfa_eps(n, s, fs[i]);
+                nfa_eps(n, fe[i], e);
+                i = i + 1;
+            }
+            var k = 0;
+            while k < o.n {
+                fs.pop();
+                fe.pop();
+                k = k + 1;
+            }
+            fs.push(s);
+            fe.push(e);
+        } else {
+            let a = fs.pop();
+            let b = fe.pop();
+            if o.kind == PatKind::AtLeastOne {
+                let e = nfa_state(n);
+                nfa_eps(n, b, a);
+                nfa_eps(n, b, e);
+                fs.push(a);
+                fe.push(e);
+            } else {
+                let s = nfa_state(n);
+                let e = nfa_state(n);
+                nfa_eps(n, s, a);
+                nfa_eps(n, s, e);
+                nfa_eps(n, b, e);
+                if o.kind == PatKind::Many {
+                    nfa_eps(n, b, a);
+                }
+                fs.push(s);
+                fe.push(e);
+            }
+        }
+    }
+    end_out[0] = fe[0];
+    return fs[0];
+}
+
+// ------------------------------------------------------------------------------
+// Building the table
+// ------------------------------------------------------------------------------
+
+fn join_ints(ref xs: List<i64>) -> str {
+    var out = "";
+    var i = 0;
+    while i < xs.len() {
+        if i > 0 {
+            out = out + ",";
+        }
+        out = out + f"{xs[i]}";
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The eps-closure of `seeds`, as a sorted list of NFA states.
+fn closure(ref seeds: List<i64>, ref eps_off: List<i64>, ref eps_dst: List<i64>, var ref mark: List<i64>, stamp: i64) -> List<i64> {
+    var stack: List<i64> = [];
+    for s in seeds {
+        if mark[s] != stamp {
+            mark[s] = stamp;
+            stack.push(s);
+        }
+    }
+    while stack.len() > 0 {
+        let s = stack.pop();
+        var k = eps_off[s];
+        while k < eps_off[s + 1] {
+            let t = eps_dst[k];
+            if mark[t] != stamp {
+                mark[t] = stamp;
+                stack.push(t);
+            }
+            k = k + 1;
+        }
+    }
+    var out: List<i64> = [];
+    var i = 0;
+    while i < mark.len() {
+        if mark[i] == stamp {
+            out.push(i);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+fn build_error(code: str, message: str) -> LexBuildError => LexBuildError { code: code, message: message };
+
+/// Compiles `decls` into a minimized lexer table. A declaration whose
+/// pattern matches the empty text is LEX004; two declarations of equal
+/// priority that match the same text are LEX002.
+pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
+    var errors: List<LexBuildError> = [];
+    var names: List<str> = [];
+    var prio: List<i64> = [];
+    for d in decls {
+        names.push(d.name);
+        prio.push(d.priority);
+    }
+
+    // 1. Byte classes: a boundary before every range start and after every
+    //    range end.
+    var cut: List<i64> = [];
+    var b = 0;
+    while b < 257 {
+        cut.push(0);
+        b = b + 1;
+    }
+    cut[0] = 1;
+    for d in decls {
+        for o in d.pattern.ops {
+            if o.kind == PatKind::Bytes {
+                cut[o.lo] = 1;
+                cut[o.hi + 1] = 1;
+            }
+        }
+    }
+    var interval_of: List<i64> = [];
+    var intervals = 0;
+    b = 0;
+    while b < 256 {
+        if cut[b] == 1 {
+            intervals = intervals + 1;
+        }
+        interval_of.push(intervals - 1);
+        b = b + 1;
+    }
+
+    // 2. The NFA: state 0 reaches every declaration's fragment.
+    var n = Nfa { lo: [], hi: [], to: [], accept: [], eps_from: [], eps_to: [] };
+    let root = nfa_state(n);
+    var end_out: List<i64> = [0];
+    var di = 0;
+    for d in decls {
+        let s = nfa_fragment(n, d.pattern, end_out);
+        nfa_eps(n, root, s);
+        n.accept[end_out[0]] = di;
+        di = di + 1;
+    }
+    let ns = n.lo.len();
+    var eps_off: List<i64> = [];
+    var i = 0;
+    while i <= ns {
+        eps_off.push(0);
+        i = i + 1;
+    }
+    i = 0;
+    while i < n.eps_from.len() {
+        eps_off[n.eps_from[i] + 1] = eps_off[n.eps_from[i] + 1] + 1;
+        i = i + 1;
+    }
+    i = 0;
+    while i < ns {
+        eps_off[i + 1] = eps_off[i + 1] + eps_off[i];
+        i = i + 1;
+    }
+    var fill: List<i64> = [];
+    var eps_dst: List<i64> = [];
+    i = 0;
+    while i < ns {
+        fill.push(eps_off[i]);
+        i = i + 1;
+    }
+    i = 0;
+    while i < n.eps_from.len() {
+        eps_dst.push(0);
+        i = i + 1;
+    }
+    i = 0;
+    while i < n.eps_from.len() {
+        let f = n.eps_from[i];
+        eps_dst[fill[f]] = n.eps_to[i];
+        fill[f] = fill[f] + 1;
+        i = i + 1;
+    }
+
+    // 3. Subset construction over the byte intervals.
+    var mark: List<i64> = [];
+    i = 0;
+    while i < ns {
+        mark.push(-1);
+        i = i + 1;
+    }
+    var stamp = 0;
+    var members: List<List<i64>> = [];
+    var index: Map<str, i64> = Map<str, i64>();
+    var dnext: List<i64> = [];
+    var daccept: List<i64> = [];
+    var seeds: List<i64> = [root];
+    let first = closure(seeds, eps_off, eps_dst, mark, stamp);
+    stamp = stamp + 1;
+    let first_key = join_ints(first);
+    index.set(first_key, 0);
+    members.push(first);
+    var reported: Map<str, i64> = Map<str, i64>();
+    var cur = 0;
+    while cur < members.len() {
+        // What this DFA state accepts.
+        var best = -1;
+        for s in members[cur] {
+            let a = n.accept[s];
+            if a >= 0 {
+                if best < 0 || prio[a] > prio[best] {
+                    best = a;
+                } else if prio[a] == prio[best] && a != best {
+                    var lo_d = best;
+                    var hi_d = a;
+                    if a < best {
+                        lo_d = a;
+                        hi_d = best;
+                    }
+                    let key = f"{lo_d},{hi_d}";
+                    if !reported.has(key) {
+                        reported.set(key, 1);
+                        errors.push(build_error("LEX002", f"`{names[lo_d]}` and `{names[hi_d]}` both match the same text with priority {prio[a]}; give one of them a higher priority"));
+                    }
+                    if a < best {
+                        best = a;
+                    }
+                }
+            }
+        }
+        if cur == 0 && best >= 0 {
+            errors.push(build_error("LEX004", f"`{names[best]}` matches the empty text; a token must take at least one byte"));
+        }
+        daccept.push(best);
+        var c = 0;
+        while c < intervals {
+            var step: List<i64> = [];
+            for s in members[cur] {
+                let lo = n.lo[s];
+                if lo >= 0 && interval_of[lo] <= c && c <= interval_of[n.hi[s]] {
+                    step.push(n.to[s]);
+                }
+            }
+            if step.len() == 0 {
+                dnext.push(-1);
+            } else {
+                let set = closure(step, eps_off, eps_dst, mark, stamp);
+                stamp = stamp + 1;
+                let key = join_ints(set);
+                if index.has(key) {
+                    dnext.push(index[key]);
+                } else {
+                    let id = members.len();
+                    index.set(key, id);
+                    members.push(set);
+                    dnext.push(id);
+                }
+            }
+            c = c + 1;
+        }
+        cur = cur + 1;
+    }
+    let dstates = members.len();
+
+    // 4. Minimize: split states until each group's members agree on what
+    //    they accept and where every interval takes them.
+    var part: List<i64> = [];
+    var groups = 0;
+    var first_split: Map<str, i64> = Map<str, i64>();
+    i = 0;
+    while i < dstates {
+        let key = f"{daccept[i]}";
+        if !first_split.has(key) {
+            first_split.set(key, groups);
+            groups = groups + 1;
+        }
+        part.push(first_split[key]);
+        i = i + 1;
+    }
+    var changed = true;
+    while changed {
+        var sig_ids: Map<str, i64> = Map<str, i64>();
+        var next_part: List<i64> = [];
+        var next_groups = 0;
+        i = 0;
+        while i < dstates {
+            var sig = f"{part[i]}";
+            var c = 0;
+            while c < intervals {
+                let t = dnext[i * intervals + c];
+                if t < 0 {
+                    sig = sig + ":-";
+                } else {
+                    sig = sig + f":{part[t]}";
+                }
+                c = c + 1;
+            }
+            if !sig_ids.has(sig) {
+                sig_ids.set(sig, next_groups);
+                next_groups = next_groups + 1;
+            }
+            next_part.push(sig_ids[sig]);
+            i = i + 1;
+        }
+        changed = next_groups != groups;
+        groups = next_groups;
+        part = next_part;
+    }
+    var gnext: List<i64> = [];
+    var gaccept: List<i64> = [];
+    var seen: List<i64> = [];
+    i = 0;
+    while i < groups * intervals {
+        gnext.push(-1);
+        i = i + 1;
+    }
+    i = 0;
+    while i < groups {
+        gaccept.push(-1);
+        seen.push(0);
+        i = i + 1;
+    }
+    i = 0;
+    while i < dstates {
+        let g = part[i];
+        if seen[g] == 0 {
+            seen[g] = 1;
+            gaccept[g] = daccept[i];
+            var c = 0;
+            while c < intervals {
+                let t = dnext[i * intervals + c];
+                if t >= 0 {
+                    gnext[g * intervals + c] = part[t];
+                }
+                c = c + 1;
+            }
+        }
+        i = i + 1;
+    }
+
+    // 5. Merge intervals whose columns are equal into one byte class.
+    var class_ids: Map<str, i64> = Map<str, i64>();
+    var class_of_interval: List<i64> = [];
+    var classes = 0;
+    var c = 0;
+    while c < intervals {
+        var col = "";
+        var g = 0;
+        while g < groups {
+            col = col + f"{gnext[g * intervals + c]},";
+            g = g + 1;
+        }
+        if !class_ids.has(col) {
+            class_ids.set(col, classes);
+            classes = classes + 1;
+        }
+        class_of_interval.push(class_ids[col]);
+        c = c + 1;
+    }
+    var next: List<i64> = [];
+    i = 0;
+    while i < groups * classes {
+        next.push(-1);
+        i = i + 1;
+    }
+    var g = 0;
+    while g < groups {
+        c = 0;
+        while c < intervals {
+            next[g * classes + class_of_interval[c]] = gnext[g * intervals + c];
+            c = c + 1;
+        }
+        g = g + 1;
+    }
+    var class_of: List<i64> = [];
+    b = 0;
+    while b < 256 {
+        class_of.push(class_of_interval[interval_of[b]]);
+        b = b + 1;
+    }
+
+    let table = LexTable {
+        names: names,
+        class_of: class_of,
+        classes: classes,
+        states: groups,
+        start: part[0],
+        next: next,
+        accept: gaccept,
+    };
+    return LexBuild { table: table, errors: errors };
+}
+
+// ------------------------------------------------------------------------------
+// Running a table
+// ------------------------------------------------------------------------------
+
+/// The tokens of `src`, longest match first from each position.
+pub fn lex_all(ref t: LexTable, src: str) -> List<Lexeme> {
+    var out: List<Lexeme> = [];
+    let len = src.len() as i64;
+    var pos = 0;
+    while pos < len {
+        var state = t.start;
+        var i = pos;
+        var last = -1;
+        var last_end = pos;
+        while i < len {
+            let cls = t.class_of[src.byte_at(i) as i64];
+            let nx = t.next[state * t.classes + cls];
+            if nx < 0 {
+                break;
+            }
+            state = nx;
+            i = i + 1;
+            if t.accept[state] >= 0 {
+                last = t.accept[state];
+                last_end = i;
+            }
+        }
+        if last < 0 {
+            out.push(Lexeme { decl: -1, start: pos, end: pos + 1 });
+            pos = pos + 1;
+        } else {
+            out.push(Lexeme { decl: last, start: pos, end: last_end });
+            pos = last_end;
+        }
+    }
+    return out;
+}
+
+/// `name:text` for a lexeme (`?:text` for a byte that starts no token).
+pub fn lexeme_text(ref t: LexTable, src: str, l: Lexeme) -> str {
+    let text = src.slice(l.start, l.end);
+    if l.decl < 0 {
+        return f"?:{text}";
+    }
+    return f"{t.names[l.decl]}:{text}";
+}
+
+/// `N states, M classes, K tokens`, not counting the dead state.
+pub fn table_summary(ref t: LexTable) -> str => f"{t.states} states, {t.classes} classes, {t.names.len()} tokens";

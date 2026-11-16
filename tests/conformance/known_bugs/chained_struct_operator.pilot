@@ -1,0 +1,28 @@
+// An operator a struct declares applies to any value of that type,
+// including the result of another operator call: `a + b + c` is
+// `(a + b) + c`. On the seed the second `+` finds no operator for "record
+// and record" and stops (the result of `a + b` is not known to be a `Pat`
+// there; naming it with `let ab: Pat = a + b` works). PilIR and the emitted
+// C are right. Found 2026-11-16 while probing operator syntax for token
+// patterns (PROP-021).
+//
+// Expected, worked by hand: `+` wraps its operands in parentheses, so
+// e | f -> "(e | f)" and a + b + c -> "((a b) c)".
+pub struct Pat : IObject {
+    pub text: str;
+
+    pub pure op + (rhs: Pat) -> Pat => Pat { text: f"({.text} {rhs.text})" };
+    pub pure op | (rhs: Pat) -> Pat => Pat { text: f"({.text} | {rhs.text})" };
+}
+
+fn p(t: str) -> Pat => Pat { text: t };
+
+fn main() {
+    let e = p("e");
+    let f = p("f");
+    print((e | f).text);
+    let a = p("a");
+    let b = p("b");
+    let c = p("c");
+    print((a + b + c).text);
+}

@@ -149,6 +149,55 @@ pub fn absent_of(var ref lw: Lowerer, t: i64, n: i64) -> u32? {
     return call_static(lw, m, t, [], n);
 }
 
+/// The result `v` of an engine operation where a `t` is expected. The
+/// engine hands back the plain value, or its null for none; when `t` takes
+/// part in the try protocol and binds both an empty value and a lifting
+/// constructor (`opt<T>`), null becomes the empty value and any other value
+/// is lifted, so the value is `t`'s record as everywhere else in PilIR.
+/// Otherwise `v` itself.
+[StandIn("ir.absent_as_null", "opt<T> is a tagged or niche-packed value whose tag says none or some", "an engine operation still answers none with its null, which the lowering turns into the record at the call", "F6")]
+pub fn engine_result(var ref lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {
+    if v == ir_no_value() || !has_protocol(lw, t) { return v; }
+    guard some lift = bound_ctor(lw, t, lift_hook()) else { return v; }
+    guard some empty = bound_ctor(lw, t, absent_hook()) else { return v; }
+    let hook = bound(lw, absent_test_hook(), []);
+    if hook == "" { return v; }
+    let phy = layout_of(lw.ls, t);
+    let absent = emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), bool_physics(lw), [v], n);
+    let none_block = ir_add_block(lw.f);
+    let some_block = ir_add_block(lw.f);
+    let join = ir_add_block(lw.f);
+    let result = ir_add_param(lw.f, join, phy);
+    emit_void(lw, op_cond_br(), 0, [absent, none_block, 0, some_block, 0], n);
+    switch_to(lw, none_block);
+    let no_args: List<u32> = [];
+    jump_to(lw, join, [call_static(lw, empty, t, no_args, n)], n);
+    switch_to(lw, some_block);
+    let given: List<u32> = [v];
+    jump_to(lw, join, [call_static(lw, lift, t, given, n)], n);
+    switch_to(lw, join);
+    return result;
+}
+
+/// Calls engine operation `hook` with `args` where a value of type `t` (of
+/// physics `phy`) is expected: through `engine_result` when `t` is a type
+/// whose none the engine answers with its null, the raw answer then being
+/// of no known layout.
+pub fn engine_call(var ref lw: Lowerer, hook: str, ref args: List<u32>, phy: IrTypePhysics, t: i64, n: i64) -> u32 {
+    let wraps = wraps_engine_result(lw, t);
+    let v = emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), if wraps { layout_unknown(lw.ls) } else { phy }, args, n);
+    return if wraps { engine_result(lw, v, t, n) } else { v };
+}
+
+/// Whether an engine answer where a `t` is expected is turned into `t`'s
+/// record: `t` takes part in the try protocol and binds both an empty value
+/// and a lifting constructor (`opt<T>`), and the program binds the engine's
+/// absent test.
+fn wraps_engine_result(var ref lw: Lowerer, t: i64) -> bool {
+    if !has_protocol(lw, t) || bound(lw, absent_test_hook(), []) == "" { return false; }
+    return bound_ctor(lw, t, lift_hook()) != none && bound_ctor(lw, t, absent_hook()) != none;
+}
+
 /// Whether `v` (of type `t`) holds a success: the protocol's test, or for a
 /// value of no protocol type, that it is not the engine's null.
 pub fn success_test(var ref lw: Lowerer, v: u32, t: i64, n: i64) -> u32 {

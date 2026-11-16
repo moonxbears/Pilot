@@ -1,0 +1,24 @@
+// `m.get(k)` gives `opt<V>`: some value when the key is present, none when
+// it is absent. `?? fallback` takes the value or the fallback. On the seed
+// this works; PilIR and the emitted C read the result as a record with a
+// tag field (selfhost/ir/interp.pilot:672 run_extract_field "cannot read `1`
+// from integer"; the C runtime "cannot read a field of integer"), so the
+// program stops at the first `??`. Found 2026-11-16 while probing for the
+// PROP-021 lexer builder. It is a PilIR / C bug, and `known_bugs/` holds
+// only seed bugs (it runs on the seed alone), so this program lives in the
+// corpus and fails loudly on `pilot test --ir` and `--emit c` until the
+// lowering wraps an engine op's opt result (stand-in `ir.absent_as_null`).
+//
+// Expected, worked by hand:
+//   "a" is present with 4         -> 4
+//   "b" is absent, fallback 7     -> 7
+//   3 is present in the i64 map   -> 4
+fn main() {
+    var m: Map<str, i64> = Map<str, i64>();
+    m.set("a", 4);
+    print(m.get("a") ?? 0);
+    print(m.get("b") ?? 7);
+    var n: Map<i64, i64> = Map<i64, i64>();
+    n.set(3, 4);
+    print(n.get(3) ?? 0);
+}

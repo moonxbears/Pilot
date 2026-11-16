@@ -1,0 +1,191 @@
+// =========================================================================
+// FILE: stdlib/core/lex/patterns.pilot
+// TOKEN PATTERNS (PROP-021 slice 21A)
+// =========================================================================
+// A token is declared as a pattern over bytes, built from the functions
+// below. `pilot.lex.build` compiles a list of declarations into the state
+// table the lexer runs; nothing about a token's spelling lives anywhere
+// else.
+//
+// A `Pattern` is a postfix program: its leaves are byte ranges and every
+// combinator appends one op that consumes the patterns before it. So
+// patterns compose by value (`float` reuses `digits`), a pattern can never
+// refer to itself, and the builder reads it with one stack pass.
+//
+// Bootstrap subset: these files use plain decimal numbers and plain strings
+// only, so a byte that needs an escape is named by its value (`byte(34)`).
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Patterns;
+
+/// One step of a pattern's postfix program.
+pub enum PatKind : u8 {
+    /// Matches one byte in `lo ..= hi`.
+    Bytes,
+    /// The last `n` patterns one after another (`n` = 0 matches nothing).
+    Seq,
+    /// Any one of the last `n` patterns.
+    Alt,
+    /// The last pattern or nothing.
+    Opt,
+    /// The last pattern zero or more times.
+    Many,
+    /// The last pattern one or more times.
+    AtLeastOne,
+}
+
+[Layout(c_abi)]
+pub struct PatOp : IValue {
+    pub kind: PatKind;
+    pub lo: i64;
+    pub hi: i64;
+    pub n: i64;
+}
+
+/// A token pattern: a postfix program of `PatOp`s.
+pub struct Pattern : IObject {
+    pub ops: List<PatOp>;
+}
+
+/// A declared token: its name, the pattern its text must match, and its
+/// priority, which decides between two tokens that match exactly the same
+/// text (the higher wins; equal priorities are an error, LEX002).
+pub struct TokenDecl : IObject {
+    pub name: str;
+    pub priority: i64;
+    pub pattern: Pattern;
+}
+
+pub fn token(name: str, pattern: Pattern) -> TokenDecl => TokenDecl { name: name, priority: 0, pattern: pattern };
+
+pub fn token_over(name: str, priority: i64, pattern: Pattern) -> TokenDecl => TokenDecl { name: name, priority: priority, pattern: pattern };
+
+fn op(kind: PatKind, lo: i64, hi: i64, n: i64) -> PatOp => PatOp { kind: kind, lo: lo, hi: hi, n: n };
+
+fn append_ops(var ref out: List<PatOp>, ref p: Pattern) {
+    for o in p.ops {
+        out.push(o);
+    }
+}
+
+// -------------------------------------------------------------------------
+// Leaves
+// -------------------------------------------------------------------------
+
+/// One byte in `lo ..= hi`, both given by value.
+pub fn byte_range(lo: i64, hi: i64) -> Pattern {
+    var ops: List<PatOp> = [];
+    ops.push(op(PatKind::Bytes, lo, hi, 0));
+    return Pattern { ops: ops };
+}
+
+/// The one byte with value `b`.
+pub fn byte(b: i64) -> Pattern => byte_range(b, b);
+
+/// One byte from the first byte of `lo` to the first byte of `hi`
+/// (`range("0", "9")`).
+pub fn range(lo: str, hi: str) -> Pattern => byte_range(lo.byte_at(0) as i64, hi.byte_at(0) as i64);
+
+/// Exactly the bytes of `text`, in order.
+pub fn lit(text: str) -> Pattern {
+    var ops: List<PatOp> = [];
+    var i = 0;
+    while i < text.len() {
+        let b = text.byte_at(i) as i64;
+        ops.push(op(PatKind::Bytes, b, b, 0));
+        i = i + 1;
+    }
+    if text.len() != 1 {
+        ops.push(op(PatKind::Seq, 0, 0, text.len() as i64));
+    }
+    return Pattern { ops: ops };
+}
+
+/// Any one of the bytes of `chars` (`class("eE")`).
+pub fn class(chars: str) -> Pattern {
+    var ops: List<PatOp> = [];
+    var i = 0;
+    while i < chars.len() {
+        let b = chars.byte_at(i) as i64;
+        ops.push(op(PatKind::Bytes, b, b, 0));
+        i = i + 1;
+    }
+    if chars.len() != 1 {
+        ops.push(op(PatKind::Alt, 0, 0, chars.len() as i64));
+    }
+    return Pattern { ops: ops };
+}
+
+// -------------------------------------------------------------------------
+// Combinators
+// -------------------------------------------------------------------------
+
+/// The parts one after another.
+pub fn seq(parts: List<Pattern>) -> Pattern {
+    var ops: List<PatOp> = [];
+    for p in parts {
+        append_ops(ops, p);
+    }
+    ops.push(op(PatKind::Seq, 0, 0, parts.len() as i64));
+    return Pattern { ops: ops };
+}
+
+/// Any one of the parts.
+pub fn alt(parts: List<Pattern>) -> Pattern {
+    var ops: List<PatOp> = [];
+    for p in parts {
+        append_ops(ops, p);
+    }
+    ops.push(op(PatKind::Alt, 0, 0, parts.len() as i64));
+    return Pattern { ops: ops };
+}
+
+fn wrap(ref p: Pattern, kind: PatKind) -> Pattern {
+    var ops: List<PatOp> = [];
+    append_ops(ops, p);
+    ops.push(op(kind, 0, 0, 1));
+    return Pattern { ops: ops };
+}
+
+/// `p` or nothing.
+pub fn opt(p: Pattern) -> Pattern => wrap(p, PatKind::Opt);
+
+/// `p` zero or more times.
+pub fn many(p: Pattern) -> Pattern => wrap(p, PatKind::Many);
+
+/// `p` one or more times.
+pub fn some_of(p: Pattern) -> Pattern => wrap(p, PatKind::AtLeastOne);
+
+/// `p` at least `min` and at most `max` times (`repeat(hex, 1, 6)`). Each
+/// count costs about one state, so keep the bounds small.
+pub fn repeat(p: Pattern, min: i64, max: i64) -> Pattern {
+    var ops: List<PatOp> = [];
+    var count = 0;
+    while count < min {
+        append_ops(ops, p);
+        count = count + 1;
+    }
+    // The optional tail nests (`p (p (p)?)?`), so a later copy is only
+    // tried after an earlier one matched.
+    var tail = 0;
+    while count < max {
+        append_ops(ops, p);
+        count = count + 1;
+        tail = tail + 1;
+    }
+    var closed = 0;
+    while closed < tail {
+        if closed > 0 {
+            ops.push(op(PatKind::Seq, 0, 0, 2));
+        }
+        ops.push(op(PatKind::Opt, 0, 0, 1));
+        closed = closed + 1;
+    }
+    var parts = min;
+    if tail > 0 {
+        parts = parts + 1;
+    }
+    if parts != 1 {
+        ops.push(op(PatKind::Seq, 0, 0, parts));
+    }
+    return Pattern { ops: ops };
+}

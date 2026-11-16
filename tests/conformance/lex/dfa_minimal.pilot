@@ -1,0 +1,36 @@
+// The lexer builder (pilot.lex.build, PROP-021 slice 21A) gives the
+// smallest DFA for each set of token patterns. "N states" does not count
+// the dead state; byte classes with the same column are merged.
+//
+// Expected, worked by hand:
+//   ab|ac: start -a-> A -(b|c)-> accept. 3 states. Classes: {a}, {b, c}
+//     (same column: A -> accept), everything else (dead everywhere) -> 3.
+//   a a*  and  a+ : start -a-> accept, accept -a-> accept. 2 states,
+//     classes {a} and the rest -> 2. Equivalent patterns, same table.
+//   [ab]{1,3}: start, then 1, 2 or 3 bytes taken (all accepting, but each
+//     has a different number of bytes left) -> 4 states; a and b share a
+//     column -> 2 classes.
+//   `if` (priority 1) over names [a-z]+: start; I after "i" (a name);
+//     IF after "if" (the keyword); N any other name. I and N differ on f
+//     (I -f-> IF accepts the keyword, N -f-> N a name) -> 4 states.
+//     Columns: i, f, the other letters (all to N; a-e, g-h, j-z merge),
+//     every other byte (dead) -> 4 classes.
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+
+fn summary(decls: List<TokenDecl>) {
+    let built = build_table(decls);
+    if !built.ok() {
+        print("errors");
+        return;
+    }
+    print(table_summary(built.table));
+}
+
+fn main() {
+    summary([token("ab", alt([lit("ab"), lit("ac")]))]);
+    summary([token("as", seq([lit("a"), many(lit("a"))]))]);
+    summary([token("as", some_of(lit("a")))]);
+    summary([token("ab", repeat(class("ab"), 1, 3))]);
+    summary([token_over("if", 1, lit("if")), token("name", some_of(range("a", "z")))]);
+}

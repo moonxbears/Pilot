@@ -350,7 +350,7 @@ pub fn member_call(var ref lw: Lowerer, recv: u32, t: i64, name: str, ref arg_no
         if kind(s, a) == nk_call_arg() { return unsupported(lw, n); }
         args.push(lower_expr(lw, a));
     }
-    return emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), phy, args, n);
+    return engine_call(lw, hook, args, phy, type_of(lw.inf, n), n);
 }
 
 /// Whether member `m` is a method with a body the program runs.

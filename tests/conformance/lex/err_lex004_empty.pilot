@@ -1,0 +1,16 @@
+// A token must take at least one byte: a pattern that matches the empty
+// text would let the lexer stand still (LEX004).
+//
+// Expected, worked by hand: `a*` matches "", so LEX004 names `as`; `a+`
+// does not, so the second build is fine.
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+
+fn main() {
+    let bad = build_table([token("as", many(lit("a")))]);
+    print(bad.ok());
+    for e in bad.errors {
+        print(f"{e.code}: {e.message}");
+    }
+    print(build_table([token("as", some_of(lit("a")))]).ok());
+}
