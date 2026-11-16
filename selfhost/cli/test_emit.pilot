@@ -68,6 +68,7 @@ struct EmitTally : IObject {
     pub failed:       i64;
     pub at_seam:      i64;
     pub not_eligible: i64;
+    pub not_run:      i64;
 }
 
 fn read_or_empty(path: str) -> str => if File.exists(path) { File.read_text(path) } else { "" };
@@ -294,7 +295,12 @@ fn emit_cases(exe: str, ref rs: List<EmitRunner>, ref cases: List<str>, ref dir_
 
 /// `pilot test --emit <lang>[,<lang>..] [paths...] [--filter text] [--live-allocations]`: exit 0 when no
 /// eligible case fails, 1 when one does, 2 when a language is not a target.
-pub fn test_emit_command(langs: str, ref paths: List<str>, filter: str, live: bool) -> i64 {
+pub fn test_emit_command(langs: str, ref paths: List<str>, ref sel: TestSelect, live: bool) -> i64 {
+    let problem = test_select_problem(sel);
+    if problem != "" {
+        eprint(f"error: {problem}");
+        return 2;
+    }
     var rs: List<EmitRunner> = [];
     var has_c = false;
     for lang in text.split_text(langs, ",") {
@@ -312,12 +318,12 @@ pub fn test_emit_command(langs: str, ref paths: List<str>, filter: str, live: bo
     var not_eligible = 0;
     let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
     var cases: List<str> = [];
-    for root in roots {
-        let programs = if root.ends_with(".pilot") { [root] } else { test_programs_in(root) };
-        for program in programs {
-            if program.find(filter, 0) < 0 || !File.exists(test_stem(program) + ".stdout") { continue; }
-            if ir_eligible(program) { cases.push(program); } else { not_eligible = not_eligible + 1; }
-        }
+    for program in test_pick(sel, test_case_programs(roots), true, sel.list) {
+        if ir_eligible(program) { cases.push(program); } else { not_eligible = not_eligible + 1; }
+    }
+    if sel.list {
+        test_print_list(cases);
+        return 0;
     }
     let exe = proc.current_exe() ?? "pilot";
     var dirs: List<str> = [];
@@ -326,17 +332,22 @@ pub fn test_emit_command(langs: str, ref paths: List<str>, filter: str, live: bo
     var failed = 0;
     var k = 0;
     while k < rs.len() {
-        let tally = EmitTally { passed: 0, failed: 0, at_seam: 0, not_eligible: not_eligible };
-        run_emitted(rs[k], cases, emitted[k], dirs[k], live && rs[k].lang == "c", tally);
+        let tally = EmitTally { passed: 0, failed: 0, at_seam: 0, not_eligible: not_eligible, not_run: 0 };
+        run_emitted(rs[k], cases, emitted[k], dirs[k], live && rs[k].lang == "c", sel.fail_fast, sel.jobs, tally);
+        test_report_stopped(tally.not_run);
         print(f"RESULT (emit {rs[k].lang}): {tally.passed} passed, {tally.failed} failed, {tally.at_seam} stopped at a seam, {tally.not_eligible} not eligible");
         failed = failed + tally.failed;
+        if sel.fail_fast && failed > 0 { break; }
         k = k + 1;
     }
     return if failed == 0 { 0 } else { 1 };
 }
 
 /// Builds, runs and judges `cases` as emitted for the language of `r`.
-fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitted>, dir: str, live: bool, var ref tally: EmitTally) {
+/// With `fail_fast`, a failure in one phase (emitting, building, running)
+/// leaves the cases of the later phases unrun (`tally.not_run`), and a
+/// failed run starts no more runs.
+fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitted>, dir: str, live: bool, fail_fast: bool, most: i64, var ref tally: EmitTally) {
     var compile: List<str> = [];
     for a in r.compile {
         compile.push(a);
@@ -372,6 +383,11 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
         i = i + 1;
     }
 
+    if fail_fast && tally.failed > 0 {
+        tally.not_run = tally.not_run + built.len();
+        return;
+    }
+
     // Build, when the language is compiled.
     var runnable: List<i64> = [];
     if r.compile.len() == 0 {
@@ -392,6 +408,11 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
         }
     }
 
+    if fail_fast && tally.failed > 0 {
+        tally.not_run = tally.not_run + runnable.len();
+        return;
+    }
+
     // Run. A case that starts the CLI again finds it through PILOT_CLI
     // (proc.pilot_cli_path): compiled, it is not the CLI itself.
     let cli_env = f"{proc.pilot_cli_env()}={proc.current_exe() ?? "pilot"}";
@@ -402,17 +423,37 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
         for a in test_lines(read_or_empty(stem + ".args")) { argv.push(a); }
         runs.push(job_of(argv, read_or_empty(stem + ".stdin"), [cli_env]));
     }
-    let outs = proc.run_all(runs);
-    i = 0;
-    while i < runnable.len() {
-        let k = runnable[i];
-        var problems = check_emitted(built[k], built_stderr[k], outs[i]);
+    // Judged as they finish; reported in case order.
+    var judged: List<bool> = [];
+    var found: List<List<str>> = [];
+    for k in runnable {
+        judged.push(false);
+        found.push([]);
+    }
+    var pool = proc.job_pool_at_most(runs, most);
+    loop {
+        guard some f = pool.next() else { break; };
+        let k = runnable[f.index];
+        var problems = check_emitted(built[k], built_stderr[k], f.out);
         if live {
-            if some n = live_count(outs[i].stderr) {
+            if some n = live_count(f.out.stderr) {
                 if n != "0" { problems.push(f"{n} heap objects still allocated at the end"); }
             }
         }
-        if problems.len() == 0 { tally.passed = tally.passed + 1; } else { fail(built[k], problems, tally); }
+        judged[f.index] = true;
+        found[f.index] = problems;
+        if fail_fast && problems.len() > 0 { break; }
+    }
+    pool.finish();
+    i = 0;
+    while i < runnable.len() {
+        if !judged[i] {
+            tally.not_run = tally.not_run + 1;
+        } else if found[i].len() == 0 {
+            tally.passed = tally.passed + 1;
+        } else {
+            fail(built[runnable[i]], found[i], tally);
+        }
         i = i + 1;
     }
 }

@@ -24,6 +24,21 @@
 // The programs of a directory are its top-level `.pilot` files and those of
 // its case folders (subfolders that hold `.stdout` files, one per area of the
 // language); packages the cases import live in subfolders without any.
+//
+// Choosing and running (`TestSelect`, the same for every engine):
+// * `<name>.tags` holds a case's tags, separated by commas, spaces or
+//   newlines (`slow`). `--tag a,b` runs only the cases with one of them,
+//   `--skip-tag a,b` none of those; `SKIPPED n of m cases by tag` counts the
+//   cases left out.
+// * `--shard K/N` runs the K-th of N disjoint parts: the cases tagged `slow`
+//   are dealt out first, then the rest, each in path order, the i-th to
+//   shard (i mod N) + 1, so the slow ones spread over the shards. Known-bug
+//   programs run on shard 1.
+// * `--list` prints the chosen cases, one path per line, and runs nothing,
+//   so a CI job can hand each shard its list.
+// * `--fail-fast` starts no more cases after the first failure;
+//   `STOPPED at the first failure: n not run` counts what it skipped.
+// * `--jobs N` runs at most N cases at once (one per CPU by default).
 pub lvl(0) pkg selfhost.cli;
 
 use Pilot.Core.File;
@@ -36,6 +51,128 @@ pub pure fn test_default_dir() -> str => "tests/conformance";
 pub pure fn test_known_bugs_dir() -> str => "known_bugs";
 /// The attribute that marks a unit test.
 pub pure fn test_attr() -> str => "Test";
+/// The extension of a case's tag file.
+pub const TAGS_EXT: str = ".tags";
+/// The tag of the cases dealt out first by `--shard`.
+pub const SLOW_TAG: str = "slow";
+
+/// Which cases a `pilot test` run takes, and how it runs them.
+pub struct TestSelect : IObject {
+    /// Only programs whose path holds this text.
+    pub filter:    str;
+    /// Only cases with one of these tags (none: every case).
+    pub tags:      List<str>;
+    /// No case with one of these tags.
+    pub skip_tags: List<str>;
+    /// The part to run, 1 ..= `shards` (0: no sharding).
+    pub shard:     i64;
+    pub shards:    i64;
+    /// Start no more cases after the first failure.
+    pub fail_fast: bool;
+    /// Print the chosen cases and run nothing.
+    pub list:      bool;
+    /// At most this many cases at once (0: one per CPU).
+    pub jobs:      i64;
+}
+
+/// A selection that takes every case and runs it.
+pub fn test_select_all(filter: str) -> TestSelect =>
+    TestSelect { filter: filter, tags: [], skip_tags: [], shard: 0, shards: 0, fail_fast: false, list: false, jobs: 0 };
+
+/// The words of `text` separated by commas, spaces or newlines.
+pub fn test_words(text: str) -> List<str> {
+    var out: List<str> = [];
+    var word = "";
+    for i in 0 .. text.len() {
+        let b = text.byte_at(i) as i64;
+        if b == 44 || b == 32 || b == 10 || b == 13 || b == 9 {
+            if word != "" { out.push(word); }
+            word = "";
+        } else {
+            word = word + text.slice(i, i + 1);
+        }
+    }
+    if word != "" { out.push(word); }
+    return out;
+}
+
+/// The tags of `program`, from its `.tags` file.
+pub fn test_tags(program: str) -> List<str> {
+    let path = test_stem(program) + TAGS_EXT;
+    return if File.exists(path) { test_words(File.read_text(path)) } else { [] };
+}
+
+fn shares_any(ref a: List<str>, ref b: List<str>) -> bool {
+    for x in a {
+        if test_listed(b, x) { return true; }
+    }
+    return false;
+}
+
+/// What is wrong with `sel`, or "" when nothing is.
+pub fn test_select_problem(ref sel: TestSelect) -> str {
+    for t in sel.tags {
+        if test_listed(sel.skip_tags, t) { return f"`--tag` and `--skip-tag` both name `{t}`, so no case could run"; }
+    }
+    if sel.shards > 0 && (sel.shard < 1 || sel.shard > sel.shards) {
+        return f"`--shard {sel.shard}/{sel.shards}` names no shard: K must be 1 ..= N";
+    }
+    return "";
+}
+
+/// Reads `K/N` into `sel`; false when it is not two numbers.
+pub fn test_parse_shard(spec: str, var ref sel: TestSelect) -> bool {
+    let slash = spec.find("/", 0);
+    if slash < 1 { return false; }
+    guard some k = text.parse_i64(spec.slice(0, slash)) else { return false; };
+    guard some n = text.parse_i64(spec.slice(slash + 1, spec.len())) else { return false; };
+    if n < 1 { return false; }
+    sel.shard = k;
+    sel.shards = n;
+    return true;
+}
+
+/// The programs of `programs` the run takes, in order: those whose path
+/// holds the filter, then those the tags allow, then (with `sharded`) those
+/// of the shard. Unless `quiet`, prints the SKIPPED and SHARD counts.
+pub fn test_pick(ref sel: TestSelect, ref programs: List<str>, sharded: bool, quiet: bool) -> List<str> {
+    var tagged: List<str> = [];
+    var named = 0;
+    for p in programs {
+        if p.find(sel.filter, 0) < 0 { continue; }
+        named = named + 1;
+        let tags = test_tags(p);
+        if sel.tags.len() > 0 && !shares_any(tags, sel.tags) { continue; }
+        if shares_any(tags, sel.skip_tags) { continue; }
+        tagged.push(p);
+    }
+    if !quiet && tagged.len() < named { print(f"SKIPPED {named - tagged.len()} of {named} cases by tag"); }
+    if !sharded || sel.shards == 0 { return tagged; }
+    // Deal the slow cases first, then the rest.
+    var shard_of: List<i64> = [];
+    var dealt = 0;
+    for p in tagged { shard_of.push(0); }
+    for pass in 0 .. 2 {
+        for i in 0 .. tagged.len() {
+            let slow = test_listed(test_tags(tagged[i]), SLOW_TAG);
+            if (pass == 0) == slow {
+                shard_of[i] = dealt % sel.shards + 1;
+                dealt = dealt + 1;
+            }
+        }
+    }
+    var out: List<str> = [];
+    for i in 0 .. tagged.len() {
+        if shard_of[i] == sel.shard { out.push(tagged[i]); }
+    }
+    if !quiet { print(f"SHARD {sel.shard}/{sel.shards}: {out.len()} of {tagged.len()} cases"); }
+    return out;
+}
+
+/// Prints `programs`, one per line (`--list`).
+pub fn test_print_list(ref programs: List<str>) {
+    for p in programs { print(p); }
+}
 
 /// How one program or test function fared.
 pub struct TestResult : IValue {
@@ -51,6 +188,8 @@ pub struct TestTally : IObject {
     pub bugs_reproduced: i64;
     /// Known-bug programs that now pass: their bug is fixed.
     pub bugs_fixed:      i64;
+    /// Programs `--fail-fast` did not run.
+    pub not_run:         i64;
 }
 
 /// The lines of `text`, without line endings.
@@ -173,19 +312,39 @@ pub fn test_check_case(program: str, out: proc.ProcessOutput) -> TestResult {
     return TestResult { name: program, problems: problems };
 }
 
-/// Runs the conformance case `program` in its own process and lists every
-/// way its result differs from its expectation files.
-pub fn test_run_case(program: str) -> TestResult => test_check_case(program, proc.spawn_job(test_case_job(program)).wait());
+/// What running some cases left: per case its result, and whether it ran.
+pub struct CaseRuns : IObject {
+    pub results: List<TestResult>;
+    pub ran:     List<bool>;
+    /// Whether a failure stopped the run before every case ran.
+    pub stopped: bool;
+}
 
-/// Runs the conformance cases `programs` (`proc.run_all`) and returns their
-/// results in the order of `programs`.
-pub fn test_run_cases(ref programs: List<str>) -> List<TestResult> {
+/// Runs the conformance cases `programs` (a `proc.JobPool`), judging each
+/// as it finishes; with `fail_fast`, starts no more after the first failure.
+pub fn test_run_cases(ref programs: List<str>, fail_fast: bool, most: i64) -> CaseRuns {
     var jobs: List<proc.ProcessJob> = [];
-    for program in programs { jobs.push(test_case_job(program)); }
-    let outs = proc.run_all(jobs);
     var results: List<TestResult> = [];
-    for i in 0 .. programs.len() { results.push(test_check_case(programs[i], outs[i])); }
-    return results;
+    var ran: List<bool> = [];
+    for program in programs {
+        jobs.push(test_case_job(program));
+        results.push(TestResult { name: program, problems: [] });
+        ran.push(false);
+    }
+    var pool = proc.job_pool_at_most(jobs, most);
+    var stopped = false;
+    loop {
+        guard some f = pool.next() else { break; };
+        let r = test_check_case(programs[f.index], f.out);
+        results[f.index] = r;
+        ran[f.index] = true;
+        if fail_fast && r.problems.len > 0 {
+            stopped = true;
+            break;
+        }
+    }
+    pool.finish();
+    return CaseRuns { results: results, ran: ran, stopped: stopped };
 }
 
 /// The `[Test]` functions of `program`, each run on its own.
@@ -238,45 +397,37 @@ fn test_tally_result(r: TestResult, var ref tally: TestTally) {
     }
 }
 
-/// Runs `programs` (conformance cases and unit-test files) into `tally`, in
-/// order. The cases run in parallel first; their results are reported in
-/// place.
-pub fn test_programs(ref programs: List<str>, filter: str, var ref tally: TestTally) {
+/// Runs `programs` (conformance cases and unit-test files, already chosen)
+/// into `tally`, in order. The cases run in parallel first; their results
+/// are reported in place. Returns whether `--fail-fast` stopped the run.
+pub fn test_programs(ref programs: List<str>, ref sel: TestSelect, var ref tally: TestTally) -> bool {
     var cases: List<str> = [];
     for program in programs {
-        if is_case(program) && program.find(filter, 0) >= 0 { cases.push(program); }
+        if is_case(program) { cases.push(program); }
     }
-    let case_results = test_run_cases(cases);
+    let runs = test_run_cases(cases, sel.fail_fast, sel.jobs);
+    var stopped = runs.stopped;
     var next_case = 0;
     for program in programs {
         if is_case(program) {
-            if program.find(filter, 0) >= 0 {
-                test_tally_result(case_results[next_case], tally);
-                next_case = next_case + 1;
-            }
+            if runs.ran[next_case] { test_tally_result(runs.results[next_case], tally); } else { tally.not_run = tally.not_run + 1; }
+            next_case = next_case + 1;
+        } else if stopped {
+            tally.not_run = tally.not_run + 1;
         } else if test_has_functions(program) {
-            for r in test_run_functions(program, filter) { test_tally_result(r, tally); }
-        } else if program.find(filter, 0) >= 0 {
+            for r in test_run_functions(program, sel.filter) { test_tally_result(r, tally); }
+            if sel.fail_fast && tally.failed > 0 { stopped = true; }
+        } else {
             test_tally_result(TestResult { name: program, problems: ["has no `.stdout` expectation file and no `[Test]` functions"] }, tally);
+            if sel.fail_fast { stopped = true; }
         }
     }
-}
-
-/// Runs one program (a conformance case or a unit-test file) into `tally`.
-pub fn test_program(program: str, filter: str, var ref tally: TestTally) => test_programs([program], filter, tally);
-
-/// Runs the known-bug programs of `dir`; each must still fail.
-pub fn test_known_bugs(dir: str, filter: str, var ref tally: TestTally) {
-    var programs: List<str> = [];
-    for program in test_programs_in(dir) {
-        if program.find(filter, 0) >= 0 { programs.push(program); }
-    }
-    test_known_bug_programs(programs, tally);
+    return stopped;
 }
 
 /// Runs the known-bug programs `programs`; each must still fail.
 pub fn test_known_bug_programs(ref programs: List<str>, var ref tally: TestTally) {
-    for r in test_run_cases(programs) {
+    for r in test_run_cases(programs, false, 0).results {
         if r.problems.len == 0 {
             tally.bugs_fixed = tally.bugs_fixed + 1;
             print(f"FIXED {r.name}: the bug it reproduces is gone; move it up into the corpus, delete its `bug_registry()` entry and undo every [Workaround] naming it");
@@ -286,11 +437,24 @@ pub fn test_known_bug_programs(ref programs: List<str>, var ref tally: TestTally
     }
 }
 
-/// `pilot test [paths...] [--filter text]`: exit 0 when every case passes and
-/// every known bug still reproduces, 1 otherwise.
-pub fn test_command(ref paths: List<str>, filter: str) -> i64 {
-    var tally = TestTally { passed: 0, failed: 0, bugs_reproduced: 0, bugs_fixed: 0 };
+/// Prints the STOPPED line when `--fail-fast` left cases unrun.
+pub fn test_report_stopped(not_run: i64) {
+    if not_run > 0 { print(f"STOPPED at the first failure: {not_run} not run"); }
+}
+
+/// `pilot test [paths...] [--filter text] [--tag ..] [--skip-tag ..]
+/// [--shard K/N] [--list] [--fail-fast]`: exit 0 when every case passes and
+/// every known bug still reproduces, 1 otherwise, 2 for a bad request.
+pub fn test_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
+    let problem = test_select_problem(sel);
+    if problem != "" {
+        eprint(f"error: {problem}");
+        return 2;
+    }
+    var tally = TestTally { passed: 0, failed: 0, bugs_reproduced: 0, bugs_fixed: 0, not_run: 0 };
     let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
+    var programs: List<str> = [];
+    var bugs: List<str> = [];
     for root in roots {
         if root.ends_with(".pilot") {
             if !File.exists(root) {
@@ -298,22 +462,32 @@ pub fn test_command(ref paths: List<str>, filter: str) -> i64 {
                 return 2;
             }
             // A program of a `known_bugs/` directory must still fail.
-            if root.find("/" + test_known_bugs_dir() + "/", 0) >= 0 {
-                test_known_bug_programs([root], tally);
-            } else {
-                test_program(root, filter, tally);
-            }
+            if root.find("/" + test_known_bugs_dir() + "/", 0) >= 0 { bugs.push(root); } else { programs.push(root); }
             continue;
         }
-        let programs = test_programs_in(root);
-        if programs.len == 0 {
+        let found = test_programs_in(root);
+        if found.len == 0 {
             eprint(f"error: no `.pilot` programs in `{root}`");
             return 2;
         }
-        test_programs(programs, filter, tally);
-        let bugs = (if root.ends_with("/") { root } else { root + "/" }) + test_known_bugs_dir();
-        if test_programs_in(bugs).len > 0 { test_known_bugs(bugs, filter, tally); }
+        for p in found { programs.push(p); }
+        let bug_dir = (if root.ends_with("/") { root } else { root + "/" }) + test_known_bugs_dir();
+        for p in test_programs_in(bug_dir) { bugs.push(p); }
     }
+    let picked = test_pick(sel, programs, true, sel.list);
+    let picked_bugs = if sel.shard > 1 { [] } else { test_pick(sel, bugs, false, true) };
+    if sel.list {
+        test_print_list(picked);
+        test_print_list(picked_bugs);
+        return 0;
+    }
+    let stopped = test_programs(picked, sel, tally);
+    if stopped {
+        tally.not_run = tally.not_run + picked_bugs.len();
+    } else if picked_bugs.len() > 0 {
+        test_known_bug_programs(picked_bugs, tally);
+    }
+    test_report_stopped(tally.not_run);
     print(f"RESULT: {tally.passed} passed, {tally.failed} failed, {tally.bugs_reproduced} known bugs reproduced, {tally.bugs_fixed} known bugs fixed");
     return if tally.failed == 0 && tally.bugs_fixed == 0 { 0 } else { 1 };
 }

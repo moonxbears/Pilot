@@ -266,6 +266,7 @@ pub fn stand_in_registry() -> List<StandInEntry> {
         stand_in_entry("proc.memory_available", "each OS's own report of available memory (Linux /proc/meminfo, macOS host_statistics64, Windows GlobalMemoryStatusEx)", "only Linux's /proc/meminfo is read; on other OSes it is none, and run_all is limited by the CPU count alone", "F6"),
         stand_in_entry("proto.packet_bytes", "borrowed slice<u8> wire view (0b01)", "generated views hold an owned List<i64>, one byte per element", "F7"),
         stand_in_entry("lex.token_attribute", "each token is a declaration marked [Token(..)] that the lexer builder collects from the tree", "stdlib/core/lex/numbers.pilot number_tokens() returns its declarations in a list written by hand", "PROP-021"),
+        stand_in_entry("mem.packed_width", "a PackedBuffer<T> takes its element width and signedness from T's [Bits] (sizeof(T) in the generic body)", "stdlib/core/packed.pilot packed_buffer<T>(width, signed) takes them from the caller, because the seed cannot lower sizeof(T) in a generic body (SEED001)", "M38"),
         stand_in_entry("py.buffer_layout", "CPython Py_buffer C layout with typed pointers", "pointers are usize and format is a str, so the layout does not match", "F6"),
         stand_in_entry("seed.generator_frame", "a frame record of the body's live locals and a state index (F5b)", "on the seed the engine keeps the frame (its registers and resume point) and the value is its integer handle; the type declares none of the record's fields", "F6"),
         stand_in_entry("soa.row_base", "ptr<u8> base of the table's column planes", "integer address with no allocation behind it", "F7"),
@@ -363,6 +364,10 @@ pub fn bug_registry() -> List<KnownBug> {
             "inside a `while` or `for` body the left operand of an arithmetic operator reads as unknown, so `x + 7` takes the literal's `i64` (even `flag + 7` for a bool `flag`); outside a loop, or inside `loop`, the other operand's type wins",
             "capacity + 7 is a usize; prints 3", "error[TYPE001]: argument 1 of `want`: expected `usize`, found `i64`",
             "tests/conformance/known_bugs/loop_arith_literal.pilot", "F4"),
+        known_bug("lex.fstring_format_spec", "stdlib/core/lex/strings.pilot f-string hole mode (PROP-021 slice 21C)",
+            "an f-string hole's format spec after `:` (`{n:#_###}`) is lexed with the ordinary tokens, so a `#` in it starts a `#` line that swallows the hole's `}` and the closing quote; found by the 21E tape's LEX006 on the whole tree",
+            "the hole holds `n` and the spec `#_###`; prints true", "prints false (LEX006: the hole's `{` is never closed)",
+            "tests/conformance/known_bugs/fstring_format_spec_lex.pilot", "PROP-021"),
     ];
     return entries;
 }

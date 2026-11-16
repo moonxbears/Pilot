@@ -1,0 +1,47 @@
+// The token tape (PROP-021 slice 21E) keeps 6 bytes a token: its kind (2)
+// and its start (4). The kind says the token's family, its mode and the
+// context it started in; the end is found again from the start.
+//
+// Expected, worked by hand for `fn f(a) {a.b}` (byte offsets 0 ..= 12;
+// spaces are not tokens on the tape):
+//   fn        0..2   Start   (the first token)
+//   name f    3..4   Spaced  (after a space)
+//   (         4..5   Glued   (touching the name, an operand)
+//   name a    5..6   Other   (after `(`, not an operand)
+//   )         6..7   Glued
+//   {         8..9   Spaced
+//   name a    9..10  Other
+//   infix_dot 10..11 Glued   (a dot touching an operand)
+//   name b    11..12 Other
+//   }         12..13 Glued
+// 10 tokens, 60 bytes.
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.build;
+use pilot.lex.modes;
+use pilot.lex;
+
+fn ctx_name(c: LexContextKind) -> str {
+    if c == LexContextKind::Start { return "Start"; }
+    if c == LexContextKind::Spaced { return "Spaced"; }
+    if c == LexContextKind::Glued { return "Glued"; }
+    return "Other";
+}
+
+fn main() {
+    let built = build_modes(core_modes(operator_tokens([], [])));
+    let src = "fn f(a) {a.b}";
+    let tb = build_tape(built.lexer, src);
+    print(tb.ok());
+    print(tb.tape.len());
+    print(tb.tape.byte_len());
+    var i = 0;
+    while i < tb.tape.len() {
+        let fam = tb.tape.family(built.lexer, i);
+        let ctx = ctx_name(tb.tape.context(i));
+        let from = tb.tape.start(i);
+        let to = tb.tape.end(built.lexer, src, i);
+        print(f"{fam} {ctx} {from} {to}");
+        i = i + 1;
+    }
+}

@@ -1,0 +1,66 @@
+name: Pilot suites
+
+# The conformance corpus on all three engines, split into shards that run on
+# separate machines, and `pilot gate --full`.
+#
+# Sharding (`pilot test --shard K/N`, selfhost/cli/test_cmd.pilot) deals the
+# cases to N disjoint parts, the `slow`-tagged ones first, so each machine
+# gets a share of the expensive cases. Shard counts follow measured CPU time
+# per engine (2026-11-16, all 639 cases): seed ~800 s, PilIR ~6,200 s, C
+# ~1,100 s; a hosted runner has 4 CPUs.
+#
+# On a pull request each shard runs only the cases the change reaches
+# (`--changed`, selfhost/cli/test_changed.pilot); on main it runs them all,
+# `slow` cases included.
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  conformance:
+    name: ${{ matrix.engine }} shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { engine: seed, flags: "",           shard: "1/2" }
+          - { engine: seed, flags: "",           shard: "2/2" }
+          - { engine: ir,   flags: "--ir",       shard: "1/4" }
+          - { engine: ir,   flags: "--ir",       shard: "2/4" }
+          - { engine: ir,   flags: "--ir",       shard: "3/4" }
+          - { engine: ir,   flags: "--ir",       shard: "4/4" }
+          - { engine: c,    flags: "--emit c",   shard: "1/2" }
+          - { engine: c,    flags: "--emit c",   shard: "2/2" }
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # `--changed` compares two commits, so it needs the history.
+        fetch-depth: 0
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Build the seed
+      run: cargo build -p pilot-cli
+    - name: Run the shard
+      shell: bash
+      run: |
+        changed=()
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          changed=(--changed --since "${{ github.event.pull_request.base.sha }}..${{ github.sha }}")
+        fi
+        ./target/debug/pilot test ${{ matrix.flags }} "${changed[@]}" --shard ${{ matrix.shard }}
+
+  gate:
+    name: pilot gate --full
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Build the seed
+      run: cargo build -p pilot-cli
+    - name: Gate
+      run: ./target/debug/pilot gate --full

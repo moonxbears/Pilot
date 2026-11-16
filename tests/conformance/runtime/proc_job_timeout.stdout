@@ -1,0 +1,3 @@
+0: timed out false, exit 0, out `a`
+1: timed out true, exit -1, out `b`
+under 20 s: true

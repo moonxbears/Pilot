@@ -1,0 +1,4 @@
+// A case that passes: it prints what its .stdout holds.
+fn main() {
+    print("a");
+}

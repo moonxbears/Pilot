@@ -1,0 +1,6 @@
+false
+LEX006: `]` at byte 2 does not close `(` at byte 0
+false
+LEX006: `)` at byte 0 closes nothing
+false
+LEX006: `{` at byte 2 is never closed

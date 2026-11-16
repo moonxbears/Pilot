@@ -1,115 +1,238 @@
 // ==============================================================================
 // FILE: stdlib/pilot/lex.pilot
-// Ring 3: Compiler-as-a-Library Streaming Tokenizer (pub pkg pilot.lex;)
-// Zero-allocation streaming cursor over source text
+// Ring 3: the token tape (pub pkg pilot.lex;) — PROP-021 slice 21E
 // ==============================================================================
+// The tokens of one source, kept for a parser that reads them in any order:
+// 6 bytes a token, as the Zig compiler's tokenizer keeps them (owner
+// decision 2026-11-16). Each token keeps
+//   - its kind (`u16`): its family across the whole lexer
+//     (`ModalLexer.family_of`) times the number of start contexts, plus the
+//     context it started in; the family also names the token's mode;
+//   - its start (`u32`): the byte where it begins.
+// Everything else is found again from those and the source:
+//   - the end: the longest match from the start, in the token's mode and
+//     context, which is how the token was found in the first place;
+//   - what lies between two tokens (a newline, whether they touch);
+//   - bracket partners, which `bracket_links` works out when asked.
+// Spaces are not on the tape; comments, `#` lines and the shebang are, so a
+// tool can give back the source as it was. `crates/pilot-lexer`'s
+// `TokenTape` stores 15 bytes a token and is the guide for what the parser
+// must be able to ask (PROP-021 §11.1).
 pub pkg pilot.lex;
 
+use Pilot.Core.Packed;
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Lexicon;
+use pilot.lex.build;
+use pilot.lex.modes;
+
+/// A token's bytes, as offsets into its source.
 [Layout(c_abi)]
 pub struct ByteSpan : IValue {
     pub start: u32;
-    pub end:   u32;
+    pub end: u32;
 }
 
-pub pure fn byte_span_new(st: u32, ed: u32) -> ByteSpan => ByteSpan { start: st, end: ed };
+/// The furthest byte offset a `u32` start can hold (LEX007).
+pub const MAX_OFFSET: i64 = 4294967295;
 
-[Layout(c_abi)]
-pub struct Token : IValue {
-    pub kind_id:   u16;
-    pub span:      ByteSpan;
-    pub is_trivia: bool;
-    pub text:      str;
-}
+/// The tokens of one source: per token, its kind and its start.
+pub struct TokenTape : IObject {
+    pub kinds: PackedBuffer<u16>;
+    pub starts: PackedBuffer<u32>;
 
-pub pure fn token_new(kind: u16, st: u32, ed: u32, trivia: bool, txt: str) -> Token {
-    return Token {
-        kind_id:   kind,
-        span:      byte_span_new(st, ed),
-        is_trivia: trivia,
-        text:      txt,
-    };
-}
+    /// The number of tokens.
+    pub fn len(ref self) -> i64 => self.kinds.len();
 
-pub enum TokenKind : u16 {
-    ::Eof        = 0,
-    ::Whitespace = 1,
-    ::Comment    = 2,
-    ::Ident      = 10,
-    ::Keyword    = 11,
-    ::Number     = 12,
-    ::String     = 13,
-    ::Symbol     = 14,
-}
+    /// The bytes the tape takes: 2 for the kind and 4 for the start of
+    /// each token.
+    pub fn byte_len(ref self) -> i64 => self.kinds.byte_len() + self.starts.byte_len();
 
-pub pure fn token_kind_eof()        -> u16 => 0;
-pub pure fn token_kind_whitespace() -> u16 => 1;
-pub pure fn token_kind_comment()    -> u16 => 2;
-pub pure fn token_kind_ident()      -> u16 => 10;
-pub pure fn token_kind_keyword()    -> u16 => 11;
-pub pure fn token_kind_number()     -> u16 => 12;
-pub pure fn token_kind_string()     -> u16 => 13;
-pub pure fn token_kind_symbol()     -> u16 => 14;
+    /// Token `i`'s family, numbered across the lexer.
+    pub fn family_index(ref self, i: i64) -> i64 => (self.kinds[i] as i64) / (LEX_CONTEXT_KINDS.len() as i64);
 
-// Zero-allocation streaming cursor (0b01 : IReference)
-pub struct TokenCursor : IReference {
-    pub source:   str;
-    pub position: usize;
-}
+    /// The context token `i` started in.
+    pub fn context(ref self, i: i64) -> LexContextKind => LEX_CONTEXT_KINDS[(self.kinds[i] as i64) % (LEX_CONTEXT_KINDS.len() as i64)];
 
-pub pure fn tokenize(source: str) -> TokenCursor {
-    return TokenCursor { source: source, position: 0 };
-}
+    /// Token `i`'s family name.
+    pub fn family(ref self, ref m: ModalLexer, i: i64) -> str => m.family_name(self.family_index(i));
 
-pub pure fn token_cursor_has_more(cur: TokenCursor) -> bool {
-    return cur.position < cur.source.len();
-}
+    /// The byte where token `i` begins.
+    pub fn start(ref self, i: i64) -> i64 => self.starts[i] as i64;
 
-pub fn token_cursor_next(var ref cur: TokenCursor) -> Token {
-    let n = cur.source.len();
-    if cur.position >= n {
-        return token_new(token_kind_eof(), n as u32, n as u32, false, "");
+    /// The byte after token `i`: its longest match again, in its mode and
+    /// the context it started in.
+    pub fn end(ref self, ref m: ModalLexer, src: str, i: i64) -> i64 {
+        let mode = m.mode_of[self.family_index(i)];
+        return match_at(m.tables[mode], src, self.start(i), self.context(i)).end;
     }
 
-    let st = cur.position;
-    let b = cur.source.byte_at(st);
+    /// Token `i`'s bytes.
+    pub fn span(ref self, ref m: ModalLexer, src: str, i: i64) -> ByteSpan => ByteSpan { start: self.start(i) as u32, end: self.end(m, src, i) as u32 };
 
-    // Whitespace
-    if b == 32 || b == 9 || b == 10 || b == 13 {
-        var ed = st + 1;
-        while ed < n {
-            let nb = cur.source.byte_at(ed);
-            if !(nb == 32 || nb == 9 || nb == 10 || nb == 13) { break; }
-            ed = ed + 1;
+    /// Token `i`'s text.
+    pub fn text(ref self, ref m: ModalLexer, src: str, i: i64) -> str => src.slice(self.start(i), self.end(m, src, i));
+
+    /// Whether a newline lies between the token before `i` (or the start of
+    /// the source) and token `i`.
+    pub fn newline_before(ref self, ref m: ModalLexer, src: str, i: i64) -> bool {
+        var at = if i == 0 { 0 } else { self.end(m, src, i - 1) };
+        let stop = self.start(i);
+        while at < stop {
+            if src.byte_at(at) as i64 == NEWLINE { return true; }
+            at = at + 1;
         }
-        cur.position = ed;
-        return token_new(token_kind_whitespace(), st as u32, ed as u32, true, cur.source.slice(st, ed));
+        return false;
     }
 
-    // Comment //
-    if b == 47 && st + 1 < n && cur.source.byte_at(st + 1) == 47 {
-        var ed = st + 2;
-        while ed < n && cur.source.byte_at(ed) != 10 && cur.source.byte_at(ed) != 13 {
-            ed = ed + 1;
+    /// Whether token `i` ends where the next one starts.
+    pub fn touches_next(ref self, ref m: ModalLexer, src: str, i: i64) -> bool {
+        if i + 1 >= self.len() { return false; }
+        return self.end(m, src, i) == self.start(i + 1);
+    }
+}
+
+/// The result of `build_tape`: the tape, and the errors met while lexing.
+pub struct TapeBuild : IObject {
+    pub tape: TokenTape;
+    pub errors: List<LexBuildError>;
+
+    pub fn ok(ref self) -> bool => self.errors.len() == 0;
+}
+
+/// Per family of a lexer, the bracket it opens or closes: `opens[f]` is the
+/// name of the family that closes `f` ("" when `f` opens nothing), and
+/// `closes[f]` whether `f` closes one (`BRACKET_PAIRS`).
+struct BracketRoles : IObject {
+    opens: List<str>;
+    closes: List<bool>;
+}
+
+fn bracket_roles(ref m: ModalLexer) -> BracketRoles {
+    var opens: List<str> = [];
+    var closes: List<bool> = [];
+    var f = 0;
+    while f < m.families() {
+        let name = m.family_name(f);
+        var closer = "";
+        var closing = false;
+        for p in BRACKET_PAIRS {
+            if p.open == name { closer = p.close; }
+            if p.close == name { closing = true; }
         }
-        cur.position = ed;
-        return token_new(token_kind_comment(), st as u32, ed as u32, true, cur.source.slice(st, ed));
+        opens.push(closer);
+        closes.push(closing);
+        f = f + 1;
     }
+    return BracketRoles { opens: opens, closes: closes };
+}
 
-    // Ident / Keyword
-    if (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 {
-        var ed = st + 1;
-        while ed < n {
-            let nb = cur.source.byte_at(ed);
-            if !((nb >= 65 && nb <= 90) || (nb >= 97 && nb <= 122) || nb == 95 || (nb >= 48 && nb <= 57)) {
-                break;
+/// An open bracket waiting for its closer: its token and the family that
+/// closes it.
+struct OpenBracket : IValue {
+    token: i64;
+    closer: str;
+}
+
+/// Pairs the brackets of `tape`, calling `link(open, close)` for each pair
+/// and reporting LEX006 into `errors`.
+fn pair_brackets(ref m: ModalLexer, ref tape: TokenTape, src: str, var ref errors: List<LexBuildError>, var ref links: PackedBuffer<u32>) {
+    let roles = bracket_roles(m);
+    var stack: List<OpenBracket> = [];
+    var i = 0;
+    while i < tape.len() {
+        let f = tape.family_index(i);
+        if roles.opens[f] != "" {
+            stack.push(OpenBracket { token: i, closer: roles.opens[f] });
+        } else if roles.closes[f] {
+            let name = m.family_name(f);
+            let at = tape.start(i);
+            if stack.len() == 0 {
+                errors.push(LexBuildError { code: "LEX006", message: f"`{name}` at byte {at} closes nothing" });
+            } else {
+                let top = stack.pop();
+                if top.closer == name {
+                    links[i] = top.token as u32;
+                    links[top.token] = i as u32;
+                } else {
+                    let opened = tape.text(m, src, top.token);
+                    let from = tape.start(top.token);
+                    errors.push(LexBuildError { code: "LEX006", message: f"`{name}` at byte {at} does not close `{opened}` at byte {from}" });
+                }
             }
-            ed = ed + 1;
         }
-        cur.position = ed;
-        return token_new(token_kind_ident(), st as u32, ed as u32, false, cur.source.slice(st, ed));
+        i = i + 1;
     }
+    for o in stack {
+        let opened = tape.text(m, src, o.token);
+        let from = tape.start(o.token);
+        errors.push(LexBuildError { code: "LEX006", message: f"`{opened}` at byte {from} is never closed" });
+    }
+}
 
-    // Single byte symbol
-    cur.position = st + 1;
-    return token_new(token_kind_symbol(), st as u32, (st + 1) as u32, false, cur.source.slice(st, st + 1));
+/// A token's partner when it has none.
+const NO_PARTNER: i64 = 4294967295;
+
+/// Per token, the bracket that pairs with it.
+pub struct BracketLinks : IObject {
+    links: PackedBuffer<u32>;
+
+    /// The token that pairs with token `i`, when `i` is a bracket with a
+    /// partner.
+    pub fn partner(ref self, i: i64) -> i64? {
+        let p = self.links[i] as i64;
+        if p == NO_PARTNER { return none; }
+        return p;
+    }
+}
+
+fn unlinked(n: i64) -> PackedBuffer<u32> {
+    var links = packed_buffer<u32>(sizeof(u32), false);
+    links.reserve(n);
+    var i = 0;
+    while i < n {
+        links.push(NO_PARTNER as u32);
+        i = i + 1;
+    }
+    return links;
+}
+
+/// The bracket partners of `tape`, worked out now; a caller that only walks
+/// the tokens in order keeps its own stack instead.
+pub fn bracket_links(ref m: ModalLexer, ref tape: TokenTape, src: str) -> BracketLinks {
+    var errors: List<LexBuildError> = [];
+    var links = unlinked(tape.len());
+    pair_brackets(m, tape, src, errors, links);
+    return BracketLinks { links: links };
+}
+
+/// The tape of `src`. A byte that starts no token is LEX001, an unbalanced
+/// bracket LEX006, and a source too long for a `u32` start LEX007.
+pub fn build_tape(ref m: ModalLexer, src: str) -> TapeBuild {
+    var errors: List<LexBuildError> = [];
+    var kinds = packed_buffer<u16>(sizeof(u16), false);
+    var starts = packed_buffer<u32>(sizeof(u32), false);
+    let len = src.len() as i64;
+    if len > MAX_OFFSET {
+        errors.push(LexBuildError { code: "LEX007", message: f"the source is {len} bytes; a token start is a u32, which reaches byte {MAX_OFFSET}" });
+        return TapeBuild { tape: TokenTape { kinds: kinds, starts: starts }, errors: errors };
+    }
+    kinds.reserve(len / 4);
+    starts.reserve(len / 4);
+    let contexts = LEX_CONTEXT_KINDS.len() as i64;
+    var c = LEX_CONTEXT_START;
+    for l in lex_modal(m, src) {
+        let ctx = context_at(c, l.start);
+        c = context_after(c, role_of(m.tables[l.mode], l));
+        if l.decl < 0 {
+            errors.push(LexBuildError { code: "LEX001", message: f"no token starts at byte {l.start}" });
+        } else if m.tables[l.mode].actions[l.decl].role != TokenRole::Space {
+            kinds.push((m.family_of(l.mode, l.decl) * contexts + (ctx as i64)) as u16);
+            starts.push(l.start as u32);
+        }
+    }
+    let tape = TokenTape { kinds: kinds, starts: starts };
+    var links = unlinked(tape.len());
+    pair_brackets(m, tape, src, errors, links);
+    return TapeBuild { tape: tape, errors: errors };
 }

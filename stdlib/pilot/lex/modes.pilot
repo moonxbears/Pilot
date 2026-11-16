@@ -14,12 +14,37 @@ use Pilot.Core.Lex.Patterns;
 use pilot.lex.build;
 
 /// A built lexer with modes: one table per mode, and per mode and
-/// declaration the index of the mode it enters (-1 for none).
+/// declaration the index of the mode it enters (-1 for none). Every family
+/// of every mode also has one number across the whole lexer: the
+/// declarations of mode `k` are numbered from `bases[k]`, and `mode_of`
+/// gives a family's mode back. The token tape (`pilot.lex`) keeps that
+/// number.
 pub struct ModalLexer : IObject {
     pub modes: List<str>;
     pub tables: List<LexTable>;
     pub enters: List<List<i64>>;
+    pub bases: List<i64>;
+    pub mode_of: List<i64>;
+
+    /// The number of families across every mode.
+    pub fn families(ref self) -> i64 => self.mode_of.len() as i64;
+
+    /// The number across the lexer of declaration `decl` of mode `mode`.
+    pub fn family_of(ref self, mode: i64, decl: i64) -> i64 => self.bases[mode] + decl;
+
+    /// The declaration, within its mode, of family `fam`.
+    pub fn decl_of(ref self, fam: i64) -> i64 => fam - self.bases[self.mode_of[fam]];
+
+    /// The name of family `fam`.
+    pub fn family_name(ref self, fam: i64) -> str {
+        let mode = self.mode_of[fam];
+        return self.tables[mode].names[fam - self.bases[mode]];
+    }
 }
+
+/// The most families a lexer may have: a token kind on the tape is a `u16`
+/// holding a family and one of the start contexts (LEX007).
+pub const MAX_KIND: i64 = 65535;
 
 /// The result of `build_modes`: the lexer, or the errors that stop it.
 pub struct ModalBuild : IObject {
@@ -42,7 +67,15 @@ pub fn build_modes(ref modes: List<LexMode>) -> ModalBuild {
     var errors: List<LexBuildError> = [];
     var tables: List<LexTable> = [];
     var enters: List<List<i64>> = [];
+    var bases: List<i64> = [];
+    var mode_of: List<i64> = [];
     for m in modes {
+        bases.push(mode_of.len() as i64);
+        var j = 0;
+        while j < m.tokens.len() {
+            mode_of.push(bases.len() as i64 - 1);
+            j = j + 1;
+        }
         let built = build_table(m.tokens);
         for e in built.errors {
             errors.push(LexBuildError { code: e.code, message: f"in mode `{m.name}`: {e.message}" });
@@ -61,7 +94,11 @@ pub fn build_modes(ref modes: List<LexMode>) -> ModalBuild {
         tables.push(built.table);
         enters.push(to);
     }
-    return ModalBuild { lexer: ModalLexer { modes: names, tables: tables, enters: enters }, errors: errors };
+    let kinds = mode_of.len() as i64 * LEX_CONTEXT_KINDS.len() as i64;
+    if kinds > MAX_KIND + 1 {
+        errors.push(LexBuildError { code: "LEX007", message: f"{mode_of.len()} families in {LEX_CONTEXT_KINDS.len()} contexts make {kinds} token kinds; a u16 kind numbers at most {MAX_KIND + 1}" });
+    }
+    return ModalBuild { lexer: ModalLexer { modes: names, tables: tables, enters: enters, bases: bases, mode_of: mode_of }, errors: errors };
 }
 
 /// The tokens of `src`, starting in the first mode. A generator, like

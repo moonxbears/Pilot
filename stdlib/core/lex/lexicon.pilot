@@ -15,6 +15,21 @@ use Pilot.Core.Lex.Trivia;
 use Pilot.Core.Lex.Strings;
 use Pilot.Core.Lex.Delimiters;
 
+/// Two families that open and close a bracket, by name.
+pub struct BracketPair : IValue {
+    pub open: str;
+    pub close: str;
+}
+
+/// The brackets: the structural ones, and an f-string hole, whose `{` is
+/// its own family and whose `}` is the structural one (PROP-021 slice 21E).
+pub const BRACKET_PAIRS: List<BracketPair> = [
+    BracketPair { open: "(", close: ")" },
+    BracketPair { open: "[", close: "]" },
+    BracketPair { open: "{", close: "}" },
+    BracketPair { open: HOLE_OPEN, close: "}" },
+];
+
 /// Every token declared so far that lexes in one table, in declaration
 /// order (no operators: those come from the program's declarations).
 pub fn core_tokens() -> List<TokenDecl> => core_tokens_with([]);

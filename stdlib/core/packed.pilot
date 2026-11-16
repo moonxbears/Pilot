@@ -1,0 +1,97 @@
+// =========================================================================
+// FILE: stdlib/core/packed.pilot
+// PACKED SCALARS IN ONE RAW BLOCK (`PackedBuffer<T>`, 0b10)
+// =========================================================================
+// A `List<T>` keeps each element as one engine value, whatever `T` is. A
+// `PackedBuffer<T>` keeps its elements in one block of raw memory at the
+// element's own width (1, 2, 4 or 8 bytes), so 1,000 `u16`s take 2,000
+// bytes. It grows by doubling and frees the block when it is dropped.
+// Only the element's bits are kept: `T` is an integer type.
+//
+// The width comes from the caller (`packed_buffer<u16>(sizeof(u16), false)`)
+// because the seed cannot lower `sizeof(T)` inside a generic body (SEED001);
+// stand-in `mem.packed_width`.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Packed;
+
+/// The element widths `RawMem` loads and stores, in bytes.
+const PACKED_WIDTHS: List<i64> = [1, 2, 4, 8,];
+
+/// The elements a buffer makes room for when it first grows.
+const PACKED_FIRST_CAP: i64 = 8;
+
+/// Integers of one width, side by side in one raw block.
+pub struct PackedBuffer<T: IValue> : IObject {
+    priv base: i64;
+    priv count: i64;
+    priv cap: i64;
+    priv width: i64;
+    priv signed: bool;
+
+    ~self() {
+        if .base != 0 {
+            RawMem.free(.base, .cap * .width, .width);
+        }
+    }
+
+    /// The number of elements.
+    pub fn len(ref self) -> i64 => .count;
+
+    /// The bytes the elements take.
+    pub fn byte_len(ref self) -> i64 => .count * .width;
+
+    /// Makes room for `more` elements past the last one.
+    pub fn reserve(var ref self, more: i64) {
+        let need = .count + more;
+        if need <= .cap { return; }
+        var grown = if .cap == 0 { PACKED_FIRST_CAP } else { .cap * 2 };
+        while grown < need {
+            grown = grown * 2;
+        }
+        if .base == 0 {
+            .base = RawMem.alloc(grown * .width, .width);
+        } else {
+            .base = RawMem.realloc(.base, .cap * .width, grown * .width, .width);
+        }
+        .cap = grown;
+    }
+
+    /// Appends `v`.
+    pub fn push(var ref self, v: T) {
+        .reserve(1);
+        RawMem.store_int(.base + .count * .width, v as i64, .width * 8);
+        .count = .count + 1;
+    }
+
+    /// The element at `i`; an index out of range stops the program (PACK001).
+    pub op _[_] (i: i64) -> T {
+        .check(i);
+        return RawMem.load_int(.base + i * .width, .width * 8, if .signed { 1 } else { 0 });
+    }
+
+    /// Replaces the element at `i`.
+    pub op _[_]=_ (i: i64, v: T) {
+        .check(i);
+        RawMem.store_int(.base + i * .width, v as i64, .width * 8);
+    }
+
+    fn check(ref self, i: i64) {
+        if i < 0 || i >= .count {
+            fault(f"PACK001: index {i} is outside a packed buffer of length {.count}");
+        }
+    }
+}
+
+/// An empty buffer of `width`-byte elements, `signed` or not. A width other
+/// than 1, 2, 4 or 8 stops the program (PACK002).
+[StandIn("mem.packed_width", "the element width and signedness come from T's [Bits]", "the caller passes sizeof(T) and the signedness, because the seed cannot lower sizeof(T) in a generic body (SEED001)", "M38")]
+pub fn packed_buffer<T: IValue>(width: i64, signed: bool) -> PackedBuffer<T> {
+    var known = false;
+    for w in PACKED_WIDTHS {
+        if w == width { known = true; }
+    }
+    if !known {
+        fault(f"PACK002: a packed element is 1, 2, 4 or 8 bytes wide, not {width}");
+    }
+    return PackedBuffer<T> { base: 0, count: 0, cap: 0, width: width, signed: signed };
+}

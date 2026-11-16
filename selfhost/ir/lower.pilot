@@ -990,7 +990,8 @@ pub fn lower_call(var ref lw: Lowerer, n: i64) -> u32 {
         }
     }
     if some v = lower_variant_call(lw, n) { return v; }
-    if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 {
+    // `__engine` is a seed token, not the keyword registry's `__engine {}`.
+    if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 && node_name(s, callee) != engine_token() {
         let as_type = type_receiver(lw.inf, callee);
         if ty_is_named(lw.inf.p.tt, as_type) && ch.len() == 2 && kind(s, ch[1]) == nk_map() {
             return lower_struct_literal(lw, n, ch[1]);

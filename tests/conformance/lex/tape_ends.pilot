@@ -1,0 +1,34 @@
+// A token's end is not stored on the tape: it is the longest match from the
+// token's start, in the mode and context the kind records (PROP-021 slice
+// 21E). Expected, worked by hand, as `family start end`:
+//   `x>>=1_000.5e3;` with operators `>`, `>>`, `>>=`:
+//     name 0 1; `>>=` is the longest of the three: >>= 1 4;
+//     `1_000.5e3` is 9 bytes: float 4 13; ; 13 14
+//   `a>>b`: name 0 1; >> 1 3; name 3 4
+//   `"""a"b""" f"ab{c}"`: the triple-quoted string is 3 + 3 + 3 = 9 bytes:
+//     string 0 9; then after the space at 9: fstring_open 10 12;
+//     fstring_text 12 14 (in the f-string's mode); hole_open 14 15;
+//     name 15 16 (in the hole's mode); } 16 17; fstring_close 17 18
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.modes;
+use pilot.lex;
+
+fn show(ref m: ModalLexer, src: str) {
+    let tb = build_tape(m, src);
+    var i = 0;
+    while i < tb.tape.len() {
+        let fam = tb.tape.family(m, i);
+        let from = tb.tape.start(i);
+        let to = tb.tape.end(m, src, i);
+        print(f"{fam} {from} {to}");
+        i = i + 1;
+    }
+}
+
+fn main() {
+    let built = build_modes(core_modes(operator_tokens([">", ">>", ">>="], [])));
+    show(built.lexer, "x>>=1_000.5e3;");
+    show(built.lexer, "a>>b");
+    show(built.lexer, "\"\"\"a\"b\"\"\" f\"ab{c}\"");
+}

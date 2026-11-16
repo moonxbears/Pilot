@@ -142,54 +142,104 @@ fn fail(program: str, ref problems: List<str>, var ref tally: IrTally) {
     for p in problems { print("  " + p); }
 }
 
-/// `pilot test --ir [paths...] [--filter text]`: exit 0 when no eligible case
-/// fails, 1 otherwise.
-pub fn test_ir_command(ref paths: List<str>, filter: str) -> i64 {
-    var tally = IrTally { passed: 0, failed: 0, at_seam: 0, not_eligible: 0 };
-    let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
-    var cases: List<str> = [];
+/// The cases of `roots` that have expectation files, in order.
+pub fn test_case_programs(ref roots: List<str>) -> List<str> {
+    var out: List<str> = [];
     for root in roots {
         let programs = if root.ends_with(".pilot") { [root] } else { test_programs_in(root) };
         for program in programs {
-            if program.find(filter, 0) < 0 || !File.exists(test_stem(program) + ".stdout") { continue; }
-            if ir_eligible(program) { cases.push(program); } else { tally.not_eligible = tally.not_eligible + 1; }
+            if File.exists(test_stem(program) + ".stdout") { out.push(program); }
         }
     }
-    let runs = run_all(cases, "run-roundtrip");
+    return out;
+}
+
+/// The problems of `out`, the run of case `program`, with the `pilot ir
+/// opt` runs `opts` of the cases `opt_cases` that name inlined functions.
+fn ir_problems(program: str, out: proc.ProcessOutput, ref opt_cases: List<str>, ref opts: List<proc.ProcessOutput>) -> List<str> {
+    if out.stderr.find(roundtrip_failed_line(), 0) >= 0 {
+        return [f"the PilIR text does not round-trip\n--- stderr ---\n{out.stderr}"];
+    }
+    let r = test_check_case(program, out);
+    var problems = r.problems;
+    var k = 0;
+    while k < opt_cases.len() {
+        if opt_cases[k] == program {
+            let wanted = test_lines(File.read_text(test_stem(program) + ir_inlined_ext()));
+            var named: List<str> = [];
+            for w in wanted { if w.trim().len() > 0 { named.push(w.trim()); } }
+            for p in inlined_problems(opts[k], named) { problems.push(p); }
+        }
+        k = k + 1;
+    }
+    return problems;
+}
+
+/// `pilot test --ir [paths...]` with the choices of `sel` (`TestSelect`):
+/// exit 0 when no eligible case fails, 1 otherwise, 2 for a bad request.
+pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
+    let problem = test_select_problem(sel);
+    if problem != "" {
+        eprint(f"error: {problem}");
+        return 2;
+    }
+    var tally = IrTally { passed: 0, failed: 0, at_seam: 0, not_eligible: 0 };
+    let roots = if paths.len == 0 { [test_default_dir()] } else { paths };
+    var cases: List<str> = [];
+    for program in test_pick(sel, test_case_programs(roots), true, sel.list) {
+        if ir_eligible(program) { cases.push(program); } else { tally.not_eligible = tally.not_eligible + 1; }
+    }
+    if sel.list {
+        test_print_list(cases);
+        return 0;
+    }
     // The cases that name functions whose calls must be inlined.
     var opt_cases: List<str> = [];
     for c in cases {
         if File.exists(test_stem(c) + ir_inlined_ext()) { opt_cases.push(c); }
     }
     let opts = run_all(opt_cases, "opt");
+    // Judged as they finish; reported in case order.
+    var outcomes: List<i64> = [];
+    var problems: List<List<str>> = [];
+    var seams: List<str> = [];
+    for c in cases {
+        outcomes.push(-1);
+        problems.push([]);
+        seams.push("");
+    }
+    var jobs: List<proc.ProcessJob> = [];
+    for c in cases { jobs.push(job(c, "run-roundtrip")); }
+    var pool = proc.job_pool_at_most(jobs, sel.jobs);
+    loop {
+        guard some f = pool.next() else { break; };
+        let i = f.index;
+        if stopped_at_seam(f.out) {
+            outcomes[i] = 2;
+            seams[i] = seam_line(f.out);
+        } else {
+            problems[i] = ir_problems(cases[i], f.out, opt_cases, opts);
+            outcomes[i] = if problems[i].len() == 0 { 0 } else { 1 };
+            if sel.fail_fast && outcomes[i] == 1 { break; }
+        }
+    }
+    pool.finish();
+    var not_run = 0;
     var i = 0;
     while i < cases.len() {
-        let out = runs[i];
-        if stopped_at_seam(out) {
+        if outcomes[i] == -1 {
+            not_run = not_run + 1;
+        } else if outcomes[i] == 2 {
             tally.at_seam = tally.at_seam + 1;
-            print(f"SEAM {cases[i]}: {seam_line(out)}");
-        } else if out.stderr.find(roundtrip_failed_line(), 0) >= 0 {
-            fail(cases[i], [f"the PilIR text does not round-trip\n--- stderr ---\n{out.stderr}"], tally);
+            print(f"SEAM {cases[i]}: {seams[i]}");
+        } else if outcomes[i] == 1 {
+            fail(cases[i], problems[i], tally);
         } else {
-            let r = test_check_case(cases[i], out);
-            var k = 0;
-            while k < opt_cases.len() {
-                if opt_cases[k] == cases[i] {
-                    let wanted = test_lines(File.read_text(test_stem(cases[i]) + ir_inlined_ext()));
-                    var named: List<str> = [];
-                    for w in wanted { if w.trim().len() > 0 { named.push(w.trim()); } }
-                    for p in inlined_problems(opts[k], named) { r.problems.push(p); }
-                }
-                k = k + 1;
-            }
-            if r.problems.len == 0 {
-                tally.passed = tally.passed + 1;
-            } else {
-                fail(cases[i], r.problems, tally);
-            }
+            tally.passed = tally.passed + 1;
         }
         i = i + 1;
     }
+    test_report_stopped(not_run);
     print(f"RESULT (ir): {tally.passed} passed, {tally.failed} failed, {tally.at_seam} stopped at a seam, {tally.not_eligible} not eligible");
     return if tally.failed == 0 { 0 } else { 1 };
 }

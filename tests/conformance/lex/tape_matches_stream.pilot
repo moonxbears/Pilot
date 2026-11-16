@@ -1,0 +1,44 @@
+// The tape keeps each token's kind and start and recomputes its end; the
+// yield stream (`lex_modal`) reports all three as it lexes. On real source
+// they must agree token for token (PROP-021 slice 21E): same count, and per
+// token the same family, start and end. The files are the f-string
+// declarations and the f-string lexing test (nested holes, triple and raw
+// f-strings, escapes); the whole tree is checked in emitted C (PROP-021
+// §11.4: 1,232 files, 880,253 tokens, no difference). The seed and PilIR
+// engines run this smaller pair because PilIR takes minutes on the large
+// files.
+// Expected, worked by hand: no difference in either file, so `0` twice.
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.build;
+use pilot.lex.modes;
+use pilot.lex;
+use Pilot.Core.File;
+
+fn differences(ref m: ModalLexer, path: str) -> i64 {
+    let src = File.read_text(path);
+    let tb = build_tape(m, src);
+    var wrong = 0;
+    var i = 0;
+    for l in lex_modal(m, src) {
+        if l.decl >= 0 && !is_space_lexeme(m, l) {
+            if i >= tb.tape.len() {
+                wrong = wrong + 1;
+            } else {
+                let fam = m.family_of(l.mode, l.decl);
+                if tb.tape.family_index(i) != fam || tb.tape.start(i) != l.start || tb.tape.end(m, src, i) != l.end {
+                    wrong = wrong + 1;
+                }
+            }
+            i = i + 1;
+        }
+    }
+    if i != tb.tape.len() { wrong = wrong + 1; }
+    return wrong;
+}
+
+fn main() {
+    let built = build_modes(core_modes(operator_tokens(["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "!", "&", "|", "^", "<<", ">>", "..", "..=", "?", "??", "->",], ["?"])));
+    print(differences(built.lexer, "stdlib/core/lex/strings.pilot"));
+    print(differences(built.lexer, "tests/conformance/lex/fstrings.pilot"));
+}

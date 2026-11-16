@@ -1,0 +1,24 @@
+// A JobPool job given a time limit that is still running when it passes is
+// handed back as timed out (exit -1), without waiting for it.
+//
+// Jobs (sh -c): 0 `printf a` (no limit), 1 `printf b; sleep 30` (limit 2 s).
+// Worked by hand: job 0 finishes at once, not timed out, exit 0, out `a`.
+// Job 1 has written `b` and is asleep at 2 s: timed out, exit -1, out `b`.
+// Both are handed back well before job 1's 30 s: under 20 s.
+use std.proc;
+
+fn main() {
+    let t0 = Clock.now_ns(1);
+    var pool = proc.job_pool([
+        proc.job("sh", ["-c", "printf a"], ""),
+        proc.job("sh", ["-c", "printf b; sleep 30"], ""),
+    ]);
+    pool.set_limit(1, 2);
+    var lines: List<str> = ["", "",];
+    loop {
+        guard some f = pool.next() else { break; };
+        lines[f.index] = f"{f.index}: timed out {f.timed_out}, exit {f.out.exit_code}, out `{f.out.stdout}`";
+    }
+    for l in lines { print(l); }
+    print(f"under 20 s: {(Clock.now_ns(1) - t0) / 1000000000 < 20}");
+}

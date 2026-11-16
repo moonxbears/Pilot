@@ -676,6 +676,15 @@ fn is_bridge_bind_hook(name: str) -> bool {
         || name == "bind_enumerator";
 }
 
+/// Whether `name` is bound as a compile-time question about a type
+/// (`bind_type_query(sizeof, ..)`).
+pub fn prog_is_type_query(var ref p: Program, name: str) -> bool {
+    for row in prog_engine_bindings(p) {
+        if row.len() >= 3 && row[0] == "bind_type_query" && row[1] == name { return true; }
+    }
+    return false;
+}
+
 fn scan_engine_bindings(var ref p: Program) -> List<List<str>> {
     let s = p.s;
     var out: List<List<str>> = [];

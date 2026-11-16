@@ -1,0 +1,13 @@
+// Reading past the end of a `PackedBuffer` stops the program (PACK001), as
+// a `List` index out of bounds does. Expected, worked by hand: three
+// elements hold indexes 0 ..= 2, so `a[2]` prints 9 and `a[3]` stops.
+use Pilot.Core.Packed;
+
+fn main() {
+    var a = packed_buffer<u16>(sizeof(u16), false);
+    a.push(7);
+    a.push(8);
+    a.push(9);
+    print(a[2]);
+    print(a[3]);
+}

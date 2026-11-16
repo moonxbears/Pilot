@@ -1,0 +1,59 @@
+// `PackedBuffer<T>` (stdlib/core/packed.pilot) keeps its elements in one
+// block of raw memory at the element's own width, not as one engine value
+// each, so 20 `u16`s take 40 bytes. It grows by itself and frees the block
+// when it is dropped.
+//
+// Expected, worked by hand:
+//   u8:  i * 13 for i in 0 .. 20: 20 elements, [0] = 0, [10] = 130,
+//        [19] = 247; 20 elements of 1 byte = 20 bytes. After `a[3] = 255`,
+//        [3] = 255 and [4] = 4 * 13 = 52 is unchanged.
+//   u16: 65535 and 1 keep their values; 2 elements of 2 bytes = 4 bytes.
+//   u32: 4294967295 (2^32 - 1) keeps its value.
+//   i32: -2147483648 (-2^31) and -1 keep their sign.
+//   i16: -1 keeps its sign.
+//   i64: -9223372036854775807 (-(2^63 - 1)) keeps its value; 1 element of
+//        8 bytes = 8 bytes.
+use Pilot.Core.Packed;
+
+fn main() {
+    var a = packed_buffer<u8>(sizeof(u8), false);
+    var i = 0;
+    while i < 20 {
+        a.push((i * 13) as u8);
+        i = i + 1;
+    }
+    print(a.len());
+    print(a[0]);
+    print(a[10]);
+    print(a[19]);
+    print(a.byte_len());
+    a[3] = 255;
+    print(a[3]);
+    print(a[4]);
+
+    var b = packed_buffer<u16>(sizeof(u16), false);
+    b.push(65535);
+    b.push(1);
+    print(b[0]);
+    print(b[1]);
+    print(b.byte_len());
+
+    var c = packed_buffer<u32>(sizeof(u32), false);
+    c.push(4294967295);
+    print(c[0]);
+
+    var d = packed_buffer<i32>(sizeof(i32), true);
+    d.push(-2147483648);
+    d.push(-1);
+    print(d[0]);
+    print(d[1]);
+
+    var e = packed_buffer<i16>(sizeof(i16), true);
+    e.push(-1);
+    print(e[0]);
+
+    var f = packed_buffer<i64>(sizeof(i64), true);
+    f.push(-9223372036854775807);
+    print(f[0]);
+    print(f.byte_len());
+}

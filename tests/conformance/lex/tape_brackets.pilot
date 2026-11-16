@@ -1,0 +1,28 @@
+// Bracket partners are not stored on the tape; `bracket_links` finds them
+// when a caller asks (PROP-021 slice 21E). A bracket is a token spelled
+// `(`, `[`, `{` or their closers, so an f-string hole's `{` .. `}` pairs
+// too. Expected, worked by hand for `(a[1]{f"{x}"})`, as
+// `index text partner` (- for none):
+//   0 ( 12   1 a -   2 [ 4   3 1 -   4 ] 2   5 { 11   6 f" -
+//   7 { 9 (the hole)   8 x -   9 } 7   10 " -   11 } 5   12 ) 0
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.modes;
+use pilot.lex;
+
+fn main() {
+    let built = build_modes(core_modes(operator_tokens([], [])));
+    let m = built.lexer;
+    let src = "(a[1]{f\"{x}\"})";
+    let tb = build_tape(m, src);
+    print(tb.ok());
+    let links = bracket_links(m, tb.tape, src);
+    var i = 0;
+    while i < tb.tape.len() {
+        let t = tb.tape.text(m, src, i);
+        var other = "-";
+        if some p = links.partner(i) { other = f"{p}"; }
+        print(f"{i} {t} {other}");
+        i = i + 1;
+    }
+}

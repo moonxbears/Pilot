@@ -1,0 +1,10 @@
+// A packed element is 1, 2, 4 or 8 bytes wide, the widths `RawMem` loads
+// and stores (PACK002). Expected, worked by hand: 3 is none of them, so the
+// buffer is never made and nothing is printed.
+use Pilot.Core.Packed;
+
+fn main() {
+    var a = packed_buffer<u16>(3, false);
+    a.push(1);
+    print(a.len());
+}

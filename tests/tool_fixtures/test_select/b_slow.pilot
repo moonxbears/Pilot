@@ -1,0 +1,4 @@
+// A case that passes, tagged `slow` in b_slow.tags.
+fn main() {
+    print("b");
+}

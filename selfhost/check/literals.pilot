@@ -7,7 +7,7 @@
 // type whose [Bits] register is an integer or float one). Today's seed lexer
 // still reads `1__000`, `1000_` and `0x_FF` as numbers; the checker reads
 // each literal's text with the table built from the declared patterns
-// (`Infer.numbers`) and reports any that are not one.
+// (`NUMBER_TABLE`) and reports any that are not one.
 //
 // LIT002: an integer literal must fit the type it lands in. The value comes
 // from `int_from_text` (stdlib/core/lex/literal_value.pilot), at any size;
@@ -21,6 +21,11 @@ pub lvl(0) pkg selfhost.check;
 use Pilot.Core.Lex.Numbers;
 use Pilot.Core.Lex.LiteralValue;
 use pilot.lex.build;
+
+/// The table of the declared number tokens, built once (imp_type.md Rule
+/// 13). A structured `comptime` value is built when the program starts
+/// (stand-in `ir.comptime_at_start`), so it is built once per check.
+const NUMBER_TABLE: LexTable = comptime { build_table(number_tokens()).table };
 
 /// The node under any unary minuses of `e`, and how many there are.
 fn under_negation(ref s: Snap, e: i64) -> List<i64> {
@@ -36,7 +41,7 @@ fn under_negation(ref s: Snap, e: i64) -> List<i64> {
 /// Where the longest number at the start of `text` ends (0 when none
 /// starts there).
 fn number_end(ref inf: Infer, text: str) -> i64 {
-    let l = match_at(inf.numbers, text, 0, LexContextKind::Start);
+    let l = match_at(NUMBER_TABLE, text, 0, LexContextKind::Start);
     return if l.decl < 0 { 0 } else { l.end };
 }
 

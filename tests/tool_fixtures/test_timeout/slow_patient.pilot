@@ -1,0 +1,6 @@
+// Sleeps 12 s, past `--timeout 10`, but it is tagged `slow`, whose limit
+// is 4 times the given one (40 s), so it passes.
+fn main() {
+    Clock.sleep_ns(12000000000);
+    print("s");
+}

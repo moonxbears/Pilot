@@ -58,6 +58,9 @@ pub fn fstring_mode_name(q: i64, triple: bool, raw: bool) -> str {
 /// The mode the expression in an f-string's `{ .. }` is lexed in.
 pub const HOLE_MODE: str = "fstring_hole";
 
+/// The family of the `{` that opens an f-string hole.
+pub const HOLE_OPEN: str = "hole_open";
+
 fn quotes(q: i64, triple: bool) -> Pattern => if triple { byte(q) * 3 } else { byte(q) };
 
 fn fprefix(raw: bool) -> Pattern => if raw { class("rR") + class("fF") | class("fF") + class("rR") } else { class("fF") };
@@ -105,7 +108,7 @@ fn fstring_mode(q: i64, triple: bool, raw: bool) -> LexMode {
     if !raw { piece = piece | byte(BACKSLASH) + any_byte(); }
     var tokens: List<TokenDecl> = [token("fstring_text", piece.some())];
     if triple { tokens.push(token("fstring_quote", byte(q) | byte(q) * 2)); }
-    tokens.push(entering(HOLE_MODE, token("hole_open", lit("{"))));
+    tokens.push(entering(HOLE_MODE, token(HOLE_OPEN, lit("{"))));
     tokens.push(acting(TokenRole::Operand, leaving(token("fstring_close", quotes(q, triple)))));
     return lex_mode(fstring_mode_name(q, triple, raw), tokens);
 }

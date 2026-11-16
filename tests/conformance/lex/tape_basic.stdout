@@ -1,0 +1,13 @@
+true
+10
+60
+fn Start 0 2
+name Spaced 3 4
+( Glued 4 5
+name Other 5 6
+) Glued 6 7
+{ Spaced 8 9
+name Other 9 10
+infix_dot Glued 10 11
+name Other 11 12
+} Glued 12 13

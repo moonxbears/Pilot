@@ -1,0 +1,33 @@
+// What lies between two tokens is found again from the source, not stored
+// (PROP-021 slice 21E): whether a newline comes before a token, and whether
+// a token touches the next one. Expected, worked by hand for
+// "a\n  b c(d)// e\nf" (bytes: a 0, newline 1, spaces 2-3, b 4, space 5,
+// c 6, ( 7, d 8, ) 9, `// e` 10-13, newline 14, f 15), as
+// `family newline_before touches_next`:
+//   name a        false (nothing before it)   false (1 vs 4)
+//   name b        true  ("\n  ")              false (5 vs 6)
+//   name c        false (" ")                 true  (7 == 7)
+//   (             false                       true  (8 == 8)
+//   name d        false                       true  (9 == 9)
+//   )             false                       true  (10 == 10)
+//   line_comment  false                       false (14 vs 15)
+//   name f        true  ("\n")                false (the last token)
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.modes;
+use pilot.lex;
+
+fn main() {
+    let built = build_modes(core_modes(operator_tokens([], [])));
+    let m = built.lexer;
+    let src = "a\n  b c(d)// e\nf";
+    let tb = build_tape(m, src);
+    var i = 0;
+    while i < tb.tape.len() {
+        let fam = tb.tape.family(m, i);
+        let nl = tb.tape.newline_before(m, src, i);
+        let touch = tb.tape.touches_next(m, src, i);
+        print(f"{fam} {nl} {touch}");
+        i = i + 1;
+    }
+}

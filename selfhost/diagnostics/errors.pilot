@@ -910,6 +910,20 @@ pub let ERRORS = [
         reference: "proposals.md PROP-021 §2.4",
     },
     ErrorDef {
+        code: "LEX006",
+        title: "Unbalanced Bracket",
+        description: "While the token tape is built, a closing bracket does not match the bracket open before it, closes nothing, or an opening bracket is never closed",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §11.2; stdlib/pilot/lex.pilot",
+    },
+    ErrorDef {
+        code: "LEX007",
+        title: "Past the Token Tape's Widths",
+        description: "A source longer than a u32 offset can reach, or a lexicon with more families, modes and contexts than a u16 kind can number",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §11.2; stdlib/pilot/lex.pilot",
+    },
+    ErrorDef {
         code: "SYN010",
         title: "Malformed Sequence Rule",
         description: "A `syntax` rule with a sequence head is malformed (a hole kind that is not a `HoleKind` variant, a group of the wrong form, or a body that is not a `quote { .. }`), or a use of the rule does not fit its head",
@@ -1184,6 +1198,20 @@ pub let ERRORS = [
         description: "Control reached `unreachable()`, which states that it never does",
         category: "Hints",
         reference: "stdlib/core/hint.pilot; C23 unreachable() / Rust unreachable_unchecked",
+    },
+    ErrorDef {
+        code: "PACK001",
+        title: "Packed Index Out of Range",
+        description: "A `PackedBuffer` element was read or written at an index outside 0 ..= len - 1",
+        category: "Runtime",
+        reference: "stdlib/core/packed.pilot",
+    },
+    ErrorDef {
+        code: "PACK002",
+        title: "Packed Width Not 1, 2, 4 or 8",
+        description: "A `PackedBuffer` was made with an element width that `RawMem` cannot load or store",
+        category: "Runtime",
+        reference: "stdlib/core/packed.pilot",
     },
     ErrorDef {
         code: "LAYOUT001",

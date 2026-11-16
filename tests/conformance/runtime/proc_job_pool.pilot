@@ -1,0 +1,49 @@
+// A std.proc JobPool hands back each job's output as soon as it finishes, with
+// the job's position, so a caller can judge results while others still run
+// and stop early.
+//
+// Jobs (sh -c): 0 prints `zero` and exits 0, 1 prints `one` and exits 3,
+// 2 prints `two` to stderr and exits 0. Which finishes first depends on the
+// machine, so the results are put back in job order before printing.
+// Expected, worked by hand:
+//   0: exit 0, out `zero`, err ``
+//   1: exit 3, out `one`, err ``
+//   2: exit 0, out ``, err `two`
+//   all 3 yielded once each.
+// Leaving after the first result: exactly 1 seen, and the program goes on
+// (`finish` waits for the jobs still running), then `next()` has nothing
+// more: true. `after` is printed.
+use std.proc;
+
+fn jobs() -> List<proc.ProcessJob> => [
+    proc.job("sh", ["-c", "printf zero"], ""),
+    proc.job("sh", ["-c", "printf one; exit 3"], ""),
+    proc.job("sh", ["-c", "printf two >&2"], ""),
+];
+
+fn main() {
+    var codes: List<i64> = [-1, -1, -1,];
+    var outs: List<str> = ["", "", "",];
+    var errs: List<str> = ["", "", "",];
+    var seen = 0;
+    var pool = proc.job_pool(jobs());
+    loop {
+        guard some f = pool.next() else { break; };
+        codes[f.index] = f.out.exit_code;
+        outs[f.index] = f.out.stdout;
+        errs[f.index] = f.out.stderr;
+        seen = seen + 1;
+    }
+    for i in 0 .. 3 {
+        print(f"{i}: exit {codes[i]}, out `{outs[i]}`, err `{errs[i]}`");
+    }
+    print(f"all {seen} yielded once each");
+
+    var first = 0;
+    var early = proc.job_pool(jobs());
+    if some f = early.next() { first = first + 1; }
+    early.finish();
+    print(early.next() == none);
+    print(f"left after {first}");
+    print("after");
+}

@@ -1,0 +1,51 @@
+SKIPPED 1 of 3 cases by tag
+FAIL tests/tool_fixtures/test_select/c_fail.pilot
+RESULT: 1 passed, 1 failed, 0 known bugs reproduced, 0 known bugs fixed
+exit 1
+SKIPPED 2 of 3 cases by tag
+RESULT: 1 passed, 0 failed, 0 known bugs reproduced, 0 known bugs fixed
+exit 0
+SKIPPED 1 of 3 cases by tag
+FAIL tests/tool_fixtures/test_select/c_fail.pilot
+RESULT: 1 passed, 1 failed, 0 known bugs reproduced, 0 known bugs fixed
+exit 1
+tests/tool_fixtures/test_select/a_pass.pilot
+tests/tool_fixtures/test_select/c_fail.pilot
+exit 0
+tests/tool_fixtures/test_select/b_slow.pilot
+exit 0
+tests/tool_fixtures/test_select/a_pass.pilot
+exit 0
+SKIPPED 2 of 3 cases by tag
+RESULT (ir): 1 passed, 0 failed, 0 stopped at a seam, 0 not eligible
+exit 0
+SKIPPED 2 of 3 cases by tag
+RESULT (emit c): 1 passed, 0 failed, 0 stopped at a seam, 0 not eligible
+exit 0
+fail-fast: 1 FAIL line, 1 failed, passed + not run = 2, exit 1
+error: `--tag` and `--skip-tag` both name `slow`, so no case could run
+exit 2
+tests/tool_fixtures/test_select/b_slow.pilot
+tests/tool_fixtures/test_select/c_fail.pilot
+exit 0
+tests/tool_fixtures/test_select/a_pass.pilot
+exit 0
+SHARD 2/2: 1 of 3 cases
+RESULT: 1 passed, 0 failed, 0 known bugs reproduced, 0 known bugs fixed
+exit 0
+error: `--shard 3/2` names no shard: K must be 1 ..= N
+exit 2
+FAIL tests/tool_fixtures/test_select/c_fail.pilot
+STOPPED at the first failure: 1 not run
+RESULT: 0 passed, 1 failed, 0 known bugs reproduced, 0 known bugs fixed
+exit 1
+FAIL tests/tool_fixtures/test_select/c_fail.pilot
+STOPPED at the first failure: 1 not run
+RESULT (ir): 0 passed, 1 failed, 0 stopped at a seam, 0 not eligible
+exit 1
+FAIL tests/tool_fixtures/test_select/c_fail.pilot
+STOPPED at the first failure: 1 not run
+RESULT (emit c): 0 passed, 1 failed, 0 stopped at a seam, 0 not eligible
+exit 1
+error: `--jobs x`: expected a whole number
+exit 2

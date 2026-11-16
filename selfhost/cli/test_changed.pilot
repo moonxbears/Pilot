@@ -14,8 +14,8 @@
 // * a path in `change_rules()` reaches every case of the modes its rule
 //   names, or none (the gate's ledgers, documentation, a seed crate's own
 //   `tests/`, which `cargo test` runs);
-// * an expectation file of a case (`<name>.stdout`, `.stderr`, `.exit`,
-//   `.args`, `.stdin`) reaches that case;
+// * an expectation or tag file of a case (`<name>.stdout`, `.stderr`, `.exit`,
+//   `.args`, `.stdin`, `.tags`) reaches that case;
 // * a `.pilot` file that no longer declares the package it declared (the
 //   `pkg` line was removed or renamed, or the file was deleted) reaches every
 //   case whose loader looks for packages there, whatever the case links
@@ -132,11 +132,11 @@ fn rule_for(path: str) -> ChangeRule? {
 }
 
 /// The expectation-file extensions of a case.
-fn expectation_exts() -> List<str> => [".stdout", ".stderr", ".exit", ".args", ".stdin"];
+const EXPECTATION_EXTS: List<str> = [".stdout", ".stderr", ".exit", ".args", ".stdin", ".tags",];
 
 /// Whether `path` has an expectation-file extension.
 fn is_expectation(path: str) -> bool {
-    for ext in expectation_exts() {
+    for ext in EXPECTATION_EXTS {
         if path.ends_with(ext) { return true; }
     }
     return false;
@@ -376,7 +376,7 @@ pub fn select_cases(ref changed: List<str>, ref programs: List<str>, engine: Tes
         }
         var reached = false;
         // An expectation file of a case.
-        for ext in expectation_exts() {
+        for ext in EXPECTATION_EXTS {
             if f.ends_with(ext) {
                 let k = index_of(programs, f.slice(0, f.len() - ext.len()) + ".pilot");
                 if k >= 0 {
@@ -465,8 +465,9 @@ pub struct ChangedPlan : IObject {
 }
 
 /// Chooses what `pilot test --changed` runs: the roots themselves when a
-/// change reaches every case, the cases it reaches otherwise. Prints why.
-pub fn plan_changed(since: str, ref roots: List<str>, engine: TestEngine, mode_lang: str, ref tool_sources: List<str>) -> ChangedPlan {
+/// change reaches every case, the cases it reaches otherwise. Prints why,
+/// unless `quiet` (`--list`, whose output is only the chosen paths).
+pub fn plan_changed(since: str, ref roots: List<str>, engine: TestEngine, mode_lang: str, ref tool_sources: List<str>, quiet: bool) -> ChangedPlan {
     let given = if roots.len() == 0 { [test_default_dir()] } else { roots };
     if !File.exists("stdlib/core") {
         eprint("error: `pilot test --changed` runs from the toolchain root (the directory holding `stdlib/`)");
@@ -481,11 +482,13 @@ pub fn plan_changed(since: str, ref roots: List<str>, engine: TestEngine, mode_l
     let programs = candidate_programs(given, engine);
     let sel = select_cases(changed, programs, engine, mode_lang, tool_sources, repackaged(changed, earlier_rev(since), later_rev(since)));
     if sel.everything {
-        print(f"CHANGED {changed.len()} files since {since}: {sel.why}; running every case");
+        if !quiet { print(f"CHANGED {changed.len()} files since {since}: {sel.why}; running every case"); }
         return ChangedPlan { action: 0, paths: given };
     }
-    print(f"CHANGED {changed.len()} files since {since}: {sel.picked.len()} of {programs.len()} cases reached");
-    for c in sel.picked { print(f"  {c}"); }
+    if !quiet {
+        print(f"CHANGED {changed.len()} files since {since}: {sel.picked.len()} of {programs.len()} cases reached");
+        for c in sel.picked { print(f"  {c}"); }
+    }
     if sel.picked.len() == 0 { return ChangedPlan { action: 1, paths: [] }; }
     return ChangedPlan { action: 0, paths: sel.picked };
 }

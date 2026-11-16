@@ -1,0 +1,5 @@
+// A case that fails on purpose: it prints `c`, and c_fail.stdout expects
+// `not c`. Tagged `wip` and `net` in c_fail.tags.
+fn main() {
+    print("c");
+}

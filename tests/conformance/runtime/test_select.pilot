@@ -1,0 +1,106 @@
+// `pilot test` chooses cases by tag, lists them, and stops at the first
+// failure on request.
+//
+// Fixtures in tests/tool_fixtures/test_select/ (D below): three cases,
+//   a_pass (no tags, passes), b_slow (tag `slow`, passes),
+//   c_fail (tags `wip` and `net`, fails: it prints `c`, its .stdout says
+//   `not c`).
+// Each run prints its summary lines (SKIPPED and SHARD, printed when the
+// cases are chosen, then FAIL, STOPPED, RESULT) and its exit code. Expected, worked by hand:
+//   1. --skip-tag slow: a and c run, c fails; 1 of the 3 skipped. Exit 1.
+//   2. --tag slow: only b runs; 2 of 3 skipped. Exit 0.
+//   3. --tag wip,slow: b and c run, c fails; 1 skipped (a). Exit 1.
+//   4. --list --skip-tag slow: the paths of a and c, in path order, and
+//      nothing run. Exit 0.
+//   5. --ir --list --tag slow: the path of b. Exit 0.
+//   6. --emit c --list --skip-tag slow,wip: the path of a. Exit 0.
+//   7. --ir --skip-tag slow,wip: a runs on PilIR and passes; 2 of 3
+//      skipped. Exit 0.
+//   8. --emit c --tag slow: b is emitted, built and passes; 2 skipped.
+//      Exit 0.
+//   9. --fail-fast on all three: c fails, so one FAIL line, `1 failed`, and
+//      every other case either passed or was not run: passed + not run = 2.
+//      Which of a and b finish first depends on the machine. Exit 1.
+//  10. --tag slow --skip-tag slow: no case could run, an error. Exit 2.
+//  11. --shard: `slow` cases are dealt to the shards first, then the rest,
+//      each in path order, case i to shard (i mod N) + 1. Dealing order
+//      b, a, c: b -> 1, a -> 2, c -> 1. So --list --shard 1/2 is b and c
+//      (printed in path order), --list --shard 2/2 is a. Exit 0 each.
+//  12. --shard 2/2 run: a passes; the SHARD line counts 1 of the 3 cases.
+//      Exit 0.
+//  13. --shard 3/2: no such shard, an error. Exit 2.
+//  14. --fail-fast --jobs 1 with c_fail then a_pass given in that order:
+//      one case at a time, c fails first, so a is never started.
+//      FAIL c, `STOPPED at the first failure: 1 not run`, 0 passed,
+//      1 failed. Exit 1. The same on --ir and --emit c.
+//  15. --jobs x: not a number, an error. Exit 2.
+use std.proc;
+use std.text;
+
+const D: str = "tests/tool_fixtures/test_select";
+
+/// The lines of `s` that start with one of the summary words.
+fn summary(s: str) -> str {
+    var out = "";
+    for line in text.split_text(s, "\n") {
+        if line.starts_with("FAIL ") || line.starts_with("SKIPPED ") || line.starts_with("STOPPED ") || line.starts_with("SHARD ") || line.starts_with("RESULT") {
+            out = out + line + "\n";
+        }
+    }
+    return out;
+}
+
+fn show(args: List<str>) {
+    let out = proc.run(proc.pilot_cli_path(), args, "");
+    print(summary(out.stdout) + f"exit {out.exit_code}");
+}
+
+fn list(args: List<str>) {
+    let out = proc.run(proc.pilot_cli_path(), args, "");
+    print(out.stdout + f"exit {out.exit_code}");
+}
+
+/// The number just before `word` in `s` (`3 passed` -> 3), or 0 when
+/// `word` is not there.
+fn count_before(s: str, word: str) -> i64 {
+    let at = s.find(word, 0);
+    if at < 1 { return 0; }
+    var start = at - 1;
+    while start > 0 && s.byte_at(start - 1) as i64 >= 48 && s.byte_at(start - 1) as i64 <= 57 { start = start - 1; }
+    return text.parse_i64(s.slice(start, at - 1)) ?? 0;
+}
+
+fn main() {
+    show(["test", D, "--skip-tag", "slow"]);
+    show(["test", D, "--tag", "slow"]);
+    show(["test", D, "--tag", "wip,slow"]);
+    list(["test", D, "--list", "--skip-tag", "slow"]);
+    list(["test", D, "--ir", "--list", "--tag", "slow"]);
+    list(["test", D, "--emit", "c", "--list", "--skip-tag", "slow,wip"]);
+    show(["test", D, "--ir", "--skip-tag", "slow,wip"]);
+    show(["test", D, "--emit", "c", "--tag", "slow"]);
+
+    let fast = proc.run(proc.pilot_cli_path(), ["test", D, "--fail-fast"], "");
+    var fails = 0;
+    for line in text.split_text(fast.stdout, "\n") {
+        if line.starts_with("FAIL ") { fails = fails + 1; }
+    }
+    print(f"fail-fast: {fails} FAIL line, {count_before(fast.stdout, "failed,")} failed, passed + not run = {count_before(fast.stdout, "passed,") + count_before(fast.stdout, "not run")}, exit {fast.exit_code}");
+
+    let both = proc.run(proc.pilot_cli_path(), ["test", D, "--tag", "slow", "--skip-tag", "slow"], "");
+    print(both.stderr + f"exit {both.exit_code}");
+
+    list(["test", D, "--list", "--shard", "1/2"]);
+    list(["test", D, "--list", "--shard", "2/2"]);
+    show(["test", D, "--shard", "2/2"]);
+    let bad = proc.run(proc.pilot_cli_path(), ["test", D, "--shard", "3/2"], "");
+    print(bad.stderr + f"exit {bad.exit_code}");
+
+    let c = D + "/c_fail.pilot";
+    let a = D + "/a_pass.pilot";
+    show(["test", c, a, "--fail-fast", "--jobs", "1"]);
+    show(["test", "--ir", c, a, "--fail-fast", "--jobs", "1"]);
+    show(["test", "--emit", "c", c, a, "--fail-fast", "--jobs", "1"]);
+    let nan = proc.run(proc.pilot_cli_path(), ["test", D, "--jobs", "x"], "");
+    print(nan.stderr + f"exit {nan.exit_code}");
+}

@@ -1,0 +1,14 @@
+FAIL tests/tool_fixtures/test_timeout/sleeper.pilot
+  timed out after 10 s
+RESULT: 3 passed, 1 failed, 0 known bugs reproduced, 0 known bugs fixed
+exit 1, under 40 s: true
+FAIL tests/tool_fixtures/test_timeout/sleeper.pilot
+  timed out after 10 s
+RESULT (ir): 3 passed, 1 failed, 0 stopped at a seam, 0 not eligible
+exit 1, under 40 s: true
+FAIL tests/tool_fixtures/test_timeout/sleeper.pilot
+  timed out after 10 s
+RESULT (emit c): 3 passed, 1 failed, 0 stopped at a seam, 0 not eligible
+exit 1, under 40 s: true
+error: `--timeout x`: expected a whole number of seconds
+exit 2

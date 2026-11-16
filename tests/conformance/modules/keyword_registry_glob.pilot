@@ -1,0 +1,16 @@
+// The keyword registry (stdlib/core/keywords.pilot) declares one empty
+// struct per keyword, `sizeof {}` and `__engine {}` among them. A glob
+// import of it, which `use Pilot.Core.Primitives.Span;` brings, must not
+// turn `sizeof(T)` into building a `sizeof`, nor a library body's
+// `__engine(..)` into building an `__engine` (found by PROP-021 slice 21E).
+// Expected, worked by hand: a u16 is 2 bytes; 77 stored as 64 bits loads
+// back as 77.
+use Pilot.Core.Primitives.Span;
+
+fn main() {
+    print(sizeof(u16));
+    let p = RawMem.alloc(8, 8);
+    RawMem.store_int(p, 77, 64);
+    print(RawMem.load_int(p, 64, 1));
+    RawMem.free(p, 8, 8);
+}

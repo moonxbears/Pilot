@@ -269,10 +269,19 @@ pub fn spawn_job(ref start: ProcessJob) -> ProcessHandle => proc_spawn_impl("", 
 
 /// Waits until one of `running` has finished and returns its position in
 /// `running`; that handle's `wait` then returns at once.
-pub fn first_finished(ref running: List<ProcessHandle>) -> i64 {
+pub fn first_finished(ref running: List<ProcessHandle>) -> i64 => first_finished_until(running, 0);
+
+/// Like `first_finished`, but gives up at `until_ns` on the monotonic clock
+/// (`Clock.now_ns(1)`) and returns -1 when none has finished by then;
+/// `until_ns <= 0` waits as long as it takes.
+pub fn first_finished_until(ref running: List<ProcessHandle>, until_ns: i64) -> i64 {
     let code_ptr = RawMem.alloc(8, 8);
     var k = 0;
     while true {
+        if until_ns > 0 && Clock.now_ns(1) >= until_ns {
+            let _ = RawMem.free(code_ptr, 8, 8);
+            return -1;
+        }
         k = 0;
         while k < running.len() {
             // Collect its output first: a child blocked writing to a full
@@ -313,40 +322,129 @@ fn may_start(running: i64, fresh: i64, cpus: i64) -> bool {
     return free >= job_memory_reserve() * (fresh + 1);
 }
 
-/// Runs every job in `jobs`, at most as many at once as the machine has
-/// CPUs, starting the next as soon as any one finishes, so one slow job never
-/// holds the others back. A job starts only while the machine has memory
-/// for it (`may_start`), so jobs that each need a lot of memory are not
-/// stacked until the machine runs out; one job always runs. Returns what
-/// each left, in the order of `jobs`.
-pub fn run_all(ref jobs: List<ProcessJob>) -> List<ProcessOutput> {
-    let cpus = if cpu_count() > 1 { cpu_count() } else { 1 };
-    var running: List<ProcessHandle> = [];
-    var slots: List<i64> = [];
-    var started = 0;
-    var fresh = 0;
-    // What each finished job left, and which job it was.
-    var done: List<ProcessOutput> = [];
-    var done_slots: List<i64> = [];
-    while started < jobs.len() || running.len() > 0 {
-        while started < jobs.len() && may_start(running.len() as i64, fresh, cpus) {
-            running.push(spawn_job(jobs[started]));
-            slots.push(started);
-            started = started + 1;
-            fresh = fresh + 1;
-        }
-        let k = first_finished(running);
-        done.push(running[k].wait());
-        done_slots.push(slots[k]);
-        running.remove_at(k);
-        slots.remove_at(k);
-        fresh = 0;
+/// A job a `JobPool` saw finish: its position in the jobs and what it left.
+/// A job stopped at its time limit is `timed_out`, with what it had written
+/// by then and exit code -1.
+pub struct Finished : IValue {
+    pub index:     i64;
+    pub out:       ProcessOutput;
+    pub timed_out: bool;
+}
+
+/// Jobs run at most as many at once as the machine has CPUs, the next
+/// started as soon as any one finishes, so one slow job never holds the
+/// others back. A job starts only while the machine has memory for it
+/// (`may_start`), so jobs that each need a lot of memory are not stacked
+/// until the machine runs out; one job always runs.
+///
+/// `next()` hands back each job as it finishes, so a caller can judge
+/// results while others still run and stop early. A job given a limit
+/// (`set_limit`) that is still running that many seconds after it started is
+/// handed back as timed out, and the pool stops collecting it. The pool is an object
+/// rather than a `yield` generator because the CLI that runs it is linked
+/// without the generator runtime (its source list is `CLI` in
+/// crates/pilot-cli/src/main.rs).
+pub struct JobPool : IObject {
+    priv jobs:    List<ProcessJob>;
+    priv cpus:    i64;
+    priv started: i64;
+    priv fresh:   i64;
+    priv running: List<ProcessHandle>;
+    priv slots:   List<i64>;
+    /// Per job, its limit in seconds (0: none).
+    priv limits:  List<i64>;
+    /// Per running job, when it must have finished (ns, monotonic; 0: never).
+    priv due:     List<i64>;
+
+    ~self() {
+        .finish();
     }
+
+    /// Gives job `i` a limit of `seconds` (0: none); set before `next()`.
+    pub fn set_limit(var ref self, i: i64, seconds: i64) {
+        .limits[i] = seconds;
+    }
+
+    /// The next job to finish, or `none` once every job has.
+    pub fn next(var ref self) -> Finished? {
+        while .started < .jobs.len() && may_start(.running.len() as i64, .fresh, .cpus) {
+            let now = Clock.now_ns(1);
+            .running.push(spawn_job(.jobs[.started]));
+            .slots.push(.started);
+            .due.push(if .limits[.started] > 0 { now + .limits[.started] * 1000000000 } else { 0 });
+            .started = .started + 1;
+            .fresh = .fresh + 1;
+        }
+        if .running.len() == 0 { return none; }
+        // The earliest limit among the running jobs.
+        var first_due = 0;
+        for d in .due {
+            if d > 0 && (first_due == 0 || d < first_due) { first_due = d; }
+        }
+        let k = first_finished_until(.running, first_due);
+        if k < 0 { return .time_out(first_due); }
+        let out = .running[k].wait();
+        let slot = .slots[k];
+        .forget(k);
+        return Finished { index: slot, out: out, timed_out: false };
+    }
+
+    /// Hands back the running job due at `due` as timed out. Its output so
+    /// far is kept and its pipes closed; the child itself is left running,
+    /// because the seed cannot stop it yet (seam `bridge.proc_signal`).
+    fn time_out(var ref self, due: i64) -> Finished? {
+        var k = 0;
+        while .due[k] != due { k = k + 1; }
+        .running[k].drain(0);
+        if .running[k].stdout_fd >= 0 { Fd.close(.running[k].stdout_fd); }
+        if .running[k].stderr_fd >= 0 { Fd.close(.running[k].stderr_fd); }
+        let out = ProcessOutput { exit_code: -1, stdout: .running[k].stdout_text, stderr: .running[k].stderr_text };
+        let slot = .slots[k];
+        .forget(k);
+        return Finished { index: slot, out: out, timed_out: true };
+    }
+
+    fn forget(var ref self, k: i64) {
+        .running.remove_at(k);
+        .slots.remove_at(k);
+        .due.remove_at(k);
+        .fresh = 0;
+    }
+
+    /// Starts no more jobs and waits for those running, dropping what they
+    /// leave: the seed cannot stop a child yet (seam `bridge.proc_signal`).
+    pub fn finish(var ref self) {
+        .started = .jobs.len();
+        while .running.len() > 0 {
+            .running[0].wait();
+            .running.remove_at(0);
+            .slots.remove_at(0);
+            .due.remove_at(0);
+        }
+    }
+}
+
+/// A pool that runs `jobs`; nothing starts before the first `next()`.
+pub fn job_pool(jobs: List<ProcessJob>) -> JobPool => job_pool_at_most(jobs, 0);
+
+/// A pool that runs at most `most` of `jobs` at once (`most <= 0`: as many
+/// as the machine has CPUs).
+pub fn job_pool_at_most(jobs: List<ProcessJob>, most: i64) -> JobPool {
+    let cpus = if most > 0 { most } else if cpu_count() > 1 { cpu_count() } else { 1 };
+    var limits: List<i64> = [];
+    for j in jobs { limits.push(0); }
+    return JobPool { jobs: jobs, cpus: cpus, started: 0, fresh: 0, running: [], slots: [], limits: limits, due: [] };
+}
+
+/// Runs every job in `jobs` in a `JobPool` and returns what each left, in
+/// the order of `jobs`.
+pub fn run_all(ref jobs: List<ProcessJob>) -> List<ProcessOutput> {
     var out: List<ProcessOutput> = [];
-    for i in 0 .. jobs.len() {
-        var j = 0;
-        while done_slots[j] != i { j = j + 1; }
-        out.push(done[j]);
+    for i in 0 .. jobs.len() { out.push(ProcessOutput { exit_code: -1, stdout: "", stderr: "" }); }
+    var pool = job_pool(jobs);
+    loop {
+        guard some f = pool.next() else { break; };
+        out[f.index] = f.out;
     }
     return out;
 }

@@ -1,0 +1,4 @@
+// A case that passes at once.
+fn main() {
+    print("q");
+}

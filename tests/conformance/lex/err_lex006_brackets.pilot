@@ -1,0 +1,26 @@
+// A closer that does not match the open bracket, one with nothing open, and
+// an opener never closed are each LEX006 when the tape is built (PROP-021
+// slice 21E); the Rust lexer leaves them unlinked without a word.
+// Expected, worked by hand:
+//   `( ]`: `]` at byte 2 meets `(` from byte 0: one error.
+//   `)`: nothing is open at byte 0: one error.
+//   `x {`: `{` at byte 2 is still open at the end: one error.
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.modes;
+use pilot.lex;
+
+fn show(ref m: ModalLexer, src: str) {
+    let tb = build_tape(m, src);
+    print(tb.ok());
+    for e in tb.errors {
+        print(f"{e.code}: {e.message}");
+    }
+}
+
+fn main() {
+    let built = build_modes(core_modes(operator_tokens([], [])));
+    show(built.lexer, "( ]");
+    show(built.lexer, ")");
+    show(built.lexer, "x {");
+}
