@@ -260,7 +260,7 @@ pub fn proto_parse_source(src: str) -> ProtoDoc {
     // Check package
     let pkg_idx = src.find("package");
     if pkg_idx >= 0 {
-        var p_st = (pkg_idx + 7) as usize;
+        var p_st = (pkg_idx + 7) as i64;
         while p_st < n && sql_is_space(src.byte_at(p_st)) { p_st = p_st + 1; }
         var p_en = p_st;
         while p_en < n && src.byte_at(p_en) != 59 { p_en = p_en + 1; }
@@ -271,7 +271,7 @@ pub fn proto_parse_source(src: str) -> ProtoDoc {
     while pos < n {
         let m_idx = src.find("message", pos);
         if m_idx < 0 { break; }
-        var m_st = (m_idx + 7) as usize;
+        var m_st = (m_idx + 7) as i64;
         while m_st < n && sql_is_space(src.byte_at(m_st)) { m_st = m_st + 1; }
         var m_en = m_st;
         while m_en < n && sql_is_alnum(src.byte_at(m_en)) { m_en = m_en + 1; }
@@ -297,8 +297,8 @@ pub fn proto_parse_source(src: str) -> ProtoDoc {
             // Check field line: e.g. "repeated int32 values = 1 [packed=true];"
             let eq_idx = line.find("=");
             if eq_idx > 0 {
-                let lhs = sql_trim(line.slice(0, eq_idx as usize));
-                let rhs = sql_trim(line.slice((eq_idx + 1) as usize, line.len()));
+                let lhs = sql_trim(line.slice(0, eq_idx));
+                let rhs = sql_trim(line.slice((eq_idx + 1), line.len()));
 
                 let is_repeated = lhs.starts_with("repeated");
                 var clean_lhs = lhs;
@@ -311,8 +311,8 @@ pub fn proto_parse_source(src: str) -> ProtoDoc {
                 var f_type = "int32";
                 var f_name = clean_lhs;
                 if sp_idx > 0 {
-                    f_type = clean_lhs.slice(0, sp_idx as usize);
-                    f_name = sql_trim(clean_lhs.slice((sp_idx + 1) as usize, clean_lhs.len()));
+                    f_type = clean_lhs.slice(0, sp_idx);
+                    f_name = sql_trim(clean_lhs.slice((sp_idx + 1), clean_lhs.len()));
                 }
 
                 // rhs has NUMBER [OPT]

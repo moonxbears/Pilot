@@ -20,7 +20,7 @@ pub struct FixApplicationResult : IValue {
     pub error_message: str;
 }
 
-pub fn fix_result_ok(new_src: str, applied: usize) -> FixApplicationResult {
+pub fn fix_result_ok(new_src: str, applied: i64) -> FixApplicationResult {
     return FixApplicationResult {
         success:       true,
         fixes_applied: applied,
@@ -46,7 +46,7 @@ pub fn fix_result_err(err_code: str, err_msg: str, old_src: str) -> FixApplicati
 pub fn extract_all_comments(src: str) -> List<str> {
     var comments: List<str> = [];
     let n = src.len();
-    var p: usize = 0;
+    var p: i64 = 0;
 
     while p < n {
         let b = src.byte_at(p);
@@ -98,7 +98,7 @@ pub fn extract_all_comments(src: str) -> List<str> {
 // Asserts every single comment token in old_src is preserved verbatim in new_src
 pub fn verify_comment_conservation(old_src: str, new_src: str) -> bool {
     let old_comments = extract_all_comments(old_src);
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < old_comments.len {
         let c = old_comments[i];
         if !str_contains(new_src, c) {
@@ -112,22 +112,22 @@ pub fn verify_comment_conservation(old_src: str, new_src: str) -> bool {
 // ------------------------------------------------------------------------------
 // Multi-Edit Disjointness Solver & Reverse Byte-Order Applicator
 // ------------------------------------------------------------------------------
-pub fn apply_file_fixes_lossless(old_src: str, ref fixes: List<FixSuggestion>, max_passes: usize) -> FixApplicationResult {
+pub fn apply_file_fixes_lossless(old_src: str, ref fixes: List<FixSuggestion>, max_passes: i64) -> FixApplicationResult {
     let limit_passes = if max_passes > 0 { max_passes; } else { 3; };
     var cur_src = old_src;
-    var total_applied: usize = 0;
-    var pass: usize = 0;
+    var total_applied: i64 = 0;
+    var pass: i64 = 0;
 
     // Detect CRLF in old source to preserve verbatim
     let has_crlf = str_contains(old_src, "\r\n");
 
     // Gather all edits across machine-applicable fixes
     var pending_edits: List<CstTextEdit> = [];
-    var fi: usize = 0;
+    var fi: i64 = 0;
     while fi < fixes.len {
         let fix = fixes[fi];
         if fix.applicability == fix_machine_applicable() {
-            var ei: usize = 0;
+            var ei: i64 = 0;
             while ei < fix.edits.len {
                 pending_edits.push(fix.edits[ei]);
                 ei = ei + 1;
@@ -144,7 +144,7 @@ pub fn apply_file_fixes_lossless(old_src: str, ref fixes: List<FixSuggestion>, m
         pass = pass + 1;
 
         // 1. Sort edits ascending by start offset
-        var i: usize = 0;
+        var i: i64 = 0;
         while i < pending_edits.len {
             var j = i + 1;
             while j < pending_edits.len {
@@ -163,7 +163,7 @@ pub fn apply_file_fixes_lossless(old_src: str, ref fixes: List<FixSuggestion>, m
         var deferred: List<CstTextEdit> = [];
         var last_end: u32 = 0;
 
-        var k: usize = 0;
+        var k: i64 = 0;
         while k < pending_edits.len {
             let ed = pending_edits[k];
             if k == 0 || ed.span.start >= last_end {
@@ -181,8 +181,8 @@ pub fn apply_file_fixes_lossless(old_src: str, ref fixes: List<FixSuggestion>, m
         while b_idx > 0 {
             b_idx = b_idx - 1;
             let edit = batch[b_idx];
-            let st = edit.span.start as usize;
-            let ed = edit.span.end as usize;
+            let st = edit.span.start as i64;
+            let ed = edit.span.end as i64;
 
             if st <= cur_src.len() && ed <= cur_src.len() && st <= ed {
                 let prefix = cur_src.slice(0, st);
@@ -238,8 +238,8 @@ pub fn generate_unified_diff(file_path: str, old_src: str, new_src: str) -> str 
     out = out + "@@ -1 +1 @@\n";
 
     // Scan line by line for differences
-    var p_old: usize = 0;
-    var p_new: usize = 0;
+    var p_old: i64 = 0;
+    var p_new: i64 = 0;
     let n_old = old_src.len();
     let n_new = new_src.len();
 
@@ -288,7 +288,7 @@ pub fn generate_unified_diff(file_path: str, old_src: str, new_src: str) -> str 
 pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
     var diags: List<Diagnostic> = [];
     let n = src.len();
-    var p: usize = 0;
+    var p: i64 = 0;
     // First and last significant (non-trivia) byte of the current line, or -1.
     var line_first: i64 = 0 - 1;
     var line_last: i64 = 0 - 1;
@@ -335,10 +335,10 @@ pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
         // End of line: Defect 1, missing `;` after a `let`/`var`/`return` statement
         if b == 10 {
             if line_last >= 0 {
-                let last_b = src.byte_at(line_last as usize);
+                let last_b = src.byte_at(line_last);
                 let ends_operand = (last_b >= 48 && last_b <= 57) || (last_b >= 65 && last_b <= 90) ||
                     (last_b >= 97 && last_b <= 122) || last_b == 95 || last_b == 41 || last_b == 93 || last_b == 34;
-                let stmt = src.slice(line_first as usize, (line_last + 1) as usize);
+                let stmt = src.slice(line_first, (line_last + 1));
                 if ends_operand && (stmt.starts_with("let ") || stmt.starts_with("var ") || stmt.starts_with("return ")) {
                     let at = (line_last + 1) as u32;
                     let sp = source_span_new(file_id, at, at);

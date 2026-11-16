@@ -57,7 +57,7 @@ pub fn plan_numeric(var ref inf: Infer, var ref rows: List<List<any>>) {
         if is_arithmetic_op(flags(s, n)) && in_linked_file(s, n) {
             let t = type_of(inf, n);
             if !other.has(t) { other.set(t, is_other_width(p, t, int_width, float_width)); }
-            if other.get(t) {
+            if other[t] {
                 let name = node_name(s, ty_decl(p.tt, t));
                 rows.push([DropAction::NumericType as i64, span_start(s, n), span_end(s, n), kind(s, n), name, ""]);
             }

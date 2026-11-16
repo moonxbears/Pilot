@@ -157,7 +157,7 @@ pub fn lower_struct_literal(var ref lw: Lowerer, n: i64, map: i64) -> u32 {
     for f in fields {
         let name = f.canonical_name;
         if given.has(name) {
-            let e = given.get(name);
+            let e = given[name];
             args.push(coerce(lw, lower_expr(lw, e), field_physics(lw, t, name), e));
         } else {
             args.push(field_default_value(lw, t, name, n));
@@ -470,7 +470,7 @@ pub fn value_type(var ref lw: Lowerer, n: i64) -> i64 {
         // What the lowering learned about a binding is at least as precise
         // as the checker's type for it.
         let b = binding_index(lw, n);
-        if b >= 0 && lw.known_types.has(key(b)) { return lw.known_types.get(key(b)); }
+        if b >= 0 && lw.known_types.has(key(b)) { return lw.known_types[key(b)]; }
         if b < 0 && is_setter_word(lw, n) { return lw.setter_arg_type; }
         if ty_is_unknown(lw.inf.p.tt, t) {
             let g = find_global(lw, n);
@@ -935,7 +935,7 @@ pub fn lower_cascade(var ref lw: Lowerer, n: i64) -> u32 {
     let t = value_type(lw, lhs(s, n));
     let recv = lower_expr(lw, lhs(s, n));
     let skips = flags(s, n) != 0;
-    var join = 0;
+    var join: u32 = 0;
     var owner = t;
     if skips {
         let hook = bound(lw, absent_test_hook(), []);

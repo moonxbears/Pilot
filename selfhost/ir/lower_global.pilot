@@ -119,7 +119,7 @@ pub fn global_type(var ref lw: Lowerer, d: i64) -> i64 {
         if !ty_is_unknown(lw.inf.p.tt, a) { return a; }
     }
     if lw.binding_of.has(key(d)) {
-        let t = binding_type(lw.inf, lw.binding_of.get(key(d)));
+        let t = binding_type(lw.inf, lw.binding_of[key(d)]);
         if !ty_is_unknown(lw.inf.p.tt, t) { return t; }
     }
     let v = decl_init_expr(lw.inf.p.s, d);
@@ -129,8 +129,8 @@ pub fn global_type(var ref lw: Lowerer, d: i64) -> i64 {
 /// The module global for `d` (a global binding, or a `comptime` expression
 /// whose value is kept), added on first use.
 pub fn global_index(var ref lw: Lowerer, d: i64, t: i64, name: str) -> i64 {
-    if lw.global_of.has(key(d)) { return lw.global_of.get(key(d)); }
-    let g = lw.m.globals.len();
+    if lw.global_of.has(key(d)) { return lw.global_of[key(d)]; }
+    let g = lw.m.globals.len() as i64;
     lw.m.globals.push(IrGlobal { name: name, physics: layout_of(lw.ls, t), ready: false });
     lw.global_of.set(key(d), g);
     lw.global_decls.push(d);
@@ -174,8 +174,8 @@ fn global_value(var ref lw: Lowerer, d: i64) -> u32 {
 /// compiling.
 pub fn const_init_index(var ref lw: Lowerer, d: i64) -> i64 {
     let k = f"const:{d}";
-    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
-    let idx = lw.queue.len();
+    if lw.fn_index.has(k) { return lw.fn_index[k]; }
+    let idx = lw.queue.len() as i64;
     lw.fn_index.set(k, idx);
     lw.queue.push(d);
     lw.queue_self.push(ty_unknown());
@@ -207,8 +207,8 @@ pub fn lower_const_init(var ref lw: Lowerer, d: i64, var ref f: IrFunction) {
 /// The function that runs `comptime` node `n`, queued on first use.
 pub fn comptime_index(var ref lw: Lowerer, n: i64) -> i64 {
     let k = f"comptime:{n}";
-    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
-    let idx = lw.queue.len();
+    if lw.fn_index.has(k) { return lw.fn_index[k]; }
+    let idx = lw.queue.len() as i64;
     lw.fn_index.set(k, idx);
     lw.queue.push(n);
     lw.queue_self.push(ty_unknown());

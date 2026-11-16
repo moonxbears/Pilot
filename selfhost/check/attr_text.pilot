@@ -10,9 +10,9 @@
 // (selfhost/cli/comptime_tool.pilot) both use them.
 pub lvl(0) pkg selfhost.check;
 
-fn is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
+fn is_space(b: u8) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
 
-fn is_word_byte(b: i64) -> bool =>
+fn is_word_byte(b: u8) -> bool =>
     (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
 
 /// The name written before the attribute argument that starts at byte `at`

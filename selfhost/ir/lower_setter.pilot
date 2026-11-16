@@ -51,8 +51,8 @@ fn setter_row(ref s: Snap, body: i64) -> List<i64> {
 fn setter_index(var ref lw: Lowerer, field: i64, t: i64, vt: i64) -> i64 {
     let s = lw.inf.p.s;
     let k = f"{field}:=@{t}:{ty_display(lw.inf.p.tt, vt)}";
-    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
-    let idx = lw.queue.len();
+    if lw.fn_index.has(k) { return lw.fn_index[k]; }
+    let idx = lw.queue.len() as i64;
     lw.fn_index.set(k, idx);
     lw.queue.push(field);
     lw.queue_self.push(t);
@@ -140,7 +140,7 @@ pub fn lower_setters(var ref lw: Lowerer, idx: i64) {
             let pt = prog_annot_type(lw.inf.p, rhs(s, param));
             let pv = ir_add_param(lw.f, lw.cur, layout_of(lw.ls, pt));
             if lw.binding_of.has(key(param)) {
-                let b = lw.binding_of.get(key(param));
+                let b = lw.binding_of[key(param)];
                 lw.values.set(key(b), pv);
                 if !ty_is_unknown(lw.inf.p.tt, pt) { lw.known_types.set(key(b), pt); }
             }
@@ -166,14 +166,14 @@ pub fn lower_setters(var ref lw: Lowerer, idx: i64) {
         }
         lw.setter_arg = ir_no_value();
         if param >= 0 && lw.binding_of.has(key(param)) {
-            let b = lw.binding_of.get(key(param));
+            let b = lw.binding_of[key(param)];
             lw.values.set(key(b), v);
             if known { lw.known_types.set(key(b), vt); }
         } else {
             lw.setter_arg = v;
             lw.setter_arg_type = vt;
         }
-        var next = 0;
+        var next: u32 = 0;
         if guard >= 0 {
             let ok = ir_add_block(lw.f);
             next = ir_add_block(lw.f);

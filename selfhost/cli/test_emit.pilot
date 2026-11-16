@@ -386,14 +386,15 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
         }
     }
 
-    // Run.
+    // Run. A case that starts the CLI again finds it through PILOT_CLI
+    // (proc.pilot_cli_path): compiled, it is not the CLI itself.
+    let cli_env = f"{proc.pilot_cli_env()}={proc.current_exe() ?? "pilot"}";
     var runs: List<proc.ProcessJob> = [];
     for k in runnable {
         let stem = test_stem(built[k]);
         var argv = filled(r.run, srcs[k], bins[k]);
         for a in test_lines(read_or_empty(stem + ".args")) { argv.push(a); }
-        // A case that starts the CLI again finds it here (proc.pilot_cli_path).
-        runs.push(job_of(argv, read_or_empty(stem + ".stdin"), [f"{proc.pilot_cli_env()}={exe}"]));
+        runs.push(job_of(argv, read_or_empty(stem + ".stdin"), [cli_env]));
     }
     let outs = proc.run_all(runs);
     i = 0;

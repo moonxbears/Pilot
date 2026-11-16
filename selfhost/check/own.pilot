@@ -164,7 +164,7 @@ pub fn borrows_element(var ref f: Flow, b: i64) -> bool {
         else if src >= 0 && r.bind_kind[b] == BindKind::Local { yes = kind(s, r.site[b]) == nk_let() && is_owned_element(f, src); }
         f.element.set(b, yes);
     }
-    return f.element.get(b);
+    return f.element[b];
 }
 
 /// OWN004: an element a collection owns, or a binding borrowing one, used
@@ -209,7 +209,7 @@ pub fn is_owned_binding(var ref f: Flow, b: i64) -> bool {
         else if r.source[b] >= 0 && r.bind_kind[b] == BindKind::Unwrapped { t = owned_payload(f, type_of(f.inf, r.source[b])); }
         f.owned.set(b, owns(f, t));
     }
-    return f.owned.get(b);
+    return f.owned[b];
 }
 
 /// The declaration a call resolves to (a function, or a method of the
@@ -303,7 +303,7 @@ pub fn plain_param(ref s: Snap, prm: i64) -> bool => kind(s, prm) == nk_param() 
 /// The `param_flag_*` bits of parameter `prm`: the written ones, or those
 /// `f.assumed` gives it.
 pub fn flow_param_flags(ref f: Flow, prm: i64) -> i64 {
-    if f.assumed.has(prm) { return f.assumed.get(prm); }
+    if f.assumed.has(prm) { return f.assumed[prm]; }
     return flags(f.inf.p.s, prm);
 }
 
@@ -411,7 +411,7 @@ fn walk(var ref f: Flow, n: i64, moved: List<i64>) -> FlowState {
         let target = lhs(s, n);
         if target >= 0 && kind(s, target) == nk_ident() && inf.r.ref_of[target] >= 0 {
             let at = f"{n}";
-            let was = f.moved_at.has(at) && f.moved_at.get(at);
+            let was = f.moved_at.has(at) && f.moved_at[at];
             f.moved_at.set(at, was || has(st.moved, inf.r.ref_of[target]));
             return flow_state(drop_binding(st.moved, inf.r.ref_of[target]), st.falls_through);
         }

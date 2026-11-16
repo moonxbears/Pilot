@@ -33,9 +33,9 @@ fn collect_captures(ref lw: Lowerer, n: i64, var ref out: List<i64>) {
 
 /// The current value of binding `b` of the function being lowered.
 fn binding_value(var ref lw: Lowerer, b: i64, n: i64) -> u32 {
-    if lw.values.has(key(b)) { return lw.values.get(key(b)); }
+    if lw.values.has(key(b)) { return lw.values[key(b)]; }
     let phy = layout_of(lw.ls, binding_type(lw.inf, b));
-    return emit(lw, op_load(), 0, phy, [lw.slots.get(key(b))], n);
+    return emit(lw, op_load(), 0, phy, [lw.slots[key(b)]], n);
 }
 
 /// The record of function `fi` with `captured` values.
@@ -70,7 +70,7 @@ pub fn lambda_params(var ref lw: Lowerer, decl: i64, var ref f: IrFunction) {
     var i = 0;
     while i + 1 < ch.len() {
         let v = ir_add_param(f, lw.cur, physics_of_type_node(lw, rhs(s, ch[i])));
-        if lw.binding_of.has(key(ch[i])) { lw.values.set(key(lw.binding_of.get(key(ch[i]))), v); }
+        if lw.binding_of.has(key(ch[i])) { lw.values.set(key(lw.binding_of[key(ch[i])]), v); }
         i = i + 1;
     }
     let caps: List<i64> = if lw.lambda_captures.has(key(decl)) { lw.lambda_captures.get(key(decl)) } else { [] };

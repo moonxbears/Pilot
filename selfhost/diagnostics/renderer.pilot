@@ -7,7 +7,7 @@ pub lvl(0) pkg selfhost.diagnostics;
 
 use std.text;
 
-pub pure fn int_to_str(v: usize) -> str => "" + v;
+pub pure fn int_to_str(v: i64) -> str => "" + v;
 
 // ------------------------------------------------------------------------------
 // ANSI Terminal Color Codes (Disabled when use_color == false)
@@ -27,11 +27,11 @@ pub pure fn ansi_bold_blue()    -> str => "\x1b[1;34m";
 // ------------------------------------------------------------------------------
 [Layout(c_abi)]
 pub struct CharWidthInfo : IValue {
-    pub byte_len:      usize;
-    pub display_width: usize;
+    pub byte_len:      i64;
+    pub display_width: i64;
 }
 
-pub fn utf8_char_info(src: str, byte_idx: usize) -> CharWidthInfo {
+pub fn utf8_char_info(src: str, byte_idx: i64) -> CharWidthInfo {
     let n = src.len();
     if byte_idx >= n {
         return CharWidthInfo { byte_len: 0, display_width: 0 };
@@ -80,9 +80,9 @@ pub fn utf8_char_info(src: str, byte_idx: usize) -> CharWidthInfo {
     return CharWidthInfo { byte_len: 1, display_width: 1 };
 }
 
-pub fn measure_display_column(line_str: str, byte_offset_in_line: usize) -> usize {
-    var col: usize = 0;
-    var idx: usize = 0;
+pub fn measure_display_column(line_str: str, byte_offset_in_line: i64) -> i64 {
+    var col: i64 = 0;
+    var idx: i64 = 0;
     let limit = byte_offset_in_line;
     let n = line_str.len();
     while idx < limit && idx < n {
@@ -94,8 +94,8 @@ pub fn measure_display_column(line_str: str, byte_offset_in_line: usize) -> usiz
     return col;
 }
 
-pub fn measure_span_display_width(line_str: str, start_byte: usize, end_byte: usize) -> usize {
-    var width: usize = 0;
+pub fn measure_span_display_width(line_str: str, start_byte: i64, end_byte: i64) -> i64 {
+    var width: i64 = 0;
     var idx = start_byte;
     let limit = end_byte;
     let n = line_str.len();
@@ -116,17 +116,17 @@ pub fn measure_span_display_width(line_str: str, start_byte: usize, end_byte: us
 // ------------------------------------------------------------------------------
 [Layout(c_abi)]
 pub struct LineColInfo : IValue {
-    pub line:             usize;
-    pub col:              usize;
-    pub line_start_byte:  usize;
-    pub line_end_byte:    usize;
+    pub line:             i64;
+    pub col:              i64;
+    pub line_start_byte:  i64;
+    pub line_end_byte:    i64;
 }
 
-pub fn find_line_col_at(src: str, byte_offset: usize) -> LineColInfo {
+pub fn find_line_col_at(src: str, byte_offset: i64) -> LineColInfo {
     let n = src.len();
-    var cur_line: usize = 1;
-    var line_start: usize = 0;
-    var i: usize = 0;
+    var cur_line: i64 = 1;
+    var line_start: i64 = 0;
+    var i: i64 = 0;
     let target = if byte_offset < n { byte_offset; } else { n; };
 
     while i < target {
@@ -181,7 +181,7 @@ pub fn render_diagnostic_human(ref diag: Diagnostic, src: str, file_path: str, u
     }
 
     let prim_label = diag.labels[0];
-    let loc = find_line_col_at(src, prim_label.span.start as usize);
+    let loc = find_line_col_at(src, prim_label.span.start as i64);
 
     let pipe = if use_color { ansi_bold_blue() + " |" + ansi_reset(); } else { " |"; };
     let arrow = if use_color { ansi_bold_blue() + "  --> " + ansi_reset(); } else { "  --> "; };
@@ -200,13 +200,13 @@ pub fn render_diagnostic_human(ref diag: Diagnostic, src: str, file_path: str, u
     out = out + gutter_num + line_str + "\n";
 
     // Underline and caret positioning
-    let span_st_in_line = if (prim_label.span.start as usize) >= loc.line_start_byte {
-        (prim_label.span.start as usize) - loc.line_start_byte;
+    let span_st_in_line = if (prim_label.span.start as i64) >= loc.line_start_byte {
+        (prim_label.span.start as i64) - loc.line_start_byte;
     } else {
         0;
     };
-    let span_ed_in_line = if (prim_label.span.end as usize) >= loc.line_start_byte {
-        let ed = (prim_label.span.end as usize) - loc.line_start_byte;
+    let span_ed_in_line = if (prim_label.span.end as i64) >= loc.line_start_byte {
+        let ed = (prim_label.span.end as i64) - loc.line_start_byte;
         if ed > line_str.len() { line_str.len(); } else { ed; };
     } else {
         span_st_in_line + 1;
@@ -425,7 +425,7 @@ pub fn render_diagnostic_json(ref diag: Diagnostic, file_path: str, src: str) ->
 
     if diag.labels.len > 0 {
         let prim = diag.labels[0];
-        let loc = find_line_col_at(src, prim.span.start as usize);
+        let loc = find_line_col_at(src, prim.span.start as i64);
         out = out + ",\"line\":" + int_to_str(loc.line) + ",\"column\":" + int_to_str(loc.col);
     }
     out = out + "}";
@@ -462,7 +462,7 @@ pub fn render_sarif_report(ref diags: List<Diagnostic>, file_path: str, src: str
 
         if d.labels.len > 0 {
             let prim = d.labels[0];
-            let loc = find_line_col_at(src, prim.span.start as usize);
+            let loc = find_line_col_at(src, prim.span.start as i64);
             parts.push(",\n          \"locations\": [\n");
             parts.push("            {\n");
             parts.push("              \"physicalLocation\": {\n");

@@ -75,7 +75,7 @@ pub fn render_ansi(diag: Diagnostic, source: str) -> str {
                   else { "\x1b[1;34minfo\x1b[0m" };
     var preview = "";
     if source.len() > 0 && (diag.span.end as usize) <= source.len() {
-        preview = " --> " + source.slice(diag.span.start as usize, diag.span.end as usize);
+        preview = " --> " + source.slice(diag.span.start, diag.span.end);
     }
     return sev_str + " [" + diag.code + "]: " + diag.message + preview;
 }

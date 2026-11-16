@@ -97,8 +97,7 @@ pub fn borrows_new(ref f: Flow) -> Borrows {
 
 /// Every assignment of the program to a binding, in node order, as
 /// `binding, right-hand side` pairs laid end to end. The program is walked
-/// once (`Program.gen_memo`); the list is shared, so a caller must not
-/// change it.
+/// once (`Program.gen_memo`); each caller gets its own copy of the list.
 fn binding_assignments(ref inf: Infer) -> List<i64> {
     let p = inf.p;
     let memo = "binding_assignments";
@@ -115,7 +114,7 @@ fn binding_assignments(ref inf: Infer) -> List<i64> {
         }
         p.gen_memo.set(memo, out);
     }
-    return p.gen_memo.get(memo);
+    return copy(p.gen_memo[memo]);
 }
 
 fn add_all(var ref into: List<i64>, ref xs: List<i64>) {
@@ -129,7 +128,7 @@ fn add_all(var ref into: List<i64>, ref xs: List<i64>) {
 /// The roots of binding `b`.
 pub fn binding_roots(ref bw: Borrows, b: i64) -> List<i64> {
     let state = if bw.state.has(b) { bw.state.get(b) } else { 0 };
-    if state == 2 { return bw.roots.get(b); }
+    if state == 2 { return copy(bw.roots[b]); }
     // A binding met again while its roots are being computed (`x = f(x)`)
     // adds nothing new.
     if state == 1 { return []; }
@@ -139,7 +138,7 @@ pub fn binding_roots(ref bw: Borrows, b: i64) -> List<i64> {
     if (!element && !borrows_type(f.inf.p, flow_binding_type(f, b))) || r.bind_kind[b] == BindKind::Param {
         bw.roots.set(b, [b]);
         bw.state.set(b, 2);
-        return bw.roots.get(b);
+        return copy(bw.roots[b]);
     }
     bw.state.set(b, 1);
     var out: List<i64> = [];

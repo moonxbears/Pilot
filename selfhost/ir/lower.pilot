@@ -53,9 +53,9 @@ pub struct Lowerer : IObject {
     pub f: IrFunction;
     pub cur: u32;
     /// Binding index -> its SSA value (`let`, parameters).
-    pub values: Map<str, i64>;
+    pub values: Map<str, u32>;
     /// Binding index -> its stack slot (`var`).
-    pub slots: Map<str, i64>;
+    pub slots: Map<str, u32>;
     /// Innermost loop last: the block `continue` goes to and the block `break` goes to.
     pub loop_heads: List<u32>;
     pub loop_exits: List<u32>;
@@ -89,9 +89,9 @@ pub struct Lowerer : IObject {
     /// each `old(e)` in them (selfhost/ir/lower_contract.pilot).
     pub contract_fn: str;
     pub ensures: List<i64>;
-    pub olds: Map<str, i64>;
+    pub olds: Map<str, u32>;
     /// Exit block of a `for .. then` loop -> the stack slot of its value.
-    pub result_slots: Map<str, i64>;
+    pub result_slots: Map<str, u32>;
     /// Innermost `try` region last: the block its failures go to, and
     /// whether its catch clause binds a name.
     pub try_blocks: List<u32>;
@@ -144,7 +144,7 @@ pub struct Lowerer : IObject {
     /// The function indices lowered already.
     pub lowered: Map<str, bool>;
     /// Collecting `for` node -> the list it fills.
-    pub collect_lists: Map<str, i64>;
+    pub collect_lists: Map<str, u32>;
     /// The stack slots of the `var ref` parameters the function being
     /// lowered hands back at each return, and their physics
     /// (selfhost/ir/lower_outs.pilot).
@@ -161,7 +161,7 @@ pub struct Lowerer : IObject {
     pub releases: Map<str, List<any>>;
     /// Binding -> the stack slot of its drop flag, for a binding moved on
     /// only some paths (selfhost/ir/lower_drop.pilot).
-    pub drop_flags: Map<str, i64>;
+    pub drop_flags: Map<str, u32>;
     /// The calls planned around statements (selfhost/ir/lower_probe.pilot),
     /// by statement node.
     pub probes: Map<str, List<any>>;
@@ -188,7 +188,7 @@ pub fn key(n: i64) -> str => f"{n}";
 /// arguments are `keys`, or "".
 pub fn bound(ref lw: Lowerer, hook: str, ref keys: List<str>) -> str {
     let k = bound_key(hook, keys);
-    if lw.bound_index.has(k) { return lw.bound_index.get(k); }
+    if lw.bound_index.has(k) { return lw.bound_index[k]; }
     return "";
 }
 
@@ -268,18 +268,18 @@ pub fn lower_program_rooted(var ref inf: Infer, every_function: bool) -> IrModul
         bindings: engine_bindings, bound_index: bound_rows_index(engine_bindings), queue_body: [], queue_args: [], cur_field: -1, binding_of: binding_of,
         membership_fn: find_membership_fn(engine_bindings),
         f: ir_function_new("", ir_physics_new(0, 0, 0, 0, 0)), cur: 0,
-        values: Map<str, i64>(), slots: Map<str, i64>(), loop_heads: [], loop_exits: [], head_depths: [], exit_depths: [], defers: [],
+        values: Map<str, u32>(), slots: Map<str, u32>(), loop_heads: [], loop_exits: [], head_depths: [], exit_depths: [], defers: [],
         lambda_captures: Map<str, List<i64>>(), lambda_self: Map<str, i64>(),
         int_pool: Map<str, i64>(), str_pool: Map<str, i64>(), self_value: ir_no_value(), self_type: ty_unknown(), hint: ty_unknown(), ret_type: ty_unknown(),
-        contract_fn: "", ensures: [], olds: Map<str, i64>(), result_slots: Map<str, i64>(), failing: false,
+        contract_fn: "", ensures: [], olds: Map<str, u32>(), result_slots: Map<str, u32>(), failing: false,
         try_blocks: [], try_binds: [], try_types: [], try_depths: [], known_types: Map<str, i64>(),
         global_named: global_names(p), global_of: Map<str, i64>(), global_decls: [],
         comptime_nodes: [], comptime_called: Map<str, bool>(), start_cur: 0, start_body: 0, globals_done: 0,
         start_units: [], start_run_blocks: [], start_unit_bodies: [],
         setter_arg: ir_no_value(), setter_arg_type: ty_unknown(),
         gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
-        resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, i64>(), outs: [], out_phys: [],
-        loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, List<any>>(), drop_flags: Map<str, i64>(),
+        resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, u32>(), outs: [], out_phys: [],
+        loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, List<any>>(), drop_flags: Map<str, u32>(),
         probes: probe_rows(p), adt_decls: adt_nodes(p),
     };
     // Function 0 is `<start>` (selfhost/ir/lower_global.pilot).
@@ -360,8 +360,8 @@ pub fn specialized_index(var ref lw: Lowerer, decl: i64, self_t: i64, arg_types:
     let owner = owner_type_decl(lw, decl);
     let recv = if owner < 0 || is_static_decl(s, decl) { ty_unknown() } else if ty_is_named(lw.inf.p.tt, self_t) { self_t } else { owner_type(lw, owner) };
     let k = f"{decl}@{recv}{spec}";
-    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
-    let idx = lw.queue.len();
+    if lw.fn_index.has(k) { return lw.fn_index[k]; }
+    let idx = lw.queue.len() as i64;
     lw.fn_index.set(k, idx);
     lw.queue.push(decl);
     lw.queue_self.push(recv);
@@ -382,8 +382,8 @@ pub fn specialized_index(var ref lw: Lowerer, decl: i64, self_t: i64, arg_types:
 pub fn accessor_index(var ref lw: Lowerer, field: i64, body: i64, self_t: i64) -> i64 {
     let s = lw.inf.p.s;
     let k = f"{field}:{body}@{self_t}";
-    if lw.fn_index.has(k) { return lw.fn_index.get(k); }
-    let idx = lw.queue.len();
+    if lw.fn_index.has(k) { return lw.fn_index[k]; }
+    let idx = lw.queue.len() as i64;
     lw.fn_index.set(k, idx);
     lw.queue.push(field);
     lw.queue_self.push(self_t);
@@ -448,7 +448,7 @@ pub fn lower_function(var ref lw: Lowerer, idx: i64) {
     if lw.self_value != ir_no_value() && accessor < 0 {
         // `fn f(self, ..)`: the explicit receiver is the receiver parameter.
         let r = receiver_param(s, decl);
-        if r >= 0 && lw.binding_of.has(key(r)) { lw.values.set(key(lw.binding_of.get(key(r))), lw.self_value); }
+        if r >= 0 && lw.binding_of.has(key(r)) { lw.values.set(key(lw.binding_of[key(r)]), lw.self_value); }
         params = method_params(s, decl);
     }
     let spec = lw.queue_args[idx];
@@ -458,7 +458,7 @@ pub fn lower_function(var ref lw: Lowerer, idx: i64) {
         let given = !ty_is_unknown(lw.inf.p.tt, t);
         let v = ir_add_param(f, lw.cur, if given { layout_of(lw.ls, t) } else { physics_of_type_node(lw, rhs(s, param)) });
         if lw.binding_of.has(key(param)) {
-            let b = lw.binding_of.get(key(param));
+            let b = lw.binding_of[key(param)];
             lw.values.set(key(b), v);
             if given { lw.known_types.set(key(b), t); }
         }
@@ -495,10 +495,10 @@ pub fn lower_function(var ref lw: Lowerer, idx: i64) {
 // Emission helpers
 // ------------------------------------------------------------------------------
 
-pub fn emit(var ref lw: Lowerer, op: u16, sub: u16, phy: IrTypePhysics, ref args: List<u32>, n: i64) -> u32 =>
+pub fn emit(var ref lw: Lowerer, op: u16, sub: i64, phy: IrTypePhysics, ref args: List<u32>, n: i64) -> u32 =>
     ir_emit(lw.f, lw.cur, op, sub, phy, args, true, span_start(lw.inf.p.s, n));
 
-pub fn emit_void(var ref lw: Lowerer, op: u16, sub: u16, ref args: List<u32>, n: i64) {
+pub fn emit_void(var ref lw: Lowerer, op: u16, sub: i64, ref args: List<u32>, n: i64) {
     let _ = ir_emit(lw.f, lw.cur, op, sub, layout_unknown(lw.ls), args, false, span_start(lw.inf.p.s, n));
 }
 
@@ -532,31 +532,33 @@ pub fn ensure_open(var ref lw: Lowerer) {
 
 pub fn pool_int(var ref lw: Lowerer, v: i64) -> u32 {
     let k = f"{v}";
-    if lw.int_pool.has(k) { return lw.int_pool.get(k); }
+    if lw.int_pool.has(k) { return ir_operand(lw.int_pool[k]); }
     lw.m.ints.push(v);
     lw.int_pool.set(k, lw.m.ints.len - 1);
-    return lw.m.ints.len - 1;
+    return ir_operand(lw.m.ints.len - 1);
 }
 
 /// The pool index of the float whose binary64 bits are `bits`.
 pub fn pool_float(var ref lw: Lowerer, bits: i64) -> u32 {
     var i = 0;
     while i < lw.m.floats.len {
-        if lw.m.floats[i] == bits { return i; }
+        if lw.m.floats[i] == bits { return ir_operand(i); }
         i = i + 1;
     }
     lw.m.floats.push(bits);
-    return lw.m.floats.len - 1;
+    return ir_operand(lw.m.floats.len - 1);
 }
 
 pub fn pool_str(var ref lw: Lowerer, v: str) -> u32 {
-    if lw.str_pool.has(v) { return lw.str_pool.get(v); }
+    if lw.str_pool.has(v) { return ir_operand(lw.str_pool[v]); }
     lw.m.strings.push(v);
     lw.str_pool.set(v, lw.m.strings.len - 1);
-    return lw.m.strings.len - 1;
+    return ir_operand(lw.m.strings.len - 1);
 }
 
-pub fn intrinsic_index(var ref lw: Lowerer, hook: str) -> u32 {
+/// The index of intrinsic `hook` in the module, added when new: an
+/// instruction's sub-code (ir_sub).
+pub fn intrinsic_index(var ref lw: Lowerer, hook: str) -> i64 {
     var i = 0;
     while i < lw.m.intrinsics.len {
         if lw.m.intrinsics[i] == hook { return i; }
@@ -680,8 +682,8 @@ pub fn lower_ident(var ref lw: Lowerer, n: i64) -> u32 {
     }
     if b < 0 { return unsupported(lw, n); }
     let k = key(b);
-    if lw.values.has(k) { return lw.values.get(k); }
-    if lw.slots.has(k) { return emit(lw, op_load(), 0, physics_of(lw, n), [lw.slots.get(k)], n); }
+    if lw.values.has(k) { return lw.values[k]; }
+    if lw.slots.has(k) { return emit(lw, op_load(), 0, physics_of(lw, n), [lw.slots[k]], n); }
     return unsupported(lw, n);
 }
 
@@ -690,7 +692,7 @@ pub fn lower_binding(var ref lw: Lowerer, n: i64) -> u32 {
     let value_node = rhs(s, n);
     if is_pattern_let(s, n) { return lower_pattern_let(lw, n); }
     if !lw.binding_of.has(key(n)) { return unsupported(lw, n); }
-    let bi = lw.binding_of.get(key(n));
+    let bi = lw.binding_of[key(n)];
     if value_node >= 0 {
         // A binding keeps the type its value has as far as the lowering
         // knows it when the checker gives it none (a map literal's) or one
@@ -737,7 +739,7 @@ pub fn lower_assign(var ref lw: Lowerer, n: i64) -> u32 {
     }
     let b = binding_index(lw, target);
     if b < 0 || !lw.slots.has(key(b)) { return unsupported(lw, n); }
-    let slot = lw.slots.get(key(b));
+    let slot = lw.slots[key(b)];
     let op = flags(s, n);
     var v = if op == 0 { as_member_of(lw, lower_hinted(lw, rhs(s, n), binding_type(lw.inf, b)), value_type(lw, rhs(s, n)), binding_type(lw.inf, b), n) } else { lower_expr(lw, rhs(s, n)) };
     if op != 0 {
@@ -1235,7 +1237,7 @@ fn lower_for_loop(var ref lw: Lowerer, n: i64) -> u32 {
     let result_phy = physics_of(lw, n);
     let result_slot = if then_clause >= 0 { emit(lw, op_stack_slot(), 0, result_phy, [], n) } else { ir_no_value() };
     if then_clause >= 0 { emit_void(lw, op_store(), 0, [result_slot, unit_value(lw, n)], n); }
-    let bi = lw.binding_of.get(key(n));
+    let bi = lw.binding_of[key(n)];
     let var_key = key(bi);
     // `a..b : step`: the range is the step node's lhs, the step its rhs.
     let stepped = kind(s, iterable) == nk_binary() && flags(s, iterable) == op_step();
@@ -1419,7 +1421,7 @@ fn lower_break_value(var ref lw: Lowerer, n: i64) -> u32 {
     while at >= 0 && !lw.result_slots.has(key(lw.loop_exits[at])) { at = at - 1; }
     if at < 0 { return unsupported(lw, n); }
     let target = lw.loop_exits[at];
-    let slot: u32 = lw.result_slots.get(key(target));
+    let slot: u32 = lw.result_slots[key(target)];
     emit_void(lw, op_store(), 0, [slot, lower_expr(lw, lhs(s, n))], n);
     plan_exit(lw, n);
     run_defers_to(lw, lw.exit_depths[at]);

@@ -216,7 +216,7 @@ pub fn yaml_parse(src: str) -> YamlNode {
         if pos >= n { break; }
 
         let nl_pos = src.slice(pos, n).find("\n");
-        let line = if nl_pos >= 0 { src.slice(pos, pos + (nl_pos as usize)) } else { src.slice(pos, n) };
+        let line = if nl_pos >= 0 { src.slice(pos, pos + (nl_pos)) } else { src.slice(pos, n) };
         pos = if nl_pos >= 0 { pos + (nl_pos as usize) + 1 } else { n };
 
         let clean = yaml_trim(line);
@@ -235,8 +235,8 @@ pub fn yaml_parse(src: str) -> YamlNode {
         // Mapping item: key: val
         let colon_idx = clean.find(":");
         if colon_idx > 0 {
-            let key = yaml_trim(clean.slice(0, colon_idx as usize));
-            let val = yaml_trim(clean.slice((colon_idx + 1) as usize, clean.len()));
+            let key = yaml_trim(clean.slice(0, colon_idx));
+            let val = yaml_trim(clean.slice((colon_idx + 1), clean.len()));
             mapping.set(key, yaml_scalar(val));
         }
     }

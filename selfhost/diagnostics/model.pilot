@@ -17,7 +17,7 @@ pub pure fn str_starts_with(src: str, prefix: str) -> bool {
 
 pub fn str_replace(src: str, target: str, replacement: str) -> str {
     var out = "";
-    var p: usize = 0;
+    var p: i64 = 0;
     let n = src.len();
     let m = target.len();
     if m == 0 { return src; }
@@ -27,8 +27,8 @@ pub fn str_replace(src: str, target: str, replacement: str) -> str {
             out = out + src.slice(p, n);
             break;
         }
-        out = out + src.slice(p, idx as usize) + replacement;
-        p = (idx as usize) + m;
+        out = out + src.slice(p, idx) + replacement;
+        p = idx + m;
     }
     return out;
 }

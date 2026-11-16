@@ -135,7 +135,7 @@ pub fn containers_of(ref p: Program, ref pkgs: Map<str, i64>, n: i64) -> List<i6
     }
     var out: List<i64> = [];
     let u = key_of(unit_of(p.s, n));
-    if pkgs.has(u) && pkgs.get(u) != n { out.push(pkgs.get(u)); }
+    if pkgs.has(u) && pkgs[u] != n { out.push(pkgs[u]); }
     var i = inner.len() - 1;
     while i >= 0 {
         out.push(inner[i]);
@@ -247,9 +247,7 @@ fn listed(ref names: List<str>, name: str) -> bool {
 
 /// `list` without what `[NoInherit]` on node `n` drops.
 fn drop_inherited(ref p: Program, n: i64, list: List<EffAttr>) -> List<EffAttr> {
-    let names = no_inherit_names(p, n);
-    if names == none { return list; }
-    let drop: List<str> = names;
+    guard some drop = no_inherit_names(p, n) else { return list; };
     var out: List<EffAttr> = [];
     if drop.len() == 0 { return out; }
     for e in list {

@@ -363,7 +363,7 @@ pub fn memory_available() -> i64? {
     if at < 0 { return none; }
     var end = info.find("\n", at);
     if end < 0 { end = info.len() as i64; }
-    var field = info.slice((at + key.len() as i64) as usize, end as usize).trim();
+    var field = info.slice((at + key.len() as i64), end).trim();
     if !field.ends_with(" kB") { return none; }
     field = field.slice(0, field.len() - 3).trim();
     guard some kb = text.parse_i64(field) else { return none; };
@@ -411,11 +411,12 @@ pub fn pilot_cli_env() -> str => "PILOT_CLI";
 /// The path of the `pilot` CLI, for a program that starts it again (`pilot
 /// test` cases): `PILOT_CLI` when set, else the running executable when that
 /// is the CLI. A program compiled to its own binary and started without
-/// `PILOT_CLI` would start itself without end: that stops at a seam.
+/// `PILOT_CLI` would start itself without end: that stops with a fault.
 pub fn pilot_cli_path() -> str {
     let given = Env.get(pilot_cli_env());
     if given != "" { return given; }
     let exe = current_exe() ?? "pilot";
     if exe.ends_with("/pilot") || exe.ends_with("/pilot.exe") || exe == "pilot" { return exe; }
-    return seam("proc.pilot_cli_path", f"started as {exe}, which is not the pilot CLI");
+    fault(f"proc.pilot_cli_path: started as {exe}, which is not the pilot CLI; set {pilot_cli_env()} to the CLI's path");
+    return "";
 }

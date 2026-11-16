@@ -78,7 +78,7 @@ pub fn parse_pkg_config_file(pc_content: str) -> PkgConfigResult {
     var vars = Map<str, str> {};
 
     let n = pc_content.len();
-    var pos: usize = 0;
+    var pos: i64 = 0;
 
     while pos < n {
         var line_end = pos;
@@ -95,13 +95,13 @@ pub fn parse_pkg_config_file(pc_content: str) -> PkgConfigResult {
 
         // Variable assignment: name=value
         if line.contains("=") && !line.contains(":") {
-            let eq_idx = line.find("=") as usize;
+            let eq_idx = line.find("=") as i64;
             let v_name = line.slice(0, eq_idx);
             var v_val = line.slice(eq_idx + 1, line.len());
             // Resolve nested ${var}
             while v_val.contains("${") {
-                let s_idx = v_val.find("${") as usize;
-                let e_idx = v_val.find("}") as usize;
+                let s_idx = v_val.find("${") as i64;
+                let e_idx = v_val.find("}") as i64;
                 if e_idx > s_idx {
                     let sub_name = v_val.slice(s_idx + 2, e_idx);
                     let repl = if vars.has(sub_name) { vars[sub_name] } else { "" };
@@ -119,8 +119,8 @@ pub fn parse_pkg_config_file(pc_content: str) -> PkgConfigResult {
             var cflags = line.slice(7, line.len());
             // Resolve ${var}
             while cflags.contains("${") {
-                let s_idx = cflags.find("${") as usize;
-                let e_idx = cflags.find("}") as usize;
+                let s_idx = cflags.find("${") as i64;
+                let e_idx = cflags.find("}") as i64;
                 if e_idx > s_idx {
                     let sub_name = cflags.slice(s_idx + 2, e_idx);
                     let repl = if vars.has(sub_name) { vars[sub_name] } else { "" };
@@ -131,7 +131,7 @@ pub fn parse_pkg_config_file(pc_content: str) -> PkgConfigResult {
             }
 
             // Extract -I<dir>
-            var ci: usize = 0;
+            var ci: i64 = 0;
             while ci < cflags.len() {
                 if ci + 1 < cflags.len() && cflags.byte_at(ci) == 45 && cflags.byte_at(ci + 1) == 73 { // "-I"
                     var ie = ci + 2;
@@ -152,8 +152,8 @@ pub fn parse_pkg_config_file(pc_content: str) -> PkgConfigResult {
         if line.starts_with("Libs:") {
             var lib_str = line.slice(5, line.len());
             while lib_str.contains("${") {
-                let s_idx = lib_str.find("${") as usize;
-                let e_idx = lib_str.find("}") as usize;
+                let s_idx = lib_str.find("${") as i64;
+                let e_idx = lib_str.find("}") as i64;
                 if e_idx > s_idx {
                     let sub_name = lib_str.slice(s_idx + 2, e_idx);
                     let repl = if vars.has(sub_name) { vars[sub_name] } else { "" };
@@ -164,7 +164,7 @@ pub fn parse_pkg_config_file(pc_content: str) -> PkgConfigResult {
             }
 
             // Extract -l<name> and -L<dir>
-            var li: usize = 0;
+            var li: i64 = 0;
             while li < lib_str.len() {
                 if li + 1 < lib_str.len() && lib_str.byte_at(li) == 45 && (lib_str.byte_at(li + 1) == 108 || lib_str.byte_at(li + 1) == 76) { // "-l" or "-L"
                     var le = li + 2;
@@ -197,11 +197,11 @@ pub fn resolve_c_header_path(
     sysroot: ref<SysrootDiscovery>
 ) -> opt<str> {
     // 1. Check extra user-provided include directories
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < extra_includes.len() {
         let cand = extra_includes[i] + "/" + header_name;
         if File.exists(cand) {
-            return opt<str>::some(cand);
+            return cand;
         }
         i = i + 1;
     }
@@ -211,10 +211,10 @@ pub fn resolve_c_header_path(
     while i < sysroot.include_dirs.len() {
         let cand = sysroot.include_dirs[i] + "/" + header_name;
         if File.exists(cand) {
-            return opt<str>::some(cand);
+            return cand;
         }
         i = i + 1;
     }
 
-    return opt<str>::none;
+    return none;
 }

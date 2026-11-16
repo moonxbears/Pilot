@@ -14,13 +14,13 @@ use Pilot.Core.Env::*;
 
 pub pure fn cp_trim(s: str) -> str {
     let l = s.len();
-    var start: usize = 0;
+    var start: i64 = 0;
     while start < l {
         let b = s.byte_at(start);
         if b != 32 && b != 9 && b != 13 && b != 10 { break; }
         start = start + 1;
     }
-    var end: usize = l;
+    var end: i64 = l;
     while end > start {
         let b = s.byte_at(end - 1);
         if b != 32 && b != 9 && b != 13 && b != 10 { break; }
@@ -33,7 +33,7 @@ pub pure fn cp_starts_with(s: str, pfx: str) -> bool {
     let sl = s.len();
     let pl = pfx.len();
     if pl > sl { return false; }
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < pl {
         if s.byte_at(i) != pfx.byte_at(i) { return false; }
         i = i + 1;
@@ -45,7 +45,7 @@ pub pure fn cp_ends_with(s: str, sfx: str) -> bool {
     let sl = s.len();
     let xl = sfx.len();
     if xl > sl { return false; }
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < xl {
         if s.byte_at(sl - xl + i) != sfx.byte_at(i) { return false; }
         i = i + 1;
@@ -70,14 +70,14 @@ pub fn cli_levenshtein(s1: str, s2: str) -> i64 {
     let v0 = cli_list_new();
     let v1 = cli_list_new();
 
-    var j: usize = 0;
+    var j: i64 = 0;
     while j <= l2 {
         let _ = cli_list_push(v0, j as i64);
         let _ = cli_list_push(v1, 0 as i64);
         j = j + 1;
     }
 
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < l1 {
         v1.set(0, (i + 1) as i64);
         let c1 = s1.byte_at(i);
@@ -114,7 +114,7 @@ pub fn cli_suggest_typo(input: str, candidates: i64) -> str {
     var best_match = "";
     var best_dist: i64 = 3; // strictly <= 2
 
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < count {
         let cand = cli_list_get_str(candidates, i);
         let d = cli_levenshtein(input, cand);
@@ -139,7 +139,7 @@ pub fn cli_tokenize(raw: str) -> i64 {
 
     // Check if ASCII 31 (\x1f) is used as separator
     var has_unit_sep = false;
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < l {
         if raw.byte_at(i) == 31 {
             has_unit_sep = true;
@@ -150,7 +150,7 @@ pub fn cli_tokenize(raw: str) -> i64 {
 
     // Separated argv entries are exact: each is kept verbatim, empty or not.
     if has_unit_sep {
-        var start: usize = 0;
+        var start: i64 = 0;
         i = 0;
         while i < l {
             if raw.byte_at(i) == 31 {
@@ -164,7 +164,7 @@ pub fn cli_tokenize(raw: str) -> i64 {
     }
 
     // Standard shell whitespace splitting with quote awareness
-    var pos: usize = 0;
+    var pos: i64 = 0;
     while pos < l {
         while pos < l && (raw.byte_at(pos) == 32 || raw.byte_at(pos) == 9) {
             pos = pos + 1;
@@ -252,7 +252,7 @@ pub fn cli_parse_args(reg: ref<CommandRegistry>, raw_argv_line: str) -> i64 {
     }
 
     // Direct script detection
-    var start_arg_idx: usize = 1;
+    var start_arg_idx: i64 = 1;
     var cmd_idx: i64 = -1;
 
     if cp_ends_with(tok0, ".pilot") || cp_ends_with(tok0, ".pilc") {
@@ -265,7 +265,7 @@ pub fn cli_parse_args(reg: ref<CommandRegistry>, raw_argv_line: str) -> i64 {
             // Collect all command names & aliases for typo checking
             let candidate_list = cli_list_new();
             let n_cmds = spec_registry_count(reg);
-            var ci: usize = 0;
+            var ci: i64 = 0;
             while ci < n_cmds {
                 let spec = spec_registry_get(reg, ci);
                 let _ = cli_list_push(candidate_list, spec.name);
@@ -282,17 +282,17 @@ pub fn cli_parse_args(reg: ref<CommandRegistry>, raw_argv_line: str) -> i64 {
             let _ = cli_map_set(res, "exit_code", 2 as i64);
             return res;
         }
-        let spec = spec_registry_get(reg, cmd_idx as usize);
+        let spec = spec_registry_get(reg, cmd_idx as i64);
         parsed.command = spec.name;
     }
 
-    let cmd_spec = if cmd_idx >= 0 { spec_registry_get(reg, cmd_idx as usize) } else { spec_registry_get(reg, 0) };
+    let cmd_spec = if cmd_idx >= 0 { spec_registry_get(reg, cmd_idx as i64) } else { spec_registry_get(reg, 0) };
 
     // Build lookup table for command flags
     let valid_flags = cli_map_new();
     let flag_candidates = cli_list_new();
     let n_flags = cli_list_len(cmd_spec.flags_handle);
-    var fi: usize = 0;
+    var fi: i64 = 0;
     while fi < n_flags {
         let f: FlagSpec = cli_list_get(cmd_spec.flags_handle, fi);
         let _ = cli_map_set(valid_flags, f.long_name, f);
@@ -304,7 +304,7 @@ pub fn cli_parse_args(reg: ref<CommandRegistry>, raw_argv_line: str) -> i64 {
     }
 
     var in_passthrough = false;
-    var t: usize = start_arg_idx;
+    var t: i64 = start_arg_idx;
 
     while t < num_tokens {
         let tok = cli_list_get_str(tokens, t);
@@ -328,7 +328,7 @@ pub fn cli_parse_args(reg: ref<CommandRegistry>, raw_argv_line: str) -> i64 {
             var flag_val = "";
             var has_eq = false;
 
-            var eq_idx: usize = 0;
+            var eq_idx: i64 = 0;
             while eq_idx < flag_body.len() {
                 if flag_body.byte_at(eq_idx) == 61 { // '='
                     flag_name = flag_body.slice(0, eq_idx);
@@ -382,7 +382,7 @@ pub fn cli_parse_args(reg: ref<CommandRegistry>, raw_argv_line: str) -> i64 {
             if f_spec.kind_tag == 5 && f_spec.choices_csv.len() > 0 {
                 let choices = f_spec.choices_csv;
                 var found_choice = false;
-                var c_start: usize = 0;
+                var c_start: i64 = 0;
                 while c_start < choices.len() {
                     var c_end = c_start;
                     while c_end < choices.len() && choices.byte_at(c_end) != 44 { // ','

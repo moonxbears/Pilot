@@ -1,0 +1,2 @@
+error[TYPE001]: argument 1 of `str.slice`: expected `i64`, found `f64`
+err_str_index_type.pilot:4:19

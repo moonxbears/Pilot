@@ -265,7 +265,8 @@ pub interface {
 
     /// A finite group of items that can be counted and searched.
     IReadOnlyCollection<TItem: IAnyValue> : IAnyValue {
-        pub count:    usize { get; }
+        /// Counts and positions are `i64` (PROP-005 5B.2, 2026-11-16).
+        pub count:    i64 { get; }
         pub is_empty: bool  { get => .count == 0; }
         pub pure fn contains(item: TItem) -> bool;
     }
@@ -278,15 +279,15 @@ pub interface {
     }
 
     /// Items in order, read by position.
-    IReadOnlyList<TItem: IAnyValue> : IReadOnlyCollection<TItem>, IIndexGet<usize, TItem> {}
+    IReadOnlyList<TItem: IAnyValue> : IReadOnlyCollection<TItem>, IIndexGet<i64, TItem> {}
 
     /// A fixed number of items in order, each of which can be replaced.
-    IWritableList<TItem: IAnyValue> : IReadOnlyList<TItem>, IIndexSet<usize, TItem> {}
+    IWritableList<TItem: IAnyValue> : IReadOnlyList<TItem>, IIndexSet<i64, TItem> {}
 
     /// Items in order that can grow and shrink.
     IList<TItem: IAnyValue> : ICollection<TItem>, IWritableList<TItem> {
         /// Removes and returns the item at `index`.
-        pub var fn remove_at(index: usize) -> TItem;
+        pub var fn remove_at(index: i64) -> TItem;
     }
 
     /// Items taken out in the order they were put in.
@@ -300,7 +301,7 @@ pub interface {
 
     /// Values looked up by key.
     IReadOnlyDictionary<TKey: IEquatable<TKey>, TVal: IAnyValue> : IIndexGet<TKey, TVal> {
-        pub count:    usize { get; }
+        pub count:    i64 { get; }
         pub is_empty: bool  { get => .count == 0; }
         pub pure fn has(key: TKey) -> bool;
         pub pure fn get(key: TKey) -> option<TVal>;

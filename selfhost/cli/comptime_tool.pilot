@@ -52,9 +52,7 @@ fn row_of(ref p: Program, var ref sink: DiagSink, ref pkgs: Map<str, i64>, f: i6
     let name = node_name(s, f);
     if st.kind == StepKind::Runtime { return ["runtime", path, line, group, fn_shown_name(p, pkgs, f)]; }
     if st.kind == StepKind::User {
-        let value = step_value(p, sink, st.name, st.layers, st.site);
-        if value == none { return none; }
-        let v: str = value;
+        guard some v = step_value(p, sink, st.name, st.layers, st.site) else { return none; };
         return ["step", path, line, group, v, fn_shown_name(p, pkgs, f)];
     }
     if !runs { return ["idle", path, line, group]; }
@@ -143,8 +141,7 @@ fn steps_of(var ref p: Program, phase: str) -> List<List<str>> {
                         else { now };
                     let runs = mask > 0 && (mask & now) != 0;
                     let row = row_of(p, quiet, pkgs, f, st, runs);
-                    if row != none {
-                        let r: List<str> = row;
+                    if some r = row {
                         if r[0] != "idle" { active = true; }
                         rows.push(r);
                     }

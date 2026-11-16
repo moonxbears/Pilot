@@ -17,8 +17,8 @@ use Pilot.Core.Interfaces::*;
 
 [Lang(Cfg.Lang.list_t)]
 pub partial struct List<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerator<T>> {
-    /// The number of items.
-    pub fn len() -> usize;
+    /// The number of items. Counts and indexes are `i64` (PROP-005 5B.2).
+    pub fn len() -> i64;
     /// Appends `item` and returns the list.
     [Mutates]
     pub fn push(item: T) -> List<T>;
@@ -28,19 +28,19 @@ pub partial struct List<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerato
     /// Removes and returns the item at `index`; an index out of range stops
     /// the program.
     [Mutates]
-    pub fn remove_at(index: usize) -> T;
+    pub fn remove_at(index: i64) -> T;
     /// The item at `index`; an index out of range stops the program.
-    pub op [] (index: usize) -> T;
+    pub op [] (index: i64) -> T;
     /// Replaces the item at `index`.
     [Mutates]
-    pub op []= (index: usize, item: T);
+    pub op []= (index: i64, item: T);
 
     /// The number of items.
-    pub count: usize { get => .len(); }
+    pub count: i64 { get => .len(); }
 
     /// Whether some item equals `item`.
     pub fn contains(item: T) -> bool {
-        var i: usize = 0;
+        var i: i64 = 0;
         while i < .len() {
             if self[i] == item { return true; }
             i = i + 1;
@@ -75,7 +75,7 @@ comptime {
 /// Walks a `List<T>` front to back, borrowing it.
 pub struct ListEnumerator<T: IAnyValue> : ICursor<T> {
     pub ref items:   List<T>;
-    pub index:       usize;
+    pub index:       i64;
     pub has_started: bool;
 
     pub var fn move_next() -> bool {

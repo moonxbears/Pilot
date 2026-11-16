@@ -194,7 +194,7 @@ pub pure fn rust_demangle_v0(mangled: str) -> str {
     let n = mangled.len();
     if n < 3 { return mangled; }
 
-    var cursor: usize = 0;
+    var cursor: i64 = 0;
     if mangled.starts_with("_R") {
         cursor = 2;
     } else if mangled.starts_with("__R") {
@@ -245,9 +245,9 @@ pub pure fn rust_demangle_v0(mangled: str) -> str {
 
         // Decimal length of identifier
         if b >= 48 && b <= 57 {
-            var len_val: usize = 0;
+            var len_val: i64 = 0;
             while cursor < n && mangled.byte_at(cursor) >= 48 && mangled.byte_at(cursor) <= 57 {
-                len_val = len_val * 10 + (mangled.byte_at(cursor) - 48) as usize;
+                len_val = len_val * 10 + (mangled.byte_at(cursor) - 48) as i64;
                 cursor = cursor + 1;
             }
             if len_val > 0 && cursor + len_val <= n {
@@ -269,7 +269,7 @@ pub pure fn rust_demangle_v0(mangled: str) -> str {
     }
 
     var full_name = "";
-    var pi: usize = 0;
+    var pi: i64 = 0;
     while pi < parts.len() {
         if pi > 0 { full_name = full_name + "::"; }
         full_name = full_name + parts[pi];
@@ -282,12 +282,12 @@ pub pure fn rust_is_scalar_type(t: str) -> bool {
     let n = t.len();
     if n == 0 { return false; }
     let b0 = t.byte_at(0);
-    // Integers: i8, i16, i32, i64, i128, u8, u16, u32, u64, u128, isize, usize
+    // Integers: i8, i16, i32, i64, i128, u8, u16, u32, u64, u128, isize, i64
     if b0 == 105 || b0 == 117 { // 'i' or 'u'
         if t == "isize" || (b0 == 117 && n == 5 && t.slice(1, 5) == "size") { return true; }
         if n >= 2 && n <= 4 {
             var all_digits = true;
-            var j: usize = 1;
+            var j: i64 = 1;
             while j < n {
                 let d = t.byte_at(j);
                 if d < 48 || d > 57 { all_digits = false; break; }
@@ -307,13 +307,13 @@ pub pure fn rust_is_scalar_type(t: str) -> bool {
 // 4. Tokenizer & String Parsing Helpers
 // ------------------------------------------------------------------------------
 
-pub pure fn rust_is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
+pub pure fn rust_is_space(b: u8) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
 
-pub pure fn rust_is_ident_start(b: i64) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+pub pure fn rust_is_ident_start(b: u8) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
 
-pub pure fn rust_is_ident_char(b: i64) -> bool => rust_is_ident_start(b) || (b >= 48 && b <= 57);
+pub pure fn rust_is_ident_char(b: u8) -> bool => rust_is_ident_start(b) || (b >= 48 && b <= 57);
 
-pub pure fn rust_skip_ws(src: str, start: usize) -> usize {
+pub pure fn rust_skip_ws(src: str, start: i64) -> i64 {
     let n = src.len();
     var cur = start;
     while cur < n {
@@ -336,7 +336,7 @@ pub pure fn rust_skip_ws(src: str, start: usize) -> usize {
     return cur;
 }
 
-pub pure fn rust_read_ident(src: str, start: usize) -> str {
+pub pure fn rust_read_ident(src: str, start: i64) -> str {
     let n = src.len();
     var cur = start;
     if cur < n && rust_is_ident_start(src.byte_at(cur)) {
@@ -358,9 +358,9 @@ pub pure fn rust_read_ident(src: str, start: usize) -> str {
 
 pub pure fn rust_trim(s: str) -> str {
     let n = s.len();
-    var st: usize = 0;
+    var st: i64 = 0;
     while st < n && rust_is_space(s.byte_at(st)) { st = st + 1; }
-    var en: usize = n;
+    var en: i64 = n;
     while en > st && rust_is_space(s.byte_at(en - 1)) { en = en - 1; }
     if en > st { return s.slice(st, en); }
     return "";
@@ -385,7 +385,7 @@ pub fn rust_parse_source(src: str, diags: var ref<List<Diagnostic>>) -> RustModu
         return module;
     }
     let n = src.len();
-    var pos: usize = 0;
+    var pos: i64 = 0;
     var is_repr_c = false;
 
     while pos < n {
@@ -418,7 +418,7 @@ pub fn rust_parse_source(src: str, diags: var ref<List<Diagnostic>>) -> RustModu
                 var fields: List<RustFieldDecl> = [];
                 if pos < n && src.byte_at(pos) == 123 { // '{'
                     pos = pos + 1;
-                    var offset: usize = 0;
+                    var offset: i64 = 0;
                     while pos < n && src.byte_at(pos) != 125 {
                         let prev_pos = pos;
                         pos = rust_skip_ws(src, pos);
@@ -442,7 +442,7 @@ pub fn rust_parse_source(src: str, diags: var ref<List<Diagnostic>>) -> RustModu
                             }
                             let ty_str = rust_trim(src.slice(pos, t_end));
                             let ty_kind = rust_type_classify(ty_str);
-                            let f_size: usize = if ty_kind == RustTypeKind::SliceRef || ty_kind == RustTypeKind::SliceMut || ty_kind == RustTypeKind::StrRef || ty_kind == RustTypeKind::DynTrait { 16 } else if ty_kind == RustTypeKind::Vec || ty_kind == RustTypeKind::String { 24 } else { 8 };
+                            let f_size: i64 = if ty_kind == RustTypeKind::SliceRef || ty_kind == RustTypeKind::SliceMut || ty_kind == RustTypeKind::StrRef || ty_kind == RustTypeKind::DynTrait { 16 } else if ty_kind == RustTypeKind::Vec || ty_kind == RustTypeKind::String { 24 } else { 8 };
 
                             fields.push(RustFieldDecl {
                                 name:        f_name,
@@ -772,7 +772,7 @@ pub fn rust_parse_source(src: str, diags: var ref<List<Diagnostic>>) -> RustModu
 pub fn cargo_parse_manifest(toml_src: str) -> CargoMetadata {
     var meta = cargo_metadata_new();
     let n = toml_src.len();
-    var pos: usize = 0;
+    var pos: i64 = 0;
     var current_section = "";
 
     while pos < n {
@@ -795,8 +795,8 @@ pub fn cargo_parse_manifest(toml_src: str) -> CargoMetadata {
 
         let eq_idx = line.find("=");
         if eq_idx > 0 {
-            let key = rust_trim(line.slice(0, eq_idx as usize));
-            var val = rust_trim(line.slice((eq_idx + 1) as usize, line.len()));
+            let key = rust_trim(line.slice(0, eq_idx));
+            var val = rust_trim(line.slice((eq_idx + 1), line.len()));
             // Strip quotes
             if val.len() >= 2 && val.byte_at(0) == 34 && val.byte_at(val.len() - 1) == 34 {
                 val = val.slice(1, val.len() - 1);

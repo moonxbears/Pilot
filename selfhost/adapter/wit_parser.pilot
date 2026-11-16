@@ -307,23 +307,23 @@ pub fn wit_function_new(name: str) -> WitFunction {
 // 6. Lexer & Tokenizer
 // ------------------------------------------------------------------------------
 
-pure fn wit_is_space(b: i64) -> bool {
+pure fn wit_is_space(b: u8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13;
 }
 
-pure fn wit_is_alpha(b: i64) -> bool {
+pure fn wit_is_alpha(b: u8) -> bool {
     return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || b == 95 || b == 45; // a-z, A-Z, _, -
 }
 
-pure fn wit_is_alnum(b: i64) -> bool {
+pure fn wit_is_alnum(b: u8) -> bool {
     return wit_is_alpha(b) || (b >= 48 && b <= 57);
 }
 
 pub pure fn wit_trim(s: str) -> str {
     let n = s.len();
-    var st: usize = 0;
+    var st: i64 = 0;
     while st < n && wit_is_space(s.byte_at(st)) { st = st + 1; }
-    var en: usize = n;
+    var en: i64 = n;
     while en > st && wit_is_space(s.byte_at(en - 1)) { en = en - 1; }
     if en > st { return s.slice(st, en); }
     return "";
@@ -331,7 +331,7 @@ pub pure fn wit_trim(s: str) -> str {
 
 /// Index of the first `stop` byte in `s` at or after `from` that is not nested
 /// inside `<..>` or `(..)`, or `s.len()` when there is none.
-pure fn wit_find_top(s: str, from: usize, stop: i64) -> usize {
+pure fn wit_find_top(s: str, from: i64, stop: i64) -> i64 {
     let n = s.len();
     var depth: i64 = 0;
     var i = from;
@@ -346,7 +346,7 @@ pure fn wit_find_top(s: str, from: usize, stop: i64) -> usize {
 }
 
 /// The text between the outer `<` and `>` of `t`, which starts with `prefix<`.
-pure fn wit_angle_body(t: str, prefix_len: usize) -> str {
+pure fn wit_angle_body(t: str, prefix_len: i64) -> str {
     let close = t.len() - 1;
     if close <= prefix_len { return ""; }
     return wit_trim(t.slice(prefix_len, close));
@@ -378,9 +378,9 @@ pub fn wit_parse_type(raw: str) -> WitTypeRef {
 pub fn wit_parse_signature(var ref f: WitFunction, sig: str) {
     let open = sig.find("(");
     if open < 0 { return; }
-    let close = wit_find_top(sig, (open + 1) as usize, 41); // ')'
-    let params_txt = sig.slice((open + 1) as usize, close);
-    var at: usize = 0;
+    let close = wit_find_top(sig, (open + 1) as i64, 41); // ')'
+    let params_txt = sig.slice((open + 1), close);
+    var at: i64 = 0;
     while at < params_txt.len() {
         let comma = wit_find_top(params_txt, at, 44);
         let one = wit_trim(params_txt.slice(at, comma));
@@ -389,8 +389,8 @@ pub fn wit_parse_signature(var ref f: WitFunction, sig: str) {
         let colon = one.find(":");
         if colon > 0 {
             f.params.push(WitParam {
-                name:     wit_trim(one.slice(0, colon as usize)),
-                type_ref: wit_parse_type(one.slice((colon + 1) as usize, one.len())),
+                name:     wit_trim(one.slice(0, colon)),
+                type_ref: wit_parse_type(one.slice((colon + 1), one.len())),
             });
         }
     }
@@ -398,7 +398,7 @@ pub fn wit_parse_signature(var ref f: WitFunction, sig: str) {
         let rest = sig.slice(close + 1, sig.len());
         let arrow = rest.find("->");
         if arrow >= 0 {
-            let ret_txt = wit_trim(rest.slice((arrow + 2) as usize, rest.len()));
+            let ret_txt = wit_trim(rest.slice((arrow + 2), rest.len()));
             if ret_txt.len() > 0 {
                 f.results.push(WitParam { name: "", type_ref: wit_parse_type(ret_txt) });
             }
@@ -433,7 +433,7 @@ fn wit_resolve_params(ref iface: WitInterface, ref params: List<WitParam>) -> Li
 
 /// Re-kinds bare type names that the interface itself declares as `Named`.
 pub fn wit_resolve_named_types(var ref iface: WitInterface) {
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < iface.functions.len() {
         var f = iface.functions[i];
         f.params = wit_resolve_params(iface, f.params);
@@ -441,7 +441,7 @@ pub fn wit_resolve_named_types(var ref iface: WitInterface) {
         iface.functions[i] = f;
         i = i + 1;
     }
-    var r: usize = 0;
+    var r: i64 = 0;
     while r < iface.records.len() {
         var rec = iface.records[r];
         var fields: List<WitField> = [];
@@ -460,7 +460,7 @@ pub fn wit_resolve_named_types(var ref iface: WitInterface) {
 
 pub fn wit_parse(src: str) -> WitPackage {
     let n = src.len();
-    var pos: usize = 0;
+    var pos: i64 = 0;
 
     var out_pkg = wit_package_new("default", "module", "0.1.0");
 
@@ -492,13 +492,13 @@ pub fn wit_parse(src: str) -> WitPackage {
             let colon_idx = full_spec.find(":");
             let at_idx = full_spec.find("@");
             if colon_idx > 0 {
-                out_pkg.ns = full_spec.slice(0, colon_idx as usize);
+                out_pkg.ns = full_spec.slice(0, colon_idx);
                 out_pkg.namespace = out_pkg.ns;
                 if at_idx > colon_idx {
-                    out_pkg.name = full_spec.slice((colon_idx + 1) as usize, at_idx as usize);
-                    out_pkg.version = full_spec.slice((at_idx + 1) as usize, full_spec.len());
+                    out_pkg.name = full_spec.slice((colon_idx + 1), at_idx);
+                    out_pkg.version = full_spec.slice((at_idx + 1), full_spec.len());
                 } else {
-                    out_pkg.name = full_spec.slice((colon_idx + 1) as usize, full_spec.len());
+                    out_pkg.name = full_spec.slice((colon_idx + 1), full_spec.len());
                 }
             }
             continue;
@@ -657,13 +657,13 @@ pub fn wit_parse(src: str) -> WitPackage {
                             let colon_p = m_line.find(":");
                             let paren_p = m_line.find("(");
                             if colon_p > 0 && (paren_p < 0 || colon_p < paren_p) {
-                                var meth = wit_function_new(wit_trim(m_line.slice(0, colon_p as usize)));
-                                wit_parse_signature(var meth, m_line.slice((colon_p + 1) as usize, m_line.len()));
+                                var meth = wit_function_new(wit_trim(m_line.slice(0, colon_p)));
+                                wit_parse_signature(var meth, m_line.slice((colon_p + 1), m_line.len()));
                                 res.methods.push(meth);
                             } else if paren_p > 0 {
                                 // `constructor(params)` returns an owned handle.
-                                var ctor = wit_function_new(wit_trim(m_line.slice(0, paren_p as usize)));
-                                wit_parse_signature(var ctor, m_line.slice(paren_p as usize, m_line.len()));
+                                var ctor = wit_function_new(wit_trim(m_line.slice(0, paren_p)));
+                                wit_parse_signature(var ctor, m_line.slice(paren_p, m_line.len()));
                                 ctor.results.push(WitParam { name: "", type_ref: wit_type_own(res_name) });
                                 res.methods.push(ctor);
                             }
@@ -685,9 +685,9 @@ pub fn wit_parse(src: str) -> WitPackage {
 
                 if fn_line.contains(": func") {
                     let colon_p = fn_line.find(":");
-                    let fn_name = if colon_p > 0 { wit_trim(fn_line.slice(0, colon_p as usize)) } else { wit_trim(item_kw) };
+                    let fn_name = if colon_p > 0 { wit_trim(fn_line.slice(0, colon_p)) } else { wit_trim(item_kw) };
                     var iface_fn = wit_function_new(fn_name);
-                    wit_parse_signature(var iface_fn, fn_line.slice((colon_p + 1) as usize, fn_line.len()));
+                    wit_parse_signature(var iface_fn, fn_line.slice((colon_p + 1), fn_line.len()));
                     iface.functions.push(iface_fn);
                 }
                 continue;
@@ -738,9 +738,9 @@ pub fn wit_parse(src: str) -> WitPackage {
 
                     let colon_p = exp_line.find(":");
                     if colon_p > 0 && exp_line.contains("func") {
-                        var fn_item = wit_function_new(wit_trim(exp_line.slice(0, colon_p as usize)));
+                        var fn_item = wit_function_new(wit_trim(exp_line.slice(0, colon_p)));
                         let func_at = exp_line.find("func");
-                        wit_parse_signature(var fn_item, exp_line.slice((func_at + 4) as usize, exp_line.len()));
+                        wit_parse_signature(var fn_item, exp_line.slice((func_at + 4), exp_line.len()));
                         world.exports.push(fn_item);
                     } else {
                         // `export iface;` exports a whole interface.

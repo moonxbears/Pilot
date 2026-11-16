@@ -87,7 +87,7 @@ fn in_source_order(ref analyzed: List<HostDiag>, ref checked: List<HostDiag>) ->
 /// The positional arguments as a list.
 pub fn cli_positionals(ref p: ParsedArgs) -> List<str> {
     var out: List<str> = [];
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < cli_list_len(p.positionals) {
         out.push(cli_list_get_str(p.positionals, i));
         i = i + 1;
@@ -134,7 +134,7 @@ pub fn cmd_run(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     let args = cli_positionals(p);
     if args.len == 0 { return usage_error("`pilot run` needs a program file"); }
     var script_args: List<str> = [];
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < cli_list_len(p.passthrough_args) {
         script_args.push(cli_list_get_str(p.passthrough_args, i));
         i = i + 1;
@@ -421,7 +421,7 @@ pub fn cmd_ir(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     if report_diagnostics(compiled) > 0 { return 1; }
     // The script arguments after `--` reach the program the interpreter runs.
     var script_args = "[";
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < cli_list_len(p.passthrough_args) {
         if i > 0 { script_args = script_args + ", "; }
         script_args = script_args + pilot_string_literal(cli_list_get_str(p.passthrough_args, i));

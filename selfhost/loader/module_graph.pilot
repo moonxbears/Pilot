@@ -37,11 +37,11 @@ pub struct HeaderDecl : IValue {
 
 /// The `pkg` and `use` declarations at the head of a source file, as the
 /// seed parser reads them.
-fn mg_is_ident_start(b: i64) -> bool {
+fn mg_is_ident_start(b: u8) -> bool {
     return (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
 }
 
-fn mg_is_ident_char(b: i64) -> bool {
+fn mg_is_ident_char(b: u8) -> bool {
     return mg_is_ident_start(b) || (b >= 48 && b <= 57);
 }
 
@@ -284,7 +284,7 @@ pub pure fn mg_to_lower(s: str) -> str {
     var out = "";
     var i = 0;
     while i < s.len() {
-        let b = s.byte_at(i);
+        let b = s.byte_at(i) as i64;
         if b >= 65 && b <= 90 {
             out = out + lower.slice(b - 65, b - 64);
         } else {
@@ -378,7 +378,7 @@ pub fn mg_root_pairs(ref g: ModuleGraph, root: str) -> List<str> {
         }
         g.root_index.set(root, found);
     }
-    return g.root_index.get(root);
+    return g.root_index[root];
 }
 
 /// The search root `path` lies under (the longest one containing it), or
@@ -422,7 +422,7 @@ pub fn mg_index_next_root(var ref g: ModuleGraph) {
 /// indexed in order only as far as needed, so a package under an earlier
 /// root hides one of the same name under a later root.
 pub fn mg_package_files(var ref g: ModuleGraph, pkg: str) -> List<str> {
-    if g.pkg_files.has(pkg) { return g.pkg_files.get(pkg); }
+    if g.pkg_files.has(pkg) { return g.pkg_files[pkg]; }
     if g.indexed == 0 {
         for root in g.roots {
             for path in mg_conventional_paths(root, pkg) {
@@ -434,7 +434,7 @@ pub fn mg_package_files(var ref g: ModuleGraph, pkg: str) -> List<str> {
     }
     while g.indexed < g.roots.len() {
         mg_index_next_root(g);
-        if g.pkg_files.has(pkg) { return g.pkg_files.get(pkg); }
+        if g.pkg_files.has(pkg) { return g.pkg_files[pkg]; }
     }
     return [];
 }
@@ -486,9 +486,9 @@ fn mg_report(var ref g: ModuleGraph, code: str, message: str, path: str, offset:
 /// The unit for `path`, adding it (and the units it imports) when new.
 /// `-1` when the file cannot be read.
 fn mg_unit_for(var ref g: ModuleGraph, path: str) -> i64 {
-    if g.by_path.has(path) { return g.by_path.get(path); }
+    if g.by_path.has(path) { return g.by_path[path]; }
     guard some h = UnitHeader.read(path) else { return -1; };
-    let id = g.units.len();
+    let id = g.units.len() as i64;
     let node = mg_extract_package_info(path, id, h);
     g.units.push(node);
     g.by_path.set(path, id);
@@ -555,14 +555,15 @@ fn mg_visit(var ref g: ModuleGraph, u: i64, var ref state: List<i64>, var ref st
     if node.pkg_name != "" {
         for f in mg_package_members(g, mg_root_of(g, node.file_path), node.pkg_name) {
             if g.by_path.has(f) {
-                let sib = g.by_path.get(f);
+                let sib = g.by_path[f];
                 if state[sib] == 0 { mg_visit(g, sib, state, stack); }
             }
         }
     }
     let _ = stack.pop();
     state[u] = 2;
-    g.topo_order.push(file_unit_id_new(u));
+    // A unit index: one per loaded file.
+    g.topo_order.push(file_unit_id_new(u as u32));
 }
 
 /// The module graph of the program whose entry file is `entry_file`.

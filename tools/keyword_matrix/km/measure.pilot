@@ -121,7 +121,7 @@ fn called_names(line: str) -> List<str> {
     var out: List<str> = [];
     if !line.contains("(") { return out; }
     let n = line.len();
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < n {
         // `is_ident_byte`, written out: this loop reads every byte.
         let b = line.byte_at(i);
@@ -174,7 +174,7 @@ fn file_name(path: str) -> str {
     let pieces = split_on(path, "/");
     let last = pieces[pieces.len() - 1];
     let dot = last.find(".", 0);
-    return if dot >= 0 { last.slice(0, dot as usize) } else { last };
+    return if dot >= 0 { last.slice(0, dot) } else { last };
 }
 
 /// The lines holding one of the search's keys, in order, each once.
@@ -219,7 +219,7 @@ fn rarest_token(ref c: Corpus, key: str) -> str {
     var best = "";
     var best_count = -1;
     let n = key.len();
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < n {
         if !is_ident_byte(key.byte_at(i)) {
             i = i + 1;
@@ -248,5 +248,5 @@ fn is_rule_header(line: str, word: str) -> bool {
     if rest.len() == 0 || is_ident_byte(rest.byte_at(0)) { return false; }
     let arrow = rest.find("=>", 0);
     if arrow < 0 { return false; }
-    return rest.slice((arrow as usize) + 2, rest.len()).trim().starts_with("quote");
+    return rest.slice((arrow) + 2, rest.len()).trim().starts_with("quote");
 }

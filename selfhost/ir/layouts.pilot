@@ -72,7 +72,8 @@ pub fn layout_of(var ref ls: IrLayouts, t: i64) -> IrTypePhysics {
     if ty_is_func(p.tt, t) {
         return layout_add(ls, name, ir_physics_new(0, reg_class_raw_ptr(), 64, 3, lattice_value()));
     }
-    let lattice: u8 = lattice_of(p, t);
+    // The 2-bit lattice class (0..3).
+    let lattice = lattice_of(p, t) as u8;
     if ty_is_named(p.tt, t) {
         // `[Bits]` may sit on any partial declaration of the type.
         for d in nl_get(p.type_decls, p.tt.name[t]) {
@@ -81,7 +82,7 @@ pub fn layout_of(var ref ls: IrLayouts, t: i64) -> IrTypePhysics {
                     if some width = prog_const(p, bits[0]) {
                         let class = reg_class_code(prog_const_name(p, bits[1]));
                         let rc = if width == 0 { reg_class_unit() } else { class };
-                        return layout_add(ls, name, ir_physics_new(0, rc, width, align_pow2_of(width), lattice));
+                        return layout_add(ls, name, ir_physics_new(0, rc, ir_u16(width, "`[Bits]` width"), align_pow2_of(width), lattice));
                     }
                 }
             }

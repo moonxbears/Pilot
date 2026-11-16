@@ -148,7 +148,6 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("pilot_vm.sandbox_run", ::Entry, "VM that meters fuel, heap and capabilities through VmSandbox", "F7"),
         seam_entry("pilotc.compile_c11", ::Entry, "self-hosted pipeline lowering a whole Pilot program to C11 (analyzer F4, PilIR F5, C11 backend F6)", "F8"),
         seam_entry("polyglot.inline", ::Entry, "inline foreign-language blocks `word { .. }` / `word(\"..\")` run in-process with typed results (stdlib/polyglot/polyglot_syntax.pilot `RejectWord` rules; PROP-009 section 17 removed the seed parse that built nodes nothing ran)", "M58"),
-        seam_entry("proc.pilot_cli_path", ::Entry, "a way for a compiled program to find the pilot CLI: `pilot test --emit c` runs the program as its own binary, so `proc.current_exe()` names that binary; needs a per-job environment in std.proc (or a host op to set one) to hand it the CLI path", "F6"),
         seam_entry("py.allow_threads", ::Entry, "PyEval_SaveThread through an in-process libpython3", "F6"),
         seam_entry("py.buffer_acquire", ::Entry, "PyObject_GetBuffer filling a PyBufferRaw (PEP 3118)", "F6"),
         seam_entry("py.buffer_release", ::Entry, "PyBuffer_Release through an in-process libpython3", "F6"),

@@ -24,7 +24,7 @@ pub fn rust_verify_lifetime_bindings(
     }
 
     var has_input_borrow = false;
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < fn_decl.params.len() {
         let p = fn_decl.params[i];
         if p.is_ref || p.type_kind == RustTypeKind::SliceRef || p.type_kind == RustTypeKind::SliceMut || p.type_kind == RustTypeKind::StrRef {
@@ -57,7 +57,7 @@ pub fn rust_verify_lifetime_bindings(
 pub pure fn rust_bridge_cache_key(crate_name: str, src: str) -> str {
     var h: u64 = 0xcbf29ce484222325;
     let n = src.len();
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < n {
         let b = src.byte_at(i) as u64;
         h = h ^ b;
@@ -77,9 +77,9 @@ pub pure fn rust_bridge_cache_key(crate_name: str, src: str) -> str {
     let hex_chars = "0123456789abcdef";
     var out = "";
     var temp = h;
-    var d: usize = 0;
+    var d: i64 = 0;
     while d < 16 {
-        let hex_val = (temp & 15) as usize;
+        let hex_val = (temp & 15) as i64;
         out = out + hex_chars.slice(hex_val, hex_val + 1);
         temp = temp >> 4;
         d = d + 1;
@@ -95,10 +95,10 @@ pub fn rust_synthesize_dyn_vtable(trait_decl: ref<RustTraitDecl>) -> str {
     var out: List<str> = [f"// DynTraitFatPtr vtable layout for trait '{trait_decl.name}'\n"];
     out.push(f"#[repr(C)]\npub struct {trait_decl.name}Vtable {{\n");
     out.push("    pub destructor: unsafe extern \"C\" fn(*mut ()),\n");
-    out.push("    pub size: usize,\n");
-    out.push("    pub align: usize,\n");
+    out.push("    pub size: i64,\n");
+    out.push("    pub align: i64,\n");
 
-    var m_idx: usize = 0;
+    var m_idx: i64 = 0;
     while m_idx < trait_decl.methods.len() {
         let m = trait_decl.methods[m_idx];
         out.push(f"    pub {m.name}: unsafe extern \"C\" fn(*const (),\n");
@@ -123,7 +123,7 @@ pub fn rust_elem_type(ty: str, kind: RustTypeKind) -> str {
     let a = ty.find(open);
     let b = ty.find(close);
     if a < 0 || b <= a { return ty; }
-    return ty.slice((a + 1) as usize, b as usize).trim();
+    return ty.slice((a + 1), b).trim();
 }
 
 /// Where a parameter or return kind the bridge cannot carry yet stops.
@@ -208,29 +208,29 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
     out.push("    pub is_ok: bool,\n");
     out.push("    pub val: T,\n");
     out.push("    pub panic_msg: *const u8,\n");
-    out.push("    pub panic_len: usize,\n");
+    out.push("    pub panic_len: i64,\n");
     out.push("}\n\n");
 
     out.push("/// Zero-copy slice view passed between Pilot and Rust\n");
     out.push("#[repr(C)]\n#[derive(Clone, Copy)]\n");
     out.push("pub struct PilotSliceView<T> {\n");
     out.push("    pub ptr: *const T,\n");
-    out.push("    pub len: usize,\n");
+    out.push("    pub len: i64,\n");
     out.push("}\n\n");
 
     out.push("/// Zero-copy mutable slice view\n");
     out.push("#[repr(C)]\n#[derive(Clone, Copy)]\n");
     out.push("pub struct PilotSliceMut<T> {\n");
     out.push("    pub ptr: *mut T,\n");
-    out.push("    pub len: usize,\n");
+    out.push("    pub len: i64,\n");
     out.push("}\n\n");
 
     out.push("/// An owned Rust Vec<T> / String handed to Pilot; freed by the free_* functions\n");
     out.push("#[repr(C)]\n");
     out.push("pub struct PilotVecParts<T> {\n");
     out.push("    pub ptr: *mut T,\n");
-    out.push("    pub cap: usize,\n");
-    out.push("    pub len: usize,\n");
+    out.push("    pub cap: i64,\n");
+    out.push("    pub len: i64,\n");
     out.push("}\n\n");
 
     out.push("/// DynTrait fat pointer representation { data, vtable }\n");
@@ -249,7 +249,7 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
 
     out.push("/// Free function for Rust Vec<T>\n");
     out.push("#[no_mangle]\n");
-    out.push(f"pub unsafe extern \"C\" fn pilot_rust_free_vec_{crate_name}(ptr: *mut u8, cap: usize, len: usize) {{\n");
+    out.push(f"pub unsafe extern \"C\" fn pilot_rust_free_vec_{crate_name}(ptr: *mut u8, cap: i64, len: i64) {{\n");
     out.push("    if !ptr.is_null() && cap > 0 {\n");
     out.push("        let _ = Vec::from_raw_parts(ptr, len, cap);\n");
     out.push("    }\n");
@@ -257,16 +257,16 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
 
     out.push("/// Free function for Rust String\n");
     out.push("#[no_mangle]\n");
-    out.push(f"pub unsafe extern \"C\" fn pilot_rust_free_string_{crate_name}(ptr: *mut u8, cap: usize, len: usize) {{\n");
+    out.push(f"pub unsafe extern \"C\" fn pilot_rust_free_string_{crate_name}(ptr: *mut u8, cap: i64, len: i64) {{\n");
     out.push("    if !ptr.is_null() && cap > 0 {\n");
     out.push("        let _ = String::from_raw_parts(ptr, len, cap);\n");
     out.push("    }\n");
     out.push("}\n\n");
 
-    var f_idx: usize = 0;
+    var f_idx: i64 = 0;
     while f_idx < module.functions.len() {
         let f = module.functions[f_idx];
-        var p_idx: usize = 0;
+        var p_idx: i64 = 0;
         while p_idx < f.params.len() {
             if !bridge_param_supported(f.params[p_idx].type_kind) {
                 return bridge_unsupported_kind();
@@ -311,7 +311,7 @@ pub fn rust_generate_bridge_crate(module: ref<RustModuleDecl>, crate_name: str) 
             let elem = rust_elem_type(f.return_type, f.ret_kind);
             out.push(f"/// Frees the Vec<{elem}> returned by '{f.name}' on Rust's allocator\n");
             out.push("#[no_mangle]\n");
-            out.push(f"pub unsafe extern \"C\" fn bridge_free_{crate_name}_{f.name}(ptr: *mut {elem}, cap: usize, len: usize) {{\n");
+            out.push(f"pub unsafe extern \"C\" fn bridge_free_{crate_name}_{f.name}(ptr: *mut {elem}, cap: i64, len: i64) {{\n");
             out.push("    if !ptr.is_null() && cap > 0 {\n");
             out.push("        let _ = Vec::from_raw_parts(ptr, len, cap);\n");
             out.push("    }\n");
@@ -335,7 +335,7 @@ pub fn absorb_rust_source(
     diags: var ref<List<Diagnostic>>
 ) -> RustModuleDecl {
     let module = rust_parse_source(src, var diags);
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < module.functions.len() {
         let f = module.functions[i];
         let _ = rust_verify_lifetime_bindings(ref f, var diags);

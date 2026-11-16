@@ -64,7 +64,7 @@ pub fn print_function_header(fn_name: str, params_str: str, ret_phy: IrTypePhysi
 // Textual IR Round-Trip Parser Helpers
 // ------------------------------------------------------------------------------
 
-pub fn parse_ir_find_next_line(text: str, start: usize) -> str {
+pub fn parse_ir_find_next_line(text: str, start: i64) -> str {
     let n = text.len();
     if start >= n { return ""; }
     let rem = text.slice(start, n);

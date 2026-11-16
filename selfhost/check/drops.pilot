@@ -212,7 +212,7 @@ pub fn needs_drop(var ref pl: DropPlanner, t: i64, depth: i64) -> i64 {
     if pl.needs.has(key) {
         // -1: met again while it is being decided, so it holds itself. That
         // matters only if it needs dropping, decided below.
-        let known = pl.needs.get(key);
+        let known = pl.needs[key];
         if known < 0 {
             pl.cyclic.set(key, true);
             return 0;
@@ -565,7 +565,7 @@ fn unsupported_uses(var ref pl: DropPlanner, body: i64, b: i64, key: str) -> boo
         let up = pl.flow.inf.p.parents[i];
         if up >= 0 && kind(s, up) == nk_assign() && lhs(s, up) == i {
             let at = f"{up}";
-            let maybe = pl.flow.moved_at.has(at) && pl.flow.moved_at.get(at);
+            let maybe = pl.flow.moved_at.has(at) && pl.flow.moved_at[at];
             if !maybe { row(pl, ::Replace, up, name, key); }
             else if !moved_before(pl, up, b) {
                 // Moved on some paths only: the flag says whether to drop.

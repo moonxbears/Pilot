@@ -1,0 +1,5 @@
+// A list index is an i64: a float is not one (PROP-005 5B.2, 2026-11-16).
+fn main() {
+    var xs: List<i64> = [1, 2, 3];
+    print(xs.remove_at(1.5));
+}

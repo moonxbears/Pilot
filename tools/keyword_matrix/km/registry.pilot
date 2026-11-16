@@ -36,10 +36,10 @@ pub fn read_categories(text: str) -> List<Category> {
     let marker = "KeywordCategoryDefAttr(";
     var at = text.find(marker, 0);
     while at >= 0 {
-        let from = (at as usize) + marker.len();
+        let from = (at as i64) + marker.len();
         let id = leading_int(text.slice(from, text.len()));
         let close = text.find(")", from);
-        let args = string_literals(text.slice(from, if close >= 0 { close as usize } else { text.len() }));
+        let args = string_literals(text.slice(from, if close >= 0 { close } else { text.len() }));
         if id >= 0 && args.len() >= 2 {
             out.push(Category { id: id, badge: args[1] });
         }
@@ -75,8 +75,8 @@ pub fn read_entries(text: str) -> List<RegistryEntry> {
 /// `word` from a line `word {}`; empty for any other line.
 fn entry_word(line: str) -> str {
     if !line.ends_with("{}") { return ""; }
-    let word = line.slice(0, (line.len() - 2) as usize).trim();
-    var i: usize = 0;
+    let word = line.slice(0, (line.len() - 2)).trim();
+    var i: i64 = 0;
     while i < word.len() {
         if !is_ident_byte(word.byte_at(i)) { return ""; }
         i = i + 1;
@@ -130,14 +130,14 @@ fn token_table(text: str) -> Map<str, str> {
         let line = raw.trim();
         let colon = line.find(":", 0);
         if colon <= 0 || !line.ends_with("\",") { continue; }
-        let name = line.slice(0, colon as usize);
+        let name = line.slice(0, colon);
         var ok = true;
-        var i: usize = 0;
+        var i: i64 = 0;
         while i < name.len() {
             if !is_ident_byte(name.byte_at(i)) { ok = false; }
             i = i + 1;
         }
-        let lits = string_literals(line.slice(colon as usize, line.len()));
+        let lits = string_literals(line.slice(colon, line.len()));
         if ok && lits.len() == 1 { out.set(name, lits[0]); }
     }
     return out;

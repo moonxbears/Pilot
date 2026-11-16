@@ -114,15 +114,15 @@ pub fn py_module_stub_new(name: str) -> PyModuleStub {
 // 4. Type Classification & Normalization
 // ------------------------------------------------------------------------------
 
-pure fn py_is_space(b: i64) -> bool {
+pure fn py_is_space(b: u8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13;
 }
 
 pub pure fn py_trim(s: str) -> str {
     let n = s.len();
-    var st: usize = 0;
+    var st: i64 = 0;
     while st < n && py_is_space(s.byte_at(st)) { st = st + 1; }
-    var en: usize = n;
+    var en: i64 = n;
     while en > st && py_is_space(s.byte_at(en - 1)) { en = en - 1; }
     if en > st { return s.slice(st, en); }
     return "";
@@ -173,7 +173,7 @@ pub pure fn py_classify_type(type_str: str) -> PyStubTypeKind {
 // 5. Python .pyi Stub Parser
 // ------------------------------------------------------------------------------
 
-pure fn py_skip_ws(src: str, pos: usize) -> usize {
+pure fn py_skip_ws(src: str, pos: i64) -> i64 {
     var p = pos;
     let n = src.len();
     while p < n {
@@ -195,7 +195,7 @@ fn py_parse_param(raw: str) -> PyParamDecl {
     let p = py_trim(raw);
     var is_var = false;
     var is_kw = false;
-    var name_start: usize = 0;
+    var name_start: i64 = 0;
     if p.starts_with("**") {
         is_kw = true;
         name_start = 2;
@@ -213,18 +213,18 @@ fn py_parse_param(raw: str) -> PyParamDecl {
     var def_val = "";
 
     if colon_pos >= 0 {
-        p_name = py_trim(p.slice(name_start, colon_pos as usize));
+        p_name = py_trim(p.slice(name_start, colon_pos));
         if eq_pos > colon_pos {
-            p_type = py_trim(p.slice((colon_pos + 1) as usize, eq_pos as usize));
+            p_type = py_trim(p.slice((colon_pos + 1), eq_pos));
             has_def = true;
-            def_val = py_trim(p.slice((eq_pos + 1) as usize, p.len()));
+            def_val = py_trim(p.slice((eq_pos + 1), p.len()));
         } else {
-            p_type = py_trim(p.slice((colon_pos + 1) as usize, p.len()));
+            p_type = py_trim(p.slice((colon_pos + 1), p.len()));
         }
     } else if eq_pos >= 0 {
-        p_name = py_trim(p.slice(name_start, eq_pos as usize));
+        p_name = py_trim(p.slice(name_start, eq_pos));
         has_def = true;
-        def_val = py_trim(p.slice((eq_pos + 1) as usize, p.len()));
+        def_val = py_trim(p.slice((eq_pos + 1), p.len()));
     } else {
         p_name = py_trim(p.slice(name_start, p.len()));
     }
@@ -244,7 +244,7 @@ fn py_parse_param(raw: str) -> PyParamDecl {
 pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleStub {
     var stub = py_module_stub_new("python_module");
     let n = source.len();
-    var pos: usize = 0;
+    var pos: i64 = 0;
 
     var cur_class_name = "";
     var is_static = false;
@@ -259,7 +259,7 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
         if pos >= n { break; }
 
         // Measure line indentation
-        var indent: usize = 0;
+        var indent: i64 = 0;
         while pos < n && (source.byte_at(pos) == 32 || source.byte_at(pos) == 9) {
             indent = indent + 1;
             pos = pos + 1;
@@ -303,21 +303,21 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
         if rem.starts_with("class ") {
             let class_kw_len = 6;
             let nl_pos = rem.find("\n");
-            let line = if nl_pos >= 0 { rem.slice(0, nl_pos as usize) } else { rem };
+            let line = if nl_pos >= 0 { rem.slice(0, nl_pos) } else { rem };
             let colon_idx = line.find(":");
-            let head = if colon_idx >= 0 { py_trim(line.slice(class_kw_len, colon_idx as usize)) } else { py_trim(line.slice(class_kw_len, line.len())) };
+            let head = if colon_idx >= 0 { py_trim(line.slice(class_kw_len, colon_idx)) } else { py_trim(line.slice(class_kw_len, line.len())) };
 
             var c_name = head;
             var bases: List<str> = [];
             let paren_open = head.find("(");
             let paren_close = head.find(")");
             if paren_open >= 0 && paren_close > paren_open {
-                c_name = py_trim(head.slice(0, paren_open as usize));
-                var b_rem = py_trim(head.slice((paren_open + 1) as usize, paren_close as usize));
+                c_name = py_trim(head.slice(0, paren_open));
+                var b_rem = py_trim(head.slice((paren_open + 1), paren_close));
                 while b_rem.len() > 0 {
                     let comma = b_rem.find(",");
-                    let b_str = if comma >= 0 { py_trim(b_rem.slice(0, comma as usize)) } else { py_trim(b_rem) };
-                    b_rem = if comma >= 0 { py_trim(b_rem.slice((comma + 1) as usize, b_rem.len())) } else { "" };
+                    let b_str = if comma >= 0 { py_trim(b_rem.slice(0, comma)) } else { py_trim(b_rem) };
+                    b_rem = if comma >= 0 { py_trim(b_rem.slice((comma + 1), b_rem.len())) } else { "" };
                     if b_str.len() > 0 {
                         bases.push(b_str);
                     }
@@ -332,7 +332,7 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
             };
             stub.classes.push(cls);
             cur_class_name = c_name;
-            pos = if nl_pos >= 0 { pos + (nl_pos as usize) + 1 } else { n };
+            pos = if nl_pos >= 0 { pos + (nl_pos as i64) + 1 } else { n };
             continue;
         }
 
@@ -345,16 +345,16 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
             let on_line = def_nl < 0 || paren_close < def_nl;
 
             if paren_open > 0 && paren_close > paren_open && on_line {
-                let f_name = py_trim(rem.slice(def_kw_len, paren_open as usize));
-                let params_raw = py_trim(rem.slice((paren_open + 1) as usize, paren_close as usize));
+                let f_name = py_trim(rem.slice(def_kw_len, paren_open));
+                let params_raw = py_trim(rem.slice((paren_open + 1), paren_close));
 
                 var params: List<PyParamDecl> = [];
                 if params_raw.len() > 0 {
                     var p_rem = params_raw;
                     while p_rem.len() > 0 {
                         let c_idx = p_rem.find(",");
-                        let seg = if c_idx >= 0 { p_rem.slice(0, c_idx as usize) } else { p_rem };
-                        p_rem = if c_idx >= 0 { p_rem.slice((c_idx + 1) as usize, p_rem.len()) } else { "" };
+                        let seg = if c_idx >= 0 { p_rem.slice(0, c_idx) } else { p_rem };
+                        p_rem = if c_idx >= 0 { p_rem.slice((c_idx + 1), p_rem.len()) } else { "" };
                         let param = py_parse_param(seg);
                         if param.name != "self" && param.name != "cls" {
                             params.push(param);
@@ -364,11 +364,11 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
 
                 // Return type
                 var ret_type = "None";
-                let after_paren = rem.slice((paren_close + 1) as usize, rem.len());
+                let after_paren = rem.slice((paren_close + 1), rem.len());
                 let arrow_idx = after_paren.find("->");
                 let colon_idx = after_paren.find(":");
                 if arrow_idx >= 0 && colon_idx > arrow_idx {
-                    ret_type = py_trim(after_paren.slice((arrow_idx + 2) as usize, colon_idx as usize));
+                    ret_type = py_trim(after_paren.slice((arrow_idx + 2), colon_idx));
                 }
 
                 let ret_k = py_classify_type(ret_type);
@@ -395,13 +395,13 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
                 is_property = false;
 
                 let nl = rem.find("\n");
-                pos = if nl >= 0 { pos + (nl as usize) + 1 } else { n };
+                pos = if nl >= 0 { pos + (nl as i64) + 1 } else { n };
                 continue;
             }
 
             // A `def` without a parameter list is not a valid declaration.
             let bad_nl = rem.find("\n");
-            let bad_line = if bad_nl >= 0 { rem.slice(0, bad_nl as usize) } else { rem };
+            let bad_line = if bad_nl >= 0 { rem.slice(0, bad_nl) } else { rem };
             diags.push(Diagnostic {
                 code:     py_diag_code(PyDiagnosticKind::StubParseError),
                 severity: 1,
@@ -410,23 +410,23 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
                 notes:    [],
                 fixes:    [],
             });
-            pos = if bad_nl >= 0 { pos + (bad_nl as usize) + 1 } else { n };
+            pos = if bad_nl >= 0 { pos + (bad_nl as i64) + 1 } else { n };
             continue;
         }
 
         // Constant or module attribute: NAME: type = val or NAME = val
         let nl_end = rem.find("\n");
-        let line_seg = if nl_end >= 0 { rem.slice(0, nl_end as usize) } else { rem };
+        let line_seg = if nl_end >= 0 { rem.slice(0, nl_end) } else { rem };
         if line_seg.find("=") >= 0 && !line_seg.starts_with(" ") && !line_seg.starts_with("\t") {
             let eq_i = line_seg.find("=");
-            let lhs = py_trim(line_seg.slice(0, eq_i as usize));
-            let rhs = py_trim(line_seg.slice((eq_i + 1) as usize, line_seg.len()));
+            let lhs = py_trim(line_seg.slice(0, eq_i));
+            let rhs = py_trim(line_seg.slice((eq_i + 1), line_seg.len()));
             let colon_i = lhs.find(":");
             var c_name = lhs;
             var c_ty = "Any";
             if colon_i >= 0 {
-                c_name = py_trim(lhs.slice(0, colon_i as usize));
-                c_ty = py_trim(lhs.slice((colon_i + 1) as usize, lhs.len()));
+                c_name = py_trim(lhs.slice(0, colon_i));
+                c_ty = py_trim(lhs.slice((colon_i + 1), lhs.len()));
             }
             let tk = py_classify_type(c_ty);
             stub.constants.push(PyParamDecl {
@@ -440,7 +440,7 @@ pub fn py_parse_stub(source: str, diags: var ref<List<Diagnostic>>) -> PyModuleS
             });
         }
 
-        pos = if nl_end >= 0 { pos + (nl_end as usize) + 1 } else { n };
+        pos = if nl_end >= 0 { pos + (nl_end as i64) + 1 } else { n };
     }
 
     return stub;
@@ -455,7 +455,7 @@ pub fn py_synthesize_vectorcall_wrapper(module: ref<PyModuleStub>, fn_name: str)
     out = out + f"// Pilot In-Process Python Vectorcall Wrapper for '{module.name}.{fn_name}'\n";
     out = out + "// Zero-copy stack frame argument packing via PyObject_Vectorcall\n";
     out = out + "// ==============================================================================\n";
-    out = out + f"pub fn call_py_{fn_name}(callable: usize, args: slice<usize>, kwnames: slice<str>) -> res<usize, PyError> {{\n";
+    out = out + f"pub fn call_py_{fn_name}(callable: i64, args: slice<i64>, kwnames: slice<str>) -> res<i64, PyError> {{\n";
     out = out + "    let gil = py_gil_acquire();\n";
     out = out + "    let res = py_vectorcall_fast(callable, args, kwnames);\n";
     out = out + "    py_gil_release(var gil);\n";

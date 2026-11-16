@@ -144,7 +144,7 @@ pub fn adapter_blueprint_new(source_ns: str, target_type: str) -> AdapterBluepri
 pub fn adapter_strip_prefix(name: str, ref prefixes: List<str>) -> str {
     var out = name;
     let n = prefixes.len();
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < n {
         let pfx = prefixes[i];
         let p_len = pfx.len();
@@ -229,7 +229,7 @@ pub fn adapter_case_norm(name: str, style: u8) -> str {
     }
     var out = "";
     let n = name.len();
-    var i: usize = 0;
+    var i: i64 = 0;
     var next_upper = (style == 2);
 
     while i < n {
@@ -266,9 +266,9 @@ pub struct AdapterTransformEntry : IValue {
     pub description: str;
 }
 
-pub pure fn adapter_rule_count() -> usize => 9;
+pub pure fn adapter_rule_count() -> i64 => 9;
 
-pub pure fn adapter_rule_get(index: usize) -> AdapterTransformEntry {
+pub pure fn adapter_rule_get(index: i64) -> AdapterTransformEntry {
     if index == 0 { return AdapterTransformEntry { rule_id: 1, name: "strip_prefix",     description: "Removes foreign module/library namespace prefixes" }; }
     if index == 1 { return AdapterTransformEntry { rule_id: 2, name: "case_norm",        description: "Normalizes C snake_case to Pilot camelCase/PascalCase" }; }
     if index == 2 { return AdapterTransformEntry { rule_id: 3, name: "receiver_promote", description: "Lifts handle pointer to self/var ref self receiver" }; }

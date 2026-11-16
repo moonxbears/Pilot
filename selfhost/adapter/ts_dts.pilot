@@ -131,15 +131,15 @@ pub fn ts_module_decl_new(name: str) -> TsModuleDecl {
 // 4. Name-Blind Type Classifier & Trimmer
 // ------------------------------------------------------------------------------
 
-pure fn ts_is_space(b: i64) -> bool {
+pure fn ts_is_space(b: u8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13;
 }
 
 pub pure fn ts_trim(s: str) -> str {
     let n = s.len();
-    var st: usize = 0;
+    var st: i64 = 0;
     while st < n && ts_is_space(s.byte_at(st)) { st = st + 1; }
-    var en: usize = n;
+    var en: i64 = n;
     while en > st && ts_is_space(s.byte_at(en - 1)) { en = en - 1; }
     if en > st { return s.slice(st, en); }
     return "";
@@ -196,7 +196,7 @@ pub pure fn ts_classify_type(type_str: str) -> TsTypeKind {
 fn ts_parse_param(raw: str) -> TsParamDecl {
     let p = ts_trim(raw);
     var is_rest = false;
-    var name_start: usize = 0;
+    var name_start: i64 = 0;
     if p.starts_with("...") {
         is_rest = true;
         name_start = 3;
@@ -211,21 +211,21 @@ fn ts_parse_param(raw: str) -> TsParamDecl {
     var def_val = "";
 
     if colon_pos >= 0 {
-        var raw_name = ts_trim(p.slice(name_start, colon_pos as usize));
+        var raw_name = ts_trim(p.slice(name_start, colon_pos));
         if raw_name.ends_with("?") {
             is_opt = true;
             raw_name = ts_trim(raw_name.slice(0, raw_name.len() - 1));
         }
         p_name = raw_name;
         if eq_pos > colon_pos {
-            p_type = ts_trim(p.slice((colon_pos + 1) as usize, eq_pos as usize));
-            def_val = ts_trim(p.slice((eq_pos + 1) as usize, p.len()));
+            p_type = ts_trim(p.slice((colon_pos + 1), eq_pos));
+            def_val = ts_trim(p.slice((eq_pos + 1), p.len()));
         } else {
-            p_type = ts_trim(p.slice((colon_pos + 1) as usize, p.len()));
+            p_type = ts_trim(p.slice((colon_pos + 1), p.len()));
         }
     } else if eq_pos >= 0 {
-        p_name = ts_trim(p.slice(name_start, eq_pos as usize));
-        def_val = ts_trim(p.slice((eq_pos + 1) as usize, p.len()));
+        p_name = ts_trim(p.slice(name_start, eq_pos));
+        def_val = ts_trim(p.slice((eq_pos + 1), p.len()));
     } else {
         p_name = ts_trim(p.slice(name_start, p.len()));
     }
@@ -257,7 +257,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
     }
 
     let n = source.len();
-    var pos: usize = 0;
+    var pos: i64 = 0;
 
     var cur_interface_name = "";
     var cur_class_name = "";
@@ -270,7 +270,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
         if pos >= n { break; }
 
         // Measure line indentation
-        var indent: usize = 0;
+        var indent: i64 = 0;
         while pos < n && (source.byte_at(pos) == 32 || source.byte_at(pos) == 9) {
             indent = indent + 1;
             pos = pos + 1;
@@ -316,14 +316,14 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
         if decl_rem.starts_with("interface ") {
             let kw_len = 10;
             let brace_open = decl_rem.find("{");
-            let head = if brace_open >= 0 { ts_trim(decl_rem.slice(kw_len, brace_open as usize)) } else { ts_trim(decl_rem.slice(kw_len, decl_rem.len())) };
+            let head = if brace_open >= 0 { ts_trim(decl_rem.slice(kw_len, brace_open)) } else { ts_trim(decl_rem.slice(kw_len, decl_rem.len())) };
 
             var if_name = head;
             var extends_names: List<str> = [];
             let ext_idx = head.find("extends ");
             if ext_idx >= 0 {
-                if_name = ts_trim(head.slice(0, ext_idx as usize));
-                let ext_target = ts_trim(head.slice((ext_idx + 8) as usize, head.len()));
+                if_name = ts_trim(head.slice(0, ext_idx));
+                let ext_target = ts_trim(head.slice((ext_idx + 8), head.len()));
                 if ext_target.len() > 0 {
                     extends_names.push(ext_target);
                 }
@@ -338,7 +338,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
             module.interfaces.push(iface);
             cur_interface_name = if_name;
             let nl = rem.find("\n");
-            pos = if nl >= 0 { pos + (nl as usize) + 1 } else { n };
+            pos = if nl >= 0 { pos + (nl as i64) + 1 } else { n };
             continue;
         }
 
@@ -346,7 +346,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
         if decl_rem.starts_with("class ") {
             let kw_len = 6;
             let brace_open = decl_rem.find("{");
-            let head = if brace_open >= 0 { ts_trim(decl_rem.slice(kw_len, brace_open as usize)) } else { ts_trim(decl_rem.slice(kw_len, decl_rem.len())) };
+            let head = if brace_open >= 0 { ts_trim(decl_rem.slice(kw_len, brace_open)) } else { ts_trim(decl_rem.slice(kw_len, decl_rem.len())) };
 
             var c_name = head;
             var base_cls = "";
@@ -356,17 +356,17 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
             let imp_idx = head.find("implements ");
 
             if ext_idx >= 0 {
-                c_name = ts_trim(head.slice(0, ext_idx as usize));
+                c_name = ts_trim(head.slice(0, ext_idx));
                 if imp_idx > ext_idx {
-                    base_cls = ts_trim(head.slice((ext_idx + 8) as usize, imp_idx as usize));
-                    let imp_t = ts_trim(head.slice((imp_idx + 11) as usize, head.len()));
+                    base_cls = ts_trim(head.slice((ext_idx + 8), imp_idx));
+                    let imp_t = ts_trim(head.slice((imp_idx + 11), head.len()));
                     if imp_t.len() > 0 { impl_names.push(imp_t); }
                 } else {
-                    base_cls = ts_trim(head.slice((ext_idx + 8) as usize, head.len()));
+                    base_cls = ts_trim(head.slice((ext_idx + 8), head.len()));
                 }
             } else if imp_idx >= 0 {
-                c_name = ts_trim(head.slice(0, imp_idx as usize));
-                let imp_t = ts_trim(head.slice((imp_idx + 11) as usize, head.len()));
+                c_name = ts_trim(head.slice(0, imp_idx));
+                let imp_t = ts_trim(head.slice((imp_idx + 11), head.len()));
                 if imp_t.len() > 0 { impl_names.push(imp_t); }
             }
 
@@ -380,7 +380,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
             module.classes.push(cls);
             cur_class_name = c_name;
             let nl = rem.find("\n");
-            pos = if nl >= 0 { pos + (nl as usize) + 1 } else { n };
+            pos = if nl >= 0 { pos + (nl as i64) + 1 } else { n };
             continue;
         }
 
@@ -391,28 +391,28 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
             let paren_close = decl_rem.find(")");
 
             if paren_open > 0 && paren_close > paren_open {
-                let f_name = ts_trim(decl_rem.slice(kw_len, paren_open as usize));
-                let params_raw = ts_trim(decl_rem.slice((paren_open + 1) as usize, paren_close as usize));
+                let f_name = ts_trim(decl_rem.slice(kw_len, paren_open));
+                let params_raw = ts_trim(decl_rem.slice((paren_open + 1), paren_close));
 
                 var params: List<TsParamDecl> = [];
                 if params_raw.len() > 0 {
                     var p_rem = params_raw;
                     while p_rem.len() > 0 {
                         let c_idx = p_rem.find(",");
-                        let seg = if c_idx >= 0 { p_rem.slice(0, c_idx as usize) } else { p_rem };
-                        p_rem = if c_idx >= 0 { p_rem.slice((c_idx + 1) as usize, p_rem.len()) } else { "" };
+                        let seg = if c_idx >= 0 { p_rem.slice(0, c_idx) } else { p_rem };
+                        p_rem = if c_idx >= 0 { p_rem.slice((c_idx + 1), p_rem.len()) } else { "" };
                         params.push(ts_parse_param(seg));
                     }
                 }
 
                 // Return type
                 var ret_type = "void";
-                let after_paren = decl_rem.slice((paren_close + 1) as usize, decl_rem.len());
+                let after_paren = decl_rem.slice((paren_close + 1), decl_rem.len());
                 let colon_idx = after_paren.find(":");
                 let semi_idx = after_paren.find(";");
                 if colon_idx >= 0 {
-                    let end_pos = if semi_idx > colon_idx { semi_idx as usize } else { after_paren.len() };
-                    ret_type = ts_trim(after_paren.slice((colon_idx + 1) as usize, end_pos));
+                    let end_pos = if semi_idx > colon_idx { semi_idx as i64 } else { after_paren.len() };
+                    ret_type = ts_trim(after_paren.slice((colon_idx + 1), end_pos));
                 }
 
                 let ret_k = ts_classify_type(ret_type);
@@ -427,41 +427,41 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
                 module.functions.push(fn_decl);
 
                 let nl = rem.find("\n");
-                pos = if nl >= 0 { pos + (nl as usize) + 1 } else { n };
+                pos = if nl >= 0 { pos + (nl as i64) + 1 } else { n };
                 continue;
             }
         }
 
         // Method or Property inside Interface/Class
         let nl_end = rem.find("\n");
-        let line_seg = if nl_end >= 0 { rem.slice(0, nl_end as usize) } else { rem };
+        let line_seg = if nl_end >= 0 { rem.slice(0, nl_end) } else { rem };
         let semi_i = line_seg.find(";");
-        let clean_line = if semi_i >= 0 { ts_trim(line_seg.slice(0, semi_i as usize)) } else { ts_trim(line_seg) };
+        let clean_line = if semi_i >= 0 { ts_trim(line_seg.slice(0, semi_i)) } else { ts_trim(line_seg) };
 
         if cur_interface_name.len() > 0 || cur_class_name.len() > 0 {
             // Check if method: name(params): Ret;
             let paren_open = clean_line.find("(");
             let paren_close = clean_line.find(")");
             if paren_open > 0 && paren_close > paren_open {
-                let m_name = ts_trim(clean_line.slice(0, paren_open as usize));
-                let params_raw = ts_trim(clean_line.slice((paren_open + 1) as usize, paren_close as usize));
+                let m_name = ts_trim(clean_line.slice(0, paren_open));
+                let params_raw = ts_trim(clean_line.slice((paren_open + 1), paren_close));
 
                 var params: List<TsParamDecl> = [];
                 if params_raw.len() > 0 {
                     var p_rem = params_raw;
                     while p_rem.len() > 0 {
                         let c_idx = p_rem.find(",");
-                        let seg = if c_idx >= 0 { p_rem.slice(0, c_idx as usize) } else { p_rem };
-                        p_rem = if c_idx >= 0 { p_rem.slice((c_idx + 1) as usize, p_rem.len()) } else { "" };
+                        let seg = if c_idx >= 0 { p_rem.slice(0, c_idx) } else { p_rem };
+                        p_rem = if c_idx >= 0 { p_rem.slice((c_idx + 1), p_rem.len()) } else { "" };
                         params.push(ts_parse_param(seg));
                     }
                 }
 
                 var ret_type = "void";
-                let after_paren = clean_line.slice((paren_close + 1) as usize, clean_line.len());
+                let after_paren = clean_line.slice((paren_close + 1), clean_line.len());
                 let colon_idx = after_paren.find(":");
                 if colon_idx >= 0 {
-                    ret_type = ts_trim(after_paren.slice((colon_idx + 1) as usize, after_paren.len()));
+                    ret_type = ts_trim(after_paren.slice((colon_idx + 1), after_paren.len()));
                 }
                 let ret_k = ts_classify_type(ret_type);
 
@@ -482,7 +482,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
                     module.classes[last_idx].methods.push(meth);
                 }
 
-                pos = if nl_end >= 0 { pos + (nl_end as usize) + 1 } else { n };
+                pos = if nl_end >= 0 { pos + (nl_end as i64) + 1 } else { n };
                 continue;
             }
 
@@ -490,7 +490,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
             let colon_idx = clean_line.find(":");
             if colon_idx > 0 {
                 var is_ro = false;
-                var raw_prop = clean_line.slice(0, colon_idx as usize);
+                var raw_prop = clean_line.slice(0, colon_idx);
                 if raw_prop.starts_with("readonly ") {
                     is_ro = true;
                     raw_prop = raw_prop.slice(9, raw_prop.len());
@@ -501,7 +501,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
                     is_opt = true;
                     p_name = ts_trim(p_name.slice(0, p_name.len() - 1));
                 }
-                let p_type = ts_trim(clean_line.slice((colon_idx + 1) as usize, clean_line.len()));
+                let p_type = ts_trim(clean_line.slice((colon_idx + 1), clean_line.len()));
                 let tk = ts_classify_type(p_type);
 
                 var prop = TsPropertyDecl {
@@ -520,7 +520,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
                     module.classes[last_idx].properties.push(prop);
                 }
 
-                pos = if nl_end >= 0 { pos + (nl_end as usize) + 1 } else { n };
+                pos = if nl_end >= 0 { pos + (nl_end as i64) + 1 } else { n };
                 continue;
             }
         }
@@ -530,8 +530,8 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
             let kw_len = if decl_rem.starts_with("const ") { 6 } else { 4 };
             let colon_i = clean_line.find(":");
             if colon_i > 0 {
-                let v_name = ts_trim(clean_line.slice(kw_len, colon_i as usize));
-                let v_type = ts_trim(clean_line.slice((colon_i + 1) as usize, clean_line.len()));
+                let v_name = ts_trim(clean_line.slice(kw_len, colon_i));
+                let v_type = ts_trim(clean_line.slice((colon_i + 1), clean_line.len()));
                 let tk = ts_classify_type(v_type);
                 module.variables.push(TsPropertyDecl {
                     name:        v_name,
@@ -543,7 +543,7 @@ pub fn ts_parse_dts(source: str, diags: var ref<List<Diagnostic>>) -> TsModuleDe
             }
         }
 
-        pos = if nl_end >= 0 { pos + (nl_end as usize) + 1 } else { n };
+        pos = if nl_end >= 0 { pos + (nl_end as i64) + 1 } else { n };
     }
 
     return module;
@@ -558,7 +558,7 @@ pub fn ts_synthesize_napi_wrapper(module: ref<TsModuleDecl>, fn_name: str) -> st
     out = out + f"// Pilot In-Process Node-API Wrapper for '{module.module_name}.{fn_name}'\n";
     out = out + "// Zero-copy stack frame argument packing via napi_call_function\n";
     out = out + "// ==============================================================================\n";
-    out = out + f"pub fn call_napi_{fn_name}(env: usize, func: usize, args: slice<usize>) -> res<usize, JsError> {{\n";
+    out = out + f"pub fn call_napi_{fn_name}(env: i64, func: i64, args: slice<i64>) -> res<i64, JsError> {{\n";
     out = out + "    let scope = napi_open_handle_scope(env);\n";
     out = out + "    let res = napi_call_function(env, func, args);\n";
     out = out + "    napi_close_handle_scope(var scope);\n";

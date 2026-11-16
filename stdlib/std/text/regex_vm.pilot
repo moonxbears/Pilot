@@ -114,13 +114,13 @@ fn assertion_holds(ref prog: ReProgram, kind: i64, cls: i64, text: str, pos: i64
     if kind == ReAssert::TextStart as i64 { return pos == 0; }
     if kind == ReAssert::TextEnd as i64 { return pos == n; }
     if kind == ReAssert::EndOrFinalNewline as i64 {
-        return pos == n || (pos == n - 1 && (text.byte_at(pos as usize) as i64) == 10);
+        return pos == n || (pos == n - 1 && (text.byte_at(pos) as i64) == 10);
     }
     if kind == ReAssert::LineStart as i64 {
-        return pos == 0 || (text.byte_at((pos - 1) as usize) as i64) == 10;
+        return pos == 0 || (text.byte_at((pos - 1)) as i64) == 10;
     }
     if kind == ReAssert::LineEnd as i64 {
-        return pos == n || (text.byte_at(pos as usize) as i64) == 10;
+        return pos == n || (text.byte_at(pos) as i64) == 10;
     }
     let before = pos > 0 && prog.classes.has(cls, code_point_before(text, pos));
     let after = pos < n && prog.classes.has(cls, code_point_at(text, pos));
@@ -174,7 +174,7 @@ fn next_start(ref prog: ReProgram, text: str, from: i64, n: i64) -> i64 {
     if prog.first_class < 0 { return from; }
     var i = from;
     while i < n {
-        let b = text.byte_at(i as usize) as i64;
+        let b = text.byte_at(i) as i64;
         let c = if b < 128 { b } else { code_point_at(text, i) };
         if prog.classes.has(prog.first_class, c) { return i; }
         i = i + utf8_width(b);
@@ -212,7 +212,7 @@ pub fn pike_search(ref prog: ReProgram, var ref vm: PikeVm, text: str, from: i64
         var c = -1;
         var w = 1;
         if pos < n {
-            let b = text.byte_at(pos as usize) as i64;
+            let b = text.byte_at(pos) as i64;
             w = utf8_width(b);
             c = if b < 128 { b } else { code_point_at(text, pos) };
         }

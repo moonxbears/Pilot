@@ -456,7 +456,7 @@ pub fn probe_plan(ref p: Program) -> List<List<any>> {
         if traced_statement(p, n) && in_user_file(p.s, n) {
             let f = enclosing_fn(p, n);
             if f >= 0 && traced.has(key_of(f)) {
-                out.push(statement_probe(p, levels, traced.get(key_of(f)), f, n));
+                out.push(statement_probe(p, levels, traced[key_of(f)], f, n));
             }
         }
         n = n + 1;

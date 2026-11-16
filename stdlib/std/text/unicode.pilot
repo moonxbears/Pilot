@@ -92,13 +92,13 @@ pub fn decode_list(data: str) -> List<i64> {
     let n = data.len() as i64;
     var i = 0;
     while i < n {
-        let a = data.byte_at(i as usize) as i64;
+        let a = data.byte_at(i) as i64;
         if a < 63 {
             i = i + 1;
             continue;
         }
-        let b = data.byte_at((i + 1) as usize) as i64;
-        let c = data.byte_at((i + 2) as usize) as i64;
+        let b = data.byte_at((i + 1)) as i64;
+        let c = data.byte_at((i + 2)) as i64;
         out.push(((a - 63) << 12) | ((b - 63) << 6) | (c - 63));
         i = i + 3;
     }

@@ -63,7 +63,7 @@ pub fn lower_contract_clause(var ref lw: Lowerer, n: i64) -> u32 {
 
 /// `old(e)`: the value `e` had on entry.
 pub fn lower_old(ref lw: Lowerer, n: i64) -> u32 {
-    if lw.olds.has(key(n)) { return lw.olds.get(key(n)); }
+    if lw.olds.has(key(n)) { return lw.olds[key(n)]; }
     return unsupported(lw, n);
 }
 
@@ -76,7 +76,7 @@ fn check_clauses(var ref lw: Lowerer, value: u32, n: i64) {
             // `r => cond`: `r` is the result.
             let ch = children(s, clause);
             if ch.len() >= 2 && value != ir_no_value() && lw.binding_of.has(key(ch[0])) {
-                lw.values.set(key(lw.binding_of.get(key(ch[0]))), value);
+                lw.values.set(key(lw.binding_of[key(ch[0])]), value);
             }
             cond = lower_expr(lw, ch[ch.len() - 1]);
         } else {

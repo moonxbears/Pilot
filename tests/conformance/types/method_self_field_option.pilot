@@ -9,7 +9,7 @@ struct Window {
         return self.n;
     }
 
-    pub fn piece(ref self, a: usize, b: usize) -> str? {
+    pub fn piece(ref self, a: i64, b: i64) -> str? {
         if a > b { return none; }
         return self.text.slice(a, b);
     }

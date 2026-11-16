@@ -97,7 +97,7 @@ pub fn begin_collecting(var ref lw: Lowerer, n: i64) -> u32? {
 fn collect(var ref lw: Lowerer, owner: i64, n: i64) -> u32 {
     let s = lw.inf.p.s;
     if !lw.collect_lists.has(key(owner)) || lhs(s, n) < 0 { return unsupported(lw, n); }
-    let list = lw.collect_lists.get(key(owner));
+    let list = lw.collect_lists[key(owner)];
     let t = value_type(lw, owner);
     let append = bound(lw, list_literal_hook(), [type_name_of(lw, t)]);
     let hook = native_for(lw, t, append, native_method_hook());
@@ -153,8 +153,8 @@ pub fn is_resume_function(ref lw: Lowerer, idx: i64) -> bool => lw.resume_of.has
 /// The index of the resume function of generator function `idx`, queuing
 /// it with the same receiver type and argument types.
 pub fn resume_index(var ref lw: Lowerer, idx: i64) -> i64 {
-    if lw.resume_of.has(key(idx)) { return lw.resume_of.get(key(idx)); }
-    let ri = lw.queue.len();
+    if lw.resume_of.has(key(idx)) { return lw.resume_of[key(idx)]; }
+    let ri = lw.queue.len() as i64;
     lw.queue.push(lw.queue[idx]);
     lw.queue_self.push(lw.queue_self[idx]);
     lw.queue_body.push(-1);
@@ -400,10 +400,10 @@ pub fn lower_generator_op(var ref lw: Lowerer, hook: str, ref args: List<u32>, p
 // ------------------------------------------------------------------------------
 
 /// An instruction of `f` with `args` placed in its operand pool.
-fn make_inst(var ref f: IrFunction, result: u32, op: u16, sub: u16, phy: IrTypePhysics, ref args: List<u32>, span_id: u32) -> IrInst {
+fn make_inst(var ref f: IrFunction, result: u32, op: u16, sub: i64, phy: IrTypePhysics, ref args: List<u32>, span_id: u32) -> IrInst {
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
-    return ir_inst_new(result, op, sub, phy, offset, args.len(), span_id);
+    return ir_inst_new(result, op, ir_sub(sub), phy, offset, args.len(), span_id);
 }
 
 /// The state of moving values of a resume function into its frame.

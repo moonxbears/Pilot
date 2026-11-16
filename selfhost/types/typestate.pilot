@@ -150,7 +150,7 @@ pub fn typestate_format_mask(decl: ref<TypestateDecl>, mask: StateSetMask) -> st
     var s = "";
     var i = 0;
     while i < decl.states.len() {
-        if mask.mask_contains(i) {
+        if mask.mask_contains(i as usize) {
             if s.len() > 0 { s = s + " | "; }
             s = s + decl.states[i];
         }

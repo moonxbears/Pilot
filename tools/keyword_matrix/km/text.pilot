@@ -11,10 +11,10 @@ pub fn is_ident_byte(b: u8) -> bool {
 pub fn lines_of(text: str) -> List<str> {
     var out: List<str> = [];
     let n = text.len();
-    var start: usize = 0;
+    var start: i64 = 0;
     var at = text.find("\n", 0);
     while at >= 0 {
-        let i = at as usize;
+        let i = at as i64;
         var end = i;
         if end > start && text.byte_at(end - 1) == 13 { end = end - 1; }
         out.push(text.slice(start, end));
@@ -28,10 +28,10 @@ pub fn lines_of(text: str) -> List<str> {
 /// `s` cut at every `sep`; empty pieces are kept.
 pub fn split_on(s: str, sep: str) -> List<str> {
     var out: List<str> = [];
-    var start: usize = 0;
+    var start: i64 = 0;
     var at = s.find(sep, 0);
     while at >= 0 {
-        let cut = at as usize;
+        let cut = at as i64;
         out.push(s.slice(start, cut));
         start = cut + sep.len();
         at = s.find(sep, start);
@@ -61,8 +61,8 @@ pub fn code_lines(text: str) -> List<str> {
             continue;
         }
         var kept = "";
-        var from: usize = 0;
-        var i: usize = 0;
+        var from: i64 = 0;
+        var i: i64 = 0;
         let n = line.len();
         while i < n {
             if in_block {
@@ -72,21 +72,21 @@ pub fn code_lines(text: str) -> List<str> {
                     break;
                 }
                 in_block = false;
-                i = (close as usize) + 2;
+                i = (close as i64) + 2;
                 from = i;
                 continue;
             }
             let slashes = line.find("//", i);
             let open = line.find("/*", i);
             if slashes >= 0 && (open < 0 || slashes < open) {
-                i = slashes as usize;
+                i = slashes as i64;
                 break;
             }
             if open < 0 {
                 i = n;
                 break;
             }
-            i = open as usize;
+            i = open as i64;
             kept = kept + line.slice(from, i);
             in_block = true;
             i = i + 2;
@@ -111,13 +111,13 @@ pub fn has_word(s: str, word: str) -> bool {
 
 /// Where `key` occurs in `s` at or after `from` with no identifier byte
 /// before it, nor after it when it ends in one; -1 when it does not.
-pub fn find_word(s: str, key: str, from: usize) -> isize {
+pub fn find_word(s: str, key: str, from: i64) -> isize {
     if key.len() == 0 { return -1; }
-    let last = key.byte_at((key.len() - 1) as usize);
+    let last = key.byte_at((key.len() - 1));
     let first = key.byte_at(0);
     var at = s.find(key, from);
     while at >= 0 {
-        let i = at as usize;
+        let i = at as i64;
         let end = i + key.len();
         let clear_before = i == 0 || !is_ident_byte(first) || !is_ident_byte(s.byte_at(i - 1));
         let clear_after = end >= s.len() || !is_ident_byte(last) || !is_ident_byte(s.byte_at(end));
@@ -189,7 +189,7 @@ pub fn cell(s: str) -> str {
 
 /// The first `limit` bytes of `s`, never cutting a character in two, with
 /// `…` when something was cut.
-pub fn clip(s: str, limit: usize) -> str {
+pub fn clip(s: str, limit: i64) -> str {
     if s.len() <= limit { return s; }
     var end = limit;
     while end > 0 && s.byte_at(end) >= 128 && s.byte_at(end) < 192 {
@@ -201,7 +201,7 @@ pub fn clip(s: str, limit: usize) -> str {
 /// The decimal number at the start of `s`, or -1 when it has none.
 pub fn leading_int(s: str) -> i64 {
     var n = -1;
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < s.len() && s.byte_at(i) >= 48 && s.byte_at(i) <= 57 {
         let d = (s.byte_at(i) - 48) as i64;
         n = if n < 0 { d } else { n * 10 + d };
@@ -213,7 +213,7 @@ pub fn leading_int(s: str) -> i64 {
 /// The string literals of `s` in order, with their escapes kept as written.
 pub fn string_literals(s: str) -> List<str> {
     var out: List<str> = [];
-    var i: usize = 0;
+    var i: i64 = 0;
     let n = s.len();
     while i < n {
         if s.byte_at(i) == 34 {
@@ -255,8 +255,8 @@ pub fn sorted_lines(listing: str) -> List<str> {
 /// `s` with its ASCII capital letters made small.
 pub fn lower(s: str) -> str {
     var out = "";
-    var from: usize = 0;
-    var i: usize = 0;
+    var from: i64 = 0;
+    var i: i64 = 0;
     while i < s.len() {
         let b = s.byte_at(i);
         if b >= 65 && b <= 90 {
@@ -270,6 +270,6 @@ pub fn lower(s: str) -> str {
 
 fn char_of(b: u8) -> str {
     let letters = "abcdefghijklmnopqrstuvwxyz";
-    let at = (b - 65) as usize;
+    let at = (b - 65) as i64;
     return letters.slice(at, at + 1);
 }

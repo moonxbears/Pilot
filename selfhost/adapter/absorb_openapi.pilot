@@ -172,7 +172,7 @@ pub fn openapi_detect_recursion(var ref doc: OpenApiDoc) -> i64 {
 // Walks the spec text in place: a value is named by the offset where it
 // starts, and nothing is copied until a string is read.
 
-pure fn oa_is_ws(b: i64) -> bool {
+pure fn oa_is_ws(b: u8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13;
 }
 

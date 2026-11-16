@@ -135,7 +135,7 @@ pub fn wasm_memory_store_str(var ref mem: WasmMemory, offset: i64, s: str) -> Wa
     }
     var i = 0;
     while i < slen {
-        let b = s.byte_at(i as usize);
+        let b = s.byte_at(i);
         let res_st = wasm_memory_store_byte(var mem, offset + i, b);
         if res_st.is_err() {
             return res_st;

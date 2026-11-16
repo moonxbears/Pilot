@@ -237,13 +237,13 @@ pub fn xml_parse(src: str) -> XmlNode {
         return xml_text(rem);
     }
 
-    let tag_header = rem.slice(1, open_end as usize);
+    let tag_header = rem.slice(1, open_end);
     var tag_name = tag_header;
     var attrs_raw = "";
     let sp_idx = tag_header.find(" ");
     if sp_idx > 0 {
-        tag_name = tag_header.slice(0, sp_idx as usize);
-        attrs_raw = xml_trim(tag_header.slice((sp_idx + 1) as usize, tag_header.len()));
+        tag_name = tag_header.slice(0, sp_idx);
+        attrs_raw = xml_trim(tag_header.slice((sp_idx + 1), tag_header.len()));
     }
 
     var root = xml_element(tag_name);
@@ -254,13 +254,13 @@ pub fn xml_parse(src: str) -> XmlNode {
         while a_rem.len() > 0 {
             let eq_pos = a_rem.find("=\"");
             if eq_pos > 0 {
-                let a_name = xml_trim(a_rem.slice(0, eq_pos as usize));
-                let after_quote = a_rem.slice((eq_pos + 2) as usize, a_rem.len());
+                let a_name = xml_trim(a_rem.slice(0, eq_pos));
+                let after_quote = a_rem.slice((eq_pos + 2), a_rem.len());
                 let quote_close = after_quote.find("\"");
                 if quote_close >= 0 {
-                    let a_val = after_quote.slice(0, quote_close as usize);
+                    let a_val = after_quote.slice(0, quote_close);
                     root.set_attr(a_name, a_val);
-                    a_rem = xml_trim(after_quote.slice((quote_close + 1) as usize, after_quote.len()));
+                    a_rem = xml_trim(after_quote.slice((quote_close + 1), after_quote.len()));
                     continue;
                 }
             }
@@ -274,11 +274,11 @@ pub fn xml_parse(src: str) -> XmlNode {
     }
 
     // Body & closing tag
-    let after_open = rem.slice((open_end + 1) as usize, rem.len());
+    let after_open = rem.slice((open_end + 1), rem.len());
     let close_tag = "</" + tag_name + ">";
     let close_pos = after_open.find(close_tag);
     if close_pos >= 0 {
-        let body = after_open.slice(0, close_pos as usize);
+        let body = after_open.slice(0, close_pos);
         if body.find("<") >= 0 {
             // Nested element child
             let child = xml_parse(body);

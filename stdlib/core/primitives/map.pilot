@@ -54,7 +54,7 @@ pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IDictionaryBuf
 
     /// How many keys have a value. The engine keeps no count it hands out,
     /// so this lists the keys (linear in their number).
-    pub count: usize { get => .keys().len(); }
+    pub count: i64 { get => .keys().len(); }
     /// Removes every key, one at a time (the engine has no op that empties
     /// a map).
     pub fn clear() {

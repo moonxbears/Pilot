@@ -56,8 +56,8 @@ fn tt_key(tag: str, decl: i64, name: str, ref args: List<i64>) -> str {
 
 fn tt_intern(var ref tt: TypeTable, form: TypeForm, tag: str, decl: i64, name: str, args: List<i64>) -> i64 {
     let key = tt_key(tag, decl, name, args);
-    if tt.keys.has(key) { return tt.keys.get(key); }
-    let id = tt.form.len();
+    if tt.keys.has(key) { return tt.keys[key]; }
+    let id = tt.form.len() as i64;
     tt.form.push(form);
     tt.decl.push(decl);
     tt.args.push(args);

@@ -15,34 +15,40 @@ use Pilot.Core.Keywords::*;
 // Text is not a collection of bytes: `contains` searches for text, not for
 // one byte, so `str` takes no collection role. It is a borrowed (0b01) view
 // whose bytes can be read by position and enumerated.
-pub partial struct str : IEquatable<str>, IIndexGet<usize, u8>, IEnumerable<u8, SliceEnumerator<u8>>, IReference {
+pub partial struct str : IEquatable<str>, IIndexGet<i64, u8>, IEnumerable<u8, SliceEnumerator<u8>>, IReference {
     *RawStorageBundle<u8>;
     *ContiguousViewFacet<u8>;
 
     pub pure:
         fn as_bytes() -> slice<u8> => slice<u8> { data: .data, len: .len };
 
-        op [] (idx: usize) -> u8 => .data[idx];
+        op [] (idx: i64) -> u8 => .data[idx as usize];
 
         op [] (r: range<usize>) -> str => str {
             data: .data + r.start,
             len:  r.end - r.start,
         };
 
-        // Pure Pilot byte indexing (replaces __engine("str_byte_at"))
-        fn byte_at(idx: usize) -> u8 {
-            if idx >= .len { return 0; }
-            return .data[idx];
+        // Positions are `i64` (PROP-005 D2 (a)): what `len()` and position
+        // arithmetic give, so callers never cast. They are clamped to the
+        // text: below 0 reads as 0, past the end as the length.
+
+        /// The byte at `idx`, or 0 when `idx` is outside the text.
+        fn byte_at(idx: i64) -> u8 {
+            if idx < 0 || idx >= .len as i64 { return 0; }
+            return .data[idx as usize];
         }
 
-        // Pure Pilot slice view extraction (replaces __engine("str_slice"))
-        fn slice(start: usize, end: usize) -> str {
-            let s = if start > .len { .len } else { start };
-            let e = if end > .len { .len } else { end };
+        /// The bytes from `start` up to `end`, both clamped to the text;
+        /// empty when `start` is not before `end`.
+        fn slice(start: i64, end: i64) -> str {
+            let n = .len as i64;
+            let s = if start < 0 { 0 } else if start > n { n } else { start };
+            let e = if end < 0 { 0 } else if end > n { n } else { end };
             if s >= e { return str { data: .data, len: 0 }; }
             return str {
-                data: .data + s,
-                len:  e - s,
+                data: .data + (s as usize),
+                len:  (e - s) as usize,
             };
         }
 
@@ -71,7 +77,8 @@ pub partial struct str : IEquatable<str>, IIndexGet<usize, u8>, IEnumerable<u8, 
             return true;
         }
 
-        fn index_of(needle: str) -> isize {
+        /// Where `needle` first starts, or -1 when it does not occur.
+        fn index_of(needle: str) -> i64 {
             if needle.len == 0 { return 0; }
             if needle.len > .len { return -1; }
             let max_start = .len - needle.len;
@@ -88,7 +95,7 @@ pub partial struct str : IEquatable<str>, IIndexGet<usize, u8>, IEnumerable<u8, 
                     }
                     j = j + 1;
                 }
-                if match_found { return i as isize; }
+                if match_found { return i as i64; }
                 i = i + 1;
             }
             return -1;
@@ -109,10 +116,3 @@ pub partial struct str : IEquatable<str>, IIndexGet<usize, u8>, IEnumerable<u8, 
 
         fn get_enumerator() -> SliceEnumerator<u8> => .as_bytes().get_enumerator();
 }
-
-// Pure Pilot stand-alone functional string primitives (replaces all __engine("str_*") calls)
-pub pure fn str_len_pure(s: str) -> usize => s.len;
-pub pure fn str_byte_at_pure(s: str, idx: usize) -> u8 => s.byte_at(idx);
-pub pure fn str_slice_pure(s: str, start: usize, end: usize) -> str => s.slice(start, end);
-pub pure fn str_index_of_pure(haystack: str, needle: str) -> isize => haystack.index_of(needle);
-pub pure fn str_contains_pure(haystack: str, needle: str) -> bool => haystack.contains(needle);

@@ -56,7 +56,7 @@ pub fn read_hand_rows(text: str) -> Map<str, HandRow> {
             continue;
         }
         if header.len() == 0 || cells.len() != header.len() || !cells[0].starts_with("`") { continue; }
-        let word = cells[0].slice(1, (cells[0].len() - 1) as usize);
+        let word = cells[0].slice(1, (cells[0].len() - 1));
         if out.has(word) { continue; }
         out.set(word, HandRow {
             bound: column(header, cells, "Bound by"), s: column(header, cells, "S"),
@@ -86,8 +86,8 @@ pub fn splice_generated(text: str, generated: str) -> str {
     let begin = text.find(begin_marker(), 0);
     let end = text.find(end_marker(), 0);
     if begin < 0 || end < begin { return ""; }
-    let head = text.slice(0, (begin as usize) + begin_marker().len());
-    let tail = text.slice(end as usize, text.len());
+    let head = text.slice(0, (begin) + begin_marker().len());
+    let tail = text.slice(end, text.len());
     return head + "\n\n" + generated + "\n" + tail;
 }
 

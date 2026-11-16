@@ -130,7 +130,7 @@ fn put(var ref f: IrFunction, b: u32, result: u32, op: u16, sub: u16, phy: IrTyp
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
     f.spans.push(span);
-    f.blocks[b].insts.push(ir_inst_new(result, op, sub, phy, offset, args.len, f.spans.len - 1));
+    f.blocks[b].insts.push(ir_inst_new(result, op, sub, phy, offset, args.len, ir_operand(f.spans.len - 1)));
 }
 
 /// Whether some block of `g` jumps to its entry block.

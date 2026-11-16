@@ -23,35 +23,35 @@ pub fn glist_new() -> i64 {
     return m;
 }
 
-pub fn glist_len(list: i64) -> usize {
+pub fn glist_len(list: i64) -> i64 {
     return (__engine("map_get", list, "count") ?? 0);
 }
 
-pub fn glist_push(list: i64, item: any) -> usize {
+pub fn glist_push(list: i64, item: any) -> i64 {
     let idx = glist_len(list);
     __engine("map_set", list, idx, item);
     __engine("map_set", list, "count", idx + 1);
     return idx + 1;
 }
 
-pub fn glist_get(list: i64, idx: usize) -> any {
+pub fn glist_get(list: i64, idx: i64) -> any {
     return __engine("map_get", list, idx);
 }
 
-pub fn glist_get_str(list: i64, idx: usize) -> str {
+pub fn glist_get_str(list: i64, idx: i64) -> str {
     return __engine("map_get", list, idx);
 }
 
-pub fn glist_get_int(list: i64, idx: usize) -> i64 {
+pub fn glist_get_int(list: i64, idx: i64) -> i64 {
     return __engine("map_get", list, idx) as i64;
 }
 
-pub fn glist_set_str(list: i64, idx: usize, val: str) -> i64 {
+pub fn glist_set_str(list: i64, idx: i64, val: str) -> i64 {
     __engine("map_set", list, idx, val);
     return list;
 }
 
-pub fn pragma_interval_new(st: usize, en: usize, code: str, is_all: bool) -> i64 {
+pub fn pragma_interval_new(st: i64, en: i64, code: str, is_all: bool) -> i64 {
     let m = __engine("map_new");
     __engine("map_set", m, "start_offset", st);
     __engine("map_set", m, "end_offset", en);
@@ -66,13 +66,13 @@ pub fn pragma_interval_new(st: usize, en: usize, code: str, is_all: bool) -> i64
 
 pub pure fn pf_trim(s: str) -> str {
     let l = s.len();
-    var start: usize = 0;
+    var start: i64 = 0;
     while start < l {
         let b = s.byte_at(start);
         if b != 32 && b != 9 && b != 13 && b != 10 { break; }
         start = start + 1;
     }
-    var end: usize = l;
+    var end: i64 = l;
     while end > start {
         let b = s.byte_at(end - 1);
         if b != 32 && b != 9 && b != 13 && b != 10 { break; }
@@ -89,7 +89,7 @@ pub pure fn pf_starts_with(s: str, pfx: str) -> bool {
     return sub == pfx;
 }
 
-pub pure fn pf_find(haystack: str, needle: str, start: usize) -> i64 {
+pub pure fn pf_find(haystack: str, needle: str, start: i64) -> i64 {
     let hl = haystack.len();
     let nl = needle.len();
     if nl == 0 { return if start <= hl { start as i64 } else { -1 }; }
@@ -111,11 +111,11 @@ pub fn pragma_solve_intervals(src: str) -> i64 {
     let open_keys = glist_new();
     let open_starts = glist_new();
     let sl = src.len();
-    var cur: usize = 0;
+    var cur: i64 = 0;
 
     while cur < sl {
         let nl = pf_find(src, "\n", cur);
-        let line_end = if nl >= 0 { nl as usize } else { sl };
+        let line_end = if nl >= 0 { nl as i64 } else { sl };
         let line = src.slice(cur, line_end);
         let line_len = line_end - cur;
         let tr = pf_trim(line);
@@ -153,11 +153,11 @@ pub fn pragma_solve_intervals(src: str) -> i64 {
                 let _ = glist_push(open_starts, cur as i64);
             } else if is_restore {
                 let count = glist_len(open_keys);
-                var k: usize = 0;
+                var k: i64 = 0;
                 while k < count {
                     let ok = glist_get_str(open_keys, k);
                     if ok == key {
-                        let st = glist_get_int(open_starts, k) as usize;
+                        let st = glist_get_int(open_starts, k) as i64;
                         let interval = pragma_interval_new(st, cur + line_len, code_arg, is_all);
                         let _ = glist_push(list, interval);
                         let _ = glist_set_str(open_keys, k, "__CLOSED__");
@@ -168,16 +168,16 @@ pub fn pragma_solve_intervals(src: str) -> i64 {
             }
         }
 
-        cur = if nl >= 0 { (nl + 1) as usize } else { sl };
+        cur = if nl >= 0 { (nl + 1) as i64 } else { sl };
     }
 
     // Flush unclosed intervals to EOF
     let open_count = glist_len(open_keys);
-    var idx: usize = 0;
+    var idx: i64 = 0;
     while idx < open_count {
         let k = glist_get_str(open_keys, idx);
         if k != "__CLOSED__" {
-            let st = glist_get_int(open_starts, idx) as usize;
+            let st = glist_get_int(open_starts, idx) as i64;
             let is_all = (k == "__ALL__");
             let c = if is_all { "" } else { k };
             let interval = pragma_interval_new(st, sl, c, is_all);
@@ -189,13 +189,13 @@ pub fn pragma_solve_intervals(src: str) -> i64 {
     return list;
 }
 
-pub fn pragma_is_suppressed(intervals: i64, offset: usize, diag_code: str, is_error: bool) -> bool {
+pub fn pragma_is_suppressed(intervals: i64, offset: i64, diag_code: str, is_error: bool) -> bool {
     let count = glist_len(intervals);
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < count {
         let item = glist_get(intervals, i);
-        let st = __engine("map_get", item, "start_offset") as usize;
-        let en = __engine("map_get", item, "end_offset") as usize;
+        let st = __engine("map_get", item, "start_offset") as i64;
+        let en = __engine("map_get", item, "end_offset") as i64;
         let is_all = __engine("map_get", item, "is_all_warnings") as i64 == 1;
         let c = __engine("map_get", item, "code");
         if offset >= st && offset < en {

@@ -120,7 +120,7 @@ fn entry_for(ref p: Program, name: str, tier: MemberTier, origin: str, m: i64) -
 
 fn add_found(var ref bt: BuiltType, m: Member) -> i64 {
     bt.found.push(m);
-    return bt.found.len() - 1;
+    return (bt.found.len() as i64) - 1;
 }
 
 /// Registers member `m` under `name` at `tier`, with origin `origin`.
@@ -318,7 +318,7 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
     if p.built_index.has(name) { return p.built[p.built_index.get(name)]; }
     let bt = empty_built(p, name);
     // Registered before its parts are built, so a cycle ends here.
-    p.built_index.set(name, p.built.len());
+    p.built_index.set(name, p.built.len() as i64);
     p.built.push(bt);
     if bt.decl < 0 || depth > 12 { return bt; }
     let s = p.s;
@@ -402,7 +402,7 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
         bt.spliced.push(bname);
         for old_name in dir.with_names { note_alias(bt, bname + "." + old_name, dir.with_aliases[old_name]); }
         for k in sub.alias_keys {
-            let inner = sub.aliases.get(k);
+            let inner = sub.aliases[k];
             note_alias(bt, k, if dir.with_aliases.has(inner) { dir.with_aliases[inner] } else { inner });
         }
         for mname in sub.names {
@@ -435,7 +435,7 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
         }
     }
     for f in bt.own_fields {
-        if bt.field_decls.has(f.name) { bt.fields.set(f.name, bt.field_decls.get(f.name)); }
+        if bt.field_decls.has(f.name) { bt.fields.set(f.name, bt.field_decls[f.name]); }
     }
 
     // Tiers 3 and 4: default members of the interfaces it implements.

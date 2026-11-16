@@ -92,7 +92,7 @@ fn push_inst(var ref f: IrFunction, var ref b: IrBlock, result: u32, op: u16, su
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
     f.spans.push(span);
-    b.insts.push(ir_inst_new(result, op, sub, phy, offset, args.len, f.spans.len - 1));
+    b.insts.push(ir_inst_new(result, op, sub, phy, offset, args.len, ir_operand(f.spans.len - 1)));
 }
 
 /// The entry block of function `g`'s copy in the host, reserving the copy's

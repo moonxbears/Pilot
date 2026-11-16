@@ -11,11 +11,11 @@ pub lvl(0) pkg selfhost.chor;
 // 1. Lexing & Whitespace Helpers
 // ------------------------------------------------------------------------------
 
-pure fn chor_is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
-pure fn chor_is_ident_start(b: i64) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
-pure fn chor_is_ident_char(b: i64) -> bool => chor_is_ident_start(b) || (b >= 48 && b <= 57) || b == 46; // '.' for dotted paths
+pure fn chor_is_space(b: u8) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
+pure fn chor_is_ident_start(b: u8) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+pure fn chor_is_ident_char(b: u8) -> bool => chor_is_ident_start(b) || (b >= 48 && b <= 57) || b == 46; // '.' for dotted paths
 
-pure fn chor_skip_ws(src: str, start: usize) -> usize {
+pure fn chor_skip_ws(src: str, start: i64) -> i64 {
     let n = src.len();
     var cur = start;
     while cur < n {
@@ -32,7 +32,7 @@ pure fn chor_skip_ws(src: str, start: usize) -> usize {
     return cur;
 }
 
-pure fn chor_read_ident(src: str, start: usize) -> str {
+pure fn chor_read_ident(src: str, start: i64) -> str {
     let n = src.len();
     var cur = start;
     if cur < n && chor_is_ident_start(src.byte_at(cur)) {
@@ -46,12 +46,12 @@ pure fn chor_read_ident(src: str, start: usize) -> str {
 }
 
 /// Reads the decimal digits starting at `start`; `none` when there are none.
-pure fn chor_read_usize(src: str, start: usize) -> usize? {
+pure fn chor_read_usize(src: str, start: i64) -> i64? {
     let n = src.len();
     var pos = start;
-    var val: usize = 0;
+    var val: i64 = 0;
     while pos < n && src.byte_at(pos) >= 48 && src.byte_at(pos) <= 57 {
-        val = val * 10 + ((src.byte_at(pos) - 48) as usize);
+        val = val * 10 + ((src.byte_at(pos) - 48) as i64);
         pos = pos + 1;
     }
     if pos == start {
@@ -62,9 +62,9 @@ pure fn chor_read_usize(src: str, start: usize) -> usize? {
 
 pure fn chor_trim(s: str) -> str {
     let n = s.len();
-    var st: usize = 0;
+    var st: i64 = 0;
     while st < n && chor_is_space(s.byte_at(st)) { st = st + 1; }
-    var en: usize = n;
+    var en: i64 = n;
     while en > st && chor_is_space(s.byte_at(en - 1)) { en = en - 1; }
     if en > st { return s.slice(st, en); }
     return "";
@@ -77,7 +77,7 @@ pure fn chor_trim(s: str) -> str {
 pub fn parse_pchor_source(src: str) -> BlueprintDef {
     var bp = blueprint_def_new("DefaultBlueprint");
     let n = src.len();
-    var pos: usize = 0;
+    var pos: i64 = 0;
 
     while pos < n {
         pos = chor_skip_ws(src, pos);
@@ -102,7 +102,7 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
             pos = chor_skip_ws(src, pos + s_name.len());
             var ent_ty = "";
             var strat = "AoS";
-            var cap: usize = 1024;
+            var cap: i64 = 1024;
 
             if pos < n && src.byte_at(pos) == 58 { // ':'
                 pos = chor_skip_ws(src, pos + 1);
@@ -227,8 +227,8 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
             var c_name = "";
             let dot_idx = from_part.index_of(".");
             if dot_idx >= 0 {
-                f_role = from_part.slice(0, dot_idx as usize);
-                c_name = from_part.slice((dot_idx as usize) + 1, from_part.len());
+                f_role = from_part.slice(0, dot_idx);
+                c_name = from_part.slice((dot_idx) + 1, from_part.len());
             }
 
             // Skip '->'
@@ -242,8 +242,8 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
             var t_handler = "handle";
             let to_dot = to_part.index_of(".");
             if to_dot >= 0 {
-                t_role = to_part.slice(0, to_dot as usize);
-                t_handler = to_part.slice((to_dot as usize) + 1, to_part.len());
+                t_role = to_part.slice(0, to_dot);
+                t_handler = to_part.slice((to_dot) + 1, to_part.len());
             }
 
             // Parse transport

@@ -114,7 +114,7 @@ pub fn plan_copies(var ref pl: DropPlanner) {
         if (is_place(k) || k == nk_call()) && in_user_file(s, n) {
             let t = type_of(inf, n);
             if !value_types.has(t) { value_types.set(t, declares_value(p, pl.flow.engine, t)); }
-            let is_value = value_types.get(t);
+            let is_value = value_types[t];
             if is_place(k) && is_value && copy_position(pl.flow, n) {
                 copy_glue(pl, t);
                 pl.cur_binding = -1;

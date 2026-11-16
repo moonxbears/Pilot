@@ -1,0 +1,13 @@
+// std.proc job_env: a child gets the `KEY=value` entries added for it and
+// still inherits the rest of the environment (OsProcSpec env_mode 0).
+// The shell prints the added value, then `path` because PATH is still set,
+// then `unset` for a name nobody set: "hello path unset".
+use std.proc;
+
+fn main() {
+    let script = "printf '%s %s %s' \"$PILOT_T_X\" \"${PATH:+path}\" \"${PILOT_T_NONE:-unset}\"";
+    let j = proc.job_env("sh", ["-c", script], "", ["PILOT_T_X=hello"]);
+    for out in proc.run_all([j]) { print(out.stdout); }
+    // A plain job adds nothing.
+    for out in proc.run_all([proc.job("sh", ["-c", "printf '%s' \"${PILOT_T_X:-none}\""], "")]) { print(out.stdout); }
+}

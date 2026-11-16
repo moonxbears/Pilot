@@ -21,7 +21,7 @@ use Pilot.Core.Env;
 fn write_ascii(dst: i64, s: str) -> i64 {
     var i = 0;
     while i < s.len() {
-        let _ = RawMem.store_int(dst + i, s.byte_at(i as usize) as i64, 8);
+        let _ = RawMem.store_int(dst + i, s.byte_at(i) as i64, 8);
         i = i + 1;
     }
     return s.len();

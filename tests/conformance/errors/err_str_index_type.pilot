@@ -1,0 +1,5 @@
+// A str position is an i64: a float is not one (PROP-005 D2 (a)).
+fn main() {
+    let s = "pilot";
+    print(s.slice(1.5, 3));
+}

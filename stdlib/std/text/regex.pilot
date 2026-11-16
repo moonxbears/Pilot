@@ -117,10 +117,10 @@ pub struct Regex : IObject {
         var last = 0;
         let limit = if count > 0 { count } else { -1 };
         for slots in all_slots(self.prog, text, limit, false) {
-            out.push(text.slice(last as usize, slots[0] as usize));
+            out.push(text.slice(last, slots[0]));
             last = slots[1];
         }
-        out.push(text.slice(last as usize, text.len()));
+        out.push(text.slice(last, text.len()));
         return out;
     }
 
@@ -140,17 +140,17 @@ pub struct Regex : IObject {
         var last = 0;
         let limit = if count > 0 { count } else { -1 };
         for slots in all_slots(self.prog, text, limit, template_needs_groups(parts)) {
-            out.push(text.slice(last as usize, slots[0] as usize));
+            out.push(text.slice(last, slots[0]));
             for part in parts {
                 if part.group < 0 {
                     out.push(part.text);
                 } else if slots[2 * part.group] >= 0 {
-                    out.push(text.slice(slots[2 * part.group] as usize, slots[2 * part.group + 1] as usize));
+                    out.push(text.slice(slots[2 * part.group], slots[2 * part.group + 1]));
                 }
             }
             last = slots[1];
         }
-        out.push(text.slice(last as usize, text.len()));
+        out.push(text.slice(last, text.len()));
         return ok(join_text(out, ""));
     }
 
@@ -161,11 +161,11 @@ pub struct Regex : IObject {
         for slots in all_slots(self.prog, text, -1, true) {
             let start = slots[0];
             let end = slots[1];
-            out.push(text.slice(last as usize, start as usize));
+            out.push(text.slice(last, start));
             out.push(f(Captures { text: text, slots: slots, names: self.prog.names }));
             last = end;
         }
-        out.push(text.slice(last as usize, text.len()));
+        out.push(text.slice(last, text.len()));
         return join_text(out, "");
     }
 
@@ -182,7 +182,7 @@ pub struct Match : IValue {
 fn make_match(text: str, ref slots: List<i64>) -> Match {
     let start = slots[0];
     let end = slots[1];
-    return Match { start: start, end: end, text: text.slice(start as usize, end as usize) };
+    return Match { start: start, end: end, text: text.slice(start, end) };
 }
 
 /// The number of the group named `name` in `names` (group number - 1 order),
@@ -209,7 +209,7 @@ pub struct Captures : IObject {
     /// The text group `g` matched, or `none` when it did not take part.
     pub fn get(ref self, g: i64) -> str? {
         if g < 0 || 2 * g >= (self.slots.len() as i64) || self.slots[2 * g] < 0 { return none; }
-        return self.text.slice(self.slots[2 * g] as usize, self.slots[2 * g + 1] as usize);
+        return self.text.slice(self.slots[2 * g], self.slots[2 * g + 1]);
     }
 
     /// The text the group named `name` matched, or `none`.
@@ -286,20 +286,20 @@ pub fn escape(text: str) -> str {
     let n = text.len() as i64;
     var i = 0;
     while i < n {
-        let b = text.byte_at(i as usize) as i64;
+        let b = text.byte_at(i) as i64;
         var hit = b >= 9 && b <= 13;
         var k = 0;
         while k < (special.len() as i64) && !hit {
-            hit = (special.byte_at(k as usize) as i64) == b;
+            hit = (special.byte_at(k) as i64) == b;
             k = k + 1;
         }
         if hit {
-            out.push(text.slice(last as usize, i as usize) + "\\");
+            out.push(text.slice(last, i) + "\\");
             last = i;
         }
         i = i + 1;
     }
-    out.push(text.slice(last as usize, text.len()));
+    out.push(text.slice(last, text.len()));
     return join_text(out, "");
 }
 
@@ -350,39 +350,39 @@ fn parse_template(ref prog: ReProgram, template: str) -> res<List<TemplatePart>,
     let n = template.len() as i64;
     var i = 0;
     while i < n {
-        let b = template.byte_at(i as usize) as i64;
+        let b = template.byte_at(i) as i64;
         if b != 92 || i + 1 >= n {
-            lit = lit + template.slice(i as usize, (i + 1) as usize);
+            lit = lit + template.slice(i, (i + 1));
             i = i + 1;
             continue;
         }
-        let e = template.byte_at((i + 1) as usize) as i64;
+        let e = template.byte_at((i + 1)) as i64;
         var group = -1;
         if e >= 48 && e <= 57 {
             group = e - 48;
             var j = i + 2;
-            if j < n && (template.byte_at(j as usize) as i64) >= 48 && (template.byte_at(j as usize) as i64) <= 57 {
-                group = group * 10 + ((template.byte_at(j as usize) as i64) - 48);
+            if j < n && (template.byte_at(j) as i64) >= 48 && (template.byte_at(j) as i64) <= 57 {
+                group = group * 10 + ((template.byte_at(j) as i64) - 48);
                 j = j + 1;
             }
             if group > prog.groups {
                 return err(RegexError { kind: RegexErrorKind::BadGroupRef, pos: i + 1, message: "invalid group reference" });
             }
             i = j;
-        } else if e == 103 && i + 2 < n && (template.byte_at((i + 2) as usize) as i64) == 60 {
+        } else if e == 103 && i + 2 < n && (template.byte_at((i + 2)) as i64) == 60 {
             let name_start = i + 3;
             var j = name_start;
-            while j < n && (template.byte_at(j as usize) as i64) != 62 { j = j + 1; }
+            while j < n && (template.byte_at(j) as i64) != 62 { j = j + 1; }
             if j >= n {
                 return err(RegexError { kind: RegexErrorKind::BadGroupRef, pos: name_start, message: "missing >, unterminated name" });
             }
-            let name = template.slice(name_start as usize, j as usize);
+            let name = template.slice(name_start, j);
             group = name_index(prog.names, name);
             if group < 0 {
                 var v = 0;
                 var k = 0;
                 while k < name.len() as i64 {
-                    let d = name.byte_at(k as usize) as i64;
+                    let d = name.byte_at(k) as i64;
                     if d < 48 || d > 57 { v = -1; break; }
                     v = v * 10 + (d - 48);
                     k = k + 1;
@@ -398,7 +398,7 @@ fn parse_template(ref prog: ReProgram, template: str) -> res<List<TemplatePart>,
             else if e == 116 { lit = lit + "\t"; }
             else if e == 114 { lit = lit + "\r"; }
             else if e == 92 { lit = lit + "\\"; }
-            else { lit = lit + template.slice(i as usize, (i + 2) as usize); }
+            else { lit = lit + template.slice(i, (i + 2)); }
             i = i + 2;
             continue;
         }

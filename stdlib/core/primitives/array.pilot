@@ -13,7 +13,7 @@ use Pilot.Core.Keywords::*;
 [KeywordDefAttr(27, "Inline fixed-capacity C-ABI array stored contiguously without pointer indirection.")]
 [Lang(Cfg.Lang.array_t), Layout("inline_array")]
 pub partial struct array<T: IAnyValue, N: const usize> : IInlineList<T>, IEnumerable<T, SliceEnumerator<T>> {
-    pub count:    usize { get => N; }
+    pub count:    i64 { get => N as i64; }
     pub is_empty: bool  { get => N == 0; }
 
     pub pure:
@@ -24,7 +24,7 @@ pub partial struct array<T: IAnyValue, N: const usize> : IInlineList<T>, IEnumer
             len:  N,
         };
 
-        op [] (idx: usize) -> T => .as_ptr()[idx];
+        op [] (idx: i64) -> T => .as_ptr()[idx as usize];
 
         fn contains(item: T) -> bool {
             var idx: usize = 0;
@@ -39,5 +39,5 @@ pub partial struct array<T: IAnyValue, N: const usize> : IInlineList<T>, IEnumer
         fn get_enumerator() -> SliceEnumerator<T> => .as_slice().get_enumerator();
 
     pub var:
-        op []= (idx: usize, val: T) => { .as_ptr()[idx] = val; }
+        op []= (idx: i64, val: T) => { .as_ptr()[idx as usize] = val; }
 }

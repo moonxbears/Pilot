@@ -474,14 +474,14 @@ fn hoist(var ref ce: ConstEval, fi: i64, g: i64) {
     let addr = ir_new_value(start, ce.m.globals[g].physics);
     let v = ir_new_value(start, f.ret_physics);
     start.spans.push(ir_no_span());
-    let span = start.spans.len - 1;
+    let span = ir_operand(start.spans.len - 1);
     let a_off = start.operand_pool.len;
     let s_off = a_off;
     start.operand_pool.push(addr);
     start.operand_pool.push(v);
     let added = [
-        ir_inst_new(addr, op_global_addr(), g as u16, ce.m.globals[g].physics, a_off, 0, span),
-        ir_inst_new(v, op_call_direct(), fi as u16, f.ret_physics, a_off, 0, span),
+        ir_inst_new(addr, op_global_addr(), ir_sub(g), ce.m.globals[g].physics, a_off, 0, span),
+        ir_inst_new(v, op_call_direct(), ir_sub(fi), f.ret_physics, a_off, 0, span),
         ir_inst_new(ir_no_value(), op_store(), 0, ce.m.layouts[0].physics, s_off, 2, span),
     ];
     var insts: List<IrInst> = [];
@@ -512,7 +512,7 @@ fn replace_calls_with_load(ref m: IrModule, fi: i64, g: i64) {
                 let building = fx == 0 && b.id == 0 && is_build_of(f, b, i, g);
                 if inst.opcode == op_call_direct() && inst.subop == fi && inst.args_len == 0 && inst.result != ir_no_value() && !building {
                     let addr = ir_new_value(f, m.globals[g].physics);
-                    out.push(ir_inst_new(addr, op_global_addr(), g as u16, m.globals[g].physics, f.operand_pool.len, 0, inst.span_id));
+                    out.push(ir_inst_new(addr, op_global_addr(), ir_sub(g), m.globals[g].physics, f.operand_pool.len, 0, inst.span_id));
                     let off = f.operand_pool.len;
                     f.operand_pool.push(addr);
                     out.push(ir_inst_new(inst.result, op_load(), 0, inst.physics, off, 1, inst.span_id));

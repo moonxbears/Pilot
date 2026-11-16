@@ -104,7 +104,7 @@ fn rc_function(ref m: IrModule, var ref f: IrFunction, start: bool, counted: (Ir
     if start {
         var g = 0;
         while g < m.globals.len() {
-            if counted(m.globals[g].physics) { rc.globals.push(g); }
+            if counted(m.globals[g].physics) { rc.globals.push(ir_operand(g)); }
             g = g + 1;
         }
     }
@@ -122,7 +122,7 @@ fn rc_function(ref m: IrModule, var ref f: IrFunction, start: bool, counted: (Ir
     var rewritten: List<List<IrInst>> = [];
     var b = 0;
     while b < original {
-        rewritten.push(rc_block(rc, b));
+        rewritten.push(rc_block(rc, ir_operand(b)));
         b = b + 1;
     }
     b = 0;
@@ -255,7 +255,7 @@ fn rc_liveness(var ref rc: RcFunction) {
 /// need) in `rc.mark` and returns their indices; the caller clears them.
 fn rc_live_out(var ref rc: RcFunction, b: i64) -> List<i64> {
     var touched: List<i64> = [];
-    for s in block_successors(rc.f, b) {
+    for s in block_successors(rc.f, ir_operand(b)) {
         if s >= rc.live_in.len() { continue; }
         for i in rc.live_in[s] { rc_mark(rc, touched, i); }
     }
@@ -343,7 +343,7 @@ fn rc_terminator(var ref rc: RcFunction, b: u32, t: IrInst, touched: List<i64>) 
             let cell = ir_new_value(f, ir_physics_ptr());
             rc.kind.push(0);
             rc.index.push(-1);
-            before.push(rc_inst(f, op_global_addr(), g, ir_physics_ptr(), [], cell, t.span_id));
+            before.push(rc_inst(f, op_global_addr(), ir_sub(g as i64), ir_physics_ptr(), [], cell, t.span_id));
             before.push(rc_op(rc, op_perceus_drop(), cell, t.span_id));
         }
     } else if op == op_jump() || op == op_cond_br() || op == op_switch_table() {
@@ -397,7 +397,7 @@ fn rc_terminator(var ref rc: RcFunction, b: u32, t: IrInst, touched: List<i64>) 
                     f.blocks[nb].insts = body;
                     targets[e] = nb;
                     args[e] = [];
-                    moved.push(e);
+                    moved.push(ir_operand(e));
                 }
             }
             e = e + 1;

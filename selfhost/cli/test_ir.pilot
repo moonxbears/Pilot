@@ -82,7 +82,7 @@ fn word_after(line: str, prefix: str) -> str {
     let at = line.find(prefix, 0);
     if at < 0 { return ""; }
     var end = at + prefix.len();
-    while end < line.len() && line.byte_at(end as usize) != 32 && line.byte_at(end as usize) != 34 { end = end + 1; }
+    while end < line.len() && line.byte_at(end) != 32 && line.byte_at(end) != 34 { end = end + 1; }
     return line.slice(at + prefix.len(), end);
 }
 

@@ -62,8 +62,8 @@ pub struct CFieldDecl : IValue {
 pub pure fn c_field_decl_new(
     name: str,
     ty: str,
-    offset: usize,
-    size: usize
+    offset: i64,
+    size: i64
 ) -> CFieldDecl {
     return CFieldDecl {
         name:         name,
@@ -215,7 +215,7 @@ pub fn c_translation_unit_new(header: str) -> CTranslationUnit {
 // ------------------------------------------------------------------------------
 
 [StandIn("c.type_layout", "size and alignment of the resolved C type per target", "unknown types and aggregates count as 8 bytes", "F4")]
-pub pure fn c_type_size_target(ty: str, is_win64: bool) -> usize {
+pub pure fn c_type_size_target(ty: str, is_win64: bool) -> i64 {
     if ty == "signed char" || ty == "unsigned char" || ty == "int8_t" || ty == "uint8_t" || ty == "_Bool" || (ty.len() == 4 && ty.byte_at(0) == 99 && ty.byte_at(1) == 104) || (ty.len() == 4 && ty.byte_at(0) == 98 && ty.byte_at(1) == 111) {
         return 1;
     }
@@ -239,22 +239,22 @@ pub pure fn c_type_size_target(ty: str, is_win64: bool) -> usize {
     return 8;
 }
 
-pub pure fn c_type_size(ty: str) -> usize => c_type_size_target(ty, false);
+pub pure fn c_type_size(ty: str) -> i64 => c_type_size_target(ty, false);
 
-pub pure fn c_type_align(ty: str) -> usize => c_type_size(ty);
+pub pure fn c_type_align(ty: str) -> i64 => c_type_size(ty);
 
-pub pure fn c_type_size_and_align(ty: str) -> usize => c_type_size(ty);
+pub pure fn c_type_size_and_align(ty: str) -> i64 => c_type_size(ty);
 
 // ------------------------------------------------------------------------------
 // 4. Tokenizer Helpers
 // ------------------------------------------------------------------------------
 
-pub pure fn c_is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
-pub pure fn c_is_alpha(b: i64) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
-pub pure fn c_is_digit(b: i64) -> bool => b >= 48 && b <= 57;
-pub pure fn c_is_alnum(b: i64) -> bool => c_is_alpha(b) || c_is_digit(b);
+pub pure fn c_is_space(b: u8) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
+pub pure fn c_is_alpha(b: u8) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+pub pure fn c_is_digit(b: u8) -> bool => b >= 48 && b <= 57;
+pub pure fn c_is_alnum(b: u8) -> bool => c_is_alpha(b) || c_is_digit(b);
 
-pub pure fn c_skip_whitespace_and_comments(src: str, pos: usize) -> usize {
+pub pure fn c_skip_whitespace_and_comments(src: str, pos: i64) -> i64 {
     let n = src.len();
     var cur = pos;
     while cur < n {
@@ -285,7 +285,7 @@ pub pure fn c_skip_whitespace_and_comments(src: str, pos: usize) -> usize {
     return cur;
 }
 
-pub pure fn c_read_word(src: str, pos: usize) -> str {
+pub pure fn c_read_word(src: str, pos: i64) -> str {
     let n = src.len();
     var cur = pos;
     while cur < n && c_is_alnum(src.byte_at(cur)) {
@@ -306,7 +306,7 @@ pub fn c_parse_translation_unit(
 ) -> CTranslationUnit {
     var tu = c_translation_unit_new(header_path);
     let n = src.len();
-    var pos: usize = 0;
+    var pos: i64 = 0;
     var current_pack_align: u8 = 8;
 
     while pos < n {
@@ -374,11 +374,11 @@ pub fn c_parse_translation_unit(
             if pos < n && src.byte_at(pos) == 123 { // '{'
                 pos = pos + 1;
                 var rec_fields: List<CFieldDecl> = [];
-                var current_offset: usize = 0;
-                var max_align: usize = 1;
+                var current_offset: i64 = 0;
+                var max_align: i64 = 1;
                 var has_flex = false;
                 var cur_bit_offset: u8 = 0;
-                var bit_storage_offset: usize = 0;
+                var bit_storage_offset: i64 = 0;
                 var in_bitfield_unit = false;
 
                 while pos < n && src.byte_at(pos) != 125 { // '}'
@@ -425,7 +425,7 @@ pub fn c_parse_translation_unit(
 
                         let storage_sz = c_type_size(f_type);
                         let storage_al = c_type_align(f_type);
-                        if (bit_w as usize) > storage_sz * 8 {
+                        if (bit_w as i64) > storage_sz * 8 {
                             // CAB004: Invalid Bitfield Width
                             let sp = source_span_new(0, pos as u32, (pos + 1) as u32);
                             let diag = diagnostic_new("CAB004", diag_severity_error(), "Bitfield width " + width_str + " exceeds storage size for type " + f_type, sp);
@@ -434,7 +434,7 @@ pub fn c_parse_translation_unit(
 
                         if !in_bitfield_unit || (cur_bit_offset + bit_w > (storage_sz * 8) as u8) {
                             // Align to storage boundary
-                            let eff_al = if (current_pack_align as usize) < storage_al { current_pack_align as usize } else { storage_al };
+                            let eff_al = if (current_pack_align as i64) < storage_al { current_pack_align as i64 } else { storage_al };
                             if eff_al > 0 {
                                 let rem = current_offset % eff_al;
                                 if rem > 0 { current_offset = current_offset + (eff_al - rem); }
@@ -478,17 +478,17 @@ pub fn c_parse_translation_unit(
                             }
                             let count_str = src.slice(pos, arr_n_end);
                             pos = if arr_n_end < n { arr_n_end + 1 } else { arr_n_end };
-                            var count_val: usize = 0;
+                            var count_val: i64 = 0;
                             var ci = 0;
                             while ci < count_str.len() {
                                 if c_is_digit(count_str.byte_at(ci)) {
-                                    count_val = (count_val * 10) + (count_str.byte_at(ci) - 48) as usize;
+                                    count_val = (count_val * 10) + (count_str.byte_at(ci) - 48) as i64;
                                 }
                                 ci = ci + 1;
                             }
                             let elem_sz = c_type_size(f_type);
                             let elem_al = c_type_align(f_type);
-                            let eff_al = if (current_pack_align as usize) < elem_al { current_pack_align as usize } else { elem_al };
+                            let eff_al = if (current_pack_align as i64) < elem_al { current_pack_align as i64 } else { elem_al };
                             if eff_al > 0 {
                                 let rem = current_offset % eff_al;
                                 if rem > 0 { current_offset = current_offset + (eff_al - rem); }
@@ -502,13 +502,13 @@ pub fn c_parse_translation_unit(
                         in_bitfield_unit = false;
                         let elem_sz = c_type_size(f_type);
                         let elem_al = c_type_align(f_type);
-                        let eff_al = if (current_pack_align as usize) < elem_al { current_pack_align as usize } else { elem_al };
+                        let eff_al = if (current_pack_align as i64) < elem_al { current_pack_align as i64 } else { elem_al };
                         if eff_al > max_align { max_align = eff_al; }
                         if eff_al > 0 && !is_union {
                             let rem = current_offset % eff_al;
                             if rem > 0 { current_offset = current_offset + (eff_al - rem); }
                         }
-                        var fld_offset: usize = current_offset;
+                        var fld_offset: i64 = current_offset;
                         if is_union { fld_offset = 0; }
                         var fld = c_field_decl_new(f_name, f_type, fld_offset, elem_sz);
                         rec_fields.push(fld);

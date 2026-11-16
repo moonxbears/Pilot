@@ -77,7 +77,7 @@ fn special_kinds(ref s: Snap) -> List<bool> {
     return out;
 }
 
-fn push_frame(var ref w: Walk) { w.frames.push(w.stack.len()); }
+fn push_frame(var ref w: Walk) { w.frames.push(w.stack.len() as i64); }
 
 fn pop_frame(var ref w: Walk) {
     let mark = w.frames.pop();
@@ -88,7 +88,7 @@ fn current_owner(ref w: Walk) -> i64 => if w.owners.len() > 0 { w.owners[w.owner
 
 /// The innermost binding named `name`, as a stack position, or -1.
 fn lookup_position(ref w: Walk, name: str) -> i64 {
-    var i = w.stack.len() - 1;
+    var i = (w.stack.len() as i64) - 1;
     while i >= 0 {
         if w.r.name[w.stack[i]] == name { return i; }
         i = i - 1;
@@ -113,7 +113,7 @@ fn declare(var ref w: Walk, site: i64, name: str, bk: BindKind, source: i64, ann
                 f"Local binding '{name}' shadows a binding of the same name in an enclosing scope");
         }
     }
-    let index = w.r.site.len();
+    let index = w.r.site.len() as i64;
     w.r.site.push(site);
     w.r.name.push(name);
     w.r.bind_kind.push(bk);

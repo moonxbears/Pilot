@@ -107,11 +107,11 @@ pub fn sql_catalog_find_table(ref cat: SqlCatalog, name: str) -> i64 {
 // 4. DDL Tokenizer & Helper Utilities
 // ------------------------------------------------------------------------------
 
-pub pure fn sql_is_space(b: i64) -> bool {
+pub pure fn sql_is_space(b: u8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13;
 }
 
-pub pure fn sql_is_alnum(b: i64) -> bool {
+pub pure fn sql_is_alnum(b: u8) -> bool {
     return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
 }
 
@@ -142,7 +142,7 @@ pub fn sql_parse_create_table(ddl: str) -> SqlTableDef {
     // Skip to table name after CREATE TABLE
     let ct_idx = ddl.find("TABLE");
     if ct_idx >= 0 {
-        pos = (ct_idx + 5) as usize;
+        pos = (ct_idx + 5) as i64;
     }
     while pos < n && sql_is_space(ddl.byte_at(pos)) { pos = pos + 1; }
 
@@ -237,7 +237,7 @@ pub fn sql_apply_alter_table(var ref cat: SqlCatalog, ddl: str) -> bool {
     let n = ddl.len();
     var pos = 0;
     let at_idx = ddl.find("TABLE");
-    if at_idx >= 0 { pos = (at_idx + 5) as usize; }
+    if at_idx >= 0 { pos = (at_idx + 5) as i64; }
     while pos < n && sql_is_space(ddl.byte_at(pos)) { pos = pos + 1; }
 
     var name_end = pos;
@@ -248,12 +248,12 @@ pub fn sql_apply_alter_table(var ref cat: SqlCatalog, ddl: str) -> bool {
     let tbl_idx = sql_catalog_find_table(cat, tbl_name);
     if tbl_idx < 0 { return false; }
 
-    var tbl = cat.tables.get(tbl_idx as usize);
+    var tbl = cat.tables.get(tbl_idx as i64);
     let rem = ddl.slice(pos, n);
 
     if rem.contains("ADD COLUMN") || rem.contains("ADD") {
         let add_idx = rem.find("ADD");
-        var after_add = (add_idx + 3) as usize;
+        var after_add = (add_idx + 3) as i64;
         let rem_n = rem.len();
         if rem.slice(after_add, rem_n).starts_with(" COLUMN") {
             after_add = after_add + 7;
@@ -282,26 +282,26 @@ pub fn sql_apply_alter_table(var ref cat: SqlCatalog, ddl: str) -> bool {
             default_val:    "",
         };
         tbl.columns.push(col_def);
-        cat.tables.set(tbl_idx as usize, tbl);
+        cat.tables.set(tbl_idx as i64, tbl);
         return true;
     }
 
     if rem.contains("DROP COLUMN") {
         let drop_idx = rem.find("DROP COLUMN");
-        let col_name = sql_trim(rem.slice((drop_idx + 11) as usize, rem.len()));
+        let col_name = sql_trim(rem.slice((drop_idx + 11), rem.len()));
         let col_idx = sql_table_find_col(tbl, col_name);
         if col_idx >= 0 {
             // Remove column
             var new_cols: List<SqlColumnDef> = [];
             var i = 0;
             while i < tbl.columns.len() {
-                if i != (col_idx as usize) {
+                if i != (col_idx as i64) {
                     new_cols.push(tbl.columns.get(i));
                 }
                 i = i + 1;
             }
             tbl.columns = new_cols;
-            cat.tables.set(tbl_idx as usize, tbl);
+            cat.tables.set(tbl_idx as i64, tbl);
             return true;
         }
     }
@@ -365,7 +365,7 @@ pub fn sql_parse_annotated_query(src: str) -> SqlQueryDef {
     var body_st = 0;
 
     if marker_idx >= 0 {
-        var pos = (marker_idx + 8) as usize;
+        var pos = (marker_idx + 8) as i64;
         let n = src.len();
         while pos < n && sql_is_space(src.byte_at(pos)) { pos = pos + 1; }
 
@@ -389,7 +389,7 @@ pub fn sql_parse_annotated_query(src: str) -> SqlQueryDef {
     var target_tbl = "";
     let from_idx = raw_sql.find("FROM");
     if from_idx >= 0 {
-        var t_pos = (from_idx + 4) as usize;
+        var t_pos = (from_idx + 4) as i64;
         let rn = raw_sql.len();
         while t_pos < rn && sql_is_space(raw_sql.byte_at(t_pos)) { t_pos = t_pos + 1; }
         var t_end = t_pos;
@@ -526,7 +526,7 @@ pub fn sql_check_query(ref cat: SqlCatalog, q: SqlQueryDef) -> str {
     if t_idx < 0 {
         return schema_diag_code(2) + ": Unknown table '" + q.target_tbl + "' in query " + q.name;
     }
-    let tbl = cat.tables.get(t_idx as usize);
+    let tbl = cat.tables.get(t_idx as i64);
     for h in sql_scan_placeholders(q.raw_sql) {
         let col = sql_placeholder_column(q.raw_sql, h.start);
         if col.len() > 0 && sql_table_find_col(tbl, col) < 0 {
@@ -540,14 +540,14 @@ pub fn sql_check_query(ref cat: SqlCatalog, q: SqlQueryDef) -> str {
 pub fn sql_synthesize_query_signature(ref cat: SqlCatalog, q: SqlQueryDef) -> str {
     let t_idx = sql_catalog_find_table(cat, q.target_tbl);
     var param_sig = "";
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < q.params.len() {
         let pname = q.params.get(i);
         var ptype = "sql_value";
         if t_idx >= 0 {
-            let tbl = cat.tables.get(t_idx as usize);
+            let tbl = cat.tables.get(t_idx as i64);
             let c_idx = sql_table_find_col(tbl, pname);
-            if c_idx >= 0 { ptype = tbl.columns.get(c_idx as usize).sql_type; }
+            if c_idx >= 0 { ptype = tbl.columns.get(c_idx as i64).sql_type; }
         }
         if i > 0 { param_sig = param_sig + ", "; }
         param_sig = param_sig + pname + ": " + ptype;

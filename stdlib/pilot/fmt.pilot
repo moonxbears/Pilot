@@ -29,7 +29,7 @@ pub fn str_replace(src: str, target: str, replacement: str) -> str {
             out.push(src.slice(p, n));
             break;
         }
-        out.push(src.slice(p, idx as usize) + replacement);
+        out.push(src.slice(p, idx) + replacement);
         p = (idx as usize) + m;
     }
     return join_text(out, "");

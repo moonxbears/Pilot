@@ -21,20 +21,20 @@ pub fn render_global_help(reg: ref<CommandRegistry>) -> str {
     let _ = cli_list_push(cats, "IDE, Debug & AI");
 
     let n_cats = cli_list_len(cats);
-    var c_idx: usize = 0;
+    var c_idx: i64 = 0;
     while c_idx < n_cats {
         let cat = cli_list_get_str(cats, c_idx);
         out = out + "  " + cat + ":\n";
 
         let n_cmds = spec_registry_count(reg);
-        var i: usize = 0;
+        var i: i64 = 0;
         while i < n_cmds {
             let spec: CommandSpec = spec_registry_get(reg, i);
             if spec.category == cat {
                 let name = spec.name;
                 var pad = "  ";
                 if name.len() < 12 {
-                    var p: usize = name.len();
+                    var p: i64 = name.len();
                     while p < 12 {
                         pad = pad + " ";
                         p = p + 1;
@@ -59,7 +59,7 @@ pub fn render_command_help(spec: ref<CommandSpec>) -> str {
     let n_flags = cli_list_len(spec.flags_handle);
     if n_flags > 0 {
         out = out + "Flags:\n";
-        var i: usize = 0;
+        var i: i64 = 0;
         while i < n_flags {
             let f: FlagSpec = cli_list_get(spec.flags_handle, i);
             let sc_str = if f.short_char.len() > 0 { "-" + f.short_char + ", " } else { "    " };
@@ -87,7 +87,7 @@ pub fn render_command_help(spec: ref<CommandSpec>) -> str {
 pub fn emit_shell_completions(reg: ref<CommandRegistry>, shell: str) -> str {
     let n_cmds = spec_registry_count(reg);
     var all_cmd_names = "";
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < n_cmds {
         let spec: CommandSpec = spec_registry_get(reg, i);
         all_cmd_names = all_cmd_names + spec.name + " ";
@@ -111,7 +111,7 @@ pub fn emit_shell_completions(reg: ref<CommandRegistry>, shell: str) -> str {
             let spec: CommandSpec = spec_registry_get(reg, i);
             var flag_str = "--help ";
             let nf = cli_list_len(spec.flags_handle);
-            var fi: usize = 0;
+            var fi: i64 = 0;
             while fi < nf {
                 let f: FlagSpec = cli_list_get(spec.flags_handle, fi);
                 flag_str = flag_str + "--" + f.long_name + " ";
@@ -162,7 +162,7 @@ pub fn emit_shell_completions(reg: ref<CommandRegistry>, shell: str) -> str {
             out = out + "complete -c pilot -n \"__fish_use_subcommand\" -a \"" + spec.name + "\" -d \"" + spec.summary + "\"\n";
 
             let nf = cli_list_len(spec.flags_handle);
-            var fi: usize = 0;
+            var fi: i64 = 0;
             while fi < nf {
                 let f: FlagSpec = cli_list_get(spec.flags_handle, fi);
                 var f_line = "complete -c pilot -n \"__fish_seen_subcommand_from " + spec.name + "\" -l \"" + f.long_name + "\"";
@@ -209,7 +209,7 @@ pub fn export_cli_json_schema(reg: ref<CommandRegistry>) -> str {
               "  \"commands\": [\n";
 
     let n_cmds = spec_registry_count(reg);
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < n_cmds {
         let spec: CommandSpec = spec_registry_get(reg, i);
         out = out + "    {\n" +
@@ -219,7 +219,7 @@ pub fn export_cli_json_schema(reg: ref<CommandRegistry>) -> str {
               "      \"flags\": [";
 
         let nf = cli_list_len(spec.flags_handle);
-        var fi: usize = 0;
+        var fi: i64 = 0;
         while fi < nf {
             let f: FlagSpec = cli_list_get(spec.flags_handle, fi);
             out = out + "\n        {\n" +

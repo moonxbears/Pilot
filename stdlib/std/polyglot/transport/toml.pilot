@@ -307,8 +307,8 @@ pub fn toml_parse(src: str) -> TomlValue {
         }
 
         if eq_idx > 0 {
-            let key = toml_trim(clean.slice(0, eq_idx as usize));
-            let raw_val = toml_trim(clean.slice((eq_idx + 1) as usize, clean.len()));
+            let key = toml_trim(clean.slice(0, eq_idx));
+            let raw_val = toml_trim(clean.slice((eq_idx + 1), clean.len()));
 
             if raw_val.starts_with("\"") && raw_val.ends_with("\"") && raw_val.len() >= 2 {
                 let s = raw_val.slice(1, raw_val.len() - 1);

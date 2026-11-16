@@ -13,18 +13,18 @@ use std.text;
 // 1. Character & String Primitives for C Lexing
 // ------------------------------------------------------------------------------
 
-pub pure fn cpp_is_space(b: i64) -> bool => b == 32 || b == 9 || b == 13;
-pub pure fn cpp_is_digit(b: i64) -> bool => b >= 48 && b <= 57;
-pub pure fn cpp_is_alpha(b: i64) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
-pub pure fn cpp_is_alnum(b: i64) -> bool => cpp_is_alpha(b) || cpp_is_digit(b);
+pub pure fn cpp_is_space(b: u8) -> bool => b == 32 || b == 9 || b == 13;
+pub pure fn cpp_is_digit(b: u8) -> bool => b >= 48 && b <= 57;
+pub pure fn cpp_is_alpha(b: u8) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+pub pure fn cpp_is_alnum(b: u8) -> bool => cpp_is_alpha(b) || cpp_is_digit(b);
 
 pub pure fn cpp_trim(s: str) -> str {
     let n = s.len();
-    var start: usize = 0;
+    var start: i64 = 0;
     while start < n && cpp_is_space(s.byte_at(start)) {
         start = start + 1;
     }
-    var end: usize = n;
+    var end: i64 = n;
     while end > start && cpp_is_space(s.byte_at(end - 1)) {
         end = end - 1;
     }
@@ -32,7 +32,7 @@ pub pure fn cpp_trim(s: str) -> str {
     return s.slice(start, end);
 }
 
-pub pure fn cpp_skip_space(s: str, pos: usize) -> usize {
+pub pure fn cpp_skip_space(s: str, pos: i64) -> i64 {
     let n = s.len();
     var cur = pos;
     while cur < n && cpp_is_space(s.byte_at(cur)) {
@@ -41,7 +41,7 @@ pub pure fn cpp_skip_space(s: str, pos: usize) -> usize {
     return cur;
 }
 
-pub pure fn cpp_read_ident(s: str, pos: usize) -> str {
+pub pure fn cpp_read_ident(s: str, pos: i64) -> str {
     let n = s.len();
     var cur = pos;
     while cur < n && cpp_is_alnum(s.byte_at(cur)) {
@@ -89,7 +89,7 @@ pub struct CppEnv : IObject {
     pub has_error:       bool;
     pub error_msg:       str;
     pub error_code:      str;
-    pub eval_pos:        usize;
+    pub eval_pos:        i64;
 }
 
 /// A preprocessor environment predefining the standard macros and the
@@ -325,7 +325,7 @@ pub fn cpp_eval_primary(expr: str, var ref env: CppEnv) -> i64 {
         if cpp_is_defined(env, ident) {
             let mval = cpp_get_macro(env, ident);
             let saved = cur;
-            var m_pos: usize = 0;
+            var m_pos: i64 = 0;
             let res = cpp_eval_expr(mval, var m_pos, env);
             env.eval_pos = saved;
             return res;
@@ -590,7 +590,7 @@ pub fn cpp_eval_logical_or(expr: str, var ref env: CppEnv) -> i64 {
     return lhs;
 }
 
-pub fn cpp_eval_expr(expr: str, var ref cur: usize, var ref env: CppEnv) -> i64 {
+pub fn cpp_eval_expr(expr: str, var ref cur: i64, var ref env: CppEnv) -> i64 {
     env.eval_pos = cur;
     let res = cpp_eval_logical_or(expr, env);
     cur = env.eval_pos;
@@ -598,7 +598,7 @@ pub fn cpp_eval_expr(expr: str, var ref cur: usize, var ref env: CppEnv) -> i64 
 }
 
 pub fn cpp_evaluate_condition(cond_str: str, var ref env: CppEnv) -> bool {
-    var pos: usize = 0;
+    var pos: i64 = 0;
     let res = cpp_eval_expr(cond_str, var pos, env);
     return res != 0;
 }
@@ -611,8 +611,8 @@ pub fn cpp_expand_fn_macro(ref m: CppMacro, ref args: List<str>) -> str {
     let body = m.val;
     let blen = body.len();
     var out = "";
-    var bi: usize = 0;
-    var b_chunk: usize = 0;
+    var bi: i64 = 0;
+    var b_chunk: i64 = 0;
 
     while bi < blen {
         let b = body.byte_at(bi);
@@ -648,7 +648,7 @@ pub fn cpp_expand_fn_macro(ref m: CppMacro, ref args: List<str>) -> str {
             if after_hash < blen && cpp_is_alpha(body.byte_at(after_hash)) {
                 let pname = cpp_read_ident(body, after_hash);
                 var found_pi: i64 = -1;
-                var pi: usize = 0;
+                var pi: i64 = 0;
                 while pi < m.params.len() {
                     if m.params[pi] == pname {
                         found_pi = pi as i64;
@@ -660,7 +660,7 @@ pub fn cpp_expand_fn_macro(ref m: CppMacro, ref args: List<str>) -> str {
                     if bi > b_chunk {
                         out = out + body.slice(b_chunk, bi);
                     }
-                    let parg = if (found_pi as usize) < args.len() { args[found_pi as usize] } else { "" };
+                    let parg = if (found_pi as i64) < args.len() { args[found_pi as i64] } else { "" };
                     out = out + "\"" + parg + "\"";
                     bi = after_hash + pname.len();
                     b_chunk = bi;
@@ -674,7 +674,7 @@ pub fn cpp_expand_fn_macro(ref m: CppMacro, ref args: List<str>) -> str {
             let ident = cpp_read_ident(body, bi);
             let next_bi = bi + ident.len();
             var found_pi: i64 = -1;
-            var pi: usize = 0;
+            var pi: i64 = 0;
             while pi < m.params.len() {
                 if m.params[pi] == ident {
                     found_pi = pi as i64;
@@ -686,7 +686,7 @@ pub fn cpp_expand_fn_macro(ref m: CppMacro, ref args: List<str>) -> str {
                 if bi > b_chunk {
                     out = out + body.slice(b_chunk, bi);
                 }
-                let parg = if (found_pi as usize) < args.len() { args[found_pi as usize] } else { "" };
+                let parg = if (found_pi as i64) < args.len() { args[found_pi as i64] } else { "" };
                 out = out + parg;
                 bi = next_bi;
                 b_chunk = bi;
@@ -708,8 +708,8 @@ pub fn cpp_expand_fn_macro(ref m: CppMacro, ref args: List<str>) -> str {
 pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
     let n = line.len();
     var out: List<str> = [];
-    var chunk_start: usize = 0;
-    var i: usize = 0;
+    var chunk_start: i64 = 0;
+    var i: i64 = 0;
     var has_expansion = false;
 
     while i < n {
@@ -815,7 +815,7 @@ pub fn cpp_process_source(
 
     let n = src.len();
     var out: List<str> = [];
-    var pos: usize = 0;
+    var pos: i64 = 0;
 
     var cond_stack: List<CppCondFrame> = [];
 

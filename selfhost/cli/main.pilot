@@ -244,7 +244,7 @@ pub fn run_cli_entry(raw_args_line: str) -> i64 {
     if parsed_has_flag(p, "help") {
         let c_idx = spec_registry_find_by_name(reg, p.command);
         if c_idx >= 0 {
-            print(render_command_help(spec_registry_get(reg, c_idx as usize)));
+            print(render_command_help(spec_registry_get(reg, c_idx)));
             return 0;
         }
     }

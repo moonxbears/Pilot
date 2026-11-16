@@ -44,7 +44,7 @@ fn text_between(ref s: Snap, n: i64, a: i64, b: i64) -> str {
     if a < base || b < a || b - base > full.len() as i64 { return ""; }
     let raw = full.slice(a - base, b - base);
     var out = "";
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < raw.len() {
         let c = raw.byte_at(i);
         if c != 32 && c != 9 && c != 10 && c != 13 && c != 40 && c != 41 { out = out + raw.slice(i, i + 1); }
@@ -138,7 +138,7 @@ fn wire_node(ref s: Snap, n: i64, var ref out: List<str>, var ref holes: List<i6
             return;
         }
     }
-    out.push(piece(word, text, kids.len()));
+    out.push(piece(word, text, kids.len() as i64));
     for c in kids { wire_node(s, c, out, holes, bad); }
 }
 

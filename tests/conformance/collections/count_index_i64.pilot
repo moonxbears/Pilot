@@ -1,0 +1,36 @@
+// Collection counts and indexes are i64 (PROP-005 5B.2, decided 2026-11-16,
+// extending D2 (a) from str positions to every collection): `len()`,
+// `count`, `[]`, `[]=` and `remove_at` take and give i64, so counts mix with
+// str positions and count down past 0 without a cast.
+//
+// Worked by hand:
+//   xs = [10, 20, 30]: len 3, count 3
+//   walking i = 2, 1, 0 and stopping at -1: 30 + 20 + 10 = 60
+//   xs[2] = 33, then xs[2] reads 33
+//   remove_at(0) gives 10 and leaves [20, 33]; len - 1 = 1
+//   an empty list's len - 1 is -1 (a signed count does not wrap)
+//   "pilot".slice(0, 2) = "pi"
+//   (Map.count is i64 too; collections/map_declared_property binds it to an
+//   i64, since PilIR does not lower `m.count` yet.)
+fn main() {
+    var xs: List<i64> = [10, 20, 30];
+    let n: i64 = xs.len();
+    let c: i64 = xs.count;
+    print(n);
+    print(c);
+    var i: i64 = n - 1;
+    var sum: i64 = 0;
+    while i >= 0 {
+        sum = sum + xs[i];
+        i = i - 1;
+    }
+    print(sum);
+    xs[n - 1] = 33;
+    print(xs[2]);
+    print(xs.remove_at(0));
+    print(xs.len() - 1);
+    var empty: List<i64> = [];
+    print(empty.len() - 1);
+    let s = "pilot";
+    print(s.slice(0, xs.len()));
+}

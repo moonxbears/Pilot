@@ -72,7 +72,7 @@ pub fn cpp_translation_unit_new(path: str) -> CppTranslationUnit {
 // 3. Type Physics & Standard C++ View Mappings
 // ------------------------------------------------------------------------------
 
-pub pure fn cpp_type_size(ty: str) -> usize {
+pub pure fn cpp_type_size(ty: str) -> i64 {
     if ty == "std::string_view" || ty.starts_with("std::span<") {
         return 16;
     }
@@ -91,7 +91,7 @@ pub pure fn cpp_type_size(ty: str) -> usize {
     return 8;
 }
 
-pub pure fn cpp_type_align(ty: str) -> usize {
+pub pure fn cpp_type_align(ty: str) -> i64 {
     if ty == "std::string_view" || ty.starts_with("std::span<") {
         return 8;
     }
@@ -106,7 +106,7 @@ pub pure fn cpp_is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b ==
 pub pure fn cpp_is_alpha(b: i64) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
 pub pure fn cpp_is_digit(b: i64) -> bool => b >= 48 && b <= 57;
 
-pub pure fn cpp_skip_whitespace_and_comments(src: str, start: usize) -> usize {
+pub pure fn cpp_skip_whitespace_and_comments(src: str, start: i64) -> i64 {
     var p = start;
     let n = src.len();
     while p < n {
@@ -144,7 +144,7 @@ pub pure fn cpp_skip_whitespace_and_comments(src: str, start: usize) -> usize {
     return p;
 }
 
-pub pure fn cpp_read_ident(src: str, start: usize) -> str {
+pub pure fn cpp_read_ident(src: str, start: i64) -> str {
     var p = start;
     let n = src.len();
     while p < n {
@@ -170,7 +170,7 @@ pub fn cpp_parse_translation_unit(
     var ref diags: List<Diagnostic>
 ) -> CppTranslationUnit {
     var tu = cpp_translation_unit_new(file_path);
-    var cursor: usize = 0;
+    var cursor: i64 = 0;
     let total_len = source.len();
 
     var ns_stack: List<str> = [];
@@ -507,7 +507,7 @@ pub fn cpp_parse_translation_unit(
                         // Field declaration: <Type> <Name>;
                         let f_size = cpp_type_size(full_type);
                         let f_align = cpp_type_align(full_type);
-                        cls.fields.push(cpp_field_decl_new(name_candidate, full_type, f_size, f_align, class_access));
+                        cls.fields.push(cpp_field_decl_new(name_candidate, full_type, f_size as usize, f_align as usize, class_access));
 
                         while scan_cursor < total_len && source.byte_at(scan_cursor as i64) != 59 {
                             scan_cursor = scan_cursor + 1;
@@ -536,7 +536,7 @@ pub fn cpp_parse_translation_unit(
         cursor = cursor + 1;
     }
 
-    var d_i: usize = 0;
+    var d_i: i64 = 0;
     while d_i < tu.diags.len() {
         diags.push(tu.diags[d_i]);
         d_i = d_i + 1;

@@ -233,7 +233,7 @@ pub fn compute_struct_layout(
     // 1. Add Tier-1 Explicit Primary Struct Fields
     var cur_offset: usize = 0;
     var max_align: usize = 1;
-    var max_lattice: u8 = if plan.explicit_dtor { 2 } else { 0 };
+    var max_lattice: u8 = (if plan.explicit_dtor { 2 } else { 0 }) as u8;
 
     let n_prim = primary_fields.len();
     var pfi = 0;

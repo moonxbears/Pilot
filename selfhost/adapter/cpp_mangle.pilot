@@ -245,7 +245,7 @@ pub pure fn mangle_itanium(
             out = out + "K";
         }
 
-        var i: usize = 0;
+        var i: i64 = 0;
         while i < ns_path.len() {
             let part = ns_path[i];
             if i == 0 && part == "std" {
@@ -283,7 +283,7 @@ pub pure fn mangle_itanium(
     if param_types.len() == 0 {
         out = out + "v";
     } else {
-        var p: usize = 0;
+        var p: i64 = 0;
         while p < param_types.len() {
             out = out + itanium_mangle_type(param_types[p]);
             p = p + 1;
@@ -351,7 +351,7 @@ pub pure fn mangle_msvc_x64(
 
     // Scopes in reverse order
     if ns_path.len() > 0 {
-        var i: usize = ns_path.len();
+        var i: i64 = ns_path.len();
         while i > 0 {
             i = i - 1;
             out = out + ns_path[i] + "@";
@@ -381,7 +381,7 @@ pub pure fn mangle_msvc_x64(
     if param_types.len() == 0 {
         out = out + "XZ";
     } else {
-        var p: usize = 0;
+        var p: i64 = 0;
         while p < param_types.len() {
             out = out + msvc_mangle_type(param_types[p]);
             p = p + 1;
@@ -414,7 +414,7 @@ pub pure fn demangle_itanium(mangled: str) -> str {
         return mangled;
     }
 
-    var cursor: usize = 2;
+    var cursor: i64 = 2;
     var is_const = false;
     var is_nested = false;
 
@@ -453,9 +453,9 @@ pub pure fn demangle_itanium(mangled: str) -> str {
             }
             // Check digits
             if b >= 48 && b <= 57 {
-                var len_val: usize = 0;
+                var len_val: i64 = 0;
                 while cursor < mangled.len() && mangled.byte_at(cursor as i64) >= 48 && mangled.byte_at(cursor as i64) <= 57 {
-                    len_val = len_val * 10 + (mangled.byte_at(cursor as i64) - 48) as usize;
+                    len_val = len_val * 10 + (mangled.byte_at(cursor as i64) - 48) as i64;
                     cursor = cursor + 1;
                 }
                 let part_name = mangled.slice(cursor, cursor + len_val);
@@ -479,9 +479,9 @@ pub pure fn demangle_itanium(mangled: str) -> str {
         }
     } else {
         // Non-nested _Z<len><name>
-        var len_val: usize = 0;
+        var len_val: i64 = 0;
         while cursor < mangled.len() && mangled.byte_at(cursor as i64) >= 48 && mangled.byte_at(cursor as i64) <= 57 {
-            len_val = len_val * 10 + (mangled.byte_at(cursor as i64) - 48) as usize;
+            len_val = len_val * 10 + (mangled.byte_at(cursor as i64) - 48) as i64;
             cursor = cursor + 1;
         }
         let fn_name = mangled.slice(cursor, cursor + len_val);
@@ -491,7 +491,7 @@ pub pure fn demangle_itanium(mangled: str) -> str {
 
     // Assemble path
     var full_name = "";
-    var p_idx: usize = 0;
+    var p_idx: i64 = 0;
     while p_idx < parts.len() {
         if p_idx > 0 { full_name = full_name + "::"; }
         full_name = full_name + parts[p_idx];
@@ -503,7 +503,7 @@ pub pure fn demangle_itanium(mangled: str) -> str {
     let rem = mangled.slice(cursor, mangled.len());
     if rem != "v" && rem != "" {
         var param_list: List<str> = [];
-        var r_idx: usize = 0;
+        var r_idx: i64 = 0;
         while r_idx < rem.len() {
             let ch = rem.slice(r_idx, r_idx + 1);
             let ty_name = demangle_itanium_type_code(ch);
@@ -511,7 +511,7 @@ pub pure fn demangle_itanium(mangled: str) -> str {
             r_idx = r_idx + 1;
         }
         var p_out = "(";
-        var q: usize = 0;
+        var q: i64 = 0;
         while q < param_list.len() {
             if q > 0 { p_out = p_out + ", "; }
             p_out = p_out + param_list[q];
@@ -532,7 +532,7 @@ pub pure fn demangle_msvc_x64(mangled: str) -> str {
         return mangled;
     }
 
-    var cursor: usize = 1;
+    var cursor: i64 = 1;
     var fn_name = "";
 
     if mangled.slice(cursor, cursor + 2) == "?0" {
@@ -544,8 +544,8 @@ pub pure fn demangle_msvc_x64(mangled: str) -> str {
     } else {
         let first_at = mangled.find("@");
         if first_at >= 1 {
-            fn_name = mangled.slice(cursor, first_at as usize);
-            cursor = (first_at + 1) as usize;
+            fn_name = mangled.slice(cursor, first_at);
+            cursor = (first_at + 1) as i64;
         }
     }
 
@@ -558,15 +558,15 @@ pub pure fn demangle_msvc_x64(mangled: str) -> str {
         }
         let next_at = mangled.slice(cursor, mangled.len()).find("@");
         if next_at < 0 { break; }
-        let sc = mangled.slice(cursor, cursor + next_at as usize);
+        let sc = mangled.slice(cursor, cursor + next_at);
         scopes.push(sc);
-        cursor = cursor + (next_at as usize) + 1;
+        cursor = cursor + (next_at as i64) + 1;
     }
 
     // Reverse scopes
     var rev_scopes: List<str> = [];
     if scopes.len() > 0 {
-        var s: usize = scopes.len();
+        var s: i64 = scopes.len() as i64;
         while s > 0 {
             s = s - 1;
             rev_scopes.push(scopes[s]);
@@ -581,7 +581,7 @@ pub pure fn demangle_msvc_x64(mangled: str) -> str {
     }
 
     var full = "";
-    var k: usize = 0;
+    var k: i64 = 0;
     while k < rev_scopes.len() {
         full = full + rev_scopes[k] + "::";
         k = k + 1;

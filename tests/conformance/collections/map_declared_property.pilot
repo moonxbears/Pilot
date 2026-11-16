@@ -4,13 +4,15 @@
 // `null` and `m.clear()` stopped with "no method `clear`".
 //
 // Worked by hand: three keys set -> count 3; one removed -> 2; clear -> 0,
-// and a cleared map has none of its old keys.
+// and a cleared map has none of its old keys. `count` is an i64 (PROP-005
+// 5B.2, 2026-11-16), so it binds to one without a cast.
 fn main() {
     let m = Map<str, i64>();
     m.set("x", 1);
     m.set("y", 2);
     m.set("z", 3);
-    print(m.count);
+    let three: i64 = m.count;
+    print(three);
     let _ = m.remove("y");
     print(m.count);
     m.clear();

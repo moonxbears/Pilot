@@ -278,7 +278,7 @@ pub fn opcode_of(name: str) -> u16 {
     let names = opcode_names();
     var i = 1;
     while i < names.len {
-        if names[i] == name { return i; }
+        if names[i] == name { return ir_u16(i, "opcode"); }
         i = i + 1;
     }
     return 0;
@@ -453,7 +453,7 @@ pub fn ir_add_block(var ref f: IrFunction) -> u32 {
 /// A new value of physics `phy` in `f`.
 pub fn ir_new_value(var ref f: IrFunction, phy: IrTypePhysics) -> u32 {
     f.value_physics.push(phy);
-    return f.value_physics.len - 1;
+    return ir_operand(f.value_physics.len - 1);
 }
 
 /// Adds a parameter of physics `phy` to block `b` of `f`.
@@ -465,12 +465,33 @@ pub fn ir_add_param(var ref f: IrFunction, b: u32, phy: IrTypePhysics) -> u32 {
 
 /// Appends an instruction to block `b`; returns its result (a new value of
 /// physics `phy`, or `ir_no_value()` when `produces` is false).
-pub fn ir_emit(var ref f: IrFunction, b: u32, op: u16, sub: u16, phy: IrTypePhysics, ref args: List<u32>, produces: bool, span: i64) -> u32 {
+/// `v` as the 16-bit field `what` of the IR. A value that does not fit stops
+/// the compiler here instead of wrapping into another value.
+pub fn ir_u16(v: i64, what: str) -> u16 {
+    if v < 0 || v > 65535 { fault(f"PilIR: {what} {v} does not fit 16 bits"); }
+    return v as u16;
+}
+
+/// `v` as the 32-bit field `what` of the IR, checked like `ir_u16`.
+pub fn ir_u32(v: i64, what: str) -> u32 {
+    if v < 0 || v > 4294967295 { fault(f"PilIR: {what} {v} does not fit 32 bits"); }
+    return v as u32;
+}
+
+/// `v` as an instruction's sub-code (`IrInst.subop`): a predicate, or the
+/// index of a function, global, field or intrinsic.
+pub fn ir_sub(v: i64) -> u16 => ir_u16(v, "sub-code");
+
+/// `v` as a 32-bit operand: a value or block number, or the index of a
+/// pooled constant.
+pub fn ir_operand(v: i64) -> u32 => ir_u32(v, "operand");
+
+pub fn ir_emit(var ref f: IrFunction, b: u32, op: u16, sub: i64, phy: IrTypePhysics, ref args: List<u32>, produces: bool, span: i64) -> u32 {
     let result = if produces { ir_new_value(f, phy) } else { ir_no_value() };
     let offset = f.operand_pool.len;
     for a in args { f.operand_pool.push(a); }
     f.spans.push(span);
-    f.blocks[b].insts.push(ir_inst_new(result, op, sub, phy, offset, args.len, f.spans.len - 1));
+    f.blocks[b].insts.push(ir_inst_new(result, op, ir_sub(sub), phy, offset, args.len, ir_operand(f.spans.len - 1)));
     return result;
 }
 

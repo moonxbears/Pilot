@@ -249,6 +249,18 @@ fn number(var ref r: Reader, w: str, prefix: str) -> i64 {
     return fail(r, f"`{w}` is not a number");
 }
 
+/// `number` for an IR field of at most `max`: a value that does not fit is
+/// an error, not wrapped.
+fn number_max(var ref r: Reader, w: str, prefix: str, max: i64) -> i64 {
+    let v = number(r, w, prefix);
+    if v < 0 || v > max { return fail(r, f"`{w}` does not fit its {max}-at-most field"); }
+    return v;
+}
+
+fn number_u32(var ref r: Reader, w: str, prefix: str) -> u32 => number_max(r, w, prefix, 4294967295) as u32;
+fn number_u16(var ref r: Reader, w: str, prefix: str) -> u16 => number_max(r, w, prefix, 65535) as u16;
+fn number_u8(var ref r: Reader, w: str, prefix: str) -> u8 => number_max(r, w, prefix, 255) as u8;
+
 fn layout_physics(var ref r: Reader, id: i64) -> IrTypePhysics {
     if id < 0 || id >= r.m.layouts.len {
         let _ = fail(r, f"layout {id} is not declared");
@@ -263,7 +275,8 @@ fn reg_class_from(var ref r: Reader, name: str) -> u8 {
         if reg_class_name(c) == name { return c; }
         c = c + 1;
     }
-    return fail(r, f"unknown register class `{name}`");
+    let _ = fail(r, f"unknown register class `{name}`");
+    return 0;
 }
 
 fn parse_header(var ref r: Reader, ref w: List<str>) {
@@ -272,7 +285,7 @@ fn parse_header(var ref r: Reader, ref w: List<str>) {
         let id = number(r, w[1], "");
         r.m.layouts.push(IrLayout {
             name: unquote(w[2]),
-            physics: ir_physics_new(id, reg_class_from(r, w[3]), number(r, w[4], ""), number(r, w[5], ""), number(r, w[6], "")),
+            physics: ir_physics_new(number_u32(r, w[1], ""), reg_class_from(r, w[3]), number_u16(r, w[4], ""), number_u8(r, w[5], ""), number_u8(r, w[6], "")),
             packed: w.len() == 8,
         });
     } else if tag == "int" && w.len() == 3 {
@@ -312,11 +325,11 @@ fn parse_header(var ref r: Reader, ref w: List<str>) {
 /// Parses `b<id>(v.., ..)` starting at word `at`; returns the operands
 /// `[id, args..]` and the index of the word after `)`.
 fn parse_target(var ref r: Reader, ref w: List<str>, at: i64, var ref out: List<u32>, with_count: bool) -> i64 {
-    out.push(number(r, w[at], "b"));
+    out.push(number_u32(r, w[at], "b"));
     var i = at + 2;
     var args: List<u32> = [];
     while i < w.len() && w[i] != ")" {
-        if w[i] != "," { args.push(number(r, w[i], "v")); }
+        if w[i] != "," { args.push(number_u32(r, w[i], "v")); }
         i = i + 1;
     }
     if with_count { out.push(args.len()); }
@@ -329,13 +342,13 @@ fn parse_inst(var ref r: Reader, var ref f: IrFunction, b: u32, ref w: List<str>
     var i = 0;
     var result = ir_no_value();
     if w.len() > 1 && w[1] == "=" {
-        result = number(r, w[0], "v");
+        result = number_u32(r, w[0], "v");
         i = 2;
     }
     let head = w[i];
     let dot = head.find(".", 0);
     let name = if dot > 0 { head.slice(0, dot) } else { head };
-    let sub = if dot > 0 { number(r, head.slice(dot + 1, head.len()), "") } else { 0 };
+    let sub = if dot > 0 { number_u16(r, head.slice(dot + 1, head.len()), "") } else { 0 };
     let op = opcode_of(name);
     if op == 0 { let _ = fail(r, f"unknown opcode `{name}`"); return; }
     i = i + 1;
@@ -343,18 +356,18 @@ fn parse_inst(var ref r: Reader, var ref f: IrFunction, b: u32, ref w: List<str>
     if op == op_jump() {
         i = parse_target(r, w, i, args, false);
     } else if op == op_cond_br() {
-        args.push(number(r, w[i], "v"));
+        args.push(number_u32(r, w[i], "v"));
         i = parse_target(r, w, i + 2, args, true);
         i = parse_target(r, w, i + 1, args, true);
     } else if op == op_switch_table() {
-        args.push(number(r, w[i], "v"));
+        args.push(number_u32(r, w[i], "v"));
         i = parse_target(r, w, i + 2, args, false);
         while i < w.len() && w[i] == "," { i = parse_target(r, w, i + 1, args, false); }
     } else {
         while i < w.len() && w[i] != ":" {
             if w[i] != "," {
                 let prefix = if w[i].starts_with("#") { "#" } else { "v" };
-                args.push(number(r, w[i], prefix));
+                args.push(number_u32(r, w[i], prefix));
             }
             i = i + 1;
         }
@@ -402,7 +415,7 @@ fn parse_function(var ref r: Reader, ref w: List<str>) {
             var i = 2;
             while i < lw.len() && lw[i] != ")" {
                 if lw[i] != "," {
-                    let v = number(r, lw[i], "v");
+                    let v = number_u32(r, lw[i], "v");
                     set_value_physics(f, v, layout_physics(r, number(r, lw[i + 2], "")));
                     f.blocks[b].params.push(v);
                     i = i + 2;

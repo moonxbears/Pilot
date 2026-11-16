@@ -148,11 +148,11 @@ pub fn check_legacy_import_migration(pkg_path: str) -> MigrationMatch {
     // Strip trailing ".*" or ";"
     if str_contains(raw, ".*") {
         let idx = raw.find(".*");
-        if idx >= 0 { raw = raw.slice(0, idx as usize); }
+        if idx >= 0 { raw = raw.slice(0, idx); }
     }
     if str_contains(raw, ";") {
         let idx = raw.find(";");
-        if idx >= 0 { raw = raw.slice(0, idx as usize); }
+        if idx >= 0 { raw = raw.slice(0, idx); }
     }
 
     if raw == "unittest"         { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.test" }; }
@@ -182,7 +182,7 @@ pub fn check_legacy_import_migration(pkg_path: str) -> MigrationMatch {
 pub fn scan_and_migrate_ring_imports(src: str, file_id: u32) -> List<Diagnostic> {
     var diags: List<Diagnostic> = [];
     let n = src.len();
-    var p: usize = 0;
+    var p: i64 = 0;
 
     while p < n {
         // Look for "use " statements

@@ -266,7 +266,7 @@ fn close_region(var ref lw: Lowerer) -> i64 {
 fn lower_handler(var ref lw: Lowerer, clause: i64, block: u32, caught_type: i64, hint: i64) -> u32 {
     switch_to(lw, block);
     if lw.binding_of.has(key(clause)) {
-        let b = key(lw.binding_of.get(key(clause)));
+        let b = key(lw.binding_of[key(clause)]);
         lw.values.set(b, lw.f.blocks[block].params[0]);
         if !ty_is_unknown(lw.inf.p.tt, caught_type) { lw.known_types.set(b, caught_type); }
     }
@@ -379,7 +379,7 @@ fn some_test(var ref lw: Lowerer, operand: i64, n: i64) -> u32 {
     if !binds { return ok; }
     let target = lhs(s, operand);
     if !lw.binding_of.has(key(target)) { return unsupported(lw, n); }
-    let bi = lw.binding_of.get(key(target));
+    let bi = lw.binding_of[key(target)];
     let phy = layout_of(lw.ls, binding_type(lw.inf, bi));
     let slot = emit(lw, op_stack_slot(), 0, phy, [], n);
     let store = ir_add_block(lw.f);

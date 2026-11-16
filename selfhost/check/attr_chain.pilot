@@ -132,20 +132,14 @@ fn step_weight(ref p: Program, var ref sink: DiagSink, k: StepKind, name: str, r
         if here >= 0 { w = here; }
     }
     if w >= 0 {
-        let given = int_node(s, w);
-        if given == none {
-            sink_error(sink, w, "ATTR003", f"the `weight` of `[{name}]` must be an integer");
-            return 0;
-        }
-        let v: i64 = given;
-        return v;
+        if some v = int_node(s, w) { return v; }
+        sink_error(sink, w, "ATTR003", f"the `weight` of `[{name}]` must be an integer");
+        return 0;
     }
     if !is_user_step(k) { return 0; }
     for f in struct_fields(s, step_attr_decl(p, name)) {
         if node_name(s, f) == weight_label() {
-            let v = int_node(s, field_default(s, f));
-            if v != none {
-                let n: i64 = v;
+            if some n = int_node(s, field_default(s, f)) {
                 return n;
             }
         }

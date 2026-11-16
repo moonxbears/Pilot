@@ -17,23 +17,23 @@ pub fn cli_list_new() -> Map<any, any> {
     return m;
 }
 
-pub fn cli_list_len(ref list: Map<any, any>) -> usize {
+pub fn cli_list_len(ref list: Map<any, any>) -> i64 {
     return list.get("count") ?? 0;
 }
 
-pub fn cli_list_push(ref list: Map<any, any>, item: any) -> usize {
+pub fn cli_list_push(ref list: Map<any, any>, item: any) -> i64 {
     let idx = cli_list_len(list);
     list.set(idx, item);
     list.set("count", idx + 1);
     return idx + 1;
 }
 
-pub fn cli_list_get(ref list: Map<any, any>, idx: usize) -> any {
+pub fn cli_list_get(ref list: Map<any, any>, idx: i64) -> any {
     return list.get(idx);
 }
 
-pub fn cli_list_get_str(ref list: Map<any, any>, idx: usize) -> str {
-    return list.get(idx);
+pub fn cli_list_get_str(ref list: Map<any, any>, idx: i64) -> str {
+    return list[idx];
 }
 
 pub fn cli_map_new() -> Map<any, any> {
@@ -205,11 +205,11 @@ pub struct CommandRegistry : IObject {
     ~self() {
     }
 
-    pub pure fn count() -> usize {
+    pub pure fn count() -> i64 {
         return cli_list_len(.commands);
     }
 
-    pub pure fn get(idx: usize) -> CommandSpec {
+    pub pure fn get(idx: i64) -> CommandSpec {
         return cli_list_get(.commands, idx);
     }
 
@@ -227,11 +227,11 @@ pub struct CommandRegistry : IObject {
     }
 }
 
-pub pure fn spec_registry_count(reg: ref<CommandRegistry>) -> usize {
+pub pure fn spec_registry_count(reg: ref<CommandRegistry>) -> i64 {
     return cli_list_len(reg.commands);
 }
 
-pub pure fn spec_registry_get(reg: ref<CommandRegistry>, idx: usize) -> CommandSpec {
+pub pure fn spec_registry_get(reg: ref<CommandRegistry>, idx: i64) -> CommandSpec {
     return cli_list_get(reg.commands, idx);
 }
 
@@ -308,7 +308,7 @@ pub fn spec_registry_new() -> CommandRegistry {
     };
 }
 
-pub fn spec_registry_register(reg: ref<CommandRegistry>, spec: CommandSpec) -> usize {
+pub fn spec_registry_register(reg: ref<CommandRegistry>, spec: CommandSpec) -> i64 {
     let idx = cli_list_len(reg.commands);
     let _ = cli_list_push(reg.commands, spec);
     let _ = cli_map_set(reg.name_to_index, spec.name, idx as i64);
@@ -316,7 +316,7 @@ pub fn spec_registry_register(reg: ref<CommandRegistry>, spec: CommandSpec) -> u
     // Register aliases if any
     let al = spec.aliases_csv;
     if al.len() > 0 {
-        var start: usize = 0;
+        var start: i64 = 0;
         let l = al.len();
         while start < l {
             var end = start;

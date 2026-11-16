@@ -61,10 +61,10 @@ fn target_value(var ref lw: Lowerer, n: i64) -> u32 {
     if kind(s, n) == nk_assign() {
         v = lower_expr(lw, lhs(s, n));
     } else if lw.binding_of.has(key(n)) {
-        let b = lw.binding_of.get(key(n));
+        let b = lw.binding_of[key(n)];
         let k = key(b);
-        if lw.values.has(k) { v = lw.values.get(k); }
-        else if lw.slots.has(k) { v = emit(lw, op_load(), 0, layout_of(lw.ls, binding_type(lw.inf, b)), [lw.slots.get(k)], n); }
+        if lw.values.has(k) { v = lw.values[k]; }
+        else if lw.slots.has(k) { v = emit(lw, op_load(), 0, layout_of(lw.ls, binding_type(lw.inf, b)), [lw.slots[k]], n); }
     }
     lw.plan.at = saved;
     return v;
@@ -95,7 +95,7 @@ pub fn probe_before(var ref lw: Lowerer, n: i64) -> u32 {
                 emit_trap(lw, "internal error: the probe plan defers a call outside any block", n);
                 ensure_open(lw);
             } else {
-                var later: List<any> = lw.probes.get(deferred_key());
+                var later: List<any> = lw.probes[deferred_key()];
                 later.push([row, n]);
                 lw.probes.set(deferred_key(), later);
                 lw.defers[lw.defers.len() - 1].push(0 - later.len());
@@ -119,7 +119,7 @@ pub fn probe_after(var ref lw: Lowerer, n: i64, captured: u32) {
 
 /// A deferred probe call, `marker` the `-(index + 1)` its scope holds.
 pub fn run_deferred_probe(var ref lw: Lowerer, marker: i64) {
-    let later: List<any> = lw.probes.get(deferred_key());
+    let later: List<any> = lw.probes[deferred_key()];
     let entry: List<any> = later[0 - marker - 1];
     let row: List<any> = entry[0];
     let n: i64 = entry[1];
@@ -130,11 +130,11 @@ pub fn run_deferred_probe(var ref lw: Lowerer, marker: i64) {
 /// when it has no value.
 fn binding_text(var ref lw: Lowerer, node: i64, n: i64) -> u32 {
     // A parameter's value is held under its binding.
-    let b = if lw.binding_of.has(key(node)) { lw.binding_of.get(key(node)) } else { node };
+    let b = if lw.binding_of.has(key(node)) { lw.binding_of[key(node)] } else { node };
     let k = key(b);
     var v = ir_no_value();
-    if lw.values.has(k) { v = lw.values.get(k); }
-    else if lw.slots.has(k) { v = emit(lw, op_load(), 0, layout_of(lw.ls, binding_type(lw.inf, b)), [lw.slots.get(k)], n); }
+    if lw.values.has(k) { v = lw.values[k]; }
+    else if lw.slots.has(k) { v = emit(lw, op_load(), 0, layout_of(lw.ls, binding_type(lw.inf, b)), [lw.slots[k]], n); }
     if v == ir_no_value() { return text_const(lw, "", n); }
     return emit(lw, op_add(), 0, text_physics(lw), [text_const(lw, "", n), v], n);
 }

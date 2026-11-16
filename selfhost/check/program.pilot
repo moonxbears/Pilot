@@ -33,7 +33,7 @@ pub pure fn scalar_slot() -> str => "char_t";
 pub fn scalar_code(text: str) -> i64 {
     let n = text.len();
     if n == 0 || n > 4 { return -1; }
-    let b0: i64 = text.byte_at(0);
+    let b0 = text.byte_at(0) as i64;
     if b0 < 128 { return if n == 1 { b0 } else { -1 }; }
     var need = 0;
     var code = 0;
@@ -43,7 +43,7 @@ pub fn scalar_code(text: str) -> i64 {
     if need == 0 || n != need { return -1; }
     var i = 1;
     while i < n {
-        let b: i64 = text.byte_at(i);
+        let b = text.byte_at(i) as i64;
         if b < 128 || b >= 192 { return -1; }
         code = code * 64 + (b - 128);
         i = i + 1;
@@ -72,7 +72,7 @@ pub fn nl_new() -> NodeLists => NodeLists { index: Map<str, i64>(), lists: [] };
 pub fn nl_add(var ref m: NodeLists, key: str, v: i64) {
     if !m.index.has(key) {
         let fresh: List<i64> = [];
-        m.index.set(key, m.lists.len());
+        m.index.set(key, m.lists.len() as i64);
         m.lists.push(fresh);
     }
     let l: List<i64> = m.lists[m.index.get(key)];
@@ -297,7 +297,7 @@ pub fn prog_tparam_defaults(ref p: Program, name: str) -> List<i64> {
 /// or the unknown type when no declaration takes that slot.
 pub fn prog_slot_type(var ref p: Program, slot: str) -> i64 {
     if !p.slots.has(slot) { return ty_unknown(); }
-    let name = node_name(p.s, p.slots.get(slot));
+    let name = node_name(p.s, p.slots[slot]);
     let no_args: List<i64> = [];
     return ty_named(p.tt, prog_type_decl(p, name), name, no_args);
 }
@@ -333,7 +333,7 @@ pub fn prog_is_zero_width(ref p: Program, t: i64) -> bool {
 /// Whether `t` is the bottom type.
 pub fn prog_is_never(ref p: Program, t: i64) -> bool {
     return t > 0 && ty_is_named(p.tt, t) && p.slots.has(never_slot())
-        && node_name(p.s, ty_decl(p.tt, t)) == node_name(p.s, p.slots.get(never_slot()));
+        && node_name(p.s, ty_decl(p.tt, t)) == node_name(p.s, p.slots[never_slot()]);
 }
 
 /// The generic parameter `name` visible at node `at`, as a type, or the
@@ -363,7 +363,7 @@ pub fn prog_type_name_known(var ref p: Program, n: i64) -> bool {
 /// (`fn_t` -> the function type's name), found through the `[Lang(..)]`
 /// arguments that index that table; "" when there is none.
 pub fn prog_slot_name(var ref p: Program, slot: str) -> str {
-    if p.slot_names.has(slot) { return p.slot_names.get(slot); }
+    if p.slot_names.has(slot) { return p.slot_names[slot]; }
     let name = find_slot_name(p, slot);
     p.slot_names.set(slot, name);
     return name;
@@ -535,7 +535,7 @@ fn map_entry(var ref p: Program, m: i64, name: str) -> i64 {
             if !entries.has(entry) { entries.set(entry, ch[i + 1]); }
             i = i + 2;
         }
-        p.entry_index.set(at, p.entry_maps.len());
+        p.entry_index.set(at, p.entry_maps.len() as i64);
         p.entry_maps.push(entries);
     }
     let entries = p.entry_maps[p.entry_index.get(at)];

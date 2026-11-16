@@ -130,22 +130,22 @@ pub fn utf8_width(b: i64) -> i64 {
 
 /// The code point of the UTF-8 sequence starting at byte `i` of `s`.
 pub fn code_point_at(s: str, i: i64) -> i64 {
-    let b0 = s.byte_at(i as usize) as i64;
+    let b0 = s.byte_at(i) as i64;
     let w = utf8_width(b0);
     let n = s.len() as i64;
     if w == 1 || i + w > n { return b0; }
-    let b1 = (s.byte_at((i + 1) as usize) as i64) & 63;
+    let b1 = (s.byte_at((i + 1)) as i64) & 63;
     if w == 2 { return ((b0 & 31) << 6) | b1; }
-    let b2 = (s.byte_at((i + 2) as usize) as i64) & 63;
+    let b2 = (s.byte_at((i + 2)) as i64) & 63;
     if w == 3 { return ((b0 & 15) << 12) | (b1 << 6) | b2; }
-    let b3 = (s.byte_at((i + 3) as usize) as i64) & 63;
+    let b3 = (s.byte_at((i + 3)) as i64) & 63;
     return ((b0 & 7) << 18) | (b1 << 12) | (b2 << 6) | b3;
 }
 
 /// The code point that ends just before byte `i` of `s`.
 pub fn code_point_before(s: str, i: i64) -> i64 {
     var j = i - 1;
-    while j > 0 && ((s.byte_at(j as usize) as i64) & 192) == 128 { j = j - 1; }
+    while j > 0 && ((s.byte_at(j) as i64) & 192) == 128 { j = j - 1; }
     return code_point_at(s, j);
 }
 
@@ -411,12 +411,12 @@ struct RegexParser : IObject {
 
     pub fn peek(ref self) -> i64 {
         if self.pos >= self.n { return -1; }
-        return self.src.byte_at(self.pos as usize) as i64;
+        return self.src.byte_at(self.pos) as i64;
     }
 
     pub fn peek_at(ref self, i: i64) -> i64 {
         if i >= self.n { return -1; }
-        return self.src.byte_at(i as usize) as i64;
+        return self.src.byte_at(i) as i64;
     }
 
     /// In verbose mode, skips white space and `#` comments.
@@ -689,7 +689,7 @@ struct RegexParser : IObject {
                 if self.pos >= self.n || self.pos == name_start {
                     return self.fail(RegexErrorKind::BadGroupRef, name_start, "missing group name");
                 }
-                let name = self.src.slice(name_start as usize, self.pos as usize);
+                let name = self.src.slice(name_start, self.pos);
                 self.pos = self.pos + 1;
                 self.groups = self.groups + 1;
                 group = self.groups;

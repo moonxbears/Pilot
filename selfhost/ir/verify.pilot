@@ -287,7 +287,7 @@ pub fn verify_ir_function(var ref f: IrFunction) -> List<IrIssue> {
                     issue(out, "IR001", f, f"b{b.id} uses v{v}, which is never defined");
                 } else if def_block[v] == b.id {
                     if def_pos[v] >= i { issue(out, "IR001", f, f"b{b.id} uses v{v} before it is defined"); }
-                } else if !reachable[def_block[v]] || !dom_holds(dom, def_block[v], b.id) {
+                } else if !reachable[def_block[v]] || !dom_holds(dom, ir_operand(def_block[v]), b.id) {
                     issue(out, "IR001", f, f"v{v} is defined in b{def_block[v]}, which does not dominate its use in b{b.id}");
                 }
             }

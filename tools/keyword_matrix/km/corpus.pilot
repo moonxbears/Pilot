@@ -73,15 +73,15 @@ pub fn build_corpus(paths: List<str>) -> Corpus {
 /// The file name without folders or extension; `lib`, `mod` and `main`
 /// name no concept, so they come back empty.
 fn base_name(path: str) -> str {
-    var start: usize = 0;
-    var i: usize = 0;
+    var start: i64 = 0;
+    var i: i64 = 0;
     while i < path.len() {
         if path.byte_at(i) == 47 { start = i + 1; }
         i = i + 1;
     }
     var name = path.slice(start, path.len());
     let dot = name.find(".", 0);
-    if dot >= 0 { name = name.slice(0, dot as usize); }
+    if dot >= 0 { name = name.slice(0, dot); }
     if name == "lib" || name == "mod" || name == "main" { return ""; }
     return name;
 }
@@ -101,7 +101,7 @@ fn index_part(var ref by_part: Map<str, List<i64>>, name: str, id: i64) {
 /// calls, and the node kinds it names (`NodeKind::X`, `nk_x()`).
 fn index_tokens(var ref c: Corpus, line: str, id: i64, var ref line_kinds: Map<i64, List<str>>) {
     let n = line.len();
-    var i: usize = 0;
+    var i: i64 = 0;
     var prev = "";
     while i < n {
         // The identifier test (`is_ident_byte`) is written out in this
@@ -176,7 +176,7 @@ fn add_functions(var ref c: Corpus, first: i64, end: i64) {
             i = i + 1;
             continue;
         }
-        var p = (at as usize) + 2;
+        var p = (at as i64) + 2;
         while p < line.len() && (line.byte_at(p) == 32 || line.byte_at(p) == 9) {
             p = p + 1;
         }
@@ -184,13 +184,13 @@ fn add_functions(var ref c: Corpus, first: i64, end: i64) {
         while p < line.len() && (is_ident_byte(line.byte_at(p)) || line.byte_at(p) == 46) {
             p = p + 1;
         }
-        if p == name_start || p == (at as usize) + 2 {
+        if p == name_start || p == (at as i64) + 2 {
             i = i + 1;
             continue;
         }
         var name = line.slice(name_start, p);
         let dot = last_dot(name);
-        if dot >= 0 { name = name.slice((dot + 1) as usize, name.len()); }
+        if dot >= 0 { name = name.slice((dot + 1), name.len()); }
         let last = body_end(c, i, p, end);
         if last >= 0 { add_function(c, name, i, last); }
         i = i + 1;
@@ -199,7 +199,7 @@ fn add_functions(var ref c: Corpus, first: i64, end: i64) {
 
 fn last_dot(s: str) -> i64 {
     var at = -1;
-    var i: usize = 0;
+    var i: i64 = 0;
     while i < s.len() {
         if s.byte_at(i) == 46 { at = i as i64; }
         i = i + 1;
@@ -209,7 +209,7 @@ fn last_dot(s: str) -> i64 {
 
 /// The last line of the body of the function declared on line `i` (its
 /// name ends at byte `from`), or -1 for a declaration without a body.
-fn body_end(ref c: Corpus, i: i64, from: usize, end: i64) -> i64 {
+fn body_end(ref c: Corpus, i: i64, from: i64, end: i64) -> i64 {
     var depth = 0;
     var started = false;
     var j = i;

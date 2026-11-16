@@ -376,8 +376,20 @@ static inline pilot_val pilot_host_op(
         for (size_t i = 0; i < argc; i++) argv[i + 1] = pilot_bridge_cstr((int64_t)av[i * 2], (int64_t)av[i * 2 + 1]);
         char *cwd = sp[7] > 0 ? pilot_bridge_cstr((int64_t)sp[6], (int64_t)sp[7]) : NULL;
         int64_t in_fd = (int64_t)sp[8], out_fd = (int64_t)sp[9], err_fd = (int64_t)sp[10];
+        /* envp: `KEY=value` slices; env_mode 0 adds them to the inherited
+           environment, 1 starts from an empty one, 2 passes an empty one. */
+        size_t envc = (size_t)sp[5];
+        const uint64_t *ev = (const uint64_t *)(uintptr_t)sp[4];
+        uint64_t env_mode = sp[11];
+        char **envs = (char **)calloc(envc + 1, sizeof(char *));
+        for (size_t i = 0; ev && i < envc; i++) envs[i] = pilot_bridge_cstr((int64_t)ev[i * 2], (int64_t)ev[i * 2 + 1]);
         pid_t pid = fork();
         if (pid == 0) {
+            if (env_mode == 1 || env_mode == 2) { extern char **environ; static char *none[1] = { NULL }; environ = none; }
+            for (size_t i = 0; env_mode != 2 && ev && i < envc; i++) {
+                char *eq = envs[i] ? strchr(envs[i], '=') : NULL;
+                if (eq) { *eq = 0; setenv(envs[i], eq + 1, 1); }
+            }
             if (cwd && chdir(cwd) != 0) _exit(127);
             if (in_fd >= 0) dup2((int)in_fd, STDIN_FILENO);
             if (out_fd >= 0) dup2((int)out_fd, STDOUT_FILENO);
@@ -388,6 +400,8 @@ static inline pilot_val pilot_host_op(
         free(prog); free(cwd);
         for (size_t i = 0; i <= argc; i++) free(argv[i]);
         free(argv);
+        for (size_t i = 0; i < envc; i++) free(envs[i]);
+        free(envs);
         if (pid < 0) return pilot_v_int(pilot_errno_map(errno));
         if (a1 != 0) *(int64_t *)(uintptr_t)a1 = (int64_t)pid;
         return pilot_v_int((int64_t)pid);

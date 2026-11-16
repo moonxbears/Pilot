@@ -133,7 +133,7 @@ pub fn match_record(var ref lw: Lowerer, pat: i64, v: u32, t: i64, fail: u32) ->
 /// the global of a top-level destructuring `let`.
 pub fn bind_name(var ref lw: Lowerer, pat: i64, v: u32, t: i64) -> bool {
     if lw.binding_of.has(key(pat)) {
-        let b = lw.binding_of.get(key(pat));
+        let b = lw.binding_of[key(pat)];
         lw.values.set(key(b), v);
         if !ty_is_unknown(lw.inf.p.tt, t) { lw.known_types.set(key(b), t); }
         return true;
