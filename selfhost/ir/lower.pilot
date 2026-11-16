@@ -782,16 +782,6 @@ pub pure fn op_pipe() -> i64 => 21;
 pub pure fn op_pipe_back() -> i64 => 31;
 pub pure fn op_as() -> i64 => 32;
 
-/// The spelling of each `BinaryOp` code, from 1 (crates/pilot-ast
-/// `BinaryOp::symbol`); an operator a program binds to a function
-/// (`bind_operator_fn`) is found by it.
-pub fn binary_op_symbols() -> List<str> => [
-    "", "+", "-", "*", "/", "//", "%", "**", "==", "!=", "<", "<=", ">", ">=", "and", "or",
-    "&", "|", "^", "<<", ">>", "|>", "??", "..=", "..", "is", ":=", "<-", "union", "intersect",
-    "except", "<|", "as", "as view", "<=>", "+|", "-|", "*|", "+%", "-%", "*%", "+?", "-?", "*?",
-    "%%", "~>", ">..<", ">..", ":=:", ":",
-];
-
 /// `x |> f` / `f <| x` is `f(x)`; `x |> f(y)` is `f(x, y)`.
 pub fn lower_pipe(var ref lw: Lowerer, n: i64, value: i64, target: i64) -> u32 {
     let s = lw.inf.p.s;
@@ -849,6 +839,10 @@ pub fn lower_binary(var ref lw: Lowerer, n: i64) -> u32 {
             let f_val = emit(lw, op_const_bits(), 0, truth, [pool_int(lw, 0)], n);
             return emit(lw, op_cmp(), 0, truth, [eq, f_val], n);
         }
+    }
+    // A range value (`1 ..= 6`) of a record type holding its two ends.
+    if op == op_range() || op == op_range_inclusive() {
+        if some v = lower_bounds_record(lw, n) { return v; }
     }
     let ir_op = arith_opcode(op);
     let pred = cmp_pred_of(op);

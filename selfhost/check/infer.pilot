@@ -576,7 +576,26 @@ fn binary_type(var ref inf: Infer, n: i64) -> i64 {
         }
         return l;
     }
+    // Any other operator the left operand's type declares (`..=` on an
+    // integer, or through an `ext` block) gives what that declaration returns.
+    let symbols = binary_op_symbols();
+    if op > 0 && op < symbols.len() {
+        if some m = prog_member(p, type_of(inf, lhs(s, n)), symbols[op]) { return prog_member_type(p, m); }
+    }
     return ty_unknown();
+}
+
+/// Whether `x[a ..= b]` on a value of type `t` calls `t`'s own `op []`:
+/// that operator takes a structured value (a range), not a register number.
+pub fn index_takes_range(var ref p: Program, t: i64) -> bool {
+    guard some m = prog_member(p, t, op_index()) else { return false; }
+    let s = p.s;
+    for prm in fn_params(s, m.decl) {
+        if annot(s, prm) < 0 || node_name(s, prm) == s.receiver { continue; }
+        let pt = prog_annot_type(p, annot(s, prm));
+        return ty_is_named(p.tt, pt) && prog_class(p, pt) == "";
+    }
+    return false;
 }
 
 fn compute(var ref inf: Infer, n: i64) -> i64 {
@@ -614,7 +633,11 @@ fn compute(var ref inf: Infer, n: i64) -> i64 {
         // list, of a string a string).
         let idx = rhs(s, n);
         if idx >= 0 && ((kind(s, idx) == nk_binary() && (flags(s, idx) == op_range() || flags(s, idx) == op_range_inclusive())) || kind(s, idx) == nk_range()) {
-            return type_of(inf, lhs(s, n));
+            let lt = type_of(inf, lhs(s, n));
+            if index_takes_range(p, lt) {
+                if some m = prog_member(p, lt, op_index()) { return prog_member_type(p, m); }
+            }
+            return lt;
         }
         if some m = prog_member(p, type_of(inf, lhs(s, n)), op_index()) { return prog_member_type(p, m); }
         return ty_unknown();

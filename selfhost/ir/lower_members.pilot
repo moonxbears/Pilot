@@ -506,12 +506,44 @@ pub fn map_literal_type(ref lw: Lowerer) -> i64 {
     return ty_unknown();
 }
 
+/// Range `n` (`a ..= b`) as a value of its declared type, when that type
+/// is a record whose first two fields hold the two ends (`{ start, end }`);
+/// none otherwise.
+pub fn lower_bounds_record(var ref lw: Lowerer, n: i64) -> u32? {
+    let s = lw.inf.p.s;
+    let t = type_of(lw.inf, n);
+    if lhs(s, n) < 0 || rhs(s, n) < 0 { return none; }
+    let fields = fields_of(lw, t);
+    if fields.len() < 2 || fields[0].is_hidden_backing || fields[1].is_hidden_backing { return none; }
+    var args: List<u32> = [];
+    var i = 0;
+    for f in fields {
+        let name = f.canonical_name;
+        if i < 2 {
+            let e = if i == 0 { lhs(s, n) } else { rhs(s, n) };
+            args.push(coerce(lw, lower_expr(lw, e), field_physics(lw, t, name), e));
+        } else {
+            args.push(field_default_value(lw, t, name, n));
+        }
+        i = i + 1;
+    }
+    let phy = physics_of(lw, n);
+    note_record(lw, t, phy);
+    return emit(lw, op_construct_aggregate(), 0, phy, args, n);
+}
+
 /// `x[i]`: the type's `op []`.
 pub fn lower_index(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     if some text = bracket_unit_text(lw, n) { return lower_unit_text(lw, text, n); }
     let idx = rhs(s, n);
     let bounds = kind(s, idx) == nk_binary() && (flags(s, idx) == op_range() || flags(s, idx) == op_range_inclusive());
+    // A type whose own `op []` takes a range gets the range as a value.
+    let lt = value_type(lw, lhs(s, n));
+    if bounds && index_takes_range(lw.inf.p, lt) && runs_as_code(lw, lt, op_index()) {
+        let recv = lower_expr(lw, lhs(s, n));
+        return member_call(lw, recv, lt, op_index(), [idx], physics_of(lw, n), n);
+    }
     if bounds && bound(lw, range_index_hook(), []) != "" {
         // `x[a..b]`: the part of `x` from `a` up to `b` (`a..=b`: through `b`).
         // A bound left out is the start (0) or the end (the length).

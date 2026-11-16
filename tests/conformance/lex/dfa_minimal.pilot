@@ -33,7 +33,7 @@ fn main() {
     summary([token("ab", lit("ab") | lit("ac"))]);
     summary([token("as", lit("a") + lit("a").many())]);
     summary([token("as", lit("a").some())]);
-    summary([token("ab", class("ab").repeat(1, 3))]);
-    summary([token_over("if", 1, lit("if")), token("name", range("a", "z").some())]);
-    summary([token("three", range("0", "9") * 3)]);
+    summary([token("ab", class("ab")[1 ..= 3])]);
+    summary([token_over("if", 1, lit("if")), token("name", ("a" ..= "z").some())]);
+    summary([token("three", ("0" ..= "9") * 3)]);
 }

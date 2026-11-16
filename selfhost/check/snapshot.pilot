@@ -102,6 +102,16 @@ pub pure fn op_range() -> i64 => 24;
 /// `a..b : step` (`BinaryOp::Step`): lhs the range, rhs the step.
 pub pure fn op_step() -> i64 => 49;
 pub pure fn op_is() -> i64 => 25;
+
+/// The spelling of each `BinaryOp` code, from 1 (crates/pilot-ast
+/// `BinaryOp::symbol`); an operator a program binds to a function
+/// (`bind_operator_fn`) is found by it.
+pub fn binary_op_symbols() -> List<str> => [
+    "", "+", "-", "*", "/", "//", "%", "**", "==", "!=", "<", "<=", ">", ">=", "and", "or",
+    "&", "|", "^", "<<", ">>", "|>", "??", "..=", "..", "is", ":=", "<-", "union", "intersect",
+    "except", "<|", "as", "as view", "<=>", "+|", "-|", "*|", "+%", "-%", "*%", "+?", "-?", "*?",
+    "%%", "~>", ">..<", ">..", ":=:", ":",
+];
 pub pure fn op_as() -> i64 => 32;
 pub pure fn op_as_view() -> i64 => 33;
 /// `BinaryExpr` flags of `x |> f(..)` and `f(..) <| x` (`BinaryOp::Pipe`,

@@ -1,0 +1,33 @@
+// Byte ranges and bounded repetition written with Pilot's own operators
+// (PROP-027): `"0" ..= "9"` is one byte from `0` to `9`, both included
+// (`..=` includes its end, as in `0 ..= 3`), and `p[1 ..= 3]` is `p` one
+// to three times.
+//
+// Expected, worked by hand:
+//   "0" ..= "9"           start -digit-> accept: 2 states; digits and the
+//                         rest -> 2 classes.
+//   "a" ..= "f" | "A" ..= "F" | "0" ..= "9"   one hex digit: 2 states;
+//                         all 22 hex bytes share a column -> 2 classes.
+//   ("0" ..= "9")[1 ..= 3]  start, then 1, 2 or 3 digits taken, each with
+//                         a different number left -> 4 states, 2 classes.
+//   "a" ..= "c" lexing "abcd": a, b, c are one-byte tokens, d starts none.
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+
+fn summary(decls: List<TokenDecl>) {
+    let built = build_table(decls);
+    print(table_summary(built.table));
+}
+
+fn main() {
+    summary([token("digit", "0" ..= "9")]);
+    summary([token("hex", "a" ..= "f" | "A" ..= "F" | "0" ..= "9")]);
+    summary([token("digits", ("0" ..= "9")[1 ..= 3])]);
+    let built = build_table([token("abc", "a" ..= "c")]);
+    let src = "abcd";
+    var out = "";
+    for l in lex_all(built.table, src) {
+        out = out + lexeme_text(built.table, src, l) + " ";
+    }
+    print(out);
+}

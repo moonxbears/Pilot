@@ -21,6 +21,6 @@ fn show(decls: List<TokenDecl>) {
 }
 
 fn main() {
-    show([token_over("if", 1, lit("if")), token("name", range("a", "z").some()), token("space", lit(" "))]);
-    show([token("name", range("a", "z").some()), token_over("if", 1, lit("if")), token("space", lit(" "))]);
+    show([token_over("if", 1, lit("if")), token("name", ("a" ..= "z").some()), token("space", lit(" "))]);
+    show([token("name", ("a" ..= "z").some()), token_over("if", 1, lit("if")), token("space", lit(" "))]);
 }

@@ -26,15 +26,15 @@ pub enum Radix : u8 {
 /// One digit of `base`.
 pub fn digit(base: Radix) -> Pattern {
     if base == Radix::Hex {
-        return range("0", "9") | range("a", "f") | range("A", "F");
+        return "0" ..= "9" | "a" ..= "f" | "A" ..= "F";
     }
     if base == Radix::Bin {
         return class("01");
     }
     if base == Radix::Oct {
-        return range("0", "7");
+        return "0" ..= "7";
     }
-    return range("0", "9");
+    return "0" ..= "9";
 }
 
 /// Digits of `base`, optionally grouped by `_`, which may only stand

@@ -16,11 +16,11 @@ use Pilot.Core.Lex.Patterns;
 use Pilot.Core.Lex.Numbers;
 use pilot.lex.build;
 
-fn letter() -> Pattern => range("a", "z") | range("A", "Z") | lit("_");
+fn letter() -> Pattern => "a" ..= "z" | "A" ..= "Z" | lit("_");
 
 fn main() {
     var decls = number_tokens();
-    decls.push(token("name", letter() + (letter() | range("0", "9")).many()));
+    decls.push(token("name", letter() + (letter() | "0" ..= "9").many()));
     decls.push(token("space", lit(" ").some()));
     let built = build_table(decls);
     print(built.ok());

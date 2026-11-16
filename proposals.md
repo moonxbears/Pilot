@@ -2555,7 +2555,7 @@ Steps 1–3 are Pilot only and need no Rust change. Step 4's Rust deletions are 
 
 ## `PROP-027` — Operators a Type Gains Through `ext` Apply to Literals (`"0" ..= "9"`); a Struct's `op _[_]` Takes a Range Index (`hex[1 ..= 6]`)
 
-**Status: APPROVED BY OWNER 2026-11-16 ("Approve PROP-027").** Owner question 2026-11-16: "Can we use "A".."B" for range and something for repeat?"
+**Status: APPROVED BY OWNER 2026-11-16 ("Approve PROP-027"); BUILT 2026-11-16 (see §5).** Owner question 2026-11-16: "Can we use "A".."B" for range and something for repeat?"
 
 ### 1. What exists today (run 2026-11-16)
 
@@ -2586,6 +2586,36 @@ Steps 1–3 are Pilot only and need no Rust change. Step 4's Rust deletions are 
 - `seed.struct_range_index` passes and moves to `operators/`.
 - Every existing conformance program passes unchanged. In particular, string slicing (`s[1 ..= 3]`) is unchanged.
 - Once it passes, the lex files use `"0" ..= "9"` and `range("0", "9")` is deleted, so there is one spelling.
+
+### 5. As built (2026-11-16)
+
+**Two places differ from §2. Both are recorded here.**
+- **There is no receptor that names a literal's type.** No `bind_receptor` binds the string family to a type, so the seed cannot read one from the bootstrap tables. Only the checker knows a literal's type (`literal_slot`). The seed rule was changed to one that needs no literal type:
+  - An operator the seed has no lowering of its own for (no instruction, no `bind_operator_fn`) that exactly one type declares as an instance member is a call of that type's operator (`sole_owner`).
+  - With the lex files loaded, that one type is `str` (its `ext` block), so `"0" ..= "9"` calls `str...=`.
+  - If a second type declares the same operator, the seed stops at the old `SEED001` again. It never guesses.
+  - `static_type` gives such a call the declared return type, so `"a" ..= "f" | "A" ..= "F"` runs `Pattern`'s `op |`.
+- **The range value for an index is built from its two ends, not by a bound function.** No function is bound to `..=`. The seed and PilIR build a value of the operator's declared parameter type (`span<i64>`) from the two ends, in its first two fields. This is the structural bounds-pair rule (field anatomy), with no type name in the code.
+- **Rust: `+73` lines, not `+25`** (`lower_expr.rs` 797 → 870: `sole_owner`, `first_param_type`, the index branch, the fallback call). The workspace is about 27,880, under the 28,000 ceiling.
+
+**Pilot (no approval needed).**
+- `selfhost/check/infer.pilot`:
+  - `binary_type`: any operator not typed above gives the return type its left operand's type declares (`i64`'s `..=` gives `span<i64>`, `ext str`'s gives `Pattern`).
+  - New `index_takes_range`: a type's `op []` whose parameter is a non-register named type takes a range. `x[a ..= b]` on such a type has the operator's return type. Strings and lists keep slicing.
+- `selfhost/check/snapshot.pilot`: `binary_op_symbols` moved here from `selfhost/ir/lower.pilot`, so the checker and the lowering share one table.
+- `selfhost/ir/lower_members.pilot`:
+  - New `lower_bounds_record`: a range value whose type is a record of its two ends.
+  - `lower_index`: calls the type's `op []` when `index_takes_range`.
+- `selfhost/ir/lower.pilot`: `lower_binary` builds range values with `lower_bounds_record`.
+- `stdlib/core/lex/patterns.pilot`:
+  - Adds `op _[_] (counts: span<i64>)` and `ext str { op ..= }`.
+  - Deletes `range()` and `.repeat()`.
+  - Imports `Pilot.Core.Primitives.Span` explicitly. Without the import, the seed has no fields for `span`.
+- `stdlib/core/lex/numbers.pilot` and the lex tests use `"0" ..= "9"` and `p[a ..= b]`. `p * n` stays. A range binds looser than `+` and `*`, so `("0" ..= "9") * 3` needs its brackets; it binds tighter than `|`.
+
+**Tests.**
+- New `lex/byte_range_literal` passes on all three engines.
+- `seed.struct_range_index` passes on all three. It moved to `operators/struct_range_index` (with the `Span` import added) and its `bug_registry` entry is deleted.
 
 ---
 

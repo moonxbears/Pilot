@@ -17,6 +17,8 @@
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Patterns;
 
+use Pilot.Core.Primitives.Span;
+
 /// One step of a pattern's postfix program.
 pub enum PatKind : u8 {
     /// Matches one byte in `lo ..= hi`.
@@ -54,6 +56,9 @@ pub struct Pattern : IObject {
     pub op | (rhs: Pattern) -> Pattern => joined(self, rhs, PatKind::Alt);
     /// `p * n`: this pattern exactly `n` times.
     pub op * (count: i64) -> Pattern => repeated(self, count, count);
+    /// `p[1 ..= 6]`: this pattern at least `start` and at most `end` times.
+    /// Each count costs about one state, so keep the bounds small.
+    pub op _[_] (counts: span<i64>) -> Pattern => repeated(self, counts.start, counts.end);
 
     /// This pattern or nothing.
     pub fn opt(ref self) -> Pattern => wrap(self, PatKind::Opt);
@@ -61,9 +66,12 @@ pub struct Pattern : IObject {
     pub fn many(ref self) -> Pattern => wrap(self, PatKind::Many);
     /// This pattern one or more times.
     pub fn some(ref self) -> Pattern => wrap(self, PatKind::AtLeastOne);
-    /// This pattern at least `min` and at most `max` times. Each count costs
-    /// about one state, so keep the bounds small.
-    pub fn repeat(ref self, min: i64, max: i64) -> Pattern => repeated(self, min, max);
+}
+
+/// `"0" ..= "9"`: one byte from the first byte of the left text to the first
+/// byte of the right text, both included.
+ext str {
+    pub op ..= (hi: str) -> Pattern => byte_range(self.byte_at(0) as i64, hi.byte_at(0) as i64);
 }
 
 /// A declared token: its name, the pattern its text must match, and its
@@ -108,10 +116,6 @@ pub fn byte_range(lo: i64, hi: i64) -> Pattern {
 
 /// The one byte with value `b`.
 pub fn byte(b: i64) -> Pattern => byte_range(b, b);
-
-/// One byte from the first byte of `lo` to the first byte of `hi`
-/// (`range("0", "9")`).
-pub fn range(lo: str, hi: str) -> Pattern => byte_range(lo.byte_at(0) as i64, hi.byte_at(0) as i64);
 
 /// Exactly the bytes of `text`, in order.
 pub fn lit(text: str) -> Pattern {

@@ -266,9 +266,30 @@ impl BytecodeCompiler {
 
     fn compile_index_value(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {
         let idx = arena.node(NodeId(rhs));
-        if idx.node_kind() == NodeKind::BinaryExpr
-            && matches!(idx.flags, OP_RANGE_INCLUSIVE | OP_RANGE_HALF_OPEN)
+        let is_range = idx.node_kind() == NodeKind::BinaryExpr
+            && matches!(idx.flags, OP_RANGE_INCLUSIVE | OP_RANGE_HALF_OPEN);
+        // A struct that declares `op _[_]` gets the range as a value of the
+        // operator's parameter type, built from its two ends.
+        let ty = self.static_type(arena, NodeId(lhs));
+        let op = pilot_parser::INDEX_GET_OP;
+        if let Some(t) = ty
+            .as_deref()
+            .filter(|t| is_range && self.structs.contains_key(*t))
         {
+            if self.declares(t, op) == Some(false) {
+                let Some(param) = self.first_param_type(arena, &format!("{t}.{op}")) else {
+                    return self.error(
+                        crate::codes::SEED,
+                        format!("the seed cannot tell the parameter type of `{t}.{op}`"),
+                    );
+                };
+                let r_obj = self.compile_node(arena, NodeId(lhs));
+                let r_range =
+                    self.compile_memberwise(arena, &param, &[NodeId(idx.lhs), NodeId(idx.rhs)]);
+                return self.emit_index_read(r_obj, Some(t), r_range);
+            }
+        }
+        if is_range {
             // A bound left out is the start (0) or the end (the length).
             let r_obj = self.compile_node(arena, NodeId(lhs));
             let r_a = if NodeId(idx.lhs).is_some() {
@@ -290,10 +311,28 @@ impl BytecodeCompiler {
             }
             return self.emit_intrinsic("str_slice", &[r_obj, r_a, r_b]);
         }
-        let ty = self.static_type(arena, NodeId(lhs));
         let r_obj = self.compile_node(arena, NodeId(lhs));
         let r_key = self.compile_node(arena, NodeId(rhs));
         self.emit_index_read(r_obj, ty.as_deref(), r_key)
+    }
+
+    /// The declared type name of the first parameter after the receiver of
+    /// function `key`.
+    fn first_param_type(&self, arena: &AstArena, key: &str) -> Option<String> {
+        let decl = *self.param_decls.get(key)?;
+        let dn = arena.node(decl);
+        let receiver = crate::RECEIVER;
+        let param = arena
+            .children_slice(dn.rhs, dn.flags as u32)
+            .iter()
+            .skip(1)
+            .map(|&p| NodeId(p))
+            .find(|&p| {
+                let name = Self::name(arena, arena.node(p).lhs);
+                name != receiver && name != &receiver[1..]
+            })?;
+        let tn = arena.node(arena.type_annot(param)?);
+        Some(Self::name(arena, tn.lhs).to_string())
     }
 
     /// A binary expression. When the checker's plan names a numeric type
@@ -426,6 +465,19 @@ impl BytecodeCompiler {
             if let Some(r) = self.compile_operator_fn(op.symbol(), arena, NodeId(lhs), NodeId(rhs))
             {
                 return r;
+            }
+            // An operator the seed has no lowering for, declared by one type
+            // only (`ext str { op ..= }`), is that type's operator.
+            if let Some(owner) = self.sole_owner(op) {
+                let dst = self.alloc_reg();
+                let mark = self.next_reg;
+                let r_l = self.compile_node(arena, NodeId(lhs));
+                let r_r = self.compile_node(arena, NodeId(rhs));
+                let sym = op.symbol();
+                let r = self.emit_user_call(format!("{owner}.{sym}"), sym.to_string(), &[r_l, r_r]);
+                self.emit(Opcode::Move, dst, r, 0);
+                self.release_to(mark);
+                return dst;
             }
             if matches!(op, BinaryOp::RangeInclusive | BinaryOp::RangeHalfOpen) {
                 return self.error(crate::codes::SEED,
@@ -564,7 +616,11 @@ impl BytecodeCompiler {
             // A struct's own operator gives its declared return type
             // (`a + b + c`: the second `+` is the struct's too).
             NodeKind::BinaryExpr => {
-                let sym = BinaryOp::from_u16(n.flags)?.symbol();
+                let op = BinaryOp::from_u16(n.flags)?;
+                let sym = op.symbol();
+                if let Some(owner) = self.sole_owner(op) {
+                    return self.declared_ret(arena, &format!("{owner}.{sym}"));
+                }
                 let ty = self.static_type(arena, NodeId(n.lhs))?;
                 if !self.structs.contains_key(&ty) || self.declares(&ty, sym) != Some(false) {
                     return None;
@@ -606,6 +662,23 @@ impl BytecodeCompiler {
         let tn = arena.node(arena.type_annot(self.lazy_decls.get(key)?.node)?);
         matches!(tn.node_kind(), NodeKind::TypeNamed | NodeKind::IdentExpr)
             .then(|| Self::name(arena, tn.lhs).to_string())
+    }
+
+    /// The one type that declares `op` as an instance member (an `ext`
+    /// block gives one to a literal's type), when the seed has no lowering
+    /// of its own for `op`.
+    fn sole_owner(&self, op: BinaryOp) -> Option<String> {
+        let sym = op.symbol();
+        if direct_opcode(op).is_some()
+            || pilot_parser::bootstrap_tables().operator_fn(sym).is_some()
+        {
+            return None;
+        }
+        let mut owners = self.method_owners.get(sym)?.iter().filter(|(_, st)| !st);
+        match (owners.next(), owners.next()) {
+            (Some((o, _)), None) => Some(o.clone()),
+            _ => None,
+        }
     }
 
     /// `a && b` / `a || b`: the right operand runs only when needed.
