@@ -34,16 +34,22 @@ pub fn name_pattern() -> Pattern => name_start() + name_continue().many();
 
 /// `:red`, `:ns/kw`: a keyword literal. Only after a space, so `x:y` and
 /// `case 1:` keep their `:`.
-pub fn keyword_literal() -> Pattern => lit(":") + name_pattern() + (lit("/") + name_pattern()).opt();
+pub fn keyword_literal() -> Pattern => keyword_literal_over(name_pattern());
+
+/// The keyword literal over `name`, a `name_pattern()` already built (it
+/// spells the Unicode letter tables as UTF-8 tries, the dearest pattern of
+/// the lexicon, so it is built once per lexicon).
+fn keyword_literal_over(name: Pattern) -> Pattern => lit(":") + name + (lit("/") + name).opt();
 
 /// The name token, one token per seed word, and the keyword literal, in
 /// declaration order.
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
 pub fn name_tokens() -> List<TokenDecl> {
-    var out: List<TokenDecl> = [acting(TokenRole::Operand, token("name", name_pattern()))];
+    let name = name_pattern();
+    var out: List<TokenDecl> = [acting(TokenRole::Operand, token("name", name))];
     for w in SEED_WORDS {
         out.push(token_over(w, 1, lit(w)));
     }
-    out.push(starting(TokenWhen::Spaced, acting(TokenRole::Operand, token("keyword_literal", keyword_literal()))));
+    out.push(starting(TokenWhen::Spaced, acting(TokenRole::Operand, token("keyword_literal", keyword_literal_over(name)))));
     return out;
 }

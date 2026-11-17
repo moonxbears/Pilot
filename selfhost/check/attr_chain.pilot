@@ -244,6 +244,16 @@ pub fn step_value(ref p: Program, var ref sink: DiagSink, name: str, ref layers:
 /// function and method in the user's files.
 pub fn check_attr_chains(ref p: Program, var ref sink: DiagSink) {
     let s = p.s;
+    // No step attribute written anywhere: every `chain_steps` is empty, so
+    // nothing is reported.
+    var any_step = false;
+    for row in s.attrs {
+        if step_kind(p, sym_text(s, row[1])) != StepKind::None {
+            any_step = true;
+            break;
+        }
+    }
+    if !any_step { return; }
     let pkgs = package_decls(p);
     var f = 0;
     f = s.user_lo;

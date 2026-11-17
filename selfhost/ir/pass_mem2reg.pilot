@@ -98,6 +98,20 @@ fn dominance_frontiers(ref f: IrFunction, ref order: List<u32>, ref reachable: L
 /// Promotes the stack slots of `f` that only `load` and `store` use;
 /// true when it promoted any.
 pub fn promote_slots(var ref f: IrFunction) -> bool {
+    // A function with no stack slot has nothing to promote; the dominators
+    // are not worked out for it (every reader of them works them out
+    // first). Most functions have none left after the first round.
+    var any_slot = false;
+    for b in f.blocks {
+        for inst in b.insts {
+            if inst.opcode == op_stack_slot() && inst.result != ir_no_value() {
+                any_slot = true;
+                break;
+            }
+        }
+        if any_slot { break; }
+    }
+    if !any_slot { return false; }
     let order = ir_compute_dominators(f);
     let blocks = f.blocks.len() as i64;
     var reachable = filled_bools(blocks, false);

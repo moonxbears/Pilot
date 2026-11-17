@@ -89,10 +89,10 @@ fn operands_text(ref f: IrFunction, inst: IrInst) -> str {
     return value_list(f, a, 0, a.len());
 }
 
-fn inst_text(ref f: IrFunction, inst: IrInst) -> str {
+fn inst_text(ref f: IrFunction, inst: IrInst, ref names: List<str>) -> str {
     var out = "    ";
     if inst.result != ir_no_value() { out = out + value_ref(inst.result) + " = "; }
-    out = out + opcode_name(inst.opcode);
+    out = out + opcode_name_in(names, inst.opcode);
     if inst.subop != 0 { out = out + f".{inst.subop}"; }
     let ops = operands_text(f, inst);
     if ops.len() > 0 { out = out + " " + ops; }
@@ -103,6 +103,8 @@ fn inst_text(ref f: IrFunction, inst: IrInst) -> str {
 /// lines are joined once at the end (`join_text`).
 pub fn print_ir_module(ref m: IrModule) -> str {
     var lines: List<str> = ["pilir 1"];
+    // The opcode names, built once for every instruction printed.
+    let names = opcode_names();
     var i = 0;
     while i < m.layouts.len {
         let l = m.layouts[i];
@@ -141,7 +143,7 @@ pub fn print_ir_module(ref m: IrModule) -> str {
             var params: List<str> = [];
             for v in b.params { params.push(value_ref(v) + f":{f.value_physics[v].layout_id}"); }
             lines.push(f"  b{b.id}(" + join_text(params, ", ") + "):");
-            for inst in b.insts { lines.push(inst_text(f, inst)); }
+            for inst in b.insts { lines.push(inst_text(f, inst, names)); }
         }
         lines.push("}");
         i = i + 1;
@@ -166,6 +168,8 @@ struct Reader : IObject {
     at: i64;
     m: IrModule;
     error: str;
+    /// Opcode name -> opcode (`opcode_lookup`), built once per parse.
+    opcodes: Map<str, u16>;
 }
 
 /// The lines of `text`, without their newlines; text after the last newline
@@ -349,7 +353,7 @@ fn parse_inst(var ref r: Reader, var ref f: IrFunction, b: u32, ref w: List<str>
     let dot = head.find(".", 0);
     let name = if dot > 0 { head.slice(0, dot) } else { head };
     let sub = if dot > 0 { number_u16(r, head.slice(dot + 1, head.len()), "") } else { 0 };
-    let op = opcode_of(name);
+    let op: u16 = if r.opcodes.has(name) { r.opcodes.get(name) } else { 0 };
     if op == 0 { let _ = fail(r, f"unknown opcode `{name}`"); return; }
     i = i + 1;
     var args: List<u32> = [];
@@ -434,7 +438,7 @@ fn parse_function(var ref r: Reader, ref w: List<str>) {
 
 /// Parses the text of a module, or says on which line and why it cannot.
 pub fn parse_ir_module(text: str) -> IrModule ! IrTextError {
-    let r = Reader { lines: split_lines(text), at: 0, m: ir_module_new(), error: "" };
+    let r = Reader { lines: split_lines(text), at: 0, m: ir_module_new(), error: "", opcodes: opcode_lookup() };
     if r.lines.len() == 0 || r.lines[0] != "pilir 1" {
         return result<IrModule, IrTextError>.err(IrTextError { line: 1, message: "IR009: line 1: expected `pilir 1`" });
     }

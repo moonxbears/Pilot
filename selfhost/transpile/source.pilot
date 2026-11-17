@@ -551,8 +551,10 @@ fn emit_function(u: SourceUnit, f: IrFunction, name: str, declared: List<u32>) {
     }
     let decl = local_declarations(sf);
     lines(sf, d.locals(decl.names, decl.phys));
+    // One operator table for every block of the function.
+    let ops = binary_ops();
     if f.blocks.len() == 1 {
-        emit_block_body(sf, f.blocks[0]);
+        emit_block_body(sf, f.blocks[0], ops);
     } else {
         line(sf, d.state_decl(state_name()));
         line(sf, d.dispatch_open());
@@ -562,7 +564,7 @@ fn emit_function(u: SourceUnit, f: IrFunction, name: str, declared: List<u32>) {
             line(sf, d.case_open(state_name(), b.id, first));
             first = false;
             sf.depth = 3;
-            emit_block_body(sf, b);
+            emit_block_body(sf, b, ops);
             sf.depth = 2;
         }
         line(sf, d.cases_close());
@@ -592,11 +594,17 @@ fn widen_to(var ref f: IrFunction, v: u32, src: IrTypePhysics) -> bool {
 /// as the number (`x catch e => e`), which the seed, holding every value
 /// dynamically, runs.
 fn widen_mixed_kinds(ref m: IrModule) {
+    // Widening changes physics only, never an instruction, so each
+    // function's slots are the same every round.
+    var slots_of: List<List<i64>> = [];
+    for f in m.functions { slots_of.push(defined_by(f, op_stack_slot())); }
     var changed = true;
     while changed {
         changed = false;
+        var fi = 0;
         for f in m.functions {
-            let slots = defined_by(f, op_stack_slot());
+            let slots = slots_of[fi];
+            fi = fi + 1;
             for b in f.blocks {
                 for inst in b.insts {
                     if widen_inst(m, f, slots, inst) { changed = true; }
@@ -608,8 +616,13 @@ fn widen_mixed_kinds(ref m: IrModule) {
 
 /// One instruction's part of `widen_mixed_kinds`.
 fn widen_inst(ref m: IrModule, var ref f: IrFunction, ref slots: List<i64>, inst: IrInst) -> bool {
-    let a = ir_args(f, inst);
     let op = inst.opcode;
+    // Only these opcodes widen anything; skip building the others' operands.
+    if op != op_jump() && op != op_cond_br() && op != op_store() && op != op_load() && op != op_return()
+        && op != op_call_intrinsic() && op != op_call_direct() {
+        return false;
+    }
+    let a = ir_args(f, inst);
     var changed = false;
     if op == op_jump() {
         let params = f.blocks[a[0]].params;
@@ -707,8 +720,10 @@ fn classify_values(var ref sf: SourceFn) -> List<str> {
     let globals = defined_by(f, op_global_addr());
     for b in f.blocks {
         for inst in b.insts {
-            let a = ir_args(f, inst);
             let op = inst.opcode;
+            // Only constants and stores read their operands.
+            let reads = op == op_const_bits() || op == op_const_float() || op == op_const_bytes() || op == op_store();
+            let a: List<u32> = if reads { ir_args(f, inst) } else { [] };
             let r = inst.result;
             if op == op_const_bits() {
                 sf.inline[r] = int_text(sf, m.ints[a[0]], inst.physics);
@@ -890,6 +905,8 @@ fn cell_physics(ref sf: SourceFn, slot: u32, cell: str) -> IrTypePhysics {
 
 /// The index of the module global named `cell`, or -1 for a stack slot.
 fn global_of(ref sf: SourceFn, cell: str) -> i64 {
+    // Globals are named `g<index>` and slots `v<value>`.
+    if cell.starts_with("v") { return -1; }
     var g = 0;
     while g < sf.u.global_names.len() {
         if sf.u.global_names[g] == cell { return g; }
@@ -986,8 +1003,7 @@ fn comparison_physics(pa: IrTypePhysics, pb: IrTypePhysics) -> IrTypePhysics {
     return if pb.bit_width > pa.bit_width { pb } else { pa };
 }
 
-fn emit_block_body(var ref sf: SourceFn, ref b: IrBlock) {
-    let ops = binary_ops();
+fn emit_block_body(var ref sf: SourceFn, ref b: IrBlock, ref ops: Map<str, str>) {
     for inst in b.insts {
         emit_inst(sf, inst, ops);
     }
@@ -997,13 +1013,14 @@ fn emit_inst(var ref sf: SourceFn, inst: IrInst, ref ops: Map<str, str>) {
     let d = sf.u.d;
     let f = sf.f;
     let m = sf.u.m;
-    let a = ir_args(f, inst);
     let op = inst.opcode;
     let r = inst.result;
+    // These are written where they are used; check before building operands.
     if op == op_const_bits() || op == op_const_float() || op == op_const_bytes() || op == op_undef()
         || op == op_stack_slot() || op == op_global_addr() {
         return;
     }
+    let a = ir_args(f, inst);
     if ops.has(f"{op}") {
         let p = f.value_physics[r];
         let name = ops.get(f"{op}");

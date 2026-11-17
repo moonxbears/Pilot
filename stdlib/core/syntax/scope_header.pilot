@@ -234,6 +234,8 @@ pub pure fn merge_attributes(parent_attrs: str, local_attrs: str) -> str {
 
 pub fn is_scope_header(line: str) -> bool {
     let trimmed = line.trim();
+    // `rest` below is a trimmed suffix of `trimmed`: it ends as `trimmed` does.
+    if !trimmed.ends_with(":") && !trimmed.ends_with("{") { return false; }
     if trimmed.contains("case ") || trimmed.contains("default:") {
         return false;
     }
@@ -258,7 +260,8 @@ pub fn is_scope_header(line: str) -> bool {
         }
         i = i + 1;
     }
-    return has_mod || (extract_attributes_prefix(trimmed) != "");
+    // An attribute prefix was there exactly when stripping it changed the line.
+    return has_mod || rest != trimmed;
 }
 
 pub fn parse_scope_header(line: str) -> ScopeHeader {

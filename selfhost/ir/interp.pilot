@@ -130,13 +130,28 @@ pub fn eval_engine_ops() -> Map<str, bool> {
     return ops;
 }
 
+/// The tables an evaluation while compiling reads and never changes, built
+/// once for every `ir_eval` of a module.
+pub struct IrEvalTables : IObject {
+    pub handlers: List<any>;
+    pub preparers: List<any>;
+    pub constants: List<any>;
+    pub engine_ops: Map<str, str>;
+    /// The engine operations it may run (`eval_engine_ops()`).
+    pub allowed: Map<str, bool>;
+}
+
+pub fn ir_eval_tables(allowed: Map<str, bool>) -> IrEvalTables =>
+    IrEvalTables { handlers: interp_handlers(), preparers: interp_preparers(), constants: interp_constants(), engine_ops: interp_engine_ops(), allowed: allowed };
+
 /// Runs function `fi` of `m` (which takes nothing) while compiling, with the
 /// globals `globals` (those `assigned` marks as set) and at most `fuel`
-/// instructions. Gives `[true, value, steps]`, or `[false, why, steps]`
-/// when it stopped: a runtime error, an effect, or the budget running out.
-/// `steps` is how many instructions it ran.
-pub fn ir_eval(ref m: IrModule, fi: i64, ref globals: List<any>, ref assigned: List<bool>, fuel: i64) -> List<any> {
-    let top = IrFrame { m: m, f: m.functions[fi], vals: [], cells: [], globals: globals, assigned: assigned, next: 0, next_args: [], ret: none, handlers: interp_handlers(), preparers: interp_preparers(), constants: interp_constants(), code: no_code(m), engine_ops: interp_engine_ops(), fault: ir_fault_new(), args: [], budget: IrBudget { left: fuel, depth: 0, eval: true, allowed: eval_engine_ops() } };
+/// instructions, reading the tables `t` (`ir_eval_tables`). Gives `[true,
+/// value, steps]`, or `[false, why, steps]` when it stopped: a runtime
+/// error, an effect, or the budget running out. `steps` is how many
+/// instructions it ran.
+pub fn ir_eval(ref m: IrModule, fi: i64, ref globals: List<any>, ref assigned: List<bool>, fuel: i64, ref t: IrEvalTables) -> List<any> {
+    let top = IrFrame { m: m, f: m.functions[fi], vals: [], cells: [], globals: globals, assigned: assigned, next: 0, next_args: [], ret: none, handlers: t.handlers, preparers: t.preparers, constants: t.constants, code: no_code(m), engine_ops: t.engine_ops, fault: ir_fault_new(), args: [], budget: IrBudget { left: fuel, depth: 0, eval: true, allowed: t.allowed } };
     let out = interp_call(top, fi, []);
     let steps = if top.budget.left < 0 { fuel } else { fuel - top.budget.left };
     if top.fault.active { return [false, top.fault.message, steps]; }
@@ -386,8 +401,9 @@ fn global_addr_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any
 /// instruction gives the same value on every run.
 pub fn interp_constants() -> List<any> {
     var cs: List<any> = [];
+    let opcodes = opcode_names().len();
     var i = 0;
-    while i < opcode_names().len() {
+    while i < opcodes {
         cs.push(none);
         i = i + 1;
     }
@@ -429,20 +445,20 @@ fn is_narrow_register(phy: IrTypePhysics) -> bool {
     return phy.reg_class == reg_class_simd_float() && phy.bit_width == 32;
 }
 
-/// The operator of each arithmetic opcode.
-fn arith_symbols() -> Map<i64, str> {
-    let syms = Map<i64, str>();
-    syms.set(op_add() as i64, "+");
-    syms.set(op_sub() as i64, "-");
-    syms.set(op_mul() as i64, "*");
-    syms.set(op_div() as i64, "/");
-    syms.set(op_rem() as i64, "%");
-    syms.set(op_bit_and() as i64, "&");
-    syms.set(op_bit_or() as i64, "|");
-    syms.set(op_bit_xor() as i64, "^");
-    syms.set(op_shl() as i64, "<<");
-    syms.set(op_shr() as i64, ">>");
-    return syms;
+/// The operator of each arithmetic opcode: `prepare_arith` is registered
+/// for these ten only, so the last is `shr`. Asked once per prepared
+/// instruction, so no table is built for it.
+fn arith_symbol(op: u16) -> str {
+    if op == op_add() { return "+"; }
+    if op == op_sub() { return "-"; }
+    if op == op_mul() { return "*"; }
+    if op == op_div() { return "/"; }
+    if op == op_rem() { return "%"; }
+    if op == op_bit_and() { return "&"; }
+    if op == op_bit_or() { return "|"; }
+    if op == op_bit_xor() { return "^"; }
+    if op == op_shl() { return "<<"; }
+    return ">>";
 }
 
 /// An arithmetic operator. The engine computes integers in 64 bits and
@@ -450,7 +466,7 @@ fn arith_symbols() -> Map<i64, str> {
 /// to it (`run_narrow`); any other is the seed's operator (`run_binary`).
 fn prepare_arith(ref fr: IrFrame, var ref st: IrStep) {
     let op = st.inst.opcode;
-    st.sym = arith_symbols().get(op as i64);
+    st.sym = arith_symbol(op);
     let phy = st.inst.physics;
     if !is_narrow_register(phy) {
         if both_plain_numbers(fr, st) {
@@ -481,12 +497,12 @@ fn run_narrow(var ref fr: IrFrame, ref st: IrStep) {
     vals[st.result] = checked(fr, "num_wrap", [v, k[0], k[1]]);
 }
 
-/// The operator of each comparison predicate (`CmpPred` 0..5).
-fn cmp_symbols() -> List<str> => ["==", "!=", "<", "<=", ">", ">="];
+/// The operator of each comparison predicate (`CmpPred` 0..5), built once.
+const CMP_SYMBOLS: List<str> = ["==", "!=", "<", "<=", ">", ">=",];
 
 fn prepare_cmp(ref fr: IrFrame, var ref st: IrStep) {
     let pred = st.inst.subop as i64;
-    st.sym = cmp_symbols()[pred];
+    st.sym = CMP_SYMBOLS[pred];
     // Equality is defined between any two values; an ordering only between
     // numbers.
     if pred < 2 || both_plain_numbers(fr, st) { st.h = DIRECT_CMP[pred]; }
@@ -542,7 +558,7 @@ fn run_le(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] =
 fn run_gt(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] > v[st.a[1]]; }
 fn run_ge(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] >= v[st.a[1]]; }
 
-/// The direct handler of each comparison predicate, in `cmp_symbols` order.
+/// The direct handler of each comparison predicate, in `CMP_SYMBOLS` order.
 const DIRECT_CMP: List<any> = [run_eq, run_ne, run_lt, run_le, run_gt, run_ge,];
 
 fn run_stack_slot(var ref fr: IrFrame, ref st: IrStep) {
@@ -847,8 +863,9 @@ fn run_return(var ref fr: IrFrame, ref st: IrStep) {
 /// A table with no entry for any opcode.
 fn opcode_table() -> List<any> {
     var t: List<any> = [];
+    let opcodes = opcode_names().len();
     var i = 0;
-    while i < opcode_names().len() {
+    while i < opcodes {
         t.push(none);
         i = i + 1;
     }

@@ -454,6 +454,9 @@ pub fn module_fn(var ref inf: Infer, callee: i64) -> i64 {
     let recv = lhs(s, callee);
     if kind(s, recv) != nk_ident() || inf.r.ref_of[recv] >= 0 { return -1; }
     if !ty_is_unknown(p.tt, type_receiver(inf, recv)) { return -1; }
+    // No function of that name: none can match, so skip the module lookup.
+    let fns = nl_get(p.fns, sym_text(s, rhs(s, callee)));
+    if fns.len() == 0 { return -1; }
     let alias_mod = aliased_module(p, callee, node_name(s, recv));
     let tail = if alias_mod.len() > 0 {
         "/" + alias_mod.replace(".", "/") + ".pilot"
@@ -461,7 +464,7 @@ pub fn module_fn(var ref inf: Infer, callee: i64) -> i64 {
         "/" + node_name(s, recv) + ".pilot"
     };
     var found = -1;
-    for f in nl_get(p.fns, sym_text(s, rhs(s, callee))) {
+    for f in fns {
         let u = unit_of(s, f);
         if u < 0 || u >= s.files.len() || !in_linked_file(s, f) { continue; }
         let row: List<any> = s.files[u];

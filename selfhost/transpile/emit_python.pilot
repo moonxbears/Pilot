@@ -448,11 +448,13 @@ pub struct PythonDialect : ISourceDialect {
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
     pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
-        var shown: List<str> = [];
-        for a in args { shown.push(f"pilot_show({a})"); }
-        let text = if shown.len() == 0 { "''" } else { "' '.join([" + joined(shown) + "])" };
-        if name == "rt_print" { return f"print({text})"; }
-        if name == "rt_eprint" { return f"print({text}, file=sys.stderr)"; }
+        // The printed text is built only for the two print operations.
+        if name == "rt_print" || name == "rt_eprint" {
+            var shown: List<str> = [];
+            for a in args { shown.push(f"pilot_show({a})"); }
+            let text = if shown.len() == 0 { "''" } else { "' '.join([" + joined(shown) + "])" };
+            return if name == "rt_print" { f"print({text})" } else { f"print({text}, file=sys.stderr)" };
+        }
         let ops = dynamic_engine_ops();
         if ops.has(name) {
             let helper = ops.get(name);

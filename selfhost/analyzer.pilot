@@ -635,6 +635,8 @@ pub fn is_kw_contextual_ident(name: str) -> bool {
 pub fn is_in_pipe_delimited(kw_buf: str, target: str) -> bool {
     let tlen = target.len();
     if tlen == 0 { return false; }
+    // A whole segment equal to `target` is also a substring of the buffer.
+    if kw_buf.find(target, 0) < 0 { return false; }
     let blen = kw_buf.len();
     var start = 0;
     var i = 0;

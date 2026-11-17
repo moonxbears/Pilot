@@ -92,6 +92,8 @@ pub fn assignable(var ref inf: Infer, src: i64, dst: i64, e: i64) -> bool {
         }
         return true;
     }
+    // Before the list rule, which needs both named and different.
+    if ty_is_unknown(tt, src) || ty_is_unknown(tt, dst) || src == dst { return true; }
     if is_literal_list(p, src) && !is_literal_list(p, dst) && ty_is_named(tt, dst) {
         // A list fits another collection when its items fit that
         // collection's elements. A type with no elements (an `i64`) takes
@@ -100,7 +102,6 @@ pub fn assignable(var ref inf: Infer, src: i64, dst: i64, e: i64) -> bool {
         let args = ty_args(tt, src);
         if !ty_is_unknown(tt, elem) { return args.len() == 0 || assignable(inf, args[0], elem, -1); }
     }
-    if ty_is_unknown(tt, src) || ty_is_unknown(tt, dst) || src == dst { return true; }
     if ty_is_param(tt, src) || ty_is_param(tt, dst) { return true; }
     if prog_is_never(p, src) { return true; }
     if ty_is_func(tt, src) && ty_is_func(tt, dst) { return func_assignable(inf, src, dst); }
@@ -329,6 +330,18 @@ fn check_return(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
 fn check_call_count(ref p: Program, var ref sink: DiagSink, n: i64, f: i64, ref params: List<i64>) {
     let s = p.s;
     let ch = children(s, n);
+    var wanted = 0;
+    var least = 0;
+    for prm in params {
+        if s.receiver.len() == 0 || node_name(s, prm) != s.receiver {
+            wanted = wanted + 1;
+            // A parameter with a default may be left out.
+            if field_default(s, prm) < 0 { least = wanted; }
+        }
+    }
+    let given = ch.len() - 1;
+    // In range: nothing to report, and every check below only returns.
+    if given >= least && given <= wanted { return; }
     var i = 1;
     while i < ch.len() {
         let a = ch[i];
@@ -346,17 +359,6 @@ fn check_call_count(ref p: Program, var ref sink: DiagSink, n: i64, f: i64, ref 
         if is_type_decl_kind(kind(s, at)) { return; }
         at = p.parents[at];
     }
-    var wanted = 0;
-    var least = 0;
-    for prm in params {
-        if s.receiver.len() == 0 || node_name(s, prm) != s.receiver {
-            wanted = wanted + 1;
-            // A parameter with a default may be left out.
-            if field_default(s, prm) < 0 { least = wanted; }
-        }
-    }
-    let given = ch.len() - 1;
-    if given >= least && given <= wanted { return; }
     let takes = if least == wanted { f"{wanted}" } else { f"{least} to {wanted}" };
     sink_error(sink, n, "CALL001", f"`{node_name(s, f)}` takes {takes} argument(s), given {given}");
 }
@@ -663,7 +665,8 @@ fn check_type_names(ref inf: Infer, var ref sink: DiagSink) {
     for r in roots { type_nodes(s, r, nodes); }
     for t in nodes {
         let name = node_name(s, t);
-        if name.find(".", 0) < 0 && name_is_written(s, t) && !prog_type_name_known(p, t) {
+        // A declared name is known: test that map lookup before the text.
+        if prog_type_decl(p, name) < 0 && name.find(".", 0) < 0 && name_is_written(s, t) && !prog_type_name_known(p, t) {
             sink_error(sink, t, "TYPE002", f"no type named `{name}`");
         }
     }
@@ -727,7 +730,7 @@ fn is_tail_value(var ref inf: Infer, n: i64) -> bool {
         let ch = children(s, n);
         return ch.len() >= 3 && terminates(inf, ch[1]) && terminates(inf, ch[2]);
     }
-    if k == nk_match() { return missing_variants(inf, n).len() == 0; }
+    if k == nk_match() { return missing_variants(inf, n, true).len() == 0; }
     if k == nk_for() { return false; }
     return k >= nk_block() && k < nk_type_named();
 }
@@ -754,7 +757,7 @@ fn terminates(var ref inf: Infer, n: i64) -> bool {
     }
     if k == nk_match() {
         let ch = children(s, n);
-        if ch.len() < 2 || missing_variants(inf, n).len() > 0 { return false; }
+        if ch.len() < 2 || missing_variants(inf, n, true).len() > 0 { return false; }
         var i = 1;
         while i < ch.len() {
             if !terminates(inf, rhs(s, ch[i])) { return false; }
@@ -822,8 +825,10 @@ fn covered_variants(ref s: Snap, pat: i64, var ref out: List<str>) {
 }
 
 /// The variants of the enum a switch inspects that no arm handles; empty
-/// when the scrutinee is not an enum or an arm matches anything.
-fn missing_variants(var ref inf: Infer, n: i64) -> List<str> {
+/// when the scrutinee is not an enum or an arm matches anything. With
+/// `first_only`, it stops at the first one (a caller that asks only whether
+/// any is missing).
+fn missing_variants(var ref inf: Infer, n: i64, first_only: bool) -> List<str> {
     let p = inf.p;
     let s = p.s;
     var out: List<str> = [];
@@ -843,15 +848,23 @@ fn missing_variants(var ref inf: Infer, n: i64) -> List<str> {
         if kind(s, v) == nk_variant() {
             let name = node_name(s, v);
             var found = false;
-            for c in covered { if c == name { found = true; } }
-            if !found { out.push(name); }
+            for c in covered {
+                if c == name {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                out.push(name);
+                if first_only { return out; }
+            }
         }
     }
     return out;
 }
 
 fn check_switch(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
-    let missing = missing_variants(inf, n);
+    let missing = missing_variants(inf, n, false);
     if missing.len() == 0 { return; }
     let p = inf.p;
     let t = type_of(inf, children(p.s, n)[0]);
@@ -905,6 +918,14 @@ fn capturing_lambda(ref p: Program, u: i64, site: i64) -> i64 {
     return -1;
 }
 
+/// Whether some lambda lies in the user's files.
+fn user_has_lambda(ref s: Snap) -> bool {
+    for l in nodes_of(s, nk_lambda()) {
+        if l >= s.user_lo && l < s.user_hi { return true; }
+    }
+    return false;
+}
+
 fn check_assign(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
@@ -928,7 +949,10 @@ fn check_assign(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
             return;
         }
     }
-    if b >= 0 && b < inf.r.site.len() {
+    // A capture needs a lambda around a use; the uses checked are in the
+    // user's files, and so are their ancestors, so a program whose user
+    // files have no lambda has nothing to warn about here.
+    if b >= 0 && b < inf.r.site.len() && user_has_lambda(s) {
         let site = inf.r.site[b];
         let n_start = span_start(s, n);
         for u in nodes_of(s, nk_ident()) {
@@ -1066,7 +1090,7 @@ pub fn check_rules(var ref inf: Infer, var ref sink: DiagSink) {
     check_type_names(inf, sink);
     // The string tokens already checked for escapes, by where they start
     // (an f-string's pieces share its token).
-    var escapes_seen: List<i64> = [];
+    var escapes_seen = Map<i64, bool>();
     var i = 0;
     i = s.user_lo;
     while i < s.user_hi {

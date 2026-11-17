@@ -369,6 +369,9 @@ fn walk_loop(ref f: Flow, n: i64, ref head: List<i64>, ref body: List<i64>, move
     let first = walk_seq(f, body, copy(entry));
     var again = copy(entry);
     union_into(again, outside_of(f, first.moved, n));
+    // Nothing new reached the head: a second walk from the same set repeats
+    // the first (the sink drops repeats, `moved_at` only ORs).
+    if again.len() == entry.len() { return flow_state(again, true); }
     let second = walk_seq(f, body, again);
     var out = copy(entry);
     union_into(out, outside_of(f, second.moved, n));

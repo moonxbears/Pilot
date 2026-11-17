@@ -21,7 +21,10 @@ pub fn operator_tokens(ref symbols: List<str>, ref postfix: List<str>) -> List<T
     for sym in symbols {
         var after = false;
         for p in postfix {
-            if p == sym { after = true; }
+            if p == sym {
+                after = true;
+                break;
+            }
         }
         out.push(if after { acting(TokenRole::Operand, token(sym, lit(sym))) } else { token(sym, lit(sym)) });
     }

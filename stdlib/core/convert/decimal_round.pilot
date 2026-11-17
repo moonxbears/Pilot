@@ -69,11 +69,16 @@ pub fn round_decimal(digits: List<i64>, exp10: i64, fmt: FloatFormat) -> u64? {
     var rest = n;
     var q = 0;
     var bit = p;
+    // `d` is normalized (top limb nonzero), so `d << bit` has exactly
+    // `d_len + bit` bits: a shorter `rest` is smaller with no shift built.
+    let d_len = limbs_bit_length(d);
     while bit >= 0 {
-        let step = limbs_shl(d, bit);
-        if limbs_cmp(rest, step) >= 0 {
-            limbs_sub(rest, step);
-            q = q | (1 << bit);
+        if limbs_bit_length(rest) >= d_len + bit {
+            let step = limbs_shl(d, bit);
+            if limbs_cmp(rest, step) >= 0 {
+                limbs_sub(rest, step);
+                q = q | (1 << bit);
+            }
         }
         bit = bit - 1;
     }

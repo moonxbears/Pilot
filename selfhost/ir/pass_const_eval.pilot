@@ -48,6 +48,8 @@ struct ConstEval : IObject {
     hoisted: i64;
     fuel: i64;
     allowed: Map<str, bool>;
+    /// What every `ir_eval` of the module reads, built once.
+    tables: IrEvalTables;
 }
 
 /// Computes what can be computed in `m`; true when it changed anything.
@@ -67,7 +69,8 @@ pub fn const_eval_module(ref m: IrModule) -> bool {
         done.push(0);
         init_global.push(-1);
     }
-    let ce = ConstEval { m: m, globals: globals, assigned: assigned, runnable: runnable, done: done, init_global: init_global, hoisted: 0, fuel: eval_total_fuel(), allowed: eval_engine_ops() };
+    let allowed = eval_engine_ops();
+    let ce = ConstEval { m: m, globals: globals, assigned: assigned, runnable: runnable, done: done, init_global: init_global, hoisted: 0, fuel: eval_total_fuel(), allowed: allowed, tables: ir_eval_tables(allowed) };
     find_inits(ce);
     var changed = false;
     var progress = true;
@@ -118,6 +121,13 @@ fn value_operands(ref f: IrFunction, inst: IrInst) -> List<u32> {
 /// must come right after the call and be its only use).
 fn keep_fresh_results(ref ce: ConstEval) -> bool {
     let m = ce.m;
+    // Only a `value_clone` call is rewritten; a module without that engine
+    // operation has none.
+    var has_clone = false;
+    for name in m.intrinsics {
+        if name == "value_clone" { has_clone = true; }
+    }
+    if !has_clone { return false; }
     var changed = false;
     for f in m.functions {
         let defs = definitions(f);
@@ -159,6 +169,16 @@ fn keep_fresh_results(ref ce: ConstEval) -> bool {
 
 fn takes_nothing(ref f: IrFunction) -> bool => f.blocks.len > 0 && f.blocks[0].params.len == 0;
 
+/// Whether some instruction of `f` is an `op`.
+fn has_opcode(ref f: IrFunction, op: u16) -> bool {
+    for b in f.blocks {
+        for inst in b.insts {
+            if inst.opcode == op { return true; }
+        }
+    }
+    return false;
+}
+
 /// The instruction defining each value of `f` (value id -> position as
 /// `[block, index]`), for values defined by instructions.
 fn definitions(ref f: IrFunction) -> Map<str, List<i64>> {
@@ -188,9 +208,17 @@ fn def_of(ref f: IrFunction, ref defs: Map<str, List<i64>>, v: u32) -> IrInst? {
 /// in the module is in `<start>` and stores the initializer's result.
 fn find_inits(var ref ce: ConstEval) {
     let m = ce.m;
+    // Only a `once` function's result is recorded below.
+    var any_once = false;
+    for f in m.functions {
+        if f.once { any_once = true; }
+    }
+    if !any_once { return; }
     var stores: List<i64> = [];
     for g in m.globals { stores.push(0); }
     for f in m.functions {
+        // Only stores are counted; a function with none is skipped.
+        if !has_opcode(f, op_store()) { continue; }
         let defs = definitions(f);
         for b in f.blocks {
             for inst in b.insts {
@@ -248,7 +276,7 @@ fn try_function(var ref ce: ConstEval, fi: i64) -> bool {
     let m = ce.m;
     let f = m.functions[fi];
     let fuel = if ce.fuel < eval_fuel() { ce.fuel } else { eval_fuel() };
-    let r = ir_eval(m, fi, ce.globals, ce.assigned, fuel);
+    let r = ir_eval(m, fi, ce.globals, ce.assigned, fuel, ce.tables);
     let steps: i64 = r[2];
     ce.fuel = ce.fuel - steps;
     if r[0] != true { return false; }
@@ -421,6 +449,8 @@ fn constant_inst(var ref f: IrFunction, result: u32, phy: IrTypePhysics, ref k: 
 /// Every read of global `g` (a `load` of its address) becomes constant `k`.
 fn replace_loads(ref m: IrModule, g: i64, ref k: List<i64>) {
     for f in m.functions {
+        // Only loads change; a function with none is skipped.
+        if !has_opcode(f, op_load()) { continue; }
         let defs = definitions(f);
         for b in f.blocks {
             var i = 0;
@@ -443,6 +473,8 @@ fn replace_loads(ref m: IrModule, g: i64, ref k: List<i64>) {
 /// are constants now); dead-code elimination removes what they stored.
 fn drop_stores(ref m: IrModule, g: i64) {
     for f in m.functions {
+        // Only stores are dropped; a function with none is left as it is.
+        if !has_opcode(f, op_store()) { continue; }
         let defs = definitions(f);
         for b in f.blocks {
             var out: List<IrInst> = [];

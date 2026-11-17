@@ -94,7 +94,15 @@ pub fn check_stack(var ref inf: Infer, ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     // The flow and the borrow analysis are made for the first `[Stack]`
-    // binding; most programs have none.
+    // binding; most programs have none, and then no row names it.
+    var any_row = false;
+    for row in s.attrs {
+        if sym_text(s, row[1]) == stack_attr() {
+            any_row = true;
+            break;
+        }
+    }
+    if !any_row { return; }
     var made: List<Borrows> = [];
     var b = 0;
     while b < r.site.len() {

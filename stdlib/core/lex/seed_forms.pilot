@@ -50,7 +50,10 @@ pub fn seed_form_tokens(ref declared: List<str>) -> List<TokenDecl> {
     for sym in SEED_FORM_SPELLINGS {
         var known = false;
         for d in declared {
-            if d == sym { known = true; }
+            if d == sym {
+                known = true;
+                break;
+            }
         }
         if !known { out.push(token(sym, lit(sym))); }
     }

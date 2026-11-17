@@ -19,8 +19,16 @@ pub fn report_diagnostic(d: HostDiag) -> Diagnostic {
 /// Renders `diags` to stderr and returns how many are errors.
 pub fn report_diagnostics(ref diags: List<HostDiag>) -> i64 {
     var errors = 0;
+    // Diagnostics of one file come together: read it once.
+    var last_file = "";
+    var src = "";
+    var have = false;
     for d in diags {
-        let src = if File.exists(d.file) { File.read_text(d.file) } else { "" };
+        if !have || d.file != last_file {
+            src = if File.exists(d.file) { File.read_text(d.file) } else { "" };
+            last_file = d.file;
+            have = true;
+        }
         eprint(render_diagnostic_human(report_diagnostic(d), src, d.file, false));
         if d.severity == diag_severity_error() { errors = errors + 1; }
     }

@@ -126,15 +126,14 @@ pub fn find_line_col_at(src: str, byte_offset: i64) -> LineColInfo {
     let n = src.len();
     var cur_line: i64 = 1;
     var line_start: i64 = 0;
-    var i: i64 = 0;
     let target = if byte_offset < n { byte_offset; } else { n; };
 
-    while i < target {
-        if src.byte_at(i) == 10 { // newline \n
-            cur_line = cur_line + 1;
-            line_start = i + 1;
-        }
-        i = i + 1;
+    // Jump from newline to newline (`\n`) before the target.
+    var nl = src.find("\n", 0);
+    while nl >= 0 && nl < target {
+        cur_line = cur_line + 1;
+        line_start = nl + 1;
+        nl = src.find("\n", nl + 1);
     }
 
     var line_end = line_start;

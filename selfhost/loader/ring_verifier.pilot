@@ -186,7 +186,8 @@ pub fn scan_and_migrate_ring_imports(src: str, file_id: u32) -> List<Diagnostic>
 
     while p < n {
         // Look for "use " statements
-        if p + 4 <= n && src.slice(p, p + 4) == "use " {
+        // First byte `u` (117) before slicing out four.
+        if p + 4 <= n && src.byte_at(p) == 117 && src.slice(p, p + 4) == "use " {
             let prev = if p > 0 { src.byte_at(p - 1); } else { 10; };
             if prev == 10 || prev == 32 || prev == 59 {
                 let stmt_st = p;

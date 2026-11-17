@@ -35,7 +35,8 @@ pub fn create_perceus_report(
 
 // Runs the Perceus `[HardRealtime]` / `noalloc` static verification pass over `src`.
 pub fn analyze_perceus_realtime_source(src: str, has_global_heap_escape: bool) -> str {
-    if has_hard_realtime_or_noalloc_contract(src) && has_global_heap_escape {
+    // The flag first: the source scan only matters when it holds.
+    if has_global_heap_escape && has_hard_realtime_or_noalloc_contract(src) {
         return "PILOT104";
     }
     return "";

@@ -95,8 +95,11 @@ pub fn yield_owner(ref p: Program, y: i64) -> i64 {
 /// collecting `for`), in source order.
 pub fn owned_yields(ref p: Program, owner: i64) -> List<i64> {
     var out: List<i64> = [];
+    // An owner is an ancestor of its yields, so it is in their unit; a
+    // yield of another unit is not walked up.
+    let unit = unit_of(p.s, owner);
     for y in all_yields(p) {
-        if yield_owner(p, y) == owner { out.push(y); }
+        if unit_of(p.s, y) == unit && yield_owner(p, y) == owner { out.push(y); }
     }
     return out;
 }
@@ -111,7 +114,12 @@ pub fn is_generator(ref p: Program, f: i64) -> bool {
     if f < 0 { return false; }
     let k = kind(p.s, f);
     if k != nk_fn() && k != nk_lambda() && k != nk_operator() { return false; }
-    return owned_yields(p, f).len() > 0;
+    // The first yield it owns answers it (`owned_yields` finds them all).
+    let unit = unit_of(p.s, f);
+    for y in all_yields(p) {
+        if unit_of(p.s, y) == unit && yield_owner(p, y) == f { return true; }
+    }
+    return false;
 }
 
 /// Whether `yield` node `y` is a delegation, `yield *xs`.

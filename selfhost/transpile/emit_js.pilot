@@ -408,9 +408,11 @@ pub struct JsDialect : ISourceDialect {
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
     pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
-        let text = "[" + joined(args) + "].map(pilot_show).join(\" \")";
-        if name == "rt_print" { return f"console.log({text})"; }
-        if name == "rt_eprint" { return f"console.error({text})"; }
+        // The printed text is built only for the two print operations.
+        if name == "rt_print" || name == "rt_eprint" {
+            let text = "[" + joined(args) + "].map(pilot_show).join(\" \")";
+            return if name == "rt_print" { f"console.log({text})" } else { f"console.error({text})" };
+        }
         if name == "list_new" { return "[]"; }
         if name == "map_new" { return "new Map()"; }
         if name == "is_null" { return f"({args[0]} === null || {args[0]} === undefined)"; }

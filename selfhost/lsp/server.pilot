@@ -13,6 +13,15 @@ pure fn lsp_find_substr(haystack: str, needle: str, start_pos: i64) -> i64 {
     if n_len == 0 || start_pos < 0 || start_pos + n_len > h_len {
         return -1;
     }
+    // An ASCII needle matches where the native search finds it; only a
+    // needle with other bytes keeps the slice walk below.
+    var ascii = true;
+    var k = 0;
+    while k < n_len && ascii {
+        if needle.byte_at(k) >= 128 { ascii = false; }
+        k = k + 1;
+    }
+    if ascii { return haystack.find(needle, start_pos); }
     var i = start_pos;
     while i + n_len <= h_len {
         if haystack.slice(i, i + n_len) == needle {
@@ -60,6 +69,12 @@ fn lsp_extract_json_str_field(json_str: str, key: str) -> str {
     }
     let n = json_str.len();
     var i = idx + pat.len();
+    // No escape before the closing quote (or the end): the value is a plain slice.
+    let close = json_str.find("\"", i);
+    let esc = json_str.find("\\", i);
+    if esc < 0 || (close >= 0 && close < esc) {
+        return json_str.slice(i, if close >= 0 { close } else { n });
+    }
     var out: List<str> = [];
     while i < n {
         let b = json_str.byte_at(i);
@@ -432,7 +447,8 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
                 "{\"label\":\"Pilot.Collections\",\"kind\":9}," +
                 "{\"label\":\"Pilot.Crypto\",\"kind\":9}";
 
-            if lsp_find_substr(doc, "Pilot.Core", 0) >= 0 {
+            let has_core = lsp_find_substr(doc, "Pilot.Core", 0) >= 0;
+            if has_core {
                 comp_json = comp_json +
                     ",{\"label\":\"IAnyValue\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
                     ",{\"label\":\"IValue\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
@@ -444,7 +460,7 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
                     ",{\"label\":\"IEquatable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
                     ",{\"label\":\"IDisposable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}";
             }
-            if lsp_find_substr(doc, "Pilot.Core.Reflect", 0) >= 0 {
+            if has_core && lsp_find_substr(doc, "Pilot.Core.Reflect", 0) >= 0 {
                 comp_json = comp_json +
                     ",{\"label\":\"reflect_category_scope\",\"kind\":3,\"detail\":\"pub fn reflect_category_scope(cat_id: i64) -> str\"}" +
                     ",{\"label\":\"reflect_category_badge\",\"kind\":3,\"detail\":\"pub fn reflect_category_badge(cat_id: i64) -> str\"}" +

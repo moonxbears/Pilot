@@ -91,6 +91,11 @@ pub fn rt_strip_comments(src: str) -> str {
 
 // Checks whether a source snippet contains the standalone keyword `kw` outside comments and strings.
 pub fn source_contains_keyword(src: str, kw: str) -> bool {
+    // Stripping only drops comments (each becomes one space), so a word
+    // with no space in it that is not in `src` is not in the stripped text.
+    if kw.len() > 0 && kw.find(" ", 0) < 0 && src.find(kw, 0) < 0 {
+        return false;
+    }
     let clean = rt_strip_comments(src);
     let n = clean.len();
     let klen = kw.len();

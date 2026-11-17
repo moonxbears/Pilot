@@ -120,11 +120,13 @@ pub fn check_with_steps(phase: str, plan: bool) -> List<any> {
 fn steps_of(var ref p: Program, phase: str) -> List<List<str>> {
     let s = p.s;
     var out: List<List<str>> = [];
-    let now = live_flag(p, phase);
+    // The `LiveWhen` flags, looked up once for both moments.
+    let known = enum_flags(p, live_when_type());
+    let now = flag_value(known, phase);
     if now < 0 { return out; }
     let quiet = sink_new(s);
     let pkgs = package_decls(p);
-    let compile = live_flag(p, live_default_flag());
+    let compile = flag_value(known, live_default_flag());
     // `chain_fn` keeps functions of the user's files only, which all lie
     // in `user_lo .. user_hi` (selfhost/check/snapshot.pilot).
     var f = s.user_lo;

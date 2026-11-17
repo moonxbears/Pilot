@@ -38,11 +38,17 @@ pub fn string_builder_new() -> StringBuilder {
 /// to a growing string copies everything before a part once per later part.
 pub pure fn join_text(parts: List<str>, sep: str) -> str {
     if parts.len() == 0 { return ""; }
-    var level: List<str> = [];
-    var i = 0;
-    while i < parts.len() {
-        level.push(if i + 1 < parts.len() { parts[i] + sep } else { parts[i] });
-        i = i + 1;
+    if parts.len() == 1 { return parts[0]; }
+    // With no separator the parts are the first level as they are; most
+    // callers join with "".
+    var level: List<str> = parts;
+    if sep != "" {
+        level = [];
+        var i = 0;
+        while i < parts.len() {
+            level.push(if i + 1 < parts.len() { parts[i] + sep } else { parts[i] });
+            i = i + 1;
+        }
     }
     while level.len() > 1 {
         var next: List<str> = [];

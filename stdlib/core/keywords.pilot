@@ -891,16 +891,15 @@ pub fn keyword_strip_colon(raw: str) -> str {
 }
 
 pub fn keyword_slash_index(stripped: str) -> i64 {
-    let n = stripped.len();
-    var last_idx = -1;
-    var i = 0;
-    while i < n {
+    // The last `/`: scanned from the end.
+    var i = stripped.len() as i64 - 1;
+    while i >= 0 {
         if stripped.byte_at(i) == 47 {
-            last_idx = i;
+            return i;
         }
-        i = i + 1;
+        i = i - 1;
     }
-    return last_idx;
+    return -1;
 }
 
 pub fn keyword_namespace(raw: str) -> str {
@@ -922,9 +921,12 @@ pub fn keyword_name(raw: str) -> str {
 }
 
 pub fn keyword_split(raw: str) -> KeywordDescriptor {
+    // As keyword_namespace and keyword_name, with one strip and one scan.
+    let stripped = keyword_strip_colon(raw);
+    let slash_idx = keyword_slash_index(stripped);
     return KeywordDescriptor {
-        namespace: keyword_namespace(raw),
-        name:      keyword_name(raw),
+        namespace: if slash_idx > 0 { stripped.slice(0, slash_idx) } else { "" },
+        name:      if slash_idx >= 0 { stripped.slice(slash_idx + 1, stripped.len()) } else { stripped },
     };
 }
 

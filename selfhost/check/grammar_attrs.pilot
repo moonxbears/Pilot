@@ -261,6 +261,8 @@ fn check_holes(ref p: Program, var ref sink: DiagSink, d: i64, shape_reported: b
 
 /// GRAM005-GRAM007 on `d`; whether it reported GRAM006.
 fn check_decl(ref p: Program, var ref sink: DiagSink, d: i64) -> bool {
+    // No attribute on `d`: every grammar attribute below is skipped.
+    if nl_get(p.attrs, f"{d}").len() == 0 { return false; }
     let s = p.s;
     let is_op = kind(s, d) == nk_operator();
     // An `op` is shown, and its symbol taken, as written (`op -`, not the

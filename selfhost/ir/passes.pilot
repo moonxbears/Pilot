@@ -66,9 +66,16 @@ pub fn run_passes(m: IrModule, ref r: PassRegistry) -> List<IrIssue> {
             return out;
         }
     }
+    let pass_count = r.passes.len();
     for f in m.functions {
         var rounds = 0;
         var changed = true;
+        // Passes in a row (across rounds) that changed nothing. A pass that
+        // returns false leaves `f` and `m` as they were, so once every pass
+        // has returned false since the last change, each would see what it
+        // saw last time and change nothing again: the rest of this round and
+        // the next one are all false, and the loop would end there anyway.
+        var unchanged = 0;
         while changed {
             if rounds == max_pass_rounds() {
                 return [IrIssue { code: "IR007", function: f.name, message: f"the passes still change it after {max_pass_rounds()} rounds" }];
@@ -77,14 +84,19 @@ pub fn run_passes(m: IrModule, ref r: PassRegistry) -> List<IrIssue> {
             for p in r.passes {
                 if p.run(f, m) {
                     changed = true;
+                    unchanged = 0;
                     let issues = verify_ir_function(f);
                     if issues.len() > 0 {
                         var out: List<IrIssue> = [];
                         for i in issues { out.push(IrIssue { code: i.code, function: i.function, message: f"after pass `{p.name()}`: {i.message}" }); }
                         return out;
                     }
+                } else {
+                    unchanged = unchanged + 1;
+                    if unchanged == pass_count { break; }
                 }
             }
+            if unchanged == pass_count { break; }
             rounds = rounds + 1;
         }
     }

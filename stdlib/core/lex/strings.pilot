@@ -138,13 +138,16 @@ fn quotes(q: i64, triple: bool) -> Pattern => if triple { byte(q) * 3 } else { b
 fn fprefix(raw: bool) -> Pattern => if raw { class(RAW_MARKS) + class(FSTRING_MARKS) | class(FSTRING_MARKS) + class(RAW_MARKS) } else { class(FSTRING_MARKS) };
 
 /// The quotings of an f-string: quote byte, triple, raw.
-fn each_fstring(var ref out: List<TokenDecl>, var ref modes: List<LexMode>) {
+fn each_fstring(var ref out: List<TokenDecl>, var ref modes: List<LexMode>, want_modes: bool) {
     for q in [DOUBLE_QUOTE, SINGLE_QUOTE] {
         for triple in [false, true] {
             for raw in [false, true] {
                 let name = fstring_mode_name(q, triple, raw);
-                out.push(entering(name, token(fstring_open_family(triple, raw), fprefix(raw) + quotes(q, triple))));
-                modes.push(fstring_mode(q, triple, raw));
+                if want_modes {
+                    modes.push(fstring_mode(q, triple, raw));
+                } else {
+                    out.push(entering(name, token(fstring_open_family(triple, raw), fprefix(raw) + quotes(q, triple))));
+                }
             }
         }
     }
@@ -155,7 +158,7 @@ fn each_fstring(var ref out: List<TokenDecl>, var ref modes: List<LexMode>) {
 pub fn fstring_openers() -> List<TokenDecl> {
     var out: List<TokenDecl> = [];
     var modes: List<LexMode> = [];
-    each_fstring(out, modes);
+    each_fstring(out, modes, false);
     return out;
 }
 
@@ -163,7 +166,7 @@ pub fn fstring_openers() -> List<TokenDecl> {
 pub fn fstring_modes() -> List<LexMode> {
     var out: List<TokenDecl> = [];
     var modes: List<LexMode> = [];
-    each_fstring(out, modes);
+    each_fstring(out, modes, true);
     return modes;
 }
 

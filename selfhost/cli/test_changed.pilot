@@ -319,6 +319,23 @@ pub struct ChangeSelection : IObject {
 /// the tools that mode runs.
 pub fn select_cases(ref changed: List<str>, ref programs: List<str>, engine: TestEngine, mode_lang: str, ref tool_sources: List<str>, ref moved: List<str>) -> ChangeSelection {
     let sel = ChangeSelection { everything: false, why: "", picked: [] };
+    // The answers below that need no link table, given before linking.
+    for f in moved {
+        if !f.starts_with("tests/") {
+            sel.everything = true;
+            sel.why = f"the package `{f}` declares changed";
+            return sel;
+        }
+    }
+    for f in changed {
+        if is_document(f) || is_crate_test(f) { continue; }
+        if is_source_of(f, tool_sources) {
+            sel.everything = true;
+            sel.why = f"`{f}` is a source of the tools this mode runs";
+            return sel;
+        }
+        break;
+    }
     // The CLI's own sources, as the loader resolves them, when the CLI is in
     // this tree.
     var asked: List<str> = [];

@@ -78,9 +78,8 @@ fn copied_in(var ref e: Effects, arg: i64, prm: i64) -> bool {
 
 /// ALIAS001 on `call`: an argument lent to an exclusive parameter that
 /// another argument, or the receiver, also reaches.
-fn check_alias(var ref e: Effects, call: i64, target: i64) {
+fn check_alias(var ref e: Effects, call: i64, ref args: List<List<i64>>) {
     let s = e.inf.p.s;
-    let args = call_args(s, call, target);
     let ch = children(s, call);
     let receiver = if ch.len() > 0 && kind(s, ch[0]) == nk_member() { lhs(s, ch[0]) } else { -1 };
     for a in args {
@@ -162,9 +161,8 @@ fn iso_problem(var ref e: Effects, var ref bw: Borrows, call: i64, arg: i64, ref
 }
 
 /// ISO001 on `call`: each argument of an `iso` parameter.
-fn check_iso(var ref e: Effects, var ref bw: Borrows, call: i64, target: i64) {
+fn check_iso(var ref e: Effects, var ref bw: Borrows, call: i64, ref args: List<List<i64>>) {
     let s = e.inf.p.s;
-    let args = call_args(s, call, target);
     for a in args {
         let prm = a[1];
         if prm < 0 || a[0] < 0 || !is_iso_param(e, prm) { continue; }
@@ -187,9 +185,21 @@ pub fn check_aliasing(var ref inf: Infer, ref sink: DiagSink) {
     while n < s.user_hi {
         if kind(s, n) == nk_call() && in_user_file(s, n) {
             let target = call_target(f, n);
+            // Both rules look only at `var ref` and `iso` parameters, and
+            // every argument's parameter is one of `target`'s.
+            var lends = false;
             if target >= 0 {
-                check_alias(e, n, target);
-                check_iso(e, bw, n, target);
+                for prm in fn_params(s, target) {
+                    if is_exclusive_param(e, prm) || is_iso_param(e, prm) {
+                        lends = true;
+                        break;
+                    }
+                }
+            }
+            if lends {
+                let args = call_args(s, n, target);
+                check_alias(e, n, args);
+                check_iso(e, bw, n, args);
             }
         }
         n = n + 1;

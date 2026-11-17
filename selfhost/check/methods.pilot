@@ -53,6 +53,9 @@ pub struct BuiltType {
     /// Fields of the type itself and of its splices, for bundle catalogs.
     pub own_fields: List<BundleFieldDef>;
     pub own_methods: List<BundleMethodDef>;
+    /// Body node per `own_methods` entry: its `accessed_fields` are filled
+    /// only when a splice reads the catalog.
+    pub own_method_bodies: List<i64>;
     /// The type's own field members, by name -> `found` index.
     pub field_decls: Map<str, i64>;
     /// The types it splices, in order.
@@ -96,20 +99,15 @@ fn generic_decl(ref p: Program, name: str) -> i64 {
     return prog_type_decl(p, name);
 }
 
-fn entry_for(ref p: Program, name: str, tier: MemberTier, origin: str, m: i64) -> MethodTableEntry {
-    let s = p.s;
-    var params = "";
-    for prm in fn_params(s, m) {
-        if params.len() > 0 { params = params + ", "; }
-        params = params + node_text(s, prm);
-    }
-    let ret = if annot(s, m) >= 0 { node_text(s, annot(s, m)) } else { "" };
+// `return_type` and `params` are left empty: nothing reads them, and the
+// member itself (`Member.decl`) carries the signature.
+fn entry_for(name: str, tier: MemberTier, origin: str) -> MethodTableEntry {
     return MethodTableEntry {
         method_name: name,
         tier: tier,
         origin_type_name: origin,
-        return_type: ret,
-        params: params,
+        return_type: "",
+        params: "",
         is_mut: false,
         is_static: false,
         field_remap_bundle: "",
@@ -124,14 +122,19 @@ fn add_found(var ref bt: BuiltType, m: Member) -> i64 {
 }
 
 /// Registers member `m` under `name` at `tier`, with origin `origin`.
-fn register(ref p: Program, var ref bt: BuiltType, name: str, tier: MemberTier, origin: str, m: Member, excluded: bool) {
+fn register(var ref bt: BuiltType, name: str, tier: MemberTier, origin: str, m: Member, excluded: bool) {
     var mt = bt.table;
-    register_method(var mt, entry_for(p, name, tier, origin, m.decl), excluded);
+    register_method(var mt, entry_for(name, tier, origin), excluded);
     if excluded { return; }
     let key = name + "@" + origin;
     if !bt.sides.has(key) { bt.sides.set(key, add_found(bt, m)); }
     var seen = false;
-    for n in bt.names { if n == name { seen = true; } }
+    for n in bt.names {
+        if n == name {
+            seen = true;
+            break;
+        }
+    }
     if !seen { bt.names.push(name); }
 }
 
@@ -304,6 +307,7 @@ fn empty_built(ref p: Program, name: str) -> BuiltType {
         declares_lattice: false,
         own_fields: [],
         own_methods: [],
+        own_method_bodies: [],
         field_decls: Map<str, i64>(),
         spliced: [],
         delegates: Map<str, i64>(),
@@ -349,10 +353,9 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
                         bt.require_names.push(mname);
                     }
                 } else {
-                    register(p, bt, mname, MemberTier::Tier1ExplicitStruct, name, member, false);
-                    var used: List<str> = [];
-                    accessed_fields(s, fn_body(s, m), used, 0);
-                    bt.own_methods.push(BundleMethodDef { name: mname, return_type: "", params: "", is_mut: false, accessed_fields: used });
+                    register(bt, mname, MemberTier::Tier1ExplicitStruct, name, member, false);
+                    bt.own_methods.push(BundleMethodDef { name: mname, return_type: "", params: "", is_mut: false, accessed_fields: [] });
+                    bt.own_method_bodies.push(fn_body(s, m));
                 }
             } else if is_field(s, m) {
                 let fname = node_name(s, m);
@@ -413,15 +416,21 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
                 if exposed != mname {
                     // Delegation names the member by its own name, not its alias.
                     var mt = bt.table;
-                    register_method(var mt, entry_for(p, mname, MemberTier::Tier2SplicedBundleFacet, bname, m.decl), true);
+                    register_method(var mt, entry_for(mname, MemberTier::Tier2SplicedBundleFacet, bname), true);
                 }
-                register(p, bt, exposed, MemberTier::Tier2SplicedBundleFacet, bname, compose(p, sub, m, st),
+                register(bt, exposed, MemberTier::Tier2SplicedBundleFacet, bname, compose(p, sub, m, st),
                     listed(dir.without_items, mname));
             }
         }
         var bdef = bundle_def_new(bname, sub.own_fields.len() == 0);
         for f in sub.own_fields { bdef.fields.push(f); }
-        for bm in sub.own_methods { bdef.methods.push(bm); }
+        var mi = 0;
+        for bm in sub.own_methods {
+            var used: List<str> = [];
+            accessed_fields(s, sub.own_method_bodies[mi], used, 0);
+            mi = mi + 1;
+            bdef.methods.push(BundleMethodDef { name: bm.name, return_type: "", params: "", is_mut: false, accessed_fields: used });
+        }
         catalog[bname] = bdef;
         directives.push(dir);
         // The fields the splice exposes, under their exposed names.
@@ -449,7 +458,7 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
             if some m = winner(sub, mname) {
                 let e: MethodTableEntry = sub.table.methods[mname];
                 let tier = if e.tier == MemberTier::Tier1ExplicitStruct { MemberTier::Tier3SubInterfaceDefault } else { MemberTier::Tier4BaseInterfaceDefault };
-                register(p, bt, mname, tier, e.origin_type_name, compose(p, sub, m, it), false);
+                register(bt, mname, tier, e.origin_type_name, compose(p, sub, m, it), false);
             }
         }
         for rname in sub.require_names {
@@ -470,14 +479,14 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
     for d in nl_get(p.ext_decls, name) {
         for m in type_members(s, d) {
             if is_method_kind(kind(s, m)) {
-                register(p, bt, member_name(s, m), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
+                register(bt, member_name(s, m), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
                     Member { decl: m, names: bt.tparams, values: args }, false);
             }
         }
     }
     for f in nl_get(p.dotted_fns, name) {
         let full = node_name(s, f);
-        register(p, bt, full.slice(ext_prefix.len(), full.len()), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
+        register(bt, full.slice(ext_prefix.len(), full.len()), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
             Member { decl: f, names: bt.tparams, values: args }, false);
     }
 
@@ -502,6 +511,8 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
 // ------------------------------------------------------------------------------
 
 fn instantiate(var ref p: Program, ref bt: BuiltType, ref m: Member, t: i64) -> Member {
+    // `ty_subst` with no type parameters gives each value back.
+    if bt.tparams.len() == 0 { return m; }
     var values: List<i64> = [];
     for v in m.values { values.push(ty_subst(p.tt, v, bt.tparams, ty_args(p.tt, t))); }
     return Member { decl: m.decl, names: m.names, values: values };

@@ -268,9 +268,25 @@ pub fn opcode_names() -> List<str> => [
     "global_addr",
 ];
 
-pub fn opcode_name(op: u16) -> str {
+pub fn opcode_name(op: u16) -> str => opcode_name_in(opcode_names(), op);
+
+/// `opcode_name` over a list `opcode_names()` gave, for a caller naming
+/// many opcodes that builds the list once.
+pub fn opcode_name_in(ref names: List<str>, op: u16) -> str =>
+    if op > 0 && op < names.len { names[op] } else { "op_custom_" + op };
+
+/// Printed name -> opcode, for every opcode (what `opcode_of` finds), for a
+/// caller looking up many names.
+pub fn opcode_lookup() -> Map<str, u16> {
+    let out = Map<str, u16>();
     let names = opcode_names();
-    return if op > 0 && op < names.len { names[op] } else { "op_custom_" + op };
+    var i = 1;
+    while i < names.len {
+        // The first opcode with a name wins, as in `opcode_of`.
+        if !out.has(names[i]) { out.set(names[i], ir_u16(i, "opcode")); }
+        i = i + 1;
+    }
+    return out;
 }
 
 /// The opcode printed as `name`, or 0.

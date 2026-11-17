@@ -432,8 +432,10 @@ fn rl_copy_renamed_tree(root: str, src_rel: str, sandbox_dir: str, dst_rel: str,
         if gm_ends_with(rel, ".pilot") {
             out_text = rl_rename_pilot_identifiers(file_text, rmap);
         } else if gm_ends_with(rel, ".stderr") {
+            // Only `<file>.pilot:` locations read the program's source.
             let program = path.slice(0, path.len() - 7) + ".pilot";
-            out_text = rl_rename_stderr(file_text, gate_fs_read_text(program), rmap);
+            let src = if gm_find(file_text, ".pilot:", 0) >= 0 { gate_fs_read_text(program) } else { "" };
+            out_text = rl_rename_stderr(file_text, src, rmap);
         }
         let out_path = gm_join_path(sandbox_dir, dst_rel + "/" + rel);
         if gate_fs_write_text(out_path, out_text) {
