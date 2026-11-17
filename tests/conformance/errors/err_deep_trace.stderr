@@ -1,0 +1,3 @@
+runtime error: integer division by zero
+called from tests/conformance/errors/err_deep_trace.pilot:15:12 (32 times)
+... and 9 more calls

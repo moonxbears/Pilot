@@ -26,9 +26,24 @@ pub pure fn format_gen002(service_name: str, method_name: str, payload_type: str
 // 2. HTTP Route & Service Schemas (0b00 & 0b10)
 // ------------------------------------------------------------------------------
 
+/// The request method a route answers (`Ws`: a WebSocket upgrade).
+pub enum HttpMethod : u8 {
+    Get,
+    Post,
+    Put,
+    Delete,
+    Ws,
+}
+
+/// The request-line text of each `HttpMethod`, by variant value.
+const HTTP_METHOD_NAMES: List<str> = ["GET", "POST", "PUT", "DELETE", "WS",];
+
+/// The request-line text of `m` (`GET`, `POST`, ..).
+pub fn http_method_name(m: HttpMethod) -> str => HTTP_METHOD_NAMES[m as usize];
+
 [Layout(c_abi)]
 pub struct HttpRouteDef : IValue {
-    pub method:            str; // "GET", "POST", "PUT", "DELETE", "WS"
+    pub method:            HttpMethod;
     pub path_template:     str; // e.g. "/v1/orders" or "/v1/orders/{id}"
     pub handler_fn:        str;
     pub payload_type:      str;
@@ -36,7 +51,7 @@ pub struct HttpRouteDef : IValue {
 }
 
 pub pure fn http_route_def_new(
-    method: str,
+    method: HttpMethod,
     path: str,
     handler: str,
     payload_t: str,
@@ -103,7 +118,7 @@ pub fn http_service_add_route(var ref self: HttpServiceDef, route: HttpRouteDef)
     }
 
     // 2. Validate payload JSON contract
-    if route.payload_type.len() > 0 && route.payload_type != "void" && !route.has_json_contract {
+    if route.payload_type.len() > 0 && route.payload_type != nameof(void) && !route.has_json_contract {
         return format_gen002(self.name, route.handler_fn, route.payload_type);
     }
 
@@ -165,7 +180,7 @@ pub fn route_path_params(template: str) -> List<str> {
 }
 
 fn openapi_operation(r: HttpRouteDef) -> str {
-    var op = "\"" + ascii_lower(r.method) + "\": { \"operationId\": \"" + json_escape(r.handler_fn) + "\"";
+    var op = "\"" + ascii_lower(http_method_name(r.method)) + "\": { \"operationId\": \"" + json_escape(r.handler_fn) + "\"";
     let params = route_path_params(r.path_template);
     if params.len() > 0 {
         op = op + ", \"parameters\": [";
@@ -285,12 +300,13 @@ pub fn http_service_match_route(ref svc: HttpServiceDef, http_method: str, path:
     while i < svc.routes.len() {
         let r = svc.routes[i];
         // Another method's route can only set `path_matched`, already set.
-        if r.method == http_method || !m.path_matched {
+        let method = http_method_name(r.method);
+        if method == http_method || !m.path_matched {
             var names: List<str> = [];
             var values: List<str> = [];
             if route_template_bind(r.path_template, path, names, values) {
                 m.path_matched = true;
-                if r.method == http_method {
+                if method == http_method {
                     m.route_index = i as i64;
                     m.param_names = names;
                     m.param_values = values;

@@ -169,7 +169,10 @@ pub struct Lowerer : IObject {
     pub drop_flags: Map<str, u32>;
     /// The calls planned around statements (selfhost/ir/lower_probe.pilot),
     /// by statement node.
-    pub probes: Map<str, List<any>>;
+    pub probes: Map<str, List<PlannedProbe>>;
+    /// The `ProbeAt::Defer` calls reached so far, each with its statement; a
+    /// scope holds `-(index + 1)` for one (selfhost/ir/lower_probe.pilot).
+    pub later_probes: List<DeferredProbe>;
     /// The program's enum declarations (`adt_nodes`), found once: a name
     /// that may be a variant is looked up among them, not among every node.
     pub adt_decls: List<i64>;
@@ -285,7 +288,7 @@ pub fn lower_program_rooted(var ref inf: Infer, every_function: bool) -> IrModul
         gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
         resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, u32>(), outs: [], out_phys: [],
         loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, AtRow>(), drop_flags: Map<str, u32>(),
-        probes: probe_rows(p), adt_decls: adt_nodes(p),
+        probes: probe_rows(p), later_probes: [], adt_decls: adt_nodes(p),
     };
     // Function 0 is `<start>` (selfhost/ir/lower_global.pilot).
     lw.queue.push(-1);
@@ -998,7 +1001,7 @@ pub fn lower_call(var ref lw: Lowerer, n: i64) -> u32 {
         }
     }
     if kind(s, callee) == nk_ident() && binding_index(lw, callee) < 0 && ch.len() == 3 && lw.membership_fn != "" && node_name(s, callee) == lw.membership_fn {
-        let mem_op = bound(lw, native_member_hook(), [type_name_of(lw, value_type(lw, ch[2])), "in"]);
+        let mem_op = bound(lw, native_member_hook(), [type_name_of(lw, value_type(lw, ch[2])), nameof(in)]);
         if mem_op != "" {
             let rhs_v = lower_expr(lw, ch[2]);
             let lhs_v = lower_expr(lw, ch[1]);
@@ -1373,7 +1376,7 @@ fn lower_for_indexed(var ref lw: Lowerer, n: i64, iterable: i64, it_t: i64, var_
     let it_name = type_name_of(lw, it_t);
     let seq_hook = bound(lw, native_member_hook(), [it_name, "for_seq"]);
     let custom_len = bound(lw, native_member_hook(), [it_name, "for_len"]);
-    let len_hook = if custom_len != "" { custom_len } else { native_for(lw, it_t, "len", native_property_hook()) };
+    let len_hook = if custom_len != "" { custom_len } else { native_for(lw, it_t, nameof(len), native_property_hook()) };
     if len_hook == "" { return unsupported(lw, n); }
     let int_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_int())));
     let bool_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));

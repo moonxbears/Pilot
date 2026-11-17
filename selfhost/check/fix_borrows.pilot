@@ -160,10 +160,10 @@ fn moved_into(ref f: Flow, n: i64, ref kept: Map<i64, bool>) -> i64 {
 
 /// `path:line:col` of node `n`.
 fn where_of(ref s: Snap, n: i64) -> str {
-    let row: List<any> = s.files[unit_of(s, n)];
-    let path: str = row[0];
-    let base: i64 = row[2];
-    let text: str = row[3];
+    let row = s.files[unit_of(s, n)];
+    let path = row.0;
+    let base = row.2;
+    let text = row.3;
     return f"{path}:{line_col(text, span_start(s, n) - base)}";
 }
 
@@ -212,12 +212,12 @@ pub fn apply_borrows(ref f: Flow, ref cands: List<BorrowCandidate>) -> i64 {
     var written = 0;
     var u = 0;
     while u < s.files.len() {
-        let row: List<any> = s.files[u];
-        let user: bool = row[1];
+        let row = s.files[u];
+        let user = row.1;
         if user {
-            let path: str = row[0];
-            let base: i64 = row[2];
-            let text: str = row[3];
+            let path = row.0;
+            let base = row.2;
+            let text = row.3;
             // The changes in this file, last first, so earlier offsets hold.
             var at: List<i64> = [];
             var words: List<str> = [];
@@ -232,7 +232,7 @@ pub fn apply_borrows(ref f: Flow, ref cands: List<BorrowCandidate>) -> i64 {
                 let at_name = if c.declared { off + 4 } else { off };
                 if text.slice(at_name, at_name + name.len()) != name { continue; }
                 if c.declared && text.slice(off, at_name) != "ref " { continue; }
-                let word = if c.declared { "var " } else if to_var { "var ref " } else { "ref " };
+                let word = if c.declared { nameof(var) + " " } else if to_var { nameof(var) + " " + nameof(ref) + " " } else { nameof(ref) + " " };
                 var k = at.len();
                 at.push(off);
                 words.push(word);
@@ -243,7 +243,7 @@ pub fn apply_borrows(ref f: Flow, ref cands: List<BorrowCandidate>) -> i64 {
                     words[k - 1] = word;
                     k = k - 1;
                 }
-                let shown = if c.declared { "var ref" } else { word.slice(0, word.len() - 1) };
+                let shown = if c.declared { nameof(var) + " " + nameof(ref) } else { word.slice(0, word.len() - 1) };
                 print(f"{path}:{line_col(text, at_name)}: `{name}` -> `{shown}`");
             }
             if at.len() > 0 {

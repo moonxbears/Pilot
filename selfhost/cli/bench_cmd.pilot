@@ -112,7 +112,7 @@ fn bench_before(a: TestTimes, b: TestTimes) -> bool =>
 /// milestone, then by name.
 pub fn bench_collect(dir: str, filter: str) -> List<TestTimes> {
     var out: List<TestTimes> = [];
-    for path in test_lines(File.walk_files(dir)) {
+    for path in File.walk_files(dir) {
         guard some h = bench_split_path(dir, path) else { continue; }
         if filter.len() > 0 && h.test.find(filter, 0) < 0 { continue; }
         guard some t = bench_summarize(h.milestone, h.test, bench_parse_history(File.read_text(path))) else { continue; }

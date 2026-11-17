@@ -321,7 +321,7 @@ fn oa_schema_ref_name(src: str, schema_at: i64) -> str {
     if r.len() > 0 { return openapi_resolve_ref(r); }
     let items = oa_get(src, schema_at, "items");
     let ir = oa_get_string(src, items, "$ref");
-    if ir.len() > 0 { return "List<" + openapi_resolve_ref(ir) + ">"; }
+    if ir.len() > 0 { return nameof(List) + "<" + openapi_resolve_ref(ir) + ">"; }
     return "";
 }
 
@@ -488,7 +488,7 @@ pub fn openapi_parse_spec(src: str) -> OpenApiDoc {
 
 pub fn openapi_synthesize_client_interface(ref doc: OpenApiDoc) -> str {
     var out: List<str> = ["// Client Interface synthesized for " + doc.title + " v" + doc.version + "\n"];
-    out.push("pub interface IApiClient {\n");
+    out.push(nameof(pub) + " " + nameof(interface) + " IApiClient {\n");
 
     var i = 0;
     while i < doc.operations.len() {
@@ -504,11 +504,11 @@ pub fn openapi_synthesize_client_interface(ref doc: OpenApiDoc) -> str {
             if param_sig.len() > 0 { param_sig = param_sig + ", "; }
             param_sig = param_sig + "body: " + op.request_schema;
         }
-        var ret_ty = "void";
+        var ret_ty = nameof(void);
         if op.response_schema.len() > 0 {
             ret_ty = op.response_schema;
         }
-        out.push("    fn " + op.operation_id + "(" + param_sig + ") -> " + ret_ty + ";\n");
+        out.push("    " + nameof(fn) + " " + op.operation_id + "(" + param_sig + ") -> " + ret_ty + ";\n");
         i = i + 1;
     }
 

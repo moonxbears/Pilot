@@ -86,7 +86,7 @@ pub pure fn verify_retained_escape(lattice_bits: i64, is_pinned_or_iso: bool) ->
 }
 
 pub fn esc_fn_is_retained(fn_nid: i64) -> bool {
-    return rt_decl_has_attr(fn_nid, "Retained");
+    return rt_decl_has_attr(fn_nid, nameof(Retained));
 }
 
 // Deduces the 2-bit lattice (`0..3`) of an AST expression `expr_nid` within `env`.

@@ -507,7 +507,7 @@ fn check_member_read(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     // A `[Lang]` primitive (`i64`, `str`) also has members the engine
     // answers; any of its `partial` declarations may carry the mark.
     for d in nl_get(p.type_decls, p.tt.name[rt]) {
-        if prog_attr_args(p, d, "Lang") != none { return; }
+        if prog_attr_args(p, d, nameof(Lang)) != none { return; }
     }
     let name = sym_text(s, field);
     if prog_member(p, rt, name) != none || is_declared_ext_method(p, name) { return; }
@@ -691,7 +691,7 @@ fn check_cast(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     if prog_value_class(p, src) != "" && prog_value_class(p, dst) != "" { return; }
     // A one-character literal is cast as the character it holds.
     if is_scalar_literal(p, lhs(s, n)) && is_integer_class(prog_value_class(p, dst)) { return; }
-    if some _m = prog_member(p, src, "as") { return; }
+    if some _m = prog_member(p, src, nameof(as)) { return; }
     sink_error(sink, n, "TYPE003",
         f"cannot cast `{ty_display(p.tt, src)}` to `{ty_display(p.tt, dst)}`");
 }
@@ -996,7 +996,7 @@ fn check_dropped_result(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
 /// What a condition `c` tests: the operand of `!c`, else `c`. A wrong
 /// type under `if !x` (what `assert(x)` expands to) is then reported once,
 /// as a condition.
-fn condition_operand(s: Snapshot, c: i64) -> i64 {
+fn condition_operand(ref s: Snap, c: i64) -> i64 {
     if c >= 0 && kind(s, c) == nk_unary() && flags(s, c) == unary_not() { return lhs(s, c); }
     return c;
 }

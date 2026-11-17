@@ -1,0 +1,264 @@
+// ==============================================================================
+// FILE: selfhost/ir/interp_ops.pilot
+// F5: the operators and numeric conversions of the PilIR interpreter.
+// ==============================================================================
+// Each operator follows the seed engine's rules (crates/pilot-vm ops.rs,
+// checked.rs) on `IrVal`s: integers wrap in 64 bits, an operation with an
+// unsigned integer or a character is unsigned, any float makes it a float
+// operation, `+` with text joins the two values' printed text. The integer
+// and float arithmetic itself is the interpreter's own operators, which run
+// on the seed and so are the seed's; what would stop the interpreter
+// (dividing by zero, comparing with NaN) is checked first and becomes the
+// program's fault with the seed's message.
+pub lvl(0) pkg selfhost.ir;
+
+
+/// A binary operator.
+pub enum IrOp : u8 { Add, Sub, Mul, Div, Rem, Pow, And, Or, Xor, Shl, Shr, Eq, Ne, Lt, Le, Gt, Ge }
+
+/// Each operator's symbol, in `IrOp` order, as the seed's messages write it.
+const IR_OP_SYMBOLS: List<str> = ["+", "-", "*", "/", "%", "**", "&", "|", "^", "<<", ">>", "==", "!=", "<", "<=", ">", ">=",];
+
+pub fn ir_op_symbol(op: IrOp) -> str => IR_OP_SYMBOLS[op as i64];
+
+/// `a op b`, or none with the program's fault raised.
+pub fn ir_binary(op: IrOp, a: IrVal, b: IrVal, var ref fault: IrFault) -> IrVal {
+    if op == IrOp.Eq { return IrVal.Bool(ir_equal(a, b)); }
+    if op == IrOp.Ne { return IrVal.Bool(!ir_equal(a, b)); }
+    if op == IrOp.Lt || op == IrOp.Le || op == IrOp.Gt || op == IrOp.Ge { return ir_compare(op, a, b, fault); }
+    if op == IrOp.And || op == IrOp.Or || op == IrOp.Xor || op == IrOp.Shl || op == IrOp.Shr { return ir_bitwise(op, a, b, fault); }
+    return ir_arith(op, a, b, fault);
+}
+
+fn type_error(op: IrOp, a: IrVal, b: IrVal, var ref fault: IrFault) -> IrVal {
+    raise_fault(fault, f"cannot apply `{ir_op_symbol(op)}` to {ir_kind(a)} and {ir_kind(b)}");
+    return IrVal.Nil;
+}
+
+fn division_by_zero(var ref fault: IrFault) -> IrVal {
+    raise_fault(fault, "integer division by zero");
+    return IrVal.Nil;
+}
+
+fn is_text(v: IrVal) -> bool => switch v {
+    case Text: true;
+    default: false;
+};
+
+/// `+ - * / % **`.
+pub fn ir_arith(op: IrOp, a: IrVal, b: IrVal, var ref fault: IrFault) -> IrVal {
+    if op == IrOp.Add && (is_text(a) || is_text(b)) { return IrVal.Text(ir_display(a) + ir_display(b)); }
+    let ka = num_class(a);
+    let kb = num_class(b);
+    if ka == IrNum.NotNum || kb == IrNum.NotNum { return type_error(op, a, b, fault); }
+    if ka == IrNum.FloatNum || kb == IrNum.FloatNum { return float_arith(op, num_f64(a), num_f64(b)); }
+    if ka == IrNum.SignedNum && kb == IrNum.SignedNum { return int_arith(op, num_bits(a), num_bits(b), fault); }
+    return uint_arith(op, num_bits(a) as u64, num_bits(b) as u64, fault);
+}
+
+fn int_arith(op: IrOp, x: i64, y: i64, var ref fault: IrFault) -> IrVal {
+    if op == IrOp.Add { return IrVal.Int(x + y); }
+    if op == IrOp.Sub { return IrVal.Int(x - y); }
+    if op == IrOp.Mul { return IrVal.Int(x * y); }
+    if op == IrOp.Pow {
+        // A negative power is a float (`2 ** -1` is 0.5).
+        if y < 0 { return IrVal.Flt((x as f64) ** (y as f64)); }
+        return IrVal.Int(x ** y);
+    }
+    if y == 0 { return division_by_zero(fault); }
+    if op == IrOp.Div { return IrVal.Int(x / y); }
+    return IrVal.Int(x % y);
+}
+
+fn uint_arith(op: IrOp, x: u64, y: u64, var ref fault: IrFault) -> IrVal {
+    if op == IrOp.Add { return IrVal.UInt(x + y); }
+    if op == IrOp.Sub { return IrVal.UInt(x - y); }
+    if op == IrOp.Mul { return IrVal.UInt(x * y); }
+    if op == IrOp.Pow { return IrVal.UInt(x ** y); }
+    if y == (0 as u64) { return division_by_zero(fault); }
+    if op == IrOp.Div { return IrVal.UInt(x / y); }
+    return IrVal.UInt(x % y);
+}
+
+/// IEEE 754 arithmetic: dividing by zero gives an infinity or NaN, `%` has
+/// the dividend's sign.
+fn float_arith(op: IrOp, x: f64, y: f64) -> IrVal {
+    if op == IrOp.Add { return IrVal.Flt(x + y); }
+    if op == IrOp.Sub { return IrVal.Flt(x - y); }
+    if op == IrOp.Mul { return IrVal.Flt(x * y); }
+    if op == IrOp.Div { return IrVal.Flt(x / y); }
+    if op == IrOp.Rem { return IrVal.Flt(x % y); }
+    return IrVal.Flt(x ** y);
+}
+
+/// `& | ^ << >>`: on integers (unsigned when either is unsigned or a
+/// character; a shift count is taken modulo 64, `>>` of a signed value is
+/// arithmetic), or `& | ^` on two booleans.
+pub fn ir_bitwise(op: IrOp, a: IrVal, b: IrVal, var ref fault: IrFault) -> IrVal {
+    let ka = num_class(a);
+    let kb = num_class(b);
+    let ints = (ka == IrNum.SignedNum || ka == IrNum.UnsignedNum) && (kb == IrNum.SignedNum || kb == IrNum.UnsignedNum);
+    if ints && (ka == IrNum.UnsignedNum || kb == IrNum.UnsignedNum) {
+        let x = num_bits(a) as u64;
+        let y = num_bits(b) as u64;
+        if op == IrOp.And { return IrVal.UInt(x & y); }
+        if op == IrOp.Or { return IrVal.UInt(x | y); }
+        if op == IrOp.Xor { return IrVal.UInt(x ^ y); }
+        if op == IrOp.Shl { return IrVal.UInt(x << y); }
+        return IrVal.UInt(x >> y);
+    }
+    if ints {
+        let x = num_bits(a);
+        let y = num_bits(b);
+        if op == IrOp.And { return IrVal.Int(x & y); }
+        if op == IrOp.Or { return IrVal.Int(x | y); }
+        if op == IrOp.Xor { return IrVal.Int(x ^ y); }
+        if op == IrOp.Shl { return IrVal.Int(x << y); }
+        return IrVal.Int(x >> y);
+    }
+    switch a {
+        case Bool(x): {
+            switch b {
+                case Bool(y): {
+                    if op == IrOp.And { return IrVal.Bool(x && y); }
+                    if op == IrOp.Or { return IrVal.Bool(x || y); }
+                    if op == IrOp.Xor { return IrVal.Bool(x != y); }
+                    return type_error(op, a, b, fault);
+                }
+                default: return type_error(op, a, b, fault);
+            }
+        }
+        default: return type_error(op, a, b, fault);
+    }
+}
+
+/// `< <= > >=`: between numbers (by value across kinds), text (by bytes)
+/// or booleans (`false < true`).
+pub fn ir_compare(op: IrOp, a: IrVal, b: IrVal, var ref fault: IrFault) -> IrVal {
+    var c = 0;
+    let ka = num_class(a);
+    let kb = num_class(b);
+    if ka != IrNum.NotNum && kb != IrNum.NotNum {
+        if ka == IrNum.FloatNum || kb == IrNum.FloatNum {
+            let x = num_f64(a);
+            let y = num_f64(b);
+            if x != x || y != y {
+                raise_fault(fault, "comparison with NaN");
+                return IrVal.Nil;
+            }
+            c = if x < y { -1 } else if x > y { 1 } else { 0 };
+        } else {
+            c = int_compare(a, b);
+        }
+    } else {
+        switch a {
+            case Text(x): {
+                switch b {
+                    case Text(y): c = if x < y { -1 } else if x > y { 1 } else { 0 };
+                    default: return type_error(op, a, b, fault);
+                }
+            }
+            case Bool(x): {
+                switch b {
+                    case Bool(y): c = (if x { 1 } else { 0 }) - (if y { 1 } else { 0 });
+                    default: return type_error(op, a, b, fault);
+                }
+            }
+            default: return type_error(op, a, b, fault);
+        }
+    }
+    if op == IrOp.Lt { return IrVal.Bool(c < 0); }
+    if op == IrOp.Le { return IrVal.Bool(c <= 0); }
+    if op == IrOp.Gt { return IrVal.Bool(c > 0); }
+    return IrVal.Bool(c >= 0);
+}
+
+// ------------------------------------------------------------------------------
+// Conversions
+// ------------------------------------------------------------------------------
+
+/// 2^63 and 2^64 as floats.
+const TWO_63: f64 = 9223372036854775808.0;
+const TWO_64: f64 = 18446744073709551616.0;
+
+/// `v` converted to a register of class `rc` and `width` bits, as the seed
+/// converts `T(x)` (ops.rs `convert`): a 1-bit register holds a boolean
+/// (true unless the number is zero), floats truncate toward zero and must
+/// fit 64 bits, integers wrap to the width, a 32-bit float rounds to
+/// binary32. A list or record passes through a 64-bit integer register
+/// unchanged.
+pub fn ir_convert(v: IrVal, rc: u8, width: i64, var ref fault: IrFault) -> IrVal {
+    let is_int = rc == reg_class_gpr_signed() || rc == reg_class_gpr_unsigned();
+    switch v {
+        case Seq: if is_int && width >= 64 { return v; }
+        case Rec: if is_int && width >= 64 { return v; }
+        default: {}
+    }
+    var n = v;
+    if num_class(v) == IrNum.NotNum {
+        switch v {
+            case Bool(b): n = IrVal.Int(if b { 1 } else { 0 });
+            default: {
+                raise_fault(fault, f"cannot convert {ir_kind(v)} to a number");
+                return IrVal.Nil;
+            }
+        }
+    }
+    if width == 1 { return IrVal.Bool(num_f64(n) != 0.0 || num_f64(n) != num_f64(n)); }
+    if width <= 0 {
+        raise_fault(fault, "cannot convert a value to a type with no bits");
+        return IrVal.Nil;
+    }
+    if rc == reg_class_simd_float() {
+        let f = num_f64(n);
+        return IrVal.Flt(if width == 32 { round_binary32(f) } else { f });
+    }
+    if !is_int {
+        raise_fault(fault, f"no numeric conversion to a `{reg_class_name(rc)}` register");
+        return IrVal.Nil;
+    }
+    var bits = 0;
+    if num_class(n) == IrNum.FloatNum {
+        let t = trunc(num_f64(n));
+        if rc == reg_class_gpr_unsigned() && t >= 0.0 && t < TWO_64 {
+            bits = (t as u64) as i64;
+        } else if t >= 0.0 - TWO_63 && t < TWO_63 {
+            bits = t as i64;
+        } else {
+            raise_fault(fault, f"{num_f64(n)} does not fit an integer");
+            return IrVal.Nil;
+        }
+    } else {
+        bits = num_bits(n);
+    }
+    if width >= 64 { return if rc == reg_class_gpr_unsigned() { IrVal.UInt(bits as u64) } else { IrVal.Int(bits) }; }
+    let s = 64 - width;
+    if rc == reg_class_gpr_signed() { return IrVal.Int((bits << s) >> s); }
+    // Zero-extended: a logical shift on the unsigned bits.
+    return IrVal.Int((((bits as u64) << (s as u64)) >> (s as u64)) as i64);
+}
+
+/// `x` rounded toward zero (NaN and the infinities stay as they are).
+fn trunc(x: f64) -> f64 {
+    if x != x || x - x != 0.0 { return x; }
+    // Past 2^52 every float is an integer.
+    if x >= 4503599627370496.0 || x <= -4503599627370496.0 { return x; }
+    let whole = (x as i64) as f64;
+    return whole;
+}
+
+/// `x` rounded to the nearest binary32 value (ties to even; past the
+/// largest, an infinity).
+fn round_binary32(x: f64) -> f64 => (x as f32) as f64;
+
+/// `v` wrapped into a register of class `rc` and `width` bits after
+/// arithmetic (the seed's `wrap`): an integer in an integer register wider
+/// than one bit, or a float in a float register, is converted; anything
+/// else is left as it is.
+pub fn ir_wrap(v: IrVal, rc: u8, width: i64, var ref fault: IrFault) -> IrVal {
+    let k = num_class(v);
+    let is_int = rc == reg_class_gpr_signed() || rc == reg_class_gpr_unsigned();
+    if is_int && width > 1 && (k == IrNum.SignedNum || k == IrNum.UnsignedNum) { return ir_convert(v, rc, width, fault); }
+    if k == IrNum.FloatNum && rc == reg_class_simd_float() { return ir_convert(v, rc, width, fault); }
+    return v;
+}

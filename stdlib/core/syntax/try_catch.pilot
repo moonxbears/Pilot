@@ -41,7 +41,7 @@ comptime {
     // Lifting: a plain value where a failure-capable type is expected is
     // wrapped by that type's static `some` or `ok`; `none` there is its
     // static `none`. Read by the PilIR lowerer (selfhost/ir/lower_try.pilot).
-    bind_lift("some");
-    bind_lift("ok");
-    bind_absent("none");
+    bind_lift(nameof(some));
+    bind_lift(nameof(ok));
+    bind_absent(nameof(none));
 }

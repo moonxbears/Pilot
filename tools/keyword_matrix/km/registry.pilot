@@ -33,7 +33,7 @@ pub fn in_scope(id: i64) -> bool {
 
 pub fn read_categories(text: str) -> List<Category> {
     var out: List<Category> = [];
-    let marker = "KeywordCategoryDefAttr(";
+    let marker = nameof(KeywordCategoryDefAttr) + "(";
     var at = text.find(marker, 0);
     while at >= 0 {
         let from = (at as i64) + marker.len();
@@ -52,7 +52,7 @@ pub fn read_categories(text: str) -> List<Category> {
 pub fn read_entries(text: str) -> List<RegistryEntry> {
     var out: List<RegistryEntry> = [];
     let lines = lines_of(text);
-    let marker = "[KeywordDefAttr(";
+    let marker = "[" + nameof(KeywordDefAttr) + "(";
     var i = 0;
     while i < lines.len() {
         let line = lines[i].trim();
@@ -91,22 +91,16 @@ pub fn read_receptors(text: str) -> List<Receptor> {
     var out: List<Receptor> = [];
     for raw in lines_of(text) {
         let line = raw.trim();
-        let legacy = "__engine(Cfg.Hooks.receptor,";
-        let hook = "bind_receptor(";
-        var rest = "";
-        if line.starts_with(legacy) {
-            rest = line.slice(legacy.len(), line.len());
-        } else if line.starts_with(hook) {
-            rest = line.slice(hook.len(), line.len());
-        } else {
-            continue;
-        }
+        let hook = nameof(bind_receptor) + "(";
+        if !line.starts_with(hook) { continue; }
+        let rest = line.slice(hook.len(), line.len());
         let args = split_on(rest, ",");
         if args.len() < 3 { continue; }
         let name = args[0].trim();
         var word = "";
-        if name.starts_with("nameof(") && name.ends_with(")") {
-            word = name.slice(7, name.len() - 1);
+        let quoter = nameof(nameof) + "(";
+        if name.starts_with(quoter) && name.ends_with(")") {
+            word = name.slice(quoter.len(), name.len() - 1);
         } else if name.starts_with("\"") {
             let lits = string_literals(name);
             if lits.len() > 0 { word = lits[0]; }

@@ -92,14 +92,14 @@ pub struct WeaverProtocolRegistry : IObject {
         // The pillar interfaces. An attribute's pillar is never registered by
         // its name: it is derived from the interfaces its `...Attr`
         // declaration implements (see `classify_attribute`).
-        reg.register("ITypeWeaverAttribute", 1);
-        reg.register("IInterceptor", 2);
-        reg.register("IFieldWeaverAttribute", 3);
-        reg.register("IFormulaAttribute", 4);
-        reg.register("IReactiveAttribute", 5);
-        reg.register("IInheritedAttribute", 6);
-        reg.register("IEcsRule", 7);
-        reg.register("IPatchAttribute", 8);
+        reg.register(nameof(ITypeWeaverAttribute), 1);
+        reg.register(nameof(IInterceptor), 2);
+        reg.register(nameof(IFieldWeaverAttribute), 3);
+        reg.register(nameof(IFormulaAttribute), 4);
+        reg.register(nameof(IReactiveAttribute), 5);
+        reg.register(nameof(IInheritedAttribute), 6);
+        reg.register(nameof(IEcsRule), 7);
+        reg.register(nameof(IPatchAttribute), 8);
 
         return reg;
     }

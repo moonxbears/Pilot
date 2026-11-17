@@ -1,0 +1,29 @@
+// `File.create_new` creates a file only when nothing is there yet (the
+// host's exclusive create), so of several programs creating the same path
+// exactly one does; the lexer cache's build lock relies on it
+// (stdlib/pilot/lex/cache.pilot). `File.delete` removes a file.
+//
+// Expected, worked by hand, one line per step:
+//   create_new on a fresh path           true
+//   create_new on it again               false (it exists)
+//   its text is the first content        first
+//   delete it                            true
+//   exists afterwards                    false
+//   delete again                         false (nothing there)
+//   create_new after the delete          true
+//   its text                             second
+use Pilot.Core.File;
+
+fn main() {
+    let path = "target/file_create_new/lock.txt";
+    let _ = File.delete(path);
+    print(File.create_new(path, "first"));
+    print(File.create_new(path, "again"));
+    print(File.read_text(path));
+    print(File.delete(path));
+    print(File.exists(path));
+    print(File.delete(path));
+    print(File.create_new(path, "second"));
+    print(File.read_text(path));
+    let _ = File.delete(path);
+}

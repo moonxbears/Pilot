@@ -33,10 +33,14 @@ pub struct DeclaredFn : IValue {
     pub attrs: List<str>;
 }
 
-fn host_diags(ref raw: List<any>) -> List<HostDiag> {
+/// One diagnostic as the host gives it: code, message, file, start, end,
+/// severity (`Diag::to_host` in crates/pilot-cli/src/run.rs).
+type HostDiagRow = (str, str, str, i64, i64, i64);
+
+fn host_diags(ref raw: List<HostDiagRow>) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in raw {
-        out.push(HostDiag { code: d[0], message: d[1], file: d[2], start: d[3], end: d[4], severity: d[5] });
+        out.push(HostDiag { code: d.0, message: d.1, file: d.2, start: d.3, end: d.4, severity: d.5 });
     }
     return out;
 }
@@ -47,21 +51,45 @@ pub fn host_check(path: str) -> List<HostDiag> => host_diags(__engine("cli_check
 /// The self-hosted analyzer's diagnostics for the file `path`.
 pub fn host_analyze(path: str) -> List<HostDiag> => host_diags(__engine("cli_analyze", path));
 
+/// What a step of a function's chain does (`StepAction` in
+/// selfhost/cli/comptime_tool.pilot, which runs in the type checker's VM and
+/// is not linked here): the same variants in the same order, so the codes
+/// that cross the host match.
+pub enum HostStepAction : u8 {
+    /// A `[Live]` call that runs.
+    Live,
+    /// A `[Generate]` that writes its file.
+    Generate,
+    /// A user step attribute's `step`.
+    Step,
+    /// A step that decides on every call; stops at seam `attr.runtime_step`.
+    Runtime,
+    /// A `[Live]` or `[Generate]` that does not run at this moment.
+    Idle,
+}
+
+/// A step row as the type checker's VM gives it (`StepRow` in
+/// selfhost/cli/comptime_tool.pilot): action, file, line, group, then two
+/// texts the action gives meaning to.
+pub type HostStepRow = (HostStepAction, str, i64, i64, str, str);
+
 /// What `host_typecheck` gives: the type checker's diagnostics in the
 /// program's own files, and what else its entry found in the same pass.
 pub struct CheckedProgram {
     pub diags: List<HostDiag>;
-    pub rest:  any;
+    /// The rows of `comptime_runs` the same pass found, or none when it did
+    /// not look.
+    pub rest:  List<HostStepRow>?;
 }
 
 /// Runs the type checker made of `checker` (its sources in link order) over
-/// the program at `path`, calling `entry`, which gives `[diagnostic rows, run
-/// plan or none, anything else]` (`check_with_steps` in
+/// the program at `path`, calling `entry`, which gives `(diagnostic rows, run
+/// plan or none, step rows or none)` (`check_with_steps` in
 /// selfhost/cli/comptime_tool.pilot). A run plan is kept for the `host_run`
 /// that follows.
 pub fn host_typecheck(path: str, ref checker: List<str>, ref decls: List<str>, entry: str) -> CheckedProgram {
-    let raw: List<any> = __engine("cli_typecheck", path, checker, decls, entry);
-    return CheckedProgram { diags: host_diags(raw[0]), rest: raw[1] };
+    let raw: (List<HostDiagRow>, List<HostStepRow>?) = __engine("cli_typecheck", path, checker, decls, entry);
+    return CheckedProgram { diags: host_diags(raw.0), rest: raw.1 };
 }
 
 /// Runs the tool made of `files`, calling `entry`, over the program at
@@ -80,14 +108,15 @@ pub fn host_checked_tool(path: str, ref files: List<str>, ref decls: List<str>, 
 /// The diagnostics a checking tool is waiting on (`host_checked_tool`): the
 /// analyzer's, then the checker's.
 pub fn host_pending_diags() -> List<List<HostDiag>> {
-    let raw: List<any> = __engine("cli_pending_diags");
-    return [host_diags(raw[0]), host_diags(raw[1])];
+    let raw: (List<HostDiagRow>, List<HostDiagRow>) = __engine("cli_pending_diags");
+    return [host_diags(raw.0), host_diags(raw.1)];
 }
 
 /// Runs the tool made of `files`, calling `entry`, over the program at
 /// `path` linked with `decls`, as `host_program_tool` does; gives the value
-/// `entry` returns, or `none` when the program does not link.
-pub fn host_program_eval(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> any =>
+/// `entry` returns, or `none` when the program does not link. Its one
+/// caller's entry is `comptime_runs`, whose rows are `HostStepRow`s.
+pub fn host_program_eval(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> List<HostStepRow>? =>
     __engine("cli_program_eval", path, files, decls, entry);
 
 /// Runs the tool made of `files`, calling `entry`, on the text of the file

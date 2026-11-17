@@ -13,7 +13,7 @@ pub lvl(0) pkg selfhost.check;
 
 
 /// The seed token that runs one machine operation.
-pub pure fn asm_token() -> str => "asm";
+pub pure fn asm_token() -> str => nameof(asm);
 
 /// What a machine operation gives.
 pub enum AsmGives : u8 {

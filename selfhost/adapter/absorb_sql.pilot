@@ -553,8 +553,8 @@ pub fn sql_synthesize_query_signature(ref cat: SqlCatalog, q: SqlQueryDef) -> st
         param_sig = param_sig + pname + ": " + ptype;
         i = i + 1;
     }
-    let ret_type = if q.return_kind == "one" { "opt<RowView>" } else if q.return_kind == "exec" { "sql_count" } else { "List<RowView>" };
-    return "pub fn " + q.name + "(" + param_sig + ") -> " + ret_type;
+    let ret_type = if q.return_kind == "one" { nameof(opt) + "<RowView>" } else if q.return_kind == "exec" { "sql_count" } else { nameof(List) + "<RowView>" };
+    return nameof(pub) + " " + nameof(fn) + " " + q.name + "(" + param_sig + ") -> " + ret_type;
 }
 
 /// The statements that run the query and decode its rows. They hand the
@@ -570,7 +570,7 @@ pub fn sql_synthesize_query_wrapper(ref cat: SqlCatalog, q: SqlQueryDef, dialect
     }
     var out = "// Synthesized query wrapper for " + q.name + "\n";
     out = out + sql_synthesize_query_signature(cat, q) + " {\n";
-    out = out + "    let raw_query = \"" + sql_rewrite_placeholders(q.raw_sql, dialect) + "\";\n";
+    out = out + "    " + nameof(let) + " raw_query = \"" + sql_rewrite_placeholders(q.raw_sql, dialect) + "\";\n";
     out = out + sql_synthesize_query_body(q, dialect);
     out = out + "}\n";
     return out;

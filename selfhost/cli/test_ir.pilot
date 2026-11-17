@@ -242,11 +242,14 @@ pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
     }
     let opts = run_all(opt_cases, "opt");
     // Judged as they finish; reported in case order.
-    var outcomes: List<i64> = [];
+    // A case the run stopped before (`--fail-fast`) has no outcome.
+    var outcomes: List<CaseOutcome> = [];
+    var finished: List<bool> = [];
     var problems: List<List<str>> = [];
     var seams: List<str> = [];
     for c in cases {
-        outcomes.push(-1);
+        outcomes.push(CaseOutcome::Pass);
+        finished.push(false);
         problems.push([]);
         seams.push("");
     }
@@ -259,30 +262,30 @@ pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
         guard some f = pool.next() else { break; };
         let i = f.index;
         done = done + 1;
+        finished[i] = true;
         if f.timed_out {
             problems[i] = [test_timed_out(sel, cases[i])];
-            outcomes[i] = 1;
+            outcomes[i] = CaseOutcome::Fail;
         } else if stopped_at_seam(f.out) {
-            outcomes[i] = 2;
+            outcomes[i] = CaseOutcome::Seam;
             seams[i] = seam_line(f.out);
         } else {
             problems[i] = ir_problems(cases[i], f.out, opt_cases, opts);
-            outcomes[i] = if problems[i].len() == 0 { 0 } else { 1 };
+            outcomes[i] = if problems[i].len() == 0 { CaseOutcome::Pass } else { CaseOutcome::Fail };
         }
-        let outcome = if outcomes[i] == 2 { CaseOutcome::Seam } else if outcomes[i] == 1 { CaseOutcome::Fail } else { CaseOutcome::Pass };
-        test_progress(done, cases.len() as i64, outcome, cases[i], f.elapsed_ms);
-        if sel.fail_fast && outcomes[i] == 1 { break; }
+        test_progress(done, cases.len() as i64, outcomes[i], cases[i], f.elapsed_ms);
+        if sel.fail_fast && outcomes[i] == CaseOutcome::Fail { break; }
     }
     pool.finish();
     var not_run = 0;
     var i = 0;
     while i < cases.len() {
-        if outcomes[i] == -1 {
+        if !finished[i] {
             not_run = not_run + 1;
-        } else if outcomes[i] == 2 {
+        } else if outcomes[i] == CaseOutcome::Seam {
             tally.at_seam = tally.at_seam + 1;
             print(f"SEAM {cases[i]}: {seams[i]}");
-        } else if outcomes[i] == 1 {
+        } else if outcomes[i] == CaseOutcome::Fail {
             fail(cases[i], problems[i], tally);
         } else {
             tally.passed = tally.passed + 1;

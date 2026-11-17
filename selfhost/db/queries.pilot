@@ -74,7 +74,7 @@ pub fn db_reset_telemetry(db: i64) {
 pub fn setup_module_chain(db: i64, count: i64) {
     var i = 0;
     while i < count {
-        let src = "pub fn compute_" + i + "(x: i64) -> i64 { let v = x + 1; return v; }";
+        let src = nameof(pub) + " " + nameof(fn) + " compute_" + i + "(x: " + nameof(i64) + ") -> " + nameof(i64) + " { " + nameof(let) + " v = x + 1; " + nameof(return) + " v; }";
         pilotdb_set_file_source(db, i + 0, src, durability_workspace());
         if i > 0 {
             // Module i imports Module i - 1
@@ -90,12 +90,12 @@ pub fn mutate_fn_body(db: i64, file_id: u64, new_local_var: str) {
     let sig_end = old_src.find("{");
     if sig_end >= 0 {
         let sig_part = old_src.slice(0, sig_end + 1);
-        let new_src = sig_part + " let " + new_local_var + " = 42; return " + new_local_var + "; }";
+        let new_src = sig_part + " " + nameof(let) + " " + new_local_var + " = 42; " + nameof(return) + " " + new_local_var + "; }";
         pilotdb_set_file_source(db, file_id, new_src, durability_workspace());
     }
 }
 
 pub fn mutate_fn_signature(db: i64, file_id: u64, new_ret_type: str) {
-    let new_src = "pub fn compute_" + file_id + "(x: i64) -> " + new_ret_type + " { return none; }";
+    let new_src = nameof(pub) + " " + nameof(fn) + " compute_" + file_id + "(x: " + nameof(i64) + ") -> " + new_ret_type + " { " + nameof(return) + " " + nameof(none) + "; }";
     pilotdb_set_file_source(db, file_id, new_src, durability_workspace());
 }

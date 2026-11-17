@@ -33,17 +33,6 @@ fn file_sort_strs(ref items: List<str>) {
     }
 }
 
-fn file_join_lines(items: List<str>) -> str {
-    var out = "";
-    var i = 0;
-    while i < items.len() {
-        if i > 0 { out = out + "\n"; }
-        out = out + items[i];
-        i = i + 1;
-    }
-    return out;
-}
-
 fn file_join_path(dir: str, name: str) -> str {
     if dir == "" || dir == "." { return name; }
     if dir.ends_with("/") { return dir + name; }
@@ -125,6 +114,28 @@ fn file_ensure_parent_dirs(path: str) {
     let _ = RawMem.free(pbuf, path.len(), 1);
 }
 
+/// Writes all of `content` to the open `fd`, then closes it. Whether every
+/// byte was written.
+fn file_write_all(fd: i64, content: str) -> bool {
+    let n = content.len();
+    if n == 0 {
+        let _ = Fd.close(fd);
+        return true;
+    }
+    let cbuf = RawMem.alloc(n, 1);
+    let _ = str_copy_to_ptr(content, cbuf, n);
+    var off = 0;
+    var ok = true;
+    while off < n {
+        let w = Fd.write(fd, cbuf + off, n - off);
+        if w <= 0 { ok = false; break; }
+        off = off + w;
+    }
+    let _ = RawMem.free(cbuf, n, 1);
+    let _ = Fd.close(fd);
+    return ok;
+}
+
 [KeywordDefAttr(30, "Freestanding core filesystem interface for file I/O operations.")]
 pub struct File : IValue {
     [EngineOp]
@@ -192,27 +203,32 @@ pub struct File : IValue {
         if path == "" { return false; }
         file_ensure_parent_dirs(path);
         let pbuf = file_path_buf(path);
-        // READ(1) | WRITE(2) | CREAT(4) | TRUNC(8) = 15, mode 0o644 = 420
-        let fd = Fd.open_path(pbuf, path.len(), 14, 420);
+        let fd = Fd.open_path(pbuf, path.len(), fd_open_write() | fd_open_creat() | fd_open_trunc(), 420);
         let _ = RawMem.free(pbuf, path.len(), 1);
         if fd < 0 { return false; }
-        let n = content.len();
-        if n == 0 {
-            let _ = Fd.close(fd);
-            return true;
-        }
-        let cbuf = RawMem.alloc(n, 1);
-        let _ = str_copy_to_ptr(content, cbuf, n);
-        var off = 0;
-        var ok = true;
-        while off < n {
-            let w = Fd.write(fd, cbuf + off, n - off);
-            if w <= 0 { ok = false; break; }
-            off = off + w;
-        }
-        let _ = RawMem.free(cbuf, n, 1);
-        let _ = Fd.close(fd);
-        return ok;
+        return file_write_all(fd, content);
+    }
+
+    /// Creates `path` holding `content` only when nothing is there yet, in
+    /// one step on the host: of several programs creating the same path at
+    /// once, exactly one does. Whether this call created it.
+    pub static fn create_new(path: str, content: str) -> bool {
+        if path == "" { return false; }
+        file_ensure_parent_dirs(path);
+        let pbuf = file_path_buf(path);
+        let fd = Fd.open_path(pbuf, path.len(), fd_open_write() | fd_open_creat() | fd_open_excl(), 420);
+        let _ = RawMem.free(pbuf, path.len(), 1);
+        if fd < 0 { return false; }
+        return file_write_all(fd, content);
+    }
+
+    /// Removes the file `path`. Whether it was removed.
+    pub static fn delete(path: str) -> bool {
+        if path == "" { return false; }
+        let pbuf = file_path_buf(path);
+        let rc = File.remove(pbuf, path.len(), 0);
+        let _ = RawMem.free(pbuf, path.len(), 1);
+        return rc >= 0;
     }
 
     /// Moves `from` to `to`, replacing `to`, in one step on the host, so a
@@ -227,18 +243,31 @@ pub struct File : IValue {
         return rc >= 0;
     }
 
-    pub static fn list_dirs(path: str) -> str {
+    /// The names of the directories in `path`, sorted; none when it
+    /// cannot be read.
+    pub static fn list_dirs(path: str) -> List<str> {
         var dirs: List<str> = [];
         var files: List<str> = [];
-        if !file_read_dir_entries(path, dirs, files) { return ""; }
+        if !file_read_dir_entries(path, dirs, files) { return []; }
         file_sort_strs(dirs);
-        return file_join_lines(dirs);
+        return dirs;
     }
 
-    pub static fn walk_files(path: str) -> str {
+    /// The names of the files directly in `path` (not in its directories),
+    /// sorted.
+    pub static fn list_files(path: str) -> List<str> {
+        var dirs: List<str> = [];
+        var files: List<str> = [];
+        if !file_read_dir_entries(path, dirs, files) { return []; }
+        file_sort_strs(files);
+        return files;
+    }
+
+    /// The paths of every file under `path`, sorted.
+    pub static fn walk_files(path: str) -> List<str> {
         var out: List<str> = [];
         file_walk_rec(path, out);
         file_sort_strs(out);
-        return file_join_lines(out);
+        return out;
     }
 }

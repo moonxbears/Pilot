@@ -278,7 +278,7 @@ fn test_listed(ref names: List<str>, name: str) -> bool {
 pub fn test_programs_in(dir: str) -> List<str> {
     var out: List<str> = [];
     let prefix = if dir.ends_with("/") { dir } else { dir + "/" };
-    let files = test_lines(File.walk_files(dir));
+    let files = File.walk_files(dir);
     var case_dirs: List<str> = [];
     for f in files {
         if !f.ends_with(".stdout") { continue; }

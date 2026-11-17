@@ -243,15 +243,6 @@ pub fn backtick_spans(s: str) -> List<str> {
     return out;
 }
 
-/// The files under `dir` (one path per line from the host), sorted.
-pub fn sorted_lines(listing: str) -> List<str> {
-    var out: List<str> = [];
-    for line in lines_of(listing) {
-        if line.len() > 0 { out.push(line); }
-    }
-    return sort_strs(out);
-}
-
 /// `s` with its ASCII capital letters made small.
 pub fn lower(s: str) -> str {
     var out = "";

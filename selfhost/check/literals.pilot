@@ -58,7 +58,7 @@ fn number_end(ref inf: Infer, text: str) -> i64 {
 fn type_bits(ref p: Program, t: i64) -> i64 {
     if !ty_is_named(p.tt, t) { return -1; }
     for td in nl_get(p.type_decls, p.tt.name[t]) {
-        if some bits = prog_attr_nodes(p, td, "Bits") {
+        if some bits = prog_attr_nodes(p, td, nameof(Bits)) {
             if bits.len() >= 1 {
                 if some w = prog_const(p, bits[0]) { return w; }
             }

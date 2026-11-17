@@ -120,7 +120,7 @@ pub fn extract_node_signature_str(fn_id: i64) -> str {
     if fn_start == 4294967295 || fn_start < 0 {
         let sym = __engine(Cfg.ast.ast_node_sym, fn_id);
         let fn_name = __engine(Cfg.ast.sym_str, sym);
-        var res = "pub fn " + fn_name + "(";
+        var res = nameof(pub) + " " + nameof(fn) + " " + fn_name + "(";
         let cc = __engine(Cfg.ast.ast_child_count, fn_id);
         var pidx = 1;
         var pcount = 0;
@@ -629,7 +629,7 @@ pub fn handle_lsp_completion(offset: i64) {
         __engine(Cfg.ast.ast_emit_diag, 0, 1, "recv=" + recv_name);
 
         var s_id = -1;
-        if recv_name == "self" {
+        if recv_name == nameof(self) {
             // The last enclosing struct or interface: search from the end.
             var j = node_count - 1;
             while j >= 0 {
@@ -683,7 +683,7 @@ pub fn handle_lsp_completion(offset: i64) {
         }
 
         if s_id != -1 {
-            let is_inside_struct = (recv_name == "self");
+            let is_inside_struct = (recv_name == nameof(self));
             let is_iface_contract = (__engine(Cfg.ast.ast_node_kind, s_id) == 2);
             let s_start = __engine(Cfg.ast.ast_span_start, s_id);
             var struct_ext_ns = if s_start == 4294967295 || s_start < 0 { reflect_node_namespace(s_id) } else { "" };
@@ -708,14 +708,17 @@ pub fn handle_lsp_completion(offset: i64) {
                         else { is_pub = true; }
                     } else {
                         let lead_start = if c_start >= 16 { c_start - 16 } else { 0 };
+                        let pub_kw = nameof(pub) + " ";
+                        let open_kw = nameof(open);
+                        let priv_kw = nameof(priv) + " ";
+                        let export_kw = nameof(export) + " ";
+                        var lead_len = pub_kw.len();
+                        for kw in [open_kw, priv_kw, export_kw] { if kw.len() > lead_len { lead_len = kw.len(); } }
                         var p_scan = lead_start;
                         while p_scan < c_start {
-                            let s4 = __engine(Cfg.ast.source_slice, p_scan, p_scan + 4);
-                            if s4 == "pub " || s4 == "open" { is_pub = true; }
-                            let s5 = __engine(Cfg.ast.source_slice, p_scan, p_scan + 5);
-                            if s5 == "priv " { is_priv = true; }
-                            let s7 = __engine(Cfg.ast.source_slice, p_scan, p_scan + 7);
-                            if s7 == "export " { is_pub = true; }
+                            let lead = __engine(Cfg.ast.source_slice, p_scan, p_scan + lead_len);
+                            if lead.starts_with(pub_kw) || lead.starts_with(open_kw) || lead.starts_with(export_kw) { is_pub = true; }
+                            if lead.starts_with(priv_kw) { is_priv = true; }
                             p_scan = p_scan + 1;
                         }
                     }
@@ -823,17 +826,19 @@ pub fn handle_lsp_definition(offset: i64) {
             __engine(Cfg.ast.lsp_set_result, "{\"targetNode\":" + target_id + ",\"isImported\":true}");
             return;
         }
-        let pub_s = if s >= 4 { s - 4 } else { s };
-        let ident_s = s + 3;
-        let pat = "pub " + nameof(fn) + " " + word;
-        let pat_len = 7 + word.len();
+        let pub_kw = nameof(pub) + " ";
+        let fn_kw = nameof(fn) + " ";
+        let pub_s = if s >= pub_kw.len() { s - pub_kw.len() } else { s };
+        let ident_s = s + fn_kw.len();
+        let pat = pub_kw + fn_kw + word;
+        let pat_len = pat.len();
         var first_decl = pub_s;
         var first_ident = ident_s;
         // The first `pub fn <word>` that ends by `s`, found in one slice.
         let before = __engine(Cfg.ast.source_slice, 0, s);
         let at = before.find(pat, 0);
         if at >= 0 && at + pat_len <= s {
-            first_decl = at; first_ident = at + 7;
+            first_decl = at; first_ident = at + pub_kw.len() + fn_kw.len();
         }
         __engine(Cfg.ast.lsp_set_result, "{\"start\":" + s + ",\"end\":" + e + ",\"pubStart\":" + pub_s + ",\"identStart\":" + ident_s + ",\"declOffset\":" + first_decl + ",\"identOffset\":" + first_ident + "}");
         return;

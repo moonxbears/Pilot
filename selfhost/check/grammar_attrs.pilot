@@ -53,15 +53,15 @@ struct GrammarAttr : IValue {
 }
 
 fn grammar_attrs() -> List<GrammarAttr> => [
-    GrammarAttr { name: "Infix",     symbol_at: 2, word_at: -1, shape_at: -1, unary: false },
-    GrammarAttr { name: "InfixWord", symbol_at: 3, word_at: 0,  shape_at: -1, unary: false },
-    GrammarAttr { name: "Prefix",    symbol_at: 1, word_at: 2,  shape_at: -1, unary: true },
-    GrammarAttr { name: "Postfix",   symbol_at: 0, word_at: -1, shape_at: -1, unary: true },
-    GrammarAttr { name: "Shaped",    symbol_at: 3, word_at: 4,  shape_at: 0,  unary: false },
+    GrammarAttr { name: nameof(Infix),     symbol_at: 2, word_at: -1, shape_at: -1, unary: false },
+    GrammarAttr { name: nameof(InfixWord), symbol_at: 3, word_at: 0,  shape_at: -1, unary: false },
+    GrammarAttr { name: nameof(Prefix),    symbol_at: 1, word_at: 2,  shape_at: -1, unary: true },
+    GrammarAttr { name: nameof(Postfix),   symbol_at: 0, word_at: -1, shape_at: -1, unary: true },
+    GrammarAttr { name: nameof(Shaped),    symbol_at: 3, word_at: 4,  shape_at: 0,  unary: false },
 ];
 
 /// The shapes of `[Shaped]` that take one operand.
-fn unary_shapes() -> List<str> => ["Prefix", "Postfix"];
+fn unary_shapes() -> List<str> => [nameof(Prefix), nameof(Postfix)];
 
 /// Whether `sym` is, or starts with a delimiter that is always, structural
 /// syntax or a seed word. (`..` and `:=` start with `.` and `:` but lex as
@@ -81,7 +81,7 @@ fn arg_text(ref s: Snap, a: i64) -> str {
     if k == nk_str() || k == nk_ident() { return node_name(s, a); }
     if k == nk_call() {
         let ch = children(s, a);
-        if ch.len() == 2 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == "nameof" {
+        if ch.len() == 2 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == nameof(nameof) {
             return node_name(s, ch[1]);
         }
     }
@@ -117,9 +117,9 @@ fn fixity_text(f: Fixity) -> str {
 
 /// The fixity each operator attribute declares, for the ones that fix it.
 fn attr_fixity(attr: str) -> Fixity? {
-    if attr == "Infix" || attr == "InfixWord" { return some(Fixity::Infix); }
-    if attr == "Prefix" { return some(Fixity::Prefix); }
-    if attr == "Postfix" { return some(Fixity::Postfix); }
+    if attr == nameof(Infix) || attr == nameof(InfixWord) { return some(Fixity::Infix); }
+    if attr == nameof(Prefix) { return some(Fixity::Prefix); }
+    if attr == nameof(Postfix) { return some(Fixity::Postfix); }
     return none;
 }
 
@@ -129,16 +129,18 @@ fn is_word_byte(c: i64) -> bool => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) 
 /// its parameter list.
 fn op_pattern(ref s: Snap, d: i64) -> str {
     let text = node_text(s, d);
+    let kw = nameof(op);
+    let n = kw.len();
     var i = 0;
-    while i + 2 <= text.len() {
+    while i + n <= text.len() {
         let before = i == 0 || !is_word_byte(text.byte_at(i - 1));
-        let after = i + 2 >= text.len() || !is_word_byte(text.byte_at(i + 2));
-        if before && after && text.slice(i, i + 2) == "op" { break; }
+        let after = i + n >= text.len() || !is_word_byte(text.byte_at(i + n));
+        if before && after && text.slice(i, i + n) == kw { break; }
         i = i + 1;
     }
-    var j = i + 2;
+    var j = i + n;
     while j < text.len() && text.byte_at(j) != 40 { j = j + 1; }
-    return if j <= text.len() && i + 2 <= j { text.slice(i + 2, j).trim() } else { "" };
+    return if j <= text.len() && i + n <= j { text.slice(i + n, j).trim() } else { "" };
 }
 
 /// The byte positions of the holes in `pat`: each `_` not part of a word.
@@ -297,7 +299,7 @@ fn check_decl(ref p: Program, var ref sink: DiagSink, d: i64) -> bool {
         let given = if is_op { fn_params(s, d).len() + 1 } else { fn_params(s, d).len() };
         if given != operands {
             let what = if unary { "one operand" } else { "two operands" };
-            let decl = if is_op { f"op {pat}" } else { name };
+            let decl = if is_op { nameof(op) + " " + pat } else { name };
             sink_error(sink, d, "GRAM006", f"`[{ga.name}]` declares `{sym}` as an operator of {what}, but `{decl}` takes {given}");
             shape_reported = true;
         }

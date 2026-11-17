@@ -1,0 +1,20 @@
+// A runtime error deep in recursion lists the innermost 32 calls and counts
+// the rest, as the seed does (crates/pilot-vm vm.rs MAX_TRACE = 32; the IR
+// interpreter's report, selfhost/ir/fault.pilot).
+//
+// Worked by hand: main calls down(40), and down(n) calls down(n - 1) until
+// down(0) divides by zero. At the fault 41 calls are open: 40 made from the
+// one call in `down` (by down(40) .. down(1)) and 1 from `main`. The report
+// lists the innermost 32, all from that one place, as one line ending
+// "(32 times)", then "... and 9 more calls" (41 - 32).
+fn down(n: i64) -> i64 {
+    if n == 0 {
+        let z = n;
+        return 1 / z;
+    }
+    return down(n - 1);
+}
+
+fn main() {
+    print(down(40));
+}

@@ -110,7 +110,7 @@ pub fn synthesize_delegation_thunks(
 
 // Formats the synthesized forwarding thunk source code
 pub fn render_thunk_source(thunk: DelegationThunk) -> str {
-    let receiver = if thunk.is_mut { "var ref self" } else { "ref self" };
+    let receiver = if thunk.is_mut { nameof(var) + " " + nameof(ref) + " " + nameof(self) } else { nameof(ref) + " " + nameof(self) };
     var out = "    pub fn " + thunk.name + "(" + receiver;
     if thunk.params.len() > 0 {
         out = out + ", " + thunk.params;

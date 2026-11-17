@@ -344,13 +344,12 @@ pub partial struct {
 // 5. PILLAR 8 (100% PILOT-HOSTED): NON-DESTRUCTIVE FUNCTION CLONING & PATCHING
 // Uses `__ast_lines`, `__replace_ast`, and `__parse_ast` from `core.pilot`!
 // =========================================================================
-pub struct PatchPart : IValue {
-    pub kind: u8;
-    pub static pure:
-        fn all()       -> PatchPart => PatchPart { kind: 0 };
-        fn signature() -> PatchPart => PatchPart { kind: 1 };
-        fn params()    -> PatchPart => PatchPart { kind: 2 };
-        fn body()      -> PatchPart => PatchPart { kind: 3 };
+/// Which part of a function a `[Patch]` clones and replaces.
+pub enum PatchPart : u8 {
+    All,
+    Signature,
+    Params,
+    Body,
 }
 
 [Lang(Cfg.Lang.patch_attr_slot)]
@@ -361,7 +360,7 @@ pub interface IPatchAttribute : IAttribute {
 
 pub struct {
     // Interactive CST/AST Clone & Patch Builder:
-    // `[var contents = Patch(myorigfunc, PatchPart.body(), 3 .. 5)]`
+    // `[var contents = Patch(myorigfunc, ::Body, 3 .. 5)]`
     [Layout(c_abi)]
     PatchAttr<TTargetFn: IAnyValue> : IPatchAttribute, IValue {
         pub target_fn:   TTargetFn;

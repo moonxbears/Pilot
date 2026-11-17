@@ -601,7 +601,7 @@ pub fn sh_ast_eval_const_expr(arena: i64, nid: i64, bindings: i64) -> i64 {
         return sh_parse_int_str(op);
     }
     if k == "BoolLit" {
-        if op == "true" { return 1; }
+        if op == nameof(true) { return 1; }
         return 0;
     }
     if k == "IdentExpr" {
@@ -777,7 +777,7 @@ pub fn sh_ast_fold_constants_in_place(arena: i64, root_nid: i64) -> i64 {
             let v = sh_ast_eval_const_expr(arena, root_nid, -1);
             let op = sh_ast_op_text(arena, root_nid);
             let lit = if op == "!" {
-                sh_ast_alloc_node(arena, "BoolLit", if v != 0 { "true" } else { "false" })
+                sh_ast_alloc_node(arena, "BoolLit", if v != 0 { nameof(true) } else { nameof(false) })
             } else {
                 sh_ast_alloc_node(arena, "IntLit", "" + v)
             };
@@ -793,7 +793,7 @@ pub fn sh_ast_fold_constants_in_place(arena: i64, root_nid: i64) -> i64 {
             let v = sh_ast_eval_const_expr(arena, root_nid, -1);
             let is_cmp = op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" || op == "&&" || op == "||";
             let lit = if is_cmp {
-                sh_ast_alloc_node(arena, "BoolLit", if v != 0 { "true" } else { "false" })
+                sh_ast_alloc_node(arena, "BoolLit", if v != 0 { nameof(true) } else { nameof(false) })
             } else {
                 sh_ast_alloc_node(arena, "IntLit", "" + v)
             };
@@ -843,7 +843,7 @@ pub fn sh_ast_emit_pilot(arena: i64, node_id: i64) -> str {
     }
     if k == "UnaryExpr" {
         let inner_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
-        if op == "await" || op == "spawn" {
+        if op == nameof(await) || op == nameof(spawn) {
             return op + " " + inner_s;
         }
         return "(" + op + inner_s + ")";
@@ -864,10 +864,10 @@ pub fn sh_ast_emit_pilot(arena: i64, node_id: i64) -> str {
         return op + "(" + args_s + ")";
     }
     if k == "LetStmt" {
-        return "let " + op + " = " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ";";
+        return nameof(let) + " " + op + " = " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ";";
     }
     if k == "VarStmt" {
-        return "var " + op + " = " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ";";
+        return nameof(var) + " " + op + " = " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ";";
     }
     if k == "AssignStmt" {
         let lhs_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
@@ -876,7 +876,7 @@ pub fn sh_ast_emit_pilot(arena: i64, node_id: i64) -> str {
     }
     if k == "ReturnStmt" {
         if ccnt > 0 {
-            return "return " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ";";
+            return nameof(return) + " " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ";";
         }
         return "return;";
     }
@@ -885,14 +885,14 @@ pub fn sh_ast_emit_pilot(arena: i64, node_id: i64) -> str {
         let then_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 1));
         if ccnt >= 3 {
             let else_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 2));
-            return "if " + cond_s + " " + then_s + " else " + else_s;
+            return nameof(if) + " " + cond_s + " " + then_s + " " + nameof(else) + " " + else_s;
         }
-        return "if " + cond_s + " " + then_s;
+        return nameof(if) + " " + cond_s + " " + then_s;
     }
     if k == "WhileStmt" {
         let wcond = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
         let wbody = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 1));
-        return "while " + wcond + " " + wbody;
+        return nameof(while) + " " + wcond + " " + wbody;
     }
     if k == "LoopStmt" {
         return "loop " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
@@ -915,7 +915,7 @@ pub fn sh_ast_emit_pilot(arena: i64, node_id: i64) -> str {
         let sig_s = if sig != none { sig } else { "()" };
         let body_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
         let is_async = (sh_ast_flags(arena, node_id) & 64) != 0;
-        let prefix_s = if is_async { "pub async fn " } else { "pub fn " };
+        let prefix_s = if is_async { nameof(pub) + " " + nameof(async) + " " + nameof(fn) + " " } else { nameof(pub) + " " + nameof(fn) + " " };
         return prefix_s + op + sig_s + " " + body_s;
     }
     if k == "Program" || k == "SeqFragment" {

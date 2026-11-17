@@ -158,7 +158,7 @@ pub fn derive_eq_source(type_name: str, fields: List<DeriveField>) -> str {
         i = i + 1;
     }
     if count == 0 {
-        body = "true";
+        body = nameof(true);
     }
     var out = "impl IEquatable<" + type_name + "> for " + type_name + " {\n";
     out = out + "    pub pure fn op == (self, other: " + type_name + ") -> bool => " + body + ";\n";

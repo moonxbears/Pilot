@@ -15,33 +15,28 @@ pub lvl(0) pkg selfhost.ir;
 
 use selfhost.check.*;
 
-/// The probes of the program `p` describes, by statement node: the rows
-/// planned for it, in plan order (`[Debug]` from probes.pilot, then
-/// `[Coverage]` from coverage.pilot). Each row is `[node, capture, call,
-/// args, at]`; deferred calls collect under `deferred_key()`.
-pub fn probe_rows(var ref p: Program) -> Map<str, List<any>> {
-    let out = Map<str, List<any>>();
-    for row in probe_plan(p) {
-        let n: i64 = row[0];
-        add_row(out, n, [row[0], row[1], row[2], row[3], ProbeAt::After as i64]);
-    }
-    for row in coverage_plan(p) {
-        let n: i64 = row[0];
-        add_row(out, n, row);
-    }
-    out.set(deferred_key(), []);
+/// The probes of the program `p` describes, by statement node, in plan
+/// order (`[Debug]` from probes.pilot, then `[Coverage]` from coverage.pilot).
+pub fn probe_rows(var ref p: Program) -> Map<str, List<PlannedProbe>> {
+    let out = Map<str, List<PlannedProbe>>();
+    for pr in probe_plan(p) { add_row(out, pr); }
+    for pr in coverage_plan(p) { add_row(out, pr); }
     return out;
 }
 
-fn add_row(ref out: Map<str, List<any>>, n: i64, row: List<any>) {
-    var rows: List<any> = if out.has(key(n)) { out.get(key(n)) } else { [] };
-    rows.push(row);
-    out.set(key(n), rows);
+fn add_row(var ref out: Map<str, List<PlannedProbe>>, pr: PlannedProbe) {
+    let k = key(pr.node);
+    var rows: List<PlannedProbe> = if out.has(k) { out.get(k) } else { [] };
+    rows.push(pr);
+    out.set(k, rows);
 }
 
-/// Where the rows of `ProbeAt::Defer` calls go once their statement is
-/// reached; a scope holds `-(index + 1)` for one (selfhost/ir/lower_defer.pilot).
-fn deferred_key() -> str => "deferred";
+/// A `ProbeAt::Defer` call reached at statement `n`, waiting for its
+/// scope's exit (selfhost/ir/lower_defer.pilot).
+pub struct DeferredProbe {
+    pub probe: PlannedProbe;
+    pub n: i64;
+}
 
 /// Whether the plan puts a probe around node `n`.
 pub fn probed(ref lw: Lowerer, n: i64) -> bool => lw.probes.has(key(n));
@@ -56,7 +51,7 @@ fn text_const(var ref lw: Lowerer, text: str, n: i64) -> u32 =>
 fn target_value(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
     let saved = lw.plan.at;
-    lw.plan.at = Map<str, List<List<any>>>();
+    lw.plan.at = Map<str, List<AtRow>>();
     var v = ir_no_value();
     if kind(s, n) == nk_assign() {
         v = lower_expr(lw, lhs(s, n));
@@ -77,30 +72,25 @@ fn target_text(var ref lw: Lowerer, n: i64) -> u32 {
     return emit(lw, op_add(), 0, text_physics(lw), [text_const(lw, "", n), v], n);
 }
 
-fn rows_at(ref lw: Lowerer, n: i64) -> List<any> => if probed(lw, n) { lw.probes.get(key(n)) } else { [] };
+fn rows_at(ref lw: Lowerer, n: i64) -> List<PlannedProbe> => if probed(lw, n) { lw.probes.get(key(n)) } else { [] };
 
 /// Before statement `n` is lowered: its `ProbeAt::Before` calls, its
 /// `ProbeAt::Defer` calls registered with the innermost scope, and the text
 /// of its target when an after-call captures it (else no value).
 pub fn probe_before(var ref lw: Lowerer, n: i64) -> u32 {
     var captured = ir_no_value();
-    for r in rows_at(lw, n) {
-        let row: List<any> = r;
-        let at: i64 = row[4];
-        let capture: bool = row[1];
-        if at == ProbeAt::Before as i64 {
+    for row in rows_at(lw, n) {
+        if row.at == ProbeAt::Before {
             probe_call(lw, row, n, ir_no_value());
-        } else if at == ProbeAt::Defer as i64 {
+        } else if row.at == ProbeAt::Defer {
             if lw.defers.len() == 0 {
                 emit_trap(lw, "internal error: the probe plan defers a call outside any block", n);
                 ensure_open(lw);
             } else {
-                var later: List<any> = lw.probes[deferred_key()];
-                later.push([row, n]);
-                lw.probes.set(deferred_key(), later);
-                lw.defers[lw.defers.len() - 1].push(0 - later.len());
+                lw.later_probes.push(DeferredProbe { probe: row, n: n });
+                lw.defers[lw.defers.len() - 1].push(0 - lw.later_probes.len());
             }
-        } else if capture && captured == ir_no_value() {
+        } else if row.capture && captured == ir_no_value() {
             captured = target_text(lw, n);
         }
     }
@@ -110,20 +100,15 @@ pub fn probe_before(var ref lw: Lowerer, n: i64) -> u32 {
 /// After statement `n` is lowered: its `ProbeAt::After` calls, `captured`
 /// the text `probe_before` read.
 pub fn probe_after(var ref lw: Lowerer, n: i64, captured: u32) {
-    for r in rows_at(lw, n) {
-        let row: List<any> = r;
-        let at: i64 = row[4];
-        if at == ProbeAt::After as i64 { probe_call(lw, row, n, captured); }
+    for row in rows_at(lw, n) {
+        if row.at == ProbeAt::After { probe_call(lw, row, n, captured); }
     }
 }
 
 /// A deferred probe call, `marker` the `-(index + 1)` its scope holds.
 pub fn run_deferred_probe(var ref lw: Lowerer, marker: i64) {
-    let later: List<any> = lw.probes[deferred_key()];
-    let entry: List<any> = later[0 - marker - 1];
-    let row: List<any> = entry[0];
-    let n: i64 = entry[1];
-    probe_call(lw, row, n, ir_no_value());
+    let entry = lw.later_probes[0 - marker - 1];
+    probe_call(lw, entry.probe, entry.n, ir_no_value());
 }
 
 /// The text of the binding declared at `node` (a parameter or `let`), `""`
@@ -140,10 +125,9 @@ fn binding_text(var ref lw: Lowerer, node: i64, n: i64) -> u32 {
 }
 
 /// The call of probe `row` at statement `n`.
-fn probe_call(var ref lw: Lowerer, ref row: List<any>, n: i64, captured: u32) {
+fn probe_call(var ref lw: Lowerer, ref row: PlannedProbe, n: i64, captured: u32) {
     if ir_is_terminated(lw.f, lw.cur) { return; }
-    let call: str = row[2];
-    let args: List<any> = row[3];
+    let call = row.call;
     let decls = nl_get(lw.inf.p.fns, call);
     if decls.len() != 1 {
         emit_trap(lw, f"internal error: the probe plan calls `{call}`, which the program does not declare once", n);
@@ -152,20 +136,15 @@ fn probe_call(var ref lw: Lowerer, ref row: List<any>, n: i64, captured: u32) {
     }
     let bool_phy = layout_of(lw.ls, prog_slot_type(lw.inf.p, literal_slot(nk_bool())));
     var values: List<u32> = [];
-    for a in args {
-        let pair: List<any> = a;
-        let code: i64 = pair[0];
-        if code == ProbeArgKind::Text as i64 {
-            let t: str = pair[1];
-            values.push(text_const(lw, t, n));
-        } else if code == ProbeArgKind::Flag as i64 {
-            let on: bool = pair[1];
-            values.push(emit(lw, op_const_bits(), 0, bool_phy, [pool_int(lw, if on { 1 } else { 0 })], n));
-        } else if code == ProbeArgKind::TargetText as i64 {
+    for a in row.args {
+        if a.kind == ProbeArgKind::Text {
+            values.push(text_const(lw, a.text, n));
+        } else if a.kind == ProbeArgKind::Flag {
+            values.push(emit(lw, op_const_bits(), 0, bool_phy, [pool_int(lw, if a.flag { 1 } else { 0 })], n));
+        } else if a.kind == ProbeArgKind::TargetText {
             values.push(target_text(lw, n));
-        } else if code == ProbeArgKind::BindingText as i64 {
-            let b: i64 = pair[2];
-            values.push(binding_text(lw, b, n));
+        } else if a.kind == ProbeArgKind::BindingText {
+            values.push(binding_text(lw, a.node, n));
         } else {
             values.push(if captured == ir_no_value() { text_const(lw, "", n) } else { captured });
         }

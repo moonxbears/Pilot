@@ -180,7 +180,7 @@ pub fn cli_parse_argv(ref app: CliAppDef, argv: List<str>) -> CliParsedResult {
 
         if matched_arg_idx >= 0 {
             let a = app.args[matched_arg_idx as usize];
-            if a.arg_type == "bool" {
+            if a.arg_type == nameof(bool) {
                 res.parsed_keys.push(a.name);
                 res.parsed_values.push("true");
             } else if i + 1 < n {

@@ -63,9 +63,9 @@ fn main() {
     print("// (runtime/c/pilot_rt_str.h), so it seldom stops where the needle is not.");
     print("// The C emitter writes this table into every module that searches text");
     print("// (selfhost/transpile/c_family.pilot).");
-    print("pub pkg Pilot.Core.ByteRank;");
+    print(f"{nameof(pub)} {nameof(pkg)} Pilot.Core.ByteRank;");
     print("");
-    print("pub fn byte_rank() -> List<i64> => [");
+    print(f"{nameof(pub)} {nameof(fn)} {nameof(byte_rank)}() -> {nameof(List)}<{nameof(i64)}> => [");
     var row = 0;
     while row < 16 {
         var line = "   ";

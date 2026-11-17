@@ -450,31 +450,31 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
             let has_core = lsp_find_substr(doc, "Pilot.Core", 0) >= 0;
             if has_core {
                 comp_json = comp_json +
-                    ",{\"label\":\"IAnyValue\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"IValue\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"IReference\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"IObject\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"IGuard\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"IEnumerable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"IComparable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"IEquatable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"" + nameof(IAnyValue) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"" + nameof(IValue) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"" + nameof(IReference) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"" + nameof(IObject) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"" + nameof(IGuard) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"" + nameof(IEnumerable) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"" + nameof(IComparable) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"" + nameof(IEquatable) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
                     ",{\"label\":\"IDisposable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}";
             }
             if has_core && lsp_find_substr(doc, "Pilot.Core.Reflect", 0) >= 0 {
                 comp_json = comp_json +
-                    ",{\"label\":\"reflect_category_scope\",\"kind\":3,\"detail\":\"pub fn reflect_category_scope(cat_id: i64) -> str\"}" +
-                    ",{\"label\":\"reflect_category_badge\",\"kind\":3,\"detail\":\"pub fn reflect_category_badge(cat_id: i64) -> str\"}" +
-                    ",{\"label\":\"reflect_keyword_doc\",\"kind\":3,\"detail\":\"pub fn reflect_keyword_doc(cat_id: i64, word: str) -> str\"}" +
-                    ",{\"label\":\"reflect_category_words\",\"kind\":3,\"detail\":\"pub fn reflect_category_words(cat_id: i64) -> str\"}" +
-                    ",{\"label\":\"reflect_type_layout\",\"kind\":3,\"detail\":\"pub fn reflect_type_layout(name: str) -> ReflectTypeInfo\"}";
+                    ",{\"label\":\"" + nameof(reflect_category_scope) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_category_scope) + "(cat_id: " + nameof(i64) + ") -> " + nameof(str) + "\"}" +
+                    ",{\"label\":\"" + nameof(reflect_category_badge) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_category_badge) + "(cat_id: " + nameof(i64) + ") -> " + nameof(str) + "\"}" +
+                    ",{\"label\":\"" + nameof(reflect_keyword_doc) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_keyword_doc) + "(cat_id: " + nameof(i64) + ", word: " + nameof(str) + ") -> " + nameof(str) + "\"}" +
+                    ",{\"label\":\"" + nameof(reflect_category_words) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_category_words) + "(cat_id: " + nameof(i64) + ") -> " + nameof(str) + "\"}" +
+                    ",{\"label\":\"" + nameof(reflect_type_layout) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_type_layout) + "(name: " + nameof(str) + ") -> " + nameof(ReflectTypeInfo) + "\"}";
             }
             if lsp_find_substr(doc, "Pilot.Collections", 0) >= 0 {
                 comp_json = comp_json +
-                    ",{\"label\":\"IList\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
+                    ",{\"label\":\"" + nameof(IList) + "\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
                     ",{\"label\":\"IMap\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
                     ",{\"label\":\"ISet\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
-                    ",{\"label\":\"List\",\"kind\":7,\"detail\":\"struct List<T>\"}" +
-                    ",{\"label\":\"Map\",\"kind\":7,\"detail\":\"struct Map<K, V>\"}" +
+                    ",{\"label\":\"" + nameof(List) + "\",\"kind\":7,\"detail\":\"" + nameof(struct) + " " + nameof(List) + "<T>\"}" +
+                    ",{\"label\":\"" + nameof(Map) + "\",\"kind\":7,\"detail\":\"" + nameof(struct) + " " + nameof(Map) + "<K, V>\"}" +
                     ",{\"label\":\"Set\",\"kind\":7,\"detail\":\"struct Set<T>\"}" +
                     ",{\"label\":\"Stack\",\"kind\":7,\"detail\":\"struct Stack<T>\"}" +
                     ",{\"label\":\"Queue\",\"kind\":7,\"detail\":\"struct Queue<T>\"}" +
@@ -485,7 +485,7 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
             }
             if lsp_find_substr(doc, "Pilot.Crypto", 0) >= 0 {
                 comp_json = comp_json +
-                    ",{\"label\":\"sha256_hex\",\"kind\":3,\"detail\":\"pub fn sha256_hex(data: str) -> str\"}";
+                    ",{\"label\":\"" + nameof(sha256_hex) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(sha256_hex) + "(data: " + nameof(str) + ") -> " + nameof(str) + "\"}";
             }
             comp_json = comp_json + "]}";
             out_frames.push(encode_lsp_frame(comp_json));

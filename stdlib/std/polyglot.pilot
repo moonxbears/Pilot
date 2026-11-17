@@ -4,16 +4,19 @@
 // ==============================================================================
 pub pkg std.polyglot;
 
-[Layout(c_abi)]
-pub struct ForeignRuntimeId : IValue {
-    pub lang_code: u8; // 1: C/C++, 2: Rust, 3: Python, 4: JS/Node, 5: WASM
+/// The foreign runtime a handle belongs to.
+pub enum ForeignLang : u8 {
+    C = 1,      // C and C++
+    Rust = 2,
+    Python = 3,
+    Js = 4,     // JavaScript / Node
+    Wasm = 5,
 }
 
-pub pure fn lang_c()      -> u8 => 1;
-pub pure fn lang_rust()   -> u8 => 2;
-pub pure fn lang_python() -> u8 => 3;
-pub pure fn lang_js()     -> u8 => 4;
-pub pure fn lang_wasm()   -> u8 => 5;
+[Layout(c_abi)]
+pub struct ForeignRuntimeId : IValue {
+    pub lang_code: ForeignLang;
+}
 
 pub struct ForeignHandle : IObject {
     pub runtime: ForeignRuntimeId;
@@ -22,7 +25,7 @@ pub struct ForeignHandle : IObject {
     ~self() {}
 }
 
-pub pure fn foreign_handle_new(lang: u8, ptr: usize) -> ForeignHandle {
+pub pure fn foreign_handle_new(lang: ForeignLang, ptr: usize) -> ForeignHandle {
     return ForeignHandle {
         runtime: ForeignRuntimeId { lang_code: lang },
         ptr_val: ptr,

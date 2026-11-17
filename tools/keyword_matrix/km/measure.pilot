@@ -248,5 +248,5 @@ fn is_rule_header(line: str, word: str) -> bool {
     if rest.len() == 0 || is_ident_byte(rest.byte_at(0)) { return false; }
     let arrow = rest.find("=>", 0);
     if arrow < 0 { return false; }
-    return rest.slice((arrow) + 2, rest.len()).trim().starts_with("quote");
+    return rest.slice((arrow) + 2, rest.len()).trim().starts_with(nameof(quote));
 }

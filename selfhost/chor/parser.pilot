@@ -84,7 +84,7 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
         if pos >= n { break; }
 
         let kw = chor_read_ident(src, pos);
-        if kw == "blueprint" {
+        if kw == nameof(blueprint) {
             pos = chor_skip_ws(src, pos + 9);
             let bp_name = chor_read_ident(src, pos);
             bp.name = bp_name;
@@ -134,7 +134,7 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
         }
 
         // role Name [HardRealtime] { reads: ...; writes: ...; emits: ...; receives: ...; }
-        if kw == "role" {
+        if kw == nameof(role) {
             pos = chor_skip_ws(src, pos + 4);
             let r_name = chor_read_ident(src, pos);
             pos = chor_skip_ws(src, pos + r_name.len());
@@ -143,7 +143,7 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
             // Check [HardRealtime]
             if pos < n && src.byte_at(pos) == 91 { // '['
                 while pos < n && src.byte_at(pos) != 93 {
-                    if src.slice(pos, pos + 12) == "HardRealtime" { is_hrt = true; }
+                    if src.slice(pos, pos + nameof(HardRealtime).len()) == nameof(HardRealtime) { is_hrt = true; }
                     pos = pos + 1;
                 }
                 if pos < n && src.byte_at(pos) == 93 { pos = pos + 1; }
@@ -182,7 +182,7 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
         }
 
         // cue Name(PayloadType);
-        if kw == "cue" {
+        if kw == nameof(cue) {
             pos = chor_skip_ws(src, pos + 3);
             let c_name = chor_read_ident(src, pos);
             pos = chor_skip_ws(src, pos + c_name.len());
@@ -218,7 +218,7 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
         }
 
         // route FromRole.Cue -> ToRole.handler (transport: ::RingBuffer(1024, ::CoalesceLatest));
-        if kw == "route" {
+        if kw == nameof(route) {
             pos = chor_skip_ws(src, pos + 5);
             let from_part = chor_read_ident(src, pos);
             pos = chor_skip_ws(src, pos + from_part.len());
@@ -287,8 +287,8 @@ pub fn parse_pchor_source(src: str) -> BlueprintDef {
             var target = "";
             var prohibited = "";
             while pos < n && src.byte_at(pos) != 59 {
-                if src.slice(pos, pos + 4) == "role" {
-                    pos = chor_skip_ws(src, pos + 4);
+                if src.slice(pos, pos + nameof(role).len()) == nameof(role) {
+                    pos = chor_skip_ws(src, pos + nameof(role).len());
                     target = chor_read_ident(src, pos);
                 } else if src.slice(pos, pos + 10) == "cannot use" {
                     pos = chor_skip_ws(src, pos + 10);

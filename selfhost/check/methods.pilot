@@ -64,9 +64,9 @@ pub struct BuiltType {
     /// ones `without` hides and `with .. as` renames included, for static
     /// delegation `Bundle.method(var ref self, ..)`.
     pub delegates: Map<str, i64>;
-    /// `[bundle name, splice node]` per splice written in a `partial`
+    /// `(bundle name, splice node)` per splice written in a `partial`
     /// declaration, where a finding about that splice is reported.
-    pub partial_splices: List<List<any>>;
+    pub partial_splices: List<(str, i64)>;
     /// `Bundle.member` -> the name a splice's `with { member as name }`
     /// gives that member in this type, for the splices it writes and the
     /// ones those splice in turn; `alias_keys` lists the keys.
@@ -155,14 +155,14 @@ fn winner(ref sub: BuiltType, name: str) -> Member? {
     return sub.found[sub.sides.get(key)];
 }
 
-/// The splice modifiers listed for splice node `u`: `[sub-slot, member,
-/// alias]` rows.
-fn splice_rows(ref s: Snap, u: i64) -> List<List<any>> {
-    var out: List<List<any>> = [];
+/// The splice modifiers listed for splice node `u`: `(sub-slot, member,
+/// alias)` rows.
+fn splice_rows(ref s: Snap, u: i64) -> List<(i64, str, str)> {
+    var out: List<(i64, str, str)> = [];
     for row in s.splice_mods {
         if row[0] == u {
             let alias = if row[3] > 0 { sym_text(s, row[3]) } else { "" };
-            out.push([row[1], sym_text(s, row[2]), alias]);
+            out.push((row[1], sym_text(s, row[2]), alias));
         }
     }
     return out;
@@ -171,9 +171,9 @@ fn splice_rows(ref s: Snap, u: i64) -> List<List<any>> {
 fn directive_for(ref s: Snap, u: i64, bundle: str) -> BundleSpliceDirective {
     var d = bundle_splice_directive_new(bundle);
     for r in splice_rows(s, u) {
-        let sub: i64 = r[0];
-        let member: str = r[1];
-        let alias: str = r[2];
+        let sub = r.0;
+        let member = r.1;
+        let alias = r.2;
         if sub == splice_coalesce() { d.coalesce_fields.push(member); }
         if sub == splice_without() { d.without_items.push(member); }
         if sub == splice_with() && alias.len() > 0 {
@@ -206,7 +206,7 @@ pub fn type_extent(var ref p: Program, t: i64, depth: i64) -> TypeExtent? {
     let d = ty_decl(p.tt, t);
     let name = node_name(p.s, d);
     for decl in nl_get(p.type_decls, name) {
-        if some args = prog_attr_nodes(p, decl, "Bits") {
+        if some args = prog_attr_nodes(p, decl, nameof(Bits)) {
             if args.len() > 0 {
                 if some bits = prog_const(p, args[0]) {
                     let size = ((bits + 7) / 8) as usize;
@@ -264,7 +264,7 @@ fn field_lattice(var ref p: Program, m: i64, t: i64) -> i64 {
 /// The bits the `[Lattice(..)]` attribute of interface `name` declares, or -1.
 fn lattice_attr(var ref p: Program, name: str) -> i64 {
     for d in nl_get(p.type_decls, name) {
-        if some args = prog_attr_nodes(p, d, "Lattice") {
+        if some args = prog_attr_nodes(p, d, nameof(Lattice)) {
             if args.len() > 0 {
                 if some bits = prog_const(p, args[0]) { return bits; }
             }
@@ -401,7 +401,7 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
         if !sub.complete { bt.complete = false; }
         var dir = directive_for(s, u, bname);
         dir.from_partial = in_partial;
-        if in_partial { bt.partial_splices.push([bname, u]); }
+        if in_partial { bt.partial_splices.push((bname, u)); }
         bt.spliced.push(bname);
         for old_name in dir.with_names { note_alias(bt, bname + "." + old_name, dir.with_aliases[old_name]); }
         for k in sub.alias_keys {
@@ -479,14 +479,14 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
     for d in nl_get(p.ext_decls, name) {
         for m in type_members(s, d) {
             if is_method_kind(kind(s, m)) {
-                register(bt, member_name(s, m), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
+                register(bt, member_name(s, m), MemberTier::Tier5ScopedExtension, ext_prefix + nameof(ext),
                     Member { decl: m, names: bt.tparams, values: args }, false);
             }
         }
     }
     for f in nl_get(p.dotted_fns, name) {
         let full = node_name(s, f);
-        register(bt, full.slice(ext_prefix.len(), full.len()), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
+        register(bt, full.slice(ext_prefix.len(), full.len()), MemberTier::Tier5ScopedExtension, ext_prefix + nameof(ext),
             Member { decl: f, names: bt.tparams, values: args }, false);
     }
 
@@ -503,6 +503,7 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
     // plan checks its fields and destructor against it (COMP005). One that
     // declares none takes the bits its fields and destructor give it.
     bt.lattice = if bt.declares_lattice { bt.declared } else { plan.computed_lattice as i64 };
+    p.built[p.built_index.get(name)] = bt;
     return bt;
 }
 
@@ -637,8 +638,7 @@ fn finding_text(msg: str) -> str {
 /// (`'Bundle'`), else the type's declaration `decl`.
 fn finding_site(ref bt: BuiltType, msg: str, decl: i64) -> i64 {
     for row in bt.partial_splices {
-        let bname: str = row[0];
-        if msg.find("'" + bname + "'", 0) >= 0 { return row[1]; }
+        if msg.find("'" + row.0 + "'", 0) >= 0 { return row.1; }
     }
     return decl;
 }

@@ -24,15 +24,31 @@ pub struct TextEdit : IValue {
 
 pub pure fn text_edit_new(span: Span, repl: str) -> TextEdit => TextEdit { span: span, replacement: repl };
 
+/// How sure a fix is: applied by `--fix`, offered with holes to fill, or
+/// a guess the user confirms.
+pub enum FixApplicability : u8 {
+    MachineApplicable,
+    HasPlaceholders,
+    MaybeIncorrect,
+}
+
+/// How serious a diagnostic is (the JSON and SARIF reports write the value).
+pub enum DiagSeverity : u8 {
+    Error = 1,
+    Warning = 2,
+    Info = 3,
+    Hint = 4,
+}
+
 pub struct FixSuggestion : IObject {
     pub title:         str;
-    pub applicability: u8;
+    pub applicability: FixApplicability;
     pub edits:         List<TextEdit>;
 
     ~self() {}
 }
 
-pub fn fix_suggestion_new(title: str, app: u8) -> FixSuggestion {
+pub fn fix_suggestion_new(title: str, app: FixApplicability) -> FixSuggestion {
     return FixSuggestion {
         title:         title,
         applicability: app,
@@ -42,7 +58,7 @@ pub fn fix_suggestion_new(title: str, app: u8) -> FixSuggestion {
 
 pub struct Diagnostic : IObject {
     pub code:     str;
-    pub severity: u8;
+    pub severity: DiagSeverity;
     pub message:  str;
     pub span:     Span;
     pub notes:    List<str>;
@@ -51,7 +67,7 @@ pub struct Diagnostic : IObject {
     ~self() {}
 }
 
-pub fn diagnostic_new(code: str, sev: u8, msg: str, sp: Span) -> Diagnostic {
+pub fn diagnostic_new(code: str, sev: DiagSeverity, msg: str, sp: Span) -> Diagnostic {
     return Diagnostic {
         code:     code,
         severity: sev,
@@ -62,16 +78,11 @@ pub fn diagnostic_new(code: str, sev: u8, msg: str, sp: Span) -> Diagnostic {
     };
 }
 
-pub pure fn diag_sev_error()   -> u8 => 1;
-pub pure fn diag_sev_warning() -> u8 => 2;
-pub pure fn diag_sev_info()    -> u8 => 3;
-pub pure fn diag_sev_hint()    -> u8 => 4;
-
-pub pure fn diagnostic_is_error(diag: Diagnostic) -> bool => diag.severity == diag_sev_error();
+pub pure fn diagnostic_is_error(diag: Diagnostic) -> bool => diag.severity == DiagSeverity::Error;
 
 pub fn render_ansi(diag: Diagnostic, source: str) -> str {
-    let sev_str = if diag.severity == diag_sev_error() { "\x1b[1;31merror\x1b[0m" }
-                  else if diag.severity == diag_sev_warning() { "\x1b[1;33mwarning\x1b[0m" }
+    let sev_str = if diag.severity == DiagSeverity::Error { "\x1b[1;31merror\x1b[0m" }
+                  else if diag.severity == DiagSeverity::Warning { "\x1b[1;33mwarning\x1b[0m" }
                   else { "\x1b[1;34minfo\x1b[0m" };
     var preview = "";
     if source.len() > 0 && (diag.span.end as usize) <= source.len() {
@@ -81,7 +92,7 @@ pub fn render_ansi(diag: Diagnostic, source: str) -> str {
 }
 
 pub fn render_json(diag: Diagnostic) -> str {
-    return "{\"code\":\"" + diag.code + "\",\"severity\":" + diag.severity + ",\"message\":\"" + diag.message + "\"}";
+    return "{\"code\":\"" + diag.code + "\",\"severity\":" + (diag.severity as u8) + ",\"message\":\"" + diag.message + "\"}";
 }
 
 pub fn render_sarif(diags: List<Diagnostic>) -> str {

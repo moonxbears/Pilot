@@ -339,7 +339,7 @@ pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
                 let ends_operand = (last_b >= 48 && last_b <= 57) || (last_b >= 65 && last_b <= 90) ||
                     (last_b >= 97 && last_b <= 122) || last_b == 95 || last_b == 41 || last_b == 93 || last_b == 34;
                 let stmt = src.slice(line_first, (line_last + 1));
-                if ends_operand && (stmt.starts_with("let ") || stmt.starts_with("var ") || stmt.starts_with("return ")) {
+                if ends_operand && (stmt.starts_with(nameof(let) + " ") || stmt.starts_with(nameof(var) + " ") || stmt.starts_with(nameof(return) + " ")) {
                     let at = (line_last + 1) as u32;
                     let sp = source_span_new(file_id, at, at);
                     var d = diagnostic_with_primary_label("SYN001", diag_severity_error(), "Missing statement terminator ';'", sp, "insert ';'");
@@ -386,7 +386,7 @@ pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
             if (prev == 32 || prev == 10 || prev == 59 || prev == 123) && (next == 32 || next == 10) {
                 let sp = source_span_new(file_id, p as u32, (p + 3) as u32);
                 var d = diagnostic_with_primary_label("DECL005", diag_severity_error(), "Legacy keyword 'mut' is deprecated; use 'var'", sp, "replace 'mut' with 'var'");
-                let ed = cst_text_edit_new(sp, "var");
+                let ed = cst_text_edit_new(sp, nameof(var));
                 let fx = fix_suggestion_with_edit("Replace 'mut' with 'var'", fix_machine_applicable(), ed);
                 diagnostic_add_fix(var ref d, fx);
                 diags.push(d);
@@ -403,7 +403,7 @@ pub fn scan_and_suggest_fixes(src: str, file_id: u32) -> List<Diagnostic> {
             if (prev == 32 || prev == 10 || prev == 59 || prev == 123) && (next == 32 || next == 10) {
                 let sp = source_span_new(file_id, p as u32, (p + 5) as u32);
                 var d = diagnostic_with_primary_label("SYN003", diag_severity_error(), "Pattern branching uses 'switch' in Pilot (not 'match')", sp, "replace 'match' with 'switch'");
-                let ed = cst_text_edit_new(sp, "switch");
+                let ed = cst_text_edit_new(sp, nameof(switch));
                 let fx = fix_suggestion_with_edit("Replace 'match' with 'switch'", fix_machine_applicable(), ed);
                 diagnostic_add_fix(var ref d, fx);
                 diags.push(d);

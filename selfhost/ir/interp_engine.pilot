@@ -1,0 +1,494 @@
+// ==============================================================================
+// FILE: selfhost/ir/interp_engine.pilot
+// F5: the engine operations of the PilIR interpreter.
+// ==============================================================================
+// The engine operations a lowered program calls (`call_intrinsic`), run on
+// `IrVal`s with the seed engine's results and failure messages
+// (crates/pilot-vm stage_a_natives.rs, heap.rs). The text operations run
+// the interpreter's own text methods, which run on the seed and so are the
+// seed's (byte offsets, a slice rounded forward to a character boundary).
+// The operations on raw memory are the host's: their values cross to the
+// seed engine at its boundary (`host_checked`, selfhost/ir/fault.pilot).
+pub lvl(0) pkg selfhost.ir;
+
+
+/// An engine operation: its arguments, and the program's fault to raise
+/// when it fails; gives its result.
+pub type IrEngineOp = (List<IrVal>, IrFault) => IrVal;
+
+/// Fails with `message`.
+fn fail(var ref fault: IrFault, message: str) -> IrVal {
+    raise_fault(fault, message);
+    return IrVal.Nil;
+}
+
+/// Argument `i` of `op`, or none with the seed's message raised.
+fn arg(ref args: List<IrVal>, i: i64, op: str, var ref fault: IrFault) -> IrVal? {
+    if i < args.len() { return args[i]; }
+    raise_fault(fault, f"`{op}` expects at least {i + 1} argument(s), got {args.len()}");
+    return none;
+}
+
+fn int_arg(ref args: List<IrVal>, i: i64, op: str, var ref fault: IrFault) -> i64? {
+    guard some v = arg(args, i, op, fault) else { return none; };
+    if some n = ir_int(v) { return n; }
+    raise_fault(fault, f"`{op}` argument {i + 1} must be an integer, found {ir_kind(v)}");
+    return none;
+}
+
+fn text_arg(ref args: List<IrVal>, i: i64, op: str, var ref fault: IrFault) -> str? {
+    guard some v = arg(args, i, op, fault) else { return none; };
+    switch v {
+        case Text(s): return s;
+        default: {
+            raise_fault(fault, f"`{op}` argument {i + 1} must be a string, found {ir_kind(v)}");
+            return none;
+        }
+    }
+}
+
+fn list_arg(ref args: List<IrVal>, i: i64, op: str, var ref fault: IrFault) -> List<IrVal>? {
+    guard some v = arg(args, i, op, fault) else { return none; };
+    switch v {
+        case Seq(items): return items;
+        default: {
+            raise_fault(fault, f"`{op}` expects a list, found {ir_kind(v)}");
+            return none;
+        }
+    }
+}
+
+fn record_arg(ref args: List<IrVal>, i: i64, op: str, var ref fault: IrFault) -> Map<str, IrVal>? {
+    guard some v = arg(args, i, op, fault) else { return none; };
+    switch v {
+        case Rec(fields, layout): return fields;
+        default: {
+            raise_fault(fault, f"`{op}` expects a record, found {ir_kind(v)}");
+            return none;
+        }
+    }
+}
+
+/// The text the arguments print as: each printed, joined by one space.
+fn printed(ref args: List<IrVal>) -> str {
+    var out = "";
+    var i = 0;
+    while i < args.len() {
+        if i > 0 { out = out + " "; }
+        out = out + ir_display(args[i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// Output and faults
+// ------------------------------------------------------------------------------
+
+fn op_print(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    print(printed(args));
+    return IrVal.Nil;
+}
+
+fn op_eprint(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    eprint(printed(args));
+    return IrVal.Nil;
+}
+
+fn op_fault(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some v = arg(args, 0, "rt_fault", fault) else { return IrVal.Nil; };
+    return fail(fault, ir_display(v));
+}
+
+/// `seam(id, note)`: always stops the program, as `SEAM001`.
+fn op_seam(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some id = text_arg(args, 0, "seam_open", fault) else { return IrVal.Nil; };
+    let note = if args.len() > 1 { ir_display(args[1]) } else { "" };
+    return fail(fault, f"SEAM001: unconnected seam `{id}`: {note}");
+}
+
+// ------------------------------------------------------------------------------
+// Lists
+// ------------------------------------------------------------------------------
+
+fn op_list_new(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    let items: List<IrVal> = [];
+    return IrVal.Seq(items);
+}
+
+fn op_list_push(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some items = list_arg(args, 0, "list_push", fault) else { return IrVal.Nil; };
+    guard some item = arg(args, 1, "list_push", fault) else { return IrVal.Nil; };
+    items.push(item);
+    return args[0];
+}
+
+/// `list_extend(dst, src, deep)`: `src`'s values after `dst`'s; with `deep`
+/// `true`, a list among them is replaced by its own values, recursively.
+fn op_list_extend(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some dst = list_arg(args, 0, "list_extend", fault) else { return IrVal.Nil; };
+    guard some src = list_arg(args, 1, "list_extend", fault) else { return IrVal.Nil; };
+    guard some deep = arg(args, 2, "list_extend", fault) else { return IrVal.Nil; };
+    // `src` may be `dst` itself: what it holds now is what is added.
+    let from = ir_values_copy(src);
+    extend_with(dst, from, ir_is_true(deep));
+    return args[0];
+}
+
+fn extend_with(var ref dst: List<IrVal>, ref src: List<IrVal>, deep: bool) {
+    for v in src {
+        if deep {
+            switch v {
+                case Seq(inner): extend_with(dst, ir_values_copy(inner), true);
+                default: dst.push(v);
+            }
+        } else {
+            dst.push(v);
+        }
+    }
+}
+
+fn op_list_pop(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some items = list_arg(args, 0, "list_pop", fault) else { return IrVal.Nil; };
+    if items.len() == 0 { return fail(fault, "pop from an empty list"); }
+    return items.pop();
+}
+
+fn op_list_remove_at(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some items = list_arg(args, 0, "list_remove_at", fault) else { return IrVal.Nil; };
+    guard some k = arg(args, 1, "list_remove_at", fault) else { return IrVal.Nil; };
+    guard some i = ir_int(k) else { return fail(fault, f"`list_remove_at` list index must be an integer, found {ir_kind(k)}"); };
+    if i < 0 || i >= items.len() { return fail(fault, f"list index {i} out of bounds for length {items.len()}"); }
+    return items.remove_at(i);
+}
+
+fn op_is_null(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some v = arg(args, 0, "is_null", fault) else { return IrVal.Nil; };
+    return IrVal.Bool(ir_is_nil(v));
+}
+
+fn op_value_clone(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some v = arg(args, 0, "value_clone", fault) else { return IrVal.Nil; };
+    return ir_clone(v, fault);
+}
+
+// ------------------------------------------------------------------------------
+// Reading and writing by index or key
+// ------------------------------------------------------------------------------
+
+/// `obj[k]`: a list's value at `k`, a text's byte at `k`, a record's value
+/// under key `k` (none when it has none).
+fn op_map_get(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some obj = arg(args, 0, "map_get", fault) else { return IrVal.Nil; };
+    guard some k = arg(args, 1, "map_get", fault) else { return IrVal.Nil; };
+    switch obj {
+        case Seq(items): {
+            guard some i = ir_int(k) else { return fail(fault, f"`map_get` list index must be an integer, found {ir_kind(k)}"); };
+            if i < 0 || i >= items.len() { return fail(fault, f"list index {i} out of bounds for length {items.len()}"); }
+            return items[i];
+        }
+        case Text(s): {
+            if some i = ir_int(k) {
+                if i < 0 || i >= s.len() { return fail(fault, f"string index {i} out of bounds for length {s.len()}"); }
+                let b: i64 = s.byte_at(i);
+                return IrVal.Int(b);
+            }
+            return fail(fault, f"cannot read `{ir_key(k)}` from {ir_kind(obj)}");
+        }
+        case Rec(fields, layout): return fields.get(ir_key(k)) ?? IrVal.Nil;
+        default: return fail(fault, f"cannot read `{ir_key(k)}` from {ir_kind(obj)}");
+    }
+}
+
+/// `obj[k] = v`: gives `obj`.
+fn op_map_set(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some obj = arg(args, 0, "map_set", fault) else { return IrVal.Nil; };
+    guard some k = arg(args, 1, "map_set", fault) else { return IrVal.Nil; };
+    guard some v = arg(args, 2, "map_set", fault) else { return IrVal.Nil; };
+    switch obj {
+        case Seq(items): {
+            guard some i = ir_int(k) else { return fail(fault, f"`map_set` list index must be an integer, found {ir_kind(k)}"); };
+            if i < 0 || i >= items.len() { return fail(fault, f"list index {i} out of bounds for length {items.len()}"); }
+            items[i] = v;
+            return obj;
+        }
+        case Rec(fields, layout): {
+            fields.set(ir_key(k), v);
+            return obj;
+        }
+        default: return fail(fault, f"cannot assign `{ir_key(k)}` on {ir_kind(obj)}");
+    }
+}
+
+fn op_map_new(args: List<IrVal>, var ref fault: IrFault) -> IrVal => IrVal.Rec(Map<str, IrVal>(), none);
+
+fn op_map_has(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some fields = record_arg(args, 0, "map_has", fault) else { return IrVal.Nil; };
+    guard some k = arg(args, 1, "map_has", fault) else { return IrVal.Nil; };
+    return IrVal.Bool(fields.has(ir_key(k)));
+}
+
+fn op_map_remove(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some fields = record_arg(args, 0, "map_remove", fault) else { return IrVal.Nil; };
+    guard some k = arg(args, 1, "map_remove", fault) else { return IrVal.Nil; };
+    return IrVal.Bool(fields.remove(ir_key(k)));
+}
+
+/// A record's keys, sorted by their bytes.
+fn op_map_keys(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some fields = record_arg(args, 0, "map_keys", fault) else { return IrVal.Nil; };
+    var keys = fields.keys();
+    sort_texts(keys);
+    var out: List<IrVal> = [];
+    for k in keys { out.push(IrVal.Text(k)); }
+    return IrVal.Seq(out);
+}
+
+/// A record's values, in the order of its sorted keys.
+fn op_map_values(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some fields = record_arg(args, 0, "map_values", fault) else { return IrVal.Nil; };
+    var keys = fields.keys();
+    sort_texts(keys);
+    var out: List<IrVal> = [];
+    for k in keys { out.push(fields.get(k) ?? IrVal.Nil); }
+    return IrVal.Seq(out);
+}
+
+// ------------------------------------------------------------------------------
+// Text
+// ------------------------------------------------------------------------------
+
+/// A text's length in bytes, a list's or a record's in values.
+fn op_str_len(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some v = arg(args, 0, "str_len", fault) else { return IrVal.Nil; };
+    switch v {
+        case Text(s): return IrVal.Int(s.len());
+        case Seq(items): return IrVal.Int(items.len());
+        case Rec(fields, layout): return IrVal.Int(fields.keys().len());
+        default: return fail(fault, f"`str_len` expects a string, list or record, found {ir_kind(v)}");
+    }
+}
+
+/// `str_slice(v, a, b)`: a text's bytes `a..b` (each clamped and moved
+/// forward to a character boundary; empty when `b < a`), or a list's
+/// values `a..b` (clamped).
+fn op_str_slice(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some a = int_arg(args, 1, "str_slice", fault) else { return IrVal.Nil; };
+    guard some b = int_arg(args, 2, "str_slice", fault) else { return IrVal.Nil; };
+    let v = args[0];
+    switch v {
+        case Text(s): return IrVal.Text(s.slice(a, b));
+        case Seq(items): {
+            let n = items.len();
+            let lo = if a < 0 { 0 } else if a > n { n } else { a };
+            var hi = if b < 0 { 0 } else if b > n { n } else { b };
+            if hi < lo { hi = lo; }
+            var out: List<IrVal> = [];
+            var i = lo;
+            while i < hi {
+                out.push(items[i]);
+                i = i + 1;
+            }
+            return IrVal.Seq(out);
+        }
+        default: return fail(fault, f"`str_slice` argument 1 must be a string, found {ir_kind(v)}");
+    }
+}
+
+/// `str_find(hay, needle[, start])`: the byte offset of the first
+/// `needle` at or after `start`, or -1.
+fn op_str_find(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some hay = text_arg(args, 0, "str_find", fault) else { return IrVal.Nil; };
+    guard some needle = text_arg(args, 1, "str_find", fault) else { return IrVal.Nil; };
+    if args.len() > 2 {
+        guard some start = int_arg(args, 2, "str_find", fault) else { return IrVal.Nil; };
+        return IrVal.Int(hay.find(needle, start));
+    }
+    return IrVal.Int(hay.find(needle));
+}
+
+/// Whether a list holds `needle` (a list or record only as itself), a
+/// record has key `needle`, or a text holds the text `needle`.
+fn op_str_contains(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some hay = arg(args, 0, "str_contains", fault) else { return IrVal.Nil; };
+    guard some needle = arg(args, 1, "str_contains", fault) else { return IrVal.Nil; };
+    switch hay {
+        case Seq(items): {
+            for v in items {
+                if contains_equal(v, needle) { return IrVal.Bool(true); }
+            }
+            return IrVal.Bool(false);
+        }
+        case Rec(fields, layout): return IrVal.Bool(fields.has(ir_key(needle)));
+        case Text(s): {
+            switch needle {
+                case Text(n): return IrVal.Bool(s.contains(n));
+                default: return fail(fault, f"`str_contains` argument 1 must be a string, found {ir_kind(needle)}");
+            }
+        }
+        default: return fail(fault, f"`str_contains` argument 1 must be a string, found {ir_kind(hay)}");
+    }
+}
+
+/// The seed's list membership test: values equal as scalars; the seed
+/// compares a list or record by its handle, which the interpreter does not
+/// see, so one never matches here (a gap only when a list holds the very
+/// list or record asked for).
+fn contains_equal(v: IrVal, needle: IrVal) -> bool {
+    switch v {
+        case Seq: return false;
+        case Rec: return false;
+        default: {}
+    }
+    switch needle {
+        case Seq: return false;
+        case Rec: return false;
+        default: return ir_equal(v, needle);
+    }
+}
+
+fn op_str_starts_with(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some s = text_arg(args, 0, "str_starts_with", fault) else { return IrVal.Nil; };
+    guard some p = text_arg(args, 1, "str_starts_with", fault) else { return IrVal.Nil; };
+    return IrVal.Bool(s.starts_with(p));
+}
+
+fn op_str_ends_with(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some s = text_arg(args, 0, "str_ends_with", fault) else { return IrVal.Nil; };
+    guard some p = text_arg(args, 1, "str_ends_with", fault) else { return IrVal.Nil; };
+    return IrVal.Bool(s.ends_with(p));
+}
+
+fn op_str_trim(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some s = text_arg(args, 0, "str_trim", fault) else { return IrVal.Nil; };
+    return IrVal.Text(s.trim());
+}
+
+fn op_str_replace(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some s = text_arg(args, 0, "str_replace", fault) else { return IrVal.Nil; };
+    guard some from = text_arg(args, 1, "str_replace", fault) else { return IrVal.Nil; };
+    guard some to = text_arg(args, 2, "str_replace", fault) else { return IrVal.Nil; };
+    return IrVal.Text(s.replace(from, to));
+}
+
+fn op_str_byte_at(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some s = text_arg(args, 0, "str_byte_at", fault) else { return IrVal.Nil; };
+    guard some i = int_arg(args, 1, "str_byte_at", fault) else { return IrVal.Nil; };
+    if i < 0 || i >= s.len() { return fail(fault, f"byte index {i} out of bounds for length {s.len()}"); }
+    let b: i64 = s.byte_at(i);
+    return IrVal.Int(b);
+}
+
+/// The text whose UTF-8 bytes a list holds, or none when they are not
+/// UTF-8.
+fn op_str_from_bytes(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some items = list_arg(args, 0, "str_from_bytes", fault) else { return IrVal.Nil; };
+    var bytes: List<i64> = [];
+    for v in items {
+        let b = switch v {
+            case Int(n): n;
+            case UInt(n): if n > (255 as u64) { -1 } else { n as i64 };
+            default: -1;
+        };
+        if b < 0 || b > 255 { return fail(fault, f"`str_from_bytes` takes bytes (0 to 255), found {ir_repr(v)}"); }
+        bytes.push(b);
+    }
+    if some s = from_utf8(bytes) { return IrVal.Text(s); }
+    return IrVal.Nil;
+}
+
+fn op_to_str(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some v = arg(args, 0, "to_str", fault) else { return IrVal.Nil; };
+    return IrVal.Text(ir_display(v));
+}
+
+/// A character: from a one-character text, a character, or an integer that
+/// is a Unicode scalar value; anything else is given back as it is.
+fn op_scalar_from(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    guard some v = arg(args, 0, "scalar_from", fault) else { return IrVal.Nil; };
+    switch v {
+        case Text(s): {
+            if some code = ir_one_char(s) { return IrVal.Chr(code); }
+            return v;
+        }
+        case Int(n): return scalar_of(n, f"{n}", fault);
+        case UInt(n): return scalar_of(n as i64, f"{n}", fault);
+        default: return v;
+    }
+}
+
+fn scalar_of(n: i64, shown: str, var ref fault: IrFault) -> IrVal {
+    if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) { return fail(fault, f"{shown} is not a Unicode scalar value"); }
+    return IrVal.Chr(n);
+}
+
+/// `num_pow(a, b)`: `a ** b`.
+fn op_pow(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    if args.len() != 2 { return fail(fault, "`**` takes two operands"); }
+    return ir_arith(IrOp.Pow, args[0], args[1], fault);
+}
+
+// ------------------------------------------------------------------------------
+// The host
+// ------------------------------------------------------------------------------
+
+fn op_str_copy_to_ptr(args: List<IrVal>, var ref fault: IrFault) -> IrVal => host_checked("str_copy_to_ptr", args, fault);
+
+fn op_str_from_ptr(args: List<IrVal>, var ref fault: IrFault) -> IrVal => host_checked("str_from_ptr", args, fault);
+
+fn op_thread_entry_ptr(args: List<IrVal>, var ref fault: IrFault) -> IrVal => host_checked("vm_thread_entry_ptr", args, fault);
+
+fn op_callback_dispatch_ptr(args: List<IrVal>, var ref fault: IrFault) -> IrVal => host_checked("vm_callback_dispatch_ptr", args, fault);
+
+fn op_host_op(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    if args.len() == 0 || ir_int(args[0]) == none { return fail(fault, "`host_op` expects an integer op ID"); }
+    return host_checked("host_op", args, fault);
+}
+
+/// Engine operation the lowering calls -> what runs it. `list_get` and
+/// `list_set` are indexing, which reads and writes lists and records alike;
+/// `num_pow` is the `**` operator. Reading standard input is not here: the
+/// seed has no such operation (an unknown name gives none), so the
+/// interpreter stops at its seam instead.
+pub fn interp_engine_ops() -> Map<str, IrEngineOp> {
+    let ops = Map<str, IrEngineOp>();
+    ops.set("rt_print", op_print);
+    ops.set("rt_eprint", op_eprint);
+    ops.set("rt_fault", op_fault);
+    ops.set("seam_open", op_seam);
+    ops.set("list_new", op_list_new);
+    ops.set("list_push", op_list_push);
+    ops.set("list_extend", op_list_extend);
+    ops.set("list_pop", op_list_pop);
+    ops.set("list_remove_at", op_list_remove_at);
+    ops.set("is_null", op_is_null);
+    ops.set("value_clone", op_value_clone);
+    ops.set("map_get", op_map_get);
+    ops.set("map_set", op_map_set);
+    ops.set("list_get", op_map_get);
+    ops.set("list_set", op_map_set);
+    ops.set("map_new", op_map_new);
+    ops.set("map_has", op_map_has);
+    ops.set("map_remove", op_map_remove);
+    ops.set("map_keys", op_map_keys);
+    ops.set("map_values", op_map_values);
+    ops.set("str_len", op_str_len);
+    ops.set("str_slice", op_str_slice);
+    ops.set("str_find", op_str_find);
+    ops.set("str_contains", op_str_contains);
+    ops.set("str_starts_with", op_str_starts_with);
+    ops.set("str_ends_with", op_str_ends_with);
+    ops.set("str_trim", op_str_trim);
+    ops.set("str_replace", op_str_replace);
+    ops.set("str_byte_at", op_str_byte_at);
+    ops.set("str_from_bytes", op_str_from_bytes);
+    ops.set("to_str", op_to_str);
+    ops.set("scalar_from", op_scalar_from);
+    ops.set("num_pow", op_pow);
+    ops.set("host_op", op_host_op);
+    ops.set("str_copy_to_ptr", op_str_copy_to_ptr);
+    ops.set("str_from_ptr", op_str_from_ptr);
+    ops.set("vm_thread_entry_ptr", op_thread_entry_ptr);
+    ops.set("vm_callback_dispatch_ptr", op_callback_dispatch_ptr);
+    return ops;
+}

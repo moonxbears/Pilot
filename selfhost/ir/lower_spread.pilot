@@ -50,7 +50,7 @@ pub fn lower_spread_call(var ref lw: Lowerer, decl: i64, ref pre: List<u32>, ref
         let seq_t = unpack_method_type(lw, raw_t, op_splat());
         let seq = lower_unpack_operand(lw, lhs(s, a), op_splat());
         let get = if ty_is_named(lw.inf.p.tt, seq_t) { native_for(lw, seq_t, "[]", native_method_hook()) } else { "" };
-        let len_hook = if get != "" { native_for(lw, seq_t, "len", native_property_hook()) } else { "" };
+        let len_hook = if get != "" { native_for(lw, seq_t, nameof(len), native_property_hook()) } else { "" };
         if len_hook != "" {
             // CmpPred 0 is `==`.
             let len = emit(lw, op_call_intrinsic(), intrinsic_index(lw, len_hook), int_phy, [seq], a);

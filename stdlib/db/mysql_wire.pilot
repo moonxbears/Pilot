@@ -15,15 +15,14 @@ pub struct MysqlWirePacket : IValue {
     pub query_sql: str;
 }
 
-pub pure fn mysql_com_query_byte() -> i64 {
-    return 3;
-}
+/// The command byte of `COM_QUERY`.
+pub const MYSQL_COM_QUERY: i64 = 3;
 
 pub fn encode_mysql_query_packet(sequence_id: i64, sql: str) -> MysqlWirePacket {
     let q_str = sql;
     return MysqlWirePacket {
         sequence_id: sequence_id,
-        command_byte: mysql_com_query_byte(),
+        command_byte: MYSQL_COM_QUERY,
         payload_len: 1 + q_str.len(),
         query_sql: q_str,
     };
@@ -89,15 +88,16 @@ pub fn mysql_encode_com_query_hex(seq_id: i64, sql: str) -> str {
         + my_str_to_hex(q_str);
 }
 
-pub fn mysql_decode_com_query(frame_hex: str) -> str {
+/// The `COM_QUERY` packet in `frame_hex`; none for any other command.
+pub fn mysql_decode_com_query(frame_hex: str) -> MysqlWirePacket? {
     let b0 = my_read_u8(frame_hex, 0);
     let b1 = my_read_u8(frame_hex, 1);
     let b2 = my_read_u8(frame_hex, 2);
     let payload_len = b0 | (b1 << 8) | (b2 << 16);
     let seq_id = my_read_u8(frame_hex, 3);
     let cmd = my_read_u8(frame_hex, 4);
-    if cmd != 3 {
-        return "";
+    if cmd != MYSQL_COM_QUERY {
+        return none;
     }
     let str_len = payload_len - 1;
     var q_out: List<str> = [];
@@ -107,5 +107,10 @@ pub fn mysql_decode_com_query(frame_hex: str) -> str {
         q_out.push(my_ascii_char(ch_b));
         i = i + 1;
     }
-    return "" + seq_id + "|" + join_text(q_out, "");
+    return MysqlWirePacket {
+        sequence_id: seq_id,
+        command_byte: cmd,
+        payload_len: payload_len,
+        query_sql: join_text(q_out, ""),
+    };
 }

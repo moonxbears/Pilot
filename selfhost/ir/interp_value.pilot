@@ -1,0 +1,374 @@
+// ==============================================================================
+// FILE: selfhost/ir/interp_value.pilot
+// F5: the values of programs the PilIR interpreter runs.
+// ==============================================================================
+// A value is an `IrVal`: one of the seed engine's value kinds
+// (crates/pilot-vm value.rs), held by the interpreter itself. A list and a
+// record are shared handles, as on the seed: binding or passing one shares
+// it (stand-in `ir.aggregate_by_reference`); `ir_clone` copies deeply.
+// Record keys are always text; a record built for a struct carries its
+// layout. Printing (`ir_display`), equality (`ir_equal`), kind labels and
+// record keys follow the seed's rules (crates/pilot-vm heap.rs, vm.rs).
+pub lvl(0) pkg selfhost.ir;
+
+
+pub enum IrVal {
+    /// `none`.
+    Nil,
+    Bool(b: bool),
+    /// A signed 64-bit integer.
+    Int(n: i64),
+    /// An unsigned 64-bit integer: a 64-bit unsigned register's value, or
+    /// the result of arithmetic with one.
+    UInt(n: u64),
+    Flt(x: f64),
+    /// A character, by its code point.
+    Chr(code: i64),
+    Text(s: str),
+    Seq(items: List<IrVal>),
+    /// A record: field or key -> value, and the layout of the struct it was
+    /// built for, if any.
+    Rec(fields: Map<str, IrVal>, layout: i64?),
+}
+
+/// The deepest `ir_display` prints before writing `...` (the seed's).
+const DISPLAY_DEPTH: i64 = 8;
+/// How deep `ir_equal` compares before giving up (the seed's).
+const EQUAL_DEPTH: i64 = 64;
+/// How deep `ir_clone` copies before failing (the seed's).
+const CLONE_DEPTH: i64 = 4096;
+
+/// The kind of `v` as the seed's messages name it.
+pub fn ir_kind(v: IrVal) -> str => switch v {
+    case Nil: "null";
+    case Bool: "boolean";
+    case Int: "integer";
+    case UInt: "integer";
+    case Flt: "float";
+    case Chr: "character";
+    case Text: "string";
+    case Seq: "list";
+    case Rec: "record";
+};
+
+/// Whether `v` is `none`.
+pub fn ir_is_nil(v: IrVal) -> bool => switch v {
+    case Nil: true;
+    default: false;
+};
+
+/// The text of a one-character value with code point `code` (UTF-8, RFC
+/// 3629); U+FFFD for a code that is not a Unicode scalar value.
+pub fn ir_char_text(code: i64) -> str {
+    var c = code;
+    if c < 0 || c > 1114111 || (c >= 55296 && c <= 57343) { c = 65533; }
+    var bytes: List<i64> = [];
+    if c < 128 {
+        bytes.push(c);
+    } else if c < 2048 {
+        bytes.push(192 | (c >> 6));
+        bytes.push(128 | (c & 63));
+    } else if c < 65536 {
+        bytes.push(224 | (c >> 12));
+        bytes.push(128 | ((c >> 6) & 63));
+        bytes.push(128 | (c & 63));
+    } else {
+        bytes.push(240 | (c >> 18));
+        bytes.push(128 | ((c >> 12) & 63));
+        bytes.push(128 | ((c >> 6) & 63));
+        bytes.push(128 | (c & 63));
+    }
+    return from_utf8(bytes) ?? "";
+}
+
+/// The code point of `s` when it is exactly one character.
+pub fn ir_one_char(s: str) -> i64? {
+    let n = s.len();
+    if n == 0 { return none; }
+    let b0: i64 = s.byte_at(0);
+    var width = 1;
+    var code = b0;
+    if b0 >= 240 {
+        width = 4;
+        code = b0 & 7;
+    } else if b0 >= 224 {
+        width = 3;
+        code = b0 & 15;
+    } else if b0 >= 192 {
+        width = 2;
+        code = b0 & 31;
+    }
+    if n != width { return none; }
+    var i = 1;
+    while i < width {
+        let b: i64 = s.byte_at(i);
+        code = (code << 6) | (b & 63);
+        i = i + 1;
+    }
+    return code;
+}
+
+/// `v` as flat text, without looking into lists or records (the seed's
+/// `to_string_repr`). The seed names a list or record by its heap slot,
+/// which the interpreter does not have.
+pub fn ir_repr(v: IrVal) -> str => switch v {
+    case Nil: "null";
+    case Bool(b): f"{b}";
+    case Int(n): f"{n}";
+    case UInt(n): f"{n}";
+    case Flt(x): f"{x}";
+    case Chr(code): ir_char_text(code);
+    case Text(s): s;
+    case Seq: "<list>";
+    case Rec: "<record>";
+};
+
+/// `v` as the seed prints it: lists as `[a, b]`, records as `{ k: v }`
+/// with their entries sorted as text, text unquoted.
+pub fn ir_display(v: IrVal) -> str => display_at(v, 0);
+
+fn display_at(v: IrVal, depth: i64) -> str {
+    if depth > DISPLAY_DEPTH { return "..."; }
+    switch v {
+        case Seq(items): {
+            var out = "[";
+            var i = 0;
+            while i < items.len() {
+                if i > 0 { out = out + ", "; }
+                out = out + display_at(items[i], depth + 1);
+                i = i + 1;
+            }
+            return out + "]";
+        }
+        case Rec(fields, layout): {
+            var entries: List<str> = [];
+            for k in fields.keys() { entries.push(k + ": " + display_at(fields.get(k) ?? IrVal.Nil, depth + 1)); }
+            sort_texts(entries);
+            var out = "{ ";
+            var i = 0;
+            while i < entries.len() {
+                if i > 0 { out = out + ", "; }
+                out = out + entries[i];
+                i = i + 1;
+            }
+            return out + " }";
+        }
+        default: return ir_repr(v);
+    }
+}
+
+/// Sorts `xs` by byte order (a merge sort: its length times its logarithm).
+pub fn sort_texts(var ref xs: List<str>) {
+    let n = xs.len();
+    if n < 2 { return; }
+    // Merged back and forth between two lists of the texts.
+    var from: List<str> = [];
+    var to: List<str> = [];
+    for x in xs {
+        from.push(x);
+        to.push(x);
+    }
+    var width = 1;
+    while width < n {
+        var lo = 0;
+        while lo < n {
+            let mid = if lo + width < n { lo + width } else { n };
+            let hi = if lo + 2 * width < n { lo + 2 * width } else { n };
+            var i = lo;
+            var j = mid;
+            var k = lo;
+            while k < hi {
+                if i < mid && (j >= hi || from[i] <= from[j]) {
+                    to[k] = from[i];
+                    i = i + 1;
+                } else {
+                    to[k] = from[j];
+                    j = j + 1;
+                }
+                k = k + 1;
+            }
+            lo = hi;
+        }
+        let t = from;
+        from = to;
+        to = t;
+        width = width * 2;
+    }
+    var i = 0;
+    while i < n {
+        xs[i] = from[i];
+        i = i + 1;
+    }
+}
+
+/// The record key `k` names: text is itself, anything else its flat text,
+/// so `m[1]` and `m["1"]` are one entry.
+pub fn ir_key(k: IrVal) -> str => switch k {
+    case Text(s): s;
+    default: ir_repr(k);
+};
+
+/// Whether a value is the boolean `true`.
+pub fn ir_is_true(v: IrVal) -> bool => switch v {
+    case Bool(b): b;
+    default: false;
+};
+
+/// The integer an address, index or count holds (a signed or unsigned
+/// integer's bits).
+pub fn ir_int(v: IrVal) -> i64? => switch v {
+    case Int(n): n;
+    case UInt(n): n as i64;
+    default: none;
+};
+
+/// Whether `a` equals `b` as the seed's `==` decides: lists and records
+/// by their contents (a record's layout aside), numbers by value across
+/// kinds (`1 == 1.0`, a character equals its code point), text by its
+/// bytes.
+pub fn ir_equal(a: IrVal, b: IrVal) -> bool => equal_at(a, b, EQUAL_DEPTH);
+
+fn equal_at(a: IrVal, b: IrVal, depth: i64) -> bool {
+    if depth == 0 { return false; }
+    switch a {
+        case Seq(xs): {
+            switch b {
+                case Seq(ys): {
+                    if xs.len() != ys.len() { return false; }
+                    var i = 0;
+                    while i < xs.len() {
+                        if !equal_at(xs[i], ys[i], depth - 1) { return false; }
+                        i = i + 1;
+                    }
+                    return true;
+                }
+                default: return false;
+            }
+        }
+        case Rec(xf, xl): {
+            switch b {
+                case Rec(yf, yl): {
+                    let keys = xf.keys();
+                    if keys.len() != yf.keys().len() { return false; }
+                    for k in keys {
+                        if !yf.has(k) { return false; }
+                        if !equal_at(xf.get(k) ?? IrVal.Nil, yf.get(k) ?? IrVal.Nil, depth - 1) { return false; }
+                    }
+                    return true;
+                }
+                default: return false;
+            }
+        }
+        default: return scalar_equal(a, b);
+    }
+}
+
+/// Equality of two values that are not both lists or records.
+fn scalar_equal(a: IrVal, b: IrVal) -> bool {
+    let ka = num_class(a);
+    let kb = num_class(b);
+    if ka != IrNum.NotNum && kb != IrNum.NotNum {
+        if ka == IrNum.FloatNum || kb == IrNum.FloatNum { return num_f64(a) == num_f64(b); }
+        return int_compare(a, b) == 0;
+    }
+    switch a {
+        case Nil: return ir_is_nil(b);
+        case Bool(x): return switch b { case Bool(y): x == y; default: false; };
+        case Text(x): return switch b { case Text(y): x == y; default: false; };
+        default: return false;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Numbers
+// ------------------------------------------------------------------------------
+
+/// How a value counts as a number (the seed's `num`): not at all, as a
+/// signed integer, as an unsigned integer (a character counts as its code
+/// point) or as a float.
+pub enum IrNum : u8 { NotNum, SignedNum, UnsignedNum, FloatNum }
+
+pub fn num_class(v: IrVal) -> IrNum => switch v {
+    case Int: IrNum.SignedNum;
+    case UInt: IrNum.UnsignedNum;
+    case Chr: IrNum.UnsignedNum;
+    case Flt: IrNum.FloatNum;
+    default: IrNum.NotNum;
+};
+
+/// The 64 bits of an integer kind (a character's code point); 0 for a
+/// value that is not one (callers check `num_class` first).
+pub fn num_bits(v: IrVal) -> i64 => switch v {
+    case Int(n): n;
+    case UInt(n): n as i64;
+    case Chr(code): code;
+    default: 0;
+};
+
+/// A number as a float: an integer converted, a float as it is.
+pub fn num_f64(v: IrVal) -> f64 => switch v {
+    case Int(n): n as f64;
+    case UInt(n): n as f64;
+    case Chr(code): code as f64;
+    case Flt(x): x;
+    default: 0.0;
+};
+
+/// -1, 0 or 1 as integer `a` is below, equal to or above integer `b`,
+/// comparing signed and unsigned values by their true value (the seed's
+/// `i128` comparison).
+pub fn int_compare(a: IrVal, b: IrVal) -> i64 {
+    let ua = num_class(a) == IrNum.UnsignedNum;
+    let ub = num_class(b) == IrNum.UnsignedNum;
+    let x = num_bits(a);
+    let y = num_bits(b);
+    if !ua && !ub { return if x < y { -1 } else if x > y { 1 } else { 0 }; }
+    // A negative signed value is below every unsigned one.
+    if !ua && x < 0 { return -1; }
+    if !ub && y < 0 { return 1; }
+    let p = x as u64;
+    let q = y as u64;
+    return if p < q { -1 } else if p > q { 1 } else { 0 };
+}
+
+// ------------------------------------------------------------------------------
+// Copies
+// ------------------------------------------------------------------------------
+
+/// A copy of `v` sharing no list or record with it (the seed's
+/// `value_clone`): a record keeps its layout. Fails with the seed's message
+/// past `CLONE_DEPTH` levels (a list holding itself).
+pub fn ir_clone(v: IrVal, var ref fault: IrFault) -> IrVal => clone_at(v, 0, fault);
+
+fn clone_at(v: IrVal, depth: i64, var ref fault: IrFault) -> IrVal {
+    if depth > CLONE_DEPTH {
+        raise_fault(fault, "a value nests too deeply to copy");
+        return IrVal.Nil;
+    }
+    switch v {
+        case Seq(items): {
+            var out: List<IrVal> = [];
+            for x in items {
+                out.push(clone_at(x, depth + 1, fault));
+                if fault.active { return IrVal.Nil; }
+            }
+            return IrVal.Seq(out);
+        }
+        case Rec(fields, layout): {
+            var out = Map<str, IrVal>();
+            for k in fields.keys() {
+                out.set(k, clone_at(fields.get(k) ?? IrVal.Nil, depth + 1, fault));
+                if fault.active { return IrVal.Nil; }
+            }
+            return IrVal.Rec(out, layout);
+        }
+        default: return v;
+    }
+}
+
+/// A list of `xs`'s values (the list itself new, the values shared).
+pub fn ir_values_copy(ref xs: List<IrVal>) -> List<IrVal> {
+    var out: List<IrVal> = [];
+    for x in xs { out.push(x); }
+    return out;
+}

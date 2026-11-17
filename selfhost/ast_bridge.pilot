@@ -88,9 +88,9 @@ pub fn hydrate_mutable_ast_from_physics() -> i64 {
             op_txt = "" + rbits;
         } else if lk == 4 {
             if rbits != 0 {
-                op_txt = "true";
+                op_txt = nameof(true);
             } else {
-                op_txt = "false";
+                op_txt = nameof(false);
             }
         } else if sym != 0 {
             op_txt = __engine(BridgeHooks.sym_str, sym);

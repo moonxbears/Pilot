@@ -22,10 +22,10 @@ pub lvl(0) pkg selfhost.check;
 
 
 /// The attribute names and the `[Layout]` argument these rules read.
-pub pure fn align_attr() -> str => "Align";
-pub pure fn layout_attr() -> str => "Layout";
-pub pure fn packed_arg() -> str => "packed";
-pub pure fn flags_attr() -> str => "Flags";
+pub pure fn align_attr() -> str => nameof(Align);
+pub pure fn layout_attr() -> str => nameof(Layout);
+pub pure fn packed_arg() -> str => nameof(packed);
+pub pure fn flags_attr() -> str => nameof(Flags);
 
 /// log2 of `n` when `n` is a positive power of two, else -1.
 pub fn log2_exact(n: i64) -> i64 {
@@ -148,7 +148,7 @@ fn enum_width(var ref p: Program, d: i64) -> i64 {
         let t = prog_annot_type(p, b);
         if !ty_is_named(p.tt, t) { continue; }
         for td in nl_get(p.type_decls, p.tt.name[t]) {
-            if some bits = prog_attr_nodes(p, td, "Bits") {
+            if some bits = prog_attr_nodes(p, td, nameof(Bits)) {
                 if bits.len() >= 1 {
                     if some w = prog_const(p, bits[0]) { return w; }
                 }

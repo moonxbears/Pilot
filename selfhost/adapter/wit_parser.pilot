@@ -62,7 +62,7 @@ pub pure fn wit_type_list(elem_ty: str) -> WitTypeRef {
 pub pure fn wit_type_option(elem_ty: str) -> WitTypeRef {
     return WitTypeRef {
         kind:   WitTypeKind::Option,
-        name:   "opt",
+        name:   nameof(opt),
         inner1: elem_ty,
         inner2: "",
     };
@@ -71,7 +71,7 @@ pub pure fn wit_type_option(elem_ty: str) -> WitTypeRef {
 pub pure fn wit_type_result(ok_ty: str, err_ty: str) -> WitTypeRef {
     return WitTypeRef {
         kind:   WitTypeKind::Result,
-        name:   "res",
+        name:   nameof(res),
         inner1: ok_ty,
         inner2: err_ty,
     };

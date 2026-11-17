@@ -4,19 +4,22 @@
 // ==============================================================================
 pub pkg std.json;
 
-pub pure fn json_kind_null()   -> u8 => 0;
-pub pure fn json_kind_bool()   -> u8 => 1;
-pub pure fn json_kind_number() -> u8 => 2;
-pub pure fn json_kind_string() -> u8 => 3;
-pub pure fn json_kind_array()  -> u8 => 4;
-pub pure fn json_kind_object() -> u8 => 5;
+/// The kind of a JSON value (RFC 8259 section 3).
+pub enum JsonKind : u8 {
+    Null,
+    Bool,
+    Number,
+    String,
+    Array,
+    Object,
+}
 
 [Layout(c_abi)]
 pub struct JsonVal : IValue {
-    pub kind: u8;
+    pub kind: JsonKind;
     pub text: str;
 }
 
-pub pure fn json_null() -> JsonVal => JsonVal { kind: json_kind_null(), text: "null" };
-pub pure fn json_bool(b: bool) -> JsonVal => JsonVal { kind: json_kind_bool(), text: if b { "true" } else { "false" } };
-pub pure fn json_str(s: str) -> JsonVal => JsonVal { kind: json_kind_string(), text: s };
+pub pure fn json_null() -> JsonVal => JsonVal { kind: ::Null, text: "null" };
+pub pure fn json_bool(b: bool) -> JsonVal => JsonVal { kind: ::Bool, text: if b { "true" } else { "false" } };
+pub pure fn json_str(s: str) -> JsonVal => JsonVal { kind: ::String, text: s };

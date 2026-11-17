@@ -22,6 +22,13 @@
 //     several programs build the same lexer at once;
 //   - a lexer whose build reported errors is not kept, and a file that does
 //     not read back is built again;
+//   - only one program builds a lexer at a time: the first to need it
+//     creates its lock (`<file>.building`, `File.create_new`), and the others
+//     wait for the file instead of building it too (32 tests starting with
+//     an empty cache each built the same lexer and ran out of time,
+//     2026-11-17). A lock older than `BUILD_STALE_SECONDS` was left by a
+//     program that stopped, and is taken over. The lock only saves work: a
+//     second build of the same key writes the same file;
 //   - a mode whose automaton is an earlier mode's (the f-string hole mode
 //     has the main mode's tokens; only its braces' mode changes differ) is
 //     written as `shares <that mode>` with only its actions after it, which
@@ -407,6 +414,53 @@ fn keep(path: str, ref m: ModalLexer, key: str) {
     }
 }
 
+/// How old a lock is, in seconds, when the program that made it is taken
+/// to have stopped: a cold build of the toolchain's lexer takes 45 s alone
+/// (2026-11-17), and a test is stopped after 300 s.
+const BUILD_STALE_SECONDS: i64 = 300;
+/// How long a waiting program sleeps between looks at the file.
+const WAIT_STEP_NS: i64 = 200000000;
+
+/// The lock a program holds while it builds the lexer kept at `path`.
+fn lock_of(path: str) -> str => path + ".building";
+
+fn wall_seconds() -> i64 => Clock.now_ns(0) / 1000000000;
+
+/// Whether `lock` was made `BUILD_STALE_SECONDS` ago or more. A lock still
+/// being written reads as new.
+fn stale(lock: str) -> bool {
+    if some since = text.parse_i64(File.read_text(lock)) {
+        return wall_seconds() - since >= BUILD_STALE_SECONDS;
+    }
+    return false;
+}
+
+/// The lexer kept at `path` for `key`, waiting while another program builds
+/// it; `none` when this program is to build it, holding its lock.
+fn read_or_claim(path: str, key: str) -> ModalLexer? {
+    let lock = lock_of(path);
+    loop {
+        if File.exists(path) {
+            if some m = read_lexer(File.read_text(path), key) { return m; }
+        }
+        if File.create_new(lock, f"{wall_seconds()}") {
+            // Kept by another program between the look above and the lock.
+            if File.exists(path) {
+                if some m = read_lexer(File.read_text(path), key) {
+                    let _ = File.delete(lock);
+                    return m;
+                }
+            }
+            return none;
+        }
+        if stale(lock) {
+            let _ = File.delete(lock);
+        } else {
+            let _ = Clock.sleep_ns(WAIT_STEP_NS);
+        }
+    }
+}
+
 /// `build_modes(modes)`, read from `dir` when it was built there before
 /// from the same declarations, and kept there when it is built now without
 /// errors. The same lexer either way.
@@ -414,13 +468,12 @@ pub fn build_modes_cached(ref modes: List<LexMode>, dir: str) -> ModalBuild {
     let key = modes_key(modes);
     if key == "" { return build_modes(modes); }
     let path = cache_file(dir, key);
-    if File.exists(path) {
-        if some m = read_lexer(File.read_text(path), key) {
-            return ModalBuild { lexer: m, errors: [] };
-        }
+    if some m = read_or_claim(path, key) {
+        return ModalBuild { lexer: m, errors: [] };
     }
     let built = build_modes(modes);
     if built.ok() { keep(path, built.lexer, key); }
+    let _ = File.delete(lock_of(path));
     return built;
 }
 
@@ -435,10 +488,8 @@ pub fn build_table_cached(ref decls: List<TokenDecl>, dir: str) -> LexBuild {
     let key = modes_key(one);
     if key == "" { return build_table(decls); }
     let path = cache_file(dir, key);
-    if File.exists(path) {
-        if some m = read_lexer(File.read_text(path), key) {
-            return LexBuild { table: m.tables[0], errors: [] };
-        }
+    if some m = read_or_claim(path, key) {
+        return LexBuild { table: m.tables[0], errors: [] };
     }
     let built = build_table(decls);
     if built.ok() {
@@ -451,5 +502,6 @@ pub fn build_table_cached(ref decls: List<TokenDecl>, dir: str) -> LexBuild {
         let m = ModalLexer { modes: [TABLE_MODE], tables: [built.table], enters: [entered], bases: [0], mode_of: owner };
         keep(path, m, key);
     }
+    let _ = File.delete(lock_of(path));
     return built;
 }
