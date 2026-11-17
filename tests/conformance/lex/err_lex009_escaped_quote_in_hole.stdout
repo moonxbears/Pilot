@@ -1,0 +1,4 @@
+false
+LEX009: at byte 5: a quote inside an f-string hole is not escaped, because a hole is code: write `f"{m["k"]}"`, not `f"{m[\"k\"]}"`
+LEX009: at byte 8: a quote inside an f-string hole is not escaped, because a hole is code: write `f"{m["k"]}"`, not `f"{m[\"k\"]}"`
+true

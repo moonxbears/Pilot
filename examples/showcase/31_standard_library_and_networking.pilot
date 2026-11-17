@@ -52,10 +52,10 @@ let payload = MicroservicePayload();
 let record_data = payload.to_record();
 
 println("\n[1] Structured JSON Processing (Pilot.Json):");
-println(f"  Service:        {record_data[\"service\"]}");
-println(f"  Transaction ID: {record_data[\"transaction_id\"]}");
-println(f"  Amount:         ${record_data[\"amount\"]} {record_data[\"currency\"]}");
-println(f"  Captured Flag:  {record_data[\"captured\"]}");
+println(f"  Service:        {record_data["service"]}");
+println(f"  Transaction ID: {record_data["transaction_id"]}");
+println(f"  Amount:         ${record_data["amount"]} {record_data["currency"]}");
+println(f"  Captured Flag:  {record_data["captured"]}");
 
 // -----------------------------------------------------------------------------
 // 2. HTTP Request & Response Modeling (`Pilot.Http`)
@@ -124,7 +124,7 @@ for rec in records {
     total_latency = total_latency + rec["latency_ms"];
     if rec["latency_ms"] >= 10 {
         slow_count = slow_count + 1;
-        println(f"  -> High Latency Route: {rec[\"method\"]} {rec[\"endpoint\"]} ({rec[\"latency_ms\"]}ms)");
+        println(f"  -> High Latency Route: {rec["method"]} {rec["endpoint"]} ({rec["latency_ms"]}ms)");
     }
 }
 

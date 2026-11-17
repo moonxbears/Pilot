@@ -15,7 +15,7 @@ fn test_json() {
 
     let encoded = json.dumps(payload, 2);
     let decoded = json.loads(encoded).unwrap();
-    print(f"Decoded name: {decoded[\"name\"]}");
+    print(f"Decoded name: {decoded["name"]}");
 
     // 2. Encoder & Decoder structs
     let encoder = json.JSONEncoder(4, true);

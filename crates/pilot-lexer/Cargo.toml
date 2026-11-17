@@ -8,4 +8,3 @@ description = "Stage 1 Zero-Copy SIMD Preprocessor, Structural Indexer & Modal L
 
 [dependencies]
 pilot-span = { path = "../pilot-span" }
-pilot-intern = { path = "../pilot-intern" }

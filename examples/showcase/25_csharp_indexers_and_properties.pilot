@@ -57,8 +57,8 @@ struct MetricCache : IValue {
 
 var metrics = MetricCache();
 println("\n[2] MetricCache Associative Indexer:");
-println(f"  metrics['cpu_usage'] = {metrics[\"cpu_usage\"]}");
-println(f"  metrics['mem_usage'] = {metrics[\"mem_usage\"]}");
+println(f"  metrics['cpu_usage'] = {metrics["cpu_usage"]}");
+println(f"  metrics['mem_usage'] = {metrics["mem_usage"]}");
 
 // -----------------------------------------------------------------------------
 // 3. Concise Read-Only Indexer
@@ -127,6 +127,6 @@ let merchant_name = transaction["merchant"];
 let is_verified = transaction["verified"];
 
 println("\n[5] Structural Row Record Static Field Indexing:");
-println(f"  Transaction #{transaction[\"txn_id\"]} at {merchant_name} for ${total_amt} (verified: {is_verified})");
+println(f"  Transaction #{transaction["txn_id"]} at {merchant_name} for ${total_amt} (verified: {is_verified})");
 
 println("\n>>> Showcase 25 Complete! <<<\n");

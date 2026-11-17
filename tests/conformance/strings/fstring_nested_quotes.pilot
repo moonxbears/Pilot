@@ -5,6 +5,6 @@ fn main() {
 
     let s = "{";
     println(f"brace: {if s == "{" { 1 } else { 2 }}");
-    println(f"legacy: {mydict[\"target\"]}");
+    println(f"legacy: {mydict["target"]}");
     println(f"nested_text: {f"inner={my_special_key["mykey"]}"}");
 }

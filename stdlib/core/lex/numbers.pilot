@@ -196,3 +196,56 @@ pub fn suffixed_number_tokens() -> List<TokenDecl> {
     }
     return out;
 }
+
+/// What a misplaced-separator number's family adds to its number's family.
+pub const MISPLACED: str = "_misplaced";
+
+/// Digits of `radix` with a separator where `digits` allows none: after
+/// the last digit (`1000_`) or before another separator (`1__000`).
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+fn misplaced_digits(radix: Radix) -> Pattern {
+    let sep: Pattern = lit(DIGIT_SEPARATOR);
+    let any: Pattern = (digit(radix) | lit(DIGIT_SEPARATOR)).many();
+    return digits(radix) + sep + (sep + any).opt();
+}
+
+/// `0x_FF`, `0x1__F`: a prefix, then a separator first or misplaced.
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+fn misplaced_in_radix(r: RadixInfo) -> Pattern {
+    if r.prefix == "" { return misplaced_digits(r.radix); }
+    let any: Pattern = (digit(r.radix) | lit(DIGIT_SEPARATOR)).many();
+    return lit(r.prefix) + (lit(DIGIT_SEPARATOR) + any | misplaced_digits(r.radix));
+}
+
+/// `1_.5`, `1.5_`: a float with a misplaced separator on either side.
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+fn misplaced_float() -> Pattern {
+    let after: Pattern = digit(Radix::Dec) + (digit(Radix::Dec) | lit(DIGIT_SEPARATOR)).many();
+    return misplaced_digits(Radix::Dec) + lit(DECIMAL_POINT) + after
+        | digits(Radix::Dec) + lit(DECIMAL_POINT) + misplaced_digits(Radix::Dec);
+}
+
+/// A number whose separator is not between two digits (`1__000`, `1000_`,
+/// `0x_FF`, `1_.5`, `100_u8`) is one token, so the checker sees one literal
+/// and reports it as LIT001 (selfhost/check/literals.pilot), instead of a
+/// number followed by a name. The text always holds a separator no number
+/// family allows, so no number matches the same text. A prefixed one ranks
+/// with its radix's number (priority 2), over a decimal `0` with a suffix
+/// (`0x_FF` is not `0` and `x_FF`) and a suffixed hex number (`0x1a__b` is
+/// not `0x1` and `a__b`); for that it has no suffixed form, which would tie
+/// with it (`0x1a__` and `b`).
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn misplaced_separator_tokens() -> List<TokenDecl> {
+    var out: List<TokenDecl> = [];
+    for r in RADIXES {
+        let d = acting(TokenRole::Operand, token_over(r.family + MISPLACED, if r.prefix == "" { 1 } else { 2 }, misplaced_in_radix(r)));
+        if r.prefix == "" {
+            out.push(acting(TokenRole::Operand, token_over(d.name + SUFFIXED, 0, seq([d.pattern, suffix()]))));
+        }
+        out.push(d);
+    }
+    let f = acting(TokenRole::Operand, token_over(FLOAT_FAMILY + MISPLACED, 1, misplaced_float()));
+    out.push(acting(TokenRole::Operand, token_over(f.name + SUFFIXED, 0, seq([f.pattern, suffix()]))));
+    out.push(f);
+    return out;
+}

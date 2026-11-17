@@ -67,8 +67,8 @@ fn main() {
     let cp = CustomPairs { k_val: 77 };
     let merged: Map<str, i64> = ["init": 0, **m_base, pairs(cp), "tail": 8];
     let from_struct: Map<str, i64> = { **PairSrc { a: 10, b: 20 }, c: 30 };
-    println(f"pairs: init={merged[\"init\"]} a={merged[\"a\"]} b={merged[\"b\"]} custom={merged[\"custom\"]} tail={merged[\"tail\"]}");
-    println(f"struct_pairs: a={from_struct[\"a\"]} b={from_struct[\"b\"]} c={from_struct[\"c\"]}");
+    println(f"pairs: init={merged["init"]} a={merged["a"]} b={merged["b"]} custom={merged["custom"]} tail={merged["tail"]}");
+    println(f"struct_pairs: a={from_struct["a"]} b={from_struct["b"]} c={from_struct["c"]}");
 
     // `*` / `splat` and `*..` / `flat` on lists, `ISplatOperator`, `IFlattenOperator`, and spread calls
     let seq = CustomSeq { items: [20, 30], nested: [[7, 8], [9]] };

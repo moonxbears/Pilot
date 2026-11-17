@@ -46,6 +46,25 @@ fn triple(q: i64) -> Pattern {
     return three + (other | byte(q) + other | byte(q) * 2 + other).many() + three;
 }
 
+/// A string quoted by `q` whose closing quote does not come before the end
+/// of the line or of the source.
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+fn open_quoted(q: i64) -> Pattern {
+    let escaped: Pattern = byte(BACKSLASH) + any_byte();
+    return byte(q) + (any_but([q, BACKSLASH, NEWLINE]) | escaped).many();
+}
+
+/// A string never closed (`print("caf`): one token to the end of the line,
+/// so it is reported once, as an unclosed string, and not as a stray quote
+/// followed by code. A closed string is always longer, so this family wins
+/// only when the closing quote is missing. The lexicon rejects it
+/// (`REJECTED_FORMS`, LEX001); the seed reads it as a string, whose missing
+/// close its parser reports.
+pub const UNCLOSED_STRING: str = "unclosed_string";
+
+pub fn unclosed_string_tokens() -> List<TokenDecl> =>
+    [acting(TokenRole::Operand, token(UNCLOSED_STRING, class(RAW_MARKS + BYTE_MARKS).opt() + (open_quoted(DOUBLE_QUOTE) | open_quoted(SINGLE_QUOTE)))),];
+
 /// A string in either quote, once or three times (`three`).
 pub fn string_body(three: bool) -> Pattern =>
     if three { triple(DOUBLE_QUOTE) | triple(SINGLE_QUOTE) } else { quoted(DOUBLE_QUOTE) | quoted(SINGLE_QUOTE) };
@@ -87,6 +106,32 @@ pub const HOLE_OPEN: str = "hole_open";
 pub const FSTRING_TEXT: str = "fstring_text";
 pub const FSTRING_QUOTE: str = "fstring_quote";
 pub const FSTRING_CLOSE: str = "fstring_close";
+
+/// A hole's format spec (`{n:#_###}`, `{x:0.00}`): a `:`, then a run with
+/// no space, quote, bracket, brace or `:`, spaces around it, and the hole's
+/// `}` right after, which it leaves for the next token. Being longer than
+/// `:`, it wins there, and a `#` in it is no directive line. Whether the
+/// run is a pattern format.pilot's `format_by_pattern` reads (`#`, `0`, `,`,
+/// `_`, `.`) is the parser's check, so `{n:#x#}` is one f-string whose
+/// hole is reported (SYN001). Known limit: a struct literal that ends a
+/// hole (`{P { x: y }}`) lexes its last field as a spec here.
+pub const FORMAT_SPEC: str = "format_spec";
+pub const FORMAT_SPACES: str = " \t";
+
+[Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
+pub fn format_spec_token() -> TokenDecl {
+    let spaces: Pattern = class(FORMAT_SPACES).many();
+    let run: Pattern = any_but([byte_of(" "), TAB, NEWLINE, DOUBLE_QUOTE, SINGLE_QUOTE, byte_of(":"), byte_of("{"), byte_of("}"), byte_of("("), byte_of(")"), byte_of("["), byte_of("]")]).some();
+    return trailed_by("}", token(FORMAT_SPEC, lit(":") + spaces + run + spaces));
+}
+
+/// `\"` or `\'` inside a hole. A hole is code, so a quote in it is a plain
+/// quote (`f"{m["k"]}"`; owner decision 2026-11-17). The escaped form is its
+/// own family only so the lexicon can reject it with a fix-it (LEX009,
+/// `REJECTED_FORMS` in lexicon.pilot); the seed reads it as an error token.
+pub const HOLE_ESCAPED_QUOTE: str = "hole_escaped_quote";
+
+pub fn hole_escaped_quote_token() -> TokenDecl => token(HOLE_ESCAPED_QUOTE, byte(BACKSLASH) + (byte(DOUBLE_QUOTE) | byte(SINGLE_QUOTE)));
 
 fn quotes(q: i64, triple: bool) -> Pattern => if triple { byte(q) * 3 } else { byte(q) };
 

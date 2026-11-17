@@ -81,7 +81,7 @@ let targets = [
 
 println("\n[3] Supported Multi-Target CodeGen Backends:");
 for t in targets {
-    println(f"  -> {t[\"target\"]} ({t[\"backend\"]}) via {t[\"flag\"]}");
+    println(f"  -> {t["target"]} ({t["backend"]}) via {t["flag"]}");
 }
 
 println("\n>>> Showcase 26 Complete! <<<\n");

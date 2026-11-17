@@ -373,8 +373,13 @@ impl<'a> Parser<'a> {
             TokenKind::BinIntLit => self.parse_int_lit(sp, 2),
             TokenKind::OctIntLit => self.parse_int_lit(sp, 8),
             TokenKind::FloatLit => {
-                let v = self.text().replace('_', "").parse().unwrap_or(0.0);
+                let text = self.text().to_string();
                 self.advance();
+                let Ok(v) = text.replace('_', "").parse() else {
+                    let msg = format!("LIT002: the float literal `{text}` has no value");
+                    self.arena.diagnostics.push((sp, msg));
+                    return self.arena.alloc_float(0.0, sp);
+                };
                 self.arena.alloc_float(v, sp)
             }
             TokenKind::StrLit | TokenKind::TripleStrLit => self.parse_str_lit(sp),

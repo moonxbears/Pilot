@@ -17,5 +17,4 @@ if:if
 bin_integer:0b1
 if:if
 integer_suffixed:7_000kB
-integer:1
-name:_x
+integer_misplaced_suffixed:1_x

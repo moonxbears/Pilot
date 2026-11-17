@@ -1,535 +1,421 @@
-//! Milestone 29.3 & 52: Single-Pass Name-Blind Seed Lexer.
+//! The seed lexer: runs the table Pilot builds from its token declarations
+//! (PROP-021 §3). `stdlib/core/lex/toolchain.lex` is written by
+//! `pilot lex --write-table` (`stdlib/pilot/lex/seed.pilot`); this file reads
+//! it and steps it. Nothing here names a character, a word or a symbol: each
+//! family's `TokenKind`, flags and emission come from the table.
 //!
-//! Emits a Struct-of-Arrays `TokenTape` recognizing strictly the 14 hardware seed keywords,
-//! raw atomic literals (with name-blind `TokenFlags::IS_DIMENSIONAL` and `IS_INTERPOLATED`),
-//! two-way dot (`InfixDot` vs `PrefixDot`), and 6 homoiconic call-quote projections.
+//! The steps are those of `stdlib/pilot/lex/build.pilot` (`match_at`,
+//! `context_at`, `context_after`) and `stdlib/pilot/lex/modes.pilot`
+//! (`lex_modal`): the longest match from the start state of the current
+//! context, in the mode on top of the mode stack. A token that enters a mode
+//! from the base mode (an f-string's opening) starts one token that runs
+//! until the stack is back to the base mode, as the seed parser reads it.
 
-use crate::keywords::lookup_keyword;
-use crate::simd::{
-    scan_ident_run, scan_interpolated_string_end, scan_quoted_string_end,
-    scan_to_block_comment_end, scan_to_newline, scan_triple_string_end, scan_whitespace_run,
-};
 use crate::token::{TokenFlags, TokenKind, TokenTape};
 use pilot_span::ByteSpan;
 
-pub struct Lexer<'a> {
-    source: &'a str,
-    bytes: &'a [u8],
-    pos: usize,
-    tape: TokenTape,
-    open_brackets: Vec<(TokenKind, u32)>,
-    last_token_can_precede_infix_dot: bool,
-    preceded_by_ws: bool,
-    preceded_by_nl: bool,
+/// The table format this runner reads (`CACHE_FORMAT` in cache.pilot).
+const FORMAT: &str = "pilot-lex-cache 4";
+/// The start contexts, by their position in `LEX_CONTEXT_KINDS`.
+const CTX_OTHER: usize = 0;
+const CTX_SPACED: usize = 1;
+const CTX_GLUED: usize = 2;
+const CTX_START: usize = 3;
+const CONTEXTS: usize = 4;
+/// The token roles, by their position in cache.pilot's `ROLES`.
+const ROLE_OPERAND: u8 = 1;
+const ROLE_SPACE: u8 = 2;
+const ROLE_TRIVIA: u8 = 3;
+/// The emissions, by their position in seed.pilot's `SEED_EMITS`.
+const EMIT_SKIP: u8 = 1;
+/// No next state.
+const DEAD: u16 = u16::MAX;
+
+struct Automaton {
+    class_of: [u16; 256],
+    classes: usize,
+    starts: [u16; CONTEXTS],
+    next: Vec<u16>,
+    accept: Vec<i32>,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str) -> Self {
-        let est_tokens = (source.len() / 4).max(16);
-        Self {
-            source,
-            bytes: source.as_bytes(),
-            pos: 0,
-            tape: TokenTape::with_capacity(est_tokens),
-            open_brackets: Vec::with_capacity(32),
-            last_token_can_precede_infix_dot: false,
-            preceded_by_ws: true,
-            preceded_by_nl: true,
+#[derive(Clone, Copy)]
+struct Action {
+    role: u8,
+    leaves: bool,
+    trails: u32,
+    enters: i32,
+}
+
+struct Mode {
+    automaton: usize,
+    base: usize,
+    actions: Vec<Action>,
+}
+
+#[derive(Clone, Copy)]
+struct Family {
+    kind: TokenKind,
+    flags: TokenFlags,
+    emit: u8,
+}
+
+/// A table loaded from `toolchain.lex`.
+pub struct SeedTable {
+    automata: Vec<Automaton>,
+    modes: Vec<Mode>,
+    families: Vec<Family>,
+    eof: TokenKind,
+    error: TokenKind,
+}
+
+/// The words of a table file, read in order.
+struct Reader<'a> {
+    src: &'a str,
+    at: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn word(&mut self) -> Result<&'a str, String> {
+        let b = self.src.as_bytes();
+        while self.at < b.len() && (b[self.at] == b' ' || b[self.at] == b'\n') {
+            self.at += 1;
         }
-    }
-
-    pub fn tokenize(mut self) -> TokenTape {
-        while self.pos < self.bytes.len() {
-            let ws_len = scan_whitespace_run(self.bytes, self.pos);
-            if ws_len > 0 {
-                self.pos += ws_len;
-                self.preceded_by_ws = true;
-                continue;
-            }
-            if self.pos >= self.bytes.len() {
-                break;
-            }
-
-            let start = self.pos;
-            let b0 = self.bytes[start];
-            let b1 = self.peek_at(start + 1);
-            let b2 = self.peek_at(start + 2);
-
-            if b0 == b'\n' {
-                self.pos += 1;
-                self.emit(TokenKind::Newline, TokenFlags::NONE, start, self.pos, false);
-                self.preceded_by_ws = true;
-                self.preceded_by_nl = true;
-                continue;
-            }
-
-            // Comments & Stage-0 Preprocessor Directive Lines (`//`, `/* ... */`, `#...`)
-            if b0 == b'#' {
-                let kind = if start == 0 && b1 == b'!' {
-                    TokenKind::Shebang
-                } else {
-                    TokenKind::Comment
-                };
-                let end = scan_to_newline(self.bytes, start + 1);
-                self.pos = end;
-                self.emit(kind, TokenFlags::NONE, start, end, false);
-                continue;
-            }
-            if b0 == b'/' && b1 == b'/' {
-                let end = scan_to_newline(self.bytes, start + 2);
-                self.pos = end;
-                self.emit(TokenKind::Comment, TokenFlags::NONE, start, end, false);
-                continue;
-            }
-            if b0 == b'/' && b1 == b'*' {
-                let end = scan_to_block_comment_end(self.bytes, start + 2);
-                self.pos = end;
-                self.emit(TokenKind::BlockComment, TokenFlags::NONE, start, end, false);
-                continue;
-            }
-
-            // Raw interpolated strings (`rf"..."`, `fr"..."`, any case)
-            let is_r = |b: u8| b == b'r' || b == b'R';
-            let is_f = |b: u8| b == b'f' || b == b'F';
-            if ((is_r(b0) && is_f(b1)) || (is_f(b0) && is_r(b1))) && (b2 == b'"' || b2 == b'\'') {
-                let mut extra = TokenFlags::IS_RAW_STRING;
-                extra.insert(TokenFlags::IS_INTERPOLATED);
-                self.scan_string_literal(start, start + 2, b2, extra);
-                continue;
-            }
-
-            // Prefixed strings (`f"..."`, `r"..."`, `b"..."`)
-            if (b0 == b'f' || b0 == b'F' || b0 == b'r' || b0 == b'R' || b0 == b'b' || b0 == b'B')
-                && (b1 == b'"' || b1 == b'\'')
-            {
-                let mut extra = TokenFlags::NONE;
-                if b0 == b'f' || b0 == b'F' {
-                    extra.insert(TokenFlags::IS_INTERPOLATED);
-                } else if b0 == b'r' || b0 == b'R' {
-                    extra.insert(TokenFlags::IS_RAW_STRING);
-                }
-                self.scan_string_literal(start, start + 1, b1, extra);
-                continue;
-            }
-
-            // Standard or triple-quoted strings (`"..."`, `"""..."""`)
-            if b0 == b'"' || b0 == b'\'' {
-                self.scan_string_literal(start, start, b0, TokenFlags::NONE);
-                continue;
-            }
-
-            // Numeric & Name-Blind Dimensional Literals (`42`, `0xFF`, `3.14`, `250ms`, `64KB`)
-            if b0.is_ascii_digit() {
-                self.scan_number_or_dimension(start);
-                continue;
-            }
-
-            // Hierarchical `:ns/kw` Keyword Literals vs `:` / `::` / `:=` / `:=:`
-            if b0 == b':' {
-                if b1 == b':' {
-                    self.pos += 2;
-                    self.emit(
-                        TokenKind::DoubleColon,
-                        TokenFlags::NONE,
-                        start,
-                        self.pos,
-                        false,
-                    );
-                    continue;
-                }
-                if b1 == b'=' {
-                    if b2 == b':' {
-                        self.pos += 3;
-                        self.emit(
-                            TokenKind::SwapEqual,
-                            TokenFlags::NONE,
-                            start,
-                            self.pos,
-                            false,
-                        );
-                    } else {
-                        self.pos += 2;
-                        self.emit(TokenKind::Walrus, TokenFlags::NONE, start, self.pos, false);
-                    }
-                    continue;
-                }
-                if (b1.is_ascii_alphabetic() || b1 == b'_') && self.preceded_by_ws {
-                    let mut end = start + 1 + scan_ident_run(self.bytes, start + 1);
-                    if self.peek_at(end) == b'/' {
-                        let ns_part = scan_ident_run(self.bytes, end + 1);
-                        if ns_part > 0 {
-                            end += 1 + ns_part;
-                        }
-                    }
-                    self.pos = end;
-                    self.emit(TokenKind::KeywordLit, TokenFlags::NONE, start, end, true);
-                    continue;
-                }
-                self.pos += 1;
-                self.emit(TokenKind::Colon, TokenFlags::NONE, start, self.pos, false);
-                continue;
-            }
-
-            // Identifiers & The 14 Hardware Seed Keywords
-            if b0.is_ascii_alphabetic() || b0 == b'_' {
-                let len = scan_ident_run(self.bytes, start);
-                let end = start + len;
-                let ident_str = &self.source[start..end];
-                let kind = lookup_keyword(ident_str).unwrap_or(TokenKind::Ident);
-                self.pos = end;
-                let can_infix = matches!(kind, TokenKind::Ident | TokenKind::KwEngine);
-                self.emit(kind, TokenFlags::NONE, start, end, can_infix);
-                continue;
-            }
-
-            // Homoiconic Call-Quoting Projections (`!(`, `!!(`, `!&(`, `!^(`, `!@(`, `!?(`, `!=`, `!`)
-            if b0 == b'!' {
-                if b1 == b'=' {
-                    self.pos += 2;
-                    self.emit(
-                        TokenKind::NotEqual,
-                        TokenFlags::NONE,
-                        start,
-                        self.pos,
-                        false,
-                    );
-                    continue;
-                }
-                if b1 == b'(' {
-                    self.pos += 1;
-                    self.emit(
-                        TokenKind::CallQuoteShallow,
-                        TokenFlags::FOLLOWED_BY_LPAREN,
-                        start,
-                        self.pos,
-                        false,
-                    );
-                    continue;
-                }
-                let cq = match (b1, b2) {
-                    (b'!', b'(') => Some(TokenKind::CallQuoteDeep),
-                    (b'&', b'(') => Some(TokenKind::CallQuoteAbi),
-                    (b'^', b'(') => Some(TokenKind::CallQuoteReact),
-                    (b'@', b'(') => Some(TokenKind::CallQuoteAdjoint),
-                    (b'?', b'(') => Some(TokenKind::CallQuoteEffect),
-                    _ => None,
-                };
-                if let Some(kind) = cq {
-                    self.pos += 2;
-                    self.emit(kind, TokenFlags::FOLLOWED_BY_LPAREN, start, self.pos, false);
-                    continue;
-                }
-                self.pos += 1;
-                self.emit(
-                    TokenKind::Exclamation,
-                    TokenFlags::NONE,
-                    start,
-                    self.pos,
-                    true,
-                );
-                continue;
-            }
-
-            // Dots & Ranges (`.`, `..`, `..=`, `..<`, `...`)
-            if b0 == b'.' {
-                if b1 == b'.' {
-                    let (kind, adv) = match b2 {
-                        b'=' => (TokenKind::DotDotEqual, 3),
-                        b'<' => (TokenKind::DotDotLess, 3),
-                        b'.' => (TokenKind::Ellipsis, 3),
-                        _ => (TokenKind::DotDot, 2),
-                    };
-                    self.pos += adv;
-                    self.emit(kind, TokenFlags::NONE, start, self.pos, false);
-                    continue;
-                }
-                self.pos += 1;
-                let dot_kind = if !self.preceded_by_ws
-                    && !self.preceded_by_nl
-                    && self.last_token_can_precede_infix_dot
-                {
-                    TokenKind::InfixDot
-                } else {
-                    TokenKind::PrefixDot
-                };
-                self.emit(dot_kind, TokenFlags::NONE, start, self.pos, false);
-                continue;
-            }
-
-            self.scan_operator_or_delimiter(start, b0, b1, b2);
+        let from = self.at;
+        while self.at < b.len() && b[self.at] != b' ' && b[self.at] != b'\n' {
+            self.at += 1;
         }
-
-        let eof_pos = self.bytes.len();
-        self.emit(TokenKind::Eof, TokenFlags::NONE, eof_pos, eof_pos, false);
-        self.tape
+        if from == self.at {
+            return Err("the file ends early".into());
+        }
+        Ok(&self.src[from..self.at])
     }
-
-    fn scan_string_literal(
-        &mut self,
-        token_start: usize,
-        quote_pos: usize,
-        quote: u8,
-        extra_flags: TokenFlags,
-    ) {
-        let is_interp = extra_flags.contains(TokenFlags::IS_INTERPOLATED);
-        let is_raw = extra_flags.contains(TokenFlags::IS_RAW_STRING);
-        if self.peek_at(quote_pos + 1) == quote && self.peek_at(quote_pos + 2) == quote {
-            let end = if is_interp {
-                scan_interpolated_string_end(self.bytes, quote_pos + 3, quote, is_raw, true)
-            } else {
-                scan_triple_string_end(self.bytes, quote_pos + 3, quote)
+    fn expect(&mut self, label: &str) -> Result<(), String> {
+        let w = self.word()?;
+        if w != label {
+            return Err(format!("`{label}` expected, found `{w}`"));
+        }
+        Ok(())
+    }
+    fn int(&mut self) -> Result<i64, String> {
+        let w = self.word()?;
+        w.parse().map_err(|_| format!("`{w}` is not a number"))
+    }
+    /// A line written by `ints_line`: `label count`, then the values, a run
+    /// written `value*times`.
+    fn ints(&mut self, label: &str) -> Result<Vec<i64>, String> {
+        self.expect(label)?;
+        let n = usize::try_from(self.int()?).map_err(|_| format!("`{label}`: bad count"))?;
+        let mut out = Vec::with_capacity(n);
+        while out.len() < n {
+            let w = self.word()?;
+            let (v, times) = match w.split_once('*') {
+                Some((v, t)) => (v, t.parse::<usize>().map_err(|_| format!("`{w}`"))?),
+                None => (w, 1),
             };
-            self.pos = end;
-            self.emit(TokenKind::TripleStrLit, extra_flags, token_start, end, true);
-        } else {
-            let close_idx = if is_interp {
-                scan_interpolated_string_end(self.bytes, quote_pos + 1, quote, is_raw, false)
-            } else {
-                scan_quoted_string_end(self.bytes, quote_pos + 1, quote)
-            };
-            let end = if close_idx < self.bytes.len() && self.bytes[close_idx] == quote {
-                close_idx + 1
-            } else {
-                close_idx
-            };
-            self.pos = end;
-            self.emit(TokenKind::StrLit, extra_flags, token_start, end, true);
+            let v: i64 = v.parse().map_err(|_| format!("`{w}` is not a number"))?;
+            if out.len() + times > n {
+                return Err(format!("`{label}` holds more than {n} values"));
+            }
+            out.resize(out.len() + times, v);
         }
+        Ok(out)
     }
-
-    fn scan_number_or_dimension(&mut self, start: usize) {
-        let b0 = self.bytes[start];
-        let b1 = self.peek_at(start + 1);
-        let mut cur = start;
-        let mut kind = TokenKind::IntLit;
-
-        if b0 == b'0' && (b1 == b'x' || b1 == b'X') {
-            kind = TokenKind::HexIntLit;
-            cur += 2;
-            while cur < self.bytes.len()
-                && (self.bytes[cur].is_ascii_hexdigit() || self.bytes[cur] == b'_')
-            {
-                cur += 1;
-            }
-        } else if b0 == b'0' && (b1 == b'b' || b1 == b'B') {
-            kind = TokenKind::BinIntLit;
-            cur += 2;
-            while cur < self.bytes.len()
-                && (self.bytes[cur] == b'0' || self.bytes[cur] == b'1' || self.bytes[cur] == b'_')
-            {
-                cur += 1;
-            }
-        } else if b0 == b'0' && (b1 == b'o' || b1 == b'O') {
-            kind = TokenKind::OctIntLit;
-            cur += 2;
-            while cur < self.bytes.len()
-                && ((self.bytes[cur] >= b'0' && self.bytes[cur] <= b'7') || self.bytes[cur] == b'_')
-            {
-                cur += 1;
-            }
-        } else {
-            while cur < self.bytes.len()
-                && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_')
-            {
-                cur += 1;
-            }
-            if cur + 1 < self.bytes.len()
-                && self.bytes[cur] == b'.'
-                && self.bytes[cur + 1].is_ascii_digit()
-            {
-                kind = TokenKind::FloatLit;
-                cur += 1;
-                while cur < self.bytes.len()
-                    && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_')
-                {
-                    cur += 1;
-                }
-            }
-            if cur < self.bytes.len() && (self.bytes[cur] == b'e' || self.bytes[cur] == b'E') {
-                let next_e = self.peek_at(cur + 1);
-                if next_e.is_ascii_digit()
-                    || ((next_e == b'+' || next_e == b'-')
-                        && self.peek_at(cur + 2).is_ascii_digit())
-                {
-                    kind = TokenKind::FloatLit;
-                    cur += if next_e == b'+' || next_e == b'-' {
-                        2
-                    } else {
-                        1
-                    };
-                    while cur < self.bytes.len()
-                        && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_')
-                    {
-                        cur += 1;
-                    }
-                }
-            }
+    /// A line written by `words_line`: `label count`, then `=name` words.
+    fn skip_words(&mut self, label: &str) -> Result<usize, String> {
+        self.expect(label)?;
+        let n = self.int()?;
+        for _ in 0..n {
+            self.word()?;
         }
-
-        // Name-blind suffix check: a unit (`250ms`, `2.4GHz`, `64KB`) or a type
-        // name (`200u8`, `0xFFu8`). Any adjacent non-seed alphabetic identifier
-        // run marks `TokenFlags::IS_DIMENSIONAL`; the parser tells them apart.
-        let mut flags = TokenFlags::NONE;
-        if cur < self.bytes.len() && self.bytes[cur].is_ascii_alphabetic() {
-            let unit_len = scan_ident_run(self.bytes, cur);
-            if unit_len > 0 && lookup_keyword(&self.source[cur..cur + unit_len]).is_none() {
-                cur += unit_len;
-                flags.insert(TokenFlags::IS_DIMENSIONAL);
-            }
-        }
-
-        self.pos = cur;
-        self.emit(kind, flags, start, cur, true);
+        Ok(n as usize)
     }
+}
 
-    fn scan_operator_or_delimiter(&mut self, start: usize, b0: u8, b1: u8, b2: u8) {
-        let (kind, len, can_infix_dot) = match (b0, b1, b2) {
-            (b'(', _, _) => (TokenKind::LParen, 1, false),
-            (b')', _, _) => (TokenKind::RParen, 1, true),
-            (b'[', _, _) => (TokenKind::LBracket, 1, false),
-            (b']', _, _) => (TokenKind::RBracket, 1, true),
-            (b'{', _, _) => (TokenKind::LBrace, 1, false),
-            (b'}', _, _) => (TokenKind::RBrace, 1, true),
-            (b';', _, _) => (TokenKind::Semicolon, 1, false),
-            (b',', _, _) => (TokenKind::Comma, 1, false),
-            (b'$', _, _) => (TokenKind::Dollar, 1, false),
-            (b'~', b'>', _) => (TokenKind::TildeGreater, 2, false),
-            (b'~', _, _) => (TokenKind::Tilde, 1, false),
-            (b'@', b'>', _) => (TokenKind::JsonContains, 2, false),
-            (b'@', _, _) => (TokenKind::At, 1, false),
-            (b'?', b'.', b'.') => (TokenKind::SafeCascade, 3, false),
-            (b'?', b'?', b'=') => (TokenKind::CoalesceEqual, 3, false),
-            (b'?', b'.', _) => (TokenKind::SafeNav, 2, false),
-            (b'?', b'?', _) => (TokenKind::Coalesce, 2, false),
-            (b'?', _, _) => (TokenKind::Question, 1, true),
-            (b'+', b'=', _) => (TokenKind::PlusEqual, 2, false),
-            (b'+', b'|', _) => (TokenKind::PlusPipe, 2, false),
-            (b'+', b'%', _) => (TokenKind::PlusPercent, 2, false),
-            (b'+', b'?', _) => (TokenKind::PlusQuestion, 2, false),
-            (b'+', _, _) => (TokenKind::Plus, 1, false),
-            (b'-', b'>', b'>') => (TokenKind::JsonGetText, 3, false),
-            (b'-', b'>', _) => (TokenKind::Arrow, 2, false),
-            (b'-', b'=', _) => (TokenKind::MinusEqual, 2, false),
-            (b'-', b'|', _) => (TokenKind::MinusPipe, 2, false),
-            (b'-', b'%', _) => (TokenKind::MinusPercent, 2, false),
-            (b'-', b'?', _) => (TokenKind::MinusQuestion, 2, false),
-            (b'-', _, _) => (TokenKind::Minus, 1, false),
-            (b'*', b'*', b'=') => (TokenKind::DoubleStarEqual, 3, false),
-            (b'*', b'.', b'.') => (TokenKind::StarDotDot, 3, false),
-            (b'*', b'*', _) => (TokenKind::DoubleStar, 2, false),
-            (b'*', b'=', _) => (TokenKind::StarEqual, 2, false),
-            (b'*', b'|', _) => (TokenKind::StarPipe, 2, false),
-            (b'*', b'%', _) => (TokenKind::StarPercent, 2, false),
-            (b'*', b'?', _) => (TokenKind::StarQuestion, 2, false),
-            (b'*', _, _) => (TokenKind::Star, 1, false),
-            (b'/', b'=', _) => (TokenKind::SlashEqual, 2, false),
-            (b'/', _, _) => (TokenKind::Slash, 1, false),
-            (b'%', b'%', _) => (TokenKind::DoublePercent, 2, false),
-            (b'%', b'=', _) => (TokenKind::PercentEqual, 2, false),
-            (b'%', _, _) => (TokenKind::Percent, 1, false),
-            (b'&', b'&', _) => (TokenKind::DoubleAmper, 2, false),
-            (b'&', b'=', _) => (TokenKind::AmperEqual, 2, false),
-            (b'&', _, _) => (TokenKind::Amper, 1, false),
-            (b'|', b'|', _) => (TokenKind::DoublePipe, 2, false),
-            (b'|', b'>', _) => (TokenKind::PipeForward, 2, false),
-            (b'|', b'=', _) => (TokenKind::VbarEqual, 2, false),
-            (b'|', _, _) => (TokenKind::Vbar, 1, false),
-            (b'^', b'=', _) => (TokenKind::CaretEqual, 2, false),
-            (b'^', _, _) => (TokenKind::Caret, 1, false),
-            (b'=', b'=', _) => (TokenKind::EqEqual, 2, false),
-            (b'=', b'>', _) => (TokenKind::FatArrow, 2, false),
-            (b'=', _, _) => (TokenKind::Equal, 1, false),
-            (b'<', b'=', b'>') => (TokenKind::Spaceship, 3, false),
-            (b'<', b'<', b'=') => (TokenKind::ShiftLeftEqual, 3, false),
-            (b'<', b'<', _) => (TokenKind::ShiftLeft, 2, false),
-            (b'<', b'=', _) => (TokenKind::LessEqual, 2, false),
-            (b'<', b'-', _) => (TokenKind::ArrowLeft, 2, false),
-            (b'<', b'|', _) => (TokenKind::PipeBackward, 2, false),
-            (b'<', b'@', _) => (TokenKind::JsonContained, 2, false),
-            (b'<', _, _) => (TokenKind::Less, 1, false),
-            (b'>', b'.', b'.') => {
-                if self.peek_at(start + 3) == b'<' {
-                    (TokenKind::GreaterDotDotLess, 4, false)
-                } else {
-                    (TokenKind::GreaterDotDot, 3, false)
-                }
-            }
-            (b'>', b'>', b'=') => (TokenKind::ShiftRightEqual, 3, false),
-            (b'>', b'>', _) => (TokenKind::ShiftRight, 2, false),
-            (b'>', b'=', _) => (TokenKind::GreaterEqual, 2, false),
-            (b'>', _, _) => (TokenKind::Greater, 1, false),
-            // A character no rule takes is one error token, all its bytes,
-            // so a token never ends inside a multi-byte character.
-            _ => {
-                let width = self
-                    .source
-                    .get(start..)
-                    .and_then(|rest| rest.chars().next())
-                    .map_or(1, char::len_utf8);
-                (TokenKind::ErrorToken, width, false)
-            }
+/// State `v` of an automaton of `states` states.
+fn state(v: i64, states: usize) -> Result<u16, String> {
+    u16::try_from(v)
+        .ok()
+        .filter(|&x| x != DEAD && (x as usize) < states)
+        .ok_or_else(|| format!("state {v} is out of range"))
+}
+
+fn read_automaton(r: &mut Reader) -> Result<Automaton, String> {
+    let names = r.skip_words("names")?;
+    let class_of_list = r.ints("class_of")?;
+    r.expect("size")?;
+    let classes = r.int()? as usize;
+    let states = r.int()? as usize;
+    let starts_list = r.ints("starts")?;
+    let next_list = r.ints("next")?;
+    let accept_list = r.ints("accept")?;
+    if class_of_list.len() != 256
+        || starts_list.len() != CONTEXTS
+        || next_list.len() != classes * states
+        || accept_list.len() != states
+    {
+        return Err("an automaton's lists do not fit its size".into());
+    }
+    let mut class_of = [0u16; 256];
+    for (i, &c) in class_of_list.iter().enumerate() {
+        if c < 0 || c as usize >= classes {
+            return Err(format!("byte class {c} is out of range"));
+        }
+        class_of[i] = c as u16;
+    }
+    let mut starts = [0u16; CONTEXTS];
+    for (i, &s) in starts_list.iter().enumerate() {
+        starts[i] = state(s, states)?;
+    }
+    let mut next = Vec::with_capacity(next_list.len());
+    for &s in &next_list {
+        next.push(if s < 0 { DEAD } else { state(s, states)? });
+    }
+    let mut accept = Vec::with_capacity(states);
+    for &a in &accept_list {
+        if a >= names as i64 {
+            return Err(format!("accepted token {a} is out of range"));
+        }
+        accept.push(a as i32);
+    }
+    Ok(Automaton {
+        class_of,
+        classes,
+        starts,
+        next,
+        accept,
+    })
+}
+
+fn kind_of(v: i64) -> Result<TokenKind, String> {
+    u16::try_from(v)
+        .ok()
+        .and_then(TokenKind::from_u16)
+        .ok_or_else(|| format!("{v} is no seed token kind"))
+}
+
+impl SeedTable {
+    /// Reads a table written by `pilot lex --write-table`.
+    pub fn parse(text: &str) -> Result<SeedTable, String> {
+        let first = text.lines().next().unwrap_or("");
+        if first != FORMAT {
+            return Err(format!("the format is `{first}`, not `{FORMAT}`"));
+        }
+        let mut r = Reader {
+            src: text,
+            at: first.len(),
         };
-        self.pos = start + len;
-        self.emit(kind, TokenFlags::NONE, start, self.pos, can_infix_dot);
+        r.expect("key")?;
+        let key_len = r.int()? as usize;
+        r.at += 1 + key_len;
+        if r.at > text.len() {
+            return Err("the key runs past the end".into());
+        }
+        let n_modes = r.skip_words("modes")?;
+        let bases = r.ints("bases")?;
+        let mode_of = r.ints("mode_of")?;
+        if bases.len() != n_modes {
+            return Err("`bases` does not list every mode".into());
+        }
+        let mut automata = Vec::new();
+        let mut modes = Vec::with_capacity(n_modes);
+        for (i, &base) in bases.iter().enumerate() {
+            let enters = r.ints("enters")?;
+            r.expect("shares")?;
+            let shares = r.int()?;
+            let automaton = if shares < 0 {
+                automata.push(read_automaton(&mut r)?);
+                automata.len() - 1
+            } else {
+                let j = shares as usize;
+                if j >= i {
+                    return Err(format!("mode {i} shares mode {j}, which is not before it"));
+                }
+                modes.get(j).map(|m: &Mode| m.automaton).unwrap_or(0)
+            };
+            let acts = r.ints("actions")?;
+            r.skip_words("enters_mode")?;
+            if acts.len() != enters.len() * 3 {
+                return Err(format!("mode {i}: `actions` and `enters` disagree"));
+            }
+            let mut actions = Vec::with_capacity(enters.len());
+            for (d, &to) in enters.iter().enumerate() {
+                if to >= n_modes as i64 {
+                    return Err(format!("mode {i} enters mode {to}, which is not declared"));
+                }
+                actions.push(Action {
+                    role: acts[d * 3] as u8,
+                    leaves: acts[d * 3 + 1] != 0,
+                    trails: acts[d * 3 + 2].max(0) as u32,
+                    enters: to as i32,
+                });
+            }
+            modes.push(Mode {
+                automaton,
+                base: base as usize,
+                actions,
+            });
+        }
+        r.expect("seed_special")?;
+        let eof = kind_of(r.int()?)?;
+        let error = kind_of(r.int()?)?;
+        let kinds = r.ints("seed_kinds")?;
+        if kinds.len() != mode_of.len() * 3 {
+            return Err("`seed_kinds` does not list every family".into());
+        }
+        let mut families = Vec::with_capacity(mode_of.len());
+        for k in kinds.chunks(3) {
+            families.push(Family {
+                kind: kind_of(k[0])?,
+                flags: TokenFlags(k[1] as u8),
+                emit: k[2] as u8,
+            });
+        }
+        for m in &modes {
+            if m.base + m.actions.len() > families.len() {
+                return Err("a mode's families run past `seed_kinds`".into());
+            }
+        }
+        Ok(SeedTable {
+            automata,
+            modes,
+            families,
+            eof,
+            error,
+        })
     }
+}
 
-    #[inline(always)]
-    fn peek_at(&self, idx: usize) -> u8 {
-        if idx < self.bytes.len() {
-            self.bytes[idx]
-        } else {
-            0
+/// The longest match of `a` at `pos` from context `ctx`: the declaration
+/// and the end of its last accepting state, or `None`.
+fn match_at(a: &Automaton, bytes: &[u8], pos: usize, ctx: usize) -> Option<(usize, usize)> {
+    let mut state = a.starts[ctx] as usize;
+    let mut last = None;
+    let mut i = pos;
+    while i < bytes.len() {
+        let nx = a.next[state * a.classes + a.class_of[bytes[i] as usize] as usize];
+        if nx == DEAD {
+            break;
+        }
+        state = nx as usize;
+        i += 1;
+        let acc = a.accept[state];
+        if acc >= 0 {
+            last = Some((acc as usize, i));
         }
     }
+    last
+}
 
-    #[inline]
-    fn emit(
-        &mut self,
-        kind: TokenKind,
-        mut flags: TokenFlags,
-        start: usize,
-        end: usize,
-        can_precede_infix_dot: bool,
-    ) {
-        if self.preceded_by_ws {
-            flags.insert(TokenFlags::PRECEDED_BY_WS);
-        }
-        if self.preceded_by_nl {
-            flags.insert(TokenFlags::PRECEDED_BY_NEWLINE);
-        }
-        if self.peek_at(end) == b'(' {
-            flags.insert(TokenFlags::FOLLOWED_BY_LPAREN);
-        }
+/// Tokens pushed onto a tape, with `()`, `[]` and `{}` linked as found.
+struct Out {
+    tape: TokenTape,
+    open: Vec<(TokenKind, u32)>,
+}
+
+impl Out {
+    fn push(&mut self, kind: TokenKind, flags: TokenFlags, start: usize, end: usize) {
         let idx = self
             .tape
             .push(kind, flags, ByteSpan::new(start as u32, end as u32));
-        match kind {
+        let opener = match kind {
             TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => {
-                self.open_brackets.push((kind, idx))
+                self.open.push((kind, idx));
+                return;
             }
-            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
-                let expected = match kind {
-                    TokenKind::RParen => TokenKind::LParen,
-                    TokenKind::RBracket => TokenKind::LBracket,
-                    _ => TokenKind::LBrace,
-                };
-                if let Some(&(_, open_idx)) =
-                    self.open_brackets.last().filter(|&&(k, _)| k == expected)
-                {
-                    self.open_brackets.pop();
-                    self.tape.bracket_links[open_idx as usize] = idx;
-                    self.tape.bracket_links[idx as usize] = open_idx;
-                }
-            }
-            _ => {}
-        }
-        if !matches!(
-            kind,
-            TokenKind::Comment | TokenKind::BlockComment | TokenKind::Newline | TokenKind::Shebang
-        ) {
-            self.last_token_can_precede_infix_dot = can_precede_infix_dot;
-            self.preceded_by_ws = false;
-            self.preceded_by_nl = false;
+            TokenKind::RParen => TokenKind::LParen,
+            TokenKind::RBracket => TokenKind::LBracket,
+            TokenKind::RBrace => TokenKind::LBrace,
+            _ => return,
+        };
+        if let Some(&(_, at)) = self.open.last().filter(|&&(k, _)| k == opener) {
+            self.open.pop();
+            self.tape.bracket_links[at as usize] = idx;
+            self.tape.bracket_links[idx as usize] = at;
         }
     }
+}
+
+/// The token tape of `src`.
+pub fn run(t: &SeedTable, src: &str) -> TokenTape {
+    let bytes = src.as_bytes();
+    let mut out = Out {
+        tape: TokenTape::with_capacity((src.len() / 4).max(16)),
+        open: Vec::with_capacity(32),
+    };
+    let mut stack: Vec<usize> = vec![0];
+    let (mut spaced, mut operand) = (true, false);
+    // The start and family of the token a mode change opened (an f-string).
+    let mut merge: Option<(usize, usize)> = None;
+    let mut pos = 0;
+    while pos < bytes.len() {
+        let mode = &t.modes[*stack.last().unwrap_or(&0)];
+        let ctx = if pos == 0 {
+            CTX_START
+        } else if spaced {
+            CTX_SPACED
+        } else if operand {
+            CTX_GLUED
+        } else {
+            CTX_OTHER
+        };
+        let found = match_at(&t.automata[mode.automaton], bytes, pos, ctx)
+            .map(|(d, end)| (d, end.saturating_sub(mode.actions[d].trails as usize)))
+            .filter(|&(_, end)| end > pos);
+        let Some((d, end)) = found else {
+            if let Some((start, fam)) = merge.take() {
+                // An f-string cut short: its token ends here, and the byte
+                // is lexed again in the base mode.
+                let f = t.families[fam];
+                out.push(f.kind, f.flags, start, pos);
+                stack.truncate(1);
+                continue;
+            }
+            let width = src
+                .get(pos..)
+                .and_then(|rest| rest.chars().next())
+                .map_or(1, char::len_utf8);
+            out.push(t.error, TokenFlags::NONE, pos, pos + width);
+            (spaced, operand) = (false, false);
+            pos += width;
+            continue;
+        };
+        let act = mode.actions[d];
+        let fam = t.families[mode.base + d];
+        match act.role {
+            ROLE_SPACE => spaced = true,
+            ROLE_TRIVIA => {}
+            role => (spaced, operand) = (false, role == ROLE_OPERAND),
+        }
+        if act.leaves && stack.len() > 1 {
+            stack.pop();
+        }
+        if act.enters >= 0 {
+            stack.push(act.enters as usize);
+        }
+        if let Some((start, family)) = merge {
+            if fam.kind == t.error {
+                let f = t.families[family];
+                out.push(f.kind, f.flags, start, pos);
+                out.push(t.error, TokenFlags::NONE, pos, end);
+                stack.truncate(1);
+                merge = None;
+            } else if stack.len() == 1 {
+                let f = t.families[family];
+                out.push(f.kind, f.flags, start, end);
+                merge = None;
+            }
+        } else if stack.len() > 1 {
+            merge = Some((pos, mode.base + d));
+        } else if fam.emit != EMIT_SKIP {
+            out.push(fam.kind, fam.flags, pos, end);
+        }
+        pos = end;
+    }
+    if let Some((start, family)) = merge {
+        let f = t.families[family];
+        out.push(f.kind, f.flags, start, bytes.len());
+    }
+    out.push(t.eof, TokenFlags::NONE, bytes.len(), bytes.len());
+    out.tape
 }

@@ -31,6 +31,19 @@ pub const BRACKET_PAIRS: List<BracketPair> = [
     BracketPair { open: HOLE_OPEN, close: "}" },
 ];
 
+/// A family the lexicon declares only to reject it: the tape reports `code`
+/// with `message`, which says what to write instead.
+pub struct RejectedForm : IValue {
+    pub family: str;
+    pub code: str;
+    pub message: str;
+}
+
+pub const REJECTED_FORMS: List<RejectedForm> = [
+    RejectedForm { family: UNCLOSED_STRING, code: "LEX001", message: "the string is not closed before the end of the line" },
+    RejectedForm { family: HOLE_ESCAPED_QUOTE, code: "LEX009", message: "a quote inside an f-string hole is not escaped, because a hole is code: write `f\"{m[\"k\"]}\"`, not `f\"{m[\\\"k\\\"]}\"`" },
+];
+
 /// Every token declared so far that lexes in one table, in declaration
 /// order (no operators: those come from the program's declarations).
 pub fn core_tokens() -> List<TokenDecl> => core_tokens_with([]);
@@ -39,7 +52,7 @@ pub fn core_tokens() -> List<TokenDecl> => core_tokens_with([]);
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
 pub fn core_tokens_with(operators: List<TokenDecl>) -> List<TokenDecl> {
     var out: List<TokenDecl> = [];
-    for group in [number_tokens(), suffixed_number_tokens(), name_tokens(), trivia_tokens(), string_tokens(), delimiter_tokens(), operators, seed_forms_after(operators)] {
+    for group in [number_tokens(), suffixed_number_tokens(), misplaced_separator_tokens(), name_tokens(), trivia_tokens(), unclosed_string_tokens(), string_tokens(), delimiter_tokens(), operators, seed_forms_after(operators)] {
         for d in group {
             out.push(d);
         }
@@ -47,13 +60,14 @@ pub fn core_tokens_with(operators: List<TokenDecl>) -> List<TokenDecl> {
     return out;
 }
 
-/// The whole lexicon with its modes, given the operator tokens: the main
-/// mode (every token, the operators and the f-string openers), one mode per
-/// f-string quoting, and the hole mode (the main mode's tokens, with braces
-/// that enter and leave it).
 /// The mode a source starts in.
 pub const MAIN_MODE: str = "main";
 
+/// The whole lexicon with its modes, given the operator tokens: the main
+/// mode (every token, the operators and the f-string openers), one mode per
+/// f-string quoting, and the hole mode (the main mode's tokens but the
+/// `#` lines, with braces that enter and leave it, a format spec before the
+/// closing `}`, and the escaped quote it rejects).
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
 pub fn core_modes(operators: List<TokenDecl>) -> List<LexMode> {
     var modes: List<LexMode> = [lex_mode(MAIN_MODE, modal_tokens(operators, false))];
@@ -76,10 +90,16 @@ fn seed_forms_after(ref operators: List<TokenDecl>) -> List<TokenDecl> {
 fn modal_tokens(operators: List<TokenDecl>, in_hole: bool) -> List<TokenDecl> {
     let braces = if in_hole { delimiters_in(true, HOLE_MODE) } else { delimiters_in(false, "") };
     var out: List<TokenDecl> = [];
-    for group in [number_tokens(), suffixed_number_tokens(), name_tokens(), trivia_tokens(), string_tokens(), fstring_openers(), operators, seed_forms_after(operators), braces] {
+    for group in [number_tokens(), suffixed_number_tokens(), misplaced_separator_tokens(), name_tokens(), trivia_tokens(), unclosed_string_tokens(), string_tokens(), fstring_openers(), operators, seed_forms_after(operators), braces] {
         for d in group {
-            out.push(d);
+            if !in_hole || !is_line_start_trivia(d.name) {
+                out.push(d);
+            }
         }
+    }
+    if in_hole {
+        out.push(format_spec_token());
+        out.push(hole_escaped_quote_token());
     }
     return out;
 }

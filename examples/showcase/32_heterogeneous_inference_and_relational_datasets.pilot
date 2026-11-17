@@ -42,7 +42,7 @@ let warehouse_inventory = [
 
 println("\n[2] Warehouse Relational Inventory Dataset:");
 for item in warehouse_inventory {
-    println(f"  {item[\"sku\"]} [{item[\"department\"]}] -> {item[\"stock\"]} units @ ${item[\"unit_cost\"]}");
+    println(f"  {item["sku"]} [{item["department"]}] -> {item["stock"]} units @ ${item["unit_cost"]}");
 }
 
 // -----------------------------------------------------------------------------
@@ -61,7 +61,7 @@ for entry in warehouse_inventory {
 
 println("\n[3] Filtered Silicon Department Records (Inferred Concrete Slice):");
 for si in silicon_items {
-    println(f"  -> Qualified: {si[\"sku\"]} (stock: {si[\"stock\"]})");
+    println(f"  -> Qualified: {si["sku"]} (stock: {si["stock"]})");
 }
 println(f"  Total Silicon Department Valuation: ${total_silicon_value}");
 

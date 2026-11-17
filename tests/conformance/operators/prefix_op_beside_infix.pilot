@@ -31,5 +31,5 @@ fn main() {
     let p = a ** b;
     print(f"{p.x} {p.y}");
     let kv: Map<str, i64> = [**a];
-    print(f"{kv[\"x\"]} {kv[\"y\"]}");
+    print(f"{kv["x"]} {kv["y"]}");
 }

@@ -1,0 +1,38 @@
+// The 14 seed words lex as their own families, which the seed reads as the
+// kinds KwEngine (40) to KwAsm (53) of crates/pilot-lexer/src/token.rs; any
+// other word, a keyword of the standard library included, is a name (Ident,
+// 20). Moved here from crates/pilot-lexer/src/lib.rs (PROP-021 21H).
+// Expected, from token.rs's numbers, as text=kind/flags:
+//   __engine=40/0 struct=41/0 interface=42/0 fn=43/0 let=44/0 ref=45/0
+//   if=46/0 loop=47/0 return=48/0 yield=49/0 defer=50/0 comptime=51/0
+//   quote=52/0 asm=53/0
+//   var=20/0 switch=20/0 for=20/0 async=20/0 select=20/0 iffy=20/0
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use Pilot.Core.Lex.SeedKinds;
+use pilot.lex.modes;
+use pilot.lex.cache;
+
+/// Each token of `src` but spaces, as `text=kind/flags`: the kind and flags
+/// the seed reads for its family (stdlib/core/lex/seed_kinds.pilot).
+fn show(ref m: ModalLexer, src: str) {
+    var out = "";
+    for l in lex_modal(m, src) {
+        let fam = modal_family(m, l);
+        if fam != "space" {
+            let text = src.slice(l.start, l.end);
+            if some e = seed_kind_of(fam) {
+                out = out + f"{text}={e.kind}/{e.flags} ";
+            } else {
+                out = out + f"{text}=? ";
+            }
+        }
+    }
+    print(out);
+}
+
+fn main() {
+    let built = build_modes_cached(core_modes(operator_tokens([], [])), LEX_CACHE_DIR);
+    show(built.lexer, "__engine struct interface fn let ref if loop return yield defer comptime quote asm");
+    show(built.lexer, "var switch for async select iffy");
+}

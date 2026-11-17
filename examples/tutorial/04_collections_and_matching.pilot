@@ -15,7 +15,7 @@ let user_id = user_tuple.0;
 let username = user_tuple.1;
 let head = numbers_list[0];
 
-println(f"User {user_id} ({username}), Head element: {head}, Host: {config_map[\"host\"]}");
+println(f"User {user_id} ({username}), Head element: {head}, Host: {config_map["host"]}");
 
 // --- 3. Algebraic Data Types (`enum` with Payload Variants) ---
 pub enum Shape {

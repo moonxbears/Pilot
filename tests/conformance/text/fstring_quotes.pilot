@@ -1,5 +1,6 @@
-// Escaped quotes inside f-string holes.
+// Quotes inside an f-string hole are plain quotes: a hole is code (owner
+// decision 2026-11-17; `\"` in a hole is LEX009, see lex/err_lex009_escaped_quote_in_hole).
 fn main() {
     let m = ["k": 42, "name": "pilot"];
-    println(f"k = {m[\"k\"]}, name = {m[\"name\"]}");
+    println(f"k = {m["k"]}, name = {m["name"]}");
 }

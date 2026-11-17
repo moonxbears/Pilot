@@ -64,6 +64,8 @@ pub const SEED_FLAGGED_KINDS: List<SeedKind> = [
     SeedKind { family: "bin_integer_suffixed", kind: 24, flags: SEED_IS_DIMENSIONAL },
     SeedKind { family: "oct_integer_suffixed", kind: 25, flags: SEED_IS_DIMENSIONAL },
     SeedKind { family: "float_suffixed", kind: 26, flags: SEED_IS_DIMENSIONAL },
+    SeedKind { family: "integer_misplaced_suffixed", kind: 22, flags: SEED_IS_DIMENSIONAL },
+    SeedKind { family: "float_misplaced_suffixed", kind: 26, flags: SEED_IS_DIMENSIONAL },
     SeedKind { family: "raw_string", kind: 27, flags: SEED_IS_RAW_STRING },
     SeedKind { family: "raw_string_triple", kind: 28, flags: SEED_IS_RAW_STRING },
     SeedKind { family: "fstring_open", kind: 27, flags: SEED_IS_INTERPOLATED },
@@ -79,6 +81,9 @@ pub const SEED_FAMILY_KINDS: List<FamilyKind> = [
     FamilyKind { family: "directive", kind: 2 },
     FamilyKind { family: "block_comment", kind: 3 },
     FamilyKind { family: "shebang", kind: 4 },
+    // Declared only to be rejected (lexicon.pilot REJECTED_FORMS): the seed
+    // reads it as a byte no token starts.
+    FamilyKind { family: HOLE_ESCAPED_QUOTE, kind: SEED_ERROR_KIND },
     // Names, literals and the 14 seed words.
     FamilyKind { family: "name", kind: 20 },
     FamilyKind { family: "keyword_literal", kind: 21 },
@@ -87,7 +92,15 @@ pub const SEED_FAMILY_KINDS: List<FamilyKind> = [
     FamilyKind { family: "bin_integer", kind: 24 },
     FamilyKind { family: "oct_integer", kind: 25 },
     FamilyKind { family: "float", kind: 26 },
+    // A number with a misplaced separator: one literal, which the checker
+    // reports as LIT001 (numbers.pilot misplaced_separator_tokens).
+    FamilyKind { family: "integer_misplaced", kind: 22 },
+    FamilyKind { family: "hex_integer_misplaced", kind: 23 },
+    FamilyKind { family: "bin_integer_misplaced", kind: 24 },
+    FamilyKind { family: "oct_integer_misplaced", kind: 25 },
+    FamilyKind { family: "float_misplaced", kind: 26 },
     FamilyKind { family: "string", kind: 27 },
+    FamilyKind { family: UNCLOSED_STRING, kind: 27 },
     FamilyKind { family: "byte_string", kind: 27 },
     FamilyKind { family: "string_triple", kind: 28 },
     FamilyKind { family: "byte_string_triple", kind: 28 },
@@ -202,7 +215,7 @@ pub const SEED_FAMILY_KINDS: List<FamilyKind> = [
 
 pub const SEED_SKIPPED: List<str> = ["space",];
 
-pub const SEED_INNER: List<str> = [FSTRING_TEXT, FSTRING_QUOTE, HOLE_OPEN, FSTRING_CLOSE,];
+pub const SEED_INNER: List<str> = [FSTRING_TEXT, FSTRING_QUOTE, HOLE_OPEN, FSTRING_CLOSE, FORMAT_SPEC,];
 
 /// What the seed reads for one family.
 pub struct SeedEntry : IValue {

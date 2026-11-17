@@ -1,0 +1,9 @@
+true
+fstring_open:f" hole_open:{ name:n format_spec::#_### }:} fstring_close:" 
+fstring_open:f" hole_open:{ name:x format_spec:: 0.00  }:} fstring_close:" 
+fstring_open:f" hole_open:{ name:a ::::: name:b }:} fstring_close:" 
+fstring_open:f" hole_open:{ name:n format_spec::#x# }:} fstring_close:" 
+fstring_open:f" hole_open:{ name:v ::: name:x name:y }:} fstring_close:" 
+{:{ name:a ::: integer:0 }:} 
+fstring_open:f" hole_open:{ ?:# }:} fstring_close:" 
+true

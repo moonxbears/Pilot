@@ -39,6 +39,18 @@ pub fn block_comment() -> Pattern {
 
 /// The trivia tokens, in declaration order.
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+/// The trivia that only mean something at the start of a line: a `#` line
+/// and the shebang. An f-string hole has neither (lexicon.pilot), so a `#`
+/// there is a stray byte, not the rest of the line.
+pub const LINE_START_TRIVIA: List<str> = ["directive", "shebang",];
+
+pub fn is_line_start_trivia(family: str) -> bool {
+    for f in LINE_START_TRIVIA {
+        if f == family { return true; }
+    }
+    return false;
+}
+
 pub fn trivia_tokens() -> List<TokenDecl> => [
     acting(TokenRole::Space, token("space", space_pattern())),
     acting(TokenRole::Space, token("newline", byte(NEWLINE))),

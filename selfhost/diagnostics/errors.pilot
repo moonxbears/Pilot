@@ -938,6 +938,13 @@ pub let ERRORS = [
         reference: "proposals.md PROP-021 §3.1; stdlib/pilot/lex/seed.pilot",
     },
     ErrorDef {
+        code: "LEX009",
+        title: "Escaped Quote in an F-String Hole",
+        description: "A `\\\"` or `\\'` inside an f-string's `{ .. }`: a hole is code, so a string in it uses plain quotes (`f\"{m[\"k\"]}\"`); the escaped form is rejected (owner decision 2026-11-17)",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §3.1; stdlib/core/lex/strings.pilot HOLE_ESCAPED_QUOTE, lexicon.pilot REJECTED_FORMS",
+    },
+    ErrorDef {
         code: "SYN010",
         title: "Malformed Sequence Rule",
         description: "A `syntax` rule with a sequence head is malformed (a hole kind that is not a `HoleKind` variant, a group of the wrong form, or a body that is not a `quote { .. }`), or a use of the rule does not fit its head",

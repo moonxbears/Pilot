@@ -247,7 +247,6 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
     ("crates/pilot-analysis/tests/milestone30_self_generating_blueprints.rs", 4),
     ("crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs", 4),
     ("crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs", 4),
-    ("crates/pilot-lexer/tests/milestone52_seed_lexer_and_preprocessor.rs", 4),
     ("crates/pilot-analysis/tests/milestone52_pilot_preprocessor_and_receptors.rs", 3),
     ("crates/pilot-analysis/tests/milestone53_cst_recovery_and_formatter.rs", 3),
     ("crates/pilot-analysis/tests/milestone54_perceus_ownership_and_escape.rs", 2),
@@ -461,7 +460,9 @@ fn verify_no_smuggled_foreign_or_binary_artifacts(root: &Path, test_name: &str, 
                         );
                     } else if ext != "pilot" && ext != "tmp" {
                         assert!(
-                            rel == "stdlib/pilot.json" || rel == "stdlib/THIRD_PARTY_NOTICES.md",
+                            rel == "stdlib/pilot.json"
+                                || rel == "stdlib/THIRD_PARTY_NOTICES.md"
+                                || rel == "stdlib/core/lex/toolchain.lex",
                             "ANTI-CHEAT [PASS 2: UNEXPECTED_DATA_FIXTURE] [M{}::{}]: Unauthorized non-.pilot file '{}' in {}/!",
                             milestone_id, test_name, rel, top
                         );

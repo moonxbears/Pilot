@@ -60,7 +60,7 @@ let CAN_BUS_IDS = comptime([
 ]);
 
 println(f"[2] CAN_BUS_IDS frozen={CAN_BUS_IDS.is_frozen}, perfect_hash={CAN_BUS_IDS.is_perfect_hash}, table_size={CAN_BUS_IDS.table_size}");
-println(f"    estop_cmd=0x{CAN_BUS_IDS[\"estop_cmd\"]}, lidar_sync=0x{CAN_BUS_IDS[\"lidar_sync\"]}");
+println(f"    estop_cmd=0x{CAN_BUS_IDS["estop_cmd"]}, lidar_sync=0x{CAN_BUS_IDS["lidar_sync"]}");
 
 // -----------------------------------------------------------------------------
 // 3. `comptime` Function Parameters & Static Contract Elision

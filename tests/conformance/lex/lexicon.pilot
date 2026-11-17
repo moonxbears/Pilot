@@ -4,12 +4,15 @@
 // into the families the parser expects.
 //
 // Expected, worked by hand:
-//   families: 45 numbers + 1 name + 14 seed words + 1 keyword_literal
-//             + 5 trivia + 1 shebang + 6 strings + 14 delimiters (the 13,
+//   families: 45 numbers + 7 numbers with a misplaced separator (4
+//             radixes and the float; the decimal and the float also
+//             suffixed) + 1 name + 14 seed words + 1 keyword_literal
+//             + 5 trivia + 1 shebang + 6 strings + 1 unclosed string
+//             (rejected, LEX001; strings.pilot) + 14 delimiters (the 13,
 //             with `.` split into prefix_dot and infix_dot) + 26 seed forms
 //             (strings: plain, raw and byte, each quoted once and three
 //             times)
-//             = 113, where
+//             = 121, where
 //     numbers: 5 (integer per radix: dec, hex, bin, oct; float), 5 of
 //       them suffixed, and each of the 5 again before a seed word, once per
 //       length of the letter-led words (fn/if 2, let/ref/asm 3, loop 4,

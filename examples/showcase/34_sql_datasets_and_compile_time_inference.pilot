@@ -111,11 +111,11 @@ let enterprise_customers = customer_table
 
 println("Filtered Enterprise Customers:");
 for cust in enterprise_customers.rows {
-    println(f"  {cust[\"name\"]} -> MRR: ${cust[\"mrr\"]}");
+    println(f"  {cust["name"]} -> MRR: ${cust["mrr"]}");
 }
 
 if some top_enterprise = enterprise_customers.first() {
-    println(f"\nTop Enterprise Account: {top_enterprise[\"name\"]}");
+    println(f"\nTop Enterprise Account: {top_enterprise["name"]}");
 }
 
 println("\n>>> Showcase 34 Execution Complete! <<<\n");

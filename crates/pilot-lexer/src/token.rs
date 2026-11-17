@@ -5,9 +5,30 @@
 
 use pilot_span::ByteSpan;
 
-#[repr(u16)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum TokenKind {
+/// Declares `TokenKind` and its checked `from_u16`: the lexer table names
+/// kinds by number (PROP-021 §3), and a number the enum lacks is a load
+/// error, never a guess.
+macro_rules! token_kinds {
+    ($($name:ident = $v:literal,)*) => {
+        #[repr(u16)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+        pub enum TokenKind {
+            $($name = $v,)*
+        }
+
+        impl TokenKind {
+            /// The kind numbered `v`, or `None` when no kind has that number.
+            pub fn from_u16(v: u16) -> Option<Self> {
+                match v {
+                    $($v => Some(Self::$name),)*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+token_kinds! {
     // 0. Special / Structural Tokens
     Eof = 0,
     Newline = 1,
@@ -156,9 +177,6 @@ pub struct TokenFlags(pub u8);
 
 impl TokenFlags {
     pub const NONE: Self = Self(0);
-    pub const PRECEDED_BY_WS: Self = Self(1 << 0);
-    pub const PRECEDED_BY_NEWLINE: Self = Self(1 << 1);
-    pub const FOLLOWED_BY_LPAREN: Self = Self(1 << 2);
     pub const IS_RAW_STRING: Self = Self(1 << 3);
     pub const IS_INTERPOLATED: Self = Self(1 << 4);
     pub const IS_DIMENSIONAL: Self = Self(1 << 5);

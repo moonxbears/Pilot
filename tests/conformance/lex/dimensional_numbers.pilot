@@ -1,0 +1,40 @@
+// A number with a word suffix is one token the seed reads with
+// IS_DIMENSIONAL (32), whatever the word; a seed word is never a suffix.
+// An f-string is read with IS_INTERPOLATED (16). Moved here from
+// crates/pilot-lexer/src/lib.rs (PROP-021 21H).
+// Expected, from token.rs's numbers, as text=kind/flags:
+//   250ms 64KB 100mol: IntLit 22 with 32; 3.25GHz: FloatLit 26 with 32;
+//   0xFFu8: HexIntLit 23 with 32 (a hex digit run stops at u).
+//   1if: IntLit 22, then the seed word if (46).
+//   f"hello {dt}": the opening is StrLit 27 with 16; its text, hole and
+//   close are pieces of that token, which the seed reads as one (no kind of
+//   their own here: kind 0).
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use Pilot.Core.Lex.SeedKinds;
+use pilot.lex.modes;
+use pilot.lex.cache;
+
+/// Each token of `src` but spaces, as `text=kind/flags`: the kind and flags
+/// the seed reads for its family (stdlib/core/lex/seed_kinds.pilot).
+fn show(ref m: ModalLexer, src: str) {
+    var out = "";
+    for l in lex_modal(m, src) {
+        let fam = modal_family(m, l);
+        if fam != "space" {
+            let text = src.slice(l.start, l.end);
+            if some e = seed_kind_of(fam) {
+                out = out + f"{text}={e.kind}/{e.flags} ";
+            } else {
+                out = out + f"{text}=? ";
+            }
+        }
+    }
+    print(out);
+}
+
+fn main() {
+    let built = build_modes_cached(core_modes(operator_tokens([], [])), LEX_CACHE_DIR);
+    show(built.lexer, "250ms 64KB 100mol 3.25GHz 0xFFu8 1if");
+    show(built.lexer, "f\"hello {dt}\"");
+}

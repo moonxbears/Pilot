@@ -206,8 +206,28 @@ pub fn bracket_links(ref m: ModalLexer, ref tape: TokenTape, src: str) -> Bracke
     return BracketLinks { links: links };
 }
 
-/// The tape of `src`. A byte that starts no token is LEX001, an unbalanced
-/// bracket LEX006, and a source too long for a `u32` start LEX007.
+/// The rejected form (`REJECTED_FORMS`) of each family, by family number:
+/// its index in `REJECTED_FORMS`, or -1.
+fn rejected_roles(ref m: ModalLexer) -> List<i64> {
+    var out: List<i64> = [];
+    var f = 0;
+    while f < m.families() {
+        let name = m.family_name(f);
+        var at = -1;
+        var i = 0;
+        for r in REJECTED_FORMS {
+            if r.family == name { at = i; }
+            i = i + 1;
+        }
+        out.push(at);
+        f = f + 1;
+    }
+    return out;
+}
+
+/// The tape of `src`. A byte that starts no token is LEX001, a rejected
+/// form its own code (`REJECTED_FORMS`, LEX009), an unbalanced bracket
+/// LEX006, and a source too long for a `u32` start LEX007.
 pub fn build_tape(ref m: ModalLexer, src: str) -> TapeBuild {
     var errors: List<LexBuildError> = [];
     var kinds = packed_buffer<u16>(sizeof(u16), false);
@@ -221,11 +241,15 @@ pub fn build_tape(ref m: ModalLexer, src: str) -> TapeBuild {
     starts.reserve(len / 4);
     let contexts = LEX_CONTEXT_KINDS.len() as i64;
     var c = LEX_CONTEXT_START;
+    let rejected = rejected_roles(m);
     for l in lex_modal(m, src) {
         let ctx = context_at(c, l.start);
         c = context_after(c, role_of(m.tables[l.mode], l));
         if l.decl < 0 {
             errors.push(LexBuildError { code: "LEX001", message: f"no token starts at byte {l.start}" });
+        } else if rejected[m.family_of(l.mode, l.decl)] >= 0 {
+            let r = REJECTED_FORMS[rejected[m.family_of(l.mode, l.decl)]];
+            errors.push(LexBuildError { code: r.code, message: f"at byte {l.start}: {r.message}" });
         } else if m.tables[l.mode].actions[l.decl].role != TokenRole::Space {
             kinds.push((m.family_of(l.mode, l.decl) * contexts + (ctx as i64)) as u16);
             starts.push(l.start as u32);

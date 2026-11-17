@@ -21,7 +21,10 @@
 //   1.5if    float:1.5 if:if
 //   0b1if    bin_integer:0b1 if:if
 //   7_000kB  integer_suffixed:7_000kB
-//   1_x      a suffix starts with a letter: integer:1 name:_x
+//   1_x      `1_` has a `_` after its last digit, which no strict number
+//            allows, so it is the misplaced-separator family (numbers.pilot,
+//            reported LIT001 by the checker), and `x` is its suffix:
+//            integer_misplaced_suffixed:1_x
 use Pilot.Core.Lex.Patterns;
 use Pilot.Core.Lex.Lexicon;
 use pilot.lex.build;

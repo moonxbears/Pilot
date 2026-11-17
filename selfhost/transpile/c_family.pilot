@@ -178,7 +178,7 @@ pub struct CFamilyDialect : ISourceDialect {
         if text == "-inf" { return "(-INFINITY)"; }
         return text + suffix;
     }
-    pub fn str_lit(raw: str) -> str => escaped(raw, (b) => "\\" + octal3(b));
+    pub fn str_lit(raw: str) -> str => without_trigraphs(escaped(raw, (b) => "\\" + octal3(b)));
     pub fn binary(op: str, a: str, b: str, pa: IrTypePhysics, pb: IrTypePhysics, p: IrTypePhysics) -> str? {
         if .carries_dynamic() && !(scalar(pa) && scalar(pb) && scalar(p)) {
             // At least one side's kind is known only at run time.
@@ -569,6 +569,27 @@ fn byte_rank_c() -> str {
     var parts: List<str> = [];
     for r in byte_rank() { parts.push(f"{r}"); }
     return "static const unsigned char pilot_byte_rank[256] = { " + join_text(parts, ", ") + " };";
+}
+
+/// C literal `lit` with each `?` that follows a `?` written `\?` (C11
+/// 6.4.4.4), so no `??x` of it is read as a trigraph (`??=` is `#` under
+/// `-std=c11`, 5.2.1.1). The escapes `escaped` writes hold no `?`, so a `?`
+/// here is one of the string's own.
+fn without_trigraphs(lit: str) -> str {
+    if !lit.contains("??") { return lit; }
+    var parts: List<str> = [];
+    var run = 0;
+    var i = 1;
+    while i < lit.len() {
+        if lit.byte_at(i) as i64 == 63 && lit.byte_at(i - 1) as i64 == 63 {
+            parts.push(lit.slice(run, i));
+            parts.push("\\");
+            run = i;
+        }
+        i = i + 1;
+    }
+    parts.push(lit.slice(run, lit.len()));
+    return join_text(parts, "");
 }
 
 /// `b` as three octal digits, for a `\ooo` escape.

@@ -93,7 +93,7 @@ impl<'a> Parser<'a> {
             let hole = &body[i + 1..end];
             let offset = (hole.as_ptr() as usize).saturating_sub(self.src.as_ptr() as usize) as u32;
             let (expr, pattern) = split_format_pattern(hole);
-            let value = self.parse_fstring_hole(unescape_hole_quotes(expr), offset, sp);
+            let value = self.parse_fstring_hole(expr, offset, sp);
             parts.push(match pattern {
                 Some(p) => self.format_call(value, p, sp),
                 None => value,
@@ -224,35 +224,6 @@ fn split_format_pattern(hole: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// Marks a string inside a hole delimited by escaped quotes (`\"`), the only
-/// way to write a double-quoted string inside `f"..."`.
-const ESCAPED_QUOTE: u8 = 0;
-
-/// A hole with its escaped quotes made plain: `m[\"k\"]` becomes `m[ "k" ]`.
-/// Each `\"` becomes two characters, so every offset in the hole is kept.
-/// The rewritten text must live as long as the source it stands in for; only
-/// holes that contain `\"` are copied, and each copy is kept for the life of
-/// the process.
-fn unescape_hole_quotes(hole: &str) -> &str {
-    if !hole.contains("\\\"") {
-        return hole;
-    }
-    let b = hole.as_bytes();
-    let (mut out, mut j, mut open) = (String::with_capacity(hole.len()), 0, false);
-    while j < b.len() {
-        if b[j] == b'\\' && b.get(j + 1) == Some(&b'"') {
-            out.push_str(if open { "\" " } else { " \"" });
-            open = !open;
-            j += 2;
-        } else {
-            let ch = hole[j..].chars().next().unwrap_or(' ');
-            out.push(ch);
-            j += ch.len_utf8();
-        }
-    }
-    Box::leak(out.into_boxed_str())
-}
-
 fn is_fstring_prefix(b: &[u8], quote_pos: usize) -> bool {
     if quote_pos == 0 {
         return false;
@@ -305,19 +276,12 @@ fn fstring_hole_end(b: &[u8], start: usize) -> Option<usize> {
     let (mut depth, mut j, mut quote) = (1usize, start, None::<u8>);
     while j < b.len() {
         let c = b[j];
-        let escaped_quote = c == b'\\' && b.get(j + 1) == Some(&b'"');
         if let Some(q) = quote {
-            if q == ESCAPED_QUOTE && escaped_quote {
-                quote = None;
-                j += 1;
-            } else if c == b'\\' {
+            if c == b'\\' {
                 j += 1;
             } else if c == q {
                 quote = None;
             }
-        } else if escaped_quote {
-            quote = Some(ESCAPED_QUOTE);
-            j += 1;
         } else if c == b'"' || c == b'\'' {
             if is_fstring_prefix(b, j) {
                 j = skip_nested_fstring(b, j + 1, c);

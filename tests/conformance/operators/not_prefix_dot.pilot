@@ -1,10 +1,9 @@
 // A `.` right after the prefix `!` is a prefix dot: `!.on` is `!self.on`,
 // as `-.level` is `-self.level` (AGENTS.md §5.1: a dot not glued to an
 // operand is prefix). `!` ends no operand: postfix `x!` is not Pilot
-// (NULL001). The seed lexer (crates/pilot-lexer/src/lexer.rs) marks `!`
-// as ending an operand, so the dot becomes infix, `!.on` reads as a member
-// of nothing, and the program stops at run time. The Pilot lexer already
-// gives `! prefix_dot name` (tests/conformance/lex/dots).
+// (NULL001). Was known bug seed.not_prefix_dot: the hand-written seed lexer
+// marked `!` as ending an operand. Since PROP-021 21H the seed runs the
+// table built from the token declarations, where it is not.
 //
 // Expected, worked by hand: a.on is true, so a.off() is !true = false;
 // a.level is 3, so a.neg() is -3                       -> "false -3"

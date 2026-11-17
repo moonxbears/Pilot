@@ -2,7 +2,7 @@
 //! Hardcodes strictly the 14 seed `TokenKind`s; zero Pilot scalar/composite type names exist here.
 use pilot_ast::*;
 use pilot_intern::SymbolId;
-use pilot_lexer::{tokenize, TokenKind, TokenTape};
+use pilot_lexer::{SeedTable, TokenKind, TokenTape};
 use pilot_span::ByteSpan;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -55,6 +55,34 @@ pub(crate) use stmt::assign_op_of;
 mod expr;
 pub fn set_source_root(root: &std::path::Path) {
     let _ = SOURCE_ROOT.set(root.to_path_buf());
+    lex_table();
+}
+
+/// The lexer table the seed runs, relative to the source root (PROP-021 §3).
+pub const LEX_TABLE_FILE: &str = "stdlib/core/lex/toolchain.lex";
+
+static LEX_TABLE: OnceLock<SeedTable> = OnceLock::new();
+
+/// The lexer table, read from the source root the first time. There is no
+/// other lexer: a missing or unreadable table stops here, naming the file.
+fn lex_table() -> &'static SeedTable {
+    LEX_TABLE.get_or_init(|| {
+        let path = source_root().join(LEX_TABLE_FILE);
+        let loaded = std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| pilot_lexer::load_table(&text));
+        loaded.unwrap_or_else(|e| {
+            panic!(
+                "error: the lexer table {} cannot be read ({e}); run `pilot lex --write-table`",
+                path.display()
+            )
+        })
+    })
+}
+
+/// The token tape of `src`, lexed with the loaded table.
+pub(crate) fn tokenize(src: &str) -> TokenTape {
+    pilot_lexer::tokenize(lex_table(), src)
 }
 
 /// The directory holding the `stdlib/` the toolchain runs with.

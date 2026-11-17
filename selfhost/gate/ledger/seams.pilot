@@ -315,10 +315,6 @@ pub fn bug_registry() -> List<KnownBug> {
             "`::Variant` is undefined when two enums share the variant name and the seed has no type at that spot: a struct literal field (`Cell { slot: ::Value }`) or a comparison with a field of a `for` element",
             "the field's enum picks the variant; prints true", "error[DECL001]: undefined name `Value`",
             "tests/conformance/known_bugs/variant_compare_untyped.pilot", "F5"),
-        known_bug("seed.not_prefix_dot", "crates/pilot-lexer lexer.rs (`!` is emitted as ending an operand)",
-            "a `.` right after the prefix `!` is lexed as an infix dot, so `!.on` reads as a member of nothing instead of `!self.on` and the program stops; `-.level` is read right",
-            "`!.on` is `!self.on`; prints false -3", "runtime error: cannot apply `!` to null",
-            "tests/conformance/known_bugs/not_prefix_dot.pilot", "PROP-029"),
         known_bug("seed.compound_pow_assign", "crates/pilot-parser stmt.rs assign_op_of",
             "`x **= y` is lexed as one token but has no compound-assignment entry, so the statement does nothing and `x` keeps its value without a diagnostic (found by the vocabulary inventory, docs/vocabulary_in_rust.md)",
             "x becomes 2 ** 3; prints 8", "prints 2",
@@ -367,10 +363,6 @@ pub fn bug_registry() -> List<KnownBug> {
             "inside a `while` or `for` body the left operand of an arithmetic operator reads as unknown, so `x + 7` takes the literal's `i64` (even `flag + 7` for a bool `flag`); outside a loop, or inside `loop`, the other operand's type wins",
             "capacity + 7 is a usize; prints 3", "error[TYPE001]: argument 1 of `want`: expected `usize`, found `i64`",
             "tests/conformance/known_bugs/loop_arith_literal.pilot", "F4"),
-        known_bug("lex.fstring_format_spec", "stdlib/core/lex/strings.pilot f-string hole mode (PROP-021 slice 21C)",
-            "an f-string hole's format spec after `:` (`{n:#_###}`) is lexed with the ordinary tokens, so a `#` in it starts a `#` line that swallows the hole's `}` and the closing quote; found by the 21E tape's LEX006 on the whole tree",
-            "the hole holds `n` and the spec `#_###`; prints true", "prints false (LEX006: the hole's `{` is never closed)",
-            "tests/conformance/known_bugs/fstring_format_spec_lex.pilot", "PROP-021"),
     ];
     return entries;
 }

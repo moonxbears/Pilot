@@ -1,0 +1,39 @@
+// The two dots and the six call-quote openers, with the kinds the seed
+// reads (crates/pilot-lexer/src/token.rs). Moved here from
+// crates/pilot-lexer/src/lib.rs (PROP-021 21H).
+// Expected, from token.rs's numbers, as text=kind/flags:
+//   obj.field: Ident 20, InfixDot 260 (touching a name), Ident.
+//   ". implicit_self": a dot after a space is PrefixDot 261.
+//   f!(x): Ident, CallQuoteShallow 340, LParen 250, Ident, RParen 251; then
+//   !! 341 (Deep), !& 342 (Abi), !^ 343 (React), !@ 344 (Adjoint),
+//   !? 345 (Effect), each before its "(".
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use Pilot.Core.Lex.SeedKinds;
+use pilot.lex.modes;
+use pilot.lex.cache;
+
+/// Each token of `src` but spaces, as `text=kind/flags`: the kind and flags
+/// the seed reads for its family (stdlib/core/lex/seed_kinds.pilot).
+fn show(ref m: ModalLexer, src: str) {
+    var out = "";
+    for l in lex_modal(m, src) {
+        let fam = modal_family(m, l);
+        if fam != "space" {
+            let text = src.slice(l.start, l.end);
+            if some e = seed_kind_of(fam) {
+                out = out + f"{text}={e.kind}/{e.flags} ";
+            } else {
+                out = out + f"{text}=? ";
+            }
+        }
+    }
+    print(out);
+}
+
+fn main() {
+    let built = build_modes_cached(core_modes(operator_tokens([], [])), LEX_CACHE_DIR);
+    show(built.lexer, "obj.field . implicit_self");
+    show(built.lexer, "f!(x) f!!(x) f!&(x)");
+    show(built.lexer, "f!^(x) f!@(x) f!?(x)");
+}

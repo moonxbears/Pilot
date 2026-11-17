@@ -1,0 +1,26 @@
+// A hole is code, so a quote in it is a plain quote (owner decision
+// 2026-11-17). `\"` or `\'` inside a hole is LEX009 when the tape is built,
+// and the message says what to write instead.
+// Expected, worked by hand, for f"{m[\"k\"]}" (bytes: f0 "1 {2 m3 [4 \5 "6
+// k7 \8 "9 ]10 }11 "12): two escaped quotes, at bytes 5 and 8; the hole's
+// brackets still pair, so only the two LEX009 errors. The plain form
+// f"{m["k"]}" has none.
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.modes;
+use pilot.lex.cache;
+use pilot.lex;
+
+fn show(ref m: ModalLexer, src: str) {
+    let tb = build_tape(m, src);
+    print(tb.ok());
+    for e in tb.errors {
+        print(f"{e.code}: {e.message}");
+    }
+}
+
+fn main() {
+    let built = build_modes_cached(core_modes(operator_tokens([], [])), LEX_CACHE_DIR);
+    show(built.lexer, "f\"{m[\\\"k\\\"]}\"");
+    show(built.lexer, "f\"{m[\"k\"]}\"");
+}
