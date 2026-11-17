@@ -32,9 +32,9 @@ pub lvl(0) pkg selfhost.ir;
 use selfhost.check.*;
 
 /// The attribute that asks for a declaration's calls to be inlined.
-pub pure fn inline_attr() -> str => "Inline";
+pub pure fn inline_attr() -> str => nameof(Inline);
 /// The attribute of an engine op's owner method, whose calls are always inlined.
-pub pure fn engine_op_attr() -> str => "EngineOp";
+pub pure fn engine_op_attr() -> str => nameof(EngineOp);
 
 /// The inline mode of declaration `decl` (set on its `IrFunction` when it
 /// is lowered).

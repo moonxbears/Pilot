@@ -56,6 +56,9 @@ fn text_between(ref s: Snap, n: i64, a: i64, b: i64) -> str {
 /// One node of the wire.
 fn piece(word: str, text: str, count: i64) -> str => f"{word}/{text.len()}/{text}/{count};";
 
+/// The node kinds on the wire ("str", "let", "if", ..) are wire tags that
+/// stdlib/core/primitives/ast.pilot decodes, not Pilot names: they stay
+/// string literals on both sides, so the rename litmus leaves them equal.
 /// Writes node `n` and its subtree to `out`, listing its holes in `holes`
 /// in source order; a node a quote cannot hold goes to `bad` instead.
 fn wire_node(ref s: Snap, n: i64, var ref out: List<str>, var ref holes: List<i64>, var ref bad: List<i64>) {

@@ -965,7 +965,7 @@ pub fn reflect_category_keywords(target_cat_id: i64) -> str {
             var a = 0;
             while a < ac {
                 let attr_name = __engine("sym_str", __engine("ast_attr_name", i, a));
-                if attr_name == "KeywordDefAttr" || attr_name == "KeywordDef" {
+                if attr_name == nameof(KeywordDefAttr) || attr_name + "Attr" == nameof(KeywordDefAttr) {
                     let cat = __engine("ast_attr_decl_arg", i, a, 0);
                     if target_cat_id < 0 || cat == target_cat_id {
                         let name = __engine("sym_str", __engine("ast_node_sym", i));

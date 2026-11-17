@@ -176,7 +176,7 @@ pub fn cg_resolve_type_physics(type_name: str) -> LayoutDescriptor {
                 let argc = __engine("ast_attr_decl_arg_count", s_nid, di);
                 if argc == 2 || argc == 3 {
                     let aname = __engine("sym_str", __engine("ast_attr_name", s_nid, di));
-                    if matched < 0 || aname == "Bits" {
+                    if matched < 0 || aname == nameof(Bits) {
                         matched = di;
                     }
                 }

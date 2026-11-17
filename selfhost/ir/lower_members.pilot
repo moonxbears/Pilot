@@ -554,7 +554,7 @@ pub fn lower_index(var ref lw: Lowerer, n: i64) -> u32 {
         if rhs(s, idx) >= 0 {
             b = lower_expr(lw, rhs(s, idx));
         } else {
-            let len_hook = native_for(lw, value_type(lw, lhs(s, n)), "len", native_property_hook());
+            let len_hook = native_for(lw, value_type(lw, lhs(s, n)), nameof(len), native_property_hook());
             if len_hook == "" { return unsupported(lw, n); }
             b = emit(lw, op_call_intrinsic(), intrinsic_index(lw, len_hook), int_phy, [obj], idx);
         }

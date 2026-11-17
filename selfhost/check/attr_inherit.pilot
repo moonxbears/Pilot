@@ -23,22 +23,22 @@ pub lvl(0) pkg selfhost.check;
 
 
 /// The built-in function attributes, as written in `[Name(..)]`.
-pub pure fn debug_attr() -> str => "Debug";
-pub pure fn live_attr() -> str => "Live";
-pub pure fn generate_attr() -> str => "Generate";
-pub pure fn no_inherit_attr() -> str => "NoInherit";
-pub pure fn coverage_attr() -> str => "Coverage";
+pub pure fn debug_attr() -> str => nameof(Debug);
+pub pure fn live_attr() -> str => nameof(Live);
+pub pure fn generate_attr() -> str => nameof(Generate);
+pub pure fn no_inherit_attr() -> str => nameof(NoInherit);
+pub pure fn coverage_attr() -> str => nameof(Coverage);
 
 /// The names stdlib/core/attr_flow.pilot declares, which this file reads.
-pub pure fn step_interface() -> str => "IStepAttribute";
-pub pure fn runtime_step_interface() -> str => "IRuntimeStepAttribute";
-pub pure fn inherited_interface() -> str => "IInheritedAttribute";
-pub pure fn inherit_policy_type() -> str => "InheritPolicy";
-pub pure fn inherit_policy_member() -> str => "policy";
+pub pure fn step_interface() -> str => nameof(IStepAttribute);
+pub pure fn runtime_step_interface() -> str => nameof(IRuntimeStepAttribute);
+pub pure fn inherited_interface() -> str => nameof(IInheritedAttribute);
+pub pure fn inherit_policy_type() -> str => nameof(InheritPolicy);
+pub pure fn inherit_policy_member() -> str => nameof(policy);
 /// `[Name]` is declared by struct `NameAttr`.
 pub pure fn attr_struct_suffix() -> str => "Attr";
 /// The label of `[Generate(ext: "..")]`, the form a container may carry.
-pub pure fn generate_ext_label() -> str => "ext";
+pub pure fn generate_ext_label() -> str => nameof(ext);
 
 
 /// What an inherited attribute does to one of the same name written

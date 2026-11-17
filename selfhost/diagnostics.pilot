@@ -190,10 +190,10 @@ pub fn node_has_attr_named(nid: i64, target_attr: str) -> bool {
 pub fn unit_enforces_core_naming(node_count: i64) -> bool {
     var i = 0;
     while i < node_count {
-        if node_has_attr_named(i, "EnforceCoreNaming") {
+        if node_has_attr_named(i, nameof(EnforceCoreNaming)) {
             return true;
         }
-        if node_has_attr_named(i, "EnforceCoreNamingAttr") {
+        if node_has_attr_named(i, nameof(EnforceCoreNamingAttr)) {
             return true;
         }
         i = i + 1;
@@ -242,7 +242,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
     let dflags = __engine(DiagHooks.ast_decl_flags, nid);
     let is_partial = (dflags & 16) != 0;
     let has_dtor = (dflags & 1024) != 0;
-    let is_lang = node_has_attr_named(nid, "Lang");
+    let is_lang = node_has_attr_named(nid, nameof(Lang));
 
     if kind == 2 {
         if enforce_naming {
@@ -276,11 +276,11 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
     while bi < bc {
         let bsym = __engine(DiagHooks.ast_base_at, nid, bi);
         let bname = __engine(DiagHooks.sym_str, bsym);
-        if bname == "IValue" { has_ivalue = true; }
-        if bname == "IReference" { has_iref = true; }
-        if bname == "IObject" { has_iobj = true; }
-        if bname == "IGuard" { has_iguard = true; }
-        if bname == "IAttribute" || bname == "IInheritedAttribute" || bname == "IInterceptor" || bname == "IEcsRule" {
+        if bname == nameof(IValue) { has_ivalue = true; }
+        if bname == nameof(IReference) { has_iref = true; }
+        if bname == nameof(IObject) { has_iobj = true; }
+        if bname == nameof(IGuard) { has_iguard = true; }
+        if bname == nameof(IAttribute) || bname == nameof(IInheritedAttribute) || bname == nameof(IInterceptor) || bname == nameof(IEcsRule) {
             has_iattr = true;
         }
         if str_ends_with(bname, "Attribute") {
@@ -292,7 +292,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
     // Universal Lattice Check: `: IValue` (`0b00`) must never declare `~self()` (`0b10`)
     if has_ivalue {
         if has_dtor {
-            let lmsg = format_lattice_contract_mismatch(name, "IValue", 0, 2, "declares ~self() destructor");
+            let lmsg = format_lattice_contract_mismatch(name, nameof(IValue), 0, 2, "declares ~self() destructor");
             __engine(DiagHooks.ast_emit_diag, nid, 1, lmsg);
             return 1;
         }

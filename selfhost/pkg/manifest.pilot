@@ -40,7 +40,7 @@ pub pure fn generate_default_manifest_json(pkg_name: str, version: str) -> str {
 }
 
 pub pure fn scaffold_canonical_main_pilot(pkg_name: str) -> str {
-    return "pub " + nameof(fn) + " main() -> i64 {\n" +
+    return nameof(pub) + " " + nameof(fn) + " main() -> " + nameof(i64) + " {\n" +
            "    " + nameof(let) + " msg = \"Hello from " + pkg_name + "!\";\n" +
            "    " + nameof(return) + " 0;\n" +
            "}\n";

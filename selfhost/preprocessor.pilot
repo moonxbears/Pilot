@@ -313,7 +313,7 @@ pub fn classify_directive_code(
         }
         return "";
     }
-    if directive == "undef" || directive == "if" || directive == "ifdef" || directive == "ifndef"
+    if directive == "undef" || directive == nameof(if) || directive == "ifdef" || directive == "ifndef"
         || directive == "region" || directive == "pragma" || directive == "nullable" || directive == "line"
     {
         return "";
@@ -327,7 +327,7 @@ pub fn classify_directive_code(
         }
         return "";
     }
-    if directive == "else" {
+    if directive == nameof(else) {
         if !has_open_if {
             return "PREPROC002";
         }
@@ -469,7 +469,7 @@ pub fn validate_preprocessor_directives(src: str, initial_symbols_csv: str) -> s
                         warn_disabled = false;
                     }
                 }
-            } else if dir == "if" || dir == "ifdef" || dir == "ifndef" {
+            } else if dir == nameof(if) || dir == "ifdef" || dir == "ifndef" {
                 if_depth = if_depth + 1;
                 var pa_flag = 0;
                 if cur_active {
@@ -511,7 +511,7 @@ pub fn validate_preprocessor_directives(src: str, initial_symbols_csv: str) -> s
                         __engine("map_set", stk, "ba_" + if_depth, 0);
                     }
                 }
-            } else if dir == "else" && if_depth > 0 && !cur_has_else {
+            } else if dir == nameof(else) && if_depth > 0 && !cur_has_else {
                 __engine("map_set", stk, "el_" + if_depth, 1);
                 let pa = __engine("map_get", stk, "pa_" + if_depth) == 1;
                 let met = __engine("map_get", stk, "met_" + if_depth) == 1;
@@ -583,7 +583,7 @@ pub fn preprocess_source(src: str, initial_symbols_csv: str) -> str {
                 defined_csv = csv_add_symbol(defined_csv, args);
             } else if dir == "undef" && cur_active && args.len() > 0 {
                 defined_csv = csv_remove_symbol(defined_csv, args);
-            } else if dir == "if" || dir == "ifdef" || dir == "ifndef" {
+            } else if dir == nameof(if) || dir == "ifdef" || dir == "ifndef" {
                 if_depth = if_depth + 1;
                 var pa_flag = 0;
                 if cur_active {
@@ -625,7 +625,7 @@ pub fn preprocess_source(src: str, initial_symbols_csv: str) -> str {
                         __engine("map_set", stk, "ba_" + if_depth, 0);
                     }
                 }
-            } else if dir == "else" && if_depth > 0 && !cur_has_else {
+            } else if dir == nameof(else) && if_depth > 0 && !cur_has_else {
                 __engine("map_set", stk, "el_" + if_depth, 1);
                 let pa = __engine("map_get", stk, "pa_" + if_depth) == 1;
                 let met = __engine("map_get", stk, "met_" + if_depth) == 1;

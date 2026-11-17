@@ -206,7 +206,7 @@ pub fn type_extent(var ref p: Program, t: i64, depth: i64) -> TypeExtent? {
     let d = ty_decl(p.tt, t);
     let name = node_name(p.s, d);
     for decl in nl_get(p.type_decls, name) {
-        if some args = prog_attr_nodes(p, decl, "Bits") {
+        if some args = prog_attr_nodes(p, decl, nameof(Bits)) {
             if args.len() > 0 {
                 if some bits = prog_const(p, args[0]) {
                     let size = ((bits + 7) / 8) as usize;
@@ -264,7 +264,7 @@ fn field_lattice(var ref p: Program, m: i64, t: i64) -> i64 {
 /// The bits the `[Lattice(..)]` attribute of interface `name` declares, or -1.
 fn lattice_attr(var ref p: Program, name: str) -> i64 {
     for d in nl_get(p.type_decls, name) {
-        if some args = prog_attr_nodes(p, d, "Lattice") {
+        if some args = prog_attr_nodes(p, d, nameof(Lattice)) {
             if args.len() > 0 {
                 if some bits = prog_const(p, args[0]) { return bits; }
             }
@@ -479,14 +479,14 @@ pub fn build_type(var ref p: Program, name: str, depth: i64) -> BuiltType {
     for d in nl_get(p.ext_decls, name) {
         for m in type_members(s, d) {
             if is_method_kind(kind(s, m)) {
-                register(bt, member_name(s, m), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
+                register(bt, member_name(s, m), MemberTier::Tier5ScopedExtension, ext_prefix + nameof(ext),
                     Member { decl: m, names: bt.tparams, values: args }, false);
             }
         }
     }
     for f in nl_get(p.dotted_fns, name) {
         let full = node_name(s, f);
-        register(bt, full.slice(ext_prefix.len(), full.len()), MemberTier::Tier5ScopedExtension, ext_prefix + "ext",
+        register(bt, full.slice(ext_prefix.len(), full.len()), MemberTier::Tier5ScopedExtension, ext_prefix + nameof(ext),
             Member { decl: f, names: bt.tparams, values: args }, false);
     }
 

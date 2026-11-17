@@ -406,31 +406,33 @@ pub fn proto_field_wire_type(ref doc: ProtoDoc, f: ProtoFieldDef) -> i64 {
 pub fn proto_synthesize_dual_views(ref doc: ProtoDoc, ref msg: ProtoMessageDef) -> str {
     var out: List<str> = ["// ------------------------------------------------------------------\n"];
     out.push("// 0b10 Owned Mutable Builder\n");
-    out.push("pub struct " + msg.name + " : IObject {\n");
+    out.push(nameof(pub) + " " + nameof(struct) + " " + msg.name + " : " + nameof(IObject) + " {\n");
     var i = 0;
     while i < msg.fields.len() {
         let f = msg.fields.get(i);
-        out.push("    pub " + f.name + ": " + f.field_type + ";\n");
+        out.push("    " + nameof(pub) + " " + f.name + ": " + f.field_type + ";\n");
         i = i + 1;
     }
-    out.push("    ~self() {}\n");
+    out.push("    ~" + nameof(self) + "() {}\n");
     out.push("}\n\n");
 
     out.push("// 0b01 Zero-Copy Borrowed Wire View\n");
-    out.push("pub struct " + msg.name + "View : IReference {\n");
-    out.push("    pub packet: List<i64>;\n");
+    out.push(nameof(pub) + " " + nameof(struct) + " " + msg.name + "View : " + nameof(IReference) + " {\n");
+    out.push("    " + nameof(pub) + " packet: " + nameof(List) + "<" + nameof(i64) + ">;\n");
+    let pub_fn = nameof(pub) + " " + nameof(fn);
+    let ref_self = nameof(ref) + " " + nameof(self);
     var j = 0;
     while j < msg.fields.len() {
         let f = msg.fields.get(j);
-        let find = "proto_wire_find_field(self.packet, " + ("" + f.field_number) + ")";
+        let find = nameof(proto_wire_find_field) + "(" + nameof(self) + ".packet, " + ("" + f.field_number) + ")";
         let wire = proto_field_wire_type(doc, f);
         if f.is_repeated || wire == 2 {
             // Repeated, packed and length-delimited fields hand back the span.
-            out.push("    pub fn " + f.name + "_span(ref self) -> ProtoFieldSpan => " + find + ";\n");
+            out.push("    " + pub_fn + " " + f.name + "_span(" + ref_self + ") -> " + nameof(ProtoFieldSpan) + " => " + find + ";\n");
         } else if f.field_type.starts_with("sint") {
-            out.push("    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => proto_zigzag_decode64(" + find + ".value);\n");
+            out.push("    " + pub_fn + " get_" + f.name + "(" + ref_self + ") -> " + f.field_type + " => " + nameof(proto_zigzag_decode64) + "(" + find + ".value);\n");
         } else {
-            out.push("    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => " + find + ".value;\n");
+            out.push("    " + pub_fn + " get_" + f.name + "(" + ref_self + ") -> " + f.field_type + " => " + find + ".value;\n");
         }
         j = j + 1;
     }

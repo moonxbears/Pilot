@@ -20,7 +20,7 @@ pub lvl(0) pkg selfhost.check;
 
 
 /// The attribute that asks for frame placement.
-pub pure fn stack_attr() -> str => "Stack";
+pub pure fn stack_attr() -> str => nameof(Stack);
 
 /// Whether `let`/`var` node `n` is written `[Stack]`.
 pub fn is_stack_binding(ref p: Program, n: i64) -> bool {

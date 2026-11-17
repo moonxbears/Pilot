@@ -291,7 +291,7 @@ fn guard_stored(var ref bw: Borrows, n: i64, t: i64) {
 
 /// Whether function `target` is declared `[Cue]`.
 fn has_cue(ref p: Program, target: i64) -> bool {
-    if some _args = prog_attr_nodes(p, target, "Cue") { return true; }
+    if some _args = prog_attr_nodes(p, target, nameof(Cue)) { return true; }
     return false;
 }
 

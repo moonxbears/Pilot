@@ -29,7 +29,7 @@ pub pure fn is_declaration_modifier(word: str) -> bool {
 }
 
 pub pure fn is_clearance_modifier(word: str) -> bool {
-    if word.starts_with("lvl(") && word.ends_with(")") {
+    if word.starts_with(nameof(lvl) + "(") && word.ends_with(")") {
         return true;
     }
     if word.starts_with(nameof(lvl)) && word.len() <= 6 {
@@ -236,7 +236,7 @@ pub fn is_scope_header(line: str) -> bool {
     let trimmed = line.trim();
     // `rest` below is a trimmed suffix of `trimmed`: it ends as `trimmed` does.
     if !trimmed.ends_with(":") && !trimmed.ends_with("{") { return false; }
-    if trimmed.contains("case ") || trimmed.contains("default:") {
+    if trimmed.contains(nameof(case) + " ") || trimmed.contains(nameof(default) + ":") {
         return false;
     }
     let rest = strip_attributes_prefix(trimmed);
@@ -346,8 +346,8 @@ pub fn desugar_scope_headers(src: str) -> str {
                     if cur.attributes != "" && !decl.starts_with("[") {
                         decl = f"{cur.attributes} {decl}";
                     }
-                    if !decl.contains("fn ") && decl.contains("(") {
-                        decl = f"fn {decl}";
+                    if !decl.contains(nameof(fn) + " ") && decl.contains("(") {
+                        decl = f"{nameof(fn)} {decl}";
                     }
                     if cur.return_type != "" && !decl.contains("->") && decl.contains("=>") {
                         let arrow_pos = decl.find("=>");

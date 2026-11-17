@@ -102,9 +102,9 @@ comptime {
     bind_native_member(nameof(map), "[]",  "map_get");
     bind_native_member(nameof(map), "[]=", "map_set");
     // Membership (`x in y`) and native iteration (`for x in y`) per type.
-    bind_native_member(nameof(str), "in",      "str_contains");
-    bind_native_member(nameof(Map), "in",      "map_has");
-    bind_native_member(nameof(map), "in",      "map_has");
+    bind_native_member(nameof(str), nameof(in),  "str_contains");
+    bind_native_member(nameof(Map), nameof(in),  "map_has");
+    bind_native_member(nameof(map), nameof(in),  "map_has");
     bind_native_member(nameof(Map), "for_seq", "map_keys");
     bind_native_member(nameof(Map), "for_len", "str_len");
     bind_native_member(nameof(Map), "for_get", "list_get");

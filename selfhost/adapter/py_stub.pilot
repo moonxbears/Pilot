@@ -455,11 +455,12 @@ pub fn py_synthesize_vectorcall_wrapper(ref module: PyModuleStub, fn_name: str) 
     out = out + f"// Pilot In-Process Python Vectorcall Wrapper for '{module.name}.{fn_name}'\n";
     out = out + "// Zero-copy stack frame argument packing via PyObject_Vectorcall\n";
     out = out + "// ==============================================================================\n";
-    out = out + f"pub fn call_py_{fn_name}(callable: i64, args: slice<i64>, kwnames: slice<str>) -> res<i64, PyError> {{\n";
-    out = out + "    let gil = py_gil_acquire();\n";
-    out = out + "    let res = py_vectorcall_fast(callable, args, kwnames);\n";
-    out = out + "    py_gil_release(var gil);\n";
-    out = out + "    return res;\n";
+    let i64_t = nameof(i64);
+    out = out + f"{nameof(pub)} {nameof(fn)} call_py_{fn_name}(callable: {i64_t}, args: {nameof(slice)}<{i64_t}>, kwnames: {nameof(slice)}<{nameof(str)}>) -> {nameof(res)}<{i64_t}, {nameof(PyError)}> {{\n";
+    out = out + f"    {nameof(let)} gil = {nameof(py_gil_acquire)}();\n";
+    out = out + f"    {nameof(let)} reply = {nameof(py_vectorcall_fast)}(callable, args, kwnames);\n";
+    out = out + f"    {nameof(py_gil_release)}({nameof(var)} gil);\n";
+    out = out + f"    {nameof(return)} reply;\n";
     out = out + "}\n";
     return out;
 }

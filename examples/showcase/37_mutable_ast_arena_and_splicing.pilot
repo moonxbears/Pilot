@@ -150,7 +150,7 @@ fn arena_emit(a: i64, nid: i64) -> str {
         return "(" + l + " " + op_txt + " " + r + ")";
     }
     if k == "LetStmt" {
-        return "let " + op_txt + " = " + arena_emit(a, __engine("map_get", a, nid + "_c_0")) + ";";
+        return nameof(let) + " " + op_txt + " = " + arena_emit(a, __engine("map_get", a, nid + "_c_0")) + ";";
     }
     if k == "CallExpr" {
         var args = "";

@@ -28,24 +28,24 @@ pub lvl(0) pkg selfhost.check;
 
 /// The flags enums of stdlib/core/coverage.pilot, the arguments that take
 /// them, and the outputs flag used when `to:` is not written.
-pub pure fn coverage_mode_type() -> str => "CoverageMode";
-pub pure fn coverage_out_type() -> str => "CoverageOut";
-pub pure fn coverage_modes_label() -> str => "modes";
-pub pure fn coverage_to_label() -> str => "to";
-pub pure fn coverage_default_out() -> str => "Stderr";
-pub pure fn coverage_file_out() -> str => "File";
+pub pure fn coverage_mode_type() -> str => nameof(CoverageMode);
+pub pure fn coverage_out_type() -> str => nameof(CoverageOut);
+pub pure fn coverage_modes_label() -> str => nameof(modes);
+pub pure fn coverage_to_label() -> str => nameof(to);
+pub pure fn coverage_default_out() -> str => nameof(Stderr);
+pub pure fn coverage_file_out() -> str => nameof(File);
 
 /// The functions of stdlib/core/coverage.pilot (and coverage_file.pilot)
 /// the plan calls.
-pub pure fn cov_hook_group() -> str => "coverage_group";
-pub pure fn cov_hook_unit() -> str => "coverage_unit";
-pub pure fn cov_hook_enter() -> str => "coverage_enter";
-pub pure fn cov_hook_enter_timed() -> str => "coverage_enter_timed";
-pub pure fn cov_hook_exit() -> str => "coverage_exit";
-pub pure fn cov_hook_exit_timed() -> str => "coverage_exit_timed";
-pub pure fn cov_hook_line() -> str => "coverage_line";
-pub pure fn cov_hook_report() -> str => "coverage_report";
-pub pure fn cov_hook_write_file() -> str => "coverage_write_file";
+pub pure fn cov_hook_group() -> str => nameof(coverage_group);
+pub pure fn cov_hook_unit() -> str => nameof(coverage_unit);
+pub pure fn cov_hook_enter() -> str => nameof(coverage_enter);
+pub pure fn cov_hook_enter_timed() -> str => nameof(coverage_enter_timed);
+pub pure fn cov_hook_exit() -> str => nameof(coverage_exit);
+pub pure fn cov_hook_exit_timed() -> str => nameof(coverage_exit_timed);
+pub pure fn cov_hook_line() -> str => nameof(coverage_line);
+pub pure fn cov_hook_report() -> str => nameof(coverage_report);
+pub pure fn cov_hook_write_file() -> str => nameof(coverage_write_file);
 
 /// The function the report runs on the way out of.
 pub pure fn cov_entry_fn() -> str => "main";
@@ -234,10 +234,10 @@ fn own_settings(ref p: Program, var ref quiet: DiagSink, c: i64) -> CoverageSett
 
 fn group_label(ref s: Snap, c: i64) -> str {
     let k = kind(s, c);
-    if k == nk_struct() { return "struct " + node_name(s, c); }
-    if k == nk_interface() { return "interface " + node_name(s, c); }
-    if k == nk_extend() { return "ext " + node_name(s, c); }
-    return "pkg " + node_name(s, c);
+    if k == nk_struct() { return nameof(struct) + " " + node_name(s, c); }
+    if k == nk_interface() { return nameof(interface) + " " + node_name(s, c); }
+    if k == nk_extend() { return nameof(ext) + " " + node_name(s, c); }
+    return nameof(pkg) + " " + node_name(s, c);
 }
 
 /// Where the calls on entry to `f` go, and whether its way out is
@@ -257,10 +257,7 @@ fn flag_text(v: i64) -> ProbeArg => text_arg(f"{v}");
 /// The probes that measure the covered functions of the program.
 pub fn coverage_plan(var ref p: Program) -> List<PlannedProbe> {
     let s = p.s;
-<<<<<<< HEAD
     var out: List<PlannedProbe> = [];
-=======
-    var out: List<List<any>> = [];
     // No `[Coverage]` row anywhere: no function is covered, written on it
     // or inherited from a container.
     var any_row = false;
@@ -271,7 +268,6 @@ pub fn coverage_plan(var ref p: Program) -> List<PlannedProbe> {
         }
     }
     if !any_row { return out; }
->>>>>>> claude/cool-moser-2264b9
     let pkgs = package_decls(p);
     let quiet = sink_new(s);
     let speed = flag_value(enum_flags(p, coverage_mode_type()), "Speed");

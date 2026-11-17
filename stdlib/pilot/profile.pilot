@@ -45,12 +45,12 @@ pub enum ClearanceRing : u8 {
 }
 
 pub pure fn clearance_ring_name(ring: ClearanceRing) -> str {
-    if ring == ClearanceRing::Lvl0 { return "lvl(0)"; }
-    if ring == ClearanceRing::Lvl1 { return "lvl(1)"; }
-    if ring == ClearanceRing::Lvl2 { return "lvl(2)"; }
-    if ring == ClearanceRing::Lvl3 { return "lvl(3)"; }
-    if ring == ClearanceRing::Lvl4 { return "lvl(4)"; }
-    return "lvl(custom)";
+    if ring == ClearanceRing::Lvl0 { return nameof(lvl) + "(0)"; }
+    if ring == ClearanceRing::Lvl1 { return nameof(lvl) + "(1)"; }
+    if ring == ClearanceRing::Lvl2 { return nameof(lvl) + "(2)"; }
+    if ring == ClearanceRing::Lvl3 { return nameof(lvl) + "(3)"; }
+    if ring == ClearanceRing::Lvl4 { return nameof(lvl) + "(4)"; }
+    return nameof(lvl) + "(custom)";
 }
 
 // ------------------------------------------------------------------------------

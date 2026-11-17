@@ -422,7 +422,7 @@ pub fn vmc_compile_call(st: i64, nid: i64) -> i64 {
             if qk == 4 || qk == 5 || qk == 6 {
                 let r_wrap = vmc_alloc_temp(st);
                 let r_tag = vmc_emit_load_const(st, vmc_add_int_const(st, qk));
-                let r_fn = vmc_emit_load_const(st, vmc_add_str_const(st, "rx_source"));
+                let r_fn = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(rx_source)));
                 vmc_emit(st, op_move(), 1, r_tag, 0);
                 vmc_emit(st, op_move(), 2, dst, 0);
                 vmc_emit(st, op_engine_intrinsic(), r_wrap, r_fn, 2);

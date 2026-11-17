@@ -106,8 +106,8 @@ pub fn entity_validate_predicate(
         let col = schema.columns[i];
         if col.name == col_name {
             // Check numeric vs string type compatibility
-            let is_col_numeric = col.col_type == "BIGINT" || col.col_type == "INTEGER" || col.col_type == "u64" || col.col_type == "i64" || col.col_type == "u32" || col.col_type == "i32";
-            let is_val_numeric = val_type == "BIGINT" || val_type == "INTEGER" || val_type == "u64" || val_type == "i64" || val_type == "u32" || val_type == "i32";
+            let is_col_numeric = col.col_type == "BIGINT" || col.col_type == "INTEGER" || col.col_type == nameof(u64) || col.col_type == nameof(i64) || col.col_type == nameof(u32) || col.col_type == nameof(i32);
+            let is_val_numeric = val_type == "BIGINT" || val_type == "INTEGER" || val_type == nameof(u64) || val_type == nameof(i64) || val_type == nameof(u32) || val_type == nameof(i32);
             
             if is_col_numeric && !is_val_numeric {
                 return format_gen004(schema.table_name, col_name, col.col_type, val_type);

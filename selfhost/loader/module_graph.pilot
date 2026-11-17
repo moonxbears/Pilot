@@ -141,7 +141,7 @@ fn mg_scan_unit_header(src: str) -> List<HeaderDecl> {
             while i < n && mg_is_ident_char(src.byte_at(i)) { i = i + 1; }
             let word = src.slice(tok_start, i);
             if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 {
-                if word == "pkg" {
+                if word == nameof(pkg) {
                     let pkg_path = mg_read_dotted_path(src, i);
                     if pkg_path != "" {
                         decls.push(HeaderDecl { is_package: true, path: pkg_path, alias: "", offset: tok_start as u32 });
@@ -150,12 +150,13 @@ fn mg_scan_unit_header(src: str) -> List<HeaderDecl> {
                     if i < n { i = i + 1; }
                     continue;
                 }
-                if word == "use" {
+                if word == nameof(use) {
                     let use_path = mg_read_dotted_path(src, i);
                     var alias = "";
                     i = mg_skip_ws_and_comments(src, i);
-                    if i + 2 <= n && src.slice(i, i + 2) == "as" && (i + 2 == n || !mg_is_ident_char(src.byte_at(i + 2))) {
-                        i = mg_skip_ws_and_comments(src, i + 2);
+                    let as_len = nameof(as).len();
+                    if i + as_len <= n && src.slice(i, i + as_len) == nameof(as) && (i + as_len == n || !mg_is_ident_char(src.byte_at(i + as_len))) {
+                        i = mg_skip_ws_and_comments(src, i + as_len);
                         let a_start = i;
                         while i < n && mg_is_ident_char(src.byte_at(i)) { i = i + 1; }
                         alias = src.slice(a_start, i);
@@ -179,7 +180,7 @@ fn mg_scan_unit_header(src: str) -> List<HeaderDecl> {
                     if i < n { i = i + 1; }
                     continue;
                 }
-                if word == "fn" || word == "struct" || word == "interface" || word == "enum" || word == "comptime" {
+                if word == nameof(fn) || word == nameof(struct) || word == nameof(interface) || word == nameof(enum) || word == nameof(comptime) {
                     break;
                 }
             }

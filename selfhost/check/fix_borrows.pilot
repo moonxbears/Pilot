@@ -232,7 +232,7 @@ pub fn apply_borrows(ref f: Flow, ref cands: List<BorrowCandidate>) -> i64 {
                 let at_name = if c.declared { off + 4 } else { off };
                 if text.slice(at_name, at_name + name.len()) != name { continue; }
                 if c.declared && text.slice(off, at_name) != "ref " { continue; }
-                let word = if c.declared { "var " } else if to_var { "var ref " } else { "ref " };
+                let word = if c.declared { nameof(var) + " " } else if to_var { nameof(var) + " " + nameof(ref) + " " } else { nameof(ref) + " " };
                 var k = at.len();
                 at.push(off);
                 words.push(word);
@@ -243,7 +243,7 @@ pub fn apply_borrows(ref f: Flow, ref cands: List<BorrowCandidate>) -> i64 {
                     words[k - 1] = word;
                     k = k - 1;
                 }
-                let shown = if c.declared { "var ref" } else { word.slice(0, word.len() - 1) };
+                let shown = if c.declared { nameof(var) + " " + nameof(ref) } else { word.slice(0, word.len() - 1) };
                 print(f"{path}:{line_col(text, at_name)}: `{name}` -> `{shown}`");
             }
             if at.len() > 0 {

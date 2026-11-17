@@ -59,10 +59,10 @@ pub pure fn lattice_object()    -> u8 => 2; // 0b10: IObject (Owned ~self())
 pub pure fn lattice_guard()     -> u8 => 3; // 0b11: IGuard (Scoped lease)
 
 pub fn lattice_name(lb: u8) -> str {
-    if lb == lattice_value()     { return "IValue"; }
-    if lb == lattice_reference() { return "IReference"; }
-    if lb == lattice_object()    { return "IObject"; }
-    if lb == lattice_guard()     { return "IGuard"; }
+    if lb == lattice_value()     { return nameof(IValue); }
+    if lb == lattice_reference() { return nameof(IReference); }
+    if lb == lattice_object()    { return nameof(IObject); }
+    if lb == lattice_guard()     { return nameof(IGuard); }
     return "UnknownLattice";
 }
 

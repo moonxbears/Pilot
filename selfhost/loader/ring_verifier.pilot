@@ -107,7 +107,7 @@ pub fn verify_freestanding_source(src: str, pkg_name: str) -> RingCheckResult {
     }
 
     // Check for OS host intrinsics or host library imports
-    if str_contains(src, "use std.") || str_contains(src, "use stdlib.") {
+    if str_contains(src, nameof(use) + " std.") || str_contains(src, nameof(use) + " stdlib.") {
         return ring_check_err(
             "RING002",
             "Freestanding core violation: Ring 1 (core.*) cannot import hosted std library modules"
@@ -183,25 +183,27 @@ pub fn scan_and_migrate_ring_imports(src: str, file_id: u32) -> List<Diagnostic>
     var diags: List<Diagnostic> = [];
     let n = src.len();
     var p: i64 = 0;
+    let use_kw = nameof(use) + " ";
+    let ul = use_kw.len() as i64;
 
     while p < n {
         // Look for "use " statements
-        // First byte `u` (117) before slicing out four.
-        if p + 4 <= n && src.byte_at(p) == 117 && src.slice(p, p + 4) == "use " {
+        // First byte before slicing out the whole word.
+        if p + ul <= n && src.byte_at(p) == use_kw.byte_at(0) && src.slice(p, p + ul) == use_kw {
             let prev = if p > 0 { src.byte_at(p - 1); } else { 10; };
             if prev == 10 || prev == 32 || prev == 59 {
                 let stmt_st = p;
-                var q = p + 4;
+                var q = p + ul;
                 while q < n && src.byte_at(q) != 59 && src.byte_at(q) != 10 {
                     q = q + 1;
                 }
-                let import_target = src.slice(p + 4, q);
+                let import_target = src.slice(p + ul, q);
                 let stmt_ed = if q < n && src.byte_at(q) == 59 { q + 1; } else { q; };
 
                 let mig = check_legacy_import_migration(import_target);
                 if mig.is_legacy {
                     let sp = source_span_new(file_id, stmt_st as u32, stmt_ed as u32);
-                    let rep_code = "use " + mig.new_name + ";";
+                    let rep_code = nameof(use) + " " + mig.new_name + ";";
                     var d = diagnostic_with_primary_label(
                         "RING003",
                         diag_severity_error(),

@@ -276,18 +276,10 @@ fn try_function(var ref ce: ConstEval, fi: i64) -> bool {
     let m = ce.m;
     let f = m.functions[fi];
     let fuel = if ce.fuel < eval_fuel() { ce.fuel } else { eval_fuel() };
-<<<<<<< HEAD
-    let r = ir_eval(m, fi, ce.globals, ce.assigned, fuel);
+    let r = ir_eval(m, fi, ce.globals, ce.assigned, fuel, ce.tables);
     ce.fuel = ce.fuel - r.steps;
     if !r.ok { return false; }
     let value = r.value;
-=======
-    let r = ir_eval(m, fi, ce.globals, ce.assigned, fuel, ce.tables);
-    let steps: i64 = r[2];
-    ce.fuel = ce.fuel - steps;
-    if r[0] != true { return false; }
-    let value = r[1];
->>>>>>> claude/cool-moser-2264b9
     let g = ce.init_global[fi];
     if some k = constant_of(m, f, value) {
         ce.done[fi] = 1;

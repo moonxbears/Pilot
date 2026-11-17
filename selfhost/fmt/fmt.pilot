@@ -175,15 +175,15 @@ pub pure fn is_open_group_tok(t: str) -> bool {
 }
 
 pub fn is_generic_lead_prev(prev2: str, prev: str) -> bool {
-    if prev2 == ":" || prev2 == "->" || prev2 == "as" || prev2 == nameof(fn)
+    if prev2 == ":" || prev2 == "->" || prev2 == nameof(as) || prev2 == nameof(fn)
         || prev2 == nameof(struct) || prev2 == nameof(interface) || prev2 == nameof(let)
-        || prev2 == nameof(var) || prev2 == "bundle" || prev2 == "facet" || prev2 == "ext" {
+        || prev2 == nameof(var) || prev2 == "bundle" || prev2 == "facet" || prev2 == nameof(ext) {
         return true;
     }
-    return prev == nameof(opt) || prev == nameof(res) || prev == "sig" || prev == "grad" || prev == "plan"
-        || prev == "array" || prev == "simd" || prev == "ptr" || prev == "ref" || prev == "iso"
-        || prev == "span" || prev == "step" || prev == "from" || prev == "until" || prev == "map"
-        || prev == "frame" || prev == "List" || prev == "Map";
+    return prev == nameof(opt) || prev == nameof(res) || prev == nameof(sig) || prev == nameof(grad) || prev == nameof(plan)
+        || prev == nameof(array) || prev == nameof(simd) || prev == nameof(ptr) || prev == nameof(ref) || prev == nameof(iso)
+        || prev == nameof(span) || prev == nameof(step) || prev == nameof(from) || prev == nameof(until) || prev == nameof(map)
+        || prev == nameof(frame) || prev == nameof(List) || prev == nameof(Map);
 }
 
 pub pure fn is_binary_or_assign_op(t: str) -> bool {
@@ -351,10 +351,10 @@ fn text_at(ref toks: List<FmtTok>, i: i64) -> str => if i >= 0 && i < toks.len()
 fn word_at(ref toks: List<FmtTok>, i: i64) -> bool => i >= 0 && i < toks.len() as i64 && toks[i].kind == FmtTokKind::Word;
 
 /// The readable call-quote keyword of each compact opener, in pairs.
-const CALL_QUOTES: List<str> = ["!(", "call", "!!(", "splice", "!&(", "frame", "!^(", "sig", "!@(", "grad", "!?(", "plan",];
+const CALL_QUOTES: List<str> = ["!(", nameof(call), "!!(", nameof(splice), "!&(", nameof(frame), "!^(", nameof(sig), "!@(", nameof(grad), "!?(", nameof(plan),];
 
 /// The readable unpack call of each compact sigil, in pairs.
-const UNPACKS: List<str> = ["*..", "flat", "**", "pairs", "*", "splat",];
+const UNPACKS: List<str> = ["*..", nameof(flat), "**", nameof(pairs), "*", nameof(splat),];
 
 /// The other half of `t`'s pair in `pairs` (`from` 0: `t` is a compact
 /// form; 1: a readable one), or "".

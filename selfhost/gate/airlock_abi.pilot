@@ -100,13 +100,13 @@ pub fn airlock_arch_kinds() -> List<CodeNameRow> => [
 
 /// Frozen Model B+ `[Layout(c_abi)]` structs: `(name, size, align, field_markers)`.
 pub fn airlock_c_structs() -> List<CStructRow> => [
-    ("OsSlice",      16, 8,  ["ptr", "len"]),
-    ("OsPollFd",     16, 8,  ["fd", "events", "revents"]),
-    ("OsStat",       72, 8,  ["kind", "size", "mode", "mtime_ns", "atime_ns", "ctime_ns", "dev", "ino", "nlink"]),
-    ("OsProcSpec",   96, 8,  ["prog_ptr", "prog_len", "argv_ptr", "argc", "envp_ptr", "envc", "cwd_ptr", "cwd_len", "stdin_fd", "stdout_fd", "stderr_fd", "env_mode"]),
-    ("OsSockAddr",   144, 8, ["family", "port", "addr_len", "addr_bytes", "flowinfo", "scope_id"]),
-    ("OsFfiAbiDesc", 32, 8,  ["arch_kind", "gpr_count", "vec_count", "stack_bytes", "variadic_fixed_args", "flags", "sret_ptr", "_reserved"]),
-    ("OsFfiRetRegs", 80, 16, ["gpr", "vec"]),
+    (nameof(OsSlice),      16, 8,  ["ptr", "len"]),
+    (nameof(OsPollFd),     16, 8,  ["fd", "events", "revents"]),
+    (nameof(OsStat),       72, 8,  ["kind", "size", "mode", "mtime_ns", "atime_ns", "ctime_ns", "dev", "ino", "nlink"]),
+    (nameof(OsProcSpec),   96, 8,  ["prog_ptr", "prog_len", "argv_ptr", "argc", "envp_ptr", "envc", "cwd_ptr", "cwd_len", "stdin_fd", "stdout_fd", "stderr_fd", "env_mode"]),
+    (nameof(OsSockAddr),   144, 8, ["family", "port", "addr_len", "addr_bytes", "flowinfo", "scope_id"]),
+    (nameof(OsFfiAbiDesc), 32, 8,  ["arch_kind", "gpr_count", "vec_count", "stack_bytes", "variadic_fixed_args", "flags", "sret_ptr", "_reserved"]),
+    (nameof(OsFfiRetRegs), 80, 16, ["gpr", "vec"]),
 ];
 
 /// Frozen Model B+ `bridge_lang.pilot` hooks (64 compile-time hooks; the six
@@ -143,16 +143,16 @@ pub fn airlock_transitional_hooks() -> List<str> => [];
 /// Where each owner type lives (Amendment A1).
 pub fn airlock_owner_files() -> Map<str, str> {
     let m = Map<str, str>();
-    m.set("RawMem", "stdlib/core/host_raw.pilot");
-    m.set("Fd", "stdlib/core/host_raw.pilot");
-    m.set("File", "stdlib/core/file.pilot");
-    m.set("Env", "stdlib/core/env.pilot");
-    m.set("Process", "stdlib/core/env.pilot");
-    m.set("TcpSocket", "stdlib/core/env.pilot");
-    m.set("Thread", "stdlib/core/env.pilot");
-    m.set("Clock", "stdlib/core/env.pilot");
-    m.set("Entropy", "stdlib/core/env.pilot");
-    m.set("Ffi", "stdlib/core/env.pilot");
+    m.set(nameof(RawMem), "stdlib/core/host_raw.pilot");
+    m.set(nameof(Fd), "stdlib/core/host_raw.pilot");
+    m.set(nameof(File), "stdlib/core/file.pilot");
+    m.set(nameof(Env), "stdlib/core/env.pilot");
+    m.set(nameof(Process), "stdlib/core/env.pilot");
+    m.set(nameof(TcpSocket), "stdlib/core/env.pilot");
+    m.set(nameof(Thread), "stdlib/core/env.pilot");
+    m.set(nameof(Clock), "stdlib/core/env.pilot");
+    m.set(nameof(Entropy), "stdlib/core/env.pilot");
+    m.set(nameof(Ffi), "stdlib/core/env.pilot");
     return m;
 }
 
@@ -180,17 +180,17 @@ fn ab_check_native_owners(root: str, violations: i64) {
         let dot = gm_find(owner, ".", 0);
         let ty = owner.slice(0, dot);
         let meth = owner.slice(dot + 1, owner.len());
-        let head = gm_find(src, f"[EngineOp]\n    priv static fn {meth}_internal(", 0);
+        let head = gm_find(src, f"[{nameof(EngineOp)}]\n    {nameof(priv)} {nameof(static)} {nameof(fn)} {meth}_internal(", 0);
         let arrow = if head < 0 { -1 } else { gm_find(src, "=>", head) };
         let semi = if head < 0 { -1 } else { gm_find(src, ";", head) };
-        let body = gm_find(src, f"=> __engine(\"{nat}\", ", head);
+        let body = gm_find(src, f"=> {nameof(__engine)}(\"{nat}\", ", head);
         if head < 0 || arrow < 0 || body != arrow || semi < body {
             let _ = glist_push(violations, ab_viol(file, owner, f"{owner}_internal must be a `priv static fn` marked [EngineOp] whose whole body is `__engine(\"{nat}\", ...)`"));
             continue;
         }
         let calls = ab_count_calls(src, meth + "_internal");
-        let public = gm_find(src, f"pub fn {meth}(", 0);
-        let public_pure = gm_find(src, f"pub pure fn {meth}(", 0);
+        let public = gm_find(src, f"{nameof(pub)} {nameof(fn)} {meth}(", 0);
+        let public_pure = gm_find(src, f"{nameof(pub)} {nameof(pure)} {nameof(fn)} {meth}(", 0);
         let ppos = if public >= 0 { public } else { public_pure };
         let only = gm_find(src, f"{ty}.{meth}_internal(", 0);
         if calls != 1 || ppos < 0 || only < ppos || gm_find(src, ";", ppos) < only {
@@ -278,8 +278,8 @@ fn ab_check_site(src: str, at: i64, rel: str, id: i64, owner: str, files: Map<st
         let _ = glist_push(violations, ab_viol(rel, f"host_op {id}", f"HostOp {id} is owned by {owner} in {want_file}; it may not appear here"));
         return;
     }
-    let head = f"[EngineOp]\n    priv static fn {meth}_internal(";
-    let st = gm_find(src, f"pub struct {ty} : ", 0);
+    let head = f"[{nameof(EngineOp)}]\n    {nameof(priv)} {nameof(static)} {nameof(fn)} {meth}_internal(";
+    let st = gm_find(src, f"{nameof(pub)} {nameof(struct)} {ty} : ", 0);
     let body_end = if st < 0 { -1 } else { gm_find(src, "\n}", st) };
     let hpos = if st < 0 { -1 } else { gm_find(src, head, st) };
     if hpos < 0 || hpos > at || body_end < at {
@@ -293,7 +293,7 @@ fn ab_check_site(src: str, at: i64, rel: str, id: i64, owner: str, files: Map<st
         let _ = glist_push(violations, ab_viol(rel, owner, f"{owner}_internal must have `__engine(\"host_op\", {id}, ...)` as its whole body"));
     }
     let semi = gm_find(src, ";", at);
-    let next_fn = gm_find(src, "fn ", hpos + head.len());
+    let next_fn = gm_find(src, nameof(fn) + " ", hpos + head.len());
     if semi < 0 || (next_fn >= 0 && next_fn < semi) {
         let _ = glist_push(violations, ab_viol(rel, owner, f"{owner}_internal must end at its `__engine(...)` call"));
     }
@@ -302,7 +302,7 @@ fn ab_check_site(src: str, at: i64, rel: str, id: i64, owner: str, files: Map<st
 /// The body of `struct <ty>` in `src` (from its header to the next top-level
 /// declaration), so owners in one file with the same method name stay apart.
 fn ab_struct_body(src: str, ty: str) -> str {
-    let st = gm_find(src, f"pub struct {ty} : ", 0);
+    let st = gm_find(src, f"{nameof(pub)} {nameof(struct)} {ty} : ", 0);
     if st < 0 { return ""; }
     let nx = gm_find(src, "\n}", st);
     return if nx < 0 { src.slice(st, src.len()) } else { src.slice(st, nx + 2) };
@@ -344,7 +344,7 @@ pub fn verify_airlock_abi(root: str, violations: i64) {
 
     // Checks 1-3: every runtime op site, across every Pilot source tree.
     let seen = Map<i64, i64>();
-    let needle = "__engine(\"host_op\", ";
+    let needle = nameof(__engine) + "(\"host_op\", ";
     for subdir in ["stdlib", "selfhost", "tools", "tests", "examples"] {
         let walked = gate_fs_walk_files(gm_join_path(root, subdir));
         var wi = 0;
@@ -383,7 +383,7 @@ pub fn verify_airlock_abi(root: str, violations: i64) {
         let meth = owner.slice(dot + 1, owner.len());
         let osrc = ab_struct_body(gate_fs_read_text(gm_join_path(root, files.get(ty))), ty);
         let calls = ab_count_calls(osrc, meth + "_internal");
-        let public = f"pub static fn {meth}(";
+        let public = f"{nameof(pub)} {nameof(static)} {nameof(fn)} {meth}(";
         let ppos = gm_find(osrc, public, 0);
         let only = gm_find(osrc, f"{ty}.{meth}_internal(", 0);
         if calls != 1 || ppos < 0 || only < ppos || gm_find(osrc, ";", ppos) < only {
@@ -440,17 +440,17 @@ pub fn verify_airlock_abi(root: str, violations: i64) {
     for row in airlock_c_structs() {
         let sname = row.0;
         let fields = row.3;
-        if !gm_contains(os_abi, f"pub struct {sname} : IValue") {
+        if !gm_contains(os_abi, f"{nameof(pub)} {nameof(struct)} {sname} : {nameof(IValue)}") {
             let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", sname, f"Frozen C-ABI struct {sname} missing in os_abi.pilot"));
         }
         for f in fields {
-            if !gm_contains(os_abi, f"pub {f}:") {
+            if !gm_contains(os_abi, f"{nameof(pub)} {f}:") {
                 let _ = glist_push(violations, ab_viol("stdlib/core/os_abi.pilot", f, f"Frozen C-ABI field {sname}.{f} missing in os_abi.pilot"));
             }
         }
     }
     for h in airlock_lang_hooks() {
-        if !gm_contains(bridge_lang, f"{h}(") || !gm_contains(bridge_lang, f"__engine(\"{h}\"") {
+        if !gm_contains(bridge_lang, f"{h}(") || !gm_contains(bridge_lang, f"{nameof(__engine)}(\"{h}\"") {
             let _ = glist_push(violations, ab_viol("stdlib/core/bridge_lang.pilot", h, f"Frozen bridge_lang hook {h} missing or altered in bridge_lang.pilot"));
         }
     }

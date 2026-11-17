@@ -385,6 +385,9 @@ fn call_type(var ref inf: Infer, n: i64) -> i64 {
     if ck == nk_ident() && inf.r.ref_of[callee] >= 0 {
         return ty_func_return(p.tt, type_of(inf, callee));
     }
+    if ck == nk_ident() && inf.r.ref_of[callee] < 0 && prog_is_name_quote(inf.p, node_name(s, callee)) {
+        return prog_slot_type(p, literal_slot(nk_str()));
+    }
     if ck == nk_ident() {
         let as_type = type_receiver(inf, callee);
         if ty_is_named(p.tt, as_type) && ch.len() == 2 && kind(s, ch[1]) == nk_map() {
@@ -504,7 +507,7 @@ fn member_type(var ref inf: Infer, n: i64) -> i64 {
 /// `xs as view T` (selfhost/check/view_cast.pilot checks it).
 /// The operator symbol `as view` is bound under (crates/pilot-ast
 /// `BinaryOp::symbol`).
-pub pure fn view_symbol() -> str => "as view";
+pub pure fn view_symbol() -> str => nameof(as) + " view";
 
 /// The function `as view` node `n` calls, or -1: of the functions the
 /// program binds `as view` to, the one whose first parameter takes the
@@ -548,9 +551,9 @@ pub fn view_type(var ref inf: Infer, n: i64) -> i64 {
 /// The binding keys of `quote` values (stdlib/core/primitives/ast.pilot):
 /// the function that builds a quote's tree, the one that fills its next
 /// hole, and the ones that make a literal tree of a plain value.
-pub pure fn quote_symbol() -> str => "quote";
-pub pure fn quote_hole_symbol() -> str => "quote hole";
-pub pure fn quote_lift_symbol() -> str => "quote lift";
+pub pure fn quote_symbol() -> str => nameof(quote);
+pub pure fn quote_hole_symbol() -> str => nameof(quote) + " hole";
+pub pure fn quote_lift_symbol() -> str => nameof(quote) + " lift";
 
 /// The functions the program binds `key` to, in binding order.
 pub fn bound_fns(var ref p: Program, key: str) -> List<i64> {

@@ -39,7 +39,7 @@ use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
 
 comptime {
-    bind_operator_fn("quote", nameof(ast_decode));
+    bind_operator_fn(nameof(quote), nameof(ast_decode));
     bind_operator_fn("quote hole", nameof(ast_fill));
     bind_operator_fn("quote lift", nameof(ast_lift_int));
     bind_operator_fn("quote lift", nameof(ast_lift_float));
@@ -139,13 +139,14 @@ fn ast_render<T: IAnyValue>(t: ast<T>, i: usize) -> str {
     if k == "block" { return if n == 0 { "{}" } else { "{ " + ast_joined(t, i, 0, " ") + " }" }; }
     if k == "stmt" { return ast_render(t, i + 1) + ";"; }
     if k == "let" || k == "var" {
-        return k + " " + x + (if n > 0 { " = " + ast_render(t, i + 1) } else { "" }) + ";";
+        let word = if k == "let" { nameof(let) } else { nameof(var) };
+        return word + " " + x + (if n > 0 { " = " + ast_render(t, i + 1) } else { "" }) + ";";
     }
-    if k == "return" { return "return" + (if n > 0 { " " + ast_render(t, i + 1) } else { "" }) + ";"; }
+    if k == "return" { return nameof(return) + (if n > 0 { " " + ast_render(t, i + 1) } else { "" }) + ";"; }
     if k == "assign" { return ast_render(t, i + 1) + " " + x + " " + ast_render(t, ast_child(t, i, 1)) + ";"; }
     if k == "if" {
-        let head = "if " + ast_render(t, i + 1) + " " + ast_render(t, ast_child(t, i, 1));
-        return if n > 2 { head + " else " + ast_render(t, ast_child(t, i, 2)) } else { head };
+        let head = nameof(if) + " " + ast_render(t, i + 1) + " " + ast_render(t, ast_child(t, i, 1));
+        return if n > 2 { head + " " + nameof(else) + " " + ast_render(t, ast_child(t, i, 2)) } else { head };
     }
     if k == "hole" { return "$" + x; }
     return x;
@@ -244,7 +245,7 @@ pub fn ast_lift_float(v: f64) -> ast<f64> {
 }
 
 /// The literal tree of `v`.
-pub fn ast_lift_bool(v: bool) -> ast<bool> => ast_leaf<bool>("bool", if v { "true" } else { "false" });
+pub fn ast_lift_bool(v: bool) -> ast<bool> => ast_leaf<bool>("bool", if v { nameof(true) } else { nameof(false) });
 
 /// The literal tree of `v`, escaped as a string literal is written.
 pub fn ast_lift_str(v: str) -> ast<str> =>

@@ -107,9 +107,9 @@ pub pure fn op_is() -> i64 => 25;
 /// `BinaryOp::symbol`); an operator a program binds to a function
 /// (`bind_operator_fn`) is found by it.
 pub fn binary_op_symbols() -> List<str> => [
-    "", "+", "-", "*", "/", "//", "%", "**", "==", "!=", "<", "<=", ">", ">=", "and", "or",
-    "&", "|", "^", "<<", ">>", "|>", "??", "..=", "..", "is", ":=", "<-", "union", "intersect",
-    "except", "<|", "as", "as view", "<=>", "+|", "-|", "*|", "+%", "-%", "*%", "+?", "-?", "*?",
+    "", "+", "-", "*", "/", "//", "%", "**", "==", "!=", "<", "<=", ">", ">=", nameof(and), nameof(or),
+    "&", "|", "^", "<<", ">>", "|>", "??", "..=", "..", nameof(is), ":=", "<-", nameof(union), nameof(intersect),
+    nameof(except), "<|", nameof(as), nameof(as) + " view", "<=>", "+|", "-|", "*|", "+%", "-%", "*%", "+?", "-?", "*?",
     "%%", "~>", ">..<", ">..", ":=:", ":",
 ];
 pub pure fn op_as() -> i64 => 32;

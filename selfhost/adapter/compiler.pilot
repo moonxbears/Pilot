@@ -92,7 +92,7 @@ pub fn adapted_method_new(raw_sym: str, clean_name: str) -> AdaptedMethod {
         is_property_set: false,
         property_name:   "",
         params:          [],
-        return_type:     "void",
+        return_type:     nameof(void),
         has_error_lift:  false,
         ir_ops:          [],
         ir_thunk:        "",
@@ -218,13 +218,13 @@ pub fn compile_adapter_method_thunk(
         let o_rule = out_rule_at(blueprint, sig, p_idx);
         if p_idx == 0 && adapter_type_is_pointer(ty) && s_rule < 0 && o_rule < 0 {
             // Receiver promote: a leading handle pointer becomes `self`.
-            var param = adapted_param_new("self", blueprint.target_type, reg_class_raw_ptr(), 0);
+            var param = adapted_param_new(nameof(self), blueprint.target_type, reg_class_raw_ptr(), 0);
             param.is_receiver = true;
             method.params.push(param);
-            emit_op(ref method, op_extract_field(), "%r0 = extract_field(self, 0)");
+            emit_op(ref method, op_extract_field(), f"%r0 = extract_field({nameof(self)}, 0)");
         } else if s_rule >= 0 {
             let rule = blueprint.slice_rules[s_rule as usize];
-            let p_type = if rule.as_utf8_str { "str" } else { "slice<u8>" };
+            let p_type = if rule.as_utf8_str { nameof(str) } else { nameof(slice) + "<" + nameof(u8) + ">" };
             method.params.push(adapted_param_new(p_name, p_type, reg_class_raw_ptr(), p_idx as u16));
             emit_op(ref method, op_extract_field(), f"%r{p_idx} = extract_field({p_name}, 0)");
             emit_op(ref method, op_extract_field(), f"%r{rule.len_param_idx} = extract_field({p_name}, 1)");
@@ -250,12 +250,12 @@ pub fn compile_adapter_method_thunk(
         emit_op(ref method, op_cmp(), "%ok = cmp eq %ret, 0");
         emit_op(ref method, op_cond_br(), "cond_br %ok, ok_path, err_path");
         method.has_error_lift = true;
-        method.return_type = f"void ! {sig.ret_type}";
+        method.return_type = f"{nameof(void)} ! {sig.ret_type}";
     } else if blueprint.err_policy == ErrorLiftPolicy::NonNegativeIsOk {
         emit_op(ref method, op_cmp(), "%ok = cmp ge %ret, 0");
         emit_op(ref method, op_cond_br(), "cond_br %ok, ok_path, err_path");
         method.has_error_lift = true;
-        method.return_type = f"usize ! {sig.ret_type}";
+        method.return_type = f"{nameof(usize)} ! {sig.ret_type}";
     } else if blueprint.err_policy == ErrorLiftPolicy::NonNullIsOk {
         emit_op(ref method, op_cmp(), "%ok = cmp ne %ret, 0");
         emit_op(ref method, op_cond_br(), "cond_br %ok, ok_path, err_path");

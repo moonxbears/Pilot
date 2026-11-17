@@ -166,10 +166,11 @@ pub fn parse_source_exclusions(src: str) -> i64 {
     var p = 0;
     let total_len = src.len();
     while p < total_len {
-        let w_idx = e_find(src, "without ", p);
+        let w_kw = nameof(without) + " ";
+        let w_idx = e_find(src, w_kw, p);
         if w_idx < 0 { break; }
 
-        let after_w = src.slice(w_idx + 8, total_len);
+        let after_w = src.slice(w_idx + w_kw.len(), total_len);
         let b_open = e_find(after_w, "{", 0);
         let semi_pos = e_find(after_w, ";", 0);
 
@@ -255,7 +256,7 @@ pub fn format_exclusions_report(map: i64) -> str {
     while i < ex_count {
         let tgt = __engine("map_get", map, "ex_target_" + i);
         let mem = __engine("map_get", map, "ex_member_" + i);
-        out = out + "  - " + tgt + " without {" + mem + "}\n";
+        out = out + "  - " + tgt + " " + nameof(without) + " {" + mem + "}\n";
         i = i + 1;
     }
     return out + "Total: " + ex_count + " symbols excluded.\n";

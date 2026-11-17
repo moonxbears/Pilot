@@ -134,7 +134,7 @@ fn sa_scan_inherits_attr(tape: i64, start_idx: i64, limit_idx: i64) -> bool {
     while k < limit_idx {
         let t = sh_token_text(tape, k);
         if t == "{" || t == ";" { return false; }
-        if t == "IAttribute" { return true; }
+        if t == nameof(IAttribute) { return true; }
         k = k + 1;
     }
     return false;
@@ -146,7 +146,7 @@ fn sa_prev_has_lang_attr(tape: i64, kw_idx: i64) -> bool {
     while k >= 0 && steps < 28 {
         let t = sh_token_text(tape, k);
         if t == ";" || t == "}" { return false; }
-        if t == "Lang" { return true; }
+        if t == nameof(Lang) { return true; }
         k = k - 1;
         steps = steps + 1;
     }
@@ -158,7 +158,7 @@ fn sa_prev_is_partial(tape: i64, kw_idx: i64) -> bool {
     var steps = 0;
     while k >= 0 && steps < 6 {
         let t = sh_token_text(tape, k);
-        if t == "partial" { return true; }
+        if t == nameof(partial) { return true; }
         if t == ";" || t == "}" || t == "]" { return false; }
         k = k - 1;
         steps = steps + 1;
@@ -188,7 +188,7 @@ fn sa_harvest_distributive_block(
             let rb = sh_token_matching_bracket(tape, j);
             var ak = j + 1;
             while ak < rb {
-                if sh_token_text(tape, ak) == "Lang" { item_has_lang = true; }
+                if sh_token_text(tape, ak) == nameof(Lang) { item_has_lang = true; }
                 ak = ak + 1;
             }
             j = if rb > j { rb + 1 } else { j + 1 };
@@ -199,7 +199,7 @@ fn sa_harvest_distributive_block(
         } else if (tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw) && j + 1 < close_idx {
             let nx = sh_token_text(tape, j + 1);
             if nx == "<" || nx == ":" || nx == "{" || nx == ";" {
-                if !seed_registry_contains(seed_reg, txt) && txt != "pub" && txt != "priv" {
+                if !seed_registry_contains(seed_reg, txt) && txt != nameof(pub) && txt != nameof(priv) {
                     let _ = gset_insert(vocab, txt);
                 }
                 if enforce_naming {
@@ -956,7 +956,7 @@ fn sa_count_engine_calls(src: str) -> i64 {
             let st = i;
             i = i + 1;
             while i < n && sa_is_id_char(src.byte_at(i)) { i = i + 1; }
-            if src.slice(st, i) == "__engine" {
+            if src.slice(st, i) == nameof(__engine) {
                 var k = i;
                 while k < n && (src.byte_at(k) == 32 || src.byte_at(k) == 9 || src.byte_at(k) == 10 || src.byte_at(k) == 13) {
                     k = k + 1;
@@ -973,7 +973,7 @@ fn sa_count_engine_calls(src: str) -> i64 {
 }
 
 fn sa_count_host_op_sites(src: str) -> i64 {
-    let needle = "__engine(\"host_op\", ";
+    let needle = nameof(__engine) + "(\"host_op\", ";
     var n = 0;
     var at = gm_find(src, needle, 0);
     while at >= 0 {

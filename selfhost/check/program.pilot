@@ -232,10 +232,10 @@ pub fn prog_new(ref s: Snap) -> Program {
             let name = node_name(s, i);
             nl_add(p.type_decls, name, i);
             if k != nk_adt() { index_members(p, name, i); }
-            if some slot = prog_attr_args(p, i, "Lang") {
+            if some slot = prog_attr_args(p, i, nameof(Lang)) {
                 if slot.len() > 0 && !p.slots.has(slot[0]) { p.slots.set(slot[0], i); }
             }
-            if some bits = prog_attr_args(p, i, "Bits") {
+            if some bits = prog_attr_args(p, i, nameof(Bits)) {
                 if bits.len() >= 2 {
                     p.bits_width.set(name, bits[0]);
                     p.bits_class.set(name, bits[1]);
@@ -312,7 +312,7 @@ pub fn prog_class(ref p: Program, t: i64) -> str {
 pub fn prog_bits(var ref p: Program, t: i64) -> i64 {
     if !ty_is_named(p.tt, t) { return -1; }
     for decl in nl_get(p.type_decls, node_name(p.s, ty_decl(p.tt, t))) {
-        if some args = prog_attr_nodes(p, decl, "Bits") {
+        if some args = prog_attr_nodes(p, decl, nameof(Bits)) {
             if args.len() > 0 {
                 if some bits = prog_const(p, args[0]) { return bits; }
             }
@@ -408,7 +408,7 @@ fn find_slot_name(var ref p: Program, slot: str) -> str {
     while r < s.attrs.len() {
         let row = s.attrs[r];
         let args = row.2;
-        if sym_text(s, row.1) == "Lang" && args.len() > 0 && kind(s, args[0]) == nk_member() {
+        if sym_text(s, row.1) == nameof(Lang) && args.len() > 0 && kind(s, args[0]) == nk_member() {
             let table = const_node(p, lhs(s, args[0]), 0);
             if table >= 0 && kind(s, table) == nk_map() {
                 let v = map_entry(p, table, slot);
@@ -621,7 +621,7 @@ pub fn prog_const(var ref p: Program, e: i64) -> i64? {
     return none;
 }
 /// The seed token for engine calls.
-pub pure fn engine_token() -> str => "__engine";
+pub pure fn engine_token() -> str => nameof(__engine);
 
 /// The text of a binding argument: `nameof(f)` is `f`, a string its value,
 /// a name itself.
@@ -672,7 +672,25 @@ fn is_bridge_bind_hook(name: str) -> bool {
         || name == "bind_format_spec"
         || name == "bind_scalar_text"
         || name == "bind_native_effect"
-        || name == "bind_enumerator";
+        || name == "bind_enumerator"
+        || name == "bind_receptor";
+}
+
+/// The receptor kind `bind_receptor` gives the symbol-quoting word
+/// (`bind_receptor(nameof(nameof), 33, 25)`, stdlib/core/core.pilot and
+/// stdlib/core/syntax/expr_sugar.pilot): a call of that word is the text of
+/// the name it quotes.
+pub pure fn name_quote_receptor_kind() -> str => "33";
+
+/// Whether `name` is bound as the symbol-quoting receptor (`nameof`), whose
+/// call is a string whatever else of that name is in view: the keyword
+/// registry declares `nameof {}`, which a glob import of
+/// `Pilot.Core.Keywords` brings into view.
+pub fn prog_is_name_quote(var ref p: Program, name: str) -> bool {
+    for row in prog_engine_bindings(p) {
+        if row.len() >= 3 && row[0] == "bind_receptor" && row[1] == name && row[2] == name_quote_receptor_kind() { return true; }
+    }
+    return false;
 }
 
 /// Whether `name` is bound as a compile-time question about a type

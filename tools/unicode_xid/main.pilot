@@ -152,7 +152,7 @@ fn version_of(text: str) -> str {
 
 /// The declaration of const `name` holding `rs` as lo, hi pairs.
 fn const_text(name: str, doc: str, ref rs: List<CodeRange>) -> str {
-    var out = f"/// {doc}\n/// {rs.len()} ranges, as `lo, hi` pairs.\npub const {name}: List<i64> = [\n";
+    var out = f"/// {doc}\n/// {rs.len()} ranges, as `lo, hi` pairs.\n{nameof(pub)} {nameof(const)} {name}: {nameof(List)}<{nameof(i64)}> = [\n";
     var i = 0;
     while i < rs.len() as i64 {
         var line = "   ";
@@ -194,10 +194,10 @@ fn main() -> i64 {
     out = out + "// XID_Continue ones (PROP-021 §2.8; stdlib/core/lex/names.pilot). The\n";
     out = out + "// ASCII part is written in names.pilot; these are the code points from\n";
     out = out + "// U+0080 on, as sorted, merged, inclusive ranges.\n";
-    out = out + "[EnforceCoreNaming]\n";
-    out = out + "pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.UnicodeXid;\n\n";
+    out = out + "[" + nameof(EnforceCoreNaming) + "]\n";
+    out = out + f"{nameof(pub)} {nameof(lvl)}(Cfg.Tokens.ring_genesis) {nameof(pkg)} Pilot.Core.Lex.UnicodeXid;\n\n";
     out = out + "/// The Unicode version the ranges come from.\n";
-    out = out + f"pub const UNICODE_VERSION: str = \"{version}\";\n\n";
+    out = out + f"{nameof(pub)} {nameof(const)} UNICODE_VERSION: {nameof(str)} = \"{version}\";\n\n";
     out = out + const_text("XID_START_RANGES", "The non-ASCII code points that may start a name (XID_Start).", start) + "\n";
     out = out + const_text("XID_CONTINUE_ONLY_RANGES", "The non-ASCII code points that may continue a name but not start it (XID_Continue, not XID_Start).", cont);
     print(out);

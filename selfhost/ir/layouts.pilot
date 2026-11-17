@@ -77,7 +77,7 @@ pub fn layout_of(var ref ls: IrLayouts, t: i64) -> IrTypePhysics {
     if ty_is_named(p.tt, t) {
         // `[Bits]` may sit on any partial declaration of the type.
         for d in nl_get(p.type_decls, p.tt.name[t]) {
-            if some bits = prog_attr_nodes(p, d, "Bits") {
+            if some bits = prog_attr_nodes(p, d, nameof(Bits)) {
                 if bits.len() >= 2 {
                     if some width = prog_const(p, bits[0]) {
                         let class = reg_class_code(prog_const_name(p, bits[1]));

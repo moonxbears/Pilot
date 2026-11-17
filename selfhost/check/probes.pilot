@@ -29,18 +29,18 @@ pub lvl(0) pkg selfhost.check;
 
 /// The function a `[Debug]` probe calls, and the enum of its levels
 /// (stdlib/core/debug.pilot).
-pub pure fn debug_hook() -> str => "debug_trace_line";
-pub pure fn debug_level_type() -> str => "DebugLevel";
+pub pure fn debug_hook() -> str => nameof(debug_trace_line);
+pub pure fn debug_level_type() -> str => nameof(DebugLevel);
 
 /// The flags of `[Live]`'s `when:` (stdlib/core/live.pilot), the argument
 /// that takes them, and the flag that applies when it is not written.
-pub pure fn live_when_type() -> str => "LiveWhen";
-pub pure fn live_when_label() -> str => "when";
-pub pure fn live_default_flag() -> str => "Compile";
+pub pure fn live_when_type() -> str => nameof(LiveWhen);
+pub pure fn live_when_label() -> str => nameof(when);
+pub pure fn live_default_flag() -> str => nameof(Compile);
 
 /// The argument every attribute may take to order it among the steps of its
 /// function (selfhost/check/attr_chain.pilot).
-pub pure fn weight_label() -> str => "weight";
+pub pure fn weight_label() -> str => nameof(weight);
 
 /// What a probe passes for one argument of its call. The codes are shared
 /// with crates/pilot-vm/src/lower_probe.rs (`ProbeArg`).
@@ -178,7 +178,7 @@ fn debug_settings(ref p: Program, var ref sink: DiagSink, ref args: List<i64>) -
     let s = p.s;
     let levels = debug_levels(p);
     let params = ["level", "changed_only"];
-    var level = ordinal_of(levels, "Debug");
+    var level = ordinal_of(levels, nameof(Debug));
     var changed_only = false;
     var ok = true;
     var i = 0;
@@ -329,8 +329,8 @@ pub fn generate_target(ref s: Snap, ref given: List<i64>) -> GenerateTarget? {
     let label = attr_arg_label(s, args[0]);
     let value = str_value(s, args[0]);
     if value == "" { return none; }
-    if label == "" || label == "path" { return GenerateTarget.Path(value); }
-    if label == "ext" { return GenerateTarget.Ext(value); }
+    if label == "" || label == nameof(path) { return GenerateTarget.Path(value); }
+    if label == generate_ext_label() { return GenerateTarget.Ext(value); }
     return none;
 }
 
@@ -437,7 +437,7 @@ fn statement_probe(ref p: Program, ref levels: List<str>, cfg: DebugSettings, f:
     let s = p.s;
     let assigns = kind(s, n) == nk_assign();
     let target = if assigns { attr_one_line(node_text(s, lhs(s, n))) } else { node_name(s, n) };
-    let show_before = assigns && cfg.level >= ordinal_of(levels, "Debug");
+    let show_before = assigns && cfg.level >= ordinal_of(levels, nameof(Debug));
     let compare = assigns && cfg.changed_only;
     let capture = show_before || compare;
     let head = if cfg.level >= ordinal_of(levels, "Verbose") {
@@ -467,16 +467,11 @@ fn traced_statement(ref p: Program, n: i64) -> bool {
 
 /// The probes of every function in the user's files that `[Debug]` applies
 /// to, written on it or inherited (selfhost/check/attr_inherit.pilot).
-<<<<<<< HEAD
 pub fn probe_plan(ref p: Program) -> List<PlannedProbe> {
     var out: List<PlannedProbe> = [];
-=======
-pub fn probe_plan(ref p: Program) -> List<List<any>> {
-    var out: List<List<any>> = [];
     // No hook to call: no probe either way, and the scan below only fills
     // `traced` (its findings go to a discarded sink).
     if nl_get(p.fns, debug_hook()).len() == 0 { return out; }
->>>>>>> claude/cool-moser-2264b9
     let traced = Map<str, DebugSettings>();
     let quiet = sink_new(p.s);
     let pkgs = package_decls(p);
