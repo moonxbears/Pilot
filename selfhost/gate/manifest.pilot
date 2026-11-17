@@ -131,6 +131,10 @@ pub fn gate_fs_list_dirs(dir_path: str) -> List<str> {
     return File.list_dirs(dir_path);
 }
 
+pub fn gate_fs_list_files(dir_path: str) -> List<str> {
+    return File.list_files(dir_path);
+}
+
 pub fn gate_fs_remove_all(path: str) -> bool {
     if path == "" { return false; }
     let n = path.len();

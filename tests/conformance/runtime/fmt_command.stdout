@@ -25,10 +25,8 @@ tests/tool_fixtures/fmt/messy.pilot is not formatted
 true
 0
 true
-fn f(a: opt<i64>, b: res<i64, E>) -> i64 => sig g(a) + h(splat(xs));
-
-fn f(a: i64?, b: i64 ! E) -> i64 => g!^(a) + h(*xs);
-
+true
+true
 let s = f"a {x+1} b";
 /* keep */ let y = 1;
 

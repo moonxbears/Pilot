@@ -181,7 +181,7 @@ pub fn is_generic_lead_prev(prev2: str, prev: str) -> bool {
         || prev2 == nameof(var) || prev2 == "bundle" || prev2 == "facet" || prev2 == "ext" {
         return true;
     }
-    return prev == "opt" || prev == "res" || prev == "sig" || prev == "grad" || prev == "plan"
+    return prev == nameof(opt) || prev == nameof(res) || prev == "sig" || prev == "grad" || prev == "plan"
         || prev == "array" || prev == "simd" || prev == "ptr" || prev == "ref" || prev == "iso"
         || prev == "span" || prev == "step" || prev == "from" || prev == "until" || prev == "map"
         || prev == "frame" || prev == "List" || prev == "Map";
@@ -404,7 +404,7 @@ pub fn fmt_restyle(ref toks: List<FmtTok>, style: FmtStyle) -> List<FmtTok> {
             }
             // T? -> opt<T>
             if word_at(toks, i) && text_at(toks, i + 1) == "?" && type_position(toks, i) {
-                out.push(word("opt"));
+                out.push(word(nameof(opt)));
                 out.push(punct("<"));
                 out.push(toks[i]);
                 out.push(punct(">"));
@@ -413,7 +413,7 @@ pub fn fmt_restyle(ref toks: List<FmtTok>, style: FmtStyle) -> List<FmtTok> {
             }
             // T ! E -> res<T, E>
             if word_at(toks, i) && text_at(toks, i + 1) == "!" && word_at(toks, i + 2) && type_position(toks, i) {
-                out.push(word("res"));
+                out.push(word(nameof(res)));
                 out.push(punct("<"));
                 out.push(toks[i]);
                 out.push(punct(","));
@@ -440,14 +440,14 @@ pub fn fmt_restyle(ref toks: List<FmtTok>, style: FmtStyle) -> List<FmtTok> {
                 continue;
             }
             // opt<T> -> T?
-            if t == "opt" && text_at(toks, i + 1) == "<" && word_at(toks, i + 2) && text_at(toks, i + 3) == ">" {
+            if t == nameof(opt) && text_at(toks, i + 1) == "<" && word_at(toks, i + 2) && text_at(toks, i + 3) == ">" {
                 out.push(toks[i + 2]);
                 out.push(punct("?"));
                 i = i + 4;
                 continue;
             }
             // res<T, E> -> T ! E
-            if t == "res" && text_at(toks, i + 1) == "<" && word_at(toks, i + 2) && text_at(toks, i + 3) == ","
+            if t == nameof(res) && text_at(toks, i + 1) == "<" && word_at(toks, i + 2) && text_at(toks, i + 3) == ","
                 && word_at(toks, i + 4) && text_at(toks, i + 5) == ">" {
                 out.push(toks[i + 2]);
                 out.push(punct("!"));

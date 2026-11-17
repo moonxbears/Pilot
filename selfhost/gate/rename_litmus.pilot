@@ -2,7 +2,7 @@
 // FILE: selfhost/gate/rename_litmus.pilot
 // Milestone 1 / F4: Dual-Pass Universal Rename Litmus Gate (`GATE008`)
 // ==============================================================================
-// The check: copy `stdlib/`, `selfhost/` and the conformance corpus into a
+// The check: copy the workspace (every file a checkout has) into a
 // sandbox, rename the core type names there (pass 0: the AGENTS.md pairs;
 // pass 1: the same names plus `str` with a seeded suffix), consistently in
 // every copied file, then run `pilot test` in the sandbox. The seed reads its
@@ -10,7 +10,9 @@
 // runs in (`pilot_parser::set_source_root`), and its own Pilot sources from
 // there too, so the renamed toolchain checks and runs the renamed programs
 // with no change to the seed. Every program whose result changes is a
-// `GATE008` violation.
+// `GATE008` violation; a program that fails in the workspace too, with no
+// renaming, is not (its failure is the corpus run's to report), so the gate
+// fails only on a dependence on a name.
 // ==============================================================================
 pub lvl(0) pkg selfhost.gate;
 
@@ -286,16 +288,51 @@ pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
 /// Where the conformance corpus lives, relative to the workspace root.
 fn rl_conformance_dir() -> str => "tests/conformance";
 
-/// The trees copied into the sandbox, renamed: the stdlib the programs and
-/// the seed's tables come from, the toolchain's own Pilot sources, the
-/// conformance corpus, and the programs corpus cases start as child
-/// processes or read (`runtime/proc_large_output` runs
-/// `tests/tool_fixtures/proc`; `runtime/check_fix_borrows` fixes a copy of
-/// `tests/tool_fixtures/check_fix`; `lex/cli_lex` lexes
-/// `tests/tool_fixtures/lex`; `runtime/test_select` and
-/// `runtime/test_timeout` run `pilot test` over
-/// `tests/tool_fixtures/test_select` and `tests/tool_fixtures/test_timeout`).
-fn rl_sandbox_trees() -> List<str> => ["stdlib", "selfhost", rl_conformance_dir(), "tests/tool_fixtures/proc", "tests/tool_fixtures/check_fix", "tests/tool_fixtures/lex", "tests/tool_fixtures/test_select", "tests/tool_fixtures/test_timeout"];
+/// Directory names a sandbox built without git leaves out wherever they
+/// are: build output and package caches. Hidden directories (`.git`,
+/// `.claude`, ..) are left out too.
+const RL_SKIPPED_DIRS: List<str> = ["target", "node_modules",];
+
+fn rl_skips_dir(name: str) -> bool {
+    if gm_starts_with(name, ".") { return true; }
+    for d in RL_SKIPPED_DIRS {
+        if d == name { return true; }
+    }
+    return false;
+}
+
+/// The workspace files the sandbox holds, relative to `root`: every file a
+/// checkout has (tracked, or new and not ignored), so a program that reads
+/// any workspace file finds it renamed in the sandbox and this gate never
+/// needs to know which files programs read. Without git, every file under
+/// `root` outside `rl_skips_dir` directories.
+fn rl_workspace_files(root: str) -> List<str> {
+    let listed = run_in(root, "git", ["ls-files", "--cached", "--others", "--exclude-standard"], "");
+    var out: List<str> = [];
+    if listed.exit_code == 0 {
+        let lines = gm_split_lines(listed.stdout);
+        var i = 0;
+        while i < glist_len(lines) {
+            let rel = gm_trim(glist_get(lines, i));
+            // A tracked file deleted from the working tree is not there.
+            if rel.len() > 0 && gate_fs_exists(gm_join_path(root, rel)) { out.push(rel); }
+            i = i + 1;
+        }
+        return out;
+    }
+    rl_walk_workspace(root, "", out);
+    return out;
+}
+
+fn rl_walk_workspace(root: str, rel: str, ref out: List<str>) {
+    let dir = if rel == "" { root } else { gm_join_path(root, rel) };
+    for f in gate_fs_list_files(dir) {
+        out.push(if rel == "" { f } else { rel + "/" + f });
+    }
+    for d in gate_fs_list_dirs(dir) {
+        if !rl_skips_dir(d) { rl_walk_workspace(root, if rel == "" { d } else { rel + "/" + d }, out); }
+    }
+}
 
 /// What `pilot test` printed and returned in the sandbox.
 pub struct LitmusRun : IValue {
@@ -416,57 +453,80 @@ fn rl_rename_stderr(body: str, program_src: str, rmap: i64) -> str {
     return out;
 }
 
-/// Copies every file under `<root>/<src_rel>` to `<sandbox>/<dst_rel>`,
-/// renaming identifiers in `.pilot` files. Returns the number of files copied.
-fn rl_copy_renamed_tree(root: str, src_rel: str, sandbox_dir: str, dst_rel: str, rmap: i64, violations: i64) -> usize {
-    let base = gm_join_path(root, src_rel);
-    let files = gate_fs_walk_files(base);
-    let n = files.len();
-    var copied = 0;
-    var i = 0;
-    while i < n {
-        let path = files[i];
-        let rel = path.slice(base.len() + 1, path.len());
-        let file_text = gate_fs_read_text(path);
-        var out_text = file_text;
-        if gm_ends_with(rel, ".pilot") {
-            out_text = rl_rename_pilot_identifiers(file_text, rmap);
-        } else if gm_ends_with(rel, ".stderr") {
-            let program = path.slice(0, path.len() - 7) + ".pilot";
-            out_text = rl_rename_stderr(file_text, gate_fs_read_text(program), rmap);
-        }
-        let out_path = gm_join_path(sandbox_dir, dst_rel + "/" + rel);
-        if gate_fs_write_text(out_path, out_text) {
-            copied = copied + 1;
-        } else {
-            let _ = glist_push(violations, rl_violation(out_path, out_path,
-                "Failed to write a renamed file into the litmus sandbox",
-                "Check write permissions for the TempDirGuard sandbox"));
-        }
-        i = i + 1;
+/// Copies `<root>/<rel>` to `<sandbox_dir>/<rel>`, renaming identifiers in
+/// a `.pilot` file and the expectations of a `.stderr` file. Whether it was
+/// written.
+fn rl_copy_renamed_file(root: str, rel: str, sandbox_dir: str, rmap: i64, violations: i64) -> bool {
+    let path = gm_join_path(root, rel);
+    let file_text = gate_fs_read_text(path);
+    var out_text = file_text;
+    if gm_ends_with(rel, ".pilot") {
+        out_text = rl_rename_pilot_identifiers(file_text, rmap);
+    } else if gm_ends_with(rel, ".stderr") {
+        let program = path.slice(0, path.len() - 7) + ".pilot";
+        let program_src = if gate_fs_exists(program) { gate_fs_read_text(program) } else { "" };
+        out_text = rl_rename_stderr(file_text, program_src, rmap);
     }
-    if n == 0 {
-        let _ = glist_push(violations, rl_violation(src_rel, base,
-            "Nothing to copy into the litmus sandbox",
-            "Run the gate from the workspace root"));
-    }
-    return copied;
+    let out_path = gm_join_path(sandbox_dir, rel);
+    if gate_fs_write_text(out_path, out_text) { return true; }
+    let _ = glist_push(violations, rl_violation(out_path, out_path,
+        "Failed to write a renamed file into the litmus sandbox",
+        "Check write permissions for the TempDirGuard sandbox"));
+    return false;
 }
 
-/// The GATE008 violations of one corpus run: every program `pilot test`
-/// reports as failing, or the run itself when it reports no result.
-fn rl_corpus_violations(run: LitmusRun, violations: i64) {
+/// The name of the program a `pilot test` result line reports as failing
+/// (`FAIL <name>`, `FIXED <name>: ..`), or "" for any other line.
+fn rl_failed_program(line: str) -> str {
+    if gm_starts_with(line, "FAIL ") { return gm_trim(line.slice(5, line.len())); }
+    if gm_starts_with(line, "FIXED ") {
+        let rest = line.slice(6, line.len());
+        let colon = gm_find(rest, ":", 0);
+        return gm_trim(if colon < 0 { rest } else { rest.slice(0, colon) });
+    }
+    return "";
+}
+
+/// The programs among `programs` that fail in the workspace itself, with no
+/// renaming: their failure is not the litmus's to report (the corpus run
+/// reports it). None when the run gives no result, so every program counts.
+fn rl_failing_unrenamed(root: str, ref programs: List<str>) -> List<str> {
+    var out: List<str> = [];
+    if programs.len() == 0 { return out; }
+    var args: List<str> = ["test",];
+    for p in programs { args.push(p); }
+    let run = run_in(root, current_exe() ?? "pilot", args, "");
     let lines = gm_split_lines(run.stdout);
     var saw_result = false;
     var i = 0;
     while i < glist_len(lines) {
         let line = glist_get(lines, i);
         if gm_starts_with(line, "RESULT: ") { saw_result = true; }
-        if gm_starts_with(line, "FAIL ") || gm_starts_with(line, "FIXED ") {
-            let detail = if i + 1 < glist_len(lines) { gm_trim(glist_get(lines, i + 1)) } else { "" };
-            let _ = glist_push(violations, rl_violation(line.slice(5, line.len()), detail,
-                "Program result changed after renaming core types: the toolchain depends on a core type name",
-                "Derive the behaviour from layouts, field anatomy, syntax rules or method tables, not names"));
+        let name = rl_failed_program(line);
+        if name.len() > 0 { out.push(name); }
+        i = i + 1;
+    }
+    if !saw_result { return []; }
+    return out;
+}
+
+/// The GATE008 violations of one corpus run: every program `pilot test`
+/// reports as failing in the renamed sandbox that passes in the workspace
+/// itself (so only a change renaming caused is reported), or the run itself
+/// when it reports no result.
+fn rl_corpus_violations(root: str, run: LitmusRun, violations: i64) {
+    let lines = gm_split_lines(run.stdout);
+    var saw_result = false;
+    var failed: List<str> = [];
+    var details: List<str> = [];
+    var i = 0;
+    while i < glist_len(lines) {
+        let line = glist_get(lines, i);
+        if gm_starts_with(line, "RESULT: ") { saw_result = true; }
+        let name = rl_failed_program(line);
+        if name.len() > 0 {
+            failed.push(name);
+            details.push(if i + 1 < glist_len(lines) { gm_trim(glist_get(lines, i + 1)) } else { "" });
         }
         i = i + 1;
     }
@@ -474,6 +534,17 @@ fn rl_corpus_violations(run: LitmusRun, violations: i64) {
         let _ = glist_push(violations, rl_violation(rl_conformance_dir(), "exit " + run.exit_code,
             "`pilot test` in the renamed sandbox reported no result: " + gm_trim(run.stderr),
             "Run `pilot test` in the sandbox by hand to see where the toolchain stops"));
+        return;
+    }
+    let unrenamed = rl_failing_unrenamed(root, failed);
+    var k = 0;
+    while k < failed.len() as i64 {
+        if !unrenamed.contains(failed[k]) {
+            let _ = glist_push(violations, rl_violation(failed[k], details[k],
+                "Program result changed after renaming core types: the toolchain or the program depends on a core type name",
+                "Derive the behaviour from layouts, field anatomy, syntax rules or method tables, not names; write a name as `nameof(..)`, not a string; compare printed source with a renamed fixture file, not a `.stdout` line"));
+        }
+        k = k + 1;
     }
 }
 
@@ -485,15 +556,20 @@ struct LitmusSandbox : IValue {
     pub copied: usize;
 }
 
-/// Builds the renamed sandbox for `rename_pairs`: every tree of
-/// `rl_sandbox_trees()` copied from `root` with the names renamed.
-fn rl_build_sandbox(root: str, rename_pairs: i64, violations: i64) -> LitmusSandbox {
+/// Builds the renamed sandbox for `rename_pairs`: every file of
+/// `rl_workspace_files(root)` copied from `root` with the names renamed.
+fn rl_build_sandbox(root: str, ref files: List<str>, rename_pairs: i64, violations: i64) -> LitmusSandbox {
     let rmap = rl_pairs_to_map(rename_pairs);
     let sandbox_dir = "/tmp/pilot_litmus_" + gate_proc_pid() + "_" + gate_time_now_us();
     let guard = temp_guard_new(sandbox_dir);
     var copied = 0;
-    for tree in rl_sandbox_trees() {
-        copied = copied + rl_copy_renamed_tree(root, tree, sandbox_dir, tree, rmap, violations);
+    for rel in files {
+        if rl_copy_renamed_file(root, rel, sandbox_dir, rmap, violations) { copied = copied + 1; }
+    }
+    if files.len() == 0 {
+        let _ = glist_push(violations, rl_violation(root, root,
+            "Nothing to copy into the litmus sandbox",
+            "Run the gate from the workspace root"));
     }
     return LitmusSandbox { dir: sandbox_dir, guard: guard, copied: copied };
 }
@@ -523,9 +599,10 @@ fn rl_finish_corpus(running: ProcessHandle) -> LitmusRun {
 /// One litmus pass: build the renamed sandbox, then run the corpus in it.
 /// Returns the number of files copied plus programs run.
 fn rl_run_pass(root: str, rename_pairs: i64, violations: i64) -> usize {
-    let sb = rl_build_sandbox(root, rename_pairs, violations);
+    let files = rl_workspace_files(root);
+    let sb = rl_build_sandbox(root, files, rename_pairs, violations);
     if glist_len(violations) == 0 {
-        rl_corpus_violations(rl_run_corpus(sb.dir), violations);
+        rl_corpus_violations(root, rl_run_corpus(sb.dir), violations);
     }
     rl_remove_sandbox(sb, violations);
     return sb.copied;
@@ -556,13 +633,14 @@ pub fn execute_dual_pass_rename_gate(workspace_root: str, ref opts: GateRunOptio
     let root = resolve_workspace_root(workspace_root);
     let violations0 = glist_new();
     let violations1 = glist_new();
-    let sb0 = rl_build_sandbox(root, build_canonical_litmus_pairs(), violations0);
-    let sb1 = rl_build_sandbox(root, build_seeded_litmus_pairs(opts.seed), violations1);
+    let files = rl_workspace_files(root);
+    let sb0 = rl_build_sandbox(root, files, build_canonical_litmus_pairs(), violations0);
+    let sb1 = rl_build_sandbox(root, files, build_seeded_litmus_pairs(opts.seed), violations1);
     if glist_len(violations0) == 0 && glist_len(violations1) == 0 {
         let run0 = rl_start_corpus(sb0.dir);
         let run1 = rl_start_corpus(sb1.dir);
-        rl_corpus_violations(rl_finish_corpus(run0), violations0);
-        rl_corpus_violations(rl_finish_corpus(run1), violations1);
+        rl_corpus_violations(root, rl_finish_corpus(run0), violations0);
+        rl_corpus_violations(root, rl_finish_corpus(run1), violations1);
     }
     rl_remove_sandbox(sb0, violations0);
     rl_remove_sandbox(sb1, violations1);

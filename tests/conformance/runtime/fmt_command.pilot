@@ -12,7 +12,10 @@
 //   styles.pilot `--style readable`: `i64?` -> `opt<i64>`, `i64 ! E` ->
 //     `res<i64, E>`, `g!^(a)` -> `sig g(a)`, `*xs` -> `splat(xs)`.
 //   readable.pilot `--style compact`: the same four the other way, with
-//     `T ! E` spaced.
+//     `T ! E` spaced. Each style's output is the other fixture's text, so
+//     both print `true`; comparing with the fixtures (not printing the
+//     text) keeps the expectation right when the rename litmus renames
+//     `opt`/`res` in the fixtures and in fmt.pilot alike.
 //   literals.pilot: the f-string (it has lexer modes of its own) stays as
 //     written, `{x+1}` unspaced; the inline `/* keep */` stays inline.
 //   unbalanced.pilot `fn f( {`: LEX006 for both brackets, exit 1.
@@ -34,8 +37,8 @@ fn main() {
     print(File.write_text(copy, File.read_text(dir + "messy.pilot")));
     print(proc.run(exe, ["fmt", "--write", copy], "").exit_code);
     print(File.read_text(copy) == File.read_text(dir + "formatted.pilot"));
-    print(proc.run(exe, ["fmt", "--style", "readable", dir + "styles.pilot"], "").stdout);
-    print(proc.run(exe, ["fmt", "--style", "compact", dir + "readable.pilot"], "").stdout);
+    print(proc.run(exe, ["fmt", "--style", "readable", dir + "styles.pilot"], "").stdout == File.read_text(dir + "readable.pilot"));
+    print(proc.run(exe, ["fmt", "--style", "compact", dir + "readable.pilot"], "").stdout == File.read_text(dir + "styles.pilot"));
     print(proc.run(exe, ["fmt", dir + "literals.pilot"], "").stdout);
     let bad = proc.run(exe, ["fmt", dir + "unbalanced.pilot"], "");
     print(bad.stderr);

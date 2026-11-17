@@ -253,6 +253,16 @@ pub struct File : IValue {
         return dirs;
     }
 
+    /// The names of the files directly in `path` (not in its directories),
+    /// sorted.
+    pub static fn list_files(path: str) -> List<str> {
+        var dirs: List<str> = [];
+        var files: List<str> = [];
+        if !file_read_dir_entries(path, dirs, files) { return []; }
+        file_sort_strs(files);
+        return files;
+    }
+
     /// The paths of every file under `path`, sorted.
     pub static fn walk_files(path: str) -> List<str> {
         var out: List<str> = [];
