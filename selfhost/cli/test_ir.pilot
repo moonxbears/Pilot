@@ -77,6 +77,44 @@ fn run_all(ref programs: List<str>, mode: str) -> List<proc.ProcessOutput> {
 /// The extension of the list of functions whose calls must be inlined.
 pub pure fn ir_inlined_ext() -> str => ".ir.inlined";
 
+/// The file naming the functions of a case in which no `stack_slot` may
+/// remain after `pilot ir opt` (selfhost/ir/pass_mem2reg.pilot).
+pub pure fn ir_promoted_ext() -> str => ".ir.promoted";
+
+/// The problems with `optimized` given the functions `wanted` whose stack
+/// slots must all be promoted to values.
+pub fn promoted_problems(optimized: proc.ProcessOutput, ref wanted: List<str>) -> List<str> {
+    if optimized.exit_code != 0 { return [f"`pilot ir opt` failed\n--- stderr ---\n{optimized.stderr}"]; }
+    var problems: List<str> = [];
+    var seen: List<str> = [];
+    var current = "";
+    for line in test_lines(optimized.stdout) {
+        if line.starts_with("fn ") {
+            let q = line.find("\"", 0);
+            let q2 = line.find("\"", q + 1);
+            current = if q > 0 && q2 > q { line.slice(q + 1, q2) } else { "" };
+            seen.push(current);
+        } else if line.find("= stack_slot", 0) >= 0 {
+            for name in wanted {
+                if name == current { problems.push(f"`{name}` still keeps a value in a stack slot"); }
+            }
+        }
+    }
+    for name in wanted {
+        var found = false;
+        for n in seen { if n == name { found = true; } }
+        if !found { problems.push(f"`{name}` is not in the optimised module"); }
+    }
+    return problems;
+}
+
+/// The names listed one a line in `path`.
+fn listed_names(path: str) -> List<str> {
+    var out: List<str> = [];
+    for w in test_lines(File.read_text(path)) { if w.trim().len() > 0 { out.push(w.trim()); } }
+    return out;
+}
+
 /// The text after `prefix` in `line` up to the next space or `"`.
 fn word_after(line: str, prefix: str) -> str {
     let at = line.find(prefix, 0);
@@ -155,7 +193,8 @@ pub fn test_case_programs(ref roots: List<str>) -> List<str> {
 }
 
 /// The problems of `out`, the run of case `program`, with the `pilot ir
-/// opt` runs `opts` of the cases `opt_cases` that name inlined functions.
+/// opt` runs `opts` of the cases `opt_cases` that name inlined or promoted
+/// functions.
 fn ir_problems(program: str, out: proc.ProcessOutput, ref opt_cases: List<str>, ref opts: List<proc.ProcessOutput>) -> List<str> {
     if out.stderr.find(roundtrip_failed_line(), 0) >= 0 {
         return [f"the PilIR text does not round-trip\n--- stderr ---\n{out.stderr}"];
@@ -165,10 +204,13 @@ fn ir_problems(program: str, out: proc.ProcessOutput, ref opt_cases: List<str>, 
     var k = 0;
     while k < opt_cases.len() {
         if opt_cases[k] == program {
-            let wanted = test_lines(File.read_text(test_stem(program) + ir_inlined_ext()));
-            var named: List<str> = [];
-            for w in wanted { if w.trim().len() > 0 { named.push(w.trim()); } }
-            for p in inlined_problems(opts[k], named) { problems.push(p); }
+            let stem = test_stem(program);
+            if File.exists(stem + ir_inlined_ext()) {
+                for p in inlined_problems(opts[k], listed_names(stem + ir_inlined_ext())) { problems.push(p); }
+            }
+            if File.exists(stem + ir_promoted_ext()) {
+                for p in promoted_problems(opts[k], listed_names(stem + ir_promoted_ext())) { problems.push(p); }
+            }
         }
         k = k + 1;
     }
@@ -196,7 +238,7 @@ pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
     // The cases that name functions whose calls must be inlined.
     var opt_cases: List<str> = [];
     for c in cases {
-        if File.exists(test_stem(c) + ir_inlined_ext()) { opt_cases.push(c); }
+        if File.exists(test_stem(c) + ir_inlined_ext()) || File.exists(test_stem(c) + ir_promoted_ext()) { opt_cases.push(c); }
     }
     let opts = run_all(opt_cases, "opt");
     // Judged as they finish; reported in case order.
@@ -212,21 +254,24 @@ pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
     for c in cases { jobs.push(job(c, "run-roundtrip")); }
     var pool = proc.job_pool_at_most(jobs, sel.jobs);
     test_set_limits(pool, sel, cases);
+    var done = 0;
     loop {
         guard some f = pool.next() else { break; };
         let i = f.index;
+        done = done + 1;
         if f.timed_out {
             problems[i] = [test_timed_out(sel, cases[i])];
             outcomes[i] = 1;
-            if sel.fail_fast { break; }
         } else if stopped_at_seam(f.out) {
             outcomes[i] = 2;
             seams[i] = seam_line(f.out);
         } else {
             problems[i] = ir_problems(cases[i], f.out, opt_cases, opts);
             outcomes[i] = if problems[i].len() == 0 { 0 } else { 1 };
-            if sel.fail_fast && outcomes[i] == 1 { break; }
         }
+        let outcome = if outcomes[i] == 2 { CaseOutcome::Seam } else if outcomes[i] == 1 { CaseOutcome::Fail } else { CaseOutcome::Pass };
+        test_progress(done, cases.len() as i64, outcome, cases[i], f.elapsed_ms);
+        if sel.fail_fast && outcomes[i] == 1 { break; }
     }
     pool.finish();
     var not_run = 0;

@@ -34,13 +34,15 @@ pub fn pass_register(var ref r: PassRegistry, p: IPilIrPass) { r.passes.push(p);
 
 /// The passes `pilot ir opt` and `pilot ir run` apply: computing functions
 /// that take nothing, then inlining (`[Inline]` and `[EngineOp]`), then
-/// constant folding (with branch folding), then dead-code elimination.
+/// constant folding (with branch folding), then dead-code elimination, then
+/// promoting stack slots to values.
 pub fn default_passes() -> PassRegistry {
     let r = pass_registry_new();
     r.computes_constants = true;
     pass_register(r, InlinePass {});
     pass_register(r, ConstFoldPass {});
     pass_register(r, DeadCodePass {});
+    pass_register(r, Mem2RegPass {});
     return r;
 }
 

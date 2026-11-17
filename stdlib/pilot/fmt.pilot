@@ -13,10 +13,6 @@ pub enum FmtStyle : u8 {
     ::Preserve = 2,
 }
 
-pub pure fn fmt_style_compact()  -> u8 => 0;
-pub pure fn fmt_style_readable() -> u8 => 1;
-pub pure fn fmt_style_preserve() -> u8 => 2;
-
 pub fn str_replace(src: str, target: str, replacement: str) -> str {
     var out: List<str> = [];
     var p: usize = 0;

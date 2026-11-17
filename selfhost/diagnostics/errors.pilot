@@ -931,6 +931,13 @@ pub let ERRORS = [
         reference: "proposals.md PROP-021 §11.2; stdlib/pilot/lex.pilot",
     },
     ErrorDef {
+        code: "LEX008",
+        title: "Token Family With No Seed Kind",
+        description: "A token family has no entry in stdlib/core/lex/seed_kinds.pilot, so the table the seed lexer runs cannot say which kind the seed parser reads for it; nothing is written",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §3.1; stdlib/pilot/lex/seed.pilot",
+    },
+    ErrorDef {
         code: "SYN010",
         title: "Malformed Sequence Rule",
         description: "A `syntax` rule with a sequence head is malformed (a hole kind that is not a `HoleKind` variant, a group of the wrong form, or a body that is not a `quote { .. }`), or a use of the rule does not fit its head",

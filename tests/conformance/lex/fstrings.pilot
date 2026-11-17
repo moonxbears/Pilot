@@ -19,10 +19,11 @@
 //                   fstring_open:f' hole_open name:y } fstring_close:'
 //                   } fstring_close:"
 //   f"""a"b{x}"""   a lone quote is text in a triple one:
-//                   fstring_open:f""" fstring_text:a fstring_quote:"
+//                   fstring_open_triple:f""" (each quoting opens with a
+//                   family of its own) fstring_text:a fstring_quote:"
 //                   fstring_text:b hole_open name:x } fstring_close:"""
 //   rf"\{x}".n      raw: `\` is text; the close ends an operand, so the
-//                   dot is infix: fstring_open:rf" fstring_text:\
+//                   dot is infix: fstring_open_raw:rf" fstring_text:\
 //                   hole_open name:x } fstring_close infix_dot name:n
 use Pilot.Core.Lex.Lexicon;
 use Pilot.Core.Lex.Operators;

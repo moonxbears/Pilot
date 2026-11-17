@@ -1,0 +1,49 @@
+// Names beyond ASCII (PROP-021 §2.8; owner decision 2026-11-16: Unicode
+// UAX #31). A name starts with XID_Start or `_` and goes on with
+// XID_Continue; the table reads them as UTF-8 bytes. A character that
+// starts no token is one unmatched lexeme, however many bytes it has.
+//
+// The source, word by word (code points; classes from Unicode 15.1
+// DerivedCoreProperties.txt, the version stdlib/core/lex/unicode_xid.pilot
+// is generated from):
+//   café      U+00E9 (Ll) is XID_Start: one name
+//   δx        U+03B4 (Ll) XID_Start: one name
+//   名前      U+540D, U+524D (Lo) XID_Start: one name
+//   _ü        `_`, then U+00FC (Ll): one name
+//   é         `e` then U+0301 COMBINING ACUTE ACCENT (Mn), XID_Continue
+//             only: one name of two code points
+//   x٣        U+0663 ARABIC-INDIC DIGIT THREE (Nd), XID_Continue only:
+//             one name
+//   ٣x        the same digit cannot start a name: unmatched (2 bytes),
+//             then the name `x`
+//   a→b       U+2192 RIGHTWARDS ARROW (Sm) is neither: `a`, unmatched
+//             (3 bytes), `b`
+//   p q       U+00A0 NO-BREAK SPACE (Zs) is neither, and not a space:
+//             `p`, unmatched (2 bytes), `q`
+//   𮯰        U+2EBF0, a CJK ideograph new in Unicode 15.1 (XID_Start):
+//             one name of 4 bytes
+//   😀        U+1F600 GRINNING FACE (So) is neither: unmatched (4 bytes)
+//
+// Expected, one lexeme a line (spaces left out): a name as `name:<text>`,
+// an unmatched character as `?:<start>..<end>`, its byte offsets, counted
+// from the UTF-8 lengths (1 byte below U+0080, 2 below U+0800, 3 below
+// U+10000, else 4).
+use Pilot.Core.Lex.Lexicon;
+use Pilot.Core.Lex.Operators;
+use pilot.lex.build;
+use pilot.lex.cache;
+
+fn main() {
+    let built = build_table_cached(core_tokens_with(operator_tokens([], [])), LEX_CACHE_DIR);
+    print(built.ok());
+    let src = "café δx 名前 _ü é x٣ ٣x a→b p q 𮯰 😀";
+    for l in lex_all(built.table, src) {
+        if l.decl < 0 {
+            print(f"?:{l.start}..{l.end}");
+        } else if built.table.names[l.decl] == "name" {
+            print("name:" + src.slice(l.start, l.end));
+        } else if built.table.names[l.decl] != "space" {
+            print(built.table.names[l.decl] + ":" + src.slice(l.start, l.end));
+        }
+    }
+}

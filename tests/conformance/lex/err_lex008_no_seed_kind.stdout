@@ -1,0 +1,3 @@
+true
+LEX008: the token family `mystery` has no kind the seed parser reads; add it to stdlib/core/lex/seed_kinds.pilot
+true

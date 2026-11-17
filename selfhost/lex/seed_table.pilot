@@ -1,0 +1,56 @@
+// ==============================================================================
+// FILE: selfhost/lex/seed_table.pilot
+// The table the seed lexer runs: `pilot lex --write-table` (PROP-021 §3.1).
+// ==============================================================================
+// The toolchain's lexer (every token family declared in stdlib/core/lex/
+// and every operator the standard library declares) is written to
+// `SEED_TABLE_FILE` as `seed_table_text` gives it (stdlib/pilot/lex/seed.pilot).
+//
+// The file is checked in, so the seed can lex the toolchain's sources before
+// any Pilot runs. `pilot lex --check-table` rebuilds it in memory and reports
+// GATE024 when the file on disk differs; the `lex_table` gate runs it.
+pub lvl(0) pkg selfhost.lex;
+
+use Pilot.Core.File;
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+use pilot.lex.modes;
+use pilot.lex.cache;
+use pilot.lex.seed;
+
+/// Where the table the seed runs is kept.
+pub const SEED_TABLE_FILE: str = "stdlib/core/lex/toolchain.lex";
+
+/// `pilot lex --write-table` (`write`) or `--check-table`: builds the
+/// toolchain's lexer, then writes its seed table to `SEED_TABLE_FILE`, or
+/// compares it with the file there (GATE024 when they differ). Exit 0 when
+/// written or current, 1 otherwise.
+pub fn seed_table_main(write: bool) -> i64 {
+    let modes = program_modes();
+    let full_key = modes_key(modes);
+    if full_key == "" {
+        eprint("error: the lexer builder's sources are not found from the working directory; run from the toolchain's tree");
+        return 1;
+    }
+    let built = build_modes_cached(modes, LEX_CACHE_DIR);
+    for e in built.errors { eprint(f"{e.code}: {e.message}"); }
+    if !built.ok() { return 1; }
+    var errors: List<LexBuildError> = [];
+    let table = seed_table_text(built.lexer, full_key, errors);
+    for e in errors { eprint(f"{e.code}: {e.message}"); }
+    if errors.len() > 0 { return 1; }
+    if write {
+        if !File.write_text(SEED_TABLE_FILE, table) {
+            eprint(f"error: cannot write {SEED_TABLE_FILE}");
+            return 1;
+        }
+        print(f"wrote {SEED_TABLE_FILE} ({built.lexer.families()} families, {table.len()} bytes)");
+        return 0;
+    }
+    if !File.exists(SEED_TABLE_FILE) || File.read_text(SEED_TABLE_FILE) != table {
+        eprint(f"GATE024: {SEED_TABLE_FILE} is not the table the token declarations give; run `pilot lex --write-table`");
+        return 1;
+    }
+    print(f"{SEED_TABLE_FILE} is current");
+    return 0;
+}

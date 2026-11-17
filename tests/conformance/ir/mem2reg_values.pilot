@@ -1,0 +1,86 @@
+// Stack slots promoted to values (selfhost/ir/pass_mem2reg.pilot): local
+// variables written in loops and branches keep their values on every
+// engine, and `mem2reg_values.ir.promoted` names the functions in which no
+// stack slot may remain after `pilot ir opt`. A variable passed by `var ref`
+// is handed to the callee and handed back (selfhost/ir/lower_outs.pilot),
+// so no address leaves `escapes` and its slot is promoted too.
+//
+// Expected output, worked by hand:
+//   fib(10)          a, b step (0,1) (1,1) (1,2) (2,3) (3,5) (5,8) (8,13)
+//                    (13,21) (21,34) (34,55) (55,89): a = 55
+//   classify(7)      7 > 5: s = 1, 1 * 10 + 7     = 17
+//   classify(-3)     -3 < 0: s = -1, -10 + -3     = -13
+//   classify(2)      neither: s = 0, 0 + 2        = 2
+//   grid(4)          sum of i * j for i, j in 0..3 = (0 + 1 + 2 + 3)^2 = 36
+//   swap_rounds(3)   (1,2) -> (2,1) -> (1,2) -> (2,1): 2 * 10 + 1 = 21
+//   swap_rounds(4)   an even number of swaps: (1,2): 12
+//   escapes()        k = 5, bumped twice      = 7
+fn fib(n: i64) -> i64 {
+    var a = 0;
+    var b = 1;
+    var i = 0;
+    while i < n {
+        let t = a + b;
+        a = b;
+        b = t;
+        i = i + 1;
+    }
+    return a;
+}
+
+fn classify(x: i64) -> i64 {
+    var s = 0;
+    if x > 5 {
+        s = 1;
+    } else if x < 0 {
+        s = -1;
+    }
+    return s * 10 + x;
+}
+
+fn grid(n: i64) -> i64 {
+    var total = 0;
+    var i = 0;
+    while i < n {
+        var j = 0;
+        while j < n {
+            total = total + i * j;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return total;
+}
+
+fn swap_rounds(n: i64) -> i64 {
+    var x = 1;
+    var y = 2;
+    var i = 0;
+    while i < n {
+        let t = x;
+        x = y;
+        y = t;
+        i = i + 1;
+    }
+    return x * 10 + y;
+}
+
+fn bump(var ref v: i64) { v = v + 1; }
+
+fn escapes() -> i64 {
+    var k = 5;
+    bump(k);
+    bump(k);
+    return k;
+}
+
+fn main() {
+    print(fib(10));
+    print(classify(7));
+    print(classify(-3));
+    print(classify(2));
+    print(grid(4));
+    print(swap_rounds(3));
+    print(swap_rounds(4));
+    print(escapes());
+}

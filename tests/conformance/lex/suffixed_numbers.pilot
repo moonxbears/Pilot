@@ -1,0 +1,40 @@
+// A number followed by a suffix is one token (PROP-021 slice 21G,
+// stdlib/core/lex/numbers.pilot): a unit (`250ms`) or a type (`200u8`), an
+// ASCII letter then ASCII letters, digits and `_`. Each radix is a family
+// of its own, so the parser reads the base from the family. The digits are
+// taken first (`0xFFe` is hex, `1.5e3` a float), and a seed word is never
+// a suffix (`1if` is `1` and `if`), as in the seed lexer.
+//
+// Expected, worked by hand, one family:text per token:
+//   250ms    integer_suffixed:250ms
+//   2.4GHz   float_suffixed:2.4GHz
+//   200u8    integer_suffixed:200u8
+//   0xFFu8   hex digits FF, then u8: hex_integer_suffixed:0xFFu8
+//   0xFFe    `e` is a hex digit: hex_integer:0xFFe
+//   1.5e3    the exponent is the float's: float:1.5e3
+//   1e9x     float 1e9, then x: float_suffixed:1e9x
+//   2em      no digit after e, so no exponent: integer_suffixed:2em
+//   0b101 0o17
+//            bin_integer:0b101 oct_integer:0o17
+//   1if      integer:1 if:if
+//   1iffy    `iffy` is no seed word: integer_suffixed:1iffy
+//   1.5if    float:1.5 if:if
+//   0b1if    bin_integer:0b1 if:if
+//   7_000kB  integer_suffixed:7_000kB
+//   1_x      a suffix starts with a letter: integer:1 name:_x
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Lexicon;
+use pilot.lex.build;
+use pilot.lex.cache;
+
+fn main() {
+    let ops: List<TokenDecl> = [token("!", lit("!")), token("!=", lit("!=")),];
+    let built = build_table_cached(core_tokens_with(ops), LEX_CACHE_DIR);
+    print(built.ok());
+    let src = "250ms 2.4GHz 200u8 0xFFu8 0xFFe 1.5e3 1e9x 2em 0b101 0o17 1if 1iffy 1.5if 0b1if 7_000kB 1_x";
+    for l in lex_all(built.table, src) {
+        if l.decl < 0 || built.table.names[l.decl] != "space" {
+            print(lexeme_text(built.table, src, l));
+        }
+    }
+}

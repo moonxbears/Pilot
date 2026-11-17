@@ -10,14 +10,17 @@
 //   if, __engine, asm                                       -> their words
 //   9a        a name cannot start with a digit: the `9` starts no name
 //             token here (no numbers declared): ?, then name `a`
+// The table holds the Unicode name automaton, so it is read from the lexer
+// cache (the same table as `build_table`, tests/conformance/lex/lex_cache).
 use Pilot.Core.Lex.Patterns;
 use Pilot.Core.Lex.Names;
 use pilot.lex.build;
+use pilot.lex.cache;
 
 fn main() {
     var decls = name_tokens();
     decls.push(token("space", lit(" ").some()));
-    let built = build_table(decls);
+    let built = build_table_cached(decls, LEX_CACHE_DIR);
     print(built.ok());
     let src = "fn fnord _x9 struct2 if __engine asm 9a";
     for l in lex_all(built.table, src) {

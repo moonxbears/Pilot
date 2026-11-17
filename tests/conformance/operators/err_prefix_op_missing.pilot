@@ -1,0 +1,12 @@
+// `-p` on a struct calls its prefix `op -_` (PROP-022 slice 22A). `P`
+// declares none, so the use is METH001; a struct is never negated by the
+// machine op.
+struct P : IValue {
+    pub v: i64;
+}
+
+fn main() {
+    let p = P { v: 1 };
+    let q = -p;
+    print(q.v);
+}

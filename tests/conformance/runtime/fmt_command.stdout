@@ -1,0 +1,40 @@
+// sum of squares
+fn sq(x: i64) -> i64 {
+    return x * x;
+}
+fn main() {
+    let xs = [1, 2, 3];
+    var t = 0;
+    for x in xs {
+        t = t + sq(x);
+    }
+    // add
+    if t > 10 && !done {
+        print(t);
+    } else {
+        print(0);
+    }
+}
+
+0
+true
+0
+tests/tool_fixtures/fmt/messy.pilot is not formatted
+
+1
+true
+0
+true
+fn f(a: opt<i64>, b: res<i64, E>) -> i64 => sig g(a) + h(splat(xs));
+
+fn f(a: i64?, b: i64 ! E) -> i64 => g!^(a) + h(*xs);
+
+let s = f"a {x+1} b";
+/* keep */ let y = 1;
+
+LEX006: `(` at byte 4 is never closed of tests/tool_fixtures/fmt/unbalanced.pilot
+LEX006: `{` at byte 6 is never closed of tests/tool_fixtures/fmt/unbalanced.pilot
+
+1
+2
+2

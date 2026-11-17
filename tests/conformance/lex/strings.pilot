@@ -12,8 +12,10 @@
 //   'c'                                          string 3
 //   r"d"          prefix r                       raw_string 4
 //   b"e"          prefix b                       byte_string 4
-//   """f""g"""    `""g` does not close it        string 10
-//   '''h'''                                      string 7
+//   """f""g"""    `""g` does not close it        string_triple 10
+//   '''h'''                                      string_triple 7
+// (the seed reads a triple-quoted string as a kind of its own, so it is a
+// family of its own)
 use Pilot.Core.Lex.Patterns;
 use Pilot.Core.Lex.Strings;
 use pilot.lex.build;

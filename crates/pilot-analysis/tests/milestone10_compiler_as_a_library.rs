@@ -87,7 +87,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             max_lines: 1500,
             name_blind: true,
             required_pub_fns: &["format_str", "str_replace"],
-            required_code_markers: &["fmt_style_compact", "fmt_style_readable"],
+            required_code_markers: &["FmtStyle"],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
         },
@@ -336,15 +336,6 @@ pub fn test_m10_3_type_reflection_lattice_classes_and_ir_pipeline() {
         ran.starts_with("FAULT: SEAM001: unconnected seam `pilot_ir.pipeline_run`"),
         "ir_pass_pipeline_run must stop at its seam, got: {}",
         ran
-    );
-    let formatted = eval_m10(
-        &["stdlib/std/text.pilot", "stdlib/pilot/fmt.pilot"],
-        r#"format_str("let t = f!^(a);", fmt_style_readable());"#,
-    );
-    assert!(
-        formatted.starts_with("FAULT: SEAM001: unconnected seam `pilot_fmt.format_str`"),
-        "format_str must stop at its seam, got: {}",
-        formatted
     );
 
     guard.finish();

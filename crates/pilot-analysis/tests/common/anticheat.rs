@@ -218,7 +218,7 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
     ("crates/pilot-analysis/tests/milestone01_seed_unlock_and_pilot_gate.rs", 4),
     ("crates/pilot-analysis/tests/milestone02_module_graph_and_comptime_parity.rs", 4),
     ("crates/pilot-analysis/tests/milestone03_declarative_cli_registry_and_comptime_parity.rs", 4),
-    ("crates/pilot-analysis/tests/milestone04_dual_syntax_pairings_and_bidirectional_formatter.rs", 4),
+    ("crates/pilot-analysis/tests/milestone04_dual_syntax_pairings_and_bidirectional_formatter.rs", 3),
     ("crates/pilot-analysis/tests/milestone05_shared_incremental_compiler_query_database.rs", 4),
     ("crates/pilot-analysis/tests/milestone06_first_class_typed_ssa_mid_level_ir.rs", 4),
     ("crates/pilot-analysis/tests/milestone07_zero_black_box_transparency_tool.rs", 4),

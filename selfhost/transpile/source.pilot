@@ -43,6 +43,10 @@ pub interface ISourceDialect {
     /// Identifiers a function may not be named: keywords, the native entry
     /// point and the dialect's own helpers.
     fn reserved() -> List<str>;
+    /// Put before every program function's name, so that no name a program
+    /// gives a function can be one the target's headers declare ("" for
+    /// none; a dialect with a prefix needs no `reserved()` list).
+    fn function_prefix() -> str => "";
     /// The type of values of physics `p`, or none when the language has no
     /// representation for them here (a dynamic language answers "").
     fn type_name(p: IrTypePhysics) -> str?;
@@ -449,9 +453,10 @@ fn looks_generated(name: str) -> bool {
     return true;
 }
 
-/// Each function's name in the target: its PilIR name as an identifier,
-/// moved aside (`_` appended) when it is reserved or looks like a local,
-/// then numbered when two would be the same. Function 0 is the start.
+/// Each function's name in the target: the dialect's `function_prefix()`
+/// and its PilIR name as an identifier, moved aside (`_` appended) when it
+/// is reserved or looks like a local, then numbered when two would be the
+/// same. Function 0 is the start.
 fn function_names(ref m: IrModule, d: ISourceDialect) -> List<str> {
     let reserved = Map<str, bool>();
     for r in d.reserved() { reserved.set(r, true); }
@@ -462,6 +467,7 @@ fn function_names(ref m: IrModule, d: ISourceDialect) -> List<str> {
     while i < m.functions.len() {
         var name = if i == 0 { helper_prefix() + "start" } else { identifier(m.functions[i].name) };
         if i > 0 && (reserved.has(name) || looks_generated(name) || name.starts_with(helper_prefix())) { name = name + "_"; }
+        if i > 0 { name = d.function_prefix() + name; }
         if taken.has(name) { name = f"{name}_{i}"; }
         taken.set(name, true);
         out.push(name);

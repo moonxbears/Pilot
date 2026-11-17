@@ -1,0 +1,49 @@
+// A struct's prefix operator is its member (PROP-022 slice 22A): `-m` is
+// `m.(-_)()`, `~f` is `f.(~_)()`, `!s` is `s.(!_)()`. `op -_ ()` and the
+// hole-less `op - ()` declare the same member. A primitive's prefix
+// operator stays its machine op. The type of `-g` is the member's return
+// type, which need not be the struct.
+//
+// Expected output, worked by hand:
+//   Money { cents: 5 }:  -m = { 0 - 5 } = { -5 }              -> "-5"
+//                        -(-m) = { 0 - (-5) } = { 5 }          -> "5"
+//   Flags { bits: 5 }:   ~f = { 5 ^ 15 } = { 0b0101 ^ 0b1111 = 0b1010 = 10 }
+//                        (a machine `~` on 5 would give -6)    -> "10"
+//   Switch { on: true }: !s = { !true } = { false }             -> "false"
+//   Gauge { level: 30 }: -g = 100 - 30 = 70 (an i64), + 1 = 71 -> "71"
+//   -5, !true, ~0 on primitives: -5, false, -1               -> "-5 false -1"
+struct Money : IValue {
+    pub cents: i64;
+    pub pure op -_ () -> Money => Money { cents: 0 - self.cents };
+}
+
+struct Flags : IValue {
+    pub bits: i64;
+    pub pure op ~_ () -> Flags => Flags { bits: self.bits ^ 15 };
+}
+
+struct Switch : IValue {
+    pub on: bool;
+    pub pure op ! () -> Switch => Switch { on: !self.on };
+}
+
+struct Gauge : IValue {
+    pub level: i64;
+    pub pure op - () -> i64 => 100 - self.level;
+}
+
+fn main() {
+    let m = Money { cents: 5 };
+    let n = -m;
+    print(n.cents);
+    print((-(-m)).cents);
+    let f = Flags { bits: 5 };
+    print((~f).bits);
+    let s = Switch { on: true };
+    print((!s).on);
+    let g = Gauge { level: 30 };
+    let x = -g;
+    print(x + 1);
+    let k = 5;
+    print(f"{-k} {!true} {~0}");
+}

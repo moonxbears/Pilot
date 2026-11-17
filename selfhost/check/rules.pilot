@@ -83,6 +83,11 @@ pub fn assignable(var ref inf: Infer, src: i64, dst: i64, e: i64) -> bool {
                 if !assignable(inf, unpacked_element(p, type_of(inf, lhs(p.s, item))), elem, -1) { return false; }
                 continue;
             }
+            // `*..x` fits by its leaves.
+            if kind(p.s, item) == nk_unary() && flags(p.s, item) == unary_deep_flatten() {
+                if !assignable(inf, flattened_leaf(p, type_of(inf, lhs(p.s, item))), elem, -1) { return false; }
+                continue;
+            }
             if !assignable(inf, type_of(inf, item), elem, item) { return false; }
         }
         return true;
@@ -1011,21 +1016,18 @@ fn check_unpack(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     }
 }
 
-/// `-x` or `~x` on a struct calls its prefix `op -_` / `op ~_` (PROP-018);
-/// no engine dispatches a prefix `op` other than unpacking yet, so the use
-/// stops at the seam `grammar.prefix_op_call` instead of trapping at run time.
+/// `-x`, `~x` or `!x` on a struct calls its prefix member `op -_` /
+/// `op ~_` / `op !_` (PROP-022 slice 22A); a struct that declares none is
+/// METH001, never run as the machine op. Quoted code is not run.
 fn check_prefix_call(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let operand = lhs(p.s, n);
-    if operand < 0 { return; }
+    if operand < 0 || enclosing_quote(p, n) >= 0 { return; }
     let t = type_of(inf, operand);
-    if !ty_is_named(p.tt, t) { return; }
-    let d = ty_decl(p.tt, t);
-    // A primitive (`[Bits]`) negates natively; quoted code is not run.
-    if d < 0 || kind(p.s, d) != nk_struct() || prog_class(p, t) != "" || enclosing_quote(p, n) >= 0 { return; }
-    let sym = if flags(p.s, n) == unary_neg() { "-" } else { "~" };
-    sink_error(sink, n, "SEAM001",
-        f"unconnected seam `grammar.prefix_op_call`: `{sym}x` on `{ty_display(p.tt, t)}` calls its prefix `op {sym}_`, which no engine dispatches yet (proposals.md PROP-018)");
+    if !is_program_struct(p, t) { return; }
+    if some _m = prefix_member(inf, n) { return; }
+    let name = prefix_member_name(p, flags(p.s, n));
+    sink_error(sink, n, "METH001", f"`{ty_display(p.tt, t)}` declares no prefix `op {name}`");
 }
 
 /// A statement written among the members of a struct, interface or `ext`
@@ -1103,7 +1105,7 @@ pub fn check_rules(var ref inf: Infer, var ref sink: DiagSink) {
             else if k == nk_unary() && (flags(s, i) == unary_splat() || flags(s, i) == unary_double_splat() || flags(s, i) == unary_deep_flatten()) {
                 check_unpack(inf, sink, i);
             }
-            else if k == nk_unary() && (flags(s, i) == unary_neg() || flags(s, i) == unary_bit_not()) {
+            else if is_prefix_operator_use(s, i) && is_program_struct(p, type_of(inf, lhs(s, i))) {
                 check_prefix_call(inf, sink, i);
             }
             else if k == nk_unary() && flags(s, i) == unary_not() && !is_condition_not(p, i) {

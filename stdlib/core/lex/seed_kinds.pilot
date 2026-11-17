@@ -1,0 +1,228 @@
+// =========================================================================
+// FILE: stdlib/core/lex/seed_kinds.pilot
+// THE KIND THE SEED PARSER READS FOR EACH TOKEN FAMILY (PROP-021 slice 21G)
+// =========================================================================
+// The seed parser (crates/pilot-parser) reads a token's kind as a number
+// of crates/pilot-lexer/src/token.rs's `#[repr(u16)] enum TokenKind`, and
+// a few flag bits (`TokenFlags`). When the seed runs the table written from
+// the token declarations (`pilot lex --write-table`, toolchain.lex), each
+// family's number and flags come from this file, so the Rust side receives
+// numbers only, never a Pilot name. A family no entry here names is LEX008
+// when the table is written.
+//
+// The numbers are the seed's (token.rs), copied by hand; they change only
+// with token.rs, which is frozen until PROP-022 replaces `TokenKind`.
+//   - `SEED_FAMILY_KINDS`: a family whose token the seed reads with no flag;
+//   - `SEED_FLAGGED_KINDS`: a family read with flags (a raw, interpolated or
+//     triple-quoted string; a suffixed number);
+//   - `SEED_SKIPPED`: a family the seed never sees (a space that is not a
+//     newline);
+//   - `SEED_INNER`: a family that is only a piece of an f-string. The seed
+//     reads a whole f-string, from its opening to its closing quote, holes
+//     and all, as one token: the opening's.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.SeedKinds;
+
+/// The seed's `TokenFlags` bits that a family decides.
+pub const SEED_IS_RAW_STRING: u8 = 8;
+pub const SEED_IS_INTERPOLATED: u8 = 16;
+pub const SEED_IS_DIMENSIONAL: u8 = 32;
+
+/// The seed's kind for a byte no token starts (`ErrorToken`) and for the
+/// end of the source (`Eof`), which no family is.
+pub const SEED_ERROR_KIND: u16 = 5;
+pub const SEED_EOF_KIND: u16 = 0;
+
+/// What the seed does with a family's token.
+pub enum SeedEmit : u8 {
+    /// One token of the family's kind and flags.
+    Token,
+    /// Nothing: the seed never sees it.
+    Skip,
+    /// Part of the f-string token around it.
+    Inner,
+}
+
+/// A family the seed reads with flags.
+pub struct SeedKind : IValue {
+    pub family: str;
+    pub kind: u16;
+    pub flags: u8;
+}
+
+/// A family the seed reads with no flag.
+pub struct FamilyKind : IValue {
+    pub family: str;
+    pub kind: u16;
+}
+
+pub const SEED_FLAGGED_KINDS: List<SeedKind> = [
+    SeedKind { family: "integer_suffixed", kind: 22, flags: SEED_IS_DIMENSIONAL },
+    SeedKind { family: "hex_integer_suffixed", kind: 23, flags: SEED_IS_DIMENSIONAL },
+    SeedKind { family: "bin_integer_suffixed", kind: 24, flags: SEED_IS_DIMENSIONAL },
+    SeedKind { family: "oct_integer_suffixed", kind: 25, flags: SEED_IS_DIMENSIONAL },
+    SeedKind { family: "float_suffixed", kind: 26, flags: SEED_IS_DIMENSIONAL },
+    SeedKind { family: "raw_string", kind: 27, flags: SEED_IS_RAW_STRING },
+    SeedKind { family: "raw_string_triple", kind: 28, flags: SEED_IS_RAW_STRING },
+    SeedKind { family: "fstring_open", kind: 27, flags: SEED_IS_INTERPOLATED },
+    SeedKind { family: "fstring_open_triple", kind: 28, flags: SEED_IS_INTERPOLATED },
+    SeedKind { family: "fstring_open_raw", kind: 27, flags: SEED_IS_INTERPOLATED | SEED_IS_RAW_STRING },
+    SeedKind { family: "fstring_open_triple_raw", kind: 28, flags: SEED_IS_INTERPOLATED | SEED_IS_RAW_STRING },
+];
+
+pub const SEED_FAMILY_KINDS: List<FamilyKind> = [
+    // Trivia: the seed keeps comments (its parser skips them) and newlines.
+    FamilyKind { family: "newline", kind: 1 },
+    FamilyKind { family: "line_comment", kind: 2 },
+    FamilyKind { family: "directive", kind: 2 },
+    FamilyKind { family: "block_comment", kind: 3 },
+    FamilyKind { family: "shebang", kind: 4 },
+    // Names, literals and the 14 seed words.
+    FamilyKind { family: "name", kind: 20 },
+    FamilyKind { family: "keyword_literal", kind: 21 },
+    FamilyKind { family: "integer", kind: 22 },
+    FamilyKind { family: "hex_integer", kind: 23 },
+    FamilyKind { family: "bin_integer", kind: 24 },
+    FamilyKind { family: "oct_integer", kind: 25 },
+    FamilyKind { family: "float", kind: 26 },
+    FamilyKind { family: "string", kind: 27 },
+    FamilyKind { family: "byte_string", kind: 27 },
+    FamilyKind { family: "string_triple", kind: 28 },
+    FamilyKind { family: "byte_string_triple", kind: 28 },
+    FamilyKind { family: "__engine", kind: 40 },
+    FamilyKind { family: "struct", kind: 41 },
+    FamilyKind { family: "interface", kind: 42 },
+    FamilyKind { family: "fn", kind: 43 },
+    FamilyKind { family: "let", kind: 44 },
+    FamilyKind { family: "ref", kind: 45 },
+    FamilyKind { family: "if", kind: 46 },
+    FamilyKind { family: "loop", kind: 47 },
+    FamilyKind { family: "return", kind: 48 },
+    FamilyKind { family: "yield", kind: 49 },
+    FamilyKind { family: "defer", kind: 50 },
+    FamilyKind { family: "comptime", kind: 51 },
+    FamilyKind { family: "quote", kind: 52 },
+    FamilyKind { family: "asm", kind: 53 },
+    // Delimiters and punctuation.
+    FamilyKind { family: "(", kind: 250 },
+    FamilyKind { family: ")", kind: 251 },
+    FamilyKind { family: "[", kind: 252 },
+    FamilyKind { family: "]", kind: 253 },
+    FamilyKind { family: "{", kind: 254 },
+    FamilyKind { family: "}", kind: 255 },
+    FamilyKind { family: ":", kind: 256 },
+    FamilyKind { family: "::", kind: 257 },
+    FamilyKind { family: ";", kind: 258 },
+    FamilyKind { family: ",", kind: 259 },
+    FamilyKind { family: "infix_dot", kind: 260 },
+    FamilyKind { family: "prefix_dot", kind: 261 },
+    FamilyKind { family: "@", kind: 262 },
+    FamilyKind { family: "$", kind: 263 },
+    FamilyKind { family: "?", kind: 264 },
+    FamilyKind { family: "!", kind: 265 },
+    FamilyKind { family: "~", kind: 266 },
+    // Arithmetic, bitwise and relational operators.
+    FamilyKind { family: "+", kind: 270 },
+    FamilyKind { family: "-", kind: 271 },
+    FamilyKind { family: "*", kind: 272 },
+    FamilyKind { family: "/", kind: 273 },
+    FamilyKind { family: "%", kind: 274 },
+    FamilyKind { family: "**", kind: 275 },
+    FamilyKind { family: "*..", kind: 276 },
+    FamilyKind { family: "&", kind: 278 },
+    FamilyKind { family: "|", kind: 279 },
+    FamilyKind { family: "^", kind: 280 },
+    FamilyKind { family: "<<", kind: 281 },
+    FamilyKind { family: ">>", kind: 282 },
+    FamilyKind { family: "=", kind: 283 },
+    FamilyKind { family: "==", kind: 284 },
+    FamilyKind { family: "!=", kind: 285 },
+    FamilyKind { family: "<", kind: 286 },
+    FamilyKind { family: ">", kind: 287 },
+    FamilyKind { family: "<=", kind: 288 },
+    FamilyKind { family: ">=", kind: 289 },
+    FamilyKind { family: ":=", kind: 290 },
+    FamilyKind { family: "<-", kind: 291 },
+    // Compound assignments.
+    FamilyKind { family: "+=", kind: 300 },
+    FamilyKind { family: "-=", kind: 301 },
+    FamilyKind { family: "*=", kind: 302 },
+    FamilyKind { family: "/=", kind: 303 },
+    FamilyKind { family: "%=", kind: 304 },
+    FamilyKind { family: "**=", kind: 305 },
+    FamilyKind { family: "&=", kind: 307 },
+    FamilyKind { family: "|=", kind: 308 },
+    FamilyKind { family: "^=", kind: 309 },
+    FamilyKind { family: "<<=", kind: 310 },
+    FamilyKind { family: ">>=", kind: 311 },
+    FamilyKind { family: "??=", kind: 312 },
+    // Pipes, navigation and ranges.
+    FamilyKind { family: "|>", kind: 320 },
+    FamilyKind { family: "<|", kind: 321 },
+    FamilyKind { family: "?..", kind: 322 },
+    FamilyKind { family: "?.", kind: 323 },
+    FamilyKind { family: "??", kind: 324 },
+    FamilyKind { family: "->", kind: 325 },
+    FamilyKind { family: "=>", kind: 326 },
+    FamilyKind { family: "->>", kind: 327 },
+    FamilyKind { family: "@>", kind: 328 },
+    FamilyKind { family: "<@", kind: 329 },
+    FamilyKind { family: "..", kind: 330 },
+    FamilyKind { family: "..=", kind: 331 },
+    FamilyKind { family: "..<", kind: 332 },
+    FamilyKind { family: "...", kind: 333 },
+    // Call-quote openers (seed_forms.pilot).
+    FamilyKind { family: "call_quote", kind: 340 },
+    FamilyKind { family: "splice_quote", kind: 341 },
+    FamilyKind { family: "frame_quote", kind: 342 },
+    FamilyKind { family: "sig_quote", kind: 343 },
+    FamilyKind { family: "grad_quote", kind: 344 },
+    FamilyKind { family: "plan_quote", kind: 345 },
+    // Logical, comparison and overflow operators.
+    FamilyKind { family: "&&", kind: 350 },
+    FamilyKind { family: "||", kind: 351 },
+    FamilyKind { family: "<=>", kind: 352 },
+    FamilyKind { family: "+|", kind: 353 },
+    FamilyKind { family: "-|", kind: 354 },
+    FamilyKind { family: "*|", kind: 355 },
+    FamilyKind { family: "+%", kind: 356 },
+    FamilyKind { family: "-%", kind: 357 },
+    FamilyKind { family: "*%", kind: 358 },
+    FamilyKind { family: "+?", kind: 359 },
+    FamilyKind { family: "-?", kind: 360 },
+    FamilyKind { family: "*?", kind: 361 },
+    FamilyKind { family: "%%", kind: 362 },
+    FamilyKind { family: "~>", kind: 363 },
+    FamilyKind { family: ">..<", kind: 364 },
+    FamilyKind { family: ">..", kind: 365 },
+    FamilyKind { family: ":=:", kind: 366 },
+];
+
+pub const SEED_SKIPPED: List<str> = ["space",];
+
+pub const SEED_INNER: List<str> = ["fstring_text", "fstring_quote", "hole_open", "fstring_close",];
+
+/// What the seed reads for one family.
+pub struct SeedEntry : IValue {
+    pub kind: u16;
+    pub flags: u8;
+    pub emit: SeedEmit;
+}
+
+/// The seed's entry for `family`, or none when this file does not name it
+/// (LEX008).
+pub fn seed_kind_of(family: str) -> SeedEntry? {
+    for k in SEED_FLAGGED_KINDS {
+        if k.family == family { return SeedEntry { kind: k.kind, flags: k.flags, emit: SeedEmit::Token }; }
+    }
+    for k in SEED_FAMILY_KINDS {
+        if k.family == family { return SeedEntry { kind: k.kind, flags: 0, emit: SeedEmit::Token }; }
+    }
+    for f in SEED_SKIPPED {
+        if f == family { return SeedEntry { kind: 0, flags: 0, emit: SeedEmit::Skip }; }
+    }
+    for f in SEED_INNER {
+        if f == family { return SeedEntry { kind: 0, flags: 0, emit: SeedEmit::Inner }; }
+    }
+    return none;
+}

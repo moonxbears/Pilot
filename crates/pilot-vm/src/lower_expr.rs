@@ -627,6 +627,12 @@ impl BytecodeCompiler {
                 }
                 self.declared_ret(arena, &format!("{ty}.{sym}"))
             }
+            // A struct's prefix operator gives its member's return type (`-(-m)`).
+            NodeKind::UnaryExpr if matches!(n.flags, UNARY_NEG | UNARY_BIT_NOT | UNARY_NOT) => {
+                let (ty, method) = self.prefix_member(arena, NodeId(n.lhs), n.flags)?;
+                self.structs.contains_key(&ty).then_some(())?;
+                self.declared_ret(arena, &format!("{ty}.{method}"))
+            }
             NodeKind::CallExpr if n.rhs > 0 => {
                 let callee = arena.node(NodeId(*arena.extra_children.get(n.lhs as usize)?));
                 // A method call gives the method's declared return type.
@@ -720,6 +726,15 @@ impl BytecodeCompiler {
     }
 
     fn compile_unary(&mut self, arena: &AstArena, flags: u16, operand: u32) -> u8 {
+        // A struct's prefix operator is its member (PROP-022 slice 22A).
+        if matches!(flags, UNARY_NEG | UNARY_BIT_NOT | UNARY_NOT) {
+            if let Some((ty, method)) = self.prefix_member(arena, NodeId(operand), flags) {
+                if self.structs.contains_key(&ty) {
+                    let r = self.compile_node(arena, NodeId(operand));
+                    return self.emit_method_call(arena, r, &ty, &method, &[]);
+                }
+            }
+        }
         let opcode = match flags {
             UNARY_IDENTITY => return self.compile_node(arena, NodeId(operand)),
             UNARY_NEG => Opcode::Neg,
@@ -768,16 +783,21 @@ impl BytecodeCompiler {
         op_flag: u16,
     ) -> u8 {
         let r = self.compile_node(arena, id);
-        let tables = pilot_parser::bootstrap_tables();
-        let method = tables
-            .native_member("unpack_op", &op_flag.to_string())
-            .map(str::to_string);
-        if let (Some(ty), Some(method)) = (self.static_type(arena, id), method) {
-            if self.declares(&ty, &method).is_some() {
-                return self.emit_method_call(arena, r, &ty, &method, &[]);
-            }
+        if let Some((ty, method)) = self.prefix_member(arena, id, op_flag) {
+            return self.emit_method_call(arena, r, &ty, &method, &[]);
         }
         r
+    }
+
+    /// The static type of `id` and the member its prefix operator `flag`
+    /// calls, when Pilot's `prefix_op` table names one that type declares.
+    fn prefix_member(&self, arena: &AstArena, id: NodeId, flag: u16) -> Option<(String, String)> {
+        let tables = pilot_parser::bootstrap_tables();
+        let method = tables.native_member("prefix_op", &flag.to_string())?;
+        let ty = self.static_type(arena, id)?;
+        self.declares(&ty, method)
+            .is_some()
+            .then(|| (ty, method.to_string()))
     }
 
     pub(crate) fn compile_map_literal(&mut self, arena: &AstArena, lhs: u32, rhs: u32) -> u8 {

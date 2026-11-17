@@ -1,0 +1,205 @@
+// =========================================================================
+// FILE: tools/unicode_xid/main.pilot
+// GENERATES stdlib/core/lex/unicode_xid.pilot FROM UNICODE'S DATA
+// =========================================================================
+// Reads Unicode's DerivedCoreProperties.txt and prints the Pilot source of
+// stdlib/core/lex/unicode_xid.pilot: the non-ASCII code points of
+// XID_Start, and those of XID_Continue that are not XID_Start (UAX #31),
+// as sorted, merged, inclusive ranges. Names are made of them (PROP-021
+// §2.8, owner decision 2026-11-16: Unicode XID).
+//
+//   pilot run tools/unicode_xid/main.pilot -- /usr/share/unicode/DerivedCoreProperties.txt \
+//       > stdlib/core/lex/unicode_xid.pilot
+//
+// The data is Unicode's, not computed here: a line `0041..005A ; XID_Start`
+// adds a range. Exit 2 when the file is missing or has no XID_Start line.
+use std.env;
+use Pilot.Core.File;
+
+/// One inclusive code point range.
+struct CodeRange : IValue {
+    lo: i64;
+    hi: i64;
+}
+
+/// The ranges per line of the output.
+const PER_LINE: i64 = 4;
+
+/// The first code point that is not ASCII.
+const FIRST_NON_ASCII: i64 = 128;
+
+/// The hex digits, by value.
+const HEX_DIGITS: str = "0123456789ABCDEF";
+
+/// The value of hex text `t` (upper or lower case); -1 when it is not hex.
+fn hex_value(t: str) -> i64 {
+    if t.len() == 0 { return -1; }
+    var v = 0;
+    var i = 0;
+    while i < t.len() as i64 {
+        var b = t.byte_at(i) as i64;
+        // A lower-case letter as its upper-case one.
+        if b >= 97 && b <= 102 { b = b - 32; }
+        var d = 0;
+        while d < 16 && HEX_DIGITS.byte_at(d) as i64 != b { d = d + 1; }
+        if d == 16 { return -1; }
+        v = v * 16 + d;
+        i = i + 1;
+    }
+    return v;
+}
+
+/// The ranges of property `prop` in the file text `text`, non-ASCII part,
+/// sorted and merged.
+fn ranges_of(text: str, prop: str) -> List<CodeRange> {
+    var found: List<CodeRange> = [];
+    var at = 0;
+    let n = text.len() as i64;
+    while at < n {
+        var end = text.find("\n", at);
+        if end < 0 { end = n; }
+        var line = text.slice(at, end);
+        at = end + 1;
+        let hash = line.find("#", 0);
+        if hash >= 0 { line = line.slice(0, hash); }
+        let semi = line.find(";", 0);
+        if semi < 0 { continue; }
+        let field = line.slice(semi + 1, line.len() as i64).trim();
+        if field != prop { continue; }
+        let cps = line.slice(0, semi).trim();
+        let dots = cps.find("..", 0);
+        let lo = hex_value(if dots >= 0 { cps.slice(0, dots) } else { cps });
+        let hi = hex_value(if dots >= 0 { cps.slice(dots + 2, cps.len() as i64) } else { cps });
+        if lo < 0 || hi < lo { continue; }
+        if hi < FIRST_NON_ASCII { continue; }
+        found.push(CodeRange { lo: if lo < FIRST_NON_ASCII { FIRST_NON_ASCII } else { lo }, hi: hi });
+    }
+    return merged(sorted(found));
+}
+
+/// `rs` sorted by their low ends (insertion sort: the file is nearly sorted).
+fn sorted(rs: List<CodeRange>) -> List<CodeRange> {
+    var out = rs;
+    var i = 1;
+    while i < out.len() as i64 {
+        let cur = out[i];
+        var j = i - 1;
+        while j >= 0 && out[j].lo > cur.lo {
+            out[j + 1] = out[j];
+            j = j - 1;
+        }
+        out[j + 1] = cur;
+        i = i + 1;
+    }
+    return out;
+}
+
+/// Sorted `rs` with touching and overlapping ranges joined.
+fn merged(rs: List<CodeRange>) -> List<CodeRange> {
+    var out: List<CodeRange> = [];
+    for r in rs {
+        let last = out.len() as i64 - 1;
+        if last >= 0 && r.lo <= out[last].hi + 1 {
+            if r.hi > out[last].hi { out[last] = CodeRange { lo: out[last].lo, hi: r.hi }; }
+        } else {
+            out.push(r);
+        }
+    }
+    return out;
+}
+
+/// The code points of `a` that are in no range of `b` (both sorted, merged).
+fn minus(ref a: List<CodeRange>, ref b: List<CodeRange>) -> List<CodeRange> {
+    var out: List<CodeRange> = [];
+    var j = 0;
+    for r in a {
+        var lo = r.lo;
+        while j < b.len() as i64 && b[j].hi < lo { j = j + 1; }
+        var k = j;
+        while k < b.len() as i64 && b[k].lo <= r.hi && lo <= r.hi {
+            if b[k].lo > lo { out.push(CodeRange { lo: lo, hi: b[k].lo - 1 }); }
+            lo = b[k].hi + 1;
+            k = k + 1;
+        }
+        if lo <= r.hi { out.push(CodeRange { lo: lo, hi: r.hi }); }
+    }
+    return out;
+}
+
+/// `v` as `0x` and at least four upper-case hex digits.
+fn hex_text(v: i64) -> str {
+    var digits = "";
+    var rest = v;
+    while rest > 0 {
+        let d = rest % 16;
+        digits = HEX_DIGITS.slice(d, d + 1) + digits;
+        rest = rest / 16;
+    }
+    while digits.len() < 4 { digits = "0" + digits; }
+    return "0x" + digits;
+}
+
+/// The Unicode version named on the file's first line
+/// (`# DerivedCoreProperties-15.1.0.txt`), or "".
+fn version_of(text: str) -> str {
+    let mark = "DerivedCoreProperties-";
+    let at = text.find(mark, 0);
+    if at < 0 { return ""; }
+    let from = at + mark.len() as i64;
+    let end = text.find(".txt", from);
+    return if end < 0 { "" } else { text.slice(from, end) };
+}
+
+/// The declaration of const `name` holding `rs` as lo, hi pairs.
+fn const_text(name: str, doc: str, ref rs: List<CodeRange>) -> str {
+    var out = f"/// {doc}\n/// {rs.len()} ranges, as `lo, hi` pairs.\npub const {name}: List<i64> = [\n";
+    var i = 0;
+    while i < rs.len() as i64 {
+        var line = "   ";
+        var k = 0;
+        while k < PER_LINE && i < rs.len() as i64 {
+            line = line + " " + hex_text(rs[i].lo) + ", " + hex_text(rs[i].hi) + ",";
+            k = k + 1;
+            i = i + 1;
+        }
+        out = out + line + "\n";
+    }
+    return out + "];\n";
+}
+
+fn main() -> i64 {
+    let args = env.args();
+    if args.len() < 1 || !File.exists(args[0]) {
+        eprint("usage: pilot run tools/unicode_xid/main.pilot -- <DerivedCoreProperties.txt>");
+        return 2;
+    }
+    let text = File.read_text(args[0]);
+    let start = ranges_of(text, "XID_Start");
+    if start.len() == 0 {
+        eprint(f"error: no XID_Start line in `{args[0]}`");
+        return 2;
+    }
+    let cont = minus(ranges_of(text, "XID_Continue"), start);
+    let version = version_of(text);
+    var out = "";
+    out = out + "// =========================================================================\n";
+    out = out + "// FILE: stdlib/core/lex/unicode_xid.pilot\n";
+    out = out + "// THE LETTERS OF NAMES BEYOND ASCII (UNICODE UAX #31 XID), GENERATED\n";
+    out = out + "// =========================================================================\n";
+    out = out + f"// Generated from Unicode {version} DerivedCoreProperties.txt by\n";
+    out = out + "// tools/unicode_xid/main.pilot; do not edit by hand, regenerate:\n";
+    out = out + "//   pilot run tools/unicode_xid/main.pilot -- <DerivedCoreProperties.txt> \\\n";
+    out = out + "//       > stdlib/core/lex/unicode_xid.pilot\n";
+    out = out + "// A name starts with an XID_Start letter or `_` and goes on with\n";
+    out = out + "// XID_Continue ones (PROP-021 §2.8; stdlib/core/lex/names.pilot). The\n";
+    out = out + "// ASCII part is written in names.pilot; these are the code points from\n";
+    out = out + "// U+0080 on, as sorted, merged, inclusive ranges.\n";
+    out = out + "[EnforceCoreNaming]\n";
+    out = out + "pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.UnicodeXid;\n\n";
+    out = out + "/// The Unicode version the ranges come from.\n";
+    out = out + f"pub const UNICODE_VERSION: str = \"{version}\";\n\n";
+    out = out + const_text("XID_START_RANGES", "The non-ASCII code points that may start a name (XID_Start).", start) + "\n";
+    out = out + const_text("XID_CONTINUE_ONLY_RANGES", "The non-ASCII code points that may continue a name but not start it (XID_Continue, not XID_Start).", cont);
+    print(out);
+    return 0;
+}

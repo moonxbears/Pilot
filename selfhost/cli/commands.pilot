@@ -42,6 +42,7 @@ pub fn cli_gate_files() -> List<str> => [
     "selfhost/gate/ledger/wiring.pilot",
     "selfhost/gate/seam_gate.pilot",
     "selfhost/gate/keyword_gate.pilot",
+    "selfhost/gate/lex_table_gate.pilot",
     "selfhost/gate/runner.pilot",
 ];
 
@@ -403,6 +404,7 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/passes.pilot",
         "selfhost/ir/pass_fold.pilot",
         "selfhost/ir/pass_dce.pilot",
+        "selfhost/ir/pass_mem2reg.pilot",
         "selfhost/ir/pass_const_eval.pilot",
         "selfhost/ir/pass_inline.pilot",
         "selfhost/ir/text.pilot",
@@ -461,9 +463,9 @@ fn cli_lex_files() -> List<str> {
     var files = cli_checker_files();
     for f in [
         "stdlib/core/os_abi.pilot", "stdlib/core/host_raw.pilot", "stdlib/core/file.pilot", "stdlib/core/generator.pilot",
-        "stdlib/core/lex/names.pilot",
+        "stdlib/core/lex/unicode_xid.pilot", "stdlib/core/lex/names.pilot",
         "stdlib/core/lex/trivia.pilot", "stdlib/core/lex/strings.pilot", "stdlib/core/lex/delimiters.pilot",
-        "stdlib/core/lex/operators.pilot", "stdlib/core/lex/lexicon.pilot", "stdlib/pilot/lex/modes.pilot",
+        "stdlib/core/lex/operators.pilot", "stdlib/core/lex/seed_forms.pilot", "stdlib/core/lex/lexicon.pilot", "stdlib/pilot/lex/modes.pilot",
         "stdlib/core/packed.pilot", "stdlib/pilot/lex.pilot",
         "stdlib/core/env.pilot", "stdlib/core/derive.pilot", "stdlib/std/text.pilot", "stdlib/pilot/lex/cache.pilot",
         "selfhost/lex/lex_tool.pilot",
@@ -471,17 +473,50 @@ fn cli_lex_files() -> List<str> {
     return files;
 }
 
+/// The file `pilot lex --write-table` / `--check-table` is run over: it
+/// declares no operator, so the operators are the standard library's.
+const SEED_TABLE_SUBJECT: str = "stdlib/core/lex/seed_kinds.pilot";
+
 /// `pilot lex <file>`: the file's tokens, lexed by the table built from the
 /// token declarations (selfhost/lex/lex_tool.pilot, PROP-021).
+/// `--write-table` writes the table the seed runs and `--check-table`
+/// checks it (selfhost/lex/seed_table.pilot).
 pub fn cmd_lex(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     let paths = cli_positionals(p);
-    if paths.len() != 1 { return usage_error("usage: pilot lex <file>"); }
-    if !File.exists(paths[0]) { return usage_error(f"no such file `{paths[0]}`"); }
+    let write = parsed_has_flag(p, "write-table");
+    let table = write || parsed_has_flag(p, "check-table");
+    if paths.len() != (if table { 0 } else { 1 }) { return usage_error("usage: pilot lex <file> | --write-table | --check-table"); }
+    let subject = if table { SEED_TABLE_SUBJECT } else { paths[0] };
+    if !File.exists(subject) { return usage_error(f"no such file `{subject}`"); }
     // The declarations, and the operators declared by attribute on `syntax`
     // rules (stdlib/core/operators/), whose symbols are tokens too.
     var decls = cli_checker_decls();
     decls.push("stdlib/core/operators");
-    return host_program_tool(paths[0], cli_lex_files(), decls, f"lex_main({pilot_string_literal(paths[0])});");
+    var files = cli_lex_files();
+    if table {
+        files.push("stdlib/core/lex/seed_kinds.pilot");
+        files.push("stdlib/pilot/lex/seed.pilot");
+        files.push("selfhost/lex/seed_table.pilot");
+        return host_program_tool(subject, files, decls, f"seed_table_main({write});");
+    }
+    return host_program_tool(subject, files, decls, f"lex_main({pilot_string_literal(subject)});");
+}
+
+/// `pilot fmt <file>`: the file laid out as canonical Pilot, from its
+/// token tape (selfhost/fmt/fmt.pilot); `--check` and `--write` as listed.
+pub fn cmd_fmt(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
+    let paths = cli_positionals(p);
+    if paths.len() != 1 { return usage_error("usage: pilot fmt <file> [--check | --write] [--style preserve|readable|compact]"); }
+    if !File.exists(paths[0]) { return usage_error(f"no such file `{paths[0]}`"); }
+    var files = cli_lex_files();
+    files.push("stdlib/pilot/fmt.pilot");
+    files.push("selfhost/fmt/fmt.pilot");
+    var decls = cli_checker_decls();
+    decls.push("stdlib/core/operators");
+    let style = pilot_string_literal(parsed_get_str(p, "style", "preserve"));
+    let check = if parsed_has_flag(p, "check") { "true" } else { "false" };
+    let write = if parsed_has_flag(p, "write") { "true" } else { "false" };
+    return host_program_tool(paths[0], files, decls, f"fmt_main({pilot_string_literal(paths[0])}, {style}, {check}, {write});");
 }
 
 /// The handler of every command that has one, by command name.
@@ -500,5 +535,6 @@ pub fn cli_handlers() -> Map<str, (ParsedArgs, CommandRegistry) => i64> {
     h.set("build", cmd_build);
     h.set("ir", cmd_ir);
     h.set("lex", cmd_lex);
+    h.set("fmt", cmd_fmt);
     return h;
 }

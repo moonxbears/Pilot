@@ -1,0 +1,68 @@
+// ==============================================================================
+// FILE: stdlib/pilot/lex/seed.pilot
+// Ring 3: a built lexer as the table the seed lexer runs (pub pkg
+// pilot.lex.seed;) — PROP-021 §3.1
+// ==============================================================================
+// A built lexer is written in the lexer cache's format (cache.pilot), with
+// a short key (the hash of its declarations), then what the seed reads for
+// each family (stdlib/core/lex/seed_kinds.pilot):
+//   seed_special <the end-of-source kind> <the kind of a byte no token starts>
+//   seed_kinds <3 x families> then per family, numbered across the lexer:
+//     its kind, its flags, and 0 (a token), 1 (skipped) or 2 (a piece of
+//     an f-string, part of the opening's token)
+// The seed receives numbers only, never a Pilot name. A family
+// seed_kinds.pilot does not name is LEX008, and no text is given.
+pub pkg pilot.lex.seed;
+
+use Pilot.Core.Lex.SeedKinds;
+use core.derive;
+use std.text;
+use pilot.lex.build;
+use pilot.lex.modes;
+use pilot.lex.cache;
+
+/// The seed emissions in a fixed order, written by position.
+pub const SEED_EMITS: List<SeedEmit> = [SeedEmit::Token, SeedEmit::Skip, SeedEmit::Inner,];
+
+fn emit_index(e: SeedEmit) -> i64 {
+    var i = 0;
+    while i < SEED_EMITS.len() {
+        if SEED_EMITS[i] == e { return i as i64; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+/// The short key a seed table is written with: the hash of the full key
+/// (`modes_key`), which holds every declaration and the builder's hash.
+pub fn seed_table_key(full_key: str) -> str => f"declarations {hex64(string_hash(full_key))}\n";
+
+/// The text of the seed table for `m`, built from the declarations
+/// `full_key`; a family with no seed kind is pushed to `errors` as LEX008.
+pub fn seed_table_text(ref m: ModalLexer, full_key: str, var ref errors: List<LexBuildError>) -> str {
+    var kinds: List<i64> = [];
+    var fam = 0;
+    while fam < m.families() {
+        let name = m.family_name(fam);
+        if some e = seed_kind_of(name) {
+            kinds.push(e.kind as i64);
+            kinds.push(e.flags as i64);
+            kinds.push(emit_index(e.emit));
+        } else {
+            var listed = false;
+            for x in errors {
+                if x.message.contains(f"`{name}`") { listed = true; }
+            }
+            if !listed {
+                errors.push(LexBuildError { code: "LEX008", message: f"the token family `{name}` has no kind the seed parser reads; add it to stdlib/core/lex/seed_kinds.pilot" });
+            }
+        }
+        fam = fam + 1;
+    }
+    if errors.len() > 0 { return ""; }
+    var b = text.string_builder_new();
+    b.append(lexer_text(m, seed_table_key(full_key)));
+    b.append(f"seed_special {SEED_EOF_KIND} {SEED_ERROR_KIND}\n");
+    b.append(ints_line("seed_kinds", kinds));
+    return b.to_string();
+}

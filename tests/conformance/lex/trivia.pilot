@@ -17,15 +17,18 @@
 //   z                 name 1
 //   " "               space 1
 //   "/**/"            block_comment 4
+// The table holds the Unicode name automaton, so it is read from the lexer
+// cache (the same table as `build_table`, tests/conformance/lex/lex_cache).
 use Pilot.Core.Lex.Patterns;
 use Pilot.Core.Lex.Names;
 use Pilot.Core.Lex.Trivia;
 use pilot.lex.build;
+use pilot.lex.cache;
 
 fn main() {
     var decls = trivia_tokens();
     decls.push(token("name", name_pattern()));
-    let built = build_table(decls);
+    let built = build_table_cached(decls, LEX_CACHE_DIR);
     print(built.ok());
     let src = "x // a b\n#d e\n/* p * / **/y\t\r z /**/";
     for l in lex_all(built.table, src) {

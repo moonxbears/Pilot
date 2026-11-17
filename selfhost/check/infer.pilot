@@ -65,6 +65,49 @@ pub pure fn op_pairs() -> str => "**_";
 pub pure fn op_flatten() -> str => "*.._";
 pub pure fn op_index() -> str => "[]";
 
+/// The table that names the member each prefix operator calls, by its unary
+/// flag (`bind_native_member("prefix_op", "0", "-_")`,
+/// stdlib/core/builtins/native_calls.pilot); the engines read the same one.
+pub const PREFIX_OP_TABLE: str = "prefix_op";
+
+/// The member the prefix operator of unary flag `flag` calls, or "".
+pub fn prefix_member_name(var ref p: Program, flag: i64) -> str {
+    let key = f"{flag}";
+    for row in prog_engine_bindings(p) {
+        if row.len() == 4 && row[0] == "bind_native_member" && row[1] == PREFIX_OP_TABLE && row[2] == key { return row[3]; }
+    }
+    return "";
+}
+
+/// Whether `t` is a struct the program declares (not a `[Bits]` primitive),
+/// whose prefix operators are its members (PROP-022 slice 22A).
+pub fn is_program_struct(var ref p: Program, t: i64) -> bool {
+    if !ty_is_named(p.tt, t) { return false; }
+    let d = ty_decl(p.tt, t);
+    return d >= 0 && kind(p.s, d) == nk_struct() && prog_class(p, t) == "";
+}
+
+/// Whether unary node `n` is `-x`, `~x` or `!x` (the unpack sigils have
+/// their own rules: check_unpack, list and map literals).
+pub fn is_prefix_operator_use(ref s: Snap, n: i64) -> bool {
+    let f = flags(s, n);
+    return kind(s, n) == nk_unary() && (f == unary_neg() || f == unary_bit_not() || f == unary_not());
+}
+
+/// The member prefix-operator use `n` (`-x`, `~x`, `!x`) calls: none when
+/// the operand is not a program struct or declares no such member.
+pub fn prefix_member(var ref inf: Infer, n: i64) -> Member? {
+    let p = inf.p;
+    if !is_prefix_operator_use(p.s, n) { return none; }
+    let operand = lhs(p.s, n);
+    if operand < 0 { return none; }
+    let t = type_of(inf, operand);
+    if !is_program_struct(p, t) { return none; }
+    let name = prefix_member_name(p, flags(p.s, n));
+    if name == "" { return none; }
+    return prog_member(p, t, name);
+}
+
 /// The value `t` holds once unwrapped by its `op ?`, or unknown.
 pub fn unwrap_type(var ref p: Program, t: i64) -> i64 {
     if some m = prog_member(p, t, op_unwrap()) { return prog_member_type(p, m); }
@@ -149,6 +192,23 @@ pub fn unpacked_element(var ref p: Program, t: i64) -> i64 {
     return element_type(p, t);
 }
 
+/// The leaf type `*..x` gives for an `x` of type `t`: the elements of what
+/// its prefix `op *.. ()` returns (or of `t`), with every list among them
+/// opened in turn, as the engine's deep `list_extend` opens nested lists.
+pub fn flattened_leaf(var ref p: Program, t: i64) -> i64 {
+    var from = t;
+    if some m = prog_member(p, t, op_flatten()) { from = prog_member_type(p, m); }
+    var leaf = element_type(p, from);
+    let lt = prog_slot_type(p, list_slot());
+    if !ty_is_named(p.tt, lt) { return leaf; }
+    var depth = 0;
+    while depth < 64 && ty_is_named(p.tt, leaf) && ty_decl(p.tt, leaf) == ty_decl(p.tt, lt) {
+        leaf = element_type(p, leaf);
+        depth = depth + 1;
+    }
+    return leaf;
+}
+
 /// The element type of the iterable expression `e`.
 fn iterated_type(var ref inf: Infer, e: i64) -> i64 {
     let s = inf.p.s;
@@ -196,9 +256,16 @@ fn list_type(var ref inf: Infer, n: i64) -> i64 {
     var elem = ty_unknown();
     var first = true;
     for c in children(p.s, n) {
-        // `*x` among the items gives the elements of what it unpacks.
-        let spread = kind(p.s, c) == nk_unary() && flags(p.s, c) == unary_splat();
-        let t = if spread { unpacked_element(p, type_of(inf, lhs(p.s, c))) } else { type_of(inf, c) };
+        // `*x` among the items gives the elements of what it unpacks, and
+        // `*..x` the leaves.
+        let unpack = if kind(p.s, c) == nk_unary() { flags(p.s, c) } else { -1 };
+        let t = if unpack == unary_splat() {
+            unpacked_element(p, type_of(inf, lhs(p.s, c)))
+        } else if unpack == unary_deep_flatten() {
+            flattened_leaf(p, type_of(inf, lhs(p.s, c)))
+        } else {
+            type_of(inf, c)
+        };
         elem = if first { t } else { agree(p, elem, t) };
         first = false;
     }
@@ -647,6 +714,7 @@ fn compute(var ref inf: Infer, n: i64) -> i64 {
     if k == nk_binary() { return binary_type(inf, n); }
     if k == nk_unary() {
         if flags(s, n) == unary_some() { return prog_slot_type(p, literal_slot(nk_bool())); }
+        if some m = prefix_member(inf, n) { return prog_member_type(p, m); }
         return type_of(inf, lhs(s, n));
     }
     if k == nk_try_propagate() || k == nk_catch_recovery() {

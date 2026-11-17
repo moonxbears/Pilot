@@ -1,0 +1,271 @@
+// ==============================================================================
+// FILE: selfhost/ir/pass_mem2reg.pilot
+// F5: promoting stack slots to values on PilIR.
+// ==============================================================================
+// The lowering keeps every local variable in a `stack_slot`, read with
+// `load` and written with `store`. A slot whose address is used for nothing
+// else (it is never passed, stored or returned) holds just the value last
+// stored on each path, so its loads become that value and its stores and
+// the slot go away (the classic SSA construction of Cytron et al., 1991,
+// with block parameters in place of phi nodes):
+//   - a block needs a parameter for a slot where two paths with different
+//     stores meet: the iterated dominance frontier of the blocks that store
+//     to it (dominance frontiers as in Cooper, Harvey and Kennedy, "A Simple,
+//     Fast Dominance Algorithm", 2001);
+//   - in reverse postorder each block starts from its parameter, or else
+//     from what its immediate dominator ended with; a load is the current
+//     value, a store sets it, and each jump passes the current values to the
+//     parameters of the block it goes to;
+//   - before any store a slot holds `undef`, placed at the start of the
+//     entry block (dead-code elimination removes the unused ones).
+// A slot is left as it is when it would need a parameter on the entry block
+// (whose parameters are the function's) or on a `switch_table` target (a
+// table passes no arguments). A function with code in a block no path
+// reaches is left for dead-code elimination to empty first; the pass driver
+// runs the passes again after it.
+pub lvl(0) pkg selfhost.ir;
+
+
+pub struct Mem2RegPass : IPilIrPass {
+    pub fn name() -> str => "mem2reg";
+    pub fn run(f: IrFunction, m: IrModule) -> bool => promote_slots(f);
+}
+
+/// `count` lists, each empty.
+fn empty_lists(count: i64) -> List<List<i64>> {
+    var out: List<List<i64>> = [];
+    var i = 0;
+    while i < count {
+        out.push([]);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// `count` copies of `v`.
+fn filled_ints(count: i64, v: i64) -> List<i64> {
+    var out: List<i64> = [];
+    var i = 0;
+    while i < count {
+        out.push(v);
+        i = i + 1;
+    }
+    return out;
+}
+
+fn filled_bools(count: i64, v: bool) -> List<bool> {
+    var out: List<bool> = [];
+    var i = 0;
+    while i < count {
+        out.push(v);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// `inst` with the operands `args`, written at the end of the operand pool.
+fn with_args(var ref f: IrFunction, inst: IrInst, ref args: List<u32>) -> IrInst {
+    let offset = f.operand_pool.len;
+    for a in args { f.operand_pool.push(a); }
+    return ir_inst_new(inst.result, inst.opcode, inst.subop, inst.physics, offset, ir_operand(args.len()), inst.span_id);
+}
+
+/// The dominance frontier of each block reachable in `order` (blocks with
+/// their `preds` and `idom` filled).
+fn dominance_frontiers(ref f: IrFunction, ref order: List<u32>, ref reachable: List<bool>) -> List<List<i64>> {
+    var df = empty_lists(f.blocks.len() as i64);
+    for b in order {
+        let preds = f.blocks[b].preds;
+        if preds.len() < 2 { continue; }
+        let up = f.blocks[b].idom;
+        for p in preds {
+            if !reachable[p] { continue; }
+            var r = p;
+            while r != up {
+                var listed = false;
+                for x in df[r] {
+                    if x == b as i64 { listed = true; }
+                }
+                if !listed { df[r].push(b as i64); }
+                if r == f.blocks[r].idom { break; }
+                r = f.blocks[r].idom;
+            }
+        }
+    }
+    return df;
+}
+
+/// Promotes the stack slots of `f` that only `load` and `store` use;
+/// true when it promoted any.
+pub fn promote_slots(var ref f: IrFunction) -> bool {
+    let order = ir_compute_dominators(f);
+    let blocks = f.blocks.len() as i64;
+    var reachable = filled_bools(blocks, false);
+    for b in order { reachable[b] = true; }
+    for b in f.blocks {
+        if reachable[b.id] || b.insts.len == 0 { continue; }
+        if !(b.insts.len == 1 && b.insts[0].opcode == op_unreachable()) { return false; }
+    }
+
+    // The slots: value -> slot number, and each slot's value and physics.
+    var slot_of = filled_ints(f.value_physics.len() as i64, -1);
+    var slots: List<u32> = [];
+    var slot_phy: List<IrTypePhysics> = [];
+    for b in order {
+        for inst in f.blocks[b].insts {
+            if inst.opcode == op_stack_slot() && inst.result != ir_no_value() {
+                slot_of[inst.result] = slots.len() as i64;
+                slots.push(inst.result);
+                slot_phy.push(inst.physics);
+            }
+        }
+    }
+    let count = slots.len() as i64;
+    if count == 0 { return false; }
+
+    // Which slots only loads and stores use, and the blocks storing to each;
+    // which blocks may take no new parameter.
+    var ok = filled_bools(count, true);
+    var stores = empty_lists(count);
+    var fixed = filled_bools(blocks, false);
+    fixed[0] = true;
+    for b in order {
+        for inst in f.blocks[b].insts {
+            let op = inst.opcode;
+            if op == op_switch_table() {
+                for t in ir_successors(f, inst) { fixed[t] = true; }
+            }
+            let a = ir_args(f, inst);
+            for pos in value_positions(f, inst) {
+                let s = slot_of[a[pos]];
+                if s < 0 { continue; }
+                if pos != 0 || (op != op_load() && op != op_store()) {
+                    ok[s] = false;
+                } else if op == op_store() {
+                    stores[s].push(b as i64);
+                }
+            }
+        }
+    }
+
+    // The blocks that need a parameter for each slot: the iterated
+    // dominance frontier of its stores.
+    let df = dominance_frontiers(f, order, reachable);
+    var needs = empty_lists(count);
+    var s = 0;
+    while s < count {
+        if ok[s] {
+            var has = filled_bools(blocks, false);
+            var work: List<i64> = [];
+            for d in stores[s] { work.push(d); }
+            var i = 0;
+            while i < work.len() as i64 && ok[s] {
+                for y in df[work[i]] {
+                    if has[y] { continue; }
+                    has[y] = true;
+                    if fixed[y] { ok[s] = false; }
+                    needs[s].push(y);
+                    work.push(y);
+                }
+                i = i + 1;
+            }
+        }
+        s = s + 1;
+    }
+    var any = false;
+    for o in ok {
+        if o { any = true; }
+    }
+    if !any { return false; }
+
+    // The new parameters, block by block, and each slot's `undef`.
+    var param_slots = empty_lists(blocks);
+    var param_vals = empty_lists(blocks);
+    var entry_value = filled_ints(count, -1);
+    var head: List<IrInst> = [];
+    let span = if f.blocks[0].insts.len > 0 { f.blocks[0].insts[0].span_id } else { 0 };
+    s = 0;
+    while s < count {
+        if ok[s] {
+            for y in needs[s] {
+                param_slots[y].push(s);
+                param_vals[y].push(ir_add_param(f, y as u32, slot_phy[s]) as i64);
+            }
+            let u = ir_new_value(f, slot_phy[s]);
+            head.push(ir_inst_new(u, op_undef(), 0, slot_phy[s], f.operand_pool.len, 0, span));
+            entry_value[s] = u as i64;
+        }
+        s = s + 1;
+    }
+
+    // Renaming, in reverse postorder: a block's dominators come first.
+    var subst = filled_ints(f.value_physics.len() as i64, -1);
+    var ends = empty_lists(blocks);
+    for b in order {
+        var cur: List<i64> = [];
+        if b == 0 {
+            for v in entry_value { cur.push(v); }
+        } else {
+            for v in ends[f.blocks[b].idom] { cur.push(v); }
+        }
+        var k = 0;
+        while k < param_slots[b].len() as i64 {
+            cur[param_slots[b][k]] = param_vals[b][k];
+            k = k + 1;
+        }
+        var kept: List<IrInst> = [];
+        if b == 0 {
+            for h in head { kept.push(h); }
+        }
+        for inst in f.blocks[b].insts {
+            var a = ir_args(f, inst);
+            var renamed = false;
+            for pos in value_positions(f, inst) {
+                let to = subst[a[pos]];
+                if to >= 0 {
+                    a[pos] = to as u32;
+                    renamed = true;
+                }
+            }
+            let op = inst.opcode;
+            let promoted = (op == op_stack_slot() && inst.result != ir_no_value() && slot_of[inst.result] >= 0 && ok[slot_of[inst.result]])
+                || ((op == op_load() || op == op_store()) && slot_of[a[0]] >= 0 && ok[slot_of[a[0]]]);
+            if promoted {
+                if op == op_load() { subst[inst.result] = cur[slot_of[a[0]]]; }
+                if op == op_store() { cur[slot_of[a[0]]] = a[1] as i64; }
+                continue;
+            }
+            if op == op_jump() {
+                for v in param_slots[a[0]] { a.push(cur[v] as u32); renamed = true; }
+            } else if op == op_cond_br() {
+                // [cond, then, n, then args.., else, n, else args..]
+                let other = 3 + a[2];
+                let to_then = param_slots[a[1]];
+                let to_else = param_slots[a[other]];
+                if to_then.len() + to_else.len() > 0 {
+                    var out: List<u32> = [a[0], a[1], a[2] + to_then.len()];
+                    var i = 3;
+                    while i < other {
+                        out.push(a[i]);
+                        i = i + 1;
+                    }
+                    for v in to_then { out.push(cur[v] as u32); }
+                    out.push(a[other]);
+                    out.push(a[other + 1] + to_else.len());
+                    i = other + 2;
+                    while i < a.len() {
+                        out.push(a[i]);
+                        i = i + 1;
+                    }
+                    for v in to_else { out.push(cur[v] as u32); }
+                    a = out;
+                    renamed = true;
+                }
+            }
+            kept.push(if renamed { with_args(f, inst, a) } else { inst });
+        }
+        f.blocks[b].insts = kept;
+        ends[b] = cur;
+    }
+    return true;
+}

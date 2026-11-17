@@ -4,5 +4,5 @@ fstring_open:f" hole_open:{ name:m [:[ string:"k" ]:] }:} fstring_close:"
 fstring_open:f" fstring_text:{{}} fstring_close:" 
 fstring_open:f" hole_open:{ {:{ integer:1 }:} }:} fstring_close:" 
 fstring_open:f" hole_open:{ fstring_open:f' hole_open:{ name:y }:} fstring_close:' }:} fstring_close:" 
-fstring_open:f""" fstring_text:a fstring_quote:" fstring_text:b hole_open:{ name:x }:} fstring_close:""" 
-fstring_open:rf" fstring_text:\ hole_open:{ name:x }:} fstring_close:" infix_dot:. name:n 
+fstring_open_triple:f""" fstring_text:a fstring_quote:" fstring_text:b hole_open:{ name:x }:} fstring_close:""" 
+fstring_open_raw:rf" fstring_text:\ hole_open:{ name:x }:} fstring_close:" infix_dot:. name:n 

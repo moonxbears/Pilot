@@ -28,6 +28,7 @@
 pub pkg pilot.lex.build;
 
 use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Utf8;
 
 /// A built lexer: `next[state * classes + class]` is the next state or -1,
 /// `accept[state]` the declaration index a state accepts or -1, and
@@ -50,6 +51,7 @@ pub struct TokenAction : IValue {
     pub role: TokenRole;
     pub enters: str;
     pub leaves: bool;
+    pub trails: i64;
 }
 
 /// The contexts a token can start in: after a token that is neither a
@@ -205,26 +207,42 @@ fn nfa_fragment(var ref n: Nfa, ref p: Pattern, var ref end_out: List<i64>) -> i
 // Building the table
 // ------------------------------------------------------------------------------
 
-fn join_ints(ref xs: List<i64>) -> str {
-    var out = "";
-    var i = 0;
-    while i < xs.len() {
-        if i > 0 {
-            out = out + ",";
+/// `xs` written as `a,b,c`. Joined by halves, so each character is copied
+/// about log2(n) times rather than once per later item (a key of hundreds
+/// of states is built often).
+fn join_ints(ref xs: List<i64>) -> str => join_ints_in(xs, 0, xs.len() as i64);
+
+fn join_ints_in(ref xs: List<i64>, lo: i64, hi: i64) -> str {
+    if hi - lo == 0 { return ""; }
+    if hi - lo == 1 { return f"{xs[lo]}"; }
+    let mid = lo + (hi - lo) / 2;
+    return join_ints_in(xs, lo, mid) + "," + join_ints_in(xs, mid, hi);
+}
+
+/// `xs` sorted ascending, in place (insertion sort: a closure is short).
+fn sort_ints(var ref xs: List<i64>) {
+    var i = 1;
+    while i < xs.len() as i64 {
+        let v = xs[i];
+        var j = i - 1;
+        while j >= 0 && xs[j] > v {
+            xs[j + 1] = xs[j];
+            j = j - 1;
         }
-        out = out + f"{xs[i]}";
+        xs[j + 1] = v;
         i = i + 1;
     }
-    return out;
 }
 
 /// The eps-closure of `seeds`, as a sorted list of NFA states.
 fn closure(ref seeds: List<i64>, ref eps_off: List<i64>, ref eps_dst: List<i64>, var ref mark: List<i64>, stamp: i64) -> List<i64> {
     var stack: List<i64> = [];
+    var out: List<i64> = [];
     for s in seeds {
         if mark[s] != stamp {
             mark[s] = stamp;
             stack.push(s);
+            out.push(s);
         }
     }
     while stack.len() > 0 {
@@ -235,18 +253,13 @@ fn closure(ref seeds: List<i64>, ref eps_off: List<i64>, ref eps_dst: List<i64>,
             if mark[t] != stamp {
                 mark[t] = stamp;
                 stack.push(t);
+                out.push(t);
             }
             k = k + 1;
         }
     }
-    var out: List<i64> = [];
-    var i = 0;
-    while i < mark.len() {
-        if mark[i] == stamp {
-            out.push(i);
-        }
-        i = i + 1;
-    }
+    // Only the states reached are sorted, not every NFA state scanned.
+    sort_ints(out);
     return out;
 }
 
@@ -263,7 +276,7 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
     for d in decls {
         names.push(d.name);
         prio.push(d.priority);
-        actions.push(TokenAction { role: d.role, enters: d.enters, leaves: d.leaves });
+        actions.push(TokenAction { role: d.role, enters: d.enters, leaves: d.leaves, trails: d.trails });
     }
 
     // 1. Byte classes: a boundary before every range start and after every
@@ -376,6 +389,14 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
     }
     let start_states = members.len();
     var reported: Map<str, i64> = Map<str, i64>();
+    // The targets of the current DFA state's byte transitions, by interval:
+    // each NFA transition adds its target to the intervals its range spans.
+    var buckets: List<List<i64>> = [];
+    i = 0;
+    while i < intervals {
+        buckets.push([]);
+        i = i + 1;
+    }
     var cur = 0;
     while cur < members.len() {
         // What this DFA state accepts.
@@ -408,19 +429,23 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
             errors.push(build_error("LEX004", f"`{names[best]}` matches the empty text; a token must take at least one byte"));
         }
         daccept.push(best);
-        var c = 0;
-        while c < intervals {
-            var step: List<i64> = [];
-            for s in members[cur] {
-                let lo = n.lo[s];
-                if lo >= 0 && interval_of[lo] <= c && c <= interval_of[n.hi[s]] {
-                    step.push(n.to[s]);
+        for s in members[cur] {
+            let lo = n.lo[s];
+            if lo >= 0 {
+                var k = interval_of[lo];
+                while k <= interval_of[n.hi[s]] {
+                    buckets[k].push(n.to[s]);
+                    k = k + 1;
                 }
             }
-            if step.len() == 0 {
+        }
+        var c = 0;
+        while c < intervals {
+            if buckets[c].len() == 0 {
                 dnext.push(-1);
             } else {
-                let set = closure(step, eps_off, eps_dst, mark, stamp);
+                let set = closure(buckets[c], eps_off, eps_dst, mark, stamp);
+                buckets[c] = [];
                 stamp = stamp + 1;
                 let key = join_ints(set);
                 if index.has(key) {
@@ -460,17 +485,14 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
         var next_groups = 0;
         i = 0;
         while i < dstates {
-            var sig = f"{part[i]}";
+            var parts: List<i64> = [part[i]];
             var c = 0;
             while c < intervals {
                 let t = dnext[i * intervals + c];
-                if t < 0 {
-                    sig = sig + ":-";
-                } else {
-                    sig = sig + f":{part[t]}";
-                }
+                parts.push(if t < 0 { -1 } else { part[t] });
                 c = c + 1;
             }
+            let sig = join_ints(parts);
             if !sig_ids.has(sig) {
                 sig_ids.set(sig, next_groups);
                 next_groups = next_groups + 1;
@@ -520,12 +542,13 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
     var classes = 0;
     var c = 0;
     while c < intervals {
-        var col = "";
+        var cells: List<i64> = [];
         var g = 0;
         while g < groups {
-            col = col + f"{gnext[g * intervals + c]},";
+            cells.push(gnext[g * intervals + c]);
             g = g + 1;
         }
+        let col = join_ints(cells);
         if !class_ids.has(col) {
             class_ids.set(col, classes);
             classes = classes + 1;
@@ -577,8 +600,9 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
 // ------------------------------------------------------------------------------
 
 /// The longest token of `t` starting at `pos` of `src` in context `ctx`,
-/// falling back to the last accepting state; family -1 (one byte) when
-/// none starts there.
+/// falling back to the last accepting state; family -1 when none starts
+/// there, over one whole UTF-8 character (one byte when the bytes there are
+/// not well-formed UTF-8), so it is reported once.
 pub fn match_at(ref t: LexTable, src: str, pos: i64, ctx: LexContextKind) -> Lexeme {
     let len = src.len() as i64;
     var state = t.starts[ctx as i64];
@@ -599,9 +623,9 @@ pub fn match_at(ref t: LexTable, src: str, pos: i64, ctx: LexContextKind) -> Lex
         }
     }
     if last < 0 {
-        return Lexeme { decl: -1, start: pos, end: pos + 1, mode: 0 };
+        return Lexeme { decl: -1, start: pos, end: pos + utf8_char_length(src, pos), mode: 0 };
     }
-    return Lexeme { decl: last, start: pos, end: last_end, mode: 0 };
+    return Lexeme { decl: last, start: pos, end: last_end - t.actions[last].trails, mode: 0 };
 }
 
 /// Where the lexer stands between two tokens: whether a space came last

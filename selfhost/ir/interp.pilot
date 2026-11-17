@@ -452,7 +452,12 @@ fn prepare_arith(ref fr: IrFrame, var ref st: IrStep) {
     let op = st.inst.opcode;
     st.sym = arith_symbols().get(op as i64);
     let phy = st.inst.physics;
-    if !is_narrow_register(phy) { return; }
+    if !is_narrow_register(phy) {
+        if both_plain_numbers(fr, st) {
+            if some h = direct_arith(op) { st.h = h; }
+        }
+        return;
+    }
     let is_shift = op == op_shl() || op == op_shr();
     let bits: i64 = phy.bit_width;
     // [register class, width, whether the count is taken modulo the width]
@@ -479,7 +484,66 @@ fn run_narrow(var ref fr: IrFrame, ref st: IrStep) {
 /// The operator of each comparison predicate (`CmpPred` 0..5).
 fn cmp_symbols() -> List<str> => ["==", "!=", "<", "<=", ">", ">="];
 
-fn prepare_cmp(ref fr: IrFrame, var ref st: IrStep) { st.sym = cmp_symbols()[st.inst.subop]; }
+fn prepare_cmp(ref fr: IrFrame, var ref st: IrStep) {
+    let pred = st.inst.subop as i64;
+    st.sym = cmp_symbols()[pred];
+    // Equality is defined between any two values; an ordering only between
+    // numbers.
+    if pred < 2 || both_plain_numbers(fr, st) { st.h = DIRECT_CMP[pred]; }
+}
+
+/// Whether a register holds the engine's own numbers as they are: a 64-bit
+/// integer or a 64-bit float.
+fn is_plain_number(phy: IrTypePhysics) -> bool {
+    let rc = phy.reg_class;
+    let numeric = rc == reg_class_gpr_signed() || rc == reg_class_gpr_unsigned() || rc == reg_class_simd_float();
+    return numeric && phy.bit_width == 64;
+}
+
+/// Whether both operands of the step are plain numbers (`is_plain_number`)
+/// by the checker's types. On those the operators that only fail on a
+/// value of the wrong kind (`+ - * & | ^ << >>` and the orderings) run as
+/// the interpreter's own operators, which are the seed's, without the
+/// argument and result lists of `op_checked`; division and remainder still
+/// go through it for their division-by-zero fault.
+fn both_plain_numbers(ref fr: IrFrame, ref st: IrStep) -> bool {
+    let a = st.a;
+    if a.len() != 2 { return false; }
+    let vp = fr.f.value_physics;
+    return is_plain_number(vp[a[0]]) && is_plain_number(vp[a[1]]);
+}
+
+/// The handler that runs arithmetic opcode `op` as the interpreter's own
+/// operator, for the opcodes that cannot fail on plain numbers.
+fn direct_arith(op: u16) -> any? {
+    if op == op_add() { return run_add; }
+    if op == op_sub() { return run_sub; }
+    if op == op_mul() { return run_mul; }
+    if op == op_bit_and() { return run_bit_and; }
+    if op == op_bit_or() { return run_bit_or; }
+    if op == op_bit_xor() { return run_bit_xor; }
+    if op == op_shl() { return run_shl; }
+    if op == op_shr() { return run_shr; }
+    return none;
+}
+
+fn run_add(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] + v[st.a[1]]; }
+fn run_sub(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] - v[st.a[1]]; }
+fn run_mul(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] * v[st.a[1]]; }
+fn run_bit_and(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] & v[st.a[1]]; }
+fn run_bit_or(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] | v[st.a[1]]; }
+fn run_bit_xor(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] ^ v[st.a[1]]; }
+fn run_shl(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] << v[st.a[1]]; }
+fn run_shr(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] >> v[st.a[1]]; }
+fn run_eq(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] == v[st.a[1]]; }
+fn run_ne(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] != v[st.a[1]]; }
+fn run_lt(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] < v[st.a[1]]; }
+fn run_le(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] <= v[st.a[1]]; }
+fn run_gt(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] > v[st.a[1]]; }
+fn run_ge(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]] >= v[st.a[1]]; }
+
+/// The direct handler of each comparison predicate, in `cmp_symbols` order.
+const DIRECT_CMP: List<any> = [run_eq, run_ne, run_lt, run_le, run_gt, run_ge,];
 
 fn run_stack_slot(var ref fr: IrFrame, ref st: IrStep) {
     let cells = fr.cells;
@@ -690,7 +754,21 @@ fn prepare_cast(ref fr: IrFrame, var ref st: IrStep) {
     let phy = st.inst.physics;
     st.sym = reg_class_name(phy.reg_class);
     st.k = phy.bit_width;
+    if is_same_int(fr.f.value_physics[st.a[0]], phy) { st.h = run_same; }
 }
+
+/// Whether a cast from register `from` to register `to` changes nothing:
+/// into a signed 64-bit integer from a signed integer, which the engine
+/// keeps as its signed integer whatever its width. An unsigned register may
+/// hold a value the engine keeps apart (a `char`, a 64-bit unsigned value),
+/// which the cast converts (`ops::convert`).
+fn is_same_int(from: IrTypePhysics, to: IrTypePhysics) -> bool {
+    if to.reg_class != reg_class_gpr_signed() || to.bit_width != 64 || from.bit_width <= 1 { return false; }
+    return from.reg_class == reg_class_gpr_signed();
+}
+
+/// A cast that changes nothing (`is_same_int`).
+fn run_same(var ref fr: IrFrame, ref st: IrStep) { let v = fr.vals; v[st.result] = v[st.a[0]]; }
 
 /// `cast`: the value converted to the result's register physics, as the
 /// seed converts `T(x)`: floats truncate toward zero, integers wrap to the

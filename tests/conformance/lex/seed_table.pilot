@@ -1,0 +1,43 @@
+// A built lexer written as the table the seed lexer runs (PROP-021 §3.1,
+// stdlib/pilot/lex/seed.pilot): the cache's format with a short key, then
+// what the seed reads for each family (stdlib/core/lex/seed_kinds.pilot).
+//
+// Expected, worked by hand. The families, in order, and their entries
+// (kind, flags, emission: 0 token, 1 skipped, 2 part of an f-string):
+//   name        Ident 20, no flags, token            20 0 0
+//   +=          PlusEqual 300                       300 0 0
+//   space       skipped (kind and flags 0)            0 0 1
+//   raw_string  StrLit 27, IS_RAW_STRING 8, token    27 8 0
+// The 12 numbers, with a run of one value written `value*times` (as the
+// cache writes every line): 20 0*2 300 0*4 1 27 8 0. Before them the
+// end-of-source kind 0 and the error kind 5. The text reads back as a
+// lexer of 4 families with the short key, and not with another key.
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+use pilot.lex.modes;
+use pilot.lex.cache;
+use pilot.lex.seed;
+
+fn main() {
+    let tokens: List<TokenDecl> = [
+        acting(TokenRole::Operand, token("name", ("a" ..= "z").some())),
+        token("+=", lit("+=")),
+        acting(TokenRole::Space, token("space", lit(" ").some())),
+        acting(TokenRole::Operand, token("raw_string", lit("r\"x\""))),
+    ];
+    let modes: List<LexMode> = [lex_mode("main", tokens)];
+    let built = build_modes(modes);
+    print(built.ok());
+    let key = modes_key(modes);
+    var errors: List<LexBuildError> = [];
+    let text = seed_table_text(built.lexer, key, errors);
+    print(errors.len());
+    let at = text.find("seed_special", 0);
+    print(text.slice(at, text.len()).trim());
+    if some m = read_lexer(text, seed_table_key(key)) {
+        print(f"read back: {m.families()} families");
+    }
+    var other = true;
+    if some m = read_lexer(text, seed_table_key(key + " ")) { other = false; }
+    print(other);
+}

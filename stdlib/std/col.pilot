@@ -66,10 +66,19 @@ pub struct RingBuffer<T: IAnyValue> : IQueue<T>, IObject {
     pub pure fn len(ref self) -> usize => self.count;
     pub pure fn is_full(ref self) -> bool => self.count >= self.capacity;
 
+    /// The slot after `at`, wrapping to 0 at `capacity`: a compare the
+    /// target can make a conditional move, not a division.
+    pure fn next_slot(ref self, at: usize) -> usize {
+        let n = at + 1;
+        return if n == self.capacity { 0 } else { n };
+    }
+
     pub pure fn contains(ref self, item: T) -> bool {
+        var at = self.head;
         var i: usize = 0;
         while i < self.count {
-            if self.items[(self.head + i) % self.capacity] == item { return true; }
+            if self.items[at] == item { return true; }
+            at = self.next_slot(at);
             i = i + 1;
         }
         return false;
@@ -82,7 +91,7 @@ pub struct RingBuffer<T: IAnyValue> : IQueue<T>, IObject {
         } else {
             self.items[self.tail] = item;
         }
-        self.tail = (self.tail + 1) % self.capacity;
+        self.tail = self.next_slot(self.tail);
         self.count = self.count + 1;
         return true;
     }
@@ -90,7 +99,7 @@ pub struct RingBuffer<T: IAnyValue> : IQueue<T>, IObject {
     pub fn dequeue(var ref self) -> T? {
         if self.count == 0 { return none; }
         let item = self.items[self.head];
-        self.head = (self.head + 1) % self.capacity;
+        self.head = self.next_slot(self.head);
         self.count = self.count - 1;
         return item;
     }

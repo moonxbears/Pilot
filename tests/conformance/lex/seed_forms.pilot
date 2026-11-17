@@ -1,0 +1,51 @@
+// The spellings the seed parser still gives a meaning of its own (PROP-021
+// slice 21G, stdlib/core/lex/seed_forms.pilot): each lexes as one token, as
+// the seed lexer reads it. A call-quote opener (`!`, `!!`, `!&`, `!^`, `!@`,
+// `!?`) is a token only right before a `(`, which it leaves for the next
+// token, glued to a name or not (`if !(t)` is a call quote to the seed).
+// Here the only operators declared are `!` and `!=`.
+//
+// Expected, worked by hand (spaces not shown), one family:text per token:
+//   f!(x)    `!` before `(`: call_quote:! then (:( name:x ):)
+//   g!!(y)   splice_quote:!! then ( name )
+//   a!&(b) c!^(d) e!@(h) k!?(m)
+//            frame_quote:!&, sig_quote:!^, grad_quote:!@, plan_quote:!?
+//            (each with name before and ( name ) after)
+//   if !(t)  if:if call_quote:! (:( name:t ):)
+//   !x       no `(` follows: the declared `!`, then name:x
+//   !!z      two `!`s: no `!!` without a `(`, so !:! !:! name:z
+//   p != q   the declared `!=`: name !=:!= name
+//   x += 1   +=:+= between name and integer:1
+//   a?.b ?? c ??= d
+//            ?.:?. (`??` is not declared here: `?`s alone start no token,
+//            so `??` is two unmatched bytes ?:? ?:?) then ??=:??=
+//   $v @> <- ... **= <<=
+//            $:$ name:v @>:@> <-:<- ...:... **=:**= <<=:<<=
+use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Lexicon;
+use pilot.lex.build;
+use pilot.lex.cache;
+
+fn main() {
+    let ops: List<TokenDecl> = [token("!", lit("!")), token("!=", lit("!=")),];
+    let built = build_table_cached(core_tokens_with(ops), LEX_CACHE_DIR);
+    print(built.ok());
+    let lines: List<str> = [
+        "f!(x) g!!(y)",
+        "a!&(b) c!^(d) e!@(h) k!?(m)",
+        "if !(t)",
+        "!x !!z p != q",
+        "x += 1",
+        "a?.b ?? c ??= d",
+        "$v @> <- ... **= <<=",
+    ];
+    for src in lines {
+        var out = "";
+        for l in lex_all(built.table, src) {
+            if l.decl < 0 || built.table.names[l.decl] != "space" {
+                out = out + lexeme_text(built.table, src, l) + " ";
+            }
+        }
+        print(out);
+    }
+}

@@ -1,0 +1,7 @@
+// `*..x` gives the leaves of `x`: for a `List<List<i64>>` they are `i64`,
+// so the literal is a `List<i64>` and cannot be a `List<str>`.
+fn main() {
+    let flat: List<List<i64>> = [[1, 2,], [3,],];
+    let words: List<str> = [*..flat];
+    print(words);
+}

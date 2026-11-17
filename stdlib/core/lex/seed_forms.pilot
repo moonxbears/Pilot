@@ -1,0 +1,61 @@
+// =========================================================================
+// FILE: stdlib/core/lex/seed_forms.pilot
+// SPELLINGS WHOSE MEANING THE SEED PARSER STILL SUPPLIES (PROP-021 slice 21G)
+// =========================================================================
+// An operator's spelling is declared by the `op` or `syntax` rule that gives
+// it its meaning (operators.pilot). The spellings below have no such
+// declaration yet: the Rust parser gives each a meaning of its own (an
+// assignment statement, safe navigation, a `syntax`-rule hole, a variadic
+// `...`, a call-quote projection). PROP-022 moves each meaning into a
+// declaration; its spelling then comes from the declared symbols and leaves
+// this file. Until then they are listed here, so the table lexes what the
+// seed lexes. The list only shrinks.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.SeedForms;
+
+use Pilot.Core.Lex.Patterns;
+
+/// The spellings the seed lexes as one token that no declaration declares.
+pub const SEED_FORM_SPELLINGS: List<str> = [
+    "$", "@", "@>", "<@", "?.", "?..", "??=", "...", "<-",
+    "+=", "-=", "*=", "**=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
+];
+
+/// A call-quote projection's opener (AGENTS.md §5.4): its family, named by
+/// its readable keyword, and its spelling, which must touch the `(` that
+/// follows (`f!^(x)` is `sig f(x)`).
+pub struct CallQuoteForm : IValue {
+    pub name: str;
+    pub spelling: str;
+}
+
+pub const CALL_QUOTE_FORMS: List<CallQuoteForm> = [
+    CallQuoteForm { name: "call_quote", spelling: "!" },
+    CallQuoteForm { name: "splice_quote", spelling: "!!" },
+    CallQuoteForm { name: "frame_quote", spelling: "!&" },
+    CallQuoteForm { name: "sig_quote", spelling: "!^" },
+    CallQuoteForm { name: "grad_quote", spelling: "!@" },
+    CallQuoteForm { name: "plan_quote", spelling: "!?" },
+];
+
+/// What follows a call-quote opener, not part of it.
+pub const CALL_QUOTE_OPEN: str = "(";
+
+/// One token per seed-form spelling that `declared` (the families declared
+/// already, by name) does not have, then the call-quote openers, each
+/// matched only before a `(` that it leaves for the next token.
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn seed_form_tokens(ref declared: List<str>) -> List<TokenDecl> {
+    var out: List<TokenDecl> = [];
+    for sym in SEED_FORM_SPELLINGS {
+        var known = false;
+        for d in declared {
+            if d == sym { known = true; }
+        }
+        if !known { out.push(token(sym, lit(sym))); }
+    }
+    for f in CALL_QUOTE_FORMS {
+        out.push(trailed_by(CALL_QUOTE_OPEN, token(f.name, lit(f.spelling))));
+    }
+    return out;
+}

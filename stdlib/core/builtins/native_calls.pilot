@@ -117,10 +117,6 @@ comptime {
     bind_native_member(nameof(List), "for_get", "list_get");
     bind_native_member(nameof(slice), "for_len", "str_len");
     bind_native_member(nameof(slice), "for_get", "list_get");
-    // The member each unpack sigil calls: its prefix `op` (PROP-018).
-    bind_native_member("unpack_op", "6", "*_");
-    bind_native_member("unpack_op", "7", "**_");
-    bind_native_member("unpack_op", "8", "*.._");
     // An operator with no PilIR instruction of its own runs as an engine
     // operation: `a ** b` (an integer power wraps; a float power is `powf`).
     bind_operator_intrinsic("**", "num_pow");
@@ -142,4 +138,23 @@ comptime {
     bind_list_splat(nameof(List), "list_extend");
     // A map literal `["k": v]` (or `{k: v}`) is `Map()` followed by `set(k, v)`.
     bind_map_literal(nameof(Map), nameof(set));
+}
+
+// The member each prefix operator calls on a struct that declares it
+// (PROP-018, PROP-022 slice 22A): `-x`, `~x`, `!x`, and the unpack sigils
+// `*x`, `**x`, `*..x`. A primitive's prefix operator stays its machine op.
+// The keys are the Rust parser's unary flags (`prefix_flag`,
+// crates/pilot-parser/src/expr.rs), so this table only translates Rust's
+// numbering into Pilot's member names; it goes when the Pilot parser
+// (PROP-025) builds a prefix use from the `op` declaration itself
+// (PROP-022 §3). The checker (selfhost/check/infer.pilot `PREFIX_OP_TABLE`),
+// PilIR and the seed all read it.
+[StandIn("parse.prefix_flag_table", "a prefix operator use names the `op` member it calls, found from the operator's own declaration", "the Rust parser records only a unary flag number, and this table maps each flag to a member name", "PROP-025")]
+comptime {
+    bind_native_member("prefix_op", "0", "-_");
+    bind_native_member("prefix_op", "4", "~_");
+    bind_native_member("prefix_op", "5", "!_");
+    bind_native_member("prefix_op", "6", "*_");
+    bind_native_member("prefix_op", "7", "**_");
+    bind_native_member("prefix_op", "8", "*.._");
 }

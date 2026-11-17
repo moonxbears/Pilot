@@ -1,0 +1,46 @@
+// ==============================================================================
+// FILE: selfhost/gate/lex_table_gate.pilot
+// The `lex_table` gate: the table the seed lexer runs is the one the token
+// declarations give (PROP-021 §3.1).
+// ==============================================================================
+// stdlib/core/lex/toolchain.lex is generated (`pilot lex --write-table`) and
+// checked in, so the seed can lex before any Pilot runs. This gate runs
+// `pilot lex --check-table`, which builds the toolchain's lexer from the
+// declarations (or reads it from target/cache/lex) and compares the table
+// it gives with the file. A build from nothing takes about two minutes on
+// the seed, so the gate runs with `--full` only.
+//
+// Codes:
+//   GATE024  toolchain.lex is missing or is not the table the declarations
+//            give (or the declarations do not build: LEX002, LEX008, ..)
+pub lvl(0) pkg selfhost.gate;
+
+fn lt_table_file() -> str => "stdlib/core/lex/toolchain.lex";
+
+pub fn execute_lex_table_gate(workspace_root: str, ref _opts: GateRunOptions) -> GateReport {
+    let t0 = gate_time_now_us();
+    let root = resolve_workspace_root(workspace_root);
+    let violations = glist_new();
+    let exe = current_exe() ?? "pilot";
+    let out = run_in(root, exe, ["lex", "--check-table"], "");
+    if out.exit_code != 0 {
+        glist_push(violations, GateViolation {
+            code: "GATE024",
+            file_path: lt_table_file(),
+            line: 1,
+            column: 1,
+            offending_snippet: out.stderr.trim(),
+            message: "the seed lexer's table is not the one the token declarations give",
+            remediation: "Run `pilot lex --write-table` (with the old table in place, as the seed lexes the toolchain with it) and check the new table in",
+        });
+    }
+    let dt = gate_time_now_us() - t0;
+    return GateReport {
+        gate_id: "lex_table",
+        category: GateCategoryId.Hygiene,
+        passed: glist_len(violations) == 0,
+        elapsed_us: if dt >= 0 { dt } else { 0 },
+        items_scanned: 1,
+        violations: violations,
+    };
+}

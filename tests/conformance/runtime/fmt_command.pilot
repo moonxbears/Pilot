@@ -1,0 +1,46 @@
+// `pilot fmt <file>`: the file's token tape laid out as canonical Pilot
+// (selfhost/fmt/fmt.pilot). Fixtures in tests/tool_fixtures/fmt/.
+//
+// Expected, worked by hand from the layout rules in fmt.pilot's header:
+//   messy.pilot: one statement a line, blocks indented 4, `{` at the end of
+//     its line, `}` joining `else`; `x:i64` -> `x: i64`, binary operators
+//     spaced, `!done` touching; the comment after `}` keeps a line of its
+//     own. That is formatted.pilot, so printing it gives formatted.pilot's
+//     text, `--check` on formatted.pilot exits 0 and on messy.pilot prints
+//     "<path> is not formatted" and exits 1; `--write` on a copy of
+//     messy.pilot (in target/fmt_command/) leaves formatted.pilot's text in it.
+//   styles.pilot `--style readable`: `i64?` -> `opt<i64>`, `i64 ! E` ->
+//     `res<i64, E>`, `g!^(a)` -> `sig g(a)`, `*xs` -> `splat(xs)`.
+//   readable.pilot `--style compact`: the same four the other way, with
+//     `T ! E` spaced.
+//   literals.pilot: the f-string (it has lexer modes of its own) stays as
+//     written, `{x+1}` unspaced; the inline `/* keep */` stays inline.
+//   unbalanced.pilot `fn f( {`: LEX006 for both brackets, exit 1.
+//   no file: the usage line, exit 2; an unknown style: CLI004, exit 2.
+use std.proc;
+
+fn main() {
+    let exe = proc.pilot_cli_path();
+    let dir = "tests/tool_fixtures/fmt/";
+    let shown = proc.run(exe, ["fmt", dir + "messy.pilot"], "");
+    print(shown.stdout);
+    print(shown.exit_code);
+    print(shown.stdout == File.read_text(dir + "formatted.pilot"));
+    print(proc.run(exe, ["fmt", "--check", dir + "formatted.pilot"], "").exit_code);
+    let unformatted = proc.run(exe, ["fmt", "--check", dir + "messy.pilot"], "");
+    print(unformatted.stdout);
+    print(unformatted.exit_code);
+    let copy = "target/fmt_command/write.pilot";
+    print(File.write_text(copy, File.read_text(dir + "messy.pilot")));
+    print(proc.run(exe, ["fmt", "--write", copy], "").exit_code);
+    print(File.read_text(copy) == File.read_text(dir + "formatted.pilot"));
+    print(proc.run(exe, ["fmt", "--style", "readable", dir + "styles.pilot"], "").stdout);
+    print(proc.run(exe, ["fmt", "--style", "compact", dir + "readable.pilot"], "").stdout);
+    print(proc.run(exe, ["fmt", dir + "literals.pilot"], "").stdout);
+    let bad = proc.run(exe, ["fmt", dir + "unbalanced.pilot"], "");
+    print(bad.stderr);
+    print(bad.exit_code);
+    print(proc.run(exe, ["fmt"], "").exit_code);
+    let style = proc.run(exe, ["fmt", "--style", "weird", dir + "styles.pilot"], "");
+    print(style.exit_code);
+}

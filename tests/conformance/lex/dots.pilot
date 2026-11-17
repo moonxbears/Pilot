@@ -13,7 +13,8 @@
 //   \n.b        after a newline: prefix_dot name
 //   a/**/.b     the comment keeps `a`'s context: name block_comment
 //               infix_dot name
-//   x?.y        `?` is postfix, so it ends an operand: name ? infix_dot
+//   x?.y        `?.` is one token (the seed's safe navigation,
+//               seed_forms.pilot), longer than the postfix `?`: name ?.
 //               name
 //   !.on        `!` is a prefix operator here, not postfix, so it ends no
 //               operand: ! prefix_dot name (read as `!self.on`)

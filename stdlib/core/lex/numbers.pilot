@@ -16,6 +16,7 @@
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Numbers;
 
 use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Lex.Words;
 use Pilot.Core.Convert.DecimalRound;
 
 /// The bases a number may be written in.
@@ -26,20 +27,22 @@ pub enum Radix : u8 {
     Oct,
 }
 
-/// A radix: the prefix that selects it and the base it counts in.
+/// A radix: the prefix that selects it, the base it counts in, and the
+/// family its integers are lexed as (the parser reads the base from it).
 pub struct RadixInfo : IValue {
     pub radix: Radix;
     pub prefix: str;
     pub base: i64;
+    pub family: str;
 }
 
 /// Every radix, declared once: the integer pattern and the value function
 /// (`Pilot.Core.Lex.LiteralValue`) both read this table.
 pub const RADIXES: List<RadixInfo> = [
-    RadixInfo { radix: Radix::Dec, prefix: "", base: 10 },
-    RadixInfo { radix: Radix::Hex, prefix: "0x", base: 16 },
-    RadixInfo { radix: Radix::Bin, prefix: "0b", base: 2 },
-    RadixInfo { radix: Radix::Oct, prefix: "0o", base: 8 },
+    RadixInfo { radix: Radix::Dec, prefix: "", base: 10, family: "integer" },
+    RadixInfo { radix: Radix::Hex, prefix: "0x", base: 16, family: "hex_integer" },
+    RadixInfo { radix: Radix::Bin, prefix: "0b", base: 2, family: "bin_integer" },
+    RadixInfo { radix: Radix::Oct, prefix: "0o", base: 8, family: "oct_integer" },
 ];
 
 /// Bytes `lo ..= hi` are the digits `value`, `value + 1`, ..
@@ -128,9 +131,68 @@ pub fn float() -> Pattern =>
     digits(Radix::Dec) + lit(DECIMAL_POINT) + digits(Radix::Dec) + exponent().opt()
     | digits(Radix::Dec) + exponent();
 
-/// The number tokens, in declaration order.
+/// The float family's name.
+pub const FLOAT_FAMILY: str = "float";
+
+/// What a suffixed number's family adds to its number's family.
+pub const SUFFIXED: str = "_suffixed";
+
+/// A number's suffix: a unit (`250ms`, `2.4GHz`) or a type (`200u8`,
+/// `0xFFu8`), told apart by the parser. An ASCII letter, then ASCII
+/// letters, digits and `_`.
+pub fn suffix() -> Pattern {
+    let letter: Pattern = "a" ..= "z" | "A" ..= "Z";
+    return letter + (letter | "0" ..= "9" | lit(DIGIT_SEPARATOR)).many();
+}
+
+/// The number tokens, in declaration order: one integer family per radix,
+/// then the float. A prefixed radix and the float outrank the decimal
+/// integer, so `0xFF` and `1e9` are not the decimal `0` or `1` with a
+/// suffix (`xFF`, `e9`) once suffixed numbers are tokens too (priorities
+/// 2 and 1; `suffixed_number_tokens` ranks each one lower).
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
-pub fn number_tokens() -> List<TokenDecl> => [
-    acting(TokenRole::Operand, token("integer", integer())),
-    acting(TokenRole::Operand, token("float", float())),
-];
+pub fn number_tokens() -> List<TokenDecl> {
+    var out: List<TokenDecl> = [];
+    for r in RADIXES {
+        out.push(acting(TokenRole::Operand, token_over(r.family, if r.prefix == "" { 1 } else { 2 }, in_radix(r))));
+    }
+    out.push(acting(TokenRole::Operand, token_over(FLOAT_FAMILY, 2, float())));
+    return out;
+}
+
+/// Each number token followed by a suffix, as one token of its own family
+/// (`integer_suffixed`, ..), ranked one below its number: the digits are
+/// taken first, so `0xFFe` is a hex number and `1.5e3` a float, not a
+/// number with the suffix `e` or `e3`. A suffix that is a seed word is not one: `1if`
+/// is `1` and `if`. For that, each number followed by a seed word is
+/// declared once more (priority 3, over every number), with the word left for the
+/// next token (one declaration per word length, as `trails` is a length).
+/// A seed word starting with no letter (`__engine`) is never a suffix.
+[StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
+pub fn suffixed_number_tokens() -> List<TokenDecl> {
+    var lengths: List<i64> = [];
+    for w in SEED_WORDS {
+        let b = w.byte_at(0) as i64;
+        let letter = (b >= 97 && b <= 122) || (b >= 65 && b <= 90);
+        let n = w.len() as i64;
+        var known = !letter;
+        for l in lengths {
+            if l == n { known = true; }
+        }
+        if !known { lengths.push(n); }
+    }
+    var out: List<TokenDecl> = [];
+    for d in number_tokens() {
+        out.push(acting(TokenRole::Operand, token_over(d.name + SUFFIXED, d.priority - 1, seq([d.pattern, suffix()]))));
+    }
+    for d in number_tokens() {
+        for n in lengths {
+            var words: List<str> = [];
+            for w in SEED_WORDS {
+                if w.len() as i64 == n && w.byte_at(0) as i64 != byte_of("_") { words.push(w); }
+            }
+            out.push(trailed_by_any(words, token_over(d.name, 3, d.pattern)));
+        }
+    }
+    return out;
+}

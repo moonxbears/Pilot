@@ -3,8 +3,8 @@
 // Ring 3: built lexers kept on disk (pub pkg pilot.lex.cache;)
 // ==============================================================================
 // Building a lexer (patterns -> NFA -> DFA -> minimized tables, `build_modes`)
-// takes about 2.4 s on the seed and several minutes on the PilIR
-// interpreter, and gives the same tables every time for the same token
+// takes seconds on the seed (6.5 s for the Unicode name table alone,
+// 2026-11-16) and minutes on the PilIR interpreter, and gives the same tables every time for the same token
 // declarations. `build_modes_cached` keeps what it built in a directory
 // (`target/cache/lex` by convention) and reads it back the next time:
 //   - the key is the declarations themselves, written out as text (each
@@ -21,7 +21,11 @@
 //     place (`File.rename`), so a reader never sees half of one, even when
 //     several programs build the same lexer at once;
 //   - a lexer whose build reported errors is not kept, and a file that does
-//     not read back is built again.
+//     not read back is built again;
+//   - a mode whose automaton is an earlier mode's (the f-string hole mode
+//     has the main mode's tokens; only its braces' mode changes differ) is
+//     written as `shares <that mode>` with only its actions after it, which
+//     halves the file (the main table's transitions alone are 784 kB).
 pub pkg pilot.lex.cache;
 
 use Pilot.Core.File;
@@ -32,7 +36,7 @@ use pilot.lex.build;
 use pilot.lex.modes;
 
 /// The first line of a cache file; a file with another is built again.
-pub const CACHE_FORMAT: str = "pilot-lex-cache 1";
+pub const CACHE_FORMAT: str = "pilot-lex-cache 4";
 /// Where programs of this toolchain keep built lexers.
 pub const LEX_CACHE_DIR: str = "target/cache/lex";
 
@@ -102,7 +106,7 @@ pub fn modes_key(ref modes: List<LexMode>) -> str {
         b.append(f"mode {word(m.name)}\n");
         for t in m.tokens {
             if !plain(t.name) || !plain(t.enters) { return ""; }
-            b.append(f"tok {word(t.name)} {t.priority} {when_index(t.when)} {role_index(t.role)} {word(t.enters)} {if t.leaves { 1 } else { 0 }}");
+            b.append(f"tok {word(t.name)} {t.priority} {when_index(t.when)} {role_index(t.role)} {word(t.enters)} {if t.leaves { 1 } else { 0 }} {t.trails}");
             for o in t.pattern.ops {
                 b.append(f" {kind_index(o.kind)} {o.lo} {o.hi} {o.n}");
             }
@@ -127,14 +131,40 @@ pub fn hex64(h: u64) -> str {
 /// The cache file in `dir` for the declarations `key`.
 pub fn cache_file(dir: str, key: str) -> str => f"{dir}/{hex64(string_hash(key))}.lex";
 
-/// `label`, the count of `xs`, then `xs`, as one line.
-fn ints_line(label: str, ref xs: List<i64>) -> str {
+/// `label`, the count of `xs`, then `xs`, as one line; a run of one value
+/// is written once, as `value*times` (a table's transitions are mostly runs
+/// of -1: 247,118 numbers in 13,399 runs for the core tokens).
+pub fn ints_line(label: str, ref xs: List<i64>) -> str {
     var b = text.string_builder_new();
     b.append(f"{label} {xs.len()}");
-    for x in xs { b.append(f" {x}"); }
+    let n = xs.len() as i64;
+    var i = 0;
+    while i < n {
+        var j = i + 1;
+        while j < n && xs[j] == xs[i] { j = j + 1; }
+        if j - i > 1 { b.append(f" {xs[i]}*{j - i}"); } else { b.append(f" {xs[i]}"); }
+        i = j;
+    }
     b.append("\n");
     return b.to_string();
 }
+
+/// `times` copies of `v`, doubled up rather than pushed one by one: on the
+/// PilIR interpreter each push is a step, a doubling one step for the run.
+fn run_of(v: i64, times: i64) -> List<i64> {
+    var run: List<i64> = [v];
+    while run.len() as i64 * 2 <= times { run = [*run, *run]; }
+    if (run.len() as i64) < times {
+        let rest = run_of(v, times - run.len() as i64);
+        run = [*run, *rest];
+    }
+    return run;
+}
+
+/// The lists of `parts`, one after another: one engine step
+/// (`list_extend`, deep) for them all, where pushing each number would be a
+/// step per number on the PilIR interpreter.
+fn joined(ref parts: List<List<i64>>) -> List<i64> => [*..parts];
 
 fn words_line(label: str, ref xs: List<str>) -> str {
     var b = text.string_builder_new();
@@ -142,6 +172,22 @@ fn words_line(label: str, ref xs: List<str>) -> str {
     for x in xs { b.append(" " + word(x)); }
     b.append("\n");
     return b.to_string();
+}
+
+/// Whether tables `a` and `b` are one automaton over the same families
+/// (their actions may differ).
+fn same_automaton(ref a: LexTable, ref b: LexTable) -> bool =>
+    a.classes == b.classes && a.states == b.states && a.names == b.names && a.class_of == b.class_of
+    && a.starts == b.starts && a.accept == b.accept && a.next == b.next;
+
+/// The first mode before `i` whose table is mode `i`'s automaton, or -1.
+fn shared_with(ref m: ModalLexer, i: i64) -> i64 {
+    var j = 0;
+    while j < i {
+        if same_automaton(m.tables[j], m.tables[i]) { return j; }
+        j = j + 1;
+    }
+    return -1;
 }
 
 /// `m`, built from the declarations `key`, as the text of a cache file.
@@ -156,17 +202,22 @@ pub fn lexer_text(ref m: ModalLexer, key: str) -> str {
     for i in 0 .. m.tables.len() {
         b.append(ints_line("enters", m.enters[i]));
         let t = m.tables[i];
-        b.append(words_line("names", t.names));
-        b.append(ints_line("class_of", t.class_of));
-        b.append(f"size {t.classes} {t.states}\n");
-        b.append(ints_line("starts", t.starts));
-        b.append(ints_line("next", t.next));
-        b.append(ints_line("accept", t.accept));
+        let shares = shared_with(m, i as i64);
+        b.append(f"shares {shares}\n");
+        if shares < 0 {
+            b.append(words_line("names", t.names));
+            b.append(ints_line("class_of", t.class_of));
+            b.append(f"size {t.classes} {t.states}\n");
+            b.append(ints_line("starts", t.starts));
+            b.append(ints_line("next", t.next));
+            b.append(ints_line("accept", t.accept));
+        }
         var acts: List<i64> = [];
         var goes: List<str> = [];
         for a in t.actions {
             acts.push(role_index(a.role));
             acts.push(if a.leaves { 1 } else { 0 });
+            acts.push(a.trails);
             goes.push(a.enters);
         }
         b.append(ints_line("actions", acts));
@@ -227,16 +278,36 @@ struct Reader : IObject {
         if .next_word() != label { .bad = true; }
     }
 
+    /// A line written by `ints_line`; a run `value*times` is read as
+    /// `times` copies of the value.
     fn ints(var ref self, label: str) -> List<i64> {
         .expect(label);
         let n = .int();
-        var out: List<i64> = [];
-        var i = 0;
-        while i < n && !self.bad {
-            out.push(.int());
-            i = i + 1;
+        var parts: List<List<i64>> = [];
+        var single: List<i64> = [];
+        var count = 0;
+        while count < n && !self.bad {
+            let v = .int();
+            if .at < .src.len() && .src.byte_at(.at) as i64 == 42 {
+                .at = .at + 1;
+                let times = .int();
+                if times < 2 || count + times > n {
+                    .bad = true;
+                } else {
+                    if single.len() > 0 {
+                        parts.push(single);
+                        single = [];
+                    }
+                    parts.push(run_of(v, times));
+                    count = count + times;
+                }
+            } else {
+                single.push(v);
+                count = count + 1;
+            }
         }
-        return out;
+        if single.len() > 0 { parts.push(single); }
+        return joined(parts);
     }
 
     fn names(var ref self, label: str) -> List<str> {
@@ -250,6 +321,19 @@ struct Reader : IObject {
         }
         return out;
     }
+}
+
+/// A table's automaton as `lexer_text` writes it (its actions empty).
+fn read_automaton(var ref r: Reader) -> LexTable {
+    let names = r.names("names");
+    let class_of = r.ints("class_of");
+    r.expect("size");
+    let classes = r.int();
+    let states = r.int();
+    let starts = r.ints("starts");
+    let next = r.ints("next");
+    let accept = r.ints("accept");
+    return LexTable { names: names, class_of: class_of, classes: classes, states: states, starts: starts, next: next, accept: accept, actions: [] };
 }
 
 /// The lexer in the cache file text `src`, when it holds one built from
@@ -271,26 +355,22 @@ pub fn read_lexer(src: str, key: str) -> ModalLexer? {
     var i = 0;
     while i < modes.len() && !r.bad {
         enters.push(r.ints("enters"));
-        let names = r.names("names");
-        let class_of = r.ints("class_of");
-        r.expect("size");
-        let classes = r.int();
-        let states = r.int();
-        let starts = r.ints("starts");
-        let next = r.ints("next");
-        let accept = r.ints("accept");
+        r.expect("shares");
+        let shares = r.int();
+        if shares >= i { return none; }
+        let auto = if shares >= 0 { tables[shares] } else { read_automaton(r) };
         let acts = r.ints("actions");
         let goes = r.names("enters_mode");
         var actions: List<TokenAction> = [];
         var k = 0;
-        while k < goes.len() && 2 * k + 1 < acts.len() {
-            let role = acts[2 * k];
-            if role < 0 || role >= ROLES.len() { return none; }
-            actions.push(TokenAction { role: ROLES[role], enters: goes[k], leaves: acts[2 * k + 1] == 1 });
+        while k < goes.len() && 3 * k + 2 < acts.len() {
+            let role = acts[3 * k];
+            if role < 0 || role >= ROLES.len() || acts[3 * k + 2] < 0 { return none; }
+            actions.push(TokenAction { role: ROLES[role], enters: goes[k], leaves: acts[3 * k + 1] == 1, trails: acts[3 * k + 2] });
             k = k + 1;
         }
-        if actions.len() != names.len() { return none; }
-        tables.push(LexTable { names: names, class_of: class_of, classes: classes, states: states, starts: starts, next: next, accept: accept, actions: actions });
+        if actions.len() != auto.names.len() { return none; }
+        tables.push(LexTable { names: auto.names, class_of: auto.class_of, classes: auto.classes, states: auto.states, starts: auto.starts, next: auto.next, accept: auto.accept, actions: actions });
         i = i + 1;
     }
     if r.bad { return none; }

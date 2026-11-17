@@ -1,0 +1,1 @@
+fn f(a: opt<i64>, b: res<i64, E>) -> i64 => sig g(a) + h(splat(xs));

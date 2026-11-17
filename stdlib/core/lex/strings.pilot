@@ -46,17 +46,33 @@ fn triple(q: i64) -> Pattern {
     return three + (other | byte(q) + other | byte(q) * 2 + other).many() + three;
 }
 
-/// A string in any of the four quotings.
-pub fn string_body() -> Pattern =>
-    quoted(DOUBLE_QUOTE) | quoted(SINGLE_QUOTE) | triple(DOUBLE_QUOTE) | triple(SINGLE_QUOTE);
+/// A string in either quote, once or three times (`three`).
+pub fn string_body(three: bool) -> Pattern =>
+    if three { triple(DOUBLE_QUOTE) | triple(SINGLE_QUOTE) } else { quoted(DOUBLE_QUOTE) | quoted(SINGLE_QUOTE) };
+
+/// What a triple-quoted string's family adds to the family's name: the
+/// seed reads the two quotings as different kinds, so they are different
+/// families.
+pub const TRIPLE_SUFFIX: str = "_triple";
+/// What a raw f-string's opener adds to the family's name.
+pub const RAW_SUFFIX: str = "_raw";
+
+/// The family `base` of a string quoted three times when `triple`.
+pub fn string_family(base: str, triple: bool) -> str => if triple { base + TRIPLE_SUFFIX } else { base };
+
+/// The family of an f-string's opening, by quoting.
+pub fn fstring_open_family(triple: bool, raw: bool) -> str {
+    let name = string_family("fstring_open", triple);
+    return if raw { name + RAW_SUFFIX } else { name };
+}
 
 /// The name of the mode of an f-string quoted by `q` (three times when
 /// `triple`), raw or not.
 pub fn fstring_mode_name(q: i64, triple: bool, raw: bool) -> str {
     var name = "fstring";
     name = name + (if q == DOUBLE_QUOTE { "_double" } else { "_single" });
-    if triple { name = name + "_triple"; }
-    if raw { name = name + "_raw"; }
+    if triple { name = name + TRIPLE_SUFFIX; }
+    if raw { name = name + RAW_SUFFIX; }
     return name;
 }
 
@@ -76,7 +92,7 @@ fn each_fstring(var ref out: List<TokenDecl>, var ref modes: List<LexMode>) {
         for triple in [false, true] {
             for raw in [false, true] {
                 let name = fstring_mode_name(q, triple, raw);
-                out.push(entering(name, token("fstring_open", fprefix(raw) + quotes(q, triple))));
+                out.push(entering(name, token(fstring_open_family(triple, raw), fprefix(raw) + quotes(q, triple))));
                 modes.push(fstring_mode(q, triple, raw));
             }
         }
@@ -118,10 +134,15 @@ fn fstring_mode(q: i64, triple: bool, raw: bool) -> LexMode {
     return lex_mode(fstring_mode_name(q, triple, raw), tokens);
 }
 
-/// The string tokens, in declaration order.
+/// The string tokens, in declaration order: plain, raw and byte strings,
+/// each quoted once and three times.
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
-pub fn string_tokens() -> List<TokenDecl> => [
-    acting(TokenRole::Operand, token("string", string_body())),
-    acting(TokenRole::Operand, token("raw_string", class(RAW_MARKS) + string_body())),
-    acting(TokenRole::Operand, token("byte_string", class(BYTE_MARKS) + string_body())),
-];
+pub fn string_tokens() -> List<TokenDecl> {
+    var out: List<TokenDecl> = [];
+    for triple in [false, true] {
+        out.push(acting(TokenRole::Operand, token(string_family("string", triple), string_body(triple))));
+        out.push(acting(TokenRole::Operand, token(string_family("raw_string", triple), class(RAW_MARKS) + string_body(triple))));
+        out.push(acting(TokenRole::Operand, token(string_family("byte_string", triple), class(BYTE_MARKS) + string_body(triple))));
+    }
+    return out;
+}

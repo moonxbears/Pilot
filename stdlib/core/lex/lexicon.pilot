@@ -14,6 +14,7 @@ use Pilot.Core.Lex.Names;
 use Pilot.Core.Lex.Trivia;
 use Pilot.Core.Lex.Strings;
 use Pilot.Core.Lex.Delimiters;
+use Pilot.Core.Lex.SeedForms;
 
 /// Two families that open and close a bracket, by name.
 pub struct BracketPair : IValue {
@@ -38,7 +39,7 @@ pub fn core_tokens() -> List<TokenDecl> => core_tokens_with([]);
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
 pub fn core_tokens_with(operators: List<TokenDecl>) -> List<TokenDecl> {
     var out: List<TokenDecl> = [];
-    for group in [number_tokens(), name_tokens(), trivia_tokens(), string_tokens(), delimiter_tokens(), operators] {
+    for group in [number_tokens(), suffixed_number_tokens(), name_tokens(), trivia_tokens(), string_tokens(), delimiter_tokens(), operators, seed_forms_after(operators)] {
         for d in group {
             out.push(d);
         }
@@ -60,11 +61,19 @@ pub fn core_modes(operators: List<TokenDecl>) -> List<LexMode> {
     return modes;
 }
 
+/// The seed-form tokens (seed_forms.pilot) that `operators` does not
+/// declare already.
+fn seed_forms_after(ref operators: List<TokenDecl>) -> List<TokenDecl> {
+    var names: List<str> = [];
+    for d in operators { names.push(d.name); }
+    return seed_form_tokens(names);
+}
+
 /// The tokens of the main mode, or of the hole mode when `in_hole`.
 fn modal_tokens(operators: List<TokenDecl>, in_hole: bool) -> List<TokenDecl> {
     let braces = if in_hole { delimiters_in(true, HOLE_MODE) } else { delimiters_in(false, "") };
     var out: List<TokenDecl> = [];
-    for group in [number_tokens(), name_tokens(), trivia_tokens(), string_tokens(), fstring_openers(), operators, braces] {
+    for group in [number_tokens(), suffixed_number_tokens(), name_tokens(), trivia_tokens(), string_tokens(), fstring_openers(), operators, seed_forms_after(operators), braces] {
         for d in group {
             out.push(d);
         }

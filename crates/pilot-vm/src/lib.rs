@@ -982,9 +982,13 @@ impl BytecodeCompiler {
             CMap::Val(v) => self.emit_const(*v),
             CMap::List(items) => {
                 let r_list = self.emit_intrinsic("list_new", &[]);
+                // Each item's registers are released once it is pushed, as in
+                // a list literal, so a list of any length fits.
+                let mark = self.next_reg;
                 for item in items {
                     let r_v = self.materialize_cmap(item);
                     self.emit_intrinsic("list_push", &[r_list, r_v]);
+                    self.release_to(mark);
                 }
                 r_list
             }
@@ -992,10 +996,12 @@ impl BytecodeCompiler {
                 let r_map = self.emit_intrinsic("map_new", &[]);
                 let mut keys: Vec<&String> = m.keys().collect();
                 keys.sort();
+                let mark = self.next_reg;
                 for k in keys {
                     let r_v = self.materialize_cmap(&m[k]);
                     let r_k = self.emit_const(PilotVal::from_str(k));
                     self.emit_intrinsic("map_set", &[r_map, r_k, r_v]);
+                    self.release_to(mark);
                 }
                 r_map
             }

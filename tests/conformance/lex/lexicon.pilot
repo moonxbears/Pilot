@@ -4,11 +4,21 @@
 // into the families the parser expects.
 //
 // Expected, worked by hand:
-//   families: 2 numbers + 1 name + 14 seed words + 1 keyword_literal
-//             + 5 trivia + 1 shebang + 3 strings + 14 delimiters (the 13,
-//             with `.` split into prefix_dot and infix_dot) = 41
+//   families: 45 numbers + 1 name + 14 seed words + 1 keyword_literal
+//             + 5 trivia + 1 shebang + 6 strings + 14 delimiters (the 13,
+//             with `.` split into prefix_dot and infix_dot) + 26 seed forms
+//             (strings: plain, raw and byte, each quoted once and three
+//             times)
+//             = 113, where
+//     numbers: 5 (integer per radix: dec, hex, bin, oct; float), 5 of
+//       them suffixed, and each of the 5 again before a seed word, once per
+//       length of the letter-led words (fn/if 2, let/ref/asm 3, loop 4,
+//       yield/defer/quote 5, struct/return 6, comptime 8, interface 9:
+//       7 lengths) = 5 + 5 + 35;
+//     seed forms: no operators are declared here, so all 20 spellings of
+//       seed_forms.pilot, plus its 6 call-quote openers.
 //   `fn main() { let x = 0xFF; } // done` (spaces not shown):
-//   fn name ( ) { let name = integer ; } line_comment
+//   fn name ( ) { let name = hex_integer ; } line_comment
 use Pilot.Core.Lex.Lexicon;
 use pilot.lex.build;
 use pilot.lex.cache;

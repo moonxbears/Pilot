@@ -20,15 +20,29 @@ use pilot.lex.modes;
 use pilot.lex.cache;
 use pilot.lex;
 
-/// The tokens of the file at `path`, as described above.
-pub fn lex_main(path: str) -> i64 {
+/// The lexer modes of the program being checked: every token family
+/// declared in stdlib/core/lex/ and every operator the program and its
+/// declarations declare.
+pub fn program_modes() -> List<LexMode> {
     let s = snap_load();
     let p = prog_new(s);
-    let modes = core_modes(operator_tokens(declared_operator_symbols(p), declared_postfix_symbols(p)));
+    return core_modes(operator_tokens(declared_operator_symbols(p), declared_postfix_symbols(p)));
+}
+
+/// The modal lexer of `program_modes()`, built (or read from the cache);
+/// its build errors are reported.
+pub fn program_lexer() -> ModalBuild {
+    let modes = program_modes();
     let built = build_modes_cached(modes, LEX_CACHE_DIR);
     for e in built.errors {
         eprint(f"{e.code}: {e.message}");
     }
+    return built;
+}
+
+/// The tokens of the file at `path`, as described above.
+pub fn lex_main(path: str) -> i64 {
+    let built = program_lexer();
     if !built.ok() { return 1; }
     let src = File.read_text(path);
     let tb = build_tape(built.lexer, src);

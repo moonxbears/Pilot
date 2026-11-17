@@ -1,0 +1,198 @@
+// =========================================================================
+// FILE: stdlib/core/lex/utf8.pilot
+// CODE POINTS AS UTF-8 BYTE PATTERNS (PROP-021 §2.8)
+// =========================================================================
+// The lexer's table steps over bytes, so a set of code points is written
+// as the byte sequences that encode them (RFC 3629). `utf8_sequences`
+// splits a code point range into pieces whose encodings differ only in
+// each byte's own range, the standard construction (as in RE2 and Rust's
+// regex-syntax): each piece is one byte range per encoded byte.
+// `utf8_ranges` joins the pieces of a whole set into one trie-shaped
+// pattern.
+// `utf8_char_length` reads one well-formed sequence, so a byte that starts
+// no token is reported once per character, not once per byte.
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Utf8;
+
+use Pilot.Core.Lex.Patterns;
+
+/// The largest code point of each encoded length, 1 to 4 bytes.
+pub const UTF8_LENGTH_MAX: List<i64> = [0x7F, 0x7FF, 0xFFFF, 0x10FFFF,];
+
+/// The lead byte's marker bits of each encoded length (2 to 4 bytes start
+/// at index 1), and the continuation byte's.
+pub const UTF8_LEAD: List<i64> = [0x00, 0xC0, 0xE0, 0xF0,];
+pub const UTF8_CONTINUATION: i64 = 0x80;
+
+/// The surrogate code points, which UTF-8 never encodes.
+pub const SURROGATE_FIRST: i64 = 0xD800;
+pub const SURROGATE_LAST: i64 = 0xDFFF;
+
+/// The bytes UTF-8 uses to encode code point `cp`.
+pub fn utf8_length(cp: i64) -> i64 {
+    var n = 0;
+    while n < 3 && cp > UTF8_LENGTH_MAX[n] { n = n + 1; }
+    return n + 1;
+}
+
+/// The UTF-8 encoding of code point `cp`, byte by byte.
+pub fn utf8_bytes(cp: i64) -> List<i64> {
+    let n = utf8_length(cp);
+    var out: List<i64> = [];
+    if n == 1 {
+        out.push(cp);
+        return out;
+    }
+    out.push(UTF8_LEAD[n - 1] | (cp >> (6 * (n - 1))));
+    var k = n - 2;
+    while k >= 0 {
+        out.push(UTF8_CONTINUATION | ((cp >> (6 * k)) & 0x3F));
+        k = k - 1;
+    }
+    return out;
+}
+
+/// The code points of `ranges` (sorted, merged `lo, hi` pairs; surrogates
+/// left out) as one pattern over their UTF-8 bytes, shaped as a trie: the
+/// sequences are grouped by their first byte range, then by their second
+/// within each group, and so on. A flat alternation of every sequence
+/// (about 1,800 for Unicode's identifier letters) gives an automaton that
+/// carries all of them through each step; the trie carries a few dozen (as
+/// RE2 and Rust's regex-automata build UTF-8 classes).
+pub fn utf8_ranges(ref ranges: List<i64>) -> Pattern {
+    var seqs: List<List<i64>> = [];
+    var i = 0;
+    while i + 1 < ranges.len() as i64 {
+        utf8_sequences(ranges[i], ranges[i + 1], seqs);
+        i = i + 2;
+    }
+    return utf8_trie(seqs, 0, seqs.len() as i64, 0);
+}
+
+/// The trie pattern of `seqs[from .. to]` from byte position `depth` on:
+/// one branch per distinct byte range at that position. The sequences come
+/// in code point order, and two sequences' ranges at one position are
+/// either equal or disjoint, so the sequences of one branch are next to
+/// each other: one pass groups them (a branch's code points lie between
+/// its first and last sequence's, so its lead bytes do too).
+fn utf8_trie(ref seqs: List<List<i64>>, from: i64, to: i64, depth: i64) -> Pattern {
+    var branches: List<Pattern> = [];
+    var i = from;
+    while i < to {
+        let lo = seqs[i][2 * depth];
+        let hi = seqs[i][2 * depth + 1];
+        var j = i;
+        while j < to && seqs[j][2 * depth] == lo && seqs[j][2 * depth + 1] == hi { j = j + 1; }
+        // One prefix fixes the encoded length, so a branch's sequences all
+        // end here or all go on.
+        let head = byte_range(lo, hi);
+        if seqs[i].len() as i64 <= 2 * depth + 2 {
+            branches.push(head);
+        } else {
+            branches.push(seq([head, utf8_trie(seqs, i, j, depth + 1)]));
+        }
+        i = j;
+    }
+    return if branches.len() == 1 { branches[0] } else { alt(branches) };
+}
+
+/// Appends to `out` the UTF-8 byte sequences of `lo ..= hi`, each as its
+/// byte ranges (`lo0, hi0, lo1, hi1, ..`): the code points are split until
+/// each piece's encodings differ only in each byte's own range.
+pub fn utf8_sequences(lo: i64, hi: i64, var ref out: List<List<i64>>) {
+    if lo > hi { return; }
+    if lo <= SURROGATE_LAST && hi >= SURROGATE_FIRST {
+        utf8_sequences(lo, SURROGATE_FIRST - 1, out);
+        utf8_sequences(SURROGATE_LAST + 1, hi, out);
+        return;
+    }
+    // Ends of different encoded lengths: one part per length.
+    for top in UTF8_LENGTH_MAX {
+        if lo <= top && hi > top {
+            utf8_sequences(lo, top, out);
+            utf8_sequences(top + 1, hi, out);
+            return;
+        }
+    }
+    let n = utf8_length(lo);
+    // Split where a lower byte would have to wrap: below each boundary of
+    // 6 * i bits the low bits must run over their whole range.
+    var i = 1;
+    while i < n {
+        let m = (1 << (6 * i)) - 1;
+        if (lo & ~m) != (hi & ~m) {
+            if (lo & m) != 0 {
+                utf8_sequences(lo, lo | m, out);
+                utf8_sequences((lo | m) + 1, hi, out);
+                return;
+            }
+            if (hi & m) != m {
+                utf8_sequences(lo, (hi & ~m) - 1, out);
+                utf8_sequences(hi & ~m, hi, out);
+                return;
+            }
+        }
+        i = i + 1;
+    }
+    let a = utf8_bytes(lo);
+    let b = utf8_bytes(hi);
+    var seq: List<i64> = [];
+    var k = 0;
+    while k < n {
+        seq.push(a[k]);
+        seq.push(b[k]);
+        k = k + 1;
+    }
+    out.push(seq);
+}
+
+/// The union of two lists of sorted, merged `lo, hi` pairs, sorted and
+/// merged.
+pub fn ranges_union(ref a: List<i64>, ref b: List<i64>) -> List<i64> {
+    var out: List<i64> = [];
+    var i = 0;
+    var j = 0;
+    while i < a.len() as i64 || j < b.len() as i64 {
+        let take_a = j >= b.len() as i64 || (i < a.len() as i64 && a[i] <= b[j]);
+        let lo = if take_a { a[i] } else { b[j] };
+        let hi = if take_a { a[i + 1] } else { b[j + 1] };
+        if take_a { i = i + 2; } else { j = j + 2; }
+        let last = out.len() as i64 - 1;
+        if last > 0 && lo <= out[last] + 1 {
+            if hi > out[last] { out[last] = hi; }
+        } else {
+            out.push(lo);
+            out.push(hi);
+        }
+    }
+    return out;
+}
+
+/// The length of the well-formed UTF-8 sequence at `src[pos ..]` (RFC 3629:
+/// no overlong form, no surrogate, nothing past U+10FFFF); 1 when the bytes
+/// there are not one.
+pub fn utf8_char_length(src: str, pos: i64) -> i64 {
+    let n = src.len() as i64;
+    let b0 = src.byte_at(pos) as i64;
+    let len = utf8_lead_length(b0);
+    if len <= 1 || pos + len > n { return 1; }
+    var cp = b0 & (0x7F >> len);
+    var k = 1;
+    while k < len {
+        let b = src.byte_at(pos + k) as i64;
+        if (b & 0xC0) != UTF8_CONTINUATION { return 1; }
+        cp = (cp << 6) | (b & 0x3F);
+        k = k + 1;
+    }
+    if utf8_length(cp) != len || (cp >= SURROGATE_FIRST && cp <= SURROGATE_LAST) || cp > UTF8_LENGTH_MAX[3] { return 1; }
+    return len;
+}
+
+/// The length a lead byte announces: 1 for ASCII or a byte no sequence
+/// starts with.
+fn utf8_lead_length(b: i64) -> i64 {
+    if (b & 0xE0) == UTF8_LEAD[1] { return 2; }
+    if (b & 0xF0) == UTF8_LEAD[2] { return 3; }
+    if (b & 0xF8) == UTF8_LEAD[3] { return 4; }
+    return 1;
+}

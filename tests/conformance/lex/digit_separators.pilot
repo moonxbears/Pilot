@@ -8,7 +8,7 @@
 //   1000_      `_` has no digit after it: number 1000, then `_` is a name
 //   1__0       one `_` at most before each digit: number 1, name __0
 //   0x_FF      hex digits must start with a digit: number 0, name x_FF
-//   0xFF_FF    -> integer
+//   0xFF_FF    -> hex_integer (one family per radix)
 //   2.5e1_0    digits . digits, exponent with grouped digits -> float
 //   1..5       a float needs digits after `.`: number 1, `.` and `.`
 //              start no token (?), number 5

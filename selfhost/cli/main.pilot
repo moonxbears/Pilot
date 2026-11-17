@@ -48,11 +48,13 @@ pub fn default_command_registry() -> CommandRegistry {
     spec_command_add_flag(cmd_check, spec_new_flag("fix", "", 0, "false", "", "", false, false, "Automatically apply lossless CST fixes"));
     let _ = spec_registry_register(reg, cmd_check);
 
-    let cmd_lex = spec_new_command(
+    var cmd_lex = spec_new_command(
         "lex", "", "Analysis & Quality",
         "Print a file's tokens, lexed by the table built from Pilot's token declarations",
         "pilot lex src/main.pilot"
     );
+    spec_command_add_flag(cmd_lex, spec_new_flag("write-table", "", 0, "false", "", "", false, false, "Write the table the seed lexer runs (stdlib/core/lex/toolchain.lex) from the token declarations"));
+    spec_command_add_flag(cmd_lex, spec_new_flag("check-table", "", 0, "false", "", "", false, false, "Fail (GATE024) when stdlib/core/lex/toolchain.lex is not the table the token declarations give"));
     let _ = spec_registry_register(reg, cmd_lex);
 
     var cmd_fmt = spec_new_command(

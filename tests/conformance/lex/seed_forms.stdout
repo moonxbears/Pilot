@@ -1,0 +1,8 @@
+true
+name:f call_quote:! (:( name:x ):) name:g splice_quote:!! (:( name:y ):) 
+name:a frame_quote:!& (:( name:b ):) name:c sig_quote:!^ (:( name:d ):) name:e grad_quote:!@ (:( name:h ):) name:k plan_quote:!? (:( name:m ):) 
+if:if call_quote:! (:( name:t ):) 
+!:! name:x !:! !:! name:z name:p !=:!= name:q 
+name:x +=:+= integer:1 
+name:a ?.:?. name:b ?:? ?:? name:c ??=:??= name:d 
+$:$ name:v @>:@> <-:<- ...:... **=:**= <<=:<<= 

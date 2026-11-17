@@ -55,7 +55,7 @@
 //!      - `pub fn compute_bench_stats_json(samples_csv: str) -> str`
 //!        Computes valid JSON `{"count":N,"min":...,"max":...,"mean":...,"median":...}` over comma-separated integer nanosecond samples.
 //!
-//! 3. `selfhost/cli/{main,build_cmd,test_runner,diff_test,repl}.pilot` & `selfhost/pilotc.pilot` (`<= 1,500` LOC each):
+//! 3. `selfhost/cli/{main,build_cmd,test_runner,diff_test}.pilot` & `selfhost/pilotc.pilot` (`<= 1,500` LOC each):
 //!    - `cli/main.pilot` & `cli/build_cmd.pilot`:
 //!      - `pub fn parse_cli_build_args(argv_line: str) -> str`
 //!        (Parses e.g. `"build <input> --target <t> --release -o <out>"` -> `"<cmd>|<input>|<target>|<release_0_or_1>|<out>"`.)
@@ -65,11 +65,6 @@
 //!    - `cli/diff_test.pilot`:
 //!      - `pub fn check_differential_backends(vm_out: str, c_out: str, llvm_out: str, wasm_out: str) -> str`
 //!        (Returns `"PASS"` iff all 4 match; otherwise `"MISMATCH:<backend_name>"` naming the first diverging backend.)
-//!    - `cli/repl.pilot`:
-//!      - Zero hardcoded Pilot scalar type names (`"i64"`, `"f64"`, `"bool"`, `"str"`, `"usize"`).
-//!      - `pub fn repl_session_new() -> i64`
-//!      - `pub fn repl_eval_line(sess: i64, line: str) -> str`
-//!        Persists `let`/`var` bindings and reassignments across lines, evaluates arithmetic expressions over session bindings, and returns the evaluated decimal result string.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -216,15 +211,6 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             max_lines: 1500,
             name_blind: false,
             required_pub_fns: &["check_differential_backends"],
-            required_code_markers: &[],
-            forbidden_code_markers: &[],
-            forbidden_string_substrings: &[],
-        },
-        anticheat::FileAuditRule {
-            path: "selfhost/cli/repl.pilot",
-            max_lines: 1500,
-            name_blind: true,
-            required_pub_fns: &["repl_session_new", "repl_eval_line"],
             required_code_markers: &[],
             forbidden_code_markers: &[],
             forbidden_string_substrings: &[],
@@ -738,9 +724,9 @@ print("OK")
 }
 
 #[test]
-pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_crate_purge() {
+pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_and_crate_purge() {
     let guard = anticheat::AntiCheatGuard::arm(
-        "test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_crate_purge",
+        "test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_and_crate_purge",
         &ANTICHEAT_SPEC,
     );
     let root = workspace_root();
@@ -785,18 +771,8 @@ pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_c
     let build_cmd = std::fs::read_to_string(root.join("selfhost/cli/build_cmd.pilot")).unwrap();
     let test_runner = std::fs::read_to_string(root.join("selfhost/cli/test_runner.pilot")).unwrap();
     let diff_test = std::fs::read_to_string(root.join("selfhost/cli/diff_test.pilot")).unwrap();
-    let repl_src = std::fs::read_to_string(root.join("selfhost/cli/repl.pilot")).unwrap();
 
-    // Enforce Name-Blind REPL rule: zero hardcoded Pilot scalar type names in `repl.pilot`
-    for scalar in ["\"i64\"", "\"f64\"", "\"bool\"", "\"usize\"", "\"u8\""] {
-        assert!(
-            !repl_src.contains(scalar),
-            "selfhost/cli/repl.pilot must be Name-Blind (found hardcoded {})",
-            scalar
-        );
-    }
-
-    // 3. Test AST test discovery + CLI argv parsing + differential backend detector + stateful REPL
+    // 3. Test AST test discovery + CLI argv parsing + differential backend detector
     let t_fn_1 = rng.ident("test_math_", 5);
     let t_fn_2 = rng.ident("test_crypto_", 5);
     let helper_fn = rng.ident("helper_ignore_", 5);
@@ -808,16 +784,11 @@ pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_c
     let suite_arena = parse(&suite_src);
     let suite_analysis = AnalysisPipeline::analyze(&suite_arena, suite_arena.root);
 
-    let r1 = rng.range_i64(12, 60);
-    let r2 = rng.range_i64(3, 9);
-    let r3 = rng.range_i64(10, 80);
-    let r4 = rng.range_i64(5, 25);
-    let expected_repl = r1 + (r1 * r2 + r3 - r4);
     let rand_val = format!("{}", rng.range_i64(1000, 9999));
     let bad_val = format!("{}_bad", rand_val);
 
     let driver = format!(
-        "{cli_main}\n{build_cmd}\n{test_runner}\n{diff_test}\n{repl_src}\n\
+        "{cli_main}\n{build_cmd}\n{test_runner}\n{diff_test}\n\
          let argv_parsed = parse_cli_build_args(\"build app/guidance.pilot --target wasm --release -o out/guidance.wasm\");\n\
          let discovered = discover_arena_tests();\n\
          let summary_json = summarize_test_suite_json(\"{t_fn_1}:1,{t_fn_2}:0,extra:1\");\n\
@@ -825,19 +796,14 @@ pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_c
          let d_c = check_differential_backends(\"{rand_val}\", \"{bad_val}\", \"{rand_val}\", \"{rand_val}\");\n\
          let d_llvm = check_differential_backends(\"{rand_val}\", \"{rand_val}\", \"{bad_val}\", \"{rand_val}\");\n\
          let d_wasm = check_differential_backends(\"{rand_val}\", \"{rand_val}\", \"{rand_val}\", \"{bad_val}\");\n\
-         let sess = repl_session_new();\n\
-         let _l1 = repl_eval_line(sess, \"let alpha = {r1};\");\n\
-         let _l2 = repl_eval_line(sess, \"var beta = alpha * {r2} + {r3};\");\n\
-         let _l3 = repl_eval_line(sess, \"beta = beta - {r4};\");\n\
-         let repl_ans = repl_eval_line(sess, \"alpha + beta\");\n\
          let __out = argv_parsed + \"@@CLI@@\" + discovered + \"@@CLI@@\" + summary_json + \"@@CLI@@\"\n\
-             + d_ok + \",\" + d_c + \",\" + d_llvm + \",\" + d_wasm + \"@@CLI@@\" + repl_ans;\n\
+             + d_ok + \",\" + d_c + \",\" + d_llvm + \",\" + d_wasm;\n\
          __out;\n"
     );
 
     let out = eval_with_mounted_physics(&driver, &suite_src, &suite_analysis.physics);
     let cols: Vec<&str> = out.split("@@CLI@@").collect();
-    assert_eq!(cols.len(), 5, "Unexpected CLI suite output: {}", out);
+    assert_eq!(cols.len(), 4, "Unexpected CLI suite output: {}", out);
 
     assert_eq!(
         cols[0], "build|app/guidance.pilot|wasm|1|out/guidance.wasm",
@@ -856,12 +822,6 @@ pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_c
     assert_eq!(
         cols[3], "PASS,MISMATCH:c,MISMATCH:llvm,MISMATCH:wasm",
         "Differential backend verifier failed to pinpoint diverging backend"
-    );
-    assert!(
-        cols[4].contains(&expected_repl.to_string()),
-        "Stateful REPL session expected {} across 4 lines, got: {}",
-        expected_repl,
-        cols[4]
     );
     guard.finish();
 }

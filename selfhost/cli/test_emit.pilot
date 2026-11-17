@@ -360,20 +360,30 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
     var built_stderr: List<str> = [];
     var srcs: List<str> = [];
     var bins: List<str> = [];
+    // Progress over every case, whichever step settles it.
+    let total = cases.len() as i64;
+    var done = 0;
+    var seams: List<str> = [];
     var i = 0;
     while i < cases.len() {
         let out = emitted[i].out;
         if stopped_at_seam(out) {
             tally.at_seam = tally.at_seam + 1;
-            print(f"SEAM {cases[i]}: {seam_line(out)}");
+            seams.push(f"SEAM {cases[i]}: {seam_line(out)}");
+            done = done + 1;
+            test_progress_untimed(done, total, CaseOutcome::Seam, cases[i]);
         } else if out.exit_code != 0 {
             let res = test_check_case(cases[i], out);
             if res.problems.len == 0 { tally.passed = tally.passed + 1; } else { fail(cases[i], res.problems, tally); }
+            done = done + 1;
+            test_progress_untimed(done, total, if res.problems.len == 0 { CaseOutcome::Pass } else { CaseOutcome::Fail }, cases[i]);
         } else {
             let base = emitted_name(cases[i]);
             let src = f"{dir}/{base}.{r.ext}";
             if emitted[i].src == "" && !File.write_text(src, out.stdout) {
                 fail(cases[i], [f"cannot write `{src}`"], tally);
+                done = done + 1;
+                test_progress_untimed(done, total, CaseOutcome::Fail, cases[i]);
             } else {
                 built.push(cases[i]);
                 built_stderr.push(out.stderr);
@@ -386,6 +396,7 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
 
     if fail_fast && tally.failed > 0 {
         tally.not_run = tally.not_run + built.len();
+        for line in seams { print(line); }
         return;
     }
 
@@ -404,6 +415,8 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
                 runnable.push(i);
             } else {
                 fail(built[i], [f"the host compiler rejected `{srcs[i]}`\n{outs[i].stdout}{outs[i].stderr}"], tally);
+                done = done + 1;
+                test_progress_untimed(done, total, CaseOutcome::Fail, built[i]);
             }
             i = i + 1;
         }
@@ -411,6 +424,7 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
 
     if fail_fast && tally.failed > 0 {
         tally.not_run = tally.not_run + runnable.len();
+        for line in seams { print(line); }
         return;
     }
 
@@ -438,6 +452,7 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
     loop {
         guard some f = pool.next() else { break; };
         let k = runnable[f.index];
+        done = done + 1;
         var problems = if f.timed_out { [test_timed_out(sel, built[k])] } else { check_emitted(built[k], built_stderr[k], f.out) };
         if live && !f.timed_out {
             if some n = live_count(f.out.stderr) {
@@ -446,6 +461,7 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
         }
         judged[f.index] = true;
         found[f.index] = problems;
+        test_progress(done, total, if problems.len() > 0 { CaseOutcome::Fail } else { CaseOutcome::Pass }, built[k], f.elapsed_ms);
         if fail_fast && problems.len() > 0 { break; }
     }
     pool.finish();
@@ -459,5 +475,5 @@ fn run_emitted(ref r: EmitRunner, ref cases: List<str>, ref emitted: List<Emitte
             fail(built[runnable[i]], found[i], tally);
         }
         i = i + 1;
-    }
+    }    for line in seams { print(line); }
 }

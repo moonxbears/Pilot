@@ -1,0 +1,45 @@
+// RingBuffer keeps head and tail inside 0 .. capacity as they wrap.
+// Hand-worked, capacity 3 (items, head, tail, count):
+//   enqueue 10, 20, 30   -> true x3; [10,20,30] h0 t0 (2+1 wraps to 0) c3
+//   enqueue 40           -> false (full)
+//   dequeue x2           -> 10, 20; h2 c1
+//   enqueue 40, 50       -> true x2; items[0]=40, items[1]=50; [40,50,30] t2 c3
+//   enqueue 60           -> false (full)
+//   contains 30, 20, 50  -> slots 2,0,1 hold 30,40,50: true, false, true
+//   dequeue x3           -> 30 (h wraps 2 -> 0), 40, 50; h2 c0
+//   dequeue              -> none, printed -1
+//   len                  -> 0
+//   enqueue 60           -> true; items[2]=60, t wraps 2 -> 0
+//   dequeue              -> 60; h wraps 2 -> 0
+// Capacity 1 wraps on every step: true, false, 7, true, 9.
+use std.col;
+
+fn main() {
+    var q = RingBuffer<i64> { capacity: 3, head: 0, tail: 0, count: 0, items: [] };
+    print(q.enqueue(10));
+    print(q.enqueue(20));
+    print(q.enqueue(30));
+    print(q.enqueue(40));
+    print(q.dequeue() ?? -1);
+    print(q.dequeue() ?? -1);
+    print(q.enqueue(40));
+    print(q.enqueue(50));
+    print(q.enqueue(60));
+    print(q.contains(30));
+    print(q.contains(20));
+    print(q.contains(50));
+    print(q.dequeue() ?? -1);
+    print(q.dequeue() ?? -1);
+    print(q.dequeue() ?? -1);
+    print(q.dequeue() ?? -1);
+    print(q.len());
+    print(q.enqueue(60));
+    print(q.dequeue() ?? -1);
+
+    var one = RingBuffer<i64> { capacity: 1, head: 0, tail: 0, count: 0, items: [] };
+    print(one.enqueue(7));
+    print(one.enqueue(8));
+    print(one.dequeue() ?? -1);
+    print(one.enqueue(9));
+    print(one.dequeue() ?? -1);
+}

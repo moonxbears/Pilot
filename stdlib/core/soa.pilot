@@ -31,6 +31,8 @@ pub pure fn default_simd_alignment() -> usize => 64;
 
 pub pure fn align_up_bytes(offset: usize, align: usize) -> usize {
     if align <= 1 { return offset; }
+    // A power of two (one bit set): round up with a mask, no division.
+    if (align & (align - 1)) == 0 { return (offset + (align - 1)) & ~(align - 1); }
     let rem = offset % align;
     if rem == 0 { return offset; }
     return offset + (align - rem);

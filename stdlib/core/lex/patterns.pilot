@@ -108,7 +108,8 @@ pub enum TokenRole : u8 {
 /// text in the same context (the higher wins; equal priorities are an error,
 /// LEX002). `when` and `role` are its context rules; `enters` names the
 /// mode a lexer switches to after it (`""` for none), and `leaves` returns
-/// to the mode before.
+/// to the mode before. `trails` counts the bytes at the end of `pattern`
+/// that must follow the token but are not part of it (`f!(`'s `(`).
 pub struct TokenDecl : IObject {
     pub name: str;
     pub priority: i64;
@@ -117,12 +118,13 @@ pub struct TokenDecl : IObject {
     pub role: TokenRole;
     pub enters: str;
     pub leaves: bool;
+    pub trails: i64;
 }
 
 pub fn token(name: str, pattern: Pattern) -> TokenDecl => token_over(name, 0, pattern);
 
 pub fn token_over(name: str, priority: i64, pattern: Pattern) -> TokenDecl =>
-    TokenDecl { name: name, priority: priority, pattern: pattern, when: TokenWhen::Always, role: TokenRole::Plain, enters: "", leaves: false };
+    TokenDecl { name: name, priority: priority, pattern: pattern, when: TokenWhen::Always, role: TokenRole::Plain, enters: "", leaves: false, trails: 0 };
 
 /// `d`, which may only start in context `w`.
 pub fn starting(w: TokenWhen, d: TokenDecl) -> TokenDecl {
@@ -142,6 +144,26 @@ pub fn acting(r: TokenRole, d: TokenDecl) -> TokenDecl {
 pub fn entering(m: str, d: TokenDecl) -> TokenDecl {
     var out = d;
     out.enters = m;
+    return out;
+}
+
+/// `d`, matched only when `text` follows it; `text` is left for the next
+/// token (fixed trailing context, as in lex's `r/s`).
+pub fn trailed_by(text: str, d: TokenDecl) -> TokenDecl {
+    var out = d;
+    out.pattern = seq([d.pattern, lit(text)]);
+    out.trails = d.trails + text.len() as i64;
+    return out;
+}
+
+/// `d` matched only before one of `texts` (all of one length), which it
+/// leaves for the next token.
+pub fn trailed_by_any(texts: List<str>, d: TokenDecl) -> TokenDecl {
+    var alts: List<Pattern> = [];
+    for t in texts { alts.push(lit(t)); }
+    var out = d;
+    out.pattern = seq([d.pattern, alt(alts)]);
+    out.trails = d.trails + texts[0].len() as i64;
     return out;
 }
 

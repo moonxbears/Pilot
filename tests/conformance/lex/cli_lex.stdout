@@ -11,8 +11,7 @@ name:len
 fstring_close:"
 ;:;
 name:x
-?:?
-infix_dot:.
+?.:?.
 name:y
 
 0

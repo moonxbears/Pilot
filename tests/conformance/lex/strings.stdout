@@ -3,5 +3,5 @@ string 6
 string 3
 raw_string 4
 byte_string 4
-string 10
-string 7
+string_triple 10
+string_triple 7

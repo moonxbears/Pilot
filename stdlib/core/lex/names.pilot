@@ -2,21 +2,35 @@
 // FILE: stdlib/core/lex/names.pilot
 // NAME TOKENS AND THE SEED WORDS (PROP-021 slice 21B)
 // =========================================================================
-// A name is a letter or `_`, then letters, digits and `_`. A seed word is
-// declared over the name pattern with a higher priority, so `fn` is the
-// word and `fnord` a name (the longest match). Names are ASCII here, as in
-// today's seed lexer; UTF-8 letters are a later slice (PROP-021 §2.8).
+// A name starts with a letter or `_` and goes on with letters, digits and
+// `_`, where the letters beyond ASCII are Unicode's identifier letters
+// (UAX #31: XID_Start, then XID_Continue; owner decision 2026-11-16), as
+// UTF-8 bytes (PROP-021 §2.8). A seed word is declared over the name
+// pattern with a higher priority, so `fn` is the word and `fnord` a name
+// (the longest match).
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Names;
 
 use Pilot.Core.Lex.Patterns;
 use Pilot.Core.Lex.Words;
+use Pilot.Core.Lex.Utf8;
+use Pilot.Core.Lex.UnicodeXid;
 
-/// A byte that may start a name.
-pub fn name_start() -> Pattern => "a" ..= "z" | "A" ..= "Z" | lit("_");
+/// An ASCII character that may start a name.
+pub fn ascii_name_start() -> Pattern => "a" ..= "z" | "A" ..= "Z" | lit("_");
 
-/// A name: a start byte, then start bytes and digits.
-pub fn name_pattern() -> Pattern => name_start() + (name_start() | "0" ..= "9").many();
+/// A character that may start a name: an ASCII letter, `_`, or an XID_Start
+/// letter beyond ASCII.
+pub fn name_start() -> Pattern => ascii_name_start() | utf8_ranges(XID_START_RANGES);
+
+/// A character that may continue a name: one that may start it, an ASCII
+/// digit, or an XID_Continue character beyond ASCII (combining marks,
+/// other scripts' digits, ...). The two non-ASCII sets are joined first, so
+/// they form one trie.
+pub fn name_continue() -> Pattern => ascii_name_start() | "0" ..= "9" | utf8_ranges(ranges_union(XID_START_RANGES, XID_CONTINUE_ONLY_RANGES));
+
+/// A name: a start character, then continue characters.
+pub fn name_pattern() -> Pattern => name_start() + name_continue().many();
 
 /// `:red`, `:ns/kw`: a keyword literal. Only after a space, so `x:y` and
 /// `case 1:` keep their `:`.

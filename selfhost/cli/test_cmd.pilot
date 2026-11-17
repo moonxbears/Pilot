@@ -345,6 +345,27 @@ pub fn test_check_case(program: str, out: proc.ProcessOutput) -> TestResult {
     return TestResult { name: program, problems: problems };
 }
 
+/// How one case ended, as its progress line names it.
+pub enum CaseOutcome : u8 { Pass, Fail, Seam, Bug, Fixed, }
+
+/// The word of each `CaseOutcome`, by its value: a known bug that still
+/// fails is `BUG`, one that passes is `FIXED`.
+pub const CASE_OUTCOME_WORDS: List<str> = ["PASS", "FAIL", "SEAM", "BUG", "FIXED",];
+
+/// Prints the line for a case as it finishes, `[3/29] PASS <case> (1.2 s)`,
+/// so a long run shows its progress; the failures' details and the RESULT
+/// line still come at the end, in case order. Every engine's runner prints
+/// it (test_ir.pilot, test_emit.pilot).
+pub fn test_progress(done: i64, total: i64, outcome: CaseOutcome, program: str, elapsed_ms: i64) {
+    print(f"[{done}/{total}] {CASE_OUTCOME_WORDS[outcome as i64]} {program} ({elapsed_ms / 1000}.{(elapsed_ms % 1000) / 100} s)");
+}
+
+/// The line for a case settled by a step that did not time it on its own
+/// (a batch of `pilot emit` or host compiler runs): no time is shown.
+pub fn test_progress_untimed(done: i64, total: i64, outcome: CaseOutcome, program: str) {
+    print(f"[{done}/{total}] {CASE_OUTCOME_WORDS[outcome as i64]} {program}");
+}
+
 /// What running some cases left: per case its result, and whether it ran.
 pub struct CaseRuns : IObject {
     pub results: List<TestResult>;
@@ -354,8 +375,10 @@ pub struct CaseRuns : IObject {
 }
 
 /// Runs the conformance cases `programs` (a `proc.JobPool`), judging each
-/// as it finishes; with `fail_fast`, starts no more after the first failure.
-pub fn test_run_cases(ref programs: List<str>, ref sel: TestSelect, fail_fast: bool) -> CaseRuns {
+/// and printing its progress line as it finishes; with `fail_fast`, starts
+/// no more after the first failure. `known_bugs`: the cases reproduce known
+/// bugs, so a failure is `BUG` and a pass `FIXED`.
+pub fn test_run_cases(ref programs: List<str>, ref sel: TestSelect, fail_fast: bool, known_bugs: bool) -> CaseRuns {
     var jobs: List<proc.ProcessJob> = [];
     var results: List<TestResult> = [];
     var ran: List<bool> = [];
@@ -367,12 +390,17 @@ pub fn test_run_cases(ref programs: List<str>, ref sel: TestSelect, fail_fast: b
     var pool = proc.job_pool_at_most(jobs, sel.jobs);
     test_set_limits(pool, sel, programs);
     var stopped = false;
+    var done = 0;
     loop {
         guard some f = pool.next() else { break; };
         let program = programs[f.index];
         let r = if f.timed_out { TestResult { name: program, problems: [test_timed_out(sel, program)] } } else { test_check_case(program, f.out) };
         results[f.index] = r;
         ran[f.index] = true;
+        done = done + 1;
+        let failed = r.problems.len > 0;
+        let outcome = if known_bugs { if failed { CaseOutcome::Bug } else { CaseOutcome::Fixed } } else if failed { CaseOutcome::Fail } else { CaseOutcome::Pass };
+        test_progress(done, programs.len() as i64, outcome, program, f.elapsed_ms);
         if fail_fast && r.problems.len > 0 {
             stopped = true;
             break;
@@ -440,7 +468,7 @@ pub fn test_programs(ref programs: List<str>, ref sel: TestSelect, var ref tally
     for program in programs {
         if is_case(program) { cases.push(program); }
     }
-    let runs = test_run_cases(cases, sel, sel.fail_fast);
+    let runs = test_run_cases(cases, sel, sel.fail_fast, false);
     var stopped = runs.stopped;
     var next_case = 0;
     for program in programs {
@@ -462,7 +490,7 @@ pub fn test_programs(ref programs: List<str>, ref sel: TestSelect, var ref tally
 
 /// Runs the known-bug programs `programs`; each must still fail.
 pub fn test_known_bug_programs(ref programs: List<str>, ref sel: TestSelect, var ref tally: TestTally) {
-    for r in test_run_cases(programs, sel, false).results {
+    for r in test_run_cases(programs, sel, false, true).results {
         if r.problems.len == 0 {
             tally.bugs_fixed = tally.bugs_fixed + 1;
             print(f"FIXED {r.name}: the bug it reproduces is gone; move it up into the corpus, delete its `bug_registry()` entry and undo every [Workaround] naming it");

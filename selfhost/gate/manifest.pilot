@@ -706,7 +706,6 @@ pub fn legacy_engine_ratchet() -> Map<str, i64> {
     m.set("selfhost/check/program.pilot", 2);
     m.set("selfhost/check/snapshot.pilot", 2);
     m.set("selfhost/cli/host.pilot", 12);
-    m.set("selfhost/cli/repl.pilot", 50);
     m.set("selfhost/cli/test_runner.pilot", 8);
     m.set("selfhost/codegen/asm_emitter.pilot", 109);
     m.set("selfhost/codegen/c_emitter.pilot", 80);
@@ -724,7 +723,6 @@ pub fn legacy_engine_ratchet() -> Map<str, i64> {
     m.set("selfhost/db/engine.pilot", 85);
     m.set("selfhost/diagnostics.pilot", 20);
     m.set("selfhost/ffi_bindgen.pilot", 56);
-    m.set("selfhost/fmt/fmt.pilot", 62);
     m.set("selfhost/gate/manifest.pilot", 22);
     m.set("selfhost/gate/rename_litmus.pilot", 15);
     m.set("selfhost/gate/runner.pilot", 20);

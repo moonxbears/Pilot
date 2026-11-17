@@ -1,0 +1,23 @@
+// align_up_bytes(offset, align): the least multiple of `align` >= offset;
+// `align` 0 or 1 leaves the offset as it is. Hand-worked:
+//   (0, 8) = 0       (13, 8) = 16     (16, 8) = 16     (17, 16) = 32
+//   (1, 64) = 64     (63, 64) = 64    (65, 64) = 128   (5, 1) = 5
+//   (5, 0) = 5
+// An alignment that is not a power of two still rounds up to its multiple:
+//   (10, 12) = 12    (24, 12) = 24    (25, 12) = 36 (25 = 2*12 + 1)
+use core.soa;
+
+fn main() {
+    print(align_up_bytes(0, 8));
+    print(align_up_bytes(13, 8));
+    print(align_up_bytes(16, 8));
+    print(align_up_bytes(17, 16));
+    print(align_up_bytes(1, 64));
+    print(align_up_bytes(63, 64));
+    print(align_up_bytes(65, 64));
+    print(align_up_bytes(5, 1));
+    print(align_up_bytes(5, 0));
+    print(align_up_bytes(10, 12));
+    print(align_up_bytes(24, 12));
+    print(align_up_bytes(25, 12));
+}

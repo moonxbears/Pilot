@@ -121,6 +121,7 @@ pub fn cli_checker_files() -> List<str> => [
     "stdlib/core/lex/numbers.pilot",
     "stdlib/core/lex/strings.pilot",
     "stdlib/core/lex/literal_value.pilot",
+    "stdlib/core/lex/utf8.pilot",
     "stdlib/pilot/lex/build.pilot",
     "selfhost/check/snapshot.pilot",
     "selfhost/check/types.pilot",

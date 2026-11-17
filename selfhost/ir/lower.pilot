@@ -885,6 +885,7 @@ pub fn lower_unary(var ref lw: Lowerer, n: i64) -> u32 {
     if op == 1 { return lower_expr(lw, lhs(s, n)); }
     if op == unary_some() { return lower_some(lw, n); }
     if op == unary_old() { return lower_old(lw, n); }
+    if some call = lower_prefix_member(lw, n) { return call; }
     if op != 0 && op != 4 && op != 5 { return unsupported(lw, n); }
     let x = lower_expr(lw, lhs(s, n));
     let phy = physics_of(lw, n);

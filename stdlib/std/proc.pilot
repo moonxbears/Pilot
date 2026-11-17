@@ -336,6 +336,8 @@ pub struct Finished : IValue {
     pub index:     i64;
     pub out:       ProcessOutput;
     pub timed_out: bool;
+    /// How long the job ran, in milliseconds (monotonic clock).
+    pub elapsed_ms: i64;
 }
 
 /// Jobs run at most as many at once as the machine has CPUs, the next
@@ -362,6 +364,8 @@ pub struct JobPool : IObject {
     priv limits:  List<i64>;
     /// Per running job, when it must have finished (ns, monotonic; 0: never).
     priv due:     List<i64>;
+    /// Per running job, when it started (ns, monotonic).
+    priv began:   List<i64>;
 
     ~self() {
         .finish();
@@ -379,6 +383,7 @@ pub struct JobPool : IObject {
             .running.push(spawn_job(.jobs[.started]));
             .slots.push(.started);
             .due.push(if .limits[.started] > 0 { now + .limits[.started] * 1000000000 } else { 0 });
+            .began.push(now);
             .started = .started + 1;
             .fresh = .fresh + 1;
         }
@@ -392,8 +397,9 @@ pub struct JobPool : IObject {
         if k < 0 { return .time_out(first_due); }
         let out = .running[k].wait();
         let slot = .slots[k];
+        let ms = (Clock.now_ns(1) - .began[k]) / 1000000;
         .forget(k);
-        return Finished { index: slot, out: out, timed_out: false };
+        return Finished { index: slot, out: out, timed_out: false, elapsed_ms: ms };
     }
 
     /// Hands back the running job due at `due` as timed out. Its output so
@@ -409,14 +415,16 @@ pub struct JobPool : IObject {
         let _ = .running[k].wait();
         let out = ProcessOutput { exit_code: -1, stdout: .running[k].stdout_text, stderr: .running[k].stderr_text };
         let slot = .slots[k];
+        let ms = (Clock.now_ns(1) - .began[k]) / 1000000;
         .forget(k);
-        return Finished { index: slot, out: out, timed_out: true };
+        return Finished { index: slot, out: out, timed_out: true, elapsed_ms: ms };
     }
 
     fn forget(var ref self, k: i64) {
         .running.remove_at(k);
         .slots.remove_at(k);
         .due.remove_at(k);
+        .began.remove_at(k);
         .fresh = 0;
     }
 
@@ -429,6 +437,7 @@ pub struct JobPool : IObject {
             .running.remove_at(0);
             .slots.remove_at(0);
             .due.remove_at(0);
+            .began.remove_at(0);
         }
     }
 }
@@ -442,7 +451,7 @@ pub fn job_pool_at_most(jobs: List<ProcessJob>, most: i64) -> JobPool {
     let cpus = if most > 0 { most } else if cpu_count() > 1 { cpu_count() } else { 1 };
     var limits: List<i64> = [];
     for j in jobs { limits.push(0); }
-    return JobPool { jobs: jobs, cpus: cpus, started: 0, fresh: 0, running: [], slots: [], limits: limits, due: [] };
+    return JobPool { jobs: jobs, cpus: cpus, started: 0, fresh: 0, running: [], slots: [], limits: limits, due: [], began: [] };
 }
 
 /// Runs every job in `jobs` in a `JobPool` and returns what each left, in

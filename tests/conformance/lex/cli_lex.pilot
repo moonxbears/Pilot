@@ -6,8 +6,9 @@
 //   sample.pilot, `let s = f"n={x.len}";` then `x?.y`:
 //     let s = are a seed word, a name and `=`; the f-string is its opening,
 //     the text `n=`, the hole (`x`, an infix dot touching `x`, `len`, its
-//     closing `}`) and the closing quote; then `;`. On line 2 `?` is a
-//     declared postfix operator, so the `.` touching it is infix. Exit 0.
+//     closing `}`) and the closing quote; then `;`. On line 2 `?.` is one
+//     token, the seed's safe navigation (stdlib/core/lex/seed_forms.pilot,
+//     longer than the postfix `?`), then the name `y`. Exit 0.
 //   stray_byte.pilot, `a ` b`: no token starts with a backquote, so LEX001
 //     at byte 2 and exit 1; `a` and `b` still lex.
 //   no file: the usage line, exit 2.

@@ -27,7 +27,9 @@
  * PILOT_NO_FREE turns freeing off, so that count is every object made.
  *
  * ABI. The entry points named `pilot_*` and `pilot_v_*` below are the stable
- * surface emitted code calls. Behaviour (printing, equality, ordering,
+ * surface emitted code calls. Names starting `pilot_u_` are the program's own
+ * functions (selfhost/transpile/c_family.pilot); the runtime never declares
+ * one. Behaviour (printing, equality, ordering,
  * errors) follows the seed VM, whose conformance corpus checks it.
  * ========================================================================= */
 #ifndef PILOT_RT_H

@@ -1,0 +1,27 @@
+// A token family the seed parser has no kind for is LEX008 when the seed
+// table is written (PROP-021 §3.1, stdlib/pilot/lex/seed.pilot): the seed
+// would have to guess what `mystery` is.
+//
+// Expected, worked by hand: `name` is in stdlib/core/lex/seed_kinds.pilot,
+// `mystery` is not. It is declared in both modes, so it is two families,
+// but one LEX008 names it; no table text is given.
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+use pilot.lex.modes;
+use pilot.lex.cache;
+use pilot.lex.seed;
+
+fn main() {
+    let modes: List<LexMode> = [
+        lex_mode("main", [token("name", ("a" ..= "z").some()), entering("other", token("mystery", lit("~~~")))]),
+        lex_mode("other", [leaving(token("mystery", lit("~~~")))]),
+    ];
+    let built = build_modes(modes);
+    print(built.ok());
+    var errors: List<LexBuildError> = [];
+    let text = seed_table_text(built.lexer, modes_key(modes), errors);
+    for e in errors {
+        print(f"{e.code}: {e.message}");
+    }
+    print(text == "");
+}

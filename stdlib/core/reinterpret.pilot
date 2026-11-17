@@ -86,26 +86,37 @@ pub fn from_bits<U: IValue>(bits: u64, to: RegisterShape) -> U {
     return bits;
 }
 
+/// log2 of a width the checker allows (8, 16, 32 or 64: one bit set), with
+/// shifts and masks instead of a loop or a division:
+/// 3 + bit 4 + 2 * bit 5 + 3 * bit 6.
+pub pure fn width_shift(width: i64) -> i64 =>
+    3 + ((width >> 4) & 1) + (((width >> 5) & 1) << 1) + (((width >> 6) & 1) * 3);
+
 /// How many elements a view of shape `to` has over `count` elements of
-/// shape `from`.
+/// shape `from`. Both widths are powers of two, so their ratio is a shift.
 pub fn view_len(count: usize, from: RegisterShape, to: RegisterShape) -> usize {
-    if from.width >= to.width { return count * ((from.width / to.width) as usize); }
-    return count / ((to.width / from.width) as usize);
+    if from.width >= to.width { return count << ((width_shift(from.width) - width_shift(to.width)) as usize); }
+    return count >> ((width_shift(to.width) - width_shift(from.width)) as usize);
 }
 
 /// Element `i` of the view of shape `to` over `src` (elements of shape
 /// `from`).
 pub fn view_read<TSrc: IValue, TDst: IValue>(src: slice<TSrc>, from: RegisterShape, to: RegisterShape, i: usize) -> TDst {
-    if from.width >= to.width {
-        let per = (from.width / to.width) as usize;
-        let shift = (to.width as u64) * ((i % per) as u64);
-        return from_bits<TDst>((bits_of(src[i / per], from) >> shift) & low_mask(to.width), to);
+    let sf = width_shift(from.width);
+    let st = width_shift(to.width);
+    if sf >= st {
+        // `per` = 1 << k target elements in each source element: element
+        // `i` is lane `i & (per - 1)` of source element `i >> k`.
+        let k = (sf - st) as usize;
+        let shift = ((i & ((1 << k) - 1)) as u64) << (st as u64);
+        return from_bits<TDst>((bits_of(src[i >> k], from) >> shift) & low_mask(to.width), to);
     }
-    let per = (to.width / from.width) as usize;
+    let k = (st - sf) as usize;
+    let per: usize = 1 << k;
     var bits: u64 = 0;
     var m: usize = 0;
     while m < per {
-        bits = bits | (bits_of(src[i * per + m], from) << ((from.width as u64) * (m as u64)));
+        bits = bits | (bits_of(src[(i << k) + m], from) << ((m as u64) << (sf as u64)));
         m = m + 1;
     }
     return from_bits<TDst>(bits, to);
@@ -146,16 +157,20 @@ pub struct ReinterpretListLens<TSrc: IValue, TDst: IValue> : IReference {
         get => view_read<TSrc, TDst>(.src, .from, .to, i);
         set => {
             let vbits = bits_of(value, .to);
-            if .from.width >= .to.width {
-                let per = (.from.width / .to.width) as usize;
-                let shift = (.to.width as u64) * ((i % per) as u64);
-                let kept = bits_of(.src[i / per], .from) & (low_mask(.from.width) ^ (low_mask(.to.width) << shift));
-                .src[i / per] = from_bits<TSrc>(kept | (vbits << shift), .from);
+            let sf = width_shift(.from.width);
+            let st = width_shift(.to.width);
+            if sf >= st {
+                let k = (sf - st) as usize;
+                let at = i >> k;
+                let shift = ((i & ((1 << k) - 1)) as u64) << (st as u64);
+                let kept = bits_of(.src[at], .from) & (low_mask(.from.width) ^ (low_mask(.to.width) << shift));
+                .src[at] = from_bits<TSrc>(kept | (vbits << shift), .from);
             } else {
-                let per = (.to.width / .from.width) as usize;
+                let k = (st - sf) as usize;
+                let per: usize = 1 << k;
                 var m: usize = 0;
                 while m < per {
-                    .src[i * per + m] = from_bits<TSrc>((vbits >> ((.from.width as u64) * (m as u64))) & low_mask(.from.width), .from);
+                    .src[(i << k) + m] = from_bits<TSrc>((vbits >> ((m as u64) << (sf as u64))) & low_mask(.from.width), .from);
                     m = m + 1;
                 }
             }

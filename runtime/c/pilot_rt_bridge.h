@@ -141,6 +141,15 @@ static inline pilot_val pilot_str_from_ptr(pilot_val ptr, pilot_val len) {
 static inline pilot_val pilot_vm_thread_entry_ptr(void) { return pilot_v_int(0); }
 static inline pilot_val pilot_vm_callback_dispatch_ptr(void) { return pilot_v_int(0); }
 
+/* A host op the seed VM (crates/pilot-vm/src/bridge.rs) also leaves
+ * unbuilt stops at the same registered seam, with the seed's own words. */
+static inline pilot_val pilot_bridge_seam(const char *id, const char *note) {
+    char m[512];
+    snprintf(m, sizeof m, "SEAM001: unconnected seam `%s`: %s", id, note);
+    pilot_trap(m);
+    return pilot_v_int(-43);
+}
+
 static inline pilot_val pilot_host_op(
     pilot_val v0, pilot_val v1, pilot_val v2, pilot_val v3,
     pilot_val v4, pilot_val v5, pilot_val v6
@@ -164,7 +173,7 @@ static inline pilot_val pilot_host_op(
         free((void *)(uintptr_t)a0);
         return pilot_v_int(0);
     }
-    case 3: return pilot_v_int(-43); /* MemMap */
+    case 3: return pilot_bridge_seam("bridge.mem_map", "virtual memory mapping ops are not yet implemented");
     case 4: memcpy((void *)(uintptr_t)a0, (const void *)(uintptr_t)a1, (size_t)a2); return pilot_v_int(0);
     case 5: memset((void *)(uintptr_t)a0, (int)a1, (size_t)a2); return pilot_v_int(0);
     case 6: {
@@ -212,6 +221,8 @@ static inline pilot_val pilot_host_op(
         }
         return pilot_v_int(-12);
     }
+    case 12: return pilot_bridge_seam("bridge.thread_spawn", "OS thread spawn is not yet implemented");
+    case 13: return pilot_bridge_seam("bridge.thread_join", "OS thread join is not yet implemented");
     case 14: { /* ThreadCtl */
         if (a0 == 2) {
             long n = sysconf(_SC_NPROCESSORS_ONLN);
@@ -219,6 +230,7 @@ static inline pilot_val pilot_host_op(
         }
         return pilot_v_int(-43);
     }
+    case 15: return pilot_bridge_seam("bridge.futex", "futex wait/wake is not yet implemented");
     case 16: { /* FdOpen */
         char *p = pilot_bridge_cstr(a0, a1);
         if (!p) return pilot_v_int(-10);
@@ -292,6 +304,7 @@ static inline pilot_val pilot_host_op(
         free(pfds);
         return pilot_v_int(r >= 0 ? (int64_t)r : pilot_errno_map(e));
     }
+    case 25: return pilot_bridge_seam("bridge.fd_raw_ctl", "raw OS handle adoption/extraction is not yet implemented");
     case 26: { /* FsStat */
         char *p = pilot_bridge_cstr(a1, a2);
         if (!p) return pilot_v_int(-10);
@@ -372,6 +385,7 @@ static inline pilot_val pilot_host_op(
         free(s); free(d);
         return pilot_v_int(rc);
     }
+    case 31: return pilot_bridge_seam("bridge.fs_path_ctl", "getcwd/chdir/realpath/chmod/utimens sub-ops are not yet implemented");
     case 32: { /* ProcSpawn */
         const uint64_t *sp = (const uint64_t *)(uintptr_t)a0;
         char *prog = pilot_bridge_cstr((int64_t)sp[0], (int64_t)sp[1]);
@@ -545,13 +559,16 @@ static inline pilot_val pilot_host_op(
     case 44: { char *s = pilot_bridge_cstr(a1, a2); void *f = dlsym((void *)(uintptr_t)a0, s); free(s); if (!f) return pilot_v_int(-3); if (a3) *(int64_t *)(uintptr_t)a3 = (int64_t)(uintptr_t)f; return pilot_v_int(0); }
     case 45: return pilot_v_int(dlclose((void *)(uintptr_t)a0) == 0 ? 0 : -12);
     case 46: return pilot_v_int(-43); /* FfiCall: arch_kind check / seam */
+    case 47: return pilot_bridge_seam("bridge.ffi_callback_alloc", "C-callable callback trampolines are not yet implemented");
+    case 48: return pilot_bridge_seam("bridge.ffi_callback_free", "C-callable callback trampolines are not yet implemented");
     case 49: { char *m = pilot_bridge_cstr(a0, a1); pilot_trap(m ? m : "fault"); return pilot_v_int(0); }
     case 50: {
         char *id = pilot_bridge_cstr(a0, a1), *nt = pilot_bridge_cstr(a2, a3);
-        fprintf(stderr, "seam: %s: %s\n", id ? id : "", nt ? nt : "");
+        fflush(stdout);
+        fprintf(stderr, "runtime error: SEAM001: unconnected seam `%s`: %s\n", id ? id : "bridge.unknown", nt ? nt : "");
         free(id); free(nt); exit(1);
     }
-    default: pilot_trap("seam: unimplemented host_op in C11 runtime"); return pilot_v_int(-43);
+    default: pilot_trap("host_op id out of range (0..=50)"); return pilot_v_int(-43);
     }
 }
 

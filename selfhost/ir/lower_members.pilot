@@ -594,6 +594,18 @@ pub fn unpack_method_type(var ref lw: Lowerer, t: i64, method: str) -> i64 {
     return t;
 }
 
+/// `-x`, `~x` or `!x` on a struct that declares the prefix member (`op -_`,
+/// `op ~_`, `op !_`): that member's call (PROP-022 slice 22A). None for any
+/// other operand, which keeps its machine op.
+pub fn lower_prefix_member(var ref lw: Lowerer, n: i64) -> u32? {
+    guard some _m = prefix_member(lw.inf, n) else { return none; }
+    let s = lw.inf.p.s;
+    let operand = lhs(s, n);
+    let t = value_type(lw, operand);
+    let recv = lower_expr(lw, operand);
+    return member_call(lw, recv, t, prefix_member_name(lw.inf.p, flags(s, n)), [], physics_of(lw, n), n);
+}
+
 pub fn lower_unpack_operand(var ref lw: Lowerer, operand: i64, method: str) -> u32 {
     let t = value_type(lw, operand);
     let v = lower_expr(lw, operand);

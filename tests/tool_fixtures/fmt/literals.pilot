@@ -1,0 +1,1 @@
+let s=f"a {x+1} b";   /* keep */ let y = 1;
